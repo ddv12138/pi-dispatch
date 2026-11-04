@@ -101,7 +101,7 @@ export async function executeToolAction(name, params, rawCtx, { paths, env, gran
   // Explicit enumerable methods survive the action's origin wrapper. A Proxy with only get would lose
   // pauseQueue/resumeQueue when that wrapper copies its fleet adapter, despite reads working normally.
   const fleet = injectedFleet ?? Object.fromEntries(["snapshot", "pause", "resume", "cancelActive", "pauseQueue"].map((method) => [method, (...args) => {
-    ownedFleet ??= readModel.createFleetReader(paths, { readOnly: true, dollarEnvFn: () => env, nowFn: now });
+    ownedFleet ??= readModel.createFleetReader(paths, { readOnly: true, budgetEnvFn: () => env, nowFn: now });
     return ownedFleet[method](...args);
   }]));
   if (!injectedFleet) fleet.dispose = async () => ownedFleet?.dispose();
@@ -154,7 +154,7 @@ export async function executeToolAction(name, params, rawCtx, { paths, env, gran
       const one = (method, args) => {
         const target = out.targets.find((row) => row.jobId === args.jobId);
         if (!target) return { invalid: "job was not in the confirmed action" };
-        return auditedWrite({ audit, actor, kind: action.kind, target: target.jobId, reserve: target.reserve?.dollarsMicros ?? null, count: 1, failure }, () => readModel[method](args));
+        return auditedWrite({ audit, actor, kind: action.kind, target: target.jobId, reserve: target.reserve?.tokens ?? null, count: 1, failure }, () => readModel[method](args));
       };
       // The console action keeps its rechecks and partial-outcome behavior. Each actual job mutation gets
       // its own intent and receipt, so one refused job cannot make a whole batch look applied.
@@ -171,7 +171,7 @@ export async function executeToolAction(name, params, rawCtx, { paths, env, gran
         return { results };
       };
     }
-    const result = action.bulk ? await action.apply(out, ctx) : await auditedWrite({ audit, actor, kind: action.kind, target: fresh.target, beforeDigest: fresh.beforeDigest, afterDigest: fresh.afterDigest, reserve: fresh.reserve?.dollarsMicros ?? null, failure }, () => action.apply(out, ctx));
+    const result = action.bulk ? await action.apply(out, ctx) : await auditedWrite({ audit, actor, kind: action.kind, target: fresh.target, beforeDigest: fresh.beforeDigest, afterDigest: fresh.afterDigest, reserve: fresh.reserve?.tokens ?? null, failure }, () => action.apply(out, ctx));
     if (bulkWarning) result.warning = "tracking-incomplete";
     if (result?.invalid === AUDIT_REFUSAL) throw publicToolRefusal(AUDIT_REFUSAL);
     if (!result?.ok && !(action.name === "priorities-set" && result?.outcome === "refused")) throw new Error(result?.invalid ?? result?.refused ?? "the action could not be applied");

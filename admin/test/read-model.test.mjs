@@ -679,12 +679,12 @@ test("writeSubscriptions starts from the empty v1 shape only for a MISSING file;
   for (const [text, said] of [
     [`${SECRET} {`, "the subscriptions file subs.json is not valid JSON, so its subscriptions cannot be kept; nothing was written"],
     [JSON.stringify({ version: SECRET, subscriptions: [] }), "the subscriptions file subs.json is not a valid subscriptions file, so its subscriptions cannot be kept; nothing was written"],
-    [JSON.stringify({ version: 1, subscriptions: [{ ...kimiPlan, price: { ...kimiPlan.price, per: SECRET } }] }), "the subscriptions file subs.json is not a valid subscriptions file, so its subscriptions cannot be kept; nothing was written"],
+    [JSON.stringify({ version: 1, subscriptions: [{ ...kimiPlan, vendor: 7 }] }), "the subscriptions file subs.json is not a valid subscriptions file, so its subscriptions cannot be kept; nothing was written"],
   ]) {
     const fs = triggerFs({ "subs.json": text });
     assert.equal(writeSubscriptions({ subscriptionsPath: "subs.json", fs, mutate: (l) => l }).invalid, said, text);
     assert.equal(fs.files["subs.json"], text);
-    assert.match(readSubscriptions({ subscriptionsPath: "subs.json", fs }).invalid, /SECRET-TOK/, "the reader keeps the parser's words for the views that show the file");
+    if (text.includes(SECRET)) assert.match(readSubscriptions({ subscriptionsPath: "subs.json", fs }).invalid, /SECRET-TOK/, "the reader keeps the parser's words for the views that show the file");
   }
   // A file that is there but cannot be read refuses with its code, never read as missing.
   const held = JSON.stringify({ version: 1, subscriptions: [kimiPlan] });
@@ -2284,7 +2284,7 @@ test("readFolderSkills attaches the prose-loop hints from the SKILL.md body", ()
 
 // ── scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT) ──────────────────────────────────────
 
-import { modelDollarKeyPrefix, scopeDollarKeyPrefix, scopeKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
+import { modelTokenKeyPrefix, scopeTokenKeyPrefix, scopeKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 test("readScopedLimits: valid file, missing file, invalid file (incl. a NEWER version, fail-loud)", () => {
@@ -2292,9 +2292,9 @@ test("readScopedLimits: valid file, missing file, invalid file (incl. a NEWER ve
   const ok = readScopedLimits({ scopedLimitsPath: "sl.json", fs });
   assert.equal(ok.limits[0].day, 3);
   assert.deepEqual(readScopedLimits({ scopedLimitsPath: "absent.json", fs }), { missing: true });
-  // One past the newest this build reads (3 since issue #596).
-  const newer = readScopedLimits({ scopedLimitsPath: "v4.json", fs: memFs({ "v4.json": JSON.stringify({ version: 4, limits: [] }) }) });
-  assert.match(newer.invalid, /newer pi-dispatch \(version 4; this build understands 3\)/);
+  // One past the newest this build reads (4 since issue #596).
+  const newer = readScopedLimits({ scopedLimitsPath: "v5.json", fs: memFs({ "v5.json": JSON.stringify({ version: 5, limits: [] }) }) });
+  assert.match(newer.invalid, /newer pi-dispatch \(version 5; this build understands 4\)/);
 });
 
 test("writeScopedLimits: a MISSING file starts from the empty v1 shape and the write creates it", () => {
@@ -2315,11 +2315,11 @@ test("writeScopedLimits REFUSES a version-less or newer existing file -- read an
   const r1 = writeScopedLimits({ scopedLimitsPath: "sl.json", fs: versionless, mutate: (l) => l });
   assert.match(r1.invalid, /must have "version": 1/);
   assert.equal(JSON.parse(versionless.files.get("sl.json")).version, undefined, "the file bytes were not touched");
-  const v4text = JSON.stringify({ version: 4, limits: [{ scope: "a/b", day: 1, hour: 2 }] });
-  const v4 = memFs({ "sl.json": v4text });
-  const r2 = writeScopedLimits({ scopedLimitsPath: "sl.json", fs: v4, mutate: (l) => l });
+  const v5text = JSON.stringify({ version: 5, limits: [{ scope: "a/b", day: 1, hour: 2 }] });
+  const v5 = memFs({ "sl.json": v5text });
+  const r2 = writeScopedLimits({ scopedLimitsPath: "sl.json", fs: v5, mutate: (l) => l });
   assert.match(r2.invalid, /newer pi-dispatch/);
-  assert.equal(v4.files.get("sl.json"), v4text, "never re-stamped down");
+  assert.equal(v5.files.get("sl.json"), v5text, "never re-stamped down");
 });
 
 test("writeScopedLimits stamps version 3 only when a row carries a size, and a size off a project row is refused unwritten (issue #596)", () => {
@@ -2455,36 +2455,36 @@ test("issue #498: readScopedBudget reads a bare row's PRE-UPGRADE key, and a qua
   assert.deepEqual(res.rows, [{ day: 2 }, { day: 4 }]);
 });
 
-test("writeScopedLimits writes the LOWEST version that expresses the file: v1 stays v1, a dollar or model row makes v2 (#501 p5, #502 p6)", () => {
+test("writeScopedLimits writes the LOWEST version that expresses the file: v1 stays v1, a token or model row makes v2 (#501 p5, #502 p6)", () => {
   const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] }) });
   assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/api", week: 9 }] }).ok, true);
   assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1, "count rows only: still version 1, readable by an older worker");
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/ops", dayUsd: "2.5" }] }).ok, true);
+  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/ops", dayTokens: 5000 }] }).ok, true);
   const v2 = JSON.parse(fs.files.get("sl.json"));
   assert.equal(v2.version, 2);
-  assert.deepEqual(v2.limits[2], { scope: "acme/ops", dayUsd: "2.5" }, "nulls omitted");
-  // Deleting the last dollar row steps back down to version 1.
+  assert.deepEqual(v2.limits[2], { scope: "acme/ops", dayTokens: 5000 }, "nulls omitted");
+  // Deleting the last token row steps back down to version 1.
   assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => l.filter((r) => r.scope !== "acme/ops") }).ok, true);
   assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1);
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "model:openai/gpt-x", monthUsd: 40 }] }).ok, true);
+  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "model:openai/gpt-x", monthTokens: 40_000 }] }).ok, true);
   const m = JSON.parse(fs.files.get("sl.json"));
   assert.equal(m.version, 2, "a model row needs version 2");
-  assert.deepEqual(m.limits.at(-1), { scope: "model:openai/gpt-x", monthUsd: 40 });
-  // An edit of the count fields keeps a dollar field the row already had (read-modify-write through the parser).
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => l.map((r) => (r.scope === "model:openai/gpt-x" ? { ...r, dayUsd: "1" } : r)) }).ok, true);
-  assert.deepEqual(JSON.parse(fs.files.get("sl.json")).limits.at(-1), { scope: "model:openai/gpt-x", dayUsd: "1", monthUsd: "40.00" });
+  assert.deepEqual(m.limits.at(-1), { scope: "model:openai/gpt-x", monthTokens: 40_000 });
+  // An edit of the count fields keeps a token field the row already had (read-modify-write through the parser).
+  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => l.map((r) => (r.scope === "model:openai/gpt-x" ? { ...r, dayTokens: 1000 } : r)) }).ok, true);
+  assert.deepEqual(JSON.parse(fs.files.get("sl.json")).limits.at(-1), { scope: "model:openai/gpt-x", dayTokens: 1000, monthTokens: 40_000 });
 });
 
-test("readScopedBudget also reads the DOLLAR keys a row caps, scope and model, under the worker's own prefixes", async () => {
+test("readScopedBudget also reads the TOKEN keys a row caps, scope and model, under the worker's own prefixes", async () => {
   const limits = [
-    { scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayUsd: "5.00", weekUsd: null, monthUsd: null },
-    { scope: "model:OpenAI/gpt-x", day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: "10.00", monthUsd: null },
-    { scope: "acme/count", day: 1 }, // a version 1 row: no dollar GET at all
+    { scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayTokens: 50_000, weekTokens: null, monthTokens: null },
+    { scope: "model:OpenAI/gpt-x", day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: 25_000, monthTokens: null },
+    { scope: "acme/count", day: 1 }, // a version 1 row: no token GET at all
   ];
   const now = new Date();
   const values = new Map([
-    [dayKey(now, scopeDollarKeyPrefix("acme/web")), "1500000"],
-    [weekKey(now, modelDollarKeyPrefix("openai/gpt-x")), "250000"],
+    [dayKey(now, scopeTokenKeyPrefix("acme/web")), "12000"],
+    [weekKey(now, modelTokenKeyPrefix("openai/gpt-x")), "4000"],
   ]);
   const commands = [];
   const redis = {
@@ -2495,9 +2495,9 @@ test("readScopedBudget also reads the DOLLAR keys a row caps, scope and model, u
     disconnect() {},
   };
   const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ day: 0, usdMicros: { day: 1_500_000 } }, { usdMicros: { week: 250_000 } }, { day: 0 }]);
+  assert.deepEqual(res.rows, [{ day: 0, tokensUsed: { day: 12_000 } }, { tokensUsed: { week: 4_000 } }, { day: 0 }]);
   assert.equal(commands.length, 4, "one GET per capped window; a model row has no job-count GET");
-  assert.ok(commands.some((k) => k.startsWith(`${modelDollarKeyPrefix("openai/gpt-x")}:`)), "the model key hashes the LOWERCASED ref");
+  assert.ok(commands.some((k) => k.startsWith(`${modelTokenKeyPrefix("openai/gpt-x")}:`)), "the model key hashes the LOWERCASED ref");
 });
 
 // --- the fleet (issue #57) ------------------------------------------------------------------------------
@@ -2796,26 +2796,26 @@ test("panelEnv: the deployment's PI_SESSIONS_DIR is a panel path key, relative t
   assert.equal(panelEnv({ env: { HOME: "/h" }, pointerDir: null }).env.PI_SESSIONS_DIR, undefined, "no pointer, no .env read");
 });
 
-test("panelEnv + settingShown: a pointer deployment's .env dollar cap is what the dispatch_set confirm states (#501)", () => {
-  // The worker reads PI_MAX_COST_USD from the deployment's .env; pi's own environment does not carry it. Before the
-  // dollar names joined PANEL_SERVICE_KEYS the confirm said "(unset: no cap)" while the worker ran at $2.
-  const dir = scaffoldedDeployment("PI_MAX_COST_USD=2.00\n");
+test("panelEnv + settingShown: a pointer deployment's .env token budget is what the dispatch_set confirm states (#501)", () => {
+  // The worker reads PI_MAX_TOKENS from the deployment's .env; pi's own environment does not carry it. Before the
+  // token names joined PANEL_SERVICE_KEYS the confirm said "(unset: no cap)" while the worker ran at 2000.
+  const dir = scaffoldedDeployment("PI_MAX_TOKENS=2000\n");
   const { env } = panelEnv({ env: { HOME: "/h" }, pointerDir: dir, platform: "linux" });
-  assert.equal(env.PI_MAX_COST_USD, "2.00");
-  assert.equal(settingShown("maxCostUsd", {}, env, { deploymentDir: dir }), "2.00 (env PI_MAX_COST_USD)");
-  assert.equal(settingShown("maxCostUsd", { maxCostUsd: "1.50" }, env, { deploymentDir: dir }), "1.50 (overlay)");
-  // With a deployment the worker's .env IS visible, so absent (or empty, the worker's own reading) is no cap.
-  assert.equal(settingShown("maxCostUsd", {}, { HOME: "/h" }, { deploymentDir: dir }), "(unset: no cap)");
-  const emptyDir = scaffoldedDeployment("PI_MAX_COST_USD=\n", "pi-501-empty-");
+  assert.equal(env.PI_MAX_TOKENS, "2000");
+  assert.equal(settingShown("maxTokens", {}, env, { deploymentDir: dir }), "2000 (env PI_MAX_TOKENS)");
+  assert.equal(settingShown("maxTokens", { maxTokens: 1500 }, env, { deploymentDir: dir }), "1500 (overlay)");
+  // With a deployment the worker's .env IS visible, so absent (or empty, the worker's own reading) is no budget.
+  assert.equal(settingShown("maxTokens", {}, { HOME: "/h" }, { deploymentDir: dir }), "(unset: no budget)");
+  const emptyDir = scaffoldedDeployment("PI_MAX_TOKENS=\n", "pi-501-empty-");
   const empty = panelEnv({ env: { HOME: "/h" }, pointerDir: emptyDir, platform: "linux" }).env;
-  assert.equal(settingShown("maxCostUsd", {}, empty, { deploymentDir: emptyDir }), "(unset: no cap)");
+  assert.equal(settingShown("maxTokens", {}, empty, { deploymentDir: emptyDir }), "(unset: no budget)");
   // With no deployment, pi's environment is not the worker's: absence proves nothing, and the confirm says so.
-  assert.equal(settingShown("maxCostUsd", {}, { HOME: "/h" }), "(not in the overlay; the worker's environment is not visible here)");
-  assert.equal(settingShown("maxCostUsd", {}, { PI_MAX_COST_USD: "" }), "(not in the overlay; the worker's environment is not visible here)");
-  assert.equal(settingShown("maxCostUsd", {}, { PI_MAX_COST_USD: "3" }), "3 (env PI_MAX_COST_USD)", "pi's own export is still shown");
-  assert.equal(settingShown("dailyCap", { dailyCap: 5 }, env), "5", "non-dollar keys keep the overlay value");
+  assert.equal(settingShown("maxTokens", {}, { HOME: "/h" }), "(not in the overlay; the worker's environment is not visible here)");
+  assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "" }), "(not in the overlay; the worker's environment is not visible here)");
+  assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "3" }), "3 (env PI_MAX_TOKENS)", "pi's own export is still shown");
+  assert.equal(settingShown("dailyCap", { dailyCap: 5 }, env), "5", "non-token keys keep the overlay value");
   assert.equal(settingShown("dailyCap", {}, env), "(unset)");
-  for (const name of ["PI_MAX_COST_USD", "PI_DAILY_COST_USD", "PI_WEEKLY_COST_USD", "PI_MONTHLY_COST_USD"]) assert.ok(PANEL_SERVICE_KEYS.includes(name), name);
+  for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) assert.ok(PANEL_SERVICE_KEYS.includes(name), name);
 });
 
 test("panelEnv: with no pointer no .env is read, not even from a cwd carrying init's whole scaffold (#471, gate round 1)", () => {
@@ -2986,18 +2986,18 @@ test("the panel's Valkey reads fail open, naming it, on a database that Valkey d
   for (const r of [await rm.readQueueState({ url }), await rm.readHeldJobs({ url }), await rm.readHosts({ url })]) assert.match(r.unreachable, said);
 });
 
-test("mergedDollarProblem: a window with no maxCostUsd in the MERGED overlay and env is a WARNING naming what was seen, never a refusal (#501, PR #542)", () => {
+test("mergedTokenProblem: a window with no maxTokens in the MERGED overlay and env is a WARNING naming what was seen, never a refusal (#501, PR #542)", () => {
   const dir = "/deploy";
-  assert.equal(mergedDollarProblem({ dailyCostUsd: "10" }, { PI_MAX_COST_USD: "2" }, { deploymentDir: dir }), null, "the cap in env");
-  assert.equal(mergedDollarProblem({ dailyCostUsd: "10", maxCostUsd: "2" }, {}, { deploymentDir: dir }), null, "the cap in the overlay");
-  assert.equal(mergedDollarProblem({ maxCostUsd: "2" }, { PI_WEEKLY_COST_USD: "50" }, { deploymentDir: dir }), null, "the window in env");
+  assert.equal(mergedDollarProblem({ dailyTokenCap: 10_000 }, { PI_MAX_TOKENS: "2000" }, { deploymentDir: dir }), null, "the budget in env");
+  assert.equal(mergedDollarProblem({ dailyTokenCap: 10_000, maxTokens: 2000 }, {}, { deploymentDir: dir }), null, "the budget in the overlay");
+  assert.equal(mergedDollarProblem({ maxTokens: 2000 }, { PI_WEEKLY_TOKEN_CAP: "50000" }, { deploymentDir: dir }), null, "the window in env");
   assert.equal(mergedDollarProblem({}, {}, { deploymentDir: dir }), null, "nothing set");
-  const pointed = mergedDollarProblem({ dailyCostUsd: "10" }, {}, { deploymentDir: dir });
-  assert.equal(pointed.invalid, undefined, "the worker's unit or --env-setup script may hold the cap: never a refusal");
-  assert.match(pointed.warning, /^dailyCostUsd needs maxCostUsd.*Neither the settings overlay nor the deployment's \.env sets maxCostUsd/);
+  const pointed = mergedDollarProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: dir });
+  assert.equal(pointed.invalid, undefined, "the worker's unit or --env-setup script may hold the budget: never a refusal");
+  assert.match(pointed.warning, /^dailyTokenCap needs maxTokens.*Neither the settings overlay nor the deployment's \.env sets maxTokens/);
   assert.match(pointed.warning, /service unit or its --env-setup script, is not visible here/);
-  assert.match(mergedDollarProblem({}, { PI_WEEKLY_COST_USD: "50", PI_MAX_COST_USD: "" }, { deploymentDir: dir }).warning, /^weeklyCostUsd needs maxCostUsd/, "an empty variable is unset");
-  const blind = mergedDollarProblem({ dailyCostUsd: "10" }, {}, { deploymentDir: null });
+  assert.match(mergedDollarProblem({}, { PI_WEEKLY_TOKEN_CAP: "50000", PI_MAX_TOKENS: "" }, { deploymentDir: dir }).warning, /^weeklyTokenCap needs maxTokens/, "an empty variable is unset");
+  const blind = mergedDollarProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: null });
   assert.equal(blind.invalid, undefined);
   assert.match(blind.warning, /this session's environment \(not the worker's\)/);
 });
@@ -3005,16 +3005,16 @@ test("mergedDollarProblem: a window with no maxCostUsd in the MERGED overlay and
 test("writeSettings: with the env passed, a write that breaks the merged invariant is WRITTEN and returns a warning (#501, PR #542)", () => {
   const dir = tempDir("pi-merged-");
   const file = join(dir, "settings.json");
-  writeFileSync(file, JSON.stringify({ maxCostUsd: "2", dailyCostUsd: "10" }));
-  const unsetCap = writeSettings({ settingsFile: file, mutate: (o) => { delete o.maxCostUsd; return o; }, dollarEnv: {}, deploymentDir: dir });
+  writeFileSync(file, JSON.stringify({ maxTokens: 2000, dailyTokenCap: 10_000 }));
+  const unsetCap = writeSettings({ settingsFile: file, mutate: (o) => { delete o.maxTokens; return o; }, budgetEnv: {}, deploymentDir: dir });
   assert.equal(unsetCap.ok, true);
-  assert.match(unsetCap.warning, /^dailyCostUsd needs maxCostUsd/);
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyCostUsd: "10" }, "written");
-  const fine = writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, maxCostUsd: "3" }), dollarEnv: {}, deploymentDir: dir });
+  assert.match(unsetCap.warning, /^dailyTokenCap needs maxTokens/);
+  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyTokenCap: 10_000 }, "written");
+  const fine = writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, maxTokens: 3000 }), budgetEnv: {}, deploymentDir: dir });
   assert.deepEqual([fine.ok, fine.warning], [true, undefined]);
   // A non-merged problem is still refused by writeSettings' own validation.
-  assert.match(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, weeklyCostUsd: "1.1234567" }), dollarEnv: {}, deploymentDir: dir }).invalid, /^weeklyCostUsd must be a dollar amount/);
-  // Without the env (every non-dollar key), no judgement at all.
+  assert.match(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, weeklyTokenCap: "1e3" }), budgetEnv: {}, deploymentDir: dir }).invalid, /weeklyTokenCap must be an integer >= 1/);
+  // Without the env (every non-token key), no judgement at all.
   assert.deepEqual(Object.keys(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, dailyCap: 5 }) })), ["ok", "overlay"]);
 });
 

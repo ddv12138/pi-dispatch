@@ -29,7 +29,7 @@ export async function planTriggerFire({
     raw = JSON.parse(source)?.triggers?.[index];
     // Validate the WHOLE file before selecting its raw index. A malformed sibling must not turn an
     // invalid deployment into a partial list of runnable schedules.
-    const schedules = loadSchedulesFn({ triggersFile: triggersPath, maxCostUsd: env.PI_MAX_COST_USD || null }, { readFileSync: () => source, existsSync: (p) => fs.existsSync(p), fleet: Boolean(env.PI_WORKER_NAME) });
+    const schedules = loadSchedulesFn({ triggersFile: triggersPath, maxTokens: env.PI_MAX_COST_USD || null }, { readFileSync: () => source, existsSync: (p) => fs.existsSync(p), fleet: Boolean(env.PI_WORKER_NAME) });
     if (!raw) return { refusal: `There is no trigger at row ${index + 1}. Nothing was queued.` };
     if (raw.on?.type !== "cron") return { refusal: "Only a cron trigger can be fired now. Nothing was queued." };
     schedule = schedules.find((s) => s.schedulerId === raw.on.id);

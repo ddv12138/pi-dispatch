@@ -7,10 +7,8 @@
  * this module are shared between the screens' modules only; `../panels.mjs` does not re-export them.
  */
 import { DEFER_TIME_MAX_MS } from "@edgehero/pi-dispatch/defer-reasons";
-import { formatMicros } from "@edgehero/pi-dispatch/money";
-import { classifyRow } from "../../costs.mjs";
 import { beatAgeOf } from "../../doctor-view.mjs";
-import { fmtCost, usd2 } from "../../panel.mjs";
+import { fmtAmount, fmtTokens } from "../../panel.mjs";
 import { resolveWorkerCount, forgeLinkOf, progressStaleFor } from "../../read-model.mjs";
 import { parseRunFilter } from "../../run-filter.mjs";
 // The one vocabulary the panel reads too (issue #710): outcome words and tones, the venue label, the Spend and Held titles.
@@ -64,23 +62,21 @@ export function timeHtml(ms) {
 /** A record's ISO instant as millis, or NaN. */
 const msOf = (iso) => (typeof iso === "string" ? Date.parse(iso) : Number.NaN);
 
-/** Micro-dollars as `$1.20`, `-` for a value that is not an amount. */
-export function usdText(micros) {
-  return Number.isSafeInteger(micros) && micros >= 0 ? `$${formatMicros(micros)}` : "-";
+/** A token count with thousands separators, `-` for a value that is not a count. */
+export function usdText(tokens) {
+  return Number.isSafeInteger(tokens) && tokens >= 0 ? tokens.toLocaleString("en-US") : "-";
 }
 
 /**
- * Micro-dollars for a list row or an overview line (issue #710): `usd2`'s one fixed form, `$1,234.56`, with the exact
- * amount (`usdText`, every digit the counter holds) in the `title`, so a reader sees a number they can read at a glance
- * and can still hover for the one the ledger holds. `spent: true` for an amount read against a cap, which `usd2` rounds
- * DOWN, so a window one micro-dollar short of its cap never reads as the cap. `-` for a value that is not an amount.
- * Review round 1: the panel's `fmtUsd` was here first, and its ladder printed `$99.99`, `$412` and `$4.1k` in one
- * column, so two rows of a table were not comparable at a glance.
+ * A token count for a list row or an overview line (issue #710): `fmtTokens`' compact ladder, with the
+ * exact amount (`usdText`, every digit the counter holds) in the `title`, so a reader sees a number
+ * they can read at a glance and can still hover for the one the ledger holds. `-` for a value that is
+ * not a count.
  */
-export function moneyHtml(micros, { spent = false } = {}) {
-  const full = usdText(micros);
+export function moneyHtml(tokens) {
+  const full = usdText(tokens);
   if (full === "-") return full;
-  return html`<span title="${full}">${usd2(micros, { spent })}</span>`;
+  return html`<span title="${full}">${fmtTokens(tokens)}</span>`;
 }
 
 /** A whole number with thousands separators (fixed to `en-US`, so not the host's locale). */
@@ -186,43 +182,29 @@ function fromSnapshot(title, render) {
 // ---- cost ------------------------------------------------------------------------------------------------------------
 
 /**
- * One run's typed cost, `{ usd, class, floor, planId }`, by the cost fold's own classifier (`classifyRow`): per ledger
- * row when the record has a usage ledger, else one row from the host-effective provider and model. A run whose rows all
- * share a class keeps it; mixed classes read as an estimate. A fallback-metered run (`metered: false`) is a floor. Null
- * when the run measured nothing (no `tokens`). The pricing table is not consulted (`classifyRow` needs it only for a
- * cost that is not a number), so this needs no pi.
+ * One run's typed amount, `{ tokens, class, floor }`, by the token fold's own completeness rule: the
+ * run's total when its meter read complete ("metered"), "estimated" when a completeness counter or
+ * the fallback meter says the count is short. Null when the run measured nothing (no `tokens`).
+ * Subscriptions take no part: prices died with the cost era, and a plan covers windows, not rows.
  */
-export function runCost(record, subscriptions = []) {
+export function runCost(record) {
   const tokens = record?.tokens;
   if (tokens === null || typeof tokens !== "object") return null;
-  const ledger = Array.isArray(record.usage?.models) && record.usage.models.length > 0 ? record.usage.models : null;
-  const models = ledger ?? [{ provider: record.provider ?? "unknown", model: record.model ?? "unknown", cost: tokens.cost }];
-  const rows = models.map((m) => {
-    const row = { provider: m?.provider ?? "unknown", model: m?.model ?? "unknown", cost: typeof m?.cost === "number" && Number.isFinite(m.cost) ? m.cost : 0 };
-    return { ...row, ...classifyRow(row, subscriptions, null) };
-  });
-  const floor = tokens.metered === false;
-  const usd = rows.reduce((s, r) => s + (r.class === "plan" ? 0 : r.cost), 0);
-  const classes = [...new Set(rows.map((r) => r.class))];
-  if (classes.length === 1 && classes[0] === "plan") {
-    const ids = [...new Set(rows.map((r) => r.planId))];
-    if (ids.length === 1 && !floor) return { usd: 0, class: "plan", floor: false, planId: ids[0] };
-    return { usd, class: "estimated", floor };
-  }
-  if (classes.length === 1) return { usd, class: classes[0], floor, planId: null };
-  return { usd, class: "estimated", floor, planId: null };
+  const floor = tokens.metered === false
+    || [tokens.unresolved, tokens.usageUnreported, tokens.unmeteredChildren].some((v) => v !== undefined && (!(Number.isSafeInteger(v) && v >= 0) || v > 0));
+  return { tokens: tokens.total ?? 0, class: floor ? "estimated" : "metered", floor };
 }
 
-/** A typed cost as text (`fmtCost`'s shapes), or "not metered" for a run that measured nothing. */
-function costText(cost) {
-  return cost ? fmtCost(cost) : "not metered";
+/** A typed amount as text (`fmtAmount`'s shapes), or "not metered" for a run that measured nothing. */
+function costText(amount) {
+  return amount ? fmtAmount(amount) : "not metered";
 }
 
-/** The per-job dollar cap a run was held to: what it reserved, else the cap its exit line names. */
-function capMicrosOf(record) {
-  const reserved = record?.dollars?.reservedMicros;
+/** The per-job token budget a run was held to: what it reserved, else the budget its exit line names. */
+function capTokensOf(record) {
+  const reserved = record?.tokensWindows?.reservedTokens;
   if (Number.isSafeInteger(reserved)) return reserved;
-  const cap = record?.tokens?.costCapMicros;
+  const cap = record?.tokens?.tokenBudgetTokens;
   return Number.isSafeInteger(cap) ? cap : null;
 }
 
@@ -439,6 +421,6 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export {
   plural, SEC, MIN, cell, msOf, count, runLink, targetLink, titled, actForm, field, area, indexField, editor, table, facts,
-  fromSnapshot, costText, capMicrosOf, pausedState, beatCell, blessedText, activeTable, outcomeText, bannerCut,
+  fromSnapshot, costText, capTokensOf, pausedState, beatCell, blessedText, activeTable, outcomeText, bannerCut,
   parkedAnswerForm
 };

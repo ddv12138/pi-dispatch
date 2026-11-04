@@ -392,7 +392,7 @@ test("the settings plans: the tool surface says what dispatch_set says, the comm
     assert.deepEqual(unset.mutate({ model: "m", dailyCap: 7 }), { dailyCap: 7 });
     const dollar = plans.planSettingSet({ key: "dailyCostUsd", valueTokens: ["2.50"], paths, env, shown: { deploymentDir: "/d" }, surface: "command" }).plan;
     assert.deepEqual(dollar.mutate({}), { dailyCostUsd: "2.50" }, "a dollar key keeps the typed text");
-    assert.deepEqual(dollar.writeArgs, { dollarEnv: env, deploymentDir: "/d" }, "and its write warns over the merged values");
+    assert.deepEqual(dollar.writeArgs, { budgetEnv: env, deploymentDir: "/d" }, "and its write warns over the merged values");
     // An invalid file is refused on the tool surface BEFORE the confirm.
     writeFileSync(paths.settingsFile, "{ not json");
     assert.deepEqual(planSays(plans.planSettingChange({ key: "dailyCap", value: "3", paths, env })), await toolSays(t.dispatch_set, { key: "dailyCap", value: "3" }));

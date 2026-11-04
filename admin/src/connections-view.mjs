@@ -20,12 +20,13 @@ import { makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { FORGES } from "@edgehero/pi-dispatch/forges";
 import { doctorHostsOf, doctorStale } from "./doctor-view.mjs";
 import { PANEL_SERVICE_KEYS } from "./read-model.mjs";
-import { DOLLAR_ENV_NAMES } from "@edgehero/pi-dispatch/money";
+import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES } from "@edgehero/pi-dispatch/budget-rule";
 import { readHookRuns, hookRunsView } from "@edgehero/pi-dispatch/hook-runs";
 
 /** A closed display vocabulary: arbitrary strings, even numeric-looking secrets, are never printed. */
+const TOKEN_ENV_NAMES = Object.freeze({ maxTokens: "PI_MAX_TOKENS", ...WORKER_TOKEN_ENV_NAMES });
 export const CONNECTION_ENV_TYPES = Object.freeze({
-  ...Object.fromEntries(PANEL_SERVICE_KEYS.map((key) => [key, /(?:_FILE|_DIR)$|^(?:TMPDIR|TEMP)$/.test(key) ? "path" : Object.values(DOLLAR_ENV_NAMES).includes(key) ? "decimal" : "present"])),
+  ...Object.fromEntries(PANEL_SERVICE_KEYS.map((key) => [key, /(?:_FILE|_DIR)$|^(?:TMPDIR|TEMP)$/.test(key) ? "path" : Object.values(TOKEN_ENV_NAMES).includes(key) ? "decimal" : "present"])),
   RECEIVER_PORT: "port", RECEIVER_BIND: "present", GITHUB_AUTH_SOURCE: ["app", "pat", "gh"],
   WEBHOOK_SECRET: "present", GITHUB_PAT: "present", GITHUB_APP_ID: "present", GITHUB_APP_PRIVATE_KEY_PATH: "path", GITHUB_APP_INSTALLATION_ID: "present",
   GITLAB_WEBHOOK_MODE: ["signature", "token"], GITLAB_WEBHOOK_SECRET: "present", GITLAB_TOKEN: "present", GITLAB_URL: "present",
@@ -63,7 +64,7 @@ function endpointFleetDeclaration(env, unknown) {
 }
 
 export function connectionEnvValue(key, raw, type = CONNECTION_ENV_TYPES[key]) {
-  if (typeof raw !== "string") return (CAP_KEY.test(key) || Object.values(DOLLAR_ENV_NAMES).includes(key)) ? "unknown (worker env or default)" : "not set";
+  if (typeof raw !== "string") return (CAP_KEY.test(key) || Object.values(TOKEN_ENV_NAMES).includes(key)) ? "unknown (worker env or default)" : "not set";
   if (type === "path") return raw === "" ? "not set" : basename(raw);
   if (key === "PI_EGRESS" && raw === "") return "empty (on by default)";
   if (Array.isArray(type)) return type.includes(raw) ? raw : "set (invalid option)";

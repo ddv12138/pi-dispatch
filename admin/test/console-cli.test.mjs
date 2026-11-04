@@ -460,7 +460,7 @@ test("serve wires one fleet reader on the deployment, answers /api/state and a l
   const { paths, seams } = modules.fleet.built[0];
   assert.equal(paths.logsDir, join(dep.dir, "logs"));
   assert.equal(paths.triggersPath, join(dep.dir, "triggers.json"), "a relative default is the deployment folder's, not the shell's cwd");
-  assert.equal(typeof seams.dollarEnvFn, "function");
+  assert.equal(typeof seams.budgetEnvFn, "function");
   assert.equal(seams.readOnly, true, "the console's reader is read-only");
   assert.equal(seams.activeLimit, 50, "the console reads at most 50 active jobs per snapshot");
   // Issue #737: the waiting jobs are not the reader's to read on every snapshot: the overview's load asks for them.

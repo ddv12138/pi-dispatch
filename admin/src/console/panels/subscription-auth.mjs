@@ -22,7 +22,7 @@ const facts = (rows, view) => html`<dl class="sa-facts">${rows.map(([label, valu
 const selected = (value, view) => tr(view, value === true ? "selected" : value === false ? "not selected" : "selection unknown");
 const owner = (row, view) => row.ownerHost ? html`<a href="${`/fleet/host?name=${encodeURIComponent(row.ownerHost)}`}">${row.ownerHost}</a>` : tr(view, "Owner not published");
 const extra = (row, view) => tr(view, row.quota.extraUsage.enabled === true ? "Enabled" : row.quota.extraUsage.enabled === false ? "Disabled" : row.extraUsage === "enabled" ? "Enabled" : row.extraUsage === "disabled" ? "Disabled" : "Unknown");
-const credit = (row, view) => row.extraUsageCreditMicros === null ? tr(view, "Not authorized for paid overage") : `${row.extraUsageCreditMicros / 1_000_000} USD ${tr(view, "per job (conservative model-cost bound); deployment dollar caps still apply")}`;
+const credit = (row, view) => row.extraUsageCreditTokens === null ? tr(view, "Not authorized for paid overage") : `${row.extraUsageCreditTokens / 1_000_000} USD ${tr(view, "per job (conservative model-cost bound); deployment dollar caps still apply")}`;
 const allowed = view => view.role === "operator" && !view.readOnly;
 const source = (view, page) => subscriptionAuthView(view.data?.[page]?.subscriptionAuth ?? view.data?.subscriptionAuth, { now: view.now ?? view.data?.now ?? 0 });
 const title = (row, status, view) => html`<div class="sa-title"><h3>${code(row.id)}</h3>${ui.badge(status[0], tr(view, status[1]))}</div>`;

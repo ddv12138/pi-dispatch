@@ -459,7 +459,7 @@ export function buildGraphModel({ triggers, schedulers, folderSkills, injectedSk
       next: sched?.next ?? null,
       overdueMs: sched?.overdueMs ?? null,
       // The window's typed spend for this trigger, or null when none was wired/attributed. Carried
-      // whole (usd/class/floor) so every renderer keeps the fmtCost labeling discipline.
+      // whole (usd/class/floor) so every renderer keeps the fmtAmount labeling discipline.
       cost: spendByNode[id]?.cost ?? null,
     };
     model.nodes.push(node);

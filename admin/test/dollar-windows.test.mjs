@@ -6,10 +6,10 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { stripAnsi } from "../src/style.mjs";
-import { deploymentDollarCaps, dollarWindowRows, dollarWindowSpecs, dollarWindowsSinceMs, foldWindowRecords, renderDollarWindows, runDollars, UNATTRIBUTED } from "../src/dollar-windows.mjs";
+import { deploymentTokenCaps, tokenWindowRows, tokenWindowSpecs, tokenWindowsSinceMs, foldWindowRecords, renderTokenWindows, runTokenWindows, UNATTRIBUTED } from "../src/token-windows.mjs";
 import { dayKey, monthKey, weekKey } from "@edgehero/pi-dispatch/budget";
 import { readDollarCounters } from "../src/read-model.mjs";
-import { modelDollarKeyPrefix, parseScopedLimits, scopeDollarKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
+import { modelTokenKeyPrefix, parseScopedLimits, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 /**
  * Issue #501, part 7: the dollar windows the panel and `dispatch_costs` show. Two sources, never blended: the
@@ -47,17 +47,17 @@ const LIMITS = [
   { scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: null, monthUsd: "25.00" },
 ];
 
-test("deploymentDollarCaps merges the overlay over the env, key by key, and names a value it cannot read", () => {
-  const { caps, invalid } = deploymentDollarCaps({ dailyCostUsd: "10" }, { PI_DAILY_COST_USD: "99", PI_MONTHLY_COST_USD: "100", PI_WEEKLY_COST_USD: "" });
+test("deploymentTokenCaps merges the overlay over the env, key by key, and names a value it cannot read", () => {
+  const { caps, invalid } = deploymentTokenCaps({ dailyCostUsd: "10" }, { PI_DAILY_COST_USD: "99", PI_MONTHLY_COST_USD: "100", PI_WEEKLY_COST_USD: "" });
   assert.deepEqual(caps, { day: 10_000_000, week: null, month: 100_000_000 }, "the overlay wins, an empty env value is unset");
   assert.deepEqual(invalid, []);
-  const bad = deploymentDollarCaps({ weeklyCostUsd: "1e3" }, {});
+  const bad = deploymentTokenCaps({ weeklyCostUsd: "1e3" }, {});
   assert.deepEqual(bad.caps, { day: null, week: null, month: null }, "never a guessed cap");
   assert.deepEqual(bad.invalid, ["weeklyCostUsd"]);
 });
 
 test("the specs are the deployment's windows first, then each dollar row in file order, under the worker's own keys", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000, week: null, month: 50_000_000 }, limits: LIMITS, now: NOW });
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000, week: null, month: 50_000_000 }, limits: LIMITS, now: NOW });
   assert.deepEqual(
     specs.map((s) => [s.ledger, s.name, s.index, s.window, s.capMicros]),
     [
@@ -71,36 +71,36 @@ test("the specs are the deployment's windows first, then each dollar row in file
   );
   assert.equal(specs[0].key, dayKey(NOW, "budget:usd"));
   assert.equal(specs[1].key, monthKey(NOW, "budget:usd"));
-  assert.equal(specs[2].key, dayKey(NOW, scopeDollarKeyPrefix("acme/web")));
-  assert.equal(specs[3].key, weekKey(NOW, scopeDollarKeyPrefix("/srv/site")));
-  assert.equal(specs[4].key, monthKey(NOW, modelDollarKeyPrefix("openai/gpt-x")));
-  assert.deepEqual(dollarWindowSpecs({ caps: { day: null, week: null, month: null }, limits: [], now: NOW }), [], "nothing set, nothing shown");
+  assert.equal(specs[2].key, dayKey(NOW, scopeTokenKeyPrefix("acme/web")));
+  assert.equal(specs[3].key, weekKey(NOW, scopeTokenKeyPrefix("/srv/site")));
+  assert.equal(specs[4].key, monthKey(NOW, modelTokenKeyPrefix("openai/gpt-x")));
+  assert.deepEqual(tokenWindowSpecs({ caps: { day: null, week: null, month: null }, limits: [], now: NOW }), [], "nothing set, nothing shown");
 });
 
 test("the scan starts at the oldest active window: the month's first, or a Monday in the month before", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 1, week: 1, month: 1 }, limits: [], now: NOW });
-  assert.equal(dollarWindowsSinceMs(specs, NOW), Date.UTC(2026, 9, 1));
+  const specs = tokenWindowSpecs({ caps: { day: 1, week: 1, month: 1 }, limits: [], now: NOW });
+  assert.equal(tokenWindowsSinceMs(specs, NOW), Date.UTC(2026, 9, 1));
   const early = new Date(Date.UTC(2026, 9, 2, 8)); // a Friday; its week began Monday 2026-09-28
-  assert.equal(dollarWindowsSinceMs(dollarWindowSpecs({ caps: { day: 1, week: 1, month: 1 }, limits: [], now: early }), early), Date.UTC(2026, 8, 28));
-  assert.equal(dollarWindowsSinceMs(dollarWindowSpecs({ caps: { day: 1, week: null, month: null }, limits: [], now: NOW }), NOW), Date.UTC(2026, 9, 14));
-  assert.equal(dollarWindowsSinceMs([], NOW), null);
+  assert.equal(tokenWindowsSinceMs(tokenWindowSpecs({ caps: { day: 1, week: 1, month: 1 }, limits: [], now: early }), early), Date.UTC(2026, 8, 28));
+  assert.equal(tokenWindowsSinceMs(tokenWindowSpecs({ caps: { day: 1, week: null, month: null }, limits: [], now: NOW }), NOW), Date.UTC(2026, 9, 14));
+  assert.equal(tokenWindowsSinceMs([], NOW), null);
 });
 
 test("spent and held come from the COUNTER, settled from the records, and the two are never blended", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000, week: null, month: null }, limits: [], now: NOW });
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000, week: null, month: null }, limits: [], now: NOW });
   // The counter holds a running job's whole hold (2,000,000) on top of what settled: the records cannot see it.
   const counters = { [specs[0].key]: 2_400_000 };
-  const [row] = dollarWindowRows({ specs, counters, records: [record()] });
+  const [row] = tokenWindowRows({ specs, counters, records: [record()] });
   assert.equal(row.counterMicros, 2_400_000, "spent and held is the counter, never the records' sum");
   assert.equal(row.records.settledMicros, 400_000);
   assert.equal(row.records.runs, 1);
   // An absent key is an honest 0 (nothing reserved yet); an unreadable queue is null, never an invented 0.
-  assert.equal(dollarWindowRows({ specs, counters: {}, records: [] })[0].counterMicros, 0);
-  assert.equal(dollarWindowRows({ specs, counters: { unreachable: "down" }, records: [record()] })[0].counterMicros, null);
+  assert.equal(tokenWindowRows({ specs, counters: {}, records: [] })[0].counterMicros, 0);
+  assert.equal(tokenWindowRows({ specs, counters: { unreachable: "down" }, records: [record()] })[0].counterMicros, null);
 });
 
 test("the records' side counts each basis, sums boundExceeded, and keeps only runs that started in the window", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000, week: null, month: 90_000_000 }, limits: [], now: NOW });
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000, week: null, month: 90_000_000 }, limits: [], now: NOW });
   const records = [
     record(),
     record({ jobId: "b", tokens: { boundExceeded: 2 }, dollars: { reservedMicros: 2_000_000, settledMicros: 2_000_000, basis: "floor", modelBasis: null } }),
@@ -113,20 +113,20 @@ test("the records' side counts each basis, sums boundExceeded, and keeps only ru
     // A malformed amount is skipped and counted, never read as 0.
     record({ jobId: "g", dollars: { reservedMicros: 1, settledMicros: "lots", basis: "metered", modelBasis: null } }),
   ];
-  const [day, month] = dollarWindowRows({ specs, counters: {}, records });
+  const [day, month] = tokenWindowRows({ specs, counters: {}, records });
   assert.deepEqual(day.records, { runs: 5, settledMicros: 2_400_000, basis: { metered: 2, floor: 1, refunded: 1, unreserved: 1 }, boundExceeded: 2, malformed: 1 });
   assert.equal(month.records.runs, 6);
   assert.equal(month.records.settledMicros, 3_400_000);
 });
 
 test("a repo row folds its own forge runs; a folder or model row says why its runs cannot be named", () => {
-  const specs = dollarWindowSpecs({ caps: {}, limits: LIMITS, now: NOW });
+  const specs = tokenWindowSpecs({ caps: {}, limits: LIMITS, now: NOW });
   const records = [
     record(),
     record({ jobId: "other", target: "acme/api#3", dollars: { reservedMicros: 1, settledMicros: 900_000, basis: "metered", modelBasis: "metered" } }),
     record({ jobId: "local", kind: "local", target: "local:web", dollars: { reservedMicros: 1, settledMicros: 700_000, basis: "metered", modelBasis: null } }),
   ];
-  const rows = dollarWindowRows({ specs, counters: {}, records });
+  const rows = tokenWindowRows({ specs, counters: {}, records });
   assert.equal(rows[0].name, "acme/web");
   assert.equal(rows[0].records.runs, 1, "only acme/web's own run, never another repo's or a local one");
   assert.equal(rows[0].records.settledMicros, 400_000);
@@ -139,7 +139,7 @@ test("a repo row folds its own forge runs; a folder or model row says why its ru
 
 test("issue #499 part C: a project row's dollar window folds the records whose project is that id, a local run included", () => {
   const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "project:shop", dayUsd: "5" }, { scope: "project:constructor", dayUsd: "5" }] }), "sl.json");
-  const specs = dollarWindowSpecs({ caps: {}, limits, now: NOW });
+  const specs = tokenWindowSpecs({ caps: {}, limits, now: NOW });
   assert.deepEqual(specs.map((s) => [s.ledger, s.name]), [["scope", "project:shop"], ["scope", "project:constructor"]]);
   const records = [
     record({ jobId: "gh-shop", project: "shop" }),
@@ -149,7 +149,7 @@ test("issue #499 part C: a project row's dollar window folds the records whose p
     record({ jobId: "gh-other", project: "tools", dollars: { reservedMicros: 1, settledMicros: 800_000, basis: "metered", modelBasis: null } }),
     record({ jobId: "gh-ctor", project: "constructor", dollars: { reservedMicros: 1, settledMicros: 50_000, basis: "metered", modelBasis: null } }),
   ];
-  const [shop, ctor] = dollarWindowRows({ specs, counters: {}, records });
+  const [shop, ctor] = tokenWindowRows({ specs, counters: {}, records });
   assert.equal(shop.unattributed, undefined, "attributed now, no longer marked");
   assert.equal(shop.records.runs, 2, "the github and the local run of shop, nothing else");
   assert.equal(shop.records.settledMicros, 650_000);
@@ -164,15 +164,15 @@ test("issue #498: a qualified repo row folds only its own forge's runs; a bare r
     { scope: "github:acme/web", day: null, week: null, month: null, concurrent: null, dayUsd: "5.00", weekUsd: null, monthUsd: null },
     { scope: "acme/api", day: null, week: null, month: null, concurrent: null, dayUsd: "5.00", weekUsd: null, monthUsd: null },
   ];
-  const specs = dollarWindowSpecs({ caps: {}, limits, now: NOW });
-  assert.equal(specs[0].keyPrefix, scopeDollarKeyPrefix("github:acme/web"), "the row's own key");
+  const specs = tokenWindowSpecs({ caps: {}, limits, now: NOW });
+  assert.equal(specs[0].keyPrefix, scopeTokenKeyPrefix("github:acme/web"), "the row's own key");
   const records = [
     record(),
     record({ jobId: "fj-web", kind: "forgejo", dollars: { reservedMicros: 1, settledMicros: 900_000, basis: "metered", modelBasis: null } }),
     record({ jobId: "gh-api", target: "acme/api#3", dollars: { reservedMicros: 1, settledMicros: 100_000, basis: "metered", modelBasis: null } }),
     record({ jobId: "fj-api", kind: "forgejo", target: "acme/api#4", dollars: { reservedMicros: 1, settledMicros: 200_000, basis: "metered", modelBasis: null } }),
   ];
-  const rows = dollarWindowRows({ specs, counters: {}, records });
+  const rows = tokenWindowRows({ specs, counters: {}, records });
   assert.equal(rows[0].records.runs, 1, "the Forgejo run on acme/web is not the GitHub row's");
   assert.equal(rows[0].records.settledMicros, 400_000);
   assert.equal(rows[1].records.runs, 2, "a bare row folds the repo on every forge");
@@ -180,28 +180,28 @@ test("issue #498: a qualified repo row folds only its own forge's runs; a bare r
 });
 
 test("only numbers, fixed tokens and the operator's own scope and model names leave the rows", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000 }, limits: LIMITS, now: NOW });
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000 }, limits: LIMITS, now: NOW });
   const poisoned = record({ flow: "SECRET-FLOW", target: "acme/web#12", jobId: "SECRET-JOB", reason: "SECRET-REASON" });
-  const text = JSON.stringify(dollarWindowRows({ specs, counters: {}, records: [poisoned] }));
+  const text = JSON.stringify(tokenWindowRows({ specs, counters: {}, records: [poisoned] }));
   for (const needle of ["SECRET", "#12", "fix"]) assert.ok(!text.includes(needle), `${needle} must not reach a row: ${text}`);
 });
 
-test("runDollars lists each run's dollars newest first, rebuilt from named fields, capped with a count", () => {
+test("runTokenWindows lists each run's dollars newest first, rebuilt from named fields, capped with a count", () => {
   const records = [
     record({ jobId: "old", endedAt: iso(NOW.getTime() - 3 * HOUR) }),
     record({ jobId: "new", endedAt: iso(NOW.getTime() - HOUR), dollars: { reservedMicros: 2, settledMicros: 2, basis: "floor", modelBasis: "floor", extra: "SECRET" }, tokens: { boundExceeded: 1 } }),
     record({ jobId: "none", dollars: null }),
   ];
-  const out = runDollars(records, { limit: 1 });
+  const out = runTokenWindows(records, { limit: 1 });
   assert.deepEqual(out.runs, [{ jobId: "new", startedAt: records[1].startedAt, endedAt: records[1].endedAt, flow: "fix", outcome: "completed", dollars: { reservedMicros: 2, settledMicros: 2, basis: "floor", modelBasis: "floor" }, boundExceeded: 1 }]);
   assert.equal(out.more, 1, "the run with no dollars is not a row");
   assert.ok(!JSON.stringify(out).includes("SECRET"));
 });
 
 test("the plain renderer is null when no window is set, and states both sources when one is", () => {
-  assert.equal(renderDollarWindows(null), null);
-  assert.equal(renderDollarWindows({ rows: [] }), null);
-  const text = renderDollarWindows({ rows: [
+  assert.equal(renderTokenWindows(null), null);
+  assert.equal(renderTokenWindows({ rows: [] }), null);
+  const text = renderTokenWindows({ rows: [
     { ledger: "deployment", name: null, window: "day", capMicros: 10_000_000, counterMicros: 2_400_000, records: { runs: 2, settledMicros: 400_000, basis: { metered: 1, floor: 1, refunded: 0, unreserved: 0 }, boundExceeded: 0 } },
     { ledger: "model", name: "openai/gpt-x", window: "month", capMicros: 25_000_000, counterMicros: null, records: null, unattributed: UNATTRIBUTED.model },
   ] });
@@ -354,7 +354,7 @@ test("the panel's REAL deps read the counters every tick and the records at most
   const deps = createDashboardDeps({ valkeyUrl: "redis://x", logsDir: join(dir, "logs"), schedulerStallMax: 3, settingsFile, triggersPath: join(dir, "t.json") }, {
     makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis,
     readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => [],
-    dollarEnvFn: () => ({ PI_WEEKLY_COST_USD: "40" }),
+    budgetEnvFn: () => ({ PI_WEEKLY_COST_USD: "40" }),
     scanRecordsFn: (args) => { scans.push(args); return [record()]; },
     nowFn: () => clock,
   });
@@ -416,23 +416,23 @@ test("the panel shows a trigger's models and per-job cap on its row and in full 
 
 test("a run is counted in the window it STARTED in: one that ran across midnight belongs to yesterday", () => {
   const midnight = Date.UTC(2026, 9, 14);
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: NOW });
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: NOW });
   const across = record({ startedAt: iso(midnight - 60_000), endedAt: iso(midnight + 60_000) });
-  assert.equal(dollarWindowRows({ specs, counters: {}, records: [across] })[0].records.runs, 0, "its hold was reserved under yesterday's key");
-  const yesterday = dollarWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: new Date(midnight - 1) });
-  assert.equal(dollarWindowRows({ specs: yesterday, counters: {}, records: [across] })[0].records.runs, 1);
+  assert.equal(tokenWindowRows({ specs, counters: {}, records: [across] })[0].records.runs, 0, "its hold was reserved under yesterday's key");
+  const yesterday = tokenWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: new Date(midnight - 1) });
+  assert.equal(tokenWindowRows({ specs: yesterday, counters: {}, records: [across] })[0].records.runs, 1);
 });
 
 test("a window is FULL when the next job's per-job cap would not fit, not only when the counter reaches the cap", () => {
-  const specs = dollarWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: NOW });
-  const row = (counter, jobCapMicros) => dollarWindowRows({ specs, counters: { [specs[0].key]: counter }, records: [], jobCapMicros })[0].full;
+  const specs = tokenWindowSpecs({ caps: { day: 10_000_000 }, limits: [], now: NOW });
+  const row = (counter, jobCapMicros) => tokenWindowRows({ specs, counters: { [specs[0].key]: counter }, records: [], jobCapMicros })[0].full;
   assert.equal(row(8_000_000, 2_000_000), false, "exactly fits: five $2 jobs fill a $10 window");
   assert.equal(row(8_000_001, 2_000_000), true, "one micro-dollar over: no $2 job fits");
   assert.equal(row(9_000_000, null), false, "no per-job cap known: judged on the counter alone");
   assert.equal(row(10_000_000, null), true);
-  assert.equal(dollarWindowRows({ specs, counters: { unreachable: "x" }, records: [], jobCapMicros: 1 })[0].full, false, "no counter, no claim");
-  assert.equal(deploymentDollarCaps({ maxCostUsd: "2" }, {}).jobCapMicros, 2_000_000);
-  assert.equal(deploymentDollarCaps({}, { PI_MAX_COST_USD: "1.5" }).jobCapMicros, 1_500_000);
+  assert.equal(tokenWindowRows({ specs, counters: { unreachable: "x" }, records: [], jobCapMicros: 1 })[0].full, false, "no counter, no claim");
+  assert.equal(deploymentTokenCaps({ maxCostUsd: "2" }, {}).jobCapMicros, 2_000_000);
+  assert.equal(deploymentTokenCaps({}, { PI_MAX_COST_USD: "1.5" }).jobCapMicros, 1_500_000);
 });
 
 test("readDollarCounters swallows ioredis' error events and gives up after its timeout", async () => {
@@ -470,7 +470,7 @@ test("the panel names a dollar setting it cannot read, even when no window is le
   const deps = createDashboardDeps({ valkeyUrl: "redis://x", logsDir: join(dir, "logs"), schedulerStallMax: 3, settingsFile }, {
     makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis,
     readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => [], nowFn: () => NOW.getTime(),
-    dollarEnvFn: () => ({ PI_DAILY_COST_USD: "1e3" }),
+    budgetEnvFn: () => ({ PI_DAILY_COST_USD: "1e3" }),
   });
   const snap = await deps.fetchSnapshot();
   await deps.dispose();

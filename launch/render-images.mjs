@@ -544,7 +544,7 @@ async function main() {
 		scopedLimits: await import("../worker/src/scoped-limits.mjs"),
 		allocation: await import("../worker/src/allocation.mjs"),
 		waitState: await import("../worker/src/wait-state.mjs"),
-		dollarBudget: await import("../worker/src/dollar-budget.mjs"),
+		tokenBudget: await import("../worker/src/token-budget.mjs"),
 		// Issue #712: the hosts' published doctor runs, which the hosts view draws under each host.
 		doctorResults: await import("../worker/src/doctor-results.mjs"),
 	};

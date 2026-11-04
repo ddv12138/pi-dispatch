@@ -46,8 +46,8 @@
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
 import { FIRST_RUN_COMMANDS, FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
-import { usd2 } from "../../panel.mjs";
 import { NO_EXPLANATION, docsHref } from "../../words.mjs";
+import { fmtTokens } from "../../panel.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
@@ -609,8 +609,8 @@ export const overviewActive = overviewPanel("Running", (s, view) => {
  * Micro-dollars as a KPI's big number: `moneyHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
  * since the bundle draws every `span` inside a `.kpi` in its small label face (`.kpi span`).
  */
-function kpiMoney(micros, { spent = false } = {}) {
-  return usdText(micros) === "-" ? "-" : html`<data value="${String(micros)}" title="${usdText(micros)}">${usd2(micros, { spent })}</data>`;
+function kpiMoney(tokens) {
+  return usdText(tokens) === "-" ? "-" : html`<data value="${String(tokens)}" title="${usdText(tokens)}">${fmtTokens(tokens)}</data>`;
 }
 
 /**
@@ -627,9 +627,9 @@ const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && c
  * whole (only the newest read, or a side of them unread), whose hours may be short.
  */
 export const overviewSpend = overviewPanel("Spend today", (s, view) => {
-  const d = s.dollars;
+  const d = s.windows;
   const day = Array.isArray(d?.rows) ? d.rows.find((r) => r?.ledger === "deployment" && r.window === "day") ?? null : null;
-  const windowRead = day !== null && Number.isSafeInteger(day.counterMicros);
+  const windowRead = day !== null && Number.isSafeInteger(day.counterTokens);
   const countersUnread = Boolean(d?.unreachable) || (day !== null && !windowRead);
   const hours = Array.isArray(s.spendByHour?.hours) ? s.spendByHour.hours : null;
   const cut = hours === null ? -1 : hours.indexOf(null);
@@ -638,8 +638,8 @@ export const overviewSpend = overviewPanel("Spend today", (s, view) => {
   let kpi;
   let chip = null;
   if (windowRead) {
-    const pct = pctOf(day.counterMicros, day.capMicros);
-    kpi = ui.kpi(kpiMoney(day.counterMicros, { spent: true }), html`of ${moneyHtml(day.capMicros)}`);
+    const pct = pctOf(day.counterTokens, day.capTokens);
+    kpi = ui.kpi(kpiMoney(day.counterTokens), html`of ${moneyHtml(day.capTokens)}`);
     if (pct !== null) chip = ui.chip(`${count(Math.floor(pct))}% of cap`, { status: day.full ? "failed" : "ok" });
   } else if (settled !== null) kpi = ui.kpi(kpiMoney(settled), "settled today");
   else kpi = ui.kpi("-", "not known");
@@ -786,16 +786,16 @@ export const overviewCaps = overviewPanel("Caps", (s, view) => {
     caps.push(ui.capsule({ name, window, pct: pctOf(used, cap), hold: holds ? hold : null, status: holds ? countStatus(used, cap, hold) : used >= cap ? "failed" : "ok" }));
   }
   const keys = [];
-  let dollarsUnread = Boolean(s.dollars?.unreachable);
-  for (const r of Array.isArray(s.dollars?.rows) ? s.dollars.rows : []) {
-    if (!Number.isSafeInteger(r?.capMicros) || r.capMicros <= 0) continue;
-    if (!Number.isSafeInteger(r.counterMicros)) {
+  let dollarsUnread = Boolean(s.windows?.unreachable);
+  for (const r of Array.isArray(s.windows?.rows) ? s.windows.rows : []) {
+    if (!Number.isSafeInteger(r?.capTokens) || r.capTokens <= 0) continue;
+    if (!Number.isSafeInteger(r.counterTokens)) {
       dollarsUnread = true;
       continue;
     }
     const { name, key } = dollarName(r);
     if (key !== null && !keys.includes(key)) keys.push(key);
-    caps.push(ui.capsule({ name, unit: "$", window: WINDOW_WORD[r.window] ?? String(r.window), pct: pctOf(r.counterMicros, r.capMicros), status: r.full ? "failed" : "ok" }));
+    caps.push(ui.capsule({ name, unit: "$", window: WINDOW_WORD[r.window] ?? String(r.window), pct: pctOf(r.counterTokens, r.capTokens), status: r.full ? "failed" : "ok" }));
   }
   const unread = [settingsRead ? null : UNREAD.settings, countsUnread ? UNREAD.counts : null, dollarsUnread ? UNREAD.dollars : null].filter(Boolean).map((t) => html`<p class="card__sub">${t}</p>`);
   const spend = ui.btn({ kind: "sm", label: "Spend", href: hrefTo(view, "insights") });

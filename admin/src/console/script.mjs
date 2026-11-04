@@ -1942,10 +1942,10 @@ ${FIT_JS}
         for (var id in weights) projects.push({ id: id, weight: weights[id] });
         return { projects: projects, validDays: Number(out.validDays) };
       }
-      out.floorsUsd = floors;
+      out.floorsTokens = floors;
       out.defaultWeights = weights;
       out.enabled = out.enabled === true;
-      for (var key of ["totalUsd", "maxStepPct", "minIntervalHours", "maxPlanDays"]) {
+      for (var key of ["totalTokens", "maxStepPct", "minIntervalHours", "maxPlanDays"]) {
         out[key] = Number(out[key]);
         if (!isFinite(out[key]) || out[key] < 0) throw new Error(key + " must be a nonnegative number");
       }

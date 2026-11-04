@@ -12,16 +12,17 @@ import { SKILL_NAME_RE } from "@edgehero/pi-dispatch/flow-gate";
 import { MODEL_ROLE_RE } from "@edgehero/pi-dispatch/model-roles";
 import { failoverModelStatus } from "@edgehero/pi-dispatch/model-status";
 import { readOverlayModels } from "@edgehero/pi-dispatch/model-endpoints";
-import { resolveConfiguredModelRuns, cooldownModelRefs, RADIUS_COST_CAP_LABEL, RADIUS_COST_CAP_FIX } from "@edgehero/pi-dispatch/model-observation";
+import { resolveConfiguredModelRuns, cooldownModelRefs } from "@edgehero/pi-dispatch/model-observation";
 import { readModelCooldowns } from "@edgehero/pi-dispatch/model-cooldowns";
 import { modelProposalOf } from "@edgehero/pi-dispatch/model-proposal-protocol";
 import { MODEL_WHY, providerFailureOf } from "@edgehero/pi-dispatch/model-failover-protocol";
-import { effectiveCostCapMicros, formatMicros } from "@edgehero/pi-dispatch/money";
+import { effectiveTokenCap } from "@edgehero/pi-dispatch/budget-rule";
+import { fmtTokens } from "./panel.mjs";
 import { makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { readSettingsView } from "./read-model.mjs";
-import { dollarWindowSpecs } from "./dollar-windows.mjs";
+import { tokenWindowSpecs } from "./token-windows.mjs";
 import { doctorStale } from "./doctor-view.mjs";
-import { meteredRunMicros } from "./costs.mjs";
+import { meteredRunTokens } from "./costs.mjs";
 import { newerSkippedSentence, readableRecords } from "./newer-release.mjs";
 
 export const MODELS_LIMITS = Object.freeze({ fileBytes: 1024 * 1024, records: 1000, days: 30, hosts: 64, proposals: 256, waits: 200, canarySources: 64, timeoutMs: 2500 });
@@ -41,7 +42,7 @@ export function collectModelPolicies({ entries = [], modelRoles = {}, projects =
     const run = entry?.run;
     if (!run || typeof run !== "object") return [];
     return [{ sourceIndex: index, index, label: `trigger ${index + 1}`, authoredProvider: run.provider,
-      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "maxCostUsd", "flow"]),
+      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "maxTokens", "flow"]),
     }];
   });
   const out = resolveConfiguredModelRuns({ runs, modelRoles, projects, deployment, envList, conservativeLocal: true, ...(resolveFolder ? { resolveFolder } : {}) });
@@ -60,9 +61,9 @@ function comparisonRecord(record) {
   if (!record) return null;
   const ref = typeof record.provider === "string" && typeof record.model === "string" ? `${record.provider}/${record.model}` : null;
   // A recorded numeric lower bound is not an exact comparison price. Share every floor and meter rule with Spend.
-  const costMicros = finite(record.tokens?.cost) === null ? null : meteredRunMicros(record);
+  const costTokens = finite(record.tokens?.cost) === null ? null : meteredRunTokens(record);
   return { model: splitModelEntry(ref) ? ref : null, outcome: ["completed", "policy", "failed", "error"].includes(record.outcome) ? record.outcome : "unknown",
-    cost: costMicros === null ? null : costMicros / 1_000_000, turns: integer(record.turns), tokens: integer(record.tokens?.total) };
+    cost: costTokens === null ? null : costTokens / 1_000_000, turns: integer(record.turns), tokens: integer(record.tokens?.total) };
 }
 
 /** Missing meters keep their own denominators. A completed replay describes execution, never quality. */
@@ -92,17 +93,17 @@ function canariesOf(records, roles, deployment, now, sourceRecords = []) {
     const sources = group.rows.flatMap(row => row.source ? [row.source] : []);
     const sourceStats = metricRows(sources);
     const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownCosts, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
-    let suggestedCapUsd = null;
-    try { const cap = effectiveCostCapMicros(undefined, deployment.maxCostUsd); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapUsd = formatMicros(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
+    let suggestedCapTokens = null;
+    try { const cap = effectiveTokenCap(undefined, deployment.maxTokens); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapTokens = fmtTokens(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
     const sample = { ...group, count: group.rows.length, candidateStats, sourceStats, partial,
-      scopes: roles.filter(row => row.role === group.role).map(row => row.scope), suggestedCapUsd,
+      scopes: roles.filter(row => row.role === group.role).map(row => row.scope), suggestedCapTokens,
       whatIf: `/insights?whatif=${encodeURIComponent(group.candidate)}&flow=${encodeURIComponent(group.flow)}` };
     return { ...sample, digest: sha({ role: sample.role, candidate: sample.candidate, flow: sample.flow, rows: sample.rows, candidateStats, sourceStats, partial }) };
   });
 }
 
 function modelWindows(ref, windows) {
-  return windows.filter(window => window.ledger === "model" && typeof window.name === "string" && window.name.toLowerCase() === ref.toLowerCase()).map(window => ({ scope: `model:${window.name}`, window: window.window, capMicros: integer(window.capMicros), spentMicros: integer(window.counterMicros ?? window.spentMicros), unavailable: integer(window.counterMicros ?? window.spentMicros) === null }));
+  return windows.filter(window => window.ledger === "model" && typeof window.name === "string" && window.name.toLowerCase() === ref.toLowerCase()).map(window => ({ scope: `model:${window.name}`, window: window.window, capTokens: integer(window.capTokens), spentTokens: integer(window.counterTokens), unavailable: integer(window.counterTokens) === null }));
 }
 function nextOf(model, fallbacks, cooldowns, status, cooldownsUnknown, policyUnknown = false) {
   if (policyUnknown) return { kind: "unknown", model: null, reason: "model-policy-unavailable" };
@@ -158,21 +159,22 @@ export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], dep
   const refusedRefs = new Set(entries.flatMap((entry, index) => refusedRows.has(index) ? authoredRefs(entry, deployment, envList) : []));
   const radius = new Set();
   for (const run of facts.runs) {
-    let cap = null; try { cap = effectiveCostCapMicros(run.maxCostUsd, deployment.maxCostUsd); } catch { /* Config warning already names invalid settings. */ }
+    let cap = null; try { cap = effectiveTokenCap(run.maxTokens, deployment.maxTokens); } catch { /* Config warning already names invalid settings. */ }
     if (cap === null) continue;
     for (const ref of [`${run.provider}/${run.model}`, ...(run.models ?? [])]) if (status(ref).api === "pi-messages") radius.add(ref);
   }
   for (const entry of entries) {
-    let cap = null; try { cap = effectiveCostCapMicros(entry?.run?.maxCostUsd, deployment.maxCostUsd); } catch {}
+    let cap = null; try { cap = effectiveTokenCap(entry?.run?.maxTokens, deployment.maxTokens); } catch {}
     if (cap !== null) for (const ref of authoredRefs(entry, deployment, envList)) if (status(ref).api === "pi-messages") radius.add(ref);
   }
-  let roleCap = null; try { roleCap = effectiveCostCapMicros(undefined, deployment.maxCostUsd); } catch {}
+  let roleCap = null; try { roleCap = effectiveTokenCap(undefined, deployment.maxTokens); } catch {}
   if (roleCap !== null) for (const role of roles) for (const ref of [role.model, ...role.fallbackModels.map(item => item.ref)]) if (status(ref).api === "pi-messages") radius.add(ref);
-  if (radius.size) banners.unshift({ kind: "radius-cost-cap", reason: "cost-cap", label: `${RADIUS_COST_CAP_LABEL}: ${[...radius].join(", ")}`, fix: RADIUS_COST_CAP_FIX });
+  // The Radius cost-bound banner died with the cost era: nothing reads it and nothing writes it.
+  void radius;
   const models = [...namedRefs].map(ref => {
     const parsed = splitModelEntry(ref), price = status(ref), modelWindowsRows = modelWindows(ref, windows);
     return { ref, provider: parsed.provider, model: parsed.model, known: price.known, priced: price.priced, reason: price.reason,
-      windows: modelWindowsRows, state: configUnknown || overlayUnknown || cooldowns === null || modelWindowsRows.some(window => window.unavailable) ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : price.priced === null ? "unknown" : !price.known ? "unknown-model" : !price.priced ? "unpriced" : modelWindowsRows.some(window => window.spentMicros >= window.capMicros) ? "window-full" : "available" };
+      windows: modelWindowsRows, state: configUnknown || overlayUnknown || cooldowns === null || modelWindowsRows.some(window => window.unavailable) ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : modelWindowsRows.some(window => window.spentTokens >= window.capTokens) ? "window-full" : "available" };
   });
   const hostRows = (snapshot?.doctor?.hosts ?? []).slice(0, MODELS_LIMITS.hosts);
   const proposals = hostRows.flatMap(host => (host.checks ?? []).flatMap(check => {
@@ -265,7 +267,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
   } catch { configUnknown = true; }
   try { overlay = reads.overlay ? await reads.overlay() : readOverlayModels(paths.globalPiDir, { readFileSync: (path, encoding) => readText(path, fs), lstatSync: path => fs.lstatSync(path) }); }
   catch { overlayUnknown = true; }
-  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxCostUsd: settings.maxCostUsd ?? env.PI_MAX_COST_USD ?? null };
+  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxTokens: settings.maxTokens ?? env.PI_MAX_COST_USD ?? null };
   if (providerIdProblem(deployment.provider) !== null || modelIdProblem(deployment.model) !== null) configUnknown = true;
   if (!snapshot && fleet) { try { snapshot = await fleet.snapshot({ waiting: true }); } catch { snapshot = null; } }
   const source = snapshot?.recordDetails instanceof Map ? [...snapshot.recordDetails.values()] : Array.isArray(snapshot?.runs) ? snapshot.runs : null;
@@ -277,7 +279,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
   const policies = collectModelPolicies({ entries, modelRoles, projects, deployment, envList });
   const configuredRefs = cooldownModelRefs(policies.runs, deployment);
   let client = redis, owned = false, cooldowns = configuredRefs.length ? null : [], counters = null;
-  const specs = dollarWindowSpecs({ caps: {}, limits, now: new Date(now) }).filter(row => row.ledger === "model");
+  const specs = tokenWindowSpecs({ caps: {}, limits, now: new Date(now) }).filter(row => row.ledger === "model");
   try {
     if (!client && (configuredRefs.length || specs.length) && (!reads.cooldowns && configuredRefs.length || !reads.counters && specs.length)) { client = (reads.redis ?? makeRedisClient)(paths.valkeyUrl); client.on?.("error", () => {}); owned = true; }
     if (configuredRefs.length) cooldowns = await bounded(reads.cooldowns ? reads.cooldowns(configuredRefs, { now: () => now }) : readModelCooldowns(client, configuredRefs, { now: () => now }));
@@ -288,7 +290,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
     }
   } catch { /* Unknown observations remain visible; a read never changes worker policy. */ }
   finally { if (owned) client?.disconnect?.(); }
-  const windows = specs.map(spec => ({ ...spec, counterMicros: counters?.get(spec.key) ?? null }));
+  const windows = specs.map(spec => ({ ...spec, counterTokens: counters?.get(spec.key) ?? null }));
   const subscriptionAuth = await readSubscriptionAuthView({ snapshot, read: reads.subscriptionAuth, now });
   return { subscriptionAuth, ...modelsViewOf({ entries, modelRoles, projects, deployment, envList, overlay, overlayUnknown, configUnknown, cooldowns, records, sourceRecords, snapshot, windows, coverage: historyCoverage, now, ...(reads.status ? { status: reads.status } : {}) }) };
 }
@@ -311,7 +313,7 @@ export function modelsForAgent(view) {
     models: (view?.models ?? []).map(row => ({ ref: model(row.ref), provider: providerIdProblem(row.provider) === null ? row.provider : null, known: typeof row.known === "boolean" ? row.known : null, priced: typeof row.priced === "boolean" ? row.priced : null,
       reason: modelReason(row.reason),
       state: ["cooling-down", "window-full", "unknown", "unknown-model", "unpriced", "policy-refused", "available"].includes(row.state) ? row.state : "unknown",
-      windows: (row.windows ?? []).map(window => ({ window: ["day", "week", "month"].includes(window.window) ? window.window : null, scope: splitModelEntry(window.scope?.slice(6)) ? window.scope : null, capMicros: integer(window.capMicros), spentMicros: integer(window.spentMicros), unavailable: window.unavailable === true })) })),
+      windows: (row.windows ?? []).map(window => ({ window: ["day", "week", "month"].includes(window.window) ? window.window : null, scope: splitModelEntry(window.scope?.slice(6)) ? window.scope : null, capTokens: integer(window.capTokens), spentTokens: integer(window.spentTokens), unavailable: window.unavailable === true })) })),
     cooldowns: (view?.cooldowns ?? []).map(row => ({ ref: model(row.ref), kind: ["rate-limited", "quota-exhausted", "overloaded"].includes(row.kind) ? row.kind : null, until: integer(row.until) })),
     proposals: (view?.proposals ?? []).flatMap(row => modelProposalOf(row) ? [{ ...modelProposalOf(row), id: safeId(row.id), host: safeId(row.host), at: integer(row.at), ageMs: integer(row.ageMs), stale: row.stale === true, level: ["ok", "warn", "fail"].includes(row.level) ? row.level : null }] : []),
     canaries: (view?.canaries ?? []).map(row => ({ id: safeId(row.id), digest: /^[a-f0-9]{64}$/.test(row.digest ?? "") ? row.digest : null, role: roleValid(row.role) ? row.role : null, candidate: model(row.candidate), flow: safeId(row.flow),

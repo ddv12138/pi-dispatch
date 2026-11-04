@@ -10,7 +10,7 @@
  * (buildGraphScene lays out the topology; PAGE_THEME is the palette; `clip`, `clipColumns` and `drawnColumns` are the
  * one answer to how a string is cut and sized on these pages, issue #418; FIT_JS, which the console's script carries,
  * shortens at view time a drawn label the static estimate let run past its box, issue #422), and panel.mjs is THE money
- * renderer -- fmtCost/fmtUsd are the only functions allowed to turn a dollar into text, because the typed-cost class
+ * renderer -- fmtAmount/fmtTokens are the only functions allowed to turn a dollar into text, because the typed-cost class
  * system is what keeps an estimate structurally distinguishable behind every figure on this page. costs.mjs is
  * deliberately NOT loaded: it reaches into the worker for its day bucketing, and one worker coupling would drag the
  * queue stack into a renderer. Its class list is duplicated below and pinned byte-for-byte by a parity test in
@@ -29,7 +29,7 @@
  */
 
 import { clip, clipColumns, drawnColumns, escapeHtml, fmt, legendHtml, PAGE_THEME, SPEND_BADGE_DY } from "./graph-html.mjs";
-import { escapeInterpreted, fmtCost, fmtUsd } from "./panel.mjs";
+import { escapeInterpreted, fmtAmount, fmtTokens } from "./panel.mjs";
 
 // Must equal costs.mjs's COST_CLASSES; the parity test compares the two literals. Duplicated rather
 // than re-exported because loading costs.mjs is exactly the worker coupling this module refuses.
@@ -49,7 +49,7 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 // ---- chart geometry (values, not CSS: the layout helpers are exported and tested as numbers) ----
 const DAILY_W = 920;
 const DAILY_H = 160;
-const DAILY_ML = 46; // room for fmtUsd axis labels
+const DAILY_ML = 46; // room for fmtTokens axis labels
 const DAILY_MR = 10;
 const DAILY_MT = 16; // room for the floor marker above a full-height bar
 const DAILY_MB = 20; // room for the MM-DD tick labels
@@ -118,22 +118,18 @@ function cmpStr(a, b) {
 /**
  * The typed-cost allowlist: usd finite-or-0, class from the known list else "unknown", floor only on
  * an exact true, coverage clamped into 0..1 or null, planId clipped or null. Nullish input stays null
- * so fmtCost renders the em dash -- inventing a zero here would be the exact mislabeling the class
+ * so fmtAmount renders the em dash -- inventing a zero here would be the exact mislabeling the class
  * system exists to prevent.
  */
-function normCost(v) {
+function normAmount(v) {
   if (v === null || v === undefined || typeof v !== "object") return null;
-  return {
-    usd: finOr(v.usd, 0),
-    class: INSIGHTS_COST_CLASSES.includes(v.class) ? v.class : "unknown",
-    floor: v.floor === true,
-    coverage: Number.isFinite(v.coverage) ? Math.min(1, Math.max(0, v.coverage)) : null,
-    planId: typeof v.planId === "string" ? clip(v.planId, 40) : null,
-  };
+  const tokens = Number.isSafeInteger(v.tokens) && v.tokens >= 0 ? v.tokens : null;
+  const cls = ["metered", "estimated", "unknown"].includes(v.class) ? v.class : "unknown";
+  return { tokens: tokens ?? 0, class: cls, floor: v.floor === true, ...(v.coverage === undefined ? {} : { coverage: v.coverage }) };
 }
 
 function unknownCost() {
-  return { usd: 0, class: "unknown", floor: false, coverage: null, planId: null };
+  return { tokens: 0, class: "unknown", floor: false, coverage: null };
 }
 
 /** `limit` verbatim shapes only: null (vendor undisclosed, first-class), a finite number, or a
@@ -144,12 +140,6 @@ function normLimit(v) {
   return null;
 }
 
-function normVerdict(v) {
-  const kind = v !== null && v !== undefined && typeof v === "object" && VERDICT_KINDS.includes(v.kind) ? v.kind : "NO_BASELINE";
-  // NO_BASELINE never carries a number, even when a malformed payload smuggles one in: the whole
-  // point of the kind is that no comparable figure exists.
-  return { kind, usd: kind === "NO_BASELINE" ? null : normCost(v.usd) };
-}
 
 /** Daily entries: the day string must be a bare UTC date or the entry is dropped whole -- a day
  * label is an axis coordinate here, and a non-date coordinate has nowhere truthful to draw. */
@@ -157,10 +147,10 @@ function normDailyEntries(daily) {
   const out = [];
   for (const d of Array.isArray(daily) ? daily : []) {
     if (d === null || typeof d !== "object" || typeof d.day !== "string" || !DAY_RE.test(d.day)) continue;
-    out.push({ day: d.day, cost: normCost(d.cost) ?? unknownCost(), runs: posInt(d.runs) });
+    out.push({ day: d.day, amount: normAmount(d.amount) ?? { tokens: 0, class: "metered", floor: false }, runs: posInt(d.runs) });
   }
   // Total sort (day, then the tie fields) so a permuted payload cannot move a byte of the chart.
-  out.sort((a, b) => cmpStr(a.day, b.day) || a.runs - b.runs || a.cost.usd - b.cost.usd);
+  out.sort((a, b) => cmpStr(a.day, b.day) || a.runs - b.runs || a.amount.tokens - b.amount.tokens);
   return out;
 }
 
@@ -187,11 +177,10 @@ export function normFold(fold) {
       flowKey: typeof r.flowKey === "string" ? clip(r.flowKey, 60) : null,
       runs: posInt(r.runs),
       tokens: posInt(r.tokens),
-      cost: normCost(r.cost) ?? unknownCost(),
-      apiEquiv: normCost(r.apiEquiv),
+      amount: normAmount(r.amount) ?? { tokens: 0, class: "metered", floor: false },
     });
   }
-  byFlow.sort((a, b) => b.cost.usd - a.cost.usd || cmpStr(a.flow, b.flow));
+  byFlow.sort((a, b) => b.amount.tokens - a.amount.tokens || cmpStr(a.flow, b.flow));
 
   const byModel = [];
   for (const r of Array.isArray(fold.byModel) ? fold.byModel : []) {
@@ -201,10 +190,10 @@ export function normFold(fold) {
       model: clip(strOr(r.model, "?"), 40),
       runs: posInt(r.runs),
       tokens: posInt(r.tokens),
-      cost: normCost(r.cost) ?? unknownCost(),
+      amount: normAmount(r.amount) ?? { tokens: 0, class: "metered", floor: false },
     });
   }
-  byModel.sort((a, b) => b.cost.usd - a.cost.usd || cmpStr(a.provider, b.provider) || cmpStr(a.model, b.model));
+  byModel.sort((a, b) => b.amount.tokens - a.amount.tokens || cmpStr(a.provider, b.provider) || cmpStr(a.model, b.model));
 
   // null stays null: "not computed" and "nothing attributed" are different sentences, and the
   // breakdown panel says which one it is.
@@ -221,16 +210,16 @@ export function normFold(fold) {
         label: clip(strOr(r.label, "(trigger)"), 60),
         runs: posInt(r.runs),
         tokens: posInt(r.tokens),
-        cost: normCost(r.cost) ?? unknownCost(),
+        amount: normAmount(r.amount) ?? { tokens: 0, class: "metered", floor: false },
         outcomes: { completed: posInt(o.completed), policy: posInt(o.policy), failed: posInt(o.failed) },
-        failedCost: normCost(r.failedCost),
+        failedAmount: normAmount(r.failedAmount),
       });
     }
     byTrigger.sort((a, b) => {
       const ta = TRIGGER_TAIL.indexOf(a.key);
       const tb = TRIGGER_TAIL.indexOf(b.key);
       if (ta !== -1 || tb !== -1) return ta === -1 ? -1 : tb === -1 ? 1 : ta - tb;
-      return b.cost.usd - a.cost.usd || cmpStr(a.label, b.label) || cmpStr(a.key, b.key);
+      return b.amount.tokens - a.amount.tokens || cmpStr(a.label, b.label) || cmpStr(a.key, b.key);
     });
   }
 
@@ -243,10 +232,10 @@ export function normFold(fold) {
       kind: typeof r.kind === "string" ? clip(r.kind, 20) : null,
       runs: posInt(r.runs),
       tokens: posInt(r.tokens),
-      cost: normCost(r.cost) ?? unknownCost(),
+      amount: normAmount(r.amount) ?? { tokens: posInt(r.tokens) ?? 0, class: "unknown" },
     });
   }
-  byRepo.sort((a, b) => b.cost.usd - a.cost.usd || cmpStr(a.label, b.label) || cmpStr(a.key ?? "", b.key ?? ""));
+  byRepo.sort((a, b) => b.amount.tokens - a.amount.tokens || cmpStr(a.label, b.label) || cmpStr(a.key ?? "", b.key ?? ""));
 
   // Issue #499 part C: by the project id each record carries. null (no section) for a fold that predates the arm, so
   // its absence never reads as "nothing spent in any project". A key that is not an id is the "(no project)" bucket.
@@ -258,35 +247,31 @@ export function normFold(fold) {
     for (const r of fold.byProject) {
       if (r === null || typeof r !== "object") continue;
       const key = typeof r.key === "string" && PROJECT_ID.test(r.key) ? r.key : null;
-      const row = { key, label: key ?? "(no project)", runs: posInt(r.runs), tokens: posInt(r.tokens), cost: normCost(r.cost) ?? unknownCost() };
+      const row = { key, label: key ?? "(no project)", runs: posInt(r.runs), tokens: posInt(r.tokens), amount: normAmount(r.amount) ?? { tokens: 0, class: "metered", floor: false } };
       const had = rows.get(key);
       if (!had) {
         rows.set(key, row);
         continue;
       }
-      const cls = had.cost.class === row.cost.class ? had.cost.class : "estimated";
+      const cls = had.amount.class === row.amount.class ? had.amount.class : "estimated";
       had.runs += row.runs;
       had.tokens += row.tokens;
-      had.cost = { usd: had.cost.usd + row.cost.usd, class: cls, floor: had.cost.floor === true || row.cost.floor === true };
+      had.amount = { tokens: had.amount.tokens + row.amount.tokens, class: cls, floor: had.amount.floor === true || row.amount.floor === true };
     }
     byProject = [...rows.values()];
-    byProject.sort((a, b) => b.cost.usd - a.cost.usd || cmpStr(a.label, b.label));
+    byProject.sort((a, b) => b.amount.tokens - a.amount.tokens || cmpStr(a.label, b.label));
   }
 
   const plans = [];
   for (const r of Array.isArray(fold.plans) ? fold.plans : []) {
     if (r === null || typeof r !== "object") continue;
-    const price = r.price !== null && r.price !== undefined && typeof r.price === "object" ? r.price : {};
     plans.push({
       id: clip(strOr(r.id, "?"), 40),
       vendor: clip(strOr(r.vendor, "?"), 60),
       hypothetical: r.hypothetical === true,
-      price: { amount: finOr(price.amount, 0), per: clip(strOr(price.per, "month"), 10) },
       attributedRuns: posInt(r.attributedRuns),
       attributedTokens: posInt(r.attributedTokens),
-      amortizedPerRun: normCost(r.amortizedPerRun),
-      apiEquiv: normCost(r.apiEquiv),
-      verdict: normVerdict(r.verdict),
+      anyFloor: r.anyFloor === true,
       windows: (Array.isArray(r.windows) ? r.windows : [])
         .flatMap((w) => (w !== null && typeof w === "object"
           ? [{
@@ -306,7 +291,7 @@ export function normFold(fold) {
 
   const prov = fold.provenance !== null && fold.provenance !== undefined && typeof fold.provenance === "object" ? fold.provenance : {};
   const provenance = {
-    total: normCost(prov.total),
+    total: normAmount(prov.amount),
     runsTotal: posInt(prov.runsTotal),
     runsUnmetered: posInt(prov.runsUnmetered),
     runsUnledgered: posInt(prov.runsUnledgered),
@@ -380,7 +365,7 @@ function normFlowSeries(v) {
     });
   }
   rows.sort((a, b) => {
-    const sum = (x) => x.days.reduce((s, d) => s + d.cost.usd, 0);
+    const sum = (x) => x.days.reduce((s, d) => s + d.amount.tokens, 0);
     return sum(b) - sum(a) || cmpStr(a.flow, b.flow);
   });
   return rows;
@@ -437,20 +422,20 @@ function normScopedRow(v) {
     };
   };
   // A dollar window (issue #507): integer micro-dollars, the cap above 0 or the window is not drawn; the counter null when
-  // it could not be read, never an invented $0. A payload from before the key lacks `usd` and draws no dollar window.
+  // it could not be read, never an invented 0. A payload from before the key lacks `tokens` and draws no window.
   const usdWin = (w) => {
     if (w === null || w === undefined || typeof w !== "object") return null;
-    if (!Number.isSafeInteger(w.capMicros) || w.capMicros <= 0) return null;
-    return { usedMicros: Number.isSafeInteger(w.usedMicros) && w.usedMicros >= 0 ? w.usedMicros : null, capMicros: w.capMicros };
+    if (!Number.isSafeInteger(w.capTokens) || w.capTokens <= 0) return null;
+    return { usedTokens: Number.isSafeInteger(w.usedTokens) && w.usedTokens >= 0 ? w.usedTokens : null, capTokens: w.capTokens };
   };
-  const usd = v.usd !== null && v.usd !== undefined && typeof v.usd === "object" ? v.usd : {};
+  const windows = v.tokens !== null && v.tokens !== undefined && typeof v.tokens === "object" ? v.tokens : {};
   return {
     scope: clip(v.scope, 60),
     day: win(v.day),
     week: win(v.week),
     month: win(v.month),
     concurrent: Number.isInteger(v.concurrent) && v.concurrent > 0 ? v.concurrent : null,
-    usd: { day: usdWin(usd.day), week: usdWin(usd.week), month: usdWin(usd.month) },
+    tokens: { day: usdWin(windows.day), week: usdWin(windows.week), month: usdWin(windows.month) },
     // A project row's size, as the assembler words it (render.mjs `sizeBits`): at most four short strings.
     size: Array.isArray(v.size) ? v.size.filter((b) => typeof b === "string" && b !== "").slice(0, 4).map((b) => clip(b, 24)) : [],
   };
@@ -474,7 +459,7 @@ const SPLIT_LOG_ROWS = 20;
 // The entry no project lists (worker/src/priorities.mjs `OTHER`): an envelope id, though not a project id.
 const SPLIT_OTHER = "_other";
 
-function microsOr(v) {
+function tokensOr(v) {
   return Number.isSafeInteger(v) && v >= 0 ? v : null;
 }
 
@@ -483,13 +468,13 @@ function splitWord(v) {
 }
 
 /**
- * Integer micro-dollars as dollars, exactly: `formatMicros` (worker/src/money.mjs) restated, because this module loads
- * nothing from the worker; `insights-html.test.mjs` holds the two equal. NOT fmtCost or fmtUsd, on purpose: those render
+ * Integer micro-dollars as dollars, exactly: `fmtTokens` (worker/src/money.mjs) restated, because this module loads
+ * nothing from the worker; `insights-html.test.mjs` holds the two equal. NOT fmtAmount or fmtTokens, on purpose: those render
  * a PRICED cost with its class, and a split amount is neither priced nor estimated. It is the envelope's arithmetic and
  * a counter's integer, which the panel's `b` view and `/dispatch priorities` print to the micro-dollar, and a page that
  * rounded $70.00 to "$70" would disagree with them on the screen beside it. Null renders "-", never $0.
  */
-export function microsUsd(m) {
+export function tokensText(m) {
   if (!Number.isSafeInteger(m) || m < 0) return "-";
   const whole = Math.floor(m / 1000000);
   const fraction = String(m % 1000000).padStart(6, "0").replace(/0+$/, "").padEnd(2, "0");
@@ -537,13 +522,13 @@ function splitPlanId(v) {
   return typeof v === "string" && SPLIT_PLAN_ID.test(v) ? v : "?";
 }
 
-/** A `{ id: micros }` map with ids the envelope can name (a project id or `_other`), sorted; junk entries drop. */
-function splitMicrosMap(v) {
+/** A `{ id: tokens }` map with ids the envelope can name (a project id or `_other`), sorted; junk entries drop. */
+function splitTokensMap(v) {
   const out = new Map();
   if (v === null || typeof v !== "object" || Array.isArray(v)) return out;
   for (const id of Object.keys(v).sort()) {
     if (id !== SPLIT_OTHER && !PROJECT_ID.test(id)) continue;
-    out.set(id, microsOr(v[id]));
+    out.set(id, tokensOr(v[id]));
   }
   return out;
 }
@@ -575,13 +560,13 @@ export function normAllocation(v) {
   if (v.unset === true) return { kind: "unset" };
   if (typeof v.problem === "string" && v.problem !== "") return { kind: "problem", problem: clip(escapeInterpreted(v.problem), 240) };
   const window = SPLIT_WINDOWS.includes(v.window) ? v.window : null;
-  const totalMicros = microsOr(v.totalMicros);
+  const totalTokens = tokensOr(v.totalTokens);
   if (typeof v.unreachable === "string" && v.unreachable !== "") return { kind: "unreachable", unreachable: clip(escapeInterpreted(v.unreachable), 160), window };
   const st = v.state !== null && v.state !== undefined && typeof v.state === "object" ? v.state : null;
-  const floors = splitMicrosMap(v.floors);
+  const floors = splitTokensMap(v.floors);
   const spend = v.spend !== null && v.spend !== undefined && typeof v.spend === "object" ? v.spend : {};
-  const spent = splitMicrosMap(spend.projects);
-  const allocations = st ? splitMicrosMap(st.allocations) : new Map();
+  const spent = splitTokensMap(spend.projects);
+  const allocations = st ? splitTokensMap(st.allocations) : new Map();
   // One row per entry the envelope floors (the panel's rule: the floors name every entry, `_other` included).
   const rows = [...floors.keys()].map((id) => ({ id, floor: floors.get(id), allocation: allocations.get(id) ?? null, spent: spent.get(id) ?? null, splitOnly: false }));
   // During a mismatch, every entry the split allocates and this host's file does not name, marked (issue #507): render.mjs
@@ -598,9 +583,9 @@ export function normAllocation(v) {
   return {
     kind: "live",
     window,
-    totalMicros,
+    totalTokens,
     // This host's envelope file's total, only to say it differs from the split's (issue #507); null when it agrees.
-    fileTotal: Number.isSafeInteger(v.fileTotalMicros) && v.fileTotalMicros !== totalMicros ? microsOr(v.fileTotalMicros) : null,
+    fileTotal: Number.isSafeInteger(v.fileTotalTokens) && v.fileTotalTokens !== totalTokens ? tokensOr(v.fileTotalTokens) : null,
     delegation: v.delegation === true,
     stateProblem: SPLIT_PROBLEMS.includes(v.stateProblem) ? v.stateProblem : null,
     state: st && {
@@ -609,11 +594,11 @@ export function normAllocation(v) {
       appliedAt: splitAt(st.appliedAt),
       validUntil: typeof st.validUntil === "string" ? splitAt(st.validUntil) : null,
       clamped: st.clamped === true,
-      unallocated: microsOr(st.unallocated),
+      unallocated: tokensOr(st.unallocated),
     },
     mismatch: v.mismatch === true,
     outsideEdit: normOutsideEdit(v.outsideEdit),
-    deploymentSpent: microsOr(spend.deployment),
+    deploymentSpent: tokensOr(spend.deployment),
     rows,
     log,
     refusals: c === null ? null : splitCountMap(c.refusals, SPLIT_REFUSALS),
@@ -630,14 +615,14 @@ export function normSpendMap(v) {
     if (!key.startsWith("trigger:")) continue;
     const e = v[key];
     if (e === null || e === undefined || typeof e !== "object") continue;
-    const cost = normCost(e.cost);
-    if (cost === null) continue;
-    out.set(key, { cost, runs: posInt(e.runs) });
+    const amount = normAmount(e.amount);
+    if (amount === null) continue;
+    out.set(key, { amount, runs: posInt(e.runs) });
   }
   return out;
 }
 
-// 1/2/5 ladder for the y gridlines: the axis must land on amounts fmtUsd renders cleanly, and a
+// 1/2/5 ladder for the y gridlines: the axis must land on amounts fmtTokens renders cleanly, and a
 // step derived raw off the maximum draws labels like $0.7750 that read as false precision.
 function niceStep(raw) {
   if (!Number.isFinite(raw) || raw <= 0) return 0;
@@ -659,13 +644,13 @@ export function layoutDailyChart(daily, { width, height } = {}) {
   const h = Number.isFinite(height) && height > 60 ? height : DAILY_H;
   const entries = normDailyEntries(daily);
   const plot = { x: DAILY_ML, y: DAILY_MT, w: w - DAILY_ML - DAILY_MR, h: h - DAILY_MT - DAILY_MB };
-  const maxUsd = entries.reduce((m, e) => Math.max(m, e.cost.usd), 0);
-  const step = niceStep(maxUsd / 4);
+  const maxTokens = entries.reduce((m, e) => Math.max(m, e.amount.tokens), 0);
+  const step = niceStep(maxTokens / 4);
   const scaleMax = step * 4;
   const yTicks = [];
   if (scaleMax > 0) {
     for (let k = 1; k <= 4; k += 1) {
-      yTicks.push({ y: plot.y + plot.h - (k / 4) * plot.h, label: fmtUsd(step * k) });
+      yTicks.push({ y: plot.y + plot.h - (k / 4) * plot.h, label: fmtTokens(step * k) });
     }
   }
   const n = entries.length;
@@ -681,8 +666,8 @@ export function layoutDailyChart(daily, { width, height } = {}) {
       bh = 1;
       cls = "zero";
     } else {
-      bh = scaleMax > 0 ? Math.max(1, (Math.max(0, e.cost.usd) / scaleMax) * plot.h) : 1;
-      cls = e.cost.class;
+      bh = scaleMax > 0 ? Math.max(1, (Math.max(0, e.amount.tokens) / scaleMax) * plot.h) : 1;
+      cls = e.amount.class;
     }
     return {
       x: cx - barW / 2,
@@ -690,10 +675,10 @@ export function layoutDailyChart(daily, { width, height } = {}) {
       w: barW,
       h: bh,
       cls,
-      floor: e.cost.floor === true && e.runs > 0,
+      floor: e.amount.floor === true && e.runs > 0,
       runs: e.runs,
       day: e.day,
-      usd: e.cost.usd,
+      tokens: e.amount.tokens,
     };
   });
   const every = n > 0 ? Math.ceil(n / 8) : 1;
@@ -706,10 +691,9 @@ export function layoutDailyChart(daily, { width, height } = {}) {
 
 /**
  * Pure geometry for one horizontal bar list. The class encoding is the row's whole honesty story:
- * metered draws a solid bar, estimated a translucent dashed one, plan draws NO bar at all (a chip --
- * a covered run has no per-run dollar, and a zero-width bar would still claim the dollar axis),
- * zero-rated a hairline tick, unknown nothing but the em dash. `nodeId` rides through only when it
- * is already a minted ordinal, so an original (path-bearing) id can never reach a DOM attribute.
+ * metered draws a solid bar, estimated a translucent dashed one, unknown nothing but the em dash.
+ * `nodeId` rides through only when it is already a minted ordinal, so an original (path-bearing) id
+ * can never reach a DOM attribute.
  */
 export function layoutBarList(rows, { width } = {}) {
   const w = Number.isFinite(width) && width > 200 ? width : LIST_W;
@@ -722,45 +706,30 @@ export function layoutBarList(rows, { width } = {}) {
   // every visual comparison between rows meaningless.
   let max = 0;
   for (const r of items) {
-    const c = normCost(r.cost);
-    if (c !== null && (c.class === "metered" || c.class === "estimated" || c.class === "seeded") && c.usd > max) max = c.usd;
-    const a = normCost(r.apiEquiv);
-    if (a !== null && a.usd > max) max = a.usd;
+    const a = normAmount(r.amount);
+    if (a !== null && a.tokens > max) max = a.tokens;
   }
   return items.map((r, i) => {
-    const c = normCost(r.cost);
-    const cls = c === null ? "unknown" : c.class;
+    const a = normAmount(r.amount);
+    const cls = a === null ? "unknown" : a.class;
     const label = clip(strOr(r.label, "(unnamed)"), 60);
     const runs = posInt(r.runs);
-    let barW = null;
-    let chipText = null;
-    if (cls === "metered" || cls === "estimated" || cls === "seeded") {
-      // "seeded" cannot appear on this page (only the what-if emits it), but a total function
-      // still draws SOMETHING if it ever does: the ~~ text already carries the class.
-      barW = max > 0 ? Math.max(1, (Math.max(0, c.usd) / max) * span) : 1;
-    } else if (cls === "plan") {
-      chipText = fmtCost(c);
-    } else if (cls === "zero-rated") {
-      barW = 1;
-    }
-    const a = normCost(r.apiEquiv);
+    const barW = cls === "unknown" ? null : max > 0 ? Math.max(1, (Math.max(0, a.tokens) / max) * span) : 1;
     const failed = posInt(r.failed);
-    let tip = `${label} · ${fmtCost(c)} · ${fmt(runs)} runs`;
-    if (failed > 0) tip += ` · ${fmt(failed)} failed (${fmtCost(normCost(r.failedCost))})`;
-    if (a !== null) tip += ` · ${fmtCost(a)} @ API`;
+    const tip = `${label} · ${fmtAmount(a)} · ${fmt(runs)} runs${failed > 0 ? ` · ${fmt(failed)} failed` : ""}`;
     return {
       y: i * LIST_ROW_H,
       barW,
-      chipText,
+      chipText: null,
       // COLUMNS, cut between clusters (issue #418): the label column is a fixed 150px, and a cut by
       // code units let twenty CJK characters run into the bars beside them.
       labelText: clipColumns(label, 20),
-      valueText: fmtCost(c),
+      valueText: fmtAmount(a),
       cls,
       nodeId: typeof r.nodeId === "string" && /^n\d+$/.test(r.nodeId) ? r.nodeId : null,
       tip,
-      apiW: a !== null && max > 0 ? Math.max(1, (Math.max(0, a.usd) / max) * span) : null,
-      apiText: a !== null ? `${fmtCost(a)} @ API` : null,
+      apiW: null,
+      apiText: null,
     };
   });
 }
@@ -781,21 +750,21 @@ export function layoutFlowLines(dailyByFlow, { width, height, top } = {}) {
   const chosen = rows.slice(0, take);
   const rest = rows.slice(take);
   const plot = { x: FLOW_ML, y: FLOW_MT, w: w - FLOW_ML - FLOW_MR, h: h - FLOW_MT - FLOW_MB };
-  let maxUsd = 0;
-  for (const r of chosen) for (const d of r.days) maxUsd = Math.max(maxUsd, d.cost.usd);
-  const step = niceStep(maxUsd / 4);
+  let maxTokens = 0;
+  for (const r of chosen) for (const d of r.days) maxTokens = Math.max(maxTokens, d.amount.tokens);
+  const step = niceStep(maxTokens / 4);
   const scaleMax = step * 4;
   const panels = chosen.map((r) => {
     const n = r.days.length;
     const slot = n > 0 ? plot.w / n : plot.w;
     const points = r.days.map((d, i) => ({
       x: plot.x + i * slot + slot / 2,
-      y: plot.y + plot.h - (scaleMax > 0 ? (Math.max(0, d.cost.usd) / scaleMax) * plot.h : 0),
+      y: plot.y + plot.h - (scaleMax > 0 ? (Math.max(0, d.amount.tokens) / scaleMax) * plot.h : 0),
       day: d.day,
-      usd: d.cost.usd,
+      tokens: d.amount.tokens,
       runs: d.runs,
-      cls: d.cost.class,
-      floor: d.cost.floor === true && d.runs > 0,
+      cls: d.amount.class,
+      floor: d.amount.floor === true && d.runs > 0,
     }));
     const segments = [];
     for (let i = 1; i < points.length; i += 1) {
@@ -807,7 +776,7 @@ export function layoutFlowLines(dailyByFlow, { width, height, top } = {}) {
         dashed: points[i - 1].cls !== "metered" || points[i].cls !== "metered",
       });
     }
-    const yTicks = scaleMax > 0 ? [2, 4].map((k) => ({ y: plot.y + plot.h - (k / 4) * plot.h, label: fmtUsd(step * k) })) : [];
+    const yTicks = scaleMax > 0 ? [2, 4].map((k) => ({ y: plot.y + plot.h - (k / 4) * plot.h, label: fmtTokens(step * k) })) : [];
     const every = n > 0 ? Math.ceil(n / 4) : 1;
     const xLabels = [];
     for (let i = 0; i < n; i += every) {
@@ -818,9 +787,9 @@ export function layoutFlowLines(dailyByFlow, { width, height, top } = {}) {
   const restAgg =
     rest.length > 0
       ? {
-          usd: rest.reduce((s, r) => s + r.days.reduce((a, d) => a + d.cost.usd, 0), 0),
+          tokens: rest.reduce((s, r) => s + r.days.reduce((a, d) => a + d.amount.tokens, 0), 0),
           class: "estimated",
-          floor: rest.some((r) => r.days.some((d) => d.cost.floor === true)),
+          floor: rest.some((r) => r.days.some((d) => d.amount.floor === true)),
         }
       : null;
   return { panels, restCount: rest.length, restAgg, scaleMax, width: w, height: h };
@@ -842,9 +811,9 @@ export function layoutCumulative(daily, { width, height } = {}) {
   let demoted = false;
   let floor = false;
   const raw = entries.map((e) => {
-    running += Math.max(0, e.cost.usd);
-    if (e.runs > 0 && e.cost.class !== "metered") demoted = true;
-    if (e.cost.floor === true) floor = true;
+    running += Math.max(0, e.amount.tokens);
+    if (e.runs > 0 && e.amount.class !== "metered") demoted = true;
+    if (e.amount.floor === true) floor = true;
     return { day: e.day, total: running, demoted, floor, runs: e.runs };
   });
   const step = niceStep(running / 2);
@@ -863,8 +832,8 @@ export function layoutCumulative(daily, { width, height } = {}) {
   for (let i = 1; i < points.length; i += 1) {
     segments.push({ x1: points[i - 1].x, y1: points[i - 1].y, x2: points[i].x, y2: points[i].y, dashed: points[i].demoted });
   }
-  const yTicks = scaleMax > 0 ? [1, 2].map((k) => ({ y: plot.y + plot.h - (k / 2) * plot.h, label: fmtUsd(step * k) })) : [];
-  const endTotal = n > 0 ? { usd: points[n - 1].total, class: points[n - 1].demoted ? "estimated" : "metered", floor } : null;
+  const yTicks = scaleMax > 0 ? [1, 2].map((k) => ({ y: plot.y + plot.h - (k / 2) * plot.h, label: fmtTokens(step * k) })) : [];
+  const endTotal = n > 0 ? { tokens: points[n - 1].total, class: points[n - 1].demoted ? "estimated" : "metered", floor } : null;
   // The end label ENDS at the last point and sits above it. It used to start just right of that point,
   // which is the right edge of the plot on any window with a run on its last day, so the label ran past
   // the svg and was cut (issue #483). Above-left is always free: a running total never falls, so every
@@ -872,7 +841,7 @@ export function layoutCumulative(daily, { width, height } = {}) {
   // label starts at the point instead, and stays inside the chart either way.
   let endLabel = null;
   if (n > 0) {
-    const text = fmtCost(endTotal);
+    const text = fmtAmount(endTotal);
     const last = points[n - 1];
     const tw = drawnColumns(text) * CUM_LABEL_COL_W;
     const fitsLeft = last.x - CUM_LABEL_GAP - tw >= 0;
@@ -897,7 +866,7 @@ export function layoutCumulative(daily, { width, height } = {}) {
 export function dailyChartHtml(daily, tips, translate = (message) => message) {
   if (daily.length === 0) return '<div class="dim">no runs in the spend window</div>';
   const lay = layoutDailyChart(daily, { width: DAILY_W, height: DAILY_H });
-  const costByDay = new Map(daily.map((d) => [d.day, d.cost]));
+  const costByDay = new Map(daily.map((d) => [d.day, d.amount]));
   const p = lay.plot;
   const parts = [`<svg width="${fmt(DAILY_W)}" height="${fmt(DAILY_H)}" role="img" aria-label="${escapeHtml(translate("daily spend"))}">`];
   parts.push(`<line x1="${fmt(p.x)}" y1="${fmt(p.y)}" x2="${fmt(p.x)}" y2="${fmt(p.y + p.h)}" stroke="${PAGE_THEME.border}"/>`);
@@ -907,7 +876,7 @@ export function dailyChartHtml(daily, tips, translate = (message) => message) {
     parts.push(`<text x="${fmt(p.x - 6)}" y="${fmt(t.y + 3)}" text-anchor="end" font-size="9" fill="${PAGE_THEME.dim}">${escapeHtml(t.label)}</text>`);
   }
   for (const b of lay.bars) {
-    const idx = tips.push(`${b.day} · ${fmtCost(costByDay.get(b.day) ?? null)} · ${fmt(b.runs)} ${translate("runs")}`) - 1;
+    const idx = tips.push(`${b.day} · ${fmtAmount(costByDay.get(b.day) ?? null)} · ${fmt(b.runs)} ${translate("runs")}`) - 1;
     if (b.cls === "zero") {
       parts.push(`<rect data-tip="${fmt(idx)}" x="${fmt(b.x)}" y="${fmt(b.y)}" width="${fmt(b.w)}" height="${fmt(b.h)}" fill="${PAGE_THEME.dim}"/>`);
     } else if (b.cls === "metered") {
@@ -950,7 +919,7 @@ function segmentPaths(points, segments, stroke) {
   return parts.join("");
 }
 
-/** The chart frame every line panel shares: spine, baseline, gridlines with fmtUsd labels. */
+/** The chart frame every line panel shares: spine, baseline, gridlines with fmtTokens labels. */
 function axisFrame(plot, yTicks) {
   const parts = [];
   parts.push(`<line x1="${fmt(plot.x)}" y1="${fmt(plot.y)}" x2="${fmt(plot.x)}" y2="${fmt(plot.y + plot.h)}" stroke="${PAGE_THEME.border}"/>`);
@@ -972,7 +941,7 @@ export function cumulativeHtml(daily, tips, translate = (message) => message) {
   } else {
     parts.push(segmentPaths(lay.points, lay.segments, PAGE_THEME.accent));
     for (const pt of lay.points) {
-      const idx = tips.push(`${pt.day} · ${translate("cumulative")} ${fmtCost({ usd: pt.total, class: pt.demoted ? "estimated" : "metered", floor: pt.floor })}`) - 1;
+      const idx = tips.push(`${pt.day} · ${translate("cumulative")} ${fmtAmount({ tokens: pt.total, class: pt.demoted ? "estimated" : "metered", floor: pt.floor })}`) - 1;
       parts.push(`<circle data-tip="${fmt(idx)}" cx="${fmt(pt.x)}" cy="${fmt(pt.y)}" r="2" fill="${PAGE_THEME.accent}"${pt.demoted ? ' fill-opacity=".45" stroke="' + PAGE_THEME.accent + '"' : ""}/>`);
     }
     // Direct end-of-line label: the running typed total, which converges to the KPI's provenance total.
@@ -987,9 +956,9 @@ export function flowLinesHtml(nf, tips, translate = (message) => message) {
   if (nf.dailyByFlow === null) return null; // absence: the fold predates the series, so no section at all
   const lay = layoutFlowLines(nf.dailyByFlow, {});
   if (lay.panels.length === 0) return `<div class="dim">${escapeHtml(translate("no runs in the spend window"))}</div>`;
-  const totalsByFlow = new Map(nf.byFlow.map((r) => [r.flow, r.cost]));
+  const totalsByFlow = new Map(nf.byFlow.map((r) => [r.flow, r.amount]));
   const panels = lay.panels.map((panel) => {
-    const parts = [`<div class="bl"><h3>${escapeHtml(panel.flow)} <span class="dim">${escapeHtml(fmtCost(totalsByFlow.get(panel.flow) ?? null))}</span></h3>`];
+    const parts = [`<div class="bl"><h3>${escapeHtml(panel.flow)} <span class="dim">${escapeHtml(fmtAmount(totalsByFlow.get(panel.flow) ?? null))}</span></h3>`];
     parts.push(`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="${escapeHtml(translate("daily spend"))} · ${escapeHtml(panel.flow)}">`);
     parts.push(axisFrame(panel.plot, panel.yTicks));
     if (lay.scaleMax === 0) {
@@ -997,7 +966,7 @@ export function flowLinesHtml(nf, tips, translate = (message) => message) {
     } else {
       parts.push(segmentPaths(panel.points, panel.segments, PAGE_THEME.accent));
       for (const pt of panel.points) {
-        const idx = tips.push(`${pt.day} · ${panel.flow} · ${fmtCost({ usd: pt.usd, class: pt.cls, floor: pt.floor })} · ${fmt(pt.runs)} ${translate("runs")}`) - 1;
+        const idx = tips.push(`${pt.day} · ${panel.flow} · ${fmtAmount({ tokens: pt.tokens, class: pt.cls, floor: pt.floor })} · ${fmt(pt.runs)} ${translate("runs")}`) - 1;
         const estim = pt.runs > 0 && pt.cls !== "metered";
         parts.push(`<circle data-tip="${fmt(idx)}" cx="${fmt(pt.x)}" cy="${fmt(pt.y)}" r="2" fill="${PAGE_THEME.accent}"${estim ? ' fill-opacity=".45" stroke="' + PAGE_THEME.accent + '"' : ""}/>`);
         if (pt.floor) {
@@ -1013,7 +982,7 @@ export function flowLinesHtml(nf, tips, translate = (message) => message) {
   });
   let tail = "";
   if (lay.restCount > 0) {
-    tail = `<div class="dim small">(+${fmt(lay.restCount)} ${escapeHtml(translate("more flows"))} · ${escapeHtml(fmtCost(lay.restAgg))})</div>`;
+    tail = `<div class="dim small">(+${fmt(lay.restCount)} ${escapeHtml(translate("more flows"))} · ${escapeHtml(fmtAmount(lay.restAgg))})</div>`;
   }
   return `<div id="flows">${panels.join("")}</div>${tail}`;
 }
@@ -1048,7 +1017,7 @@ function stateWord(state, translate = (message) => message) {
  * meter doctrine throughout: an overlay-unset cap is unknown (day) or off (week/month with nothing
  * reserved) -- no bar, no percentage, no derived room; an unreachable queue leaves the caps as facts
  * and states the absence; slots and tokens are counts, never dollars, so nothing here touches
- * fmtCost. Renders even when the cost fold is null: the lever does not depend on the spend scan.
+ * fmtAmount. Renders even when the cost fold is null: the lever does not depend on the spend scan.
  */
 export function budgetSectionHtml(nb, translate = (message) => message) {
   if (nb === null) return `<div class="dim">${escapeHtml(translate("no budget data in this payload"))}</div>`;
@@ -1112,9 +1081,9 @@ export function budgetSectionHtml(nb, translate = (message) => message) {
       // worker admits the next job against. No state word: a dollar window is full before its counter reaches the cap
       // (a reservation adds the whole per-job cap), and this page does not hold the per-job cap to judge it.
       for (const key of ["day", "week", "month"]) {
-        const w = s.usd[key];
+        const w = s.tokens[key];
         if (w === null) continue;
-        bits.push(`${translate(key)} ${translate("spent+held")} ${w.usedMicros !== null ? microsUsd(w.usedMicros) : "?"} / ${translate("cap")} ${microsUsd(w.capMicros)}`);
+        bits.push(`${translate(key)} ${translate("spent+held")} ${w.usedTokens !== null ? tokensText(w.usedTokens) : "?"} / ${translate("cap")} ${tokensText(w.capTokens)}`);
       }
       bits.push(...s.size);
       rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span>${worst !== "ok" ? stateWord(worst, translate) : ""}</div>`);
@@ -1133,9 +1102,9 @@ export function budgetSectionHtml(nb, translate = (message) => message) {
  * the outlined bar, the spend the solid bar inside it, the floor an amber tick; overspend is carried by the WORD beside
  * the row, never by geometry alone.
  */
-export function layoutSplitBars(rows, totalMicros) {
+export function layoutSplitBars(rows, totalTokens) {
   const list = Array.isArray(rows) ? rows : [];
-  let scale = Number.isSafeInteger(totalMicros) && totalMicros > 0 ? totalMicros : 0;
+  let scale = Number.isSafeInteger(totalTokens) && totalTokens > 0 ? totalTokens : 0;
   for (const r of list) scale = Math.max(scale, r?.allocation ?? 0, r?.spent ?? 0, r?.floor ?? 0);
   const w = (m) => (scale > 0 && Number.isSafeInteger(m) && m > 0 ? Math.max(1, Math.round((m / scale) * SPLIT_TRACK_W)) : 0);
   return list.map((r, i) => ({
@@ -1148,15 +1117,15 @@ export function layoutSplitBars(rows, totalMicros) {
 }
 
 function splitBarsSvg(na, tips, names, translate) {
-  const laid = layoutSplitBars(na.rows, na.totalMicros);
+  const laid = layoutSplitBars(na.rows, na.totalTokens);
   const height = laid.length * SPLIT_ROW_H + 4;
   const parts = [`<svg width="${fmt(SPLIT_W)}" height="${fmt(height)}" role="img" aria-label="allocation and spend by project">`];
   laid.forEach((g, i) => {
     const r = na.rows[i];
     // A split-only entry (issue #507) has no floor or spend this host can read: its allocation and the mark alone.
-    const text = r.splitOnly ? `${microsUsd(r.allocation)} ${translate("allocated · not in this host's file")}` : `${microsUsd(r.spent)} ${translate("spent of")} ${microsUsd(r.allocation)} · ${translate("floor")} ${microsUsd(r.floor)}`;
+    const text = r.splitOnly ? `${tokensText(r.allocation)} ${translate("allocated · not in this host's file")}` : `${tokensText(r.spent)} ${translate("spent of")} ${tokensText(r.allocation)} · ${translate("floor")} ${tokensText(r.floor)}`;
     const name = names.get(r.id);
-    const idx = tips.push(r.splitOnly ? `${r.id} · ${translate("allocated")} ${microsUsd(r.allocation)} · ${translate("not in this host's file")}` : `${r.id}${name !== undefined ? ` (${name})` : ""} · ${translate("allocated")} ${microsUsd(r.allocation)} · ${translate("spent")} ${microsUsd(r.spent)} · ${translate("floor")} ${microsUsd(r.floor)}${g.over ? ` · ${translate("over its allocation")}` : ""}`) - 1;
+    const idx = tips.push(r.splitOnly ? `${r.id} · ${translate("allocated")} ${tokensText(r.allocation)} · ${translate("not in this host's file")}` : `${r.id}${name !== undefined ? ` (${name})` : ""} · ${translate("allocated")} ${tokensText(r.allocation)} · ${translate("spent")} ${tokensText(r.spent)} · ${translate("floor")} ${tokensText(r.floor)}${g.over ? ` · ${translate("over its allocation")}` : ""}`) - 1;
     const base = g.y + 14;
     const bx = SPLIT_LABEL_W;
     parts.push(`<g data-tip="${fmt(idx)}">`);
@@ -1194,7 +1163,7 @@ export function splitSectionHtml(na, tips, names, windowLabel, translate = (mess
   if (na.kind === "unreachable") return `<div id="split" class="dim">${escapeHtml(translate("the split could not be read from the queue, so no number is shown (see the banner)"))}</div>`;
   const rows = [];
   const per = na.window !== null ? ` ${translate("per")} ${translate(na.window)}` : "";
-  rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("envelope"))}</span><span>${escapeHtml(`${microsUsd(na.totalMicros)}${per} · ${translate("delegation")} ${translate(na.delegation ? "on" : "off")}`)}</span></div>`);
+  rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("envelope"))}</span><span>${escapeHtml(`${tokensText(na.totalTokens)}${per} · ${translate("delegation")} ${translate(na.delegation ? "on" : "off")}`)}</span></div>`);
   const st = na.state;
   // The panel's outside-edit notice: its facts come from the assembler (render.mjs `outsideEdit`), and these words are
   // render.mjs `outsideEditText`'s, held equal by a test, since this module may load neither.
@@ -1214,8 +1183,8 @@ export function splitSectionHtml(na, tips, names, windowLabel, translate = (mess
     // This console host's envelope, compared with the applied split's: the panel's and `/dispatch priorities`' sentence.
     // Another host with the matching envelope runs its jobs, so the page claims this host only.
     // With another total in this host's file, the line says so: render.mjs `fileTotalText`'s words, held equal by a test.
-    // Fixed words and `microsUsd` digits only, so nothing here needs escaping.
-    if (na.mismatch) rows.push(`<div class="row"><span class="state">${escapeHtml(translate("the split was made for another envelope, not this host's: governed jobs on this host refuse as envelope-mismatch"))}.${na.fileTotal !== null ? ` ${escapeHtml(translate("This host's file says total"))} ${microsUsd(na.fileTotal)}; ${escapeHtml(translate("the totals shown are the split's."))}` : ""}</span></div>`);
+    // Fixed words and `tokensText` digits only, so nothing here needs escaping.
+    if (na.mismatch) rows.push(`<div class="row"><span class="state">${escapeHtml(translate("the split was made for another envelope, not this host's: governed jobs on this host refuse as envelope-mismatch"))}.${na.fileTotal !== null ? ` ${escapeHtml(translate("This host's file says total"))} ${tokensText(na.fileTotal)}; ${escapeHtml(translate("the totals shown are the split's."))}` : ""}</span></div>`);
   } else if (na.stateProblem === null) {
     rows.push(`<div class="row dim">${escapeHtml(translate("no split applied yet: the first host to look writes the neutral one"))}</div>`);
   }
@@ -1223,7 +1192,7 @@ export function splitSectionHtml(na, tips, names, windowLabel, translate = (mess
     rows.push(splitBarsSvg(na, tips, names, translate));
     rows.push(projectNamesHtml(na.rows.map((r) => ({ key: r.id })), names));
   }
-  if (st) rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("headroom"))}</span><span>${escapeHtml(`${translate("unallocated")} ${microsUsd(st.unallocated)} · ${translate("deployment spent")} ${microsUsd(na.deploymentSpent)} ${translate("of")} ${microsUsd(na.totalMicros)}`)}</span></div>`);
+  if (st) rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("headroom"))}</span><span>${escapeHtml(`${translate("unallocated")} ${tokensText(st.unallocated)} · ${translate("deployment spent")} ${tokensText(na.deploymentSpent)} ${translate("of")} ${tokensText(na.totalTokens)}`)}</span></div>`);
   rows.push(`<div class="dim small">${escapeHtml(translate("amounts are this"))} ${escapeHtml(translate(na.window ?? "envelope"))} ${escapeHtml(translate("window's; the bar is the allocation, the solid bar the spend (held included), the amber tick the floor"))}</div>`);
   // From THIS host's run records, over the spend window; the history below is the fleet's (`alloc:log` is shared).
   rows.push(`<div class="small">${escapeHtml(splitCountsLine(`${translate("refusals in runs on this host")}, ${windowLabel}`, na.refusals, translate("none"), translate))}</div>`);
@@ -1290,11 +1259,11 @@ function listSection(title, rows, aria, tips, extra = "", translate = (message) 
     // The tail is an aggregate, and an aggregate over heterogeneous rows is at best an estimate --
     // hence the forced class. Totals never silently truncate: K rows fold into one stated line.
     const agg = {
-      usd: rest.reduce((s, r) => s + r.cost.usd, 0),
+      tokens: rest.reduce((s, r) => s + r.amount.tokens, 0),
       class: "estimated",
       floor: rest.some((r) => r.cost.floor === true),
     };
-    tail = `<div class="dim small">(+${fmt(rest.length)} ${escapeHtml(translate("more"))} · ${escapeHtml(fmtCost(agg))})</div>`;
+    tail = `<div class="dim small">(+${fmt(rest.length)} ${escapeHtml(translate("more"))} · ${escapeHtml(fmtAmount(agg))})</div>`;
   }
   const body = head.length === 0 ? `<div class="dim small">${escapeHtml(translate("none in window"))}</div>` : barListSvg(head, aria, tips);
   return `<div class="bl"><h3>${escapeHtml(title)}</h3>${body}${tail}${extra}</div>`;
@@ -1302,7 +1271,7 @@ function listSection(title, rows, aria, tips, extra = "", translate = (message) 
 
 export function breakdownHtml(nf, minted, tips, names = new Map(), translate = (message) => message) {
   const secs = [];
-  secs.push(listSection(translate("by flow"), nf.byFlow.map((r) => ({ label: r.flow, cost: r.cost, runs: r.runs, apiEquiv: r.apiEquiv })), translate("spend by flow"), tips, "", translate));
+  secs.push(listSection(translate("by flow"), nf.byFlow.map((r) => ({ label: r.flow, amount: r.amount, runs: r.runs })), translate("spend by flow"), tips, "", translate));
   if (nf.byTrigger === null) {
     // Absence, not an empty table: an empty list would read as "nothing spent", which is a claim
     // the caller explicitly did not compute.
@@ -1312,7 +1281,7 @@ export function breakdownHtml(nf, minted, tips, names = new Map(), translate = (
       translate("by trigger"),
       nf.byTrigger.map((r) => ({
         label: r.label,
-        cost: r.cost,
+        amount: r.amount,
         runs: r.runs,
         failed: r.outcomes.failed,
         failedCost: r.failedCost,
@@ -1324,11 +1293,11 @@ export function breakdownHtml(nf, minted, tips, names = new Map(), translate = (
       translate,
     ));
   }
-  secs.push(listSection(translate("by model"), nf.byModel.map((r) => ({ label: `${r.provider}/${r.model}`, cost: r.cost, runs: r.runs })), translate("spend by model"), tips, "", translate));
-  secs.push(listSection(translate("by repo"), nf.byRepo.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), translate("spend by repo"), tips, "", translate));
+  secs.push(listSection(translate("by model"), nf.byModel.map((r) => ({ label: `${r.provider}/${r.model}`, amount: r.amount, runs: r.runs })), translate("spend by model"), tips, "", translate));
+  secs.push(listSection(translate("by repo"), nf.byRepo.map((r) => ({ label: r.label, amount: r.amount, runs: r.runs })), translate("spend by repo"), tips, "", translate));
   // Issue #499 part C: the bars carry the id (what a run record holds); the names, when any, sit under the list.
   if (nf.byProject !== null) {
-    secs.push(listSection(translate("by project"), nf.byProject.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), translate("spend by project"), tips, projectNamesHtml(nf.byProject.slice(0, LIST_TOP), names), translate));
+    secs.push(listSection(translate("by project"), nf.byProject.map((r) => ({ label: r.label, amount: r.amount, runs: r.runs })), translate("spend by project"), tips, projectNamesHtml(nf.byProject.slice(0, LIST_TOP), names), translate));
   }
   return `<div id="grid">${secs.join("")}</div>`;
 }
@@ -1338,11 +1307,11 @@ export function kpisHtml(nf, translate = (message) => message) {
   const ledgered = Math.max(0, p.runsTotal - p.runsUnmetered - p.runsUnledgered);
   const top = nf.byFlow.length > 0 ? nf.byFlow[0] : null;
   const tiles = [
-    [fmtCost(p.total), translate("window spend")],
+    [fmtAmount(p.total), translate("window spend")],
     [fmt(p.runsTotal), translate("runs")],
     [`${fmt(ledgered)} ${translate("of")} ${fmt(p.runsTotal)}`, translate("runs fully ledgered")],
     [fmt(nf.plans.length), translate("plans declared")],
-    [top !== null ? fmtCost(top.cost) : "—", top !== null ? `${translate("top flow")} · ${top.flow}` : translate("top flow")],
+    [top !== null ? fmtAmount(top.cost) : "—", top !== null ? `${translate("top flow")} · ${top.flow}` : translate("top flow")],
   ];
   return `<div id="kpis">${tiles.map(([v, l]) => `<div class="kpi"><div class="v">${escapeHtml(v)}</div><div class="l">${escapeHtml(l)}</div></div>`).join("")}</div>`;
 }
@@ -1359,17 +1328,10 @@ function limitLine(w, translate) {
 export function planCardsHtml(plans, translate = (message) => message) {
   const cards = plans.map((pl) => {
     const parts = [`<div class="plan${pl.hypothetical ? " hypo" : ""}">`];
-    parts.push(`<div><span class="pid">${escapeHtml(pl.id)}</span> <span class="pv">${escapeHtml(pl.vendor)}</span> · ${escapeHtml(`${fmtUsd(pl.price.amount)}/${pl.price.per}`)}${pl.hypothetical ? ` (${escapeHtml(translate("hypothetical"))})` : ""}</div>`);
-    if (pl.verdict.kind === "NO_BASELINE") {
-      parts.push(`<div class="dim small">${escapeHtml(translate("no API-rate baseline declared, set counterfactualModel to compare"))}</div>`);
-    } else {
-      // The WORD carries the verdict; color only reinforces it -- a monochrome print of this page
-      // must still say SAVING or LOSING in so many letters.
-      const saving = pl.verdict.kind === "SAVING" || pl.verdict.kind === "WOULD_SAVE";
-      parts.push(`<div><span class="badge ${saving ? "good" : "bad"}">${escapeHtml(pl.verdict.kind.replace("_", " "))}</span> ${escapeHtml(fmtCost(pl.verdict.usd))}</div>`);
-    }
-    parts.push(`<div class="small dim">${escapeHtml(translate("attributed"))} ${fmt(pl.attributedRuns)} ${escapeHtml(translate("runs"))} · ${fmt(pl.attributedTokens)} ${escapeHtml(translate("tok"))}</div>`);
-    parts.push(`<div class="small dim">${escapeHtml(translate("amortized"))} ${escapeHtml(fmtCost(pl.amortizedPerRun))}/${escapeHtml(translate("run"))} · ${escapeHtml(translate("api-equiv"))} ${escapeHtml(fmtCost(pl.apiEquiv))}</div>`);
+    parts.push(`<div><span class="pid">${escapeHtml(pl.id)}</span> <span class="pv">${escapeHtml(pl.vendor)}</span>${pl.hypothetical ? ` (${escapeHtml(translate("hypothetical"))})` : ""}</div>`);
+    // FACTS ONLY (DES-TOKEN-RESERVE-AND-SETTLE): prices died, so there is no verdict to draw -- which
+    // runs the plan covered, their recorded tokens, and where the plan's declared windows peaked.
+    parts.push(`<div class="small dim">${escapeHtml(translate("attributed"))} ${fmt(pl.attributedRuns)} ${escapeHtml(translate("runs"))} · ${fmt(pl.attributedTokens)} ${escapeHtml(translate("tok"))}${pl.anyFloor ? ` · ${escapeHtml(translate("at least"))}` : ""}</div>`);
     for (const w of pl.windows) {
       parts.push(`<div class="small dim">${escapeHtml(`${translate("peak")} ${w.per}${w.rolling ? ` ${translate("rolling")}` : ""}: ${fmt(w.peakRuns)} ${translate("runs")} · ${fmt(w.peakTokens)} ${translate("tok")} · ${limitLine(w, translate)}`)}</div>`);
     }
@@ -2040,13 +2002,13 @@ export function topologySpend(scene, spend) {
     minted.set(orig, pl.id);
     const entry = spend !== null && spend !== undefined ? spend.get(orig) : undefined;
     if (!entry) continue;
-    const cls = entry.cost.class;
+    const cls = entry.amount.class;
     const fill = cls === "estimated" || cls === "seeded" ? PAGE_THEME.amber : PAGE_THEME.dim;
     // At the scene's own badge line: the scene routes a trigger's re-arm loop below that line, so a badge
     // drawn anywhere else could land on the loop again (issue #483).
     // The badge fits its chip (issue #492): a plan badge carries the plan's free-form id, and one long enough
     // ran past the chip onto the wires beside it. Cut with the ellipsis, the whole text in a tooltip.
-    const text = fmtCost(entry.cost);
+    const text = fmtAmount(entry.amount);
     const cols = Math.max(2, Math.floor((pl.w - 20) / BADGE_COL_W));
     const shown = drawnColumns(text) <= cols ? text : clipColumns(text, cols - 1);
     const tip = shown !== text ? `<title>${escapeHtml(text)}</title>` : "";

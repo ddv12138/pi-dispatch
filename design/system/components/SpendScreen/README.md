@@ -6,7 +6,7 @@ Spend shows money and tokens against every cap, where they went, and what the sa
 - **Four big numbers:** this week against its cap; today against its cap, split into metered and held; tokens today; and the average cost per run.
 - **Spend over time.** Daily settled bars against the $25.00 daily cap. Today's bar shows the money held for running jobs as a dashed top: it is released when they settle.
 - **Where it went.** Cost by flow, by model and by project, in one hue with values written out.
-- **Job sizes.** A histogram of cost per run against the $2.00 job cap, with how much the largest run used.
+- **Job sizes.** A histogram of tokens per run against the 2.00M job budget, with how much the largest run used.
 - **Right column:**
   - *Caps*: every window, with the 80% tick on job windows only;
   - *What if*: pick another model and see the same runs' estimated cost;
@@ -29,7 +29,7 @@ Spend shows money and tokens against every cap, where they went, and what the sa
 - Plan runs count against every cap, the dollar windows at their API-equivalent price.
 
 **Fixture note.**
-- **From the fixture:** the caps, today's $15.04 and the week's $33.07. Today's $5.23 metered and Wednesday's $5.25 are sums of the Runs list; the held $9.81 is the sum of four sample running-job reservations.
+- **From the fixture:** the caps, today's $15.04 and the week's $33.07. Today's 5.23M metered and Wednesday's 5.25M are sums of the Runs list; the held 9.81M is the sum of four sample running-job reservations.
 - **Computed from the Runs list:** cost by flow, model and project, and the job sizes, over the 46 metered runs listed since Tue 6 Oct, 15:11 UTC.
 - **Sample:**
   - the daily bars for Fri 2 to Tue 6 (Mon and Tue add up to the week total);

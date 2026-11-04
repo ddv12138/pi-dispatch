@@ -83,7 +83,7 @@ export function triggerRuns(v) {
           >${d.historyIncomplete ? `${t("at least", v)} ` : ""}${d.count24h ??
           "unknown"}</b
         >
-        ${t("runs in the last 24 hours ·", v)} ${moneyHtml(d.cost24hMicros)} ${t("metered", v)}
+        ${t("runs in the last 24 hours ·", v)} ${moneyHtml(d.cost24hTokens)} ${t("settled", v)}
         spend${d.costIncomplete
           ? ` (${t("metered portion only; some runs have no cost", v)})`
           : ""}.
@@ -123,7 +123,7 @@ export const EDIT_FIELDS = Object.freeze([
   "recover",
 ]);
 export const HAND_FIELDS = Object.freeze([
-  "maxCostUsd",
+  "maxTokens",
   "models",
   "mcp",
   "secrets",
@@ -466,7 +466,7 @@ export function triggerRefusalExamples() {
     { field: "maxTurns", params: { kind: "label", flow: "triage", labels: ["pi"], maxTurns: 0 } },
     { field: "statusComment", params: { kind: "cron", id: "nightly", pattern: "0 3 * * *", folder: "repository", task: "Review", flow: "triage", statusComment: true } },
     { field: "backend", params: { kind: "label", flow: "triage", labels: ["pi"], backend: "openshell" } },
-    { field: "maxCostUsd", params: { kind: "label", flow: "triage", labels: ["pi"], maxCostUsd: "1" } },
+    { field: "maxTokens", params: { kind: "label", flow: "triage", labels: ["pi"], maxTokens: "1" } },
   ].map(({field,params}) => ({field, sentence: planTriggerAdd({ ...shared, params }).refusal}));
 }
 export function triggerRefusals(v = {}) {

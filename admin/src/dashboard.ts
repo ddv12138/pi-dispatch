@@ -31,8 +31,7 @@ import { ranBefore } from "@edgehero/pi-dispatch/cancel-state";
 import { windowEndAt } from "@edgehero/pi-dispatch/pause-windows";
 import { fromNewerRelease, NEWER_RECORD_SENTENCE, newerSkippedSentence } from "./newer-release.mjs";
 import { BUNDLE_SKIPPED_TEXT, CUSTODY_TEXT, DECLARATION_TEXT, GATEWAY_TEXT, OPENSHELL_UNPUBLISHED_TEXT, venuesView, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, liveAbsentCause, recordSkips, venueCustody, VENUE_MAY_NOT_STREAM, bundleCountsText, bundleReceivedText, recordBundle, renderSecretBundles, triggerBundleOf, cancelHeldJob, checkpointsText, createFleetReader, enqueueSteer, listRuns, planSteer, steerAuditTarget, progressStaleFor, recordRecovery, recoveryCountsText, FORGE_MCP_SERVER_NAME, TRANSCRIPT_PAGE_MAX, openshellCountsText, openshellHostsText, recordOpenshell, recordSecretsProfile, secretProfileFacts } from "./read-model.mjs";
-import { dollarWindowRows, renderDollarWindows } from "./dollar-windows.mjs";
-import { formatMicros, optionalUsdMicros } from "@edgehero/pi-dispatch/money";
+import { tokenWindowRows, renderTokenWindows } from "./token-windows.mjs";
 import { projectKeyOf } from "./costs.mjs";
 import { formatCpus, formatMemory } from "@edgehero/pi-dispatch/job-size";
 import { SUGGEST_WINDOW_DAYS, coresText, cpusText, notEnoughRunsText } from "@edgehero/pi-dispatch/size-suggest";
@@ -41,12 +40,12 @@ import { basisNote, durationText, fleetRecordNotes, historyNotes, hostCaveats, m
 import { WORKER_NAME_RE } from "@edgehero/pi-dispatch/config";
 import { LIVE_MAX_ENTRIES } from "@edgehero/pi-dispatch/live-transcript";
 import { FORGE_JOB_RETENTION_DAYS, LOCAL_JOB_KEPT_FAILED_S } from "@edgehero/pi-dispatch/retention";
-import { sizeBits, renderStatus, renderBudget, renderHeldJobs, renderScopedLimits, renderTriggers, renderSettingsView, commandSlashLabel, scrubTrigger, skillsBasename, allocAt, allocHostsShown, allocPlanId, outsideEdit, outsideEditText, splitTotalMicros, fileTotalText, allocationRowIds, SPLIT_ONLY_MARK } from "./render.mjs";
+import { sizeBits, renderStatus, renderBudget, renderHeldJobs, renderScopedLimits, renderTriggers, renderSettingsView, commandSlashLabel, scrubTrigger, skillsBasename, allocAt, allocHostsShown, allocPlanId, outsideEdit, outsideEditText, splitTotalTokens, fileTotalText, allocationRowIds, SPLIT_ONLY_MARK } from "./render.mjs";
 import { matchesKey } from "./keys.mjs";
 // The one vocabulary both surfaces read (issue #710): outcome words, the venue label, the Spend and Held titles.
 import { HELD_LABEL, NO_EXPLANATION, SPEND_TITLE, VENUE_LABEL, outcomeWord, reasonWords, recordReason, rowNumber } from "./words.mjs";
 import { beatAgeOf, doctorByText, doctorCountsText, doctorHostsOf, doctorProblems, doctorStale } from "./doctor-view.mjs";
-import { box, clip, clipData, cutUnits, escapeInterpreted, fmtCost, hasControls, makeLineInput, meter, scrubControls, scrubKeepingStyle, sliceColumns } from "./panel.mjs";
+import { box, clip, clipData, cutUnits, escapeInterpreted, fmtAmount, hasControls, makeLineInput, meter, scrubControls, scrubKeepingStyle, sliceColumns } from "./panel.mjs";
 import { makeStyler, frame, RULE } from "./style.mjs";
 
 const KEY_HINTS = "[p]ause  [r]esume  [q]uit";
@@ -1840,7 +1839,7 @@ function renderPanelLines(snapshot: any, width: number, state: any, styler: any)
   // Held jobs appear only when something is held, for the same reason: a section with no lines renders an
   // empty box, and a deployment that never waits must look exactly as it did before the feature existed.
   // The dollar windows, after SPEND, only when one is set (issue #501, part 7).
-  const dollarText = renderDollarWindows(snapshot.dollars);
+  const dollarText = renderTokenWindows(snapshot.dollars);
   if (dollarText) sections.splice(2, 0, { title: "DOLLAR WINDOWS", lines: toLines(dollarText) });
   const heldText = renderHeldJobs({ held: snapshot.held });
   if (heldText) sections.push({ title: HELD_LABEL.toUpperCase(), lines: toLines(heldText) });
@@ -2027,24 +2026,24 @@ function dollarSection(dollars: any, inner: number, styler: any): any[] {
 }
 
 /** `$1.20`: integer micro-dollars as dollars, through the worker's own formatter. `-` for a missing number. */
-function usd(micros: any): string {
-  return Number.isSafeInteger(micros) && micros >= 0 ? `$${formatMicros(micros)}` : "-";
+function usd(tokens: any): string {
+  return Number.isSafeInteger(tokens) && tokens >= 0 ? tokens.toLocaleString("en-US") : "-";
 }
 
 function dollarRow(r: any, inner: number, styler: any): string {
   const name = r.ledger === "deployment" ? "deployment" : r.ledger === "model" ? `model:${r.name ?? "-"}` : String(r.name ?? "-");
-  // Amber when FULL (`dollarWindowRows`): no job at the deployment's per-job cap fits, because a reservation adds
+  // Amber when FULL (`tokenWindowRows`): no job at the deployment's per-job cap fits, because a reservation adds
   // that whole cap, even while the counter itself is still below the window.
   const full = r.full === true;
   const bits = [
     styler.cell(r.window ?? "-", 6, { color: "muted" }) + styler.fg("accent", cellOf(name)),
-    styler.fg(full ? "warning" : "text", `${usd(r.counterMicros)}/${usd(r.capMicros)}${full ? " full" : ""}`),
+    styler.fg(full ? "warning" : "text", `${usd(r.counterTokens)}/${usd(r.capTokens)}${full ? " full" : ""}`),
   ];
   if (r.records) {
     // Fitted to 80 columns with exact micro-dollar amounts (issue #507): the amounts are the one part a reader cannot
     // round, so the words around them got shorter. `boundExceeded` is drawn only when it is above zero, amber and
     // BEFORE the settled part, because a non-zero count is the evidence that reopens the bound and a zero is the
-    // normal case; the plain-text path (`renderDollarWindows`) still prints the 0. The runs are counted by basis alone
+    // normal case; the plain-text path (`renderTokenWindows`) still prints the 0. The runs are counted by basis alone
     // ("13 metered, 1 floor") when those counts add up to the runs, so the total is implied; a run with a basis this
     // panel does not know keeps the long form, "5 runs (4 metered)", which says that one run is not in a count.
     if (r.records.boundExceeded > 0) bits.push(styler.fg("warning", `boundExceeded ${r.records.boundExceeded}`));
@@ -2057,7 +2056,7 @@ function dollarRow(r: any, inner: number, styler: any): string {
       counts.length > 0 && counted === runs
         ? counts.join(", ")
         : `${runs} run${runs === 1 ? "" : "s"}${counts.length > 0 ? ` (${counts.join(", ")})` : ""}`;
-    bits.push(styler.fg("dim", `settled ${usd(r.records.settledMicros)} · ${how}`));
+    bits.push(styler.fg("dim", `settled ${usd(r.records.settledTokens)} · ${how}`));
   } else {
     bits.push(styler.fg("dim", "records n/a"));
   }
@@ -2558,7 +2557,7 @@ function triggerRow(raw: any, sel: boolean, inner: number, styler: any, sched: a
   // ([once], [image]), never amber. The model list is free text that may be clipped; the drill-in lists it whole.
   const mdl = Array.isArray(t?.models) && t.models.length > 0 ? rowBadge("accent", false, "[models ", cellOf(t.models.join(", ")), "]") : null;
   const fallbacks = Array.isArray(t?.fallbackModels) && t.fallbackModels.length > 0 ? rowBadge("accent", false, "[fallbacks ", cellOf(t.fallbackModels.join(", ")), "]") : null;
-  const cap = t?.maxCostUsd ? rowBadge("accent", false, "[max $", cellOf(t.maxCostUsd), "]") : null;
+  const cap = t?.maxTokens ? rowBadge("accent", false, "[max $", cellOf(t.maxTokens), "]") : null;
   // A portfolio trigger (issues #505 and #507): its jobs write the budget split. `accent`, NOT `warning`: amber marks
   // what raises the bill ([xN]), what a job can reach ([secrets]) or what leaves it ([resume]), and a plan can do none
   // of those. It moves money between projects only inside the operator's envelope, above every floor and by at most
@@ -2745,7 +2744,7 @@ function limitRow(l: any, used: any, inner: number, styler: any, projects: any =
     if (over) atCap = true;
     windows.push(styler.fg(over ? "warning" : "text", `${key} ${u ?? "-"}/${l[key]}`));
   }
-  // The row's dollar windows (issue #507): a dollar-only row (a `model:` row, or a `project:` row with `weekUsd`) used to
+  // The row's dollar windows (issue #507): a dollar-only row (a `model:` row, or a `project:` row with `weekTokens`) used to
   // show no cap at all here. Each is `window $spent+held/$cap`, after the concurrency, the order of the plain-text path
   // (`renderScopedLimits`). The CAP comes from the row's own field, so it stays on screen when the dollar read fails as a
   // whole (the counter is then `-`, DOLLAR WINDOWS' convention for an unread counter). The counter and the verdict come
@@ -2757,7 +2756,7 @@ function limitRow(l: any, used: any, inner: number, styler: any, projects: any =
   for (const key of ["day", "week", "month"]) {
     let cap: number | null = null;
     try {
-      cap = optionalUsdMicros(l[`${key}Usd`], `${key}Usd`);
+      cap = parseTokenCount(l[`${key}Tokens`], `${key}Tokens`);
     } catch {
       cap = null; // the shared parser already refused such a file; a hand-built row is skipped, never guessed
     }
@@ -2765,7 +2764,7 @@ function limitRow(l: any, used: any, inner: number, styler: any, projects: any =
     const d = dollarRows.find((r: any) => r?.window === key) ?? null;
     const full = d?.full === true;
     if (full) atCap = true;
-    usdCells.push({ full, text: styler.fg(full ? "warning" : "text", `${key} ${usd(d?.counterMicros ?? null)}/${usd(cap)}${full ? " full" : ""}`) });
+    usdCells.push({ full, text: styler.fg(full ? "warning" : "text", `${key} ${usd(d?.counterTokens ?? null)}/${usd(cap)}${full ? " full" : ""}`) });
   }
   const usdWindows = [...usdCells.filter((c) => c.full), ...usdCells.filter((c) => !c.full)].map((c) => c.text);
   const dot = atCap ? styler.fg("warning", "●") : styler.fg("dim", "○");
@@ -2965,7 +2964,7 @@ function projectRows(snapshot: any, info: any = null): any[] {
 
 /**
  * The PROJECTS view (issue #499 part C): each project with its members and its spend this month, then the runs
- * recorded under no project. Spend is the cost fold's `byProject` (typed dollars through `fmtCost`, the panel's one
+ * recorded under no project. Spend is the cost fold's `byProject` (typed dollars through `fmtAmount`, the panel's one
  * money renderer), keyed by the project id each RECORD carries, read once when the view opened.
  *
  * THE NAME is the operator's free text, and `projects.json` admits a bidi override or an invisible character in it.
@@ -3000,7 +2999,7 @@ function projectsView(snapshot: any, info: any, selected: number, runProject: an
   rows.forEach((row: any, i: number) => {
     const cursor = i === selected ? styler.fg("accent", "›") : " ";
     const s = spend.get(row.key);
-    const money = s ? `${fmtCost(s.cost)} · ${s.runs} run${s.runs === 1 ? "" : "s"}` : "no runs";
+    const money = s ? `${fmtAmount(s.cost)} · ${s.runs} run${s.runs === 1 ? "" : "s"}` : "no runs";
     const filtering = runProject === row.key ? styler.fg("warning", " · filtering runs") : "";
     if (row.orphan) {
       lines.push(fitLine(`${cursor} ${styler.fg("accent", cellOf(row.key))}  ${styler.fg("warning", "not in projects.json")}  ${styler.fg("text", money)}${filtering}`, iw, styler));
@@ -3071,10 +3070,10 @@ function revertNote(res: any): string {
  */
 function allocationView(info: any, selected: number, iw: number, styler: any): { title: string; lines: string[] } {
   const e = info?.envelope;
-  // The applied split's own total beside the split (issue #507, render.mjs `splitTotalMicros`): during an envelope
+  // The applied split's own total beside the split (issue #507, render.mjs `splitTotalTokens`): during an envelope
   // mismatch this host's file may hold another total, and the mismatch line below says which.
   const shownState = info && !info.loading && !info.unwired && !info.unreachable && !info.alloc?.unreachable ? info.alloc?.state ?? null : null;
-  const total = e ? splitTotalMicros(shownState, e.totalMicros) : null;
+  const total = e ? splitTotalTokens(shownState, e.totalTokens) : null;
   const title = e ? `allocation · ${cellOf(e.window)} · total ${usd(total)}` : "allocation";
   const dim = (t: string) => styler.cell(t, iw, { color: "dim" });
   const wrapped = (t: string, color: string) => wrapColumns(t, iw, styler).map((l) => styler.cell(l, iw, { color }));
@@ -3096,7 +3095,7 @@ function allocationView(info: any, selected: number, iw: number, styler: any): {
   if (a.stateProblem === "newer") lines.push(...wrapped("the applied split was written by a newer pi-dispatch: upgrade this console", "warning"));
   else if (a.stateProblem === "unreadable") lines.push(...wrapped("the applied split does not decode; the next pickup replaces it with the neutral split", "warning"));
   const st = a.state ?? null;
-  if (st && st.envelopeDigest !== info.digest) lines.push(...wrapped(`the split was made for envelope ${cellOf(st.envelopeDigest)}, not this host's ${cellOf(info.digest)}: governed jobs here refuse as envelope-mismatch${total !== e.totalMicros ? `.${fileTotalText(usd(e.totalMicros))}` : ""}`, "warning"));
+  if (st && st.envelopeDigest !== info.digest) lines.push(...wrapped(`the split was made for envelope ${cellOf(st.envelopeDigest)}, not this host's ${cellOf(info.digest)}: governed jobs here refuse as envelope-mismatch${total !== e.totalTokens ? `.${fileTotalText(usd(e.totalTokens))}` : ""}`, "warning"));
   const spend = a.spend ?? null;
   // During a mismatch an entry only the split names is listed too, marked (render.mjs `allocationRowIds`, issue #507).
   for (const { id, splitOnly } of allocationRowIds(e.floors, st, !!st && st.envelopeDigest !== info.digest)) {
@@ -3106,13 +3105,13 @@ function allocationView(info: any, selected: number, iw: number, styler: any): {
       styler.fg("muted", `floor ${splitOnly ? "-" : usd(e.floors[id])}`),
       styler.fg("muted", `weight ${weight ?? "-"}`),
       styler.fg("text", `${usd(st?.allocations?.[id])}`),
-      styler.fg("dim", splitOnly ? SPLIT_ONLY_MARK : `spent ${usd(spend?.projects?.[id]?.micros)}`),
+      styler.fg("dim", splitOnly ? SPLIT_ONLY_MARK : `spent ${usd(spend?.projects?.[id]?.tokens)}`),
     ];
     lines.push(fitLine(bits.join("  "), iw, styler));
     if (spend?.projects?.[id]?.key) lines.push(fitLine(`    ${styler.fg("dim", cellOf(spend.projects[id].key))}`, iw, styler));
   }
   // The headroom against the split it is headroom of (issue #507), `/dispatch priorities`' line word for word.
-  if (st) lines.push(dim(`unallocated ${usd(st.unallocated)} · deployment spent ${usd(spend?.deployment?.micros)} of ${usd(total)}`));
+  if (st) lines.push(dim(`unallocated ${usd(st.unallocated)} · deployment spent ${usd(spend?.deployment?.tokens)} of ${usd(total)}`));
   if (st) {
     const plan = st.planId ? `plan ${cellOf(st.planId)}` : "neutral, no plan";
     // The applied instant as the history shows one (`allocAt`, issue #507), so the line keeps its `until` at 80 columns.
@@ -3700,7 +3699,7 @@ function renderTriggerDetail(raw: any, inner: number, styler: any, sched: any = 
   // under the deployment's list and cap, and a trigger that sets neither keeps exactly the pane it had.
   if (Array.isArray(t.models) && t.models.length > 0) kvWrap("models", t.models.map((m: any) => cellOf(m)).join(", "), "accent");
   if (Array.isArray(t.fallbackModels) && t.fallbackModels.length > 0) kvWrap("fallbacks", t.fallbackModels.map((m: any) => cellOf(m)).join(", "), "accent");
-  if (t.maxCostUsd) out.push(kv("max cost", `$${cellOf(t.maxCostUsd)} per job`, "accent"));
+  if (t.maxTokens) out.push(kv("max cost", `$${cellOf(t.maxTokens)} per job`, "accent"));
   // The portfolio flag (issue #507), the row badge's fact in words: what the job may write back. A row only when set, so
   // every other pane is byte-identical; `accent` for the row badge's reason.
   if (t.portfolio === true) out.push(kv("portfolio", "its jobs write the budget split", "accent"));
@@ -4474,8 +4473,8 @@ function renderRunDetail(record: any, inner: number, styler: any, allRuns: any[]
   }
   // WHAT THE RUN SETTLED in dollars (issue #501's `dollars`), so the drill-in and the other surfaces can be held to one
   // number (issue #507). The basis is the worker's fixed token. Absent on a record with no dollar window.
-  if (r.dollars !== null && typeof r.dollars === "object" && !Array.isArray(r.dollars)) {
-    out.push(kv("dollars", `settled ${usd(r.dollars.settledMicros)} (${show(r.dollars.basis)})`));
+  if (r.tokensWindows !== null && typeof r.tokensWindows === "object" && !Array.isArray(r.tokensWindows)) {
+    out.push(kv("dollars", `settled ${usd(r.tokensWindows.settledTokens)} (${show(r.tokensWindows.basis)})`));
   }
 
   // turns · exit · budget slot · attempt (each present only when the field is).

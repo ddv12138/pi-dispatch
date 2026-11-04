@@ -3,7 +3,7 @@
  * Keep this module independent of HTTP and pi so both surfaces judge exactly the same evidence.
  */
 import { SETUP_ACTION_NAMES } from "./setup-actions.mjs";
-import { parseUsdMicros } from "@edgehero/pi-dispatch/money";
+import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 const rule = (mode, reason, ...tools) => Object.freeze({ mode, reason, tools: Object.freeze(tools) });
 export const AGENT_MODES = Object.freeze(["unattended", "confirm", "person"]);
 export const ACTION_AGENT_POLICIES = Object.freeze({
@@ -78,13 +78,13 @@ export function actionAgentPolicy(name) {
 const object = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const keysChanged = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !same(a[k], b[k]));
-const SETTINGS_CAPS = new Set(["dailyCap", "weeklyCap", "monthlyCap", "maxTurns", "maxTokens", "dailyTokenCap", "concurrency", "softHoldPct", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
-const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayUsd", "weekUsd", "monthUsd", "hostShare"]);
+const SETTINGS_CAPS = new Set(["dailyCap", "weeklyCap", "monthlyCap", "maxTurns", "maxTokens", "dailyTokenCap", "concurrency", "softHoldPct", "maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
+const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayTokens", "weekTokens", "monthTokens", "hostShare"]);
 const FLAGS = new Set(["recover", "steer", "progress", "statusComment"]);
 const dollar = (key) => /Usd$/.test(key);
 function amount(value, usd) {
   if (!usd) return Number.isSafeInteger(value) && value >= 0 ? value : null;
-  try { return parseUsdMicros(value, "agent cap"); } catch { return null; }
+  try { return parseTokenCount(value, "agent cap"); } catch { return null; }
 }
 function decreased(before, after, allowed) {
   if (!object(before) || !object(after)) return false;

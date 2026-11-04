@@ -117,7 +117,7 @@ function canaryTriggers(document) {
 	return rows.flatMap((trigger, index) => {
 		const on = trigger?.on, run = trigger?.run;
 		if (on?.type !== "cron" || run?.packages === false || run?.resume === true || run?.command !== undefined || run?.portfolio === true) return [];
-		return [{ index, id: typeof on.id === "string" ? on.id : null, capUsd: Number.isFinite(run?.maxCostUsd) ? run.maxCostUsd : null }];
+		return [{ index, id: typeof on.id === "string" ? on.id : null, capTokens: Number.isFinite(run?.maxTokens) ? run.maxTokens : null }];
 	});
 }
 

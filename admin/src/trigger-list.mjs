@@ -7,7 +7,7 @@ import cronParser from "cron-parser";
 const { parseExpression } = cronParser;
 import { windowEndAt } from "@edgehero/pi-dispatch/pause-windows";
 import { cronRunOf } from "@edgehero/pi-dispatch/bullmq-internals";
-import { foldTriggerCosts, meteredRunMicros, refusedBeforeSpend } from "./costs.mjs";
+import { foldTriggerCosts, meteredRunTokens, refusedBeforeSpend } from "./costs.mjs";
 import { recordReason } from "./words.mjs";
 import { newerSkippedSentence, readableRecords } from "./newer-release.mjs";
 
@@ -23,9 +23,9 @@ const copyStrings = (value) => Array.isArray(value) ? value.filter((v) => typeof
 const recordOf = (r) => Object.fromEntries(["jobId", "target", "project", "kind", "triggerIndex", "triggerType", "flow", "startedAt", "endedAt", "outcome"].filter((k) => typeof r?.[k] === "string" || Number.isSafeInteger(r?.[k])).map((k) => [k, r[k]]).concat([["reason", recordReason(r)]]));
 
 function ruleOf(t) {
-  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "portfolio", "replicas", "maxCostUsd", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout", "gateBudgetRaiseUsd"];
+  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "portfolio", "replicas", "maxTokens", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout", "gateBudgetRaiseUsd"];
   const out = Object.fromEntries(scalar.filter((k) => typeof t[k] === "string" || typeof t[k] === "boolean" || Number.isSafeInteger(t[k])).map((k) => [k, t[k]]));
-  for (const key of ["maxCostUsd", "gateBudgetRaiseUsd"]) {
+  for (const key of ["maxTokens", "gateBudgetRaiseUsd"]) {
     if (typeof t[key] === "number" && Number.isFinite(t[key]) && t[key] >= 0) out[key] = t[key];
     else delete out[key];
   }
@@ -75,7 +75,7 @@ function chipsOf(t, packagesAvailable) {
   if (t.awaitInput === true || t.gates?.length) add("asks", "may wait for a person");
   if (t.steer === true) add("asks", "takes messages");
   if (t.recover === true) add("writes", "recovers a lost run");
-  if (t.models?.length || t.maxCostUsd !== undefined || t.waitFor?.length || t.reviewState?.length || t.all?.length || t.none?.length || t.number) add("narrows", "reviewed constraints");
+  if (t.models?.length || t.maxTokens !== undefined || t.waitFor?.length || t.reviewState?.length || t.all?.length || t.none?.length || t.number) add("narrows", "reviewed constraints");
   if (t.secretBundle === false) add("narrows", "no project secret bundle");
   if (t.disarmed) add("spent", "spent one-shot");
   return chips;
@@ -124,12 +124,12 @@ export function quietIntervals(window, { start, end, formatters = new Map() } = 
 }
 
 function statsOf(records, weekStart, now, incomplete, subscriptions, pricing) {
-  if (records === null) return { runs30d: null, weekRuns: null, weekCostMicros: null, weekCost: null, incomplete: true, costIncomplete: true };
+  if (records === null) return { runs30d: null, weekRuns: null, weekCostTokens: null, weekCost: null, incomplete: true, costIncomplete: true };
   const week = records.filter((r) => atOf(r) >= weekStart && atOf(r) <= now);
-  const costs = week.map((r) => refusedBeforeSpend(r) ? 0 : meteredRunMicros(r, { subscriptions, pricing }));
+  const costs = week.map((r) => refusedBeforeSpend(r) ? 0 : meteredRunTokens(r));
   const joined = { byJobId: Object.fromEntries(week.map((r) => [r.jobId, { key: "trigger:sum" }])) };
   const cost = foldTriggerCosts({ records: week, subscriptions, pricing, triggerJoin: joined })["trigger:sum"]?.cost ?? { usd: 0, class: "metered", floor: false };
-  return { runs30d: records.length, weekRuns: week.length, weekCostMicros: costs.reduce((sum, n) => sum + (n ?? 0), 0), weekCost: cost, incomplete, costIncomplete: costs.some((n) => n === null) };
+  return { runs30d: records.length, weekRuns: week.length, weekCostTokens: costs.reduce((sum, n) => sum + (n ?? 0), 0), weekCost: cost, incomplete, costIncomplete: costs.some((n) => n === null) };
 }
 
 /**

@@ -171,6 +171,7 @@
     "./subscriptions": "./src/subscriptions.mjs",
     "./subscription-status": "./src/subscription-status.mjs",
     "./budget": "./src/budget.mjs",
+    "./budget-rule": "./src/budget-rule.mjs",
     "./pricing": "./src/pricing.mjs",
     "./token-budget": "./src/token-budget.mjs",
     "./scheduler-stall-guard": "./src/scheduler-stall-guard.mjs",

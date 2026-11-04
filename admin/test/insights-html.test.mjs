@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutSplitBars, layoutCapacityChart, microsUsd, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_SPLIT_REFUSALS, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
-import { formatMicros } from "@edgehero/pi-dispatch/money";
+import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutSplitBars, layoutCapacityChart, tokensText, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_SPLIT_REFUSALS, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
 import { PROJECT_ID_RE } from "@edgehero/pi-dispatch/projects";
 import { buildGraphModel } from "../src/graph-model.mjs";
 import { buildGraphScene, drawnColumns, PAGE_THEME } from "../src/graph-html.mjs";
@@ -64,7 +63,7 @@ const CANNED = () => ({
 /** A typed dollar literal (the costs.mjs shape): the fold is hand-built rather than run, because
  * this page's contract is the SHAPES foldCosts documents, and canned literals keep every dollar
  * assertion hand-computable. */
-const usd = (n, cls, over = {}) => ({ usd: n, class: cls, floor: false, ...over });
+const usd = (n, cls, over = {}) => ({ tokens: n, class: cls, floor: false, ...over });
 
 /**
  * One realistic canned fold: an owned SAVING plan with a null-limit rolling window plus a range
@@ -76,48 +75,48 @@ const usd = (n, cls, over = {}) => ({ usd: n, class: cls, floor: false, ...over 
 const CANNED_FOLD = () => ({
   window: { fromMs: Date.parse("2026-07-20T00:00:00.000Z"), toMs: Date.parse("2026-08-01T00:00:00.000Z"), days: 12, firstRunMs: Date.parse("2026-07-29T10:00:00.000Z") },
   daily: [
-    { day: "2026-07-29", cost: usd(1.1, "metered"), runs: 3 },
+    { day: "2026-07-29", cost: usd(1100000, "metered"), runs: 3 },
     { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 }, // the gap day: zero runs, never compressed away
-    { day: "2026-07-31", cost: usd(3.1, "estimated", { coverage: 0.5, floor: true }), runs: 4 },
+    { day: "2026-07-31", cost: usd(3100000, "estimated", { coverage: 0.5, floor: true }), runs: 4 },
   ],
   dailyByFlow: [
     {
       flow: "fix",
       flowKey: "fix",
       days: [
-        { day: "2026-07-29", cost: usd(0.9, "metered"), runs: 2 },
+        { day: "2026-07-29", cost: usd(900000, "metered"), runs: 2 },
         { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 },
-        { day: "2026-07-31", cost: usd(2.4, "estimated", { coverage: 0.5, floor: true }), runs: 3 },
+        { day: "2026-07-31", cost: usd(2400000, "estimated", { coverage: 0.5, floor: true }), runs: 3 },
       ],
     },
     {
       flow: "tidy",
       flowKey: "tidy",
       days: [
-        { day: "2026-07-29", cost: usd(0.2, "metered"), runs: 1 },
+        { day: "2026-07-29", cost: usd(200000, "metered"), runs: 1 },
         { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 },
-        { day: "2026-07-31", cost: usd(0.7, "metered"), runs: 1 },
+        { day: "2026-07-31", cost: usd(700000, "metered"), runs: 1 },
       ],
     },
   ],
   byFlow: [
-    { flow: "fix", flowKey: "fix", runs: 12, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }), apiEquiv: usd(44.49, "estimated") },
-    { flow: "tidy", flowKey: "tidy", runs: 3, tokens: 90000, cost: usd(1.25, "metered"), apiEquiv: null },
+    { flow: "fix", flowKey: "fix", runs: 12, tokens: 5400000, cost: usd(0, "metered") },
+    { flow: "tidy", flowKey: "tidy", runs: 3, tokens: 90000, cost: usd(1250000, "metered"), apiEquiv: null },
   ],
   byModel: [
-    { provider: "kimi-coding", model: "kimi-k2", runs: 12, calls: 24, input: 4000000, output: 1400000, cacheRead: 0, cacheWrite: 0, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }) },
-    { provider: "anthropic", model: "claude-sonnet-4", runs: 3, calls: 6, input: 60000, output: 30000, cacheRead: 0, cacheWrite: 0, tokens: 90000, cost: usd(1.25, "metered") },
-    { provider: "qwen-token-plan", model: "deepseek-v4-pro", runs: 1, calls: 1, input: 800, output: 200, cacheRead: 0, cacheWrite: 0, tokens: 1000, cost: usd(0, "zero-rated") },
+    { provider: "kimi-coding", model: "kimi-k2", runs: 12, calls: 24, input: 4000000, output: 1400000, cacheRead: 0, cacheWrite: 0, tokens: 5400000, cost: usd(0, "metered") },
+    { provider: "anthropic", model: "claude-sonnet-4", runs: 3, calls: 6, input: 60000, output: 30000, cacheRead: 0, cacheWrite: 0, tokens: 90000, cost: usd(1250000, "metered") },
+    { provider: "qwen-token-plan", model: "deepseek-v4-pro", runs: 1, calls: 1, input: 800, output: 200, cacheRead: 0, cacheWrite: 0, tokens: 1000, cost: usd(0, "metered") },
   ],
   byTrigger: [
-    { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *", runs: 9, tokens: 4000000, cost: usd(0, "plan", { planId: "kimi" }), outcomes: { completed: 9, policy: 0, failed: 0 }, failedCost: null },
-    { key: "trigger:1", index: 1, type: "label", label: "any[ai]", runs: 3, tokens: 90000, cost: usd(1.25, "metered"), outcomes: { completed: 2, policy: 0, failed: 1 }, failedCost: usd(0.4, "metered") },
-    { key: "chained", index: null, type: null, label: "(chained runs)", runs: 2, tokens: 200000, cost: usd(0.2, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
-    { key: "manual", index: null, type: null, label: "(manual/local)", runs: 2, tokens: 1000, cost: usd(0, "zero-rated"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
+    { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *", runs: 9, tokens: 4000000, cost: usd(0, "metered"), outcomes: { completed: 9, policy: 0, failed: 0 }, failedCost: null },
+    { key: "trigger:1", index: 1, type: "label", label: "any[ai]", runs: 3, tokens: 90000, cost: usd(1250000, "metered"), outcomes: { completed: 2, policy: 0, failed: 1 }, failedCost: usd(400000, "metered") },
+    { key: "chained", index: null, type: null, label: "(chained runs)", runs: 2, tokens: 200000, cost: usd(200000, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
+    { key: "manual", index: null, type: null, label: "(manual/local)", runs: 2, tokens: 1000, cost: usd(0, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
   ],
   byRepo: [
-    { key: "acme/api", label: "acme/api", kind: "github", runs: 12, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }) },
-    { key: "local:site", label: "local:site", kind: "local", runs: 4, tokens: 91000, cost: usd(1.25, "metered") },
+    { key: "acme/api", label: "acme/api", kind: "github", runs: 12, tokens: 5400000, cost: usd(0, "metered") },
+    { key: "local:site", label: "local:site", kind: "local", runs: 4, tokens: 91000, cost: usd(1250000, "metered") },
   ],
   plans: [
     {
@@ -127,9 +126,9 @@ const CANNED_FOLD = () => ({
       price: { amount: 99, currency: "USD", per: "month" },
       attributedRuns: 12,
       attributedTokens: 5400000,
-      amortizedPerRun: usd(3.3, "estimated"),
-      apiEquiv: usd(44.49, "estimated"),
-      verdict: { kind: "SAVING", usd: usd(4.89, "estimated") },
+      amortizedPerRun: usd(3300000, "estimated"),
+      apiEquiv: usd(44490000, "estimated"),
+      verdict: { kind: "SAVING", usd: usd(4890000, "estimated") },
       windows: [
         { per: "5h", rolling: true, unit: "tokens", limit: null, peakRuns: 4, peakTokens: 1200000 },
         { per: "7d", rolling: true, unit: "tokens", limit: [1000000, 2000000], peakRuns: 9, peakTokens: 3000000 },
@@ -142,14 +141,14 @@ const CANNED_FOLD = () => ({
       price: { amount: 15, currency: "USD", per: "month" },
       attributedRuns: 1,
       attributedTokens: 1000,
-      amortizedPerRun: usd(6, "estimated"),
+      amortizedPerRun: usd(6_000_000, "estimated"),
       apiEquiv: null,
-      verdict: { kind: "WOULD_LOSE", usd: usd(2.4, "estimated") },
+      verdict: { kind: "WOULD_LOSE", usd: usd(2400000, "estimated") },
       windows: [{ per: "month", rolling: false, unit: "tokens", limit: 5000000, peakRuns: 1, peakTokens: 1000 }],
     },
   ],
   provenance: {
-    total: usd(4.45, "estimated", { floor: true, coverage: 0.5 }),
+    total: usd(4450000, "estimated", { floor: true, coverage: 0.5 }),
     runsTotal: 16,
     runsUnmetered: 1,
     runsUnledgered: 2,
@@ -174,8 +173,8 @@ const CANNED_PAYLOAD = () => ({
   costsUnreachable: null,
   window: "30d",
   costByTrigger: {
-    "trigger:0": { cost: usd(0, "plan", { planId: "kimi" }), runs: 9 },
-    "trigger:1": { cost: usd(1.25, "estimated", { coverage: 0.5 }), runs: 3 },
+    "trigger:0": { cost: usd(0, "metered"), runs: 9 },
+    "trigger:1": { cost: usd(1250000, "estimated", { coverage: 0.5 }), runs: 3 },
   },
   budget: CANNED_BUDGET(),
 });
@@ -218,7 +217,7 @@ test("hostile flow, plan, repo, trigger and day strings cannot break out of mark
   payload.fold.byTrigger[1].label = "</script><script>evil()";
   // A hostile day string is not escaped but DROPPED: a day is an axis coordinate, and a non-date
   // coordinate has nowhere truthful to draw. The $77 canary proves the whole entry went with it.
-  payload.fold.daily.push({ day: '"><script>', cost: usd(77, "metered"), runs: 1 });
+  payload.fold.daily.push({ day: '"><script>', cost: usd(77_000_000, "metered"), runs: 1 });
   const out = insightsHtml(payload, { now: NOW });
 
   assert.equal(out.split("<script").length - 1, 0, "no script element at all: the console's one script is served by URL");
@@ -320,7 +319,7 @@ test("a null window limit renders undisclosed with no burn-down, and NO_BASELINE
 
   const p = CANNED_PAYLOAD();
   p.fold.plans[0].apiEquiv = null;
-  p.fold.plans[0].verdict = { kind: "NO_BASELINE", usd: usd(9.99, "estimated") }; // a smuggled number
+  p.fold.plans[0].verdict = { kind: "NO_BASELINE", usd: usd(9990000, "estimated") }; // a smuggled number
   const page = insightsHtml(p, { now: NOW });
   assert.ok(page.includes("no API-rate baseline declared, set counterfactualModel to compare"));
   assert.ok(!page.includes("$9.99"), "NO_BASELINE renders the sentence and never a number, even a smuggled one");
@@ -356,10 +355,10 @@ test("layoutDailyChart: bars inside the plot, monotone x, gap days present, all-
 
 test("layoutBarList: plan rows chip with no bar, estimated dashed class, unknown dash, nodeId guarded", () => {
   const rows = [
-    { label: "fix", cost: usd(0, "plan", { planId: "kimi" }), runs: 12, apiEquiv: usd(44.49, "estimated") },
-    { label: "tidy", cost: usd(1.25, "metered"), runs: 3 },
-    { label: "est", cost: usd(2, "estimated", { floor: true }), runs: 1, nodeId: "n4" },
-    { label: "zr", cost: usd(0, "zero-rated"), runs: 1 },
+    { label: "fix", cost: usd(0, "metered"), runs: 12 },
+    { label: "tidy", cost: usd(1250000, "metered"), runs: 3 },
+    { label: "est", cost: usd(2_000_000, "estimated", { floor: true }), runs: 1, nodeId: "n4" },
+    { label: "zr", cost: usd(0, "metered"), runs: 1 },
     { label: "junk", cost: null, runs: 0, nodeId: "constructor" },
   ];
   const laid = layoutBarList(rows, { width: 430 });
@@ -456,7 +455,7 @@ test("breakdown lists cap at 8 rows and state the tail as one estimated aggregat
     kind: "github",
     runs: 1,
     tokens: 10,
-    cost: usd(11 - i, "metered"),
+    cost: usd(11_000_000 - i, "metered"),
   }));
   const out = insightsHtml(p, { now: NOW });
   // Rows 9..11 carry $3 + $2 + $1: the tail is their sum, demoted to an estimate because a fold of
@@ -803,9 +802,9 @@ test("the cumulative end label sits inside its chart, above its line and off eve
   // plot's top line, the case where a label above it has least room.
   const series = [
     CANNED_FOLD().daily,
-    Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, "0")}`, cost: usd(0.4 + (i % 3) * 0.1, i > 20 ? "estimated" : "metered", { floor: i === 29 }), runs: 2 })),
-    [{ day: "2026-07-01", cost: usd(1, "metered"), runs: 1 }, { day: "2026-07-02", cost: usd(1, "metered"), runs: 1 }],
-    [{ day: "2026-07-01", cost: usd(12345.67, "estimated", { floor: true }), runs: 1 }],
+    Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, "0")}`, cost: usd(400000 + (i % 3) * 0.1, i > 20 ? "estimated" : "metered", { floor: i === 29 }), runs: 2 })),
+    [{ day: "2026-07-01", cost: usd(1_000_000, "metered"), runs: 1 }, { day: "2026-07-02", cost: usd(1_000_000, "metered"), runs: 1 }],
+    [{ day: "2026-07-01", cost: usd(12345670000, "estimated", { floor: true }), runs: 1 }],
   ];
   let lifted = 0;
   for (const daily of series) {
@@ -839,7 +838,7 @@ test("a trigger's spend badge sits above its re-arm loop on the page (issue #483
   // The badge was drawn at the chip's top + 53 and the loop ran at + 55, so the dollars sat on the dashed
   // loop. The badge now takes the scene's own line, and the scene routes the loop below it.
   const p = CANNED_PAYLOAD();
-  p.costByTrigger["trigger:0"] = { cost: usd(1.55, "metered"), runs: 4 };
+  p.costByTrigger["trigger:0"] = { cost: usd(1550000, "metered"), runs: 4 };
   const out = insightsHtml(p, { now: NOW });
   const spend = /<g id="spend">(.*?)<\/g>/.exec(out)[1];
   const badges = [...spend.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)"[^>]*>([^<]*)<\/text>/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]), text: m[3] }));
@@ -918,10 +917,10 @@ test("a trigger's spend badge fits its chip, the whole text in a tooltip (issue 
 test("the breakdown gains a by-project list keyed by id, with names escaped and isolated under it", () => {
   const p = CANNED_PAYLOAD();
   p.fold.byProject = [
-    { key: "shop", label: "shop", runs: 3, tokens: 100, cost: usd(1.25, "metered") },
-    { key: "constructor", label: "constructor", runs: 1, tokens: 10, cost: usd(0.5, "metered") },
-    { key: null, label: "(no project)", runs: 2, tokens: 10, cost: usd(0.25, "metered") },
-    { key: "<script>", label: "<script>", runs: 1, tokens: 1, cost: usd(0.1, "metered") },
+    { key: "shop", label: "shop", runs: 3, tokens: 100, cost: usd(1250000, "metered") },
+    { key: "constructor", label: "constructor", runs: 1, tokens: 10, cost: usd(500000, "metered") },
+    { key: null, label: "(no project)", runs: 2, tokens: 10, cost: usd(250000, "metered") },
+    { key: "<script>", label: "<script>", runs: 1, tokens: 1, cost: usd(100000, "metered") },
   ];
   p.projects = [
     { id: "shop", name: "Web‮shop <b>" },
@@ -952,9 +951,9 @@ test("the page's restated project id rule is the worker's rule (PR #569's review
 test("a key that is not an id JOINS the one (no project) bar, never a second one with the same label", () => {
   const p = CANNED_PAYLOAD();
   p.fold.byProject = [
-    { key: null, label: "(no project)", runs: 1, tokens: 10, cost: usd(1, "metered") },
-    { key: "Bad Key", label: "Bad Key", runs: 2, tokens: 5, cost: usd(2, "metered") },
-    { key: "shop", label: "shop", runs: 1, tokens: 1, cost: usd(0.5, "metered") },
+    { key: null, label: "(no project)", runs: 1, tokens: 10, cost: usd(1_000_000, "metered") },
+    { key: "Bad Key", label: "Bad Key", runs: 2, tokens: 5, cost: usd(2_000_000, "metered") },
+    { key: "shop", label: "shop", runs: 1, tokens: 1, cost: usd(500000, "metered") },
   ];
   const out = insightsHtml(p, { now: NOW });
   assert.equal(out.split(">(no project)</text>").length - 1, 1, "one bar");
@@ -1048,11 +1047,11 @@ test("junk in a split row degrades to ? or absence, and hostile text is escaped 
   assert.ok(down.includes("budget split unreachable: &lt;/script&gt;&lt;script&gt;x"));
 });
 
-test("the page's micro-dollar text is the worker's formatMicros, to the micro (#507)", () => {
-  for (const m of [0, 1, 10, 999_999, 1_000_000, 1_250_000, 70_000_000, 82_500_000, 123_456_789, Number.MAX_SAFE_INTEGER]) {
-    assert.equal(microsUsd(m), `$${formatMicros(m)}`, `${m}`);
+test("the page's token text carries thousands separators, `-` for a value that is not a count", () => {
+  for (const [m, want] of [[0, "0"], [1, "1"], [10, "10"], [999_999, "999,999"], [1_000_000, "1,000,000"], [1_250_000, "1,250,000"], [70_000_000, "70,000,000"], [123_456_789, "123,456,789"], [Number.MAX_SAFE_INTEGER, "9,007,199,254,740,991"]]) {
+    assert.equal(tokensText(m), want, `${m}`);
   }
-  for (const junk of [-1, 1.5, null, undefined, "70", NaN]) assert.equal(microsUsd(junk), "-", "never a $0 for a number nobody has");
+  for (const junk of [-1, 1.5, null, undefined, "70", NaN]) assert.equal(tokensText(junk), "-", "never a 0 for a value nobody measured");
 });
 
 test("layoutSplitBars: one scale for every row, the envelope total or a larger amount, and overspend flagged (#507)", () => {

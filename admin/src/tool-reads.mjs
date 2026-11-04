@@ -54,7 +54,7 @@ export function setupForAgent(snapshot, { deployment = null } = {}) {
 export async function readOperationalTool(kind, { paths, env = {}, now = Date.now, fleet: provided, reads = {} } = {}) {
   reads = { ...testReads, ...reads };
   if (kind === "failed" && reads.failed) return failedForAgent(await reads.failed({ url: paths.valkeyUrl }));
-  const fleet = provided ?? (reads.fleet ?? rm.createFleetReader)(paths, { readOnly: true, dollarEnvFn: () => env, nowFn: now });
+  const fleet = provided ?? (reads.fleet ?? rm.createFleetReader)(paths, { readOnly: true, budgetEnvFn: () => env, nowFn: now });
   try {
     const snapshot = await fleet.snapshot(kind === "waiting" ? { waiting: true } : {});
     if (kind === "failed") return failedForAgent(snapshot.failed);
@@ -80,10 +80,10 @@ export function runForAgent(record, { retention = null, self = null } = {}) {
 
 export async function readHeldForAgent({ paths, env = {}, nowMs, project = null } = {}) {
   if (typeof testReads.held === "function") return testReads.held({ paths, env, nowMs, project });
-  const fleet = rm.createFleetReader(paths, { readOnly: true, dollarEnvFn: () => env, nowFn: () => nowMs });
+  const fleet = rm.createFleetReader(paths, { readOnly: true, budgetEnvFn: () => env, nowFn: () => nowMs });
   try {
     const snapshot = await fleet.snapshot();
     return heldMoneyOf(snapshot.hostBudgets, { nowMs, project });
-  } catch { return { heldMicros: null, heldJobs: null, unknown: true }; }
+  } catch { return { heldTokens: null, heldJobs: null, unknown: true }; }
   finally { await fleet.dispose(); }
 }

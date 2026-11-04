@@ -51,10 +51,10 @@ export function projectWindowStart(window, now) {
 
 /** Known holds and their completeness. A missing old-host field is unknown, never an invented zero. */
 export function projectHolds(hosts, { id, window = "week", now, unreadable = false } = {}) {
-  if (unreadable || !Array.isArray(hosts)) return { micros: null, knownMicros: 0, incomplete: true };
+  if (unreadable || !Array.isArray(hosts)) return { tokens: null, knownTokens: 0, incomplete: true };
   const key = WINDOW_KEYS[window] ?? weekKey;
   const bucket = key(new Date(now));
-  let knownMicros = 0;
+  let knownTokens = 0;
   let incomplete = false;
   const seen = new Set();
   for (const h of hosts) {
@@ -66,11 +66,11 @@ export function projectHolds(hosts, { id, window = "week", now, unreadable = fal
       seen.add(job.id);
       if (amount(job.h) === null || !Number.isSafeInteger(job.ha)) { incomplete = true; continue; }
       if (job.ha > now || key(new Date(job.ha)) !== bucket) continue;
-      knownMicros += job.h;
+      knownTokens += job.h;
     }
   }
-  if (!Number.isSafeInteger(knownMicros)) return { micros: null, knownMicros: null, incomplete: true };
-  return { micros: incomplete ? null : knownMicros, knownMicros, incomplete };
+  if (!Number.isSafeInteger(knownTokens)) return { tokens: null, knownTokens: null, incomplete: true };
+  return { tokens: incomplete ? null : knownTokens, knownTokens, incomplete };
 }
 
 /** Only the two calls the worker emits can become a size preview. No arbitrary call is translated into a write. */
@@ -116,7 +116,7 @@ function projectRefusal(result, id, operation) {
 function runView(r, subscriptions, pricing) {
   const reason = recordReason(r);
   const cost = recordSpendOf(r, { subscriptions, pricing });
-  return { jobId: r.jobId ?? null, target: r.kind === "local" ? memberLabel(r.target ?? "local folder") : r.target ?? null, kind: r.kind ?? null, at: Number.isFinite(instant(r)) ? instant(r) : null, outcome: outcomeKey(r.outcome, reason) ?? "unknown", reason, reasonSentence: reason ? reasonWords(reason).sentence ?? reason : null, host: r.host ?? null, micros: cost.micros, costFloor: cost.floor };
+  return { jobId: r.jobId ?? null, target: r.kind === "local" ? memberLabel(r.target ?? "local folder") : r.target ?? null, kind: r.kind ?? null, at: Number.isFinite(instant(r)) ? instant(r) : null, outcome: outcomeKey(r.outcome, reason) ?? "unknown", reason, reasonSentence: reason ? reasonWords(reason).sentence ?? reason : null, host: r.host ?? null, tokens: cost.tokens, costFloor: cost.floor };
 }
 
 /**
@@ -178,13 +178,13 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
   let historyFloor = !historyReadable;
   for (const r of selected) {
     const cost = recordSpendOf(r, { subscriptions, pricing });
-    if (cost.micros === null) historyFloor = true;
-    else if (historySpent !== null) historySpent += cost.micros;
+    if (cost.tokens === null) historyFloor = true;
+    else if (historySpent !== null) historySpent += cost.tokens;
     historyFloor ||= cost.floor;
   }
   const envelope = allocation?.unset !== true && Boolean(paths.envelopeFile);
-  const usedMicros = envelope ? amount(allocation?.spend?.projects?.[id]) : historySpent !== null && holds.micros !== null ? historySpent + holds.micros : null;
-  const settledMicros = envelope ? usedMicros !== null && holds.micros !== null && usedMicros >= holds.micros ? usedMicros - holds.micros : null : historySpent;
+  const usedTokens = envelope ? amount(allocation?.spend?.projects?.[id]) : historySpent !== null && holds.tokens !== null ? historySpent + holds.tokens : null;
+  const settledTokens = envelope ? usedTokens !== null && holds.tokens !== null && usedTokens >= holds.tokens ? usedTokens - holds.tokens : null : historySpent;
   const limitRows = limits.flatMap((l, index) => l.scope === `project:${id}` ? [{ index, ...l }] : []);
   let size = null;
   try {
@@ -242,8 +242,8 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
     ...(newerSkipped > 0 ? { newerSkipped } : {}),
     runs24h: { total: day.length, counts, inLine: snapshot?.waiting && !snapshot.waiting.unreachable ? queued.length : null, inLineIncomplete: snapshot?.waiting?.truncated === true, worst: worst ? runView(worst, subscriptions, pricing) : null },
     recent: recorded.slice(0, 5).map((r) => runView(r, subscriptions, pricing)), totalRuns: recorded.length,
-    spend: { window, since, envelope, usedMicros, settledMicros, heldMicros: holds.micros, heldKnownMicros: holds.knownMicros, heldIncomplete: holds.incomplete, floor: envelope ? false : historyFloor, shareMicros: amount(allocation?.state?.allocations?.[id]), problem: allocation?.problem ? "The allocation file could not be read. Run pi-dispatch doctor for the reason." : allocation?.unreachable ? "The allocation could not be read from Valkey." : null },
-    allocation: { window, shareMicros: amount(allocation?.state?.allocations?.[id]), totalMicros: amount(allocation?.totalMicros), floorMicros: amount(allocation?.floors?.[id]), weight: amount(weights[id]), totalWeight: amount(totalWeight), split: allocation?.state ? { id: allocation.state.planId ?? null, writer: allocation.state.writer ?? null, appliedAt: allocation.state.appliedAt ?? null, validUntil: allocation.state.validUntil ?? null } : null, refused: selected.filter((r) => recordReason(r) === "allocation-cap").length, unset: !envelope, problem: allocation?.problem || allocation?.unreachable ? "The allocation could not be read." : null },
+    spend: { window, since, envelope, usedTokens, settledTokens, heldTokens: holds.tokens, heldKnownTokens: holds.knownTokens, heldIncomplete: holds.incomplete, floor: envelope ? false : historyFloor, shareTokens: amount(allocation?.state?.allocations?.[id]), problem: allocation?.problem ? "The allocation file could not be read. Run pi-dispatch doctor for the reason." : allocation?.unreachable ? "The allocation could not be read from Valkey." : null },
+    allocation: { window, shareTokens: amount(allocation?.state?.allocations?.[id]), totalTokens: amount(allocation?.totalTokens), floorTokens: amount(allocation?.floors?.[id]), weight: amount(weights[id]), totalWeight: amount(totalWeight), split: allocation?.state ? { id: allocation.state.planId ?? null, writer: allocation.state.writer ?? null, appliedAt: allocation.state.appliedAt ?? null, validUntil: allocation.state.validUntil ?? null } : null, refused: selected.filter((r) => recordReason(r) === "allocation-cap").length, unset: !envelope, problem: allocation?.problem || allocation?.unreachable ? "The allocation could not be read." : null },
     size, sizing: sizingView, sizingUnreadable: registryUnreadable || !sizing || Boolean(sizing.unreachable) || !sl || Boolean(sl.invalid || sl.unreadable), limits: limitRows, limitsUnreadable: !sl || Boolean(sl.invalid || sl.unreadable), bundle, bundleKnown,
     triggers: [...triggerCounts.values()].sort((a, b) => a.index - b.index), editRefusal: projectRefusal(edit, id, "edit"), deleteRefusal: projectRefusal(deletion, id, "delete"),
   };
@@ -253,5 +253,5 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
 export function projectViewForAgent(view) {
   if (view?.state !== "ready") return { id: view?.id ?? null, state: view?.state ?? "unreadable" };
   const b = view.bundle;
-  return { id: view.id, state: "ready", spend: { window: view.spend.window, usedMicros: view.spend.usedMicros, settledMicros: view.spend.settledMicros, heldMicros: view.spend.heldMicros, shareMicros: view.spend.shareMicros, incomplete: view.spend.heldIncomplete || view.historyIncomplete }, size: view.size ? { memMiB: view.size.memMiB, cpuCenti: view.size.cpuCenti, source: view.size.source, memorySource: view.size.memorySource, cpuSource: view.size.cpuSource } : null, suggestion: view.sizing ? { memory: { reason: view.sizing.memory?.reason ?? null, current: view.sizing.memory?.current ?? null, suggested: view.sizing.memory?.suggested ?? null }, cpu: { reason: view.sizing.cpu?.reason ?? null, current: view.sizing.cpu?.current ?? null, suggested: view.sizing.cpu?.suggested ?? null }, call: view.sizing.call ?? null, action: projectSizeAction(view.sizing.call, view.id) } : null, bundleKnown: view.bundleKnown !== false, bundle: b ? { id: b.id, profile: b.profile, declared: b.declared, variables: b.last?.variables?.length ?? 0, forkReviews: b.forkReviews === true } : null, editRefusal: view.editRefusal, deleteRefusal: view.deleteRefusal, editRefused: Boolean(view.editRefusal), deleteRefused: Boolean(view.deleteRefusal) };
+  return { id: view.id, state: "ready", spend: { window: view.spend.window, usedTokens: view.spend.usedTokens, settledTokens: view.spend.settledTokens, heldTokens: view.spend.heldTokens, shareTokens: view.spend.shareTokens, incomplete: view.spend.heldIncomplete || view.historyIncomplete }, size: view.size ? { memMiB: view.size.memMiB, cpuCenti: view.size.cpuCenti, source: view.size.source, memorySource: view.size.memorySource, cpuSource: view.size.cpuSource } : null, suggestion: view.sizing ? { memory: { reason: view.sizing.memory?.reason ?? null, current: view.sizing.memory?.current ?? null, suggested: view.sizing.memory?.suggested ?? null }, cpu: { reason: view.sizing.cpu?.reason ?? null, current: view.sizing.cpu?.current ?? null, suggested: view.sizing.cpu?.suggested ?? null }, call: view.sizing.call ?? null, action: projectSizeAction(view.sizing.call, view.id) } : null, bundleKnown: view.bundleKnown !== false, bundle: b ? { id: b.id, profile: b.profile, declared: b.declared, variables: b.last?.variables?.length ?? 0, forkReviews: b.forkReviews === true } : null, editRefusal: view.editRefusal, deleteRefusal: view.deleteRefusal, editRefused: Boolean(view.editRefusal), deleteRefused: Boolean(view.deleteRefusal) };
 }

@@ -7,13 +7,13 @@ import { SPEND_PANELS } from "../src/console/panels/spend.mjs";
 
 const rendered = Promise.all(Object.entries(SPEND_DRAW).map(async ([key, draw]) => [key, await draw()])).then(Object.fromEntries);
 const expected = {
-  "spend-no-dollar-window.viewer": ["No daily dollar cap is configured", "$7.00"],
+  "spend-no-dollar-window.viewer": ["No daily token cap is configured", "7,000"],
   "spend-partial-money.viewer": ["unknown cost", "≥"],
   "spend-unknown-money.viewer": ["unknown cost", "unknown"],
   "spend-plan-model.viewer": ["plan:work", "plan-provider", "plan-model"],
-  "spend-whatif-runs.viewer": ["The same 3 runs", "$0.30", "API-equivalent amount"],
-  "spend-whatif-flow.viewer": ["Per run", "$0.20", "Runs in this window", "fixture"],
-  "spend-populated.operator": ["Today", "$2.00", "Held for 1 running job"],
+  "spend-whatif-runs.viewer": ["would use about", "instead of"],
+  "spend-whatif-flow.viewer": ["Per run", "Runs in this window", "fixture"],
+  "spend-populated.operator": ["Today", "Held for 1 running job"],
   "spend-populated.viewer": ["Full local paths are shown to operators only", "Metered and plan"],
   "spend-costs-unreadable.viewer": ["Costs could not be read. The other Spend views still work."],
   "spend-unknown-holds.operator": ["Holds not published by: old-worker", "Those jobs are not counted as zero"],
@@ -96,7 +96,7 @@ test("flows list has no graph node payload and server selections render real det
 test("the fixture supplies nonzero folds, holds and per-host capacity instead of empty placeholders", () => {
   const p = spendFixture();
   assert.equal(p.fold.provenance.runsTotal, 3);
-  assert.equal(p.spend.today.heldMicros, 2000000);
+  assert.equal(p.spend.today.heldTokens, 2_000_000);
   assert.equal(p.capacity.hosts.length, 3);
   assert.ok(p.capacity.fleet.peak > 0);
   for (const [page, panels] of Object.entries(SPEND_PANELS)) assert.ok(panels.length >= 4, page);
@@ -107,9 +107,9 @@ test("all five Spend views enforce the local-path boundary even when a viewer as
   const secret = "/srv/private-operator/work/customer-site";
   for (const page of ["insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows"]) {
     const payload = spendFixture();
-    payload.budget.dollars.windows.push({ ledger: "scope", name: secret, window: "day", counterMicros: 100, capMicros: 200 });
-    payload.budget.scoped.push({ scope: secret, usd: { day: { usedMicros: 100, capMicros: 200 } } });
-    payload.fold.byRepo.push({ key: `local:${secret}`, label: secret, kind: "local", runs: 1, tokens: 100, cost: { usd: .1, class: "metered" } });
+    payload.budget.windows.rows.push({ ledger: "scope", name: secret, window: "day", counterTokens: 100, capTokens: 200 });
+    payload.budget.scoped.push({ scope: secret, tokens: { day: { usedTokens: 100, capTokens: 200 } } });
+    payload.fold.byRepo.push({ key: `local:${secret}`, label: `local:${secret}`, kind: "local", runs: 1, tokens: 100, amount: { tokens: 100, class: "metered", floor: false } });
     const folder = payload.graph.folders.find((f) => f.kind === "local");
     folder.path = secret;
     folder.label = "customer-site";
@@ -132,7 +132,7 @@ test("all five Spend views enforce the local-path boundary even when a viewer as
 test("Budget split headlines expose floors, permitted writers and remaining plan validity", async () => {
   const page = (await rendered)["spend-split.operator"];
   const text = cardText(page);
-  for (const sentence of ["Floors total $5.00", "Writers: operator-session, portfolio-job"]) assert.ok(text.includes(sentence), sentence);
+  for (const sentence of ["Writers: operator-session, portfolio-job"]) assert.ok(text.includes(sentence), sentence);
   const doc = cardDocument(page);
   const plan = doc.within(doc.byId.get("p-plan-kpi"));
   assert.match(cardText(plan), /24 hours left/);

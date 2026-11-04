@@ -2,7 +2,7 @@
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { formatCpus, parseMemory } from "@edgehero/pi-dispatch/job-size";
-import { parseUsdMicros } from "@edgehero/pi-dispatch/money";
+import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { bundleDeclaredText } from "../../read-model.mjs";
 import { OUTCOME_KEY_WORDS, reasonWords, shortSentence } from "../../words.mjs";
 import { newerSkippedSentence } from "../../newer-release.mjs";
@@ -39,11 +39,11 @@ export const projectDescription = (view, locale = "en") => view?.state === "read
 export function projectSpend(v) {
   if (!ready(v)) return issue(v);
   const s = data(v).spend;
-  const splitKnown = Number.isFinite(s.settledMicros) && Number.isFinite(s.heldMicros);
-  const totalKnown = Number.isFinite(s.usedMicros);
-  const headline = splitKnown ? s.settledMicros : totalKnown ? s.usedMicros : s.settledMicros;
-  const pct = totalKnown && s.shareMicros > 0 ? (s.usedMicros / s.shareMicros) * 100 : null;
-  return card(`${uiText("Spend this", v.locale)} ${uiText(s.window, v.locale)}`, html`<div class="proj-kv"><b>${s.floor ? uiText("at least", v.locale) + " " : ""}${money(headline)}</b><span>${splitKnown ? html`+ ${money(s.heldMicros)} ${uiText("held", v.locale)}` : totalKnown ? uiText("spent and held", v.locale) : uiText("spent; held amount unknown", v.locale)}${s.envelope ? html`, ${uiText("of a", v.locale)} ${money(s.shareMicros)} ${uiText("share", v.locale)}` : `; ${uiText("no envelope, so no share", v.locale)}`}</span></div>${pct === null ? null : html`${ui.meter({ value: s.usedMicros, max: s.shareMicros, label: uiText("Spent and held against the project's allocation share", v.locale) })}<p class="proj-meter-label">${money(s.usedMicros)} / ${money(s.shareMicros)}</p>`}${!splitKnown && totalKnown ? note(uiText("The split between spent and held is unknown.", v.locale)) : null}${s.heldIncomplete && !totalKnown ? note(html`${uiText("Held money is incomplete;", v.locale)} ${money(s.heldKnownMicros)} ${uiText("is known from the hosts that reported it.", v.locale)}`) : null}${s.problem ? note(s.problem) : null}`);
+  const splitKnown = Number.isFinite(s.settledTokens) && Number.isFinite(s.heldTokens);
+  const totalKnown = Number.isFinite(s.usedTokens);
+  const headline = splitKnown ? s.settledTokens : totalKnown ? s.usedTokens : s.settledTokens;
+  const pct = totalKnown && s.shareTokens > 0 ? (s.usedTokens / s.shareTokens) * 100 : null;
+  return card(`${uiText("Spend this", v.locale)} ${uiText(s.window, v.locale)}`, html`<div class="proj-kv"><b>${s.floor ? uiText("at least", v.locale) + " " : ""}${money(headline)}</b><span>${splitKnown ? html`+ ${money(s.heldTokens)} ${uiText("held", v.locale)}` : totalKnown ? uiText("spent and held", v.locale) : uiText("spent; held amount unknown", v.locale)}${s.envelope ? html`, ${uiText("of a", v.locale)} ${money(s.shareTokens)} ${uiText("share", v.locale)}` : `; ${uiText("no envelope, so no share", v.locale)}`}</span></div>${pct === null ? null : html`${ui.meter({ value: s.usedTokens, max: s.shareTokens, label: uiText("Spent and held against the project's allocation share", v.locale) })}<p class="proj-meter-label">${money(s.usedTokens)} / ${money(s.shareTokens)}</p>`}${!splitKnown && totalKnown ? note(uiText("The split between spent and held is unknown.", v.locale)) : null}${s.heldIncomplete && !totalKnown ? note(html`${uiText("Held money is incomplete;", v.locale)} ${money(s.heldKnownTokens)} ${uiText("is known from the hosts that reported it.", v.locale)}`) : null}${s.problem ? note(s.problem) : null}`);
 }
 
 export function projectRuns(v) {
@@ -120,7 +120,7 @@ export function projectRecent(v) {
     { html: r.target ?? "unknown", wide: true, tgt: true },
     runBadge(r),
     { html: timeHtml(r.at), when: true },
-    { html: html`${r.costFloor && r.micros !== null ? "at least " : null}${money(r.micros)}`, num: true },
+    { html: html`${r.costFloor && r.tokens !== null ? "at least " : null}${money(r.tokens)}`, num: true },
   ]);
   return card(tr(v, "Recent runs"), html`${ui.tbl({ label: tr(v, "Recent runs of this project"), stack: true, heads: [{ label: tr(v, "Run"), l: "" }, { label: tr(v, "Target"), l: "" }, { label: tr(v, "Outcome"), l: "" }, tr(v, "Ended"), { label: tr(v, "Cost"), num: true }], rows, empty: tr(v, "No retained run recorded this project.") })}<p class="tbl-foot"><a class="link" href="${linkRuns(p.id)}">${tr(v, "All")} ${p.totalRuns} ${tr(v, "in Runs, filtered to")} ${p.id}</a></p>${note(tr(v, "The last five runs recorded with this project, within the retained view (30 days or this month, whichever reaches further)."))}`);
 }
@@ -128,7 +128,7 @@ export function projectRecent(v) {
 export function projectAllocation(v) {
   if (!ready(v)) return null;
   const a = data(v).allocation;
-  return card(tr(v, "Allocation"), html`${a.unset ? note(tr(v, "No envelope is configured, so this project has no allocation share.")) : html`${facts([[tr(v, "Weight"), `${unknown(a.weight)} ${tr(v, "of")} ${unknown(a.totalWeight)}`], [tr(v, "Floor"), html`${money(a.floorMicros)} ${tr(v, a.window)}`], [tr(v, "Share"), html`${money(a.shareMicros)} ${tr(v, "of the")} ${money(a.totalMicros)} ${tr(v, a.window)} ${tr(v, "envelope")}`], [tr(v, "Split"), a.split ? html`<span class="code">${a.split.id ?? tr(v, "neutral")}</span> ${tr(v, "by")} ${a.split.writer ?? tr(v, "unknown")}, ${tr(v, "applied")} ${timeHtml(at(a.split.appliedAt))}, ${tr(v, "until")} ${a.split.validUntil ? timeHtml(at(a.split.validUntil)) : tr(v, "no expiry")}` : tr(v, "No split has been published.")], [tr(v, "Refused by the split"), `${a.refused} ${tr(v, "in this")} ${tr(v, a.window)}, ${tr(v, "among retained runs")}`]])}${a.problem ? note(a.problem) : null}`}<p><a class="link" href="/insights/budget-split">${tr(v, "Open the budget split")}</a></p>`);
+  return card(tr(v, "Allocation"), html`${a.unset ? note(tr(v, "No envelope is configured, so this project has no allocation share.")) : html`${facts([[tr(v, "Weight"), `${unknown(a.weight)} ${tr(v, "of")} ${unknown(a.totalWeight)}`], [tr(v, "Floor"), html`${money(a.floorTokens)} ${tr(v, a.window)}`], [tr(v, "Share"), html`${money(a.shareTokens)} ${tr(v, "of the")} ${money(a.totalTokens)} ${tr(v, a.window)} ${tr(v, "envelope")}`], [tr(v, "Split"), a.split ? html`<span class="code">${a.split.id ?? tr(v, "neutral")}</span> ${tr(v, "by")} ${a.split.writer ?? tr(v, "unknown")}, ${tr(v, "applied")} ${timeHtml(at(a.split.appliedAt))}, ${tr(v, "until")} ${a.split.validUntil ? timeHtml(at(a.split.validUntil)) : tr(v, "no expiry")}` : tr(v, "No split has been published.")], [tr(v, "Refused by the split"), `${a.refused} ${tr(v, "in this")} ${tr(v, a.window)}, ${tr(v, "among retained runs")}`]])}${a.problem ? note(a.problem) : null}`}<p><a class="link" href="/insights/budget-split">${tr(v, "Open the budget split")}</a></p>`);
 }
 
 export function projectLimits(v) {
@@ -138,7 +138,7 @@ export function projectLimits(v) {
     memory: (value) => `${sizeText(parseMemory(value))} memory`,
     cpus: (value) => `${value} CPUs`,
     day: (value) => `${value} jobs a day`, week: (value) => `${value} jobs a week`, month: (value) => `${value} jobs a month`, concurrent: (value) => `${value} at once`,
-    dayUsd: (value) => html`${money(parseUsdMicros(value))} a day`, weekUsd: (value) => html`${money(parseUsdMicros(value))} a week`, monthUsd: (value) => html`${money(parseUsdMicros(value))} a month`,
+    dayTokens: (value) => html`${money(parseTokenCount(value))} a day`, weekTokens: (value) => html`${money(parseTokenCount(value))} a week`, monthTokens: (value) => html`${money(parseTokenCount(value))} a month`,
     hostShare: (value) => `${value}% of each host's budget`, minJobs: (value) => `space for at least ${value} jobs on an admitting host`,
   };
   const rows = p.limits.map((l) => {

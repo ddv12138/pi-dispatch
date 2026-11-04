@@ -11,9 +11,8 @@ import {
   box,
   meter,
   sparkline,
-  fmtUsd,
-  usd2,
-  fmtCost,
+  fmtTokens,
+  fmtAmount,
   makeLineInput,
   LINE_INPUT_CURSOR,
   trimClusters,
@@ -196,67 +195,40 @@ test("sparkline swaps to the ASCII ramp under setGlyphs(true) with identical geo
   }
 });
 
-test("fmtUsd compacts any magnitude into at most 7 characters", () => {
+test("fmtTokens compacts any magnitude into at most 6 characters", () => {
   const table = [
-    [0, "$0"],
-    [0.0001, "<1¢"],
-    [0.0042, "$0.0042"],
-    [0.42, "$0.42"],
-    [4.12, "$4.12"],
-    [41.2, "$41.20"],
-    [412, "$412"],
-    [4120, "$4.1k"],
-    [412000, "$412k"],
-    [4200000, "$4.2M"],
+    [0, "0"],
+    [742, "742"],
+    [9400, "9.4k"],
+    [9_990, "9.9k"],
+    [123_000, "123k"],
+    [12_340_000, "12.34M"],
+    [4_120_000_000, "4.12B"],
     [NaN, "-"],
     [Infinity, "-"],
     [-3, "-"],
   ];
   for (const [n, expected] of table) {
-    assert.equal(fmtUsd(n), expected, `fmtUsd(${n})`);
-    assert.ok(fmtUsd(n).length <= 7, `fmtUsd(${n}) stays within 7 chars`);
+    assert.equal(fmtTokens(n), expected, `fmtTokens(${n})`);
+    assert.ok(fmtTokens(n).length <= 6, `fmtTokens(${n}) stays within 6 chars`);
   }
 });
 
-test("usd2: one fixed two-decimal form from micro-dollars, half up by default and DOWN for a spend against a cap (#710)", () => {
-  // [micro-dollars, default, spent]
-  const table = [
-    [0, "$0.00", "$0.00"],
-    [4_999, "$0.00", "$0.00"],
-    [5_000, "$0.01", "$0.00"], // $0.005
-    [99_999_000, "$100.00", "$99.99"], // $99.999 against a $100 cap is not full
-    [100_000_000, "$100.00", "$100.00"],
-    [999_595_000, "$999.60", "$999.59"],
-    [999_600_000, "$999.60", "$999.60"],
-    [1_000_000_000, "$1,000.00", "$1,000.00"],
-    [1_234_565_000, "$1,234.57", "$1,234.56"],
-    [1_000_000_000_000, "$1,000,000.00", "$1,000,000.00"], // $1e6
-    [Number.MAX_SAFE_INTEGER, "$9,007,199,254.74", "$9,007,199,254.74"],
-  ];
-  for (const [m, dflt, spent] of table) {
-    assert.equal(usd2(m), dflt, `usd2(${m})`);
-    assert.equal(usd2(m, { spent: true }), spent, `usd2(${m}, spent)`);
-  }
-  for (const bad of [-1, -1_000_000, 1.5, NaN, Infinity, null, undefined, "3"]) assert.equal(usd2(bad), "-", `usd2(${String(bad)})`);
+
+test("fmtAmount renders each class with a distinct, non-overlapping shape", () => {
+  assert.equal(fmtAmount({ tokens: 12_340_000, class: "metered" }), "12.34M");
+  assert.equal(fmtAmount({ tokens: 12_340_000, class: "metered", floor: true }), "≥12.34M", "a floor is marked, not silently rounded");
+  assert.equal(fmtAmount({ tokens: 4120, class: "estimated" }), "~4.1k est.");
+  assert.equal(fmtAmount({ tokens: 4120, class: "estimated", floor: true }), "~≥4.1k est.", "the floor rule applies inside an estimate");
+  assert.equal(fmtAmount({ class: "unknown" }), "—");
 });
 
-test("fmtCost renders each cost class with a distinct, non-overlapping shape", () => {
-  assert.equal(fmtCost({ usd: 4.12, class: "metered" }), "$4.12");
-  assert.equal(fmtCost({ usd: 4.12, class: "metered", floor: true }), "≥$4.12", "a floor is marked, not silently rounded");
-  assert.equal(fmtCost({ class: "plan", planId: "max-5x" }), "plan:max-5x", "plan coverage is never a dollar amount");
-  assert.equal(fmtCost({ usd: 0, class: "zero-rated" }), "$0 (unrated)");
-  assert.equal(fmtCost({ usd: 4.12, class: "estimated" }), "~$4.12 est.");
-  assert.equal(fmtCost({ usd: 4.12, class: "estimated", floor: true }), "~≥$4.12 est.", "the floor rule applies inside an estimate");
-  assert.equal(fmtCost({ usd: 0.42, class: "seeded" }), "~~$0.42 seeded");
-  assert.equal(fmtCost({ class: "unknown" }), "—");
-});
-
-test("fmtCost refuses to guess on nullish or malformed input", () => {
-  assert.equal(fmtCost(null), "—");
-  assert.equal(fmtCost(undefined), "—");
-  assert.equal(fmtCost(42), "—");
-  assert.equal(fmtCost({}), "—");
-  assert.equal(fmtCost({ usd: 4.12, class: "billed" }), "—", "an unrecognized class is never rendered as money");
+test("fmtAmount refuses to guess on nullish or malformed input", () => {
+  assert.equal(fmtAmount(null), "—");
+  assert.equal(fmtAmount(undefined), "—");
+  assert.equal(fmtAmount(42), "—");
+  assert.equal(fmtAmount({}), "—");
+  assert.equal(fmtAmount({ tokens: 4120, class: "billed" }), "—", "an unrecognized class is never rendered as a count");
 });
 
 test("makeLineInput edits round-trip: insert, cursor moves, backspace, del, setValue", () => {

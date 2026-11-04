@@ -61,7 +61,7 @@ export function subscriptionAuthView(value, { now = Date.now() } = {}) {
       id: connectionId, provider, adapter, ownerHost: id(row.ownerHost), active: bool(row.active), state,
       compatibility: metadata && metadata.provider === provider ? compatibility : "unavailable",
       expiresAt, expired, lastRefreshAt: instant(row.lastRefreshAt),
-      extraUsageCreditMicros: Number.isSafeInteger(row.extraUsageCreditMicros) && row.extraUsageCreditMicros >= 0 ? row.extraUsageCreditMicros : null,
+      extraUsageCreditTokens: Number.isSafeInteger(row.extraUsageCreditTokens) && row.extraUsageCreditTokens >= 0 ? row.extraUsageCreditTokens : null,
       extraUsage: ["enabled", "disabled"].includes(row.extraUsage) ? row.extraUsage : "unknown",
       quotaWindows, quota: quotaOf(row.quota, now),
     }];

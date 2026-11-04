@@ -140,10 +140,11 @@ import { valkeyDownHint } from "@edgehero/pi-dispatch/valkey-auth";
 // approves a confirm dialog, and writeTriggers rejects it: a wasted human approval. `blessedBackends`
 // below is the precedent, and its header is a post-mortem of the same mistake.
 import { FORGE_KINDS, ON_TYPES, PR_ACTIONS, PR_CLOSE_ACTIONS, REVIEW_STATES } from "@edgehero/pi-dispatch/triggers";
-import { formatMicros, parseUsdMicros } from "@edgehero/pi-dispatch/money";
+import { fmtTokens } from "./panel.mjs";
+import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { formatCpus, formatMemory } from "@edgehero/pi-dispatch/job-size";
 import { SUGGEST_WINDOW_DAYS, coresText, cpusText, notEnoughRunsText } from "@edgehero/pi-dispatch/size-suggest";
-import { runDollars } from "./dollar-windows.mjs";
+import { runTokenWindows } from "./token-windows.mjs";
 import { tokensFilePath } from "@edgehero/pi-dispatch/console-tokens";
 import { defaultWorkerName } from "@edgehero/pi-dispatch/config";
 import { builtinModel } from "@edgehero/pi-dispatch/model-catalog";
@@ -629,7 +630,7 @@ function registerTools(pi: ExtensionAPI): void {
       "project id each run record carries: runs outside every project, and runs recorded before projects existed, are " +
       "\"(no project)\", and a record is never re-attributed from the projects file as it is now. " +
       "`dollars` adds the dollar caps: `windows` has one row per active dollar window (the deployment's, then each " +
-      "scoped-limits dollar row), with `counterMicros` (spent and held, the Valkey counter the next job is admitted " +
+      "scoped-limits dollar row), with `counterTokens` (spent and held, the Valkey counter the next job is admitted " +
       "against, null when unreadable) beside the records' side (settled micro-dollars, how many runs settled metered, " +
       "floor, refunded or unreserved, and the boundExceeded count; null for a folder or model row, which a run record " +
       "cannot name); `runs` lists the per-run `dollars` of this window's records, newest first, and `newerSkipped`, when " +
@@ -655,9 +656,9 @@ function registerTools(pi: ExtensionAPI): void {
       // this window's records, filtered like the fold. Integers and fixed tokens, so nothing a job chose rides along.
       const windows = await readDollarWindows({ paths, env: deploymentEnv() });
       // Issue #761: `res.records` are the records the fold read, so a newer pi-dispatch's record never reaches
-      // `runDollars` here and its own count stays empty; the scan's count rides beside the list instead, so a list that
+      // `runTokenWindows` here and its own count stays empty; the scan's count rides beside the list instead, so a list that
       // leaves such a run out says so.
-      const runs = runDollars(res.records);
+      const runs = runTokenWindows(res.records);
       const newerSkipped = res.fold?.newerSkipped;
       const dollars = { ...windows, ...runs, ...(Number.isSafeInteger(newerSkipped) && newerSkipped > 0 ? { newerSkipped } : {}) };
       const nowMs = Date.now();
@@ -669,7 +670,7 @@ function registerTools(pi: ExtensionAPI): void {
       }
       // The fold's dollars are TYPED `{ usd, class, floor, ... }` on purpose: the class rides beside every
       // number in this JSON, so a model consuming it cannot launder an estimate into a fact by dropping
-      // the label -- the same discipline fmtCost enforces on the text views.
+      // the label -- the same discipline fmtAmount enforces on the text views.
       return toolText(JSON.stringify({ window, fold: res.fold, dollars, held, ...(whatif ? { whatif } : {}) }));
     },
   });
@@ -959,8 +960,8 @@ function registerTools(pi: ExtensionAPI): void {
     description:
       "Read-only. Lists the scoped limits (per repo/folder budget caps and concurrency, scoped-limits.json) " +
       "with their array index and, when the queue is reachable, each scope's used day/week/month run counts. " +
-      "Each row carries `summary` (its caps in words) and, for a row with dollar windows (dayUsd/weekUsd/monthUsd, " +
-      "or a model:<provider>/<model> row), `dollars`: one entry per window with its cap and `counterMicros`, the " +
+      "Each row carries `summary` (its caps in words) and, for a row with dollar windows (dayTokens/weekTokens/monthTokens, " +
+      "or a model:<provider>/<model> row), `dollars`: one entry per window with its cap and `counterTokens`, the " +
       "micro-dollars spent and held in it so far (null when the queue is unreachable). " +
       "Use the index for dispatch_limit_edit / dispatch_limit_delete. The always-on one-job-per-folder mutex " +
       "for local jobs is separate: it has no entry here and no switch anywhere.",
@@ -1021,7 +1022,7 @@ function registerTools(pi: ExtensionAPI): void {
       "forge's repo, or a local folder path, ABSOLUTE, matched exactly like pause windows, no globs) exceed the `day`/`week`/`month` " +
       "job-count caps are REFUSED before any spend (reason scope-cap, never retried); jobs over `concurrent` " +
       "are DEFERRED, never dropped, and run when a slot frees. At least one of day/week/month/concurrent is " +
-      "required, each an integer >= 1. `dayUsd`/`weekUsd`/`monthUsd` are DOLLAR windows (a decimal string such as " +
+      "required, each an integer >= 1. `dayTokens`/`weekTokens`/`monthTokens` are DOLLAR windows (a decimal string such as " +
       "\"2.50\": above 0, at most 1000000, at most 6 decimals): what the scope's jobs may spend per UTC day, Monday " +
       "week and month; a job that does not fit is refused dollar-cap. A scope of model:<provider>/<model> caps one " +
       "model across every scope and takes the three dollar fields only. A scope of project:<id> (an id from " +
@@ -1032,7 +1033,7 @@ function registerTools(pi: ExtensionAPI): void {
       "envelope total is allocation-cap, not dollar-cap. " +
       "A bare row and a qualified row for the same " +
       "repo are refused together: keep one form. A dollar window needs a per-job cap " +
-      "(maxCostUsd). A project:<id> row may also set its jobs' SIZE: `memory` (a string such as \"512m\", \"1536m\" " +
+      "(maxTokens). A project:<id> row may also set its jobs' SIZE: `memory` (a string such as \"512m\", \"1536m\" " +
       "or \"4g\", at least 512m; no swap is given beyond it) and `cpus` (a number such as 0.5 or 2, at least 0.25, at " +
       "most two decimals; a CPU WEIGHT under contention, not a cap). Unset, a job takes PI_JOB_MEMORY and PI_JOB_CPUS " +
       "(4g and 2). `hostShare` (a whole percentage, 1 to 100, of a host's job budget: the most the project's running " +
@@ -1051,12 +1052,12 @@ function registerTools(pi: ExtensionAPI): void {
       week: Type.Optional(Type.Integer({ minimum: 1 })),
       month: Type.Optional(Type.Integer({ minimum: 1 })),
       concurrent: Type.Optional(Type.Integer({ minimum: 1 })),
-      // Issue #501, part 7. Strings, the form `parseUsdMicros` reads exactly as written. pi's own validation turns a
+      // Issue #501, part 7. Strings, the form `parseTokenCount` reads exactly as written. pi's own validation turns a
       // JSON number into a string before `execute` (`dollarFieldsOf`), so a number is read by its value; one that does
       // not print as a plain decimal of at most 6 places is refused.
-      dayUsd: Type.Optional(Type.String()),
-      weekUsd: Type.Optional(Type.String()),
-      monthUsd: Type.Optional(Type.String()),
+      dayTokens: Type.Optional(Type.String()),
+      weekTokens: Type.Optional(Type.String()),
+      monthTokens: Type.Optional(Type.String()),
       // Issue #596: a project row's job size (version 3), one table for both tools (`SIZE_FIELD_SCHEMAS`).
       ...SIZE_FIELD_SCHEMAS,
     }),
@@ -1077,10 +1078,10 @@ function registerTools(pi: ExtensionAPI): void {
     label: "pi-dispatch edit scoped limit",
     description:
       "Changes fields of an existing scoped limit (by array index from dispatch_limits) and applies it live. " +
-      "Provide only the fields to change (scope/day/week/month/concurrent/dayUsd/weekUsd/monthUsd, and on a project:<id> " +
+      "Provide only the fields to change (scope/day/week/month/concurrent/dayTokens/weekTokens/monthTokens, and on a project:<id> " +
       "row memory/cpus/hostShare/minJobs as dispatch_limit_add describes them); the rest keep " +
       "their current value. `scope` is a repo \"owner/name\" on every forge, a forge-qualified " +
-      "\"<forge>:owner/name\" such as \"github:acme/web\" for that forge only, or an ABSOLUTE local folder path. `dayUsd`/`weekUsd`/`monthUsd` are dollar windows, written as a decimal string (\"2.50\"). " +
+      "\"<forge>:owner/name\" such as \"github:acme/web\" for that forge only, or an ABSOLUTE local folder path. `dayTokens`/`weekTokens`/`monthTokens` are dollar windows, written as a decimal string (\"2.50\"). " +
       "No field can be removed here: to drop a cap from an entry, edit scoped-limits.json by hand. Changing `scope` " +
       "(such as a bare \"acme/web\" rewritten to \"github:acme/web\") starts a NEW count under a new key: the old " +
       "row's used runs and dollars do not carry over, and jobs already running keep their slot under the old scope " +
@@ -1095,9 +1096,9 @@ function registerTools(pi: ExtensionAPI): void {
       week: Type.Optional(Type.Integer({ minimum: 1 })),
       month: Type.Optional(Type.Integer({ minimum: 1 })),
       concurrent: Type.Optional(Type.Integer({ minimum: 1 })),
-      dayUsd: Type.Optional(Type.String()),
-      weekUsd: Type.Optional(Type.String()),
-      monthUsd: Type.Optional(Type.String()),
+      dayTokens: Type.Optional(Type.String()),
+      weekTokens: Type.Optional(Type.String()),
+      monthTokens: Type.Optional(Type.String()),
       ...SIZE_FIELD_SCHEMAS,
     }),
   });
@@ -1249,7 +1250,7 @@ function registerTools(pi: ExtensionAPI): void {
     label: "pi-dispatch set the allocation envelope",
     description:
       "Changes the allocation envelope (PI_ENVELOPE_FILE) and applies it live: any of `window` (day, week or month), " +
-      "`totalUsd` (a decimal string such as \"100\"), `floorsUsd` (project id to a decimal string; merged with the " +
+      "`totalTokens` (a decimal string such as \"100\"), `floorsTokens` (project id to a decimal string; merged with the " +
       "file's, \"0\" is a floor), `defaultWeights` (project id to an integer 0 to 1000; merged), and the delegation " +
       "rules `enabled`, `writers` (operator-session, portfolio-job), `maxStepPct` (1 to 100), `minIntervalHours` and " +
       "`maxPlanDays`. The result is judged by the worker's own parser before the confirm (floors may not exceed the " +
@@ -1259,8 +1260,8 @@ function registerTools(pi: ExtensionAPI): void {
     executionMode: "sequential",
     parameters: Type.Object({
       window: Type.Optional(Type.String()),
-      totalUsd: Type.Optional(Type.String()),
-      floorsUsd: Type.Optional(Type.Record(Type.String(), Type.String())),
+      totalTokens: Type.Optional(Type.String()),
+      floorsTokens: Type.Optional(Type.Record(Type.String(), Type.String())),
       defaultWeights: Type.Optional(Type.Record(Type.String(), Type.Integer({ minimum: 0, maximum: 1000 }))),
       enabled: Type.Optional(Type.Boolean()),
       writers: Type.Optional(Type.Array(Type.String())),
@@ -1301,14 +1302,14 @@ function registerTools(pi: ExtensionAPI): void {
 function allocationContext(): any {
   const env = deploymentEnv();
   const paths = resolvePaths(deploymentEnv());
-  const maxCostMicros = envelopeJobCap({ settingsFile: paths.settingsFile, env });
-  const read: any = readEnvelope({ envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxCostMicros });
-  return { env, paths, maxCostMicros, read };
+  const maxTokens = envelopeJobCap({ settingsFile: paths.settingsFile, env });
+  const read: any = readEnvelope({ envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens });
+  return { env, paths, maxTokens, read };
 }
 
 /** The envelope as a tool shows it: numbers and ids the parser checked, in micro-dollars, with its digest. */
 function envelopeShown(e: any, digest: string): any {
-  return { digest, window: e.window, totalMicros: e.totalMicros, floors: e.floors, defaultWeights: e.defaultWeights, delegation: e.delegation };
+  return { digest, window: e.window, totalTokens: e.totalTokens, floors: e.floors, defaultWeights: e.defaultWeights, delegation: e.delegation };
 }
 
 /**
@@ -1406,7 +1407,7 @@ async function prioritiesCommand(pi: ExtensionAPI, tokens: string[], notify: Not
 /** One line for a plan's outcome: the enum, the plan id, and each project's dollars after (never a reason text). */
 function prioritiesOutcome(res: any): string {
   const after = res?.after?.allocations ?? {};
-  const split = Object.keys(after).sort().map((id) => `${id} $${formatMicros(after[id])}`).join(", ");
+  const split = Object.keys(after).sort().map((id) => `${id} $${fmtTokens(after[id])}`).join(", ");
   if (res?.outcome === "applied") return `applied ${res.planId}${res.clamped ? " (clamped by the step)" : ""}: ${split}`;
   if (res?.outcome === "duplicate") return `no change: plan ${res.planId} is already applied`;
   const field = res?.field ? ` (${res.field}: ${res.rule})` : "";
@@ -1459,18 +1460,18 @@ export const SIZE_FIELD_SCHEMAS = {
 };
 
 /**
- * `dispatch_limits`' dollar rows for one scoped limit (issue #501, part 7): `{ dollars: [{ window, cap, capMicros,
- * counterMicros }] }` for each dollar window the row caps, from `readScopedBudget`'s `usdMicros` (read under
- * `dollarKeyPrefixFor`, the worker's own key), or `{}` for a row with none. `counterMicros` is spent and held;
+ * `dispatch_limits`' dollar rows for one scoped limit (issue #501, part 7): `{ dollars: [{ window, cap, capTokens,
+ * counterTokens }] }` for each token window the row caps, from `readScopedBudget`'s `tokensUsed` (read under
+ * `dollarKeyPrefixFor`, the worker's own key), or `{}` for a row with none. `counterTokens` is spent and held;
  * null when the counters could not be read, never an invented 0.
  */
 function dollarRowsOf(l: any, used: any): any {
-  const windows = [["dayUsd", "day"], ["weekUsd", "week"], ["monthUsd", "month"]].filter(([f]) => typeof l?.[f] === "string");
+  const windows = [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]].filter(([f]) => typeof l?.[f] === "string");
   if (windows.length === 0) return {};
   return {
     dollars: windows.map(([f, w]) => {
-      const counter = used?.usdMicros?.[w];
-      return { window: w, cap: l[f], capMicros: parseUsdMicros(l[f], f), counterMicros: Number.isSafeInteger(counter) ? counter : null };
+      const counter = used?.tokensUsed?.[w];
+      return { window: w, cap: l[f], capTokens: parseTokenCount(l[f], f), counterTokens: Number.isSafeInteger(counter) ? counter : null };
     }),
   };
 }
@@ -1858,7 +1859,7 @@ async function openDashboard(paths: any, ctx: any, notify: Notify, { initialTail
         // writes (pause, resume, both cancels) go through the console's audit chain as the panel (issue #642).
         // The kill switch's plan (issue #642) is the CLI's and the tools' (`killSwitchPlan`): both Valkeys on a pause when this
         // process's and the deployment's disagree, and a resume refused then, so the TUI cannot resume one and strand the other.
-        ...withAuditedWrites(createDashboardDeps(paths, { dollarEnvFn: deploymentEnv, killSwitchPlanFn: ({ paused }: any) => killSwitchPlan({ paused }) }), (opts: any, fn: () => any) => panelWrite(auditDir(), opts, fn)),
+        ...withAuditedWrites(createDashboardDeps(paths, { budgetEnvFn: deploymentEnv, killSwitchPlanFn: ({ paused }: any) => killSwitchPlan({ paused }) }), (opts: any, fn: () => any) => panelWrite(auditDir(), opts, fn)),
         // log read stays here; overlay-only, returns readLogTail's result verbatim. The live transcript (issue #643) comes
         // through `createDashboardDeps` above, off the fleet reader's held client; this is the fallback for a run with no
         // stream. `host` (the registry's host for the job) and `self` (this host's worker name, as the worker resolves it:
@@ -1938,7 +1939,7 @@ export function chatIo(paths: any, ctx: any, notify: Notify, seams: any = {}): a
   return {
     ui: ctx?.ui,
     env,
-    openReader: () => readerFn(paths, { dollarEnvFn: envFn, readOnly: true }),
+    openReader: () => readerFn(paths, { budgetEnvFn: envFn, readOnly: true }),
     openDashboard: ({ initialTail }: { initialTail: string }) => dashboardFn(paths, ctx, notify, { initialTail }),
     planAnswer: ({ jobId, text }: { jobId: string; text: string }) =>
       planFn({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId, text, from: "panel", triggersPath: paths.triggersPath ?? null, overlay: readSettingsView({ settingsFile: paths.settingsFile })?.overlay ?? {}, env }),
@@ -2246,9 +2247,9 @@ export async function editScopedLimitViaDialogs(paths: any, ui: any, notify: Not
     month: keep(month, cur.month),
     concurrent: keep(concurrent, cur.concurrent),
     // Carried unchanged (see dispatch_limit_edit): editing a count must never drop a dollar cap, nor a size (#596).
-    dayUsd: cur.dayUsd,
-    weekUsd: cur.weekUsd,
-    monthUsd: cur.monthUsd,
+    dayTokens: cur.dayTokens,
+    weekTokens: cur.weekTokens,
+    monthTokens: cur.monthTokens,
     ...sizeFieldsFrom((k) => cur[k]),
   });
   const note = scopeChangeNote(buildScopedLimit(cur), merged);

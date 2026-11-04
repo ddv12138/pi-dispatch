@@ -221,7 +221,7 @@ test("console pages: every screen, both roles, byte-identical to the fixtures an
   const liveViewer = first["run-live.viewer"].html;
   assert.match(liveViewer, /<dt>Turn<\/dt><dd><span><b>7<\/b> of 30<\/span><\/dd>/, "a viewer gets the counters");
   assert.match(liveViewer, /Phase 2 of 4: 3 of 10 done/, "and the phase's integers");
-  assert.match(liveViewer, /Phase names and the run's note are shown to operators only\./);
+  assert.match(liveViewer, /Phase names and the run(?:&#39;|')s note are shown to operators only\./);
   for (const text of ["migrate the schema", "three of ten tables migrated"]) {
     for (const [key, page] of Object.entries(first)) if (key !== "run-live.operator") assert.ok(!page.html.includes(text), `${key} carries no ${text}`);
   }

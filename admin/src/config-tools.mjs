@@ -32,7 +32,7 @@ export async function readConfigTool(kind, { paths, env = {}, deploymentDir, now
   reads = { ...testReads, ...reads };
   const declared = kind === "projects" ? (reads.projects ?? readProjects)({ projectsPath: paths.projectsFile }) : null;
   if (kind === "projects" && !Array.isArray(declared?.projects)) return { ...(declared?.unset ? { unset: true } : declared?.missing ? { missing: true } : { unavailable: true }) };
-  const fleet = (reads.fleet ?? createFleetReader)(paths, { readOnly: true, dollarEnvFn: () => env, nowFn: () => now });
+  const fleet = (reads.fleet ?? createFleetReader)(paths, { readOnly: true, budgetEnvFn: () => env, nowFn: () => now });
   try {
     let snapshot = null;
     try { snapshot = await fleet.snapshot(kind === "projects" ? { waiting: true } : {}); } catch { /* The file facts remain readable. */ }

@@ -27,9 +27,10 @@ import { parseBackendList } from "@edgehero/pi-dispatch/backends";
 import { delimitedList } from "@edgehero/pi-dispatch/config";
 import { withinRoots } from "@edgehero/pi-dispatch/secret-profiles";
 import { ISSUE_ACTIONS, isModelRolesField, isMcpNearMiss, recoverVenueProblem, runModelFieldNearMiss, validateModelRef, validateProgressFlags, validateRecoverFlag, validateSteerFlag } from "@edgehero/pi-dispatch/triggers";
-import { DOLLAR_SETTING_KEYS, formatMicros, parseUsdMicros } from "@edgehero/pi-dispatch/money";
+import { TOKEN_SETTING_KEYS, optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
+import { fmtTokens } from "./panel.mjs";
 import { modelIdProblem, providerIdProblem } from "@edgehero/pi-dispatch/model-ref";
-import { SIZE_LIMIT_FIELDS, USD_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { SIZE_LIMIT_FIELDS, TOKEN_LIMIT_FIELDS as USD_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
 import { formatCpus, formatMemory, parseCpus, parseMemory } from "@edgehero/pi-dispatch/job-size";
 import {
   BUNDLE_FORMATS,
@@ -358,7 +359,7 @@ function unknownTriggerField(params, kind) {
 }
 
 /**
- * The trigger fields NO tool may set (issue #501, part 7): `run.maxCostUsd` (a trigger's per-job dollar cap),
+ * The trigger fields NO tool may set (issue #501, part 7): `run.maxTokens` (a trigger's per-job dollar cap),
  * `run.models` (the models its jobs may call), `run.fallbackModels` (their reviewed retry order) and
  * `run.mcp` (the MCP servers they connect, below). Each one decides
  * what a trigger's jobs can spend or reach, and removing or widening it is a widening, so it is written by hand in the
@@ -371,7 +372,7 @@ function unknownTriggerField(params, kind) {
  * touched: the add tool builds entries without these keys and the edit tool spreads the entry's own `run` under the
  * fields it sets.
  */
-const TOOL_PROOF_FIELDS = new Set(["run.maxCostUsd", "run.models", "run.fallbackModels", "run.mcp"]);
+const TOOL_PROOF_FIELDS = new Set(["run.maxTokens", "run.models", "run.fallbackModels", "run.mcp"]);
 /**
  * `run.mcp` (REQ-MCP-OPERATOR-SERVERS) is tool-proof for the same reason: which outside systems a trigger's jobs act
  * on, with which credentials, is the operator's to write. Its near misses are the loader's own (`isMcpNearMiss`: the
@@ -636,24 +637,24 @@ export function coerceSettingValue(key, raw) {
   if (key === "model" || key === "provider") return raw;
   // Issue #501: a dollar key keeps the operator's text, because the overlay stores it AS WRITTEN and
   // `Number` would quietly widen the money grammar (`1e3` and `0x10` become plain dollars, `2.50` loses its
-  // zero). `writeOverlay`'s `parseUsdMicros` is then the one judge of the exact string that was typed. The
+  // zero). `writeOverlay`'s `parseTokenCount` is then the one judge of the exact string that was typed. The
   // worker's own list, never a guess from the name.
-  if (DOLLAR_SETTING_KEYS.includes(key)) return raw;
+  if (TOKEN_SETTING_KEYS.includes(key)) return raw;
   return Number(raw);
 }
 
 /**
  * A settings write of `key` that would leave the allocation envelope invalid (the per-job cap removed, or set to
- * something the worker cannot read), or null. Only `maxCostUsd` can: it is the one setting the envelope is judged by.
+ * something the worker cannot read), or null. Only `maxTokens` can: it is the one setting the envelope is judged by.
  */
 export function settingsEnvelopeRefusal(key, beforeOverlay, afterOverlay, paths, env) {
-  if (key !== "maxCostUsd" || !paths.envelopeFile) return null;
+  if (key !== "maxTokens" || !paths.envelopeFile) return null;
   return envelopeRefusal({
     envelopeFile: paths.envelopeFile,
     projectsPath: paths.projectsFile,
     scopedLimitsPath: paths.scopedLimitsPath,
-    maxCostMicros: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: beforeOverlay }),
-    next: { maxCostMicros: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: afterOverlay }) },
+    maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: beforeOverlay }),
+    next: { maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: afterOverlay }) },
   });
 }
 
@@ -688,11 +689,11 @@ function planSettingTool({ key, value, paths, env, shown, fs }) {
   if (view?.invalid && !blankSettingsFile(paths.settingsFile, fs)) return { refusal: `rejected: ${overlayInvalidRefusal(view.invalid, { newer: view.newer === true })}` };
   const unset = value === undefined || value === null || String(value).trim() === "";
   const newVal = unset ? undefined : coerceSettingValue(key, String(value).trim());
-  const isDollarKey = DOLLAR_SETTING_KEYS.includes(key);
+  const isDollarKey = TOKEN_SETTING_KEYS.includes(key);
   // Issue #501, part 7: a dollar value is judged by the worker's own parser BEFORE the confirm, so the operator is
   // never asked to approve a value the write would then refuse (the edit tools' rule). The message names the key.
   if (!unset && isDollarKey) {
-    const dollar = refusalOf(() => parseUsdMicros(newVal, key));
+    const dollar = refusalOf(() => parseTokenCount(newVal, key));
     if (dollar !== null) return { refusal: dollar };
   }
   // Issue #673, review round 1: a model or provider id by the worker's own rule, before the confirm, for the same reason.
@@ -748,12 +749,12 @@ function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
       return o;
     };
   }
-  if (key === "maxCostUsd") {
+  if (key === "maxTokens") {
     const before = readSettingsView({ settingsFile: paths.settingsFile, fs })?.overlay ?? {};
     const broken = settingsEnvelopeRefusal(key, before, mutate({ ...before }), paths, env);
     if (broken) return { refusal: `${verb}: ${broken}` };
   }
-  const writeArgs = DOLLAR_SETTING_KEYS.includes(key) ? { dollarEnv: env, deploymentDir: shown?.deploymentDir ?? null } : {};
+  const writeArgs = TOKEN_SETTING_KEYS.includes(key) ? { budgetEnv: env, deploymentDir: shown?.deploymentDir ?? null } : {};
   return {
     plan: {
       key,
@@ -906,7 +907,7 @@ export function buildScopedLimit(f) {
     if (v !== undefined) l[k] = v;
   }
   // Version 2's dollar windows ride through as the parser's own decimal strings; the shared parser validates them.
-  for (const k of ["dayUsd", "weekUsd", "monthUsd"]) {
+  for (const k of ["dayTokens", "weekTokens", "monthTokens"]) {
     if (typeof f[k] === "string" && f[k].trim() !== "") l[k] = f[k].trim();
   }
   // Version 3's size fields (issue #596) ride through as given; the shared parser validates them, and refuses them on
@@ -962,7 +963,7 @@ export function sizeFieldsOf(f) {
 
 /**
  * The dollar fields a scoped-limit tool was SENT (issue #501, part 7), each judged by the worker's own
- * `parseUsdMicros` and returned in its canonical form (`formatMicros`: "2.5" becomes "2.50"), the form the parser
+ * `parseTokenCount` and returned in its canonical form (`fmtTokens`: "2.5" becomes "2.50"), the form the parser
  * stores, so a confirm shows exactly what the file will hold. A blank or absent field is not sent. A malformed one
  * throws with the parser's message (the key named, never the value) before any confirm is shown.
  */
@@ -976,7 +977,7 @@ export function dollarFieldsOf(f) {
     // #550's review measured `Type.String`, `Type.Unsafe`, `allOf`, `anyOf` and `not`; only a schema with no `type`
     // refused one, and a tool schema without a type is one some providers reject). So a number is read by its VALUE,
     // the overlay's documented rule (`INT-CONFIG-OVERLAY-CONTRACT`): `2.5` is $2.50 and `1e-7` is refused.
-    out[k] = formatMicros(parseUsdMicros(typeof raw === "string" ? raw.trim() : raw, k));
+    out[k] = fmtTokens(parseTokenCount(typeof raw === "string" ? raw.trim() : raw, k));
   }
   return out;
 }
@@ -989,9 +990,9 @@ export function limitSummary(l) {
   if (Number.isInteger(l?.month)) bits.push(`month ${l.month}`);
   if (Number.isInteger(l?.concurrent)) bits.push(`≤${l.concurrent} at once`);
   // Version 2's dollar windows (issues #501, #502), so a model or dollar-only row never summarizes as nothing.
-  if (typeof l?.dayUsd === "string") bits.push(`day $${l.dayUsd}`);
-  if (typeof l?.weekUsd === "string") bits.push(`week $${l.weekUsd}`);
-  if (typeof l?.monthUsd === "string") bits.push(`month $${l.monthUsd}`);
+  if (typeof l?.dayTokens === "string") bits.push(`day $${l.dayTokens}`);
+  if (typeof l?.weekTokens === "string") bits.push(`week $${l.weekTokens}`);
+  if (typeof l?.monthTokens === "string") bits.push(`month $${l.monthTokens}`);
   // Version 3's size (issue #596), with hostShare and minJobs, which each worker's host budget enforces since phase 2.
   bits.push(...sizeBits(l));
   return bits.join(" · ");
@@ -1018,7 +1019,7 @@ export function scopeChangeNote(before, after) {
 
 /** The envelope cross-check context the scoped-limits and projects writers take (`envelopeRefusal`). */
 export function envelopeGuard(paths, env, fs = nodeFs) {
-  return paths.envelopeFile ? { file: paths.envelopeFile, maxCostMicros: envelopeJobCap({ settingsFile: paths.settingsFile, env, fs }) } : null;
+  return paths.envelopeFile ? { file: paths.envelopeFile, maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, fs }) } : null;
 }
 
 /** A scoped-limits change judged in full without writing (`dryRun`): the refusal, or null. */
@@ -1099,9 +1100,9 @@ export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface
     concurrent: params.concurrent ?? cur.concurrent,
     // The dollar windows (version 2): a sent one replaces, an omitted one is CARRIED, never dropped, so an edit of
     // a count field cannot silently remove a dollar cap.
-    dayUsd: usd.dayUsd ?? cur.dayUsd,
-    weekUsd: usd.weekUsd ?? cur.weekUsd,
-    monthUsd: usd.monthUsd ?? cur.monthUsd,
+    dayTokens: usd.dayTokens ?? cur.dayTokens,
+    weekTokens: usd.weekTokens ?? cur.weekTokens,
+    monthTokens: usd.monthTokens ?? cur.monthTokens,
     // The size fields (version 3) the same way: a sent one replaces, an omitted one is carried.
     ...sizeFieldsFrom((k) => size[k] ?? cur[k]),
   });
@@ -1277,8 +1278,8 @@ export function planProjectDelete({ id, paths, env, fs = nodeFs }) {
 export function envelopeChangeOf(p) {
   const change = {};
   if (p.window !== undefined) change.window = p.window;
-  if (p.totalUsd !== undefined) change.totalUsd = p.totalUsd;
-  if (p.floorsUsd !== undefined) change.floorsUsd = p.floorsUsd;
+  if (p.totalTokens !== undefined) change.totalTokens = p.totalTokens;
+  if (p.floorsTokens !== undefined) change.floorsTokens = p.floorsTokens;
   if (p.defaultWeights !== undefined) change.defaultWeights = p.defaultWeights;
   const delegation = {};
   for (const f of ["enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"]) if (p[f] !== undefined) delegation[f] = p[f];
@@ -1295,9 +1296,9 @@ export function envelopeChangeOf(p) {
  */
 export function planEnvelope({ params, paths, env, fs = nodeFs }) {
   const change = envelopeChangeOf(params);
-  if (Object.keys(change).length === 0) return { refusal: "nothing to change: name at least one of window, totalUsd, floorsUsd, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays" };
-  const maxCostMicros = envelopeJobCap({ settingsFile: paths.settingsFile, env, fs });
-  const files = { envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxCostMicros };
+  if (Object.keys(change).length === 0) return { refusal: "nothing to change: name at least one of window, totalTokens, floorsTokens, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays" };
+  const maxTokens = envelopeJobCap({ settingsFile: paths.settingsFile, env, fs });
+  const files = { envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens };
   const planned = planEnvelopeWrite({ ...files, change, fs });
   if (planned.invalid) return { refusal: `rejected: ${escapeInterpreted(planned.invalid)}` };
   if (planned.digest === planned.beforeDigest) return { unchanged: "no change: the envelope already says this" };

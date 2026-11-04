@@ -12,11 +12,11 @@
  */
 
 import { windowState } from "@edgehero/pi-dispatch/budget";
-import { formatMicros } from "@edgehero/pi-dispatch/money";
+import { fmtTokens } from "./panel.mjs";
 // Pure-to-pure, the same standing as the windowState import above: panel.mjs is the admin's other no-I/O
-// text module (asserted so by panel.test.mjs), and fmtCost is THE single renderer of typed cost values,
+// text module (asserted so by panel.test.mjs), and fmtAmount is THE single renderer of typed cost values,
 // so the what-if below routes every dollar through it rather than grow a second money formatter here.
-import { clip, columnsOf, fmtCost, pad, scrubControls, sliceColumns } from "./panel.mjs";
+import { clip, columnsOf, fmtAmount, pad, scrubControls, sliceColumns } from "./panel.mjs";
 // The overlay keys, IMPORTED rather than retyped. This was a verbatim copy of the worker's array, in the
 // order the worker declares them, and the worker's side is pinned while this side was not -- so a key
 // added there would have failed a test, been added, and left the settings VIEW silently ten keys wide
@@ -257,14 +257,14 @@ export function renderScopedLimits({ limits, scopedBudget, projects = null, doll
     // Version 2's dollar windows (issues #501, #502): the cap, and what is held or settled when the counter was read.
     // Given `dollars` (the panel's DOLLAR WINDOWS rows, issue #507), the counter and its `(full)` verdict are that
     // section's row for this file index and window, so the two cannot disagree; a row missing there (the read failed)
-    // keeps its cap with `-`. Without it (`/dispatch budget`), the counter is the scoped read's own `usdMicros`.
+    // keeps its cap with `-`. Without it (`/dispatch budget`), the counter is the scoped read's own `tokensUsed`.
     const dollarRows = Array.isArray(dollars?.rows) ? dollars.rows : null;
     for (const key of ["day", "week", "month"]) {
       const cap = l[`${key}Usd`];
       if (typeof cap !== "string") continue;
       const d = dollarRows === null ? null : (dollarRows.find((r) => r?.index === i && r?.window === key) ?? null);
-      const micros = dollarRows === null ? used?.usdMicros?.[key] : d?.counterMicros;
-      const u = Number.isSafeInteger(micros) && micros >= 0 ? formatMicros(micros) : "-";
+      const counter = dollarRows === null ? used?.tokensUsed?.[key] : d?.counterTokens;
+      const u = Number.isSafeInteger(counter) && counter >= 0 ? counter.toLocaleString("en-US") : "-";
       bits.push(`${key} $${u}/$${cap}${d?.full === true ? " (full)" : ""}`);
     }
     // Version 3's job size (issue #596): what each of the project's jobs gets. hostShare and minJobs are shown as not
@@ -424,7 +424,7 @@ function triggerLine(t) {
   // The two spend narrowings no tool can set (issues #501 and #502): which models the trigger's jobs may call, and
   // its per-job dollar cap. Listed in full: the models a job can reach are not a fact to summarize as a count.
   // Absent when unset, appended last, so every existing line is byte-identical.
-  const pol = `${Array.isArray(t?.models) && t.models.length > 0 ? `  [models ${t.models.join(", ")}]` : ""}${t?.maxCostUsd ? `  [max $${t.maxCostUsd}]` : ""}${Array.isArray(t?.fallbackModels) && t.fallbackModels.length > 0 ? `  [fallbacks ${t.fallbackModels.join(", ")}]` : ""}`;
+  const pol = `${Array.isArray(t?.models) && t.models.length > 0 ? `  [models ${t.models.join(", ")}]` : ""}${t?.maxTokens ? `  [max $${t.maxTokens}]` : ""}${Array.isArray(t?.fallbackModels) && t.fallbackModels.length > 0 ? `  [fallbacks ${t.fallbackModels.join(", ")}]` : ""}`;
   // A portfolio trigger (issue #505) says so (issue #507): its jobs write the budget split every other project spends
   // under, and a trigger that sets the split must not read like one that only spends inside it. Cron only (the loader
   // refuses it elsewhere), the panel row's text (#482 parity), appended last so every other line is byte-identical.
@@ -496,8 +496,8 @@ function schedulerLine(s) {
 
 /**
  * Render one `whatIfFlow` estimate (costs.mjs) as a compact block. The measured path shows the estimate
- * through `fmtCost` with its coverage/excluded honesty and the rates version; the zero-knowledge path
- * shows the seeded band verbatim -- both bounds through `fmtCost`'s seeded shape, plus the fold's own
+ * through `fmtAmount` with its coverage/excluded honesty and the rates version; the zero-knowledge path
+ * shows the seeded band verbatim -- both bounds through `fmtAmount`'s seeded shape, plus the fold's own
  * note -- so an unmeasured flow can never read like a measurement.
  */
 export function renderWhatIf(result, { flow, target } = {}) {
@@ -509,14 +509,14 @@ export function renderWhatIf(result, { flow, target } = {}) {
   if (result.class === "seeded") {
     return [
       head,
-      `  no ledgered run to measure from — seeded band ${fmtCost({ usd: result.low, class: "seeded" })} to ${fmtCost({ usd: result.high, class: "seeded" })} · ${result.note}`,
+      `  no ledgered run to measure from — seeded band ${fmtAmount({ usd: result.low, class: "seeded" })} to ${fmtAmount({ usd: result.high, class: "seeded" })} · ${result.note}`,
       ...tail,
     ].join("\n");
   }
   const pct = Math.round((result.coverage ?? 0) * 100);
   return [
     head,
-    `  estimate ${fmtCost({ usd: result.usd, class: "estimated" })} total · ${fmtCost({ usd: result.perRun, class: "estimated" })} per run`,
+    `  estimate ${fmtAmount({ usd: result.usd, class: "estimated" })} total · ${fmtAmount({ usd: result.perRun, class: "estimated" })} per run`,
     `  coverage ${pct}% of observed runs ledgered · excluded ${result.excluded} (no ledger)`,
     `  rates pi-ai ${result.ratesVersion ?? "unknown"}`,
     ...tail,
@@ -544,15 +544,15 @@ export function renderSettingsView(settings) {
  * envelope. Every amount is integer micro-dollars, shown in dollars.
  */
 export function renderAllocations({ envelope = null, digest = null, problem = null, alloc = null, historyRows = 10 } = {}) {
-  // `>= 0` as the panel's `usd` has it: `formatMicros` throws on a negative, and a counter another writer set below 0
+  // `>= 0` as the panel's `usd` has it: `fmtTokens` throws on a negative, and a counter another writer set below 0
   // made this whole view throw instead of showing "-" for the one cell.
-  const usd = (m) => (Number.isSafeInteger(m) && m >= 0 ? `$${formatMicros(m)}` : "-");
+  const usd = (m) => (Number.isSafeInteger(m) && m >= 0 ? m.toLocaleString("en-US") : "-");
   if (!envelope) return `ALLOCATION\n${cell(problem ?? "no envelope")}`;
   const d = envelope.delegation ?? {};
   const rules = d.enabled ? `delegation on (${(d.writers ?? []).join(", ")}; step ${d.maxStepPct}%, interval ${d.minIntervalHours}h, plans up to ${d.maxPlanDays}d)` : "delegation off";
-  // The split's own total beside the split (issue #507, `splitTotalMicros`), the envelope's when none is shown.
+  // The split's own total beside the split (issue #507, `splitTotalTokens`), the envelope's when none is shown.
   const s = alloc && !alloc.unreachable ? alloc.state : null;
-  const total = splitTotalMicros(s, envelope.totalMicros);
+  const total = splitTotalTokens(s, envelope.totalTokens);
   const lines = [`ALLOCATION · ${envelope.window} · total ${usd(total)} · ${rules}`, `envelope ${cell(digest)}`];
   if (!alloc) return lines.join("\n");
   if (alloc.unreachable) return [...lines, `split unreadable (${cell(alloc.unreachable)})`].join("\n");
@@ -565,7 +565,7 @@ export function renderAllocations({ envelope = null, digest = null, problem = nu
     // fits 80 columns with the longest writer; `clamped` gets its own line, where no width can cut it.
     lines.push(`${plan} · ${cell(s.writer)} · ${allocAt(s.appliedAt)}${s.validUntil ? ` · until ${sliceColumns(cell(s.validUntil), 10)}` : ""}`);
     if (s.clamped) lines.push("  clamped by the step");
-    if (s.envelopeDigest !== digest) lines.push(`made for envelope ${cell(s.envelopeDigest)}, not this host's: governed jobs here refuse as envelope-mismatch${total !== envelope.totalMicros ? `.${fileTotalText(usd(envelope.totalMicros))}` : ""}`);
+    if (s.envelopeDigest !== digest) lines.push(`made for envelope ${cell(s.envelopeDigest)}, not this host's: governed jobs here refuse as envelope-mismatch${total !== envelope.totalTokens ? `.${fileTotalText(usd(envelope.totalTokens))}` : ""}`);
     // The panel's outside-edit notice, by the same rule and in the same words (issue #507).
     const edit = outsideEdit(alloc.log, s.envelopeDigest);
     if (edit) lines.push(cell(outsideEditText(edit)));
@@ -576,13 +576,13 @@ export function renderAllocations({ envelope = null, digest = null, problem = nu
     `floor ${splitOnly ? "-" : usd(envelope.floors[id])}`,
     `weight ${s?.weights?.[id] ?? envelope.defaultWeights?.[id] ?? "-"}`,
     `allocation ${usd(s?.allocations?.[id])}`,
-    `spent ${splitOnly ? "-" : usd(alloc.spend?.projects?.[id]?.micros)}`,
+    `spent ${splitOnly ? "-" : usd(alloc.spend?.projects?.[id]?.tokens)}`,
     splitOnly ? SPLIT_ONLY_MARK : "",
   ]);
   const widths = rows.reduce((w, r) => r.map((c, i) => Math.max(w[i] ?? 0, c.length)), []);
   for (const r of rows) lines.push(`  ${r.map((c, i) => pad(c, widths[i])).join("  ").trimEnd()}`);
   // The headroom beside the split it is headroom of (issue #507): the deployment's spend against the split's total.
-  if (s) lines.push(`  unallocated ${usd(s.unallocated)} · deployment spent ${usd(alloc.spend?.deployment?.micros)} of ${usd(total)}`);
+  if (s) lines.push(`  unallocated ${usd(s.unallocated)} · deployment reserved+held ${usd(alloc.spend?.deployment?.tokens)} of ${usd(total)}`);
   const history = Array.isArray(alloc.log) ? alloc.log.slice(0, historyRows) : [];
   if (history.length > 0) {
     lines.push("history (newest first):");
@@ -640,12 +640,12 @@ export function outsideEdit(log, splitDigest) {
  * count (that split does not decode as the worker's, and the view says so elsewhere). One rule for the panel,
  * `/dispatch priorities` and the insights page.
  */
-export function splitTotalMicros(state, envelopeTotalMicros) {
-  if (!state || typeof state !== "object") return envelopeTotalMicros;
+export function splitTotalTokens(state, envelopeTotalTokens) {
+  if (!state || typeof state !== "object") return envelopeTotalTokens;
   const parts = [...Object.values(state.allocations ?? {}), state.unallocated ?? 0];
-  if (!parts.every((n) => Number.isSafeInteger(n) && n >= 0)) return envelopeTotalMicros;
+  if (!parts.every((n) => Number.isSafeInteger(n) && n >= 0)) return envelopeTotalTokens;
   const sum = parts.reduce((a, b) => a + b, 0);
-  return Number.isSafeInteger(sum) ? sum : envelopeTotalMicros;
+  return Number.isSafeInteger(sum) ? sum : envelopeTotalTokens;
 }
 
 /**
@@ -661,7 +661,7 @@ export function fileTotalText(usdText) {
  * The entries an ALLOCATION view lists (issue #507), as `[{ id, splitOnly }]`: this host's envelope file's entries in
  * its order, and, while the applied split was made for another envelope (`mismatch`), every entry the split allocates
  * that the file does not name, sorted, marked `splitOnly`. Without them an allocation the file dropped counted in the
- * split's total (`splitTotalMicros`) and was listed nowhere. One rule for the panel, `/dispatch priorities` and the
+ * split's total (`splitTotalTokens`) and was listed nowhere. One rule for the panel, `/dispatch priorities` and the
  * insights page (which restates it, held equal by a test).
  */
 export function allocationRowIds(floors, state, mismatch) {

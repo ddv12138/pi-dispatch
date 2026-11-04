@@ -47,7 +47,7 @@ function canaryCost(view) {
 	const triggers = data(view).triggers;
   if (triggers.length !== 1) return t("one paid job of the trigger you choose", view);
 	const [only] = triggers;
-  return `${t("one job of trigger", view)} ${only.index + 1}${only.capUsd !== null ? `, ${t("up to", view)} $${only.capUsd.toFixed(2)}` : `, ${t("up to its cap", view)}`}`;
+  return `${t("one job of trigger", view)} ${only.index + 1}${only.capTokens !== null ? `, ${t("up to", view)} $${only.capTokens.toFixed(2)}` : `, ${t("up to its cap", view)}`}`;
 }
 
 function canaryForm(row, view, label = "Run a canary") {
@@ -184,7 +184,7 @@ export function updatesHow(view) {
 	if (!v) return ui.card({ title: t("How it keeps up", view), body: unreadable(view) });
 	const looks = t(v.state === "not-looking" ? "off, until PI_UPDATES_LOOK=1 is set" : v.state === "unknown" ? "unknown" : v.state === "stale" ? "late: the last look" : "daily", view) + (v.state === "stale" ? ` ${ageText(nowOf(view) - v.at)} ${t("ago", view)}` : "");
 	const first = v.triggers[0];
-	const runs = first ? `${t("trigger", view)} ${first.index + 1}${first.id ? `, ${first.id}` : ""}${first.capUsd !== null ? `, ${t("up to its", view)} $${first.capUsd.toFixed(2)} ${t("cap", view)}` : `, ${t("up to its cap", view)}`}${v.triggers.length > 1 ? `, ${t("or", view)} ${v.triggers.length - 1} ${t("more", view)}` : ""}` : t("no cron trigger can", view);
+	const runs = first ? `${t("trigger", view)} ${first.index + 1}${first.id ? `, ${first.id}` : ""}${first.capTokens !== null ? `, ${t("up to its", view)} $${first.capTokens.toFixed(2)} ${t("cap", view)}` : `, ${t("up to its cap", view)}`}${v.triggers.length > 1 ? `, ${t("or", view)} ${v.triggers.length - 1} ${t("more", view)}` : ""}` : t("no cron trigger can", view);
 	return ui.card({ title: t("How it keeps up", view), body: ui.facts([[t("Looks for updates", view), t(looks, view)], [t("Last look", view), Number.isFinite(v.at) ? timeHtml(v.at) : t(v.state === "unknown" ? "unknown" : "never", view)], [t("A canary runs as", view), t(runs, view)], [t("Adopting", view), t("always a person, with a preview and Undo", view)]], { cols: 1 }) });
 }
 

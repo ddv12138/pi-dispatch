@@ -4,7 +4,7 @@ import math, random
 import gen_spend as GS          # adds the Spend icons to ICONS on import
 from pulse import *
 
-money = GS.money
+money = GS.money  # fmt_tokens's ladder: the token era's one renderer
 RANGE, projseg, spend_tabs = GS.RANGE, GS.projseg, GS.spend_tabs
 
 def readme(name, text):
@@ -24,10 +24,10 @@ def winline(text):
 # 1. BUDGET SPLIT
 # =====================================================================================
 # (project, weight, allocation, floor, spent this week incl. held)  -- spent matches SpendScreen's split rows
-ALLOC = [("web", 40, 45.00, 10.00, 11.78), ("billing", 35, 42.00, 10.00, 14.20), ("api", 20, 24.00, 5.00, 6.65), ("ops", 5, 6.00, 2.00, 0.44)]
-TOTAL = 120.00
+ALLOC = [("web", 40, 45_000_000, 10_000_000, 11_780_000), ("billing", 35, 42_000_000, 10_000_000, 14_200_000), ("api", 20, 24_000_000, 5_000_000, 6_650_000), ("ops", 5, 6_000_000, 2_000_000, 440_000)]
+TOTAL = 120_000_000
 ALLOCATED = sum(a for _, _, a, _, _ in ALLOC)
-SPENT_WEEK = round(sum(s for *_, s in ALLOC), 2)          # 33.07
+SPENT_WEEK = sum(s for *_, s in ALLOC)          # 33_070_000
 
 def alloc_rows():
     mx = max(a for _, _, a, _, _ in ALLOC)
@@ -56,7 +56,7 @@ def split_card():
     legend = ('<p class="keyrow"><span><i class="al-k al-k--alloc"></i>Allocation</span><span><i class="al-k al-k--spent"></i>Spend, held included</span>'
               '<span><i class="al-k al-k--floor"></i>Floor</span><span><i class="al-k al-k--over"></i>Over the allocation</span></p>')
     head = (f'<p class="al-env">{ic("pie", "ic")}<span><b>$120.00 per week</b> · delegation on</span>'
-            f'<span class="al-env__h">Unallocated <b>{money(TOTAL - ALLOCATED)}</b> · deployment spent <b>{money(SPENT_WEEK)}</b> of <b>{money(TOTAL)}</b></span></p>')
+            f'<span class="al-env__h">Unallocated <b>{money(TOTAL - ALLOCATED)}</b> · deployment reserved+held <b>{money(SPENT_WEEK)}</b> of <b>{money(TOTAL)}</b></span></p>')
     body = head + plan + alloc_rows() + legend + \
         '<p class="sx-note">Amounts are this week\'s window.</p>'
     return card("Budget split", body, sub="this week, every host", id_="p-split",
@@ -130,7 +130,7 @@ def reasons_card():
     rs = [("web", "Two releases this sprint, and most open issues are frontend."),
           ("billing", "Invoice migration backlog; keep it steady."),
           ("api", "Fewer issues opened this week."),
-          ("ops", "Nightly tidy runs on plan:kimi and needs little dollar spend.")]
+          ("ops", "Nightly tidy runs on the plan and needs few tokens.")]
     li = "".join(f'<li>{tag(p)}<q>{E(t)}</q></li>' for p, t in rs)
     return card("Why the plan says so", f'<p class="sx-note sx-note--top">Written by the portfolio job.</p><ul class="rs-l">{li}</ul>',
                 sub="operators only", id_="p-plan-reasons")
@@ -148,8 +148,8 @@ def split_states():
 def split_page():
     kpis = f"""<div class="cards-4">
   {card("Envelope", '<p class="kpi"><b>$120.00</b><span>per week</span></p><p class="sx-k">Delegation on: you and the portfolio job may write plans.</p>', id_="p-env-kpi")}
-  {card("Allocated", f'<p class="kpi"><b>{money(ALLOCATED)}</b><span>to 4 projects</span></p><p class="sx-k">{money(TOTAL - ALLOCATED)} unallocated. Floors add up to $27.00.</p>', id_="p-alloc-kpi")}
-  {card("Spent this week", f'<p class="kpi"><b>{money(SPENT_WEEK)}</b><span>of {money(TOTAL)}</span></p>{pbar(SPENT_WEEK / TOTAL, "ok", "Week: 28 percent of the envelope", 10)}<p class="sx-k">No project is over its allocation.</p>', id_="p-spent-kpi")}
+  {card("Allocated", f'<p class="kpi"><b>{money(ALLOCATED)}</b><span>to 4 projects</span></p><p class="sx-k">{money(TOTAL - ALLOCATED)} unallocated. Floors add up to 27.00M tokens.</p>', id_="p-alloc-kpi")}
+  {card("Reserved this week", f'<p class="kpi"><b>{money(SPENT_WEEK)}</b><span>of {money(TOTAL)}</span></p>{pbar(SPENT_WEEK / TOTAL, "ok", "Week: 28 percent of the envelope", 10)}<p class="sx-k">No project is over its allocation.</p>', id_="p-spent-kpi")}
   {card("Plan in force", '<p class="kpi"><b>11 days</b><span>left</span></p><p class="sx-k">Applied Mon 5 Oct by <span class="code">pm-weekly</span>, until Mon 19 Oct.</p>', end=badge("ok", "Applied"), id_="p-plan-kpi")}
 </div>"""
     left = f'<div class="stack">{split_card()}{history_card()}{priorities_card()}</div>'

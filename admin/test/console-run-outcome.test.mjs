@@ -297,7 +297,7 @@ test("the re-run windows and the sentences that state them are the queue's own r
 function readerOn({ jobs = {}, paths = {}, env = {}, getJob } = {}) {
   const queue = { name: "pi-jobs", getJob: getJob ?? (async (id) => (Object.hasOwn(jobs, id) ? { id, data: jobs[id] } : null)), close: async () => {} };
   const redis = { on() {}, disconnect() {}, quit: async () => {} };
-  return createFleetReader({ valkeyUrl: "redis://unused", logsDir: tempDir("pd-710-logs-"), ...paths }, { makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis, readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => ({ names: [], incomplete: null }), nowFn: () => NOW, dollarEnvFn: () => env, sandboxRetentionFn: sandboxRetentionOf });
+  return createFleetReader({ valkeyUrl: "redis://unused", logsDir: tempDir("pd-710-logs-"), ...paths }, { makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis, readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => ({ names: [], incomplete: null }), nowFn: () => NOW, budgetEnvFn: () => env, sandboxRetentionFn: sandboxRetentionOf });
 }
 
 test("the fleet reader's rerunCheck is rerunRefusalOf over the retained data; the data never leaves it", async () => {
@@ -328,7 +328,7 @@ test("the fleet reader's sandboxCheck is the panel's manifest verdict, read only
   assert.equal((await reader.sandboxCheck("gh-9", { jobId: "gh-9", host: "mini1" })).why, "swept");
   const off = readerOn({ paths: { sandboxDir, sandboxRetentionHours: 0 }, env: { PI_WORKER_NAME: "mini1" } });
   assert.equal((await off.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini1" })).why, "retention-off");
-  const unwired = createFleetReader({ valkeyUrl: "redis://unused", sandboxDir, sandboxRetentionHours: 24 }, { makeQueueFn: () => ({ name: "pi-jobs" }), parseConnectionFn: () => ({}), redisFn: () => ({ on() {} }), dollarEnvFn: () => ({ PI_WORKER_NAME: "mini1" }) });
+  const unwired = createFleetReader({ valkeyUrl: "redis://unused", sandboxDir, sandboxRetentionHours: 24 }, { makeQueueFn: () => ({ name: "pi-jobs" }), parseConnectionFn: () => ({}), redisFn: () => ({ on() {} }), budgetEnvFn: () => ({ PI_WORKER_NAME: "mini1" }) });
   assert.deepEqual(await unwired.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini1" }), { elsewhere: true }, "no verdict wired: cannot tell, the command stays");
   // The verdict is the panel's: the same `reason` readSandboxInfo shows (sandbox-session.test.mjs holds those words).
   const past = sandboxRetentionOf({ sandboxDir, sandboxRetentionHours: 1 }, "gh-1", { now: () => NOW + 3_600_000 });

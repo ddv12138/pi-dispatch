@@ -19,8 +19,8 @@ const acts = (view) => view?.role === "operator" && !view?.readOnly;
 const code = (text) => html`<span class="code md-ref">${text}</span>`;
 const t = (text, view) => uiText(text, view?.locale);
 const amount = (v) => Number.isFinite(v) ? new Intl.NumberFormat("en-US", { maximumFractionDigits: 1 }).format(v) : "Not known";
-const usd = (v) => Number.isFinite(v) ? `$${v.toFixed(2)}` : "Not known";
-const micros = (v) => Number.isFinite(v) ? usd(v / 1e6) : "Not known";
+const usd = (v) => Number.isFinite(v) ? v.toLocaleString("en-US") : "Not known";
+const tokensCell = (v) => Number.isFinite(v) ? usd(v) : "Not known";
 const scopeWord = (s, view = {}) => s === "default" ? t("Default", view) : `${t("Project", view)} ${s}`;
 const rowLink = (row, view = {}) => html`<a class="link" href="${`/config/trigger?index=${row.index}`}">${t("Row", view)} ${row.number ?? row.index + 1}</a>`;
 const runLink = (id) => html`<a class="link code md-ref" href="${`/run?id=${encodeURIComponent(id)}`}">${id}</a>`;
@@ -95,7 +95,7 @@ function modelStateBadge(row, view) {
 }
 export function modelsInUse(view) {
   const m = model(view);
-  return ui.card({ title: t("Models in use", view), sub: t("unpriced fallbacks are skipped", view), body: html`${array(m.models).length ? html`<ul class="md-ms">${array(m.models).map((r) => html`<li class="md-m"><div class="md-m__t"><b>${code(r.ref)}</b><small>${r.provider} · ${t(r.known === false ? "Unknown model" : r.priced === true ? "Priced for failover" : r.priced === false ? "Unpriced: skipped as a fallback" : "Price status unavailable", view)}</small><ul class="md-windows">${array(r.windows).map((w) => html`<li>${w.scope} · ${w.window}: ${t(w.unavailable ? "Spend unavailable" : "Spend", view)}${w.unavailable ? "" : ` ${micros(w.spentMicros)} ${t("of", view)} ${micros(w.capMicros)}`}</li>`)}</ul>${array(r.windows).length ? null : html`<small>${t("No model-specific dollar windows are configured; other deployment and scope caps still apply.", view)}</small>`}</div>${modelStateBadge(r, view)}</li>`)}</ul>` : empty(m, "No role, fallback or trigger names a model.", view)}` });
+  return ui.card({ title: t("Models in use", view), sub: t("unpriced fallbacks are skipped", view), body: html`${array(m.models).length ? html`<ul class="md-ms">${array(m.models).map((r) => html`<li class="md-m"><div class="md-m__t"><b>${code(r.ref)}</b><small>${r.provider} · ${t(r.known === false ? "Unknown model" : r.priced === true ? "Priced for failover" : r.priced === false ? "Unpriced: skipped as a fallback" : "Price status unavailable", view)}</small><ul class="md-windows">${array(r.windows).map((w) => html`<li>${w.scope} · ${w.window}: ${t(w.unavailable ? "Spend unavailable" : "Spend", view)}${w.unavailable ? "" : ` ${tokensCell(w.spentTokens)} ${t("of", view)} ${tokensCell(w.capTokens)}`}</li>`)}</ul>${array(r.windows).length ? null : html`<small>${t("No model-specific token windows are configured; other deployment and scope caps still apply.", view)}</small>`}</div>${modelStateBadge(r, view)}</li>`)}</ul>` : empty(m, "No role, fallback or trigger names a model.", view)}` });
 }
 function metricRows(c, view) {
   const candidate = c.candidateStats ?? {}, source = c.sourceStats ?? {};

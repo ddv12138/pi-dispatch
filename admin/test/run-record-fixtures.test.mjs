@@ -1,6 +1,6 @@
 // Every admin reader of run records against the record each release's `buildRecord` made (issue #761): the fixtures in
 // `worker/test/fixtures/run-records/` (one shape per release that changed the builder, listed in `manifest.json`, and a
-// record of a version no release has written yet, `synthetic-v2.json`). Each shape is copied into a logs directory of
+// record of a version no release has written yet, `synthetic-v3.json`). Each shape is copied into a logs directory of
 // its own, every file dated by its record's `endedAt`, and every instant below is read from the fixtures, never the wall
 // clock. Lists, pages and tools read every record back with its id, outcome, kind and times; folds read every released
 // shape and leave the newer record out, saying how many; the run page and the API show the newer one's core alone.
@@ -15,9 +15,9 @@ import { readZeroTouch } from "@edgehero/pi-dispatch/zero-touch";
 import { NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, listRuns, makeLocalRunIndex, readRun, readRunById, readRunsPage, scanRunRecords, modelRunRecord } from "../src/read-model.mjs";
 import { fromNewerRelease, readableRecords, shownRecord } from "../src/newer-release.mjs";
 import { foldCosts, whatIfFlow } from "../src/costs.mjs";
-import { DOLLAR_KEY_PREFIX } from "@edgehero/pi-dispatch/dollar-budget";
+import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
 import { dayKey } from "@edgehero/pi-dispatch/budget";
-import { foldWindowRecords, runDollars } from "../src/dollar-windows.mjs";
+import { foldWindowRecords, runTokenWindows } from "../src/token-windows.mjs";
 import { safeRunOf } from "../src/console/run-api.mjs";
 import { renderPage } from "../src/console/pages.mjs";
 import { rerunRefusalOf } from "../src/job-actions.mjs";
@@ -32,7 +32,7 @@ const FIXTURES = fileURLToPath(new URL("../../worker/test/fixtures/run-records/"
 const { RUN_RECORD_CASES } = await import(new URL("../../worker/test/fixtures/run-records/cases.mjs", import.meta.url));
 const readJson = (name) => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
 const manifest = readJson("manifest.json");
-const SYNTHETIC = readJson("synthetic-v2.json");
+const SYNTHETIC = readJson("synthetic-v3.json");
 const HOUR = 60 * 60 * 1000;
 const NEWER_SAID = "1 record from a newer pi-dispatch not read";
 const OPERATOR = Object.freeze({ id: "s-run-record-fixtures", name: "ops", role: "operator" });
@@ -103,13 +103,13 @@ test("the cost and dollar-window folds read every released shape, count the newe
     assert.equal(fold.newerSkipped, 1, `${shape.id}: the newer one is counted out`);
     assert.deepEqual(fold.byFlow.map((r) => r.flow).sort(), [...new Set(records.map((r) => r.flow ?? "(no flow)"))].sort(), shape.id);
     // The day window of the runs' start: every released record that carries dollars settles into it, to the micro-dollar.
-    const spec = { ledger: "deployment", name: null, window: "day", capMicros: 10_000_000, keyPrefix: DOLLAR_KEY_PREFIX, key: dayKey(new Date(Date.parse(records[0].startedAt)), DOLLAR_KEY_PREFIX) };
+    const spec = { ledger: "deployment", name: null, window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse(records[0].startedAt)), TOKEN_KEY_PREFIX) };
     const window = foldWindowRecords(scanned, spec);
     const withDollars = records.filter((r) => r.dollars && typeof r.dollars === "object");
     assert.equal(window.records.runs, withDollars.length, shape.id);
     assert.equal(window.records.settledMicros, settledOf(withDollars), shape.id);
     assert.equal(window.records.newerSkipped, 1, `${shape.id}: the newer record's 7.5 dollars are not in the window's sum`);
-    const runs = runDollars(scanned);
+    const runs = runTokenWindows(scanned);
     assert.deepEqual(runs.runs.map((r) => [r.jobId, r.dollars.settledMicros]).sort(), withDollars.map((r) => [r.jobId, r.dollars.settledMicros ?? null]).sort(), shape.id);
     assert.equal(runs.newerSkipped, 1, shape.id);
   }
@@ -119,9 +119,9 @@ test("the next shape's dollars are the cases' own: 0.4125, 0.061, 0.15 and 1.86 
   const next = manifest.shapes.at(-1);
   const { logsDir, sinceMs, nowMs } = deployment(next);
   const scanned = scanRunRecords({ logsDir, sinceMs, nowMs });
-  const spec = { ledger: "deployment", name: null, window: "day", capMicros: 10_000_000, keyPrefix: DOLLAR_KEY_PREFIX, key: dayKey(new Date(Date.parse("2026-09-14T10:00:00.000Z")), DOLLAR_KEY_PREFIX) };
+  const spec = { ledger: "deployment", name: null, window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse("2026-09-14T10:00:00.000Z")), TOKEN_KEY_PREFIX) };
   // The failed run settled at its floor; the refusal before any spend carries `dollars: null` and is no window run.
-  assert.deepEqual(foldWindowRecords(scanned, spec).records, { runs: 4, settledMicros: 2_483_500, basis: { metered: 3, floor: 1, refunded: 0, unreserved: 0 }, boundExceeded: 0, malformed: 0, newerSkipped: 1 });
+  assert.deepEqual(foldWindowRecords(scanned, spec).records, { runs: 4, settledTokens: 2_483_500, basis: { metered: 3, floor: 1, refunded: 0, unreserved: 0 }, boundExceeded: 0, malformed: 0, newerSkipped: 1 });
   // A project row counts the newer record only when its core says the project: `api` does, `web` does not.
   const api = foldWindowRecords(scanned, { ...spec, ledger: "scope", name: "project:api" });
   const web = foldWindowRecords(scanned, { ...spec, ledger: "scope", name: "project:web" });
@@ -259,7 +259,7 @@ test("each fold left whole a newer record reaches leaves it out and says so: wha
   assert.ok(list.problems.includes(`${NEWER_SAID}: counts and spend leave them out.`), list.problems.join("\n"));
   assert.deepEqual([list.rows[0].stats.runs30d, list.rows[0].lastRun], [0, null]);
   // A repo row: a newer FORGE run of the window may be the repo's and is counted out; a newer LOCAL run never is.
-  const spec = { ledger: "scope", name: "acme/api", window: "day", capMicros: 10_000_000, keyPrefix: DOLLAR_KEY_PREFIX, key: dayKey(new Date(Date.parse(NEWER.startedAt)), DOLLAR_KEY_PREFIX) };
+  const spec = { ledger: "scope", name: "acme/api", window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse(NEWER.startedAt)), TOKEN_KEY_PREFIX) };
   assert.equal(foldWindowRecords([NEWER], spec).records.newerSkipped, 1);
   assert.deepEqual(foldWindowRecords([{ ...NEWER, kind: "local" }], spec).records, { runs: 0, settledMicros: 0, basis: { metered: 0, floor: 0, refunded: 0, unreserved: 0 }, boundExceeded: 0, malformed: 0 });
   // The split's counts: its reason and plan are not counted, only how many were left out.
