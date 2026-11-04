@@ -223,7 +223,7 @@ export function swallowedRunSentence(jobId, existing) {
 	return `an identical run was queued${hhmm} as ${jobId} (${existing?.state ?? "already queued or done"}); nothing new was queued.`;
 }
 
-async function addLocalJob(queue, { folder, flow, task, command, provider, model, maxTurns, models, fallbackModels, maxCostUsd, image, backend, excludeTools, mcp, skillsDir, secrets, secretsProfile, recover, steer, chainDepth, parentJobId, jobId, enqueueNonce, dataVersion, now = new Date() }, { dataVersions } = {}) {
+async function addLocalJob(queue, { folder, flow, task, command, provider, model, maxTurns, models, fallbackModels, maxTokens, image, backend, excludeTools, mcp, skillsDir, secrets, secretsProfile, recover, steer, chainDepth, parentJobId, jobId, enqueueNonce, dataVersion, now = new Date() }, { dataVersions } = {}) {
 	const minute = now.toISOString().slice(0, 16); // YYYY-MM-DDTHH:MM -- the dedup window
 	// A caller-supplied jobId (the outbox collector's retry-idempotent chainedJobId) wins; otherwise the
 	// minute-windowed localJobId is the dedup key. A command job (issue #189) fills the flow slot with
@@ -255,7 +255,7 @@ async function addLocalJob(queue, { folder, flow, task, command, provider, model
 		...(models !== undefined && { models }),
 		...(fallbackModels !== undefined && { fallbackModels }),
 		// Issue #501: the per-job dollar cap, passed through for the outbox child that inherits its parent's.
-		...(maxCostUsd !== undefined && { maxCostUsd }),
+		...(maxTokens !== undefined && { maxTokens }),
 		...(image !== undefined && { image }),
 		// #227. WHERE this job's container is built. Conditional like `image`, so a trigger that named no
 		// venue produces byte-identical job data -- and at JOB level, never inside `trigger`, for the reason
@@ -475,7 +475,7 @@ export async function enqueueLateForgeJob(queue, kind, fields, { dataVersions } 
  * semantic dedup id. Throws on a bad delivery id or console name, and on input a newer release stored with a
  * `dataVersion` above this build's (issue #761; every caller that rebuilds stored input answers with a reply then).
  */
-function forgeJobOf(kind, { repo, projectId, azure, target, flow, command, trigger, provider, model, maxTurns, models, fallbackModels, maxCostUsd, packages, image, backend, excludeTools, mcp, skillsDir, instructions, resume, awaitInput, gates, approvalRequestId, gateTimeout, gateBudgetRaiseUsd, progress, statusComment, recover, steer, fork, forkPolicy, forkReserveMicros, thinkingLevel, parkedReply, replyReceivedAt, console: consoleMeta, secrets, secretsProfile, waitFor, replica, replicas, dataVersion }, { dataVersions } = {}) {
+function forgeJobOf(kind, { repo, projectId, azure, target, flow, command, trigger, provider, model, maxTurns, models, fallbackModels, maxTokens, packages, image, backend, excludeTools, mcp, skillsDir, instructions, resume, awaitInput, gates, approvalRequestId, gateTimeout, gateBudgetRaiseTokens, progress, statusComment, recover, steer, fork, forkPolicy, forkReserveTokens, thinkingLevel, parkedReply, replyReceivedAt, console: consoleMeta, secrets, secretsProfile, waitFor, replica, replicas, dataVersion }, { dataVersions } = {}) {
 	const jobId = forgeDeliveryJobId(kind, trigger?.deliveryId, replica);
 	if (approvalRequestId !== undefined && (typeof approvalRequestId !== "string" || !/^[A-Za-z0-9._:-]{1,200}$/.test(approvalRequestId))) throw new TypeError("approval-request-invalid");
 	if (replyReceivedAt !== undefined && (!Number.isSafeInteger(replyReceivedAt) || replyReceivedAt < 0 || resume !== true || typeof trigger?.comment?.body !== "string")) throw new TypeError("reply-receipt-invalid");
@@ -530,7 +530,7 @@ function forgeJobOf(kind, { repo, projectId, azure, target, flow, command, trigg
 		...(mcp !== undefined && { mcp }),
 		// #501. The trigger's per-job dollar cap, as written. Conditional like `excludeTools`, at JOB level for its
 		// reason, and a narrowing like it: the worker runs the job under the smaller of this and the deployment cap.
-		...(maxCostUsd !== undefined && { maxCostUsd }),
+		...(maxTokens !== undefined && { maxTokens }),
 		// The host directory of operator-authored skills this trigger injects (REQ-PER-TRIGGER-SKILLS).
 		// Conditional like `image`, so an unflagged job's data stays byte-identical, and at JOB level rather
 		// than inside `trigger` because a worker-host path is an execution knob, not a fact about the
@@ -547,7 +547,7 @@ function forgeJobOf(kind, { repo, projectId, azure, target, flow, command, trigg
 		...(gates !== undefined && { gates }),
 		...(approvalRequestId !== undefined && { approvalRequestId }),
 		...(gateTimeout !== undefined && { gateTimeout }),
-		...(gateBudgetRaiseUsd !== undefined && { gateBudgetRaiseUsd }),
+		...(gateBudgetRaiseTokens !== undefined && { gateBudgetRaiseTokens }),
 		// Issue #644: the report_progress tool, and the forge status comment. Only when armed, awaitInput's rule and
 		// for its reasons (byte-identical unflagged data; job level, never inside `trigger`).
 		...(progress === true && { progress: true }),
@@ -587,7 +587,7 @@ function forgeJobOf(kind, { repo, projectId, azure, target, flow, command, trigg
 		// Conditional for the same reason packages/image/resume are: an unflagged job's data must keep
 		// exactly the keys it has today. `replica` is this job's 1-based index and `replicas` the set size;
 		// both are integers, so the run record they land in stays PII-free by construction.
-		...(fork !== undefined && { fork: validateFork(fork), forkPolicy, forkReserveMicros }),
+		...(fork !== undefined && { fork: validateFork(fork), forkPolicy, forkReserveTokens }),
 		...(thinkingLevel !== undefined && { thinkingLevel }),
 		...(replica !== undefined && { replica }),
 		...(replicas !== undefined && { replicas }),

@@ -55,7 +55,7 @@ test("host subscription policy rejects an older image before access preparation,
 	let prepared = 0;
 	const { deps: d, calls } = deps({
 		subscriptionAuthRequired: async () => true,
-		imagePreflight: async () => ({ ok: true, image: "job:old", capabilities: ["modelPolicy", "costCap"] }),
+		imagePreflight: async () => ({ ok: true, image: "job:old", capabilities: ["modelPolicy", "tokenBudget"] }),
 		prepareSubscriptionAuth: async () => { prepared++; throw new Error("must refuse before credential renewal"); },
 	});
 	const result = await runJob({ ...ghJob, models: ["anthropic/m"] }, d);
@@ -402,7 +402,7 @@ test("exit 2 with any reason outside the closed set, or none, stays runner-polic
 	}
 });
 
-test("a cost-cap exit names the guard's rule in the record's why, from the closed set only, and nothing else gets one (#507)", async () => {
+test("a cost-cap exit names the meter's rule in the record's why, from the closed set only, and nothing else gets one (#507)", async () => {
 	for (const exitWhy of ["unboundable", "external", "over-cap"]) {
 		const { deps: d } = deps({ runContainer: async () => ({ code: 2, aborted: false, turns: 1, tokens: { total: 0 }, exitReason: "cost-cap", exitWhy }) });
 		const r = await runJob(ghJob, d);
@@ -1948,8 +1948,8 @@ test("a job carrying exclusions on an image that does not declare exclude-tools 
 	assert.ok(posted[0]?.includes("Rebuild"), "and names the fix, not merely the symptom");
 });
 
-test("a job carrying a dollar cap on an image without `costCap` refuses pre-spend, pre-reserve, through the REAL preflight table (#501)", async () => {
-	// An image built before the cost guard reads no PI_MAX_COST_MICROS: the job would run with NO cap and record
+test("a job carrying a token budget on an image without `tokenBudget` refuses pre-spend, pre-reserve, through the REAL preflight table (#501)", async () => {
+	// An image built before the meter reads no PI_MAX_TOKENS: the job would run with NO cap and record
 	// a clean exit. Driven through makeImagePreflight itself (a fake docker printing the labels), so removing
 	// the table row fails here, not only in the table's own test.
 	const { makeImagePreflight, FIELD_SEP } = await import("../src/image-preflight.mjs");
@@ -1965,13 +1965,13 @@ test("a job carrying a dollar cap on an image without `costCap` refuses pre-spen
 		queueMicrotask(() => child.emit("close", 0));
 		return child;
 	};
-	const job = { kind: "local", folder: "/proj", flow: "f", task: "t", provider: "anthropic", model: "m", maxTurns: 5, maxCostMicros: 0 };
+	const job = { kind: "local", folder: "/proj", flow: "f", task: "t", provider: "anthropic", model: "m", maxTurns: 5, maxTokens: 0 };
 	const redis = fakeRedis();
 	const posted = [];
 	const { deps: d, calls } = deps({ redis, comment: async (_j, t) => posted.push(t), imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
 	const r = await runJob(job, d);
 	assert.equal(r.outcome, "policy", "a policy RETURN, never a throw");
-	assert.equal(r.reason, "job-image-cost-cap-unsupported");
+	assert.equal(r.reason, "job-image-token-budget-unsupported");
 	assert.equal(r.budgetReserved, false);
 	assert.equal(redis.incrCalls, 0, "no budget slot to find out");
 	assert.ok(!calls.includes("prepare"), "no clone");
@@ -1980,8 +1980,8 @@ test("a job carrying a dollar cap on an image without `costCap` refuses pre-spen
 
 	// The same job with NO cap on the same old image is not this gate's business.
 	const { deps: d2 } = deps({ redis: fakeRedis(), imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
-	const r2 = await runJob({ ...job, maxCostMicros: null }, d2);
-	assert.notEqual(r2.reason, "job-image-cost-cap-unsupported");
+	const r2 = await runJob({ ...job, maxTokens: null }, d2);
+	assert.notEqual(r2.reason, "job-image-token-budget-unsupported");
 });
 
 // ---- REQ-PER-TRIGGER-SKILLS: a trigger that named a skills dir the worker cannot see.

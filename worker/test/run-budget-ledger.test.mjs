@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { reserveDollars } from "../src/dollar-budget.mjs";
+import { reserveTokens } from "../src/token-budget.mjs";
 import { sanitizeJobId } from "../src/run-history.mjs";
 import {
 	RUN_BUDGET_KEY_PREFIX,
@@ -20,13 +20,13 @@ import {
 const AT_MS = Date.parse("2026-10-17T10:00:00.000Z");
 const clock = () => AT_MS;
 
-const SCOPE = "budget:usd:s:0123456789abcdef";
-const MODEL = "budget:usd:mdl:fedcba9876543210";
+const SCOPE = "budget:tok:s:0123456789abcdef";
+const MODEL = "budget:tok:mdl:fedcba9876543210";
 const HOLD = Object.freeze({
-	amountMicros: 2_000_000,
-	keys: ["budget:usd:2026-10-17", `${SCOPE}:2026-10-17`, `${MODEL}:m:2026-10`],
+	amountTokens: 2_000_000,
+	keys: ["budget:tok:2026-10-17", `${SCOPE}:2026-10-17`, `${MODEL}:m:2026-10`],
 	ledgers: [
-		{ keyPrefix: "budget:usd", keys: ["budget:usd:2026-10-17"] },
+		{ keyPrefix: "budget:tok", keys: ["budget:tok:2026-10-17"] },
 		{ keyPrefix: SCOPE, keys: [`${SCOPE}:2026-10-17`] },
 		{ keyPrefix: MODEL, keys: [`${MODEL}:m:2026-10`] },
 	],
@@ -43,33 +43,33 @@ test("the key is the run mirror's sanitized id under run:budget:, and the consta
 	assert.deepEqual([...RUN_BUDGET_STATES], ["held", "settled", "released", "settled-crashed"]);
 });
 
-test("validHold keeps reserveDollars' shape and refuses everything else", () => {
-	assert.deepEqual(validHold(HOLD), { amountMicros: HOLD.amountMicros, keys: HOLD.keys, ledgers: HOLD.ledgers });
-	assert.deepEqual(validHold({ amountMicros: 0, keys: [] }), { amountMicros: 0, keys: [] }, "the zero hold carries no ledgers");
-	assert.deepEqual(validHold({ amountMicros: 0, keys: [], extra: "x", note: { a: 1 } }), { amountMicros: 0, keys: [] }, "unknown fields are dropped from a hold without ledgers too");
-	assert.deepEqual(Object.keys(validHold({ amountMicros: 3, keys: ["budget:usd:2026-10-17"], extra: "x" })), ["amountMicros", "keys"]);
-	assert.deepEqual(validHold({ amountMicros: 5, keys: [], ledgers: [] }), { amountMicros: 5, keys: [], ledgers: [] }, "no active window");
-	assert.deepEqual(validHold({ ...HOLD, extra: "x" }), { amountMicros: HOLD.amountMicros, keys: HOLD.keys, ledgers: HOLD.ledgers }, "unknown fields are dropped, not stored");
-	const many = Array.from({ length: 17 }, (_, i) => `budget:usd:s:${String(i).padStart(16, "0")}:2026-10-17`);
+test("validHold keeps reserveTokens' shape and refuses everything else", () => {
+	assert.deepEqual(validHold(HOLD), { amountTokens: HOLD.amountTokens, keys: HOLD.keys, ledgers: HOLD.ledgers });
+	assert.deepEqual(validHold({ amountTokens: 0, keys: [] }), { amountTokens: 0, keys: [] }, "the zero hold carries no ledgers");
+	assert.deepEqual(validHold({ amountTokens: 0, keys: [], extra: "x", note: { a: 1 } }), { amountTokens: 0, keys: [] }, "unknown fields are dropped from a hold without ledgers too");
+	assert.deepEqual(Object.keys(validHold({ amountTokens: 3, keys: ["budget:tok:2026-10-17"], extra: "x" })), ["amountTokens", "keys"]);
+	assert.deepEqual(validHold({ amountTokens: 5, keys: [], ledgers: [] }), { amountTokens: 5, keys: [], ledgers: [] }, "no active window");
+	assert.deepEqual(validHold({ ...HOLD, extra: "x" }), { amountTokens: HOLD.amountTokens, keys: HOLD.keys, ledgers: HOLD.ledgers }, "unknown fields are dropped, not stored");
+	const many = Array.from({ length: 17 }, (_, i) => `budget:tok:s:${String(i).padStart(16, "0")}:2026-10-17`);
 	for (const [why, bad] of [
 		["null", null],
 		["an array", []],
-		["a float", { ...HOLD, amountMicros: 1.5 }],
-		["negative", { ...HOLD, amountMicros: -1 }],
-		["unsafe", { ...HOLD, amountMicros: 2 ** 53 }],
-		["a string amount", { ...HOLD, amountMicros: "2000000" }],
-		["keys not an array", { ...HOLD, keys: "budget:usd:2026-10-17" }],
-		["a key outside the dollar prefix", { amountMicros: 1, keys: ["budget:2026-10-17"] }],
-		["a look-alike prefix", { amountMicros: 1, keys: ["budget:usdx:2026-10-17"] }],
-		["a bare prefix", { amountMicros: 1, keys: ["budget:usd:"] }],
-		["a non-string key", { amountMicros: 1, keys: [7] }],
-		["a duplicate key", { amountMicros: 1, keys: ["budget:usd:2026-10-17", "budget:usd:2026-10-17"] }],
-		["seventeen keys", { amountMicros: 1, keys: many }],
+		["a float", { ...HOLD, amountTokens: 1.5 }],
+		["negative", { ...HOLD, amountTokens: -1 }],
+		["unsafe", { ...HOLD, amountTokens: 2 ** 53 }],
+		["a string amount", { ...HOLD, amountTokens: "2000000" }],
+		["keys not an array", { ...HOLD, keys: "budget:tok:2026-10-17" }],
+		["a key outside the token prefix", { amountTokens: 1, keys: ["budget:2026-10-17"] }],
+		["a look-alike prefix", { amountTokens: 1, keys: ["budget:tokx:2026-10-17"] }],
+		["a bare prefix", { amountTokens: 1, keys: ["budget:tok:"] }],
+		["a non-string key", { amountTokens: 1, keys: [7] }],
+		["a duplicate key", { amountTokens: 1, keys: ["budget:tok:2026-10-17", "budget:tok:2026-10-17"] }],
+		["seventeen keys", { amountTokens: 1, keys: many }],
 		["ledgers not flattening to keys", { ...HOLD, ledgers: HOLD.ledgers.slice(1) }],
 		["ledgers out of order", { ...HOLD, ledgers: [...HOLD.ledgers].reverse() }],
-		["a ledger key under another prefix", { amountMicros: 1, keys: [`${SCOPE}:2026-10-17`], ledgers: [{ keyPrefix: MODEL, keys: [`${SCOPE}:2026-10-17`] }] }],
-		["a ledger prefix outside the dollar prefix", { amountMicros: 1, keys: ["budget:usd:2026-10-17"], ledgers: [{ keyPrefix: "budget", keys: ["budget:usd:2026-10-17"] }] }],
-		["an empty ledger", { amountMicros: 1, keys: [], ledgers: [{ keyPrefix: "budget:usd", keys: [] }] }],
+		["a ledger key under another prefix", { amountTokens: 1, keys: [`${SCOPE}:2026-10-17`], ledgers: [{ keyPrefix: MODEL, keys: [`${SCOPE}:2026-10-17`] }] }],
+		["a ledger prefix outside the token prefix", { amountTokens: 1, keys: ["budget:tok:2026-10-17"], ledgers: [{ keyPrefix: "budget", keys: ["budget:tok:2026-10-17"] }] }],
+		["an empty ledger", { amountTokens: 1, keys: [], ledgers: [{ keyPrefix: "budget:tok", keys: [] }] }],
 	]) assert.equal(validHold(bad), null, why);
 });
 
@@ -99,7 +99,7 @@ test("a Valkey fault returns { error } with the code and never throws, from ever
 		assert.deepEqual(await l.read("r"), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.remove("r"), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(logs, ["claimSlot", "recordHold", "settle", "release", "settleCrashed", "nextSeq", "read", "remove"].map((op) => ["run_budget_ledger_error", { op, code: "ECONNREFUSED" }]), "exactly { op, code }, nothing more");
-		assert.ok(!JSON.stringify(logs).includes("run:budget") && !JSON.stringify(logs).includes("budget:usd"), "no key and no value in a log line");
+		assert.ok(!JSON.stringify(logs).includes("run:budget") && !JSON.stringify(logs).includes("budget:tok"), "no key and no value in a log line");
 	}
 	const noCode = makeRunBudgetLedger({ redis: { eval: () => Promise.reject(new Error("x")) }, now: clock });
 	assert.deepEqual(await noCode.nextSeq("r"), { error: "valkey" }, "an error with no code still reads as a fault");
@@ -114,7 +114,7 @@ test("bad arguments are refused before Valkey is asked, as { error }, never thro
 		assert.deepEqual(await l.release("r", seq), { error: "bad-seq" }, String(seq));
 		assert.deepEqual(await l.settleCrashed("r", seq), { error: "bad-seq" }, String(seq));
 	}
-	assert.deepEqual(await l.recordHold("r", 1, { amountMicros: -1, keys: [] }), { error: "bad-hold" });
+	assert.deepEqual(await l.recordHold("r", 1, { amountTokens: -1, keys: [] }), { error: "bad-hold" });
 	assert.equal(asked, 0);
 	const odd = makeRunBudgetLedger({ redis: { eval: async () => "nope" }, now: clock });
 	assert.deepEqual(await odd.nextSeq("r"), { error: "bad-reply" }, "a reply that is not a container number is not handed out");
@@ -165,26 +165,26 @@ test("two recoveries claiming at once: exactly one reserves the job-count slots"
 	assert.deepEqual(got.sort(), ["carried", "new"]);
 });
 
-test("recordHold writes once per seq, refuses a second write and a bad shape, and a real reserveDollars hold round-trips", { skip: live }, async () => {
+test("recordHold writes once per seq, refuses a second write and a bad shape, and a real reserveTokens hold round-trips", { skip: live }, async () => {
 	const r = await client();
 	const l = makeRunBudgetLedger({ redis: r, now: clock });
 	const id = runId("record");
 	assert.deepEqual(await l.recordHold(id, 1, HOLD), { ok: true });
-	assert.deepEqual(await l.recordHold(id, 1, { amountMicros: 1, keys: [] }), { error: "exists" });
-	assert.deepEqual(JSON.parse(await r.hget(runBudgetKeyFor(id), "h1")), { amountMicros: HOLD.amountMicros, keys: HOLD.keys, ledgers: HOLD.ledgers }, "the first record stands");
+	assert.deepEqual(await l.recordHold(id, 1, { amountTokens: 1, keys: [] }), { error: "exists" });
+	assert.deepEqual(JSON.parse(await r.hget(runBudgetKeyFor(id), "h1")), { amountTokens: HOLD.amountTokens, keys: HOLD.keys, ledgers: HOLD.ledgers }, "the first record stands");
 	assert.deepEqual(await l.recordHold(id, 2, { ...HOLD, keys: ["budget:9999"] }), { error: "bad-hold" });
 	assert.equal(await r.hexists(runBudgetKeyFor(id), "s2"), 0, "a refused shape writes nothing");
 	assert.equal(await l.settle(id, 1), "moved");
 	assert.deepEqual(await l.recordHold(id, 1, HOLD), { error: "exists" }, "a terminal hold is never put back to held");
-	assert.deepEqual((await l.read(id)).holds, [{ seq: 1, state: "settled", amountMicros: 2_000_000 }]);
+	assert.deepEqual((await l.read(id)).holds, [{ seq: 1, state: "settled", amountTokens: 2_000_000 }]);
 
-	// The hold reserveDollars really returns, in this file's own database, is accepted as it is.
+	// The hold reserveTokens really returns, in this file's own database, is accepted as it is.
 	const now = new Date(AT_MS);
-	const res = await reserveDollars(r, { ledgers: [{ keyPrefix: "budget:usd", caps: { day: 10_000_000, week: null, month: 10_000_000 } }, { keyPrefix: SCOPE, caps: { day: null, week: 10_000_000, month: null } }], amountMicros: 1_500_000, now });
+	const res = await reserveTokens(r, { ledgers: [{ keyPrefix: "budget:tok", caps: { day: 10_000_000, week: null, month: 10_000_000 } }, { keyPrefix: SCOPE, caps: { day: null, week: 10_000_000, month: null } }], amountTokens: 1_500_000, now });
 	assert.equal(res.allowed, true);
 	assert.deepEqual(await l.recordHold(id, 3, res.hold), { ok: true });
 	assert.deepEqual(JSON.parse(await r.hget(runBudgetKeyFor(id), "h3")), res.hold);
-	const zero = await reserveDollars(r, { ledgers: [], amountMicros: 0, now });
+	const zero = await reserveTokens(r, { ledgers: [], amountTokens: 0, now });
 	assert.deepEqual(await l.recordHold(id, 4, zero.hold), { ok: true }, "the zero hold, which carries no ledgers");
 });
 
@@ -324,7 +324,7 @@ test("read reports an unparseable hold record as an unknown amount rather than g
 	const l = makeRunBudgetLedger({ redis: r, now: clock });
 	const id = runId("read-bad");
 	await r.hset(runBudgetKeyFor(id), "s1", "held", "h1", "{not json");
-	assert.deepEqual(await l.read(id), { slot: null, seq: 0, at: null, holds: [{ seq: 1, state: "held", amountMicros: null }] });
+	assert.deepEqual(await l.read(id), { slot: null, seq: 0, at: null, holds: [{ seq: 1, state: "held", amountTokens: null }] });
 });
 
 /** mulberry32: a seeded generator, so a failing interleaving is reproducible from the seed in the message. */

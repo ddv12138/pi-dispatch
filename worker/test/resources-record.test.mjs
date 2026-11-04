@@ -57,7 +57,7 @@ test("a completed run's record carries its resources", { skip }, async () => {
 test("a cancel acknowledged while the container ran keeps what that container used", { skip }, async () => {
 	const ac = new AbortController();
 	// The container exits 1 on its own after the operator's cancel was acknowledged: the job ends as the cancel, and the
-	// spent attempt's resources stay with it, beside its tokens and dollars.
+	// spent attempt's resources stay with it, beside its tokens and tokens.
 	const { processor, records } = harness(async () => {
 		ac.abort("operator-cancel");
 		return { code: 1, aborted: false, turns: 1, resources: USED };

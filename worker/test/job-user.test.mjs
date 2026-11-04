@@ -228,7 +228,7 @@ test("measured labs: each daemon's facts decide the mode the ground truth suppor
 
 test("Docker Desktop on Linux is refused unless the release is WSL, which falls through to the ordinary rows", () => {
 	assert.equal(decideJobUser({ ...linux, endpoint: LOCAL, daemon: answered("desktop"), socket: { uid: 1234, gid: 1234 } }).cause, "desktop-linux-userns");
-	const wsl = { ...linux, release: "5.15.153.1-microsoft-standard-WSL2" };
+	const wsl = { ...linux, release: "5.15.153.1-tokensoft-standard-WSL2" };
 	assert.deepEqual(decideJobUser({ ...wsl, endpoint: LOCAL, daemon: answered("desktop"), socket: { uid: 0, gid: 1001 } }), { mode: "worker", user: "1234:1234", cause: null, reason: null });
 });
 

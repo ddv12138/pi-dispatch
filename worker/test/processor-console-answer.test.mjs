@@ -13,7 +13,7 @@ import { computeZeroTouch } from "../src/zero-touch.mjs";
 // `not-parked` gate and before any spend; the queue carries who answered and nothing else; and the console's reserve
 // estimate is the worker's own hold for the same job.
 
-const USD = 1_000_000;
+const TOKENS = 1_000_000;
 const NOW = new Date("2026-10-15T12:00:00Z");
 
 /** Every command in order, so a test can say what happened BEFORE the trail comment. */
@@ -191,40 +191,40 @@ test("the answer bound: scrubbed first, refused when empty or above 8 KiB, never
 
 // ---- the reserve estimate is the worker's hold ----
 
-/** What the worker holds in its day dollar window for `data` under `overlay`/`env`: the real effectiveJobOf + runJob. */
+/** What the worker holds in its day token window for `data` under `overlay`/`env`: the real effectiveJobOf + runJob. */
 async function workerHold(data, { overlay = {}, env = {}, modelEndpoints = null } = {}) {
-	const settings = resolveSettings({ provider: env.PI_PROVIDER ?? "anthropic", model: env.PI_MODEL ?? "claude-sonnet-5-5", maxTurns: 20, maxCostUsd: env.PI_MAX_COST_USD ?? null, dailyCostUsd: null, weeklyCostUsd: null, monthlyCostUsd: null }, { overlay });
+	const settings = resolveSettings({ provider: env.PI_PROVIDER ?? "anthropic", model: env.PI_MODEL ?? "claude-sonnet-5-5", maxTurns: 20, maxTokens: env.PI_MAX_TOKENS ?? null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null }, { overlay });
 	const job = effectiveJobOf(data, settings, null);
-	const { deps: d, calls } = deps({ dollarCaps: { day: 100 * USD, week: null, month: null }, modelEndpoints });
+	const { deps: d, calls } = deps({ tokenCaps: { day: 100 * TOKENS, week: null, month: null }, modelEndpoints });
 	const r = await runJob(job, d);
 	assert.equal(r.outcome, "completed");
-	const reserve = calls.find((c) => c.startsWith("incrby:budget:usd:"));
+	const reserve = calls.find((c) => c.startsWith("incrby:budget:tok:"));
 	return reserve ? Number(reserve.split(":").pop()) : 0;
 }
 
 test("estimateReserve equals what the worker holds for the same job: trigger narrowing, overlay over env, zero-rated", async () => {
 	const forge = { kind: "github", repo: "org/repo", target: { type: "issue", number: 7 }, flow: "fix" };
-	for (const [what, data, opts, micros] of [
-		["the deployment cap from env", forge, { env: { PI_MAX_COST_USD: "2" } }, 2 * USD],
-		["the overlay outranks env", forge, { overlay: { maxCostUsd: "3" }, env: { PI_MAX_COST_USD: "2" } }, 3 * USD],
-		["a trigger cap narrows", { ...forge, maxCostUsd: "1.25" }, { env: { PI_MAX_COST_USD: "2" } }, 1_250_000],
-		["a trigger cap cannot widen", { ...forge, maxCostUsd: "9" }, { env: { PI_MAX_COST_USD: "2" } }, 2 * USD],
+	for (const [what, data, opts, tokens] of [
+		["the deployment cap from env", forge, { env: { PI_MAX_TOKENS: "2" } }, 2 * TOKENS],
+		["the overlay outranks env", forge, { overlay: { maxTokens: "3" }, env: { PI_MAX_TOKENS: "2" } }, 3 * TOKENS],
+		["a trigger cap narrows", { ...forge, maxTokens: "1.25" }, { env: { PI_MAX_TOKENS: "2" } }, 1_250_000],
+		["a trigger cap cannot widen", { ...forge, maxTokens: "9" }, { env: { PI_MAX_TOKENS: "2" } }, 2 * TOKENS],
 	]) {
 		const est = estimateReserve(data, opts);
-		assert.deepEqual(est, { slots: 1, dollarsMicros: micros, capMicros: micros, zeroRated: false }, what);
-		assert.equal(await workerHold(data, opts), est.dollarsMicros, `${what}: the worker holds the same`);
+		assert.deepEqual(est, { slots: 1, tokensTokens: tokens, capTokens: tokens, zeroRated: false }, what);
+		assert.equal(await workerHold(data, opts), est.tokensTokens, `${what}: the worker holds the same`);
 	}
 	// Zero-rated: every callable model on a declared endpoint at zero cost. The worker holds nothing, and so says the estimate.
 	const modelEndpoints = { endpoints: [{ id: "mac-ollama", host: "host.docker.internal", port: 11434, slots: 2, keyless: true }], models: { providers: { "local-ollama": { api: "openai-completions", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "$PI_DISPATCH_KEYLESS", models: [{ id: "q" }] } } } };
 	const local = { ...forge, provider: "local-ollama", model: "q" };
-	const zero = estimateReserve(local, { env: { PI_MAX_COST_USD: "2" }, modelEndpoints });
-	assert.deepEqual(zero, { slots: 1, dollarsMicros: 0, capMicros: 2 * USD, zeroRated: true });
-	assert.equal(await workerHold(local, { env: { PI_MAX_COST_USD: "2" }, modelEndpoints }), 0);
+	const zero = estimateReserve(local, { env: { PI_MAX_TOKENS: "2" }, modelEndpoints });
+	assert.deepEqual(zero, { slots: 1, tokensTokens: 0, capTokens: 2 * TOKENS, zeroRated: true });
+	assert.equal(await workerHold(local, { env: { PI_MAX_TOKENS: "2" }, modelEndpoints }), 0);
 	// Without the endpoint snapshot the estimate fails closed to the cap: never smaller than what the worker holds.
-	assert.equal(estimateReserve(local, { env: { PI_MAX_COST_USD: "2" } }).dollarsMicros, 2 * USD);
+	assert.equal(estimateReserve(local, { env: { PI_MAX_TOKENS: "2" } }).tokensTokens, 2 * TOKENS);
 	// No cap anywhere: nothing to hold, and the estimate says so rather than inventing a figure.
-	assert.deepEqual(estimateReserve(forge, { env: {} }), { slots: 1, dollarsMicros: null, capMicros: null, zeroRated: false });
-	assert.match(estimateReserve(forge, { overlay: { maxCostUsd: "1e3" } }).invalid, /maxCostUsd must be a dollar amount/);
+	assert.deepEqual(estimateReserve(forge, { env: {} }), { slots: 1, tokensTokens: null, capTokens: null, zeroRated: false });
+	assert.match(estimateReserve(forge, { overlay: { maxTokens: "1e3" } }).invalid, /maxTokens must be a token count/);
 });
 
 test("human touch lineage names the exact park only after the runner proves a resume, using receipt time", async () => {

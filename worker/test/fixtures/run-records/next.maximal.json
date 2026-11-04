@@ -13,9 +13,9 @@
     "input": 210000,
     "output": 18000,
     "total": 228000,
-    "cost": 1.86,
     "metered": 228000,
-    "calls": 31
+    "calls": 31,
+    "usageUnreported": 0
   },
   "usage": {
     "v": 1,
@@ -32,9 +32,7 @@
         "cacheWrite": 8000,
         "cacheWrite1h": 0,
         "reasoning": 2000,
-        "total": 217000,
-        "cost": 1.8,
-        "unpriced": 0
+        "total": 217000
       },
       {
         "provider": "anthropic",
@@ -46,9 +44,7 @@
         "cacheWrite": 0,
         "cacheWrite1h": 0,
         "reasoning": 0,
-        "total": 11000,
-        "cost": 0.06,
-        "unpriced": 0
+        "total": 11000
       }
     ]
   },
@@ -89,9 +85,9 @@
   },
   "host": "mini-2",
   "backend": "openshell",
-  "dollars": {
-    "reservedMicros": 3000000,
-    "settledMicros": 1860000,
+  "tokensWindows": {
+    "reservedTokens": 240000,
+    "settledTokens": 228000,
     "basis": "metered",
     "modelBasis": "metered",
     "reservedIn": {
@@ -113,8 +109,7 @@
       "file_issue": 0.2,
       "ignore": 0.1
     },
-    "confidence": 0.7,
-    "costUsd": 0.002
+    "confidence": 0.7
   },
   "approval": {
     "requestId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
@@ -274,5 +269,5 @@
     }
   ],
   "touchLineageSkipped": "source-unavailable",
-  "v": 1
+  "v": 2
 }

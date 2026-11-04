@@ -91,12 +91,11 @@ import { makeCheckOnceSpent, makeCheckPortfolioFlag, makeCheckWaitSkew, makeDisa
 import { makeBundleResolver } from "./secret-bundles.mjs";
 import { WATCH_DEBOUNCE_MS, changedWhileArming, makeWatchCloser, readBeforeArming } from "./watch-closer.mjs";
 import { loadPauseWindows, PAUSE_WINDOWS_VERSION, pauseUntilMs } from "./pause-windows.mjs";
-import { checkProjectRows, danglingProjectRows, dollarRowsWithoutCap, makeInFlight, loadScopedLimits, SCOPED_LIMITS_VERSION, scopeClaimRows } from "./scoped-limits.mjs";
+import { checkProjectRows, danglingProjectRows, tokenRowsWithoutCap, makeInFlight, loadScopedLimits, SCOPED_LIMITS_VERSION, scopeClaimRows } from "./scoped-limits.mjs";
 import { escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
 import { envelopeDigest, envelopeInsideJobPaths, loadEnvelopeChecked } from "./envelope.mjs";
 import { NO_ENVELOPE_FINGERPRINT, makeAllocationAudit, makeAllocationLogReaper, makeAllocationState } from "./allocation.mjs";
 import { makeConsoleAuditReaper } from "./console-audit.mjs";
-import { optionalUsdMicros } from "./money.mjs";
 import { makeOnFailure } from "./on-failure.mjs";
 import { makeHookRunsPublisher } from "./hook-runs.mjs";
 import { makeWaitChecker } from "./wait-check.mjs";
@@ -127,7 +126,7 @@ import { readProgressKey } from "./run-progress.mjs";
 import { makeStatusCommenter, makeStatusCommentRegistry, renderStatusText, STATUS_OUTCOMES, STATUS_RETRYING } from "./status-comment.mjs";
 import { readOverlay, resolveSettings, SETTINGS_VERSION } from "./runtime-settings.mjs";
 import { JOB_DATA_VERSION } from "./job-data-version.mjs";
-import { usdFingerprint } from "./dollar-fingerprint.mjs";
+import { tokenFingerprint } from "./token-fingerprint.mjs";
 import { authoredCron, envelopeJobPaths, loadSchedules, servedSchedules } from "./schedules.mjs";
 import { makeStallGuard } from "./scheduler-stall-guard.mjs";
 import { makeWorkspaceCheckpointer } from "./workspace-checkpoint.mjs";
@@ -436,7 +435,7 @@ export function reloadScopedLimits(config, ref, log, deploymentCap = null, pair 
 		const other = pair ? pairWith(config, next, pair, "limits") : null;
 		ref.current = next;
 		log("scoped_limits_reloaded", { count: ref.current.length });
-		if (deploymentCap) warnDollarRowsWithoutCap(ref.current, deploymentCap(), log);
+		if (deploymentCap) warnTokenRowsWithoutCap(ref.current, deploymentCap(), log);
 		if (other) {
 			pair.projects.current = other;
 			log("projects_reloaded", { count: other.length, with: "scoped-limits" });
@@ -489,13 +488,13 @@ function pairWith(config, next, pair, side) {
 }
 
 /**
- * PR #549's review: a `scoped-limits.json` dollar row on a deployment with no per-job cap (env and overlay merged)
- * refuses every job it applies to as `config-refused`, unless that job's trigger sets `run.maxCostUsd`. So it is a
+ * PR #549's review: a `scoped-limits.json` token row on a deployment with no per-job budget (env and overlay merged)
+ * refuses every job it applies to as `config-refused`, unless that job's trigger sets `run.maxTokens`. So it is a
  * WARNING at load and at each reload, never a refusal: the rows by index and kind, never a scope string.
  */
-export function warnDollarRowsWithoutCap(limits, deploymentMaxCostUsd, log) {
-	const rows = dollarRowsWithoutCap(limits, deploymentMaxCostUsd);
-	if (rows.length > 0) log("scoped_limits_dollar_rows_without_cap", { rows });
+export function warnTokenRowsWithoutCap(limits, deploymentMaxTokens, log) {
+	const rows = tokenRowsWithoutCap(limits, deploymentMaxTokens);
+	if (rows.length > 0) log("scoped_limits_token_rows_without_budget", { rows });
 }
 
 /**
@@ -617,10 +616,10 @@ export function makeEnvelopeJobPaths(config, io = {}) {
  * `envelope_reload_invalid`; the last good copy can never be one a job wrote, because every reload re-runs the
  * containment check. A changed digest logs `envelope_reloaded` and calls `onChange` (the re-base, or the mismatch).
  */
-export function reloadEnvelope(config, ref, log, { projects, limits, maxCostMicros = () => null, jobPaths, onChange = () => {} }) {
+export function reloadEnvelope(config, ref, log, { projects, limits, maxTokens = () => null, jobPaths, onChange = () => {} }) {
 	let next;
 	try {
-		next = loadEnvelopeChecked(config, { projects: projects?.current ?? [], limits: limits?.current ?? [], maxCostMicros: maxCostMicros(), jobPaths: jobPaths() });
+		next = loadEnvelopeChecked(config, { projects: projects?.current ?? [], limits: limits?.current ?? [], maxTokens: maxTokens(), jobPaths: jobPaths() });
 	} catch (err) {
 		log("envelope_reload_invalid", { reason: escapeControls(err?.message) });
 		return;
@@ -1030,10 +1029,10 @@ export async function startWorker(
 	// reserves it against its share), and must lie outside every host path a job container can see, which is checked
 	// with this load and again with every reload. A mutable ref `{ current, digest }`; null when PI_ENVELOPE_FILE is
 	// unset, and then nothing below governs anything.
-	const envelopeCap = () => {
+	const envelopeBudget = () => {
 		try {
 			const s = resolveSettings(config, readOverlay(config.settingsFile));
-			return optionalUsdMicros(s.invalid ? config.maxCostUsd : s.maxCostUsd, "maxCostUsd");
+			return s.invalid ? config.maxTokens : s.maxTokens;
 		} catch {
 			return null;
 		}
@@ -1041,7 +1040,7 @@ export async function startWorker(
 	const envelopeJobPathsNow = makeEnvelopeJobPaths(config);
 	const envelope = { current: null, digest: null };
 	if (config.envelopeFile !== null && config.envelopeFile !== undefined) {
-		envelope.current = loadEnvelopeChecked(config, { projects: projects.current, limits: scopedLimits.current, maxCostMicros: envelopeCap(), jobPaths: envelopeJobPathsNow() }, { io: recording("envelope", config.envelopeFile) });
+		envelope.current = loadEnvelopeChecked(config, { projects: projects.current, limits: scopedLimits.current, maxTokens: envelopeBudget(), jobPaths: envelopeJobPathsNow() }, { io: recording("envelope", config.envelopeFile) });
 		envelope.digest = envelope.current === null ? null : envelopeDigest(envelope.current);
 		log("envelope_loaded", { digest: envelope.digest, window: envelope.current?.window ?? null, delegation: envelope.current?.delegation?.enabled === true });
 	}
@@ -1976,13 +1975,13 @@ export async function startWorker(
 	// the per-job path enforce the refusal (getSettings already logged the invalid reason).
 	const bootSettings = getSettings();
 	const bootConcurrency = bootSettings.invalid ? config.concurrency : bootSettings.concurrency;
-	// PR #549's review: the merged per-job cap, for the scoped-limits dollar-row warning at boot and at each reload.
+	// PR #549's review: the merged per-job budget, for the scoped-limits token-row warning at boot and at each reload.
 	// An invalid overlay falls back to the env value, the same fallback as the slot count above.
-	const deploymentMaxCostUsd = () => {
+	const deploymentMaxTokens = () => {
 		const s = getSettings();
-		return s.invalid ? config.maxCostUsd : s.maxCostUsd;
+		return s.invalid ? config.maxTokens : s.maxTokens;
 	};
-	warnDollarRowsWithoutCap(scopedLimits.current, bootSettings.invalid ? config.maxCostUsd : bootSettings.maxCostUsd, log);
+	warnTokenRowsWithoutCap(scopedLimits.current, bootSettings.invalid ? config.maxTokens : bootSettings.maxTokens, log);
 
 	// INT-OUTBOX-CONTRACT chain collector: the host-side reader of a completed local parent's /outbox. It
 	// enqueues chained children onto the CRON queue via enqueueLocalJob -- this host's own when one is
@@ -2301,7 +2300,7 @@ export async function startWorker(
 		// profile on restart must start attracting that work within one beat, and one that loses it must stop.
 		//
 		// Issue #704: the secret half is the profiles this host would RESOLVE, not only the env-declared ones. The
-		// overlay is read here each beat (without a log, `fpUsd`'s reason), so a profile declared in the panel is
+		// overlay is read here each beat (without a log, `fpTok`'s reason), so a profile declared in the panel is
 		// advertised within one beat of the write when its resolver sits inside PI_SECRET_RESOLVER_ROOTS, and
 		// never when it does not. A name declared in both sources makes this host refuse every secrets job, so it
 		// then advertises no secret profile at all. An overlay the job path refuses advertises the env profiles,
@@ -2323,16 +2322,16 @@ export async function startWorker(
 		// here is no opinion at all, and such a host must never be able to disagree with one that has one.
 		fpCron: () => cronFingerprint(authoredCron(config), { tz: hostTz }) ?? "",
 		cronCount: () => schedules.current.length,
-		// Issue #501 part 6: a fingerprint of the dollar caps this host judges the SHARED dollar counters against (the four
-		// settings as a job resolves them, and the scoped-limits dollar rows), so doctor can name two hosts that would
-		// admit different jobs against one counter. A thunk for `fpCron`'s reason: the overlay and the scoped-limits file
-		// change without a restart. Read without a log, so an invalid overlay is not logged on every beat (each job
-		// logs it already). With an invalid overlay it hashes the env values, the slot count's fallback above; such a
-		// host refuses every job (settings-overlay-invalid) until the file is fixed. The env list rides along: it decides
-		// which model rows a job without its own list reserves in.
-		fpUsd: () => {
+		// A fingerprint of the token caps this host judges the SHARED token counters against (the window caps and the
+		// per-job budget as a job resolves them, and the scoped-limits token rows), so doctor can name two hosts that
+		// would admit different jobs against one counter. A thunk for `fpCron`'s reason: the overlay and the
+		// scoped-limits file change without a restart. Read without a log, so an invalid overlay is not logged on every
+		// beat (each job logs it already). With an invalid overlay it hashes the env values, the slot count's fallback
+		// above; such a host refuses every job (settings-overlay-invalid) until the file is fixed. The env list rides
+		// along: it decides which model rows a job without its own list reserves in.
+		fpTok: () => {
 			const settings = resolveSettings(config, readOverlay(settingsFile));
-			return usdFingerprint(settings.invalid ? config : settings, scopedLimits.current, config.allowedModels);
+			return tokenFingerprint(settings.invalid ? config : settings, scopedLimits.current, config.allowedModels);
 		},
 		// Issue #499 part C: a fingerprint of the LIVE projects (ids and member hashes, never a name), so doctor can name a
 		// host whose projects.json differs. Each host resolves its own jobs' project from its own copy, while the project
@@ -3574,17 +3573,17 @@ export async function startWorker(
 
 		// Issue #499 part B: the two files a project row joins reload as a pair; the deployment cap rides along so a limits
 		// list either reload commits gets the dollar-rows-without-cap warning.
-		const projectPair = makeProjectPair(scopedLimits, projects, deploymentMaxCostUsd);
+		const projectPair = makeProjectPair(scopedLimits, projects, deploymentMaxTokens);
 		// Issue #504 part B: the envelope reloads with the pair, since its floors are judged against both files: a committed
 		// limits or projects edit re-judges it from disk, and its own edits are judged against the live pair.
-		const envelopeCtx = { projects, limits: scopedLimits, maxCostMicros: envelopeCap, jobPaths: envelopeJobPathsNow, onChange: () => void reconcileAllocation("reload") };
+		const envelopeCtx = { projects, limits: scopedLimits, maxTokens: envelopeBudget, jobPaths: envelopeJobPathsNow, onChange: () => void reconcileAllocation("reload") };
 		if (config.envelopeFile) {
 			projectPair.afterCommit = () => reloadEnvelope(config, envelope, log, envelopeCtx);
 			extraClosers.push(watchEnvelopeFn(config, envelope, log, atBoot.envelope, envelopeCtx));
 		}
 		// Issue #242 live edit: hot-swap the scoped limits on file change, keeping last-good on a bad edit.
 		if (config.scopedLimitsFile) {
-			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, deploymentMaxCostUsd, projectPair));
+			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, deploymentMaxTokens, projectPair));
 		}
 
 		// Issue #499 live edit: the projects file, keep-last-good on a bad edit.

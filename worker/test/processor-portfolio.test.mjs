@@ -151,14 +151,14 @@ const skip = mod ? false : "index.mjs could not import here (bullmq)";
 
 test("the pickup hands the processor this host's envelope delegation, so the gate judges the loaded envelope (#505)", { skip }, async () => {
 	const PROJECTS = [{ id: "shop", members: ["github:acme/web"] }];
-	const envelopeOf = (delegation) => parseEnvelope(JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10" }, ...(delegation ? { delegation } : {}) }), "/e/envelope.json", { projects: PROJECTS, maxCostMicros: 1_000_000 });
+	const envelopeOf = (delegation) => parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: "100", floorsTokens: { shop: "10" }, ...(delegation ? { delegation } : {}) }), "/e/envelope.json", { projects: PROJECTS, maxTokens: 1_000_000 });
 	const pickup = async (allocation) => {
 		const seen = { containers: 0, logs: [] };
 		const processor = mod.makeProcessor({
 			cancelJob: () => {},
 			stopContainer: () => {},
 			redis: { incr: async () => 1, decr: async () => 0, incrby: async () => 1, decrby: async () => 0, eval: async () => [0, 0], expire: async () => {}, get: async () => null },
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxCostUsd: 1 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 1 }),
 			scopedLimits: () => [],
 			projects: () => parseProjects(JSON.stringify({ version: 1, projects: PROJECTS }), "p.json"),
 			allocation,

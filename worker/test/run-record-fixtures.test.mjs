@@ -15,13 +15,13 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The run-record fixtures (issue #761): the record each released `buildRecord` makes from the shared cases, one shape
 // per release that changed it (`manifest.json`, written by `.github/scripts/run-record-fixtures.mjs`), and one record of
-// a version no release has written yet (`synthetic-v2.json`). Every instant below is read from the fixtures, never the
+// a version no release has written yet (`synthetic-v3.json`). Every instant below is read from the fixtures, never the
 // wall clock, so the suite reads the same 399 days from now.
 
 const FIXTURES = fileURLToPath(new URL("./fixtures/run-records/", import.meta.url));
 const readJson = (name) => JSON.parse(readFileSync(join(FIXTURES, name), "utf8"));
 const manifest = readJson("manifest.json");
-const SYNTHETIC = readJson("synthetic-v2.json");
+const SYNTHETIC = readJson("synthetic-v3.json");
 const HOUR = 60 * 60 * 1000;
 
 /** A shape's five records, each beside the input it was built from. */
@@ -97,7 +97,7 @@ test("the manifest lists every release once and in order, each shape under its f
 	const named = new Set(manifest.shapes.flatMap((s) => RUN_RECORD_CASES.map((name) => `${s.id}.${name}.json`)));
 	const onDisk = readdirSync(FIXTURES).filter((n) => FIXTURE_NAME_RE.test(n));
 	assert.deepEqual(onDisk.sort(), [...named].sort());
-	assert.deepEqual(readdirSync(FIXTURES).filter((n) => !FIXTURE_NAME_RE.test(n)).sort(), ["cases.mjs", "manifest.json", "synthetic-v2.json"]);
+	assert.deepEqual(readdirSync(FIXTURES).filter((n) => !FIXTURE_NAME_RE.test(n)).sort(), ["cases.mjs", "manifest.json", "synthetic-v3.json"]);
 });
 
 test("releaseTags keeps vX.Y.Z tags only, in version order rather than text order", () => {
@@ -122,21 +122,21 @@ test("every shape reads back whole by its job id, says what its case was, and is
 			assert.equal(record.attempt, input.job.attemptsMade + (since(shape, "v2.0.0") ? 1 : 0), at);
 			assert.equal(record.host, since(shape, "v1.7.0") ? input.host : undefined, at);
 			assert.equal(record.project, since(shape, "v3.0.0") ? input.project : undefined, at);
-			// Money, where the shape records it: the settled micro-dollars the run reported, or null for a run with none.
-			if (since(shape, "v3.0.0")) assert.equal(record.dollars?.settledMicros ?? null, sourceOf(input).dollars?.settledMicros ?? null, at);
-			else assert.equal(Object.hasOwn(record, "dollars"), false, at);
-			assert.equal(recordVersionOf(record), 1, at);
+			// The reservation's outcome rides `tokensWindows` from this build; no released shape wrote one.
+			if (since(shape, NEXT_ID)) assert.equal(record.tokensWindows?.settledTokens ?? null, sourceOf(input).tokensWindows?.settledTokens ?? null, at);
+			else assert.equal(Object.hasOwn(record, "tokensWindows"), false, at);
+			assert.equal(recordVersionOf(record), since(shape, NEXT_ID) ? 2 : 1, at);
 			assert.equal(recordReadable(record), true, at);
 			if (shape.id === NEXT_ID) assert.equal(Object.keys(record).at(-1), "v", at);
 			else assert.equal(Object.hasOwn(record, "v"), false, `${at}: no release wrote one`);
 		}
 		const synthetic = readRecord(SYNTHETIC.jobId);
 		assert.deepEqual(synthetic, SYNTHETIC, "a newer record is read back as it is, not refused");
-		assert.equal(recordVersionOf(synthetic), 2);
+		assert.equal(recordVersionOf(synthetic), 3);
 		assert.equal(recordReadable(synthetic), false);
-		assert.equal(recordReadable(synthetic, { supported: 2 }), true);
+		assert.equal(recordReadable(synthetic, { supported: 3 }), true);
 	}
-	assert.equal(RUN_RECORD_VERSION, 1);
+	assert.equal(RUN_RECORD_VERSION, 2);
 });
 
 test("recordVerdict judges every shape, and the newer record, on the core alone", () => {

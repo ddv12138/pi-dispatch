@@ -23,21 +23,27 @@ export function catalogDiff(before, after, providers) {
 	return changed;
 }
 
-/** Same worst-call bound as enforcement, for an explicitly disclosed empty-text fixture, not a job forecast. */
-export function proposalCallBound(model, outputTokens = 4096, callCostBound) {
-	const micros = callCostBound("streamSimple", model, { messages: [] }, { maxTokens: outputTokens }, {});
-	return Number.isFinite(micros) ? micros / 1e6 : null;
+/** A public-report reference price for ONE full-context call, from the catalog's own rate table (pi's models.json
+ * keeps its prices; the worker's budgets are token-denominated and this figure enforces nothing). */
+export function proposalCallPrice(model, outputTokens = 4096) {
+	const rates = model?.cost ?? null;
+	const context = Number.isFinite(model?.contextWindow) ? model.contextWindow : 0;
+	const tokens = context + outputTokens;
+	const input = rates?.input, cached = rates?.cacheRead ?? 0;
+	const rate = Number.isFinite(input) ? Math.max(0, input) : null;
+	const out = rates?.output;
+	return rate === null || !Number.isFinite(out) ? null : (Math.max(0, tokens) * rate + Math.max(0, outputTokens) * Math.max(0, out) - Math.max(0, outputTokens) * Math.max(0, cached)) / 1;
 }
 
-export function renderCatalogProposal(changes, { providers, capsUsd, outputTokens = 4096 }, callCostBound) {
-	const lines = ["## Model catalog proposals", "", `Public report scope: ${providers.join(", ")}. Reference caps: ${capsUsd.map((n) => `$${n}`).join(", ")}; these are public report inputs, not deployment caps.`, "", `First-call bounds use the runner's guard with an empty-text context and maxTokens=${outputTokens}; actual job prompts, images, thinking and options can increase the bound. Models remain unchanged until a reviewed edit.`, ""];
+export function renderCatalogProposal(changes, { providers, capsUsd, outputTokens = 4096 }) {
+	const lines = ["## Model catalog proposals", "", `Public report scope: ${providers.join(", ")}. Reference caps: ${capsUsd.map((n) => `$${n}`).join(", ")}; these are public report inputs, not deployment caps.`, "", `Reference prices are one full-context call (the row's context window plus ${outputTokens} output tokens) at the catalog's own rates; actual job prompts, images and thinking change the count. Models remain unchanged until a reviewed edit.`, ""];
 	if (!changes.length) lines.push("No added, removed or repriced chat models in this scope.");
 	for (const change of changes) {
-		const bound = change.after ? proposalCallBound(change.after, outputTokens, callCostBound) : null;
-		const price = bound === null ? "not boundable" : `$${bound.toFixed(6)}`;
-		const beforeBound = change.before ? proposalCallBound(change.before, outputTokens, callCostBound) : null;
-		const previous = change.before ? `; previous reference bound: ${beforeBound === null ? "not boundable" : `$${beforeBound.toFixed(6)}`}` : "";
-		lines.push(`- ${change.kind}: \`${change.ref}\`; reference first-call bound: ${change.after ? price : "removed"}${previous}${bound === null ? "" : `; ${capsUsd.map((cap) => `${bound <= cap ? "fits" : "exceeds"} $${cap}`).join(", ")}`}.`);
+		const price = change.after ? proposalCallPrice(change.after, outputTokens) : null;
+		const shown = price === null ? "no usable rate table" : `$${price.toFixed(6)}`;
+		const beforePrice = change.before ? proposalCallPrice(change.before, outputTokens) : null;
+		const previous = change.before ? `; previous reference price: ${beforePrice === null ? "no usable rate table" : `$${beforePrice.toFixed(6)}`}` : "";
+		lines.push(`- ${change.kind}: \`${change.ref}\`; reference full-context call: ${change.after ? shown : "removed"}${previous}${price === null ? "" : `; ${capsUsd.map((cap) => `${price <= cap ? "fits" : "exceeds"} $${cap}`).join(", ")}`}.`);
 	}
 	return lines.join("\n");
 }

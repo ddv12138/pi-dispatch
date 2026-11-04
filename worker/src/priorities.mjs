@@ -8,9 +8,9 @@
  * test all call it, and none of them may drag config.mjs's fs and os in with it. Nothing here reads a clock, a file or
  * Valkey. The callers pass `now`, the envelope and the current effective vector.
  *
- * Money is integer micro-dollars as a Number at every edge (money.mjs). Inside `allocate` and `rebase` it is BigInt:
- * a remainder times a weight can pass 2^53 (a $1,000,000 remainder is 1e12 micro-dollars, times 1000 is 1e15, and the
- * step blend multiplies a difference by another amount), and a float there would drift by a micro-dollar, which a
+ * Amounts are integer tokens as a Number at every edge. Inside `allocate` and `rebase` they are BigInt:
+ * a remainder times a weight can pass 2^53 (a 1e12-token remainder times 1000 is 1e15, and the step blend
+ * multiplies a difference by another amount), and a float there would drift by a token, which a
  * property test of "sums to the total" then catches only sometimes. Each Number that comes in is checked as a safe,
  * non-negative integer, and each that goes out is below the total, which was such an integer.
  *
@@ -33,7 +33,7 @@ export const PLAN_MAX_BYTES = 16 * 1024;
 export const DEFAULT_MAX_PLAN_DAYS = 14;
 /**
  * The envelope entry for every scope in no envelope project. `PROJECT_ID_RE` forbids `_`, so no real project can
- * collide with it, and its dollar keys (`scopeDollarKeyPrefix("project:_other")`) cannot either.
+ * collide with it, and its dollar keys (`scopeTokenKeyPrefix("project:_other")`) cannot either.
  */
 export const OTHER = "_other";
 /** The two writers that may send a plan: the operator's session tool and a flagged portfolio job (issue #505). */
@@ -320,9 +320,9 @@ export function planRefusal({ envelope, writer, parsed, current, now }) {
 
 // ── the arithmetic ─────────────────────────────────────────────────────────────────────────────────────────
 
-/** A Number micro-dollar amount as BigInt, or a TypeError: every amount that comes in is a safe, non-negative integer. */
+/** A Number token amount as BigInt, or a TypeError: every amount that comes in is a safe, non-negative integer. */
 function micros(value, what) {
-	if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${what} must be a non-negative safe integer of micro-dollars`);
+	if (!Number.isSafeInteger(value) || value < 0) throw new TypeError(`${what} must be a non-negative safe integer of tokens`);
 	return BigInt(value);
 }
 
@@ -334,7 +334,7 @@ function floorDiv(a, b) {
 
 /**
  * Split `amount` between `keys` in proportion to `weights` (BigInt, each >= 0), by largest remainder: each key gets
- * floor(amount * w / W), and the micro-dollars left go one each to the largest fractional remainders, ties to the
+ * floor(amount * w / W), and the tokens left go one each to the largest fractional remainders, ties to the
  * earlier key in `keys` order. Sums exactly to `amount` when any weight is above 0; all zero gives every key 0n.
  */
 function largestRemainder(amount, keys, weights) {
@@ -362,7 +362,7 @@ function largestRemainder(amount, keys, weights) {
 function envelopeNumbers(envelope) {
 	const entries = envelopeEntries(envelope);
 	if (!entries.includes(OTHER)) throw new TypeError(`the envelope must carry ${OTHER} among its floors`);
-	const total = micros(envelope?.totalMicros, "envelope.totalMicros");
+	const total = micros(envelope?.totalTokens, "envelope.totalTokens");
 	const floors = {};
 	let sum = 0n;
 	for (const id of entries) {

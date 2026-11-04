@@ -23,9 +23,9 @@ import { hostBudgetSettings } from "./host-budget.mjs";
 import { CONTAINER_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
 import { modelIdProblem, modelListProblem, providerIdProblem } from "./model-ref.mjs";
 import { WORKER_NAME_RE } from "./worker-name.mjs";
+import { checkTokenInvariant, TOKEN_ENV_NAMES, TOKEN_WINDOW_KEYS, RETIRED_DOLLAR_ENV_NAMES, retiredDollarMessage } from "./budget-rule.mjs";
 
 export { WORKER_NAME_RE };
-import { DOLLAR_ENV_NAMES, DOLLAR_WINDOW_KEYS, checkDollarInvariant, optionalUsdMicros } from "./money.mjs";
 
 /**
  * The VALKEY_URL the worker uses when none is set. ONE constant (issue #503's review): doctor judges the model endpoints
@@ -512,15 +512,12 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		maxTurns: positiveInt(env, "PI_MAX_TURNS", 30), // pi has no turn limit; we impose one
 		allowedModels: allowedModelsFrom(env), // issue #502: the deployment's allowed-model list; null = unrestricted. ENV ONLY, never the settings overlay
 		maxTokens: optionalBoundedInt(env, "PI_MAX_TOKENS", 1), // issue #25; null = per-job token budget disabled (lagging in-run backstop)
-		dailyTokenCap: optionalBoundedInt(env, "PI_DAILY_TOKEN_CAP", 1), // issue #25; null = daily token counter disabled (check-AFTER, host-side)
-		// Issue #501. The dollar settings, each an operator's decimal (`"2.50"`) kept AS WRITTEN once it parses, so
-		// the overlay and env carry one kind of value and `effectiveJobOf` converts both to micro-dollars the same
-		// way. Unset or empty is null: no per-job cap, no window. The cross-key rule is below, after the object is
-		// built.
-		maxCostUsd: usdSetting(env, "PI_MAX_COST_USD"),
-		dailyCostUsd: usdSetting(env, "PI_DAILY_COST_USD"),
-		weeklyCostUsd: usdSetting(env, "PI_WEEKLY_COST_USD"),
-		monthlyCostUsd: usdSetting(env, "PI_MONTHLY_COST_USD"),
+		// Issue #25's day cap is the day WINDOW's cap now (DES-TOKEN-RESERVE-AND-SETTLE): reserved pre-container
+		// against `budget:tok:` like the two below it, no longer the lagging check-after counter. Unset or empty is
+		// null: no window. The cross-key rule is below, after the object is built.
+		dailyTokenCap: optionalBoundedInt(env, "PI_DAILY_TOKEN_CAP", 1),
+		weeklyTokenCap: optionalBoundedInt(env, "PI_WEEKLY_TOKEN_CAP", 1),
+		monthlyTokenCap: optionalBoundedInt(env, "PI_MONTHLY_TOKEN_CAP", 1),
 		// Issue #596: the deployment's default job size (`PI_JOB_MEMORY`, `PI_JOB_CPUS`; 4g and 2 when unset), refused here at
 		// boot (exit 2) naming the key, never at a job. A project row's size overrides it (INT-SCOPED-LIMITS-FILE-CONTRACT).
 		// The VALIDATION is this field's job; nothing reads its value. The pickup resolves each job's size from the same two
@@ -707,30 +704,25 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 	// as the two backend fields, and a check woven between properties would depend on key order.
 	refuseBackendShortfall(config);
 	// Issue #501, after the object for the same reason: both rules read more than one key.
-	refuseDollarSettings(config);
+	refuseTokenSettings(config, env);
 
 	return config;
 }
 
-// An optional dollar amount from env (issue #501): unset or empty is null, anything else must parse as money
-// (`parseUsdMicros`) and is kept as the string the operator wrote. The refusal names the variable, never the
-// value, which is `parseUsdMicros`' own rule.
-function usdSetting(env, name) {
-	const raw = env[name];
-	if (raw === undefined || raw === "") return null;
-	optionalUsdMicros(raw, name);
-	return raw;
-}
-
-// The env half of the dollar rule (issue #501). The overlay half runs on MERGED values per job (start.mjs);
-// this one runs on env alone at boot, where an operator is present to read the refusal: a window without a
-// per-job cap (`checkDollarInvariant`), because a window reserves each job's per-job cap and without one there
-// is no amount to reserve. The windows themselves are enforced (dollar-budget.mjs, processor.mjs).
-function refuseDollarSettings(config) {
-	const broken = checkDollarInvariant(config);
+// The env half of the token rule (DES-TOKEN-RESERVE-AND-SETTLE). The overlay half runs on MERGED values per job
+// (runtime-settings.mjs); this one runs on env alone at boot, where an operator is present to read the refusal: a
+// window without a per-job token budget (`checkTokenInvariant`), because a window reserves each job's budget and
+// without one there is no amount to reserve. The windows themselves are enforced (token-budget.mjs, processor.mjs).
+function refuseTokenSettings(config, env) {
+	for (const [key, name] of Object.entries(RETIRED_DOLLAR_ENV_NAMES)) {
+		if (env[name] !== undefined && env[name] !== "") {
+			throw configError(`${name} is set: ${retiredDollarMessage(key)}`);
+		}
+	}
+	const broken = checkTokenInvariant(config);
 	if (broken) {
-		const window = DOLLAR_WINDOW_KEYS.find((key) => config[key] !== null);
-		throw configError(`${DOLLAR_ENV_NAMES[window]} needs PI_MAX_COST_USD: a dollar window reserves each job's per-job cost cap before it starts, so it cannot be set without one`);
+		const window = TOKEN_WINDOW_KEYS.find((key) => config[key] !== null);
+		throw configError(`${TOKEN_ENV_NAMES[window]} needs PI_MAX_TOKENS: a token window reserves each job's per-job token budget before it starts, so it cannot be set without one`);
 	}
 }
 

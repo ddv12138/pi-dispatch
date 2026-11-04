@@ -53,7 +53,6 @@
 import * as nodeFs from "node:fs";
 import * as nodeHttp from "node:http";
 import { join } from "node:path";
-import { formatMicros } from "./money.mjs";
 import { readDeploymentEnv } from "./service-env.mjs";
 
 /** Where the console listens when nothing names it: its own default (`admin/src/console/listen.mjs`). */
@@ -455,13 +454,13 @@ export function endedOf(data) {
 	}
 }
 
-/** The money a preview reserves, as one line, or null. A worker-side reading of the console's `reserve` object. */
+/** The reservation a preview makes, as one line, or null. A worker-side reading of the console's `reserve` object. */
 export function reserveLine(r) {
 	if (!r || typeof r !== "object") return null;
 	if (r.unknown) return "reserve: unknown (the job's data could not be read)";
-	if (r.zeroRated) return "reserve: 1 job slot and $0.00 (every model it may call is zero-rated)";
-	if (Number.isSafeInteger(r.dollarsMicros) && r.dollarsMicros >= 0) return `reserve: 1 job slot and $${formatMicros(r.dollarsMicros)} (the per-job cap) in each dollar window that applies`;
-	return "reserve: 1 job slot (no per-job dollar cap is set)";
+	if (r.zeroRated) return "reserve: 1 job slot and 0 tokens (the job's own cap is 0)";
+	if (Number.isSafeInteger(r.tokens) && r.tokens >= 0) return `reserve: 1 job slot and ${r.tokens} tokens (the per-job budget) in each token window that applies`;
+	return "reserve: 1 job slot (no per-job token budget is set)";
 }
 
 /** An abortable sleep: resolves after `ms`, or at once (false) when `signal` aborts. */

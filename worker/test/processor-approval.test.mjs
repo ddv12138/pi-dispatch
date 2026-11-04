@@ -8,7 +8,7 @@ import { approvalDueKey, approvalTargetKey, makeApprovalStore } from "../src/app
 import { APPROVAL_PARK_NEWER_COMMENT } from "../src/comment-tables.mjs";
 
 const AT = Date.parse("2026-10-28T12:00:00Z");
-const USD = 1_000_000;
+const TOKENS = 1_000_000;
 const request = { requestId: "a".repeat(64), sessionKey: "session-1", action: "deploy:staging" };
 const decision = { requestId: request.requestId, action: request.action, toolCallId: "call-1", decision: "approved", text: "private human text" };
 const audit = { requestId: request.requestId, action: request.action, decision: "approved", actorKind: "forge", actorId: "b".repeat(64), decidedAt: AT };
@@ -21,7 +21,7 @@ function setup(overrides = {}) {
 	const redis = {
 		async incr(key) { calls.push(["count", key]); const value = (values.get(key) ?? 0) + 1; values.set(key, value); return value; },
 		async decr(key) { const value = (values.get(key) ?? 0) - 1; values.set(key, value); return value; },
-		async incrby(key, amount) { calls.push(["dollars", key, amount]); const value = (values.get(key) ?? 0) + amount; values.set(key, value); return value; },
+		async incrby(key, amount) { calls.push(["tokens", key, amount]); const value = (values.get(key) ?? 0) + amount; values.set(key, value); return value; },
 		async decrby(key, amount) { const value = (values.get(key) ?? 0) - amount; values.set(key, value); return value; },
 		async expire() {},
 		async get(key) { calls.push(["read", key]); return null; },
@@ -59,7 +59,7 @@ function setup(overrides = {}) {
 }
 
 function assertNoSpend(calls) {
-	assert.equal(calls.some(([name]) => ["mint", "prepare", "read", "count", "dollars", "container"].includes(name)), false);
+	assert.equal(calls.some(([name]) => ["mint", "prepare", "read", "count", "tokens", "container"].includes(name)), false);
 }
 
 test("approval-store failure retries before the mint, clone, token-cap read or either reserve", async () => {
@@ -111,27 +111,27 @@ test("an approved decision never transfers to another session or to a cold start
 		const out = await runJob(jobOf(), f.deps);
 		assert.equal(out.reason, "approval-session-unavailable");
 		assert.equal(out.budgetReserved, false);
-		assert.equal(f.calls.some(([name]) => ["count", "dollars", "container", "read"].includes(name)), false);
+		assert.equal(f.calls.some(([name]) => ["count", "tokens", "container", "read"].includes(name)), false);
 	}
 });
 
-test("approved budget cap is bounded by deployment and reserved against every applicable dollar ledger", async () => {
-	const caps = { day: 100 * USD, week: null, month: null };
+test("approved budget cap is bounded by deployment and reserved against every applicable token ledger", async () => {
+	const caps = { day: 100 * TOKENS, week: null, month: null };
 	const f = setup({
-		deploymentMaxCostUsd: "3",
-		dollarCaps: caps,
-		scopedDollars: { scope: "org/repo", keyPrefix: "budget:usd:s:repo", caps },
-		projectDollars: { scope: "project:p", keyPrefix: "budget:usd:s:project", caps },
-		modelDollars: [{ ref: "anthropic/m", keyPrefix: "budget:usd:mdl:model", caps }],
+		deploymentMaxTokens: "3",
+		tokenCaps: caps,
+		scopedTokens: { scope: "org/repo", keyPrefix: "budget:tok:s:repo", caps },
+		projectTokens: { scope: "project:p", keyPrefix: "budget:tok:s:project", caps },
+		modelTokens: [{ ref: "anthropic/m", keyPrefix: "budget:tok:mdl:model", caps }],
 	});
-	f.runtime.before = async () => ({ ok: true, request, decision: { ...decision, action: "budget-raise" }, audit, budgetCapUsd: "5" });
-	const out = await runJob(jobOf({ gates: ["budget-raise"], maxCostUsd: "1", maxCostMicros: USD, gateBudgetRaiseUsd: "5" }), f.deps);
+	f.runtime.before = async () => ({ ok: true, request, decision: { ...decision, action: "budget-raise" }, audit, budgetCapTokens: "5" });
+	const out = await runJob(jobOf({ gates: ["budget-raise"], maxTokens: "1", maxTokens: TOKENS, gateBudgetRaiseTokens: "5" }), f.deps);
 	assert.equal(out.outcome, "completed");
-	assert.equal(f.captured().maxCostMicros, 3 * USD);
-	assert.equal(out.dollars.reservedMicros, 3 * USD);
-	const holds = f.calls.filter(([name]) => name === "dollars");
+	assert.equal(f.captured().maxTokens, 3 * TOKENS);
+	assert.equal(out.tokens.reservedTokens, 3 * TOKENS);
+	const holds = f.calls.filter(([name]) => name === "tokens");
 	assert.equal(holds.length, 4);
-	assert.ok(holds.every(([, , amount]) => amount === 3 * USD));
+	assert.ok(holds.every(([, , amount]) => amount === 3 * TOKENS));
 	const containerAt = f.calls.findIndex(([name]) => name === "container");
 	assert.ok(holds.every((hold) => f.calls.indexOf(hold) < containerAt));
 });
@@ -218,7 +218,7 @@ test("a terminal policy refusal after approval closes the consumed request witho
 	const out = await runJob(jobOf(), f.deps);
 	assert.equal(out.reason, "approval-session-unavailable");
 	assert.equal(f.calls.filter(([name]) => name === "approval-finish").length, 1);
-	assert.equal(f.calls.some(([name]) => ["container", "count", "dollars"].includes(name)), false);
+	assert.equal(f.calls.some(([name]) => ["container", "count", "tokens"].includes(name)), false);
 });
 
 test("a real claimed decision survives infrastructure retry but a later policy stop releases its target", { skip: !url && "VALKEY_TEST_URL not set" }, async () => {

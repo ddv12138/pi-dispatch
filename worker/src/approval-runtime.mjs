@@ -60,7 +60,7 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 		finish: ({ requestId, jobId } = {}) => store.finish({ requestId, jobId }),
 		async before(job) {
 			let configInvalid = false;
-			if (job.gates !== undefined || job.gateTimeout !== undefined || job.gateBudgetRaiseUsd !== undefined) {
+			if (job.gates !== undefined || job.gateTimeout !== undefined || job.gateBudgetRaiseTokens !== undefined) {
 				try { validateApprovalConfig(job); } catch { configInvalid = true; }
 			}
 			const found = await store.find(job);
@@ -118,7 +118,7 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 				decision: { requestId: request.requestId, action: request.action, toolCallId: request.toolCallId, decision: request.decision.decision, text: request.decision.text },
 				request,
 				audit: approvalAudit(request),
-				...(request.action === "budget-raise" && request.decision.decision === "approved" ? { budgetCapUsd: job.gateBudgetRaiseUsd } : {}),
+				...(request.action === "budget-raise" && request.decision.decision === "approved" ? { budgetCapTokens: job.gateBudgetRaiseTokens } : {}),
 			};
 		},
 		async afterPark({ job, session, metadata, rawJob = job } = {}) {
@@ -135,7 +135,7 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 			}
 			const createdAt = now();
 			const resumeJob = { ...rawJob };
-			for (const field of ["id", "maxCostMicros", "approvalDecision", "approvalRequestId"]) delete resumeJob[field];
+			for (const field of ["id", "maxTokens", "approvalDecision", "approvalRequestId"]) delete resumeJob[field];
 			const out = await store.publish({
 				requestId, runId: job.id, kind: job.kind, repo: job.repo,
 				target: job.target, action: metadata.action, toolCallId: metadata.toolCallId,

@@ -929,19 +929,19 @@ test("excludeTools rides local and forge job data only when supplied, and never 
 	assert.equal(captured.opts.deduplication.id, dedupFlagged, "the semantic window coalesces flagged and unflagged alike");
 });
 
-test("models and maxCostUsd ride local and forge job data, as written, only when supplied, and never move a forge dedup key (#502, #501, #544)", async () => {
+test("models and maxTokens ride local and forge job data, as written, only when supplied, and never move a forge dedup key (#502, #501, #544)", async () => {
 	const { enqueueLocalJob, enqueueGitHubJob } = await import("../src/queue.mjs");
 	let captured;
 	const fakeQueue = { add: (name, data, opts) => ((captured = { name, data, opts }), { id: opts.jobId }) };
 
 	const localBase = { folder: "/proj", flow: "tidy", task: "t", provider: "anthropic", model: "m", maxTurns: 5, now: new Date("2026-07-16T12:00:00Z") };
-	await enqueueLocalJob(fakeQueue, { ...localBase, models: ["anthropic/m"], maxCostUsd: 0.25 });
+	await enqueueLocalJob(fakeQueue, { ...localBase, models: ["anthropic/m"], maxTokens: 0.25 });
 	assert.deepEqual(captured.data.models, ["anthropic/m"]);
-	assert.equal(captured.data.maxCostUsd, 0.25, "the outbox child's inherited cap reaches its data");
+	assert.equal(captured.data.maxTokens, 0.25, "the outbox child's inherited cap reaches its data");
 	const flaggedLocalId = captured.opts.jobId;
 	await enqueueLocalJob(fakeQueue, localBase);
 	assert.equal("models" in captured.data, false, "an unflagged job's data keeps exactly the keys it has today");
-	assert.equal("maxCostUsd" in captured.data, false);
+	assert.equal("maxTokens" in captured.data, false);
 	// Issue #544 reversed this for the minute-windowed local id: the model fields are part of a local run's identity,
 	// so a run with a list is not a duplicate of the same run without one. The forge dedup below is unchanged.
 	assert.notEqual(captured.opts.jobId, flaggedLocalId, "the list is part of a local job's identity");
@@ -952,15 +952,15 @@ test("models and maxCostUsd ride local and forge job data, as written, only when
 		flow: "fix",
 		trigger: { event: "issues", action: "labeled", deliveryId: "guid-md", sender: { id: 42 }, matched: { index: 0, type: "label", label: "bug" } },
 	};
-	await enqueueGitHubJob(fakeQueue, { ...forgeBase, models: ["openai/gpt-x"], maxCostUsd: "2.50" });
+	await enqueueGitHubJob(fakeQueue, { ...forgeBase, models: ["openai/gpt-x"], maxTokens: "2.50" });
 	assert.deepEqual(captured.data.models, ["openai/gpt-x"]);
-	assert.equal(captured.data.maxCostUsd, "2.50", "a trigger's cap rides forge job data as written (#501)");
+	assert.equal(captured.data.maxTokens, "2.50", "a trigger's cap rides forge job data as written (#501)");
 	assert.equal("models" in captured.data.trigger, false, "an execution knob never rides /job/event.json");
-	assert.equal("maxCostUsd" in captured.data.trigger, false);
+	assert.equal("maxTokens" in captured.data.trigger, false);
 	const dedupFlagged = captured.opts.deduplication.id;
 	await enqueueGitHubJob(fakeQueue, forgeBase);
 	assert.equal("models" in captured.data, false);
-	assert.equal("maxCostUsd" in captured.data, false);
+	assert.equal("maxTokens" in captured.data, false);
 	assert.equal(captured.opts.deduplication.id, dedupFlagged);
 });
 

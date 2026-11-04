@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CAP_MICROS, FAKE_KEY, smoke, smokeProblems, smokeWanted } from "../../.github/scripts/fake-key-smoke.mjs";
+import { FAKE_KEY, smoke, smokeProblems, smokeWanted } from "../../.github/scripts/fake-key-smoke.mjs";
 
 // Issue #587: the image job's zero-spend provider smoke. Its verdict on real runner output (the shape measured in the
 // lab on the 1.0.3 image), and its split between a defect in the image and a runner that cannot reach Anthropic.
 
-const METER = (capped) => JSON.stringify({ event: "usage_meter", ok: true, methods: ["streamSimple", "stream", "streamDeferred", "classify", "generateImages"], compat: "pi", fallback: true, capped: false, costCapped: capped, listed: false, brake: capped });
+const METER = (capped) => JSON.stringify({ event: "usage_meter", ok: true, methods: ["streamSimple", "stream", "streamDeferred", "classify", "generateImages"], compat: "pi", fallback: true, listed: capped });
 const EXIT = (capped, over = {}) =>
 	JSON.stringify({
 		event: "exit",
@@ -13,13 +13,13 @@ const EXIT = (capped, over = {}) =>
 		reason: "provider-auth-refused",
 		message: '401 {"type":"error","error":{"type":"authentication_error","message":"API key is invalid."},"request_id":null}',
 		turns: 1,
-		tokens: { input: 0, output: 0, total: 0, cost: 0, metered: true, sessions: 1, calls: 1, ...(capped ? { costCapMicros: 5000000, costRefused: 0, costUnanswered: 1 } : {}) },
-		usage: { v: 1, piAi: "1.0.3", models: [{ provider: "anthropic", model: "claude-sonnet-4-5-20250929", calls: 1, cost: 0 }] },
+		tokens: { input: 0, output: 0, total: 0, metered: true, sessions: 1, calls: 1, ...(capped ? { modelRefused: 0, usageUnreported: 1 } : {}) },
+		usage: { v: 1, piAi: "1.0.3", models: [{ provider: "anthropic", model: "claude-sonnet-4-5-20250929", calls: 1, total: 0 }] },
 		...over,
 	});
 const run = (capped, exitOver, meter = METER(capped)) => ['{"event":"workspace_not_writable","path":"/workspace"}', "", meter, "", EXIT(capped, exitOver), ""].join("\n");
 
-test("a run that reached Anthropic, got its 401, stayed metered on every method and cost nothing passes, capped or not", () => {
+test("a run that reached Anthropic, got its 401, stayed metered on every method and reported no usage passes, listed or not", () => {
 	assert.deepEqual(smokeProblems(run(false), { piVersion: "1.0.3", capped: false }), []);
 	assert.deepEqual(smokeProblems(run(true), { piVersion: "1.0.3", capped: true }), []);
 	assert.match(FAKE_KEY, /^sk-ant-api03-[0-9]{93}AA$/);
@@ -32,11 +32,11 @@ test("each way the smoke can be wrong is named", () => {
 	assert.match(at(run(false, {}, METER(false).replace('"compat":"pi"', '"compat":"hoisted"'))).join(), /not pi's own pi-ai/);
 	assert.match(at(run(false, { code: 0, reason: "stop" })).join(), /exit 0 stop, want 2 provider-auth-refused/);
 	assert.match(at(run(false, { message: "403 forbidden" })).join(), /not Anthropic's 401/);
-	assert.match(at(run(false, { tokens: { calls: 0, cost: 0 } })).join(), /never reached the meter/);
-	assert.match(at(run(false, { tokens: { calls: 1, cost: 0.01 } })).join(), /not \$0/);
+	assert.match(at(run(false, { tokens: { calls: 0 } })).join(), /never reached the meter/);
+	assert.match(at(run(false, { usage: { piAi: "1.0.3", models: [{ provider: "anthropic", model: "m", total: 12 }] } })).join(), /not zeros/);
 	assert.match(at(run(false, { usage: { piAi: "1.0.2", models: [] } })).join(), /not the pin 1\.0\.3/);
-	assert.match(at(run(true, { tokens: { calls: 1, cost: 0, costRefused: 1 } }), true).join(), /refused 1 call/);
-	assert.match(at(run(false), true).join(), /costCapped is false, want true/);
+	assert.match(at(run(true, { tokens: { calls: 1, cost: 0, modelRefused: 1 } }), true).join(), /refused 1 call/);
+	assert.match(at(run(false), true).join(), /listed is false, want true/);
 	assert.deepEqual(at("not json at all"), ["no usage_meter line: the meter never reported installing", "no exit line: the runner did not finish"]);
 });
 
@@ -46,7 +46,7 @@ test("a failed run is the image's fault when a plain fetch from the image reache
 		calls.push(args);
 		return answers(args);
 	};
-	const ok = smoke({ image: "pi-job:ci", piVersion: "1.0.3", jobDir: "/j", docker: docker((args) => ({ status: 2, output: run(args.includes(`PI_MAX_COST_MICROS=${CAP_MICROS}`)) })) });
+	const ok = smoke({ image: "pi-job:ci", piVersion: "1.0.3", jobDir: "/j", docker: docker((args) => ({ status: 2, output: run(args.some((a) => a.startsWith("PI_ALLOWED_MODELS=anthropic/"))) })) });
 	assert.equal(ok.ok, true);
 	assert.equal(calls.length, 2, "no control when both runs pass");
 	assert.ok(calls.every((args) => args.includes(`ANTHROPIC_API_KEY=${FAKE_KEY}`) && args.at(-1) === "pi-job:ci" && args.includes("/j:/job:ro")));

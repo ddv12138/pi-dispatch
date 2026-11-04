@@ -25,7 +25,7 @@
   "session": null,
   "host": "mini-2",
   "backend": "podman",
-  "dollars": null,
+  "tokensWindows": null,
   "why": "daily",
   "project": "api",
   "plan": null,
@@ -40,5 +40,5 @@
   "capacity": null,
   "earlier": null,
   "stalledRepick": false,
-  "v": 1
+  "v": 2
 }

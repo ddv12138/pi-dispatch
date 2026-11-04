@@ -111,7 +111,7 @@ test("a carried __proto__ key stays data: no prototype is set, on the read or on
 
 test("a file of known keys only is rewritten byte for byte, and a write without a carry is today's exact text", () => {
 	const path = settingsFile();
-	const text = lines("{", '  "maxCostUsd": "2.50",', '  "model": "claude-x",', '  "secretProfiles": {', '    "jira": "/srv/jira.sh"', "  },", '  "dailyCap": 4', "}");
+	const text = lines("{", '  "maxTokens": "2.50",', '  "model": "claude-x",', '  "secretProfiles": {', '    "jira": "/srv/jira.sh"', "  },", '  "dailyCap": 4', "}");
 	writeFileSync(path, text);
 	assert.deepEqual(edit(path, (overlay) => overlay), { ok: true });
 	assert.equal(readFileSync(path, "utf8"), text);
@@ -154,11 +154,11 @@ test("a broken version is an ordinary invalid file, never newer", () => {
 	assert.deepEqual(validateOverlay({ version: 1, dailyCap: 1, later: 2 }), { overlay: { dailyCap: 1 }, unknownKeys: ["later"] });
 });
 
-test("a dollar near miss is refused on read and is never carried, even by a carry built by hand", () => {
+test("a token near miss is refused on read and is never carried, even by a carry built by hand", () => {
 	const path = settingsFile();
 	const text = lines("{", '  "max_cost_usd": "2",', '  "dailyCap": 1', "}");
 	writeFileSync(path, text);
-	assert.match(readOverlayDocument(path).invalid, /^max_cost_usd is not a settings key -- did you mean maxCostUsd\?/);
+	assert.match(readOverlayDocument(path).invalid, /^max_cost_usd is not a settings key -- did you mean maxTokens\?/);
 	assert.equal(readOverlayDocument(path).newer, undefined);
 	// The writer judges its own output as the reader would, so a forged carry cannot write a file the worker refuses.
 	const res = writeOverlay(path, { dailyCap: 1 }, { carry: { doc: { max_cost_usd: "2", dailyCap: 1 }, unknownKeys: ["max_cost_usd"] } });

@@ -173,7 +173,7 @@ test("every store with a fixed name is pinned to its source and named on the bac
 // occur in its code. A family whose literal moves fails here, and so does one the page drops or adds.
 const KEY_FAMILIES = new Map([
 	["bull:*", [["worker/src/bullmq-internals.mjs", 'BULL_PREFIX = "bull"']]],
-	["budget:*", [["worker/src/budget.mjs", 'prefix = "budget"'], ["worker/src/budget.mjs", "}:t:"], ["worker/src/dollar-budget.mjs", '"budget:usd"'], ["worker/src/scoped-limits.mjs", "`budget:s:"]]],
+	["budget:*", [["worker/src/budget.mjs", 'prefix = "budget"'], ["worker/src/budget.mjs", "}:t:"], ["worker/src/token-budget.mjs", '"budget:tok"'], ["worker/src/scoped-limits.mjs", "`budget:s:"]]],
 	["run:budget:*", [["worker/src/run-budget-ledger.mjs", '"run:budget:"']]],
 	["run:approval:*", [["worker/src/approval-state.mjs", '"run:approval:"']]],
 	["run:checkpoint:*", [["worker/src/run-checkpoint.mjs", '"run:checkpoint:"']]],
@@ -232,7 +232,7 @@ test("every Valkey key family is pinned to its source and named in the backup pa
 	const { out, section } = pageFamilies();
 	assert.deepEqual([...out].sort(), [...KEY_FAMILIES.keys()].sort(), "the page's Valkey table names exactly the pinned families");
 	// The row says what a reset costs, and what doctor sees of it.
-	assert.ok(section.includes("dollars.window-reset") && /Every cap reopens/.test(section), "the Valkey section says a reset reopens caps and names dollars.window-reset");
+	assert.ok(section.includes("tokens.window-reset") && /Every cap reopens/.test(section), "the Valkey section says a reset reopens caps and names tokens.window-reset");
 	assert.ok(/`Queue and counters`|\| Queue and counters \|/.test(doc) && doc.includes("(#what-the-valkey-volume-holds)"), "the Valkey row links the family table");
 });
 
@@ -264,9 +264,9 @@ const looseConstants = (constants) => constants.filter((c) => ![...KEY_FAMILIES.
 
 test("every exported constant with a key's shape falls in a pinned family", () => {
 	const constants = keyShapedConstants(SOURCES);
-	// Not vacuous: the scan sees the dollar counters' prefix, the defer records' key and a constant whose name says
+	// Not vacuous: the scan sees the token counters' prefix, the defer records' key and a constant whose name says
 	// nothing about a key (the failure hook's index of hosts).
-	for (const value of ["budget:usd", "defer:job:", "hook:hosts"]) assert.ok(constants.some((c) => c.value === value), `the scan finds the constant ${value}`);
+	for (const value of ["budget:tok", "defer:job:", "hook:hosts"]) assert.ok(constants.some((c) => c.value === value), `the scan finds the constant ${value}`);
 	// Planted: a key in a template literal is read like one in quotes, and a value that only STARTS with a `NOT_A_KEY`
 	// entry ("model:" here) is still a key, since an entry excuses one exact value and never a family under it.
 	const planted = keyShapedConstants([{ path: "planted", code: 'export const somethingElse = "brand-new:index";\nexport const ROSTER = `roster:all`;\nexport const MSG = "see: the docs";\nexport const MODEL_INDEX = "model:index";' }]);

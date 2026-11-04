@@ -52,7 +52,7 @@ test("BY SHAPE: every Valkey client doctor opens connects through a bound", () =
 	const src = readFileSync(new URL("../src/doctor.mjs", import.meta.url), "utf8").replace(/^\s*(\/\/|\*).*$/gm, "");
 	assert.deepEqual(src.match(/\.connect\(\)/g), [".connect()"], "the one bare connect() is inside connectWithin");
 	assert.match(src, /export function connectWithin\([^)]*\) \{[\s\S]*?client\.connect\(\)/);
-	for (const fn of ["defaultProbeValkey", "defaultReadAppliedSplit", "defaultReadHosts", "defaultDollarKeysExist"]) {
+	for (const fn of ["defaultProbeValkey", "defaultReadAppliedSplit", "defaultReadHosts", "defaultTokenKeysExist"]) {
 		const body = src.slice(src.indexOf(`function ${fn}(`), src.indexOf("\n}\n", src.indexOf(`function ${fn}(`)));
 		assert.match(body, /withDoctorClient\(/, `${fn} opens its client through withDoctorClient`);
 	}

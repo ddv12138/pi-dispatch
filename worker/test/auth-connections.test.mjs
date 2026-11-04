@@ -19,7 +19,7 @@ function setup(override = {}) {
 }
 
 test("auth policy rejects unknown version, cross-provider binding, relative roots and unreviewed credit", () => {
-	for (const input of [{ ...policy, version: 2 }, { ...policy, bindings: { anthropic: "chatgpt" } }, { ...policy, connections: [{ ...policy.connections[0], extraUsageCreditMicros: -1 }] }, { ...policy, connections: [{ id: "claude", provider: "anthropic", adapter: "pi-anthropic-oauth@0.3.6", ownerHost: "host-a", root: "relative", digest: "a".repeat(64) }] }]) assert.throws(() => parseAuthConnections(input), /auth-/);
+	for (const input of [{ ...policy, version: 2 }, { ...policy, bindings: { anthropic: "chatgpt" } }, { ...policy, connections: [{ ...policy.connections[0], extraUsageCreditTokens: -1 }] }, { ...policy, connections: [{ id: "claude", provider: "anthropic", adapter: "pi-anthropic-oauth@0.3.6", ownerHost: "host-a", root: "relative", digest: "a".repeat(64) }] }]) assert.throws(() => parseAuthConnections(input), /auth-/);
 	assert.equal(parseAuthConnections(policy).connections[0].adapter, "openai-chatgpt");
 });
 
@@ -165,7 +165,7 @@ test("credit/monitor policy edits and provider rebindings invalidate already pre
 	await service.login("chatgpt");
 	const { snapshot } = await service.prepareSnapshot("openai", { deadlineAt: instant + 30 * 60_000 });
 	assert.equal(await service.validateSnapshot(snapshot), true);
-	current = { ...current, connections: [{ ...current.connections[0], extraUsageCreditMicros: 1_000_000 }] };
+	current = { ...current, connections: [{ ...current.connections[0], extraUsageCreditTokens: 1_000_000 }] };
 	assert.equal(await service.validateSnapshot(snapshot), false);
 	current = { ...current, bindings: {} };
 	assert.equal(await service.validateSnapshot(snapshot), false);

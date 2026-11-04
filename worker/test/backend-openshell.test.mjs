@@ -337,7 +337,7 @@ test("the image preflight reads the gateway's own engine and needs sandboxLayout
 	assert.equal(answer.sandboxLayoutUnsupported, "pi-job:x");
 	assert.equal(calls[0][0], "podman");
 	// Issue #730: both modes are brokered, so an image with every earlier capability but not observableRunner is refused.
-	const older = "replicas,commands,excludeTools,anyUid,costCap,modelPolicy,exitAuth,mcp,forgeMcp,awaitInput,reportProgress,recover,steer,sandboxLayout,transcriptStderr,steerStdin,bundleEnvFile";
+	const older = "replicas,commands,excludeTools,anyUid,tokenBudget,modelPolicy,exitAuth,mcp,forgeMcp,awaitInput,reportProgress,recover,steer,sandboxLayout,transcriptStderr,steerStdin,bundleEnvFile";
 	const spawnOlder = () => {
 		const child = new EventEmitter();
 		child.stdout = new EventEmitter();

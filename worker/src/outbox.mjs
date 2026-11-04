@@ -191,7 +191,7 @@ export function makeCollectChain({ queue, enqueue = enqueueLocalJob, readFlowGat
 					fallbackModels: job.data?.fallbackModels,
 					// Issue #501's per-job dollar cap, by the same narrowing rule: a child that dropped it would run
 					// uncapped. Passed through whenever the parent's data carries it; absent stays absent.
-					maxCostUsd: job.data?.maxCostUsd,
+					maxTokens: job.data?.maxTokens,
 					// #227, and INHERITED for the reason `image` directly above is: a chained child continues its
 					// parent's work, so it belongs in the venue the parent's trigger chose, not silently back on
 					// the deployment default. Written down rather than left to inference because this file's

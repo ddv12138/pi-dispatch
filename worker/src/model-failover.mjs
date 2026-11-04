@@ -1,7 +1,7 @@
 import { resolveBackendName } from "./backend-registry.mjs";
 import { MODEL_WHY, providerFailureOf } from "./model-failover-protocol.mjs";
 import { modelListProblem, modelOnList, splitModelEntry } from "./model-ref.mjs";
-import { modelDollarRows } from "./scoped-limits.mjs";
+import { modelTokenRows } from "./scoped-limits.mjs";
 import { dayKey, weekKey, monthKey } from "./budget.mjs";
 import { builtinModel, checkModelsKnown } from "./model-catalog.mjs";
 import { egressRefusalFor } from "./egress-allowlist.mjs";
@@ -66,25 +66,25 @@ export async function checkFailoverCandidate(job, { models = null, endpoints = [
 }
 
 async function modelWindowHasRoom(redis, ref, job, limits, at) {
-	if (job.maxCostMicros === 0) return true;
-	for (const row of modelDollarRows(limits, [ref])) {
+	if (job.maxTokens === 0) return true;
+	for (const row of modelTokenRows(limits, [ref])) {
 		// reserveDollars remains the atomic authority. This read chooses a candidate without acquiring money;
 		// its later reservation may lose a race, which must refuse rather than run with an uncovered window.
-		if (!Number.isSafeInteger(job.maxCostMicros)) return false;
+		if (!Number.isSafeInteger(job.maxTokens)) return false;
 		for (const [window, key] of [["day", dayKey(new Date(at), row.keyPrefix)], ["week", weekKey(new Date(at), row.keyPrefix)], ["month", monthKey(new Date(at), row.keyPrefix)]]) {
 			const cap = row.caps?.[window];
 			if (cap === null || cap === undefined) continue;
 			const raw = await redis.get(key);
 			const spent = raw === null || raw === undefined ? 0 : Number(raw);
 			if (!Number.isSafeInteger(spent) || spent < 0) throw new Error("invalid model window");
-			if (spent + job.maxCostMicros > cap) return false;
+			if (spent + job.maxTokens > cap) return false;
 		}
 	}
 	return true;
 }
 
 /** Only opt-in jobs enter here. Every candidate has a singleton executable policy beneath the reviewed ceiling. */
-export async function selectFailoverJob(job, { redis, id, retry = false, recoveryModel = null, retryNeverStarted = false, models = null, limits = [], now = () => Date.now(), checkCandidate, subscriptionCheck = null, reservationFor = (candidate) => candidate.maxCostMicros, acquireEndpoints = async () => true, modelView = (ref) => failoverModelView(ref, { models }), log = () => {} } = {}) {
+export async function selectFailoverJob(job, { redis, id, retry = false, recoveryModel = null, retryNeverStarted = false, models = null, limits = [], now = () => Date.now(), checkCandidate, subscriptionCheck = null, reservationFor = (candidate) => candidate.maxTokens, acquireEndpoints = async () => true, modelView = (ref) => failoverModelView(ref, { models }), log = () => {} } = {}) {
 	if (!Array.isArray(job.fallbackModels) || modelListProblem(job.fallbackModels) !== null || modelListProblem(job.models) !== null || !Array.isArray(job.models) || !job.fallbackModels.every((ref) => { const s = splitModelEntry(ref); return s && modelOnList(job.models, s.provider, s.model); })) return { refused: "model-failover-no-candidate" };
 	const primary = `${job.provider}/${job.model}`;
 	const previous = retry ? await readModelAttempt(redis, id) : null;
@@ -124,8 +124,8 @@ export async function selectFailoverJob(job, { redis, id, retry = false, recover
 			const failedHere = previous?.safe === true && previous.ref === ref && previous.failure?.kind !== "context-overflow";
 			if (cooldown || failedHere) { if (ref === primary) why = "fallback-cooldown"; if (!failedHere) wait ??= "model-cooldown"; log("model_candidate_skipped", { model: ref, reason: failedHere ? "previous-attempt" : "cooldown" }); continue; }
 		}
-		const reservationJob = { ...candidate, maxCostMicros: reservationFor(candidate) };
-		if (modelDollarRows(limits, [ref]).length > 0 && !Number.isSafeInteger(reservationJob.maxCostMicros)) { log("model_candidate_skipped", { model: ref, reason: "model-cost-cap-missing" }); continue; }
+		const reservationJob = { ...candidate, maxTokens: reservationFor(candidate) };
+		if (modelTokenRows(limits, [ref]).length > 0 && !Number.isSafeInteger(reservationJob.maxTokens)) { log("model_candidate_skipped", { model: ref, reason: "model-token-budget-missing" }); continue; }
 		if (!(await modelWindowHasRoom(redis, ref, reservationJob, limits, now()))) { if (ref === primary) why = "fallback-window"; wait ??= "model-window"; log("model_candidate_skipped", { model: ref, reason: "model-window" }); continue; }
 		if (!(await acquireEndpoints(candidate))) { wait ??= "endpoint"; log("model_candidate_skipped", { model: ref, reason: "endpoint-busy" }); continue; }
 		return { job: { ...candidate, modelWhy: ref === primary ? "primary" : locked ? previous?.modelWhy ?? "fallback-unavailable" : why }, ref };

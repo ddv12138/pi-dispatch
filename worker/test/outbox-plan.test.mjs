@@ -354,9 +354,9 @@ const PROJECTS = [
 	{ id: "platform", members: ["github:acme/infra"] },
 ];
 const ENVELOPE = parseEnvelope(
-	JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", platform: "10" }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job", "operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
+	JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, platform: 10 }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job", "operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
 	"/e/envelope.json",
-	{ projects: PROJECTS, maxCostMicros: 2_000_000 },
+	{ projects: PROJECTS, maxTokens: 2_000_000 },
 );
 const DIGEST = envelopeDigest(ENVELOPE);
 const planText = (shop, platform, basis) => JSON.stringify({ version: 1, basis, projects: [{ id: "shop", weight: shop }, { id: "platform", weight: platform }, { id: "_other", weight: 0 }] });

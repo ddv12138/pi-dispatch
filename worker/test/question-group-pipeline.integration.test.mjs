@@ -32,7 +32,7 @@ function isolatedLedger(redis, prefix, events) {
 		...Object.fromEntries(["get", "incr", "decr", "expire", "incrby", "set", "hgetall", "exists", "pexpire", "hget", "del"].map((method) => [method, one(method)])),
 		async eval(script, count, ...args) {
 			const keys = args.slice(0, count).map((key) => `${prefix}${key}`);
-			if (keys.some((key) => key.includes("budget:usd"))) events.push("dollar-ledger");
+			if (keys.some((key) => key.includes("budget:tok"))) events.push("token-ledger");
 			return redis.eval(script, count, ...keys, ...args.slice(count));
 		},
 	};
@@ -51,7 +51,7 @@ async function fixture(t) {
 		if (keys.length) await redis.del(...keys);
 		redis.disconnect();
 	});
-	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, maxCostUsd: "0.05", confidence: 0.9, names: {} };
+	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, maxTokens: "0.05", confidence: 0.9, names: {} };
 	const triggersPath = join(root, "triggers.json");
 	const document = { triggers: [], zeroTouch: config };
 	writeFileSync(triggersPath, JSON.stringify(document));
@@ -61,7 +61,7 @@ async function fixture(t) {
 	const meta = await store.readMeta("source");
 	const id = await enqueueQuestionGroupJob(queue, { runId: "source", digest: meta.digest, configDigest: questionGroupConfigDigest(config) }, { nonce: () => "fixed" });
 	const job = await queue.getJob(id);
-	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyCap: 10, dailyCostUsd: "1", maxCostUsd: "0.05" };
+	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyCap: 10, dailyTokenCap: "1", maxTokens: "0.05" };
 	const runtime = makeQuestionGroupRuntime({ store, triggersPath, getSettings: () => settings, resolveClassifier: () => MODEL });
 	return { root, jobsDir, name, redis, queue, store, job, runtime, settings, document, triggersPath, scopeId };
 }
@@ -79,7 +79,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 		recordRun: (args) => records.push(buildRecord({ ...args, host: "test-host", touchTracking: true })),
 		deps: {
 			questionGroupRuntime: f.runtime,
-			imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["costCap", "modelPolicy", "questionGrouping"] }),
+			imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["tokenBudget", "modelPolicy", "questionGrouping"] }),
 			checkProviderCredential: async (job) => { credentials.push(job.provider); return { ok: true }; },
 			checkModelsKnown: () => ({ ok: true }),
 			prepareWorkspace: async (...args) => { events.push("prepare"); return prepare(...args); },
@@ -91,9 +91,9 @@ test("real references, corpus and admission reserve before the isolated classifi
 				assert.equal(statSync(join(prepared.jobDir, "question-grouping.json")).mode & 0o777, 0o444);
 				assert.equal(readFileSync(join(prepared.jobDir, "prompt.md"), "utf8"), "");
 				assert.ok(events.includes("job-reserve"));
-				const dollarKeys = await f.redis.keys(`${f.name}:ledger:budget:usd:*`);
-				assert.ok(dollarKeys.length > 0, "ordinary dollar windows were reserved before any classifier call");
-				assert.ok((await f.redis.mget(...dollarKeys)).some((value) => Number(value) === 50000), "the real window holds the configured cap");
+				const tokenKeys = await f.redis.keys(`${f.name}:ledger:budget:tok:*`);
+				assert.ok(tokenKeys.length > 0, "ordinary token windows were reserved before any classifier call");
+				assert.ok((await f.redis.mget(...tokenKeys)).some((value) => Number(value) === 50000), "the real window holds the configured cap");
 				const input = readQuestionGrouping({ path: join(prepared.jobDir, "question-grouping.json") });
 				const done = await executeQuestionGrouping({ input, outbox: prepared.outboxDir, runtime: {
 					getModelsOfType: (type, provider) => { assert.equal(type, "classifier"); assert.equal(provider, MODEL.provider); return [MODEL]; },
@@ -116,7 +116,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 	assert.equal(calls, 1);
 	assert.deepEqual(credentials, ["anthropic", "openrouter"], "both credentials pass the free gate");
 	assert.ok(events.indexOf("job-reserve") < events.indexOf("container"));
-	assert.ok(events.indexOf("dollar-ledger") < events.indexOf("classify"));
+	assert.ok(events.indexOf("token-ledger") < events.indexOf("classify"));
 	const assigned = await f.store.readMeta("source");
 	assert.equal(assigned.status, "assigned", "processor finalization imports the classifier result");
 	assert.match(assigned.groupId, /^[a-f0-9]{32}$/);

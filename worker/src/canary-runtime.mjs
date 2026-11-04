@@ -14,7 +14,7 @@ import { makeRunContainer } from "./run-container.mjs";
 import { makeLogSink, makeRecordWriter, buildRecord, recordReadable } from "./run-history.mjs";
 import { materializePiDir } from "./materialize.mjs";
 import { runJob } from "./processor.mjs";
-import { dollarWindowCaps } from "./dollar-budget.mjs";
+import { tokenWindowCaps } from "./token-budget.mjs";
 import { makeRedisClient, parseConnection } from "./connection.mjs";
 import { makeQueue } from "./queue.mjs";
 import { acquireCanaryLease, canaryQueueNames } from "./canary-lock.mjs";
@@ -150,8 +150,8 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 		// Proxy validation and the model/image checks run before the first count or dollar reservation.
 		await run(["image", "inspect", CANARY_PROXY_IMAGE]);
 		const preflight = imagePreflightFactory({ image: config.jobImage });
-		const checked = await preflight({ kind: "local", models: [options.model], maxCostMicros: 1 });
-		if (!checked.ok || !["costCap", "modelPolicy", "modelRoles", "exitAuth", "anyUid"].every((c) => checked.capabilities?.includes(c))) fail("canary job image must declare costCap, modelPolicy, modelRoles, exitAuth and anyUid; rebuild the job image");
+		const checked = await preflight({ kind: "local", models: [options.model], maxTokens: 1 });
+		if (!checked.ok || !["modelPolicy", "modelRoles", "exitAuth", "anyUid"].every((c) => checked.capabilities?.includes(c))) fail("canary job image must declare modelPolicy, modelRoles, exitAuth and anyUid; rebuild the job image");
 		redis = redisFactory(config.valkeyUrl, { failFast: true, lazyConnect: true });
 		redis.on("error", () => {});
 		if (typeof redis.connect === "function") await redis.connect();
@@ -194,7 +194,7 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 			return { ...source, prepared: { jobDir, workspace, sha: source.baseSha } };
 		};
 		return {
-			records, deploymentCapUsd: settings.maxCostUsd, close,
+			records, deploymentCapTokens: settings.maxTokens, close,
 			inspectSource: async (record) => {
 				const source = sourceFor(record, config, now);
 				for (const entry of Object.values({ ...source.roles, [options.role]: options.model })) {
@@ -203,12 +203,12 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 				}
 				return prepareSource(source);
 			},
-			execute: async ({ source, original, jobId, maxCostMicros }) => {
+			execute: async ({ source, original, jobId, maxTokens }) => {
 				await unpaused();
 				await createProxy();
 				const { jobDir, workspace } = source.prepared;
 				const modelRoles = { ...source.roles, [options.role]: options.model };
-				const job = { kind: "local", folder: workspace, flow: options.flow, provider, model, modelRole: options.role, modelRoles, models: [...new Set([options.model, ...Object.values(modelRoles)])], maxCostMicros, maxTurns: settings.maxTurns, maxTokens: settings.maxTokens, packages: false, canary: { sourceJobId: original.jobId, role: options.role, candidate: options.model } };
+				const job = { kind: "local", folder: workspace, flow: options.flow, provider, model, modelRole: options.role, modelRoles, models: [...new Set([options.model, ...Object.values(modelRoles)])], maxTokens, maxTurns: settings.maxTurns, packages: false, canary: { sourceJobId: original.jobId, role: options.role, candidate: options.model } };
 				const startedAt = new Date(now()).toISOString();
 				let result, error;
 				try {

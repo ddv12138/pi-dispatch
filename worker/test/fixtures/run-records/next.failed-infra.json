@@ -25,9 +25,9 @@
   "session": null,
   "host": "mini-2",
   "backend": "podman",
-  "dollars": {
-    "reservedMicros": 2000000,
-    "settledMicros": 150000,
+  "tokensWindows": {
+    "reservedTokens": 2000000,
+    "settledTokens": 150000,
     "basis": "floor",
     "modelBasis": "floor"
   },
@@ -58,5 +58,5 @@
     }
   ],
   "stalledRepick": false,
-  "v": 1
+  "v": 2
 }

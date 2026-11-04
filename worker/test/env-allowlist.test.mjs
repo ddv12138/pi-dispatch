@@ -264,25 +264,25 @@ test("PI_MAX_TOKENS is forwarded only when the per-job budget is set", { skip },
 	assert.equal(noCap.PI_MAX_TOKENS, undefined, "an unset cap is omitted, never an empty string");
 });
 
-test("PI_MAX_COST_MICROS (issue #501) carries the per-job dollar cap whenever one is set, 0 included, and is absent otherwise", { skip }, () => {
-	const env = (maxCostMicros) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxCostMicros, jobId: "j", hostEnv: HOST });
-	assert.equal(env(2_500_000).PI_MAX_COST_MICROS, "2500000", "integer micro-dollars as a string");
+test("PI_MAX_TOKENS (issue #501) carries the per-job token budget whenever one is set, 0 included, and is absent otherwise", { skip }, () => {
+	const env = (maxTokens) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens, jobId: "j", hostEnv: HOST });
+	assert.equal(env(2_500_000).PI_MAX_TOKENS, "2500000", "integer tokens as a string");
 	// 0 is the tightest cap (no priced call at all), never "no cap": a truthiness test here would send a job
 	// that asked for 0 out with no cap whatsoever.
-	assert.equal(env(0).PI_MAX_COST_MICROS, "0");
-	assert.equal(env(1_000_000_000_000).PI_MAX_COST_MICROS, "1000000000000");
-	assert.equal(env(null).PI_MAX_COST_MICROS, undefined, "no cap: omitted, never an empty string (the runner refuses an empty one)");
-	assert.equal(env(undefined).PI_MAX_COST_MICROS, undefined);
-	assert.equal(buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", hostEnv: HOST }).PI_MAX_COST_MICROS, undefined, "a caller that says nothing sends nothing");
+	assert.equal(env(0).PI_MAX_TOKENS, "0");
+	assert.equal(env(1_000_000_000_000).PI_MAX_TOKENS, "1000000000000");
+	assert.equal(env(null).PI_MAX_TOKENS, undefined, "no cap: omitted, never an empty string (the runner refuses an empty one)");
+	assert.equal(env(undefined).PI_MAX_TOKENS, undefined);
+	assert.equal(buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", hostEnv: HOST }).PI_MAX_TOKENS, undefined, "a caller that says nothing sends nothing");
 });
 
-test("PI_MAX_COST_MICROS is the worker's alone: a forwarded or secret value neither replaces the cap nor adds one (#501)", { skip }, () => {
-	const hostEnv = { ...HOST, PI_MAX_COST_MICROS: "1000000000000" };
-	const env = (maxCostMicros, extra = {}) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxCostMicros, jobId: "j", hostEnv, ...extra });
-	assert.equal(env(500_000, { forwardEnv: ["PI_MAX_COST_MICROS"] }).PI_MAX_COST_MICROS, "500000", "PI_FORWARD_ENV cannot raise the computed cap");
-	assert.equal(env(0, { secrets: { PI_MAX_COST_MICROS: "999" } }).PI_MAX_COST_MICROS, "0", "nor can a secret");
-	assert.equal(env(null, { forwardEnv: ["PI_MAX_COST_MICROS"] }).PI_MAX_COST_MICROS, undefined, "an uncapped job carries none, whatever was forwarded");
-	assert.equal(env(undefined, { secrets: { PI_MAX_COST_MICROS: "5" } }).PI_MAX_COST_MICROS, undefined);
+test("PI_MAX_TOKENS is the worker's alone: a forwarded or secret value neither replaces the cap nor adds one (#501)", { skip }, () => {
+	const hostEnv = { ...HOST, PI_MAX_TOKENS: "1000000000000" };
+	const env = (maxTokens, extra = {}) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens, jobId: "j", hostEnv, ...extra });
+	assert.equal(env(500_000, { forwardEnv: ["PI_MAX_TOKENS"] }).PI_MAX_TOKENS, "500000", "PI_FORWARD_ENV cannot raise the computed cap");
+	assert.equal(env(0, { secrets: { PI_MAX_TOKENS: "999" } }).PI_MAX_TOKENS, "0", "nor can a secret");
+	assert.equal(env(null, { forwardEnv: ["PI_MAX_TOKENS"] }).PI_MAX_TOKENS, undefined, "an uncapped job carries none, whatever was forwarded");
+	assert.equal(env(undefined, { secrets: { PI_MAX_TOKENS: "5" } }).PI_MAX_TOKENS, undefined);
 });
 
 test("an unconfigured provider throws a config-tagged error (=> pre-spend refusal)", { skip }, () => {
@@ -422,7 +422,7 @@ test("an unparseable auth.json is determinate too, and says which of the two it 
 test("a TRANSIENT read fault is NOT a config refusal -- it propagates as itself", { skip }, () => {
 	// Issue #310 made this expensive. A config-tagged error is now never retried, refunds the reserve, and
 	// tells the issue author publicly that the deployment is misconfigured. Under the old bare `catch {}`
-	// every one of these produced that verdict on a deployment that was correctly configured a microsecond
+	// every one of these produced that verdict on a deployment that was correctly configured a tokensecond
 	// earlier and later: fd exhaustion, a network-filesystem blip, a permission fault, a directory in the
 	// file's place, or a torn read while `pi login` rewrites the file.
 	for (const code of ["EMFILE", "EIO", "EACCES", "EAGAIN", "EISDIR", "ETIMEDOUT"]) {

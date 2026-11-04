@@ -37,11 +37,11 @@ export function makeQuestionGroupRuntime({ store, triggersPath, getSettings = ()
 			const classifier = modelRef(current.model);
 			let selected;
 			try { selected = await resolveClassifier(classifier); } catch { return { result: policy("question-group-refused") }; }
-			// The full reviewed context window is a conservative input-only price ceiling, not a guessed tokenizer.
-			// The runner still checks the exact call at its dispatch boundary before it can reach the provider.
-			if (!selected || selected.type !== "classifier" || !Number.isFinite(selected.cost?.input) || selected.cost.input < 0 || selected.cost.output !== 0 || !Number.isSafeInteger(selected.contextWindow) || selected.contextWindow <= 0) return { result: policy("question-group-refused") };
-			const boundMicros = Math.ceil(selected.contextWindow * selected.cost.input);
-			if (!Number.isSafeInteger(boundMicros) || boundMicros > Math.round(Number(current.maxCostUsd) * 1000000)) return { result: policy("question-group-refused") };
+			// The full reviewed context window is a conservative worst-case input count, not a guessed tokenizer:
+			// every token of the window could be read. The meter's settle-time stop still backs this budget.
+			if (!selected || selected.type !== "classifier" || !Number.isSafeInteger(selected.contextWindow) || selected.contextWindow <= 0) return { result: policy("question-group-refused") };
+			const boundTokens = selected.contextWindow;
+			if (!Number.isSafeInteger(boundTokens) || boundTokens > current.maxTokens) return { result: policy("question-group-refused") };
 			const grouping = { ...ref };
 			Object.defineProperties(grouping, {
 				input: { value: { version: 1, model: classifier, source: source.excerpt, candidates: source.candidates.map((candidate, i) => ({ slot: `g${i}`, excerpt: candidate.excerpt })), confidence: current.confidence } },
@@ -49,7 +49,7 @@ export function makeQuestionGroupRuntime({ store, triggersPath, getSettings = ()
 				revision: { value: source.revision }, project: { value: source.meta.project }, jobId: { value: runId },
 			});
 			await store.setStatus(ref.runId, "pending");
-			return { data: { kind: "local", purpose: "zero-touch-grouping", provider: settings.provider, model: settings.model, maxCostUsd: current.maxCostUsd, models: [...new Set([`${settings.provider}/${settings.model}`, current.model])], maxTurns: 1, packages: false, github: false, questionGroupModel: classifier, questionGrouping: grouping } };
+			return { data: { kind: "local", purpose: "zero-touch-grouping", provider: settings.provider, model: settings.model, maxTokens: current.maxTokens, models: [...new Set([`${settings.provider}/${settings.model}`, current.model])], maxTurns: 1, packages: false, github: false, questionGroupModel: classifier, questionGrouping: grouping } };
 		},
 		/** Collection never throws: neither invalid output nor a store failure is permission to buy the call again. */
 		async collect({ job, prepared, completed }) {

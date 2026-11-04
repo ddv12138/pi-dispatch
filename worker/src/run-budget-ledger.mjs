@@ -18,7 +18,7 @@
  *   - `h<seq>`: the hold container `seq` ran under, as JSON, validated before it is written (`validHold`);
  *   - `s<seq>`: that hold's state, `held` and then exactly one of the terminal states `settled`, `released` or
  *     `settled-crashed`. A terminal state never changes again: every transition is one Lua script that moves a hold
- *     only FROM `held` (a compare-and-set, the idiom of dollar-budget.mjs's SETTLE_SCRIPT), so two racing callers
+ *     only FROM `held` (a compare-and-set, the idiom of token-budget.mjs's SETTLE_SCRIPT), so two racing callers
  *     cannot both move it, and nothing can move it back;
  *   - `at`: the injected clock at the last write, for doctor (how stale a ledger is), never for a decision.
  * The hash is PEXPIREd `ttlMs` (35 days by default, past the longest dollar window a hold can sit in: a month) on
@@ -42,7 +42,7 @@
  * the whole argument.
  */
 
-import { DOLLAR_KEY_PREFIX } from "./dollar-budget.mjs";
+import { TOKEN_KEY_PREFIX } from "./token-budget.mjs";
 import { sanitizeJobId } from "./run-history.mjs";
 
 /** The key prefix of every run's budget ledger. */

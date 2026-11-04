@@ -7,8 +7,8 @@ const PRIVATE_ENV_KEYS = Object.freeze(["VALKEY_URL", "ANTHROPIC_API_KEY", "ANTH
 export async function runCanary(args, { env = process.env, write = (s) => process.stdout.write(s), errWrite = (s) => process.stderr.write(s), deploymentEnv = (e) => ({ env: e }), runtimeFactory, now = Date.now } = {}) {
 	let runtime;
 	try {
-		const { values } = parseArgs({ args, allowPositionals: false, options: { role: { type: "string" }, model: { type: "string" }, flow: { type: "string" }, count: { type: "string", default: "3" }, "cap-usd": { type: "string" }, json: { type: "boolean", default: false } } });
-		const options = canaryOptions({ ...values, capUsd: values["cap-usd"] });
+		const { values } = parseArgs({ args, allowPositionals: false, options: { role: { type: "string" }, model: { type: "string" }, flow: { type: "string" }, count: { type: "string", default: "3" }, "cap-tokens": { type: "string" }, json: { type: "boolean", default: false } } });
+		const options = canaryOptions({ ...values, capTokens: values["cap-tokens"] });
 		const deployment = deploymentEnv(env, CANARY_ENV_KEYS);
 		if (deployment.problem) throw new Error(deployment.problem);
 		const credentials = deploymentEnv(deployment.env, PRIVATE_ENV_KEYS);

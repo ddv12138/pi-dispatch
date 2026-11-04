@@ -8,13 +8,13 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 
 const M = 1_000_000;
 const PROJECTS = [{ id: "shop", name: null, members: ["github:acme/web"] }, { id: "platform", name: null, members: ["github:acme/platform"] }];
-const CONTEXT = { projects: PROJECTS, limits: [], maxCostMicros: 2 * M };
+const CONTEXT = { projects: PROJECTS, limits: [], maxTokens: 2 * M };
 
 const EXAMPLE = {
 	version: 1,
 	window: "week",
-	totalUsd: 100,
-	floorsUsd: { shop: 10, platform: 10, _other: 0 },
+	totalTokens: 100,
+	floorsTokens: { shop: 10, platform: 10, _other: 0 },
 	defaultWeights: { shop: 1, platform: 1, _other: 1 },
 	delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
 };
@@ -28,11 +28,11 @@ function refused(body, re, context = CONTEXT) {
 
 // ── the parser ──────────────────────────────────────────────────────────────────────────────────────────
 
-test("parseEnvelope accepts the issue's example and normalizes it to integer micro-dollars", () => {
+test("parseEnvelope accepts the issue's example and normalizes it to integer tokens", () => {
 	assert.deepEqual(parse(EXAMPLE), {
 		version: 1,
 		window: "week",
-		totalMicros: 100 * M,
+		totalTokens: 100 * M,
 		floors: { [OTHER]: 0, platform: 10 * M, shop: 10 * M },
 		defaultWeights: { [OTHER]: 1, platform: 1, shop: 1 },
 		delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
@@ -42,13 +42,13 @@ test("parseEnvelope accepts the issue's example and normalizes it to integer mic
 });
 
 test("_other is always an entry: floor 0 and default weight 1 when the file leaves it out; delegation absent is off", () => {
-	const e = parse({ version: 1, window: "month", totalUsd: "50.5", floorsUsd: { shop: "1.000001" } });
+	const e = parse({ version: 1, window: "month", totalTokens: "50.5", floorsTokens: { shop: "1.000001" } });
 	assert.deepEqual(e.floors, { [OTHER]: 0, shop: 1_000_001 });
 	assert.deepEqual(e.defaultWeights, { [OTHER]: 1, shop: 1 });
-	assert.equal(e.totalMicros, 50_500_000);
+	assert.equal(e.totalTokens, 50_500_000);
 	assert.deepEqual(e.delegation, { enabled: false, writers: [], maxStepPct: null, minIntervalHours: null, maxPlanDays: null });
-	assert.deepEqual(parse({ version: 1, window: "day", totalUsd: 1, floorsUsd: {} }).floors, { [OTHER]: 0 }, "no project floors: everything is _other");
-	// The normalized envelope is what allocate consumes: 49,499,999 splits 1:1, the odd micro-dollar to _other (lower id).
+	assert.deepEqual(parse({ version: 1, window: "day", totalTokens: 1, floorsTokens: {} }).floors, { [OTHER]: 0 }, "no project floors: everything is _other");
+	// The normalized envelope is what allocate consumes: 49,499,999 splits 1:1, the odd token to _other (lower id).
 	assert.deepEqual(allocate({ envelope: e, weights: e.defaultWeights }).allocations, { [OTHER]: 24_750_000, shop: 25_750_000 });
 });
 
@@ -62,70 +62,70 @@ test("the version: required, an integer >= 1, and a newer one is refused", () =>
 test("the shape: valid JSON, an object, and no unknown key at the top or in delegation (counted, never quoted)", () => {
 	assert.throws(() => parseEnvelope("{ nope", "envelope.json", CONTEXT), (e) => /not valid JSON \(at character \d+\): envelope\.json$/.test(e.message) && !e.message.includes("nope"));
 	refused([], /must be an object/);
-	refused(withField({ totalUSD: 1 }), /the file has 1 unknown key\(s\)/);
+	refused(withField({ totalTOKENS: 1 }), /the file has 1 unknown key\(s\)/);
 	refused(withDelegation({ maxStepPCT: 5 }), /delegation has 1 unknown key\(s\)/);
 	assert.throws(() => parse(withField({ zzSECRETzz: 1 })), (e) => !e.message.includes("zzSECRETzz"));
 });
 
-test("an envelope needs a per-job cost cap, naming PI_MAX_COST_USD", () => {
-	refused(EXAMPLE, /needs a per-job cost cap: set PI_MAX_COST_USD/, { ...CONTEXT, maxCostMicros: null });
-	refused(EXAMPLE, /PI_MAX_COST_USD/, { projects: PROJECTS, limits: [] });
-	for (const maxCostMicros of [0, -1, 1.5, "2000000", Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
-		refused(EXAMPLE, /needs a per-job cost cap/, { ...CONTEXT, maxCostMicros });
+test("an envelope needs a per-job token budget, naming PI_MAX_TOKENS", () => {
+	refused(EXAMPLE, /needs a per-job token budget: set PI_MAX_TOKENS/, { ...CONTEXT, maxTokens: null });
+	refused(EXAMPLE, /PI_MAX_TOKENS/, { projects: PROJECTS, limits: [] });
+	for (const maxTokens of [0, -1, 1.5, "2000000", Number.MAX_SAFE_INTEGER + 1, Infinity, NaN]) {
+		refused(EXAMPLE, /needs a per-job token budget/, { ...CONTEXT, maxTokens });
 	}
-	assert.equal(parse(EXAMPLE, { ...CONTEXT, maxCostMicros: 1 }).window, "week", "one micro-dollar is a cap");
+	assert.equal(parse(EXAMPLE, { ...CONTEXT, maxTokens: 1 }).window, "week", "one token is a cap");
 });
 
 test("window is one of day, week, month", () => {
 	for (const window of [undefined, "year", "Week", 7]) refused(withField({ window }), /window must be one of day, week, month/);
 });
 
-test("totalUsd: a plain decimal above 0, at most 6 decimals, never rounded", () => {
-	for (const totalUsd of [undefined, 0, "0", -1, "1e3", "1.0000001", 1e-7, "abc", 1_000_001]) refused(withField({ totalUsd }), /totalUsd must be a dollar amount above 0/);
-	assert.equal(parse(withField({ totalUsd: "100.000001" })).totalMicros, 100_000_001);
+test("totalTokens: a plain decimal above 0, at most 6 decimals, never rounded", () => {
+	for (const totalTokens of [undefined, 0, "0", -1, "1e3", "1.0000001", 1e-7, "abc", 1_000_001]) refused(withField({ totalTokens }), /totalTokens must be a token count above 0/);
+	assert.equal(parse(withField({ totalTokens: "100.000001" })).totalTokens, 100_000_001);
 });
 
-test("floorsUsd: an object; each floor a plain decimal of 0 or more with at most 6 decimals", () => {
-	for (const floorsUsd of [undefined, [], "shop"]) refused(withField({ floorsUsd }), /floorsUsd must be an object/);
-	for (const v of [-1, "1.0000001", "1e2", "x", null]) refused(withField({ floorsUsd: { shop: v } }), /floorsUsd\.shop must be a dollar amount of 0 or more/);
-	assert.equal(parse(withField({ floorsUsd: { shop: "0.000000", platform: 0 } })).floors.shop, 0);
+test("floorsTokens: an object; each floor a plain decimal of 0 or more with at most 6 decimals", () => {
+	for (const floorsTokens of [undefined, [], "shop"]) refused(withField({ floorsTokens }), /floorsTokens must be an object/);
+	for (const v of [-1, "1.0000001", "1e2", "x", null]) refused(withField({ floorsTokens: { shop: v } }), /floorsTokens\.shop must be a token count of 0 or more/);
+	assert.equal(parse(withField({ floorsTokens: { shop: "0.000000", platform: 0 } })).floors.shop, 0);
 });
 
 test("a floor key must be a project in projects.json or _other", () => {
-	refused(withField({ floorsUsd: { web: 1 } }), /floorsUsd\.web names a project that is not in the projects file/);
-	refused(withField({ floorsUsd: { shop: 1 } }), /floorsUsd\.shop names a project that is not in the projects file/, { ...CONTEXT, projects: [] });
-	refused(withField({ floorsUsd: { "Shop/../x": 1 } }), /a key of floorsUsd is neither _other nor a project id/);
-	assert.throws(() => parse(withField({ floorsUsd: { "/srv/secret": 1 } })), (e) => !e.message.includes("/srv/secret"), "a malformed key is never quoted");
+	refused(withField({ floorsTokens: { web: 1 } }), /floorsTokens\.web names a project that is not in the projects file/);
+	refused(withField({ floorsTokens: { shop: 1 } }), /floorsTokens\.shop names a project that is not in the projects file/, { ...CONTEXT, projects: [] });
+	refused(withField({ floorsTokens: { "Shop/../x": 1 } }), /a key of floorsTokens is neither _other nor a project id/);
+	assert.throws(() => parse(withField({ floorsTokens: { "/srv/secret": 1 } })), (e) => !e.message.includes("/srv/secret"), "a malformed key is never quoted");
 });
 
 test("the floors may not add up to more than the total", () => {
-	refused(withField({ totalUsd: 15, floorsUsd: { shop: 10, platform: 10 } }), /the floors add up to 20\.00, above totalUsd 15\.00/);
-	assert.equal(parse(withField({ totalUsd: 20, floorsUsd: { shop: 10, platform: 10 } })).totalMicros, 20 * M, "equal is allowed");
+	refused(withField({ totalTokens: 15, floorsTokens: { shop: 10, platform: 10 } }), /the floors add up to 20\.00, above totalTokens 15\.00/);
+	assert.equal(parse(withField({ totalTokens: 20, floorsTokens: { shop: 10, platform: 10 } })).totalTokens, 20 * M, "equal is allowed");
 });
 
 test("defaultWeights: entries with a floor, integers 0 to 1000", () => {
 	refused(withField({ defaultWeights: [] }), /defaultWeights must be an object/);
 	refused(withField({ defaultWeights: { web: 1 } }), /defaultWeights\.web names a project that is not in the projects file/);
-	refused(withField({ floorsUsd: { shop: 10 }, defaultWeights: { platform: 1 } }), /defaultWeights\.platform names a project with no floor/);
+	refused(withField({ floorsTokens: { shop: 10 }, defaultWeights: { platform: 1 } }), /defaultWeights\.platform names a project with no floor/);
 	for (const w of [-1, 1001, 1.5, "1"]) refused(withField({ defaultWeights: { shop: w } }), /defaultWeights\.shop must be an integer from 0 to 1000/);
 	assert.deepEqual(parse(withField({ defaultWeights: { shop: 0 } })).defaultWeights, { [OTHER]: 1, platform: 1, shop: 0 });
 });
 
-test("a project's operator dollar row for the envelope's window below its floor refuses the file, naming both", () => {
-	const limits = [{ scope: "project:shop", weekUsd: "5.00", dayUsd: null, monthUsd: null }];
-	refused(EXAMPLE, /floorsUsd\.shop \(10\.00\) is above the scoped-limits row project:shop weekUsd \(5\.00\)/, { ...CONTEXT, limits });
+test("a project's operator token row for the envelope's window below its floor refuses the file, naming both", () => {
+	const limits = [{ scope: "project:shop", weekTokens: "5.00", dayTokens: null, monthTokens: null }];
+	refused(EXAMPLE, /floorsTokens\.shop \(10\.00\) is above the scoped-limits row project:shop weekTokens \(5\.00\)/, { ...CONTEXT, limits });
 	// Another window's row is not this envelope's business, and a row at the floor is fine.
-	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "project:shop", dayUsd: "1.00", weekUsd: null, monthUsd: null }] }).window, "week");
-	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "project:shop", weekUsd: "10.00" }] }).window, "week");
-	refused(withField({ window: "day" }), /floorsUsd\.shop \(10\.00\) is above the scoped-limits row project:shop dayUsd \(1\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", dayUsd: "1.00" }] });
+	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "project:shop", dayTokens: "1.00", weekTokens: null, monthTokens: null }] }).window, "week");
+	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "project:shop", weekTokens: "10.00" }] }).window, "week");
+	refused(withField({ window: "day" }), /floorsTokens\.shop \(10\.00\) is above the scoped-limits row project:shop dayTokens \(1\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", dayTokens: "1.00" }] });
 	// A LONGER window's row bounds the envelope's window too: a week of $0.000001 caps every day of it.
-	refused(withField({ window: "day", floorsUsd: { shop: 50, platform: 10 } }), /floorsUsd\.shop \(50\.00\) is above the scoped-limits row project:shop weekUsd \(0\.000001\)/, { ...CONTEXT, limits: [{ scope: "project:shop", weekUsd: "0.000001" }] });
-	refused(withField({ window: "week" }), /project:shop monthUsd \(5\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", monthUsd: "5.00" }] });
-	refused(withField({ window: "day" }), /project:shop monthUsd \(9\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", dayUsd: "20.00", monthUsd: "9.00" }] });
+	refused(withField({ window: "day", floorsTokens: { shop: 50, platform: 10 } }), /floorsTokens\.shop \(50\.00\) is above the scoped-limits row project:shop weekTokens \(0\.000001\)/, { ...CONTEXT, limits: [{ scope: "project:shop", weekTokens: "0.000001" }] });
+	refused(withField({ window: "week" }), /project:shop monthTokens \(5\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", monthTokens: "5.00" }] });
+	refused(withField({ window: "day" }), /project:shop monthTokens \(9\.00\)/, { ...CONTEXT, limits: [{ scope: "project:shop", dayTokens: "20.00", monthTokens: "9.00" }] });
 	// A SHORTER window's row is not compared: seven days of $5 can still reach a week floor of $10.
-	assert.equal(parse(withField({ window: "month" }), { ...CONTEXT, limits: [{ scope: "project:shop", dayUsd: "1.00", weekUsd: "5.00" }] }).window, "month");
+	assert.equal(parse(withField({ window: "month" }), { ...CONTEXT, limits: [{ scope: "project:shop", dayTokens: "1.00", weekTokens: "5.00" }] }).window, "month");
 	// A repo row is not a project row.
-	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "github:acme/web", weekUsd: "1.00" }] }).window, "week");
+	assert.equal(parse(EXAMPLE, { ...CONTEXT, limits: [{ scope: "github:acme/web", weekTokens: "1.00" }] }).window, "week");
 });
 
 test("delegation: enabled is a boolean, and when on, writers, maxStepPct, minIntervalHours and maxPlanDays are all required", () => {
@@ -145,9 +145,9 @@ test("delegation: enabled is a boolean, and when on, writers, maxStepPct, minInt
 test("envelopeDigest is 16 hex over the normalized envelope: key order and spelling do not move it, a value does", () => {
 	const a = envelopeDigest(parse(EXAMPLE));
 	assert.match(a, /^[0-9a-f]{16}$/);
-	const reordered = { delegation: EXAMPLE.delegation, defaultWeights: { _other: 1, platform: 1, shop: 1 }, floorsUsd: { _other: "0", platform: "10.00", shop: "10" }, totalUsd: "100", window: "week", version: 1 };
+	const reordered = { delegation: EXAMPLE.delegation, defaultWeights: { _other: 1, platform: 1, shop: 1 }, floorsTokens: { _other: "0", platform: "10.00", shop: "10" }, totalTokens: "100", window: "week", version: 1 };
 	assert.equal(envelopeDigest(parse(reordered)), a);
-	assert.notEqual(envelopeDigest(parse(withField({ totalUsd: 101 }))), a);
+	assert.notEqual(envelopeDigest(parse(withField({ totalTokens: 101 }))), a);
 	assert.notEqual(envelopeDigest(parse(withDelegation({ maxStepPct: 24 }))), a);
 });
 
@@ -161,8 +161,8 @@ test("loadEnvelope: unset is null (no delegation), a missing file and an empty v
 	const dir = tempDir("envelope-");
 	const path = join(dir, "envelope.json");
 	writeFileSync(path, JSON.stringify(EXAMPLE));
-	assert.equal(loadEnvelope({ envelopeFile: path }, CONTEXT).totalMicros, 100 * M);
-	assert.throws(() => loadEnvelope({ envelopeFile: path }, { ...CONTEXT, projects: [] }), /floorsUsd\.platform names a project/);
+	assert.equal(loadEnvelope({ envelopeFile: path }, CONTEXT).totalTokens, 100 * M);
+	assert.throws(() => loadEnvelope({ envelopeFile: path }, { ...CONTEXT, projects: [] }), /floorsTokens\.platform names a project/);
 });
 
 // ── the inside-path check ───────────────────────────────────────────────────────────────────────────────

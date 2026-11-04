@@ -41,7 +41,7 @@ test("a generated password is 64 hex characters that every .env loader reads bac
 
 test("a password the start script could not hand to Valkey is refused, with the way to make one (#468)", () => {
 	for (const ok of [PW, "A-Za_z0123456789", "x".repeat(512)]) assert.equal(valkeyPasswordProblem(ok), null, ok);
-	for (const [bad, why] of [["", /empty/], ["has space inside it", /character other than/], ['quote"d-0123456789', /character other than/], ["hash#0123456789abc", /character other than/], ["short", /at least 16/], ["x".repeat(513), /over the 512/], ["dollar$0123456789ab", /character other than/]]) {
+	for (const [bad, why] of [["", /empty/], ["has space inside it", /character other than/], ['quote"d-0123456789', /character other than/], ["hash#0123456789abc", /character other than/], ["short", /at least 16/], ["x".repeat(513), /over the 512/], ["token$0123456789ab", /character other than/]]) {
 		assert.match(valkeyPasswordProblem(bad), why, bad);
 	}
 	const decided = valkeyPasswordDecision({ VALKEY_PASSWORD: "bad value here!" }, { envPath: "/d/.env" });

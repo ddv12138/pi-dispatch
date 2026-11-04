@@ -4,8 +4,8 @@ import { test } from "node:test";
 import { subscriptionSmokeProblems } from "../../.github/scripts/subscription-auth-image.mjs";
 
 const key = "ab".repeat(32);
-const costExit = { event: "exit", code: 2, reason: "cost-cap", tokens: { costRefused: 1, modelRefused: 0 } };
-const providerExit = { event: "exit", code: 1, reason: "error", tokens: { costRefused: 0, modelRefused: 0, calls: 2, metered: true }, toolsStarted: false, replaySafe: true, providerFailure: { kind: "quota-exhausted", subscriptionProvider: "openai", subscriptionCode: "usage_limit_reached" } };
+const costExit = { event: "exit", code: 2, reason: "cost-cap", tokens: { modelRefused: 1, modelRefused: 0 } };
+const providerExit = { event: "exit", code: 1, reason: "error", tokens: { modelRefused: 0, modelRefused: 0, calls: 2, metered: true }, toolsStarted: false, replaySafe: true, providerFailure: { kind: "quota-exhausted", subscriptionProvider: "openai", subscriptionCode: "usage_limit_reached" } };
 const signed = exit => {
 	const body = JSON.stringify(exit);
 	return `${body.slice(0, -1)},"auth":"${createHmac("sha256", key).update(body).digest("hex")}"}`;
@@ -19,7 +19,7 @@ test("image conformance accepts a signed initial cost refusal, and rejects confi
 	for (const exit of [
 		{ event: "exit", code: 2, reason: "config", message: "adapter unavailable" },
 		{ ...costExit, reason: "model-not-allowed" },
-		{ ...costExit, tokens: { costRefused: 1, modelRefused: 1 } },
+		{ ...costExit, tokens: { modelRefused: 1, modelRefused: 1 } },
 		{ ...costExit, tokens: { modelRefused: 0 } },
 	]) assert.ok(check(exit).length > 0);
 	assert.ok(check(costExit, { status: 0 }).length > 0);

@@ -5,6 +5,6 @@ export function recordedWatchDecision(value) {
 	if (Array.isArray(value.questions) && value.questions.length <= 16 && value.questions.every(n => /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/.test(n))) out.questions = [...value.questions];
 	if (value.probabilities && Object.keys(value.probabilities).every(k => ["investigate", "file_issue", "ignore"].includes(k)) && Object.values(value.probabilities).every(p => Number.isFinite(p) && p >= 0 && p <= 1)) out.probabilities = { ...value.probabilities };
 	if (Number.isFinite(value.confidence) && value.confidence >= 0 && value.confidence <= 1) out.confidence = value.confidence;
-	if (Number.isFinite(value.costUsd) && value.costUsd >= 0) out.costUsd = value.costUsd;
+	if (Number.isSafeInteger(value.tokensTotal) && value.tokensTotal >= 0) out.tokensTotal = value.tokensTotal;
 	return out;
 }

@@ -354,16 +354,16 @@ test("the trigger's run.mcp reaches the container env as PI_MCP_SERVERS, and a j
 	}
 });
 
-test("the job's dollar cap reaches the container env as PI_MAX_COST_MICROS, 0 included, and an uncapped job emits none (#501)", { skip }, async () => {
-	// The hop from the effective job to buildContainerEnv. Dropped here, every capped job would pass the costCap
+test("the job's token budget reaches the container env as PI_MAX_TOKENS, 0 included, and an uncapped job emits none (#501)", { skip }, async () => {
+	// The hop from the effective job to buildContainerEnv. Dropped here, every capped job would pass the tokenBudget
 	// gate and then run with NO cap on Docker and Podman alike, so this asserts the argv itself.
-	for (const maxCostMicros of [0, 500_000]) {
-		const argv = await argvFor({ ...JOB, maxCostMicros });
-		assert.ok(argv.includes(`PI_MAX_COST_MICROS=${maxCostMicros}`), `cap ${maxCostMicros} must reach the runner`);
+	for (const maxTokens of [0, 500_000]) {
+		const argv = await argvFor({ ...JOB, maxTokens });
+		assert.ok(argv.includes(`PI_MAX_TOKENS=${maxTokens}`), `cap ${maxTokens} must reach the runner`);
 	}
-	for (const job of [{ ...JOB, maxCostMicros: null }, JOB]) {
+	for (const job of [{ ...JOB, maxTokens: null }, JOB]) {
 		const argv = await argvFor(job);
-		assert.ok(!argv.some((a) => String(a).startsWith("PI_MAX_COST_MICROS")), "no cap: no variable at all");
+		assert.ok(!argv.some((a) => String(a).startsWith("PI_MAX_TOKENS")), "no cap: no variable at all");
 	}
 });
 
@@ -850,7 +850,7 @@ test("exitReason reaches the result through a disabled real sink, and only off a
 	assert.deepEqual(opened, [], "raw logs stayed off: no .log was ever opened");
 });
 
-// Issue #507: the cost guard's rule, through the same real disabled sink, and only when the line named one.
+// Issue #507: the meter's rule, through the same real disabled sink, and only when the line named one.
 test("exitWhy reaches the result off a cost-cap exit line, and is absent from every other result", { skip }, async () => {
 	const { makeLogSink } = await import("../src/run-history.mjs");
 	const fs = { mkdirSync() {}, createWriteStream: () => null };

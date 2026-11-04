@@ -3,20 +3,20 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { InfraRetry, runJob } from "../src/processor.mjs";
 import { configError } from "../src/config.mjs";
-import { dollarCapsFor, parseScopedLimits, projectDollarCapsFor, scopeDollarKeyPrefix, scopedLedgers, scopeKeyPrefix } from "../src/scoped-limits.mjs";
+import { tokenCapsFor, parseScopedLimits, projectTokenCapsFor, scopeTokenKeyPrefix, scopedLedgers, scopeKeyPrefix } from "../src/scoped-limits.mjs";
 
 // Issue #499 part B (INT-SCOPED-LIMITS-FILE-CONTRACT, DES-SCOPED-LIMITS-AND-FOLDER-MUTEX): a `project:<id>` row caps
 // every member of a project as one. The job-count ledgers reserve narrowest first (repo or folder row, project row,
-// global) through one helper and give back last first; the dollar ledgers gain the project tier in one hold.
+// global) through one helper and give back last first; the token ledgers gain the project tier in one hold.
 
-const USD = 1_000_000;
+const TOKENS = 1; // amounts are token counts now; the name keeps the N * TOKENS shapes readable
 const NOW = new Date("2026-07-16T10:00:00Z");
 const G_DAY = "budget:2026-07-16";
 const P_PREFIX = scopeKeyPrefix("project:shop");
 const P_DAY = `${P_PREFIX}:2026-07-16`;
 const dayOf = (scope) => `${scopeKeyPrefix(scope)}:2026-07-16`;
 
-/** A keyed fake: job-count INCR/DECR and dollar INCRBY/DECRBY/settle on one store, every op in order. */
+/** A keyed fake: job-count INCR/DECR and token INCRBY/DECRBY/settle on one store, every op in order. */
 function keyedRedis(preset = {}, { failDecr = false, failDecrOn = null, failIncrOn = null } = {}) {
 	const store = new Map(Object.entries(preset));
 	const ops = [];
@@ -66,7 +66,7 @@ const LIMITS = parseScopedLimits(
 		limits: [
 			{ scope: "github:acme/web", day: 5 },
 			{ scope: "github:acme/api", day: 5 },
-			{ scope: "project:shop", day: 2, dayUsd: "3" },
+			{ scope: "project:shop", day: 2, dayTokens: 3 },
 		],
 	}),
 	"sl.json",
@@ -180,16 +180,16 @@ test("(d) a config-refused job releases all three ledgers; a refund that fails s
 });
 
 test("budgetReserved is ONE rule, global-only: a refund whose global give-back landed records false even when a narrower one failed", async () => {
-	const P_USD_ = projectDollarCapsFor(LIMITS, "shop");
-	// dollar-cap: the project dollar window is full; the project slot's DECR fails after the global DECR landed.
+	const P_TOKENS_ = projectTokenCapsFor(LIMITS, "shop");
+	// token-cap: the project token window is full; the project slot's DECR fails after the global DECR landed.
 	{
-		const redis = keyedRedis({ [`${P_USD_.keyPrefix}:2026-07-16`]: 2 * USD }, { failDecrOn: P_DAY });
-		const d = deps(DJOB, { redis, dollarCaps: { day: 50 * USD, week: null, month: null }, projectDollars: P_USD_ });
+		const redis = keyedRedis({ [`${P_TOKENS_.keyPrefix}:2026-07-16`]: 2 }, { failDecrOn: P_DAY });
+		const d = deps(DJOB, { redis, tokenCaps: { day: 50, week: null, month: null }, projectTokens: P_TOKENS_ });
 		const r = await runJob(DJOB, d.deps);
-		assert.equal(r.reason, "dollar-cap");
+		assert.equal(r.reason, "token-cap");
 		assert.equal(redis.store.get(G_DAY), 0, "the global slot was given back");
 		assert.equal(r.budgetReserved, false, "so the record says it is not held");
-		assert.ok(d.logs.some((l) => l.e === "budget_release_failed" && l.f.at === "dollar-cap"), "the stranded project slot is in the log");
+		assert.ok(d.logs.some((l) => l.e === "budget_release_failed" && l.f.at === "token-cap"), "the stranded project slot is in the log");
 	}
 	// config-refused: the same.
 	{
@@ -231,57 +231,57 @@ test("a fault on a LATER window of one ledger gives back the whole ledgers befor
 	assert.equal(redis.store.has(G_DAY), false, "the global ledger was never reached");
 });
 
-// ── dollars: the project tier ────────────────────────────────────────────────────────────────────────────
+// ── tokensWindows: the project tier ────────────────────────────────────────────────────────────────────────────
 
-const DJOB = { ...web, provider: "openai", model: "gpt-x", maxCostMicros: 2 * USD };
-const P_USD = projectDollarCapsFor(LIMITS, "shop");
-const P_USD_DAY = `${P_USD.keyPrefix}:2026-07-16`;
-const D_DAY = "budget:usd:2026-07-16";
-const TOKENS = (cost) => ({ input: 10, output: 5, total: 15, cost, calls: 2, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costCapMicros: 2 * USD, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0, costUnreported: 0 });
-const ROW = (provider, model, cost) => ({ provider, model, calls: 1, input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 7, cost, unpriced: 0 });
-const MODEL = { ref: "openai/gpt-x", keyPrefix: "budget:usd:mdl:feedfacefeedface", caps: { day: 100 * USD, week: null, month: null } };
-const ranFor = (cost, modelCost) => async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens: TOKENS(cost), usage: { v: 1, piAi: null, truncated: 0, models: [ROW("openai", "gpt-x", modelCost)] } });
+const DJOB = { ...web, provider: "openai", model: "gpt-x", maxTokens: 2 };
+const P_TOKENS = projectTokenCapsFor(LIMITS, "shop");
+const P_TOKENS_DAY = `${P_TOKENS.keyPrefix}:2026-07-16`;
+const D_DAY = "budget:tok:2026-07-16";
+const TOKENS_OF = (total) => ({ input: 10, output: 5, total, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 2, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, usageUnreported: 0, modelRefused: 0 });
+const ROW = (provider, model, total) => ({ provider, model, calls: 1, input: 5, output: 2, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total });
+const MODEL = { ref: "openai/gpt-x", keyPrefix: "budget:tok:mdl:feedfacefeedface", caps: { day: 100, week: null, month: null } };
+const ranFor = (cost, modelCost) => async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens: TOKENS_OF(cost), usage: { v: 1, piAi: null, truncated: 0, models: [ROW("openai", "gpt-x", modelCost)] } });
 
-test("the project dollar window is under scopeDollarKeyPrefix(project:shop), reserved after the scope and before the models, in ONE hold", async () => {
-	assert.equal(P_USD.keyPrefix, scopeDollarKeyPrefix("project:shop"));
-	assert.ok(!P_USD.keyPrefix.startsWith("budget:usd:p:"), "no second dollar keyspace for projects");
-	const scope = dollarCapsFor(web, parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "github:acme/web", dayUsd: "50" }] }), "sl.json"));
+test("the project token window is under scopeTokenKeyPrefix(project:shop), reserved after the scope and before the models, in ONE hold", async () => {
+	assert.equal(P_TOKENS.keyPrefix, scopeTokenKeyPrefix("project:shop"));
+	assert.ok(!P_TOKENS.keyPrefix.startsWith("budget:tok:p:"), "no second token keyspace for projects");
+	const scope = tokenCapsFor(web, parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "github:acme/web", dayTokens: 50 }] }), "sl.json"));
 	const redis = keyedRedis();
-	const d = deps(DJOB, { redis, dollarCaps: { day: 50 * USD, week: null, month: null }, scopedDollars: scope, projectDollars: P_USD, modelDollars: [MODEL], runContainer: ranFor(0.5, 0.25) });
+	const d = deps(DJOB, { redis, tokenCaps: { day: 50, week: null, month: null }, scopedTokens: scope, projectTokens: P_TOKENS, modelTokens: [MODEL], runContainer: ranFor(4, 2) });
 	const r = await runJob(DJOB, d.deps);
 	assert.equal(r.outcome, "completed");
 	const reserved = redis.ops.filter((o) => o[0] === "incrby").map((o) => o[1]);
-	assert.deepEqual(reserved, [D_DAY, `${scope.keyPrefix}:2026-07-16`, P_USD_DAY, `${MODEL.keyPrefix}:2026-07-16`], "deployment, scope, project, models");
+	assert.deepEqual(reserved, [D_DAY, `${scope.keyPrefix}:2026-07-16`, P_TOKENS_DAY, `${MODEL.keyPrefix}:2026-07-16`], "deployment, scope, project, models");
 	// The project part settles to the JOB's cost, like the scope part; the model part to its own usage row.
-	assert.equal(redis.store.get(P_USD_DAY), 500_000, "the project window holds the job's metered $0.50");
-	assert.equal(redis.store.get(`${scope.keyPrefix}:2026-07-16`), 500_000);
-	assert.equal(redis.store.get(D_DAY), 500_000);
-	assert.equal(redis.store.get(`${MODEL.keyPrefix}:2026-07-16`), 250_000, "the model window holds its own row's $0.25");
+	assert.equal(redis.store.get(P_TOKENS_DAY), 4, "the project window holds the job's metered $0.50");
+	assert.equal(redis.store.get(`${scope.keyPrefix}:2026-07-16`), 4);
+	assert.equal(redis.store.get(D_DAY), 4);
+	assert.equal(redis.store.get(`${MODEL.keyPrefix}:2026-07-16`), 2, "the model window holds its own row's $0.25");
 });
 
-test("a full project dollar window refuses dollar-cap naming 'this project', and every count and dollar ledger goes back", async () => {
-	const redis = keyedRedis({ [P_USD_DAY]: 2 * USD }); // $2 of $3 used; a $2 hold would make $4
-	const d = deps(DJOB, { redis, dollarCaps: { day: 50 * USD, week: null, month: null }, projectDollars: P_USD });
+test("a full project token window refuses token-cap naming 'this project', and every count and token ledger goes back", async () => {
+	const redis = keyedRedis({ [P_TOKENS_DAY]: 2 }); // $2 of $3 used; a $2 hold would make $4
+	const d = deps(DJOB, { redis, tokenCaps: { day: 50, week: null, month: null }, projectTokens: P_TOKENS });
 	const r = await runJob(DJOB, d.deps);
-	assert.equal(r.reason, "dollar-cap");
+	assert.equal(r.reason, "token-cap");
 	assert.equal(r.budgetReserved, false);
 	assert.ok(!d.calls.includes("run-container"));
-	assert.match(d.comments[0], /^Refused: today's dollar budget for this project has no room left/);
-	const logged = d.logs.find((l) => l.e === "over_dollar_budget").f;
+	assert.match(d.comments[0], /^Refused: today's token budget for this project has no room left/);
+	const logged = d.logs.find((l) => l.e === "over_token_budget").f;
 	assert.equal(logged.ledger, "project");
-	assert.equal(logged.key, P_USD.keyPrefix);
-	assert.equal(redis.store.get(P_USD_DAY), 2 * USD, "the refusing window was given back");
+	assert.equal(logged.key, P_TOKENS.keyPrefix);
+	assert.equal(redis.store.get(P_TOKENS_DAY), 2, "the refusing window was given back");
 	assert.equal(redis.store.get(D_DAY), 0, "the deployment window too");
 	assert.equal(redis.store.get(WEB_DAY), 0, "the repo job-count slot went back");
 	assert.equal(redis.store.get(P_DAY), 0, "the project job-count slot went back");
 	assert.equal(redis.store.get(G_DAY), 0, "the global job-count slot went back");
 });
 
-test("a never-started container gives the project dollar hold back with the rest", async () => {
+test("a never-started container gives the project token hold back with the rest", async () => {
 	const redis = keyedRedis();
-	const d = deps(DJOB, { redis, dollarCaps: { day: 50 * USD, week: null, month: null }, projectDollars: P_USD, runContainer: async () => ({ code: 125, aborted: false }) });
+	const d = deps(DJOB, { redis, tokenCaps: { day: 50, week: null, month: null }, projectTokens: P_TOKENS, runContainer: async () => ({ code: 125, aborted: false }) });
 	await assert.rejects(() => runJob(DJOB, d.deps), (e) => e.reason === "container-never-started");
-	assert.equal(redis.store.get(P_USD_DAY), 0);
+	assert.equal(redis.store.get(P_TOKENS_DAY), 0);
 	assert.equal(redis.store.get(D_DAY), 0);
 });
 

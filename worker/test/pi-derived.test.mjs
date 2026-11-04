@@ -30,8 +30,7 @@ test("every derived pi table in this repository equals its generation from the i
 
 test("a hand edit of any derived table goes red", { skip }, () => {
 	const edits = {
-		[HOSTS_FILES[0]]: (text) => text.replace('\t"api.groq.com",\n', ""),
-		[HOSTS_FILES[1]]: (text) => text.replace('\t"openrouter.ai",\n', '\t"openrouter.ai",\n\t"evil.example",\n'),
+		[HOSTS_FILES[0]]: (text) => text.replace('\t"openrouter.ai",\n', '\t"openrouter.ai",\n\t"evil.example",\n'),
 		[CATALOG_FILE]: (text) => text.replace('"output":15,', '"output":14,'),
 		[TOOLS_FILE]: (text) => text.replace('"powershell", ', ""),
 	};
@@ -62,13 +61,13 @@ test("the hosts block is rewritten in place, and its added and removed hosts are
 	const source = 'x\nexport const COMPLETIONS_CATALOG_HOSTS = Object.freeze([\n\t"a.example",\n\t"old.example",\n]);\ny\n';
 	assert.deepEqual(hostsIn(source), ["a.example", "old.example"]);
 	assert.equal(withHosts(source, ["a.example", "new.example"]), 'x\nexport const COMPLETIONS_CATALOG_HOSTS = Object.freeze([\n\t"a.example",\n\t"new.example",\n]);\ny\n');
-	const files = { [HOSTS_FILES[0]]: source, [HOSTS_FILES[1]]: source, [CATALOG_FILE]: "export const CATALOG_ROWS = Object.freeze({\n});\n", [TOOLS_FILE]: 'export const EXCLUDABLE_TOOL_NAMES = new Set(["a"]);\n' };
+	const files = { [HOSTS_FILES[0]]: source, [CATALOG_FILE]: "export const CATALOG_ROWS = Object.freeze({\n});\n", [TOOLS_FILE]: 'export const EXCLUDABLE_TOOL_NAMES = new Set(["a"]);\n' };
 	const catalogFacts = { catalog: [row("p", "openai-completions", "m", "https://a.example"), row("q", "openai-completions", "n", "https://new.example")], allToolNames: ["a"] };
 	assert.throws(() => catalogRowsIn(files[CATALOG_FILE]), /no CATALOG_ROWS/, "an empty row list is not a block this generator recognises");
 	files[CATALOG_FILE] = 'export const CATALOG_ROWS = Object.freeze({\n\tM: ["p", "openai-completions", "m"],\n});\n';
 	const { hosts, changed } = derivedChanges({ read: (path) => files[path], facts: catalogFacts });
 	assert.deepEqual(hosts, { added: ["new.example"], removed: ["old.example"] });
-	assert.deepEqual(changed, [...DERIVED_FILES.slice(0, 3)]);
+	assert.deepEqual(changed, [HOSTS_FILES[0], CATALOG_FILE]);
 });
 
 test("a generator whose target moved, or whose catalog row is gone, is an error for that file alone, never a pass", () => {
@@ -78,10 +77,10 @@ test("a generator whose target moved, or whose catalog row is gone, is an error 
 	assert.deepEqual(empty.errors.map((e) => e.path), [...DERIVED_FILES]);
 	assert.equal(empty.files.size, 0);
 	// A renamed model: the catalog file errs by name, and the other three are still generated.
-	const files = { [HOSTS_FILES[0]]: 'export const COMPLETIONS_CATALOG_HOSTS = Object.freeze([\n]);\n', [HOSTS_FILES[1]]: 'export const COMPLETIONS_CATALOG_HOSTS = Object.freeze([\n]);\n', [CATALOG_FILE]: 'export const CATALOG_ROWS = Object.freeze({\n\tM: ["p", "openai-completions", "renamed"],\n});\n', [TOOLS_FILE]: 'export const EXCLUDABLE_TOOL_NAMES = new Set(["a"]);\n' };
+	const files = { [HOSTS_FILES[0]]: 'export const COMPLETIONS_CATALOG_HOSTS = Object.freeze([\n]);\n', [CATALOG_FILE]: 'export const CATALOG_ROWS = Object.freeze({\n\tM: ["p", "openai-completions", "renamed"],\n});\n', [TOOLS_FILE]: 'export const EXCLUDABLE_TOOL_NAMES = new Set(["a"]);\n' };
 	const renamed = derivedChanges({ read: (path) => files[path], facts: { catalog: [row("p", "openai-completions", "m", "https://a.example")], allToolNames: ["a", "b"] } });
 	assert.deepEqual(renamed.errors, [{ path: CATALOG_FILE, message: `${CATALOG_FILE}: M (p openai-completions renamed) is gone from the pinned catalog; change CATALOG_ROWS` }]);
-	assert.deepEqual(renamed.changed, [HOSTS_FILES[0], HOSTS_FILES[1], TOOLS_FILE]);
+	assert.deepEqual(renamed.changed, [HOSTS_FILES[0], TOOLS_FILE]);
 	assert.deepEqual(renamed.hosts, { added: ["a.example"], removed: [] });
 });
 

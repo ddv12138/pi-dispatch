@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto";
 import { PROJECT_ID_RE } from "./project-id.mjs";
 import { SKILL_NAME_RE } from "./flow-gate.mjs";
-import { parseUsdMicros } from "./money.mjs";
 
 export const ANSWER_CATEGORIES = Object.freeze(["convention", "how-to", "decided"]);
 export const ANSWER_CLASSIFICATIONS = Object.freeze([...ANSWER_CATEGORIES, "product", "security", "money", "scope", "approval", "uncovered"]);
@@ -39,11 +38,11 @@ export function validateAnswerRules(value) {
 	if (!Array.isArray(value) || value.length > 100) fail("answerRules must be an array of at most 100 reviewed rules");
 	const ids = new Set(), claimed = new Set();
 	for (const r of value) {
-		if (!only(r, ["id", "projects", "categories", "confidence", "mode", "flow", "model", "decisionModel", "maxCostUsd"]) || !ANSWER_ID_RE.test(r.id ?? "") || ids.has(r.id)) fail("answerRules requires unique rule ids and only declared fields");
+		if (!only(r, ["id", "projects", "categories", "confidence", "mode", "flow", "model", "decisionModel", "maxTokens"]) || !ANSWER_ID_RE.test(r.id ?? "") || ids.has(r.id)) fail("answerRules requires unique rule ids and only declared fields");
 		if (!projects(r.projects) || r.projects.some(p => claimed.has(p))) fail("answerRules projects must be valid, unique and belong to at most one rule");
 		if (!Array.isArray(r.categories) || !r.categories.length || new Set(r.categories).size !== r.categories.length || r.categories.some(c => !ANSWER_CATEGORIES.includes(c))) fail("answerRules categories are convention, how-to and decided");
 		if (typeof r.confidence !== "number" || !Number.isFinite(r.confidence) || r.confidence <= 0.5 || r.confidence > 1) fail("answerRules confidence must be above 0.5 and at most 1");
-		if (!["classify", "draft"].includes(r.mode) || typeof r.flow !== "string" || !SKILL_NAME_RE.test(r.flow) || !model(r.model) || !model(r.decisionModel) || parseUsdMicros(r.maxCostUsd) === null) fail("answerRules requires a mode, flow, explicit model and decisionModel, and dollar cap");
+		if (!["classify", "draft"].includes(r.mode) || typeof r.flow !== "string" || !SKILL_NAME_RE.test(r.flow) || !model(r.model) || !model(r.decisionModel) || r.maxTokens === undefined || !Number.isSafeInteger(r.maxTokens) || r.maxTokens < 1) fail("answerRules requires a mode, flow, explicit model and decisionModel, and a whole token budget of 1 or more");
 		ids.add(r.id); for (const p of r.projects) claimed.add(p);
 	}
 	return JSON.parse(JSON.stringify(value));
@@ -74,7 +73,7 @@ const json = text => { try { return JSON.parse(text); } catch { return null; } }
 const META_MAX_BYTES = 16384, INPUT_MAX_BYTES = 16384, PRIVATE_MAX_BYTES = 65536;
 const probability = n => typeof n === "number" && Number.isFinite(n) && n >= 0 && n <= 1;
 const distribution = m => object(m.probabilities) && ANSWER_CLASSIFICATIONS.includes(m.category) && Object.keys(m.probabilities).sort().join() === [...ANSWER_CLASSIFICATIONS].sort().join() && Object.values(m.probabilities).every(probability) && Math.abs(Object.values(m.probabilities).reduce((a, b) => a + b, 0) - 1) <= 0.000001 && m.confidence === m.probabilities[m.category] && Object.values(m.probabilities).every(p => p <= m.confidence);
-const validMeta = m => only(m, ["v", "runId", "ruleId", "draftRunId", "draftDigest", "status", "at", "draftExists", "sources", "passReason", "category", "confidence", "answerableConfidence", "probabilities", "costUsd", "sentAt", "by", "disposition"]) && m.v === 1 && ANSWER_RUN_RE.test(m.runId ?? "") && ANSWER_ID_RE.test(m.ruleId ?? "") && ANSWER_STATUSES.includes(m.status) && (m.draftRunId === null || ANSWER_RUN_RE.test(m.draftRunId ?? "")) && Number.isSafeInteger(m.at) && m.at >= 0 && typeof m.draftExists === "boolean" && Array.isArray(m.sources) && m.sources.length <= 32 && m.sources.every(validAnswerSource) && (m.passReason === undefined || ANSWER_REASONS.includes(m.passReason)) && (m.category === undefined || ANSWER_CLASSIFICATIONS.includes(m.category)) && ["confidence", "answerableConfidence"].every(k => m[k] === undefined || probability(m[k])) && (m.probabilities === undefined || distribution(m)) && (m.draftDigest === undefined || /^[a-f0-9]{64}$/.test(m.draftDigest)) && (m.costUsd === undefined || m.costUsd === null || typeof m.costUsd === "number" && Number.isFinite(m.costUsd) && m.costUsd >= 0) && (m.sentAt === undefined || Number.isSafeInteger(m.sentAt) && m.sentAt >= 0) && (m.by === undefined || /^[a-z0-9][a-z0-9._-]{0,31}$/.test(m.by)) && (m.disposition === undefined || ["as-drafted", "edited"].includes(m.disposition));
+const validMeta = m => only(m, ["v", "runId", "ruleId", "draftRunId", "draftDigest", "status", "at", "draftExists", "sources", "passReason", "category", "confidence", "answerableConfidence", "probabilities", "tokensTotal", "sentAt", "by", "disposition"]) && m.v === 1 && ANSWER_RUN_RE.test(m.runId ?? "") && ANSWER_ID_RE.test(m.ruleId ?? "") && ANSWER_STATUSES.includes(m.status) && (m.draftRunId === null || ANSWER_RUN_RE.test(m.draftRunId ?? "")) && Number.isSafeInteger(m.at) && m.at >= 0 && typeof m.draftExists === "boolean" && Array.isArray(m.sources) && m.sources.length <= 32 && m.sources.every(validAnswerSource) && (m.passReason === undefined || ANSWER_REASONS.includes(m.passReason)) && (m.category === undefined || ANSWER_CLASSIFICATIONS.includes(m.category)) && ["confidence", "answerableConfidence"].every(k => m[k] === undefined || probability(m[k])) && (m.probabilities === undefined || distribution(m)) && (m.draftDigest === undefined || /^[a-f0-9]{64}$/.test(m.draftDigest)) && (m.tokensTotal === undefined || m.tokensTotal === null || Number.isSafeInteger(m.tokensTotal) && m.tokensTotal >= 0) && (m.sentAt === undefined || Number.isSafeInteger(m.sentAt) && m.sentAt >= 0) && (m.by === undefined || /^[a-z0-9][a-z0-9._-]{0,31}$/.test(m.by)) && (m.disposition === undefined || ["as-drafted", "edited"].includes(m.disposition));
 
 /** Private bodies never ride public reads. All keys and indexes expire even on keep-forever deployments. */
 export function makeAnswerDraftStore({ redis, now = Date.now, retentionDays = 30, prefix = "answerer:", timeoutMs = 2000 } = {}) {
@@ -93,7 +92,7 @@ export function makeAnswerDraftStore({ redis, now = Date.now, retentionDays = 30
 		const m = json(raw); return validMeta(m) && m.at >= now() - ttl ? m : null;
 	}
 	async function update(runId, fields, expected = {}) {
-		const allowed = ["status", "draftRunId", "draftDigest", "draftExists", "passReason", "category", "confidence", "answerableConfidence", "probabilities", "sources", "costUsd", "sentAt", "by", "disposition"];
+		const allowed = ["status", "draftRunId", "draftDigest", "draftExists", "passReason", "category", "confidence", "answerableConfidence", "probabilities", "sources", "tokensTotal", "sentAt", "by", "disposition"];
 		if (!only(fields, allowed)) return false;
 		// Compare serialized bytes. Redis Lua's cjson turns an empty JSON array into {}, which would
 		// silently invalidate a queued row's empty sources on its very first status transition.

@@ -9,13 +9,13 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 import { mkdirSync, writeFileSync, symlinkSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 
-const rule = { id: "help", projects: ["web"], categories: ["convention", "how-to", "decided"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxCostUsd: "0.10" };
+const rule = { id: "help", projects: ["web"], categories: ["convention", "how-to", "decided"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxTokens: "0.10" };
 const standing = { id: "tests", title: "Test command", text: "Run npm test.", projects: ["web"], repo: "github:acme/web" };
 
 test("reviewed answer rules and standing answers have strict scope and execution bounds", () => {
 	assert.deepEqual(validateAnswerRules([rule]), [rule]); assert.deepEqual(validateStandingAnswers([standing]), [standing]);
 	assert.deepEqual(parseTriggersDocument(JSON.stringify({ triggers: [], answerRules: [rule], standingAnswers: [standing] }), "/config").answerRules, [rule]);
-	for (const changed of [{ categories: ["approval"] }, { categories: [] }, { confidence: 0.5 }, { confidence: Number.NaN }, { projects: [] }, { maxCostUsd: "unlimited" }, { mode: "send" }, { model: "role:chat" }, { mcp: ["forge"] }, { command: "post" }, { instructions: "widen" }]) assert.throws(() => validateAnswerRules([{ ...rule, ...changed }]));
+	for (const changed of [{ categories: ["approval"] }, { categories: [] }, { confidence: 0.5 }, { confidence: Number.NaN }, { projects: [] }, { maxTokens: "unlimited" }, { mode: "send" }, { model: "role:chat" }, { mcp: ["forge"] }, { command: "post" }, { instructions: "widen" }]) assert.throws(() => validateAnswerRules([{ ...rule, ...changed }]));
 	assert.throws(() => validateAnswerRules([rule, { ...rule, id: "overlap" }]));
 	for (const changed of [{ repo: "acme/web" }, { repo: undefined }, { text: "x".repeat(8193) }, { projects: [] }, { script: "/bin/evil" }]) assert.throws(() => validateStandingAnswers([{ ...standing, ...changed }]));
 	assert.equal(validateStandingAnswers([{ ...standing, adoptedAt: "2026-10-31T12:00:00.000Z" }])[0].adoptedAt, "2026-10-31T12:00:00.000Z");
@@ -52,7 +52,7 @@ test("retained classifier evidence must agree with its selected category and con
 
 test("the configured flow is bounded reviewed text at the fresh base, never a symlink, host file or executable import", () => {
 	const root = tempDir("answer-flow-"), workspace = join(root, "workspace"), flow = join(workspace, ".pi/skills/answer"); mkdirSync(flow, { recursive: true });
-	const job = { answerDraft: { input: { version: 1, standing: [] } }, flow: "answer", maxCostUsd: "1" }, prepared = { jobDir: root, workspace, sha: "a".repeat(40) };
+	const job = { answerDraft: { input: { version: 1, standing: [] } }, flow: "answer", maxTokens: "1" }, prepared = { jobDir: root, workspace, sha: "a".repeat(40) };
 	assert.equal(stageAnswerDraft(job, prepared).reason, "answer-draft-refused", "a missing configured flow is loud");
 	writeFileSync(join(flow, "SKILL.md"), "Cite the exact procedure. Never run scripts."); assert.equal(stageAnswerDraft(job, prepared).workspaceReadOnly, true);
 	const input = JSON.parse(readFileSync(join(root, "answer-draft.json"))); assert.equal(input.flow.revision, prepared.sha); assert.ok(readFileSync(join(root, "prompt.md"), "utf8").includes(input.flow.text));

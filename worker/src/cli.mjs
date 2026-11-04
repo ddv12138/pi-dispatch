@@ -53,7 +53,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            register pi-dispatch-open for this account; terminal commands wait for Enter
   pi-dispatch sandbox --list
                            what is still re-openable, for how long, and what is running now
-  pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-usd <amount>
+  pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-tokens <tokens>
                            replay up to three retained recent jobs in disposable workspaces with forge
                            access blocked, under one experiment cap [--count 1..10] [--json]
 

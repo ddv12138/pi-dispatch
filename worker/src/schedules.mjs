@@ -15,7 +15,7 @@
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { configError } from "./config.mjs";
-import { triggerCapAboveDeployment } from "./money.mjs";
+import { triggerCapAboveDeployment } from "./budget-rule.mjs";
 import { parseTriggers } from "./triggers.mjs";
 import { withJobDataVersion } from "./job-data-version.mjs";
 import { LOCAL_JOB_KEPT_COMPLETED_S, LOCAL_JOB_KEPT_FAILED_S } from "./retention.mjs";
@@ -35,15 +35,15 @@ export function loadSchedules(config, { readFileSync = fsReadFileSync, existsSyn
 	}
 
 	const triggers = parseTriggers(readFileSync(path, "utf8"), path);
-	// Issue #501: a trigger's run.maxCostUsd above this deployment's PI_MAX_COST_USD refuses the file, at boot
+	// A trigger's run.maxTokens above this deployment's PI_MAX_TOKENS refuses the file, at boot
 	// (an operator is present) and on a live reload (the running schedules are kept). Every kind is checked,
 	// not only cron: the worker runs the forge jobs too, and this is the one load it does of the file. Here and
 	// not in parseTriggers, which is pure and shared with the receiver, which never sees the worker's env. The
 	// job itself runs under the smaller of the two whatever this finds (effectiveJobOf), so this is the loud
 	// half, never the only one. Env only: an overlay cap can change between jobs and is applied per job.
-	const above = triggerCapAboveDeployment(triggers, config.maxCostUsd);
+	const above = triggerCapAboveDeployment(triggers, config.maxTokens);
 	if (above !== -1) {
-		throw configError(`trigger at index ${above}: run.maxCostUsd is above this deployment's PI_MAX_COST_USD. A trigger can only narrow the per-job cost cap, so lower it or remove it (${path})`);
+		throw configError(`trigger at index ${above}: run.maxTokens is above this deployment's PI_MAX_TOKENS. A trigger can only narrow the per-job token budget, so lower it or remove it (${path})`);
 	}
 
 	return triggers.filter((t) => t.on.type === "cron").map((t) => normalizeCronSchedule(t, path, existsSync, fleet, dataVersions));
@@ -194,7 +194,7 @@ function normalizeCronSchedule({ on, run }, path, existsSync, fleet, dataVersion
 	// Stamped like every builder's (issue #761, `withJobDataVersion`): the template is what every tick of this schedule
 	// stores, so a field that needs a version above 1 says so on every job, and nothing is added while none does.
 	// `dataVersions` is the version rule, injectable for tests.
-	const data = withJobDataVersion({ kind: "local", folder: run.folder, flow: run.flow, task: run.task, ...(run.command !== undefined && { command: run.command }), provider: run.provider, model: run.model, maxTurns: run.maxTurns, github: run.github, packages: run.packages, image: run.image, ...(run.backend !== undefined && { backend: run.backend }), ...(run.excludeTools !== undefined && { excludeTools: run.excludeTools }), ...(run.mcp !== undefined && { mcp: run.mcp }), ...(run.models !== undefined && { models: run.models }), ...(run.fallbackModels !== undefined && { fallbackModels: run.fallbackModels }), ...(run.maxCostUsd !== undefined && { maxCostUsd: run.maxCostUsd }), ...(run.skillsDir !== undefined && { skillsDir: run.skillsDir }), ...(run.secrets !== undefined && { secrets: run.secrets }), ...(run.secretsProfile !== undefined && { secretsProfile: run.secretsProfile }), resume: run.resume, ...(run.portfolio !== undefined && { portfolio: run.portfolio }), ...(run.progress === true && { progress: true }), ...(run.steer === true && { steer: true }), trigger: { id: on.id, pattern: on.pattern } }, dataVersions);
+	const data = withJobDataVersion({ kind: "local", folder: run.folder, flow: run.flow, task: run.task, ...(run.command !== undefined && { command: run.command }), provider: run.provider, model: run.model, maxTurns: run.maxTurns, github: run.github, packages: run.packages, image: run.image, ...(run.backend !== undefined && { backend: run.backend }), ...(run.excludeTools !== undefined && { excludeTools: run.excludeTools }), ...(run.mcp !== undefined && { mcp: run.mcp }), ...(run.models !== undefined && { models: run.models }), ...(run.fallbackModels !== undefined && { fallbackModels: run.fallbackModels }), ...(run.maxTokens !== undefined && { maxTokens: run.maxTokens }), ...(run.skillsDir !== undefined && { skillsDir: run.skillsDir }), ...(run.secrets !== undefined && { secrets: run.secrets }), ...(run.secretsProfile !== undefined && { secretsProfile: run.secretsProfile }), resume: run.resume, ...(run.portfolio !== undefined && { portfolio: run.portfolio }), ...(run.progress === true && { progress: true }), ...(run.steer === true && { steer: true }), trigger: { id: on.id, pattern: on.pattern } }, dataVersions);
 	// Retention only; the deterministic repeat:<id>:<millis> jobId supplies dedup, so no jobId here, and
 	// scheduler jobs are not retried (DES-CRON-VIA-BULLMQ-SCHEDULER) so no attempts/backoff. A local job's retention, in
 	// SECONDS (BullMQ's `age`), from the one place the console's re-run reads it too (retention.mjs).

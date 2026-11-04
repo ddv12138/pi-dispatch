@@ -105,7 +105,7 @@ test("every other failure refuses too, and the error carries the status but neve
 	);
 });
 
-test("no reachable path returns a non-integer -- the guard's input is a number or the boot fails", async () => {
+test("no reachable path returns a non-integer -- the meter's input is a number or the boot fails", async () => {
 	// The invariant restated as a sweep, because "returns undefined" is the one outcome that is worse than
 	// any throw: it boots a receiver whose bot-loop guard can never match.
 	const cases = [

@@ -14,7 +14,7 @@ const OK = {
 	id: "kimi-for-coding",
 	vendor: "Moonshot AI",
 	provider: "kimi-coding",
-	price: { amount: 99, currency: "USD", per: "month" },
+	price: { amount: 99, currency: "TOKENS", per: "month" },
 };
 
 // ── the committed example ───────────────────────────────────────────────────────────────────────────────
@@ -50,7 +50,7 @@ test("a minimal subscription normalizes to an explicit literal with every defaul
 			vendor: "Moonshot AI",
 			provider: "kimi-coding",
 			models: ["*"],
-			price: { amount: 99, currency: "USD", per: "month" },
+			price: { amount: 99, currency: "TOKENS", per: "month" },
 			sharedWithOtherProducts: false,
 			hypothetical: false,
 			counterfactualModel: null,

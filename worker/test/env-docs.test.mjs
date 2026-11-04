@@ -555,7 +555,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	);
 	// NON-VACUITY, the discipline this file already keeps for its other scans: a regex that matches nothing
 	// passes every assertion above it. 125 is the count both mirrors carry today (VALKEY_PASSWORD and PI_VALKEY_PORT joined in issue #468,
-	// PI_MODEL_ENDPOINTS_FILE in issue #503, PI_ALLOWED_MODELS in issue #502, the four PI_*_COST_USD dollar settings in issue #501,
+	// PI_MODEL_ENDPOINTS_FILE in issue #503, PI_ALLOWED_MODELS in issue #502, the four PI_*_COST_TOKENS token settings in issue #501,
 	// PI_PROJECTS_FILE in issue #499, PI_ENVELOPE_FILE in issue #504, PI_JOB_MEMORY and PI_JOB_CPUS in issue #596, and the four
 	// PI_HOST_* budget settings in its phase 2, FORGEJO_PERMISSION_TOKEN for OQ-043, the eight PI_CONSOLE_* keys of
 	// issue #640, PI_LIVE_TRANSCRIPTS in issue #643, PI_RUN_PROGRESS in issue #644, PI_CHECKPOINTS_DIR in issue #645, and PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY in issue #683, PI_SECRET_BUNDLES in issue #704, PI_DOCTOR_INTERVAL_HOURS in issue #712; PI_GRAPH_DIR left with the

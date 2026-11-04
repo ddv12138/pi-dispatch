@@ -62,11 +62,11 @@ import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSandboxDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, sandboxDirOwnerFix, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, envelopeFilePath, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue, envFileWrapperInternal, wrapperInternalSentence } from "./env-file.mjs";
-import { canonicalScope, danglingProjectRows, dollarRowsBelowJobCap, dollarRowsWithoutCap, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
+import { canonicalScope, danglingProjectRows, tokenRowsBelowJobCap, tokenRowsWithoutCap, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
 import { EMPTY_PROJECTS_FINGERPRINT, escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
 import { parseModelsJson, stripBom, stripJsonComments } from "./models-json.mjs";
 import { isTransientOverlayRead, overlayProviderProblem } from "./model-catalog.mjs";
-import { EMPTY_USD_FINGERPRINT, usdFingerprint } from "./dollar-fingerprint.mjs";
+import { EMPTY_TOKEN_FINGERPRINT, tokenFingerprint } from "./token-fingerprint.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
 import { resolveConfiguredModelRuns as resolveDoctorModelRuns, cooldownModelRefs, RADIUS_COST_CAP_LABEL, RADIUS_COST_CAP_FIX } from "./model-observation.mjs";
 import { ignoredOutputCapModels, outputCapView, outputUnboundable } from "./output-cap.mjs";
@@ -128,9 +128,10 @@ import { doctorModelProposalChecks } from "./doctor-model-proposals.mjs";
  */
 const BUNDLE_DOCTOR_TIMEOUT_MS = 30_000;
 import { readOverlay, readOverlayDocument, resolveSettings, settingsVersionFor } from "./runtime-settings.mjs";
-import { DEPLOYMENT_WINDOWS, DOLLAR_KEY_PREFIX, deploymentWindowsAt, dollarWindowCaps, dollarWindowFloors, valkeyEndpointTag } from "./dollar-budget.mjs";
+import { DEPLOYMENT_WINDOWS, TOKEN_KEY_PREFIX, deploymentWindowsAt, tokenWindowCaps, tokenWindowFloors, valkeyEndpointTag } from "./token-budget.mjs";
 import { dayKey, monthKey, weekKey } from "./budget.mjs";
-import { DOLLAR_ENV_NAMES, DOLLAR_SETTING_KEYS, checkDollarInvariant, effectiveCostCapMicros, formatMicros, optionalUsdMicros, parseUsdMicros } from "./money.mjs";
+import { TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, TOKEN_WINDOW_KEYS, checkTokenInvariant, effectiveTokenCap, retiredDollarMessage, optionalTokenCount, RETIRED_DOLLAR_ENV_NAMES } from "./budget-rule.mjs";
+import { RETIRED_DOLLAR_KEY_PREFIX } from "./token-budget.mjs";
 import { cronPlacement, envelopeJobPaths } from "./schedules.mjs";
 import { envelopeDigest, envelopeInsideJobPaths, loadEnvelopeChecked } from "./envelope.mjs";
 import { keptTokens, operatorCount, readTokensFile, tokensFilePath } from "./console-tokens.mjs";
@@ -251,7 +252,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		// Issue #599, phase 2: the capacity line's read of the run history (the run mirror and the logs directory).
 		// Undefined means the default, which reads the deployment's real Valkey and files.
 		readCapacity,
-		// Issue #761: the dollar window check's two reads, this host's records and then the counters (`doctorDollarWindows`),
+		// Issue #761: the token window check's two reads, this host's records and then the counters (`doctorTokenWindows`),
 		// and the stores an older release left behind (`olderStateFindings`, older-state.mjs). Undefined means the defaults,
 		// which read the deployment's real files, Valkey and Docker.
 		readDollarRecords,
@@ -726,7 +727,7 @@ export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_AUTH_SOURCE", "GITHUB_
  *  `.env`. TEMP is TMPDIR's twin in the worker's temp root; PI_CODING_AGENT_DIR is where the worker reads auth.json.
  *  Issue #761: PI_CONSOLE_AUDIT_RETENTION_DAYS is here and not in `CONSOLE_ENV_KEYS` although it is named for the
  *  console: the worker reads it (it runs the audit reaper), and a console key set alone makes doctor judge a console. */
-export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_SANDBOX_RETENTION_HOURS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(DOLLAR_ENV_NAMES)]);
+export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", "PI_MAX_TOKENS", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_SANDBOX_RETENTION_HOURS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
 /** Issue #471: the receiver's keys doctor judges its boot by (the receiver's unit reads the same `.env`). */
 export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "PI_RECEIVER_ALLOW_SELF", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
 /**
@@ -1325,14 +1326,14 @@ function envelopeContextOf(env, io = {}) {
 	};
 	const projects = quiet(() => loadProjects({ projectsFile: nonEmpty(env.PI_PROJECTS_FILE) }, io));
 	const limits = quiet(() => loadScopedLimits({ scopedLimitsFile: nonEmpty(env.PI_SCOPED_LIMITS_FILE) }, io));
-	let maxCostMicros = null;
+	let maxTokens = null;
 	try {
 		const settings = deploymentSettingsOf(env, settingsFilePath(env), (p) => (io.existsSync ?? existsSync)(p));
-		maxCostMicros = optionalUsdMicros(settings.maxCostUsd, "maxCostUsd");
+		maxTokens = settings.maxTokens;
 	} catch {
 		// A malformed cap is its own line; the envelope then reads as having none, which it refuses.
 	}
-	return { projects, limits, maxCostMicros };
+	return { projects, limits, maxTokens };
 }
 
 /**
@@ -1822,7 +1823,7 @@ export async function collectChecks(shellVars, seams) {
 	// runTable, blockTable }, jobData: { table } }`, each part the store module's own when absent. Every table is empty in
 	// this release, so this seam is how a test drives a need above 1 through the real collection before a table has a row.
 	const versionTables = seams.versionTables ?? {};
-	const { watchSources: triggerWatchSources, watchRules: triggerWatchRules, modelRoles: triggerModelRoles, secretBundles: triggerBundles, requiring, waiting, listing, waitProfiles, waitAfters, optingOut, resuming, recovering, replicating, instructing, commands, secreting, onceArmed, onceSpent, secretProfiles, localSecretFolders, secretNames, folders, images, imageRoutes, namedBackends, skillsDirs, forges, repositories, flows, costCaps, modelRuns, triggersVersionNeed, jobDataVersionNeed, parseError, parseNewer: triggersFileIsNewer, path: triggersFilePath } = readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables);
+	const { watchSources: triggerWatchSources, watchRules: triggerWatchRules, modelRoles: triggerModelRoles, secretBundles: triggerBundles, requiring, waiting, listing, waitProfiles, waitAfters, optingOut, resuming, recovering, replicating, instructing, commands, secreting, onceArmed, onceSpent, secretProfiles, localSecretFolders, secretNames, folders, images, imageRoutes, namedBackends, skillsDirs, forges, repositories, flows, tokenCaps, modelRuns, triggersVersionNeed, jobDataVersionNeed, parseError, parseNewer: triggersFileIsNewer, path: triggersFilePath } = readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables);
 	const modelRoleProjects = readProjectFacts(env, fileExists).projects;
 	const scopedLimitFacts = readScopedLimitFacts(env, fileExists);
 	const pauseWindowFacts = readPauseWindowFacts(env, fileExists, versionTables.pauseWindows);
@@ -1865,7 +1866,7 @@ export async function collectChecks(shellVars, seams) {
 		});
 	}
 	section("dollars");
-	checks.push(...dollarChecks(env, costCaps, triggersSet !== undefined));
+	checks.push(...tokenChecks(env, tokenCaps, triggersSet !== undefined));
 
 	section("image");
 	// Only meaningful if docker itself responds; otherwise the image check is noise on top of a down daemon. Issue #433:
@@ -3062,15 +3063,15 @@ export async function collectChecks(shellVars, seams) {
 		// fingerprint is computed here from the service's own settings, by the worker's function, never read back from
 		// its registry row: doctor answers for the configuration, which a worker that has not restarted may not run yet.
 		// The scoped-limits rows are the parsed file's, or none when it does not load (the worker refuses to boot then).
-		const dollarsHere = deploymentSettingsOf(env, settingsFilePath(env, home), fileExists);
+		const tokensHere = deploymentSettingsOf(env, settingsFilePath(env, home), fileExists);
 		let envListHere = null;
 		try {
 			envListHere = allowedModelsFrom(env);
 		} catch {
 			// A malformed list is its own line below; the worker refuses to boot on it.
 		}
-		const usdHere = usdFingerprint(dollarsHere, scopedLimitFacts.parseError === null ? scopedLimitFacts.limits : [], envListHere);
-		checks.push(...(await fleetDollarChecks(usdHere, peers, { dollarKeysExist: () => (seams.dollarKeysExist ?? defaultDollarKeysExist)(valkeyTalkUrl) })));
+		const fpTokHere = tokenFingerprint(tokensHere, scopedLimitFacts.parseError === null ? scopedLimitFacts.limits : [], envListHere);
+		checks.push(...(await fleetTokenChecks(fpTokHere, peers, { retiredTokenKeysExist: () => (seams.dollarKeysExist ?? defaultDollarKeysExist)(valkeyTalkUrl) })));
 		// Issue #499 part C: each host resolves its jobs' project from its OWN projects.json, while the project rows' counters
 		// are shared. This host's `fpProjects` from the file the service names, against every peer's published one. SKIPPED
 		// when this host's file does not load (PR #569's review): the BOOT_FILES line already fails on it, and comparing
@@ -3101,11 +3102,11 @@ export async function collectChecks(shellVars, seams) {
 	// worker, after the peers block so the second is said on a single host too. Workers only: a receiver's status row is
 	// never a doctor input (INT-RECEIVER-STATUS-KEY).
 	checks.push(...fleetVersionChecks({ installed: PACKAGE_VERSION, self: selfRow, selfName: workerNameOf(declaredWorkerName), peers }));
-	// Issue #761: a dollar window counter below what this host's own records settled into it (`doctorDollarWindows`).
-	// Re-opened here, where whether this command may talk to the Valkey is known, from the same Valkey at the address the
+	// Issue #761: a token window counter below what this host's own records settled into it (`doctorTokenWindows`).
+	// Re-opened here, where whether this command may talk to Valkey is known, from the same Valkey at the address the
 	// worker pins.
-	section("dollars");
-	checks.push(...(await doctorDollarWindows({ seams, env, home, url: valkeyUsable ? valkeyTalkUrl : null, localHost: workerNameOf(declaredWorkerName), fileExists })));
+	section("token budgets");
+	checks.push(...(await doctorTokenWindows({ seams, env, home, url: valkeyUsable ? valkeyTalkUrl : null, localHost: workerNameOf(declaredWorkerName), fileExists })));
 	section("capacity");
 	// Issue #599, phase 2: how busy each host was over the last 7 days, one fact line per host, never a warning (nothing
 	// decides on it). On every deployment, a single host too: its own files are read when the run mirror is not. Read from
@@ -3400,14 +3401,14 @@ export async function collectChecks(shellVars, seams) {
 					checks.push({
 						ok: false,
 						warn: true,
-						label: `Overlay models.json sets compat.supportsUsageInStreaming to false on ${named}${more} with a nonzero cost table, so those calls report no usage: each counts as costUnreported, and every job that calls one settles at the floor`,
+						label: `Overlay models.json sets compat.supportsUsageInStreaming to false on ${named}${more} with a nonzero cost table, so those calls report no usage: each counts as usageUnreported, and every job that calls one settles at the floor`,
 						fix: "remove supportsUsageInStreaming: false if the server sends usage when asked (stream_options.include_usage), or set the model's cost to zeros if it is free: docs/costs.md, \"A call that reports no usage\"",
 					});
 				}
 				// Issue #507: a priced model on a declared endpoint whose output cap would travel as max_completion_tokens,
 				// which Ollama ignores. The runner's cost guard counts every such call unboundable, so a job under a dollar
 				// cap is refused at its first call. The endpoints as the service reads them, through the keyless line's io.
-				// A model a capped job may use is named by the cost-cap line below (`costCapFitChecks`), which runs on the
+				// A model a budgeted job may use is named by the model list's own checks above, which run on the
 				// same catalog seam, so this line names only the rest: one line per model.
 				const capEndpoints = (seams.declaredEndpoints ?? ((a) => declaredEndpointsIn({ ...a, fs: keylessIo })))({ env, cwd: seams.cwd, platform: seams.platform ?? process.platform, valkeyUrl: keylessValkey });
 				const capped = usageCatalog ? cappedModelNames(env, { runs: parseError ? [] : modelRuns, deployment: deploymentSettingsOf(env, settingsFilePath(env, home), fileExists), modelRoles: triggerModelRoles, projects: modelRoleProjects }) : new Set();
@@ -3419,8 +3420,8 @@ export async function collectChecks(shellVars, seams) {
 					checks.push({
 						ok: false,
 						warn: true,
-						label: `Overlay models.json sends the output cap of ${named}${more} as max_completion_tokens to a declared model endpoint, which a local server may ignore (Ollama does), so under a dollar cap every call to it is refused as unboundable`,
-						fix: "set \"compat\": { \"maxTokensField\": \"max_tokens\" } on the model or its provider in models.json, or set its cost to zeros if it is free: docs/egress.md, \"Local model servers\"",
+						label: `Overlay models.json sends the output cap of ${named}${more} as max_completion_tokens to a declared model endpoint, which a local server may ignore (Ollama does), so the run's measured total can run past what the model's own limit suggests`,
+						fix: "set \"compat\": { \"maxTokensField\": \"max_tokens\" } on the model or its provider in models.json, or use a model whose output field the server honours: docs/egress.md, \"Local model servers\"",
 					});
 				}
 			}
@@ -3723,12 +3724,12 @@ export async function collectChecks(shellVars, seams) {
 			label: `${listing} trigger(s) name run.models, which needs a worker and a receiver that carry issue #502 (a service below that drops the list silently; the worker refuses such a job as trigger-skew rather than running it unrestricted, and only when it can read the triggers file itself)`,
 		});
 	}
-	if (costCaps.length > 0) {
+	if (tokenCaps.length > 0) {
 		// Issue #540: the run.models line's twin for run.maxCostUsd (#501), for its reason. A service below the floor
 		// tolerated the key as unknown and dropped it, so the job would run under the deployment's cap, or none.
 		checks.push({
 			ok: true,
-			label: `${costCaps.length} trigger(s) set run.maxCostUsd, which needs a worker and a receiver that carry issue #501 (a service below that drops the cap silently; the worker refuses such a job as trigger-skew rather than running it under the deployment's cap or none, and only when it can read the triggers file itself)`,
+			label: `${tokenCaps.length} trigger(s) set run.maxTokens, which needs a worker and a receiver that carry issue #501 (a service below that drops the budget silently; the worker refuses such a job as trigger-skew rather than running it under the deployment's budget or none, and only when it can read the triggers file itself)`,
 		});
 	}
 
@@ -3770,7 +3771,7 @@ export async function collectChecks(shellVars, seams) {
 			// the one line (issue #673, review round 1).
 			const envShapeBad = envShapeProblem.PI_MODEL !== null || envShapeProblem.PI_PROVIDER !== null;
 			checks.push(...unknownModelChecks(envShapeBad ? subjects.filter((s) => s.deployment !== true) : subjects, catalog.checkModelsKnown, readOverlayDoc));
-			checks.push(...costCapFitChecks(subjects, (ref) => boundModelOf(ref, { builtinModel: catalog.builtinModel, overlay: overlayDoc }), { unboundable: (ref) => outputUnboundable(outputCapView({ models: overlayDoc, provider: ref.provider, modelId: ref.id, builtinModel: catalog.builtinModel, builtinChatModels: catalog.builtinChatModels })), apiOf: (ref) => outputCapView({ models: overlayDoc, provider: ref.provider, modelId: ref.id, builtinModel: catalog.builtinModel, builtinChatModels: catalog.builtinChatModels })?.api }));
+			
 			checks.push(
 				...listedProviderCredentialChecks(subjects, {
 					candidatesOf: (name) => (typeof oracle?.providerKeyCandidates === "function" ? oracle.providerKeyCandidates(name) : []),
@@ -4444,7 +4445,7 @@ export async function collectChecks(shellVars, seams) {
 	// Issue #504 part B: the envelope's advisories, on the file the service names, when it loads (a file that does not is
 	// the BOOT_FILES line's). Warnings only: the worker boots on both.
 	const envelopeFactsHere = readEnvelopeFacts(env);
-	if (envelopeFactsHere.envelope) checks.push(...envelopeChecks(envelopeFactsHere.envelope, envelopeFactsHere.projects, envelopeFactsHere.maxCostMicros));
+	if (envelopeFactsHere.envelope) checks.push(...envelopeChecks(envelopeFactsHere.envelope, envelopeFactsHere.projects, envelopeFactsHere.maxTokens));
 
 	section("console");
 	// Issue #640: the operator console, judged with its keys resolved by the console's own rule (this shell's value, else
@@ -4649,18 +4650,18 @@ export async function collectChecks(shellVars, seams) {
 				}
 				// Issue #501 (PR #542's review): a VALID overlay can still break the dollar invariant once merged over env
 				// (a window in one, no maxCostUsd in either), which the worker checks per job and answers by refusing every
-				// job. The env-only half is `dollarChecks`; this is the merged half, said only when env alone is fine.
-				const merged = overlayDollarProblem(overlay.overlay, env);
-				if (merged) checks.push({ id: "settings.overlay-dollars", ok: false, label: `settings overlay ${settingsFile}: ${merged} -- the worker refuses every job as settings-overlay-invalid`, fix: "set maxCostUsd in the overlay (or PI_MAX_COST_USD in .env), or remove the dollar window" });
+				// job. The env-only half is `tokenChecks`; this is the merged half, said only when env alone is fine.
+				const merged = overlayTokenProblem(overlay.overlay, env);
+				if (merged) checks.push({ id: "settings.overlay-tokens", ok: false, label: `settings overlay ${settingsFile}: ${merged} -- the worker refuses every job as settings-overlay-invalid`, fix: "set the token keys in the overlay (or PI_MAX_TOKENS in .env), or remove the token window" });
 			}
 		}
 		// PR #549's review: the scoped-limits dollar rows against the deployment's per-job cap, env and overlay merged
 		// the worker's way (an overlay value wins; an invalid overlay leaves env).
 		if (scopedLimitFacts.parseError === null && scopedLimitFacts.limits.length > 0) {
 			const overlay = fileExists(settingsFile) ? readOverlay(settingsFile) : { overlay: {} };
-			const fromOverlay = overlay.invalid ? undefined : overlay.overlay?.maxCostUsd;
+			const fromOverlay = overlay.invalid ? undefined : overlay.overlay?.maxTokens;
 			const envCap = env.PI_MAX_COST_USD === undefined || env.PI_MAX_COST_USD === "" ? undefined : env.PI_MAX_COST_USD;
-			checks.push(...scopedDollarRowChecks(scopedLimitFacts.limits, fromOverlay ?? envCap, scopedLimitFacts.path));
+			checks.push(...scopedTokenRowChecks(scopedLimitFacts.limits, fromOverlay ?? envCap, scopedLimitFacts.path));
 		}
 		if (noHome) {
 			checks.push({
@@ -5626,13 +5627,13 @@ function consoleTokensInsideJobPaths(path, env, { cwd, fs, folders, skillsDirs, 
  */
 function readEnvelopeFacts(env) {
 	const path = nonEmpty(env.PI_ENVELOPE_FILE);
-	if (path === null) return { envelope: null, projects: [], maxCostMicros: null, parseError: null };
+	if (path === null) return { envelope: null, projects: [], maxTokens: null, parseError: null };
 	const io = { readFileSync, existsSync };
 	try {
 		const context = envelopeContextOf(env, io);
-		return { envelope: loadEnvelopeAsTheWorker(path, io, env), projects: context.projects, maxCostMicros: context.maxCostMicros, parseError: null };
+		return { envelope: loadEnvelopeAsTheWorker(path, io, env), projects: context.projects, maxTokens: context.maxTokens, parseError: null };
 	} catch (e) {
-		return { envelope: null, projects: [], maxCostMicros: null, parseError: e?.message ?? String(e) };
+		return { envelope: null, projects: [], maxTokens: null, parseError: e?.message ?? String(e) };
 	}
 }
 
@@ -5644,14 +5645,14 @@ function readEnvelopeFacts(env) {
  * Plus one line of facts: the digest (what `fpEnvelope` and `alloc:envelope:expected` hold), the window, the total and
  * whether delegation is on. Ids and amounts only.
  */
-export function envelopeChecks(envelope, projects, maxCostMicros) {
-	const checks = [{ ok: true, label: `Allocation envelope ${envelopeDigest(envelope)}: ${formatMicros(envelope.totalMicros)} a ${envelope.window}, ${Object.keys(envelope.floors).length} entries, delegation ${envelope.delegation?.enabled ? `ON (writers ${envelope.delegation.writers.join(", ")}, step ${envelope.delegation.maxStepPct}%, interval ${envelope.delegation.minIntervalHours}h)` : "OFF"}` }];
-	const low = Object.entries(envelope.floors).filter(([, floor]) => floor > 0 && Number.isSafeInteger(maxCostMicros) && floor < maxCostMicros);
+export function envelopeChecks(envelope, projects, maxTokens) {
+	const checks = [{ ok: true, label: `Allocation envelope ${envelopeDigest(envelope)}: ${envelope.totalTokens} tokens a ${envelope.window}, ${Object.keys(envelope.floors).length} entries, delegation ${envelope.delegation?.enabled ? `ON (writers ${envelope.delegation.writers.join(", ")}, step ${envelope.delegation.maxStepPct}%, interval ${envelope.delegation.minIntervalHours}h)` : "OFF"}` }];
+	const low = Object.entries(envelope.floors).filter(([, floor]) => floor > 0 && Number.isSafeInteger(maxTokens) && floor < maxTokens);
 	if (low.length > 0) {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: `envelope floor(s) ${low.map(([id, floor]) => `${id} (${formatMicros(floor)})`).join(", ")} are below the per-job cost cap (${formatMicros(maxCostMicros)}): each governed job reserves its whole cap against its share, so a floor that small admits no job of its own`,
+			label: `envelope floor(s) ${low.map(([id, floor]) => `${id} (${floor})`).join(", ")} are below the per-job token budget (${maxTokens}): each governed job reserves its whole budget against its share, so a floor that small admits no job of its own`,
 			fix: "raise the floor to at least the per-job cap (PI_MAX_COST_USD), lower the cap, or set the floor to 0 if the project needs no guaranteed share",
 		});
 	}
@@ -5853,18 +5854,22 @@ function scopeFormOf(scope) {
 /**
  * The merged-values half of the dollar invariant (issue #501, PR #542's review): `overlay` over `env`, the worker's
  * own merge, checked by the worker's own rule. Returns the reason, or null when it holds, or when env ALONE already
- * breaks it (that is `dollarChecks`' line, and the worker refuses to start on it).
+ * breaks it (that is `tokenChecks`' line, and the worker refuses to start on it).
  */
-export function overlayDollarProblem(overlay, env) {
+export function overlayTokenProblem(overlay, env) {
 	const fromEnv = {};
-	for (const key of DOLLAR_SETTING_KEYS) {
-		const raw = env?.[DOLLAR_ENV_NAMES[key]];
+	for (const key of TOKEN_SETTING_KEYS) {
+		const raw = env?.[TOKEN_ENV_NAMES[key]];
 		if (raw !== undefined && raw !== "") fromEnv[key] = raw;
 	}
-	if (checkDollarInvariant(fromEnv) !== null) return null;
+	if (checkTokenInvariant(fromEnv) !== null) return null;
 	const merged = { ...fromEnv };
-	for (const key of DOLLAR_SETTING_KEYS) if (overlay?.[key] !== undefined && overlay[key] !== null) merged[key] = overlay[key];
-	return checkDollarInvariant(merged)?.invalid ?? null;
+	for (const key of TOKEN_SETTING_KEYS) if (overlay?.[key] !== undefined && overlay[key] !== null) merged[key] = overlay[key];
+	// The retired dollar keys: a merged overlay carrying one is the problem, named with the upgrade.
+	for (const key of Object.keys(RETIRED_DOLLAR_ENV_NAMES)) {
+		if (overlay?.[key] !== undefined && overlay[key] !== null) return retiredDollarMessage(key);
+	}
+	return checkTokenInvariant(merged)?.invalid ?? null;
 }
 
 /**
@@ -5873,23 +5878,23 @@ export function overlayDollarProblem(overlay, env) {
  * job's trigger sets `run.maxCostUsd`. With one, a row window BELOW it refuses every job it applies to, every time
  * (a job reserves its whole cap), until one of the two changes. Rows are named by index and kind, and only the caps
  * are compared, never a scope string (a folder scope is a host path). `maxCostUsd` is the merged value or undefined;
- * one that does not parse is `dollarChecks`' line, so this says nothing more.
+ * one that does not parse is `tokenChecks`' line, so this says nothing more.
  */
-export function scopedDollarRowChecks(limits, maxCostUsd, path) {
+export function scopedTokenRowChecks(limits, maxTokens, path) {
 	const checks = [];
 	const label = (r) => `#${r.index} (${r.kind === "model" ? "a model row" : r.kind === "project" ? "a project row" : "a repo or folder row"})`;
-	const missing = dollarRowsWithoutCap(limits, maxCostUsd);
+	const missing = tokenRowsWithoutCap(limits, maxTokens);
 	if (missing.length > 0) {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: `scoped limit(s) ${missing.map(label).join(", ")} in ${path} set a dollar window, but the deployment has no per-job cost cap (maxCostUsd) -- every job such a row applies to is refused as config-refused unless its trigger sets run.maxCostUsd`,
-			fix: "set PI_MAX_COST_USD in .env (or maxCostUsd in the overlay), or give each trigger that reaches the row a run.maxCostUsd",
+			label: `scoped limit(s) ${missing.map(label).join(", ")} in ${path} set a token window, but the deployment has no per-job token budget (maxTokens) -- every job such a row applies to is refused as config-refused unless its trigger sets run.maxTokens`,
+			fix: "set PI_MAX_TOKENS in .env (or maxTokens in the overlay), or give each trigger that reaches the row a run.maxTokens",
 		});
 	}
 	let below = [];
 	try {
-		below = dollarRowsBelowJobCap(limits, maxCostUsd);
+		below = tokenRowsBelowJobCap(limits, maxTokens);
 	} catch {
 		return checks;
 	}
@@ -5897,42 +5902,47 @@ export function scopedDollarRowChecks(limits, maxCostUsd, path) {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: `scoped limit window(s) ${below.map((r) => `${label(r)} ${r.window}`).join(", ")} in ${path} are below the per-job cost cap (maxCostUsd) -- a job reserves its whole cap, so every job that reaches such a window is refused dollar-cap, every time`,
-			fix: "raise the window to at least maxCostUsd, or lower maxCostUsd (a trigger's smaller run.maxCostUsd also fits)",
+			label: `scoped limit window(s) ${below.map((r) => `${label(r)} ${r.window}`).join(", ")} in ${path} are below the per-job token budget (maxTokens) -- a job reserves its whole budget, so every job that reaches such a window is refused token-cap, every time`,
+			fix: "raise the window to at least maxTokens, or lower maxTokens (a trigger's smaller run.maxTokens also fits)",
 		});
 	}
 	return checks;
 }
 
-export function dollarChecks(env, costCaps, workerReadsTriggers) {
-	const envName = DOLLAR_ENV_NAMES;
+export function tokenChecks(env, tokenCaps, workerReadsTriggers) {
+	const envName = { ...TOKEN_ENV_NAMES, ...RETIRED_DOLLAR_ENV_NAMES };
 	const checks = [];
 	const values = {};
-	for (const key of DOLLAR_SETTING_KEYS) {
-		const raw = env[envName[key]];
-		if (raw === undefined || raw === "") continue;
-		try {
-			optionalUsdMicros(raw, envName[key]);
-			values[key] = raw;
-		} catch (error) {
-			checks.push({ ok: false, label: `${error.message} -- the worker refuses to start`, fix: `set ${envName[key]} to a plain dollar amount such as 2.50, or remove it` });
+	for (const key of ["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]) {
+		if (env[envName[key]] !== undefined && env[envName[key]] !== "") {
+			checks.push({ ok: false, label: `${envName[key]} is set: ${retiredDollarMessage(key)} -- the worker refuses to start`, fix: `remove ${envName[key]} and set the token knobs instead` });
 		}
 	}
-	const broken = checkDollarInvariant(values);
-	if (broken) {
-		const window = DOLLAR_SETTING_KEYS.find((key) => key !== "maxCostUsd" && values[key] !== undefined);
-		checks.push({ ok: false, label: `${envName[window]} is set without PI_MAX_COST_USD -- the worker refuses to start`, fix: "a dollar window reserves each job's per-job cap, so set PI_MAX_COST_USD too" });
+	for (const key of TOKEN_SETTING_KEYS) {
+		const raw = env[TOKEN_ENV_NAMES[key]] ?? (key === "maxTokens" ? env.PI_MAX_TOKENS : undefined);
+		if (raw === undefined || raw === "") continue;
+		try {
+			optionalTokenCount(raw, envName[key] ?? key);
+			values[key] = Number(raw);
+		} catch (error) {
+			checks.push({ ok: false, label: `${error.message} -- the worker refuses to start`, fix: `set ${TOKEN_ENV_NAMES[key] ?? "PI_MAX_TOKENS"} to a whole number of tokens, or remove it` });
+		}
 	}
-	if (values.maxCostUsd !== undefined) {
-		const deployment = parseUsdMicros(values.maxCostUsd, "PI_MAX_COST_USD");
-		for (const cap of costCaps.filter((c) => parseUsdMicros(c.maxCostUsd, "run.maxCostUsd") > deployment)) {
+	const broken = checkTokenInvariant(values);
+	if (broken) {
+		const window = TOKEN_WINDOW_KEYS.find((key) => values[key] !== undefined);
+		checks.push({ ok: false, label: `${TOKEN_ENV_NAMES[window]} is set without PI_MAX_TOKENS -- the worker refuses to start`, fix: "a token window reserves each job's per-job budget, so set PI_MAX_TOKENS too" });
+	}
+	if (values.maxTokens !== undefined) {
+		const deployment = values.maxTokens;
+		for (const cap of tokenCaps.filter((c) => optionalTokenCount(c.maxTokens, "run.maxTokens") !== null && optionalTokenCount(c.maxTokens, "run.maxTokens") > deployment)) {
 			checks.push({
 				ok: false,
 				...(workerReadsTriggers ? {} : { warn: true }),
 				label: workerReadsTriggers
-					? `${cap.label}: run.maxCostUsd is above PI_MAX_COST_USD -- the worker refuses to start (a trigger can only narrow the per-job cost cap)`
-					: `${cap.label}: run.maxCostUsd is above PI_MAX_COST_USD -- its jobs run under PI_MAX_COST_USD anyway (a trigger can only narrow the per-job cost cap)`,
-				fix: "lower that trigger's run.maxCostUsd to PI_MAX_COST_USD or below, or remove it",
+					? `${cap.label}: run.maxTokens is above PI_MAX_TOKENS -- the worker refuses to start (a trigger can only narrow the per-job token budget)`
+					: `${cap.label}: run.maxTokens is above PI_MAX_TOKENS -- its jobs run under PI_MAX_TOKENS anyway (a trigger can only narrow the per-job token budget)`,
+				fix: "lower that trigger's run.maxTokens to PI_MAX_TOKENS or below, or remove it",
 			});
 		}
 	}
@@ -5940,48 +5950,48 @@ export function dollarChecks(env, costCaps, workerReadsTriggers) {
 }
 
 /**
- * Issue #501 part 6: do this host's dollar caps match its peers'? `mine` is this host's `fpUsd` as doctor computes it
- * from the service's settings (`deploymentSettingsOf`, `usdFingerprint`), `peers` the registry rows of every OTHER
+ * Do this host's token budgets match its peers'? `mine` is this host's `fpTok` as doctor computes it
+ * from the service's settings (`deploymentSettingsOf`, `tokenFingerprint`), `peers` the registry rows of every OTHER
  * host. WARNINGS only, never a failure, the fleet block's rule: this command runs on one machine and must not refuse
  * a deployment for a condition that machine cannot fix.
  *
- *   - A peer whose `fpUsd` differs: the dollar counters are shared, so the host with the larger cap admits a job the
+ *   - A peer whose `fpTok` differs: the token counters are shared, so the host with the larger budget admits a job the
  *     other would refuse, and each host's view of "full" is its own.
- *   - A peer with no `fpUsd` (or an empty one): it runs a worker from before hosts published one, so whether it holds
- *     the same caps is unknown. Said only when dollar caps are in use somewhere: this host's fingerprint, or any
- *     peer's, is not the empty one, or else a dollar counter (`budget:usd:*`) exists on this Valkey
- *     (`dollarKeysExist`, asked only then). The counters are the one trace a capped host that publishes nothing
- *     leaves (PR #551's review: an old capped host beside a new uncapped one was silent). A fleet that never used a
- *     dollar setting hears nothing new on upgrade.
+ *   - A peer with no `fpTok` (or an empty one): it runs a worker from before hosts published one, so whether it holds
+ *     the same budgets is unknown. Said only when token budgets are in use somewhere: this host's fingerprint, or any
+ *     peer's, is not the empty one, or else a token counter (`budget:tok:*`) exists on this Valkey
+ *     (`retiredTokenKeysExist`, asked only then). The counters are the one trace a capped host that publishes nothing
+ *     leaves (PR #551's review: an old capped host beside a new uncapped one was silent). A fleet that never set a
+ *     token budget hears nothing new on upgrade.
  *
  * Hosts are named, never their caps: the registry carries a digest, so "different" is all a reader can know.
  */
-export async function fleetDollarChecks(mine, peers, { dollarKeysExist = async () => false } = {}) {
+export async function fleetTokenChecks(mine, peers, { retiredTokenKeysExist = async () => false } = {}) {
 	const checks = [];
-	const opinions = peers.filter((h) => typeof h.fpUsd === "string" && h.fpUsd !== "");
-	const differing = opinions.filter((h) => h.fpUsd !== mine);
+	const opinions = peers.filter((h) => typeof h.fpTok === "string" && h.fpTok !== "");
+	const differing = opinions.filter((h) => h.fpTok !== mine);
 	if (differing.length > 0) {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: `Hosts disagree about the dollar caps: ${differing.map((h) => h.name).join(", ")} ${differing.length === 1 ? "judges" : "judge"} the shared dollar counters against a different per-job cap, dollar windows, scoped-limits dollar rows or PI_ALLOWED_MODELS than this host's settings`,
-			fix: "set PI_MAX_COST_USD, PI_DAILY_COST_USD, PI_WEEKLY_COST_USD, PI_MONTHLY_COST_USD, the overlay's dollar keys, the scoped-limits file's dollar rows and PI_ALLOWED_MODELS (it picks the model rows a job without its own list reserves in) alike on every host: the counters are shared, so a host with a larger cap admits a job another would refuse. An env change needs a restart; an overlay or scoped-limits edit shows within one beat",
+			label: `Hosts disagree about the token budgets: ${differing.map((h) => h.name).join(", ")} ${differing.length === 1 ? "judges" : "judge"} the shared token counters against a different per-job budget, token windows, scoped-limits token rows or PI_ALLOWED_MODELS than this host's settings`,
+			fix: "set PI_MAX_TOKENS, PI_DAILY_TOKEN_CAP, PI_WEEKLY_TOKEN_CAP, PI_MONTHLY_TOKEN_CAP, the overlay's token keys, the scoped-limits file's token rows and PI_ALLOWED_MODELS (it picks the model rows a job without its own list reserves in) alike on every host: the counters are shared, so a host with a larger budget admits a job another would refuse. An env change needs a restart; an overlay or scoped-limits edit shows within one beat",
 		});
 	}
-	const silent = peers.filter((h) => typeof h.fpUsd !== "string" || h.fpUsd === "");
+	const silent = peers.filter((h) => typeof h.fpTok !== "string" || h.fpTok === "");
 	if (silent.length === 0) return checks;
-	let inUse = mine !== EMPTY_USD_FINGERPRINT || opinions.some((h) => h.fpUsd !== EMPTY_USD_FINGERPRINT);
+	let inUse = mine !== EMPTY_TOKEN_FINGERPRINT || opinions.some((h) => h.fpTok !== EMPTY_TOKEN_FINGERPRINT);
 	let byCounters = false;
 	if (!inUse) {
-		byCounters = (await Promise.resolve().then(dollarKeysExist).catch(() => false)) === true;
+		byCounters = (await Promise.resolve().then(retiredTokenKeysExist).catch(() => false)) === true;
 		inUse = byCounters;
 	}
 	if (inUse) {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: `${silent.map((h) => h.name).join(", ")} ${silent.length === 1 ? "publishes no fingerprint of its" : "publish no fingerprint of their"} dollar caps, so whether ${silent.length === 1 ? "it holds" : "they hold"} the same caps as this host is unknown${byCounters ? " (no host that publishes one sets a dollar cap, but dollar counters exist on this Valkey, so some host reserved dollars recently)" : ""}`,
-			fix: "upgrade every worker on this Valkey to the same release: a worker from before hosts compared their dollar caps may judge the shared dollar counters against other caps, or reserve no dollars at all",
+			label: `${silent.map((h) => h.name).join(", ")} ${silent.length === 1 ? "publishes no fingerprint of its" : "publish no fingerprint of their"} token budgets, so whether ${silent.length === 1 ? "it holds" : "they hold"} the same budgets as this host is unknown${byCounters ? " (no host that publishes one sets a token cap, but token counters exist on this Valkey, so some host reserved tokens recently)" : ""}`,
+			fix: "upgrade every worker on this Valkey to the same release: a worker from before hosts compared their token budgets may judge the shared token counters against other caps, or reserve no tokens at all",
 		});
 	}
 	return checks;
@@ -6191,16 +6201,16 @@ export { resolveConfiguredModelRuns as resolveDoctorModelRuns } from "./model-ob
  * `deploymentSettingsOf`); `runs` the trigger facts; `envList` the parsed `PI_ALLOWED_MODELS`, or null. Each subject
  * is `{ label, main, list, cap, secretNames, named }`: `main` and `list` are `{ provider, id }`, `list` is the
  * trigger's `run.models` or else the env list, `cap` the effective per-job cap in micro-dollars (the smaller of the
- * trigger's and the deployment's, `effectiveCostCapMicros`) or null, and `named` says the trigger names a provider, a
+ * trigger's and the deployment's, `effectiveTokenCap`) or null, and `named` says the trigger names a provider, a
  * model or a list of its own.
  */
 export function modelSubjects({ runs = [], deployment, envList = null, modelRoles = {}, projects = [] }) {
 	const listOf = (list) => (Array.isArray(list) ? list.map(splitModelEntry).filter((ref) => ref !== null).map((ref) => ({ provider: ref.provider, id: ref.model })) : []);
 	const capOf = (triggerValue) => {
 		try {
-			return effectiveCostCapMicros(triggerValue, deployment.maxCostUsd);
+			return effectiveTokenCap(triggerValue, deployment.maxTokens);
 		} catch {
-			return null; // a deployment cap that does not parse is `dollarChecks`' line
+			return null; // a deployment budget that does not parse is `tokenChecks`' line
 		}
 	};
 	const subjects = [{ label: "the deployment default", main: { provider: deployment.provider, id: deployment.model }, list: listOf(envList), cap: capOf(undefined), secretNames: [], named: false, deployment: true }];
@@ -6209,7 +6219,7 @@ export function modelSubjects({ runs = [], deployment, envList = null, modelRole
 			label: run.label,
 			main: { provider: run.provider ?? deployment.provider, id: run.model ?? deployment.model },
 			list: listOf(run.models ?? envList),
-			cap: capOf(run.maxCostUsd),
+			cap: capOf(run.maxTokens),
 			secretNames: run.secretNames ?? [],
 			named: run.provider !== undefined || run.model !== undefined || run.models !== undefined,
 		});
@@ -6219,7 +6229,7 @@ export function modelSubjects({ runs = [], deployment, envList = null, modelRole
 
 /**
  * The `provider/id` of every model a job under a per-job dollar cap may use (the main model and the list, as
- * `modelSubjects` resolves them), for the overlay's output-cap line to leave to `costCapFitChecks` (issue #507). Empty
+ * `modelSubjects` resolves them), for the overlay's output-cap line, which no longer feeds a cost bound. Empty
  * when the settings cannot be read.
  */
 export function cappedModelNames(env, { runs, deployment, modelRoles = {}, projects = [] }) {
@@ -6248,72 +6258,6 @@ export function cappedModelNames(env, { runs, deployment, modelRoles = {}, proje
  * Radius and every composed pi-messages model have a separate diagnosis: their server-reported billing and input
  * rewrites are not bounded by the catalog, including rows whose listed rates are zero (issue #693).
  */
-export function costCapFitChecks(subjects, modelOf, { unboundable = () => false, apiOf = (ref) => modelOf(ref)?.api } = {}) {
-	const groups = new Map();
-	const unbounded = new Map();
-	const radius = new Map();
-	for (const s of subjects) {
-		if (s.cap === null || s.cap === undefined) continue;
-		const seen = new Set();
-		for (const ref of [s.main, ...s.list]) {
-			const name = `${ref.provider}/${ref.id}`;
-			if (seen.has(name)) continue;
-			seen.add(name);
-			// The gateway reports its own prices and may rewrite input, so even a zero-rate catalog row is no bound.
-			const api = apiOf(ref);
-			if (api === "pi-messages" || (api === undefined && ref.provider === "radius")) {
-				if (!radius.has(name)) radius.set(name, { main: false, labels: [] });
-				const r = radius.get(name);
-				r.main ||= ref === s.main;
-				r.labels.push(s.label);
-				continue;
-			}
-			if (unboundable(ref)) {
-				if (!unbounded.has(name)) unbounded.set(name, { main: false, labels: [] });
-				const u = unbounded.get(name);
-				u.main ||= ref === s.main;
-				u.labels.push(s.label);
-				continue;
-			}
-			const floor = firstCallFloorMicros(modelOf(ref));
-			if (floor === null || s.cap >= floor) continue;
-			const main = ref === s.main;
-			const key = `${name}\u0000${s.cap}\u0000${main}`;
-			if (!groups.has(key)) groups.set(key, { name, floor, cap: s.cap, main, labels: [] });
-			groups.get(key).labels.push(s.label);
-		}
-	}
-	const out = [];
-	if (radius.size > 0) {
-		const items = [...radius].map(([name, r]) => `${printable(name)}${r.main ? " (the main model, so such a job makes no call at all)" : ""} (${r.labels.join(", ")})`);
-		out.push({
-			ok: false,
-			warn: true,
-			label: `${RADIUS_COST_CAP_LABEL}: ${items.join("; ")}`,
-			fix: RADIUS_COST_CAP_FIX,
-		});
-	}
-	if (unbounded.size > 0) {
-		const items = [...unbounded].map(([name, u]) => `${printable(name)}${u.main ? " (the main model, so such a job makes no call at all)" : ""} (${u.labels.join(", ")})`);
-		out.push({
-			ok: false,
-			warn: true,
-			label: `A job under a per-job cost cap may use a model whose output cap travels as max_completion_tokens to a server that may ignore it (one outside pi's own hosted providers), so the runner counts every call to it unboundable and refuses it under the cap: ${items.join("; ")}`,
-			fix: "set \"compat\": { \"maxTokensField\": \"max_tokens\" } on the model or its provider in models.json, or set its cost to zeros if it is free: docs/egress.md, \"Local model servers\"",
-		});
-	}
-	if (groups.size === 0) return out;
-	const items = [...groups.values()].map((g) => `${printable(g.name)}${g.main ? " (the main model, so such a job makes no call at all)" : ""} needs at least $${formatMicros(g.floor)} a call under a $${formatMicros(g.cap)} cap (${g.labels.join(", ")})`);
-	return [
-		...out,
-		{
-			ok: false,
-			warn: true,
-			label: `The per-job cost cap is below one full-output call of a model a job may use, so the runner refuses every call to that model before it is sent: ${items.join("; ")}`,
-			fix: "raise PI_MAX_COST_USD (or the trigger's run.maxCostUsd) above the amount named, or use a model with a smaller output limit. The amount is a lower bound: the runner's own bound adds the whole request, so a cap just above it can still refuse a call",
-		},
-	];
-}
 
 /**
  * Issue #502 part 2: a trigger whose model, or a model on its list, the worker's free gate would refuse, asked of the
@@ -6414,15 +6358,15 @@ export function listedProviderCredentialChecks(subjects, { candidatesOf, forward
 }
 
 /**
- * The deployment's provider, model and dollar settings as the worker resolves them for a job: the overlay over env
- * (`resolveSettings`), falling back to env when the overlay is invalid or the merged dollar values break the
- * invariant, which is the fallback `start.mjs` takes for its slot count and its `fpUsd`. Values as written; nothing
+ * The deployment's provider, model and token settings as the worker resolves them for a job: the overlay over env
+ * (`resolveSettings`), falling back to env when the overlay is invalid or the merged token values break the
+ * invariant, which is the fallback `start.mjs` takes for its slot count and its `fpTok`. Values as written; nothing
  * here throws.
  */
 export function deploymentSettingsOf(env, settingsFile, fileExists) {
 	const fromEnv = { provider: env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: env.PI_MODEL ?? DEFAULT_MODEL };
-	for (const key of DOLLAR_SETTING_KEYS) {
-		const raw = env[DOLLAR_ENV_NAMES[key]];
+	for (const key of TOKEN_SETTING_KEYS) {
+		const raw = env[TOKEN_ENV_NAMES[key]] ?? (key === "maxTokens" ? env.PI_MAX_TOKENS : undefined);
 		fromEnv[key] = raw === undefined || raw === "" ? null : raw;
 	}
 	let read;
@@ -6573,7 +6517,7 @@ function triggerLabel(t, index) {
 }
 
 function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables = {}) {
-	const none = { watchSources: {}, watchRules: 0, modelRoles: {}, secretBundles: {}, requiring: 0, waiting: 0, listing: 0, waitProfiles: [], waitAfters: [], optingOut: 0, resuming: 0, recovering: 0, replicating: 0, instructing: 0, commands: 0, secreting: 0, onceArmed: 0, onceSpent: 0, secretProfiles: [], localSecretFolders: [], secretNames: [], folders: [], images: [], imageRoutes: [], namedBackends: [], skillsDirs: [], forges: [], repositories: [], flows: [], costCaps: [], modelRuns: [], triggersVersionNeed: 1, jobDataVersionNeed: 1, parseError: null, parseNewer: false, path: null };
+	const none = { watchSources: {}, watchRules: 0, modelRoles: {}, secretBundles: {}, requiring: 0, waiting: 0, listing: 0, waitProfiles: [], waitAfters: [], optingOut: 0, resuming: 0, recovering: 0, replicating: 0, instructing: 0, commands: 0, secreting: 0, onceArmed: 0, onceSpent: 0, secretProfiles: [], localSecretFolders: [], secretNames: [], folders: [], images: [], imageRoutes: [], namedBackends: [], skillsDirs: [], forges: [], repositories: [], flows: [], tokenCaps: [], modelRuns: [], triggersVersionNeed: 1, jobDataVersionNeed: 1, parseError: null, parseNewer: false, path: null };
 	try {
 		// Unset falls back to ./triggers.json in cwd, MIRRORING the receiver's own default
 		// (receiver/src/config.mjs) -- the two must read the same file, or doctor preflights a deployment
@@ -6713,7 +6657,7 @@ function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTable
 				.filter((f) => typeof f.flow === "string"),
 			// Issue #501: every trigger that sets run.maxCostUsd, with the label the cap check names it by. The value
 			// already parsed (the loader validated it), so the check below only compares.
-			costCaps: triggers.map((t, index) => ({ label: triggerLabel(t, index), maxCostUsd: t.run.maxCostUsd })).filter((r) => r.maxCostUsd !== undefined && r.maxCostUsd !== null),
+			tokenCaps: triggers.map((t, index) => ({ label: triggerLabel(t, index), maxTokens: t.run.maxTokens })).filter((r) => r.maxTokens !== undefined && r.maxTokens !== null),
 			// Issues #501 and #502 (PR 9 of that round): every trigger's model choice, list, cap and bound secret NAMES, for the
 			// unknown-model, cap-fit and listed-provider credential lines. Every kind, cron included, whatever host serves it:
 			// a model the worker does not know is refused wherever the job runs.
@@ -6726,7 +6670,7 @@ function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTable
 				model: typeof t.run.model === "string" ? t.run.model : undefined,
 				models: Array.isArray(t.run.models) ? t.run.models : undefined,
 				fallbackModels: Array.isArray(t.run.fallbackModels) ? t.run.fallbackModels : undefined,
-				maxCostUsd: t.run.maxCostUsd ?? undefined,
+				maxTokens: t.run.maxTokens ?? undefined,
 				secretNames: t.run.secrets !== undefined && t.run.secrets !== null ? Object.keys(t.run.secrets) : [],
 			})),
 			// Explicit on the success path too (issue #242): the dead-scope advisory distinguishes
@@ -8771,8 +8715,8 @@ async function defaultReadHosts(url) {
 }
 
 /**
- * Has any host reserved dollars on this Valkey recently? For `fleetDollarChecks`, asked only when a peer publishes no
- * `fpUsd` and nothing else says dollar caps are in use. BEST EFFORT, and it says so wherever it is described:
+ * Has any host reserved tokens on this Valkey recently? For `fleetTokenChecks`, asked only when a peer publishes no
+ * `fpTok` and nothing else says token caps are in use. BEST EFFORT, and it says so wherever it is described:
  *   1. EXISTS on the deployment's current day, week and month keys (`budget:usd:YYYY-MM-DD`, `:w:<Monday>`,
  *      `:m:YYYY-MM`, `budget.mjs`'s key functions at `now`), the counters any host with a dollar window writes;
  *   2. else a bounded SCAN for `budget:usd:*` (at most ten passes of COUNT 1000), for scope and model windows.
@@ -8789,11 +8733,12 @@ export async function dollarKeysExistWith(client, { now = () => new Date(), dead
 	});
 	const ask = (async () => {
 		const at = now();
-		const current = [dayKey(at, DOLLAR_KEY_PREFIX), weekKey(at, DOLLAR_KEY_PREFIX), monthKey(at, DOLLAR_KEY_PREFIX)];
+		// The RETIRED dollar keys: a leftover counter means an older capped host still runs beside this one.
+		const current = [dayKey(at, RETIRED_DOLLAR_KEY_PREFIX), weekKey(at, RETIRED_DOLLAR_KEY_PREFIX), monthKey(at, RETIRED_DOLLAR_KEY_PREFIX)];
 		if (Number(await client.exists(...current)) > 0) return true;
 		let cursor = "0";
 		for (let pass = 0; pass < 10; pass++) {
-			const [next, keys] = await client.scan(cursor, "MATCH", `${DOLLAR_KEY_PREFIX}:*`, "COUNT", 1000);
+			const [next, keys] = await client.scan(cursor, "MATCH", `${RETIRED_DOLLAR_KEY_PREFIX}:*`, "COUNT", 1000);
 			if (Array.isArray(keys) && keys.length > 0) return true;
 			cursor = String(next);
 			if (cursor === "0") return false;
@@ -9312,47 +9257,44 @@ export function fleetVersionChecks({ installed, self = null, selfName = null, pe
 	return [{ id: "fleet.versions", ok: !warn, ...(warn ? { warn: true } : {}), label: warn ? `pi-dispatch versions ${differ ? "differ" : "cannot all be read"}: ${parts.join("; ")}` : ok, ...(warn ? { fix } : {}) }];
 }
 
-/** The most the dollar window check may take, its records read and its counter read together. */
-export const DOLLAR_WINDOWS_DOCTOR_TIMEOUT_MS = 5_000;
+/** The most the token window check may take, its records read and its counter read together. */
+export const TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS = 5_000;
 
 const WINDOW_WORDS = Object.freeze({ day: { its: "today's", cap: "daily" }, week: { its: "this week's", cap: "weekly" }, month: { its: "this month's", cap: "monthly" } });
-/** A counter value as micro-dollars, sign kept: `-$2.00` for a counter a give-back took below 0. */
-const usdSigned = (micros) => (micros < 0 ? `-$${formatMicros(-micros)}` : `$${formatMicros(micros)}`);
+/** A counter value as a signed token count: `-200` for a counter a give-back took below 0. */
+const tokensSigned = (count) => (count < 0 ? `-${-count}` : `${count}`);
 const utcMinute = (ms) => `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 
 /**
- * The dollar window reset check (issue #761, DES-DOLLAR-RESERVE-AND-SETTLE): whether a deployment dollar window's
+ * The token window reset check (issue #761, DES-TOKEN-RESERVE-AND-SETTLE): whether a deployment token window's
  * counter holds less than this host's own run records settled into it, which only lost history explains (a flushed,
- * replaced or restored Valkey, an evicted key, a hand edit): the cap then counts from less than was spent and can let
- * at least the difference more be spent. One warning for every such window, or nothing.
+ * replaced or restored Valkey, an evicted key, a hand edit): the cap then counts from less than was used and can let
+ * at least the difference more be used. One warning for every such window, or nothing.
  *
- *   1. The deployment's day, week and month caps, overlay over env (`deploymentSettingsOf`, `dollarWindowCaps`, which
- *      throws on a value the worker refuses: that is its own line, and this check says nothing). None set, or no Valkey
- *      this command may talk to (`url` null): nothing is read.
- *   2. This host's records FIRST (`seams.readDollarRecords`; default: `readLocalWindow` from the start of the earliest
- *      active window, a file at a time until the bound passes), summed per window by `dollarWindowFloors` over this
+ *   1. The deployment's day, week and month caps, overlay over env (`deploymentSettingsOf`, `tokenWindowCaps`). None
+ *      set, or no Valkey this command may talk to (`url` null): nothing is read.
+ *   2. This host's records FIRST (`seams.readTokenRecords`; default: `readLocalWindow` from the start of the earliest
+ *      active window, a file at a time until the bound passes), summed per window by `tokenWindowFloors` over this
  *      host's name and the endpoint tag of `url` (`valkeyEndpointTag`, the worker's).
- *   3. THEN the counters of the windows whose sum is above 0 (`seams.readDollarCounters`; default: one MGET). In this
+ *   3. THEN the counters of the windows whose sum is above 0 (`seams.readTokenCounters`; default: one MGET). In this
  *      order every record read was settled before its counter was read, so a counter read after it cannot be
  *      legitimately below it.
  *   4. A counter that is absent, or an integer below the sum (a negative one included), is a finding; one that is not
  *      an integer is skipped.
- * Both default reads share one bound (`DOLLAR_WINDOWS_DOCTOR_TIMEOUT_MS`) and are refused in tests
- * (`forbidDefaultDollarWindowRead`). A read that fails or runs out of time says nothing: this check claims a reset only
+ * Both default reads share one bound (`TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS`) and are refused in tests
+ * (`forbidDefaultTokenWindowRead`). A read that fails or runs out of time says nothing: this check claims a reset only
  * where it sees one, and its silence is never a claim that nothing was lost. It sees this host's share only (another
  * host's records are not here) and only the deployment windows (a scoped, project or model key is a hash per ledger),
- * from the records written since issue #761 (`dollars.reservedIn`).
+ * from the records written since issue #761 (`tokensWindows.reservedIn`).
  */
-export async function doctorDollarWindows({ seams = {}, env = {}, home, url, localHost, fileExists = existsSync }) {
+export async function doctorTokenWindows({ seams = {}, env = {}, home, url, localHost, fileExists = existsSync }) {
 	// Resolved first, then judged: `deploymentSettingsOf` never throws and hands back values as written, which
-	// `dollarWindowCaps` may refuse.
+	// `tokenWindowCaps` judges whole numbers only.
 	const settings = deploymentSettingsOf(env, settingsFilePath(env, home), fileExists);
-	let caps = null;
-	try {
-		caps = dollarWindowCaps(settings);
-	} catch {
-		return [];
-	}
+	// The worker refuses to boot on a broken invariant (a window without PI_MAX_TOKENS), so its windows are
+	// never enforced here: say nothing, like the pre-token check's parse-refusal branch did.
+	if (checkTokenInvariant({ ...settings, maxTokens: settings.maxTokens }) !== null) return [];
+	const caps = tokenWindowCaps(settings);
 	const valkey = url ? valkeyEndpointTag(url) : null;
 	if (caps === null || valkey === null) return [];
 	try {
@@ -9361,13 +9303,13 @@ export async function doctorDollarWindows({ seams = {}, env = {}, home, url, loc
 		const active = DEPLOYMENT_WINDOWS.filter((w) => caps[w] !== null && caps[w] !== undefined && at[w].bucket !== null).map((w) => ({ window: w, cap: caps[w], ...at[w] }));
 		if (active.length === 0) return [];
 		// The bound runs on the real clock, never the injected one a test fixes: it measures how long this read takes.
-		const clock = typeof seams.dollarWindowsClock === "function" ? seams.dollarWindowsClock : Date.now;
-		const deadlineAt = clock() + (seams.dollarWindowsTimeoutMs ?? DOLLAR_WINDOWS_DOCTOR_TIMEOUT_MS);
-		const read = await (seams.readDollarRecords ?? defaultReadDollarRecords)({ logsDir: logsDirPath(env, home), sinceMs: Math.min(...active.map((w) => w.startMs)), deadlineAt, clock });
-		const floors = dollarWindowFloors(read?.records, { host: localHost, valkey, buckets: Object.fromEntries(active.map((w) => [w.window, w.bucket])) });
+		const clock = typeof seams.tokenWindowsClock === "function" ? seams.tokenWindowsClock : Date.now;
+		const deadlineAt = clock() + (seams.tokenWindowsTimeoutMs ?? TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS);
+		const read = await (seams.readTokenRecords ?? defaultReadTokenRecords)({ logsDir: logsDirPath(env, home), sinceMs: Math.min(...active.map((w) => w.startMs)), deadlineAt, clock });
+		const floors = tokenWindowFloors(read?.records, { host: localHost, valkey, buckets: Object.fromEntries(active.map((w) => [w.window, w.bucket])) });
 		const due = active.filter((w) => floors[w.window] > 0);
 		if (due.length === 0) return [];
-		const counters = await (seams.readDollarCounters ?? defaultReadDollarCounters)({ url, keys: due.map((w) => w.key), deadlineAt, clock });
+		const counters = await (seams.readTokenCounters ?? defaultReadTokenCounters)({ url, keys: due.map((w) => w.key), deadlineAt, clock });
 		if (!Array.isArray(counters) || counters.length !== due.length) return [];
 		const found = [];
 		due.forEach((w, i) => {
@@ -9377,7 +9319,7 @@ export async function doctorDollarWindows({ seams = {}, env = {}, home, url, loc
 			if (typeof text !== "string" || !/^-?\d{1,16}$/.test(text) || !Number.isSafeInteger(Number(text))) return;
 			if (Number(text) < floors[w.window]) found.push({ ...w, floor: floors[w.window], counter: Number(text) });
 		});
-		return dollarWindowResetChecks(found);
+		return tokenWindowResetChecks(found);
 	} catch (err) {
 		if (err?.[FORBIDDEN_READ]) throw err;
 		return [];
@@ -9385,21 +9327,21 @@ export async function doctorDollarWindows({ seams = {}, env = {}, home, url, loc
 }
 
 /**
- * The one `dollars.window-reset` warning for `found` (`doctorDollarWindows`), each `{ window, key, cap, floor, counter,
+ * The one `tokens.window-reset` warning for `found` (`doctorTokenWindows`), each `{ window, key, cap, floor, counter,
  * ttlSeconds, endMs }` (`counter` null for an absent key), or none for an empty list. PURE. It says "at least" and
  * "this host's" wherever it gives an amount: the other hosts' records are not here, so the real shortfall can only be
  * larger. The fix puts the shortfall back (`INCRBY`, then `EXPIRE` with the window's own TTL, printed, and without
  * `NX`, which an operator's older Valkey may not take), lowers the cap, or pauses until the window ends. On a fleet
  * the amount is the sum of every host's settled share less what the counter holds, never the sum of each host's
  * shortfall: each shortfall subtracts the counter, so adding them subtracts it once per host and puts back too little.
- * The sum is in micro-dollars, as `INCRBY` takes it, while the label names dollars.
+ * The sum is in tokens, as `INCRBY` takes it.
  */
-export function dollarWindowResetChecks(found) {
+export function tokenWindowResetChecks(found) {
 	if (!Array.isArray(found) || found.length === 0) return [];
 	const parts = found.map((f) => {
 		const short = f.floor - (f.counter ?? 0);
-		const holds = f.counter === null ? "is missing" : `holds ${usdSigned(f.counter)}`;
-		return `${WINDOW_WORDS[f.window].its} (${f.key}) ${holds} while this host's own run records settled $${formatMicros(f.floor)} into it, so the $${formatMicros(f.cap)} ${WINDOW_WORDS[f.window].cap} cap counts at least $${formatMicros(short)} too little`;
+		const holds = f.counter === null ? "is missing" : `holds ${tokensSigned(f.counter)}`;
+		return `${WINDOW_WORDS[f.window].its} (${f.key}) ${holds} while this host's own run records settled ${f.floor} tokens into it, so the ${f.cap} ${WINDOW_WORDS[f.window].cap} token cap counts at least ${short} tokens too little`;
 	});
 	const put = found.map((f) => `\`valkey-cli INCRBY ${f.key} ${f.floor - (f.counter ?? 0)}\` then \`valkey-cli EXPIRE ${f.key} ${f.ttlSeconds}\``);
 	const ends = found.map((f) => `${WINDOW_WORDS[f.window].its} at ${utcMinute(f.endMs)}`);
@@ -9420,15 +9362,15 @@ export function dollarWindowResetChecks(found) {
  * check's DEFAULT reads throw an error doctor does not swallow, so a test that reaches the developer's real logs
  * directory and Valkey fails loudly instead of judging whatever that machine holds.
  */
-let defaultDollarWindowReadForbidden = false;
-export function forbidDefaultDollarWindowRead() {
-	defaultDollarWindowReadForbidden = true;
+let defaultTokenWindowReadForbidden = false;
+export function forbidDefaultTokenWindowRead() {
+	defaultTokenWindowReadForbidden = true;
 }
-const forbiddenDollarRead = () => Object.assign(new Error("doctor reached its real dollar window read in a test: pass readDollarRecords and readDollarCounters"), { [FORBIDDEN_READ]: true });
+const forbiddenTokenRead = () => Object.assign(new Error("doctor reached its real token window read in a test: pass readTokenRecords and readTokenCounters"), { [FORBIDDEN_READ]: true });
 
 /** The default records read: this host's files, a file at a time until `deadlineAt` (`readLocalWindow`). */
-async function defaultReadDollarRecords({ logsDir, sinceMs, deadlineAt, clock }) {
-	if (defaultDollarWindowReadForbidden) throw forbiddenDollarRead();
+async function defaultReadTokenRecords({ logsDir, sinceMs, deadlineAt, clock }) {
+	if (defaultTokenWindowReadForbidden) throw forbiddenTokenRead();
 	const { readLocalWindow } = await import("./capacity-records.mjs");
 	return readLocalWindow(logsDir, { sinceMs, deadlineAt, clock });
 }
@@ -9437,8 +9379,8 @@ async function defaultReadDollarRecords({ logsDir, sinceMs, deadlineAt, clock })
  * The default counters read: one MGET through a fail-fast client, its connection and its command each bounded by what
  * is left before `deadlineAt`, so the whole check stays inside its bound. Null when it could not be read.
  */
-async function defaultReadDollarCounters({ url, keys, deadlineAt, clock }) {
-	if (defaultDollarWindowReadForbidden) throw forbiddenDollarRead();
+async function defaultReadTokenCounters({ url, keys, deadlineAt, clock }) {
+	if (defaultTokenWindowReadForbidden) throw forbiddenTokenRead();
 	const left = () => Math.max(0, deadlineAt - clock());
 	if (left() === 0) return null;
 	try {
