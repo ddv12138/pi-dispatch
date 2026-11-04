@@ -5,13 +5,14 @@
  *
  * THE HOST CHECK IS BY HOSTNAME, NEVER BY PORT. `ssh -L 8080:127.0.0.1:4790` makes the browser send
  * `Host: localhost:8080`, so pinning the configured `host:port` would refuse every tunnel on another local port. DNS
- * rebinding is defeated by the NAME: a rebound page is still addressed as `evil.test`, and that name is not on the
- * list whatever port it carries.
+ * rebinding is defeated by the NAME with the default allowlist: a rebound page is still addressed as `evil.test`, and
+ * that name is not on the list whatever port it carries. The explicit `*` entry opts out of that protection and
+ * accepts every syntactically valid Host, including container gateway names.
  *
- * THE CONTAINER GATEWAY NAMES ARE REFUSED ALWAYS. On Docker Desktop `host.docker.internal` reaches the host's own
+ * THE CONTAINER GATEWAY NAMES ARE REFUSED BY THE DEFAULT POLICY. On Docker Desktop `host.docker.internal` reaches the host's own
  * loopback listeners, so a job container is a client of a loopback-only console unless its Host is refused. Adding
- * one of these names to PI_CONSOLE_ALLOWED_HOSTS is refused at startup (`config.mjs`) rather than honoured here, so
- * no configuration can reopen that path. This stops a browser and any client that keeps the name it dialled; a program
+ * one of these names to PI_CONSOLE_ALLOWED_HOSTS is refused at startup (`config.mjs`) rather than honoured here, unless
+ * the operator explicitly sets `*`. This stops a browser and any client that keeps the name it dialled; a program
  * in a job can send `Host: localhost` instead, so against a job the token is the barrier and the unix socket the cure.
  *
  * WRITES NEED `Sec-Fetch-Site: same-origin` EXACTLY. Browsers ignore ports when deciding "site", so a page served by
@@ -22,7 +23,7 @@
  */
 import { isJsonContentType } from "@edgehero/pi-dispatch/http-body";
 
-/** The names a container uses to reach the host it runs on. Never a valid console Host, whatever is configured. */
+/** The names a container uses to reach its host. The default policy refuses them; `*` explicitly accepts them. */
 export const GATEWAY_HOSTS = Object.freeze(["host.docker.internal", "host.containers.internal", "gateway.docker.internal"]);
 
 /** The loopback names a browser on this host uses for the console. Extras come from PI_CONSOLE_ALLOWED_HOSTS. */
@@ -66,7 +67,8 @@ export function isGatewayHost(value) {
 }
 
 /**
- * Refuse a request whose Host hostname is not loopback or an allowed extra (any port). Returns a sentence or null.
+ * Refuse a request whose Host hostname is not loopback or an allowed extra (any port). `*` allows every valid name.
+ * Returns a sentence or null.
  * The sentence names the hostname so the operator who added a tunnel name can see what to allow; it is scrubbed and
  * capped by whoever records it.
  */
@@ -76,6 +78,7 @@ export function hostRefusal(hostHeader, allowedHosts = []) {
   }
   const name = hostnameOf(hostHeader);
   if (name === null) return "the Host header is not a plain hostname or IP literal, so the request was refused";
+  if (allowedHosts.includes("*")) return null;
   if (GATEWAY_HOSTS.includes(name)) {
     return `the Host ${name} is a container gateway name; the console never answers a container, whatever is configured`;
   }

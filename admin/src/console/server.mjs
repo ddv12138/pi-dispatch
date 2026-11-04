@@ -479,9 +479,9 @@ export function loginNoticeOf(searchParams) {
 
 /**
  * How the console listens, as the sign-in footer words it: `unix` for a unix socket, `tcp` for a loopback
- * address, and `public` for an address that is not loopback (PI_CONSOLE_BIND_PUBLIC=1), where saying "loopback only"
- * would be untrue. The loopback test is the listener's own (`isLoopbackAddress`; `parseListen` refuses a hostname, so
- * the host is always a literal), so the footer and the bind cannot disagree about what loopback is.
+ * address, and `public` for an address that is not loopback (the default, or PI_CONSOLE_BIND_PUBLIC=1), where saying
+ * "loopback only" would be untrue. The loopback test is the listener's own (`isLoopbackAddress`; `parseListen` refuses
+ * a hostname, so the host is always a literal), so the footer and the bind cannot disagree about what loopback is.
  */
 function listenWord(config) {
   const listen = config?.listen;

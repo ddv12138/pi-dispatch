@@ -1,12 +1,13 @@
 /**
  * Where the console listens (issue #640, REQ-CONSOLE-SECURITY clauses a and j).
  *
- * `PI_CONSOLE_LISTEN` takes an IP literal and a port (`127.0.0.1:4790`, `[::1]:4790`) or `unix:/abs/path`.
+ * `PI_CONSOLE_LISTEN` takes an IP literal and a port (`0.0.0.0:4790`, `127.0.0.1:4790`, `[::1]:4790`) or `unix:/abs/path`.
  *
  * IP LITERALS ONLY. A hostname is refused even when it is `localhost`: what a name resolves to is decided by a file or
  * a server the console does not control, and "loopback" must be a property of the bind, not of today's resolver. A
- * non-loopback literal (`0.0.0.0`, a LAN address) is refused unless PI_CONSOLE_BIND_PUBLIC=1, and doctor warns while it
- * is set: the console has no TLS, and a token over plain HTTP on a network is a token anyone on it can read.
+ * non-loopback literal is refused unless PI_CONSOLE_BIND_PUBLIC=1, except the default `0.0.0.0:4790` requested by the
+ * operator console's deployment contract. The console has no TLS, and a token over plain HTTP on a network is a token
+ * anyone on it can read; doctor warns on the public default and on PI_CONSOLE_BIND_PUBLIC=1.
  *
  * UNIX SOCKET MODE removes every network peer, the job container on the host gateway included. The parent directory
  * must be ours and 0700 (a socket file's own mode is not honoured by every platform's `connect`, a directory's is), the
@@ -37,7 +38,7 @@ export function isLoopbackAddress(address) {
  * Parse a PI_CONSOLE_LISTEN value. Returns `{kind: "tcp", host, port}` (host unbracketed), `{kind: "unix", path}` or
  * `{refusal}`. `bindPublic` is PI_CONSOLE_BIND_PUBLIC=1.
  */
-export function parseListen(value, { bindPublic = false, platform = process.platform } = {}) {
+export function parseListen(value, { bindPublic = false, defaultPublic = false, platform = process.platform } = {}) {
   const text = String(value ?? "").trim();
   if (text.startsWith("unix:")) {
     const path = text.slice("unix:".length);
@@ -71,7 +72,7 @@ export function parseListen(value, { bindPublic = false, platform = process.plat
   if (!isIPv4(host) && !(isIPv6(host) && text.startsWith("["))) {
     return { refusal: `PI_CONSOLE_LISTEN names ${host}, which is not an IP literal; a hostname can resolve anywhere, so write 127.0.0.1 or [::1] instead` };
   }
-  if (!isLoopbackAddress(host) && !bindPublic) {
+  if (!isLoopbackAddress(host) && !bindPublic && !(defaultPublic && text === "0.0.0.0:4790")) {
     return { refusal: `PI_CONSOLE_LISTEN ${host} is not a loopback address; the console has no TLS, so reach it with ssh -L instead, or set PI_CONSOLE_BIND_PUBLIC=1 to accept that risk` };
   }
   return { kind: "tcp", host, port: Number(portText) };
@@ -80,6 +81,7 @@ export function parseListen(value, { bindPublic = false, platform = process.plat
 /** The URL a browser on this host opens for a TCP spec; null for a socket (the browser reaches it through a tunnel). */
 export function listenUrl(spec, port = spec.port) {
   if (spec.kind !== "tcp") return null;
+  if (spec.host === "0.0.0.0" || spec.host === "::") return `http://<this host>:${port}/`;
   return `http://${isIPv6(spec.host) ? `[${spec.host}]` : spec.host}:${port}/`;
 }
 

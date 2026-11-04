@@ -17,7 +17,7 @@ test("hostnameOf keeps the name, drops any port and one trailing dot, lowercases
   }
 });
 
-test("hostRefusal: loopback names on any port pass; rebinding names, gateway names and garbage are refused", () => {
+test("hostRefusal: loopback names pass, unlisted names and garbage refuse, wildcard opts into every valid name", () => {
   for (const ok of ["127.0.0.1:4790", "localhost:9999", "[::1]:1", "localhost", "LOCALHOST.:80"]) assert.equal(hostRefusal(ok, []), null, ok);
   for (const bad of ["evil.test", "127.0.0.1.nip.io", "localhost.evil.test", "127.0.0.2", "0.0.0.0", "[::2]", undefined, "", "   "]) {
     assert.equal(typeof hostRefusal(bad, []), "string", String(bad));
@@ -31,6 +31,9 @@ test("hostRefusal: loopback names on any port pass; rebinding names, gateway nam
   assert.equal(hostRefusal("console.lan:8443", ["console.lan"]), null);
   assert.equal(hostRefusal("console.lan.", ["Console.LAN"]), null);
   assert.equal(typeof hostRefusal("sub.console.lan", ["console.lan"]), "string", "an allowed name does not allow its subdomains");
+  assert.equal(hostRefusal("anything.example:4790", ["*"]), null, "wildcard allows every hostname on any port");
+  assert.equal(hostRefusal("host.docker.internal", ["*"]), null, "wildcard also accepts gateway names");
+  assert.equal(typeof hostRefusal("bad host", ["*"]), "string", "wildcard does not accept malformed Host headers");
 });
 
 test("originRefusal: Sec-Fetch-Site must be same-origin when present, and Origin must be http://<Host> always", () => {

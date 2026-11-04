@@ -39,7 +39,7 @@ import { makeGatewayBroker } from "./gateway-broker.mjs";
 
 export const USAGE = `usage: pi-dispatch-console <command> [--deployment <dir>]
 
-  serve                                    run the console on PI_CONSOLE_LISTEN (default 127.0.0.1:4790)
+  serve                                    run the console on PI_CONSOLE_LISTEN (default 0.0.0.0:4790)
   token add --name <name> --role <role>    add a token (operator, viewer or agent); prints it once
   token list                               names and roles, never a token
   token revoke --name <name>               remove a token; its sessions end at their next request
@@ -740,8 +740,13 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     }
     if (config.listen.kind === "tcp") {
       const port = bound.address.port;
-      io.out(`pi-dispatch console on ${listenUrl(config.listen, port)}`);
-      io.out(`from another machine: ssh -L ${port}:${config.listen.host.includes(":") ? `[${config.listen.host}]` : config.listen.host}:${port} <this host>, then open http://localhost:${port}/`);
+      if (config.listen.host === "0.0.0.0" || config.listen.host === "::") {
+        io.out(`pi-dispatch console listening on ${config.listen.host}:${port}`);
+        io.out(`from another machine: open ${listenUrl(config.listen, port)} using this host's address; plain HTTP carries tokens and session cookies`);
+      } else {
+        io.out(`pi-dispatch console on ${listenUrl(config.listen, port)}`);
+        io.out(`from another machine: ssh -L ${port}:${config.listen.host.includes(":") ? `[${config.listen.host}]` : config.listen.host}:${port} <this host>, then open http://localhost:${port}/`);
+      }
     } else {
       io.out(`pi-dispatch console on unix socket ${config.listen.path}`);
       io.out(`from another machine: ssh -L 4790:${config.listen.path} <this host>, then open http://localhost:4790/`);

@@ -38,14 +38,15 @@ test("no tokens file and no PI_CONSOLE_* key: no console line at all", () => {
 	assert.deepEqual(consoleChecks({ ...d.env, PI_CONSOLE_LISTEN: "" }, { cwd: d.cwd }), []);
 });
 
-test("a set-up console with one operator: the tokens file and the default listen address, both ok", { skip: !posix }, () => {
+test("a set-up console with one operator: the public default listen warns about plain HTTP", { skip: !posix }, () => {
 	const d = deployment();
 	withToken(d);
 	withToken(d, "viewer", "bob");
 	const checks = consoleChecks(d.env, { cwd: d.cwd });
 	assert.deepEqual(labels(checks), [
 		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only and outside every job folder (1 operator, 1 viewer)`,
-		"ok console: listens on 127.0.0.1:4790 (the default)",
+		"ok console: listens on 0.0.0.0:4790 (the default)",
+		"warn console: the default 0.0.0.0:4790 listens on every IPv4 interface, where tokens and session cookies cross the network in plain HTTP",
 	]);
 });
 
@@ -116,7 +117,7 @@ test("a tokens file inside a trigger's run.skillsDir fails, and so does one with
 	assert.match(linked.fix, /find \/ -samefile/);
 });
 
-test("PI_CONSOLE_BIND_PUBLIC=1 warns; a non-loopback listen without it, or an unparseable one, fails", { skip: !posix }, () => {
+test("the public default warns; PI_CONSOLE_BIND_PUBLIC=1 allows other public binds; an unparseable one fails", { skip: !posix }, () => {
 	const d = deployment();
 	withToken(d);
 	const pub = consoleChecks({ ...d.env, PI_CONSOLE_LISTEN: "0.0.0.0:4790", PI_CONSOLE_BIND_PUBLIC: "1" }, { cwd: d.cwd });
@@ -129,6 +130,17 @@ test("PI_CONSOLE_BIND_PUBLIC=1 warns; a non-loopback listen without it, or an un
 	const bad = consoleChecks({ ...d.env, PI_CONSOLE_LISTEN: "localhost:4790" }, { cwd: d.cwd });
 	assert.match(labels(bad)[1], /^fail console: PI_CONSOLE_LISTEN "localhost:4790" cannot be used, so `pi-dispatch-console serve` refuses to start: localhost is not an IP literal/);
 	assert.equal(labels(consoleChecks({ ...d.env, PI_CONSOLE_LISTEN: "[::1]:4790" }, { cwd: d.cwd }))[1], "ok console: listens on [::1]:4790");
+	const defaulted = consoleChecks({ ...d.env, PI_CONSOLE_LISTEN: "" }, { cwd: d.cwd });
+	assert.equal(labels(defaulted)[1], "ok console: listens on 0.0.0.0:4790 (the default)");
+	assert.match(labels(defaulted)[2], /^warn console: the default 0\.0\.0\.0:4790 listens on every IPv4 interface/);
+});
+
+test("the wildcard Host allowlist warns that DNS-rebinding and gateway-name defenses are disabled", { skip: !posix }, () => {
+	const d = deployment();
+	withToken(d);
+	const row = consoleChecks({ ...d.env, PI_CONSOLE_ALLOWED_HOSTS: "*" }, { cwd: d.cwd }).find((check) => check.warn && check.label.includes("PI_CONSOLE_ALLOWED_HOSTS=*"));
+	assert.ok(row);
+	assert.match(row.fix, /exact hostnames and IP addresses/);
 });
 
 test("consoleListenOf reads PI_CONSOLE_LISTEN as the console's own parseListen does", async () => {
@@ -141,12 +153,15 @@ test("consoleListenOf reads PI_CONSOLE_LISTEN as the console's own parseListen d
 			const verdict = ours.refusal ? "refused" : ours.loopback ? "loopback" : "public";
 			if (existsSync(listenPath)) {
 				const { parseListen } = await import(listenPath.href);
-				const theirs = parseListen(v, { bindPublic: false, platform }).refusal ? (parseListen(v, { bindPublic: true, platform }).refusal ? "refused" : "public") : "loopback";
+			const defaulted = typeof v !== "string" || v.trim() === "";
+			const theirs = parseListen(defaulted ? "0.0.0.0:4790" : v, { bindPublic: false, defaultPublic: defaulted, platform }).refusal
+				? (parseListen(v, { bindPublic: true, platform }).refusal ? "refused" : "public")
+				: (defaulted || v.startsWith("0.0.0.0") || v.startsWith("[::]") ? "public" : "loopback");
 				assert.equal(verdict, theirs, `${platform} ${JSON.stringify(v)}`);
 			}
 		}
 	}
-	assert.equal(consoleListenOf(undefined).shown, "127.0.0.1:4790 (the default)");
+	assert.equal(consoleListenOf(undefined).shown, "0.0.0.0:4790 (the default)");
 });
 
 test("consoleListenOf and the console's own settings read agree, unset, empty and whitespace-only values included", async () => {
@@ -155,7 +170,7 @@ test("consoleListenOf and the console's own settings read agree, unset, empty an
 	// or it reports a default the console refuses (or the reverse). Compared at that level, not at parseListen's.
 	const configPath = new URL("../../admin/src/console/config.mjs", import.meta.url);
 	const samples = [undefined, "", "   ", "\t", " \t ", "127.0.0.1:4790", " [::1]:4790 ", "0.0.0.0:4790", "localhost:4790", "unix:/tmp/pd.sock", "unix:relative.sock"];
-	for (const v of ["   ", "\t", " \t "]) assert.equal(consoleListenOf(v).shown, "127.0.0.1:4790 (the default)", JSON.stringify(v));
+	for (const v of ["   ", "\t", " \t "]) assert.equal(consoleListenOf(v).shown, "0.0.0.0:4790 (the default)", JSON.stringify(v));
 	if (!existsSync(configPath)) return;
 	const { consoleConfig } = await import(configPath.href);
 	for (const platform of ["darwin", "linux"]) {
@@ -164,7 +179,10 @@ test("consoleListenOf and the console's own settings read agree, unset, empty an
 			const verdict = ours.refusal ? "refused" : ours.loopback ? "loopback" : "public";
 			const env = v === undefined ? {} : { PI_CONSOLE_LISTEN: v };
 			const read = (extra) => consoleConfig({ env: { ...env, ...extra }, dir: "/srv/pd", platform });
-			const theirs = read({}).refusal ? (read({ PI_CONSOLE_BIND_PUBLIC: "1" }).refusal ? "refused" : "public") : "loopback";
+			const normal = read({});
+			const theirs = normal.refusal
+				? (read({ PI_CONSOLE_BIND_PUBLIC: "1" }).refusal ? "refused" : "public")
+				: normal.listen.kind === "unix" || normal.listen.host === "::1" || normal.listen.host.startsWith("127.") ? "loopback" : "public";
 			assert.equal(verdict, theirs, `${platform} ${JSON.stringify(v)}`);
 		}
 	}

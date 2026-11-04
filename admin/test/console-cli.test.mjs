@@ -320,7 +320,7 @@ function get(port, path, host = `127.0.0.1:${port}`) {
   });
 }
 
-test("serve prints the URL and an ssh -L hint (never a token), answers, holds the lock against a second serve, and releases it", async (t) => {
+test("serve prints the public listener and URL hint (never a token), answers, holds the lock against a second serve, and releases it", async (t) => {
   const dep = deployment();
   let stop;
   const until = new Promise((resolve) => (stop = resolve));

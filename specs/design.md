@@ -2683,9 +2683,20 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
 
 ## DES-WORKER-ON-HOST
 
-- **Decision**: The worker runs **on the host** (a Node process, `pi-dispatch worker` / `npm start`), not
-  in a container. It launches job containers by shelling out to the real `docker` CLI.
-  `docker-compose` runs **only Valkey**; the worker is a host process alongside it. That Valkey takes the
+- **AMENDED 2026-11-04**: The worker has two supported deployment modes: the default host process, and an opt-in
+  Linux Docker Engine container in the Compose `worker` profile. The container image is built from this checkout,
+  runs as uid/gid 10001, uses the host's Docker CLI and mounts `/var/run/docker.sock` plus the deployment tree at
+  the same absolute path visible to the daemon. This mode is supported only when Compose and the worker talk to a
+  local Linux Docker Engine. Every durable job path, temporary path passed to Docker, and local-folder project path
+  must be inside that same-path mount; additional local roots are mounted at the identical host and worker paths.
+  Docker Desktop, remote Docker contexts and Windows hosts use host-worker mode because their daemon path namespace
+  requires client-side translation. The worker socket is control-plane authority equivalent to host root; it is
+  never passed into a job container. The worker image drops Linux capabilities and does not run as root, but that
+  does not reduce the authority granted by the socket.
+- **Decision**: The worker runs **on the host by default** (a Node process, `pi-dispatch worker` / `npm start`),
+  and may instead run in the Linux-only Compose profile described above. Both modes launch job containers by
+  shelling out to the real `docker` CLI. `docker-compose` runs Valkey by default; its `worker` profile adds the
+  containerized worker. The default Valkey takes the
   deployment's `VALKEY_PASSWORD` (issue #468) from `docker compose --env-file .env` into its container's environment,
   and its command hands it to `valkey-server` on stdin, never on a command line: the one start script
   `DES-PODMAN-STACK-AS-QUADLET-UNITS` describes, with `$` written `$$` for compose's interpolation. Without
@@ -2705,7 +2716,10 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
   as proof (two deployments on one host share it); a lock file (a second account's `up` cannot see it); recreating an
   unlabelled volume to label it (a copy of a live queue); and `--yes` adopting one (a script would take another
   deployment's waiting jobs unasked).
-- **Why**: This is the reversal of `DES-JOB-FILES-VIA-VOLUME-SUBPATH` (below, superseded), forced by two
+- **Why**: Host mode remains the default because it is the portable path for Docker Desktop, remote contexts and
+  arbitrary local folders. The earlier universal rejection of a containerized worker is narrowed to those cases:
+  on a Linux host, mounting the deployment root at the same absolute path preserves daemon-side bind sources without
+  path translation. This is the reversal of `DES-JOB-FILES-VIA-VOLUME-SUBPATH` (below, superseded), forced by two
   findings and the local-first target.
   **(1) The `docker` CLI translates host paths; the daemon does not.** On Docker Desktop the daemon is a
   *Linux* daemon behind a Windows named pipe (`docker context` shows `npipe://…` with `docker info`
@@ -2721,39 +2735,42 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
   **(2) Local-folder jobs *require* a host bind mount.** The named-volume trick in the superseded entry
   dissolves the path problem only because no host path crosses the boundary — which is exactly what a
   local-folder job cannot do: the operator's own folder must be bind-mounted as `/workspace`, edited in
-  place. There is no volume to hide behind. Since local folders are the primary self-hosted experience,
-  the deployment model must support the bind mount, and the host worker does so with zero path math.
-  **Isolation is unaffected.** `CONST-ISOLATION-CONTAINER-PER-JOB` is about the **job** container being
-  the boundary — the harness still never runs pi on the host. And a container holding `/var/run/docker.sock` is
-  already root-equivalent on the host, so containerising the worker bought *no* isolation; it only bought
-  deployment tidiness, which is what this trades away.
-- **What this deletes**: the named-volume + `volume-subpath` machinery, the `≥26.1.0` Engine floor, the
-  socket mount, and the `docker-socket-proxy`. The worker binds `/job:ro` and `/workspace` (the folder)
-  directly.
-- **Accepted cost, stated plainly**: Node on the host, not only Docker. `docker compose up` alone no
-  longer runs everything; the operator also runs `pi-dispatch worker`. That is the honest price of
-  local-folder jobs working on Windows/macOS/Linux without fragile path math. The receiver is Node too,
-  so it is one install story (`npm ci`), with Docker running Valkey and the job containers.
+  place. There is no volume to hide behind. Host mode supports any local folder with zero path math;
+  Linux container mode supports local folders only under the deployment tree or another explicitly
+  same-path mount.
+  **The job isolation contract is unchanged.** `CONST-ISOLATION-CONTAINER-PER-JOB` is about the **job** container:
+  the harness still never runs pi on the host, and job containers never receive the socket. The worker's own
+  container is not an isolation boundary against worker compromise: the socket is root-equivalent, as is the host
+  account needed to operate the local Docker daemon. The opt-in container mode changes packaging and narrows path
+  support, not the authority of trusted worker code.
+- **Accepted cost, stated plainly**: Host mode still requires Node on the host and supports Windows, macOS and
+  remote daemon path translation. Container mode requires Linux, the Docker socket group id, same-path mounts and
+  a worker-owned runtime directory. `docker compose --profile worker up` starts Valkey and the worker together;
+  adding `--profile receiver` also starts the containerized trigger edge. Local-folder jobs outside the mounted
+  roots remain unavailable to that worker. The receiver remains optional and never gets the Docker socket.
   Since issue #80, `pi-dispatch up` *sequences* the surrounding chores (image pull+tag, Valkey start,
-  scaffold, preflight) behind explicit per-action consent — the price above is unchanged (the worker is
-  still a host process the operator runs); only the amount of typing shrank
+  scaffold, preflight) behind explicit per-action consent for host-mode deployments; only the amount of
+  typing shrank
   (`REQ-DEPLOYMENT-BOOTSTRAP`).
 - **Evidence**: verified first-hand this session — `docker context` (`npipe` endpoint, `linux/x86_64`
   daemon) · `moby/for-win#14271` (VM prefix `/run/desktop/mnt/host/…`) and `docker/compose#5563`
   (older `/host_mnt/…`), i.e. the prefix moved · `docker/compose#4240`
   (`COMPOSE_CONVERT_WINDOWS_PATHS` is unconditional client-side rewriting) · a constructed `docker run`
   argv launched the real job image with a host-native folder path, cross-platform, with no translation.
-- **Rejected**: containerised worker + `volume-subpath` (cannot bind-mount a local folder; pins moving
-  path math) — see the superseded entry for its full reasoning, kept as the record of why it was tried.
+- **Rejected**: making the containerized worker the universal default. That would break Docker Desktop and remote
+  daemon path translation and hide arbitrary host folders unless each was explicitly mounted. The Linux profile
+  opts into the narrower same-path contract without changing host mode.
 - **Traces to**: `INT-CONTAINER-JOB-INPUTS`, `INT-CONTAINER-RUNTIME-CONTRACT`,
   `CONST-ISOLATION-CONTAINER-PER-JOB`
+- **Code evidence**: `deploy/docker-compose.yml` -> `worker`, `deploy/worker.Dockerfile`,
+  `worker/src/backend-local.mjs` -> `execDockerBounded`, `worker/src/run-container.mjs` -> job bind mounts.
 
 ## DES-JOB-FILES-VIA-VOLUME-SUBPATH
 
 - **Status**: **SUPERSEDED by `DES-WORKER-ON-HOST`.** Kept in place because IDs are permanent and its
-  research (subpath semantics, the socket-proxy hardening) stays relevant if a GitHub-only deployment
-  ever re-containerises the worker. The decision below is **not** what the code does: the worker runs on
-  the host and bind-mounts directly.
+  research (subpath semantics, the socket-proxy hardening) remains useful. The named-volume design below
+  is **not** what either deployment mode does: host mode binds host paths directly; the Linux Compose
+  mode binds the deployment tree at the same absolute path and uses the existing Docker CLI adapter.
 - **Decision**: The worker hands `/workspace` and `/job` to the job container via a **plain named volume
   per job** plus `--mount type=volume,…,volume-subpath=…`. Never a host bind mount. Docker Engine
   **≥26.1.0**. A `tecnativa/docker-socket-proxy` sits between the worker and the Docker socket.
@@ -2944,7 +2961,8 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
   the ONE surface for "what is this deployment wired to do and what does it cost". From issue #181 until
   2026-10-18 it was a static file the extension wrote and opened (the retired `REQ-INSIGHTS-HTML-EXPORT`); since
   then bare `/dispatch insights [7d|30d|mtd]` prints the console's URL for that window
-  (`http://<PI_CONSOLE_LISTEN host:port>/insights?range=<w>`, `127.0.0.1:4790` when the setting is unset; the ssh
+  (`http://<PI_CONSOLE_LISTEN host:port>/insights?range=<w>`, `0.0.0.0:4790` when the setting is unset, printed as
+  `http://<this host>:4790/insights?range=<w>`; the ssh
   tunnel hint for a unix socket, its path one shell word; `<this host>` in place of an any-address bind such as
   `0.0.0.0` or `[::]`, which no browser can open; a sentence instead of a URL for port 0, whose port only the running
   console knows; a sentence saying so when the setting does not parse) and says to start the console
@@ -12523,10 +12541,12 @@ unknown data, invalid files and additional Forgejo/Azure groups retain readable 
   extension), on `node:http` alone. The pi extension is unchanged and still binds no port; the console is a second
   surface over the same read model (`admin/src/read-model.mjs`), never a second write path. The property that
   replaces "binds no network port" has five parts, each held by a lettered clause of `REQ-CONSOLE-SECURITY`:
-  1. **It listens on loopback or on a private socket.** `PI_CONSOLE_LISTEN` takes `127.0.0.1:4790` (the default),
-     `[::1]:<port>` or `unix:/abs/path`. Only IP literals are accepted, because a hostname can resolve somewhere else;
-     loopback is 127.0.0.0/8 and ::1, and any other literal is refused unless `PI_CONSOLE_BIND_PUBLIC=1`, on which
-     doctor warns. A unix socket's parent directory must exist, belong to the console's account and give nothing to
+  1. **It listens on its deployment default or on a private socket.** `PI_CONSOLE_LISTEN` defaults to
+     `0.0.0.0:4790` (all IPv4 interfaces); an explicitly configured loopback bind such as `127.0.0.1:4790`,
+     `[::1]:<port>` or `unix:/abs/path` remains available. Only IP literals are accepted, because a hostname can
+     resolve somewhere else; loopback is 127.0.0.0/8 and ::1, and any other explicitly configured literal is refused
+     unless `PI_CONSOLE_BIND_PUBLIC=1`, on which doctor warns. Doctor also warns that the default uses plain HTTP on
+     every IPv4 interface. A unix socket's parent directory must exist, belong to the console's account and give nothing to
      group or other; the socket is created under umask 077 and then set to 0600. A stale socket is removed only when
      `lstat` says it is a socket AND a connect to it fails, so a running console's socket is never taken over, and a
      path longer than the platform's `sun_path` (104 bytes on macOS, 108 on Linux) is refused before the bind, by
@@ -12614,8 +12634,8 @@ unknown data, invalid files and additional Forgejo/Azure groups retain readable 
 - **The six threats found while surveying, beyond the issue's text, and what answers each**:
   1. **The job container can be a client of the console.** On Docker Desktop `host.docker.internal` reaches the
      host's loopback listeners (measured from the egress proxy on 2026-09-30, Docker Desktop 4.37.2, `docs/backends.md`).
-     So "loopback only" does not keep the untrusted side out. The Host check always refuses `host.docker.internal`, `host.containers.internal` and
-     `gateway.docker.internal`, and the console refuses to start when `PI_CONSOLE_ALLOWED_HOSTS` names one; a job
+     So "loopback only" does not keep the untrusted side out. The default Host policy refuses `host.docker.internal`, `host.containers.internal` and
+     `gateway.docker.internal`, and the console refuses to start when `PI_CONSOLE_ALLOWED_HOSTS` names one; the explicit wildcard accepts them; a job
      that reaches the port still needs a token; and unix-socket mode removes the path. Measured on 2026-10-14
      with `ghcr.io/edgehero/pi-job:4.3.0` and a listener bound to `127.0.0.1`: on Docker Desktop 27.4.0 (macOS) a
      container on the default bridge (the `PI_EGRESS=0` posture) reached it through `host.docker.internal` with a
@@ -12635,8 +12655,11 @@ unknown data, invalid files and additional Forgejo/Azure groups retain readable 
      so the issue's rule (the Host must equal the configured host and port) would refuse every tunnel on another
      port. The rule is on the **hostname**: `127.0.0.1`, `localhost`, `[::1]` or a name in
      `PI_CONSOLE_ALLOWED_HOSTS`, compared case-insensitively with a trailing dot stripped, any port; anything else is
-     421, but for the three `anyHost` files (since #737 PR 2), which a rebound name may read as anyone may.
-     Rebinding is defeated by the hostname, which an attacker's DNS name never is, not by the port. The `Origin`
+     421, unless the operator explicitly sets `PI_CONSOLE_ALLOWED_HOSTS=*`, which accepts every syntactically valid
+     Host, including container gateway names, and disables the DNS-rebinding defense. Missing and malformed Host
+     headers are always refused. The three `anyHost` files (since #737 PR 2) remain public bytes which a rebound name
+     may read as anyone may. With the restricted allowlist, rebinding is defeated by the hostname, which an attacker's
+     DNS name never is, not by the port. The `Origin`
      check uses the Host the request carried, so it holds through any tunnel port. Measured on 2026-10-14 through a
      real tunnel to a unix socket (OpenSSH 9.9p2 on macOS to OpenSSH 9.2p1 in a Debian 12 container, `ssh -L
      9999:/home/op/run/console.sock`, the socket `srw-------` in a 0700 directory): Chrome 155 on `localhost:9999`
@@ -17253,6 +17276,9 @@ Code evidence: `worker/src/watch-decision.mjs`, `watch-board.mjs`, `watch-store.
 | Date | Change |
 |---|---|
 | 2026-11-04 | `DES-QUEUE-BULLMQ-OVER-CUSTOM` AMENDED: token-verified GitLab webhook requests lacking native delivery headers use an event-header plus exact-raw-body SHA-256 delivery id; the best-effort boundary and signature-mode native-header requirement are recorded. Queue ownership, retention and semantic deduplication UNCHANGED, checked. **Code evidence**: `receiver/src/verify-gitlab.mjs`; `worker/src/queue.mjs`. |
+| 2026-11-04 | `DES-WORKER-ON-HOST` AMENDED: host mode remains the portable default; a Linux Compose worker profile is admitted with non-root execution, a same-path deployment mount and explicit root-equivalent Docker socket authority. Docker Desktop, remote daemon paths and arbitrary unmounted local folders stay on host mode. `CONST-ISOLATION-CONTAINER-PER-JOB` and `INT-CONTAINER-RUNTIME-CONTRACT` retain the per-job no-socket contract. **Code evidence**: `deploy/docker-compose.yml`, `deploy/worker.Dockerfile`, `worker/src/backend-local.mjs`, `worker/src/run-container.mjs`. |
+| 2026-11-04 | `DES-OPERATOR-CONSOLE` AMENDED: the default bind is `0.0.0.0:4790`; default public HTTP is accepted and doctor warns, while a custom non-loopback bind still requires `PI_CONSOLE_BIND_PUBLIC=1`. The console Compose profile publishes port 4790 and carries no Docker socket; the request Host must be explicitly allowed when accessed by the deployment's address. Loopback plus SSH and TLS proxy access remain available. Session, token, CSRF and audit rules UNCHANGED, checked. **Code evidence**: `admin/src/console/config.mjs`, `admin/src/console/listen.mjs`, `worker/src/doctor.mjs`, `deploy/docker-compose.yml`. |
+| 2026-11-04 | `DES-OPERATOR-CONSOLE` AMENDED: `PI_CONSOLE_ALLOWED_HOSTS=*` accepts any syntactically valid Host, including container gateway names; missing or malformed Host values still refuse. This explicit opt-out disables the DNS-rebinding name defense, so doctor warns. The default exact-name allowlist and the authentication, origin, write-ticket and audit guards remain available and unchanged. **Code evidence**: `admin/src/console/guards.mjs`, `admin/src/console/config.mjs`, `worker/src/doctor.mjs`. |
 | 2026-11-03 (#812) | **`DES-MODEL-FAILOVER` AMENDED**. Retry safety: the attempt key's life follows the job's, the rule approval requests keep: no expiry while the queue may still retry the job, 32 days once the queue says the job finished (a day past the longest age the queue keeps a finished job for, so a console retry still finds it), deleted when a cancel or the host-lost sweep removes the job, a console retry takes the expiry off again (`PERSIST` once BullMQ has put the job back, so a retry that waits before its next selection keeps its evidence), and a retry's write keeps none; the residuals are stated (a crash between the queue's acknowledgement and the listener, an expiry or a delete that fails, or a retried job that finishes before the `PERSIST` lands, leaves that key without expiry; a console retry of a failed job BullMQ removed late, or one whose `PERSIST` failed, can still find the key gone, and is then refused `model-failover-no-candidate`, free). Rejected gains an expiry set at write, a QueueEvents `removed` listener (BullMQ 5.80.4 adds no `removed` event when a finished job ages out, `includes/removeJobsByMaxAge.lua`) and a delete when the run record is written. Code evidence names the new module and its callers. **Code evidence**: worker/src/model-attempts.mjs -> finishModelAttempt, dropModelAttempt, keepModelAttempt, modelAttemptIdOf; worker/src/retention.mjs -> MODEL_ATTEMPT_FINISHED_TTL_MS; worker/src/start.mjs -> finishAttempt; worker/src/cancel-state.mjs -> dropAttemptOf; worker/src/recovery-queue.mjs -> makeHostLostSweep; admin/src/job-actions.mjs -> retryKeepingAttempt. |
 | 2026-11-03 (#761, upgrade path) | **`DES-QUEUE-BULLMQ-OVER-CUSTOM` AMENDED**, two bullets. "BullMQ's internals have one owner": every fact read past BullMQ's public API (keys, job fields, meta flags, the delayed score, the `repeat:`/`manual:` grammar, the custom id rules) is in `worker/src/bullmq-internals.mjs`, cited beside the bullmq 5.80.4 file it was read from, held by a single-owner scan of five source trees with named exemptions and planted spellings, text pins, BullMQ's own `validateOptions`, a pins test (the three bullmq pins, ioredis and cron-parser, the lockfile, no nested copy, `BULLMQ_VERIFIED_VERSION`) and a real-Valkey test; the meta `version` is read by that test alone. "The Valkey image is pinned to a minor": `valkey/valkey:8.1` (`VALKEY_IMAGE`) in every place that starts or ships one, held by `valkey-image.test.mjs`, which REVERSES the floating major and its "breaks loudly, spends nothing" reasoning, for four reasons; a minor, not a patch or a digest, so it still takes 8.1's patches; the lab (2026-11-03, Docker 27.4.0: `:8` and `:8.1` one image, Valkey 8.1.11 `sha256:8f836008...`; 8.0.2 `sha256:57bcc49c...` and 8.1.11 each loading the other's volume through the AOF and the RDB alone, 2,809 keys, a TTL and the writes after a rewrite intact; a final snapshot on `docker stop`, so a fix stops before it removes); what an upgrade leaves on `:8` and doctor's `state.older` detectors (exact `OLDER_VALKEY_IMAGES` matches only, a compose file by its `valkey` service's image alone, every `image:` at that service's level counting and a merge conflict's marker lines read as blank, a container only where this deployment's `up` started it and still runs it, the rule `up`'s row shares and the compose fix follows: only the `image:` line, with no `up -d valkey` that would start a second, empty Valkey, where `up`'s container is the Valkey), `up`'s `valkey image` row, how to move the pin, and two residuals (docker is asked only where `local` is in `PI_BACKENDS`, `docker info` answered and `VALKEY_URL` names this host, read from the `.env` or the shell, and only where `up`'s own reader (`readValkeyKeys`) reads the `.env`, from its bytes, without an error and finds there no `VALKEY_URL` but the one judged, so never where `up` refuses that file; a compose-made container on `:8` under an updated file is not seen). **`DES-CRON-VIA-BULLMQ-SCHEDULER` AMENDED**, a bullet "One owner of a cron run's id": one grammar for `repeat:` and `manual:` (`cronRunOf`, `isSchedulerJobId`, `scheduledForMillis`, `isSchedulerNext`, `SCHEDULER_JOB_ID_OVERHEAD`), every reader importing it and `repeat-slot.mjs` gone; record readers take any id length, Valkey readers and surfaces 200 (`SCHEDULER_ID_MAX`); the changes an operator sees (a 177 to 200 character scheduler named, an off-grammar id no longer a cron run at the formerly lenient readers, the stall guard's unparsed and non-string cases); the loader's refusal, which now says each run's job id must stay within the 200 characters the readers take. **`DES-DOLLAR-RESERVE-AND-SETTLE` AMENDED**, worker half item 11, "A counter that lost its history": the proof (reserve, settle and release order, `reservedIn` naming only windows whose key holds what the record states, each part-way case tested), the check (caps from the settings, records first, then one `MGET`, a 5 s bound, absent or below is a finding, a non-integer skipped, one warning, its label and its three-way fix with `INCRBY`, `EXPIRE` and no `NX`, on a fleet the sum, in micro-dollars, of every host's settled share less what the counter holds), the windows not checked (job-count, token, scoped, project, `_other`, model, and an envelope-only cap) and the residuals that only lower the sum. **`DES-DOCTOR-RESULTS-PUBLISHED` AMENDED**, the Ids bullet: the three named ids, the re-opened `dollars` section and `state.older`'s repeats. **`DES-HOST-REGISTRY` AMENDED**, the rejected per-field TTLs: the pinned image is `valkey/valkey:8.1`, `HEXPIRE` re-measured as `ERR unknown command` on 8.1.11 (and 8.0.2), `/bin/sh` dash on Debian 13. **`DES-WAITING-REASONS` AMENDED**, the code evidence and the paused-flag sentence: `dueOfScore`, `isSchedulerNext`, `isPausedFlag` and the key helpers moved to `bullmq-internals.mjs`, the read model's `TRIGGER_JOB_ID_RE` became `triggerRunOf`. **`DES-OPERATOR-CONSOLE` AMENDED**, the scheduler bound: `SCHEDULER_NAME_MAX` is `SCHEDULER_ID_MAX` (200), at least `CRON_ID_MAX`, no longer equal to it. **`DES-RUNTIME-SETTINGS-FILE-OVERLAY` and `DES-STORE-VERSION-WHEN-NEEDED` CORRECTED**, one parenthesis each: 4.3.1 shipped the `/dispatch` panel and no web console. **`DES-RUN-HISTORY-FLAT-FILES-NO-DB` UNCHANGED, checked**: doctor reads this host's records through the capacity reader, no store with query power. **Code evidence**: worker/src/bullmq-internals.mjs; worker/test/bullmq-internals.test.mjs; worker/test/bullmq-internals.integration.test.mjs; worker/src/valkey-auth.mjs -> VALKEY_IMAGE, valkeyContainerOwner; worker/src/older-state.mjs -> OLDER_VALKEY_IMAGES, olderStateFindings, upValkeyContainerImage; worker/src/up.mjs -> the valkey image row; worker/src/service.mjs -> TEMPLATE_PINS; worker/test/valkey-image.test.mjs; worker/src/scheduler-stall-guard.mjs -> makeStallGuard; worker/src/triggers.mjs -> CRON_ID_MAX; worker/src/dollar-budget.mjs -> deploymentWindowsOf, dollarWindowFloors; worker/src/capacity-records.mjs -> readLocalWindow's deadlineAt; worker/src/doctor.mjs -> doctorDollarWindows, dollarWindowResetChecks, fleetVersionChecks; admin/src/read-model.mjs -> mapSchedulers, triggerRunOf, cronRunStats, attributeRunsToTriggers. |
 | 2026-11-02 (#754, #792; independent implementation review) | DES-SANDBOX-GATEWAY-ATTACH-ONLY records the sibling-cookie fixation counterexample, HTTPS prefix-only binding, synchronous pre-attach deadline checks and bounded pending control queue. DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY also records the explicitly approved five-callable-identity facade correction verified against exact pi 1.4.0 and 1.5.0 artifacts. Production pi pins, policy/brake behavior, console CSP/cookies, native lifecycle and paid admission UNCHANGED, checked. |

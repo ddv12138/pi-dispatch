@@ -11,7 +11,7 @@ flowchart LR
     R["verify raw-body HMAC (401 on mismatch)<br/>filter: label allowlist, author gate, bot-loop"]
   end
   R -->|"enqueueGitHubJob (jobId = gh-&lt;delivery&gt;)"| Q[("Valkey + BullMQ<br/>pi-jobs, AOF, 31d+ retention")]
-  subgraph HOST["worker/ (host process)"]
+  subgraph HOST["worker/ (host process or Linux Compose container)"]
     W["mint the job's token, refuse an unprotected branch,<br/>hardened clone at the default-branch SHA, run container"]
   end
   Q --> W
@@ -56,8 +56,8 @@ credentials step:
    --profile receiver up -d`. This runs the prebuilt
    [`ghcr.io/edgehero/pi-dispatch-receiver`](https://github.com/edgehero/pi-dispatch/pkgs/container/pi-dispatch-receiver)
    beside Valkey. It needs `deploy/docker-compose.yml`, which a clone carries and `/dispatch setup` copies in
-   when you choose the receiver container. Triggers are mounted read-only. No docker socket goes
-   anywhere. In a folder `/dispatch
+   when you choose the receiver container. Triggers are mounted read-only. The receiver has no Docker socket.
+   In a folder `/dispatch
    setup` built, the
    compose file sits in `deploy/` of that folder. The command names the folder's own project with `-p <folder
    name>` (lower case, only letters, digits, `_` and `-`). Where `pi-dispatch up` had already started the

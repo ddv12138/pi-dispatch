@@ -4,7 +4,7 @@
  *
  * The rule (the admin's `/dispatch console`, issue #708 part 1, imports this module rather than keeping a copy, so
  * there is one rule):
- *   - the address is PI_CONSOLE_LISTEN as the console reads it (trimmed; unset or empty is 127.0.0.1:4790);
+ *   - the address is PI_CONSOLE_LISTEN as the console reads it (trimmed; unset or empty is 0.0.0.0:4790);
  *   - a loopback TCP address (127.0.0.0/8, ::1) is asked as written;
  *   - an any-address bind (0.0.0.0, ::) is asked on 127.0.0.1 or ::1, its own family's loopback, which it also binds;
  *   - a unix socket is asked through the socket (`socketPath`);
@@ -26,7 +26,7 @@ import { BlockList, isIPv4, isIPv6 } from "node:net";
 import { isAbsolute } from "node:path";
 
 /** The console's default listen address, as `pi-dispatch-console serve` binds it. */
-export const CONSOLE_DEFAULT_LISTEN = "127.0.0.1:4790";
+export const CONSOLE_DEFAULT_LISTEN = "0.0.0.0:4790";
 
 const LOOPBACK = new BlockList();
 LOOPBACK.addSubnet("127.0.0.0", 8, "ipv4");

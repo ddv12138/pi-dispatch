@@ -1,0 +1,9 @@
+.git
+.codex
+.aws
+node_modules
+**/node_modules
+runtime
+.env
+**/.env
+npm-debug.log

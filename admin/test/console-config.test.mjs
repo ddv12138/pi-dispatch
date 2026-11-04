@@ -10,10 +10,10 @@ import { CONSOLE_ENV_KEYS, consoleConfig, consoleEnv, DEFAULT_LISTEN, deployment
 
 const DIR = "/srv/deploy";
 
-test("defaults: loopback 4790, 60 min idle, 12 h max, 4 streams, files in the deployment folder", () => {
+test("defaults: all-interface 4790, 60 min idle, 12 h max, 4 streams, files in the deployment folder", () => {
   const c = consoleConfig({ env: { PI_LOGS_DIR: "/var/log/pd" }, dir: DIR });
-  assert.equal(DEFAULT_LISTEN, "127.0.0.1:4790");
-  assert.deepEqual(c.listen, { kind: "tcp", host: "127.0.0.1", port: 4790 });
+  assert.equal(DEFAULT_LISTEN, "0.0.0.0:4790");
+  assert.deepEqual(c.listen, { kind: "tcp", host: "0.0.0.0", port: 4790 });
   assert.equal(c.tokensPath, "/srv/deploy/console-tokens.json");
   assert.equal(c.pauseWindowsPath, "/srv/deploy/pause-windows.json");
   assert.equal(c.logsDir, "/var/log/pd");
@@ -44,6 +44,7 @@ test("explicit values, relative paths resolved against the deployment folder, an
 });
 
 test("startup refusals: a public bind, a hostname bind, a too-long socket path, each a sentence", () => {
+  assert.deepEqual(consoleConfig({ env: {}, dir: DIR }).listen, { kind: "tcp", host: "0.0.0.0", port: 4790 });
   assert.match(consoleConfig({ env: { PI_CONSOLE_LISTEN: "0.0.0.0:4790" }, dir: DIR }).refusal, /PI_CONSOLE_BIND_PUBLIC=1/);
   assert.equal(consoleConfig({ env: { PI_CONSOLE_LISTEN: "0.0.0.0:4790", PI_CONSOLE_BIND_PUBLIC: "1" }, dir: DIR }).bindPublic, true);
   assert.match(consoleConfig({ env: { PI_CONSOLE_LISTEN: "localhost:4790" }, dir: DIR }).refusal, /not an IP literal/);
@@ -57,6 +58,10 @@ test("a container gateway name in PI_CONSOLE_ALLOWED_HOSTS refuses the start; so
   for (const bad of ["http://x.lan", "x.lan:8080", "x lan", "a/b"]) {
     assert.match(consoleConfig({ env: { PI_CONSOLE_ALLOWED_HOSTS: bad }, dir: DIR }).refusal, /not a hostname/, bad);
   }
+});
+
+test("PI_CONSOLE_ALLOWED_HOSTS accepts the explicit wildcard", () => {
+  assert.deepEqual(consoleConfig({ env: { PI_CONSOLE_ALLOWED_HOSTS: "*" }, dir: DIR }).allowedHosts, ["*"]);
 });
 
 test("bounds are refused, never clamped, and switches take only 1 or unset", () => {
@@ -101,7 +106,7 @@ test("consoleEnv takes the console keys from the deployment .env, resolves its r
 });
 
 test("a blank PI_CONSOLE_LISTEN is the default, as doctor reads it", () => {
-  for (const value of ["", "   ", "\t"]) assert.deepEqual(consoleConfig({ env: { PI_CONSOLE_LISTEN: value }, dir: DIR }).listen, { kind: "tcp", host: "127.0.0.1", port: 4790 }, JSON.stringify(value));
+  for (const value of ["", "   ", "\t"]) assert.deepEqual(consoleConfig({ env: { PI_CONSOLE_LISTEN: value }, dir: DIR }).listen, { kind: "tcp", host: "0.0.0.0", port: 4790 }, JSON.stringify(value));
 });
 
 test("the sandbox hosts file is the worker's sandboxHostsPath: the deployment folder's sandbox-hosts.json unless set", () => {

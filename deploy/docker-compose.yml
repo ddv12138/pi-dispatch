@@ -1,7 +1,7 @@
-# pi-dispatch's worker runs on the HOST, not in a container: it drives the `docker` CLI to launch
-# job containers, and the CLI is what translates bind-mount paths cross-platform (Windows/macOS/
-# Linux) -- see DES-WORKER-ON-HOST. That is settled doctrine, and it is why no service here mounts
-# docker.sock: a socket mount is root-equivalent access to the host, and nothing in this stack needs it.
+# The default deployment starts Valkey only; run the worker on the host for cross-platform path
+# translation, or opt into the Linux-only `worker` profile below. The containerized worker mounts the
+# local Docker socket and the deployment tree at the same absolute path the daemon sees. The socket is
+# root-equivalent; only trusted worker code receives it, never a job container.
 #
 # The RECEIVER may run either way. It is the one internet-facing process and needs no Docker access at
 # all, so a container suits it -- but the host mode (`pi-dispatch-receiver`, deploy/receiver.service)
@@ -9,8 +9,10 @@
 # so worker-on-host deployments that already run the receiver on the host gain no second copy.
 #
 #   docker compose --env-file .env -f deploy/docker-compose.yml up -d                     # start Valkey (default)
-#   docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d  # Valkey + receiver container
-#   pi-dispatch worker                                                                    # drain the queue (host)
+#   docker compose --env-file .env -f deploy/docker-compose.yml --profile worker up -d   # Valkey + Linux container worker
+#   docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d # Valkey + receiver container
+#   docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d  # Valkey + web console container
+#   docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --profile receiver up -d
 #
 # `--env-file .env` (run from the deployment folder) is how compose reads VALKEY_PASSWORD for the Valkey below (issue
 # #468). Without it compose looks for a .env beside THIS file, finds none, and starts Valkey with no password, which
@@ -60,6 +62,91 @@ services:
       timeout: 3s
       retries: 5
 
+  # Linux Docker Engine only. The worker runs as a non-root uid, but membership in the host socket's
+  # group still grants host-root-equivalent Docker authority. Every host path handed to sibling job
+  # containers is under the deployment tree mounted at the exact same absolute path here and on the
+  # daemon host. Local-folder triggers must also live under this tree (or be added as same-path mounts).
+  worker:
+    profiles: ["worker"]
+    build:
+      context: ..
+      dockerfile: deploy/worker.Dockerfile
+    user: "10001:10001"
+    group_add:
+      - "${DOCKER_GID:-0}"
+    env_file: ../.env
+    environment:
+      HOME: /root/pi-dispatch/runtime/home
+      TMPDIR: /root/pi-dispatch/runtime/tmp
+      DOCKER_HOST: unix:///var/run/docker.sock
+      DOCKER_CONTEXT: default
+      VALKEY_URL: redis://valkey:6379
+      PI_JOB_IMAGE: ghcr.io/edgehero/pi-job:4.3.1
+      PI_JOBS_DIR: /root/pi-dispatch/runtime/jobs
+      PI_LOGS_DIR: /root/pi-dispatch/runtime/logs
+      PI_SANDBOX_DIR: /root/pi-dispatch/runtime/sandboxes
+      PI_SETTINGS_FILE: /root/pi-dispatch/runtime/settings.json
+      PI_TRIGGERS_FILE: /root/pi-dispatch/runtime/triggers.json
+      PI_PROJECTS_FILE: /root/pi-dispatch/runtime/projects.json
+      PI_SCOPED_LIMITS_FILE: /root/pi-dispatch/runtime/scoped-limits.json
+      PI_PAUSE_WINDOWS_FILE: /root/pi-dispatch/runtime/pause-windows.json
+    volumes:
+      - ../:/root/pi-dispatch
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${DOCKER_CLI_BIN:-/usr/bin/docker}:/usr/local/bin/docker:ro
+    depends_on:
+      valkey:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 35s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+
+  # Optional browser console. It shares the deployment files and Valkey but receives no Docker socket.
+  # Its default listener binds 0.0.0.0:4790 inside this container, published on all host interfaces.
+  # Create an operator token in runtime/console-tokens.json before starting this profile.
+  console:
+    profiles: ["console"]
+    image: deploy-worker
+    user: "10001:10001"
+    env_file: ../.env
+    working_dir: /root/pi-dispatch
+    command: ["node", "/opt/pi-dispatch/admin/src/console/cli.mjs", "serve", "--deployment", "/root/pi-dispatch"]
+    environment:
+      HOME: /root/pi-dispatch/runtime/home
+      TMPDIR: /root/pi-dispatch/runtime/tmp
+      VALKEY_URL: redis://valkey:6379
+      PI_JOBS_DIR: /root/pi-dispatch/runtime/jobs
+      PI_LOGS_DIR: /root/pi-dispatch/runtime/logs
+      PI_SANDBOX_DIR: /root/pi-dispatch/runtime/sandboxes
+      PI_SETTINGS_FILE: /root/pi-dispatch/runtime/settings.json
+      PI_TRIGGERS_FILE: /root/pi-dispatch/runtime/triggers.json
+      PI_PROJECTS_FILE: /root/pi-dispatch/runtime/projects.json
+      PI_SCOPED_LIMITS_FILE: /root/pi-dispatch/runtime/scoped-limits.json
+      PI_PAUSE_WINDOWS_FILE: /root/pi-dispatch/runtime/pause-windows.json
+      PI_CONSOLE_TOKENS_FILE: /root/pi-dispatch/runtime/console-tokens.json
+    volumes:
+      - ../:/root/pi-dispatch
+    ports:
+      - "4790:4790"
+    depends_on:
+      valkey:
+        condition: service_healthy
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 15s
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    cap_drop: ["ALL"]
+    security_opt:
+      - no-new-privileges:true
+
   # The containerized receiver (issue #82): the always-on webhook edge, prebuilt for amd64+arm64.
   # Build locally instead with:  docker build -f receiver/Dockerfile -t pi-dispatch-receiver .
   #
@@ -78,8 +165,10 @@ services:
     environment:
       VALKEY_URL: redis://valkey:6379
       PI_TRIGGERS_FILE: /config/triggers.json
-    # The repo-root triggers.json (`pi-dispatch init` scaffolds it -- run that first: mounting a path
-    # that does not exist makes Docker create it as a DIRECTORY and the boot fails confusingly).
+    # The triggers file (`pi-dispatch init` scaffolds it -- run that first: mounting a path that does
+    # not exist makes Docker create it as a DIRECTORY and the boot fails confusingly). Host-worker
+    # deployments default to the repo root. Container-worker deployments set PI_TRIGGERS_FILE to the
+    # absolute runtime path so receiver and worker share the same file.
     # Read-only: the receiver live-reloads this file on change; it never writes it. One consequence of
     # a single-FILE bind mount (issue #231): every write to this file is an atomic tmp+rename that
     # SWAPS THE INODE, and the mount stays pinned to the old one -- so the worker's one-shot disarm is
@@ -87,7 +176,7 @@ services:
     # keeps a spent one-shot from running again in the meantime. A restart picks up the current file.
     volumes:
       # `z` for the SELinux reason at the top of this file: unlabelled, the receiver cannot read it on an enforcing host.
-      - ../triggers.json:/config/triggers.json:ro,z
+      - ${PI_TRIGGERS_FILE:-../triggers.json}:/config/triggers.json:ro,z
     # Loopback only, like Valkey's port above: the operator's reverse proxy or tunnel (TLS, public
     # hostname) is what faces the internet -- never this port raw. Assumes the in-container default
     # RECEIVER_PORT=3000; if your .env overrides it, adjust the right-hand side to match.

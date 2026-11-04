@@ -1058,7 +1058,7 @@ and nothing about the box itself (`INT-CONTAINER-RUNTIME-CONTRACT`).
   (`admin/test/write-plans.test.mjs`); given the panel's `r` while the shell's and the deployment's Valkeys disagree,
   the resume is refused and said in the footer (`admin/test/panel-audit-wiring.test.mjs`, "the panel's r on a
   two-Valkey disagreement", through index.ts's own wiring). Given `/dispatch insights 7d` with no `PI_CONSOLE_LISTEN`,
-  then it prints `http://127.0.0.1:4790/insights?range=7d` and says to start the console with `pi-dispatch-console
+  then it prints `http://<this host>:4790/insights?range=7d` and says to start the console with `pi-dispatch-console
   serve` if it is not running; given a unix socket listen, then it prints the ssh tunnel hint with the path as one
   shell word; given an any-address listen (`0.0.0.0`, `[::]`) under PI_CONSOLE_BIND_PUBLIC=1, then it prints
   `<this host>` for the address; given port 0, then it prints no URL and says only the running console knows the
@@ -1161,7 +1161,9 @@ writes retain their existing interactive confirmation. This adds no unattended p
   a ticket nor an audit row. This explicit read exception grants no write capability or delivery authority.
 
 - **Statement**: The operator console (`pi-dispatch-console serve`, `DES-OPERATOR-CONSOLE`) shall be a separate
-  process that listens only on loopback or on a 0600 unix socket unless the operator opts into a public bind; shall
+  process that defaults to `0.0.0.0:4790` and warns that its plain HTTP traffic crosses every IPv4 interface; an
+  explicitly configured non-loopback bind requires `PI_CONSOLE_BIND_PUBLIC=1`; loopback and 0600 unix socket binds
+  remain available; shall
   answer every request but `/healthz`, `/favicon.ico` (an empty 204, issue #737), the console's script and stylesheet
   (`/static/console.js`, `/static/console.css`), sign-in and sign-out only within a session obtained from a named token
   or a one-time login code; shall accept a write only when it is same-origin, JSON, by the operator role or an explicitly permitted agent transition, on a console
@@ -1208,7 +1210,8 @@ writes retain their existing interactive confirmation. This adds no unattended p
   `REQ-COST-ANALYTICS` (the what-if), and since #647 `REQ-TERMINAL-CHAT`.
 - **Acceptance**:
   - (a) **Where it listens, and what it refuses to start on.** Given no `PI_CONSOLE_LISTEN`, the console listens on
-    `127.0.0.1:4790`; given a non-loopback IP literal without `PI_CONSOLE_BIND_PUBLIC=1`, a hostname, or a unix
+    `0.0.0.0:4790` on every IPv4 interface and doctor warns that HTTP traffic is unencrypted; a custom non-loopback IP
+    literal still requires `PI_CONSOLE_BIND_PUBLIC=1`. A hostname, or a unix
     socket path longer than the platform allows, `serve` refuses with a sentence naming the value and binds
     nothing; given `PI_CONSOLE_BIND_PUBLIC=1`, doctor warns. Given a tokens file that is group or world accessible,
     a symlink, not a regular file, owned by another account, or holding no operator token, `serve` refuses to start
@@ -1227,7 +1230,9 @@ writes retain their existing interactive confirmation. This adds no unattended p
     `[::1]` or a name in `PI_CONSOLE_ALLOWED_HOSTS` (`evil.test`, `127.0.0.1.nip.io`, `host.docker.internal`,
     `host.containers.internal`, `gateway.docker.internal`), it is answered 421 and its handler never runs; given
     `localhost:8080` (a tunnel on another port), it is accepted; given `PI_CONSOLE_ALLOWED_HOSTS` naming a
-    container gateway name, the console refuses to start. AMENDED 2026-10-24 (#737 PR 2): three routes marked
+    container gateway name without the wildcard, the console refuses to start. Given `PI_CONSOLE_ALLOWED_HOSTS=*`,
+    any syntactically valid Host is accepted, including gateway names; missing or malformed Host values still refuse,
+    and doctor warns that this opts out of the DNS-rebinding defense. AMENDED 2026-10-24 (#737 PR 2): three routes marked
     `anyHost` answer a GET or HEAD on any Host, before the Host check: `/static/console.js`, `/static/console.css` and
     `/favicon.ico`, public bytes that need no session and carry no data, and exactly what the 421 page itself loads,
     so a refused name gets a styled page (its tunnel command's Copy button needs a page the browser treats as secure:
@@ -7381,6 +7386,8 @@ without suggesting an OpenAI compatibility-field fix. `DES-DOLLAR-RESERVE-AND-SE
 
 ## REQ-DEPLOYMENT-BOOTSTRAP
 
+- **Containerized worker mode (2026-11-04)**: The deployment supports running the worker in the Compose `worker` profile on a Linux host with a local Docker Engine. The worker image is built from the current checkout and runs non-root. Compose grants it the host Docker socket and the daemon CLI, which is host-root-equivalent authority and must never reach a job container. The deployment tree and every path the worker passes to Docker are mounted at the same absolute path inside the worker and on the daemon host. Extra local-folder roots require explicit same-path mounts. Host mode remains the portable default for Docker Desktop, remote contexts and Windows.
+
 - **Implemented (#774)**: the `up --console` extension in `DES-BROWSER-FIRST-RUN-SETUP` adds
   early admin/durable-entry preflight, host-only operator bootstrap, the explicitly granted console user service
   and a one-time `/setup` link. Existing create-only scaffolds, per-action consent, empty/unset treatment,
@@ -8385,6 +8392,9 @@ instead of drifting.
 | Date | Change |
 |---|---|
 | 2026-11-04 | `REQ-DEDUP-BY-DELIVERY-GUID` AMENDED: GitLab requests without native delivery headers use the event-header plus exact raw-body SHA-256 as a `body-sha256-` fallback after token verification; byte-identical deliveries deduplicate within normal retention, while changed retries and identical independent events carry the stated best-effort limits. Native IDs remain preferred and signature mode still requires native headers. GitHub delivery IDs, BullMQ retention, semantic-window behavior and steer handling UNCHANGED, checked. **Code evidence**: `receiver/src/verify-gitlab.mjs`; `worker/src/queue.mjs` -> `forgeDeliveryJobId`, `forgeJobOf`. |
+| 2026-11-04 | `REQ-DEPLOYMENT-BOOTSTRAP` AMENDED: the deployment also supports the opt-in Linux Compose worker with a non-root uid, the local Docker socket, and exact host/worker paths for daemon bind mounts. The socket's host-root-equivalent authority and the host-mode portability limits are explicit. The one-shot job isolation and budget gates are unchanged. |
+| 2026-11-04 | `REQ-CONSOLE-SECURITY` and `/dispatch insights` AMENDED: the console server defaults to `0.0.0.0:4790`, prints a host placeholder for wildcard binds, and warns operators that the default uses plain HTTP on every IPv4 interface. Custom public binds still require `PI_CONSOLE_BIND_PUBLIC=1`; exact Host allowlisting and all authentication, session, CSRF and audit requirements remain in force. `pi-dispatch chat`'s local client dial default and the loopback/SSH option: UNCHANGED, checked. **Code evidence**: `admin/src/console/config.mjs`, `admin/src/console/listen.mjs`, `admin/src/console/link.mjs`, `admin/src/console/cli.mjs`, `worker/src/doctor.mjs`. |
+| 2026-11-04 | `REQ-CONSOLE-SECURITY` AMENDED: `PI_CONSOLE_ALLOWED_HOSTS=*` accepts any syntactically valid Host, including container gateway names; missing or malformed Host values remain refused. Doctor warns because the wildcard disables the DNS-rebinding name defense. Authentication, exact Origin checks, operator roles, single-use write tickets and audit requirements remain enforced. **Code evidence**: `admin/src/console/guards.mjs`, `admin/src/console/config.mjs`, `worker/src/doctor.mjs`. |
 | 2026-11-03 (#812) | `REQ-MODEL-POLICY` UNCHANGED, checked: failover still switches only on proven replay eligibility, and missing evidence still never authorizes a switch; the attempt key keeps no expiry while the queue may retry the job, and a console retry takes a finished job's expiry off again, so a retry that waits keeps its evidence; only a finished or removed job's key gets an end, and a retry that finds it gone (a failed job BullMQ removed late, or a `PERSIST` that failed) is refused, free, never switched. **Code evidence**: worker/src/model-attempts.mjs -> finishModelAttempt, dropModelAttempt, keepModelAttempt; admin/src/job-actions.mjs -> retryKeepingAttempt; worker/src/model-failover.mjs -> selectFailoverJob. |
 | 2026-11-03 (#761, upgrade path) | `REQ-CONSOLE-SECURITY` AMENDED, the overview's scheduler clause: a scheduler's id or job name is read up to `SCHEDULER_NAME_MAX`, which is now `SCHEDULER_ID_MAX` (200), the bound every reader of a scheduler key in Valkey shares and at least the loader's `CRON_ID_MAX` (176), where it said the bound IS `CRON_ID_MAX`; the rule (charset, null and never cut, the entry kept, named by its key alone) is unchanged. `REQ-DURABLE-RUN-HISTORY` UNCHANGED, checked: the record's new `dollars.reservedIn` is dates and a digest, so the record stays PII-free, and nothing about its durability moved. `REQ-SPEND-CAPS-MULTI-WINDOW` UNCHANGED, checked: the windows, their caps and their enforcement are as before; doctor's `dollars.window-reset` only reports a counter below this host's records (`DES-DOLLAR-RESERVE-AND-SETTLE`). **Code evidence**: admin/src/read-model.mjs -> SCHEDULER_NAME_MAX, mapSchedulers; worker/src/bullmq-internals.mjs -> SCHEDULER_ID_MAX, SCHEDULER_ID_RE; admin/test/read-model.test.mjs. |
 | 2026-11-03 (#752, #692, #737) | The console redesign closes. **`REQ-OPERATOR-CONSOLE-SCREENS` AMENDED**: the reverse check covers every golden, computed; ledgers read their cards; a viewer on Fleet no longer reads the queue's address or a held job's check name, the rule the card and the other screens already kept. The run page draws its card while a job runs, Progress and the transcript first, by CSS order, so its panels and the stream are unchanged. Watch stays a tab of Triggers: #752 asked for a pill before #773 recorded the opposite, and the later decision stands. Every remaining difference between a card and its page is recorded with its reason in that card's ledger. `REQ-CONSOLE-SECURITY`: a viewer reads less, nothing else moves; UNCHANGED, checked: the CSP, the write funnel and the roles that may act. No release is implied: the install lines stay at the workspace version. |

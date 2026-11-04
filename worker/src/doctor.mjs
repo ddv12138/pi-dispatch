@@ -5367,11 +5367,12 @@ CONSOLE_LOOPBACK.addAddress("::1", "ipv6");
 /**
  * PI_CONSOLE_LISTEN as the console parses it: `{ shown, loopback }` or `{ refusal }`. IP literals only (`ip:port`,
  * `[ipv6]:port`) or `unix:/abs/path` within the platform's socket path size; loopback is 127.0.0.0/8 and ::1. Unset or
- * empty is the default, 127.0.0.1:4790. The non-loopback refusal is the caller's (it depends on PI_CONSOLE_BIND_PUBLIC).
+ * empty is the default, 0.0.0.0:4790. The non-loopback refusal is the caller's (it depends on
+ * PI_CONSOLE_BIND_PUBLIC, except that public default).
  */
 export function consoleListenOf(value, platform = process.platform) {
 	const text = typeof value === "string" ? value.trim() : "";
-	if (text === "") return { shown: "127.0.0.1:4790 (the default)", loopback: true };
+	if (text === "") return { shown: "0.0.0.0:4790 (the default)", loopback: false, defaulted: true };
 	if (text.startsWith("unix:")) {
 		const path = text.slice("unix:".length);
 		if (!isAbsolute(path)) return { refusal: "a unix socket path must be absolute: write unix:/abs/path" };
@@ -5384,7 +5385,7 @@ export function consoleListenOf(value, platform = process.platform) {
 	const host = m[1] ?? m[2];
 	if (m[1] !== undefined ? !isIPv6(host) : !isIPv4(host)) return { refusal: `${host} is not an IP literal; a hostname can resolve anywhere, so write 127.0.0.1 or [::1]` };
 	const loopback = CONSOLE_LOOPBACK.check(host, m[1] !== undefined ? "ipv6" : "ipv4");
-	return { shown: text, loopback };
+	return { shown: text, loopback, defaulted: false };
 }
 
 /**
@@ -5470,13 +5471,18 @@ export function consoleChecks(env, { cwd = process.cwd(), fs = nodeFs, uid = pro
 	const bindPublic = env.PI_CONSOLE_BIND_PUBLIC === "1";
 	if (listen.refusal) {
 		checks.push({ ok: false, label: `console: PI_CONSOLE_LISTEN ${quotedShown(env.PI_CONSOLE_LISTEN)} cannot be used, so \`pi-dispatch-console serve\` refuses to start: ${listen.refusal}`, fix: "write 127.0.0.1:4790, [::1]:4790 or unix:/abs/path, or unset PI_CONSOLE_LISTEN for the default" });
-	} else if (!listen.loopback && !bindPublic) {
+	} else if (!listen.loopback && !bindPublic && !listen.defaulted) {
 		checks.push({ ok: false, label: `console: PI_CONSOLE_LISTEN ${quotedShown(env.PI_CONSOLE_LISTEN)} is not a loopback address, so \`pi-dispatch-console serve\` refuses to start`, fix: "listen on 127.0.0.1, [::1] or a unix: socket and reach it with ssh -L; or, to accept plain HTTP on a network, set PI_CONSOLE_BIND_PUBLIC=1" });
 	} else {
 		checks.push({ ok: true, label: `console: listens on ${escapeControls(listen.shown)}` });
 	}
 	if (bindPublic) {
 		checks.push({ ok: false, warn: true, label: "console: PI_CONSOLE_BIND_PUBLIC=1 lets the console listen on a non-loopback address, where tokens and session cookies cross the network in plain HTTP", fix: "keep it only behind a TLS proxy on a network you trust; otherwise unset PI_CONSOLE_BIND_PUBLIC, listen on 127.0.0.1, [::1] or a unix: socket, and reach it with ssh -L" });
+	} else if (listen.defaulted) {
+		checks.push({ ok: false, warn: true, label: "console: the default 0.0.0.0:4790 listens on every IPv4 interface, where tokens and session cookies cross the network in plain HTTP", fix: "use a trusted TLS proxy on a network you trust, or set PI_CONSOLE_LISTEN=127.0.0.1:4790 and reach it with ssh -L" });
+	}
+	if (String(env.PI_CONSOLE_ALLOWED_HOSTS ?? "").split(",").some((name) => name.trim() === "*")) {
+		checks.push({ ok: false, warn: true, label: "console: PI_CONSOLE_ALLOWED_HOSTS=* accepts every valid Host name, including DNS-rebinding names and container gateway names", fix: "replace * with the exact hostnames and IP addresses operators use" });
 	}
 	const logsDir = logsDirPath(env, home);
 	const audit = verifyConsoleAudit({ logsDir, fs });
@@ -5529,7 +5535,7 @@ async function installedConsoleUnit({ platform, home, cwd, fileExists, readUnit 
 export async function consoleServiceChecks(env, seams = {}) {
 	const { platform = process.platform, cwd = process.cwd() } = seams;
 	const listen = consoleListenOf(env.PI_CONSOLE_LISTEN, platform);
-	if (listen.refusal || (!listen.loopback && env.PI_CONSOLE_BIND_PUBLIC !== "1")) return [];
+	if (listen.refusal || (!listen.loopback && env.PI_CONSOLE_BIND_PUBLIC !== "1" && !listen.defaulted)) return [];
 	const unit = await installedConsoleUnit({ ...seams, platform, cwd, fileExists: seams.fileExists ?? existsSync });
 	const probe = seams.consoleProbe ?? (async (e) => (await import("./console-probe.mjs")).probeConsole(e));
 	let answer;

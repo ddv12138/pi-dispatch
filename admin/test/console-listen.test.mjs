@@ -51,6 +51,7 @@ test("isLoopbackAddress and listenUrl", () => {
   assert.ok(!isLoopbackAddress("128.0.0.1") && !isLoopbackAddress("::") && !isLoopbackAddress("localhost"));
   assert.equal(listenUrl({ kind: "tcp", host: "::1", port: 80 }), "http://[::1]:80/");
   assert.equal(listenUrl({ kind: "tcp", host: "127.0.0.1", port: 0 }, 5555), "http://127.0.0.1:5555/");
+  assert.equal(listenUrl({ kind: "tcp", host: "0.0.0.0", port: 4790 }), "http://<this host>:4790/");
   assert.equal(listenUrl({ kind: "unix", path: "/x" }), null);
 });
 

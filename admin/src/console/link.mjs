@@ -41,7 +41,8 @@ export function shellWord(text) {
  */
 export function consolePageUrl(env, path, { platform = process.platform } = {}) {
   const declared = String(env?.PI_CONSOLE_LISTEN ?? "").trim();
-  const listen = parseListen(declared || DEFAULT_LISTEN, { bindPublic: env?.PI_CONSOLE_BIND_PUBLIC === "1", platform });
+  const defaulted = declared === "";
+  const listen = parseListen(declared || DEFAULT_LISTEN, { bindPublic: env?.PI_CONSOLE_BIND_PUBLIC === "1", defaultPublic: defaulted, platform });
   if (listen.refusal) return { refusal: listen.refusal };
   if (listen.kind === "unix") {
     // Control bytes are refused rather than quoted: inside quotes they still reach the terminal the line is shown in.

@@ -207,8 +207,9 @@ updates by itself ([updates](docs/console.md#updates)).
 
 ![One trigger's page: what starts it, the flow it runs, its limits and what it has cost so far](docs/images/console/console-trigger.png?v=2026-11-03)
 
-**Your phone:** every page fits, for answering a question from wherever you are. The console listens only on its own machine
-unless you set it up otherwise, so reaching it from a phone takes a private tunnel
+**Your phone:** every page fits, for answering a question from wherever you are. The console listens on all IPv4 interfaces
+at port `4790` by default; add the host name or IP to `PI_CONSOLE_ALLOWED_HOSTS` before opening it from another device.
+The connection is plain HTTP, so use a trusted TLS proxy or an SSH tunnel on an untrusted network
 ([from another machine](docs/console.md#from-another-machine)).
 
 <img src="docs/images/console/console-overview-phone.png?v=2026-11-03" alt="The overview page on a phone, one column, with the questions that need you at the top" width="320">
@@ -332,8 +333,7 @@ beside what already runs on that machine ([`docs/sizing.md`](docs/sizing.md)).
 
 ## Set up a host
 
-A machine that runs jobs for good, rather than while you watch. As an ordinary account, not root, with Docker or rootless Podman and Node
-22.19 or newer installed, install into a folder that stays ([step 2 of Install](#install-in-four-steps)), then:
+A machine that runs jobs for good, rather than while you watch. For the host worker, use an ordinary account, not root, with Docker or rootless Podman and Node 22.19 or newer. On a Linux server, you can instead run the worker in Compose; that mode puts the host Docker socket in the worker container, so it has authority equivalent to root. Read [Linux Compose worker](docs/worker-container.md) before choosing it. Install into a folder that stays ([step 2 of Install](#install-in-four-steps)), then:
 
 ```bash
 ./node_modules/.bin/pi-dispatch up --console     # asks before each action: job image, Valkey, egress proxy, config, the console's service
@@ -342,8 +342,10 @@ A machine that runs jobs for good, rather than while you watch. As an ordinary a
 sudo loginctl enable-linger "$USER"              # on Linux: user services start with no one logged in
 ```
 
-**Reach the console from your own machine.** It listens on the host's loopback only. Forward a port, and make a sign in link for that port on
-the host ([more](docs/console.md#from-another-machine)):
+**Reach the console from your own machine.** By default it listens on all IPv4 interfaces at port `4790`; open
+`http://<host-address>:4790/` and sign in with your token. The connection is plain HTTP. For a private SSH tunnel,
+set `PI_CONSOLE_LISTEN=127.0.0.1:4790`, forward the port, and make a sign-in link for that port on the host
+([more](docs/console.md#from-another-machine)):
 
 ```bash
 ssh -L 4790:127.0.0.1:4790 yourhost              # on your own machine; then, on the host:
@@ -665,7 +667,8 @@ These forges have one auth source each, a token you create, so setting theirs to
 [secrets](docs/secrets.md).
 
 **Isolation:** [backends](docs/backends.md), [Podman](docs/podman.md), [egress](docs/egress.md),
-[job image](docs/job-image.md), [sandbox](docs/sandbox.md), [sandbox gateway](docs/sandbox-gateway.md).
+[job image](docs/job-image.md), [sandbox](docs/sandbox.md), [sandbox gateway](docs/sandbox-gateway.md),
+[Linux Compose worker](docs/worker-container.md).
 
 **Forges:** [GitHub](docs/github.md), [GitLab](docs/gitlab.md), [Forgejo](docs/forgejo.md),
 [Azure DevOps](docs/azure-devops.md).

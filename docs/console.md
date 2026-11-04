@@ -57,7 +57,10 @@ can read, or one another account owns, and says which. `token add` creates it th
 pi-dispatch-console serve
 ```
 
-`serve` runs in the foreground and listens on `127.0.0.1:4790`. Open `http://127.0.0.1:4790/` and paste your token.
+`serve` runs in the foreground and listens on `0.0.0.0:4790` by default. Open `http://<this host>:4790/` using the
+server's reachable IP or DNS name, then paste your token. This default is plain HTTP across the network. Use a trusted
+TLS proxy, or set `PI_CONSOLE_LISTEN=127.0.0.1:4790` and reach it through an SSH tunnel, when the network is not
+trusted.
 Only one `serve` runs per deployment: a second one refuses, naming the first one's lock, because two of them would
 fork the audit log's chain.
 
@@ -65,8 +68,8 @@ As it starts, it prints where it listens, the tunnel for another machine, and ho
 token, only the commands that make one or a one-time link:
 
 ```text
-pi-dispatch console on http://127.0.0.1:4790/
-from another machine: ssh -L 4790:127.0.0.1:4790 <this host>, then open http://localhost:4790/
+pi-dispatch console listening on 0.0.0.0:4790
+from another machine: open http://<this host>:4790/ using this host's address; plain HTTP carries tokens and session cookies
 sign in: paste a token (pi-dispatch-console token add --name <you> --role operator makes one), or open a one-time link: pi-dispatch-console link --name <you>
 ```
 
@@ -78,10 +81,11 @@ To listen somewhere else, set `PI_CONSOLE_LISTEN`:
 
 | Value | What it does |
 |---|---|
-| `127.0.0.1:4790` | The default. Loopback only. |
+| `0.0.0.0:4790` | The default. All IPv4 interfaces on port 4790. |
+| `127.0.0.1:4790` | Loopback only. Use an SSH tunnel to reach it from another machine. |
 | `[::1]:4790` | IPv6 loopback. |
 | `unix:/home/pi/.pi-dispatch/console/console.sock` | A unix socket at mode 0600. The folder must exist, belong to you and be closed to everyone else (`chmod 700`). The path must fit the platform's limit: at most 103 bytes on macOS, 107 on Linux. |
-| any other IP literal | Refused, unless `PI_CONSOLE_BIND_PUBLIC=1`. Doctor then warns. |
+| any other non-loopback IP literal | Refused, unless `PI_CONSOLE_BIND_PUBLIC=1`. Doctor warns when enabled. |
 
 Hostnames are refused: a name can resolve somewhere you did not mean. The console never terminates TLS. That is the
 tunnel's job, below.
@@ -132,7 +136,12 @@ command once an operator token exists.
 
 ## From another machine
 
-Forward a local port over SSH and open it in your browser. To a console on the default TCP port:
+By default the console binds every IPv4 interface on port 4790. Add the exact IP address or DNS name the browser uses
+to `PI_CONSOLE_ALLOWED_HOSTS` in the deployment `.env`, then open `http://<host-address>:4790/`. To accept every valid
+Host name instead, set `PI_CONSOLE_ALLOWED_HOSTS=*`. This also accepts DNS-rebinding names and container gateway names,
+so doctor warns about it; prefer listing the exact names you need. The connection is plain HTTP. Use a trusted TLS proxy
+on a network you trust, or restrict the console to loopback and use an SSH tunnel. For a console restricted to loopback
+on the default TCP port:
 
 ```bash
 ssh -L 4790:127.0.0.1:4790 host
@@ -146,11 +155,13 @@ ssh -L 4790:/home/pi/.pi-dispatch/console/console.sock host
 
 Then open `http://localhost:4790/` on your own machine. The local port can be anything: the console checks the
 hostname your browser sends (`127.0.0.1`, `localhost` or `[::1]`), not the port, so `ssh -L 8080:...` works too.
-Any other hostname is refused with 421, which is what defeats DNS rebinding. Three files answer on any name: the
+Any other hostname is refused with 421, which is what defeats DNS rebinding while the allowlist is restricted. Setting
+`PI_CONSOLE_ALLOWED_HOSTS=*` disables that hostname check for every valid Host, including container gateway names.
+Three files answer on any name regardless of that setting: the
 console's script, its stylesheet and its empty favicon, which hold nothing a session or a rebound name could use, and
 which the 421 page itself loads to draw. If you reach the console through a name of your own, list it in
 `PI_CONSOLE_ALLOWED_HOSTS`. The container gateway names (`host.docker.internal`,
-`host.containers.internal`, `gateway.docker.internal`) can never be listed: the console refuses to start if you try.
+`host.containers.internal`, `gateway.docker.internal`) are refused by default. An explicit `*` accepts them too.
 
 Whoever can use the forwarded port on your machine can reach the console's sign-in page. They still need a token.
 
@@ -2072,11 +2083,11 @@ through the same code, so the two never disagree about what is waiting.
 
 | Setting | Default | What it does |
 |---|---|---|
-| `PI_CONSOLE_LISTEN` | `127.0.0.1:4790` | Where `serve` listens: `127.0.0.1:<port>`, `[::1]:<port>` or `unix:/abs/path`. |
+| `PI_CONSOLE_LISTEN` | `0.0.0.0:4790` | Where `serve` listens: `0.0.0.0:<port>`, `127.0.0.1:<port>`, `[::1]:<port>` or `unix:/abs/path`. |
 | `PI_CONSOLE_TOKENS_FILE` | `console-tokens.json` | The tokens file, relative to the deployment folder. |
-| `PI_CONSOLE_ALLOWED_HOSTS` | none | Extra hostnames the console answers to, comma separated. |
+| `PI_CONSOLE_ALLOWED_HOSTS` | none | Extra hostnames or IP addresses the console answers to, comma separated; `*` accepts every syntactically valid Host and disables the DNS-rebinding name check. |
 | `PI_CONSOLE_READ_ONLY` | off | `1` refuses every write. |
-| `PI_CONSOLE_BIND_PUBLIC` | off | `1` allows a non-loopback IP literal in `PI_CONSOLE_LISTEN`. |
+| `PI_CONSOLE_BIND_PUBLIC` | off | `1` allows a non-loopback IP literal other than the public default in `PI_CONSOLE_LISTEN`. |
 | `PI_CONSOLE_IDLE_MINUTES` | 60 | Idle limit of a session, 5 to 1440. |
 | `PI_CONSOLE_MAX_HOURS` | 12 | Absolute limit of a session, 1 to 168. |
 | `PI_CONSOLE_MAX_STREAMS` | 4 | Live pages one token may hold open across its sign-ins, 1 to 32. The whole console holds at most 32, 8 of them kept for operators. |

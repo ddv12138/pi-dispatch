@@ -1,8 +1,8 @@
 # TEMPLATE — verified structure (systemd-analyze); set the <PLACEHOLDER> values for your host.
 #
-# The worker runs on the HOST, not in a container (DES-WORKER-ON-HOST): it drives the `docker` CLI to
-# launch one job container per job, and the CLI is what translates bind-mount paths cross-platform.
-# Compose runs only Valkey; this unit runs the worker beside it.
+# This unit is the portable host-worker mode (DES-WORKER-ON-HOST): it drives the `docker` CLI to launch
+# one job container per job, and the CLI translates bind-mount paths for Docker Desktop and remote daemons.
+# On Linux with a local Docker Engine, the Compose `worker` profile is the alternative deployment mode.
 #
 # Requires node >=22.19.0 (worker/package.json engines) on PATH for User=pi -- or pin an absolute
 # `ExecStart=/usr/bin/node ...` if PATH is not reliable under systemd. This is a Linux/systemd unit;

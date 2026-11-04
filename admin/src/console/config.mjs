@@ -40,7 +40,7 @@ export const CONSOLE_ENV_KEYS = Object.freeze([
 // here first would turn a quoted blank, which means unset, into the deployment folder itself.
 const PATH_KEYS = new Set(["PI_SANDBOX_GATEWAYS_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_LOGS_DIR", "PI_PAUSE_WINDOWS_FILE"]);
 
-export const DEFAULT_LISTEN = "127.0.0.1:4790";
+export const DEFAULT_LISTEN = "0.0.0.0:4790";
 
 /**
  * The deployment folder: the flag, else the pointer's, else `cwd`. Returns `{dir, source, notice}`; `notice` names an
@@ -103,17 +103,23 @@ export function consoleConfig({ env, dir, platform = process.platform, tokensFil
   if (bindPublic.refusal) return bindPublic;
   const readOnly = flag(env.PI_CONSOLE_READ_ONLY, "PI_CONSOLE_READ_ONLY");
   if (readOnly.refusal) return readOnly;
-  const listen = parseListen(String(env.PI_CONSOLE_LISTEN ?? "").trim() || DEFAULT_LISTEN, { bindPublic: bindPublic.value, platform });
+  const rawListen = String(env.PI_CONSOLE_LISTEN ?? "").trim();
+  const defaultedListen = rawListen === "";
+  const listen = parseListen(rawListen || DEFAULT_LISTEN, { bindPublic: bindPublic.value, defaultPublic: defaultedListen, platform });
   if (listen.refusal) return listen;
 
   const allowedHosts = [];
   for (const entry of String(env.PI_CONSOLE_ALLOWED_HOSTS ?? "").split(",").map((s) => s.trim()).filter((s) => s !== "")) {
+    if (entry === "*") {
+      allowedHosts.push("*");
+      continue;
+    }
     const name = hostnameOf(entry);
     if (name === null || (entry.includes(":") && !entry.startsWith("["))) {
       return { refusal: `PI_CONSOLE_ALLOWED_HOSTS entry ${JSON.stringify(entry.slice(0, 64))} is not a hostname; list bare names, comma separated, without a port or scheme` };
     }
     if (GATEWAY_HOSTS.includes(name)) {
-      return { refusal: `PI_CONSOLE_ALLOWED_HOSTS lists ${name}, a container gateway name; a job container reaches the host by that name, so the console never answers it. Remove it` };
+      return { refusal: `PI_CONSOLE_ALLOWED_HOSTS lists ${name}, a container gateway name; a job container reaches the host by that name, so the console never answers it. Remove it or explicitly allow every Host with *` };
     }
     allowedHosts.push(name);
   }
