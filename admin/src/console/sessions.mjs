@@ -5,7 +5,8 @@
  *
  * A session is created at login with a NEW random id (never one the browser offered, so a planted cookie cannot be
  * promoted to a signed-in one) and remembers the token it was signed in with: its hash, its role and the file's
- * `generation` at that moment. Every request re-judges it against the tokens file as the console has it now, so:
+ * `generation` at that moment. Every request re-judges it against the tokens file as the console has it now, except
+ * a fixed-token operator session, whose exact digest is held in this process's config, so:
  *   - revoking or rotating the token (its hash leaves the file) ends the session on its next request;
  *   - changing the token's role (a hand edit) ends it, rather than letting a viewer's session carry operator rights or
  *     the reverse;
@@ -66,7 +67,7 @@ const DESTROY_REASONS = Object.freeze(["elsewhere", null]);
  * shares the one budget, so signing in eight times does not buy eight times the streams), `tombstoneMax` (tests only:
  * how many ended ids are remembered). `now` and `random` are the seams.
  */
-export function makeSessionStore({ now = () => Date.now(), random = randomBytes, idleMs = 60 * 60000, maxMs = 12 * 3600000, maxStreams = 4, tombstoneMax = TOMBSTONE_MAX } = {}) {
+export function makeSessionStore({ now = () => Date.now(), random = randomBytes, idleMs = 60 * 60000, maxMs = 12 * 3600000, maxStreams = 4, tombstoneMax = TOMBSTONE_MAX, fixedTokenHash = null } = {}) {
   const sessions = new Map();
   // Open stream slots: per session id `{name, count}`, and per token name the sum. A session that ends keeps its entry
   // until its streams close and give their slots back (the hub ends them within a tick), so the token's count is never
@@ -97,6 +98,9 @@ export function makeSessionStore({ now = () => Date.now(), random = randomBytes,
     const timed = timeReason(session, t);
     if (timed !== null) return timed;
     if (file.generation !== session.generation) return "all";
+    // The optional deployment credential is not in the named-token file. Its process-held digest is its own
+    // revocation check: changing it takes effect when the console restarts, which also clears this in-memory store.
+    if (session.name === "fixed-token" && session.role === "operator" && typeof fixedTokenHash === "string" && session.tokenHash === fixedTokenHash) return null;
     const withHash = file.tokens.filter((entry) => entry?.sha256 === session.tokenHash);
     if (withHash.some((entry) => entry?.role === session.role)) return null;
     return withHash.length > 0 ? "role" : "revoked";

@@ -511,7 +511,7 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     const withRandom = (args) => (random ? { ...args, random } : args);
     const codesDir = m.loginCodes.loginCodesDir(config.tokensPath);
     const log = io.log ?? ((line) => io.err(line));
-    const sessions = m.sessions.makeSessionStore(withRandom({ now, idleMs: config.idleMs, maxMs: config.maxMs, maxStreams: config.maxStreams }));
+    const sessions = m.sessions.makeSessionStore(withRandom({ now, idleMs: config.idleMs, maxMs: config.maxMs, maxStreams: config.maxStreams, fixedTokenHash: config.loginTokenHash }));
 
     // The read side (issue #641): one fleet reader for every page, stream and /api/state, held for serve's life.
     const side = readSideOf({ m, env: shellEnv, dir: config.dir, fs, platform: io.platform ?? process.platform, uid });
@@ -535,7 +535,7 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     const gatewayRegistry = () => config.sandboxGatewaysFile ? readSandboxGateways(config.sandboxGatewaysFile, { fs, uid, platform: io.platform ?? process.platform }) : { disabled: true };
     const gatewayEnrollment = gatewayRegistry();
     if (gatewayEnrollment.refusal) io.err(`pi-dispatch-console: ${gatewayEnrollment.refusal}`);
-    if (redis) gateway = makeGatewayBroker({ redis, sessions, readTokens, findToken: m.tokens.findToken, readRegistry: gatewayRegistry, audit, readOnly: () => config.readOnly, now, ...(random ? { random } : {}), readSessions: () => fleet.sandboxSessions(), readRun: (id) => fleet.runById(id) });
+    if (redis) gateway = makeGatewayBroker({ redis, sessions, readTokens, findToken: m.tokens.findToken, fixedLoginTokenHash: config.loginTokenHash, readRegistry: gatewayRegistry, audit, readOnly: () => config.readOnly, now, ...(random ? { random } : {}), readSessions: () => fleet.sandboxSessions(), readRun: (id) => fleet.runById(id) });
     const answerer = makeAnswererService({ paths: side.paths, env: side.env, fs, now });
     const pricing = pricingOf(m.pricing);
     const modelsView = m.modelsView ? (snapshot = null) => m.modelsView.readModelsView({ paths: side.paths, env: side.env, deploymentDir: config.dir, now: now(), snapshot, fleet, fs, redis }) : null;

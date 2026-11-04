@@ -42,6 +42,17 @@ test("create issues a fresh 43-character id per login, and get returns the sessi
   assert.match(real.create({ name: "rob", role: "operator", tokenHash: H("a"), generation: 0 }).id, /^[A-Za-z0-9_-]{43}$/);
 });
 
+test("a configured fixed operator token keeps its session live outside the named-token file", () => {
+  const now = clock();
+  const fixedTokenHash = H("f");
+  const s = store(now, { fixedTokenHash });
+  const { id } = s.create({ name: "fixed-token", role: "operator", tokenHash: fixedTokenHash, generation: 0 });
+  const session = s.get(id, tokensFile([], 0));
+  assert.equal(session?.name, "fixed-token");
+  assert.equal(session?.role, "operator");
+  assert.equal(s.size(), 1);
+});
+
 test("get returns null for an unknown, a malformed or a missing id", () => {
   const s = store();
   s.create({ name: "rob", role: "operator", tokenHash: H("a"), generation: 0 });

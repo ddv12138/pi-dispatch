@@ -10,6 +10,7 @@
  * write, an export in this shell outranking the file. Only the keys below are taken from it.
  */
 import * as nodeFs from "node:fs";
+import { createHash } from "node:crypto";
 import { isAbsolute, resolve as resolvePath } from "node:path";
 import { logsDirPath } from "@edgehero/pi-dispatch/config";
 import { sandboxHostsPath } from "@edgehero/pi-dispatch/sandbox-hosts";
@@ -24,6 +25,7 @@ export const CONSOLE_ENV_KEYS = Object.freeze([
   "PI_SANDBOX_HOSTS_FILE",
   "PI_CONSOLE_LISTEN",
   "PI_CONSOLE_TOKENS_FILE",
+  "PI_CONSOLE_LOGIN_TOKEN",
   "PI_CONSOLE_ALLOWED_HOSTS",
   "PI_CONSOLE_READ_ONLY",
   "PI_CONSOLE_BIND_PUBLIC",
@@ -137,6 +139,9 @@ export function consoleConfig({ env, dir, platform = process.platform, tokensFil
     dir,
     listen,
     tokensPath,
+    // Keep only a digest in the runtime config, never the deployment secret itself.
+    loginTokenHash: typeof env.PI_CONSOLE_LOGIN_TOKEN === "string" && env.PI_CONSOLE_LOGIN_TOKEN !== ""
+      ? createHash("sha256").update(env.PI_CONSOLE_LOGIN_TOKEN, "utf8").digest("hex") : null,
     allowedHosts,
     readOnly: readOnly.value,
     bindPublic: bindPublic.value,

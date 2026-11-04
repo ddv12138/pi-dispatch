@@ -657,6 +657,22 @@ test("sign-in: a valid token sets an HttpOnly SameSite=Strict cookie with a FRES
   assert.equal(row.actor.name, "alice");
 });
 
+test("a fixed operator token remains valid when the session is rechecked against the named-token file", async () => {
+  const token = "fixed-login-token-for-regression";
+  const tokenHash = sha256(token);
+  const c = await start({
+    config: { loginTokenHash: tokenHash },
+    sessionsOf: (now) => makeSessionStore({ now, fixedTokenHash: tokenHash }),
+  });
+  const { res, cookie } = await c.login(token);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.json(), { ok: true, name: "fixed-token", role: "operator" });
+  const who = await c.send({ path: "/api/whoami", headers: { cookie } });
+  assert.equal(who.status, 200, who.text);
+  assert.equal(who.json().name, "fixed-token");
+  assert.equal(who.json().role, "operator");
+});
+
 test("a wrong token is 401, audited as login-failed, and never echoed", async () => {
   const c = await start();
   const wrong = `pdc_${"w".repeat(43)}`;

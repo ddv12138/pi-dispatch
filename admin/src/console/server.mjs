@@ -79,6 +79,7 @@
  * the browser out everywhere. The page's 303 (a navigation, which shows the sign-in page next) and `/logout` clear it.
  */
 import * as nodeFs from "node:fs";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { readRawBody } from "@edgehero/pi-dispatch/http-body";
 import { keptTokens as realKeptTokens } from "@edgehero/pi-dispatch/console-tokens";
@@ -342,13 +343,22 @@ async function postLogin(ctx) {
   const token = typeof ctx.body.token === "string" ? ctx.body.token : "";
   const file = tokensOr503(ctx);
   if (!file) return;
-  const entry = token === "" ? null : ctx.deps.findToken(file, token);
+  const entry = token === "" ? null : ctx.deps.findToken(file, token) ?? fixedLoginEntry(ctx.deps.config?.loginTokenHash, token);
   if (!entry) {
     // The row says that a sign-in failed and nothing about what was presented.
     ctx.record({ actor: ANONYMOUS, action: "login-failed", target: "/login", outcome: "refused", reason: "no token matched" });
     return sendError(ctx.res, 401, "that token is not valid for this console");
   }
   return startSession(ctx, entry, file, "login");
+}
+
+/** The optional deployment token is a second operator credential; compare fixed-size digests and never keep its value. */
+function fixedLoginEntry(configuredHash, presented) {
+  if (typeof configuredHash !== "string" || !/^[0-9a-f]{64}$/.test(configuredHash) || typeof presented !== "string" || presented.length === 0) return null;
+  const expected = Buffer.from(configuredHash, "hex");
+  const actual = createHash("sha256").update(presented, "utf8").digest();
+  if (!timingSafeEqual(expected, actual)) return null;
+  return { name: "fixed-token", role: "operator", sha256: expected.toString("hex") };
 }
 
 async function postLoginCode(ctx) {

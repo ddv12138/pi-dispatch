@@ -51,6 +51,10 @@ The tokens live in `console-tokens.json` in the deployment folder (`PI_CONSOLE_T
 regular file at mode 0600, owned by the account that runs the console: `serve` refuses a symlink, a file anyone else
 can read, or one another account owns, and says which. `token add` creates it that way.
 
+You may also set `PI_CONSOLE_LOGIN_TOKEN` in the deployment `.env` to accept one fixed token as an additional
+operator credential. Keep it in a secret manager or a private `.env`; anyone who obtains it can make every console
+change. Restart the console after rotating it. The token value is never written to the tokens file or audit log.
+
 ## Start it
 
 ```bash
@@ -58,7 +62,8 @@ pi-dispatch-console serve
 ```
 
 `serve` runs in the foreground and listens on `0.0.0.0:4790` by default. Open `http://<this host>:4790/` using the
-server's reachable IP or DNS name, then paste your token. This default is plain HTTP across the network. Use a trusted
+server's reachable IP or DNS name, then paste a token created with `token add`, or the configured
+`PI_CONSOLE_LOGIN_TOKEN`. This default is plain HTTP across the network. Use a trusted
 TLS proxy, or set `PI_CONSOLE_LISTEN=127.0.0.1:4790` and reach it through an SSH tunnel, when the network is not
 trusted.
 Only one `serve` runs per deployment: a second one refuses, naming the first one's lock, because two of them would

@@ -31,7 +31,7 @@ export const GATEWAY_REFUSALS = Object.freeze({
   "self-watch": "This sign-in already drives this sandbox. Use its existing workspace. Watching requires a separate operator sign-in.",
 });
 
-export function makeGatewayBroker({ redis, sessions, readTokens, findToken, readRegistry, audit, readOnly = () => false, now = Date.now, random = randomBytes, store = null, readSessions = () => readSandboxSessions(redis), readRun = async () => null, schedule = true } = {}) {
+export function makeGatewayBroker({ redis, sessions, readTokens, findToken, fixedLoginTokenHash = null, readRegistry, audit, readOnly = () => false, now = Date.now, random = randomBytes, store = null, readSessions = () => readSandboxSessions(redis), readRun = async () => null, schedule = true } = {}) {
   const protocol = store ?? makeGatewayStore({ redis });
   const held = new Map();
   const pending = new Map();
@@ -167,8 +167,9 @@ export function makeGatewayBroker({ redis, sessions, readTokens, findToken, read
       const file = readTokens()?.file;
       const token = typeof body.token === "string" && body.token.length <= 512 ? body.token : "";
       const matched = file && token ? findToken(file, token) : null;
+      const fixedMatch = !matched && session?.name === "fixed-token" && session?.role === "operator" && typeof fixedLoginTokenHash === "string" && session.tokenHash === fixedLoginTokenHash && same(digest(token), fixedLoginTokenHash);
       // Authenticate the original identity, never promote a different operator's token or replace the session.
-      if (!matched || matched.role !== "operator" || matched.sha256 !== session.tokenHash || matched.name !== session.name || !live(session)) {
+      if ((!fixedMatch && (!matched || matched.role !== "operator" || matched.sha256 !== session.tokenHash || matched.name !== session.name)) || !live(session)) {
         try { record(actor, "sandbox-browser-step-up", `${entry.target.host}:${entry.target.id}`, "refused", "token-mismatch"); } catch { return refusal("audit"); }
         return refusal("token");
       }
