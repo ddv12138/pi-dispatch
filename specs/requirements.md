@@ -254,9 +254,12 @@ and nothing about the box itself (`INT-CONTAINER-RUNTIME-CONTRACT`).
 
 ## REQ-DEDUP-BY-DELIVERY-GUID
 
-- **Statement**: `jobId` shall be the forge's own per-delivery id — GitHub's `X-GitHub-Delivery` GUID
-  (`gh-` prefixed), GitLab's `webhook-id` / `Idempotency-Key` (`gl-` prefixed) — giving exactly-once
-  semantics per delivery **for as long as the job key is retained**. The prefixes keep the two id spaces
+- **Statement**: `jobId` shall be the forge's own per-delivery id when supplied — GitHub's
+  `X-GitHub-Delivery` GUID (`gh-` prefixed), GitLab's `webhook-id` / `Idempotency-Key` (`gl-` prefixed).
+  GitLab token-mode requests without a native id use `body-sha256-<hex>` over event header + NUL + exact
+  raw request bytes. Native ids provide exactly-once queue admission per delivery **for as long as the job
+  key is retained**; the GitLab fallback coalesces only byte-identical requests within that retention
+  window. The prefixes keep the two id spaces
   disjoint, so a value that collided across forges could never suppress the other's job. `removeOnComplete` / `removeOnFail` retention
   shall therefore be set to meet or exceed GitHub's redelivery window. That retention is ONE value,
   `FORGE_JOB_RETENTION_S` (31 days, `worker/src/retention.mjs`, AMENDED 2026-11-03, #761), from which every marker
@@ -289,10 +292,12 @@ and nothing about the box itself (`INT-CONTAINER-RUNTIME-CONTRACT`).
   **GitLab keeps `webhook-id` constant across its own retries**, which is exactly the property this
   requirement needs, so the guarantee transfers unchanged — and so does the retention bound.
   `Idempotency-Key` is the same value under its original name and requires **GitLab 17.4 or later**; an
-  older instance is **refused at the receiver with 400**, naming the version, rather than served on a key
-  synthesised from the payload. A synthesised key — object id plus action, say — is not stable across a
-  retry that changed nothing an operator can see, so it would dedup some redeliveries and bill for the
-  rest: a weaker guarantee wearing this requirement's name, which is worse than a clear refusal.
+  older instance without either header is served in token mode using a fallback delivery id: SHA-256 over
+  the event header, a NUL separator, and the exact raw request bytes. Byte-identical deliveries therefore
+  coalesce under the existing 31-day job retention regardless of which payload fields that event has.
+  This is explicitly best-effort: a retry whose bytes or event header change gets a different id, while
+  two independent byte-identical deliveries coalesce. Signature mode still requires its native signed id
+  and timestamp. The fallback is namespaced (`body-sha256-`) so it cannot collide with a native id.
   The **semantic** window's key gains a target-type discriminator on GitLab, where issues and merge
   requests are separate per-project sequences: `project#5` and `project!5` are different objects that one
   `repo#number` key would coalesce into a single window. On GitHub they share one sequence, which is why
@@ -8379,6 +8384,7 @@ instead of drifting.
 
 | Date | Change |
 |---|---|
+| 2026-11-04 | `REQ-DEDUP-BY-DELIVERY-GUID` AMENDED: GitLab requests without native delivery headers use the event-header plus exact raw-body SHA-256 as a `body-sha256-` fallback after token verification; byte-identical deliveries deduplicate within normal retention, while changed retries and identical independent events carry the stated best-effort limits. Native IDs remain preferred and signature mode still requires native headers. GitHub delivery IDs, BullMQ retention, semantic-window behavior and steer handling UNCHANGED, checked. **Code evidence**: `receiver/src/verify-gitlab.mjs`; `worker/src/queue.mjs` -> `forgeDeliveryJobId`, `forgeJobOf`. |
 | 2026-11-03 (#812) | `REQ-MODEL-POLICY` UNCHANGED, checked: failover still switches only on proven replay eligibility, and missing evidence still never authorizes a switch; the attempt key keeps no expiry while the queue may retry the job, and a console retry takes a finished job's expiry off again, so a retry that waits keeps its evidence; only a finished or removed job's key gets an end, and a retry that finds it gone (a failed job BullMQ removed late, or a `PERSIST` that failed) is refused, free, never switched. **Code evidence**: worker/src/model-attempts.mjs -> finishModelAttempt, dropModelAttempt, keepModelAttempt; admin/src/job-actions.mjs -> retryKeepingAttempt; worker/src/model-failover.mjs -> selectFailoverJob. |
 | 2026-11-03 (#761, upgrade path) | `REQ-CONSOLE-SECURITY` AMENDED, the overview's scheduler clause: a scheduler's id or job name is read up to `SCHEDULER_NAME_MAX`, which is now `SCHEDULER_ID_MAX` (200), the bound every reader of a scheduler key in Valkey shares and at least the loader's `CRON_ID_MAX` (176), where it said the bound IS `CRON_ID_MAX`; the rule (charset, null and never cut, the entry kept, named by its key alone) is unchanged. `REQ-DURABLE-RUN-HISTORY` UNCHANGED, checked: the record's new `dollars.reservedIn` is dates and a digest, so the record stays PII-free, and nothing about its durability moved. `REQ-SPEND-CAPS-MULTI-WINDOW` UNCHANGED, checked: the windows, their caps and their enforcement are as before; doctor's `dollars.window-reset` only reports a counter below this host's records (`DES-DOLLAR-RESERVE-AND-SETTLE`). **Code evidence**: admin/src/read-model.mjs -> SCHEDULER_NAME_MAX, mapSchedulers; worker/src/bullmq-internals.mjs -> SCHEDULER_ID_MAX, SCHEDULER_ID_RE; admin/test/read-model.test.mjs. |
 | 2026-11-03 (#752, #692, #737) | The console redesign closes. **`REQ-OPERATOR-CONSOLE-SCREENS` AMENDED**: the reverse check covers every golden, computed; ledgers read their cards; a viewer on Fleet no longer reads the queue's address or a held job's check name, the rule the card and the other screens already kept. The run page draws its card while a job runs, Progress and the transcript first, by CSS order, so its panels and the stream are unchanged. Watch stays a tab of Triggers: #752 asked for a pill before #773 recorded the opposite, and the later decision stands. Every remaining difference between a card and its page is recorded with its reason in that card's ledger. `REQ-CONSOLE-SECURITY`: a viewer reads less, nothing else moves; UNCHANGED, checked: the CSP, the write funnel and the roles that may act. No release is implied: the install lines stay at the workspace version. |

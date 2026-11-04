@@ -184,23 +184,20 @@ test("decodeSigningToken strips the whsec_ prefix and base64-decodes the rest", 
 	assert.deepEqual(decodeSigningToken(RAW_KEY.toString("base64")), RAW_KEY, "a token pasted without its prefix still works");
 });
 
-// --- the delivery id, and the transport floor ---
+// --- native delivery ids, legacy token-mode fallback and the signature floor ---
 
-test("a delivery with no webhook-id or Idempotency-Key is 400 and names the minimum GitLab version", async () => {
-	// Refused rather than served on a synthesised key: a key derived from the payload is not stable across
-	// a retry, so it would dedup some redeliveries and bill for the rest.
+test("a delivery with no webhook-id or Idempotency-Key is refused in signature mode", async () => {
+	// Signature mode cannot fall back: webhook-id is part of the signed message.
 	const res = mockRes();
 	const headers = sigHeaders(RAW);
 	delete headers["webhook-id"];
     await drive(sigHandler(ok), mockReq({ headers }), res, RAW);
 	assert.equal(res.statusCode, 400);
-	assert.match(res.body, /17\.4/);
+	assert.match(res.body, /signature mode requires GitLab 19\.0/);
 });
 
 test("Idempotency-Key is accepted as webhook-id's older name", async () => {
-	// Asserted in TOKEN mode, and not incidentally: `webhook-id` and the signature arrived together in
-	// GitLab 19.0, so an instance old enough to send only `Idempotency-Key` is on 17.4-18.x and cannot be
-	// running signature mode at all. Testing it under a signature would be testing an impossible delivery.
+	// Asserted in TOKEN mode: signature verification requires GitLab 19.0+'s webhook-id in the signed input.
 	let seen = null;
 	const res = mockRes();
 	await drive(

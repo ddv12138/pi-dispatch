@@ -441,8 +441,8 @@ function makeGitHubHandler({ queue, routeTo, selfId, cfg, log, resolveAuthority,
  *
  * That resolution is a network call, and its three outcomes are deliberately not two:
  *   - a determinate verdict (authorized or not) is handed to the gate, which decides;
- *   - an INDETERMINATE lookup is a 503, so GitLab redelivers and the stable `webhook-id` dedups the
- *     retry. Answering 204 would drop real work during an outage, and it would look on the wire exactly
+ *   - an INDETERMINATE lookup is a 503, so GitLab redelivers and the delivery id (native when present,
+ *     otherwise the verified raw-body digest) dedups a byte-identical retry. Answering 204 would drop real work during an outage, and it would look on the wire exactly
  *     like a stranger being correctly refused.
  * The lookup runs only for events that could still fire -- after verification, and after the payload has
  * been projected -- so an unauthenticated flood cannot make this project call GitLab at all.
@@ -491,7 +491,7 @@ function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, res
 			outcome = await fanout(job, async (j) => await enqueueGitLabJob(await routeTo("gitlab", j), j));
 		} catch (err) {
 			log?.({ event: "enqueue_failed", delivery, reason: err?.message });
-			return respond(res, 503, { error: "enqueue-failed" }); // GitLab redelivers; dedup by webhook-id coalesces
+			return respond(res, 503, { error: "enqueue-failed" }); // GitLab redelivers; the native id or body digest coalesces an identical retry
 		}
 
 		return await answerEnqueueOutcome({ steer, kind: "gitlab", log, res, delivery, job, target, outcome });

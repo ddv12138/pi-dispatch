@@ -72,20 +72,13 @@ export function makeGitLabVerifiedHandler({ mode, secret, bodyLimit = 2 * 1024 *
 				return respond(res, 400, { error: "missing gitlab event header" });
 			}
 
-			// The delivery id is stable across GitLab's own retries, which is exactly the property dedup
-			// needs (REQ-DEDUP-BY-DELIVERY-GUID). `webhook-id` is the Standard Webhooks name (19.0+);
-			// `Idempotency-Key` is the same value under its original name (17.4+).
-			//
-			// An instance too old for either is REFUSED rather than served on a synthesised key. A key
-			// derived from the payload -- object id plus action, say -- is not stable across a retry that
-			// changes nothing an operator can see, so it would dedup some redeliveries and bill for the
-			// rest. Naming the minimum version is a message; a weaker key would be a silent second charge.
+			// Native ids are authoritative when present. GitLab before 17.4 has neither header; after
+			// reading and authenticating its body, token mode can use a digest of the exact delivery bytes
+			// as a bounded best-effort fallback (REQ-DEDUP-BY-DELIVERY-GUID). Signature mode still requires
+			// webhook-id as part of the signed message and therefore cannot use this fallback.
 			delivery = req.headers["webhook-id"] ?? req.headers["idempotency-key"];
-			if (!delivery) {
-				return respond(res, 400, {
-					error: "missing delivery id",
-					detail: "no webhook-id or Idempotency-Key header; pi-dispatch needs GitLab 17.4 or later to dedup redeliveries",
-				});
+			if (mode === "signature" && !req.headers["webhook-id"]) {
+				return respond(res, 400, { error: "missing delivery id", detail: "signature mode requires GitLab 19.0+ webhook-id" });
 			}
 
 			const declaredLength = Number(req.headers["content-length"]);
@@ -111,6 +104,17 @@ export function makeGitLabVerifiedHandler({ mode, secret, bodyLimit = 2 * 1024 *
 					: verifyToken(secret, req.headers["x-gitlab-token"]);
 			if (!verdict.ok) {
 				return respond(res, verdict.status ?? 401, { error: verdict.error });
+			}
+
+			// Hash event name plus the exact raw request bytes. Do not hash parsed/re-serialized JSON:
+			// property order and whitespace are part of whether two deliveries are byte-identical. This
+			// cannot recognize a retry whose payload changed, and identical independent deliveries coalesce;
+			// the queue's normal retention bounds that tradeoff.
+			if (!delivery) {
+				if (mode !== "token") {
+					return respond(res, 400, { error: "missing delivery id", detail: "signature mode requires GitLab 19.0+ delivery headers" });
+				}
+				delivery = `body-sha256-${createHash("sha256").update(event, "utf8").update("\0").update(buf).digest("hex")}`;
 			}
 
 			await onVerified({ rawBody: raw, headers: req.headers, event, delivery }, res);

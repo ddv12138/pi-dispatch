@@ -136,15 +136,17 @@ any other port (issue #508, `docs/egress.md`). Otherwise a job's git push and fe
 than 80 its API calls fail too.
 `pi-dispatch doctor` warns when `GITLAB_URL` is anything but `https://` on 443.
 
-## Minimum GitLab version: 17.4
+## GitLab versions and delivery deduplication
 
-pi-dispatch dedups redeliveries on GitLab's own `webhook-id` (called `Idempotency-Key` before 19.0), which
-GitLab keeps constant across its retries. Older instances send neither, and a delivery without one is
-**refused with 400** rather than run.
+GitLab 17.4+ provides `Idempotency-Key`, and 19.0+ also provides `webhook-id`; pi-dispatch prefers
+either native delivery ID when present. Older GitLab versions can use `token` mode without either header.
+For those requests, pi-dispatch hashes the event header and the exact raw request body and uses that digest
+as the queue delivery ID. Byte-identical retries therefore coalesce within the normal 31-day job retention.
 
-That refusal is deliberate. The alternative — synthesising a key from the payload — produces something
-that is *not* stable across a retry, so it would dedup some redeliveries and bill you for the rest. A
-clear error beats a guarantee that silently only half holds.
+This is best-effort deduplication, not a GitLab delivery ID: if a retry changes the body or event header,
+its hash changes and it can run again. Two independent deliveries with identical event header and body
+coalesce. Signature mode still requires GitLab's signed delivery headers, so it remains available only on
+GitLab 19.0+ (GA in 19.1).
 
 ## Who can trigger a job
 
