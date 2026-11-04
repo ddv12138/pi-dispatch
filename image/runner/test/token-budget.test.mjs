@@ -33,24 +33,22 @@ function turnEnd(usage) {
 	return { type: "turn_end", message: { role: "assistant", usage } };
 }
 
-const usage = ({ input = 0, output = 0, total = input + output, cost = 0 }) => ({
+const usage = ({ input = 0, output = 0, total = input + output }) => ({
 	input,
 	output,
 	totalTokens: total,
-	cost: { total: cost },
 });
 
 test("accumulates usage across turns (meter is always on, no cap)", () => {
 	const session = fakeSession();
 	const budget = attachTokenBudget(session, null);
 
-	session.emit(turnEnd(usage({ input: 100, output: 20, cost: 0.01 })));
-	session.emit(turnEnd(usage({ input: 200, output: 30, cost: 0.02 })));
+	session.emit(turnEnd(usage({ input: 100, output: 20 })));
+	session.emit(turnEnd(usage({ input: 200, output: 30 })));
 
 	assert.equal(budget.state.input, 300);
 	assert.equal(budget.state.output, 50);
 	assert.equal(budget.state.total, 350);
-	assert.equal(Math.round(budget.state.cost * 100) / 100, 0.03);
 	assert.equal(budget.state.aborted, false, "no cap means never abort");
 	assert.equal(session.aborted, false);
 });

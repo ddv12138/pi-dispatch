@@ -2,15 +2,14 @@
 import { validateSubscriptionRequest } from "./community-auth-adapter.mjs";
 import { subscriptionAccess, subscriptionRequestOverrides } from "./subscription-credentials.mjs";
 import { AsyncLocalStorage } from "node:async_hooks";
-import { createHash } from "node:crypto";
-import { chmodSync, closeSync, constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeSync } from "node:fs";
+import { closeSync, constants, existsSync, fstatSync, lstatSync, mkdtempSync, openSync, readdirSync, readFileSync, readSync, renameSync, rmSync, writeSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { types as utilTypes } from "node:util";
 import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readPidNamespace, runnerIdentity } from "./child-route.mjs";
-import { parseAllowedModels, parseCostMicros } from "./config.mjs";
-import { configError, COST_CAP, COST_CAP_UNENFORCEABLE, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "./outcome.mjs";
+import { parseAllowedModels } from "./config.mjs";
+import { configError, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "./outcome.mjs";
 
 /**
  * Process-wide usage meter (issue #58; REQ-TOKEN-ACCOUNTING-AND-CAPS, CONST-BUDGET-BEFORE-TOKENS).
@@ -92,9 +91,11 @@ import { configError, COST_CAP, COST_CAP_UNENFORCEABLE, MODEL_NOT_ALLOWED, MODEL
  *    decided, and such a call was judged and counted by neither half.
  *
  * The TOKEN cap here is still structurally LAGGING for the same reason token-budget.mjs's is: usage is known
- * only after a call completes, so its hard stop is a runaway backstop, not a before-the-spend cap. The COST cap
- * (issue #501) is the opposite shape: the cost guard at the bottom of this file judges each call's worst case
- * BEFORE it is sent, through the same seam and the same hard stop.
+ * only after a call completes, so its hard stop is a runaway backstop, not a before-the-spend cap (OQ-010's
+ * reservation for the per-job cap keeps holding on it). There is NO pre-call spend bound in the runner any
+ * more: the per-job cost guard (issue #501) is gone, and the only bound that precedes the container is the
+ * worker's token-window reservation (DES-TOKEN-RESERVE-AND-SETTLE), settled from this meter's totals after
+ * the run.
  */
 
 /** Where a runtime call's options carry its dispatch token (trap #5 above): a symbol, so it is never serialised. */
@@ -104,7 +105,7 @@ export const DISPATCH_MARK = Symbol("pi-dispatch.usage-meter.dispatch");
  * A runtime call's dispatch token: the model it dispatches, whether its one compat re-entry has been seen, and whether
  * it FORWARDED (issue #571): another model call was dispatched under it (a router or proxy provider calling an
  * upstream, through either half). A forwarded call's own zero usage is the router's, not a lost count, so the meter
- * does not count it `costUnreported`; the upstream call is metered on its own.
+ * does not count it `usageUnreported`; the upstream call is metered on its own.
  */
 export function dispatchToken(model) {
 	return { provider: model?.provider, id: model?.id, api: model?.api, used: false, forwarded: false };
@@ -144,8 +145,8 @@ function claimReentry(token, model, options) {
 
 /**
  * Run an admitted call's dispatch, and when it THROWS synchronously, bind `undefined` before rethrowing (issue #571):
- * the guard then settles that call's slot at its bound and counts it `costUnanswered`, rather than a later admit
- * flushing it uncounted. The throw itself is not swallowed: a throw in here is still a provider's or our bug to see.
+ * the guard's bind then releases the admission rather than a later admit flushing it uncounted. The throw itself is
+ * not swallowed: a throw in here is still a provider's or our bug to see.
  */
 function dispatchBinding(guard, verdict, run) {
 	try {
@@ -178,7 +179,6 @@ export const RUNTIME_RESULT_METHODS = Object.freeze(["classify", "generateImages
  */
 export const STOP_MESSAGES = Object.freeze({
 	[TOKEN_BUDGET]: "pi-dispatch: token cap exceeded",
-	[COST_CAP]: "pi-dispatch: cost cap reached",
 	[MODEL_NOT_ALLOWED]: "pi-dispatch: model not allowed",
 });
 
@@ -203,14 +203,12 @@ function finite(value) {
 const MAX_NAMED_ROWS = 8;
 
 /**
- * The eleven numerics a ledger row accumulates, zeroed. One shape for named rows and the fold bucket.
- *
- * `providerBilled` counts the calls whose `cost` is the provider's own billed total rather than pi's rate-card
- * estimate (pi-ai 1.5.0's `usage.cost.totalFromProvider`, OpenRouter today, with a BYOK key's upstream cost included).
- * A count and not a flag, because a row aggregates many calls and a folded one aggregates many models.
+ * The eight numerics a ledger row accumulates, zeroed. One shape for named rows and the fold bucket.
+ * Token amounts only (REQ-TOKEN-ACCOUNTING-AND-CAPS): the cost/unpriced/providerBilled columns died with
+ * the per-job cost guard; what a row says is what the provider reported in tokens, and nothing priced it.
  */
 function emptyRow() {
-	return { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, cost: 0, unpriced: 0, providerBilled: 0 };
+	return { calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0 };
 }
 
 /**
@@ -227,9 +225,6 @@ function foldRow(into, row) {
 	into.cacheWrite1h += row.cacheWrite1h;
 	into.reasoning += row.reasoning;
 	into.total += row.total;
-	into.cost += row.cost;
-	into.unpriced += row.unpriced;
-	into.providerBilled += row.providerBilled;
 }
 
 /**
@@ -240,14 +235,15 @@ function foldRow(into, row) {
  * the same PI_MAX_TOKENS env knob and an operator must not get two different verdicts on one value.
  * null/undefined means uncapped -- the meter is ALWAYS on so totals land in run history either way.
  *
- * `maxCostMicros` (issue #501) and `allowedModels` (issue #502) are the two policies the brake must also
- * serve. This meter only CARRIES them (as `costCap` and `allowed`) so the installer arms the brake for them
- * and the exit decision can name their stops; the per-call checks that act on them are the guard's
- * (wrapModelRuntime's `guard`). Each is null when unset, which is today's behaviour.
+ * `allowedModels` (issue #502) is the other policy the brake must serve. This meter only CARRIES it
+ * (as `allowed`) so the installer arms the brake for it and the exit decision can name its stop; the
+ * per-call check that acts on it is the guard's (wrapModelRuntime's `guard`). It is null when unset.
+ * The per-job cost cap (issue #501) is gone: the only token bound that precedes the container is the
+ * worker's window reservation, and this cap stays the settle-time lagging backstop it always was.
  *
  * ONE STOP, FIRST WINS. `state.stopReason` is null until the first stop and is never overwritten: a job that
- * a cost refusal stopped and whose late settles then cross the token cap is a cost-cap stop, and the exit
- * line must name the cause rather than the last thing to notice. `onStop(reason, detail)` fires once, on
+ * a model refusal stopped and whose late settles then cross the token cap is a model-not-allowed stop, and the
+ * exit line must name the cause rather than the last thing to notice. `onStop(reason, detail)` fires once, on
  * that first stop. `state.breached` stays, read-only, as "the stop was the token cap", so every reader of
  * the old flag keeps its meaning.
  *
@@ -262,18 +258,14 @@ function foldRow(into, row) {
  * and the new `childTotal` closes the partition: root + other + loose + child === total. The token cap is
  * checked against parent plus children, on every record and on every fold.
  */
-export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModels = null, rootSessionId, onStop, onChange = null } = {}) {
+export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionId, onStop, onChange = null } = {}) {
 	if (maxTokens !== null && maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1)) {
 		throw new Error(`invalid PI_MAX_TOKENS: ${maxTokens}`);
-	}
-	if (maxCostMicros !== null && (!Number.isSafeInteger(maxCostMicros) || maxCostMicros < 0)) {
-		throw new Error(`invalid PI_MAX_COST_MICROS: ${maxCostMicros}`);
 	}
 	if (allowedModels !== null && (!Array.isArray(allowedModels) || allowedModels.length === 0)) {
 		throw new Error("invalid PI_ALLOWED_MODELS: want a non-empty list or null");
 	}
 	const cap = maxTokens ?? null;
-	const costCap = maxCostMicros;
 	const allowed = allowedModels === null ? null : Object.freeze(allowedModels.map((entry) => Object.freeze({ ...entry })));
 	// Only a non-empty string can be the root. An undefined rootSessionId must NOT match an undefined
 	// options.sessionId -- that would file every unattributed call as root and hide the fanout.
@@ -285,7 +277,6 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		// totalTokens is the BILLED total (input + output + cache read/write), so total >= input + output
 		// -- deliberately, exactly as in token-budget.mjs. The cap keys on billed tokens; do not "fix".
 		total: 0,
-		cost: 0,
 		// The attribution split. INVARIANT: rootTotal + otherTotal + looseTotal === total, because every
 		// record() adds its billed tokens to exactly one of the three. otherTotal > 0 is spend the
 		// per-session bus could not attribute to the root: a subagent session's, and at the 0.99.1 pin also
@@ -299,11 +290,10 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		// Streams observed but not yet settled when the job ends. A non-zero value on the exit line means
 		// the totals are a floor, not a total -- better surfaced than silently rounded down.
 		unresolved: 0,
-		// Calls whose usage carried no finite cost.total. Counted, never guessed: a silent 0 would read
-		// as "this call was free", which is the one thing a spend control must never claim.
-		unpriced: 0,
-		// Calls on a priced model whose answer carried broken usage (issue #571, unreportedUsage): pi recorded them as
-		// zeros or a partial count, so `cost` is short. Counted on every run, capped or not; a forward's outer call is not.
+		// Calls whose answer carried no usable usage, or a broken one (issue #571, usageUnreported below):
+		// pi recorded them as zeros or a partial count, or never sent a usage block, so the token total is
+		// short. Counted on every run, capped or not; a forward's outer call is not. This is the meter's ONE
+		// completeness counter since the money floor counters died with the cost guard.
 		unreported: 0,
 		// The first stop's reason (a STOP_MESSAGES key), or null. Set once by stop(), never overwritten.
 		stopReason: null,
@@ -326,7 +316,7 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		state.stopReason = reason;
 		onStop?.(reason, detail);
 		// A stop is a change a child ledger carries (issue #500): every guard refusal stops the meter, so this is also
-		// where a raised costRefused or modelRefused reaches the ledger at once, not at the next call.
+		// where a raised modelRefused reaches the ledger at once, not at the next call.
 		changed();
 		return true;
 	}
@@ -345,12 +335,12 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 	// the key never has to be parsed back apart.
 	const byModel = new Map();
 	// Where a call lands when its ctx names no model: kept OFF the map, so a provider literally named
-	// "other" can never merge into it. Same honesty rule as `unpriced` above -- a model-less call is
+	// "other" can never merge into it. Same honesty rule as `unresolved` -- a model-less call is
 	// COUNTED here, never guessed onto whichever model a heuristic liked.
 	const other = emptyRow();
-	// The version of the pi-ai copy the meter priced with, stamped by installProcessUsageMeter once
-	// it accepts a compat copy. Pricing PROVENANCE for the run record: history is priced once,
-	// and a later pin bump must show as a different stamp on new records, not a silent repricing of
+	// The version of the pi-ai copy the meter observed with, stamped by installProcessUsageMeter once
+	// it accepts a compat copy. PROVENANCE for the run record: history is observed once,
+	// and a later pin bump must show as a different stamp on new records, not a silent reshaping of
 	// old ones. null = unknown, and the exit line says so rather than inventing one.
 	let piAiVersion = null;
 	// The children's fold (setChildren), or null until the first one. null keeps the exit line exactly as it was
@@ -381,12 +371,11 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		const billed = finite(u.totalTokens);
 		state.total += billed;
 
-		const given = u.cost?.total;
-		const priced = typeof given === "number" && Number.isFinite(given);
-		// Priced at 0 when negative, never unpriced: the call did report a price (see finite()).
-		const price = priced ? Math.max(0, given) : 0;
-		if (priced) state.cost += price;
-		else state.unpriced += 1;
+		// A call that settled with NO usage object at all (a rejected result, a provider that sent none):
+		// the token count is short by whatever it really used, which is the floor signal, counted here so
+		// the rejection paths need no second bookkeeping. A usage object is judged by usageUnreported
+		// (judgeUsage), which the observe paths call before this with the same message.
+		if (usage === null || usage === undefined) state.unreported += 1;
 
 		const id = typeof ctx.sessionId === "string" ? ctx.sessionId : "";
 		if (id.length > 0) state.sessionIds.add(id);
@@ -396,7 +385,7 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 
 		// The ledger landing. BOTH ids or neither: a provider without a model id (or the reverse) is
 		// not a pair, and a half-attributed row would be a guess wearing a label, so it goes to the
-		// bucket with the other model-less calls. `billed` and `priced` are the very values already
+		// bucket with the other model-less calls. `billed` is the very value already
 		// accumulated above, which is what makes the rows a PARTITION of the flat totals rather than a
 		// second opinion on them. The cache split (cacheRead/cacheWrite/cacheWrite1h/reasoning) is kept
 		// only here -- it is precisely what `total` collapses.
@@ -420,9 +409,6 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 			cacheWrite1h: finite(u.cacheWrite1h),
 			reasoning: finite(u.reasoning),
 			total: billed,
-			cost: priced ? price : 0,
-			unpriced: priced ? 0 : 1,
-			providerBilled: priced && u.cost.totalFromProvider === true ? 1 : 0,
 		});
 
 		if (cap !== null && combinedTotal() > cap) stop(TOKEN_BUDGET, combinedTotal());
@@ -433,16 +419,16 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 	}
 
 	/**
-	 * Count `costUnreported` (issue #571) for a settled answer, BEFORE record() writes the change, so a child ledger
-	 * written on the settle carries it. Only for a call whose `ctx.model` is priced (pricedModel), and never for a call
-	 * that forwarded (`ctx.forwarded()` true: under its dispatch another model call went out, which is metered on its
-	 * own, so the outer call's zeros are a router's, not a lost count). A ctx with no model (a caller outside the two
-	 * wrappers) is never counted.
+	 * Count `usageUnreported` (issue #571) for a settled answer, BEFORE record() writes the change, so a child ledger
+	 * written on the settle carries it. Never for a call that forwarded (`ctx.forwarded()` true: under its dispatch
+	 * another model call went out, which is metered on its own, so the outer call's zeros are a router's, not a lost
+	 * count). A ctx with no model (a caller outside the two wrappers) is never counted either: the wrappers are the
+	 * only observers, so such a ctx is a caller's own construction, not a call this meter can vouch for.
 	 */
 	function judgeUsage(message, ctx) {
-		if (ctx.model === undefined || !pricedModel(ctx.model)) return;
+		if (ctx.model === undefined) return;
 		if (typeof ctx.forwarded === "function" && ctx.forwarded()) return;
-		if (unreportedUsage(message, ctx.model?.api)) state.unreported += 1;
+		if (usageUnreported(message, ctx.model?.api)) state.unreported += 1;
 	}
 
 	/**
@@ -460,7 +446,7 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		// promise, and a caller that awaits it (a router forwarding to it) gets a working stream. pi's own paths never
 		// hand one on: ModelRuntime and the provider composer wrap every provider call in lazyStream, which awaits it.
 		// Counted at once, settled from the resolved stream's result(); a rejection, or a value with no result(), is a
-		// call with no usage, `unpriced`, as a rejected result() is.
+		// call with no usage, counted `usageUnreported` as a rejected result() is.
 		if (typeof stream.result !== "function") return typeof stream.then === "function" ? observePending(stream, ctx) : stream;
 		if (observed.has(stream)) return stream;
 		observed.add(stream);
@@ -475,9 +461,9 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 			},
 			() => {
 				// A rejected result() is pi's problem to report; swallow it here so we never turn an
-				// accounting hook into an unhandled rejection that kills the container. Recorded as a call with
-				// no usage (issue #501), so it counts as `unpriced` on its own row: what it spent is unknown, and
-				// "unknown" is the one thing a dollar settlement must not read as zero.
+				// accounting hook into an unhandled rejection that kills the container. Recorded as a call
+				// with no usage, which record() counts on `unreported`: what it consumed is unknown, and
+				// "unknown" is the one thing a token settlement must not read as zero.
 				state.unresolved -= 1;
 				record(undefined, ctx);
 			},
@@ -496,8 +482,8 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 			.then((resolved) => {
 				if (typeof resolved?.result !== "function") return { message: undefined };
 				// A stream already observed (an async entry that forwards and resolves to the forward's own stream, which
-				// this meter counted when it was dispatched): its usage is that call's. This call settles as a priced zero,
-				// and is not judged for broken usage either, so the spend is counted once.
+				// this meter counted when it was dispatched): its usage is that call's. This call settles as a zero,
+				// and is not judged for broken usage either, so the count lands once.
 				if (observed.has(resolved)) return { counted: true };
 				observed.add(resolved);
 				return resolved.result().then((message) => ({ message }));
@@ -547,12 +533,11 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 
 	/** The exit-line shape. `metered: true` marks totals that came from here, not from the session bus. */
 	function snapshot() {
-		const child = children ?? { input: 0, output: 0, total: 0, cost: 0, calls: 0, unresolved: 0, unpriced: 0, sessions: 0 };
+		const child = children ?? { input: 0, output: 0, total: 0, calls: 0, unresolved: 0, sessions: 0 };
 		return {
 			input: state.input + child.input,
 			output: state.output + child.output,
 			total: state.total + child.total,
-			cost: state.cost + child.cost,
 			metered: true,
 			// The parent's own split. With children, childTotal below is the fourth part of the partition.
 			rootTotal: state.rootTotal,
@@ -561,10 +546,9 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 			sessions: state.sessionIds.size + child.sessions,
 			calls: state.calls + child.calls,
 			unresolved: state.unresolved + child.unresolved,
-			unpriced: state.unpriced + child.unpriced,
 			...(children === null ? {} : { childTotal: children.total, childProcesses: children.processes, unmeteredChildren: children.unmetered }),
 			// Issue #571: on every metered line, the children's included (their ledgers carry it).
-			costUnreported: state.unreported + (children?.unreported ?? 0),
+			usageUnreported: state.unreported + (children?.unreported ?? 0),
 		};
 	}
 
@@ -598,17 +582,15 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 			input: high("input", totals.input),
 			output: high("output", totals.output),
 			total: high("total", totals.total),
-			cost: high("cost", totals.cost),
 			calls: high("calls", totals.calls),
 			unresolved: carry(totals.unresolved),
-			unpriced: high("unpriced", totals.unpriced),
 			sessions: high("sessions", totals.sessions),
 			processes: high("processes", fold?.processes),
 			// Not a high-water mark (issue #500 part E's review): the hook's count only grows, except for a child it held
 			// `starting` too long and then saw install its meter, which it un-counts.
 			unmetered: carry(fold?.unmetered ?? 0),
 			// Issue #571: the children's broken-usage calls, a high-water mark like the totals.
-			unreported: high("unreported", fold?.costUnreported ?? 0),
+			unreported: high("unreported", fold?.usageUnreported ?? 0),
 			rows: [...rows.values()],
 		};
 		if (cap !== null && combinedTotal() > cap) stop(TOKEN_BUDGET, combinedTotal());
@@ -677,7 +659,7 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 	}
 
 	/**
-	 * Stamp the pricing provenance. Only a non-empty string is stored: the installer's version probe is
+	 * Stamp the ledger's provenance. Only a non-empty string is stored: the installer's version probe is
 	 * best-effort, and `piAi` on the exit line must be a real version or null -- never "", never some
 	 * object that would serialise into the run record as a shape its readers have to defend against.
 	 */
@@ -685,7 +667,7 @@ export function createUsageMeter({ maxTokens, maxCostMicros = null, allowedModel
 		if (typeof version === "string" && version.length > 0) piAiVersion = version;
 	}
 
-	return { state, cap, costCap, allowed, stop, record, observe, observeResult, snapshot, usageSnapshot, setPiAiVersion, rows, setChildren };
+	return { state, cap, allowed, stop, record, observe, observeResult, snapshot, usageSnapshot, setPiAiVersion, rows, setChildren };
 }
 
 
@@ -823,48 +805,6 @@ function isOwnData(value) {
 	return true;
 }
 
-/**
- * THE PRICE TABLE (issue #587's review). The cost guard's bound and pi's own settlement both read the model object the
- * CALLER passes, so a caller's `{ ...model, cost: zeros }` would run under a cap at $0, and a live registry can be
- * poisoned mid-run (registerProvider over a builtin id, a rewritten models.json and any refresh, a modelOverrides
- * entry, an extension's own ModelRuntime). So one table is pinned ONCE, from the job's runtime, when the meter installs,
- * which is before any extension loads: the builtin catalog plus the operator's overlay as it was loaded at start.
- * `(provider, id, api)` to `{ api, cost, compat }`, each copied as plain data. Every capped call on every runtime
- * instance, and every legacy call, is held to it (pricedAsPinned). null means no table: the call is judged on its own
- * object (only a caller that wires the meter without one, such as a unit test).
- */
-export function pinPriceTable(runtime) {
-	if (typeof runtime?.getAllModels !== "function") return null;
-	const table = new Map();
-	let models;
-	try {
-		models = runtime.getAllModels();
-	} catch {
-		return table;
-	}
-	for (const model of Array.isArray(models) ? models : []) {
-		try {
-			if (typeof model?.provider !== "string" || typeof model?.id !== "string" || typeof model?.api !== "string") continue;
-			table.set(priceKey(model), { api: model.api, cost: dataCopy(model.cost), compat: dataCopy(model.compat) });
-		} catch (error) {
-			if (error !== NOT_DATA) throw error;
-			// A model whose price is not plain data is left out: a capped call on it is refused.
-		}
-	}
-	return table;
-}
-
-/** One spelling of a table key: NUL cannot appear in a provider id, a model id or an api id. */
-function priceKey(model) {
-	return `${model?.provider}\u0000${model?.id}\u0000${model?.api}`;
-}
-
-/** The pinned entry for a call's model, null when the table has none, undefined when there is no table. */
-function priceEntry(prices, model) {
-	if (!(prices instanceof Map)) return undefined;
-	return prices.get(priceKey(model)) ?? null;
-}
-
 /** The verdict for a call the guard judged and let through: dispatch it, and bind it to its settle. */
 const ADMITTED = Symbol("admitted");
 
@@ -888,17 +828,17 @@ function externalStop(isStopped) {
 /**
  * One call's verdict, for both halves: the stop reason that ends it, null to dispatch it unjudged, or ADMITTED.
  *
- * THE GUARD CONTRACT (issues #501, #502). `guard.admit({ method, model, args })` answers null or undefined to let
+ * THE GUARD CONTRACT (issue #502). `guard.admit({ method, model, args })` answers null or undefined to let
  * the call through, or a STOP_MESSAGES key to refuse it. Nothing else: a falsy non-null answer (false, 0, "")
  * reaches meter.stop() and throws, on purpose, because a guard that meant "pass" and said `false` would otherwise
  * stop a job with a reason no table names. `guard.bind(result)`, when the guard has one, is called synchronously
  * with what the call it just admitted returned (a stream, or a promise for the two result methods), so the
- * guard can hold the call's bound until it settles. A call is judged only while a brake exists, because a refusal
+ * guard can hold onto the call until it settles. A call is judged only while a brake exists, because a refusal
  * with no hard stop to answer with would have to dispatch the call it refused; `skip` is a call the guard must
  * not judge (a virtual model, whose physical re-entry is judged instead, or a compat call already judged by
  * the runtime half).
  */
-function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = null, priced, legacy = false }) {
+function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = null, legacy = false }) {
 	if (!hardStop) return null;
 	if (meter.state.stopReason !== null) return meter.state.stopReason;
 	// A stop from OUTSIDE this process (issue #500: a child reads the parent's STOP file), asked before every
@@ -911,7 +851,7 @@ function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = 
 		}
 	}
 	if (guard === null || skip) return null;
-	const refused = guard.admit({ method, model, args, ...(priced === undefined ? {} : { priced }), ...(legacy ? { legacy: true } : {}) });
+	const refused = guard.admit({ method, model, args, ...(legacy ? { legacy: true } : {}) });
 	if (refused === null || refused === undefined) return ADMITTED;
 	meter.stop(refused);
 	return meter.state.stopReason;
@@ -931,16 +871,17 @@ function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = 
  *   2. A virtual model passes straight through UNOBSERVED and UNGUARDED (trap #4 in the header):
  *      ModelRuntime routes it and calls `this.streamSimple` again with the physical model, which is the call
  *      that is guarded and counted, so one request is judged once and on the model that will answer it.
- *   3. THE GUARD SEAM (issues #501, #502). A physical call is offered to `guard.admit({ method, model, args })`
+ *   3. THE GUARD SEAM (issue #502). A physical call is offered to `guard.admit({ method, model, args })`
  *      before dispatch (a guard is `{ enforces, admit }`, `enforces` listing the stop reasons it can refuse
  *      for, which is what assertPoliciesEnforceable reads). It answers null to let the call through, or a STOP_MESSAGES reason to refuse it: the
  *      meter stops with that reason and this call gets the hard stop, so the refused call is the first one
  *      braked. An admitted call is handed to `guard.bind` once dispatched (judge() above has the contract).
  *      The guard is consulted only while a brake exists, because a refusal with no hard stop to answer with
  *      would have to dispatch the call it just refused; the runner refuses before the first prompt when a
- *      policy is set and the brake is missing (assertPoliciesEnforceable). The guard is createPolicyGuard's: the
- *      model guard (issue #502, only when a list is set) and then the cost guard (issue #501, only when a cap
- *      is set); with neither there is no guard, and every call goes through exactly as before.
+ *      policy is set and the brake is missing (assertPoliciesEnforceable). The guard is createPolicyGuard's
+ *      model guard (issue #502, only when a list is set); with no list there is no guard, and every call goes
+ *      through exactly as before. The token cap is NOT judged here: it has no pre-call bound (D2/裁决 1), it
+ *      stops at the meter's settle-time check on the accumulated total.
  *   4. Everything else is the original method, its stream observed (or its promise, for classify and
  *      generateImages) with the (provider, model) pair read off the Model object dispatched on and the
  *      sessionId off the options -- never parsed back out of a settled message, whose provider/model a
@@ -955,7 +896,7 @@ function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = 
  * later install layered on top is never torn out from under it; in that case this layer is switched to
  * pass-through instead, so it stops counting without breaking the chain.
  */
-export function wrapModelRuntime({ ModelRuntime, meter, hardStop = null, hardStopResult = defaultHardStopResult, guard = null, dispatch = new AsyncLocalStorage(), isStopped = null, prices = null }) {
+export function wrapModelRuntime({ ModelRuntime, meter, hardStop = null, hardStopResult = defaultHardStopResult, guard = null, dispatch = new AsyncLocalStorage(), isStopped = null }) {
 	const proto = ModelRuntime?.prototype;
 	const originals = new Map();
 	const wrappers = new Map();
@@ -965,10 +906,9 @@ export function wrapModelRuntime({ ModelRuntime, meter, hardStop = null, hardSto
 	// Steps 1 and 3 above, shared by every method: the stop reason that ends this call, or null to dispatch it
 	// unjudged, or ADMITTED when the guard judged it and let it through (it is then bound to its settle below).
 	// Only streamSimple re-enters with the physical model (trap #4); a virtual model on any other method is judged as
-	// itself: under a cost cap that is an unboundable call, refused, and under a list it is refused unless the list
+	// itself: under a list it is refused unless the list
 	// names the virtual entry itself (pi then fails such an unrouted call without reaching a provider).
-	// The pinned table prices the call (pinPriceTable), whatever instance it was made on, only while a guard judges.
-	const verdictFor = (method, model, args) => judge({ meter, hardStop, guard, method, model, args, isStopped, skip: method === "streamSimple" && model?.api === VIRTUAL_MODEL_API, priced: guard !== null && hardStop ? priceEntry(prices, model) : undefined });
+	const verdictFor = (method, model, args) => judge({ meter, hardStop, guard, method, model, args, isStopped, skip: method === "streamSimple" && model?.api === VIRTUAL_MODEL_API });
 	// The call's arguments as the guard prepared them for an admitted call (the model guard wraps options.onPayload).
 	const prepareFor = (verdict, method, model, args) => (verdict === ADMITTED && typeof guard.prepare === "function" ? guard.prepare({ method, model, args, stop: (reason) => meter.stop(reason) }) : args);
 	// Judged and dispatched on ONE copy (issue #502, PR #538's review): a model whose fields are getters could
@@ -1070,14 +1010,14 @@ export function defaultHardStopResult(method, model, message = STOP_MESSAGES[TOK
  * The ONE call that is a runtime call's own re-entry (`dispatch`, trap #5: its options carry the unused token of the
  * context it runs in, on the same (provider, model) pair) is routed the same way and NOT observed: the runtime half
  * already counted it. Nor is it offered to the guard: the runtime half already judged it, and judging one request
- * twice would count its bound twice. A FORWARD (the token on another pair) is a full call here: judged, prepared,
- * bounded and observed below under its own model, while the runtime call keeps its own bound and count. Every other legacy call, made
+ * twice would double the admission. A FORWARD (the token on another pair) is a full call here: judged, prepared,
+ * and observed below under its own model, while the runtime call keeps its own count. Every other legacy call, made
  * inside a runtime call's context (a hook, an onPayload, a timer scheduled there) or outside any, is guarded and
  * observed here exactly as wrapModelRuntime's step 3 guards a runtime call (issue #543).
  *
  * There is deliberately NO swallowing try/catch, for the reason wrapModelRuntime gives (dispatchBinding rethrows).
  */
-export function wrapProviderStreams({ inner, fallbackModels, meter, hardStop, guard = null, dispatch = null, isStopped = null, prices = null }) {
+export function wrapProviderStreams({ inner, fallbackModels, meter, hardStop, guard = null, dispatch = null, isStopped = null }) {
 	const dispatchOrUnanswered = (verdict, run) => dispatchBinding(guard, verdict, run);
 	function route(kind, requested, context, passed) {
 		// One copy, judged and dispatched (wrapModelRuntime's judgedModel has the why), its options likewise.
@@ -1086,8 +1026,7 @@ export function wrapProviderStreams({ inner, fallbackModels, meter, hardStop, gu
 		// Checked before dispatch, so a stop ends the NEXT call rather than merely recording it.
 		// The runtime call's own re-entry is skipped; any other call, a forward to another pair included, is judged.
 		const reentry = claimReentry(dispatch?.getStore(), model, given);
-		// A legacy call is priced from the same pinned table as the runtime half (pinPriceTable).
-		const verdict = judge({ meter, hardStop, guard, method: kind, model, args: [context, given], skip: reentry, isStopped, legacy: true, priced: guard !== null && hardStop ? priceEntry(prices, model) : undefined });
+		const verdict = judge({ meter, hardStop, guard, method: kind, model, args: [context, given], skip: reentry, isStopped, legacy: true });
 		if (verdict !== null && verdict !== ADMITTED) return hardStop(model, STOP_MESSAGES[verdict]);
 		const options = verdict === ADMITTED && typeof guard.prepare === "function" ? guard.prepare({ method: kind, model, args: [context, given], stop: (reason) => meter.stop(reason) })[1] : given;
 		const provider = fallbackModels?.getProvider?.(model.provider);
@@ -1346,11 +1285,7 @@ export async function installProcessUsageMeter({
 	brake = false,
 	children: childrenHook = null,
 	isStopped = null,
-	prices,
 }) {
-	// The price table (pinPriceTable, issue #587's review), pinned HERE, before any extension loads: `prices` when the
-	// caller hands one over (a pi child, the parent's table), else the job runtime's, else none.
-	const pinnedPrices = prices !== undefined ? prices : pinPriceTable(runtime);
 	// --- the compat half's copy, decided first: it supplies the brake's stream factory to BOTH halves ---
 	// An INJECTED copy (issue #500, `compat: { module }`) skips resolution and the identity check: a pi child loads
 	// child-meter.mjs through pi's virtual modules, so the module it hands over IS the copy pi gives extensions, and in
@@ -1409,11 +1344,13 @@ export async function installProcessUsageMeter({
 		}
 	}
 
-	// Armed only when a POLICY exists -- a token cap, a cost cap or a model list -- so a job with none of them
-	// can never have a call stopped. All three, not the token cap alone (issues #501, #502): the cost cap and
-	// the list are enforced BEFORE a call, by the guard, and a refusal needs this hard stop to answer with.
+	// Armed only when a POLICY exists -- a token cap or a model list -- so a job with none of them
+	// can never have a call stopped. The list is enforced BEFORE a call, by the guard, and a refusal needs this
+	// hard stop to answer with; the token cap needs it too, because its settle-time check answers every LATER
+	// call with the stop (the lagging in-run backstop, OQ-010 -- there is no pre-call bound since the cost
+	// guard went).
 	// The stream factory comes from the accepted compat copy, so a compat half that did not install leaves no
-	// brake for either half, and the runner then refuses a cost cap or a list before the first prompt.
+	// brake for either half, and the runner then refuses a list before the first prompt.
 	const createStream = typeof module?.createAssistantMessageEventStream === "function"
 		? module.createAssistantMessageEventStream
 		: typeof module?.AssistantMessageEventStream === "function"
@@ -1421,7 +1358,7 @@ export async function installProcessUsageMeter({
 			: null;
 	// `brake: true` (issue #500) arms it with no policy at all: a child meter has none of its own to arm it, and still
 	// needs a hard stop to answer the parent's STOP with.
-	const armed = brake === true || meter.cap !== null || meter.costCap !== null || meter.allowed !== null;
+	const armed = brake === true || meter.cap !== null || meter.allowed !== null;
 	const hardStop = armed && createStream ? makeHardStopStream({ createStream }) : null;
 	// A meter that was ASKED for a brake (`brake: true`, or an outside stop to answer, `isStopped`) and cannot build
 	// one is not a meter (issue #500): judge() never asks isStopped without a hard stop, so a parent's STOP would be
@@ -1440,7 +1377,7 @@ export async function installProcessUsageMeter({
 	}
 	// One per install, shared by both halves (trap #5).
 	const dispatch = new AsyncLocalStorage();
-	const runtimeLayer = wrapModelRuntime({ ModelRuntime, meter, hardStop, guard, dispatch, isStopped, prices: pinnedPrices });
+	const runtimeLayer = wrapModelRuntime({ ModelRuntime, meter, hardStop, guard, dispatch, isStopped });
 	if (runtime !== null && !runtimeLayer.covers(runtime)) {
 		runtimeLayer.restore();
 		log("usage_meter_unavailable", { reason: "runtime-not-covered" });
@@ -1483,8 +1420,8 @@ export async function installProcessUsageMeter({
 	// throw is caught and logged, by name only and once, and the hook owns what a failed tick means.
 	// FAIL CLOSED under a policy: in a parent the hook IS the children's fold and detector, and a tick that threw has
 	// folded and detected nothing, so the job would run on with its children uncounted. With any policy the meter
-	// stops, for the stop an unmetered child gets (cost-cap under a dollar cap, else token_budget under a token cap,
-	// else model-not-allowed under a list). With none there is nothing to enforce, and the failure is only logged.
+	// stops, for the stop an unmetered child gets (token_budget under a token cap, else model-not-allowed under a
+	// list). With none there is nothing to enforce, and the failure is only logged.
 	// Failures are counted on the teardown line (`childrenFailed`).
 	let hookFailures = 0;
 	function tick(run) {
@@ -1493,7 +1430,7 @@ export async function installProcessUsageMeter({
 		} catch (error) {
 			if (hookFailures === 0) log("usage_meter_children_failed", { reason: reasonOf(error) });
 			hookFailures += 1;
-			const reason = meter.costCap !== null ? COST_CAP : meter.cap !== null ? TOKEN_BUDGET : meter.allowed !== null ? MODEL_NOT_ALLOWED : null;
+			const reason = meter.cap !== null ? TOKEN_BUDGET : meter.allowed !== null ? MODEL_NOT_ALLOWED : null;
 			if (reason !== null) meter.stop(reason, { cause: "children-hook" });
 			return null;
 		}
@@ -1503,7 +1440,7 @@ export async function installProcessUsageMeter({
 		ok: true,
 		// Whether a hard stop exists, and which stops the installed guard can refuse for: the two facts
 		// assertPoliciesEnforceable reads before the first prompt. Per policy, not one flag, so a guard that
-		// enforces the cost cap cannot pass for one that enforces the model list.
+		// enforces one policy cannot pass for one that enforces the other.
 		brake: hardStop !== null,
 		enforces: Object.freeze([...(guard?.enforces ?? [])]),
 		methods: runtimeLayer.methods,
@@ -1512,8 +1449,6 @@ export async function installProcessUsageMeter({
 		covers: (instance) => runtimeLayer.covers(instance),
 		module,
 		tag: accepted?.candidate.tag ?? null,
-		// The table every capped call is priced from (pinPriceTable): run-job hands it to pi children.
-		prices: pinnedPrices,
 		apis: [],
 		arm,
 		rearms: 0,
@@ -1534,7 +1469,7 @@ export async function installProcessUsageMeter({
 			const api = entry?.api;
 			if (typeof api !== "string") continue;
 			if (wrapped.has(entry)) continue;
-			const streams = wrapProviderStreams({ inner: entry, fallbackModels, meter, hardStop, guard, dispatch, isStopped, prices: pinnedPrices });
+			const streams = wrapProviderStreams({ inner: entry, fallbackModels, meter, hardStop, guard, dispatch, isStopped });
 			// One sourceId per api id, and registerApiProvider keys the registry by api id, so re-arming
 			// replaces our entry instead of piling up registrations.
 			module.registerApiProvider({ api, ...streams }, `${METER_PROVIDER_PREFIX}:${api}`);
@@ -1546,29 +1481,15 @@ export async function installProcessUsageMeter({
 			} else armedApis.add(api);
 		}
 		handle.apis = [...armedApis].sort();
-		// THE RE-ARM GAP UNDER A COST CAP (issue #501). An api id this half had wrapped was found replaced: by
+		// THE RE-ARM GAP UNDER A MODEL LIST (issue #502). An api id this half had wrapped was found replaced: by
 		// resetApiProviders() (AgentSession.reload()), or by an extension re-registering it. Between that and this
 		// arm, a legacy compat call on that api reached a provider UNGUARDED, and nothing can tell whether one did:
-		// the call went through an entry that is not ours. For the token cap that is a gap in a lagging count; for
-		// a cap that is checked BEFORE a call it is a call that may have passed the cap unseen. So under a cost
-		// cap a displacement stops the job, fail closed. Judging cost in the runtime half alone would not close
-		// it: a legacy compat call never enters a ModelRuntime (header, trap #5's converse). A job with no cost cap
-		// keeps today's behaviour: re-wrap and count the re-arm.
-		// The stop alone leaves no trace a settlement can read (the exit reason is the same `cost-cap` a plain refusal
-		// gives), so the guard also counts the displaced entries as `costUnjudged` on the exit line: a non-zero value
-		// says calls may have run unjudged and unmetered, and the job's cost is a floor.
-		if (displaced > 0 && meter.costCap !== null) {
-			guard?.unjudged?.(displaced);
-			if (meter.state.stopReason === null) {
-				log("cost_guard_displaced", { apis: displaced });
-				meter.stop(COST_CAP);
-			}
-		}
-		// The same gap under a model list (issue #502): a legacy compat call through the displaced entry reached a
-		// provider without the list being asked, so it may have called a model the list forbids. Fail closed the
-		// same way. Under a cap as well, the cap's stop above has already won (first wins, with `costUnjudged` as its
-		// evidence); under a list alone the stop is `model-not-allowed`, and its record tells it apart from a refused
-		// call by `modelRefused: 0`.
+		// the call went through an entry that is not ours. So under a list a displacement stops the job, fail
+		// closed. Judging in the runtime half alone would not close it: a legacy compat call never enters a
+		// ModelRuntime (header, trap #5's converse). A job with no list keeps today's behaviour: re-wrap and count
+		// the re-arm. The token cap has no displaced-entry stop on purpose: with no pre-call bound anywhere (the
+		// cost guard is gone) a displaced entry costs the run a gap in a LAGGING count, the same gap the cap has
+		// always carried, not a bound that silently passed.
 		if (displaced > 0 && meter.allowed !== null && meter.state.stopReason === null) {
 			log("model_guard_displaced", { apis: displaced });
 			meter.stop(MODEL_NOT_ALLOWED);
@@ -1606,8 +1527,8 @@ export async function installProcessUsageMeter({
 	// half sends builtin models to the wrong entry. `brake` is whether a hard-stop stream exists; `capped`
 	// rides along because it is what makes `brake` readable: an uncapped job has no brake BY DESIGN, so
 	// `capped:true` with `brake:false` is the alarm -- a cap that can only be enforced after the fact.
-	// `costCapped` and `listed` (issues #501, #502) are the other two policies that arm the brake, so the
-	// same reading holds for them: either true beside `brake:false` is a policy the runner then refuses.
+	// `listed` (issue #502) is the other policy that arms the brake, so the same reading holds for it:
+	// true beside `brake:false` is a policy the runner then refuses.
 	// Reporting a plain `ok:true` over any of these would be a degraded meter calling itself healthy.
 	log("usage_meter", {
 		ok: true,
@@ -1618,7 +1539,6 @@ export async function installProcessUsageMeter({
 		...(accepted ? { fallback: fallbackModels !== null } : {}),
 		...(fallbackError ? { fallbackError } : {}),
 		capped: meter.cap !== null,
-		costCapped: meter.costCap !== null,
 		listed: meter.allowed !== null,
 		brake: hardStop !== null,
 	});
@@ -1635,22 +1555,21 @@ export async function installProcessUsageMeter({
 }
 
 /**
- * Refuse, before the first prompt, a cost cap or a model list this runner cannot enforce BEFORE a call
- * (issues #501, #502; INT-RUNNER-EXIT-CODE-PROTOCOL). Both policies are pre-call by definition: a cost cap
- * checked after a call has already let one call past it, and one call can cost more than the cap, and a model
- * list checked after a call has already paid the model it forbids. So each needs, together:
+ * Refuse, before the first prompt, a model list this runner cannot enforce BEFORE a call
+ * (issue #502; INT-RUNNER-EXIT-CODE-PROTOCOL). The list is pre-call by definition: a list
+ * checked after a call has already paid the model it forbids. So it needs, together:
  *   - the process-wide meter installed (`meterOk`). The fallback bus meter (run-job's attachTokenBudget) sees a
- *     call only after it settled, which is exactly the after-the-fact enforcement these policies rule out;
+ *     call only after it settled, which is exactly the after-the-fact enforcement this policy rules out;
  *   - a hard stop to answer a refused call with (`brake`), which needs the compat copy's stream factory;
  *   - a guard that judges each call FOR THAT POLICY (`enforces` lists the stop reasons the installed guard can
- *     refuse for: COST_CAP for the cap, MODEL_NOT_ALLOWED for the list). The cost guard (createCostGuard) enforces
- *     COST_CAP and the model guard (createModelGuard, issue #502) MODEL_NOT_ALLOWED; run-job installs each only
- *     for its own policy (createPolicyGuard), so a guard for one can never pass for the other.
- * Missing any one, the job is refused as a tagged configError: exit 2, not retried, before any spend. The
- * model list is checked first: a job that would be refused for both is named by the policy that decides
- * which provider is called at all. Names only, never values: the cap and the list are not echoed.
+ *     refuse for: MODEL_NOT_ALLOWED for the list). The model guard (createModelGuard, issue #502) enforces it;
+ *     run-job installs it only for this policy. The per-job token cap is deliberately NOT judged here: it has no
+ *     pre-call form to enforce (its stop is the meter's settle-time check, OQ-010), so there is nothing a missing
+ *     brake would make it enforce early.
+ * Missing any one, the job is refused as a tagged configError: exit 2, not retried, before any spend. Names
+ * only, never values: the list is not echoed.
  */
-export function assertPoliciesEnforceable({ maxCostMicros = null, allowedModels = null, meterOk, brake, enforces = [] }) {
+export function assertPoliciesEnforceable({ allowedModels = null, meterOk, brake, enforces = [] }) {
 	const missing = (stop) => (!meterOk
 		? "the process-wide usage meter did not install"
 		: !brake
@@ -1661,15 +1580,12 @@ export function assertPoliciesEnforceable({ maxCostMicros = null, allowedModels 
 	if (allowedModels !== null && missing(MODEL_NOT_ALLOWED) !== null) {
 		throw configError(`PI_ALLOWED_MODELS is set but cannot be enforced before a call: ${missing(MODEL_NOT_ALLOWED)}`, MODEL_POLICY_UNENFORCEABLE);
 	}
-	if (maxCostMicros !== null && missing(COST_CAP) !== null) {
-		throw configError(`PI_MAX_COST_MICROS is set but cannot be enforced before a call: ${missing(COST_CAP)}`, COST_CAP_UNENFORCEABLE);
-	}
 }
 
 /**
- * The stop handler run-job.mjs gives the meter (issues #501, #502). Every stop aborts the root session, the same
+ * The stop handler run-job.mjs gives the meter (issues #500, #502). Every stop aborts the root session, the same
  * synchronous way, whichever policy it was; only a TOKEN stop logs `token_budget_exceeded`, because that line
- * means "the token cap", and a cost or model stop that wrote it would send an operator to the wrong knob. Pure,
+ * means "the token cap", and a model stop that wrote it would send an operator to the wrong knob. Pure,
  * so the wiring is tested here rather than only read off run-job's source.
  */
 export function meterStopHandler({ onTokenAbort, abort }) {
@@ -1691,282 +1607,75 @@ export function policyEnforcement(handle) {
 	return { meterOk: ok, brake: ok && handle.brake === true, enforces: ok ? handle.enforces ?? [] : [] };
 }
 
-// ── Issue #501: the per-job cost cap, checked before every provider call ──────────────────────────────────
-//
-// Every number below is an INTEGER of micro-dollars (1 USD = 1,000,000), the unit of PI_MAX_COST_MICROS.
-// pi-ai rates are dollars per million tokens, so tokens x rate is already micro-dollars.
-
 /**
- * The api ids whose provider prices a call from the model's cost table, at the pin (re-verified at 1.1.0): exactly the
- * dist/api modules that reach pi-ai's `calculateCost` (directly, or through openai-responses-shared.js and
- * classifier-shared.js, which carries the System One classifiers and openai-decisions since pi 1.1.0). pinned-api.test.mjs derives that set from the pinned source and requires it to equal
- * this list, so a new priced api fails the pin rather than the budget. An api NOT here prices itself or not at
- * all (`pi-messages` and the Radius providers report their own cost; images and classifiers have their own
- * modules), so the catalog's table says nothing about what its call costs, and the bound is Infinity.
+ * Whether a settled call had STARTED answering: its message holds any content block (text, thinking, a tool call,
+ * an image), or an images result has output. Usage counts do not count, output included: anthropic-messages copies
+ * message_start's `output_tokens` (Anthropic sends 1) into usage.output before an in-band `overloaded_error`, so a
+ * call that never answered reports one output token.
  */
-export const PRICED_APIS = Object.freeze([
-	"anthropic-messages",
-	"azure-openai-responses",
-	"bedrock-converse-stream",
-	"cloudflare-workers-ai-system-one",
-	"google-generative-ai",
-	"google-vertex",
-	"mistral-conversations",
-	"openai-codex-responses",
-	"openai-completions",
-	"openai-decisions",
-	"openai-responses",
-	"typesafe-system-one",
-]);
-/** Added to the request's byte length for what the provider adds around it (system framing, tool schemas). */
-export const BOUND_OVERHEAD_TOKENS = 8192;
-/** Anthropic's long-context threshold, in input tokens (user decision, issue #501). */
-export const LONG_CONTEXT_TOKENS = 200_000;
-/**
- * The two apis that report `cacheWrite1h` (so a 1h write is priced at 2 x input) and that carry Anthropic's
- * models, which is where the synthetic long-context tier applies. Pinned by needle.
- */
-const ANTHROPIC_PRICED_APIS = new Set(["anthropic-messages", "bedrock-converse-stream"]);
-/** The apis that multiply the settled cost by the service tier the RESPONSE reports (pinned by needle). */
-const SERVICE_TIER_APIS = new Set(["openai-responses", "openai-codex-responses"]);
-/** The apis that raise max_output_tokens to 16 (OPENAI_RESPONSES_MIN_OUTPUT_TOKENS, pinned by needle). */
-const MIN_OUTPUT_APIS = new Set(["openai-responses", "azure-openai-responses"]);
-const MIN_OUTPUT_TOKENS = 16;
-/**
- * The apis that never put the caller's maxTokens on the request (pinned by needle): the provider then answers up
- * to the model's own limit, so a small options.maxTokens bounds nothing there.
- */
-const MAX_TOKENS_UNSENT_APIS = new Set(["openai-codex-responses", "cloudflare-workers-ai-system-one", "openai-decisions", "typesafe-system-one"]);
-/**
- * The hosts pi's own catalog serves openai-completions models on (issue #507), GENERATED from the pinned catalog by
- * .github/scripts/pi-derived.mjs (a pi bump reruns it and lists the hosts that came or went) and pinned to the catalog
- * by pinned-api.test.mjs. openai-completions sends the output cap as `max_completion_tokens` unless the model's
- * compat says `max_tokens`, and pi picked that field per host for these hosts only. Any other server is the
- * operator's (Ollama, vLLM, llama.cpp, LM Studio, a proxy), and pi's default is a guess there: Ollama 0.35.0
- * ignores `max_completion_tokens` and answers past it (measured: 20 asked, 440 returned), which let a job settle
- * $3.41 under a $2 cap. Every OpenAI-compatible server reads `max_tokens`, so on any other host only a cap that
- * travels as `max_tokens` bounds the output. Rejected: trusting `model.contextWindow` instead, since it is the
- * operator's number and not the server's (Ollama's own window differs and it shifts context to keep answering).
- */
-export const COMPLETIONS_CATALOG_HOSTS = Object.freeze([
-	"api.ant-ling.com",
-	"api.cerebras.ai",
-	"api.cloudflare.com",
-	"api.deepseek.com",
-	"api.fireworks.ai",
-	"api.groq.com",
-	"api.individual.githubcopilot.com",
-	"api.kimi.com",
-	"api.moonshot.ai",
-	"api.moonshot.cn",
-	"api.together.ai",
-	"api.xiaomimimo.com",
-	"api.z.ai",
-	"gateway.ai.cloudflare.com",
-	"inference.baseten.co",
-	"integrate.api.nvidia.com",
-	"open.bigmodel.cn",
-	"opencode.ai",
-	"openrouter.ai",
-	"router.huggingface.co",
-	"token-plan-ams.xiaomimimo.com",
-	"token-plan-cn.xiaomimimo.com",
-	"token-plan-sgp.xiaomimimo.com",
-	"token-plan.ap-southeast-1.maas.aliyuncs.com",
-	"token-plan.cn-beijing.maas.aliyuncs.com",
-]);
-
-/**
- * Hosts trusted beside the catalog's, each pinned with its reason by pinned-api.test.mjs. api.openai.com: pi's catalog
- * serves OpenAI on openai-responses, so the host is not in the derived list, but an overlay model may reach it on
- * openai-completions. pi sends `max_completion_tokens` there (detectCompat has no rule for it), OpenAI honours it, and
- * it REJECTS `max_tokens` for its reasoning models, so refusing it would leave the operator no field that works.
- */
-export const COMPLETIONS_EXTRA_HOSTS = Object.freeze(["api.openai.com"]);
-
-/**
- * Whether an openai-completions model talks to a server outside COMPLETIONS_CATALOG_HOSTS and COMPLETIONS_EXTRA_HOSTS,
- * where only a cap sent as `max_tokens` is known to be read. A baseUrl that does not parse counts as such a server.
- */
-export function completionsOwnServer(model) {
-	if (model?.api !== "openai-completions") return false;
-	try {
-		const host = new URL(model.baseUrl).hostname;
-		return !COMPLETIONS_CATALOG_HOSTS.includes(host) && !COMPLETIONS_EXTRA_HOSTS.includes(host);
-	} catch {
-		return true;
-	}
+function started(message) {
+	const blocks = (value) => Array.isArray(value) && value.length > 0;
+	return blocks(message?.content) || blocks(message?.output);
 }
 
-/** A rate that is a finite, non-negative number. Anything else makes the table unusable for a bound. */
-function rate(value) {
-	return typeof value === "number" && Number.isFinite(value) && value >= 0;
-}
-
-/** Every cost table that could price this call: the model's own, then each allowed fallback's (pi-ai prices a fallback answer at the fallback's table). */
-function baseTables(model) {
-	const fallbacks = Array.isArray(model?.compat?.allowedFallbackModels) ? model.compat.allowedFallbackModels : [];
-	return [model?.cost, ...fallbacks.map((fallback) => fallback?.cost)];
-}
-
-/** Whether the request carries options.maxTokens as its output cap. See MAX_TOKENS_UNSENT_APIS. */
-function sendsMaxTokens(model, options) {
-	if (MAX_TOKENS_UNSENT_APIS.has(model.api)) return false;
-	if (model.api === "openai-responses") {
-		if (model.compat?.supportsMaxOutputTokens === false) return false;
-		// Sign in with ChatGPT drops max_output_tokens (openai-responses.js isChatGPTSignIn). The key is resolved
-		// AFTER this wrapper (ModelRuntime.prepareRequest), so unless the caller passed an `sk-` key itself, the
-		// openai provider on its own baseUrl may be that case.
-		const apiKey = options?.apiKey;
-		if (model.provider === "openai" && model.baseUrl === "https://api.openai.com/v1" && !(typeof apiKey === "string" && apiKey.startsWith("sk-"))) return false;
-	}
-	return true;
+/** An answer block that holds something the model produced: non-empty text or thinking, or a tool call. */
+function answerContent(message) {
+	if (!Array.isArray(message?.content)) return false;
+	return message.content.some((block) => (block?.type === "text" && typeof block.text === "string" && block.text.length > 0) || (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) || block?.type === "toolCall");
 }
 
 /**
- * The most one provider call can cost, in integer micro-dollars: a number, 0 for a zero-rated model, or
- * Infinity when the call cannot be bounded (the guard refuses those under a cap). Pure. `env` is the process
- * environment, injected (PI_CACHE_RETENTION).
- *
- * The steps, each a fact about the pinned pi-ai (re-verified at 1.0.3) that pinned-api.test.mjs holds by needle:
- *   1. An api outside PRICED_APIS: Infinity.
- *   2. The rate tables: model.cost, each compat.allowedFallbackModels cost (anthropic-messages bills a fallback
- *      answer at the fallback's rates), each table's `tiers` entry that the input could reach, and, for a table
- *      with no tiers on the two Anthropic apis, a SYNTHETIC long-context tier above 200k input tokens (2 x input,
- *      cache read and cache write, 1.5 x output). The catalog carries no Anthropic long-context prices, and the
- *      user decision was a generic tier rather than a hand-kept price table. A rate that is not a finite
- *      non-negative number: Infinity.
- *   3. Every rate 0: 0, so a zero-rated local model runs under a cap of 0.
- *   4. inputBound = UTF-8 bytes of JSON.stringify(context) + BOUND_OVERHEAD_TOKENS. ASSUMPTION: one token is at
- *      least one UTF-8 byte; `boundExceeded` on the exit line is the evidence if a tokenizer breaks it. NOT capped
- *      by model.contextWindow: pi does not enforce the window (gpt-5.4 lists 272k and prices a tier above it).
- *      A context that does not serialise: Infinity. Each image block counts at least a per-image pixel ceiling
- *      (imageAllowance), because providers bill pixels, not base64 bytes.
- *   5. The output bound: options.maxTokens (when positive and the api sends it) else model.maxTokens; raised to
- *      model.maxTokens when options.reasoning is set (adjustMaxTokensForThinking may lift the caller's budget up
- *      to it); at least 16 on openai-responses and azure. 0 for `classify`, which is Infinity if any output rate
- *      is above 0 (pi exposes no output bound for it). No usable number, or a present maxTokens that is not
- *      finite: Infinity. On the three apis that merge samplingParams after the cap, an output-cap key there wins
- *      if larger and `n` multiplies (samplingOutput). On openai-completions to a host outside
- *      COMPLETIONS_CATALOG_HOSTS and COMPLETIONS_EXTRA_HOSTS (issue #507), only the cap the request carries as
- *      `max_tokens` counts: a model whose compat does not set that field is Infinity, and so is a raw `stream` with
- *      no options.maxTokens and a caller's cap of 0. A negative cap on openai-completions is Infinity on every host.
- *   6. The input rate of a table is the highest of input, cacheRead and cacheWrite, and 2 x input when a 1h cache
- *      write can happen: api anthropic-messages or bedrock-converse-stream and retention "long", resolved as pi
- *      does (options.cacheRetention, else options.env.PI_CACHE_RETENTION, else the process env).
- *   7. The service-tier multiplier: 2.5 for gpt-5.5 and 2 otherwise on openai-responses and
- *      openai-codex-responses (pi multiplies the settled cost by the tier the RESPONSE reports, which can be the
- *      account's default, not only the request's); 1 elsewhere, azure included (it applies none).
- *   8. ceil(max over tables of (inputBound x inputRate + output x outputRate) x multiplier). Per table, because
- *      pi prices one call with exactly one table.
+ * Did this settled answer carry NO usable usage, or BROKEN usage (issue #571)? pi fills a missing usage block with
+ * zeros, and keeps the part of a usage it did see, so a call's token count reads as 0 though the provider answered.
+ * True when the answer carries no usage object at all (a provider that sent none; the token total is short by
+ * whatever the call really used), and otherwise when:
+ *   (a) it failed (`error` or `aborted`) after it started: its usage is partial (openai-completions and
+ *       openai-responses report usage only at the stream's end, anthropic-messages what message_start carried);
+ *   (b) its input side (input + cacheRead + cacheWrite) is 0: a call that reached a provider always consumed
+ *       input, so a zero is pi's filled-in zeros, not a measurement;
+ *   (c) it succeeded with answer content (answerContent) but an output count of 0, or of at most 1 on
+ *       `anthropic-messages`, where pi keeps message_start's `output_tokens` (Anthropic sends 1) when a proxy's
+ *       message_delta carries no output count (anthropic-messages.js at the pin). A genuine one-token answer there is
+ *       floored too: the safe side.
+ * The money precondition the old unreportedUsage had (a finite `cost.total`, the meter's `unpriced`) is gone with
+ * the cost guard: a missing usage block is itself the floor signal now, not something a price column would paper
+ * over. A call that never reached a provider (the meter's hard stop) is never observed here at all, so an honest
+ * zero is never counted.
+ * Pure: `api` is the api of the model the call was dispatched on.
  */
-export function callCostBound(method, model, context, options, env = process.env) {
-	// 1.
-	if (!PRICED_APIS.includes(model?.api)) return Infinity;
-	// 2. The tables before tiers; each must be usable.
-	const bases = baseTables(model);
-	const fields = ["input", "output", "cacheRead", "cacheWrite"];
-	for (const table of bases) {
-		if (!table || !fields.every((field) => rate(table[field]))) return Infinity;
-		const tiers = table.tiers ?? [];
-		if (!Array.isArray(tiers)) return Infinity;
-		for (const tier of tiers) {
-			if (!tier || !fields.every((field) => rate(tier[field])) || !rate(tier.inputTokensAbove)) return Infinity;
-		}
-	}
-	// 3.
-	const everyRate = bases.flatMap((table) => [table, ...(table.tiers ?? [])]).flatMap((table) => fields.map((field) => table[field]));
-	if (everyRate.every((value) => value === 0)) return 0;
-	// 4.
-	let serialised;
-	try {
-		serialised = JSON.stringify(context);
-	} catch {
-		return Infinity;
-	}
-	const inputBound = (typeof serialised === "string" ? Buffer.byteLength(serialised, "utf8") : 0) + BOUND_OVERHEAD_TOKENS + imageAllowance(model, context);
-	// 5.
-	let output;
-	if (method === "classify") {
-		const outputRates = bases.flatMap((table) => [table, ...(table.tiers ?? [])]).map((table) => table.output);
-		if (outputRates.some((value) => value > 0)) return Infinity;
-		output = 0;
-	} else {
-		// A PRESENT maxTokens that is not a finite number is unboundable: pi's clampMaxTokensToContext turns NaN into a
-		// null on the wire (the provider's default) and Infinity into the remaining window. null/undefined is absent,
-		// as pi reads it (`options?.maxTokens ?? model.maxTokens`). A finite value of 0 or less is NOT absent: the clamp
-		// keeps it (`Math.min`), and openai-completions then sends no cap for 0 (`if (options?.maxTokens)`) and a
-		// negative one as it is (Ollama reads `max_tokens: -1` as no limit; measured on the wire, issue #507). On
-		// openai-completions a negative cap is Infinity on every host; 0 is Infinity on the operator's own server and
-		// the model's limit on a catalog host, where a request with no cap is the hosted server's own limit (the
-		// residual named in DES-DOLLAR-RESERVE-AND-SETTLE). The other apis refuse a cap of 0 or less, or raise it
-		// (openai-responses' 16 floor), so there it bounds nothing and the model's cap applies.
-		const raw = options?.maxTokens;
-		if (raw !== undefined && raw !== null && !(typeof raw === "number" && Number.isFinite(raw))) return Infinity;
-		const present = typeof raw === "number";
-		if (present && raw < 0 && model.api === "openai-completions") return Infinity;
-		const asked = present && raw > 0 ? raw : undefined;
-		const modelMax = typeof model.maxTokens === "number" && Number.isFinite(model.maxTokens) && model.maxTokens > 0 ? model.maxTokens : undefined;
-		if (completionsOwnServer(model)) {
-			// Issue #507: on the operator's own server the output is bounded by the cap on the wire, and only when it
-			// travels as max_tokens. streamSimple sends `asked`, or `model.maxTokens` when the caller passed none (clamped
-			// lower, never to 0 from a positive value); a raw stream sends only the caller's. A caller's 0 sends no cap at
-			// all, so the server answers as long as it likes: Infinity, like a raw stream with none.
-			const sent = present ? asked : method === "stream" ? undefined : modelMax;
-			output = model.compat?.maxTokensField === "max_tokens" ? sent : undefined;
-		} else {
-			output = sendsMaxTokens(model, options) ? (asked ?? modelMax) : modelMax;
-		}
-		if (options?.reasoning) output = modelMax === undefined || output === undefined ? undefined : Math.max(output, modelMax);
-		if (output === undefined) return Infinity;
-		if (MIN_OUTPUT_APIS.has(model.api)) output = Math.max(output, MIN_OUTPUT_TOKENS);
-		output = samplingOutput(model, options, output);
-		if (!Number.isFinite(output)) return Infinity;
-	}
-	// 6.
-	const anthropic = ANTHROPIC_PRICED_APIS.has(model.api);
-	// pi's own order and truthiness (anthropic-messages.js resolveCacheRetention, provider-env.js getProviderEnvValue).
-	// env-internal PI_CACHE_RETENTION: pi-ai's own knob, read here only to bound a call the way pi will price it.
-	const retention = options?.cacheRetention || ((options?.env?.PI_CACHE_RETENTION || env?.PI_CACHE_RETENTION) === "long" ? "long" : "short");
-	const longWrite = anthropic && retention === "long";
-	// 7.
-	const multiplier = SERVICE_TIER_APIS.has(model.api) ? (model.id === "gpt-5.5" ? 2.5 : 2) : 1;
-	// 2 and 8: every table that could price this call, the dearest of them.
-	let dearest = 0;
-	for (const table of bases) {
-		const tiers = table.tiers ?? [];
-		const candidates = [table, ...tiers.filter((tier) => inputBound > tier.inputTokensAbove)];
-		if (anthropic && tiers.length === 0 && inputBound > LONG_CONTEXT_TOKENS) candidates.push(longContextTier(table));
-		for (const rates of candidates) {
-			const inputRate = Math.max(rates.input, rates.cacheRead, rates.cacheWrite, longWrite ? 2 * rates.input : 0);
-			dearest = Math.max(dearest, inputBound * inputRate + output * rates.output);
-		}
-	}
-	const bound = Math.ceil(dearest * multiplier);
-	return Number.isFinite(bound) ? bound : Infinity;
+export function usageUnreported(message, api) {
+	const usage = message?.usage;
+	if (usage === null || usage === undefined || typeof usage !== "object") return true;
+	const failed = message?.stopReason === "error" || message?.stopReason === "aborted";
+	if (failed) return started(message);
+	if (finite(usage.input) + finite(usage.cacheRead) + finite(usage.cacheWrite) === 0) return true;
+	if (!answerContent(message)) return false;
+	const output = finite(usage.output);
+	return output === 0 || (api === "anthropic-messages" && output <= 1);
+}
+
+// ── Issue #502, part 4: the allowed-model list, checked before every provider call ────────────────────────
+
+/** The one spelling of a (provider, model) pair the guard compares: NUL cannot appear in either id. */
+function pairKey(provider, model) {
+	return `${provider}\u0000${model}`;
 }
 
 /**
- * The apis that merge the resolved sampling parameters into the request AFTER the output cap
- * (`Object.assign(params, samplingParams)` on `resolveSamplingParams(model, level, options?.samplingParams)`, pinned
- * by needle), so a key there overrides it. Issue #501, PR #534's review.
+ * The api that sends a model's `compat.allowedFallbackModels` to the provider (as `params.fallbacks`, model ids only)
+ * and names a fallback answer in `responseModel`. Pinned by needle: it is the only api module that reads the field.
  */
+const FALLBACK_API = "anthropic-messages";
+
 const SAMPLING_OVERRIDE_APIS = new Set(["openai-completions", "openai-responses", "azure-openai-responses"]);
-const SAMPLING_OUTPUT_KEYS = Object.freeze(["max_tokens", "max_completion_tokens", "max_output_tokens"]);
-/**
- * The samplingParams keys a bound can reason about. Because the merge comes LAST, any other key overrides the
- * request itself (`model`, `service_tier`, `tools`...), so a samplingParams holding a key outside this list makes
- * the call unboundable under a cap. The sampling knobs here change which tokens come out, never the price of one.
- */
-export const SAMPLING_SAFE_KEYS = Object.freeze(["temperature", "top_p", "top_k", "seed", "stop", "presence_penalty", "frequency_penalty", ...SAMPLING_OUTPUT_KEYS, "n"]);
 
 /**
  * Every sampling-parameter object that can reach a call's request, or null when one cannot be read (fail closed).
  * pi 1.0.2 added `model.samplingParamsByThinkingLevel` (issue #587): `resolveSamplingParams` merges
  * `{ ...model.samplingParams, ...byLevel[level], ...options.samplingParams }`, with the level clamped per model and
  * chosen per call, and streamSimple resolves twice (buildBaseOptions, then the api), so keys of two levels can meet in
- * one request. The guards track no level: they read EVERY level, the model's own params and the call's, as layers.
- * A key in any layer counts, and an output bound takes the largest value any layer holds.
+ * one request. The model guard tracks no level: it reads EVERY level, the model's own params and the call's, as layers.
+ * A routing key in any layer refuses the call.
  */
 function samplingLayers(model, options) {
 	const layers = [];
@@ -1987,442 +1696,6 @@ function samplingLayers(model, options) {
 	}
 	return layers;
 }
-
-/**
- * Whether a call's sampling layers (samplingLayers: the model's, every thinking level's, the call's) hold a key
- * outside SAMPLING_SAFE_KEYS on an api that merges them into the request AFTER it is built, so the key overrides the
- * request itself: its price for the cost guard, and for the model guard its `model` (issue #502, PR #538's review).
- * One rule, read by both guards. A layer that cannot be read counts as such a key.
- */
-export function samplingOverridesRequest(model, options) {
-	if (!SAMPLING_OVERRIDE_APIS.has(model?.api)) return false;
-	const layers = samplingLayers(model, options);
-	if (layers === null) return true;
-	return layers.some((layer) => Object.keys(layer).some((key) => !SAMPLING_SAFE_KEYS.includes(key)));
-}
-
-/**
- * The output bound once the sampling layers have had their say: the larger of the bound and any output-cap key in
- * ANY layer, times the largest `n` in any layer (completions answer n choices, each up to the cap). Taken across
- * layers rather than on one merged object, so whichever level pi picks, and whichever layers meet in the request, the
- * bound is not lower than what is sent. A key that is present but not a positive finite number (null sends the
- * provider's default; a string is whatever the server makes of it) is Infinity.
- */
-function samplingOutput(model, options, output) {
-	if (!SAMPLING_OVERRIDE_APIS.has(model.api)) return output;
-	if (samplingOverridesRequest(model, options)) return Infinity;
-	const positive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0;
-	let bound = output;
-	let choices = 1;
-	for (const layer of samplingLayers(model, options)) {
-		for (const key of SAMPLING_OUTPUT_KEYS) {
-			if (!Object.hasOwn(layer, key)) continue;
-			if (!positive(layer[key])) return Infinity;
-			bound = Math.max(bound, layer[key]);
-		}
-		if (Object.hasOwn(layer, "n")) {
-			if (!positive(layer.n) || !Number.isInteger(layer.n)) return Infinity;
-			choices = Math.max(choices, layer.n);
-		}
-	}
-	return bound * choices;
-}
-
-/** pi's default image resize box (pi-coding-agent utils/image-resize-core.js, pinned by needle). */
-export const IMAGE_RESIZE_MAX = Object.freeze({ width: 2000, height: 2000 });
-/**
- * Input tokens one image can cost in pi's resize box (2000 x 2000), per api. Provider billing rules, not pi facts,
- * so each is stated with its arithmetic, for the family each api natively serves:
- *   - the openai apis (completions, responses, azure, codex, decisions): gpt-4o-mini's high-detail tiles, base 2,833 plus
- *     5,667 per 512 px tile. Inside a 2000 box the most tiles is 4 x 2 = 8 (a 2000 x 750 image: no side over
- *     2048, the shortest side under 768 so not scaled), so 2,833 + 8 x 5,667 = 48,169. gpt-4o's 85 + 170 per tile
- *     and the 32 px patch counts (2000 x 2000 is 3,969 patches) are below it;
- *   - mistral-conversations: Pixtral's 16 px patches plus one break token per row, unscaled at 2000:
- *     125 x 125 + 125 = 15,750;
- *   - every other priced api: Anthropic's w x h / 750 = 2000 x 2000 / 750 = 5,334 (Claude direct and on Bedrock;
- *     Gemini's 768 px tiles at 258 each, 9 x 258 = 2,322, are below it).
- * The ceiling is the larger of the api's and the model FAMILY's (familyImageCeiling): a gateway serves one
- * family over another family's api (vercel-ai-gateway's gpt-4o-mini on anthropic-messages, Bedrock's Pixtral on
- * bedrock-converse-stream), and the family decides how its images are billed.
- * A model that declares a larger resize box scales the ceiling by the area ratio.
- */
-export const IMAGE_TOKEN_CEILINGS = Object.freeze({
-	"openai-completions": 48_169,
-	"openai-responses": 48_169,
-	"azure-openai-responses": 48_169,
-	"openai-codex-responses": 48_169,
-	// OpenAI's Decisions classifier (pi 1.1.0) sends a classify call's images as they are, without pi's resize; the
-	// tile count is still bounded by OpenAI's own downscale, which is what 48,169 is derived from.
-	"openai-decisions": 48_169,
-	"mistral-conversations": 15_750,
-	default: 5_334,
-});
-
-/** The family ceiling a model id implies, by name: OpenAI's (48,169) or Mistral's (15,750), else 0. */
-/** Any `gpt-` id (gpt-4o, gpt-4.1, gpt-5...), or an o-series id (`o1`, `o3-mini`, `openai/o4-mini`). */
-const OPENAI_FAMILY = /gpt-|(?:^|[/:.])o\d/i;
-const MISTRAL_FAMILY = /pixtral|mistral|ministral|magistral|devstral|codestral/i;
-function familyImageCeiling(id) {
-	if (typeof id !== "string") return 0;
-	if (OPENAI_FAMILY.test(id)) return IMAGE_TOKEN_CEILINGS["openai-completions"];
-	if (MISTRAL_FAMILY.test(id)) return IMAGE_TOKEN_CEILINGS["mistral-conversations"];
-	return 0;
-}
-
-/**
- * Input tokens an image costs beyond its own bytes (PR #534's review). Providers bill an image by its PIXELS,
- * not by its base64 length: a 2000 x 2000 one-bit PNG is 756 bytes and about 1,590 Anthropic tokens. So each
- * image block in the request counts as the larger of its serialised bytes and a per-image ceiling: the larger of
- * its api's (IMAGE_TOKEN_CEILINGS) and its model family's, for pi's 2000 x 2000 resize box, scaled up for a model
- * that declares a larger box.
- * Limits, named in DES-DOLLAR-RESERVE-AND-SETTLE: an image an extension adds without pi's resize can be larger
- * than the box, and the ceilings are provider billing rules for the families catalogued today.
- */
-function imageAllowance(model, context) {
-	const resize = model?.inputLimits?.images?.resize;
-	const width = Number.isFinite(resize?.maxWidth) && resize.maxWidth > 0 ? Math.max(resize.maxWidth, IMAGE_RESIZE_MAX.width) : IMAGE_RESIZE_MAX.width;
-	const height = Number.isFinite(resize?.maxHeight) && resize.maxHeight > 0 ? Math.max(resize.maxHeight, IMAGE_RESIZE_MAX.height) : IMAGE_RESIZE_MAX.height;
-	const perApi = Math.max(IMAGE_TOKEN_CEILINGS[model?.api] ?? IMAGE_TOKEN_CEILINGS.default, familyImageCeiling(model?.id));
-	const ceiling = Math.ceil((perApi * width * height) / (IMAGE_RESIZE_MAX.width * IMAGE_RESIZE_MAX.height));
-	let extra = 0;
-	// Every occurrence counts, shared references included: JSON.stringify sends a block once per reference, and a
-	// cycle has already made the context unboundable before this runs.
-	const walk = (value) => {
-		if (value === null || typeof value !== "object") return;
-		if (Array.isArray(value)) {
-			for (const item of value) walk(item);
-			return;
-		}
-		if (["image", "image_url", "input_image"].includes(value.type) || value.image?.source || value.inlineData?.mimeType?.startsWith("image/")) {
-			extra += Math.max(0, ceiling - Buffer.byteLength(JSON.stringify(value) ?? "", "utf8"));
-			return;
-		}
-		for (const item of Object.values(value)) walk(item);
-	};
-	walk(context);
-	return extra;
-}
-
-/** The synthetic Anthropic long-context tier of one table (user decision, issue #501). */
-function longContextTier(table) {
-	return { input: 2 * table.input, output: 1.5 * table.output, cacheRead: 2 * table.cacheRead, cacheWrite: 2 * table.cacheWrite };
-}
-
-/**
- * Whether a settled call had STARTED answering: its message holds any content block (text, thinking, a tool call,
- * an image), or an images result has output. Usage counts do not count, output included: anthropic-messages copies
- * message_start's `output_tokens` (Anthropic sends 1) into usage.output before an in-band `overloaded_error`, so a
- * call that never answered reports one output token.
- */
-function started(message) {
-	const blocks = (value) => Array.isArray(value) && value.length > 0;
-	return blocks(message?.content) || blocks(message?.output);
-}
-
-const PRICE_RATES = Object.freeze(["input", "output", "cacheRead", "cacheWrite"]);
-
-/**
- * Does a call on this model cost money (issue #571)? True when any rate of its cost table, of one of its tiers, or of
- * an allowed fallback model's table (anthropic-messages bills a fallback answer at the fallback's rates) is above 0.
- * The Model object a call is dispatched on carries the cost pi composed (overlay entry, override and tiers applied),
- * so this reads it as it is. Through pi a table is never missing: pi's composer gives a model with no `cost` all zeros
- * (provider-composer.js, modelFromJson), so such a model is zero-rated here as it is in pi's own pricing. A Model
- * object built by hand with no table, or with a rate that is not a number, counts as priced: its price cannot be read,
- * which is not proof of a free call. An absent rate is 0, as pi's own tables never omit one.
- */
-export function pricedModel(model) {
-	const rateOf = (value) => value === undefined || (typeof value === "number" && value <= 0) ? 0 : 1;
-	const priced = (table) => table === null || typeof table !== "object" || PRICE_RATES.some((key) => rateOf(table[key]) > 0);
-	const cost = model?.cost;
-	if (priced(cost)) return true;
-	if (Array.isArray(cost.tiers) && cost.tiers.some(priced)) return true;
-	const fallbacks = model?.compat?.allowedFallbackModels;
-	return Array.isArray(fallbacks) && fallbacks.some((entry) => priced(entry?.cost) || (Array.isArray(entry?.cost?.tiers) && entry.cost.tiers.some(priced)));
-}
-
-/** An answer block that holds something the model produced: non-empty text or thinking, or a tool call. */
-function answerContent(message) {
-	if (!Array.isArray(message?.content)) return false;
-	return message.content.some((block) => (block?.type === "text" && typeof block.text === "string" && block.text.length > 0) || (block?.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) || block?.type === "toolCall");
-}
-
-/**
- * Did this settled answer carry BROKEN usage (issue #571)? pi fills a missing usage block with zeros, and keeps the
- * part of a usage it did see, so a priced call's cost reads as about $0 though the provider billed it. True when the
- * answer has a finite `cost.total` (a missing one is the meter's `unpriced`, already a floor) and:
- *   (a) its input side (input + cacheRead + cacheWrite) is 0, and it is not a failed call that never started (that is
- *       the cost guard's `costUnanswered`: nothing came back, and nothing may have been billed);
- *   (b) it failed (`error` or `aborted`) after it started: its usage is partial (openai-completions and
- *       openai-responses report usage only at the stream's end, anthropic-messages what message_start carried);
- *   (c) it succeeded with answer content (answerContent) but an output count of 0, or of at most 1 on
- *       `anthropic-messages`, where pi keeps message_start's `output_tokens` (Anthropic sends 1) when a proxy's
- *       message_delta carries no output count (anthropic-messages.js at the pin). A genuine one-token answer there is
- *       floored too: the safe side.
- * Pure: `api` is the api of the model the call was dispatched on.
- */
-export function unreportedUsage(message, api) {
-	const usage = message?.usage;
-	if (usage === null || typeof usage !== "object") return false;
-	if (typeof usage.cost?.total !== "number" || !Number.isFinite(usage.cost.total)) return false;
-	const failed = message?.stopReason === "error" || message?.stopReason === "aborted";
-	if (failed) return started(message);
-	if (finite(usage.input) + finite(usage.cacheRead) + finite(usage.cacheWrite) === 0) return true;
-	if (!answerContent(message)) return false;
-	const output = finite(usage.output);
-	return output === 0 || (api === "anthropic-messages" && output <= 1);
-}
-
-/**
- * THE COST GUARD (issue #501; REQ-TOKEN-ACCOUNTING-AND-CAPS (d), DES-DOLLAR-RESERVE-AND-SETTLE). A guard for the
- * meter's seam: `{ enforces: [COST_CAP], admit, bind, snapshot }`.
- *
- * admit(call) refuses a call when `spent + inflight + bound > cap`, where `spent` is what settled calls cost and
- * `inflight` the bounds of calls admitted but not settled. With `external` (issue #500) the sum also holds
- * `external()`, spend in other processes, read at every admit: `spent + inflight + external() + bound > cap`. The in-flight sum is what makes parallel calls safe:
- * two sessions calling at once are judged against each other's worst case, not against a total neither has
- * added to yet. `generateImages` and `streamDeferred` have no bound pi exposes, and neither has a call
- * callCostBound answers Infinity for: under a cap those are refused, logged `why: "unboundable"`. A refusal
- * counts `costRefused`, logs `cost_refused` with numbers only (never a model id, never task content), and
- * returns COST_CAP, which stops the job (the meter's one stop) and answers this call with the hard stop.
- *
- * bind(result) ties the admission just made to its settle. Single-slot by design: admit and the dispatch that
- * follows it are synchronous and adjacent in both wrappers, and the only re-entry (a virtual model's physical
- * call) is never admitted on the outer call. A slot still held at the next admit means the dispatch threw
- * synchronously; that call stays charged at its bound, because a throw after a request started is not proof
- * that nothing was sent.
- *
- * Settle: the bound leaves `inflight` and the call's real cost joins `spent`, as ceil(cost x 1e6). A cost above
- * the bound counts `boundExceeded` (the evidence the one-byte-per-token assumption broke). On the two Anthropic
- * apis, a model with no catalog tiers whose settled input + cache read + cache write passed 200k counts
- * `longContext`, and is charged at the synthetic tier (2 x the input-side costs, 1.5 x output) because pi priced
- * it at the base rates the provider does not bill; a dollar settlement treats such a job's cost as incomplete. A
- * call whose cost is unknown (no finite cost.total, or a rejected result) stays charged at its BOUND, and the meter
- * counts it unpriced; a call that ended `error` or `aborted` after it STARTED (any content block) is charged at
- * least its bound, because its usage is partial, and one that never started is charged its metered cost and counted
- * as `costUnanswered`; a successful call that reports no input at all is charged its bound. A charge is never below zero. `costUnjudged` counts the compat entries the
- * installer found displaced under the cap (calls there may have run unjudged and unmetered). A call whose dispatch
- * threw synchronously (the wrappers bind `undefined` for it) or returned neither a stream nor a promise stays charged
- * at its bound and, on a bound above 0, counts `costUnanswered` (issue #571): it was never answered, and the meter never
- * saw it. A slot merely flushed by the next admit (a synchronous forward) is charged its bound and not counted. A call
- * whose answer carries broken usage (unreportedUsage, the meter's own predicate) is charged at least its bound; the
- * guard keeps no counter for it: the meter counts it as `costUnreported` on every run, capped or not.
- */
-/** Whether the call's model carries the pinned entry's api, cost (tiers included) and compat (fallbacks, maxTokensField). */
-function pricedAsPinned(model, pinned) {
-	if (pinned === null || typeof pinned !== "object") return false;
-	return model?.api === pinned.api && samePayloadValue(model?.cost, pinned.cost) && samePayloadValue(model?.compat, pinned.compat);
-}
-
-export function createCostGuard({ capMicros, env = process.env, log = () => {}, bound = callCostBound, external = null }) {
-	if (!Number.isSafeInteger(capMicros) || capMicros < 0) throw new Error(`invalid PI_MAX_COST_MICROS: ${capMicros}`);
-	if (external !== null && typeof external !== "function") throw new Error("createCostGuard: external must be a function");
-	const state = { spent: 0, inflight: 0, refused: 0, boundExceeded: 0, longContext: 0, unjudged: 0, unanswered: 0, why: null };
-	let pending = null;
-
-	/**
-	 * Spend this guard does not see itself (issue #500), in micro-dollars, read at every admit: for a parent, what its
-	 * children spent and hold in flight; for a child, what the parent's SPENT file says. Fail closed: anything but a
-	 * finite number at or above zero, or a throw, is Infinity, so the call is refused rather than judged against 0.
-	 */
-	function externalMicros() {
-		if (external === null) return 0;
-		let value;
-		try {
-			value = external();
-		} catch {
-			return Infinity;
-		}
-		return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : Infinity;
-	}
-
-	function refuse(fields) {
-		state.refused += 1;
-		// The FIRST refusal's rule (issue #507), the one that stopped the job: a refusal stops the meter, and a stopped
-		// meter answers every later call before the guard is asked. The log line below stays as it was (an over-cap
-		// refusal logs its `bound`, not a `why`); the exit line names the rule through refusedWhy().
-		state.why ??= fields.why ?? "over-cap";
-		log("cost_refused", { ...fields, spent: state.spent, inflight: state.inflight, cap: capMicros });
-		return COST_CAP;
-	}
-
-	function settle(ticket, message) {
-		if (ticket.settled) return;
-		ticket.settled = true;
-		const usage = message?.usage;
-		state.inflight -= ticket.bound;
-		const price = usage?.cost?.total;
-		if (typeof price !== "number" || !Number.isFinite(price)) {
-			state.spent += ticket.bound;
-			return;
-		}
-		// Never below zero: calculateCost's short-write term goes negative when a provider reports more 1h writes
-		// than writes (PR #534's review), and a negative charge would hand the cap room nobody paid for.
-		let charged = Math.max(0, Math.ceil(price * 1e6));
-		// A FAILED or ABORTED call (PR #534's review). Its usage is partial: openai-completions and openai-responses
-		// report usage only at the stream's end, anthropic-messages what message_start carried (the input and one
-		// output token) until message_delta, so a stream cut after 2,000 output deltas settles at about 0, and pi then
-		// auto-retries it. So a failed call that STARTED (the settled message holds any content block; usage counts
-		// do not decide it, see started()) is charged at least its bound. One that never
-		// started (a 429 or a 5xx before the stream, an in-band error before any content, a connection lost before the
-		// answer) is charged its metered cost and counted as `costUnanswered`: charging it the bound would stop a
-		// rate-limited job as cost-cap at $0 spent, and the counter tells a settlement the cost may be a floor, because
-		// a provider that accepted the request and lost the answer may still bill it. One rule, every api.
-		//
-		// Any other call whose usage is BROKEN is charged its bound too: the same predicate the meter counts
-		// `costUnreported` by (unreportedUsage, issue #571: no input, a failure after it started, or answer content with
-		// no output count), so what the cap charges and what the settlement floors cannot drift apart. The lift is not
-		// counted here: the meter's counter is the one. A forwarding call is lifted all the same, though the meter does
-		// not count it: the cap judges each call on its own worst case, and a router that answers itself after a failed
-		// forward must not run under the cap at $0.
-		const failed = message?.stopReason === "error" || message?.stopReason === "aborted";
-		if (failed && !started(message)) state.unanswered += 1;
-		else if (failed || unreportedUsage(message, ticket.model?.api)) charged = Math.max(charged, ticket.bound);
-		const catalogTiers = ticket.model?.cost?.tiers ?? [];
-		const inputSide = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0);
-		if (ANTHROPIC_PRICED_APIS.has(ticket.model?.api) && catalogTiers.length === 0 && inputSide > LONG_CONTEXT_TOKENS) {
-			state.longContext += 1;
-			const cost = usage.cost;
-			const synthetic = 2 * ((cost.input ?? 0) + (cost.cacheRead ?? 0) + (cost.cacheWrite ?? 0)) + 1.5 * (cost.output ?? 0);
-			if (Number.isFinite(synthetic)) charged = Math.max(charged, Math.ceil(synthetic * 1e6));
-		}
-		if (charged > ticket.bound) state.boundExceeded += 1;
-		state.spent += charged;
-	}
-
-	/**
-	 * A slot still held at the next admit or the snapshot: charged at its bound, and NOT counted. A call that dispatches
-	 * another synchronously (a router's forward) leaves its own slot here when the forward is admitted, and that call
-	 * is answered and metered like any other. Only a dispatch that threw, or returned no answer object, is counted
-	 * (`bind`, issue #571).
-	 */
-	function flushPending() {
-		if (pending === null) return;
-		const ticket = pending;
-		pending = null;
-		settle(ticket, null);
-	}
-
-	function admit({ method, model, args, priced }) {
-		flushPending();
-		// Issue #587's review: priced from the table pinned at install (pinPriceTable), never the caller's say-so. A call
-		// whose api, cost or compat differs from its entry, or one with no entry, cannot be bounded honestly. `priced` is
-		// undefined only when the meter was wired with no table at all, and then the call is judged on its own object.
-		if (priced !== undefined && !pricedAsPinned(model, priced)) return refuse({ why: "unboundable" });
-		const [context, options] = args ?? [];
-		// A copy that held something other than plain data (snapshotModel): what pi would read is not what was judged.
-		if (isUnreadable(model) || isUnreadable(options)) return refuse({ why: "unboundable" });
-		const b = method === "generateImages" || method === "streamDeferred" ? Infinity : bound(method, model, context, options, env);
-		if (!Number.isFinite(b)) return refuse({ why: "unboundable" });
-		const outside = externalMicros();
-		if (!Number.isFinite(outside)) return refuse({ why: "external" });
-		if (state.spent + state.inflight + outside + b > capMicros) return refuse(external === null ? { bound: b } : { bound: b, external: outside });
-		state.inflight += b;
-		pending = { bound: b, model, stream: !RUNTIME_RESULT_METHODS.includes(method) };
-		return null;
-	}
-
-	function bind(result) {
-		const ticket = pending;
-		pending = null;
-		if (ticket === null) return;
-		const done = (value) => settle(ticket, value);
-		const failed = () => settle(ticket, null);
-		// A stream method whose dispatch answered with a PROMISE of a stream (issue #571, observe() has where it comes
-		// from) settles from that stream's result(). Its rejection is charged the bound, like a rejected result(), and the
-		// meter counts the call `unpriced`, as it does for a result method's rejection: not counted here as well.
-		// A stream ticket whose promise resolves to anything but a stream has no usage to settle from: the bound, as the
-		// meter counts it `unpriced`.
-		const settled = (value) => (!ticket.stream ? done(value) : typeof value?.result === "function" ? value.result().then(done, failed) : failed());
-		if (typeof result?.result === "function") result.result().then(done, failed);
-		else if (typeof result?.then === "function") result.then(settled, failed);
-		else {
-			// No answer object (issue #571): the wrappers bind `undefined` when the dispatch threw synchronously, and a
-			// dispatch may return neither a stream nor a promise. Charged its bound and, on a bound above 0, counted as
-			// `costUnanswered`: it was never answered, the meter never saw it, and a provider may still have received it.
-			if (ticket.bound > 0) state.unanswered += 1;
-			settle(ticket, null);
-		}
-	}
-
-	function prepare({ method, model, args, stop }) {
-		const ticket = pending;
-		if (!ticket) return args;
-		const [context, given = {}] = args ?? [];
-		const theirs = given.onPayload;
-		const onPayload = async function (payload, payloadModel) {
-			const next = typeof theirs === "function" ? await theirs.call(this, payload, payloadModel) : undefined;
-			let sent;
-			let finalBound = Infinity;
-			try {
-				// Clone once and send exactly this plain JSON. Original image allowances stay in the bound;
-				// the complete shaped body adds every byte introduced by a provider or caller hook.
-				sent = JSON.parse(JSON.stringify(next === undefined ? payload : next));
-				if (!isPlain(sent)) throw new Error("unboundable payload");
-				const caps = [sent.max_tokens, sent.max_completion_tokens, sent.max_output_tokens, sent.config?.maxOutputTokens, sent.inferenceConfig?.maxTokens].filter((value) => value !== undefined && value !== null);
-				if (caps.some((value) => typeof value !== "number" || !Number.isFinite(value))) throw new Error("unboundable output cap");
-				// A hook can remove or disable the cap it was given. The caller's options are no longer evidence of
-				// the wire limit. An operator's completions server has no known default, so its missing/zero/negative
-				// max_tokens refuses; a hosted adapter falls back to its catalog maximum through callCostBound.
-				if (completionsOwnServer(model) && !(typeof sent.max_tokens === "number" && sent.max_tokens > 0)) throw new Error("unboundable output cap");
-				const maxTokens = caps.length ? Math.max(...caps) : undefined;
-				const longCache = (value) => value && typeof value === "object" && (value.cache_control?.ttl === "1h" || value.cachePoint?.ttl === "1h" || Object.values(value).some(longCache));
-				const options = { ...given, maxTokens, ...(longCache(sent) ? { cacheRetention: "long" } : {}), ...(sent.n !== undefined ? { samplingParams: { ...given.samplingParams, n: sent.n } } : {}) };
-				finalBound = bound(method, model, { ...context, finalPayload: sent }, options, env);
-			} catch { /* A body we cannot bound must never reach the transport. */ }
-			const enlarged = Math.max(ticket.bound, finalBound);
-			const outside = externalMicros();
-			if (ticket.settled || !Number.isFinite(enlarged) || !Number.isFinite(outside) || state.spent + state.inflight - ticket.bound + outside + enlarged > capMicros) {
-				refuse({ why: "final-payload", bound: Number.isFinite(enlarged) ? enlarged : null });
-				stop(COST_CAP);
-				throw new Error(STOP_MESSAGES[COST_CAP]);
-			}
-			state.inflight += enlarged - ticket.bound;
-			ticket.bound = enlarged;
-			return sent;
-		};
-		return [context, { ...given, onPayload }, ...(args ?? []).slice(2)];
-	}
-
-	/** The exit line's cost fields, present only when a cap is set (run-job spreads them into `tokens`). */
-	function snapshot() {
-		flushPending();
-		return { costCapMicros: capMicros, costRefused: state.refused, boundExceeded: state.boundExceeded, longContext: state.longContext, costUnjudged: state.unjudged, costUnanswered: state.unanswered };
-	}
-
-	/**
-	 * What this guard holds (issue #500): `spentMicros` settled and `inflightMicros` admitted but not settled. The two
-	 * numbers a child ledger carries and a parent's SPENT is made of. An accessor, NOT part of snapshot(), so the exit
-	 * line stays exactly as it was. It settles no pending slot: a pending admission is already in `inflight`.
-	 */
-	function spend() {
-		return { spentMicros: state.spent, inflightMicros: state.inflight };
-	}
-
-	/** The installer's report of compat entries found displaced under the cap: calls there may have run unjudged. */
-	function unjudged(count) {
-		state.unjudged += count;
-	}
-
-	/** The first refusal's rule (a COST_REFUSALS member), or null when the guard refused nothing. NOT in snapshot(): `tokens` is numbers only. */
-	function refusedWhy() {
-		return state.why;
-	}
-
-	return { enforces: Object.freeze([COST_CAP]), admit, prepare, bind, snapshot, spend, unjudged, refusedWhy, state };
-}
-
-// ── Issue #502, part 4: the allowed-model list, checked before every provider call ────────────────────────
-
-/** The one spelling of a (provider, model) pair the guard compares: NUL cannot appear in either id. */
-function pairKey(provider, model) {
-	return `${provider}\u0000${model}`;
-}
-
-/**
- * The api that sends a model's `compat.allowedFallbackModels` to the provider (as `params.fallbacks`, model ids only)
- * and names a fallback answer in `responseModel`. Pinned by needle: it is the only api module that reads the field.
- */
-const FALLBACK_API = "anthropic-messages";
 
 /**
  * The samplingParams keys that pick, or widen, the model that answers, refused under a list on the three apis that
@@ -2780,102 +2053,74 @@ export function createModelGuard({ allowedModels, log = () => {}, env = process.
 }
 
 /**
- * The one guard the runner hands both meter halves (issues #501, #502): the model guard and the cost guard, in
- * THAT order, or null when neither policy is set (and then every call goes through exactly as before).
+ * The one guard the runner hands both meter halves (issue #502): the model guard, or null when no list is set
+ * (and then every call goes through exactly as before).
  *
- * MODEL FIRST, then cost. The list decides which provider may be called at all, so a call it forbids must be
- * refused as `model-not-allowed` whatever its price; judged the other way round, an unlisted call that also passed
- * the cap would be recorded as `cost-cap`, and an operator would raise a cap to fix a model choice. The order is
- * also the safe one for the cost guard's single slot: the cost guard is asked only for a call the model guard
- * already admitted, so a bound it takes into flight always belongs to a call that is then dispatched.
+ * The list decides which provider may be called at all, so a call it forbids must be refused as
+ * `model-not-allowed` before dispatch. The per-job token cap has NO guard on purpose: its stop is the meter's
+ * settle-time check on the accumulated total (the lagging in-run backstop, OQ-010), and there is no pre-call
+ * bound anywhere since the cost guard went.
  *
- * `enforces` is the union, so assertPoliciesEnforceable sees each policy only when its own guard is here.
- * `snapshot()` is the cost fields (only with a cap) then `modelRefused` (only with a list), the worker's TOKEN_KEYS
- * order, so with no list the exit line is byte-identical to before. `unjudged` reaches the cost guard only: it is
- * the cap's counter of displaced compat entries.
+ * `enforces` is the guard's own list, so assertPoliciesEnforceable sees the policy only when its guard is here.
+ * `snapshot()` is `modelRefused` (only with a list), the worker's TOKEN_KEYS position unchanged, so with no list
+ * the exit line is byte-identical to before.
  */
-export function createPolicyGuard({ maxCostMicros = null, allowedModels = null, log = () => {}, env = process.env, external = null, now = Date.now, subscriptionAdmission = null }) {
+export function createPolicyGuard({ allowedModels = null, log = () => {}, env = process.env, now = Date.now, subscriptionAdmission = null }) {
 	const model = allowedModels === null ? null : createModelGuard({ allowedModels, log, env, now, subscriptionAdmission });
-	// `external` (issue #500) reaches the cost guard only: it is spend, which only a cap judges.
-	const cost = maxCostMicros === null ? null : createCostGuard({ capMicros: maxCostMicros, env, log, external });
-	const guards = [model, cost].filter((guard) => guard !== null);
-	if (guards.length === 0) return null;
+	if (model === null) return null;
 	return {
-		enforces: Object.freeze(guards.flatMap((guard) => [...guard.enforces])),
+		enforces: model.enforces,
 		admit(call) {
-			for (const guard of guards) {
-				const refused = guard.admit(call);
-				if (refused !== null && refused !== undefined) return refused;
-			}
-			return null;
+			return model.admit(call);
 		},
 		prepare(call) {
-			const args = model ? model.prepare(call) : call.args;
-			return cost ? cost.prepare({ ...call, args }) : args;
+			return model.prepare(call);
 		},
 		bind(result) {
-			for (const guard of guards) guard.bind?.(result);
-		},
-		unjudged(count) {
-			cost?.unjudged(count);
-		},
-		/** The cost guard's spend() (issue #500), zeros without a cap. */
-		spend() {
-			return cost ? cost.spend() : { spentMicros: 0, inflightMicros: 0 };
-		},
-		/** The cost guard's refusedWhy() (issue #507), null without a cap. */
-		refusedWhy() {
-			return cost ? cost.refusedWhy() : null;
+			model.bind?.(result);
 		},
 		snapshot() {
-			return { ...(cost ? cost.snapshot() : {}), ...(model ? model.snapshot() : {}) };
+			return model.snapshot();
 		},
 		model,
-		cost,
 	};
 }
 
-// ── Issue #500: child ledgers, the files a pi child process reports its spend through ──────────────────────
+// ── Issue #500: child ledgers, the files a pi child process reports its usage through ──────────────────────
 //
 // THE LEDGER FILE (issue #500; DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY). A pi child process runs its own meter and
 // reports through one file in the run's ledger directory, which the parent folds on its tick (foldChildLedgers).
 //   - Name: `<pid>.<nonce>.json` (CHILD_LEDGER_NAME): the child's pid in decimal, a nonce of 16 lowercase hex
-//     characters. Any other name is ignored, so the directory can also hold the parent's `STOP` and `SPENT` and the
+//     characters. Any other name is ignored, so the directory can also hold the parent's `STOP` and the
 //     temporary file of an atomic write (it must not end in `.json`).
 //   - Written whole, by rename, as compact JSON of at most CHILD_LEDGER_MAX_BYTES (64 KiB).
 //   - Every field is required, in every state:
-//       { "v": 3,
+//       { "v": 4,
 //         "state": "starting" | "running" | "done",
 //         "metered": true | false,
-//         "totals": { "input", "output", "total", "cost", "calls", "unresolved", "unpriced", "sessions" },
+//         "totals": { "input", "output", "total", "calls", "unresolved", "usageUnreported", "sessions" },
 //         "rows": [ { "provider", "model", "calls", "input", "output", "cacheRead", "cacheWrite", "cacheWrite1h",
-//                     "reasoning", "total", "cost", "unpriced" } ],
-//         "spentMicros", "inflightMicros", "costRefused", "modelRefused",
-//         "boundExceeded", "costUnanswered", "costUnreported", "longContext", "costUnjudged" }
+//                     "reasoning", "total" } ],
+//         "modelRefused" }
 //     `starting` is the preload's stub (zeros, `metered: true`), written before the meter installs; `running` once
 //     it has; `done` at exit. `metered: false` says the child's meter did not install. `totals` is the child meter's
 //     snapshot, `rows` its rows() (first-seen order, at most CHILD_LEDGER_ROWS written and CHILD_LEDGER_MAX_ROWS
-//     read, a model-less row with both ids null), then its cost guard's spend(), both guards' refusal counters, the
-//     cost guard's four floor counters (0 without a guard; the parent adds them to its own on the exit line, so a
-//     child's partial count floors the job as the parent's would) and the METER's `costUnreported` (issue #571,
-//     written with or without a guard; the parent's meter adds it through setChildren). childLedger() builds exactly
-//     this object. Version 2 added the four guard counters, version 3 `costUnreported`; a file of an older version is
-//     malformed (unmetered), so a child from an older image floors the job rather than hiding a call it did not count.
-//   - Numbers only. Token amounts and `cost` are numbers from 0 to Number.MAX_SAFE_INTEGER; `calls`, `unresolved`,
-//     `unpriced`, `sessions` and the guard counters are safe integers at least 0. Ids are printable ASCII and
+//     read, a model-less row with both ids null), `modelRefused` the model guard's refusal counter, and
+//     `usageUnreported` the METER's completeness counter (issue #571, written with or without a list; the parent's
+//     meter adds it through setChildren). Token amounts only: the cost, unpriced, providerBilled and guard
+//     micro-dollar columns died with the per-job cost guard (DES-TOKEN-RESERVE-AND-SETTLE). childLedger() builds
+//     exactly this object. Version 4 is the token-only shape; a file of an older version is malformed (unmetered),
+//     so a child from an older image floors the job rather than hiding a call it did not count.
+//   - Numbers only. Token amounts are numbers from 0 to Number.MAX_SAFE_INTEGER; `calls`, `unresolved`,
+//     `usageUnreported`, `sessions` and `modelRefused` are safe integers at least 0. Ids are printable ASCII and
 //     match USAGE_ID_PATTERN after lowercasing, the worker's rule. The rows partition the totals: their calls sum to
 //     `calls - unresolved`, and every other amount sums to its total.
 //   - A fold reads at most CHILD_LEDGER_MAX_FILES names; any further name counts as unmetered unread.
 //
-// THE SPENT FILE (spentFile, externalFor). The parent tells each child what the rest of the job has spent, so a child's
-// cost guard can judge the whole job without counting itself twice: `{ "v": 1, "total", "byLedger": { <name>: micros } }`,
-// where `total` is the parent's own spend plus every ledger's `spentMicros + inflightMicros`, and `byLedger` is each
-// ledger's part. A child's external spend is `total - byLedger[its own name]`.
-//
 // What the fold trusts, and why it is cooperative accounting rather than a boundary: the agent holds the provider key
 // and shares the runner's uid, so it can delete or forge these files. The rules make that fail toward a floor or an
-// overcharge: a high-water mark per file; a file that shrinks, vanishes, is malformed in any part, or says
-// `metered: false` counts ONCE as unmetered and keeps what it had reached; a forged larger number only overcharges.
+// overcount: a high-water mark per file; a file that shrinks, vanishes, is malformed in any part, or says
+// `metered: false` counts ONCE as unmetered and keeps what it had reached; a forged larger number only overcounts.
 
 /** A child ledger's file name: `<pid>.<nonce>.json`. */
 export const CHILD_LEDGER_NAME = /^([1-9][0-9]{0,9})\.([0-9a-f]{16})\.json$/;
@@ -2896,8 +2141,8 @@ export const CHILD_LEDGER_ROWS = 120;
  */
 export const CHILD_LEDGER_MAX_FILES = 512;
 export const CHILD_LEDGER_STATES = Object.freeze(["starting", "running", "done"]);
-/** The ledger format's version. 2 since the four floor counters (issue #500 part E's review), 3 since `costUnreported` (issue #571). */
-export const CHILD_LEDGER_VERSION = 3;
+/** The ledger format's version. 2 added the guard counters (issue #500 part E's review), 3 `costUnreported` (issue #571), 4 is the token-only shape. */
+export const CHILD_LEDGER_VERSION = 4;
 /**
  * A COPY of the worker's id rule (worker/src/model-ref.mjs MODEL_REF_PATTERN, which run-history.mjs imports as
  * USAGE_ID_PATTERN), because the image does not carry the worker. A copy is held to its source by a test that reads
@@ -2915,16 +2160,18 @@ function recordableId(id) {
 	return typeof id === "string" && /^[!-~]+$/.test(id) && USAGE_ID_PATTERN.test(id.toLowerCase());
 }
 
-const LEDGER_AMOUNTS = Object.freeze(["input", "output", "total", "cost"]);
-const LEDGER_COUNTS = Object.freeze(["calls", "unresolved", "unpriced", "sessions"]);
-const LEDGER_GUARD_COUNTS = Object.freeze(["spentMicros", "inflightMicros", "costRefused", "modelRefused", "boundExceeded", "costUnanswered", "costUnreported", "longContext", "costUnjudged"]);
-/** The floor counters a ledger carries (version 3), the exit line's names: the cost guard's four and the meter's `costUnreported`. */
-export const CHILD_FLOOR_COUNTERS = Object.freeze(["boundExceeded", "costUnanswered", "costUnreported", "longContext", "costUnjudged"]);
-const ROW_AMOUNTS = Object.freeze(["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning", "total", "cost"]);
-const ROW_COUNTS = Object.freeze(["calls", "unpriced", "providerBilled"]);
-/** What only ever grows in a live child: everything but `unresolved` and `inflightMicros`. */
-const MONOTONE_TOTALS = Object.freeze(["input", "output", "total", "cost", "calls", "unpriced", "sessions"]);
-const MONOTONE_GUARD = Object.freeze(["spentMicros", "costRefused", "modelRefused", ...CHILD_FLOOR_COUNTERS]);
+const LEDGER_AMOUNTS = Object.freeze(["input", "output", "total"]);
+const LEDGER_COUNTS = Object.freeze(["calls", "unresolved", "usageUnreported", "sessions"]);
+const LEDGER_GUARD_COUNTS = Object.freeze(["modelRefused"]);
+/** The completeness counters a ledger carries (version 4), the exit line's names. The money floor counters died with
+ * the cost guard; the token count's own completeness signal is the meter's `usageUnreported` (issue #571), beside the
+ * `unresolved` calls that were still in flight when the file was written. */
+export const CHILD_FLOOR_COUNTERS = Object.freeze(["usageUnreported"]);
+const ROW_AMOUNTS = Object.freeze(["input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning", "total"]);
+const ROW_COUNTS = Object.freeze(["calls"]);
+/** What only ever grows in a live child: everything but `unresolved`. */
+const MONOTONE_TOTALS = Object.freeze(["input", "output", "total", "calls", "sessions"]);
+const MONOTONE_GUARD = Object.freeze(["modelRefused", "usageUnreported"]);
 
 /**
  * An amount a ledger may carry: a number from 0 to Number.MAX_SAFE_INTEGER. The upper bound is what keeps a fold's
@@ -2940,7 +2187,7 @@ const rowKey = (row) => (row.provider === null ? "" : `${row.provider}\u0000${ro
 
 /** A ledger with nothing in it: the contribution of a file that was never good. */
 function emptyLedger() {
-	return { state: null, totals: { input: 0, output: 0, total: 0, cost: 0, calls: 0, unresolved: 0, unpriced: 0, sessions: 0 }, rows: new Map(), spentMicros: 0, inflightMicros: 0, costRefused: 0, modelRefused: 0, boundExceeded: 0, costUnanswered: 0, costUnreported: 0, longContext: 0, costUnjudged: 0 };
+	return { state: null, totals: { input: 0, output: 0, total: 0, calls: 0, unresolved: 0, usageUnreported: 0, sessions: 0 }, rows: new Map(), modelRefused: 0, usageUnreported: 0 };
 }
 
 /**
@@ -2971,6 +2218,10 @@ export function parseChildLedger(text) {
 		if (!whole(raw[key])) return null;
 		ledger[key] = raw[key];
 	}
+	// `usageUnreported` lives inside `totals` on the file (the writer's shape), but the fold's machinery --
+	// the high-water mark, the monotone check and the counters -- reads it beside `modelRefused` at the top
+	// level, as its v3 spelling `costUnreported` was carried. Copy it up once, here, so one shape serves both.
+	ledger.usageUnreported = totals.usageUnreported;
 	if (!Array.isArray(raw.rows) || raw.rows.length > CHILD_LEDGER_MAX_ROWS) return null;
 	const sum = { ...emptyRow() };
 	for (const given of raw.rows) {
@@ -2996,7 +2247,7 @@ export function parseChildLedger(text) {
 	}
 	// The rows partition the totals (the meter's own invariant): a file whose rows say less than its totals, or more,
 	// is not a ledger the meter wrote.
-	if (sum.calls !== totals.calls - totals.unresolved || sum.unpriced !== totals.unpriced) return null;
+	if (sum.calls !== totals.calls - totals.unresolved) return null;
 	if (!LEDGER_AMOUNTS.every((key) => agrees(sum[key], totals[key]))) return null;
 	return ledger;
 }
@@ -3074,7 +2325,7 @@ const DEFAULT_LEDGER_FS = { readdirSync, lstatSync, openSync, fstatSync, readSyn
  * last call's result (null the first time). Never throws. The rules (the ledger comment above has the why):
  *   - each file keeps a HIGH-WATER mark, its last good ledger, and contributes that;
  *   - a good ledger that reached its high-water mark in everything that only grows (every total but `unresolved`,
- *     every row, the guard counters but `inflightMicros`) replaces it;
+ *     every row, `modelRefused`) replaces it;
  *   - a file that is malformed in any part, says `metered: false`, shrank in anything, or vanished is counted
  *     unmetered ONCE, keeps the mark it had (nothing, if it was never good) and is never read again;
  *   - a file that vanished between the listing and the read is a vanished file if it was known, and unseen if not;
@@ -3082,7 +2333,7 @@ const DEFAULT_LEDGER_FS = { readdirSync, lstatSync, openSync, fstatSync, readSyn
  *     so it can still vanish). A `done` file is read like any other: `state` is not a number the mark holds, so a
  *     forged `done` with unchanged numbers would otherwise blind the fold to a live child's later writes;
  *   - RETIREMENT (issue #500 part E's review): a file, in ANY state, whose process `retire(pid, name, entry)` says is
- *     gone is folded into the `retired` aggregate as it stands (its mark, its charge, its pid; a `running` file's
+ *     gone is folded into the `retired` aggregate as it stands (its mark, its pid; a `running` file's
  *     unresolved calls stay counted) and its name is kept in a set, so it is never read or listed again; a file of a
  *     live process, an unmetered one, or any with no `retire`, stays tracked. A child killed with SIGKILL never
  *     writes `done`, and must not hold an open slot for the rest of the job. A dead child's file cannot change
@@ -3090,21 +2341,19 @@ const DEFAULT_LEDGER_FS = { readdirSync, lstatSync, openSync, fstatSync, readSyn
  *   - at most CHILD_LEDGER_MAX_FILES OPEN names (tracked, not `done`, not already unmetered) are read; a new name past
  *     that is counted in `flooded`, unmetered and unread. `flooded` is a high-water mark of how many such names one
  *     listing held.
- * Returns `{ processes, unmetered, flooded, totals, rows, spentMicros, inflightMicros, costRefused, modelRefused,
- * boundExceeded, costUnanswered, costUnreported, longContext, costUnjudged, settledMicros, chargeMicros, missing, files, retired }`:
+ * Returns `{ processes, unmetered, flooded, totals, rows, modelRefused, usageUnreported, missing, files, retired }`:
  * `processes` the ledger files ever seen (flooded and retired ones included), `unmetered` those counted unmetered
  * (flooded ones included), `totals` and the counters summed over every file's mark and the retired aggregate, `rows`
- * merged by pair (the model-less row last, ids null), `settledMicros` the sum of each ledger's ledgerSettled() and
- * `chargeMicros` of its ledgerCharge(), `missing` true when the directory could not be listed, `files` the per-file
- * state for the next call (a Map by name of `{ pid, state, unmetered, why, high, sig }`, `why` one of `malformed`,
- * `unmetered`, `shrank`, `vanished`), which the detector reads for a file's pid and state, and `retired` the
- * aggregate (`{ count, names, pids, high, charge, settled }`). `meter.setChildren()` takes the result as it is.
+ * merged by pair (the model-less row last, ids null), `missing` true when the directory could not be listed, `files`
+ * the per-file state for the next call (a Map by name of `{ pid, state, unmetered, why, high, sig }`, `why` one of
+ * `malformed`, `unmetered`, `shrank`, `vanished`), which the detector reads for a file's pid and state, and `retired`
+ * the aggregate (`{ count, names, pids, high }`). `meter.setChildren()` takes the result as it is.
  */
 export function foldChildLedgers({ dir, fs = DEFAULT_LEDGER_FS, prev = null, retire = null } = {}) {
 	const files = new Map(prev?.files ?? []);
 	const retired = prev?.retired
 		? { ...prev.retired, names: new Set(prev.retired.names), pids: new Set(prev.retired.pids), high: cloneLedger(prev.retired.high) }
-		: { count: 0, names: new Set(), pids: new Set(), high: emptyLedger(), charge: 0, settled: 0 };
+		: { count: 0, names: new Set(), pids: new Set(), high: emptyLedger() };
 	let names = [];
 	let missing = false;
 	try {
@@ -3161,29 +2410,23 @@ export function foldChildLedgers({ dir, fs = DEFAULT_LEDGER_FS, prev = null, ret
 			retired.pids.add(entry.pid);
 			retired.count += 1;
 			addLedger(retired.high, entry.high);
-			retired.charge = saturatingAdd(retired.charge, ledgerCharge(entry.high));
-			retired.settled = saturatingAdd(retired.settled, ledgerSettled(entry.high));
 		}
 	}
 	const flooded = Math.max(prev?.flooded ?? 0, beyond);
 
 	const sum = cloneLedger(retired.high);
 	let unmetered = flooded;
-	let chargeMicros = retired.charge;
-	let settledMicros = retired.settled;
 	for (const entry of files.values()) {
 		if (entry.unmetered) unmetered += 1;
 		addLedger(sum, entry.high);
-		chargeMicros = saturatingAdd(chargeMicros, ledgerCharge(entry.high));
-		settledMicros = saturatingAdd(settledMicros, ledgerSettled(entry.high));
 	}
 	// The model-less row last, as usageSnapshot emits its bucket.
 	const merged = new Map(sum.rows);
 	const modelless = merged.get("");
 	merged.delete("");
 	const rows = [...merged.values(), ...(modelless ? [modelless] : [])];
-	const counters = Object.fromEntries(LEDGER_GUARD_COUNTS.map((key) => [key, sum[key]]));
-	return { processes: files.size + flooded + retired.count, unmetered, flooded, totals: sum.totals, rows, ...counters, settledMicros, chargeMicros, missing, files, retired };
+	const counters = Object.fromEntries([...LEDGER_GUARD_COUNTS, "usageUnreported"].map((key) => [key, sum[key]]));
+	return { processes: files.size + flooded + retired.count, unmetered, flooded, totals: sum.totals, rows, ...counters, missing, files, retired };
 }
 
 /** A copy of a ledger mark, its rows copied too. */
@@ -3195,6 +2438,9 @@ function cloneLedger(ledger) {
 function addLedger(into, from) {
 	for (const key of Object.keys(into.totals)) into.totals[key] += from.totals[key];
 	for (const key of LEDGER_GUARD_COUNTS) into[key] += from[key];
+	// The completeness counter's TOP-LEVEL copy (parse lifts it beside modelRefused) summed beside them, so the
+	// fold's counters line reads it without reaching into totals.
+	into.usageUnreported += from.usageUnreported ?? from.totals.usageUnreported ?? 0;
 	for (const [key, row] of from.rows) {
 		const there = into.rows.get(key);
 		if (there) foldRow(there, row);
@@ -3205,64 +2451,12 @@ function addLedger(into, from) {
 const saturatingAdd = (a, b) => Math.min(Number.MAX_SAFE_INTEGER, a + b);
 
 /**
- * What a ledger has SETTLED, in whole micro-dollars (issue #500 part E's review): the larger of its cost guard's
- * `spentMicros` and its metered `totals.cost`, rounded up. A child with no cost guard (its spawner dropped
- * PI_MAX_COST_MICROS from its environment) reports `spentMicros: 0` while its meter still prices every call, so the
- * cost is what counts it. Saturates at Number.MAX_SAFE_INTEGER.
- */
-export function ledgerSettled(high) {
-	const cost = Math.ceil((high?.totals?.cost ?? 0) * 1e6);
-	const value = Math.max(high?.spentMicros ?? 0, Number.isFinite(cost) ? cost : Number.MAX_SAFE_INTEGER);
-	return Math.min(Number.MAX_SAFE_INTEGER, value);
-}
-
-/** What a ledger holds against a cap: ledgerSettled() plus its in-flight bounds. */
-export function ledgerCharge(high) {
-	return saturatingAdd(ledgerSettled(high), high?.inflightMicros ?? 0);
-}
-
-/**
- * The SPENT file the parent writes for its children (issue #500; the ledger comment above has the format): `total` is
- * `parentMicros` (the parent's own spent plus in-flight) plus every ledger's ledgerCharge() (retired ones included),
- * and `byLedger` each tracked ledger's part, by file name. A number that cannot be carried saturates at
- * Number.MAX_SAFE_INTEGER.
- */
-export function spentFile(fold, parentMicros) {
-	// Whole micro-dollars, rounded UP: externalFor() reads only safe integers, so the writer must never emit a file its
-	// own reader refuses, and rounding up only overcharges.
-	const carry = (value) => (typeof value === "number" && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? Math.ceil(value) : Number.MAX_SAFE_INTEGER);
-	const byLedger = {};
-	let total = saturatingAdd(carry(parentMicros), carry(fold?.retired?.charge ?? 0));
-	for (const [name, entry] of fold?.files ?? []) {
-		const part = carry(ledgerCharge(entry.high));
-		byLedger[name] = part;
-		total = saturatingAdd(total, part);
-	}
-	return { v: 1, total, byLedger };
-}
-
-/**
- * A child's external spend from a parsed SPENT file: the job's total less its own ledger's part, so the child's cost
- * guard never counts its own spend twice (once as its own, once a tick late through SPENT). Anything malformed is
- * Infinity, which the cost guard refuses: a SPENT that cannot be read is no licence to spend. A missing file is the
- * caller's case (nothing written yet), not this one.
- */
-export function externalFor(spent, ownName) {
-	const whole = (value) => Number.isSafeInteger(value) && value >= 0;
-	if (!isPlain(spent) || spent.v !== 1 || !whole(spent.total) || !isPlain(spent.byLedger)) return Infinity;
-	const own = Object.hasOwn(spent.byLedger, ownName) ? spent.byLedger[ownName] : 0;
-	if (!whole(own) || own > spent.total) return Infinity;
-	return spent.total - own;
-}
-
-/**
  * A child ledger object, ready for JSON.stringify (issue #500; the format in the ledger comment above), built from the
  * child's meter and its policy guard (or null). `metered` false is the record of a meter that did not install, written
  * with zeros. Every number comes from the meter and the guard as they are: the writer adds nothing of its own.
  */
 export function childLedger({ state, metered = true, meter = null, guard = null }) {
 	const snap = metered && meter ? meter.snapshot() : null;
-	const spend = metered && guard?.spend ? guard.spend() : { spentMicros: 0, inflightMicros: 0 };
 	const refused = metered && guard ? guard.snapshot() : {};
 	return {
 		v: CHILD_LEDGER_VERSION,
@@ -3272,22 +2466,13 @@ export function childLedger({ state, metered = true, meter = null, guard = null 
 			input: snap?.input ?? 0,
 			output: snap?.output ?? 0,
 			total: snap?.total ?? 0,
-			cost: snap?.cost ?? 0,
 			calls: snap?.calls ?? 0,
 			unresolved: snap?.unresolved ?? 0,
-			unpriced: snap?.unpriced ?? 0,
+			usageUnreported: snap?.usageUnreported ?? 0,
 			sessions: snap?.sessions ?? 0,
 		},
 		rows: snap ? meter.rows() : [],
-		spentMicros: spend.spentMicros,
-		inflightMicros: spend.inflightMicros,
-		costRefused: refused.costRefused ?? 0,
 		modelRefused: refused.modelRefused ?? 0,
-		boundExceeded: refused.boundExceeded ?? 0,
-		costUnanswered: refused.costUnanswered ?? 0,
-		costUnreported: snap?.costUnreported ?? 0,
-		longContext: refused.longContext ?? 0,
-		costUnjudged: refused.costUnjudged ?? 0,
 	};
 }
 
@@ -3299,14 +2484,12 @@ export function childLedger({ state, metered = true, meter = null, guard = null 
 // whether the child is a pi session; if so, the child's own meter is started (startChildMeter) on the child's own
 // ModelRuntime class and writes the child's ledger file. The parent folds those files (foldChildLedgers).
 //
-// THE CONTROL FILES. The parent writes two files into the same directory, each whole by temp file and rename:
+// THE CONTROL FILE. The parent writes one file into the same directory, whole by temp file and rename:
 //   - `STOP`: `{ "v": 1, "reason": <a STOP_MESSAGES key> }` (stopFile). Once it exists, a child's next call is braked
 //     with that reason. Present but not readable as that shape, it is a stop as the token cap: a garbled STOP is still a
 //     STOP (externalStop). Missing means go.
-//   - `SPENT`: spentFile's object. A child's cost guard adds externalFor(SPENT, its own name) to what it judges. Missing
-//     means 0 (the parent has written nothing yet), malformed or unreadable means Infinity (the call is refused).
-// Both are read on every call, without blocking and without following a link (readLedger), so a FIFO or a symlink
-// planted under either name refuses rather than hangs. Every file in the directory is written by writeFileAtomic, whose
+// It is read on every call, without blocking and without following a link (readLedger), so a FIFO or a symlink
+// planted under that name refuses rather than hangs. Every file in the directory is written by writeFileAtomic, whose
 // temporary file is created exclusively under a random name, so nothing planted there can block or redirect a writer.
 
 /** The ledger directory, set by the runner for every descendant. */
@@ -3314,18 +2497,6 @@ export const CHILD_LEDGER_ENV = "PI_DISPATCH_CHILD_LEDGER";
 /** The runner's own pid, so a process can tell the runner from a nested copy of it. */
 export const RUNNER_PID_ENV = "PI_DISPATCH_RUNNER_PID";
 export const STOP_FILE = "STOP";
-export const SPENT_FILE = "SPENT";
-/**
- * The parent's pinned price table (pinPriceTable, issue #587's review), for pi children: written ONCE by the runner into
- * the ledger directory, read-only (0444), its sha256 in PRICE_TABLE_ENV, which the runner sets in its own environment
- * for its descendants. A child prices every capped call from it; a file that is missing, unreadable, malformed or does
- * not match the hash is an EMPTY table, which refuses every capped call (never "unchecked"). RESIDUAL, named: the job's
- * own processes run as the runner's uid, so one that rewrites the file AND exports a matching hash to a child it starts
- * itself defeats the check; it stops an extension or a model in a pi child from forging a price in passing.
- */
-export const PRICE_TABLE_FILE = "PRICES";
-export const PRICE_TABLE_ENV = "PI_DISPATCH_PRICE_TABLE";
-const PRICE_TABLE_MAX_BYTES = 8 * 1024 * 1024;
 /**
  * The globalThis key the preload hands its state over on: `{ dir, name, meter, library, child }`. A Symbol.for key,
  * because the preload, the child-meter extension (loaded by pi's own loader) and code appended to pi's
@@ -3380,7 +2551,7 @@ export function stopFile(reason) {
 /**
  * Write `text` to `<dir>/<name>` whole: a temporary file beside it, then a rename, so a reader sees the old file or the
  * new one and never half of one. Every writer of the ledger directory uses this: the child's ledger now, the parent's
- * STOP and SPENT (issue #500 part E). The directory is shared with the agent's own processes, so the temporary file is
+ * STOP (issue #500 part E). The directory is shared with the agent's own processes, so the temporary file is
  * CREATED, never opened: `O_CREAT|O_EXCL|O_NOFOLLOW|O_NONBLOCK` under a random name, so a FIFO planted there cannot
  * block the writer (the parent's event loop, and with it every brake) and a symlink cannot send the bytes elsewhere.
  * A name that exists is retried under a new one, a few times. The descriptor must be a regular file. The temporary name
@@ -3450,66 +2621,6 @@ export function readStop({ dir, fs = DEFAULT_LEDGER_FS }) {
 	return isPlain(parsed) && parsed.v === 1 && typeof parsed.reason === "string" && Object.hasOwn(STOP_MESSAGES, parsed.reason) ? parsed.reason : true;
 }
 
-/**
- * The child cost guard's `external` (issue #500): externalFor(SPENT, own ledger name) in micro-dollars, 0 while
- * `<dir>/SPENT` does not exist, Infinity when it is malformed. An unreadable one throws, which the cost guard also reads
- * as Infinity: a SPENT that cannot be read is no licence to spend.
- */
-export function readExternal({ dir, name, fs = DEFAULT_LEDGER_FS }) {
-	const text = readControl(fs, dir, SPENT_FILE);
-	if (text === null) return 0;
-	let parsed;
-	try {
-		parsed = JSON.parse(text);
-	} catch {
-		return Infinity;
-	}
-	return externalFor(parsed, name);
-}
-
-/** The table's file text: `{ v: 1, entries: [[key, { api, cost, compat }], ...] }`, in key order. */
-function priceTableText(table) {
-	return JSON.stringify({ v: 1, entries: [...table].sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)) });
-}
-
-/**
- * Write the parent's table for its children (PRICE_TABLE_FILE) and set its hash in `env` (the runner's own environment,
- * which every descendant inherits). Throws what the fs throws; the caller logs it, and a child then finds no table.
- */
-export function publishPriceTable({ dir, table, env, fs = DEFAULT_WRITE_FS, chmod = chmodSync }) {
-	const text = priceTableText(table instanceof Map ? table : new Map());
-	writeFileAtomic({ dir, name: PRICE_TABLE_FILE, text, fs });
-	try {
-		chmod(join(dir, PRICE_TABLE_FILE), 0o444);
-	} catch {
-		// Read-only is a convenience, not the check: the hash is.
-	}
-	// The hash variable (PRICE_TABLE_ENV) is set by the runner in its own environment for its descendants, never by the worker.
-	env[PRICE_TABLE_ENV] = createHash("sha256").update(text).digest("hex");
-}
-
-/** A child's copy of the parent's table, or an EMPTY Map when it cannot be had intact (PRICE_TABLE_FILE has the rule). */
-export function readPriceTable({ dir, env, fs = DEFAULT_LEDGER_FS }) {
-	// The hash variable (PRICE_TABLE_ENV) is set by the runner in its own environment and inherited, never by the worker.
-	const want = env?.[PRICE_TABLE_ENV];
-	if (typeof want !== "string" || !/^[0-9a-f]{64}$/.test(want) || typeof dir !== "string") return new Map();
-	const read = readLedger(fs, join(dir, PRICE_TABLE_FILE), null, PRICE_TABLE_MAX_BYTES);
-	if (read === GONE || read === BAD || read === UNCHANGED) return new Map();
-	if (createHash("sha256").update(read.text).digest("hex") !== want) return new Map();
-	try {
-		const parsed = JSON.parse(read.text);
-		if (!isPlain(parsed) || parsed.v !== 1 || !Array.isArray(parsed.entries)) return new Map();
-		const table = new Map();
-		for (const entry of parsed.entries) {
-			if (!Array.isArray(entry) || typeof entry[0] !== "string" || !isPlain(entry[1])) return new Map();
-			table.set(entry[0], entry[1]);
-		}
-		return table;
-	} catch {
-		return new Map();
-	}
-}
-
 /** A fresh ledger name for `pid`: `<pid>.<16 lowercase hex>.json`. */
 export function childLedgerName(pid, random = (bytes) => globalThis.crypto.getRandomValues(bytes)) {
 	const nonce = [...random(new Uint8Array(8))].map((byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -3525,10 +2636,9 @@ export function childLedgerName(pid, random = (bytes) => globalThis.crypto.getRa
  *     child started from the bundle runs the bundle's own copy, and wrapping another one counts nothing.
  *   - `compat`: `{ module, fallbackModels }`, the child's own pi-ai compat copy (installProcessUsageMeter `compat`). Its
  *     stream factory is the brake's.
- *   - `env`: the policies come from it as the runner reads them: PI_ALLOWED_MODELS (the model guard) and
- *     PI_MAX_COST_MICROS (a cost guard whose `external` is readExternal). The token cap is not the child's: the parent
- *     judges it on its own spend plus every child's, and answers through STOP. A policy that does not parse leaves the
- *     child unmetered (`metered: false`), the floor, rather than unguarded.
+ *   - `env`: the policy comes from it as the runner reads it: PI_ALLOWED_MODELS (the model guard). The token cap is
+ *     not the child's: the parent judges it on its own spend plus every child's, and answers through STOP. A policy
+ *     that does not parse leaves the child unmetered (`metered: false`), the floor, rather than unguarded.
  *   - `dir`, `name`: the ledger directory and this child's file in it.
  *   - `lazy`: write nothing until the first call is about to go out (the library route: a process that only imports pi
  *     and never calls leaves no file, so a test suite that imports pi hundreds of times cannot flood the directory).
@@ -3604,11 +2714,8 @@ export async function startChildMeter({
 			child.write("running");
 		};
 		onExit(() => child.write("done"));
-		let maxCostMicros;
 		let allowedModels;
 		try {
-			// env-internal PI_MAX_COST_MICROS: the worker's per-job cap, inherited from the runner, read here as the runner reads it.
-			maxCostMicros = parseCostMicros(env, "PI_MAX_COST_MICROS");
 			allowedModels = parseAllowedModels(env, "PI_ALLOWED_MODELS");
 		} catch {
 			child.unmetered();
@@ -3622,8 +2729,8 @@ export async function startChildMeter({
 			return child;
 		}
 		child.metered = true;
-		child.meter = createUsageMeter({ maxTokens: null, maxCostMicros, allowedModels, onChange: () => child.write("running") });
-		const policy = createPolicyGuard({ maxCostMicros, allowedModels, env, external: () => readExternal({ dir, name, fs }) });
+		child.meter = createUsageMeter({ maxTokens: null, allowedModels, onChange: () => child.write("running") });
+		const policy = createPolicyGuard({ allowedModels, env });
 		// THE PRE-DISPATCH WRITE. The guard is the last thing a call passes before it is dispatched (judge), so the child's
 		// guard wraps the policy guard (or stands alone, with no policy): once the policy admits a call, the ledger is
 		// written with that call already counted, in flight (`unresolved`), and a write that fails refuses the call. So
@@ -3644,20 +2751,14 @@ export async function startChildMeter({
 			},
 			...(policy ? { prepare: (call) => policy.prepare(call) } : {}),
 			bind: (result) => policy?.bind?.(result),
-			unjudged: (count) => policy?.unjudged?.(count),
-			// The refusal counters only. Not policy.snapshot(): the cost guard's snapshot settles a pending admission at its
-			// bound, and the pre-dispatch write runs between an admission and its bind.
-			// The cost guard's floor counters too (issue #500 part E's review), read off its state for the same reason.
+			// The refusal counter only. Not policy.snapshot(): the pre-dispatch write runs between an admission and its
+			// bind, and the counter is read off the guard's state for the same reason (issue #500 part E's review).
 			snapshot: () => ({
-				...(policy?.cost ? { costRefused: policy.cost.state.refused, boundExceeded: policy.cost.state.boundExceeded, costUnanswered: policy.cost.state.unanswered, longContext: policy.cost.state.longContext, costUnjudged: policy.cost.state.unjudged } : {}),
 				...(policy?.model ? { modelRefused: policy.model.snapshot().modelRefused } : {}),
 			}),
-			spend: () => (policy ? policy.spend() : { spentMicros: 0, inflightMicros: 0 }),
 		};
 		// After a failed write, nothing more goes out: the ledger can no longer record it.
 		const isStopped = () => (child.failed ? TOKEN_BUDGET : readStop({ dir, fs }));
-		// The parent's pinned price table (issue #587's review): a child prices from it, never from its own runtime.
-		const prices = readPriceTable({ dir, env, fs });
 		child.installOn = async (Class, copy) => {
 			const handle = await install({
 				ModelRuntime: Class,
@@ -3666,7 +2767,6 @@ export async function startChildMeter({
 				compat: copy,
 				brake: true,
 				isStopped,
-				prices,
 				// The parent's detector is the parent's; a child samples nothing.
 				children: { sample() {} },
 			});

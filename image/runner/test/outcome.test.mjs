@@ -9,10 +9,6 @@ import {
 	classifyStopReason,
 	classifyThrow,
 	configError,
-	COST_CAP,
-	COST_CAP_UNENFORCEABLE,
-	COST_REFUSALS,
-	costRefusalField,
 	decideExit,
 	EXIT_COMPLETED,
 	EXIT_INFRA,
@@ -142,7 +138,7 @@ test("a run a tool ended exits 0 as tool-terminated, not 1 as unknown-stop-reaso
 test("a tool-ended run still loses to every budget stop, and keeps its verdict on a command job", () => {
 	const terminal = toolResult();
 	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, tokenAborted: false, terminal }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, meterStop: COST_CAP, tokenAborted: false, terminal }).reason, COST_CAP);
+	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: false, terminal }).reason, MODEL_NOT_ALLOWED);
 	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal }).reason, TOKEN_BUDGET);
 	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, command: { failed: false } }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
 });
@@ -157,7 +153,7 @@ test("a parked run exits 0 as awaiting-input, below every budget stop and a clas
 	const terminal = { role: "toolResult", toolName: "await_human_input", content: [], isError: false };
 	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, parked: true }), { code: EXIT_COMPLETED, reason: AWAITING_INPUT });
 	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 4, tokenAborted: false, terminal, parked: true }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, meterStop: COST_CAP, tokenAborted: false, terminal, parked: true }).reason, COST_CAP);
+	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: false, terminal, parked: true }).reason, MODEL_NOT_ALLOWED);
 	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal, parked: true }).reason, TOKEN_BUDGET);
 	const rejected = { code: EXIT_POLICY, reason: "retry-unresumable" };
 	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal, rejected, parked: true }), rejected);
@@ -574,7 +570,7 @@ test("run-job.mjs logs retry_predicate_unavailable when no pinned retry predicat
 });
 
 test("decideExit ranks a meter stop over everything but the turn budget: the catch path reuses it after a stop (issue #543)", () => {
-	for (const reason of ["cost-cap", "model-not-allowed", "token_budget"]) {
+	for (const reason of ["model-not-allowed", "token_budget"]) {
 		assert.deepEqual(decideExit({ budgetAborted: false, meterStop: reason }), { code: EXIT_POLICY, reason });
 	}
 });
@@ -587,7 +583,7 @@ test("run-job.mjs caps every exit line and hands decideExit the pinned retry pre
 	assert.equal(exitLines.length, 4, "the runner has chat, deterministic watch classifier, answer classifier/pass and preflight-throw exit paths");
 	for (const line of exitLines.slice(0, 3)) assert.match(line, /\.\.\.capExitMessage\(outcome\)/, "every classifier and chat outcome is capped");
 	assert.match(exitLines[0], /\.\.\.capExitMessage\(outcome\)/, "the decided outcome's exit line must be capped");
-	assert.match(src, /const capped = capExitMessage\(outcome\);\s*exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, \.\.\.costRefusalField\(outcome, costRefusalWhy\(\)\), message: capped\.message, \.\.\.meteredExitFields\(\) \}\)/, "the throw path's exit line must be capped");
+	assert.match(src, /const capped = capExitMessage\(outcome\);\s*exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, message: capped\.message, \.\.\.meteredExitFields\(\) \}\)/, "the throw path's exit line must be capped");
 	assert.match(src, /loadRetryPredicate\(\{ module: usageMeter\.ok \? usageMeter\.module : null, candidates: resolvePiAiCompat\(\) \}\)/);
 	assert.match(src, /decideExit\(\{[\s\S]*?\n\t\tisRetryable,\n\t\trejected,\n[\s\S]*?\n\t\tparked: awaitInput !== null && parkedTerminal\(terminal\),\n\t\}\);/, "decideExit must receive isRetryable, the classified rejection, and whether the run parked (issue #625)");
 });
@@ -700,40 +696,27 @@ test("decideExit ranks a classified rejection below both budget aborts and above
 	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "toolUse" });
 });
 
-// ── Issues #501/#502: the meter's stop reaches the exit decision by reason ────────────────────────────
+// ── Issue #502: the meter's stop reaches the exit decision by reason ────────────────────────────
 
-test("the four policy reasons are exported literals, spelled once", () => {
-	assert.deepEqual([TOKEN_BUDGET, COST_CAP, MODEL_NOT_ALLOWED, COST_CAP_UNENFORCEABLE, MODEL_POLICY_UNENFORCEABLE], ["token_budget", "cost-cap", "model-not-allowed", "cost-cap-unenforceable", "model-policy-unenforceable"]);
+test("the policy reasons are exported literals, spelled once", () => {
+	assert.deepEqual([TOKEN_BUDGET, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE], ["token_budget", "model-not-allowed", "model-policy-unenforceable"]);
 });
 
 test("decideExit: turn_budget > meterStop > tokenAborted > rejected > the terminal message", () => {
 	const ok = { role: "assistant", stopReason: "stop" };
 	const rejected = { code: EXIT_POLICY, reason: "retry-unresumable", message: "x" };
-	for (const stop of [TOKEN_BUDGET, COST_CAP, MODEL_NOT_ALLOWED]) {
+	for (const stop of [TOKEN_BUDGET, MODEL_NOT_ALLOWED]) {
 		assert.deepEqual(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok }), { code: EXIT_POLICY, reason: stop }, stop);
 		assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, meterStop: stop, terminal: ok }).reason, "turn_budget", `turn budget outranks ${stop}`);
 		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok, rejected }).reason, stop, `${stop} outranks a rejected prompt`);
 		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok, command: { failed: true } }).reason, stop, `${stop} outranks a failed command`);
 	}
-	assert.equal(decideExit({ budgetAborted: false, meterStop: COST_CAP, tokenAborted: true, terminal: ok }).reason, COST_CAP, "the meter's stop outranks the fallback's flag");
+	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: true, terminal: ok }).reason, MODEL_NOT_ALLOWED, "the meter's stop outranks the fallback's flag");
 	assert.equal(decideExit({ budgetAborted: false, meterStop: null, tokenAborted: true, terminal: ok, rejected }).reason, TOKEN_BUDGET, "the fallback bus meter still names a token stop");
 	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal: ok }), { code: EXIT_COMPLETED, reason: "stop" }, "no stop at all: unchanged");
 });
 
-test("classifyThrow honours the tag of both unenforceable refusals: exit 2, its own reason", () => {
-	for (const reason of [COST_CAP_UNENFORCEABLE, MODEL_POLICY_UNENFORCEABLE]) {
-		const outcome = classifyThrow(configError("PI_MAX_COST_MICROS is set but cannot be enforced before a call: no guard", reason));
-		assert.deepEqual([outcome.code, outcome.reason], [EXIT_POLICY, reason]);
-	}
-});
-
-test("costRefusalField: a `why` only on a cost-cap outcome and only from COST_REFUSALS, else nothing at all (#507)", () => {
-	assert.deepEqual([...COST_REFUSALS], ["unboundable", "external", "over-cap", "final-payload"]);
-	for (const why of COST_REFUSALS) assert.deepEqual(costRefusalField({ code: EXIT_POLICY, reason: COST_CAP }, why), { why });
-	assert.deepEqual(costRefusalField({ code: EXIT_POLICY, reason: COST_CAP }, null), {}, "a cost-cap stop the guard did not refuse");
-	assert.deepEqual(costRefusalField({ code: EXIT_POLICY, reason: COST_CAP }, "something-else"), {});
-	for (const reason of [MODEL_NOT_ALLOWED, TOKEN_BUDGET, COST_CAP_UNENFORCEABLE, "stop"]) {
-		assert.deepEqual(costRefusalField({ code: EXIT_POLICY, reason }, "unboundable"), {}, reason);
-	}
-	assert.deepEqual(costRefusalField(undefined, "unboundable"), {});
+test("classifyThrow honours the tag of the unenforceable refusal: exit 2, its own reason", () => {
+	const outcome = classifyThrow(configError("PI_ALLOWED_MODELS is set but cannot be enforced before a call: no guard", MODEL_POLICY_UNENFORCEABLE));
+	assert.deepEqual([outcome.code, outcome.reason], [EXIT_POLICY, MODEL_POLICY_UNENFORCEABLE]);
 });

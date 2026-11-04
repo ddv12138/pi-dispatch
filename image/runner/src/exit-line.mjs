@@ -5,8 +5,8 @@ import { readKeyFrame } from "./steer-frames.mjs";
 /**
  * The runner's exit line, and the key that authenticates it (issue #545, INT-RUNNER-EXIT-CODE-PROTOCOL).
  *
- * The worker reads the job's outcome telemetry (tokens, usage, turns, session, context, and through them the dollar
- * settlement) off the LAST `{"event":"exit",...}` line on the container's stdout. That stream is not the runner's
+ * The worker reads the job's outcome telemetry (tokens, usage, turns, session, context, and through them the
+ * token-window settlement) off the LAST `{"event":"exit",...}` line on the container's stdout. That stream is not the runner's
  * alone: a job's own tool can write to it (a child opens `/proc/<pid>/fd/1` of the runner or of the init process,
  * measured on Docker Desktop, rootful Docker 29 and rootless Podman 4.9 and 5.8). No reader policy can tell the
  * runner's bytes from an imitation of them, so the line now carries a MAC the job's tools cannot compute.

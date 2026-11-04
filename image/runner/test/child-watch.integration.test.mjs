@@ -6,8 +6,8 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 // Pure: no static pi import in their module graph, so they load unconditionally and the gate below applies to pi only.
 import { createChildWatch, linuxProc } from "../src/child-watch.mjs";
-import { COST_CAP, TOKEN_BUDGET } from "../src/outcome.mjs";
-import { CHILD_LEDGER_NAME, childLedger, createUsageMeter, pinPriceTable, publishPriceTable, STOP_MESSAGES, writeFileAtomic } from "../src/usage-meter.mjs";
+import { TOKEN_BUDGET } from "../src/outcome.mjs";
+import { CHILD_LEDGER_NAME, childLedger, createUsageMeter, STOP_MESSAGES, writeFileAtomic } from "../src/usage-meter.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 /**
@@ -58,19 +58,6 @@ export default function fakeProvider(pi) {
 	});
 }
 `;
-
-/**
- * Publish the parent's price table for the fake model into the world's ledger directory, as the runner does (issue
- * #587's review): a pi child prices every capped call from the parent's table, and the fake provider is an extension
- * the parent never saw, so without this a capped child refuses its first call.
- */
-function priceFake(w, api) {
-	const env = {};
-	const model = { provider: "fake", id: "m1", api, cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, compat: { maxTokensField: "max_tokens" } };
-	publishPriceTable({ dir: w.ledger, table: pinPriceTable({ getAllModels: () => [model] }), env });
-	Object.assign(w.env, env);
-	return w;
-}
 
 function world({ api = "pi-dispatch-child-fake" } = {}) {
 	const root = tempDir("pi-dispatch-watch-it-");
@@ -150,37 +137,6 @@ test("a parent plus a pi child pushed over maxTokens: STOP is written and the ch
 	const snap = meter.snapshot();
 	assert.deepEqual([snap.total, snap.childTotal, snap.childProcesses, snap.unmeteredChildren], [1077, 777, 1, 0]);
 	assert.equal(snap.rootTotal + snap.otherTotal + snap.looseTotal + snap.childTotal, snap.total);
-});
-
-test("the same under a dollar cap: the child judges against SPENT, the parent stops cost-cap and the child is braked (issue #500)", { skip }, async () => {
-	// A priced api, so the child's guard has a finite bound to judge.
-	const w = priceFake(world({ api: "openai-completions" }), "openai-completions");
-	const cap = 1_000_000;
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-	let own = { spentMicros: 900_000, inflightMicros: 0 };
-	const hook = createChildWatch({ dir: w.ledger, meter, guard: () => ({ spend: () => own }), proc: null });
-	hook.sample();
-	assert.deepEqual(JSON.parse(readFileSync(join(w.ledger, "SPENT"), "utf8")), { v: 1, total: 900_000, byLedger: {} });
-	let spent;
-	const result = await rpcChild(w, {
-		env: { ...w.env, PI_MAX_COST_MICROS: String(cap) },
-		prompts: ["one", "two"],
-		between: () => {
-			// The parent spent 99,500 more meanwhile: 999,500 plus the child's 777 passes the cap.
-			own = { spentMicros: 999_500, inflightMicros: 0 };
-			hook.sample();
-			spent = JSON.parse(readFileSync(join(w.ledger, "SPENT"), "utf8"));
-		},
-	});
-	assert.equal(result.code, 0, result.stderr);
-	assert.equal(w.callCount(), 1, "the child's first call fit under SPENT; its second was braked");
-	assert.equal(meter.state.stopReason, COST_CAP);
-	assert.deepEqual(stopOf(w.ledger), { v: 1, reason: COST_CAP });
-	assert.match(result.stdout, new RegExp(STOP_MESSAGES[COST_CAP]));
-	const [name] = readdirSync(w.ledger).filter((file) => CHILD_LEDGER_NAME.test(file));
-	assert.deepEqual(spent, { v: 1, total: 999_500 + 777, byLedger: { [name]: 777 } }, "SPENT carries each ledger's part");
-	hook.teardown();
-	assert.equal(meter.snapshot().childTotal, 777);
 });
 
 /**

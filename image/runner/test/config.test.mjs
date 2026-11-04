@@ -306,20 +306,6 @@ function verdict(env) {
 	}
 }
 
-test("PI_MAX_COST_MICROS: absent is no cap, 0 is the strictest cap, the bounds are 0 to 1e12", () => {
-	assert.equal(parseRunnerEnv(base).maxCostMicros, null);
-	assert.equal(parseRunnerEnv({ ...base, PI_MAX_COST_MICROS: "0" }).maxCostMicros, 0, "0 is legal: a zero-rated job's cap, never 'off'");
-	assert.equal(parseRunnerEnv({ ...base, PI_MAX_COST_MICROS: "2000000" }).maxCostMicros, 2_000_000);
-	assert.equal(parseRunnerEnv({ ...base, PI_MAX_COST_MICROS: "1000000000000" }).maxCostMicros, 1e12);
-	for (const bad of ["1000000000001", "-1", "1.5", "1e6", "+5", "007", " 5", "5 ", "abc", "99999999999999999999"]) {
-		assert.equal(verdict({ PI_MAX_COST_MICROS: bad }), EXIT_POLICY, `PI_MAX_COST_MICROS=${JSON.stringify(bad)}`);
-	}
-});
-
-test("an EMPTY PI_MAX_COST_MICROS is a config error, not 'no cap' (an empty money knob must not fail open)", () => {
-	assert.equal(verdict({ PI_MAX_COST_MICROS: "" }), EXIT_POLICY);
-});
-
 test("PI_ALLOWED_MODELS: absent is unrestricted; entries split at the FIRST slash, verbatim", () => {
 	assert.equal(parseRunnerEnv(base).allowedModels, null);
 	assert.deepEqual(parseRunnerEnv({ ...base, PI_ALLOWED_MODELS: "anthropic/claude-x,openrouter/~anthropic/claude-y,cloudflare-workers-ai/@cf/meta/llama" }).allowedModels, [

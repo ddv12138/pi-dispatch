@@ -360,10 +360,6 @@ LABEL dev.pi-dispatch.forges="github,gitlab,forgejo"
 # runs both as uid 4242). An older image run with `--user` gets HOME=/ (Docker) or HOME=/workspace
 # (Podman, measured), so auth.json lands nowhere or in the operator's repository, and Chromium does not
 # start. The label is how the worker can tell the two apart before it spends anything.
-# `costCap` (issue #501) tells the worker this runner reads PI_MAX_COST_MICROS and refuses, before each provider
-# call, a call whose worst-case cost would take the job past it. An older runner handed the variable would ignore
-# it and spend without a cap, reporting a clean exit: a MONEY limit quietly not enforced. The worker refuses that
-# pairing pre-spend by this token (its `costCap` capability row, reason job-image-cost-cap-unsupported); verify-image.sh runs an offline job with a fake key under a cap of 0 to prove the claim.
 # `modelPolicy` (issue #502) tells the worker this runner reads PI_ALLOWED_MODELS and refuses, before each provider call,
 # a call to a model the list does not name. An older runner handed the variable would ignore it and call any model,
 # reporting a clean exit: a model choice quietly not enforced. The worker sends the list only to an image declaring this
@@ -447,7 +443,7 @@ LABEL dev.pi-dispatch.forges="github,gitlab,forgejo"
 # subscriptionAuth (#781) verifies access lifetime and exact community receipts before loading code,
 # then holds final shaped requests to the admitted model/account and existing cost ticket.
 # verify-image.sh exercises receipt rejection, deadline checks and final-payload cost refusal offline.
-LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,costCap,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,sandboxLayout,transcriptStderr,steerStdin,bundleEnvFile,observableRunner,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
+LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,sandboxLayout,transcriptStderr,steerStdin,bundleEnvFile,observableRunner,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
 
 # The binaries in this image that may need the network, at their real paths (issue #683). A venue whose egress policy
 # names binaries rather than hosts alone (OpenShell decides every connection per executable) needs the paths before it

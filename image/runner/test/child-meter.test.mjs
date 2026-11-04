@@ -10,20 +10,14 @@ import {
 	childLedgerName,
 	openChildLedger,
 	parseChildLedger,
-	pinPriceTable,
-	PRICE_TABLE_ENV,
-	publishPriceTable,
-	readExternal,
-	readPriceTable,
 	readStop,
 	RUNNER_PID_ENV,
-	spentFile,
 	startChildMeter,
 	stopFile,
 	writeFileAtomic,
 } from "../src/usage-meter.mjs";
 import * as usageMeter from "../src/usage-meter.mjs";
-import { COST_CAP, MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // Importing the preload runs its top level, which does nothing without PI_DISPATCH_CHILD_LEDGER in this environment.
@@ -103,8 +97,8 @@ test("openChildLedger: a directory that cannot be made deletes the directory nam
 test("STOP: missing is go, a reason is that stop, anything else is a stop (true), and a FIFO neither hangs nor passes", () => {
 	const dir = tempDir("pi-dispatch-stop-");
 	assert.equal(readStop({ dir }), null);
-	writeFileAtomic({ dir, name: "STOP", text: JSON.stringify(stopFile(COST_CAP)) });
-	assert.equal(readStop({ dir }), COST_CAP);
+	writeFileAtomic({ dir, name: "STOP", text: JSON.stringify(stopFile(MODEL_NOT_ALLOWED)) });
+	assert.equal(readStop({ dir }), MODEL_NOT_ALLOWED);
 	writeFileAtomic({ dir, name: "STOP", text: JSON.stringify({ v: 1, reason: "nope" }) });
 	assert.equal(readStop({ dir }), true);
 	writeFileAtomic({ dir, name: "STOP", text: "not json" });
@@ -114,18 +108,6 @@ test("STOP: missing is go, a reason is that stop, anything else is a stop (true)
 	execFileSync("mkfifo", [join(fifoDir, "STOP")]);
 	assert.throws(() => readStop({ dir: fifoDir }), /unreadable STOP/, "a FIFO planted as STOP refuses (a stop), it never blocks");
 });
-
-test("SPENT: missing is 0, the job's total less this ledger's own part, malformed is Infinity", () => {
-	const dir = tempDir("pi-dispatch-spent-");
-	const own = "7.0123456789abcdef.json";
-	assert.equal(readExternal({ dir, name: own }), 0);
-	const fold = { files: new Map([[own, { high: { spentMicros: 300, inflightMicros: 20 } }], ["8.fedcba9876543210.json", { high: { spentMicros: 100, inflightMicros: 0 } }]]) };
-	writeFileAtomic({ dir, name: "SPENT", text: JSON.stringify(spentFile(fold, 1000)) });
-	assert.equal(readExternal({ dir, name: own }), 1100, "the parent's 1000 and the other child's 100, never its own 320");
-	writeFileAtomic({ dir, name: "SPENT", text: "{" });
-	assert.equal(readExternal({ dir, name: own }), Infinity);
-});
-
 
 test("writeFileAtomic: whole by rename, nothing left beside the file, and a ledger name is <pid>.<16 hex>.json", () => {
 	const dir = tempDir("pi-dispatch-atomic-");
@@ -193,40 +175,6 @@ async function startIn({ env = {}, install, ModelRuntime = ChildRuntime, compat 
 	return { child, dir, name, exits, read, state };
 }
 
-test("the parent's pinned price table reaches a child through the ledger directory, checked by its hash (issue #587)", async () => {
-	// A pi child has no runtime of the job's to pin from, and its own is the job's to poison, so it prices from the
-	// parent's table: written once into the ledger directory, its sha256 in the environment the child inherits.
-	const LISTED = { provider: "p", id: "m", api: "openai-completions", cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, compat: { maxTokensField: "max_tokens" } };
-	const table = pinPriceTable({ getAllModels: () => [LISTED] });
-	const dir = tempDir("pi-dispatch-prices-");
-	const env = {};
-	publishPriceTable({ dir, table, env });
-	assert.match(env[PRICE_TABLE_ENV], /^[0-9a-f]{64}$/);
-	const read = readPriceTable({ dir, env });
-	assert.deepEqual([...read.keys()], [...table.keys()]);
-	assert.deepEqual(read.get([...table.keys()][0]), table.get([...table.keys()][0]));
-	// Tampered, missing, or with no hash to check: an EMPTY table, so every capped call is refused, never unchecked.
-	const tampered = tempDir("pi-dispatch-prices-");
-	const tamperedEnv = {};
-	publishPriceTable({ dir: tampered, table, env: tamperedEnv });
-	const file = join(tampered, "PRICES");
-	rmSyncReal(file, { force: true });
-	writeFileSync(file, readFileSync(join(dir, "PRICES"), "utf8").replace('"output":2', '"output":0'));
-	assert.equal(readPriceTable({ dir: tampered, env: tamperedEnv }).size, 0, "a file that does not match its hash");
-	assert.equal(readPriceTable({ dir: tempDir("pi-dispatch-prices-"), env }).size, 0, "no file");
-	assert.equal(readPriceTable({ dir, env: {} }).size, 0, "no hash");
-	// The child meter installs with the table it read.
-	const fake = fakeInstall();
-	const childDir = tempDir("pi-dispatch-child-unit-");
-	const childEnv = { PI_MAX_COST_MICROS: "1000000" };
-	publishPriceTable({ dir: childDir, table, env: childEnv });
-	await startChildMeter({ ModelRuntime: ChildRuntime, compat: FAKE_COMPAT, env: childEnv, dir: childDir, name: "98.0123456789abcdef.json", state: {}, install: fake.install, onExit: () => {} });
-	assert.deepEqual([...fake.calls[0].prices.keys()], [...table.keys()]);
-	const bare = fakeInstall();
-	await startChildMeter({ ModelRuntime: ChildRuntime, compat: FAKE_COMPAT, env: { PI_MAX_COST_MICROS: "1000000" }, dir: tempDir("pi-dispatch-child-unit-"), name: "97.0123456789abcdef.json", state: {}, install: bare.install, onExit: () => {} });
-	assert.ok(bare.calls[0].prices instanceof Map && bare.calls[0].prices.size === 0, "no table handed down: an empty one, never none");
-});
-
 test("startChildMeter: installs on the class it is given with brake, isStopped and the injected compat copy, writes running, and done at exit", async () => {
 	const fake = fakeInstall();
 	const { child, exits, read, dir } = await startIn({ install: fake.install });
@@ -256,14 +204,13 @@ test("startChildMeter: installs on the class it is given with brake, isStopped a
 
 test("startChildMeter: the policies come from the inherited env, and a policy that does not parse leaves the child unmetered", async () => {
 	const fake = fakeInstall();
-	await startIn({ install: fake.install, env: { PI_ALLOWED_MODELS: "fake/m1", PI_MAX_COST_MICROS: "5000" } });
+	await startIn({ install: fake.install, env: { PI_ALLOWED_MODELS: "fake/m1" } });
 	const { guard, meter } = fake.calls[0];
-	assert.deepEqual([...guard.enforces].sort(), [COST_CAP, MODEL_NOT_ALLOWED].sort());
-	assert.equal(meter.costCap, 5000);
+	assert.deepEqual([...guard.enforces].sort(), [MODEL_NOT_ALLOWED].sort());
 	assert.deepEqual(meter.allowed, [{ provider: "fake", model: "m1" }]);
 
 	const bad = fakeInstall();
-	const { read } = await startIn({ install: bad.install, env: { PI_MAX_COST_MICROS: "1e6" } });
+	const { read } = await startIn({ install: bad.install, env: { PI_ALLOWED_MODELS: "not-a-pair" } });
 	assert.equal(bad.calls.length, 0, "nothing installed on a policy that does not parse");
 	assert.equal(read().metered, false);
 });

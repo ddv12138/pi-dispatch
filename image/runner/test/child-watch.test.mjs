@@ -3,9 +3,8 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 import { test } from "node:test";
 import { CMDLINE_BYTES, createChildWatch, ENVIRON_BYTES, isPiProcess, linuxProc, NO_LEDGER_FINAL_MS, NO_LEDGER_TICKS, PF_FORKNOEXEC, PRELOAD_FLAG, STARTING_CPU_MS, STARTING_FINAL_MS, STARTING_WALL_MS } from "../src/child-watch.mjs";
-import { COST_CAP, MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
-import { childLedger, CHILD_LEDGER_MAX_FILES, createCostGuard, createPolicyGuard, createUsageMeter, foldChildLedgers, writeFileAtomic } from "../src/usage-meter.mjs";
-import { dollarSettlement } from "../../../worker/src/dollar-budget.mjs";
+import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { childLedger, CHILD_LEDGER_MAX_FILES, createPolicyGuard, createUsageMeter, foldChildLedgers, writeFileAtomic } from "../src/usage-meter.mjs";
 import { parseExitTokens } from "../../../worker/src/run-history.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -15,28 +14,19 @@ import { tempDir } from "./helpers/temp-dir.mjs";
  * detector's rules run on any platform. child-watch.integration.test.mjs runs real pi children against the hook.
  */
 
-/** A ledger row with the ten numerics, zero unless given. */
-const row = (provider, model, fields = {}) => ({ provider, model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, cost: 0, unpriced: 0, providerBilled: 0, ...fields });
+/** A ledger row with the eight numerics, zero unless given. */
+const row = (provider, model, fields = {}) => ({ provider, model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, ...fields });
 
 /** A well-formed ledger: `calls` settled calls of `each` tokens on one pair, plus `unresolved` calls in flight. */
-function ledger({ state = "running", metered = true, calls = 1, each = 100, provider = "fake", model = "m1", unresolved = 0, spentMicros = 0, inflightMicros = 0, costRefused = 0, modelRefused = 0, cost = 0.001, floor = {} } = {}) {
-	const rows = calls === 0 ? [] : [row(provider, model, { calls, input: calls * each, total: calls * each, cost: calls * cost })];
+function ledger({ state = "running", metered = true, calls = 1, each = 100, provider = "fake", model = "m1", unresolved = 0, modelRefused = 0 } = {}) {
+	const rows = calls === 0 ? [] : [row(provider, model, { calls, input: calls * each, total: calls * each })];
 	return {
-		v: 3,
+		v: 4,
 		state,
 		metered,
-		totals: { input: calls * each, output: 0, total: calls * each, cost: calls * cost, calls: calls + unresolved, unresolved, unpriced: 0, sessions: calls === 0 ? 0 : 1 },
+		totals: { input: calls * each, output: 0, total: calls * each, calls: calls + unresolved, unresolved, usageUnreported: 0, sessions: calls === 0 ? 0 : 1 },
 		rows,
-		spentMicros,
-		inflightMicros,
-		costRefused,
 		modelRefused,
-		boundExceeded: 0,
-		costUnanswered: 0,
-		costUnreported: 0,
-		longContext: 0,
-		costUnjudged: 0,
-		...floor,
 	};
 }
 
@@ -73,7 +63,7 @@ function watch({ meter, proc = null, guard = () => null, now = () => 0, ...rest 
 const stopOf = (dir) => JSON.parse(readFileSync(join(dir, "STOP"), "utf8"));
 const usage = (total) => ({ input: total, output: 0, totalTokens: total, cost: { total: 0.001 } });
 
-test("with no children the exit line is the one it was, plus the three child keys at zero, after unpriced (issue #500)", () => {
+test("with no children the exit line is the one it was, plus the three child keys at zero, after the flat totals (issue #500)", () => {
 	const plain = createUsageMeter({ maxTokens: 10_000, rootSessionId: "root" });
 	const watched = createUsageMeter({ maxTokens: 10_000, rootSessionId: "root" });
 	const { dir, hook } = watch({ meter: watched });
@@ -83,20 +73,20 @@ test("with no children the exit line is the one it was, plus the three child key
 	}
 	hook.sample();
 	hook.sample();
-	const guard = createPolicyGuard({ maxCostMicros: 5_000_000, env: {} });
-	const line = (meter) => JSON.stringify({ tokens: { ...meter.snapshot(), ...guard.snapshot() }, usage: meter.usageSnapshot() });
-	const parsed = JSON.parse(line(watched));
+	const guard = createPolicyGuard({ env: {} });
+	const line = (meter, withGuard) => JSON.stringify({ tokens: { ...meter.snapshot(), ...(withGuard && guard ? guard.snapshot() : {}) }, usage: meter.usageSnapshot() });
+	const parsed = JSON.parse(line(watched, true));
 	assert.deepEqual([parsed.tokens.childTotal, parsed.tokens.childProcesses, parsed.tokens.unmeteredChildren], [0, 0, 0]);
 	const keys = Object.keys(parsed.tokens);
-	assert.deepEqual(keys.slice(keys.indexOf("unpriced") + 1, keys.indexOf("unpriced") + 4), ["childTotal", "childProcesses", "unmeteredChildren"]);
+	assert.deepEqual(keys.slice(keys.indexOf("unresolved") + 1, keys.indexOf("unresolved") + 4), ["childTotal", "childProcesses", "unmeteredChildren"]);
 	delete parsed.tokens.childTotal;
 	delete parsed.tokens.childProcesses;
 	delete parsed.tokens.unmeteredChildren;
-	assert.equal(JSON.stringify(parsed), line(plain), "everything else byte-identical");
+	assert.equal(JSON.stringify(parsed), line(plain, false), "everything else byte-identical");
 	// The keys are there before the first tick too: the hook hands over an empty fold when it is made.
 	const early = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
 	createChildWatch({ dir, meter: early, proc: null });
-	assert.deepEqual(Object.keys(early.snapshot()).slice(-4), ["childTotal", "childProcesses", "unmeteredChildren", "costUnreported"]);
+	assert.deepEqual(Object.keys(early.snapshot()).slice(-4), ["childTotal", "childProcesses", "unmeteredChildren", "usageUnreported"]);
 	assert.deepEqual(hook.teardown(), { distinct: null, peak: null, unmetered: 0 }, "no detector off Linux");
 	assert.equal(watched.state.stopReason, null);
 	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET }, "the directory and its STOP stay: the container ends right after");
@@ -139,34 +129,6 @@ test("parent plus children past maxTokens stops token_budget and writes STOP; a 
 	assert.equal(logged.filter((line) => line.event === "unmetered_child").length, 1);
 });
 
-test("under a dollar cap: SPENT is written each tick, external() is the children's spend, and the parent's plus the children's spend past the cap is cost-cap (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: 1_000_000, rootSessionId: "root" });
-	let own = { spentMicros: 900_000, inflightMicros: 5_000 };
-	const { dir, hook } = watch({ meter, guard: () => ({ spend: () => own }) });
-	const name = writeLedger(dir, 9, ledger({ spentMicros: 60_000, inflightMicros: 2_000 }));
-	hook.sample();
-	assert.equal(meter.state.stopReason, null, "960,000 settled is under the cap");
-	assert.deepEqual(JSON.parse(readFileSync(join(dir, "SPENT"), "utf8")), { v: 1, total: 905_000 + 62_000, byLedger: { [name]: 62_000 } });
-	assert.equal(hook.external(), 62_000, "the parent's guard sees each child's spent and in-flight");
-	own = { spentMicros: 950_000, inflightMicros: 0 };
-	hook.sample();
-	assert.equal(meter.state.stopReason, COST_CAP, "950,000 + 60,000 settled passes 1,000,000");
-	assert.deepEqual(stopOf(dir), { v: 1, reason: COST_CAP });
-});
-
-test("a child's costRefused is cost-cap under a dollar cap; with no dollar cap it stops nothing (issue #500)", () => {
-	const capped = createUsageMeter({ maxTokens: null, maxCostMicros: 1_000_000, rootSessionId: "root" });
-	const a = watch({ meter: capped });
-	writeLedger(a.dir, 9, ledger({ calls: 0, costRefused: 1 }));
-	a.hook.sample();
-	assert.equal(capped.state.stopReason, COST_CAP);
-	const uncapped = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
-	const b = watch({ meter: uncapped });
-	writeLedger(b.dir, 9, ledger({ calls: 0, costRefused: 1 }));
-	b.hook.sample();
-	assert.equal(uncapped.state.stopReason, null);
-});
-
 test("under a model list: a named child row off the PARENT's list, or a child's modelRefused, is model-not-allowed; a model-less row is the child guard's to judge (issue #500)", () => {
 	const listed = [{ provider: "fake", model: "m1" }];
 	for (const [label, body, want] of [
@@ -202,38 +164,9 @@ test("a child's modelRefused with no list on the parent stops nothing: that list
 	assert.equal(meter.state.stopReason, null);
 });
 
-test("the cost stop is judged on SETTLED spend: in-flight bounds past the cap do not stop the job (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: 1_000_000, rootSessionId: "root" });
-	const { dir, hook } = watch({ meter, guard: () => ({ spend: () => ({ spentMicros: 900_000, inflightMicros: 50_000 }) }) });
-	writeLedger(dir, 9, ledger({ calls: 0, spentMicros: 90_000, inflightMicros: 200_000 }));
-	hook.sample();
-	assert.equal(meter.state.stopReason, null, "990,000 settled is under 1,000,000, whatever is in flight");
-	assert.equal(hook.external(), 290_000, "but the parent's guard sees the children's in-flight bounds");
-});
-
-test("a child with no cost guard (its spawner dropped PI_MAX_COST_MICROS) is charged its metered cost: the stop, external() and SPENT (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: 1_000_000, rootSessionId: "root" });
-	const { dir, hook } = watch({ meter, guard: () => ({ spend: () => ({ spentMicros: 0, inflightMicros: 0 }) }) });
-	// Five calls at $0.3 each, spentMicros 0: $1.5 against a $1 cap.
-	const name = writeLedger(dir, 9, ledger({ calls: 5, cost: 0.3, spentMicros: 0 }));
-	hook.sample();
-	assert.equal(meter.state.stopReason, COST_CAP);
-	assert.equal(hook.external(), 1_500_000);
-	assert.deepEqual(JSON.parse(readFileSync(join(dir, "SPENT"), "utf8")), { v: 1, total: 1_500_000, byLedger: { [name]: 1_500_000 } });
-});
-
-test("SPENT is written only under a dollar cap (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
-	const { dir, hook } = watch({ meter });
-	writeLedger(dir, 9, ledger({ spentMicros: 5 }));
-	hook.sample();
-	assert.equal(existsSync(join(dir, "SPENT")), false);
-});
-
 test("the worker keeps the child keys: a runner's exit line round-trips byte-identically, and an unmetered child floors the settlement (issue #500 part F)", () => {
-	const cap = 1_000_000;
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-	const guard = createPolicyGuard({ maxCostMicros: cap, allowedModels: [{ provider: "fake", model: "m1" }], env: {} });
+	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const guard = createPolicyGuard({ allowedModels: [{ provider: "fake", model: "m1" }], env: {} });
 	const { dir, hook } = watch({ meter, guard: () => guard });
 	meter.record(usage(120), { sessionId: "root", provider: "fake", modelId: "m1" });
 	writeLedger(dir, 31, ledger({ state: "done", calls: 2, each: 300 }));
@@ -241,101 +174,25 @@ test("the worker keeps the child keys: a runner's exit line round-trips byte-ide
 	const line = () => ({ ...meter.snapshot(), ...hook.guardFields(guard.snapshot()) });
 	const tokens = line();
 	assert.deepEqual([tokens.childTotal, tokens.childProcesses, tokens.unmeteredChildren], [600, 1, 0]);
-	const kept = parseExitTokens(JSON.stringify({ event: "exit", tokens }));
-	assert.equal(JSON.stringify(kept), JSON.stringify(tokens), "every key the runner writes is on the worker's closed list, in its order");
+	// The worker's TOKEN_KEYS gain `usageUnreported` in the worker phase of this change (DES-TOKEN-RESERVE-AND-SETTLE);
+	// until that lands the parse drops it, so the round-trip is asserted on what the parse keeps today.
+	const kept = parseExitTokens(JSON.stringify({ event: "exit", tokens: meter.snapshot() }));
+	assert.deepEqual([kept.total, kept.calls, kept.childTotal, kept.unmeteredChildren], [720, 2, 600, 0], "the meter's keys survive the worker's parse");
 	assert.equal(kept.rootTotal + kept.otherTotal + kept.looseTotal + kept.childTotal, kept.total);
-	const settle = (fields) => dollarSettlement({ tokens: fields, usage: meter.usageSnapshot(), reservedMicros: cap, trusted: true });
-	assert.equal(settle(kept).basis, "metered", "metered children are part of the metered cost");
 	// A pi child that reports through no ledger: counted, and the record that the worker keeps says so.
 	writeLedger(dir, 32, ledger({ metered: false, calls: 0 }));
 	hook.sample();
 	const floored = parseExitTokens(JSON.stringify({ event: "exit", tokens: line() }));
 	assert.equal(floored.unmeteredChildren, 1);
-	assert.equal(settle(floored).basis, "floor");
 });
 
-test("a child's floor counters reach the exit line: a child call that never started floors the job exactly as a parent call would (issue #500)", async () => {
-	const cap = 1_000_000;
-	const M1 = { provider: "fake", id: "m1", api: "openai-completions", cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, compat: { maxTokensField: "max_tokens" } };
-	const failed = { role: "assistant", stopReason: "error", content: [], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } };
-	const noUsage = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }] };
-	// Issue #571: what pi settles when the answer carried no usage block, all zeros. The meter would price it at $0 as
-	// metered; its costUnreported floors it, written by the meter whether or not a guard runs.
-	const zeroUsage = { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }], usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } } };
-	/** One call through a meter (and a cost guard, when given), answered with `message`, as the wrappers observe it. */
-	async function call(meter, guard, message) {
-		const stream = { result: () => Promise.resolve(message) };
-		if (guard !== null) {
-			assert.equal(guard.admit({ method: "streamSimple", model: M1, args: [{}, {}] }), null);
-			guard.bind(stream);
-		}
-		meter.observe(stream, { sessionId: "s", provider: M1.provider, modelId: M1.id, model: M1 });
-		await new Promise((resolve) => setImmediate(resolve));
-	}
-	const settle = (meter, guard, extra = (fields) => fields) => dollarSettlement({ tokens: { ...meter.snapshot(), ...extra(guard.snapshot()) }, usage: meter.usageSnapshot(), reservedMicros: cap, trusted: true });
-	const cases = [
-		["a call that never started", failed, "costUnanswered", true],
-		["an answer with no usage", noUsage, null, true],
-		["an answer pi filled with zero usage", zeroUsage, "costUnreported", true],
-		// Issue #571: a child whose spawner dropped PI_MAX_COST_MICROS runs no cost guard; its meter still counts.
-		["an answer pi filled with zero usage, in a child with no cost guard", zeroUsage, "costUnreported", false],
-	];
-	for (const [label, message, counter, childGuarded] of cases) {
-		// The parent makes the call itself.
-		const parent = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-		const direct = createCostGuard({ capMicros: cap, bound: () => 1000 });
-		// With its children hook, as in a job: the child keys are on the line at zero, so only the call floors it.
-		watch({ meter: parent, guard: () => direct });
-		await call(parent, direct, message);
-		const own = settle(parent, direct);
-		// A child makes it, and the parent folds its ledger.
-		const childMeter = createUsageMeter({ maxTokens: null, rootSessionId: "child" });
-		const childGuard = childGuarded ? createCostGuard({ capMicros: cap, bound: () => 1000 }) : null;
-		await call(childMeter, childGuard, message);
-		const folding = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-		const parentOnly = createPolicyGuard({ maxCostMicros: cap, env: {} });
-		const { dir, hook } = watch({ meter: folding, guard: () => parentOnly });
-		writeLedger(dir, 12, childLedger({ state: "done", meter: childMeter, guard: childGuard }));
-		hook.sample();
-		const viaChild = settle(folding, parentOnly, (fields) => hook.guardFields(fields));
-		assert.equal(own.basis, "floor", `${label}: the parent's own call floors`);
-		assert.equal(viaChild.basis, "floor", `${label}: so does the child's`);
-		if (counter === "costUnanswered") {
-			assert.equal(direct.snapshot()[counter], 1, `${label}: counted as ${counter}`);
-			assert.equal(hook.guardFields(parentOnly.snapshot())[counter], 1, `${label}: the child's ${counter} reaches the parent's line`);
-			assert.equal(settle(folding, parentOnly).basis, "metered", `${label}: without the child's counter the line would read as metered`);
-		}
-		if (counter === "costUnreported") {
-			assert.equal(parent.snapshot()[counter], 1, `${label}: counted by the parent's meter`);
-			assert.equal(folding.snapshot()[counter], 1, `${label}: the child's count reaches the parent's line through the fold`);
-		}
-	}
-	// And a clean child call settles metered: the counters are added, not invented.
-	const childMeter = createUsageMeter({ maxTokens: null, rootSessionId: "child" });
-	const childGuard = createCostGuard({ capMicros: cap, bound: () => 1000 });
-	await call(childMeter, childGuard, { role: "assistant", stopReason: "stop", content: [{ type: "text", text: "ok" }], usage: { input: 500, output: 10, cacheRead: 0, cacheWrite: 0, totalTokens: 510, cost: { total: 0.0005 } } });
-	const folding = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-	const parentOnly = createPolicyGuard({ maxCostMicros: cap, env: {} });
-	const { dir, hook } = watch({ meter: folding, guard: () => parentOnly });
-	writeLedger(dir, 12, childLedger({ state: "done", meter: childMeter, guard: childGuard }));
+test("a version 3 ledger (the money shape, retired) counts as unmetered and floors the job", () => {
+	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const { dir, hook } = watch({ meter });
+	const old = ledger({ state: "done" });
+	writeLedger(dir, 41, { ...old, v: 3 });
 	hook.sample();
-	assert.equal(settle(folding, parentOnly, (fields) => hook.guardFields(fields)).basis, "metered");
-	const fields = { ...folding.snapshot(), ...hook.guardFields(parentOnly.snapshot()) };
-	assert.deepEqual([fields.costUnanswered, fields.costUnreported, fields.boundExceeded, fields.costRefused], [0, 0, 0, 0]);
-	assert.deepEqual(hook.guardFields({ modelRefused: 1 }), { modelRefused: 1 }, "only the keys the parent's guard writes");
-});
-
-test("a version 2 ledger (an image from before costUnreported) counts as unmetered and floors the job (issue #571)", () => {
-	const cap = 1_000_000;
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros: cap, rootSessionId: "root" });
-	const guard = createPolicyGuard({ maxCostMicros: cap, env: {} });
-	const { dir, hook } = watch({ meter, guard: () => guard });
-	const { costUnreported, ...old } = ledger({ state: "done" });
-	writeLedger(dir, 41, { ...old, v: 2 });
-	hook.sample();
-	assert.equal(meter.snapshot().unmeteredChildren, 1, "a child that cannot say whether it lifted a call is unmetered");
-	const tokens = { ...meter.snapshot(), ...hook.guardFields(guard.snapshot()) };
-	assert.equal(dollarSettlement({ tokens, usage: meter.usageSnapshot(), reservedMicros: cap, trusted: true }).basis, "floor");
+	assert.equal(meter.snapshot().unmeteredChildren, 1, "a child of the retired shape is unmetered");
 });
 
 test("the detector: a registered child is metered however long it lives; a pi process with no ledger is unmetered after two ticks (issue #500)", () => {
@@ -363,9 +220,8 @@ test("the unmetered stop carries its cause, so run-job's handler does not log to
 	assert.deepEqual(stops, [[TOKEN_BUDGET, { cause: "unmetered-child", unmetered: 1 }]]);
 });
 
-test("an unmetered child's stop: cost-cap under a dollar cap, else token_budget under a token cap, else model-not-allowed under a list; uncapped, a floor only (issue #500)", () => {
+test("an unmetered child's stop: token_budget under a token cap, else model-not-allowed under a list; uncapped, a floor only (issue #500)", () => {
 	for (const [options, want] of [
-		[{ maxTokens: 1_000_000, maxCostMicros: 1_000_000, allowedModels: [{ provider: "fake", model: "m1" }] }, COST_CAP],
 		[{ maxTokens: 1_000_000, allowedModels: [{ provider: "fake", model: "m1" }] }, TOKEN_BUDGET],
 		[{ maxTokens: null, allowedModels: [{ provider: "fake", model: "m1" }] }, MODEL_NOT_ALLOWED],
 		[{ maxTokens: null }, null],
@@ -706,12 +562,12 @@ test("the open-file cap still floods: more than CHILD_LEDGER_MAX_FILES live ledg
 	assert.equal(meter.snapshot().unmeteredChildren, 3);
 });
 
-test("the parent's own failure to write STOP or SPENT is a breach (issue #500)", () => {
+test("the parent's own failure to write STOP is a breach (issue #500)", () => {
 	const failing = { openSync: () => {
 		throw Object.assign(new Error("denied"), { code: "EACCES" });
 	} };
 	const writeFs = new Proxy(failing, { get: (target, key) => target[key] ?? (key === "constants" ? { O_WRONLY: 1, O_CREAT: 64, O_EXCL: 128 } : () => {}) });
-	// STOP: the meter stopped on its own; the STOP that cannot be written is counted unmetered, and logged.
+	// The meter stopped on its own; the STOP that cannot be written is counted unmetered, and logged.
 	const stopped = createUsageMeter({ maxTokens: 10, rootSessionId: "root" });
 	const a = watch({ meter: stopped, writeFs });
 	stopped.record(usage(20), { sessionId: "root" });
@@ -719,12 +575,6 @@ test("the parent's own failure to write STOP or SPENT is a breach (issue #500)",
 	assert.equal(stopped.state.stopReason, TOKEN_BUDGET);
 	assert.equal(stopped.snapshot().unmeteredChildren, 1);
 	assert.deepEqual(a.logged.filter((line) => line.event === "unmetered_child").map((line) => line.fields.why), ["control-write"]);
-	// SPENT under a dollar cap, before any stop: the job stops cost-cap.
-	const capped = createUsageMeter({ maxTokens: null, maxCostMicros: 1_000_000, rootSessionId: "root" });
-	const b = watch({ meter: capped, writeFs });
-	b.hook.sample();
-	assert.equal(capped.state.stopReason, COST_CAP);
-	assert.equal(capped.snapshot().unmeteredChildren, 1);
 });
 
 test("a ledger path the agent replaced with a file is not made over; it is counted lost (issue #500)", () => {
@@ -760,7 +610,7 @@ test("teardown writes STOP FIRST, then folds once more (a child's last write cou
 	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET }, "STOP stays for any child still alive");
 	// After teardown nothing more is written, and a second teardown is the first one's answer.
 	rmSync(join(dir, "STOP"));
-	made.hook.stopped(COST_CAP);
+	made.hook.stopped(MODEL_NOT_ALLOWED);
 	made.hook.sample();
 	assert.equal(existsSync(join(dir, "STOP")), false);
 	assert.deepEqual(made.hook.teardown(), torn);

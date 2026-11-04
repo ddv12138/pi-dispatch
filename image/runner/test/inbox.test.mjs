@@ -1105,7 +1105,7 @@ test("frames: read before the session exists, a frame the transcript already del
 	assert.equal(inbox.counts().pending, 1);
 });
 
-test("frames: a frame written before agent_start is read there, synchronously, with no I/O turn between (the cost-cap-0 case) (#686)", () => {
+test("frames: a frame written before agent_start is read there, synchronously, with no I/O turn between (the capped-job case) (#686)", () => {
 	const { stream, inbox, api } = framedStandIn();
 	inbox.listen();
 	stream.write(workerFrame(2, { messageId: id(9) }));

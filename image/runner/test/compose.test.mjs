@@ -267,7 +267,7 @@ test("run-job installs the meter and the guards before any extension loads, and 
 	// that spent before a later refusal (command-unregistered) must reach the settlement.
 	const armed = src.indexOf("\t\tmeteredExitFields = () => {");
 	assert.ok(armed > install && armed < loader, "the exit fields are armed right after the install, before any extension loads");
-	assert.match(src, /exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, \.\.\.costRefusalField\(outcome, costRefusalWhy\(\)\), message: capped\.message, \.\.\.meteredExitFields\(\) \}\);/, "the outer catch's exit line carries the meter's fields");
+	assert.match(src, /exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, message: capped\.message, \.\.\.meteredExitFields\(\) \}\);/, "the outer catch's exit line carries the meter's fields");
 	assert.match(src, /const tokens = usageMeter\.ok \? meteredExitFields\(\)\.tokens :/, "the success line reads the same fields");
 	// `usage` rides only when a call was observed: a run with none keeps the key absent, never `usage: null`.
 	assert.match(src, /\{ tokens: \{ \.\.\.meter\.snapshot\(\), \.\.\.\(policyGuard \? childWatch\.guardFields\(policyGuard\.snapshot\(\)\) : \{\}\) \}, \.\.\.\(usage \? \{ usage \} : \{\}\) \}/, "usage is omitted when no call was observed");
@@ -280,30 +280,32 @@ test("run-job installs the meter and the guards before any extension loads, and 
 	assert.ok(src.indexOf("\t\tmeterStopAtExit = () =>") > install && src.indexOf("\t\tmeterStopAtExit = () =>") < loader, "armed with the exit fields, before any extension loads");
 });
 
-test("run-job refuses an unenforceable cost cap or model list after the meter installs and before the session exists (issues #501, #502)", () => {
+test("run-job refuses an unenforceable model list after the meter installs and before the session exists (issue #502)", () => {
 	// Source-guard tactic again. The order is the whole point: the check reads the install's verdict (meter ok,
 	// brake, guard), so it must follow installProcessUsageMeter; and it must precede createAgentSession, because
 	// a session can spend on its own (an extension factory's call, a cache warm) before the first prompt.
+	// The token cap is deliberately not asserted here: it has no pre-call form to enforce (its stop is the meter's
+	// settle-time check), so there is nothing a missing brake would make it enforce early.
 	const src = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
 	const install = src.indexOf("await installProcessUsageMeter(");
 	const check = src.indexOf("assertPoliciesEnforceable({");
 	const session = src.indexOf("await createAgentSession(");
 	assert.ok(install > 0 && check > install && session > check, "install, then the policy check, then the session");
 	// The verdict comes from policyEnforcement, whose ok:false and brake rules usage-meter.test.mjs drives.
-	assert.match(src, /assertPoliciesEnforceable\(\{\s*maxCostMicros: cfg\.maxCostMicros,\s*allowedModels: cfg\.allowedModels,\s*\.\.\.policyEnforcement\(usageMeter\),\s*\}\);/, "the fallback bus meter (ok:false) can only see a call after it was paid for");
-	// Issue #501, PR 3 (PR #533's review): the stop handler is the tested one, so a cost stop cannot log token_budget_exceeded.
+	assert.match(src, /assertPoliciesEnforceable\(\{\s*allowedModels: cfg\.allowedModels,\s*\.\.\.policyEnforcement\(usageMeter\),\s*\}\);/, "the fallback bus meter (ok:false) can only see a call after it ran");
+	// The stop handler is the tested one, so a model stop cannot log token_budget_exceeded.
 	assert.match(src, /const stopHandler = meterStopHandler\(\{ onTokenAbort, abort: \(\) => void session\?\.abort\(\) \}\);/, "the meter's stop goes through meterStopHandler");
 	// And then, issue #500 part E, to the children: STOP is written the moment the meter stops.
 	assert.match(src, /\t\tonStop: \(reason, detail\) => \{\n\t\t\tstopHandler\(reason, detail\);\n\t\t\tchildWatch\?\.stopped\(reason\);\n\t\t\},\n/, "the stop handler first, then STOP for the children");
 	assert.doesNotMatch(src, /reason === TOKEN_BUDGET/, "no second, untested copy of the token-only rule");
-	// The policy guard (issues #501, #502): built from both policies (null when neither is set, its order and its
-	// snapshot driven in model-guard.test.mjs), handed to the install, and its fields spread only when it exists.
-	assert.match(src, /const policyGuard = createPolicyGuard\(\{ maxCostMicros: cfg\.maxCostMicros, allowedModels: cfg\.allowedModels, log, external: \(\) => childWatch\.external\(\), subscriptionAdmission: subscriptionRegistration \? \(provider\) => subscriptionRegistration\.admitted\(provider\) : null \}\);/);
+	// The policy guard (issue #502): built from the list (null when none is set, its snapshot driven in
+	// model-guard.test.mjs), handed to the install, and its fields spread only when it exists.
+	assert.match(src, /const policyGuard = createPolicyGuard\(\{ allowedModels: cfg\.allowedModels, log, subscriptionAdmission: subscriptionRegistration \? \(provider\) => subscriptionRegistration\.admitted\(provider\) : null \}\);/);
 	assert.ok(src.indexOf("const policyGuard =") < install, "the guard exists before the install that hands it to both halves");
 	assert.match(src, /installProcessUsageMeter\(\{ ModelRuntime, runtime: modelRuntime, meter, log, guard: policyGuard, children: childWatch \}\)/);
-	assert.match(src, /\{ \.\.\.meter\.snapshot\(\), \.\.\.\(policyGuard \? childWatch\.guardFields\(policyGuard\.snapshot\(\)\) : \{\}\) \}/, "the policy fields ride the exit line only when a policy is set, the children's counters added");
-	assert.doesNotMatch(src, /createCostGuard|createModelGuard/, "no guard built beside the policy guard, which fixes their order");
-	assert.match(src, /maxCostMicros: cfg\.maxCostMicros,\s*allowedModels: cfg\.allowedModels,\s*rootSessionId/, "the meter carries both policies, so the brake is armed for them");
+	assert.match(src, /\{ \.\.\.meter\.snapshot\(\), \.\.\.\(policyGuard \? childWatch\.guardFields\(policyGuard\.snapshot\(\)\) : \{\}\) \}/, "the policy fields ride the exit line only when a list is set, the children's counters added");
+	assert.doesNotMatch(src, /createCostGuard|createModelGuard/, "no guard built beside the policy guard");
+	assert.match(src, /maxTokens: cfg\.maxTokens,\s*allowedModels: cfg\.allowedModels,\s*rootSessionId/, "the meter carries the token cap and the list, so the brake is armed for them");
 	assert.match(src, /meterStop: usageMeter\.ok \? meter\.state\.stopReason : null,/, "the exit decision reads the meter's stop by reason");
 	assert.match(src, /tokenAborted: usageMeter\.ok \? false : tokenBudget\.state\.aborted,/, "the flag is the fallback meter's alone");
 });
@@ -322,12 +324,12 @@ test("run-job takes PI_EXIT_AUTH out of its environment right after reading the 
 	assert.match(src, /if \(childLedger\.error !== undefined\) log\("child_ledger_unavailable", \{ reason: childLedger\.error \}\);/, "a ledger that could not be opened is said, by code");
 });
 
-test("run-job hands the meter the children hook on the ledger directory, and the guard's external is the children's spend (issue #500 part E)", () => {
+test("run-job hands the meter the children hook on the ledger directory (issue #500 part E)", () => {
 	// Source-guard tactic: child-watch.test.mjs drives the hook itself. This pins the wiring a run cannot show here.
 	const src = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
 	const ledger = src.indexOf("const childLedger = openChildLedger(");
 	const meter = src.indexOf("const meter = createUsageMeter({");
-	const watch = src.indexOf("childWatch = createChildWatch({ dir: childLedger.dir ?? null, meter, guard: () => policyGuard, log });");
+	const watch = src.indexOf("childWatch = createChildWatch({ dir: childLedger.dir ?? null, meter, log });");
 	const guard = src.indexOf("const policyGuard = createPolicyGuard(");
 	const install = src.indexOf("await installProcessUsageMeter(");
 	assert.ok(ledger > 0 && meter > ledger && watch > meter && guard > watch && install > guard, "the ledger, the meter, the hook (which sets the empty fold, so the three keys are on every exit line), the guard, the install");
@@ -376,13 +378,11 @@ test("run-job decides nested or not FIRST, and a nested runner never reaches the
 	assert.equal((src.match(/process\.on\("SIGTERM"/g) ?? []).length, 1, "one handler");
 });
 
-test("every exit-line path of run-job.mjs names the cost guard's rule on a cost-cap stop -- worker parseExitWhy depends on it (#507, #772)", () => {
-	// Same tactic as the guards above: main() self-runs on import. Every writeExit that writes a decided outcome (the
-	// prompt's end and the outer catch; the SIGTERM line is always `terminated`) spreads costRefusalField, and the
-	// accessor is set from the policy guard once it exists.
+test("every exit-line path of run-job.mjs is capped, and the decided lines read the meter's fields (issue #224, #543)", () => {
+	// Same tactic as the guards above: main() self-runs on import. Every writeExit caps its message (the worker reads
+	// the line from a bounded tail), and the decided ones carry the meter's fields.
 	const src = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
 	const writes = src.match(/exitWriter\.writeExit\([^\n]*/g) ?? [];
 	assert.equal(writes.length, 4, "chat, deterministic watch classifier, answer classifier/pass and throw exit lines");
-	for (const line of writes) assert.match(line, /\.\.\.costRefusalField\(outcome, costRefusalWhy\(\)\)/, line);
-	assert.match(src, /costRefusalWhy = \(\) => policyGuard\?\.refusedWhy\(\) \?\? null;/);
+	for (const line of writes) assert.match(line, /\.\.\.capExitMessage|\.\.\.meteredExitFields/, line);
 });

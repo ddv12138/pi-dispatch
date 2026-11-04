@@ -65,6 +65,13 @@ globalThis.fetch = async (input, init) => {
   let modelOk = false;
   try { modelOk = JSON.parse(await request.text()).model === process.env.PI_MODEL; } catch {}
   console.log(JSON.stringify({event:"subscription_smoke_fetch",calls,provider,authOk,urlOk,modelOk}));
+  if (process.env.PI_AUTH_SMOKE_MODE === "token") {
+    // A small 200 with real usage: the settle-time token cap (PI_MAX_TOKENS=1) fires on it, so the job ends
+    // token_budget after ONE metered dispatch, the lagging backstop OQ-010 keeps describing.
+    const usage = provider === "openai" ? {input:5,output:5,total_tokens:10} : {input_tokens:5,output_tokens:5};
+    const body = provider === "openai" ? {id:"resp_smoke",object:"response",status:"completed",model:process.env.PI_MODEL,output:[],usage} : {id:"msg_smoke",type:"message",role:"assistant",model:process.env.PI_MODEL,content:[],stop_reason:"end_turn",usage:{...usage,cache_creation_input_tokens:0,cache_read_input_tokens:0}};
+    return new Response(JSON.stringify(body), {status:200,headers:{"content-type":"application/json"}});
+  }
   if (process.env.PI_AUTH_SMOKE_MODE !== "provider") throw new Error("subscription smoke unexpected dispatch");
   return new Response(JSON.stringify({error:provider === "openai" ? {code:"usage_limit_reached",type:"usage_limit_reached",message:"synthetic quota refusal"} : {type:"rate_limit_error",message:"synthetic throttle"}}), {status:429,headers:{"content-type":"application/json","retry-after":"600"}});
 };
@@ -83,13 +90,14 @@ export function subscriptionSmokeProblems({ output, status, key, provider, mode 
 	if (exit.tokens?.modelRefused !== 0) problems.push("model admission did not pass");
 	if (events.some(row => row.event === "extension_load_error" || row.event === "extension_error")) problems.push("extension failed to load");
 	const requests = events.filter(row => row.event === "subscription_smoke_fetch");
-	if (mode === "cost") {
-		if (status !== 2 || exit.code !== 2 || exit.reason !== "cost-cap" || exit.tokens?.costRefused !== 1) problems.push("normal runner did not refuse its first call at the initial cost bound");
-		if (requests.length !== 0) problems.push("a cost-refused job attempted dispatch");
+	if (mode === "token") {
+		if (status !== 2 || exit.code !== 2 || exit.reason !== "token_budget") problems.push("normal runner did not stop at the settle-time token cap");
+		if (requests.length !== 1) problems.push("the token-capped job made the wrong number of dispatches");
+		if (exit.tokens?.calls !== 1 || exit.tokens?.metered !== true) problems.push("the token-capped job was not metered on its one dispatch");
 	} else {
 		if (status !== 1 || exit.code !== 1 || !["quota-exhausted", "rate-limited"].includes(exit.providerFailure?.kind) || exit.providerFailure?.subscriptionProvider !== provider) problems.push("synthetic throttle did not retain typed subscription evidence");
 		if (provider === "openai" && exit.providerFailure?.subscriptionCode !== "usage_limit_reached") problems.push("OpenAI typed quota code was lost");
-		if (exit.tokens?.costRefused !== 0 || exit.tokens?.calls !== 2 || exit.tokens?.metered !== true || exit.toolsStarted !== false || exit.replaySafe !== true) problems.push("provider observation bypassed ordinary metering or replay evidence");
+		if (exit.tokens?.calls !== 2 || exit.tokens?.metered !== true || exit.toolsStarted !== false || exit.replaySafe !== true) problems.push("provider observation bypassed ordinary metering or replay evidence");
 		const retries = events.filter(row => row.event === "pi_auto_retry");
 		if (requests.length !== 2 || requests.some((row, index) => row.calls !== index + 1 || row.provider !== provider || !row.authOk || !row.urlOk || !row.modelOk) || retries.length !== 1 || retries[0].attempt !== 1 || retries[0].maxAttempts !== 1) problems.push("expected the initial request and one bounded retry, both correctly authenticated and shaped, with no refresh call");
 	}
@@ -118,7 +126,7 @@ export function verifySubscriptionImage(image) {
 				prepared = prepareCommunityAuthAdapter({ adapter: profile.adapter, root });
 			}
 			readable(scratch);
-			for (const mode of ["cost", "provider"]) {
+			for (const mode of ["token", "provider"]) {
 				const name = `pi-subscription-smoke-${process.pid}-${index}-${mode}`;
 				containers.add(name);
 				const key = randomBytes(32).toString("hex");
@@ -126,7 +134,7 @@ export function verifySubscriptionImage(image) {
 				const binding = { provider: profile.provider, adapter: profile.adapter, connectionId: "smoke", generation: 1, expiresAt: at + 2 * 3_600_000, deadlineAt: at + 1_800_000, ...(prepared ? { root: stagedRoot, digest: prepared.digest } : {}) };
 				const env = {
 					PI_PROVIDER: profile.provider, PI_MODEL: profile.model, PI_ALLOWED_MODELS: `${profile.provider}/${profile.model}`,
-					PI_MAX_COST_MICROS: mode === "cost" ? "1" : "100000000", PI_MAX_TURNS: "1", PI_RETRY_MAX: "1", PI_RETRY_BASE_MS: "1",
+					...(mode === "token" ? { PI_MAX_TOKENS: "1" } : {}), PI_MAX_TURNS: "1", PI_RETRY_MAX: "1", PI_RETRY_BASE_MS: "1",
 					PI_EXIT_AUTH: "stdin", PI_SUBSCRIPTION_AUTH: JSON.stringify([binding]), PI_AUTH_SMOKE_MODE: mode,
 					NODE_OPTIONS: "--import=/job/offline-fetch.mjs",
 					[profile.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_OAUTH_TOKEN"]: profile.provider === "openai" ? "fixture.oauth.access" : "sk-ant-oat01-dispatch-fixture",

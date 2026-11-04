@@ -48,7 +48,7 @@ export function attachTokenBudget(session, maxTokens, { onAbort } = {}) {
 	}
 	const cap = maxTokens ?? null;
 
-	const state = { input: 0, output: 0, total: 0, cost: 0, aborted: false };
+	const state = { input: 0, output: 0, total: 0, aborted: false };
 
 	const unsubscribe = session.subscribe((event) => {
 		// Once breached, EVERY later turn_start aborts again (issue #455 gate, A11/A13). The breach abort lands
@@ -70,10 +70,10 @@ export function attachTokenBudget(session, maxTokens, { onAbort } = {}) {
 		state.input += usage.input ?? 0;
 		state.output += usage.output ?? 0;
 		// totalTokens is the BILLED total (input + output + cache read/write), so state.total >= input +
-		// output -- deliberately, not a bug. The cap and the daily counter must key on billed tokens, so do
-		// not "fix" this to input+output. cost is a per-turn object; sum its `.total` (USD).
+		// output -- deliberately, not a bug. The cap and the worker's token windows key on billed tokens, so
+		// do not "fix" this to input+output. Usage carries no money here: token metering is the only
+		// accounting (DES-TOKEN-RESERVE-AND-SETTLE).
 		state.total += usage.totalTokens ?? 0;
-		state.cost += usage.cost?.total ?? 0;
 
 		if (cap !== null && state.total > cap && !state.aborted) {
 			state.aborted = true;

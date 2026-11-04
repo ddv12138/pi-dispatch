@@ -1,8 +1,8 @@
 /**
  * The zero-spend provider smoke on a built job image (issue #587): a real job, through the image's own entrypoint,
  * with a well-formed but fake ANTHROPIC_API_KEY. It must reach Anthropic, be refused with a 401, be metered on every
- * method the meter wraps, exit 2 as `provider-auth-refused`, and cost $0. Once uncapped, and once under a dollar cap,
- * which shows the cost guard admits the default model and lets its call go out.
+ * method the meter wraps, exit 2 as `provider-auth-refused`, and report no usage. Once unrestricted, and once under a
+ * model list that admits the default model, which shows the model guard admits it and lets its call go out.
  *
  * WHY A REAL PROVIDER, and why it is free. Every other in-image check runs offline against a fake provider, which
  * proves the runner's wiring but not that the PINNED pi still reaches a real provider through the meter: a bump that
@@ -32,7 +32,6 @@ import { BUMP_PATHS } from "./pi-bump.mjs";
 /** Shaped like an Anthropic key (prefix, 93 characters, the AA tail) and not one. */
 export const FAKE_KEY = `sk-ant-api03-${"0".repeat(93)}AA`;
 export const MODEL = "claude-sonnet-4-5-20250929";
-export const CAP_MICROS = "5000000";
 /**
  * The control: the same fake key, sent by a plain fetch from the same image. Only Anthropic's 401 for it shows the
  * provider was reachable and answering keys. A 5xx, a 529 or a 429 is Anthropic having a bad minute, and a network
@@ -68,15 +67,15 @@ export function smokeProblems(output, { piVersion, capped }) {
 		const want = [...RUNTIME_STREAM_METHODS, ...RUNTIME_RESULT_METHODS].sort();
 		if (JSON.stringify([...(meter.methods ?? [])].sort()) !== JSON.stringify(want)) problems.push(`the meter wrapped ${JSON.stringify(meter.methods)}, not every method (${want.join(", ")})`);
 		if (meter.compat !== "pi") problems.push(`the meter's compat half is ${JSON.stringify(meter.compat)}, not pi's own pi-ai`);
-		if (meter.costCapped !== capped) problems.push(`costCapped is ${meter.costCapped}, want ${capped}`);
+		if (meter.listed !== capped) problems.push(`listed is ${meter.listed}, want ${capped}`);
 	}
 	if (!exit) return [...problems, "no exit line: the runner did not finish"];
 	if (exit.code !== 2 || exit.reason !== "provider-auth-refused") problems.push(`exit ${exit.code} ${exit.reason}, want 2 provider-auth-refused (${String(exit.message ?? "").slice(0, 200)})`);
 	else if (!/\b401\b/.test(String(exit.message))) problems.push(`the refusal is not Anthropic's 401: ${String(exit.message).slice(0, 200)}`);
 	if (!(exit.tokens?.calls >= 1)) problems.push(`calls is ${exit.tokens?.calls}: the call never reached the meter`);
-	if (exit.tokens?.cost !== 0 || (exit.usage?.models ?? []).some((m) => m.cost !== 0)) problems.push(`the run cost ${exit.tokens?.cost}, not $0`);
+	if ((exit.usage?.models ?? []).some((m) => m.total !== 0)) problems.push(`the run reported usage ${JSON.stringify(exit.usage?.models)}, not zeros: Anthropic's 401 generates no tokens`);
 	if (exit.usage?.piAi !== piVersion) problems.push(`the run used pi-ai ${exit.usage?.piAi}, not the pin ${piVersion}`);
-	if (capped && exit.tokens?.costRefused !== 0) problems.push(`the cost guard refused ${exit.tokens?.costRefused} call(s) of the default model under a $5 cap`);
+	if (capped && exit.tokens?.modelRefused !== 0) problems.push(`the model guard refused ${exit.tokens?.modelRefused} call(s) of a model the list admits`);
 	return problems;
 }
 
@@ -94,12 +93,12 @@ export function smoke({ image, piVersion, docker = defaultDocker, jobDir }) {
 	let failed = false;
 	for (const capped of [false, true]) {
 		const args = ["run", "--rm", "-v", `${jobDir}:/job:ro`, "-e", "PI_PROVIDER=anthropic", "-e", `PI_MODEL=${MODEL}`, "-e", "PI_MAX_TURNS=1", "-e", `ANTHROPIC_API_KEY=${FAKE_KEY}`];
-		if (capped) args.push("-e", `PI_MAX_COST_MICROS=${CAP_MICROS}`);
+		if (capped) args.push("-e", `PI_ALLOWED_MODELS=anthropic/${MODEL}`);
 		const { output } = docker([...args, image]);
 		const problems = smokeProblems(output, { piVersion, capped });
-		const label = capped ? `capped at ${CAP_MICROS} micros` : "uncapped";
+		const label = capped ? "under a list that admits the model" : "unrestricted";
 		const { exit } = events(output);
-		if (problems.length === 0) report.push(`OK (${label}): reached Anthropic, 401, exit 2 provider-auth-refused, ${exit.tokens.calls} call(s) metered, $0, pi-ai ${exit.usage.piAi}`);
+		if (problems.length === 0) report.push(`OK (${label}): reached Anthropic, 401, exit 2 provider-auth-refused, ${exit.tokens.calls} call(s) metered, no usage, pi-ai ${exit.usage.piAi}`);
 		else {
 			failed = true;
 			report.push(`FAILED (${label}):`, ...problems.map((p) => `  - ${p}`), "  last lines:", ...output.trim().split("\n").filter((l) => l.trim() !== "").slice(-6).map((l) => `    ${l.slice(0, 400)}`));

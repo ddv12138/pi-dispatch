@@ -39,8 +39,6 @@ export function parseRunnerEnv(env, { steerFrames = false } = {}) {
 		model,
 		maxTurns,
 		maxTokens,
-		// Issue #501: the per-job dollar cap in integer micro-dollars, or null (no cap, today's behaviour).
-		maxCostMicros: parseCostMicros(env, "PI_MAX_COST_MICROS"),
 		// Issue #502: the models this job may call, as `{ provider, model }` pairs, or null (unrestricted).
 		allowedModels: parseAllowedModels(env, "PI_ALLOWED_MODELS"),
 		// REQ-GLOBAL-PI-OVERLAY: does the global overlay's `extensions/` dir load? ON by default -- the
@@ -126,37 +124,6 @@ function parseOptionalPositiveInt(env, name) {
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isInteger(n) || n < 1 || String(n) !== String(raw).trim()) {
 		throw configError(`invalid ${name}: ${JSON.stringify(raw)} (want a positive integer)`);
-	}
-	return n;
-}
-
-/** The highest per-job cost cap the runner accepts: one million dollars, in micro-dollars. */
-export const MAX_COST_MICROS_LIMIT = 1_000_000_000_000;
-
-/**
- * Parse the per-job dollar cap (issue #501, INT-CONTAINER-RUNTIME-CONTRACT): an integer number of
- * micro-dollars from 0 to 1e12, or null when the variable is absent.
- *
- * Two departures from parseOptionalPositiveInt, both on purpose:
- *   - `0` is LEGAL. It is the cap a zero-rated local job runs under (#503 part 7): every call whose bound is
- *     0 passes, every priced call is refused. Reading 0 as "off" would turn the strictest cap into none.
- *   - An EMPTY value is a config error, not "unset". The worker omits the variable when there is no cap and
- *     never writes it empty, so an empty one is a template or hand-run mistake, and reading it as "no cap"
- *     would fail open on money. PI_MAX_TOKENS keeps its "empty is unset" reading for compatibility; a new
- *     money knob has no such history to honour.
- * Digits only, no sign, no exponent, no leading zero: `1e6` and `+5` are refused rather than coerced.
- */
-// env-internal PI_MAX_COST_MICROS: the worker's own per-job input (INT-CONTAINER-RUNTIME-CONTRACT), derived from
-// the operator's dollar settings; the container env is BUILT, never inherited, and `run.secrets` cannot bind it.
-export function parseCostMicros(env, name) {
-	const raw = env[name];
-	if (raw === undefined) return null;
-	if (!/^(?:0|[1-9][0-9]*)$/.test(raw)) {
-		throw configError(`invalid ${name}: ${JSON.stringify(raw)} (want an integer number of micro-dollars, 0 to ${MAX_COST_MICROS_LIMIT})`);
-	}
-	const n = Number(raw);
-	if (!Number.isSafeInteger(n) || n > MAX_COST_MICROS_LIMIT) {
-		throw configError(`invalid ${name}: ${JSON.stringify(raw)} (want an integer number of micro-dollars, 0 to ${MAX_COST_MICROS_LIMIT})`);
 	}
 	return n;
 }
