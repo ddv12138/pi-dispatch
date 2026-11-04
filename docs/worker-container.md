@@ -10,7 +10,7 @@ Keep the Docker socket on the Unix socket. Do not expose the daemon on TCP port 
 
 ## Path rule
 
-The Docker daemon resolves bind mount paths on its host. The Compose worker mounts the deployment directory at `/root/pi-dispatch`, the same absolute path it has on the server. Its job, log, settings, temporary and trigger files live under `/root/pi-dispatch/runtime`. A Docker source path outside that mount is invalid unless you add the path as another bind mount at the identical absolute path in both places.
+The Docker daemon resolves bind mount paths on its host. Run Compose from the deployment directory: `${PWD}` supplies the same absolute path for the worker's cwd, deployment mount target, console deployment and runtime files. The worker and console execute code from `/opt/pi-dispatch` by absolute path, but read deployment policy files from the live mount. A Docker source path outside that mount is invalid unless you add the path as another bind mount at the identical absolute path in both places.
 
 Keep local-folder projects under `/root/pi-dispatch/projects`, or add their parent directory as a same-path mount to the worker service. Files in a mounted local project must be writable by uid 10001, which is also the uid used by a job on this native Linux Docker host.
 
@@ -20,10 +20,15 @@ Run from the deployment directory on the Linux server:
 
 ```bash
 cp .env.example .env
-chmod 600 .env
+chgrp 10001 .env
+chmod 640 .env
 mkdir -p runtime projects
 chown -R 10001:10001 runtime projects
 ```
+
+The worker reads `PI_VALKEY_SHARED` from `.env` at startup, so in this Compose mode the non-root uid 10001 needs
+read access to the file. Keep root as owner and group 10001 as read-only; do not make `.env` group-writable or
+world-readable. The same credentials are already passed to the trusted worker/console processes by Compose.
 
 Edit `.env` and set a fresh `VALKEY_PASSWORD` plus provider and forge credentials for the triggers you will use. `openssl rand -hex 32` makes a suitable Valkey password. The worker service sets `VALKEY_URL` to Compose's `valkey` service and uses the pinned job image for this release.
 
@@ -38,14 +43,14 @@ docker compose --env-file .env -f deploy/docker-compose.yml --profile worker bui
 docker compose --env-file .env -f deploy/docker-compose.yml --profile worker run --rm --user 0 worker node /opt/pi-dispatch/worker/src/cli.mjs init
 mv triggers.json pause-windows.json scoped-limits.json projects.json runtime/
 cat >> .env <<'EOF'
-PI_TRIGGERS_FILE=/root/pi-dispatch/runtime/triggers.json
-PI_PAUSE_WINDOWS_FILE=/root/pi-dispatch/runtime/pause-windows.json
-PI_SCOPED_LIMITS_FILE=/root/pi-dispatch/runtime/scoped-limits.json
-PI_PROJECTS_FILE=/root/pi-dispatch/runtime/projects.json
-PI_JOBS_DIR=/root/pi-dispatch/runtime/jobs
-PI_LOGS_DIR=/root/pi-dispatch/runtime/logs
-PI_SANDBOX_DIR=/root/pi-dispatch/runtime/sandboxes
-PI_SETTINGS_FILE=/root/pi-dispatch/runtime/settings.json
+PI_TRIGGERS_FILE=${PWD}/runtime/triggers.json
+PI_PAUSE_WINDOWS_FILE=${PWD}/runtime/pause-windows.json
+PI_SCOPED_LIMITS_FILE=${PWD}/runtime/scoped-limits.json
+PI_PROJECTS_FILE=${PWD}/runtime/projects.json
+PI_JOBS_DIR=${PWD}/runtime/jobs
+PI_LOGS_DIR=${PWD}/runtime/logs
+PI_SANDBOX_DIR=${PWD}/runtime/sandboxes
+PI_SETTINGS_FILE=${PWD}/runtime/settings.json
 EOF
 chown -R 10001:10001 runtime projects
 ```
@@ -68,7 +73,7 @@ publishes port 4790 on all host interfaces; add the host name or IP clients will
 
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml --profile console run --rm --no-deps console \
-  node /opt/pi-dispatch/admin/src/console/cli.mjs token add --name you --role operator --deployment /root/pi-dispatch
+  node /opt/pi-dispatch/admin/src/console/cli.mjs token add --name you --role operator --deployment "$PWD"
 docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d
 ```
 

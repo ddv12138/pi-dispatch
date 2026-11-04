@@ -70,7 +70,7 @@ import { EMPTY_USD_FINGERPRINT, usdFingerprint } from "./dollar-fingerprint.mjs"
 import { splitModelEntry } from "./model-ref.mjs";
 import { resolveConfiguredModelRuns as resolveDoctorModelRuns, cooldownModelRefs, RADIUS_COST_CAP_LABEL, RADIUS_COST_CAP_FIX } from "./model-observation.mjs";
 import { ignoredOutputCapModels, outputCapView, outputUnboundable } from "./output-cap.mjs";
-import { KEYLESS_API_KEY, KEYLESS_HOW, MODEL_ENDPOINTS_FILE_NAME, MODEL_ENDPOINTS_INCLUDE_NAME, MODEL_ENDPOINT_ID_RE, OVERLAY_LINK_FIX, OVERLAY_NOT_A_FILE_FIX, RENAMED_PROVIDERS, baseUrlTarget, endpointsAt, keylessVerdict, loadModelEndpoints, providerRenameHint, readOverlayModels, renderEndpointsInclude, unreportedUsageModels } from "./model-endpoints.mjs";
+import { KEYLESS_API_KEY, KEYLESS_HOW, MODEL_ENDPOINTS_FILE_NAME, MODEL_ENDPOINTS_INCLUDE_NAME, MODEL_ENDPOINT_ID_RE, OVERLAY_LINK_FIX, OVERLAY_NOT_A_FILE_FIX, RENAMED_PROVIDERS, baseUrlTarget, endpointsAt, keylessVerdict, loadModelEndpoints, overlayApiKeyProblem, overlayApiKeyVariable, providerRenameHint, readOverlayModels, renderEndpointsInclude, unreportedUsageModels } from "./model-endpoints.mjs";
 import { declaredEndpointsIn, endpointsDeclaredIn, reloadCommand, rulesFileIncludes, rulesPredateEndpointsLine } from "./egress-cli.mjs";
 import { loadPauseWindows, parsePauseWindows, parseScopeString, pauseWindowsVersionFor } from "./pause-windows.mjs";
 import { WAIT_AFTER_MAX_DEFAULT_MS, afterInstantMs, parseWaitProfiles } from "./wait-for.mjs";
@@ -3134,7 +3134,7 @@ export async function collectChecks(shellVars, seams) {
 	// The worker's rule (config.mjs `resolveGlobalPiDir`, PR #553's review): only an absolute PI_GLOBAL_PI_DIR is an
 	// overlay; a relative one refuses the worker's boot, and the overlay section below says so. Both reads take the
 	// value as it is, so they read the same folder.
-	if (keylessEndpoints.length > 0 && typeof env.PI_GLOBAL_PI_DIR === "string" && isAbsolute(env.PI_GLOBAL_PI_DIR)) {
+	if ((keylessEndpoints.length > 0 || unknownToPi) && typeof env.PI_GLOBAL_PI_DIR === "string" && isAbsolute(env.PI_GLOBAL_PI_DIR)) {
 		try {
 			keylessModels = readOverlayModels(env.PI_GLOBAL_PI_DIR, keylessIo);
 		} catch (error) {
@@ -3154,9 +3154,14 @@ export async function collectChecks(shellVars, seams) {
 			hintUnread = true;
 		}
 	}
+	const customCredentialName = overlayApiKeyVariable(keylessModels, provider);
+	const customKeyFromFile = customCredentialName && (env[customCredentialName] ?? "") === ""
+		? service.extra(serviceEnvKeys([customCredentialName], [customCredentialName])).fromFile
+		: {};
+	const credentialFromFile = { ...keyFromFile, ...customKeyFromFile };
 	const subscriptionDefault = await subscriptionCredentials.check(provider);
-	const keyCheck = subscriptionDefault.managed ? subscriptionCredentialCheck(provider, subscriptionDefault) : providerKeyCheck({ provider, env: { ...env, ...keyFromFile }, agentDir: keyAgentDir, oracle, nodeOk: checks[0]?.ok, keyless: { endpoints: keylessEndpoints, models: keylessModels, unreadable: keylessUnreadable, hintModels, hintUnread } });
-	const keyNamed = Object.keys(keyFromFile).filter((name) => keyCheck.label?.includes(`: ${name})`));
+	const keyCheck = subscriptionDefault.managed ? subscriptionCredentialCheck(provider, subscriptionDefault) : providerKeyCheck({ provider, env: { ...env, ...credentialFromFile }, agentDir: keyAgentDir, oracle, nodeOk: checks[0]?.ok, keyless: { endpoints: keylessEndpoints, models: keylessModels, unreadable: keylessUnreadable, hintModels, hintUnread } });
+	const keyNamed = Object.keys(credentialFromFile).filter((name) => keyCheck.label?.includes(`: ${name})`));
 	// Issue #481 (PR #485 review round 2): a key found nowhere doctor can look is one an env-setup script may export, which
 	// is the documented home for a provider key fetched from a secrets manager (docs/secrets.md).
 	const { absent: keyAbsent, ...keyShown } = keyCheck;
@@ -4926,7 +4931,7 @@ function providerKeyCheck({ provider, env, agentDir, oracle, nodeOk, keyless = n
 		};
 	}
 	const candidates = oracle.providerKeyCandidates(provider);
-	if (candidates.length === 0) return noKeyVariableCheck(provider, oracle, keyless);
+	if (candidates.length === 0) return noKeyVariableCheck(provider, oracle, keyless, env);
 
 	// Presence by PI'S truthiness, not a stricter one. This used to trim, and trimming made doctor pick a
 	// DIFFERENT variable than the worker will: with a whitespace `ANTHROPIC_OAUTH_TOKEN` beside a real
@@ -5089,7 +5094,7 @@ function usablePiLoginKey(agentDir, provider) {
  * the distinction `findEnvKeys`'s single `undefined` cannot make, and the reason issue #286 needed a
  * second question at all.
  */
-function noKeyVariableCheck(provider, oracle, keyless = null) {
+function noKeyVariableCheck(provider, oracle, keyless = null, env = {}) {
 	if (oracle.piProviders().includes(provider)) {
 		// `amazon-bedrock` wants AWS credentials or a profile, `openai-codex` an OAuth login. Both are
 		// credential SOURCES the closed container env has no door for, so buildContainerEnv refuses every
@@ -5121,6 +5126,14 @@ function noKeyVariableCheck(provider, oracle, keyless = null) {
 	if (verdict.keyless) {
 		return { ok: true, label: `Provider key: none needed (${provider} is keyless: served by declared endpoint ${verdict.endpoints.join(", ")})` };
 	}
+	const customKey = overlayApiKeyVariable(keyless?.models, provider);
+	if (customKey) {
+		const value = env?.[customKey];
+		if (typeof value === "string" && value.trim() !== "") return { ok: true, label: `Provider key set (${provider}: ${customKey})` };
+		return { ok: false, label: `Provider key missing (${provider}: ${customKey})`, fix: `set ${customKey} in the worker environment or deployment .env` };
+	}
+	const customKeyProblem = overlayApiKeyProblem(keyless?.models, provider);
+	if (customKeyProblem) return { ok: false, label: `Provider key configuration is invalid (${provider})`, fix: `${customKeyProblem}; use a non-reserved API-key environment variable in models.json` };
 	const wanted = `${provider.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
 	const owner = oracle.piProviders().find((id) => oracle.providerKeyCandidates(id).includes(wanted));
 	// Why a custom provider the overlay defines is not keyless, when it is one: the one fact the operator has to change.

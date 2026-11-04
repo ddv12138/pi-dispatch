@@ -28,8 +28,10 @@ import { existsSync as fsExistsSync, lstatSync as fsLstatSync, readFileSync as f
 import { isIPv4 } from "node:net";
 import { join, resolve } from "node:path";
 import { PROXY_LOCAL_ADDRESSES, isProxyLocalHost } from "./backends.mjs";
-import { configError } from "./config.mjs";
-import { KEYLESS_ENV_NAME } from "./reserved-env.mjs";
+import { configError, EGRESS_ENV_VARS, WORKER_ONLY_SECRET_VARS } from "./config.mjs";
+import { CONTAINER_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
+import { FORGE_HOST_VARS, MINTED_TOKEN_VARS, RECEIVER_ONLY_VARS } from "./forges.mjs";
+import { PROVIDER_STEERING_VARS } from "./provider-steering.mjs";
 import { parseModelsJson } from "./models-json.mjs";
 
 /** The schema version this build reads. A file declaring a higher one is refused loudly. */
@@ -549,6 +551,30 @@ export function providerRenameHint(provider, { models = null, piProviders = [], 
  * The second way into the credential gate, said once for every refusal and doctor line that names it (issue #503).
  */
 export const KEYLESS_HOW = `for a custom provider served by a local model server, declare that server in model-endpoints.json with "keyless": true and set "apiKey": "${KEYLESS_API_KEY}" on the provider in models.json (docs/egress.md, "Local model servers")`;
+
+/** The environment variable a custom provider's models.json apiKey explicitly names, else null. */
+export function overlayApiKeyVariable(models, provider) {
+	const entry = models?.providers?.[provider];
+	if (entry === null || typeof entry !== "object" || Array.isArray(entry)) return null;
+	const match = typeof entry.apiKey === "string" ? /^(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})$/.exec(entry.apiKey) : null;
+	const name = match?.[1] ?? match?.[2] ?? null;
+	return name && !RESERVED_PROVIDER_ENV_NAMES.has(name) ? name : null;
+}
+
+const RESERVED_PROVIDER_ENV_NAMES = new Set([
+	...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS,
+	...RECEIVER_ONLY_VARS, ...EGRESS_ENV_VARS, ...WORKER_ONLY_SECRET_VARS, ...PROVIDER_STEERING_VARS,
+]);
+
+/** Why a declared custom apiKey cannot be used as a worker-forwarded variable, else null. */
+export function overlayApiKeyProblem(models, provider) {
+	const entry = models?.providers?.[provider];
+	if (entry === null || typeof entry !== "object" || Array.isArray(entry) || entry.apiKey === undefined) return null;
+	if (overlayApiKeyVariable(models, provider)) return null;
+	const match = typeof entry.apiKey === "string" ? /^(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})$/.exec(entry.apiKey) : null;
+	const name = match?.[1] ?? match?.[2] ?? null;
+	return name ? `models.json apiKey names reserved worker variable ${name}` : "models.json apiKey must be a $ENV_NAME or ${ENV_NAME} reference";
+}
 
 /**
  * Is this overlay provider keyless (issue #503, part 4)? `{ keyless: true, endpoints: [ids] }` only when ALL of these

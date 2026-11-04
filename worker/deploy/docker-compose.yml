@@ -76,22 +76,27 @@ services:
       - "${DOCKER_GID:-0}"
     env_file: ../.env
     environment:
-      HOME: /root/pi-dispatch/runtime/home
-      TMPDIR: /root/pi-dispatch/runtime/tmp
+      HOME: ${PWD}/runtime/home
+      TMPDIR: ${PWD}/runtime/tmp
       DOCKER_HOST: unix:///var/run/docker.sock
       DOCKER_CONTEXT: default
       VALKEY_URL: redis://valkey:6379
       PI_JOB_IMAGE: ghcr.io/edgehero/pi-job:4.3.1
-      PI_JOBS_DIR: /root/pi-dispatch/runtime/jobs
-      PI_LOGS_DIR: /root/pi-dispatch/runtime/logs
-      PI_SANDBOX_DIR: /root/pi-dispatch/runtime/sandboxes
-      PI_SETTINGS_FILE: /root/pi-dispatch/runtime/settings.json
-      PI_TRIGGERS_FILE: /root/pi-dispatch/runtime/triggers.json
-      PI_PROJECTS_FILE: /root/pi-dispatch/runtime/projects.json
-      PI_SCOPED_LIMITS_FILE: /root/pi-dispatch/runtime/scoped-limits.json
-      PI_PAUSE_WINDOWS_FILE: /root/pi-dispatch/runtime/pause-windows.json
+      PI_JOBS_DIR: ${PWD}/runtime/jobs
+      PI_LOGS_DIR: ${PWD}/runtime/logs
+      PI_SANDBOX_DIR: ${PWD}/runtime/sandboxes
+      PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
+      PI_TRIGGERS_FILE: ${PWD}/runtime/triggers.json
+      PI_PROJECTS_FILE: ${PWD}/runtime/projects.json
+      PI_SCOPED_LIMITS_FILE: ${PWD}/runtime/scoped-limits.json
+      PI_PAUSE_WINDOWS_FILE: ${PWD}/runtime/pause-windows.json
+      PI_CONSOLE_TOKENS_FILE: ${PWD}/runtime/console-tokens.json
+    # Compose is run from the deployment folder (the commands above). Use its absolute host path
+    # for both cwd and the bind target, while loading executable code from the immutable image.
+    working_dir: ${PWD}
+    command: ["node", "/opt/pi-dispatch/worker/src/cli.mjs", "worker"]
     volumes:
-      - ../:/root/pi-dispatch
+      - "../:${PWD}"
       - /var/run/docker.sock:/var/run/docker.sock
       - ${DOCKER_CLI_BIN:-/usr/bin/docker}:/usr/local/bin/docker:ro
     depends_on:
@@ -115,23 +120,23 @@ services:
     image: deploy-worker
     user: "10001:10001"
     env_file: ../.env
-    working_dir: /root/pi-dispatch
-    command: ["node", "/opt/pi-dispatch/admin/src/console/cli.mjs", "serve", "--deployment", "/root/pi-dispatch"]
+    working_dir: ${PWD}
+    command: ["node", "/opt/pi-dispatch/admin/src/console/cli.mjs", "serve", "--deployment", "${PWD}"]
     environment:
-      HOME: /root/pi-dispatch/runtime/home
-      TMPDIR: /root/pi-dispatch/runtime/tmp
+      HOME: ${PWD}/runtime/home
+      TMPDIR: ${PWD}/runtime/tmp
       VALKEY_URL: redis://valkey:6379
-      PI_JOBS_DIR: /root/pi-dispatch/runtime/jobs
-      PI_LOGS_DIR: /root/pi-dispatch/runtime/logs
-      PI_SANDBOX_DIR: /root/pi-dispatch/runtime/sandboxes
-      PI_SETTINGS_FILE: /root/pi-dispatch/runtime/settings.json
-      PI_TRIGGERS_FILE: /root/pi-dispatch/runtime/triggers.json
-      PI_PROJECTS_FILE: /root/pi-dispatch/runtime/projects.json
-      PI_SCOPED_LIMITS_FILE: /root/pi-dispatch/runtime/scoped-limits.json
-      PI_PAUSE_WINDOWS_FILE: /root/pi-dispatch/runtime/pause-windows.json
-      PI_CONSOLE_TOKENS_FILE: /root/pi-dispatch/runtime/console-tokens.json
+      PI_JOBS_DIR: ${PWD}/runtime/jobs
+      PI_LOGS_DIR: ${PWD}/runtime/logs
+      PI_SANDBOX_DIR: ${PWD}/runtime/sandboxes
+      PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
+      PI_TRIGGERS_FILE: ${PWD}/runtime/triggers.json
+      PI_PROJECTS_FILE: ${PWD}/runtime/projects.json
+      PI_SCOPED_LIMITS_FILE: ${PWD}/runtime/scoped-limits.json
+      PI_PAUSE_WINDOWS_FILE: ${PWD}/runtime/pause-windows.json
+      PI_CONSOLE_TOKENS_FILE: ${PWD}/runtime/console-tokens.json
     volumes:
-      - ../:/root/pi-dispatch
+      - "../:${PWD}"
     ports:
       - "4790:4790"
     depends_on:

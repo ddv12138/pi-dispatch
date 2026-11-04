@@ -1260,10 +1260,12 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// are unreadable or invalid: that job is refused or retried below without starting anything.
 		//
 		// One snapshot per pickup (the endpoints, the overlay models, the derived set), handed to runJob as
-		// `modelEndpoints` so a later gate reads the same declaration this one leased against. With no endpoints
-		// declared the overlay is not even read, and the job touches nothing new: no command, no key, no field.
+		// `modelEndpoints` so a later gate reads the same declaration this one leased against. With no endpoints,
+		// only a custom main provider requires the overlay snapshot for its declared API-key variable.
 		let endpointSnapshot = failoverSnapshot;
-		if (failoverSnapshot === null && !selectionError && !selectionRefused && modelEndpoints && !settingsThrew && !settings?.invalid) {
+		const credentialProvider = selectedEffective?.provider ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null).provider;
+		const needsCredentialOverlay = typeof deps?.isCustomProvider === "function" && deps.isCustomProvider(credentialProvider);
+		if (failoverSnapshot === null && !selectionError && !selectionRefused && modelEndpoints && !settingsThrew && !settings?.invalid && (modelEndpoints().length > 0 || needsCredentialOverlay)) {
 			let endpoints = [];
 			let models = null;
 			let set = [];
@@ -1275,12 +1277,12 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			let modelsUnreadable = null;
 			try {
 				endpoints = modelEndpoints() ?? [];
-				if (endpoints.length > 0) {
+				if (endpoints.length > 0 || needsCredentialOverlay) {
 					try {
 						models = overlayModels();
 					} catch (err) {
-						// FAIL OPEN, and say so: an overlay models.json that does not parse names no endpoint for any model, and
-						// refusing here would refuse every job on a hosted model too. The job runs without an endpoint slot.
+					// Endpoint derivation fails open as before. For a custom main provider the same snapshot is also used
+					// for credential resolution; the model-known gate has already refused malformed overlays.
 						// A FIXED reason, never the error's message: a JSON.parse message quotes the file's text around the fault,
 						// and models.json holds keys (PR #518's gate measured one in this line). The settings reader's posture.
 						// An fs error is named by its code: `readOverlayModels` returns null for absence and rethrows every other

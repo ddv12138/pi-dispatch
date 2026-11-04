@@ -35,7 +35,7 @@ import { egressEnv } from "./egress.mjs";
 import { RECEIVER_ONLY_VARS, forgeSpec } from "./forges.mjs";
 import { apiKeyVariable } from "./provider-key.mjs";
 import { isDeterminateFsCode } from "./transient.mjs";
-import { KEYLESS_HOW, keylessVerdict, providerRenameHint, readOverlayModels, RENAMED_PROVIDERS } from "./model-endpoints.mjs";
+import { KEYLESS_HOW, keylessVerdict, overlayApiKeyProblem, overlayApiKeyVariable, providerRenameHint, readOverlayModels, RENAMED_PROVIDERS } from "./model-endpoints.mjs";
 import { KEYLESS_ENV_NAME } from "./reserved-env.mjs";
 
 function configError(message) {
@@ -152,6 +152,14 @@ export function resolveProviderCredential({ provider, hostEnv, authFromPi = fals
 		// The one variable this branch writes, fixed and non-secret. It is the credential's slot in the closed map,
 		// so buildContainerEnv carries it exactly when this gate passes keyless, and on no other job.
 		if (ids !== null) return { [KEYLESS_ENV_NAME]: KEYLESS_VALUE };
+		const customKey = overlayApiKeyVariable(modelEndpoints?.models, provider);
+		if (customKey) {
+			const value = hostEnv?.[customKey];
+			if (typeof value === "string" && value.trim() !== "") return { [customKey]: value };
+			throw configError(`provider ${provider} has no configured credential in the worker environment. Set ${customKey} there, or, ${KEYLESS_HOW}.`);
+		}
+		const invalidCustomKey = overlayApiKeyProblem(modelEndpoints?.models, provider);
+		if (invalidCustomKey) throw configError(`${invalidCustomKey}; use a non-reserved API-key environment variable, or, ${KEYLESS_HOW}.`);
 		// The overlay could not be read at this pickup for a TRANSIENT reason (index.mjs, `modelsUnreadable`): the provider
 		// may well be keyless, so this is no verdict at all. UNTAGGED and marked transient, never `piDispatchConfig`: a
 		// config refusal is permanent, refunded and commented publicly, and the same job may pass on the next attempt. The
@@ -576,6 +584,10 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 	// this is the backstop that keeps a value from either one from replacing it, or from appearing on a keyed job.
 	if (credEnv[KEYLESS_ENV_NAME] === KEYLESS_VALUE) env[KEYLESS_ENV_NAME] = KEYLESS_VALUE;
 	else delete env[KEYLESS_ENV_NAME];
+	// The credential map is authoritative too. In particular, a custom provider's key name
+	// comes from models.json rather than pi's static table, so this final write protects it from a forwarded value or
+	// trigger secret if an earlier reservation gate regresses.
+	Object.assign(env, credEnv);
 
 	// Issue #501: the per-job dollar cap is the worker's answer and nothing else's, so it is settled again AFTER the
 	// PI_FORWARD_ENV and secrets loops, PI_DISPATCH_KEYLESS's backstop. Both lists refuse the name upstream (config.mjs

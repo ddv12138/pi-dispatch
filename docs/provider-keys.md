@@ -28,10 +28,13 @@ Reviewed OpenAI and Claude managed connections have their own policy and host lo
 
 The worker currently has no main-provider credential route for Amazon Bedrock or legacy `openai-codex`.
 Vertex's host API-key route is distinct from its application-default-credentials route; ADC-only authentication
-is not supported by the worker's credential gate. Keyed custom main providers are also refused. A custom main provider
-can use the explicitly declared [keyless endpoint contract](global-pi-overlay.md); registering a provider only
-inside an extension does not make it visible to the pre-spend model checks. These limits are not removed by
-appearing in pi's catalogue, and this key editor does not expand job credential permissions.
+is not supported by the worker's credential gate. A custom main provider declared in the global overlay may use an
+API key through its `models.json` `apiKey` environment reference (for example `"$MY_PROVIDER_KEY"`); put the value in
+the worker environment or deployment `.env`. The worker checks the named variable before starting a paid container and
+passes only that variable into the job. Literal keys remain refused in the overlay. A custom provider may instead use
+the explicitly declared [keyless endpoint contract](global-pi-overlay.md). Registering a provider only inside an
+extension does not make it visible to the pre-spend model checks. OAuth and cloud credential-chain authentication
+remain unsupported for custom providers.
 
 ## Find or create a key at the provider
 

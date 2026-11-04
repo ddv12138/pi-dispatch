@@ -2940,6 +2940,9 @@ export async function startWorker(
 		// the operator edits without a restart too. Read only when an endpoint is declared (the gate's own rule).
 		modelEndpoints: () => modelEndpoints.current,
 		overlayModels: () => readOverlayModels(config.globalPiDir),
+		// A keyed custom provider needs the same per-pickup overlay snapshot as keyless providers, even when it has
+		// no declared local endpoint. The credential gate and env builder both consume this snapshot.
+		isCustomProvider: (provider) => providerKeyCandidates(provider).length === 0 && !piProviders().includes(provider),
 		checkLease: hostQueue
 			? makeFleetLease({
 					redis,

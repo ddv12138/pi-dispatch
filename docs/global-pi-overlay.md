@@ -100,12 +100,13 @@ overlay then carries no custom model definitions, so read that row.
 
 ### Custom providers
 
-A provider you define in `models.json` (one pi does not know) has no key variable in pi's table, so the worker
-cannot hand it a key. As a job's **main** provider (`PI_PROVIDER`, or a trigger's provider) it runs only when it
-is served by a local model server that takes no key: declare that server in `model-endpoints.json` with
-`"keyless": true` and set `"apiKey": "$PI_DISPATCH_KEYLESS"` on the provider. Every one of its models must be on
-such a server. See [`egress.md`, "Local model servers"](egress.md#local-model-servers). Any other custom provider
-is refused as a main provider, before anything is spent.
+A provider you define in `models.json` (one pi does not know) has no key variable in pi's table. For a keyed
+custom provider, set its `apiKey` to an environment reference such as `"$MY_PROVIDER_KEY"` and put the value
+in the worker environment or deployment `.env`. The worker checks the referenced variable before paid work
+and passes only that variable into the job container. A literal value remains forbidden in the mounted overlay.
+As an alternative, a provider served by a local model server that takes no key can use the keyless contract:
+declare the server in `model-endpoints.json` with `"keyless": true` and set `"apiKey": "$PI_DISPATCH_KEYLESS"`.
+Every model of that provider must be on a declared keyless endpoint. See [`egress.md`, "Local model servers"](egress.md#local-model-servers).
 
 For a custom provider that is **not** the job's main one (a model the agent switches to), forward its key by name
 and reference it as `"apiKey": "$MY_PROVIDER_KEY"`:
