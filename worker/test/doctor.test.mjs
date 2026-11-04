@@ -2975,6 +2975,22 @@ test("doctor: a deployment with no forge triggers prints no receiver line at all
 	assert.doesNotMatch(text(), /WEBHOOK_SECRET|RECEIVER_PORT/, "no receiver noise for a cron/local-only deployment");
 });
 
+test("doctor: a disarmed bot-loop guard is warned about by name, and an armed one prints nothing", async () => {
+	// The switch exists (one-identity forges), but nobody should learn it is off from a bill. `0`, empty and
+	// unset are all the armed default and must stay quiet; a value that is neither is a boot refusal.
+	const { out, text } = capture();
+	await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(), PI_RECEIVER_ALLOW_SELF: "1" }), imgDeps(out, green));
+	assert.match(text(), /⚠ PI_RECEIVER_ALLOW_SELF=1 -- the bot-loop guard is OFF/);
+
+	const quiet = capture();
+	await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(), PI_RECEIVER_ALLOW_SELF: "0" }), imgDeps(quiet.out, green));
+	assert.doesNotMatch(quiet.text(), /bot-loop guard/);
+
+	const junk = capture();
+	await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(), PI_RECEIVER_ALLOW_SELF: "yes" }), imgDeps(junk.out, green));
+	assert.match(junk.text(), /⚠ PI_RECEIVER_ALLOW_SELF is "yes", which is neither "1" nor "0"/);
+});
+
 test("doctor: a malformed RECEIVER_PORT is echoed by value and warned about; a sane one prints nothing", async () => {
 	// The port is not a secret, so echoing the malformed shape is what makes the warn actionable.
 	const { out, text } = capture();

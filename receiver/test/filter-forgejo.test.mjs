@@ -50,8 +50,8 @@ const prPayload = (over = {}) => ({
 	...over,
 });
 
-const run = (eventName, payload, { authorized = true, selfId = SELF_ID } = {}) =>
-	filterForgejo(eventName, parseForgejoSubset(payload), triggersRaw, knownFlows, selfId, authorized, "fj-1");
+const run = (eventName, payload, { authorized = true, selfId = SELF_ID, allowSelf = false } = {}) =>
+	filterForgejo(eventName, parseForgejoSubset(payload), triggersRaw, knownFlows, selfId, authorized, "fj-1", { allowSelf });
 
 // --- the action map: issue #61's Gap 2, which is a SILENT failure ---
 
@@ -162,6 +162,13 @@ test("the bot-loop guard runs BEFORE the authority gate, so our own comment cann
 	// ordering is what stops its own status comment from starting another job.
 	const r = run("issue_comment", commentPayload({ sender: { id: SELF_ID, login: "pi-bot" } }), { authorized: true });
 	assert.equal(r.reason, "self");
+});
+
+test("PI_RECEIVER_ALLOW_SELF disarms ONLY the self compare, never the authority gate", () => {
+	const self = commentPayload({ sender: { id: SELF_ID, login: "pi-bot" } });
+	assert.equal(run("issue_comment", self, { allowSelf: true }).enqueue, true);
+	assert.equal(run("issue_comment", self, { allowSelf: true, authorized: false }).reason, "author-not-allowed");
+	assert.equal(run("issue_comment", self).reason, "self", "the default is unchanged");
 });
 
 test("a missing sender.id is refused before the self compare -- undefined must not fall through", () => {

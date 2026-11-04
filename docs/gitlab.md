@@ -148,6 +148,72 @@ its hash changes and it can run again. Two independent deliveries with identical
 coalesce. Signature mode still requires GitLab's signed delivery headers, so it remains available only on
 GitLab 19.0+ (GA in 19.1).
 
+## Instances older than `user.id`
+
+GitLab 13.x and earlier build a webhook's `user` object out of `name`, `username`, `avatar_url` and `email` and
+send no `id` (measured on 13.2.10). pi-dispatch needs a numeric sender id: it is what the author gate looks up
+and what the bot-loop guard compares. Without one every delivery drops as `missing-sender-id`, with the
+endpoint configured perfectly.
+
+So the sender is resolved from `user.username` when the payload carries no `id`: one `GET /users?username=<name>`
+against the instance, accepted only when it matches **exactly one** account, then the same `members/all` lookup
+by the resolved id. Four things do not change:
+
+- the payload's own `user.id` always wins when it is present, so an instance that sends one pays no extra call
+  and the fallback can never disagree with it;
+- the gate still needs Developer or above, from the same endpoint (`CONST-TRIGGER-AUTHOR-GATE`);
+- the harness still cannot trigger itself, because the comparison is between numbers either way;
+- no username reaches a job, a log line or the run record, exactly as before.
+
+Two failure shapes are worth knowing apart:
+
+- A username matching no account, or several, is a delivery with **no sender**: dropped as `missing-sender-id`,
+  and the members lookup is never spent on it. A lookalike spelling therefore refuses rather than guesses.
+- A `/users` answer that fails, or is not a list, is a **503**: GitLab redelivers and the `body-sha256-` id above
+  coalesces the retry. An outage never reads as "no such person".
+
+**Where project and group access tokens do not exist** (measured on 13.2.10: `/projects/:id/access_tokens` and
+`/groups/:id/access_tokens` both answer 404), the only credential is a personal access token, and that is a
+residual against `CONST-TOKEN-SCOPED-PER-JOB`: it reaches every project its owner belongs to, and it makes the
+harness's own identity that human account, so the bot-loop guard drops every event that account authors. Mint it
+from a dedicated account with Developer access on the projects you service, never from the account whose
+comments you want to trigger jobs, and rotate it.
+
+## One identity: `PI_RECEIVER_ALLOW_SELF`
+
+Every delivery is dropped when its author is the harness's own account, because our own output is an event a
+trigger can match: a status comment carrying the trigger phrase, a label a flow applied, and above all a push
+to a merge request's source branch, which GitLab reports as an `update` of that MR. One job would start the
+next.
+
+That guard becomes a deadlock when the forge gives you a **single identity** (a personal PAT, or any instance
+where you and the harness are the same account): your own comment and your own label arrive as ours, so every
+rule you write matches nothing. GitLab's own answer is a second account, `docs/gitlab.md` above says why, and
+where that is not possible the guard can be disarmed for the whole deployment:
+
+```bash
+PI_RECEIVER_ALLOW_SELF=1
+```
+
+`1` disarms it, unset or `0` keep it, and anything else refuses at the receiver's boot. It disarms **only** the
+self comparison: the author gate still runs, still needs Developer or above, and a delivery that is self **and**
+unauthorised still refuses as `author-not-allowed`. The receiver says `{"event":"bot_loop_guard_disabled"}` at
+boot and `pi-dispatch doctor` warns while it is set.
+
+**What now bounds the spend is your caps, not the guard.** So keep every trigger clear of what the harness
+produces itself. Two shapes are matched by its own output and turn the guard into a daily budget:
+
+| Do not write, with the guard off | Why |
+|---|---|
+| `on: {type:"pull_request", action:["update"]}` | every push the agent makes to its own MR is an `update` authored by it |
+| `on: {type:"comment", phrase:"@pi"}` where the flow's own output can contain `@pi` | its reply quotes the request; a status comment is a comment too |
+| close rules (`action:["closed"]`, `on.once`) on items the agent closes | it closes the issue itself |
+
+Labels are the safest shape here, and even they need care: a rule keyed to a label **you** apply is fine, one
+keyed to a label the flow applies to its own issue is a loop. The honest summary: with one identity, "the agent
+works on what I hand it" and "the agent reacts to its own work" cannot both be true, and the switch chooses the
+first.
+
 ## Who can trigger a job
 
 **A project member with Developer access or above — resolved from the API, for every trigger type.**

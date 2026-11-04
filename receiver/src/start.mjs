@@ -43,7 +43,7 @@ import { makeGitHubAuth } from "@edgehero/pi-dispatch/get-token";
 import { resolveGitLabSelfId } from "@edgehero/pi-dispatch/gitlab-identity";
 import { resolveForgejoSelfId } from "@edgehero/pi-dispatch/forgejo-identity";
 import { resolveAzureSelfId } from "@edgehero/pi-dispatch/azure-identity";
-import { makeResolveAuthority } from "./gitlab-members.mjs";
+import { makeResolveActor } from "./gitlab-members.mjs";
 import { makeResolveForgejoAuthority } from "./forgejo-members.mjs";
 import { makeResolveAzureAuthority } from "./azure-members.mjs";
 import { makeResolveGitHubAuthority } from "./github-members.mjs";
@@ -76,7 +76,7 @@ export async function startReceiver(
 		createServer = http.createServer,
 		makeReceiverPublisherFn = makeReceiverPublisher,
 		resolveGitLabSelfId: resolveSelfIdFn = resolveGitLabSelfId,
-		makeResolveAuthority: makeResolveAuthorityFn = makeResolveAuthority,
+		makeResolveActor: makeResolveActorFn = makeResolveActor,
 		resolveForgejoSelfId: resolveForgejoSelfIdFn = resolveForgejoSelfId,
 		makeResolveForgejoAuthority: makeResolveForgejoAuthorityFn = makeResolveForgejoAuthority,
 		resolveAzureSelfId: resolveAzureSelfIdFn = resolveAzureSelfId,
@@ -119,6 +119,11 @@ export async function startReceiver(
 			return text;
 		},
 	});
+
+	// A guard that is off is said out loud, first thing: `PI_RECEIVER_ALLOW_SELF=1` means our own comments,
+	// labels and pushes can start jobs, so the only bound left is the deployment's caps. An operator reading
+	// the log of a machine they did not configure should learn that here, not from the bill.
+	if (cfg.allowSelf) log({ event: "bot_loop_guard_disabled", reason: "PI_RECEIVER_ALLOW_SELF=1" });
 
 	// One options bag for the four identity arms below (issue #318): the SAME window, clock and sleep for
 	// every forge, so the bound the operator configured is the bound every arm obeys.
@@ -206,7 +211,7 @@ export async function startReceiver(
 				mode: cfg.gitlab.mode,
 				secret: cfg.gitlab.secret,
 				selfId: gitlabSelfId,
-				resolveAuthority: makeResolveAuthorityFn({ apiUrl: cfg.gitlab.apiUrl, token: cfg.gitlab.token }),
+				resolveActor: makeResolveActorFn({ apiUrl: cfg.gitlab.apiUrl, token: cfg.gitlab.token }),
 			};
 		}
 

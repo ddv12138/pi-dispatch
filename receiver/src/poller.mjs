@@ -979,7 +979,7 @@ async function gate(ctx, eventName, payload, deliveryId, stats) {
 		closerAuthorized = resolved.authorized;
 	}
 
-	const result = filter(eventName, subset, ctx.cfg, ctx.selfId, deliveryId, closerAuthorized);
+	const result = filter(eventName, subset, ctx.cfg, ctx.selfId, deliveryId, closerAuthorized, { allowSelf: ctx.cfg?.allowSelf });
 	if (!result.enqueue) {
 		// Issue #638, the webhook arms' `heldBeforeLabelOr` at the poller's seam: a phrase-free reply that missed only the
 		// parked marker is held for an awaitInput run parking on its target; otherwise today's drop.

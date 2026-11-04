@@ -4041,6 +4041,22 @@ payload is a different shape rather than an extension of GitHub's.
     puts no access level in the payload and the member lookup needs an identity. It is **personal data**
     with exactly one consumer: it reaches the resolver and goes no further — never a log line, never the
     job, never the run record (`no-pii-in-logs`).
+  - **`user.username` is also the IDENTITY when `user.id` is absent** (measured on GitLab 13.2.10, whose
+    `Issue Hook` `user` object is `{name, username, avatar_url, email}` and nothing else). The sender is
+    resolved BEFORE the gate, by the same resolver that asks for the access level
+    (`receiver/src/gitlab-members.mjs`), so `filterGitLab` and the bot-loop guard keep comparing numeric
+    ids exactly as written: the payload's own `user.id` wins whenever it is present (no extra call, and
+    the fallback can never disagree with the field the gate was written against), and otherwise the
+    resolver filters `GET /users?username=<name>` and accepts **exactly one exact match**. Anything else
+    — no match, several matches, a lookalike spelling, a non-numeric id, a body that is not an array —
+    leaves the delivery with **no sender id at all** and the gate's own first step drops it as
+    `missing-sender-id`, which is what that reason has always meant. A failed or unreadable `/users`
+    answer is INDETERMINATE, never an absent sender, so the receiver answers 503 and GitLab redelivers.
+    The resolved id is what the job carries (`trigger.sender.id`); usernames still enter no job, log line
+    or run record. **The fallback adds no trust**: in token mode the body is what the sender wrote, so a
+    sender able to forge `user.id` could always have forged the actor; in signature mode the body is
+    integrity-protected, and an instance new enough to sign also sends `user.id`, so the fallback is not
+    reached there at all.
 - **`iid`, never `id`.** `iid` is the per-project number a human sees and an API path takes; `id` is a
   global database key that would address a valid-looking object belonging to somebody else.
 - **The project is carried as its numeric `id`**, with `path_with_namespace` kept only as a human-readable
@@ -4061,6 +4077,13 @@ payload is a different shape rather than an extension of GitHub's.
   contains `user.username`. Given a token-verified request with neither native delivery header, the
   receiver derives the same `body-sha256-` id for the same event header and exact raw bytes, and a
   changed byte or event header changes that fallback id; signature mode still refuses without `webhook-id`.
+  Given a payload with no `user.id` and one exact `user.username` match, the job's `trigger.sender.id` is
+  the resolved numeric id and `GET /users?username=` is called once before the members lookup. Given a
+  payload with both, only the members lookup is made and the payload's id is the one compared to the
+  harness's own. Given a username matching no account or more than one, the delivery drops as
+  `missing-sender-id` and the members lookup is never made. Given a username that resolves to the
+  harness's own account, the delivery drops as `self`. Given a `/users` answer that is a 4xx/5xx, a
+  throw or a non-array body, the receiver answers 503 and enqueues nothing.
 
 ## INT-FORGEJO-PAYLOAD-SUBSET
 
@@ -13645,3 +13668,4 @@ increase its existing cost ticket only before dispatch; a larger/unboundable pay
 | 2026-11-04 | `INT-CONTAINER-RUNTIME-CONTRACT` AMENDED: for a custom main provider, the worker resolves the provider's models.json `apiKey` `$ENV_NAME` on the host, checks it before spending and emits that one value under that exact name in the closed job environment. The pickup snapshot is shared by the credential gate and env builder. Builtin credentials, keyless marker and all other container variables: UNCHANGED, checked. **Code evidence**: `worker/src/index.mjs`, `worker/src/start.mjs`, `worker/src/env-allowlist.mjs`. |
 | 2026-11-04 | `INT-CONSOLE-TOKENS-FILE-CONTRACT` AMENDED: optional `PI_CONSOLE_LOGIN_TOKEN` is a fixed operator credential, hashed at configuration load, audited as `fixed-token`, and never persisted or logged. The valid tokens file and its operator entry remain required for service installation/readiness; file generation and the exact configured digest jointly govern fixed-token sessions. Existing token format, revocation, modes and writers: UNCHANGED, checked. |
 | 2026-11-04 | `INT-CONSOLE-TOKENS-FILE-CONTRACT` CORRECTED after the first deployed login smoke test showed a successful sign-in immediately read as revoked: the live-session check now recognizes only the reserved fixed-token operator session whose digest equals the process-configured hash, while still checking expiry and file generation. Sandbox browser step-up also accepts that exact token as the session's own credential. Named token revocation/role changes and all ordinary session checks: UNCHANGED, checked. |
+| 2026-11-04 | `INT-GITLAB-PAYLOAD-SUBSET` AMENDED: `user.username` is the sender's identity when the payload carries no `user.id` (measured on GitLab 13.2.10, whose webhook `user` object is `{name, username, avatar_url, email}` and nothing else), so an instance whose configuration was entirely correct could arm `/gitlab` and then drop every delivery as `missing-sender-id`. The id is resolved BEFORE the gate, by the same resolver that already asks for the access level (renamed `makeResolveAuthority` to `makeResolveActor` because it now answers who as well as whether), and three rules keep it from becoming a second gate: the payload's own `user.id` wins whenever present, the username must match EXACTLY ONE account through `GET /users?username=`, and an absent actor resolves to no id at all so the gate's own first step still drops it as `missing-sender-id`. A failed or unreadable `/users` answer is INDETERMINATE like every other lookup failure, so the receiver answers 503 and GitLab redelivers. `filterGitLab`, the bot-loop guard, `trigger.sender.id` and every `no-pii-in-logs` rule are UNCHANGED, checked: the gate still refuses a non-numeric sender before anything else, still compares numbers, and no username reaches a job, a log line or the run record. **CONST-TRIGGER-AUTHOR-GATE UNCHANGED, checked**: the Developer threshold and the `members/all` lookup are byte-identical, only the id they are asked about can now also come from the username. **INT-WEBHOOK-PAYLOAD-SUBSET, INT-FORGEJO-PAYLOAD-SUBSET, INT-AZURE-PAYLOAD-SUBSET, INT-TRIGGERS-FILE-CONTRACT and INT-RUN-HISTORY-FILE-CONTRACT UNCHANGED, checked**: no other forge's projection changes, no trigger field moves, and nothing new is stored. **Code evidence**: `receiver/src/gitlab-members.mjs`, `receiver/src/receiver.mjs`, `receiver/src/start.mjs`. |

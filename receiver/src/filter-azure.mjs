@@ -40,7 +40,7 @@ export const PR_ACTION_FOR = {
  *
  * `selfId` is `{ id, email }` -- see the header for why it is not one value.
  */
-export function filterAzure(subset, triggers, knownFlows, selfId, authorized, deliveryId) {
+export function filterAzure(subset, triggers, knownFlows, selfId, authorized, deliveryId, { allowSelf = false } = {}) {
 	const actor = subset?.actor ?? {};
 	const hasId = typeof actor.id === "string" && actor.id !== "";
 	const hasEmail = typeof actor.email === "string" && actor.email !== "";
@@ -50,12 +50,13 @@ export function filterAzure(subset, triggers, knownFlows, selfId, authorized, de
 		return { enqueue: false, reason: "missing-sender-id" };
 	}
 
-	// (1) Bot-loop guard, unconditional. Both forms are compared, and an EMPTY side never matches: a
+	// (1) Bot-loop guard. `allowSelf` is the operator's explicit switch (PI_RECEIVER_ALLOW_SELF), and only an
+	// exact `true` disarms it. Both forms are compared, and an EMPTY side never matches: a
 	// deployment whose selfId resolved only one of the two must not silently match every actor on the
 	// other.
 	const selfGuid = typeof selfId?.id === "string" && selfId.id !== "" ? selfId.id : null;
 	const selfEmail = typeof selfId?.email === "string" && selfId.email !== "" ? selfId.email.toLowerCase() : null;
-	if ((hasId && selfGuid !== null && actor.id === selfGuid) || (hasEmail && selfEmail !== null && actor.email === selfEmail)) {
+	if (allowSelf !== true && ((hasId && selfGuid !== null && actor.id === selfGuid) || (hasEmail && selfEmail !== null && actor.email === selfEmail))) {
 		return { enqueue: false, reason: "self" };
 	}
 

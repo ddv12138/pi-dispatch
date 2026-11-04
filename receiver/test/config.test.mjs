@@ -33,6 +33,18 @@ test("empty/whitespace WEBHOOK_SECRET is a config error", () => {
 	assert.throws(() => loadReceiverConfig({ WEBHOOK_SECRET: "   " }, validTriggers), (e) => e.piDispatchConfig === true);
 });
 
+test("PI_RECEIVER_ALLOW_SELF is strict: \"1\" disarms the guard, unset/\"0\" keep it, anything else refuses at boot", () => {
+	// A silently-ignored value here would leave an operator believing the bot-loop guard is off when it is
+	// on, or the reverse. Both are worse than refusing to start, and the guard is a money control.
+	assert.equal(loadReceiverConfig({ WEBHOOK_SECRET: "shh", PI_RECEIVER_ALLOW_SELF: "1" }, validTriggers).allowSelf, true);
+	assert.equal(loadReceiverConfig({ WEBHOOK_SECRET: "shh" }, validTriggers).allowSelf, false);
+	assert.equal(loadReceiverConfig({ WEBHOOK_SECRET: "shh", PI_RECEIVER_ALLOW_SELF: "" }, validTriggers).allowSelf, false);
+	assert.equal(loadReceiverConfig({ WEBHOOK_SECRET: "shh", PI_RECEIVER_ALLOW_SELF: "0" }, validTriggers).allowSelf, false);
+	for (const bad of ["true", "yes", "2", "on"]) {
+		assert.throws(() => loadReceiverConfig({ WEBHOOK_SECRET: "shh", PI_RECEIVER_ALLOW_SELF: bad }, validTriggers), (e) => e.piDispatchConfig === true, `${JSON.stringify(bad)} must refuse rather than guess`);
+	}
+});
+
 test("a valid secret + triggers file yields conservative defaults and grouped webhook triggers", () => {
 	const c = loadReceiverConfig({ WEBHOOK_SECRET: "shh" }, validTriggers);
 	assert.equal(c.webhookSecret, "shh");

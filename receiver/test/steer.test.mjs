@@ -182,15 +182,17 @@ function build({ redis = fakeRedis(), admitted = true, cfg = cfgWith(), steerRed
 	const calls = [];
 	const logs = [];
 	const queue = { add: async (name, data, opts) => (calls.push({ name, data, opts }), { id: opts?.jobId }) };
-	const resolveAuthority = async () => ({ authorized: admitted });
+	// The gitlab arm resolves the ACTOR too, and echoes the payload's own id exactly as the real resolver does;
+	// one fake serves all three forge bags here because only the gitlab gate reads the id back.
+	const resolveActor = async (_target, who) => ({ id: who?.id, authorized: admitted });
 	const handler = makeReceiver({
 		queue,
 		selfId: 999,
 		cfg,
 		log: (o) => logs.push(o),
-		gitlab: { mode: "token", secret: GL_TOKEN, selfId: 999, resolveAuthority },
-		forgejo: { secret: FJ_SECRET, selfId: 999, resolveAuthority },
-		azure: { mode: "basic", secret: AZ_BASIC, selfId: { id: "self-guid", email: "bot@example.com" }, resolveAuthority },
+		gitlab: { mode: "token", secret: GL_TOKEN, selfId: 999, resolveActor },
+		forgejo: { secret: FJ_SECRET, selfId: 999, resolveAuthority: resolveActor },
+		azure: { mode: "basic", secret: AZ_BASIC, selfId: { id: "self-guid", email: "bot@example.com" }, resolveAuthority: resolveActor },
 		steerRedis: steerRedis ?? (() => redis),
 		now,
 	});

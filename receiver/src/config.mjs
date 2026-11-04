@@ -63,6 +63,32 @@ export function identityRetryWindowMs(env = process.env) {
 }
 
 /**
+ * `PI_RECEIVER_ALLOW_SELF` -- the ONE switch that disarms the bot-loop guard on every arm. Off unless the
+ * operator writes exactly "1".
+ *
+ * The guard drops any delivery the harness itself authored, because our own output IS an event a trigger can
+ * match: a status comment carrying the phrase, a label a flow applied, and above all a push to a merge
+ * request's source branch, which GitLab and GitHub both report as an update of that MR. Without the guard one
+ * job starts another, each paying for a container and a model's turns.
+ *
+ * An operator turns it off for the one reason that is not a mistake: their forge has a SINGLE identity, so
+ * their own comments and labels arrive as ours and every rule they write is dead on arrival. What still
+ * bounds the spend then is the deployment's own caps (`PI_DAILY_CAP`, `PI_MAX_TURNS`), never this file, so
+ * the rules written with the switch on must be ones the harness's own output cannot match: a bare comment
+ * phrase and a merge-request update rule both can, and both turn the guard into a 25-runs-a-day budget.
+ *
+ * Strict, like every other security-shaped key: `"1"` is on, unset and `"0"` are off, and anything else is a
+ * boot refusal rather than a guess. A silently ignored value would leave an operator believing the guard is
+ * disarmed when it is armed, or the reverse, and each of those is worse than refusing to start.
+ */
+function allowSelfFlag(env) {
+	const raw = env.PI_RECEIVER_ALLOW_SELF;
+	if (raw === undefined || raw === "" || raw === "0") return false;
+	if (raw === "1") return true;
+	throw configError(`PI_RECEIVER_ALLOW_SELF must be exactly "1" (disarm the bot-loop guard) or "0"/unset (keep it); got ${JSON.stringify(raw)}`);
+}
+
+/**
  * Parse the receiver's config from `env` (default process.env). Filesystem access is injected
  * (`readFile`, `fileExists`) so the loader is hermetically testable and never touches disk in tests.
  */
@@ -74,6 +100,8 @@ export function loadReceiverConfig(env = process.env, { readFile = readFileSync,
 	const triggers = loadTriggers(env, readFile, fileExists);
 	const github = loadGitHubAuth(env, fileExists);
 	const servesGithub = decideServesGithub(env, triggers.github);
+
+	const allowSelf = allowSelfFlag(env);
 
 	const webhookSecret = env.WEBHOOK_SECRET;
 	if (servesGithub && (webhookSecret === undefined || webhookSecret.trim() === "")) {
@@ -89,6 +117,7 @@ export function loadReceiverConfig(env = process.env, { readFile = readFileSync,
 		// is what says so, so an unread absent secret can never be mistaken for an armed endpoint.
 		webhookSecret,
 		servesGithub,
+		allowSelf,
 		valkeyUrl: env.VALKEY_URL ?? "redis://127.0.0.1:6379", // mirrors worker config: producer and consumer share one queue
 		port: positiveInt(env, "RECEIVER_PORT", 3000),
 		bind: env.RECEIVER_BIND ?? "0.0.0.0",

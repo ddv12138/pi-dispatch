@@ -728,7 +728,7 @@ export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_AUTH_SOURCE", "GITHUB_
  *  console: the worker reads it (it runs the audit reaper), and a console key set alone makes doctor judge a console. */
 export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_SANDBOX_RETENTION_HOURS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(DOLLAR_ENV_NAMES)]);
 /** Issue #471: the receiver's keys doctor judges its boot by (the receiver's unit reads the same `.env`). */
-export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
+export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "PI_RECEIVER_ALLOW_SELF", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
 /**
  * Issue #471 (follow-up): the variables the CLIs doctor spawns read from their environment, by the CLI that reads them.
  * The worker starts podman, docker and gh with its OWN environment (no `env` option: `image-preflight.mjs`,
@@ -2358,6 +2358,27 @@ export async function collectChecks(shellVars, seams) {
 				});
 			}
 		}
+	}
+
+	// The bot-loop guard, disarmed on purpose or by accident. WARNS, never fails: the switch exists for a
+	// deployment whose forge has ONE identity, where the operator's own comments and labels arrive as ours
+	// and every rule they write is dead without it. What nobody should have to learn from a bill is that the
+	// guard is off, because from that moment the only bound on a runaway loop is this deployment's own caps.
+	const allowSelf = env.PI_RECEIVER_ALLOW_SELF;
+	if (allowSelf === "1") {
+		checks.push({
+			ok: false,
+			warn: true,
+			label: "PI_RECEIVER_ALLOW_SELF=1 -- the bot-loop guard is OFF, so the harness's own comments, labels and pushes can start jobs and only the daily caps bound the spend",
+			fix: "set it to 0 (or drop the line) as soon as a second forge identity exists; until then keep every trigger clear of what the harness produces itself -- a bare comment phrase and a merge-request `update` rule are both matched by our own output",
+		});
+	} else if (allowSelf !== undefined && allowSelf !== "" && allowSelf !== "0") {
+		checks.push({
+			ok: false,
+			warn: true,
+			label: `PI_RECEIVER_ALLOW_SELF is ${JSON.stringify(allowSelf)}, which is neither "1" nor "0" -- the receiver will refuse to start`,
+			fix: 'set it to "1" to disarm the bot-loop guard, or drop the line for the default (armed)',
+		});
 	}
 
 	// GitLab, when the triggers file names it. WARNS rather than fails, matching the github auth checks

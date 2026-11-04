@@ -401,7 +401,7 @@ function makeGitHubHandler({ queue, routeTo, selfId, cfg, log, resolveAuthority,
 			closerAuthorized = resolved.authorized;
 		}
 
-		let result = filter(event, subset, cfg, selfId, delivery, closerAuthorized);
+		let result = filter(event, subset, cfg, selfId, delivery, closerAuthorized, { allowSelf: cfg.allowSelf });
 		if (!result.enqueue) {
 			// Issue #638: a phrase-free reply that missed only the parked marker is held for a run parking on its target, or
 			// enqueued as a parked reply when a run just parked there; otherwise this is today's drop, byte for byte.
@@ -436,18 +436,20 @@ function makeGitHubHandler({ queue, routeTo, selfId, cfg, log, resolveAuthority,
 
 /**
  * The GitLab arm. Same shape as the GitHub one -- verify, project, gate, enqueue, respond -- with one step
- * the GitHub path does not need: the actor's project access level is RESOLVED here, between verification
- * and the gate, because GitLab puts no `author_association` in the payload (gitlab-members.mjs).
+ * the GitHub path does not need: the ACTOR is resolved here, between verification and the gate, because
+ * GitLab puts no `author_association` in the payload and, on instances old enough to predate `user.id`,
+ * does not name the sender in a form the gate can compare either (gitlab-members.mjs).
  *
- * That resolution is a network call, and its three outcomes are deliberately not two:
- *   - a determinate verdict (authorized or not) is handed to the gate, which decides;
+ * That resolution is one network call (two on such an instance), and its three outcomes are deliberately
+ * not two:
+ *   - a determinate answer (a numeric id and an authorized verdict) is handed to the gate, which decides;
  *   - an INDETERMINATE lookup is a 503, so GitLab redelivers and the delivery id (native when present,
  *     otherwise the verified raw-body digest) dedups a byte-identical retry. Answering 204 would drop real work during an outage, and it would look on the wire exactly
  *     like a stranger being correctly refused.
  * The lookup runs only for events that could still fire -- after verification, and after the payload has
  * been projected -- so an unauthenticated flood cannot make this project call GitLab at all.
  */
-function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, resolveAuthority, now, steer }) {
+function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, resolveActor, now, steer }) {
 	return makeGitLabVerifiedHandler({ mode, secret, ...(now ? { now } : {}) }, async ({ rawBody, delivery }, res) => {
 		let subset;
 		try {
@@ -456,7 +458,12 @@ function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, res
 			return respond(res, 400, { error: "invalid-json" });
 		}
 
-		const resolved = await resolveAuthority(subset.project?.id, subset.user?.id);
+		// The actor is resolved BEFORE the gate, because a delivery from an instance old enough to omit
+		// `user.id` names its sender by USERNAME only, and the gate requires a numeric id: it refuses a
+		// non-numeric one first of all, on purpose (`undefined === selfId` is false and would otherwise fail
+		// open). So the resolver turns whichever identity the body carries into the id, and the gate below
+		// is fed that and not the raw shape -- one numeric sender id on every instance.
+		const resolved = await resolveActor(subset.project?.id, subset.user);
 		if (resolved.indeterminate) {
 			// The reason names the lookup, never the actor -- `user.username` is personal data and exists
 			// only to have been asked about (no-pii-in-logs).
@@ -464,7 +471,13 @@ function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, res
 			return respond(res, 503, { error: "access-lookup-failed" });
 		}
 
-		let result = filterGitLab(subset, cfg.triggers?.gitlab, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery);
+		// A COPY with the username dropped and the resolved id in its place, so what the gate and the job
+		// builder see is the one shape the contract describes. `id` may still be undefined (no such user,
+		// or a body that named no actor), and the gate's own first step then drops it as
+		// `missing-sender-id` exactly as before.
+		const actor = { ...subset, user: { id: resolved.id } };
+
+		let result = filterGitLab(actor, cfg.triggers?.gitlab, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery, { allowSelf: cfg.allowSelf });
 		if (!result.enqueue) {
 			// Issue #638: a phrase-free reply that missed only the parked marker is held for a run parking on its target, or
 			// enqueued as a parked reply when a run just parked there; otherwise this is today's drop, byte for byte.
@@ -528,7 +541,7 @@ function makeForgejoHandler({ routeTo, queue, cfg, log, secret, selfId, resolveA
 			return respond(res, 503, { error: "permission-lookup-failed" });
 		}
 
-		let result = filterForgejo(event, subset, cfg.triggers?.forgejo, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery);
+		let result = filterForgejo(event, subset, cfg.triggers?.forgejo, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery, { allowSelf: cfg.allowSelf });
 		if (!result.enqueue) {
 			// Issue #638: a phrase-free reply that missed only the parked marker is held for a run parking on its target, or
 			// enqueued as a parked reply when a run just parked there; otherwise this is today's drop, byte for byte.
@@ -598,7 +611,7 @@ function makeAzureHandler({ routeTo, queue, cfg, log, mode, secret, headerName, 
 			return respond(res, 503, { error: "membership-lookup-failed" });
 		}
 
-		let result = filterAzure(subset, cfg.triggers?.azure, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery);
+		let result = filterAzure(subset, cfg.triggers?.azure, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery, { allowSelf: cfg.allowSelf });
 		if (!result.enqueue) {
 			// Issue #638: a phrase-free reply that missed only the parked marker is held for a run parking on its target, or
 			// enqueued as a parked reply when a run just parked there; otherwise this is today's drop, byte for byte.

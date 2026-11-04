@@ -57,7 +57,7 @@ function gitlabOnlyEnv(overrides = {}) {
 /** The gitlab arm's injected collaborators, so the boot touches no GitLab instance. */
 const gitlabFakes = {
 	resolveGitLabSelfId: async () => 4242,
-	makeResolveAuthority: () => async () => ({ authorized: true }),
+	makeResolveActor: () => async () => ({ id: 7, authorized: true }),
 };
 
 /**
@@ -268,6 +268,22 @@ test("the makeReceiver handler is wired to createServer and a signed delivery en
 // deployment had to have the GitHub CLI installed and logged in -- and a WEBHOOK_SECRET for an endpoint it
 // never served -- or it could not start. Both directions are pinned: skipped when github is not served,
 // still a hard-fail boot gate when it is.
+
+test("PI_RECEIVER_ALLOW_SELF=1 is announced at boot, and the default boot says nothing about it", async () => {
+	// "Fail open and say which": a guard that is off must be visible in the log of the machine that runs it,
+	// because what bounds the spend then is the deployment's own caps and an operator may not know either.
+	const withSwitch = await bootLogLines(async (write) => {
+		await startReceiverClosed(gitlabOnlyEnv({ PI_RECEIVER_ALLOW_SELF: "1" }), { write, makeQueueFn: stubQueue, createServer: capturingServer().createServer, ...gitlabFakes });
+	});
+	const line = withSwitch.find((l) => l.event === "bot_loop_guard_disabled");
+	assert.ok(line, "the disarm is announced");
+	assert.equal(JSON.stringify(line).includes("glpat"), false, "and names the setting, never a credential");
+
+	const without = await bootLogLines(async (write) => {
+		await startReceiverClosed(gitlabOnlyEnv(), { write, makeQueueFn: stubQueue, createServer: capturingServer().createServer, ...gitlabFakes });
+	});
+	assert.equal(without.some((l) => l.event === "bot_loop_guard_disabled"), false, "an armed guard is the default and stays quiet");
+});
 
 test("a gitlab-only deployment boots without ever calling makeAuth, and says so in one log line", async () => {
 	const { captured, createServer } = capturingServer();
@@ -692,7 +708,7 @@ test("the retry wraps EACH arm: a gitlab retry re-resolves gitlab alone and rebu
 				if (gitlabCalls === 1) throw new Error("502 mid-restart");
 				return 4242;
 			},
-			makeResolveAuthority: () => async () => ({ authorized: true }),
+			makeResolveActor: () => async () => ({ id: 7, authorized: true }),
 			now: () => t,
 			sleep: async (ms) => {
 				sleeps.push(ms);
@@ -779,7 +795,7 @@ test("a refusal AFTER the queue exists closes what the boot built, so the exit c
 			resolveGitLabSelfId: async () => {
 				throw Object.assign(new Error("GET /user returned 401"), { piDispatchConfig: true });
 			},
-			makeResolveAuthority: () => async () => ({ authorized: true }),
+			makeResolveActor: () => async () => ({ id: 7, authorized: true }),
 		}),
 		(e) => e.piDispatchConfig === true,
 	);
@@ -797,7 +813,7 @@ test("a refusal AFTER the queue exists closes what the boot built, so the exit c
 			resolveGitLabSelfId: async () => {
 				throw new Error("connect ECONNREFUSED 10.0.0.5:443");
 			},
-			makeResolveAuthority: () => async () => ({ authorized: true }),
+			makeResolveActor: () => async () => ({ id: 7, authorized: true }),
 			now: () => t,
 			sleep: async (ms) => {
 				t += ms;

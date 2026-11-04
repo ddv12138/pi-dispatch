@@ -137,6 +137,14 @@ test("self-comment is dropped even though it would clear the author gate + phras
 	assert.equal(r.job, undefined);
 });
 
+test("PI_RECEIVER_ALLOW_SELF disarms only the self compare -- the author gate below it still decides", () => {
+	// Same switch, same reason: one identity per forge. What must survive is the author gate and the
+	// ordering, so a delivery that is self AND unauthorised refuses for the author reason.
+	const subset = commentSubset({ sender: { id: SELF_ID } });
+	assert.equal(filter("issue_comment", subset, cfg, SELF_ID, "d-self", undefined, { allowSelf: true }).enqueue, true);
+	assert.equal(filter("issue_comment", subset, cfg, SELF_ID, "d-self").reason, "self", "the default is the guard");
+});
+
 test("missing sender.id rejects BEFORE the self compare (fail-closed, not fall-through to enqueue)", () => {
 	for (const sender of [undefined, {}, { id: undefined }, { id: "7" }, { id: "999" }]) {
 		const subset = commentSubset({ sender });

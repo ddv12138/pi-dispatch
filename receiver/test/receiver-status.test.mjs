@@ -26,9 +26,10 @@ function build(forge, { disabled = false, dedup = false, lookup = false, enqueue
 	const rule = { index: 1, phrase: "@pi", defaultFlow: "triage", repository: "widgets" };
 	const groups = Object.fromEntries(RECEIVER_FORGES.map((f) => [f, { label: [], comment: rule, pullRequest: [], issue: [{ index: 2, actions: new Set(["closed"]), number: 7, once: true, flow: "triage" }] }]));
 	const queue = { get client() { clients++; throw new Error("request telemetry must stay in memory"); }, add: async (_name, _data, opts) => { adds++; if (enqueue) throw new Error("infrastructure"); return { id: dedup ? "survivor" : opts.jobId }; } };
-	const resolveAuthority = async () => lookup ? { indeterminate: "lookup-failed" } : { authorized: true };
+	// The gitlab arm resolves the ACTOR too (`id`), so one fake serves all four forge bags here.
+	const resolveActor = async () => lookup ? { indeterminate: "lookup-failed" } : { id: 7, authorized: true };
 	const handler = makeReceiver({ queue, selfId: 999, cfg: { servesGithub: !disabled, webhookSecret: SECRET, triggers: { ...groups, knownFlows: new Set(["triage"]) } }, log: error ? () => { throw new Error("sink"); } : () => {}, now, observations,
-		gitlab: disabled ? null : { mode: "token", secret: SECRET, selfId: 999, resolveAuthority }, forgejo: disabled ? null : { secret: SECRET, selfId: 999, resolveAuthority }, azure: disabled ? null : { mode: "header", headerName: "x-auth", secret: SECRET, selfId: { id: "self", email: "bot@example.com" }, resolveAuthority }, resolveAuthority });
+		gitlab: disabled ? null : { mode: "token", secret: SECRET, selfId: 999, resolveActor }, forgejo: disabled ? null : { secret: SECRET, selfId: 999, resolveAuthority: resolveActor }, azure: disabled ? null : { mode: "header", headerName: "x-auth", secret: SECRET, selfId: { id: "self", email: "bot@example.com" }, resolveAuthority: resolveActor }, resolveAuthority: resolveActor });
 	return { handler, observations, adds: () => adds, clients: () => clients };
 }
 async function drive(handler, req, raw) {

@@ -55,14 +55,16 @@ export const MR_ACTIONS = new Set(["open", "update", "reopen", "approved"]);
  * receiver's resolved verdict for this actor; `deliveryId` is the stable `webhook-id`, carried into the job
  * for dedup.
  */
-export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, deliveryId) {
+export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, deliveryId, { allowSelf = false } = {}) {
 	// (0) Fail-closed on identity. MUST precede the self compare -- see header.
 	if (typeof subset?.user?.id !== "number") {
 		return { enqueue: false, reason: "missing-sender-id" };
 	}
 
-	// (1) Bot-loop guard: unconditional, independent of the access outcome below.
-	if (subset.user.id === selfId) {
+	// (1) Bot-loop guard, independent of the access outcome below -- which is why it is HERE and not folded
+	// into the gate: under a project access token the harness clears that gate. `allowSelf` is the
+	// operator's explicit switch (PI_RECEIVER_ALLOW_SELF), and only an exact `true` disarms it.
+	if (allowSelf !== true && subset.user.id === selfId) {
 		return { enqueue: false, reason: "self" };
 	}
 

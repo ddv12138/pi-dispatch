@@ -564,7 +564,10 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_AUTH_CONNECTIONS_FILE and PI_AUTH_STORE_DIR add the host-owned subscription boundary (#781).
 	// PI_SANDBOX_GATEWAYS_FILE adds the hand-owned browser gateway enrollment (#754).
 	// PI_CONSOLE_AUDIT_RETENTION_DAYS and PI_RUN_MIRROR_MAX_RUNS add the audit trail's own retention and the run index cap (#761).
-	assert.equal(scanned, 136, "the scan must actually reach every assignment in the file");
+	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The count also carries ONE
+	// assignment this file already had at the pin's last edit, which is why it moves by two: at HEAD the file
+	// carried 137 assignments against this pin's 136, so this assertion was already failing before the switch.
+	assert.equal(scanned, 138, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

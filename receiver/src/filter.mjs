@@ -69,14 +69,16 @@ const REVIEW_EVENT_ACTION = "submitted";
 // raw payload action against it.
 const CLOSE_ACTION = "closed";
 
-export function filter(eventName, subset, cfg, selfId, deliveryId, closerAuthorized) {
+export function filter(eventName, subset, cfg, selfId, deliveryId, closerAuthorized, { allowSelf = false } = {}) {
 	// (0) Fail-closed on identity. MUST precede the self compare -- see header, ordering constraint.
 	if (typeof subset?.sender?.id !== "number") {
 		return { enqueue: false, reason: "missing-sender-id" };
 	}
 
-	// (1) Bot-loop guard: unconditional, independent of the author/label outcome below.
-	if (subset.sender.id === selfId) {
+	// (1) Bot-loop guard, independent of the author/label outcome below. `allowSelf` is the operator's
+	// explicit switch (rather than a silent one): read from the receiver's own config, and only an
+	// exact `true` disarms it -- anything else is the guard.
+	if (allowSelf !== true && subset.sender.id === selfId) {
 		return { enqueue: false, reason: "self" };
 	}
 

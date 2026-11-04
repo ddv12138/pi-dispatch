@@ -45,8 +45,8 @@ const pullRequest = (over = {}) => ({
 	...over,
 });
 
-const run = (payload, { authorized = true, selfId = SELF } = {}) =>
-	filterAzure(parseAzureSubset(payload), triggers, knownFlows, selfId, authorized, "delivery-guid");
+const run = (payload, { authorized = true, selfId = SELF, allowSelf = false } = {}) =>
+	filterAzure(parseAzureSubset(payload), triggers, knownFlows, selfId, authorized, "delivery-guid", { allowSelf });
 
 // --- the tag DIFF, which is the expensive thing to get wrong ---
 
@@ -139,6 +139,24 @@ test("a display name CONTAINING the bot address is not the bot -- the spoofable-
 
 test("the harness's own pull-request activity drops as self, matched on the GUID", () => {
 	assert.equal(run(pullRequest({ resource: { ...pullRequest().resource, createdBy: { id: SELF.id } } })).reason, "self");
+});
+
+test("PI_RECEIVER_ALLOW_SELF disarms ONLY the self compare, on both forms of the identity", () => {
+	// Azure compares a GUID and an address; the switch must disarm both, and nothing else. The anchored
+	// address comparison stays exactly as it is -- this is not a licence to loosen it.
+	const ownPullRequest = pullRequest({ resource: { ...pullRequest().resource, createdBy: { id: SELF.id } } });
+	assert.equal(run(ownPullRequest, { allowSelf: true }).enqueue, true);
+	assert.equal(run(ownPullRequest).reason, "self", "the default is unchanged");
+	const ownComment = workItem({
+		eventType: "workitem.commented",
+		resource: {
+			id: 7,
+			fields: { "System.ChangedBy": "pi-dispatch <PI-BOT@Example.com>", "System.History": "@pi done" },
+			revision: { fields: { "System.TeamProject": "Fabrikam" } },
+		},
+	});
+	assert.equal(run(ownComment, { allowSelf: true }).enqueue, true, "the address form too");
+	assert.equal(run(ownComment, { allowSelf: true, authorized: false }).reason, "author-not-allowed", "the authority gate is still a gate");
 });
 
 test("an EMPTY side of selfId never matches -- a half-resolved identity must not match every actor", () => {

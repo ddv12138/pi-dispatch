@@ -52,8 +52,8 @@ function notePayload(over = {}) {
 	};
 }
 
-const run = (payload, { authorized = true, selfId = SELF_ID, delivery = "wh-1" } = {}) =>
-	filterGitLab(parseGitLabSubset(payload), triggers, knownFlows, selfId, authorized, delivery);
+const run = (payload, { authorized = true, selfId = SELF_ID, delivery = "wh-1", allowSelf = false } = {}) =>
+	filterGitLab(parseGitLabSubset(payload), triggers, knownFlows, selfId, authorized, delivery, { allowSelf });
 
 // --- the label diff (the repeat-paid-run bug this design exists to prevent) ---
 
@@ -133,6 +133,16 @@ test("the bot-loop guard runs BEFORE the access gate, so our own comment cannot 
 	const r = run(notePayload({ user: { id: SELF_ID, username: "pi-bot" } }), { authorized: true });
 	assert.equal(r.enqueue, false);
 	assert.equal(r.reason, "self");
+});
+
+test("PI_RECEIVER_ALLOW_SELF disarms ONLY the self compare: the access gate and a non-self delivery are untouched", () => {
+	// The switch exists for a forge with ONE identity: the human's own comment arrives as ours, so every
+	// rule they write is dead until the guard is off. What must NOT move with it is the money gate below.
+	const self = notePayload({ user: { id: SELF_ID, username: "pi-bot" } });
+	assert.equal(run(self, { allowSelf: true }).enqueue, true, "the same delivery now routes");
+	assert.equal(run(self, { allowSelf: false }).reason, "self", "and the default is the guard");
+	assert.equal(run(self, { allowSelf: true, authorized: false }).reason, "author-not-allowed", "the access gate is still a gate");
+	assert.equal(run(notePayload({ user: { id: 7, username: "human" } }), { allowSelf: true }).enqueue, true, "a human's comment is unaffected either way");
 });
 
 test("a missing user.id is refused before the self compare -- undefined must not fall through", () => {

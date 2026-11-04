@@ -68,7 +68,7 @@ async function deliver({ url, headers, payload }) {
 		selfId: SELF_ID,
 		cfg,
 		log: (o) => logs.push(o),
-		gitlab: { mode: "token", secret: GL_TOKEN, selfId: SELF_ID, resolveAuthority: async () => ({ authorized: true }) },
+		gitlab: { mode: "token", secret: GL_TOKEN, selfId: SELF_ID, resolveActor: async (_project, user) => ({ id: user?.id, authorized: true }) },
 		forgejo: { secret: FJ_SECRET, selfId: SELF_ID, resolveAuthority: async () => ({ authorized: true }) },
 		azure: { mode: "basic", secret: AZ_BASIC, selfId: AZ_SELF, resolveAuthority: async () => ({ authorized: true }) },
 	});

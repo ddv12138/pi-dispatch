@@ -75,6 +75,7 @@ export function loadPollerConfig(env = process.env, { readFile = readFileSync, f
 		valkeyUrl: base.valkeyUrl, // mirrors the receiver: producer and consumer share one queue
 		triggers: base.triggers, // the SAME grouped rules the webhook filter reads -- one gate, two feeds
 		github: base.github, // validated by the shared loadGitHubAuth, exactly as serve validates it
+		allowSelf: base.allowSelf, // the poller reads the SAME gate (filter()), so it obeys the same switch
 		repos,
 		intervalSeconds: Math.max(POLL_INTERVAL_FLOOR_SECONDS, positiveInt(env, "POLL_INTERVAL_SECONDS", POLL_INTERVAL_DEFAULT_SECONDS)),
 		// Passed THROUGH the receiver loader rather than re-parsed: one parse, one floor (issue #318).

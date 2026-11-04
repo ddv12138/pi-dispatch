@@ -48,14 +48,15 @@ export const PR_ACTIONS = new Set(["labeled", "opened", "synchronize", "reopened
  * whole file's flow vocabulary; `authorized` is the receiver's resolved verdict; `deliveryId` is the
  * `X-GitHub-Delivery` GUID, which Forgejo emits and keeps stable across its own retries.
  */
-export function filterForgejo(eventName, subset, triggers, knownFlows, selfId, authorized, deliveryId) {
+export function filterForgejo(eventName, subset, triggers, knownFlows, selfId, authorized, deliveryId, { allowSelf = false } = {}) {
 	// (0) Fail-closed on identity. MUST precede the self compare -- see header.
 	if (typeof subset?.sender?.id !== "number") {
 		return { enqueue: false, reason: "missing-sender-id" };
 	}
 
-	// (1) Bot-loop guard: unconditional, independent of the authority outcome below.
-	if (subset.sender.id === selfId) {
+	// (1) Bot-loop guard, independent of the authority outcome below. `allowSelf` is the operator's explicit
+	// switch (PI_RECEIVER_ALLOW_SELF), and only an exact `true` disarms it.
+	if (allowSelf !== true && subset.sender.id === selfId) {
 		return { enqueue: false, reason: "self" };
 	}
 
