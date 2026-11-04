@@ -254,6 +254,52 @@ export const STALE_TOKENS_BODY = "The console could not read its tokens file, so
 export const CONSOLE_SCRIPT = `"use strict";
 (function () {
   var page = document.body ? document.body.getAttribute("data-page") : null;
+  var isChinese = document.documentElement && document.documentElement.lang === "zh-CN";
+  // This closed catalogue covers text the browser creates after the server's first render. User data and machine values
+  // are deliberately passed through unchanged.
+  var ZH_TEXT = {
+    "The console refused the request": "控制台拒绝了此请求",
+    "Console not reachable": "无法连接到控制台",
+    "Nothing more is sent, and this page no longer holds the token. Paste it and press Sign in again once the console is back.": "不会再发送请求，此页面也不再保留令牌。控制台恢复后，请重新粘贴令牌并登录。",
+    "Nothing more is sent, and a link lasts 60 seconds, so this one has expired. Ask for a new one once the console is back.": "不会再发送请求。登录链接仅有效 60 秒，因此此链接已过期。控制台恢复后，请获取新链接。",
+    "Sign-out not confirmed": "退出状态未确认",
+    "The console did not confirm it, so this browser may still be signed in. Press Sign out again.": "控制台未确认退出，因此此浏览器可能仍处于登录状态。请再次点击退出登录。",
+    "The console could not read its tokens file, so it shows nothing newer; this is the page as it was last seen. An operator should run \`pi-dispatch doctor\`.": "控制台无法读取令牌文件，因此不会显示较新的数据；当前页面是最近一次成功读取的内容。操作员应运行 \`pi-dispatch doctor\`。",
+    "The console is unreachable. Check the address and try again.": "无法连接到控制台。请检查地址后重试。",
+    "Sign-in could not be confirmed. Submit again; the token was not saved.": "无法确认登录结果。请重新提交；令牌未保存。",
+    "Sign-out could not be confirmed. Your session may still be active.": "无法确认退出结果。你的会话可能仍然有效。",
+    "Following": "跟随最新内容", "Reading earlier entries": "正在查看较早内容",
+    "Live": "实时", "Not live": "未连接", "Reconnecting": "正在重连", "Signed out": "已退出",
+    "reconnecting": "正在重连", "live": "实时", "signed out": "已退出",
+    "Theme: follows the system": "主题：跟随系统", "Theme: light": "主题：浅色", "Theme: dark": "主题：深色",
+    "The check could not connect. Your description is preserved; try again.": "检查无法连接。你的描述已保留，请重试。",
+    "This private invitation is no longer shown. Ask for a new link on the host if needed.": "此私密邀请不再显示。如需使用，请在主机上重新生成链接。",
+    "Copy invitation": "复制邀请", "Preview revoking this viewer": "预览撤销此只读用户",
+    "Share unknown": "份额未知", "Preview replacing key": "预览替换密钥", "Preview adding key": "预览添加密钥",
+    "Preview the bundle resolver": "预览密钥包解析脚本", "Preview the profile": "预览配置", "about": "约",
+    "Copied": "已复制", "Not copied": "未复制", "Copy": "复制",
+    "Nothing was changed.": "未作任何更改。", "running ": "运行中 ",
+    "The run is over (": "运行已结束（", ").": "）。"
+  };
+  function uiText(text) {
+    if (!isChinese || typeof text !== "string") return text;
+    if (Object.prototype.hasOwnProperty.call(ZH_TEXT, text)) return ZH_TEXT[text];
+    if (text.indexOf("Previewing: ") === 0) return "正在预览：" + text.slice("Previewing: ".length);
+    if (text.indexOf("ended (") === 0) return "已结束（" + text.slice("ended (".length).replace(/\\)$/, "）");
+    if (text.indexOf("not live: reload after closing another console tab") === 0) return "未连接：请关闭其他控制台标签页后重新加载";
+    if (text.indexOf("The console refused the request (") === 0) return text.replace("The console refused the request (", "控制台拒绝了此请求（").replace(/\\)$/, "）");
+    return text;
+  }
+  var localeToggle = typeof document.querySelector === "function" ? document.querySelector("[data-locale-toggle]") : null;
+  if (localeToggle) {
+    var currentLocale = document.documentElement && document.documentElement.lang === "zh-CN" ? "zh-CN" : "en";
+    localeToggle.textContent = currentLocale === "zh-CN" ? "EN" : "中";
+    localeToggle.hidden = false;
+    localeToggle.addEventListener("click", function () {
+      document.cookie = "pd_locale=" + (currentLocale === "zh-CN" ? "en" : "zh-CN") + "; Path=/; Max-Age=31536000; SameSite=Lax";
+      if (location && typeof location.reload === "function") location.reload();
+    });
+  }
   var PAGE_PATHS = ${JSON.stringify(Object.values(PAGES).map((p) => p.path))};
   var CONFIG_FIX_ACTIONS = ${JSON.stringify(CONFIG_FIX_ACTIONS)};
   // The console's outcome words (words.mjs, issue #710), written in from the one table: a stream's end says "refused",
@@ -334,7 +380,7 @@ export const CONSOLE_SCRIPT = `"use strict";
       var mine = all[i].getAttribute("data-notice") === kind;
       all[i].hidden = !mine;
       var t = mine && typeof text === "string" ? all[i].querySelector("[data-notice-text]") : null;
-      if (t) t.textContent = text;
+      if (t) t.textContent = uiText(text);
     }
   }
   // The notice a refused sign-in shows: by its status, from the server's table for that route, else "other".
@@ -370,8 +416,8 @@ export const CONSOLE_SCRIPT = `"use strict";
       mine.setAttribute("data-notice", "gaveup");
       var t = mine.querySelector(".banner__t");
       var s = mine.querySelector(".banner__s");
-      if (t) t.textContent = SIGN_IN_GAVE_UP.title;
-      if (s) s.textContent = SIGN_IN_GAVE_UP[kind];
+      if (t) t.textContent = uiText(SIGN_IN_GAVE_UP.title);
+      if (s) s.textContent = uiText(SIGN_IN_GAVE_UP[kind]);
       box.appendChild(mine);
     }
     showOnly("gaveup");
@@ -541,8 +587,8 @@ export const CONSOLE_SCRIPT = `"use strict";
     var s = document.createElement("p");
     t.className = "banner__t";
     s.className = "banner__s";
-    t.textContent = SIGN_OUT_UNCONFIRMED.title;
-    s.textContent = SIGN_OUT_UNCONFIRMED.body;
+    t.textContent = uiText(SIGN_OUT_UNCONFIRMED.title);
+    s.textContent = uiText(SIGN_OUT_UNCONFIRMED.body);
     words.appendChild(t);
     words.appendChild(s);
     outNote.appendChild(words);
@@ -592,7 +638,7 @@ export const CONSOLE_SCRIPT = `"use strict";
       return THEME_ORDER.indexOf(t) > 0 ? t : "system";
     };
     var themeSay = function (t) {
-      themeBtn.setAttribute("aria-label", THEME_LABELS[t]);
+      themeBtn.setAttribute("aria-label", uiText(THEME_LABELS[t]));
       themeBtn.setAttribute("title", THEME_LABELS[t]);
     };
     themeSay(themeNow());
@@ -758,8 +804,8 @@ export const CONSOLE_SCRIPT = `"use strict";
       var code = box ? box.querySelector("code") : null;
       if (!code) return;
       var said = function (text) {
-        btn.textContent = text;
-        setTimeout(function () { btn.textContent = label; }, 2000);
+        btn.textContent = uiText(text);
+        setTimeout(function () { btn.textContent = uiText(label); }, 2000);
       };
       navigator.clipboard.writeText(code.textContent).then(function () { said("Copied"); }, function () { said("Not copied"); });
     });
@@ -1162,7 +1208,7 @@ ${FIT_JS}
   function forgetSetupInvitation() {
     if (setupInviteTimer !== null && typeof clearTimeout === "function") clearTimeout(setupInviteTimer);
     setupInviteTimer = null;
-    if (setupInviteBox) setupInviteBox.textContent = "This private invitation is no longer shown. Ask for a new link on the host if needed.";
+    if (setupInviteBox) setupInviteBox.textContent = uiText("This private invitation is no longer shown. Ask for a new link on the host if needed.");
     setupInviteBox = null;
   }
   function cancelSetupTicket() {
@@ -1189,14 +1235,14 @@ ${FIT_JS}
     var command = document.createElement("div"); command.className = "cmd";
     var code = document.createElement("code"); code.textContent = href;
     var copy = document.createElement("button"); copy.setAttribute("type", "button"); copy.hidden = true;
-    copy.setAttribute("data-copy", ""); copy.className = "btn btn--sm"; copy.textContent = "Copy invitation";
+    copy.setAttribute("data-copy", ""); copy.className = "btn btn--sm"; copy.textContent = uiText("Copy invitation");
     command.appendChild(code); command.appendChild(copy); box.appendChild(command);
     if (viewer && typeof viewer.name === "string" && /^[a-z0-9][a-z0-9._-]{0,31}$/.test(viewer.name) && typeof viewer.identity === "string" && /^[0-9a-f]{32}$/.test(viewer.identity)) {
       var revoke = document.createElement("form"); revoke.setAttribute("data-action", "setup-viewer-revoke"); revoke.setAttribute("data-setup-revoke", ""); revoke.className = "su-act";
       for (var field of ["name", "identity"]) {
         var hidden = document.createElement("input"); hidden.setAttribute("type", "hidden"); hidden.setAttribute("name", field); hidden.setAttribute("value", viewer[field]); revoke.appendChild(hidden);
       }
-      var undo = document.createElement("button"); undo.setAttribute("type", "submit"); undo.className = "btn btn--ghost btn--sm"; undo.textContent = "Preview revoking this viewer"; revoke.appendChild(undo); box.appendChild(revoke);
+      var undo = document.createElement("button"); undo.setAttribute("type", "submit"); undo.className = "btn btn--ghost btn--sm"; undo.textContent = uiText("Preview revoking this viewer"); revoke.appendChild(undo); box.appendChild(revoke);
     }
     message.after(box);
     setupInviteBox = box;
@@ -1700,7 +1746,7 @@ ${FIT_JS}
     var outputs = form.querySelectorAll("[data-weight-share]");
     for (var i = 0; i < outputs.length; i++) {
       var weight = weights[outputs[i].getAttribute("data-weight-share")];
-      outputs[i].textContent = valid && weight !== undefined ? "about " + (sum > 0 ? Math.round(weight / sum * 100) : 0) + "%" : "Share unknown";
+      outputs[i].textContent = valid && weight !== undefined ? uiText("about") + " " + (sum > 0 ? Math.round(weight / sum * 100) : 0) + "%" : uiText("Share unknown");
     }
   });
   function enableAnswererControls(root) {
@@ -1730,7 +1776,7 @@ ${FIT_JS}
     var replace = mode.value === "replace";
     form.setAttribute("data-action", replace ? "setup-provider-key-replace" : "setup-provider-key");
     var submit = form.querySelector("[data-provider-key-submit]");
-    if (submit) submit.textContent = replace ? "Preview replacing key" : "Preview adding key";
+    if (submit) submit.textContent = uiText(replace ? "Preview replacing key" : "Preview adding key");
     var contexts = form.querySelectorAll("[data-provider-context]");
     for (var pc = 0; pc < contexts.length; pc++) contexts[pc].hidden = contexts[pc].getAttribute("data-provider-context") !== provider.value;
   }
@@ -1769,9 +1815,9 @@ ${FIT_JS}
     var box = form.querySelector("[data-resolver-format]");
     if (box) { box.hidden = !bundle; var format = box.querySelector('[name="format"]'); if (format) format.disabled = !bundle; }
     var button = form.querySelector('[type="submit"]');
-    if (button) button.textContent = bundle ? "Preview the bundle resolver" : "Preview the profile";
+    if (button) button.textContent = uiText(bundle ? "Preview the bundle resolver" : "Preview the profile");
     var hint = form.querySelector("[data-resolver-frequency]");
-    if (hint) hint.textContent = bundle ? "The worker runs this script as the account it runs as, once per job start of each bound project, and hands the job every variable it prints. Only declare a resolver you trust." : "The worker runs this script as the account it runs as, once per reference before the container starts. Only declare a resolver you trust.";
+    if (hint) hint.textContent = uiText(bundle ? "The worker runs this script as the account it runs as, once per job start of each bound project, and hands the job every variable it prints. Only declare a resolver you trust." : "The worker runs this script as the account it runs as, once per reference before the container starts. Only declare a resolver you trust.");
   }
   var resolverForms = typeof document.querySelectorAll === "function" ? document.querySelectorAll('form[data-structured="resolver"]') : [];
   for (var ri = 0; ri < resolverForms.length; ri++) resolverFields(resolverForms[ri]);
@@ -1853,7 +1899,7 @@ ${FIT_JS}
       var control = slots[i].parentElement.querySelector("input, select, textarea");
       var active = control && !control.disabled && !(typeof control.closest === "function" && control.closest("fieldset[disabled]"));
       var applies = active && targets.indexOf(key.toLowerCase()) >= 0;
-      slots[i].textContent = applies ? message + " Nothing was changed." : "";
+      slots[i].textContent = applies ? message + " " + uiText("Nothing was changed.") : "";
       slots[i].hidden = !applies;
       if (slots[i].parentElement.classList) {
         if (applies) slots[i].parentElement.classList.add("field--err");
@@ -1951,7 +1997,7 @@ ${FIT_JS}
     var checkBusy = false;
     function checkControl(name) { return checkForm.querySelector('[name="' + name + '"]'); }
     function checkValue(name) { var el = checkControl(name); return el ? el.value : ""; }
-    function checkStatus(text) { checkResult.textContent = text; }
+    function checkStatus(text) { checkResult.textContent = uiText(text); }
     function checkFinish() {
       checkBusy = false;
       checkForm.removeAttribute("aria-busy");
@@ -2049,7 +2095,7 @@ ${FIT_JS}
       }).catch(function () {
         if (mine !== checkSeq) return;
         checkFinish();
-        checkStatus("The check could not connect. Your description is preserved; try again.");
+        checkStatus(uiText("The check could not connect. Your description is preserved; try again."));
       });
     });
     if (checkFields) checkFields.disabled = false;
@@ -2068,9 +2114,9 @@ ${FIT_JS}
     var st = LIVE[state];
     if (!status || !st) return;
     status.className = st.cls;
-    if (word) word.textContent = st.word;
+    if (word) word.textContent = uiText(st.word);
     if (typeof status.setAttribute === "function") {
-      if (st.title) status.setAttribute("title", st.title);
+      if (st.title) status.setAttribute("title", uiText(st.title));
       else status.removeAttribute("title");
     }
   }
@@ -2322,7 +2368,7 @@ ${FIT_JS}
         if (at !== null || !staleShown) since(at);
         staleShown = true;
         if (mainEl && mainEl.classList) mainEl.classList.add("stale");
-        if (staleBody) sayWithCode(staleBody, tokens ? STALE_TOKENS_BODY : staleData);
+        if (staleBody) sayWithCode(staleBody, tokens ? uiText(STALE_TOKENS_BODY) : uiText(staleData));
         note("stale");
       });
     });
@@ -2391,7 +2437,7 @@ ${FIT_JS}
     var follows = transcriptFollowing();
     var label = document.querySelector("[data-transcript-following]");
     var newest = document.querySelector("[data-transcript-newest]");
-    if (label) label.textContent = follows ? "Following" : "Reading earlier entries";
+    if (label) label.textContent = uiText(follows ? "Following" : "Reading earlier entries");
     if (newest) newest.hidden = follows;
   }
   function filterTranscript() {
@@ -2427,7 +2473,7 @@ ${FIT_JS}
       var span = document.createElement("span");
       span.setAttribute("data-call-elapsed", "");
       span.className = "muted mono";
-      span.textContent = "running " + Math.max(0, Math.floor((Date.now() - ts) / 1000)) + "s";
+      span.textContent = uiText("running ") + Math.max(0, Math.floor((Date.now() - ts) / 1000)) + "s";
       var timer = entry.querySelector("[data-tool-timer]") || entry.querySelector("header");
       if (timer) timer.appendChild(span);
       });
@@ -2438,7 +2484,7 @@ ${FIT_JS}
       tstate = { text: text, cls: cls };
       var status = document.querySelector("[data-transcript-status]");
       if (!status) return;
-      status.textContent = text;
+      status.textContent = uiText(text);
       status.setAttribute("data-stream-state", cls);
     };
     es.addEventListener("error", function () { if (!tdone) tmark("reconnecting", "off"); });
@@ -2473,7 +2519,7 @@ ${FIT_JS}
       } catch (e) { /* keep unknown */ }
       tmark("ended (" + outcome + ")", "ended");
       var ends = tbox.querySelectorAll("[data-transcript-end]");
-      for (var i = 0; i < ends.length; i++) ends[i].textContent = "The run is over (" + outcome + ").";
+      for (var i = 0; i < ends.length; i++) ends[i].textContent = uiText("The run is over (") + outcome + uiText(").");
       fillRunSlots();
       transcriptTimers();
       // The page stream stays open: its panels still change after the transcript ends.

@@ -8,9 +8,11 @@ import {
 } from "../../read-model.mjs";
 import { VENUE_LABEL } from "../../words.mjs";
 import { html } from "../html.mjs";
+import { uiText } from "../locale.mjs";
 import * as ui from "../kit.mjs";
 
 const model = (view) => venuesView(view.data?.snapshot?.hostBudgets ?? []);
+const t = (view, message) => uiText(message, view.locale);
 const selected = (view) =>
   model(view).venues.find((v) => v.name === view.query?.name);
 const holderOf = (venue) =>
@@ -27,7 +29,7 @@ const panel = (title, fn) => (view) => {
   const v = selected(view);
   return v
     ? ui.card({
-        title,
+    title: t(view, title),
         sub:
           {
             "What it declares": "this build’s table, 14 properties",
@@ -35,7 +37,12 @@ const panel = (title, fn) => (view) => {
             "OpenShell on each host": "read once, when the worker started",
             "Compare venues":
               "the same table for all four; this venue is highlighted",
-          }[title] ?? null,
+        }[title] ? t(view, {
+          "What it declares": "this build’s table, 14 properties",
+          "What it serves": "per feature",
+          "OpenShell on each host": "read once, when the worker started",
+          "Compare venues": "the same table for all four; this venue is highlighted",
+        }[title]) : null,
         flush: ["What it declares", "Compare venues"].includes(title),
         body: fn(v, model(view), view),
       })

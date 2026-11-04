@@ -337,3 +337,24 @@ test("Changing resolver kind or fields invalidates an open preview and ignores a
   assert.ok(!slot.textContent.includes("Fresh bundle"));
   assert.equal(w.fetch.calls.filter((call) => call.url.endsWith("/confirm")).length, 0);
 });
+
+test("the Secrets screen localizes fixed card and resolver-form labels without changing resolver values", () => {
+  const v = secretsView(fixture());
+  const ctx = { ...ctxOf(v), locale: "zh" };
+  const profiles = String(secretsProfiles(ctx));
+  const add = String(secretsAdd(ctx));
+  const help = String(secretsHelp(ctx));
+  assert.ok(profiles.includes("密钥配置"));
+  assert.ok(add.includes("声明解析器"));
+  assert.ok(help.includes("运行获得的内容"));
+  assert.ok(add.includes('value="profile"'), "resolver kind remains a machine value");
+  assert.ok(add.includes("PI_SECRET_RESOLVER_ROOTS"), "the environment variable name remains intact");
+});
+
+test("the Secrets screen localizes refusal framing while preserving profile identifiers", () => {
+  const collision = secretsView(fixture({ PI_SECRET_PROFILES: "default:/opt/default,prod:/opt/prod" }));
+  const markup = String(secretsProblems({ ...ctxOf(collision), locale: "zh" }));
+  assert.match(markup, /已拒绝：prod 被重复声明/);
+  assert.match(markup, /PI_SECRET_PROFILES/);
+  assert.match(markup, /设置覆盖项/);
+});

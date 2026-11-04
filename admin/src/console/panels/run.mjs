@@ -15,7 +15,7 @@ import { forkArchiveFact } from "@edgehero/pi-dispatch/fork-job";
 import { modelIdProblem } from "@edgehero/pi-dispatch/model-ref";
 import { recordedProgress } from "@edgehero/pi-dispatch/run-history";
 import { UNATTRIBUTED_BACKEND, servesOf, SERVES, declarationOf, BACKENDS } from "@edgehero/pi-dispatch/backends";
-import { BUNDLE_SKIPPED_TEXT, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, VENUE_MAY_NOT_STREAM, liveAbsentCause, progressAbsentText, recordSkips, sandboxShellRefusal, bundleCountsText, bundleReceivedText, checkpointsText, isProgressSnapshot, progressStaleFor, recordBundle, recordRecovery, recoveredText, openshellCountsText, openshellHostsText, recordOpenshell, recordSecretsProfile, RUN_RECORD_UNREAD, runPlaces, runPlacesText, SERVES_TEXT, CUSTODY_TEXT, venueCustody, transcriptAbsentText, forgeLinkOf } from "../../read-model.mjs";
+import { BUNDLE_SKIPPED_TEXT, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, VENUE_MAY_NOT_STREAM, liveAbsentCause, progressAbsentText, recordSkips, sandboxShellRefusal, bundleCountsText, bundleReceivedText, checkpointsText, isProgressSnapshot, progressStaleFor, recordBundle, recordRecovery, recoveredText, openshellCountsText, openshellHostsText, recordOpenshell, recordSecretsProfile, RUN_RECORD_UNREAD, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, runPlaces, runPlacesText, SERVES_TEXT, CUSTODY_TEXT, venueCustody, transcriptAbsentText, forgeLinkOf } from "../../read-model.mjs";
 import { CHAIN_MAX_PER_JOB_DEFAULT } from "@edgehero/pi-dispatch/config";
 import { RECOVERY_CAP, RECOVERY_TTL_MS, RECOVERY_MAX_WAIT_MS } from "@edgehero/pi-dispatch/recovery-queue";
 import { recordedEarlier } from "@edgehero/pi-dispatch/run-history";
@@ -34,13 +34,16 @@ import { isForgeKind } from "@edgehero/pi-dispatch/forges";
 import { isSchedulerJobId } from "@edgehero/pi-dispatch/bullmq-internals";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { STEER_MAX_MESSAGES, STEER_TOTAL_MAX_BYTES } from "@edgehero/pi-dispatch/steer-inbox";
 import { SEC, MIN, cell, ageText, timeHtml, msOf, usdText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capMicrosOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
 
-const titled = (title, body) => ui.card({ title, body });
-const facts = (pairs) => ui.facts(pairs.filter(([, value]) => value !== null && value !== undefined));
+const titled = (title, body, locale = "en") => ui.card({ title: uiText(title, locale), body });
+const t = (message, view) => uiText(message, view?.locale);
+const facts = (pairs, locale = "en") => ui.facts(pairs.filter(([, value]) => value !== null && value !== undefined).map(([label, value]) => [typeof label === "string" ? uiText(label, locale) : label, value]));
 /** Facts whose values are sentences, which three narrow columns would split mid-word. */
-const factsOne = (pairs) => ui.facts(pairs.filter(([, value]) => value !== null && value !== undefined), { cols: 1 });
+const factsOne = (pairs, locale = "en") => ui.facts(pairs.filter(([, value]) => value !== null && value !== undefined).map(([label, value]) => [typeof label === "string" ? uiText(label, locale) : label, value]), { cols: 1 });
+const localizedTable = (caption, heads, rows, empty, locale = "en") => table(uiText(caption, locale), heads.map((head) => typeof head === "string" ? uiText(head, locale) : head), rows, uiText(empty, locale));
 const recordOf = (view) => view.data?.run?.record ?? null;
 /**
  * The run card's label for the record's `kind`: "Forge" where it names a forge (its value then says which), "Kind" for
@@ -48,7 +51,7 @@ const recordOf = (view) => view.data?.run?.record ?? null;
  */
 const kindLabel = (kind) => (isForgeKind(kind) ? "Forge" : "Kind");
 const hiddenRecord = (view) => !recordOf(view) || refusedBeforeStart(recordOf(view));
-const command = (jobId, host = null) => ui.cmd(["pi-dispatch", "chat", jobId], { host: host ? `Run it on ${host}, or a host that holds the session store (PI_SESSIONS_DIR).` : "Run it on a host that holds the session store (PI_SESSIONS_DIR)." });
+const command = (jobId, host = null, locale = "en") => ui.cmd(["pi-dispatch", "chat", jobId], { host: locale === "zh" ? host ? `请在主机 ${host} 上运行，或在可访问会话存储（PI_SESSIONS_DIR）的主机上运行。` : "请在可访问会话存储（PI_SESSIONS_DIR）的主机上运行。" : host ? `Run it on ${host}, or a host that holds the session store (PI_SESSIONS_DIR).` : "Run it on a host that holds the session store (PI_SESSIONS_DIR)." });
 
 // ---- run detail ------------------------------------------------------------------------------------------------------
 
@@ -82,7 +85,7 @@ function withRun(title, render) {
     const got = view.data?.run;
     if (!got?.record) return html``;
     if (refusedBeforeStart(got.record)) return html``;
-    return titled(title, render(got.record, view, got.source));
+    return titled(title, render(got.record, view, got.source), view.locale);
   };
 }
 
@@ -133,7 +136,11 @@ function answerRefusedHere(view) {
 }
 
 /** The banner for a run whose record could not be read (`readRunById`'s `unreadable`, what could not be read). */
-export function runUnreadText(why) {
+export function runUnreadText(why, locale = "en") {
+  if (locale === "zh") {
+    const translated = why === RUN_FILE_UNREADABLE ? "此主机上的运行记录无法读取" : why === RUN_MIRROR_UNREAD ? "主机群运行镜像无法读取" : why === RUN_RECORD_UNREAD ? "运行记录无法读取" : uiText(capitalised(String(why)), locale);
+    return `${translated}，因此此页面无法显示运行情况。请重新加载后重试。`;
+  }
   return `${capitalised(String(why))}, so this page cannot say what the run did. Reload to try again.`;
 }
 
@@ -142,7 +149,13 @@ export function runUnreadText(why) {
  * not be read (`runPlaces`' `unread`, in `RUN_PLACES`' words): the page names what it could not read rather than say
  * there is no run.
  */
-export function runUntoldText(unread) {
+export function runUntoldText(unread, locale = "en") {
+  if (locale === "zh") {
+    const place = { file: "此主机的运行记录", mirror: "主机群运行镜像", record: "运行记录", queues: "所有队列", transcript: "实时对话记录", progress: "运行进度" };
+    const list = Array.isArray(unread) ? unread.map((item) => place[item] ?? item) : [];
+    const phrase = list.length <= 1 ? (list[0] ?? "") : `${list.slice(0, -1).join("、")}和${list.at(-1)}`;
+    return `此主机历史记录或主机群运行镜像中没有此运行的记录，但此页面无法读取${phrase}，因此无法确认运行是否存在。请重新加载后重试。`;
+  }
   return `No record of this run is in this host's history or the fleet's run mirror, but this page could not read ${runPlacesText(unread)}, so it cannot say whether the run exists. Reload to try again.`;
 }
 
@@ -160,21 +173,21 @@ export function runUntoldText(unread) {
  */
 function absentOutcome(view) {
   const got = view.data?.run;
-  if (got?.invalid) return { cls: "warn", text: "That is not a run id." };
+  if (got?.invalid) return { cls: "warn", text: t("That is not a run id.", view) };
   if (runningWithoutRecord(view)) {
     // A snapshot the worker stopped rewriting (its heartbeat is 30 s) may be a run that will never write a record.
     const stale = isProgressSnapshot(view.data?.progress) ? progressStaleFor(view.data.progress, view.now) : null;
-    return { cls: "note", text: `This run has no record yet: a run's record is written when it ends.${stale !== null ? ` Its progress has had ${staleText(stale)}.` : ""}` };
+    return { cls: "note", text: view.locale === "zh" ? `此运行尚无记录：记录会在运行结束时写入。${stale !== null ? `进度已 ${t(staleText(stale), view)}。` : ""}` : `This run has no record yet: a run's record is written when it ends.${stale !== null ? ` Its progress has had ${staleText(stale)}.` : ""}` };
   }
   const state = view.data?.chat?.jobState ?? null;
-  if (typeof state === "string" && QUEUED_STATES.includes(state)) return { cls: "note", text: "This job is queued and has not started yet: a run's record is written when it ends, and its live transcript attaches on this page once it runs." };
+  if (typeof state === "string" && QUEUED_STATES.includes(state)) return { cls: "note", text: t("This job is queued and has not started yet: a run's record is written when it ends, and its live transcript attaches on this page once it runs.", view) };
   // A record neither side said it does not hold (`missing`) is one this page could not read, whatever it was handed.
-  if (got?.missing !== true) return { cls: "warn", text: runUnreadText(typeof got?.unreadable === "string" ? got.unreadable : RUN_RECORD_UNREAD) };
-  if (state === "completed" || state === "failed") return { cls: "warn", text: "This job has ended, but its record is not in this host's history or the fleet's run mirror (another host's run, with the mirror off?)." };
+  if (got?.missing !== true) return { cls: "warn", text: runUnreadText(typeof got?.unreadable === "string" ? got.unreadable : RUN_RECORD_UNREAD, view.locale) };
+  if (state === "completed" || state === "failed") return { cls: "warn", text: t("This job has ended, but its record is not in this host's history or the fleet's run mirror (another host's run, with the mirror off?).", view) };
   const places = runPlaces({ run: got, lookup: view.data?.chat, transcript: view.data?.transcript, progress: view.data?.progress });
-  if (!places.shown && places.unread.length > 0) return { cls: "warn", text: runUntoldText(places.unread) };
-  if (typeof state === "string") return { cls: "warn", text: `The queue holds this job in a state this console does not name yet (${state}); its run record is not readable here.` };
-  return { cls: "warn", text: "No run with that id is in this host's history or the fleet's run mirror." };
+  if (!places.shown && places.unread.length > 0) return { cls: "warn", text: runUntoldText(places.unread, view.locale) };
+  if (typeof state === "string") return { cls: "warn", text: view.locale === "zh" ? `队列中此作业的状态尚未被此控制台识别（${state}）；此处无法读取运行记录。` : `The queue holds this job in a state this console does not name yet (${state}); its run record is not readable here.` };
+  return { cls: "warn", text: t("No run with that id is in this host's history or the fleet's run mirror.", view) };
 }
 
 /**
@@ -193,23 +206,23 @@ export function runOutcome(view) {
     const { text } = absentOutcome(view);
     return ui.banner({ status: "idle", title: text });
   }
-  if (fromNewerRelease(r)) return newerOutcome(r);
+  if (fromNewerRelease(r)) return newerOutcome(r, view.locale);
   const token = recordReason(r);
   const w = outcomeWord(r.outcome, token);
   const recovering = token === "recovery-enqueued" && [view.data?.chat?.activeJobId, view.data?.chat?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
-  const word = recovering ? "Failed, continuing" : refusedBeforeStart(r) ? w.word === "cancelled" ? "Cancelled before it started" : "Refused before it started" : capitalised(w.known ? w.word : bannerCut(r.outcome));
+  const word = view.locale === "zh" ? recovering ? "失败，正在继续" : refusedBeforeStart(r) ? w.word === "cancelled" ? "启动前已取消" : "启动前已拒绝" : t(capitalised(w.known ? w.word : bannerCut(r.outcome)), view) : recovering ? "Failed, continuing" : refusedBeforeStart(r) ? w.word === "cancelled" ? "Cancelled before it started" : "Refused before it started" : capitalised(w.known ? w.word : bannerCut(r.outcome));
   const started = msOf(r.startedAt), ended = msOf(r.endedAt);
-  const where = r.host ? ` on ${r.host}${String(r.backend).startsWith("openshell") ? ", in an OpenShell sandbox" : ""}` : "";
-  const duration = Number.isFinite(started) && Number.isFinite(ended) ? `: finished in ${ageText(ended - started)}${where}` : where;
+  const where = view.locale === "zh" ? r.host ? `，主机：${r.host}${String(r.backend).startsWith("openshell") ? "，运行于 OpenShell 沙盒" : ""}` : "" : r.host ? ` on ${r.host}${String(r.backend).startsWith("openshell") ? ", in an OpenShell sandbox" : ""}` : "";
+  const duration = Number.isFinite(started) && Number.isFinite(ended) ? view.locale === "zh" ? `，耗时 ${ageText(ended - started)}${where}` : `: finished in ${ageText(ended - started)}${where}` : where;
   const said = token ? explainReason(token, { why: r.why }) : null;
-  const reason = said?.known ? ui.withCode(said.sentence) : token ? html`${bannerCut(token)}, ${NO_EXPLANATION}.` : html`${NO_REASON_TEXT[w.word] ?? NO_REASON_TEXT.failed}${w.word === "failed" ? view.role === "operator" ? " The Fleet page's failed list may say more." : " Failure reasons are shown to operators only." : ""}`;
-  const next = said?.known ? html`<p><strong>What to do:</strong> ${ui.withCode(token === "awaiting-input" && answerRefusedHere(view) ? AWAITING_INPUT_ELSEWHERE : said.next)}</p>${docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: "Read more in the reasons docs" }) : null}` : null;
+  const reason = said?.known ? ui.withCode(t(said.sentence, view)) : token ? html`${bannerCut(token)}, ${t(NO_EXPLANATION, view)}.` : html`${t(NO_REASON_TEXT[w.word] ?? NO_REASON_TEXT.failed, view)}${w.word === "failed" ? t(view.role === "operator" ? " The Fleet page's failed list may say more." : " Failure reasons are shown to operators only.", view) : ""}`;
+  const next = said?.known ? html`<p><strong>${t("What to do:", view)}</strong> ${ui.withCode(t(token === "awaiting-input" && answerRefusedHere(view) ? AWAITING_INPUT_ELSEWHERE : said.next, view))}</p>${docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read more in the reasons docs", view) }) : null}` : null;
   const href = forgeLinkOf(r, view.env);
   const recoveryId = view.data?.chat?.activeJobId ?? view.data?.chat?.queuedJobId;
-  const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: "Open recovery run", kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: "Open sibling replica", kind: "sm", icon: "runs" }))}` : null;
-  const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: "Fix configuration", kind: "sm", icon: "config" }) : null;
-  const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: "Open Fleet", kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: "Open target on the forge", btn: "primary" }) : null}${r.outcome === "completed" && !["awaiting-input", "awaiting-approval"].includes(token) ? ui.btn({ href: "#p-workspace", label: "Try it in its workspace", kind: "sm", icon: "terminal" }) : null}${rerunLine(r, view)}${fixLink}`;
-  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>It queued ${view.data?.children?.length ?? 0} runs from /outbox${r.chainRefused > 0 ? `, and ${r.chainRefused} more requests were refused: a job may queue at most ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>Nothing was spent.</p>` : href ? html`<p>Merges are never automatic: a person merges the pull request on the forge.</p>` : null}`, actions });
+  const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
+  const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: t("Fix configuration", view), kind: "sm", icon: "config" }) : null;
+  const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${r.outcome === "completed" && !["awaiting-input", "awaiting-approval"].includes(token) ? ui.btn({ href: "#p-workspace", label: t("Try it in its workspace", view), kind: "sm", icon: "terminal" }) : null}${rerunLine(r, view)}${fixLink}`;
+  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `，${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
 }
 
 /**
@@ -217,16 +230,16 @@ export function runOutcome(view) {
  * every release, and the one sentence that says why the page shows nothing else. No reason, no next step and no action:
  * each reads a field past the stable core, which this record reaches the page without.
  */
-function newerOutcome(r) {
+function newerOutcome(r, locale = "en") {
   const w = outcomeWord(r.outcome, null);
   const started = msOf(r.startedAt), ended = msOf(r.endedAt);
-  const where = r.host ? ` on ${r.host}` : "";
-  const duration = Number.isFinite(started) && Number.isFinite(ended) ? `: finished in ${ageText(ended - started)}${where}` : where;
-  return ui.banner({ block: true, status: w.status, title: `${capitalised(w.known ? w.word : bannerCut(r.outcome))}${duration}`, body: html`<p>${NEWER_RECORD_SENTENCE}.</p>` });
+  const where = r.host ? locale === "zh" ? `，主机：${r.host}` : ` on ${r.host}` : "";
+  const duration = Number.isFinite(started) && Number.isFinite(ended) ? locale === "zh" ? `，耗时 ${ageText(ended - started)}${where}` : `: finished in ${ageText(ended - started)}${where}` : where;
+  return ui.banner({ block: true, status: w.status, title: `${uiText(capitalised(w.known ? w.word : bannerCut(r.outcome)), locale)}${duration}`, body: html`<p>${uiText(NEWER_RECORD_SENTENCE, locale)}.</p>` });
 }
 
 /** The "Run" card for a record a newer pi-dispatch wrote (issue #761): its stable core alone, each field by name. */
-function newerSummary(r, source) {
+function newerSummary(r, source, locale = "en") {
   const started = msOf(r.startedAt), ended = msOf(r.endedAt);
   return titled("Run", facts([
     ["Job", html`<span class="mono">${cell(r.jobId)}</span>`],
@@ -238,8 +251,8 @@ function newerSummary(r, source) {
     ["Started", timeHtml(started)],
     ["Ended", timeHtml(ended)],
     ["Took", Number.isFinite(started) && Number.isFinite(ended) ? ageText(ended - started) : "-"],
-    ["Read from", source === "mirror" ? "the fleet's run mirror" : "this host's run history"],
-  ]));
+    ["Read from", uiText(source === "mirror" ? "the fleet's run mirror" : "this host's run history", locale)],
+  ], locale), locale);
 }
 
 // ---- run progress (issue #644) ---------------------------------------------------------------------------------------
@@ -251,7 +264,7 @@ function stepDuration(ms) {
 }
 
 /** The run record's `progress`, rebuilt by the worker's own rule (`recordedProgress`): integers and closed keys only. */
-function recordProgressBody(r) {
+function recordProgressBody(r, locale = "en") {
   const p = recordedProgress(r?.progress);
   if (p === undefined) return null;
   const z = (v) => (Number.isSafeInteger(v) ? count(v) : "0");
@@ -267,7 +280,7 @@ function recordProgressBody(r) {
     ["Longest interrupted step", Number.isSafeInteger(p.longestInterruptedMs) ? stepDuration(p.longestInterruptedMs) : null],
     ["Phases declared", z(p.phasesDeclared)],
     ["Last phase", Number.isSafeInteger(p.lastPhaseIndex) ? `${p.lastPhaseIndex + 1} of ${count(p.phasesDeclared)}` : null],
-  ])}${tools.length > 0 ? table("Steps by tool", ["Tool", { num: "Steps" }], tools.map(([name, n]) => html`<tr><td class="mono">${name}</td><td class="num">${count(n)}</td></tr>`), "") : null}`;
+  ], locale)}${tools.length > 0 ? localizedTable("Steps by tool", ["Tool", { num: "Steps" }], tools.map(([name, n]) => html`<tr><td class="mono">${name}</td><td class="num">${count(n)}</td></tr>`), "", locale) : null}`;
 }
 
 /**
@@ -276,11 +289,11 @@ function recordProgressBody(r) {
  * the template (the worker already escaped the control class; this is the second belt). A `phase.index` past the list
  * (the worker's size cut) shows no name rather than a neighbour's.
  */
-function phaseBody(g, operator) {
+function phaseBody(g, operator, locale = "en") {
   const f = g.phase;
-  if (!f && g.phases.length === 0) return ui.noProgress("The worker reports no phase progress.");
+  if (!f && g.phases.length === 0) return ui.noProgress(uiText("The worker reports no phase progress.", locale));
   const total = f ? Math.max(g.phases.length, f.index + 1) : g.phases.length;
-  return html`${f ? html`<p class="run-phase">Phase ${f.index + 1} of ${count(total)}${f.done !== null ? `: ${count(f.done)}${f.total !== null ? ` of ${count(f.total)}` : ""} done` : ""}</p>` : null}${ui.phases({ names: Array.from({ length: total }, (_, i) => operator ? g.phases[i] ?? `Phase ${i + 1}` : `Phase ${i + 1}`), index: f?.index ?? 0, done: f?.done, total: f?.total })}${operator ? g.note !== null ? html`<p class="run-note">${ui.icon("runs", { size: "sm" })}<span>Note from the run: ${g.note}</span></p>` : null : html`<p class="card__sub">Phase names and the run's note are shown to operators only.</p>`}`;
+  return html`${f ? html`<p class="run-phase">${uiText("Phase", locale)} ${f.index + 1} ${uiText("of", locale)} ${count(total)}${f.done !== null ? `: ${count(f.done)}${f.total !== null ? ` ${uiText("of", locale)} ${count(f.total)}` : ""} ${uiText("done", locale)}` : ""}</p>` : null}${ui.phases({ names: Array.from({ length: total }, (_, i) => operator ? g.phases[i] ?? `${uiText("Phase", locale)} ${i + 1}` : `${uiText("Phase", locale)} ${i + 1}`), index: f?.index ?? 0, done: f?.done, total: f?.total })}${operator ? g.note !== null ? html`<p class="run-note">${ui.icon("runs", { size: "sm" })}<span>${uiText("Note from the run:", locale)} ${g.note}</span></p>` : null : html`<p class="card__sub">${uiText("Phase names and the run's note are shown to operators only.", locale)}</p>`}`;
 }
 
 /**
@@ -292,14 +305,14 @@ function liveProgressBody(g, view) {
   const now = view.now;
   const operator = view.role === "operator";
   const stale = progressStaleFor(g, now);
-  const open = (r) => (stale === null ? `running ${Number.isFinite(now) && now >= r.since ? ageText(now - r.since) : "-"}` : `open ${g.updatedAt >= r.since ? ageText(g.updatedAt - r.since) : "-"} at the last update`);
-  const running = g.running.length === 0 ? html`<p class="note">${g.ended ? `The run has ended (${typeof g.outcome === "string" ? (outcomeWord(recordOf(view)?.outcome ?? g.outcome, recordReason(recordOf(view))).word ?? recordOf(view)?.outcome ?? g.outcome) : "unknown"}).` : "No step is running."}</p>` : html`<ul class="plain">${g.running.map((r) => html`<li><span class="mono">${r.tool}</span> ${open(r)}</li>`)}</ul>`;
+  const open = (r) => (stale === null ? `${uiText("running", view.locale)} ${Number.isFinite(now) && now >= r.since ? ageText(now - r.since) : "-"}` : `${uiText("open", view.locale)} ${g.updatedAt >= r.since ? ageText(g.updatedAt - r.since) : "-"} ${uiText("at the last update", view.locale)}`);
+  const running = g.running.length === 0 ? html`<p class="note">${g.ended ? `${uiText("The run has ended", view.locale)} (${typeof g.outcome === "string" ? uiText(outcomeWord(recordOf(view)?.outcome ?? g.outcome, recordReason(recordOf(view))).word ?? recordOf(view)?.outcome ?? g.outcome, view.locale) : uiText("unknown", view.locale)}).` : uiText("No step is running.", view.locale)}</p>` : html`<ul class="plain">${g.running.map((r) => html`<li><span class="mono">${r.tool}</span> ${open(r)}</li>`)}</ul>`;
   const recent = [...g.recent].reverse().slice(0, 3);
   const max = view.data?.activeRun?.maxTurns;
   const stepRow = (r) => ui.rowPill({
     icon: r.status === "ok" ? "done" : "failed",
     status: r.status === "ok" ? "ok" : "failed",
-    items: [html`<span class="code">${r.tool}</span>`, html`<span class="run-st tinted">${r.status}</span>`],
+    items: [html`<span class="code">${r.tool}</span>`, html`<span class="run-st tinted">${uiText(r.status, view.locale)}</span>`],
     end: html`<span>${stepDuration(r.durationMs)}</span><span class="run-at">${timeHtml(r.at)}</span>`,
   });
   // The rare rows stay facts: on most runs none of them draws, and the run's own numbers lead (the RunLive card).
@@ -309,7 +322,7 @@ function liveProgressBody(g, view) {
     // The resume prior: what the session's earlier runs did before this run resumed it, not this job's retries.
     ["Earlier runs of this session", g.prior ? `${count(g.prior.turns)} turns, ${count(g.prior.steps)} steps before this run resumed the session` : null],
   ].filter(([, value]) => value !== null);
-  return html`${stale !== null ? html`<p class="warn">Stale: ${staleText(stale)}${view.data?.activeRun?.host ? ` on ${view.data.activeRun.host}` : ""}. <a href="/fleet">Open Fleet</a>.</p>` : null}<div class="run-prog"><div class="run-big"><p class="kpi"><b class="run-tc">${Number.isFinite(now) && now >= g.startedAt ? timecode(now - g.startedAt) : "-"}</b><span>elapsed since ${timeHtml(g.startedAt)}</span></p></div><dl class="run-stats"><div><dt>Turn</dt><dd><span><b>${count(g.turn)}</b>${Number.isSafeInteger(max) ? ` of ${max}` : ""}</span></dd></div><div><dt>Steps</dt><dd><span><b>${count(g.steps)}</b>${g.failed > 0 ? `, ${count(g.failed)} failed` : ""}</span></dd></div><div class="tone-running"><dt>Running now</dt><dd>${running}</dd></div></dl></div>${rare.length ? facts(rare) : null}${phaseBody(g, operator)}<h3 class="run-sub">Recent steps</h3>${recent.length ? html`<ul class="rows">${recent.map(stepRow)}</ul>` : html`<p class="note">No step has finished yet.</p>`}<p class="run-at">Updated ${timeHtml(g.updatedAt)}</p>`;
+  return html`${stale !== null ? html`<p class="warn">${uiText("Stale:", view.locale)} ${staleText(stale)}${view.data?.activeRun?.host ? ` ${uiText("on", view.locale)} ${view.data.activeRun.host}` : ""}. <a href="/fleet">${uiText("Open Fleet", view.locale)}</a>.</p>` : null}<div class="run-prog"><div class="run-big"><p class="kpi"><b class="run-tc">${Number.isFinite(now) && now >= g.startedAt ? timecode(now - g.startedAt) : "-"}</b><span>${uiText("elapsed since", view.locale)} ${timeHtml(g.startedAt)}</span></p></div><dl class="run-stats"><div><dt>${uiText("Turn", view.locale)}</dt><dd><span><b>${count(g.turn)}</b>${Number.isSafeInteger(max) ? ` ${uiText("of", view.locale)} ${max}` : ""}</span></dd></div><div><dt>${uiText("Steps", view.locale)}</dt><dd><span><b>${count(g.steps)}</b>${g.failed > 0 ? `，${count(g.failed)} ${uiText("failed", view.locale)}` : ""}</span></dd></div><div class="tone-running"><dt>${uiText("Running now", view.locale)}</dt><dd>${running}</dd></div></dl></div>${rare.length ? facts(rare, view.locale) : null}${phaseBody(g, operator, view.locale)}<h3 class="run-sub">${uiText("Recent steps", view.locale)}</h3>${recent.length ? html`<ul class="rows">${recent.map(stepRow)}</ul>` : html`<p class="note">${uiText("No step has finished yet.", view.locale)}</p>`}<p class="run-at">${uiText("Updated", view.locale)} ${timeHtml(g.updatedAt)}</p>`;
 }
 
 /**
@@ -318,6 +331,19 @@ function liveProgressBody(g, view) {
  * live transcript), so a run on a venue that does not stream it is not blamed on the switch alone.
  */
 export const PROGRESS_ABSENT = progressAbsentText({ backend: "local" });
+
+function transcriptAbsent(record, locale = "en") {
+  if (locale !== "zh") return transcriptAbsentText(record);
+  const cause = liveAbsentCause(record);
+  if (cause?.skipped) return `没有实时对话记录：${uiText(cause.skipped, locale)}。`;
+  return cause?.venue ? "没有实时对话记录：未发布（PI_LIVE_TRANSCRIPTS=0）、已过期、尚未开始，或此运行环境不支持实时传输。" : "没有实时对话记录：未发布（PI_LIVE_TRANSCRIPTS=0）、已过期或尚未开始。";
+}
+function progressAbsent(record, locale = "en") {
+  if (locale !== "zh") return progressAbsentText(record);
+  const cause = liveAbsentCause(record);
+  if (cause?.skipped) return `没有实时进度：进度从实时对话记录中读取，但${uiText(cause.skipped, locale)}。`;
+  return cause?.venue ? "没有实时进度：未发布（PI_RUN_PROGRESS=0）、已过期、尚无步骤记录，或此运行环境不支持实时传输。" : "没有实时进度：未发布（PI_RUN_PROGRESS=0）、已过期或尚未记录步骤。";
+}
 
 /**
  * The run page's "Progress" panel (issue #644). A run with a record shows the record's `progress` (and, while the key
@@ -350,38 +376,38 @@ export function runProgress(view) {
   const cont = view.data?.progressContinues ?? null;
   if (record && cont) {
     const next = typeof cont.as === "string" && RUN_ID_RE.test(cont.as) ? cont.as : null;
-    const line = html`<p class="note">This run continues as ${next !== null ? runLink(next) : "a recovery job"}.</p>`;
+    const line = html`<p class="note">${uiText("This run continues as", view.locale)} ${next !== null ? runLink(next) : uiText("a recovery job", view.locale)}.</p>`;
     const nextProgress = view.data?.recoveryProgress?.progress;
-    return titled(title, html`${line}${recordProgressBody(record) ?? html`<p class="note">This attempt's record holds no progress.</p>`}${isProgressSnapshot(nextProgress) ? html`<h3>Recovery progress</h3>${liveProgressBody(nextProgress, { ...view, data: { ...view.data, run: null, activeRun: view.data.recoveryLive } })}` : null}`);
+    return titled(title, html`${line}${recordProgressBody(record, view.locale) ?? html`<p class="note">${uiText("This attempt's record holds no progress.", view.locale)}</p>`}${isProgressSnapshot(nextProgress) ? html`<h3>${uiText("Recovery progress", view.locale)}</h3>${liveProgressBody(nextProgress, { ...view, data: { ...view.data, run: null, activeRun: view.data.recoveryLive } })}` : null}`, view.locale);
   }
   const live = isProgressSnapshot(g) ? g : null;
   const recordEnd = typeof record?.endedAt === "string" ? Date.parse(record.endedAt) : Number.NaN;
   if (record && live && Number.isFinite(recordEnd) && live.startedAt > recordEnd) {
     const outcome = typeof record.outcome === "string" && /^[a-z-]{1,40}$/.test(record.outcome) ? record.outcome : "unknown";
-    return titled(title, html`<p class="note">An earlier attempt of this run ended (${outcome}); this is the attempt after it.</p>${liveProgressBody(live, { ...view, data: { ...view.data, run: null } })}`);
+    return titled(title, html`<p class="note">${uiText("An earlier attempt of this run ended", view.locale)} (${uiText(outcome, view.locale)}); ${uiText("this is the attempt after it.", view.locale)}</p>${liveProgressBody(live, { ...view, data: { ...view.data, run: null } })}`, view.locale);
   }
   if (record) {
-    const body = recordProgressBody(record);
+    const body = recordProgressBody(record, view.locale);
     // Both bounds: a key that started before this record's attempt did is an EARLIER attempt's (attempt 2 refused before
     // its container leaves attempt 1's ended key in place), and its phase names are not this record's. An unreadable
     // start pairs with nothing, as an unreadable end does.
     const recordStart = typeof record.startedAt === "string" ? Date.parse(record.startedAt) : Number.NaN;
     const same = live && live.ended && Number.isFinite(recordEnd) && Number.isFinite(recordStart) && live.startedAt >= recordStart && live.startedAt <= recordEnd;
-    const names = same && view.role === "operator" && live.phases.length > 0 ? html`<h3>Phases</h3>${phaseBody(live, true)}` : null;
+    const names = same && view.role === "operator" && live.phases.length > 0 ? html`<h3>${uiText("Phases", view.locale)}</h3>${phaseBody(live, true, view.locale)}` : null;
     // Issue #712: a record that names its live skip says it; one on a venue that does not always stream adds that cause.
     if (body === null && names === null) {
       const cause = liveAbsentCause(record);
       const why = cause?.skipped ? `it had no live transcript to read it from: ${cause.skipped}` : cause?.venue ? `an older worker, PI_RUN_PROGRESS=0, ${VENUE_MAY_NOT_STREAM}` : "an older worker, or PI_RUN_PROGRESS=0";
-      return titled(title, html`<p class="note">This run's record holds no progress (${why}).</p>`);
+      return titled(title, html`<p class="note">${uiText("This run's record holds no progress", view.locale)} (${uiText(why, view.locale)}).</p>`, view.locale);
     }
-    return titled(title, html`${body ?? html`<p class="note">This run's record holds no progress.</p>`}${names}`);
+    return titled(title, html`${body ?? html`<p class="note">${uiText("This run's record holds no progress.", view.locale)}</p>`}${names}`, view.locale);
   }
-  if (live) return ui.card({ title, end: !live.ended && progressStaleFor(live, view.now) === null ? ui.chip("live", { status: "running", icon: "running" }) : null, body: liveProgressBody(live, view) });
-  if (g?.unreachable) return titled(title, html`<p class="warn">The run's progress could not be read (is Valkey reachable?).</p>`);
-  if (g?.invalid) return titled(title, html`<p class="warn">The run's progress key is not one this console reads (a newer or older worker?).</p>`);
+  if (live) return ui.card({ title: uiText(title, view.locale), end: !live.ended && progressStaleFor(live, view.now) === null ? ui.chip(t("live", view), { status: "running", icon: "running" }) : null, body: liveProgressBody(live, view) });
+  if (g?.unreachable) return titled(title, html`<p class="warn">${uiText("The run's progress could not be read (is Valkey reachable?).", view.locale)}</p>`, view.locale);
+  if (g?.invalid) return titled(title, html`<p class="warn">${uiText("The run's progress key is not one this console reads (a newer or older worker?).", view.locale)}</p>`, view.locale);
   // No record and no snapshot: a queued job, or no run at all, which the banner names. A running job keeps the sentence.
   if (!runningWithoutRecord(view)) return html``;
-  return titled(title, html`<p class="note">${progressAbsentText(record)}</p>`);
+  return titled(title, html`<p class="note">${progressAbsent(record, view.locale)}</p>`, view.locale);
 }
 
 // ---- run inbox (issue #646) ------------------------------------------------------------------------------------------
@@ -411,7 +437,7 @@ export function runInbox(view) {
   const box = view.data?.inbox ?? null;
   if (box === null || typeof box !== "object" || box.invalid || box.found === false || (box.found === true && box.steer !== true)) return html``;
   const title = "Inbox";
-  if (box.unreachable) return titled(title, html`<p class="warn">The run's inbox could not be read (is Valkey reachable?).</p>`);
+  if (box.unreachable) return titled(title, html`<p class="warn">${t("The run's inbox could not be read (is Valkey reachable?).", view)}</p>`, view.locale);
   const jobId = view.query?.id;
   // Review F4: a job that is not active whose run goes on as a recovery job (`continuesAs`, same run, same inbox): the
   // forms stay, since the planner sends through the active job, and the panel names that job with a link.
@@ -419,35 +445,35 @@ export function runInbox(view) {
   const running = box.state === "active" || next !== null;
   const takes = running && box.open === true;
   const status = takes
-    ? "The run takes messages. A steer reaches the agent after its current tool calls, before its next model call; a follow-up once the agent would otherwise stop. Either one spends from the run's existing reservation."
+    ? t("The run takes messages. A steer reaches the agent after its current tool calls, before its next model call; a follow-up once the agent would otherwise stop. Either one spends from the run's existing reservation.", view)
     : running
       ? box.open === null
-        ? "Whether the run takes messages could not be read."
-        : INBOX_NOT_OPEN
-      : `The job is ${cell(box.state)}, not running, so it takes no message; its inbox is kept for an hour after its run.`;
+        ? t("Whether the run takes messages could not be read.", view)
+        : t(INBOX_NOT_OPEN, view)
+      : `${t("The job is", view)} ${cell(t(box.state, view))}，${t("not running, so it takes no message; its inbox is kept for an hour after its run.", view)}`;
   const act = canAct(view) && typeof jobId === "string" && RUN_ID_RE.test(jobId);
   const withdraw = (e) => {
     if (!act) return null;
     if ((e.state !== "queued" && e.state !== "written") || typeof e.id !== "string" || !MESSAGE_ID_RE.test(e.id)) return null;
-    return actForm("steer-withdraw", { hidden: [["jobId", jobId], ["id", e.id]], label: "Withdraw" });
+    return actForm("steer-withdraw", { hidden: [["jobId", jobId], ["id", e.id]], label: t("Withdraw", view) });
   };
   const entries = Array.isArray(box.entries) ? box.entries : null;
   const list =
     entries === null
-      ? html`<p class="warn">The messages could not be read this time; the next refresh tries again.</p>`
+      ? html`<p class="warn">${t("The messages could not be read this time; the next refresh tries again.", view)}</p>`
       : entries.length === 0
-        ? html`<p class="note">No message has been sent to this run.</p>`
+        ? html`<p class="note">${t("No message has been sent to this run.", view)}</p>`
         : html`<ul class="rows">${entries.map((e) => ui.rowPill({
             icon: e.state === "delivered" ? "done" : "clock",
-            items: [html`<span class="run-inbox"><strong>${cell(MODE_WORD[e.mode])}</strong> <span class="muted">${cell(e.source)}, ${e.bytes === 1 ? "1 byte" : `${count(e.bytes)} bytes`}</span><br><span class="run-at">${Number.isSafeInteger(e.at) ? timeHtml(e.at) : "-"}</span> <span class="code">${cell(e.id)}</span></span>`],
+            items: [html`<span class="run-inbox"><strong>${cell(t(MODE_WORD[e.mode], view))}</strong> <span class="muted">${cell(t(e.source, view))}, ${e.bytes === 1 ? `1 ${t("byte", view)}` : `${count(e.bytes)} ${t("bytes", view)}`}</span><br><span class="run-at">${Number.isSafeInteger(e.at) ? timeHtml(e.at) : "-"}</span> <span class="code">${cell(e.id)}</span></span>`],
             end: ui.chip(e.state, { icon: e.state === "delivered" ? "done" : e.state === "withdrawn" ? "cancel" : "clock" }),
             action: withdraw(e),
           }))}</ul>`;
   // Issue #647: when the Chat panel draws the message forms (a live run an operator can steer), they are drawn THERE and
   // not here, so the page holds one steer form per mode, never two copies of the same action.
-  const forms = act && takes && !chatDrawsSteer(view) ? steerForms(jobId) : null;
-  const cont = next !== null ? html`<p class="note">This job is ${cell(box.state)}; its run continues as ${runLink(next)}, and a message sent here goes to that job.</p>` : null;
-  return titled(title, html`${cont}<p class="note">${status}</p>${entries ? ui.meter({ value: entries.length, max: STEER_MAX_MESSAGES, label: "Messages" }) : null}${entries ? ui.meter({ value: entries.reduce((n, e) => n + (e.bytes ?? 0), 0), max: STEER_TOTAL_MAX_BYTES, label: "Bytes" }) : null}${entries?.some((e) => e.state === "late") ? html`<p>Late: the run ended before the message arrived, so the agent never saw it.</p>` : null}${list}${forms}<p class="note">A message's text is never listed: the run reads it, and the audit log keeps its sha256.</p>`);
+  const forms = act && takes && !chatDrawsSteer(view) ? steerForms(jobId, view.locale) : null;
+  const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}；${t("its run continues as", view)} ${runLink(next)}，${t("and a message sent here goes to that job.", view)}</p>` : null;
+  return titled(title, html`${cont}<p class="note">${status}</p>${entries ? ui.meter({ value: entries.length, max: STEER_MAX_MESSAGES, label: t("Messages", view) }) : null}${entries ? ui.meter({ value: entries.reduce((n, e) => n + (e.bytes ?? 0), 0), max: STEER_TOTAL_MAX_BYTES, label: t("Bytes", view) }) : null}${entries?.some((e) => e.state === "late") ? html`<p>${t("Late: the run ended before the message arrived, so the agent never saw it.", view)}</p>` : null}${list}${forms}<p class="note">${t("A message's text is never listed: the run reads it, and the audit log keeps its sha256.", view)}</p>`, view.locale);
 }
 
 // ---- run chat (issue #647) -------------------------------------------------------------------------------------------
@@ -487,32 +513,32 @@ export function runChat(view) {
   if (refusedBeforeStart(record)) return html``;
 
   const title = "Chat";
-  if (record?.purpose === "answer-draft") return titled(title, html`<p>This draft helper takes no replies. Review and send the answer from the parked source run ${runLink(record.answerDraft?.sourceRunId)}.</p>`);
-  if (chat.unreachable) return titled(title, html`<p class="warn">The queue could not be read (is Valkey reachable?), so whether this run can chat is unknown. The next refresh tries again.</p>`);
+  if (record?.purpose === "answer-draft") return titled(title, html`<p>${t("This draft helper takes no replies. Review and send the answer from the parked source run", view)} ${runLink(record.answerDraft?.sourceRunId)}.</p>`, view.locale);
+  if (chat.unreachable) return titled(title, html`<p class="warn">${t("The queue could not be read (is Valkey reachable?), so whether this run can chat is unknown. The next refresh tries again.", view)}</p>`, view.locale);
   const jobId = typeof view.query?.id === "string" && RUN_ID_RE.test(view.query.id) ? view.query.id : null;
   const answering = chat.state === "answered" && typeof chat.answeringJobId === "string";
-  const status = html`<p>This run is ${answering ? "being answered" : Object.hasOwn(CHAT_STATE_WORD, chat.state) ? CHAT_STATE_WORD[chat.state] : "unknown"}.</p>`;
-  if (!record && view.data?.run?.missing !== true && chat.state === "unknown") return titled(title, html`<p>The run's chat state is unknown while its record could not be read.</p>`);
-  if (view.role !== "operator") return titled(title, html`${status}<p class="note">Chat is for operators; a viewer sees the run's status only.</p>`);
-  if (chat.mode !== "live" && chat.mode !== "reply" && chat.mode !== "fork") return titled(title, html`${status}<p class="note">${typeof chat.says === "string" ? chat.says : "This run has no chat."}</p>${chatHeldBy(chat)}`);
-  if (jobId === null) return titled(title, html`${status}<p class="note">Chat is for operators; a viewer sees the run's status only.</p>`);
-  const terminal = (id) => command(id, record?.host);
-  const readOnly = view.readOnly ? html`<p class="note">This console is read-only, so it sends nothing.</p>` : null;
+  const status = html`<p>${t("This run is", view)} ${answering ? t("being answered", view) : Object.hasOwn(CHAT_STATE_WORD, chat.state) ? t(CHAT_STATE_WORD[chat.state], view) : t("unknown", view)}.</p>`;
+  if (!record && view.data?.run?.missing !== true && chat.state === "unknown") return titled(title, html`<p>${t("The run's chat state is unknown while its record could not be read.", view)}</p>`, view.locale);
+  if (view.role !== "operator") return titled(title, html`${status}<p class="note">${t("Chat is for operators; a viewer sees the run's status only.", view)}</p>`, view.locale);
+  if (chat.mode !== "live" && chat.mode !== "reply" && chat.mode !== "fork") return titled(title, html`${status}<p class="note">${typeof chat.says === "string" ? t(chat.says, view) : t("This run has no chat.", view)}</p>${chatHeldBy(chat)}`, view.locale);
+  if (jobId === null) return titled(title, html`${status}<p class="note">${t("Chat is for operators; a viewer sees the run's status only.", view)}</p>`, view.locale);
+  const terminal = (id) => command(id, record?.host, view.locale);
+  const readOnly = view.readOnly ? html`<p class="note">${t("This console is read-only, so it sends nothing.", view)}</p>` : null;
   if (chat.mode === "live") {
     const active = typeof chat.activeJobId === "string" && RUN_ID_RE.test(chat.activeJobId) ? chat.activeJobId : jobId;
-    const via = active !== jobId ? html`<p class="note">The run goes on as ${runLink(active)}; its transcript is on that job's page, and a message sent here reaches it.</p>` : html`<p class="note">Its live transcript is <a href="#transcript">below</a>.</p>`;
+    const via = active !== jobId ? html`<p class="note">${t("The run goes on as", view)} ${runLink(active)}; ${t("its transcript is on that job's page, and a message sent here reaches it.", view)}</p>` : html`<p class="note">${t("Its live transcript is", view)} <a href="#transcript">${t("below", view)}</a>.</p>`;
     const box = view.data?.inbox ?? null;
     // An inbox that could not be read says so: "not steer-armed" about a run whose inbox was never read would be a guess.
     const boxRead = box !== null && typeof box === "object" && !box.unreachable && !box.invalid;
     const armed = boxRead && box.found === true && box.steer === true;
     const send = chatDrawsSteer(view)
-      ? steerForms(jobId)
+      ? steerForms(jobId, view.locale)
       : canAct(view)
         ? !boxRead
-          ? html`<p class="warn">The run's inbox could not be read (is Valkey reachable?), so whether it takes a message is unknown. The next refresh tries again.</p>`
-          : html`<p class="note">${!armed ? "This run is not steer-armed (its trigger sets no run.steer), so it takes no message; watch it instead." : "The run takes no message right now; the Inbox panel says why."}</p>`
+          ? html`<p class="warn">${t("The run's inbox could not be read (is Valkey reachable?), so whether it takes a message is unknown. The next refresh tries again.", view)}</p>`
+          : html`<p class="note">${!armed ? t("This run is not steer-armed (its trigger sets no run.steer), so it takes no message; watch it instead.", view) : t("The run takes no message right now; the Inbox panel says why.", view)}</p>`
         : null;
-    return titled(title, html`${status}${via}${send}${readOnly}`);
+    return titled(title, html`${status}${via}${send}${readOnly}`, view.locale);
   }
   if (chat.mode === "reply") {
     const offered = view.query?.id === view.data?.answerer?.privateDraft?.meta?.runId ? offeredAnswerDraft(view) : null;
@@ -522,18 +548,18 @@ export function runChat(view) {
     // could not be read keeps the form and says so (the planner checks again before anything is queued).
     const check = view.data?.chatAnswer ?? null;
     const refusal = typeof check?.refusal === "string" ? check.refusal : null;
-    const why = check?.unreachable ? html`<p class="warn">Whether it can be answered from here could not be read; the preview checks again.</p>` : null;
+    const why = check?.unreachable ? html`<p class="warn">${t("Whether it can be answered from here could not be read; the preview checks again.", view)}</p>` : null;
     const keptTranscript = view.data?.transcript?.exists === true;
-    const question = keptTranscript ? html`<div data-run-question></div><p class="card__sub">The question is the last assistant entry of the transcript <a href="#transcript">below</a>.</p>` : html`<p>Read the question on the forge thread: ${link}. The live transcript is no longer kept.</p>`;
-    const answer = refusal !== null ? ui.banner({ status: "attention", sm: true, title: PARKED_ELSEWHERE_TITLE, body: refusal, actions: forgeLinkOf(record, view.env) ? ui.outLink({ href: forgeLinkOf(record, view.env), label: "Answer on the forge", btn: "primary" }) : null }) : canAct(view) ? record?.reason === "awaiting-approval" ? ui.approvalForms({ jobId, id: "run-approval" }) : ui.answerForm({ jobId, id: "run-answer", hint: "Preview the answer before posting it and resuming the run.", guarded: Boolean(view.data?.answerer?.rules?.length), value: offered?.draft ?? "", draft: offered ? { draftRunId: offered.meta.draftRunId, digest: offered.digest } : null, keepStanding: Boolean(view.data?.answerer?.rules?.length && record?.project) }) : readOnly;
-    const gate = record?.reason === "awaiting-approval" ? html`<p>Awaiting approval for <span class="code">${record.approval?.action ?? "unknown action"}</span>.</p><p>${record.approval?.action === "budget-raise" ? "Worker-enforced: the declared cap remains subject to deployment and scoped budgets." : "Advisory: the worker does not enforce this external action."}</p>` : null;
-    return ui.questionCard({ jobId, waited: Number.isFinite(msOf(record?.endedAt)) ? ageText(view.now - msOf(record.endedAt)) : null, project: record?.project, target: link, body: html`${gate}${question}${why}`, answer: html`${answer}${view.data?.answerer?.rules?.length && record?.project && canAct(view) && record?.reason !== "awaiting-approval" ? standingAnswerEditor({ id: "standing-from-answer", projects: [record.project], runId: jobId, repo: `${record.kind}:${String(record.target ?? "").split("#")[0]}` }) : null}` });
+    const question = keptTranscript ? html`<div data-run-question></div><p class="card__sub">${t("The question is the last assistant entry of the transcript", view)} <a href="#transcript">${t("below", view)}</a>.</p>` : html`<p>${t("Read the question on the forge thread:", view)} ${link}. ${t("The live transcript is no longer kept.", view)}</p>`;
+    const answer = refusal !== null ? ui.banner({ status: "attention", sm: true, title: t(PARKED_ELSEWHERE_TITLE, view), body: t(refusal, view), actions: forgeLinkOf(record, view.env) ? ui.outLink({ href: forgeLinkOf(record, view.env), label: t("Answer on the forge", view), btn: "primary" }) : null }) : canAct(view) ? record?.reason === "awaiting-approval" ? ui.approvalForms({ jobId, id: "run-approval", locale: view.locale }) : ui.answerForm({ jobId, id: "run-answer", hint: t("Preview the answer before posting it and resuming the run.", view), guarded: Boolean(view.data?.answerer?.rules?.length), value: offered?.draft ?? "", draft: offered ? { draftRunId: offered.meta.draftRunId, digest: offered.digest } : null, keepStanding: Boolean(view.data?.answerer?.rules?.length && record?.project), locale: view.locale }) : readOnly;
+    const gate = record?.reason === "awaiting-approval" ? html`<p>${t("Awaiting approval for", view)} <span class="code">${record.approval?.action ?? t("unknown action", view)}</span>.</p><p>${t(record.approval?.action === "budget-raise" ? "Worker-enforced: the declared cap remains subject to deployment and scoped budgets." : "Advisory: the worker does not enforce this external action.", view)}</p>` : null;
+    return ui.questionCard({ jobId, waited: Number.isFinite(msOf(record?.endedAt)) ? ageText(view.now - msOf(record.endedAt)) : null, project: record?.project, target: link, body: html`${gate}${question}${why}`, answer: html`${answer}${view.data?.answerer?.rules?.length && record?.project && canAct(view) && record?.reason !== "awaiting-approval" ? standingAnswerEditor({ id: "standing-from-answer", projects: [record.project], runId: jobId, repo: `${record.kind}:${String(record.target ?? "").split("#")[0]}` }) : null}`, locale: view.locale });
   }
   // fork: whether the record names a session the host-local fork can find, said before the command is offered.
   const kept = sessionSavedOf(record);
   const why = !kept ? record?.session?.reason ? `${nestedText("session.reason", record.session.reason)} There is no saved transcript to fork.` : "This run's trigger keeps no session (no run.resume), so there is no transcript to fork." : sessionKeyOfRecord(record) === null ? "This run's session cannot be found from its record (a pull or merge request's session is keyed by its head branch, which the record does not carry), so a fork would refuse." : null;
-  if (why !== null) return titled(title, html`${status}<p class="note">${why}</p>`);
-  return titled(title, html`${status}<p class="note">Continue it in your own pi, as a fork of its session: run this on a host that holds the session store (PI_SESSIONS_DIR). The session's transcript is not redacted and goes to your pi's provider; the run's own transcript is never written.</p>${chat.newer?.jobId ? html`<p class="warn">The session holds a later run's turns too: ${runLink(chat.newer.jobId)} continued it on ${record.target} after this run.</p>` : null}${terminal(jobId)}`);
+  if (why !== null) return titled(title, html`${status}<p class="note">${t(why, view)}</p>`, view.locale);
+  return titled(title, html`${status}<p class="note">${t("Continue it in your own pi, as a fork of its session: run this on a host that holds the session store (PI_SESSIONS_DIR). The session's transcript is not redacted and goes to your pi's provider; the run's own transcript is never written.", view)}</p>${chat.newer?.jobId ? html`<p class="warn">${t("The session holds a later run's turns too:", view)} ${runLink(chat.newer.jobId)} ${t("continued it on", view)} ${record.target} ${t("after this run.", view)}</p>` : null}${terminal(jobId)}`, view.locale);
 }
 
 /**
@@ -541,9 +567,9 @@ export function runChat(view) {
  * action with a `mode`. Drawn by the Inbox panel, or by the Chat panel when it shows a live run (issue #647), never by
  * both (`chatDrawsSteer`).
  */
-function steerForms(jobId) {
-  const text = (label) => area("text", label, { rows: 3, required: true, max: 8192 });
-  return html`<h3>Send a message</h3>${actForm("steer", { hidden: [["jobId", jobId], ["mode", "steer"]], fields: text("Steer: read after the agent's current tool calls"), label: "Preview the steer" })}${actForm("steer", { hidden: [["jobId", jobId], ["mode", "followUp"]], fields: text("Follow-up: read once the agent would otherwise stop"), label: "Preview the follow-up" })}`;
+function steerForms(jobId, locale = "en") {
+  const text = (label) => area("text", uiText(label, locale), { rows: 3, required: true, max: 8192 });
+  return html`<h3>${uiText("Send a message", locale)}</h3>${actForm("steer", { hidden: [["jobId", jobId], ["mode", "steer"]], fields: text("Steer: read after the agent's current tool calls"), label: uiText("Preview the steer", locale) })}${actForm("steer", { hidden: [["jobId", jobId], ["mode", "followUp"]], fields: text("Follow-up: read once the agent would otherwise stop"), label: uiText("Preview the follow-up", locale) })}`;
 }
 
 /**
@@ -596,9 +622,9 @@ export function runWorkspaceState(view) {
   const r = recordOf(view), data = view.data ?? {};
   const id = r?.jobId ?? view.query?.id;
   const active = data.chat?.jobState === "active" || data.chat?.state === "active" || runningWithoutRecord(view) || r?.reason === "recovery-enqueued" && Boolean(data.chat?.activeJobId || data.chat?.queuedJobId);
-  if (active) return { kind: "running", id, title: "Opens when it ends.", text: "To change it now, steer it. The running job's container is never a browser terminal." };
-  if (!r) return { kind: "unknown", id, title: "Workspace unknown.", text: "This run's record is unavailable; no workspace or shell is inferred." };
-  if (refusedBeforeStart(r) || r.reason === "container-never-started") return { kind: "nothing", id, title: "Nothing to open.", text: r.reason === "container-never-started" ? "Its container never started." : "The run was refused before it started." };
+  if (active) return { kind: "running", id, title: t("Opens when it ends.", view), text: t("To change it now, steer it. The running job's container is never a browser terminal.", view) };
+  if (!r) return { kind: "unknown", id, title: t("Workspace unknown.", view), text: t("This run's record is unavailable; no workspace or shell is inferred.", view) };
+  if (refusedBeforeStart(r) || r.reason === "container-never-started") return { kind: "nothing", id, title: t("Nothing to open.", view), text: t(r.reason === "container-never-started" ? "Its container never started." : "The run was refused before it started.", view) };
   const published = data.workspace ?? {};
   const check = data.sandboxCheck;
   const shell = published.shell ?? data.browserGateways?.sessions?.find((s) => s.host === r.host && s.id === r.jobId) ?? null;
@@ -607,41 +633,41 @@ export function runWorkspaceState(view) {
   const until = Number.isSafeInteger(evidence.until) ? evidence.until : msOf(evidence.until);
   const venue = r.backend ?? UNATTRIBUTED_BACKEND;
   const noVenue = sandboxShellRefusal(venue);
-  if (!shell && (noVenue || evidence.retained === false || Number.isFinite(until) && until <= view.now)) return { kind: "prepare", id, host: r.host, title: noVenue ? "Cannot reopen." : evidence.why === "retention-off" ? "Not kept." : "Workspace gone.", text: noVenue ? `Its ${venue} venue cannot reopen a sandbox.` : evidence.why === "retention-off" ? "Workspace retention is off on its host." : "It was swept, or is past its opening window.", until };
-  const purpose = ["awaiting-input", "awaiting-approval"].includes(recordReason(r)) ? { title: "Look before you answer.", text: "Your answer starts a new job, so put what you find in it; shell edits do not reach it." } : outcomeWord(r.outcome, recordReason(r)).word === "failed" ? { title: "Reproduce it.", text: "The kept sandbox uses the run's recorded limits." } : { title: "Try it before you merge.", text: "The native terminal checks the workspace again before opening." };
-  return { kind: shell ? "open" : evidence.retained === true ? "kept" : "unknown", id, host: r.host, shell, until, ...purpose, ...(shell || evidence.retained === true ? {} : { text: "The workspace's current retention could not be verified. The native command checks again; missing tracking does not prove it was swept." }) };
+  if (!shell && (noVenue || evidence.retained === false || Number.isFinite(until) && until <= view.now)) return { kind: "prepare", id, host: r.host, title: t(noVenue ? "Cannot reopen." : evidence.why === "retention-off" ? "Not kept." : "Workspace gone.", view), text: t(noVenue ? `Its ${venue} venue cannot reopen a sandbox.` : evidence.why === "retention-off" ? "Workspace retention is off on its host." : "It was swept, or is past its opening window.", view), until };
+  const purpose = ["awaiting-input", "awaiting-approval"].includes(recordReason(r)) ? { title: t("Look before you answer.", view), text: t("Your answer starts a new job, so put what you find in it; shell edits do not reach it.", view) } : outcomeWord(r.outcome, recordReason(r)).word === "failed" ? { title: t("Reproduce it.", view), text: t("The kept sandbox uses the run's recorded limits.", view) } : { title: t("Try it before you merge.", view), text: t("The native terminal checks the workspace again before opening.", view) };
+  return { kind: shell ? "open" : evidence.retained === true ? "kept" : "unknown", id, host: r.host, shell, until, ...purpose, ...(shell || evidence.retained === true ? {} : { text: t("The workspace's current retention could not be verified. The native command checks again; missing tracking does not prove it was swept.", view) }) };
 }
 
 export function runWorkspace(view) {
   if (view.role !== "operator") return html``;
   const state = runWorkspaceState(view), r = recordOf(view);
   let actions = null, more = null;
-  if (state.kind === "running") actions = !view.readOnly ? ui.btn({ href: "#p-chat", label: "Steer this run", kind: "sm", icon: "steer" }) : null;
-  else if (state.kind === "prepare") actions = !view.readOnly ? ui.btn({ href: `/runs/sandboxes?${new URLSearchParams({ fromRun: state.id })}`, label: "Prepare from this run", kind: "sm", icon: "plus" }) : null;
+  if (state.kind === "running") actions = !view.readOnly ? ui.btn({ href: "#p-chat", label: t("Steer this run", view), kind: "sm", icon: "steer" }) : null;
+  else if (state.kind === "prepare") actions = !view.readOnly ? ui.btn({ href: `/runs/sandboxes?${new URLSearchParams({ fromRun: state.id })}`, label: t("Prepare from this run", view), kind: "sm", icon: "plus" }) : null;
   else if (r && ["open", "kept", "unknown"].includes(state.kind) && RUN_ID_RE.test(state.id ?? "")) {
     const verb = state.shell ? "attach" : "open";
-    if (!view.readOnly) actions = html`${state.shell ? sandboxBrowserLink(view, state.shell) : null}${typeof state.host === "string" ? sandboxNativeLink({ id: state.id, host: state.host, verb }) : null}`;
-    const copy = typeof state.host === "string" ? sandboxCopy({ id: state.id, host: state.host, verb, config: view.data?.sandboxHosts }) : html`<aside data-sandbox-command>${ui.cmd(["pi-dispatch", "sandbox", state.id], { host: "Run on the host that kept this workspace; its historical host was not recorded." })}</aside>`;
-    more = html`<details class="ws-more"><summary>${view.readOnly || !state.shell ? "Copy the command" : "Copy the command, or end the shell"}</summary><div class="ws-more__b">${copy}${!view.readOnly && state.shell ? ui.actForm({ action: "sandbox-end", hidden: [["host", state.shell.host], ["id", state.shell.id], ["nonce", state.shell.nonce], ["containerId", state.shell.containerId]], label: "Preview End", kind: ["sm", "danger"], icon: "cancel" }) : null}</div></details>`;
+    if (!view.readOnly) actions = html`${state.shell ? sandboxBrowserLink(view, state.shell) : null}${typeof state.host === "string" ? sandboxNativeLink({ id: state.id, host: state.host, verb, locale: view.locale }) : null}`;
+    const copy = typeof state.host === "string" ? sandboxCopy({ id: state.id, host: state.host, verb, config: view.data?.sandboxHosts, locale: view.locale }) : html`<aside data-sandbox-command>${ui.cmd(["pi-dispatch", "sandbox", state.id], { host: t("Run on the host that kept this workspace; its historical host was not recorded.", view) })}</aside>`;
+    more = html`<details class="ws-more"><summary>${t(view.readOnly || !state.shell ? "Copy the command" : "Copy the command, or end the shell", view)}</summary><div class="ws-more__b">${copy}${!view.readOnly && state.shell ? ui.actForm({ action: "sandbox-end", hidden: [["host", state.shell.host], ["id", state.shell.id], ["nonce", state.shell.nonce], ["containerId", state.shell.containerId]], label: t("Preview End", view), kind: ["sm", "danger"], icon: "cancel" }) : null}</div></details>`;
   }
   // Who is in it comes first, and what opening it would do depends on who is reading: a watcher never joins, they only see.
   const driver = state.shell ? view.data?.browserGateways?.drivers?.find((s) => s.host === state.shell.host && s.id === state.shell.id && s.containerId === state.shell.containerId && s.nonce === state.shell.nonce) : null;
-  const since = Number.isFinite(state.shell?.since) ? html`, since ${timeHtml(state.shell.since)}` : null;
-  const opener = html`<b>${state.shell?.by ?? "The native terminal operator"}</b> opened the shell${since}.`;
+  const since = Number.isFinite(state.shell?.since) ? html`, ${uiText("since", view.locale)} ${timeHtml(state.shell.since)}` : null;
+  const opener = html`<b>${state.shell?.by ?? t("The native terminal operator", view)}</b> ${t("opened the shell", view)}${since}.`;
   const shared = driver?.watching && driver.by !== view.name;
   const line = !state.shell ? html`<b>${state.title}</b> ${state.text}`
-    : shared ? html`<b>${driver.by} is driving</b>, and lets operators watch. You see new output and cannot type.`
-    : html`${opener}${view.readOnly ? null : " Opening it joins that shell."}`;
+    : shared ? html`<b>${driver.by} ${t("is driving", view)}</b>, ${t("and lets operators watch. You see new output and cannot type.", view)}`
+    : html`${opener}${view.readOnly ? null : ` ${t("Opening it joins that shell.", view)}`}`;
   // Watching and joining are different promises: Open in Terminal still shares the driver's prompt, so say so here.
   const below = !state.shell ? null
-    : shared ? html`<p class="sx-open__s">${opener}${view.readOnly ? null : " A native terminal joins that shell and its prompt."}${driver.watchers?.length ? ` Watching now: ${driver.watchers.map((w) => w.name).join(", ")}.` : null}</p>`
+    : shared ? html`<p class="sx-open__s">${opener}${view.readOnly ? null : ` ${t("A native terminal joins that shell and its prompt.", view)}`}${driver.watchers?.length ? ` ${t("Watching now:", view)} ${driver.watchers.map((w) => w.name).join(", ")}.` : null}</p>`
     : sandboxDriverLine(view, state.shell);
   const points = view.data?.forkPoints;
   const canFork = points?.ok && points.entries?.some((entry) => entry.positions?.length);
-  const found = r && !view.readOnly && !["nothing", "running"].includes(state.kind) ? html`<p class="ws-found"><b>Found something?</b><a class="link" href="/triggers">Add it to a trigger’s instructions</a>${canFork ? html`<a class="link" href="#run-fork">Fork it with a message</a>` : html`<span>Fork unavailable: ${(r.forkSource?.saved === false ? forkRefusalWords(forkArchiveFact(r.forkSource).reason) : forkRefusalWords(points?.refusal)) ?? "no exact retained point is available"}.</span>`}</p>` : null;
+  const found = r && !view.readOnly && !["nothing", "running"].includes(state.kind) ? html`<p class="ws-found"><b>${t("Found something?", view)}</b><a class="link" href="/triggers">${t("Add it to a trigger’s instructions", view)}</a>${canFork ? html`<a class="link" href="#run-fork">${t("Fork it with a message", view)}</a>` : html`<span>${t("Fork unavailable:", view)} ${t((r.forkSource?.saved === false ? forkRefusalWords(forkArchiveFact(r.forkSource).reason) : forkRefusalWords(points?.refusal)) ?? "no exact retained point is available", view)}.</span>`}</p>` : null;
   // A gone workspace has no "kept until", and "not verified" would contradict the row beneath it.
-  const sub = !state.host ? null : state.kind === "prepare" ? html`on ${state.host}` : state.until && Number.isFinite(state.until) ? html`kept on ${state.host} until ${timeHtml(state.until)}` : html`on ${state.host}, retention not verified`;
-  return ui.card({ title: "Workspace", sub, body: html`<div class="ws-row"><p class="ws-row__t"><span class="dot ${state.kind === "open" ? "tone-running" : "tone-idle"}"></span><span>${line}</span></p><div class="ws-row__a">${actions}</div></div>${below}${view.data?.workspace?.sessionsUnknown || view.data?.browserGateways?.partial ? html`<p class="note" role="status">Some shell or browser status could not be read; an absent watcher is not inferred.</p>` : null}${more}${found}` });
+  const sub = !state.host ? null : state.kind === "prepare" ? html`${t("on", view)} ${state.host}` : state.until && Number.isFinite(state.until) ? html`${t("kept on", view)} ${state.host} ${t("until", view)} ${timeHtml(state.until)}` : html`${t("on", view)} ${state.host}, ${t("retention not verified", view)}`;
+  return ui.card({ title: t("Workspace", view), sub, body: html`<div class="ws-row"><p class="ws-row__t"><span class="dot ${state.kind === "open" ? "tone-running" : "tone-idle"}"></span><span>${line}</span></p><div class="ws-row__a">${actions}</div></div>${below}${view.data?.workspace?.sessionsUnknown || view.data?.browserGateways?.partial ? html`<p class="note" role="status">${t("Some shell or browser status could not be read; an absent watcher is not inferred.", view)}</p>` : null}${more}${found}` });
 }
 
 /**
@@ -655,8 +681,8 @@ function rerunLine(r, view) {
   if (!canAct(view)) return null;
   const check = view.data?.rerunCheck ?? null;
   const refusal = typeof check?.refusal === "string" ? check.refusal : check?.ok === true ? null : rerunRefusalOf(r, view.now);
-  if (refusal !== null) return html`${ui.btn({ label: "Preview a re-run", kind: ["sm", "paid"], disabled: true })}<p class="card__sub">Not offered for a re-run: ${refusal}.</p>`;
-  return ui.actForm({ action: "rerun", hidden: [["jobId", r.jobId]], label: "Preview a re-run", kind: ["sm", "paid"], icon: "rerun" });
+  if (refusal !== null) return html`${ui.btn({ label: t("Preview a re-run", view), kind: ["sm", "paid"], disabled: true })}<p class="card__sub">${t("Not offered for a re-run:", view)} ${t(refusal, view)}.</p>`;
+  return ui.actForm({ action: "rerun", hidden: [["jobId", r.jobId]], label: t("Preview a re-run", view), kind: ["sm", "paid"], icon: "rerun" });
 }
 
 /**
@@ -667,8 +693,8 @@ function rerunLine(r, view) {
 function skipRows(r, view) {
   const { liveSkipped, steerSkipped } = recordSkips(r);
   return [
-    ["Steering", steerSkipped !== null ? `skipped: ${STEER_SKIPPED_TEXT[steerSkipped]}` : r.steered ? `armed: ${r.steered.delivered} delivered, ${r.steered.late} late, ${r.steered.withdrawn} withdrawn` : "not armed: its trigger sets no run.steer"],
-    ["Live transcript", liveSkipped !== null ? `none: ${LIVE_SKIPPED_TEXT[liveSkipped]}` : view?.data?.transcript?.exists ? "streamed, kept 24 hours after the end" : transcriptAbsentText(r)],
+    ["Steering", t(steerSkipped !== null ? `skipped: ${STEER_SKIPPED_TEXT[steerSkipped]}` : r.steered ? `armed: ${r.steered.delivered} delivered, ${r.steered.late} late, ${r.steered.withdrawn} withdrawn` : "not armed: its trigger sets no run.steer", view)],
+    ["Live transcript", liveSkipped !== null ? t(`none: ${LIVE_SKIPPED_TEXT[liveSkipped]}`, view) : view?.data?.transcript?.exists ? t("streamed, kept 24 hours after the end", view) : transcriptAbsent(r, view?.locale)],
   ];
 }
 
@@ -694,10 +720,10 @@ function openshellRows(r) {
  * rebuild (integers, closed enums and a charset-checked id), so both roles see them; each row is null, and so not drawn,
  * when the record holds nothing for it, which keeps every record of a job that never armed `run.recover` byte-identical.
  */
-function recoveryRows(r) {
+function recoveryRows(r, locale = "en") {
   const rec = recordRecovery(r);
   if (rec === null) return [];
-  const said = [rec.recovered ? recoveredText(rec.recovered) : null, rec.recoverSkipped ? `recovery skipped (${rec.recoverSkipped}): ${nestedText("recoverSkipped", rec.recoverSkipped)}` : null].filter(Boolean);
+  const said = [rec.recovered ? uiText(recoveredText(rec.recovered), locale) : null, rec.recoverSkipped ? `${uiText("recovery skipped", locale)} (${rec.recoverSkipped}): ${uiText(nestedText("recoverSkipped", rec.recoverSkipped), locale)}` : null].filter(Boolean);
   return [
     ["Recovery of", rec.recoveryOf !== null ? runLink(rec.recoveryOf) : null],
     ["Recovery", said.length > 0 ? said.join("; ") : null],
@@ -712,14 +738,14 @@ function recoveryRows(r) {
  * charset, a closed enum), escaped by the renderer like every record string; no row for a record that carries neither
  * key, so every run outside a bundled project renders byte-identical.
  */
-function bundleRows(r) {
+function bundleRows(r, locale = "en") {
   const got = recordBundle(r);
   if (got === null) return [];
   const b = got.bundle;
-  const said = b ? [bundleReceivedText({ ...b, variables: b.variables.filter((name) => !b.shadowed.includes(name)) }), b.shadowed.length > 0 ? `shadowed by the trigger's own run.secrets: ${b.shadowed.join(", ")}` : null, bundleCountsText(b) || null].filter(Boolean) : [];
+  const said = b ? [uiText(bundleReceivedText({ ...b, variables: b.variables.filter((name) => !b.shadowed.includes(name)) }), locale), b.shadowed.length > 0 ? `${uiText("shadowed by the trigger's own run.secrets:", locale)} ${b.shadowed.join(", ")}` : null, uiText(bundleCountsText(b) || "", locale) || null].filter(Boolean) : [];
   return [
     ["Secret bundle", said.length > 0 ? said.join("; ") : null],
-    ["Bundle skipped", got.bundleSkipped !== null ? `${got.bundleSkipped}: ${BUNDLE_SKIPPED_TEXT[got.bundleSkipped]}` : null],
+    ["Bundle skipped", got.bundleSkipped !== null ? `${got.bundleSkipped}: ${uiText(BUNDLE_SKIPPED_TEXT[got.bundleSkipped], locale)}` : null],
   ];
 }
 
@@ -738,12 +764,12 @@ const recordSummary = withRun("Run", (r, view, source) => {
     ["Target", targetLink(r, view.env)],
     [kindLabel(r.kind), cell(r.kind)],
     ["Flow", cell(r.flow)],
-    ["Outcome", outcomeText(r)],
-    ["Reason", recordReason(r)],
+    ["Outcome", t(outcomeText(r), view)],
+    ["Reason", t(recordReason(r), view)],
 
     ["Exit code", cell(r.exitCode)],
     ["Attempt", cell(r.attempt)],
-    ...recoveryRows(r),
+    ...recoveryRows(r, view.locale),
     ...forkRows(r),
     ["Host", cell(r.host)],
     [VENUE_LABEL, cell(r.backend)],
@@ -754,59 +780,59 @@ const recordSummary = withRun("Run", (r, view, source) => {
     ["Provider and model", [r.provider, r.model].filter(Boolean).join(" / ") || "-"],
     ["Model role", typeof r.modelRole === "string" && /^[a-z][a-z0-9_-]{0,31}$/.test(r.modelRole) ? r.modelRole : null],
     ["Agent refusals", modelRolesTelemetryOf(r.modelRoles)?.refusals.length || null],
-    ["Model choice", modelChoiceSentence(r)],
-    ["Provider failure", providerFailureSentence(r.providerFailure)],
+    ["Model choice", t(modelChoiceSentence(r), view)],
+    ["Provider failure", t(providerFailureSentence(r.providerFailure), view)],
     ["Provider reset", providerFailureOf(r.providerFailure)?.resetAt !== undefined ? timeHtml(r.providerFailure.resetAt) : null],
     ["Turns", `${cell(r.turns)}${Number.isSafeInteger(r.maxTurns) ? ` of ${r.maxTurns}` : ""}`],
     ["Trigger", r.triggerIndex !== null && r.triggerIndex !== undefined ? html`<a href="/config">row ${r.triggerIndex + 1}</a> (${cell(r.triggerType)})${view.data?.trigger ? `: ${[view.data.trigger.phrase, view.data.trigger.label, view.data.trigger.pattern].filter(Boolean).join(", ")} (as the triggers file says now)` : ""}` : "-"],
-    ["MCP", view.data?.trigger ? `${view.data.trigger.mcp?.length ? view.data.trigger.mcp.join(", ") : "none"} (as the triggers file says now; the record does not say which connected)` : null],
+    ["MCP", view.data?.trigger ? `${view.data.trigger.mcp?.length ? view.data.trigger.mcp.join(", ") : t("none", view)} (${t("as the triggers file says now; the record does not say which connected", view)})` : null],
     ["Replica", Number.isInteger(r.replica) ? html`${r.replica} of ${cell(r.replicas)}${view.data?.siblings?.length ? html` · ${view.data.siblings.map((s) => html`${runLink(s.jobId)} ${ui.outcomeBadge(s.outcome, recordReason(s))} `)}` : null}` : null],
     ["Queued", Number.isFinite(msOf(r.queuedAt)) ? timeHtml(msOf(r.queuedAt)) : null],
     ["Wait for a slot", Number.isFinite(msOf(r.queuedAt)) && Number.isFinite(started) ? ageText(started - msOf(r.queuedAt)) : null],
-    ["Stalled re-pick", r.stalledRepick ? "This job was re-picked after its worker stopped reporting." : null],
+    ["Stalled re-pick", r.stalledRepick ? t("This job was re-picked after its worker stopped reporting.", view) : null],
     ["Started", timeHtml(started)],
     ["Ended", timeHtml(ended)],
     ["Took", Number.isFinite(started) && Number.isFinite(ended) ? ageText(ended - started) : "-"],
-    ["Read from", source === "mirror" ? "the fleet's run mirror" : "this host's run history"],
-  ])}`;
+    ["Read from", t(source === "mirror" ? "the fleet's run mirror" : "this host's run history", view)],
+  ], view.locale)}`;
 });
 
 /** Dollar windows have no soft hold; these are settlement facts, never a promise to spend again. */
-export function settlementText(basis) {
-  return ({ metered: "settled from the reported model cost", floor: "the window keeps the whole hold because the full cost was not known", refunded: "the hold was released before the run spent", unreserved: "no dollar hold was reserved" })[basis] ?? "no settlement explanation was recorded";
+export function settlementText(basis, locale = "en") {
+  return uiText(({ metered: "settled from the reported model cost", floor: "the window keeps the whole hold because the full cost was not known", refunded: "the hold was released before the run spent", unreserved: "no dollar hold was reserved" })[basis] ?? "no settlement explanation was recorded", locale);
 }
 
 export const runCostPanel = withRun("Tokens and dollars", (r, view) => {
-  const t = r.tokens ?? null;
+  const tokens = r.tokens ?? null;
   const d = r.dollars ?? null;
   const cost = runCost(r, Array.isArray(view.data.subscriptions) ? view.data.subscriptions : []);
   const attempts = view.data?.recoveryRuns ?? [];
   const holds = Array.isArray(view.data?.runHolds) ? view.data.runHolds : [];
-  return html`${attempts.length > 1 || holds.length ? html`<h3>Each attempt</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a, view.data.subscriptions ?? []))}${a.dollars ? `; ${usdText(a.dollars.settledMicros)} settled` : ""}.</p>`)}${holds.map((h) => html`<p>Container attempt ${h.seq}: ${usdText(h.amountMicros)} ${h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole hold after it was lost" : h.state}.</p>`)}<p>A durable run can hold up to ${(2 + RECOVERY_CAP)} per-job caps: two queue attempts and ${RECOVERY_CAP} recoveries. Each settles on its own.</p>` : null}${capMicrosOf(r) > 0 && cost ? ui.meter({ value: Math.round(cost.usd * 1e6), max: capMicrosOf(r), label: "Job cap (dollars)" }) : null}${facts([
-    ["Cost", costText(cost)],
-    ["Cost class", cost ? `${cost.class}${cost.floor ? " (a floor: the meter could not see all of it)" : ""}` : "not metered"],
-    ["Input tokens", t ? count(t.input) : "-"],
-    ["Output tokens", t ? count(t.output) : "-"],
-    ["Total tokens", t ? count(t.total) : "-"],
-    ["Model calls", t ? cell(t.calls) : "-"],
+  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a, view.data.subscriptions ?? []))}${a.dollars ? `; ${usdText(a.dollars.settledMicros)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${usdText(h.amountMicros)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole hold after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job caps: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capMicrosOf(r) > 0 && cost ? ui.meter({ value: Math.round(cost.usd * 1e6), max: capMicrosOf(r), label: t("Job cap (dollars)", view) }) : null}${facts([
+    ["Cost", t(costText(cost), view)],
+    ["Cost class", cost ? `${t(cost.class, view)}${cost.floor ? ` (${t("a floor: the meter could not see all of it", view)})` : ""}` : t("not metered", view)],
+    ["Input tokens", tokens ? count(tokens.input) : "-"],
+    ["Output tokens", tokens ? count(tokens.output) : "-"],
+    ["Total tokens", tokens ? count(tokens.total) : "-"],
+    ["Model calls", tokens ? cell(tokens.calls) : "-"],
     ["Job cap", usdText(capMicrosOf(r))],
-    ["Reserved", d ? usdText(d.reservedMicros) : "no dollar window applied"],
-    ["Settled", d && d.settledMicros !== null && d.settledMicros !== undefined ? `${usdText(d.settledMicros)}: ${settlementText(d.basis)}` : null],
+    ["Reserved", d ? usdText(d.reservedMicros) : t("no dollar window applied", view)],
+    ["Settled", d && d.settledMicros !== null && d.settledMicros !== undefined ? `${usdText(d.settledMicros)}: ${settlementText(d.basis, view.locale)}` : null],
     ["Released at the end", d && Number.isFinite(d.reservedMicros) && Number.isFinite(d.settledMicros) ? usdText(Math.max(0, d.reservedMicros - d.settledMicros)) : null],
-    ["Token split", t && (t.rootTotal != null || t.otherTotal != null || t.childTotal != null) ? `${count(t.rootTotal ?? 0)} this run, ${count(t.otherTotal ?? 0)} other sessions, ${count(t.childTotal ?? 0)} subprocesses` : null],
-    ["Unmetered children", t?.unmeteredChildren],
-    ["Cost unreported", t?.costUnreported],
+    ["Token split", tokens && (tokens.rootTotal != null || tokens.otherTotal != null || tokens.childTotal != null) ? `${count(tokens.rootTotal ?? 0)} this run, ${count(tokens.otherTotal ?? 0)} other sessions, ${count(tokens.childTotal ?? 0)} subprocesses` : null],
+    ["Unmetered children", tokens?.unmeteredChildren],
+    ["Cost unreported", tokens?.costUnreported],
     ["Model window", d?.modelBasis ? settlementText(d.modelBasis) : null],
-  ])}`;
+  ], view.locale)}`;
 });
 
 /** Bytes as MiB. */
 const mib = (bytes) => (Number.isFinite(bytes) ? `${count(bytes / (1024 * 1024))} MiB` : "-");
 
-export const runResources = withRun("Resources", (r) => {
+export const runResources = withRun("Resources", (r, view) => {
   const x = r.resources ?? null;
   const size = r.size ?? null;
-  return html`${x && size?.memMiB > 0 ? ui.meter({ value: x.memPeak, max: size.memMiB * 1024 * 1024, label: "Peak memory against size given" }) : null}${facts([
+  return html`${x && size?.memMiB > 0 ? ui.meter({ value: x.memPeak, max: size.memMiB * 1024 * 1024, label: t("Peak memory against size given", view) }) : null}${facts([
     ["Size given", size ? `${count(size.memMiB)} MiB, ${Number.isSafeInteger(size.cpuCenti) && size.cpuCenti >= 0 ? coresText(size.cpuCenti) : "- cores"} (${cell(size.source)})` : "-"],
     ["Peak memory", x ? mib(x.memPeak) : "not reported"],
     ["Out-of-memory kills", x ? cell(x.oomKills) : null],
@@ -817,29 +843,29 @@ export const runResources = withRun("Resources", (r) => {
     ["Memory pressure", x ? `${(x.memSomeUsec ?? 0) / 1e6} s some, ${(x.memFullUsec ?? 0) / 1e6} s full` : null],
     ["Throttled periods", x?.throttledPeriods],
     ["Host offered at admission", r.capacity ? `${r.capacity.slots ?? "?"} slots, ${r.capacity.memMiB ?? "?"} MiB, ${r.capacity.cpuCenti === "off" ? "CPU budget off" : r.capacity.cpuCenti != null ? coresText(r.capacity.cpuCenti) : "CPU budget unknown"}; ${r.capacity.cpus ?? "?"} physical CPUs` : null],
-  ])}`;
+  ], view.locale)}`;
 });
 
-export const runSession = withRun("Session and plan", (r) => {
+export const runSession = withRun("Session and plan", (r, view) => {
   const s = r.session ?? null;
   const p = r.plan ?? null;
   return facts([
-    ["Session", s ? (s.resumed ? "resumed" : `fresh${typeof s.reason === "string" ? `: ${nestedText("session.reason", s.reason)}` : ""}`) : "this trigger keeps no session"],
-    ["Kept", sessionSavedOf(r) ? `for the next run on ${r.target ?? "this target"}` : null],
-    ["Transcript", s && Number.isFinite(s.bytes) ? `${count(s.bytes / 1024)} KB in the session store` : null],
-    ["Plan", p ? `${cell(p.outcome)}${p.clamped ? ", clamped" : ""}${typeof p.reason === "string" && p.reason !== "" ? `: ${nestedText("plan.reason", p.reason)}` : ""}` : "none"],
+    ["Session", s ? (s.resumed ? t("resumed", view) : `${t("fresh", view)}${typeof s.reason === "string" ? `: ${t(nestedText("session.reason", s.reason), view)}` : ""}`) : t("this trigger keeps no session", view)],
+    ["Kept", sessionSavedOf(r) ? `${t("for the next run on", view)} ${r.target ?? t("this target", view)}` : null],
+    ["Transcript", s && Number.isFinite(s.bytes) ? `${count(s.bytes / 1024)} KB ${t("in the session store", view)}` : null],
+    ["Plan", p ? `${cell(t(p.outcome, view))}${p.clamped ? `, ${t("clamped", view)}` : ""}${typeof p.reason === "string" && p.reason !== "" ? `: ${t(nestedText("plan.reason", p.reason), view)}` : ""}` : t("none", view)],
     ["Plan id", p?.planId ? html`<span class="mono">${p.planId}</span>` : null],
-  ]);
+  ], view.locale);
 });
 
 export const runChain = withRun("Chain", (r, view) => {
   const kids = Array.isArray(view.data?.children) ? view.data.children : [];
-  if (!r.parentJobId && kids.length === 0 && !(r.chainRefused > 0)) return ui.collapsed({ icon: "chain", title: "No parent or child runs", body: `No child run among the ${count(view.data?.childrenSearched ?? 0)} newest runs.` });
+  if (!r.parentJobId && kids.length === 0 && !(r.chainRefused > 0)) return ui.collapsed({ icon: "chain", title: t("No parent or child runs", view), body: `${t("No child run among the", view)} ${count(view.data?.childrenSearched ?? 0)} ${t("newest runs.", view)}` });
   return html`${facts([
-    ["Parent", r.parentJobId ? runLink(r.parentJobId) : "none"],
+    ["Parent", r.parentJobId ? runLink(r.parentJobId) : t("none", view)],
     ["Depth", cell(r.chainDepth)],
     ["Refused chain requests", `${cell(r.chainRefused)}; a job may queue at most ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT} (PI_CHAIN_MAX_PER_JOB)`],
-  ])}<h3>Children</h3>${kids.length === 0 ? html`<p class="note">No child run among the ${count(view.data?.childrenSearched ?? 0)} newest runs.</p>` : html`<ul class="plain">${kids.map((k) => html`<li>${runLink(k.jobId)} ${outcomeText(k)}</li>`)}</ul>`}`;
+  ], view.locale)}<h3>${t("Children", view)}</h3>${kids.length === 0 ? html`<p class="note">${t("No child run among the", view)} ${count(view.data?.childrenSearched ?? 0)} ${t("newest runs.", view)}</p>` : html`<ul class="plain">${kids.map((k) => html`<li>${runLink(k.jobId)} ${t(outcomeText(k), view)}</li>`)}</ul>`}`;
 });
 
 /** The elapsed run time, with fixed-width components so updates do not move the card. */
@@ -854,43 +880,44 @@ export function runHeadline(view) {
   const chat = view.data?.chat;
   const recovering = r?.reason === "recovery-enqueued" && (chat?.activeJobId || chat?.queuedJobId);
   const active = chat?.jobState === "active" || runningWithoutRecord(view);
-  const badge = recovering ? ui.badge("running", "Recovering") : r ? ui.outcomeBadge(r.outcome, recordReason(r)) : ui.badge(active ? "running" : "idle", active ? "Running" : QUEUED_STATES.includes(chat?.jobState) ? "Queued" : "Unknown");
+  const badge = recovering ? ui.badge("running", t("Recovering", view)) : r ? ui.badge(outcomeWord(r.outcome, recordReason(r)).status, t(capitalised(outcomeWord(r.outcome, recordReason(r)).word), view)) : ui.badge(active ? "running" : "idle", t(active ? "Running" : QUEUED_STATES.includes(chat?.jobState) ? "Queued" : "Unknown", view));
   const facts = r ?? a ?? {};
-  const cancel = canAct(view) && chat?.jobState === "active" && RUN_ID_RE.test(view.query?.id ?? "") ? ui.actForm({ action: "cancel-active", hidden: [["jobId", view.query.id]], label: "Cancel run", kind: ["sm", "danger"], icon: "cancel" }) : null;
-  return html`${badge} ${facts.project ? ui.ptag(facts.project) : null} ${facts.target ? targetLink(facts, view.env) : null} ${facts.flow ?? ""} ${facts.host ? `on ${facts.host}` : ""} ${facts.endedAt ? timeHtml(msOf(facts.endedAt)) : facts.startedAt ? timeHtml(msOf(facts.startedAt)) : null}${cancel}`;
+  const cancel = canAct(view) && chat?.jobState === "active" && RUN_ID_RE.test(view.query?.id ?? "") ? ui.actForm({ action: "cancel-active", hidden: [["jobId", view.query.id]], label: t("Cancel run", view), kind: ["sm", "danger"], icon: "cancel" }) : null;
+  return html`${badge} ${facts.project ? ui.ptag(facts.project) : null} ${facts.target ? targetLink(facts, view.env) : null} ${facts.flow ?? ""} ${facts.host ? `${t("on", view)} ${facts.host}` : ""} ${facts.endedAt ? timeHtml(msOf(facts.endedAt)) : facts.startedAt ? timeHtml(msOf(facts.startedAt)) : null}${cancel}`;
 }
 
 export function runSummary(view) {
   if (recordOf(view)) {
-    if (fromNewerRelease(recordOf(view))) return newerSummary(recordOf(view), view.data?.run?.source);
-    if (refusedBeforeStart(recordOf(view))) return titled("Run", facts([["Job", recordOf(view).jobId], ["Target", targetLink(recordOf(view), view.env)], ["Project", recordOf(view).project], ["Host", recordOf(view).host], [VENUE_LABEL, recordOf(view).backend]]));
+    if (fromNewerRelease(recordOf(view))) return newerSummary(recordOf(view), view.data?.run?.source, view.locale);
+    if (refusedBeforeStart(recordOf(view))) return titled("Run", facts([["Job", recordOf(view).jobId], ["Target", targetLink(recordOf(view), view.env)], ["Project", recordOf(view).project], ["Host", recordOf(view).host], [VENUE_LABEL, recordOf(view).backend]], view.locale), view.locale);
     return recordSummary(view);
   }
   const a = view.data?.activeRun;
   if (!a) return html``;
-  return titled("Run", facts([["Target", targetLink(a, view.env)], ["Project", a.project], ["Flow", a.flow], ["Host", a.host], [VENUE_LABEL, a.backend], ["Provider and model", [a.provider, a.model].filter(Boolean).join(" / ")], ["Queue", a.queue], ["Queued", timeHtml(msOf(a.queuedAt))], ["Started", timeHtml(msOf(a.startedAt))]]));
+  return titled("Run", facts([["Target", targetLink(a, view.env)], ["Project", a.project], ["Flow", a.flow], ["Host", a.host], [VENUE_LABEL, a.backend], ["Provider and model", [a.provider, a.model].filter(Boolean).join(" / ")], ["Queue", a.queue], ["Queued", timeHtml(msOf(a.queuedAt))], ["Started", timeHtml(msOf(a.startedAt))]], view.locale), view.locale);
 }
 
 export function runRecord(view) {
-  return recordOf(view) || !runningWithoutRecord(view) ? html`` : ui.collapsed({ icon: "runs", title: "Run record, tokens, resources, session and chain are written when the run ends." });
+  return recordOf(view) || !runningWithoutRecord(view) ? html`` : ui.collapsed({ icon: "runs", title: t("Run record, tokens, resources, session and chain are written when the run ends.", view) });
 }
 
 export function runRest(view) {
-  return refusedBeforeStart(recordOf(view)) ? ui.collapsed({ icon: "runs", title: "Nothing ran, so there is no progress, transcript or spend.", body: "Session fresh, no parent or child runs. No workspace to reopen: none was made." }) : html``;
+  return refusedBeforeStart(recordOf(view)) ? ui.collapsed({ icon: "runs", title: t("Nothing ran, so there is no progress, transcript or spend.", view), body: t("Session fresh, no parent or child runs. No workspace to reopen: none was made.", view) }) : html``;
 }
 
 export function runTranscriptState(view) {
   if (refusedBeforeStart(recordOf(view))) return html``;
   const meta = view.data?.transcript;
   const r = recordOf(view);
-  const state = meta?.exists ? meta.ended ? `Ended (${outcomeWord(r?.outcome ?? meta.outcome, recordReason(r)).word ?? r?.outcome ?? meta.outcome ?? "unknown"}); kept 24 hours after the end.` : `Streamed from ${r?.host ?? view.data?.activeRun?.host ?? "the worker"} as it happens.` : meta?.unreachable ? "The live transcript could not be read; the next update tries again." : r ? transcriptAbsentText(r) : "Waiting for the run's live transcript. It attaches here when it starts.";
-  return titled("Live transcript", html`<p data-transcript-status role="status" aria-live="polite">${state}</p>`);
+  const outcome = outcomeWord(r?.outcome ?? meta?.outcome, recordReason(r)).word ?? r?.outcome ?? meta?.outcome ?? "unknown";
+  const state = view.locale === "zh" ? meta?.exists ? meta.ended ? `已结束（${t(outcome, view)}）；运行结束后保留 24 小时。` : `正在从 ${r?.host ?? view.data?.activeRun?.host ?? "worker"} 实时传输。` : meta?.unreachable ? "无法读取实时对话记录；下次刷新时重试。" : r ? transcriptAbsent(r, view.locale) : "正在等待运行的实时对话记录。运行开始后会在此显示。" : meta?.exists ? meta.ended ? `Ended (${outcome}); kept 24 hours after the end.` : `Streamed from ${r?.host ?? view.data?.activeRun?.host ?? "the worker"} as it happens.` : meta?.unreachable ? "The live transcript could not be read; the next update tries again." : r ? transcriptAbsent(r) : "Waiting for the run's live transcript. It attaches here when it starts.";
+  return titled("Live transcript", html`<p data-transcript-status role="status" aria-live="polite">${state}</p>`, view.locale);
 }
 
 export function runTerminal(view) {
   const chat = view.data?.chat;
   if (view.role !== "operator" || refusedBeforeStart(recordOf(view)) || !["live", "reply"].includes(chat?.mode)) return html``;
-  return titled("Terminal chat", command(view.query.id, recordOf(view)?.host ?? view.data?.activeRun?.host));
+  return titled("Terminal chat", command(view.query.id, recordOf(view)?.host ?? view.data?.activeRun?.host, view.locale), view.locale);
 }
 
 export function runActionsPanel(view) {
@@ -898,7 +925,7 @@ export function runActionsPanel(view) {
   if (!r || view.role !== "operator" || !RUN_ID_RE.test(r.jobId ?? "")) return html``;
   const continuing = r.reason === "recovery-enqueued" && [view.data?.chat?.activeJobId, view.data?.chat?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
   if (continuing) return html``;
-  return titled("Actions", html`${rerunLine(r, view)}${forkLine(r, view)}${isSchedulerJobId(r.jobId) ? html`<p>A cron run is fired again by hand from its trigger as the triggers file says now.</p>` : null}`);
+  return titled("Actions", html`${rerunLine(r, view)}${forkLine(r, view)}${isSchedulerJobId(r.jobId) ? html`<p>${t("A cron run is fired again by hand from its trigger as the triggers file says now.", view)}</p>` : null}`, view.locale);
 }
 
 export function runSandbox(view) {
@@ -906,14 +933,14 @@ export function runSandbox(view) {
   const r = record ?? view.data?.activeRun;
   if (!r || (!record && !runningWithoutRecord(view))) return html``;
   // Only a historical record can predate venue attribution. Missing live facts are unknown, never legacy local.
-  if (!record && !r.backend) return titled("Sandbox", html`<p>This running job's venue could not yet be read. Its host's default is not known here.</p>`);
+  if (!record && !r.backend) return titled("Sandbox", html`<p>${t("This running job's venue could not yet be read. Its host's default is not known here.", view)}</p>`, view.locale);
   const venue = r.backend ?? UNATTRIBUTED_BACKEND;
   const serves = servesOf(venue), custody = venueCustody(venue);
   const check = view.data?.sandboxCheck;
   const o = recordOpenshell(r);
-  const workspace = refusedBeforeStart(r) ? "No workspace was made: the run was refused before it started." : sandboxShellRefusal(venue) ? `Its workspace is ${sandboxShellRefusal(venue)}.` : check?.retained === true && Number.isFinite(check.until) ? html`Kept on ${r.host} until ${timeHtml(check.until)}. PI_SANDBOX_RETENTION_HOURS controls this window (24 hours by default; 0 keeps none).` : check?.retained === false ? check.why === "past-window" ? "Past its retention window: the sandbox command needs --pin." : SANDBOX_KEPT_TEXT[check.why] ?? check.reason ?? "Its workspace cannot be reopened." : "Kept on its host for PI_SANDBOX_RETENTION_HOURS after the run (24 hours by default, when retention is on there). This console cannot read another host's retention setting; the CLI on that host decides.";
+  const workspace = refusedBeforeStart(r) ? t("No workspace was made: the run was refused before it started.", view) : sandboxShellRefusal(venue) ? `${t("Its workspace is", view)} ${t(sandboxShellRefusal(venue), view)}.` : check?.retained === true && Number.isFinite(check.until) ? html`${t("Kept on", view)} ${r.host} ${t("until", view)} ${timeHtml(check.until)}. PI_SANDBOX_RETENTION_HOURS ${t("controls this window (24 hours by default; 0 keeps none).", view)}` : check?.retained === false ? check.why === "past-window" ? t("Past its retention window: the sandbox command needs --pin.", view) : t(SANDBOX_KEPT_TEXT[check.why] ?? check.reason ?? "Its workspace cannot be reopened.", view) : t("Kept on its host for PI_SANDBOX_RETENTION_HOURS after the run (24 hours by default, when retention is on there). This console cannot read another host's retention setting; the CLI on that host decides.", view);
   const siblings = Array.isArray(view.data?.siblings) ? view.data.siblings : [];
-  return titled(`Sandbox: ${venue}${r.host ? ` on ${r.host}` : ""}`, html`${r.backend ? null : html`<p>A local run from before venues were recorded.</p>`}${factsOne([...(serves ? SERVES.map((key) => [key === "liveTranscript" ? "Live transcript" : key === "sandboxShell" ? "Sandbox shell" : capitalised(key), SERVES_TEXT[key]?.[serves[key]]]) : [[VENUE_LABEL, "This console does not know this venue yet."]]), [VENUE_LABEL, BACKENDS[venue]?.describe ?? "This console does not know this venue yet."], ["Who holds the credentials", custody ? CUSTODY_TEXT[custody] : "unknown"], ["Sandbox policy", o ? openshellCountsText(o) : null], ["Rule hosts", o ? o.ruleHostCount === 0 ? openshellHostsText(o) : html`${o.ruleHostCount} rule hosts: ${o.ruleHosts.map((name) => ui.chip(name))}${o.ruleHostCount > o.ruleHosts.length ? ` and ${o.ruleHostCount - o.ruleHosts.length} more` : ""}` : null], ["Workspace", workspace], ["Replica", Number.isInteger(r.replica) ? `replica ${r.replica} of ${r.replicas}: each replica is its own sandbox, racing the others on the same event` : null]])}${siblings.length ? html`<p>Sibling replicas: ${siblings.map((s) => html`${runLink(s.jobId)} ${ui.outcomeBadge(s.outcome, recordReason(s))} `)}</p>` : null}`);
+  return titled(`${t("Sandbox", view)}: ${venue}${r.host ? ` ${t("on", view)} ${r.host}` : ""}`, html`${r.backend ? null : html`<p>${t("A local run from before venues were recorded.", view)}</p>`}${factsOne([...(serves ? SERVES.map((key) => [key === "liveTranscript" ? "Live transcript" : key === "sandboxShell" ? "Sandbox shell" : capitalised(key), t(SERVES_TEXT[key]?.[serves[key]], view)]) : [[VENUE_LABEL, t("This console does not know this venue yet.", view)]]), [VENUE_LABEL, t(BACKENDS[venue]?.describe ?? "This console does not know this venue yet.", view)], ["Who holds the credentials", t(custody ? CUSTODY_TEXT[custody] : "unknown", view)], ["Sandbox policy", o ? t(openshellCountsText(o), view) : null], ["Rule hosts", o ? o.ruleHostCount === 0 ? t(openshellHostsText(o), view) : html`${o.ruleHostCount} ${t("rule hosts:", view)} ${o.ruleHosts.map((name) => ui.chip(name))}${o.ruleHostCount > o.ruleHosts.length ? ` ${t("and", view)} ${o.ruleHostCount - o.ruleHosts.length} ${t("more", view)}` : ""}` : null], ["Workspace", workspace], ["Replica", Number.isInteger(r.replica) ? `${t("replica", view)} ${r.replica} ${t("of", view)} ${r.replicas}: ${t("each replica is its own sandbox, racing the others on the same event", view)}` : null]], view.locale)}${siblings.length ? html`<p>${t("Sibling replicas:", view)} ${siblings.map((s) => html`${runLink(s.jobId)} ${ui.badge(outcomeWord(s.outcome, recordReason(s)).status, t(capitalised(outcomeWord(s.outcome, recordReason(s)).word), view))} `)}</p>` : null}`, view.locale);
 }
 
 export function runSecrets(view) {
@@ -921,18 +948,18 @@ export function runSecrets(view) {
   if (!r || (!recordBundle(r) && !recordSecretsProfile(r))) return html``;
   const got = recordBundle(r), b = got?.bundle;
   const names = (b?.variables ?? []).filter((name) => !b.shadowed.includes(name));
-  return titled("Secrets", html`${facts([["Secrets profile", recordSecretsProfile(r)], ...bundleRows(r)])}${Array.isArray(names) && names.length ? html`<p>${names.map((name) => ui.chip(`${name}${Array.isArray(b.placeholderNames) ? b.placeholderNames.includes(name) ? " (placeholder)" : " (value)" : ""}`))}</p>` : null}${b?.shadowed?.length ? html`<p>The trigger's value won; the bundle's was not passed: ${b.shadowed.join(", ")}.</p>` : null}<p class="card__sub">Names only: no secret value reaches a log, a record or this page.</p>`);
+  return titled("Secrets", html`${facts([["Secrets profile", t(recordSecretsProfile(r), view)], ...bundleRows(r, view.locale)], view.locale)}${Array.isArray(names) && names.length ? html`<p>${names.map((name) => ui.chip(`${name}${Array.isArray(b.placeholderNames) ? b.placeholderNames.includes(name) ? `（${t("placeholder", view)}）` : `（${t("value", view)}）` : ""}`))}</p>` : null}${b?.shadowed?.length ? html`<p>${t("The trigger's value won; the bundle's was not passed:", view)} ${b.shadowed.join(", ")}.</p>` : null}<p class="card__sub">${t("Names only: no secret value reaches a log, a record or this page.", view)}</p>`, view.locale);
 }
 
 export function runModels(view) {
   const r = recordOf(view), u = r?.usage;
   if (hiddenRecord(view) || !u) return html``;
   const models = Array.isArray(u.models) ? u.models : [];
-  return titled("Model usage", html`${table("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${usdText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.")}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]])}<p>Priced by pi-ai ${u.piAi ?? "unknown"} at stream time.</p>`);
+  return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${usdText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
 }
 
 export function runTail(view) {
-  return view.role === "operator" && view.data?.chat?.mode === "reply" && view.data?.transcript?.exists ? titled("Last transcript entries", html`<div data-run-tail></div><a href="#transcript">Read the whole transcript</a>`) : html``;
+  return view.role === "operator" && view.data?.chat?.mode === "reply" && view.data?.transcript?.exists ? titled("Last transcript entries", html`<div data-run-tail></div><a href="#transcript">${t("Read the whole transcript", view)}</a>`, view.locale) : html``;
 }
 
 /** Counts are positioned evenly: a record has no checkpoint timestamps, so the track invents none. */
@@ -942,9 +969,9 @@ function recoveryTrack(record, next, view) {
   const visible = Math.min(total, 24);
   const marks = Array.from({ length: visible }, (_, i) => {
     const kind = i < (c?.written ?? 0) ? "written" : i < (c?.written ?? 0) + (c?.failed ?? 0) ? "failed" : "skipped";
-    return html`<g class="run-cp run-cp--${kind}"><title>${kind} checkpoint ${i + 1}; its time was not recorded</title><circle cx="${40 + (visible <= 1 ? 0 : i * 270 / (visible - 1))}" cy="20" r="4"></circle></g>`;
+    return html`<g class="run-cp run-cp--${kind}"><title>${uiText(kind, view.locale)} ${uiText("checkpoint", view.locale)} ${i + 1}; ${uiText("its time was not recorded", view.locale)}</title><circle cx="${40 + (visible <= 1 ? 0 : i * 270 / (visible - 1))}" cy="20" r="4"></circle></g>`;
   });
-  return html`<div class="run-track"><svg viewBox="0 0 640 110" role="img" aria-label="Attempt and recovery; checkpoint positions are evenly spaced, not timestamps"><line class="run-track__line" x1="20" y1="70" x2="620" y2="70"></line><rect class="run-track__attempt" x="20" y="42" width="300" height="28" rx="14"></rect><text x="34" y="61">Attempt ${record.attempt ?? 1}: ${outcomeWord(record.outcome, recordReason(record)).word ?? record.outcome}</text>${marks}${next ? html`<line class="run-track__wait" x1="325" y1="56" x2="390" y2="56"></line><rect class="run-track__next" x="395" y="42" width="225" height="28" rx="14"></rect><text x="408" y="61">${view.data?.chat?.activeJobId === next ? "Recovery running" : "Recovery queued"}</text>` : null}</svg></div><p class="card__sub">Checkpoint positions are evenly spaced; their times and kinds were not recorded.${total > visible ? ` ${total - visible} more checkpoints are counted below.` : ""}</p>`;
+  return html`<div class="run-track"><svg viewBox="0 0 640 110" role="img" aria-label="${uiText("Attempt and recovery; checkpoint positions are evenly spaced, not timestamps", view.locale)}"><line class="run-track__line" x1="20" y1="70" x2="620" y2="70"></line><rect class="run-track__attempt" x="20" y="42" width="300" height="28" rx="14"></rect><text x="34" y="61">${uiText("Attempt", view.locale)} ${record.attempt ?? 1}: ${uiText(outcomeWord(record.outcome, recordReason(record)).word ?? record.outcome, view.locale)}</text>${marks}${next ? html`<line class="run-track__wait" x1="325" y1="56" x2="390" y2="56"></line><rect class="run-track__next" x="395" y="42" width="225" height="28" rx="14"></rect><text x="408" y="61">${uiText(view.data?.chat?.activeJobId === next ? "Recovery running" : "Recovery queued", view.locale)}</text>` : null}</svg></div><p class="card__sub">${uiText("Checkpoint positions are evenly spaced; their times and kinds were not recorded.", view.locale)}${total > visible ? ` ${total - visible} ${uiText("more checkpoints are counted below.", view.locale)}` : ""}</p>`;
 }
 
 export function runRecovery(view) {
@@ -955,7 +982,8 @@ export function runRecovery(view) {
   const recovered = rec?.recovered ?? [...(view.data?.recoveryRuns ?? [])].reverse().map((record) => recordRecovery(record)?.recovered).find(Boolean);
   const earlier = recordedEarlier(r.earlier) ?? [];
   const queuedAt = msOf(view.data?.recoveryLive?.queuedAt), startedAt = msOf(view.data?.recoveryLive?.startedAt);
-  return titled(`Recovery${Number.isInteger(r.triggerIndex) ? `: run.recover is armed on trigger row ${r.triggerIndex + 1}` : ""}`, html`${continuation || rec?.checkpoints ? recoveryTrack(r, continuation, view) : null}${facts(recoveryRows(r))}${!rec && !continuation ? html`<p>None needed: this run finished on its first attempt.</p>` : null}${continuation ? html`<p>${ui.badge(view.data.chat.activeJobId === continuation ? "running" : "idle", view.data.chat.activeJobId === continuation ? "Recovery running" : "Recovery queued")} ${runLink(continuation)}.</p>` : null}${recovered ? facts([["Restored from", `${recovered.from} checkpoint ${recovered.checkpointSeq ?? "(sequence not recorded)"}`], ["Recovery", `${recovered.n} of at most ${RECOVERY_CAP}`], ["Calls replayed", recovered.replayed], ["Calls interrupted (may or may not have happened)", recovered.interrupted], ["Calls not started", recovered.notStarted]]) : null}${recovered?.checkpointSeq ? html`<p>The agent was told it restarts from checkpoint ${recovered.checkpointSeq}. Its workspace was restored, with .pi/, .agents/ and the root context files reset to the base commit. It checks before repeating anything with outside effects.</p>` : null}${Number.isFinite(queuedAt) ? html`<p>Wait for a slot: ${ageText((Number.isFinite(startedAt) ? startedAt : view.now) - queuedAt)} on ${view.data.recoveryLive.host ?? r.host}.</p>` : null}${earlier.map((a) => html`<p>Retried: an earlier attempt ran on ${a.host}, ${timeHtml(msOf(a.startedAt))} to ${timeHtml(msOf(a.endedAt))}.</p>`)}${r.stalledRepick ? html`<p>Re-picked: its worker stopped answering and this pickup ran it again.</p>` : null}${view.role === "operator" ? html`<div data-recovery-tools></div>` : null}<p class="card__sub">Recovery queued waits for the checkpoint's host: ${RECOVERY_TTL_MS / 3_600_000} hours, longer while that host is alive, at most ${RECOVERY_MAX_WAIT_MS / 86_400_000} days.</p>`);
+  const recTitle = `${uiText("Recovery", view.locale)}${Number.isInteger(r.triggerIndex) ? `: run.recover ${uiText("is armed on trigger row", view.locale)} ${r.triggerIndex + 1}` : ""}`;
+  return titled(recTitle, html`${continuation || rec?.checkpoints ? recoveryTrack(r, continuation, view) : null}${facts(recoveryRows(r, view.locale), view.locale)}${!rec && !continuation ? html`<p>${t("None needed: this run finished on its first attempt.", view)}</p>` : null}${continuation ? html`<p>${ui.badge(view.data.chat.activeJobId === continuation ? "running" : "idle", t(view.data.chat.activeJobId === continuation ? "Recovery running" : "Recovery queued", view))} ${runLink(continuation)}.</p>` : null}${recovered ? facts([["Restored from", `${recovered.from} ${t("checkpoint", view)} ${recovered.checkpointSeq ?? `(${t("sequence not recorded", view)})`}`], ["Recovery", `${recovered.n} ${t("of at most", view)} ${RECOVERY_CAP}`], ["Calls replayed", recovered.replayed], ["Calls interrupted (may or may not have happened)", recovered.interrupted], ["Calls not started", recovered.notStarted]], view.locale) : null}${recovered?.checkpointSeq ? html`<p>${t("The agent was told it restarts from checkpoint", view)} ${recovered.checkpointSeq}. ${t("Its workspace was restored, with .pi/, .agents/ and the root context files reset to the base commit. It checks before repeating anything with outside effects.", view)}</p>` : null}${Number.isFinite(queuedAt) ? html`<p>${t("Wait for a slot:", view)} ${ageText((Number.isFinite(startedAt) ? startedAt : view.now) - queuedAt)} ${t("on", view)} ${view.data.recoveryLive.host ?? r.host}.</p>` : null}${earlier.map((a) => html`<p>${t("Retried: an earlier attempt ran on", view)} ${a.host}, ${timeHtml(msOf(a.startedAt))} ${t("to", view)} ${timeHtml(msOf(a.endedAt))}.</p>`)}${r.stalledRepick ? html`<p>${t("Re-picked: its worker stopped answering and this pickup ran it again.", view)}</p>` : null}${view.role === "operator" ? html`<div data-recovery-tools></div>` : null}<p class="card__sub">${t("Recovery queued waits for the checkpoint's host:", view)} ${RECOVERY_TTL_MS / 3_600_000} ${t("hours, longer while that host is alive, at most", view)} ${RECOVERY_MAX_WAIT_MS / 86_400_000} ${t("days.", view)}</p>`, view.locale);
 }
 
 function hostFacts(view, name) {
@@ -972,7 +1000,7 @@ export function runWhy(view) {
   const floor = host?.backends?.floor;
   const properties = floor && typeof floor === "object" ? Object.entries(floor) : [];
   const said = token ? explainReason(token, { why: r.why }) : null;
-  return titled("Why it was refused", html`${facts([["Rule", said?.known ? ui.withCode(said.sentence) : "No explanation is recorded for this rule yet."], ["Venue floor (PI_BACKEND_FLOOR)", properties.length ? properties.map(([name, want]) => html`<span>${PROPERTY_LABEL[name] ?? name}: ${want}; ${r.backend ?? UNATTRIBUTED_BACKEND} declares ${DECLARATION_TEXT[declarationOf(r.backend ?? UNATTRIBUTED_BACKEND, name)?.word] ?? "unknown"}. </span>`) : "This host has not published a floor."], ["Same reason in the last 24 hours", Number.isFinite(n) ? html`<a href="/runs?reason=${encodeURIComponent(token)}">${count(n)}</a>` : "could not be read"], ["Newest doctor result", doctor && !doctor.unreadable ? `${doctorCountsText(doctor)}, ${ageText(doctor.ageMs)} ago` : "not published or could not be read"]])}${said?.known && docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: "Read the rule in the reasons docs" }) : null}${view.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: `Run it on ${r.host ?? "the worker host"}; the console runs nothing on a host.` }) : html`<p>Ask an operator to run the host's doctor checks.</p>`}`);
+  return titled("Why it was refused", html`${facts([["Rule", said?.known ? ui.withCode(t(said.sentence, view)) : t("No explanation is recorded for this rule yet.", view)], ["Venue floor (PI_BACKEND_FLOOR)", properties.length ? properties.map(([name, want]) => html`<span>${t(PROPERTY_LABEL[name] ?? name, view)}: ${want}; ${r.backend ?? UNATTRIBUTED_BACKEND} ${t("declares", view)} ${t(DECLARATION_TEXT[declarationOf(r.backend ?? UNATTRIBUTED_BACKEND, name)?.word] ?? "unknown", view)}. </span>`) : t("This host has not published a floor.", view)], ["Same reason in the last 24 hours", Number.isFinite(n) ? html`<a href="/runs?reason=${encodeURIComponent(token)}">${count(n)}</a>` : t("could not be read", view)], ["Newest doctor result", doctor && !doctor.unreadable ? `${doctorCountsText(doctor)}, ${ageText(doctor.ageMs)} ${t("ago", view)}` : t("not published or could not be read", view)]], view.locale)}${said?.known && docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read the rule in the reasons docs", view) }) : null}${view.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: `${t("Run it on", view)} ${r.host ?? t("the worker host", view)}; ${t("the console runs nothing on a host.", view)}` }) : html`<p>${t("Ask an operator to run the host's doctor checks.", view)}</p>`}`, view.locale);
 }
 
 export function runHost(view) {
@@ -982,28 +1010,28 @@ export function runHost(view) {
   const age = beatAgeOf(host), fail = doctorProblems(doctor).find((p) => p.level === "fail");
   const queues = Array.isArray(view.data?.snapshot?.queueCounts) ? view.data.snapshot.queueCounts : [];
   const queue = queues.find((q) => q.queue === host?.queue || q.queue === `pi-jobs@${r.host}`);
-  return titled("The host", html`${facts([["Host", r.host], [VENUE_LABEL, r.backend ?? UNATTRIBUTED_BACKEND], ["Heartbeat", Number.isFinite(age) ? `${ageText(age)} ago` : "could not be read"], ["Newest failing doctor check", fail ? fail.label : doctor && !doctor.unreadable ? "none in its newest result" : "could not be read"], ["Queue waiting", queue ? count(queue.counts?.waiting) : "could not be read"], ["Queue running", queue ? count(queue.counts?.active) : "could not be read"]])}<a href="/fleet">Open Fleet for this host's queues and doctor checks</a>`);
+  return titled("The host", html`${facts([["Host", r.host], [VENUE_LABEL, r.backend ?? UNATTRIBUTED_BACKEND], ["Heartbeat", Number.isFinite(age) ? `${ageText(age)} ${t("ago", view)}` : t("could not be read", view)], ["Newest failing doctor check", fail ? fail.label : doctor && !doctor.unreadable ? t("none in its newest result", view) : t("could not be read", view)], ["Queue waiting", queue ? count(queue.counts?.waiting) : t("could not be read", view)], ["Queue running", queue ? count(queue.counts?.active) : t("could not be read", view)]], view.locale)}<a href="/fleet">${t("Open Fleet for this host's queues and doctor checks", view)}</a>`, view.locale);
 }
 
 export function runViewer(view) {
-  return view.role !== "operator" ? ui.banner({ status: "idle", sm: true, icon: "shield", title: "Signed in as a viewer", body: "Transcripts, chat, phase names, the run's note, failure reasons and every action are shown to operators only." }) : html``;
+  return view.role !== "operator" ? ui.banner({ status: "idle", sm: true, icon: "shield", title: t("Signed in as a viewer", view), body: t("Transcripts, chat, phase names, the run's note, failure reasons and every action are shown to operators only.", view) }) : html``;
 }
 
 /** Only exact retained points are selectable; ids carry no transcript text into the page. */
 function forkLine(r, view) {
   if (!canAct(view)) return null;
   const points = view.data?.forkPoints;
-  if (!points?.ok) return html`<p>Fork unavailable: ${(r.forkSource?.saved === false ? forkRefusalWords(forkArchiveFact(r.forkSource).reason) : forkRefusalWords(points?.refusal)) ?? forkRefusalWords("fork-source-unavailable")}.</p>`;
+  if (!points?.ok) return html`<p>${t("Fork unavailable:", view)} ${t((r.forkSource?.saved === false ? forkRefusalWords(forkArchiveFact(r.forkSource).reason) : forkRefusalWords(points?.refusal)) ?? forkRefusalWords("fork-source-unavailable"), view)}.</p>`;
   const entries = points.entries.filter((e) => e.positions?.length);
-  if (!entries.length) return html`<p>Fork unavailable: no exact workspace point is retained.</p>`;
+  if (!entries.length) return html`<p>${t("Fork unavailable:", view)} ${t("no exact workspace point is retained.", view)}</p>`;
   return html`<form class="act" id="run-fork" data-action="run-fork" autocomplete="off"><input type="hidden" name="jobId" value="${r.jobId}">
-    <p><b>Fork this run.</b> Continue from a retained point on a separate branch and pull request.</p>
-    ${ui.field({ label: "Fork point", id: "fork-point", control: ui.select({ id: "fork-point", name: "point", options: entries.flatMap((e) => e.positions.map((position) => ({ value: `${e.id}:${position}`, label: `${position} ${e.id} (${e.role ?? e.type})` }))) }) })}
-    ${ui.field({ label: "Provider (optional)", id: "fork-provider", control: ui.input({ id: "fork-provider", name: "provider" }) })}
-    ${ui.field({ label: "Model (optional)", id: "fork-model", control: ui.input({ id: "fork-model", name: "model" }) })}
-    ${ui.field({ label: "Thinking level (optional)", id: "fork-thinking", control: ui.select({ id: "fork-thinking", name: "thinking", options: ["", ...FORK_THINKING_LEVELS] }) })}
-    ${ui.field({ label: "Message (optional)", id: "fork-message", control: ui.input({ id: "fork-message", name: "message" }) })}
-    ${ui.btn({ type: "submit", label: "Preview a fork", kind: ["sm", "paid"], icon: "rerun" })}</form>`;
+    <p><b>${t("Fork this run.", view)}</b> ${t("Continue from a retained point on a separate branch and pull request.", view)}</p>
+    ${ui.field({ label: t("Fork point", view), id: "fork-point", control: ui.select({ id: "fork-point", name: "point", options: entries.flatMap((e) => e.positions.map((position) => ({ value: `${e.id}:${position}`, label: `${position} ${e.id} (${e.role ?? e.type})` }))) }) })}
+    ${ui.field({ label: t("Provider (optional)", view), id: "fork-provider", control: ui.input({ id: "fork-provider", name: "provider" }) })}
+    ${ui.field({ label: t("Model (optional)", view), id: "fork-model", control: ui.input({ id: "fork-model", name: "model" }) })}
+    ${ui.field({ label: t("Thinking level (optional)", view), id: "fork-thinking", control: ui.select({ id: "fork-thinking", name: "thinking", options: ["", ...FORK_THINKING_LEVELS] }) })}
+    ${ui.field({ label: t("Message (optional)", view), id: "fork-message", control: ui.input({ id: "fork-message", name: "message" }) })}
+    ${ui.btn({ type: "submit", label: t("Preview a fork", view), kind: ["sm", "paid"], icon: "rerun" })}</form>`;
 }
 
 /** Private answer-rule text is mounted only on operator run pages. */

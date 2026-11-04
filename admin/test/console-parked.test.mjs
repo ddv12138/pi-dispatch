@@ -23,8 +23,8 @@ const MIN = 60_000;
 /** A parked row as the fleet reader's snapshot carries one (`readParkedRuns` plus `pendingScan` and `project`). */
 const row = (jobId, over = {}) => ({ target: `acme/web#${jobId.length}`, kind: "github", jobId, parkedAt: T0 - 26 * MIN, ageMs: 26 * MIN, answered: false, chainCount: 2, project: "web", pendingScan: { jobId: null }, ...over });
 
-function view(role, data, { readOnly = false } = {}) {
-  return { page: "parked", role, readOnly, query: {}, env: {}, now: T0, pages: PAGES, data: { now: T0, ...data } };
+function view(role, data, { readOnly = false, locale = "en" } = {}) {
+  return { page: "parked", role, readOnly, query: {}, env: {}, now: T0, pages: PAGES, locale, data: { now: T0, ...data } };
 }
 const draw = (role, snapshot, extra = {}, opts = {}) => String(parkedQuestions(view(role, { snapshot, ...extra }, opts)));
 const cards = (out) => out.match(/<article class="[^"]*\bqcard[ "][^]*?<\/article>/g) ?? [];
@@ -192,6 +192,15 @@ test("the list's states: unread is never empty and has no count, no snapshot say
     assert.ok(empty.includes(PARKED_EMPTY) && empty.includes('<span class="count">0</span>'), empty);
     assert.equal(cards(empty).length, 0);
   }
+});
+
+test("Chinese parked cards translate approval framing and where the question is read", () => {
+  const approval = row("gh-approve", { reason: "awaiting-approval", approval: { action: "budget-raise" } });
+  const out = draw("viewer", { parked: [approval] }, {}, { locale: "zh" });
+  assert.match(out, /正在等待批准/);
+  assert.match(out, /批准仅允许使用声明的运行预算上限，仍受部署设置和范围预算约束/);
+  assert.match(out, /问题位于运行的最后一条消息/);
+  assert.doesNotMatch(out, /Awaiting approval for|Worker-enforced|The question is the run's last message/);
 });
 
 test("the rows whose planner check the page reads: the reply rows with a run id, in the snapshot's order, at most PARKED_CHECKS_MAX", () => {

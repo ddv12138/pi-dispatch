@@ -110,7 +110,7 @@ function snapshot(over = {}) {
   };
 }
 
-const viewOf = (snap, { role = "operator", readOnly = false, query = {}, pages = undefined, deployment = { folder: "pi-dispatch" } } = {}) => ({ page: "overview", data: { now: NOW, snapshot: snap, deployment }, role, readOnly, query, env: {}, now: NOW, ...(pages === undefined ? {} : { pages }) });
+const viewOf = (snap, { role = "operator", readOnly = false, query = {}, pages = undefined, deployment = { folder: "pi-dispatch" }, locale = "en" } = {}) => ({ page: "overview", data: { now: NOW, snapshot: snap, deployment }, role, readOnly, query, env: {}, now: NOW, locale, ...(pages === undefined ? {} : { pages }) });
 const draw = (render, snap, opts) => String(render(viewOf(snap, opts)));
 
 /** A sentence as a page holds it: `html` escapes its quote. */
@@ -128,6 +128,12 @@ test("the overview links to its pages by PAGES' names: the copy of their paths i
 test("every sentence is plain: no em dash, no emoji, no control byte", () => {
   const all = [COUNT_WINDOWS_UTC_TEXT, DAY_FLOOR_TEXT, FREE_SLOT_TEXT, HOST_NO_EXPIRY_TEXT, NEEDS_DEFINITION, NEEDS_UNKNOWN_PROJECT_TEXT, NO_DOCTOR_TEXT, NO_WORKER_TEXT, OVERVIEW_UNREAD_TEXT, REGISTRY_UNREAD_TEXT, SOFT_HOLD_REFUSED_TEXT, SOFT_HOLD_TEXT, SPEND_HOURS_TEXT, SPEND_SUM_TEXT, STALE_BEATS_TEXT, WAITING_CUT_TEXT, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, JOBS_UNREAD_TEXT, JOBS_UNREAD_WORDS, NOT_BEATING_WORDS, CAPS_EMPTY_TEXT, LAST_SEEN_WORDS, ...[NEEDS_EMPTY, WAITING_EMPTY, RUNNING_EMPTY, SPEND_EMPTY, HOSTS_EMPTY].flatMap((e) => [e.title, e.body])];
   for (const s of all) assert.match(s, /^[\x20-\x7e]+$/, s);
+});
+
+test("overview fixed panel titles and all-clear headline follow the selected Chinese locale", () => {
+  const calm = snapshot(CALM);
+  assert.equal(draw(overviewNeeds, calm, { locale: "zh" }).includes("需要你"), true);
+  assert.equal(String(overviewHeadline(viewOf(calm, { locale: "zh" }))).includes("一切正常"), true);
 });
 
 test("no snapshot: the eight say the one fixed sentence, the setup draws nothing, and the headline says Valkey was not read", () => {

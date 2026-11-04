@@ -6,6 +6,7 @@ import { ERROR_KINDS, ERROR_SENTENCES, errorPage } from "../src/console/error-pa
 import { parsePageQuery } from "../src/console/pages.mjs";
 import { LINK_PAGE_TITLE, loginCodePage, loginPage } from "../src/console/shell.mjs";
 import { NO_SCRIPT_TEXT } from "../src/console/signin.mjs";
+import { gatewayLanding } from "../src/console/gateway.mjs";
 import { FIXTURES, STATIC_SHOTS, assertClean, renderStatic } from "./helpers/console-pages-harness.mjs";
 import { parseDocument, shown } from "./helpers/script-dom.mjs";
 
@@ -248,4 +249,37 @@ test("each error page's title bar says its title and the line under it, as the E
   // A command in a catalog sentence is in the code face: the 503's, and the sign-in notice's, which says the same.
   assert.ok(String(errorPage({ kind: "unavailable" }).html).includes('An operator should run <span class="code">pi-dispatch doctor</span> on the host'));
   assert.ok(String(loginPage({ notice: "tokens" })).includes('<p class="banner__s">An operator should run <span class="code">pi-dispatch doctor</span> on the host.</p>'));
+});
+
+test("Simplified Chinese is available on sign-in, link, error and browser-terminal pages", () => {
+  const login = String(loginPage({ locale: "zh", notice: "wrong" }));
+  assert.match(login, /<html lang="zh-CN"/);
+  assert.ok(login.includes("登录控制台"));
+  assert.ok(login.includes("此令牌无法用于此控制台"));
+  assert.ok(login.includes("控制台令牌"));
+  assert.ok(login.includes("<code><span>pi-dispatch-console</span>"), "CLI command remains unchanged");
+
+  const link = String(loginCodePage({ locale: "zh", state: "used" }));
+  assert.ok(link.includes("一次性登录链接"));
+  assert.ok(link.includes("此登录链接已使用、过期或无效"));
+  assert.ok(link.includes("改用令牌登录"));
+  assert.ok(link.includes("/dispatch console --link"), "pi command remains unchanged");
+
+  const error = String(errorPage({ kind: "no-run", locale: "zh", runId: "gh-2f6a" }).html);
+  assert.match(error, /<html lang="zh-CN"/);
+  assert.ok(error.includes("找不到运行记录"));
+  assert.ok(error.includes("此 ID 的运行记录"));
+  assert.ok(error.includes('value="gh-2f6a"'), "run id is preserved as data");
+  assert.ok(error.includes("前往 运行记录"));
+
+  const refused = String(errorPage({ kind: "bad-query", locale: "zh", page: "insights", sentence: "range must be one of 7d, 30d, mtd" }).html);
+  assert.ok(refused.includes("range</span> 必须是以下值之一：7d, 30d, mtd。"), "parameter names and accepted machine values stay intact");
+  const paired = String(errorPage({ kind: "bad-query", locale: "zh", page: "audit", sentence: "seq and before do not go together: each says where the page starts" }).html);
+  assert.ok(paired.includes('seq</span> 和 <span class="code">before</span> 不能同时使用'));
+
+  const gateway = String(gatewayLanding({ locale: "zh" }));
+  assert.match(gateway, /<html lang="zh-CN"/);
+  assert.ok(gateway.includes("浏览器终端"));
+  assert.ok(gateway.includes("当前操作员令牌"));
+  assert.ok(gateway.includes("/api/sandbox-gateway/authorize"), "API route remains unchanged");
 });

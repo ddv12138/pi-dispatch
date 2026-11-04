@@ -2,6 +2,7 @@
 import { ANSWER_CLASSIFICATIONS } from "@edgehero/pi-dispatch/answerer";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { ageText, canAct, RUN_ID_RE } from "./common.mjs";
 
 export const ANSWERER_PASS_WORDS = Object.freeze({
@@ -10,6 +11,7 @@ export const ANSWERER_PASS_WORDS = Object.freeze({
 export const ANSWERER_READ_FAILURE = "Answer-rule results could not be read. These questions still wait for a person; open a run to answer it.";
 const runLink = (id, label = id) => RUN_ID_RE.test(id ?? "") ? html`<a class="link code" href="${`/run?${new URLSearchParams({ id })}`}">${label}</a>` : html`<span class="code">${label}</span>`;
 const number = n => Number.isFinite(n) && n >= 0 ? n : 0;
+const t = (message, view) => uiText(message, view?.locale);
 const ruleHref = id => `/parked/rules${typeof id === "string" ? `#${encodeURIComponent(`rule-${id}`)}` : ""}`;
 const sourceName = source => typeof source?.name === "string" ? source.name : "Named source unavailable";
 
@@ -47,7 +49,7 @@ export function answererStanding(view) {
   if (view.role !== "operator") return null;
   const state = view.data?.answerer;
   const rows = state?.standing ?? [];
-  return ui.card({ title: "Standing answers", sub: "Adopted by you", body: html`<ul class="pa-sts">${rows.map(answer => html`<li class="pa-st"><span class="pa-st__n">${ui.icon("flag", { size: "sm" })}<b>${answer.title}</b></span><span class="pa-st__a">${answer.text}</span><span class="pa-st__m">${answer.adoptedAt ? `adopted ${answer.adoptedAt}` : "adoption date not recorded"}; ${number(answer.used) === 1 ? "cited once" : `cited ${number(answer.used)} times`} in retained results</span></li>`)}</ul>${!rows.length ? html`<p>No standing answer has been adopted.</p>` : null}${canAct(view) ? standingAnswerEditor({ id: "standing-new", projects: [...new Set((state?.rules ?? []).flatMap(r => r.projects))] }) : null}<p class="pa-foot">A standing answer is reviewed in its own preview and Confirm. Adding one sends no reply.</p>` });
+  return ui.card({ title: t("Standing answers", view), sub: t("Adopted by you", view), body: html`<ul class="pa-sts">${rows.map(answer => html`<li class="pa-st"><span class="pa-st__n">${ui.icon("flag", { size: "sm" })}<b>${answer.title}</b></span><span class="pa-st__a">${answer.text}</span><span class="pa-st__m">${answer.adoptedAt ? `${t("adopted", view)} ${answer.adoptedAt}` : t("adoption date not recorded", view)}; ${number(answer.used) === 1 ? t("cited once", view) : `${t("cited", view)} ${number(answer.used)} ${t("times", view)}`} ${t("in retained results", view)}</span></li>`)}</ul>${!rows.length ? html`<p>${t("No standing answer has been adopted.", view)}</p>` : null}${canAct(view) ? standingAnswerEditor({ id: "standing-new", projects: [...new Set((state?.rules ?? []).flatMap(r => r.projects))] }) : null}<p class="pa-foot">${t("A standing answer is reviewed in its own preview and Confirm. Adding one sends no reply.", view)}</p>` });
 }
 
 export function standingAnswerEditor({ id, projects = [], runId = null, text = "", repo = "" }) {
@@ -64,7 +66,7 @@ export function answererRules(view) {
 
 export function answererParked(view, { manualAnswer = () => null } = {}) {
   const state = view.data?.answerer;
-  if (view.page === "answer-rules" && view.role === "operator" && !state?.rules?.length) return ui.card({ title: "Answer rules", body: state?.state === "ok" ? "No answer rule is configured. Write an answerRules entry by hand in triggers.json before drafts can start. Standing answers do not enable drafting by themselves." : ANSWERER_READ_FAILURE });
+  if (view.page === "answer-rules" && view.role === "operator" && !state?.rules?.length) return ui.card({ title: t("Answer rules", view), body: state?.state === "ok" ? t("No answer rule is configured. Write an answerRules entry by hand in triggers.json before drafts can start. Standing answers do not enable drafting by themselves.", view) : t(ANSWERER_READ_FAILURE, view) });
   if (!state || !(state.rules?.length || state.rows?.length || state.state !== "ok")) return null;
   const operator = view.role === "operator";
   const parked = view.data?.snapshot?.parked ?? [];
@@ -93,5 +95,5 @@ export function answererRun(view) {
   if (problem) return ui.banner({ status: "attention", title: "This draft cannot be offered", body: ANSWERER_PASS_WORDS[problem] ?? "Its retained sources could not be verified. Answer the question yourself, or restore the reviewed source." });
   const draft = offeredAnswerDraft(view);
   if (!draft) return html``;
-  return ui.card({ title: "Answer draft", sub: "Only your Confirm sends it", body: html`<p>Draft run ${runLink(draft.meta.draftRunId)} for ${runLink(draft.meta.runId)}.</p><h3>Question</h3><pre class="pa-private">${draft.question}</pre><h3>Draft</h3><pre class="pa-private">${draft.draft}</pre>${answererSources(draft.sources ?? draft.meta.sources)}<div id="answer-draft-controls">${canAct(view) && draft.draft ? html`<fieldset class="pa-draft-controls" data-answerer-control disabled>${ui.actForm({ action: "answer-draft-drop", hidden: [["runId", draft.meta.runId], ["draftRunId", draft.meta.draftRunId], ["digest", draft.digest]], label: "Preview dropping the draft", kind: "ghost" })}</fieldset><noscript><p>Dropping a draft requires JavaScript for its preview and Confirm.</p></noscript>` : null}</div>` });
+  return ui.card({ title: t("Answer draft", view), sub: t("Only your Confirm sends it", view), body: html`<p>${t("Draft run", view)} ${runLink(draft.meta.draftRunId)} ${t("for", view)} ${runLink(draft.meta.runId)}.</p><h3>${t("Question", view)}</h3><pre class="pa-private">${draft.question}</pre><h3>${t("Draft", view)}</h3><pre class="pa-private">${draft.draft}</pre>${answererSources(draft.sources ?? draft.meta.sources)}<div id="answer-draft-controls">${canAct(view) && draft.draft ? html`<fieldset class="pa-draft-controls" data-answerer-control disabled>${ui.actForm({ action: "answer-draft-drop", hidden: [["runId", draft.meta.runId], ["draftRunId", draft.meta.draftRunId], ["digest", draft.digest]], label: t("Preview dropping the draft", view), kind: "ghost" })}</fieldset><noscript><p>${t("Dropping a draft requires JavaScript for its preview and Confirm.", view)}</p></noscript>` : null}</div>` });
 }

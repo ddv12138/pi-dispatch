@@ -65,6 +65,12 @@ test("title cancel guard, trigger numbering and turn budget use the shared state
   assert.match(summary, /14 of 40/);
 });
 
+test("run detail uses the selected locale for panel titles and record fact labels", () => {
+  const zh = String(runSummary({ ...view({ run: { record: record({ triggerIndex: 0, triggerType: "comment" }) } }), locale: "zh" }));
+  assert.match(zh, /<dt>作业<\/dt>/);
+  assert.doesNotMatch(zh, /<dt>Job<\/dt>/);
+});
+
 test("run page has one fixed panel set and static transcript inside the page grid, with long cron IDs", async () => {
   const id = `repeat:${"long-trigger".repeat(10)}:1793181600000`;
   const data = { now: AT, run: { record: record({ jobId: id }) }, chat: { state: "finished", mode: "fork" }, transcript: { exists: false } };

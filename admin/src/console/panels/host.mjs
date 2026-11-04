@@ -18,6 +18,7 @@ import {
 } from "../../doctor-view.mjs";
 import { VENUE_LABEL } from "../../words.mjs";
 import { html } from "../html.mjs";
+import { uiText } from "../locale.mjs";
 import * as ui from "../kit.mjs";
 import {
   ageText,
@@ -28,6 +29,7 @@ import {
 } from "./common.mjs";
 
 const runLink = (id) => recordLink(id, { pulse: true });
+const t = (view, message) => uiText(message, view.locale);
 
 import {
   hostSkewText,
@@ -52,7 +54,7 @@ const command = (v, argv) =>
     : html`<p class="note"> Run the cleanup on ${label(v)} using its runtime, then the host budget gives the room back within 5 seconds once that runtime says the container is gone. </p>`;
 const card = (title, fn) => (v) =>
   ui.card({
-    title,
+    title: t(v, title),
     sub:
       {
         "Jobs on the host":
@@ -60,7 +62,12 @@ const card = (title, fn) => (v) =>
         "Slots and budget": "what the host promised, from its registry row",
         "Registry row": "what the worker publishes about itself",
         "Last 7 days": "one-hour buckets; read on page load",
-      }[title] ?? null,
+      }[title] ? t(v, {
+        "Jobs on the host": "running, orphaned and waiting; sizes from published facts",
+        "Slots and budget": "what the host promised, from its registry row",
+        "Registry row": "what the worker publishes about itself",
+        "Last 7 days": "one-hour buckets; read on page load",
+      }[title]) : null,
     body: fn(hostOf(v), v),
   });
 const digestOrphanObservation = (job) =>
@@ -257,7 +264,7 @@ export const hostSandboxes = card("Sandboxes left on the host", (h, v) => {
         !shell
           ? "This venue has no sandbox shell: pi-dispatch sandbox cannot reopen its runs."
           : typeof id === "string" && !id.startsWith("sha256:")
-            ? v.role === "operator" && !(until && until <= v.now) ? sandboxLinks({ id, host: h.name, config: v.data?.sandboxHosts, compact: true }) : command(v, ["pi-dispatch", "sandbox", id, ...(until && until <= v.now ? ["--pin"] : [])])
+            ? v.role === "operator" && !(until && until <= v.now) ? sandboxLinks({ id, host: h.name, config: v.data?.sandboxHosts, compact: true, locale: v.locale }) : command(v, ["pi-dispatch", "sandbox", id, ...(until && until <= v.now ? ["--pin"] : [])])
             : "The published id is a digest; identify the run on this host.",
       ];
     }),

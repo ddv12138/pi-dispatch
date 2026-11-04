@@ -15,6 +15,7 @@ import {
   doctorStale,
 } from "../../doctor-view.mjs";
 import { html } from "../html.mjs";
+import { uiText } from "../locale.mjs";
 import * as ui from "../kit.mjs";
 import {
   ageText,
@@ -34,6 +35,7 @@ import {
 } from "./overview.mjs";
 
 const runLink = (id) => recordLink(id, { pulse: true });
+const t = (view, message) => uiText(message, view.locale);
 
 const list = (x) => (Array.isArray(x) ? x : []);
 const hostHref = (name) => `/fleet/host?${new URLSearchParams({ name })}`;
@@ -47,7 +49,7 @@ const wrap =
   (view) => {
     const snapshot = view.data?.snapshot;
     return ui.card({
-      title,
+      title: t(view, title),
       flush,
       sub: typeof sub === "function" ? sub(snapshot, view) : sub,
       end: snapshot && typeof end === "function" ? end(snapshot, view) : end,
@@ -107,7 +109,7 @@ export const fleetBar = (v) => {
   const s = v.data?.snapshot;
   if (!s)
     return ui.card({
-      title: "Fleet",
+      title: t(v, "Fleet"),
       body: html`<p>The deployment's Valkey could not be read. The next refresh tries again.</p>`,
     });
   const queues = list(s.queueCounts);

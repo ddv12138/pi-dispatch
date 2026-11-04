@@ -43,7 +43,7 @@ function queryOf(qs) {
 }
 
 /** A runs page's view, as `pages.mjs` hands a panel one. */
-const viewOf = ({ role = "operator", qs = "", data = {}, now = NOW, env = {} } = {}) => ({ page: "runs", role, readOnly: false, query: queryOf(qs), env, now, pages: null, data: { subscriptions: [], ...data } });
+const viewOf = ({ role = "operator", qs = "", data = {}, now = NOW, env = {}, locale = "en" } = {}) => ({ page: "runs", role, readOnly: false, query: queryOf(qs), env, now, pages: null, locale, data: { subscriptions: [], ...data } });
 
 /**
  * Whether `href` is a runs page the console takes: the runs path, only the filter's fields and `before`, each once, a
@@ -405,4 +405,13 @@ test("a run's target links out to its forge when the deployment can build the li
   assert.equal(target({ ...run, kind: "gitlab" }, {}), "acme/web#1", "a GitLab run on a deployment with no GITLAB_URL");
   assert.equal(target({ ...run, kind: "gitlab" }, { GITLAB_URL: "https://gitlab.example.com" }), String(ui.outLink({ href: "https://gitlab.example.com/acme/web/-/issues/1", label: "acme/web#1" })));
   assert.equal(target({ ...run, target: null }), "-");
+});
+
+test("the runs filters and table headings use the selected Chinese locale", () => {
+  const filter = runsFiltersModel(viewOf({ locale: "zh" }));
+  assert.equal(filter.selects[0].label, "结果");
+  assert.equal(filter.selects[0].select.options[0].label, "全部");
+  const table = runsTableModel(viewOf({ locale: "zh", data: { runsPage: pageOf([{ ...base, jobId: "gh-1", outcome: "completed" }]) } }));
+  assert.equal(table.card.title, "运行记录");
+  assert.deepEqual(table.table.heads.slice(0, 4).map((head) => head.label), ["结束时间", "作业", "目标", "流程"]);
 });

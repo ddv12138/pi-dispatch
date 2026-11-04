@@ -54,6 +54,7 @@ import { PAGES, pageQueryString } from "./pages.mjs";
 import { ICON_NAMES, SPRITE } from "./pulse-icons.mjs";
 import { linkContent, signInContent } from "./signin.mjs";
 import { themeLabel } from "./theme.mjs";
+import { uiText } from "./locale.mjs";
 
 /**
  * The navigation, in its order: the screens a person works in, then Configuration. Watch stays in Triggers; Models is first in More. Every name is a `PAGES` key with a `nav` label; the shell test holds `NAV` and
@@ -144,7 +145,7 @@ export function navParkedHtml(data) {
 export const READ_ONLY_TITLE = "This console is read-only";
 
 /** The read-only banner's sentence: why, what it means, and what operators keep. */
-const READ_ONLY_BODY = html`It was started with <span class="code">PI_CONSOLE_READ_ONLY=1</span>, so every change is refused and no page shows a form. Operators still see reasons, transcripts and the audit log.`;
+const readOnlyBody = (locale) => html`${uiText("It was started with", locale)} <span class="code">PI_CONSOLE_READ_ONLY=1</span>, ${uiText("so every change is refused and no page shows a form. Operators still see reasons, transcripts and the audit log.", locale)}`;
 
 /**
  * The most live streams the whole console holds, every token together (`server.mjs` `STREAMS_TOTAL_MAX`). Written here
@@ -179,14 +180,18 @@ function selfHref(name, query) {
  * `[data-live-note]` box. `maxStreams` is the token's stream limit; a value that is not one leaves the number out
  * rather than state a wrong one. `reload` is the page's own address, for the limit note's Reload.
  */
-export function liveNoteHtml({ maxStreams = null, reload = null } = {}) {
+export function liveNoteHtml({ maxStreams = null, reload = null, locale = "en" } = {}) {
   const limit = Number.isSafeInteger(maxStreams) && maxStreams >= 1 ? String(maxStreams) : null;
   const notes = Object.entries(LIVE_NOTES).map(([state, n]) => {
-    let body = n.body;
-    if (state === "limit") body = limit === null ? body.replace("One token may hold {maxStreams} live tabs, and the console", "One token may hold only a few live tabs, and the console") : body.replace("{maxStreams}", limit);
+    let body = uiText(n.body, locale);
+    if (state === "limit") {
+      const first = locale === "zh" ? "一个令牌最多可连接 {maxStreams} 个实时标签页" : "One token may hold {maxStreams} live tabs";
+      const fallback = locale === "zh" ? "一个令牌可连接的实时标签页数量已达上限" : "One token may hold only a few live tabs";
+      body = limit === null ? body.replace(first, fallback) : body.replace("{maxStreams}", limit);
+    }
     // The stale note's time, written by the script; "at" shows only once there is one (`SHELL_CSS`).
-    const title = state === "stale" ? html`${n.title}<span class="live-note__at"> at <time data-since></time></span>` : n.title;
-    const actions = state === "limit" && reload !== null ? ui.btn({ kind: ["sm", "primary"], label: "Reload", href: reload }) : null;
+    const title = state === "stale" ? html`${uiText(n.title, locale)}<span class="live-note__at">${locale === "zh" ? "，更新时间 " : " at "}<time data-since></time></span>` : uiText(n.title, locale);
+    const actions = state === "limit" && reload !== null ? ui.btn({ kind: ["sm", "primary"], label: uiText("Reload", locale), href: reload }) : null;
     return html`<div data-live-note="${state}" hidden>${ui.banner({ status: n.status, icon: n.icon, sm: true, title, body, actions })}</div>`;
   });
   return html`<div id="live-note" class="live-note" aria-live="polite">${notes}</div>`;
@@ -197,10 +202,10 @@ export function liveNoteHtml({ maxStreams = null, reload = null } = {}) {
  * load and say when"): when it was drawn, as a `<time>` the script shows in the reader's own time, "not live", and
  * Reload. `now` is the page data's clock; a page with none says only that it is not live.
  */
-function drawnHtml(now, reload, before = null) {
+function drawnHtml(now, reload, before = null, locale = "en") {
   const at = Number.isFinite(now) && Math.abs(now) <= 8.64e15 ? new Date(now) : null;
-  const when = at === null ? html`Drawn once` : html`Drawn at <time datetime="${at.toISOString()}">${at.toISOString().slice(11, 16)} UTC</time>`;
-  return html`<div class="titlebar__end">${before}<span class="drawn">${ui.icon("clock", { size: "sm" })}<span>${when} \u00b7 not live</span></span>${ui.btn({ kind: ["sm", "ghost"], icon: "rerun", label: "Reload", href: reload })}</div>`;
+  const when = at === null ? html`${uiText("Drawn once", locale)}` : html`${uiText("Drawn at", locale)} <time datetime="${at.toISOString()}">${at.toISOString().slice(11, 16)} UTC</time>`;
+  return html`<div class="titlebar__end">${before}<span class="drawn">${ui.icon("clock", { size: "sm" })}<span>${when} \u00b7 ${uiText("not live", locale)}</span></span>${ui.btn({ kind: ["sm", "ghost"], icon: "rerun", label: uiText("Reload", locale), href: reload })}</div>`;
 }
 
 /**
@@ -213,9 +218,9 @@ function initialsOf(name) {
 }
 
 /** One navigation pill: its icon and label, `aria-current` on the screen shown, the Parked pill with its count panel. */
-function navLink(name, here, parked) {
+function navLink(name, here, parked, locale = "en") {
   const p = PAGES[name];
-  return html`<a href="${p.path}"${name === here ? html` aria-current="page"` : null}>${ui.icon(p.icon)}${p.nav}${name === "parked" ? parked : null}</a>`;
+  return html`<a href="${p.path}"${name === here ? html` aria-current="page"` : null}>${ui.icon(p.icon)}${uiText(p.nav, locale)}${name === "parked" ? parked : null}</a>`;
 }
 
 /**
@@ -234,8 +239,8 @@ export const SEARCH_HREF = `/runs#${ui.SEARCH_ID}`;
  * rules, which also leave it off a desktop bar just past each width where the bar's end is tightest (the end gives the
  * button the room the signed-in name had there, `page-css.mjs` `SHELL_CSS`).
  */
-function searchButton() {
-  return html`<a class="roundbtn hide-phone top__search" href="${SEARCH_HREF}" aria-label="Search runs" title="Search runs">${ui.icon("search")}</a>`;
+function searchButton(locale = "en") {
+  return html`<a class="roundbtn hide-phone top__search" href="${SEARCH_HREF}" aria-label="${uiText("Search runs", locale)}" title="${uiText("Search runs", locale)}">${ui.icon("search")}</a>`;
 }
 
 /** The theme button, named for the choice the page was drawn in; drawn hidden, the script shows it (see the header). */
@@ -250,27 +255,27 @@ function brandPill() {
 }
 
 /** The navigation: the pills, then the More menu with what the role may open of `NAV_MORE` (none: no menu). */
-function navHtml(here, role, parked) {
+function navHtml(here, role, parked, locale = "en") {
   const more = NAV_MORE.filter((n) => mayOpen(n, role));
   const menu = more.length === 0
     ? null
-    : html`<details class="more"><summary${more.includes(here) ? html` aria-current="page"` : null} aria-label="${`More: ${more.map((n) => PAGES[n].nav).join(", ")}`}" title="More">${ui.icon("more")}</summary><div>${more.map((n) => navLink(n, here, null))}</div></details>`;
-  return html`<nav class="pillnav" aria-label="Console screens">${NAV.filter((n) => mayOpen(n, role)).map((n) => navLink(n, here, parked))}${menu}</nav>`;
+    : html`<details class="more"><summary${more.includes(here) ? html` aria-current="page"` : null} aria-label="${`${uiText("More", locale)}: ${more.map((n) => uiText(PAGES[n].nav, locale)).join(", ")}`}" title="${uiText("More", locale)}">${ui.icon("more")}</summary><div>${more.map((n) => navLink(n, here, null, locale))}</div></details>`;
+  return html`<nav class="pillnav" aria-label="${uiText("Console screens", locale)}">${NAV.filter((n) => mayOpen(n, role)).map((n) => navLink(n, here, parked, locale))}${menu}</nav>`;
 }
 
 /** The signed-in top bar: the pill, the navigation (`here` the current screen, or none), the end, by the session. */
-function signedInBar({ here, role, parked, live, theme, readOnly, session }) {
+function signedInBar({ here, role, parked, live, theme, readOnly, session, locale = "en" }) {
   const s = session ?? {};
   // Name and role share one column, so the longer of the two is cut first with an ellipsis where the bar is short of
   // room (for "ops, Operator", the role; SHELL_CSS), and a phone shows the avatar alone, so the block carries both whole
   // in its title ("ops, Operator").
   const whoName = s.name ?? "-";
-  const roleWord = role === null ? "-" : ROLE_WORDS[role];
+  const roleWord = role === null ? "-" : uiText(ROLE_WORDS[role], locale);
   // `data-name` and `data-role` are the session's own, for the script (issue #737): a probe's 200 reloads the page only
   // into this same person, never into whoever this browser's cookie names by then. Absent when there is none to name.
   const whoData = typeof s.name === "string" && role !== null ? html` data-name="${s.name}" data-role="${role}"` : null;
   const who = html`<span class="who"${whoData} title="${role === null ? whoName : `${whoName}, ${roleWord}`}"><span><b>${whoName}</b><small>${roleWord}</small></span><span class="avatar">${initialsOf(s.name)}</span></span>`;
-  return html`<header class="${readOnly ? "top top--ro" : "top"}">${brandPill()}${navHtml(here, role, parked)}<div class="top__end">${searchButton()}${live}${themeButton(theme)}${readOnly ? ui.chip("Read-only console", { status: "attention", icon: "shield" }) : null}${who}<button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out">${ui.icon("logout")}</button></div></header>`;
+  return html`<header class="${readOnly ? "top top--ro" : "top"}">${brandPill()}${navHtml(here, role, parked, locale)}<div class="top__end">${searchButton(locale)}${live}${themeButton(theme)}${readOnly ? ui.chip(uiText("Read-only console", locale), { status: "attention", icon: "shield" }) : null}${who}<button id="logout" class="roundbtn" type="button" aria-label="${uiText("Sign out", locale)}" title="${uiText("Sign out", locale)}">${ui.icon("logout")}</button><button class="roundbtn" type="button" data-locale-toggle hidden aria-label="${uiText("Switch language", locale)}" title="${uiText("Chinese / English", locale)}">中</button></div></header>`;
 }
 
 /** A session's role as the bar knows it, or null for one it does not (which opens no operator page). */
@@ -300,22 +305,23 @@ export function shellHtml(name, ctx, inner, { headline = null, description = nul
   const parked = meta.live || String(count) !== "" ? html`<span id="${NAV_PARKED_ID}" data-panel>${count}</span>` : null;
   const start = LIVE_STATES.start;
   const glyphs = Object.entries(LIVE_GLYPHS).map(([state, glyph]) => liveGlyph(state, glyph));
-  const liveHtml = meta.live ? html`<span id="live-status" class="${start.cls}" role="status" aria-live="polite" title="${start.title}"><span class="dot"></span>${glyphs}<span data-live-word>${start.word}</span></span>` : null;
-  const back = ["secrets", "connections", "updates", "project"].includes(name) ? html`<a class="back" href="${PAGES.config.path}">${ui.icon("chev-l", { size: "sm" })}Configuration</a>` : name === "run" ? html`<a class="back" href="${PAGES.runs.path}">${ui.icon("chev-l", { size: "sm" })}${PAGES.runs.nav}</a>` : ["host", "venue"].includes(name) ? html`<a class="back" href="${PAGES.fleet.path}">${ui.icon("chev-l", { size: "sm" })}Fleet</a>` : null;
-  const heading = title ?? (name === "run" && typeof ctx?.query?.id === "string" && ctx.query.id !== "" ? html`${ctx.query.id}` : ["host", "venue"].includes(name) && typeof ctx?.query?.name === "string" ? html`${ctx.query.name}` : meta.title);
+  const liveHtml = meta.live ? html`<span id="live-status" class="${start.cls}" role="status" aria-live="polite" title="${uiText(start.title, ctx?.locale)}"><span class="dot"></span>${glyphs}<span data-live-word>${uiText(start.word, ctx?.locale)}</span></span>` : null;
+  const back = ["secrets", "connections", "updates", "project"].includes(name) ? html`<a class="back" href="${PAGES.config.path}">${ui.icon("chev-l", { size: "sm" })}${uiText("Configuration", ctx?.locale)}</a>` : name === "run" ? html`<a class="back" href="${PAGES.runs.path}">${ui.icon("chev-l", { size: "sm" })}${uiText(PAGES.runs.nav, ctx?.locale)}</a>` : ["host", "venue"].includes(name) ? html`<a class="back" href="${PAGES.fleet.path}">${ui.icon("chev-l", { size: "sm" })}${uiText("Fleet", ctx?.locale)}</a>` : null;
+  const heading = title ?? (name === "run" && typeof ctx?.query?.id === "string" && ctx.query.id !== "" ? html`${ctx.query.id}` : ["host", "venue"].includes(name) && typeof ctx?.query?.name === "string" ? html`${ctx.query.name}` : uiText(meta.title, ctx?.locale));
   const reload = mayOpen(name, role) ? selfHref(name, ctx?.query) : null;
-  const drawn = !meta.live && reload !== null ? drawnHtml(ctx?.data?.now, reload, end) : end;
+  const drawn = !meta.live && reload !== null ? drawnHtml(ctx?.data?.now, reload, end, ctx?.locale) : end;
   const readOnly = Boolean(ctx?.readOnly);
-  const ro = readOnly ? ui.banner({ status: "attention", icon: "shield", sm: true, title: READ_ONLY_TITLE, body: READ_ONLY_BODY }) : null;
+  const ro = readOnly ? ui.banner({ status: "attention", icon: "shield", sm: true, title: uiText(READ_ONLY_TITLE, ctx?.locale), body: readOnlyBody(ctx?.locale) }) : null;
   const flash = ctx?.flash !== null && typeof ctx?.flash === "object" ? doneBannerHtml(ctx.flash) : null;
-  const notes = meta.live ? liveNoteHtml({ maxStreams: ctx?.maxStreams, reload }) : null;
+  const notes = meta.live ? liveNoteHtml({ maxStreams: ctx?.maxStreams, reload, locale: ctx?.locale }) : null;
   const writes = role === "operator" && !readOnly && ctx?.slot !== false ? confirmSlotHtml() : null;
   const held = meta.live ? html`<template id="held-note">${heldNoteHtml()}</template>` : null;
-  const sub = headline === null ? (description === null ? null : html`<p class="titlebar__sub">${description}</p>`) : name === "run" ? html`<div class="titlebar__sub"><span id="${HEADLINE_ID}" data-panel>${headline}</span></div>` : html`<p class="titlebar__sub"><span id="${HEADLINE_ID}" data-panel>${headline}</span></p>`;
-  return html`<a class="skip" href="#main">Skip to content</a>
+  const displayedDescription = typeof description === "string" ? uiText(description, ctx?.locale) : description;
+  const sub = headline === null ? (displayedDescription === null ? null : html`<p class="titlebar__sub">${displayedDescription}</p>`) : name === "run" ? html`<div class="titlebar__sub"><span id="${HEADLINE_ID}" data-panel>${headline}</span></div>` : html`<p class="titlebar__sub"><span id="${HEADLINE_ID}" data-panel>${headline}</span></p>`;
+  return html`<a class="skip" href="#main">${uiText("Skip to content", ctx?.locale)}</a>
 ${SPRITE}
 <div class="page">
-${signedInBar({ here, role, parked, live: liveHtml, theme: ctx?.theme, readOnly, session: ctx?.session })}
+${signedInBar({ here, role, parked, live: liveHtml, theme: ctx?.theme, readOnly, session: ctx?.session, locale: ctx?.locale })}
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead">${back}<h1>${heading}</h1>${sub}</div>${drawn}</div>
 ${ro}${flash}${notes}${inner}${writes}${held}
@@ -335,16 +341,16 @@ ${ro}${flash}${notes}${inner}${writes}${held}
  * the page's stylesheet read. `here` marks a screen's pill current where the page stands for one (the run-id 404 is a
  * run's page, which counts as Runs as the run detail does); by default none is.
  */
-export function frameHtml({ name, title, sub = null, theme = null, session = null, readOnly = false, nav = false, skip = "Skip to content", titleShown = true, here = null }, inner) {
+export function frameHtml({ name, title, sub = null, theme = null, locale = "en", session = null, readOnly = false, nav = false, skip = "Skip to content", titleShown = true, here = null }, inner) {
   const signedIn = nav && session !== null && typeof session === "object";
   const role = roleOf(session);
   const current = typeof here === "string" && NAV.includes(here) && mayOpen(here, role) ? here : null;
   const bar = signedIn
-    ? signedInBar({ here: current, role, parked: null, live: null, theme, readOnly: Boolean(readOnly), session })
-    : html`<header class="top">${brandPill()}<div class="top__end">${themeButton(theme)}</div></header>`;
+    ? signedInBar({ here: current, role, parked: null, live: null, theme, readOnly: Boolean(readOnly), session, locale })
+    : html`<header class="top">${brandPill()}<div class="top__end"><button class="roundbtn" type="button" data-locale-toggle hidden aria-label="${uiText("Switch language", locale)}" title="${uiText("Chinese / English", locale)}">中</button>${themeButton(theme)}</div></header>`;
   const subLine = typeof sub === "string" && sub !== "" ? html`<p class="titlebar__sub">${sub}</p>` : null;
   const head = titleShown ? html`<div class="titlebar"><div class="titlebar__lead"><h1>${title}</h1>${subLine}</div></div>` : html`<h1 class="sr">${title}</h1>`;
-  const body = html`<a class="skip" href="#main">${skip}</a>
+  const body = html`<a class="skip" href="#main">${uiText(skip, locale)}</a>
 ${SPRITE}
 <div class="page">
 ${bar}
@@ -353,7 +359,7 @@ ${head}
 ${inner}
 </main>
 </div>`;
-  return page({ title: `pi-dispatch console: ${title}`, name, body, theme });
+  return page({ title: `pi-dispatch console: ${title}`, name, body, theme, locale });
 }
 
 /**
@@ -363,8 +369,8 @@ ${inner}
  * `endedReasonOf`'s, never the query's own bytes); `limits` the console's `{ idleMinutes, maxHours }`; `listen` the
  * config's listen address, for the footer.
  */
-export function loginPage({ theme = null, notice = null, limits = {}, listen = null } = {}) {
-  return frameHtml({ name: "login", title: "Sign in", theme, skip: "Skip to sign-in", titleShown: false }, signInContent({ notice, limits, listen }));
+export function loginPage({ theme = null, locale = "en", notice = null, limits = {}, listen = null } = {}) {
+  return frameHtml({ name: "login", title: uiText("Sign in", locale), theme, locale, skip: uiText("Skip to sign-in", locale), titleShown: false }, signInContent({ notice, limits, listen, locale }));
 }
 
 /**
@@ -378,6 +384,6 @@ export const LINK_PAGE_TITLE = "One-time sign-in link";
  * history and posts it, switching the card to `used` or `nocode` as the answer says. `state` is the card's first state;
  * `notice` a notice to draw shown, for a panel golden (`signin.mjs` `linkContent`; the server passes neither).
  */
-export function loginCodePage({ theme = null, state = "wait", notice = null } = {}) {
-  return frameHtml({ name: "login-code", title: LINK_PAGE_TITLE, theme, skip: "Skip to sign-in", titleShown: false }, linkContent({ state, notice }));
+export function loginCodePage({ theme = null, locale = "en", state = "wait", notice = null } = {}) {
+  return frameHtml({ name: "login-code", title: uiText(LINK_PAGE_TITLE, locale), theme, locale, skip: uiText("Skip to sign-in", locale), titleShown: false }, linkContent({ state, notice, locale }));
 }

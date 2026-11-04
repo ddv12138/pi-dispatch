@@ -32,6 +32,7 @@ import { RUN_FILTER_FIELDS, runVenueOf } from "../../run-filter.mjs";
 import { OUTCOME_KEYS, OUTCOME_KEY_WORDS, VENUE_LABEL, rowNumber } from "../../words.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { RUN_ID_RE, capMicrosOf, costText, count, moneyHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
 
 // ---- the sentences ---------------------------------------------------------------------------------------------------
@@ -135,17 +136,17 @@ export function runsFiltersModel(view) {
     const opts = [...offered];
     if (typeof f[field] === "string" && !opts.includes(f[field])) opts.push(f[field]);
     const id = `rf-${field}`;
-    return { label: FILTER_LABELS[field], id, select: { id, name: field, value: f[field] ?? "", options: [{ value: "", label: "Any" }, ...opts.map((v) => ({ value: v, label: labelOf(v) }))] } };
+    return { label: uiText(FILTER_LABELS[field], view.locale), id, select: { id, name: field, value: f[field] ?? "", options: [{ value: "", label: uiText("Any", view.locale) }, ...opts.map((v) => ({ value: v, label: labelOf(v) }))] } };
   };
-  const outcomeLabel = (v) => (Object.hasOwn(OUTCOME_KEY_WORDS, v) ? OUTCOME_KEY_WORDS[v].word : v === "policy" ? "policy (the record's value)" : v);
+  const outcomeLabel = (v) => (Object.hasOwn(OUTCOME_KEY_WORDS, v) ? uiText(OUTCOME_KEY_WORDS[v].word, view.locale) : v === "policy" ? uiText("policy (the record's value)", view.locale) : v);
   const listed = Array.isArray(w?.byProject) ? w.byProject.filter((p) => typeof p?.project === "string" && PROJECT_ID_RE.test(p.project)) : [];
   return {
     search: { id: "q", name: "q", value: f.q ?? null },
     folded: set.filter((k) => k !== "q").length,
     projects: [
-      { label: "All", count: w ? windowTotal(w) : null, href: runsHref(without(f, "project")), on: f.project === undefined },
+      { label: uiText("All", view.locale), count: w ? windowTotal(w) : null, href: runsHref(without(f, "project")), on: f.project === undefined },
       ...listed.map((p) => ({ label: ui.ptag(p.project), count: Number.isSafeInteger(p.count) ? p.count : null, href: runsHref({ ...f, project: p.project }), on: f.project === p.project })),
-      ...(typeof f.project === "string" && !listed.some((p) => p.project === f.project) ? [{ label: f.project === "~" ? "No project recorded" : ui.ptag(f.project), count: null, href: runsHref(f), on: true }] : []),
+      ...(typeof f.project === "string" && !listed.some((p) => p.project === f.project) ? [{ label: f.project === "~" ? uiText("No project recorded", view.locale) : ui.ptag(f.project), count: null, href: runsHref(f), on: true }] : []),
     ],
     selects: [
       pick("outcome", OUTCOME_KEYS, outcomeLabel),
@@ -157,9 +158,9 @@ export function runsFiltersModel(view) {
       pick("backend", listOf(values.backend)),
       pick("model", listOf(values.model)),
     ],
-    repo: { label: FILTER_LABELS.repo, id: "rf-repo", input: { id: "rf-repo", name: "repo", value: f.repo ?? null, placeholder: "owner/name", autocomplete: "off", spellcheck: false } },
+    repo: { label: uiText(FILTER_LABELS.repo, view.locale), id: "rf-repo", input: { id: "rf-repo", name: "repo", value: f.repo ?? null, placeholder: "owner/name", autocomplete: "off", spellcheck: false } },
     hidden: ["project", "problems", "touched", "days", "scope"].filter((k) => typeof f[k] === "string").map((k) => [k, f[k]]),
-    applied: set.map((k) => ({ label: FILTER_LABELS[k], value: chipValue(k, f[k]), href: runsHref(without(f, k)) })),
+    applied: set.map((k) => ({ label: uiText(FILTER_LABELS[k], view.locale), value: chipValue(k, f[k]), href: runsHref(without(f, k)) })),
   };
 }
 
@@ -171,13 +172,13 @@ export function runsFiltersModel(view) {
 export function runsFilters(view) {
   const m = runsFiltersModel(view);
   const toggle = ui.filterToggle({ count: m.folded });
-  const projects = ui.chipRow(m.projects.map((p) => ui.fpill(p)), { label: "Project" });
+  const projects = ui.chipRow(m.projects.map((p) => ui.fpill(p)), { label: uiText("Project", view.locale) });
   const selects = m.selects.map((s) => ui.field({ label: s.label, id: s.id, control: ui.select(s.select) }));
   const repo = ui.field({ label: m.repo.label, id: m.repo.id, control: ui.input(m.repo.input) });
   const hidden = m.hidden.map(([k, v]) => html`<input type="hidden" name="${k}" value="${v}">`);
-  const form = html`<form class="filterbar" method="get" action="/runs" role="search" aria-label="Filter runs" data-collapsible>${ui.searchPill(m.search)}${toggle}${projects}${selects}${repo}${hidden}${ui.btn({ type: "submit", label: "Apply" })}</form>`;
+  const form = html`<form class="filterbar" method="get" action="/runs" role="search" aria-label="${uiText("Filter runs", view.locale)}" data-collapsible>${ui.searchPill(m.search)}${toggle}${projects}${selects}${repo}${hidden}${ui.btn({ type: "submit", label: uiText("Apply", view.locale) })}</form>`;
   if (m.applied.length === 0) return form;
-  return html`${form}${ui.chipRow([...m.applied.map((c) => ui.fchip(c)), ui.btn({ kind: ["sm", "ghost"], label: "Clear filters", href: "/runs" })], { label: "Applied filters" })}`;
+  return html`${form}${ui.chipRow([...m.applied.map((c) => ui.fchip(c)), ui.btn({ kind: ["sm", "ghost"], label: uiText("Clear filters", view.locale), href: "/runs" })], { label: uiText("Applied filters", view.locale) })}`;
 }
 
 // ---- p-summary -------------------------------------------------------------------------------------------------------
@@ -218,29 +219,29 @@ export function runsSummaryModel(view) {
   const { by, spentMicros, unpriced, every } = countsFor(w, f.project);
   const n = (k) => (Number.isSafeInteger(by[k]) && by[k] > 0 ? by[k] : 0);
   // A phone draws the four counts that need a look (the RunsPhone card's), leaving out the completed runs.
-  const items = OUTCOME_KEYS.map((key) => ({ n: n(key), label: OUTCOME_KEY_WORDS[key].word, status: OUTCOME_KEY_WORDS[key].status, href: runsHref({ project: f.project, outcome: key }), floor, hidePhone: key === "completed" }));
+  const items = OUTCOME_KEYS.map((key) => ({ n: n(key), label: uiText(OUTCOME_KEY_WORDS[key].word, view.locale), status: OUTCOME_KEY_WORDS[key].status, href: runsHref({ project: f.project, outcome: key }), floor, hidePhone: key === "completed" }));
   // An outcome no key names has no filter to link to: counted, not linked, as every surface draws one, as a failure.
-  if (n("other") > 0) items.push({ n: n("other"), label: "outcome not known", status: "failed", href: null, floor });
+  if (n("other") > 0) items.push({ n: n("other"), label: uiText("outcome not known", view.locale), status: "failed", href: null, floor });
   return {
     strip: { items, label: "Runs that ended in the last 24 hours, by outcome" },
     spentMicros: Number.isSafeInteger(spentMicros) ? spentMicros : null,
     unpriced: Number.isSafeInteger(unpriced) && unpriced > 0 ? unpriced : 0,
     show: [
-      { label: "All outcomes", href: runsHref(without(f, "problems")), on: f.problems === undefined },
-      { label: "Only problems", href: runsHref({ ...f, problems: "1" }), on: f.problems !== undefined },
+      { label: uiText("All outcomes", view.locale), href: runsHref(without(f, "problems")), on: f.problems === undefined },
+      { label: uiText("Only problems", view.locale), href: runsHref({ ...f, problems: "1" }), on: f.problems !== undefined },
     ],
-    notes: [RUNS_WINDOW_TEXT, ...(w.partial === true ? [RUNS_WINDOW_PARTIAL] : []), ...(every ? [RUNS_WINDOW_EVERY_PROJECT] : [])].join(" "),
+    notes: [uiText(RUNS_WINDOW_TEXT, view.locale), ...(w.partial === true ? [uiText(RUNS_WINDOW_PARTIAL, view.locale)] : []), ...(every ? [uiText(RUNS_WINDOW_EVERY_PROJECT, view.locale)] : [])].join(" "),
   };
 }
 
 /** The summary panel (`runsSummaryModel`, drawn), or `RUNS_WINDOW_UNREAD` alone. */
 export function runsSummary(view) {
-  if (view.query?.filter?.touched === "1") return html`<p class="note">Runs that needed a person over ${view.query.filter.days} days: ${view.data?.runsPage?.touchTotal ?? "not known"}.${view.data?.runsPage?.touchCoverage?.partial ? " The window is partial; missing evidence is not counted as untouched." : null} <a class="link" href="/runs/zero-touch">Return to Zero touch</a>.</p>`;
+  if (view.query?.filter?.touched === "1") return html`<p class="note">${uiText("Runs that needed a person over", view.locale)} ${view.query.filter.days} ${uiText("days", view.locale)}: ${view.data?.runsPage?.touchTotal ?? uiText("not known", view.locale)}.${view.data?.runsPage?.touchCoverage?.partial ? uiText("The window is partial; missing evidence is not counted as untouched.", view.locale) : null} <a class="link" href="/runs/zero-touch">${uiText("Return to Zero touch", view.locale)}</a>.</p>`;
   const m = runsSummaryModel(view);
-  if (m === null) return ui.card({ body: html`<p class="muted">${RUNS_WINDOW_UNREAD}</p>` });
-  const unpriced = m.unpriced > 0 ? html`<span class="muted">, ${count(m.unpriced)} ${m.unpriced === 1 ? "run" : "runs"} with no settled amount</span>` : null;
-  const spend = html`<span><b>${moneyHtml(m.spentMicros)}</b> settled spend${unpriced}</span>`;
-  return ui.card({ body: html`${ui.sumStrip(m.strip.items, { label: m.strip.label })}<div class="runs-sum">${spend}${ui.seg(m.show, { label: "Show" })}</div><p class="card__sub">${m.notes}</p>` });
+  if (m === null) return ui.card({ body: html`<p class="muted">${uiText(RUNS_WINDOW_UNREAD, view.locale)}</p>` });
+  const unpriced = m.unpriced > 0 ? html`<span class="muted">, ${count(m.unpriced)} ${m.unpriced === 1 ? uiText("run", view.locale) : uiText("runs", view.locale)} ${uiText("with no settled amount", view.locale)}</span>` : null;
+  const spend = html`<span><b>${moneyHtml(m.spentMicros)}</b> ${uiText("settled spend", view.locale)}${unpriced}</span>`;
+  return ui.card({ body: html`${ui.sumStrip(m.strip.items, { label: uiText(m.strip.label, view.locale) })}<div class="runs-sum">${spend}${ui.seg(m.show, { label: uiText("Show", view.locale) })}</div><p class="card__sub">${uiText(m.notes, view.locale)}</p>` });
 }
 
 // ---- p-runs ----------------------------------------------------------------------------------------------------------
@@ -354,20 +355,20 @@ export function runsTableModel(view) {
   const filter = view.query?.filter ?? {};
   const before = view.query?.before;
   const newer = before !== null && before !== undefined ? runsHref(filter) : null;
-  const card = { title: "Runs", sub: "newest first", flush: true };
-  if (!page || typeof page.refusal === "string") return { card, table: null, foot: [page ? page.refusal : RUNS_UNREADABLE], pager: { newer, older: null, newerLabel: "Newest" } };
+  const card = { title: uiText("Runs", view.locale), sub: uiText("newest first", view.locale), flush: true };
+  if (!page || typeof page.refusal === "string") return { card, table: null, foot: [page ? page.refusal : uiText(RUNS_UNREADABLE, view.locale)], pager: { newer, older: null, newerLabel: uiText("Newest", view.locale) } };
   const subs = Array.isArray(view.data?.subscriptions) ? view.data.subscriptions : [];
   const runs = Array.isArray(page.runs) ? page.runs : [];
   const foot = [];
-  if (runs.length === 0) foot.push(RUNS_EMPTY);
+  if (runs.length === 0) foot.push(uiText(RUNS_EMPTY, view.locale));
   else {
     const source = runsSourceText(page);
-    foot.push(`${count(runs.length)} ${runs.length === 1 ? "run" : "runs"}${source === null ? "" : `, ${source}`}.`);
+    foot.push(`${count(runs.length)} ${uiText(runs.length === 1 ? "run" : "runs", view.locale)}${source === null ? "" : `, ${uiText(source, view.locale)}`}.`);
   }
-  if (page.unreachable) foot.push(RUNS_HOST_UNREADABLE);
-  if (page.mirror === "off") foot.push(RUNS_MIRROR_OFF);
-  else if (typeof page.mirror === "string" && page.mirror !== "ok") foot.push(RUNS_MIRROR_DEGRADED);
-  if (page.truncated) foot.push(runsTruncatedText(page.examined));
+  if (page.unreachable) foot.push(uiText(RUNS_HOST_UNREADABLE, view.locale));
+  if (page.mirror === "off") foot.push(uiText(RUNS_MIRROR_OFF, view.locale));
+  else if (typeof page.mirror === "string" && page.mirror !== "ok") foot.push(uiText(RUNS_MIRROR_DEGRADED, view.locale));
+  if (page.truncated) foot.push(uiText(runsTruncatedText(page.examined), view.locale));
   // A group row before each UTC day's first run: the history is newest first, so a day's runs stand together.
   const rows = [];
   let day = null;
@@ -380,9 +381,9 @@ export function runsTableModel(view) {
   const next = Number.isSafeInteger(page.next) && page.next >= 0 ? page.next : null;
   return {
     card,
-    table: runs.length === 0 ? null : { caption: "Runs", heads: RUNS_TABLE_HEADS, rows, stack: true },
+    table: runs.length === 0 ? null : { caption: uiText("Runs", view.locale), heads: RUNS_TABLE_HEADS.map((head) => (typeof head === "string" ? uiText(head, view.locale) : { ...head, label: uiText(head.label, view.locale) })), rows, stack: true },
     foot,
-    pager: { newer, older: next === null ? null : runsHref(filter, { before: next }), newerLabel: "Newest" },
+    pager: { newer, older: next === null ? null : runsHref(filter, { before: next }), newerLabel: uiText("Newest", view.locale) },
   };
 }
 

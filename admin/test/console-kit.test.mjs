@@ -1067,6 +1067,10 @@ test("questionCard and answerForm: the ParkedPhone card's question card, its ans
   assert.match(legacy, /actForm\("parked-answer", \{ hidden: \[\["jobId", jobId\]\], fields: area\("text", /, "the old form's field names, which the kit's keeps");
   // With nothing but its id: no meta line, no body, no answer; no Open run and no hint on a bare form.
   assert.equal(out(ui.questionCard({ jobId: "gh-1", runHref: "/run?id=gh-1" })), `<article class="card card--ring tone-parked qcard" aria-label="gh-1 asks"><p class="qcard__top"><span class="tile tile--sm tone-parked"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-parked"></use></svg></span><b><a class="code" href="/run?id=gh-1">gh-1</a> asks</b></p></article>`);
+  const zhQuestion = out(ui.questionCard({ jobId: "gh-1", locale: "zh" }));
+  const zhAnswer = out(ui.answerForm({ jobId: "gh-1", id: "a-zh", hint: null, locale: "zh" }));
+  assert.doesNotMatch(zhQuestion, / asks|aria-label="gh-1 asks/);
+  assert.doesNotMatch(zhAnswer, /Your answer, as the reply on the issue|Write your answer|Preview the answer/);
   const bare = out(ui.answerForm({ jobId: "gh-1", id: "a1", hint: null }));
   assert.ok(!bare.includes("Open run") && !bare.includes("field__hint") && !bare.includes("aria-describedby"), bare);
   assert.throws(() => ui.questionCard({ jobId: "gh-1", runHref: "https://evil.example/" }), RangeError);

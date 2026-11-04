@@ -2,6 +2,7 @@
 import { PLAN_REASON_TEXT } from "@edgehero/pi-dispatch/reason-catalog";
 import { html, trustedRenderer as raw } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { countStatus } from "./overview.mjs";
 import * as capacityPulse from "./capacity-pulse.mjs";
 import { fmtCost, escapeInterpreted } from "../../panel.mjs";
@@ -48,20 +49,21 @@ const descriptions = [
   "The records behind the money, by trigger, repository and model.",
   "How triggers reach flows, and what ran.",
 ];
-export const spendDescription = (name) =>
-  descriptions[SPEND_VIEWS.findIndex(([n]) => n === name)] ?? descriptions[0];
-const spendWindowLabel = (range) =>
-  range === "24h" ? "last 24 hours" : insightsWindowLabel(range);
+export const spendDescription = (name, locale = "en") =>
+  uiText(descriptions[SPEND_VIEWS.findIndex(([n]) => n === name)] ?? descriptions[0], locale);
+const t = (v, text) => uiText(text, v?.locale);
+const spendWindowLabel = (range, locale = "en") =>
+  range === "24h" ? uiText("last 24 hours", locale) : uiText(insightsWindowLabel(range), locale);
 const payload = (v) => v.data?.insights ?? {};
 const number = (v) => (Number.isFinite(v) && v >= 0 ? v : null);
-const usd = (v) =>
+const usd = (v, locale = "en") =>
   number(v) === null
-    ? html`${ui.icon("minus")} unknown`
+    ? html`${ui.icon("minus")} ${uiText("unknown", locale)}`
     : `$${(v / 1e6).toFixed(2)}`;
-const pct = (used, cap) =>
+const pct = (used, cap, locale = "en") =>
   number(used) !== null && number(cap) > 0
     ? `${Math.round((100 * used) / cap)}%`
-    : "unknown";
+    : uiText("unknown", locale);
 const when = (value) =>
   timeHtml(typeof value === "string" ? Date.parse(value) : value);
 const note = (text) => html`<p class="sp-note note">${text}</p>`;
@@ -78,9 +80,9 @@ const progress = (used, cap, label, status = "ok") =>
   number(used) !== null && number(cap) > 0
     ? ui.meter({ value: used, max: cap, label, status, height: 10 })
     : null;
-const compactNumber = (n) =>
+const compactNumber = (n, locale = "en") =>
   number(n) === null
-    ? "unknown"
+    ? uiText("unknown", locale)
     : n >= 1_000_000
       ? `${(n / 1_000_000).toFixed(2)}M`
       : n >= 10_000
@@ -99,25 +101,27 @@ function allocationWeights(p) {
 const overAllocation = (row) => number(row.spent) !== null && number(row.allocation) !== null && row.spent > row.allocation;
 const unknownCount = (row) =>
   Number.isSafeInteger(row?.unpriced) && row.unpriced > 0 ? row.unpriced : 0;
-const moneyMarks = ({ floor = false, estimated = false } = {}) =>
-  `${estimated === true ? "~" : ""}${floor === true ? "≥" : ""}`;
-function markedMoney(amount, flags) {
+const moneyMarks = (flags = {}) => {
+  const { floor = false, estimated = false } = flags ?? {};
+  return `${estimated === true ? "~" : ""}${floor === true ? "≥" : ""}`;
+};
+function markedMoney(amount, flags, locale = "en") {
   return number(amount) === null
-    ? usd(null)
-    : html`${moneyMarks(flags)}${usd(amount)}`;
+    ? usd(null, locale)
+    : html`${moneyMarks(flags)}${usd(amount, locale)}`;
 }
-function markedMoneyText(amount, flags) {
+function markedMoneyText(amount, flags, locale = "en") {
   return number(amount) === null
-    ? "unknown"
+    ? uiText("unknown", locale)
     : `${moneyMarks(flags)}$${(amount / 1e6).toFixed(2)}`;
 }
-function settledMoney(row) {
+function settledMoney(row, locale = "en") {
   const unknown = unknownCount(row);
-  return html`${markedMoney(row?.settledMicros, { floor: row?.settledFloor, estimated: row?.settledEstimated })}${unknown ? html`; ${unknown} ${unknown === 1 ? "run has" : "runs have"} unknown cost` : null}`;
+  return html`${markedMoney(row?.settledMicros, { floor: row?.settledFloor, estimated: row?.settledEstimated })}${unknown ? html`; ${unknown} ${uiText(unknown === 1 ? "run has" : "runs have", locale)} ${uiText("unknown cost", locale)}` : null}`;
 }
-function settledMoneyText(row) {
+function settledMoneyText(row, locale = "en") {
   const unknown = unknownCount(row);
-  return `${markedMoneyText(row?.settledMicros, { floor: row?.settledFloor, estimated: row?.settledEstimated })}${unknown ? `; ${unknown} ${unknown === 1 ? "run has" : "runs have"} unknown cost` : ""}`;
+  return `${markedMoneyText(row?.settledMicros, { floor: row?.settledFloor, estimated: row?.settledEstimated })}${unknown ? `; ${unknown} ${uiText(unknown === 1 ? "run has" : "runs have", locale)} ${uiText("unknown cost", locale)}` : ""}`;
 }
 
 /** Legacy chart geometry is in pixels. A viewBox preserves it when the Pulse card changes width. */
@@ -156,7 +160,7 @@ function link(v, path, over = {}) {
 }
 export function spendTabs(v) {
   const icons = ["spend", "pie", "slot", "runs", "flows"];
-  return html`<nav class="tabs sp-tabs spend-tabs" aria-label="Spend views">${SPEND_VIEWS.map(([name, path, label], index) => html`<a href="${link(v, path)}"${v.page === name ? html` aria-current="page"` : null}>${ui.icon(icons[index], { size: "sm" })}${label}</a>`)}</nav>${note(`Spend window: ${spendWindowLabel(v.query?.range ?? "30d")}. ${v.page === "insights-flows" ? "Map window: the last 30 days of run records. " : ""}Series are bounded by log retention and the 92-day scan cap.`)}${v.role !== "operator" && v.query?.paths === "full" ? note("Full local paths are shown to operators only; folder labels show folder names.") : null}`;
+  return html`<nav class="tabs sp-tabs spend-tabs" aria-label="${t(v, "Spend views")}">${SPEND_VIEWS.map(([name, path, label], index) => html`<a href="${link(v, path)}"${v.page === name ? html` aria-current="page"` : null}>${ui.icon(icons[index], { size: "sm" })}${t(v, label)}</a>`)}</nav>${note(`${t(v, "Spend window")}: ${spendWindowLabel(v.query?.range ?? "30d", v.locale)}. ${v.page === "insights-flows" ? `${t(v, "Map window")}: ${t(v, "the last 30 days of run records")}. ` : ""}${t(v, "Series are bounded by log retention and the 92-day scan cap.")}`)}${v.role !== "operator" && v.query?.paths === "full" ? note(t(v, "Full local paths are shown to operators only; folder labels show folder names.")) : null}`;
 }
 
 export function spendControls(v) {
@@ -185,11 +189,11 @@ export function spendControls(v) {
         ? null
         : ui.seg(
             ranges.map(([range, label]) => ({
-              label,
+              label: t(v, label),
               href: link(v, path, { range }),
               on: (v.query?.range ?? "30d") === range,
             })),
-            { label: "Spend window" },
+            { label: t(v, "Spend window") },
           )
     }${
       v.page === "insights-capacity"
@@ -198,7 +202,7 @@ export function spendControls(v) {
           ${ui.seg(
             [
               {
-                label: "All projects",
+                label: t(v, "All projects"),
                 href: link(v, path, { project: null }),
                 on: !v.query?.project,
               },
@@ -212,7 +216,7 @@ export function spendControls(v) {
                   on: v.query?.project === (p.id ?? p.key),
                 })),
             ],
-            { label: "Projects" },
+            { label: t(v, "Projects") },
           )}
         </div>`
     }
@@ -221,8 +225,8 @@ export function spendControls(v) {
 function kpi(title, amount, text) {
   return card(title, html`${ui.kpi(amount)}${note(text)}`);
 }
-function capLine(label, used, cap, money = true, soft = null) {
-  const state = /: (Full|Soft hold|Open|unknown)$/.exec(label)?.[1];
+function capLine(label, used, cap, money = true, soft = null, locale = "en", stateWord = null) {
+  const state = stateWord ?? /: (Full|Soft hold|Open|unknown)$/.exec(label)?.[1];
   const status =
     state === "Full"
       ? "failed"
@@ -231,7 +235,7 @@ function capLine(label, used, cap, money = true, soft = null) {
         : number(used) === null
           ? "idle"
           : "ok";
-  return html`<div class="meterrow"><span class="meterrow__l">${label}</span>${number(used) !== null && number(cap) > 0 ? ui.meter({ value: used, max: cap, label, status, hold: soft, height: 10 }) : html`<svg class="pbar tone-idle" height="10" role="img" aria-label="${label}: usage unknown"><rect class="pbar__bed" width="100%" height="10" rx="5"></rect>${number(soft) !== null ? html`<line class="pbar__hold" x1="${soft}%" x2="${soft}%" y1="-3" y2="13"></line>` : null}</svg>`}<span class="meterrow__v">${money ? usd(used) : compactNumber(used)} <span>/ ${money ? usd(cap) : compactNumber(cap)}</span></span></div>`;
+  return html`<div class="meterrow"><span class="meterrow__l">${label}</span>${number(used) !== null && number(cap) > 0 ? ui.meter({ value: used, max: cap, label, status, hold: soft, height: 10 }) : html`<svg class="pbar tone-idle" height="10" role="img" aria-label="${label}: ${uiText("usage unknown", locale)}"><rect class="pbar__bed" width="100%" height="10" rx="5"></rect>${number(soft) !== null ? html`<line class="pbar__hold" x1="${soft}%" x2="${soft}%" y1="-3" y2="13"></line>` : null}</svg>`}<span class="meterrow__v">${money ? usd(used) : compactNumber(used)} <span>/ ${money ? usd(cap) : compactNumber(cap)}</span></span></div>`;
 }
 
 export function spendWeek(v) {
@@ -241,8 +245,8 @@ export function spendWeek(v) {
       ? Math.max(0, s.capMicros - s.usedMicros)
       : null;
   return card(
-    "Spent this week",
-    html`${ui.kpi(usd(s?.usedMicros), html`of ${usd(s?.capMicros)}`)}${progress(s?.usedMicros, s?.capMicros, `This week's spend and held against its weekly cap`)}<p class="sp-kf">Mon to today. ${pct(s?.usedMicros, s?.capMicros)} of the weekly cap. ${usd(left)} left.</p>${v.query?.project ? note(s?.projectFallback ? "Deployment weekly cap: this project has no separate weekly dollar window." : `Project ${v.query.project}'s weekly dollar window.`) : null}`,
+    t(v, "Spent this week"),
+    html`${ui.kpi(usd(s?.usedMicros, v.locale), html`${t(v, "of")} ${usd(s?.capMicros, v.locale)}`)}${progress(s?.usedMicros, s?.capMicros, t(v, "This week's spend and held against its weekly cap"))}<p class="sp-kf">${t(v, "Mon to today.")} ${pct(s?.usedMicros, s?.capMicros, v.locale)} ${t(v, "of the weekly cap.")} ${usd(left, v.locale)} ${t(v, "left.")}</p>${v.query?.project ? note(s?.projectFallback ? t(v, "Deployment weekly cap: this project has no separate weekly dollar window.") : `${t(v, "Project")} ${v.query.project}${t(v, "'s weekly dollar window.")}`) : null}`,
     null,
     null,
     "sp-kpi",
@@ -261,59 +265,59 @@ export function spendToday(v) {
       s.settledEstimated === true ||
       unknownCount(s) > 0);
   return card(
-    "Today",
+    t(v, "Today"),
     html`${ui.kpi(
       markedMoney(s?.usedMicros, {
         floor: s?.usedFloor,
         estimated: s?.usedEstimated,
       }),
       capped
-        ? html`of ${usd(s?.capMicros)}`
+          ? html`${t(v, "of")} ${usd(s?.capMicros, v.locale)}`
         : uncapped
-          ? "No daily dollar cap is configured"
-          : "The daily dollar cap could not be read",
-    )}${progress(s?.usedMicros, s?.capMicros, "Today's spend and held against its daily dollar cap")}${factsOne(
+          ? t(v, "No daily dollar cap is configured")
+          : t(v, "The daily dollar cap could not be read"),
+    )}${progress(s?.usedMicros, s?.capMicros, t(v, "Today's spend and held against its daily dollar cap"))}${factsOne(
       [
-        ["Settled in today's records", settledMoney(s)],
+        [t(v, "Settled in today's records"), settledMoney(s, v?.locale)],
         [
-          `Held for ${s?.heldJobs ?? "unknown"} running ${s?.heldJobs === 1 ? "job" : "jobs"}`,
-          usd(s?.heldMicros),
+          `${t(v, "Held for")} ${s?.heldJobs ?? t(v, "unknown")} ${t(v, s?.heldJobs === 1 ? "running job" : "running jobs")}`,
+          usd(s?.heldMicros, v.locale),
         ],
         ...(chargedDiffers
-          ? [["Charged to dollar windows", usd(s.ledgerMicros)]]
+          ? [[t(v, "Charged to dollar windows"), usd(s.ledgerMicros, v.locale)]]
           : []),
         ...(capped
           ? [
               [
-                "Counter beyond recorded window charges and holds",
-                usd(s?.unattributedMicros),
+                t(v, "Counter beyond recorded window charges and holds"),
+                usd(s?.unattributedMicros, v.locale),
               ],
             ]
           : []),
       ],
-    )}${s?.unknownHosts?.length ? note(`Holds not published by: ${s.unknownHosts.join(", ")}. Those jobs are not counted as zero.`) : null}<details class="sp-provenance"><summary>Cost and counter details</summary>${chargedDiffers ? note("Readable record cost includes work outside dollar windows or cost that is not fully known. Charged to dollar windows is the recorded window charge, not the cost of all readable work.") : null}${note(
+    )}${s?.unknownHosts?.length ? note(`${t(v, "Holds not published by:")} ${s.unknownHosts.join(", ")}. ${t(v, "Those jobs are not counted as zero.")}`) : null}<details class="sp-provenance"><summary>${t(v, "Cost and counter details")}</summary>${chargedDiffers ? note(t(v, "Readable record cost includes work outside dollar windows or cost that is not fully known. Charged to dollar windows is the recorded window charge, not the cost of all readable work.")) : null}${note(
       capped
-        ? "The counter remainder is not explained by readable window charges and published holds. It can include records this host cannot read, such as another host's on an unshared PI_LOGS_DIR. Held money is reported by running jobs, never inferred from the counter."
+        ? t(v, "The counter remainder is not explained by readable window charges and published holds. It can include records this host cannot read, such as another host's on an unshared PI_LOGS_DIR. Held money is reported by running jobs, never inferred from the counter.")
         : uncapped
-          ? "The amount above is readable record cost plus published running-job holds, not a dollar-window counter. Held money is reported by running jobs, never inferred from another total."
-          : "The dollar-window configuration could not be read. Unknown amounts are not zero.",
-    )}${s?.usedSource === "unknown-counter" ? note("The configured dollar counter could not be read. Its amount stays unknown; readable records do not replace it.") : null}${unknownCount(s) || s?.settledFloor || s?.settledEstimated ? note("Unknown costs are not counted as zero. ≥ marks a known minimum; ~ marks an estimate.") : null}${
+          ? t(v, "The amount above is readable record cost plus published running-job holds, not a dollar-window counter. Held money is reported by running jobs, never inferred from another total.")
+          : t(v, "The dollar-window configuration could not be read. Unknown amounts are not zero."),
+    )}${s?.usedSource === "unknown-counter" ? note(t(v, "The configured dollar counter could not be read. Its amount stays unknown; readable records do not replace it.")) : null}${unknownCount(s) || s?.settledFloor || s?.settledEstimated ? note(t(v, "Unknown costs are not counted as zero. ≥ marks a known minimum; ~ marks an estimate.")) : null}${
       s?.reconciliationMismatch
         ? note(
-            "Counter reconciliation mismatch: readable window charges and running-job holds exceed the counter. Refresh or check shared history; no held money is inferred.",
+            t(v, "Counter reconciliation mismatch: readable window charges and running-job holds exceed the counter. Refresh or check shared history; no held money is inferred."),
           )
         : null
     }${
       v.query?.project
         ? note(
             typeof s?.basis === "string" && s.basis.startsWith("project:")
-              ? "This project's own dollar windows."
-              : "Deployment dollar windows: this project has no separate dollar window.",
+              ? t(v, "This project's own dollar windows.")
+              : t(v, "Deployment dollar windows: this project has no separate dollar window."),
           )
         : null
     }</details>`,
     capped && number(s?.usedMicros) !== null
-      ? statusBadge("ok", pct(s.usedMicros, s.capMicros))
+      ? statusBadge("ok", pct(s.usedMicros, s.capMicros, v.locale))
       : null,
     null,
     "sp-kpi",
@@ -323,8 +327,8 @@ export function spendToday(v) {
 export function spendTokens(v) {
   const s = payload(v).spend?.tokens;
   return card(
-    "Tokens today",
-    html`${ui.kpi(compactNumber(s?.used), html`of ${compactNumber(s?.cap)}`)}${progress(s?.used, s?.cap, "Tokens today against the daily token cap")}<p class="sp-kf">${number(s?.used) === null ? "unknown" : s.used.toLocaleString("en-US")} tokens, ${pct(s?.used, s?.cap)} of the daily token cap. No soft hold.</p>`,
+    t(v, "Tokens today"),
+    html`${ui.kpi(compactNumber(s?.used, v.locale), html`${t(v, "of")} ${compactNumber(s?.cap, v.locale)}`)}${progress(s?.used, s?.cap, t(v, "Tokens today against the daily token cap"))}<p class="sp-kf">${number(s?.used) === null ? t(v, "unknown") : s.used.toLocaleString("en-US")} ${t(v, "tokens")}, ${pct(s?.used, s?.cap, v.locale)} ${t(v, "of the daily token cap. No soft hold.")}</p>`,
     null,
     null,
     "sp-kpi",
@@ -334,8 +338,8 @@ export function spendTokens(v) {
 export function spendAverage(v) {
   const s = payload(v).spend;
   return card(
-    "Average per metered run",
-    html`${ui.kpi(usd(s?.average?.costMicros), "last 24 hours")}${progress(s?.average?.costMicros, s?.jobCapMicros, "Average cost per metered run against the job cap")}<p class="sp-kf">${s?.average?.runs ?? 0} metered ${s?.average?.runs === 1 ? "run" : "runs"}. The job cap is <b>${usd(s?.jobCapMicros)}</b>; the largest run used <b>${usd(s?.average?.largestMicros)}</b>.</p>`,
+    t(v, "Average per metered run"),
+    html`${ui.kpi(usd(s?.average?.costMicros, v.locale), t(v, "last 24 hours"))}${progress(s?.average?.costMicros, s?.jobCapMicros, t(v, "Average cost per metered run against the job cap"))}<p class="sp-kf">${s?.average?.runs ?? 0} ${t(v, s?.average?.runs === 1 ? "metered run" : "metered runs")}. ${t(v, "The job cap is")} <b>${usd(s?.jobCapMicros, v.locale)}</b>; ${t(v, "the largest run used")} <b>${usd(s?.average?.largestMicros, v.locale)}</b>.</p>`,
     null,
     null,
     "sp-kpi",
@@ -352,8 +356,8 @@ export function spendOver(v) {
   const days = p.spend?.daily;
   if (!Array.isArray(days))
     return empty(
-      "Spend over time",
-      "Costs could not be read. The other Spend views still work.",
+      t(v, "Spend over time"),
+      t(v, "Costs could not be read. The other Spend views still work."),
     );
   const cap = number(p.spend?.today?.capMicros);
   const max = Math.max(
@@ -374,7 +378,7 @@ export function spendOver(v) {
     (d.today && number(d.heldMicros) === null)
       ? null
       : d.settledMicros + (d.today ? d.heldMicros : 0);
-  const chart = html`<div id="wrap" class="sp-plot"><div id="tip"></div><svg class="sp-chart" height="230" role="img" aria-label="Daily settled spend with today's running-job holds">${cap !== null ? html`<line class="sp-cap" x1="0" x2="100%" y1="${base - (cap / max) * plot}" y2="${base - (cap / max) * plot}"></line><text class="sp-ll sp-ll--cap" x="100%" y="${Math.max(12, base - (cap / max) * plot - 7)}" text-anchor="end">daily cap ${markedMoneyText(cap)}</text>` : null}<line class="sp-base" x1="0" x2="100%" y1="${base}" y2="${base}"></line>${days.map(
+  const chart = html`<div id="wrap" class="sp-plot"><div id="tip"></div><svg class="sp-chart" height="230" role="img" aria-label="${t(v, "Daily settled spend with today's running-job holds")}">${cap !== null ? html`<line class="sp-cap" x1="0" x2="100%" y1="${base - (cap / max) * plot}" y2="${base - (cap / max) * plot}"></line><text class="sp-ll sp-ll--cap" x="100%" y="${Math.max(12, base - (cap / max) * plot - 7)}" text-anchor="end">${t(v, "daily cap")} ${markedMoneyText(cap)}</text>` : null}<line class="sp-base" x1="0" x2="100%" y1="${base}" y2="${base}"></line>${days.map(
     (d, i) => {
       const settled = number(d.settledMicros);
       const held = d.today ? number(d.heldMicros) : 0;
@@ -385,16 +389,16 @@ export function spendOver(v) {
       const top = ((held ?? 0) / max) * plot;
       const anchor = i === 0 ? "start" : i === n - 1 ? "end" : "middle";
       const labelX = i === 0 ? 0 : i === n - 1 ? 100 : center;
-      return html`<g data-tip="${i}"><title>${d.date}: ${settledMoneyText(d)} settled${d.today ? `; ${markedMoneyText(held)} held` : ""}</title>${settled === null ? html`<text class="sp-gap" x="${center}%" y="${base - 8}" text-anchor="middle">?</text>` : html`<rect class="${d.settledEstimated ? "sp-bar sp-bar--estimated" : "sp-bar"}" x="${x}%" y="${base - bar}" width="${width}%" height="${Math.max(0.3, bar)}" rx="7"></rect>`}${top > 0 ? html`<rect class="sp-held" x="${x}%" y="${base - bar - top}" width="${width}%" height="${top}" rx="7"></rect>` : null}${!dense ? html`<text class="sp-v" x="${labelX}%" y="${Math.max(13, base - bar - top - 8)}" text-anchor="${anchor}">${markedMoneyText(valueOf(d), { floor: d.settledFloor, estimated: d.settledEstimated })}</text>` : null}${!dense || i % Math.ceil(n / 7) === 0 || i === n - 1 ? html`<text class="${d.today ? "sp-d sp-d--now" : "sp-d"}" x="${labelX}%" y="224" text-anchor="${anchor}">${d.date.slice(5)}</text>` : null}</g>`;
+      return html`<g data-tip="${i}"><title>${d.date}: ${settledMoneyText(d, v?.locale)} ${t(v, "settled")}${d.today ? `; ${markedMoneyText(held)} ${t(v, "held")}` : ""}</title>${settled === null ? html`<text class="sp-gap" x="${center}%" y="${base - 8}" text-anchor="middle">?</text>` : html`<rect class="${d.settledEstimated ? "sp-bar sp-bar--estimated" : "sp-bar"}" x="${x}%" y="${base - bar}" width="${width}%" height="${Math.max(0.3, bar)}" rx="7"></rect>`}${top > 0 ? html`<rect class="sp-held" x="${x}%" y="${base - bar - top}" width="${width}%" height="${top}" rx="7"></rect>` : null}${!dense ? html`<text class="sp-v" x="${labelX}%" y="${Math.max(13, base - bar - top - 8)}" text-anchor="${anchor}">${markedMoneyText(valueOf(d), { floor: d.settledFloor, estimated: d.settledEstimated })}</text>` : null}${!dense || i % Math.ceil(n / 7) === 0 || i === n - 1 ? html`<text class="${d.today ? "sp-d sp-d--now" : "sp-d"}" x="${labelX}%" y="224" text-anchor="${anchor}">${d.date.slice(5)}</text>` : null}</g>`;
     },
-  )}</svg></div>${tipsHtml(days.map((d) => `${d.date}: ${settledMoneyText(d)} settled${d.today ? `; ${markedMoneyText(d.heldMicros)} held` : ""}`))}<p class="keyrow"><span><i class="sp-k sp-k--bar"></i>Settled</span><span><i class="sp-k sp-k--held"></i>Held for running jobs, released when they settle</span></p><details class="sp-provenance sp-daily-values"${days.some((d) => unknownCount(d) > 0 || d.settledFloor || d.settledEstimated || number(d.settledMicros) === null) ? html` open` : null}><summary>Daily values and coverage</summary>${ui.facts(
+  )}</svg></div>${tipsHtml(days.map((d) => `${d.date}: ${settledMoneyText(d, v?.locale)} ${uiText("settled", v?.locale)}${d.today ? `; ${markedMoneyText(d.heldMicros)} ${uiText("held", v?.locale)}` : ""}`))}<p class="keyrow"><span><i class="sp-k sp-k--bar"></i >${t(v, "Settled")}</span><span><i class="sp-k sp-k--held"></i>${t(v, "Held for running jobs, released when they settle")}</span></p><details class="sp-provenance sp-daily-values"${days.some((d) => unknownCount(d) > 0 || d.settledFloor || d.settledEstimated || number(d.settledMicros) === null) ? html` open` : null}><summary>${t(v, "Daily values and coverage")}</summary>${ui.facts(
     days.map((d) => [
       d.date,
-      html`${settledMoney(d)}${d.today ? html` settled; ${usd(d.heldMicros)} held` : ""}`,
+      html`${settledMoney(d, v?.locale)}${d.today ? html` ${t(v, "settled;")} ${usd(d.heldMicros)} ${t(v, "held")}` : ""}`,
     ]),
     { cols: 3 },
-  )}</details>${note("Past days show record cost only. ≥ marks a known minimum; ~ marks an estimate; ? means the cost is unknown. Unknown costs are not zero.")}${newerNote(p.spend?.newerSkipped)}`;
-  return card("Spend over time", chart, null, "per day, against the daily cap");
+  )}</details>${note(t(v, "Past days show record cost only. ≥ marks a known minimum; ~ marks an estimate; ? means the cost is unknown. Unknown costs are not zero."))}${newerNote(p.spend?.newerSkipped)}`;
+  return card(t(v, "Spend over time"), chart, null, t(v, "per day, against the daily cap"));
 }
 
 /**
@@ -406,31 +410,32 @@ function newerNote(n) {
   return said ? note(`${said}: the totals leave them out.`) : null;
 }
 
-function moneyCost(cost) {
+function moneyCost(cost, locale = "en") {
   return !cost || cost.class === "unknown"
-    ? html`${ui.icon("minus")} unknown`
+    ? html`${ui.icon("minus")} ${uiText("unknown", locale)}`
     : fmtCost(cost);
 }
-function costRows(title, rows, label, meta = () => "") {
-  if (!rows?.length) return empty(title, "No runs in this spend window.");
+function costRows(v, title, rows, label, meta = () => "") {
+  if (!rows?.length) return empty(t(v, title), t(v, "No runs in this spend window."));
   const max = Math.max(0.001, ...rows.map((r) => number(r.cost?.usd) ?? 0));
   return card(
-    title,
-    html`<div class="sp-hbars">${rows.map((r) => html`<div class="sp-hb"><span class="sp-hb__l"><b>${label(r)}</b>${meta(r) ? html`<small>${meta(r)}</small>` : null}</span><svg class="sp-hb__bar" height="12" aria-hidden="true"><rect class="sp-hb__bed" width="100%" height="12" rx="6"></rect><rect class="sp-hb__fill" width="${Math.min(100, (100 * (number(r.cost?.usd) ?? 0)) / max)}%" height="12" rx="6"></rect></svg><b class="sp-hb__v">${moneyCost(r.cost)}</b></div>`)}</div>${note("Counts the runs in the selected spend window.")}`,
+    t(v, title),
+    html`<div class="sp-hbars">${rows.map((r) => html`<div class="sp-hb"><span class="sp-hb__l"><b>${label(r)}</b>${meta(r) ? html`<small>${meta(r)}</small>` : null}</span><svg class="sp-hb__bar" height="12" aria-hidden="true"><rect class="sp-hb__bed" width="100%" height="12" rx="6"></rect><rect class="sp-hb__fill" width="${Math.min(100, (100 * (number(r.cost?.usd) ?? 0)) / max)}%" height="12" rx="6"></rect></svg><b class="sp-hb__v">${moneyCost(r.cost, v.locale)}</b></div>`)}</div>${note(t(v, "Counts the runs in the selected spend window."))}`,
   );
 }
 export const spendByFlow = (v) =>
-  costRows("By flow", fold(v)?.byFlow, (r) => r.flow);
+  costRows(v, "By flow", fold(v)?.byFlow, (r) => r.flow);
 export const spendByModel = (v) =>
   costRows(
+    v,
     "By model",
     fold(v)?.byModel,
     (r) => r.model,
     (r) =>
-      `${r.provider}; ${r.runs} runs${r.cost?.class === "plan" ? ` on plan:${r.cost.planId ?? "unknown"}` : ""}`,
+      `${r.provider}; ${r.runs} ${t(v, r.runs === 1 ? "run" : "runs")}${r.cost?.class === "plan" ? ` ${t(v, "on plan:")}${r.cost.planId ?? t(v, "unknown")}` : ""}`,
   );
 export const spendByProject = (v) =>
-  costRows("By project", fold(v)?.byProject, (r) => r.label ?? r.key);
+  costRows(v, "By project", fold(v)?.byProject, (r) => r.label ?? r.key);
 
 export function spendSizes(v) {
   const s = payload(v).spend;
@@ -439,26 +444,26 @@ export function spendSizes(v) {
   const max = Math.max(1, ...bins.map((b) => b.runs));
   const n = Math.max(1, bins.length);
   return card(
-    "Job sizes",
+    t(v, "Job sizes"),
     html`${
       cap > 0
-        ? html`<svg class="sp-hist" height="180" role="img" aria-label="Cost per metered run, equal bins to the job cap"><line class="sp-base" x1="0" x2="100%" y1="142" y2="142"></line>${bins.map(
+        ? html`<svg class="sp-hist" height="180" role="img" aria-label="${t(v, "Cost per metered run, equal bins to the job cap")}"><line class="sp-base" x1="0" x2="100%" y1="142" y2="142"></line>${bins.map(
             (b, i) => {
               const h = (b.runs / max) * 105;
-              return html`<g><title>${markedMoneyText(b.fromMicros)} to ${markedMoneyText(b.toMicros)}: ${b.runs} metered ${b.runs === 1 ? "run" : "runs"}</title><rect class="sp-hbin" x="${((i + 0.12) / n) * 97}%" y="${142 - h}" width="${(0.76 / n) * 97}%" height="${h}" rx="4"></rect><text class="sp-v" x="${((i + 0.5) / n) * 97}%" y="${134 - h}" text-anchor="middle">${b.runs}</text></g>`;
+              return html`<g><title>${markedMoneyText(b.fromMicros, null, v.locale)} ${t(v, "to")} ${markedMoneyText(b.toMicros, null, v.locale)}: ${b.runs} ${t(v, b.runs === 1 ? "metered run" : "metered runs")}</title><rect class="sp-hbin" x="${((i + 0.12) / n) * 97}%" y="${142 - h}" width="${(0.76 / n) * 97}%" height="${h}" rx="4"></rect><text class="sp-v" x="${((i + 0.5) / n) * 97}%" y="${134 - h}" text-anchor="middle">${b.runs}</text></g>`;
             },
-          )}<line class="sp-capline" x1="99%" x2="99%" y1="22" y2="142"></line><text class="sp-ll" x="98%" y="15" text-anchor="end">job cap</text>${[0, 1, 2, 3, 4].map((i) => html`<text class="sp-d" x="${i * 24.5}%" y="166" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${markedMoneyText((cap * i) / 4)}</text>`)}</svg>${note(`Axis: $0 to $${(cap / 1e6).toFixed(2)}, in equal bins; ${s?.meteredRangeRuns ?? 0} metered runs.`)}`
-        : note("The per-job dollar cap could not be read.")
-    }${note("While a dollar window is set, every run reserves its per-job cap before it starts; a zero-rated one reserves nothing.")}<p class="sp-note">The largest run used <b>${usd(s?.largestRangeMicros)}</b>; a lower <code>maxCostUsd</code> would hold less money while jobs run.</p>${s?.overJobCapRuns ? note(`${s.overJobCapRuns} historical ${s.overJobCapRuns === 1 ? "run" : "runs"} exceeded today's job cap and ${s.overJobCapRuns === 1 ? "is" : "are"} included in the final bin.`) : null}`,
+          )}<line class="sp-capline" x1="99%" x2="99%" y1="22" y2="142"></line><text class="sp-ll" x="98%" y="15" text-anchor="end">${t(v, "job cap")}</text>${[0, 1, 2, 3, 4].map((i) => html`<text class="sp-d" x="${i * 24.5}%" y="166" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${markedMoneyText((cap * i) / 4, null, v.locale)}</text>`)}</svg>${note(`${t(v, "Axis from zero to")} $${(cap / 1e6).toFixed(2)}; ${t(v, "equal bins; metered runs:")} ${s?.meteredRangeRuns ?? 0}.`)}`
+        : note(t(v, "The per-job dollar cap could not be read."))
+    }${note(t(v, "While a dollar window is set, every run reserves its per-job cap before it starts; a zero-rated one reserves nothing."))}<p class="sp-note">${t(v, "The largest run used")} <b>${usd(s?.largestRangeMicros, v.locale)}</b>; ${t(v, "a lower maxCostUsd would hold less money while jobs run.")}</p>${s?.overJobCapRuns ? note(`${s.overJobCapRuns} ${t(v, s.overJobCapRuns === 1 ? "historical run exceeded today's job cap and is included in the final bin." : "historical runs exceeded today's job cap and are included in the final bin.")}`) : null}`,
     v.role === "operator"
       ? ui.btn({
-          label: "Change the job cap",
+          label: t(v, "Change the job cap"),
           href: "/config#p-settings",
           icon: "config",
           kind: "sm",
         })
       : null,
-    "cost per run",
+    t(v, "cost per run"),
   );
 }
 
@@ -473,13 +478,13 @@ export function spendCaps(v) {
   const b = p.budget;
   if (!b)
     return empty(
-      "Caps",
-      "The settings or counters could not be read. No cap usage can be claimed.",
+      t(v, "Caps"),
+      t(v, "The settings or counters could not be read. No cap usage can be claimed."),
     );
   const dollar = b.dollars ?? {};
   const windows = Array.isArray(dollar.windows) ? dollar.windows : [];
   return card(
-    "Caps",
+    t(v, "Caps"),
     html`<div class="sp-caps">${
       b.unreachable ||
       b.settingsInvalid ||
@@ -489,55 +494,67 @@ export function spendCaps(v) {
       dollar.limits?.invalid ||
       b.scopedInvalid
         ? note(
-            "The settings file or counters could not be read; amounts marked unknown are not zero.",
+            t(v, "The settings file or counters could not be read; amounts marked unknown are not zero."),
           )
         : null
     }${["day", "week", "month"].map((key) =>
       b[key]?.cap
         ? capLine(
-            `Jobs this ${key}: ${countWord(b[key].reserved ?? b[key].spent ?? b[key].used, b[key].cap, b.softHoldPct)}`,
+          `${t(v, "Jobs this")} ${t(v, key)}: ${t(v, countWord(b[key].reserved ?? b[key].spent ?? b[key].used, b[key].cap, b.softHoldPct))}`,
             b[key].reserved ?? b[key].spent ?? b[key].used,
             b[key].cap,
             false,
             b.softHoldPct,
+            v.locale,
+            countWord(b[key].reserved ?? b[key].spent ?? b[key].used, b[key].cap, b.softHoldPct),
           )
         : null,
     )}${
       b.tokens?.cap
         ? capLine(
-            `Tokens today: ${number(b.tokens.spent) === null ? "unknown" : b.tokens.spent >= b.tokens.cap ? "Full" : "Open"}`,
+            `${t(v, "Tokens today")}: ${t(v, number(b.tokens.spent) === null ? "unknown" : b.tokens.spent >= b.tokens.cap ? "Full" : "Open")}`,
             b.tokens.spent,
             b.tokens.cap,
             false,
+            null,
+            v.locale,
+            number(b.tokens.spent) === null ? "unknown" : b.tokens.spent >= b.tokens.cap ? "Full" : "Open",
           )
         : null
     }${windows.map((d) =>
       capLine(
-        `${pathLabel(v, d.name ?? d.ledger ?? "Deployment dollars")} ${d.window} (spent and held): ${number(d.counterMicros) === null ? "unknown" : d.full ? "Full" : "Open"}`,
+        `${pathLabel(v, d.name ?? d.ledger ?? "Deployment dollars")} ${t(v, d.window)} (${t(v, "spent and held")}): ${t(v, number(d.counterMicros) === null ? "unknown" : d.full ? "Full" : "Open")}`,
         d.counterMicros,
         d.capMicros,
+        true,
+        null,
+        v.locale,
+        number(d.counterMicros) === null ? "unknown" : d.full ? "Full" : "Open",
       ),
     )}${(b.scoped ?? []).map((r) =>
       ["day", "week", "month"].map((key) =>
         r[key]?.cap
           ? capLine(
-              `${pathLabel(v, r.scope)} jobs ${key}: ${countWord(r[key].used, r[key].cap)}`,
+              `${pathLabel(v, r.scope)} ${t(v, "jobs")} ${t(v, key)}: ${t(v, countWord(r[key].used, r[key].cap))}`,
               r[key].used,
               r[key].cap,
               false,
+              null,
+              v.locale,
+              countWord(r[key].used, r[key].cap),
             )
           : null,
       ),
-    )}</div><p class="keyrow sp-cap-key"><span><i class="k tone-ok"></i>Open</span><span><i class="k tone-attention"></i>From the job soft hold new starts are refused; nothing is spent.</span><span><i class="k tone-failed"></i>Full: another job at its per-job cap would not fit.</span></p>${note("The soft-hold tick applies to global job windows only. Scoped job windows, tokens and dollars have hard caps.")}`,
+    )}</div><p class="keyrow sp-cap-key"><span><i class="k tone-ok"></i>${t(v, "Open")}</span><span><i class="k tone-attention"></i>${t(v, "From the job soft hold new starts are refused; nothing is spent.")}</span><span><i class="k tone-failed"></i>${t(v, "Full")}: ${t(v, "another job at its per-job cap would not fit.")}</span></p>${note(t(v, "The soft-hold tick applies to global job windows only. Scoped job windows, tokens and dollars have hard caps."))}`,
     v.role === "operator"
       ? ui.btn({
-          label: "Edit caps",
+          label: t(v, "Edit caps"),
           href: "/config#p-settings",
           icon: "config",
           kind: "sm",
         })
       : null,
-    "job soft-hold ticks only",
+    t(v, "job soft-hold ticks only"),
   );
 }
 
@@ -551,7 +568,7 @@ function whatif(v, perFlow) {
   const rows = p.fold?.byFlow ?? [];
   let answer = null;
   if (result?.unknown)
-    answer = html`${note("Unknown model. The pricing tables cannot price it.")}
+    answer = html`${note(t(v, "Unknown model. The pricing tables cannot price it."))}
       <ul>
         ${(result.near ?? []).map(
           (m) =>
@@ -568,44 +585,44 @@ function whatif(v, perFlow) {
       </ul>`;
   else if (result?.unreachable)
     answer = note(
-      "The run records could not be read, so there is nothing to estimate from.",
+      t(v, "The run records could not be read, so there is nothing to estimate from."),
     );
   else if (result?.runSet) {
     const r = result.runSet;
     const target = number(r.usd) === null ? null : r.usd * 1e6;
     const actual = number(r.originalUsd) === null ? null : r.originalUsd * 1e6;
     const scale = Math.max(1, target ?? 0, actual ?? 0);
-    answer = html`<p class="sp-wi__s">The same ${r.runs ?? 0} runs on <b>${q.whatif}</b> would have cost about <b>${usd(target)}</b> instead of <b>${usd(actual)}</b>.</p><div class="sp-wi"><span class="sp-wi__l">Recorded cost<small>the same ledgered runs</small></span>${progress(actual, scale, "What these ledgered runs cost", "idle")}<b>${usd(actual)}</b><span class="sp-wi__l">${q.whatif}<small>estimate</small></span>${progress(target, scale, "The same runs repriced on the selected model")}<b>about ${usd(target)}</b></div>${note(`${r.excluded ?? 0} runs had no ledger and were excluded. ${r.planId ? `Plan ${r.planId}; this is the API-equivalent amount the dollar windows would be charged.` : ""}`)}${newerNote(r.newerSkipped)}`;
+    answer = html`<p class="sp-wi__s">${t(v, "The same runs on")} ${r.runs ?? 0} <b>${q.whatif}</b> ${t(v, "would have cost about")} <b>${usd(target, v.locale)}</b> ${t(v, "instead of")} <b>${usd(actual, v.locale)}</b>.</p><div class="sp-wi"><span class="sp-wi__l">${t(v, "Recorded cost")}<small>${t(v, "the same ledgered runs")}</small></span>${progress(actual, scale, t(v, "What these ledgered runs cost"), "idle")}<b>${usd(actual, v.locale)}</b><span class="sp-wi__l">${q.whatif}<small>${t(v, "estimate")}</small></span>${progress(target, scale, t(v, "The same runs repriced on the selected model"))}<b>${t(v, "about")} ${usd(target, v.locale)}</b></div>${note(`${r.excluded ?? 0} ${t(v, "runs had no ledger and were excluded.")} ${r.planId ? `${t(v, "Plan")} ${r.planId}; ${t(v, "this is the API-equivalent amount the dollar windows would be charged.")}` : ""}`)}${newerNote(r.newerSkipped)}`;
   } else if (result?.result) {
     const r = result.result;
     answer = html`${ui.facts([
       [
-        "Per run",
+        t(v, "Per run"),
         r.class === "seeded"
           ? html`${usd(r.low * 1e6)} to ${usd(r.high * 1e6)} (seeded)`
           : usd(r.perRun * 1e6),
       ],
-      ["Runs in this window", r.windowRuns ?? 0],
+      [t(v, "Runs in this window"), r.windowRuns ?? 0],
       [
-        "Window estimate",
+        t(v, "Window estimate"),
         r.class === "seeded"
-          ? "Seeded range, no ledgered run yet"
+          ? t(v, "Seeded range, no ledgered run yet")
           : usd(r.usd * 1e6),
       ],
       [
-        "Ledger coverage",
+        t(v, "Ledger coverage"),
         typeof r.coverage === "number"
           ? `${Math.round(r.coverage * 100)}%`
           : "unknown",
       ],
-      ["Runs excluded", r.excluded ?? 0],
-      ["Rates version", r.ratesVersion ?? "unknown"],
+      [t(v, "Runs excluded"), r.excluded ?? 0],
+      [t(v, "Rates version"), r.ratesVersion ?? "unknown"],
     ])}${note(
-      "Per-run estimate, multiplied by the flow's runs in this spend window. Seeded ranges narrow after a ledgered run.",
+      t(v, "Per-run estimate, multiplied by the flow's runs in this spend window. Seeded ranges narrow after a ledgered run."),
     )}${newerNote(r.newerSkipped)}`;
   }
   return card(
-    perFlow ? "What if, per flow" : "What if",
+    t(v, perFlow ? "What if, per flow" : "What if"),
     html`<form class="sp-wiform spend-whatif" method="get" action="${path}">
         <input
           type="hidden"
@@ -620,7 +637,7 @@ function whatif(v, perFlow) {
             ? html`<input type="hidden" name="paths" value="${q.paths}" />`
             : null
         }<label
-          >Model<input
+           >${t(v, "Model")}<input
             name="whatif"
             list="spend-models"
             required
@@ -630,7 +647,7 @@ function whatif(v, perFlow) {
         >${
           perFlow
             ? html`<label
-                >Flow<input
+                 >${t(v, "Flow")}<input
                   name="flow"
                   list="spend-flows"
                   required
@@ -642,7 +659,7 @@ function whatif(v, perFlow) {
                   .map((r) => html`<option value="${r.flow}"></option>`)}
               </datalist>`
             : html`<label
-              >Which runs<select name="runs">
+               >${t(v, "Which runs")}<select name="runs">
                 <option
                   value="24h"
                   ${q.runs !== "week" ? html` selected` : null}
@@ -664,10 +681,10 @@ function whatif(v, perFlow) {
                 ${typeof m === "string" ? m : m.label}
               </option>`,
           )}</datalist
-        ><button class="btn btn--primary" type="submit">Estimate</button>
+        ><button class="btn btn--primary" type="submit" >${t(v, "Estimate")}</button>
       </form>
       ${answer}${note(
-        "An estimate from token counts and list prices. Outcomes may differ: a cheaper model can take more turns or fail more often.",
+        t(v, "An estimate from token counts and list prices. Outcomes may differ: a cheaper model can take more turns or fail more often."),
       )}`,
   );
 }
@@ -676,10 +693,10 @@ export const breakdownWhatif = (v) => whatif(v, true);
 export function spendPlans(v) {
   const f = normFold(payload(v).recent24h);
   return card(
-    "Metered and plan",
-    html`${f ? html`<ul class="sp-mp">${f.byModel.map((r) => html`<li><span class="sp-mp__k">${r.cost?.class === "plan" ? "plan" : "metered"}</span><span class="sp-mp__t"><b>${r.model}</b><small>${r.provider}; ${r.runs} runs in 24 hours, ${r.tokens.toLocaleString("en-US")} tokens${payload(v).triggersByModel?.[`${r.provider}/${r.model}`]?.length ? ` (${payload(v).triggersByModel[`${r.provider}/${r.model}`].join(", ")})` : ""}. ${r.cost?.class === "plan" ? `Billed by plan:${r.cost.planId ?? "unknown"}, not per run.` : ""}</small></span><b class="sp-mp__v">${moneyCost(r.cost)}</b></li>`)}</ul>` : note("No runs could be read for the last 24 hours.")}${note("Plan runs are billed by plan:<id>, not per run. They count against every cap, with dollar windows charged at their API-equivalent price.")}`,
+    t(v, "Metered and plan"),
+    html`${f ? html`<ul class="sp-mp">${f.byModel.map((r) => html`<li><span class="sp-mp__k">${t(v, r.cost?.class === "plan" ? "plan" : "metered")}</span><span class="sp-mp__t"><b>${r.model}</b><small>${r.provider}; ${r.runs} ${t(v, "runs in 24 hours,")} ${r.tokens.toLocaleString("en-US")} ${t(v, "tokens")}${payload(v).triggersByModel?.[`${r.provider}/${r.model}`]?.length ? ` (${payload(v).triggersByModel[`${r.provider}/${r.model}`].join(", ")})` : ""}. ${r.cost?.class === "plan" ? `${t(v, "Billed by plan:")}${r.cost.planId ?? t(v, "unknown")}, ${t(v, "not per run.")}` : ""}</small></span><b class="sp-mp__v">${moneyCost(r.cost, v.locale)}</b></li>`)}</ul>` : note(t(v, "No runs could be read for the last 24 hours."))}${note(t(v, "Plan runs are billed by plan:<id>, not per run. They count against every cap, with dollar windows charged at their API-equivalent price."))}`,
     null,
-    "last 24 hours",
+    t(v, "last 24 hours"),
   );
 }
 
@@ -713,12 +730,12 @@ export function spendSplit(v) {
     ]),
   );
   return card(
-    "Budget split",
+    t(v, "Budget split"),
     html`${
       a?.kind === "live"
         ? html`${
             total > 0
-              ? html`<svg class="sp-split" height="34" role="img" aria-label="Allocation weight shares">${weights.map(
+              ? html`<svg class="sp-split" height="34" role="img" aria-label="${t(v, "Allocation weight shares")}">${weights.map(
                   ([id, weight], i) => {
                     const width = (weight / total) * 100;
                     const at = x;
@@ -728,12 +745,12 @@ export function spendSplit(v) {
                 )}</svg>`
               : note(
                   weights.length
-                    ? "All published weights are zero; there are no proportional shares."
-                    : "The split's weights were not published; shares are unknown.",
+                    ? t(v, "All published weights are zero; there are no proportional shares.")
+                    : t(v, "The split's weights were not published; shares are unknown."),
                 )
-          }${note(`Weights only: it never changes a cap. Written by ${p?.state?.triggerId ?? a.state?.writer ?? "not known"}, writer ${a.state?.writer ?? "unknown"}, on ${p?.state?.model ?? "a model not recorded"}.`)}${when(a.state?.appliedAt)}<div class="sp-rows">${a.rows.filter((r) => !v.query?.project || v.query.project === r.id).map((r) => capLine(`${r.id}, ${shares.get(r.id) === null || shares.get(r.id) === undefined ? weights.length && total === 0 ? "no proportional" : "unknown" : Math.round(shares.get(r.id)) + "%"} share`, r.spent, r.allocation))}</div>`
-        : note("No budget split is available.")
-    }<a class="btn btn--sm" href="${link(v, "/insights/budget-split")}">Open Budget split</a>`,
+          }${note(`${t(v, "Weights only: it never changes a cap. Written by")} ${p?.state?.triggerId ?? a.state?.writer ?? t(v, "not known")}, ${t(v, "writer")} ${a.state?.writer ?? t(v, "unknown")}, ${t(v, "on")} ${p?.state?.model ?? t(v, "a model not recorded")}.`)}${when(a.state?.appliedAt)}<div class="sp-rows">${a.rows.filter((r) => !v.query?.project || v.query.project === r.id).map((r) => { const share = shares.get(r.id); const label = share == null ? weights.length && total === 0 ? t(v, "no proportional") : t(v, "unknown") : `${Math.round(share)}% ${t(v, "share")}`; return capLine(`${r.id}, ${label}`, r.spent, r.allocation, true, null, v.locale); })}</div>`
+        : note(t(v, "No budget split is available."))
+    }<a class="btn btn--sm" href="${link(v, "/insights/budget-split")}">${t(v, "Open Budget split")}</a>`,
     null,
     a?.window ?? null,
   );
@@ -742,24 +759,24 @@ export function spendSplit(v) {
 export function splitEnvelopeKpi(v) {
   const a = allocation(v);
   return kpi(
-    "Envelope",
+    t(v, "Envelope"),
     usd(a?.totalMicros),
-    `${a?.window ?? "unknown window"}. Delegation ${a?.delegation ? "on" : "off"}. Writers: ${(payload(v).allocation?.envelope?.delegation?.writers ?? []).join(", ") || "none"}.`,
+    `${a?.window ?? t(v, "unknown window")}. ${t(v, "Delegation")} ${a?.delegation ? t(v, "on") : t(v, "off")}. ${t(v, "Writers:")} ${(payload(v).allocation?.envelope?.delegation?.writers ?? []).join(", ") || t(v, "none")}.`,
   );
 }
 export function splitAllocatedKpi(v) {
   const a = allocation(v);
   return kpi(
-    "Allocated",
+    t(v, "Allocated"),
     usd(a?.rows?.reduce((sum, r) => sum + (r.allocation ?? 0), 0)),
-    `${a?.rows?.length ?? 0} projects; unallocated ${a?.state?.unallocated === undefined ? "unknown" : `$${(a.state.unallocated / 1e6).toFixed(2)}`}. Floors total $${((a?.rows ?? []).reduce((sum, row) => sum + (row.floor ?? 0), 0) / 1e6).toFixed(2)}; floors come first.`,
+    `${a?.rows?.length ?? 0} ${t(v, "projects")}; ${t(v, "Unallocated")} ${a?.state?.unallocated === undefined ? t(v, "unknown") : `$${(a.state.unallocated / 1e6).toFixed(2)}`}. ${t(v, "Floor total")} $${((a?.rows ?? []).reduce((sum, row) => sum + (row.floor ?? 0), 0) / 1e6).toFixed(2)}; ${t(v, "floors come first.")}`,
   );
 }
 export function splitSpentKpi(v) {
   const a = allocation(v);
   return card(
-    "Spent this envelope window",
-    html`${ui.kpi(usd(a?.deploymentSpent), html`of ${usd(a?.totalMicros)}`)}${progress(a?.deploymentSpent, a?.totalMicros, "Spent and held against the allocation envelope")}<p class="sx-k">${a?.rows?.filter(overAllocation).length ?? 0} projects over allocation. Includes held money.</p>`,
+    t(v, "Spent this envelope window"),
+    html`${ui.kpi(usd(a?.deploymentSpent), html`${t(v, "of")} ${usd(a?.totalMicros)}`)}${progress(a?.deploymentSpent, a?.totalMicros, t(v, "Spent and held against the allocation envelope"))}<p class="sx-k">${a?.rows?.filter(overAllocation).length ?? 0} ${t(v, "projects over allocation. Includes held money.")}</p>`,
   );
 }
 export function splitPlanKpi(v) {
@@ -771,17 +788,17 @@ export function splitPlanKpi(v) {
       : null;
   const duration =
     hours === null
-      ? "unknown"
+      ? t(v, "unknown")
       : hours >= 48
-        ? `${Math.ceil(hours / 24)} days`
-        : `${hours} hours`;
+      ? `${Math.ceil(hours / 24)} ${t(v, "days")}`
+        : `${hours} ${t(v, "hours")}`;
   return card(
-    "Plan in force",
-    html`${ui.kpi(a?.state ? duration : "No split yet", a?.state ? "left" : null)}<p class="sx-k">Applied ${when(a?.state?.appliedAt)} by <span class="code">${payload(v).allocation?.state?.triggerId ?? a?.state?.writer ?? "unknown"}</span>, until ${when(a?.state?.validUntil)}.</p>${hours === null ? note("No plan expiry recorded.") : null}`,
+    t(v, "Plan in force"),
+    html`${ui.kpi(a?.state ? duration : t(v, "No split yet"), a?.state ? t(v, "left") : null)}<p class="sx-k">${t(v, "Applied")} ${when(a?.state?.appliedAt)} ${t(v, "by")} <span class="code">${payload(v).allocation?.state?.triggerId ?? a?.state?.writer ?? "unknown"}</span>, ${t(v, "until")} ${when(a?.state?.validUntil)}.</p>${hours === null ? note(t(v, "No plan expiry recorded.")) : null}`,
     a?.state
       ? statusBadge(
           hours === 0 ? "attention" : "ok",
-          hours === 0 ? "Expired" : "Applied",
+          hours === 0 ? t(v, "Expired") : t(v, "Applied"),
         )
       : null,
   );
@@ -792,37 +809,37 @@ export function splitRows(v) {
   const p = payload(v).allocation;
   if (a?.kind !== "live")
     return empty(
-      "Budget split",
-      "No split can be drawn until the envelope and queue can be read.",
+      t(v, "Budget split"),
+      t(v, "No split can be drawn until the envelope and queue can be read."),
     );
   const hosts = p.hosts ?? payload(v).hosts ?? [];
   return card(
-    "Budget split",
-    html`<p class="al-env">${ui.icon("pie")}<span><b>${usd(a.totalMicros)} per ${a.window ?? "unknown window"}</b>, delegation ${a.delegation ? "on" : "off"}</span><span class="al-env__h">Unallocated <b>${usd(a.state?.unallocated)}</b>; deployment spent <b>${usd(a.deploymentSpent)}</b></span></p>${ui.facts(
+    t(v, "Budget split"),
+    html`<p class="al-env">${ui.icon("pie")}<span><b>${usd(a.totalMicros)} per ${a.window ?? t(v, "unknown window")}</b>, ${t(v, "delegation")} ${a.delegation ? t(v, "on") : t(v, "off")}</span><span class="al-env__h">${t(v, "Unallocated")} <b>${usd(a.state?.unallocated)}</b>; ${t(v, "deployment spent")} <b>${usd(a.deploymentSpent)}</b></span></p>${ui.facts(
       [
-        ["Plan", html`<span class="code">${a.state?.planId ?? "none"}</span>`],
+        [t(v, "Plan"), html`<span class="code">${a.state?.planId ?? t(v, "none")}</span>`],
         [
-          "Written by",
-          html`<span class="code">${a.state?.writer ?? "unknown"}</span>${p.state?.triggerId ? html`, the ${p.state.triggerId} run` : null}`,
+          t(v, "Written by"),
+          html`<span class="code">${a.state?.writer ?? t(v, "unknown")}</span>${p.state?.triggerId ? html`, ${t(v, "the")} ${p.state.triggerId} ${t(v, "run")}` : null}`,
         ],
-        ["Applied", when(a.state?.appliedAt)],
-        ["Valid until", when(a.state?.validUntil)],
+        [t(v, "Applied"), when(a.state?.appliedAt)],
+        [t(v, "Valid until"), when(a.state?.validUntil)],
         [
-          "Step",
+          t(v, "Step"),
           a.state?.clamped
-            ? "Clamped by the envelope's step"
-            : "No step clamp recorded",
+            ? t(v, "Clamped by the envelope's step")
+            : t(v, "No step clamp recorded"),
         ],
         [
-          "Envelope",
+          t(v, "Envelope"),
           hosts.length &&
           p.digest &&
           hosts.every((h) => h.fpEnvelope === p.digest)
-            ? statusBadge("ok", "All hosts agree")
-            : statusBadge("attention", "Not confirmed"),
+            ? statusBadge("ok", t(v, "All hosts agree"))
+            : statusBadge("attention", t(v, "Not confirmed")),
         ],
       ],
-    )}${hosts.some((h) => h.fpEnvelope !== p.digest || !h.fpEnvelope) ? note(hosts.map((h) => `${h.name}: ${!h.fpEnvelope ? "Envelope digest not published" : h.fpEnvelope !== p.digest ? "Different envelope" : "Same envelope"}`).join("; ")) : null}
+    )}${hosts.some((h) => h.fpEnvelope !== p.digest || !h.fpEnvelope) ? note(hosts.map((h) => `${h.name}: ${!h.fpEnvelope ? t(v, "Envelope digest not published") : h.fpEnvelope !== p.digest ? t(v, "Different envelope") : t(v, "Same envelope")}`).join("; ")) : null}
       <ul class="al-rows">
         ${a.rows
           .filter((r) => !v.query?.project || r.id === v.query.project)
@@ -837,17 +854,17 @@ export function splitRows(v) {
             return html`<li class="al-row">
               <span class="al-row__l"
                 >${r.id}<small
-                  >weight ${p.state?.weights?.[r.id] ?? "unknown"}</small
+                  >${t(v, "weight")} ${p.state?.weights?.[r.id] ?? t(v, "unknown")}</small
                 ></span
               ><svg
                 class="al-bar"
                 height="22"
                 role="img"
-                aria-label="${r.id}: spent ${
-                  r.spent === null ? "unknown" : r.spent / 1e6
-                } USD; allocation ${
-                  r.allocation === null ? "unknown" : r.allocation / 1e6
-                } USD; floor ${(r.floor ?? 0) / 1e6} USD"
+                aria-label="${r.id}: ${t(v, "spent")} ${
+                  r.spent === null ? t(v, "unknown") : r.spent / 1e6
+                } USD; ${t(v, "allocation")} ${
+                  r.allocation === null ? t(v, "unknown") : r.allocation / 1e6
+                } USD; ${t(v, "floor")} ${(r.floor ?? 0) / 1e6} USD"
               >
                 <rect
                   class="al-bar__track"
@@ -885,12 +902,12 @@ export function splitRows(v) {
                   y2="22"
                 ></line></svg
               ><span class="al-row__v"
-                ><span>${usd(r.spent)} spent of ${usd(r.allocation)}</span
+                ><span>${usd(r.spent, v.locale)} ${t(v, "spent of")} ${usd(r.allocation, v.locale)}</span
                 ><small
-                  >Floor ${usd(r.floor)}
+                  >${t(v, "Floor")} ${usd(r.floor, v.locale)}
                   ${
                     overAllocation(r)
-                      ? html`${ui.icon("failed")} over`
+                      ? html`${ui.icon("failed")} ${t(v, "over")}`
                       : null
                   }</small
                 ></span
@@ -898,13 +915,13 @@ export function splitRows(v) {
             </li>`;
           })}
       </ul>
-      <p class="keyrow"><span><i class="al-k al-k--alloc"></i>Allocation</span><span><i class="al-k al-k--spent"></i>Spend, held included</span><span><i class="al-k al-k--floor"></i>Floor</span><span><i class="al-k al-k--over"></i>Over the allocation</span></p>
+      <p class="keyrow"><span><i class="al-k al-k--alloc"></i>${t(v, "Allocation")}</span><span><i class="al-k al-k--spent"></i>${t(v, "Spend, held included")}</span><span><i class="al-k al-k--floor"></i>${t(v, "Floor")}</span><span><i class="al-k al-k--over"></i>${t(v, "Over the allocation")}</span></p>
       ${note(
-        "A project may spend up to the smaller of its allocation and its own scoped limit. allocation-cap means the split refused it; dollar-cap means the operator's own limit refused it.",
+        t(v, "A project may spend up to the smaller of its allocation and its own scoped limit. allocation-cap means the split refused it; dollar-cap means the operator's own limit refused it."),
       )}`,
     canAct(v)
       ? ui.btn({
-          label: "Set priorities",
+          label: t(v, "Set priorities"),
           href: "#p-priorities",
           icon: "edit",
           kind: "primary",
@@ -917,22 +934,22 @@ export function splitHistory(v) {
   const p = payload(v).allocation;
   const rows = p?.log ?? [];
   return card(
-    "History",
+    t(v, "History"),
     rows.length
       ? html`<div class="tbl-wrap">
           <table class="tbl">
             <thead>
               <tr>
-                <th>Row</th>
-                <th>When (UTC)</th>
-                <th>Writer</th>
-                <th>Outcome</th><th>Reason</th>
-                <th>Plan</th>
+                <th>${t(v, "Row")}</th>
+                <th>${t(v, "When (UTC)")}</th>
+                <th>${t(v, "Writer")}</th>
+                <th>${t(v, "Outcome")}</th><th>${t(v, "Reason")}</th>
+                <th>${t(v, "Plan")}</th>
                 ${
                   new Set(rows.map((r) => r.host).filter(Boolean)).size > 1
-                    ? html`<th>Host</th>`
+                    ? html`<th>${t(v, "Host")}</th>`
                     : null
-                }${canAct(v) ? html`<th>Action</th>` : null}
+                }${canAct(v) ? html`<th>${t(v, "Action")}</th>` : null}
               </tr>
             </thead>
             <tbody>
@@ -966,13 +983,13 @@ export function splitHistory(v) {
                 const current = neutralCurrent || currentPlanRow === i;
                 // Expiry keeps the old plan id but writes neutral weights; equal ids alone cannot identify a duplicate.
                 const historyFact = current
-                  ? "In force"
+                  ? t(v, "In force")
                   : r.outcome === "duplicate"
                     ? applied >= 0
-                      ? `Same as row ${applied + 1}`
-                      : "Duplicate plan; its applied row is outside the newest 20 rows"
+                      ? `${t(v, "Same as row")} ${applied + 1}`
+                      : t(v, "Duplicate plan; its applied row is outside the newest 20 rows")
                     : !r.weights
-                      ? "No split to go back to"
+                      ? t(v, "No split to go back to")
                       : null;
                 return html`<tr>
                   <td>${i + 1}</td>
@@ -984,15 +1001,15 @@ export function splitHistory(v) {
                     r.reason
                       ? html`:
                         ${
-                          PLAN_REASON_TEXT[r.reason]?.sentence ??
-                          "A newer worker recorded this reason; check its version and plan rules."
+                          PLAN_REASON_TEXT[r.reason]?.sentence ? t(v, PLAN_REASON_TEXT[r.reason].sentence) :
+                          t(v, "A newer worker recorded this reason; check its version and plan rules.")
                         }`
                       : null
                   }
                   </td>
                   <td>
-                    ${neutralCurrent ? "Today's neutral split" : (r.planId ?? (r.weights ? "Today's neutral split" : null))}
-                    ${historyFact === "In force" ? statusBadge("ok", historyFact) : historyFact ? note(historyFact) : null}
+                    ${neutralCurrent ? t(v, "Today's neutral split") : (r.planId ?? (r.weights ? t(v, "Today's neutral split") : null))}
+                    ${historyFact === t(v, "In force") ? statusBadge("ok", historyFact) : historyFact ? note(historyFact) : null}
                   </td>
                   ${
                     new Set(rows.map((x) => x.host).filter(Boolean)).size > 1
@@ -1011,7 +1028,7 @@ export function splitHistory(v) {
                                     data-type="int"
                                     value="${i}"
                                   /><button class="btn btn--sm" type="submit">
-                                    Revert row ${i + 1}
+                                    ${t(v, "Revert row")} ${i + 1}
                                   </button>
                                 </form>`
                         }
@@ -1024,7 +1041,7 @@ export function splitHistory(v) {
           </table>
         </div>`
       : note(
-          "No allocation history has been read. The newest 20 rows from every host are shown when available (the log keeps 500).",
+          t(v, "No allocation history has been read. The newest 20 rows from every host are shown when available (the log keeps 500)."),
         ),
   );
 }
@@ -1034,8 +1051,8 @@ export function splitPriorities(v) {
   const env = envelopeForm(p);
   if (!env)
     return empty(
-      "Set priorities",
-      "Read a valid envelope before setting priorities.",
+      t(v, "Set priorities"),
+      t(v, "Read a valid envelope before setting priorities."),
     );
   const ids = Object.keys(env.floorsUsd ?? {});
   const weights = p.state?.weights ?? env.defaultWeights ?? {};
@@ -1044,8 +1061,8 @@ export function splitPriorities(v) {
     Object.values(weights).reduce((sum, value) => sum + value, 0),
   );
   return card(
-    "Set priorities",
-    html`<form data-action="priorities-set" data-structured="priorities"><div class="pr-grid">${ids.map((id) => html`<label class="pr-row"><span class="ptag">${id}</span><span class="sr">Weight for ${id}</span><input class="input pr-in" type="number" name="weight:${id}" min="0" max="1000" step="1" required value="${weights[id] ?? 0}"><output class="pr-share" data-weight-share="${id}">about ${Math.round(((weights[id] ?? 0) / total) * 100)}%</output></label>`)}</div><div class="formrow pr-foot"><label class="field">Days this plan holds<input class="input pr-in" type="number" name="validDays" data-type="int" min="1" max="${env.maxPlanDays ?? 7}" value="${env.maxPlanDays ?? 7}" required><small class="field__hint">At most ${env.maxPlanDays ?? 7}, the envelope's limit.</small></label><button class="btn btn--primary" type="submit">Preview the plan</button></div></form>${note("Writer operator-session. Weights are whole numbers from 0 to 1000. Floors come first, the rest is split by weight, and a change moves each share by at most the envelope's step.")}`,
+    t(v, "Set priorities"),
+    html`<form data-action="priorities-set" data-structured="priorities"><div class="pr-grid">${ids.map((id) => html`<label class="pr-row"><span class="ptag">${id}</span><span class="sr">${t(v, "Weight for")} ${id}</span><input class="input pr-in" type="number" name="weight:${id}" min="0" max="1000" step="1" required value="${weights[id] ?? 0}"><output class="pr-share" data-weight-share="${id}" >${t(v, "about")} ${Math.round(((weights[id] ?? 0) / total) * 100)}%</output></label>`)}</div><div class="formrow pr-foot"><label class="field" >${t(v, "Days this plan holds")}<input class="input pr-in" type="number" name="validDays" data-type="int" min="1" max="${env.maxPlanDays ?? 7}" value="${env.maxPlanDays ?? 7}" required><small class="field__hint">${t(v, "At most")} ${env.maxPlanDays ?? 7}, ${t(v, "the envelope's limit.")}</small></label><button class="btn btn--primary" type="submit">${t(v, "Preview the plan")}</button></div></form>${note(t(v, "Writer operator-session. Weights are whole numbers from 0 to 1000. Floors come first, the rest is split by weight, and a change moves each share by at most the envelope's step."))}`,
     null,
     "a plan of weights, previewed first",
   );
@@ -1056,35 +1073,35 @@ export function splitEnvelope(v) {
   const e = envelopeForm(p);
   if (!e)
     return empty(
-      "Envelope",
-      "The envelope is missing or could not be read. Check PI_ENVELOPE_FILE.",
+      t(v, "Envelope"),
+      t(v, "The envelope is missing or could not be read. Check PI_ENVELOPE_FILE."),
     );
   return card(
-    "Envelope",
+    t(v, "Envelope"),
     html`${ui.facts(
       [
-        ["Window", e.window],
-        ["Total", `$${e.totalUsd ?? "unknown"}`],
-        ["Delegation", e.enabled ? "On" : "Off"],
-        ["Writers", (e.writers ?? []).join(", ")],
-        ["Step", `${e.maxStepPct}%`],
-        ["Minimum interval", `${e.minIntervalHours} hours`],
-        ["Longest plan", `${e.maxPlanDays} days`],
+        [t(v, "Window"), t(v, e.window)],
+        [t(v, "Total"), `$${e.totalUsd ?? t(v, "unknown")}`],
+        [[t(v, "Delegation"), e.enabled ? t(v, "On") : t(v, "Off")]],
+        [t(v, "Writers"), (e.writers ?? []).join(", ")],
+        [t(v, "Step"), `${e.maxStepPct}%`],
+        [t(v, "Minimum interval"), `${e.minIntervalHours} ${t(v, "hours")}`],
+        [t(v, "Longest plan"), `${e.maxPlanDays} ${t(v, "days")}`],
         [
-          "Floors",
+          t(v, "Floors"),
           Object.entries(e.floorsUsd ?? {})
             .map(([id, n]) => `${id}: $${n}`)
             .join(", "),
         ],
         [
-          "Default weights",
+          t(v, "Default weights"),
           Object.entries(e.defaultWeights ?? {})
             .map(([id, n]) => `${id}: ${n}`)
             .join(", "),
         ],
-        ["File", pathLabel(v, p.file ?? p.path ?? "PI_ENVELOPE_FILE")],
+        [t(v, "File"), pathLabel(v, p.file ?? p.path ?? "PI_ENVELOPE_FILE")],
         ...(p.hosts ?? payload(v).hosts ?? []).map((h) => [
-          `Envelope digest, ${h.name}`,
+          `${t(v, "Envelope digest")}, ${h.name}`,
           h.fpEnvelope ?? "not published",
         ]),
       ],
@@ -1092,26 +1109,26 @@ export function splitEnvelope(v) {
     )}${
       canAct(v)
         ? html`<details>
-          <summary>Edit envelope</summary>
+          <summary>${t(v, "Edit envelope")}</summary>
           <form
             id="envelope-form" data-action="envelope-set"
             data-structured="envelope"
             class="spend-fields"
           >
             <label
-              >Window<select name="window">
+               >${t(v, "Window")}<select name="window">
                 ${["day", "week", "month"].map(
                   (w) =>
                     html`<option
                       value="${w}"
                       ${e.window === w ? html` selected` : null}
                     >
-                      ${w}
+                      ${t(v, w)}
                     </option>`,
                 )}
               </select></label
             ><label
-              >Total USD<input
+               >${t(v, "Total USD")}<input
                 type="number"
                 name="totalUsd"
                 min="0"
@@ -1121,7 +1138,7 @@ export function splitEnvelope(v) {
             >${Object.entries(e.floorsUsd ?? {}).map(
               ([id, amount]) =>
                 html`<label
-                    >${id} floor USD<input
+                      >${id} ${t(v, "floor USD")}<input
                       type="number"
                       name="floor:${id}"
                       min="0"
@@ -1129,7 +1146,7 @@ export function splitEnvelope(v) {
                       value="${amount}"
                       required /></label
                   ><label
-                    >${id} default weight<input
+                    >${id} ${t(v, "default weight")}<input
                       type="number"
                       name="weight:${id}"
                       min="0"
@@ -1143,9 +1160,9 @@ export function splitEnvelope(v) {
                 type="checkbox"
                 name="enabled"
                 ${e.enabled ? html` checked` : null}
-              />Delegation enabled</label
+              />${t(v, "Delegation enabled")}</label
             ><label
-              >Writers<input
+               >${t(v, "Writers")}<input
                 name="writers"
                 data-type="list"
                 value="${(e.writers ?? []).join(", ")}" /></label
@@ -1156,7 +1173,7 @@ export function splitEnvelope(v) {
             ].map(
               ([key, label]) =>
                 html`<label
-                  >${label}<input
+                  >${t(v, label)}<input
                     type="number"
                     name="${key}"
                     data-type="int"
@@ -1165,7 +1182,7 @@ export function splitEnvelope(v) {
                     required
                 /></label>`,
             )}<button class="btn btn--primary" type="submit">
-              Preview envelope
+              ${t(v, "Preview envelope")}
             </button>
           </form>
         </details>`
@@ -1173,7 +1190,7 @@ export function splitEnvelope(v) {
     }`,
     canAct(v)
       ? ui.btn({
-          label: "Edit envelope",
+          label: t(v, "Edit envelope"),
           href: "#envelope-form",
           icon: "config",
           kind: "sm",
@@ -1185,10 +1202,10 @@ export function splitReasons(v) {
   if (v.role !== "operator") return html``;
   const reasons = payload(v).allocation?.state?.reasons;
   return card(
-    "Why the plan says so",
+    t(v, "Why the plan says so"),
     reasons && Object.keys(reasons).length
-      ? html`${note("Written by the portfolio job.")}<ul class="rs-l">${Object.entries(reasons).map(([id, text]) => html`<li><span class="ptag">${id}</span><q>${escapeInterpreted(String(text))}</q></li>`)}</ul>`
-      : note("No project reasons were recorded for this plan."),
+      ? html`${note(t(v, "Written by the portfolio job."))}<ul class="rs-l">${Object.entries(reasons).map(([id, text]) => html`<li><span class="ptag">${id}</span><q>${escapeInterpreted(String(text))}</q></li>`)}</ul>`
+      : note(t(v, "No project reasons were recorded for this plan.")),
     null,
     "operators only",
   );
@@ -1204,8 +1221,8 @@ export function splitCounts(v) {
   const rows = (items) =>
     html`<ul class="cn-l">${items.map(([name, value]) => html`<li><span class="code">${name}</span><b>${value}</b></li>`)}</ul>`;
   return card(
-    "Refusals and plans",
-    html`${note("Counted in this host's run records over the envelope's window.")}${a?.refusals === null || a?.refusals === undefined ? note("Refusals and plans were not counted: the run records could not be read.") : html`<p class="cn-h">${ui.icon("refused", { size: "sm" })}Refusals in runs on this host</p>${rows(refusals.map((name) => [name, a.refusals[name] ?? 0]))}<p class="cn-h">${ui.icon("done", { size: "sm" })}Plans collected in runs on this host</p>${rows(["applied", "duplicate", "refused"].map((name) => [name, a.plans?.[name] ?? 0]))}${!a.plans || Object.keys(a.plans).length === 0 ? note("No plans collected in this envelope window.") : null}`}`,
+    t(v, "Refusals and plans"),
+    html`${note(t(v, "Counted in this host's run records over the envelope's window."))}${a?.refusals === null || a?.refusals === undefined ? note(t(v, "Refusals and plans were not counted: the run records could not be read.")) : html`<p class="cn-h">${ui.icon("refused", { size: "sm" })}${t(v, "Refusals in runs on this host")}</p>${rows(refusals.map((name) => [name, a.refusals[name] ?? 0]))}<p class="cn-h">${ui.icon("done", { size: "sm" })}${t(v, "Plans collected in runs on this host")}</p>${rows(["applied", "duplicate", "refused"].map((name) => [name, a.plans?.[name] ?? 0]))}${!a.plans || Object.keys(a.plans).length === 0 ? note(t(v, "No plans collected in this envelope window.")) : null}`}`,
     null,
     "from run records",
   );
@@ -1257,21 +1274,21 @@ export function splitStates(v) {
                     ]
                   : null;
   return card(
-    "Other states",
+    t(v, "Other states"),
     state
       ? ui.banner({
           status: state[0],
-          title: state[1],
-          body: state[2],
+          title: t(v, state[1]),
+          body: t(v, state[2]),
           sm: true,
         })
       : ui.collapsed({
           icon: "done",
-          title: "Envelope and split read",
-          body: "No exceptional split state was reported.",
+          title: t(v, "Envelope and split read"),
+          body: t(v, "No exceptional split state was reported."),
         }),
     null,
-    "what this view says instead",
+    t(v, "what this view says instead"),
   );
 }
 
@@ -1286,62 +1303,62 @@ export const capacityStates = capacityPulse.capacityStates;
 export function capacityHosts(v) {
   const tips = [];
   const charts = capacityPulse.capacityHosts(v, tips);
-  return html`<div class="stack">${charts}<p class="muted">Job sizes and their suggestions are on each <a class="link" href="/config#cf-projects">project page</a>.</p>${tipsHtml(tips)}</div>`;
+  return html`<div class="stack">${charts}<p class="muted">${t(v, "Job sizes and their suggestions are on each")} <a class="link" href="/config#cf-projects">${t(v, "project page")}</a>.</p>${tipsHtml(tips)}</div>`;
 }
 export function breakdownSpend(v) {
   const f = fold(v);
   return kpi(
-    "Window spend",
-    moneyCost(f?.provenance?.total),
-    "Settled run records only. A floor (≥) means a run could not be fully priced.",
+    t(v, "Window spend"),
+    moneyCost(f?.provenance?.total, v.locale),
+    t(v, "Settled run records only. A floor (≥) means a run could not be fully priced."),
   );
 }
 export function breakdownRuns(v) {
   const p = fold(v)?.provenance;
   return kpi(
-    "Runs",
-    p?.runsTotal ?? "unknown",
-    `${Math.max(0, (p?.runsTotal ?? 0) - (p?.runsUnledgered ?? 0) - (p?.runsUnmetered ?? 0))} fully ledgered: their cost can be re-priced.`,
+    t(v, "Runs"),
+    p?.runsTotal ?? t(v, "unknown"),
+    `${Math.max(0, (p?.runsTotal ?? 0) - (p?.runsUnledgered ?? 0) - (p?.runsUnmetered ?? 0))} ${t(v, "fully ledgered: their cost can be re-priced.")}`,
   );
 }
 export function breakdownPlans(v) {
   const plans = fold(v)?.plans ?? [];
   return kpi(
-    "Plans declared",
+    t(v, "Plans declared"),
     plans.length,
-    `${plans.filter((p) => p.hypothetical).length} hypothetical. Compare each with its API baseline.`,
+    `${plans.filter((p) => p.hypothetical).length} ${t(v, "hypothetical. Compare each with its API baseline.")}`,
   );
 }
 export function breakdownTop(v) {
   const f = fold(v);
   const top = f?.byFlow?.[0];
   return kpi(
-    "Top flow",
-    top?.flow ?? "No flow",
-    `${top ? fmtCost(top.cost) : "No cost"}; ${pct(top?.cost?.usd, f?.provenance?.total?.usd)} of the window; next ${f?.byFlow?.[1]?.flow ?? "none"}.`,
+    t(v, "Top flow"),
+    top?.flow ?? t(v, "No flow"),
+    `${top ? fmtCost(top.cost) : t(v, "No cost")}; ${pct(top?.cost?.usd, f?.provenance?.total?.usd)} ${t(v, "of the window; next")} ${f?.byFlow?.[1]?.flow ?? t(v, "none")}.`,
   );
 }
 export function breakdownDaily(v) {
   const f = fold(v);
   const tips = [];
   return card(
-    "Daily spend",
+    t(v, "Daily spend"),
     f
       ? html`<div id="wrap">
             <div id="tip"></div>
-            ${responsiveLegacy(dailyChartHtml(f.daily, tips))}${responsiveLegacy(
-              cumulativeHtml(f.daily, tips),
+            ${responsiveLegacy(dailyChartHtml(f.daily, tips, (message) => t(v, message)))}${responsiveLegacy(
+              cumulativeHtml(f.daily, tips, (message) => t(v, message)),
             )}
           </div>
           ${tipsHtml(tips)}`
-      : note("Costs could not be read."),
+      : note(t(v, "Costs could not be read.")),
   );
 }
 export function breakdownFlow(v) {
   const f = fold(v);
   const series = f?.dailyByFlow;
   if (!series?.length)
-    return empty("Daily spend by flow", "No runs in this spend window.");
+    return empty(t(v, "Daily spend by flow"), t(v, "No runs in this spend window."));
   const top = series.slice(0, 4);
   const max = Math.max(
     0.001,
@@ -1355,7 +1372,7 @@ export function breakdownFlow(v) {
       0,
     );
   return card(
-    "Daily spend by flow",
+    t(v, "Daily spend by flow"),
     html`<div class="sp-hbars">
         ${top.map((r) => {
           const width = 100 / Math.max(1, r.days.length);
@@ -1380,7 +1397,7 @@ export function breakdownFlow(v) {
               ${r.days.map((d, i) => {
                 const h = ((number(d.cost?.usd) ?? 0) / max) * 24;
                 return html`<g
-                  ><title>${d.day}: ${moneyCost(d.cost)}</title
+                  ><title>${d.day}: ${moneyCost(d.cost, v.locale)}</title
                   ><rect
                     class="sp-hbin"
                     x="${i * width + width * 0.15}"
@@ -1395,26 +1412,26 @@ export function breakdownFlow(v) {
         })}
       </div>
       ${note(
-        `Top four flows share a $0 to $${max.toFixed(2)} daily scale. The rest add up to $${rest.toFixed(2)}.`,
+        `${t(v, "Top four flows share a $0 to $")}${max.toFixed(2)}${t(v, " daily scale. The rest add up to $")}${rest.toFixed(2)}.`,
       )}`,
   );
 }
 
 export function breakdownRows(v) {
   const f = fold(v);
-  if (!f) return empty("Breakdown", "Costs could not be read.");
+  if (!f) return empty(t(v, "Breakdown"), t(v, "Costs could not be read."));
   return card(
-    "Breakdown",
-    html`${note("By flow and by project are on the Spend view.")}
-      <h3>By trigger</h3>
+    t(v, "Breakdown"),
+    html`${note(t(v, "By flow and by project are on the Spend view."))}
+      <h3>${t(v, "By trigger")}</h3>
       <div class="table-scroll">
         <table class="table">
           <thead>
             <tr>
-              <th>Trigger</th>
-              <th>Runs</th>
-              <th>Failed</th>
-              <th>Cost</th>
+              <th>${t(v, "Trigger")}</th>
+              <th>${t(v, "Runs")}</th>
+              <th>${t(v, "Failed")}</th>
+              <th>${t(v, "Cost")}</th>
             </tr>
           </thead>
           <tbody>
@@ -1435,28 +1452,28 @@ export function breakdownRows(v) {
                   </td>
                   <td>${r.runs}</td>
                   <td>${r.outcomes.failed}</td>
-                  <td>${moneyCost(r.cost)}</td>
+                  <td>${moneyCost(r.cost, v.locale)}</td>
                 </tr>`,
             )}
           </tbody>
         </table>
       </div>
-      <h3>By repository</h3>
+      <h3>${t(v, "By repository")}</h3>
       ${ui.facts(
         f.byRepo.map((r) => [
           pathLabel(v, r.label),
-          html`${r.kind ?? "no forge"},
+          html`${t(v, r.kind ?? "no forge")},
           ${
             (payload(v).repoProjects?.[r.key ?? "(no target)"] ?? [])
-              .map((id) => id ?? "no project")
-              .join(", ") || "no project"
+              .map((id) => id ?? t(v, "no project"))
+              .join(", ") || t(v, "no project")
           },
-          ${moneyCost(r.cost)}`,
+          ${moneyCost(r.cost, v.locale)}`,
         ]),
       )}
-      <h3>By model</h3>
+      <h3>${t(v, "By model")}</h3>
       ${ui.facts(
-        f.byModel.map((r) => [`${r.provider}/${r.model}`, moneyCost(r.cost)]),
+        f.byModel.map((r) => [`${r.provider}/${r.model}`, moneyCost(r.cost, v.locale)]),
       )}${
         v.role === "operator"
           ? html`<a
@@ -1464,7 +1481,7 @@ export function breakdownRows(v) {
             href="${link(v, "/insights/breakdown", {
               paths: v.query?.paths === "full" ? null : "full",
             })}"
-            >${v.query?.paths === "full" ? "Last folder" : "Full paths"}</a
+            >${t(v, v.query?.paths === "full" ? "Last folder" : "Full paths")}</a
           >`
           : null
       }`,
@@ -1473,48 +1490,48 @@ export function breakdownRows(v) {
 export function breakdownSubscriptions(v) {
   const f = fold(v);
   return card(
-    "Plans",
+    t(v, "Plans"),
     f?.plans?.length
-      ? raw(planCardsHtml(f.plans))
+      ? raw(planCardsHtml(f.plans, (message) => t(v, message)))
       : note(
-          "Plans not scored: subscriptions.json is missing, invalid, or declares no plans.",
+          t(v, "Plans not scored: subscriptions.json is missing, invalid, or declares no plans."),
         ),
   );
 }
-export const breakdownLegend = () =>
+export const breakdownLegend = (v) =>
   card(
-    "How money is shown",
+    t(v, "How money is shown"),
     note(
-      "Metered: pi-ai list prices. Estimated (~): partial evidence. Plan: plan:<id>, with API equivalent shown separately. Zero-rated: no charge. Unknown: not priceable. Floor (≥): at least this much. Seeded: a wide range until a ledgered run exists.",
+      t(v, "Metered: pi-ai list prices. Estimated (~): partial evidence. Plan: plan:<id>, with API equivalent shown separately. Zero-rated: no charge. Unknown: not priceable. Floor (≥): at least this much. Seeded: a wide range until a ledgered run exists."),
     ),
   );
 export function breakdownProvenance(v) {
   const f = fold(v);
   return card(
-    "Where these numbers come from",
+    t(v, "Where these numbers come from"),
     html`${note(
-      "Metered means pi-ai prices, not invoices. Money held for running jobs is not in run records yet; the Spend view shows it.",
+      t(v, "Metered means pi-ai prices, not invoices. Money held for running jobs is not in run records yet; the Spend view shows it."),
     )}${
       f
-        ? raw(footerHtml(f, spendWindowLabel(v.query?.range)))
-        : note("No record provenance could be read.")
+        ? raw(footerHtml(f, spendWindowLabel(v.query?.range, v.locale), (message) => t(v, message)))
+        : note(t(v, "No record provenance could be read."))
     }`,
   );
 }
 export function breakdownStates(v) {
   const f = fold(v);
   return card(
-    "Other states",
+    t(v, "Other states"),
     html`${note(
       !f
-        ? "Costs could not be read."
+        ? t(v, "Costs could not be read.")
         : !f.provenance.runsTotal
-          ? "No runs in the spend window."
-          : "The records in the selected spend window are shown.",
+          ? t(v, "No runs in the spend window.")
+          : t(v, "The records in the selected spend window are shown."),
     )}${newerNote(f?.newerSkipped)}${
       !f?.provenance.runsTotal
         ? html`<a href="${link(v, "/insights/breakdown", { range: "30d" })}"
-          >Try 30 days</a
+          >${t(v, "Try 30 days")}</a
         >`
         : null
     }`,
@@ -1542,9 +1559,9 @@ export function flowsMap(v) {
   const triggers = nodes.filter((n) => n.kind === "trigger");
   if (sc.norm.meta.triggersMissing || sc.norm.meta.triggersInvalid)
     return card(
-      "Flows",
-      html`${raw(bannersHtml(sc.norm))}${note(
-        "Configuration says where the triggers file should be. Nothing is drawn until it loads.",
+      t(v, "Flows"),
+      html`${raw(bannersHtml(sc.norm, (message) => t(v, message)))}${note(
+        t(v, "Configuration says where the triggers file should be. Nothing is drawn until it loads."),
       )}`,
     );
   const toggles = ui.seg(
@@ -1556,22 +1573,22 @@ export function flowsMap(v) {
       href: link(v, "/insights/flows", { view, select: q.select }),
       on: (q.view ?? "map") === view,
     })),
-    { label: "Flows view" },
+    { label: t(v, "Flows view") },
   );
   if (q.view === "list")
     return card(
-      "Flows list",
+      t(v, "Flows list"),
       html`${toggles}
         <div class="table-scroll">
           <table class="table">
             <thead>
               <tr>
-                <th>Trigger</th>
-                <th>Flow and state</th>
-                <th>Folder</th>
-                <th>Runs and last outcome</th>
-                <th>Spend</th>
-                <th>Badges and chains</th>
+                <th>${t(v, "Trigger")}</th>
+                <th>${t(v, "Flow and state")}</th>
+                <th>${t(v, "Folder")}</th>
+                <th>${t(v, "Runs and last outcome")}</th>
+                <th>${t(v, "Spend")}</th>
+                <th>${t(v, "Badges and chains")}</th>
               </tr>
             </thead>
             <tbody>
@@ -1594,18 +1611,18 @@ export function flowsMap(v) {
                     >
                   </td>
                   <td>
-                    ${n.flow ?? n.command ?? "No flow"}
+                    ${n.flow ?? n.command ?? t(v, "No flow")}
                     ${flows.map((f) => f.kind).join(", ")}
                   </td>
-                  <td>${folder?.label ?? "unverifiable from this host"}</td>
-                  <td>${n.runs} ${n.runs === 1 ? "run" : "runs"}; ${n.lastOutcome ?? "no outcome"}</td>
-                  <td>${moneyCost(n.cost)}</td>
+                  <td>${folder?.label ?? t(v, "unverifiable from this host")}</td>
+                  <td>${n.runs} ${t(v, n.runs === 1 ? "run" : "runs")}; ${n.lastOutcome ?? t(v, "no outcome")}</td>
+                  <td>${moneyCost(n.cost, v.locale)}</td>
                   <td>
                     ${
                       n.once
-                        ? "one-shot armed"
+                        ? t(v, "one-shot armed")
                         : n.disarmed
-                          ? "one-shot spent"
+                          ? t(v, "one-shot spent")
                           : ""
                     }
                     ${sc.norm.flags
@@ -1619,7 +1636,7 @@ export function flowsMap(v) {
             </tbody>
           </table>
         </div>
-        <h3>Flows nothing reaches</h3>
+        <h3>${t(v, "Flows nothing reaches")}</h3>
         ${note(
           nodes
             .filter(
@@ -1669,7 +1686,7 @@ export function flowsMap(v) {
       String(
         html`<a
           href="/run?${new URLSearchParams({ id: p.node.disarmed.jobId })}"
-          aria-label="Run that spent trigger ${(p.node.index ?? 0) + 1}"
+          aria-label="${t(v, "Run that spent trigger")} ${(p.node.index ?? 0) + 1}"
           ><text
             x="${p.x + p.w - 22}"
             y="${p.y - 5}"
@@ -1684,25 +1701,25 @@ export function flowsMap(v) {
   body = body.replace('<g id="spend">', `${spentLinks}<g id="spend">`);
   if (selected) body = body.replace('id="root"', 'id="root" class="dim"');
   return card(
-    "Flows map",
+    t(v, "Flows map"),
     html`${toggles}
       <div class="actions">
         <button
           type="button"
           class="btn btn--sm"
           data-graph-zoom="out"
-          aria-label="Zoom out"
+          aria-label="${t(v, "Zoom out")}"
         >
           −</button
         ><button
           type="button"
           class="btn btn--sm"
           data-graph-zoom="in"
-          aria-label="Zoom in"
+          aria-label="${t(v, "Zoom in")}"
         >
           +</button
         ><button type="button" class="btn btn--sm" data-graph-zoom="fit">
-          Fit
+          ${t(v, "Fit")}
         </button>
       </div>
       ${raw(body)}${graphNodesHtml(sc)}`,
@@ -1714,28 +1731,28 @@ function selectedDetails(v, sc, n) {
     .filter((e) => e.from === n.id && e.kind === "config")
     .map((e) => sc.norm.nodes.find((x) => x.id === e.to))
     .filter(Boolean);
-  return html`<h3>Trigger ${n.index + 1}</h3>
+  return html`<h3>${t(v, "Trigger")} ${n.index + 1}</h3>
     ${factsOne([
-      ["Kind and phrase", `${n.onType}: ${n.label}`],
-      ["Schedule", n.pattern ?? "Event driven"],
-      ["Flow", n.flow ?? n.command ?? "none"],
-      ["Skill state", flows.map((f) => f.kind).join(", ") || "not found"],
-      ["Folder", group?.label ?? "unverifiable from this host"],
-      ["HEAD", group?.head ?? "unknown"],
-      ["Runs in map window", n.runs],
-      ["Last outcome", html`${n.lastOutcome ?? "none"} ${when(n.lastEndedAt)}`],
+      [t(v, "Kind and phrase"), `${n.onType}: ${n.label}`],
+      [t(v, "Schedule"), n.pattern ?? t(v, "Event driven")],
+      [t(v, "Flow"), n.flow ?? n.command ?? t(v, "none")],
+      [t(v, "Skill state"), flows.map((f) => f.kind).join(", ") || t(v, "not found")],
+      ["Folder", group?.label ?? t(v, "unverifiable from this host")],
+      [t(v, "HEAD"), group?.head ?? t(v, "unknown")],
+      [t(v, "Runs in map window"), n.runs],
+      [t(v, "Last outcome"), html`${n.lastOutcome ?? "none"} ${when(n.lastEndedAt)}`],
       [
-        "Next fire",
+        t(v, "Next fire"),
         n.next === null || n.next === undefined
-          ? "not scheduled"
+          ? t(v, "not scheduled")
           : when(n.next),
       ],
-      ["Spend", moneyCost(n.cost)],
+      [t(v, "Spend"), moneyCost(n.cost, v.locale)],
       [
-        "Chainable",
+        t(v, "Chainable"),
         flows.some((f) => f.aiTrigger)
-          ? "Yes, ai-trigger: allow"
-          : "Not declared",
+          ? t(v, "Yes, ai-trigger: allow")
+          : t(v, "Not declared"),
       ],
       [
         "Chains",
@@ -1745,35 +1762,35 @@ function selectedDetails(v, sc, n) {
           )
           .map(
             (e) =>
-              `${sc.norm.nodes.find((x) => x.id === e.to)?.label ?? "unknown flow"}: ${e.count ?? 0} observed (${e.kind})`,
+              `${sc.norm.nodes.find((x) => x.id === e.to)?.label ?? t(v, "unknown flow")}: ${e.count ?? 0} observed (${e.kind})`,
           )
-          .join(", ") || "none observed",
+          .join(", ") || t(v, "none observed"),
       ],
       [
-        "Loops in the skill",
+        t(v, "Loops in the skill"),
         flows
           .flatMap((f) => f.loops ?? [])
           .map((l) => l.hint)
-          .join(", ") || "none detected",
+          .join(", ") || t(v, "none detected"),
       ],
     ])}${
       n.disarmed?.jobId && RUN_ID_RE.test(n.disarmed.jobId)
         ? html`<a
           class="btn"
           href="/run?${new URLSearchParams({ id: n.disarmed.jobId })}"
-          >Run that spent this one-shot</a
+           >${t(v, "Run that spent this one-shot")}</a
         >`
         : null
     }
     <div class="actions">
-      <a class="btn" href="/config">Open trigger</a
+      <a class="btn" href="/config" >${t(v, "Open trigger")}</a
       ><a
         class="btn"
         href="/runs?${new URLSearchParams({
           trigger:
             n.cronId && n.cronId.length <= 128 ? n.cronId : String(n.index),
         })}"
-        >Runs from it</a
+         >${t(v, "Runs from it")}</a
       >
     </div>`;
 }
@@ -1781,9 +1798,9 @@ export function flowsSelected(v) {
   const sc = scene(v);
   const selected = selectedNode(v, sc);
   return card(
-    "Selected trigger",
+    t(v, "Selected trigger"),
     html`<div data-selected-empty${selected ? html` hidden` : null}>
-        ${note("Choose a chip to see its schedule, flow, runs and chains.")}
+        ${note(t(v, "Choose a chip to see its schedule, flow, runs and chains."))}
       </div>
       <div data-selected-details${selected ? null : html` hidden`}>
         ${selected ? selectedDetails(v, sc, selected) : null}
@@ -1798,23 +1815,23 @@ export function flowsSelected(v) {
         )}`,
   );
 }
-export const flowsKey = () =>
+export const flowsKey = (v) =>
   card(
-    "Key",
+    t(v, "Key"),
     note(
-      "Solid flow: found at HEAD. Dashed grey: unverified. Dashed amber: not at HEAD. Dashed red: missing. Faded: orphan or spent one-shot. Wires: config, observed, potential mention, cron re-arm. Dot: unread, injected ai-trigger or PR spend-loop risk. Ring: chainable. Strong mention and invalid flow names are distinguished in their tooltips.",
+      t(v, "Solid flow: found at HEAD. Dashed grey: unverified. Dashed amber: not at HEAD. Dashed red: missing. Faded: orphan or spent one-shot. Wires: config, observed, potential mention, cron re-arm. Dot: unread, injected ai-trigger or PR spend-loop risk. Ring: chainable. Strong mention and invalid flow names are distinguished in their tooltips."),
     ),
   );
 export function flowsHonesty(v) {
   const sc = scene(v);
   return card(
-    "What the map cannot see",
+    t(v, "What the map cannot see"),
     html`${
       sc.norm.meta.triggersMissing || sc.norm.meta.triggersInvalid
         ? null
-        : raw(bannersHtml(sc.norm))
+        : raw(bannersHtml(sc.norm, (message) => t(v, message)))
     }${note(
-      `Unverifiable skills, unattributed runs, refused chains and scan caps remain incomplete evidence. ${sc.hiddenLabels} wire labels moved into tooltips. Chain caps still apply.`,
+      `${t(v, "Unverifiable skills, unattributed runs, refused chains and scan caps remain incomplete evidence.")} ${sc.hiddenLabels} ${t(v, "wire labels moved into tooltips. Chain caps still apply.")}`,
     )}`,
   );
 }

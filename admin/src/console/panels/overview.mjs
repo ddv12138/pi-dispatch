@@ -50,6 +50,7 @@ import { usd2 } from "../../panel.mjs";
 import { NO_EXPLANATION, docsHref } from "../../words.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { TIMELINE_ROWS, TIMELINE_WAIT_WORDS, TIMELINE_ZOOMS, timelineHtml, timelineLegend, timelineModel } from "../timeline.mjs";
 import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, moneyHtml, shownPath, timeHtml, usdText, workersOnline } from "./common.mjs";
 
@@ -244,7 +245,7 @@ const setupOf = (view) => firstRunState(view?.data?.snapshot ?? null, { session:
 function overviewPanel(title, render) {
   return (view) => {
     const s = view?.data?.snapshot;
-    if (!s) return ui.card({ title, body: html`<p class="muted">${OVERVIEW_UNREAD_TEXT}</p>` });
+    if (!s) return ui.card({ title: uiText(title, view?.locale), body: html`<p class="muted">${uiText(OVERVIEW_UNREAD_TEXT, view?.locale)}</p>` });
     if (setupOf(view).applies) return html``;
     return render(s, view);
   };
@@ -357,21 +358,21 @@ const andList = (items) => (items.length <= 1 ? items.join("") : `${items.slice(
  */
 export function overviewHeadline(view) {
   const s = view?.data?.snapshot;
-  if (!s) return html`Valkey could not be read; the next refresh tries again.`;
+  if (!s) return html`${uiText("Valkey could not be read; the next refresh tries again.", view?.locale)}`;
   const setup = setupOf(view);
   if (setup.applies) return html`${setup.lead}`;
   const need = needsOf(s);
   const running = runningText(s);
-  if (need.clear) return html`All clear. ${capFirst(running)}, nothing needs you.`;
+  if (need.clear) return html`${uiText("All clear.", view?.locale)} ${capFirst(uiText(running, view?.locale))}, ${uiText("nothing needs you.", view?.locale)}`;
   // What was read, counted; a read that failed adds nothing here (its list is empty) and is said after.
   const parts = [...(need.questions.length > 0 ? [plural(need.questions.length, "question")] : []), ...(need.fix > 0 ? [`${count(need.fix)} to fix`] : [])];
   // With no worker online the line leads with it: nothing in line runs until one starts, which needs the person first.
   const lead = `${need.noWorker ? `${NO_WORKER_TEXT} ` : ""}${parts.length > 0 ? `Needs you: ${parts.join(" and ")}. ` : ""}`;
   if (!need.read) {
     const nouns = NEEDS_READS.filter(([key]) => need.unread.includes(key)).map(([, noun]) => noun);
-    return html`${lead}${capFirst(andList(nouns))} could not be read, so ${parts.length > 0 ? "more may need you" : "what needs you is not known"}. ${capFirst(running)}.`;
+    return html`${uiText(lead, view?.locale)}${capFirst(uiText(andList(nouns), view?.locale))} ${uiText("could not be read, so", view?.locale)} ${uiText(parts.length > 0 ? "more may need you" : "what needs you is not known", view?.locale)}. ${capFirst(uiText(running, view?.locale))}.`;
   }
-  return lead !== "" ? html`${lead}${capFirst(running)}.` : html`Nothing needs you. ${capFirst(running)}.`;
+  return lead !== "" ? html`${uiText(lead, view?.locale)}${capFirst(uiText(running, view?.locale))}.` : html`${uiText("Nothing needs you.", view?.locale)} ${capFirst(uiText(running, view?.locale))}.`;
 }
 
 // ---- Needs you -------------------------------------------------------------------------------------------------------------
@@ -446,7 +447,7 @@ export const overviewNeeds = overviewPanel("Needs you", (s, view) => {
   const unreadText = (key) => (key === "registry" && !need.workerKnown ? UNREAD.registryNoWorker : UNREAD[key]);
   const notes = [...(need.noWorker ? [NO_WORKER_TEXT] : []), ...need.unread.map(unreadText), ...(shown.some((r) => r.tagless) ? [NEEDS_UNKNOWN_PROJECT_TEXT] : [])];
   const body = html`${head}${shown.length > 0 ? html`<ul class="rows">${shown.map((r) => r.pill)}</ul>` : null}${more}${answering}${need.clear ? ui.empty({ status: "ok", icon: "done", title: "All clear", body: NEEDS_EMPTY.body }) : null}${notes.map((n) => html`<p class="card__sub">${n}</p>`)}${dayLine(need.day, view)}${zero ? null : html`<p class="card__sub">${NEEDS_DEFINITION}</p>`}`;
-  return ui.card({ title: "Needs you", body });
+  return ui.card({ title: uiText("Needs you", view.locale), body });
 });
 
 // ---- In line ---------------------------------------------------------------------------------------------------------------
@@ -496,7 +497,7 @@ const floorEnd = (n) => (n > 0 ? html`<b>${count(n)}</b> or more` : html`<b>-</b
  */
 export const overviewWaiting = overviewPanel("In line", (s, view) => {
   const w = waitingOf(s);
-  if (w === null) return ui.card({ title: "In line", body: html`<p class="muted">${UNREAD.waiting}</p>` });
+  if (w === null) return ui.card({ title: uiText("In line", view.locale), body: html`<p class="muted">${uiText(UNREAD.waiting, view.locale)}</p>` });
   const cut = w.truncated === true;
   const oldest = w.rows.reduce((a, r) => (Number.isSafeInteger(r?.queuedAt) && (a === null || r.queuedAt < a) ? r.queuedAt : a), null);
   const longest = oldest !== null && Number.isFinite(view.now) && view.now >= oldest ? ui.chip(`longest ${ageText(view.now - oldest)}${cut ? " or more" : ""}`) : null;
@@ -505,7 +506,7 @@ export const overviewWaiting = overviewPanel("In line", (s, view) => {
   const rows = buckets.map((b) => ui.rowPill({ icon: bucketIcon(b), items: [DEFER_BUCKET_WORDS[b].short], end: cut ? floorEnd(by[b]) : by[b] }));
   // The big number is a count alone, or a dash; a floor is said in its label (`inLineOf`).
   const line = inLineOf(w);
-  return ui.card({ title: "In line", end: longest, body: html`${ui.kpi(line.n, line.label)}<ul class="rows">${rows}</ul>${cut ? html`<p class="card__sub">${WAITING_CUT_TEXT}</p>` : null}` });
+  return ui.card({ title: uiText("In line", view.locale), end: longest, body: html`${ui.kpi(line.n, uiText(line.label, view.locale))}<ul class="rows">${rows}</ul>${cut ? html`<p class="card__sub">${uiText(WAITING_CUT_TEXT, view.locale)}</p>` : null}` });
 });
 
 // ---- Running ---------------------------------------------------------------------------------------------------------------
@@ -586,7 +587,7 @@ function runningLabel(n, slots) {
   return total === null ? `in ${plural(used, "slot")}` : `in ${count(used)} of ${plural(total, "slot")}`;
 }
 
-export const overviewActive = overviewPanel("Running", (s) => {
+export const overviewActive = overviewPanel("Running", (s, view) => {
   const n = Array.isArray(s.active) ? s.active.length : 0;
   const lastSeen = Boolean(s.queue?.fleetDegraded);
   const slots = hostsOf(s).map((h) => ({ h, sl: slotsOf(h, lastSeen) }));
@@ -597,7 +598,7 @@ export const overviewActive = overviewPanel("Running", (s) => {
   // A registry that could not be read says so, under the rows last seen or in their place, never that no host is
   // registered.
   const note = lastSeen ? REGISTRY_UNREAD_TEXT : rows.length === 0 ? HOSTS_EMPTY.body : null;
-  return ui.card({ title: "Running", end: live, body: html`${ui.kpi(count(n), runningLabel(n, slots))}${rows.length > 0 ? html`<ul class="rows">${rows}</ul>` : null}${note === null ? null : html`<p class="card__sub">${note}</p>`}` });
+  return ui.card({ title: uiText("Running", view.locale), end: live, body: html`${ui.kpi(count(n), uiText(runningLabel(n, slots), view.locale))}${rows.length > 0 ? html`<ul class="rows">${rows}</ul>` : null}${note === null ? null : html`<p class="card__sub">${uiText(note, view.locale)}</p>`}` });
 });
 
 // ---- Spend today -----------------------------------------------------------------------------------------------------------
@@ -623,7 +624,7 @@ const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && c
  * (the reader's `unreachable`, or a day window whose counter came back null), and so is a day of records not read
  * whole (only the newest read, or a side of them unread), whose hours may be short.
  */
-export const overviewSpend = overviewPanel("Spend today", (s) => {
+export const overviewSpend = overviewPanel("Spend today", (s, view) => {
   const d = s.dollars;
   const day = Array.isArray(d?.rows) ? d.rows.find((r) => r?.ledger === "deployment" && r.window === "day") ?? null : null;
   const windowRead = day !== null && Number.isSafeInteger(day.counterMicros);
@@ -646,7 +647,7 @@ export const overviewSpend = overviewPanel("Spend today", (s) => {
   // the note names its number's source as it does for any sum, and `spendShort` says the hours may be missing spend.
   const short = past !== null && (s.spendByHour.floor === true || s.spendByHour.partial === true);
   const note = past === null ? null : html`<p class="card__sub">${settled === 0 && !short ? SPEND_EMPTY.body : windowRead ? SPEND_HOURS_TEXT : SPEND_SUM_TEXT}${unpriced}</p>`;
-  return ui.card({ title: "Spend today", end: chip, body: html`${kpi}${dots}${note}${short ? html`<p class="card__sub">${UNREAD.spendShort}</p>` : null}${countersUnread ? html`<p class="card__sub">${UNREAD.dollars}</p>` : null}` });
+  return ui.card({ title: uiText("Spend today", view.locale), end: chip, body: html`${kpi}${dots}${uiText(note, view.locale)}${short ? html`<p class="card__sub">${uiText(UNREAD.spendShort, view.locale)}</p>` : null}${countersUnread ? html`<p class="card__sub">${uiText(UNREAD.dollars, view.locale)}</p>` : null}` });
 });
 
 // ---- the timeline ----------------------------------------------------------------------------------------------------------
@@ -682,7 +683,7 @@ function chipsHtml(view, q, model) {
 }
 
 export const overviewTimeline = overviewPanel("Runs by project", (s, view) => {
-  if (!Number.isFinite(view.now)) return ui.card({ title: "Runs by project", body: html`<p class="muted">${OVERVIEW_UNREAD_TEXT}</p>` });
+  if (!Number.isFinite(view.now)) return ui.card({ title: uiText("Runs by project", view.locale), body: html`<p class="muted">${uiText(OVERVIEW_UNREAD_TEXT, view.locale)}</p>` });
   const q = timelineQuery(view);
   // A parked run's project is its record's (the parked list carries none), as Needs you reads it.
   const projects = projectsByJob(s);
@@ -707,7 +708,7 @@ export const overviewTimeline = overviewPanel("Runs by project", (s, view) => {
     model.empty && runsWhole && w !== null && w.truncated !== true ? "No run in this window, and nothing in line." : null,
   ].filter(Boolean);
   const body = html`${chipsHtml(view, q, model)}${timelineHtml(model, { label: title })}${notes.map((n) => html`<p class="card__sub">${n}</p>`)}${timelineLegend()}`;
-  return ui.card({ title, sub: "left of now: what ran; right of now: what is in line", end: html`${rowsSeg}${zoomSeg}`, body });
+  return ui.card({ title: uiText(title, view.locale), sub: uiText("left of now: what ran; right of now: what is in line", view.locale), end: html`${rowsSeg}${zoomSeg}`, body });
 });
 
 // ---- Caps ------------------------------------------------------------------------------------------------------------------
@@ -796,9 +797,9 @@ export const overviewCaps = overviewPanel("Caps", (s, view) => {
   }
   const unread = [settingsRead ? null : UNREAD.settings, countsUnread ? UNREAD.counts : null, dollarsUnread ? UNREAD.dollars : null].filter(Boolean).map((t) => html`<p class="card__sub">${t}</p>`);
   const spend = ui.btn({ kind: "sm", label: "Spend", href: hrefTo(view, "insights") });
-  if (caps.length === 0) return ui.card({ title: "Caps", sub: "percent used", end: spend, body: html`${unread.length > 0 ? unread : html`<p class="muted">${CAPS_EMPTY_TEXT}</p>`}<p class="card__sub">${COUNT_WINDOWS_UTC_TEXT}</p>` });
+  if (caps.length === 0) return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`${unread.length > 0 ? unread : html`<p class="muted">${uiText(CAPS_EMPTY_TEXT, view.locale)}</p>`}<p class="card__sub">${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
   const legend = html`<p class="keyrow"><span><i class="k tone-ok"></i>Open</span>${hold !== null ? html`<span><i class="k tone-attention"></i>Soft hold</span>` : null}<span><i class="k tone-failed"></i>Full</span>${hold !== null ? html`<span><i class="k k--hold"></i>Soft hold line (${count(hold)}%)</span>` : null}${keys.length > 0 ? html`<span>${keys.join("; ")}</span>` : null}</p>`;
-  return ui.card({ title: "Caps", sub: "percent used", end: spend, body: html`<div class="capbars">${caps}</div>${legend}${unread}<p class="card__sub">${hold !== null ? `${SOFT_HOLD_TEXT} ` : ""}${COUNT_WINDOWS_UTC_TEXT}</p>` });
+  return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`<div class="capbars">${caps}</div>${legend}${unread}<p class="card__sub">${hold !== null ? `${uiText(SOFT_HOLD_TEXT, view.locale)} ` : ""}${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
 });
 
 // ---- Waitlists -------------------------------------------------------------------------------------------------------------
@@ -997,7 +998,7 @@ export const overviewWaitlists = overviewPanel("Waitlists", (s, view) => {
   const act = canAct(view);
   const orphans = orphansByHost(s);
   const foot = html`${queueRow(s, w)}${scheduledLine(s, view)}${softHoldLine(s, view)}`;
-  if (w === null) return ui.card({ title: "Waitlists", body: html`<div class="wl"><p class="muted">${UNREAD.waiting}</p>${foot}</div>` });
+  if (w === null) return ui.card({ title: uiText("Waitlists", view.locale), body: html`<div class="wl"><p class="muted">${uiText(UNREAD.waiting, view.locale)}</p>${foot}</div>` });
   const by = bucketCounts(w);
   const bar = ui.waitBar(DEFER_BUCKETS.map((b) => ({ icon: bucketIcon(b), count: by[b] })), { label: "In line by reason" });
   let freeSlot = false;
@@ -1018,7 +1019,7 @@ export const overviewWaitlists = overviewPanel("Waitlists", (s, view) => {
   // Calm only over a read made whole: a cut one says its counts are a floor (`floorText`), and may have missed the job.
   const calm = w.truncated !== true && by.slot === 0 && by.run === 0 && by.check === 0 ? ui.collapsed({ icon: "done", title: WAITLISTS_CALM }) : null;
   const notes = [unknownProject ? WAITING_UNKNOWN_PROJECT_TEXT : null, floorText(w)].filter(Boolean);
-  return ui.card({ title: "Waitlists", body: html`<div class="wl">${bar}${groups}${calm}${notes.map((n) => html`<p class="card__sub">${n}</p>`)}${foot}</div>` });
+  return ui.card({ title: uiText("Waitlists", view.locale), body: html`<div class="wl">${bar}${groups}${calm}${notes.map((n) => html`<p class="card__sub">${uiText(n, view.locale)}</p>`)}${foot}</div>` });
 });
 
 // ---- Hosts -----------------------------------------------------------------------------------------------------------------
@@ -1148,7 +1149,7 @@ export const overviewHosts = overviewPanel("Hosts", (s, view) => {
     return html`<li class="hostrow">${beat}<span class="hostrow__n"><b>${h.name}</b><span>${venuesText(h)}</span></span>${slotDots(h.name, sl)}${ageCell}<span class="hostrow__p">${act ? hostPause(hq, h.name) : null}</span><span class="hostrow__x">${x}</span></li>`;
   });
   const list = rows.length > 0 ? html`<ul class="hosts">${rows}</ul>` : q.fleetDegraded ? null : html`<p class="muted">${HOSTS_EMPTY.body}</p>`;
-  return ui.card({ title: "Hosts", sub, end: state === null && fleetAct === null ? null : html`${state}${fleetAct}`, body: html`${banner}${degraded}${list}` });
+  return ui.card({ title: uiText("Hosts", view.locale), sub: uiText(sub, view.locale), end: state === null && fleetAct === null ? null : html`${state}${fleetAct}`, body: html`${uiText(banner, view.locale)}${uiText(degraded, view.locale)}${list}` });
 });
 
 // ---- the first run -------------------------------------------------------------------------------------------------------
@@ -1199,13 +1200,13 @@ export function overviewSetup(view) {
   if (!st.applies) return html``;
   const from = st.doctor === null ? null : `from doctor on ${st.doctor.host}${Number.isSafeInteger(st.doctor.ageMs) ? `, ${ageWords(st.doctor.ageMs)} ago` : ""}`;
   const prog = html`<div class="su-prog"><p><b class="su-big">${count(st.ready)}</b> of ${count(st.total)} ready</p>${progressBar(st.steps)}<p class="muted">${st.sub}</p></div>`;
-  return ui.card({ title: "Getting ready", sub: from, body: html`${prog}<p class="su-p"><a class="btn" href="/setup">Open setup</a></p><ol class="su-steps">${st.steps.map((x, i) => stepHtml(x, i, view))}</ol>` });
+  return ui.card({ title: uiText("Getting ready", view.locale), sub: uiText(from, view.locale), body: html`${prog}<p class="su-p"><a class="btn" href="/setup">${uiText("Open setup", view.locale)}</a></p><ol class="su-steps">${st.steps.map((x, i) => stepHtml(x, i, view))}</ol>` });
 }
 
 /** "Do it from pi": the guided setup, `/dispatch setup`, its command an operator's. */
 export function overviewSetupPi(view) {
   if (!setupOf(view).applies) return html``;
-  return ui.card({ title: "Do it from pi", body: html`<p class="muted su-p">The guided setup in pi walks through every step and asks before each one. It never asks for the provider key.</p>${view.role === "operator" ? ui.cmd([...FIRST_RUN_COMMANDS.pi]) : null}` });
+  return ui.card({ title: uiText("Do it from pi", view.locale), body: html`<p class="muted su-p">${uiText("The guided setup in pi walks through every step and asks before each one. It never asks for the provider key.", view.locale)}</p>${view.role === "operator" ? ui.cmd([...FIRST_RUN_COMMANDS.pi]) : null}` });
 }
 
 /**
@@ -1225,8 +1226,8 @@ export function overviewSetupEmpty(view) {
   const inLine = w === null ? null : inLineOf(w);
   const waiting = inLine === null ? "could not be read" : inLine.cut ? WAITING_CUT_TEXT : w.rows.length === 0 ? WAITING_EMPTY.title : `${inLine.n} ${inLine.label}`;
   return ui.card({
-    title: "The Overview, once it runs",
-    sub: "each panel says what it is waiting for",
-    body: html`<div class="stack su-empties">${line("parked", "Needs you", NEEDS_EMPTY.title)}${line("queue", "In line", waiting)}${line("running", "Running", active === 0 ? RUNNING_EMPTY.title : `${plural(active, "job")} running`)}${line("spend", "Spend today", SPEND_EMPTY.title)}${line("fleet", "Hosts", hosts === 0 ? HOSTS_EMPTY.title : `${plural(hosts, "host")} registered`)}</div>`,
+    title: uiText("The Overview, once it runs", view.locale),
+    sub: uiText("each panel says what it is waiting for", view.locale),
+    body: html`<div class="stack su-empties">${line("parked", uiText("Needs you", view.locale), uiText(NEEDS_EMPTY.title, view.locale))}${line("queue", uiText("In line", view.locale), uiText(waiting, view.locale))}${line("running", uiText("Running", view.locale), uiText(active === 0 ? RUNNING_EMPTY.title : `${plural(active, "job")} running`, view.locale))}${line("spend", uiText("Spend today", view.locale), uiText(SPEND_EMPTY.title, view.locale))}${line("fleet", uiText("Hosts", view.locale), uiText(hosts === 0 ? HOSTS_EMPTY.title : `${plural(hosts, "host")} registered`, view.locale))}</div>`,
   });
 }

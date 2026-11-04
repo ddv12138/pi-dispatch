@@ -29,10 +29,13 @@ import { CONSOLE_AUDIT_ACTION_RE, CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_OUTCOME_R
 import { AUDIT_ACTOR_ROLES, AUDIT_EXAMINE_MAX, AUDIT_OUTCOME_WORDS, AUDIT_Q_MAX, auditDriver, auditFiltered, auditQueryString, isAuditRow } from "../audit-view.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { msOf, timeHtml, usdText } from "./common.mjs";
 
 /** What a role that is not an operator reads in the log's panel (the belt; see the header). */
 export const AUDIT_OPERATORS_ONLY = "The audit log is shown to operators only.";
+const t = (message, view) => uiText(message, view?.locale);
+const fmt = (pattern, values, locale = "en") => Object.entries(values).reduce((text, [key, value]) => text.replaceAll(`{${key}}`, String(value)), uiText(pattern, locale));
 
 /**
  * The command that walks the same chain on the host, named wherever the page cannot vouch for a row: in the code face,
@@ -74,10 +77,10 @@ function rowId(entry, pos, state, used) {
  * is looked up only when the console writes it: a word this console does not know (issue #761) that happens to name a
  * state ("damaged") must not wear that state's badge, so it takes the attention badge with the word as written.
  */
-function outcomeCell(entry, state) {
+function outcomeCell(entry, state, locale = "en") {
   const key = state === "ok" ? (CONSOLE_AUDIT_OUTCOMES.includes(entry.outcome) ? entry.outcome : null) : state;
   const w = typeof key === "string" && Object.hasOwn(AUDIT_OUTCOME_WORDS, key) ? AUDIT_OUTCOME_WORDS[key] : { status: "attention", icon: null, word: String(entry.outcome ?? "unknown") };
-  return ui.badge(w.status, w.word, { icon: w.icon });
+  return ui.badge(w.status, uiText(w.word, locale), { icon: w.icon });
 }
 
 /**
@@ -95,22 +98,22 @@ const NONE_ON_TINT = html`<span class="muted">-</span>`;
  * only when this page had read that line, named one place two ways, by its row on the page that held it and by its
  * line on every other.
  */
-function damagedLabel(a) {
+function damagedLabel(a, locale = "en") {
   const b = a?.chain?.broken;
-  return b ? `line ${b.line} of ${b.file}` : null;
+  return b ? `${uiText("line", locale)} ${b.line} ${uiText("of", locale)} ${b.file}` : null;
 }
 
 /** A sentence's first letter in capitals ("row 7" leads one as "Row 7"). */
 const lead = (s) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** The note under a row's reason for a state the chain does not vouch for, with the outcome it was written with. */
-function stateNote(entry, state, chain) {
-  const written = typeof entry.outcome === "string" ? ` Written as ${entry.outcome}.` : "";
-  if (state === "unverified") return html`<span class="reason">Not verified: it follows the damaged row.${written}</span>`;
+function stateNote(entry, state, chain, locale = "en") {
+  const written = typeof entry.outcome === "string" ? ` ${uiText("Written as", locale)} ${entry.outcome}.` : "";
+  if (state === "unverified") return html`<span class="reason">${uiText("Not verified: it follows the damaged row.", locale)}${written}</span>`;
   // The row before a break whose line shows no prev that matches it: nothing vouches for it (audit-view.mjs header).
-  if (state === "suspect") return html`<span class="reason">Not verified: the link to the row after it does not hold.${written}</span>`;
+  if (state === "suspect") return html`<span class="reason">${uiText("Not verified: the link to the row after it does not hold.", locale)}${written}</span>`;
   if (state === "unchecked") {
-    const why = chain?.state === "unreadable" ? "Not checked: the chain could not be checked." : "Written after the last check; the next one covers it.";
+    const why = uiText(chain?.state === "unreadable" ? "Not checked: the chain could not be checked." : "Written after the last check; the next one covers it.", locale);
     return html`<span class="reason">${why}${written}</span>`;
   }
   return null;
@@ -123,14 +126,14 @@ function stateNote(entry, state, chain) {
  * no such shape gets no note either (the chain check refuses it). The words are plain text in the sentence, as the
  * state note's "Written as" is.
  */
-function unknownWordsNote(entry, state) {
+function unknownWordsNote(entry, state, locale = "en") {
   if (state !== "ok") return null;
   const unknown = (value, list, re) => typeof value === "string" && re.test(value) && !list.includes(value);
   const words = [
     unknown(entry.action, CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_ACTION_RE) ? `the action ${entry.action}` : null,
     unknown(entry.outcome, CONSOLE_AUDIT_OUTCOMES, CONSOLE_AUDIT_OUTCOME_RE) ? `the outcome ${entry.outcome}` : null,
   ].filter(Boolean);
-  return words.length === 0 ? null : html`<span class="reason">Not known to this console: ${words.join(" and ")} (a newer release writes such rows).</span>`;
+  return words.length === 0 ? null : html`<span class="reason">${uiText("Not known to this console:", locale)} ${words.join(` ${uiText("and", locale)} `)} (${uiText("a newer release writes such rows", locale)}).</span>`;
 }
 
 /**
@@ -151,53 +154,53 @@ export const AUDIT_BULK_KINDS = Object.freeze(["held-cancel-all", "failed-retry-
 export const AUDIT_WAITING_KINDS = Object.freeze(["fleet-resume", "queue-resume"]);
 
 /** A row's `count` in words, `alone` when no reason comes before it (see `AUDIT_BULK_KINDS`). */
-function countText(kind, n, alone) {
-  if (AUDIT_BULK_KINDS.includes(kind)) return alone ? `one of ${n} in a bulk write` : `one of ${n}`;
-  if (AUDIT_WAITING_KINDS.includes(kind)) return `${n} ${n === 1 ? "job was" : "jobs were"} waiting`;
-  return `count ${n}`;
+function countText(kind, n, alone, locale = "en") {
+  if (AUDIT_BULK_KINDS.includes(kind)) return alone ? `${uiText("one of", locale)} ${n} ${uiText("in a bulk write", locale)}` : `${uiText("one of", locale)} ${n}`;
+  if (AUDIT_WAITING_KINDS.includes(kind)) return `${n} ${uiText(n === 1 ? "job was" : "jobs were", locale)} ${uiText("waiting", locale)}`;
+  return `${uiText("count", locale)} ${n}`;
 }
 
 /** One table row of the log (`kit.tbl`'s `{ cells, mark, id }`). */
-function rowOf({ entry, pos, state }, chain, used) {
+function rowOf({ entry, pos, state }, chain, used, locale = "en") {
   const id = rowId(entry, pos, state, used);
   if (!isAuditRow(entry)) {
-    const file = typeof entry?.file === "string" ? entry.file : "an audit file";
+    const file = typeof entry?.file === "string" ? entry.file : uiText("an audit file", locale);
     const line = Number.isSafeInteger(entry?.line) ? entry.line : 0;
     const reason = typeof entry?.reason === "string" && entry.reason !== "" ? entry.reason : null;
     const what = line > 0
-      ? html`<b>Not an audit row: line ${line} of ${file}.</b> Changed, or written by something else.`
-      : html`<b>Not an audit row: the file ${file} could not be read${reason ? ` (${reason})` : ""}.</b> Its rows are not shown.`;
+      ? html`<b>${fmt("Not an audit row: line {line} of {file}.", { line, file }, locale)}</b> ${uiText("Changed, or written by something else.", locale)}`
+      : html`<b>${fmt("Not an audit row: the file {file} could not be read", { file }, locale)}${reason ? ` (${reason})` : ""}.</b> ${uiText("Its rows are not shown.", locale)}`;
     const at = line > 0 ? html`<span class="code au-tgt">${file}:${line}</span>` : html`<span class="code au-tgt">${file}</span>`;
-    return { id, mark: "failed", cells: [NONE_ON_TINT, NONE_ON_TINT, NONE_ON_TINT, NONE_ON_TINT, { wide: true, html: at }, outcomeCell(entry, "damaged"), reasonCell(html`<span class="au-dmg">${what}</span>`)] };
+    return { id, mark: "failed", cells: [NONE_ON_TINT, NONE_ON_TINT, NONE_ON_TINT, NONE_ON_TINT, { wide: true, html: at }, outcomeCell(entry, "damaged", locale), reasonCell(html`<span class="au-dmg">${what}</span>`)] };
   }
   const none = state === "damaged" ? NONE_ON_TINT : NONE;
   const actor = entry.actor && typeof entry.actor === "object" ? entry.actor : null;
   const driver = auditDriver(entry);
-  const who = actor ? html`<span class="au-who">${actor.name ?? "-"}<small>${actor.role ?? "-"}</small>${driver ? html`<small>driver: ${driver.name}</small>` : null}</span>` : none;
+  const who = actor ? html`<span class="au-who">${actor.name ?? "-"}<small>${uiText(actor.role ?? "-", locale)}</small>${driver ? html`<small>${uiText("driver:", locale)} ${driver.name}</small>` : null}</span>` : none;
   // The cells beside the reason are bounded (`page-css.mjs` `AUDIT_LAYOUT`): a long name, write kind or target wraps
   // inside its own width instead of taking the reason's.
   const action = html`<span class="code">${entry.action ?? "-"}</span>${typeof entry.kind === "string" ? html`<span class="reason au-kind">${entry.kind}</span>` : null}`;
   const target = typeof entry.target === "string" && entry.target !== "" ? html`<span class="code au-tgt">${entry.target}</span>` : none;
-  const said = [typeof entry.reason === "string" && entry.reason !== "" ? entry.reason : null, Number.isSafeInteger(entry.reserve) ? `reserve ${usdText(entry.reserve)}` : null].filter(Boolean).join(", ");
+  const said = [typeof entry.reason === "string" && entry.reason !== "" ? uiText(entry.reason, locale) : null, Number.isSafeInteger(entry.reserve) ? `${uiText("reserve", locale)} ${usdText(entry.reserve)}` : null].filter(Boolean).join(", ");
   // The count after the reason in brackets, or alone as its own words (a bracket with nothing before it read as a stray
   // aside).
-  const count = Number.isSafeInteger(entry.count) ? (said === "" ? countText(entry.kind, entry.count, true) : ` (${countText(entry.kind, entry.count, false)})`) : "";
+  const count = Number.isSafeInteger(entry.count) ? (said === "" ? countText(entry.kind, entry.count, true, locale) : ` (${countText(entry.kind, entry.count, false, locale)})`) : "";
   // The faint dash stands for a cell with nothing in it: a row whose state note fills the cell has no dash before it.
-  const note = stateNote(entry, state, chain);
-  const unknownNote = unknownWordsNote(entry, state);
+  const note = stateNote(entry, state, chain, locale);
+  const unknownNote = unknownWordsNote(entry, state, locale);
   const reasonText = said === "" && count === "" ? (note === null && unknownNote === null ? none : null) : html`${said}${count}`;
   const reason = state === "damaged"
-    ? html`<span class="au-dmg"><b>The chain check says:</b> ${chain?.broken?.reason ?? "this row's link to the one before it does not hold"}.</span>`
+    ? html`<span class="au-dmg"><b>${uiText("The chain check says:", locale)}</b> ${chain?.broken?.reason ?? uiText("this row's link to the one before it does not hold", locale)}.</span>`
     : html`${reasonText}${note}${unknownNote}`;
   return {
     id,
     mark: state === "damaged" ? "failed" : null,
-    cells: [html`<b>${entry.seq}</b>`, { when: true, html: html`<span class="au-at">${timeHtml(msOf(entry.at))}</span>` }, who, action, { wide: true, html: target }, outcomeCell(entry, state), reasonCell(reason)],
+    cells: [html`<b>${entry.seq}</b>`, { when: true, html: html`<span class="au-at">${timeHtml(msOf(entry.at))}</span>` }, who, action, { wide: true, html: target }, outcomeCell(entry, state, locale), reasonCell(reason)],
   };
 }
 
 /** `k` rows, grouped ("2,000 rows", "1 row"). */
-const rowsText = (k) => `${GROUPED.format(k)} ${k === 1 ? "row" : "rows"}`;
+const rowsText = (k, locale = "en") => `${GROUPED.format(k)} ${uiText(k === 1 ? "row" : "rows", locale)}`;
 
 /**
  * Why a seq page read the log from its newest row rather than at the place the chain check counted for its row: one
@@ -205,14 +208,14 @@ const rowsText = (k) => `${GROUPED.format(k)} ${k === 1 ? "row" : "rows"}`;
  * state, since that is what left it uncounted), or null when the row was read at its place. The same clause says how a
  * row was found and why one was not, so the page never reports a walk without its reason.
  */
-function walkWhy(a, s) {
+function walkWhy(a, s, locale = "en") {
   const by = a.seek?.by;
-  if (by === "newer") return Number.isSafeInteger(a.chain?.through) ? `the last chain check counted rows up to row ${a.chain.through}` : `the last chain check did not count row ${s}`;
-  if (by === "misplaced") return `row ${s} is not where the chain check counted it (the files changed since it ran)`;
+  if (by === "newer") return Number.isSafeInteger(a.chain?.through) ? fmt("the last chain check counted rows up to row {through}", { through: a.chain.through }, locale) : fmt("the last chain check did not count row {seq}", { seq: s }, locale);
+  if (by === "misplaced") return fmt("row {seq} is not where the chain check counted it (the files changed since it ran)", { seq: s }, locale);
   if (by !== "unplaced") return null;
-  if (a.chain?.state === "broken") return `the chain check stops at the damaged row, so it cannot count to row ${s}`;
-  if (a.chain?.state === "unreadable") return `the chain could not be checked, so row ${s} cannot be found by its number`;
-  return `the chain check gave no place for row ${s}`;
+  if (a.chain?.state === "broken") return fmt("the chain check stops at the damaged row, so it cannot count to row {seq}", { seq: s }, locale);
+  if (a.chain?.state === "unreadable") return fmt("the chain could not be checked, so row {seq} cannot be found by its number", { seq: s }, locale);
+  return fmt("the chain check gave no place for row {seq}", { seq: s }, locale);
 }
 
 /**
@@ -220,58 +223,58 @@ function walkWhy(a, s) {
  * reaped; or, after a walk, why the walk ran and where it got to. Said once: in the foot over rows, in the empty state
  * over none.
  */
-function seqSentence(a, s) {
+function seqSentence(a, s, locale = "en") {
   const k = a.seek ?? {};
-  const why = walkWhy(a, s);
-  if (a.found) return why === null ? `The page that holds row ${s}.` : `The page that holds row ${s}, found by reading from the newest row: ${why}.`;
-  if (Number.isSafeInteger(k.newest) && s > k.newest) return `Row ${s} does not exist yet: the newest row is ${k.newest}.`;
-  if (Number.isSafeInteger(k.first) && s < k.first) return `The log starts at row ${k.first}: row ${s} was reaped by retention, or removed.`;
+  const why = walkWhy(a, s, locale);
+  if (a.found) return why === null ? fmt("The page that holds row {seq}.", { seq: s }, locale) : fmt("The page that holds row {seq}, found by reading from the newest row: {why}.", { seq: s, why }, locale);
+  if (Number.isSafeInteger(k.newest) && s > k.newest) return fmt("Row {seq} does not exist yet: the newest row is {newest}.", { seq: s, newest: k.newest }, locale);
+  if (Number.isSafeInteger(k.first) && s < k.first) return fmt("The log starts at row {first}: row {seq} was reaped by retention, or removed.", { first: k.first, seq: s }, locale);
   const said = why === null ? "" : `${lead(why)}. `;
-  if (a.stopped) return `${said}Row ${s} is not among the newest ${rowsText(a.examined)}; Older lists the rows below them.`;
+  if (a.stopped) return fmt("{lead}Row {seq} is not among the newest {rows}; Older lists the rows below them.", { lead: said, seq: s, rows: rowsText(a.examined, locale) }, locale);
   // A walk run because the files changed since the check stops at the first row below the chunk, and a changed file can
   // hold that row out of its order, so such a walk cannot say the row is gone.
-  return k.by === "misplaced" ? `${said}Reading from the newest row did not find it either.` : `${said}The log holds no row ${s} now.`;
+  return k.by === "misplaced" ? fmt("{lead}Reading from the newest row did not find it either.", { lead: said }, locale) : fmt("{lead}The log holds no row {seq} now.", { lead: said, seq: s }, locale);
 }
 
 /**
  * The table's foot line over rows: what the page shows, and where a search or a seq stopped. A filtered page counts its
  * matches apart from the damaged entries it shows whatever the filters say (audit-view.mjs header).
  */
-function footText(a, query) {
-  if (Number.isSafeInteger(query?.seq)) return seqSentence(a, query.seq);
+function footText(a, query, locale = "en") {
+  if (Number.isSafeInteger(query?.seq)) return seqSentence(a, query.seq, locale);
   if (auditFiltered(query)) {
     const damaged = a.rows.filter((r) => r.state === "damaged").length;
     const n = a.rows.length - damaged;
-    const from = query.before ? " from here" : "";
-    const found = `${n === 0 ? "No row matches" : `${rowsText(n)} ${n === 1 ? "matches" : "match"}`} among the ${rowsText(a.examined)} searched${from}.`;
-    const shown = damaged === 0 ? "" : damaged === 1 ? " The damaged one is shown whatever the filters say." : ` The ${damaged} damaged ones are shown whatever the filters say.`;
-    return `${found}${shown}${a.stopped ? ` The search stops at ${GROUPED.format(AUDIT_EXAMINE_MAX)} rows; Older searches on from there.` : ""}`;
+    const from = query.before ? ` ${uiText("from here", locale)}` : "";
+    const found = fmt("{matches} among the {examined} searched{from}.", { matches: n === 0 ? uiText("No row matches", locale) : `${rowsText(n, locale)} ${uiText(n === 1 ? "matches" : "match", locale)}`, examined: rowsText(a.examined, locale), from }, locale);
+    const shown = damaged === 0 ? "" : damaged === 1 ? ` ${uiText("The damaged one is shown whatever the filters say.", locale)}` : ` ${fmt("The {count} damaged ones are shown whatever the filters say.", { count: damaged }, locale)}`;
+    return `${found}${shown}${a.stopped ? ` ${fmt("The search stops at {max} rows; Older searches on from there.", { max: GROUPED.format(AUDIT_EXAMINE_MAX) }, locale)}` : ""}`;
   }
   const n = a.rows.length;
   const seqs = a.rows.map((r) => r.entry).filter(isAuditRow).map((e) => e.seq);
-  return seqs.length > 1 ? `Showing ${rowsText(n)}, row ${seqs[0]} down to row ${seqs[seqs.length - 1]}` : `Showing ${rowsText(n)}`;
+  return seqs.length > 1 ? fmt("Showing {rows}, row {first} down to row {last}", { rows: rowsText(n, locale), first: seqs[0], last: seqs[seqs.length - 1] }, locale) : fmt("Showing {rows}", { rows: rowsText(n, locale) }, locale);
 }
 
 /**
  * The log's empty state: none written, none matching, a seq page without its row, or a page past the end. It carries
  * the page's one sentence (the foot then has none), and it never says nothing older exists while Older leads somewhere.
  */
-function emptyOf(a, query) {
+function emptyOf(a, query, locale = "en") {
   if (auditFiltered(query)) {
     const body = a.stopped
-      ? `None of the ${rowsText(a.examined)} searched ${query.before ? "from here" : "from the newest"} matches; Older searches on from there.`
-      : query.before ? "No row from here to the oldest matches these filters." : "No row in the log matches these filters.";
-    return ui.empty({ status: "idle", icon: "search", title: "No row matches", body });
+      ? fmt("None of the {rows} searched {place} matches; Older searches on from there.", { rows: rowsText(a.examined, locale), place: uiText(query.before ? "from here" : "from the newest", locale) }, locale)
+      : uiText(query.before ? "No row from here to the oldest matches these filters." : "No row in the log matches these filters.", locale);
+    return ui.empty({ status: "idle", icon: "search", title: uiText("No row matches", locale), body });
   }
   if (Number.isSafeInteger(query?.seq)) {
     const s = query.seq;
     const k = a.seek ?? {};
-    const title = Number.isSafeInteger(k.newest) && s > k.newest ? `No row ${s} yet` : Number.isSafeInteger(k.first) && s < k.first ? `No row ${s} now` : a.stopped ? `Row ${s} was not reached` : k.by === "misplaced" ? `Row ${s} was not found` : `No row ${s}`;
-    return ui.empty({ status: "idle", icon: "audit", title, body: seqSentence(a, s) });
+    const title = fmt(Number.isSafeInteger(k.newest) && s > k.newest ? "No row {seq} yet" : Number.isSafeInteger(k.first) && s < k.first ? "No row {seq} now" : a.stopped ? "Row {seq} was not reached" : k.by === "misplaced" ? "Row {seq} was not found" : "No row {seq}", { seq: s }, locale);
+    return ui.empty({ status: "idle", icon: "audit", title, body: seqSentence(a, s, locale) });
   }
   // A plain page below a cursor with no rows read none there, so there is no Older (`next` is null) and the sentence holds.
-  if (query?.before) return ui.empty({ status: "idle", icon: "audit", title: "No rows here", body: "Nothing older is in the log. Newest goes back to the top." });
-  return ui.empty({ status: "idle", icon: "audit", title: "The audit log is empty", body: "Every write, sign-in and refusal the console makes is written here." });
+  if (query?.before) return ui.empty({ status: "idle", icon: "audit", title: uiText("No rows here", locale), body: uiText("Nothing older is in the log. Newest goes back to the top.", locale) });
+  return ui.empty({ status: "idle", icon: "audit", title: uiText("The audit log is empty", locale), body: uiText("Every write, sign-in and refusal the console makes is written here.", locale) });
 }
 
 /**
@@ -279,8 +282,8 @@ function emptyOf(a, query) {
  * control that leads nowhere is drawn quiet whichever it is, so two disabled controls look alike rather than one of them
  * looking like the live one.
  */
-function auditPager(newer, older) {
-  const one = (label, href, kind) => ui.btn({ kind: href === null ? ["sm", "ghost"] : kind, label, href: href ?? "", disabled: href === null });
+function auditPager(newer, older, locale = "en") {
+  const one = (label, href, kind) => ui.btn({ kind: href === null ? ["sm", "ghost"] : kind, label: uiText(label, locale), href: href ?? "", disabled: href === null });
   return html`<span class="pager">${one("Newest", newer, ["sm", "ghost"])}${one("Older", older, "sm")}</span>`;
 }
 
@@ -290,22 +293,22 @@ function auditPager(newer, older) {
  * the page or where a search stopped).
  */
 export function auditLog(view) {
-  if (view.role !== "operator") return html`<p class="muted">${AUDIT_OPERATORS_ONLY}</p>`;
+  if (view.role !== "operator") return html`<p class="muted">${t(AUDIT_OPERATORS_ONLY, view)}</p>`;
   const a = view.data?.audit;
   const q = view.query ?? {};
-  const head = { title: "Audit log", sub: "newest first; every write, sign-in and refusal", flush: true };
+  const head = { title: t("Audit log", view), sub: t("newest first; every write, sign-in and refusal", view), flush: true };
   if (!a || typeof a.unreadable === "string") {
-    const body = a ? `${lead(a.unreadable)}. The next load tries again.` : "The console's log has the reason. The next load tries again.";
-    return ui.card({ ...head, body: html`<div class="au-empty">${ui.empty({ status: "attention", icon: "audit", title: "The audit log could not be read", body })}</div>` });
+    const body = a ? `${lead(a.unreadable)}. ${t("The next load tries again.", view)}` : t("The console's log has the reason. The next load tries again.", view);
+    return ui.card({ ...head, body: html`<div class="au-empty">${ui.empty({ status: "attention", icon: "audit", title: t("The audit log could not be read", view), body })}</div>` });
   }
   const used = new Set();
-  const rows = a.rows.map((r) => rowOf(r, a.chain, used));
+  const rows = a.rows.map((r) => rowOf(r, a.chain, used, view.locale));
   const table = rows.length === 0
-    ? html`<div class="au-empty">${emptyOf(a, q)}</div>`
-    : ui.tbl({ caption: "Audit log", heads: [{ label: "Seq", num: true }, "At", "Who", "Action", "Target", "Outcome", "Reason"], rows, stack: true });
+    ? html`<div class="au-empty">${emptyOf(a, q, view.locale)}</div>`
+    : ui.tbl({ caption: t("Audit log", view), heads: [{ label: "Seq", num: true }, ...["At", "Who", "Action", "Target", "Outcome", "Reason"].map((label) => t(label, view))], rows, stack: true });
   const paged = (typeof q.before === "string" && q.before !== "") || Number.isSafeInteger(q.seq);
-  const pager = auditPager(paged ? auditHref(q, { before: null, seq: null }) : null, typeof a.next === "string" ? auditHref(q, { before: a.next, seq: null }) : null);
-  return ui.card({ ...head, body: html`${table}${ui.tblFoot(rows.length === 0 ? "" : footText(a, q), pager)}` });
+  const pager = auditPager(paged ? auditHref(q, { before: null, seq: null }) : null, typeof a.next === "string" ? auditHref(q, { before: a.next, seq: null }) : null, view.locale);
+  return ui.card({ ...head, body: html`${table}${ui.tblFoot(rows.length === 0 ? "" : footText(a, q, view.locale), pager)}` });
 }
 
 /**
@@ -319,29 +322,29 @@ export function auditChain(view) {
   if (view.role !== "operator") return html``;
   const a = view.data?.audit;
   const c = a?.chain;
-  if (!a || !c) return ui.banner({ status: "attention", icon: "chain", title: "The chain could not be checked", body: html`The audit log could not be read, so no row is verified here. ${VERIFY_CMD} walks it on the host.` });
+  if (!a || !c) return ui.banner({ status: "attention", icon: "chain", title: t("The chain could not be checked", view), body: html`${t("The audit log could not be read, so no row is verified here.", view)} ${VERIFY_CMD} ${t("walks it on the host.", view)}` });
   if (c.state === "unreadable") {
-    const why = c.why === "directory" ? "The audit directory could not be read, so no row is verified." : "The check did not run, so no row is verified here.";
-    return ui.banner({ status: "attention", icon: "chain", title: "The chain could not be checked", body: html`${why} ${VERIFY_CMD} walks the same chain on the host.` });
+    const why = t(c.why === "directory" ? "The audit directory could not be read, so no row is verified." : "The check did not run, so no row is verified here.", view);
+    return ui.banner({ status: "attention", icon: "chain", title: t("The chain could not be checked", view), body: html`${why} ${VERIFY_CMD} ${t("walks the same chain on the host.", view)}` });
   }
   if (c.state === "broken") {
-    const label = damagedLabel(a);
-    const verified = c.through === null ? "No row could be verified" : `Chain verified through row ${c.through}`;
+    const label = damagedLabel(a, view.locale);
+    const verified = c.through === null ? t("No row could be verified", view) : fmt("Chain verified through row {seq}", { seq: c.through }, view.locale);
     const at = placeOf(c.broken.pos);
     const href = at === null ? null : `/audit?${new URLSearchParams({ before: `${at[0]}:${Math.max(at[1], 1) + 1}` })}#line-${at[0]}-${at[1]}`;
-    const before = c.suspect ? ` Neither can row ${c.suspect.seq}, the row before it: the link between the two does not hold, so the chain cannot tell whether row ${c.suspect.seq} changed.` : "";
-    const body = html`${c.broken.reason ? html`The check says: ${c.broken.reason}. ` : null}${lead(label)} and every row after it cannot be trusted.${before} Keep the file as it is and compare it with your last backup; ${VERIFY_CMD} names the same line.`;
-    const show = href === null ? null : ui.btn({ kind: ["sm", "primary"], label: "Show the damaged line", href });
-    return ui.banner({ status: "failed", icon: "chain", title: `${verified}. ${lead(label)} is damaged.`, body, actions: show });
+    const before = c.suspect ? ` ${fmt("Neither can row {seq}, the row before it: the link between the two does not hold, so the chain cannot tell whether row {seq} changed.", { seq: c.suspect.seq }, view.locale)}` : "";
+    const body = html`${c.broken.reason ? html`${t("The check says:", view)} ${c.broken.reason}. ` : null}${lead(label)} ${t("and every row after it cannot be trusted.", view)}${before} ${t("Keep the file as it is and compare it with your last backup;", view)} ${VERIFY_CMD} ${t("names the same line.", view)}`;
+    const show = href === null ? null : ui.btn({ kind: ["sm", "primary"], label: t("Show the damaged line", view), href });
+    return ui.banner({ status: "failed", icon: "chain", title: `${verified}. ${lead(label ?? "")} ${t("is damaged.", view)}`, body, actions: show });
   }
   if (c.through === null) {
-    if ((a.rows ?? []).length === 0) return ui.banner({ status: "ok", icon: "chain", title: "The audit log is empty", body: "The chain starts with the first row the console writes." });
-    return ui.banner({ status: "idle", icon: "chain", title: "No row is verified yet", body: "Every row was written after the last check; the next one covers them." });
+    if ((a.rows ?? []).length === 0) return ui.banner({ status: "ok", icon: "chain", title: t("The audit log is empty", view), body: t("The chain starts with the first row the console writes.", view) });
+    return ui.banner({ status: "idle", icon: "chain", title: t("No row is verified yet", view), body: t("Every row was written after the last check; the next one covers them.", view) });
   }
-  const span = c.startsAt !== null && c.from !== null ? `Chain verified from row ${c.from} through row ${c.through}` : `Chain verified through row ${c.through}`;
-  const reaped = c.startsAt !== null ? " The log starts there: older rows were reaped by retention, or removed, and the two look alike." : "";
-  const fresh = (a.rows ?? []).some((r) => r.state === "unchecked") ? " Rows written since the check say unchecked until the next one." : "";
-  return ui.banner({ status: "ok", icon: "chain", title: span, body: `Every row's hash follows the row before it.${reaped}${fresh}` });
+  const span = c.startsAt !== null && c.from !== null ? fmt("Chain verified from row {from} through row {through}", { from: c.from, through: c.through }, view.locale) : fmt("Chain verified through row {through}", { through: c.through }, view.locale);
+  const reaped = c.startsAt !== null ? ` ${t("The log starts there: older rows were reaped by retention, or removed, and the two look alike.", view)}` : "";
+  const fresh = (a.rows ?? []).some((r) => r.state === "unchecked") ? ` ${t("Rows written since the check say unchecked until the next one.", view)}` : "";
+  return ui.banner({ status: "ok", icon: "chain", title: span, body: `${t("Every row's hash follows the row before it.", view)}${reaped}${fresh}` });
 }
 
 /**
@@ -353,9 +356,9 @@ export function auditFilter(view) {
   if (view.role !== "operator") return html``;
   const q = view.query ?? {};
   const names = Array.isArray(view.data?.audit?.who) ? view.data.audit.who : [];
-  const pick = (id, name, label, values, value) => html`<label class="sr" for="${id}">${label}</label>${ui.select({ id, name, value: value ?? "", options: [{ value: "", label: `${label}: all` }, ...values.map((v) => ({ value: v, label: `${label}: ${v}` }))] })}`;
-  const reset = auditFiltered(q) || (typeof q.before === "string" && q.before !== "") || Number.isSafeInteger(q.seq) ? ui.btn({ kind: "ghost", label: "Clear", href: "/audit" }) : null;
-  return html`<form class="filterbar" method="get" action="/audit" role="search" aria-label="Filter the audit log"><label class="search">${ui.icon("search")}<input type="search" name="q" value="${q.q ?? ""}" maxlength="${AUDIT_Q_MAX}" placeholder="Search targets and reasons" aria-label="Search targets and reasons" autocomplete="off" spellcheck="false"></label>${pick("au-who", "who", "Who", names, q.who)}${pick("au-role", "role", "Role", AUDIT_ACTOR_ROLES, q.role)}${pick("au-action", "action", "Action", CONSOLE_AUDIT_ACTIONS, q.action)}${pick("au-outcome", "outcome", "Outcome", CONSOLE_AUDIT_OUTCOMES, q.outcome)}${ui.btn({ label: "Filter", type: "submit" })}${reset}</form>`;
+  const pick = (id, name, label, values, value) => { const shown = t(label, view); return html`<label class="sr" for="${id}">${shown}</label>${ui.select({ id, name, value: value ?? "", options: [{ value: "", label: `${shown}: ${t("all", view)}` }, ...values.map((v) => ({ value: v, label: `${shown}: ${v}` }))] })}`; };
+  const reset = auditFiltered(q) || (typeof q.before === "string" && q.before !== "") || Number.isSafeInteger(q.seq) ? ui.btn({ kind: "ghost", label: t("Clear", view), href: "/audit" }) : null;
+  return html`<form class="filterbar" method="get" action="/audit" role="search" aria-label="${t("Filter the audit log", view)}"><label class="search">${ui.icon("search")}<input type="search" name="q" value="${q.q ?? ""}" maxlength="${AUDIT_Q_MAX}" placeholder="${t("Search targets and reasons", view)}" aria-label="${t("Search targets and reasons", view)}" autocomplete="off" spellcheck="false"></label>${pick("au-who", "who", "Who", names, q.who)}${pick("au-role", "role", "Role", AUDIT_ACTOR_ROLES, q.role)}${pick("au-action", "action", "Action", CONSOLE_AUDIT_ACTIONS, q.action)}${pick("au-outcome", "outcome", "Outcome", CONSOLE_AUDIT_OUTCOMES, q.outcome)}${ui.btn({ label: t("Filter", view), type: "submit" })}${reset}</form>`;
 }
 
 /** What the log is (the AuditScreen card's side card): the verified range, the damage, the last check, who sees it. */
@@ -365,8 +368,8 @@ export function auditAbout(view) {
   const c = a?.chain ?? null;
   const ok = c !== null && c.state !== "unreadable";
   // A broken chain with nothing vouched for has no row to come "yet": the check stopped at the damage.
-  const range = !ok ? "not checked" : c.through === null ? (c.state === "broken" ? "none" : "none yet") : c.from !== null && c.from !== c.through ? `rows ${c.from} to ${c.through}` : `row ${c.through}`;
-  const label = damagedLabel(a);
+  const range = !ok ? t("not checked", view) : c.through === null ? (c.state === "broken" ? t("none", view) : t("none yet", view)) : c.from !== null && c.from !== c.through ? fmt("rows {from} to {through}", { from: c.from, through: c.through }, view.locale) : fmt("row {seq}", { seq: c.through }, view.locale);
+  const label = damagedLabel(a, view.locale);
   const after = a?.rows?.some((r) => r.state === "unverified") ? "every row after the damaged one" : "any row after the damaged one (none on this page)";
   const pairs = [
     ["Verified", range],
@@ -375,9 +378,9 @@ export function auditAbout(view) {
     // Issue #761: the rows an intact chain holds whose action or outcome this console does not know, only when there are
     // any (the check counts them only on an intact chain).
     ...(ok && c.unknown > 0 ? [["Not known to this console", `${rowsText(c.unknown)} (a newer release writes such rows)`]] : []),
-    ...(Number.isFinite(c?.checkedAt) ? [["Checked at", timeHtml(c.checkedAt)]] : []),
+    ...(Number.isFinite(c?.checkedAt) ? [[t("Checked at", view), timeHtml(c.checkedAt)]] : []),
     ["Each row keeps", "who, what, target, outcome, reason and a hash of the row before"],
     ["Who sees it", "operators only; viewers do not see this page"],
   ];
-  return ui.card({ title: "About this log", body: ui.facts(pairs, { cols: 1 }) });
+  return ui.card({ title: t("About this log", view), body: ui.facts(pairs.map(([k, value]) => [t(k, view), typeof value === "string" ? t(value, view) : value]), { cols: 1 }) });
 }

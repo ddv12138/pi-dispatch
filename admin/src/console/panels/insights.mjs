@@ -34,6 +34,7 @@ import { renderWhatIf } from "../../render.mjs";
 import { OUTCOME_WORD_OF, SPEND_TITLE } from "../../words.mjs";
 import { html, trustedRenderer } from "../html.mjs";
 import { titled } from "./common.mjs";
+import { uiText } from "../locale.mjs";
 
 // ---- insights --------------------------------------------------------------------------------------------------------
 
@@ -114,9 +115,9 @@ export function graphNodesHtml(scene) {
  * window, and what bounds every series. A page that showed one window's numbers beside the other's chips without
  * saying so would let a reader add them up.
  */
-function windowsLineHtml(windowLabel, scene) {
+function windowsLineHtml(windowLabel, scene, translate = (message) => message) {
   const days = scene?.norm?.caps?.windowDays ?? "?";
-  return html`<p id="windows" class="note">spend window: ${windowLabel} · topology: fixed ${String(days)}d record window · series bounded by retention (PI_LOG_RETENTION_DAYS) and the 92-day scan cap</p>`;
+  return html`<p id="windows" class="note">${translate("spend window:")} ${windowLabel} · ${translate("topology: fixed")} ${String(days)}${translate("d record window · series bounded by retention (PI_LOG_RETENTION_DAYS) and the 92-day scan cap")}</p>`;
 }
 
 /**
@@ -127,7 +128,8 @@ function windowsLineHtml(windowLabel, scene) {
  * tooltips the renderers push onto `tips` are listed, escaped, in a hidden `#insights-tips` list, which console.js shows
  * in the page's tooltip box. `fullPaths` widens the topology's folder labels (`insightsFullPaths` decides it).
  */
-export function insightsBody(payload, nowMs, { fullPaths = false } = {}) {
+export function insightsBody(payload, nowMs, { fullPaths = false, locale = "en" } = {}) {
+  const t = (message) => uiText(message, locale);
   const p = payload !== null && typeof payload === "object" ? payload : {};
   const scene = buildGraphScene(p.graph, { now: nowMs, fullPaths: fullPaths === true, outcomeWords: OUTCOME_WORD_OF });
   const nf = guarded(() => normFold(p.fold), null);
@@ -141,33 +143,33 @@ export function insightsBody(payload, nowMs, { fullPaths = false } = {}) {
   const { minted, html: spendHtml } = topologySpend(scene, spend);
   const tips = [];
   const R = trustedRenderer;
-  const parts = [windowsLineHtml(windowLabel, scene), R(bannersHtml(scene.norm)), R(costBannersHtml(p, nf, nb, na))];
-  if (nf !== null) parts.push(html`<section>${R(kpisHtml(nf))}</section>`);
-  parts.push(html`<section><h2>budget</h2>${R(budgetSectionHtml(nb))}</section>`);
-  if (na !== null) parts.push(html`<section><h2>budget split</h2>${R(splitSectionHtml(na, tips, names, windowLabel))}</section>`);
-  if (ns !== null) parts.push(html`<section><h2>job sizes</h2>${R(sizingSectionHtml(ns, tips, scene.nowMs))}</section>`);
+  const parts = [windowsLineHtml(windowLabel, scene, t), R(bannersHtml(scene.norm, t)), R(costBannersHtml(p, nf, nb, na, t))];
+  if (nf !== null) parts.push(html`<section>${R(kpisHtml(nf, t))}</section>`);
+  parts.push(html`<section><h2>${t("budget")}</h2>${R(budgetSectionHtml(nb, t))}</section>`);
+  if (na !== null) parts.push(html`<section><h2>${t("budget split")}</h2>${R(splitSectionHtml(na, tips, names, windowLabel, t))}</section>`);
+  if (ns !== null) parts.push(html`<section><h2>${t("job sizes")}</h2>${R(sizingSectionHtml(ns, tips, scene.nowMs, t))}</section>`);
   if (nc !== null) {
-    const capacity = guarded(() => capacitySectionHtml(nc, tips, scene.nowMs, windowLabel), null);
-    parts.push(html`<section><h2>capacity</h2>${capacity === null ? html`<p class="note">capacity not drawn: the slice is not readable. ${INSIGHTS_CAPACITY_JOBS_ONLY}</p>` : R(capacity)}</section>`);
+    const capacity = guarded(() => capacitySectionHtml(nc, tips, scene.nowMs, windowLabel, t), null);
+    parts.push(html`<section><h2>${t("capacity")}</h2>${capacity === null ? html`<p class="note">${t("capacity not drawn: the slice is not readable.")} ${t(INSIGHTS_CAPACITY_JOBS_ONLY)}</p>` : R(capacity)}</section>`);
   }
   if (nf !== null) {
-    if (nf.plans.length > 0) parts.push(html`<section><h2>plans</h2>${R(planCardsHtml(nf.plans))}</section>`);
-    parts.push(html`<section><h2>daily spend</h2>${R(dailyChartHtml(nf.daily, tips))}${R(cumulativeHtml(nf.daily, tips))}</section>`);
-    const flows = flowLinesHtml(nf, tips);
-    if (flows !== null) parts.push(html`<section><h2>daily spend by flow</h2>${R(flows)}</section>`);
-    parts.push(html`<section><h2>breakdown</h2>${R(breakdownHtml(nf, minted, tips, names))}</section>`);
+    if (nf.plans.length > 0) parts.push(html`<section><h2>${t("plans")}</h2>${R(planCardsHtml(nf.plans, t))}</section>`);
+    parts.push(html`<section><h2>${t("daily spend")}</h2>${R(dailyChartHtml(nf.daily, tips, t))}${R(cumulativeHtml(nf.daily, tips, t))}</section>`);
+    const flows = flowLinesHtml(nf, tips, t);
+    if (flows !== null) parts.push(html`<section><h2>${t("daily spend by flow")}</h2>${R(flows)}</section>`);
+    parts.push(html`<section><h2>${t("breakdown")}</h2>${R(breakdownHtml(nf, minted, tips, names, t))}</section>`);
   } else {
-    parts.push(html`<section><p class="note">No cost data could be read for this window.</p></section>`);
+    parts.push(html`<section><p class="note">${t("No cost data could be read for this window.")}</p></section>`);
   }
-  parts.push(R(topologySectionHtml(scene, spendHtml)));
-  if (nf !== null) parts.push(R(footerHtml(nf, windowLabel)));
+  parts.push(R(topologySectionHtml(scene, spendHtml, t)));
+  if (nf !== null) parts.push(R(footerHtml(nf, windowLabel, t)));
   return html`${parts}${graphNodesHtml(scene)}<ol id="insights-tips" class="hidden-tips" hidden>${tips.map((t) => html`<li>${t}</li>`)}</ol>`;
 }
 
 export function insightsPanel(view) {
   const d = view.data ?? {};
   if (d.insightsError) return titled(SPEND_TITLE, html`<p class="warn">${d.insightsError}</p>`);
-  return html`<h2>${SPEND_TITLE}, ${insightsWindowLabel(view.query?.range ?? INSIGHTS_DEFAULT_RANGE)}</h2>${insightsBody(d.insights, view.now, { fullPaths: insightsFullPaths(view) })}`;
+  return html`<h2>${uiText(SPEND_TITLE, view.locale)}, ${insightsWindowLabel(view.query?.range ?? INSIGHTS_DEFAULT_RANGE)}</h2>${insightsBody(d.insights, view.now, { fullPaths: insightsFullPaths(view), locale: view.locale })}`;
 }
 
 /** The flows the what-if form suggests: the window's flows from the fold, in the skill-name charset, sorted. */

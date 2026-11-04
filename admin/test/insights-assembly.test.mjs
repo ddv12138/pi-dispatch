@@ -8,7 +8,8 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 import { resolvePaths } from "../src/read-model.mjs";
 import { assembleInsights } from "../src/insights-assembly.mjs";
 import * as html from "../src/insights-html.mjs";
-import { buildGraphScene } from "../src/graph-html.mjs";
+import { bannersHtml, buildGraphScene } from "../src/graph-html.mjs";
+import { uiText } from "../src/console/locale.mjs";
 import * as ia from "../src/insights-assembly.mjs";
 import { insightsBody } from "../src/console/panels.mjs";
 import { modelDollarKeyPrefix, scopeDollarKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
@@ -92,14 +93,28 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
   assert.equal(typeof payload.budget.unreachable, "string", "the Valkey read degraded and said so");
   assert.ok(envReads >= 1, "the deployment's environment came from envFn, not this process's");
   // The console's whole insights body still builds from it, and carries every section as the renderers draw it.
-  const page = String(insightsBody(payload, nowMs));
-  assert.ok(page.includes('id="graph"'));
   const tips = [];
   const nf = html.normFold(payload.fold);
   const scene = buildGraphScene(payload.graph, { now: nowMs });
   const { minted, html: spendHtml } = html.topologySpend(scene, html.normSpendMap(payload.costByTrigger));
   const names = html.normProjectNames(payload.projects);
   const label = html.insightsWindowLabel(payload.window);
+  const page = String(insightsBody(payload, nowMs));
+  assert.ok(page.includes('id="graph"'));
+  const zhPage = String(insightsBody(payload, nowMs, { locale: "zh" }));
+  assert.match(zhPage, /累计/);
+  assert.match(zhPage, /每日费用/);
+  assert.match(zhPage, /费用图例/);
+  assert.match(zhPage, /连线/);
+  assert.doesNotMatch(zhPage, /no project to size|peak memory against size|no graph model supplied/);
+  const zh = (message) => uiText(message, "zh");
+  const zhSizing = html.sizingSectionHtml(html.normSizing(payload.sizing), [], nowMs, zh);
+  assert.doesNotMatch(zhSizing, /no project to size|peak memory against size/);
+  const zhTopology = html.topologySectionHtml(scene, spendHtml, zh);
+  assert.match(zhTopology, /链深度/);
+  assert.match(zhTopology, /费用图例/);
+  assert.match(bannersHtml({ ok: false, meta: { triggersMissing: true, triggersInvalid: null } }, zh), /未提供图模型/);
+  assert.doesNotMatch(zhPage, /cumulative window spend|no spend recorded/);
   const sections = {
     kpis: html.kpisHtml(nf),
     budget: html.budgetSectionHtml(html.normBudget(payload.budget)),
@@ -345,7 +360,7 @@ test("during an envelope mismatch every total shown is the applied split's, and 
   assert.ok(text.includes("  unallocated $1.00 · deployment spent $8.00 of $28.00"), text.join("\n"));
   const page = pageOf({ allocation: slice, window: "30d" }, 0);
   assert.ok(page.includes("<span>$28.00 per week · delegation on</span>"), "the envelope row");
-  assert.ok(page.includes(`governed jobs on this host refuse as envelope-mismatch.${note}</span>`), "the page's mismatch line, in render.mjs' words");
+  assert.ok(page.includes(`governed jobs on this host refuse as envelope-mismatch.${note.replaceAll("'", "&#39;")}</span>`), "the page's mismatch line, in render.mjs' words");
   assert.ok(page.includes("of $28.00</span>"), "the headroom");
   assert.ok(!page.includes("of $30.00"));
   // The same split on a host whose file agrees: no note, and the totals are the same number.

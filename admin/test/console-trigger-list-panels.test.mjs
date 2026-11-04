@@ -60,6 +60,17 @@ test("kind filters change actual rule membership while unfiltered summary facts 
   assert.ok(!panel(comments, "p-tr-schedule").includes('/config/trigger?index=0'));
   assert.match(comments, /href="\/triggers\?kind=label"/);
 });
+
+test("trigger navigation, headings and check form use the selected Chinese locale", async () => {
+  const page = await triggerListGolden({ role: "viewer", locale: "zh" });
+  const nav = text(panel(page, "p-tr-tabs"));
+  const count = text(panel(page, "p-tr-count"));
+  const check = text(panel(page, "p-tr-check"));
+  assert.match(nav, /规则/);
+  assert.match(count, /设置/);
+  assert.match(check, /规则/);
+  assert.ok(!nav.includes("Rules"));
+});
 test("rule chips reflect selected capabilities and escape every configured string", async () => {
   const page = await triggerListGolden({ extraTriggers: [{ index: 7, type: "comment", forge: "forgejo", phrase: '<img src=x onerror="unsafe">', flow: "safe-flow", model: '<script>unsafe</script>', backend: "openshell", resume: true, steer: true, awaitInput: true, recover: true, secrets: 2, secretBundle: false, mcp: ["search"], instructions: true }] });
   const forgejo = panel(page, "p-tr-forgejo");

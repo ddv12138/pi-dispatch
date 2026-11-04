@@ -894,12 +894,12 @@ export function layoutCumulative(daily, { width, height } = {}) {
 
 // ---- HTML emission (server-side strings; the page script only ever assigns them as text) ----
 
-export function dailyChartHtml(daily, tips) {
+export function dailyChartHtml(daily, tips, translate = (message) => message) {
   if (daily.length === 0) return '<div class="dim">no runs in the spend window</div>';
   const lay = layoutDailyChart(daily, { width: DAILY_W, height: DAILY_H });
   const costByDay = new Map(daily.map((d) => [d.day, d.cost]));
   const p = lay.plot;
-  const parts = [`<svg width="${fmt(DAILY_W)}" height="${fmt(DAILY_H)}" role="img" aria-label="daily spend">`];
+  const parts = [`<svg width="${fmt(DAILY_W)}" height="${fmt(DAILY_H)}" role="img" aria-label="${escapeHtml(translate("daily spend"))}">`];
   parts.push(`<line x1="${fmt(p.x)}" y1="${fmt(p.y)}" x2="${fmt(p.x)}" y2="${fmt(p.y + p.h)}" stroke="${PAGE_THEME.border}"/>`);
   parts.push(`<line x1="${fmt(p.x)}" y1="${fmt(p.y + p.h)}" x2="${fmt(p.x + p.w)}" y2="${fmt(p.y + p.h)}" stroke="${PAGE_THEME.border}"/>`);
   for (const t of lay.yTicks) {
@@ -907,7 +907,7 @@ export function dailyChartHtml(daily, tips) {
     parts.push(`<text x="${fmt(p.x - 6)}" y="${fmt(t.y + 3)}" text-anchor="end" font-size="9" fill="${PAGE_THEME.dim}">${escapeHtml(t.label)}</text>`);
   }
   for (const b of lay.bars) {
-    const idx = tips.push(`${b.day} · ${fmtCost(costByDay.get(b.day) ?? null)} · ${fmt(b.runs)} runs`) - 1;
+    const idx = tips.push(`${b.day} · ${fmtCost(costByDay.get(b.day) ?? null)} · ${fmt(b.runs)} ${translate("runs")}`) - 1;
     if (b.cls === "zero") {
       parts.push(`<rect data-tip="${fmt(idx)}" x="${fmt(b.x)}" y="${fmt(b.y)}" width="${fmt(b.w)}" height="${fmt(b.h)}" fill="${PAGE_THEME.dim}"/>`);
     } else if (b.cls === "metered") {
@@ -923,7 +923,7 @@ export function dailyChartHtml(daily, tips) {
     parts.push(`<text x="${fmt(xl.x)}" y="${fmt(p.y + p.h + 14)}" text-anchor="middle" font-size="9" fill="${PAGE_THEME.dim}">${escapeHtml(xl.label)}</text>`);
   }
   if (lay.yTicks.length === 0) {
-    parts.push(`<text x="${fmt(p.x + p.w / 2)}" y="${fmt(p.y + p.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">no spend recorded</text>`);
+    parts.push(`<text x="${fmt(p.x + p.w / 2)}" y="${fmt(p.y + p.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(translate("no spend recorded"))}</text>`);
   }
   parts.push("</svg>");
   return parts.join("");
@@ -962,17 +962,17 @@ function axisFrame(plot, yTicks) {
   return parts.join("");
 }
 
-export function cumulativeHtml(daily, tips) {
+export function cumulativeHtml(daily, tips, translate = (message) => message) {
   const lay = layoutCumulative(daily, {});
   if (lay.points.length === 0) return "";
-  const parts = [`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="cumulative window spend">`];
+  const parts = [`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="${escapeHtml(translate("cumulative window spend"))}">`];
   parts.push(axisFrame(lay.plot, lay.yTicks));
   if (lay.scaleMax === 0) {
-    parts.push(`<text x="${fmt(lay.plot.x + lay.plot.w / 2)}" y="${fmt(lay.plot.y + lay.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">no spend recorded</text>`);
+    parts.push(`<text x="${fmt(lay.plot.x + lay.plot.w / 2)}" y="${fmt(lay.plot.y + lay.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(translate("no spend recorded"))}</text>`);
   } else {
     parts.push(segmentPaths(lay.points, lay.segments, PAGE_THEME.accent));
     for (const pt of lay.points) {
-      const idx = tips.push(`${pt.day} · cumulative ${fmtCost({ usd: pt.total, class: pt.demoted ? "estimated" : "metered", floor: pt.floor })}`) - 1;
+      const idx = tips.push(`${pt.day} · ${translate("cumulative")} ${fmtCost({ usd: pt.total, class: pt.demoted ? "estimated" : "metered", floor: pt.floor })}`) - 1;
       parts.push(`<circle data-tip="${fmt(idx)}" cx="${fmt(pt.x)}" cy="${fmt(pt.y)}" r="2" fill="${PAGE_THEME.accent}"${pt.demoted ? ' fill-opacity=".45" stroke="' + PAGE_THEME.accent + '"' : ""}/>`);
     }
     // Direct end-of-line label: the running typed total, which converges to the KPI's provenance total.
@@ -980,24 +980,24 @@ export function cumulativeHtml(daily, tips) {
     parts.push(`<text x="${fmt(el.x)}" y="${fmt(el.y)}"${el.anchor === "end" ? ' text-anchor="end"' : ""} font-size="9" fill="${PAGE_THEME.dim}">${escapeHtml(el.text)}</text>`);
   }
   parts.push("</svg>");
-  return `<div class="dim small">cumulative</div>${parts.join("")}`;
+  return `<div class="dim small">${escapeHtml(translate("cumulative"))}</div>${parts.join("")}`;
 }
 
-export function flowLinesHtml(nf, tips) {
+export function flowLinesHtml(nf, tips, translate = (message) => message) {
   if (nf.dailyByFlow === null) return null; // absence: the fold predates the series, so no section at all
   const lay = layoutFlowLines(nf.dailyByFlow, {});
-  if (lay.panels.length === 0) return '<div class="dim">no runs in the spend window</div>';
+  if (lay.panels.length === 0) return `<div class="dim">${escapeHtml(translate("no runs in the spend window"))}</div>`;
   const totalsByFlow = new Map(nf.byFlow.map((r) => [r.flow, r.cost]));
   const panels = lay.panels.map((panel) => {
     const parts = [`<div class="bl"><h3>${escapeHtml(panel.flow)} <span class="dim">${escapeHtml(fmtCost(totalsByFlow.get(panel.flow) ?? null))}</span></h3>`];
-    parts.push(`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="daily spend · ${escapeHtml(panel.flow)}">`);
+    parts.push(`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="${escapeHtml(translate("daily spend"))} · ${escapeHtml(panel.flow)}">`);
     parts.push(axisFrame(panel.plot, panel.yTicks));
     if (lay.scaleMax === 0) {
-      parts.push(`<text x="${fmt(panel.plot.x + panel.plot.w / 2)}" y="${fmt(panel.plot.y + panel.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">no spend recorded</text>`);
+      parts.push(`<text x="${fmt(panel.plot.x + panel.plot.w / 2)}" y="${fmt(panel.plot.y + panel.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(translate("no spend recorded"))}</text>`);
     } else {
       parts.push(segmentPaths(panel.points, panel.segments, PAGE_THEME.accent));
       for (const pt of panel.points) {
-        const idx = tips.push(`${pt.day} · ${panel.flow} · ${fmtCost({ usd: pt.usd, class: pt.cls, floor: pt.floor })} · ${fmt(pt.runs)} runs`) - 1;
+        const idx = tips.push(`${pt.day} · ${panel.flow} · ${fmtCost({ usd: pt.usd, class: pt.cls, floor: pt.floor })} · ${fmt(pt.runs)} ${translate("runs")}`) - 1;
         const estim = pt.runs > 0 && pt.cls !== "metered";
         parts.push(`<circle data-tip="${fmt(idx)}" cx="${fmt(pt.x)}" cy="${fmt(pt.y)}" r="2" fill="${PAGE_THEME.accent}"${estim ? ' fill-opacity=".45" stroke="' + PAGE_THEME.accent + '"' : ""}/>`);
         if (pt.floor) {
@@ -1013,7 +1013,7 @@ export function flowLinesHtml(nf, tips) {
   });
   let tail = "";
   if (lay.restCount > 0) {
-    tail = `<div class="dim small">(+${fmt(lay.restCount)} more flows · ${escapeHtml(fmtCost(lay.restAgg))})</div>`;
+    tail = `<div class="dim small">(+${fmt(lay.restCount)} ${escapeHtml(translate("more flows"))} · ${escapeHtml(fmtCost(lay.restAgg))})</div>`;
   }
   return `<div id="flows">${panels.join("")}</div>${tail}`;
 }
@@ -1036,9 +1036,10 @@ function budgetBarSvg(reserved, cap, state, pct) {
 }
 
 /** A budget state as a WORD (omitted when "ok"): monochrome must still say soft-hold or over. */
-function stateWord(state) {
+function stateWord(state, translate = (message) => message) {
   if (state === "ok") return "";
-  return ` <span class="state${state === "over" ? " over" : ""}">${escapeHtml(state)}</span>`;
+  const label = state === "soft-hold" ? "soft hold" : state === "over" ? "over cap" : state;
+  return ` <span class="state${state === "over" ? " over" : ""}">${escapeHtml(translate(label))}</span>`;
 }
 
 /**
@@ -1049,26 +1050,26 @@ function stateWord(state) {
  * and states the absence; slots and tokens are counts, never dollars, so nothing here touches
  * fmtCost. Renders even when the cost fold is null: the lever does not depend on the spend scan.
  */
-export function budgetSectionHtml(nb) {
-  if (nb === null) return '<div class="dim">no budget data in this payload</div>';
+export function budgetSectionHtml(nb, translate = (message) => message) {
+  if (nb === null) return `<div class="dim">${escapeHtml(translate("no budget data in this payload"))}</div>`;
   const rows = [];
   const slotRow = (label, wdw) => {
     if (wdw.cap === null && (wdw.reserved === null || wdw.reserved === 0) && label !== "day") {
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(label)}</span><span class="dim">off · no cap set</span></div>`);
+      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span class="dim">${escapeHtml(translate("off · no cap set"))}</span></div>`);
       return;
     }
     if (nb.unreachable !== null) {
-      const capText = wdw.cap !== null ? `cap ${fmt(wdw.cap)} (overlay)` : "cap unknown (worker env/default)";
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(label)}</span><span class="dim">${escapeHtml(capText)} · reserved unavailable (queue unreachable)</span></div>`);
+      const capText = wdw.cap !== null ? `${translate("cap")} ${fmt(wdw.cap)} (${translate("overlay")})` : translate("cap unknown (worker env/default)");
+      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span class="dim">${escapeHtml(capText)} · ${escapeHtml(translate("reserved unavailable (queue unreachable)"))}</span></div>`);
       return;
     }
     const reserved = wdw.reserved ?? 0;
     if (wdw.cap === null) {
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(label)}</span><span>${escapeHtml(`reserved ${fmt(reserved)} / cap unknown (worker env/default)`)}</span></div>`);
+      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span>${escapeHtml(`${translate("reserved")} ${fmt(reserved)} / ${translate("cap unknown (worker env/default)")}`)}</span></div>`);
       return;
     }
     rows.push(
-      `<div class="row"><span class="wl">${escapeHtml(label)}</span><span>${escapeHtml(`reserved ${fmt(reserved)} / cap ${fmt(wdw.cap)} (overlay)`)}</span>${stateWord(wdw.state)}${budgetBarSvg(reserved, wdw.cap, wdw.state, nb.softHoldPct)}</div>`,
+      `<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span>${escapeHtml(`${translate("reserved")} ${fmt(reserved)} / ${translate("cap")} ${fmt(wdw.cap)} (${translate("overlay")})`)}</span>${stateWord(wdw.state, translate)}${budgetBarSvg(reserved, wdw.cap, wdw.state, nb.softHoldPct)}</div>`,
     );
   };
   slotRow("day", nb.day);
@@ -1076,52 +1077,52 @@ export function budgetSectionHtml(nb) {
   slotRow("month", nb.month);
 
   const t = nb.tokens;
-  const perJob = t.maxTokens !== null ? ` · per-job maxTokens ${fmt(t.maxTokens)}` : " · per-job budget off";
+  const perJob = t.maxTokens !== null ? ` · ${translate("per-job maxTokens")} ${fmt(t.maxTokens)}` : ` · ${translate("per-job budget off")}`;
   if (nb.unreachable !== null) {
-    const capText = t.cap !== null ? `cap ${fmt(t.cap)} tok (overlay)` : "daily cap off";
-    rows.push(`<div class="row"><span class="wl">tokens today</span><span class="dim">${escapeHtml(capText + " · spent unavailable (queue unreachable)" + perJob)}</span></div>`);
+    const capText = t.cap !== null ? `${translate("cap")} ${fmt(t.cap)} ${translate("tok")} (${translate("overlay")})` : translate("daily cap off");
+    rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span class="dim">${escapeHtml(capText + ` · ${translate("spent unavailable (queue unreachable)")}` + perJob)}</span></div>`);
   } else if (t.cap === null) {
-    rows.push(`<div class="row"><span class="wl">tokens today</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} tok · daily cap off${perJob}`)}</span></div>`);
+    rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} ${translate("tok")} · ${translate("daily cap off")}${perJob}`)}</span></div>`);
   } else {
     rows.push(
-      `<div class="row"><span class="wl">tokens today</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} / cap ${fmt(t.cap)} tok`)}</span>${stateWord(t.state)}${budgetBarSvg(t.spent ?? 0, t.cap, t.state, nb.softHoldPct)}<span class="dim small">${escapeHtml(perJob)}</span></div>`,
+      `<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} / ${translate("cap")} ${fmt(t.cap)} ${translate("tok")}`)}</span>${stateWord(t.state, translate)}${budgetBarSvg(t.spent ?? 0, t.cap, t.state, nb.softHoldPct)}<span class="dim small">${escapeHtml(perJob)}</span></div>`,
     );
   }
 
   if (nb.softHoldPct !== null) {
-    rows.push(`<div class="dim small">soft-hold band: ${fmt(nb.softHoldPct)}% of each cap (the amber tick)</div>`);
+    rows.push(`<div class="dim small">${escapeHtml(translate("soft-hold band"))}: ${fmt(nb.softHoldPct)}% ${escapeHtml(translate("of each cap (the amber tick)"))}</div>`);
   }
   // The scoped rows (issue #242): configured limits with their used counts, states as the assembler's
   // words. Concurrency renders as config only -- in-flight is worker state no payload carries.
   if (nb.scopedInvalid !== null) {
-    rows.push(`<div class="dim small">scoped limits: file invalid (${escapeHtml(nb.scopedInvalid)})</div>`);
+    rows.push(`<div class="dim small">${escapeHtml(translate("scoped limits: file invalid"))} (${escapeHtml(nb.scopedInvalid)})</div>`);
   } else if (nb.scoped.length > 0) {
-    rows.push('<div class="dim small">scoped limits (scoped-limits.json)</div>');
+    rows.push(`<div class="dim small">${escapeHtml(translate("scoped limits"))} (scoped-limits.json)</div>`);
     for (const s of nb.scoped) {
       const bits = [];
       let worst = "ok";
       for (const key of ["day", "week", "month"]) {
         const w = s[key];
         if (w === null || w.cap === null) continue;
-        bits.push(`${key} used ${w.used !== null ? fmt(w.used) : "?"} / cap ${fmt(w.cap)}`);
+        bits.push(`${translate(key)} ${translate("used")} ${w.used !== null ? fmt(w.used) : "?"} / ${translate("cap")} ${fmt(w.cap)}`);
         if (w.state !== "ok") worst = w.state;
       }
-      if (s.concurrent !== null) bits.push(`concurrent ≤${fmt(s.concurrent)} (config; in-flight not shown)`);
+      if (s.concurrent !== null) bits.push(`${translate("concurrent")} ≤${fmt(s.concurrent)} (${translate("config; in-flight not shown")})`);
       // The dollar windows (issue #507), exact micro-dollars like the panel's: the counter is spent and held, what the
       // worker admits the next job against. No state word: a dollar window is full before its counter reaches the cap
       // (a reservation adds the whole per-job cap), and this page does not hold the per-job cap to judge it.
       for (const key of ["day", "week", "month"]) {
         const w = s.usd[key];
         if (w === null) continue;
-        bits.push(`${key} spent+held ${w.usedMicros !== null ? microsUsd(w.usedMicros) : "?"} / cap ${microsUsd(w.capMicros)}`);
+        bits.push(`${translate(key)} ${translate("spent+held")} ${w.usedMicros !== null ? microsUsd(w.usedMicros) : "?"} / ${translate("cap")} ${microsUsd(w.capMicros)}`);
       }
       bits.push(...s.size);
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span>${worst !== "ok" ? stateWord(worst) : ""}</div>`);
+      rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span>${worst !== "ok" ? stateWord(worst, translate) : ""}</div>`);
     }
-    rows.push('<div class="lever">scoped: dispatch_limit_add/edit/delete · or press m in the /dispatch panel</div>');
+    rows.push(`<div class="lever">${escapeHtml(translate("scoped: dispatch_limit_add/edit/delete · or press m in the /dispatch panel"))}</div>`);
   }
   // The lever, named: what the whole panel exists to point at.
-  rows.push('<div class="lever">adjust: /dispatch set dailyCap|weeklyCap|monthlyCap|dailyTokenCap|softHoldPct &lt;n&gt; · or press s in the /dispatch panel</div>');
+  rows.push(`<div class="lever">${escapeHtml(translate("adjust: /dispatch set dailyCap|weeklyCap|monthlyCap|dailyTokenCap|softHoldPct <n> · or press s in the /dispatch panel"))}</div>`);
   return `<div id="budget">${rows.join("")}</div>`;
 }
 
@@ -1146,16 +1147,16 @@ export function layoutSplitBars(rows, totalMicros) {
   }));
 }
 
-function splitBarsSvg(na, tips, names) {
+function splitBarsSvg(na, tips, names, translate) {
   const laid = layoutSplitBars(na.rows, na.totalMicros);
   const height = laid.length * SPLIT_ROW_H + 4;
   const parts = [`<svg width="${fmt(SPLIT_W)}" height="${fmt(height)}" role="img" aria-label="allocation and spend by project">`];
   laid.forEach((g, i) => {
     const r = na.rows[i];
     // A split-only entry (issue #507) has no floor or spend this host can read: its allocation and the mark alone.
-    const text = r.splitOnly ? `${microsUsd(r.allocation)} allocated · not in this host's file` : `${microsUsd(r.spent)} spent of ${microsUsd(r.allocation)} · floor ${microsUsd(r.floor)}`;
+    const text = r.splitOnly ? `${microsUsd(r.allocation)} ${translate("allocated · not in this host's file")}` : `${microsUsd(r.spent)} ${translate("spent of")} ${microsUsd(r.allocation)} · ${translate("floor")} ${microsUsd(r.floor)}`;
     const name = names.get(r.id);
-    const idx = tips.push(r.splitOnly ? `${r.id} · allocated ${microsUsd(r.allocation)} · not in this host's file` : `${r.id}${name !== undefined ? ` (${name})` : ""} · allocated ${microsUsd(r.allocation)} · spent ${microsUsd(r.spent)} · floor ${microsUsd(r.floor)}${g.over ? " · over its allocation" : ""}`) - 1;
+    const idx = tips.push(r.splitOnly ? `${r.id} · ${translate("allocated")} ${microsUsd(r.allocation)} · ${translate("not in this host's file")}` : `${r.id}${name !== undefined ? ` (${name})` : ""} · ${translate("allocated")} ${microsUsd(r.allocation)} · ${translate("spent")} ${microsUsd(r.spent)} · ${translate("floor")} ${microsUsd(r.floor)}${g.over ? ` · ${translate("over its allocation")}` : ""}`) - 1;
     const base = g.y + 14;
     const bx = SPLIT_LABEL_W;
     parts.push(`<g data-tip="${fmt(idx)}">`);
@@ -1166,7 +1167,7 @@ function splitBarsSvg(na, tips, names) {
     if (g.allocW > 0) parts.push(`<rect x="${fmt(bx)}" y="${fmt(g.y + 4)}" width="${fmt(g.allocW)}" height="13" rx="2" fill="${PAGE_THEME.accent}" fill-opacity=".18" stroke="${PAGE_THEME.accent}"/>`);
     if (g.spentW > 0) parts.push(`<rect x="${fmt(bx)}" y="${fmt(g.y + 7)}" width="${fmt(g.spentW)}" height="7" rx="1" fill="${g.over ? PAGE_THEME.danger : PAGE_THEME.accent}"/>`);
     if (g.floorX !== null) parts.push(`<rect x="${fmt(bx + g.floorX)}" y="${fmt(g.y + 1)}" width="2" height="19" fill="${PAGE_THEME.amber}"/>`);
-    parts.push(`<text x="${fmt(bx + SPLIT_TRACK_W + 10)}" y="${fmt(base)}" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(text)}${g.over ? ` <tspan fill="${PAGE_THEME.danger}" font-weight="600">over</tspan>` : ""}</text>`);
+    parts.push(`<text x="${fmt(bx + SPLIT_TRACK_W + 10)}" y="${fmt(base)}" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(text)}${g.over ? ` <tspan fill="${PAGE_THEME.danger}" font-weight="600">${escapeHtml(translate("over"))}</tspan>` : ""}</text>`);
     parts.push("</g>");
   });
   parts.push("</svg>");
@@ -1174,8 +1175,8 @@ function splitBarsSvg(na, tips, names) {
 }
 
 /** The count line: every reason with its number, or the stated absence when the scan was not read. */
-function splitCountsLine(label, counts, empty) {
-  if (counts === null) return `${label}: not counted (the spend scan could not be read)`;
+function splitCountsLine(label, counts, empty, translate = (message) => message) {
+  if (counts === null) return `${label}: ${translate("not counted (the spend scan could not be read)")}`;
   if (counts === undefined) return `${label}: ?`;
   if (counts.size === 0) return `${label}: ${empty}`;
   return `${label}: ${[...counts].map(([k, n]) => `${k} ${n === null ? "?" : fmt(n)}`).join(" · ")}`;
@@ -1187,53 +1188,53 @@ function splitCountsLine(label, counts, empty) {
  * worker's integers, outcomes and reasons its enum words, and the plans' own reason TEXT never reaches this page (it is
  * agent text, drawn only in the panel's `b` view). No host is named: the page is a file meant to be shared.
  */
-export function splitSectionHtml(na, tips, names, windowLabel) {
-  if (na.kind === "unset") return '<div id="split" class="dim">no envelope (PI_ENVELOPE_FILE is unset), so there is no split and delegation is off</div>';
-  if (na.kind === "problem") return `<div id="split"><div class="row"><span class="state over">envelope problem</span><span>${escapeHtml(na.problem)}</span></div></div>`;
-  if (na.kind === "unreachable") return '<div id="split" class="dim">the split could not be read from the queue, so no number is shown (see the banner)</div>';
+export function splitSectionHtml(na, tips, names, windowLabel, translate = (message) => message) {
+  if (na.kind === "unset") return `<div id="split" class="dim">${escapeHtml(translate("no envelope (PI_ENVELOPE_FILE is unset), so there is no split and delegation is off"))}</div>`;
+  if (na.kind === "problem") return `<div id="split"><div class="row"><span class="state over">${escapeHtml(translate("envelope problem"))}</span><span>${escapeHtml(na.problem)}</span></div></div>`;
+  if (na.kind === "unreachable") return `<div id="split" class="dim">${escapeHtml(translate("the split could not be read from the queue, so no number is shown (see the banner)"))}</div>`;
   const rows = [];
-  const per = na.window !== null ? ` per ${na.window}` : "";
-  rows.push(`<div class="row"><span class="wl">envelope</span><span>${escapeHtml(`${microsUsd(na.totalMicros)}${per} · delegation ${na.delegation ? "on" : "off"}`)}</span></div>`);
+  const per = na.window !== null ? ` ${translate("per")} ${translate(na.window)}` : "";
+  rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("envelope"))}</span><span>${escapeHtml(`${microsUsd(na.totalMicros)}${per} · ${translate("delegation")} ${translate(na.delegation ? "on" : "off")}`)}</span></div>`);
   const st = na.state;
   // The panel's outside-edit notice: its facts come from the assembler (render.mjs `outsideEdit`), and these words are
   // render.mjs `outsideEditText`'s, held equal by a test, since this module may load neither.
   if (na.outsideEdit !== null) {
     const e = na.outsideEdit;
-    rows.push(`<div class="row"><span class="state">${escapeHtml(`a host reported envelope ${e.digest} at ${e.at}, not the one the split was made for (${e.split}); a host still on it refuses governed jobs as envelope-mismatch`)}</span></div>`);
+    rows.push(`<div class="row"><span class="state">${escapeHtml(`${translate("a host reported envelope")} ${e.digest} ${translate("at")} ${e.at}, ${translate("not the one the split was made for")} (${e.split}); ${translate("a host still on it refuses governed jobs as envelope-mismatch")}`)}</span></div>`);
   }
-  if (na.stateProblem === "newer") rows.push('<div class="row"><span class="state">the applied split was written by a newer pi-dispatch: upgrade this console</span></div>');
-  else if (na.stateProblem === "unreadable") rows.push('<div class="row"><span class="state">the applied split does not decode; the next pickup replaces it with the neutral split</span></div>');
+  if (na.stateProblem === "newer") rows.push(`<div class="row"><span class="state">${escapeHtml(translate("the applied split was written by a newer pi-dispatch: upgrade this console"))}</span></div>`);
+  else if (na.stateProblem === "unreadable") rows.push(`<div class="row"><span class="state">${escapeHtml(translate("the applied split does not decode; the next pickup replaces it with the neutral split"))}</span></div>`);
   if (st) {
-    const plan = st.planId !== null ? `plan ${st.planId}` : "neutral split, no plan";
+    const plan = st.planId !== null ? `${translate("plan")} ${st.planId}` : translate("neutral split, no plan");
     // Each piece escaped on its own, the two instants as `<time>` (splitAtHtml).
-    const bits = [escapeHtml(plan), escapeHtml(`written by ${st.writer}`), `applied ${splitAtHtml(st.appliedAt)}`];
-    if (st.validUntil !== null) bits.push(`until ${splitAtHtml(st.validUntil)}`);
-    if (st.clamped) bits.push("clamped by the step");
-    rows.push(`<div class="row"><span class="wl">plan</span><span>${bits.join(" · ")}</span></div>`);
+    const bits = [escapeHtml(plan), escapeHtml(`${translate("written by")} ${st.writer}`), `${translate("applied")} ${splitAtHtml(st.appliedAt)}`];
+    if (st.validUntil !== null) bits.push(`${translate("until")} ${splitAtHtml(st.validUntil)}`);
+    if (st.clamped) bits.push(translate("clamped by the step"));
+    rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("plan"))}</span><span>${bits.join(" · ")}</span></div>`);
     // This console host's envelope, compared with the applied split's: the panel's and `/dispatch priorities`' sentence.
     // Another host with the matching envelope runs its jobs, so the page claims this host only.
     // With another total in this host's file, the line says so: render.mjs `fileTotalText`'s words, held equal by a test.
     // Fixed words and `microsUsd` digits only, so nothing here needs escaping.
-    if (na.mismatch) rows.push(`<div class="row"><span class="state">the split was made for another envelope, not this host's: governed jobs on this host refuse as envelope-mismatch${na.fileTotal !== null ? `. This host's file says total ${microsUsd(na.fileTotal)}; the totals shown are the split's.` : ""}</span></div>`);
+    if (na.mismatch) rows.push(`<div class="row"><span class="state">${escapeHtml(translate("the split was made for another envelope, not this host's: governed jobs on this host refuse as envelope-mismatch"))}.${na.fileTotal !== null ? ` ${escapeHtml(translate("This host's file says total"))} ${microsUsd(na.fileTotal)}; ${escapeHtml(translate("the totals shown are the split's."))}` : ""}</span></div>`);
   } else if (na.stateProblem === null) {
-    rows.push('<div class="row dim">no split applied yet: the first host to look writes the neutral one</div>');
+    rows.push(`<div class="row dim">${escapeHtml(translate("no split applied yet: the first host to look writes the neutral one"))}</div>`);
   }
   if (na.rows.length > 0) {
-    rows.push(splitBarsSvg(na, tips, names));
+    rows.push(splitBarsSvg(na, tips, names, translate));
     rows.push(projectNamesHtml(na.rows.map((r) => ({ key: r.id })), names));
   }
-  if (st) rows.push(`<div class="row"><span class="wl">headroom</span><span>${escapeHtml(`unallocated ${microsUsd(st.unallocated)} · deployment spent ${microsUsd(na.deploymentSpent)} of ${microsUsd(na.totalMicros)}`)}</span></div>`);
-  rows.push(`<div class="dim small">amounts are this ${escapeHtml(na.window ?? "envelope")} window's; the bar is the allocation, the solid bar the spend (held included), the amber tick the floor</div>`);
+  if (st) rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("headroom"))}</span><span>${escapeHtml(`${translate("unallocated")} ${microsUsd(st.unallocated)} · ${translate("deployment spent")} ${microsUsd(na.deploymentSpent)} ${translate("of")} ${microsUsd(na.totalMicros)}`)}</span></div>`);
+  rows.push(`<div class="dim small">${escapeHtml(translate("amounts are this"))} ${escapeHtml(translate(na.window ?? "envelope"))} ${escapeHtml(translate("window's; the bar is the allocation, the solid bar the spend (held included), the amber tick the floor"))}</div>`);
   // From THIS host's run records, over the spend window; the history below is the fleet's (`alloc:log` is shared).
-  rows.push(`<div class="small">${escapeHtml(splitCountsLine(`refusals in runs on this host, ${windowLabel}`, na.refusals, "none"))}</div>`);
-  rows.push(`<div class="small">${escapeHtml(splitCountsLine(`plans collected in runs on this host, ${windowLabel}`, na.plans, "none"))}</div>`);
+  rows.push(`<div class="small">${escapeHtml(splitCountsLine(`${translate("refusals in runs on this host")}, ${windowLabel}`, na.refusals, translate("none"), translate))}</div>`);
+  rows.push(`<div class="small">${escapeHtml(splitCountsLine(`${translate("plans collected in runs on this host")}, ${windowLabel}`, na.plans, translate("none"), translate))}</div>`);
   if (na.log.length > 0) {
     const tr = na.log.map((h) => `<tr><td>${splitAtHtml(h.at)}</td><td>${escapeHtml(h.writer)}</td><td>${escapeHtml(h.outcome)}</td><td>${escapeHtml(h.reason ?? "")}</td><td class="pid">${escapeHtml(h.planId ?? "")}</td></tr>`);
-    rows.push(`<h3>history, newest first (alloc:log, every host)</h3><table class="alog"><tr><th>at</th><th>writer</th><th>outcome</th><th>reason</th><th>plan</th></tr>${tr.join("")}</table>`);
+    rows.push(`<h3>${escapeHtml(translate("history, newest first (alloc:log, every host)"))}</h3><table class="alog"><tr><th>${escapeHtml(translate("at"))}</th><th>${escapeHtml(translate("writer"))}</th><th>${escapeHtml(translate("outcome"))}</th><th>${escapeHtml(translate("reason"))}</th><th>${escapeHtml(translate("plan"))}</th></tr>${tr.join("")}</table>`);
   } else {
-    rows.push('<div class="dim small">no outcomes yet</div>');
+    rows.push(`<div class="dim small">${escapeHtml(translate("no outcomes yet"))}</div>`);
   }
-  rows.push('<div class="lever">change it: /dispatch priorities set &lt;project&gt;=&lt;weight&gt; · or press b in the /dispatch panel, where each plan\'s reasons are shown</div>');
+  rows.push(`<div class="lever">${escapeHtml(translate("change it: /dispatch priorities set <project>=<weight> · or press b in the /dispatch panel, where each plan's reasons are shown"))}</div>`);
   return `<div id="split">${rows.join("")}</div>`;
 }
 
@@ -1281,7 +1282,7 @@ function barListSvg(rows, aria, tips) {
   return parts.join("");
 }
 
-function listSection(title, rows, aria, tips, extra = "") {
+function listSection(title, rows, aria, tips, extra = "", translate = (message) => message) {
   const head = rows.slice(0, LIST_TOP);
   const rest = rows.slice(LIST_TOP);
   let tail = "";
@@ -1293,22 +1294,22 @@ function listSection(title, rows, aria, tips, extra = "") {
       class: "estimated",
       floor: rest.some((r) => r.cost.floor === true),
     };
-    tail = `<div class="dim small">(+${fmt(rest.length)} more · ${escapeHtml(fmtCost(agg))})</div>`;
+    tail = `<div class="dim small">(+${fmt(rest.length)} ${escapeHtml(translate("more"))} · ${escapeHtml(fmtCost(agg))})</div>`;
   }
-  const body = head.length === 0 ? '<div class="dim small">none in window</div>' : barListSvg(head, aria, tips);
+  const body = head.length === 0 ? `<div class="dim small">${escapeHtml(translate("none in window"))}</div>` : barListSvg(head, aria, tips);
   return `<div class="bl"><h3>${escapeHtml(title)}</h3>${body}${tail}${extra}</div>`;
 }
 
-export function breakdownHtml(nf, minted, tips, names = new Map()) {
+export function breakdownHtml(nf, minted, tips, names = new Map(), translate = (message) => message) {
   const secs = [];
-  secs.push(listSection("by flow", nf.byFlow.map((r) => ({ label: r.flow, cost: r.cost, runs: r.runs, apiEquiv: r.apiEquiv })), "spend by flow", tips));
+  secs.push(listSection(translate("by flow"), nf.byFlow.map((r) => ({ label: r.flow, cost: r.cost, runs: r.runs, apiEquiv: r.apiEquiv })), translate("spend by flow"), tips, "", translate));
   if (nf.byTrigger === null) {
     // Absence, not an empty table: an empty list would read as "nothing spent", which is a claim
     // the caller explicitly did not compute.
-    secs.push('<div class="bl"><h3>by trigger</h3><div class="dim small">not computed (no trigger join wired)</div></div>');
+    secs.push(`<div class="bl"><h3>${escapeHtml(translate("by trigger"))}</h3><div class="dim small">${escapeHtml(translate("not computed (no trigger join wired)"))}</div></div>`);
   } else {
     secs.push(listSection(
-      "by trigger",
+      translate("by trigger"),
       nf.byTrigger.map((r) => ({
         label: r.label,
         cost: r.cost,
@@ -1317,29 +1318,31 @@ export function breakdownHtml(nf, minted, tips, names = new Map()) {
         failedCost: r.failedCost,
         nodeId: minted.get(r.key) ?? null,
       })),
-      "spend by trigger",
+      translate("spend by trigger"),
       tips,
+      "",
+      translate,
     ));
   }
-  secs.push(listSection("by model", nf.byModel.map((r) => ({ label: `${r.provider}/${r.model}`, cost: r.cost, runs: r.runs })), "spend by model", tips));
-  secs.push(listSection("by repo", nf.byRepo.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), "spend by repo", tips));
+  secs.push(listSection(translate("by model"), nf.byModel.map((r) => ({ label: `${r.provider}/${r.model}`, cost: r.cost, runs: r.runs })), translate("spend by model"), tips, "", translate));
+  secs.push(listSection(translate("by repo"), nf.byRepo.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), translate("spend by repo"), tips, "", translate));
   // Issue #499 part C: the bars carry the id (what a run record holds); the names, when any, sit under the list.
   if (nf.byProject !== null) {
-    secs.push(listSection("by project", nf.byProject.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), "spend by project", tips, projectNamesHtml(nf.byProject.slice(0, LIST_TOP), names)));
+    secs.push(listSection(translate("by project"), nf.byProject.map((r) => ({ label: r.label, cost: r.cost, runs: r.runs })), translate("spend by project"), tips, projectNamesHtml(nf.byProject.slice(0, LIST_TOP), names), translate));
   }
   return `<div id="grid">${secs.join("")}</div>`;
 }
 
-export function kpisHtml(nf) {
+export function kpisHtml(nf, translate = (message) => message) {
   const p = nf.provenance;
   const ledgered = Math.max(0, p.runsTotal - p.runsUnmetered - p.runsUnledgered);
   const top = nf.byFlow.length > 0 ? nf.byFlow[0] : null;
   const tiles = [
-    [fmtCost(p.total), "window spend"],
-    [fmt(p.runsTotal), "runs"],
-    [`${fmt(ledgered)} of ${fmt(p.runsTotal)}`, "runs fully ledgered"],
-    [fmt(nf.plans.length), "plans declared"],
-    [top !== null ? fmtCost(top.cost) : "—", top !== null ? `top flow · ${top.flow}` : "top flow"],
+    [fmtCost(p.total), translate("window spend")],
+    [fmt(p.runsTotal), translate("runs")],
+    [`${fmt(ledgered)} ${translate("of")} ${fmt(p.runsTotal)}`, translate("runs fully ledgered")],
+    [fmt(nf.plans.length), translate("plans declared")],
+    [top !== null ? fmtCost(top.cost) : "—", top !== null ? `${translate("top flow")} · ${top.flow}` : translate("top flow")],
   ];
   return `<div id="kpis">${tiles.map(([v, l]) => `<div class="kpi"><div class="v">${escapeHtml(v)}</div><div class="l">${escapeHtml(l)}</div></div>`).join("")}</div>`;
 }
@@ -1347,28 +1350,28 @@ export function kpisHtml(nf) {
 // FACTS ONLY, like the fold's peakWindow: a null limit renders as undisclosed and nothing here
 // derives a remaining amount or a burn-down -- room "left" against a number the vendor never
 // published would be an invented fact wearing the vendor's name.
-function limitLine(w) {
-  if (w.limit === null) return "limit undisclosed by vendor";
-  if (Array.isArray(w.limit)) return `limit ${fmt(w.limit[0])}–${fmt(w.limit[1])} ${w.unit}`;
-  return `limit ${fmt(w.limit)} ${w.unit}`;
+function limitLine(w, translate) {
+  if (w.limit === null) return translate("limit undisclosed by vendor");
+  if (Array.isArray(w.limit)) return `${translate("limit")} ${fmt(w.limit[0])}–${fmt(w.limit[1])} ${w.unit}`;
+  return `${translate("limit")} ${fmt(w.limit)} ${w.unit}`;
 }
 
-export function planCardsHtml(plans) {
+export function planCardsHtml(plans, translate = (message) => message) {
   const cards = plans.map((pl) => {
     const parts = [`<div class="plan${pl.hypothetical ? " hypo" : ""}">`];
-    parts.push(`<div><span class="pid">${escapeHtml(pl.id)}</span> <span class="pv">${escapeHtml(pl.vendor)}</span> · ${escapeHtml(`${fmtUsd(pl.price.amount)}/${pl.price.per}`)}${pl.hypothetical ? " (hypothetical)" : ""}</div>`);
+    parts.push(`<div><span class="pid">${escapeHtml(pl.id)}</span> <span class="pv">${escapeHtml(pl.vendor)}</span> · ${escapeHtml(`${fmtUsd(pl.price.amount)}/${pl.price.per}`)}${pl.hypothetical ? ` (${escapeHtml(translate("hypothetical"))})` : ""}</div>`);
     if (pl.verdict.kind === "NO_BASELINE") {
-      parts.push('<div class="dim small">no API-rate baseline declared, set counterfactualModel to compare</div>');
+      parts.push(`<div class="dim small">${escapeHtml(translate("no API-rate baseline declared, set counterfactualModel to compare"))}</div>`);
     } else {
       // The WORD carries the verdict; color only reinforces it -- a monochrome print of this page
       // must still say SAVING or LOSING in so many letters.
       const saving = pl.verdict.kind === "SAVING" || pl.verdict.kind === "WOULD_SAVE";
       parts.push(`<div><span class="badge ${saving ? "good" : "bad"}">${escapeHtml(pl.verdict.kind.replace("_", " "))}</span> ${escapeHtml(fmtCost(pl.verdict.usd))}</div>`);
     }
-    parts.push(`<div class="small dim">attributed ${fmt(pl.attributedRuns)} runs · ${fmt(pl.attributedTokens)} tok</div>`);
-    parts.push(`<div class="small dim">amortized ${escapeHtml(fmtCost(pl.amortizedPerRun))}/run · api-equiv ${escapeHtml(fmtCost(pl.apiEquiv))}</div>`);
+    parts.push(`<div class="small dim">${escapeHtml(translate("attributed"))} ${fmt(pl.attributedRuns)} ${escapeHtml(translate("runs"))} · ${fmt(pl.attributedTokens)} ${escapeHtml(translate("tok"))}</div>`);
+    parts.push(`<div class="small dim">${escapeHtml(translate("amortized"))} ${escapeHtml(fmtCost(pl.amortizedPerRun))}/${escapeHtml(translate("run"))} · ${escapeHtml(translate("api-equiv"))} ${escapeHtml(fmtCost(pl.apiEquiv))}</div>`);
     for (const w of pl.windows) {
-      parts.push(`<div class="small dim">${escapeHtml(`peak ${w.per}${w.rolling ? " rolling" : ""}: ${fmt(w.peakRuns)} runs · ${fmt(w.peakTokens)} tok · ${limitLine(w)}`)}</div>`);
+      parts.push(`<div class="small dim">${escapeHtml(`${translate("peak")} ${w.per}${w.rolling ? ` ${translate("rolling")}` : ""}: ${fmt(w.peakRuns)} ${translate("runs")} · ${fmt(w.peakTokens)} ${translate("tok")} · ${limitLine(w, translate)}`)}</div>`);
     }
     parts.push("</div>");
     return parts.join("");
@@ -1379,17 +1382,17 @@ export function planCardsHtml(plans) {
 // The dollars legend beside the reused graph legend. "seeded" is deliberately absent: only the
 // what-if command emits it and this page never renders a what-if, so listing it would promise an
 // encoding no bar here can carry (it stays in INSIGHTS_COST_CLASSES because the class exists).
-export function dollarsLegendHtml() {
+export function dollarsLegendHtml(translate = (message) => message) {
   const sw = (inner) => `<svg width="20" height="12" aria-hidden="true">${inner}</svg>`;
   const rows = [];
   const row = (sample, text) => rows.push(`<div class="row">${sample}<span>${escapeHtml(text)}</span></div>`);
-  rows.push("<h2>dollars</h2>");
-  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}"/>`), "metered: pi-ai computed price");
-  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}" fill-opacity=".45" stroke="${PAGE_THEME.accent}" stroke-dasharray="4,3"/>`), "estimated (~): partly measured");
-  row(sw(`<rect x="1" y="2" width="18" height="8" rx="4" fill="none" stroke="${PAGE_THEME.chipStroke}"/>`), "plan: covered by a subscription, never a dollar");
-  row(sw(`<rect x="9" y="2" width="1" height="8" fill="${PAGE_THEME.dim}"/>`), "zero-rated: a rate table priced it $0");
-  row(sw(`<text x="6" y="10" font-size="10" fill="${PAGE_THEME.dim}">—</text>`), "unknown: not measured, not guessed");
-  rows.push('<div class="caps">≥ marks a floor: the window holds spend the meter could not fully price</div>');
+  rows.push(`<h2>${escapeHtml(translate("dollars"))}</h2>`);
+  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}"/>`), translate("metered: pi-ai computed price"));
+  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}" fill-opacity=".45" stroke="${PAGE_THEME.accent}" stroke-dasharray="4,3"/>`), translate("estimated (~): partly measured"));
+  row(sw(`<rect x="1" y="2" width="18" height="8" rx="4" fill="none" stroke="${PAGE_THEME.chipStroke}"/>`), translate("plan: covered by a subscription, never a dollar"));
+  row(sw(`<rect x="9" y="2" width="1" height="8" fill="${PAGE_THEME.dim}"/>`), translate("zero-rated: a rate table priced it $0"));
+  row(sw(`<text x="6" y="10" font-size="10" fill="${PAGE_THEME.dim}">—</text>`), translate("unknown: not measured, not guessed"));
+  rows.push(`<div class="caps">${escapeHtml(translate("≥ marks a floor: the window holds spend the meter could not fully price"))}</div>`);
   return `<div id="dollars">${rows.join("")}</div>`;
 }
 
@@ -1555,12 +1558,12 @@ export function sizeCoresText(cpuCenti) {
 
 export const SIZING_NO_CAP_WORDS = Object.freeze({ unread: "no host budget read as a number", "none-holds": "no live host's budget holds this size", off: "every live host's budget is off" });
 
-function sizingWhat(dim, unit) {
-  if (dim.suggested !== null) return `suggest ${unit(dim.suggested)} (${dim.reason}${dim.held === "cap" ? ", the most a live host offers" : ""})`;
-  if (dim.held === "largest") return `stays (${dim.reason}, ${dim.cap !== null && dim.current > dim.cap ? "already above the most a live host offers" : "already the largest size a live host offers"})`;
+function sizingWhat(dim, unit, t) {
+  if (dim.suggested !== null) return `${t("suggest")} ${unit(dim.suggested)} (${t(dim.reason)}${dim.held === "cap" ? `, ${t("the most a live host offers")}` : ""})`;
+  if (dim.held === "largest") return `${t("stays")} (${t(dim.reason)}, ${t(dim.cap !== null && dim.current > dim.cap ? "already above the most a live host offers" : "already the largest size a live host offers")})`;
   // the three ways no cap is known, worded apart (the panel's words, held equal by a test); an unknown one reads as unread
-  if (dim.held === "no-cap" && dim.wanted !== null) return `wants ${unit(dim.wanted)} (${dim.reason}, ${SIZING_NO_CAP_WORDS[dim.capMissing ?? "unread"]}: no call)`;
-  return dim.reason === "not-enough-runs" ? sizingNotEnoughText(dim, unit === sizeCpuText ? sizeCpusWords : unit) : dim.reason;
+  if (dim.held === "no-cap" && dim.wanted !== null) return `${t("wants")} ${unit(dim.wanted)} (${t(dim.reason)}, ${t(SIZING_NO_CAP_WORDS[dim.capMissing ?? "unread"])}: ${t("no call")})`;
+  return dim.reason === "not-enough-runs" ? sizingNotEnoughText(dim, unit === sizeCpuText ? sizeCpusWords : unit, t) : t(dim.reason);
 }
 
 /**
@@ -1569,34 +1572,35 @@ function sizingWhat(dim, unit) {
  */
 /** CPUs with their unit, singular for exactly one (the worker's `cpusText`, restated). */
 const sizeCpusWords = (centi) => `${sizeCpuText(centi)} CPU${centi === 100 ? "" : "s"}`;
-export function sizingNotEnoughText(dim, unit) {
-  return `not enough runs at ${unit(dim.current)} (${dim.samples}${dim.smaller > 0 ? `; ${dim.smaller} at smaller sizes` : ""})`;
+export function sizingNotEnoughText(dim, unit, t = (message) => message) {
+  return `${t("not enough runs at")} ${unit(dim.current)} (${dim.samples}${dim.smaller > 0 ? `; ${dim.smaller} ${t("at smaller sizes")}` : ""})`;
 }
 
 /** A withheld pair's refusal in words, naming each dimension every live host refuses (the worker's `refusalWords`, restated). */
-function sizingRefusalText(r, m, c) {
-  const where = (kind) => (kind === "share" ? "its hostShare of every live host's budget" : "every live host's budget");
+function sizingRefusalText(r, m, c, t) {
+  const where = (kind) => t(kind === "share" ? "its hostShare of every live host's budget" : "every live host's budget");
   const mem = m.suggested ?? m.current;
   const cpus = c.suggested ?? c.current;
   const parts = [];
-  if (r.memMiB) parts.push(`${m.suggested !== null ? "memory" : "its memory"} ${sizeMemText(mem)} is above ${where(r.memMiB)}`);
-  if (r.cpuCenti) parts.push(`${c.suggested !== null ? "" : "its "}${sizeCpuText(cpus)} CPU${cpus === 100 ? " is" : "s are"} above ${where(r.cpuCenti)}`);
-  return parts.length > 0 ? parts.join(" and ") : `memory ${sizeMemText(mem)} with ${sizeCpuText(cpus)} CPU${cpus === 100 ? "" : "s"} fits no live host's budget`;
+  if (r.memMiB) parts.push(`${t(m.suggested !== null ? "memory" : "its memory")} ${sizeMemText(mem)} ${t("is above")} ${where(r.memMiB)}`);
+  if (r.cpuCenti) parts.push(`${c.suggested !== null ? "" : `${t("its")} `}${sizeCpuText(cpus)} CPU${cpus === 100 ? ` ${t("is")}` : `s ${t("are")}`} ${t("above")} ${where(r.cpuCenti)}`);
+  return parts.length > 0 ? parts.join(` ${t("and")} `) : `${t("memory")} ${sizeMemText(mem)} ${t("with")} ${sizeCpuText(cpus)} CPU${cpus === 100 ? "" : "s"} ${t("fits no live host's budget")}`;
 }
 
 /** The facts a suggestion carries, as information with no call, rebuilt here from the numbers alone. */
-function sizingFacts(m, c) {
+function sizingFacts(m, c, t) {
   const facts = [];
-  if (m.fact === "pressure") facts.push(`${m.pressured} of ${m.samples} runs reached the memory limit while stalled for memory`);
-  if (c.fact === "ceiling" && c.throttledPct !== null) facts.push(`the median run was held back ${c.throttledPct}% of its time by its host's CPU ceiling, which a job's cpus do not change`);
+  if (m.fact === "pressure") facts.push(`${m.pressured} ${t("of")} ${m.samples} ${t("runs reached the memory limit while stalled for memory")}`);
+  if (c.fact === "ceiling" && c.throttledPct !== null) facts.push(`${t("the median run was held back")} ${c.throttledPct}% ${t("of its time by its host's CPU ceiling, which a job's cpus do not change")}`);
   return facts;
 }
 
-export function sizingSectionHtml(ns, tips, nowMs) {
-  if (ns.unreachable) return `<div class="dim">job sizes not read: ${escapeHtml(ns.unreachable)}</div>`;
+export function sizingSectionHtml(ns, tips, nowMs, translate = (message) => message) {
+  const t = translate;
+  if (ns.unreachable) return `<div class="dim">${escapeHtml(t("job sizes not read:"))} ${escapeHtml(ns.unreachable)}</div>`;
   const parts = [];
-  if (ns.hosts.unreachable) parts.push(`<div class="dim small">host budgets not read: ${escapeHtml(ns.hosts.unreachable)}</div>`);
-  else if (ns.hosts.rows.length === 0) parts.push('<div class="dim small">no live host publishes a budget</div>');
+  if (ns.hosts.unreachable) parts.push(`<div class="dim small">${escapeHtml(t("host budgets not read:"))} ${escapeHtml(ns.hosts.unreachable)}</div>`);
+  else if (ns.hosts.rows.length === 0) parts.push(`<div class="dim small">${escapeHtml(t("no live host publishes a budget"))}</div>`);
   else {
     // Each dimension in the panel's HOSTS view states and words (dashboard.ts `budgetText`): what the jobs were promised
     // of a budget ("promised memory 6g of 16g"), "no memory budget" for one switched off, "memory budget not known yet"
@@ -1604,47 +1608,48 @@ export function sizingSectionHtml(ns, tips, nowMs) {
     // budget published" for a worker from before the field; one phrase when both dimensions agree.
     const dims = (h) => {
       const one = (label, budget, used, text) => {
-        if (budget === "absent") return { kind: "absent", text: `no ${label} budget published` };
-        if (budget === "off") return { kind: "off", text: `no ${label} budget` };
-        if (budget === "unknown") return { kind: "unknown", text: `${label} budget not known yet` };
-        if (budget === "unreadable") return { kind: "unreadable", text: `${label} budget unreadable` };
-        return { kind: "set", text: `${label} ${used === null || used === "off" ? "?" : text(used)} of ${text(budget)}` };
+        if (budget === "absent") return { kind: "absent", text: t(`no ${label} budget published`) };
+        if (budget === "off") return { kind: "off", text: t(`no ${label} budget`) };
+        if (budget === "unknown") return { kind: "unknown", text: t(`${label} budget not known yet`) };
+        if (budget === "unreadable") return { kind: "unreadable", text: t(`${label} budget unreadable`) };
+        return { kind: "set", text: `${t(label)} ${used === null || used === "off" ? "?" : text(used)} ${t("of")} ${text(budget)}` };
       };
       const both = [one("memory", h.budgetMemMiB, h.usedMemMiB, sizeMemText), one("CPU", h.budgetCpuCenti, h.usedCpuCenti, sizeCpuText)];
-      if (both.every((d) => d.kind === "absent")) return "no host budget published";
-      if (both.every((d) => d.kind === "unknown")) return "budget not known yet";
-      if (both.every((d) => d.kind === "unreadable")) return "budget unreadable";
+      if (both.every((d) => d.kind === "absent")) return t("no host budget published");
+      if (both.every((d) => d.kind === "unknown")) return t("budget not known yet");
+      if (both.every((d) => d.kind === "unreadable")) return t("budget unreadable");
       const set = both.filter((d) => d.kind === "set").map((d) => d.text);
-      return [...(set.length > 0 ? [`promised ${set.join(", ")}`] : []), ...both.filter((d) => d.kind !== "set").map((d) => d.text)].join(", ");
+      return [...(set.length > 0 ? [`${t("promised")} ${set.join(", ")}`] : []), ...both.filter((d) => d.kind !== "set").map((d) => d.text)].join(", ");
     };
     const rows = ns.hosts.rows.map((h) => `<div><span class="pid">${escapeHtml(h.name)}</span> ${escapeHtml(dims(h))}</div>`);
     parts.push(`<div class="small">${rows.join("")}</div>`);
   }
   if (ns.projects.length === 0) {
-    parts.push('<div class="dim">no project to size</div>');
+    parts.push(`<div class="dim">${escapeHtml(t("no project to size"))}</div>`);
     return parts.join("");
   }
-  parts.push(`<div class="dim small">peak memory of each run (the runs a suggestion reads: the last ${fmt(ns.windowDays)} days, at most 50) against its size; measured inside the jobs, so advisory; a suggestion applies only by its call, confirmed</div>`);
+  const sizingNote = `${t("peak memory of each run (the runs a suggestion reads: the last")} ${fmt(ns.windowDays)} ${t("days, at most 50) against its size; measured inside the jobs, so advisory; a suggestion applies only by its call, confirmed")}`;
+  parts.push(`<div class="dim small">${escapeHtml(sizingNote)}</div>`);
   const panels = ns.projects.map((pr) => {
     const m = pr.memory;
     const c = pr.cpu;
-    const head = `<h3><span class="pid">${escapeHtml(pr.id)}</span> <span class="dim">size ${escapeHtml(sizeMemText(m.current))}, ${escapeHtml(sizeCpuText(c.current))} CPU${c.current === 100 ? "" : "s"} · p95 ${escapeHtml(m.p95MiB === null ? "-" : sizeMemText(m.p95MiB))}, ${escapeHtml(c.p95CoresCenti === null ? "-" : sizeCoresText(c.p95CoresCenti))}</span></h3>`;
-    const verdict = `<div class="small">memory: ${escapeHtml(sizingWhat(m, sizeMemText))} · CPUs: ${escapeHtml(sizingWhat(c, sizeCpuText))}</div>`;
+    const head = `<h3><span class="pid">${escapeHtml(pr.id)}</span> <span class="dim">${escapeHtml(t("size"))} ${escapeHtml(sizeMemText(m.current))}, ${escapeHtml(sizeCpuText(c.current))} CPU${c.current === 100 ? "" : "s"} · p95 ${escapeHtml(m.p95MiB === null ? "-" : sizeMemText(m.p95MiB))}, ${escapeHtml(c.p95CoresCenti === null ? "-" : sizeCoresText(c.p95CoresCenti))}</span></h3>`;
+    const verdict = `<div class="small">${escapeHtml(t("memory:"))} ${escapeHtml(sizingWhat(m, sizeMemText, t))} · ${escapeHtml(t("CPUs:"))} ${escapeHtml(sizingWhat(c, sizeCpuText, t))}</div>`;
     const call = pr.call === null ? "" : `<div class="small"><code>${escapeHtml(pr.call)}</code></div>`;
-    const refused = pr.refusal === null ? "" : `<div class="small">no call: no live host admits it (${escapeHtml(sizingRefusalText(pr.refusal, m, c))})</div>`;
-    const facts = sizingFacts(m, c).map((f) => `<div class="dim small">${escapeHtml(f)}</div>`).join("");
+    const refused = pr.refusal === null ? "" : `<div class="small">${escapeHtml(t("no call: no live host admits it"))} (${escapeHtml(sizingRefusalText(pr.refusal, m, c, t))})</div>`;
+    const facts = sizingFacts(m, c, t).map((f) => `<div class="dim small">${escapeHtml(f)}</div>`).join("");
     const lay = layoutSizingChart(pr.series, { nowMs, windowDays: ns.windowDays, currentMiB: m.current });
-    const svg = [`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="peak memory against size · ${escapeHtml(pr.id)}">`];
+    const svg = [`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="${escapeHtml(t("peak memory against size"))} · ${escapeHtml(pr.id)}">`];
     svg.push(axisFrame(lay.plot, lay.yTicks));
     for (const st of lay.steps) {
       if (st.from !== undefined) svg.push(`<line x1="${fmt(st.x1)}" y1="${fmt(st.from)}" x2="${fmt(st.x2)}" y2="${fmt(st.y)}" stroke="${PAGE_THEME.dim}" stroke-width="1.5"/>`);
       else svg.push(`<line x1="${fmt(st.x1)}" y1="${fmt(st.y)}" x2="${fmt(st.x2)}" y2="${fmt(st.y)}" stroke="${PAGE_THEME.dim}" stroke-width="1.5"/>`);
     }
     for (const pt of lay.points) {
-      const idx = tips.push(`${new Date(pt.at).toISOString().slice(0, 16).replace("T", " ")} UTC · peak ${sizeMemText(pt.peakMiB)} of ${sizeMemText(pt.sizeMiB)}${pt.oom ? " · oom-killed" : ""}`) - 1;
+      const idx = tips.push(`${new Date(pt.at).toISOString().slice(0, 16).replace("T", " ")} UTC · ${t("peak")} ${sizeMemText(pt.peakMiB)} ${t("of")} ${sizeMemText(pt.sizeMiB)}${pt.oom ? ` · ${t("oom-killed")}` : ""}`) - 1;
       svg.push(`<circle data-tip="${fmt(idx)}" cx="${fmt(pt.x)}" cy="${fmt(pt.y)}" r="2.5" fill="${pt.oom ? PAGE_THEME.danger : PAGE_THEME.accent}"/>`);
     }
-    if (lay.points.length === 0) svg.push(`<text x="${fmt(lay.plot.x + lay.plot.w / 2)}" y="${fmt(lay.plot.y + lay.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">no measured runs in the window</text>`);
+    if (lay.points.length === 0) svg.push(`<text x="${fmt(lay.plot.x + lay.plot.w / 2)}" y="${fmt(lay.plot.y + lay.plot.h / 2)}" text-anchor="middle" font-size="11" fill="${PAGE_THEME.dim}">${escapeHtml(t("no measured runs in the window"))}</text>`);
     for (const xl of lay.xLabels) svg.push(`<text x="${fmt(xl.x)}" y="${fmt(lay.plot.y + lay.plot.h + 12)}" text-anchor="${xl.anchor}" font-size="8" fill="${PAGE_THEME.dim}">${escapeHtml(xl.label)}</text>`);
     svg.push("</svg>");
     return `<div class="bl">${head}${verdict}${call}${refused}${facts}${svg.join("")}</div>`;
@@ -1897,27 +1902,27 @@ function capWhenHtml(ms) {
 }
 
 /** Why a stretch of a host's chart has no data, by its kind and the host's state. */
-function capGapWhy(gap, host) {
-  if (gap.kind === "after") return "after the report was read";
+function capGapWhy(gap, host, translate) {
+  if (gap.kind === "after") return translate("after the report was read");
   if (host.state === "not-shared") return host.notShared;
-  if (host.state === "empty") return "no history here";
-  if (gap.kind === "before") return `before this host's history starts${host.truncated ? " (the run mirror holds nothing older: it started then, or its cap or a peer's shorter retention cut it)" : ""}`;
-  return "this bucket's numbers were not readable, so they are not drawn";
+  if (host.state === "empty") return translate("no history here");
+  if (gap.kind === "before") return `${translate("before this host's history starts")}${host.truncated ? ` (${translate("the run mirror holds nothing older: it started then, or its cap or a peer's shorter retention cut it")})` : ""}`;
+  return translate("this bucket's numbers were not readable, so they are not drawn");
 }
 
-function capacityChartSvg(host, nc, tips, nowMs) {
+function capacityChartSvg(host, nc, tips, nowMs, translate) {
   const lay = layoutCapacityChart(host, { ...nc.window, nowMs });
   const svg = [`<svg width="${fmt(lay.width)}" height="${fmt(lay.height)}" role="img" aria-label="jobs at once on ${escapeHtml(host.name)}">`];
   svg.push(axisFrame(lay.plot, lay.yTicks));
   for (const g of lay.gaps) {
-    const idx = tips.push(`${capWhen(g.fromMs)} to ${capWhen(g.toMs)} · no data: ${capGapWhy(g, host)}`) - 1;
+    const idx = tips.push(`${capWhen(g.fromMs)} ${translate("to")} ${capWhen(g.toMs)} · ${translate("no data")}: ${capGapWhy(g, host, translate)}`) - 1;
     svg.push(`<g class="nodata" data-tip="${fmt(idx)}"><rect x="${fmt(g.x)}" y="${fmt(lay.plot.y)}" width="${fmt(g.w)}" height="${fmt(lay.plot.h)}" fill="${PAGE_THEME.dim}" fill-opacity=".12"/><path d="${hatchPath(g.x, lay.plot.y, g.w, lay.plot.h)}" stroke="${PAGE_THEME.dim}" stroke-width=".6" fill="none"/></g>`);
   }
-  const of = host.slots !== null ? ` of ${host.slots}` : "";
+  const of = host.slots !== null ? ` ${translate("of")} ${host.slots}` : "";
   for (const bar of lay.bars) {
     const b = bar.bucket;
-    const full = b.fullMs === null ? "" : `, full ${capShareText(b.fullMs, b.coveredMs)}`;
-    const idx = tips.push(`${capWhen(b.fromMs)} · busy ${capShareText(b.busyMs, b.coveredMs)}, avg ${capMilliText(b.avgMilli ?? 0)}${of}, peak ${fmt(b.peak)}${full}${bar.partial ? " (part of it has no data)" : ""}`) - 1;
+    const full = b.fullMs === null ? "" : `, ${translate("full")} ${capShareText(b.fullMs, b.coveredMs)}`;
+    const idx = tips.push(`${capWhen(b.fromMs)} · ${translate("busy")} ${capShareText(b.busyMs, b.coveredMs)}, ${translate("avg")} ${capMilliText(b.avgMilli ?? 0)}${of}, ${translate("peak")} ${fmt(b.peak)}${full}${bar.partial ? ` (${translate("part of it has no data")})` : ""}`) - 1;
     // the whole bucket answers the tooltip, the bar only where it has height
     svg.push(`<g data-tip="${fmt(idx)}"><rect x="${fmt(bar.x)}" y="${fmt(lay.plot.y)}" width="${fmt(bar.w)}" height="${fmt(lay.plot.h)}" fill="${PAGE_THEME.canvas}" fill-opacity="0"/>`);
     if (bar.h > 0) svg.push(`<rect x="${fmt(bar.x)}" y="${fmt(bar.y)}" width="${fmt(Math.max(0.5, bar.w - 0.5))}" height="${fmt(bar.h)}" fill="${PAGE_THEME.accent}"/>`);
@@ -1936,47 +1941,47 @@ function capacityChartSvg(host, nc, tips, nowMs) {
   return svg.join("");
 }
 
-export function capacitySectionHtml(nc, tips, nowMs, windowLabel) {
-  if (nc.unreachable) return `<div class="dim">capacity not read: ${escapeHtml(nc.unreachable)}</div><div class="dim small">${escapeHtml(INSIGHTS_CAPACITY_JOBS_ONLY)}</div>`;
-  if (nc.noTime) return `<div class="dim">no time in this window yet: ${escapeHtml(windowLabel)} starts at ${capWhenHtml(nc.fromMs)}</div><div class="dim small">${escapeHtml(INSIGHTS_CAPACITY_JOBS_ONLY)}</div>`;
+export function capacitySectionHtml(nc, tips, nowMs, windowLabel, translate = (message) => message) {
+  if (nc.unreachable) return `<div class="dim">${escapeHtml(translate("capacity not read"))}: ${escapeHtml(nc.unreachable)}</div><div class="dim small">${escapeHtml(translate(INSIGHTS_CAPACITY_JOBS_ONLY))}</div>`;
+  if (nc.noTime) return `<div class="dim">${escapeHtml(translate("no time in this window yet"))}: ${escapeHtml(windowLabel)} ${escapeHtml(translate("starts at"))} ${capWhenHtml(nc.fromMs)}</div><div class="dim small">${escapeHtml(translate(INSIGHTS_CAPACITY_JOBS_ONLY))}</div>`;
   const hours = nc.window.bucketMs % 3_600_000 === 0 ? `${fmt(nc.window.bucketMs / 3_600_000)}h` : `${fmt(Math.round(nc.window.bucketMs / 60_000))}m`;
   const parts = [];
-  parts.push(`<div class="small">${escapeHtml(windowLabel)}, from ${capWhenHtml(nc.window.fromMs)} to ${capWhenHtml(nc.window.toMs)}. Each bar is one ${escapeHtml(hours)} bucket: how many jobs ran at once on average, with a tick at the most at once; the dashed line is the host's slot count. Hatched is no data, counted as neither busy nor idle; an idle stretch is empty.</div>`);
-  parts.push(`<div class="dim small">${escapeHtml(INSIGHTS_CAPACITY_JOBS_ONLY)}</div>`);
-  if (nc.truncated) parts.push(`<div class="small cap-warn">history truncated: the run mirror holds nothing older for at least one host, so its earlier time is drawn as no data, never as idle</div>`);
+  parts.push(`<div class="small">${escapeHtml(windowLabel)}, ${escapeHtml(translate("from"))} ${capWhenHtml(nc.window.fromMs)} ${escapeHtml(translate("to"))} ${capWhenHtml(nc.window.toMs)}. ${escapeHtml(translate("Each bar is one"))} ${escapeHtml(hours)} ${escapeHtml(translate("bucket: how many jobs ran at once on average, with a tick at the most at once; the dashed line is the host's slot count. Hatched is no data, counted as neither busy nor idle; an idle stretch is empty."))}</div>`);
+  parts.push(`<div class="dim small">${escapeHtml(translate(INSIGHTS_CAPACITY_JOBS_ONLY))}</div>`);
+  if (nc.truncated) parts.push(`<div class="small cap-warn">${escapeHtml(translate("history truncated: the run mirror holds nothing older for at least one host, so its earlier time is drawn as no data, never as idle"))}</div>`);
   if (nc.hosts.length === 0) parts.push(`<div class="dim">${escapeHtml(nc.noRun)}</div>`);
   for (const host of nc.hosts) {
     const block = [];
     if (host.state === "not-shared") {
-      block.push(`<h3><span class="pid">${escapeHtml(host.name)}</span> <span class="cap-warn">history not here</span></h3>`);
+      block.push(`<h3><span class="pid">${escapeHtml(host.name)}</span> <span class="cap-warn">${escapeHtml(translate("history not here"))}</span></h3>`);
       block.push(`<div class="small">${escapeHtml(host.notShared)}</div>`);
-      block.push(capacityChartSvg(host, nc, tips, nowMs));
+      block.push(capacityChartSvg(host, nc, tips, nowMs, translate));
     } else if (host.state === "empty") {
-      block.push(`<h3><span class="pid">${escapeHtml(host.name)}</span> <span class="dim">no history here</span></h3>`);
-      block.push(capacityChartSvg(host, nc, tips, nowMs));
+      block.push(`<h3><span class="pid">${escapeHtml(host.name)}</span> <span class="dim">${escapeHtml(translate("no history here"))}</span></h3>`);
+      block.push(capacityChartSvg(host, nc, tips, nowMs, translate));
     } else {
       const f = host.facts;
-      const of = f.slots !== null ? ` of ${f.slots}` : "";
-      const head = [`busy ${f.busy}, idle ${f.idle}${f.missing !== null ? ` (${f.missing} of the window has no history)` : ""}`, `avg ${f.avg}${of}, peak ${fmt(f.peak)}${of}`];
-      if (f.full !== null) head.push(`full ${f.full} of the time`);
+      const of = f.slots !== null ? ` ${translate("of")} ${f.slots}` : "";
+      const head = [`${translate("busy")} ${f.busy}, ${translate("idle")} ${f.idle}${f.missing !== null ? ` (${f.missing} ${translate("of the window has no history")})` : ""}`, `${translate("avg")} ${f.avg}${of}, ${translate("peak")} ${fmt(f.peak)}${of}`];
+      if (f.full !== null) head.push(`${translate("full")} ${f.full} ${translate("of the time")}`);
       block.push(`<h3><span class="pid">${escapeHtml(host.name)}</span> <span>${escapeHtml(head.join(" · "))}</span></h3>`);
-      const used = [f.memory !== null && f.cpu !== null ? `promised: ${f.memory}, ${f.cpu}` : null, f.cpuUsed !== null ? `CPU used: ${f.cpuUsed}` : null, `wait for a slot: ${f.wait ?? "no run recorded one"}`].filter((x) => x !== null);
+      const used = [f.memory !== null && f.cpu !== null ? `${translate("promised")}: ${f.memory}, ${f.cpu}` : null, f.cpuUsed !== null ? `${translate("CPU used")}: ${f.cpuUsed}` : null, `${translate("wait for a slot")}: ${f.wait ?? translate("no run recorded one")}`].filter((x) => x !== null);
       block.push(`<div class="small">${escapeHtml(used.join(" · "))}</div>`);
-      if (f.projects.length > 0) block.push(`<div class="small">projects by run time: ${escapeHtml(f.projects.join(", "))}</div>`);
-      if (host.truncated) block.push(`<div class="small cap-warn">history truncated: it starts at ${capWhenHtml(host.fromMs)}</div>`);
-      block.push(capacityChartSvg(host, nc, tips, nowMs));
+      if (f.projects.length > 0) block.push(`<div class="small">${escapeHtml(translate("projects by run time"))}: ${escapeHtml(f.projects.join(", "))}</div>`);
+      if (host.truncated) block.push(`<div class="small cap-warn">${escapeHtml(translate("history truncated: it starts at"))} ${capWhenHtml(host.fromMs)}</div>`);
+      block.push(capacityChartSvg(host, nc, tips, nowMs, translate));
       for (const c of host.caveats) block.push(`<div class="small cap-warn">${escapeHtml(c)}</div>`);
       if (host.notes !== null) block.push(`<div class="dim small">${escapeHtml(host.notes)}</div>`);
     }
     parts.push(`<div class="bl cap">${block.join("")}</div>`);
   }
   const nd = nc.notDrawn;
-  const kinds = [[nd.numbers, "with numbers"], [nd.empty, "with no history here"], [nd["not-shared"], "whose history is not here"]].filter(([n]) => n > 0).map(([n, what]) => `${fmt(n)} ${what}`);
+  const kinds = [[nd.numbers, translate("with numbers")], [nd.empty, translate("with no history here")], [nd["not-shared"], translate("whose history is not here")]].filter(([n]) => n > 0).map(([n, what]) => `${fmt(n)} ${what}`);
   const capped = nd.numbers + nd.empty + nd["not-shared"];
-  if (capped > 0) parts.push(`<div class="dim small">${fmt(capped)} more host${capped === 1 ? "" : "s"} not drawn past the first ${fmt(CAPACITY_HOSTS_MAX)}: ${escapeHtml(kinds.join(", "))}</div>`);
-  if (nd.unnamed > 0) parts.push(`<div class="dim small">${fmt(nd.unnamed)} host${nd.unnamed === 1 ? "" : "s"} not drawn: not a worker name</div>`);
-  if (nd.repeated > 0) parts.push(`<div class="dim small">${fmt(nd.repeated)} host name${nd.repeated === 1 ? "" : "s"} given more than once, not drawn</div>`);
-  if (nc.coverage.length > 0) parts.push(`<div class="dim small">Coverage:</div>${nc.coverage.map((c) => `<div class="dim small">${escapeHtml(c)}</div>`).join("")}`);
+  if (capped > 0) parts.push(`<div class="dim small">${fmt(capped)} ${escapeHtml(translate("more hosts not drawn past the first"))} ${fmt(CAPACITY_HOSTS_MAX)}: ${escapeHtml(kinds.join(", "))}</div>`);
+  if (nd.unnamed > 0) parts.push(`<div class="dim small">${fmt(nd.unnamed)} ${escapeHtml(translate("hosts not drawn: not a worker name"))}</div>`);
+  if (nd.repeated > 0) parts.push(`<div class="dim small">${fmt(nd.repeated)} ${escapeHtml(translate("host names given more than once, not drawn"))}</div>`);
+  if (nc.coverage.length > 0) parts.push(`<div class="dim small">${escapeHtml(translate("Coverage:"))}</div>${nc.coverage.map((c) => `<div class="dim small">${escapeHtml(c)}</div>`).join("")}`);
   return `<div id="capacity">${parts.join("")}</div>`;
 }
 
@@ -1987,30 +1992,30 @@ function utcDateStr(ms) {
   return new Date(ms).toISOString().slice(0, 10);
 }
 
-export function footerHtml(nf, windowLabel) {
+export function footerHtml(nf, windowLabel, translate = (message) => message) {
   const p = nf.provenance;
   const lines = [];
-  lines.push(`~ marks estimates · metered = pi-ai computed prices, not invoices · pi-ai ${p.piAiPin ?? "—"}`);
+  lines.push(`${translate("~ marks estimates · metered = pi-ai computed prices, not invoices · pi-ai")} ${p.piAiPin ?? "—"}`);
   // The always-on pair states how much of the window was measured at all; the bracketed counters
   // appear only when nonzero because "rates drifted 0" reads as an accusation retracted.
-  let counters = `unmetered ${fmt(p.runsUnmetered)} · no ledger (not re-priceable) ${fmt(p.runsUnledgered)}`;
-  if (p.ratesDrifted > 0) counters += ` · rates drifted ${fmt(p.ratesDrifted)}`;
-  if (p.runsLedgerTruncated > 0) counters += ` · ledgers truncated ${fmt(p.runsLedgerTruncated)}`;
+  let counters = `${translate("unmetered")} ${fmt(p.runsUnmetered)} · ${translate("no ledger (not re-priceable)")} ${fmt(p.runsUnledgered)}`;
+  if (p.ratesDrifted > 0) counters += ` · ${translate("rates drifted")} ${fmt(p.ratesDrifted)}`;
+  if (p.runsLedgerTruncated > 0) counters += ` · ${translate("ledgers truncated")} ${fmt(p.runsLedgerTruncated)}`;
   lines.push(counters);
-  lines.push(`spend window ${utcDateStr(nf.window.fromMs)} – ${utcDateStr(nf.window.toMs)} UTC (${windowLabel})`);
+  lines.push(`${translate("spend window")} ${utcDateStr(nf.window.fromMs)} – ${utcDateStr(nf.window.toMs)} UTC (${windowLabel})`);
   return `<div id="prov">${lines.map((l) => `<div>${escapeHtml(l)}</div>`).join("")}</div>`;
 }
 
-export function costBannersHtml(p, nf, nb, na) {
+export function costBannersHtml(p, nf, nb, na, translate = (message) => message) {
   const banners = [];
-  if (typeof p.costsUnreachable === "string" && p.costsUnreachable !== "") banners.push(`costs unreachable: ${clip(p.costsUnreachable, 160)}`);
-  if (nb !== null && nb !== undefined && nb.unreachable !== null) banners.push(`budget unreachable: ${nb.unreachable}`);
+  if (typeof p.costsUnreachable === "string" && p.costsUnreachable !== "") banners.push(`${translate("costs unreachable:")} ${clip(p.costsUnreachable, 160)}`);
+  if (nb !== null && nb !== undefined && nb.unreachable !== null) banners.push(`${translate("budget unreachable:")} ${nb.unreachable}`);
   // The split's unreachable shape is a banner too (issue #507), the budget's twin: the section then draws no number.
-  if (na !== null && na !== undefined && na.kind === "unreachable") banners.push(`budget split unreachable: ${na.unreachable}`);
-  if (nf !== null && nf.provenance.runsTotal === 0) banners.push("no runs in the spend window");
+  if (na !== null && na !== undefined && na.kind === "unreachable") banners.push(`${translate("budget split unreachable:")} ${na.unreachable}`);
+  if (nf !== null && nf.provenance.runsTotal === 0) banners.push(translate("no runs in the spend window"));
   // Only with the caller's explicit flag: an empty plans array alone also means "operator declared
   // nothing", and accusing a missing file on that evidence would be wrong half the time.
-  if (nf !== null && nf.plans.length === 0 && p.subscriptionsInvalid) banners.push("subscriptions file missing or invalid: plans not scored");
+  if (nf !== null && nf.plans.length === 0 && p.subscriptionsInvalid) banners.push(translate("subscriptions file missing or invalid: plans not scored"));
   if (banners.length === 0) return "";
   return `<div id="cost-banners">${banners.map((b) => `<div class="banner">${escapeHtml(b)}</div>`).join("")}</div>`;
 }
@@ -2055,12 +2060,12 @@ export function topologySpend(scene, spend) {
  * the scene's legend. Pan, zoom, the tooltip and label fitting are the console's script (`console/script.mjs`), which
  * reads the chips' data from the page's hidden `#graph-nodes` list.
  */
-export function topologySectionHtml(scene, spendHtml) {
+export function topologySectionHtml(scene, spendHtml, translate = (message) => message) {
   const windowDays = scene.norm.caps.windowDays ?? "?";
   const vb = scene.viewBox;
   const parts = [];
-  parts.push(`<section><h2>topology (fixed ${escapeHtml(String(windowDays))}d window)</h2>`);
-  parts.push('<div class="dim small">chip run counts use the topology window; spend badges use the spend window</div>');
+  parts.push(`<section><h2>${escapeHtml(translate("topology (fixed"))} ${escapeHtml(String(windowDays))}${escapeHtml(translate("d window)"))}</h2>`);
+  parts.push(`<div class="dim small">${escapeHtml(translate("chip run counts use the topology window; spend badges use the spend window"))}</div>`);
   parts.push([
     '<div id="wrap">',
     // The pane takes the scene's own aspect ratio, the viewBox's (clamped by the stylesheet's max-height): a fixed
@@ -2071,15 +2076,15 @@ export function topologySectionHtml(scene, spendHtml) {
     // padding every scene with 80 units). Wider scenes fill the pane as before; a small one sits centred.
     // That cap is the `width` attribute, which the stylesheet's `max-width:100%` holds to the pane, and never a `style`
     // attribute: the operator console serves this section under a CSP that refuses inline style (issue #641).
-    `<svg id="graph" class="canvas" width="${fmt(Math.max(1, vb.w) * GRAPH_MAX_SCALE)}" viewBox="${fmt(vb.x)} ${fmt(vb.y)} ${fmt(vb.w)} ${fmt(vb.h)}" role="img" aria-label="pi-dispatch trigger and flow topology" preserveAspectRatio="xMidYMid meet">`,
+    `<svg id="graph" class="canvas" width="${fmt(Math.max(1, vb.w) * GRAPH_MAX_SCALE)}" viewBox="${fmt(vb.x)} ${fmt(vb.y)} ${fmt(vb.w)} ${fmt(vb.h)}" role="img" aria-label="${escapeHtml(translate("pi-dispatch trigger and flow topology"))}" preserveAspectRatio="xMidYMid meet">`,
     `<g id="root">${scene.svgBody}</g>`,
     `<g id="spend">${spendHtml}</g>`,
     "</svg>",
     '<div id="tip"></div>',
     "</div>",
   ].join(""));
-  parts.push(dollarsLegendHtml());
-  parts.push(legendHtml(scene.norm, scene.hiddenLabels));
+  parts.push(dollarsLegendHtml(translate));
+  parts.push(legendHtml(scene.norm, scene.hiddenLabels, translate));
   parts.push("</section>");
   return parts.join("\n");
 }

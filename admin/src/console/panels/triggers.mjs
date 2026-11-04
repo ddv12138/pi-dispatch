@@ -14,6 +14,7 @@ import { fmtCost } from "../../panel.mjs";
 import { outcomeWord, recordReason, reasonWords } from "../../words.mjs";
 import { html as escapedHtml } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { timeHtml, ageText, shownPath, runLink } from "./common.mjs";
 const html = (strings, ...values) =>
   escapedHtml(
@@ -81,8 +82,8 @@ const shortList = (values) =>
 
 export function triggersDescription(v) {
   return v.role === "viewer"
-    ? "What starts a job, in plain words. Rules from the triggers file."
-    : `What starts a job, in plain words. Rules in ${v.data?.configLocations?.triggers ?? "the triggers file"}.`;
+    ? uiText("What starts a job, in plain words. Rules from the triggers file.", v.locale)
+    : `${uiText("What starts a job, in plain words. Rules in", v.locale)} ${v.data?.configLocations?.triggers ?? uiText("the triggers file", v.locale)}.`;
 }
 export function triggersNavigation(v) {
   const counts = modelOf(v)?.counts;
@@ -90,28 +91,25 @@ export function triggersNavigation(v) {
     <a
       href="/triggers"
       aria-current="${v.page === "trigger-check" ? "false" : "page"}"
-      >${ui.icon("runs", { size: "sm" })}Rules
+      >${ui.icon("runs", { size: "sm" })}${uiText("Rules", v.locale)}
       <span class="count">${counts?.all ?? "?"}</span></a
     ><a href="${ui.pageHref(v.pages, "watch") ?? "/watch"}"
-      >${ui.icon("eye", { size: "sm" })}Watch
+      >${ui.icon("eye", { size: "sm" })}${uiText("Watch", v.locale)}
       <span class="count">${counts?.watch ?? "?"}</span></a
     ><span class="tr-tab-unavailable" aria-disabled="true"
-      >${ui.icon("flows", { size: "sm" })}Dispatchers
-      <span class="count">proposed</span></span
+      >${ui.icon("flows", { size: "sm" })}${uiText("Dispatchers", v.locale)}
+      <span class="count">${uiText("proposed", v.locale)}</span></span
     >
   </nav>`;
 }
 export function triggersViewer(v) {
   return v.role === "viewer"
     ? html`<p class="collapsed tr-viewer">
-        ${ui.icon("eye", { size: "sm" })}<b>Viewer.</b> You can read every rule
-        and check a hypothetical event. Adding and changing rules is for
-        operators.
+        ${ui.icon("eye", { size: "sm" })}<b>${uiText("Viewer.", v.locale)}</b> ${uiText("You can read every rule and check a hypothetical event. Adding and changing rules is for operators.", v.locale)}
       </p>`
     : v.readOnly
       ? html`<p class="collapsed tr-viewer">
-          ${ui.icon("shield", { size: "sm" })}Changes are off. The event checker
-          only reads and remains available.
+          ${ui.icon("shield", { size: "sm" })}${uiText("Changes are off. The event checker only reads and remains available.", v.locale)}
         </p>`
       : html``;
 }
@@ -119,12 +117,11 @@ export function triggersCount(v) {
   const m = modelOf(v),
     c = m?.counts;
   return card(
-    "Set up",
+    uiText("Set up", v.locale),
     html`${ui.kpi(c?.all ?? "?", "rules")}
       <p class="tr-kp">
-        ${c?.schedule ?? "?"} on a schedule,
-        ${c?.all == null || c?.schedule == null ? "?" : c.all - c.schedule} from
-        forges; ${c?.spent ?? "?"} spent one-shots.
+        ${c?.schedule ?? "?"} ${uiText("on a schedule", v.locale)},
+        ${c?.all == null || c?.schedule == null ? "?" : c.all - c.schedule} ${uiText("from forges", v.locale)}; ${c?.spent ?? "?"} ${uiText("spent one-shots", v.locale)}.
       </p>
       ${(m?.problems ?? []).map(
         (p) =>
@@ -138,7 +135,7 @@ export function triggersNext(v) {
   const m = modelOf(v),
     n = m?.next;
   return card(
-    "Next to fire",
+    uiText("Next to fire", v.locale),
     n
       ? html`${ui.kpi(ageText(n.at - m.now), `until ${n.id}`)}
           <p class="tr-kp">
@@ -146,20 +143,19 @@ export function triggersNext(v) {
             <a href="${ruleHref(v, n.index)}">row ${n.index + 1}</a>
           </p>`
       : html`<p class="tr-empty">
-          No next fire is published. Check the schedule's owning worker and its
-          doctor result.
+          ${uiText("No next fire is published. Check the schedule's owning worker and its doctor result.", v.locale)}
         </p>`,
   );
 }
 export function triggersSpend(v) {
   const m = modelOf(v);
   return card(
-    "Recorded this UTC week",
+    uiText("Recorded this UTC week", v.locale),
     html`${ui.kpi(
         m?.stats?.weekCost && !(m.stats.incomplete && m.stats.weekRuns === 0)
           ? fmtCost(m.stats.weekCost)
           : "unknown",
-        "attributed to these rules",
+        uiText("attributed to these rules", v.locale),
       )}
       <p class="tr-kp">
         ${countText(m?.stats?.weekRuns, m?.stats?.incomplete)} ${m?.stats?.weekRuns === 1 ? "run record" : "run records"} since
@@ -178,7 +174,7 @@ export function triggersFilters(v) {
   return html`<nav class="tr-filters" aria-label="Show rules">
     ${TRIGGER_LIST_KINDS.map((kind) =>
       ui.fpill({
-        label: FILTER[kind],
+        label: uiText(FILTER[kind], v.locale),
         count: typeof c?.[kind] === "number" ? c[kind] : null,
         href: kind === "all" ? "/triggers" : `/triggers?kind=${kind}`,
         on: (v.query?.kind ?? "all") === kind,
@@ -186,50 +182,50 @@ export function triggersFilters(v) {
     )}
   </nav>`;
 }
-function labelPredicate(t) {
+function labelPredicate(t, locale = "en") {
   const clauses = [
     t.any?.length
-      ? html`any of <span class="code">${shortList(t.any)}</span>`
+      ? html`${uiText("any of", locale)} <span class="code">${shortList(t.any)}</span>`
       : null,
     t.all?.length
-      ? html`all of <span class="code">${shortList(t.all)}</span>`
+      ? html`${uiText("all of", locale)} <span class="code">${shortList(t.all)}</span>`
       : null,
     t.none?.length
-      ? html`none of <span class="code">${shortList(t.none)}</span>`
+      ? html`${uiText("none of", locale)} <span class="code">${shortList(t.none)}</span>`
       : null,
   ].filter(Boolean);
-  return html`${clauses.map((clause, i) => html`${i ? " and " : ""}${clause}`)}`;
+  return html`${clauses.map((clause, i) => html`${i ? uiText(" and ", locale) : ""}${clause}`)}`;
 }
-function whenOf(t) {
+function whenOf(t, locale = "en") {
   if (t.type === "cron")
-    return html`Schedule
+    return html`${uiText("Schedule", locale)}
       <span class="code">${t.pattern ?? "unknown pattern"}</span>`;
   if (t.type === "comment")
-    return html`A comment contains
+    return html`${uiText("A comment contains", locale)}
       <span class="code">${t.phrase ?? "an unavailable phrase"}</span>`;
   if (t.type === "label")
-    return html`An issue has labels matching ${labelPredicate(t)}`;
-  return html`${t.type === "issue" ? "An issue" : "A pull request"}${t.number
+    return html`${uiText("An issue has labels matching", locale)} ${labelPredicate(t, locale)}`;
+  return html`${uiText(t.type === "issue" ? "An issue" : "A pull request", locale)}${t.number
       ? html` <span class="code">#${t.number}</span>`
       : null}
-    has action <span class="code">${shortList(t.action)}</span>${t.reviewState
+    ${uiText("has action", locale)} <span class="code">${shortList(t.action)}</span>${t.reviewState
       ?.length
-      ? html`, verdict <span class="code">${shortList(t.reviewState)}</span>`
+      ? html`, ${uiText("verdict", locale)} <span class="code">${shortList(t.reviewState)}</span>`
       : null}${t.any?.length || t.all?.length || t.none?.length
-      ? html`, with labels on labeled deliveries matching ${labelPredicate(t)}`
+      ? html`, ${uiText("with labels on labeled deliveries matching", locale)} ${labelPredicate(t, locale)}`
       : null}`;
 }
-function goodToKnow(t) {
+function goodToKnow(t, locale = "en") {
   if (t.disarmed)
-    return "This one-shot matches nothing now. Remove on.disarmed in the triggers file to arm it again; keeping the row preserves its history number.";
+    return uiText("This one-shot matches nothing now. Remove on.disarmed in the triggers file to arm it again; keeping the row preserves its history number.", locale);
   if (t.type === "comment")
-    return "A comment can select another declared flow. It still uses this comment rule's options and reviewed constraints.";
+    return uiText("A comment can select another declared flow. It still uses this comment rule's options and reviewed constraints.", locale);
   if (t.forge === "github" && t.type === "label")
-    return "GitHub matches the issue's whole label set. Re-labelling or reopening can start another paid run, including each configured replica.";
+    return uiText("GitHub matches the issue's whole label set. Re-labelling or reopening can start another paid run, including each configured replica.", locale);
   if (t.forge === "gitlab" && t.type === "pull_request")
-    return "On GitLab, changing labels counts as an update. A merge does not fire a close rule.";
+    return uiText("On GitLab, changing labels counts as an update. A merge does not fire a close rule.", locale);
   if (t.forge === "azure" && t.type === "pull_request")
-    return "Azure pull request actions use created or updated. Pull request labels and close-only actions are not available.";
+    return uiText("Azure pull request actions use created or updated. Pull request labels and close-only actions are not available.", locale);
   return null;
 }
 function ruleRow(v, r) {
@@ -237,7 +233,7 @@ function ruleRow(v, r) {
     [glyph, word] = KIND[t.type] ?? ["info", "Rule"],
     last = r.lastRun;
   const outcome = last ? outcomeWord(last.outcome, recordReason(last)) : null;
-  const note = goodToKnow(t),
+  const note = goodToKnow(t, v.locale),
     next = r.nextFire;
   const hostNames = r.nextFire?.hosts ?? [];
   return html`<li class="tr${t.disarmed ? " tr--spent" : ""}">
@@ -245,30 +241,30 @@ function ruleRow(v, r) {
     <div class="tr-when">
       <span class="tile tile--sm tr-kind">${ui.icon(glyph)}</span>
       <div>
-        <p class="tr-k">${word}</p>
-        <p class="tr-s"><a href="${ruleHref(v, r.index)}">${whenOf(t)}</a></p>
+        <p class="tr-k">${uiText(word, v.locale)}</p>
+        <p class="tr-s"><a href="${ruleHref(v, r.index)}">${whenOf(t, v.locale)}</a></p>
         <p class="tr-sub">
           ${t.type === "cron"
-            ? html`In
+            ? html`${uiText("In", v.locale)}
                 <span class="code"
                   >${shownPath(t.folder) ?? "an unpublished folder"}</span
                 >;
                 ${hostNames.length
-                  ? html`on ${hostNames.join(", ")}`
-                  : "owning host not published"}${next?.zone
-                  ? html`; schedule zone ${next.zone}`
+                  ? html`${uiText("on", v.locale)} ${hostNames.join(", ")}`
+                  : uiText("owning host not published", v.locale)}${next?.zone
+                  ? html`; ${uiText("schedule zone", v.locale)} ${next.zone}`
                   : null}`
-            : html`${triggerWhoMayFire(t)}
+            : html`${uiText(triggerWhoMayFire(t), v.locale)}
               ${t.repository
-                ? html`In <span class="code">${t.repository}</span>.`
-                : "In repositories wired to this deployment."}`}
+                ? html`${uiText("In", v.locale)} <span class="code">${t.repository}</span>.`
+                : uiText("In repositories wired to this deployment.", v.locale)}`}
         </p>
       </div>
     </div>
     <span class="tr-arrow" aria-hidden="true">${ui.icon("chev-r")}</span>
     <div class="tr-then">
       <p class="tr-s">
-        runs
+        ${uiText("runs", v.locale)}
         <span class="tr-flow"
           >${ui.icon(t.command ? "terminal" : "skill", {
             size: "sm",
@@ -276,18 +272,17 @@ function ruleRow(v, r) {
         >
       </p>
       <p class="tr-sub">
-        ${[t.provider, t.model].filter(Boolean).join(" / ") ||
-        "deployment default model"}
-        · ${t.backend ?? "each host's default"} venue
+        ${[t.provider, t.model].filter(Boolean).join(" / ") || uiText("deployment default model", v.locale)}
+        · ${t.backend ?? uiText("each host's default", v.locale)} ${uiText("venue", v.locale)}
       </p>
       <p class="tr-chips">
         ${r.chips.map((c) => {
           const [status, icon, label] = CHIP[c.kind] ?? [
             null,
             "info",
-            "Option",
+            uiText("Option", v.locale),
           ];
-          return ui.chip(`${label}: ${c.text}`, { status, icon });
+          return ui.chip(`${uiText(label, v.locale)}: ${c.text}`, { status, icon });
         })}
       </p>
     </div>
@@ -296,7 +291,7 @@ function ruleRow(v, r) {
         ? html`<p>
               ${ui.badge(
                 outcome?.known ? outcome.status : "failed",
-                outcome?.word ?? last.outcome ?? "unknown",
+                uiText(outcome?.word ?? last.outcome ?? "unknown", v.locale),
               )}${timeHtml(atOf(last))}
             </p>
             <p class="tr-sub">
@@ -306,41 +301,41 @@ function ruleRow(v, r) {
             </p>
             ${recordReason(last)
               ? html`<p class="tr-sub">
-                  ${reasonWords(recordReason(last)).sentence ??
-                  "No explanation is available for the recorded reason."}
+                  ${uiText(reasonWords(recordReason(last)).sentence ??
+                  "No explanation is available for the recorded reason.", v.locale)}
                 </p>`
               : null}`
         : html`<p class="tr-sub">
             ${r.stats.runs30d == null
-              ? "Last run unavailable"
-              : "No run in retained history"}
+              ? uiText("Last run unavailable", v.locale)
+              : uiText("No run in retained history", v.locale)}
           </p>`}${next
         ? html`<p class="tr-next">
-              Next: ${next.at === null ? "unknown" : timeHtml(next.at)} ·
-              ${next.health === "on-time" ? "on time" : next.health} · stalls
-              ${next.stalls ?? "unknown"} of ${next.stallLimit}
+              ${uiText("Next", v.locale)}: ${next.at === null ? uiText("unknown", v.locale) : timeHtml(next.at)} ·
+              ${uiText(next.health === "on-time" ? "on time" : next.health, v.locale)} · ${uiText("stalls", v.locale)}
+              ${next.stalls ?? uiText("unknown", v.locale)} ${uiText("of", v.locale)} ${next.stallLimit}
             </p>
             ${next.problem
               ? html`<p class="tr-problem">${next.problem}</p>`
               : null}`
         : null}
       <p class="tr-sub">
-        ${countText(r.stats.runs30d, r.stats.incomplete)} runs in 30 days ·
-        ${costText(r.stats)} this UTC week
+        ${countText(r.stats.runs30d, r.stats.incomplete)} ${uiText("runs in 30 days", v.locale)} ·
+        ${uiText(costText(r.stats), v.locale)} ${uiText("this UTC week", v.locale)}
       </p>
       ${r.unknown.map((p) => html`<p class="tr-problem">${p}</p>`)}
     </div>
     <a
       class="tr-open btn btn--sm btn--ghost"
       href="${ruleHref(v, r.index)}"
-      aria-label="Open row ${r.index + 1}"
+      aria-label="${uiText("Open row", v.locale)} ${r.index + 1}"
       >${ui.icon("chev-r", { size: "sm" })}</a
     >${note
       ? html`<p class="tr-note tr-note-desktop">
             ${ui.icon("info", { size: "sm" })}<span>${note}</span>
           </p>
           <details class="tr-note tr-note-phone">
-            <summary>${ui.icon("info", { size: "sm" })}Good to know</summary>
+            <summary>${ui.icon("info", { size: "sm" })}${uiText("Good to know", v.locale)}</summary>
             <p>${note}</p>
           </details>`
       : null}
@@ -353,13 +348,13 @@ function groupPanel(v, key) {
   );
   if (!rows.length) return html``;
   return card(
-    GROUP[key],
+    uiText(GROUP[key], v.locale),
     html`<ol class="tr-list">
       ${rows.map((r) => ruleRow(v, r))}
     </ol>`,
     {
       flush: true,
-      sub: `${rows.length} ${rows.length === 1 ? "rule" : "rules"}`,
+      sub: `${rows.length} ${uiText(rows.length === 1 ? "rule" : "rules", v.locale)}`,
     },
   );
 }
@@ -382,19 +377,18 @@ export function triggersUnknown(v) {
   const rows = rowsOf(v);
   if (!modelOf(v))
     return card(
-      "Rules unavailable",
+      uiText("Rules unavailable", v.locale),
       html`<p>
-        The deployment's rule facts could not be read. Reload and check
-        pi-dispatch doctor.
+        ${uiText("The deployment's rule facts could not be read. Reload and check pi-dispatch doctor.", v.locale)}
       </p>`,
     );
   if (!rows.length)
     return card(
-      "Rules",
+      uiText("Rules", v.locale),
       html`<p>
         ${modelOf(v).problems?.length
-          ? "No rule can be shown from the available file."
-          : "No rule matches this filter."}
+          ? uiText("No rule can be shown from the available file.", v.locale)
+          : uiText("No rule matches this filter.", v.locale)}
       </p>`,
     );
   return groupPanel(v, "unknown");
@@ -412,8 +406,8 @@ export function triggersWeek(v) {
     w = m?.week;
   if (!w)
     return card(
-      "When schedules fire",
-      html`<p>Schedule and quiet-window projections are unavailable.</p>`,
+      uiText("When schedules fire", v.locale),
+      html`<p>${uiText("Schedule and quiet-window projections are unavailable.", v.locale)}</p>`,
     );
   const lanes = [
     ...w.lanes.map((l) => ({
@@ -424,13 +418,13 @@ export function triggersWeek(v) {
     })),
     ...w.quiet.map((q) => ({
       kind: "quiet",
-      name: `Quiet: ${shownPath(q.scope)}`,
+      name: `${uiText("Quiet", v.locale)}: ${shownPath(q.scope)}`,
       sub:
         q.affects === "forge"
-          ? "forge jobs only"
+          ? uiText("forge jobs only", v.locale)
           : q.affects === "local"
-            ? "local folder jobs, including schedules"
-            : "all matching jobs, including schedules",
+            ? uiText("local folder jobs, including schedules", v.locale)
+            : uiText("all matching jobs, including schedules", v.locale),
       ...q,
     })),
   ];
@@ -439,7 +433,7 @@ export function triggersWeek(v) {
       .filter((r) => r.nextFire?.at != null && r.nextFire.at >= m.now)
       .sort((a, b) => a.nextFire.at - b.nextFire.at);
   return card(
-    "When schedules fire",
+    uiText("When schedules fire", v.locale),
     html`<div class="tr-week-desktop">
         <div class="wk-scroll">
           <div class="wk">
@@ -475,9 +469,9 @@ export function triggersWeek(v) {
                                 cy="${i * 36 + 18}"
                                 r="6"
                                 ><title>
-                                  ${t.kind === "ran"
+                  ${uiText(t.kind === "ran"
                                     ? "Recorded run"
-                                    : "Projected fire"}:
+                                    : "Projected fire", v.locale)}:
                                   ${new Date(t.at).toISOString()}${t.jobId
                                     ? `; ${t.jobId}`
                                     : ""}
@@ -536,20 +530,20 @@ export function triggersWeek(v) {
                   y="-10"
                   text-anchor="middle"
                 >
-                  now
+                  ${uiText("now", v.locale)}
                 </text>
               </svg>
             </div>
           </div>
         </div>
         <p class="keyrow tr-week-key">
-          <span><i class="wk-k wk-k--ran"></i>recorded run</span
-          ><span><i class="wk-k wk-k--next"></i>projected fire</span
-          ><span><i class="wk-k wk-k--quiet"></i>quiet window</span>
+          <span><i class="wk-k wk-k--ran"></i>${uiText("recorded run", v.locale)}</span
+          ><span><i class="wk-k wk-k--next"></i>${uiText("projected fire", v.locale)}</span
+          ><span><i class="wk-k wk-k--quiet"></i>${uiText("quiet window", v.locale)}</span>
         </p>
       </div>
       <div class="tr-week-phone">
-        <h3>Next fires</h3>
+        <h3>${uiText("Next fires", v.locale)}</h3>
         <ul class="tr-next-fires">
           ${future.map(
             (r) =>
@@ -559,14 +553,14 @@ export function triggersWeek(v) {
                   >${r.trigger.id} · row ${r.index + 1}</a
                 ><span
                   >${r.nextFire.health === "on-time"
-                    ? "on time"
-                    : r.nextFire.health}</span
+                    ? uiText("on time", v.locale)
+                    : uiText(r.nextFire.health, v.locale)}</span
                 >
               </li>`,
           )}
         </ul>
         ${!future.length
-          ? html`<p>No next fire is published.</p>`
+          ? html`<p>${uiText("No next fire is published.", v.locale)}</p>`
           : null}${w.quiet.map(
           (q) =>
             html`<p>
@@ -575,17 +569,15 @@ export function triggersWeek(v) {
                   ${timeHtml(q.intervals[0].end)}`
                 : "no interval in view"};
               ${q.affects === "forge"
-                ? "forge jobs only"
+                ? uiText("forge jobs only", v.locale)
                 : q.affects === "local"
-                  ? "local folder jobs, including schedules"
-                  : "all matching jobs, including schedules"}.
+                  ? uiText("local folder jobs, including schedules", v.locale)
+                  : uiText("all matching jobs, including schedules", v.locale)}.
             </p>`,
         )}
       </div>
       <p class="tr-sub">
-        ${w.label}. Schedule times use their owning host's verified timezone and
-        are plotted as UTC instants. Forge repository quiet windows do not hold
-        cron; matching local-folder and global windows can hold it.
+        ${uiText(w.label, v.locale)}. ${uiText("Schedule times use their owning host's verified timezone and are plotted as UTC instants. Forge repository quiet windows do not hold cron; matching local-folder and global windows can hold it.", v.locale)}
       </p>
       ${lanes
         .filter((l) => l.problem || l.incomplete)
@@ -594,53 +586,52 @@ export function triggersWeek(v) {
             html`<p class="tr-problem">
               ${l.name}:
               ${l.problem ??
-              "Only a bounded selection of retained runs and projected times is shown."}
+              uiText("Only a bounded selection of retained runs and projected times is shown.", v.locale)}
             </p>`,
         )}${w.lanesCut
         ? html`<p class="tr-problem">
-            ${w.lanesCut} schedule lanes are omitted.
+            ${w.lanesCut} ${uiText("schedule lanes are omitted.", v.locale)}
           </p>`
         : null}${w.quietCut
         ? html`<p class="tr-problem">
-            ${w.quietCut} quiet windows are omitted.
+            ${w.quietCut} ${uiText("quiet windows are omitted.", v.locale)}
           </p>`
         : null}${w.quietUnknown
         ? html`<p class="tr-problem">
-            Quiet windows could not be read; no absence of bands proves they are
-            off.
+          ${uiText("Quiet windows could not be read; no absence of bands proves they are off.", v.locale)}
           </p>`
         : null}`,
-    { sub: "UTC instants, not an execution guarantee" },
+    { sub: uiText("UTC instants, not an execution guarantee", v.locale) },
   );
 }
-function checkSelect(name, label, values, { forges = false } = {}) {
+function checkSelect(name, label, values, { forges = false, locale = "en" } = {}) {
   const options = forges
     ? Object.entries(values).flatMap(([forge, words]) =>
         words.map(
           (value) =>
             html`<option value="${value}" data-check-forge="${forge}">
-              ${value}
+              ${uiText(value, locale)}
             </option>`,
         ),
       )
-    : values.map((value) => html`<option value="${value}">${value}</option>`);
+    : values.map((value) => html`<option value="${value}">${uiText(value, locale)}</option>`);
   return html`<div class="field" data-check-field="${name}">
     <label
-      >${label}<select class="select" name="${name}">
+      >${uiText(label, locale)}<select class="select" name="${name}">
         ${options}
       </select></label
     >
   </div>`;
 }
-export function triggerCheckForm() {
+export function triggerCheckForm(locale = "en") {
   return html`<form data-trigger-check autocomplete="off">
     <fieldset data-trigger-check-fields disabled>
-      <legend class="sr">Describe a hypothetical forge event</legend>
+      <legend class="sr">${uiText("Describe a hypothetical forge event", locale)}</legend>
       <div class="tr-form">
-        ${checkSelect("forge", "Forge", Object.keys(CHECK_EVENTS))}
+        ${checkSelect("forge", "Forge", Object.keys(CHECK_EVENTS), { locale })}
         <div class="field" data-check-field="repository">
           <label
-            >Repository<input
+            >${uiText("Repository", locale)}<input
               class="input input--code"
               name="repository"
               maxlength="${CHECK_LIMITS.repository}"
@@ -650,12 +641,10 @@ export function triggerCheckForm() {
               spellcheck="false"
           /></label>
         </div>
-        ${checkSelect("event", "What happens", CHECK_EVENTS, {
-          forges: true,
-        })}${checkSelect("actor", "Who acts (assumed authority)", CHECK_ACTORS)}
+        ${checkSelect("event", "What happens", CHECK_EVENTS, { forges: true, locale })}${checkSelect("actor", "Who acts (assumed authority)", CHECK_ACTORS, { locale })}
         <div class="field" data-check-field="number">
           <label
-            >Issue or pull request number<input
+            >${uiText("Issue or pull request number", locale)}<input
               class="input"
               type="number"
               name="number"
@@ -666,19 +655,21 @@ export function triggerCheckForm() {
           /></label>
         </div>
         ${checkSelect("action", "Pull request action", CHECK_PR_ACTIONS, {
-          forges: true,
+          forges: true, locale,
         })}${checkSelect(
           "prAuthor",
           "Pull request author's authority",
           CHECK_PR_AUTHORS,
+          { locale },
         )}${checkSelect(
           "reviewState",
           "Review verdict",
           CHECK_REVIEW_STATES,
-        )}${checkSelect("reviewBody", "Review body", CHECK_REVIEW_BODIES)}
+          { locale },
+        )}${checkSelect("reviewBody", "Review body", CHECK_REVIEW_BODIES, { locale })}
         <div class="field tr-span" data-check-field="labels">
           <label
-            >Current labels, one per line<textarea
+            >${uiText("Current labels, one per line", locale)}<textarea
               class="textarea"
               name="labels"
               rows="2"
@@ -689,7 +680,7 @@ export function triggerCheckForm() {
         </div>
         <div class="field tr-span" data-check-field="previousLabels">
           <label
-            >Previous labels, one per line<textarea
+            >${uiText("Previous labels, one per line", locale)}<textarea
               class="textarea"
               name="previousLabels"
               rows="2"
@@ -700,7 +691,7 @@ export function triggerCheckForm() {
         </div>
         <div class="field tr-span" data-check-field="comment">
           <label
-            >Comment<textarea
+            >${uiText("Comment", locale)}<textarea
               class="textarea"
               name="comment"
               rows="3"
@@ -711,97 +702,89 @@ export function triggerCheckForm() {
         </div>
       </div>
       <p class="tr-sub">
-        Authority is a hypothetical assumption. Comment text stays in this
-        request; it is never placed in the address bar or audit log.
+        ${uiText("Authority is a hypothetical assumption. Comment text stays in this request; it is never placed in the address bar or audit log.", locale)}
       </p>
       <button class="btn btn--primary" type="submit">
-        ${ui.icon("search", { size: "sm" })}Check an event
+        ${ui.icon("search", { size: "sm" })}${uiText("Check an event", locale)}
       </button>
     </fieldset>
     <noscript
       ><p class="tr-problem">
-        Enable JavaScript to check an event. Rules, filters and navigation
-        remain available; no event text can be submitted into the address bar.
+        ${uiText("Enable JavaScript to check an event. Rules, filters and navigation remain available; no event text can be submitted into the address bar.", locale)}
       </p></noscript
     >
     <div
       data-trigger-check-result
       role="region"
-      aria-label="Event check result"
+      aria-label="${uiText("Event check result", locale)}"
       aria-live="polite"
       tabindex="-1"
     >
       <p class="tr-sub">
-        Describe an event to see hypothetical matching. Nothing will be sent to
-        a forge, queued or spent.
+        ${uiText("Describe an event to see hypothetical matching. Nothing will be sent to a forge, queued or spent.", locale)}
       </p>
     </div>
   </form>`;
 }
 export function triggersCheck(v) {
   return card(
-    "Which rule would run?",
+    uiText("Which rule would run?", v.locale),
     html`<p class="tr-p">
-        Describe an event and see which rule matches, and why the others do not.
-        Nothing is sent to a forge or spent.
+        ${uiText("Describe an event and see which rule matches, and why the others do not. Nothing is sent to a forge or spent.", v.locale)}
       </p>
       <p class="tr-check-phone-link">
         ${ui.btn({
-          label: "Check an event",
+          label: uiText("Check an event", v.locale),
           href: ui.pageHref(v.pages, "trigger-check") ?? "/triggers/check",
           kind: "primary",
           icon: "search",
         })}
       </p>
-      <div class="tr-check-embedded">${triggerCheckForm()}</div>`,
-    { sub: "Hypothetical matching, not delivery authentication" },
+      <div class="tr-check-embedded">${triggerCheckForm(v.locale)}</div>`,
+    { sub: uiText("Hypothetical matching, not delivery authentication", v.locale) },
   );
 }
-export function triggerCheckPage() {
-  return card("Which rule would run?", triggerCheckForm(), {
-    sub: "Read-only and available to viewers",
+export function triggerCheckPage(v = {}) {
+  return card(uiText("Which rule would run?", v.locale), triggerCheckForm(v.locale), {
+    sub: uiText("Read-only and available to viewers", v.locale),
   });
 }
-export function renderTriggerCheckResult(result) {
+export function renderTriggerCheckResult(result, locale = "en") {
   if (result?.refusal)
     return html`<div class="tr-check-error" role="alert">
       <h3>
-        ${ui.icon("refused", { size: "sm" })}The event could not be checked
+        ${ui.icon("refused", { size: "sm" })}${uiText("The event could not be checked", locale)}
       </h3>
-      <p>${result.refusal.sentence ?? "The event description was refused."}</p>
-      <p>No delivery was sent or queued; nothing was spent.</p>
+      <p>${uiText(result.refusal.sentence ?? "The event description was refused.", locale)}</p>
+      <p>${uiText("No delivery was sent or queued; nothing was spent.", locale)}</p>
     </div>`;
   if (!result || typeof result !== "object")
     return html`<div class="tr-check-error" role="alert">
       <p>
-        The console could not read a matching result. Nothing was sent or
-        queued.
+        ${uiText("The console could not read a matching result. Nothing was sent or queued.", locale)}
       </p>
     </div>`;
   const match = result.matched;
   return html`<div class="tr-result">
     <h3 class="tr-res__h">
       ${ui.icon(match ? "done" : "info", { size: "sm" })}${match
-        ? html`Rule ${match.row ?? match.index + 1} would
-          match${match.flow
-            ? html` with flow <b>${match.flow}</b>`
+        ? html`${uiText("Rule", locale)} ${match.row ?? match.index + 1} ${uiText("would match", locale)}${match.flow
+            ? html` ${uiText("with flow", locale)} <b>${match.flow}</b>`
             : match.command
-              ? html` with command <b>${match.command}</b>`
+              ? html` ${uiText("with command", locale)} <b>${match.command}</b>`
               : null}`
-        : "No rule would match this description"}
+        : uiText("No rule would match this description", locale)}
     </h3>
     ${match
       ? html`<p>
-          Route:
-          <span class="code">${match.route ?? "hypothetical match"}</span>. This
-          is not a promise that a real delivery will start a paid job.
+          ${uiText("Route", locale)}:
+          <span class="code">${match.route ?? uiText("hypothetical match", locale)}</span>. ${uiText("This is not a promise that a real delivery will start a paid job.", locale)}
         </p>`
       : null}
     <p class="tr-res__s">
-      ${result.notice ??
-      "Hypothetical matching only. Nothing was authenticated, sent, queued or spent."}
+      ${uiText(result.notice ?? "Hypothetical matching only. Nothing was authenticated, sent, queued or spent.", locale)}
     </p>
-    <h4>The rules</h4>
+    <h4>${uiText("The rules", locale)}</h4>
     <ol class="tr-why">
       ${(result.rules ?? []).map(
         (r) =>
@@ -814,7 +797,7 @@ export function renderTriggerCheckResult(result) {
           </li>`,
       )}
     </ol>
-    <h4>Checks a real delivery must still pass</h4>
+    <h4>${uiText("Checks a real delivery must still pass", locale)}</h4>
     <ul class="tr-gates">
       ${(result.gates ?? []).map(
         (g) =>
@@ -827,8 +810,7 @@ export function renderTriggerCheckResult(result) {
     </ul>
     ${!result.gates?.length
       ? html`<p>
-          Delivery authentication and current admission gates were not checked
-          here.
+          ${uiText("Delivery authentication and current admission gates were not checked here.", locale)}
         </p>`
       : null}
   </div>`;

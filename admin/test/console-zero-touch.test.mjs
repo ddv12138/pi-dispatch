@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { zeroTouchView } from "../src/zero-touch-view.mjs";
 import { loadPageData, parsePageQuery, pageQueryString, renderPage, panelIds } from "../src/console/pages.mjs";
-import { ZERO_TOUCH_CAUSES, ZERO_TOUCH_WORDS, zeroTouchHandled } from "../src/console/panels/zero-touch.mjs";
+import { ZERO_TOUCH_CAUSES, ZERO_TOUCH_WORDS, zeroTouchHandled, zeroTouchRate, zeroTouchStreak } from "../src/console/panels/zero-touch.mjs";
 import { zeroTouchFixture, ZERO_TOUCH_DRAW } from "./helpers/zero-touch-goldens.mjs";
 import { assertClean } from "./helpers/console-pages-harness.mjs";
 import { computeZeroTouch } from "@edgehero/pi-dispatch/zero-touch";
@@ -44,6 +44,13 @@ test("draft counts distinguish covered zero, partial retained counts and unavail
     assert.ok(tile.includes(ZERO_TOUCH_WORDS.unavailable));
     assert.doesNotMatch(tile, /class="kpi"|<b>0<\/b>/, "lost evidence is not a known zero");
   }
+});
+
+test("zero-touch panels use the selected locale for fixed headings and copy", () => {
+  const view = { role: "viewer", locale: "zh", data: { zeroTouch: zeroTouchFixture(NOW) }, query: { days: 30 }, now: NOW };
+  assert.match(String(zeroTouchRate(view)), /人工介入率/);
+  assert.match(String(zeroTouchStreak(view)), /连续无需人工处理/);
+  assert.doesNotMatch(String(zeroTouchRate(view)), /Touch rate,|goal under 5%/);
 });
 
 test("Zero touch query refuses unknown, duplicate and malformed input before a reader is called", () => {

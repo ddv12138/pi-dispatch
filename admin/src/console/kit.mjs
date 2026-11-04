@@ -1,4 +1,5 @@
 import { parseSandboxOpenUrl } from "@edgehero/pi-dispatch/opener-protocol";
+import { uiText } from "./locale.mjs";
 /**
  * The console's kit (issue #737): the Pulse design's components as pure functions, each returning a fragment built with
  * `html`, so a page says `ui.badge("failed", "Failed")` and gets the design's markup and class names, never its own copy
@@ -1002,12 +1003,12 @@ export function actForm({ action, hidden = [], label, kind = ["sm"], icon: glyph
  * carries none, and transcript text is shown only in a run page's transcript (REQ-CONSOLE-SECURITY (l)). Their body
  * says where the question is read.
  */
-export function questionCard({ jobId, runHref = null, waited = null, project = null, target = null, where = null, body = null, answer = null }) {
+export function questionCard({ jobId, runHref = null, waited = null, project = null, target = null, where = null, body = null, answer = null, locale = "en" }) {
   const id = plainOf(jobId, "a job id", "questionCard");
   const part = (v) => (isSafeHtml(v) ? v : html`<span>${v}</span>`);
   const meta = [given(project) ? ptag(project) : null, given(target) ? part(target) : null, given(where) ? part(where) : null].filter((m) => m !== null);
-  const wait = given(waited) ? html`<span class="qcard__wait"><span class="sr">waiting </span>${waited}</span>` : null;
-  return html`<article class="card card--ring tone-parked qcard" aria-label="${`${id} asks`}"><p class="qcard__top">${tile("parked", { sm: true, iconSm: true })}<b>${runHref === null ? html`<span class="code">${id}</span>` : html`<a class="code" href="${hrefOf(runHref, "questionCard")}">${id}</a>`} asks</b>${wait}</p>${meta.length === 0 ? null : html`<p class="qcard__meta">${meta}</p>`}${given(body) ? html`<div class="qcard__body">${body}</div>` : null}${given(answer) ? answer : null}</article>`;
+  const wait = given(waited) ? html`<span class="qcard__wait"><span class="sr">${uiText("waiting", locale)} </span>${waited}</span>` : null;
+  return html`<article class="card card--ring tone-parked qcard" aria-label="${`${id} ${uiText("asks", locale)}`}"><p class="qcard__top">${tile("parked", { sm: true, iconSm: true })}<b>${runHref === null ? html`<span class="code">${id}</span>` : html`<a class="code" href="${hrefOf(runHref, "questionCard")}">${id}</a>`} ${uiText("asks", locale)}</b>${wait}</p>${meta.length === 0 ? null : html`<p class="qcard__meta">${meta}</p>`}${given(body) ? html`<div class="qcard__body">${body}</div>` : null}${given(answer) ? answer : null}</article>`;
 }
 
 /** The most characters an answer's field takes: the worker's bound on an answer (`console-answer.mjs`, in bytes). */
@@ -1022,21 +1023,21 @@ export const ANSWER_MAX = ANSWER_TEXT_MAX_BYTES;
  * Then Preview the answer, in the answer act's fill, and an Open run link where `runHref` is given. `id` is the field's,
  * a kit id unique on the page. Nothing is posted until the preview's Confirm (`confirm-view.mjs`).
  */
-export function answerForm({ jobId, id, hint, runHref = null, value = "", draft = null, keepStanding = false, guarded = false }) {
+export function answerForm({ jobId, id, hint, runHref = null, value = "", draft = null, keepStanding = false, guarded = false, locale = "en" }) {
   const fid = idOf(id, "answerForm");
-  const field = html`<label class="sr" for="${fid}">Your answer, as the reply on the issue</label>${textarea({ id: fid, name: "text", value, rows: 3, maxlength: ANSWER_MAX, placeholder: "Write your answer", required: true, describedBy: given(hint) ? `${fid}-hint` : null })}`;
-  const open = runHref === null ? null : btn({ kind: "ghost", label: "Open run", href: runHref });
+  const field = html`<label class="sr" for="${fid}">${uiText("Your answer, as the reply on the issue", locale)}</label>${textarea({ id: fid, name: "text", value, rows: 3, maxlength: ANSWER_MAX, placeholder: uiText("Write your answer", locale), required: true, describedBy: given(hint) ? `${fid}-hint` : null })}`;
+  const open = runHref === null ? null : btn({ kind: "ghost", label: uiText("Open run", locale), href: runHref });
   const said = given(hint) ? html`<p class="field__hint" id="${idOf(`${fid}-hint`, "answerForm")}">${hint}</p>` : null;
   const start = guarded ? html`<fieldset data-answerer-control disabled>` : null;
-  const end = guarded ? html`</fieldset><noscript><p>Reading and navigation work without JavaScript; sending an answer requires it.</p></noscript>` : null;
-  return html`<form class="act qform" data-action="parked-answer" autocomplete="off">${start}${hiddenOf(["jobId", plainOf(jobId, "a job id", "answerForm")])}${draft ? html`${hiddenOf(["draftRunId", draft.draftRunId])}${hiddenOf(["draftDigest", draft.digest])}` : null}${field}${keepStanding ? html`<label class="pa-check"><input type="checkbox" data-keep-standing><span>Review this as a standing answer after sending, through a separate preview and Confirm</span></label>` : null}<div class="qform__act">${btn({ type: "submit", kind: "answer", icon: "comment", label: "Preview the answer" })}${open}</div>${said}${end}</form>`;
+  const end = guarded ? html`</fieldset><noscript><p>${uiText("Reading and navigation work without JavaScript; sending an answer requires it.", locale)}</p></noscript>` : null;
+  return html`<form class="act qform" data-action="parked-answer" autocomplete="off">${start}${hiddenOf(["jobId", plainOf(jobId, "a job id", "answerForm")])}${draft ? html`${hiddenOf(["draftRunId", draft.draftRunId])}${hiddenOf(["draftDigest", draft.digest])}` : null}${field}${keepStanding ? html`<label class="pa-check"><input type="checkbox" data-keep-standing><span>${uiText("Review this as a standing answer after sending, through a separate preview and Confirm", locale)}</span></label>` : null}<div class="qform__act">${btn({ type: "submit", kind: "answer", icon: "comment", label: uiText("Preview the answer", locale) })}${open}</div>${said}${end}</form>`;
 }
 
 /** Typed approval decisions use the existing preview, confirmation and audited answer funnel. */
-export function approvalForms({ jobId, id }) {
+export function approvalForms({ jobId, id, locale = "en" }) {
   const fid = idOf(id, "approvalForms");
   const hidden = hiddenOf(["jobId", plainOf(jobId, "a job id", "approvalForms")]);
-  return html`<form class="act qform" data-action="parked-answer" autocomplete="off">${hidden}${hiddenOf(["decision", "approve"])}${btn({ type: "submit", kind: "primary", icon: "done", label: "Preview approval" })}</form><form class="act qform" data-action="parked-answer" autocomplete="off">${hidden}${hiddenOf(["decision", "decline"])}<label for="${fid}">Reason for declining (optional)</label>${textarea({ id: fid, name: "text", rows: 2, maxlength: ANSWER_MAX, placeholder: "Why should the agent change course?" })}${btn({ type: "submit", kind: "danger", label: "Preview decline" })}</form>${answerForm({ jobId, id: `${fid}-question`, hint: "Ask a question back: the run resumes with your question and no approval is granted." })}`;
+  return html`<form class="act qform" data-action="parked-answer" autocomplete="off">${hidden}${hiddenOf(["decision", "approve"])}${btn({ type: "submit", kind: "primary", icon: "done", label: uiText("Preview approval", locale) })}</form><form class="act qform" data-action="parked-answer" autocomplete="off">${hidden}${hiddenOf(["decision", "decline"])}<label for="${fid}">${uiText("Reason for declining (optional)", locale)}</label>${textarea({ id: fid, name: "text", rows: 2, maxlength: ANSWER_MAX, placeholder: uiText("Why should the agent change course?", locale) })}${btn({ type: "submit", kind: "danger", label: uiText("Preview decline", locale) })}</form>${answerForm({ jobId, id: `${fid}-question`, hint: uiText("Ask a question back: the run resumes with your question and no approval is granted.", locale), locale })}`;
 }
 
 /**

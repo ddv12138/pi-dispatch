@@ -103,6 +103,7 @@ import { endedReasonOf, PERSON_HEADER, PERSON_PARAM } from "./session-ends.mjs";
 import { loginCodePage, loginPage } from "./shell.mjs";
 import { CONSOLE_CSS } from "./style.mjs";
 import { themeOf } from "./theme.mjs";
+import { localeOf } from "./locale.mjs";
 import { TRANSCRIPT_FORMATS } from "./transcript.mjs";
 import { gatewayApi, gatewayLanding } from "./gateway.mjs";
 
@@ -255,7 +256,7 @@ function sendFailure(ctx, status, sentence, { headers = {}, page = null } = {}) 
   const session = ctx.session ? { name: ctx.session.name, role: ctx.session.role } : ctx.peek ? peekForNav(deps, req) : null;
   let out;
   try {
-    out = deps.errorPage({ ...page, kind, status, sentence, theme: themeOf(req.headers.cookie), session, readOnly: Boolean(deps.config?.readOnly) });
+    out = deps.errorPage({ ...page, kind, status, sentence, theme: themeOf(req.headers.cookie), locale: localeOf(req.headers.cookie, req.headers["accept-language"]), session, readOnly: Boolean(deps.config?.readOnly) });
   } catch (e) {
     deps.log?.(`console: the ${kind} error page could not be drawn (${e?.name ?? "error"}), so the refusal went as JSON`);
     return sendError(res, status, sentence, headers);
@@ -450,6 +451,7 @@ function pageHandler(name) {
       data,
       readOnly: Boolean(config.readOnly),
       theme: themeOf(ctx.req.headers.cookie),
+      locale: localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]),
       flash: ctx.flash,
       maxStreams: config.maxStreams,
     });
@@ -468,7 +470,7 @@ function getLogin(ctx) {
   const notice = loginNoticeOf(ctx.searchParams);
   const idleMinutes = Number.isSafeInteger(config.idleMs) ? Math.floor(config.idleMs / 60000) : undefined;
   const maxHours = Number.isSafeInteger(config.maxMs) ? Math.floor(config.maxMs / 3600000) : undefined;
-  return sendHtml(ctx.res, 200, loginPage({ theme: themeOf(ctx.req.headers.cookie), notice, limits: { idleMinutes, maxHours }, listen: listenWord(config) }));
+  return sendHtml(ctx.res, 200, loginPage({ theme: themeOf(ctx.req.headers.cookie), locale: localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]), notice, limits: { idleMinutes, maxHours }, listen: listenWord(config) }));
 }
 
 /** The sign-in page's `ended` notice from its query: exactly one `ended`, a member of `ENDED_REASONS`, else null. */
@@ -535,7 +537,7 @@ async function getEvents(ctx) {
   if (!parsed) return;
   const presented = req.headers["last-event-id"];
   const lastEventId = typeof presented === "string" && (name === "run" ? TRANSCRIPT_ID_RE : EVENT_ID_RE).test(presented) ? presented : null;
-  return openStream(ctx, () => deps.hub.subscribe({ res, sessionId: session.id, session: { name: session.name, role: session.role }, page: name, query: parsed.query, lastEventId }));
+  return openStream(ctx, () => deps.hub.subscribe({ res, sessionId: session.id, session: { name: session.name, role: session.role }, page: name, query: parsed.query, locale: localeOf(req.headers.cookie, req.headers["accept-language"]), lastEventId }));
 }
 
 /**
@@ -626,7 +628,7 @@ async function postTriggerCheck(ctx) {
   } catch {
     return sendError(ctx.res, 503, "the trigger check could not read its inputs; reload and try again");
   }
-  return sendJson(ctx.res, result?.refusal ? 400 : 200, { html: String(renderTriggerCheckResult(result)) });
+  return sendJson(ctx.res, result?.refusal ? 400 : 200, { html: String(renderTriggerCheckResult(result, localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]))) });
 }
 
 /**
@@ -644,13 +646,13 @@ export const ROUTES = Object.freeze([
   } },
   { method: "GET", path: "/login", auth: "none", write: false, handler: getLogin },
   { method: "POST", path: "/login", auth: "none", write: true, readOnlyExempt: true, handler: postLogin },
-  { method: "GET", path: "/login/code", auth: "none", write: false, handler: (ctx) => sendHtml(ctx.res, 200, loginCodePage({ theme: themeOf(ctx.req.headers.cookie) })) },
+  { method: "GET", path: "/login/code", auth: "none", write: false, handler: (ctx) => sendHtml(ctx.res, 200, loginCodePage({ theme: themeOf(ctx.req.headers.cookie), locale: localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]) })) },
   { method: "POST", path: "/login/code", auth: "none", write: true, readOnlyExempt: true, handler: postLoginCode },
   // `auth: "none"` (issue #737): a sign-out judges no session, it ends the one the cookie names (`postLogout`), so an
   // unreadable tokens file cannot keep a browser signed in that asked to sign out.
   { method: "POST", path: "/logout", auth: "none", write: true, readOnlyExempt: true, handler: postLogout },
   // Public generic shells recover the Strict cookie with a same-origin request, without replacing the sign-in.
-  ...["launch", "authorize", "return", "select"].map((mode) => ({ method: "GET", path: `/sandbox/gateway/${mode}`, auth: "none", write: false, handler: (ctx) => sendHtml(ctx.res, 200, gatewayLanding({ mode, theme: themeOf(ctx.req.headers.cookie), gesture: ctx.req.headers["sec-fetch-site"] !== "same-origin" })) })),
+  ...["launch", "authorize", "return", "select"].map((mode) => ({ method: "GET", path: `/sandbox/gateway/${mode}`, auth: "none", write: false, handler: (ctx) => sendHtml(ctx.res, 200, gatewayLanding({ mode, theme: themeOf(ctx.req.headers.cookie), locale: localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]), gesture: ctx.req.headers["sec-fetch-site"] !== "same-origin" })) })),
   ...["launch", "context", "authorize"].map((method) => ({ method: "POST", path: `/api/sandbox-gateway/${method}`, auth: "operator", write: true, handler: (ctx) => { ctx.gatewayTheme = themeOf(ctx.req.headers.cookie); return gatewayApi(ctx, method); } })),
   ...pageRoutes(realPages.PAGES),
   { method: "GET", path: "/api/whoami", auth: "viewer", write: false, handler: (ctx) => sendJson(ctx.res, 200, { name: ctx.session.name, role: ctx.session.role, readOnly: Boolean(ctx.deps.config.readOnly) }) },

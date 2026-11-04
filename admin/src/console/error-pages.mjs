@@ -36,6 +36,7 @@ import * as ui from "./kit.mjs";
 // the page table and the shell's frame. Nothing here touches either while it loads, only when a page is drawn.
 import { PAGES } from "./pages.mjs";
 import { frameHtml } from "./shell.mjs";
+import { uiText } from "./locale.mjs";
 
 /**
  * The kinds of error page, one per refusal the server answers with a page. `no-run` is the run page's own 404 (PR 4 of
@@ -100,9 +101,13 @@ function bigTile({ status, icon }) {
 }
 
 /** A "Go to <screen>" button for page `name`, with the screen's own icon and path (no query: a screen as it opens). */
-function goTo(name, primary) {
+function goTo(name, primary, locale = "en") {
   const p = PAGES[name];
-  return ui.btn({ kind: primary ? "primary" : null, icon: p.icon, label: `Go to ${p.nav}`, href: p.path });
+  return ui.btn({ kind: primary ? "primary" : null, icon: p.icon, label: `${uiText("Go to", locale)} ${uiText(p.nav, locale)}`, href: p.path });
+}
+
+function translateEntry(entry, locale) {
+  return locale === "zh" ? { ...entry, title: uiText(entry.title, locale), sub: uiText(entry.sub, locale), heading: uiText(entry.heading, locale), sentence: uiText(entry.sentence, locale) } : entry;
 }
 
 /** The ordinary error card: the tile, the status code, the heading, the sentence, then the way back. */
@@ -132,13 +137,52 @@ const LEADING_NAMES = /^([a-z][a-z0-9_]*)(?: and ([a-z][a-z0-9_]*))?(?= (?:must|
  * A refusal sentence as the end of the lead-in: kept as written, one full stop, its leading parameter name in the code
  * face (the name is what the person types in the address, as the voice sets ids and keys).
  */
-function refusalTail(sentence) {
+function refusalTail(sentence, locale = "en") {
   const trimmed = String(sentence).trim();
-  const text = trimmed.endsWith(".") ? trimmed : `${trimmed}.`;
+  let text = trimmed.endsWith(".") ? trimmed : `${trimmed}.`;
   const m = LEADING_NAMES.exec(text);
+  if (locale === "zh") {
+    if (m === null) {
+      const count = /^a query carries at most (\d+) parameters\.?$/.exec(text);
+      if (count) text = `查询最多只能包含 ${count[1]} 个参数。`;
+      else if (text === "the query is not readable.") text = "无法读取此查询。";
+      else if (text === "there is no such page on this console.") text = "此控制台没有此页面。";
+      else {
+        const takes = /^the ([a-z-]+) page takes only (.+)\.$/.exec(text);
+        const none = /^the ([a-z-]+) page takes no query parameters\.$/.exec(text);
+        const needs = /^the ([a-z-]+) page needs (.+)\.$/.exec(text);
+        if (takes) text = `${uiText(takes[1], locale)} 页面只接受这些查询参数：${takes[2]}。`;
+        else if (none) text = `${uiText(none[1], locale)} 页面不接受查询参数。`;
+        else if (needs) text = `${uiText(needs[1], locale)} 页面需要 ${needs[2]}。`;
+      }
+    } else {
+      const tail = text.slice(m[0].length).trimStart();
+      const valueSet = /^must be one of (.+)\.$/.exec(tail);
+      const longer = /^is longer than (\d+) characters\.$/.exec(tail);
+      const repeated = /^is given more than once\.$/.exec(tail);
+      const together = /^do not go together: each says where the page starts\.$/.exec(tail);
+      const fixed = {
+        "must be one retained run id.": "必须是一个仍保留的运行 ID。",
+        "must be 1 with one valid host and no other fields.": "必须为 1，并且只包含一个有效主机及无其他字段。",
+        "must name one run id.": "必须指定一个运行 ID。",
+        "must be a sandbox or run id.": "必须是沙箱 ID 或运行 ID。",
+        "must be a repository path.": "必须是仓库路径。",
+        "must be a triggers-file index.": "必须是 triggers 文件索引。",
+        "must be a worker name.": "必须是 worker 名称。",
+        "must be 0 or 1.": "必须为 0 或 1。",
+        "must be a sandbox preparation id.": "必须是沙箱准备任务 ID。",
+        "must be a branch, tag, full SHA or pr:number without spaces or control bytes.": "必须是分支、标签、完整 SHA 或 pr:number，且不能包含空格或控制字符。",
+        "must be a worker name (letters, digits, '.', '_', '-', at most 64 characters).": "必须是 worker 名称（字母、数字、'.'、'_'、'-'，且最多 64 个字符）。",
+      };
+      let translated = valueSet ? `必须是以下值之一：${valueSet[1]}。` : longer ? `长度不能超过 ${longer[1]} 个字符。` : repeated ? "不能重复提供。" : together ? "不能同时使用：它们分别指定页面的起始位置。" : fixed[tail];
+      if (translated !== undefined) text = `${m[1]}${m[2] === undefined ? "" : ` and ${m[2]}`} ${translated}`;
+    }
+  }
   if (m === null) return text;
   const name = (n) => html`<span class="code">${n}</span>`;
-  return html`${name(m[1])}${m[2] === undefined ? null : html` and ${name(m[2])}`}${text.slice(m[0].length)}`;
+  const body = text.slice(m[0].length);
+  const joiner = locale === "zh" ? " 和 " : " and ";
+  return html`${name(m[1])}${m[2] === undefined ? null : html`${joiner}${name(m[2])}`}${body}`;
 }
 
 /** The refused Host as a 421 page shows it: the normalized name, cut to `HOST_SHOWN_MAX`; null when there was none. */
@@ -173,22 +217,21 @@ function tunnelHost(address) {
  * to the address the connection reached (`tunnelHost`); for a unix socket it names a placeholder for the socket (its
  * path is not shown) and the default port.
  */
-function hostCard({ status, host, port, address }) {
-  const said = ERROR_SENTENCES.host;
+function hostCard({ status, host, port, address, locale = "en", said = ERROR_SENTENCES.host }) {
   const shown = hostShown(host);
   const local = portOf(port);
   const tunnelPort = local ?? SOCKET_TUNNEL_PORT;
   const argv = local === null ? ["ssh", "-L", `${SOCKET_TUNNEL_PORT}:<console socket>`, "<this host>"] : ["ssh", "-L", `${local}:${tunnelHost(address)}:${local}`, "<this host>"];
-  const asked = shown === null ? html`a Host that is not a plain name` : html`<span class="code">${shown}</span>`;
-  return html`<section id="p-error-421" data-panel><div class="card er-421">${ui.tile(said.status, { icon: said.icon })}<div class="er-421__t"><p class="er-code">${String(status)}</p><h2>${said.heading}</h2><p class="muted">${ui.withCode(said.sentence)}</p><p class="muted">Your browser asked for ${asked}, so the request was refused. From another machine, open an SSH tunnel and use http://localhost:${String(tunnelPort)}/ instead:</p>${ui.cmd(argv)}</div></div></section>`;
+  const asked = shown === null ? html`${uiText("a Host that is not a plain name", locale)}` : html`<span class="code">${shown}</span>`;
+  return html`<section id="p-error-421" data-panel><div class="card er-421">${ui.tile(said.status, { icon: said.icon })}<div class="er-421__t"><p class="er-code">${String(status)}</p><h2>${said.heading}</h2><p class="muted">${ui.withCode(said.sentence)}</p><p class="muted">${uiText("Your browser asked for", locale)} ${asked}${uiText(", so the request was refused. From another machine, open an SSH tunnel and use", locale)} http://localhost:${String(tunnelPort)}/${uiText("instead:", locale)}</p>${ui.cmd(argv)}</div></div></section>`;
 }
 
 /**
  * The operators-only card, alone: what a viewer is shown for the audit log, both by the server's role refusal (inside
  * `errorPage`) and by `pages.mjs` `renderPage`'s 403 belt (inside the signed-in shell), so the two say the same.
  */
-export function forbiddenContent() {
-  return errorCard({ status: KIND_STATUS["operators-only"], said: ERROR_SENTENCES["operators-only"], actions: goTo("overview", true) });
+export function forbiddenContent(locale = "en") {
+  return errorCard({ status: KIND_STATUS["operators-only"], said: translateEntry(ERROR_SENTENCES["operators-only"], locale), actions: goTo("overview", true, locale) });
 }
 
 /**
@@ -206,30 +249,29 @@ function searchedId(runId) {
  * `#q` as on the runs page, filled with the asked id where `searchedId` shows it. A plain form, so it works without the
  * script; Enter in the field submits it.
  */
-function runSearch(runId) {
-  return html`<form class="er-search" method="get" action="${PAGES.runs.path}" role="search">${ui.searchPill({ id: ui.SEARCH_ID, name: "q", value: searchedId(runId) })}</form>`;
+function runSearch(runId, locale = "en") {
+  return html`<form class="er-search" method="get" action="${PAGES.runs.path}" role="search">${ui.searchPill({ id: ui.SEARCH_ID, name: "q", value: searchedId(runId), label: uiText("Search runs", locale), placeholder: uiText("Repository, target or job id", locale) })}</form>`;
 }
 
 /** The card for `kind` (every kind but host), with its way back. */
-function cardOf(kind, { status, sentence, page, runId }) {
-  const said = ERROR_SENTENCES[kind];
+function cardOf(kind, { status, sentence, page, runId, locale = "en", said = ERROR_SENTENCES[kind] }) {
   switch (kind) {
     case "no-page":
-      return errorCard({ status, said, actions: html`${goTo("runs", true)}${goTo("overview", false)}` });
+      return errorCard({ status, said, actions: html`${goTo("runs", true, locale)}${goTo("overview", false, locale)}` });
     case "no-project":
-      return errorCard({ status, said, actions: goTo("config", true) });
+      return errorCard({ status, said, actions: goTo("config", true, locale) });
     case "no-run":
-      return errorCard({ status, said, extra: runSearch(runId), actions: html`${goTo("runs", true)}${goTo("overview", false)}` });
+      return errorCard({ status, said, extra: runSearch(runId, locale), actions: html`${goTo("runs", true, locale)}${goTo("overview", false, locale)}` });
     case "bad-query": {
       const back = backTo(page);
-      const told = typeof sentence === "string" && sentence.trim() !== "" ? html`${said.sentence}: ${refusalTail(sentence)}` : html`${said.sentence}.`;
-      const actions = back === null || back === "overview" ? goTo("overview", true) : html`${goTo(back, true)}${goTo("overview", false)}`;
+      const told = typeof sentence === "string" && sentence.trim() !== "" ? html`${said.sentence}: ${refusalTail(sentence, locale)}` : html`${said.sentence}.`;
+      const actions = back === null || back === "overview" ? goTo("overview", true, locale) : html`${goTo(back, true, locale)}${goTo("overview", false, locale)}`;
       return errorCard({ status, said, sentence: told, actions });
     }
     case "operators-only":
-      return forbiddenContent();
+      return errorCard({ status, said, actions: goTo("overview", true, locale) });
     case "method":
-      return errorCard({ status, said, actions: goTo("overview", true) });
+      return errorCard({ status, said, actions: goTo("overview", true, locale) });
     case "unavailable":
       return errorCard({ status, said, extra: ui.cmd(["pi-dispatch", "doctor"]) });
     default:
@@ -246,14 +288,14 @@ function cardOf(kind, { status, sentence, page, runId }) {
  * shown only as its search field's value (see the header). Every value goes through `html`. A no-run page's navigation
  * marks Runs current, as the run page's does: it stands where the run's page would.
  */
-export function errorPage({ status, kind, theme = null, session = null, readOnly = false, sentence = null, host = null, port = null, address = null, page = null, runId = null }) {
+export function errorPage({ status, kind, theme = null, locale = "en", session = null, readOnly = false, sentence = null, host = null, port = null, address = null, page = null, runId = null }) {
   if (typeof kind !== "string" || !ERROR_KINDS.includes(kind)) throw new RangeError(`error-pages: unknown kind ${JSON.stringify(kind)} (one of ${ERROR_KINDS.join(", ")})`);
   const code = Number.isInteger(status) && status >= 400 && status <= 599 ? status : KIND_STATUS[kind];
-  const said = ERROR_SENTENCES[kind];
+  const said = translateEntry(ERROR_SENTENCES[kind], locale);
   const nav = NAV_KINDS.has(kind) && session !== null && typeof session === "object";
-  const inner = kind === "host" ? hostCard({ status: code, host, port, address }) : cardOf(kind, { status: code, sentence, page, runId });
+  const inner = kind === "host" ? hostCard({ status: code, host, port, address, locale, said }) : cardOf(kind, { status, sentence, page, runId, locale, said });
   return {
     status: code,
-    html: frameHtml({ name: "error", title: said.title, sub: said.sub, theme, session: nav ? session : null, readOnly: nav ? Boolean(readOnly) : false, nav, here: kind === "no-run" ? "runs" : kind === "no-project" ? "config" : null }, inner),
+    html: frameHtml({ name: "error", title: said.title, sub: said.sub, theme, locale, session: nav ? session : null, readOnly: nav ? Boolean(readOnly) : false, nav, here: kind === "no-run" ? "runs" : kind === "no-project" ? "config" : null }, inner),
   };
 }

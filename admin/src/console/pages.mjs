@@ -55,6 +55,7 @@ import { PROJECT_ID_RE } from "@edgehero/pi-dispatch/projects";
 import { RUN_FILTER_FIELDS, parseRunFilter } from "../run-filter.mjs";
 import { html, page } from "./html.mjs";
 import { seg } from "./kit.mjs";
+import { uiText } from "./locale.mjs";
 import { HEADLINE_ID, NAV_PARKED_ID, navParkedHtml, shellHtml } from "./shell.mjs";
 import { TIMELINE_ROWS, TIMELINE_ZOOMS } from "./timeline.mjs";
 import { auditAbout, auditChain, auditFilter } from "./panels/audit.mjs";
@@ -1048,7 +1049,7 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
  */
 function viewOf(name, ctx) {
   const data = ctx?.data ?? {};
-  return { page: name, data, role: ctx?.session?.role ?? null, name: ctx?.session?.name ?? null, readOnly: Boolean(ctx?.readOnly), query: ctx?.query ?? {}, env: data.env ?? {}, now: data.now, pages: PAGES };
+  return { page: name, data, role: ctx?.session?.role ?? null, name: ctx?.session?.name ?? null, readOnly: Boolean(ctx?.readOnly), locale: ctx?.locale ?? "en", query: ctx?.query ?? {}, env: data.env ?? {}, now: data.now, pages: PAGES };
 }
 
 /** The viewer card's fixed visible panels. The other ids remain empty for live state swaps. */
@@ -1130,15 +1131,15 @@ export async function renderPage(name, ctx) {
   const query = pageQueryString(name, ctx?.query);
   const theme = ctx?.theme ?? null;
   if (meta.auth === "operator" && role !== "operator") {
-    const body = shellHtml(name, ctx, forbiddenContent());
-    return { status: 403, html: page({ title: `pi-dispatch console: ${meta.title}`, name, body, theme }) };
+    const body = shellHtml(name, ctx, forbiddenContent(ctx?.locale), { title: uiText(meta.title, ctx?.locale) });
+    return { status: 403, html: page({ title: `pi-dispatch console: ${uiText(meta.title, ctx?.locale)}`, name, body, theme, locale: ctx?.locale }) };
   }
   const places = name === "run" ? runPlacesOf(ctx?.data) : null;
   if (places !== null && runAbsent(places)) {
-    return errorPage({ kind: "no-run", status: 404, session: ctx?.session ?? null, readOnly: Boolean(ctx?.readOnly), theme, runId: typeof ctx?.query?.id === "string" ? ctx.query.id : null });
+    return errorPage({ kind: "no-run", status: 404, session: ctx?.session ?? null, readOnly: Boolean(ctx?.readOnly), theme, locale: ctx?.locale, runId: typeof ctx?.query?.id === "string" ? ctx.query.id : null });
   }
   if (name === "project" && ctx?.data?.projectView?.state === "missing") {
-    return errorPage({ kind: "no-project", status: 404, session: ctx?.session ?? null, readOnly: Boolean(ctx?.readOnly), theme });
+    return errorPage({ kind: "no-project", status: 404, session: ctx?.session ?? null, readOnly: Boolean(ctx?.readOnly), theme, locale: ctx?.locale });
   }
   const panels = panelFragments(name, ctx);
   // The run detail's live transcript (issue #643) is a section of its own, never a panel: a panel is what the hub
@@ -1151,11 +1152,11 @@ export async function renderPage(name, ctx) {
   if (name === "run" && extra !== null) sections.set("p-transcript", html`${sections.get("p-transcript")}${extra}`);
   const inner = Object.hasOwn(PAGE_LAYOUT, name) ? layoutHtml(name === "run" ? runLayoutOf(ctx?.data) : name === "zero-touch" ? zeroTouchLayout(role) : PAGE_LAYOUT[name], sections) : html`${[...sections.values()]}`;
   const headline = headlineOf(name, ctx);
-  const triggerListOptions = name === "triggers" ? { description: triggersDescription(viewOf(name, ctx)), end: role === "operator" && !ctx?.readOnly ? html`<a class="btn btn--primary" href="${PAGES["trigger-add"].path}">Add a trigger</a>` : null } : name === "trigger-check" ? { description: "Describe a hypothetical event. Nothing is sent or spent.", end: html`<a class="btn" href="${PAGES.triggers.path}">Back to Triggers</a>` } : null;
-  const configOptions = name === "connections" ? { description: connectionsDescription() } : name === "updates" ? { description: updatesDescription() } : name === "project" ? { title: projectTitle(ctx?.data?.projectView), description: projectDescription(ctx?.data?.projectView), end: html`<a class="btn" href="${`/runs?project=${encodeURIComponent(ctx?.query?.id ?? "")}`}">Open in Runs</a>` } : null;
-  const titleOptions = configOptions ?? triggerListOptions ?? (name === "setup" ? { description: SETUP_DESCRIPTION } : name === "models" ? { description: "Which model each role runs, its fallbacks and cooldowns. Every role change is reviewed; this page starts no run." } : name === "sandboxes" ? { description: ctx?.query?.gatewaySelect ? "Choose an already-open shell on the workspace host. No sandbox starts here." : "A kept workspace or a fresh clone, in your own terminal. A job’s isolation, no credentials and no agent.", end: ctx?.query?.gatewaySelect ? null : html`<a class="btn" href="/runs/sandboxes#p-sb-new">New sandbox</a>` } : name === "config" ? { description: configDescription(viewOf(name, ctx)) } : name === "trigger" ? { title: triggerTitle(viewOf(name, ctx)), end: html`<a class="btn" href="${`/runs?trigger=${encodeURIComponent(String(ctx?.data?.triggerDetail?.trigger?.type === "cron" ? ctx.data.triggerDetail.trigger.id : ctx?.query?.index))}`}">Open in Runs</a>` } : name === "venue" ? { description: BACKENDS[ctx?.query?.name]?.describe ?? null, end: seg(BACKEND_NAMES.map((venue) => ({ label: venue, href: `/fleet/venue?${new URLSearchParams({ name: venue })}`, on: venue === ctx?.query?.name })), { label: "Venues" }) } : name === "fleet" ? { description: "Queues, hosts and their health. Every pause, cancel and removal previews first." } : {});
-  const body = shellHtml(name, ctx, html`${["runs", "zero-touch", "sandboxes"].includes(name) ? zeroTouchTabs(viewOf(name, ctx)) : name.startsWith("insights") ? spendTabs(viewOf(name, ctx)) : null}${ctx?.query?.becauseRun ? html`<p class="note">Configuration fix started from <a href="${`/run?id=${encodeURIComponent(ctx.query.becauseRun)}`}">${ctx.query.becauseRun}</a>. Confirmed changes on this page will be linked to that refusal.</p>` : null}${inner}`, { ...titleOptions, ...(name === "zero-touch" ? { description: "How often a run needed a person, per project and repository. The goal is zero.", end: zeroTouchControls(viewOf(name, ctx)) } : {}), ...(name.startsWith("insights") ? { description: spendDescription(name), end: spendControls(viewOf(name, ctx)) } : {}), ...(headline === null ? {} : { headline }) });
+  const triggerListOptions = name === "triggers" ? { description: triggersDescription(viewOf(name, ctx)), end: role === "operator" && !ctx?.readOnly ? html`<a class="btn btn--primary" href="${PAGES["trigger-add"].path}">${uiText("Add a trigger", ctx?.locale)}</a>` : null } : name === "trigger-check" ? { description: "Describe a hypothetical event. Nothing is sent or spent.", end: html`<a class="btn" href="${PAGES.triggers.path}">${uiText("Back to Triggers", ctx?.locale)}</a>` } : null;
+  const configOptions = name === "connections" ? { description: connectionsDescription(ctx?.locale) } : name === "updates" ? { description: updatesDescription(ctx?.locale) } : name === "project" ? { title: projectTitle(ctx?.data?.projectView, ctx?.locale), description: projectDescription(ctx?.data?.projectView, ctx?.locale), end: html`<a class="btn" href="${`/runs?project=${encodeURIComponent(ctx?.query?.id ?? "")}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : null;
+  const titleOptions = configOptions ?? triggerListOptions ?? (name === "setup" ? { description: SETUP_DESCRIPTION } : name === "models" ? { description: "Which model each role runs, its fallbacks and cooldowns. Every role change is reviewed; this page starts no run." } : name === "sandboxes" ? { description: ctx?.query?.gatewaySelect ? "Choose an already-open shell on the workspace host. No sandbox starts here." : "A kept workspace or a fresh clone, in your own terminal. A job’s isolation, no credentials and no agent.", end: ctx?.query?.gatewaySelect ? null : html`<a class="btn" href="/runs/sandboxes#p-sb-new">New sandbox</a>` } : name === "config" ? { description: configDescription(viewOf(name, ctx)) } : name === "trigger" ? { title: triggerTitle(viewOf(name, ctx)), end: html`<a class="btn" href="${`/runs?trigger=${encodeURIComponent(String(ctx?.data?.triggerDetail?.trigger?.type === "cron" ? ctx.data.triggerDetail.trigger.id : ctx?.query?.index))}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : name === "venue" ? { description: BACKENDS[ctx?.query?.name]?.describe ?? null, end: seg(BACKEND_NAMES.map((venue) => ({ label: venue, href: `/fleet/venue?${new URLSearchParams({ name: venue })}`, on: venue === ctx?.query?.name })), { label: "Venues" }) } : name === "fleet" ? { description: "Queues, hosts and their health. Every pause, cancel and removal previews first." } : {});
+  const body = shellHtml(name, ctx, html`${["runs", "zero-touch", "sandboxes"].includes(name) ? zeroTouchTabs(viewOf(name, ctx)) : name.startsWith("insights") ? spendTabs(viewOf(name, ctx)) : null}${ctx?.query?.becauseRun ? html`<p class="note">${uiText("Configuration fix started from", ctx?.locale)} <a href="${`/run?id=${encodeURIComponent(ctx.query.becauseRun)}`}">${ctx.query.becauseRun}</a>. ${uiText("Confirmed changes on this page will be linked to that refusal.", ctx?.locale)}</p>` : null}${inner}`, { ...titleOptions, ...(name === "zero-touch" ? { description: "How often a run needed a person, per project and repository. The goal is zero.", end: zeroTouchControls(viewOf(name, ctx)) } : {}), ...(name.startsWith("insights") ? { description: spendDescription(name, viewOf(name, ctx).locale), end: spendControls(viewOf(name, ctx)) } : {}), ...(headline === null ? {} : { headline }) });
   // A run no place shows while one could not be read is a run page that cannot say whether the run exists: 503.
   const status = name === "project" && ctx?.data?.projectView?.state !== "ready" || places !== null && !runPlaces(places).shown ? 503 : 200;
-  return { status, html: page({ title: `pi-dispatch console: ${["host", "venue"].includes(name) ? ctx?.query?.name ?? meta.title : meta.title}`, name, body, live, query, theme, becauseRun: ctx?.query?.becauseRun ?? null }) };
+  return { status, html: page({ title: `pi-dispatch console: ${["host", "venue"].includes(name) ? ctx?.query?.name ?? uiText(meta.title, ctx?.locale) : uiText(meta.title, ctx?.locale)}`, name, body, live, query, theme, locale: ctx?.locale, becauseRun: ctx?.query?.becauseRun ?? null }) };
 }

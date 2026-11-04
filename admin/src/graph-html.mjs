@@ -1474,13 +1474,6 @@ function groupTitle(g, fullPaths) {
   return name;
 }
 
-function capsLineText(caps) {
-  const d = caps.chainDepthMax ?? "?";
-  const m = caps.chainMaxPerJob ?? "?";
-  const k = caps.windowDays ?? "?";
-  return `chains: depth ≤ ${d} · ≤ ${m} per job · same folder only · window ${k}d`;
-}
-
 // ---- SVG emission ----
 
 const ORANGE_FLAGS = new Set(["unread", "injected-ai-trigger", "pr-spend-loop-risk"]);
@@ -1622,46 +1615,46 @@ function legendSwatch(inner) {
   return `<svg width="16" height="12" aria-hidden="true">${inner}</svg>`;
 }
 
-export function legendHtml(norm, hiddenLabels = 0) {
+export function legendHtml(norm, hiddenLabels = 0, translate = (message) => message) {
   const rows = [];
-  const row = (sample, text) => rows.push(`<div class="row">${sample}<span>${escapeHtml(text)}</span></div>`);
-  rows.push("<h2>edges</h2>");
+  const row = (sample, text) => rows.push(`<div class="row">${sample}<span>${escapeHtml(translate(text))}</span></div>`);
+  rows.push(`<h2>${escapeHtml(translate("edges"))}</h2>`);
   row(legendSample(WIRE_CONFIG, 2, null), "config: the trigger names this flow");
   row(legendSample(WIRE_OBSERVED, 3, null), "observed ×n: chained in run records");
   row(legendSample(WIRE_POTENTIAL, 2, "6,4"), "potential: a text mention, not a promise");
   row(legendSample(PAGE_ACCENT, 2, "6,4"), "potential (strong): near chain vocabulary");
   row(legendSample(CHIP_FILL.cron, 2, "4,3"), "cron re-arm: the schedule itself");
-  rows.push("<h2>badges</h2>");
+  rows.push(`<h2>${escapeHtml(translate("badges"))}</h2>`);
   row(legendSwatch(`<circle cx="8" cy="6" r="5" fill="${BADGE_ORANGE}"/>`), "unread / injected ai-trigger / PR spend-loop risk");
   row(legendSwatch(`<circle cx="8" cy="6" r="4" fill="none" stroke="${BADGE_GREEN}" stroke-width="2"/>`), "chainable: ai-trigger allow");
   row(legendSwatch(`<rect x="1" y="1" width="14" height="10" rx="2" fill="none" stroke="${CHIP_STROKE}" stroke-dasharray="8,3"/>`), "orphan: no trigger, no ai-trigger, no mention");
   row(legendSwatch(`<rect x="1" y="1" width="14" height="10" rx="2" fill="none" stroke="${DANGER}" stroke-dasharray="10,4"/>`), "dangling: absent in every checkable tier or name invalid");
   row(legendSwatch(`<rect x="1" y="1" width="14" height="10" rx="2" fill="none" stroke="${PAGE_AMBER}" stroke-dasharray="10,4"/>`), "not at HEAD: some skill tiers not checkable from this session");
   row(legendSwatch(`<rect x="1" y="1" width="14" height="10" rx="2" fill="none" stroke="${PAGE_DIM}" stroke-dasharray="10,4"/>`), "unverified: repo not readable from this host");
-  rows.push(`<div class="caps">${escapeHtml(capsLineText(norm.caps))}</div>`);
+  rows.push(`<div class="caps">${escapeHtml(`${translate("chains: depth")} ≤ ${norm.caps.chainDepthMax ?? "?"} · ≤ ${norm.caps.chainMaxPerJob ?? "?"} ${translate("per job · same folder only · window")} ${norm.caps.windowDays ?? "?"}${translate("d")}`)}</div>`);
   const honesty = [];
-  if (norm.meta.unattributedRuns > 0) honesty.push(`${norm.meta.unattributedRuns} ${norm.meta.unattributedRuns === 1 ? "run" : "runs"} unattributed`);
-  if (norm.meta.truncated.folders) honesty.push("folder scan truncated (cap reached)");
-  if (norm.meta.truncated.skills) honesty.push("skill enumeration truncated or partly unread");
-  if (norm.meta.truncated.edges) honesty.push("observed edges truncated (cap reached)");
-  if (norm.meta.droppedObservedEdges > 0) honesty.push(`${norm.meta.droppedObservedEdges} observed ${norm.meta.droppedObservedEdges === 1 ? "edge" : "edges"} dropped (no unique folder)`);
+  if (norm.meta.unattributedRuns > 0) honesty.push(`${norm.meta.unattributedRuns} ${translate(norm.meta.unattributedRuns === 1 ? "run unattributed" : "runs unattributed")}`);
+  if (norm.meta.truncated.folders) honesty.push(translate("folder scan truncated (cap reached)"));
+  if (norm.meta.truncated.skills) honesty.push(translate("skill enumeration truncated or partly unread"));
+  if (norm.meta.truncated.edges) honesty.push(translate("observed edges truncated (cap reached)"));
+  if (norm.meta.droppedObservedEdges > 0) honesty.push(`${norm.meta.droppedObservedEdges} ${translate(norm.meta.droppedObservedEdges === 1 ? "observed edge dropped (no unique folder)" : "observed edges dropped (no unique folder)")}`);
   // The counters the text and TUI surfaces already state (issue #175): the page joins them.
   const refused = norm.meta.chainRefusals.reduce((a, r) => a + r.count, 0);
-  if (refused > 0) honesty.push(`${refused} chain ${refused === 1 ? "request" : "requests"} refused (caps or gate)`);
-  if (norm.meta.injectedUnreachable.length > 0) honesty.push(`injected skills dir unreadable: ${norm.meta.injectedUnreachable.join(", ")}`);
-  if (norm.meta.overlayUnreachable) honesty.push("overlay skills dir unreadable (global pi dir)");
-  if (norm.meta.stagedUnenumerable.length > 0) honesty.push(`staged packages not enumerable (manifest patterns): ${norm.meta.stagedUnenumerable.join(", ")}`);
+  if (refused > 0) honesty.push(`${refused} ${translate(refused === 1 ? "chain request refused (caps or gate)" : "chain requests refused (caps or gate)")}`);
+  if (norm.meta.injectedUnreachable.length > 0) honesty.push(`${translate("injected skills dir unreadable:")} ${norm.meta.injectedUnreachable.join(", ")}`);
+  if (norm.meta.overlayUnreachable) honesty.push(translate("overlay skills dir unreadable (global pi dir)"));
+  if (norm.meta.stagedUnenumerable.length > 0) honesty.push(`${translate("staged packages not enumerable (manifest patterns):")} ${norm.meta.stagedUnenumerable.join(", ")}`);
   // Stated, never silent: a wire label the layout found no clear spot for is in that wire's tooltip only.
-  if (Number.isInteger(hiddenLabels) && hiddenLabels > 0) honesty.push(`${hiddenLabels} wire label${hiddenLabels === 1 ? "" : "s"} in tooltips only (no clear spot on the page)`);
+  if (Number.isInteger(hiddenLabels) && hiddenLabels > 0) honesty.push(`${hiddenLabels} ${translate(hiddenLabels === 1 ? "wire label in tooltips only (no clear spot on the page)" : "wire labels in tooltips only (no clear spot on the page)")}`);
   for (const line of honesty) rows.push(`<div class="honesty">${escapeHtml(line)}</div>`);
   return `<div id="legend">${rows.join("")}</div>`;
 }
 
-export function bannersHtml(norm) {
+export function bannersHtml(norm, translate = (message) => message) {
   const banners = [];
-  if (!norm.ok) banners.push("no graph model supplied; the page has nothing to draw");
-  if (norm.meta.triggersMissing) banners.push("no triggers file found");
-  if (norm.meta.triggersInvalid !== null) banners.push(`triggers file invalid: ${norm.meta.triggersInvalid}`);
+  if (!norm.ok) banners.push(translate("no graph model supplied; the page has nothing to draw"));
+  if (norm.meta.triggersMissing) banners.push(translate("no triggers file found"));
+  if (norm.meta.triggersInvalid !== null) banners.push(`${translate("triggers file invalid:")} ${norm.meta.triggersInvalid}`);
   if (banners.length === 0) return "";
   return `<div id="banners">${banners.map((b) => `<div class="banner">${escapeHtml(b)}</div>`).join("")}</div>`;
 }

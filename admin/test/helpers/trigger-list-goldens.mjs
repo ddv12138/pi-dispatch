@@ -25,7 +25,7 @@ function checked(input) {
   }
   return checkTriggerEvent({ triggersPath: checkerPath, input });
 }
-export async function triggerListGolden({ role = "operator", state = "history-cut", readOnly = false, check = null, kind = "all", extraTriggers = [], recordsOverride = undefined, complete = false } = {}) {
+export async function triggerListGolden({ role = "operator", state = "history-cut", readOnly = false, check = null, kind = "all", locale = "en", extraTriggers = [], recordsOverride = undefined, complete = false } = {}) {
   const triggers = entries.map((entry, index) => ({ ...normalizeTriggerForDisplay(entry), index }));
   triggers.push(...extraTriggers);
   if (state === "spent") triggers.push({ index: 4, type: "issue", forge: "github", flow: "close", action: ["closed"], number: 42, once: true, disarmed: { jobId: "gh-spent", at: new Date(NOW - 3600000).toISOString() } });
@@ -43,7 +43,7 @@ export async function triggerListGolden({ role = "operator", state = "history-cu
     fleet: { snapshot: async () => snapshot, parkedCount: async () => 0 },
     triggerList: snap => triggerListOf({ snapshot: snap, now: NOW, records, coverage: { complete }, scheduleZones: state === "zone-unknown" ? {} : { nightly: "UTC" } }),
   }, { role });
-  const rendered = await renderPage(name, { query: name === "triggers" ? { kind } : {}, session: { name: role === "operator" ? "ops" : "watcher", role }, data, readOnly });
+  const rendered = await renderPage(name, { query: name === "triggers" ? { kind } : {}, session: { name: role === "operator" ? "ops" : "watcher", role }, data, readOnly, locale });
   assert.equal(rendered.status, 200);
   let page = String(rendered.html);
   if (check) {
@@ -52,7 +52,7 @@ export async function triggerListGolden({ role = "operator", state = "history-cu
     assert.equal(Boolean(result.matched), check === "match");
     const slot = /(<div\s+data-trigger-check-result\b[^>]*>)[^]*?(<\/div>\s*<\/form>)/;
     assert.match(page, slot);
-    page = page.replace(slot, (_, start, end) => `${start}${renderTriggerCheckResult(result)}${end}`);
+    page = page.replace(slot, (_, start, end) => `${start}${renderTriggerCheckResult(result, locale)}${end}`);
   }
   assert.ok(!page.includes("PRIVATE TASK CANARY"));
   return page;

@@ -1,6 +1,7 @@
 /** SandboxesScreen: private operator facts and confirmed control requests, never a browser shell (#771). */
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { sandboxLinks, sandboxBrowserLink, sandboxDriverLine } from "../sandbox-links.mjs";
 import { timeHtml, ageText } from "./common.mjs";
 
@@ -12,10 +13,11 @@ export const SANDBOX_WORDS = Object.freeze({
   noScript: "Preparing, pinning, ending a shell and saving terminal targets require JavaScript for Preview and Confirm. Commands remain selectable and the settings form works without JavaScript.",
 });
 const report = (v) => v.data?.sandboxes;
+const t = (s, v) => uiText(s, v?.locale);
 const allowed = (v) => v.role === "operator";
 const acts = (v) => allowed(v) && !v.readOnly;
 const rows = (v) => (report(v)?.hosts ?? []).flatMap((h) => (h.rows ?? []).map((r) => ({ ...r, host: h.name, hostStale: h.stale, retentionHours: h.retentionHours })));
-const card = (title, body, sub = null, end = null) => ui.card({ title, sub, body, end });
+const card = (title, body, sub = null, end = null, locale = "en") => ui.card({ title: uiText(title, locale), sub: sub ? uiText(sub, locale) : sub, body, end });
 const stamp = (ms) => Number.isFinite(ms) ? timeHtml(ms) : "not published";
 const rowId = (r) => r.id ?? r.jobId;
 const canOpen = (r) => !String(rowId(r)).startsWith("sha256:") && r.canOpen !== false && ["local", "podman"].includes(r.v ?? r.backend);
@@ -26,7 +28,7 @@ const facts = (plan) => ui.facts([
   ["Network", plan.egress?.armed ? "The host's job allowlist through its egress proxy" : "Open bridge, egress policy off"],
   ["Credentials", "None in the shell"],
 ]);
-const links = (v, r, verb = "open", compact = false) => sandboxLinks({ id: rowId(r), host: r.host, verb, compact, config: v.data?.sandboxHosts });
+const links = (v, r, verb = "open", compact = false) => sandboxLinks({ id: rowId(r), host: r.host, verb, compact, config: v.data?.sandboxHosts, locale: v.locale });
 const retention = (r, now) => html`${r.pin ? "Pinned" : "Kept"}${Number.isFinite(r.until) ? html` until ${stamp(r.until)}${r.until <= now ? " (past its window; pin before opening)" : html`, ${ageText(r.until - now)} left`}` : ": deadline not published"}`;
 const pinForm = (v, r) => acts(v) && canOpen(r) ? ui.actForm({ action: "sandbox-pin", hidden: [["host", r.host], ["id", rowId(r)]], label: "Preview pin", icon: "clock" }) : null;
 function state(v) {
@@ -43,11 +45,11 @@ export function sandboxFromRun(v) {
   const picked = all.find((r) => rowId(r) === id && (!v.query?.host || r.host === v.query.host));
   const pickerHost = v.query?.host ?? selected(v).host ?? all[0]?.host ?? "";
   const picker = html`<form method="get" action="/runs/sandboxes" data-live-hold class="sx-picker">${ui.field({ label: "Workspace host", id: "sb-workspace-host", control: ui.select({ id: "sb-workspace-host", name: "host", value: pickerHost, options: [{ value: "", label: "Choose a host" }, ...(report(v)?.hosts ?? []).map((h) => ({ value: h.name, label: h.name }))] }) })}${ui.field({ label: "Kept workspace", id: "sb-workspace", control: ui.select({ id: "sb-workspace", name: "id", value: id ?? "", options: [{ value: "", label: "Choose a workspace" }, ...all.filter((r) => !pickerHost || r.host === pickerHost).map((r) => ({ value: rowId(r), label: `${rowId(r)} on ${r.host}${r.prepared ? " (prepared)" : ""}` }))] }) })}${ui.btn({ type: "submit", label: "Show workspace" })}</form>`;
-  if (!report(v)) return card("From a run", html`<p role="status">${SANDBOX_WORDS.unavailable}</p>`);
-  if (!picked) return card("From a run", html`${state(v)}${v.data?.sandboxHostsProblem ? html`<p role="status">${v.data.sandboxHostsProblem}</p>` : null}${picker}<p class="card__sub">${all.length ? "Choose a kept workspace, or open Sandboxes from a run page." : SANDBOX_WORDS.empty}</p>`, "the image, workspace and isolation the run kept");
+  if (!report(v)) return card(t("From a run", v), html`<p role="status">${t(SANDBOX_WORDS.unavailable, v)}</p>`);
+  if (!picked) return card(t("From a run", v), html`${state(v)}${v.data?.sandboxHostsProblem ? html`<p role="status">${v.data.sandboxHostsProblem}</p>` : null}${picker}<p class="card__sub">${all.length ? t("Choose a kept workspace, or open Sandboxes from a run page.", v) : t(SANDBOX_WORDS.empty, v)}</p>`, t("the image, workspace and isolation the run kept", v));
   const workspace = picked.kind === "local" ? "Its original host folder" : ["github", "gitlab", "forgejo", "azure"].includes(picked.kind) ? "Its retained clone" : "The workspace recorded in its kept manifest";
   const what = ui.facts([["Image", picked.image ?? "As recorded in its kept manifest"], ["/workspace", workspace], ["/job", "Read only, with the retained job inputs"], ["Processes", "None until you start them"], ["Credentials", "None, on purpose"], ["Network", "The host's current job egress policy"]], { cols: 3 });
-  return card("From a run", html`${state(v)}${v.data?.sandboxHostsProblem ? html`<p role="status">${v.data.sandboxHostsProblem}</p>` : null}${picker}<div class="sx-run">${ui.tile("ok", { icon: "box" })}<div><p class="sx-run__t"><span class="code">${rowId(picked)}</span>${picked.project ? ui.ptag(picked.project) : null}${picked.prepared ? ui.chip("Without a run") : null}</p><p class="sx-run__s">${picked.host} ${ui.vtag(picked.v ?? picked.backend)}. ${retention(picked, v.now)}</p></div></div><h3 class="sx-h3">What opens</h3>${what}<h3 class="sx-h3">How it opens</h3>${canOpen(picked) ? html`<div class="sx-ch sx-ch--on"><div class="sx-ch__h">${ui.icon("terminal", { size: "sm" })}<b>In your terminal</b><span class="sx-rec sandbox-opener">recommended</span></div><p class="sx-ch__s">Your terminal opens with the command typed in and waits for Enter. The link holds no secret. On a phone, copy the command.</p>${links(v, picked)}</div><div class="sx-foot"><p>${ui.icon("info", { size: "sm" })}<span>The shell uses a job's isolation and network. A published host port is refused while egress is on. Pinning uses this host's configured pin window.</span></p>${pinForm(v, picked)}</div>` : html`<p>This venue has no sandbox shell. Its workspace cannot be reopened here.</p>`}`, "the same image, workspace and isolation as the run");
+  return card(t("From a run", v), html`${state(v)}${v.data?.sandboxHostsProblem ? html`<p role="status">${v.data.sandboxHostsProblem}</p>` : null}${picker}<div class="sx-run">${ui.tile("ok", { icon: "box" })}<div><p class="sx-run__t"><span class="code">${rowId(picked)}</span>${picked.project ? ui.ptag(picked.project) : null}${picked.prepared ? ui.chip(t("Without a run", v)) : null}</p><p class="sx-run__s">${picked.host} ${ui.vtag(picked.v ?? picked.backend)}. ${retention(picked, v.now)}</p></div></div><h3 class="sx-h3">${t("What opens", v)}</h3>${what}<h3 class="sx-h3">${t("How it opens", v)}</h3>${canOpen(picked) ? html`<div class="sx-ch sx-ch--on"><div class="sx-ch__h">${ui.icon("terminal", { size: "sm" })}<b>${t("In your terminal", v)}</b><span class="sx-rec sandbox-opener">${t("recommended", v)}</span></div><p class="sx-ch__s">${t("Your terminal opens with the command typed in and waits for Enter. The link holds no secret. On a phone, copy the command.", v)}</p>${links(v, picked)}</div><div class="sx-foot"><p>${ui.icon("info", { size: "sm" })}<span>${t("The shell uses a job's isolation and network. A published host port is refused while egress is on. Pinning uses this host's configured pin window.", v)}</span></p>${pinForm(v, picked)}</div>` : html`<p>${t("This venue has no sandbox shell. Its workspace cannot be reopened here.", v)}</p>`}`, t("the same image, workspace and isolation as the run", v));
 }
 
 export function sandboxNew(v) {

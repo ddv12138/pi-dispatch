@@ -2,6 +2,7 @@
 import { plural } from "./common.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { zeroTouchView } from "../../zero-touch-view.mjs";
 
 export const ZERO_TOUCH_WORDS = Object.freeze({ unavailable: "Zero touch could not be read. Reload to try again; missing history is never counted as zero touches.", empty: "No workload runs ended in the covered interval.", drafts: "Sent by a person, edited or as drafted. Each run still counts as a touch.", draftsPartial: "Partial history; this counts retained runs only.", viewer: "Questions it keeps asking are for operators. Rates, causes, streaks and fixes are shown here.", noGroups: "No question groups yet. Group retained questions with a capped decision job; name each group yourself.", noFixes: "No cause-linked fixes recorded yet. Start a change from a refusal or a question group to measure it here." });
@@ -25,6 +26,7 @@ export const ZERO_TOUCH_SOURCE_WORDS = Object.freeze({
   failed: "The grouping job failed. Open its run and review the failure before trying again.",
 });
 const causesByKey = new Map(ZERO_TOUCH_CAUSES.map((c) => [c.cause, c]));
+const t = (s, view) => uiText(s, view?.locale);
 const model = (v) => zeroTouchView(v?.data?.zeroTouch, { role: v?.role, windowDays: v?.query?.days ?? 30, nowMs: v?.now ?? 0 });
 const acts = (v) => v?.role === "operator" && !v?.readOnly;
 const pct = (n) => Number.isFinite(n) ? `${Math.round(n)}%` : "Not known";
@@ -36,11 +38,11 @@ const fail = (m) => m.state === "unavailable" ? html`<p class="zt-note" role="st
 export function zeroTouchTabs(view) {
   const here = view?.page === "zero-touch";
   const sandboxes = view?.page === "sandboxes";
-  return ui.tabs([{ label: "All runs", href: "/runs", icon: "runs", current: !here && !sandboxes }, { label: "Zero touch", href: "/runs/zero-touch", icon: "flag", current: here }, ...(view?.role === "operator" ? [{ label: "Sandboxes", href: "/runs/sandboxes", icon: "box", current: sandboxes }] : [])], { label: "Runs views" });
+  return ui.tabs([{ label: t("All runs", view), href: "/runs", icon: "runs", current: !here && !sandboxes }, { label: t("Zero touch", view), href: "/runs/zero-touch", icon: "flag", current: here }, ...(view?.role === "operator" ? [{ label: t("Sandboxes", view), href: "/runs/sandboxes", icon: "box", current: sandboxes }] : [])], { label: t("Runs views", view) });
 }
 export function zeroTouchControls(view) {
   const m = model(view);
-  return ui.seg([7, 30, 90].map((days) => ({ label: `${days} days`, href: `/runs/zero-touch?${new URLSearchParams({ days: String(days), ...(view?.query?.project ? { project: view.query.project } : {}), ...(view?.query?.scope ? { scope: view.query.scope } : {}) })}`, on: days === m.windowDays })), { label: "Window" });
+  return ui.seg([7, 30, 90].map((days) => ({ label: `${days} ${t("days", view)}`, href: `/runs/zero-touch?${new URLSearchParams({ days: String(days), ...(view?.query?.project ? { project: view.query.project } : {}), ...(view?.query?.scope ? { scope: view.query.scope } : {}) })}`, on: days === m.windowDays })), { label: t("Window", view) });
 }
 function delta(n, previousRate = null) {
   if (!Number.isFinite(n)) return html`<span class="zt-tr">Previous interval not covered</span>`;
@@ -74,11 +76,11 @@ function compact(m) {
 }
 export function zeroTouchRate(view) {
   const m = model(view);
-  return ui.card({ title: `Touch rate, ${m.windowDays} days`, body: html`${fail(m)}${m.state === "ready" ? html`${ui.kpi(m.totals.runs ? pct(m.totals.rate) : "No runs", `${m.totals.touched} of ${m.totals.runs} runs needed a person`)}${spark(m)}<p class="zt-kp"><span class="zt-kt">${ui.icon("flag", { size: "sm" })}goal under 5%</span>${delta(m.totals.deltaPoints, m.totals.previousRate)}</p>${coverage(m)}<p class="zt-kps">${m.totals.stopped} stopped before they ran, outside the rate.${m.totals.stoppedUnattributed > 0 ? html` ${m.totals.stoppedUnattributed} stops have no recorded project or scope, so this selection may have more.` : null}</p><div class="zt-phone-summary">${compact(m)}</div>` : null}` });
+  return ui.card({ title: `${t("Touch rate,", view)} ${m.windowDays} ${t("days", view)}`, body: html`${fail(m)}${m.state === "ready" ? html`${ui.kpi(m.totals.runs ? pct(m.totals.rate) : t("No runs", view), `${m.totals.touched} ${t("of", view)} ${m.totals.runs} ${t("runs needed a person", view)}`)}${spark(m)}<p class="zt-kp"><span class="zt-kt">${ui.icon("flag", { size: "sm" })}${t("goal under 5%", view)}</span>${delta(m.totals.deltaPoints, m.totals.previousRate)}</p>${coverage(m)}<p class="zt-kps">${m.totals.stopped} ${t("stopped before they ran, outside the rate.", view)}${m.totals.stoppedUnattributed > 0 ? html` ${m.totals.stoppedUnattributed} ${t("stops have no recorded project or scope, so this selection may have more.", view)}` : null}</p><div class="zt-phone-summary">${compact(m)}</div>` : null}` });
 }
 export function zeroTouchStreak(view) {
   const m = model(view), best = longest(m);
-  return ui.card({ title: "Zero-touch streak", body: html`${fail(m)}${ui.kpi(best ? `${amount(best.streakDays)} ${best.streakDays === 1 ? "day" : "days"}` : "Not enough history", best ? `${best.name}, the longest now` : "30 days of observed activity establish a zero-touch project")}<p class="zt-kp">${m.projects.filter((p) => p !== best).sort((a, b) => (b.streakDays ?? -1) - (a.streakDays ?? -1)).map((p) => p.waitingNow ? ui.chip(`${p.name} waiting now`, { status: "parked", icon: "parked" }) : html`<span class="zt-kt">${p.name} ${p.streakDays === null ? "not known" : `${amount(p.streakDays)} ${p.streakDays === 1 ? "day" : "days"}`}</span>`)}</p>` });
+  return ui.card({ title: t("Zero-touch streak", view), body: html`${fail(m)}${ui.kpi(best ? `${amount(best.streakDays)} ${best.streakDays === 1 ? t("day", view) : t("days", view)}` : t("Not enough history", view), best ? `${best.name}, ${t("the longest now", view)}` : t("30 days of observed activity establish a zero-touch project", view))}<p class="zt-kp">${m.projects.filter((p) => p !== best).sort((a, b) => (b.streakDays ?? -1) - (a.streakDays ?? -1)).map((p) => p.waitingNow ? ui.chip(`${p.name} ${t("waiting now", view)}`, { status: "parked", icon: "parked" }) : html`<span class="zt-kt">${p.name} ${p.streakDays === null ? t("not known", view) : `${amount(p.streakDays)} ${p.streakDays === 1 ? t("day", view) : t("days", view)}`}</span>`)}</p>` });
 }
 export function zeroTouchWait(view) {
   const m = model(view);

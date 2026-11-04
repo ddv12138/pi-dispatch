@@ -4,6 +4,28 @@ export const GATEWAY_CONSOLE_SCRIPT = String.raw`
   "use strict";
   var root = document.querySelector("[data-sandbox-gateway-mode]");
   if (!root) return;
+  var isChinese = document.documentElement && document.documentElement.lang === "zh-CN";
+  var ZH = {
+    "The launch state could not be read. Restart from Sandboxes.": "无法读取启动状态。请返回沙箱页面重新开始。",
+    "Use your own terminal on this screen. No browser attachment was authorized.": "请在此屏幕使用自己的终端。浏览器终端连接未获授权。",
+    "This console request is not supported. Restart from Sandboxes.": "此控制台请求不受支持。请返回沙箱页面重新开始。",
+    "The original sign-in or gateway could not be checked. Restart from Sandboxes.": "无法验证原始登录状态或网关。请返回沙箱页面重新开始。",
+    "The console did not answer in time. No connection is retried; restart from Sandboxes.": "控制台未能及时响应。不会自动重试，请返回沙箱页面重新开始。",
+    "This opening could not be authorized. Restart from Sandboxes.": "此终端连接未获授权。请返回沙箱页面重新开始。",
+    "The gateway address changed. Restart from Sandboxes.": "网关地址已更改。请返回沙箱页面重新开始。",
+    "This launch address is not usable. Restart from Sandboxes.": "此启动地址不可用。请返回沙箱页面重新开始。",
+    "This return address is not usable. Restart from Sandboxes.": "此返回地址不可用。请返回沙箱页面重新开始。",
+    "This host is not usable. Restart from Sandboxes.": "此主机不可用。请返回沙箱页面重新开始。",
+    "Browser terminals need an operator on a writable console. Use the native terminal route.": "浏览器终端需要可写控制台中的操作员权限。请改用本机终端。",
+    "Open this terminal? Nothing has been authorized yet.": "要打开此终端吗？目前尚未进行授权。",
+    "This opening has no original-tab proof. Restart from Sandboxes.": "此连接缺少原始标签页凭证。请返回沙箱页面重新开始。",
+    "This opening expired or belongs to another tab. Restart from Sandboxes.": "此连接已过期或属于其他标签页。请返回沙箱页面重新开始。",
+    "Gateway enrollment changed. Restart from Sandboxes.": "网关注册信息已更改。请返回沙箱页面重新开始。",
+    "Verify and watch": "验证并查看", "Verify and open terminal": "验证并打开终端",
+    "Enter this sign-in's current operator token. The one-use attachment grant lasts 60 seconds.": "请输入当前登录使用的操作员令牌。一次性连接授权有效期为 60 秒。",
+    "Verifying this sign-in and sandbox. Nothing opens until the check succeeds.": "正在验证此登录状态和沙箱。验证成功前不会打开任何内容。"
+  };
+  function uiText(text) { return isChinese && typeof text === "string" ? ZH[text] || text : text; }
   var mode = root.getAttribute("data-sandbox-gateway-mode"), person = null;
   // These controls belong to this one section, not the global frame whose IDs the kit reserves.
   var status = root.querySelector("#gateway-status"), form = root.querySelector("#gateway-step-up");
@@ -12,7 +34,7 @@ export const GATEWAY_CONSOLE_SCRIPT = String.raw`
   var key = intent ? "sandbox-gateway:" + intent : null;
   function refusal(text) { var error = new Error(text); error.public = true; return error; }
   function safeError(error) { return error && error.public ? error.message : "The launch state could not be read. Restart from Sandboxes."; }
-  function say(text) { status.textContent = text; }
+  function say(text) { status.textContent = uiText(text); }
   function wide() { return window.innerWidth > 760; }
   function forget() { if (key) { try { sessionStorage.removeItem(key); } catch (_) {} } }
   function blocked(text) { form.hidden = true; token.value = ""; token.disabled = true; submit.disabled = true; say(text); }
@@ -82,9 +104,11 @@ export const GATEWAY_CONSOLE_SCRIPT = String.raw`
     if (!/^[A-Za-z0-9_-]{43}$/.test(saved.receipt || "")) { forget(); throw refusal("This opening has no original-tab proof. Restart from Sandboxes."); }
     var context = await post("context", { intentId: intent, tabProof: saved.proof, receipt: saved.receipt });
     if (context.gatewayOrigin !== saved.gateway) { forget(); throw refusal("Gateway enrollment changed. Restart from Sandboxes."); }
-    root.querySelector("#gateway-target").textContent = context.id + " on " + context.host;
-    root.querySelector("#gateway-person").textContent = "Verify as " + context.by + (context.kind === "watch" ? " to watch " + context.driverName + "’s shell, read only, through " : " before attaching through ") + context.gatewayOrigin + ".";
-    submit.textContent = context.kind === "watch" ? "Verify and watch" : "Verify and open terminal";
+    root.querySelector("#gateway-target").textContent = context.id + (isChinese ? "，主机：" : " on ") + context.host;
+    root.querySelector("#gateway-person").textContent = isChinese
+      ? "以 " + context.by + " 身份验证" + (context.kind === "watch" ? "，只读查看 " + context.driverName + " 的终端，通过 " : "，然后通过 ") + context.gatewayOrigin + "。"
+      : "Verify as " + context.by + (context.kind === "watch" ? " to watch " + context.driverName + "’s shell, read only, through " : " before attaching through ") + context.gatewayOrigin + ".";
+    submit.textContent = uiText(context.kind === "watch" ? "Verify and watch" : "Verify and open terminal");
     root.querySelector("#gateway-details").hidden = false;
     form.hidden = false; token.disabled = false; submit.disabled = false;
     say("Enter this sign-in's current operator token. The one-use attachment grant lasts 60 seconds.");

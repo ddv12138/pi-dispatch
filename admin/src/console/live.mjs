@@ -213,7 +213,7 @@ export function makeLiveHub({
     if (failing.delete(key)) log(line);
   };
 
-  const viewKeyOf = (sub) => `${sub.page}\n${sub.qkey}\n${sub.session.role}\n${sub.session.name}`;
+  const viewKeyOf = (sub) => `${sub.page}\n${sub.qkey}\n${sub.session.role}\n${sub.session.name}\n${sub.locale ?? "en"}`;
   /** The stream's data key: its page and the canonical text of the part of its query the load reads (`dataKeyOf`). */
   const dataKeyOfSub = (sub) => `${sub.page}\n${sub.dkey}${sub.session.role === "agent" ? "\nagent" : ""}`;
   const isPage = (sub) => sub.kind === "page";
@@ -455,7 +455,7 @@ export function makeLiveHub({
         if (live.length === 0) continue;
         let rendered;
         try {
-          rendered = await pagePanels(page, { query: live[0].query, session: { name: live[0].session.name, role: live[0].session.role }, data, readOnly });
+          rendered = await pagePanels(page, { query: live[0].query, session: { name: live[0].session.name, role: live[0].session.role }, data, readOnly, locale: live[0].locale ?? "en" });
         } catch (e) {
           failed(`view\n${vk}`, `console: live panels for page ${page} failed (${codeOf(e)}); its streams keep their last panels`);
           // A render is one view's (a role's, a name's): only its streams were not drawn, so only they are told.
@@ -609,7 +609,7 @@ export function makeLiveHub({
   }
 
   return {
-    subscribe({ res, sessionId, session, page, query = {}, lastEventId = null }) {
+    subscribe({ res, sessionId, session, page, query = {}, locale = "en", lastEventId = null }) {
       if (closed) {
         try {
           res.end();
@@ -624,7 +624,7 @@ export function makeLiveHub({
       // `dquery`/`dkey`: the part of the query the page's data depends on and its canonical text (`dataQueryOf`,
       // `dataKeyOf`), which the load is shared by; `qkey` keys the view.
       const refresh = ["sandboxes", "setup"].includes(page) && typeof lastEventId !== "string";
-      const sub = { kind: "page", res, sessionId, session: { name: String(session?.name ?? ""), role: String(session?.role ?? "") }, page, query, qkey: String(queryKeyOf(page, query)), dquery: dataQueryOf(page, query), dkey: String(dataKeyOf(page, query)), needsFull: true, holds: refresh || typeof lastEventId === "string", refresh, said: null, degraded: null, cursor: page === "run" && typeof lastEventId === "string" && TRANSCRIPT_ID_RE.test(lastEventId) ? lastEventId : null, format: "html", jobId: null, transcriptDone: false, recordWord: null };
+      const sub = { kind: "page", res, sessionId, session: { name: String(session?.name ?? ""), role: String(session?.role ?? "") }, page, query, locale: locale === "zh" ? "zh" : "en", qkey: String(queryKeyOf(page, query)), dquery: dataQueryOf(page, query), dkey: String(dataKeyOf(page, query)), needsFull: true, holds: refresh || typeof lastEventId === "string", refresh, said: null, degraded: null, cursor: page === "run" && typeof lastEventId === "string" && TRANSCRIPT_ID_RE.test(lastEventId) ? lastEventId : null, format: "html", jobId: null, transcriptDone: false, recordWord: null };
       subs.add(sub);
       startTimer();
       const view = views.get(viewKeyOf(sub));

@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cardDocument } from "./helpers/card-structure.mjs";
 import { drawSpend, spendFixture } from "./helpers/spend-goldens.mjs";
-import { spendTabs, spendControls, capacityHosts, capacityKey, capacityCoverage, splitRows, splitSpentKpi, spendSplit, spendWeek, spendTokens, spendToday, spendAverage } from "../src/console/panels/spend.mjs";
+import { spendTabs, spendControls, capacityHosts, capacityKey, capacityCoverage, splitRows, splitSpentKpi, spendSplit, spendWeek, spendTokens, spendToday, spendAverage, spendCaps, splitEnvelope } from "../src/console/panels/spend.mjs";
 
 // Read the rendered controls, rather than accepting a panel heading as evidence
 // that the design's navigation and scoping controls exist.
@@ -33,6 +33,30 @@ test("Spend controls render actual range and project links, while Capacity and s
 });
 
 const viewOf = (payload, role = "viewer", query = {}) => ({ role, query, now: payload.nowMs, data: { insights: payload } });
+
+test("Spend caps, budget split and capacity fixed labels render in Chinese", () => {
+  const p = spendFixture();
+  p.budget = {
+    day: { used: 8, reserved: 8, cap: 10 },
+    tokens: { spent: 80, cap: 100 },
+    dollars: { windows: [] },
+  };
+  const view = { ...viewOf(p), locale: "zh" };
+  const caps = String(spendCaps(view));
+  assert.match(caps, /作业|令牌/);
+  assert.doesNotMatch(caps, /Jobs this day|Tokens today|Soft hold/);
+
+  const split = String(splitRows(view));
+  assert.match(split, /已分配|支出/);
+  assert.doesNotMatch(split, /Spend, held included|Over the allocation/);
+  const envelope = String(splitEnvelope({ ...view, role: "operator" }));
+  assert.match(envelope, /预算|委派|编辑/);
+  assert.doesNotMatch(envelope, /Default weights|Preview envelope|Maximum step percent/);
+
+  const capacity = String(capacityHosts(view));
+  assert.match(capacity, /项目页面/);
+  assert.doesNotMatch(capacity, /Job sizes and their suggestions|Venues unknown|slot count unknown/);
+});
 
 test("Capacity hosts render venues, three state shares, a chart and distinct operational fact groups", () => {
   const p = spendFixture();

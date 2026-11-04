@@ -21,6 +21,7 @@ import {
   rowDelete,
 } from "./config-ui.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { KNOWN_KEYS } from "@edgehero/pi-dispatch/runtime-settings";
 
 // ---- configuration ---------------------------------------------------------------------------------------------------
@@ -30,25 +31,29 @@ import { KNOWN_KEYS } from "@edgehero/pi-dispatch/runtime-settings";
  * (issue #712, `doctorQuote`), naming the host and its age, else the pointer to run doctor. Never the parser's own
  * message, which names this host's path; a published label had its paths cut before it left the host that wrote it.
  */
-function doctorReason(s, what) {
+function doctorReason(s, what, locale = "en") {
   const id = DOCTOR_FILE_CHECKS[what];
   const q = id ? doctorQuote(s, id) : null;
-  if (!q)
-    return `The ${what} does not load; run pi-dispatch doctor for the reason.`;
+  if (!q) return locale === "zh" ? `${uiText(what, locale)}无法加载；请运行 pi-dispatch doctor 查看原因。` : `The ${what} does not load; run pi-dispatch doctor for the reason.`;
   const where = q.own
     ? `on this host (${q.host}, ${ageText(q.ageMs)} ago)`
     : `on ${q.host} (its own copy of the file, ${ageText(q.ageMs)} ago)`;
-  return `The ${what} does not load. pi-dispatch doctor ${where} says: ${q.label}${q.fix ? `. Fix: ${q.fix}` : ""}`;
+  if (locale !== "zh") return `The ${what} does not load. pi-dispatch doctor ${where} says: ${q.label}${q.fix ? `. Fix: ${q.fix}` : ""}`;
+  const location = q.own ? `此主机（${q.host}，${ageText(q.ageMs)}前）` : `${q.host}（该主机自己的文件副本，${ageText(q.ageMs)}前）`;
+  // The quoted label and fix are host-published diagnostic values, not this page's fixed copy. Keep them verbatim so
+  // operators can match the worker's report exactly; paths are already redacted by doctorQuote at the source.
+  return `${uiText(what, locale)}无法加载。pi-dispatch doctor 在${location}报告：${q.label}${q.fix ? `。修复方法：${q.fix}` : ""}`;
 }
 
 /** A file view's trouble as one sentence (no parser message: it names the host's path), or null when it loaded. */
-export function fileTrouble(v, what, s = null) {
-  if (!v) return `The ${what} could not be read.`;
-  if (v.unset) return `No ${what} is configured.`;
-  if (v.missing) return `The ${what} does not exist.`;
-  if (v.invalid) return doctorReason(s, what);
-  if (v.unreadable)
-    return `The ${what} cannot be read (${String(v.unreadable)}).`;
+export function fileTrouble(v, what, s = null, locale = "en") {
+  const subject = uiText(what, locale);
+  if (!v) return locale === "zh" ? `无法读取${subject}。` : `The ${what} could not be read.`;
+  if (v.unset) return locale === "zh" ? `未配置${subject}。` : `No ${what} is configured.`;
+  if (v.missing) return locale === "zh" ? `${subject}不存在。` : `The ${what} does not exist.`;
+  if (v.invalid) return doctorReason(s, what, locale);
+  // This field is a dynamic host diagnostic. Preserve its exact wording for operator troubleshooting.
+  if (v.unreadable) return locale === "zh" ? `无法读取${subject}（${String(v.unreadable)}）。` : `The ${what} cannot be read (${String(v.unreadable)}).`;
   return null;
 }
 
@@ -148,13 +153,13 @@ function triggersEditor(view) {
 
 export const configTriggers = fromSnapshot("Triggers", (s, view) => {
   const v = s.triggers;
-  const trouble = fileTrouble(v, "triggers file", s);
+  const trouble = fileTrouble(v, "triggers file", s, view.locale);
   if (trouble)
     return html`<p class="warn">${trouble}</p>
       ${triggersEditor(view)}`;
   const list = Array.isArray(v.triggers) ? v.triggers : [];
-  return html`<p><a class="btn" href="/triggers">Read trigger rules and check an event</a></p>${list.some((t) => t.type === "watch")
-    ? html`<p><a href="/watch">Watch findings and boards</a></p>`
+  return html`<p><a class="btn" href="/triggers">${uiText("Read trigger rules and check an event", view.locale)}</a></p>${list.some((t) => t.type === "watch")
+    ? html`<p><a href="/watch">${uiText("Watch findings and boards", view.locale)}</a></p>`
     : null}${table(
     "Triggers",
     [{ num: "Row" }, "On", "Runs", "Model", "Notes", "Actions"],
@@ -186,16 +191,17 @@ export const configTriggers = fromSnapshot("Triggers", (s, view) => {
           <div class="acts">
             ${canAct(view)
               ? html`${ui.btn({
-                  label: `Edit row ${i + 1}`,
+                  label: `${uiText("Edit row", view.locale)} ${i + 1}`,
                   href: `${ui.pageHref(view.pages, "trigger", { index: i })}#p-trigger-edit`,
                   kind: "sm",
-                })}${rowDelete("trigger-delete", i)}`
+                })}${rowDelete("trigger-delete", i, view.locale)}`
               : null}
           </div>
         </td>
       </tr>`;
     }),
     "The triggers file declares no trigger.",
+    view.locale,
   )}${triggersEditor(view)}`;
 });
 
@@ -221,17 +227,17 @@ const SETTINGS_SHOWN = Object.freeze([
 function settingsEditor(view) {
   if (!canAct(view)) return null;
   return editor(
-    "Change a setting",
+    uiText("Change a setting", view.locale),
     html`${actForm("setting-set", {
-      fields: html`${field("key", "Key", { options: KNOWN_KEYS })}${field(
+      fields: html`${field("key", "Key", { options: KNOWN_KEYS, locale: view.locale })}${field(
         "value",
-        "Value",
-        { required: true },
+        uiText("Value", view.locale),
+        { required: true, locale: view.locale },
       )}`,
-      label: "Preview the change",
+      label: uiText("Preview the change", view.locale), locale: view.locale,
     })}${actForm("setting-unset", {
-      fields: field("key", "Key", { options: KNOWN_KEYS }),
-      label: "Preview the unset",
+      fields: field("key", "Key", { options: KNOWN_KEYS, locale: view.locale }),
+      label: uiText("Preview the unset", view.locale), locale: view.locale,
     })}`,
   );
 }
@@ -247,9 +253,8 @@ export const configSettings = fromSnapshot("Settings overlay", (s, view) => {
     .filter((k) => !SETTINGS_SHOWN.includes(k))
     .sort();
   return html`${shown.length === 0
-    ? html`<p class="note">
-        The overlay sets nothing; every setting is the deployment's environment
-        or its default.
+      ? html`<p class="note">
+        ${uiText("The overlay sets nothing; every setting is the deployment's environment or its default.", view.locale)}
       </p>`
     : facts(
         shown.map((k) => [
@@ -257,60 +262,60 @@ export const configSettings = fromSnapshot("Settings overlay", (s, view) => {
           overlay[k] === undefined ? "deployment default" : String(overlay[k]),
         ]),
       )}${others.length > 0
-    ? html`<p class="note">Also set: ${others.join(", ")}</p>`
+    ? html`<p class="note">${uiText("Also set:", view.locale)} ${others.join(", ")}</p>`
     : null}${settingsEditor(view)}`;
 });
 
 /** A pause window's fields, as the add and edit tools take them (an edit leaves a blank field as it was). */
-function pauseFieldsHtml(required, w = {}) {
+function pauseFieldsHtml(required, w = {}, locale = "en") {
   return html`${field("scope", "Scope", {
     value:
       typeof w.scope === "string" && w.scope.startsWith("/")
         ? ""
         : (w.scope ?? ""),
     required,
-    placeholder: w.scope
-      ? `Blank keeps ${shownPath(w.scope)}`
-      : "owner/name, a folder, or *",
-    max: 4096,
+            placeholder: w.scope
+              ? `${uiText("Blank keeps", locale)} ${shownPath(w.scope)}`
+              : uiText("owner/name, a folder, or *", locale),
+    max: 4096, locale,
   })}${field("from", "From (HH:MM)", {
     value: w.from ?? "",
     required,
-    max: 5,
+    max: 5, locale,
   })}${field("to", "To (HH:MM)", {
     value: w.to ?? "",
     required,
-    max: 5,
+    max: 5, locale,
   })}${field("tz", "Zone (IANA, default UTC)", {
     value: w.tz ?? "",
-    max: 64,
+    max: 64, locale,
   })}${field("days", "Days (mon..sun)", {
     value: w.days?.join(", ") ?? "",
     type: "list",
-    max: 64,
+    max: 64, locale,
   })}${field("dateFrom", "From date (YYYY-MM-DD)", {
     value: w.dateFrom ?? "",
-    max: 10,
+    max: 10, locale,
   })}${field("dateTo", "To date (YYYY-MM-DD)", {
     value: w.dateTo ?? "",
-    max: 10,
+    max: 10, locale,
   })}`;
 }
 
 function pauseEditor(view) {
   if (!canAct(view)) return null;
   return editor(
-    "Change the pause windows",
+    uiText("Change the pause windows", view.locale),
     html`${actForm("pause-window-add", {
-      fields: pauseFieldsHtml(true),
-      label: "Preview the add",
+      fields: pauseFieldsHtml(true, {}, view.locale),
+      label: uiText("Preview the add", view.locale), locale: view.locale,
     })}`,
   );
 }
 
 export const configPauseWindows = fromSnapshot("Pause windows", (s, view) => {
   const v = s.pauseWindows;
-  const trouble = fileTrouble(v, "pause-windows file", s);
+  const trouble = fileTrouble(v, "pause-windows file", s, view.locale);
   if (trouble)
     return html`<p class="note">${trouble}</p>
       ${pauseEditor(view)}`;
@@ -339,18 +344,19 @@ export const configPauseWindows = fromSnapshot("Pause windows", (s, view) => {
           <td>
             ${canAct(view)
               ? html`${editor(
-                  `Edit row ${i + 1}`,
+                  `${uiText("Edit row", view.locale)} ${i + 1}`,
                   actForm("pause-window-edit", {
                     hidden: [["index", i, "int"]],
-                    fields: pauseFieldsHtml(false, w),
-                    label: `Preview edit of row ${i + 1}`,
+                    fields: pauseFieldsHtml(false, w, view.locale),
+                    label: `${uiText("Preview edit of row", view.locale)} ${i + 1}`, locale: view.locale,
                   }),
-                )}${rowDelete("pause-window-delete", i)}`
+                )}${rowDelete("pause-window-delete", i, view.locale)}`
               : null}
           </td>
         </tr>`,
     ),
     "No pause window is set.",
+    view.locale,
   )}${pauseEditor(view)}`;
 });
 
@@ -377,16 +383,17 @@ function limitsEditor(view) {
     rows: 4,
     required: true,
     placeholder: '{"scope": "acme/web", "day": 10, "concurrent": 2}',
+    locale: view.locale,
   });
   return editor(
-    "Change the scoped limits",
-    html`${actForm("limit-add", { fields: json, label: "Preview the add" })}`,
+    uiText("Change the scoped limits", view.locale),
+    html`${actForm("limit-add", { fields: json, label: uiText("Preview the add", view.locale), locale: view.locale })}`,
   );
 }
 
 export const configScopedLimits = fromSnapshot("Scoped limits", (s, view) => {
   const v = s.scopedLimits;
-  const trouble = fileTrouble(v, "scoped-limits file", s);
+  const trouble = fileTrouble(v, "scoped-limits file", s, view.locale);
   if (trouble)
     return html`<p class="note">${trouble}</p>
       ${limitsEditor(view)}`;
@@ -403,21 +410,22 @@ export const configScopedLimits = fromSnapshot("Scoped limits", (s, view) => {
             ${LIMIT_FIELDS.filter(([k]) => l[k] !== null && l[k] !== undefined)
               .map(
                 ([k, words]) =>
-                  `${k.endsWith("Usd") ? `$${l[k]}` : l[k]} ${words}`,
+                  `${k.endsWith("Usd") ? `$${l[k]}` : l[k]} ${uiText(words, view.locale)}`,
               )
               .join("; ") || "-"}
           </td>
           <td>
             ${canAct(view)
               ? html`${editor(
-                  `Edit row ${i + 1}`,
+                  `${uiText("Edit row", view.locale)} ${i + 1}`,
                   actForm("limit-edit", {
                     hidden: [["index", i, "int"]],
                     fields: area(
                       "limit",
-                      "Fields to change (JSON; omitted fields keep their values)",
+                      uiText("Fields to change (JSON; omitted fields keep their values)", view.locale),
                       {
                         type: "json",
+                        locale: view.locale,
                         value: JSON.stringify(
                           {
                             ...l,
@@ -431,14 +439,15 @@ export const configScopedLimits = fromSnapshot("Scoped limits", (s, view) => {
                         ),
                       },
                     ),
-                    label: `Preview edit of row ${i + 1}`,
+                    label: `${uiText("Preview edit of row", view.locale)} ${i + 1}`, locale: view.locale,
                   }),
-                )}${rowDelete("limit-delete", i)}`
+                )}${rowDelete("limit-delete", i, view.locale)}`
               : null}
           </td>
         </tr>`,
     ),
     "No scoped limit is set.",
+    view.locale,
   )}${limitsEditor(view)}`;
 });
 
@@ -450,20 +459,22 @@ function projectsEditor(view) {
       rows: 3,
       required,
       max: 16384,
+      locale: view.locale,
     });
   return editor(
-    "Change the projects",
+    uiText("Change the projects", view.locale),
     html`${actForm("project-add", {
-        fields: html`${field("id", "Id", { required: true, max: 64 })}${field(
+        fields: html`${field("id", uiText("Id", view.locale), { required: true, max: 64, locale: view.locale })}${field(
           "name",
-          "Name (optional)",
+          uiText("Name (optional)", view.locale),
+          { locale: view.locale },
         )}${members(true)}`,
-        label: "Preview the add",
+        label: uiText("Preview the add", view.locale), locale: view.locale,
       })}
       <p class="note">
         <a href="/insights/budget-split"
-          >Edit the envelope, priorities and allocation history in Budget
-          split</a
+          >${uiText("Edit the envelope, priorities and allocation history in Budget split", view.locale)}
+          </a
         >.
       </p>`,
   );
@@ -471,7 +482,7 @@ function projectsEditor(view) {
 
 export const configProjects = fromSnapshot("Projects", (s, view) => {
   const v = s.projects;
-  const trouble = fileTrouble(v, "projects file", s);
+  const trouble = fileTrouble(v, "projects file", s, view.locale);
   if (trouble)
     return html`<p class="note">${trouble}</p>
       ${projectsEditor(view)}`;
@@ -493,41 +504,44 @@ export const configProjects = fromSnapshot("Projects", (s, view) => {
           <td>
             ${canAct(view)
               ? html`${editor(
-                  `Edit row ${i + 1}`,
+                  `${uiText("Edit row", view.locale)} ${i + 1}`,
                   actForm("project-edit", {
                     hidden: [["id", p.id]],
                     fields: html`${field("name", "Name", {
                       value: p.name ?? "",
+                      locale: view.locale,
                     })}${area(
                       "members",
                       "Members (blank keeps the current list)",
                       {
+                        locale: view.locale,
                         value: p.members?.some((m) => m.startsWith("/"))
                           ? ""
                           : (p.members?.join("\n") ?? ""),
                       },
                     )}`,
-                    label: `Preview edit of row ${i + 1}`,
+                    label: `${uiText("Preview edit of row", view.locale)} ${i + 1}`, locale: view.locale,
                   }),
                 )}${actForm("project-delete", {
                   hidden: [["id", p.id]],
-                  label: `Delete row ${i + 1}`,
+                    label: `${uiText("Delete row", view.locale)} ${i + 1}`, locale: view.locale,
                 })}`
               : null}
           </td>
         </tr>`,
     ),
     "The projects file declares no project.",
+    view.locale,
   )}${facts([
     ["Allocation envelope", s.envelopeSet ? "set" : "not set"],
   ])}${projectsEditor(view)}`;
 });
 
 /** The detail pages own these panels and writes; Configuration keeps one useful line per source. */
-export const configMcp = fromSnapshot("MCP servers", (s) => html`<p>${s.overlayMcp?.servers?.length ?? "Unknown"} overlay ${s.overlayMcp?.servers?.length === 1 ? "server" : "servers"}. <a class="link" href="/config/connections#p-mcp">Open Connections</a></p>`);
-export const configPackages = fromSnapshot("Staged pi packages", (s) => html`<p>${s.stagedPackages?.packages?.length ?? "Unknown"} packages staged. <a class="link" href="/config/connections#p-packages">Open Connections</a>. <a class="link" href="/config/updates">See what is newer</a></p>`);
-export const configSecretProfiles = fromSnapshot("Secret profiles", (s) => html`<p>${s.secretProfiles?.profiles?.length ?? 0} profiles in view. <a class="link" href="/config/secrets#p-secret-profiles">Open Secrets</a></p>`);
-export const configSecretBundles = fromSnapshot("Secret bundles", (s) => html`<p>${s.secretBundles?.bundles?.length ?? 0} project bundles in view. <a class="link" href="/config/secrets#p-secret-bundles">Open Secrets</a></p>`);
+export const configMcp = fromSnapshot("MCP servers", (s, v) => html`<p>${s.overlayMcp?.servers?.length ?? uiText("Unknown", v.locale)} ${uiText("overlay", v.locale)} ${uiText(s.overlayMcp?.servers?.length === 1 ? "server" : "servers", v.locale)}. <a class="link" href="/config/connections#p-mcp">${uiText("Open Connections", v.locale)}</a></p>`);
+export const configPackages = fromSnapshot("Staged pi packages", (s, v) => html`<p>${s.stagedPackages?.packages?.length ?? uiText("Unknown", v.locale)} ${uiText("packages staged.", v.locale)} <a class="link" href="/config/connections#p-packages">${uiText("Open Connections", v.locale)}</a>. <a class="link" href="/config/updates">${uiText("See what is newer", v.locale)}</a></p>`);
+export const configSecretProfiles = fromSnapshot("Secret profiles", (s, v) => html`<p>${s.secretProfiles?.profiles?.length ?? 0} ${uiText("profiles in view.", v.locale)} <a class="link" href="/config/secrets#p-secret-profiles">${uiText("Open Secrets", v.locale)}</a></p>`);
+export const configSecretBundles = fromSnapshot("Secret bundles", (s, v) => html`<p>${s.secretBundles?.bundles?.length ?? 0} ${uiText("project bundles in view.", v.locale)} <a class="link" href="/config/secrets#p-secret-bundles">${uiText("Open Secrets", v.locale)}</a></p>`);
 
 const shortFile = (path, fallback) => typeof path === "string" && path ? `…/${path.split(/[\\/]/).filter(Boolean).slice(-2).join("/")}` : fallback;
 export function configDescription(v) {
@@ -535,29 +549,29 @@ export function configDescription(v) {
   const locations = v.data?.configLocations ?? {};
   const settings = locations.settings ?? (s?.settings?.path?.endsWith("/.pi-dispatch/settings.json") ? "~/.pi-dispatch/settings.json" : shortFile(s?.settings?.path, "settings overlay unavailable"));
   const outside = locations.settingsOutsideDeployment === true || settings === "~/.pi-dispatch/settings.json";
-  return `Settings: ${settings}${outside ? " (outside the deployment folder)" : ""}. Triggers: ${locations.triggers ?? shortFile(s?.triggers?.path, "triggers file unavailable")}.`;
+  return `${uiText("Settings", v.locale)}: ${settings}${outside ? ` (${uiText("outside the deployment folder", v.locale)})` : ""}. ${uiText("Triggers", v.locale)}: ${locations.triggers ?? shortFile(s?.triggers?.path, uiText("triggers file unavailable", v.locale))}.`;
 }
 export function configNavigation(v) {
   const s = v.data?.snapshot ?? {};
   const sections = [
-    ["settings", "Settings", Object.keys(s.settings?.overlay ?? {}).length],
-    ["triggers", "Triggers", s.triggers?.triggers?.length ?? 0],
-    ["pause-windows", "Pause windows", s.pauseWindows?.windows?.length ?? 0],
-    ["scoped-limits", "Scoped limits", s.scopedLimits?.limits?.length ?? 0],
-    ["projects", "Projects", s.projects?.projects?.length ?? 0],
-    ["files", "Files", 2],
-    ["unset", "Unset", 0],
-    ["mcp-servers", "MCP servers", s.overlayMcp?.servers?.length ?? 0],
+    ["settings", uiText("Settings", v.locale), Object.keys(s.settings?.overlay ?? {}).length],
+    ["triggers", uiText("Triggers", v.locale), s.triggers?.triggers?.length ?? 0],
+    ["pause-windows", uiText("Pause windows", v.locale), s.pauseWindows?.windows?.length ?? 0],
+    ["scoped-limits", uiText("Scoped limits", v.locale), s.scopedLimits?.limits?.length ?? 0],
+    ["projects", uiText("Projects", v.locale), s.projects?.projects?.length ?? 0],
+    ["files", uiText("Files", v.locale), 2],
+    ["unset", uiText("Unset", v.locale), 0],
+    ["mcp-servers", uiText("MCP servers", v.locale), s.overlayMcp?.servers?.length ?? 0],
   ];
-  return html`<nav class="config-sections" aria-label="Configuration sections">
+  return html`<nav class="config-sections" aria-label="${uiText("Configuration sections", v.locale)}">
     ${sections.map(([id, label, count]) =>
       ui.fpill({ label, count, href: `#cf-${id}` }),
     )}<span class="config-divider" aria-hidden="true"></span>${ui.btn({
-      label: "Secrets",
+      label: uiText("Secrets", v.locale),
       href: ui.pageHref(v.pages, "secrets") ?? "/config",
       kind: "sm",
     })}${ui.btn({
-      label: "Connections",
+      label: uiText("Connections", v.locale),
       href: ui.pageHref(v.pages, "connections") ?? "/config",
       kind: "sm",
     })}
@@ -570,8 +584,8 @@ export const configFiles = fromSnapshot(
 export const configUnset = fromSnapshot("Unset a setting", (s, v) =>
   canAct(v)
     ? actForm("setting-unset", {
-        fields: field("key", "Key", { options: KNOWN_KEYS }),
-        label: "Preview the unset",
+        fields: field("key", uiText("Key", v.locale), { options: KNOWN_KEYS, locale: v.locale }),
+        label: uiText("Preview the unset", v.locale),
       })
-    : html`<p>Unset keys fall back to the deployment defaults.</p>`,
+    : html`<p>${uiText("Unset keys fall back to the deployment defaults.", v.locale)}</p>`,
 );

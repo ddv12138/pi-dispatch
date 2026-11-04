@@ -37,6 +37,7 @@ import { forgeLinkOf } from "../../read-model.mjs";
 import { capitalised } from "../../words.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { RUN_ID_RE, ageText, canAct, count } from "./common.mjs";
 import { OVERVIEW_LINKS, OVERVIEW_UNREAD_TEXT } from "./overview.mjs";
 
@@ -143,19 +144,19 @@ function answerOf(p, i, view) {
   const v = verdictOf(p);
   if (v.answeringJobId !== null) {
     const href = hrefTo(view, "run", { id: v.answeringJobId });
-    return html`<p class="muted">${PARKED_ANSWERING} ${href === null ? html`<span class="code">${v.answeringJobId}</span>` : html`<a class="link code" href="${href}">${v.answeringJobId}</a>`}.</p>`;
+    return html`<p class="muted">${uiText(PARKED_ANSWERING, view.locale)} ${href === null ? html`<span class="code">${v.answeringJobId}</span>` : html`<a class="link code" href="${href}">${v.answeringJobId}</a>`}.</p>`;
   }
-  if (v.mode !== "reply") return html`<p class="muted">${v.says}</p>`;
+  if (v.mode !== "reply") return html`<p class="muted">${uiText(v.says, view.locale)}</p>`;
   if (!canAct(view) || !idOk(p)) return null;
   // Its own key only: a run id may be `__proto__`, which a plain object's lookup would answer with its prototype.
   const checks = view.data?.parkedChecks;
   const check = checks !== null && typeof checks === "object" && Object.hasOwn(checks, p.jobId) ? checks[p.jobId] : null;
-  if (check?.ok === true) return p.reason === "awaiting-approval" ? ui.approvalForms({ jobId: p.jobId, id: `approval-${i + 1}` }) : ui.answerForm({ jobId: p.jobId, id: `answer-${i + 1}`, hint: PARKED_ANSWER_HINT, guarded: Boolean(view.data?.answerer?.rules?.length), runHref: hrefTo(view, "run", { id: p.jobId }) });
+  if (check?.ok === true) return p.reason === "awaiting-approval" ? ui.approvalForms({ jobId: p.jobId, id: `approval-${i + 1}`, locale: view.locale }) : ui.answerForm({ jobId: p.jobId, id: `answer-${i + 1}`, hint: PARKED_ANSWER_HINT, guarded: Boolean(view.data?.answerer?.rules?.length), runHref: hrefTo(view, "run", { id: p.jobId }), locale: view.locale });
   if (typeof check?.refusal === "string") {
     const said = check.refusal.trim();
-    return ui.banner({ status: "attention", title: PARKED_ELSEWHERE_TITLE, body: `${capitalised(said)}${/[.!?]$/.test(said) ? "" : "."}` });
+    return ui.banner({ status: "attention", title: uiText(PARKED_ELSEWHERE_TITLE, view.locale), body: `${capitalised(uiText(said, view.locale))}${/[.!?]$/.test(said) ? "" : "."}` });
   }
-  return html`<p class="muted">${check?.unreachable ? PARKED_CHECK_UNREAD : PARKED_CHECK_SKIPPED}</p>`;
+  return html`<p class="muted">${uiText(check?.unreachable ? PARKED_CHECK_UNREAD : PARKED_CHECK_SKIPPED, view.locale)}</p>`;
 }
 
 /** One parked row as its card (`ui.questionCard`). */
@@ -168,8 +169,9 @@ function cardOf(p, i, view) {
     project: projectOf(p),
     target: targetOf(p, view.env),
     where: whereOf(p),
-    body: p.reason === "awaiting-approval" ? html`<p>Awaiting approval for <span class="code">${p.approval?.action ?? "unknown action"}</span>.</p><p>${p.approval?.action === "budget-raise" ? "Worker-enforced: approval permits the declared run cap, subject to deployment and scoped budgets." : "Advisory: the worker does not enforce this external action."}</p><p>${PARKED_QUESTION_WHERE}</p>` : PARKED_QUESTION_WHERE,
+    body: p.reason === "awaiting-approval" ? html`<p>${uiText("Awaiting approval for", view.locale)} <span class="code">${p.approval?.action ?? uiText("unknown action", view.locale)}</span>.</p><p>${uiText(p.approval?.action === "budget-raise" ? "Worker-enforced: approval permits the declared run cap, subject to deployment and scoped budgets." : "Advisory: the worker does not enforce this external action.", view.locale)}</p><p>${uiText(PARKED_QUESTION_WHERE, view.locale)}</p>` : uiText(PARKED_QUESTION_WHERE, view.locale),
     answer: answerOf(p, i, view),
+    locale: view.locale,
   });
 }
 
@@ -184,12 +186,12 @@ export function parkedQuestions(view) {
   const unread = s === null ? OVERVIEW_UNREAD_TEXT : typeof s.parkedUnreachable === "string" && s.parkedUnreachable !== "" ? parkedUnreadText(s.parkedUnreachable) : null;
   const rows = s !== null && unread === null && Array.isArray(s.parked) ? s.parked : [];
   const approvals = rows.filter((p) => p.reason === "awaiting-approval").length;
-  const tabs = ui.tabs([{ label: approvals > 0 ? "Questions and approvals" : "Questions", count: unread === null ? rows.length : null, href: hrefTo(view, "parked"), current: true }], { label: "Parked" });
+  const tabs = ui.tabs([{ label: uiText(approvals > 0 ? "Questions and approvals" : "Questions", view.locale), count: unread === null ? rows.length : null, href: hrefTo(view, "parked"), current: true }], { label: uiText("Parked", view.locale) });
   const main = unread !== null
     ? ui.banner({ status: "attention", title: unread })
     : rows.length === 0
-      ? ui.card({ body: ui.empty({ status: "ok", icon: "done", title: PARKED_EMPTY }) })
+      ? ui.card({ body: ui.empty({ status: "ok", icon: "done", title: uiText(PARKED_EMPTY, view.locale) }) })
       : rows.map((p, i) => cardOf(p, i, view));
-  const how = ui.card({ title: "How answers work", body: html`<p class="muted">${PARKED_HOW}</p>` });
+  const how = ui.card({ title: uiText("How answers work", view.locale), body: html`<p class="muted">${uiText(PARKED_HOW, view.locale)}</p>` });
   return html`${tabs}<div class="cols"><div class="stack">${main}</div><div class="stack">${how}</div></div>`;
 }

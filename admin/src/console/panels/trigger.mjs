@@ -13,9 +13,21 @@ import { html as escapedHtml } from "../html.mjs";
 // Keep indented source readable without emitting whitespace-only lines when an optional fragment is absent.
 const html = (strings, ...values) => escapedHtml(strings.map(s => s.replace(/[ \t]*\n[ \t]*/g, "\n")), ...values);
 import * as ui from "../kit.mjs";
+import { uiText } from "../locale.mjs";
 import { canAct, shownPath, runLink, moneyHtml, timeHtml } from "./common.mjs";
 import { actForm, field, area, table, facts } from "./config-ui.mjs";
-const card = (title, body) => ui.card({ title, body });
+const t = (message, v) => uiText(message, v?.locale);
+const card = (v, title, body) => body === undefined
+  ? ui.card({ title: v, body: title })
+  : ui.card({ title: t(title, v), body });
+const fieldL = (view, name, label, options = {}) => {
+  const translatedOptions = options.options?.map((option) => {
+    if (typeof option === "string") return { value: option, label: t(option, view) };
+    return { ...option, label: t(option.label, view) };
+  });
+  return field(name, t(label, view), { ...options, ...(translatedOptions ? { options: translatedOptions } : {}), locale: view.locale });
+};
+const areaL = (view, name, label, options = {}) => area(name, t(label, view), { ...options, locale: view.locale });
 const detail = (v) => v.data?.triggerDetail ?? {};
 const trigger = (v) =>
   detail(v).trigger ?? v.data?.snapshot?.triggers?.triggers?.[v.query?.index];
@@ -33,38 +45,38 @@ const show = (x) =>
       : String(x);
 const gateText = triggerWhoMayFire;
 export function triggerTitle(v) {
-  const t = trigger(v);
-  return t
-    ? `${t.type} ${t.phrase ?? t.id ?? t.action?.join(", ") ?? ""} → ${t.flow ?? t.command ?? "deployment default"}${t.forge ? ` · ${t.forge}` : ""} · row ${v.query.index + 1}`
-    : "Trigger unavailable";
+  const found = trigger(v);
+  return found
+    ? `${found.type} ${found.phrase ?? found.id ?? found.action?.join(", ") ?? ""} → ${found.flow ?? found.command ?? uiText("deployment default", v.locale)}${found.forge ? ` · ${found.forge}` : ""} · ${uiText("row", v.locale)} ${v.query.index + 1}`
+    : t("Trigger unavailable", v);
 }
 export function triggerOn(v) {
-  const t = trigger(v);
-  if (!t)
-    return card(
+  const triggerRow = trigger(v);
+  if (!triggerRow)
+    return card(v,
       "What starts it",
       html`<p>
-        ${fileTrouble(v.data?.snapshot?.triggers, "triggers file", v.data?.snapshot) ?? "This row does not exist. Return to Configuration."}
+        ${fileTrouble(v.data?.snapshot?.triggers, "triggers file", v.data?.snapshot, v.locale) ?? t("This row does not exist. Return to Configuration.", v)}
       </p>`,
     );
-  return card(
+  return card(v,
     "What starts it",
     html`${facts([
-      ["Kind", t.type],
-      ["Phrase or schedule", t.phrase ?? t.pattern ?? show(t.action)],
-      ["Forge", t.forge ?? "local"],
-      ["Repository", t.repository ?? "any allowed repository"],
+      ["Kind", triggerRow.type],
+      ["Phrase or schedule", triggerRow.phrase ?? triggerRow.pattern ?? show(triggerRow.action)],
+      ["Forge", triggerRow.forge ?? "local"],
+      [uiText("Repository", v.locale), triggerRow.repository ?? uiText("any allowed repository", v.locale)],
       [
-        "Who may fire it",
-        gateText(t),
+        uiText("Who may fire it", v.locale),
+        gateText(triggerRow),
       ],
-    ])}${t.type === "comment" ? html`<p>Write <code>${`${t.phrase} <flow>`}</code> to choose another flow named by a trigger in this file. Otherwise this trigger's default flow runs.</p>` : null}`,
+    ])}${triggerRow.type === "comment" ? html`<p>${uiText("Write", v.locale)} <code>${`${triggerRow.phrase} <flow>`}</code> ${uiText("to choose another flow named by a trigger in this file. Otherwise this trigger's default flow runs.", v.locale)}</p>` : null}`,
   );
 }
 export function triggerRuns(v) {
   const d = detail(v);
   const rows = d.lastRuns ?? [];
-  return card(
+  return card(v,
     "Runs it started",
     html`<p>
         <b
@@ -88,14 +100,14 @@ export function triggerRuns(v) {
               <td>${recordReason(r) ? reasonWords(recordReason(r)).sentence ?? `No explanation is available for ${recordReason(r)}.` : "No reason was recorded."}</td>
             </tr>`,
         ),
-        "No runs were found in the available history.",
+        uiText("No runs were found in the available history.", v.locale),
       )}
       <p>
-        Jobs in line now:
+        ${uiText("Jobs in line now:", v.locale)}
         ${(d.queued ?? []).map((j) => runLink(j.jobId ?? j.id))}${d.queued
           ?.length
           ? null
-          : d.queued == null ? "unavailable; the queue could not be read" : "none in view"}.
+          : d.queued == null ? uiText("unavailable; the queue could not be read", v.locale) : uiText("none in view", v.locale)}.
       </p>`,
   );
 }
@@ -147,9 +159,9 @@ export function triggerRun(v) {
   const hostRows = triggerSandboxHosts(t, v.data?.snapshot);
   const bundle = triggerBundleOf(t, v.data?.snapshot?.secretBundles);
   const bundleNames = (v.data?.snapshot?.secretBundles?.bundles ?? []).map(b=>`${b.project ?? "project"}: ${b.id}`).join(", ");
-  return card(
+  return card(v,
     "What it runs",
-    html`<h3>Edit here</h3>
+    html`<h3>${uiText("Edit here", v.locale)}</h3>
       ${facts(
         EDIT_FIELDS.filter(
           (k) => t.type !== "cron" || !["statusComment", "recover"].includes(k),
@@ -158,16 +170,16 @@ export function triggerRun(v) {
           `${["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; deployment default: ${show(def[k])}`,
         ]),
       )}
-      <h3>By hand</h3>
+      <h3>${uiText("By hand", v.locale)}</h3>
       ${facts(
         HAND_FIELDS.map((k) => [
           `run.${k}`,
           `${["instructions", "task"].includes(k) ? (t[k] ? "set (operator only)" : "not set") : ["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; deployment default: ${show(def[k])}`,
         ]),
       )}
-      <h3>Its runs' sandbox</h3>
+      <h3>${uiText("Its runs' sandbox", v.locale)}</h3>
       ${hostRows.length ? facts(hostRows.map((h) => [h.name, `${h.backend ?? "venue not published"}${h.deploymentDefault ? " (that host's deployment default)" : " (trigger override)"}; ${h.blessed === null ? "blessing not published" : h.blessed ? "blessed" : "not blessed"}${h.capabilityUnknown ? "; required profile capabilities not published" : ""}${h.backend && BACKENDS[h.backend] ? `; ${Object.entries(BACKENDS[h.backend].serves).map(([key, value]) => `${key}: ${value === "image" ? "with the image" : value}`).join(", ")}` : ""}`])) : html`<p>No live host blessing facts are available.</p>`}
-      <p>These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend. ${t.type === "cron" ? "The schedule's owning host runs a cron trigger's local folder; the registry alone does not prove which host has that folder." : "Hosts missing its required secret or wait profile are excluded where their capability list is published."}</p>
+      <p>${uiText("These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend.", v.locale)} ${uiText(t.type === "cron" ? "The schedule's owning host runs a cron trigger's local folder; the registry alone does not prove which host has that folder." : "Hosts missing its required secret or wait profile are excluded where their capability list is published.", v.locale)}</p>
       <p>
         ${ui.icon("shield")}
         <a href="${ui.pageHref(v.pages, "venue", { name: backend })}"
@@ -240,6 +252,7 @@ export function editFields(v, t = {}, group = null) {
             ]
           : null,
       hint: k === "flow" ? "Required: name the skill to run; its location is explained below." : t.type ? `Blank keeps the current value (${show(t[k])}); deployment default: ${show(defaults(v)[k])}.` : `Blank uses ${show(defaults(v)[k])}. ${{ progress: "Needs progress publishing and a capable image.", statusComment: "Needs forge access; unavailable for cron.", steer: "Needs a venue and image that support steering.", recover: "Needs recovery support, a safe workspace and a replayable event; unavailable for cron." }[k] ?? ""}`,
+      locale: v.locale,
     }),
   )}`;
 }
@@ -247,27 +260,25 @@ export function triggerEdit(v) {
   const t = trigger(v);
   return !t || !canAct(v)
     ? html``
-    : card(
+    : card(v,
         "Edit",
         actForm("trigger-edit", {
           hidden: [["index", v.query.index, "int"]],
           fields: editFields(v, t),
-          label: `Preview edit of row ${v.query.index + 1}`,
+          label: `${uiText("Preview edit of row", v.locale)} ${v.query.index + 1}`, locale: v.locale,
         }),
       );
 }
 export function triggerTrust(v) {
   const t = trigger(v);
   if (!t) return null;
-  return card(
+  return card(v,
     "Trust model",
     html`<p>
-        ${gateText(t)} Each forge delivery is checked against its configured authentication, bot-loop guard, sender permissions and duplicate protection, then applicable quiet hours, image, repository protection and spend caps. Cron starts from the deployment schedule instead of a webhook. A comment may select another flow; only one
-        comment trigger per forge may be declared.
+        ${gateText(t)} ${uiText("Each forge delivery is checked against its configured authentication, bot-loop guard, sender permissions and duplicate protection, then applicable quiet hours, image, repository protection and spend caps. Cron starts from the deployment schedule instead of a webhook. A comment may select another flow; only one comment trigger per forge may be declared.", v.locale)}
       </p>
       <p>
-        Keeping a session continues its retained conversation on the same issue.
-        Nothing merges by itself.
+        ${uiText("Keeping a session continues its retained conversation on the same issue. Nothing merges by itself.", v.locale)}
       </p>
       ${t.instructions
         ? v.role === "operator"
@@ -278,11 +289,8 @@ ${v.data?.snapshot?.triggerInstructions?.[v.query.index] ??
                   "Instructions could not be read. Reload to try again."}</pre
                 >
               </blockquote>`
-          : html`<p>
-              This trigger has instructions. Their text is available to an
-              operator only.
-            </p>`
-        : html`<p>No instructions are set.</p>`}${t.task &&
+    : html`<p>${uiText("This trigger has instructions. Their text is available to an operator only.", v.locale)}</p>`
+        : html`<p>${uiText("No instructions are set.", v.locale)}</p>`}${t.task &&
       v.role === "operator"
         ? html`<h3>Task</h3>
             <pre>
@@ -296,11 +304,11 @@ export function triggerKinds(v) {
   const t = trigger(v);
   if (!t) return null;
   const d = detail(v);
-  return card(
+  return card(v,
     "Other kinds",
     html`${t.type === "cron"
       ? html`<p>
-            Next fire: ${timeHtml(d.cron?.next ?? t.next)}. Health:
+            ${uiText("Next fire:", v.locale)} ${timeHtml(d.cron?.next ?? t.next)}. ${uiText("Health:", v.locale)}
             ${d.cron?.next == null ? "not known (schedule not published)" : d.cron.overdueMs > 0 ? "overdue" : "on time"}; stalls
             ${t.stalls ?? d.cron?.stalls ?? "not known"} of ${d.cron?.stallLimit ?? "not published"}.
           </p>
@@ -329,7 +337,7 @@ export function triggerKinds(v) {
 }
 export function triggerChange(v) {
   const t = trigger(v);
-  return card(
+  return card(v,
     "Before you change it",
     html`<p>
         A job already in line is refused if this trigger has gained a field the
@@ -338,22 +346,22 @@ export function triggerChange(v) {
       <p>
         ${!t || detail(v).skewed == null
           ? (detail(v).skewReason ??
-            "Jobs that would be refused cannot be checked here.")
-          : `${detail(v).skewIncomplete ? "At least " : ""}${detail(v).skewed?.length ?? 0} jobs in view would be refused now.${detail(v).skewIncomplete ? " The queue check was incomplete." : ""}`}
+            uiText("Jobs that would be refused cannot be checked here.", v.locale))
+          : `${detail(v).skewIncomplete ? `${uiText("At least", v.locale)} ` : ""}${detail(v).skewed?.length ?? 0} ${uiText("jobs in view would be refused now.", v.locale)}${detail(v).skewIncomplete ? ` ${uiText("The queue check was incomplete.", v.locale)}` : ""}`}
       </p>
-      <p>${fileTrouble(v.data?.snapshot?.triggers, "triggers file", v.data?.snapshot) ?? "The triggers file loads."}</p>
+      <p>${fileTrouble(v.data?.snapshot?.triggers, "triggers file", v.data?.snapshot, v.locale) ?? uiText("The triggers file loads.", v.locale)}</p>
       ${(detail(v).skewed ?? []).map(job => html`<p>${runLink(job.jobId)}: ${job.field ?? job.conditions ?? "trigger changed"}</p>`)}
       ${t && canAct(v)
         ? actForm("trigger-delete", {
             hidden: [["index", v.query.index, "int"]],
-            label: `Delete row ${v.query.index + 1}`,
+            label: `${uiText("Delete row", v.locale)} ${v.query.index + 1}`, locale: v.locale,
           })
         : null}`,
   );
 }
 export function triggerAdd(v) {
   if (v.readOnly)
-    return card(
+    return card(v,
       "Add a trigger",
       html`<p>Forms are off on this read-only console.</p>`,
     );
@@ -362,7 +370,7 @@ export function triggerAdd(v) {
   const forges = opts(v).forges ?? [];
   const missingForge = Boolean(prefill.forge && !forges.includes(prefill.forge));
   const kinds = ["cron", "label", "comment", "pull_request", "issue"];
-  const starts = html`${field("kind", "Kind", {
+  const starts = html`${fieldL(v, "kind", "Kind", {
     options: kinds,
     value: prefill.kind ?? "label",
   })}${kinds.map(
@@ -370,96 +378,82 @@ export function triggerAdd(v) {
       html`<fieldset data-trigger-kind="${kind}">
         <legend>${kind}</legend>
         ${kind === "cron"
-          ? html`${field("id", "Scheduler id", { value: prefill.id ?? "" })}${field(
+          ? html`${fieldL(v, "id", "Scheduler id", { value: prefill.id ?? "" })}${fieldL(v,
               "pattern",
               "Cron pattern (5 or 6 fields)", { value: prefill.pattern ?? "" },
-            )}${field("folder", "Local repository folder", { required: prefill.kind === "cron", hint: prefill.kind === "cron" ? "Choose the existing local repository folder. No sample path is saved for you." : null })}${area(
+            )}${fieldL(v, "folder", "Local repository folder", { required: prefill.kind === "cron", hint: prefill.kind === "cron" ? "Choose the existing local repository folder. No sample path is saved for you." : null })}${areaL(v,
               "task",
               "Task", { required: prefill.kind === "cron", hint: null },
             )}`
-          : html`${field("forge", "Forge", {
+          : html`${fieldL(v, "forge", "Forge", {
               options: missingForge ? [{ value: "", label: "Choose a configured forge" }, ...forges] : forges, value: missingForge ? "" : prefill.forge ?? "", required: true, hint: opts(v).forges?.length ? "Only forges with configured webhooks are offered." : "No webhook is configured. Configure a forge connection or choose cron.",
             })}${["label", "comment"].includes(kind)
-              ? field("repository", "Repository (optional)")
+              ? fieldL(v, "repository", "Repository (optional)")
               : null}${kind === "comment"
-              ? field("phrase", "Comment phrase", { value: prefill.phrase ?? "" })
+              ? fieldL(v, "phrase", "Comment phrase", { value: prefill.phrase ?? "" })
               : null}${["label", "pull_request"].includes(kind)
-              ? field("labels", "Labels (required for labeled)", {
+              ? fieldL(v, "labels", "Labels (required for labeled)", {
                   type: "list", value: prefill.labels ?? "",
                 })
               : null}${["pull_request", "issue"].includes(kind)
-              ? html`${field("action", "Actions (forge words)", {
+              ? html`${fieldL(v, "action", "Actions (forge words)", {
                   type: "list",
                   options: kind === "issue" ? ["closed"] : [...PR_ACTIONS.github],
                   hint: "Submitted reviews fire on every verdict unless reviewState narrows them.",
                 })}${kind === "pull_request"
-                  ? field("reviewState", "Review states", { type: "list" })
-                  : null}${field("number", "Issue or pull request number", {
+                  ? fieldL(v, "reviewState", "Review states", { type: "list" })
+                  : null}${fieldL(v, "number", "Issue or pull request number", {
                   type: "int",
-                })}${field("once", "One-shot", {
+                })}${fieldL(v, "once", "One-shot", {
                   type: "json",
                   options: ["false", "true"],
                 })}`
               : null}`}
       </fieldset>`,
   )}`;
-  return card(
+  return card(v,
     "Add a trigger",
-    html`${recipe ? html`<p class="su-small">Recipe: <b>${recipe.title}</b>. Change any field before the preview.${missingForge ? " This recipe needs a GitHub webhook; configure Connections or choose a different configured forge." : null}${prefill.kind === "cron" ? " Add the existing folder; the schedule is 02:00 in the deployment’s configured timezone (UTC by default)." : null}</p>` : null}<p>
-        Preview the added lines, then confirm with a person's single-use
-        five-minute ticket.
-      </p>
+    html`${recipe ? html`<p class="su-small">${uiText("Recipe:", v.locale)} <b>${recipe.title}</b>. ${uiText("Change any field before the preview.", v.locale)}${missingForge ? ` ${uiText("This recipe needs a GitHub webhook; configure Connections or choose a different configured forge.", v.locale)}` : null}${prefill.kind === "cron" ? ` ${uiText("Add the existing folder; the schedule is 02:00 in the deployment’s configured timezone (UTC by default).", v.locale)}` : null}</p>` : null}<p>${uiText("Preview the added lines, then confirm with a person's single-use five-minute ticket.", v.locale)}</p>
       ${actForm("trigger-add", {
         structured: "trigger",
-        fields: html`<h3>1. What starts it</h3>
+        fields: html`<h3>1. ${uiText("What starts it", v.locale)}</h3>
           ${starts}
-          <h3>2. What it runs</h3>
+          <h3>2. ${uiText("What it runs", v.locale)}</h3>
           ${editFields(v, { flow: prefill.flow ?? "" }, "run")}
           <p>
-            The flow's skill must live in the repository's .pi/skills or
-            .agents/skills, or an available deployment skill tier. Suggestions:
+            ${uiText("The flow's skill must live in the repository's .pi/skills or .agents/skills, or an available deployment skill tier. Suggestions:", v.locale)}
             ${(opts(v).flows ?? [])
               .map((f) => (typeof f === "string" ? f : `${f.name} (${f.tier})`))
-              .join(", ") || "none found"}.
+              .join(", ") || uiText("none found", v.locale)}.
           </p>
-          <h3>Venue capabilities</h3>${facts((opts(v).backends ?? []).map(b => [typeof b === "string" ? b : b.name, Object.entries((typeof b === "string" ? BACKENDS[b]?.serves : b.serves) ?? {}).map(([k,value])=>`${k}: ${value === "image" ? "with the image" : value}`).join("; ")]))}
-          <h3>3. Run options</h3><div class="config-options">${editFields(v, {}, "options")}</div>
-          <p>
-            run.progress reports phases; run.statusComment needs forge access;
-            run.steer needs steering support; run.recover needs recovery
-            support. Cron cannot set statusComment or recover to true.
-          </p>
-          <h3>4. Set by hand</h3>
-          <p>
-            The console never sets the job cap, allowed models, MCP servers,
-            session, image, secrets, waits or replicas; new adds opt out of project secret bundles (run.secretBundle: false). Change the bundle opt-out and these other fields by hand in the triggers file.
-          </p>`,
-        label: "Preview the add",
+          <h3>${uiText("Venue capabilities", v.locale)}</h3>${facts((opts(v).backends ?? []).map(b => [typeof b === "string" ? b : b.name, Object.entries((typeof b === "string" ? BACKENDS[b]?.serves : b.serves) ?? {}).map(([k,value])=>`${k}: ${value === "image" ? "with the image" : value}`).join("; ")]))}
+          <h3>3. ${uiText("Run options", v.locale)}</h3><div class="config-options">${editFields(v, {}, "options")}</div>
+          <p>${uiText("run.progress reports phases; run.statusComment needs forge access; run.steer needs steering support; run.recover needs recovery support. Cron cannot set statusComment or recover to true.", v.locale)}</p>
+          <h3>4. ${uiText("Set by hand", v.locale)}</h3>
+          <p>${uiText("The console never sets the job cap, allowed models, MCP servers, session, image, secrets, waits or replicas; new adds opt out of project secret bundles (run.secretBundle: false). Change the bundle opt-out and these other fields by hand in the triggers file.", v.locale)}</p>`,
+          label: uiText("Preview the add", v.locale), locale: v.locale,
       })}
       <details>
-        <summary>Or paste the add tool's fields as JSON</summary>
+        <summary>${uiText("Or paste the add tool's fields as JSON", v.locale)}</summary>
         ${actForm("trigger-add", {
-          fields: area("trigger", "Add tool fields (JSON)", {
+          fields: areaL(v, "trigger", "Add tool fields (JSON)", {
             type: "json",
             required: true,
           }),
-          label: "Preview the JSON add",
+          label: uiText("Preview the JSON add", v.locale), locale: v.locale,
         })}
       </details>`,
   );
 }
-export function triggerKindHelp() { return card(
+export function triggerKindHelp(v = {}) { return card(v,
     "The five kinds",
     html`<p>
-      Cron runs a task in a local repository on a schedule. Label starts on an
-      issue label, never a pull request. Comment matches a phrase, with one per
-      forge. Pull request matches forge actions and reviews. Issue matches
-      closing; a one-shot also names its number.
+      ${uiText("Cron runs a task in a local repository on a schedule. Label starts on an issue label, never a pull request. Comment matches a phrase, with one per forge. Pull request matches forge actions and reviews. Issue matches closing; a one-shot also names its number.", v.locale)}
     </p>`,
   );
 }
 
-export function triggerForgeWords() { return card(
+export function triggerForgeWords(v = {}) { return card(v,
     "Pull request words per forge",
     facts(
       Object.entries(PR_ACTIONS).map(([forge, words]) => [
@@ -479,6 +473,6 @@ export function triggerRefusalExamples() {
     { field: "maxCostUsd", params: { kind: "label", flow: "triage", labels: ["pi"], maxCostUsd: "1" } },
   ].map(({field,params}) => ({field, sentence: planTriggerAdd({ ...shared, params }).refusal}));
 }
-export function triggerRefusals() {
-  return card("Refusals",html`<p>Each field below shows the shared planner's own refusal.</p>${triggerRefusalExamples().map(({field,sentence}) => html`<p><b>${field}</b>: ${sentence}${sentence?.includes("Nothing was changed") ? "." : " Nothing was changed."}</p>`)}`);
+export function triggerRefusals(v = {}) {
+  return card(v, "Refusals",html`<p>${uiText("Each field below shows the shared planner's own refusal.", v.locale)}</p>${triggerRefusalExamples().map(({field,sentence}) => html`<p><b>${field}</b>: ${sentence}${sentence?.includes("Nothing was changed") ? "." : ` ${uiText("Nothing was changed.", v.locale)}`}</p>`)}`);
 }
