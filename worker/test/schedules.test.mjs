@@ -211,21 +211,21 @@ test("cronPlacement is the rule loadSchedules places by, row for row (issue #433
 // Issue #501: a trigger's run.maxTokens may only NARROW the deployment's PI_MAX_TOKENS, so the worker's load of
 // the file (boot, and every live reload, which keeps the running schedules on a throw) refuses one above it.
 test("a trigger whose run.maxTokens is above PI_MAX_TOKENS refuses the load, any kind, naming the trigger and never the value", () => {
-	const capped = { ...CONFIG, maxTokens: "5" };
+	const capped = { ...CONFIG, maxTokens: 5 };
 	const over = (entry, maxTokens) => ({ on: entry.on, run: { ...entry.run, maxTokens } });
 	const cron2 = { on: { ...CRON.on, id: "weekly-tidy" }, run: CRON.run };
-	for (const [i, triggers] of [[1, [CRON, over(cron2, "5.000001")]], [1, [LABEL, over(PR, 9)]], [0, [over(LABEL, "6"), CRON]]]) {
+	for (const [i, triggers] of [[1, [CRON, over(cron2, 9)]], [1, [LABEL, over(PR, 9)]], [0, [over(LABEL, 6), CRON]]]) {
 		assert.throws(
 			() => load(triggers, { config: capped }),
-			(e) => isConfigError(e) && e.message.startsWith(`trigger at index ${i}: run.maxTokens is above this deployment's PI_MAX_TOKENS`) && !e.message.includes("5.000001") && e.message.includes("/triggers.json"),
+			(e) => isConfigError(e) && e.message.startsWith(`trigger at index ${i}: run.maxTokens is above this deployment's PI_MAX_TOKENS`) && !e.message.includes("9000000") && e.message.includes("/triggers.json"),
 		);
 	}
 	// At or below the cap loads, and so does any value when the deployment sets no cap (the trigger's cap applies alone).
-	assert.equal(load([over(CRON, "5"), over(LABEL, 0.5)], { config: capped }).length, 1);
-	assert.equal(load([over(CRON, "500")]).length, 1);
-	assert.equal(load([over(CRON, "500")], { config: { ...CONFIG, maxTokens: null } }).length, 1);
+	assert.equal(load([over(CRON, 5), over(LABEL, 1)], { config: capped }).length, 1);
+	assert.equal(load([over(CRON, 500)]).length, 1);
+	assert.equal(load([over(CRON, 500)], { config: { ...CONFIG, maxTokens: null } }).length, 1);
 	// The cron schedule carries the trigger's cap into its job data, as written.
-	assert.equal(load([over(CRON, "2.50")], { config: capped })[0].data.maxTokens, "2.50");
+	assert.equal(load([over(CRON, 3)], { config: capped })[0].data.maxTokens, 3);
 });
 
 test("run.portfolio rides the scheduler data at JOB level, never inside trigger (issue #505)", () => {

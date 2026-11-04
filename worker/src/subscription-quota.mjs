@@ -41,7 +41,7 @@ function strongerRow(old, next) {
 function extraOf(raw) {
 	const extra = object(raw) ? raw : {};
 	const number = value => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : null;
-	return { enabled: typeof extra.is_enabled === "boolean" ? extra.is_enabled : null, usedPercent: percent(extra.utilization), usedCredits: number(extra.used_credits), monthlyLimit: number(extra.monthly_limit), currency: typeof extra.currency === "string" && /^[A-Z]{3}$/.test(extra.currency) ? extra.currency : null, decimalPlaces: Number.isInteger(extra.decimal_places) && extra.decimal_places >= 0 && extra.decimal_places <= 4 ? extra.decimal_places : null };
+	return { enabled: typeof extra.is_enabled === "boolean" ? extra.is_enabled : null, usedPercent: percent(extra.utilization), usedCredits: number(extra.used_credits), monthlyLimit: number(extra.monthly_limit), currency: typeof extra.currency === "string" ? extra.currency : null, decimalPlaces: Number.isInteger(extra.decimal_places) && extra.decimal_places >= 0 && extra.decimal_places <= 4 ? extra.decimal_places : null };
 }
 function completeOf(windows) {
 	return windows.length > 0 && windows.every(value => value.state !== "unknown") && ["five-hour", "seven-day"].every(window => windows.some(value => value.id === window && value.state !== "unknown"));
@@ -225,8 +225,8 @@ export function makeSubscriptionQuotaStore({ redis, now = Date.now } = {}) {
 				return { ok: true, next: { ...state, source: incoming.source, observedAt: incoming.observedAt, windows: [...rows.values()], extraUsage: incoming.source === "provider-error" ? state.extraUsage : incoming.extraUsage, trial: null, ...(clearsProbe ? { probeRequired: false, invalidatedAt: null } : {}) } };
 			});
 		},
-		async admit(value, { windows = ["five-hour", "seven-day"], attemptId, consumeTrial = true, allowExtraUsage = false, maxCreditMicros = null, requireExtraUsageKnownDisabled = false } = {}) {
-			if (!Array.isArray(windows) || windows.some(value => !["five-hour", "seven-day"].includes(value)) || new Set(windows).size !== windows.length || allowExtraUsage && (!Number.isSafeInteger(maxCreditMicros) || maxCreditMicros <= 0)) throw quotaError("subscription-invalid-policy");
+		async admit(value, { windows = ["five-hour", "seven-day"], attemptId, consumeTrial = true, allowExtraUsage = false, maxCreditTokens = null, requireExtraUsageKnownDisabled = false } = {}) {
+			if (!Array.isArray(windows) || windows.some(value => !["five-hour", "seven-day"].includes(value)) || new Set(windows).size !== windows.length || allowExtraUsage && (!Number.isSafeInteger(maxCreditTokens) || maxCreditTokens <= 0)) throw quotaError("subscription-invalid-policy");
 			return mutate(value, (state, status) => {
 				if (state.probeRequired) {
 					if (status.state === "exhausted") return { ok: false, reason: "subscription-quota", until: status.until, status };
@@ -235,8 +235,8 @@ export function makeSubscriptionQuotaStore({ redis, now = Date.now } = {}) {
 				if (requireExtraUsageKnownDisabled && status.extraUsage.enabled !== false && !allowExtraUsage) return { ok: false, reason: "subscription-extra-usage", until: null, status };
 				// Monitoring preferences do not authorize spending against any observed exhausted bucket.
 				const blocked = status.windows.filter(row => row.state === "exhausted");
-				if (blocked.length === 0) return { ok: true, reason: status.state === "unknown" ? "subscription-unknown" : "subscription-available", ...(allowExtraUsage ? { creditCapMicros: maxCreditMicros } : {}), status };
-				if (allowExtraUsage && status.extraUsage.enabled === true) return { ok: true, reason: "subscription-available", creditCapMicros: maxCreditMicros, status };
+				if (blocked.length === 0) return { ok: true, reason: status.state === "unknown" ? "subscription-unknown" : "subscription-available", ...(allowExtraUsage ? { creditCapTokens: maxCreditTokens } : {}), status };
+				if (allowExtraUsage && status.extraUsage.enabled === true) return { ok: true, reason: "subscription-available", creditCapTokens: maxCreditTokens, status };
 				if (blocked.every(row => row.resetAt === null) && state.trial !== null) {
 					if (consumeTrial === false && state.trial.usedBy === null) return { ok: true, reason: "subscription-trial", status };
 					if (typeof attemptId !== "string" || attemptId.length === 0 || attemptId.length > 256) throw quotaError("subscription-invalid-trial");

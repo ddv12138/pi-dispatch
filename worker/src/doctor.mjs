@@ -68,7 +68,7 @@ import { parseModelsJson, stripBom, stripJsonComments } from "./models-json.mjs"
 import { isTransientOverlayRead, overlayProviderProblem } from "./model-catalog.mjs";
 import { EMPTY_TOKEN_FINGERPRINT, tokenFingerprint } from "./token-fingerprint.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
-import { resolveConfiguredModelRuns as resolveDoctorModelRuns, cooldownModelRefs, RADIUS_COST_CAP_LABEL, RADIUS_COST_CAP_FIX } from "./model-observation.mjs";
+import { resolveConfiguredModelRuns as resolveDoctorModelRuns, cooldownModelRefs } from "./model-observation.mjs";
 import { ignoredOutputCapModels, outputCapView, outputUnboundable } from "./output-cap.mjs";
 import { KEYLESS_API_KEY, KEYLESS_HOW, MODEL_ENDPOINTS_FILE_NAME, MODEL_ENDPOINTS_INCLUDE_NAME, MODEL_ENDPOINT_ID_RE, OVERLAY_LINK_FIX, OVERLAY_NOT_A_FILE_FIX, RENAMED_PROVIDERS, baseUrlTarget, endpointsAt, keylessVerdict, loadModelEndpoints, overlayApiKeyProblem, overlayApiKeyVariable, providerRenameHint, readOverlayModels, renderEndpointsInclude, unreportedUsageModels } from "./model-endpoints.mjs";
 import { declaredEndpointsIn, endpointsDeclaredIn, reloadCommand, rulesFileIncludes, rulesPredateEndpointsLine } from "./egress-cli.mjs";
@@ -255,8 +255,8 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		// Issue #761: the token window check's two reads, this host's records and then the counters (`doctorTokenWindows`),
 		// and the stores an older release left behind (`olderStateFindings`, older-state.mjs). Undefined means the defaults,
 		// which read the deployment's real files, Valkey and Docker.
-		readDollarRecords,
-		readDollarCounters,
+		readTokenRecords,
+		readTokenCounters,
 		olderStateFindings,
 		// Issue #708: whether the operator console answers (`probeConsole`, console-probe.mjs). Undefined means the default,
 		// which sends one GET /healthz to a loopback address or the socket, so a test passes its own.
@@ -449,7 +449,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 						return { ...(await valkeyAuthState(url, { context, withoutPassword })), passwordSet: Boolean(sent.password), from: sent.from };
 					}
 				: null;
-	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), openshell: openshell === true, ...(openshellRun ? { openshellRun } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readDollarRecords ? { readDollarRecords } : {}), ...(readDollarCounters ? { readDollarCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readUnit, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), ...(readPodmanService ? { readPodmanService } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
+	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), openshell: openshell === true, ...(openshellRun ? { openshellRun } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readUnit, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), ...(readPodmanService ? { readPodmanService } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
 	// Issue #471: every other service key, resolved ONCE for the whole run (the fix pass's re-collect and `--live` judge the
 	// same resolution). THE RULE (PR #474's round cap, after three rounds of trust patches): no program doctor starts is
 	// handed anything from `.env`. Every child gets this shell's own environment, the one it had before #471; a `.env`
@@ -1329,9 +1329,11 @@ function envelopeContextOf(env, io = {}) {
 	let maxTokens = null;
 	try {
 		const settings = deploymentSettingsOf(env, settingsFilePath(env), (p) => (io.existsSync ?? existsSync)(p));
-		maxTokens = settings.maxTokens;
+		// env values are AS WRITTEN (strings); the envelope's whole-tokens guard wants the number, and a
+		// malformed one is its own line -- the envelope then reads as having none, which it refuses.
+		maxTokens = settings.maxTokens === null || settings.maxTokens === undefined ? null : optionalTokenCount(settings.maxTokens, "maxTokens");
 	} catch {
-		// A malformed cap is its own line; the envelope then reads as having none, which it refuses.
+		// A malformed budget is its own line; the envelope then reads as having none, which it refuses.
 	}
 	return { projects, limits, maxTokens };
 }
@@ -1865,7 +1867,7 @@ export async function collectChecks(shellVars, seams) {
 				: `fix ${triggersFilePath} so it loads (the message above names the entry and the reason), then re-run doctor -- every trigger-derived check below is skipped until it loads`,
 		});
 	}
-	section("dollars");
+	section("tokens");
 	checks.push(...tokenChecks(env, tokenCaps, triggersSet !== undefined));
 
 	section("image");
@@ -3071,7 +3073,7 @@ export async function collectChecks(shellVars, seams) {
 			// A malformed list is its own line below; the worker refuses to boot on it.
 		}
 		const fpTokHere = tokenFingerprint(tokensHere, scopedLimitFacts.parseError === null ? scopedLimitFacts.limits : [], envListHere);
-		checks.push(...(await fleetTokenChecks(fpTokHere, peers, { retiredTokenKeysExist: () => (seams.dollarKeysExist ?? defaultDollarKeysExist)(valkeyTalkUrl) })));
+		checks.push(...(await fleetTokenChecks(fpTokHere, peers, { retiredTokenKeysExist: () => (seams.tokenKeysExist ?? seams.dollarKeysExist ?? defaultDollarKeysExist)(valkeyTalkUrl) })));
 		// Issue #499 part C: each host resolves its jobs' project from its OWN projects.json, while the project rows' counters
 		// are shared. This host's `fpProjects` from the file the service names, against every peer's published one. SKIPPED
 		// when this host's file does not load (PR #569's review): the BOOT_FILES line already fails on it, and comparing
@@ -3105,7 +3107,7 @@ export async function collectChecks(shellVars, seams) {
 	// Issue #761: a token window counter below what this host's own records settled into it (`doctorTokenWindows`).
 	// Re-opened here, where whether this command may talk to Valkey is known, from the same Valkey at the address the
 	// worker pins.
-	section("token budgets");
+	section("tokens");
 	checks.push(...(await doctorTokenWindows({ seams, env, home, url: valkeyUsable ? valkeyTalkUrl : null, localHost: workerNameOf(declaredWorkerName), fileExists })));
 	section("capacity");
 	// Issue #599, phase 2: how busy each host was over the last 7 days, one fact line per host, never a warning (nothing
@@ -4660,7 +4662,7 @@ export async function collectChecks(shellVars, seams) {
 		if (scopedLimitFacts.parseError === null && scopedLimitFacts.limits.length > 0) {
 			const overlay = fileExists(settingsFile) ? readOverlay(settingsFile) : { overlay: {} };
 			const fromOverlay = overlay.invalid ? undefined : overlay.overlay?.maxTokens;
-			const envCap = env.PI_MAX_COST_USD === undefined || env.PI_MAX_COST_USD === "" ? undefined : env.PI_MAX_COST_USD;
+			const envCap = env.PI_MAX_TOKENS === undefined || env.PI_MAX_TOKENS === "" ? undefined : env.PI_MAX_TOKENS;
 			checks.push(...scopedTokenRowChecks(scopedLimitFacts.limits, fromOverlay ?? envCap, scopedLimitFacts.path));
 		}
 		if (noHome) {
@@ -5653,7 +5655,7 @@ export function envelopeChecks(envelope, projects, maxTokens) {
 			ok: false,
 			warn: true,
 			label: `envelope floor(s) ${low.map(([id, floor]) => `${id} (${floor})`).join(", ")} are below the per-job token budget (${maxTokens}): each governed job reserves its whole budget against its share, so a floor that small admits no job of its own`,
-			fix: "raise the floor to at least the per-job cap (PI_MAX_COST_USD), lower the cap, or set the floor to 0 if the project needs no guaranteed share",
+			fix: "raise the floor to at least the per-job budget (PI_MAX_TOKENS), lower the budget, or set the floor to 0 if the project needs no guaranteed share",
 		});
 	}
 	const absent = (Array.isArray(projects) ? projects : []).map((p) => p?.id).filter((id) => typeof id === "string" && id !== OTHER && envelope.floors[id] === undefined);
@@ -5859,7 +5861,8 @@ function scopeFormOf(scope) {
 export function overlayTokenProblem(overlay, env) {
 	const fromEnv = {};
 	for (const key of TOKEN_SETTING_KEYS) {
-		const raw = env?.[TOKEN_ENV_NAMES[key]];
+		// maxTokens' env name is its own (PI_MAX_TOKENS), not a window's: the same resolution config.mjs does.
+		const raw = key === "maxTokens" ? env?.PI_MAX_TOKENS : env?.[TOKEN_ENV_NAMES[key]];
 		if (raw !== undefined && raw !== "") fromEnv[key] = raw;
 	}
 	if (checkTokenInvariant(fromEnv) !== null) return null;
@@ -5910,7 +5913,7 @@ export function scopedTokenRowChecks(limits, maxTokens, path) {
 }
 
 export function tokenChecks(env, tokenCaps, workerReadsTriggers) {
-	const envName = { ...TOKEN_ENV_NAMES, ...RETIRED_DOLLAR_ENV_NAMES };
+	const envName = { ...TOKEN_ENV_NAMES, maxTokens: "PI_MAX_TOKENS", ...RETIRED_DOLLAR_ENV_NAMES };
 	const checks = [];
 	const values = {};
 	for (const key of ["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]) {
@@ -5925,7 +5928,7 @@ export function tokenChecks(env, tokenCaps, workerReadsTriggers) {
 			optionalTokenCount(raw, envName[key] ?? key);
 			values[key] = Number(raw);
 		} catch (error) {
-			checks.push({ ok: false, label: `${error.message} -- the worker refuses to start`, fix: `set ${TOKEN_ENV_NAMES[key] ?? "PI_MAX_TOKENS"} to a whole number of tokens, or remove it` });
+			checks.push({ ok: false, label: `${envName[key] ?? key} ${error.message.slice(error.message.indexOf("must"))} -- the worker refuses to start`, fix: `set ${envName[key] ?? key} to a whole number of tokens, or remove it` });
 		}
 	}
 	const broken = checkTokenInvariant(values);
@@ -6026,7 +6029,7 @@ export function fleetSizeChecks(fileVersion, peers) {
 	return [{
 		ok: false,
 		warn: true,
-		label: `${old.map((h) => h.name).join(", ")} ${old.length === 1 ? "predates" : "predate"} job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (job counts, concurrent, dollar caps) applies on it until it is upgraded and restarted, and it refuses the file at its next start`,
+		label: `${old.map((h) => h.name).join(", ")} ${old.length === 1 ? "predates" : "predate"} job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (job counts, concurrent, token budgets) applies on it until it is upgraded and restarted, and it refuses the file at its next start`,
 		fix: "upgrade and restart every worker on this Valkey before scoped-limits.json is written as version 3",
 	}];
 }
@@ -6127,55 +6130,6 @@ export function fleetProjectsChecks(mine, peers) {
 }
 
 /**
- * The runner's own input overhead (`BOUND_OVERHEAD_TOKENS`, image/runner/src/usage-meter.mjs), which its bound adds to
- * every call. Copied, because the worker package does not ship the runner; `doctor.test.mjs` holds the two equal.
- */
-export const FIRST_CALL_OVERHEAD_TOKENS = 8192;
-/**
- * The least a job's FIRST call carries before its task, in bytes: pi 0.99.1's default system prompt (1,753 bytes) and
- * the schemas of its four default tools (2,712 bytes) serialise to 4,465 bytes, and PR #542's lab measured 10,667 for
- * a short task. 4,096 is below both, so the bound below stays a lower bound for a job that adds nothing.
- */
-export const FIRST_CALL_MIN_CONTEXT_BYTES = 4096;
-
-/**
- * A LOWER BOUND, in integer micro-dollars, on what the runner's cost guard (`callCostBound`) reserves for a job's
- * first call on `model`, or null when this cannot say. The guard refuses a call when its bound would pass the cap, so
- * a per-job cap below this number can never admit a call on the model: with the main model, the job makes no call at
- * all (PR #542's lab: the default model's first call was bounded at $1.03 under a $1 cap).
- *
- * The guard's bound is (request bytes + 8,192) x the dearest input rate + the output limit x the dearest output rate,
- * times a service-tier multiplier, over the model's table, its tiers and its fallbacks. This takes the parts of that
- * which cannot be smaller: the model's own table (not its tiers or fallbacks, which only raise the bound), the output
- * limit `model.maxTokens` (pi sends none of its own, so the guard uses the model's), an input of the overhead plus
- * `FIRST_CALL_MIN_CONTEXT_BYTES`, and the runner's own service-tier multiplier (`serviceTierMultiplier`). The input
- * rate is the guard's: the highest of input, cache read and cache write (not the 1h write, which needs long
- * retention). Null for a table or limit it cannot read.
- */
-export function firstCallFloorMicros(model) {
-	const cost = model?.cost;
-	const usable = (v) => typeof v === "number" && Number.isFinite(v) && v >= 0;
-	if (!cost || !["input", "output", "cacheRead", "cacheWrite"].every((field) => usable(cost[field]))) return null;
-	const maxTokens = model.maxTokens;
-	if (!(typeof maxTokens === "number" && Number.isFinite(maxTokens) && maxTokens > 0)) return null;
-	const inputRate = Math.max(cost.input, cost.cacheRead, cost.cacheWrite);
-	return Math.ceil(((FIRST_CALL_OVERHEAD_TOKENS + FIRST_CALL_MIN_CONTEXT_BYTES) * inputRate + maxTokens * cost.output) * serviceTierMultiplier(model));
-}
-
-/**
- * The runner's service-tier multiplier (`callCostBound` step 7, image/runner/src/usage-meter.mjs), copied like the
- * overhead above: pi multiplies a settled cost by the tier the RESPONSE reports on these two apis, which can be the
- * account's default rather than the request's, so the runner always bounds at the dearest tier. Leaving it out
- * (PR #551's review) let doctor stay silent on a cap the runner refuses every call under: openai/gpt-5.5 under $5.
- * `fleet-dollars.test.mjs` derives the runner's multiplier from its own bound for every priced api and holds this
- * equal to it.
- */
-export function serviceTierMultiplier(model) {
-	if (model?.api !== "openai-responses" && model?.api !== "openai-codex-responses") return 1;
-	return model.id === "gpt-5.5" ? 2.5 : 2;
-}
-
-/**
  * The model object the floor above is computed from: the builtin catalog's (`builtinModel`, model-catalog.mjs), or a
  * CUSTOM model the overlay `models.json` defines (its own `cost` and `maxTokens`). Null, so the model is not judged,
  * when the overlay redefines or overrides a builtin model: pi composes the two, and this does not copy that rule.
@@ -6246,18 +6200,6 @@ export function cappedModelNames(env, { runs, deployment, modelRoles = {}, proje
 	}
 	return names;
 }
-
-/**
- * Issue #501's open question, answered with a warning: a per-job cap below one full-output call of the main model,
- * or of a listed model, is a cap the runner can never admit that call under (`firstCallFloorMicros`). One line,
- * grouped by model and cap so a deployment default every trigger inherits is named once.
- *
- * Issue #507: `unboundable(ref)` says the runner cannot bound the model's output at all (`outputUnboundable`,
- * output-cap.mjs: openai-completions to a server off the trusted hosts without `compat.maxTokensField: "max_tokens"`),
- * so every call to it is refused under any cap. Such a model gets a line of its own, grouped by model, and no floor.
- * Radius and every composed pi-messages model have a separate diagnosis: their server-reported billing and input
- * rewrites are not bounded by the catalog, including rows whose listed rates are zero (issue #693).
- */
 
 /**
  * Issue #502 part 2: a trigger whose model, or a model on its list, the worker's free gate would refuse, asked of the
@@ -9348,7 +9290,7 @@ export function tokenWindowResetChecks(found) {
 	const one = found.length === 1;
 	return [
 		{
-			id: "dollars.window-reset",
+			id: "tokens.window-reset",
 			ok: false,
 			warn: true,
 			label: `${one ? "A dollar window counter is" : "Dollar window counters are"} below what this host's own runs settled into ${one ? "it" : "them"}, so ${one ? "its" : "their"} history was lost (a flushed, replaced or restored Valkey, an evicted key, or a hand edit) and the cap can let at least that much more be spent: ${parts.join("; ")}. Other hosts' runs are not counted here`,

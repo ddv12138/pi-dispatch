@@ -35,9 +35,13 @@ import { fingerprint } from "./fingerprint.mjs";
 import { TOKEN_LIMIT_FIELDS, tokenKeyPrefixFor, modelTokenRows } from "./scoped-limits.mjs";
 
 /** An amount as the integer token count, `null` when unset, or `"invalid"`: never the value as written. */
-function amount(value) {
+function amount(value, field) {
 	if (value === null || value === undefined) return null;
-	return Number.isSafeInteger(value) && value >= 0 ? value : "invalid";
+	// The worker's own readers hand env values AS WRITTEN (strings) beside overlay numbers, and both mean the
+	// same whole count: a numeric string of digits is the number. Anything else is a value the worker refuses,
+	// and the fingerprint records it as a different fingerprint ("invalid") rather than guessing.
+	const n = typeof value === "number" ? value : typeof value === "string" && /^\d+$/.test(value.trim()) ? Number(value.trim()) : value;
+	return Number.isSafeInteger(n) && n >= 0 ? n : "invalid";
 }
 
 /**

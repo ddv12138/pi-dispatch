@@ -113,7 +113,7 @@ test("a job with no dataVersion, or this build's own, runs as before", { skip },
 const iso = (ms) => new Date(ms).toISOString();
 const core = (fields = {}) => ({ jobId: "gh-1", attempt: 1, outcome: "policy", startedAt: iso(NOW - 60_000), endedAt: iso(NOW - 1_000), host: "other-host", kind: "github", project: null, ...fields });
 const HOSTILE = { reason: "runner-policy", exitCode: 2, turns: 9, tokens: { anything: 1 }, budgetReserved: { meaningChanged: true } };
-const NOT_READABLE = [2, 0, "2", 1.5, null];
+const NOT_READABLE = [3, 0, "3", 1.5, null];
 
 test("a lost-lock replay of a record a newer pi-dispatch wrote returns its outcome alone, never its other fields", { skip }, async () => {
 	const stalled = (record) => {
@@ -265,7 +265,7 @@ test("a failover retry keeps today's answers: a model attempt key locks it to it
 // same id, the previous attempt, and not older than the job. A record that is not, however new its release, says nothing
 // about the attempt being retried, so the retry goes as one with no record: refused, free, with no key to lock to.
 test("a failover retry waits only on its own previous attempt's record: a stale record under a reused id, an earlier attempt's or another job's is no record", { skip }, async () => {
-	const newer = (fields = {}) => ({ ...core({ outcome: "failed", ...fields }), ...NEVER_STARTED, v: 2 });
+	const newer = (fields = {}) => ({ ...core({ outcome: "failed", ...fields }), ...NEVER_STARTED, v: 3 });
 	const longAgo = iso(ENQUEUED - 20 * 86_400_000);
 	for (const [label, prior, job] of [
 		["a stale record an older job left under the same id", newer({ startedAt: longAgo, endedAt: longAgo }), {}],
@@ -305,8 +305,8 @@ test("a failover retry still waits when a stale record at a higher attempt on on
 		reads.push([jobId, typeof keep === "function"]);
 		return newerRecord(...[local, mirrored].map((record) => (typeof keep === "function" && !keep(record) ? null : record)));
 	};
-	for (const staleRelease of [{ v: 2 }, {}]) {
-		const stale = { ...core({ outcome: "failed", attempt: 3, startedAt: longAgo, endedAt: longAgo }), reason: "infra", budgetReserved: true, exitCode: 1, ...staleRelease };
+	for (const staleRelease of [{ v: 3 }, {}]) {
+		const stale = { ...core({ outcome: "failed", attempt: 3, startedAt: longAgo, endedAt: longAgo }), reason: "infra", budgetReserved: true, exitCode: 1, ...(staleRelease.v ? { v: staleRelease.v } : {}) };
 		for (const [label, own, job, sides] of [
 			["stale here, its own in the fleet's copy", 1, {}, (s, o) => [s, o]],
 			["its own here, stale in the fleet's copy", 1, {}, (s, o) => [o, s]],
@@ -315,7 +315,7 @@ test("a failover retry still waits when a stale record at a higher attempt on on
 		]) {
 			const name = `${label}, the stale record ${staleRelease.v ? "newer" : "readable"}`;
 			const reads = [];
-			const r = failoverRetry({ previousRecord: twoSides(...sides(stale, { ...core({ outcome: "failed", attempt: own }), ...NEVER_STARTED, v: 2 }), reads), job });
+			const r = failoverRetry({ previousRecord: twoSides(...sides(stale, { ...core({ outcome: "failed", attempt: own }), ...NEVER_STARTED, v: 3 }), reads), job });
 			await assert.rejects(r.run, (err) => err.name === "DelayedError", name);
 			assert.deepEqual(r.moves, [{ ts: NOW + mod.NEWER_RELEASE_RECHECK_MS, tok: "the-token" }], name);
 			assert.deepEqual(holdsOf(r).map((fields) => fields.what), ["the previous attempt's run record"], name);
@@ -327,7 +327,7 @@ test("a failover retry still waits when a stale record at a higher attempt on on
 		}
 	}
 	// The stale record alone, on either side: no record of its own, so refused, free, as before.
-	const stale = { ...core({ outcome: "failed", attempt: 3, startedAt: longAgo, endedAt: longAgo }), ...NEVER_STARTED, v: 2 };
+	const stale = { ...core({ outcome: "failed", attempt: 3, startedAt: longAgo, endedAt: longAgo }), ...NEVER_STARTED, v: 3 };
 	const alone = failoverRetry({ previousRecord: twoSides(stale, null, []) });
 	assert.equal((await alone.run()).reason, "model-failover-no-candidate");
 	assert.deepEqual(alone.moves, []);
@@ -336,7 +336,7 @@ test("a failover retry still waits when a stale record at a higher attempt on on
 test("a recovery retry never waits on a newer previous record: it is locked to its checkpoint's model", { skip }, async () => {
 	const manifests = [];
 	const r = failoverRetry({
-		prior: { ...core({ outcome: "failed" }), ...NEVER_STARTED, v: 2 },
+		prior: { ...core({ outcome: "failed" }), ...NEVER_STARTED, v: 3 },
 		data: { ...FAILOVER_JOB, recover: true, recoveryOf: "gh-0" },
 		deps: { workspaceCheckpointer: { readManifest: async (runId) => (manifests.push(runId), { ok: true, manifest: { provider: "anthropic", model: "fallback" } }) } },
 	});
@@ -355,7 +355,7 @@ test("a recovery retry never waits on a newer previous record: it is locked to i
 
 test("a fault reading the model attempt key is retried as infrastructure, never a wait", { skip }, async () => {
 	for (const [label, getKey] of [["a Valkey fault", async () => { throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }); }], ["a malformed key", async () => "{not json"]]) {
-		const r = failoverRetry({ prior: { ...core({ outcome: "failed" }), ...NEVER_STARTED, v: 2 }, getKey });
+		const r = failoverRetry({ prior: { ...core({ outcome: "failed" }), ...NEVER_STARTED, v: 3 }, getKey });
 		await assert.rejects(r.run, (err) => err.name === "InfraRetry" && err.reason === "container-never-started", label);
 		assert.deepEqual(r.moves, [], `${label}: not held`);
 		assert.deepEqual(holdsOf(r), [], label);

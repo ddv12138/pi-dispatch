@@ -213,7 +213,7 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 				let result, error;
 				try {
 					const runContainer = containerFactory({ image: config.jobImage, hostEnv: providerEnv, allowGlobalExtensions: false, packagePaths: [], egress: true, egressProxy: proxy, onOutput: () => {}, openJobLog: sink });
-					result = await runJobFn(job, { redis, caps: { day: settings.dailyCap, week: settings.weeklyCap, month: settings.monthlyCap }, softHoldPct: settings.softHoldPct, tokenCap: settings.dailyTokenCap, dollarCaps: dollarWindowCaps(settings), now: new Date(now()), imagePreflight: async () => checked, checkProviderCredential: () => ({ ok: true }), prepareWorkspace: async () => ({ jobDir, workspace, sha: source.baseSha }), runContainer: async (args) => {
+					result = await runJobFn(job, { redis, caps: { day: settings.dailyCap, week: settings.weeklyCap, month: settings.monthlyCap }, softHoldPct: settings.softHoldPct, tokenCaps: tokenWindowCaps(settings), now: new Date(now()), imagePreflight: async () => checked, checkProviderCredential: () => ({ ok: true }), prepareWorkspace: async () => ({ jobDir, workspace, sha: source.baseSha }), runContainer: async (args) => {
 						const controller = new AbortController();
 						const stop = () => { interrupted = true; if (!controller.signal.aborted) { controller.abort(); void run(["stop", "-t", "5", jobId]).catch(() => {}); } };
 						stops.add(stop);

@@ -23,10 +23,10 @@ function pageJson() {
 	return [...PAGE.matchAll(/```json\n([\s\S]*?)\n```/g)].map((m) => JSON.parse(m[1]));
 }
 const PROJECTS = pageJson().find((b) => Array.isArray(b.projects)).projects;
-const ENVELOPE = parseEnvelope(JSON.stringify(pageJson().find((b) => b.floorsTokens)), "/e/envelope.json", { projects: PROJECTS, maxTokens: 2 * TOKENS });
+const ENVELOPE = parseEnvelope(JSON.stringify(pageJson().find((b) => b.floorsTokens)), "/e/envelope.json", { projects: PROJECTS, maxTokens: 2 });
 
 /** Tokens as the page writes them. */
-const usd = (tokens) => `$${(tokens / TOKENS).toFixed(2)}`;
+const usd = (tokens) => Math.round(tokens).toLocaleString("en-US");
 
 test("the example's trigger parses through the shared parser, carries portfolio: true and no github (#506)", () => {
 	const [entry, ...rest] = parseTriggers(read(`${EXAMPLE}triggers.portfolio.example.json`), "triggers.portfolio.example.json");
@@ -93,7 +93,7 @@ test("the page's worked numbers are what the allocator gives for its envelope an
 	assert.ok(PAGE.includes(`aims platform at ${usd(second.target.allocations.platform)}`));
 	assert.ok(PAGE.includes(`to shop ${usd(second.allocations.shop)}, platform ${usd(second.allocations.platform)} and ops ${usd(second.allocations.ops)}`));
 	// The manager's own share admits its job: ops is floored at or above the per-job cap.
-	assert.ok(ENVELOPE.floors.ops >= 2 * TOKENS);
+	assert.ok(ENVELOPE.floors.ops >= 2);
 	assert.ok(PROJECTS.find((p) => p.id === "ops").members.includes("/home/me/pm"));
 });
 

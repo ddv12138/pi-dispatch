@@ -40,7 +40,7 @@ Both exist because getting them wrong is silent.
 | Sandbox gateways | `./sandbox-gateways.json`, on the console host | `PI_SANDBOX_GATEWAYS_FILE` | The browser gateways enrolled for [sandbox attachment](sandbox-gateway.md). Absent turns attachment off |
 | Opener hosts | `~/.config/pi-dispatch/opener/hosts.json`, on each machine that opens sandboxes | `XDG_CONFIG_HOME` | The host configuration the native opener approved |
 | Deployment pointer | `~/.pi/agent/pi-dispatch-deployment.json` | `PI_DISPATCH_DEPLOYMENT_FILE` (`PI_CODING_AGENT_DIR` moves its folder) | Which deployment folder `/dispatch` and the console manage. `/dispatch setup` writes it again |
-| Queue and counters | Docker volume | `VALKEY_URL` | Every key family [listed below](#what-the-valkey-volume-holds): the waiting queue, the job, token and dollar counters, the pause flag, delivery dedup, held and parked runs, the host registry, the run mirror, and the live transcripts (redacted, gone 24 hours after each run, none with `PI_LIVE_TRANSCRIPTS=0`). A forge job's queue data holds issue text for 31 days, so a backup of this volume is personal data. **A reset or an older copy reopens every cap** for the rest of its window, and doctor notices that for the deployment's dollar windows only (`dollars.window-reset`) |
+| Queue and counters | Docker volume | `VALKEY_URL` | Every key family [listed below](#what-the-valkey-volume-holds): the waiting queue, the job and token counters, the pause flag, delivery dedup, held and parked runs, the host registry, the run mirror, and the live transcripts (redacted, gone 24 hours after each run, none with `PI_LIVE_TRANSCRIPTS=0`). A forge job's queue data holds issue text for 31 days, so a backup of this volume is personal data. **A reset or an older copy reopens every budget** for the rest of its window, and doctor notices that for the deployment's token windows only (`tokens.window-reset`) |
 
 The Valkey volume is `pi-dispatch-valkey-data` when you started it with `pi-dispatch up`, and
 `valkey-data` (Compose prefixes it with the project name) when you started it with
@@ -89,7 +89,7 @@ behaves as before; the rest is state that a lost or older volume takes with it.
 
 A reset (a flushed, replaced or newly made Valkey) or a restore of an older copy loses or rolls back all of this.
 **Every cap reopens** for the rest of its window: the job counts, the token counter and every dollar window. Doctor
-notices it for the deployment's own day, week and month dollar windows only (`dollars.window-reset`, see
+notices it for the deployment's own day, week and month token windows only (`tokens.window-reset`, see
 [When a counter resets](costs.md#when-a-counter-resets)). The job, token, scoped and model windows reset in silence.
 
 ### The settings overlay is the one that fails quietly
@@ -253,7 +253,7 @@ Valkey does not corrupt the history. What an older Valkey *does* restore is an o
 spend counters (`budget:*`), so caps under count for the rest of that window and held jobs come back.
 Nothing about the file store gates a re-run: dedup and the wait list live entirely in Valkey. `pi-dispatch doctor`
 notices a dollar counter that is now below what this host's own run records settled into its window
-(`dollars.window-reset`), and says how to put it back ([When a counter resets](costs.md#when-a-counter-resets)). It
+(`tokens.window-reset`), and says how to put it back ([When a counter resets](costs.md#when-a-counter-resets)). It
 cannot see the job, token, scoped or model windows.
 
 **Restoring an old `triggers.json` over a newer one re-arms spent one-shots.** A trigger with
@@ -339,6 +339,6 @@ Two more lines speak about what this page covers:
   that is the Valkey image, wherever it still says `valkey/valkey:8` rather than the pinned `valkey/valkey:8.1`: a
   compose file's `valkey` service, a Podman unit, or a `pi-dispatch-valkey` container this deployment's `up` started
   and still runs itself ([upgrading.md](upgrading.md#valkey-and-bullmq)). Each such store gets a line of its own.
-- **`dollars.window-reset`** warns when a dollar window's counter in Valkey is missing, or below what this host's own
+- **`tokens.window-reset`** warns when a token window's counter in Valkey is missing, or below what this host's own
   run records settled into it, which is what a flushed, replaced or restored Valkey looks like
   ([When a counter resets](costs.md#when-a-counter-resets)).

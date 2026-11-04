@@ -1,17 +1,12 @@
-/**
- * Operator-declared subscription plans (issue #53): the one place a flat-rate plan's real price can be
- * stated. pi-ai's rate table for a subscription-backed provider does not state the plan's price: at 0.80.7
- * kimi-coding and zai-coding-cn shipped all-zero tables, so their runs recorded cost 0 and read as FREE
- * when they were PREPAID; at the 0.99.1 pin most of their models carry an implied API-equivalent rate
- * instead (issue #509), so the same prepaid runs now record a POSITIVE cost and read as METERED spend.
- * Either way the table is the wrong price, and a zero rate is no longer even a hint that a plan exists
- * (the qwen-token-plan family is all-zero, and so are free models of metered providers). And the env
- * boundary REFUSES OAuth/subscription logins on purpose (env-allowlist.mjs: an expiring token cannot power an
+/** Operator-declared subscription plans (issue #53): the auth-and-windows declaration for providers the
+ * env boundary REFUSES OAuth/subscription logins for (env-allowlist.mjs: an expiring token cannot power an
  * unattended service), so no credential ever reaches the worker that could name the plan. An operator-side
- * declaration is therefore the only honest price source, and `subscriptions.json` is that declaration.
+ * declaration is the only source, and `subscriptions.json` is that declaration. The retired money `price`
+ * died with the cost era: records carry tokens (DES-TOKEN-RESERVE-AND-SETTLE), and a plan's real-world
+ * price is outside every budget this service enforces.
  *
  * This file feeds COUNTERFACTUAL ARITHMETIC ONLY (DES-SUBSCRIPTIONS-ARE-COUNTERFACTUAL-ONLY): the admin
- * extension prices runs that already happened against the plans declared here. It never touches job
+ * extension reasons about runs that already happened against the plans declared here. It never touches job
  * execution, routing, or auth -- the worker exports this validator and reads nothing at job time. The
  * parser lives in the worker purely for the shared-validator anti-drift idiom: the admin imports it the
  * same way it imports parseTriggers/parsePauseWindows, so the two sides cannot drift on the schema.
@@ -128,19 +123,9 @@ function normalizeSubscription(entry, index, path, seenIds) {
 
 	const models = entry.models === undefined ? ["*"] : normalizeGlobs(entry.models, "models", at, path);
 
-	const price = entry.price;
-	if (price === null || typeof price !== "object" || Array.isArray(price)) {
-		throw configError(`${at}: price must be an object { amount, currency, per }: ${path}`);
-	}
-	if (typeof price.amount !== "number" || !Number.isFinite(price.amount) || price.amount <= 0) {
-		throw configError(`${at}: price.amount must be a number > 0: ${path}`);
-	}
-	if (typeof price.currency !== "string" || !/^[A-Z]{3}$/.test(price.currency)) {
-		throw configError(`${at}: price.currency must be a 3-letter uppercase code (e.g. "USD"): ${path}`);
-	}
-	if (price.per !== "month") {
-		throw configError(`${at}: price.per must be "month" (got ${JSON.stringify(price.per)}): ${path}`);
-	}
+	// The retired money price: a plan's cost is what the operator pays the vendor, outside every token
+	// budget this service enforces, and the run records carry tokens only (DES-TOKEN-RESERVE-AND-SETTLE).
+	// A `price` field left in a file is dropped like any unknown field; nothing validates it.
 
 	const sharedWithOtherProducts = normalizeBool(entry.sharedWithOtherProducts, "sharedWithOtherProducts", at, path, false);
 	const hypothetical = normalizeBool(entry.hypothetical, "hypothetical", at, path, false);
@@ -167,7 +152,6 @@ function normalizeSubscription(entry, index, path, seenIds) {
 		vendor: entry.vendor.trim(),
 		provider: entry.provider.trim(),
 		models,
-		price: { amount: price.amount, currency: price.currency, per: "month" },
 		sharedWithOtherProducts,
 		hypothetical,
 		counterfactualModel,

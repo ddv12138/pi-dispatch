@@ -48,14 +48,14 @@ export function projectWatchDecisionState(finding, fields = []) {
 }
 
 /** A trusted pinned-runtime bound is required; input-only pricing alone is no token bound. */
-export function prepareWatchDecision(config, finding, { resolveModel, boundCostMicros } = {}) {
+export function prepareWatchDecision(config, finding, { resolveModel, boundCostTokens } = {}) {
 	const checked = validateWatchDecision(config, { resolveModel });
-	if (!checked.ok || typeof boundCostMicros !== "function") return fail();
+	if (!checked.ok || typeof boundCostTokens !== "function") return fail();
 	const state = projectWatchDecisionState(finding, checked.config.fields);
-	let boundMicros;
-	try { boundMicros = boundCostMicros({ model: checked.config.model, state, questions: checked.config.questions }); } catch { return fail(); }
-	if (!Number.isSafeInteger(boundMicros) || boundMicros < 0 || boundMicros > checked.maxTokens) return fail();
-	return { ...checked, state, boundMicros };
+	let boundTokens;
+	try { boundTokens = boundCostTokens({ model: checked.config.model, state, questions: checked.config.questions }); } catch { return fail(); }
+	if (!Number.isSafeInteger(boundTokens) || boundTokens < 0 || boundTokens > checked.maxTokens) return fail();
+	return { ...checked, state, boundTokens };
 }
 
 export function selectWatchDecision(config, result) {

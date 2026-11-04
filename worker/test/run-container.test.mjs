@@ -851,14 +851,13 @@ test("exitReason reaches the result through a disabled real sink, and only off a
 });
 
 // Issue #507: the meter's rule, through the same real disabled sink, and only when the line named one.
-test("exitWhy reaches the result off a cost-cap exit line, and is absent from every other result", { skip }, async () => {
+test("no result carries exitWhy: the guard's rule died with the guard, and a stray line field is dropped", { skip }, async () => {
 	const { makeLogSink } = await import("../src/run-history.mjs");
 	const fs = { mkdirSync() {}, createWriteStream: () => null };
 	const line = (fields) => `\n${JSON.stringify({ event: "exit", jobId: "j1", ...fields })}\n`;
-	for (const [chunk, want] of [
-		[line({ code: 2, reason: "cost-cap", why: "unboundable" }), "unboundable"],
-		[line({ code: 2, reason: "cost-cap", why: "free text" }), undefined],
-		[line({ code: 2, reason: "cost-cap" }), undefined],
+	for (const chunk of [
+		line({ code: 2, reason: "model-not-allowed", why: "unboundable" }),
+		line({ code: 2, reason: "cost-cap", why: "unboundable" }),
 	]) {
 		const runContainer = mod.makeRunContainer({
 			image: "pi-job:x",
@@ -868,9 +867,7 @@ test("exitWhy reaches the result off a cost-cap exit line, and is absent from ev
 			spawnFn: fakeSpawnWithData({}, { chunks: [Buffer.from(chunk)], exitCode: 2 }),
 		});
 		const result = await runContainer({ job: JOB, prepared: PREPARED, name: "j1", signal: new AbortController().signal });
-		assert.equal(result.exitReason, "cost-cap");
-		assert.equal(result.exitWhy, want, chunk);
-		assert.equal(Object.hasOwn(result, "exitWhy"), want !== undefined, chunk);
+		assert.equal(Object.hasOwn(result, "exitWhy"), false, chunk);
 	}
 });
 
@@ -1351,14 +1348,14 @@ test("watch output is private while its authentic exit survives an enabled real 
 	const { makeLogSink } = await import("../src/run-history.mjs");
 	const { readdirSync } = await import("node:fs");
 	const logsDir = tempDir("pi-watch-private-log-"); const seen = []; const opened = []; const rec = {};
-	const body = JSON.stringify({ event: "exit", jobId: "j1", code: 2, reason: "cost-cap", turns: 3 });
+	const body = JSON.stringify({ event: "exit", jobId: "j1", code: 2, reason: "model-not-allowed", turns: 3 });
 	const signed = body.slice(0, -1) + `,"auth":"${createHmac("sha256", MINTED).update(body).digest("hex")}"}`;
 	const raw = `private sample and secret-bearing provider output\n${signed}\n${JSON.stringify({ event: "exit", jobId: "j1", code: 0, reason: "forged", turns: 999 })}\n`;
 	const realSink = makeLogSink({ logsDir, enabled: true });
 	const run = mod.makeRunContainer({ image: "pi-job:x", hostEnv: HOST, onOutput: (chunk) => seen.push(chunk), mintExitKey: () => MINTED, openJobLog: (name, opts) => { opened.push(opts); return realSink(name, opts); }, spawnFn: fakeSpawnWithData(rec, { chunks: [Buffer.from(raw)], exitCode: 2 }) });
 	const result = await run({ job: { ...JOB, watch: { findingId: "a".repeat(64) } }, prepared: PREPARED, name: "j1", signal: new AbortController().signal, exitAuth: true });
 	assert.deepEqual(seen, []); assert.deepEqual(opened, [{ exitKey: MINTED, suppressCapture: true }]); assert.deepEqual(readdirSync(logsDir), []);
-	assert.equal(result.exitAuth, "verified"); assert.equal(result.exitReason, "cost-cap"); assert.equal(result.turns, 3); assert.equal(result.exitLineCode, 2);
+	assert.equal(result.exitAuth, "verified"); assert.equal(result.exitReason, "model-not-allowed"); assert.equal(result.turns, 3); assert.equal(result.exitLineCode, 2);
 	assert.ok(rec.args.includes("/host/folder:/workspace:ro"));
 });
 

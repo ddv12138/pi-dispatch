@@ -41,7 +41,7 @@ import { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_S
 export { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, newerSkippedSentence, pauseWindowsNewerRefusal, readableRecords, shownRecord };
 // The scoped-limits validator is shared for the anti-drift reason the pause/subscriptions ones are: the
 // write goes through the exact parser the worker boot-loads, so the sides cannot disagree on the schema.
-import { danglingProjectRows, dollarKeyPrefixFor, isModelScope, isProjectScope, parseScopedLimits, scopeDollarKeyPrefix, scopedLimitsVersionFor, scopeKeyPrefix, USD_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { danglingProjectRows, tokenKeyPrefixFor, isModelScope, isProjectScope, parseScopedLimits, scopeTokenKeyPrefix, scopedLimitsVersionFor, scopeKeyPrefix, TOKEN_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
 // The projects parser, for the same anti-drift reason: a `project:<id>` row is written only when the id is a project the
 // worker would load (issue #499 part B).
 import { PROJECT_ID_RE, parseProjects, projectOf, projectsVersionFor } from "@edgehero/pi-dispatch/projects";
@@ -1811,11 +1811,11 @@ async function envelopeSpend(redis, envelope, projects, now) {
   const keyOf = WINDOW_KEY[envelope.window];
   const deployment = keyOf(now, DOLLAR_KEY_PREFIX);
   const entries = envelopeEntries(envelope);
-  const projectKeys = Object.fromEntries(entries.map((id) => [id, keyOf(now, scopeDollarKeyPrefix(`project:${id}`))]));
+  const projectKeys = Object.fromEntries(entries.map((id) => [id, keyOf(now, scopeTokenKeyPrefix(`project:${id}`))]));
   const repoKeys = {};
   for (const p of Array.isArray(projects) ? projects : []) {
     if (!entries.includes(p?.id) || p.id === OTHER) continue;
-    repoKeys[p.id] = Object.fromEntries((Array.isArray(p.members) ? p.members : []).map((m) => [scopeRef(m), keyOf(now, scopeDollarKeyPrefix(m))]));
+    repoKeys[p.id] = Object.fromEntries((Array.isArray(p.members) ? p.members : []).map((m) => [scopeRef(m), keyOf(now, scopeTokenKeyPrefix(m))]));
   }
   const all = [deployment, ...Object.values(projectKeys), ...Object.values(repoKeys).flatMap((r) => Object.values(r))];
   const values = await redis.mget(...all);
@@ -1915,9 +1915,9 @@ export async function readScopedBudget({ url, limits, redisFn = makeRedisClient,
           if (l.month !== null && l.month !== undefined) row.month = await cell(monthKey(now, prefix));
         }
         // The dollar windows (version 2), in integer micro-dollars held or settled so far, under the keys the worker
-        // composes from the same shared export (`dollarKeyPrefixFor`). Only the windows the row caps.
-        if (USD_LIMIT_FIELDS.some((f) => l[f] !== null && l[f] !== undefined)) {
-          const prefix = dollarKeyPrefixFor(l);
+        // composes from the same shared export (`tokenKeyPrefixFor`). Only the windows the row caps.
+        if (TOKEN_LIMIT_FIELDS.some((f) => l[f] !== null && l[f] !== undefined)) {
+          const prefix = tokenKeyPrefixFor(l);
           const usd = {};
           if (l.dayUsd !== null && l.dayUsd !== undefined) usd.day = await cell(dayKey(now, prefix));
           if (l.weekUsd !== null && l.weekUsd !== undefined) usd.week = await cell(weekKey(now, prefix));

@@ -10,7 +10,7 @@ function fixture({ decision = false, shadow = false, storeOverrides = {}, pauseU
 	const root = tempDir("pi-watch-runtime-"); const outboxDir = join(root, "outbox"); mkdirSync(outboxDir);
 	const triggersPath = join(root, "triggers.json");
 	const finding = { id: findingId, ruleId: "shop", source: "prod", fingerprint: "b".repeat(64), severity: "error", count: 37, firstSeen: "2026-10-29T00:00:00Z", lastSeen: "2026-10-29T00:10:00Z", fields: { service: "checkout" }, samples: ["private-hostile-sample"] };
-	const trigger = { on: { type: "watch", id: "shop", source: "prod", fingerprint: ["service"], minCount: 5, window: "10m", cooldown: "6h", maxPerDay: 4 }, run: mode === "issue" ? { kind: "local", mode, issue: { kind: "github", repo: "acme/shop" } } : { kind: "local", mode, folder: root, flow: "triage", task: "Investigate", maxTokens: "0.40", issue: { kind: "github", repo: "acme/shop" } }, ...(decision && { decide: { model: "openrouter/typesafe/jev-1.13", maxTokens: "0.001", fields: ["service"], shadow, questions: { act: { type: "choice", criteria: { investigate: "failure", ignore: "noise", file_issue: "ask person" } } }, act: { investigate: 0.7, ignore: 0.9, otherwise: "file_issue" } } }) };
+	const trigger = { on: { type: "watch", id: "shop", source: "prod", fingerprint: ["service"], minCount: 5, window: "10m", cooldown: "6h", maxPerDay: 4 }, run: mode === "issue" ? { kind: "local", mode, issue: { kind: "github", repo: "acme/shop" } } : { kind: "local", mode, folder: root, flow: "triage", task: "Investigate", maxTokens: 4000, issue: { kind: "github", repo: "acme/shop" } }, ...(decision && { decide: { model: "openrouter/typesafe/jev-1.13", maxTokens: 2000, fields: ["service"], shadow, questions: { act: { type: "choice", criteria: { investigate: "failure", ignore: "noise", file_issue: "ask person" } } }, act: { investigate: 0.7, ignore: 0.9, otherwise: "file_issue" } } }) };
 	writeFileSync(triggersPath, JSON.stringify({ watchSources: { prod: { verify: "hmac-sha256", secretEnv: "WATCH_PROD_SECRET" } }, triggers: [trigger] }));
 	const changes = []; const traces = []; const queued = []; const handoffs = []; const acknowledged = [];
 	let latest = { ...finding };
@@ -29,7 +29,7 @@ test("watch pickup ignores forged execution selectors and private evidence never
 });
 test("decision pickup projects only bounded structured fields and uses a separate classifier cap", async () => {
 	const f = fixture({ decision: true }); const resolved = await f.runtime.resolve(f.ref, "gate1");
-	assert.equal(resolved.data.watch.stage, "decision"); assert.equal(resolved.data.maxTokens, "0.001");
+	assert.equal(resolved.data.watch.stage, "decision"); assert.equal(resolved.data.maxTokens, 2000);
 	assert.equal(resolved.data.watch.gate.state.service, "checkout"); assert.equal(resolved.data.watch.gate.state.samples, undefined);
 	assert.ok(resolved.data.models.includes("openrouter/typesafe/jev-1.13"));
 	assert.equal(JSON.stringify(resolved.data).includes("private-hostile-sample"), false);

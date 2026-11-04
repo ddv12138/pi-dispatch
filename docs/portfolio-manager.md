@@ -25,7 +25,7 @@ The [example's README](../examples/portfolio-manager/README.md) has the commands
 
 Put the manager's folder in a project with a floor. Its own job is governed like any other: it pays from its
 folder's project, or from `_other` when the folder is in no project. A plan can give `_other` weight 0, and then
-the manager is refused as `allocation-cap` at its next run. A floor of at least `PI_MAX_COST_USD` keeps it
+the manager is refused as `allocation-cap` at its next run. A floor of at least `PI_MAX_TOKENS` keeps it
 running. The example uses a project `ops`:
 
 ```json
@@ -36,33 +36,33 @@ running. The example uses a project `ops`:
 ```
 
 ```json
-{ "version": 1, "window": "week", "totalUsd": 100,
-  "floorsUsd": { "shop": 10, "platform": 10, "ops": 5, "_other": 0 },
+{ "version": 1, "window": "week", "totalTokens": 1000000,
+  "floorsTokens": { "shop": 100000, "platform": 100000, "ops": 50000, "_other": 0 },
   "defaultWeights": { "shop": 1, "platform": 1, "ops": 1, "_other": 1 },
   "delegation": { "enabled": true, "writers": ["operator-session", "portfolio-job"],
                   "maxStepPct": 25, "minIntervalHours": 24, "maxPlanDays": 14 } }
 ```
 
-With `PI_MAX_COST_USD=2`, the `ops` floor of $5 admits the manager's weekly job even when a plan gives `ops`
+With `PI_MAX_TOKENS=50000`, the `ops` floor of 50000 tokens admits the manager's weekly job even when a plan gives `ops`
 weight 0.
 
 ### What these numbers give
 
-The floors take $25 of the $100. The other $75 is split by weight.
+The floors take 250000 of the 1000000 tokens. The other 750000 is split by weight.
 
 | Project | Floor | Neutral (weights 1, 1, 1, 1) | After the fixture plan (3, 2, 1, 0) |
 |---|---:|---:|---:|
-| shop | $10.00 | $28.75 | $47.50 |
-| platform | $10.00 | $28.75 | $35.00 |
-| ops | $5.00 | $23.75 | $17.50 |
-| `_other` | $0.00 | $18.75 | $0.00 |
+| shop | 100,000 | 287,500 | 475,000 |
+| platform | 100,000 | 287,500 | 350,000 |
+| ops | 50,000 | 237,500 | 175,000 |
+| `_other` | 0 | 187,500 | 0 |
 
-The neutral split does not give `shop` and `platform` half of the $75 each: `ops` and `_other` have a default
+The neutral split does not give `shop` and `platform` half of the 750,000 each: `ops` and `_other` have a default
 weight of 1 too, so each of the four takes a quarter.
 
-The fixture plan moves no project by more than $18.75, under the $25.00 step (25% of $100), so it applies
-whole. A next plan of 1, 6, 1, 0 aims platform at $66.25, a move of $31.25, so it is clamped: every project
-moves 25/31.25 of the way, to shop $25.00, platform $60.00 and ops $15.00.
+The fixture plan moves no project by more than 187,500, under the 250,000 step (25% of 1,000,000), so it applies
+whole. A next plan of 1, 6, 1, 0 aims platform at 662,500, a move of 312,500, so it is clamped: every project
+moves 25/312,500 of the way, to shop 250,000, platform 600,000 and ops 150,000.
 
 ### The trigger
 

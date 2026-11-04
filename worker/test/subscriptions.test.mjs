@@ -50,7 +50,6 @@ test("a minimal subscription normalizes to an explicit literal with every defaul
 			vendor: "Moonshot AI",
 			provider: "kimi-coding",
 			models: ["*"],
-			price: { amount: 99, currency: "TOKENS", per: "month" },
 			sharedWithOtherProducts: false,
 			hypothetical: false,
 			counterfactualModel: null,
@@ -140,15 +139,12 @@ test("model globs are bounded to the model-id charset plus *", () => {
 	assert.throws(() => parse([{ ...OK, models: [42] }]), isConfigError);
 });
 
-// ── field refusals: price ───────────────────────────────────────────────────────────────────────────────
+// ── the retired money price ─────────────────────────────────────────────────────────────────────────────
 
-test("price must be { amount > 0, 3-letter uppercase currency, per: month }", () => {
-	assert.throws(() => parse([{ ...OK, price: undefined }]), (e) => isConfigError(e) && /price must be an object/.test(e.message));
-	assert.throws(() => parse([{ ...OK, price: { ...OK.price, amount: 0 } }]), (e) => isConfigError(e) && /amount must be a number > 0/.test(e.message));
-	assert.throws(() => parse([{ ...OK, price: { ...OK.price, amount: -5 } }]), isConfigError);
-	assert.throws(() => parse([{ ...OK, price: { amount: 99, per: "month" } }]), (e) => isConfigError(e) && /currency/.test(e.message), "missing currency");
-	assert.throws(() => parse([{ ...OK, price: { ...OK.price, currency: "usd" } }]), isConfigError, "lowercase is refused");
-	assert.throws(() => parse([{ ...OK, price: { ...OK.price, per: "year" } }]), (e) => isConfigError(e) && /per must be "month"/.test(e.message));
+test("the retired price field is dropped like any unknown field, and a minimal entry normalizes without one", () => {
+	const { subscriptions } = parse([{ ...OK, price: { amount: 99, currency: "USD", per: "month" } }]);
+	assert.equal("price" in subscriptions[0], false, "no price survives the rebuild");
+	assert.deepEqual(subscriptions[0], { id: OK.id, vendor: OK.vendor, provider: OK.provider, models: ["*"], sharedWithOtherProducts: false, hypothetical: false, counterfactualModel: null, windows: [] });
 });
 
 // ── field refusals: booleans and counterfactualModel ────────────────────────────────────────────────────

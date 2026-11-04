@@ -1423,7 +1423,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			capacity = capacityNow();
 			// This host runs the job from here on (issue #599, phase 2): its entry, at the same instant as `startedAt`, given
 			// back by `releaseAllHolds` on every exit. `add` is total, so this block still cannot throw.
-			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt), holdMicros: 0, holdAt: Date.parse(startedAt) });
+			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt), holdTokens: 0, holdAt: Date.parse(startedAt) });
 			// The producer of the name both boot reapers sweep by substring. Built from the shared prefix
 			// rather than typed here, so a rename cannot land in the producer and not in the sweeps (#227).
 			// From the VENUE that will build the container, not from the local adapter reached for directly:

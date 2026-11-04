@@ -8,7 +8,7 @@ import { scopeTokenKeyPrefix } from "../src/scoped-limits.mjs";
 // when its key holds at least what the record states, so doctor's sum of this host's records stays at or below the
 // counter on a healthy deployment, however a settle or a release ended.
 
-const TOKENS = 1_000_000;
+const TOKENS = 1; // amounts are token counts; the name keeps the N * TOKENS shapes readable
 const NOW = new Date("2026-11-03T12:00:00Z");
 const DAY = "budget:tok:2026-11-03";
 const WEEK = "budget:tok:w:2026-11-02";
@@ -53,9 +53,9 @@ function keyedRedis(preset = {}) {
 	return redis;
 }
 
-const tokensOf = (cost) => ({ input: 10, output: 5, total: 15, cost, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, tokenBudgetTokens: 2 * TOKENS, modelRefused: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0 });
-const ledgerOf = (cost) => ({ v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 15, cost, unpriced: 0 }] });
-const ran = (cost) => async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens: tokensOf(cost), usage: ledgerOf(cost) });
+const tokensOf = (total) => ({ input: 10, output: 5, total, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, modelRefused: 0, usageUnreported: 0 });
+const ledgerOf = () => ({ v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 10, output: 5, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 15 }] });
+const ran = (total) => async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens: tokensOf(total), usage: ledgerOf() });
 
 function deps(overrides = {}) {
 	const redis = overrides.redis ?? keyedRedis();
@@ -68,7 +68,7 @@ function deps(overrides = {}) {
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
 		prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }),
-		runContainer: ran(0.3),
+		runContainer: ran(3),
 		collectChain: async () => ({ enqueued: 0, refused: 0 }),
 		cleanup: async () => {},
 		comment: async () => {},
@@ -88,8 +88,8 @@ const thrown = async (promise) => {
 test("a full settle: every deployment window the hold reserved in, and the tag, in the result and the record", async () => {
 	const { deps: d, redis } = deps();
 	const r = await runJob(job, d);
-	assert.deepEqual(r.tokens, { reservedTokens: 2 * TOKENS, settledTokens: 300_000, basis: "metered", modelBasis: null, reservedIn: BOTH });
-	assert.equal(redis.store.get(DAY), 300_000);
+	assert.deepEqual(r.tokensWindows, { reservedTokens: 2 * TOKENS, settledTokens: 3, basis: "metered", modelBasis: null, reservedIn: BOTH });
+	assert.equal(redis.store.get(DAY), 3);
 	assert.deepEqual(buildRecord({ job: { id: "j", data: { kind: "github" } }, result: r }).tokensWindows.reservedIn, BOTH);
 	// Only the windows that are set: a month cap alone is the month alone.
 	const month = await runJob(job, deps({ tokenCaps: { day: null, week: null, month: 100 * TOKENS } }).deps);
@@ -98,7 +98,7 @@ test("a full settle: every deployment window the hold reserved in, and the tag, 
 
 test("no tag (an unwired processor): the record's tokens keep the shape they had", async () => {
 	const r = await runJob(job, deps({ valkeyTag: null }).deps);
-	assert.deepEqual(r.tokens, { reservedTokens: 2 * TOKENS, settledTokens: 300_000, basis: "metered", modelBasis: null });
+	assert.deepEqual(r.tokensWindows, { reservedTokens: 2 * TOKENS, settledTokens: 3, basis: "metered", modelBasis: null });
 });
 
 test("a settle that faults after the first key with an OVERSHOOT keeps only the window that holds it", async () => {
@@ -106,7 +106,7 @@ test("a settle that faults after the first key with an OVERSHOOT keeps only the 
 	const redis = keyedRedis();
 	redis.failAt = 1;
 	const r = await runJob(job, deps({ redis, runContainer: ran(3) }).deps);
-	assert.equal(r.tokens.settledTokens, 3 * TOKENS, "recorded as computed: the day was adjusted");
+	assert.equal(r.tokensWindows.settledTokens, 3 * TOKENS, "recorded as computed: the day was adjusted");
 	assert.equal(redis.store.get(DAY), 3 * TOKENS);
 	assert.equal(redis.store.get(WEEK), 2 * TOKENS);
 	assert.deepEqual(r.tokensWindows.reservedIn, { day: "2026-11-03", valkey: TAG });
@@ -115,8 +115,9 @@ test("a settle that faults after the first key with an OVERSHOOT keeps only the 
 test("a settle that faults after the first key BELOW the reservation keeps both: the week holds more than recorded", async () => {
 	const redis = keyedRedis();
 	redis.failAt = 1;
-	const r = await runJob(job, deps({ redis }).deps);
-	assert.equal(r.tokens.settledTokens, 300_000);
+	// A reported total (1) below the reservation (2): the week, whose settle faulted, still holds 2 >= 1.
+	const r = await runJob(job, deps({ redis, runContainer: ran(1) }).deps);
+	assert.equal(r.tokensWindows.settledTokens, 1);
 	assert.equal(redis.store.get(WEEK), 2 * TOKENS);
 	assert.deepEqual(r.tokensWindows.reservedIn, BOTH);
 });
@@ -125,14 +126,14 @@ test("a settle that faults before any key records the floor, and every window ho
 	const redis = keyedRedis();
 	redis.failAt = 0;
 	const r = await runJob(job, deps({ redis, runContainer: ran(3) }).deps);
-	assert.deepEqual(r.tokens, { reservedTokens: 2 * TOKENS, settledTokens: 2 * TOKENS, basis: "floor", modelBasis: null, reservedIn: BOTH });
+	assert.deepEqual(r.tokensWindows, { reservedTokens: 2 * TOKENS, settledTokens: 2 * TOKENS, basis: "floor", modelBasis: null, reservedIn: BOTH });
 });
 
 test("a never-started exit refunds in full: every window, each holding the 0 the record states", async () => {
 	const { deps: d, redis } = deps({ runContainer: async () => ({ code: 125, aborted: false, tokens: null }) });
 	const err = await thrown(runJob(job, d));
 	assert.ok(err instanceof InfraRetry);
-	assert.deepEqual(err.tokens, { reservedTokens: 2 * TOKENS, settledTokens: 0, basis: "refunded", modelBasis: null, reservedIn: BOTH });
+	assert.deepEqual(err.tokensWindows, { reservedTokens: 2 * TOKENS, settledTokens: 0, basis: "refunded", modelBasis: null, reservedIn: BOTH });
 	assert.equal(redis.store.get(DAY), 0);
 });
 
@@ -140,7 +141,7 @@ test("a release that faults after giving the day back keeps only the week, which
 	const redis = keyedRedis();
 	redis.failAt = 1;
 	const err = await thrown(runJob(job, deps({ redis, runContainer: async () => ({ code: 125, aborted: false, exitLineCode: 125, tokens: null }) }).deps));
-	assert.equal(err.tokens.basis, "floor");
+	assert.equal(err.tokensWindows.basis, "floor");
 	assert.equal(redis.store.get(DAY), 0, "given back");
 	assert.equal(redis.store.get(WEEK), 2 * TOKENS);
 	assert.deepEqual(err.tokensWindows.reservedIn, { week: "2026-11-02", valkey: TAG });
@@ -148,7 +149,7 @@ test("a release that faults after giving the day back keeps only the week, which
 
 test("a throw that leaves the hold standing: the floor, in every window", async () => {
 	const err = await thrown(runJob(job, deps({ runContainer: async () => { throw new TypeError("a defect"); } }).deps));
-	assert.deepEqual(err.tokens, { reservedTokens: 2 * TOKENS, settledTokens: 2 * TOKENS, basis: "floor", modelBasis: null, reservedIn: BOTH });
+	assert.deepEqual(err.tokensWindows, { reservedTokens: 2 * TOKENS, settledTokens: 2 * TOKENS, basis: "floor", modelBasis: null, reservedIn: BOTH });
 	assert.deepEqual(buildRecord({ job: { id: "j", data: { kind: "github" } }, error: err }).tokensWindows.reservedIn, BOTH);
 });
 
@@ -156,24 +157,24 @@ test("no reservedIn where nothing is held in a deployment window: a refusal, an 
 	// Refused: every key given back, so no window holds anything of this job.
 	const refused = await runJob(job, deps({ redis: keyedRedis({ [DAY]: 9 * TOKENS }) }).deps);
 	assert.equal(refused.reason, "token-cap");
-	assert.equal(Object.hasOwn(refused.tokens, "reservedIn"), false);
+	assert.equal(Object.hasOwn(refused.tokensWindows, "reservedIn"), false);
 	// Refused with a give-back that failed: the record says floor, but no hold stands to say which windows keep it.
 	const stuck = keyedRedis({ [WEEK]: 49 * TOKENS });
 	stuck.decrby = async () => {
 		throw Object.assign(new Error("down"), { code: "ECONNRESET" });
 	};
 	const stranded = await runJob(job, deps({ redis: stuck }).deps);
-	assert.equal(stranded.tokens.basis, "floor");
-	assert.equal(Object.hasOwn(stranded.tokens, "reservedIn"), false);
+	assert.equal(stranded.tokensWindows.basis, "floor");
+	assert.equal(Object.hasOwn(stranded.tokensWindows, "reservedIn"), false);
 	// A per-job cap of 0: nothing reserved.
 	const zero = await runJob({ ...job, maxTokens: 0 }, deps().deps);
-	assert.equal(zero.tokens.basis, "unreserved");
-	assert.equal(Object.hasOwn(zero.tokens, "reservedIn"), false);
+	assert.equal(zero.tokensWindows.basis, "unreserved");
+	assert.equal(Object.hasOwn(zero.tokensWindows, "reservedIn"), false);
 	// A repo's own token window and none of the deployment's.
 	const scope = { scope: "org/repo", keyPrefix: scopeTokenKeyPrefix("org/repo"), caps: { day: 10 * TOKENS, week: null, month: null } };
 	const scoped = await runJob(job, deps({ tokenCaps: null, scopedTokens: scope }).deps);
-	assert.equal(scoped.tokens.basis, "metered");
-	assert.equal(Object.hasOwn(scoped.tokens, "reservedIn"), false);
+	assert.equal(scoped.tokensWindows.basis, "metered");
+	assert.equal(Object.hasOwn(scoped.tokensWindows, "reservedIn"), false);
 	// With a scope's window beside the deployment's, the deployment's are still named (its ledger comes first).
 	const both = await runJob(job, deps({ scopedTokens: scope }).deps);
 	assert.deepEqual(both.tokensWindows.reservedIn, BOTH);
@@ -200,11 +201,11 @@ test("makeProcessor hands its tag to every job: the record's reservedIn names th
 			recordRun: (r) => records.push(r),
 			timeoutMs: 100000,
 			...(valkeyTag === undefined ? {} : { valkeyTag }),
-			deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: ran(0.3), cleanup: async () => {}, comment: async () => {}, log: () => {}, now: NOW },
+			deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: ran(3), cleanup: async () => {}, comment: async () => {}, log: () => {}, now: NOW },
 		});
 	const bullJob = { id: "d-1", attemptsMade: 0, name: "github", data: { kind: "github", repo: "o/r", flow: "fix" } };
 	await make(TAG)(bullJob, undefined, new AbortController().signal);
 	assert.deepEqual(records[0].result.tokensWindows.reservedIn, { day: "2026-11-03", valkey: TAG });
 	await make(undefined)(bullJob, undefined, new AbortController().signal);
-	assert.equal(Object.hasOwn(records[1].result.tokens, "reservedIn"), false, "no tag given, none written");
+	assert.equal(Object.hasOwn(records[1].result.tokensWindows, "reservedIn"), false, "no tag given, none written");
 });

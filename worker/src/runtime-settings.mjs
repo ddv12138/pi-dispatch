@@ -107,6 +107,21 @@ const DOLLAR_NEAR_MISSES = Object.freeze({
 	dailycostusd: "dailyCostUsd", pidailycostusd: "dailyCostUsd", dailycostmicros: "dailyCostUsd", dailycost: "dailyCostUsd",
 	weeklycostusd: "weeklyCostUsd", piweeklycostusd: "weeklyCostUsd", weeklycostmicros: "weeklyCostUsd", weeklycost: "weeklyCostUsd",
 	monthlycostusd: "monthlyCostUsd", pimonthlycostusd: "monthlyCostUsd", monthlycostmicros: "monthlyCostUsd", monthlycost: "monthlyCostUsd",
+	// The post-migration slips: an operator half-renaming a retired key into the token vocabulary.
+	maxcosttokens: "maxCostUsd", max_cost_tokens: "maxCostUsd", maxcosttoken: "maxCostUsd", max_cost_token: "maxCostUsd",
+	dailycosttokens: "dailyCostUsd", dailycosttoken: "dailyCostUsd",
+	weeklycosttokens: "weeklyCostUsd", weeklycosttoken: "weeklyCostUsd",
+	monthlycosttokens: "monthlyCostUsd", monthlycosttoken: "monthlyCostUsd",
+});
+
+// The token keys' own near-misses: the ENV name pasted into the settings file (the likeliest slip of all, since the
+// env names are all-caps), and a snake_case spelling. Refused with the right key named -- these keys are LIVE, so the
+// refusal must not carry the retired-dollar message.
+const TOKEN_NEAR_MISSES = Object.freeze({
+	pimaxtokens: "maxTokens", max_tokens: "maxTokens", tokentotal: "maxTokens", tokenstotal: "maxTokens", totaltokens: "maxTokens",
+	pidailytokencap: "dailyTokenCap", daily_token_cap: "dailyTokenCap",
+	piweeklytokencap: "weeklyTokenCap", weekly_token_cap: "weeklyTokenCap",
+	pimonthlytokencap: "monthlyTokenCap", monthly_token_cap: "monthlyTokenCap",
 });
 
 // A small FIXED look-alike table, to ASCII: Cyrillic а е о р с у х к м т н в і and Greek ο α ε ρ ν τ κ ι (lowercase
@@ -302,8 +317,11 @@ function validateKeys(candidate, log) {
 				// misspelling: `maxcostusd`, `MaxCostUsd`, `max_cost_usd`, `max<U+0421>ostUsd`, `PI_MAX_COST_USD`,
 				// `maxCostMicros`, `costUsd`. Refused with the upgrade named, never dropped. Every other unknown key
 				// keeps the forward-compatible drop-and-log, `host_<U+00FC>` and `maxCostCents` included.
-				const meant = Object.hasOwn(DOLLAR_NEAR_MISSES, overlayKeyShape(key)) ? DOLLAR_NEAR_MISSES[overlayKeyShape(key)] : undefined;
-				if (meant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${meant}? ${retiredDollarMessage(meant)}` };
+				const shape = overlayKeyShape(key);
+				const dollarMeant = Object.hasOwn(DOLLAR_NEAR_MISSES, shape) ? DOLLAR_NEAR_MISSES[shape] : undefined;
+				if (dollarMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${dollarMeant}? ${retiredDollarMessage(dollarMeant)}` };
+				const tokenMeant = Object.hasOwn(TOKEN_NEAR_MISSES, shape) ? TOKEN_NEAR_MISSES[shape] : undefined;
+				if (tokenMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${tokenMeant}? (the settings file uses the camelCase key; the all-caps spelling is the variable's env name)` };
 				log("settings_overlay_unknown_key", { key });
 				// Issue #761: the ONE place that decides a key is unknown, so the list a writer carries cannot drift from
 				// this switch. A near miss never gets here (refused above), so it is never carried either.

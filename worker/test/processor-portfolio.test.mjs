@@ -151,7 +151,7 @@ const skip = mod ? false : "index.mjs could not import here (bullmq)";
 
 test("the pickup hands the processor this host's envelope delegation, so the gate judges the loaded envelope (#505)", { skip }, async () => {
 	const PROJECTS = [{ id: "shop", members: ["github:acme/web"] }];
-	const envelopeOf = (delegation) => parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: "100", floorsTokens: { shop: "10" }, ...(delegation ? { delegation } : {}) }), "/e/envelope.json", { projects: PROJECTS, maxTokens: 1_000_000 });
+	const envelopeOf = (delegation) => parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10 }, ...(delegation ? { delegation } : {}) }), "/e/envelope.json", { projects: PROJECTS, maxTokens: 1_000_000 });
 	const pickup = async (allocation) => {
 		const seen = { containers: 0, logs: [] };
 		const processor = mod.makeProcessor({

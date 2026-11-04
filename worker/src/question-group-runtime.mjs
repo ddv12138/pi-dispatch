@@ -39,7 +39,7 @@ export function makeQuestionGroupRuntime({ store, triggersPath, getSettings = ()
 			try { selected = await resolveClassifier(classifier); } catch { return { result: policy("question-group-refused") }; }
 			// The full reviewed context window is a conservative worst-case input count, not a guessed tokenizer:
 			// every token of the window could be read. The meter's settle-time stop still backs this budget.
-			if (!selected || selected.type !== "classifier" || !Number.isSafeInteger(selected.contextWindow) || selected.contextWindow <= 0) return { result: policy("question-group-refused") };
+			if (!selected || selected.type !== "classifier" || !Number.isSafeInteger(selected.contextWindow) || selected.contextWindow <= 0 || !Number.isFinite(selected.cost?.input) || selected.cost.input < 0 || selected.cost.output !== 0) return { result: policy("question-group-refused") };
 			const boundTokens = selected.contextWindow;
 			if (!Number.isSafeInteger(boundTokens) || boundTokens > current.maxTokens) return { result: policy("question-group-refused") };
 			const grouping = { ...ref };

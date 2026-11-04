@@ -21,42 +21,42 @@ function workerZero(data, { env = {}, overlay = {} } = {}) {
 }
 
 test("PI_ALLOWED_MODELS is respected: a job that may switch to a priced listed model is never shown as $0", () => {
-	const env = { PI_MAX_TOKENS: "2", PI_ALLOWED_MODELS: "local-ollama/q,anthropic/claude-sonnet-5-5" };
+	const env = { PI_MAX_TOKENS: 2, PI_ALLOWED_MODELS: "local-ollama/q,anthropic/claude-sonnet-5-5" };
 	const est = estimateReserve(local, { env, modelEndpoints });
-	assert.deepEqual(est, { slots: 1, tokensTokens: 2 * TOKENS, capTokens: 2 * TOKENS, zeroRated: false }, "the cap, because the list holds a hosted model");
+	assert.deepEqual(est, { slots: 1, tokens: 2, maxTokens: 2, zeroRated: false }, "the cap, because the list holds a hosted model");
 	assert.equal(workerZero(local, { env }), false, "and the worker holds the cap for the same job");
 	// A list of zero-rated models only: $0, and the worker agrees.
-	const onlyLocal = { PI_MAX_TOKENS: "2", PI_ALLOWED_MODELS: "local-ollama/q" };
-	assert.equal(estimateReserve(local, { env: onlyLocal, modelEndpoints }).tokensTokens, 0);
+	const onlyLocal = { PI_MAX_TOKENS: 2, PI_ALLOWED_MODELS: "local-ollama/q" };
+	assert.equal(estimateReserve(local, { env: onlyLocal, modelEndpoints }).tokens, 0);
 	assert.equal(workerZero(local, { env: onlyLocal }), true);
 	// The trigger's own list outranks the deployment's, as in effectiveJobOf.
-	assert.equal(estimateReserve({ ...local, models: ["local-ollama/q"] }, { env, modelEndpoints }).tokensTokens, 0);
+	assert.equal(estimateReserve({ ...local, models: ["local-ollama/q"] }, { env, modelEndpoints }).tokens, 0);
 	assert.equal(workerZero({ ...local, models: ["local-ollama/q"] }, { env }), true);
 });
 
 test("an empty PI_ALLOWED_MODELS is unset, and a list the worker would refuse names the cap (never a smaller figure)", () => {
-	assert.equal(estimateReserve(local, { env: { PI_MAX_TOKENS: "2", PI_ALLOWED_MODELS: "" }, modelEndpoints }).tokensTokens, 0, "empty: no list, the main model alone");
-	assert.deepEqual(estimateReserve(local, { env: { PI_MAX_TOKENS: "2", PI_ALLOWED_MODELS: "local-ollama/q, anthropic/x" }, modelEndpoints }), { slots: 1, tokensTokens: 2 * TOKENS, capTokens: 2 * TOKENS, zeroRated: false });
+	assert.equal(estimateReserve(local, { env: { PI_MAX_TOKENS: 2, PI_ALLOWED_MODELS: "" }, modelEndpoints }).tokens, 0, "empty: no list, the main model alone");
+	assert.deepEqual(estimateReserve(local, { env: { PI_MAX_TOKENS: 2, PI_ALLOWED_MODELS: "local-ollama/q, anthropic/x" }, modelEndpoints }), { slots: 1, tokens: 2, maxTokens: 2, zeroRated: false });
 });
 
 test("overlay over env, per key: the overlay's maxTokens and model win over PI_MAX_TOKENS and PI_MODEL", () => {
-	const env = { PI_MAX_TOKENS: "2", PI_PROVIDER: "anthropic", PI_MODEL: "claude-sonnet-5-5" };
-	assert.equal(estimateReserve(forge, { overlay: { maxTokens: "0.75" }, env }).capTokens, 750_000, "the overlay's cap, not env's");
+	const env = { PI_MAX_TOKENS: 2, PI_PROVIDER: "anthropic", PI_MODEL: "claude-sonnet-5-5" };
+	assert.equal(estimateReserve(forge, { overlay: { maxTokens: 750_000 }, env }).maxTokens, 750_000, "the overlay's cap, not env's");
 	// The overlay names the zero-rated model; env names a hosted one. The overlay's is the one the job runs, so $0.
 	const overlay = { provider: "local-ollama", model: "q" };
-	assert.equal(estimateReserve(forge, { overlay, env, modelEndpoints }).tokensTokens, 0);
+	assert.equal(estimateReserve(forge, { overlay, env, modelEndpoints }).tokens, 0);
 	assert.equal(workerZero(forge, { overlay, env }), true, "the worker runs the overlay's model too");
 	// And the other way round: env's zero-rated model is outranked by the overlay's hosted one.
-	const envLocal = { PI_MAX_TOKENS: "2", PI_PROVIDER: "local-ollama", PI_MODEL: "q" };
+	const envLocal = { PI_MAX_TOKENS: 2, PI_PROVIDER: "local-ollama", PI_MODEL: "q" };
 	const hosted = { provider: "anthropic", model: "claude-sonnet-5-5" };
-	assert.equal(estimateReserve(forge, { overlay: hosted, env: envLocal, modelEndpoints }).tokensTokens, 2 * TOKENS);
+	assert.equal(estimateReserve(forge, { overlay: hosted, env: envLocal, modelEndpoints }).tokens, 2);
 	assert.equal(workerZero(forge, { overlay: hosted, env: envLocal }), false);
 	// The job's own model outranks both.
-	assert.equal(estimateReserve(local, { overlay: hosted, env, modelEndpoints }).tokensTokens, 0);
+	assert.equal(estimateReserve(local, { overlay: hosted, env, modelEndpoints }).tokens, 0);
 });
 
 test("an empty PI_MAX_TOKENS is unset: no cap and no throw, so the overlay's cap or none applies", () => {
-	assert.deepEqual(estimateReserve(forge, { env: { PI_MAX_TOKENS: "" } }), { slots: 1, tokensTokens: null, capTokens: null, zeroRated: false });
-	assert.equal(estimateReserve(forge, { env: { PI_MAX_TOKENS: "" }, overlay: { maxTokens: "1" } }).capTokens, TOKENS);
-	assert.equal(estimateReserve({ ...forge, maxTokens: "0.5" }, { env: { PI_MAX_TOKENS: "" } }).capTokens, 500_000, "a trigger-only cap applies alone");
+	assert.deepEqual(estimateReserve(forge, { env: { PI_MAX_TOKENS: "" } }), { slots: 1, tokens: null, maxTokens: null, zeroRated: false });
+	assert.equal(estimateReserve(forge, { env: { PI_MAX_TOKENS: "" }, overlay: { maxTokens: 1 } }).maxTokens, 1);
+	assert.equal(estimateReserve({ ...forge, maxTokens: 500_000 }, { env: { PI_MAX_TOKENS: "" } }).maxTokens, 500_000, "a trigger-only cap applies alone");
 });

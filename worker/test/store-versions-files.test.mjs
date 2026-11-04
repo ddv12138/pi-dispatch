@@ -420,7 +420,7 @@ const OTHER_DOMAINS = Object.freeze([
 		baseline: ["convention", "how-to", "decided"],
 		what: (m) => `the answer category ${JSON.stringify(m)}`,
 		refusal: `${LOADER_REFUSES} when an answerRules entry names it`,
-		probes: [{ table: "blockValueTable", field: "answerRules", doc: (m) => ({ triggers: [], answerRules: [{ id: "docs", projects: ["web"], categories: [m], confidence: 0.9, mode: "draft", flow: "answer", model: "anthropic/claude-sonnet-4-5", decisionModel: "anthropic/claude-sonnet-4-5", maxTokens: "1" }] }) }],
+		probes: [{ table: "blockValueTable", field: "answerRules", doc: (m) => ({ triggers: [], answerRules: [{ id: "docs", projects: ["web"], categories: [m], confidence: 0.9, mode: "draft", flow: "answer", model: "anthropic/claude-sonnet-4-5", decisionModel: "anthropic/claude-sonnet-4-5", maxTokens: 1 }] }) }],
 		widened: "policy",
 	},
 	{

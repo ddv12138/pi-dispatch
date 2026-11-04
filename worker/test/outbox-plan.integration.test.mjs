@@ -22,7 +22,7 @@ const PROJECTS = [
 	{ id: "platform", members: ["github:acme/infra"] },
 ];
 const envelope = parseEnvelope(
-	JSON.stringify({ version: 1, window: "week", totalTokens: "100", floorsTokens: { shop: "10", platform: "10" }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
+	JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, platform: 10 }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
 	"/e/envelope.json",
 	{ projects: PROJECTS, maxTokens: 1_000_000 },
 );

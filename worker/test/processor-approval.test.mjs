@@ -116,22 +116,22 @@ test("an approved decision never transfers to another session or to a cold start
 });
 
 test("approved budget cap is bounded by deployment and reserved against every applicable token ledger", async () => {
-	const caps = { day: 100 * TOKENS, week: null, month: null };
+	const caps = { day: 100, week: null, month: null };
 	const f = setup({
-		deploymentMaxTokens: "3",
+		deploymentMaxTokens: 3,
 		tokenCaps: caps,
 		scopedTokens: { scope: "org/repo", keyPrefix: "budget:tok:s:repo", caps },
 		projectTokens: { scope: "project:p", keyPrefix: "budget:tok:s:project", caps },
 		modelTokens: [{ ref: "anthropic/m", keyPrefix: "budget:tok:mdl:model", caps }],
 	});
-	f.runtime.before = async () => ({ ok: true, request, decision: { ...decision, action: "budget-raise" }, audit, budgetCapTokens: "5" });
-	const out = await runJob(jobOf({ gates: ["budget-raise"], maxTokens: "1", maxTokens: TOKENS, gateBudgetRaiseTokens: "5" }), f.deps);
+	f.runtime.before = async () => ({ ok: true, request, decision: { ...decision, action: "budget-raise" }, audit, budgetCapTokens: 5 });
+	const out = await runJob(jobOf({ gates: ["budget-raise"], maxTokens: 1, gateBudgetRaiseTokens: 3 }), f.deps);
 	assert.equal(out.outcome, "completed");
-	assert.equal(f.captured().maxTokens, 3 * TOKENS);
-	assert.equal(out.tokens.reservedTokens, 3 * TOKENS);
+	assert.equal(f.captured().maxTokens, 3);
+	assert.equal(out.tokensWindows.reservedTokens, 3);
 	const holds = f.calls.filter(([name]) => name === "tokens");
 	assert.equal(holds.length, 4);
-	assert.ok(holds.every(([, , amount]) => amount === 3 * TOKENS));
+	assert.ok(holds.every(([, , amount]) => amount === 3));
 	const containerAt = f.calls.findIndex(([name]) => name === "container");
 	assert.ok(holds.every((hold) => f.calls.indexOf(hold) < containerAt));
 });

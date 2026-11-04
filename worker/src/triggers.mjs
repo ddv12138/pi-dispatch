@@ -1862,7 +1862,11 @@ const RUN_MODEL_NEAR_MISS_TARGETS = Object.freeze({
 	fallbackmodels: "run.fallbackModels", fallbackmodel: "run.fallbackModels", fallbackmodelid: "run.fallbackModels", fallbackmodelids: "run.fallbackModels", fallbackmodelname: "run.fallbackModels", fallbackmodelnames: "run.fallbackModels",
 	maxturns: "run.maxTurns", maxturn: "run.maxTurns",
 	maxtokens: "run.maxTokens", maxtoken: "run.maxTokens",
-	maxcostusd: "run.maxCostUsd", maxcost: "run.maxCostUsd",
+	// The retired dollar keys and their post-migration slips all point at the token field that replaced them:
+	// the sweep's suggestion must not name a field this build refuses on sight.
+	maxcostusd: "run.maxTokens", maxcost: "run.maxTokens",
+	maxcosttokens: "run.maxTokens", max_cost_tokens: "run.maxTokens",
+	dailycosttokens: "run.dailyTokenCap", weeklycosttokens: "run.weeklyTokenCap", monthlycosttokens: "run.monthlyTokenCap",
 });
 
 /**

@@ -9,7 +9,7 @@ import { parseGitLabSubset } from "../src/gitlab-subset.mjs";
 import { parseForgejoSubset } from "../src/forgejo-subset.mjs";
 import { parseAzureSubset } from "../src/azure-subset.mjs";
 
-const GATES = { gates: ["budget-raise", "deploy:staging"], gateTimeout: 3, maxCostUsd: "2", gateBudgetRaiseUsd: "3.50", resume: true };
+const GATES = { gates: ["budget-raise", "deploy:staging"], gateTimeout: 3, maxTokens: 2, gateBudgetRaiseTokens: 3500, resume: true };
 
 function configured(kind) {
 	const json = JSON.stringify({ triggers: [

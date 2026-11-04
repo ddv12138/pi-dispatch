@@ -1257,8 +1257,8 @@ test("createWorker's settled record carries reservedIn.valkey, the tag of the co
 		assert.equal(typeof worker.processFn, "function", "the processor createWorker handed BullMQ's Worker");
 		await worker.processFn(secretJob("j-tag"), "tok", new AbortController().signal);
 		assert.equal(writes.length, 1);
-		const { tokens } = JSON.parse(writes[0].data);
-		assert.equal(tokens.settledTokens, 2_000_000, "the floor: no meter, so the reservation is charged");
+		const { tokensWindows } = JSON.parse(writes[0].data);
+		assert.equal(tokensWindows.settledTokens, 2, "the floor: no meter, so the reservation is charged");
 		assert.equal(tokensWindows.reservedIn.valkey, valkeyEndpointTag(connection));
 		assert.match(tokensWindows.reservedIn.valkey, /^[0-9a-f]{16}$/);
 		assert.notEqual(tokensWindows.reservedIn.valkey, valkeyEndpointTag(parseConnection("redis://127.0.0.1:1")), "database 3's tag, not database 0's");

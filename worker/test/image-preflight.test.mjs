@@ -432,7 +432,7 @@ test("tokenBudget (issue #501): any job carrying a token budget, 0 included, nee
 	assert.equal((await current({ kind: "github", maxTokens: 0 })).ok, true);
 	const row = CAPABILITY_GATES.find((gate) => gate.token === "tokenBudget");
 	assert.equal(row.reason, "job-image-token-budget-unsupported");
-	assert.equal(row.event, "refused_image_cost_cap_unsupported");
+	assert.equal(row.event, "refused_image_token_budget_unsupported");
 	assert.match(row.comment("img", "is absent"), /per-job token budget/);
 });
 

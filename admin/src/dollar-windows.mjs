@@ -30,7 +30,7 @@ import { dayKey, monthKey, weekKey } from "@edgehero/pi-dispatch/budget";
 import { isAbsolute } from "node:path";
 import { DOLLAR_BASIS, DOLLAR_KEY_PREFIX, MODEL_BASIS } from "@edgehero/pi-dispatch/dollar-budget";
 import { DOLLAR_ENV_NAMES, formatMicros, optionalUsdMicros } from "@edgehero/pi-dispatch/money";
-import { dollarKeyPrefixFor, isModelScope, isProjectScope, MODEL_SCOPE_PREFIX } from "@edgehero/pi-dispatch/scoped-limits";
+import { tokenKeyPrefixFor, isModelScope, isProjectScope, MODEL_SCOPE_PREFIX } from "@edgehero/pi-dispatch/scoped-limits";
 import { recordInProject, recordInRepo } from "./costs.mjs";
 import { fromNewerRelease, newerSkippedSentence } from "./newer-release.mjs";
 
@@ -97,7 +97,7 @@ export function dollarWindowSpecs({ caps, limits, now = new Date() }) {
   (Array.isArray(limits) ? limits : []).forEach((row, index) => {
     if (!WINDOWS.some((w) => row?.[w.field] !== null && row?.[w.field] !== undefined)) return;
     const model = isModelScope(row.scope);
-    const keyPrefix = dollarKeyPrefixFor(row);
+    const keyPrefix = tokenKeyPrefixFor(row);
     for (const w of WINDOWS) {
       let cap;
       try {

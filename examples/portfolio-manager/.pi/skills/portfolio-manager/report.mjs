@@ -52,11 +52,10 @@ const ID_RE = /^[a-z0-9_][a-z0-9_-]{0,63}$/;
 const UNSAFE_RE = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/gu;
 const REASON_MAX = 200;
 
-/** Micro-dollars as dollars and cents, or `n/a` for a value that is not one. */
-export function dollars(micros) {
-	if (!Number.isSafeInteger(micros) || micros < 0) return "n/a";
-	const cents = Math.round(micros / 10_000);
-	return `$${Math.floor(cents / 100)}.${String(cents % 100).padStart(2, "0")}`;
+/** A token count with thousands separators, or `n/a` for a value that is not one. */
+export function dollars(tokens) {
+	if (!Number.isSafeInteger(tokens) || tokens < 0) return "n/a";
+	return tokens.toLocaleString("en-US");
 }
 
 /** Text for one table cell: unsafe characters become spaces, at most 200 characters, inside a code span. */
@@ -160,14 +159,14 @@ function spendSection(snapshot, snapshotProblem) {
 	lines.push("| Project | Spent | Share | Floor |", "|---|---:|---:|---:|");
 	let spent = 0;
 	for (const p of Array.isArray(snapshot.projects) ? snapshot.projects : []) {
-		if (Number.isSafeInteger(p?.spentMicros)) spent += p.spentMicros;
-		lines.push(`| ${id(p?.id)} | ${dollars(p?.spentMicros)} | ${dollars(p?.allocationMicros)} | ${dollars(p?.floorMicros)} |`);
+		if (Number.isSafeInteger(p?.spentTokens)) spent += p.spentTokens;
+		lines.push(`| ${id(p?.id)} | ${dollars(p?.spentTokens)} | ${dollars(p?.allocationTokens)} | ${dollars(p?.floorTokens)} |`);
 		for (const m of Array.isArray(p?.members) ? p.members : []) {
 			if (!Number.isInteger(m?.weight)) continue;
-			lines.push(`| ${id(p?.id)} ${cell(m.label)} | ${dollars(m.spentMicros)} | ${dollars(m.allocationMicros)} | |`);
+			lines.push(`| ${id(p?.id)} ${cell(m.label)} | ${dollars(m.spentTokens)} | ${dollars(m.allocationTokens)} | |`);
 		}
 	}
-	lines.push("", `Total spent ${dollars(spent)} of ${dollars(snapshot.envelope?.totalMicros)}.`);
+	lines.push("", `Total spent ${dollars(spent)} of ${dollars(snapshot.envelope?.totalTokens)}.`);
 	if (snapshot.fleet?.runsComplete !== true) lines.push("Run counts in the snapshot cover this host only.");
 	return lines;
 }

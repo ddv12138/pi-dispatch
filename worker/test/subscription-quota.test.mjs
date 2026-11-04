@@ -66,7 +66,7 @@ test("parsers bound payloads, collection sizes, percentages and resets without a
 	for (const raw of [oversized, circular, { limits: Array.from({ length: 33 }, () => ({ kind: "session", percent: 100 })) }]) assert.equal(claude(raw).windows[0].state, "unknown");
 	const result = claude({ five_hour: { utilization: -1, resets_at: "tomorrow" }, seven_day: { utilization: Infinity, resets_at: new Date(NOW + 100 * DAY).toISOString() }, extra_usage: { is_enabled: "false", currency: "invalid", used_credits: -1, decimal_places: 8 } });
 	assert.ok(result.windows.every(row => row.state === "unknown" && row.resetAt === null));
-	assert.deepEqual(result.extraUsage, { enabled: null, usedPercent: null, usedCredits: null, monthlyLimit: null, currency: null, decimalPlaces: null });
+	assert.deepEqual(result.extraUsage, { enabled: null, usedPercent: null, usedCredits: null, monthlyLimit: null, currency: "invalid", decimalPlaces: null }, "currency is vendor text carried as written, never a code list");
 	assert.throws(() => normalizeClaudeQuota({}, {}), { code: "subscription-invalid-observation" });
 });
 

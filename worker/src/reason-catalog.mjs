@@ -177,6 +177,7 @@ const ROWS = [
 	["job-image-commands-unsupported", imageRefusal("command support", "its runner would not dispatch `run.command`"), REBUILD],
 	["job-image-exclude-tools-unsupported", imageRefusal("exclude-tools support", "its runner would ignore `run.excludeTools`"), REBUILD],
 	["job-image-model-policy-unsupported", imageRefusal("allowed-model support", "its runner cannot hold this job to the models it may use"), REBUILD],
+	["job-image-token-budget-unsupported", imageRefusal("tokenBudget support", "its runner would ignore the per-job token budget and run this job with none"), REBUILD],
 	["job-image-model-failover-unsupported", imageRefusal("model-failover support", "its runner cannot report the signed provider failure and replay-safety evidence this job needs"), REBUILD],
 	["job-image-subscription-auth-unsupported", imageRefusal("subscription authentication", "it cannot verify the admitted access snapshot, community adapter or final request cost"), REBUILD],
 	["job-image-any-uid-unsupported", imageRefusal("`anyUid`", "it cannot run as this worker's own uid, which this host's container runtime requires"), REBUILD],

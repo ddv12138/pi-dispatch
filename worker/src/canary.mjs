@@ -11,6 +11,8 @@ export function canaryOptions({ role, model, flow, count = 3, capTokens: capToke
 	if (modelListProblem([model]) !== null) throw new Error("--model must be provider/model");
 	if (typeof flow !== "string" || !SKILL_NAME_RE.test(flow)) throw new Error("--flow must name a flow");
 	if (!Number.isInteger(Number(count)) || Number(count) < 1 || Number(count) > 10) throw new Error("--count must be 1 to 10");
+	// REQUIRED, like --cap-usd was: an unbounded canary would buy candidate runs with no ceiling at all.
+	if (capTokensArg === undefined || capTokensArg === null || capTokensArg === "") throw new Error("--cap-tokens must be a whole number of tokens of 1 or more");
 	const capTokens = optionalTokenCount(capTokensArg, "--cap-tokens");
 	return { role, model, flow, count: Number(count), capTokens };
 }

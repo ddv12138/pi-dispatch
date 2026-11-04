@@ -332,9 +332,9 @@ test("validateModelRef returns only the present fields and leaves the input alon
 
 // ---- run.maxTokens (issue #501) ----
 
-test("run.maxTokens is accepted on every kind, carried AS WRITTEN, and absent (or null) emits no key", () => {
+test("run.maxTokens is accepted on every kind as a whole number of tokens, and absent (or null) emits no key (D7a)", () => {
 	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const value of ["2.50", 2.5, "0.000001", 1000000]) {
+		for (const value of [2, "2500", 1000000]) {
 			const [t] = parse([withRun(entry, { maxTokens: value })]);
 			assert.equal(t.run.maxTokens, value, `${name} ${JSON.stringify(value)}`);
 		}
@@ -347,10 +347,10 @@ test("run.maxTokens is accepted on every kind, carried AS WRITTEN, and absent (o
 
 test("a malformed run.maxTokens refuses the file on every kind, naming the trigger and the key, never the value", () => {
 	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const bad of [0, "0", -2, "2.1234567", 1e-7, "abc", "2 ", true, [], {}, "1000001", "1e2"]) {
+		for (const bad of [0, "0", -2, "2.50", 2.5, "abc", true, [], {}, "1e2"]) {
 			assert.throws(
 				() => parse([withRun(entry, { maxTokens: bad })]),
-				(e) => isConfigError(e) && /run\.maxTokens must be a token count/.test(e.message) && e.message.includes(PATH),
+				(e) => isConfigError(e) && /run\.maxTokens must be a whole number of tokens/.test(e.message) && e.message.includes(PATH),
 				`${name} ${JSON.stringify(bad)}`,
 			);
 		}

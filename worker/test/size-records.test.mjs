@@ -106,9 +106,9 @@ test("a record from a newer pi-dispatch is skipped and counted on its core, befo
 	const write = writer(dir);
 	write("a.json", JSON.stringify(rec({ i: 1 })));
 	write("b.json", JSON.stringify({ ...rec({ i: 2 }), v: 1 }));
-	write("c.json", JSON.stringify({ ...rec({ i: 3 }), v: 2 }));
-	write("d.json", JSON.stringify({ ...rec({ i: 4 }), v: 2, resources: "a shape this build does not know", size: null }));
-	write("e.json", JSON.stringify({ ...rec({ i: 5 }), v: 2, project: null })); // no project: no suggestion would read it
+	write("c.json", JSON.stringify({ ...rec({ i: 3 }), v: 3 }));
+	write("d.json", JSON.stringify({ ...rec({ i: 4 }), v: 3, resources: "a shape this build does not know", size: null }));
+	write("e.json", JSON.stringify({ ...rec({ i: 5 }), v: 3, project: null })); // no project: no suggestion would read it
 	const got = readSizingRecords(dir, { nowMs: NOW });
 	assert.deepEqual([got.records.map((r) => r.jobId).sort(), got.newerSkipped, got.skipped], [["job-web-1", "job-web-2"], 2, 0]);
 	assert.equal(Object.hasOwn(readSizingRecords(join(dir, "nope"), { nowMs: NOW }), "newerSkipped"), false, "absent when there is none");

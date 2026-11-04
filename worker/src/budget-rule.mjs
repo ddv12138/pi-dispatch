@@ -88,7 +88,9 @@ export function effectiveTokenCap(triggerValue, deploymentValue, onMalformed = (
 /** A token count: a safe integer of 1 or more, or a throw naming the key. Null/undefined reads as unset. */
 export function optionalTokenCount(value, key) {
 	if (value === null || value === undefined || value === "") return null;
-	const n = typeof value === "number" ? value : Number(String(value).trim());
+	// A string is a whole-number literal only: the config parser refuses exponent and padded spellings, and
+	// this shared check must not accept what the boot refuses.
+	const n = typeof value === "number" ? value : /^\d+$/.test(String(value).trim()) ? Number(String(value).trim()) : Number.NaN;
 	if (!Number.isSafeInteger(n) || n < 1) {
 		throw configError(`${key} must be a whole number of tokens of 1 or more`);
 	}

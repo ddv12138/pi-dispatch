@@ -278,8 +278,8 @@ test("a record from a newer pi-dispatch is read by neither source and counted, a
 	const write = writer(dir);
 	write("old.json", JSON.stringify(rec("old", H)));
 	write("ours.json", JSON.stringify(rec("ours", H, { v: 1 })));
-	write("newer.json", JSON.stringify(rec("newer", 2 * H, { v: 2, capacity: { slots: 99 } })));
-	write("newer-before.json", JSON.stringify(rec("newer-before", 7 * DAY + 1, { v: 2 }))); // ended before the window: not counted
+	write("newer.json", JSON.stringify(rec("newer", 2 * H, { v: 3, capacity: { slots: 99 } })));
+	write("newer-before.json", JSON.stringify(rec("newer-before", 7 * DAY + 1, { v: 3 }))); // ended before the window: not counted
 	const local = readLocalWindow(dir, { sinceMs: SINCE });
 	assert.deepEqual([local.records.map((r) => r.jobId).sort(), local.newerSkipped], [["old", "ours"], 1]);
 	const redis = fakeMirror([rec("m", H, { host: "b" }), rec("m-newer", H, { host: "c", v: 3 })]);
@@ -301,11 +301,11 @@ test("the same newer record on disk and in the mirror is one record not read, as
 	const dir = tempDir("pi-cap-records-");
 	const write = writer(dir);
 	// A host rolled back from a newer release: its own newer records are in both sources.
-	const newer = rec("rolled-back", H, { v: 2 });
+	const newer = rec("rolled-back", H, { v: 3 });
 	write("rolled-back.json", JSON.stringify(newer));
-	write("newer-here.json", JSON.stringify(rec("newer-here", H, { v: 2 })));
+	write("newer-here.json", JSON.stringify(rec("newer-here", H, { v: 3 })));
 	write("ours.json", JSON.stringify(rec("ours", H)));
-	const redis = fakeMirror([newer, rec("ours", H), rec("newer-there", 2 * H, { host: "b", v: 3 }), rec("", H, { v: 2 })]);
+	const redis = fakeMirror([newer, rec("ours", H), rec("newer-there", 2 * H, { host: "b", v: 3 }), rec("", H, { v: 3 })]);
 	const local = readLocalWindow(dir, { sinceMs: SINCE });
 	assert.deepEqual([local.newerSkipped, [...local.newerIds].sort()], [2, ["newer-here", "rolled-back"]]);
 	const mirror = await readMirrorWindow(redis, { sinceMs: SINCE, nowMs: NOW });

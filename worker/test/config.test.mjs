@@ -308,9 +308,9 @@ test("token controls take explicit positive values, default to disabled, and rej
 	}
 });
 
-test("the token budget (issue #501): PI_MAX_TOKENS is kept as written once it parses, unset or empty is null", () => {
-	assert.equal(loadConfig({ PI_MAX_TOKENS: "2.50" }).maxTokens, "2.50", "as written, so env and the overlay carry one kind of value");
-	assert.equal(loadConfig({ PI_MAX_TOKENS: "0.000001" }).maxTokens, "0.000001");
+test("the token budget (issue #501): PI_MAX_TOKENS is a whole number of tokens when it parses, unset or empty is null (D7a)", () => {
+	assert.equal(loadConfig({ PI_MAX_TOKENS: "2500" }).maxTokens, 2500);
+	assert.equal(loadConfig({ PI_MAX_TOKENS: 1000000 }).maxTokens, 1000000);
 	assert.equal(loadConfig({}).maxTokens, null, "absent: no per-job token budget");
 	assert.equal(loadConfig({ PI_MAX_TOKENS: "" }).maxTokens, null, "empty is unset, like every optional knob here");
 	for (const key of ["dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) assert.equal(loadConfig({})[key], null, `${key} is off by default`);
@@ -318,10 +318,10 @@ test("the token budget (issue #501): PI_MAX_TOKENS is kept as written once it pa
 
 test("the token settings refuse a malformed value at boot, naming the variable and never the value", () => {
 	for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) {
-		for (const bad of ["0", "-1", "abc", "1.1234567", "1e3", "1000001", " 2"]) {
+		for (const bad of ["0", "-1", "abc", "2.50", "1e3"]) {
 			assert.throws(
 				() => loadConfig({ PI_MAX_TOKENS: "5", [name]: bad }),
-				(e) => e.piDispatchConfig === true && e.message.startsWith(`${name} must be a token count`) && !e.message.includes(JSON.stringify(bad)),
+				(e) => e.piDispatchConfig === true && e.message.startsWith(`${name} must be a whole number of tokens`) && !e.message.includes(JSON.stringify(bad)),
 				`${name}=${bad}`,
 			);
 		}
@@ -330,20 +330,20 @@ test("the token settings refuse a malformed value at boot, naming the variable a
 
 test("a token window without PI_MAX_TOKENS refuses boot (the invariant), naming the window", () => {
 	for (const name of ["PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) {
-		assert.throws(() => loadConfig({ [name]: "25" }), (e) => e.piDispatchConfig === true && e.message.startsWith(`${name} needs PI_MAX_TOKENS`), name);
+		assert.throws(() => loadConfig({ [name]: "25" }), (e) => e.piDispatchConfig === true && e.message.includes(`${name} needs PI_MAX_TOKENS`), name);
 	}
 });
 
-test("a token window with PI_MAX_TOKENS set loads, kept as written (issue #501, the windows are enforced)", () => {
+test("a token window with PI_MAX_TOKENS set loads as numbers (the windows are enforced)", () => {
 	const keys = { PI_DAILY_TOKEN_CAP: "dailyTokenCap", PI_WEEKLY_TOKEN_CAP: "weeklyTokenCap", PI_MONTHLY_TOKEN_CAP: "monthlyTokenCap" };
 	for (const [name, key] of Object.entries(keys)) {
-		const c = loadConfig({ PI_MAX_TOKENS: "2", [name]: "25.50" });
-		assert.equal(c[key], "25.50", name);
+		const c = loadConfig({ PI_MAX_TOKENS: "2", [name]: "2500" });
+		assert.equal(c[key], 2500, name);
 	}
 	const all = loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "10", PI_WEEKLY_TOKEN_CAP: "50", PI_MONTHLY_TOKEN_CAP: "150" });
-	assert.deepEqual([all.maxTokens, all.dailyTokenCap, all.weeklyTokenCap, all.monthlyTokenCap], ["2", "10", "50", "150"]);
+	assert.deepEqual([all.maxTokens, all.dailyTokenCap, all.weeklyTokenCap, all.monthlyTokenCap], [2, 10, 50, 150]);
 	assert.equal(loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "" }).dailyTokenCap, null, "an empty window is unset");
-	assert.throws(() => loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "1.1234567" }), (e) => e.piDispatchConfig === true && e.message.startsWith("PI_DAILY_TOKEN_CAP must be"), "a malformed window is still refused by name");
+	assert.throws(() => loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "2.5" }), (e) => e.piDispatchConfig === true && e.message.startsWith("PI_DAILY_TOKEN_CAP must be a whole number of tokens"), "a fractional window is refused by name");
 });
 
 test("env overrides every field", () => {

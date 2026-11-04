@@ -92,11 +92,12 @@ export function parseEnvelope(text, path, { projects = [], limits = [], maxToken
 	if (version > ENVELOPE_VERSION) throw configError(`envelope file written by a newer pi-dispatch (version ${version}; this build understands ${ENVELOPE_VERSION}): ${path}`);
 	refuseUnknown(raw, TOP_KEYS, "the file", path);
 
-	// A per-job cap first: without one no governed job can reserve, so every such job would refuse as a configuration
+	// A per-job budget first: without one no governed job can reserve, so every such job would refuse as a configuration
 	// error, and an envelope that admits nothing is a mistake the boot should name.
-	// A positive safe integer of micro-dollars, nothing else: 0 would be a cap that admits no priced call, and a string
-	// or a float here is a caller's defect that must not read as "a cap is set".
-	if (!Number.isSafeInteger(maxTokens) || maxTokens < 0) {
+	// A positive safe integer of tokens, nothing else: 0 would be a budget under which a governed job can never
+	// settle more than it reserves (the zero-rated escape reads job data, not the envelope), and a string
+	// or a float here is a caller's defect that must not read as "a budget is set" (D7a: whole tokens).
+	if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
 		throw configError(`envelope file needs a per-job token budget: set PI_MAX_TOKENS (each job governed by the envelope reserves its per-job budget against its project's allocation): ${path}`);
 	}
 

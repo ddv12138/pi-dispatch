@@ -34,7 +34,7 @@ const BASE = {
 	models: ["openai/gpt-5.4", "anthropic/claude-haiku-4-5"],
 	fallbackModels: ["anthropic/claude-haiku-4-5"],
 	// #501. A NUMBER here (the receiver twin uses a string), so both spellings the loader keeps are carried.
-	maxTokens: 2.5,
+	maxTokens: 2500,
 };
 // flow+task and command are exclusive, so the twin loads each.
 const VARIANTS = { flow: { flow: "tidy", task: "run the tidy pass" }, command: { command: "wf run" } };

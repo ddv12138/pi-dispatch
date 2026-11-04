@@ -55,7 +55,7 @@ const LABEL_REFUSED = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/u;
 
 const asDate = (now) => (now instanceof Date ? now : new Date(now));
 const instant = (value) => (typeof value === "string" && INSTANT_RE.test(value) && Number.isFinite(Date.parse(value)) ? value : null);
-const micros = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+const tokens = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
 const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 /** The envelope window that holds `now`: `{ kind, start, end }`, `end` the first day after it (UTC dates). */
@@ -77,7 +77,7 @@ function windowKey(prefix, kind, now) {
 }
 
 /** A counter's value as micro-dollars: absent is 0 (nothing reserved yet), anything that is no integer is 0. */
-function counterMicros(raw) {
+function counterTokens(raw) {
 	if (raw === null || raw === undefined) return 0;
 	const n = Number(raw);
 	return Number.isSafeInteger(n) && n > 0 ? n : 0;
@@ -185,7 +185,7 @@ export async function buildPortfolioSnapshot({ envelope, digest, projects = [], 
 			.map((m) => {
 				const ref = scopeRef(m);
 				const weight = state?.repoWeights?.[id]?.[ref];
-				return { ref, label: memberLabel(m), weight: Number.isInteger(weight) ? weight : null, allocation: micros(state?.repos?.[id]?.[ref]), key: Number.isInteger(weight) ? keys.push(windowKey(memberTokenKeyPrefix(m, { limits }), kind, at)) - 1 : null };
+				return { ref, label: memberLabel(m), weight: Number.isInteger(weight) ? weight : null, allocation: tokens(state?.repos?.[id]?.[ref]), key: Number.isInteger(weight) ? keys.push(windowKey(memberTokenKeyPrefix(m, { limits }), kind, at)) - 1 : null };
 			})
 			.sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
 		return { id, projectKey, memberRows };
@@ -209,11 +209,11 @@ export async function buildPortfolioSnapshot({ envelope, digest, projects = [], 
 		lastAttempt: lastAttemptOf(allocation.lastAttempt),
 		projects: rows.map(({ id, projectKey, memberRows }) => ({
 			id,
-			floorMicros: envelope.floors[id],
+			floorTokens: envelope.floors[id],
 			weight: Number.isInteger(state?.weights?.[id]) ? state.weights[id] : envelope.defaultWeights[id],
-			allocationMicros: micros(state?.allocations?.[id]),
-			spentMicros: counterMicros(values[projectKey]),
-			members: memberRows.map((m) => ({ ref: m.ref, label: m.label, ...(m.weight === null ? {} : { weight: m.weight, allocationMicros: m.allocation, spentMicros: counterMicros(values[m.key]) }) })),
+			allocationTokens: tokens(state?.allocations?.[id]),
+			spentTokens: counterTokens(values[projectKey]),
+			members: memberRows.map((m) => ({ ref: m.ref, label: m.label, ...(m.weight === null ? {} : { weight: m.weight, allocationTokens: m.allocation, spentTokens: counterTokens(values[m.key]) }) })),
 			runs7d: counted[id],
 		})),
 		fleet: { runsComplete: runs.complete === true },

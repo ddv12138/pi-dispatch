@@ -19,12 +19,21 @@ const asLedgers = (c) => (c ? [{ scope: c.scope, keyPrefix: scopeKeyPrefix(c.sco
  *  `tokenSpent` presets the daily TOKEN counter that `checkTokenCap`'s read-only GET consults. */
 function fakeRedis(start = 0, tokenSpent = 0) {
 	let n = start;
-	const redis = { decrCalls: 0, incrCalls: 0 };
-	redis.incr = async () => (redis.incrCalls++, ++n);
-	redis.decr = async () => (redis.decrCalls++, --n);
+	const redis = { decrCalls: 0, incrCalls: 0, ops: [], store: new Map(Object.entries(tokenSpent ? { "budget:tok:2026-07-16": tokenSpent } : {})) };
+	redis.incr = async (k) => (redis.incrCalls++, redis.ops.push(["incr", k]), ++n);
+	redis.decr = async (k) => (redis.decrCalls++, redis.ops.push(["decr", k]), --n);
 	redis.expire = async () => {};
 	// The daily token counter is a separate key; GET returns its current value (a string) or null.
 	redis.get = async () => (tokenSpent > 0 ? String(tokenSpent) : null);
+	// The token windows' reserve/settle/release scripts run per key on the store, like keyedRedis's.
+	redis.incrby = async (k, v) => (redis.ops.push(["incrby", k, v]), redis.store.set(k, (redis.store.get(k) ?? 0) + v), redis.store.get(k));
+	redis.decrby = async (k, v) => (redis.ops.push(["decrby", k, v]), redis.store.set(k, Math.max(0, (redis.store.get(k) ?? 0) - v)), redis.store.get(k));
+	redis.eval = async (_script, _n, k, arg) => {
+		if (!redis.store.has(k)) return [1, 0];
+		const next = Math.max(0, (redis.store.get(k) ?? 0) + Number(arg));
+		redis.store.set(k, next);
+		return [0, next];
+	};
 	return redis;
 }
 
@@ -49,7 +58,7 @@ function deps(overrides = {}) {
 	return { deps: { ...base, ...overrides }, calls };
 }
 
-const ghJob = { kind: "github", repo: "org/repo", provider: "anthropic", model: "m", maxTurns: 20 };
+const ghJob = { kind: "github", repo: "org/repo", provider: "anthropic", model: "m", maxTurns: 20, maxTokens: 2000 };
 
 test("host subscription policy rejects an older image before access preparation, mint, clone or reservation", async () => {
 	let prepared = 0;
@@ -402,23 +411,15 @@ test("exit 2 with any reason outside the closed set, or none, stays runner-polic
 	}
 });
 
-test("a cost-cap exit names the meter's rule in the record's why, from the closed set only, and nothing else gets one (#507)", async () => {
-	for (const exitWhy of ["unboundable", "external", "over-cap"]) {
-		const { deps: d } = deps({ runContainer: async () => ({ code: 2, aborted: false, turns: 1, tokens: { total: 0 }, exitReason: "cost-cap", exitWhy }) });
-		const r = await runJob(ghJob, d);
-		assert.equal(r.reason, "cost-cap");
-		assert.equal(r.why, exitWhy);
-		const record = buildRecord({ job: { id: "gh-1", name: "github", data: ghJob, attemptsMade: 0 }, result: r, startedAt: null, endedAt: null });
-		assert.equal(record.why, exitWhy, "the record carries it");
-	}
-	// A value outside the set (an injected runContainer is not parseExitWhy), a missing one, and a why beside any other reason.
-	for (const [exitReason, exitWhy] of [["cost-cap", "qwen2.5:3b"], ["cost-cap", undefined], ["cost-cap", null], ["model-not-allowed", "unboundable"], [undefined, "unboundable"]]) {
-		const { deps: d } = deps({ runContainer: async () => ({ code: 2, aborted: false, exitReason, exitWhy }) });
+test("the record's why is retired with the guard: no exit line carries one, and nothing else gets one (#507)", async () => {
+	// A stray why from an older image, a missing one, and a why beside any other reason: all read as absent.
+	for (const [exitReason, exitWhy] of [["model-not-allowed", "unboundable"], ["model-not-allowed", undefined], [undefined, "unboundable"]]) {
+		const { deps: d } = deps({ runContainer: async () => ({ code: 2, aborted: false, turns: 1, tokens: { total: 0 }, exitReason, exitWhy }) });
 		const r = await runJob(ghJob, d);
 		assert.equal(Object.hasOwn(r, "why"), false, JSON.stringify([exitReason, exitWhy]));
 	}
-	// Never on another exit code: the label and its detail are exit-2-only.
-	const { deps: d0 } = deps({ runContainer: async () => ({ code: 0, aborted: false, exitReason: "cost-cap", exitWhy: "unboundable" }) });
+	// Never on another exit code, and never in the record.
+	const { deps: d0 } = deps({ runContainer: async () => ({ code: 0, aborted: false, exitReason: "model-not-allowed", exitWhy: "unboundable" }) });
 	assert.equal(Object.hasOwn(await runJob(ghJob, d0), "why"), false);
 });
 
@@ -1050,43 +1051,45 @@ test("collectChain runs ONLY on the completed branch, never on policy / abort / 
 
 // ---- daily token cap (issue #25): check-BEFORE reserveBudget, record-AFTER the container ----
 
-test("daily token cap refuses BEFORE reserveBudget when the day is over budget -- no job-count slot burned", async () => {
-	// The token counter is preset over the cap; checkTokenCap runs before reserveBudget's INCR.
+test("a full day window refuses token-cap AFTER the job-count reserve -- the slot is refunded, nothing burned", async () => {
+	// CONST-BUDGET-BEFORE-TOKENS: the job-count slot reserves first, the token windows reserve second, and a
+	// window's refusal refunds the slot it holds. Nothing burns: the counter ends where it started.
 	const redis = fakeRedis(0, 2000);
-	const { deps: d, calls } = deps({ redis, tokenCap: 1500 });
+	const { deps: d, calls } = deps({ redis, tokenCaps: { day: 1500, week: null, month: null } });
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
-	assert.equal(r.reason, "daily-token-cap");
+	assert.equal(r.reason, "token-cap");
 	assert.equal(r.budgetReserved, false, "a token-cap refusal consumes no job-count slot");
-	assert.equal(redis.incrCalls, 0, "reserveBudget (job-count INCR) is never reached");
+	assert.equal(redis.incrCalls, 1, "the slot was taken");
+	assert.equal(redis.decrCalls, 1, "and given back");
+	assert.equal(redis.store.get("budget:tok:2026-07-16"), 2000, "the window holds the preset, its own add given back");
 	assert.ok(!calls.includes("run-container"), "no container, no provider spend");
 });
 
-test("under the token cap: the run proceeds and records its spend AFTER the container", async () => {
-	const recorded = [];
+test("under the token cap: the run proceeds and its total settles into the window AFTER the container", async () => {
+	const redis = fakeRedis(0, 500);
 	const { deps: d } = deps({
-		redis: fakeRedis(0, 500),
-		tokenCap: 1_000_000,
-		runContainer: async () => ({ code: 0, aborted: false, turns: 3, tokens: { input: 4000, output: 1000, total: 5000, cost: 0.1 } }),
-		recordSpend: async (_redis, tokens) => (recorded.push(tokens), 5500),
+		redis,
+		tokenCaps: { day: 1_000_000, week: null, month: null },
+		runContainer: async () => ({ code: 0, aborted: false, turns: 3, tokens: { input: 4000, output: 1000, total: 5000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 } }),
 	});
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "completed");
-	assert.deepEqual(r.tokens, { input: 4000, output: 1000, total: 5000, cost: 0.1 }, "usage totals thread into the result");
-	assert.deepEqual(recorded, [5000], "the job's total tokens are INCRBY'd into the daily counter after the run");
+	assert.equal(r.tokensWindows.settledTokens, 5000, "the job's total tokens are the settled amount");
+	assert.equal(redis.store.get("budget:tok:2026-07-16"), 5500, "settled into the day window: the 500 hold + the settle delta");
 });
 
-test("token spend is recorded even on a runner-policy exit -- the container still spent", async () => {
-	const recorded = [];
+test("the token total settles even on a runner-policy exit -- the container still spent", async () => {
+	const redis = fakeRedis(0, 0);
 	const { deps: d } = deps({
-		tokenCap: 1_000_000,
-		runContainer: async () => ({ code: 2, aborted: false, turns: 9, tokens: { total: 4000 } }),
-		recordSpend: async (_redis, tokens) => recorded.push(tokens),
+		redis,
+		tokenCaps: { day: 1_000_000, week: null, month: null },
+		runContainer: async () => ({ code: 2, aborted: false, turns: 9, exitReason: "checkpoint-corrupted", exitLineCode: 2, tokens: { input: 0, output: 0, total: 4000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 } }),
 	});
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
 	assert.equal(r.reason, "runner-policy");
-	assert.deepEqual(recorded, [4000], "a policy exit that ran a container is accounted, not free");
+	assert.equal(r.tokensWindows.settledTokens, 4000, "a policy exit that ran a container is accounted, not free");
 });
 
 test("with the token cap disabled (null), the counter is never recorded", async () => {

@@ -198,6 +198,10 @@ if [ -z "$capabilities" ] || [ "$capabilities" = "<no value>" ]; then
 else
 	for capability in $(echo "$capabilities" | tr ',' ' '); do
 		case "$capability" in
+			tokenBudget)
+				docker run --rm --entrypoint grep "$IMAGE_REF" -q "PI_MAX_TOKENS" /opt/pi-dispatch/runner/usage-meter.mjs 2>/dev/null \
+					|| fail "the image declares 'tokenBudget' but its baked runner never reads PI_MAX_TOKENS -- the settle-time budget would not exist"
+				;;
 			replicas)
 				docker run --rm --entrypoint grep "$IMAGE_REF" -q "the branch your prompt names" /opt/pi-dispatch/HARD_RULES.md 2>/dev/null \
 					|| fail "the image declares 'replicas' but its baked HARD_RULES.md still hard-codes a single branch name -- the system prompt would contradict the replica prompt and both replicas would push to one branch"

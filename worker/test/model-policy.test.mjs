@@ -346,7 +346,7 @@ test("the skew check refuses a job whose AUTHORED trigger names MCP servers it a
 
 test("the processor hands the skew check maxTokens as the job ARRIVED, and refuses a dropped cap as trigger-skew (#501)", { skip }, async () => {
 	const seen = [];
-	const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: "2.50" }) });
+	const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: 3 }) });
 	const h = harness({ extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), checkWaitSkew(j)) } });
 	const r = await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
 	assert.equal(r.reason, "trigger-skew");
@@ -359,9 +359,9 @@ test("a deployment cap never fills a maxTokens the job arrived without, before t
 	// The harness above sets no deployment cap, so a wrapper that fell back to it (`job.data?.maxTokens ??
 	// settings.maxTokens`) still handed the check undefined. Here the overlay holds a cap, the SAME value the trigger
 	// authored, so such a fill would make the dropped cap read as present and the job would run.
-	for (const deployment of ["2.50", "9"]) {
+	for (const deployment of [3, 9]) {
 		const seen = [];
-		const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: "2.50" }) });
+		const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: 3 }) });
 		const h = harness({ getSettings: SETTINGS({ maxTokens: deployment }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), checkWaitSkew(j)) } });
 		const r = await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
 		assert.equal(r.reason, "trigger-skew", `deployment cap ${deployment}`);
@@ -371,9 +371,9 @@ test("a deployment cap never fills a maxTokens the job arrived without, before t
 	}
 	// The arrived cap still reaches the check, beside a deployment cap.
 	const seen = [];
-	const h = harness({ getSettings: SETTINGS({ maxTokens: "9" }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), { ok: true }) } });
-	await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, maxTokens: "2.50", trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
-	assert.deepEqual(seen, ["2.50"]);
+	const h = harness({ getSettings: SETTINGS({ maxTokens: 9 }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), { ok: true }) } });
+	await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, maxTokens: 3, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
+	assert.deepEqual(seen, [3]);
 });
 
 test("a trigger-skew refusal is pre-spend and names the field, never its value", async () => {

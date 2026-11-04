@@ -93,6 +93,21 @@ function nonNegativeInt(env, name, fallback, max = undefined) {
 // one is validated in `[min, max]` (max undefined = no upper bound) and otherwise a config error. Unlike
 // `boundedInt`, absence is a first-class "off", not a fallback default -- used by the optional week/month
 // spend ceilings and the soft-hold band, which default to disabled rather than to a number.
+/** The token knobs' parser (issue #25, D7a): a whole number of tokens, digits only, echoed never. The
+ * wording matches budget-rule.mjs's shared check, so doctor and the boot say the same thing. */
+function optionalTokenCount(env, name) {
+	const raw = env[name];
+	if (raw === undefined || raw === "") return null;
+	if (typeof raw !== "number" && !/^\d+$/.test(String(raw).trim())) {
+		throw configError(`${name} must be a whole number of tokens of 1 or more`);
+	}
+	const n = Number(raw);
+	if (!Number.isSafeInteger(n) || n < 1) {
+		throw configError(`${name} must be a whole number of tokens of 1 or more`);
+	}
+	return n;
+}
+
 function optionalBoundedInt(env, name, min, max) {
 	const raw = env[name];
 	if (raw === undefined || raw === "") return null;
@@ -511,13 +526,13 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		model,
 		maxTurns: positiveInt(env, "PI_MAX_TURNS", 30), // pi has no turn limit; we impose one
 		allowedModels: allowedModelsFrom(env), // issue #502: the deployment's allowed-model list; null = unrestricted. ENV ONLY, never the settings overlay
-		maxTokens: optionalBoundedInt(env, "PI_MAX_TOKENS", 1), // issue #25; null = per-job token budget disabled (lagging in-run backstop)
+		maxTokens: optionalTokenCount(env, "PI_MAX_TOKENS"), // issue #25; null = per-job token budget disabled (lagging in-run backstop)
 		// Issue #25's day cap is the day WINDOW's cap now (DES-TOKEN-RESERVE-AND-SETTLE): reserved pre-container
 		// against `budget:tok:` like the two below it, no longer the lagging check-after counter. Unset or empty is
 		// null: no window. The cross-key rule is below, after the object is built.
-		dailyTokenCap: optionalBoundedInt(env, "PI_DAILY_TOKEN_CAP", 1),
-		weeklyTokenCap: optionalBoundedInt(env, "PI_WEEKLY_TOKEN_CAP", 1),
-		monthlyTokenCap: optionalBoundedInt(env, "PI_MONTHLY_TOKEN_CAP", 1),
+		dailyTokenCap: optionalTokenCount(env, "PI_DAILY_TOKEN_CAP"),
+		weeklyTokenCap: optionalTokenCount(env, "PI_WEEKLY_TOKEN_CAP"),
+		monthlyTokenCap: optionalTokenCount(env, "PI_MONTHLY_TOKEN_CAP"),
 		// Issue #596: the deployment's default job size (`PI_JOB_MEMORY`, `PI_JOB_CPUS`; 4g and 2 when unset), refused here at
 		// boot (exit 2) naming the key, never at a job. A project row's size overrides it (INT-SCOPED-LIMITS-FILE-CONTRACT).
 		// The VALIDATION is this field's job; nothing reads its value. The pickup resolves each job's size from the same two

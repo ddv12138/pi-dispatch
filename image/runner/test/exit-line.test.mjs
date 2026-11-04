@@ -216,7 +216,6 @@ test("a tool child's forged exit lines are never read, and SIGTERM still yields 
 	assert.equal(read.exitAuth, "verified");
 	assert.equal(read.exitLineCode, 143, "the line read is the runner's, whose code matches the process's");
 	assert.equal(read.tokens.total, 1000, "the meter's real count, not the forged zero");
-	assert.equal(read.tokens.cost, 1.8);
 	assert.equal(read.turns, 2);
 });
 

@@ -12,7 +12,7 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 
 const AT = Date.parse("2026-10-28T10:00:00Z");
 const clock = () => AT;
-const job = (extra = {}) => ({ id: "job-1", approvalRequestId: "request-1", kind: "github", resume: true, repo: "org/repo", maxTokens: "1.00", target: { type: "issue", number: 649 }, gates: ["deploy:staging", "budget-raise"], gateTimeout: 1, gateBudgetRaiseTokens: "3.00", trigger: { sender: { id: 123 }, deliveryId: "delivery-1", comment: { body: "/approve" } }, ...extra });
+const job = (extra = {}) => ({ id: "job-1", approvalRequestId: "request-1", kind: "github", resume: true, repo: "org/repo", maxTokens: 1000, target: { type: "issue", number: 649 }, gates: ["deploy:staging", "budget-raise"], gateTimeout: 1, gateBudgetRaiseTokens: 3000, trigger: { sender: { id: 123 }, deliveryId: "delivery-1", comment: { body: "/approve" } }, ...extra });
 const request = (extra = {}) => ({ requestId: "request-1", runId: "parked-1", kind: "github", repo: "org/repo", target: { type: "issue", number: 649 }, host: "host-1", configDigest: "digest", action: "budget-raise", toolCallId: "call-1", sessionKey: "session-1", state: "pending", createdAt: AT, resumeJob: job(), ...extra });
 const accepted = (extra = {}) => request({ state: "decided", decision: { decisionId: "job-1", decision: "approved", text: "private reason", actor: { kind: "forge", id: "123" }, at: AT }, ...extra });
 
@@ -41,7 +41,7 @@ test("initial gated runs validate queued configuration and the current policy be
 	assert.deepEqual(await changed.runtime.before(job({ approvalRequestId: undefined })), { refused: "approval-policy-changed" });
 	const valid = setup({ pending: null });
 	assert.equal((await valid.runtime.before(job({ approvalRequestId: undefined }))).ok, true);
-	for (const extra of [{ gates: ["push"] }, { resume: false }, { gates: ["budget-raise"], gateBudgetRaiseTokens: "0.01" }, { gateTimeout: 0 }, { recover: true }]) {
+	for (const extra of [{ gates: ["push"] }, { resume: false }, { gates: ["budget-raise"], gateBudgetRaiseTokens: 10 }, { gateTimeout: 0 }, { recover: true }]) {
 		const { runtime, calls } = setup({ pending: null });
 		assert.deepEqual(await runtime.before(job({ ...extra, approvalRequestId: undefined })), { refused: "approval-config-invalid" });
 		assert.deepEqual(calls, ["find"]);
@@ -69,7 +69,7 @@ test("approved budget decision uses the private canonical result and an audit wi
 	const { runtime, calls } = setup();
 	const out = await runtime.before(job());
 	assert.equal(out.ok, true);
-	assert.equal(out.budgetCapTokens, "3.00");
+	assert.equal(out.budgetCapTokens, 3000);
 	assert.deepEqual(out.decision, { requestId: "request-1", action: "budget-raise", toolCallId: "call-1", decision: "approved", text: "private reason" });
 	assert.deepEqual(out.audit, approvalAudit(accepted()));
 	assert.equal(JSON.stringify(out.audit).includes("private reason"), false);
@@ -175,10 +175,10 @@ test("durable park, restart, approved resume and another park reject replies bou
 	const reply = { ...root, id: `${root.id}-reply`, approvalRequestId: parked.request.requestId };
 	const approved = await runtime().before(reply);
 	assert.equal(approved.ok, true);
-	assert.equal(approved.budgetCapTokens, "3.00");
+	assert.equal(approved.budgetCapTokens, 3000);
 	assert.equal(approved.decision.toolCallId, "gate-1");
 	assert.deepEqual(await runtime().before(reply), approved, "a retry after process restart sees the canonical decision");
-	assert.equal((await runtime().before({ ...reply, gateBudgetRaiseTokens: "9.00" })).refused, "approval-policy-changed");
+	assert.equal((await runtime().before({ ...reply, gateBudgetRaiseTokens: 9000 })).refused, "approval-policy-changed");
 	assert.equal((await runtime().finish({ requestId: parked.request.requestId, jobId: reply.id })).ok, true);
 	const next = await runtime().afterPark({ job: reply, session: { key: "saved-session" }, metadata: { action: "deploy:staging", toolCallId: "gate-2" } });
 	assert.equal(next.ok, true);

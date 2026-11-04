@@ -3,7 +3,7 @@
  * recovered run never reserves, settles or releases the same hold twice, and never releases a hold whose container
  * may still be alive.
  *
- * Why it exists: before #645 a dollar hold (`reserveDollars`'s `{ amountMicros, keys, ledgers }`) lived only in the
+ * Why it exists: before #645 a dollar hold (`reserveTokens`'s `{ amountTokens, keys, ledgers }`) lived only in the
  * worker's memory. A worker that crashed between the reservation and the settlement left the hold counted at the
  * floor in every window it touched, which is the money-safe side, but the retry then reserved AGAIN, and nothing
  * anywhere remembered that the first hold existed. A recovery that wanted to release it could not know whether its
@@ -49,7 +49,7 @@ import { sanitizeJobId } from "./run-history.mjs";
 export const RUN_BUDGET_KEY_PREFIX = "run:budget:";
 /** The default TTL: 35 days, past a month window (the longest a hold's keys live), refreshed on every write. */
 export const RUN_BUDGET_TTL_MS = 35 * 24 * 3600 * 1000;
-/** The most window keys a recorded hold may carry: every ledger reserveDollars can be handed today fits well inside. */
+/** The most window keys a recorded hold may carry: every ledger reserveTokens can be handed today fits well inside. */
 export const RUN_BUDGET_MAX_KEYS = 16;
 /** A hold's states. `held` is the only one a transition starts from; the other three are terminal. */
 export const RUN_BUDGET_STATES = Object.freeze(["held", "settled", "released", "settled-crashed"]);
@@ -106,36 +106,36 @@ redis.call('PEXPIRE', KEYS[1], ARGV[1])
 return n`;
 
 const isSeq = (n) => Number.isSafeInteger(n) && n >= 1;
-const isDollarKey = (k) => typeof k === "string" && k.length > DOLLAR_KEY_PREFIX.length + 1 && k.length <= 256 && k.startsWith(`${DOLLAR_KEY_PREFIX}:`);
-const isDollarPrefix = (p) => typeof p === "string" && p.length <= 256 && (p === DOLLAR_KEY_PREFIX || p.startsWith(`${DOLLAR_KEY_PREFIX}:`));
+const isDollarKey = (k) => typeof k === "string" && k.length > TOKEN_KEY_PREFIX.length + 1 && k.length <= 256 && k.startsWith(`${TOKEN_KEY_PREFIX}:`);
+const isTokenPrefix = (p) => typeof p === "string" && p.length <= 256 && (p === TOKEN_KEY_PREFIX || p.startsWith(`${TOKEN_KEY_PREFIX}:`));
 
 /**
- * The hold as it is stored, `{ amountMicros, keys, ledgers? }`, or `null` when `hold` is not the shape
- * `reserveDollars` returns: `amountMicros` a non-negative safe integer, `keys` an array of at most
+ * The hold as it is stored, `{ amountTokens, keys, ledgers? }`, or `null` when `hold` is not the shape
+ * `reserveTokens` returns: `amountTokens` a non-negative safe integer, `keys` an array of at most
  * `RUN_BUDGET_MAX_KEYS` distinct `budget:usd:*` keys, and `ledgers`, when present, `[{ keyPrefix, keys }]` whose keys
  * flatten, in order, to exactly `keys` (holdLedgers' grouping). Only those fields are kept: a hold is settled later by
  * exactly these keys, so anything else written beside them would be a field nobody validated.
  *
- * `ledgers` is optional because reserveDollars' zero-amount hold (`{ amountMicros: 0, keys: [] }`) carries none.
+ * `ledgers` is optional because reserveTokens' zero-amount hold (`{ amountTokens: 0, keys: [] }`) carries none.
  */
 export function validHold(hold) {
 	if (!hold || typeof hold !== "object" || Array.isArray(hold)) return null;
-	const { amountMicros, keys, ledgers } = hold;
-	if (!Number.isSafeInteger(amountMicros) || amountMicros < 0) return null;
+	const { amountTokens, keys, ledgers } = hold;
+	if (!Number.isSafeInteger(amountTokens) || amountTokens < 0) return null;
 	if (!Array.isArray(keys) || keys.length > RUN_BUDGET_MAX_KEYS || !keys.every(isDollarKey)) return null;
 	if (new Set(keys).size !== keys.length) return null;
-	if (ledgers === undefined) return { amountMicros, keys: [...keys] };
+	if (ledgers === undefined) return { amountTokens, keys: [...keys] };
 	if (!Array.isArray(ledgers) || ledgers.length > RUN_BUDGET_MAX_KEYS) return null;
 	const out = [];
 	for (const l of ledgers) {
-		if (!l || typeof l !== "object" || !isDollarPrefix(l.keyPrefix) || !Array.isArray(l.keys) || l.keys.length === 0) return null;
+		if (!l || typeof l !== "object" || !isTokenPrefix(l.keyPrefix) || !Array.isArray(l.keys) || l.keys.length === 0) return null;
 		out.push({ keyPrefix: l.keyPrefix, keys: [...l.keys] });
 	}
 	const flat = out.flatMap((l) => l.keys);
 	if (flat.length !== keys.length || flat.some((k, i) => k !== keys[i])) return null;
-	// Each ledger's keys sit under its own prefix: a hold whose model ledger names a deployment key is not reserveDollars'.
+	// Each ledger's keys sit under its own prefix: a hold whose model ledger names a deployment key is not reserveTokens'.
 	if (!out.every((l) => l.keys.every((k) => k.startsWith(`${l.keyPrefix}:`)))) return null;
-	return { amountMicros, keys: [...keys], ledgers: out };
+	return { amountTokens, keys: [...keys], ledgers: out };
 }
 
 /**
@@ -238,8 +238,8 @@ export function makeRunBudgetLedger({ redis, now = Date.now, ttlMs = RUN_BUDGET_
 		},
 
 		/**
-		 * The ledger as `{ slot, seq, at, holds: [{ seq, state, amountMicros }] }` (holds ascending; `slot` null when not
-		 * claimed; `amountMicros` null for a hold record that does not parse), `{ absent: true }` when there is none, or
+		 * The ledger as `{ slot, seq, at, holds: [{ seq, state, amountTokens }] }` (holds ascending; `slot` null when not
+		 * claimed; `amountTokens` null for a hold record that does not parse), `{ absent: true }` when there is none, or
 		 * `{ error }`. For doctor and tests; no decision reads it, because a read followed by a write is exactly the race
 		 * the scripts exist to avoid.
 		 */
@@ -253,14 +253,14 @@ export function makeRunBudgetLedger({ redis, now = Date.now, ttlMs = RUN_BUDGET_
 				const m = /^s(\d+)$/.exec(field);
 				if (!m) continue;
 				const seq = Number(m[1]);
-				let amountMicros = null;
+				let amountTokens = null;
 				try {
 					const parsed = JSON.parse(h[`h${seq}`]);
-					if (Number.isSafeInteger(parsed?.amountMicros)) amountMicros = parsed.amountMicros;
+					if (Number.isSafeInteger(parsed?.amountTokens)) amountTokens = parsed.amountTokens;
 				} catch {
 					// an unparseable record reads as an unknown amount; doctor says so rather than guessing
 				}
-				holds.push({ seq, state, amountMicros });
+				holds.push({ seq, state, amountTokens });
 			}
 			holds.sort((a, b) => a.seq - b.seq);
 			const stamp = Number(h.at);
