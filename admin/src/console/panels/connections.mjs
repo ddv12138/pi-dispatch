@@ -69,12 +69,32 @@ export function connectionsDescription(locale = "en") {
   return uiText("Where jobs come from, what they may reach, and who hears about failures. Names and hosts only.", locale);
 }
 
+function problemText(text, locale) {
+  if (locale !== "zh") return text;
+  const refused = /^Refused on (.+): its egress proxy is not running$/.exec(text);
+  if (refused) return `拒绝在 ${refused[1]} 上运行：该主机的出口代理未运行`;
+  const forge = /^Forge connection failing on (.+)$/.exec(text);
+  if (forge) return `${forge[1]} 上的代码托管连接失败`;
+  const endpoints = /^(.+) reads its own model-endpoints file, and it does not load$/.exec(text);
+  if (endpoints) return `${endpoints[1]} 使用自己的 model-endpoints 文件，但该文件无法加载`;
+  const exact = {
+    "The host's doctor says its egress proxy is unavailable.": "主机的 doctor 检查报告出口代理不可用。",
+    "Run pi-dispatch up on that host.": "请在该主机运行 pi-dispatch up。",
+    "The host's forge check failed.": "主机的代码托管平台检查失败。",
+    "Check the forge credentials with doctor on that host.": "请在该主机运行 doctor 检查代码托管凭据。",
+    "The host's endpoints file does not load.": "主机的端点文件无法加载。",
+    "Correct model-endpoints.json on that host, then render its egress rules.": "请在该主机修正 model-endpoints.json，然后重新生成出口规则。",
+    "Set WEBHOOK_SECRET for the receiver, then restart it.": "请为 receiver 设置 WEBHOOK_SECRET，然后重启 receiver。",
+  };
+  return exact[text] ?? text;
+}
+
 export function connectionsProblems(view) {
   const v = data(view);
   if (!v && view.role === "agent") return ui.banner({ status: "idle", icon: "info", title: uiText("Limited Connections view", view.locale), body: uiText("This agent view publishes typed subscription facts. Other deployment details are not published in this view.", view.locale) });
   if (!v) return ui.banner({ status: "attention", title: uiText("Connection facts unavailable", view.locale), body: uiText("The console could not read this page's sources. Reload to try again.", view.locale) });
   const hit = v.problems[0];
-  return html`${hit ? ui.banner({ status: "refused", title: hit.title, body: html`${hit.text} ${hit.fix}`, actions: hit.host || hit.run ? html`${hit.host ? ui.btn({ href: `/fleet/host?name=${encodeURIComponent(hit.host)}`, label: `Open ${hit.host}` }) : null}${hit.run ? ui.btn({ href: `/run?id=${encodeURIComponent(hit.run)}`, label: `Open ${hit.run}` }) : null}` : null }) : null}${v.environmentUnknown ? ui.banner({ status: "attention", title: uiText("Deployment metadata could not be read completely", view.locale), body: uiText("Some settings are unknown. Check the deployment's .env and its permissions; no values from an unreadable declaration are shown.", view.locale) }) : null}${v.snapshotUnreadable ? ui.banner({ status: "attention", title: uiText("Fleet facts unavailable", view.locale), body: uiText("The console could not read the host registry, doctor records or trigger facts. File sections remain readable.", view.locale) }) : null}`;
+  return html`${hit ? ui.banner({ status: "refused", title: problemText(hit.title, view.locale), body: html`${problemText(hit.text, view.locale)} ${problemText(hit.fix, view.locale)}`, actions: hit.host || hit.run ? html`${hit.host ? ui.btn({ href: `/fleet/host?name=${encodeURIComponent(hit.host)}`, label: `Open ${hit.host}` }) : null}${hit.run ? ui.btn({ href: `/run?id=${encodeURIComponent(hit.run)}`, label: `Open ${hit.run}` }) : null}` : null }) : null}${v.environmentUnknown ? ui.banner({ status: "attention", title: uiText("Deployment metadata could not be read completely", view.locale), body: uiText("Some settings are unknown. Check the deployment's .env and its permissions; no values from an unreadable declaration are shown.", view.locale) }) : null}${v.snapshotUnreadable ? ui.banner({ status: "attention", title: uiText("Fleet facts unavailable", view.locale), body: uiText("The console could not read the host registry, doctor records or trigger facts. File sections remain readable.", view.locale) }) : null}`;
 }
 
 function receiverWarnings(v) {

@@ -136,6 +136,18 @@ test("overview fixed panel titles and all-clear headline follow the selected Chi
   assert.equal(String(overviewHeadline(viewOf(calm, { locale: "zh" }))).includes("一切正常"), true);
 });
 
+test("first-run overview translates its generated headline, progress, steps and sentences for Chinese", () => {
+  const locale = "zh";
+  const headline = String(overviewHeadline(viewOf(fresh(), { locale })));
+  const checklist = draw(overviewSetup, fresh(), { locale });
+  assert.match(headline, /^控制台已启动。/);
+  assert.match(checklist, /准备就绪/);
+  assert.match(checklist, /步中 \d+ 步已就绪/);
+  assert.match(checklist, /部署已找到/);
+  assert.match(checklist, /控制台从.*部署中读取/);
+  assert.doesNotMatch(checklist, /Deployment found|Queue reachable|Console token|The console reads its files/);
+});
+
 test("no snapshot: the eight say the one fixed sentence, the setup draws nothing, and the headline says Valkey was not read", () => {
   for (const render of EIGHT) assert.ok(draw(render, null).includes(esc(OVERVIEW_UNREAD_TEXT)), render.name);
   for (const render of SETUP) assert.equal(draw(render, null), "");

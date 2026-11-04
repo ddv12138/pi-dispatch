@@ -25,9 +25,9 @@ const fieldL = (view, name, label, options = {}) => {
     if (typeof option === "string") return { value: option, label: t(option, view) };
     return { ...option, label: t(option.label, view) };
   });
-  return field(name, t(label, view), { ...options, ...(translatedOptions ? { options: translatedOptions } : {}), locale: view.locale });
+  return field(name, t(label, view), { ...options, ...(options.hint ? { hint: t(options.hint, view) } : {}), ...(translatedOptions ? { options: translatedOptions } : {}), locale: view.locale });
 };
-const areaL = (view, name, label, options = {}) => area(name, t(label, view), { ...options, locale: view.locale });
+const areaL = (view, name, label, options = {}) => area(name, t(label, view), { ...options, ...(options.hint ? { hint: t(options.hint, view) } : {}), locale: view.locale });
 const detail = (v) => v.data?.triggerDetail ?? {};
 const trigger = (v) =>
   detail(v).trigger ?? v.data?.snapshot?.triggers?.triggers?.[v.query?.index];
@@ -80,24 +80,24 @@ export function triggerRuns(v) {
     "Runs it started",
     html`<p>
         <b
-          >${d.historyIncomplete ? "at least " : ""}${d.count24h ??
+          >${d.historyIncomplete ? `${t("at least", v)} ` : ""}${d.count24h ??
           "unknown"}</b
         >
-        runs in the last 24 hours · ${moneyHtml(d.cost24hMicros)} metered
+        ${t("runs in the last 24 hours ·", v)} ${moneyHtml(d.cost24hMicros)} ${t("metered", v)}
         spend${d.costIncomplete
-          ? " (metered portion only; some runs have no cost)"
+          ? ` (${t("metered portion only; some runs have no cost", v)})`
           : ""}.
       </p>
       ${table(
-        "Last five trigger runs",
-        ["Run", "Project", "Outcome", "Reason"],
+        t("Last five trigger runs", v),
+        ["Run", "Project", "Outcome", "Reason"].map(x => t(x, v)),
         rows.map(
           (r) =>
             html`<tr>
               <td>${runLink(r.jobId)}</td>
               <td>${r.project ?? r.target ?? "-"}</td>
               <td>${outcomeWord(r.outcome, recordReason(r)).word ?? r.outcome ?? "-"}</td>
-              <td>${recordReason(r) ? reasonWords(recordReason(r)).sentence ?? `No explanation is available for ${recordReason(r)}.` : "No reason was recorded."}</td>
+              <td>${recordReason(r) ? reasonWords(recordReason(r)).sentence ?? t("No explanation is available for this run reason.", v) : t("No reason was recorded.", v)}</td>
             </tr>`,
         ),
         uiText("No runs were found in the available history.", v.locale),
@@ -167,24 +167,24 @@ export function triggerRun(v) {
           (k) => t.type !== "cron" || !["statusComment", "recover"].includes(k),
         ).map((k) => [
           `run.${k}`,
-          `${["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; deployment default: ${show(def[k])}`,
+          `${["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; ${uiText("deployment default:", v.locale)} ${show(def[k])}`,
         ]),
       )}
       <h3>${uiText("By hand", v.locale)}</h3>
       ${facts(
         HAND_FIELDS.map((k) => [
           `run.${k}`,
-          `${["instructions", "task"].includes(k) ? (t[k] ? "set (operator only)" : "not set") : ["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; deployment default: ${show(def[k])}`,
+          `${["instructions", "task"].includes(k) ? uiText(t[k] ? "set (operator only)" : "not set", v.locale) : ["folder", "skillsDir"].includes(k) ? show(shownPath(t[k])) : show(k === "kind" ? t.forge ?? "local" : t[k])}; ${uiText("deployment default:", v.locale)} ${show(def[k])}`,
         ]),
       )}
       <h3>${uiText("Its runs' sandbox", v.locale)}</h3>
-      ${hostRows.length ? facts(hostRows.map((h) => [h.name, `${h.backend ?? "venue not published"}${h.deploymentDefault ? " (that host's deployment default)" : " (trigger override)"}; ${h.blessed === null ? "blessing not published" : h.blessed ? "blessed" : "not blessed"}${h.capabilityUnknown ? "; required profile capabilities not published" : ""}${h.backend && BACKENDS[h.backend] ? `; ${Object.entries(BACKENDS[h.backend].serves).map(([key, value]) => `${key}: ${value === "image" ? "with the image" : value}`).join(", ")}` : ""}`])) : html`<p>No live host blessing facts are available.</p>`}
+      ${hostRows.length ? facts(hostRows.map((h) => [h.name, `${h.backend ?? uiText("venue not published", v.locale)}${h.deploymentDefault ? ` (${uiText("that host's deployment default", v.locale)})` : ` (${uiText("trigger override", v.locale)})`}; ${h.blessed === null ? uiText("blessing not published", v.locale) : h.blessed ? uiText("blessed", v.locale) : uiText("not blessed", v.locale)}${h.capabilityUnknown ? `; ${uiText("required profile capabilities not published", v.locale)}` : ""}${h.backend && BACKENDS[h.backend] ? `; ${Object.entries(BACKENDS[h.backend].serves).map(([key, value]) => `${key}: ${value === "image" ? uiText("with the image", v.locale) : value}`).join(", ")}` : ""}`])) : html`<p>${uiText("No live host blessing facts are available.", v.locale)}</p>`}
       <p>${uiText("These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend.", v.locale)} ${uiText(t.type === "cron" ? "The schedule's owning host runs a cron trigger's local folder; the registry alone does not prove which host has that folder." : "Hosts missing its required secret or wait profile are excluded where their capability list is published.", v.locale)}</p>
       <p>
         ${ui.icon("shield")}
         <a href="${ui.pageHref(v.pages, "venue", { name: backend })}"
-          >${backend}</a
-        >${t.backend ? " (trigger override)" : " (deployment default)"}.
+        >${backend}</a
+        >${t.backend ? ` (${uiText("trigger override", v.locale)})` : ` (${uiText("deployment default", v.locale)})`}.
       </p>
       ${facts(
         Object.entries(venue?.serves ?? {}).map(([k, value]) => [
@@ -194,27 +194,26 @@ export function triggerRun(v) {
       )}
       <p>
         ${venue?.serves?.sandboxShell === "yes"
-          ? "Reopen a retained workspace with pi-dispatch sandbox <job id>."
-          : "This venue has no sandbox shell for reopening a workspace."}
-        Workspaces are kept for ${detail(v).sandbox?.retentionHours ?? 24} hours; 0
-        keeps none.
+          ? uiText("Reopen a retained workspace with pi-dispatch sandbox <job id>.", v.locale)
+          : uiText("This venue has no sandbox shell for reopening a workspace.", v.locale)}
+        ${uiText("Workspaces are kept for", v.locale)} ${detail(v).sandbox?.retentionHours ?? 24} ${uiText("hours; 0 keeps none.", v.locale)}
       </p>
-      ${v.role === "operator" ? html`<p><a class="link" href="${`/runs/sandboxes?${new URLSearchParams({ index: String(v.query.index) })}`}">Prepare a sandbox as this trigger</a></p>` : null}
+      ${v.role === "operator" ? html`<p><a class="link" href="${`/runs/sandboxes?${new URLSearchParams({ index: String(v.query.index) })}`}">${uiText("Prepare a sandbox as this trigger", v.locale)}</a></p>` : null}
       ${backend.startsWith("openshell")
         ? html`<p>
-            OpenShell ${backend === "openshell-bind" ? "bind" : "copy"} mode.
-            Current egress rule hosts in this deployment: ${opts(v).egressProblem ?? (Array.isArray(opts(v).egressHosts) ? opts(v).egressHosts.join(", ") || "none in these base policy sources" : "not published")}.
-            Other hosts read their own deployment's rules; credentials and project-bundle endpoints can further qualify a run's policy.
+            OpenShell ${backend === "openshell-bind" ? uiText("bind", v.locale) : uiText("copy", v.locale)} ${uiText("mode.", v.locale)}
+            ${uiText("Current egress rule hosts in this deployment:", v.locale)} ${opts(v).egressProblem ?? (Array.isArray(opts(v).egressHosts) ? opts(v).egressHosts.join(", ") || uiText("none in these base policy sources", v.locale) : uiText("not published", v.locale))}.
+            ${uiText("Other hosts read their own deployment's rules; credentials and project-bundle endpoints can further qualify a run's policy.", v.locale)}
           </p>`
         : null}
       <p>
         ${t.once
-          ? "A one-shot never races."
-          : `${t.replicas ?? 1} independent sandbox(s) race each event, on separate branches and, for development flows, separate pull requests.`}
-        Secret profile: ${t.secretsProfile ?? "none"}. Bundle:
+          ? uiText("A one-shot never races.", v.locale)
+          : `${t.replicas ?? 1} ${uiText("independent sandbox(s) race each event, on separate branches and, for development flows, separate pull requests.", v.locale)}`}
+        ${uiText("Secret profile:", v.locale)} ${t.secretsProfile ?? uiText("none", v.locale)}. ${uiText("Bundle:", v.locale)}
         ${t.secretBundle === false
-          ? "opted out"
-          : (bundle?.id ?? (bundleNames ? `By event project: ${bundleNames}` : "no declared project bundle"))}.
+          ? uiText("opted out", v.locale)
+          : (bundle?.id ?? (bundleNames ? `${uiText("By event project:", v.locale)} ${bundleNames}` : uiText("no declared project bundle", v.locale)))}.
       </p>`,
   );
 }
@@ -235,7 +234,7 @@ export function editFields(v, t = {}, group = null) {
         ? [
             {
               value: "",
-              label: t.type ? `Keep current (${show(t[k])})` : `Deployment default (${show(defaults(v)[k])})`,
+              label: t.type ? `${uiText("Keep current", v.locale)} (${show(t[k])})` : `${uiText("Deployment default", v.locale)} (${show(defaults(v)[k])})`,
             },
             "true",
             "false",
@@ -244,14 +243,14 @@ export function editFields(v, t = {}, group = null) {
           ? [
               {
                 value: "",
-                label: t.type ? `Keep current (${t.backend ?? "deployment default"})` : `Deployment default (${defaults(v).backend ?? "local"})`,
+                label: t.type ? `${uiText("Keep current", v.locale)} (${t.backend ?? uiText("deployment default", v.locale)})` : `${uiText("Deployment default", v.locale)} (${defaults(v).backend ?? "local"})`,
               },
               ...(opts(v).backends ?? []).map((b) =>
                 typeof b === "string" ? b : { value: b.name, label: `${b.name}: live transcript ${b.serves?.liveTranscript ?? "no"}, steering ${b.serves?.steering ?? "no"}, recovery ${b.serves?.recovery ?? "no"}, sandbox shell ${b.serves?.sandboxShell ?? "no"}` },
               ),
             ]
           : null,
-      hint: k === "flow" ? "Required: name the skill to run; its location is explained below." : t.type ? `Blank keeps the current value (${show(t[k])}); deployment default: ${show(defaults(v)[k])}.` : `Blank uses ${show(defaults(v)[k])}. ${{ progress: "Needs progress publishing and a capable image.", statusComment: "Needs forge access; unavailable for cron.", steer: "Needs a venue and image that support steering.", recover: "Needs recovery support, a safe workspace and a replayable event; unavailable for cron." }[k] ?? ""}`,
+      hint: k === "flow" ? uiText("Required: name the skill to run; its location is explained below.", v.locale) : `${uiText(t.type ? "Blank keeps the current value" : "Blank uses", v.locale)} ${show(t.type ? t[k] : defaults(v)[k])}${t.type ? `; ${uiText("deployment default:", v.locale)} ${show(defaults(v)[k])}` : ""} ${uiText(({ progress: "Needs progress publishing and a capable image.", statusComment: "Needs forge access; unavailable for cron.", steer: "Needs a venue and image that support steering.", recover: "Needs recovery support, a safe workspace and a replayable event; unavailable for cron." }[k] ?? ""), v.locale)}`,
       locale: v.locale,
     }),
   )}`;
@@ -309,29 +308,29 @@ export function triggerKinds(v) {
     html`${t.type === "cron"
       ? html`<p>
             ${uiText("Next fire:", v.locale)} ${timeHtml(d.cron?.next ?? t.next)}. ${uiText("Health:", v.locale)}
-            ${d.cron?.next == null ? "not known (schedule not published)" : d.cron.overdueMs > 0 ? "overdue" : "on time"}; stalls
-            ${t.stalls ?? d.cron?.stalls ?? "not known"} of ${d.cron?.stallLimit ?? "not published"}.
+            ${d.cron?.next == null ? uiText("not known (schedule not published)", v.locale) : d.cron.overdueMs > 0 ? uiText("overdue", v.locale) : uiText("on time", v.locale)}; ${uiText("stalls", v.locale)}
+            ${t.stalls ?? d.cron?.stalls ?? uiText("not known", v.locale)} ${uiText("of", v.locale)} ${d.cron?.stallLimit ?? uiText("not published", v.locale)}.
           </p>
           ${canAct(v)
             ? v.data?.triggerFireCheck?.refusal
               ? html`<p>${v.data.triggerFireCheck.refusal}</p>`
               : v.data?.triggerFireCheck?.plan
                 ? html`<p>
-                      ${v.data.triggerFireCheck.plan.summary ?? "Fire this schedule once."}
-                      Paid: ${reserveText(v.data.triggerFireCheck.plan.reserve)}
+                      ${v.data.triggerFireCheck.plan.summary ? uiText(v.data.triggerFireCheck.plan.summary, v.locale) : uiText("Fire this schedule once.", v.locale)}
+                      ${uiText("Paid:", v.locale)} ${reserveText(v.data.triggerFireCheck.plan.reserve)}
                     </p>
                     ${actForm("trigger-fire", {
                       hidden: [["index", v.query.index, "int"]],
-                      label: "Fire now",
+                      label: uiText("Fire now", v.locale), locale: v.locale,
                     })}`
-                : html`<p>Fire now cannot be checked here.</p>`
+                : html`<p>${uiText("Fire now cannot be checked here.", v.locale)}</p>`
             : null}`
       : html`<p>
           ${t.once
             ? t.disarmed
               ? `Spent by ${t.disarmed.jobId ?? "a run"}; clear on.disarmed by hand to re-arm it.`
-              : "One-shot armed."
-            : "This trigger is not a schedule or a one-shot."}
+              : uiText("One-shot armed.", v.locale)
+            : uiText("This trigger is not a schedule or a one-shot.", v.locale)}
         </p>`}`,
   );
 }
@@ -339,10 +338,7 @@ export function triggerChange(v) {
   const t = trigger(v);
   return card(v,
     "Before you change it",
-    html`<p>
-        A job already in line is refused if this trigger has gained a field the
-        job lacks. Adding or deleting a row renumbers the rows after it.
-      </p>
+    html`<p>${uiText("A job already in line is refused if this trigger has gained a field the job lacks. Adding or deleting a row renumbers the rows after it.", v.locale)}</p>
       <p>
         ${!t || detail(v).skewed == null
           ? (detail(v).skewReason ??
@@ -363,7 +359,7 @@ export function triggerAdd(v) {
   if (v.readOnly)
     return card(v,
       "Add a trigger",
-      html`<p>Forms are off on this read-only console.</p>`,
+      html`<p>${uiText("Forms are off on this read-only console.", v.locale)}</p>`,
     );
   const recipe = TRIGGER_RECIPES[v.query?.recipe] ?? null;
   const prefill = recipe?.fields ?? {};
@@ -376,7 +372,7 @@ export function triggerAdd(v) {
   })}${kinds.map(
     (kind) =>
       html`<fieldset data-trigger-kind="${kind}">
-        <legend>${kind}</legend>
+        <legend>${uiText(kind === "pull_request" ? "Pull request" : kind === "issue" ? "Issue" : kind === "cron" ? "Cron" : kind === "label" ? "Label" : "Comment", v.locale)}</legend>
         ${kind === "cron"
           ? html`${fieldL(v, "id", "Scheduler id", { value: prefill.id ?? "" })}${fieldL(v,
               "pattern",
@@ -386,7 +382,7 @@ export function triggerAdd(v) {
               "Task", { required: prefill.kind === "cron", hint: null },
             )}`
           : html`${fieldL(v, "forge", "Forge", {
-              options: missingForge ? [{ value: "", label: "Choose a configured forge" }, ...forges] : forges, value: missingForge ? "" : prefill.forge ?? "", required: true, hint: opts(v).forges?.length ? "Only forges with configured webhooks are offered." : "No webhook is configured. Configure a forge connection or choose cron.",
+              options: missingForge ? [{ value: "", label: uiText("Choose a configured forge", v.locale) }, ...forges] : forges, value: missingForge ? "" : prefill.forge ?? "", required: true, hint: opts(v).forges?.length ? "Only forges with configured webhooks are offered." : "No webhook is configured. Configure a forge connection or choose cron.",
             })}${["label", "comment"].includes(kind)
               ? fieldL(v, "repository", "Repository (optional)")
               : null}${kind === "comment"
@@ -416,9 +412,9 @@ export function triggerAdd(v) {
     html`${recipe ? html`<p class="su-small">${uiText("Recipe:", v.locale)} <b>${recipe.title}</b>. ${uiText("Change any field before the preview.", v.locale)}${missingForge ? ` ${uiText("This recipe needs a GitHub webhook; configure Connections or choose a different configured forge.", v.locale)}` : null}${prefill.kind === "cron" ? ` ${uiText("Add the existing folder; the schedule is 02:00 in the deployment’s configured timezone (UTC by default).", v.locale)}` : null}</p>` : null}<p>${uiText("Preview the added lines, then confirm with a person's single-use five-minute ticket.", v.locale)}</p>
       ${actForm("trigger-add", {
         structured: "trigger",
-        fields: html`<h3>1. ${uiText("What starts it", v.locale)}</h3>
+        fields: html`<h3>${uiText("1.", v.locale)} ${uiText("What starts it", v.locale)}</h3>
           ${starts}
-          <h3>2. ${uiText("What it runs", v.locale)}</h3>
+          <h3>${uiText("2.", v.locale)} ${uiText("What it runs", v.locale)}</h3>
           ${editFields(v, { flow: prefill.flow ?? "" }, "run")}
           <p>
             ${uiText("The flow's skill must live in the repository's .pi/skills or .agents/skills, or an available deployment skill tier. Suggestions:", v.locale)}
@@ -427,9 +423,9 @@ export function triggerAdd(v) {
               .join(", ") || uiText("none found", v.locale)}.
           </p>
           <h3>${uiText("Venue capabilities", v.locale)}</h3>${facts((opts(v).backends ?? []).map(b => [typeof b === "string" ? b : b.name, Object.entries((typeof b === "string" ? BACKENDS[b]?.serves : b.serves) ?? {}).map(([k,value])=>`${k}: ${value === "image" ? "with the image" : value}`).join("; ")]))}
-          <h3>3. ${uiText("Run options", v.locale)}</h3><div class="config-options">${editFields(v, {}, "options")}</div>
+          <h3>${uiText("3.", v.locale)} ${uiText("Run options", v.locale)}</h3><div class="config-options">${editFields(v, {}, "options")}</div>
           <p>${uiText("run.progress reports phases; run.statusComment needs forge access; run.steer needs steering support; run.recover needs recovery support. Cron cannot set statusComment or recover to true.", v.locale)}</p>
-          <h3>4. ${uiText("Set by hand", v.locale)}</h3>
+          <h3>${uiText("4.", v.locale)} ${uiText("Set by hand", v.locale)}</h3>
           <p>${uiText("The console never sets the job cap, allowed models, MCP servers, session, image, secrets, waits or replicas; new adds opt out of project secret bundles (run.secretBundle: false). Change the bundle opt-out and these other fields by hand in the triggers file.", v.locale)}</p>`,
           label: uiText("Preview the add", v.locale), locale: v.locale,
       })}
@@ -474,5 +470,5 @@ export function triggerRefusalExamples() {
   ].map(({field,params}) => ({field, sentence: planTriggerAdd({ ...shared, params }).refusal}));
 }
 export function triggerRefusals(v = {}) {
-  return card(v, "Refusals",html`<p>${uiText("Each field below shows the shared planner's own refusal.", v.locale)}</p>${triggerRefusalExamples().map(({field,sentence}) => html`<p><b>${field}</b>: ${sentence}${sentence?.includes("Nothing was changed") ? "." : ` ${uiText("Nothing was changed.", v.locale)}`}</p>`)}`);
+  return card(v, "Refusals",html`<p>${uiText("Each field below shows the shared planner's own refusal.", v.locale)}</p>${triggerRefusalExamples().map(({field,sentence}) => html`<p><b>${uiText(field, v.locale)}</b>: ${uiText(sentence, v.locale)}${sentence?.includes("Nothing was changed") ? "." : ` ${uiText("Nothing was changed.", v.locale)}`}</p>`)}`);
 }

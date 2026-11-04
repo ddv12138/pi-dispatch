@@ -183,7 +183,7 @@ export function parkedQuestions(view) {
   const prepared = answererParked(view, { manualAnswer: (row, i) => answerOf(row, i, view) });
   if (prepared !== null) return prepared;
   const s = view?.data?.snapshot ?? null;
-  const unread = s === null ? OVERVIEW_UNREAD_TEXT : typeof s.parkedUnreachable === "string" && s.parkedUnreachable !== "" ? parkedUnreadText(s.parkedUnreachable) : null;
+  const unread = s === null ? OVERVIEW_UNREAD_TEXT : typeof s.parkedUnreachable === "string" && s.parkedUnreachable !== "" ? uiText(parkedUnreadText(s.parkedUnreachable), view.locale) : null;
   const rows = s !== null && unread === null && Array.isArray(s.parked) ? s.parked : [];
   const approvals = rows.filter((p) => p.reason === "awaiting-approval").length;
   const tabs = ui.tabs([{ label: uiText(approvals > 0 ? "Questions and approvals" : "Questions", view.locale), count: unread === null ? rows.length : null, href: hrefTo(view, "parked"), current: true }], { label: uiText("Parked", view.locale) });

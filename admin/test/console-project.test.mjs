@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layoutProjectSizingChart, projectSizing, projectSizingChart, projectSpend, projectRuns, projectSize, projectTriggers, projectMembers, projectDelete, projectBundle, projectRecent, projectLimits, projectAllocation } from "../src/console/panels/project.mjs";
+import { layoutProjectSizingChart, projectSizing, projectSizingChart, projectSpend, projectRuns, projectSize, projectTriggers, projectMembers, projectDelete, projectBundle, projectRecent, projectLimits, projectAllocation, projectDescription } from "../src/console/panels/project.mjs";
 import { projectSizeAction } from "../src/project-view.mjs";
 import { reasonWords } from "../src/words.mjs";
 import { parseDocument as parsePage } from "./helpers/script-dom.mjs";
@@ -8,6 +8,13 @@ import { parseDocument as parsePage } from "./helpers/script-dom.mjs";
 const NOW = Date.parse("2026-10-30T12:00:00Z");
 const DAY = 86_400_000;
 const parseDocument = (markup) => parsePage(`<html><body>${markup}</body></html>`);
+
+test("project unavailable descriptions are localized while the problem detail stays caller-owned", () => {
+  const translated = projectDescription({ state: "unreadable" }, "zh");
+  assert.match(translated, /无法读取项目配置/);
+  assert.doesNotMatch(translated, /Project configuration could not be read/);
+});
+
 function fixture() {
   const call = 'dispatch_limit_edit {"index":2,"memory":"4g","cpus":2}';
   return { id: "billing", state: "ready", now: NOW, project: { id: "billing", name: "Billing" }, members: [{ label: "github:acme/billing", local: false, count: 5, last: null }], memberInput: "github:acme/billing", editRefusal: null, deleteRefusal: null, size: { memMiB: 8192, cpuCenti: 400 }, spend: { window: "week", settledMicros: 6_100_000, heldMicros: 2_000_000, usedMicros: 8_100_000, shareMicros: 25_000_000, envelope: true }, sizing: { memory: { current: 8192, suggested: 4096, reason: "oversized" }, cpu: { current: 400, suggested: 200, reason: "underused" }, call, action: projectSizeAction(call, "billing"), words: { memory: "p95 peak 2g", cpu: "p95 0.9 cores", cpuFact: "the median run was held back 4% of its time by this host's CPU ceiling, which a job's cpus do not change" }, series: [{ at: NOW - 20 * DAY, peakMiB: 1024, sizeMiB: 8192, oom: false }, { at: NOW - 10 * DAY, peakMiB: 2048, sizeMiB: 4096, oom: true }] } };

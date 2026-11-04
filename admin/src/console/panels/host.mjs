@@ -51,7 +51,7 @@ const label = (v) => v.query?.name ?? "this host";
 const command = (v, argv) =>
   v.role === "operator"
     ? ui.cmd(argv, { host: label(v) })
-    : html`<p class="note"> Run the cleanup on ${label(v)} using its runtime, then the host budget gives the room back within 5 seconds once that runtime says the container is gone. </p>`;
+    : html`<p class="note">${t(v, "Run the cleanup on")} ${label(v)} ${t(v, "using its runtime, then the host budget gives the room back within 5 seconds once that runtime says the container is gone.")}</p>`;
 const card = (title, fn) => (v) =>
   ui.card({
     title: t(v, title),
@@ -70,9 +70,9 @@ const card = (title, fn) => (v) =>
       }[title]) : null,
     body: fn(hostOf(v), v),
   });
-const digestOrphanObservation = (job) =>
-  html`Orphaned hold observed${job.s ? html` at ${timeHtml(job.s)}` : " at an unpublished time"}; its origin is not known from the published digest`;
-const gone = html`<p class="note"> This host has no live registry row. Its last run records, queued jobs and retained doctor result can still be shown. </p>`;
+const digestOrphanObservation = (job, view) =>
+  html`${t(view, "Orphaned hold observed")}${job.s ? html` ${t(view, "at")} ${timeHtml(job.s)}` : ` ${t(view, "at an unpublished time")}`}; ${t(view, "its origin is not known from the published digest")}`;
+const gone = (view) => html`<p class="note">${t(view, "This host has no live registry row. Its last run records, queued jobs and retained doctor result can still be shown.")}</p>`;
 
 /** A published id can be a digest; that never becomes a guessed container name. */
 export function orphanCommand(job) {
@@ -131,7 +131,7 @@ export const hostState = (v) => {
   );
   return ui.card({
     tint: "attention",
-    body: html`<div class="hd-state"><span class="tile tone-attention">${ui.icon("beat")}</span><div class="hd-state__t"><h2>${!h ? "Host has gone" : late ? `Stale: no beat for ${age === null ? "an unknown time" : ageText(age)}` : "Host needs attention"}</h2>${unread ? html`<p>${REGISTRY_UNREAD_TEXT}</p>` : null}${h ? html`${late ? html`<p>Heartbeat late: ${age === null ? "age not known" : ageText(age)} (expected within 1m). The worker beats every 15s; routing stops after three missed beats. Jobs already in its own queue wait for it.${doctor && doctorStale(doctor) ? ` Doctor on ${h.name} is also ${ageText(doctor.ageMs)} old.` : ""}</p>` : null}${h.noExpiry ? html`<p>${HOST_NO_EXPIRY_TEXT}</p>` : null}${skew === null ? null : html`<p>${skew}</p>`}${h.jobsUnreadable ? html`<p>${JOBS_UNREAD_TEXT}</p>` : null}<p>${h.routes === false || h.routes === "false" ? "This host has no routing queue; it still takes shared jobs." : "This host takes its own routed jobs and shared jobs."}</p>` : gone}</div>${h && late && canAct(v) && h.routes !== false && h.routes !== "false" ? html`<div class="hd-state__a">${ui.actForm({ action: "queue-pause", hidden: [["queue", hostQueueName(h.name)]], label: `Pause ${hostQueueName(h.name)}`, kind: ["danger", "sm"] })}</div>` : null}</div>`,
+    body: html`<div class="hd-state"><span class="tile tone-attention">${ui.icon("beat")}</span><div class="hd-state__t"><h2>${!h ? t(v, "Host has gone") : late ? `${t(v, "Stale: no beat for")} ${age === null ? t(v, "an unknown time") : ageText(age)}` : t(v, "Host needs attention")}</h2>${unread ? html`<p>${t(v, REGISTRY_UNREAD_TEXT)}</p>` : null}${h ? html`${late ? html`<p>${t(v, "Heartbeat late:")} ${age === null ? t(v, "age not known") : ageText(age)} ${t(v, "(expected within 1m). The worker beats every 15s; routing stops after three missed beats. Jobs already in its own queue wait for it.")}${doctor && doctorStale(doctor) ? ` ${t(v, "Doctor on")} ${h.name} ${t(v, "is also")} ${ageText(doctor.ageMs)} ${t(v, "old.")}` : ""}</p>` : null}${h.noExpiry ? html`<p>${t(v, HOST_NO_EXPIRY_TEXT)}</p>` : null}${skew === null ? null : html`<p>${t(v, skew)}</p>`}${h.jobsUnreadable ? html`<p>${t(v, JOBS_UNREAD_TEXT)}</p>` : null}<p>${t(v, h.routes === false || h.routes === "false" ? "This host has no routing queue; it still takes shared jobs." : "This host takes its own routed jobs and shared jobs.")}</p>` : gone(v)}</div>${h && late && canAct(v) && h.routes !== false && h.routes !== "false" ? html`<div class="hd-state__a">${ui.actForm({ action: "queue-pause", hidden: [["queue", hostQueueName(h.name)]], label: `${t(v, "Pause")} ${hostQueueName(h.name)}`, kind: ["danger", "sm"] })}</div>` : null}</div>`,
   });
 };
 
@@ -166,7 +166,7 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
         html`${j.p ? ui.ptag(j.p) : "No project recorded"} ${runLink(j.id)}`,
         sizeText({ memMiB: j.m, cpuCenti: j.c }),
         j.at ? ageText(Math.max(0, v.now - j.at)) : "not recorded",
-        html`${ui.badge("attention", "Orphaned")}<span class="reason">${String(j.id).startsWith("sha256:") ? html`${digestOrphanObservation(j)}; it still holds ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.` : String(j.id).startsWith("container:") ? html`Found left from before the worker started${j.s ? html` at ${timeHtml(j.s)}` : "; observation time was not published"}; it still holds ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.` : html`Cancelled${j.s ? html` at ${timeHtml(j.s)}` : ""}; its container's stop did not take, so it still holds ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.`}</span>`,
+        html`${ui.badge("attention", t(v, "Orphaned"))}<span class="reason">${String(j.id).startsWith("sha256:") ? html`${digestOrphanObservation(j, v)}; ${t(v, "it still holds")} ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.` : String(j.id).startsWith("container:") ? html`${t(v, "Found left from before the worker started")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : `; ${t(v, "observation time was not published")}`}; ${t(v, "it still holds")} ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.` : html`${t(v, "Cancelled")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : ""}; ${t(v, "its container's stop did not take, so it still holds")} ${sizeText({ memMiB: j.m, cpuCenti: j.c })}.`}</span>`,
         v.role === "operator"
           ? ui.btn({
               label: "Free the slot",
@@ -178,7 +178,7 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
     });
   for (const j of waiting)
     rows.push([
-      html`${j.project ? ui.ptag(j.project) : "No project recorded"} ${runLink(j.jobId)}`,
+      html`${j.project ? ui.ptag(j.project) : t(v, "No project recorded")} ${runLink(j.jobId)}`,
       sizeText(j.size ?? s.defaultSize),
       Number.isFinite(j.queuedAt)
         ? ageText(Math.max(0, v.now - j.queuedAt))
@@ -203,11 +203,11 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
         : null,
     ]);
   return html`${ui.tbl({
-    label: "Jobs on the host",
+    label: t(v, "Jobs on the host"),
     stack: true,
-    heads: ["Project and job", "Size", "How long", "State", "Action"],
+    heads: ["Project and job", "Size", "How long", "State", "Action"].map((label) => t(v, label)),
     rows,
-    empty: "No running, orphaned or waiting job was read for this host.",
+    empty: t(v, "No running, orphaned or waiting job was read for this host."),
   })}${
     h?.jobsUnreadable
       ? html`<p>The host's running-job list is unreadable.</p>`
@@ -226,13 +226,13 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
 });
 
 export const hostSandboxes = card("Sandboxes left on the host", (h, v) => {
-  if (!h) return gone;
+  if (!h) return gone(v);
   const orphans = jobsOf(h).filter((j) => j.o);
   const sandboxes = Array.isArray(h.sandboxes) ? h.sandboxes : [];
   const sandboxesKnown = Array.isArray(h.sandboxes);
   return html`${orphans.map((j) => {
     const argv = orphanCommand(j);
-    return html`<div class="card card--tint tone-attention"> <h3>Orphaned hold ${j.id}</h3> <p> ${String(j.id).startsWith("sha256:") ? digestOrphanObservation(j) : String(j.id).startsWith("container:") ? html`Found left from before the worker started${j.s ? html` at ${timeHtml(j.s)}` : "; observation time was not published"}` : html`Its stop did not take ${j.s ? html`at ${timeHtml(j.s)}` : "at an unpublished time"}`}; it still holds ${j.m ?? "unknown"} MiB and ${j.c === undefined || j.c === null ? "unknown" : Number(j.c) / 100} cores. </p> ${
+    return html`<div class="card card--tint tone-attention"> <h3>${t(v, "Orphaned hold")} ${j.id}</h3> <p> ${String(j.id).startsWith("sha256:") ? digestOrphanObservation(j, v) : String(j.id).startsWith("container:") ? html`${t(v, "Found left from before the worker started")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : `; ${t(v, "observation time was not published")}`}` : html`${t(v, "Its stop did not take")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : ` ${t(v, "at an unpublished time")}`}`}; ${t(v, "it still holds")} ${j.m ?? t(v, "unknown")} MiB ${t(v, "and")} ${j.c === undefined || j.c === null ? t(v, "unknown") : Number(j.c) / 100} ${t(v, "cores")}. </p> ${
       argv
         ? command(v, argv)
         : html`<p> The venue was not published, so the console cannot name its container or runtime. Inspect the host's runtime and identify the orphan there. </p>`
@@ -245,12 +245,12 @@ export const hostSandboxes = card("Sandboxes left on the host", (h, v) => {
     } </div>`;
   })}${
     orphans.length
-      ? html`<p> The host budget gives the room back within 5 seconds once its runtime says the container is gone. </p>`
+      ? html`<p>${t(v, "The host budget gives the room back within 5 seconds once its runtime says the container is gone.")}</p>`
       : html`<p>No orphan container was published.</p>`
   }${ui.tbl({
-    label: "Retained workspaces",
+    label: t(v, "Retained workspaces"),
     stack: true,
-    heads: ["Run", VENUE_LABEL, "Kept until", "Pin", "Open on the host"],
+    heads: ["Run", VENUE_LABEL, "Kept until", "Pin", "Open on the host"].map((label) => t(v, label)),
     rows: sandboxes.map((x) => {
       const id = x.id ?? x.jobId;
       const venue = x.v ?? x.venue;
@@ -268,9 +268,9 @@ export const hostSandboxes = card("Sandboxes left on the host", (h, v) => {
             : "The published id is a digest; identify the run on this host.",
       ];
     }),
-    empty: sandboxesKnown
+    empty: t(v, sandboxesKnown
       ? "No retained workspace was published."
-      : "The retained workspace list is unreadable or was not published by this worker.",
+      : "The retained workspace list is unreadable or was not published by this worker."),
   })}${
     h.sandboxesMore > 0
       ? html`<p>${h.sandboxesMore} more retained workspaces.</p>`
@@ -357,7 +357,7 @@ const seedText = (value) =>
       : "The old-container listing was not published.";
 
 export const hostBudget = card("Slots and budget", (h, v) => {
-  if (!h) return gone;
+  if (!h) return gone(v);
   const orphans = jobsOf(h).filter((j) => j.o).length;
   const running = jobsOf(h).length - orphans;
   const slots = num(h.concurrency);
@@ -477,9 +477,9 @@ export const hostCapacity = card("Last 7 days", (_h, v) => {
         ],
       ].map(
         ([value, title]) =>
-          html`<div><b>${value}</b><span>${title}</span></div>`,
+          html`<div><b>${value}</b><span>${t(v, title)}</span></div>`,
       )}</div>`
-    : html`<p>${host?.notShared ?? (host?.empty ? "No capacity history here for this host." : "The host's capacity history could not be read.")}</p>`;
+    : html`<p>${t(v, host?.notShared ?? (host?.empty ? "No capacity history here for this host." : "The host's capacity history could not be read."))}</p>`;
   let graph = null;
   if (validChart) {
     const max = Math.max(
@@ -496,7 +496,7 @@ export const hostCapacity = card("Last 7 days", (_h, v) => {
       { length: 7 },
       (_, day) => cap.window.fromMs + ((day + 0.5) * windowMs) / 7,
     );
-    graph = html`<svg class="hd-chart" viewBox="0 0 640 158" role="img" aria-label="${label(v)} over the last seven days: jobs at once on average, peak ticks, slot ceiling and no-history time"><defs><pattern id="host-cap-nodata" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hd-nd-bg" width="6" height="6"/><rect class="hd-nd-ln" width="2" height="6"/></pattern></defs><rect x="32" y="24" width="600" height="98" fill="url(#host-cap-nodata)"/>${[0, max / 2, max].map((level) => html`<line class="hd-axis" x1="32" x2="632" y1="${n(y(level))}" y2="${n(y(level))}"/><text class="hd-tick" x="26" y="${n(y(level) + 4)}" text-anchor="end">${Number(level.toFixed(1))}</text>`)}${buckets.map(
+    graph = html`<svg class="hd-chart" viewBox="0 0 640 158" role="img" aria-label="${label(v)} ${t(v, "over the last seven days: jobs at once on average, peak ticks, slot ceiling and no-history time")}"><defs><pattern id="host-cap-nodata" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect class="hd-nd-bg" width="6" height="6"/><rect class="hd-nd-ln" width="2" height="6"/></pattern></defs><rect x="32" y="24" width="600" height="98" fill="url(#host-cap-nodata)"/>${[0, max / 2, max].map((level) => html`<line class="hd-axis" x1="32" x2="632" y1="${n(y(level))}" y2="${n(y(level))}"/><text class="hd-tick" x="26" y="${n(y(level) + 4)}" text-anchor="end">${Number(level.toFixed(1))}</text>`)}${buckets.map(
       (b) => {
         const duration = Math.max(
           0,
@@ -507,27 +507,27 @@ export const hostCapacity = card("Last 7 days", (_h, v) => {
         const left = x(knownStart);
         const width = Math.max(0, x(b.fromMs + duration) - left);
         if (known === 0)
-          return html`<g><title>${timeText(b.fromMs)}: no history, neither busy nor idle</title></g>`;
+          return html`<g><title>${timeText(b.fromMs)}: ${t(v, "no history, neither busy nor idle")}</title></g>`;
         const average = Math.max(0, (Number(b.avgMilli) || 0) / 1000);
-        return html`<g><title>${timeText(b.fromMs)}: average ${average}, peak ${b.peak ?? "unknown"}; coverage begins ${timeText(knownStart)}</title><rect x="${n(left)}" y="24" width="${n(width)}" height="98" fill="var(--surface)"/><rect class="hd-bar" x="${n(left + 0.25)}" y="${n(y(average))}" width="${n(Math.max(0, width - 0.5))}" height="${n(122 - y(average))}" rx="1"/>${Number(b.peak) > 0 ? html`<line class="hd-peak" x1="${n(left)}" x2="${n(left + width)}" y1="${n(y(Number(b.peak)))}" y2="${n(y(Number(b.peak)))}"/>` : null}</g>`;
+        return html`<g><title>${timeText(b.fromMs)}: ${t(v, "average")} ${average}, ${t(v, "peak")} ${b.peak ?? t(v, "unknown")}; ${t(v, "coverage begins")} ${timeText(knownStart)}</title><rect x="${n(left)}" y="24" width="${n(width)}" height="98" fill="var(--surface)"/><rect class="hd-bar" x="${n(left + 0.25)}" y="${n(y(average))}" width="${n(Math.max(0, width - 0.5))}" height="${n(122 - y(average))}" rx="1"/>${Number(b.peak) > 0 ? html`<line class="hd-peak" x1="${n(left)}" x2="${n(left + width)}" y1="${n(y(Number(b.peak)))}" y2="${n(y(Number(b.peak)))}"/>` : null}</g>`;
       },
-    )}${host.slots !== null && host.slots !== undefined ? html`<line class="hd-slotline" x1="32" x2="632" y1="${n(y(Number(host.slots)))}" y2="${n(y(Number(host.slots)))}"/><text class="hd-tick" x="632" y="${n(Math.max(12, y(Number(host.slots)) - 6))}" text-anchor="end">${host.slots} slots</text>` : null}<line class="hd-axis" x1="32" x2="632" y1="122" y2="122"/>${dates.map((at) => html`<text class="hd-tick" x="${n(x(at))}" y="143" text-anchor="middle">${new Date(at).toISOString().slice(5, 10)}</text>`)}</svg><div class="hd-key"><span><i class="hd-k hd-k--bar"></i>jobs at once, on average</span><span><i class="hd-k hd-k--peak"></i>the most at once</span><span><i class="hd-k hd-k--slot"></i>slots</span><span><i class="hd-k hd-k--nd"></i>no history: neither busy nor idle</span></div>`;
+    )}${host.slots !== null && host.slots !== undefined ? html`<line class="hd-slotline" x1="32" x2="632" y1="${n(y(Number(host.slots)))}" y2="${n(y(Number(host.slots)))}"/><text class="hd-tick" x="632" y="${n(Math.max(12, y(Number(host.slots)) - 6))}" text-anchor="end">${host.slots} ${t(v, "slots")}</text>` : null}<line class="hd-axis" x1="32" x2="632" y1="122" y2="122"/>${dates.map((at) => html`<text class="hd-tick" x="${n(x(at))}" y="143" text-anchor="middle">${new Date(at).toISOString().slice(5, 10)}</text>`)}</svg><div class="hd-key"><span><i class="hd-k hd-k--bar"></i>${t(v, "jobs at once, on average")}</span><span><i class="hd-k hd-k--peak"></i>${t(v, "the most at once")}</span><span><i class="hd-k hd-k--slot"></i>${t(v, "slots")}</span><span><i class="hd-k hd-k--nd"></i>${t(v, "no history: neither busy nor idle")}</span></div>`;
   }
   return html`${kpis}${graph}${
     facts
       ? ui.facts(
           [
             [
-              "Promised",
-              `${facts.memory ?? "memory not recorded"}; ${facts.cpu ?? "CPU not recorded"}`,
+              t(v, "Promised"),
+              `${facts.memory ?? t(v, "memory not recorded")}; ${facts.cpu ?? t(v, "CPU not recorded")}`,
             ],
-            ["CPU used", facts.cpuUsed ?? "not recorded"],
-            ["By run time", facts.projects?.join(", ") || "none recorded"],
+            [t(v, "CPU used"), facts.cpuUsed ?? t(v, "not recorded")],
+            [t(v, "By run time"), facts.projects?.join(", ") || t(v, "none recorded")],
           ],
           { cols: 1 },
         )
       : null
-  }<ul class="mini-list hd-cav"><li class="tone-attention">${ui.icon("attention", { size: "sm" })}<span>Jobs only: a machine busy with other work reads as idle. This seven-day report is read on page load, never on a live tick.</span></li>${cap?.truncated || host?.truncated ? html`<li>${ui.icon("info", { size: "sm" })}<span>Capacity history was truncated; earlier time is no history.</span></li>` : null}${(cap?.coverage ?? []).map((line) => html`<li>${ui.icon("info", { size: "sm" })}<span>${line}</span></li>`)}${(host?.caveats ?? []).map((line) => html`<li>${ui.icon("info", { size: "sm" })}<span>${line}</span></li>`)}</ul>${host?.notes ? html`<p class="note">${host.notes}</p>` : null}${v.role === "operator" ? ui.cmd(["pi-dispatch", "capacity", "--host", label(v), "--since", "7d"]) : null}`;
+  }<ul class="mini-list hd-cav"><li class="tone-attention">${ui.icon("attention", { size: "sm" })}<span>${t(v, "Jobs only: a machine busy with other work reads as idle. This seven-day report is read on page load, never on a live tick.")}</span></li>${cap?.truncated || host?.truncated ? html`<li>${ui.icon("info", { size: "sm" })}<span>${t(v, "Capacity history was truncated; earlier time is no history.")}</span></li>` : null}${(cap?.coverage ?? []).map((line) => html`<li>${ui.icon("info", { size: "sm" })}<span>${t(v, line)}</span></li>`)}${(host?.caveats ?? []).map((line) => html`<li>${ui.icon("info", { size: "sm" })}<span>${t(v, line)}</span></li>`)}</ul>${host?.notes ? html`<p class="note">${host.notes}</p>` : null}${v.role === "operator" ? ui.cmd(["pi-dispatch", "capacity", "--host", label(v), "--since", "7d"]) : null}`;
 });
 const timeText = (ms) =>
   Number.isFinite(ms) && ms >= 0 && ms <= 253402300799999
@@ -603,7 +603,7 @@ export const hostRow = card("Registry row", (h, v) =>
           ? html`<p class="warn"> This row has no expiry and may outlive its host. </p>`
           : null
       }`
-    : html`${gone}${
+    : html`${gone(v)}${
         v.data?.hostHistory?.records?.length
           ? html`<p> Last seen ${(() => {
               const record = v.data.hostHistory.records[0];
@@ -622,7 +622,7 @@ export const hostDoctor = (v) => {
   const checks = Array.isArray(d?.checks) ? d.checks : [];
   const sections =
     d && !d.unreadable
-      ? html`<p class="sect-h">Sections <span class="faint">· ${DOCTOR_SECTIONS.filter((section) => checks.some((c) => c.id?.startsWith(`${section}.`))).length} ran</span></p><ul class="hd-secs">${DOCTOR_SECTIONS.map(
+      ? html`<p class="sect-h">${t(v, "Sections")} <span class="faint">· ${DOCTOR_SECTIONS.filter((section) => checks.some((c) => c.id?.startsWith(`${section}.`))).length} ${t(v, "ran")}</span></p><ul class="hd-secs">${DOCTOR_SECTIONS.map(
           (section) => {
             const found = checks.filter((c) => c.id?.startsWith(`${section}.`));
             const fails = found.filter((c) => c.level === "fail").length;
@@ -634,25 +634,25 @@ export const hostDoctor = (v) => {
                 : found.length
                   ? "passing"
                   : "not run on this host";
-            return html`<li class="hd-sec${fails ? " tone-failed" : warns ? " tone-attention" : found.length ? "" : " hd-sec--off"}" aria-label="${section}: ${state}">${ui.icon(fails ? "failed" : warns ? "attention" : found.length ? "done" : "minus", { size: "sm" })}${section}${fails || warns ? html`<b>${[fails ? `${fails} failing` : null, warns ? `${warns} warning` : null].filter(Boolean).join(", ")}</b>` : null}</li>`;
+            return html`<li class="hd-sec${fails ? " tone-failed" : warns ? " tone-attention" : found.length ? "" : " hd-sec--off"}" aria-label="${section}: ${t(v, state)}">${ui.icon(fails ? "failed" : warns ? "attention" : found.length ? "done" : "minus", { size: "sm" })}${section}${fails || warns ? html`<b>${[fails ? `${fails} ${t(v, "failing")}` : null, warns ? `${warns} ${t(v, "warning")}` : null].filter(Boolean).join(", ")}</b>` : null}</li>`;
           },
-        )}</ul><p class="hd-seckey"><span>${ui.icon("done", { size: "sm" })}every check passed</span><span>${ui.icon("failed", { size: "sm" })}a check fails or warns</span><span>${ui.icon("minus", { size: "sm" })}not run on this host</span></p>`
+        )}</ul><p class="hd-seckey"><span>${ui.icon("done", { size: "sm" })}${t(v, "every check passed")}</span><span>${ui.icon("failed", { size: "sm" })}${t(v, "a check fails or warns")}</span><span>${ui.icon("minus", { size: "sm" })}${t(v, "not run on this host")}</span></p>`
       : null;
   const problems = d ? doctorProblems(d) : [];
   const hidden =
     Math.max(0, problems.length - DOCTOR_CHECKS_SHOWN) + Number(d?.more ?? 0);
   const state = !d
-    ? html`<p>No doctor result published by this host. Run doctor on this host to publish its result.</p>`
+    ? html`<p>${t(v, "No doctor result published by this host. Run doctor on this host to publish its result.")}</p>`
     : d.unreadable
-      ? html`<p>Its published result cannot be read (a worker of another version may have written it).</p>`
-      : html`<p class="hd-docline tinted ${d.counts?.fail ? "tone-failed" : d.counts?.warn ? "tone-attention" : "tone-ok"}">${ui.icon(d.counts?.fail ? "failed" : d.counts?.warn ? "attention" : "done", { size: "sm" })}<span>Doctor ran ${ageText(d.ageMs)} ago${d.version ? ` (version ${d.version})` : ""}, ${doctorByText(d)}: ${doctorCountsText(d)}.${d.openshell ? " The openshell venue was judged." : ""}</span></p>${doctorStale(d) ? ui.banner({ status: "attention", icon: "clock", sm: true, title: `Stale: older than two of this host's doctor runs (every ${d.every}h)`, body: `So it may no longer describe the host. Run doctor on ${label(v)} to publish a fresh result.` }) : null}${d.workerRun && !d.by?.worker ? html`<p>It replaced the worker's own run${d.workerRun.uid !== undefined ? ` (uid ${d.workerRun.uid})` : ""}, so it shows another account's view of the host.</p>` : null}`;
+      ? html`<p>${t(v, "Its published result cannot be read (a worker of another version may have written it).")}</p>`
+      : html`<p class="hd-docline tinted ${d.counts?.fail ? "tone-failed" : d.counts?.warn ? "tone-attention" : "tone-ok"}">${ui.icon(d.counts?.fail ? "failed" : d.counts?.warn ? "attention" : "done", { size: "sm" })}<span>${t(v, "Doctor ran")} ${ageText(d.ageMs)} ${t(v, "ago")}${d.version ? ` (${t(v, "version")} ${d.version})` : ""}, ${t(v, doctorByText(d))}: ${t(v, doctorCountsText(d))}.${d.openshell ? ` ${t(v, "The openshell venue was judged.")}` : ""}</span></p>${doctorStale(d) ? ui.banner({ status: "attention", icon: "clock", sm: true, title: `${t(v, "Stale: older than two of this host's doctor runs")} (${t(v, "every")} ${d.every}h)`, body: `${t(v, "So it may no longer describe the host. Run doctor on")} ${label(v)} ${t(v, "to publish a fresh result.")}` }) : null}${d.workerRun && !d.by?.worker ? html`<p>${t(v, "It replaced the worker's own run")}${d.workerRun.uid !== undefined ? ` (uid ${d.workerRun.uid})` : ""}${t(v, ", so it shows another account's view of the host.")}</p>` : null}`;
   const problemsHtml =
     d && !d.unreadable
-      ? html`<p class="sect-h">Failing first, then warnings</p>${problems.length ? html`<ul class="fl-chks">${problems.slice(0, DOCTOR_CHECKS_SHOWN).map((c) => html`<li class="fl-chk"><span class="badge tone-${c.level === "fail" ? "failed" : "attention"}">${ui.icon(c.level === "fail" ? "failed" : "attention", { size: "sm" })}${c.level === "fail" ? "Failing" : "Warning"}</span><span class="code">${c.id}</span><span class="fl-chk__said">${c.label}</span><span class="fl-chk__fix"><b>Fix:</b> ${c.fix}</span></li>`)}</ul>` : html`<p>Every check passed.</p>`}${hidden ? html`<p>${hidden} more not shown here; doctor on this host prints them all.</p>` : null}`
+      ? html`<p class="sect-h">${t(v, "Failing first, then warnings")}</p>${problems.length ? html`<ul class="fl-chks">${problems.slice(0, DOCTOR_CHECKS_SHOWN).map((c) => html`<li class="fl-chk"><span class="badge tone-${c.level === "fail" ? "failed" : "attention"}">${ui.icon(c.level === "fail" ? "failed" : "attention", { size: "sm" })}${t(v, c.level === "fail" ? "Failing" : "Warning")}</span><span class="code">${c.id}</span><span class="fl-chk__said">${c.label}</span><span class="fl-chk__fix"><b>${t(v, "Fix:")}</b> ${c.fix}</span></li>`)}</ul>` : html`<p>${t(v, "Every check passed.")}</p>`}${hidden ? html`<p>${hidden} ${t(v, "more not shown here; doctor on this host prints them all.")}</p>` : null}`
       : null;
   return ui.card({
-    title: "Doctor",
-    sub: "visible to viewers; paths and secrets redacted at the source",
-    body: html`${state}${sections}${problemsHtml}${v.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: label(v) }) : html`<p>Run doctor on this host to inspect its checks.</p>`}`,
+    title: t(v, "Doctor"),
+    sub: t(v, "visible to viewers; paths and secrets redacted at the source"),
+    body: html`${state}${sections}${problemsHtml}${v.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: label(v) }) : html`<p>${t(v, "Run doctor on this host to inspect its checks.")}</p>`}`,
   });
 };

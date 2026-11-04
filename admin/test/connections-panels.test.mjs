@@ -7,6 +7,25 @@ import { consoleConnectionsFixture } from "./helpers/configuration-goldens.mjs";
 
 const AT = Date.UTC(2026, 9, 30, 12);
 const draw = (name, value, options = {}) => String(panels[name]({ role: "operator", data: { connections: value }, ...options }));
+
+test("the Connections unread state renders its actionable copy in Chinese", () => {
+  const markup = draw("connectionsProblems", null, { locale: "zh" });
+  assert.match(cardText(markup), /连接信息不可用/);
+  assert.match(cardText(markup), /控制台无法读取此页面的数据源/);
+  assert.doesNotMatch(cardText(markup), /Connection facts unavailable|Reload to try again/);
+});
+
+
+test("dynamic connection warnings localize fixed clauses while preserving host names and identifiers", () => {
+  const facts = { problems: [{ kind: "proxy", host: "build-west", title: "Refused on build-west: its egress proxy is not running", text: "The host's doctor says its egress proxy is unavailable.", fix: "Run pi-dispatch up on that host.", run: "gh-42" }], environmentUnknown: false, snapshotUnreadable: false };
+  const markup = draw("connectionsProblems", facts, { locale: "zh" });
+  const text = cardText(markup);
+  assert.match(text, /拒绝在 build-west 上运行/);
+  assert.match(text, /主机的 doctor 检查报告出口代理不可用/);
+  assert.match(text, /请在该主机运行 pi-dispatch up/);
+  assert.match(markup, /gh-42/);
+});
+
 function row(markup, name, tag = "tr") {
   const doc = cardDocument(markup);
   const hit = doc.nodes.find((node) => node.tag === tag && cardText(doc.within(node)).startsWith(name));

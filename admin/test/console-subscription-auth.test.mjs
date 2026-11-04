@@ -44,6 +44,13 @@ test("Models shows observed percentages and resets, preserves exhaustion on stal
   assert.match(trial, /does not clear account exhaustion or start a job here/);
 });
 
+
+test("Models quota fixed copy renders in Chinese and preserves provider, host, percentages and reset times", () => {
+  const doc = text(draw("models", consoleSubscriptionFixture(NOW), { locale: "zh" }));
+  for (const fact of ["订阅配额", "提供商", "anthropic", "所属主机", "mini1", "五小时账户窗口", "七天账户窗口", "100% 已使用", "配额已耗尽", "等待至 2026-10-31 12:30:00 UTC", "部署级美元窗口仍然适用"]) assert.ok(doc.includes(fact), fact);
+  assert.doesNotMatch(doc, /Usage unknown|Observed exhausted|Quota exhausted|Known exhausted windows remain visible/);
+});
+
 test("viewer, agent and read-only operators read safe facts but receive no commands or authentication controls", () => {
   const safe = consoleSubscriptionFixture(NOW, v => { v.connections[0].quota.trialAvailable = true; });
   for (const page of ["connections", "models"]) for (const options of [{ role: "viewer" }, { role: "agent" }, { role: "operator", readOnly: true }]) {

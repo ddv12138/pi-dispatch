@@ -3,12 +3,20 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PAGES, loadPageData, parsePageQuery, renderPage, panelIds } from "../src/console/pages.mjs";
 import { modelsViewOf, modelsForAgent } from "../src/models-view.mjs";
-import { modelRoleForm, MODELS_WORDS } from "../src/console/panels/models.mjs";
+import { modelRoleForm, modelProposalSentence, MODELS_WORDS } from "../src/console/panels/models.mjs";
 import { consoleModelsFixture, MODELS_DRAW, MODELS_PANEL_STATES } from "./helpers/models-goldens.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
 import { assertClean } from "./helpers/console-pages-harness.mjs";
 const AT = Date.UTC(2026, 9, 31, 12);
 const render = async (m, { role = "operator", readOnly = false } = {}) => String((await renderPage("models", { session: { name: "test", role }, query: {}, data: { now: AT, models: m }, readOnly })).html);
+
+test("model proposal sentences translate closed kinds and preserve runtime identifiers", () => {
+  const proposal = { kind: "newer-sibling", candidate: "provider/model-new", scope: "project-x", role: "planner", model: "provider/model-old" };
+  const zh = modelProposalSentence(proposal, "zh");
+  assert.match(zh, /project-x/); assert.match(zh, /planner/); assert.match(zh, /provider\/model-new/); assert.match(zh, /provider\/model-old/);
+  assert.match(zh, /更新的同系列模型/); assert.doesNotMatch(zh, /A newer sibling/);
+  assert.match(modelProposalSentence({ kind: "retirement", model: "x/y", scope: "default", role: "r" }, "en"), /Model x\/y/);
+});
 
 test("Models is a static viewer read with no caller-selected data query or live endpoint", async () => {
   assert.deepEqual(PAGES.models, { path: "/models", auth: "viewer", live: false, title: "Models", nav: "Models", icon: "spend" });

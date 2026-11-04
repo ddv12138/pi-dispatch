@@ -5,7 +5,7 @@ import { connectionsProviderKeys } from "../src/console/panels/provider-keys.mjs
 import { connectionsSubscriptionAuth } from "../src/console/panels/subscription-auth.mjs";
 import { setupStart } from "../src/console/panels/setup.mjs";
 import { PROVIDER_KEYS_CSS } from "../src/console/provider-keys-css.mjs";
-import { PRIMARY_PROVIDER_HELP, providerHelp } from "../src/provider-help.mjs";
+import { PRIMARY_PROVIDER_HELP, PROVIDER_HELP, providerHelp } from "../src/provider-help.mjs";
 import { parseDocument } from "./helpers/script-dom.mjs";
 
 const inventory = () => ({ state: "ready", defaultProvider: "anthropic", rows: [
@@ -36,6 +36,52 @@ test("one permanent key editor preserves several provider sources and discloses 
   assert.match(form.textContent, /default provider stays the same/);
   assert.equal(doc.querySelector('[data-provider-context="anthropic"]').hidden, false);
   assert.equal(doc.querySelector('[data-provider-context="google"]').hidden, true);
+});
+
+test("provider key inventory, editor and provider guides are localized without changing provider or credential identifiers", () => {
+  const doc = draw({ locale: "zh" });
+  const visible = doc.body.textContent;
+  for (const copy of [
+    "提供商 API 密钥",
+    "凭据彼此独立，默认提供商保持不变",
+    "可为多个提供商保存密钥",
+    "默认提供商：",
+    "已在部署中设置",
+    "添加或替换提供商密钥",
+    "官方指南",
+    "登录 Claude Console 并打开 API keys。",
+  ]) assert.ok(visible.includes(copy), `Chinese page contains ${copy}`);
+  for (const copy of [
+    "Provider API keys",
+    "Store keys for several providers.",
+    "Default provider:",
+    "Set in deployment",
+    "Find or create a key at the provider",
+    "Sign in to Claude Console and open API keys.",
+  ]) assert.ok(!visible.includes(copy), `Chinese page translates ${copy}`);
+  assert.ok(visible.includes("Anthropic / Claude API"), "provider display names stay unchanged");
+  assert.ok(visible.includes("ANTHROPIC_API_KEY"), "credential variable names stay unchanged");
+});
+
+test("every reviewed provider guide renders its authored steps and notices in Chinese", () => {
+  const doc = draw({
+    locale: "zh",
+    data: {
+      setup: { enabled: true, actions: ["setup-provider-key", "setup-provider-key-replace"] },
+      connections: { providerKeys: {
+        state: "ready",
+        defaultProvider: "anthropic",
+        rows: [],
+        choices: Object.keys(PROVIDER_HELP).map(provider => ({ provider })),
+      } },
+    },
+  });
+  const visible = doc.body.textContent;
+  for (const [provider, help] of Object.entries(PROVIDER_HELP)) {
+    for (const source of [...help.steps, ...(help.notice ? [help.notice] : [])]) {
+      assert.ok(!visible.includes(source), `${provider} guide translates: ${source}`);
+    }
+  }
 });
 
 test("guides are native readable disclosures outside mutation controls, and official destinations are exact safe outbound links", () => {

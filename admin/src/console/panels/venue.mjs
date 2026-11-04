@@ -20,10 +20,10 @@ const holderOf = (venue) =>
 const names = (rows) => (rows.length ? rows.join(", ") : "no live host");
 const word = (p) =>
   html`<span class="chip vw vw--${p.word}${p.word === "enforced" ? " tone-ok" : ""}">${ui.icon(p.word === "enforced" ? "shield" : p.word === "asserted" ? "done" : "minus")}${p.word}</span>`;
-const missing = () =>
+const missing = (view) =>
   ui.card({
-    title: VENUE_LABEL,
-    body: html`<p class="note">This venue is not in this build's table.</p>`,
+    title: t(view, VENUE_LABEL),
+    body: html`<p class="note">${t(view, "This venue is not in this build's table.")}</p>`,
   });
 const panel = (title, fn) => (view) => {
   const v = selected(view);
@@ -46,7 +46,7 @@ const panel = (title, fn) => (view) => {
         flush: ["What it declares", "Compare venues"].includes(title),
         body: fn(v, model(view), view),
       })
-    : missing();
+    : missing(view);
 };
 
 export const venueSummary = panel(

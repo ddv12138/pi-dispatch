@@ -54,6 +54,8 @@ import { uiText } from "../locale.mjs";
 import { TIMELINE_ROWS, TIMELINE_WAIT_WORDS, TIMELINE_ZOOMS, timelineHtml, timelineLegend, timelineModel } from "../timeline.mjs";
 import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, moneyHtml, shownPath, timeHtml, usdText, workersOnline } from "./common.mjs";
 
+const tr = (message, view) => uiText(message, view?.locale);
+
 // ---- the sentences -----------------------------------------------------------------------------------------------------
 
 /** The sentence the hosts panel leads with when no worker drains the queue (issue #710). */
@@ -360,7 +362,7 @@ export function overviewHeadline(view) {
   const s = view?.data?.snapshot;
   if (!s) return html`${uiText("Valkey could not be read; the next refresh tries again.", view?.locale)}`;
   const setup = setupOf(view);
-  if (setup.applies) return html`${setup.lead}`;
+  if (setup.applies) return html`${uiText(setup.lead, view?.locale)}`;
   const need = needsOf(s);
   const running = runningText(s);
   if (need.clear) return html`${uiText("All clear.", view?.locale)} ${capFirst(uiText(running, view?.locale))}, ${uiText("nothing needs you.", view?.locale)}`;
@@ -386,13 +388,13 @@ export const NEEDS_ROWS_MAX = 4;
  * is not All clear; a day with neither is no line.
  */
 function dayLine(day, view) {
-  if (!day.read) return html`<p class="card__sub">${UNREAD.day}</p>`;
+  if (!day.read) return html`<p class="card__sub">${tr(UNREAD.day, view)}</p>`;
   if (day.failed === 0 && day.refused === 0) return day.floor ? html`<p class="card__sub">${DAY_FLOOR_TEXT}</p>` : null;
   const floor = day.floor ? "at least " : "";
   const parts = [];
-  if (day.failed > 0) parts.push(html`<a href="${hrefTo(view, "runs", { outcome: "failed" })}">${floor}${count(day.failed)} failed</a>`);
-  if (day.refused > 0) parts.push(html`<a href="${hrefTo(view, "runs", { outcome: "refused" })}">${floor}${count(day.refused)} refused</a>`);
-  return html`<p class="card__sub">Last 24 hours: ${parts.length === 2 ? html`${parts[0]} and ${parts[1]}` : parts[0]}${day.refused > 0 ? ", not counting runs an operator cancelled" : ""}.</p>`;
+  if (day.failed > 0) parts.push(html`<a href="${hrefTo(view, "runs", { outcome: "failed" })}">${tr(floor, view)}${count(day.failed)} ${tr("failed", view)}</a>`);
+  if (day.refused > 0) parts.push(html`<a href="${hrefTo(view, "runs", { outcome: "refused" })}">${tr(floor, view)}${count(day.refused)} ${tr("refused", view)}</a>`);
+  return html`<p class="card__sub">${tr("Last 24 hours:", view)} ${parts.length === 2 ? html`${parts[0]} ${tr("and", view)} ${parts[1]}` : parts[0]}${day.refused > 0 ? tr(", not counting runs an operator cancelled", view) : ""}.</p>`;
 }
 
 /**
@@ -417,36 +419,36 @@ export const overviewNeeds = overviewPanel("Needs you", (s, view) => {
     const href = runHref(view, p.jobId);
     const project = projectId(p.project) ?? projects.get(p.jobId) ?? null;
     // Answer where this page can take the answer (an operator on a console that takes changes); else the run's page.
-    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: href === null ? null : { label: act ? "Answer" : "Open", href } }), tagless: project === null });
+    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: href === null ? null : { label: tr(act ? "Answer" : "Open", view), href } }), tagless: project === null });
   }
   for (const j of need.failedRows) {
     const id = typeof j?.jobId === "string" ? j.jobId : null;
     if (id === null) continue;
     const retry = act && RUN_ID_RE.test(id) && typeof j.queue === "string";
     const href = runHref(view, id);
-    const action = retry ? ui.actForm({ action: "retry-failed", hidden: [["jobId", id], ["queue", j.queue]], label: "Retry", kind: ["sm", "paid"] }) : href === null ? null : { label: "Open", href };
+    const action = retry ? ui.actForm({ action: "retry-failed", hidden: [["jobId", id], ["queue", j.queue]], label: tr("Retry", view), kind: ["sm", "paid"] }) : href === null ? null : { label: tr("Open", view), href };
     const project = projects.get(id) ?? null;
     rows.push({ pill: ui.rowPill({ icon: "failed", status: "failed", items: idItems(project, id), action }), tagless: project === null });
   }
   for (const h of need.failingHosts) {
     // The name in `title` too: a long one gives way to its row's words, and is still read whole there.
-    rows.push({ pill: ui.rowPill({ icon: "doctor", status: "failed", items: [html`<b title="${h.name}">${h.name}</b>`, "doctor fails"], action: { label: "Open", href: hrefTo(view, "host", { name: h.name }, "fleet") } }), tagless: false });
+    rows.push({ pill: ui.rowPill({ icon: "doctor", status: "failed", items: [html`<b title="${h.name}">${h.name}</b>`, tr("doctor fails", view)], action: { label: tr("Open", view), href: hrefTo(view, "host", { name: h.name }, "fleet") } }), tagless: false });
   }
   const shown = rows.slice(0, NEEDS_ROWS_MAX);
   const hidden = rows.length - shown.length + (need.failedJobs - need.failedRows.length);
-  const answering = need.answering > 0 ? html`<p class="card__sub">${plural(need.answering, "more question is", "more questions are")} being answered now.</p>` : null;
-  const more = hidden > 0 ? html`<p class="card__sub">And ${count(hidden)} more: see <a href="${hrefTo(view, "parked")}">Parked</a> and <a href="${hrefTo(view, "fleet")}">Fleet</a>.</p>` : null;
+  const answering = need.answering > 0 ? html`<p class="card__sub">${tr(`${plural(need.answering, "more question is", "more questions are")} being answered now.`, view)}</p>` : null;
+  const more = hidden > 0 ? html`<p class="card__sub">${tr(`And ${count(hidden)} more: see`, view)} <a href="${hrefTo(view, "parked")}">${tr("Parked", view)}</a> ${tr("and", view)} <a href="${hrefTo(view, "fleet")}">${tr("Fleet", view)}</a>.</p>` : null;
   // The 0 and its "nothing needs you" only where all four reads were made and found nothing, and a worker is online to
   // run what is in line; else the two numbers, each a count, a floor or "not known".
   const zero = need.read && !need.noWorker && need.questions.length === 0 && need.fix === 0;
   const head = zero
-    ? ui.kpi(count(0), NEEDS_EMPTY.title)
+    ? ui.kpi(count(0), tr(NEEDS_EMPTY.title, view))
     : html`<div class="bigpair">${needsBig(need.questionsKnown, need.questions.length, { one: "question", many: "questions", status: "parked", href: hrefTo(view, "parked") })}${needsBig(need.fixKnown, need.fix, { one: "to fix", many: "to fix", status: "failed", href: hrefTo(view, "fleet") })}</div>`;
   // An unread registry says, beside the doctors it leaves uncounted, that whether a worker is online is not known either
   // where the queue sees none connected (BullMQ's list answers that alone).
   const unreadText = (key) => (key === "registry" && !need.workerKnown ? UNREAD.registryNoWorker : UNREAD[key]);
   const notes = [...(need.noWorker ? [NO_WORKER_TEXT] : []), ...need.unread.map(unreadText), ...(shown.some((r) => r.tagless) ? [NEEDS_UNKNOWN_PROJECT_TEXT] : [])];
-  const body = html`${head}${shown.length > 0 ? html`<ul class="rows">${shown.map((r) => r.pill)}</ul>` : null}${more}${answering}${need.clear ? ui.empty({ status: "ok", icon: "done", title: "All clear", body: NEEDS_EMPTY.body }) : null}${notes.map((n) => html`<p class="card__sub">${n}</p>`)}${dayLine(need.day, view)}${zero ? null : html`<p class="card__sub">${NEEDS_DEFINITION}</p>`}`;
+  const body = html`${head}${shown.length > 0 ? html`<ul class="rows">${shown.map((r) => r.pill)}</ul>` : null}${more}${answering}${need.clear ? ui.empty({ status: "ok", icon: "done", title: tr("All clear", view), body: tr(NEEDS_EMPTY.body, view) }) : null}${notes.map((n) => html`<p class="card__sub">${tr(n, view)}</p>`)}${dayLine(need.day, view)}${zero ? null : html`<p class="card__sub">${tr(NEEDS_DEFINITION, view)}</p>`}`;
   return ui.card({ title: uiText("Needs you", view.locale), body });
 });
 
@@ -487,7 +489,7 @@ function inLineOf(w) {
  * A reason row's count under a cut read: a floor, "2 or more", or a dash where the read found none of that reason,
  * never a whole number (a whole 0 would say no job waits for it, which a cut read cannot know).
  */
-const floorEnd = (n) => (n > 0 ? html`<b>${count(n)}</b> or more` : html`<b>-</b>`);
+const floorEnd = (n, view) => (n > 0 ? html`<b>${count(n)}</b> ${tr("or more", view)}` : html`<b>-</b>`);
 
 /**
  * In line: the big number (`inLineOf`), the age of the longest wait, and each reason's count, the four main ones always.
@@ -500,10 +502,10 @@ export const overviewWaiting = overviewPanel("In line", (s, view) => {
   if (w === null) return ui.card({ title: uiText("In line", view.locale), body: html`<p class="muted">${uiText(UNREAD.waiting, view.locale)}</p>` });
   const cut = w.truncated === true;
   const oldest = w.rows.reduce((a, r) => (Number.isSafeInteger(r?.queuedAt) && (a === null || r.queuedAt < a) ? r.queuedAt : a), null);
-  const longest = oldest !== null && Number.isFinite(view.now) && view.now >= oldest ? ui.chip(`longest ${ageText(view.now - oldest)}${cut ? " or more" : ""}`) : null;
+  const longest = oldest !== null && Number.isFinite(view.now) && view.now >= oldest ? ui.chip(tr(`longest ${ageText(view.now - oldest)}${cut ? " or more" : ""}`, view)) : null;
   const by = bucketCounts(w);
   const buckets = DEFER_BUCKETS.filter((b) => WAITING_MAIN_BUCKETS.includes(b) || by[b] > 0);
-  const rows = buckets.map((b) => ui.rowPill({ icon: bucketIcon(b), items: [DEFER_BUCKET_WORDS[b].short], end: cut ? floorEnd(by[b]) : by[b] }));
+  const rows = buckets.map((b) => ui.rowPill({ icon: bucketIcon(b), items: [tr(DEFER_BUCKET_WORDS[b].short, view)], end: cut ? floorEnd(by[b], view) : by[b] }));
   // The big number is a count alone, or a dash; a floor is said in its label (`inLineOf`).
   const line = inLineOf(w);
   return ui.card({ title: uiText("In line", view.locale), end: longest, body: html`${ui.kpi(line.n, uiText(line.label, view.locale))}<ul class="rows">${rows}</ul>${cut ? html`<p class="card__sub">${uiText(WAITING_CUT_TEXT, view.locale)}</p>` : null}` });
@@ -555,16 +557,16 @@ function slotsOf(h, lastSeen = false) {
 }
 
 /** A host's slot dots, named for a screen reader; none for a host whose slots are not known (`slotsOf`). */
-const slotDots = (name, sl) =>
+const slotDots = (name, sl, view) =>
   sl.unknown !== null
-    ? ui.slots({ label: `${name}: ${UNKNOWN_SLOT_WORDS[sl.unknown]}` })
-    : ui.slots({ run: sl.run, hold: sl.hold, free: sl.free, label: `${name}: ${count(sl.run)} running, ${count(sl.hold)} held, ${sl.total === null ? "slots not published" : `${count(sl.free)} free`}` });
+    ? ui.slots({ label: tr(`${name}: ${UNKNOWN_SLOT_WORDS[sl.unknown]}`, view) })
+    : ui.slots({ run: sl.run, hold: sl.hold, free: sl.free, label: tr(`${name}: ${count(sl.run)} running, ${count(sl.hold)} held, ${sl.total === null ? "slots not published" : `${count(sl.free)} free`}`, view) });
 
 /** A Running row's end: what its slots hold, in words. */
-function slotsEnd(sl) {
-  if (sl.unknown !== null) return { text: UNKNOWN_SLOT_WORDS[sl.unknown], status: "attention" };
-  if (sl.hold > 0) return { text: `${count(sl.hold)} held`, status: "attention" };
-  return { text: sl.total === null ? "slots not published" : sl.free > 0 ? `${count(sl.free)} free` : "full", faint: true };
+function slotsEnd(sl, view) {
+  if (sl.unknown !== null) return { text: tr(UNKNOWN_SLOT_WORDS[sl.unknown], view), status: "attention" };
+  if (sl.hold > 0) return { text: tr(`${count(sl.hold)} held`, view), status: "attention" };
+  return { text: tr(sl.total === null ? "slots not published" : sl.free > 0 ? `${count(sl.free)} free` : "full", view), faint: true };
 }
 
 /**
@@ -575,16 +577,16 @@ function slotsEnd(sl) {
  * floor with no total, and a floor of none says nothing, so then the label is the count's own ("nothing is running", or
  * that jobs run in slots not known). The label follows the count, never the rows.
  */
-function runningLabel(n, slots) {
-  if (slots.length === 0) return n === 0 ? RUNNING_EMPTY.title : `${n === 1 ? "job" : "jobs"} running, slots not published`;
+function runningLabel(n, slots, view) {
+  if (slots.length === 0) return tr(n === 0 ? RUNNING_EMPTY.title : `${n === 1 ? "job" : "jobs"} running, slots not published`, view);
   const used = slots.reduce((a, { sl }) => a + sl.run + sl.hold, 0);
   // A host whose slots are not known uses slots nobody can count: the slots used are a floor, with no total.
   if (slots.some(({ sl }) => sl.unknown !== null)) {
-    if (used > 0) return `in ${count(used)} or more slots`;
-    return n === 0 ? RUNNING_EMPTY.title : `${n === 1 ? "job" : "jobs"} running, slots not known`;
+    if (used > 0) return tr(`in ${count(used)} or more slots`, view);
+    return tr(n === 0 ? RUNNING_EMPTY.title : `${n === 1 ? "job" : "jobs"} running, slots not known`, view);
   }
   const total = slots.every(({ sl }) => sl.total !== null) ? slots.reduce((a, { sl }) => a + sl.total, 0) : null;
-  return total === null ? `in ${plural(used, "slot")}` : `in ${count(used)} of ${plural(total, "slot")}`;
+  return tr(total === null ? `in ${plural(used, "slot")}` : `in ${count(used)} of ${plural(total, "slot")}`, view);
 }
 
 export const overviewActive = overviewPanel("Running", (s, view) => {
@@ -592,13 +594,13 @@ export const overviewActive = overviewPanel("Running", (s, view) => {
   const lastSeen = Boolean(s.queue?.fleetDegraded);
   const slots = hostsOf(s).map((h) => ({ h, sl: slotsOf(h, lastSeen) }));
   const rows = slots.map(({ h, sl }) =>
-    ui.rowPill({ items: [html`<b title="${h.name}">${h.name}</b>`, slotDots(h.name, sl)], end: slotsEnd(sl) }),
+    ui.rowPill({ items: [html`<b title="${h.name}">${h.name}</b>`, slotDots(h.name, sl, view)], end: slotsEnd(sl, view) }),
   );
-  const live = n > 0 ? ui.chip("live", { status: "running", icon: "running" }) : null;
+  const live = n > 0 ? ui.chip(tr("live", view), { status: "running", icon: "running" }) : null;
   // A registry that could not be read says so, under the rows last seen or in their place, never that no host is
   // registered.
   const note = lastSeen ? REGISTRY_UNREAD_TEXT : rows.length === 0 ? HOSTS_EMPTY.body : null;
-  return ui.card({ title: uiText("Running", view.locale), end: live, body: html`${ui.kpi(count(n), uiText(runningLabel(n, slots), view.locale))}${rows.length > 0 ? html`<ul class="rows">${rows}</ul>` : null}${note === null ? null : html`<p class="card__sub">${uiText(note, view.locale)}</p>`}` });
+  return ui.card({ title: uiText("Running", view.locale), end: live, body: html`${ui.kpi(count(n), uiText(runningLabel(n, slots, view), view.locale))}${rows.length > 0 ? html`<ul class="rows">${rows}</ul>` : null}${note === null ? null : html`<p class="card__sub">${uiText(note, view.locale)}</p>`}` });
 });
 
 // ---- Spend today -----------------------------------------------------------------------------------------------------------
@@ -824,8 +826,8 @@ function placeholder(row, key) {
 }
 
 /** `sentence` with each `{placeholder}` filled from `row` (`placeholder`), or null when one is missing. */
-function filledSentence(sentence, row) {
-  const values = sentence.split(/\{([a-z]+)\}/).map((p, i) => (i % 2 === 1 ? placeholder(row, p) : p));
+function filledSentence(sentence, row, locale = "en") {
+  const values = sentence.split(/\{([a-z]+)\}/).map((p, i) => (i % 2 === 1 ? placeholder(row, p) : uiText(p, locale)));
   return values.every((v) => v !== null) ? html`${values}` : null;
 }
 
@@ -838,19 +840,19 @@ function filledSentence(sentence, row) {
  * face with `NO_EXPLANATION` (see the header's role rule), never the `none` bucket's title, which says no reason was
  * recorded. Null for no row.
  */
-export function waitingSentence(row) {
+export function waitingSentence(row, locale = "en") {
   if (row === null || typeof row !== "object") return null;
   const why = typeof row.why === "string" && DEFER_WHY_RE.test(row.why) ? row.why : null;
   if (row.bucket === "due") {
-    const line = filledSentence(DEFER_DUE_SENTENCE, row);
+    const line = filledSentence(DEFER_DUE_SENTENCE, row, locale);
     if (line !== null) return line;
   } else if (why !== null && row.known === true && Object.hasOwn(DEFER_WHYS, why)) {
-    const line = filledSentence(DEFER_WHYS[why].sentence, row);
+    const line = filledSentence(DEFER_WHYS[why].sentence, row, locale);
     if (line !== null) return line;
   } else if (why !== null && row.known === false) {
-    return html`Recorded reason: <span class="code">${why}</span>, ${NO_EXPLANATION}`;
+    return html`${uiText("Recorded reason:", locale)} <span class="code">${why}</span>, ${uiText(NO_EXPLANATION, locale)}`;
   }
-  return html`${DEFER_BUCKET_WORDS[Object.hasOwn(DEFER_BUCKET_WORDS, row.bucket) ? row.bucket : "none"].title}`;
+  return html`${uiText(DEFER_BUCKET_WORDS[Object.hasOwn(DEFER_BUCKET_WORDS, row.bucket) ? row.bucket : "none"].title, locale)}`;
 }
 
 /** The registry's orphan entries (a job gone, its slot still held) per host name. */
@@ -909,13 +911,13 @@ function waitAction(row, view, orphans, s) {
  * registry no longer names, and how long it was held.
  */
 function waitText(row, view, orphans, operator, s) {
-  const said = waitingSentence(row);
-  const held = heldSlot(row, orphans) ? html`. <span class="code">${orphans.get(row.host)[0]}</span> still holds one of its slots` : null;
+  const said = waitingSentence(row, view.locale);
+  const held = heldSlot(row, orphans) ? html`. <span class="code">${orphans.get(row.host)[0]}</span> ${tr("still holds one of its slots", view)}` : null;
   // In a host's own queue whose host left the registry: only that host's worker takes a job from it, so the row says
   // where the job is, beside why it last waited.
-  const stray = strayQueue(s, row.queue) ? html`. It is in <span class="code">${row.queue}</span>, whose host is not in the registry` : null;
-  const since = row.held !== null && typeof row.held === "object" && Number.isSafeInteger(row.held.since) && Number.isFinite(view.now) && view.now >= row.held.since ? html`. Held ${ageText(view.now - row.held.since)}` : null;
-  const answers = operator && Array.isArray(row.held?.answers) && row.held.answers.length > 0 ? html`; last answers: ${row.held.answers.map((a, i) => html`${i === 0 ? null : ", "}<span class="code">${a.profile}</span> ${ANSWER_WORDS[a.answer] ?? a.answer}`)}` : null;
+  const stray = strayQueue(s, row.queue) ? html`. ${tr("It is in", view)} <span class="code">${row.queue}</span>, ${tr("whose host is not in the registry", view)}` : null;
+  const since = row.held !== null && typeof row.held === "object" && Number.isSafeInteger(row.held.since) && Number.isFinite(view.now) && view.now >= row.held.since ? html`. ${tr(`Held ${ageText(view.now - row.held.since)}`, view)}` : null;
+  const answers = operator && Array.isArray(row.held?.answers) && row.held.answers.length > 0 ? html`; ${tr("last answers:", view)} ${row.held.answers.map((a, i) => html`${i === 0 ? null : ", "}<span class="code">${a.profile}</span> ${tr(ANSWER_WORDS[a.answer] ?? a.answer, view)}`)}` : null;
   return html`${said}${held}${stray}${since}${answers}`;
 }
 
@@ -935,7 +937,7 @@ function strayQueue(s, queue) {
  * the registry whose queue still holds jobs), by how many wait in it. A queue the waiting read read with nothing in
  * line is not listed: a host gone for good leaves its queue's keys behind.
  */
-function queueRow(s, w) {
+function queueRow(s, w, view) {
   const list = Array.isArray(s?.queueCounts) ? s.queueCounts.filter((q) => typeof q?.queue === "string") : [];
   const counted = new Set(list.map((q) => q.queue));
   const extra = (Array.isArray(w?.byQueue) ? w.byQueue : []).filter((q) => typeof q?.queue === "string" && !counted.has(q.queue) && Number.isSafeInteger(q.inLine) && q.inLine > 0);
@@ -944,10 +946,10 @@ function queueRow(s, w) {
     const c = q.counts ?? {};
     const n = (k) => (Number.isSafeInteger(c[k]) && c[k] > 0 ? c[k] : 0);
     const parts = [...(q.paused ? ["paused"] : []), ...(n("waiting") + n("prioritized") > 0 ? [`${count(n("waiting") + n("prioritized"))} waiting`] : []), ...(n("delayed") > 0 ? [`${count(n("delayed"))} delayed`] : []), ...(n("paused") > 0 ? [`${count(n("paused"))} held by the pause`] : [])];
-    return parts.length === 0 ? "0" : parts.join(", ");
+    return parts.length === 0 ? "0" : parts.map((p) => tr(p, view)).join(", ");
   };
-  const strayWords = (q) => `${count(q.inLine)} in line${strayQueue(s, q.queue) ? ", its host not in the registry" : ""}`;
-  return html`<div class="qrow"><span class="card__sub">Queues</span>${list.map((q) => html`<span class="qp"><b class="code">${queueLabel(q.queue)}</b>${words(q)}</span>`)}${extra.map((q) => html`<span class="qp"><b class="code">${queueLabel(q.queue)}</b>${strayWords(q)}</span>`)}</div>`;
+  const strayWords = (q) => tr(`${count(q.inLine)} in line${strayQueue(s, q.queue) ? ", its host not in the registry" : ""}`, view);
+  return html`<div class="qrow"><span class="card__sub">${tr("Queues", view)}</span>${list.map((q) => html`<span class="qp"><b class="code">${queueLabel(q.queue)}</b>${words(q)}</span>`)}${extra.map((q) => html`<span class="qp"><b class="code">${queueLabel(q.queue)}</b>${strayWords(q)}</span>`)}</div>`;
 }
 
 /**
@@ -959,7 +961,7 @@ function scheduledLine(s, view) {
   const list = (Array.isArray(s?.schedulers) ? s.schedulers : []).filter((x) => timeOrNull(x?.next) !== null && typeof x.key === "string" && (!Number.isFinite(view.now) || x.next >= view.now)).sort((a, b) => a.next - b.next);
   if (list.length === 0) return null;
   const shown = list.slice(0, 3).map((x, i) => html`${i === 0 ? null : ", "}<span class="code">${x.key}</span> ${timeHtml(x.next)}`);
-  return html`<p class="card__sub">${ui.icon("clock", { size: "sm" })} Scheduled: ${shown}${list.length > 3 ? `, and ${count(list.length - 3)} more` : ""}</p>`;
+  return html`<p class="card__sub">${ui.icon("clock", { size: "sm" })} ${tr("Scheduled:", view)} ${shown}${list.length > 3 ? tr(`, and ${count(list.length - 3)} more`, view) : ""}</p>`;
 }
 
 /** Today's soft-hold refusals, linked to those runs: none of them waits in line. */
@@ -967,8 +969,8 @@ function softHoldLine(s, view) {
   const t = s?.softHoldToday;
   const hold = Number.isInteger(s?.settings?.overlay?.softHoldPct);
   if (!t || !Number.isSafeInteger(t.count) || (t.count === 0 && !hold)) return null;
-  const n = html`${t.floor ? "at least " : ""}${count(t.count)} today`;
-  return html`<p class="card__sub">${SOFT_HOLD_REFUSED_TEXT} ${t.count > 0 ? html`<a href="${hrefTo(view, "runs", { outcome: "refused", reason: "soft-hold" })}">${n}</a>` : n}.</p>`;
+  const n = html`${t.floor ? tr("at least ", view) : ""}${count(t.count)} ${tr("today", view)}`;
+  return html`<p class="card__sub">${tr(SOFT_HOLD_REFUSED_TEXT, view)} ${t.count > 0 ? html`<a href="${hrefTo(view, "runs", { outcome: "refused", reason: "soft-hold" })}">${n}</a>` : n}.</p>`;
 }
 
 /**
@@ -976,12 +978,12 @@ function softHoldLine(s, view) {
  * bound on queues (it read the first `byQueue.length` and counts the rest, `queuesCut`), or a queue holds more waiting
  * jobs than one read takes (a `byQueue` entry `truncated`), or both. In line's label says "or more" for the same `truncated`.
  */
-function floorText(w) {
+function floorText(w, view) {
   const cut = Number.isSafeInteger(w.queuesCut) && w.queuesCut > 0 ? w.queuesCut : 0;
   const read = Array.isArray(w.byQueue) ? w.byQueue.length : 0;
   const part = Array.isArray(w.byQueue) && w.byQueue.some((q) => q?.truncated === true);
-  if (cut > 0) return `Only the first ${count(read)} queues were read; ${count(cut)} more ${cut === 1 ? "was" : "were"} not${part ? ", and a queue holds more waiting jobs than are read" : ""}, so the counts are a floor.`;
-  return w.truncated ? "A queue holds more waiting jobs than are read, so the counts are a floor." : null;
+  if (cut > 0) return tr(`Only the first ${count(read)} queues were read; ${count(cut)} more ${cut === 1 ? "was" : "were"} not${part ? ", and a queue holds more waiting jobs than are read" : ""}, so the counts are a floor.`, view);
+  return w.truncated ? tr("A queue holds more waiting jobs than are read, so the counts are a floor.", view) : null;
 }
 
 /**
@@ -997,10 +999,10 @@ export const overviewWaitlists = overviewPanel("Waitlists", (s, view) => {
   const operator = view.role === "operator";
   const act = canAct(view);
   const orphans = orphansByHost(s);
-  const foot = html`${queueRow(s, w)}${scheduledLine(s, view)}${softHoldLine(s, view)}`;
+  const foot = html`${queueRow(s, w, view)}${scheduledLine(s, view)}${softHoldLine(s, view)}`;
   if (w === null) return ui.card({ title: uiText("Waitlists", view.locale), body: html`<div class="wl"><p class="muted">${uiText(UNREAD.waiting, view.locale)}</p>${foot}</div>` });
   const by = bucketCounts(w);
-  const bar = ui.waitBar(DEFER_BUCKETS.map((b) => ({ icon: bucketIcon(b), count: by[b] })), { label: "In line by reason" });
+  const bar = ui.waitBar(DEFER_BUCKETS.map((b) => ({ icon: bucketIcon(b), count: by[b] })), { label: tr("In line by reason", view) });
   let freeSlot = false;
   let unknownProject = false;
   const groups = DEFER_BUCKETS.filter((b) => by[b] > 0).map((b) => {
@@ -1012,12 +1014,12 @@ export const overviewWaitlists = overviewPanel("Waitlists", (s, view) => {
       if (operator && heldSlot(r, orphans)) freeSlot = true;
       return html`<li>${project === null ? null : ui.ptag(project)}${jobIdHtml(r.jobId)}<span class="wl__t">${waitText(r, view, orphans, operator, s)}</span>${action}</li>`;
     });
-    const more = rows.length > WAITLIST_ROWS_MAX ? html`<p class="card__sub">And ${count(rows.length - WAITLIST_ROWS_MAX)} more waiting for this, not listed: the overview lists the first ${count(WAITLIST_ROWS_MAX)} of each reason.</p>` : null;
+    const more = rows.length > WAITLIST_ROWS_MAX ? html`<p class="card__sub">${tr(`And ${count(rows.length - WAITLIST_ROWS_MAX)} more waiting for this, not listed: the overview lists the first ${count(WAITLIST_ROWS_MAX)} of each reason.`, view)}</p>` : null;
     const slotNote = b === "slot" && freeSlot ? html`<p class="card__sub">${FREE_SLOT_TEXT}</p>` : null;
-    return html`<div class="wl__g"><p class="wl__h">${ui.tile("idle", { icon: bucketIcon(b), sm: true, iconSm: true })}<b>${DEFER_BUCKET_WORDS[b].title}</b>${ui.count(by[b])}</p><ul class="wl__l">${items}</ul>${more}${slotNote}</div>`;
+    return html`<div class="wl__g"><p class="wl__h">${ui.tile("idle", { icon: bucketIcon(b), sm: true, iconSm: true })}<b>${tr(DEFER_BUCKET_WORDS[b].title, view)}</b>${ui.count(by[b])}</p><ul class="wl__l">${items}</ul>${more}${slotNote}</div>`;
   });
   // Calm only over a read made whole: a cut one says its counts are a floor (`floorText`), and may have missed the job.
-  const calm = w.truncated !== true && by.slot === 0 && by.run === 0 && by.check === 0 ? ui.collapsed({ icon: "done", title: WAITLISTS_CALM }) : null;
+  const calm = w.truncated !== true && by.slot === 0 && by.run === 0 && by.check === 0 ? ui.collapsed({ icon: "done", title: tr(WAITLISTS_CALM, view) }) : null;
   const notes = [unknownProject ? WAITING_UNKNOWN_PROJECT_TEXT : null, floorText(w)].filter(Boolean);
   return ui.card({ title: uiText("Waitlists", view.locale), body: html`<div class="wl">${bar}${groups}${calm}${notes.map((n) => html`<p class="card__sub">${uiText(n, view.locale)}</p>`)}${foot}</div>` });
 });
@@ -1154,8 +1156,8 @@ export const overviewHosts = overviewPanel("Hosts", (s, view) => {
 
 // ---- the first run -------------------------------------------------------------------------------------------------------
 
-/** A step's sentence parts (`firstRunState`'s) as markup: text, a name in the code face, bold, an age. */
-const partsHtml = (parts) => html`${(Array.isArray(parts) ? parts : []).map((p) => (typeof p === "string" ? p : typeof p?.code === "string" ? html`<span class="code">${p.code}</span>` : typeof p?.b === "string" ? html`<b>${p.b}</b>` : Number.isFinite(p?.age) ? ageText(p.age) : null))}`;
+/** A step's sentence parts (`firstRunState`'s) as markup: fixed words are localized, names and commands keep their face. */
+const partsHtml = (parts, view) => html`${(Array.isArray(parts) ? parts : []).map((p) => (typeof p === "string" ? uiText(p, view?.locale) : typeof p?.code === "string" ? html`<span class="code">${p.code}</span>` : typeof p?.b === "string" ? html`<b>${uiText(p.b, view?.locale)}</b>` : Number.isFinite(p?.age) ? uiText(`${ageText(p.age)} old`, view?.locale) : null))}`;
 
 /** The icon a step's tile carries while it is to do or optional (a state's own icon otherwise). */
 const STEP_ICONS = Object.freeze({ deployment: "folder", queue: "queue", token: "key", worker: "fleet", egress: "globe", provider: "key", trigger: "plus", forge: "git" });
@@ -1164,11 +1166,11 @@ const STEP_ICONS = Object.freeze({ deployment: "folder", queue: "queue", token: 
 const stepIcon = (st) => (st.state === "ready" ? "done" : st.state === "not-yet" ? "failed" : st.state === "check" ? "attention" : STEP_ICONS[st.id] ?? "clock");
 
 /** The segmented bar under the count: a segment per step in its state's tone, a step to do on the inset's grey. */
-function progressBar(steps) {
+function progressBar(steps, locale = "en") {
   const gap = 0.8;
   const w = (100 - gap * (steps.length - 1)) / steps.length;
   const n = (state) => steps.filter((x) => x.state === state).length;
-  const label = `${count(n("ready"))} of ${count(steps.length)} ready: ${count(n("not-yet"))} not yet, ${count(n("check"))} to check, ${count(n("to-do") + n("optional"))} to do`;
+  const label = uiText(`${count(n("ready"))} of ${count(steps.length)} ready: ${count(n("not-yet"))} not yet, ${count(n("check"))} to check, ${count(n("to-do") + n("optional"))} to do`, locale);
   return html`<svg class="su-bar" height="10" role="img" aria-label="${label}">${steps.map((x, i) => {
     const st = FIRST_RUN_STATES[x.state];
     const todo = x.state === "to-do" || x.state === "optional";
@@ -1183,12 +1185,12 @@ function stepHtml(st, i, view) {
   // A command with a placeholder in it carries the sentence that says what to put there (`firstRunCommandHint`).
   const hintOf = (argv) => {
     const hint = firstRunCommandHint(argv);
-    return hint === null ? null : html`<p class="su-alt">${partsHtml(hint)}</p>`;
+    return hint === null ? null : html`<p class="su-alt">${partsHtml(hint, view)}</p>`;
   };
-  const cmds = operator ? st.commands.map((argv, k) => html`${k === 1 && st.id === "worker" ? html`<p class="su-alt">Or run it yourself in a terminal:</p>` : null}${ui.cmd([...argv])}${hintOf(argv)}`) : null;
+  const cmds = operator ? st.commands.map((argv, k) => html`${k === 1 && st.id === "worker" ? html`<p class="su-alt">${uiText("Or run it yourself in a terminal:", view.locale)}</p>` : null}${ui.cmd([...argv])}${hintOf(argv)}`) : null;
   const href = docsHref("docs/triggers.md");
-  const add = st.id === "trigger" && st.state !== "ready" && canAct(view) ? html`<div class="su-act">${ui.btn({ kind: "primary", label: "Add a trigger", icon: "plus", href: hrefTo(view, "trigger-add", null, "config") })}${href === null ? null : ui.outLink({ href, label: "What triggers can do", btn: "ghost" })}</div>` : null;
-  return html`<li class="${st.state === "ready" ? "su-step su-step--done" : "su-step"}">${ui.tile(word.status, { icon: stepIcon(st) })}<div class="su-step__b"><p class="su-step__t"><span class="su-n">${count(i + 1)}</span>${st.title}${ui.chip(word.word, { status: word.status })}</p><p class="su-step__s">${partsHtml(st.sentence)}</p>${cmds}${add}</div></li>`;
+  const add = st.id === "trigger" && st.state !== "ready" && canAct(view) ? html`<div class="su-act">${ui.btn({ kind: "primary", label: uiText("Add a trigger", view.locale), icon: "plus", href: hrefTo(view, "trigger-add", null, "config") })}${href === null ? null : ui.outLink({ href, label: uiText("What triggers can do", view.locale), btn: "ghost" })}</div>` : null;
+  return html`<li class="${st.state === "ready" ? "su-step su-step--done" : "su-step"}">${ui.tile(word.status, { icon: stepIcon(st) })}<div class="su-step__b"><p class="su-step__t"><span class="su-n">${count(i + 1)}</span>${uiText(st.title, view.locale)}${ui.chip(uiText(word.word, view.locale), { status: word.status })}</p><p class="su-step__s">${partsHtml(st.sentence, view)}</p>${cmds}${add}</div></li>`;
 }
 
 /**
@@ -1199,7 +1201,7 @@ export function overviewSetup(view) {
   const st = setupOf(view);
   if (!st.applies) return html``;
   const from = st.doctor === null ? null : `from doctor on ${st.doctor.host}${Number.isSafeInteger(st.doctor.ageMs) ? `, ${ageWords(st.doctor.ageMs)} ago` : ""}`;
-  const prog = html`<div class="su-prog"><p><b class="su-big">${count(st.ready)}</b> of ${count(st.total)} ready</p>${progressBar(st.steps)}<p class="muted">${st.sub}</p></div>`;
+  const prog = html`<div class="su-prog"><p><b class="su-big">${count(st.ready)}</b> ${uiText(`of ${count(st.total)} ready`, view.locale)}</p>${progressBar(st.steps, view.locale)}<p class="muted">${uiText(st.sub, view.locale)}</p></div>`;
   return ui.card({ title: uiText("Getting ready", view.locale), sub: uiText(from, view.locale), body: html`${prog}<p class="su-p"><a class="btn" href="/setup">${uiText("Open setup", view.locale)}</a></p><ol class="su-steps">${st.steps.map((x, i) => stepHtml(x, i, view))}</ol>` });
 }
 

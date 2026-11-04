@@ -198,6 +198,7 @@ import { SEARCH_ID } from "./kit.mjs";
 import { LIVE_NOTES, LIVE_STATES, SEARCH_HREF } from "./shell.mjs";
 import { SYSTEM_SCHEME, THEME_COOKIE, THEME_COOKIE_MAX_AGE_SEC, THEME_COOKIE_SAME_SITE, THEME_LABELS, THEMES } from "./theme.mjs";
 import { GATEWAY_CONSOLE_SCRIPT } from "./gateway-console-script.mjs";
+import { CLIENT_ZH_TEXT } from "./locale.mjs";
 
 /**
  * How long the page waits before it asks again, when the console did not answer (a sign-in post, a one-time link's
@@ -257,30 +258,7 @@ export const CONSOLE_SCRIPT = `"use strict";
   var isChinese = document.documentElement && document.documentElement.lang === "zh-CN";
   // This closed catalogue covers text the browser creates after the server's first render. User data and machine values
   // are deliberately passed through unchanged.
-  var ZH_TEXT = {
-    "The console refused the request": "控制台拒绝了此请求",
-    "Console not reachable": "无法连接到控制台",
-    "Nothing more is sent, and this page no longer holds the token. Paste it and press Sign in again once the console is back.": "不会再发送请求，此页面也不再保留令牌。控制台恢复后，请重新粘贴令牌并登录。",
-    "Nothing more is sent, and a link lasts 60 seconds, so this one has expired. Ask for a new one once the console is back.": "不会再发送请求。登录链接仅有效 60 秒，因此此链接已过期。控制台恢复后，请获取新链接。",
-    "Sign-out not confirmed": "退出状态未确认",
-    "The console did not confirm it, so this browser may still be signed in. Press Sign out again.": "控制台未确认退出，因此此浏览器可能仍处于登录状态。请再次点击退出登录。",
-    "The console could not read its tokens file, so it shows nothing newer; this is the page as it was last seen. An operator should run \`pi-dispatch doctor\`.": "控制台无法读取令牌文件，因此不会显示较新的数据；当前页面是最近一次成功读取的内容。操作员应运行 \`pi-dispatch doctor\`。",
-    "The console is unreachable. Check the address and try again.": "无法连接到控制台。请检查地址后重试。",
-    "Sign-in could not be confirmed. Submit again; the token was not saved.": "无法确认登录结果。请重新提交；令牌未保存。",
-    "Sign-out could not be confirmed. Your session may still be active.": "无法确认退出结果。你的会话可能仍然有效。",
-    "Following": "跟随最新内容", "Reading earlier entries": "正在查看较早内容",
-    "Live": "实时", "Not live": "未连接", "Reconnecting": "正在重连", "Signed out": "已退出",
-    "reconnecting": "正在重连", "live": "实时", "signed out": "已退出",
-    "Theme: follows the system": "主题：跟随系统", "Theme: light": "主题：浅色", "Theme: dark": "主题：深色",
-    "The check could not connect. Your description is preserved; try again.": "检查无法连接。你的描述已保留，请重试。",
-    "This private invitation is no longer shown. Ask for a new link on the host if needed.": "此私密邀请不再显示。如需使用，请在主机上重新生成链接。",
-    "Copy invitation": "复制邀请", "Preview revoking this viewer": "预览撤销此只读用户",
-    "Share unknown": "份额未知", "Preview replacing key": "预览替换密钥", "Preview adding key": "预览添加密钥",
-    "Preview the bundle resolver": "预览密钥包解析脚本", "Preview the profile": "预览配置", "about": "约",
-    "Copied": "已复制", "Not copied": "未复制", "Copy": "复制",
-    "Nothing was changed.": "未作任何更改。", "running ": "运行中 ",
-    "The run is over (": "运行已结束（", ").": "）。"
-  };
+  var ZH_TEXT = ${JSON.stringify(CLIENT_ZH_TEXT)};
   function uiText(text) {
     if (!isChinese || typeof text !== "string") return text;
     if (Object.prototype.hasOwnProperty.call(ZH_TEXT, text)) return ZH_TEXT[text];

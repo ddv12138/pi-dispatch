@@ -4,6 +4,7 @@ import { CHAT_REFUSALS, parkedVerdictOf } from "@edgehero/pi-dispatch/chat-mode"
 import { ACTIONS } from "../src/console/actions.mjs";
 import { PAGES } from "../src/console/pages.mjs";
 import { OVERVIEW_UNREAD_TEXT } from "../src/console/panels/overview.mjs";
+import { uiText } from "../src/console/locale.mjs";
 import {
   PARKED_ANSWERING, PARKED_ANSWER_HINT, PARKED_CHECKS_MAX, PARKED_CHECK_SKIPPED, PARKED_CHECK_UNREAD, PARKED_ELSEWHERE_TITLE,
   PARKED_EMPTY, PARKED_HOW, PARKED_QUESTION_WHERE, parkedCheckRows, parkedQuestions, parkedUnreadText,
@@ -44,6 +45,19 @@ test("the sentences, word for word: where the question is read, the banner's tit
   assert.equal(parkedUnreadText("the runs could not be read"), "The parked runs could not be read (the runs could not be read); this is not an empty inbox.");
   assert.equal(PARKED_CHECKS_MAX, 20);
   for (const s of [PARKED_QUESTION_WHERE, PARKED_ELSEWHERE_TITLE, PARKED_HOW, PARKED_EMPTY, PARKED_ANSWER_HINT, PARKED_ANSWERING, PARKED_CHECK_UNREAD, PARKED_CHECK_SKIPPED]) assert.doesNotMatch(s, /[\u2013\u2014]/);
+});
+
+test("the parked explainer and empty state use Chinese copy when the screen locale is Chinese", () => {
+  const out = draw("viewer", { parked: [row("gh-zh")], parkedChecks: { "gh-zh": OK } }, { parkedChecks: { "gh-zh": OK } }, { locale: "zh" });
+  const empty = draw("viewer", { parked: [] }, {}, { locale: "zh" });
+  for (const sentence of [PARKED_QUESTION_WHERE, PARKED_HOW]) {
+    const translated = String(uiText(sentence, "zh"));
+    assert.notEqual(translated, sentence, `${sentence}: authored prose has a translation`);
+    assert.ok(out.includes(translated), `${sentence}: rendered copy uses its translation`);
+  }
+  const translatedEmpty = String(uiText(PARKED_EMPTY, "zh"));
+  assert.notEqual(translatedEmpty, PARKED_EMPTY);
+  assert.ok(empty.includes(translatedEmpty));
 });
 
 test("a card per parked run for both roles: who asked, its project, its target linked to the issue, the wait, the forge and the resume count, and where the question is", () => {
