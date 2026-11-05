@@ -110,13 +110,16 @@ test("all project rows share one history, source and sizing read while exact cur
     assert.strictEqual(r.limits(), limits);
     r.triggers({}); r.settings({}); r.subscriptions({}); r.environment({}); r.scan({}); await r.allocation({}); r.sizing({ projectIds: [opts.id] });
     const view = consoleProjectFixture(NOW); view.id = opts.id; view.bundle.last.variables = [VARIABLE]; view.sizing.secret = VALUE; view.sizing.path = PRIVATE;
+    // The shared fixture's spend block is the money era's; this file's pin carries the token shape itself
+    // (projectViewForAgent's reads) so the helper stays A10/console-project's to re-pin.
+    view.spend = { window: "week", settledTokens: 6_100_000, heldTokens: 2_000_000, heldKnownTokens: 2_000_000, heldIncomplete: false, usedTokens: 8_100_000, shareTokens: 25_000_000, envelope: true, floor: false };
     return view;
   } } });
   noSecrets(out);
   assert.deepEqual(count, { projects: 1, limits: 1, triggers: 1, settings: 1, subscriptions: 1, environment: 1, scan: 1, allocation: 1, sizing: 1 });
   assert.deepEqual(out.projects.map((p) => [p.id, p.members, p.limitRows]), [["billing", ["github:acme/billing"], [0]], ["web", ["github:acme/web"], [1]]]);
-  assert.equal(out.projects[0].spend.usedMicros, 8_100_000);
-  assert.equal(out.projects[0].spend.heldMicros, 2_000_000);
+  assert.equal(out.projects[0].spend.usedTokens, 8_100_000);
+  assert.equal(out.projects[0].spend.heldTokens, 2_000_000);
   assert.equal(out.projects[0].bundle.variables, 1);
   assert.equal(out.projects[0].suggestion.call, 'dispatch_limit_edit {"index":2,"memory":"4g","cpus":2}');
   assert.equal(out.projects[0].editRefusal, "Members cannot be edited while secret bundle billing names billing. Change the bundle in triggers.json first.");
