@@ -7,8 +7,8 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
-// Issue #501, PR #542's review round 2: with a deployment POINTER and an empty `.env`, a dollar change that leaves a
-// window with no maxCostUsd in the overlay or that `.env` is WARNED and written, never refused, because the worker's
+// Issue #501, PR #542's review round 2: with a deployment POINTER and an empty `.env`, a budget change that leaves a
+// window with no maxTokens in the overlay or that `.env` is WARNED and written, never refused, because the worker's
 // cap may come from its service unit or --env-setup script, which the admin cannot see. The pointer is applied once
 // per process, at the extension's factory, so this layout lives in its own file and is set before the first load.
 const home = tempDir("admin-dollar-pointer-");
@@ -21,8 +21,8 @@ writeFileSync(pointerFile, JSON.stringify({ version: 1, deploymentDir, env: {} }
 process.env.PI_DISPATCH_DEPLOYMENT_FILE = pointerFile;
 process.env.PI_CODING_AGENT_DIR = tempDir("admin-dollar-pointer-agent-");
 process.env.PI_LOGS_DIR = tempDir("admin-dollar-pointer-logs-");
-delete process.env.PI_MAX_COST_USD;
-delete process.env.PI_DAILY_COST_USD;
+delete process.env.PI_MAX_TOKENS;
+delete process.env.PI_DAILY_TOKEN_CAP;
 const settingsFile = join(tempDir("admin-dollar-pointer-settings-"), "settings.json");
 process.env.PI_SETTINGS_FILE = settingsFile;
 
@@ -48,58 +48,58 @@ function toolCtx(answer) {
   return { ctx: { hasUI: true, ui: { confirm: async (title, message) => (shown.push({ title, message }), answer) } }, shown };
 }
 
-test("pointer + empty .env: dispatch_set dailyCostUsd with no cap anywhere is WARNED in the confirm and written only once approved", async () => {
+test("pointer + empty .env: dispatch_set dailyTokenCap with no cap anywhere is WARNED in the confirm and written only once approved", async () => {
   writeFileSync(settingsFile, "{}");
   const { tool } = load();
   const no = toolCtx(false);
-  const outNo = JSON.parse((await tool("dispatch_set").execute("id", { key: "dailyCostUsd", value: "10" }, undefined, undefined, no.ctx)).content[0].text);
-  assert.match(no.shown[0].message, /\n\nWarning: dailyCostUsd needs maxCostUsd/);
+  const outNo = JSON.parse((await tool("dispatch_set").execute("id", { key: "dailyTokenCap", value: "2000000" }, undefined, undefined, no.ctx)).content[0].text);
+  assert.match(no.shown[0].message, /\n\nWarning: dailyTokenCap needs maxTokens/);
   assert.match(no.shown[0].message, /the settings overlay nor the deployment's \.env/, "names what it could see");
   assert.match(no.shown[0].message, /service unit or its --env-setup script, is not visible here/);
   assert.equal(outNo.applied, false);
   assert.deepEqual(read(), {}, "declined: nothing written");
   const yes = toolCtx(true);
-  const outYes = JSON.parse((await tool("dispatch_set").execute("id", { key: "dailyCostUsd", value: "10" }, undefined, undefined, yes.ctx)).content[0].text);
+  const outYes = JSON.parse((await tool("dispatch_set").execute("id", { key: "dailyTokenCap", value: "2000000" }, undefined, undefined, yes.ctx)).content[0].text);
   assert.equal(outYes.applied, true, "never refused on the merged invariant, pointer or not");
-  assert.deepEqual(read(), { dailyCostUsd: "10" });
+  assert.deepEqual(read(), { dailyTokenCap: 2000000 });
 });
 
-test("pointer + empty .env: dispatch_set unset maxCostUsd while a window stands is warned and, approved, written", async () => {
-  writeFileSync(settingsFile, JSON.stringify({ maxCostUsd: "2", dailyCostUsd: "10" }));
+test("pointer + empty .env: dispatch_set unset maxTokens while a window stands is warned and, approved, written", async () => {
+  writeFileSync(settingsFile, JSON.stringify({ maxTokens: 500000, dailyTokenCap: 2000000 }));
   const { tool } = load();
   const yes = toolCtx(true);
-  const out = JSON.parse((await tool("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, yes.ctx)).content[0].text);
-  assert.match(yes.shown[0].message, /\n\nWarning: dailyCostUsd needs maxCostUsd/);
+  const out = JSON.parse((await tool("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, yes.ctx)).content[0].text);
+  assert.match(yes.shown[0].message, /\n\nWarning: dailyTokenCap needs maxTokens/);
   assert.equal(out.applied, true);
-  assert.deepEqual(read(), { dailyCostUsd: "10" });
+  assert.deepEqual(read(), { dailyTokenCap: 2000000 });
 });
 
-test("pointer + empty .env: console set dailyCostUsd and unset maxCostUsd write and warn, naming the deployment's .env", async () => {
+test("pointer + empty .env: console set dailyTokenCap and unset maxTokens write and warn, naming the deployment's .env", async () => {
   writeFileSync(settingsFile, "{}");
   const { command } = load();
   const set = consoleCtx();
-  await command.handler("set dailyCostUsd 10", set.ctx);
-  const setNote = set.notes.find(([m]) => /^set dailyCostUsd = 10/.test(m));
+  await command.handler("set dailyTokenCap 2000000", set.ctx);
+  const setNote = set.notes.find(([m]) => /^set dailyTokenCap = 2000000/.test(m));
   assert.ok(setNote, JSON.stringify(set.notes));
   assert.equal(setNote[1], "warning");
-  assert.match(setNote[0], /warning: dailyCostUsd needs maxCostUsd.*the deployment's \.env/);
-  assert.deepEqual(read(), { dailyCostUsd: "10" });
-  await command.handler("set maxCostUsd 2", consoleCtx().ctx);
+  assert.match(setNote[0], /warning: dailyTokenCap needs maxTokens.*the deployment's \.env/);
+  assert.deepEqual(read(), { dailyTokenCap: 2000000 });
+  await command.handler("set maxTokens 500000", consoleCtx().ctx);
   const unset = consoleCtx();
-  await command.handler("unset maxCostUsd", unset.ctx);
-  const unsetNote = unset.notes.find(([m]) => /^unset maxCostUsd/.test(m));
+  await command.handler("unset maxTokens", unset.ctx);
+  const unsetNote = unset.notes.find(([m]) => /^unset maxTokens/.test(m));
   assert.equal(unsetNote[1], "warning");
-  assert.match(unsetNote[0], /warning: dailyCostUsd needs maxCostUsd/);
-  assert.deepEqual(read(), { dailyCostUsd: "10" });
+  assert.match(unsetNote[0], /warning: dailyTokenCap needs maxTokens/);
+  assert.deepEqual(read(), { dailyTokenCap: 2000000 });
 });
 
 test("pointer: a cap in the deployment's .env satisfies the merged check, so no warning", async () => {
-  writeFileSync(join(deploymentDir, ".env"), "PI_MAX_COST_USD=2\n");
+  writeFileSync(join(deploymentDir, ".env"), "PI_MAX_TOKENS=500000\n");
   try {
     writeFileSync(settingsFile, "{}");
     const { tool } = load();
     const probe = toolCtx(false);
-    await tool("dispatch_set").execute("id", { key: "dailyCostUsd", value: "10" }, undefined, undefined, probe.ctx);
+    await tool("dispatch_set").execute("id", { key: "dailyTokenCap", value: "2000000" }, undefined, undefined, probe.ctx);
     assert.doesNotMatch(probe.shown[0].message, /Warning/);
   } finally {
     writeFileSync(join(deploymentDir, ".env"), "");
