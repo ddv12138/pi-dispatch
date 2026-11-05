@@ -8356,21 +8356,20 @@ two Valkey keys that keep it to one per recovery number and bound its wait (issu
   `job.data > overlay > env > default` — so this file is the shared, durable truth between the admin
   extension and the worker: a write made while the worker is down is simply read at the next job start.
   `dailyCap`/`weeklyCap`/`monthlyCap`/`softHoldPct` are resolved at the existing pre-container cap check, and the
-  three dollar windows at the dollar reserve right after it, so
+  three token windows at the token reserve right after it (`reserveTokens`, the one hold over the deployment's
+  windows and the scoped and model rows), so
   the overlay changes *which values* the caps and band take, never *when* they are checked
   (`CONST-BUDGET-BEFORE-TOKENS`, `REQ-SPEND-CAPS-MULTI-WINDOW`). An unset `weeklyCap`/`monthlyCap` disables
-  that window; an unset `softHoldPct` disables the band. The two token knobs (`REQ-TOKEN-ACCOUNTING-AND-CAPS`)
-  resolve the same way but differ in *where* they act: `maxTokens` is forwarded into the container
-  (`PI_MAX_TOKENS`, `INT-CONTAINER-RUNTIME-CONTRACT`) and enforced in-run by the runner; `dailyTokenCap` is
-  worker-only and, unlike the job-count caps, is enforced **check-AFTER** — a read of prior recorded spend
-  before the container plus an `INCRBY` of the job's tokens after it — because token cost is knowable only
-  post-run. This is the one overlay knob whose enforcement is not at the same pre-container check point as
-  the rest; `CONST-BUDGET-BEFORE-TOKENS` (job count, check-before) is unchanged. See
+  that window; an unset `softHoldPct` disables the band. The per-job token budget (`REQ-TOKEN-ACCOUNTING-AND-CAPS`)
+  resolves the same way and differs in *where* it acts: `maxTokens` is forwarded into the container
+  (`PI_MAX_TOKENS`, `INT-CONTAINER-RUNTIME-CONTRACT`) and enforced by the meter where usage settles, the lagging
+  in-run backstop: a settle past the budget stops the run, and there is no pre-call refusal to fail to make
+  (`DES-TOKEN-RESERVE-AND-SETTLE`). See
   `DES-RUNTIME-SETTINGS-FILE-OVERLAY` for why a file, why atomic, and why a present-but-invalid file fails closed.
-  `maxCostUsd` resolves by the same precedence with one exception: a trigger's `run.maxCostUsd`
-  (`INT-TRIGGERS-FILE-CONTRACT`) does not REPLACE it, it NARROWS it. The job's cap is the smaller of the two,
-  each counted only when set (`effectiveJobOf`), and it is sent as `PI_MAX_COST_MICROS`
-  (`INT-CONTAINER-RUNTIME-CONTRACT`), where the runner enforces it before each provider call.
+  `maxTokens` resolves by the same precedence with one exception: a trigger's `run.maxTokens`
+  (`INT-TRIGGERS-FILE-CONTRACT`) does not REPLACE it, it NARROWS it. The job's budget is the smaller of the two,
+  each counted only when set (`effectiveJobOf`), and it is sent as `PI_MAX_TOKENS`
+  (`INT-CONTAINER-RUNTIME-CONTRACT`), where the meter stops the run when usage settles past it.
 - **Traces to**: `DES-RUNTIME-SETTINGS-FILE-OVERLAY`, `DES-ADMIN-VIA-PI-EXTENSION`,
   `CONST-BUDGET-BEFORE-TOKENS`, `CONST-RETRY-INFRA-ONLY`, `REQ-SPEND-CAPS-MULTI-WINDOW`, `REQ-TOKEN-ACCOUNTING-AND-CAPS`
 - **Acceptance**: Given a present-but-invalid file, when a job starts, then the processor returns a policy
@@ -8380,12 +8379,13 @@ two Valkey keys that keep it to one per recovery number and bound its wait (issu
   lowered below today's reserved count, when the next job starts, then it is refused over-budget before any
   container; given a concurrent write, when the worker reads, then it never observes a partial file (atomic
   rename); given an unknown key, when read, then it is ignored and logged, and the file remains valid. Given
-  `maxCostUsd: "1.1234567"` or `0`, when read or written, then the whole file is invalid and the reason names
-  `maxCostUsd` and not the value; given `dailyCostUsd` set (anywhere) with `maxCostUsd` set (anywhere), then the
-  overlay and the boot accept it and the next job reserves its per-job cap in that window before its container;
-  given a window with no `maxCostUsd` in either source, then the overlay (`settings-overlay-invalid`) or the boot
-  is refused naming the window; given an env `PI_MAX_COST_USD` and a window in the overlay, then the invariant
-  holds on the merged values. Given a key this build does not know, when an admin surface writes any key, then that
+  `maxTokens: 0` or `1.5`, when read or written, then the whole file is invalid and the reason names
+  `maxTokens` and not the value; given `dailyTokenCap` set (anywhere) with `maxTokens` set (anywhere), then the
+  overlay and the boot accept it and the next job reserves its per-job budget in that window before its container;
+  given a window with no `maxTokens` in either source, then the overlay (`settings-overlay-invalid`) or the boot
+  is refused naming the window; given an env `PI_MAX_TOKENS` and a window in the overlay, then the invariant
+  holds on the merged values; given `maxCostUsd` or any other retired dollar key, then the whole file is refused
+  with the upgrade named, whatever the `version`. Given a key this build does not know, when an admin surface writes any key, then that
   key is written back with its value, in its place (issue #761); given a `version` above `SETTINGS_VERSION`, when a
   job of any kind starts, then it is deferred `newer-release` at the processor's head, before any runtime or refusal,
   and an admin write is refused with the file unchanged; given a file that turns newer between the head's read and
