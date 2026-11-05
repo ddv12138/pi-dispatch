@@ -70,9 +70,13 @@ test("the smoke runs on main, the schedule, a manual run and the pi bump's branc
 	assert.equal(smokeWanted({ event: "schedule", headRef: "", changed: [] }).run, true);
 	assert.equal(smokeWanted({ event: "workflow_dispatch", headRef: "", changed: [] }).run, true);
 	assert.equal(smokeWanted({ event: "pull_request", headRef: "chore/pi-bump", changed: ["docs/x.md"] }).run, true);
-	for (const path of ["package-lock.json", "package.json", "image/runner/package.json", "worker/package.json", "admin/package.json", "image/Dockerfile", "image/runner/src/usage-meter.mjs", ".github/scripts/fake-key-smoke.mjs", ".github/workflows/pi-upgrade-check.yml"]) {
+	// SMOKE_PATHS is pi-bump's pin sites plus the image tree, this script and its workflow. admin/package.json was a
+	// pin site while the admin extension pinned pi; the retirement (58ef2369) left the console with no pi dependency,
+	// so its package.json can no longer move what this smoke proves.
+	for (const path of ["package-lock.json", "package.json", "image/runner/package.json", "worker/package.json", "image/Dockerfile", "image/runner/src/usage-meter.mjs", ".github/scripts/fake-key-smoke.mjs", ".github/workflows/pi-upgrade-check.yml"]) {
 		assert.deepEqual(smokeWanted({ event: "pull_request", headRef: "fix/x", changed: ["docs/a.md", path] }), { run: true, why: `the pull request changes ${path}` }, path);
 	}
+	assert.deepEqual(smokeWanted({ event: "pull_request", headRef: "fix/x", changed: ["admin/package.json"] }), { run: false, why: "the pull request changes no pi pin, lockfile, image or smoke file" }, "admin no longer pins pi");
 	for (const changed of [[], ["docs/a.md", "worker/src/doctor.mjs", "admin/src/panel.mjs", "imagery.md"]]) {
 		assert.equal(smokeWanted({ event: "pull_request", headRef: "fix/x", changed }).run, false, changed.join());
 	}
