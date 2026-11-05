@@ -3162,12 +3162,12 @@ test("schedulers are read across the fleet, or TRIGGERS shows zero while cron ru
 });
 
 test("issue #596, phase 3: the snapshot carries each live host's budget and use, for the PROJECTS view's suggestions", async () => {
-  const v = fakePanelValkey({ hosts: [{ name: "mini1", routes: "true", budgetMemMiB: "8192", budgetCpuCenti: "700", usedMemMiB: "4096", usedCpuCenti: "200", fpUsd: "x" }] });
+  const v = fakePanelValkey({ hosts: [{ name: "mini1", routes: "true", budgetMemMiB: "8192", budgetCpuCenti: "700", usedMemMiB: "4096", usedCpuCenti: "200", fpTok: "x" }] });
   const deps = createDashboardDeps(panelPaths, v.deps);
   const snap = await deps.fetchSnapshot();
   // Issue #748 adds the host page's explicit identity and bounded telemetry fields. Missing facts stay unknown;
   // the fingerprint is displayed for comparison, while every unrelated registry field remains outside the projection.
-  assert.deepEqual(snap.hostBudgets, [{ name: "mini1", version: null, startedAt: null, pid: null, image: null, imageDigest: null, piVersion: null, tz: null, fpCron: null, fpUsd: "x", fpProjects: null, fpEnvelope: null, budgetSeed: null, sandboxes: null, sandboxesMore: null, sandboxRetentionHours: null, budgetFrom: null, cpuReserve: null, heldMemMiB: undefined, heldCpuCenti: undefined, budgetMemMiB: "8192", budgetCpuCenti: "700", usedMemMiB: "4096", usedCpuCenti: "200", concurrency: undefined, budgetRunning: undefined, waiters: undefined, jobs: null, jobsMore: null, jobsUnreadable: false, staleMs: null, ttlAgeMs: null, skewMs: null, noExpiry: null, routes: "true", caps: [], backends: null, capsSeen: false }], "the budget, registry identity and bounded host telemetry fields, nothing else");
+  assert.deepEqual(snap.hostBudgets, [{ name: "mini1", version: null, startedAt: null, pid: null, image: null, imageDigest: null, piVersion: null, tz: null, fpCron: null, fpTok: "x", fpProjects: null, fpEnvelope: null, budgetSeed: null, sandboxes: null, sandboxesMore: null, sandboxRetentionHours: null, budgetFrom: null, cpuReserve: null, heldMemMiB: undefined, heldCpuCenti: undefined, budgetMemMiB: "8192", budgetCpuCenti: "700", usedMemMiB: "4096", usedCpuCenti: "200", concurrency: undefined, budgetRunning: undefined, waiters: undefined, jobs: null, jobsMore: null, jobsUnreadable: false, staleMs: null, ttlAgeMs: null, skewMs: null, noExpiry: null, routes: "true", caps: [], backends: null, capsSeen: false }], "the budget, registry identity and bounded host telemetry fields, nothing else");
   await deps.dispose();
 });
 

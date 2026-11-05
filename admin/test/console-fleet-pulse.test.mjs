@@ -367,7 +367,7 @@ test("host fingerprints compare actual registry fields and queue names use the w
     {
       ...row(),
       fpCron: "abc",
-      fpUsd: "def",
+      fpTok: "def",
       fpProjects: "ghi",
       fpEnvelope: "jkl",
     },

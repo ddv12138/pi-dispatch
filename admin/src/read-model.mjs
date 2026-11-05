@@ -4078,7 +4078,7 @@ function hostRowOf(h) {
   const more = parseJobsMore(h?.jobsMore);
   return {
     name: h?.name,
-    ...Object.fromEntries(["version", "startedAt", "pid", "image", "imageDigest", "piVersion", "tz", "fpCron", "fpUsd", "fpProjects", "fpEnvelope", "budgetSeed"].map((key) => [key, typeof h?.[key] === "string" || Number.isSafeInteger(h?.[key]) ? h[key] : null])),
+    ...Object.fromEntries(["version", "startedAt", "pid", "image", "imageDigest", "piVersion", "tz", "fpCron", "fpTok", "fpProjects", "fpEnvelope", "budgetSeed"].map((key) => [key, typeof h?.[key] === "string" || Number.isSafeInteger(h?.[key]) ? h[key] : null])),
     sandboxes: parseSandboxes(h?.sandboxes),
     sandboxesMore: parseJobsMore(h?.sandboxesMore),
     sandboxRetentionHours: parseJobsMore(h?.sandboxRetentionHours),

@@ -586,9 +586,9 @@ export const hostRow = card("Registry row", (h, v) =>
           ],
           [
             "Matches the fleet",
-            html`<div class="hd-fp">${["fpCron", "fpUsd", "fpProjects", "fpEnvelope"].every((key) => h[key] && (v.data?.snapshot?.hostBudgets ?? []).every((peer) => peer[key] === h[key])) ? ui.chip("all four match", { status: "ok", icon: "done" }) : ui.chip("compare fingerprints", { status: "attention", icon: "attention" })}<span class="muted">triggers, dollar caps, projects, envelope</span></div><details><summary>Fingerprints</summary>${[
+            html`<div class="hd-fp">${["fpCron", "fpTok", "fpProjects", "fpEnvelope"].every((key) => h[key] && (v.data?.snapshot?.hostBudgets ?? []).every((peer) => peer[key] === h[key])) ? ui.chip("all four match", { status: "ok", icon: "done" }) : ui.chip("compare fingerprints", { status: "attention", icon: "attention" })}<span class="muted">triggers, token caps, projects, envelope</span></div><details><summary>Fingerprints</summary>${[
               ["triggers", "fpCron"],
-              ["dollar caps", "fpUsd"],
+              ["token caps", "fpTok"],
               ["projects", "fpProjects"],
               ["envelope", "fpEnvelope"],
             ].map(
