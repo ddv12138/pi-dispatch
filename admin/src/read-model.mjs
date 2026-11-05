@@ -1581,20 +1581,20 @@ function applyEnvelopeChange(raw, change) {
 }
 
 /**
- * The lines a confirm shows for an envelope change: each normalized field that differs, before and after, in dollars
- * and plain numbers. Every value is the PARSER's (ids that matched the id charset, integers, micro-dollars), so no text
+ * The lines a confirm shows for an envelope change: each normalized field that differs, before and after, in tokens
+ * and plain numbers. Every value is the PARSER's (ids that matched the id charset, integer token counts), so no text
  * an editor typed reaches the dialog.
  */
 export function envelopeChangeLines(before, after) {
-  const usd = (m) => (Number.isSafeInteger(m) ? `$${fmtTokens(m)}` : "-");
+  const tok = (m) => (Number.isSafeInteger(m) ? fmtTokens(m) : "-");
   const lines = [];
   const say = (label, a, b) => {
     if (a !== b) lines.push(`${label}: ${a} to ${b}`);
   };
   say("window", before?.window ?? "-", after.window);
-  say("total", before ? usd(before.totalTokens) : "-", usd(after.totalTokens));
+  say("total", before ? tok(before.totalTokens) : "-", tok(after.totalTokens));
   const ids = [...new Set([...Object.keys(before?.floors ?? {}), ...Object.keys(after.floors)])].sort();
-  for (const id of ids) say(`floor ${id}`, before?.floors?.[id] === undefined ? "-" : usd(before.floors[id]), after.floors[id] === undefined ? "-" : usd(after.floors[id]));
+  for (const id of ids) say(`floor ${id}`, before?.floors?.[id] === undefined ? "-" : tok(before.floors[id]), after.floors[id] === undefined ? "-" : tok(after.floors[id]));
   for (const id of ids) say(`default weight ${id}`, String(before?.defaultWeights?.[id] ?? "-"), String(after.defaultWeights[id] ?? "-"));
   const d0 = before?.delegation ?? {};
   const d1 = after.delegation;
