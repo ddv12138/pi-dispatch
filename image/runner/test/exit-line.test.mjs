@@ -173,7 +173,11 @@ test("image entrypoint runs the runner under the exec-only node the Dockerfile i
 	assert.match(entrypoint, /\nexec "\$node" --disable-sigusr1 \/app\/image\/runner\/supervise\.mjs\n/);
 	assert.match(dockerfile, /\nRUN install -o root -g root -m 0711 \/usr\/local\/bin\/node \/opt\/pi-dispatch\/runner-node\n/);
 	assert.match(dockerfile, /\nRUN install -o root -g root -m 0755 \/usr\/local\/bin\/node \/opt\/pi-dispatch\/runner-observable\n/, "issue #730: the readable copy for the OpenShell venues");
-	assert.ok(dockerfile.indexOf("runner-node") < dockerfile.indexOf("chmod -R a-w /opt/pi-dispatch"), "installed before /opt/pi-dispatch is made read-only");
+	// Keyed to the chmod RUN line, not the bare string: the skills block's prose (main's baked skills, 66469328)
+	// names the same `chmod -R a-w /opt/pi-dispatch` as a comment, and an indexOf on the bare string reads that
+	// comment -- which sits above the install -- as the read-only layer. The instruction cannot be impersonated.
+	const readOnly = dockerfile.search(/\n    && chmod -R a-w \/opt\/pi-dispatch /);
+	assert.ok(dockerfile.indexOf("runner-node") < readOnly, "installed before /opt/pi-dispatch is made read-only");
 });
 
 /** Run the harness: key on stdin, wait for its tool child to forge, then stop it the way `docker stop` does. */
