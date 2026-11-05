@@ -77,7 +77,7 @@
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead"><h1>Configuration</h1><p class="titlebar__sub">Settings: .../deployment/settings.json. Triggers: .../deployment/triggers.json.</p></div><div class="titlebar__end"><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
 <div class="stack"><section id="cf-navigation" data-panel><nav class="config-sections" aria-label="Configuration sections">
-<a class="fpill" href="#cf-settings">Settings <b>11</b></a><a class="fpill" href="#cf-triggers">Triggers <b>7</b></a><a class="fpill" href="#cf-pause-windows">Pause windows <b>1</b></a><a class="fpill" href="#cf-scoped-limits">Scoped limits <b>0</b></a><a class="fpill" href="#cf-projects">Projects <b>4</b></a><a class="fpill" href="#cf-files">Files <b>2</b></a><a class="fpill" href="#cf-unset">Unset <b>0</b></a><a class="fpill" href="#cf-mcp-servers">MCP servers <b>1</b></a><span class="config-divider" aria-hidden="true"></span><a class="btn btn--sm" href="/config/secrets">Secrets</a><a class="btn btn--sm" href="/config/connections">Connections</a>
+<a class="fpill" href="#cf-settings">Settings <b>11</b></a><a class="fpill" href="#cf-triggers">Triggers <b>7</b></a><a class="fpill" href="#cf-pause-windows">Pause windows <b>1</b></a><a class="fpill" href="#cf-scoped-limits">Scoped limits <b>6</b></a><a class="fpill" href="#cf-projects">Projects <b>4</b></a><a class="fpill" href="#cf-files">Files <b>2</b></a><a class="fpill" href="#cf-unset">Unset <b>0</b></a><a class="fpill" href="#cf-mcp-servers">MCP servers <b>1</b></a><span class="config-divider" aria-hidden="true"></span><a class="btn btn--sm" href="/config/secrets">Secrets</a><a class="btn btn--sm" href="/config/connections">Connections</a>
 </nav></section></div><div class="cols cols--wide-side config-layout"><div class="stack"><section id="cf-settings" data-panel><div class="card"><div class="card__head"><h2>Settings overlay</h2></div><dl class="facts"><div class="fact"><dt>model</dt><dd>claude-sonnet-5-5</dd></div><div class="fact"><dt>provider</dt><dd>anthropic</dd></div><div class="fact"><dt>maxTurns</dt><dd>30</dd></div><div class="fact"><dt>dailyCap</dt><dd>40</dd></div><div class="fact"><dt>weeklyCap</dt><dd>200</dd></div><div class="fact"><dt>monthlyCap</dt><dd>600</dd></div><div class="fact"><dt>maxTokens</dt><dd>2000000</dd></div><div class="fact"><dt>dailyTokenCap</dt><dd>8000000</dd></div><div class="fact"><dt>weeklyTokenCap</dt><dd>120000000</dd></div><div class="fact"><dt>monthlyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>concurrency</dt><dd>4</dd></div><div class="fact"><dt>softHoldPct</dt><dd>80</dd></div></dl><details class="config-editor">
 <summary>Change a setting</summary>
 <div class="stack"><form
@@ -788,8 +788,368 @@ spellcheck="false"
 <noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
 <p class="field__err" data-form-error hidden role="alert"></p>
 </form></div>
-</details></div></section><section id="cf-scoped-limits" data-panel><div class="card"><div class="card__head"><h2>Scoped limits</h2></div><p class="note">The scoped-limits file does not load; run pi-dispatch doctor for the reason.</p>
+</details></div></section><section id="cf-scoped-limits" data-panel><div class="card"><div class="card__head"><h2>Scoped limits</h2></div><div class="tbl-wrap">
+<table class="tbl" aria-label="Scoped limits">
+<thead>
+<tr>
+<th scope="col">
+Row
+</th><th scope="col">
+Scope
+</th><th scope="col">
+Limits
+</th><th scope="col">
+Actions
+</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td class="code">github:acme/web</td>
+<td>
+20 jobs a day; 80 jobs a week; 6 at once
+</td>
+<td>
 <details class="config-editor">
+<summary>Edit row 1</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="0"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;github:acme/web&quot;,   &quot;day&quot;: 20,   &quot;week&quot;: 80,   &quot;month&quot;: null,   &quot;concurrent&quot;: 6,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 1</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="0"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 1</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr><tr>
+<td>2</td>
+<td class="code">project:billing</td>
+<td>
+8g memory; 4 CPUs
+</td>
+<td>
+<details class="config-editor">
+<summary>Edit row 2</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="1"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;project:billing&quot;,   &quot;day&quot;: null,   &quot;week&quot;: null,   &quot;month&quot;: null,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;8g&quot;,   &quot;cpus&quot;: 4,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 2</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="1"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 2</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr><tr>
+<td>3</td>
+<td class="code">project:api</td>
+<td>
+2g memory; 1 CPUs
+</td>
+<td>
+<details class="config-editor">
+<summary>Edit row 3</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="2"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;project:api&quot;,   &quot;day&quot;: null,   &quot;week&quot;: null,   &quot;month&quot;: null,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 3</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="2"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 3</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr><tr>
+<td>4</td>
+<td class="code">project:ops</td>
+<td>
+2g memory; 1 CPUs
+</td>
+<td>
+<details class="config-editor">
+<summary>Edit row 4</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="3"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;project:ops&quot;,   &quot;day&quot;: null,   &quot;week&quot;: null,   &quot;month&quot;: null,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 4</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="3"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 4</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr><tr>
+<td>5</td>
+<td class="code">project:web</td>
+<td>
+45000000 a week
+</td>
+<td>
+<details class="config-editor">
+<summary>Edit row 5</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="4"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;project:web&quot;,   &quot;day&quot;: null,   &quot;week&quot;: null,   &quot;month&quot;: null,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: 45000000,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 5</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="4"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 5</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr><tr>
+<td>6</td>
+<td class="code">model:anthropic/claude-sonnet-5-5</td>
+<td>
+80000000 a week
+</td>
+<td>
+<details class="config-editor">
+<summary>Edit row 6</summary>
+<div class="stack"><form
+class="act config-form stack"
+data-action="limit-edit"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="5"
+ data-type="int"
+/><div class="field">
+<label
+>Fields to change (JSON; omitted fields keep their values)<textarea
+class="textarea"
+name="limit"
+rows="4"
+ data-type="json"
+maxlength="16384"
+>
+{   &quot;scope&quot;: &quot;model:anthropic/claude-sonnet-5-5&quot;,   &quot;day&quot;: null,   &quot;week&quot;: null,   &quot;month&quot;: null,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: 80000000,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+>
+</label>
+<p class="field__err" data-field-error="limit" hidden></p>
+</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 6</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form></div>
+</details><form
+class="act config-form stack"
+data-action="limit-delete"
+
+autocomplete="off"
+>
+<fieldset data-config-controls disabled>
+<input
+type="hidden"
+name="index"
+value="5"
+ data-type="int"
+/><button class="btn btn--danger btn--sm" type="submit">Delete row 6</button>
+</fieldset>
+<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
+<p class="field__err" data-form-error hidden role="alert"></p>
+</form>
+</td>
+</tr>
+</tbody>
+</table>
+</div><details class="config-editor">
 <summary>Change the scoped limits</summary>
 <div class="stack"><form
 class="act config-form stack"

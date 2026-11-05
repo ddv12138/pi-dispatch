@@ -200,7 +200,8 @@
         "panels/run-workspace-open.operator"
       ],
       "shows": [
-        "Tokens and dollars",
+        "Input tokens",
+        "no token window applied",
         "Resources"
       ]
     },

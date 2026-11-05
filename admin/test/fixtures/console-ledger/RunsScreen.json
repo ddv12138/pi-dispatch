@@ -473,7 +473,7 @@
         "runs.operator",
         "runs.viewer"
       ],
-      "shows": "plan:kimi"
+      "shows": "2.00M"
     },
     {
       "el": "Counts per project and per outcome for the window",

@@ -127,8 +127,8 @@ export function writeDeployment(dir, { git = false } = {}) {
 			{ scope: "project:billing", memory: "8g", cpus: 4 },
 			{ scope: "project:api", memory: "2g", cpus: 1 },
 			{ scope: "project:ops", memory: "2g", cpus: 1 },
-			{ scope: "project:web", weekUsd: "45" },
-			{ scope: "model:anthropic/claude-sonnet-5-5", weekUsd: "80" },
+			{ scope: "project:web", weekTokens: 45_000_000 },
+			{ scope: "model:anthropic/claude-sonnet-5-5", weekTokens: 80_000_000 },
 		],
 	});
 	json(paths.envelope, {

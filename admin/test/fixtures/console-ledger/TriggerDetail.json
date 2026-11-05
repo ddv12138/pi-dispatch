@@ -78,7 +78,7 @@
       "kind": "readme",
       "status": "new",
       "source": "admin/src/console/panels/trigger.mjs#EDIT_FIELDS",
-      "reason": "Issue #750 joins the card\u2019s When adding group into Edit here, adding provider, maxTurns and run flags; prompt text is private to operators."
+      "reason": "Issue #750 joins the card’s When adding group into Edit here, adding provider, maxTurns and run flags; prompt text is private to operators."
     },
     {
       "el": "Title: kind, phrase, flow, forge and row number",
@@ -118,7 +118,7 @@
       "golden": [
         "trigger.operator"
       ],
-      "shows": "settled tokens"
+      "shows": "2.52M settled"
     },
     {
       "el": "Incomplete history and partially settled tokens are named",
@@ -137,7 +137,7 @@
       ],
       "shows": [
         "run.maxTurns",
-        "run.maxCostUsd",
+        "run.maxTokens",
         "By hand"
       ]
     },
@@ -237,7 +237,7 @@
       "el": "Comment @pi, illustrative five run ids, totals, instructions and doctor quote",
       "kind": "sample",
       "status": "illustrative",
-      "reason": "The implementation uses actual fixture data and separate cron/spent/invalid-file goldens; the published card\u2019s totals and prose are sample values."
+      "reason": "The implementation uses actual fixture data and separate cron/spent/invalid-file goldens; the published card’s totals and prose are sample values."
     },
     {
       "el": "Worded run fields",

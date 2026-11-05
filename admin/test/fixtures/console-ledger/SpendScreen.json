@@ -437,18 +437,18 @@
       ]
     },
     {
-      "el": "State: spend-plan-model.viewer",
+      "el": "State: spend-model-triggers.viewer",
       "kind": "state",
       "status": "new",
-      "source": "admin/src/console/pages.mjs#renderPage",
       "golden": [
-        "panels/spend-plan-model.viewer"
+        "panels/spend-model-triggers.viewer"
       ],
       "shows": [
-        "plan:work",
-        "<b>plan-model</b><small>plan-provider;"
+        "plan-model",
+        "2 runs"
       ],
-      "reason": "The whole page is drawn by renderPage over the named deterministic state. The tests assert these visible facts independently of the golden comparison."
+      "reason": "The whole page is drawn by renderPage over the named deterministic state. The tests assert these visible facts independently of the golden comparison.",
+      "source": "admin/src/console/pages.mjs#renderPage"
     },
     {
       "el": "State: spend-whatif-runs.viewer",
@@ -459,9 +459,12 @@
         "panels/spend-whatif-runs.viewer"
       ],
       "shows": [
-        "The same 3 runs",
-        "$0.30",
-        "API-equivalent amount"
+        "the same work might cost",
+        "would use about 30,000 tokens",
+        "the same work might cost",
+        "would use about 30,000 tokens",
+        "the same work might cost",
+        "would use about 30,000 tokens"
       ],
       "reason": "The whole page is drawn by renderPage over the named deterministic state. The tests assert these visible facts independently of the golden comparison."
     },
@@ -475,7 +478,7 @@
       ],
       "shows": [
         "Today",
-        "$2.00",
+        "600,000",
         "Held for 1 running job"
       ],
       "reason": "The whole page is drawn by renderPage over the named deterministic state. The tests assert these visible facts independently of the golden comparison."
@@ -543,8 +546,10 @@
         "panels/spend-no-dollar-window.viewer"
       ],
       "shows": [
-        "No daily dollar cap is configured",
-        "$7.00"
+        "No daily token cap is configured",
+        "7,000",
+        "No daily token cap is configured",
+        "7,000"
       ],
       "reason": "Real run-record fixtures distinguish unreserved money, partial known cost and missing cost without treating an enforcement zero as a free run."
     },
@@ -558,7 +563,7 @@
       ],
       "shows": [
         "unknown cost",
-        "\u2265"
+        "≥"
       ],
       "reason": "Real run-record fixtures distinguish unreserved money, partial known cost and missing cost without treating an enforcement zero as a free run."
     },
