@@ -51,7 +51,7 @@ async function fixture(t) {
 		if (keys.length) await redis.del(...keys);
 		redis.disconnect();
 	});
-	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, maxTokens: "0.05", confidence: 0.9, names: {} };
+	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, maxTokens: 50000, confidence: 0.9, names: {} };
 	const triggersPath = join(root, "triggers.json");
 	const document = { triggers: [], zeroTouch: config };
 	writeFileSync(triggersPath, JSON.stringify(document));
@@ -61,7 +61,7 @@ async function fixture(t) {
 	const meta = await store.readMeta("source");
 	const id = await enqueueQuestionGroupJob(queue, { runId: "source", digest: meta.digest, configDigest: questionGroupConfigDigest(config) }, { nonce: () => "fixed" });
 	const job = await queue.getJob(id);
-	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyCap: 10, dailyTokenCap: "1", maxTokens: "0.05" };
+	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyCap: 10, dailyTokenCap: 1000000, maxTokens: 50000 };
 	const runtime = makeQuestionGroupRuntime({ store, triggersPath, getSettings: () => settings, resolveClassifier: () => MODEL });
 	return { root, jobsDir, name, redis, queue, store, job, runtime, settings, document, triggersPath, scopeId };
 }
