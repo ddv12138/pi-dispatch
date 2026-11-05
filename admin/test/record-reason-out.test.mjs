@@ -49,7 +49,7 @@ test("dispatch_runs, by id and as a list, returns no record reason that is no to
   const saved = Object.fromEntries(["PI_LOGS_DIR", "VALKEY_URL"].map((k) => [k, process.env[k]]));
   const logsDir = tempDir("pd-737-reason-tool-");
   FREE.forEach((reason, i) => writeFileSync(join(logsDir, `gh-f${i}.json`), JSON.stringify(record(`gh-f${i}`, reason))));
-  writeFileSync(join(logsDir, "gh-ok.json"), JSON.stringify(record("gh-ok", "cost-cap")));
+  writeFileSync(join(logsDir, "gh-ok.json"), JSON.stringify(record("gh-ok", "token-cap")));
   // A Valkey URL the client refuses at once, so the list is this host's files alone, never a timeout.
   Object.assign(process.env, { PI_LOGS_DIR: logsDir, VALKEY_URL: "not-a-url" });
   try {
@@ -61,7 +61,7 @@ test("dispatch_runs, by id and as a list, returns no record reason that is no to
     assert.deepEqual(leaks(list), [], "the list");
     const parsed = JSON.parse(list);
     assert.equal(parsed.runs.length, FREE.length + 1);
-    assert.equal(parsed.runs.find((r) => r.jobId === "gh-ok").reason, "cost-cap", "a catalogued reason is handed out as it is");
+    assert.equal(parsed.runs.find((r) => r.jobId === "gh-ok").reason, "token-cap", "a catalogued reason is handed out as it is");
     for (let i = 0; i < FREE.length; i += 1) {
       const one = await textOf({ jobId: `gh-f${i}` });
       assert.deepEqual(leaks(one), [], `by id: ${JSON.stringify(FREE[i])}`);
@@ -75,13 +75,13 @@ test("dispatch_runs, by id and as a list, returns no record reason that is no to
 test("dispatch_runs, by id and as a list, hands the model the newer record's note, and withholds every other note (#761)", async () => {
   // The model reads only the registered tool's output, after the projection every operational read goes through; a
   // test of `modelRunRecord` alone cannot see that projection drop the note (it withholds `note` as prose).
-  const synthetic = JSON.parse(readFileSync(fileURLToPath(new URL("../../worker/test/fixtures/run-records/synthetic-v2.json", import.meta.url)), "utf8"));
+  const synthetic = JSON.parse(readFileSync(fileURLToPath(new URL("../../worker/test/fixtures/run-records/synthetic-v3.json", import.meta.url)), "utf8"));
   const saved = Object.fromEntries(["PI_LOGS_DIR", "VALKEY_URL"].map((k) => [k, process.env[k]]));
   const logsDir = tempDir("pd-761-note-tool-");
   // The newer record carries a note of its own, which its cut to the core drops; a released record's note is prose.
   writeFileSync(join(logsDir, `${sanitizeJobId(synthetic.jobId)}.json`), JSON.stringify({ ...synthetic, note: "PRIVATE-NEWER-NOTE" }));
-  writeFileSync(join(logsDir, "gh-noted.json"), JSON.stringify({ ...record("gh-noted", "cost-cap"), note: "PRIVATE-OPERATOR-NOTE" }));
-  writeFileSync(join(logsDir, "gh-mimic.json"), JSON.stringify({ ...record("gh-mimic", "cost-cap"), note: `${NEWER_RECORD_MODEL_NOTE}.` }));
+  writeFileSync(join(logsDir, "gh-noted.json"), JSON.stringify({ ...record("gh-noted", "token-cap"), note: "PRIVATE-OPERATOR-NOTE" }));
+  writeFileSync(join(logsDir, "gh-mimic.json"), JSON.stringify({ ...record("gh-mimic", "token-cap"), note: `${NEWER_RECORD_MODEL_NOTE}.` }));
   Object.assign(process.env, { PI_LOGS_DIR: logsDir, VALKEY_URL: "not-a-url" });
   try {
     const tools = [];
