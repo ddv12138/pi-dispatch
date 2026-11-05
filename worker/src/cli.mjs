@@ -641,7 +641,7 @@ async function killSwitch(cmd, url, { env, write, label, urlShown, valkeyRefusal
  * Enter must not pay twice) and stays; what changes is that it is said. The time is the first job's own, in this
  * terminal's local time, and the state is the queue's word for it, or "already queued or done" when it could not be
  * read. No flag is offered to force a second job, because none exists: a later minute is a different id.
- * The sentence itself is `queue.mjs`'s, shared with the admin's `/dispatch run`, and handed in because this module
+ * The sentence itself is `queue.mjs`'s, shared with the console's run forms, and handed in because this module
  * imports the queue lazily. `hint` is `workerHint`'s closing line (issue #530); without one, the line true either way.
  */
 export function runQueuedLine({ jobId, existing, folder, trigger, hint = WORKER_HINT_UNKNOWN }, { swallowedRunSentence }) {

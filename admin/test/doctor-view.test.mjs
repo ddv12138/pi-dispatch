@@ -416,9 +416,13 @@ test("first run's commands are the CLIs' own: each is in its usage, and setup gi
   assert.match(usage, /\n {2}pi-dispatch doctor \[--json\] \[--fix\]/);
   assert.match(usage, /pi-dispatch setup github[^]*\(--webhook-url <URL> \| --no-webhook\)/);
   assert.deepEqual(FIRST_RUN_COMMANDS.github.slice(0, 4), ["pi-dispatch", "setup", "github", "--webhook-url"]);
-  assert.match(usage, /\/dispatch setup does every step/);
-  const panel = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-  assert.ok(panel.includes("`/dispatch setup`"), "the pi panel's guided setup");
+  // The /dispatch panel is retired (58ef2369): the worker CLI no longer advertises it and its entry is gone
+  // from the package. Every console panel and route was kept deliberately, so the "Do it from pi" card still
+  // offers the guided setup to a deployment whose host still runs the previous release's extension -- the
+  // command survives, pinned to the card that renders it rather than to a file that no longer exists.
+  assert.doesNotMatch(usage, /\/dispatch setup/);
+  const overview = readFileSync(new URL("../src/console/panels/overview.mjs", import.meta.url), "utf8");
+  assert.ok(overview.includes("[...FIRST_RUN_COMMANDS.pi]"), "the pi card still offers the guided setup");
   assert.deepEqual(FIRST_RUN_COMMANDS.pi, ["/dispatch", "setup"]);
   for (const argv of Object.values(FIRST_RUN_COMMANDS)) assert.ok(Object.isFrozen(argv) && argv.every((a) => typeof a === "string"));
 });
