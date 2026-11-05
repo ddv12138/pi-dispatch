@@ -717,17 +717,17 @@ test("RUN_DETAIL shows a portfolio run's plan and the dollars a run settled, and
   // The drill-in is framed at DRILL_WIDTH (70) and centred: the row is the frame's, its value after a 12-column label.
   const row = (lines, label) => lines.map((l) => l.trim()).find((l) => l.startsWith(`│ ${label} `)) ?? null;
   const kvRow = (label, value) => `│ ${`${label.padEnd(12)} ${value}`.padEnd(66)} │`;
-  const applied = await openRun({ plan: { outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", clamped: true }, dollars: { reservedMicros: 2_000_000, settledMicros: 1_234_500, basis: "metered", modelBasis: null } });
+  const applied = await openRun({ plan: { outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", clamped: true }, tokensWindows: { reservedTokens: 2_000_000, settledTokens: 1_234_500, basis: "metered", modelBasis: null } });
   assert.equal(row(applied, "plan"), kvRow("plan", "applied · clamped · 3f9a0c1d2e4b5a67"));
-  assert.equal(row(applied, "dollars"), kvRow("dollars", "settled $1.2345 (metered)"));
+  assert.equal(row(applied, "dollars"), kvRow("dollars", "settled 1,234,500 (metered)"));
   const refused = await openRun({ plan: { outcome: "refused", reason: "plan-stale", planId: "aaaaaaaaaaaaaaaa", clamped: false } });
   assert.equal(row(refused, "plan"), kvRow("plan", "refused plan-stale · aaaaaaaaaaaaaaaa"));
   const absent = await openRun({ plan: { outcome: "refused", reason: "plan-absent", planId: null, clamped: false } });
   assert.equal(row(absent, "plan"), kvRow("plan", "refused plan-absent"), "no id, no trailing separator");
-  const floor = await openRun({ dollars: { reservedMicros: 2_000_000, settledMicros: 2_000_000, basis: "floor", modelBasis: null } });
-  assert.equal(row(floor, "dollars"), kvRow("dollars", "settled $2.00 (floor)"));
+  const floor = await openRun({ tokensWindows: { reservedTokens: 2_000_000, settledTokens: 2_000_000, basis: "floor", modelBasis: null } });
+  assert.equal(row(floor, "dollars"), kvRow("dollars", "settled 2,000,000 (floor)"));
   const older = await openRun({});
-  const nulls = await openRun({ plan: null, dollars: null });
+  const nulls = await openRun({ plan: null, tokensWindows: null });
   assert.equal(row(older, "plan"), null);
   assert.equal(row(older, "dollars"), null);
   assert.deepEqual(nulls, older, "a record with null fields renders byte-identical to one written before them");
@@ -735,7 +735,9 @@ test("RUN_DETAIL shows a portfolio run's plan and the dollars a run settled, and
 
 test("RUN_DETAIL of a record a newer pi-dispatch wrote shows its stable core and the one sentence, nothing past the core (#761)", async () => {
   const { coreRecordOf, NEWER_RECORD_SENTENCE } = await import("../src/newer-release.mjs");
-  const run = coreRecordOf({ ...SNAPSHOT.runs[0], jobId: "gh-newer", attempt: 2, host: "mini-3", project: "api", v: 2 });
+  // `v: 3`: one above `RUN_RECORD_VERSION` (2 since issue #761), so this is still a record a NEWER release wrote;
+  // `v: 2` stopped being newer the moment this build learned to read it.
+  const run = coreRecordOf({ ...SNAPSHOT.runs[0], jobId: "gh-newer", attempt: 2, host: "mini-3", project: "api", v: 3 });
   const comp = makeDashboard({ paths: {}, done() {}, tui: fakeTui(), intervalMs: 100000, deps: cannedDeps({ fetchSnapshot: async () => ({ ...SNAPSHOT, runs: [run] }) }) });
   await flush();
   comp.handleInput("\r");
@@ -3637,7 +3639,7 @@ const M504 = 1_000_000;
 const ALLOC_ENVELOPE = {
   version: 1,
   window: "week",
-  totalMicros: 100 * M504,
+  totalTokens: 100 * M504,
   floors: { _other: 0, platform: 10 * M504, shop: 10 * M504 },
   defaultWeights: { _other: 0, platform: 1, shop: 1 },
   delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
@@ -3654,7 +3656,7 @@ function allocInfo({ log = [REFUSED_ROW, APPLIED_ROW, NEUTRAL_ROW], reasons = { 
       state: { planId: "3f9a0c1d2e4b5a67", writer: "operator-session", appliedAt: "2026-10-05T12:00:00.000Z", validUntil: "2026-10-19T12:00:00.000Z", envelopeDigest: "d1d1d1d1d1d1d1d1", weights: { _other: 0, platform: 1, shop: 3 }, allocations: { _other: 0, platform: 30 * M504, shop: 70 * M504 }, unallocated: 0, clamped: false, reasons },
       expected: "d1d1d1d1d1d1d1d1",
       log,
-      spend: { window: "week", deployment: { key: "budget:usd:w:2026-10-05", micros: 0 }, projects: { shop: { key: "budget:usd:s:00112233aabbccdd:w:2026-10-05", micros: 76 * M504 }, platform: { key: "budget:usd:s:4455667788990011:w:2026-10-05", micros: 0 }, _other: { key: "budget:usd:s:ffeeddccbbaa9988:w:2026-10-05", micros: 0 } }, repos: {} },
+      spend: { window: "week", deployment: { key: "budget:tok:w:2026-10-05", tokens: 0 }, projects: { shop: { key: "budget:tok:s:00112233aabbccdd:w:2026-10-05", tokens: 76 * M504 }, platform: { key: "budget:tok:s:4455667788990011:w:2026-10-05", tokens: 0 }, _other: { key: "budget:tok:s:ffeeddccbbaa9988:w:2026-10-05", tokens: 0 } }, repos: {} },
     },
   };
 }
@@ -3668,9 +3670,9 @@ test("`b` opens the ALLOCATION view: envelope, each project's split and spend wi
   const out = stripAnsi(comp.render(100).join("\n"));
   await comp.dispose();
   assert.equal(reads, 1, "read once, when the view opens");
-  assert.match(out, /allocation · week · total \$100\.00/);
-  assert.match(out, /shop\s+floor \$10\.00\s+weight 3\s+\$70\.00\s+spent \$76\.00/);
-  assert.match(out, /budget:usd:s:00112233aabbccdd:w:2026-10-05/, "the key an operator seeds or reads with valkey-cli");
+  assert.match(out, /allocation · week · total 100,000,000/);
+  assert.match(out, /shop\s+floor 10,000,000\s+weight 3\s+70,000,000\s+spent 76,000,000/);
+  assert.match(out, /budget:tok:s:00112233aabbccdd:w:2026-10-05/, "the key an operator seeds or reads with valkey-cli");
   assert.match(out, /plan 3f9a0c1d2e4b5a67 · operator-session/);
   assert.match(out, /shop: launch on Friday/, "the plan's reason, drawn here and nowhere else");
   assert.match(out, /› 10-05 12:30 {2}operator-session {2}aaaaaaaa {2}refused plan-too-soon /, "the history, newest first, the cursor on the first row");
@@ -3738,7 +3740,7 @@ test("ALLOCATION framed at 80 columns: the plan id comes before the reason, so a
   for (const l of one) assert.equal(visibleLen(l), 80, `the frame fills the 80 columns: ${l}`);
   assert.ok(one.includes(boxed("› 10-05 12:30  operator-session  aaaaaaaa  refused plan-too-soon")), one.join("\n"));
   assert.ok(one.includes(boxed("  10-05 12:00  operator-session  3f9a0c1d  applied")));
-  assert.ok(one.includes(boxed("unallocated $0.00 · deployment spent $0.00 of $100.00")), "the headroom names the total it is headroom of");
+  assert.ok(one.includes(boxed("unallocated 0 · deployment spent 0 of 100,000,000")), "the headroom names the total it is headroom of");
   assert.ok(one.includes(boxed("plan 3f9a0c1d2e4b5a67 · operator-session · 10-05 12:00 · until 2026-10-19")), "the plan line keeps its until");
   assert.ok(one.includes(boxed("plans up to 14d")), "the delegation rules wrap, never clip");
   const clamped = await open([APPLIED_ROW], true);
@@ -3822,15 +3824,15 @@ test("ALLOCATION: during an envelope mismatch the header and the headroom show t
     return out;
   };
   const base = allocInfo();
-  // The applied split was made for a $90 envelope; this host's file says $100.
+  // The applied split was made for a 90,000,000-token envelope; this host's file says 100,000,000.
   const mismatched = { ...base, alloc: { ...base.alloc, state: { ...base.alloc.state, envelopeDigest: "e2e2e2e2e2e2e2e2", allocations: { _other: 0, platform: 30 * M504, shop: 55 * M504 }, unallocated: 5 * M504 } } };
   const out = await open(mismatched);
-  assert.match(out, /allocation · week · total \$90\.00/, out);
-  assert.match(out, /deployment spent \$0\.00 of \$90\.00/);
-  assert.ok(out.includes("the split was made for envelope e2e2e2e2e2e2e2e2, not this host's d1d1d1d1d1d1d1d1: governed jobs here refuse as envelope-mismatch. This host's file says total $100.00; the totals shown are the split's."), out);
-  assert.doesNotMatch(out, /\$100\.00(?!; the totals)/, "the file's total appears only in that note");
+  assert.match(out, /allocation · week · total 90,000,000/, out);
+  assert.match(out, /deployment spent 0 of 90,000,000/);
+  assert.ok(out.includes("the split was made for envelope e2e2e2e2e2e2e2e2, not this host's d1d1d1d1d1d1d1d1: governed jobs here refuse as envelope-mismatch. This host's file says total 100,000,000; the totals shown are the split's."), out);
+  assert.doesNotMatch(out, /100,000,000(?!; the totals)/, "the file's total appears only in that note");
   const agreeing = await open(base);
-  assert.match(agreeing, /allocation · week · total \$100\.00/);
+  assert.match(agreeing, /allocation · week · total 100,000,000/);
   assert.doesNotMatch(agreeing, /This host's file says/);
 });
 
@@ -3847,7 +3849,7 @@ test("ALLOCATION: during an envelope mismatch an entry only the split allocates 
   const base = allocInfo();
   const state = { ...base.alloc.state, weights: { ...base.alloc.state.weights, legacy: 1 }, allocations: { _other: 0, platform: 30 * M504, shop: 55 * M504, legacy: 15 * M504 } };
   const out = await open({ ...base, alloc: { ...base.alloc, state: { ...state, envelopeDigest: "e2e2e2e2e2e2e2e2" } } });
-  assert.match(out, /legacy\s+floor -\s+weight 1\s+\$15\.00\s+not in this host's file/, out);
+  assert.match(out, /legacy\s+floor -\s+weight 1\s+15,000,000\s+not in this host's file/, out);
   assert.doesNotMatch(await open({ ...base, alloc: { ...base.alloc, state } }), /legacy/, "the split on this host's envelope: the file's entries alone");
 });
 
