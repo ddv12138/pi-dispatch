@@ -713,13 +713,16 @@ test("getSettings is read ONCE per pickup beside the head's newer-release check,
 	}
 });
 
-test("NO endpoints declared: no lease command, no overlay read, and the container sees exactly what an unwired processor gives it", { skip }, async () => {
+test("NO endpoints declared, a HOSTED model: no lease command, no overlay read, and the container sees exactly what an unwired processor gives it", { skip }, async () => {
+	// A hosted model wants no snapshot at all with zero endpoints declared (index.mjs snapshotWanted), so the
+	// endpoint wiring changes nothing the container could see. A CUSTOM main provider is the one deliberate
+	// exception -- the next test.
 	let overlayReads = 0;
 	const w = endpointWiring({ endpoints: [] });
 	w.extra.overlayModels = () => (overlayReads++, OVERLAY);
 	const seenCtx = [];
-	const wired = harness({ getSettings: LOCAL_MODEL, extra: w.extra, onContainer: (ctx) => seenCtx.push(ctx) });
-	const bare = harness({ getSettings: LOCAL_MODEL, onContainer: (ctx) => seenCtx.push(ctx) });
+	const wired = harness({ getSettings: SETTINGS, extra: w.extra, onContainer: (ctx) => seenCtx.push(ctx) });
+	const bare = harness({ getSettings: SETTINGS, onContainer: (ctx) => seenCtx.push(ctx) });
 	for (const h of [wired, bare]) {
 		const p = h.processor(localJob("l-1", "/f").job, "tok", new AbortController().signal);
 		await h.untilStarted(1);
@@ -732,6 +735,32 @@ test("NO endpoints declared: no lease command, no overlay read, and the containe
 	const golden = (ctx) => JSON.stringify(ctx, (k, v) => (k === "signal" ? "<signal>" : v));
 	assert.equal(golden(seenCtx[0]), golden(seenCtx[1]), "the container context, the job argv's source, is byte-identical");
 	assert.deepEqual(Object.keys(wired.seen.records[0].result).sort(), Object.keys(bare.seen.records[0].result).sort(), "and the record carries no new field");
+});
+
+test("NO endpoints declared, a CUSTOM main provider: the pickup still reads the overlay once, leases nothing, and the snapshot rides to the container", { skip }, async () => {
+	// 4764e40c: a provider pi does not know takes its key variable only from the overlay models.json, which
+	// reaches the credential gate only inside the pickup's snapshot -- so the snapshot is wanted even with
+	// zero endpoints declared, and runContainer is handed it (buildContainerEnv resolves that same variable
+	// from it). What does NOT come back is the endpoint machinery: no lease command, no slot, an empty set.
+	let overlayReads = 0;
+	const w = endpointWiring({ endpoints: [] });
+	w.extra.overlayModels = () => (overlayReads++, OVERLAY);
+	const seenCtx = [];
+	const wired = harness({ getSettings: LOCAL_MODEL, extra: w.extra, onContainer: (ctx) => seenCtx.push(ctx) });
+	const bare = harness({ getSettings: LOCAL_MODEL, onContainer: (ctx) => seenCtx.push(ctx) });
+	for (const h of [wired, bare]) {
+		const p = h.processor(localJob("l-1", "/f").job, "tok", new AbortController().signal);
+		await h.untilStarted(1);
+		h.releaseNext();
+		assert.equal((await p).outcome, "completed");
+	}
+	assert.equal(w.redis.calls.length, 0, "zero endpoint Valkey commands, still");
+	assert.equal(overlayReads, 1, "exactly one overlay read: the credential gate's snapshot");
+	assert.equal(w.endpointSlots.count("lan-ollama"), 0);
+	const golden = (ctx) => JSON.stringify(ctx, (k, v) => (k === "signal" ? "<signal>" : v));
+	assert.equal(seenCtx[0].modelEndpoints?.models, OVERLAY, "the container is handed the snapshot the gate saw (same object)");
+	assert.equal(seenCtx[0].modelEndpoints.endpoints.length, 0, "with no endpoint in it");
+	assert.equal(golden(seenCtx[1]).includes("modelEndpoints"), false, "an unwired processor still hands the container no snapshot");
 });
 
 test("issue #503: a keyless provider runs on ONE overlay read per pickup, gate and container env deciding on the same snapshot", { skip }, async () => {
