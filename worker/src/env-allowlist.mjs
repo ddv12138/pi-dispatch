@@ -106,6 +106,20 @@ export function piProviders() {
 }
 
 /**
+ * Is this a provider pi does not know? Then it can take a key ONLY through the overlay `models.json` (its
+ * `apiKey: "$VAR"` is the only place the variable name exists), so the credential gate needs that file.
+ *
+ * ONE definition, exported: it was written inline twice (the start wiring's `deps.isCustomProvider`, and the
+ * pickup's read of it), and the pickup's copy is what decides whether the overlay reaches the credential gate.
+ * That indirection is what broke a real deployment: the predicate never arrived, so the branch was dead, a
+ * custom provider with no declared model endpoint never got its models.json, and every job was refused with
+ * "no usable credential" while the key sat in the environment. Calling this directly has no wiring to miss.
+ */
+export function isCustomProvider(provider) {
+	return typeof provider === "string" && provider !== "" && providerKeyCandidates(provider).length === 0 && !piProviders().includes(provider);
+}
+
+/**
  * Resolve the provider credential(s) to inject, as `{ VAR_NAME: value }`.
  *
  * Primary source: the worker's own environment, by pi's expected variable name(s) (`findEnvKeys`).

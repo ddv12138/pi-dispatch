@@ -111,7 +111,7 @@ import { PODMAN_BOOT_REFUSING_CAUSES, PODMAN_INFO_TIMEOUT_MS, cachedPodmanInfo, 
 import { makePodmanServiceReader, onceFs, makeRootfulMemory, observeHost, observeRootfulConf, readRootfulService, rootfulConfRefusal, rootfulConfRetries, rootfulUnreadList, runtimeObservationKey } from "./runtime-observations.mjs";
 
 import { makeRunContainer } from "./run-container.mjs";
-import { piProviders, providerKeyCandidates, resolveProviderCredential } from "./env-allowlist.mjs";
+import { isCustomProvider, piProviders, providerKeyCandidates, resolveProviderCredential } from "./env-allowlist.mjs";
 import { parseAllowlist } from "./egress-allowlist.mjs";
 import { MCP_TRANSIENT_READ_CODES, jobProviders, makeMcpCheck, providerKeyNames } from "./mcp-preflight.mjs";
 import { RESERVED_ENV_NAMES } from "./triggers.mjs";
@@ -2942,7 +2942,9 @@ export async function startWorker(
 		overlayModels: () => readOverlayModels(config.globalPiDir),
 		// A keyed custom provider needs the same per-pickup overlay snapshot as keyless providers, even when it has
 		// no declared local endpoint. The credential gate and env builder both consume this snapshot.
-		isCustomProvider: (provider) => providerKeyCandidates(provider).length === 0 && !piProviders().includes(provider),
+		// The same function the pickup calls directly (env-allowlist.mjs): one definition, so this injection cannot
+		// drift from the read that decides whether a custom provider's models.json reaches the credential gate.
+		isCustomProvider,
 		checkLease: hostQueue
 			? makeFleetLease({
 					redis,

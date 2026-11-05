@@ -55,6 +55,17 @@ const HOST = {
 // The upstream facts it encoded are still worth pinning at the pin, so they moved here, and they are now
 // hermetic, which they were not: `HOST` carries no google key but this machine may export one, so the
 // google case read the developer's shell.
+test("isCustomProvider: a provider pi does not know is the one that needs the overlay models.json", () => {
+	// The predicate the pickup calls to decide whether a custom provider's models.json reaches the credential
+	// gate. It was written inline in two places and the pickup's copy silently never arrived, so this pins the
+	// one definition: a builtin provider needs no overlay (pi knows its key variable), and anything else does.
+	assert.equal(mod.isCustomProvider("anthropic"), false, "pi knows it, so its key variable needs no models.json");
+	assert.equal(mod.isCustomProvider("deepseek"), false);
+	assert.equal(mod.isCustomProvider("tencentmaas"), true, "not in pi's catalog: only models.json can name its key variable");
+	assert.equal(mod.isCustomProvider(""), false, "an empty provider names nothing, so it is not a custom one");
+	assert.equal(mod.isCustomProvider(undefined), false);
+});
+
 test("pi's findEnvKeys filters its list by presence, in precedence order", { skip }, () => {
 	// `withoutEnv` around the FIRST assertion too, not only the google case below. HOST deliberately carries
 	// no ANTHROPIC_OAUTH_TOKEN, and pi answers absence from the real process.env, so on a developer or CI box

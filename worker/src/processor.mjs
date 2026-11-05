@@ -1280,6 +1280,21 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				// the path, on the operator's terminal, which is where that belongs.
 				await comment(job, `Refused: this deployment has no usable credential for the "${credentialJob.provider}" provider, so no container was started and nothing was spent. Ask the operator to run \`pi-dispatch doctor\`. Not run.`);
 				log("refused_provider_unconfigured", { provider: credentialJob.provider ?? null });
+				// WHY this refusal fired, in the one shape that distinguishes a missing credential from a missing
+				// OVERLAY. A provider pi does not know takes its key variable from the deployment's models.json, and
+				// that file reaches this gate only inside the pickup's endpoint snapshot. When the snapshot is absent,
+				// or present with `models: null`, the gate cannot see a key the operator did set, and the message
+				// above blames the credential. Counts and booleans only: a models.json holds key VALUES and a read
+				// error can quote file text.
+				log("credential_gate_snapshot", {
+					provider: credentialJob.provider ?? null,
+					model: credentialJob.model ?? null,
+					endpoints: modelEndpoints?.endpoints?.length ?? null,
+					hasModels: Boolean(modelEndpoints?.models),
+					providers: modelEndpoints?.models ? Object.keys(modelEndpoints.models.providers ?? {}).length : 0,
+					unreadable: modelEndpoints?.modelsUnreadable?.code ?? modelEndpoints?.modelsUnreadable?.reason ?? null,
+					customProvider: typeof deps?.isCustomProvider === "function" ? Boolean(deps.isCustomProvider(credentialJob.provider)) : null,
+				});
 				return { outcome: "policy", reason: "provider-unconfigured", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
 			}
 		}
@@ -2412,7 +2427,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 		if (job.watch?.stage === "decision") await deps.watchRuntime?.started(job);
 		if (subscriptionAuth.length > 0 && !(await validateSubscriptionAuth(subscriptionAuth))) throw new InfraRetry("subscription binding changed before container start", { reason: "container-never-started", budgetReserved: true });
-		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitWhy = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null, lingering = false } = await runContainer({ job: containerJob, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints?.endpoints?.length > 0 ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(transcriptStderr ? { transcriptStderr: true } : {}), ...(steerStdin ? { steerStdin: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
+		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitWhy = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null, lingering = false } = await runContainer({ job: containerJob, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(transcriptStderr ? { transcriptStderr: true } : {}), ...(steerStdin ? { steerStdin: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
 		const answeredPark = prepared.session?.parkedSource;
 		// A phrase-prefixed comment uses ordinary routing, but resuming this exact parked transcript still
 		// answers its question. A held receipt also identifies an answer whose legacy source cannot be proved.
@@ -2922,7 +2937,13 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// comment threw, with the ledger refunded and the record saying something else entirely. The
 			// shipped adapter never throws; this makes that a property of the arm rather than of the wiring.
 			await comment(job, REFUSAL_COMMENTS["config-refused"]).catch(() => {});
-			log("refused_config", { kind: job.kind ?? null, refunded });
+			// WHERE, not what. The message is withheld below because it can carry a host path (an OS account
+			// name) or a forge payload field, and that left an operator with a refusal nobody could locate.
+			// The top frame of OUR OWN stack is a source file and a function, which is not personal data.
+			// The FIRST frame is `configError` itself, which names nothing; skip it and take the caller.
+			const frames = typeof e?.stack === "string" ? e.stack.split("\n") : [];
+			const site = (frames.find((line) => line.includes("worker/src/") && !line.includes("at configError ")) ?? frames[1] ?? "").trim().slice(0, 160);
+			log("refused_config", { kind: job.kind ?? null, refunded, site });
 			// budgetReserved reflects the LEDGER: whether the GLOBAL slot is still held after the refund (`globalHeld`).
 			return { outcome: "policy", reason: "config-refused", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: globalHeld(), ...(dollars ? { dollars } : {}) }; // return => not retried
 		}

@@ -1,3 +1,4 @@
+import { isCustomProvider } from "./env-allowlist.mjs";
 import { resolveModelRoles } from "./model-roles.mjs";
 import { SubscriptionWait } from "./subscription-wait.mjs";
 import { zeroRatedFor } from "./reserve-estimate.mjs";
@@ -1264,8 +1265,31 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// only a custom main provider requires the overlay snapshot for its declared API-key variable.
 		let endpointSnapshot = failoverSnapshot;
 		const credentialProvider = selectedEffective?.provider ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null).provider;
-		const needsCredentialOverlay = typeof deps?.isCustomProvider === "function" && deps.isCustomProvider(credentialProvider);
-		if (failoverSnapshot === null && !selectionError && !selectionRefused && modelEndpoints && !settingsThrew && !settings?.invalid && (modelEndpoints().length > 0 || needsCredentialOverlay)) {
+		// BOTH providers, and that "or" is the fix: the snapshot is what the credential gate reads the key variable
+		// out of, and that gate is asked about `job.provider`. Asking only about the SELECTION's provider left a
+		// custom provider's key unresolvable whenever the two disagreed (the selection resolving a builtin one),
+		// and the refusal then blamed a credential the operator had set. Either being custom is enough.
+		const needsCredentialOverlay = isCustomProvider(credentialProvider) || isCustomProvider(job?.provider ?? job?.data?.provider);
+		// A provider pi does not know can only take a key through the overlay models.json, so the credential gate
+		// NEEDS this snapshot: without it the gate's own message blames the provider id ("pi has no provider X"),
+		// which is the wrong fault, and the operator is told to set a credential they already set. A skipped
+		// snapshot was silent, so that misdiagnosis had nothing to correct it with. Booleans and a reason token
+		// only, never a message: a selection error can quote file text.
+		const snapshotWanted = Boolean(modelEndpoints) && (modelEndpoints().length > 0 || needsCredentialOverlay);
+		const snapshotAllowed = failoverSnapshot === null && !selectionError && !selectionRefused && !settingsThrew && !settings?.invalid;
+		if (snapshotWanted && !snapshotAllowed) {
+			deps?.log?.("endpoint_snapshot_skipped", {
+				jobId: job.id,
+				provider: credentialProvider ?? null,
+				customProvider: needsCredentialOverlay,
+				failover: failoverSnapshot !== null,
+				selectionError: selectionError !== null,
+				selectionRefused: typeof selectionRefused === "string" ? selectionRefused : null,
+				settingsThrew,
+				settingsInvalid: settings?.invalid === true,
+			});
+		}
+		if (snapshotAllowed && snapshotWanted) {
 			let endpoints = [];
 			let models = null;
 			let set = [];
