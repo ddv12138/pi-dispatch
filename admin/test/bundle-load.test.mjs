@@ -9,10 +9,12 @@ import { build } from "esbuild";
 import { NODE_BUNDLE_OPTIONS, NODE_REQUIRE_PRELUDE } from "../bundle-options.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
-test("both published ESM entry points load in plain Node without jiti's CommonJS require", async () => {
+// The retirement of the /dispatch extension (issue #640's console, 58ef2369) left the console CLI the package's one
+// published ESM entry point; the sandbox monitor beside it is the next test's subject.
+test("the published ESM entry point loads in plain Node without jiti's CommonJS require", async () => {
   const dir = tempDir("dispatch-esm-bundle-");
   symlinkSync(fileURLToPath(new URL("../../node_modules", import.meta.url)), join(dir, "node_modules"), "junction");
-  for (const [entry, exported] of [["index.ts", "default"], ["console/cli.mjs", "runCli"]]) {
+  for (const [entry, exported] of [["console/cli.mjs", "runCli"]]) {
     const outfile = join(dir, entry.replaceAll("/", "-").replace(/\.(ts|mjs)$/, ".mjs"));
     await build({ ...NODE_BUNDLE_OPTIONS, entryPoints: [fileURLToPath(new URL(`../src/${entry}`, import.meta.url))], outfile, banner: { js: NODE_REQUIRE_PRELUDE }, logLevel: "silent" });
     const program = `import assert from "node:assert/strict"; assert.equal(typeof require, "undefined"); const mod = await import(${JSON.stringify(pathToFileURL(outfile).href)}); assert.equal(typeof mod[${JSON.stringify(exported)}], "function"); console.log("loaded");`;
