@@ -143,3 +143,34 @@ test("a resumed pull request run keeps its words", () => {
 	assert.match(p, /your push updates the existing one\./);
 	assert.equal(/glab \w+ create/.test(p), false);
 });
+
+test("every shape says the commit identity is already set, so no job probes for it", () => {
+	// The identity is four GIT_AUTHOR_*/GIT_COMMITTER_* VARIABLES (forges.mjs `GIT_JOB_IDENTITY`), so
+	// `git config user.name` reads nothing back. A model that probes for it -- one did, on the 253 deployment --
+	// sets the identity by hand, that value then loses to the variables anyway, and the only product is one paid
+	// tool call and a commit whose provenance nobody asked for.
+	const shapes = [
+		buildGitLabPrompt({ flow: "fix", target: issue }),
+		buildGitLabPrompt({ flow: "review", target: mr }),
+		buildGitLabPrompt({ flow: "fix", target: issue, comment: { body: "x" }, resumed: true }),
+	];
+	for (const p of shapes) {
+		assert.ok(p.includes("Your commit identity is already set for this job"), "the identity line is missing");
+		assert.ok(p.includes("never run\n`git config user.name` or `git config user.email`"), "it must forbid both");
+	}
+});
+
+test("an instance older than glab's floor is named, with the API route, instead of being left to the crash", () => {
+	// Measured on 13.2.10: `glab issue view 6` panicked in rawIssuePreview while `glab api` answered, and
+	// `glab auth status` called the host unauthenticated while the token worked. glab states GitLab 16.0+.
+	const p = buildGitLabPrompt({ flow: "fix", target: issue });
+	assert.ok(p.includes("`glab` supports GitLab 16.0 and later"));
+	assert.ok(p.includes("glab api projects/:id/issues/<n>"));
+	assert.ok(p.includes("neither needs fixing"), "the instance, not the token, is the cause and the agent must not chase the token");
+});
+
+test("the merge-request check has an API form, for a glab that cannot answer", () => {
+	const p = buildGitLabPrompt({ flow: "fix", target: issue });
+	assert.ok(p.includes("glab mr list --source-branch pi/issue-7"));
+	assert.ok(p.includes('projects/:id/merge_requests?source_branch=pi/issue-7&state=opened'));
+});

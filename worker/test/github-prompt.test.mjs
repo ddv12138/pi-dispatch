@@ -400,3 +400,16 @@ test("a resumed pull request run keeps its words: push to the same branch, reply
 	assert.match(p, /Do not open a second pull request -- your push updates the existing one\./);
 	assert.equal(/gh pr create/.test(p), false);
 });
+
+test("every shape says the commit identity is already set, so no job probes for it", () => {
+	// Shared by all four forge builders (`COMMIT_IDENTITY_LINES`): the identity is environment, not config.
+	const shapes = [
+		buildGithubPrompt({ flow: "fix", target: { type: "issue", number: 7, title: "t", body: "b" } }),
+		buildGithubPrompt({ flow: "review", target: { type: "pull_request", number: 9, title: "t", body: "b" } }),
+		buildGithubPrompt({ flow: "fix", target: { type: "issue", number: 7, title: "t", body: "b" }, comment: { body: "x" }, resumed: true }),
+	];
+	for (const p of shapes) {
+		assert.ok(p.includes("Your commit identity is already set for this job"), "the identity line is missing");
+		assert.ok(p.includes("never run\n`git config user.name` or `git config user.email`"), "it must forbid both");
+	}
+});

@@ -124,6 +124,26 @@ The **job container** is a separate trust store: the job's `git push` and `fetch
 `/usr/local/share/ca-certificates/` plus `update-ca-certificates`. The stock image trusts only the public
 roots.
 
+**How a job's git authenticates, and who it commits as.** The clone runs on the host and its `origin` is
+deliberately tokenless, so no `.git/config` inside the workspace ever holds a credential (the agent can rewrite
+that file, and a retained sandbox keeps the tree for a day). In the container the token reaches git through a
+helper: the worker writes `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0=credential.helper` and a `GIT_CONFIG_VALUE_0`
+whose body only *names* the token's variable (`!f() { test "$1" = get || exit 0; echo username=oauth2; echo
+"password=$GITLAB_TOKEN"; }; f`), so the value holds no secret and git reads the variable when it asks. That is
+why an envelope's plain `git push` works with no `git credential` setup of its own, and why a job with no forge
+token gets no helper at all rather than a prompt nobody can answer. The same three variables reach the `openshell`
+venue, where the value is a placeholder the gateway resolves. GitHub jobs get `x-access-token` with
+`$GITHUB_TOKEN`; Forgejo jobs `pi-dispatch` with `$FORGEJO_TOKEN`.
+
+`git commit` needs an author and a container has no `~/.gitconfig`, so the worker also sets `GIT_AUTHOR_NAME`,
+`GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL` to `pi-dispatch <pi-dispatch@localhost>`: every
+job's commits carry the same provenance instead of whatever name a model invented that day. `git config` cannot
+show those variables, so every envelope also tells the agent its identity is already set and never to change it: a
+job that reads `git config user.name` finds nothing back and would otherwise set an author by hand, which the
+variables then overrule. A trigger cannot set any of the seven names (`run.secrets` and `PI_FORWARD_ENV` refuse them),
+which is what stops one trigger installing a helper of its own and pointing a job's credential at a host the
+operator never allowlisted.
+
 **Redirects are refused, not followed.** If `GITLAB_URL` is `http://…` and your instance redirects to
 HTTPS, calls fail rather than silently following — a redirect is somewhere to send a credential, and
 following one is how a token ends up at a host you did not name. Set `GITLAB_URL` to the final URL.
@@ -147,6 +167,25 @@ This is best-effort deduplication, not a GitLab delivery ID: if a retry changes 
 its hash changes and it can run again. Two independent deliveries with identical event header and body
 coalesce. Signature mode still requires GitLab's signed delivery headers, so it remains available only on
 GitLab 19.0+ (GA in 19.1).
+
+## `glab` on an older instance
+
+`glab` states its own floor: it "officially supports GitLab versions 16.0 and later", and a command may still work
+on 15.x or earlier with no support. Measured against 13.2.10:
+
+| | 13.2.10 |
+|---|---|
+| `glab api`, `glab mr list`, `glab mr view`, `glab mr create`, `glab mr note` | work |
+| `glab issue view` | panics, a Go nil dereference in `issuable/view.rawIssuePreview` |
+| `glab auth status` | reports the host unauthenticated while `GITLAB_TOKEN` is set and every other command works |
+
+Nothing here needs configuring and none of it is a token problem. The gitlab envelope names the instance as the
+cause and gives the API route for what breaks: `glab api projects/:id/issues/<n>` reads an issue, and the
+check-first step has a `state=opened` API form beside `glab mr list`. A job therefore keeps working on an old
+instance instead of spending turns on `glab auth login`, and gives up only `glab`'s own rendering.
+
+Running `glab` inside its support matrix means a recent GitLab; an instance below it is accommodated in the prompt,
+not in the image, because the image cannot know what it will be pointed at.
 
 ## Instances older than `user.id`
 
