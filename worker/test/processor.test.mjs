@@ -702,7 +702,7 @@ test("the credential gate runs for a LOCAL job too -- a provider is a provider",
 	assert.ok(!calls.includes("run-container"), "a local job spends real money too");
 });
 
-test("issue #503: the credential gate and runContainer are handed the SAME pickup snapshot, and nothing without endpoints", async () => {
+test("issue #503: the credential gate and runContainer are handed the SAME pickup snapshot, and no snapshot at all adds nothing", async () => {
 	// One read per pickup (index.mjs), so the gate that admits a keyless provider and the env that writes its
 	// PI_DISPATCH_KEYLESS decide on one declaration. Identity, not equality: a second read would be a second object.
 	const snapshot = { endpoints: [{ id: "mac-ollama", host: "host.docker.internal", port: 11434, slots: 1, keyless: true }], models: { providers: {} }, set: [] };
@@ -716,12 +716,24 @@ test("issue #503: the credential gate and runContainer are handed the SAME picku
 	await runJob(ghJob, d);
 	assert.equal(gateSaw[0].modelEndpoints, snapshot);
 	assert.equal(containerSaw[0].modelEndpoints, snapshot);
-	// None declared (or no seam): the gate is told null-or-empty and the container context gains no key at all.
-	for (const modelEndpoints of [undefined, { endpoints: [], models: null, set: [] }]) {
+	// The processor is a dumb carrier: whether a snapshot exists is the WIRING's decision (index.mjs wants one
+	// whenever an endpoint is declared, or a custom provider is involved -- 4764e40c), so every handed snapshot
+	// rides to runContainer whole, zero endpoints included: a custom provider's key variable is resolved from
+	// the snapshot's MODELS, not from an endpoint (env-allowlist `overlayApiKeyVariable`), and a carrier-side
+	// narrowing would let the gate pass a key the env builder then cannot write. Only the absence of a snapshot
+	// (no endpoint seam, or a hosted model with no endpoint declared) leaves the container context without one.
+	for (const modelEndpoints of [undefined, null]) {
 		const saw = [];
-		const { deps: e } = deps({ ...(modelEndpoints ? { modelEndpoints } : {}), runContainer: async (ctx) => (saw.push(ctx), { code: 0, aborted: false }) });
+		const { deps: e } = deps({ ...(modelEndpoints !== undefined ? { modelEndpoints } : {}), runContainer: async (ctx) => (saw.push(ctx), { code: 0, aborted: false }) });
 		await runJob(ghJob, e);
 		assert.equal("modelEndpoints" in saw[0], false);
+	}
+	{
+		const empty = { endpoints: [], models: null, set: [] };
+		const saw = [];
+		const { deps: e } = deps({ modelEndpoints: empty, runContainer: async (ctx) => (saw.push(ctx), { code: 0, aborted: false }) });
+		await runJob(ghJob, e);
+		assert.equal(saw[0].modelEndpoints, empty, "an empty-endpoint snapshot still rides, and is the same object");
 	}
 });
 
