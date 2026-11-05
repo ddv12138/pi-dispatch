@@ -302,7 +302,10 @@ async function addLocalJob(queue, { folder, flow, task, command, provider, model
 
 // Coalesces rapid re-label spam; the GUID jobId + its retention (`FORGE_JOB_RETENTION_S`) handle exact redelivery, so
 // this window only needs to absorb burst re-labels, not the full redelivery window.
-const SEMANTIC_WINDOW_MS = 10 * 60 * 1000;
+// TEMPORARY, for testing on this deployment's box: was 10 * 60 * 1000. One second keeps the mechanism
+// (the key still exists, so a truly simultaneous duplicate still coalesces) while letting a person
+// re-trigger the same issue immediately instead of waiting out ten minutes. Revert before shipping.
+const SEMANTIC_WINDOW_MS = 1_000;
 
 /**
  * Close the semantic window of a run that PARKED (REQ-AWAIT-INPUT, DES-AWAIT-INPUT-ENDS-THE-JOB). Never throws.
