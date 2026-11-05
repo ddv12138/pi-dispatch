@@ -77,7 +77,7 @@ import {
   readScopedBudget,
   hostBudgetsOf,
   readCapacity,
-  readDollarWindows,
+  readTokenWindows,
   readHeldJobs,
   cancelHeldJob,
   listRunIds,
@@ -651,16 +651,16 @@ function registerTools(pi: ExtensionAPI): void {
       const paths = resolvePaths(deploymentEnv());
       const res = assembleCosts(paths, window, params.flow, params.repo, params.project);
       if (res.unreachable) throw new Error(`could not read the run history: ${res.unreachable}`);
-      // Issue #501, part 7: the dollar caps beside the fold. The windows are the CURRENT day, week and month whatever
+      // Issue #501, part 7: the token windows beside the fold. The windows are the CURRENT day, week and month whatever
       // `window` asked for (that is what a cap counts), each counter read under the worker's own keys; the runs are
       // this window's records, filtered like the fold. Integers and fixed tokens, so nothing a job chose rides along.
-      const windows = await readDollarWindows({ paths, env: deploymentEnv() });
+      const windows = await readTokenWindows({ paths, env: deploymentEnv() });
       // Issue #761: `res.records` are the records the fold read, so a newer pi-dispatch's record never reaches
       // `runTokenWindows` here and its own count stays empty; the scan's count rides beside the list instead, so a list that
       // leaves such a run out says so.
       const runs = runTokenWindows(res.records);
       const newerSkipped = res.fold?.newerSkipped;
-      const dollars = { ...windows, ...runs, ...(Number.isSafeInteger(newerSkipped) && newerSkipped > 0 ? { newerSkipped } : {}) };
+      const tokenWindows = { ...windows, ...runs, ...(Number.isSafeInteger(newerSkipped) && newerSkipped > 0 ? { newerSkipped } : {}) };
       const nowMs = Date.now();
       const held = await readHeldForAgent({ paths, env: deploymentEnv(), nowMs, project: params.project ?? null });
       let whatif;
@@ -668,10 +668,10 @@ function registerTools(pi: ExtensionAPI): void {
         const sample = assembleCosts(paths, "7d", params.flow, params.repo, params.project);
         whatif = whatIfAnswer({ model: params.whatif, pricing: { getPricedModel, listPricedModels, isZeroRated, reprice, piAiVersion }, records: sample.records, project: params.project ?? null, runs: params.runs ?? "24h", nowMs });
       }
-      // The fold's dollars are TYPED `{ usd, class, floor, ... }` on purpose: the class rides beside every
+      // The fold's amounts are TYPED `{ tokens, class, floor, ... }` on purpose: the class rides beside every
       // number in this JSON, so a model consuming it cannot launder an estimate into a fact by dropping
       // the label -- the same discipline fmtAmount enforces on the text views.
-      return toolText(JSON.stringify({ window, fold: res.fold, dollars, held, ...(whatif ? { whatif } : {}) }));
+      return toolText(JSON.stringify({ window, fold: res.fold, windows: tokenWindows, held, ...(whatif ? { whatif } : {}) }));
     },
   });
 
@@ -960,9 +960,9 @@ function registerTools(pi: ExtensionAPI): void {
     description:
       "Read-only. Lists the scoped limits (per repo/folder budget caps and concurrency, scoped-limits.json) " +
       "with their array index and, when the queue is reachable, each scope's used day/week/month run counts. " +
-      "Each row carries `summary` (its caps in words) and, for a row with dollar windows (dayTokens/weekTokens/monthTokens, " +
-      "or a model:<provider>/<model> row), `dollars`: one entry per window with its cap and `counterTokens`, the " +
-      "micro-dollars spent and held in it so far (null when the queue is unreachable). " +
+      "Each row carries `summary` (its caps in words) and, for a row with token windows (dayTokens/weekTokens/monthTokens, " +
+      "or a model:<provider>/<model> row), `windows`: one entry per window with its `capTokens` and `counterTokens`, " +
+      "the tokens spent and held in it so far (null when the queue is unreachable). " +
       "Use the index for dispatch_limit_edit / dispatch_limit_delete. The always-on one-job-per-folder mutex " +
       "for local jobs is separate: it has no entry here and no switch anywhere.",
     parameters: Type.Object({}),
@@ -973,10 +973,10 @@ function registerTools(pi: ExtensionAPI): void {
       const counters = await readScopedBudget({ url: paths.valkeyUrl, limits: (p as any).limits });
       const rows = (p as any).limits.map((l: any, index: number) => {
         const used = (counters as any).rows?.[index] ?? null;
-        // `summary` and `dollars` only on a row with a dollar window (PR #550's review), so a count-only row reads
+        // `summary` and `windows` only on a row with a token window (PR #550's review), so a count-only row reads
         // exactly as it always did.
-        const usd = dollarRowsOf(l, used);
-        return "dollars" in usd ? { index, ...l, used, summary: limitSummary(l), ...usd } : { index, ...l, used };
+        const rows = tokenRowsOf(l, used);
+        return "windows" in rows ? { index, ...l, used, summary: limitSummary(l), ...rows } : { index, ...l, used };
       });
       return toolText(JSON.stringify(rows));
     },
@@ -1460,18 +1460,18 @@ export const SIZE_FIELD_SCHEMAS = {
 };
 
 /**
- * `dispatch_limits`' dollar rows for one scoped limit (issue #501, part 7): `{ dollars: [{ window, cap, capTokens,
+ * `dispatch_limits`' window rows for one scoped limit (issue #501, part 7): `{ windows: [{ window, capTokens,
  * counterTokens }] }` for each token window the row caps, from `readScopedBudget`'s `tokensUsed` (read under
- * `dollarKeyPrefixFor`, the worker's own key), or `{}` for a row with none. `counterTokens` is spent and held;
- * null when the counters could not be read, never an invented 0.
+ * the worker's own key prefix, shared through `tokenKeyPrefixFor`), or `{}` for a row with none. `counterTokens`
+ * is spent and held; null when the counters could not be read, never an invented 0.
  */
-function dollarRowsOf(l: any, used: any): any {
-  const windows = [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]].filter(([f]) => typeof l?.[f] === "string");
+function tokenRowsOf(l: any, used: any): any {
+  const windows = [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]].filter(([f]) => l?.[f] !== undefined && l[f] !== null);
   if (windows.length === 0) return {};
   return {
-    dollars: windows.map(([f, w]) => {
+    windows: windows.map(([f, w]) => {
       const counter = used?.tokensUsed?.[w];
-      return { window: w, cap: l[f], capTokens: parseTokenCount(l[f], f), counterTokens: Number.isSafeInteger(counter) ? counter : null };
+      return { window: w, capTokens: l[f], counterTokens: Number.isSafeInteger(counter) ? counter : null };
     }),
   };
 }

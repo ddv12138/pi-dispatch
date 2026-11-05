@@ -8,7 +8,7 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 import { stripAnsi } from "../src/style.mjs";
 import { deploymentTokenCaps, tokenWindowRows, tokenWindowSpecs, tokenWindowsSinceMs, foldWindowRecords, renderTokenWindows, runTokenWindows, UNATTRIBUTED } from "../src/token-windows.mjs";
 import { dayKey, monthKey, weekKey } from "@edgehero/pi-dispatch/budget";
-import { readDollarCounters } from "../src/read-model.mjs";
+import { readTokenCounters } from "../src/read-model.mjs";
 import { modelTokenKeyPrefix, parseScopedLimits, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 /**
@@ -438,7 +438,7 @@ test("a window is FULL when the next job's per-job cap would not fit, not only w
   assert.equal(deploymentTokenCaps({}, { PI_MAX_TOKENS: "1500000" }).jobCapTokens, 1_500_000);
 });
 
-test("readDollarCounters swallows ioredis' error events and gives up after its timeout", async () => {
+test("readTokenCounters swallows ioredis' error events and gives up after its timeout", async () => {
   const handlers = [];
   const hung = { on: (ev, fn) => handlers.push(ev), mget: () => new Promise(() => {}), disconnect() {} };
   // The reader's timer is unref'd (a one-shot tool must not hold pi open), so the test holds the loop open with a
@@ -447,7 +447,7 @@ test("readDollarCounters swallows ioredis' error events and gives up after its t
   let out;
   try {
     out = await Promise.race([
-      readDollarCounters({ url: "redis://127.0.0.1:1", keys: ["budget:usd:2026-10-14"], redisFn: () => hung, timeoutMs: 20 }),
+      readTokenCounters({ url: "redis://127.0.0.1:1", keys: ["budget:tok:2026-10-14"], redisFn: () => hung, timeoutMs: 20 }),
       new Promise((_, reject) => { guard = setTimeout(() => reject(new Error("the reader never timed out")), 2000); }),
     ]);
   } finally {
@@ -456,7 +456,7 @@ test("readDollarCounters swallows ioredis' error events and gives up after its t
   assert.deepEqual(out, { unreachable: "timed out reaching the queue" });
   assert.deepEqual(handlers, ["error"], "an error listener, so a down Valkey prints no stack traces");
   const ok = { on() {}, async mget() { return ["5", null]; }, disconnect() {} };
-  assert.deepEqual(await readDollarCounters({ url: "redis://127.0.0.1:1", keys: ["a", "b"], redisFn: () => ok }), { a: 5 });
+  assert.deepEqual(await readTokenCounters({ url: "redis://127.0.0.1:1", keys: ["a", "b"], redisFn: () => ok }), { a: 5 });
 });
 
 test("the panel names a dollar setting it cannot read, even when no window is left to show", async () => {

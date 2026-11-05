@@ -1947,12 +1947,12 @@ export async function readScopedBudget({ url, limits, redisFn = makeRedisClient,
 }
 
 /**
- * The dollar windows' counters (issue #501, part 7): ONE MGET of `keys`, the window keys `tokenWindowSpecs` composed
+ * The token windows' counters (issue #501, part 7): ONE MGET of `keys`, the window keys `tokenWindowSpecs` composed
  * with the worker's own key functions. Returns `{ [key]: value }` (an absent key is absent from the map, an honest 0
  * to the caller), or `{ unreachable }`. A plain GET, never an INCR, so looking at a window cannot hold anything in it.
  * One client, one timeout, `readBudget`'s posture exactly.
  */
-export async function readDollarCounters({ url, keys, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
+export async function readTokenCounters({ url, keys, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
   if (!Array.isArray(keys) || keys.length === 0) return {};
   let redis;
   try {
@@ -1986,19 +1986,19 @@ export async function readDollarCounters({ url, keys, redisFn = makeRedisClient,
  * oldest window began. `{ windows, invalid?, limits? }`: `invalid` names a dollar setting that does not parse (shown,
  * never guessed), `limits` carries the scoped-limits file's own `{ missing }` or `{ invalid }`.
  */
-export async function readDollarWindows({ paths, env = {}, now = new Date(), fs = nodeFs, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
+export async function readTokenWindows({ paths, env = {}, now = new Date(), fs = nodeFs, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
   const view = readSettingsView({ settingsFile: paths.settingsFile, fs });
   const { caps, jobCapTokens, invalid } = deploymentTokenCaps(view?.overlay ?? {}, env);
   const sl = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath, fs });
   const specs = tokenWindowSpecs({ caps, limits: Array.isArray(sl?.limits) ? sl.limits : [], now });
-  const out = { windows: [] };
+  const out = { rows: [] };
   if (invalid.length > 0) out.invalid = invalid;
   if (view?.invalid) out.settingsInvalid = true;
   if (!Array.isArray(sl?.limits) && sl?.invalid) out.limits = { invalid: sl.invalid };
   if (specs.length === 0) return out;
-  const counters = await readDollarCounters({ url: paths.valkeyUrl, keys: specs.map((s) => s.key), redisFn, timeoutMs });
+  const counters = await readTokenCounters({ url: paths.valkeyUrl, keys: specs.map((s) => s.key), redisFn, timeoutMs });
   const records = scanRunRecords({ logsDir: paths.logsDir, sinceMs: tokenWindowsSinceMs(specs, now), nowMs: now.getTime(), fs });
-  out.windows = tokenWindowRows({ specs, counters, records: Array.isArray(records) ? records : [], jobCapTokens });
+  out.rows = tokenWindowRows({ specs, counters, records: Array.isArray(records) ? records : [], jobCapTokens });
   if (counters?.unreachable) out.countersUnreachable = counters.unreachable;
   if (!Array.isArray(records)) out.recordsUnreachable = records?.unreachable ?? "unreadable";
   return out;

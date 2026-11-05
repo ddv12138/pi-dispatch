@@ -14,7 +14,7 @@ import { basename } from "node:path";
 import {
   readSchedulers,
   readBudget,
-  readDollarWindows,
+  readTokenWindows,
   readSettingsView,
   readTriggers,
   readScopedLimits,
@@ -258,7 +258,7 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
   });
   return {
     unreachable,
-    ...(env ? { dollars: await readDollarWindows({ paths, env, now: new Date(nowMs), redisFn }), settingsInvalid: Boolean(view?.invalid), settings: overlay } : {}),
+    ...(env ? { windows: await readTokenWindows({ paths, env, now: new Date(nowMs), redisFn }), settingsInvalid: Boolean(view?.invalid), settings: overlay } : {}),
     softHoldPct: pct,
     day: slotWindow("day", "dailyCap"),
     week: slotWindow("week", "weeklyCap"),
