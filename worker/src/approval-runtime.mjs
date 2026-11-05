@@ -135,7 +135,10 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 			}
 			const createdAt = now();
 			const resumeJob = { ...rawJob };
-			for (const field of ["id", "maxTokens", "approvalDecision", "approvalRequestId"]) delete resumeJob[field];
+			// The declaration's own fields stay (gates, gateTimeout, gateBudgetRaiseTokens, maxTokens): the digest this
+			// request is judged by reads them, so stripping one would revoke every budget-raise park at first resume.
+			// (The old maxCostMicros, the metered spend a resumed job must not inherit, no longer rides on a job.)
+			for (const field of ["id", "approvalDecision", "approvalRequestId"]) delete resumeJob[field];
 			const out = await store.publish({
 				requestId, runId: job.id, kind: job.kind, repo: job.repo,
 				target: job.target, action: metadata.action, toolCallId: metadata.toolCallId,
