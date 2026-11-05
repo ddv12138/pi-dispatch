@@ -599,7 +599,8 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 	// all, which a fail-closed job value reads as, `effectiveCostCapMicros`), and a truthy test would send NO cap for
 	// it, the widest one there is. Absent (null or undefined) leaves no variable, so a job with no cap carries the env
 	// it always did, and never an empty string (the runner refuses one).
-	// env-internal PI_MAX_TOKENS: written into the job's closed env map here, never read from the worker's environment.
+	// PI_MAX_TOKENS is written into the job's closed env map here, never read from the worker's environment
+	// (documented in .env.example, so it needs no env-internal marker).
 	if (maxTokens === null || maxTokens === undefined) delete env.PI_MAX_TOKENS;
 	else env.PI_MAX_TOKENS = String(maxTokens);
 
