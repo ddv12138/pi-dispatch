@@ -5363,8 +5363,8 @@ function runsDayOf(w, nowMs) {
 
 /**
  * Today's settled tokens per UTC hour (issue #737), `{ hours, unpriced, floor, partial }`: `hours` is 24 entries, the
- * micro-dollars of the records that ENDED in that hour of today (`dollars.settledTokens`, what the worker settled the
- * run at), 0 for an hour that has passed with none, and null for an hour still to come. `unpriced` counts today's
+ * settled tokens of the records that ENDED in that hour of today (`tokensWindows.settledTokens`, what the worker
+ * settled the run at), 0 for an hour that has passed with none, and null for an hour still to come. `unpriced` counts today's
  * ended runs whose record carries no settled amount (no token window applied to them, or a malformed one), so a
  * surface can say the hours are not the day's whole spend. The window's counters stay the spend of record; these are
  * the records' side, by hour.
@@ -5438,7 +5438,7 @@ function windowValuesOf(field, counts) {
  *     token, for counting; the Reason select offers `values.reason`, bounded like every other list;
  *   - `values`: the kind, reason, flow, trigger, host, venue and model values the runs carry (`windowValuesOf`; the
  *     reason as `recordReason` shows it, a token or none);
- *   - `spentTokens`: the dollars the worker settled them at (`dollars.settledTokens`), null when the sum is no safe
+ *   - `spentTokens`: the tokens the worker settled them at (`tokensWindows.settledTokens`), null when the sum is no safe
  *     whole number, and `unpriced`, the runs whose record carries no settled amount (`spendByHourOf`'s rule).
  * `floor` is the window's own (it ended inside the 24 hours), `partial` that a side of it was not read; either makes a
  * count a floor. `at` is `nowMs`, the instant the 24 hours end.

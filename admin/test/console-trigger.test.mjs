@@ -33,10 +33,10 @@ test("trigger add copy uses locale projection while keeping kind and forge value
  assert.match(doc, /添加触发器/);
 });
 test("trigger run and scheduler copy localize fixed phrases while retaining live counts and state", () => {
- const runs = String(triggerRuns({ locale: "en", data: { triggerDetail: { count24h: 7, cost24hMicros: 1250000, costIncomplete: true, historyIncomplete: true, queued: [] } } }));
- assert.match(runs, /at least 7/); assert.match(runs, /1\.25/); assert.match(runs, /metered portion only/);
- const fire = String(triggerKinds({ locale: "en", query: { index: 0 }, role: "operator", data: { triggerDetail: { trigger: { type: "cron", id: "daily", pattern: "0 2 * * *" }, cron: {} }, triggerFireCheck: { plan: { summary: "Fire this schedule once.", reserve: { cents: 50 } } } } }));
- assert.match(fire, /Fire this schedule once/); assert.match(fire, /Fire now/);
+ const runs = String(triggerRuns({ locale: "en", data: { triggerDetail: { count24h: 7, cost24hTokens: 1250000, costIncomplete: true, historyIncomplete: true, queued: [] } } }));
+ assert.match(runs, /at least 7/); assert.match(runs, /1\.25M/); assert.match(runs, /metered portion only/);
+ const fire = String(triggerKinds({ locale: "en", query: { index: 0 }, role: "operator", data: { triggerDetail: { trigger: { type: "cron", id: "daily", pattern: "0 2 * * *" }, cron: {} }, triggerFireCheck: { plan: { summary: "Fire this schedule once.", reserve: { slots: 1, tokens: 50 } } } } }));
+ assert.match(fire, /Fire this schedule once/); assert.match(fire, /Fire now/); assert.match(fire, /50 tokens/);
 });
 test("trigger sandbox and cron health copy translate while preserving host, backend and retention values", () => {
  const run = String(triggerRun({ locale: "zh", role: "viewer", pages: [], data: { triggerDetail: { trigger: { type: "cron", id: "daily", folder: "/srv/project", replicas: 2 }, sandbox: { retentionHours: 36 } }, snapshot: { triggers: { triggers: [{ type: "cron", id: "daily", folder: "/srv/project" }] } } } }));
