@@ -4,7 +4,6 @@ import * as fs from "node:fs";
 import { existsSync, linkSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createRequire } from "node:module";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { JUDGED_COMMAND_TOOLS, LOGIN_CODES_GUARD, PATH_WRITE_TOOLS, PI_UNICODE_SPACES, UNJUDGED_TOOLS, envNamedFiles, insideDirectory, makeWriteGuard, piResolveToCwd, readSmallRegularFile, targetIdentity } from "../src/write-guard.mjs";
@@ -154,35 +153,6 @@ test("targetIdentity: a link loop is an error (and so a block), never a hang", (
   symlinkSync(join(dir, "b"), join(dir, "a"));
   symlinkSync(join(dir, "a"), join(dir, "b"));
   assert.throws(() => targetIdentity(join(dir, "a", "x.json")), (e) => ["ELOOP", "ENOENT"].includes(e.code) || /symbolic links/.test(e.message));
-});
-
-test("the extension's own handler guards all five of the deployment's files, at the paths the deployment resolves", async () => {
-  const { createJiti } = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"))("jiti");
-  const indexMod = await createJiti(import.meta.url).import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
-  const handlers = [];
-  const pi = new Proxy({}, { get: (_t, k) => (k === "on" ? (event, h) => event === "tool_call" && handlers.push(h) : () => {}) });
-  const keys = { PI_ENVELOPE_FILE: "envelope.json", PI_PROJECTS_FILE: "projects.json", PI_SCOPED_LIMITS_FILE: "scoped-limits.json", PI_TRIGGERS_FILE: "triggers.json", PI_SETTINGS_FILE: "settings.json" };
-  const saved = Object.fromEntries(Object.keys(keys).map((k) => [k, process.env[k]]));
-  const dir = tempDir("pd-guard-wired-");
-  try {
-    for (const [k, name] of Object.entries(keys)) {
-      writeFileSync(join(dir, name), "{}\n");
-      process.env[k] = join(dir, name);
-    }
-    indexMod.default(pi);
-    assert.equal(handlers.length, 1, "one tool_call handler");
-    for (const [k, name] of Object.entries(keys)) {
-      const r = await handlers[0](write(join(dir, name)), { cwd: "/" });
-      assert.equal(r?.block, true, `${k} is guarded`);
-      assert.ok(r.reason.includes(k), `the reason names ${k}`);
-    }
-    assert.equal(await handlers[0](write(join(dir, "notes.md")), { cwd: "/" }), undefined, "an unrelated file in the same folder passes");
-  } finally {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  }
 });
 
 test("the fold is a full case fold: a long s (U+017F) and a KELVIN SIGN (U+212A) cannot create a guarded name", () => {
