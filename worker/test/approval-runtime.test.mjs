@@ -119,7 +119,7 @@ test("parking publishes bound metadata without the model summary and strips effe
 	assert.equal(value.expiresAt, AT + 86400_000);
 	assert.equal(value.sessionKey, "session-1");
 	assert.equal(value.resumeJob.id, undefined);
-	assert.equal(value.resumeJob.maxTokens, undefined);
+	assert.equal(value.resumeJob.maxTokens, 123, "the declared budget stays on the resumeJob: the digest the decision is judged by reads it");
 	assert.equal(JSON.stringify(value).includes("private summary"), false);
 	assert.equal(out.audit.requestId, value.requestId);
 });
