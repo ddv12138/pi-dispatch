@@ -1882,11 +1882,11 @@ export async function collectChecks(shellVars, seams) {
 				? "restart Docker first: this asked the same daemon that did not answer above, so whether the image is present is unknown rather than false"
 				: jobImage === "pi-job:latest"
 					? `${jobImageFix("docker", jobImage)}  (or build image/Dockerfile)`
-					: // Issue #523 (review): the image the worker runs, by the rule `up` follows, never ghcr's latest for an
+					: // Issue #523 (review): the image the worker runs, by the rule `up` follows, never the published latest for an
 						// overriding name (which would not make THEIR image exist) and never a pull of a short name.
 						jobImageFix("docker", jobImage),
 		// Prompt tier, and ONLY for the deployment default: a PI_JOB_IMAGE the operator overrode is a trust
-		// choice this command cannot honestly satisfy (pulling ghcr's pi-job would not make THEIR image
+		// choice this command cannot honestly satisfy (pulling the published pi-job would not make THEIR image
 		// exist), so an overridden name keeps the plain fix line -- the same never-tier reasoning as the
 		// trigger-named run.image checks below. Jobs run with --pull=never and that stays true: the y
 		// keypress IS the operator pulling the repo's own image themselves.
@@ -1899,13 +1899,13 @@ export async function collectChecks(shellVars, seams) {
 			? {
 					fixAction: {
 						tier: "prompt",
-						describe: "docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest",
+						describe: "docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest",
 						run: async ({ spawn }) => {
 							// The PULL bound, not the default one: a cold pull of the job image is minutes of real work,
 							// and bounding it at the default would turn a working fix into a reported failure.
-							const pulled = await runCmd(spawn, "docker", ["pull", "ghcr.io/edgehero/pi-job:latest"], runTimeouts.pull);
+							const pulled = await runCmd(spawn, "docker", ["pull", "docker.io/ddv12138/pi-job:latest"], runTimeouts.pull);
 							if (pulled.code !== 0) return { ok: false, note: pulled.ended === "timeout" ? `docker pull did not finish within ${Math.round(runTimeouts.pull / 60000)} minutes` : "docker pull failed" };
-							if ((await runCmd(spawn, "docker", ["tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"], runTimeouts.cmd)).code !== 0) return { ok: false, note: "docker tag failed" };
+							if ((await runCmd(spawn, "docker", ["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"], runTimeouts.cmd)).code !== 0) return { ok: false, note: "docker tag failed" };
 							return { ok: true };
 						},
 					},
@@ -7745,7 +7745,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 					ok: false,
 					warn: true,
 					label: `${venue.prefix}Egress policy: not proved, because the job image could not find ${EGRESS_CANARY_RUNNER_MODULE} (or an import of it): its runner predates issue #427, whose provider call goes around the proxy so that with egress armed every job fails at its first turn, or the image is not built from this project's`,
-					fix: `use a job image built after issue #427 (ghcr.io/edgehero/pi-job:latest, or rebuild yours FROM it), or set PI_EGRESS=0 until you can`,
+					fix: `use a job image built after issue #427 (docker.io/ddv12138/pi-job:latest, or rebuild yours FROM it), or set PI_EGRESS=0 until you can`,
 					readBack: { property: "egress", want, reached: null, probe: slug },
 				});
 				staleRunner = true;
@@ -10252,7 +10252,7 @@ export async function podmanChecks(env, seams, { jobImage, jobImageNote = "" }) 
 	// deployment's `--fix` is what it always was (DES-CLI-SURFACE, REQ-DEPLOYMENT-BOOTSTRAP), and one run offering two
 	// pulls of one image into two stores is a change of that tier, not of this issue. The line and its words still say
 	// how. The offer follows docker's rules: the prompt tier, only for the deployment default (an
-	// overridden PI_JOB_IMAGE is the operator's trust choice, which pulling ghcr's image would not satisfy), and only for
+	// overridden PI_JOB_IMAGE is the operator's trust choice, which pulling the published image would not satisfy), and only for
 	// an answered miss, never for a store that did not answer. Into THIS shell's account's store, which is the store the
 	// line reads and the one a worker running as this account starts jobs from. `pi-job:latest` is tagged as is: Podman
 	// stores it as `localhost/pi-job:latest`, and `--pull=never` resolves the short name to exactly that (docs/podman.md).
@@ -10276,9 +10276,9 @@ export async function podmanChecks(env, seams, { jobImage, jobImageNote = "" }) 
 							describe: PODMAN_JOB_IMAGE_PULL,
 							run: async ({ spawn: fixSpawn }) => {
 								// The PULL bound, as docker's: a cold pull of the job image is minutes of real work.
-								const pulled = await runCmd(fixSpawn, "podman", ["pull", "ghcr.io/edgehero/pi-job:latest"], runTimeouts.pull);
+								const pulled = await runCmd(fixSpawn, "podman", ["pull", "docker.io/ddv12138/pi-job:latest"], runTimeouts.pull);
 								if (pulled.code !== 0) return { ok: false, note: pulled.ended === "timeout" ? `podman pull did not finish within ${Math.round(runTimeouts.pull / 60000)} minutes` : "podman pull failed" };
-								if ((await runCmd(fixSpawn, "podman", ["tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"], runTimeouts.cmd)).code !== 0) return { ok: false, note: "podman tag failed" };
+								if ((await runCmd(fixSpawn, "podman", ["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"], runTimeouts.cmd)).code !== 0) return { ok: false, note: "podman tag failed" };
 								return { ok: true };
 							},
 						},

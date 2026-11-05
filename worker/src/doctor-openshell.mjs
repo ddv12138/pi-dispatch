@@ -165,13 +165,13 @@ export async function openshellChecks(env = {}, { run = runQuiet, platform = pro
 	const labels = await run(engine, ["image", "inspect", "--format", '{{index .Config.Labels "dev.pi-dispatch.capabilities"}}', image]);
 	const caps = labels.code === 0 ? labels.stdout.trim().split(",") : null;
 	// Issue #730: both modes. Said only when the image was read; the store line below says when it was not.
-	if (caps !== null) checks.push(caps.includes("observableRunner") ? { ok: true, label: `openshell: the job image (${image}) declares observableRunner` } : { ok: false, label: `openshell: the job image (${image}) declares observableRunner`, fix: "use a job image built after issue #730 (ghcr.io/edgehero/pi-job:latest, or rebuild yours FROM it): it starts the runner from a node the sandbox can observe, without which no job here reaches its model" });
+	if (caps !== null) checks.push(caps.includes("observableRunner") ? { ok: true, label: `openshell: the job image (${image}) declares observableRunner` } : { ok: false, label: `openshell: the job image (${image}) declares observableRunner`, fix: "use a job image built after issue #730 (docker.io/ddv12138/pi-job:latest, or rebuild yours FROM it): it starts the runner from a node the sandbox can observe, without which no job here reaches its model" });
 	// Bind mode alone reads the `mounts` layout, so `sandboxLayout` is copy mode's line only.
 	if (modes.copy !== true) {
 		checks.push(caps === null ? { ok: false, label: `openshell: the job image (${image}) is in ${engine}'s store`, fix: `build or pull ${image} into ${engine}, the store the gateway runs images from` } : { ok: true, label: `openshell: the job image (${image}) is in ${engine}'s store` });
 		return checks;
 	}
-	checks.push(caps === null ? { ok: false, label: `openshell: the job image (${image}) is in ${engine}'s store`, fix: `build or pull ${image} into ${engine}, the store the gateway runs images from` } : caps.includes("sandboxLayout") ? { ok: true, label: `openshell: the job image (${image}) declares sandboxLayout` } : { ok: false, label: `openshell: the job image (${image}) declares sandboxLayout`, fix: "use a job image built after issue #683 (ghcr.io/edgehero/pi-job:latest, or rebuild yours FROM it): its runner finds the job under /sandbox and carries pi-landlock" });
+	checks.push(caps === null ? { ok: false, label: `openshell: the job image (${image}) is in ${engine}'s store`, fix: `build or pull ${image} into ${engine}, the store the gateway runs images from` } : caps.includes("sandboxLayout") ? { ok: true, label: `openshell: the job image (${image}) declares sandboxLayout` } : { ok: false, label: `openshell: the job image (${image}) declares sandboxLayout`, fix: "use a job image built after issue #683 (docker.io/ddv12138/pi-job:latest, or rebuild yours FROM it): its runner finds the job under /sandbox and carries pi-landlock" });
 	return checks;
 }
 

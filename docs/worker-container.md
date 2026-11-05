@@ -64,7 +64,7 @@ docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --p
 The worker container image uses the repository's pinned Node base, installs the workspace from the lockfile, and runs as uid/gid `10001:10001`. The bind mount preserves the daemon's view of the job paths. Build or pull the exact job image named by `PI_JOB_IMAGE` before enabling triggers:
 
 ```bash
-docker pull ghcr.io/edgehero/pi-job:4.3.1
+docker pull docker.io/ddv12138/pi-job:4.3.2
 ```
 
 To run the browser console as a container, first create its operator token. The console profile has no Docker socket and

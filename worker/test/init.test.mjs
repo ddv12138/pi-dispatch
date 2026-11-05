@@ -142,7 +142,7 @@ test("init never overwrites an edited allowlist", () => {
 // which a folder made by init alone does not have, and it started no egress proxy; it is `pi-dispatch up` since #480.
 const DOCKER_NEXT = `
 Next:
-  1. docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest
+  1. docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest
                                                         # the prebuilt job image (or build your own from a clone)
   2. pi-dispatch up                                     # Valkey and the egress proxy (unless PI_EGRESS=0)
   3. edit .env                                          # set ANTHROPIC_API_KEY (or your provider's key)
@@ -157,7 +157,7 @@ const PODMAN_NEXT = `
 Next (the podman venue; run these as the worker's own account. First set the account up as the Podman guide's "Setup"
 steps 1-4 say (https://github.com/edgehero/pi-dispatch/blob/main/docs/podman.md), linger included:
 sudo loginctl enable-linger <account>, without which a job gets no bounds):
-  1. podman pull ghcr.io/edgehero/pi-job:latest && podman tag ghcr.io/edgehero/pi-job:latest pi-job:latest
+  1. podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest
                                                         # the prebuilt job image, in this account's own store
   2. edit .env                                          # PI_BACKENDS=podman, and ANTHROPIC_API_KEY (or your provider's key)
   3. pi-dispatch up                                     # Valkey and the egress proxy as Quadlet units in your user manager
@@ -211,7 +211,7 @@ test("init's next steps: the podman ladder when podman is the only venue, from t
 	]) {
 		const { text } = nextFor(opts);
 		assert.ok(text.endsWith(PODMAN_NEXT), `${label}:\n${text}`);
-		assert.doesNotMatch(text, /docker/, label);
+		assert.doesNotMatch(text, /\bdocker (pull|tag|run|volume|compose)\b/, label);
 	}
 });
 

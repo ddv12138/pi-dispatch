@@ -190,7 +190,7 @@ and `pi-dispatch up` was not.
    Either works for the daemon itself: the lab's measurements were taken with `DOCKER_HOST` set and the Fedora 44
    host's through this context, and nothing failed for either, `credentialTransit` included. The context is about the
    three surfaces agreeing with each other.
-6. **Load the job image and name it as Podman stores it.** `docker pull ghcr.io/edgehero/pi-job:latest`, then set
+6. **Load the job image and name it as Podman stores it.** `docker pull docker.io/ddv12138/pi-job:latest`, then set
    `PI_JOB_IMAGE` to the name `docker images` shows for it.
 7. **Start the stack the same way you would on Docker.** It is the same compose file:
    `docker compose --env-file .env -f deploy/docker-compose.yml up -d` for Valkey, and `--profile egress` as well if you use the
@@ -764,10 +764,10 @@ an unprivileged account (uid 1234), on 2026-09-25. Run everything below as the w
    both distributions, is accepted exactly as it ships, on this venue as on the rootful route: refusing it would refuse
    every stock host, and the exception is exact, so any other value, spelling or a second sysctl beside it is refused.
 5. **The job image, in this account's own store.** A rootless account does not see root's images or another
-   user's: `podman pull ghcr.io/edgehero/pi-job:latest` as the account, then set `PI_JOB_IMAGE` to the name
+   user's: `podman pull docker.io/ddv12138/pi-job:latest` as the account, then set `PI_JOB_IMAGE` to the name
    `podman images` shows. `--pull=never` resolves a short name such as `pi-job:latest` to `localhost/pi-job:latest`
    with no registry lookup (measured). With `PI_BACKENDS=podman` and `PI_JOB_IMAGE` left unset, `pi-dispatch doctor
-   --fix` run as the account offers the pull for you: `podman pull ghcr.io/edgehero/pi-job:latest`, then `podman tag`
+   --fix` run as the account offers the pull for you: `podman pull docker.io/ddv12138/pi-job:latest`, then `podman tag`
    to `pi-job:latest`, which is the default `PI_JOB_IMAGE`, so there is nothing to set. It offers nothing while
    `local` is also listed, or for a `PI_JOB_IMAGE` you chose. The image must declare `anyUid` unless the account is uid 1001; releases
    since issue #341 do. Pull it as the account; doctor's fix line names only that, since a podman-only host has no

@@ -14,7 +14,7 @@
 # Tags: `latest`, the git `sha`, and the PRODUCT version from the root package.json (so a release cuts a
 # tag that never moves, and a deployment can pin `ghcr.io/edgehero/pi-dispatch-receiver:<version>` instead of tracking latest).
 # The version tag is published only by a push that CHANGED the root version (or a dispatch that asks for it) and
-# only while that tag is not on the registry yet: .github/scripts/image-version-tag.mjs, shared with image.yml
+# only while that tag is not on the registry yet: .github/scripts/image-version-tag.mjs, this workflow's only caller
 # (issue #341). Before it, every worker/src merge re-pushed the released version tag with unreleased contents.
 
 name: receiver-image

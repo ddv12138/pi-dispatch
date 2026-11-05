@@ -45,14 +45,18 @@ export function pullOffered(image) {
 
 /**
  * How to provide a missing deployment job image with `bin` (docker or podman), ONE text for `up` and doctor's fix lines
- * (issue #523, review): the worker's default `pi-job:latest` is ghcr's latest pulled and re-tagged, since that local
- * name has no registry behind it; a registry-qualified name is pulled as it is named; a short name is never offered as
- * a pull, since a public registry answers for it, nor a `localhost/` name (`pullOffered`), so the text says how to
- * provide it instead.
+ * (issue #523, review): the worker's default `pi-job:latest` is the published Docker Hub image pulled and re-tagged,
+ * since that local name has no registry behind it; a registry-qualified name is pulled as it is named; a short name is
+ * never offered as a pull, since a public registry answers for it, nor a `localhost/` name (`pullOffered`), so the text
+ * says how to provide it instead.
+ *
+ * The upstream for the default is where `image/publish.sh` pushes the job image (Docker Hub since 4.3.2). The `such as` hint
+ * at the end spells `docker.io/...` out rather than `ddv12138/...` because that sentence tells an operator to use a
+ * REGISTRY-QUALIFIED name, and the bare namespace would be refused by the very rule it is answering (`registryQualified`).
  */
 export function jobImageFix(bin, image) {
-	if (image === "pi-job:latest") return `${bin} pull ghcr.io/edgehero/pi-job:latest && ${bin} tag ghcr.io/edgehero/pi-job:latest pi-job:latest`;
+	if (image === "pi-job:latest") return `${bin} pull docker.io/ddv12138/pi-job:latest && ${bin} tag docker.io/ddv12138/pi-job:latest pi-job:latest`;
 	if (pullOffered(image)) return `${bin} pull ${image}`;
 	if (registryQualified(image)) return `${image} is a locally built name (localhost/ is no registry to pull from): build it on this host, or \`${bin} tag\` an image you have as ${image}`;
-	return `${image} names no registry host, so a pull would fetch whatever a public registry holds under that name: build it on this host, \`${bin} tag\` an image you have as ${image}, or set PI_JOB_IMAGE to a registry-qualified name (such as ghcr.io/edgehero/pi-job:<version>)`;
+	return `${image} names no registry host, so a pull would fetch whatever a public registry holds under that name: build it on this host, \`${bin} tag\` an image you have as ${image}, or set PI_JOB_IMAGE to a registry-qualified name (such as docker.io/ddv12138/pi-job:<version>)`;
 }

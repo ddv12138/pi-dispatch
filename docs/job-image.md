@@ -23,12 +23,34 @@ read-only mount cannot deliver those. That is the whole boundary:
 > **overlay = pi configuration, mounted, one per deployment.
 > image = the operating system the flow needs, built, per flow.**
 
+## Where the default image comes from
+
+It is built **from this checkout** and pushed by `image/publish.sh` to `docker.io/ddv12138/pi-job`, once as the
+root `package.json` version and once as `latest`. No workflow publishes it: the image a deployment pulls is
+exactly what one person built from a commit they chose, and no release run can republish a version tag. CI still
+**builds** the image on every pull request, in the required check `the job image holds its contract`
+(`pi-upgrade-check.yml`), so a Dockerfile that no longer builds or no longer satisfies `verify-image.sh` fails
+before anything could be published.
+
+Two images are published:
+
+| Repository | What it is | Who names it |
+|---|---|---|
+| `docker.io/ddv12138/pi-job` | every job's default image, plus `python3` and the three skills below | `PI_JOB_IMAGE`, or nothing at all |
+| `docker.io/ddv12138/pi-job-java21` | that image plus JDK 21 and Maven | `run.image` on a Java flow |
+
+The Java one is a flow's toolchain, never the deployment default: it carries about 400 MB a job that only reads a
+repository and opens a pull request would pay for on every run. It is built from the default image **built by the
+same run of the script**, so the two cannot drift into different releases, and its Maven mirror and proxy are baked
+in from the environment at build time (`image/publish.sh`'s header says which, and why a proxy cannot come from
+`HTTPS_PROXY`): they are facts about the network the job runs in, not about the job.
+
 If two flows want different toolchains, the alternative is one image holding the *union* of both — which
 only ever grows, because removing anything might break the other flow.
 
 ## Three starting points
 
-**`FROM ghcr.io/edgehero/pi-job:latest` and add a layer.** The cheapest and the most common, and the one to
+**`FROM docker.io/ddv12138/pi-job:latest` and add a layer.** The cheapest and the most common, and the one to
 reach for first: the pinned base, the pinned pi, the runner, the entrypoint, the guardrails floor and the
 `dev.pi-dispatch.*` labels are all **inherited** rather than restated, so a second copy of those pins is not
 a second thing to forget to bump. Re-declare only a label whose truth your layer changed.
@@ -36,13 +58,13 @@ a second thing to forget to bump. Re-declare only a label whose truth your layer
 single re-declared `dev.pi-dispatch.forges` with `azure` appended (see
 [azure-devops.md](azure-devops.md), which also names the `--build-arg BASE=…` you need).
 
-**Pin the base if you would rather not track `latest`.** Every published build carries the git `sha` as a
-tag, and a release build also carries the **product version** (`ghcr.io/edgehero/pi-job:0.8.0`). Neither
-ever moves, while `latest` follows `main`: the version tag is published only by the push that bumps the
-version (or a manual run that asks for it) and only while that tag is not on the registry yet, so an
-unreleased merge moves `latest` and never a released version. The receiver image is tagged the same way. A
-pinned base is the honest choice for a derived image whose layer assumes something about the base; the cost
-is that a pin does not pick up a security rebuild, so bump it deliberately.
+**Pin the base if you would rather not track `latest`.** `image/publish.sh` pushes two tags: the **product
+version** from the root `package.json` (`docker.io/ddv12138/pi-job:4.3.2`) and `latest`. The version tag never
+moves and the script refuses to write one that is already on the registry, so a pin names one released thing
+until the version is bumped; `latest` follows whatever the maintainer published last. The receiver image is
+tagged the same way, by `receiver-image.yml`. A pinned base is the honest choice for a derived image whose layer
+assumes something about the base; the cost is that a pin does not pick up a security rebuild, so bump it
+deliberately.
 
 **A layer that adds anything under `/home/pi` must keep it writable by any uid**, or re-declare
 `dev.pi-dispatch.capabilities` without `anyUid`: the label is inherited, and a `0755` directory your layer
@@ -55,6 +77,12 @@ you need to change something *inside* the base build (a different base distro, a
 **Start from scratch.** Then the next section is a contract, not advice.
 
 ## The conformance checklist
+
+The standard image sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to
+`/app/node_modules/@earendil-works/pi-coding-agent`. A custom image that runs `pi-subagents` needs the same
+variable to name its own installed pi-coding-agent package root. `image/verify-image.sh` checks that the path
+is absolute and names a pi-coding-agent package. The Java recipe uses the locally built, versioned pi-job base
+named in the recipe; build that base from this checkout first. It refuses an older base missing the overlay propagation.
 
 The worker verifies exactly **three declarations** an image makes about itself (the three
 `dev.pi-dispatch.*` labels at the bottom of the table, all read off one `docker image inspect` before the job
@@ -70,6 +98,8 @@ list exists.
 | Guardrails at `/opt/pi-dispatch/HARD_RULES.md`, root-owned and agent-unwritable | An agent that can rewrite its own safety floor has none | **silent** |
 | `PLAYWRIGHT_BROWSERS_PATH`, `PLAYWRIGHT_MCP_BROWSER`, `PLAYWRIGHT_MCP_SANDBOX` baked in | Frontend flows fail to launch a browser, or launch the wrong one | mixed |
 | Fonts installed | Chromium renders tofu boxes: screenshots look plausible and contain no legible text | **silent** |
+| `python3` with a JSON-capable stdlib (`jq` is here too) | A model parses a forge CLI's output with `python3 -c 'import json…'` unprompted. Without it the tool call fails, and a missing interpreter reads to it as "my command is wrong" rather than "this tool is absent", so it retries variations instead of falling back to `jq` | late: one failed tool call per job that tries |
+| `code-review`, `tdd` and `implement-spec` under `/opt/pi-dispatch/skills` | A flow whose prompt names them (`spec-run` names all three) runs without the procedure, and pi reports nothing for a skill that is not there | **silent** |
 | The loader flags in `image/runner/src/loader.mjs` | **Security posture is per-image.** A deployment that turned repo-file discovery off for multi-tenancy in one image **has not turned it off in another** | **silent** |
 | Label `dev.pi-dispatch.pi-version` = the pi the image actually carries | The worker reads it pre-spend and treats an absent one as **"never resume"**, the safe direction. Every `run.resume` job then cold-starts: correct, paid for in full, and invisible | **silent** (deliberately) |
 | Label `dev.pi-dispatch.forges` = the forges this image can serve | An **exclusion** list. A label that omits a forge refuses that forge's jobs pre-spend (`job-image-forge-unsupported`); a label naming a forge whose CLI is *not* installed is worse than none, turning that refusal into a paid container that fails at step 3 | loud, pre-spend |
@@ -128,8 +158,8 @@ the loader flags carry the posture you expect. Running a container can observe b
    will **never** fetch an image at job time. This is on purpose: an image name is per-trigger config, and
    a typo must not become a silent pull-and-execute of whatever answers to that name in a registry.
    `pi-dispatch up` will do the pull for you (consent prompted per action), but **only for the deployment
-   default**, and only when it is absent. With `PI_JOB_IMAGE` unset that is `ghcr.io/edgehero/pi-job:latest`,
-   tagged `pi-job:latest`. With `PI_JOB_IMAGE` set (in your shell or in `.env`), it is exactly the image that
+   default**, and only when it is absent. With `PI_JOB_IMAGE` unset that is
+   `docker.io/ddv12138/pi-job:latest`, tagged `pi-job:latest`. With `PI_JOB_IMAGE` set (in your shell or in `.env`), it is exactly the image that
    names, pulled under that name with no tag, and `up` prints which image it checked. A short name with no
    registry host (`pi-job:2.1.0`, `my-job:dev`) is never pulled, since a public registry would answer for it,
    and neither is a `localhost/` name, which is one built on the host: build or `docker tag` it on the host, or

@@ -3209,7 +3209,7 @@ test("doctor: without --fix, a fixAction-bearing failure prints exactly the old 
 	assert.equal(code, 1);
 	assert.match(
 		text(),
-		/✗ Job image present \(pi-job:latest\)\n    → docker pull ghcr\.io\/edgehero\/pi-job:latest && docker tag ghcr\.io\/edgehero\/pi-job:latest pi-job:latest {2}\(or build image\/Dockerfile\)\n/,
+		/✗ Job image present \(pi-job:latest\)\n    → docker pull docker\.io\/ddv12138\/pi-job:latest && docker tag docker\.io\/ddv12138\/pi-job:latest pi-job:latest {2}\(or build image\/Dockerfile\)\n/,
 	);
 	// Issue #468 with #471's rule: doctor starts no Valkey (its start needs the deployment's password in a child's
 	// environment); the fix line names `pi-dispatch up`.
@@ -3228,7 +3228,7 @@ test("doctor --fix: declining every offer runs nothing and leaves the exit code 
 	);
 	assert.equal(code, 1, "warn-not-fail doctrine: offering fixes changes nothing about severity");
 	// The EXACT command is shown before each prompt -- consent is to a command, not to a vibe.
-	assert.match(text(), /fix available: Job image present \(pi-job:latest\)\n {4}\$ docker pull ghcr\.io\/edgehero\/pi-job:latest && docker tag ghcr\.io\/edgehero\/pi-job:latest pi-job:latest\n/);
+	assert.match(text(), /fix available: Job image present \(pi-job:latest\)\n {4}\$ docker pull docker\.io\/ddv12138\/pi-job:latest && docker tag docker\.io\/ddv12138\/pi-job:latest pi-job:latest\n/);
 	// Issue #468 with #471's rule: no Valkey offer any more, only the image's.
 	assert.doesNotMatch(text(), /fix available: Valkey reachable/);
 	assert.match(text(), /skipped: Job image present \(pi-job:latest\)/);
@@ -3257,8 +3257,8 @@ test("doctor --fix: accepting the image offer runs exactly docker pull then dock
 	assert.deepEqual(
 		acts.map((c) => [c.cmd, ...c.args]),
 		[
-			["docker", "pull", "ghcr.io/edgehero/pi-job:latest"],
-			["docker", "tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"],
+			["docker", "pull", "docker.io/ddv12138/pi-job:latest"],
+			["docker", "tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"],
 		],
 		"exactly the printed command, as two argv arrays, in order",
 	);
@@ -8315,7 +8315,7 @@ test("doctor's two docker runners spawn the bin they are given, and docker when 
 	const direct = [...doctorSource.matchAll(/runCmd(?:Capture)?\(\w*[sS]pawn, "podman", \[("[^"]*", "[^"]*")/g)].map((m) => m[1]);
 	// Issue #503 added one (PR #519 gate round 2): the proxy's mounts, read for the include's bind source. Its `exec ... cat`
 	// of the include names the proxy by a variable, so the matcher above cannot see it.
-	assert.deepEqual(direct, ['"image", "inspect"', '"image", "inspect"', '"pull", "ghcr.io/edgehero/pi-job:latest"', '"tag", "ghcr.io/edgehero/pi-job:latest"', '"inspect", "--format={{.State.Status}}"', '"inspect", "--format"', '"network", "inspect"']);
+	assert.deepEqual(direct, ['"image", "inspect"', '"image", "inspect"', '"pull", "docker.io/ddv12138/pi-job:latest"', '"tag", "docker.io/ddv12138/pi-job:latest"', '"inspect", "--format={{.State.Status}}"', '"inspect", "--format"', '"network", "inspect"']);
 	// Issue #458 added the last (PR #463 round 3): the keeper network's options. And the rootless network keeper's read, whose format is the shared constant (podman-stack.mjs), so the
 	// literal matcher above cannot see it; it is pinned by its own shape, exactly once.
 	assert.equal([...doctorSource.matchAll(/runCmd(?:Capture)?\(\w*[sS]pawn, "podman", \["inspect", NETNS_KEEPER_FORMAT, NETNS_KEEPER\]/g)].length, 1);
@@ -8494,7 +8494,7 @@ const MIXED_PIN = {
 			"✗ Docker daemon reachable",
 			"    → install Docker \u2014 `docker` was not found on PATH",
 			"✗ Job image present (pi-job:latest)",
-			"    → docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
+			"    → docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
 			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
 			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
 			"✓ Jobs run on: local, podman (a trigger that names none runs on local; run.backend selects)",
@@ -8545,7 +8545,7 @@ const MIXED_PIN = {
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot (docs/backup.md)",
 			"",
 			"fix available: Job image present (pi-job:latest)",
-			"    $ docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest",
+			"    $ docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest",
 			"skipped: Job image present (pi-job:latest)",
 			"",
 			"doctor: some checks failed: fix the above, then re-run.",
@@ -8559,7 +8559,7 @@ const MIXED_PIN = {
 			"✓ .env present",
 			"✓ Docker daemon reachable",
 			"✗ Job image present (pi-job:latest)",
-			"    → docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
+			"    → docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
 			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
 			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
 			"✓ Trigger job image present (my-python:1.2.0)",
@@ -8661,7 +8661,7 @@ const MIXED_PIN = {
 			"✓ podman: cgroup v2 controllers are delegated to this account (cpuset, cpu, io, memory, pids), so a job's pid, memory and cpu bounds are applied",
 			"✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled",
 			"✗ podman: job image is not in this account's Podman store (pi-job:latest)",
-			"    → pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull ghcr.io/edgehero/pi-job:latest && podman tag ghcr.io/edgehero/pi-job:latest pi-job:latest -- jobs run with --pull=never, so the worker never fetches it",
+			"    → pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest -- jobs run with --pull=never, so the worker never fetches it",
 			"✓ podman: jobs run as uid:gid 1234:1234 (passed as --user, with --userns=keep-id) with HOME=/home/pi, once the job image is in this account's store and declares anyUid",
 			// Issue #481: the fixture now carries the PAT its source needs (the ✗ for a missing one is new), so the in-image
 			// probe runs here as it does on the green path. Nothing about the #433 output this pins moved.
@@ -8889,7 +8889,7 @@ test("the podman job image is read from THIS account's store, and its anyUid rul
 	};
 	const absent = await run(podmanPlan({ image: false }));
 	assert.equal(absent.code, 1);
-	assert.match(absent.text, /✗ podman: job image is not in this account's Podman store \(pi-job:latest\)\n {4}→ pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull ghcr\.io\/edgehero\/pi-job:latest && podman tag/);
+	assert.match(absent.text, /✗ podman: job image is not in this account's Podman store \(pi-job:latest\)\n {4}→ pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull docker\.io\/ddv12138\/pi-job:latest && podman tag/);
 	assert.match(absent.text, /✓ podman: jobs run as uid:gid 1234:1234 \(passed as --user, with --userns=keep-id\) with HOME=\/home\/pi, once the job image is in this account's store and declares anyUid/);
 	const noAnyUid = await run(podmanPlan({ capabilities: "replicas" }));
 	assert.match(noAnyUid.text, /⚠ podman: every job on pi-job:latest is refused as this uid \(job-image-any-uid-unsupported\)\n {4}→ the job image does not declare `anyUid`[^\n]*which the podman venue always uses/);
@@ -8899,11 +8899,11 @@ test("the podman job image is read from THIS account's store, and its anyUid rul
 });
 
 test("doctor's missing-job-image fix follows up's rule: the default pull and tag, a qualified name's own pull, a short name never pulled (#523)", async () => {
-	// docker: the fix line for the image PI_JOB_IMAGE names, never ghcr's latest for an overriding name.
+	// docker: the fix line for the image PI_JOB_IMAGE names, never the published latest for an overriding name.
 	for (const [image, fix] of [
-		["pi-job:latest", "docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest  (or build image/Dockerfile)"],
+		["pi-job:latest", "docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest  (or build image/Dockerfile)"],
 		["ghcr.io/edgehero/pi-job:2.1.0", "docker pull ghcr.io/edgehero/pi-job:2.1.0"],
-		["pi-job:2.1.0", "pi-job:2.1.0 names no registry host, so a pull would fetch whatever a public registry holds under that name: build it on this host, `docker tag` an image you have as pi-job:2.1.0, or set PI_JOB_IMAGE to a registry-qualified name (such as ghcr.io/edgehero/pi-job:<version>)"],
+		["pi-job:2.1.0", "pi-job:2.1.0 names no registry host, so a pull would fetch whatever a public registry holds under that name: build it on this host, `docker tag` an image you have as pi-job:2.1.0, or set PI_JOB_IMAGE to a registry-qualified name (such as docker.io/ddv12138/pi-job:<version>)"],
 	]) {
 		const { out, text } = capture();
 		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_JOB_IMAGE: image }, { out, cwd: tmpdir(), spawn: fakeSpawn({ ...EGRESS_OK, "docker info": 0, "docker image": 1 }), probeValkey: async () => false, fileExists: () => true, nodeVersion: "22.19.0" });
@@ -8919,7 +8919,10 @@ test("doctor's missing-job-image fix follows up's rule: the default pull and tag
 		const { out, text } = capture();
 		await runDoctor(podmanEnv({ PI_JOB_IMAGE: image }), podmanDeps(out, podmanPlan({ image: false })));
 		assert.ok(text().includes(`→ ${lead} it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: ${fix}`), `${image}: ${text()}`);
-		assert.doesNotMatch(text(), image.startsWith("ghcr") ? /podman pull ghcr\.io\/edgehero\/pi-job:latest/ : new RegExp(`podman pull ${image.replace(/[./]/g, "\\$&")}`), image);
+		// Never the DEFAULT image's pull-and-tag in place of the named one, and never a pull at all of a name no
+		// pull is offered for (issue #523): the lead-in above says which of the two this row is.
+		if (lead === "pull or load") assert.doesNotMatch(text(), /podman pull docker\.io\/ddv12138\/pi-job:latest/, image);
+		else assert.doesNotMatch(text(), new RegExp(`podman pull ${image.replace(/[./]/g, "\\$&")}`), image);
 	}
 });
 
@@ -9240,11 +9243,11 @@ test("podman-only: the podman image line is THE image check, and --fix pulls int
 	const code = await runDoctor(podmanEnv(), { ...podmanDeps(out, pullPlan(), calls), fix: true, promptFn: async () => true });
 	assert.equal(code, 1, "the image is still absent on the re-check, since the fake store never changes");
 	assert.match(text(), /✗ podman: job image is not in this account's Podman store \(pi-job:latest\)\n {4}→ pull or load it AS THE WORKER'S ACCOUNT/);
-	assert.ok(text().includes("fix available: podman: job image is not in this account's Podman store (pi-job:latest)\n    $ podman pull ghcr.io/edgehero/pi-job:latest && podman tag ghcr.io/edgehero/pi-job:latest pi-job:latest\n"), text());
+	assert.ok(text().includes("fix available: podman: job image is not in this account's Podman store (pi-job:latest)\n    $ podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest\n"), text());
 	const fixes = calls.filter((c) => c.args[0] === "pull" || c.args[0] === "tag").map((c) => [c.cmd, ...c.args]);
 	assert.deepEqual(fixes, [
-		["podman", "pull", "ghcr.io/edgehero/pi-job:latest"],
-		["podman", "tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"],
+		["podman", "pull", "docker.io/ddv12138/pi-job:latest"],
+		["podman", "tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"],
 	]);
 	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), [], "no docker pull, no docker anything");
 	// A failed pull is reported as podman's.
@@ -10676,7 +10679,7 @@ const DOCKER_CANARY_PIN = {
 			"✓ Egress proxy running (pi-dispatch-egress-proxy)",
 			"✓ Egress proxy health: healthy",
 			"⚠ Egress policy: not proved, because the job image could not find /app/image/runner/src/env-proxy.mjs (or an import of it): its runner predates issue #427, whose provider call goes around the proxy so that with egress armed every job fails at its first turn, or the image is not built from this project's",
-			"    → use a job image built after issue #427 (ghcr.io/edgehero/pi-job:latest, or rebuild yours FROM it), or set PI_EGRESS=0 until you can",
+			"    → use a job image built after issue #427 (docker.io/ddv12138/pi-job:latest, or rebuild yours FROM it), or set PI_EGRESS=0 until you can",
 			"✓ Jobs run on: local",
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",

@@ -20,7 +20,7 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
 4. **Pick one version for everything.** The packages of one release share its number: `@edgehero/pi-dispatch` (the
    worker and the CLI), `@edgehero/pi-dispatch-receiver`, `@edgehero/pi-dispatch-admin` (the console and `/dispatch`),
    and `@edgehero/pi-dispatch-sandbox-gateway` if you run one. Install them with `npm install --save-exact`, never a
-   range, and use the job image of the same release, `ghcr.io/edgehero/pi-job:<version>` ([job-image.md](job-image.md)).
+   range, and use the job image of the same release, `docker.io/ddv12138/pi-job:<version>` ([job-image.md](job-image.md)).
    A receiver you run from `deploy/docker-compose.yml` takes `ghcr.io/edgehero/pi-dispatch-receiver:<version>`, never
    `:latest`, which can run ahead of the workers.
 5. **Before 5.0.0** in particular:
@@ -68,7 +68,7 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
 **On one host**, with the services `pi-dispatch service install` made, steps 1 to 6 shrink to this:
 
 ```bash
-docker pull ghcr.io/edgehero/pi-job:<version>   # then set PI_JOB_IMAGE=ghcr.io/edgehero/pi-job:<version> in .env
+docker pull docker.io/ddv12138/pi-job:<version>   # then set PI_JOB_IMAGE=docker.io/ddv12138/pi-job:<version> in .env
 npm install --save-exact @edgehero/pi-dispatch@<version> @edgehero/pi-dispatch-receiver@<version> @edgehero/pi-dispatch-admin@<version>
 pi-dispatch service restart --drain   # pause the shared queue, wait for its running jobs, restart the worker, resume it
 pi-dispatch service restart --receiver

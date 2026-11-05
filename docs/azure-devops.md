@@ -183,7 +183,7 @@ majority pay for the minority, so it lives in a variant:
 
 ```bash
 docker build -f image/Dockerfile.azure -t pi-job:azure \
-  --build-arg BASE=ghcr.io/edgehero/pi-job:latest .
+  --build-arg BASE=docker.io/ddv12138/pi-job:latest .
 ```
 
 `--build-arg BASE=...` is optional now that the Dockerfile defaults to the published image. Pass it when

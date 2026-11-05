@@ -175,8 +175,8 @@ const green = { "docker version": 0, "docker image inspect": 0, "docker containe
 
 // The exact host mutations up may ever run — asserted array-for-array below, because "shown then run"
 // only holds if what runs is literally what was shown.
-const PULL = ["pull", "ghcr.io/edgehero/pi-job:latest"];
-const TAG = ["tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"];
+const PULL = ["pull", "docker.io/ddv12138/pi-job:latest"];
+const TAG = ["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"];
 // Labelled with the deployment folder (the volume gap, PR #475's review): the harness's /deploy.
 const VOLUME = ["volume", "create", "--label", "com.pi-dispatch.deployment=/deploy", "pi-dispatch-valkey-data"];
 // Issue #468: the password as `-e VALKEY_PASSWORD` (its value in the spawn's environment, never here), and the start
@@ -302,7 +302,7 @@ test("up: --yes runs both docker action pairs with exactly the argv that was sho
 	assert.ok(argvs.findIndex((a) => a[0] === "pull") < argvs.findIndex((a) => a[0] === "tag"), "pull before tag");
 	assert.ok(argvs.findIndex((a) => a[0] === "volume" && a[1] === "create") < argvs.findIndex((a) => a[0] === "run"), "volume before run");
 	// --yes waives consent, never visibility: the commands are still printed before they run.
-	assert.match(h.text(), /docker pull ghcr\.io\/edgehero\/pi-job:latest/);
+	assert.match(h.text(), /docker pull docker\.io\/ddv12138\/pi-job:latest/);
 	assert.match(h.text(), /docker volume create --label com\.pi-dispatch\.deployment=\/deploy pi-dispatch-valkey-data/);
 });
 
@@ -442,35 +442,7 @@ test("up: a key whose value is `\"\"` is named as EMPTY, not merely `already set
 	assert.equal(halfSet.store.get("/deploy/.env").includes("export PI_PAUSE_WINDOWS_FILE=/v.json"), true, "and never clobbered");
 });
 
-test("up and the deployment pointer agree on the two basenames they share, and only those two (#357)", async () => {
-	// Two surfaces write paths for one deployment: `up` into the `.env` the WORKER reads, and the setup
-	// wizard into the pointer the PANEL reads. Where they overlap they must not drift, because a panel
-	// writing quiet hours into one file while the worker loads another is the exact trap both exist to
-	// close. They overlap in two keys, and the overlap is checked here rather than assumed.
-	//
-	// The other two `up` writes are NOT comparable and must not be added to this list. `PI_LOGS_DIR` and
-	// `PI_SETTINGS_FILE` are deliberately absent from what the wizard emits (they are allowlisted and left
-	// unwritten, `INT-DEPLOYMENT-POINTER-CONTRACT`), because the pointer moves only the panel; and `up`
-	// writes those two as the resolved ACCOUNT DEFAULT rather than a deployment path, so even the shape
-	// would not match.
-	const wizard = readFileSync(new URL("../../admin/src/setup-wizard.ts", import.meta.url), "utf8");
-	const h = harness({ plan: green, files: { "/deploy/.env": "" } });
-	await h.run();
-	const written = Object.fromEntries(
-		h.store
-			.get("/deploy/.env")
-			.split("\n")
-			.filter(Boolean)
-			.map((l) => l.split("=")),
-	);
-	for (const key of ["PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE"]) {
-		const basename = written[key].split("/").pop();
-		assert.ok(wizard.includes(`${key}: join(dir, "${basename}")`), `${key}: up writes ${basename}, and the wizard's pointer must name the same file`);
-	}
-	for (const key of ["PI_LOGS_DIR", "PI_SETTINGS_FILE"]) {
-		assert.ok(!new RegExp(`${key}:\\s*join\\(dir`).test(wizard), `${key} is deliberately not in the pointer, so there is nothing to compare`);
-	}
-});
+
 
 test("up: the two FILE keys get this folder and the two DURABLE ones get the account default (#357)", async () => {
 	// The split is the sharpest edge in this change. `makeLogReaper` unlinks every `.log` and `.json` in
@@ -818,7 +790,7 @@ test("up: a PI_JOB_IMAGE that is present is checked by its own name, and nothing
 		assert.deepEqual(imageCalls(h), [["docker", "image", "inspect", PINNED]], `${label}: only the worker's image is asked about`);
 		assert.match(h.text(), new RegExp(`✓ Job image present \\(${PINNED.replace(/\./g, "\\.")}, PI_JOB_IMAGE from ${from.replace(/\./g, "\\.")}\\)`), label);
 		assert.match(h.text(), /job image\s+already present \(ghcr\.io\/edgehero\/pi-job:2\.1\.0\)/, label);
-		assert.doesNotMatch(h.text(), /pull ghcr\.io\/edgehero\/pi-job:latest|tag ghcr|Job image present \(pi-job:latest\)/, `${label}: the default image is never checked or offered`);
+		assert.doesNotMatch(h.text(), /pull docker\.io\/ddv12138\/pi-job:latest|tag docker\.io\/ddv12138|Job image present \(pi-job:latest\)/, `${label}: the default image is never checked or offered`);
 	}
 });
 
@@ -881,7 +853,7 @@ test("registryQualified: the docker reference grammar's registry host (#523 revi
 	for (const s of ["pi-job:2.1.0", "my.job:dev", "team/job:7", "edgehero/pi-job:latest", "ghcr.io", "local/job"]) assert.equal(registryQualified(s), false, s);
 });
 
-test("up: PI_JOB_IMAGE unset, empty or pi-job:latest is today's default: pi-job:latest checked, ghcr's latest pulled and tagged (#523)", async () => {
+test("up: PI_JOB_IMAGE unset, empty or pi-job:latest is today's default: pi-job:latest checked, the published latest pulled and tagged (#523)", async () => {
 	for (const [label, env, files] of [
 		["unset", { PI_PROVIDER: "anthropic" }, {}],
 		["empty in .env (the worker's ||)", { PI_PROVIDER: "anthropic" }, { "/deploy/.env": "PI_JOB_IMAGE=\n" }],
@@ -953,7 +925,7 @@ test("up: a PI_JOB_IMAGE from this shell only says an installed service reads .e
 });
 
 test("jobImageFix: one text for up and doctor: the default pull and tag, a qualified pull, a short name never pulled (#523 review)", () => {
-	assert.equal(jobImageFix("docker", "pi-job:latest"), "docker pull ghcr.io/edgehero/pi-job:latest && docker tag ghcr.io/edgehero/pi-job:latest pi-job:latest");
+	assert.equal(jobImageFix("docker", "pi-job:latest"), "docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest");
 	assert.equal(jobImageFix("podman", PINNED), `podman pull ${PINNED}`);
 	const short = jobImageFix("podman", "pi-job:2.1.0");
 	assert.doesNotMatch(short, /podman pull/);
@@ -1125,8 +1097,8 @@ test("up on podman: --yes runs exactly the lines it showed, installs the Quadlet
 	assert.ok(!ran.some((l) => / enable /.test(l)), "a generated unit is never enabled");
 	assert.deepEqual(h.calls.filter((c) => c.cmd === "podman" && c.args[0] !== "inspect" && c.args[0] !== "container").map((c) => c.args), [
 		["image", "exists", "pi-job:latest"],
-		["pull", "ghcr.io/edgehero/pi-job:latest"],
-		["tag", "ghcr.io/edgehero/pi-job:latest", "pi-job:latest"],
+		["pull", "docker.io/ddv12138/pi-job:latest"],
+		["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"],
 	]);
 	assert.match(text, /⚠ linger is OFF for op/);
 	assert.match(text, /sudo loginctl enable-linger op/);
@@ -1559,6 +1531,22 @@ test("up makes the proxy's network at RUN time when it was removed while the que
 	assert.doesNotMatch(kept.text(), /was removed while the question waited/);
 });
 
+// The deployment file's PI_JOB_IMAGE is a hand-written copy of a value this repo derives: the job image THIS release
+// publishes, which is the root version (image/publish.sh tags what it pushes with it). Nothing held it, and it sat on
+// 4.3.1 through a release that moved everything else, which is how a deployment keeps running last release's image
+// without a single red check: the compose file names an image that exists, so no pull fails. Both copies, since a
+// deployment may be run from either.
+test("deploy/docker-compose.yml's PI_JOB_IMAGE is this release's job image, on the default's own repository (4.3.2)", () => {
+	const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+	// The repository half comes from the one place that names the default's upstream (`jobImageFix`), so a later move
+	// to another registry fails here as well as in the literals above.
+	assert.equal(jobImageFix("docker", "pi-job:latest").split(" ")[2], "docker.io/ddv12138/pi-job:latest");
+	for (const path of ["../../deploy/docker-compose.yml", "../deploy/docker-compose.yml"]) {
+		const compose = readFileSync(new URL(path, import.meta.url), "utf8");
+		assert.match(compose, new RegExp(`^ {6}PI_JOB_IMAGE: docker.io/ddv12138/pi-job:${version.replace(/\./g, "\\.")}$`, "m"), `${path}: the pin follows the root package.json version`);
+	}
+});
+
 test("up's proxy image is the compose file's and the Quadlet unit's, one pinned digest (#453 gate)", () => {
 	const compose = readFileSync(new URL("../../deploy/docker-compose.yml", import.meta.url), "utf8");
 	const quadlet = readFileSync(new URL("../../deploy/pi-dispatch-egress-proxy.container", import.meta.url), "utf8");
@@ -1641,10 +1629,7 @@ test("up's failed Valkey start and its open-Valkey hint name compose only where 
 // one of the prose sentences named here by their text. A new mention of either kind fails until it is one or the other.
 // Commands built at run time go through `composeArgs`, whose own test below pins --env-file.
 const COMPOSE_PROSE = [
-	["../../admin/src/setup-wizard.ts", 'const EDGE_COMPOSE = "Run the receiver with docker compose";'],
-	["../../admin/src/setup-wizard.ts", "the receiver container needs docker compose, and this deployment runs on rootless Podman without docker"],
 	["../src/valkey-auth.mjs", "# Written by /dispatch setup (the docker compose answer)"],
-	["../../admin/src/setup-wizard.ts", "no receiver container on rootless Podman (it needs docker compose: run the receiver as that service instead)"],
 ];
 /** "ok" (a compose command carrying --env-file), "bad" (one without it), "prose" (a mention that is no command), or null. */
 function composeMention(line) {

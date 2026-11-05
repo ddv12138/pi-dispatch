@@ -9,7 +9,7 @@
  *   - init's never-clobber is contractual: up always calls runInit, and it always leaves existing
  *     files (and an existing WEBHOOK_SECRET value) untouched — see env-file.mjs.
  *   - up only ever pulls the image the worker will run as its deployment default, and only when it is
- *     absent (issue #523): the repo's own ghcr.io/edgehero/pi-job:latest, re-tagged pi-job:latest, when
+ *     absent (issue #523): the repo's own docker.io/ddv12138/pi-job:latest on Docker Hub, re-tagged pi-job:latest, when
  *     PI_JOB_IMAGE is unset, and otherwise exactly the image PI_JOB_IMAGE names, with no tag.
  *     NEVER a trigger-named run.image: those are operator-declared and doctor's
  *     presence check covers them — a setup convenience must not become "pull whatever the triggers
@@ -74,10 +74,14 @@ const TEMPLATES_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "de
 // The default image up fetches, and the local name jobs run under when PI_JOB_IMAGE is unset: the worker's own default
 // (`jobImageFrom`, `PI_JOB_IMAGE || "pi-job:latest"`) is a local-only tag with no registry behind it, so the re-tag is
 // what makes the pulled image the one the worker runs. It is load-bearing for that default ONLY. Issue #523: up used to
-// check and pull these two whatever PI_JOB_IMAGE said, so a deployment running ghcr.io/edgehero/pi-job:2.1.0, present
+// check and pull these two whatever PI_JOB_IMAGE said, so a deployment running docker.io/ddv12138/pi-job:2.1.0, present
 // on the host, was handed a 3 GB pull of an image its worker never runs. An image PI_JOB_IMAGE names is now checked
 // under that name and, when absent, pulled under that name (`overrideImageStep`), and these two are never touched.
-const UPSTREAM_IMAGE = "ghcr.io/edgehero/pi-job:latest";
+//
+// Docker Hub since 4.3.2: the job image is built and pushed from a checkout by `image/publish.sh` (no workflow publishes
+// it), and ghcr gets no new job images. A pull of `ghcr.io/edgehero/pi-job:latest` from here would therefore still succeed, with exit 0,
+// on a frozen image whose runner no longer matches this worker: the quiet version of the wrong image, never an error.
+const UPSTREAM_IMAGE = "docker.io/ddv12138/pi-job:latest";
 const LOCAL_IMAGE = "pi-job:latest";
 const PULL_ARGS = ["pull", UPSTREAM_IMAGE];
 const TAG_ARGS = ["tag", UPSTREAM_IMAGE, LOCAL_IMAGE];
@@ -1435,7 +1439,7 @@ async function openshellImageCapsStep({ engine, venues, jobImage, spawn, out, su
 	}
 	const caps = read.stdout.trim().split(",").map((c) => c.trim());
 	if (!caps.includes("sandboxLayout")) {
-		out(`✗ the job image (${image}) does not declare sandboxLayout, which the openshell venue needs\n    → use a job image built after issue #683 (ghcr.io/edgehero/pi-job:latest, or rebuild yours FROM it): its runner finds the job under /sandbox and carries pi-landlock\n`);
+		out(`✗ the job image (${image}) does not declare sandboxLayout, which the openshell venue needs\n    → use a job image built after issue #683 (docker.io/ddv12138/pi-job:latest, or rebuild yours FROM it): its runner finds the job under /sandbox and carries pi-landlock\n`);
 		summary.push(["openshell image", `${image} lacks sandboxLayout: every openshell job is refused before spend`]);
 		return;
 	}

@@ -1,7 +1,7 @@
 /**
- * Decide whether an image workflow run may publish the PRODUCT VERSION tag (`<image>:<version>`). image.yml
- * (ghcr.io/edgehero/pi-job) and receiver-image.yml (ghcr.io/edgehero/pi-dispatch-receiver) both call it, each
- * passing its own `IMAGE`.
+ * Decide whether an image workflow run may publish the PRODUCT VERSION tag (`<image>:<version>`). `receiver-image.yml`
+ * (ghcr.io/edgehero/pi-dispatch-receiver) calls it and passes its `IMAGE`; the job image has no publishing workflow any
+ * more (it is built and pushed from a checkout by `image/publish.sh`), so this script has exactly one caller left.
  *
  * `latest` and the sha tag move on every image push; the version tag is the one operators pin, and docs promise
  * it never moves once a release cut it. Before this script, every image/** merge re-pushed the unchanged root
@@ -33,7 +33,12 @@ import { execFileSync } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
-export const DEFAULT_IMAGE = "ghcr.io/edgehero/pi-job";
+/**
+ * The fallback when `IMAGE` is not set, and it names the ONE image this script still serves: the receiver's. It used to
+ * be the job image, whose workflow is gone; a default pointing at a repository nothing publishes is a trap for the next
+ * caller, so it moved with the caller it has.
+ */
+export const DEFAULT_IMAGE = "ghcr.io/edgehero/pi-dispatch-receiver";
 const NOT_FOUND = /: not found\b|MANIFEST_UNKNOWN/i;
 
 /** Pure. `inspect` is `{ code, output }` of `docker buildx imagetools inspect <image>:<version>`, or null if not asked. */

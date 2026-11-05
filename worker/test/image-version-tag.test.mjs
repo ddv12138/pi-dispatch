@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { DEFAULT_IMAGE as IMAGE, decideVersionTag, main, releaseTagCommit } from "../../.github/scripts/image-version-tag.mjs";
 
-// Issue #341: image.yml re-pushed the unchanged product version tag on every image/** merge, overwriting a
-// released tag with unreleased contents. The decision is pure and the workflow step is a thin main().
+// Issue #341: an image workflow re-pushed the unchanged product version tag on every merge, overwriting a
+// released tag with unreleased contents. The decision is pure and the workflow step is a thin main(). The job image
+// has no publishing workflow any more (`image/publish.sh` pushes it from a checkout), so the one caller left is the
+// receiver's.
 
 const notFound = { code: 1, output: `ERROR: ${IMAGE}:1.11.0: not found` };
 const found = { code: 0, output: "Name: ...\nDigest: sha256:abc" };

@@ -1,0 +1,114 @@
+# The Java job image: the default image, plus a JDK 21 and Maven.
+#
+# WHY THIS IS A SEPARATE IMAGE AND NOT A BLOCK IN THE DEFAULT ONE. The default job image is what every job in
+# the deployment runs, and it ships no JVM at all (`java`, `javac` and `mvn` are all absent). Adding a JDK to
+# it would put ~400 MB into every container, including the ones that only read a repository and open a pull
+# request. `run.image` already lets a trigger name its own image, so the cost lands on the flows that asked
+# for it. This is `image/Dockerfile.azure`'s argument, one toolchain over.
+#
+# WHY IT LIVES IN THE REPOSITORY. The deployment that needed it first (a Java spec flow on a private server,
+# docs/253-deployment.md) had to invent it in a file on that server, so the recipe existed nowhere else: a
+# second machine rebuilt from this repository could not run a Java flow at all, and its trigger failed before
+# spend with `job-image-missing`, which reads like a missing image rather than a missing recipe. A build step
+# that only one host knows is exactly what a redeploy loses.
+#
+# Build the default image from this source first, then build the Java image from that exact local tag:
+#
+#   docker build -f image/Dockerfile -t pi-job:4.3.2 .
+#   docker build -f image/Dockerfile.java21 -t pi-job:java21 .
+#
+# YOU USUALLY DO NOT BUILD THIS BY HAND. `./image/publish.sh` builds it from the default image built by the same
+# script (so the toolchain layer always sits on this checkout's runner), tags it with the root `package.json` version
+# and `latest`, and pushes both to Docker Hub as `docker.io/ddv12138/pi-job-java21`. A deployment then names that
+# image in `run.image` and pulls it, which is the only way a job ever gets it (`--pull=never`).
+#
+# The two commands above remain for a host that builds its own: the tag you give it must be the one `run.image`
+# names. Verify either one before naming it in a trigger: `./image/verify-image.sh <that tag>`.
+# Every property this file inherits (the chosen base image, the pinned pi, the runner, the entrypoint, the
+# guardrails floor, the three `dev.pi-dispatch.*` labels) is inherited rather than restated, so there is no
+# second copy of a pin to forget to bump.
+ARG BASE=pi-job:4.3.2
+
+# The toolchain stage. Pinned by DIGEST: `3.9-eclipse-temurin-21` FLOATS and did move (it
+# resolved to Maven 3.9.16 when this recipe was first written), so a tag here would silently change the JDK
+# and Maven under every Java job in the fleet, which is CONST-PI-VERSION-PINNED's failure mode reached
+# through a different vendor. This is the manifest-list digest measured for the image that was verified
+# working: eclipse-temurin 21 with Maven 3.9, amd64 + arm64.
+FROM maven@sha256:99e61abcff91a9b1333463bd8451fb18495d6eba9250ac66a338b518f8278320 AS java
+
+FROM ${BASE}
+
+# A pre-existing local tag may still name an older build; refuse it rather than silently losing the fix.
+RUN test "$PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT" = /app/node_modules/@earendil-works/pi-coding-agent \
+    && test -f /app/image/runner/src/model-runtime-defaults.mjs \
+    && grep -q installDefaultModelsPath /app/image/runner/run-job.mjs \
+    && grep -q installDefaultModelsPath /app/image/runner/src/child-preload.mjs
+
+# The base image ends with `USER pi`, so a `RUN` that needs to write outside the job user's own tree must say
+# so first. Everything below is root-owned afterwards, which is the point: a toolchain the agent could
+# rewrite is not a toolchain (`COPY --chmod` is used rather than `RUN chmod` wherever the file itself only
+# needs a mode, because a COPY as root lands correctly on the first try).
+USER root
+
+COPY --from=java /opt/java/openjdk /opt/java/openjdk
+COPY --from=java /usr/share/maven /opt/maven
+
+ENV JAVA_HOME=/opt/java/openjdk
+ENV PATH=/opt/java/openjdk/bin:/opt/maven/bin:${PATH}
+
+# Maven's own configuration, generated rather than copied, because the two things a deployment needs to say
+# about it are deployment facts: which mirror to fetch from, and which proxy to go through. Neither has a
+# default worth inventing, and a baked file would have to be edited in the image on every server, which is
+# the ad-hoc recipe this file replaces.
+#
+# THE `<proxies>` BLOCK IS NOT OPTIONAL ON A PROXIED NETWORK. Java ignores `HTTPS_PROXY`, so a Maven job on a
+# proxied (and especially on an `--internal`) network reaches NOTHING without it: measured on the deployment
+# that first needed this, where the same job downloaded JUnit with `<proxies>` and failed with
+# `PluginResolutionException` with only the environment variables set. So the proxy is passed to Maven
+# explicitly, in Maven's own vocabulary.
+#
+# NO CREDENTIALS. There is deliberately no `<username>`/`<password>` here: a proxy that needs one would bake a
+# secret into every container built from this image, and a proxy that needs one is not how this project's
+# egress is built (`docs/egress.md`: an allowlist, no authentication). An operator whose environment differs
+# should add `run.secrets` or their own image layer rather than a password in a Dockerfile.
+ARG MAVEN_MIRROR_URL=
+ARG MAVEN_PROXY_HOST=
+ARG MAVEN_PROXY_PORT=3128
+ARG MAVEN_PROXY_NONPROXY=
+RUN set -eu; \
+    { \
+      echo '<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0">'; \
+      if [ -n "${MAVEN_MIRROR_URL:-}" ]; then \
+        echo '  <mirrors><mirror>'; \
+        echo '    <id>pi-dispatch-mirror</id><name>pi-dispatch mirror</name><mirrorOf>*</mirrorOf>'; \
+        echo "    <url>${MAVEN_MIRROR_URL:-}</url>"; \
+        echo '  </mirror></mirrors>'; \
+      fi; \
+      if [ -n "${MAVEN_PROXY_HOST:-}" ]; then \
+        echo '  <proxies>'; \
+        for protocol in https http; do \
+          echo "  <proxy><id>pi-dispatch-${protocol}</id><active>true</active><protocol>${protocol}</protocol>"; \
+          echo "    <host>${MAVEN_PROXY_HOST:-}</host><port>${MAVEN_PROXY_PORT:-}</port>"; \
+          echo "    <nonProxyHosts>${MAVEN_PROXY_NONPROXY:-}</nonProxyHosts>"; \
+          echo '  </proxy>'; \
+        done; \
+        echo '  </proxies>'; \
+      fi; \
+      echo '</settings>'; \
+    } > /opt/maven/conf/settings.xml; \
+    chmod 0644 /opt/maven/conf/settings.xml
+
+# The toolchain has to be reachable and coherent BEFORE a job pays to find out. `mvn -v` prints the Maven AND
+# the JDK it resolves, so a JAVA_HOME that points at nothing fails here rather than as a compile error in a
+# paid container. Offline and cheap: no project, no network.
+RUN java -version && mvn -v
+
+# Every other property of this image -- the non-root user, the writable home, the entrypoint and its exit
+# code protocol, the guardrails floor, the fonts, the loader posture, the three `dev.pi-dispatch.*` labels --
+# is INHERITED from the base and must not be restated here. One exception, and it is a caveat rather than a
+# line: `dev.pi-dispatch.net-binaries` still lists only the base's binaries. A venue whose egress policy names
+# executables rather than hosts (OpenShell, issue #683) writes its rules from that list, so running THIS image
+# there needs `/opt/java/openjdk/bin/java` appended to it -- the process that actually opens the connection.
+# On docker and podman the label is not read and the egress proxy decides by host, which is why the deployment
+# this recipe came from needed nothing.
+USER pi
