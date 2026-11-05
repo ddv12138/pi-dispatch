@@ -1404,10 +1404,10 @@ async function prioritiesCommand(pi: ExtensionAPI, tokens: string[], notify: Not
   send(pi, renderAllocations({ envelope: a.read.envelope ?? null, digest: a.read.digest ?? null, problem: a.read.envelope ? null : envelopeProblem(a.read), alloc }));
 }
 
-/** One line for a plan's outcome: the enum, the plan id, and each project's dollars after (never a reason text). */
+/** One line for a plan's outcome: the enum, the plan id, and each project's tokens after (never a reason text). */
 function prioritiesOutcome(res: any): string {
   const after = res?.after?.allocations ?? {};
-  const split = Object.keys(after).sort().map((id) => `${id} $${fmtTokens(after[id])}`).join(", ");
+  const split = Object.keys(after).sort().map((id) => `${id} ${fmtTokens(after[id])}`).join(", ");
   if (res?.outcome === "applied") return `applied ${res.planId}${res.clamped ? " (clamped by the step)" : ""}: ${split}`;
   if (res?.outcome === "duplicate") return `no change: plan ${res.planId} is already applied`;
   const field = res?.field ? ` (${res.field}: ${res.rule})` : "";

@@ -635,11 +635,11 @@ export function planTriggerDelete({ index, paths, surface = "tool", fs = nodeFs 
  */
 export function coerceSettingValue(key, raw) {
   if (key === "model" || key === "provider") return raw;
-  // Issue #501: a dollar key keeps the operator's text, because the overlay stores it AS WRITTEN and
-  // `Number` would quietly widen the money grammar (`1e3` and `0x10` become plain dollars, `2.50` loses its
-  // zero). `writeOverlay`'s `parseTokenCount` is then the one judge of the exact string that was typed. The
-  // worker's own list, never a guess from the name.
-  if (TOKEN_SETTING_KEYS.includes(key)) return raw;
+  // Issue #501's token keys: the OVERLAY stores whole tokens as JSON numbers (runtime-settings'
+  // isIntAtLeast), so the operator's digits-only text is coerced here -- the write's own judge
+  // (`writeOverlay`) would refuse a string the worker cannot read. Anything else rides as written
+  // and is refused with the worker's own words.
+  if (TOKEN_SETTING_KEYS.includes(key)) return /^[0-9]+$/.test(raw) ? Number(raw) : raw;
   return Number(raw);
 }
 
@@ -906,9 +906,13 @@ export function buildScopedLimit(f) {
     const v = optInt(f[k]);
     if (v !== undefined) l[k] = v;
   }
-  // Version 2's dollar windows ride through as the parser's own decimal strings; the shared parser validates them.
+  // Version 2's token windows ride through: the parsed row carries them as JSON numbers, a dialog's
+  // typed text as a digits-only string -- coerced to the number the shared parser stores (the overlay's
+  // own rule, isIntAtLeast). A value that is neither rides not, and the row drops the window.
   for (const k of ["dayTokens", "weekTokens", "monthTokens"]) {
-    if (typeof f[k] === "string" && f[k].trim() !== "") l[k] = f[k].trim();
+    const v = f[k];
+    if (typeof v === "number" && Number.isSafeInteger(v) && v > 0) l[k] = v;
+    else if (typeof v === "string" && /^[0-9]+$/.test(v.trim())) l[k] = Number(v.trim());
   }
   // Version 3's size fields (issue #596) ride through as given; the shared parser validates them, and refuses them on
   // any row that is not a project row.
@@ -976,8 +980,10 @@ export function dollarFieldsOf(f) {
     // turns it into a string before `execute` runs, and no schema keeps a string-typed field a number there (PR
     // #550's review measured `Type.String`, `Type.Unsafe`, `allOf`, `anyOf` and `not`; only a schema with no `type`
     // refused one, and a tool schema without a type is one some providers reject). So a number is read by its VALUE,
-    // the overlay's documented rule (`INT-CONFIG-OVERLAY-CONTRACT`): `2.5` is $2.50 and `1e-7` is refused.
-    out[k] = fmtTokens(parseTokenCount(typeof raw === "string" ? raw.trim() : raw, k));
+    // the overlay's documented rule (`INT-CONFIG-OVERLAY-CONTRACT`): whole tokens, parsed by the
+    // worker's own `optionalTokenCount` and carried as the NUMBER the scoped-limits parser stores --
+    // a ladder string here would be dropped by buildScopedLimit's digits-only coercion.
+    out[k] = parseTokenCount(typeof raw === "string" ? raw.trim() : raw, k);
   }
   return out;
 }
@@ -989,10 +995,11 @@ export function limitSummary(l) {
   if (Number.isInteger(l?.week)) bits.push(`week ${l.week}`);
   if (Number.isInteger(l?.month)) bits.push(`month ${l.month}`);
   if (Number.isInteger(l?.concurrent)) bits.push(`≤${l.concurrent} at once`);
-  // Version 2's dollar windows (issues #501, #502), so a model or dollar-only row never summarizes as nothing.
-  if (typeof l?.dayTokens === "string") bits.push(`day $${l.dayTokens}`);
-  if (typeof l?.weekTokens === "string") bits.push(`week $${l.weekTokens}`);
-  if (typeof l?.monthTokens === "string") bits.push(`month $${l.monthTokens}`);
+  // Version 2's token windows (issues #501, #502), so a model or token-only row never summarizes as nothing.
+  // A window the row does not cap arrives as null (the parser's unset) and draws nothing.
+  if (l?.dayTokens != null) bits.push(`day ${fmtTokens(l.dayTokens)}`);
+  if (l?.weekTokens != null) bits.push(`week ${fmtTokens(l.weekTokens)}`);
+  if (l?.monthTokens != null) bits.push(`month ${fmtTokens(l.monthTokens)}`);
   // Version 3's size (issue #596), with hostShare and minJobs, which each worker's host budget enforces since phase 2.
   bits.push(...sizeBits(l));
   return bits.join(" · ");

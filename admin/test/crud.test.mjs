@@ -225,57 +225,57 @@ test("dispatch_set: an approved confirm writes the coerced value", async () => {
 });
 
 test("dispatch_set: a dollar key's confirm shows the EFFECTIVE before-value and its source (#501)", async () => {
-  // With PI_MAX_COST_USD=2 in env and no overlay key, "(unset) to 1000000" would read as adding a cap while it
+  // With PI_MAX_TOKENS=2 in env and no overlay key, "(unset) to 1000000" would read as adding a cap while it
   // raises one 500,000 times.
-  const saved = process.env.PI_MAX_COST_USD;
+  const saved = process.env.PI_MAX_TOKENS;
   try {
-    process.env.PI_MAX_COST_USD = "2";
+    process.env.PI_MAX_TOKENS = "2";
     withSettings({});
     let probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd", value: "1000000" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /^maxCostUsd: 2 \(env PI_MAX_COST_USD\) to 1000000\nUndo: .+$/);
-    withSettings({ maxCostUsd: "1.50" });
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens", value: "2000000" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /^maxTokens: 2 \(env PI_MAX_TOKENS\) to 2000000\nUndo: .+$/);
+    withSettings({ maxTokens: 1_500_000 });
     probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd", value: "3" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /^maxCostUsd: 1\.50 \(overlay\) to 3\nUndo: .+$/);
-    delete process.env.PI_MAX_COST_USD;
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens", value: "3000000" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /^maxTokens: 1500000 \(overlay\) to 3000000\nUndo: .+$/);
+    delete process.env.PI_MAX_TOKENS;
     withSettings({});
     probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd", value: "3" }, undefined, undefined, probe.ctx);
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens", value: "3000000" }, undefined, undefined, probe.ctx);
     // No deployment pointer here: pi's environment is not the worker's, so an absent variable proves nothing.
-    assert.match(probe.shown[0].message, /^maxCostUsd: \(not in the overlay; the worker's environment is not visible here\) to 3\nUndo: .+$/);
+    assert.match(probe.shown[0].message, /^maxTokens: \(not in the overlay; the worker's environment is not visible here\) to 3000000\nUndo: .+$/);
     // An EMPTY variable is unset, the worker's own reading.
-    process.env.PI_MAX_COST_USD = "";
+    process.env.PI_MAX_TOKENS = "";
     probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd", value: "3" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /^maxCostUsd: \(not in the overlay; the worker's environment is not visible here\) to 3\nUndo: .+$/);
-    delete process.env.PI_MAX_COST_USD;
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens", value: "3000000" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /^maxTokens: \(not in the overlay; the worker's environment is not visible here\) to 3000000\nUndo: .+$/);
+    delete process.env.PI_MAX_TOKENS;
     // The AFTER side of an unset is the value the key falls back to, by the same rule.
-    process.env.PI_MAX_COST_USD = "2.00";
-    withSettings({ maxCostUsd: "1.50" });
+    process.env.PI_MAX_TOKENS = "2000000";
+    withSettings({ maxTokens: 1_500_000 });
     probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /^maxCostUsd: 1\.50 \(overlay\) to 2\.00 \(env PI_MAX_COST_USD\)\nUndo: .+$/);
-    delete process.env.PI_MAX_COST_USD;
-    withSettings({ maxCostUsd: "1.50" });
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /^maxTokens: 1500000 \(overlay\) to 2000000 \(env PI_MAX_TOKENS\)\nUndo: .+$/);
+    delete process.env.PI_MAX_TOKENS;
+    withSettings({ maxTokens: 1_500_000 });
     probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd", value: "" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /^maxCostUsd: 1\.50 \(overlay\) to \(not in the overlay; the worker's environment is not visible here\)\nUndo: .+$/);
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens", value: "" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /^maxTokens: 1500000 \(overlay\) to \(not in the overlay; the worker's environment is not visible here\)\nUndo: .+$/);
   } finally {
-    if (saved === undefined) delete process.env.PI_MAX_COST_USD;
-    else process.env.PI_MAX_COST_USD = saved;
+    if (saved === undefined) delete process.env.PI_MAX_TOKENS;
+    else process.env.PI_MAX_TOKENS = saved;
   }
 });
 
 test("dispatch_set: an invalid current overlay is refused BEFORE the confirm, and the file is left alone (#501)", async () => {
   const settingsFile = join(tempDir("pi-set-"), "settings.json");
-  const text = '{"maxCostUsd":"1","maxCostUsd":"1","dailyCap":4}';
+  const text = '{"maxTokens":1,"maxTokens":1,"dailyCap":4}';
   writeFileSync(settingsFile, text);
   process.env.PI_SETTINGS_FILE = settingsFile;
   const { ctx, shown } = toolCtx({ answer: true });
   await assert.rejects(
     () => toolByName("dispatch_set").execute("id", { key: "concurrency", value: "2" }, undefined, undefined, ctx),
-    /rejected: the settings file is invalid \(settings file has a duplicate key "maxCostUsd".*\), so nothing was written/,
+    /rejected: the settings file is invalid \(settings file has a duplicate key "maxTokens".*\), so nothing was written/,
   );
   assert.equal(shown.length, 0, "the operator is never asked to approve a write that would be refused");
   assert.equal(readFileSync(settingsFile, "utf8"), text);
@@ -1023,21 +1023,21 @@ test("dispatch_limit_edit: an approved partial edit changes one field and keeps 
 });
 
 test("dispatch_limit_edit KEEPS a row's dollar window and the file stays version 2 (PR #549's review)", async () => {
-  const path = tmpLimits({ version: 2, limits: [{ scope: "acme/web", day: 3, dayUsd: "5" }] });
+  const path = tmpLimits({ version: 2, limits: [{ scope: "acme/web", day: 3, dayTokens: 5 }] });
   const { ctx, shown } = toolCtx({ answer: true });
   const out = textOf(await toolByName("dispatch_limit_edit").execute("id", { index: 0, day: 5 }, undefined, undefined, ctx));
   assert.equal(out.applied, true);
   const file = read(path);
   assert.equal(file.version, 2);
-  assert.deepEqual(file.limits[0], { scope: "acme/web", day: 5, dayUsd: "5.00" });
-  assert.match(shown[0].message, /dayUsd/, "the confirm shows the dollar field it keeps");
+  assert.deepEqual(file.limits[0], { scope: "acme/web", day: 5, dayTokens: 5 });
+  assert.match(shown[0].message, /dayTokens/, "the confirm shows the token field it keeps");
 });
 
-test("dispatch_limit_delete's confirm summarizes a model row by its dollar caps (PR #549's review)", async () => {
-  tmpLimits({ version: 2, limits: [{ scope: "model:openai/gpt-x", weekUsd: "25" }] });
+test("dispatch_limit_delete's confirm summarizes a model row by its token caps (PR #549's review)", async () => {
+  tmpLimits({ version: 2, limits: [{ scope: "model:openai/gpt-x", weekTokens: 25_000_000 }] });
   const { ctx, shown } = toolCtx({ answer: false });
   await toolByName("dispatch_limit_delete").execute("id", { index: 0 }, undefined, undefined, ctx);
-  assert.match(shown[0].message, /model:openai\/gpt-x week \$25\.00/);
+  assert.match(shown[0].message, /model:openai\/gpt-x week 25.00M/);
 });
 
 test("dispatch_limit_edit / _delete: out-of-range index throws and writes nothing", async () => {
@@ -1069,7 +1069,7 @@ test("dispatch_limits lists rows with their index and null used counts on an unr
 
 test("manageLimits: Add writes a validated limit (live); blanks drop out", async () => {
   const path = tmpLimits({ version: 1, limits: [] });
-  const ui = mockUi({ select: ["Add a scoped limit"], input: ["acme/web", "10", "", "", "1"] });
+  const ui = mockUi({ select: ["Add a scoped limit"], input: ["acme/web", 10, "", "", "1"] });
   await handleDashboardAction({ action: "manageLimits" }, { scopedLimitsPath: path }, { ui });
   assert.deepEqual(read(path).limits, [{ scope: "acme/web", day: 10, concurrent: 1 }]);
   assert.ok(ui.notes.some((n) => /added \(live\)/.test(n.m)));
@@ -1209,39 +1209,39 @@ test("the gate returns the CALLER's option, so a dirty row can still be edited (
   assert.notEqual(readFileSync(pauseWindowsPath, "utf8"), before, "and the file changed");
 });
 
-test("dispatch_set: a window that would leave no maxCostUsd anywhere is warned in the confirm when the worker's env is not visible (#501, PR #542)", async () => {
-  const saved = process.env.PI_MAX_COST_USD;
+test("dispatch_set: a window that would leave no maxTokens anywhere is warned in the confirm when the worker's env is not visible (#501, PR #542)", async () => {
+  const saved = process.env.PI_MAX_TOKENS;
   try {
-    delete process.env.PI_MAX_COST_USD;
+    delete process.env.PI_MAX_TOKENS;
     withSettings({});
     const probe = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "dailyCostUsd", value: "10" }, undefined, undefined, probe.ctx);
-    assert.match(probe.shown[0].message, /\n\nWarning: dailyCostUsd needs maxCostUsd/);
+    await toolByName("dispatch_set").execute("id", { key: "dailyTokenCap", value: "10000000" }, undefined, undefined, probe.ctx);
+    assert.match(probe.shown[0].message, /\n\nWarning: dailyTokenCap needs maxTokens/);
     assert.match(probe.shown[0].message, /this session's environment \(not the worker's\)/);
     // The warning is shown BEFORE the write: declined, nothing is written; approved, the change is written as asked.
-    const settingsFile = withSettings({ maxCostUsd: "2" });
+    const settingsFile = withSettings({ maxTokens: 2 });
     const declined = toolCtx({ answer: false });
-    await toolByName("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, declined.ctx);
+    await toolByName("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, declined.ctx);
     assert.doesNotMatch(declined.shown[0].message, /Warning/);
-    assert.deepEqual(read(settingsFile), { maxCostUsd: "2" }, "no warning without a window");
-    writeFileSync(settingsFile, JSON.stringify({ maxCostUsd: "2", dailyCostUsd: "10" }));
+    assert.deepEqual(read(settingsFile), { maxTokens: 2 }, "no warning without a window");
+    writeFileSync(settingsFile, JSON.stringify({ maxTokens: 2, dailyTokenCap: 10_000_000 }));
     const no = toolCtx({ answer: false });
-    const outNo = textOf(await toolByName("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, no.ctx));
-    assert.match(no.shown[0].message, /\n\nWarning: dailyCostUsd needs maxCostUsd/);
+    const outNo = textOf(await toolByName("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, no.ctx));
+    assert.match(no.shown[0].message, /\n\nWarning: dailyTokenCap needs maxTokens/);
     assert.equal(outNo.applied, false);
-    assert.deepEqual(read(settingsFile), { maxCostUsd: "2", dailyCostUsd: "10" }, "declined: nothing written");
+    assert.deepEqual(read(settingsFile), { maxTokens: 2, dailyTokenCap: 10_000_000 }, "declined: nothing written");
     const yes = toolCtx({ answer: true });
-    const outYes = textOf(await toolByName("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, yes.ctx));
+    const outYes = textOf(await toolByName("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, yes.ctx));
     assert.equal(outYes.applied, true, "never refused on the merged invariant");
-    assert.deepEqual(read(settingsFile), { dailyCostUsd: "10" }, "approved: written");
-    process.env.PI_MAX_COST_USD = "2";
+    assert.deepEqual(read(settingsFile), { dailyTokenCap: 10_000_000 }, "approved: written");
+    process.env.PI_MAX_TOKENS = "2";
     const fine = toolCtx({ answer: false });
-    const unchanged = textOf(await toolByName("dispatch_set").execute("id", { key: "dailyCostUsd", value: "10" }, undefined, undefined, fine.ctx));
+    const unchanged = textOf(await toolByName("dispatch_set").execute("id", { key: "dailyTokenCap", value: "10000000" }, undefined, undefined, fine.ctx));
     assert.deepEqual(unchanged, { applied: false, unchanged: true }, "an identical cap is explicitly a no-op");
     assert.deepEqual(fine.shown, [], "no write or confirmation for a no-op");
   } finally {
-    if (saved === undefined) delete process.env.PI_MAX_COST_USD;
-    else process.env.PI_MAX_COST_USD = saved;
+    if (saved === undefined) delete process.env.PI_MAX_TOKENS;
+    else process.env.PI_MAX_TOKENS = saved;
   }
 });
 
@@ -1254,7 +1254,7 @@ test("dispatch_set: a window that would leave no maxCostUsd anywhere is warned i
 
 const ALLOC_NOW = Date.parse("2026-10-05T12:00:00Z");
 const M = 1_000_000;
-const ALLOC_ENV_KEYS = ["PI_PROJECTS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_ENVELOPE_FILE", "PI_SETTINGS_FILE", "PI_LOGS_DIR", "PI_MAX_COST_USD", "VALKEY_URL", "PI_WORKER_NAME"];
+const ALLOC_ENV_KEYS = ["PI_PROJECTS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_ENVELOPE_FILE", "PI_SETTINGS_FILE", "PI_LOGS_DIR", "PI_MAX_TOKENS", "VALKEY_URL", "PI_WORKER_NAME"];
 const ALLOC_PROJECTS = [
   { id: "shop", members: ["github:acme/web", "github:acme/api"] },
   { id: "platform", members: ["github:acme/infra"] },
@@ -1263,8 +1263,8 @@ function envelopeBody(over = {}) {
   return {
     version: 1,
     window: "week",
-    totalUsd: "100",
-    floorsUsd: { shop: "10", platform: "10", _other: "0" },
+    totalTokens: 100_000_000,
+    floorsTokens: { shop: 10_000_000, platform: 10_000_000, _other: 0 },
     defaultWeights: { shop: 1, platform: 1, _other: 0 },
     delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
     ...over,
@@ -1272,7 +1272,7 @@ function envelopeBody(over = {}) {
 }
 
 /** A deployment with an envelope, the env pointed at it, and the allocation seams on the fake; restored after. */
-async function withAllocation(fn, { envelope = envelopeBody(), limits = null, settings = { maxCostUsd: "2" }, redis = fakeAllocRedis() } = {}) {
+async function withAllocation(fn, { envelope = envelopeBody(), limits = null, settings = { maxTokens: 2 }, redis = fakeAllocRedis() } = {}) {
   const saved = Object.fromEntries([...ALLOC_ENV_KEYS, "PI_DISPATCH_AGENT_WRITES"].map((k) => [k, process.env[k]]));
   process.env.PI_DISPATCH_AGENT_WRITES = "1";
   const dir = tempDir("pd-504c-");
@@ -1294,7 +1294,7 @@ async function withAllocation(fn, { envelope = envelopeBody(), limits = null, se
   process.env.PI_LOGS_DIR = files.logs;
   process.env.VALKEY_URL = "redis://127.0.0.1:6390"; // never dialled: the fake answers every call
   process.env.PI_WORKER_NAME = "mini1";
-  delete process.env.PI_MAX_COST_USD;
+  delete process.env.PI_MAX_TOKENS;
   let clock = ALLOC_NOW;
   indexMod._setAllocationSeamsForTests({ redisFn: () => redis, now: () => new Date(clock) });
   try {
@@ -1369,12 +1369,12 @@ test("dispatch_allocations: envelope numbers, the split, spend under the worker'
     const text = res.content[0].text;
     assert.ok(!/launch|reasons/.test(text), "no reason text, and no reasons key at all");
     const out = JSON.parse(text);
-    assert.equal(out.envelope.totalMicros, 100 * M);
+    assert.equal(out.envelope.totalTokens, 100 * M);
     assert.equal(out.envelope.window, "week");
     assert.equal(out.state.writer, "operator-session");
     assert.deepEqual(out.state.allocations, { _other: 0, platform: 30 * M, shop: 70 * M });
-    assert.match(out.spend.projects.shop.key, /^budget:usd:s:[0-9a-f]{16}:w:2026-10-05$/, "the envelope week's key, Monday-keyed");
-    assert.equal(out.spend.projects.shop.micros, 0);
+    assert.match(out.spend.projects.shop.key, /^budget:tok:s:[0-9a-f]{16}:w:2026-10-05$/, "the envelope week's key, Monday-keyed");
+    assert.equal(out.spend.projects.shop.tokens, 0);
     assert.deepEqual(out.log.map((r) => r.outcome), ["applied", "neutral"], "newest first");
   });
 });
@@ -1405,11 +1405,11 @@ test("dispatch_envelope_set: an approved change sets alloc:envelope:expected BEF
     assert.match(shown[0].message, /minIntervalHours: 24 to 0/, "the confirm shows the before and after");
     assert.equal(fileWhenExpectedSet, before, "the expected digest was stored while the file still held the old envelope");
     const written = readFileSync(files.envelope, "utf8");
-    const parsed = parseEnvelope(written, files.envelope, { projects: ALLOC_PROJECTS.map((p) => ({ ...p, name: null })), limits: [], maxCostMicros: 2 * M });
+    const parsed = parseEnvelope(written, files.envelope, { projects: ALLOC_PROJECTS.map((p) => ({ ...p, name: null })), limits: [], maxTokens: 2_000_000 });
     assert.equal(parsed.delegation.minIntervalHours, 0);
     assert.equal(redis.store.get("alloc:envelope:expected"), envelopeDigest(parsed), "expected names the new file's digest");
     assert.equal(out.digest, envelopeDigest(parsed));
-    assert.equal(JSON.parse(written).floorsUsd.shop, "10", "every other key is kept as written");
+    assert.equal(JSON.parse(written).floorsTokens.shop, 10_000_000, "every other key is kept as written");
   }, { redis });
 });
 
@@ -1417,8 +1417,8 @@ test("dispatch_envelope_set refuses BEFORE the confirm what the worker's parser 
   await withAllocation(async ({ files, redis }) => {
     const before = readFileSync(files.envelope, "utf8");
     const { ctx, shown } = toolCtx({ answer: true });
-    await assert.rejects(() => toolByName("dispatch_envelope_set").execute("id", { floorsUsd: { shop: "95" } }, undefined, undefined, ctx), /floors add up to 105\.00, above totalUsd 100\.00/);
-    await assert.rejects(() => toolByName("dispatch_envelope_set").execute("id", { floorsUsd: { ops: "1" } }, undefined, undefined, ctx), /floorsUsd\.ops names a project that is not in the projects file/);
+    await assert.rejects(() => toolByName("dispatch_envelope_set").execute("id", { floorsTokens: { shop: 95_000_000 } }, undefined, undefined, ctx), /floors add up to 105000000, above totalTokens 100000000/);
+    await assert.rejects(() => toolByName("dispatch_envelope_set").execute("id", { floorsTokens: { ops: 1_000_000 } }, undefined, undefined, ctx), /floorsTokens\.ops names a project that is not in the projects file/);
     await assert.rejects(() => toolByName("dispatch_envelope_set").execute("id", {}, undefined, undefined, ctx), /nothing to change/);
     assert.equal(shown.length, 0, "the operator is never asked to approve an envelope the worker would refuse");
     assert.equal(readFileSync(files.envelope, "utf8"), before);
@@ -1432,22 +1432,22 @@ test("the project, limit and per-job cap writers refuse a change that would leav
       const { ctx, shown } = toolCtx({ answer: true });
       const limitsBefore = readFileSync(files.limits, "utf8");
       // A floored project removed: the envelope's floor would name a project that is gone.
-      await assert.rejects(() => toolByName("dispatch_project_delete").execute("id", { id: "platform" }, undefined, undefined, ctx), /allocation envelope invalid \(envelope file: floorsUsd\.platform names a project that is not in the projects file/);
+      await assert.rejects(() => toolByName("dispatch_project_delete").execute("id", { id: "platform" }, undefined, undefined, ctx), /allocation envelope invalid \(envelope file: floorsTokens\.platform names a project that is not in the projects file/);
       // A project row added, edited or left below its floor.
-      await assert.rejects(() => toolByName("dispatch_limit_add").execute("id", { scope: "project:platform", weekUsd: "5" }, undefined, undefined, ctx), /floorsUsd\.platform \(10\.00\) is above the scoped-limits row project:platform weekUsd \(5\.00\)/);
-      await assert.rejects(() => toolByName("dispatch_limit_edit").execute("id", { index: 0, weekUsd: "5" }, undefined, undefined, ctx), /floorsUsd\.shop \(10\.00\) is above the scoped-limits row project:shop weekUsd \(5\.00\)/);
+      await assert.rejects(() => toolByName("dispatch_limit_add").execute("id", { scope: "project:platform", weekTokens: 5_000_000 }, undefined, undefined, ctx), /floorsTokens\.platform \(10000000\) is above the scoped-limits row project:platform weekTokens \(5000000\)/);
+      await assert.rejects(() => toolByName("dispatch_limit_edit").execute("id", { index: 0, weekTokens: 5_000_000 }, undefined, undefined, ctx), /floorsTokens\.shop \(10000000\) is above the scoped-limits row project:shop weekTokens \(5000000\)/);
       // The per-job cap removed: an envelope needs one.
-      await assert.rejects(() => toolByName("dispatch_set").execute("id", { key: "maxCostUsd" }, undefined, undefined, ctx), /needs a per-job cost cap/);
+      await assert.rejects(() => toolByName("dispatch_set").execute("id", { key: "maxTokens" }, undefined, undefined, ctx), /needs a per-job token budget/);
       assert.equal(shown.length, 0, "every refusal comes before the confirm");
       assert.equal(readFileSync(files.limits, "utf8"), limitsBefore, "nothing was written");
-      assert.deepEqual(read(files.settings), { maxCostUsd: "2" });
+      assert.deepEqual(read(files.settings), { maxTokens: 2 });
       assert.deepEqual(read(files.projects).projects.map((p) => p.id), ["shop", "platform"]);
       // A change that keeps the envelope loadable passes to the confirm as before.
-      await toolByName("dispatch_limit_edit").execute("id", { index: 0, weekUsd: "40" }, undefined, undefined, ctx);
+      await toolByName("dispatch_limit_edit").execute("id", { index: 0, weekTokens: 40_000_000 }, undefined, undefined, ctx);
       assert.equal(shown.length, 1);
-      assert.equal(read(files.limits).limits[0].weekUsd, "40.00");
+      assert.equal(read(files.limits).limits[0].weekTokens, 40_000_000);
     },
-    { limits: [{ scope: "project:shop", weekUsd: "50" }] },
+    { limits: [{ scope: "project:shop", weekTokens: 50_000_000 }] },
   );
 });
 
@@ -1455,7 +1455,7 @@ test("an envelope that already fails to load does not block an unrelated write (
   await withAllocation(
     async ({ files }) => {
       const { ctx, shown } = toolCtx({ answer: true });
-      const out = textOf(await toolByName("dispatch_limit_add").execute("id", { scope: "project:platform", weekUsd: "5" }, undefined, undefined, ctx));
+      const out = textOf(await toolByName("dispatch_limit_add").execute("id", { scope: "project:platform", weekTokens: 5_000_000 }, undefined, undefined, ctx));
       assert.equal(out.applied, true);
       assert.equal(shown.length, 1);
       assert.equal(read(files.limits).limits.length, 1);
@@ -1512,13 +1512,13 @@ test("/dispatch priorities shows the split with no reason text; `priorities set`
   await withAllocation(async ({ redis }) => {
     const { sent, run } = commandPi();
     const notes = await run("priorities set shop=3 platform=1");
-    assert.match(notes.at(-1).m, /^applied [0-9a-f]{16}: _other \$0\.00, platform \$30\.00, shop \$70\.00$/);
+    assert.match(notes.at(-1).m, /^applied [0-9a-f]{16}: _other 0, platform 30.00M, shop 70.00M$/);
     assert.equal(planOf(redis).writer, "operator-session");
     redis.store.set("alloc:plan", JSON.stringify({ ...planOf(redis), reasons: { shop: "secret plan text" } }));
     await run("priorities");
     const text = sent.at(-1);
-    assert.match(text, /^ALLOCATION · week · total \$100\.00 · delegation on/);
-    assert.match(text, /shop\s+floor \$10\.00\s+weight 3\s+allocation \$70\.00\s+spent \$0\.00/);
+    assert.match(text, /^ALLOCATION · week · total 100,000,000 · delegation on/);
+    assert.match(text, /shop\s+floor 10,000,000\s+weight 3\s+allocation 70,000,000\s+spent 0/);
     assert.ok(!text.includes("secret plan text"), "the model-visible channel never carries a reason");
     const bad = await run("priorities set shop=three");
     assert.match(bad.at(-1).m, /^usage: \/dispatch priorities set/);
@@ -1536,7 +1536,7 @@ test("a revert (operator-revert) skips the interval and the step, and is still r
     // Back to the neutral row at once: a $40 move, above the 25% ($25) step, and inside the 24-hour interval.
     const neutral = JSON.parse(redis.lists.get("alloc:log").at(-1));
     assert.equal(neutral.outcome, "neutral");
-    const envelope = parseEnvelope(readFileSync(files.envelope, "utf8"), files.envelope, { projects: ALLOC_PROJECTS.map((p) => ({ ...p, name: null })), limits: [], maxCostMicros: 2 * M });
+    const envelope = parseEnvelope(readFileSync(files.envelope, "utf8"), files.envelope, { projects: ALLOC_PROJECTS.map((p) => ({ ...p, name: null })), limits: [], maxTokens: 2_000_000 });
     const res = await revertAllocation({ url: "redis://127.0.0.1:6390", envelope, target: neutral, host: "mini1", logsDir: files.logs, now: new Date(ALLOC_NOW + 25 * 3600000), redisFn: () => redis });
     assert.equal(res.outcome, "reverted");
     assert.deepEqual(planOf(redis).allocations, { _other: 0, platform: 50 * M, shop: 50 * M }, "the whole way back, no step");
@@ -1551,7 +1551,7 @@ test("dispatch_priorities_set and dispatch_envelope_set are audited as agents wi
     const { ctx } = headless();
     await toolByName("dispatch_priorities_set").execute("id", { projects: [{ id: "shop", weight: 3 }, { id: "platform", weight: 1 }] }, undefined, undefined, ctx);
     const confirm = toolCtx({ answer: true });
-    await toolByName("dispatch_envelope_set").execute("id", { totalUsd: "120" }, undefined, undefined, confirm.ctx);
+    await toolByName("dispatch_envelope_set").execute("id", { totalTokens: 120_000_000 }, undefined, undefined, confirm.ctx);
     const dir = join(files.logs, "console-audit");
     const rows = readFileSync(join(dir, readdirSync(dir).find((n) => n.endsWith(".jsonl"))), "utf8").trim().split("\n").map((l) => JSON.parse(l));
     assert.deepEqual(rows.map((r) => [r.kind, r.outcome, r.actor.role]), [["priorities-set", "ok", "agent"], ["priorities-set", "ok", "agent"], ["envelope-set", "ok", "agent"], ["envelope-set", "ok", "agent"]]);
@@ -1563,26 +1563,26 @@ test("dispatch_priorities_set and dispatch_envelope_set are audited as agents wi
   });
 });
 
-test("the operator-typed paths refuse a change that would break the envelope too: the limit dialogs, /dispatch set and unset maxCostUsd (#504)", async () => {
+test("the operator-typed paths refuse a change that would break the envelope too: the limit dialogs, /dispatch set and unset maxTokens (#504)", async () => {
   await withAllocation(
     async ({ files }) => {
       const before = readFileSync(files.limits, "utf8");
       // The panel's `m`: edit a repo row's scope into project:shop, whose week row would then sit below shop's $10 floor.
-      const ui = mockUi({ select: ["Edit a scoped limit", "#1  github:acme/zzz  week $5.00"], input: ["project:shop", "", "", "", ""], confirm: [true] });
+      const ui = mockUi({ select: ["Edit a scoped limit", "#1  github:acme/zzz  week 5.00M"], input: ["project:shop", "", "", "", ""], confirm: [true] });
       await handleDashboardAction({ action: "manageLimits" }, { scopedLimitsPath: files.limits, projectsFile: files.projects, envelopeFile: files.envelope, settingsFile: files.settings }, { ui });
-      assert.match(ui.notes.at(-1).m, /^edit rejected: this change would leave the allocation envelope invalid \(envelope file: floorsUsd\.shop \(10\.00\) is above the scoped-limits row project:shop weekUsd \(5\.00\)/);
+      assert.match(ui.notes.at(-1).m, /^edit rejected: this change would leave the allocation envelope invalid \(envelope file: floorsTokens\.shop \(10000000\) is above the scoped-limits row project:shop weekTokens \(5000000\)/);
       assert.equal(readFileSync(files.limits, "utf8"), before, "nothing written");
-      // /dispatch unset maxCostUsd and a set to a value the worker cannot read: an envelope needs a per-job cap.
+      // /dispatch unset maxTokens and a set to a value the worker cannot read: an envelope needs a per-job cap.
       const { run } = commandPi();
-      const unset = await run("unset maxCostUsd");
-      assert.match(unset.at(-1).m, /^unset: this change would leave the allocation envelope invalid .*needs a per-job cost cap/);
-      const bad = await run("set maxCostUsd nope");
+      const unset = await run("unset maxTokens");
+      assert.match(unset.at(-1).m, /^unset: this change would leave the allocation envelope invalid .*needs a per-job token budget/);
+      const bad = await run("set maxTokens nope");
       assert.match(bad.at(-1).m, /^set: this change would leave the allocation envelope invalid/);
-      assert.deepEqual(read(files.settings), { maxCostUsd: "2" }, "the settings file is untouched");
-      const fine = await run("set maxCostUsd 3");
-      assert.match(fine.at(-1).m, /^set maxCostUsd = 3/, "a cap the envelope can live with is written");
+      assert.deepEqual(read(files.settings), { maxTokens: 2 }, "the settings file is untouched");
+      const fine = await run("set maxTokens 3");
+      assert.match(fine.at(-1).m, /^set maxTokens = 3/, "a cap the envelope can live with is written");
     },
-    { limits: [{ scope: "github:acme/zzz", weekUsd: "5" }] },
+    { limits: [{ scope: "github:acme/zzz", weekTokens: 5_000_000 }] },
   );
 });
 
