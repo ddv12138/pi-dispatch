@@ -18,7 +18,7 @@ const skip = mod ? false : "index.mjs could not import here (bullmq)";
 
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const PROJECTS = [{ id: "shop", members: ["github:acme/web"] }];
-const envelope = parseEnvelope(JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10" }, defaultWeights: { _other: 1, shop: 1 } }), "/e/envelope.json", { projects: PROJECTS, maxCostMicros: 1_000_000 });
+const envelope = parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10 }, defaultWeights: { _other: 1, shop: 1 } }), "/e/envelope.json", { projects: PROJECTS, maxTokens: 1_000_000 });
 const digest = envelopeDigest(envelope);
 
 async function pickup(allocation, comments = []) {
@@ -28,7 +28,7 @@ async function pickup(allocation, comments = []) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { incr: async () => 1, decr: async () => 0, incrby: async () => 1, decrby: async () => 0, eval: async () => [0, 0], expire: async () => {}, get: async () => null },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxCostUsd: 1 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 1 }),
 		applyConcurrency: () => {},
 		scopedLimits: () => [],
 		projects: () => parseProjects(JSON.stringify({ version: 1, projects: PROJECTS }), "p.json"),

@@ -5,6 +5,7 @@ export { WATCH_RULE_ID_RE };
 import { html } from "./html.mjs";
 import { preText } from "./transcript.mjs";
 import { uiText } from "./locale.mjs";
+import { tokensText } from "./panels/common.mjs";
 const t = (message, locale = "en") => uiText(message, locale);
 
 export const WATCH_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -76,17 +77,17 @@ export function decisionTotals(findings) {
   for (const finding of rows(findings)) {
     const d = finding?.decision;
     if (!d || typeof d.model !== "string" || !/^[A-Za-z0-9_.:/@~-]{1,128}$/.test(d.model) || !["investigate", "file_issue", "ignore"].includes(d.action)) continue;
-    if (!models.has(d.model)) models.set(d.model, { model: d.model, count: 0, costUsd: 0, unpriced: 0, investigate: 0, file_issue: 0, ignore: 0 });
+    if (!models.has(d.model)) models.set(d.model, { model: d.model, count: 0, tokens: 0, uncounted: 0, investigate: 0, file_issue: 0, ignore: 0 });
     const model = models.get(d.model);
     model.count += 1; model[d.action] += 1;
-    if (Number.isFinite(d.costUsd) && d.costUsd >= 0) model.costUsd += d.costUsd; else model.unpriced += 1;
+    if (Number.isSafeInteger(d.tokensTotal) && d.tokensTotal >= 0) model.tokens += d.tokensTotal; else model.uncounted += 1;
   }
   return [...models.values()];
 }
 
 function decisionSummary(data, locale = "en") {
   const models = decisionTotals(data.findings);
-  return html`<div class="card"><h2>${t("Decision models", locale)}</h2><p>${t("Totals cover the loaded retained findings, at most 1,000.", locale)}${rows(data.findings).length >= 1000 ? ` ${t("This is a floor; older findings may be absent.", locale)}` : ""}</p>${models.length ? models.map((m) => html`<p class="tx__b">${m.model}: ${m.count} ${t(m.count === 1 ? "decision" : "decisions", locale)}, ${t("known spend", locale)} $${m.costUsd.toFixed(6)}${m.unpriced ? html` (${m.unpriced} ${t("without a recorded cost", locale)})` : null}; ${m.investigate} ${t("investigate", locale)}, ${m.file_issue} ${t("file issue", locale)}, ${m.ignore} ${t("ignore", locale)}.</p>`) : html`<p>${t("No retained decisions.", locale)}</p>`}</div>`;
+  return html`<div class="card"><h2>${t("Decision models", locale)}</h2><p>${t("Totals cover the loaded retained findings, at most 1,000.", locale)}${rows(data.findings).length >= 1000 ? ` ${t("This is a floor; older findings may be absent.", locale)}` : ""}</p>${models.length ? models.map((m) => html`<p class="tx__b">${m.model}: ${m.count} ${t(m.count === 1 ? "decision" : "decisions", locale)}, ${tokensText(m.tokens)} ${t("tokens", locale)}${m.uncounted ? html` (${m.uncounted} ${t("without a recorded count", locale)})` : null}; ${m.investigate} ${t("investigate", locale)}, ${m.file_issue} ${t("file issue", locale)}, ${m.ignore} ${t("ignore", locale)}.</p>`) : html`<p>${t("No retained decisions.", locale)}</p>`}</div>`;
 }
 
 function findingRows(findings, rule, now, config, locale = "en") {
@@ -130,7 +131,7 @@ function privateTrace(data) {
 }
 
 function publicTrace(entries) {
-  return rows(entries).map(publicWatchTrace).map((e) => html`<li class="tx__b">${e.kind ?? "unknown"}: ${e.status ?? "recorded"}${e.action ? html`; chose ${e.action}` : null}${e.model ? html`; model ${e.model}` : null}${typeof e.costUsd === "number" ? html`; cost $${e.costUsd.toFixed(6)}` : null}${Number.isSafeInteger(e.at) && e.at <= 8.64e15 ? html`; ${new Date(e.at).toISOString()}` : null}${Number.isSafeInteger(e.rows) ? html`; ${e.rows} rows` : null}${e.source ? html` source ${e.source}` : null}${e.signature ? html` signature ${e.signature}` : null}${Number.isSafeInteger(e.count) ? html` ${e.count} events` : null}${e.checks ? Object.entries(e.checks).map(([key, value]) => html`<span> ${key}: ${value} </span>`) : null}${typeof e.confidence === "number" ? html`, confidence ${e.confidence}` : null}${e.probabilities ? Object.entries(e.probabilities).map(([key, value]) => html`<span> ${key}: ${value} </span>`) : null}</li>`);
+  return rows(entries).map(publicWatchTrace).map((e) => html`<li class="tx__b">${e.kind ?? "unknown"}: ${e.status ?? "recorded"}${e.action ? html`; chose ${e.action}` : null}${e.model ? html`; model ${e.model}` : null}${Number.isSafeInteger(e.tokensTotal) ? html`; ${tokensText(e.tokensTotal)} ${t("tokens")}` : null}${Number.isSafeInteger(e.at) && e.at <= 8.64e15 ? html`; ${new Date(e.at).toISOString()}` : null}${Number.isSafeInteger(e.rows) ? html`; ${e.rows} rows` : null}${e.source ? html` source ${e.source}` : null}${e.signature ? html` signature ${e.signature}` : null}${Number.isSafeInteger(e.count) ? html` ${e.count} events` : null}${e.checks ? Object.entries(e.checks).map(([key, value]) => html`<span> ${key}: ${value} </span>`) : null}${typeof e.confidence === "number" ? html`, confidence ${e.confidence}` : null}${e.probabilities ? Object.entries(e.probabilities).map(([key, value]) => html`<span> ${key}: ${value} </span>`) : null}</li>`);
 }
 
 export function watchBoardPanel(view) {

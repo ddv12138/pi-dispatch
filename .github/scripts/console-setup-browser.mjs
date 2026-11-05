@@ -221,7 +221,7 @@ export async function checkSetupBrowser({ chrome, shots = null, sandbox = proces
     await type('[data-provider-key-form] input[name=value]', "stale-private-openai-774");
     await click('[data-provider-key-form] button[type=submit]');
     await until("document.querySelector('#confirm-slot [data-confirm]')&&!document.querySelector('#confirm-slot [data-confirm]').disabled");
-    const beforeStale = fixture.keyFile() + "PI_MAX_COST_USD=2\n";
+    const beforeStale = fixture.keyFile() + "PI_CONCURRENCY=4\n";
     fixture.changeEnv(beforeStale);
     await click("#confirm-slot [data-confirm]");
     await until("document.querySelector('#confirm-slot').innerText.includes('deployment changed')");

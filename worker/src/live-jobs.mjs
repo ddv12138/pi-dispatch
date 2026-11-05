@@ -70,7 +70,7 @@ export function liveJobsOf({ running = [], budgetEntries = [], defaultVenue = nu
 		if (seen.has(id)) return; // one job, two pickups (or running and orphaned): listed once
 		seen.add(id);
 		const venue = typeof e.orphan?.venue === "string" ? e.orphan.venue : (e.orphan?.venue && typeof e.orphan.venue === "object" ? (e.orphan.venue.backend ?? defaultVenue) : null);
-		out.push({ id, p: isProjectId(e.project) ? e.project : null, ...(positiveInt(e.memMiB) ? { m: e.memMiB } : {}), ...(positiveInt(e.cpuCenti) ? { c: e.cpuCenti } : {}), at: e.at, ...(nonnegativeInt(e.holdMicros) && positiveInt(e.holdAt) ? { h: e.holdMicros, ha: e.holdAt } : {}), ...(orphan ? { o: 1, ...(BACKEND_NAMES.includes(venue) ? { v: venue } : {}), ...(positiveInt(e.orphan?.since) ? { s: e.orphan.since } : {}) } : {}) });
+		out.push({ id, p: isProjectId(e.project) ? e.project : null, ...(positiveInt(e.memMiB) ? { m: e.memMiB } : {}), ...(positiveInt(e.cpuCenti) ? { c: e.cpuCenti } : {}), at: e.at, ...(nonnegativeInt(e.holdTokens) && positiveInt(e.holdAt) ? { h: e.holdTokens, ha: e.holdAt } : {}), ...(orphan ? { o: 1, ...(BACKEND_NAMES.includes(venue) ? { v: venue } : {}), ...(positiveInt(e.orphan?.since) ? { s: e.orphan.since } : {}) } : {}) });
 	};
 	// Running first, so a job both running and in the ledger as an orphan (it cannot be: the gate defers it) reads as running.
 	for (const e of Array.isArray(running) ? running : []) push(e, false);

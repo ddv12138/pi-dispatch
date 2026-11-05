@@ -868,7 +868,7 @@ test("Project's visible money text keeps the primary headline hierarchy, even in
 	assert.match(projectKpiTextProblems([{ ...value, texts: [{ ...value.texts[0], color: "rgb(106, 113, 110)" }] }])[0], /primary ink/, "a normal-size amount in secondary ink still loses the primary hierarchy");
 	assert.match(projectKpiTextProblems([{ ...value, fontPx: 13, texts: small.texts }])[0], /smaller than 24 px/);
 	assert.match(projectKpiTextProblems([{ ...value, texts: [] }])[0], /no visible primary amount/);
-	assert.match(projectKpiTextProblems([{ ...value, texts: [{ ...value.texts[0], text: "at least" }] }])[0], /no visible primary amount/, "a visible prefix cannot disguise a hidden primary dollar amount");
+	assert.match(projectKpiTextProblems([{ ...value, texts: [{ ...value.texts[0], text: "at least" }] }])[0], /no visible primary amount/, "a visible prefix cannot disguise a hidden primary token count");
 	const measured = { scrollWidth: 320, clientWidth: 320, elements: [], projectKpis: [small] };
 	const verdict = runVerdict({ width: 320, csp: [], canvas: "#000000", want: "#000000", expect: "dark", measured, emulation: PHONE });
 	assert.equal(verdict.width.ok, true);

@@ -662,10 +662,10 @@ test("service install on podman: VALKEY_URL's loopback port is where the Quadlet
 	assert.deepEqual(remote.probed, [], "a remote queue is not probed here");
 	assert.ok(!remote.store.has(join(QDIR, QUADLET_FILES.valkey.file)));
 	assert.match(remote.text(), /VALKEY_URL names queue\.lan, not this host, so no Valkey is added here/);
-	const dollar = svc({ files: { [ENV_PATH]: `${PODMAN_ENV}PI_EGRESS=0\nVALKEY_URL=redis://127.0.0.1:$PORT\n` } });
-	assert.equal(await dollar.run(), 1);
-	assert.match(dollar.errText(), /line 3 assigns VALKEY_URL in a form this command cannot read the way the service's loader will \(a \$, which the loaders expand differently/);
-	assert.deepEqual(dollar.writes, []);
+	const token = svc({ files: { [ENV_PATH]: `${PODMAN_ENV}PI_EGRESS=0\nVALKEY_URL=redis://127.0.0.1:$PORT\n` } });
+	assert.equal(await token.run(), 1);
+	assert.match(token.errText(), /line 3 assigns VALKEY_URL in a form this command cannot read the way the service's loader will \(a \$, which the loaders expand differently/);
+	assert.deepEqual(token.writes, []);
 });
 
 test("service install on podman: an [::1] VALKEY_URL is refused for its brackets unquoted, read when quoted, and judged on ::1 (#464)", async () => {
@@ -1417,7 +1417,7 @@ test("#447: the venue reader never reads a venue key differently from systemd 25
 		const row = rows.find((r) => r[0] === name);
 		assert.ok(readStackKeys(row[1]).error, `${name}: refused`);
 	}
-	for (const name of ["g1-a23-shell-twoassign", "g1-a24-shell-dollarsq"]) assert.ok(readStackKeys(rows.find((r) => r[0] === name)[1], { loader: "shell" }).error, `${name}: the shell reading refuses`);
+	for (const name of ["g1-a23-shell-twoassign", "g1-a24-shell-tokensq"]) assert.ok(readStackKeys(rows.find((r) => r[0] === name)[1], { loader: "shell" }).error, `${name}: the shell reading refuses`);
 	// And it still READS the must-pass rows, rather than passing the oracle by refusing everything.
 	for (const [name, text, systemd] of rows.filter((r) => r[0].startsWith("p-") || ["g1-b01-badutf8-comment", "g1-b02-badutf8-noeq", "g1-b06-fffd-valid", "g1-b09-badutf8-semicolon-comment"].includes(r[0]))) {
 		assert.deepEqual(readStackKeys(text).keys, systemd, name);

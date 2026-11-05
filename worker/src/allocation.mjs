@@ -2,10 +2,10 @@
  * Delegated allocation, the stateful half (issue #504 part B; DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE,
  * REQ-DELEGATED-ALLOCATION). `priorities.mjs` is the arithmetic and `envelope.mjs` the operator's file; this module
  * holds the APPLIED split in Valkey, applies a plan under the ladder, writes the audit, and turns the split into the
- * dollar ledgers a job reserves in.
+ * token ledgers a job reserves in.
  *
  * Valkey keys:
- *   - `alloc:plan` (`ALLOC_PLAN_KEY`): the applied state as JSON, the effective micro-dollar vector a job reserves
+ *   - `alloc:plan` (`ALLOC_PLAN_KEY`): the applied state as JSON, the effective token vector a job reserves
  *     against and the "current" of the next step. Always present once any host has looked: the neutral state (the
  *     envelope's default weights, no plan) is PERSISTED with `SET NX`, writer `default`, so a reference always exists.
  *   - `alloc:lock` (`ALLOC_LOCK_KEY`): `SET NX PX 5000`, the `fleet-lease.mjs` idiom, released only by its holder. It
@@ -37,7 +37,7 @@ import { isAbsolute, join } from "node:path";
 import { envelopeDigest } from "./envelope.mjs";
 import { RELEASE_IF_MINE } from "./fleet-lease.mjs";
 import { OTHER, allocate, envelopeEntries, neutralAllocation, parsePlan, planRefusal, rebase, repoShares, scopeRef } from "./priorities.mjs";
-import { dollarCapsFor, scopeDollarKeyPrefix } from "./scoped-limits.mjs";
+import { tokenCapsFor, scopeTokenKeyPrefix } from "./scoped-limits.mjs";
 
 export const ALLOC_PLAN_KEY = "alloc:plan";
 export const ALLOC_LOCK_KEY = "alloc:lock";
@@ -115,7 +115,7 @@ function vectorOf(state) {
 	return { allocations: { ...(state?.allocations ?? {}) }, unallocated: state?.unallocated ?? 0 };
 }
 
-/** The micro-dollars of a state, for an audit row's `before` and `after`: amounts only, never a reason. */
+/** The tokens of a state, for an audit row's `before` and `after`: amounts only, never a reason. */
 function amountsOf(state) {
 	if (!state) return null;
 	return { allocations: { ...(state.allocations ?? {}) }, unallocated: state.unallocated ?? 0, repos: state.repos ?? {} };
@@ -149,25 +149,25 @@ export function neutralState(envelope, digest, now, { writer = "default", lastPl
 	};
 }
 
-/** A safe, non-negative integer of micro-dollars: the only amount a state may hold. */
-function isMicros(value) {
+/** A safe, non-negative integer of tokens: the only amount a state may hold. */
+function isTokens(value) {
 	return Number.isSafeInteger(value) && value >= 0;
 }
 
-/** Every amount of a state is micro-dollars: the allocations, the unallocated money and each repo share. */
-function amountsAreMicros(s) {
+/** Every amount of a state is tokens: the allocations, the unallocated money and each repo share. */
+function amountsAreTokens(s) {
 	const values = (o) => (o && typeof o === "object" && !Array.isArray(o) ? Object.values(o) : null);
 	const allocations = values(s.allocations);
 	// Every vector carries `_other` (envelope.mjs always adds it), so an allocations object without it is no vector.
-	if (!allocations || !allocations.every(isMicros) || !Object.hasOwn(s.allocations, OTHER)) return false;
-	if (!isMicros(s.unallocated ?? 0)) return false;
+	if (!allocations || !allocations.every(isTokens) || !Object.hasOwn(s.allocations, OTHER)) return false;
+	if (!isTokens(s.unallocated ?? 0)) return false;
 	const repos = values(s.repos ?? {});
-	return repos !== null && repos.every((r) => values(r)?.every(isMicros) === true);
+	return repos !== null && repos.every((r) => values(r)?.every(isTokens) === true);
 }
 
 /**
  * Parse a stored state. Null when absent; the state when it is this build's version with a digest and amounts that
- * are all safe non-negative integers of micro-dollars; `{ newer: true }` for a state a NEWER build wrote (version above
+ * are all safe non-negative integers of tokens; `{ newer: true }` for a state a NEWER build wrote (version above
  * `ALLOC_STATE_VERSION`), which this build neither trusts nor overwrites; else `{ corrupt: text }`, which the next
  * reconcile replaces with the neutral split. A string, a negative, a fraction or a missing allocation is corrupt: an
  * amount the reserve would compare against as a number it is not.
@@ -177,7 +177,7 @@ export function parseState(text) {
 	try {
 		const s = JSON.parse(text);
 		if (s && typeof s === "object" && Number.isInteger(s.version) && s.version > ALLOC_STATE_VERSION) return { newer: true };
-		if (s && typeof s === "object" && s.version === ALLOC_STATE_VERSION && typeof s.envelopeDigest === "string" && amountsAreMicros(s)) return s;
+		if (s && typeof s === "object" && s.version === ALLOC_STATE_VERSION && typeof s.envelopeDigest === "string" && amountsAreTokens(s)) return s;
 	} catch {}
 	return { corrupt: String(text) };
 }
@@ -655,7 +655,7 @@ export function makeAllocationState({ redis, host = "", audit, log = () => {}, l
 /**
  * The job a project member stands for: a folder member is a local job on that folder, a forge member
  * (`<kind>:<repo>`, as projects.json stores it) a job of that kind on that repo. Used to find the scoped-limits row a
- * member's jobs match, by the job matcher itself (`dollarCapsFor`), rather than by comparing strings a second way.
+ * member's jobs match, by the job matcher itself (`tokenCapsFor`), rather than by comparing strings a second way.
  */
 export function memberJob(member) {
 	if (typeof member !== "string" || member === "") return null;
@@ -666,41 +666,41 @@ export function memberJob(member) {
 
 /**
  * THE key prefix a member's repo share reserves and settles in (issue #505 review): the operator row its jobs match
- * when that row has dollar windows (`dollarCapsFor`, so a bare `acme/web` row is the key of the member
- * `github:acme/web`), else the synthetic ledger keyed by the member scope. `governedDollars` (enforcement) and the
+ * when that row has token windows (`tokenCapsFor`, so a bare `acme/web` row is the key of the member
+ * `github:acme/web`), else the synthetic ledger keyed by the member scope. `governedTokens` (enforcement) and the
  * portfolio snapshot (what a manager reads) both call this, so the counter read is always the counter written. Pass
  * `row` when the matched ledger is already in hand (null for none), else `limits` to match it here.
  */
-export function memberDollarKeyPrefix(member, { row, limits = null } = {}) {
-	const ledger = row !== undefined ? row : dollarCapsFor(memberJob(member), limits);
-	return ledger?.keyPrefix ?? scopeDollarKeyPrefix(member);
+export function memberTokenKeyPrefix(member, { row, limits = null } = {}) {
+	const ledger = row !== undefined ? row : tokenCapsFor(memberJob(member), limits);
+	return ledger?.keyPrefix ?? scopeTokenKeyPrefix(member);
 }
 
 /**
- * The dollar inputs of one governed job (issue #504 part B, `DES-DOLLAR-RESERVE-AND-SETTLE`): the operator's ledgers
+ * The dollar inputs of one governed job (issue #504 part B, `DES-TOKEN-RESERVE-AND-SETTLE`): the operator's ledgers
  * narrowed by the applied split for the envelope's window. PURE. `operator` is what the job would reserve in with no
- * envelope (`dollarCaps`, `scopedDollars`, `projectDollars`, each possibly null); `member` is the pickup's
+ * envelope (`tokenCaps`, `scopedTokens`, `projectTokens`, each possibly null); `member` is the pickup's
  * `{ id, member }` (the project id and `memberScopeOf`), or null for a job in no project. Returns
- * `{ dollarCaps, dollarCapSource, scopedDollars, projectDollars, otherDollars }`.
+ * `{ tokenCaps, tokenCapSource, scopedTokens, projectTokens, otherTokens }`.
  *
  *   - the deployment: `min(operator cap, envelope total)` for the window; with no operator cap the total alone;
  *   - an envelope project: its row's ledger with `min(row, allocation)` for the window, or with no row a SYNTHETIC
- *     ledger keyed `scopeDollarKeyPrefix("project:<id>")` (the key a row would have), so it reserves, joins the
+ *     ledger keyed `scopeTokenKeyPrefix("project:<id>")` (the key a row would have), so it reserves, joins the
  *     job-cost ledgers and settles to the job's cost like any project row;
  *   - its member's repo share, when the plan gave one: the member's row ledger with `min(row, share)`, or a synthetic
  *     one keyed by the member scope;
  *   - `_other` (no project, or a project the envelope does not name): a ledger of its own, keyed
- *     `scopeDollarKeyPrefix("project:_other")` (`PROJECT_ID_RE` forbids `_`, so no real project shares the key), in
- *     the `otherDollars` slot; a real project outside the envelope keeps its own row besides.
+ *     `scopeTokenKeyPrefix("project:_other")` (`PROJECT_ID_RE` forbids `_`, so no real project shares the key), in
+ *     the `otherTokens` slot; a real project outside the envelope keeps its own row besides.
  * Every ledger carries `capSource: { day, week, month }`, `operator` or `allocation` for the window that bound it (a
  * tie is `operator`), null for a window it does not have. The processor names a refusal `allocation-cap` from it.
  */
-export function governedDollars({ envelope, state, member = null, operator = {} }) {
+export function governedTokens({ envelope, state, member = null, operator = {} }) {
 	const w = envelope.window;
 	const entries = envelopeEntries(envelope);
 	const entry = member && entries.includes(member.id) && member.id !== OTHER ? member.id : OTHER;
 	const sourceOf = (caps) => ({ day: caps?.day == null ? null : "operator", week: caps?.week == null ? null : "operator", month: caps?.month == null ? null : "operator" });
-	const narrow = (ledger, scope, amount, keyPrefix = scopeDollarKeyPrefix(scope)) => {
+	const narrow = (ledger, scope, amount, keyPrefix = scopeTokenKeyPrefix(scope)) => {
 		const base = ledger ?? { scope, keyPrefix, caps: { day: null, week: null, month: null } };
 		const caps = { day: base.caps?.day ?? null, week: base.caps?.week ?? null, month: base.caps?.month ?? null };
 		const capSource = sourceOf(caps);
@@ -712,20 +712,20 @@ export function governedDollars({ envelope, state, member = null, operator = {} 
 	};
 	const withSource = (ledger) => (ledger ? { ...ledger, capSource: sourceOf(ledger.caps) } : null);
 
-	const deployment = narrow(operator.dollarCaps ? { caps: operator.dollarCaps } : null, "deployment", envelope.totalMicros);
+	const deployment = narrow(operator.tokenCaps ? { caps: operator.tokenCaps } : null, "deployment", envelope.totalTokens);
 	const out = {
-		dollarCaps: deployment.caps,
-		dollarCapSource: deployment.capSource,
-		scopedDollars: withSource(operator.scopedDollars ?? null),
-		projectDollars: withSource(operator.projectDollars ?? null),
-		otherDollars: null,
+		tokenCaps: deployment.caps,
+		tokenCapSource: deployment.capSource,
+		scopedTokens: withSource(operator.scopedTokens ?? null),
+		projectTokens: withSource(operator.projectTokens ?? null),
+		otherTokens: null,
 	};
 	if (entry === OTHER) {
-		out.otherDollars = narrow(null, `project:${OTHER}`, state.allocations[OTHER] ?? 0);
+		out.otherTokens = narrow(null, `project:${OTHER}`, state.allocations[OTHER] ?? 0);
 		return out;
 	}
-	out.projectDollars = narrow(operator.projectDollars ?? null, `project:${entry}`, state.allocations[entry] ?? 0);
+	out.projectTokens = narrow(operator.projectTokens ?? null, `project:${entry}`, state.allocations[entry] ?? 0);
 	const share = state.repos?.[entry]?.[scopeRef(member.member)];
-	if (Number.isSafeInteger(share)) out.scopedDollars = narrow(operator.scopedDollars ?? null, member.member, share, memberDollarKeyPrefix(member.member, { row: operator.scopedDollars ?? null }));
+	if (Number.isSafeInteger(share)) out.scopedTokens = narrow(operator.scopedTokens ?? null, member.member, share, memberTokenKeyPrefix(member.member, { row: operator.scopedTokens ?? null }));
 	return out;
 }

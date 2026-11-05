@@ -42,7 +42,7 @@ test("Claude legacy, modern scoped limits and extra usage retain measured fields
 	const raw = known(15, {
 		limits: [{ kind: "session", percent: 100, resets_at: new Date(NOW + 5 * 3_600_000).toISOString() }, { kind: "weekly_scoped", scope: { model: { display_name: "private@example.com" }, surface: "secret-token" }, utilization: 101, resets_at: new Date(NOW + 7 * DAY).toISOString() }],
 		seven_day_sonnet: { utilization: 42 },
-		extra_usage: { is_enabled: true, utilization: 8, used_credits: 1234, monthly_limit: 5000, currency: "USD", decimal_places: 2 },
+		extra_usage: { is_enabled: true, utilization: 8, used_credits: 1234, monthly_limit: 5000, currency: "TOKENS", decimal_places: 2 },
 		account: { email: "private@example.com" },
 	});
 	const value = claude(raw);
@@ -50,7 +50,7 @@ test("Claude legacy, modern scoped limits and extra usage retain measured fields
 	assert.equal(value.windows[0].state, "exhausted");
 	assert.equal(value.windows[0].resetAt, NOW + 5 * 3_600_000);
 	assert.deepEqual(value.windows.filter(row => row.scope === "scoped").map(row => [row.state, row.usedPercent]), [["exhausted", 101], ["available", 42]]);
-	assert.deepEqual(value.extraUsage, { enabled: true, usedPercent: 8, usedCredits: 1234, monthlyLimit: 5000, currency: "USD", decimalPlaces: 2 });
+	assert.deepEqual(value.extraUsage, { enabled: true, usedPercent: 8, usedCredits: 1234, monthlyLimit: 5000, currency: "TOKENS", decimalPlaces: 2 });
 	assert.doesNotMatch(JSON.stringify(value), /private@example|secret-token|email|display_name/);
 });
 
@@ -60,13 +60,13 @@ test("duplicate account limits cannot replace exhaustion with a lower utilizatio
 	}
 });
 
-test("parsers bound payloads, collection sizes, percentages and resets without assuming USD", () => {
+test("parsers bound payloads, collection sizes, percentages and resets without assuming TOKENS", () => {
 	const oversized = JSON.stringify({ ignored: "x".repeat(SUBSCRIPTION_QUOTA_LIMITS.payloadBytes) });
 	const circular = {}; circular.self = circular;
 	for (const raw of [oversized, circular, { limits: Array.from({ length: 33 }, () => ({ kind: "session", percent: 100 })) }]) assert.equal(claude(raw).windows[0].state, "unknown");
 	const result = claude({ five_hour: { utilization: -1, resets_at: "tomorrow" }, seven_day: { utilization: Infinity, resets_at: new Date(NOW + 100 * DAY).toISOString() }, extra_usage: { is_enabled: "false", currency: "invalid", used_credits: -1, decimal_places: 8 } });
 	assert.ok(result.windows.every(row => row.state === "unknown" && row.resetAt === null));
-	assert.deepEqual(result.extraUsage, { enabled: null, usedPercent: null, usedCredits: null, monthlyLimit: null, currency: null, decimalPlaces: null });
+	assert.deepEqual(result.extraUsage, { enabled: null, usedPercent: null, usedCredits: null, monthlyLimit: null, currency: "invalid", decimalPlaces: null }, "currency is vendor text carried as written, never a code list");
 	assert.throws(() => normalizeClaudeQuota({}, {}), { code: "subscription-invalid-observation" });
 });
 
@@ -96,9 +96,9 @@ test("initial unknown quota admits only after the separate Claude billing policy
 	assert.equal((await store.admit(identity(), { requireExtraUsageKnownDisabled: true })).reason, "subscription-extra-usage");
 	assert.equal(redis.writes.length, 0);
 	await assert.rejects(store.admit(identity(), { allowExtraUsage: true }), { code: "subscription-invalid-policy" });
-	const authorized = await store.admit(identity(), { allowExtraUsage: true, maxCreditMicros: 1000, requireExtraUsageKnownDisabled: true });
+	const authorized = await store.admit(identity(), { allowExtraUsage: true, maxCreditTokens: 1000, requireExtraUsageKnownDisabled: true });
 	assert.equal(authorized.ok, true);
-	assert.equal(authorized.creditCapMicros, 1000, "root admission must also narrow the normal per-job dollar cap");
+	assert.equal(authorized.creditCapTokens, 1000, "root admission must also narrow the normal per-job token budget");
 });
 
 test("fresh available evidence becomes honest stale unknown without manufacturing exhaustion", async () => {
@@ -176,7 +176,7 @@ test("enabled or unknown extra usage never authorizes paid credits by default", 
 	}
 	const { store } = fixture();
 	await store.record(identity(), claude(known(100, { extra_usage: { is_enabled: true } })));
-	assert.equal((await store.admit(identity(), { allowExtraUsage: true, maxCreditMicros: 25_000, requireExtraUsageKnownDisabled: true })).creditCapMicros, 25_000);
+	assert.equal((await store.admit(identity(), { allowExtraUsage: true, maxCreditTokens: 25_000, requireExtraUsageKnownDisabled: true })).creditCapTokens, 25_000);
 	assert.equal((await store.admit(identity())).ok, false);
 });
 

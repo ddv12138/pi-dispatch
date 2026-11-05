@@ -234,7 +234,7 @@ test("why picks the comment that was posted, where the table is keyed by it", ()
 	for (const why of ["not-in-catalog", "list-malformed", null, undefined, 7]) assert.equal(explainReason("model-unknown", { why }).sentence, tables.MODEL_UNKNOWN_COMMENT, String(why));
 	assert.equal(explainReason("model-not-allowed", { why: "fallback-unlisted" }).sentence, tables.MODEL_NOT_ALLOWED_COMMENTS["fallback-unlisted"]);
 	assert.equal(explainReason("model-not-allowed").sentence, REASONS["model-not-allowed"].sentence);
-	assert.equal(explainReason("cost-cap", { why: "unboundable" }).sentence, REASONS["cost-cap"].sentence, "a why without a variant keeps the sentence");
+	assert.equal(explainReason("model-not-allowed", { why: "not-in-catalog" }).sentence, REASONS["model-not-allowed"].sentence, "a why without a variant keeps the sentence");
 	assert.deepEqual(Object.keys(WHY_VARIANTS).sort(), ["model-not-allowed", "model-unknown"]);
 });
 

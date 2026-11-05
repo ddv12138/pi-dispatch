@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { makeStyler, frame, RULE, PLAIN_THEME, stripAnsi, visibleLen } from "../src/style.mjs";
-import { sparkline, fmtCost, makeLineInput, LINE_INPUT_CURSOR, GLYPHS } from "../src/panel.mjs";
+import { sparkline, fmtAmount, makeLineInput, LINE_INPUT_CURSOR, GLYPHS } from "../src/panel.mjs";
 
 // A theme whose fg/bold/inverse emit REAL SGR (so the module's stripAnsi recovers the visible text) and
 // RECORD every (color,text) request, so we can assert both the width invariant and the color choices.
@@ -152,13 +152,13 @@ test("styler.sparkline colors cells by warnAbove without touching the geometry",
   assert.ok(spy.calls.some((c) => c.color === "dim"), "the gap is dim");
 });
 
-test("styler.fmtCost colors per class and keeps the plain twin's geometry", () => {
+test("styler.fmtAmount colors per class and keeps the plain twin's geometry", () => {
   const metered = { usd: 4.12, class: "metered" };
-  assert.equal(makeStyler(PLAIN_THEME).fmtCost(metered), fmtCost(metered), "PLAIN passthrough is byte-identical");
+  assert.equal(makeStyler(PLAIN_THEME).fmtAmount(metered), fmtAmount(metered), "PLAIN passthrough is byte-identical");
   const spy = spyTheme();
-  const colored = makeStyler(spy).fmtCost(metered);
-  assert.equal(stripAnsi(colored), fmtCost(metered));
-  assert.equal(visibleLen(colored), fmtCost(metered).length);
+  const colored = makeStyler(spy).fmtAmount(metered);
+  assert.equal(stripAnsi(colored), fmtAmount(metered));
+  assert.equal(visibleLen(colored), fmtAmount(metered).length);
   for (const [cost, color] of [
     [metered, "text"],
     [{ class: "plan", planId: "max-5x" }, "accent"],
@@ -169,12 +169,12 @@ test("styler.fmtCost colors per class and keeps the plain twin's geometry", () =
     [null, "dim"],
   ]) {
     const perSpy = spyTheme();
-    makeStyler(perSpy).fmtCost(cost);
+    makeStyler(perSpy).fmtAmount(cost);
     assert.ok(perSpy.calls.some((c) => c.color === color), `${cost?.class ?? "malformed"} colors ${color}`);
   }
-  const celled = makeStyler(spy).fmtCost(metered, 12);
+  const celled = makeStyler(spy).fmtAmount(metered, 12);
   assert.equal(visibleLen(celled), 12, "an explicit width renders as a fixed cell");
-  assert.equal(stripAnsi(celled), fmtCost(metered).padEnd(12));
+  assert.equal(stripAnsi(celled), fmtAmount(metered).padEnd(12));
 });
 
 test("styler.lineInput paints the cursor cell inverse at exactly the render width", () => {

@@ -23,7 +23,7 @@ import {
 	scopeRef,
 } from "../src/priorities.mjs";
 
-const M = 1_000_000; // micro-dollars per dollar
+const M = 1_000_000; // tokens per token
 const NOW = Date.parse("2026-10-04T12:00:00Z");
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -32,7 +32,7 @@ function envelope({ total = 100 * M, floors = { shop: 10 * M, platform: 10 * M }
 	const f = { [OTHER]: 0, ...floors };
 	const d = {};
 	for (const id of Object.keys(f)) d[id] = defaults?.[id] ?? 1;
-	return { version: 1, window: "week", totalMicros: total, floors: f, defaultWeights: d, delegation: { enabled, writers: [...writers], maxStepPct: pct, minIntervalHours: interval, maxPlanDays: days } };
+	return { version: 1, window: "week", totalTokens: total, floors: f, defaultWeights: d, delegation: { enabled, writers: [...writers], maxStepPct: pct, minIntervalHours: interval, maxPlanDays: days } };
 }
 
 const ENV = envelope();
@@ -297,7 +297,7 @@ test("worked case: three equal weights over a $70 remainder give 23,333,334 / 23
 	const env = envelope({ total: 70 * M, floors: { alpha: 0, beta: 0, gamma: 0 } });
 	const r = allocate({ envelope: env, weights: { alpha: 1, beta: 1, gamma: 1, [OTHER]: 0 } });
 	assert.deepEqual(r.allocations, { [OTHER]: 0, alpha: 23_333_334, beta: 23_333_333, gamma: 23_333_333 });
-	// The same split, ids reversed: the extra micro-dollar follows the id, not the order the entries came in.
+	// The same split, ids reversed: the extra token follows the id, not the order the entries came in.
 	const swapped = allocate({ envelope: envelope({ total: 70 * M, floors: { gamma: 0, beta: 0, alpha: 0 } }), weights: { gamma: 1, beta: 1, alpha: 1, [OTHER]: 0 } });
 	assert.deepEqual(swapped.allocations, r.allocations);
 });
@@ -376,8 +376,8 @@ test("allocate refuses inputs it cannot answer for, rather than guess a money an
 	assert.throws(() => allocate({ envelope: ENV, weights: { shop: 1, platform: 1 } }), /weights\._other/);
 	assert.throws(() => allocate({ envelope: ENV, weights: { ...w, web: 1 } }), /not an envelope entry/);
 	assert.throws(() => allocate({ envelope: ENV, weights: { ...w, shop: 1.5 } }), /integer from 0 to 1000/);
-	assert.throws(() => allocate({ envelope: { ...ENV, totalMicros: 2 ** 53 }, weights: w }), /safe integer/);
-	assert.throws(() => allocate({ envelope: { ...ENV, totalMicros: 10 * M }, weights: w }), /floors exceed/);
+	assert.throws(() => allocate({ envelope: { ...ENV, totalTokens: 2 ** 53 }, weights: w }), /safe integer/);
+	assert.throws(() => allocate({ envelope: { ...ENV, totalTokens: 10 * M }, weights: w }), /floors exceed/);
 	assert.throws(() => allocate({ envelope: ENV, weights: w, current: { allocations: { shop: 50 * M, platform: 50 * M }, unallocated: 0 } }), /rebase it first/);
 	assert.throws(() => allocate({ envelope: ENV, weights: w, current: { allocations: { shop: 50 * M, platform: 40 * M, [OTHER]: 0 }, unallocated: 0 } }), /does not sum/);
 	assert.throws(() => allocate({ envelope: { ...ENV, delegation: { ...ENV.delegation, maxStepPct: 0 } }, weights: w, current: neutralAllocation(ENV) }), /maxStepPct/);
@@ -428,16 +428,16 @@ test("property: the result sums to the total, every floor holds, and nothing exc
 	for (let seed = 1; seed <= 2000; seed++) {
 		const { env, weights, current } = draw(mulberry(seed));
 		const r = allocate({ envelope: env, weights, current });
-		const total = BigInt(env.totalMicros);
+		const total = BigInt(env.totalTokens);
 		assert.equal(sum(r), total, `seed ${seed}: allocations plus unallocated equal the total`);
 		const anyWeight = Object.values(weights).some((w) => w > 0);
 		if (current === null && anyWeight) assert.equal(r.unallocated, 0, `seed ${seed}: any weight above 0 allocates everything`);
 		for (const id of envelopeEntries(env)) {
 			assert.ok(r.allocations[id] >= env.floors[id], `seed ${seed}: ${id} keeps its floor`);
-			assert.ok(r.allocations[id] <= env.totalMicros, `seed ${seed}: ${id} is never above the total`);
+			assert.ok(r.allocations[id] <= env.totalTokens, `seed ${seed}: ${id} is never above the total`);
 			assert.ok(Number.isSafeInteger(r.allocations[id]), `seed ${seed}: ${id} is a safe integer`);
 		}
-		assert.ok(r.unallocated >= 0 && r.unallocated <= env.totalMicros, `seed ${seed}: unallocated is in range`);
+		assert.ok(r.unallocated >= 0 && r.unallocated <= env.totalTokens, `seed ${seed}: unallocated is in range`);
 		assert.equal(sum(r.target), total, `seed ${seed}: the target sums to the total`);
 	}
 });
@@ -448,7 +448,7 @@ test("property: no entry, the unallocated money included, moves by more than flo
 		const { env, weights, current } = draw(mulberry(seed));
 		if (current === null) continue;
 		const r = allocate({ envelope: env, weights, current });
-		const step = (BigInt(env.totalMicros) * BigInt(env.delegation.maxStepPct)) / 100n;
+		const step = (BigInt(env.totalTokens) * BigInt(env.delegation.maxStepPct)) / 100n;
 		const moves = [BigInt(r.unallocated) - BigInt(current.unallocated), ...envelopeEntries(env).map((id) => BigInt(r.allocations[id]) - BigInt(current.allocations[id]))].map((d) => (d < 0n ? -d : d));
 		const largest = moves.reduce((a, b) => (b > a ? b : a), 0n);
 		assert.ok(largest <= step, `seed ${seed}: a move of ${largest} exceeds the step ${step}`);
@@ -474,7 +474,7 @@ test("property: the result is the same whatever order the envelope, weights and 
 	}
 });
 
-test("property: equal weights over equal floors differ by at most one micro-dollar, the extra going to the lower ids (500 seeds)", () => {
+test("property: equal weights over equal floors differ by at most one token, the extra going to the lower ids (500 seeds)", () => {
 	for (let seed = 1; seed <= 500; seed++) {
 		const rnd = mulberry(seed);
 		const ids = POOL.slice(0, 2 + Math.floor(rnd() * 6));
@@ -491,11 +491,11 @@ test("property: equal weights over equal floors differ by at most one micro-doll
 
 test("rebase projects a clamped vector onto a new total by its current shares: it never jumps to the plan's target", () => {
 	const clamped = { allocations: { shop: 75 * M, platform: 25 * M, [OTHER]: 0 }, unallocated: 0 };
-	const r = rebase(clamped, { ...ENV, totalMicros: 200 * M });
+	const r = rebase(clamped, { ...ENV, totalTokens: 200 * M });
 	// Above the floors the vector holds 65 and 15; the new remainder of 180 splits 65:15, plus the floors.
 	assert.deepEqual(r, { allocations: { [OTHER]: 0, platform: 43_750_000, shop: 156_250_000 }, unallocated: 0 });
 	assert.notDeepEqual(r.allocations, { [OTHER]: 0, platform: 10 * M, shop: 190 * M }, "the target (weights 1:0) is not reached through an envelope edit");
-	const shrunk = rebase(clamped, { ...ENV, totalMicros: 50 * M });
+	const shrunk = rebase(clamped, { ...ENV, totalTokens: 50 * M });
 	assert.deepEqual(shrunk, { allocations: { [OTHER]: 0, platform: 15_625_000, shop: 34_375_000 }, unallocated: 0 });
 });
 
@@ -508,7 +508,7 @@ test("rebase onto the same envelope is the identity, and onto a new envelope sum
 		assert.deepEqual(rebase(vector, env), vector, `seed ${seed}: identity`);
 		const { env: other } = draw(rnd);
 		const r = rebase(vector, other);
-		assert.equal(sum(r), BigInt(other.totalMicros), `seed ${seed}: sums to the new total`);
+		assert.equal(sum(r), BigInt(other.totalTokens), `seed ${seed}: sums to the new total`);
 		for (const id of envelopeEntries(other)) assert.ok(r.allocations[id] >= other.floors[id], `seed ${seed}: ${id} keeps its floor`);
 		assert.deepEqual(Object.keys(r.allocations).sort(), envelopeEntries(other), `seed ${seed}: covers exactly the new entries`);
 	}
@@ -517,7 +517,7 @@ test("rebase onto the same envelope is the identity, and onto a new envelope sum
 test("rebase: the unallocated money weighs what it holds, so it stays unallocated in proportion", () => {
 	const v = { allocations: { shop: 40 * M, platform: 10 * M, [OTHER]: 0 }, unallocated: 50 * M };
 	// Above the floors: shop 30, platform 0, _other 0, unallocated 50. The new remainder of 180 splits 30:50.
-	assert.deepEqual(rebase(v, { ...ENV, totalMicros: 200 * M }), { allocations: { [OTHER]: 0, platform: 10 * M, shop: 77_500_000 }, unallocated: 112_500_000 });
+	assert.deepEqual(rebase(v, { ...ENV, totalTokens: 200 * M }), { allocations: { [OTHER]: 0, platform: 10 * M, shop: 77_500_000 }, unallocated: 112_500_000 });
 });
 
 test("rebase: a new floor, an added project, a dropped project and unallocated money", () => {
@@ -533,7 +533,7 @@ test("rebase: a new floor, an added project, a dropped project and unallocated m
 	assert.deepEqual(dropped.allocations, { [OTHER]: 30 * M, shop: 70 * M });
 	// Unallocated money stays unallocated in proportion, and all-floor vectors leave new headroom unallocated.
 	const idle = { allocations: { shop: 10 * M, platform: 10 * M, [OTHER]: 0 }, unallocated: 80 * M };
-	assert.deepEqual(rebase(idle, { ...ENV, totalMicros: 200 * M }), { allocations: { [OTHER]: 0, platform: 10 * M, shop: 10 * M }, unallocated: 180 * M });
+	assert.deepEqual(rebase(idle, { ...ENV, totalTokens: 200 * M }), { allocations: { [OTHER]: 0, platform: 10 * M, shop: 10 * M }, unallocated: 180 * M });
 	const full = { allocations: { shop: 50 * M, platform: 50 * M, [OTHER]: 0 }, unallocated: 0 };
 	assert.deepEqual(rebase(full, envelope({ total: 120 * M, floors: { shop: 50 * M, platform: 50 * M } })), { allocations: { [OTHER]: 0, platform: 50 * M, shop: 50 * M }, unallocated: 20 * M });
 });

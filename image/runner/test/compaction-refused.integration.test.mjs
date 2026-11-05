@@ -6,8 +6,8 @@ import { test } from "node:test";
 // All pure: no static pi import anywhere in their module graph, so they load unconditionally and the gate below
 // applies only to pi itself. session.mjs DOES import pi, so it is loaded dynamically with it.
 import { createJobModelRuntime } from "../src/model-runtime.mjs";
-import { createCostGuard, createUsageMeter, installProcessUsageMeter, makeHardStopStream, resolvePiAiCompat, STOP_MESSAGES } from "../src/usage-meter.mjs";
-import { COST_CAP, decideExit, EXIT_POLICY, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { createUsageMeter, installProcessUsageMeter, makeHardStopStream, resolvePiAiCompat, STOP_MESSAGES } from "../src/usage-meter.mjs";
+import { decideExit, EXIT_POLICY, TOKEN_BUDGET } from "../src/outcome.mjs";
 import { compactionSummaryIsEmpty, fileListSuffix, hasEmptyCompaction, makeSessionStore, SESSION_FILE_NAME } from "../../../worker/src/session-store.mjs";
 import { sessionKeyFor } from "../../../worker/src/session-key.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -53,7 +53,7 @@ const FORTY_CENTS = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, tot
  * One job's worth of pi: a models.json declaring the offline provider, the runner's ModelRuntime, the meter (with
  * a guard for a cost cap), and a session on a FILE, so what pi persists is what a promotion would copy.
  */
-async function job({ api, priced = false, maxTokens = null, capMicros = null, keepRecentTokens }) {
+async function job({ api, priced = false, maxTokens = null, keepRecentTokens }) {
 	const root = tempDir("pi-dispatch-535-");
 	const modelsPath = join(root, "models.json");
 	const cost = priced ? { input: 1, output: 100, cacheRead: 0, cacheWrite: 0 } : { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 };
@@ -66,9 +66,8 @@ async function job({ api, priced = false, maxTokens = null, capMicros = null, ke
 	writeFileSync(sessionFile, "");
 	const { sessionManager } = openSessionManager({ sessionFile, cwd: root });
 
-	const meter = createUsageMeter({ maxTokens, maxCostMicros: capMicros, rootSessionId: sessionManager.getSessionId() });
-	const guard = capMicros === null ? null : createCostGuard({ capMicros, log: () => {} });
-	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, ...(guard ? { guard } : {}), log: () => {} });
+	const meter = createUsageMeter({ maxTokens, rootSessionId: sessionManager.getSessionId() });
+	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, log: () => {} });
 	assert.equal(installed.ok, true);
 	assert.equal(installed.brake, true, "the brake is the subject: a cap without one is enforced only after the fact");
 
@@ -181,17 +180,16 @@ test("token cap crossed after two exchanges, then session.compact(): both calls 
 	}
 });
 
-test("cost cap: the compaction's call is the one refused, and pi stores the empty split-turn summary the host refuses", { skip }, async () => {
-	// One turn fits under $1.30 (about $1.01 bound, $0.40 settled); the compaction's call (0.40 + about 1.01) does
-	// not, so the cost guard refuses it before dispatch and the brake answers it. openai-completions is a priced api,
-	// so the guard bounds the call from the model's catalog row.
-	const run = await job({ api: "openai-completions", priced: true, capMicros: 1_300_000, keepRecentTokens: 1 });
+test("token cap: the compaction's answer is the one stopped at the settle-time check, and pi stores the empty split-turn summary the host refuses", { skip }, async () => {
+	// The token cap has no pre-call form (its stop is the meter's settle-time check, OQ-010), so a maxTokens of one
+	// admits the first prompt and stops the run there: the brake answers the compaction's call, which never dispatches.
+	const run = await job({ api: "openai-completions", priced: true, maxTokens: 1, keepRecentTokens: 1 });
 	try {
 		await run.session.prompt("prompt 0");
-		assert.equal(run.meter.state.stopReason, null, "the first call fits under the cap");
+		assert.equal(run.meter.state.stopReason, "token_budget", "the first settle crosses a cap of one token");
 		await run.session.compact();
 		assert.deepEqual(run.calls, [MODEL_ID], "the compaction's call never reached the provider");
-		assertRefusedAndRefused({ run, stop: COST_CAP, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
+		assertRefusedAndRefused({ run, stop: TOKEN_BUDGET, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
 	} finally {
 		run.done();
 	}

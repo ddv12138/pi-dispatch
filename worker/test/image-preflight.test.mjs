@@ -330,14 +330,14 @@ test("Podman's bare-hex image id is published in docker's sha256: spelling, and 
 
 // --- the capability gates are ONE table (issues #501, #502) ---
 
-test("CAPABILITY_GATES: the old three in their old order, then modelPolicy (#502), costCap (#501), mcp, forgeMcp, awaitInput (#625), reportProgress (#644), recover (#645), steer (#646), sandboxLayout (#683) and observableRunner (#730), each keyed once, each free for a job without its feature", async () => {
-	assert.deepEqual(CAPABILITY_GATES.map((gate) => gate.token), ["replicas", "commands", "excludeTools", "modelPolicy", "costCap", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "observableRunner", "fork", "approvalGates", "modelFailover", "modelRoles", "watch", "questionGrouping", "answerDraft", "subscriptionAuth", "packageCanary"], "the order the branches had, so a job carrying several is refused for the same one; a new row appends, in the order the features landed");
+test("CAPABILITY_GATES: the old three in their old order, then modelPolicy (#502), tokenBudget (#501), mcp, forgeMcp, awaitInput (#625), reportProgress (#644), recover (#645), steer (#646), sandboxLayout (#683) and observableRunner (#730), each keyed once, each free for a job without its feature", async () => {
+	assert.deepEqual(CAPABILITY_GATES.map((gate) => gate.token), ["replicas", "commands", "excludeTools", "modelPolicy", "tokenBudget", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "observableRunner", "fork", "approvalGates", "modelFailover", "modelRoles", "watch", "questionGrouping", "answerDraft", "subscriptionAuth", "packageCanary"], "the order the branches had, so a job carrying several is refused for the same one; a new row appends, in the order the features landed");
 	for (const key of ["token", "result", "reason", "event"]) {
 		assert.equal(new Set(CAPABILITY_GATES.map((gate) => gate[key])).size, CAPABILITY_GATES.length, `${key} is unique per row`);
 	}
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
 	// A job carrying EVERY gated feature, on an image that declares none: the first row refuses.
-	const all = { packageCanary: { name: "a", version: "1.0.0" }, answerDraft: {}, questionGrouping: {}, watch: {}, modelRoles: { editor: "anthropic/claude-x" }, kind: "local", replica: 2, replicas: 2, command: "wf run", excludeTools: ["bash"], models: ["anthropic/claude-x"], maxCostMicros: 2_500_000, mcp: ["docs", "forge"], awaitInput: true, progress: true, recover: true, steer: true, fork: {}, gates: ["deploy:staging"], fallbackModels: ["anthropic/claude-x"] };
+	const all = { packageCanary: { name: "a", version: "1.0.0" }, answerDraft: {}, questionGrouping: {}, watch: {}, modelRoles: { editor: "anthropic/claude-x" }, kind: "local", replica: 2, replicas: 2, command: "wf run", excludeTools: ["bash"], models: ["anthropic/claude-x"], maxTokens: 2_500_000, mcp: ["docs", "forge"], awaitInput: true, progress: true, recover: true, steer: true, fork: {}, gates: ["deploy:staging"], fallbackModels: ["anthropic/claude-x"] };
 	const none = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("")) });
 	assert.deepEqual(await none(all), { replicaUnsupported: "i", declared: [] });
 	// Declare tokens one at a time: each declaration moves the refusal to the next row, then passes.
@@ -357,7 +357,7 @@ test("CAPABILITY_GATES: the old three in their old order, then modelPolicy (#502
 
 test("reportProgress (#644): a job armed with run.progress needs it; an unarmed one never does", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput"];
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput"];
 	const old = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
 	assert.deepEqual(await old({ kind: "github", progress: true }), { progressUnsupported: "i", declared });
 	for (const job of [{ kind: "github" }, { kind: "github", progress: false }, { kind: "github", progress: "true" }]) {
@@ -373,7 +373,7 @@ test("reportProgress (#644): a job armed with run.progress needs it; an unarmed 
 
 test("recover (#645): a job armed with run.recover needs it; an unarmed one never does", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress"];
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress"];
 	const old = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
 	assert.deepEqual(await old({ kind: "github", recover: true }), { recoverUnsupported: "i", declared });
 	for (const job of [{ kind: "github" }, { kind: "github", recover: false }, { kind: "github", recover: "true" }]) {
@@ -389,7 +389,7 @@ test("recover (#645): a job armed with run.recover needs it; an unarmed one neve
 
 test("steer (#646): a job armed with run.steer needs it; an unarmed one never does", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover"];
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover"];
 	const old = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
 	assert.deepEqual(await old({ kind: "github", steer: true }), { steerUnsupported: "i", declared });
 	assert.deepEqual(await old({ kind: "local", steer: true }), { steerUnsupported: "i", declared }, "a cron or local job armed with it needs it too");
@@ -415,31 +415,31 @@ test("modelPolicy (#502): a job with an effective allowed-model list on an image
 	assert.equal((await fresh({ kind: "github", models: ["openai/gpt-x"] })).ok, true);
 });
 
-test("costCap (issue #501): any job carrying a dollar cap, 0 included, needs it; a job with none never does", async () => {
+test("tokenBudget (issue #501): any job carrying a token budget, 0 included, needs it; a job with none never does", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
 	const old = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("replicas,commands,excludeTools,anyUid")) });
-	// An image built before the cost guard: its runner reads no PI_MAX_COST_MICROS, so a capped job would run
+	// An image built before the meter: its runner reads no PI_MAX_TOKENS, so a capped job would run
 	// UNCAPPED and record a clean exit. Refused pre-spend for every cap, the tightest (0) included.
-	for (const maxCostMicros of [0, 1, 2_500_000]) {
-		assert.deepEqual(await old({ kind: "github", maxCostMicros }), { costCapUnsupported: "i", declared: ["replicas", "commands", "excludeTools", "anyUid"] }, `cap ${maxCostMicros}`);
+	for (const maxTokens of [0, 1, 2_500_000]) {
+		assert.deepEqual(await old({ kind: "github", maxTokens }), { tokenBudgetUnsupported: "i", declared: ["replicas", "commands", "excludeTools", "anyUid"] }, `cap ${maxTokens}`);
 	}
-	// No cap: the row costs nothing, so a deployment that set no dollar cap runs its old image as before.
-	for (const job of [{ kind: "github", maxCostMicros: null }, { kind: "github" }]) {
+	// No cap: the row costs nothing, so a deployment that set no token budget runs its old image as before.
+	for (const job of [{ kind: "github", maxTokens: null }, { kind: "github" }]) {
 		assert.equal((await old(job)).ok, true, JSON.stringify(job));
 	}
 	// The image that declares it runs the capped job.
-	const current = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("replicas,commands,excludeTools,anyUid,costCap")) });
-	assert.equal((await current({ kind: "github", maxCostMicros: 0 })).ok, true);
-	const row = CAPABILITY_GATES.find((gate) => gate.token === "costCap");
-	assert.equal(row.reason, "job-image-cost-cap-unsupported");
-	assert.equal(row.event, "refused_image_cost_cap_unsupported");
-	assert.match(row.comment("img", "is absent"), /per-job dollar cap/);
+	const current = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("replicas,commands,excludeTools,anyUid,tokenBudget")) });
+	assert.equal((await current({ kind: "github", maxTokens: 0 })).ok, true);
+	const row = CAPABILITY_GATES.find((gate) => gate.token === "tokenBudget");
+	assert.equal(row.reason, "job-image-token-budget-unsupported");
+	assert.equal(row.event, "refused_image_token_budget_unsupported");
+	assert.match(row.comment("img", "is absent"), /per-job token budget/);
 });
 
 test("forgeMcp (DES-FORGE-MCP): a job whose run.mcp names `forge` needs it beside mcp; a job naming only overlay servers never does", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github,gitlab${FIELD_SEP}${caps}\n`;
-	const mcpOnly = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("replicas,commands,excludeTools,anyUid,costCap,modelPolicy,exitAuth,mcp")) });
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp"];
+	const mcpOnly = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label("replicas,commands,excludeTools,anyUid,tokenBudget,modelPolicy,exitAuth,mcp")) });
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp"];
 	assert.deepEqual(await mcpOnly({ kind: "github", mcp: ["forge"] }), { forgeMcpUnsupported: "i", declared });
 	assert.deepEqual(await mcpOnly({ kind: "gitlab", mcp: ["docs", "forge"] }), { forgeMcpUnsupported: "i", declared });
 	assert.equal((await mcpOnly({ kind: "github", mcp: ["docs", "forges"] })).ok, true, "an overlay server's name is not the forge's");
@@ -455,7 +455,7 @@ test("forgeMcp (DES-FORGE-MCP): a job whose run.mcp names `forge` needs it besid
 
 test("observableRunner (#730): armed by the VENUE, on every job of a brokered one (both OpenShell modes), and never elsewhere", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "transcriptStderr", "steerStdin", "bundleEnvFile"];
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "transcriptStderr", "steerStdin", "bundleEnvFile"];
 	// Bind mode is brokered and does not copy: the row is armed there too.
 	for (const copies of [true, false]) {
 		const brokered = makeImagePreflight({ image: "i", copies, brokered: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
@@ -477,7 +477,7 @@ test("observableRunner (#730): armed by the VENUE, on every job of a brokered on
 
 test("sandboxLayout (#683): armed by the VENUE, on every job of a copying one, and never on a binding one", async () => {
 	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "costCap", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer"];
+	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer"];
 	const copying = makeImagePreflight({ image: "i", copies: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
 	for (const job of [{ kind: "github" }, { kind: "local" }, { kind: "github", steer: false }]) {
 		assert.deepEqual(await copying(job), { sandboxLayoutUnsupported: "i", declared }, JSON.stringify(job));

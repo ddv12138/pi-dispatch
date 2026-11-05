@@ -555,7 +555,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	);
 	// NON-VACUITY, the discipline this file already keeps for its other scans: a regex that matches nothing
 	// passes every assertion above it. 125 is the count both mirrors carry today (VALKEY_PASSWORD and PI_VALKEY_PORT joined in issue #468,
-	// PI_MODEL_ENDPOINTS_FILE in issue #503, PI_ALLOWED_MODELS in issue #502, the four PI_*_COST_USD dollar settings in issue #501,
+	// PI_MODEL_ENDPOINTS_FILE in issue #503, PI_ALLOWED_MODELS in issue #502, the four PI_*_COST_TOKENS token settings in issue #501,
 	// PI_PROJECTS_FILE in issue #499, PI_ENVELOPE_FILE in issue #504, PI_JOB_MEMORY and PI_JOB_CPUS in issue #596, and the four
 	// PI_HOST_* budget settings in its phase 2, FORGEJO_PERMISSION_TOKEN for OQ-043, the eight PI_CONSOLE_* keys of
 	// issue #640, PI_LIVE_TRANSCRIPTS in issue #643, PI_RUN_PROGRESS in issue #644, PI_CHECKPOINTS_DIR in issue #645, and PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY in issue #683, PI_SECRET_BUNDLES in issue #704, PI_DOCTOR_INTERVAL_HOURS in issue #712; PI_GRAPH_DIR left with the
@@ -567,7 +567,9 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The count also carries ONE
 	// assignment this file already had at the pin's last edit, which is why it moves by two: at HEAD the file
 	// carried 137 assignments against this pin's 136, so this assertion was already failing before the switch.
-	assert.equal(scanned, 138, "the scan must actually reach every assignment in the file");
+	// The token-only accounting removes the last two retired dollar keys (PI_WEEKLY_COST_USD,
+	// PI_MONTHLY_COST_USD), whose token replacements the file already declared, so the pin follows the file down.
+	assert.equal(scanned, 136, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

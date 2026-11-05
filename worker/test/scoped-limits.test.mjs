@@ -11,19 +11,19 @@ import {
 	concurrencyFor,
 	scopeKeyPrefix,
 	makeInFlight,
-	dollarCapsFor,
-	modelDollarRows,
-	scopeDollarKeyPrefix,
-	modelDollarKeyPrefix,
-	dollarKeyPrefixFor,
+	tokenCapsFor,
+	modelTokenRows,
+	scopeTokenKeyPrefix,
+	modelTokenKeyPrefix,
+	tokenKeyPrefixFor,
 	scopedLimitsVersionFor,
 	rowScopeFor,
 	scopedLedgers,
 	projectRowFor,
-	projectDollarCapsFor,
+	projectTokenCapsFor,
 	danglingProjectRows,
 	checkProjectRows,
-	dollarRowsWithoutCap,
+	tokenRowsWithoutCap,
 	isProjectScope,
 	projectScope,
 } from "../src/scoped-limits.mjs";
@@ -62,7 +62,7 @@ test("parseScopedLimits round-trips its own output (null is absent, the subscrip
 test("parseScopedLimits rejects malformed files fail-loud", () => {
 	assert.throws(() => parseScopedLimits("{ not json", "sl.json"), /not valid JSON/);
 	assert.throws(() => parseScopedLimits(JSON.stringify([]), "sl.json"), /must be an object with "version" and "limits"/);
-	assert.throws(() => parseScopedLimits(JSON.stringify({ limits: [] }), "sl.json"), /must have "version": 1 to 3 \(an integer >= 1\)/);
+	assert.throws(() => parseScopedLimits(JSON.stringify({ limits: [] }), "sl.json"), /must have "version": 1 to 4 \(an integer >= 1\)/);
 	assert.throws(() => parseScopedLimits(JSON.stringify({ version: 0, limits: [] }), "sl.json"), /must have "version": 1/);
 	assert.throws(() => parseScopedLimits(JSON.stringify({ version: "1", limits: [] }), "sl.json"), /must have "version": 1/);
 	assert.throws(() => parseScopedLimits(JSON.stringify({ version: 1 }), "sl.json"), /must have a "limits" array/);
@@ -82,10 +82,10 @@ test("parseScopedLimits rejects malformed files fail-loud", () => {
 
 test("parseScopedLimits refuses a newer version loudly, naming both", () => {
 	assert.throws(
-		() => parseScopedLimits(wrap([], 4), "sl.json"),
-		/written by a newer pi-dispatch \(version 4; this build understands 3\)/,
+		() => parseScopedLimits(wrap([], 5), "sl.json"),
+		/written by a newer pi-dispatch \(version 5; this build understands 4\)/,
 	);
-	assert.equal(SCOPED_LIMITS_VERSION, 3);
+	assert.equal(SCOPED_LIMITS_VERSION, 4);
 });
 
 // ── version 3: job sizes on project rows (issue #596) ──────────────────────────────────────────────────
@@ -94,7 +94,7 @@ const v3 = (limits) => parseScopedLimits(wrap(limits, 3), "sl.json");
 
 test("v3: a project row may carry memory, cpus, hostShare and minJobs, normalized to one spelling each, and a size alone is a valid row", () => {
 	const [row] = v3([{ scope: "project:heavy", memory: "16384m", cpus: "1.50", hostShare: 50, minJobs: 2 }]);
-	assert.deepEqual(row, { scope: "project:heavy", day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: null, monthUsd: null, memory: "16g", cpus: 1.5, hostShare: 50, minJobs: 2 });
+	assert.deepEqual(row, { scope: "project:heavy", day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null, memory: "16g", cpus: 1.5, hostShare: 50, minJobs: 2 });
 	// The widened "limits nothing" rule: a row with only a size limits something (its jobs' size).
 	assert.deepEqual(v3([{ scope: "project:light", memory: "1g" }])[0].memory, "1g");
 	assert.deepEqual(v3([{ scope: "project:light", cpus: 0.25 }])[0].cpus, 0.25);
@@ -104,11 +104,11 @@ test("v3: a project row may carry memory, cpus, hostShare and minJobs, normalize
 	assert.deepEqual(again, v3([{ scope: "project:p", memory: "1536m", cpus: 0.29, concurrent: 3, minJobs: 3 }]));
 	assert.deepEqual([again[0].memory, again[0].cpus], ["1536m", 0.29]);
 	// Every row of a version 3 file carries the four keys, null unless set, so the shape is one per version.
-	const rows = v3([{ scope: "acme/web", day: 1 }, { scope: "model:openai/gpt-x", dayUsd: "1" }]);
+	const rows = v3([{ scope: "acme/web", day: 1 }, { scope: "model:openai/gpt-x", dayTokens: 1 }]);
 	for (const r of rows) assert.deepEqual([r.memory, r.cpus, r.hostShare, r.minJobs], [null, null, null, null], r.scope);
 	// A version 1 or 2 row reads into exactly the literal it always did: no size keys at all.
 	assert.equal("memory" in parse([{ scope: "acme/web", day: 1 }])[0], false);
-	assert.equal("memory" in parseScopedLimits(wrap([{ scope: "acme/web", dayUsd: "1" }], 2), "sl.json")[0], false);
+	assert.equal("memory" in parseScopedLimits(wrap([{ scope: "acme/web", dayTokens: 1 }], 2), "sl.json")[0], false);
 });
 
 test("v3: a size field in a version 1 or 2 file is refused naming version 3, and off a project row in any version", () => {
@@ -122,8 +122,8 @@ test("v3: a size field in a version 1 or 2 file is refused naming version 3, and
 		assert.throws(() => v3([{ scope, day: 1, memory: "1g" }]), /memory belong on a project row \(project:<id>\)/, scope);
 		assert.throws(() => v3([{ scope, cpus: 2 }]), /cpus belong on a project row/, scope);
 	}
-	assert.throws(() => v3([{ scope: "model:openai/gpt-x", dayUsd: "1", memory: "1g" }]), /a model row carries dayUsd, weekUsd and monthUsd only \(memory is refused\)/);
-	assert.throws(() => v3([{ scope: "project:p" }]), /at least one of day, week, month, concurrent, dayUsd, weekUsd, monthUsd, memory, cpus, hostShare, minJobs is required/);
+	assert.throws(() => v3([{ scope: "model:openai/gpt-x", dayTokens: 1, memory: "1g" }]), /a model row carries dayTokens, weekTokens and monthTokens only \(memory is refused\)/);
+	assert.throws(() => v3([{ scope: "project:p" }]), /at least one of day, week, month, concurrent, dayTokens, weekTokens, monthTokens, memory, cpus, hostShare, minJobs is required/);
 	assert.throws(() => v3([{ scope: "project:p", memory: null, cpus: null }]), /is required/, "explicit nulls are absent");
 });
 
@@ -350,108 +350,108 @@ test("makeInFlight: Infinity always admits and scopes are independent", () => {
 	assert.equal(m.count("b"), 1);
 });
 
-// ── version 2: dollar windows on repo and folder rows (#501 part 5) and model rows (#502 part 6) ─────────────────
+// ── version 2: token windows on repo and folder rows (#501 part 5) and model rows (#502 part 6) ─────────────────
 
 const parse2 = (limits) => parseScopedLimits(wrap(limits, 2), "sl.json");
 const sha16 = (v) => createHash("sha256").update(v).digest("hex").slice(0, 16);
 
-test("v2: a repo row carries dayUsd/weekUsd/monthUsd as canonical decimals, beside its counts; the literal has eight keys", () => {
-	const [row] = parse2([{ scope: "acme/web", day: 3, dayUsd: "2.5", weekUsd: 10, monthUsd: "0.000001" }]);
-	assert.deepEqual(row, { scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayUsd: "2.50", weekUsd: "10.00", monthUsd: "0.000001" });
-	// A dollar-only row is a row: it limits something.
-	assert.equal(parse2([{ scope: "acme/web", weekUsd: "1" }])[0].weekUsd, "1.00");
-	// The overlay's number rules: no exponent in a string, at most 6 decimals, above 0.
-	assert.throws(() => parse2([{ scope: "acme/web", dayUsd: "1e3" }]), /index 0: dayUsd must be a dollar amount above 0/);
-	assert.throws(() => parse2([{ scope: "acme/web", dayUsd: "0.1234567" }]), /dayUsd must be a dollar amount/);
-	assert.throws(() => parse2([{ scope: "acme/web", monthUsd: 0 }]), /monthUsd must be a dollar amount above 0/);
-	assert.throws(() => parse2([{ scope: "acme/web" }]), /at least one of day, week, month, concurrent, dayUsd, weekUsd, monthUsd is required/);
+test("v2: a repo row carries dayTokens/weekTokens/monthTokens as whole token counts, beside its counts; the literal has eight keys", () => {
+	const [row] = parse2([{ scope: "acme/web", day: 3, dayTokens: 2_500, weekTokens: 10_000, monthTokens: 1 }]);
+	assert.deepEqual(row, { scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayTokens: 2_500, weekTokens: 10_000, monthTokens: 1 });
+	// A token-only row is a row: it limits something.
+	assert.equal(parse2([{ scope: "acme/web", weekTokens: 1_000 }])[0].weekTokens, 1_000);
+	// Whole numbers only: a float, a 0 and a string are all refused, naming the field.
+	assert.throws(() => parse2([{ scope: "acme/web", dayTokens: 1.5 }]), /index 0: dayTokens must be an integer >= 1/);
+	assert.throws(() => parse2([{ scope: "acme/web", dayTokens: 0 }]), /dayTokens must be an integer >= 1/);
+	assert.throws(() => parse2([{ scope: "acme/web", monthTokens: 0 }]), /monthTokens must be an integer >= 1/);
+	assert.throws(() => parse2([{ scope: "acme/web" }]), /at least one of day, week, month, concurrent, dayTokens, weekTokens, monthTokens is required/);
 	// The parser accepts its own output back (the admin's read-modify-write).
-	const again = parse2(parse2([{ scope: "acme/web", dayUsd: "2.5" }]));
-	assert.equal(again[0].dayUsd, "2.50");
+	const again = parse2(parse2([{ scope: "acme/web", dayTokens: 2500 }]));
+	assert.equal(again[0].dayTokens, 2_500);
 });
 
-test("v1 stays v1: read unchanged (the five-key literal), and a v1 file using dollar fields or a model row is REFUSED naming version 2", () => {
+test("v1 stays v1: read unchanged (the five-key literal), and a v1 file using token fields or a model row is REFUSED naming version 2", () => {
 	assert.deepEqual(parse([{ scope: "acme/web", day: 3 }]), [{ scope: "acme/web", day: 3, week: null, month: null, concurrent: null }]);
-	assert.throws(() => parse([{ scope: "acme/web", day: 3, dayUsd: "5" }]), /index 0: dayUsd needs "version": 2 \(this file says 1\)/);
-	assert.throws(() => parse([{ scope: "acme/web", monthUsd: 5 }]), /monthUsd needs "version": 2/);
-	assert.throws(() => parse([{ scope: "model:openai/gpt-x", dayUsd: "5" }]), /a "model:" row needs "version": 2 \(this file says 1\)/);
-	// A null dollar field is absent, in v1 as in v2 (the subscriptions rule).
-	assert.equal(parse([{ scope: "acme/web", day: 3, dayUsd: null }])[0].day, 3);
+	assert.throws(() => parse([{ scope: "acme/web", day: 3, dayTokens: 5 }]), /index 0: dayTokens needs "version": 2 \(this file says 1\)/);
+	assert.throws(() => parse([{ scope: "acme/web", monthTokens: 5 }]), /monthTokens needs "version": 2/);
+	assert.throws(() => parse([{ scope: "model:openai/gpt-x", dayTokens: 5 }]), /a "model:" row needs "version": 2 \(this file says 1\)/);
+	// A null token field is absent, in v1 as in v2 (the subscriptions rule).
+	assert.equal(parse([{ scope: "acme/web", day: 3, dayTokens: null }])[0].day, 3);
 });
 
-test("v2 model rows: model:<provider>/<model> with *Usd fields only; counts and concurrency refused; ids checked; duplicates by case refused", () => {
-	const [m] = parse2([{ scope: " model:OpenAI/gpt-X ", monthUsd: "40" }]);
-	assert.deepEqual(m, { scope: "model:OpenAI/gpt-X", day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: null, monthUsd: "40.00" });
+test("v2 model rows: model:<provider>/<model> with token fields only; counts and concurrency refused; ids checked; duplicates by case refused", () => {
+	const [m] = parse2([{ scope: " model:OpenAI/gpt-X ", monthTokens: 40 }]);
+	assert.deepEqual(m, { scope: "model:OpenAI/gpt-X", day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: 40 });
 	for (const field of ["day", "week", "month", "concurrent"]) {
-		assert.throws(() => parse2([{ scope: "model:openai/gpt-x", dayUsd: "1", [field]: 1 }]), new RegExp(`carries dayUsd, weekUsd and monthUsd only \\(${field} is refused\\)`));
+		assert.throws(() => parse2([{ scope: "model:openai/gpt-x", dayTokens: 1, [field]: 1 }]), new RegExp(`carries dayTokens, weekTokens and monthTokens only \\(${field} is refused\\)`));
 	}
-	assert.throws(() => parse2([{ scope: "model:openai/gpt-x" }]), /a model row needs at least one of dayUsd, weekUsd, monthUsd/);
-	assert.throws(() => parse2([{ scope: "model:gpt-x", dayUsd: "1" }]), /model:<provider>\/<model>/);
-	assert.throws(() => parse2([{ scope: "model:open ai/x", dayUsd: "1" }]), /model:<provider>\/<model>/);
-	assert.throws(() => parse2([{ scope: "model:other/other", dayUsd: "1" }]), /fold row/);
+	assert.throws(() => parse2([{ scope: "model:openai/gpt-x" }]), /a model row needs at least one of dayTokens, weekTokens, monthTokens/);
+	assert.throws(() => parse2([{ scope: "model:gpt-x", dayTokens: 1 }]), /model:<provider>\/<model>/);
+	assert.throws(() => parse2([{ scope: "model:open ai/x", dayTokens: 1 }]), /model:<provider>\/<model>/);
+	assert.throws(() => parse2([{ scope: "model:other/other", dayTokens: 1 }]), /fold row/);
 	// A model id may carry a slash (openrouter vendor/model): split at the FIRST slash, as the allowed list does.
-	assert.equal(parse2([{ scope: "model:openrouter/anthropic/claude-x", dayUsd: "1" }])[0].scope, "model:openrouter/anthropic/claude-x");
-	assert.throws(() => parse2([{ scope: "model:openai/gpt-x", dayUsd: "1" }, { scope: "model:OpenAI/GPT-x", weekUsd: "1" }]), /duplicate scope/);
+	assert.equal(parse2([{ scope: "model:openrouter/anthropic/claude-x", dayTokens: 1 }])[0].scope, "model:openrouter/anthropic/claude-x");
+	assert.throws(() => parse2([{ scope: "model:openai/gpt-x", dayTokens: 1 }, { scope: "model:OpenAI/GPT-x", weekTokens: 1 }]), /duplicate scope/);
 });
 
 test("model rows are never a job's scope: limitFor, budgetCapsFor and concurrencyFor ignore them", () => {
-	const limits = parse2([{ scope: "model:openai/gpt-x", dayUsd: "1" }]);
+	const limits = parse2([{ scope: "model:openai/gpt-x", dayTokens: 1 }]);
 	assert.equal(limitFor(limits, ghJob("model:openai/gpt-x")), null);
 	assert.equal(budgetCapsFor(ghJob("model:openai/gpt-x"), limits), null);
 	assert.equal(concurrencyFor(ghJob("model:openai/gpt-x"), limits), Infinity);
 });
 
-test("dollarCapsFor: the scope row's dollar windows in integer micro-dollars under budget:usd:s:<hash16 of the canonical scope>", () => {
+test("tokenCapsFor: the scope row's token windows in integer tokens under budget:tok:s:<hash16 of the canonical scope>", () => {
 	const limits = parse2([
-		{ scope: "acme/web", day: 3, dayUsd: "2.5", monthUsd: "100" },
-		{ scope: "/srv/site/", weekUsd: "1.25" },
+		{ scope: "acme/web", day: 3, dayTokens: 2500, monthTokens: 100 },
+		{ scope: "/srv/site/", weekTokens: 1250 },
 		{ scope: "acme/count", day: 3 },
 	]);
-	assert.deepEqual(dollarCapsFor(ghJob("acme/web"), limits), { scope: "acme/web", keyPrefix: `budget:usd:s:${sha16("acme/web")}`, caps: { day: 2_500_000, week: null, month: 100_000_000 } });
-	const local = dollarCapsFor(localJob("/srv//site"), limits);
-	assert.deepEqual(local.caps, { day: null, week: 1_250_000, month: null });
-	assert.equal(local.keyPrefix, `budget:usd:s:${sha16(resolve("/srv/site"))}`, "the same canonical scope the job-count windows hash");
-	assert.equal(local.keyPrefix.slice("budget:usd:s:".length), scopeKeyPrefix(resolve("/srv/site")).slice("budget:s:".length), "the SAME hash as the job-count key");
-	assert.equal(dollarCapsFor(ghJob("acme/count"), limits), null, "a count-only row has no dollar window");
-	assert.equal(dollarCapsFor(ghJob("acme/other"), limits), null);
+	assert.deepEqual(tokenCapsFor(ghJob("acme/web"), limits), { scope: "acme/web", keyPrefix: `budget:tok:s:${sha16("acme/web")}`, caps: { day: 2_500, week: null, month: 100 } });
+	const local = tokenCapsFor(localJob("/srv//site"), limits);
+	assert.deepEqual(local.caps, { day: null, week: 1_250, month: null });
+	assert.equal(local.keyPrefix, `budget:tok:s:${sha16(resolve("/srv/site"))}`, "the same canonical scope the job-count windows hash");
+	assert.equal(local.keyPrefix.slice("budget:tok:s:".length), scopeKeyPrefix(resolve("/srv/site")).slice("budget:s:".length), "the SAME hash as the job-count key");
+	assert.equal(tokenCapsFor(ghJob("acme/count"), limits), null, "a count-only row has no token window");
+	assert.equal(tokenCapsFor(ghJob("acme/other"), limits), null);
 	assert.deepEqual(budgetCapsFor(ghJob("acme/web"), limits), { scope: "acme/web", caps: { day: 3, week: null, month: null } }, "budgetCapsFor unchanged");
 });
 
-test("modelDollarRows: a list reserves in its listed rows (ignoring case); NO list reserves in EVERY row; key = hash16 of the LOWERCASED ref", () => {
+test("modelTokenRows: a list reserves in its listed rows (ignoring case); NO list reserves in EVERY row; key = hash16 of the LOWERCASED ref", () => {
 	const limits = parse2([
-		{ scope: "acme/web", dayUsd: "1" },
-		{ scope: "model:OpenAI/GPT-x", dayUsd: "1" },
-		{ scope: "model:ollama/qwen3:0.6b", weekUsd: "0.05" },
+		{ scope: "acme/web", dayTokens: 1 },
+		{ scope: "model:OpenAI/GPT-x", dayTokens: 1 },
+		{ scope: "model:ollama/qwen3:0.6b", weekTokens: 50 },
 	]);
-	const gpt = { ref: "openai/gpt-x", keyPrefix: `budget:usd:mdl:${sha16("openai/gpt-x")}`, caps: { day: 1_000_000, week: null, month: null } };
-	const qwen = { ref: "ollama/qwen3:0.6b", keyPrefix: `budget:usd:mdl:${sha16("ollama/qwen3:0.6b")}`, caps: { day: null, week: 50_000, month: null } };
-	assert.deepEqual(modelDollarRows(limits, ["openai/gpt-x"]), [gpt]);
-	assert.deepEqual(modelDollarRows(limits, ["ollama/qwen3:0.6b", "anthropic/claude-x"]), [qwen]);
-	assert.deepEqual(modelDollarRows(limits, null), [gpt, qwen], "unrestricted: every model row (fail closed)");
-	assert.deepEqual(modelDollarRows(limits, undefined), [gpt, qwen]);
-	assert.deepEqual(modelDollarRows([], null), []);
+	const gpt = { ref: "openai/gpt-x", keyPrefix: `budget:tok:mdl:${sha16("openai/gpt-x")}`, caps: { day: 1, week: null, month: null } };
+	const qwen = { ref: "ollama/qwen3:0.6b", keyPrefix: `budget:tok:mdl:${sha16("ollama/qwen3:0.6b")}`, caps: { day: null, week: 50, month: null } };
+	assert.deepEqual(modelTokenRows(limits, ["openai/gpt-x"]), [gpt]);
+	assert.deepEqual(modelTokenRows(limits, ["ollama/qwen3:0.6b", "anthropic/claude-x"]), [qwen]);
+	assert.deepEqual(modelTokenRows(limits, null), [gpt, qwen], "unrestricted: every model row (fail closed)");
+	assert.deepEqual(modelTokenRows(limits, undefined), [gpt, qwen]);
+	assert.deepEqual(modelTokenRows([], null), []);
 	// One model is one counter whatever case it is spelled in, and the ledger's lowercased ids meet it.
-	assert.equal(modelDollarKeyPrefix("OpenAI/GPT-x"), modelDollarKeyPrefix("openai/gpt-x"));
-	assert.equal(modelDollarKeyPrefix("OpenAI/GPT-x"), `budget:usd:mdl:${sha16("openai/gpt-x")}`);
-	assert.equal(dollarKeyPrefixFor(limits[1]), gpt.keyPrefix);
-	assert.equal(dollarKeyPrefixFor(limits[0]), scopeDollarKeyPrefix("acme/web"));
-	assert.ok(!gpt.keyPrefix.startsWith("budget:usd:p:") && !scopeDollarKeyPrefix("x").startsWith("budget:usd:p:"), "no key under the withdrawn budget:usd:p: prefix (issue #499 part B)");
+	assert.equal(modelTokenKeyPrefix("OpenAI/GPT-x"), modelTokenKeyPrefix("openai/gpt-x"));
+	assert.equal(modelTokenKeyPrefix("OpenAI/GPT-x"), `budget:tok:mdl:${sha16("openai/gpt-x")}`);
+	assert.equal(tokenKeyPrefixFor(limits[1]), gpt.keyPrefix);
+	assert.equal(tokenKeyPrefixFor(limits[0]), scopeTokenKeyPrefix("acme/web"));
+	assert.ok(!gpt.keyPrefix.startsWith("budget:tok:p:") && !scopeTokenKeyPrefix("x").startsWith("budget:tok:p:"), "no key under the withdrawn budget:tok:p: prefix (issue #499 part B)");
 });
 
-test("scopedLimitsVersionFor: 1 unless a row carries a dollar field or is a model row", () => {
+test("scopedLimitsVersionFor: 1 unless a row carries a token field or is a model row", () => {
 	assert.equal(scopedLimitsVersionFor([]), 1);
-	assert.equal(scopedLimitsVersionFor([{ scope: "a/b", day: 1, dayUsd: null }]), 1);
-	assert.equal(scopedLimitsVersionFor([{ scope: "a/b", day: 1 }, { scope: "c/d", weekUsd: "1" }]), 2);
-	assert.equal(scopedLimitsVersionFor([{ scope: "model:a/b", dayUsd: "1" }]), 2);
+	assert.equal(scopedLimitsVersionFor([{ scope: "a/b", day: 1, dayTokens: null }]), 1);
+	assert.equal(scopedLimitsVersionFor([{ scope: "a/b", day: 1 }, { scope: "c/d", weekTokens: 1 }]), 2);
+	assert.equal(scopedLimitsVersionFor([{ scope: "model:a/b", dayTokens: 1 }]), 2);
 });
 
 test("a NEAR MISS of a model or project row is refused, never read as an inert repo row (PR #549's review, issue #499 part B)", () => {
 	for (const scope of ["Model:openai/gpt-x", "MODEL:openai/gpt-x", "models:openai/gpt-x", "model :openai/gpt-x", "Models  :x/y"]) {
-		assert.throws(() => parse2([{ scope, dayUsd: "1" }]), /written exactly model:<provider>\/<model>/, scope);
+		assert.throws(() => parse2([{ scope, dayTokens: 1 }]), /written exactly model:<provider>\/<model>/, scope);
 		assert.throws(() => parse([{ scope, day: 1 }]), /written exactly model:<provider>\/<model>/, `${scope} (v1)`);
 	}
 	for (const scope of ["Project:abc", "PROJECT:abc", "projects:abc", "project :abc", "Projects  :abc"]) {
-		assert.throws(() => parse2([{ scope, dayUsd: "1" }]), /written exactly project:<id>/, scope);
+		assert.throws(() => parse2([{ scope, dayTokens: 1 }]), /written exactly project:<id>/, scope);
 		assert.throws(() => parse([{ scope, day: 1 }]), /written exactly project:<id>/, `${scope} (v1)`);
 	}
 	// The exact prefix with an id the projects file could never hold.
@@ -464,7 +464,7 @@ test("a NEAR MISS of a model or project row is refused, never read as an inert r
 });
 
 test("a case-colliding duplicate model row names the FIRST row's index (PR #549's review)", () => {
-	assert.throws(() => parse2([{ scope: "acme/web", day: 1 }, { scope: "model:openai/gpt-x", dayUsd: "1" }, { scope: "model:OpenAI/gpt-x", weekUsd: "1" }]), /\(first at index 1\)/);
+	assert.throws(() => parse2([{ scope: "acme/web", day: 1 }, { scope: "model:openai/gpt-x", dayTokens: 1 }, { scope: "model:OpenAI/gpt-x", weekTokens: 1 }]), /\(first at index 1\)/);
 });
 
 // ── forge-qualified scopes (issue #498) ─────────────────────────────────────────────────────────────────
@@ -494,8 +494,8 @@ test("a bare row and a qualified row for one repo refuse the file, naming both i
 	assert.equal(parse2([{ scope: "github:acme/web", day: 1 }, { scope: "forgejo:acme/web", day: 1 }, { scope: "acme/api", day: 1 }]).length, 3);
 });
 
-test("a bare row and a qualified row for one repo refuse the file when both carry dollar windows only", () => {
-	assert.throws(() => parse2([{ scope: "acme/web", dayUsd: "5" }, { scope: "gitlab:acme/web", monthUsd: "50" }]), (e) => /index 1/.test(e.message) && /at index 0/.test(e.message) && /same repo/.test(e.message));
+test("a bare row and a qualified row for one repo refuse the file when both carry token windows only", () => {
+	assert.throws(() => parse2([{ scope: "acme/web", dayTokens: 5 }, { scope: "gitlab:acme/web", monthTokens: 50 }]), (e) => /index 1/.test(e.message) && /at index 0/.test(e.message) && /same repo/.test(e.message));
 });
 
 test("limitFor matches the qualified row first, then the bare row; the other forge falls through", () => {
@@ -510,12 +510,12 @@ test("limitFor matches the qualified row first, then the bare row; the other for
 	assert.equal(limitFor(bare, { repo: "acme/web" }).scope, "acme/web");
 });
 
-test("every key comes from the MATCHED ROW: budgetCapsFor, dollarCapsFor and rowScopeFor return the row's scope", () => {
-	const limits = parse2([{ scope: "forgejo:acme/web", day: 1, dayUsd: "2" }, { scope: "acme/api", concurrent: 1, weekUsd: "3" }]);
+test("every key comes from the MATCHED ROW: budgetCapsFor, tokenCapsFor and rowScopeFor return the row's scope", () => {
+	const limits = parse2([{ scope: "forgejo:acme/web", day: 1, dayTokens: 2 }, { scope: "acme/api", concurrent: 1, weekTokens: 3 }]);
 	assert.deepEqual(budgetCapsFor(fjJob("acme/web"), limits), { scope: "forgejo:acme/web", caps: { day: 1, week: null, month: null } });
 	assert.equal(budgetCapsFor(ghJob("acme/web"), limits), null, "the GitHub job has no row");
-	assert.equal(dollarCapsFor(fjJob("acme/web"), limits).keyPrefix, scopeDollarKeyPrefix("forgejo:acme/web"));
-	assert.equal(dollarCapsFor(ghJob("acme/api"), limits).keyPrefix, scopeDollarKeyPrefix("acme/api"));
+	assert.equal(tokenCapsFor(fjJob("acme/web"), limits).keyPrefix, scopeTokenKeyPrefix("forgejo:acme/web"));
+	assert.equal(tokenCapsFor(ghJob("acme/api"), limits).keyPrefix, scopeTokenKeyPrefix("acme/api"));
 	assert.equal(rowScopeFor(fjJob("acme/web"), limits), "forgejo:acme/web");
 	assert.equal(rowScopeFor(ghJob("acme/api"), limits), "acme/api");
 	assert.equal(rowScopeFor(fjJob("acme/api"), limits), "acme/api", "a bare row is one key for every forge");
@@ -530,7 +530,7 @@ test("the migration pin: a bare row keeps the exact key it had before qualified 
 	// Written out by hand on purpose: `printf %s acme/web | shasum -a 256 | cut -c1-16`. Any change to how a key is
 	// derived (a prefix in the hash, a qualified scope for a bare row) moves every live counter and fails here first.
 	assert.equal(scopeKeyPrefix("acme/web"), "budget:s:86f279ce9c29f106");
-	assert.equal(scopeDollarKeyPrefix("acme/web"), "budget:usd:s:86f279ce9c29f106");
+	assert.equal(scopeTokenKeyPrefix("acme/web"), "budget:tok:s:86f279ce9c29f106");
 	const limits = parse([{ scope: "acme/web", day: 5 }]);
 	for (const job of [ghJob("acme/web"), fjJob("acme/web")]) assert.equal(scopeKeyPrefix(budgetCapsFor(job, limits).scope), "budget:s:86f279ce9c29f106");
 	assert.equal(scopeKeyPrefix(budgetCapsFor(ghJob("acme/web"), parse2([{ scope: "github:acme/web", day: 5 }])).scope), "budget:s:ae5b3b31a94b074d");
@@ -572,17 +572,17 @@ test("a qualified row must have a forge repo's shape: each refused shape is name
 
 test("a project:<id> row parses in version 2 only, in every field, and stamps version 2 (issue #499 part B)", () => {
 	const v2 = parse2([{ scope: " project:shop ", day: 2, week: 5, concurrent: 1 }]);
-	assert.deepEqual(v2, [{ scope: "project:shop", day: 2, week: 5, month: null, concurrent: 1, dayUsd: null, weekUsd: null, monthUsd: null }]);
+	assert.deepEqual(v2, [{ scope: "project:shop", day: 2, week: 5, month: null, concurrent: 1, dayTokens: null, weekTokens: null, monthTokens: null }]);
 	assert.equal(isProjectScope(v2[0].scope), true);
 	assert.equal(scopedLimitsVersionFor(v2), 2, "a count-only project row needs version 2 too");
 	assert.equal(scopedLimitsVersionFor([{ scope: " project:shop ", concurrent: 1 }]), 2, "as the admin builds it, untrimmed");
 	// The released 2.1.0 reads `project:shop` as an inert repo row, so a version 1 file holding one is refused here and
 	// a version 2 file is refused there as newer.
-	for (const row of [{ scope: "project:shop", day: 2 }, { scope: "project:shop", concurrent: 1 }, { scope: "project:shop", dayUsd: "5" }]) {
+	for (const row of [{ scope: "project:shop", day: 2 }, { scope: "project:shop", concurrent: 1 }, { scope: "project:shop", dayTokens: 5 }]) {
 		assert.throws(() => parse([row]), (e) => /index 0/.test(e.message) && /a project row needs "version": 2/.test(e.message), JSON.stringify(row));
 	}
-	const usd = parse2([{ scope: "project:shop", dayUsd: "5", monthUsd: "40" }]);
-	assert.deepEqual(usd, [{ scope: "project:shop", day: null, week: null, month: null, concurrent: null, dayUsd: "5.00", weekUsd: null, monthUsd: "40.00" }]);
+	const usd = parse2([{ scope: "project:shop", dayTokens: 5, monthTokens: 40 }]);
+	assert.deepEqual(usd, [{ scope: "project:shop", day: null, week: null, month: null, concurrent: null, dayTokens: 5, weekTokens: null, monthTokens: 40 }]);
 	assert.throws(() => parse2([{ scope: "project:shop", day: 1 }, { scope: "project:shop", week: 1 }]), /duplicate scope "project:shop"/);
 	assert.throws(() => parse2([{ scope: "project:shop" }]), /at least one of day, week, month, concurrent/);
 	assert.equal(projectScope("shop"), "project:shop");
@@ -610,23 +610,23 @@ test("scopedLedgers orders the repo or folder row BEFORE the project row, each k
 	assert.deepEqual(scopedLedgers(ghJob("acme/other"), limits, "shop").map((l) => l.reason), ["project-cap"]);
 	assert.deepEqual(scopedLedgers(ghJob("acme/web"), limits, null).map((l) => l.reason), ["scope-cap"]);
 	assert.deepEqual(scopedLedgers(ghJob("acme/web"), limits, "other").map((l) => l.reason), ["scope-cap"], "a project with no row is no ledger");
-	// A concurrency-only or dollar-only project row is no job-count ledger.
-	assert.deepEqual(scopedLedgers(ghJob("acme/x"), parse2([{ scope: "project:shop", concurrent: 1 }, { scope: "project:two", dayUsd: "1" }]), "shop"), []);
-	assert.deepEqual(scopedLedgers(ghJob("acme/x"), parse2([{ scope: "project:two", dayUsd: "1" }]), "two"), []);
+	// A concurrency-only or token-only project row is no job-count ledger.
+	assert.deepEqual(scopedLedgers(ghJob("acme/x"), parse2([{ scope: "project:shop", concurrent: 1 }, { scope: "project:two", dayTokens: 1 }]), "shop"), []);
+	assert.deepEqual(scopedLedgers(ghJob("acme/x"), parse2([{ scope: "project:two", dayTokens: 1 }]), "two"), []);
 	assert.equal(projectRowFor(limits, "shop").scope, "project:shop");
 	assert.equal(projectRowFor(limits, "Not An Id"), null);
 	assert.equal(projectRowFor(limits, null), null);
 });
 
-test("projectDollarCapsFor: the project row's dollar windows under scopeDollarKeyPrefix(project:<id>), never budget:usd:p:", () => {
-	const limits = parse2([{ scope: "project:shop", day: 2, weekUsd: "12.5" }]);
-	const caps = projectDollarCapsFor(limits, "shop");
-	assert.deepEqual(caps, { scope: "project:shop", keyPrefix: scopeDollarKeyPrefix("project:shop"), caps: { day: null, week: 12_500_000, month: null } });
-	assert.equal(caps.keyPrefix, `budget:usd:s:${createHash("sha256").update("project:shop").digest("hex").slice(0, 16)}`);
-	assert.equal(dollarKeyPrefixFor(limits[0]), caps.keyPrefix, "the admin reads the counters under the same prefix");
-	assert.equal(projectDollarCapsFor(limits, null), null);
-	assert.equal(projectDollarCapsFor(parse2([{ scope: "project:shop", day: 1 }]), "shop"), null, "no dollar field, no dollar ledger");
-	assert.deepEqual(dollarRowsWithoutCap(limits, null), [{ index: 0, kind: "project" }]);
+test("projectTokenCapsFor: the project row's token windows under scopeTokenKeyPrefix(project:<id>), never budget:tok:p:", () => {
+	const limits = parse2([{ scope: "project:shop", day: 2, weekTokens: 12500 }]);
+	const caps = projectTokenCapsFor(limits, "shop");
+	assert.deepEqual(caps, { scope: "project:shop", keyPrefix: scopeTokenKeyPrefix("project:shop"), caps: { day: null, week: 12_500, month: null } });
+	assert.equal(caps.keyPrefix, `budget:tok:s:${createHash("sha256").update("project:shop").digest("hex").slice(0, 16)}`);
+	assert.equal(tokenKeyPrefixFor(limits[0]), caps.keyPrefix, "the admin reads the counters under the same prefix");
+	assert.equal(projectTokenCapsFor(limits, null), null);
+	assert.equal(projectTokenCapsFor(parse2([{ scope: "project:shop", day: 1 }]), "shop"), null, "no token field, no token ledger");
+	assert.deepEqual(tokenRowsWithoutCap(limits, null), [{ index: 0, kind: "project" }]);
 });
 
 test("a project row whose id is not a project is named by index and id (danglingProjectRows / checkProjectRows)", () => {
@@ -647,9 +647,9 @@ test("v3: a row refuses a key it does not define, so a misspelled size cannot dr
 		assert.throws(() => v3([{ scope: "project:shop", memory: "1g", [typo]: "8g" }]), (e) => e.message.includes(`unknown key ${JSON.stringify(typo)}`) && /keys are case-sensitive/.test(e.message), typo);
 	}
 	assert.throws(() => v3([{ scope: "acme/web", day: 1, Memory: "8g", cpu: 2 }]), /unknown keys "Memory", "cpu"/, "on any row, both named");
-	assert.throws(() => v3([{ scope: "model:openai/gpt-x", dayUsd: "1", dayusd: "2" }]), /unknown key "dayusd"/, "a model row too");
+	assert.throws(() => v3([{ scope: "model:openai/gpt-x", dayTokens: 1, dayusd: "2" }]), /unknown key "dayusd"/, "a model row too");
 	// Every key the file defines is accepted.
-	assert.equal(v3([{ scope: "project:shop", day: 1, week: 2, month: 3, concurrent: 2, dayUsd: "1", weekUsd: "2", monthUsd: "3", memory: "1g", cpus: 1, hostShare: 50, minJobs: 1 }]).length, 1);
+	assert.equal(v3([{ scope: "project:shop", day: 1, week: 2, month: 3, concurrent: 2, dayTokens: 1, weekTokens: 2, monthTokens: 3, memory: "1g", cpus: 1, hostShare: 50, minJobs: 1 }]).length, 1);
 	// Versions 1 and 2 keep the operator-file policy: an unknown key is dropped, so a file an older build reads still loads.
 	assert.deepEqual(parse([{ scope: "acme/web", day: 1, Memory: "8g", comment: "x" }]), [{ scope: "acme/web", day: 1, week: null, month: null, concurrent: null }]);
 	assert.equal(parseScopedLimits(wrap([{ scope: "project:shop", day: 1, cpu: 2 }], 2), "sl.json")[0].day, 1);

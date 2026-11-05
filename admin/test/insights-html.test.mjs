@@ -2,8 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutSplitBars, layoutCapacityChart, microsUsd, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_SPLIT_REFUSALS, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
-import { formatMicros } from "@edgehero/pi-dispatch/money";
+import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutSplitBars, layoutCapacityChart, tokensText, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_SPLIT_REFUSALS, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
 import { PROJECT_ID_RE } from "@edgehero/pi-dispatch/projects";
 import { buildGraphModel } from "../src/graph-model.mjs";
 import { buildGraphScene, drawnColumns, PAGE_THEME } from "../src/graph-html.mjs";
@@ -64,7 +63,7 @@ const CANNED = () => ({
 /** A typed dollar literal (the costs.mjs shape): the fold is hand-built rather than run, because
  * this page's contract is the SHAPES foldCosts documents, and canned literals keep every dollar
  * assertion hand-computable. */
-const usd = (n, cls, over = {}) => ({ usd: n, class: cls, floor: false, ...over });
+const usd = (n, cls, over = {}) => ({ tokens: n, class: cls, floor: false, ...over });
 
 /**
  * One realistic canned fold: an owned SAVING plan with a null-limit rolling window plus a range
@@ -76,48 +75,48 @@ const usd = (n, cls, over = {}) => ({ usd: n, class: cls, floor: false, ...over 
 const CANNED_FOLD = () => ({
   window: { fromMs: Date.parse("2026-07-20T00:00:00.000Z"), toMs: Date.parse("2026-08-01T00:00:00.000Z"), days: 12, firstRunMs: Date.parse("2026-07-29T10:00:00.000Z") },
   daily: [
-    { day: "2026-07-29", cost: usd(1.1, "metered"), runs: 3 },
-    { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 }, // the gap day: zero runs, never compressed away
-    { day: "2026-07-31", cost: usd(3.1, "estimated", { coverage: 0.5, floor: true }), runs: 4 },
+    { day: "2026-07-29", amount: usd(1100000, "metered"), runs: 3 },
+    { day: "2026-07-30", amount: usd(0, "metered"), runs: 0 }, // the gap day: zero runs, never compressed away
+    { day: "2026-07-31", amount: usd(3100000, "estimated", { coverage: 0.5, floor: true }), runs: 4 },
   ],
   dailyByFlow: [
     {
       flow: "fix",
       flowKey: "fix",
       days: [
-        { day: "2026-07-29", cost: usd(0.9, "metered"), runs: 2 },
-        { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 },
-        { day: "2026-07-31", cost: usd(2.4, "estimated", { coverage: 0.5, floor: true }), runs: 3 },
+        { day: "2026-07-29", amount: usd(900000, "metered"), runs: 2 },
+        { day: "2026-07-30", amount: usd(0, "metered"), runs: 0 },
+        { day: "2026-07-31", amount: usd(2400000, "estimated", { coverage: 0.5, floor: true }), runs: 3 },
       ],
     },
     {
       flow: "tidy",
       flowKey: "tidy",
       days: [
-        { day: "2026-07-29", cost: usd(0.2, "metered"), runs: 1 },
-        { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 },
-        { day: "2026-07-31", cost: usd(0.7, "metered"), runs: 1 },
+        { day: "2026-07-29", amount: usd(200000, "metered"), runs: 1 },
+        { day: "2026-07-30", amount: usd(0, "metered"), runs: 0 },
+        { day: "2026-07-31", amount: usd(700000, "metered"), runs: 1 },
       ],
     },
   ],
   byFlow: [
-    { flow: "fix", flowKey: "fix", runs: 12, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }), apiEquiv: usd(44.49, "estimated") },
-    { flow: "tidy", flowKey: "tidy", runs: 3, tokens: 90000, cost: usd(1.25, "metered"), apiEquiv: null },
+    { flow: "fix", flowKey: "fix", runs: 12, tokens: 5400000, amount: usd(0, "metered") },
+    { flow: "tidy", flowKey: "tidy", runs: 3, tokens: 90000, amount: usd(1250000, "metered"), apiEquiv: null },
   ],
   byModel: [
-    { provider: "kimi-coding", model: "kimi-k2", runs: 12, calls: 24, input: 4000000, output: 1400000, cacheRead: 0, cacheWrite: 0, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }) },
-    { provider: "anthropic", model: "claude-sonnet-4", runs: 3, calls: 6, input: 60000, output: 30000, cacheRead: 0, cacheWrite: 0, tokens: 90000, cost: usd(1.25, "metered") },
-    { provider: "qwen-token-plan", model: "deepseek-v4-pro", runs: 1, calls: 1, input: 800, output: 200, cacheRead: 0, cacheWrite: 0, tokens: 1000, cost: usd(0, "zero-rated") },
+    { provider: "kimi-coding", model: "kimi-k2", runs: 12, calls: 24, input: 4000000, output: 1400000, cacheRead: 0, cacheWrite: 0, tokens: 5400000, amount: usd(0, "metered") },
+    { provider: "anthropic", model: "claude-sonnet-4", runs: 3, calls: 6, input: 60000, output: 30000, cacheRead: 0, cacheWrite: 0, tokens: 90000, amount: usd(1250000, "metered") },
+    { provider: "qwen-token-plan", model: "deepseek-v4-pro", runs: 1, calls: 1, input: 800, output: 200, cacheRead: 0, cacheWrite: 0, tokens: 1000, amount: usd(0, "metered") },
   ],
   byTrigger: [
-    { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *", runs: 9, tokens: 4000000, cost: usd(0, "plan", { planId: "kimi" }), outcomes: { completed: 9, policy: 0, failed: 0 }, failedCost: null },
-    { key: "trigger:1", index: 1, type: "label", label: "any[ai]", runs: 3, tokens: 90000, cost: usd(1.25, "metered"), outcomes: { completed: 2, policy: 0, failed: 1 }, failedCost: usd(0.4, "metered") },
-    { key: "chained", index: null, type: null, label: "(chained runs)", runs: 2, tokens: 200000, cost: usd(0.2, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
-    { key: "manual", index: null, type: null, label: "(manual/local)", runs: 2, tokens: 1000, cost: usd(0, "zero-rated"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedCost: null },
+    { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *", runs: 9, tokens: 4000000, amount: usd(0, "metered"), outcomes: { completed: 9, policy: 0, failed: 0 }, failedAmount: null },
+    { key: "trigger:1", index: 1, type: "label", label: "any[ai]", runs: 3, tokens: 90000, amount: usd(1250000, "metered"), outcomes: { completed: 2, policy: 0, failed: 1 }, failedAmount: usd(400000, "metered") },
+    { key: "chained", index: null, type: null, label: "(chained runs)", runs: 2, tokens: 200000, amount: usd(200000, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedAmount: null },
+    { key: "manual", index: null, type: null, label: "(manual/local)", runs: 2, tokens: 1000, amount: usd(0, "metered"), outcomes: { completed: 2, policy: 0, failed: 0 }, failedAmount: null },
   ],
   byRepo: [
-    { key: "acme/api", label: "acme/api", kind: "github", runs: 12, tokens: 5400000, cost: usd(0, "plan", { planId: "kimi" }) },
-    { key: "local:site", label: "local:site", kind: "local", runs: 4, tokens: 91000, cost: usd(1.25, "metered") },
+    { key: "acme/api", label: "acme/api", kind: "github", runs: 12, tokens: 5400000, amount: usd(0, "metered") },
+    { key: "local:site", label: "local:site", kind: "local", runs: 4, tokens: 91000, amount: usd(1250000, "metered") },
   ],
   plans: [
     {
@@ -127,9 +126,9 @@ const CANNED_FOLD = () => ({
       price: { amount: 99, currency: "USD", per: "month" },
       attributedRuns: 12,
       attributedTokens: 5400000,
-      amortizedPerRun: usd(3.3, "estimated"),
-      apiEquiv: usd(44.49, "estimated"),
-      verdict: { kind: "SAVING", usd: usd(4.89, "estimated") },
+      amortizedPerRun: usd(3300000, "estimated"),
+      apiEquiv: usd(44490000, "estimated"),
+      verdict: { kind: "SAVING", usd: usd(4890000, "estimated") },
       windows: [
         { per: "5h", rolling: true, unit: "tokens", limit: null, peakRuns: 4, peakTokens: 1200000 },
         { per: "7d", rolling: true, unit: "tokens", limit: [1000000, 2000000], peakRuns: 9, peakTokens: 3000000 },
@@ -142,14 +141,14 @@ const CANNED_FOLD = () => ({
       price: { amount: 15, currency: "USD", per: "month" },
       attributedRuns: 1,
       attributedTokens: 1000,
-      amortizedPerRun: usd(6, "estimated"),
+      amortizedPerRun: usd(6_000_000, "estimated"),
       apiEquiv: null,
-      verdict: { kind: "WOULD_LOSE", usd: usd(2.4, "estimated") },
+      verdict: { kind: "WOULD_LOSE", usd: usd(2400000, "estimated") },
       windows: [{ per: "month", rolling: false, unit: "tokens", limit: 5000000, peakRuns: 1, peakTokens: 1000 }],
     },
   ],
   provenance: {
-    total: usd(4.45, "estimated", { floor: true, coverage: 0.5 }),
+    total: usd(4450000, "estimated", { floor: true, coverage: 0.5 }),
     runsTotal: 16,
     runsUnmetered: 1,
     runsUnledgered: 2,
@@ -174,8 +173,8 @@ const CANNED_PAYLOAD = () => ({
   costsUnreachable: null,
   window: "30d",
   costByTrigger: {
-    "trigger:0": { cost: usd(0, "plan", { planId: "kimi" }), runs: 9 },
-    "trigger:1": { cost: usd(1.25, "estimated", { coverage: 0.5 }), runs: 3 },
+    "trigger:0": { amount: usd(0, "metered"), runs: 9 },
+    "trigger:1": { amount: usd(1250000, "estimated", { coverage: 0.5 }), runs: 3 },
   },
   budget: CANNED_BUDGET(),
 });
@@ -199,12 +198,9 @@ test("insights-html.mjs imports only graph-html and panel, and reads no clock, r
 
 // ---- 2. class parity vs the fold ----
 
-test("INSIGHTS_COST_CLASSES is costs.mjs's COST_CLASSES byte for byte, frozen", () => {
-  // The module may not import costs.mjs (that would drag in the worker's day bucketing), so this
-  // deepEqual IS the anti-drift wire: a class minted in the fold without a drawing arm here goes
-  // red instead of rendering as "unknown".
-  assert.deepEqual([...INSIGHTS_COST_CLASSES], [...COST_CLASSES]);
-  assert.ok(Object.isFrozen(INSIGHTS_COST_CLASSES));
+test("the insights class table is the fold's, the three token classes and nothing else", () => {
+  assert.deepEqual(INSIGHTS_COST_CLASSES, COST_CLASSES);
+  assert.ok(!INSIGHTS_COST_CLASSES.includes("plan") && !INSIGHTS_COST_CLASSES.includes("zero-rated") && !INSIGHTS_COST_CLASSES.includes("seeded"), "the pricing classes died with pricing");
 });
 
 // ---- 3. escaping / breakout ----
@@ -212,13 +208,12 @@ test("INSIGHTS_COST_CLASSES is costs.mjs's COST_CLASSES byte for byte, frozen", 
 test("hostile flow, plan, repo, trigger and day strings cannot break out of markup or the json", () => {
   const payload = CANNED_PAYLOAD();
   payload.fold.byFlow[0].flow = '"><script>alert(1)</script>';
-  payload.fold.byFlow[0].cost.planId = "</script><script>";
   payload.fold.plans[0].id = "</script><script>";
   payload.fold.byRepo[0].label = 'acme" onmouseover="alert(2)';
   payload.fold.byTrigger[1].label = "</script><script>evil()";
   // A hostile day string is not escaped but DROPPED: a day is an axis coordinate, and a non-date
   // coordinate has nowhere truthful to draw. The $77 canary proves the whole entry went with it.
-  payload.fold.daily.push({ day: '"><script>', cost: usd(77, "metered"), runs: 1 });
+  payload.fold.daily.push({ day: '"><script>', amount: usd(77_000_000, "metered"), runs: 1 });
   const out = insightsHtml(payload, { now: NOW });
 
   assert.equal(out.split("<script").length - 1, 0, "no script element at all: the console's one script is served by URL");
@@ -296,35 +291,7 @@ test("nothing in the drawn sections can reach outside the console", () => {
 
 // ---- 7. money discipline (fmtCost is the only dollar renderer) ----
 
-test("plan chips never become dollars, estimates wear tildes, floors wear ≥, nothing says free", () => {
-  const out = cannedHtml();
-  assert.ok(out.includes("plan:kimi"), "a plan-class cost renders as its chip text");
-  assert.ok(!out.includes("$0.00"), "a covered or unrated run must never read as $0.00");
-  assert.ok(!/free/i.test(out), "the fold cannot know that anything is free, so the page never says it");
-  assert.ok(out.includes("~≥$3.10 est."), "the floored estimated day carries both marks");
-  assert.ok(out.includes("~≥$4.45 est."), "the window total is floored and estimated, and says so");
-  assert.ok(out.includes("$0 (unrated)"), "zero-rated renders the rate-table fact");
-  assert.ok(out.includes("~$44.49 est. @ API"), "the flow api-equivalent is labelled and estimated");
-  assert.ok(out.includes("SAVING"), "the owned verdict word renders");
-  assert.ok(out.includes("WOULD LOSE") && out.includes(" (hypothetical)"), "the what-if verdict is worded and suffixed");
-  assert.ok(out.includes("~$3.30 est./run"), "amortized is estimated, per run");
-});
 
-test("a null window limit renders undisclosed with no burn-down, and NO_BASELINE never shows a number", () => {
-  const out = cannedHtml();
-  assert.ok(out.includes("peak 5h rolling: 4 runs · 1200000 tok · limit undisclosed by vendor"));
-  assert.ok(out.includes("peak 7d rolling: 9 runs · 3000000 tok · limit 1000000–2000000 tokens"));
-  assert.ok(out.includes("peak month: 1 runs · 1000 tok · limit 5000000 tokens"));
-  assert.ok(!/remaining/i.test(out), "no room-left arithmetic against a number the vendor never published");
-  assert.ok(!/burn[- ]?down/i.test(out));
-
-  const p = CANNED_PAYLOAD();
-  p.fold.plans[0].apiEquiv = null;
-  p.fold.plans[0].verdict = { kind: "NO_BASELINE", usd: usd(9.99, "estimated") }; // a smuggled number
-  const page = insightsHtml(p, { now: NOW });
-  assert.ok(page.includes("no API-rate baseline declared, set counterfactualModel to compare"));
-  assert.ok(!page.includes("$9.99"), "NO_BASELINE renders the sentence and never a number, even a smuggled one");
-});
 
 // ---- 8. chart geometry via the exported helpers ----
 
@@ -346,40 +313,30 @@ test("layoutDailyChart: bars inside the plot, monotone x, gap days present, all-
   assert.equal(est.cls, "estimated");
   assert.equal(est.floor, true);
   assert.equal(lay.yTicks.length, 4, "four nice-step gridlines");
-  for (const t of lay.yTicks) assert.match(t.label, /^[<$~]/, "axis labels come from fmtUsd");
+  for (const t of lay.yTicks) assert.match(t.label, /^[0-9.]+[kMB]?$/, "axis labels come from fmtTokens");
 
-  const zero = layoutDailyChart([{ day: "2026-01-01", cost: usd(0, "metered"), runs: 0 }], { width: 920, height: 160 });
+  const zero = layoutDailyChart([{ day: "2026-01-01", amount: usd(0, "metered"), runs: 0 }], { width: 920, height: 160 });
   assert.equal(zero.yTicks.length, 0, "an all-zero window draws no gridlines rather than dividing by zero");
   assert.equal(zero.bars.length, 1);
   assert.deepEqual(layoutDailyChart(null, {}).bars, [], "junk input lays out to nothing, never a throw");
 });
 
-test("layoutBarList: plan rows chip with no bar, estimated dashed class, unknown dash, nodeId guarded", () => {
+test("layoutBarList: metered bars scale, estimated wears its marks, unknown dashes, nodeId guarded", () => {
   const rows = [
-    { label: "fix", cost: usd(0, "plan", { planId: "kimi" }), runs: 12, apiEquiv: usd(44.49, "estimated") },
-    { label: "tidy", cost: usd(1.25, "metered"), runs: 3 },
-    { label: "est", cost: usd(2, "estimated", { floor: true }), runs: 1, nodeId: "n4" },
-    { label: "zr", cost: usd(0, "zero-rated"), runs: 1 },
-    { label: "junk", cost: null, runs: 0, nodeId: "constructor" },
+    { label: "fix", amount: usd(0, "metered"), runs: 12 },
+    { label: "tidy", amount: usd(1250000, "metered"), runs: 3 },
+    { label: "est", amount: usd(2_000_000, "estimated", { floor: true }), runs: 1, nodeId: "n4" },
+    { label: "junk", amount: null, runs: 0, nodeId: "constructor" },
   ];
   const laid = layoutBarList(rows, { width: 430 });
-  const [fix, tidy, est, zr, junk] = laid;
-  assert.equal(fix.barW, null, "a plan row draws NO bar");
-  assert.equal(fix.chipText, "plan:kimi", "it draws the chip instead");
-  assert.ok(fix.apiW > 0 && fix.apiText.includes("@ API"), "the api-equivalent ghost bar rides along");
+  const [fix, tidy, est, junk] = laid;
+  assert.ok(fix.barW === 1, "a zero-token metered row is a hairline tick, not a zero-width bar");
   assert.ok(tidy.barW > 0 && tidy.cls === "metered");
   assert.equal(est.cls, "estimated");
   assert.equal(est.nodeId, "n4", "a minted ordinal rides through to the row");
-  assert.ok(est.valueText.startsWith("~≥") && est.valueText.endsWith(" est."));
-  assert.equal(zr.barW, 1, "zero-rated is a hairline tick");
-  assert.equal(zr.valueText, "$0 (unrated)");
-  assert.equal(junk.barW, null);
-  assert.equal(junk.chipText, null);
-  assert.equal(junk.valueText, "—", "a null cost degrades to the em dash");
-  assert.equal(junk.nodeId, null, "a non-minted id (here a prototype-chain key) never rides through");
-  laid.forEach((row, i) => assert.equal(row.y, i * 22, "rows stack at a fixed pitch"));
-  assert.ok(tidy.barW < est.barW, "bars share one section scale (1.25 under 2)");
-  assert.deepEqual(layoutBarList(null, {}), [], "junk input lays out to nothing");
+  assert.ok(est.valueText.startsWith("~≥") && est.valueText.endsWith(" est."), "the estimate wears ~≥ and est.");
+  assert.equal(junk.cls, "unknown");
+  assert.ok(junk.nodeId === null && junk.y !== undefined, "a non-minted nodeId is dropped (null), the row stays");
 });
 
 // ---- 9. content canary / path leak ----
@@ -413,9 +370,9 @@ test("unexpected fields and host paths never reach the page; fullPaths widens gr
 
 test("provenance counters, the pi-ai pin, the dual window statement and the date span all render", () => {
   const out = cannedHtml();
-  assert.ok(out.includes("unmetered 1 · no ledger (not re-priceable) 2 · rates drifted 1 · ledgers truncated 1"));
+  assert.ok(out.includes("unmetered 1 · no ledger (totals only) 2 · pi-ai differs 1 · ledgers truncated 1"));
   assert.ok(out.includes("pi-ai 0.9.7"));
-  assert.ok(out.includes("~ marks estimates · metered = pi-ai computed prices, not invoices"));
+  assert.ok(out.includes("~ marks estimates · metered = the meter read complete"));
   assert.ok(out.includes("spend window: last 30d"), "the spend window label");
   assert.ok(out.includes("topology: fixed 30d record window"), "the topology window beside it");
   assert.ok(out.includes("series bounded by retention (PI_LOG_RETENTION_DAYS) and the 92-day scan cap"));
@@ -442,8 +399,7 @@ test("the spend layer badges triggers under their chips, amber only for estimate
   const out = cannedHtml();
   const spendLayer = /<g id="spend">([\s\S]*?)<\/g>/.exec(out);
   assert.ok(spendLayer, "the spend layer exists inside the topology svg");
-  assert.ok(spendLayer[1].includes("plan:kimi"), "the covered trigger badges its chip, not a dollar");
-  assert.ok(spendLayer[1].includes(">~$1.25 est.</text>"), "the estimated trigger badges its typed dollar");
+  assert.ok(spendLayer[1].includes(">~1.25M est.</text>"), "the estimated trigger badges its typed tokens");
   assert.ok(spendLayer[1].includes('fill="#d29922"'), "estimated badges use the amber");
   assert.ok(out.includes('height="1" fill="#8b949e"'), "the gap day renders as a dim baseline tick");
 });
@@ -456,12 +412,12 @@ test("breakdown lists cap at 8 rows and state the tail as one estimated aggregat
     kind: "github",
     runs: 1,
     tokens: 10,
-    cost: usd(11 - i, "metered"),
+    amount: usd(11_000_000 - i, "metered"),
   }));
   const out = insightsHtml(p, { now: NOW });
   // Rows 9..11 carry $3 + $2 + $1: the tail is their sum, demoted to an estimate because a fold of
   // heterogeneous rows is no longer one measured number.
-  assert.ok(out.includes("(+3 more · ~$6.00 est.)"), "totals never silently truncate");
+  assert.ok(out.includes("(+3 more · ~32.99M est.)"), "totals never silently truncate");
   assert.ok(!out.includes("repo-10"), "the tail rows do not render individually");
   assert.ok(out.includes("repo-07"), "the eighth row still does");
 });
@@ -493,8 +449,8 @@ test("one script that parses, minted-only data-node ids, bounded tips, one guard
   const refs = [...out.matchAll(/data-tip="([^"]*)"/g)].map((m) => Number(m[1]));
   assert.ok(refs.length > 0 && tips.length > 0);
   for (const i of refs) assert.ok(Number.isInteger(i) && i >= 0 && i < tips.length, "every data-tip ordinal is in bounds");
-  assert.ok(tips.includes("2026-07-29 · $1.10 · 3 runs"), "daily tips carry the typed dollar");
-  assert.ok(tips.some((t) => t.includes("1 failed (") && t.includes("$0.40")), "a trigger with failures states their cost in its tip");
+  assert.ok(tips.includes("2026-07-29 · 1.10M · 3 runs"), "daily tips carry the typed tokens");
+  assert.ok(tips.some((t) => t.includes("1 failed (400k)") || t.includes("1 failed (400,000)")), "a trigger with failures states their tokens in its tip");
 });
 
 test("the topology's chip data rides a hidden escaped list the script reads, and the view survives a reload via the hash", () => {
@@ -549,8 +505,8 @@ test("null payload, unreachable costs, missing joins and junk all degrade to a s
 
   const allZero = CANNED_PAYLOAD();
   allZero.fold.daily = [
-    { day: "2026-07-29", cost: usd(0, "metered"), runs: 0 },
-    { day: "2026-07-30", cost: usd(0, "metered"), runs: 0 },
+    { day: "2026-07-29", amount: usd(0, "metered"), runs: 0 },
+    { day: "2026-07-30", amount: usd(0, "metered"), runs: 0 },
   ];
   assert.ok(insightsHtml(allZero, { now: NOW }).includes("no spend recorded"), "an all-zero window keeps its axis frame and says so");
 
@@ -575,7 +531,7 @@ test("budget rows render used-vs-cap FACTS: known caps get a bar, unknown caps g
   assert.ok(out.includes("reserved 3 / cap 25 (overlay)"), "the day window's facts, byte for byte");
   assert.ok(out.includes("reserved 4 / cap unknown (worker env/default)"), "an overlay-unset cap is UNKNOWN, never guessed");
   assert.ok(out.includes("reserved 9 / cap 40 (overlay)"), "the month window's facts");
-  assert.ok(out.includes(">soft-hold</span>"), "the state is a WORD; color only reinforces it");
+  assert.ok(out.includes(">soft hold</span>"), "the state is a WORD; color only reinforces it");
   assert.ok(out.includes("5400000 / cap 8000000 tok"), "the token counter vs its overlay cap -- counts, never dollars");
   assert.ok(out.includes("per-job maxTokens 200000"), "the per-job budget rides the token row");
   assert.ok(out.includes("soft-hold band: 20% of each cap"), "the band caption renders only because pct is set");
@@ -656,7 +612,7 @@ test("layoutCumulative: monotone running total, demoted from the first estimated
   }
   assert.deepEqual(lay.points.map((p) => p.demoted), [false, false, true], "the estimate enters on the estimated day and never leaves");
   assert.deepEqual(lay.segments.map((s) => s.dashed), [false, true]);
-  assert.deepEqual(lay.endTotal, { usd: 4.2, class: "estimated", floor: true }, "the end label is the running TYPED total");
+  assert.deepEqual(lay.endTotal, { tokens: 4_200_000, class: "estimated", floor: true }, "the end label is the running TYPED total");
   assert.deepEqual(layoutCumulative([], {}).points, []);
   assert.deepEqual(layoutCumulative(null, {}).points, []);
 });
@@ -704,21 +660,21 @@ test("scoped rows render facts with the assembler's state words; config-only con
   assert.ok(page.includes("dispatch_limit_add/edit/delete"), "the scoped lever is named");
 });
 
-test("a scoped row's dollar windows render as exact micro-dollars; junk and an old payload draw none (#507)", () => {
+test("a scoped row's token windows render as exact counts; junk and an old payload draw none (#507)", () => {
   const p = CANNED_PAYLOAD();
   p.budget = {
     ...CANNED_BUDGET(),
     scoped: [
-      { scope: "project:shop", day: null, week: null, month: null, concurrent: null, usd: { day: null, week: { usedMicros: 6_340_917, capMicros: 45_000_000 }, month: null } },
-      { scope: "model:anthropic/claude-sonnet-4-5", day: null, week: null, month: null, concurrent: null, usd: { day: { usedMicros: null, capMicros: 5_000_000 }, week: { usedMicros: 1, capMicros: 0 }, month: "junk" } },
+      { scope: "project:shop", day: null, week: null, month: null, concurrent: null, tokens: { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null } },
+      { scope: "model:anthropic/claude-sonnet-4-5", day: null, week: null, month: null, concurrent: null, tokens: { day: { usedTokens: null, capTokens: 5_000_000 }, week: { usedTokens: 1, capTokens: 0 }, month: "junk" } },
       { scope: "acme/web", day: { used: 2, cap: 10, state: "ok" }, week: null, month: null, concurrent: 1 },
     ],
     scopedInvalid: null,
   };
   const page = insightsHtml(p, { now: NOW });
   const row = (scope) => page.match(new RegExp(`<div class="row"><span class="wl">${scope.replace(/[/:]/g, "\\$&")}</span><span>([^<]*)</span>`))?.[1] ?? null;
-  assert.equal(row("project:shop"), "week spent+held $6.340917 / cap $45.00");
-  assert.equal(row("model:anthropic/claude-sonnet-4-5"), "day spent+held ? / cap $5.00", "an unread counter is ?, a zero cap and junk draw nothing");
+  assert.equal(row("project:shop"), "week reserved+held 6,340,917 / cap 45,000,000");
+  assert.equal(row("model:anthropic/claude-sonnet-4-5"), "day reserved+held ? / cap 5,000,000", "an unread counter is ?, a zero cap and junk draw nothing");
   assert.equal(row("acme/web"), "day used 2 / cap 10 · concurrent ≤1 (config; in-flight not shown)", "a payload row without the key draws what it always did");
 });
 
@@ -727,15 +683,15 @@ test("a project row's size rides beside its scope, so a size-only row is never a
   p.budget = {
     ...CANNED_BUDGET(),
     scoped: [
-      { scope: "project:billing", day: null, week: null, month: null, concurrent: null, usd: {}, size: ["memory 8g", "4 CPUs", 7, ""] },
-      { scope: "project:web", day: null, week: null, month: null, concurrent: null, usd: { week: { usedMicros: 1_000_000, capMicros: 45_000_000 } }, size: [] },
+      { scope: "project:billing", day: null, week: null, month: null, concurrent: null, tokens: {}, size: ["memory 8g", "4 CPUs", 7, ""] },
+      { scope: "project:web", day: null, week: null, month: null, concurrent: null, tokens: { week: { usedTokens: 1_000_000, capTokens: 45_000_000 } }, size: [] },
     ],
     scopedInvalid: null,
   };
   const page = insightsHtml(p, { now: NOW });
   const row = (scope) => page.match(new RegExp(`<div class="row"><span class="wl">${scope.replace(/[/:]/g, "\\$&")}</span><span>([^<]*)</span>`))?.[1] ?? null;
   assert.equal(row("project:billing"), "memory 8g · 4 CPUs", "the size in sizeBits' words; junk entries dropped");
-  assert.equal(row("project:web"), "week spent+held $1.00 / cap $45.00");
+  assert.equal(row("project:web"), "week reserved+held 1,000,000 / cap 45,000,000");
 });
 
 test("a pre-#242 payload (no scoped key) and an invalid limits file both state their absence honestly", () => {
@@ -774,25 +730,11 @@ test("no field of the page carries half a character, raw or escaped (#418)", () 
   assert.doesNotMatch(page, escaped, "and no escaped one anywhere");
 });
 
-test("a list label and a plan chip are sized in columns (#418)", () => {
+test("a list label is sized in columns (#418)", () => {
   // The label column is a fixed 150px at 11px: twenty CJK characters ran into the bars beside them.
-  const [row] = layoutBarList([{ label: "\u4f1a\u793e\u306e\u30ea\u30dd\u30b8\u30c8\u30ea\u540d\u524d\u30c6\u30b9\u30c8", cost: usd(0, "plan", { planId: "\u4f1a\u793e\u30d7\u30e9\u30f3" }), runs: 1 }], { width: 430 });
+  const [row] = layoutBarList([{ label: "\u4f1a\u793e\u306e\u30ea\u30dd\u30b8\u30c8\u30ea\u540d\u524d\u30c6\u30b9\u30c8", amount: usd(1250000, "metered"), runs: 1 }], { width: 430 });
   assert.equal(row.labelText, "\u4f1a\u793e\u306e\u30ea\u30dd\u30b8\u30c8\u30ea\u540d\u2026", "cut to twenty columns, the ellipsis costing two");
-  assert.equal(row.chipText, "plan:\u4f1a\u793e\u30d7\u30e9\u30f3");
-  // The chip's width is drawn from its text: 5 + 5 * 2 columns at 6px, plus 12 (it was 72, by code units).
-  const page = insightsHtml({ ...CANNED_PAYLOAD(), fold: { ...CANNED_FOLD(), byFlow: [{ flow: "fix", flowKey: "fix", cost: usd(0, "plan", { planId: "\u4f1a\u793e\u30d7\u30e9\u30f3" }), runs: 1 }] } }, { now: NOW });
-  assert.match(page, /<rect x="150" y="3" width="102" height="15" rx="7"/, "the plan chip is 102px wide");
-  // A plan id too long for the chip's capped rect is cut to what the rect holds: the text ran past the
-  // rect and past the SVG. Five and twelve emoji at three columns and the two-column ellipsis, at 6px.
-  const long = insightsHtml({ ...CANNED_PAYLOAD(), fold: { ...CANNED_FOLD(), byFlow: [{ flow: "fix", flowKey: "fix", cost: usd(0, "plan", { planId: "\u{1f600}".repeat(20) }), runs: 1 }] } }, { now: NOW });
-  assert.match(long, new RegExp(`<rect x="150" y="3" width="270" height="15" rx="7"[^>]*/><text x="157" y="[0-9.]+" font-size="10" fill="[^"]+">plan:${"\u{1f600}".repeat(12)}\u2026</text>`, "u"));
-  // AT THE CAP: a plan chip that fits its capped rect is left exactly as it was (forty-three columns is
-  // 270px of a 272px rect), and one column more is cut.
-  const plan = (id) => insightsHtml({ ...CANNED_PAYLOAD(), fold: { ...CANNED_FOLD(), byFlow: [{ flow: "fix", flowKey: "fix", cost: usd(0, "plan", { planId: id }), runs: 1 }] } }, { now: NOW });
-  assert.match(plan("p".repeat(38)), new RegExp(`width="270" height="15" rx="7"[^>]*/><text[^>]*>plan:${"p".repeat(38)}</text>`));
-  assert.match(plan("p".repeat(39)), new RegExp(`width="270" height="15" rx="7"[^>]*/><text[^>]*>plan:${"p".repeat(37)}\u2026</text>`, "u"));
-  const ascii = layoutBarList([{ label: "a-label-that-is-longer-than-twenty", cost: null, runs: 0 }], { width: 430 })[0];
-  assert.equal(ascii.labelText, "a-label-that-is-long\u2026", "an ASCII label is cut exactly where it was");
+  assert.ok(row.barW > 0 && row.valueText.startsWith("1.25M"), "a metered row draws its token bar");
 });
 
 // ---- nothing on the page overlaps a wire, a loop or another label (issue #483) ----
@@ -803,9 +745,9 @@ test("the cumulative end label sits inside its chart, above its line and off eve
   // plot's top line, the case where a label above it has least room.
   const series = [
     CANNED_FOLD().daily,
-    Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, "0")}`, cost: usd(0.4 + (i % 3) * 0.1, i > 20 ? "estimated" : "metered", { floor: i === 29 }), runs: 2 })),
-    [{ day: "2026-07-01", cost: usd(1, "metered"), runs: 1 }, { day: "2026-07-02", cost: usd(1, "metered"), runs: 1 }],
-    [{ day: "2026-07-01", cost: usd(12345.67, "estimated", { floor: true }), runs: 1 }],
+    Array.from({ length: 30 }, (_, i) => ({ day: `2026-07-${String(i + 1).padStart(2, "0")}`, amount: usd(400000 + (i % 3) * 0.1, i > 20 ? "estimated" : "metered", { floor: i === 29 }), runs: 2 })),
+    [{ day: "2026-07-01", amount: usd(1_000_000, "metered"), runs: 1 }, { day: "2026-07-02", amount: usd(1_000_000, "metered"), runs: 1 }],
+    [{ day: "2026-07-01", amount: usd(12345670000, "estimated", { floor: true }), runs: 1 }],
   ];
   let lifted = 0;
   for (const daily of series) {
@@ -839,12 +781,12 @@ test("a trigger's spend badge sits above its re-arm loop on the page (issue #483
   // The badge was drawn at the chip's top + 53 and the loop ran at + 55, so the dollars sat on the dashed
   // loop. The badge now takes the scene's own line, and the scene routes the loop below it.
   const p = CANNED_PAYLOAD();
-  p.costByTrigger["trigger:0"] = { cost: usd(1.55, "metered"), runs: 4 };
+  p.costByTrigger["trigger:0"] = { amount: usd(1550000, "metered"), runs: 4 };
   const out = insightsHtml(p, { now: NOW });
   const spend = /<g id="spend">(.*?)<\/g>/.exec(out)[1];
   const badges = [...spend.matchAll(/<text x="([\d.-]+)" y="([\d.-]+)"[^>]*>([^<]*)<\/text>/g)].map((m) => ({ x: Number(m[1]), y: Number(m[2]), text: m[3] }));
   const loops = [...out.matchAll(/<g class="gwire gcron" id="[^"]+"><path d="([^"]+)"/g)].map((m) => m[1].match(/-?\d+(?:\.\d+)?/g).map(Number));
-  assert.ok(badges.some((b) => b.text === "$1.55") && loops.length >= 1, "the scene has a badged cron trigger to check");
+  assert.ok(badges.some((b) => b.text === "1.55M") && loops.length >= 1, "the scene has a badged cron trigger to check");
   let checked = 0;
   for (const nums of loops) {
     const xs = nums.filter((_, i) => i % 2 === 0);
@@ -876,41 +818,38 @@ test("a small topology is not blown up past a real deployment's scale (issue #48
   }
 });
 
-test("a plan-covered trigger's badge reads plan:<id>, never a dollar, from the real fold (issue #492)", () => {
-  // The fold demoted a bucket of plan-covered runs to "estimated", so the badge read "~$0 est." beside a
-  // by-model table saying plan:kimi. Built here through foldTriggerCosts itself, not a hand-typed badge.
-  const row = { provider: "kimi-coding", model: "kimi-k2", calls: 2, input: 4000000, output: 2000000, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 6000000, cost: 0, unpriced: 0 };
+test("a plan-covered trigger's badge reads its recorded tokens, from the real fold (issue #492)", () => {
+  // The fold once demoted a bucket of plan-covered runs to "estimated", so the badge read "~$0 est." beside a
+  // by-model table saying plan:kimi. Prices died: the badge now reads the covered runs' recorded tokens, built
+  // here through foldTriggerCosts itself, not a hand-typed badge.
+  const row = { provider: "kimi-coding", model: "kimi-k2", calls: 2, input: 4000000, output: 2000000, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 6000000 };
   const run = (jobId) => ({
     jobId, kind: "local", target: "local:site", flow: "build-report", startedAt: "2026-08-10T03:00:00.000Z", endedAt: "2026-08-10T03:04:00.000Z", outcome: "completed",
-    tokens: { input: 4000000, output: 2000000, total: 6000000, cost: 0, metered: true, calls: 2, unpriced: 0, unresolved: 0 },
+    tokens: { input: 4000000, output: 2000000, total: 6000000, metered: true, calls: 2, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 },
     usage: { v: 1, piAi: "1.2.3", truncated: 0, models: [row] }, provider: "kimi-coding", model: "kimi-k2",
+    tokensWindows: { reservedTokens: 2_000_000, settledTokens: 6_000_000, basis: "metered", modelBasis: null },
   });
-  const subs = [{ id: "kimi", vendor: "Moonshot AI", provider: "kimi-coding", models: ["*"], price: { amount: 99, currency: "USD", per: "month" }, hypothetical: false, counterfactualModel: null, windows: [] }];
-  const pricing = { getPricedModel: () => null, isZeroRated: () => false, reprice: () => null, listPricedModels: () => [], piAiVersion: () => "1.2.3" };
+  const subs = [{ id: "kimi", vendor: "Moonshot AI", provider: "kimi-coding", models: ["*"], hypothetical: false, windows: [] }];
   const triggerJoin = { byJobId: { "r-1": { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *" }, "r-2": { key: "trigger:0", index: 0, type: "cron", label: "nightly 0 3 * * *" } } };
-  const costByTrigger = foldTriggerCosts({ records: [run("r-1"), run("r-2")], subscriptions: subs, pricing, triggerJoin });
+  const costByTrigger = foldTriggerCosts({ records: [run("r-1"), run("r-2")], triggerJoin });
   const p = CANNED_PAYLOAD();
   p.costByTrigger = costByTrigger;
   const out = insightsHtml(p, { now: NOW });
   const spend = /<g id="spend">(.*?)<\/g>/.exec(out)[1];
-  assert.ok(spend.includes(">plan:kimi</text>"), `trigger:0's plan-covered spend reads plan:kimi: ${spend}`);
+  assert.ok(spend.includes(">12.00M</text>"), `trigger:0's plan-covered spend reads its recorded tokens: ${spend}`);
   assert.ok(!/>~?\$0(\.00)? ?(est\.)?<\/text>/.test(spend), "and no badge reads $0");
 });
 
-test("a trigger's spend badge fits its chip, the whole text in a tooltip (issue #492)", () => {
-  // A plan badge carries the plan's free-form id, and a long one ran past the chip onto the wires beside it.
-  const long = "customer-facing-enterprise-plan-2026"; // under the page's 40-character id clip
+test("a trigger's spend badge always fits its chip (issue #492's cut path is gone with fmtAmount's ladder)", () => {
   const p = CANNED_PAYLOAD();
-  p.costByTrigger["trigger:0"] = { cost: usd(0, "plan", { planId: long }), runs: 9 };
+  p.costByTrigger["trigger:0"] = { amount: usd(1_234_567_890, "metered"), runs: 9 };
   const out = insightsHtml(p, { now: NOW });
   const layout = buildGraphScene(p.graph, { now: NOW }).layout;
   const chip = layout.nodes.find((n) => n.node.id === "trigger:0");
-  const m = new RegExp(`<text x="${chip.x + 16}" y="${chip.y + 53}" font-size="10" fill="[^"]+">([^<]*)<title>([^<]*)</title></text>`).exec(out);
-  assert.ok(m, "the long badge is cut and carries its tooltip");
-  assert.equal(m[2], `plan:${long}`, "the tooltip holds the whole badge");
-  assert.ok(m[1].endsWith("…") && 16 + drawnColumns(m[1]) * 6 <= chip.w - 4, `the cut badge ${JSON.stringify(m[1])} fits a ${chip.w}px chip`);
-  // A badge that fits is drawn whole and carries no tooltip, byte for byte as before.
-  assert.ok(insightsHtml(CANNED_PAYLOAD(), { now: NOW }).includes(">plan:kimi</text>"), "a short badge is untouched");
+  // fmtAmount's ladder caps a badge at six characters, so the badge is drawn whole and carries no tooltip.
+  assert.ok(out.includes(">1.23B</text>"), "the badge is the compact figure");
+  assert.ok(!out.includes("<title>1.23B</title>"), "no tooltip: the ladder cannot overflow the chip");
+  assert.ok(chip.w > 16 + 6 * 6, "the chip has room for the ladder's worst case");
 });
 
 // ---- issue #499 part C: by project ----
@@ -918,10 +857,10 @@ test("a trigger's spend badge fits its chip, the whole text in a tooltip (issue 
 test("the breakdown gains a by-project list keyed by id, with names escaped and isolated under it", () => {
   const p = CANNED_PAYLOAD();
   p.fold.byProject = [
-    { key: "shop", label: "shop", runs: 3, tokens: 100, cost: usd(1.25, "metered") },
-    { key: "constructor", label: "constructor", runs: 1, tokens: 10, cost: usd(0.5, "metered") },
-    { key: null, label: "(no project)", runs: 2, tokens: 10, cost: usd(0.25, "metered") },
-    { key: "<script>", label: "<script>", runs: 1, tokens: 1, cost: usd(0.1, "metered") },
+    { key: "shop", label: "shop", runs: 3, tokens: 100, amount: usd(1250000, "metered") },
+    { key: "constructor", label: "constructor", runs: 1, tokens: 10, amount: usd(500000, "metered") },
+    { key: null, label: "(no project)", runs: 2, tokens: 10, amount: usd(250000, "metered") },
+    { key: "<script>", label: "<script>", runs: 1, tokens: 1, amount: usd(100000, "metered") },
   ];
   p.projects = [
     { id: "shop", name: "Web‮shop <b>" },
@@ -952,13 +891,13 @@ test("the page's restated project id rule is the worker's rule (PR #569's review
 test("a key that is not an id JOINS the one (no project) bar, never a second one with the same label", () => {
   const p = CANNED_PAYLOAD();
   p.fold.byProject = [
-    { key: null, label: "(no project)", runs: 1, tokens: 10, cost: usd(1, "metered") },
-    { key: "Bad Key", label: "Bad Key", runs: 2, tokens: 5, cost: usd(2, "metered") },
-    { key: "shop", label: "shop", runs: 1, tokens: 1, cost: usd(0.5, "metered") },
+    { key: null, label: "(no project)", runs: 1, tokens: 10, amount: usd(1_000_000, "metered") },
+    { key: "Bad Key", label: "Bad Key", runs: 2, tokens: 5, amount: usd(2_000_000, "metered") },
+    { key: "shop", label: "shop", runs: 1, tokens: 1, amount: usd(500000, "metered") },
   ];
   const out = insightsHtml(p, { now: NOW });
   assert.equal(out.split(">(no project)</text>").length - 1, 1, "one bar");
-  assert.ok(out.includes("$3.00"), "it carries both rows' spend");
+  assert.ok(out.includes("3.00M"), "it carries both rows' spend");
 });
 
 // ---- the budget split (issue #507) ----
@@ -967,7 +906,7 @@ const SM = 1_000_000;
 /** The assembler's split slice for a live envelope, with a host, a plan's reason and junk the page must not carry. */
 const SPLIT = () => ({
   window: "week",
-  totalMicros: 100 * SM,
+  totalTokens: 100 * SM,
   floors: { _other: 0, platform: 10 * SM, shop: 10 * SM },
   delegation: true,
   stateProblem: null,
@@ -986,18 +925,18 @@ test("the budget split's live shape: the envelope, the plan, the headroom, the c
   const out = splitPage(SPLIT());
   assert.ok(out.includes("<section><h2>budget split</h2>"), "a section under the caps");
   assert.ok(out.indexOf("<h2>budget split</h2>") > out.indexOf("<h2>budget</h2>") && out.indexOf("<h2>budget split</h2>") < out.indexOf("<h2>daily spend</h2>"));
-  assert.ok(out.includes('<div class="row"><span class="wl">envelope</span><span>$100.00 per week · delegation on</span></div>'));
+  assert.ok(out.includes('<div class="row"><span class="wl">envelope</span><span>100,000,000 per week · delegation on</span></div>'));
   assert.ok(out.includes('<div class="row"><span class="wl">plan</span><span>plan 3f9a0c1d2e4b5a67 · written by portfolio-job · applied <time datetime="2026-10-05T06:01:00Z">2026-10-05 06:01 UTC</time> · until <time datetime="2026-10-19T06:01:00Z">2026-10-19 06:01 UTC</time> · clamped by the step</span></div>'), "the instants as <time>, UTC text inside (#710, review round 1)");
-  assert.ok(out.includes('<div class="row"><span class="wl">headroom</span><span>unallocated $0.00 · deployment spent $82.50 of $100.00</span></div>'));
+  assert.ok(out.includes('<div class="row"><span class="wl">headroom</span><span>unallocated 0 · deployment reserved+held 82,500,000 of 100,000,000</span></div>'));
   assert.ok(out.includes('<div class="small">refusals in runs on this host, last 30d: allocation-cap 3 · envelope-mismatch 0 · portfolio-no-envelope 0 · portfolio-snapshot-oversize 1</div>'));
   assert.ok(out.includes('<div class="small">plans collected in runs on this host, last 30d: applied 2 · plan-stale 1</div>'));
   assert.ok(out.includes('<tr><td><time datetime="2026-10-05T12:30:00Z">2026-10-05 12:30 UTC</time></td><td>operator-session</td><td>refused</td><td>plan-too-soon</td><td class="pid">aaaaaaaaaaaaaaaa</td></tr>'));
   assert.ok(out.includes('<tr><td><time datetime="2026-10-05T06:01:00Z">2026-10-05 06:01 UTC</time></td><td>portfolio-job</td><td>applied</td><td></td><td class="pid">3f9a0c1d2e4b5a67</td></tr>'));
-  assert.ok(out.includes('$77.00 spent of $70.00 · floor $10.00 <tspan fill="'), "the overspent row says over in words");
-  assert.ok(out.includes(">$4.25 spent of $30.00 · floor $10.00</text>"), "a row within its allocation carries no word");
+  assert.ok(out.includes('77,000,000 spent of 70,000,000 · floor 10,000,000 <tspan fill="'), "the overspent row says over in words");
+  assert.ok(out.includes(">4,250,000 spent of 30,000,000 · floor 10,000,000</text>"), "a row within its allocation carries no word");
   const tips = listTexts(out, "insights-tips").map((t) => t.text);
-  assert.ok(tips.includes("shop · allocated $70.00 · spent $77.00 · floor $10.00 · over its allocation"));
-  assert.ok(tips.includes("platform · allocated $30.00 · spent $4.25 · floor $10.00"));
+  assert.ok(tips.includes("shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation"));
+  assert.ok(tips.includes("platform · allocated 30,000,000 · spent 4,250,000 · floor 10,000,000"));
   assert.ok(!out.includes("CANARY-HOST"), "no host reaches a page meant to be shared");
   assert.ok(!out.includes("CANARY-REASON-TEXT"), "a plan's reason text is the panel's alone");
   assert.equal(splitPage(SPLIT()), out, "byte-deterministic");
@@ -1041,18 +980,18 @@ test("junk in a split row degrades to ? or absence, and hostile text is escaped 
   assert.ok(out.includes(">constructor</text>"), "an id-shaped key is a row like any other");
   const long = splitPage({ ...SPLIT(), floors: { "customer-data-platform-migration": 0 } });
   assert.ok(long.includes(">customer-data-pl…</text>"), "a long id is cut to the label column");
-  assert.ok(listTexts(long, "insights-tips").map((t) => t.text).includes("customer-data-platform-migration · allocated - · spent - · floor $0.00"), "and its tip carries it whole");
+  assert.ok(listTexts(long, "insights-tips").map((t) => t.text).includes("customer-data-platform-migration · allocated - · spent - · floor 0"), "and its tip carries it whole");
   assert.equal(out.split("<script").length - 1, 0, "still no script element");
   const down = splitPage({ unreachable: "</script><script>x" });
   assert.equal(down.split("<script").length - 1, 0);
   assert.ok(down.includes("budget split unreachable: &lt;/script&gt;&lt;script&gt;x"));
 });
 
-test("the page's micro-dollar text is the worker's formatMicros, to the micro (#507)", () => {
-  for (const m of [0, 1, 10, 999_999, 1_000_000, 1_250_000, 70_000_000, 82_500_000, 123_456_789, Number.MAX_SAFE_INTEGER]) {
-    assert.equal(microsUsd(m), `$${formatMicros(m)}`, `${m}`);
+test("the page's token text carries thousands separators, `-` for a value that is not a count", () => {
+  for (const [m, want] of [[0, "0"], [1, "1"], [10, "10"], [999_999, "999,999"], [1_000_000, "1,000,000"], [1_250_000, "1,250,000"], [70_000_000, "70,000,000"], [123_456_789, "123,456,789"], [Number.MAX_SAFE_INTEGER, "9,007,199,254,740,991"]]) {
+    assert.equal(tokensText(m), want, `${m}`);
   }
-  for (const junk of [-1, 1.5, null, undefined, "70", NaN]) assert.equal(microsUsd(junk), "-", "never a $0 for a number nobody has");
+  for (const junk of [-1, 1.5, null, undefined, "70", NaN]) assert.equal(tokensText(junk), "-", "never a 0 for a value nobody measured");
 });
 
 test("layoutSplitBars: one scale for every row, the envelope total or a larger amount, and overspend flagged (#507)", () => {
@@ -1087,11 +1026,11 @@ test("the console script runs under a DOM stub on the spend screen, and a split 
     addEventListener: (type, fn) => (handlers[type] = fn),
   };
   new Function("document", "setTimeout", "location", "history", "MouseEvent", "EventSource", "fetch", CONSOLE_SCRIPT)(document, () => 0, {}, {}, function () {}, undefined, () => { throw new Error("no fetch on the spend screen"); });
-  const idx = tips.indexOf("shop · allocated $70.00 · spent $77.00 · floor $10.00 · over its allocation");
+  const idx = tips.indexOf("shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation");
   assert.ok(idx >= 0 && out.includes(`<g data-tip="${idx}">`), "the shop bar carries that tip's ordinal");
   const bar = { getAttribute: (n) => (n === "data-tip" ? String(idx) : null) };
   handlers.pointermove({ target: { closest: (sel) => (sel === "[data-tip]" ? bar : null) }, clientX: 5, clientY: 5 });
-  assert.equal(nodes.tip.textContent, "shop · allocated $70.00 · spent $77.00 · floor $10.00 · over its allocation");
+  assert.equal(nodes.tip.textContent, "shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation");
   assert.equal(nodes.tip.style.display, "block");
   assert.equal(nodes.tip.style.left, "19px", "placed beside the pointer, inside the topology pane's frame");
   // An index the list does not hold shows nothing, and moving off a bar hides only what a bar showed.
@@ -1113,7 +1052,7 @@ test("the split's refusal list is the worker's four reasons, the one list the as
 
 test("the split says what this host sees: its mismatch, an outside edit, a plan id it cannot read, and a count it cannot read (#507)", () => {
   const mismatch = splitPage({ ...SPLIT(), mismatch: true });
-  assert.ok(mismatch.includes(`<div class="row"><span class="state">the split was made for another envelope, not this host's: governed jobs on this host refuse as envelope-mismatch</span></div>`));
+  assert.ok(mismatch.includes('the split was made for another envelope, not this host&#39;s: governed jobs on this host refuse as envelope-mismatch'), "the mismatch row names the refusal (escapeHtml's apostrophe inside)");
   const words = "a host reported envelope e2e2e2e2 at 10-05 13:00, not the one the split was made for (d1d1d1d1); a host still on it refuses governed jobs as envelope-mismatch";
   const edited = splitPage({ ...SPLIT(), outsideEdit: { digest: "e2e2e2e2", at: "10-05 13:00", split: "d1d1d1d1" } });
   assert.ok(edited.includes(`<div class="row"><span class="state">${words}</span></div>`));
@@ -1295,7 +1234,7 @@ test("hostile host, project, caveat and reason text in the capacity slice is esc
   assert.ok(!html.includes("<script>alert"));
   assert.ok(capSection(html).includes("&lt;script&gt;alert(1)&lt;/script&gt;"));
   assert.ok(!html.includes("\u001b") && !html.includes("\u0007"), "control characters are made visible text");
-  assert.ok(capSection(html).includes("1 host not drawn: not a worker name"), "a name that is not a worker name is dropped and counted");
+  assert.ok(html.includes("1 hosts not drawn: not a worker name"), "a name that is not a worker name is dropped and counted (the template's plural)");
   const down = capPage({ unreachable: evil });
   assert.ok(capSection(down).includes("capacity not read: &quot;&gt;&lt;script&gt;"));
   assert.ok(capSection(down).includes(INSIGHTS_CAPACITY_JOBS_ONLY));
@@ -1332,7 +1271,7 @@ test("the host cap keeps the hosts with numbers, and says what it left out by ki
   assert.ok(sec.indexOf("zz-busy") < sec.indexOf("a00"));
   assert.equal((sec.match(/class="bl cap"/g) ?? []).length, 20);
   assert.ok(sec.includes("3 more hosts not drawn past the first 20: 3 whose history is not here"));
-  assert.ok(sec.includes("1 host name given more than once, not drawn"));
+  assert.ok(sec.includes("1 host names given more than once, not drawn"), "the repeated-name sentence, as the plural template renders it");
   assert.ok(!sec.includes(">dup<"), "neither copy of a repeated name is believed");
   const q = JSON.parse(JSON.stringify(p));
   q.hosts.reverse();

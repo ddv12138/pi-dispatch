@@ -63,15 +63,6 @@ route.
 What to do: check the provider key on the worker and what it is allowed to use, then run the job again. See
 [notifications.md](notifications.md).
 
-### cost-cap
-
-The next AI call could have taken the run past its cost limit, so the runner did not make it. The record's `why` says
-which rule refused: the call's cost could not be bounded (`unboundable`), its bound would have passed the cap
-(`over-cap`), or the spend of the job's subprocesses could not be read (`external`).
-
-What to do: raise the trigger's `run.maxCostUsd`, or the deployment's `PI_MAX_COST_USD`, if the work needs more. See
-[costs.md](costs.md).
-
 ### model-not-allowed
 
 A model this job would call is not on its list of allowed models, or the run tried to change an AI request in a way it
@@ -82,13 +73,6 @@ request changed in a way the list does not allow.
 
 What to do: check the trigger's `run.models` and the deployment's `PI_ALLOWED_MODELS`, and list every model the job
 may call, fallbacks included, or check the job log for a refused request. See [triggers.md](triggers.md).
-
-### cost-cap-unenforceable
-
-The run has a cost limit, and the job image could not enforce it before each AI call. So nothing was sent to the
-provider.
-
-What to do: update the job image to a release that enforces cost limits. See [job-image.md](job-image.md).
 
 ### model-policy-unenforceable
 
@@ -139,20 +123,13 @@ The jobs started in a window are inside the soft hold band just below its cap, s
 What to do: wait for the window to roll over, or raise the cap or narrow the hold band. See
 [insights.md](insights.md).
 
-### daily-token-cap
+### token-cap
 
-The tokens spent today had already reached the daily token cap. Token spend is only known after a run, so this cap
-stops the next job, not the one that crossed it.
+A token budget had no room left for this run's token budget, or is smaller than it. The budget can be the
+deployment's, a repository's or folder's, a project's, or a model's. Nothing ran.
 
-What to do: wait for the next day (UTC), or raise the daily token cap.
-
-### dollar-cap
-
-A dollar budget had no room left for this run's cost limit, or is smaller than the limit. The budget can be the
-deployment's, a repository's or folder's, a project's, or a model's. Nothing was spent.
-
-What to do: wait for the window to roll over, or raise that budget or lower the run's cost limit. See
-[costs.md](costs.md) and [scoped-limits.md](scoped-limits.md).
+What to do: wait for the window to roll over, or raise that budget or lower the run's token budget. See
+[scoped-limits.md](scoped-limits.md).
 
 ### allocation-cap
 
@@ -357,7 +334,7 @@ The image does not declare `modelFailover`, so its runner cannot report the sign
 needed for a reviewed next-attempt fallback. Rebuild the image before enabling `run.fallbackModels`. See
 [model-failover.md](model-failover.md).
 
-### job-image-cost-cap-unsupported
+### job-image-token-budget-unsupported
 
 The image does not declare cost cap support, so its runner would run the job with no dollar cap at all. See
 [costs.md](costs.md).

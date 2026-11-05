@@ -1094,17 +1094,17 @@ test("createFleetReader: a readOnly snapshot issues no Valkey write, where the T
 test("createFleetReader: the day's runs, today's settled spend per UTC hour and today's soft-hold refusals, off the wide window, each value re-checked (#737)", async () => {
   const logsDir = tempDir("pd-737-day-");
   const HOUR = 60 * MIN;
-  const dollars = (settledMicros) => ({ reservedMicros: settledMicros, settledMicros, basis: "metered", modelBasis: null });
-  writeLocal(logsDir, rec("gh-r1", AT - 30 * MIN, { project: "shop", dollars: dollars(1_500_000) }));
-  writeLocal(logsDir, rec("gh-r2", AT - 90 * MIN, { outcome: "failed", reason: "container-lost", dollars: dollars(250_000), parentJobId: "gh-r0" }));
-  writeLocal(logsDir, rec("gh-r3", AT - 10 * MIN, { outcome: "policy", reason: "soft-hold", dollars: null }));
-  writeLocal(logsDir, rec("gh-r4", AT - 13 * HOUR, { dollars: dollars(9_999) })); // yesterday 23:00 UTC: in the last 24 h, not today
-  writeLocal(logsDir, rec("gh-r5", AT - 25 * HOUR, { dollars: dollars(7) })); // outside the day
-  writeLocal(logsDir, rec("gh-r6", AT + 5 * MIN, { dollars: dollars(5) })); // dated ahead of the clock
+  const settled = (settledTokens) => ({ reservedTokens: settledTokens, settledTokens, basis: "metered", modelBasis: null });
+  writeLocal(logsDir, rec("gh-r1", AT - 30 * MIN, { project: "shop", tokensWindows: settled(1_500_000) }));
+  writeLocal(logsDir, rec("gh-r2", AT - 90 * MIN, { outcome: "failed", reason: "container-lost", tokensWindows: settled(250_000), parentJobId: "gh-r0" }));
+  writeLocal(logsDir, rec("gh-r3", AT - 10 * MIN, { outcome: "policy", reason: "soft-hold", tokensWindows: null }));
+  writeLocal(logsDir, rec("gh-r4", AT - 13 * HOUR, { tokensWindows: settled(9_999) })); // yesterday 23:00 UTC: in the last 24 h, not today
+  writeLocal(logsDir, rec("gh-r5", AT - 25 * HOUR, { tokensWindows: settled(7) })); // outside the day
+  writeLocal(logsDir, rec("gh-r6", AT + 5 * MIN, { tokensWindows: settled(5) })); // dated ahead of the clock
   writeLocal(logsDir, rec("gh-r7", AT - 13 * HOUR, { outcome: "policy", reason: "soft-hold" })); // yesterday's soft hold
   writeLocal(logsDir, rec("gh-r8", AT - 2 * HOUR, { kind: "<b>", target: "acme/web#1\u001b[2J", project: "Shop", host: "bad host", outcome: "weird", reason: "NOT A TOKEN", parentJobId: "a b" }));
-  writeLocal(logsDir, rec("gh-r9", AT - 3 * HOUR, { dollars: { reservedMicros: 1, settledMicros: -5, basis: "metered" } }));
-  writeLocal(logsDir, rec("gh-r10", AT + 6 * MIN, { outcome: "policy", reason: "soft-hold", dollars: null })); // a soft hold dated ahead of the clock
+  writeLocal(logsDir, rec("gh-r9", AT - 3 * HOUR, { tokensWindows: { reservedTokens: 1, settledTokens: -5, basis: "metered" } }));
+  writeLocal(logsDir, rec("gh-r10", AT + 6 * MIN, { outcome: "policy", reason: "soft-hold", tokensWindows: null })); // a soft hold dated ahead of the clock
   const snap = await fleetOf(logsDir, emptyRedis()).snapshot();
   assert.deepEqual(snap.runsDay.runs.map((r) => r.jobId), ["gh-r3", "gh-r1", "gh-r2", "gh-r8", "gh-r9", "gh-r4", "gh-r7"], "the last 24 hours, newest first");
   assert.deepEqual(snap.runsDay.runs.find((r) => r.jobId === "gh-r2"), { jobId: "gh-r2", kind: "github", target: "acme/web#1", project: null, host: "hosta", outcome: "failed", reason: "container-lost", startedAt: AT - 91 * MIN, endedAt: AT - 90 * MIN, parentJobId: "gh-r0" });
@@ -1211,10 +1211,10 @@ test("writeEnvelope carries a Valkey client's words only bounded: control bytes 
   const projectsPath = join(dir, "projects.json");
   const envelopeFile = join(dir, "envelope.json");
   writeFileSync(projectsPath, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(envelopeFile, JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(envelopeFile, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
   const words = `connect ECONNREFUSED 10.9.8.7:6379 \u001b]52;c;${"A".repeat(300)}\u0007`;
   const bounded = `connect ECONNREFUSED 10.9.8.7:6379  ]52;c;${"A".repeat(300)} `.slice(0, 200);
-  const write = (over) => writeEnvelope({ envelopeFile, projectsPath, maxCostMicros: 2_000_000, change: { totalUsd: "90" }, url: "redis://127.0.0.1:1", ...over });
+  const write = (over) => writeEnvelope({ envelopeFile, projectsPath, maxTokens: 2_000, change: { totalTokens: 90 }, url: "redis://127.0.0.1:1", ...over });
   const fails = () => {
     throw new Error(words);
   };
@@ -1236,13 +1236,13 @@ test("writeEnvelope carries a Valkey client's words only bounded: control bytes 
 
 test("createFleetReader: runsWindow counts the last 24 hours by outcome key, project and reason, lists each field's values, and sums the settled spend (#737)", async () => {
   const logsDir = tempDir("pd-737-window-");
-  const dollars = (settledMicros) => ({ reservedMicros: settledMicros, settledMicros, basis: "metered", modelBasis: null });
-  writeLocal(logsDir, rec("gh-c1", AT - 10 * MIN, { project: "web", flow: "fix", model: "m1", triggerIndex: 0, dollars: dollars(1_000_000) }));
-  writeLocal(logsDir, rec("gh-c2", AT - 20 * MIN, { project: "web", flow: "fix", model: "m1", triggerIndex: 9, backend: "podman", dollars: dollars(500_000) }));
+  const settled = (settledTokens) => ({ reservedTokens: settledTokens, settledTokens, basis: "metered", modelBasis: null });
+  writeLocal(logsDir, rec("gh-c1", AT - 10 * MIN, { project: "web", flow: "fix", model: "m1", triggerIndex: 0, tokensWindows: settled(1_000_000) }));
+  writeLocal(logsDir, rec("gh-c2", AT - 20 * MIN, { project: "web", flow: "fix", model: "m1", triggerIndex: 9, backend: "podman", tokensWindows: settled(500_000) }));
   writeLocal(logsDir, rec("gh-a1", AT - 30 * MIN, { project: "web", reason: "awaiting-input", triggerIndex: 1 }));
   writeLocal(logsDir, rec("gh-r1", AT - 40 * MIN, { project: "api", outcome: "policy", reason: "scope-cap", host: "hostb" }));
   writeLocal(logsDir, rec("gh-x1", AT - 50 * MIN, { outcome: "policy", reason: "operator-cancel" }));
-  writeLocal(logsDir, rec("gh-rc", AT - 60 * MIN, { project: "api", outcome: "policy", reason: "recovery-cap", host: "hostb", dollars: dollars(250_000) }));
+  writeLocal(logsDir, rec("gh-rc", AT - 60 * MIN, { project: "api", outcome: "policy", reason: "recovery-cap", host: "hostb", tokensWindows: settled(250_000) }));
   writeLocal(logsDir, rec("gh-f1", AT - 70 * MIN, { outcome: "failed", reason: "container-lost", model: "m2" }));
   writeLocal(logsDir, rec("gh-f2", AT - 80 * MIN, { outcome: "failed", reason: "infra failure, container exit 1" }));
   writeLocal(logsDir, rec("gh-u1", AT - 90 * MIN, { outcome: "vapour", project: "Not A Project" }));
@@ -1257,7 +1257,7 @@ test("createFleetReader: runsWindow counts the last 24 hours by outcome key, pro
   assert.deepEqual(w.byOutcome, { completed: 3, refused: 1, failed: 3, "awaiting-input": 1, "awaiting-approval": 0, cancelled: 1, other: 1 }, "a recovery end is failed, a run awaiting input is not completed");
   assert.deepEqual(w.byProject.map((p) => [p.project, p.count]), [[null, 5], ["web", 3], ["api", 2]], "by count, the records with no project id (or one that is no id) under null");
   assert.deepEqual(w.byProject.find((p) => p.project === "api").byOutcome, { completed: 0, refused: 1, failed: 1, "awaiting-input": 0, "awaiting-approval": 0, cancelled: 0, other: 0 }, "a project's own outcome counts: its recovery end is a failure");
-  assert.deepEqual(w.byProject.map((p) => [p.project, p.spentMicros, p.unpriced]), [[null, 0, 5], ["web", 1_500_000, 1], ["api", 250_000, 1]], "and its own settled spend");
+  assert.deepEqual(w.byProject.map((p) => [p.project, p.spentTokens, p.unpriced]), [[null, 0, 5], ["web", 1_500_000, 1], ["api", 250_000, 1]], "and its own settled spend");
   assert.equal(w.projectsMore, 0);
   assert.deepEqual(w.byReason, { "awaiting-input": 1, "container-lost": 1, "operator-cancel": 1, "recovery-cap": 1, "scope-cap": 1 }, "tokens only, sorted: a free-text reason is counted nowhere");
   assert.deepEqual(w.values, {
@@ -1270,7 +1270,7 @@ test("createFleetReader: runsWindow counts the last 24 hours by outcome key, pro
     reason: ["awaiting-input", "container-lost", "operator-cancel", "recovery-cap", "scope-cap"],
   }, "each value the filter takes as it is; a host or model it refuses is not offered, nor a reason that is no token");
   for (const [field, list] of Object.entries(w.values)) for (const v of list) assert.equal(parseRunFilter({ [field]: v }).filter?.[field], v, `${field}=${v}`);
-  assert.equal(w.spentMicros, 1_750_000);
+  assert.equal(w.spentTokens, 1_750_000);
   assert.equal(w.unpriced, 7, "the day's runs whose record carries no settled amount");
   assert.ok(Object.isFrozen(w) && Object.isFrozen(w.byOutcome) && Object.isFrozen(w.values.host));
   // Off the same cached wide window: a second count inside 15 s reads nothing.
@@ -1343,16 +1343,16 @@ test("createFleetReader: runsWindow puts the runs with no project after every na
 });
 
 test("createFleetReader: runsWindow counts a negative settled amount as no amount, and a sum past a safe whole number as null (#737)", async () => {
-  const dollars = (settledMicros) => ({ reservedMicros: 1, settledMicros, basis: "metered", modelBasis: null });
+  const settled = (settledTokens) => ({ reservedTokens: 1, settledTokens, basis: "metered", modelBasis: null });
   const windowOf = async (records) => {
     const logsDir = tempDir("pd-737-window-spend-");
     for (const r of records) writeLocal(logsDir, r);
     return fleetOf(logsDir, emptyRedis()).runsWindow();
   };
-  const neg = await windowOf([rec("gh-1", AT - 1000, { dollars: dollars(-5) }), rec("gh-2", AT - 2000, { dollars: dollars(7) })]);
-  assert.deepEqual([neg.spentMicros, neg.unpriced], [7, 1]);
-  const big = await windowOf([rec("gh-1", AT - 1000, { dollars: dollars(Number.MAX_SAFE_INTEGER) }), rec("gh-2", AT - 2000, { dollars: dollars(Number.MAX_SAFE_INTEGER) })]);
-  assert.equal(big.spentMicros, null);
+  const neg = await windowOf([rec("gh-1", AT - 1000, { tokensWindows: settled(-5) }), rec("gh-2", AT - 2000, { tokensWindows: settled(7) })]);
+  assert.deepEqual([neg.spentTokens, neg.unpriced], [7, 1]);
+  const big = await windowOf([rec("gh-1", AT - 1000, { tokensWindows: settled(Number.MAX_SAFE_INTEGER) }), rec("gh-2", AT - 2000, { tokensWindows: settled(Number.MAX_SAFE_INTEGER) })]);
+  assert.equal(big.spentTokens, null);
 });
 
 test("createFleetReader: runsWindow lists the trigger positions by number (row 2 before row 10), then the scheduler ids (#737)", async () => {
@@ -1988,7 +1988,7 @@ test("the live run facts allowlist excludes queue payload text, validates fields
   }
 });
 
-test("run context reads only the matching trigger's attribution and bounded safe dollar holds (#747)", async () => {
+test("run context reads only the matching trigger's attribution and bounded safe token holds (#747)", async () => {
   const logsDir = tempDir("pd-747-context-");
   const triggersPath = join(logsDir, "triggers.json");
   writeFileSync(triggersPath, JSON.stringify({ triggers: [{ on: { type: "comment", phrase: "/fix" }, run: { flow: "fix", resume: true, recover: true, mcp: ["forge", "bad name"], instructions: "PRIVATE INSTRUCTIONS", secrets: { TOKEN: "PRIVATE REFERENCE" } } }] }));
@@ -1996,14 +1996,14 @@ test("run context reads only the matching trigger's attribution and bounded safe
   const { runBudgetKeyFor } = await import("@edgehero/pi-dispatch/run-budget-ledger");
   const reader = createFleetReader({ valkeyUrl: "redis://unused", logsDir, triggersPath }, {
     makeQueueFn: () => ({ name: "pi-jobs", close: async () => {} }), parseConnectionFn: () => ({}), readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => [], nowFn: () => AT,
-    redisFn: () => ({ ...emptyRedis(), hgetall: async (key) => (asked.push(key), { seq: "2", slot: "held", s1: "settled", h1: JSON.stringify({ amountMicros: 50, keys: ["PRIVATE KEY"] }), s2: "held", h2: JSON.stringify({ amountMicros: 70 }), s3: "PRIVATE TEXT", h3: JSON.stringify({ amountMicros: 90 }) }) }),
+    redisFn: () => ({ ...emptyRedis(), hgetall: async (key) => (asked.push(key), { seq: "2", slot: "held", s1: "settled", h1: JSON.stringify({ amountTokens: 50, keys: ["PRIVATE KEY"] }), s2: "held", h2: JSON.stringify({ amountTokens: 70 }), s3: "PRIVATE TEXT", h3: JSON.stringify({ amountTokens: 90 }) }) }),
   });
   try {
     assert.deepEqual(await reader.runTrigger(0, "comment"), { index: 0, type: "comment", phrase: "/fix", label: null, pattern: null, mcp: ["forge"], resume: true, recover: true });
     assert.equal(await reader.runTrigger(0, "cron"), null, "a changed row's kind cannot be attributed to an older run");
     assert.equal(await reader.runTrigger(-1, "comment"), null);
     const holds = await reader.runHolds("gh-base.r1", { recoveryOf: "gh-base" });
-    assert.deepEqual(holds, [{ seq: 1, state: "settled", amountMicros: 50 }, { seq: 2, state: "held", amountMicros: 70 }]);
+    assert.deepEqual(holds, [{ seq: 1, state: "settled", amountTokens: 50 }, { seq: 2, state: "held", amountTokens: 70 }]);
     assert.deepEqual(asked, [runBudgetKeyFor("gh-base")]);
     assert.ok(!JSON.stringify(holds).includes("PRIVATE"));
   } finally {

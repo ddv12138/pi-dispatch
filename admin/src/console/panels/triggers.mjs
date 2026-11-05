@@ -10,7 +10,7 @@ import {
 } from "../../trigger-check.mjs";
 import { TRIGGER_LIST_KINDS } from "../../trigger-list.mjs";
 import { triggerWhoMayFire } from "../../trigger-policy.mjs";
-import { fmtCost } from "../../panel.mjs";
+import { fmtAmount } from "../../panel.mjs";
 import { outcomeWord, recordReason, reasonWords } from "../../words.mjs";
 import { html as escapedHtml } from "../html.mjs";
 import * as ui from "../kit.mjs";
@@ -74,7 +74,7 @@ const countText = (number, incomplete = false) =>
     : `${incomplete ? "at least " : ""}${number}`;
 const costText = (stats) =>
   stats?.weekCost && !(stats.incomplete && stats.weekRuns === 0)
-    ? `${fmtCost(stats.weekCost)}${stats.incomplete || stats.costIncomplete ? " (retained or partially metered history)" : ""}`
+    ? `${fmtAmount(stats.weekCost)}${stats.incomplete || stats.costIncomplete ? " (retained or partially metered history)" : ""}`
     : "unknown spend";
 const atOf = (r) => Date.parse(r?.endedAt ?? r?.startedAt ?? "");
 const shortList = (values) =>
@@ -153,7 +153,7 @@ export function triggersSpend(v) {
     uiText("Recorded this UTC week", v.locale),
     html`${ui.kpi(
         m?.stats?.weekCost && !(m.stats.incomplete && m.stats.weekRuns === 0)
-          ? fmtCost(m.stats.weekCost)
+          ? fmtAmount(m.stats.weekCost)
           : "unknown",
         uiText("attributed to these rules", v.locale),
       )}

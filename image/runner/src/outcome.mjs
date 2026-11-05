@@ -12,20 +12,20 @@ export const ANSWER_DRAFT_REFUSED = "answer-draft-refused";
 export const EXIT_POLICY = 2; // not retried: turn budget, cap, config error, provider refused the credential
 
 /**
- * The policy-stop reasons the meter and the pre-spend policy check name (issues #501, #502). Exported literals,
+ * The policy-stop reasons the meter and the pre-spend policy check name (issues #500, #502). Exported literals,
  * one spelling each, because three places must agree on them: the meter's stop (usage-meter.mjs), decideExit's
  * `meterStop`, and the worker's closed RUNNER_POLICY_REASONS, which cannot import this file and so reads this
  * source for `= "<reason>"` (worker/test/run-history.test.mjs).
  *
  * `token_budget` keeps its underscore: it is the reason every existing record and dashboard already carries.
- * The four new ones are hyphenated like every other worker reason. Two are STOPS (the run spent and a cap or
- * a list ended it), two are REFUSALS before any call (a cap or a list this runner cannot enforce before a
- * call, which it refuses rather than run with the policy unenforced).
+ * The others are hyphenated like every other worker reason. `token_budget` is a STOP (the run ran and the
+ * settle-time check ended it, the lagging in-run backstop OQ-010 keeps describing); `model-not-allowed` is
+ * either a stop or a refusal before any call (a list this runner cannot enforce before a call, which it refuses
+ * rather than run with the policy unenforced). The per-job cost-cap reasons (`cost-cap`,
+ * `cost-cap-unenforceable`) died with the cost guard (DES-TOKEN-RESERVE-AND-SETTLE).
  */
 export const TOKEN_BUDGET = "token_budget";
-export const COST_CAP = "cost-cap";
 export const MODEL_NOT_ALLOWED = "model-not-allowed";
-export const COST_CAP_UNENFORCEABLE = "cost-cap-unenforceable";
 export const MODEL_POLICY_UNENFORCEABLE = "model-policy-unenforceable";
 /**
  * A parked run's reason (issue #625), on exit 0. Exported for the reason the policy literals are: the worker's
@@ -33,24 +33,6 @@ export const MODEL_POLICY_UNENFORCEABLE = "model-policy-unenforceable";
  */
 export const AWAITING_INPUT = "awaiting-input";
 export const AWAITING_APPROVAL = "awaiting-approval";
-
-/**
- * Which rule of the cost guard refused the call that stopped a `cost-cap` job (issue #507), as the exit line's `why`:
- * `unboundable` (the call has no cost bound, most often an openai-completions model whose output cap is not sent as
- * `max_tokens`), `external` (the children's spend could not be read, so the guard failed closed) or `over-cap` (the
- * bound would take the job past its cap). CLOSED, because the worker copies it into the PII-free run record: it keeps
- * a `why` only when it is a member of its own copy, which a worker test pins to this list. A `cost-cap` stop the guard
- * did not refuse (a displaced compat entry, a child's spend or refusal, an unmetered child) writes no `why`.
- */
-export const COST_REFUSALS = Object.freeze(["unboundable", "external", "over-cap", "final-payload"]);
-
-/**
- * The exit line's `why` for a decided outcome: `{ why }` when the outcome is a `cost-cap` stop and `why` is one of
- * COST_REFUSALS, else `{}`, so every other exit line stays byte-identical. Both exit-line paths of run-job.mjs spread it.
- */
-export function costRefusalField(outcome, why) {
-	return outcome?.reason === COST_CAP && COST_REFUSALS.includes(why) ? { why } : {};
-}
 
 /**
  * pi-ai@0.99.1 dist/types.d.ts:311 -- all seven, in the union's own order. Enumerated so "length" (or a
@@ -178,7 +160,7 @@ export function captureTerminal(previous, event) {
 // `rejected` is classifyPromptRejection's verdict on a prompt() that rejected, or null. It ranks BELOW both
 // budget aborts (a cap that fired is the better-named cause of whatever pi did next) and above everything
 // the terminal message could say, because a rejected prompt's last message is not the job's outcome.
-// `meterStop` is the process-wide meter's first stop reason (`state.stopReason`: TOKEN_BUDGET, COST_CAP or
+// `meterStop` is the process-wide meter's first stop reason (`state.stopReason`: TOKEN_BUDGET, MODEL_NOT_ALLOWED or
 // MODEL_NOT_ALLOWED), or null. It ranks below the turn budget only for the stable order the turn budget always
 // had, and above `tokenAborted`, which since the meter learned more than one stop is the FALLBACK bus meter's
 // flag alone: a runner whose meter installed passes its token stop here, as `meterStop`, never as both.

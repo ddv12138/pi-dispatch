@@ -7,7 +7,7 @@
  * worker/test/pi-derived.test.mjs holds the checked-in copy to the generated one. The automated bump
  * (.github/workflows/pi-bump.yml) runs no pi code, so it does not run this: on its pull request that test goes red
  * naming each table, and a person runs `--write` on the branch and reads the hosts it reports.
- *   - COMPLETIONS_CATALOG_HOSTS, in image/runner/src/usage-meter.mjs and its copy in worker/src/output-cap.mjs: every
+ *   - COMPLETIONS_CATALOG_HOSTS, in worker/src/output-cap.mjs: every
  *     host pi-ai's catalog serves openai-completions on. A host that joins WIDENS the cost guard's trust (a call there
  *     is bounded by the field pi picks), so `--write` reports the hosts added and removed for a person to judge.
  *   - the fixtures in image/runner/test/helpers/catalog-models.mjs, found by (provider, api, id). CATALOG_ROWS in that
@@ -29,7 +29,7 @@ import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-export const HOSTS_FILES = Object.freeze(["image/runner/src/usage-meter.mjs", "worker/src/output-cap.mjs"]);
+export const HOSTS_FILES = Object.freeze(["worker/src/output-cap.mjs"]);
 export const CATALOG_FILE = "image/runner/test/helpers/catalog-models.mjs";
 export const TOOLS_FILE = "worker/src/triggers.mjs";
 /** Every file a generator writes. */

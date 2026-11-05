@@ -32,7 +32,7 @@
  * part went). The rules above hold for every one of them.
  */
 export {
-  ageText, utcText, timeHtml, usdText, moneyHtml, shownPath, RUN_ID_RE, canAct, runCost, BEAT_FRESH_MS,
+  ageText, utcText, timeHtml, tokensText, tokensHtml, shownPath, RUN_ID_RE, canAct, runCost, BEAT_FRESH_MS,
   workersOnline, staleText, progressText
 } from "./panels/common.mjs";
 export {

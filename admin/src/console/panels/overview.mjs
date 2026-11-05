@@ -40,19 +40,19 @@
  * and connected where those differ), and each queue's counts are Waitlists' Queues row; the parked
  * runs, with the ones being answered, are Needs you's questions; the day's failed and refused runs (the floor rule, and
  * cancels not counted as refusals) are Needs you's foot line, linking the runs; "no worker online" and the stale-beats
- * note lead the hosts panel; the count and dollar windows are Caps, under the UTC sentence; the active jobs' table with
+ * note lead the hosts panel; the count and token windows are Caps, under the UTC sentence; the active jobs' table with
  * its progress stays on Fleet, and Running here counts them in each host's slots.
  */
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
 import { FIRST_RUN_COMMANDS, FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
-import { usd2 } from "../../panel.mjs";
 import { NO_EXPLANATION, docsHref } from "../../words.mjs";
+import { fmtTokens } from "../../panel.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { TIMELINE_ROWS, TIMELINE_WAIT_WORDS, TIMELINE_ZOOMS, timelineHtml, timelineLegend, timelineModel } from "../timeline.mjs";
-import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, moneyHtml, shownPath, timeHtml, usdText, workersOnline } from "./common.mjs";
+import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, tokensHtml, shownPath, timeHtml, tokensText, workersOnline } from "./common.mjs";
 
 const tr = (message, view) => uiText(message, view?.locale);
 
@@ -164,7 +164,7 @@ const UNREAD = Object.freeze({
   waiting: "The waiting jobs could not be read.",
   waitingCut: WAITING_CUT_TEXT,
   settings: "The settings overlay could not be read, so its caps are not drawn.",
-  dollars: "The dollar counters could not be read.",
+  dollars: "The token counters could not be read.",
   counts: "The job or token counters could not be read, so their windows are not drawn.",
   spend: "The run records could not be read, so the spend per hour is not drawn.",
   spendShort: "Not every run record of today was read, so these hours may be missing spend.",
@@ -606,15 +606,15 @@ export const overviewActive = overviewPanel("Running", (s, view) => {
 // ---- Spend today -----------------------------------------------------------------------------------------------------------
 
 /**
- * Micro-dollars as a KPI's big number: `moneyHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
+ * A token count as a KPI's big number: `tokensHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
  * since the bundle draws every `span` inside a `.kpi` in its small label face (`.kpi span`).
  */
-function kpiMoney(micros, { spent = false } = {}) {
-  return usdText(micros) === "-" ? "-" : html`<data value="${String(micros)}" title="${usdText(micros)}">${usd2(micros, { spent })}</data>`;
+function kpiMoney(tokens) {
+  return tokensText(tokens) === "-" ? "-" : html`<data value="${String(tokens)}" title="${tokensText(tokens)}">${fmtTokens(tokens)}</data>`;
 }
 
 /**
- * `used` as a percentage of `cap`, or null: rounded DOWN below the cap (`moneyHtml`'s spent rule), so a window one unit
+ * `used` as a percentage of `cap`, or null: rounded DOWN below the cap (`tokensHtml`'s spent rule), so a window one unit
  * short of its cap never reads as full; at or past it, as it is.
  */
 const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && cap > 0 ? (used >= cap ? (used / cap) * 100 : Math.floor((used / cap) * 100)) : null);
@@ -627,9 +627,9 @@ const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && c
  * whole (only the newest read, or a side of them unread), whose hours may be short.
  */
 export const overviewSpend = overviewPanel("Spend today", (s, view) => {
-  const d = s.dollars;
+  const d = s.windows;
   const day = Array.isArray(d?.rows) ? d.rows.find((r) => r?.ledger === "deployment" && r.window === "day") ?? null : null;
-  const windowRead = day !== null && Number.isSafeInteger(day.counterMicros);
+  const windowRead = day !== null && Number.isSafeInteger(day.counterTokens);
   const countersUnread = Boolean(d?.unreachable) || (day !== null && !windowRead);
   const hours = Array.isArray(s.spendByHour?.hours) ? s.spendByHour.hours : null;
   const cut = hours === null ? -1 : hours.indexOf(null);
@@ -638,8 +638,8 @@ export const overviewSpend = overviewPanel("Spend today", (s, view) => {
   let kpi;
   let chip = null;
   if (windowRead) {
-    const pct = pctOf(day.counterMicros, day.capMicros);
-    kpi = ui.kpi(kpiMoney(day.counterMicros, { spent: true }), html`of ${moneyHtml(day.capMicros)}`);
+    const pct = pctOf(day.counterTokens, day.capTokens);
+    kpi = ui.kpi(kpiMoney(day.counterTokens), html`of ${tokensHtml(day.capTokens)}`);
     if (pct !== null) chip = ui.chip(`${count(Math.floor(pct))}% of cap`, { status: day.full ? "failed" : "ok" });
   } else if (settled !== null) kpi = ui.kpi(kpiMoney(settled), "settled today");
   else kpi = ui.kpi("-", "not known");
@@ -726,7 +726,7 @@ const COUNT_CAPS = Object.freeze([
 const WINDOW_WORD = Object.freeze({ day: "today", week: "week", month: "month" });
 
 /**
- * A dollar window's capsule name (its capsule adds the unit, "$") and, for a project or a model, what the key line says
+ * A token window's capsule name (its capsule adds the unit, "tokens") and, for a project or a model, what the key line says
  * it is. A scope's name is the operator's own `scoped-limits.json` row, and a folder scope is a host path, which a page
  * shows by its last folder for every role (the PATHS rule, `panels.mjs`'s header): every scope is named through
  * `shownPath` (a repo as it is), and the key line names no scope at all, since what it would add is that raw name.
@@ -734,16 +734,16 @@ const WINDOW_WORD = Object.freeze({ day: "today", week: "week", month: "month" }
  * `anthropic/`, would crowd a capsule's label), the key saying which model: a model row's name is `<provider>/<model>`
  * (`splitModelEntry`, a provider before the first `/`), never a host path.
  */
-function dollarName(row) {
+function windowName(row) {
   if (row.ledger === "deployment") return { name: "Deploy", key: null };
   const raw = typeof row.name === "string" ? row.name : "";
   if (row.ledger === "model") {
     const short = raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) || raw : raw;
-    return { name: short, key: `${short} $ is model ${raw}` };
+    return { name: short, key: `${short} tokens is model ${raw}` };
   }
   if (raw.startsWith("project:")) {
     const project = raw.slice("project:".length);
-    return { name: project, key: `${project} $ is project ${project}` };
+    return { name: project, key: `${project} tokens is project ${project}` };
   }
   return { name: shownPath(raw), key: null };
 }
@@ -762,7 +762,7 @@ export function countStatus(used, cap, hold) {
  * settings overlay's, so they are drawn only from a settings read made whole (the reader's `{ path, overlay }`, an
  * object; never its `{ path, invalid }`, on which the worker refuses every job): any other read is said in a line of its
  * own (`UNREAD.settings`) and draws none of them. A window with a cap whose counter was not read (a job or token counter
- * that is not a number, the dollar counters' read failed, or a dollar window's counter null) is said in a line too. The
+ * that is not a number, the token counters' read failed, or a token window's counter null) is said in a line too. The
  * empty sentence, `CAPS_EMPTY_TEXT`, is drawn only where no window has a cap and nothing went unread, and it names its
  * source: the worker's own caps from its environment (`PI_DAILY_CAP` and the rest) are in no read this console makes, so
  * "No cap is set." would be false of a worker that caps at its default.
@@ -786,16 +786,16 @@ export const overviewCaps = overviewPanel("Caps", (s, view) => {
     caps.push(ui.capsule({ name, window, pct: pctOf(used, cap), hold: holds ? hold : null, status: holds ? countStatus(used, cap, hold) : used >= cap ? "failed" : "ok" }));
   }
   const keys = [];
-  let dollarsUnread = Boolean(s.dollars?.unreachable);
-  for (const r of Array.isArray(s.dollars?.rows) ? s.dollars.rows : []) {
-    if (!Number.isSafeInteger(r?.capMicros) || r.capMicros <= 0) continue;
-    if (!Number.isSafeInteger(r.counterMicros)) {
+  let dollarsUnread = Boolean(s.windows?.unreachable);
+  for (const r of Array.isArray(s.windows?.rows) ? s.windows.rows : []) {
+    if (!Number.isSafeInteger(r?.capTokens) || r.capTokens <= 0) continue;
+    if (!Number.isSafeInteger(r.counterTokens)) {
       dollarsUnread = true;
       continue;
     }
-    const { name, key } = dollarName(r);
+    const { name, key } = windowName(r);
     if (key !== null && !keys.includes(key)) keys.push(key);
-    caps.push(ui.capsule({ name, unit: "$", window: WINDOW_WORD[r.window] ?? String(r.window), pct: pctOf(r.counterMicros, r.capMicros), status: r.full ? "failed" : "ok" }));
+    caps.push(ui.capsule({ name, unit: "tokens", window: WINDOW_WORD[r.window] ?? String(r.window), pct: pctOf(r.counterTokens, r.capTokens), status: r.full ? "failed" : "ok" }));
   }
   const unread = [settingsRead ? null : UNREAD.settings, countsUnread ? UNREAD.counts : null, dollarsUnread ? UNREAD.dollars : null].filter(Boolean).map((t) => html`<p class="card__sub">${t}</p>`);
   const spend = ui.btn({ kind: "sm", label: "Spend", href: hrefTo(view, "insights") });

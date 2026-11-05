@@ -110,7 +110,7 @@ export function writeDeployment(dir, { git = false } = {}) {
 	if (git) for (const folder of [paths.site, paths.pm]) gitInit(folder, dir);
 
 	const json = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
-	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, maxTokens: 400000, dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8000000, concurrency: 4, softHoldPct: 80, maxCostUsd: "2", dailyCostUsd: "25", weeklyCostUsd: "120" });
+	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, maxTokens: 2_000_000, dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8_000_000, weeklyTokenCap: 120_000_000, concurrency: 4, softHoldPct: 80 });
 	json(paths.projects, {
 		version: 1,
 		projects: [
@@ -127,15 +127,15 @@ export function writeDeployment(dir, { git = false } = {}) {
 			{ scope: "project:billing", memory: "8g", cpus: 4 },
 			{ scope: "project:api", memory: "2g", cpus: 1 },
 			{ scope: "project:ops", memory: "2g", cpus: 1 },
-			{ scope: "project:web", weekUsd: "45" },
-			{ scope: "model:anthropic/claude-sonnet-5-5", weekUsd: "80" },
+			{ scope: "project:web", weekTokens: 45_000_000 },
+			{ scope: "model:anthropic/claude-sonnet-5-5", weekTokens: 80_000_000 },
 		],
 	});
 	json(paths.envelope, {
 		version: 1,
 		window: "week",
-		totalUsd: "100",
-		floorsUsd: { web: "10", api: "10", billing: "10", ops: "5", _other: "0" },
+		totalTokens: 120_000_000,
+		floorsTokens: { web: 12_000_000, api: 12_000_000, billing: 12_000_000, ops: 6_000_000, _other: 0 },
 		defaultWeights: { web: 1, api: 1, billing: 1, ops: 1, _other: 1 },
 		delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
 	});
@@ -143,7 +143,7 @@ export function writeDeployment(dir, { git = false } = {}) {
 	// deployment's PI_FORWARD_ENV fills in, never a value (worker/src/mcp-config.mjs).
 	mkdirSync(paths.overlay, { recursive: true });
 	json(join(paths.overlay, "mcp.json"), { mcpServers: { linear: { url: "https://mcp.example.com/linear", headers: { Authorization: "Bearer ${LINEAR_API_KEY}" }, description: "Look up and update the team's Linear issues", exposure: "codemode" } } });
-	json(paths.subs, { version: 1, subscriptions: [{ id: "kimi", vendor: "Moonshot AI", provider: "kimi-coding", models: ["*"], price: { amount: 19, currency: "USD", per: "month" } }] });
+	json(paths.subs, { version: 1, subscriptions: [{ id: "kimi", vendor: "Moonshot AI", provider: "kimi-coding", models: ["*"] }] });
 	json(paths.pause, { windows: [{ scope: "github:acme/web", from: "22:00", to: "06:00", tz: "Europe/Amsterdam", days: ["mon", "tue", "wed", "thu", "fri"] }] });
 	json(paths.triggers, {
 		triggers: [
@@ -305,16 +305,16 @@ function bullJob(j) {
 const CAPPED_MODEL = "anthropic/claude-sonnet-5-5";
 
 /**
- * A run's `dollars` as the processor settles it, through the worker's own `dollar-budget.mjs` (`D`): the job reserved
- * `maxCostUsd`, and settles metered from a trusted exit line, at the floor (the whole reservation) without one; its
- * model window, where the deployment caps that model, settles by the same rule.
+ * A run's `tokensWindows` as the processor settles it, through the worker's own `token-budget.mjs` (`D`): the job
+ * reserved its per-job budget, and settles metered from a trusted exit line, at the floor (the whole reservation)
+ * without one; its model window, where the deployment caps that model, settles by the same rule.
  */
 function dollarsOf(D, { tokens, usage, provider, model, trusted }) {
-	const reservedMicros = 2 * M;
-	const { settledMicros, basis } = D.dollarSettlement({ tokens, usage, reservedMicros, trusted });
+	const reservedTokens = 2_000_000;
+	const { settledTokens, basis } = D.tokenSettlement({ tokens, usage, reservedTokens, trusted });
 	const ref = `${provider}/${model}`.toLowerCase();
-	const modelBasis = ref === CAPPED_MODEL ? D.modelDollarSettlement({ ref, basis, tokens, usage, reservedMicros, trusted }).basis : null;
-	return D.dollarsRecord({ reservedMicros, settledMicros, basis, modelBasis });
+	const modelBasis = ref === CAPPED_MODEL ? D.modelTokenSettlement({ ref, basis, tokens, usage, reservedTokens, trusted }).basis : null;
+	return D.tokensWindowsRecord({ reservedTokens, settledTokens, basis, modelBasis });
 }
 
 /** The triggers whose jobs keep a session (`run.resume`), by their index in `triggers.json`: the comment and the triage. */
@@ -341,7 +341,7 @@ function outcomeOf(g, j, D) {
 	const cost = Math.round(input * ri + output * ro + cacheRead * rc) / 1e6;
 	const total = input + output + cacheRead;
 	const wallUsec = (j.endMs - j.startMs) * 1000;
-	const tokens = { input, output, total, cost, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: j.turns, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costUnreported: 0, costCapMicros: 2 * M, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0 };
+	const tokens = { input, output, total, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: j.turns, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0, childTotal: 0, childProcesses: 0, tokenBudgetTokens: 2_000_000 };
 	const usage = { v: 1, piAi: "0.99.1", truncated: 0, models: [{ provider, model, calls: j.turns, input, output, cacheRead, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total, cost, unpriced: 0 }] };
 	return {
 		outcome: "completed",
@@ -354,7 +354,7 @@ function outcomeOf(g, j, D) {
 		model,
 		session: sessionOf(j, input, output),
 		budgetReserved: true,
-		dollars: dollarsOf(D, { tokens, usage, provider, model, trusted: true }),
+		tokensWindows: dollarsOf(D, { tokens, usage, provider, model, trusted: true }),
 		resources: {
 			memPeak: Math.round(j.size.memMiB * (0.35 + g.next() * 0.4)) * 1024 * 1024,
 			swapPeak: 0,
@@ -396,7 +396,7 @@ function cancelledOutcome(D) {
 	const model = "claude-sonnet-5-5";
 	// The trigger keeps sessions, so the host's read stands with no runner line beside it (`mergeSession`): nothing was
 	// promoted, so no bytes.
-	return { outcome: "policy", reason: "operator-cancel", exitCode: 137, turns: null, tokens: null, provider, model, session: { resumed: false, reason: "absent", bytes: null }, budgetReserved: true, dollars: dollarsOf(D, { tokens: null, usage: null, provider, model, trusted: false }) };
+	return { outcome: "policy", reason: "operator-cancel", exitCode: 137, turns: null, tokens: null, provider, model, session: { resumed: false, reason: "absent", bytes: null }, budgetReserved: true, tokensWindows: dollarsOf(D, { tokens: null, usage: null, provider, model, trusted: false }) };
 }
 
 /** What is placed before the month is scheduled: the runs now, the retry's attempts, the cancelled job and its hold, the parked run. */
@@ -412,7 +412,7 @@ function placedFirst() {
  * carrying the first in `earlier` the way the processor carries it), the cancelled job and the parked run. The portfolio manager's
  * runs are `pmRecord`'s.
  */
-export function buildRecords({ buildRecord, earlierFrom, dollarBudget: D, venue = "local" }) {
+export function buildRecords({ buildRecord, earlierFrom, tokenBudget: D, venue = "local" }) {
 	const g = generator(599);
 	const taken = new Set(["gh-5d10", "gh-77c1", RETRY.id, CANCELLED.id, PARKED.id, ...Object.values(RUNNING).flat().map((e) => e.id)]);
 	const runs = scheduled(plannedJobs(g, taken), placedFirst());
@@ -439,7 +439,7 @@ export function pmJob(run) {
 }
 
 /** A pm run's record with the plan it wrote. */
-export function pmRecord({ buildRecord, dollarBudget: D, venue = "local" }, run, plan) {
+export function pmRecord({ buildRecord, tokenBudget: D, venue = "local" }, run, plan) {
 	const g = generator(run.at % 100_000);
 	const j = pmJob(run);
 	return buildRecord({ job: bullJob(j), result: { ...outcomeOf(g, j, D), plan }, startedAt: iso(j.startMs), endedAt: iso(j.endMs), host: j.host, defaultBackend: venue, project: j.project, size: j.size, capacity: HOSTS[j.host] });
@@ -531,11 +531,11 @@ const PLAN_REASONS = { web: "checkout launch is done; keep a floor for bug repor
 export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 	const { RM, DW } = mods;
 	// The settlement rules are the worker's own (a caller that predates the key gets them imported here).
-	const W = { ...mods.W, dollarBudget: mods.W.dollarBudget ?? (await import("../worker/src/dollar-budget.mjs")) };
+	const W = { ...mods.W, tokenBudget: mods.W.tokenBudget ?? (await import("../worker/src/token-budget.mjs")) };
 	const redis = W.connection.makeRedisClient(url);
 	try {
 		// The split's history, through the console's own writers, before the records (the pm runs carry the plans).
-		const read = RM.readEnvelope({ envelopeFile: paths.envelope, projectsPath: paths.projects, scopedLimitsPath: paths.limits, maxCostMicros: 2 * M });
+		const read = RM.readEnvelope({ envelopeFile: paths.envelope, projectsPath: paths.projects, scopedLimitsPath: paths.limits, maxTokens: 2_000_000 });
 		if (!read.envelope) throw new Error(`the fixture's envelope does not read: ${JSON.stringify(read)}`);
 		const audit = W.allocation.makeAllocationAudit({ logsDir: paths.logs });
 		let lock = 0;
@@ -563,8 +563,8 @@ export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 		plans.push(await apply(PM_RUNS[3].at + 2 * MIN + 30_000, { web: 4, api: 1, billing: 7, ops: 1, _other: 0 }, PM_RUNS[3], "mini1"));
 		const planOf = (res) => ({ outcome: res.outcome, reason: res.reason ?? null, planId: res.planId ?? null, clamped: res.clamped === true });
 
-		const records = buildRecords({ buildRecord: W.runHistory.buildRecord, earlierFrom: W.runHistory.earlierFrom, dollarBudget: W.dollarBudget, venue });
-		PM_RUNS.forEach((run, i) => records.push(pmRecord({ buildRecord: W.runHistory.buildRecord, dollarBudget: W.dollarBudget, venue }, run, planOf(plans[i]))));
+		const records = buildRecords({ buildRecord: W.runHistory.buildRecord, earlierFrom: W.runHistory.earlierFrom, tokenBudget: W.tokenBudget, venue });
+		PM_RUNS.forEach((run, i) => records.push(pmRecord({ buildRecord: W.runHistory.buildRecord, tokenBudget: W.tokenBudget, venue }, run, planOf(plans[i]))));
 		records.sort((a, b) => Date.parse(a.endedAt) - Date.parse(b.endedAt) || (a.jobId < b.jobId ? -1 : 1));
 		// mini1 and mini2 share one PI_LOGS_DIR (this one) and keep 30 days; build3 keeps its own logs directory for 7
 		// days (BUILD3_RETENTION_DAYS), so its runs reach the others only through the run mirror every named worker
@@ -604,17 +604,17 @@ export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 		await redis.set(W.budget.dayKey(now), slots(dayStart));
 		await redis.set(W.budget.weekKey(now), slots(weekStart));
 		await redis.set(W.budget.monthKey(now), slots(monthStart));
-		await redis.set(W.budget.tokenDayKey(now), records.filter((r) => since(r, dayStart)).reduce((s, r) => s + (r.tokens?.total ?? 0), 0));
+		await redis.set(W.budget.dayKey(now, W.tokenBudget.TOKEN_KEY_PREFIX), records.filter((r) => since(r, dayStart)).reduce((s, r) => s + (r.tokens?.total ?? 0), 0));
 		const web = (r) => r.kind === "github" && r.target?.startsWith("acme/web#");
 		const webScope = W.scopedLimits.scopeKeyPrefix("github:acme/web");
 		await redis.set(W.budget.dayKey(now, webScope), records.filter((r) => web(r) && r.budgetReserved && since(r, dayStart)).length + 1);
 		await redis.set(W.budget.weekKey(now, webScope), records.filter((r) => web(r) && r.budgetReserved && since(r, weekStart)).length + 1);
-		const settled = (pred, from) => records.filter((r) => pred(r) && r.dollars && since(r, from)).reduce((s, r) => s + r.dollars.settledMicros, 0);
-		const held = (pred) => running.filter(pred).length * 2 * M;
+		const settled = (pred, from) => records.filter((r) => pred(r) && r.tokensWindows && since(r, from)).reduce((s, r) => s + r.tokensWindows.settledTokens, 0);
+		const held = (pred) => running.filter(pred).length * 2_000_000;
 		const settings = RM.readSettingsView({ settingsFile: paths.settings });
 		const limits = RM.readScopedLimits({ scopedLimitsPath: paths.limits }).limits;
-		const { caps } = DW.deploymentDollarCaps(settings.overlay, {});
-		for (const spec of DW.dollarWindowSpecs({ caps, limits, now })) {
+		const { caps } = DW.deploymentTokenCaps(settings.overlay, {});
+		for (const spec of DW.tokenWindowSpecs({ caps, limits, now })) {
 			const from = spec.window === "day" ? dayStart : spec.window === "week" ? weekStart : monthStart;
 			let pred = () => true;
 			let livePred = () => true;

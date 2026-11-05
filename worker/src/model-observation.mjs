@@ -46,5 +46,3 @@ export function cooldownModelRefs(runs, deployment, { modelRoles = {}, projects 
 	return [...refs];
 }
 
-export const RADIUS_COST_CAP_LABEL = "Radius (pi-messages) has no verified local cost bound, including zero-rate routes and custom gateways, so the runner refuses every call under a per-job cost cap as unboundable";
-export const RADIUS_COST_CAP_FIX = "use a provider with a locally bounded API for capped jobs; raising the cap or changing catalog rates cannot bound Radius: docs/costs.md";

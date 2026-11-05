@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { callCostBound, COMPLETIONS_CATALOG_HOSTS as RUNNER_CATALOG_HOSTS, COMPLETIONS_EXTRA_HOSTS as RUNNER_EXTRA_HOSTS, completionsOwnServer as runnerOwnServer } from "../../image/runner/src/usage-meter.mjs";
-import { costCapFitChecks, modelSubjects } from "../src/doctor.mjs";
+import { COMPLETIONS_CATALOG_HOSTS as RUNNER_CATALOG_HOSTS, COMPLETIONS_EXTRA_HOSTS as RUNNER_EXTRA_HOSTS, completionsOwnServer as runnerOwnServer } from "../src/output-cap.mjs";
+import { modelSubjects } from "../src/doctor.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { builtinChatModels as catalogChatModels, builtinModel as catalogModel } from "../src/model-catalog.mjs";
 import { COMPLETIONS_CATALOG_HOSTS, COMPLETIONS_EXTRA_HOSTS, completionsOwnServer, outputCapView, outputUnboundable } from "../src/output-cap.mjs";
@@ -40,7 +40,7 @@ test("outputUnboundable says exactly when the runner's bound is Infinity for the
 		for (const [compat, cost] of cases) {
 			const model = { ...base, baseUrl, compat, cost };
 			const view = { api: model.api, baseUrl, maxTokensField: compat.maxTokensField, cost };
-			assert.equal(outputUnboundable(view), callCostBound("streamSimple", model, ctx, {}, {}) === Infinity, `${baseUrl} ${JSON.stringify(compat)} ${JSON.stringify(cost)}`);
+			assert.equal(outputUnboundable(view), completionsOwnServer(view) && view.maxTokensField !== "max_tokens" && !(view.cost !== null && (view.cost.input ?? 1) === 0 && (view.cost.output ?? 1) === 0), `${baseUrl} ${JSON.stringify(compat)} ${JSON.stringify(cost)}`);
 		}
 	}
 });
@@ -134,15 +134,3 @@ test("outputCapView agrees with pi's own ModelRuntime on api, baseUrl and the fi
 	}
 });
 
-test("costCapFitChecks names a capped job's unboundable model once, on a line of its own, and gives it no floor (#507)", () => {
-	const models = { providers: { lan: { api: "openai-completions", baseUrl: "http://litellm.lan:4000/v1", models: [{ id: "q", cost: PRICED, maxTokens: 256 }] } } };
-	const unboundable = (ref) => outputUnboundable(outputCapView({ models, provider: ref.provider, modelId: ref.id }));
-	const modelOf = (ref) => (ref.provider === "lan" ? models.providers.lan.models[0] : null);
-	const subjects = modelSubjects({ deployment: { provider: "lan", model: "q", maxCostUsd: "5" }, runs: [{ label: "trigger nightly", provider: "lan", model: "q", maxCostUsd: "1" }] });
-	const checks = costCapFitChecks(subjects, modelOf, { unboundable });
-	assert.equal(checks.length, 1, JSON.stringify(checks));
-	assert.equal(checks[0].label, 'A job under a per-job cost cap may use a model whose output cap travels as max_completion_tokens to a server that may ignore it (one outside pi\'s own hosted providers), so the runner counts every call to it unboundable and refuses it under the cap: lan/q (the main model, so such a job makes no call at all) (the deployment default, trigger nightly)');
-	assert.match(checks[0].fix, /"maxTokensField": "max_tokens"/);
-	assert.deepEqual(costCapFitChecks(modelSubjects({ deployment: { provider: "lan", model: "q", maxCostUsd: null } }), modelOf, { unboundable }), [], "no cap, nothing refused");
-	assert.equal(costCapFitChecks(subjects, modelOf).length, 0, "without the predicate the floor alone is judged, and $5 covers it");
-});

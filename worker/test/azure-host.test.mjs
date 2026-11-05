@@ -68,7 +68,7 @@ test("a malformed policy protects nothing rather than throwing on the money path
 });
 
 test("isDefaultBranchProtected asks the git policy endpoint, not the legacy one", () => {
-	// Microsoft's own reference says the plain /_apis/policy/configurations `scope` parameter is legacy and
+	// Tokensoft's own reference says the plain /_apis/policy/configurations `scope` parameter is legacy and
 	// "does not support hierarchical nesting" -- which is exactly the nesting a Prefix rule relies on.
 	const fetchFn = fakeFetch({
 		[REPO_ROUTE]: REPO_BODY,

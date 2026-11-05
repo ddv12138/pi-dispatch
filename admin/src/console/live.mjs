@@ -805,7 +805,7 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
         })),
         more: num(s.failed?.more) ?? 0,
       };
-  const dollarRows = Array.isArray(s.dollars?.rows) ? s.dollars.rows : [];
+  const dollarRows = Array.isArray(s.windows?.rows) ? s.windows.rows : [];
   return {
     version: STATE_VERSION,
     at: now,
@@ -829,13 +829,13 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
       tokensToday: num(s.budget?.tokensToday),
     },
     dollars: {
-      unreachable: Boolean(s.dollars?.unreachable),
+      unreachable: Boolean(s.windows?.unreachable),
       windows: dollarRows.map((r) => ({
         ledger: str(r?.ledger),
         scope: typeof r?.name === "string" && !isAbsolute(r.name) ? str(r.name) : null,
         window: str(r?.window),
-        capMicros: num(r?.capMicros),
-        counterMicros: num(r?.counterMicros),
+        capTokens: num(r?.capTokens),
+        counterTokens: num(r?.counterTokens),
         full: Boolean(r?.full),
       })),
     },

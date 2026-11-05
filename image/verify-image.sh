@@ -219,6 +219,10 @@ if [ -z "$capabilities" ] || [ "$capabilities" = "<no value>" ]; then
 else
 	for capability in $(echo "$capabilities" | tr ',' ' '); do
 		case "$capability" in
+			tokenBudget)
+				docker run --rm --entrypoint grep "$IMAGE_REF" -q "PI_MAX_TOKENS" /opt/pi-dispatch/runner/usage-meter.mjs 2>/dev/null \
+					|| fail "the image declares 'tokenBudget' but its baked runner never reads PI_MAX_TOKENS -- the settle-time budget would not exist"
+				;;
 			replicas)
 				docker run --rm --entrypoint grep "$IMAGE_REF" -q "the branch your prompt names" /opt/pi-dispatch/HARD_RULES.md 2>/dev/null \
 					|| fail "the image declares 'replicas' but its baked HARD_RULES.md still hard-codes a single branch name -- the system prompt would contradict the replica prompt and both replicas would push to one branch"
@@ -242,25 +246,6 @@ else
 					--entrypoint sh "$IMAGE_REF" -c '[ "$(id -u):$(id -g)" = 4242:4242 ] || exit 1; mkdir -p "$HOME/.pi/agent" && : > "$HOME/.pi/agent/.anyuid-probe" || exit 1; d=$(find "$HOME" -xdev -type d ! -writable 2>/dev/null) && [ -z "$d" ]' >/dev/null 2>&1 \
 					|| fail "the image declares 'anyUid' but /home/pi is not writable by an arbitrary uid -- a job run as the worker's own uid would lose auth.json and every tool cache"
 				any_uid=1
-				;;
-			costCap)
-				# Issue #501. The claim is that a job under PI_MAX_COST_MICROS is stopped BEFORE a call that could pass it.
-				# Proved by running one: a cap of 0, the default priced model, a fake key and no network. The
-				# guard must refuse the very first call (its bound is about a dollar), so the runner exits 2 with
-				# reason cost-cap and costRefused 1, and nothing is dialled. A runner that ignored the variable would try
-				# the call and exit on the network error instead; one that could not enforce the cap would exit 2 with
-				# cost-cap-unenforceable. Both fail here.
-				cost_job=$(mktemp -d)
-				echo "Reply with the single word ok." >"$cost_job/prompt.md"
-				chmod -R a+rX "$cost_job"
-				cost_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$cost_job:/job:ro" \
-					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 \
-					"$IMAGE_REF" 2>&1) && cost_code=0 || cost_code=$?
-				rm -rf "$cost_job"
-				cost_exit=$(echo "$cost_out" | grep '"event":"exit"' | tail -1)
-				[ "$cost_code" = 2 ] && echo "$cost_exit" | grep -q '"reason":"cost-cap"' && echo "$cost_exit" | grep -Eq '"costRefused":1[,}]' \
-					|| fail "the image declares 'costCap' but a job under PI_MAX_COST_MICROS=0 was not stopped before its first call (exit $cost_code: $cost_exit)"
 				;;
 			modelPolicy)
 				# Issue #502. The claim is that a job under PI_ALLOWED_MODELS is stopped BEFORE a call to a model the list does
@@ -324,7 +309,7 @@ AGENTS
 				failover_out=$(printf '%s\n' "$failover_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges -v "$failover_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
 					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_RETRY_MAX=1 -e PI_RETRY_BASE_MS=1 -e PI_EXIT_AUTH=stdin \
-					-e PI_ALLOWED_MODELS=anthropic/claude-sonnet-4-5-20250929 -e PI_MAX_COST_MICROS=100000000 \
+					-e PI_ALLOWED_MODELS=anthropic/claude-sonnet-4-5-20250929 \
 					-e NODE_OPTIONS=--import=/app/image/runner/test/fixtures/provider-failure-fetch.mjs \
 					"$IMAGE_REF" 2>&1) && failover_code=0 || failover_code=$?
 				rm -rf "$failover_job"
@@ -342,9 +327,9 @@ AGENTS
 				# REQ-MCP-OPERATOR-SERVERS. The claim is that the runner reads /job/mcp.json, connects the stdio server it
 				# names with only the environment it names, waits for it before the prompt, and closes it before it exits.
 				# Proved by running one offline: a stub server in /job that answers the handshake and refuses it when the
-				# provider's key reached it, and a cost cap of 0 so the job stops before its first call. The runner must log
-				# mcp_servers_ready and then exit 2 with cost-cap. A runner that ignored the file would exit cost-cap without
-				# the log line; one that leaked the key, or never connected, would exit mcp-unavailable or hang.
+				# provider's key reached it, and a fake key so the first call stops the job. The runner must log
+				# mcp_servers_ready and then exit 2 with provider-auth-refused. A runner that ignored the file would exit
+				# without the log line; one that leaked the key, or never connected, would exit mcp-unavailable or hang.
 				mcp_job=$(mktemp -d)
 				echo "Reply with the single word ok." >"$mcp_job/prompt.md"
 				cat >"$mcp_job/stub.mjs" <<'STUB'
@@ -368,13 +353,13 @@ DOC
 				mcp_started=$(date +%s)
 				mcp_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$mcp_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 \
 					-e PI_MCP_SERVERS=stub -e STUB_TOKEN=named \
 					"$IMAGE_REF" 2>&1) && mcp_code=0 || mcp_code=$?
 				mcp_took=$(($(date +%s) - mcp_started))
 				rm -rf "$mcp_job"
 				mcp_exit=$(echo "$mcp_out" | grep '"event":"exit"' | tail -1)
-				[ "$mcp_code" = 2 ] && echo "$mcp_out" | grep -q '"event":"mcp_servers_ready"' && echo "$mcp_exit" | grep -q '"reason":"cost-cap"' && [ "$mcp_took" -lt 60 ] \
+				[ "$mcp_code" = 2 ] && echo "$mcp_out" | grep -q '"event":"mcp_servers_ready"' && echo "$mcp_exit" | grep -q '"reason":"provider-auth-refused"' && [ "$mcp_took" -lt 60 ] \
 					|| fail "the image declares 'mcp' but a job naming a stdio server in /job/mcp.json did not connect it and stop cleanly (exit $mcp_code in ${mcp_took}s: $mcp_exit)"
 				;;
 			forgeMcp)
@@ -446,7 +431,8 @@ PROBE
 				;;
 			exitAuth)
 				# Issue #545. Two claims, both checked by running them. First, the runner signs its exit line with the key the
-				# worker writes to its stdin: the same offline job as costCap's (a cap of 0 stops it before any call), handed a
+				# worker writes to its stdin: the same offline job shape as the other proofs (a fake key stops it at the
+				# first call), handed a
 				# key the way run-container.mjs hands one (-i, PI_EXIT_AUTH=stdin), must end on a line whose HMAC-SHA256 under
 				# that key is right. Second, the runner runs under the exec-only node, so a child of it (a job's tool) cannot
 				# read its /proc entries, where the key lives in memory: a plain node runner's were readable on Docker Desktop.
@@ -456,7 +442,7 @@ PROBE
 				auth_key=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 				auth_out=$(printf '%s\n' "$auth_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges -v "$auth_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
 					"$IMAGE_REF" 2>&1) || true
 				rm -rf "$auth_job"
 				auth_exit=$(echo "$auth_out" | grep '"event":"exit"' | tail -1)
@@ -587,8 +573,8 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				;;
 			sandboxLayout)
 				# Issue #683. Two claims. First, the runner reads PI_JOB_LAYOUT and, under `sandbox`, finds its job under
-				# /sandbox: proved by the costCap job above run on that layout, its prompt mounted at /sandbox/job and nothing
-				# at /job, which must reach the same pre-call refusal (a runner reading /job would exit "missing job input").
+				# /sandbox: proved by the fake-key job above run on that layout, its prompt mounted at /sandbox/job and nothing
+				# at /job, which must reach the first dispatch (a runner reading /job would exit "missing job input").
 				layout_job=$(mktemp -d)
 				layout_ws=$(mktemp -d)
 				echo "Reply with the single word ok." >"$layout_job/prompt.md"
@@ -597,13 +583,13 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				layout_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$layout_job:/sandbox/job:ro" -v "$layout_ws:/sandbox/workspace" --workdir /sandbox/workspace \
 					-e PI_JOB_LAYOUT=sandbox -e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 \
 					"$IMAGE_REF" 2>&1) && layout_code=0 || layout_code=$?
 				layout_exit=$(echo "$layout_out" | grep '"event":"exit"' | tail -1)
 				# Issue #684: a copying venue's network policy names the image's binaries, so the claim needs the label.
 				[ -n "$net_binaries" ] && [ "$net_binaries" != "<no value>" ] \
 					|| { rm -rf "$layout_job" "$layout_ws"; fail "the image declares 'sandboxLayout' but no dev.pi-dispatch.net-binaries label: a copying venue's network policy would match no binary"; }
-				[ "$layout_code" = 2 ] && echo "$layout_exit" | grep -q '"reason":"cost-cap"' \
+				[ "$layout_code" = 2 ] && echo "$layout_exit" | grep -q '"reason":"provider-auth-refused"' \
 					|| { rm -rf "$layout_job" "$layout_ws"; fail "the image declares 'sandboxLayout' but a job on PI_JOB_LAYOUT=sandbox did not find its prompt under /sandbox/job (exit $layout_code: $layout_exit)"; }
 				# Second, /opt/pi-dispatch/pi-landlock confines every write of the tree it starts to the --rw paths. Where the
 				# kernel has no Landlock (Docker Desktop's LinuxKit, measured) the helper must refuse to run anything (126,
@@ -662,7 +648,7 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				tr_out=$(printf '%s\n' "$tr_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$tr_job:/job:ro" -v "$tr_session:/session" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
 					-e PI_JOB_ID=pi-job-verify-transcript -e PI_SESSION_FILE=/session/current.jsonl -e PI_TRANSCRIPT=stderr \
 					"$IMAGE_REF" 2>"$tr_err") || true
 				tr_rs=$(printf '\036')
@@ -735,7 +721,7 @@ STPROBE
 				st_out=$(docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$st_dir/job:/job:ro" -v "$st_dir/ws:/workspace" -v "$st_dir/session:/session" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXIT_AUTH=stdin-frames -e PI_STEER=1 \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin-frames -e PI_STEER=1 \
 					-e PI_JOB_ID="$st_run" -e PI_SESSION_FILE=/session/current.jsonl \
 					"$IMAGE_REF" <"$st_dir/stdin" 2>&1) || true
 				kill -0 "$st_writer" 2>/dev/null && st_open=yes || st_open=no
@@ -801,7 +787,7 @@ BEPROBE
 				be_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$be_dir/job:/job:ro" -v "$be_dir/ws:/workspace" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_BUNDLE_ENV=1 \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_BUNDLE_ENV=1 \
 					"$IMAGE_REF" 2>&1) || true
 				rm -rf "$be_dir"
 				echo "$be_out" | grep -q '^bundle-env-probe plain=plain-value pem=line1|line2 flag=gone$' \
@@ -818,7 +804,7 @@ BEPROBE
 				ad_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$ad_dir/job:/job:ro" -v "$ad_dir/ws:/workspace:ro" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 "$IMAGE_REF" 2>&1) && ad_code=0 || ad_code=$?
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 "$IMAGE_REF" 2>&1) && ad_code=0 || ad_code=$?
 				rm -rf "$ad_dir"
 				[ "$ad_code" = 2 ] && echo "$ad_out" | grep -q '"reason":"answer-draft-refused"' \
 					&& ! echo "$ad_out" | grep -q 'ANSWER-DRAFT-EXTENSION-EXECUTED' \
@@ -840,7 +826,7 @@ BEPROBE
 				pc_run() {
 					docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$pc_dir/job:/job:ro" \
 						-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-						-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 "$@" "$IMAGE_REF" 2>&1 | grep '"event":"exit"' | tail -1
+						-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 "$@" "$IMAGE_REF" 2>&1 | grep '"event":"exit"' | tail -1
 				}
 				pc_as() { pc_run -e "PI_PACKAGES=/job/canary/$1" -e "PI_PACKAGE_CANARY=/job/canary/$1"; }
 				pc_good=$(pc_as good--1.0.0--aaaaaaaa)
@@ -858,8 +844,8 @@ BEPROBE
 					|| fail "the image reports a canary on a job that is not one: $pc_plain"
 				;;
 			questionGrouping)
-				# The dedicated classifier mode must reach the cost guard before any executable discovery.
-				# A zero cap and no network make this a real runner proof that cannot spend provider tokens.
+				# The dedicated classifier mode must be handled before any executable discovery.
+				# A token cap, a fake key and no network make this a real runner proof that cannot spend provider tokens.
 				qg_dir=$(mktemp -d)
 				mkdir -p "$qg_dir/job" "$qg_dir/ws/.pi/extensions" "$qg_dir/outbox"
 				printf '' >"$qg_dir/job/prompt.md"
@@ -873,7 +859,7 @@ QUESTIONGROUP
 				qg_out=$(printf '%s\n' "$qg_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$qg_dir/job:/job:ro" -v "$qg_dir/ws:/workspace:ro" -v "$qg_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
 					"$IMAGE_REF" 2>&1) && qg_code=0 || qg_code=$?
 				qg_exit=$(echo "$qg_out" | grep '"event":"exit"' | tail -1)
 				qg_mac=$(echo "$qg_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -883,17 +869,15 @@ QUESTIONGROUP
 				[ ! -f "$qg_dir/outbox/question-group.json" ] || qg_written=yes
 				rm -rf "$qg_dir"
 				[ "$qg_code" = 2 ] && [ -n "$qg_mac" ] && [ "$qg_mac" = "$qg_want" ] \
-					&& echo "$qg_exit" | grep -q '"reason":"cost-cap"' \
-					&& echo "$qg_exit" | grep -Eq '"costRefused":1[,}]' \
-					&& echo "$qg_exit" | grep -Eq '"calls":0[,}]' \
+					&& echo "$qg_exit" | grep -q '"reason":"provider-auth-refused"' \
 					&& echo "$qg_exit" | grep -Eq '"toolsStarted":0[,}]' \
 					&& ! echo "$qg_out" | grep -q 'QUESTION-GROUP-EXTENSION-EXECUTED' \
 					&& [ "$qg_written" = no ] \
-					|| fail "the image declares questionGrouping but its signed classifier probe bypassed the zero cap, loaded an extension, called a tool or emitted a group"
+					|| fail "the image declares questionGrouping but its signed classifier probe loaded an extension, called a tool or emitted a group"
 				;;
 			watch)
 				# Watch evidence has no human author: executable resources must never run, even at import.
-				# The zero cap and --network none make both probes deterministic and provider-free.
+				# The token cap, the fake key and --network none make both probes deterministic and provider-free.
 				watch_dir=$(mktemp -d)
 				mkdir -p "$watch_dir/job" "$watch_dir/ws/.pi/extensions" "$watch_dir/outbox"
 				echo 'Investigate the finding using read-only tools.' >"$watch_dir/job/prompt.md"
@@ -904,13 +888,13 @@ QUESTIONGROUP
 				watch_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell \
 					"$IMAGE_REF" 2>&1) && watch_code=0 || watch_code=$?
 				watch_exit=$(echo "$watch_out" | grep '"event":"exit"' | tail -1)
 				watch_active=$(echo "$watch_out" | grep '"event":"tools_excluded"' | tail -1)
-				if [ "$watch_code" != 2 ] || ! echo "$watch_exit" | grep -q '"reason":"cost-cap"' || echo "$watch_out" | grep -q 'WATCH-EXTENSION-EXECUTED' || ! echo "$watch_active" | grep -q '"active":\["read","grep","find","ls","board_write"\]'; then
+				if [ "$watch_code" != 2 ] || ! echo "$watch_exit" | grep -q '"reason":"provider-auth-refused"' || echo "$watch_out" | grep -q 'WATCH-EXTENSION-EXECUTED' || ! echo "$watch_active" | grep -q '"active":\["read","grep","find","ls","board_write"\]'; then
 					rm -rf "$watch_dir"
-					fail "the image declares watch but executable discovery or its read-only tool registry failed the zero-spend probe"
+					fail "the image declares watch but executable discovery or its read-only tool registry failed the provider-free probe"
 				fi
 				cat >"$watch_dir/job/watch-decision.json" <<'WATCHDECIDE'
 {"version":1,"model":{"provider":"openrouter","id":"typesafe/jev-1.13"},"state":{"count":37},"questions":{"act":{"type":"choice","criteria":{"ignore":"noise","file_issue":"a person should decide"}}}}
@@ -920,7 +904,7 @@ WATCHDECIDE
 				watch_gate=$(printf '%s\n' "$watch_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_COST_MICROS=0 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
 					"$IMAGE_REF" 2>&1) && watch_gate_code=0 || watch_gate_code=$?
 				watch_gate_exit=$(echo "$watch_gate" | grep '"event":"exit"' | tail -1)
 				watch_mac=$(echo "$watch_gate_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -928,8 +912,8 @@ WATCHDECIDE
 				watch_want=$(printf '%s' "$watch_body" | openssl dgst -sha256 -hmac "$watch_key" | awk '{print $NF}')
 				watch_decision=$(cat "$watch_dir/outbox/decision.json" 2>/dev/null || true)
 				rm -rf "$watch_dir"
-				[ "$watch_gate_code" = 2 ] && [ -n "$watch_mac" ] && [ "$watch_mac" = "$watch_want" ] && echo "$watch_gate_exit" | grep -q '"reason":"cost-cap"' && echo "$watch_gate_exit" | grep -Eq '"costRefused":1[,}]' && echo "$watch_decision" | grep -q '"stopReason":"aborted"' \
-					|| fail "the image declares watch but its deterministic classifier bypassed the cost guard or failed to write its bounded result"
+				[ "$watch_gate_code" = 2 ] && [ -n "$watch_mac" ] && [ "$watch_mac" = "$watch_want" ] && echo "$watch_gate_exit" | grep -q '"reason":"provider-auth-refused"' && [ -z "$watch_decision" ] \
+					|| fail "the image declares watch but its deterministic classifier ran a model call the fake key could not answer, or wrote a decision it did not decide"
 				;;
 			*) fail "dev.pi-dispatch.capabilities names an unknown capability '$capability'" ;;
 		esac

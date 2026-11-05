@@ -205,7 +205,7 @@ test("errors name the trigger index and the key, never the value", () => {
 });
 
 test("near misses of the model keys refuse under run, on every kind", () => {
-	const misses = ["providerId", "provider_id", "Provider", "PROVIDER", "modelId", "model_id", "Model", "model-id", "allowedModels", "allowed_models", "Models", "max_turns", "maxturns", "MaxTurns", "max-cost-usd", "maxCostUSD", "m\u043Edel", "maxTurn", "max_turn", "providers", "providerIds", "model_name", "modelName", "modelNames", "allowedModel", "maxCost"];
+	const misses = ["providerId", "provider_id", "Provider", "PROVIDER", "modelId", "model_id", "Model", "model-id", "allowedModels", "allowed_models", "Models", "max_turns", "maxturns", "MaxTurns", "max-cost-usd", "maxCostTOKENS", "m\u043Edel", "maxTurn", "max_turn", "providers", "providerIds", "model_name", "modelName", "modelNames", "allowedModel", "maxCost"];
 	for (const [name, entry] of Object.entries(KINDS)) {
 		for (const key of misses) {
 			refused(withRun(entry, { [key]: "x" }), new RegExp(`run\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} is not a field -- did you mean run\\.`));
@@ -217,7 +217,7 @@ test("near misses of the model keys refuse under run, on every kind", () => {
 	refused(withRun(KINDS.label, { modelId: "x" }), /did you mean run\.model\?/);
 	refused(withRun(KINDS.label, { allowedModels: ["x"] }), /did you mean run\.models\?/);
 	refused(withRun(KINDS.label, { max_turns: 3 }), /did you mean run\.maxTurns\?/);
-	refused(withRun(KINDS.label, { max_cost_usd: 3 }), /did you mean run\.maxCostUsd\?/);
+	refused(withRun(KINDS.label, { max_cost_usd: 3 }), /did you mean run\.maxTokens\?/);
 	refused(withRun(KINDS.label, { maxTurn: 3 }), /did you mean run\.maxTurns\?/);
 	refused(withRun(KINDS.label, { providers: "x" }), /did you mean run\.provider\?/);
 	refused(withRun(KINDS.label, { modelName: "x" }), /did you mean run\.model\?/);
@@ -230,21 +230,21 @@ test("a homoglyph key is pointed at the field its surviving letters actually spe
 	refused(withRun(KINDS.label, { "m\u043Edel": "x" }), /did you mean run\.model\?/);
 	refused(withRun(KINDS.label, { "pr\u043Evider": "x" }), /did you mean run\.provider\?/);
 	refused(withRun(KINDS.label, { "m\u0430xTurns": 3 }), /did you mean run\.maxTurns\?/);
-	refused(withRun(KINDS.label, { "m\u0430xCostUsd": 3 }), /did you mean run\.maxCostUsd\?/);
+	refused(withRun(KINDS.label, { "m\u0430xCostUsd": 3 }), /did you mean run\.maxTokens\?/);
 });
 
 test("the model keys refuse under on in EVERY spelling, the correct one included", () => {
 	for (const entry of Object.values(KINDS)) {
-		for (const key of ["provider", "model", "models", "maxTurns", "maxCostUsd", "modelId"]) {
+		for (const key of ["provider", "model", "models", "maxTurns", "maxTokens", "modelId"]) {
 			refused({ on: { ...entry.on, [key]: "x" }, run: entry.run }, new RegExp(`on\\.${key} is not a field`));
 		}
 	}
 });
 
-test("run.models and run.maxCostUsd are fields now, carried into the normalized run (#502, #501)", () => {
-	const [t] = parse([withRun(KINDS.label, { models: ["openai/gpt-5.4"], maxCostUsd: 2 })]);
+test("run.models and run.maxTokens are fields now, carried into the normalized run (#502, #501)", () => {
+	const [t] = parse([withRun(KINDS.label, { models: ["openai/gpt-5.4"], maxTokens: 2 })]);
 	assert.deepEqual(t.run.models, ["openai/gpt-5.4"], "#502 part 3: the list rides the normalized run");
-	assert.equal(t.run.maxCostUsd, 2, "#501: validated and carried as written");
+	assert.equal(t.run.maxTokens, 2, "#501: validated and carried as written");
 	// An unrelated unknown key, ASCII or not, still loads.
 	parse([withRun(KINDS.label, { modelNotes: "x", fl\u00F6w: "x", temperature: 1 })]);
 });
@@ -330,37 +330,37 @@ test("validateModelRef returns only the present fields and leaves the input alon
 	assert.deepEqual(run, { provider: "anthropic", flow: "x" });
 });
 
-// ---- run.maxCostUsd (issue #501) ----
+// ---- run.maxTokens (issue #501) ----
 
-test("run.maxCostUsd is accepted on every kind, carried AS WRITTEN, and absent (or null) emits no key", () => {
+test("run.maxTokens is accepted on every kind as a whole number of tokens, and absent (or null) emits no key (D7a)", () => {
 	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const value of ["2.50", 2.5, "0.000001", 1000000]) {
-			const [t] = parse([withRun(entry, { maxCostUsd: value })]);
-			assert.equal(t.run.maxCostUsd, value, `${name} ${JSON.stringify(value)}`);
+		for (const value of [2, "2500", 1000000]) {
+			const [t] = parse([withRun(entry, { maxTokens: value })]);
+			assert.equal(t.run.maxTokens, value, `${name} ${JSON.stringify(value)}`);
 		}
 		const [plain] = parse([entry]);
-		assert.equal("maxCostUsd" in plain.run, false, `${name}: absent emits no key`);
-		const [nulled] = parse([withRun(entry, { maxCostUsd: null })]);
-		assert.equal("maxCostUsd" in nulled.run, false, `${name}: null is absent, the model keys' rule`);
+		assert.equal("maxTokens" in plain.run, false, `${name}: absent emits no key`);
+		const [nulled] = parse([withRun(entry, { maxTokens: null })]);
+		assert.equal("maxTokens" in nulled.run, false, `${name}: null is absent, the model keys' rule`);
 	}
 });
 
-test("a malformed run.maxCostUsd refuses the file on every kind, naming the trigger and the key, never the value", () => {
+test("a malformed run.maxTokens refuses the file on every kind, naming the trigger and the key, never the value", () => {
 	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const bad of [0, "0", -2, "2.1234567", 1e-7, "abc", "2 ", true, [], {}, "1000001", "1e2"]) {
+		for (const bad of [0, "0", -2, "2.50", 2.5, "abc", true, [], {}, "1e2"]) {
 			assert.throws(
-				() => parse([withRun(entry, { maxCostUsd: bad })]),
-				(e) => isConfigError(e) && /run\.maxCostUsd must be a dollar amount/.test(e.message) && e.message.includes(PATH),
+				() => parse([withRun(entry, { maxTokens: bad })]),
+				(e) => isConfigError(e) && /run\.maxTokens must be a whole number of tokens/.test(e.message) && e.message.includes(PATH),
 				`${name} ${JSON.stringify(bad)}`,
 			);
 		}
 	}
 	// The value is never echoed (checked on values long enough to be told apart from the message's own digits).
 	for (const bad of ["2.1234567", "sk-ant-wrong-field", "-12.5"]) {
-		assert.throws(() => parse([withRun(KINDS.label, { maxCostUsd: bad })]), (e) => !e.message.includes(bad), bad);
+		assert.throws(() => parse([withRun(KINDS.label, { maxTokens: bad })]), (e) => !e.message.includes(bad), bad);
 	}
-	assert.throws(() => parse([withRun(KINDS.cron, { maxCostUsd: "x" })]), (e) => /^cron trigger "nightly": run\.maxCostUsd/.test(e.message));
-	assert.throws(() => parse([KINDS.cron, withRun(KINDS.label, { maxCostUsd: "x" })]), (e) => /trigger at index 1: run\.maxCostUsd/.test(e.message));
+	assert.throws(() => parse([withRun(KINDS.cron, { maxTokens: "x" })]), (e) => /^cron trigger "nightly": run\.maxTokens/.test(e.message));
+	assert.throws(() => parse([KINDS.cron, withRun(KINDS.label, { maxTokens: "x" })]), (e) => /trigger at index 1: run\.maxTokens/.test(e.message));
 });
 
 // #716: all trigger kinds share the same reviewed fallback policy.

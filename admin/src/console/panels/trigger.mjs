@@ -14,7 +14,7 @@ import { html as escapedHtml } from "../html.mjs";
 const html = (strings, ...values) => escapedHtml(strings.map(s => s.replace(/[ \t]*\n[ \t]*/g, "\n")), ...values);
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { canAct, shownPath, runLink, moneyHtml, timeHtml } from "./common.mjs";
+import { canAct, shownPath, runLink, tokensHtml, timeHtml } from "./common.mjs";
 import { actForm, field, area, table, facts } from "./config-ui.mjs";
 const t = (message, v) => uiText(message, v?.locale);
 const card = (v, title, body) => body === undefined
@@ -83,7 +83,7 @@ export function triggerRuns(v) {
           >${d.historyIncomplete ? `${t("at least", v)} ` : ""}${d.count24h ??
           "unknown"}</b
         >
-        ${t("runs in the last 24 hours ·", v)} ${moneyHtml(d.cost24hMicros)} ${t("metered", v)}
+        ${t("runs in the last 24 hours ·", v)} ${tokensHtml(d.cost24hTokens)} ${t("settled", v)}
         spend${d.costIncomplete
           ? ` (${t("metered portion only; some runs have no cost", v)})`
           : ""}.
@@ -123,7 +123,7 @@ export const EDIT_FIELDS = Object.freeze([
   "recover",
 ]);
 export const HAND_FIELDS = Object.freeze([
-  "maxCostUsd",
+  "maxTokens",
   "models",
   "mcp",
   "secrets",
@@ -147,7 +147,7 @@ export const HAND_FIELDS = Object.freeze([
   "secretsProfile",
   "gates",
   "gateTimeout",
-  "gateBudgetRaiseUsd",
+  "gateBudgetRaiseTokens",
   "excludeTools",
 ]);
 export function triggerRun(v) {
@@ -466,7 +466,7 @@ export function triggerRefusalExamples() {
     { field: "maxTurns", params: { kind: "label", flow: "triage", labels: ["pi"], maxTurns: 0 } },
     { field: "statusComment", params: { kind: "cron", id: "nightly", pattern: "0 3 * * *", folder: "repository", task: "Review", flow: "triage", statusComment: true } },
     { field: "backend", params: { kind: "label", flow: "triage", labels: ["pi"], backend: "openshell" } },
-    { field: "maxCostUsd", params: { kind: "label", flow: "triage", labels: ["pi"], maxCostUsd: "1" } },
+    { field: "maxTokens", params: { kind: "label", flow: "triage", labels: ["pi"], maxTokens: "1" } },
   ].map(({field,params}) => ({field, sentence: planTriggerAdd({ ...shared, params }).refusal}));
 }
 export function triggerRefusals(v = {}) {

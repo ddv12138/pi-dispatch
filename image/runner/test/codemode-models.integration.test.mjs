@@ -61,7 +61,7 @@ async function stubServer() {
 }
 
 /** The runner's model runtime on a models.json that points openrouter at the stub, and the meter as the runner installs it. */
-async function job({ base, maxCostMicros = null, allowedModels = null }) {
+async function job({ base, allowedModels = null, maxTokens = null }) {
 	const root = tempDir("pi-dispatch-codemode-");
 	const modelsPath = join(root, "models.json");
 	writeFileSync(modelsPath, JSON.stringify({ providers: { openrouter: { baseUrl: base, apiKey: "stub-key" } } }));
@@ -70,8 +70,8 @@ async function job({ base, maxCostMicros = null, allowedModels = null }) {
 	const logged = [];
 	const log = (event, fields) => logged.push({ event, fields });
 	const sessionManager = pi.SessionManager.inMemory(root);
-	const meter = createUsageMeter({ maxTokens: null, maxCostMicros, allowedModels, rootSessionId: sessionManager.getSessionId(), onStop: (reason) => stops.push(reason) });
-	const guard = createPolicyGuard({ maxCostMicros, allowedModels, log });
+	const meter = createUsageMeter({ maxTokens, allowedModels, rootSessionId: sessionManager.getSessionId(), onStop: (reason) => stops.push(reason) });
+	const guard = createPolicyGuard({ allowedModels, log });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, ...(guard && { guard }), log });
 	assert.equal(installed.ok, true, JSON.stringify(logged));
 	const settingsManager = pi.SettingsManager.inMemory({});
@@ -110,7 +110,7 @@ const paint = `
 const result = await models.generateImages({ provider: "${PAINTER.provider}", id: "${PAINTER.id}" }, { input: [{ type: "text", text: "a dot" }] });
 return result.stopReason + ":" + (result.errorMessage ?? "") + ":" + result.output.filter((b) => b.type === "image").length;`;
 
-test("no policy: a script's classify and generateImages are metered, each in its own ledger row with the provider's own cost", { skip }, async () => {
+test("no policy: a script's classify and generateImages are metered, each in its own ledger row", { skip }, async () => {
 	const stub = await stubServer();
 	const j = await job({ base: stub.base });
 	try {
@@ -120,55 +120,9 @@ test("no policy: a script's classify and generateImages are metered, each in its
 		assert.equal(j.row(CLASSIFIER.id)?.calls, 1);
 		assert.equal(j.row(CLASSIFIER.id)?.input, 1200);
 		assert.equal(j.row(PAINTER.id)?.calls, 1);
-		assert.ok(j.row(PAINTER.id).cost > 0, "the image call's cost reaches the ledger");
-		assert.ok(j.meter.state.cost > 0);
+		assert.ok(j.row(PAINTER.id).total > 0, "the image call's tokens reach the ledger");
+		assert.ok(j.meter.state.total > 0);
 		assert.equal(j.meter.state.stopReason, null);
-	} finally {
-		j.close();
-		await stub.close();
-	}
-});
-
-test("under a cost cap, classify is admitted and charged, and generateImages is refused as unboundable before it reaches the provider", { skip }, async () => {
-	const stub = await stubServer();
-	const j = await job({ base: stub.base, maxCostMicros: 1_000_000 });
-	try {
-		assert.match(j.text(await j.run(classify())), /stop:/);
-		assert.equal(stub.seen.classify, 1);
-		assert.ok(j.guard.snapshot().costRefused === 0);
-		assert.match(j.text(await j.run(paint)), /aborted:pi-dispatch: cost cap reached:0/);
-		assert.equal(stub.seen.images, 0, "the image call never reached the provider");
-		assert.deepEqual(j.stops, ["cost-cap"]);
-		assert.equal(j.guard.snapshot().costRefused, 1);
-		assert.ok(j.logged.some((entry) => entry.event === "cost_refused" && entry.fields.why === "unboundable"), JSON.stringify(j.logged));
-	} finally {
-		j.close();
-		await stub.close();
-	}
-});
-
-test("under a cap too small for its bound, classify is refused before it reaches the provider, and the job stops", { skip }, async () => {
-	const stub = await stubServer();
-	const j = await job({ base: stub.base, maxCostMicros: 1 });
-	try {
-		assert.match(j.text(await j.run(classify())), /aborted:pi-dispatch: cost cap reached/);
-		assert.equal(stub.seen.classify, 0);
-		assert.deepEqual(j.stops, ["cost-cap"]);
-	} finally {
-		j.close();
-		await stub.close();
-	}
-});
-
-test("concurrent classify calls are each judged against the bounds already in flight: past the cap, the rest are refused unsent", { skip }, async () => {
-	const stub = await stubServer();
-	// One bound is a few hundred micro-dollars; a cap of 1000 admits two or three at once, never all eight.
-	const j = await job({ base: stub.base, maxCostMicros: 1000 });
-	try {
-		const out = j.text(await j.run(classify(8)));
-		assert.ok(stub.seen.classify >= 1 && stub.seen.classify < 8, `${stub.seen.classify} reached the provider: ${out}`);
-		assert.match(out, /aborted:pi-dispatch: cost cap reached/);
-		assert.ok(j.meter.state.cost * 1e6 <= 1000, `the metered total ${j.meter.state.cost} passed the cap`);
 	} finally {
 		j.close();
 		await stub.close();
@@ -206,44 +160,44 @@ test("a script's own model object cannot redirect a call: the model is resolved 
 });
 
 
-test("watch trusted decide tool uses the real pinned classifier through the process cost guard", { skip }, async () => {
+test("watch trusted decide tool uses the real pinned classifier through the process meter", { skip }, async () => {
 	const stub = await stubServer();
-	const j = await job({ base: stub.base, maxCostMicros: 1 });
+	const j = await job({ base: stub.base, maxTokens: 1 });
 	const traces = [];
 	try {
 		const watch = createWatchTools({ config: { version: 1, decisionModel: CLASSIFIER }, runtime: j.runtime, fs: { appendFileSync(_path, line) { traces.push(JSON.parse(line)); }, writeFileSync() {} } });
 		const result = await watch.tools.find((tool) => tool.name === "decide").execute("watch-1", { state: { count: 37 }, questions: { ok: { type: "bool", instructions: "Investigate?", criteria: { true: "yes", false: "no" } } } });
-		assert.equal(result.isError, true);
-		assert.equal(stub.seen.classify, 0, "watch classifier is refused by the same guard before provider dispatch");
-		assert.equal(j.guard.snapshot().costRefused, 1);
-		assert.equal(traces.at(-1).status, "failed");
+		// The token cap has no pre-call form (OQ-010): the classify dispatches once and its answer comes back; its
+		// settle crosses a cap of one token, so the meter stops and every later call is braked.
+		assert.equal(result.isError, undefined);
+		assert.equal(stub.seen.classify, 1, "exactly the one dispatch the settle-time stop allows");
+		assert.equal(j.meter.state.stopReason, "token_budget");
+		assert.equal(traces.at(-1).status, "completed");
 	} finally { j.close(); await stub.close(); }
 });
 
 
-test("deterministic watch gate calls only the real guarded classifier, never chat, and cap refusal stays unsent", { skip }, async () => {
+test("deterministic watch gate calls only the real classifier, never chat, and its decision carries the model's answer", { skip }, async () => {
 	const stub = await stubServer();
 	try {
-		for (const cap of [1_000_000, 1]) {
-			const j = await job({ base: stub.base, maxCostMicros: cap });
-			const before = stub.seen.classify;
-			const output = [];
-			try {
-				const result = await executeWatchDecision({ input: { version: 1, model: CLASSIFIER, state: { count: 37 }, questions: { ok: { type: "bool", criteria: { true: "yes", false: "no" } } } }, runtime: j.runtime, fs: { writeFileSync(_path, raw) { output.push(JSON.parse(raw)); } } });
-				assert.equal(result.ok, true);
-				assert.equal(stub.seen.classify - before, cap === 1 ? 0 : 1);
-				assert.equal(stub.seen.images, 0);
-				assert.equal(output[0].stopReason, cap === 1 ? "aborted" : "stop");
-				assert.equal(j.meter.usageSnapshot()?.models.filter((m) => m.calls > 0).every((m) => m.model === CLASSIFIER.id) ?? true, true);
-			} finally { j.close(); }
-		}
+		const j = await job({ base: stub.base });
+		const before = stub.seen.classify;
+		const output = [];
+		try {
+			const result = await executeWatchDecision({ input: { version: 1, model: CLASSIFIER, state: { count: 37 }, questions: { ok: { type: "bool", criteria: { true: "yes", false: "no" } } } }, runtime: j.runtime, fs: { writeFileSync(_path, raw) { output.push(JSON.parse(raw)); } } });
+			assert.equal(result.ok, true);
+			assert.equal(stub.seen.classify - before, 1);
+			assert.equal(stub.seen.images, 0);
+			assert.equal(output[0].stopReason, "stop");
+			assert.equal(j.meter.usageSnapshot()?.models.filter((m) => m.calls > 0).every((m) => m.model === CLASSIFIER.id) ?? true, true);
+		} finally { j.close(); }
 	} finally { await stub.close(); }
 });
 
 
 test("pinned watch classifier preserves choice probabilities and confidence in its public result", { skip }, async () => {
 	const stub = await stubServer();
-	const j = await job({ base: stub.base, maxCostMicros: 1_000_000 });
+	const j = await job({ base: stub.base });
 	try {
 		let written;
 		await executeWatchDecision({ input: { version: 1, model: CLASSIFIER, state: { count: 37 }, questions: { act: { type: "choice", criteria: { investigate: "new", ignore: "noise", file_issue: "person" } } } }, runtime: j.runtime, fs: { writeFileSync(_path, value) { written = JSON.parse(value); } } });

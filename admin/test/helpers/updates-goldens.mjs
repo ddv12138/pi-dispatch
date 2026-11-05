@@ -13,7 +13,7 @@ const RUNNER = row("pi-test-runner", "0.9.0", "0.10.0");
 const CURRENT = [row("pi-lint", "1.4.2", "1.4.2"), row("pi-test-runner", "0.9.0", "0.9.0")];
 const look = (host, fields = {}) => ({ ...LOOK, host, pi: piRead(), hostPi: hostPi(), packages: [LINT, RUNNER], ...fields });
 const STAGED = { stagedAt: "2026-10-01T00:00:00.000Z", packages: [{ name: "pi-lint", version: "1.4.2", dir: "pi-lint--1.4.2--aaaaaaaa", from: "pi-packages" }, { name: "pi-test-runner", version: "0.9.0", dir: "pi-test-runner--0.9.0--bbbbbbbb", from: "host" }] };
-const TRIGGERS = { triggers: [{ on: { type: "comment" }, run: {} }, { on: { type: "cron", id: "nightly-off" }, run: { packages: false } }, { on: { type: "cron", id: "nightly" }, run: { maxCostUsd: 2 } }] };
+const TRIGGERS = { triggers: [{ on: { type: "comment" }, run: {} }, { on: { type: "cron", id: "nightly-off" }, run: { packages: false } }, { on: { type: "cron", id: "nightly" }, run: { maxTokens: 20000 } }] };
 const canaryRecord = (fields = {}) => ({ jobId: "gh-c0a7", outcome: "completed", endedAt: new Date(NOW - 2 * HOUR).toISOString(), tokens: { cost: 0.19 }, packageCanary: { name: "pi-lint", version: "1.4.3", load: "loaded" }, ...fields });
 const desired = (fields = {}) => JSON.stringify({ v: 1, generation: 5, name: "pi-lint", version: "1.4.3", op: "adopt", from: "1.4.2", by: "ops", at: NOW - HOUR, ...fields });
 const applied = (fields = {}) => JSON.stringify({ v: 1, generation: 5, state: "adopted", version: "1.4.3", digest: "a".repeat(64), at: NOW - HOUR, ...fields });

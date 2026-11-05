@@ -1,4 +1,5 @@
-// The real CLI, a real Valkey and a real job image. A one-micro-dollar cap refuses before a provider call.
+// The real CLI, a real Valkey and a real job image. A weekly token window smaller than the canary's per-job
+// token cap refuses the reservation BEFORE a container starts (DES-TOKEN-RESERVE-AND-SETTLE).
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -33,7 +34,7 @@ try {
 	const baseSha = await git(["-C", workspace, "rev-parse", "HEAD"]);
 	writeFileSync(join(workspace, "fixture"), "original edits must survive\n");
 	const model = "claude-sonnet-4-5-20250929";
-	assert.ok(builtinChatModels("anthropic").some((m) => m.id === model), "the same pinned cost-guard fixture as image/verify-image.sh exists");
+	assert.ok(builtinChatModels("anthropic").some((m) => m.id === model), "the same pinned model fixture as image/verify-image.sh exists");
 	const candidate = `anthropic/${model}`;
 	const instant = Date.now();
 	const original = { jobId: "original-run", kind: "local", modelRole: "editor", flow: "smoke", provider: "anthropic", model, outcome: "completed", endedAt: new Date(instant - 1000).toISOString(), session: { resumed: false, reason: "disabled", bytes: null } };
@@ -47,28 +48,29 @@ try {
 	const port = JSON.parse((await docker(["inspect", "--format", "{{json .NetworkSettings.Ports}}", valkey])).stdout)["6379/tcp"][0].HostPort;
 	const url = `redis://127.0.0.1:${port}/0`;
 	const cli = resolve("worker/src/cli.mjs");
-	const commandEnv = { PATH: process.env.PATH, HOME: root, DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(process.env.HOME, ".docker"), ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}), VALKEY_URL: url, PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_SANDBOX_DIR: join(root, "sandboxes"), PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_JOB_IMAGE: image, PI_MAX_COST_USD: "0.000001", PI_DAILY_COST_USD: "1", PI_AUTH_FROM_PI: "0", ANTHROPIC_API_KEY: "zero-spend-fixture-key", GITHUB_TOKEN: "must-not-reach-job" };
+	const commandEnv = { PATH: process.env.PATH, HOME: root, DOCKER_CONFIG: process.env.DOCKER_CONFIG ?? join(process.env.HOME, ".docker"), ...(process.env.DOCKER_HOST ? { DOCKER_HOST: process.env.DOCKER_HOST } : {}), VALKEY_URL: url, PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_SANDBOX_DIR: join(root, "sandboxes"), PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_JOB_IMAGE: image, PI_MAX_TOKENS: "2", PI_WEEKLY_TOKEN_CAP: "1", PI_AUTH_FROM_PI: "0", ANTHROPIC_API_KEY: "zero-spend-fixture-key", GITHUB_TOKEN: "must-not-reach-job" };
 	let result;
-	try { result = await exec(process.execPath, [cli, "canary", "--role", "editor", "--model", candidate, "--flow", "smoke", "--cap-usd", "0.000001", "--count", "1", "--json"], { cwd: root, env: commandEnv, timeout: 120_000, maxBuffer: 1024 * 1024 }); }
+	try { result = await exec(process.execPath, [cli, "canary", "--role", "editor", "--model", candidate, "--flow", "smoke", "--cap-tokens", "2", "--count", "1", "--json"], { cwd: root, env: commandEnv, timeout: 120_000, maxBuffer: 1024 * 1024 }); }
 	catch (error) { assert.equal(error.code, 2, error.stderr); result = error; }
 	const report = JSON.parse(result.stdout);
 	assert.equal(report.rows[0].candidate.outcome, "policy");
 	const record = JSON.parse(readFileSync(join(logs, `${report.rows[0].jobId}.json`), "utf8"));
-	assert.equal(record.reason, "cost-cap");
-	assert.equal(record.tokens.cost, 0);
-	assert.equal(record.tokens.calls, 0);
-	assert.equal(record.dollars.reservedMicros, 1);
-	assert.equal(record.dollars.settledMicros, 0);
+	assert.equal(record.reason, "token-cap");
+	assert.equal(record.tokens, null);
+	assert.equal(record.tokensWindows.reservedTokens, 2);
+	assert.equal(record.tokensWindows.settledTokens, 0);
+	assert.equal(record.tokensWindows.basis, "refunded");
 	assert.equal(record.canary.sourceJobId, original.jobId);
 	assert.deepEqual(JSON.parse(readFileSync(join(logs, "original-run.json"), "utf8")), original);
 	assert.equal(readFileSync(join(workspace, "fixture"), "utf8"), "original edits must survive\n");
 	assert.deepEqual(readdirSync(jobs), []);
 	redis = makeRedisClient(url, { failFast: true, lazyConnect: true }); redis.on("error", () => {}); await redis.connect();
 	assert.equal(await redis.get(CANARY_LOCK_KEY), null);
-	assert.ok((await redis.keys("budget:*")).length > 0, "deployment ledgers were used");
+	assert.ok((await redis.keys("budget:tok:*")).length > 0, "deployment token ledgers were used");
+	assert.equal((await redis.keys("budget:usd:*")).length, 0, "no dollar ledger is written any more");
 	assert.equal((await docker(["ps", "-aq", "--filter", `name=^/${report.rows[0].jobId}$`])).stdout.trim(), "");
 	assert.equal((await docker(["ps", "-aq", "--filter", "name=^/pi-dispatch-canary-.*-proxy$"])).stdout.trim(), "");
-	process.stdout.write("OK: actual canary CLI restored a base, staged roles, reserved deployment ledgers, refused before the first paid call, retained lineage and originals, and cleaned the lease and resources\n");
+	process.stdout.write("OK: actual canary CLI restored a base, staged roles, reserved token ledgers, refused the reservation before any container, retained lineage and originals, and cleaned the lease and resources\n");
 } finally {
 	redis?.disconnect();
 	await docker(["rm", "-f", valkey]).catch(() => {});

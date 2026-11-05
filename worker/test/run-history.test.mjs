@@ -4,7 +4,7 @@ import { constants as fsConstants, lstatSync, readdirSync, readFileSync, symlink
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { createHmac, randomBytes } from "node:crypto";
-import { authenticExitLines, AWAIT_INPUT_RUNNER_REASONS, PROGRESS_RUNNER_REASONS, STEER_RUNNER_REASONS, buildRecord, COST_CAP_WHYS, makeFindPreviousRun, makeLogReaper, makeLogSink, makeReadRecord, makeRecordWriter, makeSettledRecord, RECORD_CLOCK_SKEW_MS, RECORD_CORE_FIELDS, RECORD_TMP_MAX_AGE_MS, RECORD_TMP_RE, RUN_RECORD_VERSION, earlierFrom, recordOfThisJob, recordReadable, recordVerdict, recordVersionOf, UNREADABLE_RECORD, parseExitCode, parseExitContext, parseExitReason, parseExitSession, parseExitTokens, parseExitTurns, parseExitUsage, parseExitWhy, parseExitResources, parseExitOomKilled, EXIT_OOM_KILLED, MCP_RUNNER_REASONS, RESOURCE_KEYS, PLAN_RECORD_REASONS, recordSettlesAttempt, RUNNER_COMPLETED_REASONS, RUNNER_POLICY_REASONS, sanitizeJobId, TOKEN_KEYS } from "../src/run-history.mjs";
+import { authenticExitLines, AWAIT_INPUT_RUNNER_REASONS, PROGRESS_RUNNER_REASONS, STEER_RUNNER_REASONS, buildRecord, makeFindPreviousRun, makeLogReaper, makeLogSink, makeReadRecord, makeRecordWriter, makeSettledRecord, RECORD_CLOCK_SKEW_MS, RECORD_CORE_FIELDS, RECORD_TMP_MAX_AGE_MS, RECORD_TMP_RE, RUN_RECORD_VERSION, earlierFrom, recordOfThisJob, recordReadable, recordVerdict, recordVersionOf, UNREADABLE_RECORD, parseExitCode, parseExitContext, parseExitReason, parseExitSession, parseExitTokens, parseExitTurns, parseExitUsage, parseExitWhy, parseExitResources, parseExitOomKilled, EXIT_OOM_KILLED, MCP_RUNNER_REASONS, RESOURCE_KEYS, PLAN_RECORD_REASONS, recordSettlesAttempt, RUNNER_COMPLETED_REASONS, RUNNER_POLICY_REASONS, sanitizeJobId, TOKEN_KEYS } from "../src/run-history.mjs";
 import { MODEL_REF_PATTERN } from "../src/model-ref.mjs";
 import { FORGE_KINDS } from "../src/forges.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -277,7 +277,7 @@ test("a glued line truncated at the END (a mid-write death) stays skipped", () =
 // ---- parseExitTokens (issue #25): mirrors parseExitTurns, reads the usage object off the exit line ----
 
 test("parseExitTokens reads the tokens object off the success exit line", () => {
-	const tokens = { input: 300, output: 50, total: 350, cost: 0.02 };
+	const tokens = { input: 300, output: 50, total: 350 };
 	assert.deepEqual(parseExitTokens(`{"event":"exit","code":0,"turns":7,"tokens":${JSON.stringify(tokens)}}`), tokens);
 });
 
@@ -296,7 +296,7 @@ test("the record carries a host, in tail position, and null when nobody named on
 
 	const withHost = buildRecord({ ...args, host: "mac-mini-1" });
 	const keys = Object.keys(withHost);
-	// `host` was the tail when it landed; `backend` (#277) took the tail after it, `dollars` (#501) after that, and
+	// `host` was the tail when it landed; `backend` (#277) took the tail after it, `tokens` (#501) after that, and
 	// `why` after that, `project` (#499) after that, `plan` (#505) after that, `resources` (#596) after that, and `size`
 	// (#596, phase 1) after that, `hostBudget` (#596, phase 2) after that, and `queuedAt`, `capacity`, `earlier` and `stalledRepick` (#599) after that,
 	// and `v` (#761) last of all.
@@ -324,7 +324,7 @@ test("the record names the RESOLVED venue in tail position, read from the job DA
 	const record = (job, over = {}) => buildRecord({ job, result: { outcome: "completed", exitCode: 0 }, ...at, ...over });
 
 	const unflagged = record(wrap(data), { defaultBackend: "local" });
-	assert.equal(Object.keys(unflagged).at(-13), "backend", "tail position when it landed; `dollars` (#501), `why`, `project` (#499), `plan` (#505), `resources`, `size`, `hostBudget` (#596), `queuedAt` and `capacity` (#599) and `v` (#761) took the tail after it");
+	assert.equal(Object.keys(unflagged).at(-13), "backend", "tail position when it landed; `tokens` (#501), `why`, `project` (#499), `plan` (#505), `resources`, `size`, `hostBudget` (#596), `queuedAt` and `capacity` (#599) and `v` (#761) took the tail after it");
 	assert.equal(unflagged.backend, "local", "a trigger that names no venue records the default it resolved to, never an absent key");
 	assert.equal(record(wrap({ ...data, backend: "far" }), { defaultBackend: "local" }).backend, "far", "a named venue wins over the default");
 	assert.equal(
@@ -351,9 +351,9 @@ test("a deployment that never names a backend keeps the first twenty-five fields
 		"triggerIndex", "triggerType", "session", "host",
 	]);
 	// Byte-level: everything a pre-#277 reader parsed serialises identically, and the new fields are appended.
-	const { backend, dollars, why, project, plan, resources, size, hostBudget, queuedAt, capacity, earlier, stalledRepick, v, ...before } = rec;
+	const { backend, tokensWindows, why, project, plan, resources, size, hostBudget, queuedAt, capacity, earlier, stalledRepick, v, ...before } = rec;
 	assert.equal(backend, "local");
-	assert.equal(dollars, null);
+	assert.equal(tokensWindows, null);
 	assert.equal(why, null);
 	assert.equal(project, null, "no projects file: the new key is present and null");
 	assert.equal(plan, null, "no priorities.json: the new key (#505) is present and null");
@@ -364,8 +364,8 @@ test("a deployment that never names a backend keeps the first twenty-five fields
 	assert.equal(capacity, null, "no capacity passed: the new key (#599) is present and null");
 	assert.equal(earlier, null, "a first attempt: no earlier attempts (#599)");
 	assert.equal(stalledRepick, false, "no stall (#599)");
-	assert.equal(v, 1, "the record's version (#761), its last key");
-	assert.equal(JSON.stringify(rec), `${JSON.stringify(before).slice(0, -1)},"backend":"local","dollars":null,"why":null,"project":null,"plan":null,"resources":null,"size":null,"hostBudget":null,"queuedAt":null,"capacity":null,"earlier":null,"stalledRepick":false,"v":1}`);
+	assert.equal(v, 2, "the record's version (#761), its last key");
+	assert.equal(JSON.stringify(rec), `${JSON.stringify(before).slice(0, -1)},"backend":"local","tokensWindows":null,"why":null,"project":null,"plan":null,"resources":null,"size":null,"hostBudget":null,"queuedAt":null,"capacity":null,"earlier":null,"stalledRepick":false,"v":2}`);
 });
 
 test("parseExitTokens REBUILDS: a key the runner never had no reach into the record", () => {
@@ -381,54 +381,51 @@ test("parseExitTokens REBUILDS: a key the runner never had no reach into the rec
 	assert.ok(!json.includes("feature/customer"), "nesting is not a way around the list either");
 	// A string in a KNOWN slot is dropped too: the list closes which keys survive, the type check closes
 	// what may sit in them.
-	assert.deepEqual(parseExitTokens('{"event":"exit","tokens":{"total":5,"cost":"free"}}'), { total: 5 });
+	assert.deepEqual(parseExitTokens('{"event":"exit","tokens":{"total":5,"cost":"free"}}'), { total: 5 }, "cost is not a key any more: dropped like any unknown");
 });
 
 test("parseExitTokens round-trips a conformant runner's object BYTE-IDENTICALLY", () => {
 	// The rebuild must cost a real image nothing, key order included -- the record's bytes are a contract.
 	// Both shapes the runner emits: usage-meter.mjs -> snapshot, and run-job.mjs -> pickTotals.
-	const metered = { input: 1, output: 2, total: 3, cost: 0.5, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 4, unresolved: 0, unpriced: 0 };
+	const metered = { input: 1, output: 2, total: 3, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 4, unresolved: 0, usageUnreported: 0 };
 	assert.equal(JSON.stringify(parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(metered)}}`)), JSON.stringify(metered));
-	const fallback = { input: 1, output: 2, total: 3, cost: 0.5, metered: false };
+	const fallback = { input: 1, output: 2, total: 3, metered: false };
 	assert.equal(JSON.stringify(parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(fallback)}}`)), JSON.stringify(fallback));
 	// An omitted key stays OMITTED rather than becoming null: the fallback carries five of the twenty-two, and
 	// a null would read as "measured zero" for a number nobody measured.
 	assert.ok(!("otherTotal" in parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(fallback)}}`)));
 });
 
-test("the policy counters (issues #501, #502) survive the rebuild, in emission order, and only as numbers", () => {
-	// The cost guard writes the first six under a cap and the model guard modelRefused under a list; a key missing from
-	// TOKEN_KEYS is DROPPED, and the dollar
-	// settlement reads these to decide whether a metered cost is complete, so a dropped counter would read as
-	// an honest zero. Each one asserted by name, so dropping any single entry fails here.
-	const policy = { costCapMicros: 2_000_000, costRefused: 1, boundExceeded: 0, longContext: 2, costUnjudged: 4, costUnanswered: 5, modelRefused: 3 };
-	assert.deepEqual(TOKEN_KEYS.slice(-7), Object.keys(policy), "appended after unpriced, in the runner's emission order");
-	const metered = { input: 1, output: 2, total: 3, cost: 0.5, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 4, unresolved: 0, unpriced: 0, ...policy };
+test("the model guard's modelRefused survives the rebuild, last, and only as a number", () => {
+	// The guard's counters died with the guard; the model guard's modelRefused is the one policy counter
+	// left, LAST in TOKEN_KEYS. A key missing from TOKEN_KEYS is DROPPED, and the token settlement reads
+	// modelRefused, so a dropped counter would read as an honest zero.
+	const policy = { modelRefused: 3 };
+	assert.deepEqual(TOKEN_KEYS.slice(-1), Object.keys(policy), "the last key");
+	const metered = { input: 1, output: 2, total: 3, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 4, unresolved: 0, ...policy };
 	const out = parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(metered)}}`);
 	assert.equal(JSON.stringify(out), JSON.stringify(metered), "byte-identical round trip, key order included");
 	for (const key of Object.keys(policy)) assert.equal(out[key], policy[key], key);
-	assert.equal(parseExitTokens('{"event":"exit","tokens":{"total":1,"costRefused":"many"}}').costRefused, undefined, "a string in a policy slot is dropped like any other");
+	assert.equal(parseExitTokens('{"event":"exit","tokens":{"total":1,"modelRefused":"many"}}').modelRefused, undefined, "a retired key is dropped like any unknown");
 	assert.ok(Object.isFrozen(TOKEN_KEYS));
 });
 
-test("costUnreported (issue #571) survives the rebuild after the child keys and before the policy counters, on a line with or without a cap", () => {
-	const at = TOKEN_KEYS.indexOf("unmeteredChildren");
-	assert.deepEqual(TOKEN_KEYS.slice(at + 1, at + 3), ["costUnreported", "costCapMicros"], "the meter writes it last, the guard's fields follow");
-	const uncapped = { input: 1, output: 2, total: 3, cost: 0, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costUnreported: 1 };
+test("usageUnreported (issue #571) survives the rebuild after the child keys, on any line", () => {
+	const at = TOKEN_KEYS.indexOf("unresolved");
+	assert.deepEqual(TOKEN_KEYS.slice(at + 1, at + 2), ["usageUnreported"], "the meter writes it right after unresolved");
+	const uncapped = { input: 1, output: 2, total: 3, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, usageUnreported: 1, childTotal: 0, childProcesses: 0, unmeteredChildren: 0 };
 	const out = parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(uncapped)}}`);
-	assert.equal(JSON.stringify(out), JSON.stringify(uncapped), "byte-identical round trip on an uncapped line");
-	const capped = { ...uncapped, costCapMicros: 2_000_000, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0 };
-	assert.equal(JSON.stringify(parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(capped)}}`)), JSON.stringify(capped), "and on a capped one");
-	assert.equal(parseExitTokens('{"event":"exit","tokens":{"total":1,"costUnreported":"one"}}').costUnreported, undefined, "numbers only");
+	assert.equal(JSON.stringify(out), JSON.stringify(uncapped), "byte-identical round trip");
+	assert.equal(parseExitTokens('{"event":"exit","tokens":{"total":1,"usageUnreported":"one"}}').usageUnreported, undefined, "numbers only");
 });
 
-test("the child keys (issue #500 part F) survive the rebuild, between unpriced and the policy counters, each by name", () => {
+test("the child keys (issue #500 part F) survive the rebuild, between unresolved and modelRefused, each by name", () => {
 	// A metered runner from issue #500 part E on writes all three on every line, zeros with no children. A key missing
 	// from TOKEN_KEYS is DROPPED, and `unmeteredChildren` is a floor counter: dropped, it would read as an honest zero.
 	const child = { childTotal: 700, childProcesses: 2, unmeteredChildren: 1 };
-	const at = TOKEN_KEYS.indexOf("unpriced");
-	assert.deepEqual(TOKEN_KEYS.slice(at + 1, at + 4), Object.keys(child), "after unpriced, in the runner's emission order");
-	const metered = { input: 1, output: 2, total: 703, cost: 0.5, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 3, calls: 4, unresolved: 0, unpriced: 0, ...child, costCapMicros: 2_000_000, costRefused: 0 };
+	const at = TOKEN_KEYS.indexOf("usageUnreported");
+	assert.deepEqual(TOKEN_KEYS.slice(at + 1, at + 4), Object.keys(child), "after usageUnreported, in the runner's emission order");
+	const metered = { input: 1, output: 2, total: 703, metered: true, rootTotal: 3, otherTotal: 0, looseTotal: 0, sessions: 3, calls: 4, unresolved: 0, ...child };
 	const out = parseExitTokens(`{"event":"exit","tokens":${JSON.stringify(metered)}}`);
 	assert.equal(JSON.stringify(out), JSON.stringify(metered), "byte-identical round trip, key order included");
 	for (const key of Object.keys(child)) assert.equal(out[key], child[key], key);
@@ -539,7 +536,7 @@ test("parseExitContext returns the LAST exit line's context and never throws", (
 // ---- parseExitUsage (usage ledger): mirrors parseExitTokens, but REBUILDS the per-model ledger off the exit line ----
 
 /** A fully-populated valid row, in the rebuilt 12-key shape. Tests spread over it to inject one bad field. */
-const GOOD_ROW = { provider: "anthropic", model: "claude-sonnet-4", calls: 2, input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cacheWrite1h: 0, reasoning: 3, total: 168, cost: 0.02, unpriced: 0, providerBilled: 0 };
+const GOOD_ROW = { provider: "anthropic", model: "claude-sonnet-4", calls: 2, input: 100, output: 50, cacheRead: 10, cacheWrite: 5, cacheWrite1h: 0, reasoning: 3, total: 168 };
 const usageLine = (usage) => `{"event":"exit","code":0,"usage":${JSON.stringify(usage)}}`;
 
 test("parseExitUsage reads the usage block off the success exit line and REBUILDS it", () => {
@@ -590,14 +587,12 @@ test("parseExitUsage charset: the id allowlist rejects length, symbols and a lea
 	assert.notEqual(parseExitUsage(withModel("qwen2.5:0.5b-instruct-q4_K_M")), null, "an Ollama tag's underscore, lowercased first");
 });
 
-test("providerBilled keeps its count, an older record reads 0, and a wrong value refuses the block (issue #796)", () => {
+test("a row key the meter no longer writes (cost, unpriced, providerBilled) is dropped, never an error", () => {
 	const read = (fields) => parseExitUsage(usageLine({ v: 1, models: [{ ...GOOD_ROW, ...fields }] }));
-	assert.equal(read({ providerBilled: 2 }).models[0].providerBilled, 2);
-	const { providerBilled: _, ...older } = GOOD_ROW;
-	assert.equal(parseExitUsage(usageLine({ v: 1, models: [older] })).models[0].providerBilled, 0);
-	assert.equal(read({ providerBilled: -1 }), null);
-	assert.equal(read({ providerBilled: true }), null, "the runner writes a count; a flag is not one");
-	assert.equal(read({ providerBilled: null }), null);
+	assert.equal(read({ cost: 0.02 }).models[0].cost, undefined, "the price columns are gone");
+	assert.equal(read({ unpriced: 1 }).models[0].unpriced, undefined);
+	assert.equal(read({ providerBilled: 2 }).models[0].providerBilled, undefined);
+	assert.notEqual(read({}), null, "a conformant row still parses");
 });
 
 test("with a key, what a job printed cannot change what the runner signed about a canary (issue #796)", async () => {
@@ -615,13 +610,13 @@ test("with a key, what a job printed cannot change what the runner signed about 
 });
 
 test("parseExitUsage numerics: absent rebuilds as 0, but a negative, a null, or an Infinity nulls the block", () => {
-	// Absent is an honest zero, which is how a record from before providerBilled reads, and the 13-key row shape stays stable regardless of what was emitted.
+	// Absent is an honest zero, and the row shape is the nine numeric keys plus the two names.
 	const bare = parseExitUsage(usageLine({ v: 1, models: [{ provider: "a", model: "m" }] }));
-	// ...but an absent `truncated` is null, not 0 (PR #549's review): nobody measured it, and the model dollar
+	// ...but an absent `truncated` is null, not 0 (PR #549's review): nobody measured it, and the model token
 	// windows floor on it.
-	assert.deepEqual(bare, { v: 1, piAi: null, truncated: null, models: [{ provider: "a", model: "m", calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, cost: 0, unpriced: 0, providerBilled: 0 }] });
+	assert.deepEqual(bare, { v: 1, piAi: null, truncated: null, models: [{ provider: "a", model: "m", calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0 }] });
 	assert.equal(parseExitUsage(usageLine({ v: 1, models: [{ ...GOOD_ROW, input: -1 }] })), null, "a negative count nulls the block");
-	assert.equal(parseExitUsage(usageLine({ v: 1, models: [{ ...GOOD_ROW, cost: null }] })), null, "null is present-and-wrong, not absent");
+	assert.equal(parseExitUsage(usageLine({ v: 1, models: [{ ...GOOD_ROW, total: null }] })), null, "null is present-and-wrong, not absent");
 	// JSON.parse cannot produce NaN, but it CAN produce Infinity -- 1e999 overflows to it -- so the
 	// finite check is the guard that actually fires on hostile input, not a decorative one.
 	assert.equal(parseExitUsage('{"event":"exit","usage":{"v":1,"models":[{"provider":"a","model":"m","total":1e999}]}}'), null);
@@ -640,7 +635,7 @@ test("parseExitUsage rejects a ten-row models array -- 8 named rows plus one 'ot
 });
 
 test("buildRecord stores a completed run's tokens object as an explicit field", () => {
-	const tokens = { input: 1000, output: 200, total: 1200, cost: 0.05 };
+	const tokens = { input: 1000, output: 200, total: 1200 };
 	const record = buildRecord({
 		job: { id: "gh-t", attemptsMade: 0, name: "github", data: { kind: "github", repo: "o/r", target: { type: "issue", number: 1 } } },
 		result: { outcome: "completed", turns: 4, tokens },
@@ -1793,7 +1788,7 @@ test("every RUNNER_POLICY_REASONS member is a literal the runner itself writes (
 	assert.deepEqual([...approvalThrown].sort(), [...RUNNER_POLICY_REASONS].filter((reason) => reason.startsWith("approval-")).sort());
 	// Completed reasons the worker acts on are exported literals (issues #625, #649).
 	for (const reason of RUNNER_COMPLETED_REASONS) assert.match(runnerSrc, new RegExp(`export const [A-Z_]+ = "${reason}";`));
-	for (const reason of ["cost-cap", "model-not-allowed", "cost-cap-unenforceable", "model-policy-unenforceable"]) {
+	for (const reason of ["model-not-allowed", "model-policy-unenforceable"]) {
 		assert.ok(RUNNER_POLICY_REASONS.has(reason), `${reason} is a runner reason the worker keeps`);
 	}
 	assert.ok(runnerSrc.includes('reason: "provider-auth-refused"'), "the runner's issue #437 literal moved");
@@ -1825,49 +1820,34 @@ test("every OPENSHELL_REFUSALS reason is in the record's reason enum (#686 part 
 
 // Issue #507: a cost-cap stop said only `cost-cap` with $0, because which rule of the guard refused reached the job log
 // alone (`cost_refused`), never the record.
-test("parseExitWhy keeps a cost-cap line's why only from the closed set, only on code 2, and only beside cost-cap (#507)", () => {
-	for (const why of COST_CAP_WHYS) assert.equal(parseExitWhy(exitLine({ code: 2, reason: "cost-cap", why })), why);
+test("parseExitWhy is retired with the meter: null for every line, and never a throw", () => {
+	// The guard is gone (DES-TOKEN-RESERVE-AND-SETTLE): no exit line carries a `why`, and the record's
+	// `why` is null on every path. The line's other fields keep their own parsers.
 	for (const [fields, label] of [
-		[{ code: 2, reason: "cost-cap" }, "no why: a stop the guard did not refuse"],
-		[{ code: 2, reason: "cost-cap", why: "qwen2.5:3b" }, "a model id, or any other container-written string, never passes"],
-		[{ code: 2, reason: "cost-cap", why: "Unboundable" }, "exact, case-sensitive"],
-		[{ code: 2, reason: "cost-cap", why: ["unboundable"] }, "not a string"],
-		[{ code: 2, reason: "model-not-allowed", why: "unboundable" }, "only beside cost-cap"],
+		[{ code: 2, reason: "model-not-allowed", why: "unboundable" }, "a stray why from an older image"],
+		[{ code: 2, reason: "cost-cap" }, "the retired reason itself"],
 		[{ code: 1, reason: "cost-cap", why: "unboundable" }, "only on a line that says code 2"],
 	]) {
 		assert.equal(parseExitWhy(exitLine(fields)), null, label);
 	}
-	// The LAST exit line decides, as for parseExitReason.
-	assert.equal(parseExitWhy(exitLine({ code: 2, reason: "cost-cap", why: "unboundable" }) + exitLine({ code: 2, reason: "cost-cap" })), null);
-	assert.equal(parseExitWhy(exitLine({ code: 2, reason: "cost-cap" }) + "agent noise\n" + exitLine({ code: 2, reason: "cost-cap", why: "over-cap" })), "over-cap");
 	for (const text of [undefined, null, 42, "", "{not json", '{"event":"start","code":2,"reason":"cost-cap","why":"unboundable"}']) {
 		assert.doesNotThrow(() => parseExitWhy(text));
 		assert.equal(parseExitWhy(text), null, JSON.stringify(text));
 	}
 });
 
-test("COST_CAP_WHYS is the runner's COST_REFUSALS, read from its source (the worker cannot import the runner) (#507)", () => {
-	const runnerSrc = readFileSync(new URL("../../image/runner/src/outcome.mjs", import.meta.url), "utf8");
-	const m = runnerSrc.match(/export const COST_REFUSALS = Object\.freeze\((\[[^\]]*\])\);/);
-	assert.ok(m, "image/runner/src/outcome.mjs no longer declares COST_REFUSALS in a form this pin can read");
-	assert.deepEqual([...COST_CAP_WHYS], JSON.parse(m[1]));
-	for (const why of COST_CAP_WHYS) assert.match(why, /^[a-z][a-z0-9-]{0,63}$/, "every member passes the record's own `why` charset");
-});
-
 test("makeLogSink close carries exitWhy only when the line named one, so every other close returns the object it always did (#507)", async () => {
 	const fs = makeFakeFs({ stream: makeFakeStream() });
 	const named = makeLogSink({ logsDir: "/logs", enabled: false, fs })("gh-why");
-	named.write(Buffer.from(exitLine({ code: 2, reason: "cost-cap", why: "unboundable" })));
+	named.write(Buffer.from(exitLine({ code: 2, reason: "model-not-allowed" })));
 	const closed = await named.close();
-	assert.equal(closed.exitReason, "cost-cap");
-	assert.equal(closed.exitWhy, "unboundable");
-	const plain = makeLogSink({ logsDir: "/logs", enabled: false, fs })("gh-plain");
-	plain.write(Buffer.from(exitLine({ code: 2, reason: "cost-cap" })));
-	assert.equal(Object.hasOwn(await plain.close(), "exitWhy"), false);
-	// Through to the record: the processor's result carries it as `why`, and buildRecord keeps it.
-	const record = buildRecord({ job: { id: "gh-1", name: "github", data: { kind: "github" }, attemptsMade: 0 }, result: { outcome: "policy", reason: "cost-cap", why: "unboundable" }, startedAt: null, endedAt: null });
-	assert.equal(record.reason, "cost-cap");
-	assert.equal(record.why, "unboundable");
+	assert.equal(closed.exitReason, "model-not-allowed");
+	assert.equal(Object.hasOwn(closed, "exitWhy"), false, "the why is retired with the guard");
+	// The record's `why` keeps its shape (a fixed-charset token or null) for a reader, but no current
+	// producer writes one: a retired field read, never set.
+	const record = buildRecord({ job: { id: "gh-1", name: "github", data: { kind: "github" }, attemptsMade: 0 }, result: { outcome: "policy", reason: "model-not-allowed" }, startedAt: null, endedAt: null });
+	assert.equal(record.reason, "model-not-allowed");
+	assert.equal(record.why, null);
 });
 
 test("a 16 KB provider error body keeps the exit-2 label: the runner caps the exit line's message before the 8 KiB tail sees it", async () => {
@@ -1886,7 +1866,7 @@ test("a 16 KB provider error body keeps the exit-2 label: the runner caps the ex
 	// the child keys and the policy counters included (issue #571 added one).
 	const wide = (prefix, i) => `${prefix}-${i}`.padEnd(64, "x");
 	const N = 99_999_999;
-	const row = (provider, model) => ({ provider, model, calls: N, input: N, output: N, cacheRead: N, cacheWrite: N, cacheWrite1h: N, reasoning: N, total: N, cost: 99_999.99, unpriced: N, providerBilled: 0 });
+	const row = (provider, model) => ({ provider, model, calls: N, input: N, output: N, cacheRead: N, cacheWrite: N, cacheWrite1h: N, reasoning: N, total: N });
 	const rest = {
 		turns: 4096,
 		retryTurns: 4096,
@@ -1928,17 +1908,17 @@ test("a 16 KB provider error body keeps the exit-2 label: the runner caps the ex
 	}
 });
 
-test("the record's dollars (#501) is REBUILT from named fields: four keys, integers and a fixed basis, else null", () => {
+test("the record's tokens (#501) is REBUILT from named fields: four keys, integers and a fixed basis, else null", () => {
 	const job = { id: "gh-1", name: "github", attemptsMade: 0, data: { kind: "github", repo: "acme/web", target: { number: 7 } } };
-	const rec = (dollars) => buildRecord({ job, result: { outcome: "completed", exitCode: 0, dollars } }).dollars;
-	assert.deepEqual(rec({ reservedMicros: 2_000_000, settledMicros: 300_001, basis: "metered", modelBasis: "x", leaked: "/Users/rob" }), { reservedMicros: 2_000_000, settledMicros: 300_001, basis: "metered", modelBasis: null });
-	for (const basis of ["metered", "floor", "refunded", "unreserved"]) assert.equal(rec({ reservedMicros: 0, settledMicros: 0, basis }).basis, basis);
+	const rec = (tokensWindows) => buildRecord({ job, result: { outcome: "completed", exitCode: 0, tokensWindows } }).tokensWindows;
+	assert.deepEqual(rec({ reservedTokens: 60_000, settledTokens: 54_200, basis: "metered", modelBasis: "x", leaked: "/Users/rob" }), { reservedTokens: 60_000, settledTokens: 54_200, basis: "metered", modelBasis: null });
+	for (const basis of ["metered", "floor", "refunded", "unreserved"]) assert.equal(rec({ reservedTokens: 0, settledTokens: 0, basis }).basis, basis);
 	// #502 part 6: modelBasis is one of three fixed tokens, else null.
-	for (const modelBasis of ["metered", "floor", "refunded"]) assert.equal(rec({ reservedMicros: 1, settledMicros: 1, basis: "floor", modelBasis }).modelBasis, modelBasis);
-	assert.equal(rec({ reservedMicros: 1, settledMicros: 1, basis: "floor", modelBasis: "unreserved" }).modelBasis, null);
-	for (const bad of [undefined, null, "x", { reservedMicros: 1.5, settledMicros: 0, basis: "floor" }, { reservedMicros: 1, settledMicros: -1, basis: "floor" }, { reservedMicros: 1, settledMicros: 1, basis: "free" }]) assert.equal(rec(bad), null, JSON.stringify(bad));
-	assert.equal(buildRecord({ job, error: Object.assign(new Error("x"), { dollars: { reservedMicros: 1, settledMicros: 1, basis: "floor" } }) }).dollars.basis, "floor", "read off a throw too");
-	assert.equal(Object.keys(buildRecord({ job, result: { outcome: "completed" } })).at(-12), "dollars", "the tail when it landed; `why`, `project`, `plan`, `resources`, `size`, `hostBudget`, `queuedAt`, `capacity` and `v` took it after");
+	for (const modelBasis of ["metered", "floor", "refunded"]) assert.equal(rec({ reservedTokens: 1, settledTokens: 1, basis: "floor", modelBasis }).modelBasis, modelBasis);
+	assert.equal(rec({ reservedTokens: 1, settledTokens: 1, basis: "floor", modelBasis: "unreserved" }).modelBasis, null);
+	for (const bad of [undefined, null, "x", { reservedTokens: 1.5, settledTokens: 0, basis: "floor" }, { reservedTokens: 1, settledTokens: -1, basis: "floor" }, { reservedTokens: 1, settledTokens: 1, basis: "free" }]) assert.equal(rec(bad), null, JSON.stringify(bad));
+	assert.equal(buildRecord({ job, error: Object.assign(new Error("x"), { tokensWindows: { reservedTokens: 1, settledTokens: 1, basis: "floor" } }) }).tokensWindows.basis, "floor", "read off a throw too");
+	assert.equal(Object.keys(buildRecord({ job, result: { outcome: "completed" } })).at(-12), "tokensWindows", "the tail when it landed; `why`, `project`, `plan`, `resources`, `size`, `hostBudget`, `queuedAt`, `capacity` and `v` took it after");
 });
 
 test("the record carries the refusal's why: a fixed token, in tail position, else null", () => {
@@ -1973,7 +1953,7 @@ test("the record carries the job's project id in tail position after why, charse
 });
 
 test("parseExitCode: the LAST exit line's own integer code, else null; the sink reports it as exitLineCode (#501, PR #542 round 3)", async () => {
-	assert.equal(parseExitCode('{"event":"exit","code":2,"reason":"cost-cap"}'), 2);
+	assert.equal(parseExitCode('{"event":"exit","code":2,"reason":"model-not-allowed"}'), 2);
 	assert.equal(parseExitCode('{"event":"exit","code":0}\n{"event":"exit","code":1}'), 1, "the last line wins");
 	assert.equal(parseExitCode('{"event":"exit","tokens":{"total":1}}'), null, "no code");
 	assert.equal(parseExitCode('{"event":"exit","code":"0"}'), null, "a string is not a code");
@@ -1988,9 +1968,9 @@ test("parseExitCode: the LAST exit line's own integer code, else null; the sink 
 
 test("the runner writes the code it exits with on BOTH exit lines (pinned: the settlement compares it with the container's)", () => {
 	const src = readFileSync(new URL("../../image/runner/run-job.mjs", import.meta.url), "utf8");
-	assert.match(src, /exitWriter\.writeExit\(\{ \.\.\.capExitMessage\(outcome\), \.\.\.costRefusalField\(outcome, costRefusalWhy\(\)\), turns: /, "the decided path spreads the outcome, whose `code` is the exit code");
+	assert.match(src, /exitWriter\.writeExit\(\{ \.\.\.capExitMessage\(outcome\), \.\.\.meteredExitFields\(\), turns: /, "the decided path spreads the outcome, whose `code` is the exit code");
 	assert.match(src, /\n\treturn outcome\.code;\n\}/, "and returns that same code as the process exit code");
-	assert.match(src, /exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, \.\.\.costRefusalField\(outcome, costRefusalWhy\(\)\), message: capped\.message, \.\.\.meteredExitFields\(\) \}\)/, "the catch path writes its code too (and, after the meter installed, its counts: issue #543)");
+	assert.match(src, /exitWriter\.writeExit\(\{ code: capped\.code, reason: capped\.reason, message: capped\.message, \.\.\.meteredExitFields\(\) \}\)/, "the catch path writes its code too (and, after the meter installed, its counts: issue #543)");
 });
 
 // ---- issue #545: with a key, only the runner's signed exit line is read ----
@@ -2001,8 +1981,8 @@ const signLine = (obj, key = EXIT_KEY) => {
 	const body = JSON.stringify(obj);
 	return `${body.slice(0, -1)},"auth":"${createHmac("sha256", key).update(body).digest("hex")}"}`;
 };
-const GENUINE = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 4, tokens: { input: 9, output: 1, total: 10, cost: 1.5, metered: true, calls: 2, unresolved: 0, unpriced: 0 }, session: { resumed: false, reason: "absent" }, context: { tokens: 50, window: 100 } };
-const FORGED_LINE = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 0, tokens: { input: 0, output: 0, total: 0, cost: 0, metered: true, calls: 0, unresolved: 0, unpriced: 0 } };
+const GENUINE = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 4, tokens: { input: 9, output: 1, total: 10, metered: true, calls: 2, unresolved: 0, unpriced: 0 }, session: { resumed: false, reason: "absent" }, context: { tokens: 50, window: 100 } };
+const FORGED_LINE = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 0, tokens: { input: 0, output: 0, total: 0, metered: true, calls: 0, unresolved: 0, unpriced: 0 } };
 
 async function readKeyed(text, opts) {
 	const sink = makeLogSink({ logsDir: "/logs", enabled: false, fs: makeFakeFs({ stream: makeFakeStream() }) })("gh-1", opts);
@@ -2014,7 +1994,6 @@ test("with a key, a forged line AFTER the genuine one is not read: every exit fi
 	const out = await readKeyed(`${signLine(GENUINE)}\n${JSON.stringify(FORGED_LINE)}\n`, { exitKey: EXIT_KEY });
 	assert.equal(out.exitAuth, "verified");
 	assert.equal(out.tokens.total, 10);
-	assert.equal(out.tokens.cost, 1.5);
 	assert.equal(out.turns, 4);
 	assert.equal(out.exitLineCode, 0);
 	assert.deepEqual(out.session, { resumed: false, reason: "absent" });
@@ -2160,12 +2139,13 @@ test("recordVersionOf: no v is 1, a positive safe integer is itself, and anythin
 });
 
 test("recordReadable: version 1 up to this build's own; a newer or malformed one is not, and a test can widen what is supported (#761)", () => {
-	assert.equal(RUN_RECORD_VERSION, 1);
+	assert.equal(RUN_RECORD_VERSION, 2);
 	assert.equal(recordReadable({ jobId: "j" }), true);
 	assert.equal(recordReadable({ v: 1 }), true);
-	assert.equal(recordReadable({ v: 2 }), false);
-	assert.equal(recordReadable({ v: 2 }, { supported: 2 }), true, "the build's own version is readable");
-	assert.equal(recordReadable({ v: 3 }, { supported: 2 }), false);
+	assert.equal(recordReadable({ v: 2 }), true);
+	assert.equal(recordReadable({ v: 3 }), false);
+	assert.equal(recordReadable({ v: 3 }, { supported: 3 }), true, "the build's own version is readable");
+	assert.equal(recordReadable({ v: 4 }, { supported: 3 }), false);
 	assert.equal(recordReadable({ v: "2" }, { supported: 9 }), false, "a malformed v is not readable at any version");
 	assert.equal(recordReadable(null), false);
 });
@@ -2193,7 +2173,7 @@ function watched(record) {
 }
 
 test("recordVerdict and earlierFrom read only the stable core of a record from a newer pi-dispatch (#761)", () => {
-	const newer = { jobId: "gh-n", attempt: 2, outcome: "completed", startedAt: "2026-09-14T15:00:00.000Z", endedAt: "2026-09-14T15:20:00.000Z", host: "mini-3", kind: "github", project: "api", capacity: { slots: 8 }, size: { memMiB: 8192, cpuCenti: 800 }, earlier: [{ host: "mini-1", startedAt: "2026-09-14T14:00:00.000Z", endedAt: "2026-09-14T14:10:00.000Z" }], lane: { name: "batch" }, v: 2 };
+	const newer = { jobId: "gh-n", attempt: 2, outcome: "completed", startedAt: "2026-09-14T15:00:00.000Z", endedAt: "2026-09-14T15:20:00.000Z", host: "mini-3", kind: "github", project: "api", capacity: { slots: 8 }, size: { memMiB: 8192, cpuCenti: 800 }, earlier: [{ host: "mini-1", startedAt: "2026-09-14T14:00:00.000Z", endedAt: "2026-09-14T14:10:00.000Z" }], lane: { name: "batch" }, v: 3 };
 	const verdict = watched(newer);
 	assert.equal(recordVerdict(verdict.proxy, { jobId: "gh-n", attempt: 2, since: Date.parse(newer.startedAt) }), null, "a newer host's finished run settles the attempt");
 	assert.deepEqual([...verdict.read].filter((k) => !RECORD_CORE_FIELDS.includes(k)), [], "nothing past the core");
@@ -2382,7 +2362,7 @@ test("a supervisor line AFTER a line the runner wrote is ignored by every scanne
 		return `${body.slice(0, -1)},"auth":"${createHmac("sha256", KEY).update(body, "utf8").digest("hex")}"}`;
 	};
 	const usage = { v: 1, piAi: "0.80.7", truncated: 0, models: [GOOD_ROW] };
-	const runnerLine = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 4, tokens: { input: 900000, output: 50000, total: 950000, cost: 1.5 }, usage, context: { tokens: 1000, window: 200000 }, session: { resumed: false, reason: "absent" }, resources: { ...FULL, oomKills: 0, memPeak: 100 } };
+	const runnerLine = { event: "exit", jobId: "j", code: 0, reason: "completed", turns: 4, tokens: { input: 900000, output: 50000, total: 950000 }, usage, context: { tokens: 1000, window: 200000 }, session: { resumed: false, reason: "absent" }, resources: { ...FULL, oomKills: 0, memPeak: 100 } };
 	const supervisorLine = { event: "exit", jobId: "j", code: 137, reason: "oom-killed", signal: "SIGKILL", by: "supervisor", resources: FULL };
 	const tail = `\n${sign(runnerLine)}\n\n${sign(supervisorLine)}\n`;
 	const text = authenticExitLines(tail, KEY);
@@ -2394,9 +2374,8 @@ test("a supervisor line AFTER a line the runner wrote is ignored by every scanne
 	assert.equal(parseExitSession(text).reason, "absent");
 	assert.deepEqual(parseExitContext(text), { tokens: 1000, window: 200000 });
 	assert.equal(parseExitResources(text).memPeak, 100, "the runner's block, not the supervisor's");
-	assert.equal(parseExitReason(`${exitWith({ code: 2, reason: "cost-cap", why: "over-cap" })}${exitWith(supervisorLine)}`), "cost-cap");
-	assert.equal(parseExitWhy(`${exitWith({ code: 2, reason: "cost-cap", why: "over-cap" })}${exitWith(supervisorLine)}`), "over-cap");
-	assert.deepEqual(parseExitUsage(text), usage, "the usage ledger the dollar settlement reads");
+	assert.equal(parseExitReason(`${exitWith({ code: 2, reason: "model-not-allowed" })}${exitWith(supervisorLine)}`), "model-not-allowed");
+	assert.deepEqual(parseExitUsage(text), usage, "the usage ledger the token settlement reads");
 	// Through the real sink, with the key: the result is the runner's line, and no OOM report.
 	const fs = makeFakeFs({ stream: makeFakeStream() });
 	const jobLog = makeLogSink({ logsDir: "/logs", enabled: false, fs })("j", { exitKey: KEY });
@@ -2536,7 +2515,7 @@ test("the refusals before a slot that the capacity report reads are the processo
 test("a retry's record carries its earlier attempts' slot intervals (`earlier`), rebuilt, newest kept, and nothing of their cost (#599)", async () => {
 	const { earlierFrom, recordedEarlier, EARLIER_MAX } = await import("../src/run-history.mjs");
 	const iso = (h) => new Date(Date.parse("2026-08-30T00:00:00.000Z") + h * 3600_000).toISOString();
-	const previous = { host: "mini1", startedAt: iso(1), endedAt: iso(2), size: { memMiB: 4096, cpuCenti: 200, source: "env" }, capacity: { slots: 2 }, dollars: { reservedMicros: 5 }, usage: { v: 1 }, earlier: [{ host: "mini2", startedAt: iso(0), endedAt: iso(0.5), memMiB: 2048, cpuCenti: 100, dollars: 9 }] };
+	const previous = { host: "mini1", startedAt: iso(1), endedAt: iso(2), size: { memMiB: 4096, cpuCenti: 200, source: "env" }, capacity: { slots: 2 }, tokensWindows: { reservedTokens: 5 }, usage: { v: 1 }, earlier: [{ host: "mini2", startedAt: iso(0), endedAt: iso(0.5), memMiB: 2048, cpuCenti: 100, tokensWindows: 9 }] };
 	assert.deepEqual(earlierFrom(previous), [
 		{ host: "mini2", startedAt: iso(0), endedAt: iso(0.5), memMiB: 2048, cpuCenti: 100 },
 		{ host: "mini1", startedAt: iso(1), endedAt: iso(2), memMiB: 4096, cpuCenti: 200 },
@@ -2679,9 +2658,9 @@ test("the record's turn budget is pickup's validated positive integer, never a m
 
 test("ignored watch finding has a stable reporting target and public decision without private evidence", async () => {
 	const { RUN_KINDS } = await import("../src/forges.mjs");
-	const record = buildRecord({ job: { id: "watch-job", name: "watch", data: { kind: "watch", watch: { ruleId: "shop-5xx", findingId: "a".repeat(64), finding: { samples: ["private-sample"], fields: { account: "private-account" } } } } }, result: { outcome: "completed", reason: "watch-ignored", decision: { model: "openrouter/typesafe/jev-1.13", action: "ignore", shadow: false, questions: ["act"], probabilities: { investigate: 0.02, ignore: 0.95, file_issue: 0.03 }, confidence: 0.9, costUsd: 0.001, state: { account: "private-state" }, samples: ["private-sample"] } } });
+	const record = buildRecord({ job: { id: "watch-job", name: "watch", data: { kind: "watch", watch: { ruleId: "shop-5xx", findingId: "a".repeat(64), finding: { samples: ["private-sample"], fields: { account: "private-account" } } } } }, result: { outcome: "completed", reason: "watch-ignored", decision: { model: "openrouter/typesafe/jev-1.13", action: "ignore", shadow: false, questions: ["act"], probabilities: { investigate: 0.02, ignore: 0.95, file_issue: 0.03 }, confidence: 0.9, tokensTotal: 0, state: { account: "private-state" }, samples: ["private-sample"] } } });
 	assert.equal(record.kind, "watch"); assert.equal(record.target, "watch:shop-5xx"); assert.equal(record.reason, "watch-ignored");
-	assert.deepEqual(record.decision, { model: "openrouter/typesafe/jev-1.13", action: "ignore", shadow: false, questions: ["act"], probabilities: { investigate: 0.02, ignore: 0.95, file_issue: 0.03 }, confidence: 0.9, costUsd: 0.001 });
+	assert.deepEqual(record.decision, { model: "openrouter/typesafe/jev-1.13", action: "ignore", shadow: false, questions: ["act"], probabilities: { investigate: 0.02, ignore: 0.95, file_issue: 0.03 }, confidence: 0.9, tokensTotal: 0 });
 	const serialized = JSON.stringify(record); assert.equal(serialized.includes("private-"), false); assert.equal(serialized.includes('"samples"'), false); assert.equal(serialized.includes('"fields"'), false); assert.equal(serialized.includes('"finding"'), false);
 	assert.equal(RUN_KINDS.includes("watch"), false, "reporting a watch is not permission to fork, rerun or forge-dispatch one");
 	for (const ruleId of ["../private", "a".repeat(65), "", null]) assert.equal(buildRecord({ job: { id: "watch-job", data: { kind: "watch", watch: { ruleId } } }, result: { outcome: "policy" } }).target, null);

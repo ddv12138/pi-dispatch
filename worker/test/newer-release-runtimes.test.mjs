@@ -30,11 +30,11 @@ const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.1
 const NOW = Date.UTC(2026, 10, 2, 9, 0);
 const DIGEST = "b".repeat(64);
 // The env side of the settings (start.mjs's `config`); the overlay file on disk is merged over it by the real reader.
-const ENV = { provider: "test", model: "chat", maxTurns: 1, dailyCap: 100, weeklyCap: null, monthlyCap: null, maxTokens: null, dailyTokenCap: null, concurrency: 1, softHoldPct: null, maxCostUsd: "0.05", dailyCostUsd: null, weeklyCostUsd: null, monthlyCostUsd: null };
+const ENV = { provider: "test", model: "chat", maxTurns: 1, dailyCap: 100, weeklyCap: null, monthlyCap: null, maxTokens: 2000, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 1, softHoldPct: null };
 const SETTINGS_TODAY = "{\n  \"maxTurns\": 1\n}\n";
 const SETTINGS_NEWER = "{\n  \"version\": 2,\n  \"maxTurns\": 1\n}\n";
-const ZERO_TOUCH = { capture: true, model: "test/classifier", maxCostUsd: "0.05", confidence: 0.9, names: {} };
-const RULE = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxCostUsd: "0.10" };
+const ZERO_TOUCH = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
+const RULE = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxTokens: 5000 };
 
 /**
  * The two files on disk and the settings read start.mjs builds from them (`getSettings`: the overlay over env through
@@ -68,7 +68,7 @@ function processorWith({ getSettings, deps }) {
 		recordRun: (row) => seen.records.push(row),
 		timeoutMs: 100000,
 		deps: {
-			imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["questionGrouping", "answerDraft", "exitAuth", "costCap", "modelPolicy", "modelFailover"] }),
+			imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["questionGrouping", "answerDraft", "exitAuth", "tokenBudget", "modelPolicy", "modelFailover"] }),
 			checkProviderCredential: async () => ({ ok: true }),
 			checkModelsKnown: () => ({ ok: true }),
 			mintToken: spy("mintToken", "tok"),

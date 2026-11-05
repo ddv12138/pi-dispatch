@@ -6,13 +6,13 @@ import { makeQuestionGroupRuntime, questionGroupConfigDigest, prepareQuestionGro
 import { enqueueQuestionGroupJob } from "../src/queue.mjs";
 import { compareZeroTouchFixes } from "../src/zero-touch-fixes.mjs";
 const nowMs = 1900000000000;
-const config = { capture: true, model: "test/classifier", maxCostUsd: "0.05", confidence: 0.9, names: {} };
+const config = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
 const scopeId = "a".repeat(64), digest = "b".repeat(64), groupId = "c".repeat(32);
 
 test("grouping config is opt-in and human names are bounded; malformed settings cannot silently disable capture", () => {
 	assert.equal(validateZeroTouchConfig(undefined), null);
 	assert.deepEqual(parseTriggersDocument(JSON.stringify({ triggers: [], zeroTouch: config }), "test").zeroTouch, config);
-	for (const mutation of [{ ...config, model: "floating" }, { ...config, maxCostUsd: -1 }, { ...config, confidence: 0.5 }, { ...config, summary: "from the question" }, { ...config, names: { [groupId]: "bad\u202ename" } }, { ...config, names: { [groupId]: "a".repeat(121) } }]) assert.throws(() => validateZeroTouchConfig(mutation));
+	for (const mutation of [{ ...config, model: "floating" }, { ...config, maxTokens: -1 }, { ...config, confidence: 0.5 }, { ...config, summary: "from the question" }, { ...config, names: { [groupId]: "bad\u202ename" } }, { ...config, names: { [groupId]: "a".repeat(121) } }]) assert.throws(() => validateZeroTouchConfig(mutation));
 	assert.equal(validateZeroTouchConfig({ ...config, names: { [groupId]: "a".repeat(120) } }).names[groupId].length, 120);
 });
 test("capture redacts before bounding, requires redactor and refuses overlong context", async () => {
@@ -77,7 +77,7 @@ test("fix recurrence counts untouched refusals and unanswered groups over equal 
 	assert.equal(compareZeroTouchFixes({ fixes: [fix], records: [], coverageFromMs: nowMs - 30 * 86400000, nowMs, windowDays: 30 })[0].status, "observing");
 });
 test("classifier type, known context bound and configured cap are free pickup refusals", async () => {
-	for (const model of [null, { type: "text", contextWindow: 4096, cost: { input: 1, output: 0 } }, { type: "classifier", cost: { input: 1, output: 0 } }, { type: "classifier", contextWindow: 100000, cost: { input: 1, output: 0 } }, { type: "classifier", contextWindow: 4096, cost: { input: 1, output: 1 } }]) {
+	for (const model of [null, { type: "text", contextWindow: 4096, cost: { input: 1, output: 0 } }, { type: "classifier", cost: { input: 1, output: 0 } }, { type: "classifier", contextWindow: 0, cost: { input: 1, output: 0 } }, { type: "classifier", contextWindow: 4096, cost: { input: 1, output: 1 } }]) {
 		const fixture = runtimeFixture({ resolveClassifier: () => model });
 		const result = await fixture.runtime.resolve(fixture.data, "job");
 		assert.equal(result.result.reason, "question-group-refused");

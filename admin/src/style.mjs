@@ -19,7 +19,7 @@
  * can assert both the plain content and the width math without a real terminal.
  */
 
-import { LINE_INPUT_CURSOR, columnsAfterSpace, columnsOf, fmtCost as plainFmtCost, scrubControls, scrubKeepingStyle, sliceColumns, sparkline as plainSparkline } from "./panel.mjs";
+import { LINE_INPUT_CURSOR, columnsAfterSpace, columnsOf, fmtAmount as plainFmtCost, scrubControls, scrubKeepingStyle, sliceColumns, sparkline as plainSparkline } from "./panel.mjs";
 
 // Strip SGR (and OSC-8 hyperlink) escapes to recover the visible text, which is then measured in COLUMNS.
 // This comment used to end "so post-strip `.length` is a safe column proxy", and issue #401 is what that
@@ -73,7 +73,7 @@ export const PLAIN_THEME = {
 const OVERLAY_GLYPHS = { tl: "┌", tr: "┐", bl: "└", br: "┘", ml: "├", mr: "┤", h: "─", v: "│", full: "█", empty: "░", ellipsis: "…", arrowRight: "─▶", foldOpen: "▾", foldClosed: "▸", rearm: "↻" };
 const OVERLAY_ASCII = { tl: "+", tr: "+", bl: "+", br: "+", ml: "+", mr: "+", h: "-", v: "|", full: "#", empty: ".", ellipsis: "...", arrowRight: "->", foldOpen: "v", foldClosed: ">", rearm: "~" };
 
-/** Per-class colors for `fmtCost`: an estimate must LOOK provisional, and plan coverage must not look free. */
+/** Per-class colors for `fmtAmount`: an estimate must LOOK provisional, and plan coverage must not look free. */
 const COST_COLORS = {
   metered: "text",
   plan: "accent",
@@ -271,11 +271,11 @@ export function makeStyler(theme, { ascii = false } = {}) {
   };
 
   /**
-   * Colored twin of panel's `fmtCost`: the plain renderer owns the shape, this only colors it per class
+   * Colored twin of panel's `fmtAmount`: the plain renderer owns the shape, this only colors it per class
    * (unknown/malformed share "dim"). With a `width` the result is a fixed `cell` of exactly that visible
    * width; without one the visible width equals the plain string's length.
    */
-  const fmtCost = (cost, width) => {
+  const fmtAmount = (cost, width) => {
     const plain = plainFmtCost(cost);
     const color = (cost && typeof cost === "object" && COST_COLORS[cost.class]) || "dim";
     return width == null ? fg(color, plain) : cell(plain, width, { color });
@@ -305,7 +305,7 @@ export function makeStyler(theme, { ascii = false } = {}) {
   // trigger field has the same shape as one written here: keeping ours kept theirs, with their URL under
   // their display text. `stripAnsi` still recognises OSC-8, because data can still contain one.
 
-  return { theme: th, glyphs: G, fg, bold, cell, clipStyled, badge, meter, divider, joinCells, sparkline, fmtCost, lineInput, stripAnsi, visibleLen };
+  return { theme: th, glyphs: G, fg, bold, cell, clipStyled, badge, meter, divider, joinCells, sparkline, fmtAmount, lineInput, stripAnsi, visibleLen };
 }
 
 /**

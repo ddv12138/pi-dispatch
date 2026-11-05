@@ -9,7 +9,7 @@ const connection = {
 	id: "claude", connectionId: "claude", provider: "anthropic", active: true, ownerHost: "worker-one",
 	adapter: "pi-anthropic-oauth@0.3.6", accountGroup: "12345678-1234-1234-1234-123456789abc", generation: 2,
 };
-const job = { provider: "anthropic", model: "sonnet", models: ["anthropic/sonnet"], maxCostMicros: 500_000 };
+const job = { provider: "anthropic", model: "sonnet", models: ["anthropic/sonnet"], maxTokens: 500_000 };
 const available = () => ({ five_hour: { utilization: 20 }, seven_day: { utilization: 30 }, extra_usage: { is_enabled: false } });
 const throttled = { code: 1, exitLineCode: 1, exitAuth: "verified", providerFailure: { kind: "rate-limited", subscriptionProvider: "anthropic" } };
 

@@ -8,7 +8,7 @@
  * fail-loud, `loadEnvelope` layers the one fs read on top. The worker will hold the parsed envelope in a watched ref
  * with a last-good copy, as it does the projects file.
  *
- * `version` is REQUIRED and a newer one is refused: this is a money file, and a field an old build silently drops
+ * `version` is REQUIRED and a newer one is refused: this is a budget file, and a field an old build silently drops
  * could widen what a plan may move. Unknown keys are REFUSED here, stricter than the operator-file policy that drops
  * them in scoped-limits.json and projects.json: a mistyped `maxStepPct` dropped in silence would read as a bound the
  * file does not hold, and every key in this file is a bound.
@@ -22,7 +22,6 @@ import { existsSync as fsExistsSync, readFileSync as fsReadFileSync, realpathSyn
 import { dirname, isAbsolute, resolve, sep } from "node:path";
 import { configError } from "./config.mjs";
 import { fingerprint } from "./fingerprint.mjs";
-import { formatMicros, parseUsdMicros } from "./money.mjs";
 import { OTHER, PLAN_WRITERS, WEIGHT_MAX } from "./priorities.mjs";
 import { isProjectId } from "./project-id.mjs";
 
@@ -30,16 +29,16 @@ import { isProjectId } from "./project-id.mjs";
 export const ENVELOPE_VERSION = 1;
 /** The windows an envelope may govern: the UTC day, the Monday week and the month of budget.mjs's keys. */
 export const ENVELOPE_WINDOWS = Object.freeze(["day", "week", "month"]);
-/** Each window's operator dollar field on a scoped-limits row (`project:<id>`). */
-const WINDOW_USD_FIELD = Object.freeze({ day: "dayUsd", week: "weekUsd", month: "monthUsd" });
+/** Each window's operator token field on a scoped-limits row (`project:<id>`). */
+const WINDOW_TOKEN_FIELD = Object.freeze({ day: "dayTokens", week: "weekTokens", month: "monthTokens" });
 /** Each window's row fields that bound it: its own and every LONGER window's, since a week cap also caps each day in it. */
-const BOUNDING_FIELDS = Object.freeze({ day: ["dayUsd", "weekUsd", "monthUsd"], week: ["weekUsd", "monthUsd"], month: ["monthUsd"] });
+const BOUNDING_FIELDS = Object.freeze({ day: ["dayTokens", "weekTokens", "monthTokens"], week: ["weekTokens", "monthTokens"], month: ["monthTokens"] });
 
 /** The longest interval and plan lifetime a file may set: a year. Beyond it a value is a typo, not a policy. */
 const MAX_INTERVAL_HOURS = 24 * 366;
 const MAX_PLAN_DAYS = 366;
 
-const TOP_KEYS = new Set(["version", "window", "totalUsd", "floorsUsd", "defaultWeights", "delegation"]);
+const TOP_KEYS = new Set(["version", "window", "totalTokens", "floorsTokens", "defaultWeights", "delegation"]);
 const DELEGATION_KEYS = new Set(["enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"]);
 
 function isPlainObject(value) {
@@ -53,33 +52,32 @@ function refuseUnknown(object, allowed, at, path) {
 }
 
 /**
- * A floor: `parseUsdMicros`'s rules (a plain decimal, at most 6 decimals, a string recommended), except that 0 is a
+ * A floor: a whole number of tokens of 0 or more, except that 0 is a
  * floor and not a refusal. A floor of 0 is the honest "no guaranteed share", and `_other`'s default.
  */
-function floorMicros(value, field, path) {
-	if (value === 0 || (typeof value === "string" && /^0(\.0{1,6})?$/.test(value))) return 0;
-	try {
-		return parseUsdMicros(value, field);
-	} catch (error) {
-		throw configError(`envelope file: ${error.message.replace(/above 0/, "of 0 or more")}: ${path}`);
+function floorTokens(value, field, path) {
+	if (value === 0) return 0;
+	if (!Number.isSafeInteger(value) || value < 0) {
+		throw configError(`envelope file: ${field} must be a whole number of tokens of 0 or more: ${path}`);
 	}
+	return value;
 }
 
 /**
  * Parse, validate and normalize the envelope file TEXT. Returns
- * `{ version, window, totalMicros, floors, defaultWeights, delegation }`:
- *   - `floors`: `{ id: micros }` for every project the file names and `_other` (floor 0 when absent);
+ * `{ version, window, totalTokens, floors, defaultWeights, delegation }`:
+ *   - `floors`: `{ id: tokens }` for every project the file names and `_other` (floor 0 when absent);
  *   - `defaultWeights`: `{ id: weight }` for the same entries, each 1 when absent;
  *   - `delegation`: `{ enabled, writers, maxStepPct, minIntervalHours, maxPlanDays }`, `enabled` false and the rest
  *     null when the file has no `delegation`.
  * Throws `configError` on anything malformed. `path` is for messages only.
  *
  * `projects` (the parsed projects.json) and `limits` (the parsed scoped-limits.json) are what the floors are judged
- * against: a floor names a project or `_other`, and a project's operator dollar row for the envelope's window may not
- * sit below its floor. `maxCostMicros` is the deployment's per-job cost cap, or null: an envelope needs one, because
+ * against: a floor names a project or `_other`, and a project's operator token row for the envelope's window may not
+ * sit below its floor. `maxTokens` is the deployment's per-job token budget, or null: an envelope needs one, because
  * every governed job reserves its per-job cap against its project's allocation.
  */
-export function parseEnvelope(text, path, { projects = [], limits = [], maxCostMicros = null } = {}) {
+export function parseEnvelope(text, path, { projects = [], limits = [], maxTokens = null } = {}) {
 	let raw;
 	try {
 		raw = JSON.parse(text);
@@ -88,47 +86,46 @@ export function parseEnvelope(text, path, { projects = [], limits = [], maxCostM
 		const at = /position (\d+)/.exec(String(error?.message))?.[1];
 		throw configError(`envelope file is not valid JSON${at === undefined ? "" : ` (at character ${at})`}: ${path}`);
 	}
-	if (!isPlainObject(raw)) throw configError(`envelope file must be an object with "version", "window", "totalUsd" and "floorsUsd": ${path}`);
+	if (!isPlainObject(raw)) throw configError(`envelope file must be an object with "version", "window", "totalTokens" and "floorsTokens": ${path}`);
 	const version = raw.version;
 	if (!Number.isInteger(version) || version < 1) throw configError(`envelope file must have "version": ${ENVELOPE_VERSION} (an integer >= 1): ${path}`);
 	if (version > ENVELOPE_VERSION) throw configError(`envelope file written by a newer pi-dispatch (version ${version}; this build understands ${ENVELOPE_VERSION}): ${path}`);
 	refuseUnknown(raw, TOP_KEYS, "the file", path);
 
-	// A per-job cap first: without one no governed job can reserve, so every such job would refuse as a configuration
+	// A per-job budget first: without one no governed job can reserve, so every such job would refuse as a configuration
 	// error, and an envelope that admits nothing is a mistake the boot should name.
-	// A positive safe integer of micro-dollars, nothing else: 0 would be a cap that admits no priced call, and a string
-	// or a float here is a caller's defect that must not read as "a cap is set".
-	if (!Number.isSafeInteger(maxCostMicros) || maxCostMicros <= 0) {
-		throw configError(`envelope file needs a per-job cost cap: set PI_MAX_COST_USD (each job governed by the envelope reserves its per-job cap against its project's allocation): ${path}`);
+	// A positive safe integer of tokens, nothing else: 0 would be a budget under which a governed job can never
+	// settle more than it reserves (the zero-rated escape reads job data, not the envelope), and a string
+	// or a float here is a caller's defect that must not read as "a budget is set" (D7a: whole tokens).
+	if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
+		throw configError(`envelope file needs a per-job token budget: set PI_MAX_TOKENS (each job governed by the envelope reserves its per-job budget against its project's allocation): ${path}`);
 	}
 
 	if (!ENVELOPE_WINDOWS.includes(raw.window)) throw configError(`envelope file: window must be one of ${ENVELOPE_WINDOWS.join(", ")}: ${path}`);
 	const window = raw.window;
 
-	let totalMicros;
-	try {
-		totalMicros = parseUsdMicros(raw.totalUsd, "totalUsd");
-	} catch (error) {
-		throw configError(`envelope file: ${error.message}: ${path}`);
+	if (!Number.isSafeInteger(raw.totalTokens) || raw.totalTokens <= 0) {
+		throw configError(`envelope file: totalTokens must be a whole number of tokens of 1 or more: ${path}`);
 	}
+	const totalTokens = raw.totalTokens;
 
-	if (!isPlainObject(raw.floorsUsd)) throw configError(`envelope file: floorsUsd must be an object of project id to dollars: ${path}`);
+	if (!isPlainObject(raw.floorsTokens)) throw configError(`envelope file: floorsTokens must be an object of project id to token counts: ${path}`);
 	const known = new Set((Array.isArray(projects) ? projects : []).map((p) => p?.id));
 	const floors = {};
-	for (const id of Object.keys(raw.floorsUsd).sort()) {
-		checkEntryId(id, known, "floorsUsd", path);
-		floors[id] = floorMicros(raw.floorsUsd[id], `floorsUsd.${id}`, path);
+	for (const id of Object.keys(raw.floorsTokens).sort()) {
+		checkEntryId(id, known, "floorsTokens", path);
+		floors[id] = floorTokens(raw.floorsTokens[id], `floorsTokens.${id}`, path);
 	}
 	if (floors[OTHER] === undefined) floors[OTHER] = 0;
 	const sum = Object.values(floors).reduce((s, v) => s + v, 0);
-	if (sum > totalMicros) throw configError(`envelope file: the floors add up to ${formatMicros(sum)}, above totalUsd ${formatMicros(totalMicros)}: ${path}`);
+	if (sum > totalTokens) throw configError(`envelope file: the floors add up to ${sum}, above totalTokens ${totalTokens}: ${path}`);
 
 	const defaultWeights = {};
 	if (raw.defaultWeights !== undefined) {
 		if (!isPlainObject(raw.defaultWeights)) throw configError(`envelope file: defaultWeights must be an object of project id to weight: ${path}`);
 		for (const id of Object.keys(raw.defaultWeights)) {
 			checkEntryId(id, known, "defaultWeights", path);
-			if (floors[id] === undefined) throw configError(`envelope file: defaultWeights.${id} names a project with no floor; add it to floorsUsd (0 is a floor): ${path}`);
+			if (floors[id] === undefined) throw configError(`envelope file: defaultWeights.${id} names a project with no floor; add it to floorsTokens (0 is a floor): ${path}`);
 			const w = raw.defaultWeights[id];
 			if (!Number.isInteger(w) || w < 0 || w > WEIGHT_MAX) throw configError(`envelope file: defaultWeights.${id} must be an integer from 0 to ${WEIGHT_MAX}: ${path}`);
 		}
@@ -137,10 +134,10 @@ export function parseEnvelope(text, path, { projects = [], limits = [], maxCostM
 
 	checkRowsAgainstFloors(floors, window, limits, path);
 	const delegation = parseDelegation(raw.delegation, path);
-	return { version, window, totalMicros, floors, defaultWeights, delegation };
+	return { version, window, totalTokens, floors, defaultWeights, delegation };
 }
 
-/** A key of `floorsUsd` or `defaultWeights`: `_other`, or a project id that projects.json has. */
+/** A key of `floorsTokens` or `defaultWeights`: `_other`, or a project id that projects.json has. */
 function checkEntryId(id, known, field, path) {
 	if (id === OTHER) return;
 	// The id is quoted only once it is known to match the id charset: it then cannot carry a control byte or a path.
@@ -149,11 +146,11 @@ function checkEntryId(id, known, field, path) {
 }
 
 /**
- * A project's operator dollar row (`project:<id>` in scoped-limits.json) for the envelope's window OR A LONGER ONE, below
+ * A project's operator token row (`project:<id>` in scoped-limits.json) for the envelope's window OR A LONGER ONE, below
  * the project's floor, refuses the file and names both. The allocation can only lower a project's cap
- * (`min(row, allocation)`), so such a floor promises money the operator's own row never lets the project spend: a
- * `weekUsd` of $1 bounds every day of that week, so a day floor of $50 under it is as empty as a day row of $1. A
- * shorter row (a `dayUsd` under a week envelope) is not compared: seven days of it may still reach the floor.
+ * (`min(row, allocation)`), so such a floor promises tokens the operator's own row never lets the project spend: a
+ * `weekTokens` of 1,000 bounds every day of that week, so a day floor of 50,000 under it is as empty as a day row of
+ * 1,000. A shorter row (a `dayTokens` under a week envelope) is not compared: seven days of it may still reach the floor.
  */
 function checkRowsAgainstFloors(floors, window, limits, path) {
 	for (const [id, floor] of Object.entries(floors)) {
@@ -162,9 +159,9 @@ function checkRowsAgainstFloors(floors, window, limits, path) {
 		for (const field of BOUNDING_FIELDS[window]) {
 			const value = row?.[field];
 			if (value === null || value === undefined) continue;
-			const cap = parseUsdMicros(value, field);
+			const cap = value;
 			if (cap < floor) {
-				throw configError(`envelope file: floorsUsd.${id} (${formatMicros(floor)}) is above the scoped-limits row project:${id} ${field} (${formatMicros(cap)}); lower the floor or raise the row: ${path}`);
+				throw configError(`envelope file: floorsTokens.${id} (${floor}) is above the scoped-limits row project:${id} ${field} (${cap}); lower the floor or raise the row: ${path}`);
 			}
 		}
 	}
@@ -400,10 +397,10 @@ export function envelopeInsideJobPaths(envelopePath, { cronFolders = [], runRoot
  * that succeeds is followed by `envelopeInsideJobPaths` against the job paths of the moment, at boot and on every
  * reload, because a later edit can move the file, or a job path, so that one holds the other. Returns the parsed
  * envelope, null when `PI_ENVELOPE_FILE` is unset, or throws a `configError` naming the job path that holds it.
- * `maxCostMicros` is the merged per-job cap in micro-dollars, or null.
+ * `maxTokens` is the merged per-job token budget, or null.
  */
-export function loadEnvelopeChecked(config, { projects = [], limits = [], maxCostMicros = null, jobPaths }, { io = {}, containment = {} } = {}) {
-	const envelope = loadEnvelope(config, { projects, limits, maxCostMicros }, io);
+export function loadEnvelopeChecked(config, { projects = [], limits = [], maxTokens = null, jobPaths }, { io = {}, containment = {} } = {}) {
+	const envelope = loadEnvelope(config, { projects, limits, maxTokens }, io);
 	if (envelope === null) return null;
 	const inside = envelopeInsideJobPaths(config.envelopeFile, jobPaths, containment);
 	if (inside) {

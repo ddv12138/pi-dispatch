@@ -59,7 +59,7 @@ test("listPricedModels flattens the whole builtin catalog to { provider, id, cos
 
 // ── pinned rate tables ──────────────────────────────────────────────────────────────────────────────────
 
-test("claude-opus-4-6 rates are pinned exactly (USD per 1M tokens, no tiers)", () => {
+test("claude-opus-4-6 rates are pinned exactly (TOKENS per 1M tokens, no tiers)", () => {
 	const model = getPricedModel("anthropic", "claude-opus-4-6");
 	assert.ok(model);
 	// deepEqual pins the WHOLE table: a bump that adds tiers to opus must land here first.

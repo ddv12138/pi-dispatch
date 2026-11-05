@@ -5,7 +5,7 @@ import { makeQuestionGroupRuntime, questionGroupConfigDigest } from "../src/ques
 import { scopeKeyPrefix } from "../src/scoped-limits.mjs";
 
 const NOW = Date.UTC(2026, 9, 30, 12);
-const config = { capture: true, model: "test/classifier", maxCostUsd: "0.05", confidence: 0.9, names: {} };
+const config = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
 const digest = "b".repeat(64);
 function fixture(currentProjects) {
 	const ops = [];
@@ -18,9 +18,9 @@ function fixture(currentProjects) {
 	const redis = { get: async () => null, incr: async (key) => { ops.push(["incr", key]); return key.startsWith(scopeKeyPrefix("project:shop")) ? 2 : 1; }, decr: async () => 0, expire: async () => {}, del: async () => 0 };
 	const processor = makeProcessor({
 		redis, now: () => NOW, projects: () => currentProjects, scopedLimits: () => [{ scope: "project:shop", day: 1 }],
-		getSettings: () => ({ provider: "test", model: "chat", maxTurns: 1, maxCostUsd: "0.05", dailyCap: 100, weeklyCap: null, monthlyCap: null, concurrency: 1 }),
+		getSettings: () => ({ provider: "test", model: "chat", maxTurns: 1, maxTokens: 5000, dailyCap: 100, weeklyCap: null, monthlyCap: null, concurrency: 1 }),
 		recordRun: (row) => records.push(row),
-		deps: { questionGroupRuntime: runtime, imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["questionGrouping", "costCap", "modelPolicy"] }), prepareWorkspace: async () => ({ workspace: "/internal-empty-workspace", jobDir: "/job" }), runContainer: async () => { throw new Error("a refused classification must not start a container"); }, cleanup: async () => {}, comment: async () => {}, log: () => {} },
+		deps: { questionGroupRuntime: runtime, imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["questionGrouping", "tokenBudget", "modelPolicy"] }), prepareWorkspace: async () => ({ workspace: "/internal-empty-workspace", jobDir: "/job" }), runContainer: async () => { throw new Error("a refused classification must not start a container"); }, cleanup: async () => {}, comment: async () => {}, log: () => {} },
 	});
 	const job = { id: "grouping-job", data: { kind: "question-grouping", questionGrouping: { runId: "source", digest, configDigest: questionGroupConfigDigest(config) } }, timestamp: NOW, attemptsMade: 0, opts: { attempts: 1 } };
 	return { processor, job, ops, records };

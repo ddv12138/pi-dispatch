@@ -48,9 +48,9 @@ export function makeSubscriptionRuntime({ auth, quota, now = Date.now, lookup = 
 				if (!staged) return { ok: false, managed: true, reason: "auth-adapter-unavailable" };
 				if (staged.refused) return { ok: false, managed: true, reason: staged.refused };
 			}
-			const paid = Number.isSafeInteger(row.extraUsageCreditMicros) && row.extraUsageCreditMicros > 0;
-			if (paid && (!Number.isSafeInteger(job.maxCostMicros) || job.maxCostMicros > row.extraUsageCreditMicros)) return { ok: false, managed: true, reason: "auth-credit-cap-required" };
-			const available = await quota.admit(subscriptionIdentity(row), { attemptId, consumeTrial, windows: row.quotaWindows ?? ["five-hour", "seven-day"], allowExtraUsage: paid, maxCreditMicros: row.extraUsageCreditMicros, requireExtraUsageKnownDisabled: ref.provider === "anthropic" });
+			const paid = Number.isSafeInteger(row.extraUsageCreditTokens) && row.extraUsageCreditTokens > 0;
+			if (paid && (!Number.isSafeInteger(job.maxTokens) || job.maxTokens > row.extraUsageCreditTokens)) return { ok: false, managed: true, reason: "auth-credit-cap-required" };
+			const available = await quota.admit(subscriptionIdentity(row), { attemptId, consumeTrial, windows: row.quotaWindows ?? ["five-hour", "seven-day"], allowExtraUsage: paid, maxCreditTokens: row.extraUsageCreditTokens, requireExtraUsageKnownDisabled: ref.provider === "anthropic" });
 			const needsUsage = ref.provider === "anthropic" && (available.requiresUsage === true || available.status?.fresh === false && available.status?.state !== "exhausted");
 			if (!available.ok && !(consumeTrial === false && needsUsage && available.reason === "subscription-extra-usage" && available.status?.extraUsage?.enabled === null)) return available.reason === "subscription-quota" ? { ...available, managed: true, wait: "subscription-quota", until: available.until ?? now() + 60_000 } : { ...available, managed: true };
 			if (!managed.some((entry) => entry.provider === row.provider)) managed.push({ ...row, needsUsage });

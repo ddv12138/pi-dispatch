@@ -165,9 +165,9 @@ test("pinned SDK prompt resolves on 429 yet terminal events retain reset evidenc
 	await resourceLoader.reload();
 	const sessionManager = pi.SessionManager.inMemory(root);
 	const observer = installProviderFailureObserver({ ModelRuntime: pi.ModelRuntime, now: () => NOW, rootSessionId: sessionManager.getSessionId(), fetch: async () => new Response(JSON.stringify({ error: { type: "rate_limit_error", message: "rate limit" } }), { status: 429, headers: { "retry-after": "2" } }) });
-	const meter = createUsageMeter({ rootSessionId: sessionManager.getSessionId(), allowedModels: [{ provider: model.provider, model: model.id }], maxCostMicros: 100000000 });
+	const meter = createUsageMeter({ rootSessionId: sessionManager.getSessionId(), allowedModels: [{ provider: model.provider, model: model.id }] });
 	const guardNotes = [];
-	const guard = createPolicyGuard({ log: (event, fields) => guardNotes.push({ event, fields }), allowedModels: [{ provider: model.provider, model: model.id }], maxCostMicros: 100000000 });
+	const guard = createPolicyGuard({ log: (event, fields) => guardNotes.push({ event, fields }), allowedModels: [{ provider: model.provider, model: model.id }] });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime, meter, guard });
 	assert.equal(installed.ok, true);
 	let session;

@@ -4,7 +4,7 @@
  * still reserves at pickup, and this only SAYS beforehand what that reserve will be.
  *
  * The rule is the worker's, imported rather than restated, which is the whole point of this module:
- *   - the per-job dollar cap is `effectiveCostCapMicros(trigger's maxCostUsd, deployment's maxCostUsd)` (money.mjs),
+ *   - the per-job token budget is `effectiveTokenCap(trigger's maxTokens, deployment's maxTokens)` (budget-rule.mjs),
  *     the smaller of the two, each counted only when set: exactly what `effectiveJobOf` (index.mjs) gives `runJob`;
  *   - a job that cannot spend reserves nothing: `zeroRatedFor` below is the processor's own test (its reserve step
  *     calls it), a cap of 0 or every callable model served by a declared endpoint and zero-rated (model-endpoints.mjs);
@@ -14,7 +14,7 @@
  * config.mjs), with an empty env value unset (`usdSetting`).
  */
 
-import { effectiveCostCapMicros } from "./money.mjs";
+import { effectiveTokenCap } from "./budget-rule.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
 import { zeroRatedVerdict } from "./model-endpoints.mjs";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, allowedModelsFrom } from "./config.mjs";
@@ -35,32 +35,27 @@ export function callableModelRefs(job) {
 }
 
 /**
- * Can this EFFECTIVE job (provider, model, models and `maxCostMicros` resolved) spend nothing? `{ zeroRated: true }`
- * for a cap that is already 0 (nothing to reserve), else `zeroRatedVerdict` over its callable models and the pickup's
- * endpoint snapshot `{ models, endpoints }` (null: none, so never zero-rated). The processor's reserve step and the
- * console's estimate both call this, so the two cannot disagree on the rule.
+ * Can this EFFECTIVE job (provider, model, models and `maxTokens` resolved) use no tokens? `{ zeroRated: true }`
+ * for a budget that is already 0 (nothing to reserve), else `zeroRatedVerdict` over its callable models and the
+ * pickup's endpoint snapshot `{ models, endpoints }` (null: none, so never zero-rated). The processor's reserve step
+ * and the console's estimate both call this, so the two cannot disagree on the rule.
  */
 export function zeroRatedFor(job, { modelEndpoints = null, builtinModel = () => null } = {}) {
-	if (job.maxCostMicros === 0) return { zeroRated: true };
+	if (job.maxTokens === 0) return { zeroRated: true };
 	return zeroRatedVerdict({ models: modelEndpoints?.models ?? null, endpoints: modelEndpoints?.endpoints ?? [], refs: callableModelRefs(job), builtinModel });
-}
-
-/** An env dollar value as config.mjs's `usdSetting` reads it: unset or empty is null. Validated by the cap below. */
-function envUsd(raw) {
-	return raw === undefined || raw === "" ? null : raw;
 }
 
 /**
  * The reserve for `jobData` (the job's data as it will be queued), against the deployment's settings overlay and env:
- * `{ slots: 1, dollarsMicros, capMicros, zeroRated }`, or `{ invalid }` when the deployment's own dollar setting does
- * not parse (the worker refuses every job then, `settings-overlay-invalid`).
+ * `{ slots: 1, tokens, maxTokens, zeroRated }`, or `{ invalid }` when the deployment's own token setting is malformed
+ * (the worker refuses every job then, `settings-overlay-invalid`).
  *
- *   - `capMicros`: the per-job cap the runner enforces before every priced call, or null for none.
- *   - `dollarsMicros`: what the worker holds in each dollar window that applies (the deployment's, a scoped or model
- *     row's): 0 for a zero-rated job, else the cap; null when there is no cap (then no window can be set either, the
- *     dollar invariant). With no dollar window set the worker holds nothing in dollars, and the runner still stops
- *     the job at `capMicros`.
- *   - `zeroRated`: whether the job can spend nothing at all.
+ *   - `maxTokens`: the per-job budget the runner's meter counts against, or null for none.
+ *   - `tokens`: what the worker holds in each token window that applies (the deployment's, a scoped or model
+ *     row's): 0 for a zero-rated job, else the budget; null when there is no budget (then no window can be set
+ *     either, the token invariant). With no token window set the worker holds nothing, and the runner still stops
+ *     the job at `maxTokens`.
+ *   - `zeroRated`: whether the job can use no tokens at all.
  *
  * `modelEndpoints` (`{ models, endpoints }`, the worker's pickup snapshot) and `builtinModel` are the zero-rated
  * check's inputs; without them a job is judged not zero-rated, the fail-closed direction (the estimate then names the
@@ -82,9 +77,9 @@ export function estimateReserve(jobData, { overlay = {}, env = {}, modelEndpoint
 		allowedInvalid = true;
 	}
 	const models = data.models ?? allowed ?? null;
-	let capMicros;
+	let maxTokens;
 	try {
-		capMicros = effectiveCostCapMicros(data.maxCostUsd, o.maxCostUsd ?? envUsd(env?.PI_MAX_COST_USD));
+		maxTokens = effectiveTokenCap(data.maxTokens, o.maxTokens ?? env?.PI_MAX_TOKENS ?? null);
 	} catch (e) {
 		return { invalid: e?.message ?? String(e) };
 	}
@@ -93,9 +88,9 @@ export function estimateReserve(jobData, { overlay = {}, env = {}, modelEndpoint
 		provider: data.provider ?? o.provider ?? env?.PI_PROVIDER ?? DEFAULT_PROVIDER,
 		model: data.model ?? o.model ?? env?.PI_MODEL ?? DEFAULT_MODEL,
 		...(models !== null ? { models } : {}),
-		maxCostMicros: capMicros,
+		maxTokens,
 	};
-	if (capMicros === null) return { slots: 1, dollarsMicros: null, capMicros: null, zeroRated: false };
+	if (maxTokens === null) return { slots: 1, tokens: null, maxTokens: null, zeroRated: false };
 	const zero = allowedInvalid && (data.models ?? null) === null ? { zeroRated: false } : zeroRatedFor(job, { modelEndpoints, builtinModel });
-	return { slots: 1, dollarsMicros: zero.zeroRated ? 0 : capMicros, capMicros, zeroRated: zero.zeroRated === true };
+	return { slots: 1, tokens: zero.zeroRated ? 0 : maxTokens, maxTokens, zeroRated: zero.zeroRated === true };
 }

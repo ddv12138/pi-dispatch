@@ -78,7 +78,7 @@ test("mismatched, superseded and compacted approval targets refuse before a prov
 
 test("approval parks only below budget and rejection outcomes", () => {
 	assert.deepEqual(decideExit({ approval: true }), { code: 0, reason: "awaiting-approval" });
-	assert.equal(decideExit({ approval: true, meterStop: "cost-cap" }).reason, "cost-cap");
+	assert.equal(decideExit({ approval: true, meterStop: "token_budget" }).reason, "token_budget");
 	assert.equal(decideExit({ approval: true, rejected: { code: 2, reason: "refused" } }).reason, "refused");
 });
 

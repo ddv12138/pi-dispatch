@@ -173,7 +173,7 @@ function deployment(valkeyUrl = "redis://127.0.0.1:1/0") {
   mkdirSync(paths.logsDir, { recursive: true });
   const json = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
   json(paths.triggersPath, { triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "triage", secrets: { TOKEN: "op://vault/secret-ref-canary" } } }] });
-  json(paths.settingsFile, { maxTurns: 30, maxCostUsd: "2" });
+  json(paths.settingsFile, { maxTurns: 30, maxTokens: 2000000 });
   json(paths.pauseWindowsPath, { windows: [{ scope: "*", from: "01:00", to: "02:00" }] });
   json(paths.scopedLimitsPath, { version: 1, limits: [{ scope: "acme/web", day: 10 }] });
   json(paths.projectsFile, { version: 1, projects: [{ id: "web", members: ["github:acme/web"] }] });
@@ -443,10 +443,10 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
   const DEL = [U.delete, U.deleteAfter];
   const id = "a".repeat(32);
   const json = (v) => JSON.stringify(v);
-  const r = (dollars) => ({ slots: 1, dollarsMicros: dollars, capMicros: dollars, zeroRated: false });
-  const zero = { slots: 1, dollarsMicros: 0, capMicros: 1_500_000, zeroRated: true };
-  const uncapped = { slots: 1, dollarsMicros: null, zeroRated: false };
-  const bulk = (reserves, payload = {}) => ({ targets: reserves.map((reserve, i) => ({ jobId: `gh-${i}`, reserve })), reserve: { bulk: true, slots: reserves.length, dollarsMicros: reserves.reduce((n, x) => n + (Number.isSafeInteger(x?.dollarsMicros) && !x.unknown ? x.dollarsMicros : 0), 0), unknown: reserves.filter((x) => !x || x.unknown).length }, payload });
+  const r = (tokens) => ({ slots: 1, tokens: tokens, zeroRated: false });
+  const zero = { slots: 1, tokens: 0, zeroRated: true };
+  const uncapped = { slots: 1, tokens: null, zeroRated: false };
+  const bulk = (reserves, payload = {}) => ({ targets: reserves.map((reserve, i) => ({ jobId: `gh-${i}`, reserve })), reserve: { bulk: true, slots: reserves.length, reserveTokens: reserves.reduce((n, x) => n + (Number.isSafeInteger(x?.tokens) && !x.unknown ? x.tokens : 0), 0), unknown: reserves.filter((x) => !x || x.unknown).length }, payload });
   const windows = { scope: "*", from: "01:00", to: "02:00", tz: "UTC" };
   // [action, out, undo, inverse (or null), label, done, done's result for a bulk act]
   const rows = [
@@ -458,7 +458,7 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
     ["setup-viewer-add", {}, twice("Revoke the exact viewer entry through a fresh confirmation, or use pi-dispatch-console token revoke on the host."), null, "Create viewer invitation", "Created a viewer invitation"],
     ["setup-viewer-revoke", {}, twice("Create a new viewer invitation to restore access. The old entry and its sessions cannot be restored."), null, "Revoke viewer", "Revoked the created viewer entry"],
     ["model-role-edit", { plan: { scope: "default", role: "editor", inverseBody: { scope: "default", role: "editor", entry: "openai/old", expectedEntry: "openai/new" } }, payload: { body: { scope: "default", role: "editor" } } }, twice("Restore the previous mapping for default/editor; another role edit is refused if this mapping has changed"), { action: "model-role-edit", body: { scope: "default", role: "editor", entry: "openai/old", expectedEntry: "openai/new" } }, "Save role mapping", "Changed model role default/editor; no run was started"],
-    ["run-enqueue", { reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Start run for up to $2.00", "Queued the local run"],
+    ["run-enqueue", { reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Start run for up to 2,000,000 tokens", "Queued the local run"],
     ["standing-answer-add", {}, twice("Remove the standing answer by hand from triggers.json after reviewing any draft that cited it."), null, "Adopt standing answer", "Adopted the standing answer"],
     ["answer-draft-drop", {}, twice("Write your own answer on the run page. Dropping a draft never changes the parked question."), null, "Drop draft", "Dropped the draft; the question still waits for you"],
     ["sandbox-prepare", { payload: { params: { host: "mini1" } } }, twice("The host sweeps the prepared clone when its retention window ends. No shell starts until you open it."), null, "Prepare sandbox", "Requested sandbox preparation on mini1"],
@@ -470,34 +470,34 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
     ["zero-touch-instruction", {}, twice("Remove this sentence while the trigger still matches the confirmed change."), null, "Add instruction sentence", "Added the instruction sentence and linked its cause"],
     ["zero-touch-undo", {}, twice("Add a new reviewed sentence from the same cause."), null, "Remove instruction sentence", "Removed the instruction sentence"],
     ...["freeze", "unfreeze", "clear", "revert", "adopt"].map((op) => [`board-${op}`, { target: "shop" }, twice("Restore a retained board version, or change its freeze state."), null, `${op[0].toUpperCase() + op.slice(1)} board`, "Changed board shop"]),
-    ["run-fork", { target: "gh-f", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Fork for up to $2.00", "Queued a fork of gh-f"],
+    ["run-fork", { target: "gh-f", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Fork for up to 2,000,000 tokens", "Queued a fork of gh-f"],
     ["cancel-active", { payload: { jobId: "gh-1" } }, twice(U.cancelled), null, "Cancel the run", "Cancelled running job gh-1"],
     ["cancel-held", { payload: { jobId: "gh-2" } }, twice(U.held), null, "Cancel the held job", "Cancelled held job gh-2"],
     ["cancel-all-held", bulk([null, null]), twice(U.held), null, "Cancel 2 held jobs", "Cancelled 2 held jobs", { done: 2, count: 2 }],
     ["cancel-all-held", bulk([null, null]), twice(U.held), null, "Cancel 2 held jobs", "Cancelled held jobs: 1 of 2 done", { done: 1, count: 2 }],
     ["cancel-all-held", bulk([null]), twice(U.held), null, "Cancel 1 held job", "Cancelled 1 held job", { done: 1, count: 1 }],
-    ["retry-failed", { payload: { jobId: "gh-5d10" }, reserve: r(1_500_000) }, twice(U.retried), null, "Retry for up to $1.50", "Retried failed job gh-5d10"],
+    ["retry-failed", { payload: { jobId: "gh-5d10" }, reserve: r(1_500_000) }, twice(U.retried), null, "Retry for up to 1,500,000 tokens", "Retried failed job gh-5d10"],
     ["retry-failed", { payload: { jobId: "gh-5d10" }, reserve: zero }, twice(U.retried), null, "Retry (zero-rated)", "Retried failed job gh-5d10"],
     ["retry-failed", { payload: { jobId: "gh-5d10" }, reserve: { unknown: true } }, twice(U.retried), null, "Retry (reserve unknown)", "Retried failed job gh-5d10"],
     ["retry-failed", { payload: { jobId: "gh-5d10" }, reserve: uncapped }, twice(U.retried), null, "Retry, 1 job slot", "Retried failed job gh-5d10"],
     ["cancel-queued", { payload: { jobId: "gh-q1", queue: "pi-jobs" } }, twice(U.cancelledQueued), null, "Cancel the queued job", "Cancelled queued job gh-q1"],
     ["remove-failed", { payload: { jobId: "gh-5d10" } }, twice(U.removed), null, "Remove the job", "Removed failed job gh-5d10"],
-    ["retry-all-failed", bulk([r(1_500_000), r(1_500_000)], { queue: "pi-jobs" }), twice(U.retried), null, "Retry 2 for up to $3.00", "Retried 2 failed jobs in pi-jobs", { done: 2, count: 2 }],
-    ["retry-all-failed", bulk([r(1_500_000), { unknown: true }], { repo: "acme/web" }), twice(U.retried), null, "Retry 2, at least $1.50", "Retried failed jobs for acme/web: 1 of 2 done", { done: 1, count: 2 }],
+    ["retry-all-failed", bulk([r(1_500_000), r(1_500_000)], { queue: "pi-jobs" }), twice(U.retried), null, "Retry 2 for up to 3,000,000 tokens", "Retried 2 failed jobs in pi-jobs", { done: 2, count: 2 }],
+    ["retry-all-failed", bulk([r(1_500_000), { unknown: true }], { repo: "acme/web" }), twice(U.retried), null, "Retry 2, at least 1,500,000 tokens", "Retried failed jobs for acme/web: 1 of 2 done", { done: 1, count: 2 }],
     ["retry-all-failed", bulk([{ unknown: true }, { unknown: true }]), twice(U.retried), null, "Retry 2 (reserve unknown)", "Retried 2 failed jobs", { done: 2, count: 2 }],
     // A zero-rated or uncapped list holds no dollars: words, never "$0.00", and never the count twice ("3, 3 job slots").
     ["retry-all-failed", bulk([zero, zero, zero]), twice(U.retried), null, "Retry 3 (zero-rated)", "Retried 3 failed jobs", { done: 3, count: 3 }],
-    ["retry-all-failed", bulk([uncapped, uncapped, uncapped]), twice(U.retried), null, "Retry 3, no dollar reserve", "Retried 3 failed jobs", { done: 3, count: 3 }],
-    ["retry-all-failed", bulk([zero, uncapped, r(0)]), twice(U.retried), null, "Retry 3, no dollar reserve", "Retried 3 failed jobs", { done: 3, count: 3 }],
+    ["retry-all-failed", bulk([uncapped, uncapped, uncapped]), twice(U.retried), null, "Retry 3, no token reserve", "Retried 3 failed jobs", { done: 3, count: 3 }],
+    ["retry-all-failed", bulk([zero, uncapped, r(0)]), twice(U.retried), null, "Retry 3, no token reserve", "Retried 3 failed jobs", { done: 3, count: 3 }],
     ["remove-all-failed", bulk([null, null], { queue: "pi-jobs" }), twice(U.removed), null, "Remove 2 jobs", "Removed failed jobs in pi-jobs: 1 of 2 done", { done: 1, count: 2 }],
     ["remove-all-failed", bulk([null]), twice(U.removed), null, "Remove 1 job", "Removed 1 failed job", { done: 1, count: 1 }],
-    ["trigger-fire", { target: "daily", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Fire now for up to $2.00", "Fired cron trigger daily once"],
-    ["package-canary", { target: "pi-lint@1.4.3", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Run the canary for up to $2.00", "Queued a canary of pi-lint@1.4.3"],
+    ["trigger-fire", { target: "daily", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Fire now for up to 2,000,000 tokens", "Fired cron trigger daily once"],
+    ["package-canary", { target: "pi-lint@1.4.3", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Run the canary for up to 2,000,000 tokens", "Queued a canary of pi-lint@1.4.3"],
     ["package-adopt", { target: "pi-lint@1.4.3", payload: { name: "pi-lint", from: "1.4.2" } }, twice("Put each host back as it was, at 1.4.2"), { action: "package-undo", body: { name: "pi-lint" } }, "Adopt pi-lint@1.4.3", "Asked every host to adopt pi-lint@1.4.3"],
     ["package-undo", { target: "pi-lint@1.4.2" }, twice("Adopt it again from the Updates page, while its canary's run is retained"), null, "Undo", "Asked every host to go back to pi-lint@1.4.2"],
-    ["rerun", { target: "gh-r", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Re-run for up to $2.00", "Queued a re-run of gh-r"],
+    ["rerun", { target: "gh-r", reserve: r(2_000_000) }, twice(U.rerunBefore), null, "Re-run for up to 2,000,000 tokens", "Queued a re-run of gh-r"],
     ["rerun", { target: "gh-r", reserve: zero }, twice(U.rerunBefore), null, "Re-run (zero-rated)", "Queued a re-run of gh-r"],
-    ["parked-answer", { target: "gh-p", reserve: r(2_000_000) }, twice(U.answer), null, "Answer for up to $2.00", "Answered parked run gh-p"],
+    ["parked-answer", { target: "gh-p", reserve: r(2_000_000) }, twice(U.answer), null, "Answer for up to 2,000,000 tokens", "Answered parked run gh-p"],
     ["steer", { payload: { plan: { id, jobId: "gh-s", mode: "steer" } } }, twice(`Withdraw message ${id} before the agent reads it`), { action: "steer-withdraw", body: { jobId: "gh-s", id } }, "Send", "Sent a steer to running job gh-s"],
     ["steer", { payload: { plan: { id, jobId: "gh-s", mode: "followUp" } } }, twice(`Withdraw message ${id} before the agent reads it`), { action: "steer-withdraw", body: { jobId: "gh-s", id } }, "Send follow-up", "Sent a follow-up to running job gh-s"],
     ["steer-withdraw", { payload: { plan: { id, jobId: "gh-s" } } }, twice(U.withdrawn), null, "Confirm", `Withdrew message ${id} from job gh-s`],
@@ -563,7 +563,7 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
     assert.deepEqual(a.inverse(out, {}), inverse, `${name}: inverse`);
     assert.equal(a.confirmLabel(out), label, `${name}: confirm label`);
     assert.equal(a.done(out, {}, result), done, `${name}: done`);
-    assert.ok(!/\$0\.00/.test(label), `${name}: no "$0.00" on a button`);
+    assert.ok(!/(?:up to|at least|and) 0 tokens/.test(label), `${name}: no zero-token figure on a button`);
     assert.ok(!(typeof said === "string" ? said : said.after).includes("preview"), `${name}: the banner's Undo never points at a preview`);
   }
   // A re-run's way back is the cancel of the job it queued, asked again at the confirm with the apply's answer
@@ -634,7 +634,7 @@ test("every form a golden draws names a known action and sends only fields that 
     if (structured) {
       if (structured === "resolver") assert.ok(["secret-profile-add", "secret-bundle-add"].includes(action), `${file}: the resolver picker uses an existing declaration action`);
       else assert.equal(action, structured === "trigger" ? "trigger-add" : structured === "priorities" ? "priorities-set" : "envelope-set");
-      for (const name of names) assert.ok(structured === "resolver" ? ["kind", "name", "path", "format"].includes(name) : structured === "trigger" ? Object.values(WP.TRIGGER_ADD_FIELDS).some(fields=>fields.includes(name)) : structured === "priorities" ? name === "validDays" || /^weight:(?:_other|[a-z0-9-]+)$/.test(name) : ["window", "totalUsd", "enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"].includes(name) || /^(?:floor|weight):(?:_other|[a-z0-9-]+)$/.test(name), `${file}: structured ${name} is packed by bodyOf`);
+      for (const name of names) assert.ok(structured === "resolver" ? ["kind", "name", "path", "format"].includes(name) : structured === "trigger" ? Object.values(WP.TRIGGER_ADD_FIELDS).some(fields=>fields.includes(name)) : structured === "priorities" ? name === "validDays" || /^weight:(?:_other|[a-z0-9-]+)$/.test(name) : ["window", "totalTokens", "enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"].includes(name) || /^(?:floor|weight):(?:_other|[a-z0-9-]+)$/.test(name), `${file}: structured ${name} is packed by bodyOf`);
     }
     for (const n of sent) assert.ok(a.fields.includes(n), `${file}: ${action} sends ${n}, which it does not take`);
   }
@@ -683,12 +683,12 @@ test("the diff is escaped, hides secret references, and cuts unchanged runs", ()
   assert.ok(lineDiff(["x", "1", "2", "3", "4", "5", "6", "y"], ["x", "1", "2", "3", "4", "5", "6", "z"]).some((o) => o.t === "gap"), "a long unchanged run is cut");
 });
 
-test("reserveText never says $0 for a reserve it does not know", () => {
+test("reserveText never says 0 tokens for a reserve it does not know", () => {
   assert.match(reserveText({ unknown: true }), /Reserve unknown/);
-  assert.match(reserveText({ slots: 1, dollarsMicros: 1_500_000, capMicros: 1_500_000, zeroRated: false }), /\$1\.50/);
-  assert.match(reserveText({ slots: 1, dollarsMicros: 0, zeroRated: true }), /zero-rated/);
-  const bulk = reserveText({ bulk: true, slots: 2, dollarsMicros: 0, unknown: 2 });
-  assert.ok(!bulk.includes("$0"), bulk);
+  assert.match(reserveText({ slots: 1, tokens: 1_500_000 }), /1,500,000 tokens/);
+  assert.match(reserveText({ slots: 1, tokens: 0, zeroRated: true }), /zero-rated/);
+  const bulk = reserveText({ bulk: true, slots: 2, reserveTokens: 0, unknown: 2 });
+  assert.ok(!bulk.includes("0 tokens"), bulk);
   assert.match(bulk, /unknown/);
 });
 
@@ -837,7 +837,7 @@ test("a refusal is the tool's own sentence, before any ticket: a tool-proof trig
   assert.equal(proof.status, 400);
   // The planner's own sentence, with the form's own word for itself where the tool says its name (issue #737).
   assert.equal(proof.json().error, WP.planTriggerAdd({ params: { kind: "label", labels: ["x"], flow: "f", run: { maxCostUsd: "9" } }, paths, env: {}, tool: TRIGGER_FORM }).refusal);
-  assert.match(proof.json().error, /^this form cannot set run\.maxCostUsd/);
+  assert.match(proof.json().error, /^this form cannot set run\.maxTokens \(sent as run\.maxCostUsd\)/);
   const colour = (await c.act("trigger-add", { trigger: { kind: "label", labels: ["x"], flow: "f", colour: "red" } })).json();
   assert.match(colour.error, /^this form does not take colour for a label trigger; it takes kind, flow, /);
   assert.ok(colour.html.includes("This form does not take colour for a label trigger") && !colour.html.includes("dispatch_trigger_add") && !proof.json().html.includes("dispatch_trigger_add"), "a person on the console is never told a pi tool's name");
@@ -895,21 +895,21 @@ test("the console's Configuration sentences count rows from one, the change in w
 
 // Issue #737: what a planner says beyond its first pair reaches the bar: an edit's venue, and a dollar
 // key's warning lines, each a line of the bar as the planner wrote it, with nothing blank drawn between.
-test("the bar shows every change and line the planner says: a trigger edit's backend pair, a dollar setting's warning", async () => {
+test("the bar shows every change and line the planner says: a trigger edit's backend pair, a token cap's warning", async () => {
   const { paths } = deployment();
   const c = await start({ paths, a: { env: { PI_BACKENDS: "local" } } });
   const edit = (await c.act("trigger-edit", { index: 0, flow: "review", backend: "local" })).json();
   assert.deepEqual(edit.summary, ["Edit trigger row 1", "trigger row 1 (label) flow: triage to review, backend: - to local"]);
   assert.ok(edit.html.includes("<ul class=\"confirm__list\"><li>trigger row 1 (label) flow: <b>triage</b> to <b>review</b>, backend: <b>-</b> to <b>local</b></li><li>New deliveries use the edited fields. Jobs already in line retain their queued fields; a job missing a narrowing this trigger now sets is refused before spend and must be re-run.</li></ul>"), edit.html);
-  // No per-job cap anywhere, so a daily dollar cap leaves its window unbounded: the planner warns, never refuses.
+  // No per-job cap anywhere, so a daily token cap leaves its window unbounded: the planner warns, never refuses.
   writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 30 }, null, 2)}\n`);
-  const s = (await c.act("setting-set", { key: "dailyCostUsd", value: "5" })).json();
-  const planned = WP.planSettingSet({ key: "dailyCostUsd", value: "5", paths, env: { PI_BACKENDS: "local" } }).plan;
+  const s = (await c.act("setting-set", { key: "dailyTokenCap", value: "5000000" })).json();
+  const planned = WP.planSettingSet({ key: "dailyTokenCap", value: "5000000", paths, env: { PI_BACKENDS: "local" } }).plan;
   assert.ok(planned.warning, "the fixture is one the planner warns about");
-  assert.deepEqual(s.summary, ["Set dailyCostUsd", ...planned.summary], "the answer's summary is the planner's, blank line and all");
+  assert.deepEqual(s.summary, ["Set dailyTokenCap", ...planned.summary], "the answer's summary is the planner's, blank line and all");
   const list = /<ul class="confirm__list">([^]*?)<\/ul>/.exec(s.html)?.[1] ?? "";
   assert.deepEqual(list.split("</li>").filter(Boolean).map((li) => li.replace(/^<li>/, "")), [
-    String(html`dailyCostUsd: <b>${planned.changes[0][1]}</b> to <b>5</b>`),
+    String(html`dailyTokenCap: <b>${planned.changes[0][1]}</b> to <b>5000000</b>`),
     esc(`Warning: ${planned.warning}`),
   ], "the pair in bold, then the warning, and no empty item for the planner's blank line");
 });
@@ -959,9 +959,9 @@ test("every count in a bar agrees with its words, singular, plural and zero alik
   assert.match((await c.act("steer", { jobId: "gh-s", text: "x" })).json().summary[0], /\(message a{32}, 1 byte\)$/);
   assert.match((await c.act("steer", { jobId: "gh-s", text: "xy" })).json().summary[0], /\(message a{32}, 2 bytes\)$/);
   // A bulk list of one holds what one job holds, said as a single act's reserve is; its known half counts too.
-  assert.equal(reserveText({ bulk: true, slots: 1, dollarsMicros: 1_500_000, unknown: 0 }), "It holds 1 job slot and $1.50 in each dollar window that applies.");
-  assert.equal(reserveText({ bulk: true, slots: 3, dollarsMicros: 3_000_000, unknown: 1 }), "Together they hold 3 job slots and $3.00 for the 2 jobs whose reserve is known in each dollar window that applies; the reserve of 1 job is unknown (its data could not be read), so the total is at least this.");
-  assert.equal(reserveText({ bulk: true, slots: 2, dollarsMicros: 1_500_000, unknown: 1 }), "Together they hold 2 job slots and $1.50 for the 1 job whose reserve is known in each dollar window that applies; the reserve of 1 job is unknown (its data could not be read), so the total is at least this.");
+  assert.equal(reserveText({ bulk: true, slots: 1, reserveTokens: 1_500_000, unknown: 0 }), "It holds 1 job slot and 1,500,000 tokens in each token window that applies.");
+  assert.equal(reserveText({ bulk: true, slots: 3, reserveTokens: 3_000_000, unknown: 1 }), "Together they hold 3 job slots and 3,000,000 tokens for the 2 jobs whose reserve is known in each token window that applies; the reserve of 1 job is unknown (its data could not be read), so the total is at least this.");
+  assert.equal(reserveText({ bulk: true, slots: 2, reserveTokens: 1_500_000, unknown: 1 }), "Together they hold 2 job slots and 1,500,000 tokens for the 1 job whose reserve is known in each token window that applies; the reserve of 1 job is unknown (its data could not be read), so the total is at least this.");
 });
 
 // Issue #737: a resolver's add over one of the same name and its removal name it in words, "dev: /opt/d.sh",
@@ -1350,24 +1350,24 @@ test("a change too big for the session's flash keeps its banner and drops its in
 test("the confirm button says what it does: a paid act's most, a destructive act's words, and the bar's ring and fill follow", async () => {
   const { paths } = deployment();
   const job = { jobId: "gh-z", queue: "pi-jobs", attemptsMade: 1, finishedOn: 1 };
-  let data = { kind: "github", maxCostUsd: "1.5" };
+  let data = { kind: "github", maxTokens: "1500000" };
   const rm = { ...RM, planFailedBulk: async () => ({ jobs: [job], more: 0 }) };
   const fleet = { snapshot: async () => ({ queueCounts: [{ queue: "pi-jobs", paused: false, counts: {} }], held: { rows: [{ jobId: "gh-h1", label: "jira" }, { jobId: "gh-h2", label: "jira" }] } }), cancelActive: async () => ({ ack: "" }) };
   const c = await start({ paths, a: { rm, fleet, killSwitchPlanFn: () => ({ urls: ["redis://h/0"], disagreement: null }), readJobsData: async () => new Map([["gh-z", data]]) } });
   const label = async (name, body = {}) => (await c.act(name, body)).json();
   const paid = await label("retry-failed", { jobId: "gh-z" });
-  assert.deepEqual([paid.confirmLabel, paid.danger, paid.paid], ["Retry for up to $1.50", false, true]);
+  assert.deepEqual([paid.confirmLabel, paid.danger, paid.paid], ["Retry for up to 1,500,000 tokens", false, true]);
   assert.match(confirmHtml(paid), /^<div class="confirm confirm--paid"><p class="confirm__h"><svg class="ic" aria-hidden="true"><use href="#i-spend"><\/use><\/svg>Retry failed job gh-z on pi-jobs, 1 attempt<\/p>/, "a real plural");
-  assert.match(paid.html, /<button class="btn btn--confirm-paid" type="button" data-confirm>Retry for up to \$1\.50<\/button><button class="btn btn--ghost" type="button" data-cancel>Cancel<\/button><span class="ticket">Preview expires in <b data-expires="300000">5:00<\/b><\/span><\/div><\/div>$/, "the expiry is the time left, which the script counts down");
+  assert.match(paid.html, /<button class="btn btn--confirm-paid" type="button" data-confirm>Retry for up to 1,500,000 tokens<\/button><button class="btn btn--ghost" type="button" data-cancel>Cancel<\/button><span class="ticket">Preview expires in <b data-expires="300000">5:00<\/b><\/span><\/div><\/div>$/, "the expiry is the time left, which the script counts down");
   assert.equal(paid.expiresAt, T0 + 300000);
   // No inverse: "No undo:" and the sentence, in one run after the icon, nothing bold.
   assert.ok(paid.html.includes(`<p class="confirm__undo"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg><span>No undo: ${esc(UNDO_SENTENCES.retried)}</span></p>`), paid.html);
   data = null;
-  assert.equal((await label("retry-failed", { jobId: "gh-z" })).confirmLabel, "Retry (reserve unknown)", "never $0 for an unknown reserve");
+  assert.equal((await label("retry-failed", { jobId: "gh-z" })).confirmLabel, "Retry (reserve unknown)", "never 0 for an unknown reserve");
   data = { kind: "github" };
   writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 30 }, null, 2)}\n`);
   assert.equal((await label("retry-failed", { jobId: "gh-z" })).confirmLabel, "Retry, 1 job slot", "no per-job cap: the slot is what it holds");
-  writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 30, maxCostUsd: "2" }, null, 2)}\n`);
+  writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 30, maxTokens: 2000000 }, null, 2)}\n`);
   const danger = await label("fleet-pause");
   assert.deepEqual([danger.confirmLabel, danger.danger, danger.undo], ["Pause the fleet", true, "Resume the fleet"]);
   assert.match(confirmHtml(danger), /^<div class="confirm confirm--danger"><p class="confirm__h"><svg class="ic" aria-hidden="true"><use href="#i-attention">/);
@@ -1393,7 +1393,7 @@ test("the confirm button says what it does: a paid act's most, a destructive act
   const resume = await label("fleet-resume");
   assert.deepEqual([resume.confirmLabel, resume.paid, resume.danger], ["Resume", true, false]);
   // No change: Close only.
-  writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 40, maxCostUsd: "2" }, null, 2)}\n`);
+  writeFileSync(paths.settingsFile, `${JSON.stringify({ maxTurns: 40, maxTokens: 2000000 }, null, 2)}\n`);
   const same = await label("setting-set", { key: "maxTurns", value: "40" });
   assert.equal(same.unchanged, true);
   // What the file already says, by key and value, the key as code; the answer's summary says it in words.
@@ -1422,8 +1422,8 @@ test("an Undo is the way back as it was: a key that had no value is unset again,
   assert.deepEqual([first.undo, first.inverse], ["Unset dailyCap again", { action: "setting-unset", body: { key: "dailyCap" } }]);
   const second = await undoOf("setting-set", { key: "dailyCap", value: "6" });
   assert.deepEqual([second.undo, second.inverse], ["Set dailyCap back to 5", { action: "setting-set", body: { key: "dailyCap", value: "5" } }]);
-  const unset = await undoOf("setting-unset", { key: "maxCostUsd" });
-  assert.deepEqual([unset.undo, unset.inverse], ["Set maxCostUsd back to 2", { action: "setting-set", body: { key: "maxCostUsd", value: "2" } }], "a dollar key's text as it was written");
+  const unset = await undoOf("setting-unset", { key: "maxTokens" });
+  assert.deepEqual([unset.undo, unset.inverse], ["Set maxTokens back to 2000000", { action: "setting-set", body: { key: "maxTokens", value: "2000000" } }], "the key's text as it was written");
   const fresh = deployment().paths;
   const f = await start({ paths: fresh });
   // A model a trigger did not name: an edit cannot remove it, so the way back is by hand.
@@ -1711,21 +1711,21 @@ test("trigger add previews the actual per-run reserve and authorization without 
   const modelEndpoints = { endpoints: [{ id: "ollama", host: "host.docker.internal", port: 11434, slots: 2 }], models: { providers: { ollama: { baseUrl: "http://host.docker.internal:11434/v1", api: "openai-completions", models: [{ id: "qwen3" }] } } } };
   const estimates = [];
   const rm = { ...RM, estimateReserve: (run, inputs) => { estimates.push({ run, inputs }); return RM.estimateReserve(run, inputs); } };
-  const c = await start({ paths, a: { rm, env: { PI_MAX_COST_USD: "9" }, modelEndpoints: () => modelEndpoints, builtinModel: () => null } });
+  const c = await start({ paths, a: { rm, env: { PI_MAX_TOKENS: "9000000" }, modelEndpoints: () => modelEndpoints, builtinModel: () => null } });
   const free = await c.act("trigger-add", { trigger: { kind: "comment", forge: "gitlab", phrase: "@pi", flow: "fix", provider: "ollama", model: "qwen3", maxTurns: 7 } });
   assert.equal(free.status, 200, free.text);
   assert.equal(free.json().paid, false, "the edit itself starts no run");
-  assert.match(free.json().summary.join("\n"), /Each future run is paid\. It holds 1 job slot and \$0\.00/);
+  assert.match(free.json().summary.join("\n"), /Each future run is paid\. It holds 1 job slot and 0 tokens/);
   assert.match(free.json().summary.join("\n"), /Developer access \(30\) or higher/);
   assert.equal(estimates[0].run.maxTurns, 7);
   assert.equal(estimates[0].inputs.modelEndpoints, modelEndpoints);
-  assert.equal(estimates[0].inputs.overlay.maxCostUsd, "2");
-  assert.equal(estimates[0].inputs.env.PI_MAX_COST_USD, "9");
+  assert.equal(estimates[0].inputs.overlay.maxTokens, 2000000);
+  assert.equal(estimates[0].inputs.env.PI_MAX_TOKENS, "9000000");
   const paid = await c.act("trigger-add", { trigger: { kind: "pull_request", forge: "github", action: ["review_submitted"], reviewState: ["approved"], flow: "review", provider: "anthropic", model: "priced-model" } });
   assert.equal(paid.status, 200, paid.text);
   assert.match(paid.json().summary.join("\n"), /reviewer's association must be OWNER, MEMBER or COLLABORATOR/);
-  assert.match(paid.json().summary.join("\n"), /1 job slot and \$2\.00/);
-  assert.doesNotMatch(paid.json().summary.join("\n"), /\$9\.00/, "overlay precedence is the worker's reserve rule");
+  assert.match(paid.json().summary.join("\n"), /1 job slot and 2,000,000 tokens/);
+  assert.doesNotMatch(paid.json().summary.join("\n"), /9,000,000/, "overlay precedence is the worker's reserve rule");
   for (const [trigger, who] of [
     [{ kind: "cron", id: "daily", pattern: "0 6 * * *", folder: "/srv/repo", task: "t", flow: "fix" }, /scheduler starts it on its schedule/],
     [{ kind: "label", labels: ["go"], flow: "fix" }, /label event supplies the approval/],
@@ -1792,7 +1792,7 @@ test("Fire now uses paid single-use confirmation, protects the audit boundary an
   const { paths } = deployment();
   let queued = 0;
   const rm = { ...RM,
-    planTriggerFire: async ({ index }) => ({ plan: { index, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), reserve: { slots: 1, dollarsMicros: 2_000_000, capMicros: 2_000_000, zeroRated: false }, summary: [`Fire cron trigger row ${index + 1} (daily) now, once`] } }),
+    planTriggerFire: async ({ index }) => ({ plan: { index, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), reserve: { slots: 1, tokens: 2_000_000, zeroRated: false }, summary: [`Fire cron trigger row ${index + 1} (daily) now, once`] } }),
     enqueueTriggerFire: async (p) => { assert.equal(p.index, 0); queued++; return { ok: true, jobId: "manual:daily:1", queue: "pi-jobs" }; },
   };
   const c = await start({ paths, a: { rm } });
@@ -1801,7 +1801,7 @@ test("Fire now uses paid single-use confirmation, protects the audit boundary an
   const p = await c.act("trigger-fire", { index: 0 });
   assert.equal(p.status, 200, p.text);
   assert.equal(p.json().paid, true);
-  assert.equal(p.json().confirmLabel, "Fire now for up to $2.00");
+  assert.equal(p.json().confirmLabel, "Fire now for up to 2,000,000 tokens");
   assert.equal(queued, 0);
   assert.equal((await c.confirm("trigger-fire", p.json().ticket)).status, 200);
   assert.equal(queued, 1);
@@ -1825,7 +1825,7 @@ test("managed forks use single-use paid confirmation, preserve point binding and
   const rm = { ...RM,
     planRunFork: async (args) => {
       assert.deepEqual([args.jobId, args.entry, args.position, args.message], ["gh-source", "abc123", "before", message]);
-      return { plan: { queue: "pi-jobs", branch: "pi/issue-7-fork-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", job: { fork: { id: "a".repeat(32), fromEntry: args.entry, position: args.position } }, reserve: { slots: 1, dollarsMicros: 2_000_000 }, request: args } };
+      return { plan: { queue: "pi-jobs", branch: "pi/issue-7-fork-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", job: { fork: { id: "a".repeat(32), fromEntry: args.entry, position: args.position } }, reserve: { slots: 1, tokens: 2_000_000 }, request: args } };
     },
     enqueueRunFork: async (plan) => {
       applied++;
@@ -1855,7 +1855,7 @@ test("a re-run's Undo is decided at the confirm: the bar says the banner will of
   const plans = [];
   const rm = {
     ...RM,
-    planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:t0:1760520000000", queue: "pi-jobs", schedule: {}, job: { flow: "nightly" }, runFields: null, reserve: { slots: 1, dollarsMicros: 2_000_000, capMicros: 2_000_000, zeroRated: false } } }),
+    planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:t0:1760520000000", queue: "pi-jobs", schedule: {}, job: { flow: "nightly" }, runFields: null, reserve: { slots: 1, tokens: 2_000_000, zeroRated: false } } }),
     enqueueRerun: async () => queued,
     planCancelQueued: async (args) => (plans.push(args), queuedPlan(args.jobId, waitingRow(args.jobId, { queue: "pi-jobs", why: null, known: false, bucket: "slot", state: "waiting" }), { queue: "pi-jobs", state: "waiting" })),
   };
@@ -2168,16 +2168,16 @@ test("retry-all-failed shows each job's reserve and the sum; a job whose data ca
     planFailedBulk: async () => ({ jobs: [{ jobId: "gh-a", queue: "pi-jobs", attemptsMade: 1, finishedOn: 5 }, { jobId: "gh-b", queue: "pi-jobs", attemptsMade: 2, finishedOn: 6 }], more: 3, examinedAll: true }),
     retryFailedJobs: async ({ jobs }) => (acted.push(jobs), { results: [{ jobId: "gh-a", ok: true, queue: "pi-jobs" }, { jobId: "gh-b", invalid: "job gh-b failed again since the preview (it changed since the preview)" }] }),
   };
-  const readData = async ({ jobs }) => new Map(jobs.map((j) => [j.jobId, j.jobId === "gh-a" ? { kind: "github", maxCostUsd: "1.5" } : null]));
+  const readData = async ({ jobs }) => new Map(jobs.map((j) => [j.jobId, j.jobId === "gh-a" ? { kind: "github", maxTokens: "1500000" } : null]));
   const c = await start({ paths, a: { rm, readJobsData: readData } });
   const p = (await c.act("retry-all-failed", {})).json();
-  assert.deepEqual(p.reserve, { bulk: true, slots: 2, dollarsMicros: 1_500_000, unknown: 1 });
-  assert.match(p.html, /<li>gh-a on pi-jobs, 1 attempt, reserve \$1\.50<\/li>/);
+  assert.deepEqual(p.reserve, { bulk: true, slots: 2, reserveTokens: 1_500_000, unknown: 1 });
+  assert.match(p.html, /<li>gh-a on pi-jobs, 1 attempt, reserve 1,500,000 tokens<\/li>/);
   assert.match(p.html, /<li>gh-b on pi-jobs, 2 attempts, reserve unknown<\/li>/);
   // Real plurals, and "not" lower case, in bold where it carries the meaning (the ConfirmStates card's line).
   assert.match(p.html, /<li>3 more match and are <b>not in this action<\/b> \(at most 100 per action\)<\/li>/);
   assert.deepEqual([p.summary[0], p.summary.at(-1)], ["Retry 2 failed jobs; each is re-checked and acted on alone", "3 more match and are not in this action (at most 100 per action)"]);
-  assert.match(p.html, /Together they hold 2 job slots and \$1\.50 for the 1 job whose reserve is known in each dollar window that applies; the reserve of 1 job is unknown \(its data could not be read\), so the total is at least this\./);
+  assert.match(p.html, /Together they hold 2 job slots and 1,500,000 tokens for the 1 job whose reserve is known in each token window that applies; the reserve of 1 job is unknown \(its data could not be read\), so the total is at least this\./);
   assert.equal(p.targets[1].reserve.unknown, true);
   const res = await c.confirm("retry-all-failed", p.ticket);
   assert.equal(res.status, 200, res.text);
@@ -2188,8 +2188,8 @@ test("retry-all-failed shows each job's reserve and the sum; a job whose data ca
   assert.deepEqual(rows.map((x) => [x.target, x.outcome, x.count, x.reserve ?? null]), [["gh-a", "ok", 2, 1_500_000], ["gh-b", "ok", 2, null], ["gh-b", "failed", 2, null]]);
   assert.equal(new Set(rows.map((x) => x.ticket)).size, 1, "one ticket digest shared by every job's rows");
   // Issue #737: the bar said what Confirm does, with a floor where a reserve is unknown; the answer links the rows.
-  assert.deepEqual([p.confirmLabel, p.danger, p.undo], ["Retry 2, at least $1.50", false, UNDO_SENTENCES.retried]);
-  assert.match(p.html, /<button class="btn btn--confirm-paid" type="button" data-confirm>Retry 2, at least \$1\.50<\/button>/);
+  assert.deepEqual([p.confirmLabel, p.danger, p.undo], ["Retry 2, at least 1,500,000 tokens", false, UNDO_SENTENCES.retried]);
+  assert.match(p.html, /<button class="btn btn--confirm-paid" type="button" data-confirm>Retry 2, at least 1,500,000 tokens<\/button>/);
   assert.match(confirmHtml(p), /^<div class="confirm confirm--paid">/);
   assert.deepEqual([r.change.auditSeq, r.change.auditLast, r.change.count, r.change.inverse], [rows[0].seq, rows[1].seq, 2, null], "the first and the last ok row, never a compensating one");
   // What happened, how many of how many, in the attention tone, since one job was not done.
@@ -2388,7 +2388,7 @@ test("a refused ticket says ONE instruction: the ticket store's sentence, as it 
 
 test("every reserve estimate gets the worker's zero-rated inputs: a job that can only call a declared free local model previews $0, the full cap when the snapshot does not declare it", async () => {
   const { paths } = deployment();
-  const job = { kind: "github", provider: "ollama", model: "qwen3", maxCostUsd: "1.5" };
+  const job = { kind: "github", provider: "ollama", model: "qwen3", maxTokens: "1500000" };
   const local = { endpoints: [{ id: "ollama", host: "host.docker.internal", port: 11434, slots: 2, keyless: false }], models: { providers: { ollama: { baseUrl: "http://host.docker.internal:11434/v1", api: "openai-completions", models: [{ id: "qwen3" }] } } } };
   let snapshot = local;
   const seenArgs = [];
@@ -2401,28 +2401,28 @@ test("every reserve estimate gets the worker's zero-rated inputs: a job that can
   const env = { PI_ALLOWED_MODELS: "ollama/qwen3" };
   const c = await start({ paths, a: { rm, env, modelEndpoints: () => snapshot, readJobsData: async ({ jobs }) => new Map(jobs.map((j) => [j.jobId, job])) } });
   const free = (await c.act("retry-failed", { jobId: "gh-z" })).json();
-  assert.deepEqual(free.reserve, { slots: 1, dollarsMicros: 0, capMicros: 1_500_000, zeroRated: true });
-  assert.match(free.html, /<p class="confirm__note">It holds 1 job slot and \$0\.00: every model it may call is zero-rated\.<\/p>/);
+  assert.deepEqual(free.reserve, { slots: 1, tokens: 0, maxTokens: 1_500_000, zeroRated: true });
+  assert.match(free.html, /<p class="confirm__note">It holds 1 job slot and 0 tokens: every model it may call is zero-rated\.<\/p>/);
   snapshot = { endpoints: [], models: null };
-  assert.equal((await c.act("retry-failed", { jobId: "gh-z" })).json().reserve.dollarsMicros, 1_500_000, "not declared local: the full cap");
+  assert.equal((await c.act("retry-failed", { jobId: "gh-z" })).json().reserve.tokens, 1_500_000, "not declared local: the full cap");
   snapshot = local;
   await c.act("rerun", { jobId: "gh-z" });
   await c.act("parked-answer", { jobId: "gh-z", text: "x" });
   for (const [which, args] of seenArgs) {
     assert.deepEqual(args.modelEndpoints, local, `${which} gets the endpoint snapshot`);
     assert.deepEqual(args.env, env, `${which} gets the deployment env`);
-    assert.deepEqual(args.overlay, { maxTurns: 30, maxCostUsd: "2" }, `${which} gets the overlay`);
+    assert.deepEqual(args.overlay, { maxTurns: 30, maxTokens: 2000000 }, `${which} gets the overlay`);
   }
   assert.equal(seenArgs.length, 2);
 });
 
 test("rerun and parked-answer previews show the forge run fields the plan takes from the trigger now, escaped, the secret profile by name only", async () => {
   const { paths } = deployment();
-  const runFields = { flow: "fix", model: "anthropic/claude-x", models: ["a/b", "c/d"], fallbackModels: ["anthropic/first", "openai/second<"], maxCostUsd: "1.25", secretsProfile: "prod<b>", image: "ghcr.io/acme/img:1", backend: "docker" };
-  const plan = (kind) => ({ plan: { kind, forge: "github", jobId: "gh-r", queue: "pi-jobs", replicas: 1, job: { flow: "fix", secrets: { T: "op://vault/secret-ref-canary" }, trigger: { comment: { body: "hi" } } }, runFields, reserve: { slots: 1, dollarsMicros: 1_250_000, capMicros: 1_250_000, zeroRated: false } } });
+  const runFields = { flow: "fix", model: "anthropic/claude-x", models: ["a/b", "c/d"], fallbackModels: ["anthropic/first", "openai/second<"], maxTokens: "1250000", secretsProfile: "prod<b>", image: "ghcr.io/acme/img:1", backend: "docker" };
+  const plan = (kind) => ({ plan: { kind, forge: "github", jobId: "gh-r", queue: "pi-jobs", replicas: 1, job: { flow: "fix", secrets: { T: "op://vault/secret-ref-canary" }, trigger: { comment: { body: "hi" } } }, runFields, reserve: { slots: 1, tokens: 1_250_000, zeroRated: false } } });
   const rm = { ...RM, planRerun: async () => plan("forge"), planParkedAnswer: async () => plan("parked-answer") };
   const c = await start({ paths, a: { rm } });
-  const fields = "flow fix; model anthropic/claude-x; allowed models a/b, c/d; fallbacks anthropic/first, openai/second&lt;; per-job cap $1.25; secret profile prod&lt;b&gt;; image ghcr.io/acme/img:1; backend docker";
+  const fields = "flow fix; model anthropic/claude-x; allowed models a/b, c/d; fallbacks anthropic/first, openai/second&lt;; per-job cap 1250000 tokens; secret profile prod&lt;b&gt;; image ghcr.io/acme/img:1; backend docker";
   const re = (await c.act("rerun", { jobId: "gh-r" })).json();
   assert.ok(re.html.includes(`<li>It runs as its trigger says now: ${fields}</li>`), re.html);
   const pa = (await c.act("parked-answer", { jobId: "gh-r", text: "hi" })).json();
@@ -2430,7 +2430,7 @@ test("rerun and parked-answer previews show the forge run fields the plan takes 
   for (const out of [re, pa]) assert.ok(!JSON.stringify(out).includes("op://"), "never a secret reference");
   // A model and cap the job leaves to the deployment say so.
   runFields.model = null;
-  runFields.maxCostUsd = null;
+  runFields.maxTokens = null;
   assert.match((await c.act("rerun", { jobId: "gh-r" })).json().html, /model the deployment&#39;s default; allowed models a\/b, c\/d; fallbacks anthropic\/first, openai\/second&lt;; per-job cap the deployment&#39;s;/);
 });
 
@@ -2600,13 +2600,13 @@ function writeRecord(logsDir, record) {
 test("retry-failed on Valkey: the preview shows the worker's reserve from the job's data; the confirm retries it and the row holds the reserve", live, async () => {
   const v = await freshValkey();
   try {
-    const shared = await makeFailed(v, "pi-jobs", [{ id: "gh-f1", data: { kind: "github", repo: "o/r", maxCostUsd: "1.5", target: { type: "issue", number: 1 } } }]);
+    const shared = await makeFailed(v, "pi-jobs", [{ id: "gh-f1", data: { kind: "github", repo: "o/r", maxTokens: "1500000", target: { type: "issue", number: 1 } } }]);
     const { paths } = deployment(URL13);
     const c = await start({ paths });
     const p = (await c.act("retry-failed", { jobId: "gh-f1", queue: "pi-jobs" })).json();
-    assert.deepEqual(p.reserve, RM.estimateReserve({ kind: "github", repo: "o/r", maxCostUsd: "1.5", target: { type: "issue", number: 1 } }, { overlay: { maxTurns: 30, maxCostUsd: "2" }, env: {} }));
-    assert.equal(p.reserve.dollarsMicros, 1_500_000);
-    assert.match(p.html, /\$1\.50 \(the per-job cap\)/);
+    assert.deepEqual(p.reserve, RM.estimateReserve({ kind: "github", repo: "o/r", maxTokens: "1500000", target: { type: "issue", number: 1 } }, { overlay: { maxTurns: 30, maxTokens: 2000000 }, env: {} }));
+    assert.equal(p.reserve.tokens, 1_500_000);
+    assert.match(p.html, /1,500,000 tokens \(the per-job cap\)/);
     const res = await c.confirm("retry-failed", p.ticket);
     assert.equal(res.status, 200, res.text);
     assert.equal(await (await shared.getJob("gh-f1")).getState(), "waiting");
@@ -2710,14 +2710,14 @@ test("rerun on Valkey: the preview shows the reserve; the confirm queues the reb
     const { paths } = deployment(URL13);
     // A forge re-run takes WHAT RUNS from the trigger as the file says now (job-actions' planRerun), so the trigger that
     // matched must still be there and still run this flow; its cap is the re-run's.
-    writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", maxCostUsd: "1.25" } }] }));
+    writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", maxTokens: "1250000" } }] }));
     const shared = await v.q("pi-jobs");
     const original = { repo: "org/repo", target: { type: "issue", number: 7, title: "T", body: "B" }, flow: "fix", maxCostUsd: "9", trigger: { event: "issues", action: "labeled", deliveryId: "orig-1", sender: { id: 9 }, matched: { index: 0, type: "label", label: "pi" } } };
     const { jobId } = await enqueueForgeJob(shared, "github", original);
     writeRecord(paths.logsDir, { jobId, kind: "github", target: "org/repo#7", outcome: "failed", reason: "exit-1" });
     const c = await start({ paths });
     const p = (await c.act("rerun", { jobId })).json();
-    assert.equal(p.reserve.dollarsMicros, 1_250_000);
+    assert.equal(p.reserve.tokens, 1_250_000);
     assert.match(p.html, /<p class="confirm__note">It holds 1 job slot and \$1\.25 \(the per-job cap\)/);
     assert.match(p.html, /It runs as its trigger says now: flow fix; model the deployment&#39;s default; per-job cap \$1\.25/, "the run fields the plan took from the trigger, not the retained job's $9");
     const swallowed = await c.confirm("rerun", p.ticket);
@@ -2755,7 +2755,7 @@ test("parked-answer on Valkey: the queued job is the plan's, by the session's to
     const p = await c.act("parked-answer", { jobId, text: `${ANSWER}\n<b>bold</b>` });
     assert.equal(p.status, 200, p.text);
     const pj = p.json();
-    assert.equal(pj.reserve.dollarsMicros, 1_250_000, "a paid action shows its reserve");
+    assert.equal(pj.reserve.tokens, 1_250_000, "a paid action shows its reserve");
     assert.ok(pj.html.includes("<span class=\"d-ctx\">&lt;b&gt;bold&lt;/b&gt;</span>"), "the answer is shown escaped, one line per line");
     assert.equal(pj.afterDigest, sha256(`${ANSWER}\n<b>bold</b>`));
     // A plan built the same way BEFORE the answer is queued (once it is, the planner refuses: issue #647, being answered).
@@ -2902,7 +2902,7 @@ test("steer on Valkey: the preview shows the text escaped, no new reserve and th
 test("envelope-set: the preview lists each field it changes, through the worker's parser, and writes nothing", async () => {
   const { dir, paths } = deployment();
   paths.envelopeFile = join(dir, "envelope.json");
-  const envelope = `${JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { web: "10", _other: "0" }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2)}\n`;
+  const envelope = `${JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { web: 10_000_000, _other: 0 }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2)}\n`;
   writeFileSync(paths.envelopeFile, envelope);
   const c = await start({ paths });
   const p = (await c.act("envelope-set", { envelope: { minIntervalHours: 0 } })).json();
@@ -2925,7 +2925,7 @@ test("a canary is a paid single-use Fire now that carries one exact version, and
   const { paths } = deployment();
   const enqueued = [];
   const rm = { ...RM,
-    planTriggerFire: async ({ index }) => ({ plan: { index, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: {} }, reserve: { slots: 1, dollarsMicros: 2_000_000, capMicros: 2_000_000, zeroRated: false } } }),
+    planTriggerFire: async ({ index }) => ({ plan: { index, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: {} }, reserve: { slots: 1, tokens: 2_000_000, zeroRated: false } } }),
     enqueueTriggerFire: async (plan, options) => { enqueued.push(options.packageCanary); return { ok: true, jobId: "manual:daily:1:canary", queue: "pi-jobs" }; },
   };
   const u = updatesDeps(updatesRow({ canary: null }));
@@ -2936,7 +2936,7 @@ test("a canary is a paid single-use Fire now that carries one exact version, and
   const p = await c.act("package-canary", input);
   assert.equal(p.status, 200, p.text);
   assert.equal(p.json().paid, true);
-  assert.equal(p.json().confirmLabel, "Run the canary for up to $2.00");
+  assert.equal(p.json().confirmLabel, "Run the canary for up to 2,000,000 tokens");
   assert.match(p.json().html, /A job that completed does not prove the extension is good/);
   assert.deepEqual(enqueued, [], "a preview queues nothing");
   assert.equal((await c.confirm("package-canary", p.json().ticket)).status, 200);
@@ -2953,7 +2953,7 @@ test("a canary is a paid single-use Fire now that carries one exact version, and
 
 test("a canary's preview refuses what could prove nothing, for free", async () => {
   const { paths } = deployment();
-  const planned = { plan: { index: 0, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: { packages: false } }, reserve: { slots: 1, dollarsMicros: 0, capMicros: 0, zeroRated: true } } };
+  const planned = { plan: { index: 0, schedulerId: "daily", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: { packages: false } }, reserve: { slots: 1, tokens: 0, zeroRated: true } } };
   const rm = { ...RM, planTriggerFire: async () => planned };
   const preview = async (row, input = { index: 0, name: "pi-lint", version: "1.4.3" }) => (await (await start({ paths, a: { rm, updates: updatesDeps(row).updates } })).act("package-canary", input));
   assert.match((await preview(null)).text, /not staged on this host/);
@@ -3184,8 +3184,13 @@ test("agent HTTP sessions narrow explicit caps and cannot use the resulting Undo
   assert.deepEqual(inverse, { action: "setting-set", body: { key: "maxTurns", value: "30" } });
   assert.equal((await c.act(inverse.action, inverse.body, agent)).status, 403, "Undo has the same authority check as the original action");
   assert.equal((await c.confirm("setting-set", p.json().ticket, agent)).status, 409, "single use, even for a permitted change");
+  const narrowed = await c.act("setting-set", { key: "maxTokens", value: "100" }, agent);
+  assert.equal(narrowed.status, 200, narrowed.text);
+  assert.equal(narrowed.json().agent.mode, "unattended", "a lower token cap is the narrowing the agent may do alone");
+  assert.equal((await c.confirm("setting-set", narrowed.json().ticket, agent)).status, 200);
+  assert.equal(JSON.parse(read(paths.settingsFile)).maxTokens, 100);
   const before = read(paths.settingsFile);
-  for (const [name, body] of [["setting-set", { key: "maxTurns", value: "21" }], ["setting-set", { key: "maxTokens", value: "100" }], ["setting-unset", { key: "maxTurns" }], ["trigger-add", {}], ["fleet-resume", {}], ["retry-failed", { jobId: "gh-old" }], ["parked-answer", { jobId: "gh-old", text: ANSWER }], ["standing-answer-add", { title: "x", text: ANSWER, projects: ["web"], repo: "github:acme/web" }]]) {
+  for (const [name, body] of [["setting-set", { key: "maxTurns", value: "21" }], ["setting-set", { key: "maxTokens", value: "2000001" }], ["setting-unset", { key: "maxTurns" }], ["trigger-add", {}], ["fleet-resume", {}], ["retry-failed", { jobId: "gh-old" }], ["parked-answer", { jobId: "gh-old", text: ANSWER }], ["standing-answer-add", { title: "x", text: ANSWER, projects: ["web"], repo: "github:acme/web" }]]) {
     const res = await c.act(name, body, agent);
     assert.equal(res.status, 403, `${name}: ${res.text}`);
     assert.match(res.json().error, new RegExp(`^${name} is (?:confirm|person):`));
@@ -3202,7 +3207,7 @@ test("agent HTTP cap tickets bind the session and current file; revoked roles, r
   const p = await c.act("setting-set", { key: "maxTurns", value: "20" }, agent);
   assert.equal(p.status, 200, p.text);
   assert.equal((await c.confirm("setting-set", p.json().ticket, other)).status, 409);
-  writeFileSync(paths.settingsFile, '{"maxTurns":15,"maxCostUsd":"2"}\n');
+  writeFileSync(paths.settingsFile, '{"maxTurns":15,"maxTokens":2000000}\n');
   const stale = await c.confirm("setting-set", p.json().ticket, agent);
   assert.equal(stale.status, 409, stale.text);
   assert.equal(JSON.parse(read(paths.settingsFile)).maxTurns, 15);
@@ -3325,7 +3330,7 @@ test("agent HTTP re-run revalidates the current cron execution fields before spe
   const c = await start({ paths, a: {
     grantsEnv: { PI_DISPATCH_RUN_ROOTS: "/srv/repos", PI_DISPATCH_RUN_PER_HOUR: "3" },
     rm: { ...RM,
-      planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:nightly:123", queue: "pi-jobs", job: structuredClone(source), schedule: { schedulerId: "nightly", data: structuredClone(source) }, reserve: { slots: 1, dollarsMicros: 2000000 } } }),
+      planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:nightly:123", queue: "pi-jobs", job: structuredClone(source), schedule: { schedulerId: "nightly", data: structuredClone(source) }, reserve: { slots: 1, tokens: 2000000 } } }),
       checkDispatchRun: async args => { admission.push(args.consumeRate); return {}; },
       enqueueRerun: async () => { enqueues++; return { ok: true, jobId: "cron:nightly:new", queue: "pi-jobs" }; },
     },
@@ -3487,10 +3492,10 @@ test("Budget split revert previews one-based rows, exceptions and undo by the pr
 test("Budget split envelope preview contains the exact file diff and multi-host consequence without writing", async () => {
   const { dir, paths } = deployment();
   paths.envelopeFile = join(dir, "envelope.json");
-  const before = `${JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { web: "10", _other: "0" }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2)}\n`;
+  const before = `${JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { web: 10_000_000, _other: 0 }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2)}\n`;
   writeFileSync(paths.envelopeFile, before);
   const c = await start({ paths });
-  const p = (await c.act("envelope-set", { envelope: { totalUsd: "120" } })).json();
+  const p = (await c.act("envelope-set", { envelope: { totalTokens: 120_000_000 } })).json();
   assert.equal(typeof p.ticket, "string");
   assert.match(p.html, /100/);
   assert.match(p.html, /120/);
@@ -3504,9 +3509,9 @@ test("structured allocation fields pack the existing action schemas, including f
   const field = (name, value, type = null) => ({ name, value, disabled: false, getAttribute: () => type });
   const form = (kind, elements) => ({ elements, getAttribute: () => kind });
   assert.deepEqual(bodyOf(form("priorities", [field("weight:web", "0"), field("weight:_other", "1000"), field("validDays", "3", "int")])), { projects: [{ id: "web", weight: 0 }, { id: "_other", weight: 1000 }], validDays: 3 });
-  const got = bodyOf(form("envelope", [field("window", "week"), field("totalUsd", "100"), field("floor:web", "10"), field("weight:web", "3"), field("maxStepPct", "25"), field("minIntervalHours", "0"), field("maxPlanDays", "7")]));
+  const got = bodyOf(form("envelope", [field("window", "week"), field("totalTokens", "100000000"), field("floor:web", "10000000"), field("weight:web", "3"), field("maxStepPct", "25"), field("minIntervalHours", "0"), field("maxPlanDays", "7")]));
   assert.equal(got.envelope.enabled, false);
-  assert.deepEqual({ ...got.envelope.floorsUsd }, { web: 10 });
+  assert.deepEqual({ ...got.envelope.floorsTokens }, { web: 10000000 });
   assert.deepEqual({ ...got.envelope.defaultWeights }, { web: 3 });
   for (const bad of ["-1", "1001", "1.5", "Infinity"]) assert.throws(() => bodyOf(form("priorities", [field("weight:web", bad), field("validDays", "3")])), /Weights/);
 });

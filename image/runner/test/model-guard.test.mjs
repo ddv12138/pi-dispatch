@@ -8,7 +8,6 @@ import {
 	createUsageMeter,
 	installProcessUsageMeter,
 	makeHardStopStream,
-	pinPriceTable,
 	policyEnforcement,
 	VIRTUAL_MODEL_API,
 	wrapModelRuntime,
@@ -16,7 +15,7 @@ import {
 	DISPATCH_MARK,
 	dispatchToken,
 } from "../src/usage-meter.mjs";
-import { COST_CAP, decideExit, EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE } from "../src/outcome.mjs";
+import { decideExit, EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE } from "../src/outcome.mjs";
 import { FABLE_5 } from "./helpers/catalog-models.mjs";
 
 /**
@@ -91,12 +90,12 @@ function fakeRuntimeClass({ route = LISTED, message = answer() } = {}) {
 }
 
 /** The meter, the brake and the policy guard, wired as run-job.mjs wires them. */
-function wired({ allowedModels = LIST, maxCostMicros = null, route, message } = {}) {
+function wired({ allowedModels = LIST, route, message } = {}) {
 	const { FakeRuntime, calls } = fakeRuntimeClass({ route, message });
 	const stops = [];
 	const logged = [];
-	const meter = createUsageMeter({ maxCostMicros, allowedModels, onStop: (reason) => stops.push(reason) });
-	const guard = createPolicyGuard({ maxCostMicros, allowedModels, log: (event, fields) => logged.push({ event, fields }), env: {} });
+	const meter = createUsageMeter({ allowedModels, onStop: (reason) => stops.push(reason) });
+	const guard = createPolicyGuard({ allowedModels, log: (event, fields) => logged.push({ event, fields }), env: {} });
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream() });
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop, guard });
 	return { runtime: new FakeRuntime(), calls, meter, guard, stops, logged, layer };
@@ -306,39 +305,9 @@ test("the compat half judges a legacy call on the list, and skips a call the run
 
 // ── The policy guard: order, snapshot, enforcement ───────────────────────────────────────────────────────
 
-test("the model check runs before the cost check: an unlisted call under a cap it would also pass is model-not-allowed", async () => {
-	// A cap of 0 refuses every priced call. The unlisted call must be named by the list, and the cost guard must
-	// never have been asked about it (nothing in flight, nothing refused).
-	const { runtime, calls, meter, guard, logged, layer } = wired({ maxCostMicros: 0 });
-	try {
-		const refused = await runtime.streamSimple(UNLISTED, {}, {}).result();
-		assert.equal(refused.errorMessage, "pi-dispatch: model not allowed");
-		assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
-		assert.deepEqual(calls, []);
-		assert.deepEqual([guard.cost.state.refused, guard.cost.state.inflight], [0, 0], "the cost guard was never asked");
-		assert.deepEqual(logged.map((entry) => entry.event), ["model_refused"]);
-		assert.deepEqual(guard.snapshot(), { costCapMicros: 0, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0, modelRefused: 1 });
-	} finally {
-		layer.restore();
-	}
-	// A LISTED call under the same cap is still the cap's to refuse.
-	const capped = wired({ maxCostMicros: 0 });
-	try {
-		const refused = await capped.runtime.streamSimple(LISTED, {}, {}).result();
-		assert.equal(refused.errorMessage, "pi-dispatch: cost cap reached");
-		assert.deepEqual([capped.meter.state.stopReason, capped.guard.snapshot().modelRefused, capped.guard.snapshot().costRefused], [COST_CAP, 0, 1]);
-	} finally {
-		capped.layer.restore();
-	}
-	assert.deepEqual([...createPolicyGuard({ maxCostMicros: 0, allowedModels: LIST }).enforces], [MODEL_NOT_ALLOWED, COST_CAP]);
-});
-
 test("the exit line gains modelRefused only when a list is set", () => {
-	assert.equal(createPolicyGuard({}), null, "neither policy: no guard, so nothing is spread onto the exit line");
-	assert.deepEqual(Object.keys(createPolicyGuard({ maxCostMicros: 5 }).snapshot()), ["costCapMicros", "costRefused", "boundExceeded", "longContext", "costUnjudged", "costUnanswered"], "a cap alone: the cost fields, byte-identical to before");
+	assert.equal(createPolicyGuard({}), null, "no list: no guard, so nothing is spread onto the exit line");
 	assert.deepEqual(createPolicyGuard({ allowedModels: LIST }).snapshot(), { modelRefused: 0 });
-	assert.deepEqual(Object.keys(createPolicyGuard({ maxCostMicros: 5, allowedModels: LIST }).snapshot()).at(-1), "modelRefused", "after the cost fields, the worker's TOKEN_KEYS order");
-	assert.deepEqual([...createPolicyGuard({ maxCostMicros: 5 }).enforces], [COST_CAP]);
 	assert.deepEqual([...createPolicyGuard({ allowedModels: LIST }).enforces], [MODEL_NOT_ALLOWED]);
 });
 
@@ -503,11 +472,11 @@ function recordingRuntimeClass() {
 	return { FakeRuntime, dispatched };
 }
 
-function recorded({ allowedModels = LIST, maxCostMicros = null } = {}) {
+function recorded({ allowedModels = LIST } = {}) {
 	const { FakeRuntime, dispatched } = recordingRuntimeClass();
-	const meter = createUsageMeter({ maxCostMicros, allowedModels, onStop: () => {} });
+	const meter = createUsageMeter({ allowedModels, onStop: () => {} });
 	const logged = [];
-	const guard = createPolicyGuard({ maxCostMicros, allowedModels, log: (event, fields) => logged.push({ event, fields }), env: {} });
+	const guard = createPolicyGuard({ allowedModels, log: (event, fields) => logged.push({ event, fields }), env: {} });
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard });
 	return { runtime: new FakeRuntime(), dispatched, meter, logged, layer };
 }
@@ -532,12 +501,12 @@ test("a level map or a layer that is not plain own data refuses: inherited, non-
 		["inherited samplingParams", () => ({ samplingParams: Object.create({ model: "unlisted-1" }) })],
 	];
 	for (const [label, extra] of shapes) {
-		for (const policy of [{ allowedModels: LIST }, { allowedModels: null, maxCostMicros: 1_000_000_000 }]) {
-			const { runtime, dispatched, meter, layer } = recorded(policy);
+		{
+			const { runtime, dispatched, meter, layer } = recorded({ allowedModels: LIST });
 			try {
 				const result = await runtime.streamSimple({ ...LISTED, ...extra() }, {}, {}).result();
-				assert.equal(result.stopReason, "aborted", `${label}, ${policy.allowedModels ? "list" : "cap"}`);
-				assert.deepEqual([dispatched.length, meter.state.stopReason], [0, policy.allowedModels ? MODEL_NOT_ALLOWED : COST_CAP], `${label}, ${policy.allowedModels ? "list" : "cap"}`);
+				assert.equal(result.stopReason, "aborted", label);
+				assert.deepEqual([dispatched.length, meter.state.stopReason], [0, MODEL_NOT_ALLOWED], label);
 			} finally {
 				layer.restore();
 			}
@@ -549,16 +518,15 @@ test("the sampling layers and options pi receives are copies: a mutation after t
 	// pi reads the model's and the call's sampling parameters after an await (prepareRequest), so the caller's own objects
 	// could be changed between the guard's verdict and the request. The guard judges one deep copy and pi gets it.
 	for (const where of ["samplingParams", "level", "options", "env"]) {
-		const { runtime, dispatched, meter, layer } = recorded({ maxCostMicros: 1_000_000_000 });
+		const { runtime, dispatched, meter, layer } = recorded({ allowedModels: LIST });
 		try {
-			const model = { ...LISTED, samplingParams: {}, samplingParamsByThinkingLevel: { off: {} }, cost: { ...LISTED.cost }, compat: { ...LISTED.compat } };
+			const model = { ...LISTED, samplingParams: {}, samplingParamsByThinkingLevel: { off: {} }, compat: { ...LISTED.compat } };
 			const options = { samplingParams: {}, env: {} };
 			const stream = runtime.streamSimple(model, {}, options);
 			const target = { samplingParams: model.samplingParams, level: model.samplingParamsByThinkingLevel.off, options: options.samplingParams, env: options.env }[where];
 			target.model = "unlisted-1";
 			target.max_tokens = 5_000_000;
 			target.AZURE_OPENAI_DEPLOYMENT_NAME_MAP = "listed-1=big";
-			model.cost.output = 0;
 			model.compat.maxTokensField = "max_completion_tokens";
 			await stream.result();
 			assert.equal(meter.state.stopReason, null, where);
@@ -569,8 +537,7 @@ test("the sampling layers and options pi receives are copies: a mutation after t
 			assert.deepEqual({ ...sent.model.samplingParamsByThinkingLevel.off }, {}, `${where}: the off level`);
 			assert.deepEqual({ ...sent.options.samplingParams }, {}, `${where}: the call's samplingParams`);
 			assert.deepEqual({ ...sent.options.env }, {}, `${where}: the call's env`);
-			assert.equal(sent.model.cost.output, 2, `${where}: the cost the bound was judged on`);
-			assert.equal(sent.model.compat.maxTokensField, "max_tokens", `${where}: the compat the bound was judged on`);
+			assert.equal(sent.model.compat.maxTokensField, "max_tokens", `${where}: the compat pi was handed`);
 		} finally {
 			layer.restore();
 		}
@@ -602,18 +569,18 @@ test("every field of the model, the call's env and its samplingParams must be pl
 		["an array with an accessor", { input: Object.defineProperty(["text"], 0, { get: () => "text", enumerable: true }) }, {}],
 	];
 	for (const [label, extraModel, options] of shapes) {
-		for (const policy of [{ allowedModels: LIST }, { allowedModels: null, maxCostMicros: 1_000_000_000 }]) {
-			const { runtime, dispatched, meter, layer } = recorded(policy);
+		{
+			const { runtime, dispatched, meter, layer } = recorded({ allowedModels: LIST });
 			try {
 				await runtime.streamSimple({ ...LISTED, ...extraModel }, {}, options).result();
-				assert.deepEqual([dispatched.length, meter.state.stopReason], [0, policy.allowedModels ? MODEL_NOT_ALLOWED : COST_CAP], `${label}, ${policy.allowedModels ? "list" : "cap"}`);
+				assert.deepEqual([dispatched.length, meter.state.stopReason], [0, MODEL_NOT_ALLOWED], label);
 			} finally {
 				layer.restore();
 			}
 		}
 	}
 	// Plain data at every depth passes, typed arrays and nested arrays included, and pi gets copies.
-	const { runtime, dispatched, meter, layer } = recorded({ allowedModels: LIST, maxCostMicros: 1_000_000_000 });
+	const { runtime, dispatched, meter, layer } = recorded({ allowedModels: LIST });
 	try {
 		const model = { ...LISTED, input: ["text"], extra: { bytes: new Uint8Array([1, 2]), list: [[1], { a: null }] } };
 		await runtime.streamSimple(model, {}, { env: { A: "b" } }).result();
@@ -639,78 +606,6 @@ test("the compat half hands its provider the same copies, and refuses an inherit
 	assert.deepEqual([{ ...sent[0].model.samplingParamsByThinkingLevel.off }, { ...sent[0].options.samplingParams }], [{}, {}]);
 	const refused = await compat.streamSimple({ ...LISTED, samplingParamsByThinkingLevel: Object.create({ off: { model: "unlisted-1" } }) }, {}, {}).result();
 	assert.deepEqual([refused.errorMessage, sent.length, meter.state.stopReason], ["pi-dispatch: model not allowed", 1, MODEL_NOT_ALLOWED]);
-});
-
-test("under a cap a call is priced from the table pinned at install: a forged cost or compat, or an unpinned model, is refused (issue #587)", async () => {
-	// The bound and pi's own settlement both read the model object the CALLER passes, and a live registry can be
-	// poisoned mid-run (registerProvider over a builtin id, a rewritten models.json and a refresh, an extension's own
-	// runtime). So the table is taken ONCE, when the meter installs, and every capped call on every runtime instance is
-	// held to it: no entry for (provider, id, api), or an entry whose api, cost or compat differs, is unboundable.
-	const source = [JSON.parse(JSON.stringify(LISTED)), { ...LISTED, id: "free-1", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }];
-	const prices = pinPriceTable({ getAllModels: () => source });
-	// Poisoning the source after the pin changes nothing the table holds: in place, as a registry's own objects can be.
-	Object.assign(source[0].cost, { input: 0, output: 0 });
-	source[0].compat.maxTokensField = "max_completion_tokens";
-	const cases = [
-		["the pinned model", { ...LISTED }, true],
-		["a deep-equal copy", JSON.parse(JSON.stringify(LISTED)), true],
-		["a pinned zero-rated model", { ...LISTED, id: "free-1", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, true],
-		["a forged zero cost, also what the poisoned registry now says", { ...LISTED, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, false],
-		["a forged tier", { ...LISTED, cost: { ...LISTED.cost, tiers: [{ inputTokensAbove: 1, input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }] } }, false],
-		["a forged compat", { ...LISTED, compat: { maxTokensField: "max_completion_tokens" } }, false],
-		["a forged fallback list", { ...LISTED, compat: { ...LISTED.compat, allowedFallbackModels: [] } }, false],
-		["another api", { ...LISTED, api: "openai-responses" }, false],
-		["an unpinned id", { ...LISTED, id: "nowhere-1", cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, false],
-	];
-	for (const [label, model, admitted] of cases) {
-		const { FakeRuntime, dispatched } = recordingRuntimeClass();
-		const meter = createUsageMeter({ maxCostMicros: 1_000_000_000, onStop: () => {} });
-		const logged = [];
-		const guard = createPolicyGuard({ maxCostMicros: 1_000_000_000, log: (event, fields) => logged.push({ event, fields }), env: {} });
-		const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard, prices });
-		try {
-			await new FakeRuntime().streamSimple(model, {}, {}).result();
-			assert.deepEqual([dispatched.length, meter.state.stopReason], admitted ? [1, null] : [0, COST_CAP], label);
-			if (!admitted) assert.equal(logged.find((l) => l.event === "cost_refused")?.fields.why, "unboundable", label);
-		} finally {
-			layer.restore();
-		}
-	}
-	// An empty table (a pi child given none) refuses every capped call; a list alone compares nothing.
-	const { FakeRuntime: Empty, dispatched: none } = recordingRuntimeClass();
-	const emptyMeter = createUsageMeter({ maxCostMicros: 1_000_000_000 });
-	const emptyLayer = wrapModelRuntime({ ModelRuntime: Empty, meter: emptyMeter, hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard: createPolicyGuard({ maxCostMicros: 1_000_000_000, env: {} }), prices: new Map() });
-	try {
-		await new Empty().streamSimple({ ...LISTED }, {}, {}).result();
-		assert.deepEqual([none.length, emptyMeter.state.stopReason], [0, COST_CAP]);
-	} finally {
-		emptyLayer.restore();
-	}
-	const { FakeRuntime: Plain, dispatched } = recordingRuntimeClass();
-	const meter = createUsageMeter({ allowedModels: [{ provider: "local", model: "nowhere-1" }] });
-	const layer = wrapModelRuntime({ ModelRuntime: Plain, meter, hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard: createPolicyGuard({ allowedModels: [{ provider: "local", model: "nowhere-1" }] }), prices });
-	try {
-		await new Plain().streamSimple({ ...LISTED, id: "nowhere-1" }, {}, {}).result();
-		assert.deepEqual([dispatched.length, meter.state.stopReason], [1, null], "a list alone compares no price");
-	} finally {
-		layer.restore();
-	}
-});
-
-test("the compat half prices a legacy call from the pinned table too (issue #587)", async () => {
-	const prices = pinPriceTable({ getAllModels: () => [LISTED] });
-	const sent = [];
-	const make = () => {
-		const meter = createUsageMeter({ maxCostMicros: 1_000_000_000 });
-		const inner = { streamSimple: (model) => (sent.push(model), new FakeStream()) };
-		return { meter, compat: wrapProviderStreams({ inner, fallbackModels: null, meter, hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard: createPolicyGuard({ maxCostMicros: 1_000_000_000 }), prices }) };
-	};
-	const forged = make();
-	forged.compat.streamSimple({ ...LISTED, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }, {}, {});
-	assert.deepEqual([sent.length, forged.meter.state.stopReason], [0, COST_CAP]);
-	const honest = make();
-	honest.compat.streamSimple({ ...LISTED }, {}, {});
-	assert.deepEqual([sent.length, honest.meter.state.stopReason], [1, null]);
 });
 
 /** A runtime whose provider runs options.onPayload on `{ model }` before it sends, as every pinned api does, and records what it sent. */
@@ -872,13 +767,13 @@ test("a payload hook that changes the model fails the call before it is sent and
 			return super.streamSimple(model, context, options);
 		}
 	}
-	const layer3 = wrapModelRuntime({ ModelRuntime: Spy, meter: createUsageMeter({ maxCostMicros: 1_000_000_000 }), hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard: createPolicyGuard({ maxCostMicros: 1_000_000_000 }) });
+	const layer3 = wrapModelRuntime({ ModelRuntime: Spy, meter: createUsageMeter({ allowedModels: LIST }), hardStop: makeHardStopStream({ createStream: () => new FakeStream() }), guard: createPolicyGuard({ allowedModels: LIST }) });
 	try {
 		const options = { maxTokens: 10 };
 		await new Spy().streamSimple(LISTED, {}, options).result();
-		// A cost cap adds a final-payload hook. The copy also carries the dispatch mark (issue
+		// The model guard's payload check wraps the call's options. The copy also carries the dispatch mark (issue
 		// #543), a symbol, so it never reaches a payload.
-		assert.deepEqual([Object.keys(seen[0]), seen[0].maxTokens, Object.getOwnPropertySymbols(seen[0])], [["maxTokens", "onPayload"], 10, [DISPATCH_MARK]], "a cap measures the final payload even without a model list");
+		assert.deepEqual([Object.keys(seen[0]), seen[0].maxTokens, Object.getOwnPropertySymbols(seen[0])], [["maxTokens", "onPayload"], 10, [DISPATCH_MARK]], "a list wraps the options even for a listed model");
 	} finally {
 		layer3.restore();
 	}
@@ -1103,17 +998,6 @@ test("the model is read once: a getter cannot answer the guard with one id and t
 	}
 });
 
-test("the policy guard hands an admitted call to the cost guard too: a cheap call under a cap settles at its metered cost", async () => {
-	const { runtime, guard, layer } = wired({ maxCostMicros: 1_000_000_000, message: answer({ usage: { input: 10, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 11, cost: { total: 0.25 } } }) });
-	try {
-		await runtime.streamSimple(LISTED, {}, {}).result();
-		await flush();
-		assert.deepEqual([guard.cost.state.spent, guard.cost.state.inflight], [250_000, 0], "spent is the metered cost, and nothing is left in flight");
-	} finally {
-		layer.restore();
-	}
-});
-
 // ── Installed: enforcement and the compat re-arm gap ─────────────────────────────────────────────────────
 
 function fakeCopy(apis) {
@@ -1168,9 +1052,7 @@ test("a list is enforceable once the model guard is installed; the fallback bus 
 	const refuses = (facts) => assert.throws(() => assertPoliciesEnforceable({ allowedModels: LIST, ...facts }), (error) => error.piDispatchExit === EXIT_POLICY && error.piDispatchReason === MODEL_POLICY_UNENFORCEABLE);
 	refuses(policyEnforcement({ ...handle, ok: false }));
 	refuses(policyEnforcement({ ...handle, brake: false }));
-	// A cost guard alone cannot pass for the list.
-	const costOnly = await install({ copy: fakeCopy(["openai-completions"]), meter: createUsageMeter({ maxCostMicros: 5, allowedModels: LIST }), guard: createPolicyGuard({ maxCostMicros: 5 }) });
-	refuses(policyEnforcement(costOnly.handle));
+	refuses(policyEnforcement({ ...handle, enforces: [] }));
 });
 
 test("under a list alone, a displaced compat entry stops the job as model-not-allowed with modelRefused 0", async () => {
@@ -1185,13 +1067,4 @@ test("under a list alone, a displaced compat entry stops the job as model-not-al
 	handle.arm();
 	assert.deepEqual([meter.state.stopReason, stops, guard.snapshot()], [MODEL_NOT_ALLOWED, [MODEL_NOT_ALLOWED], { modelRefused: 0 }]);
 	assert.deepEqual(logged.filter((entry) => entry.event === "model_guard_displaced").map((entry) => entry.fields), [{ apis: 2 }]);
-	// Under a cap as well, the cap's stop wins as before, with costUnjudged as its evidence.
-	const both = fakeCopy(["anthropic-messages"]);
-	const capped = createUsageMeter({ maxCostMicros: 1000, allowedModels: LIST });
-	const bothGuard = createPolicyGuard({ maxCostMicros: 1000, allowedModels: LIST });
-	const second = await install({ copy: both, meter: capped, guard: bothGuard });
-	both.reset();
-	second.handle.arm();
-	assert.deepEqual([capped.state.stopReason, bothGuard.snapshot().costUnjudged, bothGuard.snapshot().modelRefused], [COST_CAP, 1, 0]);
-	assert.deepEqual(second.logged.filter((entry) => entry.event.endsWith("_displaced")).map((entry) => entry.event), ["cost_guard_displaced"]);
 });

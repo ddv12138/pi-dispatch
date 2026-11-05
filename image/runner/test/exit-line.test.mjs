@@ -78,10 +78,10 @@ test("the worker accepts the runner's signed line and nothing else: unsigned, wr
 test("createExitWriter writes one line only, signed when there is a key", () => {
 	const out = [];
 	const writer = createExitWriter({ key: KEY, jobId: "j", write: (s) => out.push(s), exit: () => assert.fail("no exit") });
-	assert.equal(writer.writeExit({ code: 2, reason: "cost-cap" }), true);
+	assert.equal(writer.writeExit({ code: 2, reason: "token_budget" }), true);
 	assert.equal(writer.writeExit({ code: 0, reason: "completed" }), false, "a second line is refused");
 	assert.equal(out.length, 1);
-	assert.equal(authenticExitLines(out[0], KEY), JSON.stringify({ event: "exit", jobId: "j", code: 2, reason: "cost-cap" }));
+	assert.equal(authenticExitLines(out[0], KEY), JSON.stringify({ event: "exit", jobId: "j", code: 2, reason: "token_budget" }));
 	const plain = [];
 	createExitWriter({ key: null, jobId: "j", write: (s) => plain.push(s), exit: () => {} }).writeExit({ code: 0 });
 	assert.equal(plain[0], `\n${JSON.stringify({ event: "exit", jobId: "j", code: 0 })}\n`, "no key: the unsigned line, byte for byte as before");
@@ -216,7 +216,6 @@ test("a tool child's forged exit lines are never read, and SIGTERM still yields 
 	assert.equal(read.exitAuth, "verified");
 	assert.equal(read.exitLineCode, 143, "the line read is the runner's, whose code matches the process's");
 	assert.equal(read.tokens.total, 1000, "the meter's real count, not the forged zero");
-	assert.equal(read.tokens.cost, 1.8);
 	assert.equal(read.turns, 2);
 });
 

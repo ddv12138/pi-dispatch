@@ -72,18 +72,18 @@ const WINDOW = Object.freeze({
   partial: false,
   byOutcome: { completed: 23, refused: 1, failed: 2, "awaiting-input": 1, cancelled: 1, other: 0 },
   byProject: [
-    { project: "web", count: 11, byOutcome: { completed: 9, refused: 0, failed: 1, "awaiting-input": 0, cancelled: 1, other: 0 }, spentMicros: 2_000_000, unpriced: 1 },
-    { project: "billing", count: 11, byOutcome: { completed: 10, refused: 1, failed: 0, "awaiting-input": 0, cancelled: 0, other: 0 }, spentMicros: 4_000_000, unpriced: 1 },
-    { project: null, count: 6, byOutcome: { completed: 4, refused: 0, failed: 1, "awaiting-input": 1, cancelled: 0, other: 0 }, spentMicros: 130_000, unpriced: 0 },
+    { project: "web", count: 11, byOutcome: { completed: 9, refused: 0, failed: 1, "awaiting-input": 0, cancelled: 1, other: 0 }, spentTokens: 2_000_000, unpriced: 1 },
+    { project: "billing", count: 11, byOutcome: { completed: 10, refused: 1, failed: 0, "awaiting-input": 0, cancelled: 0, other: 0 }, spentTokens: 4_000_000, unpriced: 1 },
+    { project: null, count: 6, byOutcome: { completed: 4, refused: 0, failed: 1, "awaiting-input": 1, cancelled: 0, other: 0 }, spentTokens: 130_000, unpriced: 0 },
   ],
   projectsMore: 0,
   byReason: { "scope-cap": 1, "container-never-started": 1, "recovery-cap": 1, "operator-cancel": 1, "awaiting-input": 1 },
   values: { kind: ["github", "gitlab"], flow: ["fix", "triage"], trigger: ["0", "2", "nightly"], host: ["build3", "mini1"], backend: ["local", "podman"], model: ["claude-sonnet-5-5"], reason: ["awaiting-input", "container-never-started", "operator-cancel", "recovery-cap", "scope-cap"] },
-  spentMicros: 6_130_000,
+  spentTokens: 6_130_000,
   unpriced: 2,
 });
 
-const base = { kind: "github", target: "acme/web#1", host: "mini1", endedAt: "2026-10-08T15:00:00Z", tokens: { total: 5, cost: 0.1 } };
+const base = { kind: "github", target: "acme/web#1", host: "mini1", endedAt: "2026-10-08T15:00:00Z", tokens: { total: 5 } };
 
 // ---- the sentences ---------------------------------------------------------------------------------------------------
 
@@ -233,7 +233,7 @@ test("the summary: the five outcome counts of the window, each a link to those r
   ]);
   for (const it of m.strip.items) runsLink(it.href);
   assert.ok(m.strip.label);
-  assert.deepEqual([m.spentMicros, m.unpriced], [6_130_000, 2]);
+  assert.deepEqual([m.spentTokens, m.unpriced], [6_130_000, 2]);
   assert.deepEqual(m.show, [{ label: "All outcomes", href: "/runs", on: true }, { label: "Only problems", href: "/runs?problems=1", on: false }]);
   assert.equal(m.notes, RUNS_WINDOW_TEXT);
   for (const s of m.show) runsLink(s.href);
@@ -244,16 +244,17 @@ test("the summary: the five outcome counts of the window, each a link to those r
 test("the summary keeps the chosen project in its links and counts that project's runs; a floor and a partial window say at least", () => {
   const web = runsSummaryModel(viewOf({ qs: "project=web&outcome=failed&problems=1", data: { runsWindow: WINDOW } }));
   assert.deepEqual(web.strip.items.map((i) => [i.n, i.href]), [[9, "/runs?project=web&outcome=completed"], [0, "/runs?project=web&outcome=refused"], [1, "/runs?project=web&outcome=failed"], [0, "/runs?project=web&outcome=awaiting-input"], [0, "/runs?project=web&outcome=awaiting-approval"], [1, "/runs?project=web&outcome=cancelled"]], "the project's own counts, so a count is what its link finds");
-  assert.deepEqual([web.spentMicros, web.unpriced], [2_000_000, 1], "and that project's spend");
+  assert.deepEqual([web.spentTokens, web.unpriced], [2_000_000, 1], "and that project's spend");
   assert.deepEqual(web.show.map((s) => [s.href, s.on]), [["/runs?project=web&outcome=failed", false], ["/runs?project=web&outcome=failed&problems=1", true]]);
   // A project the window names every project of, and not this one, ran nothing in it.
   const none = runsSummaryModel(viewOf({ qs: "project=ops", data: { runsWindow: WINDOW } }));
   assert.ok(none.strip.items.every((i) => i.n === 0));
-  assert.deepEqual([none.spentMicros, none.unpriced, none.notes], [0, 0, RUNS_WINDOW_TEXT]);
+  assert.deepEqual([
+    none.spentTokens, none.unpriced, none.notes], [0, 0, RUNS_WINDOW_TEXT]);
   // More projects ran than the window counts one by one: the whole counts, said so.
   const many = runsSummaryModel(viewOf({ qs: "project=ops", data: { runsWindow: { ...WINDOW, projectsMore: 3 } } }));
   assert.deepEqual(many.strip.items.map((i) => i.n), [23, 1, 2, 1, 0, 1]);
-  assert.equal(many.spentMicros, WINDOW.spentMicros);
+  assert.equal(many.spentTokens, WINDOW.spentTokens);
   assert.equal(many.notes, `${RUNS_WINDOW_TEXT} ${RUNS_WINDOW_EVERY_PROJECT}`);
   // A floor: every count says at least; a partial window too, and why.
   assert.ok(runsSummaryModel(viewOf({ data: { runsWindow: { ...WINDOW, floor: true } } })).strip.items.every((i) => i.floor === true));
@@ -266,7 +267,7 @@ test("the summary keeps the chosen project in its links and counts that project'
   // An unread window is said, not drawn as zeros; a spend that is no amount is none.
   assert.equal(runsSummaryModel(viewOf({ data: { runsWindow: null } })), null);
   assert.ok(String(runsSummary(viewOf({ data: { runsWindow: null } }))).includes(RUNS_WINDOW_UNREAD));
-  assert.equal(runsSummaryModel(viewOf({ data: { runsWindow: { ...WINDOW, spentMicros: null, unpriced: -1 } } })).spentMicros, null);
+  assert.equal(runsSummaryModel(viewOf({ data: { runsWindow: { ...WINDOW, spentTokens: null, unpriced: -1 } } })).spentTokens, null);
 });
 
 // ---- p-runs ----------------------------------------------------------------------------------------------------------
@@ -276,7 +277,7 @@ const pageOf = (runs, extra = {}) => ({ runs, next: null, mirror: "ok", truncate
 
 test("the runs table: its columns, flow, venue, model, tokens and job cap off a phone, stacked rows naming only the host and the cost", () => {
   const runs = [
-    { ...base, jobId: "gh-1", project: "web", flow: "fix", backend: "podman", model: "claude-sonnet-5-5", outcome: "completed", dollars: { reservedMicros: 2_000_000 } },
+    { ...base, jobId: "gh-1", project: "web", flow: "fix", backend: "podman", model: "claude-sonnet-5-5", outcome: "completed", tokensWindows: { reservedTokens: 2_000_000 } },
     { ...base, jobId: "gh-2", project: "Not A Project", outcome: "policy", reason: "scope-cap" },
   ];
   const m = runsTableModel(viewOf({ data: { runsPage: pageOf(runs) } }));
@@ -317,7 +318,7 @@ test("the runs table: its columns, flow, venue, model, tokens and job cap off a 
   assert.match(drawn, /<td class="wide"><span class="badge tone-idle">/, "the outcome cell spans the row on a phone");
   assert.match(drawn, /<span class="vtag">podman<\/span>/);
   assert.match(drawn, /<span class="vtag">local<\/span>/, "a record naming no venue is a local run");
-  assert.match(drawn, /data-l="Job cap"><span title="\$2.00">\$2.00<\/span><\/td>/);
+  assert.match(drawn, /data-l="Job cap"><span title="2,000,000">2\.00M<\/span><\/td>/);
   // The target with its project's tag, a project id only.
   assert.match(drawn, /acme\/web#1<\/a> <span class="ptag">web<\/span><\/td>/);
   assert.ok(!drawn.includes("Not A Project"), "a project that is no id is not tagged");

@@ -8,16 +8,16 @@ import { buildRecord } from "../src/run-history.mjs";
 
 // Issue #645, durable runs (wave 2, part B2a): the processor's half. Every collaborator is a hand-rolled fake: the
 // checkpoint store, the run budget ledger (with the compare-and-set semantics of run-budget-ledger.mjs), the pointer and
-// the enqueuer. The money half runs through the real dollar-budget.mjs over a keyed fake Valkey.
+// the enqueuer. The money half runs through the real token-budget.mjs over a keyed fake Valkey.
 
-const USD = 1_000_000;
+const TOKENS = 1;
 const NOW = new Date("2026-10-07T12:00:00Z");
-const DAY = "budget:usd:2026-10-07";
+const DAY = "budget:tok:2026-10-07";
 const BASE = "b".repeat(40);
 const PI = "1.2.0";
 const HOST = "h1";
 
-/** A keyed fake: the job-count INCR/DECR and the dollar INCRBY/DECRBY on one store (processor-dollars.test.mjs's). */
+/** A keyed fake: the job-count INCR/DECR and the token INCRBY/DECRBY on one store (processor-tokens.test.mjs's). */
 function keyedRedis() {
 	const store = new Map();
 	const ops = [];
@@ -101,7 +101,7 @@ function fakeLedger({ fail = {} } = {}) {
 			if (fail.recordHold) return { error: "valkey" };
 			const r = run(id);
 			if (r.holds.has(seq)) return { error: "exists" };
-			r.holds.set(seq, { state: "held", amountMicros: hold.amountMicros });
+			r.holds.set(seq, { state: "held", amountTokens: hold.amountTokens });
 			return { ok: true };
 		},
 		settle: (id, seq) => move("settle", id, seq, "settled"),
@@ -306,7 +306,7 @@ test("settleCrashed is called once, at recovery start, with this container's num
 	// The base: seq 1, a recorded hold the crash left `held`.
 	await ledger.claimSlot(RUN);
 	await ledger.nextSeq(RUN);
-	await ledger.recordHold(RUN, 1, { amountMicros: 2 * USD, keys: [DAY] });
+	await ledger.recordHold(RUN, 1, { amountTokens: 2, keys: [DAY] });
 	ledger.calls.length = 0;
 	const { deps: d } = deps({ runBudgetLedger: ledger });
 	await runJob(recoveryJob(1), d);
@@ -379,44 +379,44 @@ test("a claim the ledger could not answer reserves nothing and is a never-starte
 });
 
 test("a recordHold failure releases the hold and throws a never-started InfraRetry before any container", async () => {
-	const { deps: d, calls, redis } = deps({ dollarCaps: { day: 10 * USD, week: null, month: null }, runBudgetLedger: fakeLedger({ fail: { recordHold: true } }) });
-	await assert.rejects(runJob({ ...job, maxCostMicros: 2 * USD }, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started" && e.dollars?.basis === "refunded");
+	const { deps: d, calls, redis } = deps({ tokenCaps: { day: 10, week: null, month: null }, runBudgetLedger: fakeLedger({ fail: { recordHold: true } }) });
+	await assert.rejects(runJob({ ...job, maxTokens: 2 }, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started" && e.tokensWindows?.basis === "refunded");
 	assert.ok(!names(calls).includes("run-container"));
-	assert.equal(redis.store.get(DAY), 0, "the dollar hold given back whole");
+	assert.equal(redis.store.get(DAY), 0, "the token hold given back whole");
 	assert.deepEqual(redis.ops.filter((o) => o[1] === DAY).map((o) => o[0]).slice(0, 1), ["incrby"], "reserved once, then given back");
 });
 
 test("a recorded hold is settled through the ledger; a 'not-held' answer leaves the floor", async () => {
-	const tokens = { input: 1, output: 1, total: 2, cost: 0.5, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costCapMicros: 2 * USD, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0, costUnreported: 0 };
+	const tokens = { input: 1, output: 1, total: 2, metered: true, rootTotal: 2, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, usageUnreported: 0, modelRefused: 0 };
 	const usage = { v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 2, cost: 0.5, unpriced: 0 }] };
 	const runContainer = async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage });
-	const ok = deps({ dollarCaps: { day: 10 * USD, week: null, month: null }, runContainer });
-	const r = await runJob({ ...job, maxCostMicros: 2 * USD }, ok.deps);
-	assert.equal(r.dollars.basis, "metered");
+	const ok = deps({ tokenCaps: { day: 10, week: null, month: null }, runContainer });
+	const r = await runJob({ ...job, maxTokens: 2 }, ok.deps);
+	assert.equal(r.tokensWindows.basis, "metered");
 	assert.ok(ok.ledger.calls.some((c) => c[0] === "settle"));
 	const ledger = fakeLedger();
 	ledger.settle = async () => "not-held";
-	const floor = deps({ dollarCaps: { day: 10 * USD, week: null, month: null }, runContainer, runBudgetLedger: ledger });
-	const f = await runJob({ ...job, maxCostMicros: 2 * USD }, floor.deps);
-	assert.equal(f.dollars.basis, "floor");
-	assert.equal(floor.redis.store.get(DAY), 2 * USD, "no window key moved");
+	const floor = deps({ tokenCaps: { day: 10, week: null, month: null }, runContainer, runBudgetLedger: ledger });
+	const f = await runJob({ ...job, maxTokens: 2 }, floor.deps);
+	assert.equal(f.tokensWindows.basis, "floor");
+	assert.equal(floor.redis.store.get(DAY), 2, "no window key moved");
 });
 
 test("issue #761: a hold the ledger did not move (settle or release) keeps every key at the floor, and reservedIn names them", async () => {
-	const tokens = { input: 1, output: 1, total: 2, cost: 0.5, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costCapMicros: 2 * USD, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0, costUnreported: 0 };
+	const tokens = { input: 1, output: 1, total: 2, metered: true, rootTotal: 2, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, usageUnreported: 0, modelRefused: 0 };
 	const usage = { v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 2, cost: 0.5, unpriced: 0 }] };
 	const valkeyTag = "0123456789abcdef";
 	const settled = fakeLedger();
 	settled.settle = async () => "not-held";
-	const s = deps({ dollarCaps: { day: 10 * USD, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage }), runBudgetLedger: settled });
-	const r = await runJob({ ...job, maxCostMicros: 2 * USD }, s.deps);
-	assert.deepEqual(r.dollars, { reservedMicros: 2 * USD, settledMicros: 2 * USD, basis: "floor", modelBasis: null, reservedIn: { day: "2026-10-07", valkey: valkeyTag } });
-	assert.equal(s.redis.store.get(DAY), 2 * USD);
+	const s = deps({ tokenCaps: { day: 10, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage }), runBudgetLedger: settled });
+	const r = await runJob({ ...job, maxTokens: 2 }, s.deps);
+	assert.deepEqual(r.tokensWindows, { reservedTokens: 2, settledTokens: 2, basis: "floor", modelBasis: null, reservedIn: { day: "2026-10-07", valkey: valkeyTag } });
+	assert.equal(s.redis.store.get(DAY), 2);
 	const released = fakeLedger();
 	released.release = async () => "not-held";
-	const n = deps({ dollarCaps: { day: 10 * USD, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 125, aborted: false, tokens: null }), runBudgetLedger: released });
-	await assert.rejects(runJob({ ...job, maxCostMicros: 2 * USD }, n.deps), (e) => e instanceof InfraRetry && e.dollars?.basis === "floor" && e.dollars.reservedIn?.day === "2026-10-07");
-	assert.equal(n.redis.store.get(DAY), 2 * USD, "not given back: someone else finished the hold");
+	const n = deps({ tokenCaps: { day: 10, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 125, aborted: false, tokens: null }), runBudgetLedger: released });
+	await assert.rejects(runJob({ ...job, maxTokens: 2 }, n.deps), (e) => e instanceof InfraRetry && e.tokensWindows?.basis === "floor" && e.tokensWindows.reservedIn?.day === "2026-10-07");
+	assert.equal(n.redis.store.get(DAY), 2, "not given back: someone else finished the hold");
 });
 
 // ── exits ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -610,8 +610,8 @@ function prng(seed) {
 	};
 }
 
-test("PROPERTY: over random crash points, the dollar keys never exceed (containers started) x cap", async () => {
-	const CAP = 2 * USD;
+test("PROPERTY: over random crash points, the token keys never exceed (containers started) x cap", async () => {
+	const CAP = 2;
 	const steps = ["complete", "policy", "infra", "crash", "recordFail", "seqFail", "neverStarted"];
 	// The property must not pass vacuously: enough trials have to reach a recovery and settle a crashed hold.
 	let recoveries = 0;
@@ -623,7 +623,7 @@ test("PROPERTY: over random crash points, the dollar keys never exceed (containe
 		const store = { alive: true };
 		const pointers = new Map();
 		let containers = 0;
-		let next = { j: { ...job, maxCostMicros: CAP } };
+		let next = { j: { ...job, maxTokens: CAP } };
 		const trail = [];
 		while (next) {
 			const current = next;
@@ -635,7 +635,7 @@ test("PROPERTY: over random crash points, the dollar keys never exceed (containe
 			ledger.recordHold = step === "recordFail" ? async () => ({ error: "valkey" }) : realRecord;
 			const realSeq = ledger._seq ?? (ledger._seq = ledger.nextSeq);
 			ledger.nextSeq = step === "seqFail" ? async () => ({ error: "valkey" }) : realSeq;
-			const tokens = { input: 1, output: 1, total: 2, cost: rand() * 2, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, costCapMicros: CAP, costRefused: 0, boundExceeded: 0, longContext: 0, costUnjudged: 0, costUnanswered: 0, costUnreported: 0 };
+			const tokens = { input: 1, output: 1, total: 2, cost: rand() * 2, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, tokenBudgetTokens: CAP, modelRefused: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0 };
 			const runContainer = async () => {
 				containers++;
 				pointers.set(RUN, { v: 1, host: HOST, hostQueue: null, seq: containers, attempt: containers, at: 1, jobDir: "job-x" });
@@ -644,10 +644,10 @@ test("PROPERTY: over random crash points, the dollar keys never exceed (containe
 				const code = step === "complete" ? 0 : step === "policy" ? 2 : 1;
 				return { code, aborted: false, exitLineCode: code, tokens };
 			};
-			const enqueueRecovery = async () => (n + 1 <= RECOVERY_CAP ? ((next = { j: { ...job, maxCostMicros: CAP, recoveryOf: RUN, recovery: n + 1 } }), { enqueued: true, jobId: `${RUN}.r${n + 1}`, n: n + 1 }) : { enqueued: false, reason: "cap" });
+			const enqueueRecovery = async () => (n + 1 <= RECOVERY_CAP ? ((next = { j: { ...job, maxTokens: CAP, recoveryOf: RUN, recovery: n + 1 } }), { enqueued: true, jobId: `${RUN}.r${n + 1}`, n: n + 1 }) : { enqueued: false, reason: "cap" });
 			const { deps: d } = deps({
 				redis,
-				dollarCaps: { day: 1000 * USD, week: null, month: null },
+				tokenCaps: { day: 1000, week: null, month: null },
 				runBudgetLedger: ledger,
 				runContainer,
 				enqueueRecovery,
@@ -667,7 +667,7 @@ test("PROPERTY: over random crash points, the dollar keys never exceed (containe
 			} catch {
 				// A crash (the worker died) is continued by the stall path's recovery, as start.mjs would enqueue it; a
 				// never-started or ledger fault is BullMQ's retry of the same attempt.
-				if (step === "crash" && n + 1 <= RECOVERY_CAP && pointers.has(RUN)) next = { j: { ...job, maxCostMicros: CAP, recoveryOf: RUN, recovery: n + 1 } };
+				if (step === "crash" && n + 1 <= RECOVERY_CAP && pointers.has(RUN)) next = { j: { ...job, maxTokens: CAP, recoveryOf: RUN, recovery: n + 1 } };
 				else if (["recordFail", "seqFail", "neverStarted"].includes(step) && trail.length < 8) next = current;
 			}
 			const total = redis.store.get(DAY) ?? 0;
@@ -748,8 +748,8 @@ test("every never-started fault of a RECOVERY job becomes a 60 s wait hold, neve
 	const cases = {
 		"pointer read throws": { readCheckpointPointer: async () => Promise.reject(new Error("x")) },
 		"claimSlot error": { runBudgetLedger: fakeLedger({ fail: { claimSlot: true } }) },
-		"nextSeq error, no dollar windows": { runBudgetLedger: fakeLedger({ fail: { nextSeq: true } }) },
-		"recordHold error": { runBudgetLedger: fakeLedger({ fail: { recordHold: true } }), dollarCaps: { day: 10 * USD, week: null, month: null } },
+		"nextSeq error, no token windows": { runBudgetLedger: fakeLedger({ fail: { nextSeq: true } }) },
+		"recordHold error": { runBudgetLedger: fakeLedger({ fail: { recordHold: true } }), tokenCaps: { day: 10, week: null, month: null } },
 		"restore skipped": { workspaceCheckpointer: fakeCheckpointer([], { restore: { skipped: "locked" } }) },
 		"trust reset failed": { resetTrustPaths: async () => Promise.reject(new Error("x")) },
 		"staging failed": { stageRecovered: async () => null },
@@ -759,7 +759,7 @@ test("every never-started fault of a RECOVERY job becomes a 60 s wait hold, neve
 	};
 	for (const [name, over] of Object.entries(cases)) {
 		const { deps: d } = deps(over);
-		await assert.rejects(runJob({ ...recoveryJob(1), maxCostMicros: 2 * USD }, d), (e) => e instanceof RecoveryWaitHold && e.recoveryWaitMs === RECOVERY_RETRY_WAIT_MS && e.reason === "container-never-started", name);
+		await assert.rejects(runJob({ ...recoveryJob(1), maxTokens: 2 }, d), (e) => e instanceof RecoveryWaitHold && e.recoveryWaitMs === RECOVERY_RETRY_WAIT_MS && e.reason === "container-never-started", name);
 	}
 	// The pointer missing beside a store still there, too.
 	const m = deps();
@@ -827,9 +827,9 @@ test("a fresh or retried armed attempt never calls settleCrashed", async () => {
 test("a never-started throw whose ledger release answers 'not-held' gives nothing back: the floor", async () => {
 	const ledger = fakeLedger();
 	ledger.release = async () => "not-held";
-	const { deps: d, redis } = deps({ runBudgetLedger: ledger, dollarCaps: { day: 10 * USD, week: null, month: null }, runContainer: async () => ({ code: 125, aborted: false }) });
-	await assert.rejects(runJob({ ...job, maxCostMicros: 2 * USD }, d), (e) => e instanceof InfraRetry && e.dollars?.basis === "floor");
-	assert.equal(redis.store.get(DAY), 2 * USD, "no window key moved back");
+	const { deps: d, redis } = deps({ runBudgetLedger: ledger, tokenCaps: { day: 10, week: null, month: null }, runContainer: async () => ({ code: 125, aborted: false }) });
+	await assert.rejects(runJob({ ...job, maxTokens: 2 }, d), (e) => e instanceof InfraRetry && e.tokensWindows?.basis === "floor");
+	assert.equal(redis.store.get(DAY), 2, "no window key moved back");
 	assert.ok(!redis.ops.some((o) => o[1] === DAY && o[0] !== "incrby"), "no release op on the window key");
 });
 
@@ -855,9 +855,9 @@ test("recovered.from is the manifest's kind: exit and salvage", async () => {
 test("a refusal after a carried slot reports budgetReserved true", async () => {
 	const ledger = fakeLedger();
 	await ledger.claimSlot(RUN);
-	const { deps: d } = deps({ runBudgetLedger: ledger, dollarCaps: { day: 1 * USD, week: null, month: null } });
-	const r = await runJob({ ...job, maxCostMicros: 2 * USD }, d);
-	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "dollar-cap", true]);
+	const { deps: d } = deps({ runBudgetLedger: ledger, tokenCaps: { day: 1, week: null, month: null } });
+	const r = await runJob({ ...job, maxTokens: 2 }, d);
+	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "token-cap", true]);
 });
 
 
@@ -866,7 +866,7 @@ test("a recovered managed fork resumes its own checkpoint and namespace without 
 	const rootKey = sessionKeyFor({ ...job, target });
 	const fork = { id: "a".repeat(32), rootKey, fromJob: "gh-parent", fromEntry: "1234abcd", position: "at", sourceDigest: "b".repeat(64) };
 	for (const resume of [true, false, undefined]) {
-		const j = { ...recoveryJob(), target, fork, forkReserveMicros: null, forkPolicy: "c".repeat(64), resume };
+		const j = { ...recoveryJob(), target, fork, forkReserveTokens: null, forkPolicy: "c".repeat(64), resume };
 		const { deps: d, calls } = deps({
 			sessionsDir: "/sessions", checkForkPolicy: async () => ({ ok: true }),
 			forkStore: { readPoint: async () => { throw new Error("must not reopen original source"); } },

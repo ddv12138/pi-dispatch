@@ -18,7 +18,7 @@ const fakeValkey = ({ looks = [], desiredRow = null } = {}) => ({
 	hgetall: async (key) => (key === "updates:desired" && desiredRow ? { [desiredRow.name]: JSON.stringify(desiredRow) } : {}),
 });
 const pkg = { name: "pi-lint", version: "1.4.2", from: "pi-packages" };
-const rec = (fields = {}) => ({ jobId: "gh-1", outcome: "completed", endedAt: "2026-11-02T10:00:00.000Z", tokens: { cost: 0.19 }, packageCanary: { name: "pi-lint", version: "1.4.3", load: "loaded" }, ...fields });
+const rec = (fields = {}) => ({ jobId: "gh-1", outcome: "completed", endedAt: "2026-11-02T10:00:00.000Z", tokens: { total: 190000 }, packageCanary: { name: "pi-lint", version: "1.4.3", load: "loaded" }, ...fields });
 
 test("a canary reads completed only when the run completed AND the runner said its candidate loaded", () => {
 	assert.equal(canaryResultOf([rec()], "pi-lint", "1.4.3").state, "completed");
@@ -129,7 +129,7 @@ test("what could not be read is never drawn as a fact", async () => {
 });
 
 test("a paid button says what it costs where it is pressed, and Undo says what it undoes", async () => {
-	assert.match(await UPDATES_DRAW["updates-newer-available.operator"](), /A canary runs one job of trigger 3, up to \$2\.00/);
+	assert.match(await UPDATES_DRAW["updates-newer-available.operator"](), /A canary runs one job of trigger 3, up to 20,000 tokens/);
 	const after = await UPDATES_DRAW["updates-newer-after-adopt.operator"]();
 	assert.match(after, /1\.4\.3 adopted by ops\./);
 	assert.match(after, /Undo 1\.4\.3/);
@@ -177,13 +177,13 @@ test("the page's facts come from what a deployment really holds: its manifest an
 	const root = tempDir("updates-real-");
 	mkdirSync(join(root, "pi-global", "packages"), { recursive: true });
 	writeFileSync(join(root, "pi-global", "packages", "packages.json"), JSON.stringify({ stagedAt: "x", packages: [{ name: "pi-lint", version: "1.4.2", dir: "pi-lint--1.4.2--aaaaaaaa", from: "host" }] }));
-	writeFileSync(join(root, "triggers.json"), JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 6 * * *" }, run: { kind: "local", folder: "/f", flow: "fix", task: "t", maxCostUsd: 2 } }] }));
+	writeFileSync(join(root, "triggers.json"), JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 6 * * *" }, run: { kind: "local", folder: "/f", flow: "fix", task: "t", maxTokens: 2 } }] }));
 	const look = { v: 1, host: "h", at: NOW, everyHours: 24, pi: {}, hostPi: {}, packages: [{ name: "pi-lint", version: "1.4.2", newest: "1.4.3", read: "ok" }] };
 	const read = await readDeploymentUpdates({ redis: fakeValkey({ looks: [look] }), paths: { globalPiDir: join(root, "pi-global"), triggersPath: join(root, "triggers.json") }, pinned: "1.5.0", now: NOW });
 	assert.equal(read.packages[0].name, "pi-lint", "a row has the name the actions look it up by");
 	assert.equal(read.packages[0].version, "1.4.2");
 	assert.equal(read.packages[0].state, "newer");
-	assert.deepEqual(read.triggers, [{ index: 0, id: "nightly", capUsd: 2 }]);
+	assert.deepEqual(read.triggers, [{ index: 0, id: "nightly", capTokens: 2 }]);
 	assert.deepEqual(readStaged({ globalPiDir: join(root, "nowhere") }), { packages: [], unreadable: false }, "nothing staged is not a fault");
 	writeFileSync(join(root, "pi-global", "packages", "packages.json"), "{ not json");
 	assert.deepEqual(readStaged({ globalPiDir: join(root, "pi-global") }), { packages: [], unreadable: true }, "a manifest that cannot be read is said");
@@ -193,7 +193,7 @@ test("the page's facts come from what a deployment really holds: its manifest an
 test("a canary that ran on another host is found: its record is in the run mirror, not on this host's disk", async () => {
 	const logsDir = tempDir("updates-fleet-records-");
 	const sinceMs = NOW - 30 * 86400_000;
-	const far = { jobId: "gh-far", host: "mini2", outcome: "completed", endedAt: new Date(NOW - 3600_000).toISOString(), tokens: { cost: 0.19 }, packageCanary: { name: "pi-lint", version: "1.4.3", load: "loaded" } };
+	const far = { jobId: "gh-far", host: "mini2", outcome: "completed", endedAt: new Date(NOW - 3600_000).toISOString(), tokens: { total: 190000 }, packageCanary: { name: "pi-lint", version: "1.4.3", load: "loaded" } };
 	const mirrorOf = (rows, calls = {}) => ({
 		zrevrangebyscore: async (...args) => { calls.range = args; return rows.map((r) => r?.jobId ?? "gh-expired"); },
 		mget: async () => rows.map((r) => (r ? JSON.stringify(r) : null)),

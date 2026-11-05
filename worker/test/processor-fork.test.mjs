@@ -11,7 +11,7 @@ const base = { kind: "github", repo: "org/repo", target: { type: "issue", number
 const fork = { id: "b".repeat(32), rootKey: sessionKeyFor(base), fromJob: "gh-original", fromEntry: "aabbccdd", position: "at", sourceDigest: "c".repeat(64), message: "operator-private-message" };
 function fixture(overrides = {}) {
 	const calls = [];
-	const job = { ...base, fork, forkReserveMicros: null };
+	const job = { ...base, fork, forkReserveTokens: null };
 	let reserved = 0;
 	const source = { ok: true, point: { seq: 1 }, manifest: { sessionKey: fork.rootKey, baseSha, piVersion: "1.2.0", venue: "local", host: "worker" }, transcriptPath: "/private/transcript.jsonl" };
 	const deps = {
@@ -84,7 +84,7 @@ test("fork source archive failure cannot turn a completed paid job into an infra
 test("queue forks have independent semantic windows and preserve the closed contract", async () => {
 	const added = [];
 	const queue = { add: async (name, data, opts) => { added.push({ name, data, opts }); return { id: opts.jobId }; } };
-	await enqueueForgeJob(queue, "github", { ...base, fork, forkReserveMicros: null, thinkingLevel: "high", forkPolicy: "d".repeat(64) });
+	await enqueueForgeJob(queue, "github", { ...base, fork, forkReserveTokens: null, thinkingLevel: "high", forkPolicy: "d".repeat(64) });
 	await enqueueForgeJob(queue, "github", { ...base, fork: { ...fork, id: "e".repeat(32) } });
 	assert.notEqual(added[0].opts.deduplication.id, added[1].opts.deduplication.id);
 	assert.deepEqual(added[0].data.fork, fork);
@@ -122,9 +122,9 @@ test("a trigger that opted out of session persistence creates no unredacted fork
 
 
 test("queued fork reservation cannot become paid or grow after its preview", async () => {
-	for (const [forkReserveMicros, maxCostMicros] of [[0, 1_000_000], [1_000_000, 2_000_000], [1_000_000, null]]) {
+	for (const [forkReserveTokens, maxTokens] of [[0, 1_000_000], [1_000_000, 2_000_000], [1_000_000, null]]) {
 		const f = fixture();
-		const result = await runJob({ ...f.job, forkReserveMicros, maxCostMicros }, f.deps);
+		const result = await runJob({ ...f.job, forkReserveTokens, maxTokens }, f.deps);
 		assert.equal(result.reason, "fork-reservation-changed");
 		assert.deepEqual(f.calls, []);
 	}

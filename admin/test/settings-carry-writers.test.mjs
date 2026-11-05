@@ -31,9 +31,11 @@ const text = (value) => `${JSON.stringify(value, null, 2)}\n`;
 /**
  * The file a newer release left: `futureCap`, a key this build does not know, between two it does, and a
  * `secretBundles` block (an operator-only table no tool can set). Built as text so the expectations below are text.
+ * No retired dollar key (`maxCostUsd` and friends): this build refuses a file that holds one, so a carry test
+ * seeded with it would pin the refusal, not the carry.
  */
 const BUNDLES = { shop: { path: "/opt/pi/bundle-shop.sh", format: "dotenv" } };
-const FILE = { model: "m1", futureCap: { perHost: 3 }, maxTurns: 30, secretBundles: BUNDLES, maxCostUsd: "2" };
+const FILE = { model: "m1", futureCap: { perHost: 3 }, maxTurns: 30, secretBundles: BUNDLES };
 /** The same file with `over` applied in the file's own order (a key set to undefined is gone, a new key goes last). */
 function fileWith(over) {
   const out = {};
@@ -56,7 +58,7 @@ test("writeSettings keeps every overlay key it does not know (a key from a later
   const { settingsFile } = seeded();
   const res = writeSettings({ settingsFile, mutate: (o) => ({ ...o, maxTurns: 40 }) });
   // `mutate` and the result still see the known keys only: no caller can read or set a carried one.
-  assert.deepEqual(res, { ok: true, overlay: { model: "m1", maxTurns: 40, secretBundles: BUNDLES, maxCostUsd: "2" } });
+  assert.deepEqual(res, { ok: true, overlay: { model: "m1", maxTurns: 40, secretBundles: BUNDLES } });
   assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: 40 }));
   // An unset removes the key from its place and keeps the rest; a candidate's own unknown key is never carried.
   const unset = writeSettings({ settingsFile, mutate: (o) => { delete o.maxTurns; return { ...o, smuggled: "x" }; } });

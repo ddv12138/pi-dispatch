@@ -22,10 +22,9 @@ import {
 	wrapProviderStreams,
 	DISPATCH_MARK,
 	dispatchToken,
-	pricedModel,
-	unreportedUsage,
+	usageUnreported,
 } from "../src/usage-meter.mjs";
-import { COST_CAP, COST_CAP_UNENFORCEABLE, EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "../src/outcome.mjs";
 
 /**
  * These tests are PURE: no pi import, no skip gate, no filesystem. Every pi-shaped dependency of
@@ -108,19 +107,17 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 // createUsageMeter
 // ---------------------------------------------------------------------------------------------
 
-test("accumulates input/output/billed total/cost across records", () => {
+test("accumulates input/output/billed total across records", () => {
 	const meter = createUsageMeter({ maxTokens: null });
 
-	meter.record(usage({ input: 100, output: 20, total: 500, cost: 0.01 }));
-	meter.record(usage({ input: 200, output: 30, total: 700, cost: 0.02 }));
+	meter.record(usage({ input: 100, output: 20, total: 500 }));
+	meter.record(usage({ input: 200, output: 30, total: 700 }));
 
 	assert.equal(meter.state.input, 300);
 	assert.equal(meter.state.output, 50);
 	// totalTokens is the BILLED total (input + output + cache), so it exceeds input + output. Same
 	// deliberate asymmetry as token-budget.mjs.
 	assert.equal(meter.state.total, 1200);
-	assert.equal(Math.round(meter.state.cost * 100) / 100, 0.03);
-	assert.equal(meter.state.unpriced, 0);
 	assert.equal(meter.snapshot().metered, true);
 });
 
@@ -224,21 +221,20 @@ test("unresolved rises on observe and falls on settle; a hung stream stays count
 	assert.equal(meter.state.calls, 2);
 });
 
-test("a rejected result() is swallowed, clears unresolved, and counts as unpriced on its own row", async () => {
+test("a rejected result() is swallowed, clears unresolved, and counts usageUnreported", async () => {
 	const meter = createUsageMeter({ maxTokens: null });
 	const stream = new FakeStream();
-	meter.observe(stream, { provider: MODEL.provider, modelId: MODEL.id });
+	meter.observe(stream, { provider: MODEL.provider, modelId: MODEL.id, model: MODEL });
 	stream.fail(new Error("transport died"));
 	await flush();
 	assert.equal(meter.state.unresolved, 0);
 	assert.equal(meter.state.total, 0);
-	// Issue #501: what a rejected call spent is unknown, and a dollar settlement must not read unknown as zero.
-	assert.equal(meter.state.unpriced, 1);
-	assert.deepEqual(meter.usageSnapshot().models.map((row) => [row.model, row.calls, row.unpriced]), [[MODEL.id, 1, 1]]);
+	// What a rejected call consumed is unknown, and a token settlement must not read unknown as zero.
+	assert.equal(meter.state.unreported, 1);
 	const promised = Promise.reject(new Error("no"));
 	meter.observeResult(promised, {});
 	await flush();
-	assert.equal(meter.state.unpriced, 2, "the result methods too");
+	assert.equal(meter.state.unreported, 2, "the result methods too");
 });
 
 test("observing the same stream twice counts it once", async () => {
@@ -253,22 +249,17 @@ test("observing the same stream twice counts it once", async () => {
 	assert.equal(meter.state.total, 60);
 });
 
-test("counts unpriced calls instead of pricing them at zero", async () => {
+test("records with no usable usage object count usageUnreported and still count their tokens", async () => {
 	const meter = createUsageMeter({ maxTokens: null });
 
-	meter.record({ input: 1, output: 1, totalTokens: 2 }); // no cost object at all
-	meter.record({ input: 1, output: 1, totalTokens: 2, cost: {} }); // cost, no total
-	meter.record({ input: 1, output: 1, totalTokens: 2, cost: { total: "1.5" } }); // not a number
-	meter.record({ input: 1, output: 1, totalTokens: 2, cost: { total: Number.NaN } });
+	meter.record(undefined); // a rejected settle, no usage at all
 
-	assert.equal(meter.state.unpriced, 4);
-	assert.equal(meter.state.cost, 0);
-	assert.equal(Number.isNaN(meter.state.cost), false, "a NaN cost would poison the whole run record");
-	assert.equal(meter.state.total, 8, "unpriced calls still count their tokens");
+	assert.equal(meter.state.unreported, 1);
+	assert.equal(meter.state.total, 0, "nothing usable was reported");
 
-	meter.record(usage({ total: 5, cost: 0.25 }));
-	assert.equal(meter.state.cost, 0.25);
-	assert.equal(meter.state.unpriced, 4);
+	meter.record(usage({ total: 8, input: 4, output: 4 }));
+	assert.equal(meter.state.unreported, 1, "a complete usage is not a broken one");
+	assert.equal(meter.state.total, 8, "complete calls still count their tokens");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -293,12 +284,12 @@ test("lands every call on its (provider, model) row and keeps the rows a partiti
 
 	const snap = meter.usageSnapshot();
 	assert.equal(snap.v, 1);
-	assert.equal(snap.piAi, null, "no installer ran, so the pricing provenance is unknown -- and says so");
+	assert.equal(snap.piAi, null, "no installer ran, so the provenance is unknown -- and says so");
 	assert.equal(snap.truncated, 0, "model-less calls are not truncation; no named row was folded");
 	assert.deepEqual(snap.models, [
-		{ provider: "anthropic", model: "claude-x", calls: 2, input: 11, output: 7, cacheRead: 80, cacheWrite: 4, cacheWrite1h: 2, reasoning: 3, total: 150, cost: 0.75, unpriced: 0, providerBilled: 0 },
-		{ provider: "openai", model: "gpt-y", calls: 1, input: 3, output: 4, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 30, cost: 0.125, unpriced: 0, providerBilled: 0 },
-		{ provider: "other", model: "other", calls: 2, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 12, cost: 0, unpriced: 0, providerBilled: 0 },
+		{ provider: "anthropic", model: "claude-x", calls: 2, input: 11, output: 7, cacheRead: 80, cacheWrite: 4, cacheWrite1h: 2, reasoning: 3, total: 150 },
+		{ provider: "openai", model: "gpt-y", calls: 1, input: 3, output: 4, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 30 },
+		{ provider: "other", model: "other", calls: 2, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 12 },
 	]);
 	// THE invariant the worker's reader leans on: every record lands on exactly one row, so the rows
 	// partition the billed total -- same shape of claim as the root/other/loose split above.
@@ -312,7 +303,7 @@ test("lands every call on its (provider, model) row and keeps the rows a partiti
 test("caps the ledger at 8 named rows and folds the overflow numerically into other", async () => {
 	const meter = createUsageMeter({ maxTokens: null });
 	for (let i = 1; i <= 10; i += 1) {
-		meter.observe(streamOf(usage({ input: i, total: i * 10, cost: 0.25 })), { provider: "prov", modelId: `model-${i}` });
+		meter.observe(streamOf(usage({ input: i, total: i * 10 })), { provider: "prov", modelId: `model-${i}` });
 	}
 	meter.observe(streamOf(usage({ total: 5 }))); // model-less: lands on other, must NOT count as truncated
 	await flush();
@@ -331,7 +322,6 @@ test("caps the ledger at 8 named rows and folds the overflow numerically into ot
 	assert.equal(other.calls, 3, "two folded rows plus one model-less call");
 	assert.equal(other.total, 35, "20 + 10 folded, 5 model-less -- the fold is numeric, never lossy");
 	assert.equal(other.input, 3, "2 + 1 from the folded rows' own numerics");
-	assert.equal(other.cost, 0.5);
 	assert.equal(
 		snap.models.reduce((sum, row) => sum + row.total, 0),
 		meter.state.total,
@@ -341,20 +331,18 @@ test("caps the ledger at 8 named rows and folds the overflow numerically into ot
 	assert.deepEqual(meter.usageSnapshot(), snap);
 });
 
-test("prices each row separately and counts a costless call as unpriced on ITS row", async () => {
+test("lands a call with a partial usage object on its own row and counts it usageUnreported", async () => {
 	const meter = createUsageMeter({ maxTokens: null });
-	meter.observe(streamOf(usage({ total: 10, cost: 0.25 })), { provider: "anthropic", modelId: "claude-x" });
-	meter.observe(streamOf({ input: 1, output: 1, totalTokens: 2 }), { provider: "anthropic", modelId: "claude-x" }); // no cost object at all
-	meter.observe(streamOf(usage({ total: 3, cost: 0.5 })), { provider: "openai", modelId: "gpt-y" });
+	meter.observe(streamOf(usage({ total: 10, input: 5, output: 5 })), { provider: "anthropic", modelId: "claude-x", model: { api: "openai-completions" } });
+	meter.observe(streamOf({ input: 0, output: 0, totalTokens: 2 }), { provider: "anthropic", modelId: "claude-x", model: { api: "openai-completions" } }); // a zero usage block
+	meter.observe(streamOf(usage({ total: 3, input: 1, output: 2 })), { provider: "openai", modelId: "gpt-y", model: { api: "openai-completions" } });
 	await flush();
 
 	const [anthropic, openai] = meter.usageSnapshot().models;
 	assert.equal(anthropic.calls, 2);
-	assert.equal(anthropic.cost, 0.25);
-	assert.equal(anthropic.unpriced, 1, "counted on the row, never priced at zero -- the flat counter's rule, per model");
-	assert.equal(openai.cost, 0.5);
-	assert.equal(openai.unpriced, 0);
-	assert.equal(meter.state.unpriced, 1, "the row counters mirror the flat one; they do not replace it");
+	assert.equal(anthropic.total, 12);
+	assert.equal(openai.total, 3);
+	assert.equal(meter.state.unreported, 1, "the zero usage block is the floor signal; the flat counter, counted once");
 });
 
 test("usageSnapshot is null until a call is observed, and piAi is null until the installer stamps it", async () => {
@@ -442,11 +430,11 @@ test("observeResult counts a promise-returning call and records its result's usa
 	assert.equal(meter.state.unresolved, 0);
 	assert.equal(meter.state.rootTotal, 5);
 	assert.equal(meter.usageSnapshot().models[0].model, "m");
-	// A result without usage (a local classifier) is COUNTED as unpriced, never priced at zero.
+	// A result without usage (a local classifier) is COUNTED on the completeness counter, never read as zero.
 	meter.observeResult(Promise.resolve({ answers: {} }), {});
 	await flush();
 	assert.equal(meter.state.calls, 2);
-	assert.equal(meter.state.unpriced, 1);
+	assert.equal(meter.state.unreported, 1);
 	// A rejection is swallowed and still clears unresolved.
 	meter.observeResult(Promise.reject(new Error("boom")), {});
 	await flush();
@@ -524,7 +512,6 @@ test("the runtime layer counts every model-calling method, with sessionId and th
 		assert.equal(meter.state.rootTotal, 15);
 		assert.equal(meter.state.otherTotal, 2 + 4 + 3, "stream, streamDeferred and classify carried the child's id");
 		assert.equal(meter.state.looseTotal, 7, "generateImages carried none");
-		assert.equal(meter.state.cost, 0.5 + 0.01 + 0.07);
 		const [row] = meter.usageSnapshot().models;
 		assert.deepEqual([row.provider, row.model, row.calls], [MODEL.provider, MODEL.id, 5], "the ledger names the model dispatched on");
 	} finally {
@@ -1020,7 +1007,6 @@ test("installs the runtime half and the compat half, and says so on one line", a
 				fallback: false,
 				fallbackError: "ERR_MODULE_NOT_FOUND",
 				capped: false,
-				costCapped: false,
 				listed: false,
 				brake: false,
 			},
@@ -1054,7 +1040,6 @@ test("a healthy meter reports its catalog and its brake as present", async () =>
 		apis: ["anthropic-messages"],
 		fallback: true,
 		capped: true,
-		costCapped: false,
 		listed: false,
 		brake: true,
 	});
@@ -1209,7 +1194,6 @@ test("no provable compat copy degrades the meter LOUDLY and leaves the runtime h
 			tried: ["pi", "hoisted"],
 			apis: [],
 			capped: true,
-			costCapped: false,
 			listed: false,
 			// The brake's stream factory comes from the accepted copy, so without one the cap is
 			// enforced only through session.abort(): capped-but-brakeless, said out loud.
@@ -1386,25 +1370,25 @@ test("a failed version probe is silent -- no extra log line, no path, and the me
 
 // ── Issues #501/#502, PR 1: one stop for every policy ─────────────────────────────────────────────────
 //
-// The seams the cost cap and the model list sit on. No guard ships yet, so these hold the shape: one stop
+// The seams the model list sits on (the token cap is the meter's settle-time check, no guard). No guard ships yet, so these hold the shape: one stop
 // reason, first wins; a brake armed by any of the three policies; a guard hook offered every physical call;
 // and a runner that refuses a policy it cannot enforce before a call.
 
 test("the meter's stop is first-wins: a later stop never overwrites the reason, and onStop fires once", () => {
 	const fired = [];
-	const meter = createUsageMeter({ maxTokens: 10, maxCostMicros: 0, onStop: (reason) => fired.push(reason) });
-	assert.equal(meter.stop(COST_CAP), true, "the first stop wins");
-	assert.equal(meter.state.stopReason, COST_CAP);
-	assert.equal(meter.stop(MODEL_NOT_ALLOWED), false, "a second stop is refused");
-	meter.record(usage({ total: 99 })); // crosses the token cap AFTER the cost stop
-	assert.equal(meter.state.stopReason, COST_CAP, "the cause stays the first stop, not the last thing to notice");
+	const meter = createUsageMeter({ maxTokens: 10, onStop: (reason) => fired.push(reason) });
+	assert.equal(meter.stop(MODEL_NOT_ALLOWED), true, "the first stop wins");
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
+	assert.equal(meter.stop(TOKEN_BUDGET), false, "a second stop is refused");
+	meter.record(usage({ total: 99 })); // crosses the token cap AFTER the list stop
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, "the cause stays the first stop, not the last thing to notice");
 	assert.equal(meter.state.breached, false, "breached means the token cap was the stop, and it was not");
-	assert.deepEqual(fired, [COST_CAP]);
+	assert.deepEqual(fired, [MODEL_NOT_ALLOWED]);
 	assert.throws(() => meter.stop("made-up"), /unknown meter stop/, "a reason with no message is a bug, never a silent stop");
 });
 
 test("STOP_MESSAGES names every meter stop, and breached is a read-only view of the token stop", () => {
-	assert.deepEqual(Object.keys(STOP_MESSAGES).sort(), [COST_CAP, MODEL_NOT_ALLOWED, TOKEN_BUDGET].sort());
+	assert.deepEqual(Object.keys(STOP_MESSAGES).sort(), [MODEL_NOT_ALLOWED, TOKEN_BUDGET].sort());
 	assert.equal(STOP_MESSAGES[TOKEN_BUDGET], "pi-dispatch: token cap exceeded", "the token stop's message is unchanged");
 	assert.ok(Object.isFrozen(STOP_MESSAGES));
 	const meter = createUsageMeter({ maxTokens: null });
@@ -1413,33 +1397,30 @@ test("STOP_MESSAGES names every meter stop, and breached is a read-only view of 
 	assert.equal(defaultHardStopResult("classify", MODEL).errorMessage, STOP_MESSAGES[TOKEN_BUDGET]);
 });
 
-test("the meter carries the cost cap and the list, 0 included, and refuses nonsense", () => {
-	assert.equal(createUsageMeter({}).costCap, null);
+test("the meter carries the list and refuses nonsense", () => {
 	assert.equal(createUsageMeter({}).allowed, null);
-	assert.equal(createUsageMeter({ maxCostMicros: 0 }).costCap, 0, "0 is the strictest cap, never 'off'");
 	const list = [{ provider: "anthropic", model: "claude-x" }];
 	assert.deepEqual(createUsageMeter({ allowedModels: list }).allowed, list);
-	for (const bad of [-1, 1.5, Number.NaN, "5"]) assert.throws(() => createUsageMeter({ maxCostMicros: bad }), /invalid PI_MAX_COST_MICROS/);
 	for (const bad of [[], "a/b"]) assert.throws(() => createUsageMeter({ allowedModels: bad }), /invalid PI_ALLOWED_MODELS/);
 });
 
 test("the brake answers each stop with that stop's own message, on both halves", async () => {
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxCostMicros: 0 });
+	const meter = createUsageMeter({});
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream() });
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop });
 	try {
-		meter.stop(COST_CAP);
+		meter.stop(MODEL_NOT_ALLOWED);
 		const runtime = new FakeRuntime();
 		for (const method of RUNTIME_STREAM_METHODS) {
-			assert.equal((await runtime[method](MODEL, [], {}).result()).errorMessage, "pi-dispatch: cost cap reached", method);
+			assert.equal((await runtime[method](MODEL, [], {}).result()).errorMessage, "pi-dispatch: model not allowed", method);
 		}
 		for (const method of RUNTIME_RESULT_METHODS) {
-			assert.equal((await runtime[method](MODEL, {}, {})).errorMessage, "pi-dispatch: cost cap reached", method);
+			assert.equal((await runtime[method](MODEL, {}, {})).errorMessage, "pi-dispatch: model not allowed", method);
 		}
 		const inner = fakeInner();
 		const compat = wrapProviderStreams({ inner, fallbackModels: null, meter, hardStop });
-		assert.equal((await compat.streamSimple(MODEL, [], {}).result()).errorMessage, "pi-dispatch: cost cap reached");
+		assert.equal((await compat.streamSimple(MODEL, [], {}).result()).errorMessage, "pi-dispatch: model not allowed");
 		assert.equal(calls.length + inner.calls.length, 0, "a stopped job reaches no provider, whichever policy stopped it");
 	} finally {
 		layer.restore();
@@ -1482,7 +1463,7 @@ test("the guard seam: a physical call is offered to the guard before dispatch, a
 
 test("the guard is never consulted without a brake, nor by the compat half inside a runtime dispatch", async () => {
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxCostMicros: 0 });
+	const meter = createUsageMeter({});
 	const guard = { admit: () => assert.fail("no brake, so no refusal could be answered: the guard must not be asked") };
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop: null, guard });
 	try {
@@ -1496,18 +1477,18 @@ test("the guard is never consulted without a brake, nor by the compat half insid
 	const inner = fakeInner();
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream() });
 	const asked = [];
-	const compat = wrapProviderStreams({ inner, fallbackModels: null, meter, hardStop, dispatch, guard: { admit: ({ model }) => (asked.push(model.id), COST_CAP) } });
+	const compat = wrapProviderStreams({ inner, fallbackModels: null, meter, hardStop, dispatch, guard: { admit: ({ model }) => (asked.push(model.id), MODEL_NOT_ALLOWED) } });
 	const token = dispatchToken(MODEL);
 	dispatch.run(token, () => compat.streamSimple(MODEL, [], { [DISPATCH_MARK]: token }));
 	assert.deepEqual([asked.length, inner.calls.length], [0, 1], "inside the runtime dispatch: routed, never judged twice");
 	const refused = await compat.streamSimple(MODEL, [], {}).result();
-	assert.deepEqual([asked.length, inner.calls.length, refused.errorMessage], [1, 1, "pi-dispatch: cost cap reached"], "a legacy call is judged and refused here");
-	assert.equal(meter.state.stopReason, COST_CAP);
+	assert.deepEqual([asked.length, inner.calls.length, refused.errorMessage], [1, 1, "pi-dispatch: model not allowed"], "a legacy call is judged and refused here");
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 });
 
-test("the brake is armed by ANY policy: a cost cap alone, or a list alone, arms it like a token cap", async () => {
-	for (const [label, meterArgs, costCapped, listed] of [
-		["cost cap", { maxCostMicros: 0 }, true, false],
+test("the brake is armed by ANY policy: a token cap alone, or a list alone, arms it", async () => {
+	for (const [label, meterArgs, capped, listed] of [
+		["token cap", { maxTokens: 1000 }, true, false],
 		["model list", { allowedModels: [{ provider: "anthropic", model: "claude-x" }] }, false, true],
 	]) {
 		const copy = fakeCopy(["anthropic-messages"]);
@@ -1520,70 +1501,33 @@ test("the brake is armed by ANY policy: a cost cap alone, or a list alone, arms 
 		handle.uninstall();
 		assert.equal(handle.brake, true, `${label}: armed`);
 		assert.deepEqual(handle.enforces, [], `${label}: no guard handed to this install`);
-		assert.deepEqual([logged[0].fields.capped, logged[0].fields.costCapped, logged[0].fields.listed, logged[0].fields.brake], [false, costCapped, listed, true], label);
+		assert.deepEqual([logged[0].fields.capped, logged[0].fields.listed, logged[0].fields.brake], [capped, listed, true], label);
 	}
-	// And none of the three: no brake, which is today's line for an uncapped job.
+	// And none of them: no brake, which is today's line for an uncapped job.
 	const handle = await installProcessUsageMeter({ ...installArgs({ copy: fakeCopy(["anthropic-messages"]) }) });
 	handle.uninstall();
 	assert.equal(handle.brake, false);
 });
 
-test("providerBilled counts the calls whose cost is the provider's billed total, on their own row (issue #796)", async () => {
-	const meter = createUsageMeter();
-	const billed = (fields) => {
-		const u = usage({ input: 1, cost: 0.5 });
-		u.cost = { ...u.cost, ...fields };
-		return u;
-	};
-	const on = { provider: "openrouter", modelId: "anthropic/claude" };
-	meter.observe(streamOf(billed({ totalFromProvider: true })), on);
-	meter.observe(streamOf(billed({ totalFromProvider: true })), on);
-	meter.observe(streamOf(billed({ totalFromProvider: false })), on);
-	meter.observe(streamOf(billed({})), on);
-	// Only the boolean pi writes counts: this field reaches the run record.
-	meter.observe(streamOf(billed({ totalFromProvider: "true" })), { provider: "anthropic", modelId: "claude" });
-	// A call with no price billed nothing, whatever it claims.
-	const noPrice = usage({ input: 1 });
-	noPrice.cost = { totalFromProvider: true };
-	meter.observe(streamOf(noPrice), { provider: "anthropic", modelId: "claude" });
-	// A model-less call lands in the bucket, like every other number on it.
-	meter.observe(streamOf(billed({ totalFromProvider: true })));
-	await flush();
-	const rows = Object.fromEntries(meter.usageSnapshot().models.map((row) => [row.provider, row]));
-	assert.equal(rows.openrouter.calls, 4);
-	assert.equal(rows.openrouter.providerBilled, 2);
-	assert.equal(rows.anthropic.providerBilled, 0);
-	assert.equal(rows.anthropic.unpriced, 1);
-	assert.equal(rows.other.providerBilled, 1);
-});
-
-test("assertPoliciesEnforceable: a cap or a list the runner cannot enforce before a call is refused, the list first", () => {
-	const healthy = { meterOk: true, brake: true, enforces: [COST_CAP, MODEL_NOT_ALLOWED] };
+test("assertPoliciesEnforceable: a list the runner cannot enforce before a call is refused", () => {
+	const healthy = { meterOk: true, brake: true, enforces: [MODEL_NOT_ALLOWED] };
 	const list = [{ provider: "anthropic", model: "claude-x" }];
-	assert.doesNotThrow(() => assertPoliciesEnforceable({ ...healthy, maxCostMicros: 5, allowedModels: list }));
-	// Neither policy set: nothing to enforce, whatever the meter's state. This is every job today.
+	assert.doesNotThrow(() => assertPoliciesEnforceable({ ...healthy, allowedModels: list }));
+	// No policy set: nothing to enforce, whatever the meter's state. This is every job today.
 	assert.doesNotThrow(() => assertPoliciesEnforceable({ meterOk: false, brake: false }));
-	// Per policy: a guard for one does not pass for the other.
-	assert.doesNotThrow(() => assertPoliciesEnforceable({ ...healthy, enforces: [COST_CAP], maxCostMicros: 5 }));
-	assert.throws(() => assertPoliciesEnforceable({ ...healthy, enforces: [COST_CAP], maxCostMicros: 5, allowedModels: list }), (error) => error.piDispatchReason === MODEL_POLICY_UNENFORCEABLE);
-	assert.throws(() => assertPoliciesEnforceable({ ...healthy, enforces: [MODEL_NOT_ALLOWED], maxCostMicros: 5, allowedModels: list }), (error) => error.piDispatchReason === COST_CAP_UNENFORCEABLE);
+	// The token cap is deliberately not asserted here: it has no pre-call form to enforce (its stop is the
+	// meter's settle-time check), so there is nothing a missing brake would make it enforce early.
 	for (const [label, broken] of [
 		["meter not installed (the fallback bus meter)", { meterOk: false }],
 		["no hard-stop stream", { brake: false }],
 		["no guard", { enforces: [] }],
 	]) {
 		const state = { ...healthy, ...broken };
-		for (const [policy, args, reason] of [
-			["cost cap", { maxCostMicros: 0 }, COST_CAP_UNENFORCEABLE],
-			["list", { allowedModels: list }, MODEL_POLICY_UNENFORCEABLE],
-			["both, the list named first", { maxCostMicros: 1, allowedModels: list }, MODEL_POLICY_UNENFORCEABLE],
-		]) {
-			assert.throws(
-				() => assertPoliciesEnforceable({ ...state, ...args }),
-				(error) => error.piDispatchExit === EXIT_POLICY && error.piDispatchReason === reason && !error.message.includes("claude-x"),
-				`${label}, ${policy}`,
-			);
-		}
+		assert.throws(
+			() => assertPoliciesEnforceable({ ...state, allowedModels: list }),
+			(error) => error.piDispatchExit === EXIT_POLICY && error.piDispatchReason === MODEL_POLICY_UNENFORCEABLE && !error.message.includes("claude-x"),
+			label,
+		);
 	}
 });
 
@@ -1591,17 +1535,18 @@ test("assertPoliciesEnforceable: a cap or a list the runner cannot enforce befor
 // Issue #500: the seams a child meter and the parent's fold use (not wired into run-job.mjs yet)
 // ---------------------------------------------------------------------------------------------
 
-/** A fold as foldChildLedgers returns it, with only what setChildren reads. */
-function childFold({ totals = {}, rows = [], processes = 1, unmetered = 0 } = {}) {
+/** A fold as foldChildLedgers returns it, with only what setChildren reads. `usageUnreported` rides at the top level. */
+function childFold({ totals = {}, rows = [], processes = 1, unmetered = 0, usageUnreported = 0 } = {}) {
 	return {
 		processes,
 		unmetered,
-		totals: { input: 0, output: 0, total: 0, cost: 0, calls: 0, unresolved: 0, unpriced: 0, sessions: 0, ...totals },
+		usageUnreported,
+		totals: { input: 0, output: 0, total: 0, calls: 0, unresolved: 0, usageUnreported: 0, sessions: 0, ...totals },
 		rows,
 	};
 }
-/** A ledger row with the ten numerics, zero unless given. */
-const ledgerRow = (provider, model, fields = {}) => ({ provider, model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, cost: 0, unpriced: 0, providerBilled: 0, ...fields });
+/** A ledger row with the eight numerics, zero unless given. */
+const ledgerRow = (provider, model, fields = {}) => ({ provider, model, calls: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 0, ...fields });
 
 test("onChange fires when a call is observed and again when it settles, for streams and for promises", async () => {
 	const seen = [];
@@ -1635,16 +1580,16 @@ test("a throwing onChange never reaches the provider call or the settle", async 
 
 test("rows(): first-seen order, a model-less row with null ids, copies, and a partition of the settled totals", () => {
 	const meter = createUsageMeter({ maxTokens: null });
-	meter.record(usage({ input: 1, total: 1, cost: 0.1 }), { provider: "p", modelId: "small" });
-	meter.record(usage({ input: 100, total: 100, cost: 2 }), { provider: "p", modelId: "big" });
-	meter.record({ input: 7, totalTokens: 7 }, {}); // no cost at all: unpriced
+	meter.record(usage({ input: 1, total: 1 }), { provider: "p", modelId: "small" });
+	meter.record(usage({ input: 100, total: 100 }), { provider: "p", modelId: "big" });
+	meter.record({ input: 7, totalTokens: 7 }, {}); // no usable usage: counted, tokens on the row
 	// An id the worker's rule refuses (a space, and an uppercase-only spelling is fine) folds into the model-less row.
-	meter.record(usage({ input: 5, total: 5, cost: 0.5 }), { provider: "p", modelId: "has space" });
-	meter.record(usage({ input: 2, total: 2, cost: 0.2 }), { provider: "OpenAI", modelId: "GPT-X" });
+	meter.record(usage({ input: 5, total: 5 }), { provider: "p", modelId: "has space" });
+	meter.record(usage({ input: 2, total: 2 }), { provider: "OpenAI", modelId: "GPT-X" });
 	const rows = meter.rows();
 	assert.deepEqual(rows.map((row) => [row.provider, row.model]), [["p", "small"], ["p", "big"], ["OpenAI", "GPT-X"], [null, null]], "first seen, not top by total: a written row never moves into the bucket");
-	assert.deepEqual([rows[3].calls, rows[3].total, rows[3].unpriced], [2, 12, 1]);
-	for (const key of ["input", "total", "unpriced"]) assert.equal(rows.reduce((sum, row) => sum + row[key], 0), meter.state[key], key);
+	assert.deepEqual([rows[3].calls, rows[3].total], [2, 12]);
+	for (const key of ["input", "total"]) assert.equal(rows.reduce((sum, row) => sum + row[key], 0), meter.state[key], key);
 	assert.equal(rows.reduce((sum, row) => sum + row.calls, 0), 5, "one per settled call");
 	rows[0].total = 999;
 	assert.equal(meter.rows()[0].total, 1, "copies: the caller cannot reach live state");
@@ -1660,34 +1605,37 @@ test("rows() keeps at most CHILD_LEDGER_ROWS rows, the overflow folded into the 
 	assert.equal(rows.reduce((sum, row) => sum + row.total, 0), CHILD_LEDGER_ROWS + 10);
 });
 
-test("with no children the snapshot is the pre-#500 line plus costUnreported (issue #571): the three child keys appear only after setChildren, before it", () => {
+test("with no children the snapshot is the pre-#500 line plus usageUnreported (issue #571): the three child keys appear only after setChildren, before it", () => {
 	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
-	meter.record(usage({ input: 10, output: 5, cost: 0.25 }), { sessionId: "root", provider: "p", modelId: "m" });
+	meter.record(usage({ input: 10, output: 5 }), { sessionId: "root", provider: "p", modelId: "m" });
 	assert.equal(
 		JSON.stringify(meter.snapshot()),
-		'{"input":10,"output":5,"total":15,"cost":0.25,"metered":true,"rootTotal":15,"otherTotal":0,"looseTotal":0,"sessions":1,"calls":0,"unresolved":0,"unpriced":0,"costUnreported":0}',
+		'{"input":10,"output":5,"total":15,"metered":true,"rootTotal":15,"otherTotal":0,"looseTotal":0,"sessions":1,"calls":0,"unresolved":0,"usageUnreported":0}',
 	);
 	meter.setChildren(childFold({ processes: 0 }));
-	assert.deepEqual(Object.keys(meter.snapshot()).slice(-4), ["childTotal", "childProcesses", "unmeteredChildren", "costUnreported"], "appended after unpriced, in this order");
+	assert.deepEqual(Object.keys(meter.snapshot()).slice(-4), ["childTotal", "childProcesses", "unmeteredChildren", "usageUnreported"], "appended after the flat totals, in this order");
 	assert.deepEqual(meter.snapshot().childTotal, 0);
 });
 
 test("setChildren: the totals include the children, root/other/loose stay the parent's, and the four parts sum to total", () => {
 	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
-	meter.record(usage({ input: 10, output: 5, cost: 1 }), { sessionId: "root" });
-	meter.record(usage({ input: 4, output: 0, cost: 0.5 }), { sessionId: "sub" });
+	meter.record(usage({ input: 10, output: 5 }), { sessionId: "root" });
+	meter.record(usage({ input: 4, output: 0 }), { sessionId: "sub" });
 	meter.record(usage({ input: 1, output: 0 }));
 	const before = meter.snapshot();
 	meter.setChildren(childFold({
 		processes: 3,
 		unmetered: 1,
-		totals: { input: 100, output: 20, total: 150, cost: 2.5, calls: 4, unresolved: 1, unpriced: 1, sessions: 2 },
+		// usageUnreported rides at the fold's TOP level (foldChildLedgers spreads it beside modelRefused),
+		// not inside totals: the meter adds the children's count to its own from that key.
+		usageUnreported: 1,
+		totals: { input: 100, output: 20, total: 150, calls: 4, unresolved: 1, sessions: 2 },
 	}));
 	const after = meter.snapshot();
 	assert.deepEqual([after.rootTotal, after.otherTotal, after.looseTotal], [before.rootTotal, before.otherTotal, before.looseTotal], "parent-only");
 	assert.deepEqual(
-		[after.input, after.output, after.total, after.cost, after.calls, after.unresolved, after.unpriced, after.sessions],
-		[before.input + 100, before.output + 20, before.total + 150, before.cost + 2.5, before.calls + 4, before.unresolved + 1, before.unpriced + 1, before.sessions + 2],
+		[after.input, after.output, after.total, after.calls, after.unresolved, after.usageUnreported, after.sessions],
+		[before.input + 100, before.output + 20, before.total + 150, before.calls + 4, before.unresolved + 1, before.usageUnreported + 1, before.sessions + 2],
 	);
 	assert.deepEqual([after.childTotal, after.childProcesses, after.unmeteredChildren], [150, 3, 1]);
 	assert.equal(after.rootTotal + after.otherTotal + after.looseTotal + after.childTotal, after.total, "root + other + loose + child == total");
@@ -1757,13 +1705,13 @@ test("isStopped is asked before dispatch on every runtime method, and its reason
 		runtime.streamSimple(MODEL, [], {});
 		assert.deepEqual(order, ["asked:0"], "asked before the provider was reached");
 		assert.equal(calls.length, 1, "null is go");
-		answer = COST_CAP;
+		answer = MODEL_NOT_ALLOWED;
 		for (const method of RUNTIME_STREAM_METHODS) {
-			assert.equal((await runtime[method](MODEL, [], {}).result()).errorMessage, STOP_MESSAGES[COST_CAP], method);
+			assert.equal((await runtime[method](MODEL, [], {}).result()).errorMessage, STOP_MESSAGES[MODEL_NOT_ALLOWED], method);
 		}
 		for (const method of RUNTIME_RESULT_METHODS) assert.equal((await runtime[method](MODEL, {}, {})).stopReason, "aborted", method);
 		assert.equal(calls.length, 1, "a stopped call reaches no provider");
-		assert.equal(meter.state.stopReason, COST_CAP);
+		assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 	} finally {
 		layer.restore();
 	}
@@ -1791,7 +1739,7 @@ test("isStopped fails closed: a garbled answer or a throw is a token-cap stop; w
 	}
 	const { FakeRuntime, calls } = fakeRuntimeClass();
 	let asked = 0;
-	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter: createUsageMeter({}), isStopped: () => (asked += 1, COST_CAP) });
+	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter: createUsageMeter({}), isStopped: () => (asked += 1, MODEL_NOT_ALLOWED) });
 	try {
 		new FakeRuntime().streamSimple(MODEL, [], {});
 		assert.deepEqual([asked, calls.length], [0, 1], "no hard stop to answer with, so no stop to ask about");
@@ -1864,7 +1812,7 @@ test("install: brake:true arms the hard stop with no policy, and isStopped then 
 	const handle = await installProcessUsageMeter({ ...args, meter, brake: true, isStopped: () => stop, log: (event, fields) => logged.push({ event, fields }) });
 	try {
 		assert.equal(handle.brake, true);
-		assert.deepEqual([logged[0].fields.capped, logged[0].fields.costCapped, logged[0].fields.listed, logged[0].fields.brake], [false, false, false, true]);
+		assert.deepEqual([logged[0].fields.capped, logged[0].fields.listed, logged[0].fields.brake], [false, false, true]);
 		const runtime = new args.ModelRuntime();
 		stop = TOKEN_BUDGET;
 		assert.equal((await runtime.streamSimple(MODEL, [], {}).result()).stopReason, "aborted");
@@ -1910,34 +1858,35 @@ test("setChildren saturates a number it cannot carry at MAX_SAFE_INTEGER, never 
 	const meter = createUsageMeter({ maxTokens: 500 });
 	const M = Number.MAX_SAFE_INTEGER;
 	meter.setChildren(childFold({
-		totals: { input: Infinity, output: Number.NaN, total: 1e308, cost: -1, calls: M * 2, unresolved: M + 2, unpriced: "3", sessions: undefined },
-		rows: [ledgerRow("p", "m", { calls: 1, total: Infinity, cost: 1e308 })],
+		usageUnreported: "3",
+		totals: { input: Infinity, output: Number.NaN, total: 1e308, calls: M * 2, unresolved: M + 2, sessions: undefined },
+		rows: [ledgerRow("p", "m", { calls: 1, total: Infinity })],
 	}));
 	const snap = meter.snapshot();
-	for (const key of ["input", "output", "total", "cost", "calls", "unresolved", "unpriced", "sessions"]) assert.equal(snap[key], M, key);
+	for (const key of ["input", "output", "total", "calls", "unresolved", "usageUnreported", "sessions"]) assert.equal(snap[key], M, key);
 	assert.equal(meter.state.stopReason, TOKEN_BUDGET, "too much to count is over any cap");
 	const [row] = meter.usageSnapshot().models;
-	assert.deepEqual([row.total, row.cost], [M, M]);
+	assert.equal(row.total, M);
 	for (const r of meter.usageSnapshot().models) for (const [key, value] of Object.entries(r)) if (typeof value === "number") assert.ok(Number.isFinite(value), `${key}: no Infinity reaches the exit line as null`);
 });
 
 test("setChildren keeps a high-water mark: a fold with less never lowers the totals or a row, but unresolved and unmetered follow the fold", () => {
 	const meter = createUsageMeter({ maxTokens: 1000 });
-	meter.setChildren(childFold({ processes: 2, unmetered: 1, totals: { input: 900, total: 900, cost: 5, calls: 3, unresolved: 1, sessions: 1 }, rows: [ledgerRow("p", "m", { calls: 2, input: 900, total: 900, cost: 5 })] }));
+	meter.setChildren(childFold({ processes: 2, unmetered: 1, totals: { input: 900, total: 900, calls: 3, unresolved: 1, sessions: 1 }, rows: [ledgerRow("p", "m", { calls: 2, input: 900, total: 900 })] }));
 	meter.setChildren(childFold({ processes: 0, unmetered: 0 }));
 	const snap = meter.snapshot();
 	// unmetered follows the fold (issue #500 part E's review): the children hook keeps that count itself, and may
 	// un-count a child that was slow to start.
-	assert.deepEqual([snap.total, snap.cost, snap.calls, snap.unresolved, snap.childProcesses, snap.unmeteredChildren], [900, 5, 3, 0, 2, 0]);
-	assert.deepEqual(meter.usageSnapshot().models.map((row) => [row.model, row.total, row.cost]), [["m", 900, 5]]);
+	assert.deepEqual([snap.total, snap.calls, snap.unresolved, snap.childProcesses, snap.unmeteredChildren], [900, 3, 0, 2, 0]);
+	assert.deepEqual(meter.usageSnapshot().models.map((row) => [row.model, row.total]), [["m", 900]]);
 });
 
-test("record clamps a negative usage field or price at 0, still priced", () => {
+test("record clamps a negative usage field at 0", () => {
 	const meter = createUsageMeter({ maxTokens: null });
-	meter.record({ input: -5, output: 3, totalTokens: -2, cacheRead: -1, cost: { total: -0.5 } }, { provider: "p", modelId: "m" });
-	assert.deepEqual([meter.state.input, meter.state.output, meter.state.total, meter.state.cost, meter.state.unpriced], [0, 3, 0, 0, 0]);
+	meter.record({ input: -5, output: 3, totalTokens: -2, cacheRead: -1 }, { provider: "p", modelId: "m" });
+	assert.deepEqual([meter.state.input, meter.state.output, meter.state.total], [0, 3, 0]);
 	const [row] = meter.rows();
-	assert.deepEqual([row.input, row.cacheRead, row.cost, row.unpriced], [0, 0, 0, 0]);
+	assert.deepEqual([row.input, row.cacheRead], [0, 0]);
 });
 
 test("rows() folds an id that is not printable ASCII (U+212A KELVIN SIGN lowercases to k) into the model-less row", () => {
@@ -1962,9 +1911,9 @@ test("a stop fires onChange, so a guard refusal reaches the child ledger with it
 	}
 	const stops = [];
 	const plain = createUsageMeter({ maxTokens: null, onChange: () => stops.push(plain.state.stopReason) });
-	plain.stop(COST_CAP);
+	plain.stop(MODEL_NOT_ALLOWED);
 	plain.stop(TOKEN_BUDGET);
-	assert.deepEqual(stops, [COST_CAP], "only the stop that wins");
+	assert.deepEqual(stops, [MODEL_NOT_ALLOWED], "only the stop that wins");
 });
 
 test("install: brake:true or isStopped with no hard stop to build is a failed install, not a silent one", async () => {
@@ -1985,7 +1934,6 @@ test("install: brake:true or isStopped with no hard stop to build is a failed in
 
 test("install: a throwing children hook stops a meter with a policy, by the unmetered-child rule; teardown fields never overwrite the meter's", async () => {
 	const cases = [
-		[{ maxCostMicros: 100, maxTokens: 10 }, COST_CAP],
 		[{ maxTokens: 10, allowedModels: [{ provider: "p", model: "m" }] }, TOKEN_BUDGET],
 		[{ allowedModels: [{ provider: "p", model: "m" }] }, MODEL_NOT_ALLOWED],
 	];
@@ -2017,7 +1965,7 @@ test("install: a throwing children hook stops a meter with a policy, by the unme
 });
 
 // ---------------------------------------------------------------------------------------------
-// Issue #571: an answer whose usage is broken counts costUnreported, in the meter, capped or not
+// Issue #571: an answer whose usage is broken or missing counts usageUnreported, in the meter, capped or not
 // ---------------------------------------------------------------------------------------------
 
 const PRICED = { api: "openai-completions", provider: "lan", id: "priced", cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, compat: { maxTokensField: "max_tokens" } };
@@ -2026,32 +1974,21 @@ const FREE = { ...PRICED, id: "free", cost: { input: 0, output: 0, cacheRead: 0,
 const TEXT = [{ type: "text", text: "a long answer" }];
 const answer = ({ stopReason = "stop", content = TEXT, input = 0, output = 0, cacheRead = 0, cost = 0 } = {}) => ({ role: "assistant", stopReason, content, usage: { input, output, cacheRead, cacheWrite: 0, totalTokens: input + output + cacheRead, cost: { total: cost } } });
 
-test("pricedModel: any rate above 0 in the table, a tier or an allowed fallback; a missing table is priced", () => {
-	assert.equal(pricedModel(PRICED), true);
-	assert.equal(pricedModel(FREE), false);
-	assert.equal(pricedModel({ ...FREE, cost: { ...FREE.cost, tiers: [{ inputTokensAbove: 10, input: 0, output: 3, cacheRead: 0, cacheWrite: 0 }] } }), true, "a priced tier");
-	assert.equal(pricedModel({ ...FREE, compat: { allowedFallbackModels: [{ provider: "a", model: "b", cost: { input: 1, output: 0, cacheRead: 0, cacheWrite: 0 } }] } }), true, "a priced fallback");
-	assert.equal(pricedModel({ ...FREE, cost: undefined }), true, "no table: not proof of a free call");
-	assert.equal(pricedModel({ ...FREE, cost: { input: "1", output: 0 } }), true, "a rate that is not a number");
-	assert.equal(pricedModel({ ...FREE, cost: { input: 0, output: 0 } }), false, "absent rates are 0");
+test("usageUnreported: a missing usage block, zero input, a started failure, and content with no output count are broken; an unanswered call is not", () => {
+	assert.equal(usageUnreported(undefined, "openai-completions"), true, "no usage block at all: the count is short");
+	assert.equal(usageUnreported(answer(), "openai-completions"), true, "pi's zeros for a missing usage block");
+	assert.equal(usageUnreported(answer({ input: 0, output: 500 }), "openai-completions"), true, "no input side");
+	assert.equal(usageUnreported(answer({ cacheRead: 1000, output: 200 }), "openai-completions"), false, "cache-only input is input");
+	assert.equal(usageUnreported(answer({ stopReason: "error", input: 100, output: 1 }), "anthropic-messages"), true, "failed after it started: partial");
+	assert.equal(usageUnreported(answer({ stopReason: "aborted", content: [] }), "openai-completions"), false, "never started: nothing was consumed, the zeros are honest");
+	assert.equal(usageUnreported(answer({ stopReason: "toolUse", content: [{ type: "toolCall", id: "t", name: "bash", arguments: {} }], input: 5000 }), "openai-completions"), true, "output 0 with a tool call: the final usage chunk was lost");
+	assert.equal(usageUnreported(answer({ content: [{ type: "text", text: "x".repeat(20000) }], input: 1200, output: 1 }), "anthropic-messages"), true, "output stuck at message_start's 1");
+	assert.equal(usageUnreported(answer({ content: [{ type: "text", text: "yes" }], input: 1200, output: 1 }), "openai-completions"), false, "1 output token elsewhere is a count");
+	assert.equal(usageUnreported(answer({ content: [{ type: "text", text: "" }], input: 1200, output: 0 }), "openai-completions"), false, "an empty answer with output 0 is consistent");
+	assert.equal(usageUnreported(answer({ input: 100, output: 20 }), "anthropic-messages"), false, "a whole answer");
 });
 
-test("unreportedUsage: zero input, a started failure, and content with no output count are broken; an unanswered call is not", () => {
-	assert.equal(unreportedUsage(answer(), "openai-completions"), true, "pi's zeros for a missing usage block");
-	assert.equal(unreportedUsage(answer({ input: 0, output: 500, cost: 0.001 }), "openai-completions"), true, "no input side");
-	assert.equal(unreportedUsage(answer({ cacheRead: 1000, output: 200, cost: 0.001 }), "openai-completions"), false, "cache-only input is input");
-	assert.equal(unreportedUsage(answer({ stopReason: "error", input: 100, output: 1, cost: 0.0001 }), "anthropic-messages"), true, "failed after it started: partial");
-	assert.equal(unreportedUsage(answer({ stopReason: "aborted", content: [] }), "openai-completions"), false, "never started: costUnanswered's, not this");
-	assert.equal(unreportedUsage(answer({ stopReason: "toolUse", content: [{ type: "toolCall", id: "t", name: "bash", arguments: {} }], input: 5000, cost: 0.005 }), "openai-completions"), true, "output 0 with a tool call: the final usage chunk was lost");
-	assert.equal(unreportedUsage(answer({ content: [{ type: "text", text: "x".repeat(20000) }], input: 1200, output: 1, cost: 0.0012 }), "anthropic-messages"), true, "output stuck at message_start's 1");
-	assert.equal(unreportedUsage(answer({ content: [{ type: "text", text: "yes" }], input: 1200, output: 1, cost: 0.0012 }), "openai-completions"), false, "1 output token elsewhere is a count");
-	assert.equal(unreportedUsage(answer({ content: [{ type: "text", text: "" }], input: 1200, output: 0, cost: 0.0012 }), "openai-completions"), false, "an empty answer with output 0 is consistent");
-	assert.equal(unreportedUsage(answer({ input: 100, output: 20, cost: 0.0001 }), "anthropic-messages"), false, "a whole answer");
-	assert.equal(unreportedUsage({ stopReason: "stop", content: TEXT, usage: { input: 0, cost: {} } }, "openai-completions"), false, "no finite cost: the meter's unpriced already");
-	assert.equal(unreportedUsage(undefined, "openai-completions"), false);
-});
-
-test("the meter counts costUnreported on an uncapped run, on a priced model, before the change hook writes, never for a forward", async () => {
+test("the meter counts usageUnreported on an uncapped run, before the change hook writes, never for a forward", async () => {
 	const seen = [];
 	const meter = createUsageMeter({ maxTokens: null, onChange: () => seen.push(meter.state.unreported) });
 	const observe = (message, model, extra = {}) => {
@@ -2061,26 +1998,25 @@ test("the meter counts costUnreported on an uncapped run, on a priced model, bef
 	};
 	observe(answer(), PRICED);
 	await flush();
-	assert.equal(meter.snapshot().costUnreported, 1, "no cap, no guard: still counted");
+	assert.equal(meter.snapshot().usageUnreported, 1, "no cap, no guard: still counted");
 	assert.equal(seen.at(-1), 1, "the settle's ledger write already carries it");
-	observe(answer(), FREE);
-	observe(answer({ input: 10, output: 5, cost: 0.00002 }), PRICED);
+	observe(answer({ input: 10, output: 5 }), PRICED);
 	observe(answer({ stopReason: "error", content: [] }), PRICED);
 	observe(answer(), PRICED, { forwarded: () => true });
 	await flush();
-	assert.equal(meter.snapshot().costUnreported, 1, "free, whole, unanswered and forwarded calls are not counted");
+	assert.equal(meter.snapshot().usageUnreported, 1, "whole, unanswered and forwarded calls are not counted");
 	// A caller with no model in its context (outside the two wrappers) is never counted.
 	meter.observe(streamOf(usage({})), { provider: "lan", modelId: "priced" });
 	await flush();
-	assert.equal(meter.snapshot().costUnreported, 1);
+	assert.equal(meter.snapshot().usageUnreported, 1);
 	// The result methods too: a classify that reports no input.
 	meter.observeResult(Promise.resolve({ answers: {}, stopReason: "stop", usage: usage({}) }), { provider: "lan", modelId: "priced", model: PRICED });
 	await flush();
-	assert.equal(meter.snapshot().costUnreported, 2);
+	assert.equal(meter.snapshot().usageUnreported, 2);
 	// The children's count is added, as a high-water mark.
-	meter.setChildren({ processes: 1, unmetered: 0, totals: { input: 0, output: 0, total: 0, cost: 0, calls: 1, unresolved: 0, unpriced: 0, sessions: 1 }, rows: [], costUnreported: 3 });
-	meter.setChildren({ processes: 1, unmetered: 0, totals: { input: 0, output: 0, total: 0, cost: 0, calls: 1, unresolved: 0, unpriced: 0, sessions: 1 }, rows: [], costUnreported: 1 });
-	assert.equal(meter.snapshot().costUnreported, 5);
+	meter.setChildren({ processes: 1, unmetered: 0, totals: { input: 0, output: 0, total: 0, calls: 1, unresolved: 0, usageUnreported: 0, sessions: 1 }, rows: [], usageUnreported: 3 });
+	meter.setChildren({ processes: 1, unmetered: 0, totals: { input: 0, output: 0, total: 0, calls: 1, unresolved: 0, usageUnreported: 0, sessions: 1 }, rows: [], usageUnreported: 1 });
+	assert.equal(meter.snapshot().usageUnreported, 5);
 });
 
 test("a router that forwards asynchronously is not counted for its own zero usage, through either half; one that does not forward is (issue #571)", async () => {
@@ -2126,18 +2062,17 @@ test("a router that forwards asynchronously is not counted for its own zero usag
 		await runtime.streamSimple(PROXY, {}, {}).result();
 		await runtime.streamSimple({ ...PROXY, id: "proxy-legacy" }, {}, {}).result();
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		assert.deepEqual([meter.state.calls, meter.snapshot().costUnreported], [4, 0], "two forwards, metered upstream, the routers' zeros not counted");
-		assert.ok(Math.abs(meter.state.cost - 0.009) < 1e-12, "the cost is the upstream's");
+		assert.deepEqual([meter.state.calls, meter.snapshot().usageUnreported], [4, 0], "two forwards, metered upstream, the routers' zeros not counted");
 		await runtime.streamSimple(LONE, {}, {}).result();
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		assert.equal(meter.snapshot().costUnreported, 1, "a provider that answered zeros with no forward is counted");
+		assert.equal(meter.snapshot().usageUnreported, 1, "a provider that answered zeros with no forward is counted");
 		// A forward that THROWS, which the router catches and answers itself with zeros: the same counters through
 		// either half, because both mark the forward before they dispatch it.
-		const before = meter.snapshot().costUnreported;
+		const before = meter.snapshot().usageUnreported;
 		await runtime.streamSimple({ ...PROXY, id: "catch-runtime" }, {}, {}).result();
 		await runtime.streamSimple({ ...PROXY, id: "catch-legacy" }, {}, {}).result();
 		await new Promise((resolve) => setTimeout(resolve, 5));
-		assert.equal(meter.snapshot().costUnreported, before, "a forward that threw still marks the call that made it, in both halves");
+		assert.equal(meter.snapshot().usageUnreported, before, "a forward that threw still marks the call that made it, in both halves");
 	} finally {
 		layer.restore();
 	}

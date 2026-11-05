@@ -39,7 +39,7 @@ import { findDuplicateKey } from "./json-duplicates.mjs";
 import { FORGE_MCP_KINDS, FORGE_MCP_SERVER_NAME, MCP_SERVER_NAME_RE } from "./mcp-config.mjs";
 import { isModelRolesField, validateModelRoles } from "./model-roles.mjs";
 import { validateModelRef } from "./model-ref.mjs";
-import { parseUsdMicros } from "./money.mjs";
+import { optionalTokenCount, retiredDollarMessage } from "./budget-rule.mjs";
 import { validateApprovalConfig } from "./approval-policy.mjs";
 // The project id rule, from its import-free module, so a bundle's `project` is held to the one rule projects.json is.
 import { PROJECT_ID_RE } from "./project-id.mjs";
@@ -559,7 +559,7 @@ function normalizeWatch(entry, index, path, state) {
 	const raw = entry.run;
 	const mode = raw.mode ?? "investigate";
 	if (!["investigate", "issue"].includes(mode)) throw configError("watch: mode must be investigate or issue; direct fixes need a human approval");
-	const allowed = new Set(["kind", "mode", "folder", "flow", "task", "excludeTools", "maxCostUsd", "provider", "model", "maxTurns", "models", "image", "backend", "secrets", "secretBundle", "skillsDir", "issue", "queryLogs"]);
+	const allowed = new Set(["kind", "mode", "folder", "flow", "task", "excludeTools", "maxTokens", "provider", "model", "maxTurns", "models", "image", "backend", "secrets", "secretBundle", "skillsDir", "issue", "queryLogs"]);
 	for (const key of Object.keys(raw)) if (!allowed.has(key)) throw configError("watch: unsupported run field");
 	if (raw.kind !== "local") throw configError("watch: run.kind must be local");
 	let issue;
@@ -577,7 +577,7 @@ function normalizeWatch(entry, index, path, state) {
 		if (entry.decide !== undefined) throw configError("watch: decide is configured on investigate rules with an issue fallback");
 		return { on, run: { kind: "local", mode, issue } };
 	}
-	if (raw.maxCostUsd === undefined || parseUsdMicros(raw.maxCostUsd) === null) throw configError("watch: investigate requires maxCostUsd");
+	if (raw.maxTokens === undefined || optionalTokenCount(raw.maxTokens, "watch: investigate maxTokens") === null) throw configError("watch: investigate requires maxTokens (the retired maxCostUsd was a dollar cap; budgets are token-denominated now)");
 	// Reuse the local execution validators with a synthetic schedule that is never returned or installed.
 	// Every admitted field is projected above; webhook-only authority cannot enter through this path.
 	const local = normalizeCron({ type: "cron", id: on.id, pattern: "0 0 * * *" }, { ...raw, packages: false, github: false }, index, path, { seenCronIds: new Set() });
@@ -602,12 +602,12 @@ function normalizeWatchQueries(value) {
 
 function normalizeWatchDecisionConfig(value, issue) {
 	if (!issue) throw configError("watch: decide requires a reviewed run.issue fallback");
-	if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["model", "maxCostUsd", "questions", "act", "fields", "shadow"].includes(k))) throw configError("watch: invalid decide block");
-	if (typeof value.model !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./:@~-]+$/.test(value.model) || value.maxCostUsd === undefined) throw configError("watch: decide requires a model and cost cap");
-	parseUsdMicros(value.maxCostUsd);
+	if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["model", "maxTokens", "questions", "act", "fields", "shadow"].includes(k))) throw configError("watch: invalid decide block");
+	if (typeof value.model !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./:@~-]+$/.test(value.model) || value.maxTokens === undefined) throw configError("watch: decide requires a model and token budget");
+	optionalTokenCount(value.maxTokens, "watch: decide maxTokens");
 	if (value.shadow !== undefined && typeof value.shadow !== "boolean") throw configError("watch: decide.shadow must be boolean");
 	const { shadow = true, ...policy } = value;
-	const checked = validateWatchDecision({ ...policy, maxCostUsd: String(policy.maxCostUsd) }, { resolveModel: ref => { const i = ref.indexOf("/"); return builtinModel(ref.slice(0, i), ref.slice(i + 1)); } });
+	const checked = validateWatchDecision({ ...policy, maxTokens: policy.maxTokens }, { resolveModel: ref => { const i = ref.indexOf("/"); return builtinModel(ref.slice(0, i), ref.slice(i + 1)); } });
 	if (!checked.ok) throw configError("watch: decide-refused; require a known input-only classifier and bounded questions");
 	return { ...checked.config, shadow };
 }
@@ -717,7 +717,7 @@ function normalizeCron(on, run, index, path, state) {
 	// freeze today's default into every stored repeatable.
 	return {
 		on: { type: "cron", id, pattern },
-		run: { kind: "local", folder: run.folder, flow: run.flow, task: run.task, provider: ref.provider, model: ref.model, maxTurns: ref.maxTurns, github: run.github, packages, image, resume, ...(command !== undefined && { command }), ...(skillsDir !== undefined && { skillsDir }), ...(secrets !== undefined && { secrets }), ...(secretsProfile !== undefined && { secretsProfile }), ...(secretBundle !== undefined && { secretBundle }), ...(backend !== undefined && { backend }), ...(excludeTools !== undefined && { excludeTools }), ...(mcp !== undefined && { mcp }), ...(ref.models !== undefined && { models: ref.models }), ...(ref.fallbackModels !== undefined && { fallbackModels: ref.fallbackModels }), ...(ref.maxCostUsd !== undefined && { maxCostUsd: ref.maxCostUsd }), ...(portfolio !== undefined && { portfolio }), ...(progress !== undefined && { progress }), ...(statusComment !== undefined && { statusComment }), ...(recover !== undefined && { recover }), ...(steer !== undefined && { steer }) },
+		run: { kind: "local", folder: run.folder, flow: run.flow, task: run.task, provider: ref.provider, model: ref.model, maxTurns: ref.maxTurns, github: run.github, packages, image, resume, ...(command !== undefined && { command }), ...(skillsDir !== undefined && { skillsDir }), ...(secrets !== undefined && { secrets }), ...(secretsProfile !== undefined && { secretsProfile }), ...(secretBundle !== undefined && { secretBundle }), ...(backend !== undefined && { backend }), ...(excludeTools !== undefined && { excludeTools }), ...(mcp !== undefined && { mcp }), ...(ref.models !== undefined && { models: ref.models }), ...(ref.fallbackModels !== undefined && { fallbackModels: ref.fallbackModels }), ...(ref.maxTokens !== undefined && { maxTokens: ref.maxTokens }), ...(portfolio !== undefined && { portfolio }), ...(progress !== undefined && { progress }), ...(statusComment !== undefined && { statusComment }), ...(recover !== undefined && { recover }), ...(steer !== undefined && { steer }) },
 	};
 }
 
@@ -1825,9 +1825,9 @@ export function recoverVenueProblem(venue) {
 
 /**
  * The `run` field a key spells or nearly spells (`run.provider`, `run.model`, `run.models`, `run.maxTurns`,
- * `run.maxCostUsd`), or null. The exact field names match too: the CALLER decides whether an exact name is legal
+ * `run.maxTokens`), or null. The exact field names match too: the CALLER decides whether an exact name is legal
  * where it found it (the loader allows them under `run`, never under `on`; the console's trigger tools refuse
- * `run.models` and `run.maxCostUsd` in any spelling, issue #501 part 7). One sweep, so the two cannot disagree on
+ * `run.models` and `run.maxTokens` in any spelling, issue #501 part 7). One sweep, so the two cannot disagree on
  * what a near miss is.
  */
 export function runModelFieldNearMiss(key) {
@@ -1861,7 +1861,12 @@ const RUN_MODEL_NEAR_MISS_TARGETS = Object.freeze({
 	models: "run.models", modelids: "run.models", modelnames: "run.models", allowedmodels: "run.models", allowedmodel: "run.models",
 	fallbackmodels: "run.fallbackModels", fallbackmodel: "run.fallbackModels", fallbackmodelid: "run.fallbackModels", fallbackmodelids: "run.fallbackModels", fallbackmodelname: "run.fallbackModels", fallbackmodelnames: "run.fallbackModels",
 	maxturns: "run.maxTurns", maxturn: "run.maxTurns",
-	maxcostusd: "run.maxCostUsd", maxcost: "run.maxCostUsd",
+	maxtokens: "run.maxTokens", maxtoken: "run.maxTokens",
+	// The retired dollar keys and their post-migration slips all point at the token field that replaced them:
+	// the sweep's suggestion must not name a field this build refuses on sight.
+	maxcostusd: "run.maxTokens", maxcost: "run.maxTokens",
+	maxcosttokens: "run.maxTokens", max_cost_tokens: "run.maxTokens",
+	dailycosttokens: "run.dailyTokenCap", weeklycosttokens: "run.weeklyTokenCap", monthlycosttokens: "run.monthlyTokenCap",
 });
 
 /**
@@ -1874,18 +1879,18 @@ const RUN_MODEL_NEAR_MISS_TARGETS = Object.freeze({
  * absence once a model is policy, and the price difference between two models is the whole point of
  * naming one.
  *
- * `run.maxCostUsd` (issue #501) is validated here too, since the sweep below already owns its near misses:
- * the per-job dollar cap, a plain decimal string or number (`parseUsdMicros`: above 0, at most 1,000,000,
- * at most 6 decimals), carried AS WRITTEN and emitted only when present (`null` is absent, the model keys'
- * rule). It can only NARROW: the worker runs the job under the smaller of it and the deployment's cap, and
- * refuses a file with one above the env cap when it loads it (`loadSchedules`, at boot and on a live reload;
- * this loader stays pure, so it cannot read env).
+ * `run.maxTokens` (the per-job token budget, DES-TOKEN-RESERVE-AND-SETTLE) is validated here too, since the sweep
+ * below already owns its near misses: a whole number of tokens of 1 or more, emitted only when present (`null` is
+ * absent, the model keys' rule). It can only NARROW: the worker runs the job under the smaller of it and the
+ * deployment's budget, and refuses a file with one above the env budget when it loads it (`loadSchedules`, at boot
+ * and on a live reload; this loader stays pure, so it cannot read env). A trigger carrying `run.maxCostUsd` or any
+ * other retired dollar key is REFUSED with the upgrade named, never dropped.
  *
  * `run.models` (the allowed-model list) is validated with them since #502's second part, and its misspellings
  * were refused here before it was.
  */
 function validateRunModel(on, run, at, path) {
-	const exact = new Set(["provider", "model", "maxTurns", "models", "fallbackModels", "maxCostUsd"]);
+	const exact = new Set(["provider", "model", "maxTurns", "models", "fallbackModels", "maxTokens", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
 	for (const [label, source, exactIsLegal] of [
 		["run", run, true],
 		["on", on, false],
@@ -1897,19 +1902,23 @@ function validateRunModel(on, run, at, path) {
 			throw configError(`${at}: ${label}.${key} is not a field -- did you mean ${meant}? A model choice the loader drops runs the job on the deployment default while the file reads as though it chose, so a near miss is refused rather than dropped: ${path}`);
 		}
 	}
-	return { ...validateModelRef(run, at, path), ...validateMaxCostUsd(run, at, path) };
+	return { ...validateModelRef(run, at, path), ...validateMaxTokens(run, at, path) };
 }
 
-// `run.maxCostUsd` (issue #501): `{ maxCostUsd }` when present and valid, `{}` when absent or null. The
-// refusal names the trigger and the key and never the value, `parseUsdMicros`' rule.
-function validateMaxCostUsd(run, at, path) {
-	if (run?.maxCostUsd === null || run?.maxCostUsd === undefined) return {};
+// `run.maxTokens`: `{ maxTokens }` when present and valid, `{}` when absent or null. A retired dollar key
+// under `run` is REFUSED with the upgrade named (`retiredDollarMessage`), and the refusal names the trigger and
+// the key and never a value.
+function validateMaxTokens(run, at, path) {
+	for (const key of ["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]) {
+		if (run?.[key] !== null && run?.[key] !== undefined) throw configError(`${at}: run.${key} is set: ${retiredDollarMessage(key)}: ${path}`);
+	}
+	if (run?.maxTokens === null || run?.maxTokens === undefined) return {};
 	try {
-		parseUsdMicros(run.maxCostUsd, "run.maxCostUsd");
+		optionalTokenCount(run.maxTokens, "run.maxTokens");
 	} catch (error) {
 		throw configError(`${at}: ${error.message}: ${path}`);
 	}
-	return { maxCostUsd: run.maxCostUsd };
+	return { maxTokens: run.maxTokens };
 }
 
 /**

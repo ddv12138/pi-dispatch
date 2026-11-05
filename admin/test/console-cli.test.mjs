@@ -474,7 +474,7 @@ test("serve wires one fleet reader on the deployment, answers /api/state and a l
   const { paths, seams } = modules.fleet.built[0];
   assert.equal(paths.logsDir, join(dep.dir, "logs"));
   assert.equal(paths.triggersPath, join(dep.dir, "triggers.json"), "a relative default is the deployment folder's, not the shell's cwd");
-  assert.equal(typeof seams.dollarEnvFn, "function");
+  assert.equal(typeof seams.budgetEnvFn, "function");
   assert.equal(seams.readOnly, true, "the console's reader is read-only");
   assert.equal(seams.activeLimit, 50, "the console reads at most 50 active jobs per snapshot");
   // Issue #737: the waiting jobs are not the reader's to read on every snapshot: the overview's load asks for them.
@@ -528,7 +528,7 @@ test("serve wires one fleet reader on the deployment, answers /api/state and a l
   assert.equal(typeof deps.whatIf, "function");
   assert.deepEqual(deps.pricedModels(), [], "the fake façade lists nothing");
   const answer = await deps.whatIf({ model: "acme/m-1", flow: "tidy" });
-  assert.equal(answer.result.class, "seeded", "no ledgered run in an empty scan: the seeded band");
+  assert.equal(answer.result.class, "unknown", "no ledgered run in an empty scan: the unknown band (the seeded pricing class died with pricing)");
   assert.deepEqual(modules.calls.filter((c) => c[0] === "scan"), [["scan", paths.logsDir, undefined]], "one scan, at the scan's own ceiling");
   // The reader keeps its scan on serve's clock, not the wall clock: past the TTL on the injected clock it scans again.
   await deps.whatIf({ model: "acme/m-1", flow: "tidy" });
@@ -746,10 +746,10 @@ test("readSideOf: the keys a reserve estimate reads (PI_ALLOWED_MODELS, PI_MODEL
   assert.ok(RESERVE_ENV_KEYS.includes("PI_MAX_COST_USD"));
 });
 
-test("endpointSnapshotFn: the worker's endpoint snapshot, so a job that can only call a declared, free local model previews $0, and the full cap without one", async () => {
+test("endpointSnapshotFn: the worker's endpoint snapshot, so a job that can only call a declared, free local model previews 0 tokens, and the full cap without one", async () => {
   const m = await loadModules();
   assert.equal(typeof m.modelEndpoints.loadModelEndpoints, "function", "loadModules loads the worker's endpoint loader");
-  assert.equal(typeof m.modelCatalog.builtinModel, "function", "and the builtin catalog's cost lookup");
+  assert.equal(typeof m.modelCatalog.builtinModel, "function", "and the builtin catalog's zero-rated lookup");
   const fs = await import("node:fs");
   const { estimateReserve } = await import("@edgehero/pi-dispatch/reserve-estimate");
   const dir = tempDir("console-eps-");
@@ -757,14 +757,14 @@ test("endpointSnapshotFn: the worker's endpoint snapshot, so a job that can only
   mkdirSync(overlay);
   writeFileSync(join(overlay, "models.json"), JSON.stringify({ providers: { ollama: { baseUrl: "http://host.docker.internal:11434/v1", api: "openai-completions", models: [{ id: "qwen3" }] } } }));
   const paths = { valkeyUrl: "redis://127.0.0.1:6379/0", globalPiDir: overlay };
-  const job = { kind: "github", provider: "ollama", model: "qwen3", maxCostUsd: "1.5" };
+  const job = { kind: "github", provider: "ollama", model: "qwen3", maxTokens: 1500000 };
   const none = endpointSnapshotFn({ m, env: {}, paths, dir, fs })();
   assert.deepEqual(none, { endpoints: [], models: null }, "no declaration: no endpoint, and the overlay is not even read (the worker's rule)");
-  assert.equal(estimateReserve(job, { modelEndpoints: none }).dollarsMicros, 1_500_000, "not declared local: the full cap");
+  assert.equal(estimateReserve(job, { modelEndpoints: none }).tokens, 1_500_000, "not declared local: the full token cap");
   writeFileSync(join(dir, "model-endpoints.json"), JSON.stringify({ version: 1, endpoints: [{ id: "ollama", host: "host.docker.internal", port: 11434, slots: 2 }] }));
   const snap = endpointSnapshotFn({ m, env: {}, paths, dir, fs })();
   assert.equal(snap.endpoints.length, 1);
-  assert.deepEqual(estimateReserve(job, { modelEndpoints: snap, builtinModel: m.modelCatalog.builtinModel }), { slots: 1, dollarsMicros: 0, capMicros: 1_500_000, zeroRated: true });
+  assert.deepEqual(estimateReserve(job, { modelEndpoints: snap, builtinModel: m.modelCatalog.builtinModel }), { slots: 1, tokens: 0, maxTokens: 1_500_000, zeroRated: true });
   // PI_MODEL_ENDPOINTS_FILE names another file, relative to the deployment folder, as the worker resolves it.
   writeFileSync(join(dir, "eps.json"), JSON.stringify({ version: 1, endpoints: [] }));
   assert.deepEqual(endpointSnapshotFn({ m, env: { PI_MODEL_ENDPOINTS_FILE: "eps.json" }, paths, dir, fs })().endpoints, []);

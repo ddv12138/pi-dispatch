@@ -1,26 +1,26 @@
 import * as nodeFs from "node:fs";
 import { randomBytes } from "node:crypto";
 import { dirname } from "node:path";
+import { retiredDollarMessage } from "./budget-rule.mjs";
 import { ensureUnderAccountRoot } from "./config.mjs";
 import { expectRefusal } from "./file-expect.mjs";
 import { findDuplicateKey } from "./json-duplicates.mjs";
 import { modelIdProblem, providerIdProblem } from "./model-ref.mjs";
-import { checkDollarInvariant, parseUsdMicros } from "./money.mjs";
+import { checkTokenInvariant } from "./budget-rule.mjs";
 import { BUNDLE_FORMATS } from "./secret-profiles.mjs";
 import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, versionProblem } from "./store-version.mjs";
 
 /**
  * Runtime-settings overlay: the shared, durable truth between the admin extension and the worker
  * (INT-CONFIG-OVERLAY-CONTRACT, DES-RUNTIME-SETTINGS-FILE-OVERLAY). A flat `settings.json` of optional keys:
- * the fourteen settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns`, `dailyCap`,
- * `weeklyCap`, `monthlyCap`, `maxTokens`, `dailyTokenCap` (int >= 1), `concurrency` (int 1-10), `softHoldPct`
- * (int 1-99), and the dollar keys `maxCostUsd`, `dailyCostUsd`, `weeklyCostUsd`, `monthlyCostUsd`
- * (a decimal string or number, `parseUsdMicros`) -- the two operator-only resolver tables in
+ * the twelve settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns`, `dailyCap`,
+ * `weeklyCap`, `monthlyCap`, `maxTokens`, `dailyTokenCap`, `weeklyTokenCap`, `monthlyTokenCap` (int >= 1),
+ * `concurrency` (int 1-10), `softHoldPct` (int 1-99) -- the two operator-only resolver tables in
  * `OPERATOR_ONLY_KEYS` (`secretProfiles`, `secretBundles`), and an optional `version` that describes the file
  * rather than setting anything (issue #761, `SETTINGS_VERSION`). Read by the worker at each job start and written
- * atomically by the admin extension (tmp + rename). `maxTokens`/`dailyTokenCap` are the optional token
- * controls (issue #25); the dollar keys are issue #501's (a window needs `maxCostUsd`, checked on the merged
- * values by `resolveSettings`).
+ * atomically by the admin extension (tmp + rename). The token keys are the budget controls
+ * (DES-TOKEN-RESERVE-AND-SETTLE): a window needs `maxTokens`, checked on the merged values by `resolveSettings`.
+ * The dollar keys are RETIRED: an overlay carrying one is refused with the upgrade named.
  *
  * A key this build does not know is dropped from the overlay it hands out and logged, and a writer given the
  * `carry` its read returned writes that key back exactly as it found it, in its place (issue #761): the file is shared
@@ -42,7 +42,9 @@ import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, v
  * Custom: overlay validated inline per config.mjs precedent; zod not in deps
  */
 
-export const KNOWN_KEYS = ["model", "provider", "maxTurns", "dailyCap", "weeklyCap", "monthlyCap", "maxTokens", "dailyTokenCap", "concurrency", "softHoldPct", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"];
+export const KNOWN_KEYS = ["model", "provider", "maxTurns", "dailyCap", "weeklyCap", "monthlyCap", "maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap", "concurrency", "softHoldPct"];
+/** The dollar keys an older overlay may carry: REFUSED with a named reason, never dropped. */
+export const RETIRED_DOLLAR_KEYS = Object.freeze(["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
 
 /**
  * Overlay keys the OVERLAY accepts but no model-callable tool may set. `secretProfiles` maps a profile name
@@ -95,14 +97,31 @@ export function settingsVersionFor(overlay, { table = SETTINGS_KEY_VERSIONS, val
 	return Math.max(neededVersion(Object.keys(overlay), table), valueNeededVersion(overlay, valueTable));
 }
 
-// The dollar keys' near-miss spellings (issue #501), already normalised (`overlayKeyShape`), each mapped to the key it
-// meant: the four keys, their env names (`PI_MAX_COST_USD` pasted into settings.json is the likeliest slip of all),
-// the micro-dollar spelling, `costUsd`, and the bare `maxCost` forms.
+// The retired dollar keys' near-miss spellings (issue #501's table, carried over), already normalised
+// (`overlayKeyShape`), each mapped to the retired key it meant: the four keys, their env names (`PI_MAX_COST_USD`
+// pasted into settings.json is the likeliest slip of all), the micro spelling, `costUsd`, and the bare `maxCost`
+// forms. Each is REFUSED with the upgrade named, never dropped: a dollar cap the worker drops would not apply
+// while the file reads as setting one, and these were real caps.
 const DOLLAR_NEAR_MISSES = Object.freeze({
 	maxcostusd: "maxCostUsd", pimaxcostusd: "maxCostUsd", maxcostmicros: "maxCostUsd", costusd: "maxCostUsd", maxcost: "maxCostUsd",
 	dailycostusd: "dailyCostUsd", pidailycostusd: "dailyCostUsd", dailycostmicros: "dailyCostUsd", dailycost: "dailyCostUsd",
 	weeklycostusd: "weeklyCostUsd", piweeklycostusd: "weeklyCostUsd", weeklycostmicros: "weeklyCostUsd", weeklycost: "weeklyCostUsd",
 	monthlycostusd: "monthlyCostUsd", pimonthlycostusd: "monthlyCostUsd", monthlycostmicros: "monthlyCostUsd", monthlycost: "monthlyCostUsd",
+	// The post-migration slips: an operator half-renaming a retired key into the token vocabulary.
+	maxcosttokens: "maxCostUsd", max_cost_tokens: "maxCostUsd", maxcosttoken: "maxCostUsd", max_cost_token: "maxCostUsd",
+	dailycosttokens: "dailyCostUsd", dailycosttoken: "dailyCostUsd",
+	weeklycosttokens: "weeklyCostUsd", weeklycosttoken: "weeklyCostUsd",
+	monthlycosttokens: "monthlyCostUsd", monthlycosttoken: "monthlyCostUsd",
+});
+
+// The token keys' own near-misses: the ENV name pasted into the settings file (the likeliest slip of all, since the
+// env names are all-caps), and a snake_case spelling. Refused with the right key named -- these keys are LIVE, so the
+// refusal must not carry the retired-dollar message.
+const TOKEN_NEAR_MISSES = Object.freeze({
+	pimaxtokens: "maxTokens", max_tokens: "maxTokens", tokentotal: "maxTokens", tokenstotal: "maxTokens", totaltokens: "maxTokens",
+	pidailytokencap: "dailyTokenCap", daily_token_cap: "dailyTokenCap",
+	piweeklytokencap: "weeklyTokenCap", weekly_token_cap: "weeklyTokenCap",
+	pimonthlytokencap: "monthlyTokenCap", monthly_token_cap: "monthlyTokenCap",
 });
 
 // A small FIXED look-alike table, to ASCII: Cyrillic а е о р с у х к м т н в і and Greek ο α ε ρ ν τ κ ι (lowercase
@@ -211,9 +230,11 @@ function validateKeys(candidate, log) {
 			case "monthlyCap":
 			case "maxTokens":
 			case "dailyTokenCap":
+			case "weeklyTokenCap":
+			case "monthlyTokenCap":
 				// Overlay caps are positive ints. A window/cap is DISABLED by absence, not by a 0 -- `unset weeklyCap`
 				// drops the key so it falls through to env, which unset means the window is off (config.mjs). The
-				// token knobs (maxTokens, dailyTokenCap) follow the same "absent = disabled" shape (issue #25).
+				// token knobs follow the same "absent = disabled" shape (issue #25).
 				if (!isIntAtLeast(value, 1)) return { invalid: `${key} must be an integer >= 1` };
 				overlay[key] = value;
 				break;
@@ -282,18 +303,8 @@ function validateKeys(candidate, log) {
 			case "dailyCostUsd":
 			case "weeklyCostUsd":
 			case "monthlyCostUsd":
-				// Issue #501: the per-job dollar cap and the three dollar windows. Kept AS WRITTEN (a string or a number)
-				// once it parses, so the file the admin writes back holds what the operator typed, never a converted
-				// number; the worker converts it to micro-dollars per job, exactly as it converts env's. A window needs
-				// `maxCostUsd`, a cross-key rule this per-key check cannot see: `resolveSettings` applies it to the
-				// merged values.
-				try {
-					parseUsdMicros(value, key);
-				} catch (error) {
-					return { invalid: error.message };
-				}
-				overlay[key] = value;
-				break;
+				// RETIRED, fail loud: these were real caps, and dropping them would silently widen every budget they set.
+				return { invalid: retiredDollarMessage(key) };
 			case "softHoldPct":
 				// A percentage of each active cap; 100 would equal the hard wall (no band) and 0 has no meaning,
 				// so the enforced band is 1-99. Absence disables the soft-hold entirely.
@@ -301,13 +312,16 @@ function validateKeys(candidate, log) {
 				overlay[key] = value;
 				break;
 			default: {
-				// Issue #501: a near miss of a DOLLAR key is refused when its shape (`overlayKeyShape`: case, the
-				// separators, a fixed look-alike table) EXACTLY equals a known misspelling: `maxcostusd`, `MaxCostUsd`,
-				// `max_cost_usd`, `max<U+0421>ostUsd`, `PI_MAX_COST_USD`, `maxCostMicros`, `costUsd`. Dropped and logged,
-				// the operator's cap would not apply while the file reads as setting one. Every other unknown key keeps
-				// the forward-compatible drop-and-log, `host_<U+00FC>` and `maxCostCents` included.
-				const meant = Object.hasOwn(DOLLAR_NEAR_MISSES, overlayKeyShape(key)) ? DOLLAR_NEAR_MISSES[overlayKeyShape(key)] : undefined;
-				if (meant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${meant}? A dollar cap the worker drops would not apply while the file reads as set` };
+				// Issue #501's near-miss table, carried over: a near miss of a RETIRED dollar key is refused when its
+				// shape (`overlayKeyShape`: case, the separators, a fixed look-alike table) EXACTLY equals a known
+				// misspelling: `maxcostusd`, `MaxCostUsd`, `max_cost_usd`, `max<U+0421>ostUsd`, `PI_MAX_COST_USD`,
+				// `maxCostMicros`, `costUsd`. Refused with the upgrade named, never dropped. Every other unknown key
+				// keeps the forward-compatible drop-and-log, `host_<U+00FC>` and `maxCostCents` included.
+				const shape = overlayKeyShape(key);
+				const dollarMeant = Object.hasOwn(DOLLAR_NEAR_MISSES, shape) ? DOLLAR_NEAR_MISSES[shape] : undefined;
+				if (dollarMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${dollarMeant}? ${retiredDollarMessage(dollarMeant)}` };
+				const tokenMeant = Object.hasOwn(TOKEN_NEAR_MISSES, shape) ? TOKEN_NEAR_MISSES[shape] : undefined;
+				if (tokenMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${tokenMeant}? (the settings file uses the camelCase key; the all-caps spelling is the variable's env name)` };
 				log("settings_overlay_unknown_key", { key });
 				// Issue #761: the ONE place that decides a key is unknown, so the list a writer carries cannot drift from
 				// this switch. A near miss never gets here (refused above), so it is never carried either.
@@ -401,12 +415,10 @@ export function effectiveSettings(config, overlay) {
 		monthlyCap: o.monthlyCap ?? config.monthlyCap,
 		maxTokens: o.maxTokens ?? config.maxTokens,
 		dailyTokenCap: o.dailyTokenCap ?? config.dailyTokenCap,
+		weeklyTokenCap: o.weeklyTokenCap ?? config.weeklyTokenCap,
+		monthlyTokenCap: o.monthlyTokenCap ?? config.monthlyTokenCap,
 		concurrency: o.concurrency ?? config.concurrency,
 		softHoldPct: o.softHoldPct ?? config.softHoldPct,
-		maxCostUsd: o.maxCostUsd ?? config.maxCostUsd,
-		dailyCostUsd: o.dailyCostUsd ?? config.dailyCostUsd,
-		weeklyCostUsd: o.weeklyCostUsd ?? config.weeklyCostUsd,
-		monthlyCostUsd: o.monthlyCostUsd ?? config.monthlyCostUsd,
 	};
 }
 
@@ -432,7 +444,7 @@ export function effectiveSettings(config, overlay) {
 export function resolveSettings(config, read) {
 	if (read.invalid) return read.newer === true ? { invalid: read.invalid, newer: true } : { invalid: read.invalid };
 	const settings = effectiveSettings(config, read.overlay);
-	const broken = checkDollarInvariant(settings);
+	const broken = checkTokenInvariant(settings);
 	if (broken) return broken;
 	return { ...settings, secretProfiles: read.overlay?.secretProfiles ?? {}, secretBundles: read.overlay?.secretBundles ?? {} };
 }

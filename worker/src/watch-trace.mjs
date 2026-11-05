@@ -17,7 +17,7 @@ export function publicWatchTrace(entry) {
 	if (ACTIONS.includes(entry.action ?? entry.option)) out.action = entry.action ?? entry.option;
 	if (entry.modelReviewed === true && typeof entry.model === "string" && /^[A-Za-z0-9_./:@~-]{1,128}$/.test(entry.model)) { out.model = entry.model; out.modelReviewed = true; }
 	if (Number.isFinite(entry.confidence) && entry.confidence >= 0 && entry.confidence <= 1) out.confidence = entry.confidence;
-	if (Number.isFinite(entry.costUsd) && entry.costUsd >= 0) out.costUsd = entry.costUsd;
+	if (Number.isSafeInteger(entry.tokensTotal) && entry.tokensTotal >= 0) out.tokensTotal = entry.tokensTotal;
 	if (entry.probabilities && !Array.isArray(entry.probabilities) && Object.keys(entry.probabilities).every(k => ACTIONS.includes(k)) && Object.values(entry.probabilities).every(p => Number.isFinite(p) && p >= 0 && p <= 1)) out.probabilities = { ...entry.probabilities };
 	if (entry.checks && Object.keys(entry.checks).every(k => ["match", "threshold", "cooldown", "cap"].includes(k)) && Object.values(entry.checks).every(v => ["passed", "refused", "active", "at-window-end"].includes(v))) out.checks = { ...entry.checks };
 	return out;

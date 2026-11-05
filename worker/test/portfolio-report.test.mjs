@@ -11,7 +11,7 @@ import { parseEnvelope, envelopeDigest } from "../src/envelope.mjs";
 import { makeCollectPlan } from "../src/outbox-plan.mjs";
 import { buildPortfolioSnapshot } from "../src/portfolio-snapshot.mjs";
 import { PLAN_FIELDS, allocate, neutralAllocation, parsePlan } from "../src/priorities.mjs";
-import { scopeDollarKeyPrefix } from "../src/scoped-limits.mjs";
+import { scopeTokenKeyPrefix } from "../src/scoped-limits.mjs";
 import { PLAN_FIELDS as REPORT_PLAN_FIELDS, main } from "../../examples/portfolio-manager/.pi/skills/portfolio-manager/report.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -20,7 +20,7 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 // worker's own builder, so a change to the snapshot's shape reaches this file.
 
 const SCRIPT = fileURLToPath(new URL("../../examples/portfolio-manager/.pi/skills/portfolio-manager/report.mjs", import.meta.url));
-const USD = 1_000_000;
+const TOKENS = 1_000_000;
 const NOW = new Date("2026-10-12T06:00:05.000Z");
 const RAN = new Date("2026-10-12T06:03:00.000Z");
 const PROJECTS = [
@@ -29,9 +29,9 @@ const PROJECTS = [
 	{ id: "ops", members: ["/home/me/pm"] },
 ];
 const ENVELOPE = parseEnvelope(
-	JSON.stringify({ version: 1, window: "week", totalUsd: 100, floorsUsd: { shop: 10, platform: 10, ops: 5, _other: 0 }, defaultWeights: { shop: 1, platform: 1, ops: 1, _other: 1 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
+	JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, platform: 10, ops: 5, _other: 0 }, defaultWeights: { shop: 1, platform: 1, ops: 1, _other: 1 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
 	"/e/envelope.json",
-	{ projects: PROJECTS, maxCostMicros: 2 * USD },
+	{ projects: PROJECTS, maxTokens: 2 },
 );
 const FIXTURE = parsePlan(readFileSync(new URL("../../examples/portfolio-manager/plan.fixture.json", import.meta.url), "utf8"), { envelope: ENVELOPE, projects: PROJECTS, now: NOW });
 
@@ -43,8 +43,8 @@ function appliedState() {
 	return { planId: FIXTURE.id, writer: "portfolio-job", appliedAt: "2026-10-05T06:01:10.000Z", validUntil: "2026-10-13T12:00:00.000Z", lastPlanAt: "2026-10-05T06:01:10.000Z", clamped: out.clamped, weights, allocations: out.allocations, unallocated: out.unallocated, repoWeights: {}, repos: {} };
 }
 
-const week = (scope) => weekKey(NOW, scopeDollarKeyPrefix(scope));
-const SPEND = { [week("project:shop")]: "12345678", [week("project:platform")]: "4000000", [week("project:ops")]: "1995000" };
+const week = (scope) => weekKey(NOW, scopeTokenKeyPrefix(scope));
+const SPEND = { [week("project:shop")]: "29", [week("project:platform")]: "4", [week("project:ops")]: "2" };
 const fakeRedis = (values) => ({ mget: async (...keys) => keys.map((k) => values[k] ?? null) });
 
 async function snapshot(lastAttempt = { at: "2026-10-05T06:01:10.000Z", outcome: "applied", reason: null, planId: FIXTURE.id, writer: "portfolio-job", triggerId: "pm-weekly" }) {
@@ -104,12 +104,12 @@ The host judges this request after the job ends. The next report says what it me
 
 | Project | Spent | Share | Floor |
 |---|---:|---:|---:|
-| _other | $0.00 | $0.00 | $0.00 |
-| ops | $2.00 | $17.50 | $5.00 |
-| platform | $4.00 | $35.00 | $10.00 |
-| shop | $12.35 | $47.50 | $10.00 |
+| _other | 0 | 0 | 0 |
+| ops | 2 | 18 | 5 |
+| platform | 4 | 35 | 10 |
+| shop | 29 | 47 | 10 |
 
-Total spent $18.34 of $100.00.
+Total spent 35 of 100.
 Run counts in the snapshot cover this host only.
 
 Written 2026-10-12T06:03:00.000Z by the portfolio-manager flow.
@@ -313,10 +313,10 @@ test("a snapshot that exists but cannot be used says why, not that run.portfolio
 test("spend rows: a member with a share gets its own row, its label gated; a project id that is no id prints ? (#506 review)", async () => {
 	const snap = await snapshot();
 	const shop = snap.projects.find((p) => p.id === "shop");
-	shop.members = [{ ref: "abcd1234", label: "github:acme/shop <!here>|x\u202e", weight: 2, allocationMicros: 30_000_000, spentMicros: 5_000_000 }, { ref: "ffff0000", label: "local:other" }];
-	snap.projects.push({ id: "Evil | row\n", floorMicros: 0, allocationMicros: 0, spentMicros: 0, members: [] });
+	shop.members = [{ ref: "abcd1234", label: "github:acme/shop <!here>|x\u202e", weight: 2, allocationTokens: 30, spentTokens: 5 }, { ref: "ffff0000", label: "local:other" }];
+	snap.projects.push({ id: "Evil | row\n", floorTokens: 0, allocationTokens: 0, spentTokens: 0, members: [] });
 	const { out } = await run([...files({ snap }).argv, "--dry-run"]);
-	assert.ok(out.includes("| shop | $12.35 | $47.50 | $10.00 |\n| shop `github:acme/shop \u2039!here\u203a\\|x` | $5.00 | $30.00 | |\n| ? | $0.00 | $0.00 | $0.00 |\n"), out);
+	assert.ok(out.includes("| shop | 29 | 47 | 10 |\n| shop `github:acme/shop \u2039!here\u203a\\|x` | 5 | 30 | |\n| ? | 0 | 0 | 0 |\n"), out);
 	assert.ok(!out.includes("local:other"), "a member with no repo weight has no row");
 	assert.ok(!out.includes("Evil"));
 });

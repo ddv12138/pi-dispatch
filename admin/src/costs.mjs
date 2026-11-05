@@ -1,32 +1,33 @@
 /**
- * The pure cost fold (issue #53): where FACTS meet OPINIONS.
+ * The pure spend fold (issues #53 and #501, DES-TOKEN-FOLD-BY-SCAN): where FACTS meet nothing else.
  *
- * The run records are immutable facts -- what ran, what the meter counted, what the stream-time rate
- * tables priced it at. The subscriptions file and the pricing facade are opinions -- what the operator
- * says a plan costs, what a rate table says a token is worth, which counterfactual model a covered run
- * should be compared against. This module folds the two AT READ TIME and stores nothing: classification
- * is never persisted, so editing subscriptions.json retroactively reclassifies history -- correctly. An
- * operator fixing a wrong declaration should fix every view of the past, not just the future.
+ * The run records are immutable facts: what ran and what the meter counted, in tokens. Prices died
+ * with the cost era (DES-TOKEN-RESERVE-AND-SETTLE): a token is not a dollar, the rate tables are
+ * gone, and no view re-derives money the records no longer carry. What this module folds is TOKEN
+ * MEASUREMENT -- how much context each run, model, flow, repo, project and trigger consumed, how
+ * complete that measurement is, and where a plan's declared windows peaked.
  *
- * Pure by contract: no filesystem, no redis, no clock of its own (`nowMs` is an argument), and the
- * pricing facade (worker/src/pricing.mjs) arrives as an injected `pricing` argument, never a
- * module-scope worker import -- the view layer wires the real one, the tests inject a canned fake. The
- * single permitted worker coupling is budget's `dayKey`: the fold's daily buckets and the worker's
- * spend windows must agree on where a UTC day boundary falls, and sharing the one function is how the
- * two sides cannot drift.
+ * Pure by contract: no filesystem, no redis, no clock of its own (`nowMs` is an argument). The single
+ * permitted worker coupling is budget's `dayKey`: the fold's daily buckets and the worker's spend
+ * windows must agree on where a UTC day boundary falls, and sharing the one function is how the two
+ * sides cannot drift.
  *
- * Every dollar this module emits is a TYPED value `{ usd, class, floor, coverage?, planId? }` -- never
- * a bare number. The class system makes a mislabeled estimate structurally impossible: a renderer
- * cannot print a dollar without also holding what KIND of dollar it is, and the panel's fmtCost is the
- * only renderer.
+ * Every amount this module emits is a TYPED value `{ tokens, class, floor, coverage? }` -- never a
+ * bare number. The class system makes a mislabeled estimate structurally impossible: a renderer
+ * cannot print a token count without also holding what KIND of count it is, and the panel's
+ * fmtAmount is the only renderer. Three classes only (the pricing classes died with pricing):
+ *   - "metered": the run's own meter read complete (no completeness counter says otherwise);
+ *   - "estimated": a floor -- some calls went unmeasured or uncounted, so the true total is higher
+ *     (`floor: true`, rendered with the >= prefix);
+ *   - "unknown": nothing was measured at all (a pre-meter record).
  */
-
 import { dayKey } from "@edgehero/pi-dispatch/budget";
 import { fromNewerRelease, readableRecords } from "./newer-release.mjs";
 
-/** Every class a typed dollar can carry. Note what is NOT here: "free". A $0 is always "zero-rated"
- * (a rate table said zero) or "plan" (prepaid) -- the fold has no way to assert that anything is free. */
-export const COST_CLASSES = ["metered", "plan", "zero-rated", "estimated", "seeded", "unknown"];
+/** Every class a typed amount can carry. Three only: the pricing classes ("plan", "zero-rated",
+ * "seeded") died with pricing itself -- there is no rate table to rate anything zero, no plan price
+ * to amortize, and no unmeasured band to seed. */
+export const COST_CLASSES = ["metered", "estimated", "unknown"];
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const HOUR_MS = 60 * 60 * 1000;
@@ -63,11 +64,10 @@ function utcDay(ms) {
   return dayKey(new Date(ms), "day").slice("day:".length);
 }
 
-/** Construct a typed dollar -- the only shape a number leaves this module in. */
-function typed(usd, cls, { floor = false, coverage, planId } = {}) {
-  const value = { usd, class: cls, floor };
+/** Construct a typed amount -- the only shape a token count leaves this module in. */
+function typed(tokens, cls, { floor = false, coverage } = {}) {
+  const value = { tokens, class: cls, floor };
   if (coverage !== undefined) value.coverage = coverage;
-  if (planId !== undefined) value.planId = planId;
   return value;
 }
 
@@ -83,45 +83,6 @@ export function matchesGlob(id, glob) {
     .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
     .join(".*");
   return new RegExp(`^${pattern}$`, "i").test(id);
-}
-
-/** The first subscription covering (provider, model): exact provider equality plus any models-glob hit.
- * `includeHypothetical: false` is classification's view -- a what-if plan never covers anything real. */
-function coveringSubscription(provider, model, subscriptions, { includeHypothetical = false } = {}) {
-  for (const sub of subscriptions) {
-    if (!includeHypothetical && sub.hypothetical) continue;
-    if (sub.provider !== provider) continue;
-    if (Array.isArray(sub.models) && sub.models.some((glob) => matchesGlob(model, glob))) return sub;
-  }
-  return null;
-}
-
-/**
- * Classify one attribution row. Order matters:
- *   1. a matched OWNED (non-hypothetical) subscription wins outright -> "plan": the row's recorded cost
- *      is not what the plan charged, whether it is $0 (an all-zero rate table: kimi-coding, zai and
- *      zai-coding-cn under pi 0.80.7, the qwen and xiaomi token plans under 0.99.1) or an implied
- *      API-equivalent price (kimi-coding, zai and zai-coding-cn under pi 0.99.1, issue #509). History holds
- *      both shapes for one plan, and a plan row contributes $0 either way;
- *   2. a positive stream-time cost is metered truth -> "metered" -- the fold never re-prices it. For an
- *      UNDECLARED coding plan pi 0.99.1 prices, that is the implied price the rate table recorded, which is
- *      why a plan is known only from subscriptions.json and never from the provider or the rate;
- *   3. zero cost -> "zero-rated", whether the rate table says so (isZeroRated) or the model is unknown
- *      to the tables entirely. NEVER "free": "zero-rated" says a table rated it zero, which is a fact;
- *      "free" would claim nobody paid, which this fold cannot know. Nor "subscription": a $0 rate was
- *      once the mark of a coding plan, and 0.99.1 prices most of those plans while free models of
- *      metered providers stay at zero.
- */
-export function classifyRow(row, subscriptions, pricing) {
-  const sub = coveringSubscription(row.provider, row.model, Array.isArray(subscriptions) ? subscriptions : []);
-  if (sub) return { class: "plan", planId: sub.id };
-  const cost = typeof row.cost === "number" ? row.cost : 0;
-  if (cost > 0) return { class: "metered", planId: null };
-  const priced = pricing?.getPricedModel?.(row.provider, row.model) ?? null;
-  if ((priced !== null && pricing.isZeroRated(priced)) || cost === 0) return { class: "zero-rated", planId: null };
-  // Unreachable for well-formed records (the host validates costs finite and non-negative), kept so a
-  // malformed number can never masquerade as any priced class.
-  return { class: "unknown", planId: null };
 }
 
 /**
@@ -152,7 +113,6 @@ function attributionRows(record) {
         cacheRead: m.cacheRead ?? 0,
         cacheWrite: (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0),
         total: m.total ?? 0,
-        cost: m.cost ?? 0,
         quad,
       };
     });
@@ -169,47 +129,38 @@ function attributionRows(record) {
       cacheRead: 0,
       cacheWrite: 0,
       total: tokens.total ?? 0,
-      cost: tokens.cost ?? 0,
       quad: null,
     },
   ];
 }
 
 /**
- * The exit-line counters that say this run's metered cost is short of what it spent, so its dollar is a floor
- * (REQ-COST-ANALYTICS (d)). `unresolved` and `unpriced`: calls the meter could not finish or price. `unmeteredChildren`
- * (issue #500): pi child processes whose spend the runner could not count. `costUnreported` (issue #571): calls on a
- * priced model whose answer carried broken usage, which pi records at about $0; the meter writes it on every line.
- * Then the cost guard's (GUARD_FLOOR_KEYS): `longContext` (pi priced a call at base rates the provider bills higher),
- * `costUnjudged` (legacy calls may have run unmetered) and `costUnanswered` (a lost answer may still have been billed).
+ * The exit-line counters that say this run's metered TOKEN total is short of what it consumed, so its
+ * amount is a floor (REQ-COST-ANALYTICS (d), COMPLETENESS_COUNTERS). `unresolved`: calls the meter
+ * could not finish counting. `usageUnreported`: calls on a priced model whose answer carried broken
+ * usage, which pi records as nothing (the meter writes it on every line). `unmeteredChildren`: pi
+ * child processes whose tokens the runner could not count.
  *
  * The rule, per key:
- *   - PRESENT: a floor unless it is a whole number at least 0 and equal to 0. A negative, fractional or non-number
- *     value is a floor, as the worker's settlement reads anything but 0 (PR #572's review).
- *   - ABSENT: not a floor for `unresolved`, `unpriced` and `unmeteredChildren`: absent means an image that never
- *     looked (for `unmeteredChildren`, one from before issue #500 part E), and reading that as a floor would put `≥`
- *     on all history, so such a record that did spawn a pi child shows as exact (a named residual,
- *     DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY).
- *   - ABSENT, for `costUnreported` and the guard's three: a floor ONLY when the record carries `costCapMicros`. A
- *     capped record is from an image with the cost guard, and such an image that does not write one of them did not
- *     measure it (before issue #571 a capped call with no usage settled at $0 with no counter). A record with no
- *     `costCapMicros` (one from before the guard, or uncapped from an image before issue #571) stays exact, so
- *     history keeps its exact dollars. Only unreleased images wrote the guard counters, and a plan-only bucket
- *     holding one reads as an estimate.
+ *   - PRESENT and not a whole number at least 0, or PRESENT and above 0: a floor. The worker's
+ *     settlement reads anything but 0 the same way.
+ *   - ABSENT: not a floor. Absent means an image that never looked (a pre-#500-part-E record for
+ *     `unmeteredChildren`, an older meter for the rest), and reading absence as a floor would put
+ *     `>=` on all history. Such a record that did spawn a pi child shows as exact, a named residual
+ *     (DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY), not a hidden one.
  *
- * `boundExceeded` is NOT here. It says a call cost more than its pre-call bound, which is the worker's settlement concern
- * (the reservation did not bound the run, so `dollarSettlement` floors it); the metered cost itself is pi's full price,
- * so this fold's dollar is not short.
+ * `costCapMicros` and the guard's trio (`costUnreported`, `longContext`, `costUnjudged`,
+ * `costUnanswered`) are NOT here: the guard died with the cost era, and a record written before it
+ * carries none of them. `boundExceeded` never was here either: it said a call cost more than its
+ * pre-call bound, which was the worker's settlement concern; the metered tokens themselves were
+ * always pi's full count.
  */
-const FLOOR_KEYS = Object.freeze(["unresolved", "unpriced", "unmeteredChildren"]);
-const GUARD_FLOOR_KEYS = Object.freeze(["costUnreported", "longContext", "costUnjudged", "costUnanswered"]);
+const COMPLETENESS_COUNTERS = Object.freeze(["unresolved", "usageUnreported", "unmeteredChildren"]);
 
-/** Whether a run's exit-line counters make its dollar a floor (FLOOR_KEYS and GUARD_FLOOR_KEYS above). */
+/** Whether a run's exit-line counters make its token total a floor (COMPLETENESS_COUNTERS above). */
 function floorCounted(tokens) {
   const short = (value) => !(Number.isSafeInteger(value) && value >= 0) || value > 0;
-  if (FLOOR_KEYS.some((key) => tokens[key] !== undefined && short(tokens[key]))) return true;
-  const guarded = tokens.costCapMicros !== undefined;
-  return GUARD_FLOOR_KEYS.some((key) => (tokens[key] === undefined ? guarded : short(tokens[key])));
+  return COMPLETENESS_COUNTERS.some((key) => tokens[key] !== undefined && short(tokens[key]));
 }
 
 /**
@@ -224,67 +175,52 @@ function floorCounted(tokens) {
  * (`budgetReserved: true`), and so does any other refusal whose job-count give-back failed. A container the runtime
  * failed to start (`container-never-started` with an exit code, often 125) carries that code, so it stays a floor too. Telling those
  * apart would mean keying on the reason, a list every new gate would have to join; a fact the record states itself
- * would be the way to count them as $0.
+ * would be the way to count them as 0.
  */
 export function refusedBeforeSpend(record) {
   return (record.tokens === null || record.tokens === undefined) && (record.exitCode === null || record.exitCode === undefined) && record.budgetReserved === false;
 }
 
 /**
- * One run's contribution to every aggregate: its classified rows, its metered dollars, the set of
- * classes it carries, and whether its number is a floor.
+ * One run's contribution to every aggregate: its attribution rows (each carrying the run's class and
+ * floor), its metered token total, the set of classes it carries, and whether its number is a floor.
  */
-function runContribution(record, subscriptions, pricing) {
+function runContribution(record) {
   const tokens = record.tokens ?? null;
-  // A refusal before any spend (issue #507): an exact $0, never a floor, and CLASSLESS: it measured nothing, so it
-  // takes no part in a bucket's class or coverage (combineContributions), and a plan-only bucket stays `plan:<id>`.
-  // Before this it fell to the branch below and put a floor on every bucket it joined, so a lab of refusals read
-  // "≥$0.00" and counted as unmetered runs (REQ-COST-ANALYTICS (d)).
-  if (refusedBeforeSpend(record)) return { rows: [], usd: 0, classes: [], floor: false, refused: true };
-  // Pre-#25: the run spent real money and recorded nothing. $0 of class "unknown", and a FLOOR -- any
-  // total containing it understates by construction.
-  if (!tokens) return { rows: [], usd: 0, classes: ["unknown"], floor: true };
-  // Floor rule: unpriced or unresolved calls are dollars the meter could not price, and the fallback
-  // meter (metered:false) missed subagent/compaction spend entirely. Either way this run's number is a
+  // A refusal before any spend (issue #507): an exact 0, never a floor, and CLASSLESS: it measured
+  // nothing, so it takes no part in a bucket's class or coverage (combineContributions). Before this
+  // it fell to the branch below and put a floor on every bucket it joined, so a lab of refusals read
+  // ">= 0 est." and counted as unmetered runs (REQ-COST-ANALYTICS (d)).
+  if (refusedBeforeSpend(record)) return { rows: [], tokens: 0, classes: [], floor: false, refused: true };
+  // Pre-meter: the run consumed real tokens and recorded nothing. 0 of class "unknown", and a FLOOR
+  // -- any total containing it understates by construction.
+  if (!tokens) return { rows: [], tokens: 0, classes: ["unknown"], floor: true };
+  // Floor rule: the fallback meter (metered:false) missed subagent and compaction tokens entirely,
+  // and a completeness counter says which calls went uncounted. Either way this run's number is a
   // floor, and floors are sticky -- any aggregate containing one is a floor.
   const floor = tokens.metered === false || floorCounted(tokens);
-  const rows = attributionRows(record).map((row) => ({ ...row, ...classifyRow(row, subscriptions, pricing), floor }));
-  // Metered truth: the run's stream-time cost IS the number -- never re-priced here -- except that
-  // plan-covered rows contribute $0 metered to totals: the plan already paid, and their recorded cost
-  // is an all-zero rate table artifact anyway. Their api-equivalent surfaces separately.
-  const usd = rows.reduce((sum, row) => sum + (row.class === "plan" ? 0 : row.cost), 0);
-  const classes = [...new Set(rows.map((row) => row.class))];
-  return { rows, usd, classes, floor };
+  const cls = floor ? "estimated" : "metered";
+  const rows = attributionRows(record).map((row) => ({ ...row, class: cls, planId: null, floor }));
+  const total = rows.reduce((sum, row) => sum + row.total, 0);
+  return { rows, tokens: total, classes: [cls], floor };
 }
 
-/**
- * Fold run contributions into one typed dollar. Aggregation demotion: a sum stays "metered" only when
- * EVERY addend is purely metered; one plan/zero-rated/estimated/unknown addend demotes the sum to
- * "estimated", because the number no longer says what was spent -- only what was spent on the metered
- * part -- and `coverage` then reports what fraction of the bucket's runs contributed metered dollars.
- * One exception (issue #492): a bucket whose runs ONE declared plan covers, every row of them, with no run a
- * floor, keeps `plan:<id>` (REQ-COST-ANALYTICS (b): a plan-covered run never renders as $0.00, and "~$0 est."
- * is that $0 with a tilde). The model table already kept it (combineRowCosts); the trigger badge and every
- * other bucket read "~$0 est." beside it. The two conditions are what (d) and the id grammar leave: a floor's
- * `≥` has no place in `plan:<id>` and may never be dropped by aggregation (a fallback-metered run cannot see
- * subagent spend), and a subscription id may hold any character, so no separator could join two ids without
- * ambiguity. Such buckets, and any mixing plan and billed runs, stay "estimated" with coverage, as before.
- * An empty bucket is vacuously metered: $0, fully measured.
- */
+/** Fold run contributions into one typed amount. Aggregation demotion: a sum stays "metered" only
+ * when EVERY addend is metered; one "unknown" addend demotes the sum to "estimated", because the
+ * number no longer says what the window consumed -- only what its measured part consumed -- and
+ * `coverage` then reports what fraction of the bucket's runs contributed metered totals. An empty
+ * bucket is vacuously metered: 0, fully measured. */
 function combineContributions(contribs) {
-  const usd = contribs.reduce((sum, c) => sum + c.usd, 0);
+  const tokens = contribs.reduce((sum, c) => sum + c.tokens, 0);
   const floor = contribs.some((c) => c.floor);
-  // A refusal before any spend (issue #507) is classless: it is left out of every class test and of the coverage
-  // denominator, so it neither demotes a bucket nor dilutes its coverage. A bucket of refusals alone is then
-  // vacuously metered, an exact $0, like an empty bucket.
+  // A refusal before any spend (issue #507) is classless: it is left out of every class test and of
+  // the coverage denominator, so it neither demotes a bucket nor dilutes its coverage. A bucket of
+  // refusals alone is then vacuously metered, an exact 0, like an empty bucket.
   const measured = contribs.filter((c) => c.refused !== true);
   const allMetered = measured.every((c) => c.classes.length === 1 && c.classes[0] === "metered");
-  if (allMetered) return typed(usd, "metered", { floor });
-  const allPlan = !floor && measured.length > 0 && measured.every((c) => c.rows.length > 0 && c.classes.length === 1 && c.classes[0] === "plan");
-  const ids = allPlan ? [...new Set(measured.flatMap((c) => c.rows.map((row) => row.planId)))] : [];
-  if (ids.length === 1) return typed(usd, "plan", { floor, planId: ids[0] });
+  if (allMetered) return typed(tokens, "metered", { floor });
   const meteredRuns = measured.filter((c) => c.classes.includes("metered")).length;
-  return typed(usd, "estimated", { floor, coverage: meteredRuns / measured.length });
+  return typed(tokens, "estimated", { floor, coverage: measured.length > 0 ? meteredRuns / measured.length : 1 });
 }
 
 /** A record's bucketing instant: `endedAt`, or `startedAt` for a record that never ended; null when
@@ -295,31 +231,7 @@ function recordMs(record) {
 }
 
 /**
- * Re-price ledgered rows at a counterfactual model. Only rows carrying a real ledger quad participate:
- * a pre-ledger run has no cache split, and an api-equivalent back-derived from its flat totals would be
- * a guess wearing a number's clothing -- such rows are EXCLUDED here and surface through
- * coverage/provenance instead, and the exclusion makes the result a floor. Returns null when the
- * counterfactual is undeclared or nothing could be re-priced: no baseline, no number.
- */
-function repriceRows(rows, counterfactual, pricing, { extraExcluded = 0 } = {}) {
-  if (counterfactual === null || counterfactual === undefined) return null;
-  let usd = 0;
-  let repriced = 0;
-  let excluded = extraExcluded;
-  for (const row of rows) {
-    const result = row.quad === null ? null : pricing.reprice(row.quad, counterfactual);
-    if (result === null || result === undefined) {
-      excluded += 1;
-      continue;
-    }
-    usd += result.usd;
-    repriced += 1;
-  }
-  return repriced === 0 ? null : typed(usd, "estimated", { floor: excluded > 0 });
-}
-
-/**
- * Fold scanned run records against declared subscriptions and the injected pricing facade into the one
+ * Fold scanned run records into the one
  * read-model the costs view renders. Everything below is derived per call and thrown away -- nothing
  * classified here is ever written anywhere.
  *
@@ -327,7 +239,7 @@ function repriceRows(rows, counterfactual, pricing, { extraExcluded = 0 } = {}) 
  * mean something else in that release, and a misread one is a wrong dollar on every aggregate. It is counted in
  * `newerSkipped`, present only when there were any, so the view can say its totals leave them out.
  */
-export function foldCosts({ records, subscriptions, pricing, nowMs, piAiPin = null, sinceMs = null, triggerJoin = null }) {
+export function foldCosts({ records, subscriptions, nowMs, piAiPin = null, sinceMs = null, triggerJoin = null }) {
   const subs = Array.isArray(subscriptions) ? subscriptions : [];
   const runs = [];
   const { records: readable, newerSkipped } = readableRecords(records);
@@ -335,7 +247,7 @@ export function foldCosts({ records, subscriptions, pricing, nowMs, piAiPin = nu
     if (!record || typeof record !== "object") continue;
     const at = recordMs(record);
     if (at === null) continue;
-    runs.push({ record, at, contribution: runContribution(record, subs, pricing) });
+    runs.push({ record, at, contribution: runContribution(record) });
   }
   runs.sort((a, b) => a.at - b.at);
 
@@ -361,7 +273,7 @@ export function foldCosts({ records, subscriptions, pricing, nowMs, piAiPin = nu
     // The per-flow daily series shares daily's origin and span, so the flow multiples and the
     // global columns describe the same days (issue #181).
     dailyByFlow: buildDailyByFlow(runs, firstRunMs ?? fromMs, toMs),
-    byFlow: buildByFlow(runs, subs, pricing),
+    byFlow: buildByFlow(runs),
     byModel: buildByModel(runs),
     // null, not [], without a join: "not computed" and "nothing attributed" are different sentences,
     // and a caller that wired no triggers must not render an empty table that looks exhaustive.
@@ -369,7 +281,7 @@ export function foldCosts({ records, subscriptions, pricing, nowMs, piAiPin = nu
     byRepo: buildByRepo(runs),
     // Issue #499 part C: by the project the record carries, never by the projects file as it is now.
     byProject: buildByProject(runs),
-    plans: buildPlans(runs, subs, pricing, days),
+    plans: buildPlans(runs, subs, days),
     provenance: buildProvenance(runs, piAiPin),
     ...(newerSkipped > 0 ? { newerSkipped } : {}),
   };
@@ -390,7 +302,7 @@ function buildDaily(runs, fromMs, toMs) {
   for (let cursor = Math.floor(fromMs / DAY_MS) * DAY_MS; cursor <= toMs; cursor += DAY_MS) {
     const day = utcDay(cursor);
     const contribs = buckets.get(day) ?? [];
-    daily.push({ day, cost: combineContributions(contribs), runs: contribs.length });
+    daily.push({ day, amount: combineContributions(contribs), runs: contribs.length });
   }
   return daily;
 }
@@ -427,7 +339,7 @@ function buildDailyByFlow(runs, fromMs, toMs) {
     for (let cursor = Math.floor(fromMs / DAY_MS) * DAY_MS; cursor <= toMs; cursor += DAY_MS) {
       const day = utcDay(cursor);
       const contribs = buckets.get(day) ?? [];
-      days.push({ day, cost: combineContributions(contribs), runs: contribs.length });
+      days.push({ day, amount: combineContributions(contribs), runs: contribs.length });
     }
     rows.push({
       flow,
@@ -437,13 +349,13 @@ function buildDailyByFlow(runs, fromMs, toMs) {
     });
   }
   return rows.sort((a, b) => {
-    const sum = (row) => row.days.reduce((acc, d) => acc + d.cost.usd, 0);
+    const sum = (row) => row.days.reduce((acc, d) => acc + d.amount.tokens, 0);
     return sum(b) - sum(a) || a.flow.localeCompare(b.flow);
   });
 }
 
-/** Per-flow rollup, sorted by metered cost descending. The label rule is flowLabelOf's. */
-function buildByFlow(runs, subs, pricing) {
+/** Per-flow rollup, sorted by metered total descending. The label rule is flowLabelOf's. */
+function buildByFlow(runs) {
   const groups = new Map();
   for (const r of runs) {
     const flow = flowLabelOf(r.record);
@@ -452,18 +364,6 @@ function buildByFlow(runs, subs, pricing) {
   }
   const byFlow = [];
   for (const [flow, members] of groups) {
-    // The flow's api-equivalent re-prices its plan-covered rows at each row's OWN plan's declared
-    // counterfactual (rows of different plans re-price differently); metered rows already carry their
-    // real dollars in `cost` and take no part here.
-    const planRows = members.flatMap((m) => m.contribution.rows.filter((row) => row.class === "plan"));
-    let apiEquiv = null;
-    for (const sub of subs) {
-      const rows = planRows.filter((row) => row.planId === sub.id);
-      if (rows.length === 0) continue;
-      const part = repriceRows(rows, sub.counterfactualModel, pricing);
-      if (part === null) continue;
-      apiEquiv = apiEquiv === null ? part : typed(apiEquiv.usd + part.usd, "estimated", { floor: apiEquiv.floor || part.floor });
-    }
     byFlow.push({
       flow,
       // The machine key beside the display label: null for the no-flow bucket, the raw flow name
@@ -473,11 +373,10 @@ function buildByFlow(runs, subs, pricing) {
       flowKey: flow === "(no flow)" ? null : flow,
       runs: members.length,
       tokens: members.reduce((sum, m) => sum + (m.record.tokens?.total ?? 0), 0),
-      cost: combineContributions(members.map((m) => m.contribution)),
-      apiEquiv,
+      amount: combineContributions(members.map((m) => m.contribution)),
     });
   }
-  return byFlow.sort((a, b) => b.cost.usd - a.cost.usd || a.flow.localeCompare(b.flow));
+  return byFlow.sort((a, b) => b.amount.tokens - a.amount.tokens || a.flow.localeCompare(b.flow));
 }
 
 // The honesty buckets a run lands in when no trigger claims it, pinned to the table's tail in this
@@ -494,7 +393,7 @@ const TRIGGER_TAIL_LABELS = { chained: "(chained runs)", manual: "(manual/local)
  * under "chained" (not rolled up to the ancestor trigger: walking parent chains across the retention
  * boundary would attribute partially, and a partial rollup wearing a trigger's name is a lie), and
  * everything else under "manual". `key` is the machine key, `label` display-only -- the byFlow
- * lesson. The outcome split rides along because "what did failed runs cost" is a per-trigger
+ * lesson. The outcome split rides along because "what did failed runs consume" is a per-trigger
  * question: a trigger whose spend is mostly failures is a different problem than an expensive one.
  */
 function buildByTrigger(runs, triggerJoin) {
@@ -531,16 +430,16 @@ function buildByTrigger(runs, triggerJoin) {
       label: g.label,
       runs: g.members.length,
       tokens: g.members.reduce((sum, m) => sum + (m.record.tokens?.total ?? 0), 0),
-      cost: combineContributions(g.members.map((m) => m.contribution)),
+      amount: combineContributions(g.members.map((m) => m.contribution)),
       outcomes,
-      failedCost: failedMembers.length > 0 ? combineContributions(failedMembers.map((m) => m.contribution)) : null,
+      failedAmount: failedMembers.length > 0 ? combineContributions(failedMembers.map((m) => m.contribution)) : null,
     });
   }
   return rows.sort((a, b) => {
     const tailA = TRIGGER_TAIL.indexOf(a.key);
     const tailB = TRIGGER_TAIL.indexOf(b.key);
     if (tailA !== -1 || tailB !== -1) return tailA === -1 ? -1 : tailB === -1 ? 1 : tailA - tailB;
-    return b.cost.usd - a.cost.usd || a.label.localeCompare(b.label);
+    return b.amount.tokens - a.amount.tokens || a.label.localeCompare(b.label);
   });
 }
 
@@ -607,10 +506,10 @@ function buildByRepo(runs) {
       kind: g.kinds.size === 1 ? [...g.kinds][0] : null,
       runs: g.members.length,
       tokens: g.members.reduce((sum, m) => sum + (m.record.tokens?.total ?? 0), 0),
-      cost: combineContributions(g.members.map((m) => m.contribution)),
+      amount: combineContributions(g.members.map((m) => m.contribution)),
     });
   }
-  return rows.sort((a, b) => b.cost.usd - a.cost.usd || a.label.localeCompare(b.label));
+  return rows.sort((a, b) => b.amount.tokens - a.amount.tokens || a.label.localeCompare(b.label));
 }
 
 /**
@@ -657,10 +556,10 @@ function buildByProject(runs) {
       label: g.label,
       runs: g.members.length,
       tokens: g.members.reduce((sum, m) => sum + (m.record.tokens?.total ?? 0), 0),
-      cost: combineContributions(g.members.map((m) => m.contribution)),
+      amount: combineContributions(g.members.map((m) => m.contribution)),
     });
   }
-  return rows.sort((a, b) => b.cost.usd - a.cost.usd || a.label.localeCompare(b.label));
+  return rows.sort((a, b) => b.amount.tokens - a.amount.tokens || a.label.localeCompare(b.label));
 }
 
 /**
@@ -669,8 +568,7 @@ function buildByProject(runs) {
  * Only real triggers appear: the chained/manual/unattributed honesty buckets have no node to badge
  * and live in byTrigger instead.
  */
-export function foldTriggerCosts({ records, subscriptions, pricing, triggerJoin }) {
-  const subs = Array.isArray(subscriptions) ? subscriptions : [];
+export function foldTriggerCosts({ records, triggerJoin }) {
   const byJobId = triggerJoin?.byJobId && typeof triggerJoin.byJobId === "object" ? triggerJoin.byJobId : {};
   const groups = new Map();
   // A newer release's record is left out, as `foldCosts` leaves it out (issue #761); the map has no place to count it.
@@ -680,16 +578,16 @@ export function foldTriggerCosts({ records, subscriptions, pricing, triggerJoin 
     const entry = typeof record.jobId === "string" ? byJobId[record.jobId] : undefined;
     if (!entry || entry.key === "unattributed" || !entry.key.startsWith("trigger:")) continue;
     if (!groups.has(entry.key)) groups.set(entry.key, []);
-    groups.get(entry.key).push(runContribution(record, subs, pricing));
+    groups.get(entry.key).push(runContribution(record));
   }
   const out = {};
   for (const [key, contribs] of groups) {
-    out[key] = { cost: combineContributions(contribs), runs: contribs.length };
+    out[key] = { amount: combineContributions(contribs), runs: contribs.length };
   }
   return out;
 }
 
-/** Per-(provider,model) rollup from the attribution rows, sorted by cost descending. A run appears in
+/** Per-(provider,model) rollup from the attribution rows, sorted by total descending. A run appears in
  * a model's `runs` count once, however many of its calls landed there. */
 function buildByModel(runs) {
   const groups = new Map();
@@ -722,100 +620,57 @@ function buildByModel(runs) {
       cacheRead: g.cacheRead,
       cacheWrite: g.cacheWrite,
       tokens: g.tokens,
-      cost: combineRowCosts(g.rows),
+      amount: combineRowTokens(g.rows),
     });
   }
-  return byModel.sort((a, b) => b.cost.usd - a.cost.usd || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
+  return byModel.sort((a, b) => b.amount.tokens - a.amount.tokens || a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
 }
 
-/**
- * A model bucket's typed cost. Rows of one (provider,model) usually share a class, and a uniform class
- * is KEPT -- "plan" and "zero-rated" at the model grain are the whole point of the classification, not
- * impurities to demote away. Only a genuinely mixed bucket (the same model both billed and $0 across
- * runs) demotes to "estimated" with run-grain coverage.
- */
-function combineRowCosts(rows) {
-  const usd = rows.reduce((sum, row) => sum + (row.class === "plan" ? 0 : row.cost), 0);
+/** A model bucket's typed amount. Rows of one (provider,model) usually share a class, and a uniform
+ * class is KEPT -- a fully floored model reads "estimated" at the model grain too, not demoted away.
+ * Only a genuinely mixed bucket (the same model both complete and floored across runs) demotes to
+ * "estimated" with run-grain coverage. */
+function combineRowTokens(rows) {
+  const tokens = rows.reduce((sum, row) => sum + row.total, 0);
   const floor = rows.some((row) => row.floor);
   const classes = [...new Set(rows.map((row) => row.class))];
-  if (classes.length === 1) {
-    return typed(usd, classes[0], classes[0] === "plan" ? { floor, planId: rows[0].planId } : { floor });
-  }
+  if (classes.length === 1) return typed(tokens, classes[0], { floor });
   const meteredRows = rows.filter((row) => row.class === "metered").length;
-  return typed(usd, "estimated", { floor, coverage: meteredRows / rows.length });
+  return typed(tokens, "estimated", { floor, coverage: meteredRows / rows.length });
 }
 
-/** Score every declared plan -- owned and hypothetical -- against the window's attributed runs. */
-function buildPlans(runs, subs, pricing, windowDays) {
+/** Attribute the window's runs to every declared plan. Prices died with the cost era, so there is
+ * nothing to score a plan against: no proration, no api-equivalent reprice, no SAVING/LOSING verdict.
+ * What remains are FACTS: which runs each plan covered, how many tokens they consumed, and where the
+ * plan's declared windows peaked (peakWindow). A what-if plan still attributes the same rows an owned
+ * one would -- the fold's what-if surfaces compare TOKEN PROFILES (whatIfFlow/whatIfRuns), not
+ * dollars. */
+function buildPlans(runs, subs, windowDays) {
+  void windowDays;
   return subs.map((sub) => {
-    // Attribution ignores `hypothetical`: a what-if plan attributes the SAME rows an owned one would
-    // (provider equality + models glob); the flag changes how the rows are SCORED below, never which
-    // rows are in scope.
     const attributed = [];
     for (const r of runs) {
-      // A refusal before any spend (issue #507) never ran on the plan, whatever provider and model it names: it is no
-      // attributed run, no amortization share, no excluded row and no peak-window event.
+      // A refusal before any spend (issue #507) never ran on the plan, whatever provider and model it names.
       if (r.contribution.refused === true) continue;
       const covered = r.contribution.rows.filter((row) => row.provider === sub.provider && sub.models.some((glob) => matchesGlob(row.model, glob)));
       if (covered.length > 0) {
         attributed.push({ at: r.at, rows: covered, floor: r.contribution.floor });
         continue;
       }
-      // A pre-#25 record carries no rows at all, but the host-effective provider/model can still name
+      // A pre-meter record carries no rows at all, but the host-effective provider/model can still name
       // this plan: the run happened ON the plan even though it measured nothing. It counts against the
-      // plan's windows and amortization, and it floors every derived number.
+      // plan's windows, and it floors every derived number.
       if (r.contribution.rows.length === 0 && r.record.provider === sub.provider && typeof r.record.model === "string" && sub.models.some((glob) => matchesGlob(r.record.model, glob))) {
         attributed.push({ at: r.at, rows: [], floor: true });
       }
     }
-    const attributedRuns = attributed.length;
-    const attributedTokens = attributed.reduce((sum, a) => sum + a.rows.reduce((s, row) => s + row.total, 0), 0);
-    const anyFloor = attributed.some((a) => a.floor);
-
-    // Proration: the declared monthly price scaled by window-days over a 30-day-month proxy. Coarse on
-    // purpose -- billing anniversaries, leap months and partial cycles are vendor bookkeeping this fold
-    // has no facts about, so 30 is the honest round number, not an attempt at calendar precision.
-    const prorated = sub.price.amount * (windowDays / 30);
-
-    const amortizedPerRun = attributedRuns > 0 ? typed(prorated / attributedRuns, "estimated", { floor: anyFloor }) : null;
-    const apiEquiv = repriceRows(attributed.flatMap((a) => a.rows), sub.counterfactualModel, pricing, {
-      extraExcluded: attributed.filter((a) => a.rows.length === 0).length,
-    });
-
-    let verdict;
-    if (attributedRuns === 0) {
-      // Nothing attributed: any verdict would score the plan against runs it never touched.
-      verdict = { kind: "NO_BASELINE", usd: null };
-    } else if (sub.hypothetical) {
-      // A hypothetical plan is scored against what the covered rows ACTUALLY cost today (their metered
-      // stream-time dollars) versus the prorated plan price: would buying it have saved money?
-      const actual = attributed.reduce((sum, a) => sum + a.rows.reduce((s, row) => s + row.cost, 0), 0);
-      verdict =
-        actual > prorated
-          ? { kind: "WOULD_SAVE", usd: typed(actual - prorated, "estimated", { floor: anyFloor }) }
-          : { kind: "WOULD_LOSE", usd: typed(prorated - actual, "estimated", { floor: anyFloor }) };
-    } else if (apiEquiv === null) {
-      // Owned plan, no counterfactual declared (or nothing re-priceable): the covered spend has no
-      // API-rate baseline, and inventing one is exactly what this fold refuses to do.
-      verdict = { kind: "NO_BASELINE", usd: null };
-    } else {
-      // Owned plan: what the covered runs would have cost at API rates versus the prorated plan price.
-      verdict =
-        apiEquiv.usd > prorated
-          ? { kind: "SAVING", usd: typed(apiEquiv.usd - prorated, "estimated", { floor: apiEquiv.floor }) }
-          : { kind: "LOSING", usd: typed(prorated - apiEquiv.usd, "estimated", { floor: apiEquiv.floor }) };
-    }
-
     return {
       id: sub.id,
       vendor: sub.vendor,
       hypothetical: sub.hypothetical,
-      price: sub.price,
-      attributedRuns,
-      attributedTokens,
-      amortizedPerRun,
-      apiEquiv,
-      verdict,
+      attributedRuns: attributed.length,
+      attributedTokens: attributed.reduce((sum, a) => sum + a.rows.reduce((s2, row) => s2 + row.total, 0), 0),
+      anyFloor: attributed.some((a) => a.floor),
       windows: (sub.windows ?? []).map((w) => peakWindow(w, attributed)),
     };
   });
@@ -912,52 +767,50 @@ function buildProvenance(runs, piAiPin) {
 }
 
 /**
- * "What would this flow cost per run on model X?" -- the median per-run quad over the flow's ledgered
- * runs, re-priced at the target. MEDIAN, not mean: one 10x outlier run must not move the estimate.
- * With no ledgered run to measure from (or a target the tables cannot price), degrade to the seeded
- * band rather than emit a $0 that looks like an answer.
+ * "What token profile does this flow have per run on model X?" -- the median per-run token total over
+ * the flow's ledgered runs (DES-TOKEN-FOLD-BY-SCAN). MEDIAN, not mean: one 10x outlier run must not
+ * move the estimate. There is no price to multiply and no rate table to consult: the comparison is
+ * between token PROFILES -- the observed median total and its input/output/cache split, against the
+ * target model's context window (how much of it one run's median occupies). With no ledgered run to
+ * measure from, the fold says "unknown" rather than emit a 0 that looks like an answer: no number was
+ * measured, and inventing one is exactly what this fold refuses to do (the unmeasured $0.5-$5/job
+ * band was a money-era artifact, OQ-002, and died with the band's unit).
  */
-export function whatIfFlow({ records, flow, target, pricing }) {
-  // A refusal before any spend (issue #507) is no run of the flow: it would be extrapolated at the flow's per-run cost
-  // and counted as an unmeasured run in `excluded` and `coverage`. A newer release's record is not read at all (issue
-  // #761): its `flow` and `usage` are past the stable core, so it is counted in `newerSkipped`, never as a member.
+export function whatIfFlow({ records, flow, target }) {
+  // A refusal before any spend (issue #507) is no run of the flow: it would be extrapolated at the flow's per-run
+  // profile and counted as an unmeasured run in `excluded` and `coverage`. A newer release's record is not read at all
+  // (issue #761): its `flow` and `usage` are past the stable core, so it is counted in `newerSkipped`, never as a member.
   const { records: readable, newerSkipped } = readableRecords(records);
   const skipped = newerSkipped > 0 ? { newerSkipped } : {};
   const members = readable.filter((r) => r && typeof r === "object" && (r.flow ?? null) === flow && !refusedBeforeSpend(r));
   const ledgered = members.filter((r) => r.usage && Array.isArray(r.usage.models) && r.usage.models.length > 0);
-  if (ledgered.length === 0) return { ...seededBand(members.length), ...skipped };
+  if (ledgered.length === 0) return { class: "unknown", note: "unmeasured", runs: Math.max(1, members.length), ...skipped };
   const quads = ledgered.map((r) => sumQuads(r.usage.models));
-  const priced = pricing.reprice(medianQuad(quads), target);
-  if (priced === null || priced === undefined) return { ...seededBand(members.length), ...skipped };
+  const median = medianQuad(quads);
+  const perRun = median.total ?? 0;
   return {
     ...skipped,
     class: "estimated",
-    // The per-run estimate times ALL observed runs of the flow -- the un-ledgered ones presumably cost
-    // something too; `coverage`/`excluded` say how much of that extrapolation is measured.
-    usd: priced.usd * members.length,
-    perRun: priced.usd,
+    // The per-run median times ALL observed runs of the flow -- the un-ledgered ones presumably
+    // consumed tokens too; `coverage`/`excluded` say how much of that extrapolation is measured.
+    tokens: perRun * members.length,
+    perRun,
+    medianQuad: median,
+    // The profile comparison the what-if exists for: how much of the target model's context window one
+    // median run occupies (null when the target declares none).
+    contextWindow: typeof target?.contextWindow === "number" ? target.contextWindow : null,
+    contextShare: typeof target?.contextWindow === "number" && target.contextWindow > 0 ? perRun / target.contextWindow : null,
     coverage: ledgered.length / members.length,
     excluded: members.length - ledgered.length,
-    ratesVersion: priced.ratesVersion,
   };
-}
-
-/**
- * The zero-knowledge estimate: no ledgered run has ever measured this flow, so the only available
- * number is requirements.md's unmeasured $0.5-$5/job band (tracked at OQ-002), times the flow's
- * observed run count -- or the bare per-run band when the flow has never run at all. `class: "seeded"`
- * is the label that keeps this band from ever being mistaken for a measurement.
- */
-function seededBand(runCount) {
-  const n = Math.max(1, runCount);
-  return { class: "seeded", low: 0.5 * n, high: 5 * n, note: "unmeasured (OQ-002)" };
 }
 
 /** Componentwise sum of a run's ledger rows into one per-run quad (full cache split). */
 function sumQuads(rows) {
-  const quad = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 };
+  const quad = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, total: 0 };
   for (const row of rows) {
     for (const key of QUAD_KEYS) quad[key] += row[key] ?? 0;
+    quad.total += row.total ?? 0;
   }
   return quad;
 }
@@ -965,7 +818,7 @@ function sumQuads(rows) {
 /** Componentwise median across per-run quads (even counts average the two middle values). */
 function medianQuad(quads) {
   const quad = {};
-  for (const key of QUAD_KEYS) {
+  for (const key of [...QUAD_KEYS, "total"]) {
     const sorted = quads.map((q) => q[key]).sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
     quad[key] = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
@@ -974,16 +827,16 @@ function medianQuad(quads) {
 }
 
 /**
- * Re-price the SAME ledgered runs, never a median multiplied by an unrelated scan's run count (#749).
- * A partial ledger cannot tell the whole run's cache split, so it is excluded and counted beside the answer.
+ * The SAME ledgered runs' token totals, never a median multiplied by an unrelated scan's run count
+ * (#749). There is no reprice: the fold reports what the runs consumed and how complete each ledger
+ * is; a partial ledger is excluded and counted beside the answer.
  */
-export function whatIfRuns({ records, target, pricing, subscriptions = [] }) {
-  let usd = 0;
-  let originalUsd = 0;
+export function whatIfRuns({ records, target }) {
+  void target;
+  let tokens = 0;
   let runs = 0;
   let excluded = 0;
-  let ratesVersion = null;
-  // A newer release's record is not re-priced (issue #761): its usage rows may mean something else there.
+  // A newer release's record is not folded (issue #761): its usage rows may mean something else there.
   const { records: readable, newerSkipped } = readableRecords(records);
   for (const record of readable) {
     if (refusedBeforeSpend(record)) continue;
@@ -993,27 +846,23 @@ export function whatIfRuns({ records, target, pricing, subscriptions = [] }) {
       excluded++;
       continue;
     }
-    const repriced = pricing.reprice(sumQuads(rows), target);
-    const original = rows.reduce((sum, r) => sum + (Number.isFinite(r.cost) && r.cost >= 0 ? r.cost : NaN), 0);
-    if (!Number.isFinite(repriced?.usd) || repriced.usd < 0 || !Number.isFinite(original)) {
+    const total = rows.reduce((sum, r) => sum + (Number.isFinite(r.total) && r.total >= 0 ? r.total : NaN), 0);
+    if (!Number.isFinite(total) || total < 0) {
       excluded++;
       continue;
     }
-    usd += repriced.usd;
-    originalUsd += original;
-    ratesVersion = repriced.ratesVersion ?? ratesVersion;
+    tokens += total;
     runs++;
   }
-  const plan = coveringSubscription(target.provider, target.id, subscriptions);
-  return { class: "estimated", usd, originalUsd, runs, excluded, coverage: runs + excluded > 0 ? runs / (runs + excluded) : 0, ratesVersion, planId: plan?.id ?? null, ...(newerSkipped > 0 ? { newerSkipped } : {}) };
+  return { class: "estimated", tokens, runs, excluded, coverage: runs + excluded > 0 ? runs / (runs + excluded) : 0, ...(newerSkipped > 0 ? { newerSkipped } : {}) };
 }
 
-/** A metered-only run's cost, using the same row classification as every cost chart; mixed plan runs are excluded. */
-export function meteredRunMicros(record, { subscriptions = [], pricing = { getPricedModel: () => null, isZeroRated: () => false } } = {}) {
-  if (fromNewerRelease(record)) return null; // a newer release's record: its cost is past the stable core (issue #761)
+/** A metered-only run's token total, using the same class rule as every spend chart; a floored run is
+ * excluded (its number is not the whole truth). */
+export function meteredRunTokens(record) {
+  if (fromNewerRelease(record)) return null; // a newer release's record: its tokens are past the stable core (issue #761)
   if (record?.tokens?.metered !== true) return null;
-  const contribution = runContribution(record, subscriptions, pricing);
-  if (contribution.refused || contribution.floor || contribution.rows.length === 0 || !contribution.rows.every((r) => r.class === "metered" || r.class === "zero-rated")) return null;
-  const micros = Math.round(contribution.usd * 1_000_000);
-  return Number.isSafeInteger(micros) && micros >= 0 ? micros : null;
+  const contribution = runContribution(record);
+  if (contribution.refused || contribution.floor || contribution.rows.length === 0 || !contribution.rows.every((r) => r.class === "metered")) return null;
+  return Number.isSafeInteger(contribution.tokens) && contribution.tokens >= 0 ? contribution.tokens : null;
 }

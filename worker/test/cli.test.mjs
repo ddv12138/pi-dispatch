@@ -588,16 +588,16 @@ test("run <folder> queues on the host queue the deployment .env names when this 
 	}
 });
 
-test("run --trigger refuses what the worker's loader refuses: PI_MAX_COST_USD from the deployment .env is applied (#505 review)", async () => {
+test("run --trigger refuses what the worker's loader refuses: PI_MAX_TOKENS from the deployment .env is applied (#505 review)", async () => {
 	const deploy = tempDir("cli-deploy-cap-");
-	const { path } = triggersFile([PM(gitRepo({ dirty: false }), { maxCostUsd: "2" })]);
-	writeFileSync(join(deploy, ".env"), `PI_TRIGGERS_FILE=${path}\nPI_MAX_COST_USD=1\nVALKEY_URL=redis://127.0.0.1:1\n`);
+	const { path } = triggersFile([PM(gitRepo({ dirty: false }), { maxTokens: "2" })]);
+	writeFileSync(join(deploy, ".env"), `PI_TRIGGERS_FILE=${path}\nPI_MAX_TOKENS=1\nVALKEY_URL=redis://127.0.0.1:1\n`);
 	const prev = process.cwd();
 	process.chdir(deploy);
 	try {
 		const r = await refusedTrigger(["run", "--trigger", "pm-weekly"], {});
 		assert.equal(r.code, 1);
-		assert.match(r.err, /^error: trigger at index 0: run\.maxCostUsd is above this deployment's PI_MAX_COST_USD\. .*Nothing was queued\.\n$/);
+		assert.match(r.err, /^error: trigger at index 0: run\.maxTokens is above this deployment's PI_MAX_TOKENS\. .*Nothing was queued\.\n$/);
 	} finally {
 		process.chdir(prev);
 	}
@@ -610,7 +610,7 @@ test("TRIGGER_LOADER_ENV_KEYS covers every config value loadSchedules reads, so 
 	const start = src.indexOf("export function loadSchedules(");
 	const body = src.slice(start, src.indexOf("\n}\n", start));
 	const read = [...new Set([...body.matchAll(/config\.(\w+)/g)].map((m) => m[1]))].sort();
-	const ENV_OF = { triggersFile: "PI_TRIGGERS_FILE", maxCostUsd: "PI_MAX_COST_USD" };
+	const ENV_OF = { triggersFile: "PI_TRIGGERS_FILE", maxTokens: "PI_MAX_TOKENS" };
 	assert.deepEqual(read, Object.keys(ENV_OF).sort(), "loadSchedules reads a config value this bolt does not map");
 	assert.deepEqual([...TRIGGER_LOADER_ENV_KEYS].sort(), [...Object.values(ENV_OF), "PI_WORKER_NAME"].sort());
 });

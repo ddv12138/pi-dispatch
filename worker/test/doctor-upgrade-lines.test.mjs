@@ -112,7 +112,7 @@ function collect({ hosts = [], plan = { "docker info": 0, "docker image": 0 }, s
 	if (symlinked) symlinkSync(real, dir);
 	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SETTINGS_FILE: join(dir, "settings.json"), VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_LOGS_DIR: join(dir, "logs"), ...extraEnv };
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	return collectChecks(env, { cwd: dir, home, out: () => {}, spawn: planSpawn(typeof plan === "function" ? plan(dir) : plan, seen), probeValkey: async () => true, readHosts: async () => ({ hosts: hosts.map((h) => ({ tz, ...h })) }), dollarKeysExist: async () => false, fileExists: existsSync, readEnvFile: (path) => readFileSync(path), nodeVersion: "22.19.0", ...seams }).then((checks) => ({ checks, dir, home }));
+	return collectChecks(env, { cwd: dir, home, out: () => {}, spawn: planSpawn(typeof plan === "function" ? plan(dir) : plan, seen), probeValkey: async () => true, readHosts: async () => ({ hosts: hosts.map((h) => ({ tz, ...h })) }), tokenKeysExist: async () => false, fileExists: existsSync, readEnvFile: (path) => readFileSync(path), nodeVersion: "22.19.0", ...seams }).then((checks) => ({ checks, dir, home }));
 }
 
 test("through the collection: this host's row and its peers' are compared, with this doctor's own package version", async () => {

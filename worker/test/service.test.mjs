@@ -315,9 +315,9 @@ test("--env-setup refuses a relative path, a path systemd or the plist would rei
 	assert.match(relative.errText(), /searches \$PATH/, "the reason is POSIX `.`, not a style preference");
 
 	// systemd expands $VAR inside Exec lines whatever the quoting, so a $ in the path is unrenderable.
-	const dollar = harness({ platform: "linux", argv: ["render", "--env-setup", "/etc/pi-$USER/setup.sh"], files: ENV_SETUP_FILES });
-	assert.equal(await dollar.run(), 1);
-	assert.match(dollar.errText(), /contains "\$"/);
+	const token = harness({ platform: "linux", argv: ["render", "--env-setup", "/etc/pi-$USER/setup.sh"], files: ENV_SETUP_FILES });
+	assert.equal(await token.run(), 1);
+	assert.match(token.errText(), /contains "\$"/);
 
 	// The plist is XML; the same path is fine on Linux, which is why the refusal is per platform.
 	const amp = harness({ platform: "darwin", argv: ["render", "--env-setup", "/etc/pi & dispatch/setup.sh"], files: ENV_SETUP_FILES });

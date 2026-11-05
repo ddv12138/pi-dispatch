@@ -83,13 +83,13 @@ const graph = {
 };
 const allocation = {
   window: "week",
-  totalMicros: 100_000_000,
+  totalTokens: 100_000_000,
   floors: { web: 10_000_000, _other: 0 },
   delegation: true,
   spend: { deployment: 20_000_000, projects: { web: 20_000_000 } },
   envelope: {
     window: "week",
-    totalMicros: 100_000_000,
+    totalTokens: 100_000_000,
     floors: { web: 10_000_000, _other: 0 },
     defaultWeights: { web: 100, _other: 0 },
     delegation: {
@@ -242,13 +242,13 @@ test("server-selected map is accessible, links spent run and script-free list ha
   assert.doesNotMatch(list, /id="graph-nodes"|id="graph"|script/);
 });
 
-test("structured allocation forms use normalized envelope dollars, delegation bounds and human row numbers", () => {
+test("structured allocation forms use normalized envelope tokens, delegation bounds and human row numbers", () => {
   const v = view();
   const envelope = String(splitEnvelope(v));
   const priorities = String(splitPriorities(v));
   const history = String(splitHistory(v));
-  assert.match(envelope, /name="totalUsd"[^>]*value="100"/);
-  assert.match(envelope, /name="floor:web"[^>]*value="10"/);
+  assert.match(envelope, /name="totalTokens"[^>]*value="100000000"/);
+  assert.match(envelope, /name="floor:web"[^>]*value="10000000"/);
   assert.match(envelope, /data-structured="envelope"/);
   assert.match(priorities, /name="validDays"[^>]*max="7"/);
   assert.match(priorities, /name="weight:web"/);
@@ -261,7 +261,7 @@ test("structured allocation forms use normalized envelope dollars, delegation bo
   assert.equal(String(splitPriorities({ ...v, role: "viewer" })), "");
 });
 
-test("money reconciliation names unknown hosts, leaves missing holds unknown and draws no non-job soft tick", () => {
+test("window reconciliation names unknown hosts, leaves missing holds unknown and draws no non-job soft tick", () => {
   const text = String(
     spendToday(
       view({
@@ -269,9 +269,9 @@ test("money reconciliation names unknown hosts, leaves missing holds unknown and
           insights: {
             spend: {
               today: {
-                usedMicros: 10_000_000,
-                settledMicros: 2_000_000,
-                heldMicros: null,
+                usedTokens: 10_000_000,
+                settledTokens: 2_000_000,
+                heldTokens: null,
                 heldJobs: 2,
                 unknownHosts: ["old-host"],
                 reconciliationMismatch: true,
@@ -293,13 +293,14 @@ test("money reconciliation names unknown hosts, leaves missing holds unknown and
             budget: {
               softHoldPct: 80,
               tokens: { spent: 85, cap: 100 },
-              dollars: {
-                windows: [
+              windows: {
+                rows: [
                   {
                     name: "deployment",
                     window: "day",
-                    counterMicros: 90_000_000,
-                    capMicros: 100_000_000,
+                    counterTokens: 90_000_000,
+                    capTokens: 100_000_000,
+                    full: false,
                   },
                 ],
               },
@@ -310,7 +311,7 @@ test("money reconciliation names unknown hosts, leaves missing holds unknown and
     ),
   );
   assert.doesNotMatch(caps, /<line/);
-  assert.match(caps, /\$90\.00/);
+  assert.match(caps, /90,000,000/);
 });
 
 for (const [cardName, hash] of Object.entries(SPEND_CARD_CSS_HASHES))
@@ -494,20 +495,20 @@ test("a cron id beyond the runs filter bound falls back to its stable trigger in
   assert.match(text, /href="\/runs\?trigger=3"/);
 });
 
-test("Caps says Full from the reader's next-reservation decision before the dollar counter reaches its cap", () => {
+test("Caps says Full from the reader's next-reservation decision before the token counter reaches its cap", () => {
   const view = {
     role: "viewer",
     query: {},
     data: {
       insights: {
         budget: {
-          dollars: {
-            windows: [
+          windows: {
+            rows: [
               {
                 name: "deployment",
                 window: "day",
-                counterMicros: 9_000_000,
-                capMicros: 10_000_000,
+                counterTokens: 9_000_000,
+                capTokens: 10_000_000,
                 full: true,
               },
             ],
@@ -518,8 +519,8 @@ test("Caps says Full from the reader's next-reservation decision before the doll
   };
   const text = String(spendCaps(view));
   assert.match(text, /spent and held\): Full/);
-  assert.match(text, /\$9.00/);
-  assert.match(text, /\$10.00/);
+  assert.match(text, /9,000,000/);
+  assert.match(text, /10,000,000/);
   assert.doesNotMatch(text, /<line/);
 });
 
@@ -577,10 +578,10 @@ test("count cap observer thresholds match the next start and scoped counters hav
   }
 });
 
-test("Caps names failed dollar/scoped reads instead of silently omitting their rows", () => {
+test("Caps names failed token/scoped reads instead of silently omitting their rows", () => {
   for (const budget of [
-    { dollars: { invalid: ["private-error-marker"] } },
-    { dollars: { countersUnreachable: "private-error-marker" } },
+    { windows: { invalid: ["private-error-marker"] } },
+    { windows: { countersUnreachable: "private-error-marker" } },
     { scopedInvalid: "private-error-marker" },
   ]) {
     const text = String(
@@ -702,8 +703,8 @@ const recordMoneyFixture = (records, budget = {}) => ({
       records,
       sinceMs: NOW - 86_400_000,
       nowMs: NOW,
-      jobCapMicros: 10_000_000,
-      heldMicros: 0,
+      jobCapTokens: 10_000_000,
+      heldTokens: 0,
     }),
   },
 });
@@ -711,16 +712,14 @@ const moneyRecord = (id, over = {}) => ({
   jobId: id,
   endedAt: new Date(NOW - 1000).toISOString(),
   outcome: "completed",
-  dollars: { basis: "unreserved", settledMicros: 0 },
+  tokensWindows: { basis: "unreserved", settledTokens: 0 },
   ...over,
 });
 const paidMoneyRecord = () =>
   moneyRecord("paid", {
-    tokens: { cost: 7, metered: true },
+    tokens: { total: 7, metered: true },
     usage: {
-      models: [
-        { provider: "paid", model: "model", cost: 7, input: 1, output: 1 },
-      ],
+      models: [{ provider: "paid", model: "model", input: 4, output: 3 }],
     },
   });
 const unknownMoneyRecord = () => moneyRecord("unknown");
@@ -733,18 +732,18 @@ const settledCell = (out) =>
 const dateCell = (out) =>
   /<dt>2026-10-29<\/dt>\s*<dd>([\s\S]*?)<\/dd>/.exec(out)?.[1];
 
-test("paid work without dollar windows shows its real record cost, not its unreserved zero charge", () => {
+test("paid work without token windows shows its real record cost, not its unreserved zero charge", () => {
   const p = recordMoneyFixture([paidMoneyRecord()]);
-  assert.equal(p.spend.today.usedMicros, 7_000_000);
-  assert.equal(p.spend.today.ledgerMicros, 0);
+  assert.equal(p.spend.today.usedTokens, 7);
+  assert.equal(p.spend.today.ledgerTokens, 0);
   const today = String(spendToday(moneyView(p)));
-  assert.match(today, /No daily dollar cap is configured/);
-  assert.match(settledCell(today), /\$7\.00/);
-  assert.match(today, /Charged to dollar windows/);
+  assert.match(today, /No daily token cap is configured/);
+  assert.match(settledCell(today), /^7$/);
+  assert.match(today, /Recorded window settlements/);
   assert.match(today, /not the cost of all readable work/);
   const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /\$7\.00/);
-  assert.match(chart, /2026-10-29: \$7\.00 settled/);
+  assert.match(dateCell(chart), /^7 settled; 0 held$/);
+  assert.match(chart, /2026-10-29: 7 settled/);
 });
 
 test("partly unknown record costs show a visible floor and unknown count in Today, daily values and escaped tips", () => {
@@ -752,25 +751,25 @@ test("partly unknown record costs show a visible floor and unknown count in Toda
   assert.equal(p.spend.today.settledFloor, true);
   assert.equal(p.spend.today.unpriced, 1);
   const today = String(spendToday(moneyView(p)));
-  assert.match(settledCell(today), /≥\$7\.00/);
+  assert.match(settledCell(today), /≥7/);
   assert.match(settledCell(today), /1 run has unknown cost/);
   const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /≥\$7\.00; 1 run has unknown cost/);
+  assert.match(dateCell(chart), /≥7; 1 run has unknown cost/);
   assert.match(
     chart,
-    /<li>2026-10-29: ~≥\$7\.00; 1 run has unknown cost settled/,
+    /<li>2026-10-29: ~≥7; 1 run has unknown cost settled/,
   );
 });
 
 test("all-unknown record cost stays unknown instead of an exact zero or a zero-value settled bar", () => {
   const p = recordMoneyFixture([unknownMoneyRecord()]);
-  assert.equal(p.spend.today.settledMicros, null);
+  assert.equal(p.spend.today.settledTokens, null);
   const today = String(spendToday(moneyView(p)));
   assert.match(settledCell(today), /unknown; 1 run has unknown cost/);
-  assert.doesNotMatch(settledCell(today), /\$0/);
+  assert.doesNotMatch(settledCell(today), /0/);
   const chart = String(spendOver(moneyView(p)));
   assert.match(dateCell(chart), /unknown; 1 run has unknown cost/);
-  assert.doesNotMatch(dateCell(chart), /\$0\.00 settled/);
+  assert.doesNotMatch(dateCell(chart), /0 settled/);
   assert.match(
     chart,
     /<li>2026-10-29: unknown; 1 run has unknown cost settled/,
@@ -780,31 +779,32 @@ test("all-unknown record cost stays unknown instead of an exact zero or a zero-v
 
 test("estimated floors and real window charges retain separate labels and actual counter reconciliation", () => {
   const partial = moneyRecord("partial", {
-    tokens: { cost: 7, metered: false },
+    tokens: { total: 7, metered: false },
     usage: null,
   });
   const budget = {
-    dollars: {
-      windows: [
+    windows: {
+      rows: [
         {
           ledger: "deployment",
-          name: "Deployment",
+          name: "deployment",
           window: "day",
-          counterMicros: 2_000_000,
-          capMicros: 20_000_000,
+          counterTokens: 2_000_000,
+          capTokens: 20_000_000,
+          full: false,
         },
       ],
     },
   };
   const p = recordMoneyFixture([partial], budget);
   const today = String(spendToday(moneyView(p)));
-  assert.match(settledCell(today), /~≥\$7\.00/);
+  assert.match(settledCell(today), /~≥7/);
   assert.match(today, /Counter beyond recorded window charges and holds/);
-  assert.equal(p.spend.today.unattributedMicros, 2_000_000);
+  assert.equal(p.spend.today.unattributedTokens, 2_000_000);
   const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /~≥\$7\.00/);
+  assert.match(dateCell(chart), /~≥7/);
   assert.match(chart, /sp-bar--estimated/);
-  assert.match(chart, /<li>2026-10-29: ~≥\$7\.00 settled/);
+  assert.match(chart, /<li>2026-10-29: ~≥7 settled/);
 });
 
 test("a newer duplicate references the applied row and never claims that its duplicate event put the plan in force", () => {
@@ -831,25 +831,26 @@ test("a plan's API-equivalent settlement floor and live hold stay distinct in To
   const plan = moneyRecord("plan-floor", {
     provider: "plan",
     model: "paid",
-    dollars: {
+    tokensWindows: {
       basis: "floor",
-      reservedMicros: 9_000_000,
-      settledMicros: 9_000_000,
+      reservedTokens: 9_000_000,
+      settledTokens: 9_000_000,
     },
-    tokens: { cost: 0, metered: true },
+    tokens: { total: 0, metered: true },
     usage: {
-      models: [{ provider: "plan", model: "paid", cost: 0, input: 10 }],
+      models: [{ provider: "plan", model: "paid", input: 10 }],
     },
   });
   const budget = {
-    dollars: {
-      windows: [
+    windows: {
+      rows: [
         {
           ledger: "deployment",
-          name: "Deployment",
+          name: "deployment",
           window: "day",
-          counterMicros: 11_000_000,
-          capMicros: 20_000_000,
+          counterTokens: 11_000_000,
+          capTokens: 20_000_000,
+          full: false,
         },
       ],
     },
@@ -877,18 +878,18 @@ test("a plan's API-equivalent settlement floor and live hold stay distinct in To
         subscriptions,
         sinceMs: NOW - 86_400_000,
         nowMs: NOW,
-        jobCapMicros: 10_000_000,
-        heldMicros: summary.today.heldMicros,
+        jobCapTokens: 10_000_000,
+        heldTokens: summary.today.heldTokens,
       }),
     },
   };
-  assert.equal(summary.today.heldMicros, 2_000_000);
-  assert.equal(summary.today.settledMicros, 9_000_000);
+  assert.equal(summary.today.heldTokens, 2_000_000);
+  assert.equal(summary.today.settledTokens, 9_000_000);
   const today = String(spendToday(moneyView(p)));
-  assert.match(settledCell(today), /≥\$9\.00/);
-  assert.match(today, /Held for 1 running job<\/dt><dd>\$2\.00/);
+  assert.match(settledCell(today), /≥9,000,000/);
+  assert.match(today, /Held for 1 running job<\/dt><dd>2,000,000/);
   const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /≥\$9\.00 settled; \$2\.00 held/);
+  assert.match(dateCell(chart), /≥9,000,000 settled; 2,000,000 held/);
   assert.match(chart, /class="sp-held"/);
 });
 

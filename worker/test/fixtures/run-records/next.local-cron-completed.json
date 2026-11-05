@@ -13,7 +13,8 @@
     "input": 9000,
     "output": 1100,
     "total": 10100,
-    "cost": 0.061
+    "metered": true,
+    "usageUnreported": 0
   },
   "usage": null,
   "provider": "openai",
@@ -30,9 +31,9 @@
   "session": null,
   "host": "mini-1",
   "backend": "docker",
-  "dollars": {
-    "reservedMicros": 1000000,
-    "settledMicros": 61000,
+  "tokensWindows": {
+    "reservedTokens": 1000000,
+    "settledTokens": 61000,
     "basis": "metered",
     "modelBasis": null
   },
@@ -65,5 +66,5 @@
   },
   "earlier": null,
   "stalledRepick": false,
-  "v": 1
+  "v": 2
 }

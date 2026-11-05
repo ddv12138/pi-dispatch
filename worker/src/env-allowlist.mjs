@@ -398,7 +398,7 @@ function layoutEnv(layout) {
  * `allowGlobalExtensions` defaults to TRUE here, matching loadConfig's default (REQ-GLOBAL-PI-OVERLAY): a
  * caller that says nothing gets the operator's staged setup, and only an explicit `false` withholds it.
  */
-export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondaryProvider = null, model, maxTurns, maxTokens, maxCostMicros = null, jobId, githubToken, forgeKind, forgeHosts = {}, hostEnv, allowGlobalExtensions = true, packagePaths = [], packageCanaryPath = undefined, forwardEnv = [], secrets = {}, sessionFile = null, flow = null, command = null, excludeTools = [], mcpServers = [], awaitInput = false, approvalGates = null, approvalDecision = null, reportProgress = false, recover = false, recovering = false, steer = false, layout = "mounts", allowedModels = null, authFromPi = false, egress = false, egressProxy, agentDir, home = null, readFile = readFileSync, modelEndpoints = null, exitAuth = false, transcriptStderr = false, steerStdin = false, bundleEnvFile = false, observableRunner = false, fork = null, thinkingLevel = null, subscriptionAuth = [] }) {
+export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondaryProvider = null, model, maxTurns, maxTokens, jobId, githubToken, forgeKind, forgeHosts = {}, hostEnv, allowGlobalExtensions = true, packagePaths = [], packageCanaryPath = undefined, forwardEnv = [], secrets = {}, sessionFile = null, flow = null, command = null, excludeTools = [], mcpServers = [], awaitInput = false, approvalGates = null, approvalDecision = null, reportProgress = false, recover = false, recovering = false, steer = false, layout = "mounts", allowedModels = null, authFromPi = false, egress = false, egressProxy, agentDir, home = null, readFile = readFileSync, modelEndpoints = null, exitAuth = false, transcriptStderr = false, steerStdin = false, bundleEnvFile = false, observableRunner = false, fork = null, thinkingLevel = null, subscriptionAuth = [] }) {
 	// The provider credential(s), by pi's expected variable name(s) -- from the worker env, or (when
 	// PI_AUTH_FROM_PI is set and the env has none) host-side from pi's auth.json. Throws (config) if
 	// neither source yields one, which the processor turns into a policy refusal that refunds any reserve
@@ -606,16 +606,17 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 	// Issue #501: the per-job dollar cap is the worker's answer and nothing else's, so it is settled again AFTER the
 	// PI_FORWARD_ENV and secrets loops, PI_DISPATCH_KEYLESS's backstop. Both lists refuse the name upstream (config.mjs
 	// refuses every CONTAINER_ENV_NAMES member in PI_FORWARD_ENV at boot, #502; the loader refuses it in run.secrets);
-	// this is the line that holds if either refusal is ever bypassed. A forwarded or secret PI_MAX_COST_MICROS would
+	// this is the line that holds if either refusal is ever bypassed. A forwarded or secret PI_MAX_TOKENS would
 	// otherwise replace the computed cap (measured: a host value of 1e12 beat a computed 500000), and on a job with
-	// no cap it would send one past the `costCap` gate, which only runs for capped jobs, to an image that may ignore it.
+	// no budget it would send one past the admission gate, which only runs for budgeted jobs, to an image that may ignore it.
 	// It is set ONLY here, once, after both loops. `!== null`, never truthiness: 0 is a real cap (no priced call at
 	// all, which a fail-closed job value reads as, `effectiveCostCapMicros`), and a truthy test would send NO cap for
 	// it, the widest one there is. Absent (null or undefined) leaves no variable, so a job with no cap carries the env
 	// it always did, and never an empty string (the runner refuses one).
-	// env-internal PI_MAX_COST_MICROS: written into the job's closed env map here, never read from the worker's environment.
-	if (maxCostMicros === null || maxCostMicros === undefined) delete env.PI_MAX_COST_MICROS;
-	else env.PI_MAX_COST_MICROS = String(maxCostMicros);
+	// PI_MAX_TOKENS is written into the job's closed env map here, never read from the worker's environment
+	// (documented in .env.example, so it needs no env-internal marker).
+	if (maxTokens === null || maxTokens === undefined) delete env.PI_MAX_TOKENS;
+	else env.PI_MAX_TOKENS = String(maxTokens);
 
 	// Issue #545: the exit line's key waits on the container's stdin, and this variable tells the runner to read it.
 	// The value names the channel and is never the key: the environment is readable from /proc/1/environ by every

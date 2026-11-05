@@ -101,11 +101,11 @@ test("empty incomplete history stays unknown while explicitly complete empty his
   const complete = await triggerListGolden({ recordsOverride: [], complete: true });
   const partialRules = text(panel(incomplete, "p-tr-github"));
   assert.match(partialRules, /unknown runs in 30 days.*unknown spend/);
-  assert.ok(!partialRules.includes("at least 0") && !partialRules.includes("$0"));
+  assert.ok(!partialRules.includes("at least 0") && !partialRules.includes("0 this UTC week"));
   assert.match(text(panel(incomplete, "p-tr-spend")), /unknown/);
-  assert.ok(!text(panel(incomplete, "p-tr-spend")).includes("$0"));
+  assert.ok(!text(panel(incomplete, "p-tr-spend")).includes("0 attributed to these rules"));
   assert.match(text(panel(complete, "p-tr-github")), /0 runs in 30 days/);
-  assert.match(text(panel(complete, "p-tr-spend")), /\$0/);
+  assert.match(text(panel(complete, "p-tr-spend")), /0 attributed to these rules/);
   assert.ok(!text(panel(complete, "p-tr-spend")).includes("unknown"));
 });
 test("label conjunctions remain complete and PR selectors apply only to labeled deliveries", async () => {

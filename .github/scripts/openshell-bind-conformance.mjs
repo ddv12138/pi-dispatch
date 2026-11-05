@@ -15,7 +15,9 @@
  *                         through the real `openshell` bundle on the same gateway;
  *                       - localFolders: a folder job edits a host folder outside the job directory in place;
  *                       - the usual eight (isolation, ephemeral, egress, jobToJobIsolation, imagePinning, nonRoot);
- *                     then the real job image's runner, keyed and offline under a cost cap of 0, whose transcript must
+ *                     then the real job image's runner, keyed and offline against the workflow's zero-rated stand-in
+ *                     model under a per-job token budget of 1 (the settle-time token budget is the runner's own stop
+ *                     now; the pre-call cost guard died with the cost era), whose transcript must
  *                     reach the real publisher from the HOST FILE the bind writes (the tail), never over stderr.
  *
  * Run with the worker STOPPED (the harness's reap deletes every owner-labelled sandbox). Exit 0 when everything held,
@@ -254,10 +256,17 @@ for (const f of r.findings) {
 console.log(`${readings.readOnlyJobInputs?.ok ? "ok     " : "FAIL   "} readOnlyJobInputs (live): ${readings.readOnlyJobInputs?.detail}`);
 if (!readings.readOnlyJobInputs?.ok) failed = true;
 
-// The real runner, keyed and offline at a cost cap of 0, its transcript TAILED from the host file the bind writes.
+// The real runner, keyed and offline, stopped by its own settle-time token budget, its transcript TAILED from the
+// host file the bind writes. The cost cap of 0 this case ran under died with the pre-call cost guard (token-only,
+// DES-TOKEN-RESERVE-AND-SETTLE): the budget is a SETTLE-TIME stop now, so the proof runs the real runner against the
+// workflow's zero-rated stand-in model (13 usage tokens a turn) under a per-job token budget of 1, the floor of
+// PI_MAX_TOKENS, and ends on the runner's own signed `token_budget` line, exit 2, with no spend and no real provider.
+// The stand-in holds a first request until the steering signal exists, so it is touched first: this case has no
+// second message to wait for (the model case below touches it again, which is idempotent).
 {
 	const logs = join(scratch, "logs");
 	nodeFs.mkdirSync(logs);
+	if (process.env.STEER_SIGNAL_FILE) nodeFs.writeFileSync(process.env.STEER_SIGNAL_FILE, "");
 	const xadds = [];
 	const redis = {
 		status: "ready",
@@ -270,13 +279,19 @@ if (!readings.readOnlyJobInputs?.ok) failed = true;
 	const opened = [];
 	const openLiveTranscript = (args) => (opened.push({ source: args.source ?? "file", file: args.file ?? null }), opener(args));
 	const events = [];
-	const real = bundleFor("bind", image, { openJobLog: makeLogSink({ logsDir: logs, enabled: false }), openLiveTranscript, log: (event, fields) => events.push([event, fields]) });
+	const model = { id: "m1", name: "m1", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000, compat: { maxTokensField: "max_tokens" } };
+	const models = { providers: { "steer-fake": { baseUrl: "http://host.openshell.internal:18080/v1", apiKey: KEYLESS_API_KEY, api: "openai-completions", models: [model] } } };
+	const overlay = join(scratch, "overlay-runner");
+	nodeFs.mkdirSync(overlay);
+	nodeFs.writeFileSync(join(overlay, "models.json"), `${JSON.stringify(models)}\n`);
+	const modelEndpoints = { endpoints: [{ id: "lab-a", host: "host.openshell.internal", port: 18080, slots: 1, keyless: true }], models };
+	const real = bundleFor("bind", image, { openJobLog: makeLogSink({ logsDir: logs, enabled: false }), globalPiDir: overlay, readEndpoints: () => [{ id: "lab-a", host: "host.openshell.internal", port: 18080, slots: 1 }], readAllowlist: () => ["api.anthropic.com", ".github.com"], openLiveTranscript, log: (event, fields) => events.push([event, fields]) });
 	const dirs = jobDirFor("Reply with the single word ok.");
 	output.set("last", "");
-	const result = await real.runContainer({ job: { ...JOB, maxCostMicros: 0 }, prepared: dirs, name: `pi-job-bind-conformance-${nonce}-runner`, signal: new AbortController().signal, exitAuth: true, transcriptStderr: true, jobId: `bind-conformance-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
+	const result = await real.runContainer({ job: { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2, maxTokens: 1 }, prepared: dirs, modelEndpoints, name: `pi-job-bind-conformance-${nonce}-runner`, signal: new AbortController().signal, exitAuth: true, transcriptStderr: true, jobId: `bind-conformance-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
 	const session = nodeFs.readFileSync(join(dirs.jobDir, "session", "current.jsonl"), "utf8");
-	const ok = result.code === 2 && result.exitReason === "cost-cap" && result.exitAuth === "verified" && session.length > 0;
-	console.log(`${ok ? "ok     " : "FAIL   "} the real runner: exit ${result.code}, reason ${result.exitReason}, exit line ${result.exitAuth}, session ${session.length} bytes written through the bind`);
+	const ok = result.code === 2 && result.exitReason === "token_budget" && result.exitAuth === "verified" && session.length > 0;
+	console.log(`${ok ? "ok     " : "FAIL   "} the real runner under a token budget of 1: exit ${result.code}, reason ${result.exitReason}, exit line ${result.exitAuth}, session ${session.length} bytes written through the bind`);
 	const kinds = xadds.map((fields) => fields[fields.indexOf("kind") + 1]);
 	const fromSession = kinds.filter((k) => k !== "end" && k !== "skipped").length;
 	const tailed = opened.length === 1 && opened[0].source === "file" && opened[0].file === join(dirs.jobDir, "session", "current.jsonl");
@@ -388,9 +403,9 @@ const standinCompletions = () => {
 		return 0;
 	}
 };
-// A real zero-cost model call from the real runner: the keyless fake (every rate 0) at the stand-in, under a cap of 0,
-// through the image's real entrypoint (the readable runner on this venue). The stand-in holds a first request until the
-// steering signal exists, so it is touched first: this case has no second message to wait for.
+// A real zero-spend model call from the real runner: the keyless fake (every rate 0) at the stand-in, with no per-job
+// token budget, through the image's real entrypoint (the readable runner on this venue). The stand-in holds a first
+// request until the steering signal exists, so it is touched first: this case has no second message to wait for.
 {
 	if (process.env.STEER_SIGNAL_FILE) nodeFs.writeFileSync(process.env.STEER_SIGNAL_FILE, "");
 	const model = { id: "m1", name: "m1", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000, compat: { maxTokensField: "max_tokens" } };
@@ -405,15 +420,15 @@ const standinCompletions = () => {
 	output.set("last", "");
 	let result = { code: "no-run" };
 	try {
-		result = await b.runContainer({ job: { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2, maxCostMicros: 0 }, prepared: jobDirFor("Read your prompt file, then reply with the single word done."), modelEndpoints, name: `pi-job-bind-conformance-${nonce}-model`, signal: new AbortController().signal, exitAuth: true, jobId: `bind-model-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
+		result = await b.runContainer({ job: { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2 }, prepared: jobDirFor("Read your prompt file, then reply with the single word done."), modelEndpoints, name: `pi-job-bind-conformance-${nonce}-model`, signal: new AbortController().signal, exitAuth: true, jobId: `bind-model-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
 	} catch (e) {
 		result = { code: `threw ${e?.reason ?? e?.message ?? e}` };
 	}
 	const said = String(output.get("last") ?? "");
 	const calls = standinCompletions() - before;
-	const refusedCost = /"event":"cost_refused"/.test(said) || result.exitReason === "cost-cap";
+	const refusedCost = /"event":"token_budget_exceeded"/.test(said) || result.exitReason === "token_budget";
 	const ok = result.code === 0 && result.exitAuth === "verified" && calls >= 1 && !refusedCost;
-	console.log(`${ok ? "ok     " : "FAIL   "} #730 bind: a real zero-cost model call from the real runner: exit ${result.code} ${result.exitReason ?? "none"} (${result.exitAuth ?? "no line"}), the stand-in saw ${calls} completion request(s), cost refused ${refusedCost}`);
+	console.log(`${ok ? "ok     " : "FAIL   "} #730 bind: a real zero-spend model call from the real runner: exit ${result.code} ${result.exitReason ?? "none"} (${result.exitAuth ?? "no line"}), the stand-in saw ${calls} completion request(s), stopped at the budget ${refusedCost}`);
 	if (!ok) {
 		console.log(said.split("\n").slice(-15).join("\n"));
 		failed = true;

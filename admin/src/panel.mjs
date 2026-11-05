@@ -1018,72 +1018,39 @@ export function sparkline(values, width = 24, opts = {}) {
 }
 
 /**
- * Compact USD for tight cells, at most 7 characters at any magnitude: `$0.0042`, `$0.42`, `$4.12`,
- * `$41.20`, `$412`, `$4.1k`, `$412k`, `$4.1M`. Sub-cent costs are real money and render at four
- * decimals; below what four decimals can show meaningfully the honest fallback is `<1¢` -- never
- * `$0.00`, which would misread as free. Non-finite and negative input (this ladder renders costs;
- * a negative cost is malformed) degrade to `-`.
+ * Compact token count for tight cells, at most 6 characters at any magnitude: `742`, `9.4k`, `123k`,
+ * `12.34M`, `4.12B`. The ladder truncates toward zero so a value never rounds up into the next rung's
+ * display class (`9,999` reads `9.9k`, never `10k`). Non-finite and negative input (this ladder
+ * renders counts; a negative count is malformed) degrade to `-`.
  */
-export function fmtUsd(n) {
+export function fmtTokens(n) {
   if (!Number.isFinite(n) || n < 0) return "-";
-  if (n === 0) return "$0";
-  if (n < 0.0005) return "<1¢";
-  if (n < 0.01) return `$${n.toFixed(4)}`;
-  if (n < 100) return `$${n.toFixed(2)}`;
-  if (n < 1000) return `$${Math.round(n)}`;
-  if (n < 100000) return `$${(n / 1000).toFixed(1)}k`;
-  if (n < 1e6) return `$${Math.round(n / 1000)}k`;
-  if (n < 1e8) return `$${(n / 1e6).toFixed(1)}M`;
-  return `$${Math.round(n / 1e6)}M`;
+  if (n < 1_000) return String(Math.round(n));
+  if (n < 10_000) return `${Math.floor(n / 100) / 10}k`;
+  if (n < 1_000_000) return `${Math.floor(n / 1_000)}k`;
+  if (n < 1e9) return `${(Math.floor(n / 10_000) / 100).toFixed(2)}M`;
+  return `${(Math.floor(n / 10_000_000) / 100).toFixed(2)}B`;
 }
 
 /**
- * Micro-dollars in one fixed form, `$1,234.56`: always two decimals and thousands commas, for a column whose rows must
- * compare at a glance (the console's money cells, issue #710 review round 1), where `fmtUsd`'s ladder would print
- * `$99.99`, `$412` and `$4.1k` one above the other. Integer arithmetic on the micro-dollars, so no float rounding can move
- * a cent.
- *
- * ROUNDING. Half up to the cent by default (`$999.60` for 999,595,000 µ$, a cap or a price). `spent: true` rounds DOWN,
- * for an amount read against a cap: 99,999,000 µ$ against a $100.00 cap reads `$99.99`, never `$100.00`, which would
- * say the window is full when it is not. The cost of that choice is that a spend under a cent reads `$0.00`; the caller
- * puts the exact amount beside it (the console's `title`), which is why this is no place for `fmtUsd`'s `<1¢`.
- * `-` for anything that is not a non-negative safe integer of micro-dollars (negative, fractional, NaN, null, a string),
- * the console's convention for a value that is not an amount.
- */
-export function usd2(micros, { spent = false } = {}) {
-  if (!Number.isSafeInteger(micros) || micros < 0) return "-";
-  const whole = Math.floor(micros / 10_000);
-  const cents = spent || micros - whole * 10_000 < 5_000 ? whole : whole + 1;
-  const dollars = String(Math.floor(cents / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
-  const c = cents % 100;
-  return `$${dollars}.${c < 10 ? "0" : ""}${c}`;
-}
-
-/**
- * THE single renderer of the typed cost value `{ usd, class, floor, coverage, planId }` -- every money
- * surface funnels here.
+ * THE single renderer of the typed amount value `{ tokens, class, floor, coverage }` -- every spend
+ * surface funnels here (DES-TOKEN-FOLD-BY-SCAN).
  *
  * Custom: the class system exists so an estimate CANNOT be mislabeled as truth by a rendering path.
- * Each class has a distinct, non-overlapping shape: metered is a bare dollar figure (`≥`-prefixed when
- * only a floor is known), plan is `plan:<planId>` and never a dollar amount (a covered run must never
- * read as $0.00), zero-rated is `$0 (unrated)` and never the word "free", estimated is `~` + figure +
- * ` est.`, seeded is `~~` + figure + ` seeded`, unknown is an em dash. Nullish or malformed input also
- * degrades to the em dash rather than guessing a class.
+ * Each class has a distinct, non-overlapping shape: metered is a bare token figure (`>=`-prefixed
+ * when only a floor is known), estimated is `~` + figure + ` est.`, unknown is an em dash. The
+ * pricing classes ("plan", "zero-rated", "seeded") died with pricing itself (DES-TOKEN-RESERVE-AND-
+ * SETTLE): there is no rate table to rate anything zero and no plan price to amortize. Nullish or
+ * malformed input also degrades to the em dash rather than guessing a class.
  */
-export function fmtCost(cost) {
-  if (!cost || typeof cost !== "object") return "—";
-  const floor = cost.floor ? "≥" : "";
-  switch (cost.class) {
+export function fmtAmount(amount) {
+  if (!amount || typeof amount !== "object") return "—";
+  const floor = amount.floor ? "≥" : "";
+  switch (amount.class) {
     case "metered":
-      return floor + fmtUsd(cost.usd);
-    case "plan":
-      return `plan:${cost.planId ?? "?"}`;
-    case "zero-rated":
-      return "$0 (unrated)";
+      return floor + fmtTokens(amount.tokens);
     case "estimated":
-      return `~${floor}${fmtUsd(cost.usd)} est.`;
-    case "seeded":
-      return `~~${fmtUsd(cost.usd)} seeded`;
+      return `~${floor}${fmtTokens(amount.tokens)} est.`;
     default:
       return "—";
   }

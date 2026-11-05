@@ -34,7 +34,7 @@ test("all adapter and credential exceptional states have truthful text and a gly
 
 test("Models shows observed percentages and resets, preserves exhaustion on stale status, and never substitutes zero for unknown", () => {
   const doc = draw("models", consoleSubscriptionFixture(NOW));
-  for (const fact of ["100% used", "42% used", "Quota exhausted", "Fresh, observed", "Waiting until 2026-10-31 12:30:00 UTC", "deployment dollar windows still apply"]) assert.ok(text(doc).includes(fact), fact);
+  for (const fact of ["100% used", "42% used", "Quota exhausted", "Fresh, observed", "Waiting until 2026-10-31 12:30:00 UTC", "deployment token windows still apply"]) assert.ok(text(doc).includes(fact), fact);
   const stale = draw("models", consoleSubscriptionFixture(NOW, v => { v.connections[0].quota.observedAt = NOW - 600_000; }));
   assert.match(stale, /Exhaustion retained/); assert.match(stale, /Stale or freshness unknown/); assert.doesNotMatch(stale, /Quota observed available/);
   const unknown = draw("models", consoleSubscriptionFixture(NOW, v => { v.connections[0].quota = null; }));
@@ -47,7 +47,7 @@ test("Models shows observed percentages and resets, preserves exhaustion on stal
 
 test("Models quota fixed copy renders in Chinese and preserves provider, host, percentages and reset times", () => {
   const doc = text(draw("models", consoleSubscriptionFixture(NOW), { locale: "zh" }));
-  for (const fact of ["订阅配额", "提供商", "anthropic", "所属主机", "mini1", "五小时账户窗口", "七天账户窗口", "100% 已使用", "配额已耗尽", "等待至 2026-10-31 12:30:00 UTC", "部署级美元窗口仍然适用"]) assert.ok(doc.includes(fact), fact);
+  for (const fact of ["订阅配额", "提供商", "anthropic", "所属主机", "mini1", "五小时账户窗口", "七天账户窗口", "100% 已使用", "配额已耗尽", "等待至 2026-10-31 12:30:00 UTC", "部署级令牌窗口仍然适用"]) assert.ok(doc.includes(fact), fact);
   assert.doesNotMatch(doc, /Usage unknown|Observed exhausted|Quota exhausted|Known exhausted windows remain visible/);
 });
 
@@ -86,11 +86,11 @@ test("agent Connections renders safely from the actual page projection instead o
 });
 
 test("over-cap usage remains visible, granted trials are not offered again, and paid overage uses a per-job USD bound", () => {
-  const value = consoleSubscriptionFixture(NOW, v => { const row = v.connections[0]; row.quota.windows[0].usedPercent = 101; row.quota.blockedUnknownReset = true; row.quota.trialAvailable = true; row.extraUsageCreditMicros = 250000; });
+  const value = consoleSubscriptionFixture(NOW, v => { const row = v.connections[0]; row.quota.windows[0].usedPercent = 101; row.quota.blockedUnknownReset = true; row.quota.trialAvailable = true; row.extraUsageCreditTokens = 250000; });
   const doc = text(draw("models", value));
   assert.ok(doc.includes("101% used")); assert.ok(doc.includes("One quota trial is already authorized")); assert.ok(doc.includes("One trial is authorized; other pickup gates still apply"));
-  assert.ok(!doc.includes("pi-dispatch auth trial")); assert.ok(doc.includes("0.25 USD per job (conservative model-cost bound)"));
-  assert.ok(!doc.includes("0.25 provider credits"));
+  assert.ok(!doc.includes("pi-dispatch auth trial")); assert.ok(doc.includes("250000 extra-usage tokens per job (conservative model-cost bound)"));
+  assert.ok(!doc.includes("0.25 provider credits")); assert.ok(!doc.includes("0.25 USD"));
 });
 
 test("access-token expiry does not invent a sign-in refusal when the host may refresh it", () => {

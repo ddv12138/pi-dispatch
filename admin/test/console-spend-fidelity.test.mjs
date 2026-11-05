@@ -89,13 +89,13 @@ test("Capacity chart key explains the five distinct chart marks", () => {
   assert.match(text, /cp-key/);
 });
 
-test("money and token KPIs contain proportionate green meters with accessible percentages", () => {
+test("spend and token KPIs contain proportionate green meters with accessible percentages", () => {
   const p = spendFixture();
-  p.spend.week = { usedMicros: 25_000_000, capMicros: 100_000_000 };
+  p.spend.week = { usedTokens: 25_000_000, capTokens: 100_000_000 };
   p.spend.tokens = { used: 25_000, cap: 100_000 };
-  p.spend.today = { usedMicros: 25_000_000, capMicros: 100_000_000, settledMicros: 20_000_000, heldMicros: 5_000_000, heldJobs: 2, counterConfigured: true };
-  p.spend.average = { costMicros: 25_000_000, runs: 4, largestMicros: 50_000_000 };
-  p.spend.jobCapMicros = 100_000_000;
+  p.spend.today = { usedTokens: 25_000_000, capTokens: 100_000_000, settledTokens: 20_000_000, heldTokens: 5_000_000, heldJobs: 2, counterConfigured: true };
+  p.spend.average = { costTokens: 25_000_000, runs: 4, largestTokens: 50_000_000 };
+  p.spend.jobCapTokens = 100_000_000;
   for (const render of [spendWeek, spendTokens, spendToday, spendAverage]) {
     const text = String(render(viewOf(p)));
     assert.match(text, /class="pbar tone-ok"/);

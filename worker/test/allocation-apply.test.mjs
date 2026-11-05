@@ -12,7 +12,7 @@ import {
 	ALLOC_PLAN_KEY,
 	CAS_SCRIPT,
 	SEED_SCRIPT,
-	governedDollars,
+	governedTokens,
 	makeAllocationAudit,
 	makeAllocationLogReaper,
 	makeAllocationState,
@@ -21,14 +21,14 @@ import {
 import { envelopeDigest, parseEnvelope } from "../src/envelope.mjs";
 import { RELEASE_IF_MINE } from "../src/fleet-lease.mjs";
 import { scopeRef } from "../src/priorities.mjs";
-import { scopeDollarKeyPrefix } from "../src/scoped-limits.mjs";
+import { scopeTokenKeyPrefix } from "../src/scoped-limits.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The applied split (issue #504 part B, DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE). The fake Valkey is the fleet-lease
 // test's (real SET NX PX semantics, compare-and-delete), extended with the two compare-and-set scripts by their
 // semantics and with the list commands `alloc:log` uses. Every subject takes an injected `now`, always.
 
-const USD = 1_000_000;
+const TOKENS = 1_000_000;
 const NOW = Date.parse("2026-10-05T12:00:00Z");
 const HOUR = 3_600_000;
 
@@ -119,13 +119,13 @@ function envelopeOf(over = {}) {
 	const body = {
 		version: 1,
 		window: "week",
-		totalUsd: "100",
-		floorsUsd: { shop: "10", platform: "10", _other: "0" },
+		totalTokens: 100,
+		floorsTokens: { shop: 10, platform: 10, _other: 0 },
 		defaultWeights: { shop: 1, platform: 1, _other: 0 },
 		delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
 		...over,
 	};
-	return parseEnvelope(JSON.stringify(body), "/e/envelope.json", { projects: PROJECTS, limits: [], maxCostMicros: 2 * USD });
+	return parseEnvelope(JSON.stringify(body), "/e/envelope.json", { projects: PROJECTS, limits: [], maxTokens: 2 * TOKENS });
 }
 
 const plan = (weights, basis = null, extra = {}) => JSON.stringify({ version: 1, basis, projects: Object.entries(weights).map(([id, weight]) => ({ id, weight, ...(extra[id] ?? {}) })), ...(extra.top ?? {}) });
@@ -148,7 +148,7 @@ test("the neutral split is persisted with SET NX, writer default, and a first pl
 	assert.equal(s.writer, "default");
 	assert.equal(s.planId, null);
 	assert.equal(s.envelopeDigest, digest);
-	assert.deepEqual(s.allocations, { _other: 0, platform: 50 * USD, shop: 50 * USD });
+	assert.deepEqual(s.allocations, { _other: 0, platform: 50, shop: 50 });
 	assert.equal(audit.rows.length, 1, "the seed's winner writes one neutral row");
 	assert.equal(audit.rows[0].row.outcome, "neutral");
 
@@ -156,8 +156,8 @@ test("the neutral split is persisted with SET NX, writer default, and a first pl
 	assert.equal(applied.outcome, "applied");
 	const after = stored(redis);
 	// From 50/50/0 to the target 70/30/0: a move of 20, inside the 25 step, so it applies whole.
-	assert.deepEqual(after.allocations, { _other: 0, platform: 30 * USD, shop: 70 * USD });
-	assert.equal(after.allocations.shop + after.allocations.platform + after.allocations._other + after.unallocated, 100 * USD);
+	assert.deepEqual(after.allocations, { _other: 0, platform: 30, shop: 70 });
+	assert.equal(after.allocations.shop + after.allocations.platform + after.allocations._other + after.unallocated, 100);
 	assert.equal(after.planId, applied.planId);
 	assert.equal(after.lastPlanAt, new Date(NOW).toISOString());
 });
@@ -174,7 +174,7 @@ test("the ladder refuses in its order, each rung recorded in the file and in all
 		["plan-invalid", { text: "{ not json", envelope: base.envelope }],
 		["delegation-off", { text: incompleteStale, envelope: envelopeOf({ delegation: { enabled: false } }) }],
 		["writer-not-allowed", { text: incompleteStale, writer: { kind: "portfolio-job" }, envelope: envelopeOf({ delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }) }],
-		["envelope-mismatch", { text: incompleteStale, envelope: envelopeOf({ totalUsd: "90" }), expected: "someone-else" }],
+		["envelope-mismatch", { text: incompleteStale, envelope: envelopeOf({ totalTokens: 90 }), expected: "someone-else" }],
 		["plan-duplicate", { text: plan({ shop: 3, platform: 1, _other: 0 }), envelope: base.envelope }],
 		["plan-stale", { text: incompleteStale, envelope: base.envelope }],
 		["plan-too-soon", { text: plan({ shop: 1 }, first.planId), envelope: base.envelope, now: NOW + HOUR }],
@@ -267,7 +267,7 @@ test("the lock is released only while it is ours: a lock that expired and was re
 	assert.equal(own.redis.store.has(ALLOC_LOCK_KEY), false);
 });
 
-test("alloc:log keeps the newest 500 rows, with weights and micro-dollars and never a reason; the file keeps the reasons (#504)", async () => {
+test("alloc:log keeps the newest 500 rows, with weights and tokens and never a reason; the file keeps the reasons (#504)", async () => {
 	const { redis, audit, alloc, envelope, digest } = setup();
 	await alloc.reconcile({ envelope, digest, now: NOW });
 	const r = await alloc.applyPlan({ envelope, digest, projects: PROJECTS, text: plan({ shop: 3, platform: 1, _other: 0 }, null, { shop: { reason: "launch on Friday" } }), writer: SESSION, now: NOW });
@@ -302,7 +302,7 @@ test("expiry: two hosts that both see an expired plan write exactly one expired 
 	assert.equal(rows.filter((x) => x.outcome === "expired").length, 1, "only the CAS winner writes the row");
 	const s = stored(redis);
 	assert.deepEqual([s.writer, s.planId], ["expiry", null]);
-	assert.deepEqual(s.allocations, { _other: 0, platform: 50 * USD, shop: 50 * USD }, "the neutral split");
+	assert.deepEqual(s.allocations, { _other: 0, platform: 50, shop: 50 }, "the neutral split");
 	assert.deepEqual(a.state.allocations, s.allocations);
 	assert.deepEqual(b.state.allocations, s.allocations);
 	// The next plan names the neutral state: basis null.
@@ -335,7 +335,7 @@ test("a changed envelope re-bases only when its digest is alloc:envelope:expecte
 	redis.store.set(ALLOC_EXPECTED_KEY, digest);
 
 	// A hand edit on one host: its digest is not the expected one.
-	const edited = envelopeOf({ totalUsd: "120" });
+	const edited = envelopeOf({ totalTokens: 120 });
 	const editedDigest = envelopeDigest(edited);
 	const m1 = await alloc.reconcile({ envelope: edited, digest: editedDigest, now: NOW + HOUR });
 	const m2 = await alloc.reconcile({ envelope: edited, digest: editedDigest, now: NOW + 2 * HOUR });
@@ -350,7 +350,7 @@ test("a changed envelope re-bases only when its digest is alloc:envelope:expecte
 	assert.equal(ok.mismatch, false);
 	const s = stored(redis);
 	assert.deepEqual([s.writer, s.envelopeDigest, s.planId], ["envelope-change", editedDigest, applied.planId], "the plan id stands, so a writer's basis still names it");
-	assert.equal(s.allocations.shop + s.allocations.platform + s.allocations._other + s.unallocated, 120 * USD);
+	assert.equal(s.allocations.shop + s.allocations.platform + s.allocations._other + s.unallocated, 120);
 	assert.equal(s.lastPlanAt, applied.lastPlanAt, "a re-base starts no interval");
 	assert.equal(audit.rows.filter((x) => x.row.outcome === "rebased").length, 1);
 });
@@ -358,7 +358,7 @@ test("a changed envelope re-bases only when its digest is alloc:envelope:expecte
 test("alloc:envelope:expected is seeded with the APPLIED digest: a second host with another envelope mismatches, never re-bases the fleet (#504)", async () => {
 	// Two hosts on one Valkey: A carries the fleet's envelope, B a hand edit. Whoever looks first, the split stays A's.
 	const good = envelopeOf();
-	const edited = envelopeOf({ totalUsd: "1000" });
+	const edited = envelopeOf({ totalTokens: 1000 });
 	const goodDigest = envelopeDigest(good);
 	const editedDigest = envelopeDigest(edited);
 	const twoHosts = () => {
@@ -398,13 +398,13 @@ test("alloc:envelope:expected is seeded with the APPLIED digest: a second host w
 	}
 });
 
-test("a stored state with an amount that is not micro-dollars is corrupt and replaced by neutral; a newer one is neither trusted nor overwritten (#504)", async () => {
+test("a stored state with an amount that is not tokens is corrupt and replaced by neutral; a newer one is neither trusted nor overwritten (#504)", async () => {
 	for (const allocations of [{ shop: "lots", platform: 1, _other: 0 }, { shop: -5, platform: 1, _other: 0 }, { shop: 1.5, platform: 1, _other: 0 }, {}]) {
 		const { redis, alloc, envelope, digest } = setup();
 		redis.store.set(ALLOC_PLAN_KEY, JSON.stringify({ version: 1, planId: null, envelopeDigest: digest, allocations, unallocated: 0, repos: {} }));
 		const r = await alloc.reconcile({ envelope, digest, now: NOW });
 		assert.equal(r.state.writer, "default", JSON.stringify(allocations));
-		assert.deepEqual(r.state.allocations, { _other: 0, platform: 50 * USD, shop: 50 * USD });
+		assert.deepEqual(r.state.allocations, { _other: 0, platform: 50, shop: 50 });
 	}
 	const { redis, alloc, envelope, digest } = setup();
 	const repoBad = JSON.stringify({ version: 1, planId: null, envelopeDigest: digest, allocations: { shop: 1, platform: 1, _other: 0 }, unallocated: 0, repos: { shop: { a1b2c3d4: "x" } } });
@@ -422,15 +422,15 @@ test("a shrink re-bases at once without the step rule, and turning delegation of
 	await alloc.reconcile({ envelope, digest, now: NOW });
 	await alloc.applyPlan({ envelope, digest, projects: PROJECTS, text: plan({ shop: 3, platform: 1, _other: 0 }), writer: SESSION, now: NOW });
 	const big = stored(redis);
-	const small = envelopeOf({ totalUsd: "30" });
+	const small = envelopeOf({ totalTokens: 30 });
 	redis.store.set(ALLOC_EXPECTED_KEY, envelopeDigest(small));
 	await alloc.reconcile({ envelope: small, digest: envelopeDigest(small), now: NOW + HOUR });
 	const s = stored(redis);
-	assert.equal(s.allocations.shop + s.allocations.platform + s.allocations._other + s.unallocated, 30 * USD);
-	assert.ok(big.allocations.shop - s.allocations.shop > 25 * USD, "moved by more than the step: the operator's act takes no step");
-	assert.ok(s.allocations.shop >= 10 * USD && s.allocations.platform >= 10 * USD, "the floors hold");
+	assert.equal(s.allocations.shop + s.allocations.platform + s.allocations._other + s.unallocated, 30);
+	assert.ok(big.allocations.shop - s.allocations.shop > 25, "moved by more than the step: the operator's act takes no step");
+	assert.ok(s.allocations.shop >= 10 && s.allocations.platform >= 10, "the floors hold");
 
-	const off = envelopeOf({ totalUsd: "30", delegation: { enabled: false } });
+	const off = envelopeOf({ totalTokens: 30, delegation: { enabled: false } });
 	redis.store.set(ALLOC_EXPECTED_KEY, envelopeDigest(off));
 	const r = await alloc.reconcile({ envelope: off, digest: envelopeDigest(off), now: NOW + 2 * HOUR });
 	assert.deepEqual([r.state.planId, r.state.writer], [null, "envelope-change"]);
@@ -455,7 +455,7 @@ test("operator-revert skips the interval and the step, and is still a CAS on the
 	assert.equal(r.outcome, "reverted");
 	const s = stored(redis);
 	assert.equal(s.writer, "operator-revert");
-	assert.ok(s.allocations.shop - far.allocations.shop > 25 * USD, "beyond one step");
+	assert.ok(s.allocations.shop - far.allocations.shop > 25, "beyond one step");
 	assert.equal(audit.rows.at(-1).row.outcome, "reverted");
 	// Revert is refused while another apply holds the lock, and while delegation is off.
 	redis.store.set(ALLOC_LOCK_KEY, "mini2#x");
@@ -510,30 +510,30 @@ test("a revert to a row with no plan restores the CURRENT neutral split, never a
 	assert.equal(JSON.stringify(stored(redis)), before);
 });
 
-test("governedDollars: min(row, allocation) with its source, synthetic ledgers for a project with no row and for _other, the total on the deployment (#504)", () => {
+test("governedTokens: min(row, allocation) with its source, synthetic ledgers for a project with no row and for _other, the total on the deployment (#504)", () => {
 	const envelope = envelopeOf();
-	const state = { allocations: { shop: 70 * USD, platform: 20 * USD, _other: 10 * USD }, unallocated: 0, repos: { shop: { [scopeRef("github:acme/web")]: 50 * USD, [scopeRef("github:acme/api")]: 20 * USD } } };
+	const state = { allocations: { shop: 70, platform: 20, _other: 10 }, unallocated: 0, repos: { shop: { [scopeRef("github:acme/web")]: 50, [scopeRef("github:acme/api")]: 20 } } };
 	// A project row above the allocation: the allocation binds; below it: the operator's row binds; a tie is the operator's.
-	const row = (weekUsd) => ({ scope: "project:shop", keyPrefix: scopeDollarKeyPrefix("project:shop"), caps: { day: 5 * USD, week: weekUsd, month: null } });
-	const a = governedDollars({ envelope, state, member: { id: "shop", member: "github:acme/web" }, operator: { dollarCaps: { day: null, week: 200 * USD, month: null }, scopedDollars: null, projectDollars: row(90 * USD) } });
-	assert.deepEqual(a.projectDollars.caps, { day: 5 * USD, week: 70 * USD, month: null });
-	assert.deepEqual(a.projectDollars.capSource, { day: "operator", week: "allocation", month: null });
-	assert.deepEqual(a.dollarCaps, { day: null, week: 100 * USD, month: null });
-	assert.equal(a.dollarCapSource.week, "allocation", "the envelope total binds the deployment ledger");
-	assert.deepEqual(a.scopedDollars.caps.week, 50 * USD, "the repo share, through the scope slot");
-	assert.equal(a.scopedDollars.keyPrefix, scopeDollarKeyPrefix("github:acme/web"));
-	assert.equal(a.otherDollars, null);
-	const tie = governedDollars({ envelope, state, member: { id: "shop", member: "github:acme/web" }, operator: { projectDollars: row(70 * USD) } });
-	assert.equal(tie.projectDollars.capSource.week, "operator");
+	const row = (weekTokens) => ({ scope: "project:shop", keyPrefix: scopeTokenKeyPrefix("project:shop"), caps: { day: 5, week: weekTokens, month: null } });
+	const a = governedTokens({ envelope, state, member: { id: "shop", member: "github:acme/web" }, operator: { tokenCaps: { day: null, week: 200, month: null }, scopedTokens: null, projectTokens: row(90) } });
+	assert.deepEqual(a.projectTokens.caps, { day: 5, week: 70, month: null });
+	assert.deepEqual(a.projectTokens.capSource, { day: "operator", week: "allocation", month: null });
+	assert.deepEqual(a.tokenCaps, { day: null, week: 100, month: null });
+	assert.equal(a.tokenCapSource.week, "allocation", "the envelope total binds the deployment ledger");
+	assert.deepEqual(a.scopedTokens.caps.week, 50, "the repo share, through the scope slot");
+	assert.equal(a.scopedTokens.keyPrefix, scopeTokenKeyPrefix("github:acme/web"));
+	assert.equal(a.otherTokens, null);
+	const tie = governedTokens({ envelope, state, member: { id: "shop", member: "github:acme/web" }, operator: { projectTokens: row(70) } });
+	assert.equal(tie.projectTokens.capSource.week, "operator");
 	// No row at all: a synthetic ledger keyed as a row would be, so it settles with the job's cost.
-	const none = governedDollars({ envelope, state, member: { id: "platform", member: "github:acme/infra" }, operator: {} });
-	assert.equal(none.projectDollars.keyPrefix, scopeDollarKeyPrefix("project:platform"));
-	assert.deepEqual(none.projectDollars.caps, { day: null, week: 20 * USD, month: null });
+	const none = governedTokens({ envelope, state, member: { id: "platform", member: "github:acme/infra" }, operator: {} });
+	assert.equal(none.projectTokens.keyPrefix, scopeTokenKeyPrefix("project:platform"));
+	assert.deepEqual(none.projectTokens.caps, { day: null, week: 20, month: null });
 	// No project: _other's own ledger.
-	const other = governedDollars({ envelope, state, member: null, operator: {} });
-	assert.equal(other.otherDollars.keyPrefix, scopeDollarKeyPrefix("project:_other"));
-	assert.equal(other.otherDollars.caps.week, 10 * USD);
-	assert.equal(other.projectDollars, null);
+	const other = governedTokens({ envelope, state, member: null, operator: {} });
+	assert.equal(other.otherTokens.keyPrefix, scopeTokenKeyPrefix("project:_other"));
+	assert.equal(other.otherTokens.caps.week, 10);
+	assert.equal(other.projectTokens, null);
 });
 
 test("the audit file is YYYY-MM.jsonl under allocations/, appended; the reaper removes only aged files of that shape (#504)", () => {
@@ -561,7 +561,7 @@ test("the audit file is YYYY-MM.jsonl under allocations/, appended; the reaper r
 
 test("one apply and its expiry give the same answers 399 days from now: every clock is injected (#504)", () => {
 	// The shift-clock guard's own shim (.github/scripts/shift-clock.mjs), run in a child: the subject must read no clock
-	// of its own, so the shifted run and this one agree to the micro-dollar.
+	// of its own, so the shifted run and this one agree to the token.
 	const shim = fileURLToPath(new URL("../../.github/scripts/shift-clock.mjs", import.meta.url));
 	const src = new URL("../src/", import.meta.url).href;
 	const script = `
@@ -580,7 +580,7 @@ test("one apply and its expiry give the same answers 399 days from now: every cl
 			async lpush() {}, async ltrim() {},
 		};
 		const projects = [{ id: "shop", members: ["github:acme/web"] }, { id: "platform", members: ["github:acme/infra"] }];
-		const envelope = parseEnvelope(JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", platform: "10" }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }), "/e", { projects, maxCostMicros: 1000000 });
+		const envelope = parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, platform: 10 }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }), "/e", { projects, maxTokens: 1000000 });
 		const alloc = makeAllocationState({ redis, host: "h", audit: { append() {} }, token: () => "t" });
 		const now = ${NOW};
 		const digest = envelopeDigest(envelope);
@@ -601,8 +601,8 @@ test("one apply and its expiry give the same answers 399 days from now: every cl
 test("a stale alloc:envelope:expected never survives a new seed: after DEL alloc:plan alone, a host with the old envelope mismatches (#504)", async () => {
 	// The turn-off deletes the split; if the old expected digest stayed, a re-seed under a new envelope would leave a host
 	// still carrying the OLD envelope able to re-base the fleet onto it.
-	const old = envelopeOf({ totalUsd: "60" });
-	const fresh = envelopeOf({ totalUsd: "100" });
+	const old = envelopeOf({ totalTokens: 60 });
+	const fresh = envelopeOf({ totalTokens: 100 });
 	const redis = fakeRedis();
 	const rows = [];
 	const audit = { append: (row) => rows.push(row) };
@@ -644,7 +644,7 @@ test("a system change whose row the audit file refuses stands: expiry logs alloc
 
 test("replacing an UNREADABLE plan keeps alloc:envelope:expected: a stale host reconciling first does not take the fleet (#504)", async () => {
 	const good = envelopeOf();
-	const stale = envelopeOf({ totalUsd: "60" });
+	const stale = envelopeOf({ totalTokens: 60 });
 	const redis = fakeRedis();
 	redis.store.set(ALLOC_PLAN_KEY, "{ garbled");
 	redis.store.set(ALLOC_EXPECTED_KEY, envelopeDigest(good));

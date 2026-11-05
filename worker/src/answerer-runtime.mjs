@@ -2,7 +2,6 @@ import * as nodeFs from "node:fs";
 import { join } from "node:path";
 import { parseTriggersDocument } from "./triggers.mjs";
 import { ANSWER_ID_RE, ANSWER_RUN_RE, QUESTION_COMMENT_RE, answerApiRoot, answerConfigDigest, answerRuleConfigDigest, validAnswerSource } from "./answerer.mjs";
-import { parseUsdMicros } from "./money.mjs";
 import { SKILL_NAME_RE } from "./flow-gate.mjs";
 
 const policy = reason => ({ outcome: "policy", reason, budgetReserved: false });
@@ -122,7 +121,7 @@ export function makeAnswerDraftRuntime({ store, triggersPath, enqueue, identity 
 			Object.defineProperty(answerDraft, "configDigest", { value: input.configDigest });
 			Object.defineProperty(answerDraft, "project", { value: input.project });
 			await store.update(ref.runId, { status: "running" });
-			return { data: { kind: input.source.kind, purpose: "answer-draft", repo: input.source.repo, target: { ...input.source.target, title: "", body: "" }, ...(input.source.projectId !== undefined ? { projectId: input.source.projectId } : {}), ...(input.source.azure ? { azure: input.source.azure } : {}), flow: rule.flow, provider: model.provider, model: model.id, models: [...new Set([rule.model, rule.decisionModel])], maxCostUsd: rule.maxCostUsd, maxTurns: 8, packages: false, secretBundle: false, resume: false, awaitInput: false, steer: false, progress: false, statusComment: false, recover: false, answerDecisionModel: classifier, answerDraft } };
+			return { data: { kind: input.source.kind, purpose: "answer-draft", repo: input.source.repo, target: { ...input.source.target, title: "", body: "" }, ...(input.source.projectId !== undefined ? { projectId: input.source.projectId } : {}), ...(input.source.azure ? { azure: input.source.azure } : {}), flow: rule.flow, provider: model.provider, model: model.id, models: [...new Set([rule.model, rule.decisionModel])], maxTokens: rule.maxTokens, maxTurns: 8, packages: false, secretBundle: false, resume: false, awaitInput: false, steer: false, progress: false, statusComment: false, recover: false, answerDecisionModel: classifier, answerDraft } };
 		},
 		async collect({ job, prepared, completed, result }) {
 			if (!job?.answerDraft) return null;
@@ -152,13 +151,13 @@ export function makeAnswerDraftRuntime({ store, triggersPath, enqueue, identity 
 					if (probs.some(p => typeof p !== "number" || !Number.isFinite(p) || p < 0 || p > 1) || Math.abs(probs.reduce((a, b) => a + b, 0) - 1) > 0.000001 || out.confidence !== confidence || probs.some(p => p > confidence)) throw new Error("output-invalid");
 					Object.assign(classification, { category: out.category, confidence, probabilities: out.probabilities });
 				}
-				const costUsd = Number.isFinite(result?.tokens?.cost) && result.tokens.cost >= 0 ? result.tokens.cost : null;
+				const tokensTotal = Number.isSafeInteger(result?.tokens?.total) && result.tokens.total >= 0 ? result.tokens.total : null;
 				if (out.verdict === "passed") {
 					if (!["source-unavailable", "source-oversize", "category-disallowed", "low-confidence", "uncovered", "classify-only", "output-invalid"].includes(out.passReason) || out.draft !== undefined) throw new Error("output-invalid");
-					await store.update(ref.runId, { status: "passed", passReason: out.passReason, ...classification, sources: [], costUsd }); return null;
+					await store.update(ref.runId, { status: "passed", passReason: out.passReason, ...classification, sources: [], tokensTotal }); return null;
 				}
 				if (rule.mode !== "draft" || !rule.categories.includes(out.category) || out.confidence < rule.confidence || typeof out.answerableConfidence !== "number" || !Number.isFinite(out.answerableConfidence) || out.answerableConfidence < rule.confidence || out.answerableConfidence > 1 || !out.sources.length || typeof out.question !== "string" || typeof out.draft !== "string") throw new Error("output-invalid");
-				await store.update(ref.runId, { ...classification, answerableConfidence: out.answerableConfidence, costUsd });
+				await store.update(ref.runId, { ...classification, answerableConfidence: out.answerableConfidence, tokensTotal });
 				const digest = answerConfigDigest({ question: out.question, draft: out.draft, sources: out.sources });
 				if (!await store.saveDraft(ref.runId, { question: out.question, draft: out.draft, sources: out.sources, digest })) throw new Error("output-invalid");
 				return { status: "drafted" };
@@ -170,7 +169,7 @@ export function makeAnswerDraftRuntime({ store, triggersPath, enqueue, identity 
 export function stageAnswerDraft(job, prepared, { fs = nodeFs } = {}) {
 	if (!job.answerDraft || !prepared?.jobDir || prepared.outcome === "policy") return prepared;
 	const input = job.answerDraft.input;
-	if (!input || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(prepared.sha ?? "") || parseUsdMicros(job.maxCostUsd) === null) return policy("answer-draft-refused");
+	if (!input || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(prepared.sha ?? "") || (job.maxTokens === undefined || !Number.isSafeInteger(job.maxTokens) || job.maxTokens < 1)) return policy("answer-draft-refused");
 	let flowText, fd;
 	try {
 		if (!SKILL_NAME_RE.test(job.flow ?? "")) return policy("answer-draft-refused");

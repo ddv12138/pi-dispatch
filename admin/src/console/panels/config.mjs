@@ -127,7 +127,7 @@ function triggerNotes(t, bundles = null) {
     t.skillsDir ? `skills ${shownPath(t.skillsDir)}` : null,
     t.image ? `image ${t.image}` : null,
     t.backend ? `venue ${t.backend}` : null,
-    t.maxCostUsd ? `job cap $${t.maxCostUsd}` : null,
+    t.maxTokens ? `job cap $${t.maxTokens}` : null,
     Array.isArray(t.fallbackModels) && t.fallbackModels.length > 0
       ? `fallbacks ${t.fallbackModels.join(", ")}`
       : null,
@@ -217,10 +217,10 @@ const SETTINGS_SHOWN = Object.freeze([
   "monthlyCap",
   "dailyTokenCap",
   "softHoldPct",
-  "maxCostUsd",
-  "dailyCostUsd",
-  "weeklyCostUsd",
-  "monthlyCostUsd",
+  "maxTokens",
+  "dailyTokenCap",
+  "weeklyTokenCap",
+  "monthlyTokenCap",
 ]);
 
 /** The settings editor: set a key to a value, or unset it back to its default (the `dispatch_set` tool's two shapes). */
@@ -366,9 +366,9 @@ const LIMIT_FIELDS = Object.freeze([
   ["week", "jobs a week"],
   ["month", "jobs a month"],
   ["concurrent", "at once"],
-  ["dayUsd", "a day"],
-  ["weekUsd", "a week"],
-  ["monthUsd", "a month"],
+  ["dayTokens", "a day"],
+  ["weekTokens", "a week"],
+  ["monthTokens", "a month"],
   ["memory", "memory"],
   ["cpus", "CPUs"],
   ["hostShare", "host share"],

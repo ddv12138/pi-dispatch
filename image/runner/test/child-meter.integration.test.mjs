@@ -6,7 +6,7 @@ import { crc32, deflateSync } from "node:zlib";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // Pure: no static pi import in their module graph, so they load unconditionally and the gate below applies to pi only.
-import { CHILD_LEDGER_NAME, foldChildLedgers, parseChildLedger, pinPriceTable, publishPriceTable, resolvePiAiCompat, spentFile, STOP_MESSAGES, stopFile, writeFileAtomic } from "../src/usage-meter.mjs";
+import { CHILD_LEDGER_NAME, foldChildLedgers, parseChildLedger, resolvePiAiCompat, STOP_MESSAGES, stopFile, writeFileAtomic } from "../src/usage-meter.mjs";
 import { TOKEN_BUDGET } from "../src/outcome.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -66,19 +66,6 @@ export default function fakeProvider(pi) {
 `;
 
 /** One test's world: an agent dir, a ledger dir (0700, as mkdtemp makes it), the provider file and its call log. */
-/**
- * Publish the parent's price table for the fake model into the world's ledger directory, as the runner does (issue
- * #587's review): a pi child prices every capped call from the parent's table, and the fake provider is an extension
- * the parent never saw, so without this a capped child refuses its first call.
- */
-function priceFake(w, api) {
-	const env = {};
-	const model = { provider: "fake", id: "m1", api, cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, compat: { maxTokensField: "max_tokens" } };
-	publishPriceTable({ dir: w.ledger, table: pinPriceTable({ getAllModels: () => [model] }), env });
-	Object.assign(w.env, env);
-	return w;
-}
-
 function world({ api = "pi-dispatch-child-fake" } = {}) {
 	const root = tempDir("pi-dispatch-child-");
 	const agentDir = join(root, "agent");
@@ -143,8 +130,7 @@ function assertMetered(dir, { calls = 1 } = {}) {
 	assert.ok(ledger, "the parent's parser accepts the child's ledger whole");
 	assert.equal(raw.state, "done");
 	assert.equal(raw.metered, true);
-	assert.deepEqual(raw.totals, { input: 500 * calls, output: 277 * calls, total: 777 * calls, cost: raw.totals.cost, calls, unresolved: 0, unpriced: 0, sessions: raw.totals.sessions });
-	assert.ok(Math.abs(raw.totals.cost - 0.000777 * calls) < 1e-12, `cost ${raw.totals.cost}`);
+	assert.deepEqual(raw.totals, { input: 500 * calls, output: 277 * calls, total: 777 * calls, calls, unresolved: 0, usageUnreported: 0, sessions: raw.totals.sessions });
 	assert.equal(raw.rows.length, 1);
 	assert.equal(raw.rows[0].provider, "fake");
 	assert.equal(raw.rows[0].model, "m1");
@@ -309,29 +295,6 @@ test("an off-list model is refused in the child, with modelRefused 1 in its ledg
 	assert.ok(parsed[0].ledger, "the ledger is well formed");
 	assert.equal(parsed[0].raw.metered, true);
 	assert.equal(parsed[0].raw.modelRefused, 1);
-	assert.equal(parsed[0].raw.totals.total, 0);
-});
-
-test("a SPENT that leaves no room under the child's cost cap refuses its call; with room it passes (issue #500)", { skip }, async () => {
-	// A priced api, so the guard has a finite bound to judge (an unpriced one is refused at any cap).
-	const roomy = priceFake(world({ api: "openai-completions" }), "openai-completions");
-	const capped = { PI_MAX_COST_MICROS: "1000000" };
-	const ok = await run([entry("dist/bundle/cli.js"), ...printArgs(roomy), "hello"], { env: { ...roomy.env, ...capped }, cwd: roomy.root });
-	assert.equal(ok.code, 0, ok.stderr);
-	assert.equal(roomy.callCount(), 1, "with no SPENT the call fits the cap");
-	const okLedger = assertMetered(roomy.ledger);
-	assert.equal(okLedger.spentMicros, 777);
-	assert.equal(okLedger.costRefused, 0);
-
-	const tight = priceFake(world({ api: "openai-completions" }), "openai-completions");
-	// The rest of the job has spent all but one micro-dollar.
-	writeFileAtomic({ dir: tight.ledger, name: "SPENT", text: JSON.stringify(spentFile(null, 999_999)) });
-	const refused = await run([entry("dist/bundle/cli.js"), ...printArgs(tight), "hello"], { env: { ...tight.env, ...capped }, cwd: tight.root });
-	assert.equal(tight.callCount(), 0, "the refused call never reached the provider");
-	assert.match(refused.stdout, new RegExp(STOP_MESSAGES["cost-cap"]));
-	const { parsed } = ledgers(tight.ledger);
-	assert.equal(parsed.length, 1);
-	assert.equal(parsed[0].raw.costRefused, 1);
 	assert.equal(parsed[0].raw.totals.total, 0);
 });
 

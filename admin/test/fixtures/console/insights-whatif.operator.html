@@ -73,25 +73,25 @@
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0 0 10 5 0 10z"/></marker>
 </defs></svg>
 <div class="page">
-<header class="top"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked<span id="p-nav-parked" data-panel><span class="count tone-parked"><span aria-hidden="true">1</span><span class="sr">1 unanswered</span></span></span></a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models, Audit" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a><a href="/audit"><svg class="ic" aria-hidden="true"><use href="#i-audit"></use></svg>Audit</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="who" data-name="ops" data-role="operator" title="ops, Operator"><span><b>ops</b><small>Operator</small></span><span class="avatar">op</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button></div></header>
+<header class="top"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked<span id="p-nav-parked" data-panel><span class="count tone-parked"><span aria-hidden="true">1</span><span class="sr">1 unanswered</span></span></span></a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models, Audit" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a><a href="/audit"><svg class="ic" aria-hidden="true"><use href="#i-audit"></use></svg>Audit</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="who" data-name="ops" data-role="operator" title="ops, Operator"><span><b>ops</b><small>Operator</small></span><span class="avatar">op</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button><button class="roundbtn" type="button" data-locale-toggle hidden aria-label="Switch language" title="Chinese / English">中</button></div></header>
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead"><h1>Spend</h1><p class="titlebar__sub">The records behind the money, by trigger, repository and model.</p></div><div class="titlebar__end"><div class="spend-controls sp-controls">
     <div class="seg" role="group" aria-label="Spend window"><a href="/insights/breakdown?range=7d">7 days</a><a href="/insights/breakdown?range=30d" aria-current="page">30 days</a><a href="/insights/breakdown?range=mtd">Month to date</a></div><div class="spend-projects">
           <div class="seg" role="group" aria-label="Projects"><a href="/insights/breakdown?range=30d" aria-current="page">All projects</a><a href="/insights/breakdown?range=30d&amp;project=web">web</a><a href="/insights/breakdown?range=30d&amp;project=api">api</a><a href="/insights/breakdown?range=30d&amp;project=billing">billing</a><a href="/insights/breakdown?range=30d&amp;project=ops">ops</a></div>
         </div>
   </div><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/insights/breakdown?range=30d&amp;whatif=acme%2Fmodel-1&amp;flow=fix"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
-<nav class="tabs sp-tabs spend-tabs" aria-label="Spend views"><a href="/insights?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/insights/budget-split?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-pie"></use></svg>Budget split</a><a href="/insights/capacity?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-slot"></use></svg>Capacity</a><a href="/insights/breakdown?range=30d" aria-current="page"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-runs"></use></svg>Breakdown</a><a href="/insights/flows?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-flows"></use></svg>Flows map</a></nav><p class="sp-note note">Spend window: last 30d. Series are bounded by log retention and the 92-day scan cap.</p><div class="cards-4"><section id="p-bk-spend" data-panel><div class="card"><div class="card__head"><h2>Window spend</h2></div><div class="card__body "><p class="kpi"><b>~$33.30 est.</b></p><p class="sp-note note">Settled run records only. A floor (≥) means a run could not be fully priced.</p></div></div></section><section id="p-bk-runs" data-panel><div class="card"><div class="card__head"><h2>Runs</h2></div><div class="card__body "><p class="kpi"><b>181</b></p><p class="sp-note note">181 fully ledgered: their cost can be re-priced.</p></div></div></section><section id="p-bk-plans" data-panel><div class="card"><div class="card__head"><h2>Plans declared</h2></div><div class="card__body "><p class="kpi"><b>1</b></p><p class="sp-note note">0 hypothetical. Compare each with its API baseline.</p></div></div></section><section id="p-bk-top" data-panel><div class="card"><div class="card__head"><h2>Top flow</h2></div><div class="card__body "><p class="kpi"><b>fix</b></p><p class="sp-note note">$19.67; 59% of the window; next frontend-fix.</p></div></div></section></div><div class="cols"><div class="stack"><section id="p-daily" data-panel><div class="card"><div class="card__head"><h2>Daily spend</h2></div><div class="card__body "><div id="wrap">
+<nav class="tabs sp-tabs spend-tabs" aria-label="Spend views"><a href="/insights?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/insights/budget-split?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-pie"></use></svg>Budget split</a><a href="/insights/capacity?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-slot"></use></svg>Capacity</a><a href="/insights/breakdown?range=30d" aria-current="page"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-runs"></use></svg>Breakdown</a><a href="/insights/flows?range=30d"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-flows"></use></svg>Flows map</a></nav><p class="sp-note note">Spend window: last 30d. Series are bounded by log retention and the 92-day scan cap.</p><div class="cards-4"><section id="p-bk-spend" data-panel><div class="card"><div class="card__head"><h2>Window spend</h2></div><div class="card__body "><p class="kpi"><b><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</b></p><p class="sp-note note">Settled run records only. A floor (≥) means a run could not be fully priced.</p></div></div></section><section id="p-bk-runs" data-panel><div class="card"><div class="card__head"><h2>Runs</h2></div><div class="card__body "><p class="kpi"><b>181</b></p><p class="sp-note note">181 fully ledgered: their cost can be re-priced.</p></div></div></section><section id="p-bk-plans" data-panel><div class="card"><div class="card__head"><h2>Plans declared</h2></div><div class="card__body "><p class="kpi"><b>1</b></p><p class="sp-note note">0 hypothetical. Compare each with its API baseline.</p></div></div></section><section id="p-bk-top" data-panel><div class="card"><div class="card__head"><h2>Top flow</h2></div><div class="card__body "><p class="kpi"><b>fix</b></p><p class="sp-note note">—; unknown of the window; next frontend-fix.</p></div></div></section></div><div class="cols"><div class="stack"><section id="p-daily" data-panel><div class="card"><div class="card__head"><h2>Daily spend</h2></div><div class="card__body "><div id="wrap">
             <div id="tip"></div>
-            <svg width="920" height="160" role="img" aria-label="daily spend" viewBox="0 0 920 160"><line x1="46" y1="16" x2="46" y2="140" stroke="#30363d"/><line x1="46" y1="140" x2="910" y2="140" stroke="#30363d"/><line x1="46" y1="109" x2="910" y2="109" stroke="#30363d" stroke-width="0.5"/><text x="40" y="112" text-anchor="end" font-size="9" fill="#8b949e">$2.00</text><line x1="46" y1="78" x2="910" y2="78" stroke="#30363d" stroke-width="0.5"/><text x="40" y="81" text-anchor="end" font-size="9" fill="#8b949e">$4.00</text><line x1="46" y1="47" x2="910" y2="47" stroke="#30363d" stroke-width="0.5"/><text x="40" y="50" text-anchor="end" font-size="9" fill="#8b949e">$6.00</text><line x1="46" y1="16" x2="910" y2="16" stroke="#30363d" stroke-width="0.5"/><text x="40" y="19" text-anchor="end" font-size="9" fill="#8b949e">$8.00</text><rect data-tip="0" x="50.3" y="134.8" width="20.2" height="5.2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="1" x="79.1" y="129" width="20.2" height="11" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="2" x="107.9" y="139" width="20.2" height="1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="3" x="136.7" y="138.3" width="20.2" height="1.7" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="4" x="165.5" y="136" width="20.2" height="4" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="5" x="194.3" y="136.5" width="20.2" height="3.5" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="6" x="223.1" y="130.6" width="20.2" height="9.4" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="7" x="251.9" y="139" width="20.2" height="1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="8" x="280.7" y="135.4" width="20.2" height="4.6" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="9" x="309.5" y="134.4" width="20.2" height="5.6" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="10" x="338.3" y="139" width="20.2" height="1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="11" x="367.1" y="129.1" width="20.2" height="10.9" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="12" x="395.9" y="133.8" width="20.2" height="6.2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="13" x="424.7" y="138" width="20.2" height="2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="14" x="453.5" y="139" width="20.2" height="1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="15" x="482.3" y="136.8" width="20.2" height="3.2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="16" x="511.1" y="123.7" width="20.2" height="16.3" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="17" x="539.9" y="137.9" width="20.2" height="2.1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="18" x="568.7" y="136.4" width="20.2" height="3.6" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="19" x="597.5" y="139" width="20.2" height="1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="20" x="626.3" y="134.9" width="20.2" height="5.1" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="21" x="655.1" y="125.8" width="20.2" height="14.2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="22" x="683.9" y="137.4" width="20.2" height="2.6" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="23" x="712.7" y="83.7" width="20.2" height="56.3" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="24" x="741.5" y="80" width="20.2" height="60" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="25" x="770.3" y="85.6" width="20.2" height="54.4" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="26" x="799.1" y="71.2" width="20.2" height="68.8" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="27" x="827.9" y="77.2" width="20.2" height="62.8" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="28" x="856.7" y="89.7" width="20.2" height="50.3" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><rect data-tip="29" x="885.5" y="87.8" width="20.2" height="52.2" rx="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff" stroke-dasharray="4,3"/><text x="60.4" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-09</text><text x="175.6" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-13</text><text x="290.8" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-17</text><text x="406" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-21</text><text x="521.2" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-25</text><text x="636.4" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-29</text><text x="751.6" y="154" text-anchor="middle" font-size="9" fill="#8b949e">10-03</text><text x="866.8" y="154" text-anchor="middle" font-size="9" fill="#8b949e">10-07</text></svg><div class="dim small">cumulative</div><svg width="920" height="84" role="img" aria-label="cumulative window spend" viewBox="0 0 920 84"><line x1="46" y1="14" x2="46" y2="64" stroke="#30363d"/><line x1="46" y1="64" x2="910" y2="64" stroke="#30363d"/><line x1="46" y1="39" x2="910" y2="39" stroke="#30363d" stroke-width="0.5"/><text x="40" y="42" text-anchor="end" font-size="9" fill="#8b949e">$20.00</text><line x1="46" y1="14" x2="910" y2="14" stroke="#30363d" stroke-width="0.5"/><text x="40" y="17" text-anchor="end" font-size="9" fill="#8b949e">$40.00</text><path d="M 60.4 63.6 L 89.2 62.7 L 118 62.7 L 146.8 62.6 L 175.6 62.2 L 204.4 62 L 233.2 61.2 L 262 61.2 L 290.8 60.8 L 319.6 60.4 L 348.4 60.4 L 377.2 59.5 L 406 59 L 434.8 58.8 L 463.6 58.8 L 492.4 58.6 L 521.2 57.3 L 550 57.1 L 578.8 56.8 L 607.6 56.8 L 636.4 56.4 L 665.2 55.2 L 694 55 L 722.8 50.5 L 751.6 45.6 L 780.4 41.3 L 809.2 35.7 L 838 30.6 L 866.8 26.6 L 895.6 22.4" fill="none" stroke="#58a6ff" stroke-width="1.5" stroke-dasharray="4,3"/><circle data-tip="30" cx="60.4" cy="63.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="31" cx="89.2" cy="62.7" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="32" cx="118" cy="62.7" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="33" cx="146.8" cy="62.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="34" cx="175.6" cy="62.2" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="35" cx="204.4" cy="62" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="36" cx="233.2" cy="61.2" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="37" cx="262" cy="61.2" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="38" cx="290.8" cy="60.8" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="39" cx="319.6" cy="60.4" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="40" cx="348.4" cy="60.4" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="41" cx="377.2" cy="59.5" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="42" cx="406" cy="59" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="43" cx="434.8" cy="58.8" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="44" cx="463.6" cy="58.8" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="45" cx="492.4" cy="58.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="46" cx="521.2" cy="57.3" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="47" cx="550" cy="57.1" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="48" cx="578.8" cy="56.8" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="49" cx="607.6" cy="56.8" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="50" cx="636.4" cy="56.4" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="51" cx="665.2" cy="55.2" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="52" cx="694" cy="55" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="53" cx="722.8" cy="50.5" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="54" cx="751.6" cy="45.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="55" cx="780.4" cy="41.3" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="56" cx="809.2" cy="35.7" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="57" cx="838" cy="30.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="58" cx="866.8" cy="26.6" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><circle data-tip="59" cx="895.6" cy="22.4" r="2" fill="#58a6ff" fill-opacity=".45" stroke="#58a6ff"/><text x="891.6" y="11" text-anchor="end" font-size="9" fill="#8b949e">~$33.30 est.</text></svg>
+            <svg width="920" height="160" role="img" aria-label="daily spend" viewBox="0 0 920 160"><line x1="46" y1="16" x2="46" y2="140" stroke="#30363d"/><line x1="46" y1="140" x2="910" y2="140" stroke="#30363d"/><line x1="46" y1="109" x2="910" y2="109" stroke="#30363d" stroke-width="0.5"/><text x="40" y="112" text-anchor="end" font-size="9" fill="#8b949e">1.00M</text><line x1="46" y1="78" x2="910" y2="78" stroke="#30363d" stroke-width="0.5"/><text x="40" y="81" text-anchor="end" font-size="9" fill="#8b949e">2.00M</text><line x1="46" y1="47" x2="910" y2="47" stroke="#30363d" stroke-width="0.5"/><text x="40" y="50" text-anchor="end" font-size="9" fill="#8b949e">3.00M</text><line x1="46" y1="16" x2="910" y2="16" stroke="#30363d" stroke-width="0.5"/><text x="40" y="19" text-anchor="end" font-size="9" fill="#8b949e">4.00M</text><rect data-tip="0" x="50.3" y="132.1" width="20.2" height="7.9" rx="2" fill="#58a6ff"/><rect data-tip="1" x="79.1" y="127.3" width="20.2" height="12.7" rx="2" fill="#58a6ff"/><rect data-tip="2" x="107.9" y="134.8" width="20.2" height="5.2" rx="2" fill="#58a6ff"/><rect data-tip="3" x="136.7" y="134.7" width="20.2" height="5.3" rx="2" fill="#58a6ff"/><rect data-tip="4" x="165.5" y="133.7" width="20.2" height="6.3" rx="2" fill="#58a6ff"/><rect data-tip="5" x="194.3" y="133.8" width="20.2" height="6.2" rx="2" fill="#58a6ff"/><rect data-tip="6" x="223.1" y="127.6" width="20.2" height="12.4" rx="2" fill="#58a6ff"/><rect data-tip="7" x="251.9" y="137.5" width="20.2" height="2.5" rx="2" fill="#58a6ff"/><rect data-tip="8" x="280.7" y="128.3" width="20.2" height="11.7" rx="2" fill="#58a6ff"/><rect data-tip="9" x="309.5" y="129.8" width="20.2" height="10.2" rx="2" fill="#58a6ff"/><rect data-tip="10" x="338.3" y="134.9" width="20.2" height="5.1" rx="2" fill="#58a6ff"/><rect data-tip="11" x="367.1" y="121.4" width="20.2" height="18.6" rx="2" fill="#58a6ff"/><rect data-tip="12" x="395.9" y="127.6" width="20.2" height="12.4" rx="2" fill="#58a6ff"/><rect data-tip="13" x="424.7" y="131.4" width="20.2" height="8.6" rx="2" fill="#58a6ff"/><rect data-tip="14" x="453.5" y="137.5" width="20.2" height="2.5" rx="2" fill="#58a6ff"/><rect data-tip="15" x="482.3" y="131.6" width="20.2" height="8.4" rx="2" fill="#58a6ff"/><rect data-tip="16" x="511.1" y="119.6" width="20.2" height="20.4" rx="2" fill="#58a6ff"/><rect data-tip="17" x="539.9" y="133.4" width="20.2" height="6.6" rx="2" fill="#58a6ff"/><rect data-tip="18" x="568.7" y="132.2" width="20.2" height="7.8" rx="2" fill="#58a6ff"/><rect data-tip="19" x="597.5" y="133.6" width="20.2" height="6.4" rx="2" fill="#58a6ff"/><rect data-tip="20" x="626.3" y="129.7" width="20.2" height="10.3" rx="2" fill="#58a6ff"/><rect data-tip="21" x="655.1" y="119.7" width="20.2" height="20.3" rx="2" fill="#58a6ff"/><rect data-tip="22" x="683.9" y="132.1" width="20.2" height="7.9" rx="2" fill="#58a6ff"/><rect data-tip="23" x="712.7" y="75" width="20.2" height="65" rx="2" fill="#58a6ff"/><rect data-tip="24" x="741.5" y="72.9" width="20.2" height="67.1" rx="2" fill="#58a6ff"/><rect data-tip="25" x="770.3" y="73.5" width="20.2" height="66.5" rx="2" fill="#58a6ff"/><rect data-tip="26" x="799.1" y="56.9" width="20.2" height="83.1" rx="2" fill="#58a6ff"/><rect data-tip="27" x="827.9" y="62.2" width="20.2" height="77.8" rx="2" fill="#58a6ff"/><rect data-tip="28" x="856.7" y="81.8" width="20.2" height="58.2" rx="2" fill="#58a6ff"/><rect data-tip="29" x="885.5" y="72.4" width="20.2" height="67.6" rx="2" fill="#58a6ff"/><text x="60.4" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-09</text><text x="175.6" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-13</text><text x="290.8" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-17</text><text x="406" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-21</text><text x="521.2" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-25</text><text x="636.4" y="154" text-anchor="middle" font-size="9" fill="#8b949e">09-29</text><text x="751.6" y="154" text-anchor="middle" font-size="9" fill="#8b949e">10-03</text><text x="866.8" y="154" text-anchor="middle" font-size="9" fill="#8b949e">10-07</text></svg><div class="dim small">cumulative</div><svg width="920" height="84" role="img" aria-label="cumulative window spend" viewBox="0 0 920 84"><line x1="46" y1="14" x2="46" y2="64" stroke="#30363d"/><line x1="46" y1="64" x2="910" y2="64" stroke="#30363d"/><line x1="46" y1="39" x2="910" y2="39" stroke="#30363d" stroke-width="0.5"/><text x="40" y="42" text-anchor="end" font-size="9" fill="#8b949e">20.00M</text><line x1="46" y1="14" x2="910" y2="14" stroke="#30363d" stroke-width="0.5"/><text x="40" y="17" text-anchor="end" font-size="9" fill="#8b949e">40.00M</text><path d="M 60.4 63.7 L 89.2 63.2 L 118 63 L 146.8 62.7 L 175.6 62.5 L 204.4 62.2 L 233.2 61.7 L 262 61.6 L 290.8 61.2 L 319.6 60.8 L 348.4 60.5 L 377.2 59.8 L 406 59.3 L 434.8 59 L 463.6 58.9 L 492.4 58.5 L 521.2 57.7 L 550 57.4 L 578.8 57.1 L 607.6 56.9 L 636.4 56.4 L 665.2 55.6 L 694 55.3 L 722.8 52.7 L 751.6 50 L 780.4 47.3 L 809.2 43.9 L 838 40.8 L 866.8 38.5 L 895.6 35.7" fill="none" stroke="#58a6ff" stroke-width="1.5"/><circle data-tip="30" cx="60.4" cy="63.7" r="2" fill="#58a6ff"/><circle data-tip="31" cx="89.2" cy="63.2" r="2" fill="#58a6ff"/><circle data-tip="32" cx="118" cy="63" r="2" fill="#58a6ff"/><circle data-tip="33" cx="146.8" cy="62.7" r="2" fill="#58a6ff"/><circle data-tip="34" cx="175.6" cy="62.5" r="2" fill="#58a6ff"/><circle data-tip="35" cx="204.4" cy="62.2" r="2" fill="#58a6ff"/><circle data-tip="36" cx="233.2" cy="61.7" r="2" fill="#58a6ff"/><circle data-tip="37" cx="262" cy="61.6" r="2" fill="#58a6ff"/><circle data-tip="38" cx="290.8" cy="61.2" r="2" fill="#58a6ff"/><circle data-tip="39" cx="319.6" cy="60.8" r="2" fill="#58a6ff"/><circle data-tip="40" cx="348.4" cy="60.5" r="2" fill="#58a6ff"/><circle data-tip="41" cx="377.2" cy="59.8" r="2" fill="#58a6ff"/><circle data-tip="42" cx="406" cy="59.3" r="2" fill="#58a6ff"/><circle data-tip="43" cx="434.8" cy="59" r="2" fill="#58a6ff"/><circle data-tip="44" cx="463.6" cy="58.9" r="2" fill="#58a6ff"/><circle data-tip="45" cx="492.4" cy="58.5" r="2" fill="#58a6ff"/><circle data-tip="46" cx="521.2" cy="57.7" r="2" fill="#58a6ff"/><circle data-tip="47" cx="550" cy="57.4" r="2" fill="#58a6ff"/><circle data-tip="48" cx="578.8" cy="57.1" r="2" fill="#58a6ff"/><circle data-tip="49" cx="607.6" cy="56.9" r="2" fill="#58a6ff"/><circle data-tip="50" cx="636.4" cy="56.4" r="2" fill="#58a6ff"/><circle data-tip="51" cx="665.2" cy="55.6" r="2" fill="#58a6ff"/><circle data-tip="52" cx="694" cy="55.3" r="2" fill="#58a6ff"/><circle data-tip="53" cx="722.8" cy="52.7" r="2" fill="#58a6ff"/><circle data-tip="54" cx="751.6" cy="50" r="2" fill="#58a6ff"/><circle data-tip="55" cx="780.4" cy="47.3" r="2" fill="#58a6ff"/><circle data-tip="56" cx="809.2" cy="43.9" r="2" fill="#58a6ff"/><circle data-tip="57" cx="838" cy="40.8" r="2" fill="#58a6ff"/><circle data-tip="58" cx="866.8" cy="38.5" r="2" fill="#58a6ff"/><circle data-tip="59" cx="895.6" cy="35.7" r="2" fill="#58a6ff"/><text x="891.6" y="30.7" text-anchor="end" font-size="9" fill="#8b949e">22.61M</text></svg>
           </div>
           <ol id="insights-tips" class="hidden-tips" hidden>
-    <li>2026-09-09 · ~$0.33 est. · 3 runs</li><li>2026-09-10 · ~$0.71 est. · 4 runs</li><li>2026-09-11 · plan:kimi · 1 runs</li><li>2026-09-12 · ~$0.11 est. · 2 runs</li><li>2026-09-13 · ~$0.26 est. · 2 runs</li><li>2026-09-14 · ~$0.22 est. · 2 runs</li><li>2026-09-15 · ~$0.61 est. · 4 runs</li><li>2026-09-16 · plan:kimi · 1 runs</li><li>2026-09-17 · ~$0.30 est. · 2 runs</li><li>2026-09-18 · ~$0.36 est. · 3 runs</li><li>2026-09-19 · plan:kimi · 1 runs</li><li>2026-09-20 · ~$0.70 est. · 3 runs</li><li>2026-09-21 · ~$0.40 est. · 4 runs</li><li>2026-09-22 · ~$0.13 est. · 2 runs</li><li>2026-09-23 · plan:kimi · 1 runs</li><li>2026-09-24 · ~$0.21 est. · 2 runs</li><li>2026-09-25 · ~$1.05 est. · 4 runs</li><li>2026-09-26 · ~$0.14 est. · 2 runs</li><li>2026-09-27 · ~$0.23 est. · 2 runs</li><li>2026-09-28 · ~$0.0043 est. · 2 runs</li><li>2026-09-29 · ~$0.33 est. · 2 runs</li><li>2026-09-30 · ~$0.92 est. · 5 runs</li><li>2026-10-01 · ~$0.17 est. · 2 runs</li><li>2026-10-02 · ~$3.64 est. · 17 runs</li><li>2026-10-03 · ~$3.87 est. · 19 runs</li><li>2026-10-04 · ~$3.51 est. · 16 runs</li><li>2026-10-05 · ~$4.44 est. · 22 runs</li><li>2026-10-06 · ~$4.05 est. · 18 runs</li><li>2026-10-07 · ~$3.24 est. · 17 runs</li><li>2026-10-08 · ~$3.37 est. · 16 runs</li><li>2026-09-09 · cumulative ~$0.33 est.</li><li>2026-09-10 · cumulative ~$1.04 est.</li><li>2026-09-11 · cumulative ~$1.04 est.</li><li>2026-09-12 · cumulative ~$1.15 est.</li><li>2026-09-13 · cumulative ~$1.41 est.</li><li>2026-09-14 · cumulative ~$1.63 est.</li><li>2026-09-15 · cumulative ~$2.24 est.</li><li>2026-09-16 · cumulative ~$2.24 est.</li><li>2026-09-17 · cumulative ~$2.54 est.</li><li>2026-09-18 · cumulative ~$2.90 est.</li><li>2026-09-19 · cumulative ~$2.90 est.</li><li>2026-09-20 · cumulative ~$3.60 est.</li><li>2026-09-21 · cumulative ~$4.00 est.</li><li>2026-09-22 · cumulative ~$4.13 est.</li><li>2026-09-23 · cumulative ~$4.13 est.</li><li>2026-09-24 · cumulative ~$4.34 est.</li><li>2026-09-25 · cumulative ~$5.39 est.</li><li>2026-09-26 · cumulative ~$5.53 est.</li><li>2026-09-27 · cumulative ~$5.76 est.</li><li>2026-09-28 · cumulative ~$5.76 est.</li><li>2026-09-29 · cumulative ~$6.09 est.</li><li>2026-09-30 · cumulative ~$7.01 est.</li><li>2026-10-01 · cumulative ~$7.18 est.</li><li>2026-10-02 · cumulative ~$10.81 est.</li><li>2026-10-03 · cumulative ~$14.68 est.</li><li>2026-10-04 · cumulative ~$18.19 est.</li><li>2026-10-05 · cumulative ~$22.63 est.</li><li>2026-10-06 · cumulative ~$26.68 est.</li><li>2026-10-07 · cumulative ~$29.93 est.</li><li>2026-10-08 · cumulative ~$33.30 est.</li>
+    <li>2026-09-09 · 254k · 3 runs</li><li>2026-09-10 · 409k · 4 runs</li><li>2026-09-11 · 168k · 1 runs</li><li>2026-09-12 · 170k · 2 runs</li><li>2026-09-13 · 204k · 2 runs</li><li>2026-09-14 · 200k · 2 runs</li><li>2026-09-15 · 400k · 4 runs</li><li>2026-09-16 · 80k · 1 runs</li><li>2026-09-17 · 377k · 2 runs</li><li>2026-09-18 · 328k · 3 runs</li><li>2026-09-19 · 163k · 1 runs</li><li>2026-09-20 · 599k · 3 runs</li><li>2026-09-21 · 399k · 4 runs</li><li>2026-09-22 · 277k · 2 runs</li><li>2026-09-23 · 81k · 1 runs</li><li>2026-09-24 · 270k · 2 runs</li><li>2026-09-25 · 657k · 4 runs</li><li>2026-09-26 · 212k · 2 runs</li><li>2026-09-27 · 253k · 2 runs</li><li>2026-09-28 · 205k · 2 runs</li><li>2026-09-29 · 332k · 2 runs</li><li>2026-09-30 · 653k · 5 runs</li><li>2026-10-01 · 255k · 2 runs</li><li>2026-10-02 · 2.09M · 17 runs</li><li>2026-10-03 · 2.16M · 19 runs</li><li>2026-10-04 · 2.14M · 16 runs</li><li>2026-10-05 · 2.67M · 22 runs</li><li>2026-10-06 · 2.51M · 18 runs</li><li>2026-10-07 · 1.87M · 17 runs</li><li>2026-10-08 · 2.17M · 16 runs</li><li>2026-09-09 · cumulative 254k</li><li>2026-09-10 · cumulative 664k</li><li>2026-09-11 · cumulative 833k</li><li>2026-09-12 · cumulative 1.00M</li><li>2026-09-13 · cumulative 1.20M</li><li>2026-09-14 · cumulative 1.40M</li><li>2026-09-15 · cumulative 1.81M</li><li>2026-09-16 · cumulative 1.89M</li><li>2026-09-17 · cumulative 2.26M</li><li>2026-09-18 · cumulative 2.59M</li><li>2026-09-19 · cumulative 2.76M</li><li>2026-09-20 · cumulative 3.36M</li><li>2026-09-21 · cumulative 3.75M</li><li>2026-09-22 · cumulative 4.03M</li><li>2026-09-23 · cumulative 4.11M</li><li>2026-09-24 · cumulative 4.38M</li><li>2026-09-25 · cumulative 5.04M</li><li>2026-09-26 · cumulative 5.25M</li><li>2026-09-27 · cumulative 5.51M</li><li>2026-09-28 · cumulative 5.71M</li><li>2026-09-29 · cumulative 6.05M</li><li>2026-09-30 · cumulative 6.70M</li><li>2026-10-01 · cumulative 6.96M</li><li>2026-10-02 · cumulative 9.05M</li><li>2026-10-03 · cumulative 11.22M</li><li>2026-10-04 · cumulative 13.36M</li><li>2026-10-05 · cumulative 16.04M</li><li>2026-10-06 · cumulative 18.55M</li><li>2026-10-07 · cumulative 20.43M</li><li>2026-10-08 · cumulative 22.61M</li>
   </ol></div></div></section><section id="p-daily-flow" data-panel><div class="card"><div class="card__head"><h2>Daily spend by flow</h2></div><div class="card__body "><div class="sp-hbars">
         <div class="sx-flow">
             <div class="row">
               <b class="mono">fix</b
               ><span
-                >$19.67</span
+                >0</span
               >
             </div>
             <svg
@@ -101,16 +101,16 @@
               aria-label="fix, daily spend on the shared scale"
             >
               <g
-                  ><title>2026-09-09: $0.17</title
+                  ><title>2026-09-09: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="0.5"
-                    y="24.64234204565617"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.3576579543438279"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-10: $0</title
+                  ><title>2026-09-10: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="3.8333333333333335"
@@ -119,7 +119,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-11: $0</title
+                  ><title>2026-09-11: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="7.166666666666667"
@@ -128,16 +128,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-12: $0.11</title
+                  ><title>2026-09-12: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="10.5"
-                    y="25.112854476271302"
+                    y="26"
                     width="2.3333333333333335"
-                    height="0.8871455237286978"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-13: $0</title
+                  ><title>2026-09-13: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="13.833333333333334"
@@ -146,7 +146,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-14: $0</title
+                  ><title>2026-09-14: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="17.166666666666668"
@@ -155,16 +155,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-15: $0.22</title
+                  ><title>2026-09-15: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="20.5"
-                    y="24.223894448154656"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.7761055518453424"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-16: $0</title
+                  ><title>2026-09-16: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="23.833333333333336"
@@ -173,7 +173,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-17: $0</title
+                  ><title>2026-09-17: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="27.166666666666668"
@@ -182,16 +182,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-18: $0.17</title
+                  ><title>2026-09-18: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="30.5"
-                    y="24.62785870432535"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.3721412956746484"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-19: $0</title
+                  ><title>2026-09-19: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="33.833333333333336"
@@ -200,7 +200,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-20: $0</title
+                  ><title>2026-09-20: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="37.16666666666667"
@@ -209,16 +209,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-21: $0.23</title
+                  ><title>2026-09-21: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="40.5"
-                    y="24.086654163568987"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.9133458364310119"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-22: $0</title
+                  ><title>2026-09-22: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="43.833333333333336"
@@ -227,7 +227,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-23: $0</title
+                  ><title>2026-09-23: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="47.16666666666667"
@@ -236,16 +236,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-24: $0.21</title
+                  ><title>2026-09-24: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="50.5"
-                    y="24.296744347297775"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.703255652702226"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-25: $0</title
+                  ><title>2026-09-25: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="53.833333333333336"
@@ -254,7 +254,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-26: $0</title
+                  ><title>2026-09-26: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="57.16666666666667"
@@ -263,16 +263,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-27: $0.23</title
+                  ><title>2026-09-27: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="60.5"
-                    y="24.11942967075668"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.8805703292433202"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-28: $0</title
+                  ><title>2026-09-28: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="63.833333333333336"
@@ -281,7 +281,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-29: $0</title
+                  ><title>2026-09-29: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="67.16666666666667"
@@ -290,16 +290,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-30: $0.33</title
+                  ><title>2026-09-30: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="70.5"
-                    y="23.30743895715038"
+                    y="26"
                     width="2.3333333333333335"
-                    height="2.6925610428496167"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-01: $0</title
+                  ><title>2026-10-01: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="73.83333333333334"
@@ -308,67 +308,67 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-02: $2.81</title
+                  ><title>2026-10-02: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="77.16666666666667"
-                    y="3.0570387138542188"
+                    y="26"
                     width="2.3333333333333335"
-                    height="22.94296128614578"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-03: $2.76</title
+                  ><title>2026-10-03: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="80.5"
-                    y="3.4626213117763243"
+                    y="26"
                     width="2.3333333333333335"
-                    height="22.537378688223676"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-04: $2.37</title
+                  ><title>2026-10-04: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="83.83333333333334"
-                    y="6.612282164968008"
+                    y="26"
                     width="2.3333333333333335"
-                    height="19.387717835031992"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-05: $2.94</title
+                  ><title>2026-10-05: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="87.16666666666667"
-                    y="2"
+                    y="26"
                     width="2.3333333333333335"
-                    height="24"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-06: $2.79</title
+                  ><title>2026-10-06: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="90.5"
-                    y="3.2229841309194818"
+                    y="26"
                     width="2.3333333333333335"
-                    height="22.77701586908052"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-07: $2.16</title
+                  ><title>2026-10-07: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="93.83333333333334"
-                    y="8.355677597171173"
+                    y="26"
                     width="2.3333333333333335"
-                    height="17.644322402828827"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-08: $2.19</title
+                  ><title>2026-10-08: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="97.16666666666667"
-                    y="8.06743294966964"
+                    y="26"
                     width="2.3333333333333335"
-                    height="17.93256705033036"
+                    height="0.12"
                   ></rect
                 ></g>
             </svg>
@@ -376,7 +376,7 @@
             <div class="row">
               <b class="mono">frontend-fix</b
               ><span
-                >$7.30</span
+                >0</span
               >
             </div>
             <svg
@@ -386,7 +386,7 @@
               aria-label="frontend-fix, daily spend on the shared scale"
             >
               <g
-                  ><title>2026-09-09: $0</title
+                  ><title>2026-09-09: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="0.5"
@@ -395,16 +395,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-10: $0.58</title
+                  ><title>2026-09-10: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="3.8333333333333335"
-                    y="21.299591770568725"
+                    y="26"
                     width="2.3333333333333335"
-                    height="4.700408229431275"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-11: $0</title
+                  ><title>2026-09-11: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="7.166666666666667"
@@ -413,7 +413,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-12: $0</title
+                  ><title>2026-09-12: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="10.5"
@@ -422,7 +422,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-13: $0</title
+                  ><title>2026-09-13: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="13.833333333333334"
@@ -431,7 +431,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-14: $0</title
+                  ><title>2026-09-14: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="17.166666666666668"
@@ -440,16 +440,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-15: $0.39</title
+                  ><title>2026-09-15: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="20.5"
-                    y="22.805981870621885"
+                    y="26"
                     width="2.3333333333333335"
-                    height="3.1940181293781142"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-16: $0</title
+                  ><title>2026-09-16: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="23.833333333333336"
@@ -458,7 +458,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-17: $0</title
+                  ><title>2026-09-17: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="27.166666666666668"
@@ -467,7 +467,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-18: $0</title
+                  ><title>2026-09-18: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="30.5"
@@ -476,7 +476,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-19: $0</title
+                  ><title>2026-09-19: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="33.833333333333336"
@@ -485,16 +485,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-20: $0.70</title
+                  ><title>2026-09-20: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="37.16666666666667"
-                    y="20.258425883387442"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.741574116612559"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-21: $0</title
+                  ><title>2026-09-21: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="40.5"
@@ -503,7 +503,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-22: $0</title
+                  ><title>2026-09-22: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="43.833333333333336"
@@ -512,7 +512,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-23: $0</title
+                  ><title>2026-09-23: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="47.16666666666667"
@@ -521,7 +521,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-24: $0</title
+                  ><title>2026-09-24: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="50.5"
@@ -530,16 +530,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-25: $0.70</title
+                  ><title>2026-09-25: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="53.833333333333336"
-                    y="20.289158029777894"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.710841970222104"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-26: $0</title
+                  ><title>2026-09-26: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="57.16666666666667"
@@ -548,7 +548,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-27: $0</title
+                  ><title>2026-09-27: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="60.5"
@@ -557,7 +557,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-28: $0</title
+                  ><title>2026-09-28: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="63.833333333333336"
@@ -566,7 +566,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-29: $0</title
+                  ><title>2026-09-29: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="67.16666666666667"
@@ -575,16 +575,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-30: $0.42</title
+                  ><title>2026-09-30: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="70.5"
-                    y="22.602307839796424"
+                    y="26"
                     width="2.3333333333333335"
-                    height="3.397692160203574"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-01: $0</title
+                  ><title>2026-10-01: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="73.83333333333334"
@@ -593,67 +593,352 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-02: $0.50</title
+                  ><title>2026-10-02: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="77.16666666666667"
-                    y="21.922906721601287"
+                    y="26"
                     width="2.3333333333333335"
-                    height="4.077093278398714"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-03: $0.64</title
+                  ><title>2026-10-03: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="80.5"
-                    y="20.76361823345329"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.236381766546711"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-04: $0.71</title
+                  ><title>2026-10-04: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="83.83333333333334"
-                    y="20.18578032032405"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.8142196796759515"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-05: $0.78</title
+                  ><title>2026-10-05: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="87.16666666666667"
-                    y="19.5905656669751"
+                    y="26"
                     width="2.3333333333333335"
-                    height="6.409434333024901"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-06: $0.72</title
+                  ><title>2026-10-06: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="90.5"
-                    y="20.076493211444593"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.923506788555409"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-07: $0.51</title
+                  ><title>2026-10-07: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="93.83333333333334"
-                    y="21.821098313239716"
+                    y="26"
                     width="2.3333333333333335"
-                    height="4.178901686760283"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-08: $0.65</title
+                  ><title>2026-10-08: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="97.16666666666667"
-                    y="20.701107739944195"
+                    y="26"
                     width="2.3333333333333335"
-                    height="5.298892260055806"
+                    height="0.12"
+                  ></rect
+                ></g>
+            </svg>
+          </div><div class="sx-flow">
+            <div class="row">
+              <b class="mono">tidy</b
+              ><span
+                >0</span
+              >
+            </div>
+            <svg
+              class="sp-chart spend-chart"
+              viewBox="0 0 100 28"
+              role="img"
+              aria-label="tidy, daily spend on the shared scale"
+            >
+              <g
+                  ><title>2026-09-09: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="0.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-10: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="3.8333333333333335"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-11: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="7.166666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-12: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="10.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-13: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="13.833333333333334"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-14: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="17.166666666666668"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-15: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="20.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-16: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="23.833333333333336"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-17: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="27.166666666666668"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-18: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="30.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-19: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="33.833333333333336"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-20: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="37.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-21: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="40.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-22: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="43.833333333333336"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-23: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="47.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-24: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="50.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-25: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="53.833333333333336"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-26: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="57.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-27: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="60.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-28: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="63.833333333333336"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-29: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="67.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-09-30: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="70.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-01: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="73.83333333333334"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-02: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="77.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-03: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="80.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-04: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="83.83333333333334"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-05: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="87.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-06: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="90.5"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-07: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="93.83333333333334"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
+                  ></rect
+                ></g><g
+                  ><title>2026-10-08: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
+                  ><rect
+                    class="sp-hbin"
+                    x="97.16666666666667"
+                    y="26"
+                    width="2.3333333333333335"
+                    height="0.12"
                   ></rect
                 ></g>
             </svg>
@@ -661,7 +946,7 @@
             <div class="row">
               <b class="mono">review</b
               ><span
-                >$4.19</span
+                >0</span
               >
             </div>
             <svg
@@ -671,7 +956,7 @@
               aria-label="review, daily spend on the shared scale"
             >
               <g
-                  ><title>2026-09-09: $0</title
+                  ><title>2026-09-09: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="0.5"
@@ -680,292 +965,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-10: $0.13</title
-                  ><rect
-                    class="sp-hbin"
-                    x="3.8333333333333335"
-                    y="24.905641344545028"
-                    width="2.3333333333333335"
-                    height="1.0943586554549734"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-11: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="7.166666666666667"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-12: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="10.5"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-13: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="13.833333333333334"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-14: $0.22</title
-                  ><rect
-                    class="sp-hbin"
-                    x="17.166666666666668"
-                    y="24.178180380398857"
-                    width="2.3333333333333335"
-                    height="1.8218196196011434"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-15: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="20.5"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-16: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="23.833333333333336"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-17: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="27.166666666666668"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-18: $0.19</title
-                  ><rect
-                    class="sp-hbin"
-                    x="30.5"
-                    y="24.42624438118351"
-                    width="2.3333333333333335"
-                    height="1.5737556188164925"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-19: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="33.833333333333336"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-20: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="37.16666666666667"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-21: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="40.5"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-22: $0.13</title
-                  ><rect
-                    class="sp-hbin"
-                    x="43.833333333333336"
-                    y="24.92120358037679"
-                    width="2.3333333333333335"
-                    height="1.0787964196232112"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-23: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="47.16666666666667"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-24: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="50.5"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-25: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="53.833333333333336"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-26: $0.14</title
-                  ><rect
-                    class="sp-hbin"
-                    x="57.16666666666667"
-                    y="24.87772086261157"
-                    width="2.3333333333333335"
-                    height="1.1222791373884287"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-27: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="60.5"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-28: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="63.833333333333336"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-29: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="67.16666666666667"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-30: $0.17</title
-                  ><rect
-                    class="sp-hbin"
-                    x="70.5"
-                    y="24.599799273857684"
-                    width="2.3333333333333335"
-                    height="1.4002007261423155"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-01: $0</title
-                  ><rect
-                    class="sp-hbin"
-                    x="73.83333333333334"
-                    y="26"
-                    width="2.3333333333333335"
-                    height="0.12"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-02: $0.33</title
-                  ><rect
-                    class="sp-hbin"
-                    x="77.16666666666667"
-                    y="23.306997591218177"
-                    width="2.3333333333333335"
-                    height="2.6930024087818207"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-03: $0.48</title
-                  ><rect
-                    class="sp-hbin"
-                    x="80.5"
-                    y="22.11306187739222"
-                    width="2.3333333333333335"
-                    height="3.886938122607779"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-04: $0.42</title
-                  ><rect
-                    class="sp-hbin"
-                    x="83.83333333333334"
-                    y="22.53132148570039"
-                    width="2.3333333333333335"
-                    height="3.4686785142996097"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-05: $0.55</title
-                  ><rect
-                    class="sp-hbin"
-                    x="87.16666666666667"
-                    y="21.541403087313828"
-                    width="2.3333333333333335"
-                    height="4.458596912686173"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-06: $0.54</title
-                  ><rect
-                    class="sp-hbin"
-                    x="90.5"
-                    y="21.585180049033845"
-                    width="2.3333333333333335"
-                    height="4.414819950966153"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-07: $0.57</title
-                  ><rect
-                    class="sp-hbin"
-                    x="93.83333333333334"
-                    y="21.32074464154173"
-                    width="2.3333333333333335"
-                    height="4.6792553584582715"
-                  ></rect
-                ></g><g
-                  ><title>2026-10-08: $0.32</title
-                  ><rect
-                    class="sp-hbin"
-                    x="97.16666666666667"
-                    y="23.407678064419674"
-                    width="2.3333333333333335"
-                    height="2.592321935580327"
-                  ></rect
-                ></g>
-            </svg>
-          </div><div class="sx-flow">
-            <div class="row">
-              <b class="mono">build-report</b
-              ><span
-                >$1.90</span
-              >
-            </div>
-            <svg
-              class="sp-chart spend-chart"
-              viewBox="0 0 100 28"
-              role="img"
-              aria-label="build-report, daily spend on the shared scale"
-            >
-              <g
-                  ><title>2026-09-09: $0.17</title
-                  ><rect
-                    class="sp-hbin"
-                    x="0.5"
-                    y="24.641516527894087"
-                    width="2.3333333333333335"
-                    height="1.3584834721059118"
-                  ></rect
-                ></g><g
-                  ><title>2026-09-10: $0</title
+                  ><title>2026-09-10: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="3.8333333333333335"
@@ -974,7 +974,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-11: $0</title
+                  ><title>2026-09-11: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="7.166666666666667"
@@ -983,7 +983,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-12: $0</title
+                  ><title>2026-09-12: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="10.5"
@@ -992,16 +992,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-13: $0.26</title
+                  ><title>2026-09-13: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="13.833333333333334"
-                    y="23.899114509598515"
+                    y="26"
                     width="2.3333333333333335"
-                    height="2.1008854904014833"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-14: $0</title
+                  ><title>2026-09-14: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="17.166666666666668"
@@ -1010,7 +1010,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-15: $0</title
+                  ><title>2026-09-15: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="20.5"
@@ -1019,7 +1019,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-16: $0</title
+                  ><title>2026-09-16: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="23.833333333333336"
@@ -1028,16 +1028,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-17: $0.30</title
+                  ><title>2026-09-17: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="27.166666666666668"
-                    y="23.56051327860986"
+                    y="26"
                     width="2.3333333333333335"
-                    height="2.4394867213901392"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-18: $0</title
+                  ><title>2026-09-18: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="30.5"
@@ -1046,7 +1046,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-19: $0</title
+                  ><title>2026-09-19: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="33.833333333333336"
@@ -1055,7 +1055,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-20: $0</title
+                  ><title>2026-09-20: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="37.16666666666667"
@@ -1064,16 +1064,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-21: $0.16</title
+                  ><title>2026-09-21: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="40.5"
-                    y="24.69192215204035"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.3080778479596533"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-22: $0</title
+                  ><title>2026-09-22: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="43.833333333333336"
@@ -1082,7 +1082,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-23: $0</title
+                  ><title>2026-09-23: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="47.16666666666667"
@@ -1091,7 +1091,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-24: $0</title
+                  ><title>2026-09-24: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="50.5"
@@ -1100,16 +1100,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-25: $0.35</title
+                  ><title>2026-09-25: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="53.833333333333336"
-                    y="23.099751765719148"
+                    y="26"
                     width="2.3333333333333335"
-                    height="2.900248234280852"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-26: $0</title
+                  ><title>2026-09-26: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="57.16666666666667"
@@ -1118,7 +1118,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-27: $0</title
+                  ><title>2026-09-27: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="60.5"
@@ -1127,7 +1127,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-28: $0</title
+                  ><title>2026-09-28: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="63.833333333333336"
@@ -1136,16 +1136,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-29: $0.33</title
+                  ><title>2026-09-29: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="67.16666666666667"
-                    y="23.310316009152892"
+                    y="26"
                     width="2.3333333333333335"
-                    height="2.689683990847106"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-09-30: $0</title
+                  ><title>2026-09-30: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="70.5"
@@ -1154,16 +1154,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-01: $0.17</title
+                  ><title>2026-10-01: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="73.83333333333334"
-                    y="24.636252830480405"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.363747169519596"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-02: $0</title
+                  ><title>2026-10-02: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="77.16666666666667"
@@ -1172,7 +1172,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-03: $0</title
+                  ><title>2026-10-03: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="80.5"
@@ -1181,7 +1181,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-04: $0</title
+                  ><title>2026-10-04: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="83.83333333333334"
@@ -1190,16 +1190,16 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-05: $0.16</title
+                  ><title>2026-10-05: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="87.16666666666667"
-                    y="24.66314345857205"
+                    y="26"
                     width="2.3333333333333335"
-                    height="1.3368565414279487"
+                    height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-06: $0</title
+                  ><title>2026-10-06: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="90.5"
@@ -1208,7 +1208,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-07: $0</title
+                  ><title>2026-10-07: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="93.83333333333334"
@@ -1217,7 +1217,7 @@
                     height="0.12"
                   ></rect
                 ></g><g
-                  ><title>2026-10-08: $0</title
+                  ><title>2026-10-08: <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</title
                   ><rect
                     class="sp-hbin"
                     x="97.16666666666667"
@@ -1229,7 +1229,7 @@
             </svg>
           </div>
       </div>
-      <p class="sp-note note">Top four flows share a $0 to $2.94 daily scale. The rest add up to $0.23.</p></div></div></section><section id="p-breakdown" data-panel><div class="card"><div class="card__head"><h2>Breakdown</h2></div><div class="card__body "><p class="sp-note note">By flow and by project are on the Spend view.</p>
+      <p class="sp-note note">Top four flows share a 0 to 1 daily scale. The rest add up to 0 tokens.</p></div></div></section><section id="p-breakdown" data-panel><div class="card"><div class="card__head"><h2>Breakdown</h2></div><div class="card__body "><p class="sp-note note">By flow and by project are on the Spend view.</p>
       <h3>By trigger</h3>
       <div class="table-scroll">
         <table class="table">
@@ -1251,7 +1251,7 @@
                   </td>
                   <td>90</td>
                   <td>0</td>
-                  <td>$19.67</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
                 </tr><tr>
                   <td>
                     <a
@@ -1261,37 +1261,7 @@
                   </td>
                   <td>24</td>
                   <td>0</td>
-                  <td>$7.30</td>
-                </tr><tr>
-                  <td>
-                    <a
-                          href="/insights/flows?range=30d&amp;select=3"
-                          >4. pull_request action[open,update]</a
-                        >
-                  </td>
-                  <td>24</td>
-                  <td>0</td>
-                  <td>$4.19</td>
-                </tr><tr>
-                  <td>
-                    <a
-                          href="/insights/flows?range=30d&amp;select=6"
-                          >7. label any[pi:triage]</a
-                        >
-                  </td>
-                  <td>1</td>
-                  <td>0</td>
-                  <td>$0.21</td>
-                </tr><tr>
-                  <td>
-                    <a
-                          href="/insights/flows?range=30d&amp;select=5"
-                          >6. cron pm-weekly 0 6 * * 1</a
-                        >
-                  </td>
-                  <td>4</td>
-                  <td>0</td>
-                  <td>$0.02</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
                 </tr><tr>
                   <td>
                     <a
@@ -1301,14 +1271,44 @@
                   </td>
                   <td>30</td>
                   <td>0</td>
-                  <td>plan:kimi</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
+                </tr><tr>
+                  <td>
+                    <a
+                          href="/insights/flows?range=30d&amp;select=3"
+                          >4. pull_request action[open,update]</a
+                        >
+                  </td>
+                  <td>24</td>
+                  <td>0</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
+                </tr><tr>
+                  <td>
+                    <a
+                          href="/insights/flows?range=30d&amp;select=5"
+                          >6. cron pm-weekly 0 6 * * 1</a
+                        >
+                  </td>
+                  <td>4</td>
+                  <td>0</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
+                </tr><tr>
+                  <td>
+                    <a
+                          href="/insights/flows?range=30d&amp;select=6"
+                          >7. label any[pi:triage]</a
+                        >
+                  </td>
+                  <td>1</td>
+                  <td>0</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
                 </tr><tr>
                   <td>
                     (chained runs)
                   </td>
                   <td>8</td>
                   <td>0</td>
-                  <td>$1.90</td>
+                  <td><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</td>
                 </tr>
           </tbody>
         </table>
@@ -1316,17 +1316,17 @@
       <h3>By repository</h3>
       <dl class="facts"><div class="fact"><dt>github:acme/web</dt><dd>github,
           web,
-          $19.43</dd></div><div class="fact"><dt>github:acme/api</dt><dd>github,
+          <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>local:site</dt><dd>local,
+          ops,
+          <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>github:acme/api</dt><dd>github,
           api,
-          $7.76</dd></div><div class="fact"><dt>gitlab:acme/billing-ui</dt><dd>gitlab,
+          <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>gitlab:acme/billing-ui</dt><dd>gitlab,
           billing,
-          $4.19</dd></div><div class="fact"><dt>local:site</dt><dd>local,
+          <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>local:pm</dt><dd>local,
           ops,
-          ~$1.90 est.</dd></div><div class="fact"><dt>local:pm</dt><dd>local,
-          ops,
-          $0.02</dd></div></dl>
+          <svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div></dl>
       <h3>By model</h3>
-      <dl class="facts"><div class="fact"><dt>anthropic/claude-sonnet-5-5</dt><dd>$33.28</dd></div><div class="fact"><dt>anthropic/claude-haiku-5-5</dt><dd>$0.02</dd></div><div class="fact"><dt>kimi-coding/kimi-for-coding</dt><dd>plan:kimi</dd></div></dl><a
+      <dl class="facts"><div class="fact"><dt>anthropic/claude-sonnet-5-5</dt><dd><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>kimi-coding/kimi-for-coding</dt><dd><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div><div class="fact"><dt>anthropic/claude-haiku-5-5</dt><dd><svg class="ic" aria-hidden="true"><use href="#i-minus"></use></svg> unknown</dd></div></dl><a
             class="btn"
             href="/insights/breakdown?range=30d&amp;paths=full"
             >Full paths</a
@@ -1336,7 +1336,7 @@
           name="range"
           value="30d"
         /><label
-          >Model<input
+           >Model<input
             name="whatif"
             list="spend-models"
             required
@@ -1344,23 +1344,23 @@
             value="acme/model-1"
             placeholder="provider/model" /></label
         ><label
-                >Flow<input
+                 >Flow<input
                   name="flow"
                   list="spend-flows"
                   required
                   maxlength="64"
                   value="fix" /></label
               ><datalist id="spend-flows">
-                <option value="fix"></option><option value="frontend-fix"></option><option value="review"></option><option value="build-report"></option><option value="triage"></option><option value="portfolio-manager"></option><option value="tidy"></option>
+                <option value="fix"></option><option value="frontend-fix"></option><option value="tidy"></option><option value="review"></option><option value="build-report"></option><option value="portfolio-manager"></option><option value="triage"></option>
               </datalist><datalist id="spend-models">
           <option value="acme/model-1">
                 acme/model-1
               </option><option value="acme/model-2">
                 acme/model-2
               </option></datalist
-        ><button class="btn btn--primary" type="submit">Estimate</button>
+        ><button class="btn btn--primary" type="submit" >Estimate</button>
       </form>
-      <dl class="facts"><div class="fact"><dt>Per run</dt><dd>$0.10</dd></div><div class="fact"><dt>Runs in this window</dt><dd>90</dd></div><div class="fact"><dt>Window estimate</dt><dd>$8.97</dd></div><div class="fact"><dt>Ledger coverage</dt><dd>100%</dd></div><div class="fact"><dt>Runs excluded</dt><dd>0</dd></div><div class="fact"><dt>Rates version</dt><dd>0.99.1</dd></div></dl><p class="sp-note note">Per-run estimate, multiplied by the flow&#39;s runs in this spend window. Seeded ranges narrow after a ledgered run.</p><p class="sp-note note">An estimate from token counts and list prices. Outcomes may differ: a cheaper model can take more turns or fail more often.</p></div></div></section></div><div class="stack"><section id="p-plans" data-panel><div class="card"><div class="card__head"><h2>Plans</h2></div><div class="card__body "><div id="plans"><div class="plan"><div><span class="pid">kimi</span> <span class="pv">Moonshot AI</span> · $19.00/month</div><div class="dim small">no API-rate baseline declared, set counterfactualModel to compare</div><div class="small dim">attributed 30 runs · 4013549 tok</div><div class="small dim">amortized ~$0.63 est./run · api-equiv —</div></div></div></div></div></section><section id="p-money-legend" data-panel><div class="card"><div class="card__head"><h2>How money is shown</h2></div><div class="card__body "><p class="sp-note note">Metered: pi-ai list prices. Estimated (~): partial evidence. Plan: plan:&lt;id&gt;, with API equivalent shown separately. Zero-rated: no charge. Unknown: not priceable. Floor (≥): at least this much. Seeded: a wide range until a ledgered run exists.</p></div></div></section><section id="p-provenance" data-panel><div class="card"><div class="card__head"><h2>Where these numbers come from</h2></div><div class="card__body "><p class="sp-note note">Metered means pi-ai prices, not invoices. Money held for running jobs is not in run records yet; the Spend view shows it.</p><div id="prov"><div>~ marks estimates · metered = pi-ai computed prices, not invoices · pi-ai 0.99.1</div><div>unmetered 0 · no ledger (not re-priceable) 0</div><div>spend window 2026-09-08 – 2026-10-08 UTC (last 30d)</div></div></div></div></section><section id="p-bk-states" data-panel><div class="card"><div class="card__head"><h2>Other states</h2></div><div class="card__body "><p class="sp-note note">The records in the selected spend window are shown.</p></div></div></section></div></div><div id="confirm-slot" class="cslot" role="region" aria-live="polite" aria-label="Preview" hidden><div class="confirm confirm--busy" aria-busy="true"><p class="confirm__h"><span data-slot-icon="busy"><svg class="ic" aria-hidden="true"><use href="#i-hourglass"></use></svg></span><span data-slot-icon="said"><svg class="ic" aria-hidden="true"><use href="#i-attention"></use></svg></span><span data-slot-title>Previewing</span></p><ul class="confirm__list confirm__ghost"><li><span></span></li><li><span></span></li></ul><p class="confirm__note" data-slot-message hidden></p><div class="confirm__act"><button class="btn btn--confirm" type="button" data-confirm disabled>Confirm</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div></div></div>
+      <dl class="facts"><div class="fact"><dt>Per run</dt><dd>~108k est.</dd></div><div class="fact"><dt>Window estimate</dt><dd>~9.72M est.</dd></div><div class="fact"><dt>Ledger coverage</dt><dd>100%</dd></div><div class="fact"><dt>Runs excluded</dt><dd>0</dd></div></dl><p class="sp-note note">Per-run estimate, multiplied by the flow&#39;s runs in this spend window.</p><p class="sp-note note">An estimate from recorded token counts. Outcomes may differ: a different model can take more turns or fail more often.</p></div></div></section></div><div class="stack"><section id="p-plans" data-panel><div class="card"><div class="card__head"><h2>Plans</h2></div><div class="card__body "><div id="plans"><div class="plan"><div><span class="pid">kimi</span> <span class="pv">Moonshot AI</span></div><div class="small dim">attributed 30 runs · 4013549 tok</div></div></div></div></div></section><section id="p-money-legend" data-panel><div class="card"><div class="card__head"><h2>How tokens are shown</h2></div><div class="card__body "><p class="sp-note note">Metered: the run&#39;s recorded usage totals. Estimated (~): partial evidence. Unknown: not readable. Floor (≥): at least this much.</p></div></div></section><section id="p-provenance" data-panel><div class="card"><div class="card__head"><h2>Where these numbers come from</h2></div><div class="card__body "><p class="sp-note note">Metered means the run&#39;s recorded usage totals, not an invoice. Tokens held for running jobs are not in run records yet; the Spend view shows them.</p><div id="prov"><div>~ marks estimates · metered = the meter read complete · pi-ai 0.99.1</div><div>unmetered 0 · no ledger (totals only) 0</div><div>spend window 2026-09-08 – 2026-10-08 UTC (last 30d)</div></div></div></div></section><section id="p-bk-states" data-panel><div class="card"><div class="card__head"><h2>Other states</h2></div><div class="card__body "><p class="sp-note note">The records in the selected spend window are shown.</p></div></div></section></div></div><div id="confirm-slot" class="cslot" role="region" aria-live="polite" aria-label="Preview" hidden><div class="confirm confirm--busy" aria-busy="true"><p class="confirm__h"><span data-slot-icon="busy"><svg class="ic" aria-hidden="true"><use href="#i-hourglass"></use></svg></span><span data-slot-icon="said"><svg class="ic" aria-hidden="true"><use href="#i-attention"></use></svg></span><span data-slot-title>Previewing</span></p><ul class="confirm__list confirm__ghost"><li><span></span></li><li><span></span></li></ul><p class="confirm__note" data-slot-message hidden></p><div class="confirm__act"><button class="btn btn--confirm" type="button" data-confirm disabled>Confirm</button><button class="btn btn--ghost" type="button" data-cancel>Cancel</button></div></div></div>
 </main>
 </div>
 </body>

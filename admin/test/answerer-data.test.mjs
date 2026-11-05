@@ -119,5 +119,6 @@ test("retained answerer statistics distinguish human sends, edits, drops and pas
   assert.equal(stats.edited, 0);
   assert.equal(stats.passed, 1);
   assert.equal(stats.jobs, 3);
-  assert.ok(Math.abs(stats.costUsd - 0.009) < 1e-9);
+  assert.equal(stats.tokens, 12200);
+  assert.equal(stats.tokensPartial, false);
 });

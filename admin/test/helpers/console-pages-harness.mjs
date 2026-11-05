@@ -313,7 +313,7 @@ async function renderInChild() {
     scopedLimits: await import("../../../worker/src/scoped-limits.mjs"),
     allocation: await import("../../../worker/src/allocation.mjs"),
     waitState: await import("../../../worker/src/wait-state.mjs"),
-    dollarBudget: await import("../../../worker/src/dollar-budget.mjs"),
+    tokenBudget: await import("../../../worker/src/token-budget.mjs"),
     doctorResults: await import("../../../worker/src/doctor-results.mjs"),
   };
   const RM = await import("../../src/read-model.mjs");
@@ -321,7 +321,7 @@ async function renderInChild() {
   const { secretsView } = await import("../../src/secrets-view.mjs");
   const { readConnections } = await import("../../src/connections-view.mjs");
   const { readProjectView } = await import("../../src/project-view.mjs");
-  const DW = await import("../../src/dollar-windows.mjs");
+  const DW = await import("../../src/token-windows.mjs");
   const { assembleInsightsView } = await import("../../src/insights-assembly.mjs");
   const { makeWhatIfReader } = await import("../../src/console/whatif.mjs");
   const pricing = await import("../../../worker/src/pricing.mjs");

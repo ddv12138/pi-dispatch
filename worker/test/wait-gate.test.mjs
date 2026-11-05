@@ -1010,7 +1010,7 @@ test("a verdict this gate does not understand HOLDS -- the default branch is nev
 
 test("an unusable target REFUSES rather than burning the fault budget", { skip }, async () => {
 	// The old shape held and counted, so five wakes later the job died `wait-unanswerable` blaming the
-	// operator's check for a value it was never handed -- which is what the guard's own comment calls wrong.
+	// operator's check for a value it was never handed -- which is what the meter's own comment calls wrong.
 	const { processor, seen } = tier2({ deps: { checkWait: async () => ({ verdict: "hold", fault: true, unusableTarget: true }) } });
 	const { job, moves } = spyJob(forge([{ profile: "jira" }]));
 	const result = await processor(job, "tok", new AbortController().signal);

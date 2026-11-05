@@ -459,7 +459,7 @@ function runFieldsOf(run, flow) {
     ...(run.maxTurns !== undefined ? { maxTurns: run.maxTurns } : {}),
     ...(run.models !== undefined ? { models: run.models } : {}),
     ...(run.fallbackModels !== undefined ? { fallbackModels: run.fallbackModels } : {}),
-    ...(run.maxCostUsd !== undefined ? { maxCostUsd: run.maxCostUsd } : {}),
+    ...(run.maxTokens !== undefined ? { maxTokens: run.maxTokens } : {}),
     ...(run.skillsDir !== undefined ? { skillsDir: run.skillsDir } : {}),
     ...(run.secrets !== undefined ? { secrets: run.secrets } : {}),
     ...(run.secretsProfile !== undefined ? { secretsProfile: run.secretsProfile } : {}),
@@ -469,7 +469,7 @@ function runFieldsOf(run, flow) {
     ...(run.awaitInput === true ? { awaitInput: true } : {}),
     ...(run.gates !== undefined ? { gates: run.gates } : {}),
     ...(run.gateTimeout !== undefined ? { gateTimeout: run.gateTimeout } : {}),
-    ...(run.gateBudgetRaiseUsd !== undefined ? { gateBudgetRaiseUsd: run.gateBudgetRaiseUsd } : {}),
+    ...(run.gateBudgetRaiseTokens !== undefined ? { gateBudgetRaiseTokens: run.gateBudgetRaiseTokens } : {}),
     ...(run.progress === true ? { progress: true } : {}),
     ...(run.statusComment === true ? { statusComment: true } : {}),
     ...(run.recover === true ? { recover: true } : {}),
@@ -479,7 +479,7 @@ function runFieldsOf(run, flow) {
 }
 
 /**
- * What a forge plan shows an operator of the run it will start (issue #642): `{ flow, model, models, maxCostUsd,
+ * What a forge plan shows an operator of the run it will start (issue #642): `{ flow, model, models, maxTokens,
  * secretsProfile, image, backend, packages?, mcp? }` off the job to enqueue, null where the job leaves the deployment's
  * default. NAMES ONLY: the secret profile's name, never a secret, and not even the `secrets` reference map (a
  * reference is a path into a vault, which an operator reading a preview does not need and a screenshot should not carry).
@@ -490,7 +490,7 @@ function runFieldsSummary(job) {
     model: job.model === undefined ? null : job.provider !== undefined ? `${job.provider}/${job.model}` : job.model,
     models: job.models ?? null,
     ...(job.fallbackModels !== undefined ? { fallbackModels: job.fallbackModels } : {}),
-    maxCostUsd: job.maxCostUsd ?? null,
+    maxTokens: job.maxTokens ?? null,
     secretsProfile: job.secretsProfile ?? null,
     image: job.image ?? null,
     backend: job.backend ?? null,
@@ -1094,7 +1094,7 @@ function notParkedRefusal(jobId, record) {
  *
  * `plan`: `{ kind: "local" | "cron" | "forge", jobId (the run re-run), queue, job (the data to enqueue), reserve,
  * schedule? (cron), forge? (the forge kind), deliveryId? (forge), runFields? (forge: `runFieldsSummary`, names only) }`.
- * `reserve` is `estimateReserve`'s over the deployment's `overlay`, `env` (its PI_MAX_COST_USD, PI_PROVIDER, PI_MODEL
+ * `reserve` is `estimateReserve`'s over the deployment's `overlay`, `env` (its PI_MAX_TOKENS, PI_PROVIDER, PI_MODEL
  * and PI_ALLOWED_MODELS) and the worker's pickup inputs `modelEndpoints` (`{ models, endpoints }`) and `builtinModel`;
  * without the last two a job is judged not zero-rated, so the figure is never below what the worker holds.
  */
@@ -1144,7 +1144,7 @@ export async function planRerun({
       if (typeof triggersPath !== "string" || triggersPath === "") return { refusal: "the triggers file is not known here (PI_TRIGGERS_FILE), so a cron run cannot be rebuilt from its trigger" };
       let schedule;
       try {
-        schedule = loadSchedulesFn({ triggersFile: triggersPath, maxCostUsd: env.PI_MAX_COST_USD === "" ? null : (env.PI_MAX_COST_USD ?? null) }, { fleet: Boolean(env.PI_WORKER_NAME) }).find((s) => s.schedulerId === triggerId);
+        schedule = loadSchedulesFn({ triggersFile: triggersPath, maxTokens: env.PI_MAX_TOKENS === "" ? null : (env.PI_MAX_TOKENS ?? null) }, { fleet: Boolean(env.PI_WORKER_NAME) }).find((s) => s.schedulerId === triggerId);
       } catch (e) {
         return { refusal: `${e?.message ?? e}. Nothing was queued` };
       }
@@ -1451,7 +1451,7 @@ export async function planParkedAnswer({
         comment: { body: bounded.text, ...(delivery.association ? { author_association: CONSOLE_ASSOCIATION } : {}) },
       },
     };
-    return { plan: { kind: "parked-answer", jobId, forge: kind, deliveryId, queue: approvalQueue ?? forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job), ...(approval ? { approval: { requestId: record.approval.requestId, action: record.approval.action, cap: rule.run.gateBudgetRaiseUsd ?? null } } : {}), reserve: estimateReserve(approval && record.approval.action === "budget-raise" && bounded.text.trim() === "/approve" ? { ...job, maxCostUsd: rule.run.gateBudgetRaiseUsd } : job, { overlay, env, modelEndpoints, builtinModel }) } };
+    return { plan: { kind: "parked-answer", jobId, forge: kind, deliveryId, queue: approvalQueue ?? forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job), ...(approval ? { approval: { requestId: record.approval.requestId, action: record.approval.action, cap: rule.run.gateBudgetRaiseTokens ?? null } } : {}), reserve: estimateReserve(approval && record.approval.action === "budget-raise" && bounded.text.trim() === "/approve" ? { ...job, maxTokens: rule.run.gateBudgetRaiseTokens } : job, { overlay, env, modelEndpoints, builtinModel }) } };
   } catch (err) {
     return { refusal: `could not read the parked run or its job (${boundedText(err?.message ?? String(err))}); nothing was queued` };
   } finally {

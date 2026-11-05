@@ -41,7 +41,6 @@ import {
 	classifyPromptRejection,
 	classifyThrow,
 	configError,
-	costRefusalField,
 	decideExit,
 	EXIT_INFRA,
 	loadRetryPredicate,
@@ -84,7 +83,6 @@ import {
 	meterStopHandler,
 	openChildLedger,
 	policyEnforcement,
-	publishPriceTable,
 	resolvePiAiCompat,
 } from "./src/usage-meter.mjs";
 
@@ -111,9 +109,9 @@ function log(event, fields = {}) {
 	process.stdout.write(`\n${JSON.stringify({ event, jobId: process.env.PI_JOB_ID, ...fields })}\n`);
 }
 
-/** The four fields the exit line's `tokens` object always carries, whichever meter produced them. */
-function pickTotals({ input, output, total, cost }) {
-	return { input, output, total, cost };
+/** The three fields the exit line's `tokens` object always carries, whichever meter produced them. */
+function pickTotals({ input, output, total }) {
+	return { input, output, total };
 }
 
 /**
@@ -129,11 +127,6 @@ let meteredExitFields = () => ({ ...roleExitFields() });
  * decideExit gives a stop over a rejected prompt, so the record says why the job really ended (PR #547's review).
  */
 let meterStopAtExit = () => null;
-/**
- * The cost guard's first refusal rule (issue #507, outcome.mjs COST_REFUSALS), or null. Set once the guard exists. Both
- * exit-line paths spread costRefusalField(outcome, costRefusalWhy()), so a `cost-cap` line names which rule refused.
- */
-let costRefusalWhy = () => null;
 /**
  * The turn count and the session as they stand, for an exit line written by the SIGTERM handler (issue #545). Empty
  * until the turn budget is attached; then set, so a line written on a stop carries what the decided line would have.
@@ -202,13 +195,13 @@ async function main() {
 	// Diagnose the shared mount boundary before inspecting optional watch or role files.
 	const watchReadOnly = readWatchMode();
 	const answerDraftInput = readAnswerDraft();
-	if (answerDraftInput && (watchReadOnly || cfg.maxCostMicros === null)) throw configError("answer drafts require their own restricted mode and cost cap", "answer-draft-refused");
+	if (answerDraftInput && (watchReadOnly || cfg.maxTokens === null)) throw configError("answer drafts require their own restricted mode and token cap", "answer-draft-refused");
 	if (answerDraftInput) assertWatchCompatible(cfg);
 	const watchDecisionInput = readWatchDecision();
 	const questionGroupingInput = readQuestionGrouping();
-	if (questionGroupingInput && (watchReadOnly || watchDecisionInput || cfg.maxCostMicros === null)) throw configError("question grouping requires its own mode and a cost cap", "question-group-refused");
+	if (questionGroupingInput && (watchReadOnly || watchDecisionInput || cfg.maxTokens === null)) throw configError("question grouping requires its own mode and a token cap", "question-group-refused");
 	if (questionGroupingInput) assertWatchCompatible(cfg);
-	if (watchDecisionInput && (!watchReadOnly || cfg.maxCostMicros === null)) throw configError("watch decisions require a read-only marker and a cost cap", "watch-config-invalid");
+	if (watchDecisionInput && (!watchReadOnly || cfg.maxTokens === null)) throw configError("watch decisions require a read-only marker and a token cap", "watch-config-invalid");
 	const watchToolsConfig = watchReadOnly && !watchDecisionInput ? readWatchTools() : null;
 	const roleInputs = readRoleInputs();
 	if (watchReadOnly || questionGroupingInput || answerDraftInput) assertWatchCompatible(cfg, { roles: roleInputs });
@@ -334,12 +327,12 @@ async function main() {
 	const failureObserver = installProviderFailureObserver({ ModelRuntime, rootSessionId });
 	const meter = createUsageMeter({
 		maxTokens: cfg.maxTokens,
-		maxCostMicros: cfg.maxCostMicros,
 		allowedModels: cfg.allowedModels,
 		rootSessionId,
-		// The meter's ONE stop (issues #501, #502): the token cap, the cost cap and the model list. Fires once,
-		// for the first stop only, whichever policy it was; only a token stop logs token_budget_exceeded
-		// (meterStopHandler). Same synchronous-abort discipline as attachTokenBudget's
+		// The meter's stops (issues #500, #502): the token cap, at the settle-time check (the lagging in-run
+		// backstop OQ-010 keeps describing -- there is no pre-call bound since the cost guard went), and the model
+		// list, refused before dispatch. Fires once, for the first stop only, whichever it was; only a token stop
+		// logs token_budget_exceeded (meterStopHandler). Same synchronous-abort discipline as attachTokenBudget's
 		// onAbort: abort() flips the AbortController before its first await, so the signal is set the instant we
 		// call it. Awaiting here would let the next turn start under a cap we already know is blown.
 		onStop: (reason, detail) => {
@@ -347,27 +340,15 @@ async function main() {
 			childWatch?.stopped(reason);
 		},
 	});
-	// The allowed-model list (issue #502) and the per-job cost cap (issue #501): judged BEFORE every provider call by
-	// the one guard both meter halves consult, the list first. Each part is built only when its policy is set, and
-	// with neither there is no guard, so such a job runs exactly as before.
+	// The allowed-model list (issue #502): judged BEFORE every provider call by the one guard both meter halves
+	// consult. Built only when the policy is set, and with no list there is no guard, so such a job runs exactly
+	// as before. The per-job cost cap has no guard: its stop is the meter's settle-time check (usage-meter.mjs).
 	// The parent's children hook (issue #500 part E, child-watch.mjs): folds the child ledgers into this meter, writes
-	// SPENT and STOP, judges the stops on the job's whole spend, and detects pi processes that report through no ledger.
-	// Built before the guard, whose `external` is every child's spend and in-flight bound as of the last fold. From here
-	// on the exit line carries childTotal, childProcesses and unmeteredChildren, zeros with no children.
-	childWatch = createChildWatch({ dir: childLedger.dir ?? null, meter, guard: () => policyGuard, log });
-	const policyGuard = createPolicyGuard({ maxCostMicros: cfg.maxCostMicros, allowedModels: cfg.allowedModels, log, external: () => childWatch.external(), subscriptionAdmission: subscriptionRegistration ? (provider) => subscriptionRegistration.admitted(provider) : null });
-	costRefusalWhy = () => policyGuard?.refusedWhy() ?? null;
+	// STOP, judges the stops on the job's whole usage, and detects pi processes that report through no ledger. From
+	// here on the exit line carries childTotal, childProcesses and unmeteredChildren, zeros with no children.
+	childWatch = createChildWatch({ dir: childLedger.dir ?? null, meter, log });
+	const policyGuard = createPolicyGuard({ allowedModels: cfg.allowedModels, log, subscriptionAdmission: subscriptionRegistration ? (provider) => subscriptionRegistration.admitted(provider) : null });
 	const usageMeter = await installProcessUsageMeter({ ModelRuntime, runtime: modelRuntime, meter, log, guard: policyGuard, children: childWatch });
-	// The price table the meter pinned from this runtime, before any extension loads, handed to pi children (issue #587's
-	// review): a child prices every capped call from it. A table that cannot be written leaves a child with none, which
-	// refuses its capped calls.
-	if (childLedger.dir && usageMeter.prices instanceof Map) {
-		try {
-			publishPriceTable({ dir: childLedger.dir, table: usageMeter.prices, env: process.env });
-		} catch (error) {
-			log("price_table_unavailable", { reason: error?.code ?? "write-failed" });
-		}
-	}
 	if (usageMeter.ok) {
 		meteredExitFields = () => {
 			const usage = meter.usageSnapshot();
@@ -378,13 +359,13 @@ async function main() {
 		finishMeter = () => usageMeter.uninstall();
 		meterStopAtExit = () => (meter.state.stopReason === null ? null : decideExit({ budgetAborted: false, meterStop: meter.state.stopReason }));
 	}
-	// A cost cap or a model list must be enforced BEFORE each call, so a runner that cannot do that refuses
-	// here, after the install it depends on and before any extension loads, while nothing has been spent
-	// (INT-RUNNER-EXIT-CODE-PROTOCOL): exit 2, `model-policy-unenforceable` or `cost-cap-unenforceable`. The
-	// fallback bus meter below is the `ok: false` case, and it can only see a call after it was paid for. The cost
-	// guard enforces the cap and the model guard the list; a job carrying neither policy passes untouched.
+	// A model list must be enforced BEFORE each call, so a runner that cannot do that refuses here, after the
+	// install it depends on and before any extension loads, while nothing has been spent
+	// (INT-RUNNER-EXIT-CODE-PROTOCOL): exit 2, `model-policy-unenforceable`. The fallback bus meter below is the
+	// `ok: false` case, and it can only see a call after it ran. The model guard enforces the list; a job carrying
+	// no list passes untouched. The token cap is deliberately not asserted: it has no pre-call form to enforce
+	// (its stop is the meter's settle-time check), so there is nothing a missing brake would make it enforce early.
 	assertPoliciesEnforceable({
-		maxCostMicros: cfg.maxCostMicros,
 		allowedModels: cfg.allowedModels,
 		...policyEnforcement(usageMeter),
 	});
@@ -397,13 +378,13 @@ async function main() {
 		finally { usageMeter.uninstall(); failureObserver.uninstall(); subscriptionCredentials?.uninstall(); subscriptionRegistration?.uninstall(); }
 		const stop = meterStopAtExit();
 		const outcome = stop ?? (result.ok ? { code: 0, reason: "stop" } : { code: 2, reason: result.reason });
-		exitWriter.writeExit({ ...capExitMessage(outcome), ...costRefusalField(outcome, costRefusalWhy()), ...meteredExitFields(), turns: 0, retryTurns: 0, toolsStarted: 0, replaySafe: false });
+		exitWriter.writeExit({ ...capExitMessage(outcome), ...meteredExitFields(), turns: 0, retryTurns: 0, toolsStarted: 0, replaySafe: false });
 		return outcome.code;
 	}
 
-	// Built only now, after the meter and the guards are installed (issue #543). Extension factories run in here,
-	// and one that makes a model call while it loads is metered, and judged against the cost cap and the model
-	// list, like any other call. A stop it causes ends the job before its prompt (below).
+	// Built only now, after the meter and the guard are installed (issue #543). Extension factories run in here,
+	// and one that makes a model call while it loads is metered, and judged against the model list, like any other
+	// call; its tokens land on the meter the same way. A stop it causes ends the job before its prompt (below).
 	// `log` is handed over so the loader's own findings arrive on THIS writer, with this job's id: the
 	// recursion guard drops an extension during reload() (see dropAdminExtensions), and a drop that
 	// landed on a second, id-less writer would be an operator's only clue to a missing tool while being
@@ -438,7 +419,7 @@ async function main() {
 	if (answerTools && !await answerTools.initialize()) {
 		usageMeter.uninstall(); failureObserver.uninstall(); subscriptionCredentials?.uninstall(); subscriptionRegistration?.uninstall();
 		const outcome = meterStopAtExit() ?? { code: 0, reason: "stop" };
-		exitWriter.writeExit({ ...capExitMessage(outcome), ...costRefusalField(outcome, costRefusalWhy()), ...meteredExitFields(), turns: 0, retryTurns: 0, toolsStarted: 0, replaySafe: false, answerDraftDigest: answerTools.state.receipt });
+		exitWriter.writeExit({ ...capExitMessage(outcome), ...meteredExitFields(), turns: 0, retryTurns: 0, toolsStarted: 0, replaySafe: false, answerDraftDigest: answerTools.state.receipt });
 		return outcome.code;
 	}
 	const resourceLoader = await buildLoadedResourceLoader({
@@ -782,7 +763,7 @@ async function main() {
 		budgetAborted: budget.state.aborted,
 		budgetTurns: budget.state.turns,
 		// Whichever meter was actually counting, and never both: the process-wide meter reports its first
-		// stop by reason (token_budget, cost-cap, model-not-allowed), the fallback bus meter its token abort
+		// stop by reason (token_budget, model-not-allowed), the fallback bus meter its token abort
 		// by flag. A token stop maps to the same reason:"token_budget" / exit 2 from either.
 		meterStop: usageMeter.ok ? meter.state.stopReason : null,
 		tokenAborted: usageMeter.ok ? false : tokenBudget.state.aborted,
@@ -797,8 +778,7 @@ async function main() {
 	});
 	// `metered: true` on the process-wide snapshot is what tells the daily token counter that this
 	// total includes every in-process session, not just the root's turns.
-	// The cost fields (issue #501) ride only when a cap is set and `modelRefused` (issue #502) only when a list is,
-	// so every other exit line stays byte-identical.
+	// `modelRefused` (issue #502) rides only when a list is set, so every other exit line stays byte-identical.
 	const tokens = usageMeter.ok ? meteredExitFields().tokens : { ...pickTotals(tokenBudget.state), metered: false };
 	// The per-(provider,model) ledger (issue #53, INT-RUN-HISTORY-FILE-CONTRACT) -- a SIBLING of
 	// `tokens`, never a widening of it: `tokens` rides through the worker verbatim because it holds
@@ -830,7 +810,7 @@ async function main() {
 	} catch {}
 	// capExitMessage: a provider's error body is unbounded, and the worker reads this line from a bounded
 	// tail, so an uncapped message can push `code` and `reason` out of what the host ever sees.
-	exitWriter.writeExit({ ...capExitMessage(outcome), ...costRefusalField(outcome, costRefusalWhy()), turns: budget.state.turns, retryTurns: budget.state.retryTurns, ...roleExitFields(), tokens, ...(usage ? { usage } : {}), ...(context ? { context } : {}), session: { resumed: sessionResumed, reason: sessionReason }, ...(outcome.reason === "awaiting-approval" ? { approval } : {}), ...(outcome.reason === "awaiting-input" && awaitInput?.state.questionRefDigest ? { questionRefDigest: awaitInput.state.questionRefDigest } : {}), replaySafe, toolsStarted: toolStarts.toolsStarted, ...(providerFailure ? { providerFailure } : {}), ...(answerTools?.state.receipt ? { answerDraftDigest: answerTools.state.receipt } : {}), ...recoveryField(), ...steerField() });
+	exitWriter.writeExit({ ...capExitMessage(outcome), turns: budget.state.turns, retryTurns: budget.state.retryTurns, ...roleExitFields(), tokens, ...(usage ? { usage } : {}), ...(context ? { context } : {}), session: { resumed: sessionResumed, reason: sessionReason }, ...(outcome.reason === "awaiting-approval" ? { approval } : {}), ...(outcome.reason === "awaiting-input" && awaitInput?.state.questionRefDigest ? { questionRefDigest: awaitInput.state.questionRefDigest } : {}), replaySafe, toolsStarted: toolStarts.toolsStarted, ...(providerFailure ? { providerFailure } : {}), ...(answerTools?.state.receipt ? { answerDraftDigest: answerTools.state.receipt } : {}), ...recoveryField(), ...steerField() });
 	return outcome.code;
 }
 
@@ -931,7 +911,7 @@ if (!nestedRunner) {
 			await stopMcp().catch(() => undefined);
 			const outcome = stopped ?? thrown;
 			const capped = capExitMessage(outcome);
-			exitWriter.writeExit({ code: capped.code, reason: capped.reason, ...costRefusalField(outcome, costRefusalWhy()), message: capped.message, ...meteredExitFields() });
+			exitWriter.writeExit({ code: capped.code, reason: capped.reason, message: capped.message, ...meteredExitFields() });
 			process.exitCode = outcome.code ?? EXIT_INFRA;
 		});
 }

@@ -18,7 +18,7 @@ test("run context reads only capped sibling/recovery ids and matching current tr
     runById: async (id) => { reads.push(id); return { record: id === own.jobId ? own : { ...own, jobId: id } }; },
     runsPage: async () => ({ runs: [], next: null }),
     runTrigger: async (index, kind) => { assert.deepEqual([index, kind], [2, "comment"]); return { index, type: kind, phrase: "pi:fix", mcp: ["forge"], recover: true }; },
-    runHolds: async () => [{ seq: 1, state: "settled-crashed", amountMicros: 2_000_000 }],
+    runHolds: async () => [{ seq: 1, state: "settled-crashed", amountTokens: 2_000_000 }],
   };
   const data = await loadPageData("run", { id: own.jobId }, { fleet, now: () => AT });
   assert.equal(reads.length, 1 + REPLICAS_MAX - 1 + RECOVERY_CAP);
@@ -63,13 +63,13 @@ test("refusal context uses published host floor, newest doctor and queue facts, 
 
 test("recovery track uses counts without invented checkpoint times, shows restored call judgments and costs per hold", () => {
   const own = record({ recovered: { n: 1, from: "live", fromAttempt: 1, checkpointSeq: 3, replayed: 1, interrupted: 2, notStarted: 1 }, earlier: [{ host: "mini1", startedAt: iso(AT - 240_000), endedAt: iso(AT - 200_000), memMiB: 1024, cpuCenti: 100 }], stalledRepick: true });
-  const data = { run: { record: own }, chat: { activeJobId: "gh-747-r2.r1" }, runHolds: [{ seq: 1, amountMicros: 2_000_000, state: "settled-crashed" }, { seq: 2, amountMicros: 2_000_000, state: "held" }], recoveryRuns: [own] };
+  const data = { run: { record: own }, chat: { activeJobId: "gh-747-r2.r1" }, runHolds: [{ seq: 1, amountTokens: 2_000_000, state: "settled-crashed" }, { seq: 2, amountTokens: 2_000_000, state: "held" }], recoveryRuns: [own] };
   const recovery = String(runRecovery(view(data)));
   assert.match(recovery, /<svg/); assert.match(recovery, /evenly spaced/); assert.match(recovery, /their times and kinds were not recorded/);
   assert.equal((recovery.match(/<circle/g) ?? []).length, 5);
   assert.match(recovery, /checkpoint 3/); assert.match(recovery, /Calls interrupted/); assert.match(recovery, /Re-picked/); assert.match(recovery, /mini1/);
   const cost = String(runCostPanel(view(data)));
-  assert.match(cost, /whole hold after it was lost/); assert.match(cost, /held while it runs/); assert.match(cost, /four|4 per-job caps/);
+  assert.match(cost, /whole reservation after it was lost/); assert.match(cost, /held while it runs/); assert.match(cost, /four|4 per-job budgets/);
 });
 
 test("cancelled-before-start keeps its word, viewer banner has no actions, session reasons are sentences", () => {

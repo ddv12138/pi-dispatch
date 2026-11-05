@@ -986,11 +986,13 @@ passing, on the record — issue #80.)
 
 - **Statement**: Every spend cap shall be checked and reserved **before** an agent run begins, before any
   provider call is made. There are two ledgers: a **job count** (container starts) and, when configured,
-  **dollars**. A dollar reservation is the job's per-job cost cap, held against every dollar window that
-  applies and replaced after the run by the metered cost, or by at least the reservation when the cost is not
-  fully known. The per-job cost cap is enforced inside the container before each provider call, against a bound
-  of each call's worst cost, so what a job can spend is bounded before it runs; the residuals where a charge can
-  pass that bound are named in `DES-DOLLAR-RESERVE-AND-SETTLE`. This constraint governs the **ordering**, which is
+  **token windows**. A token reservation is the job's per-job token budget (`maxTokens`), held against every
+  token window that applies and replaced after the run by the metered total, or by at least the reservation
+  when the count is not fully known. The per-job token budget is enforced inside the container where usage
+  settles — a **lagging in-run backstop**, not a pre-call bound (the one pre-call bound this project had, the
+  cost guard, is retired, `DES-TOKEN-RESERVE-AND-SETTLE`); what bounds the run before it starts is the
+  reservation's size, the job's whole budget. The residuals where a charge can pass the budget's in-run
+  enforcement are named in `DES-TOKEN-RESERVE-AND-SETTLE`. This constraint governs the **ordering**, which is
   the same for both ledgers.
 - **Why**: The ordering **is** the mechanism. Check-after-spend means fifty junk triggers cost fifty jobs
   of real money before the cap engages, which is the exact scenario the cap exists for. Adopted from
@@ -1011,23 +1013,26 @@ passing, on the record — issue #80.)
   route, exhausted quota or unapproved paid-overage policy refuses or defers before mint, clone and every
   reservation. Renewal is bounded network work on the owning host, not a paid model call. Only an access
   snapshot valid past the admitted job deadline and safety margin reaches the container; refresh credentials
-  never do. A renewal or persistence fault cannot silently select an environment API key. Ordinary count,
-  token, dollar and per-call worst-cost guards apply to subscription requests too.
-  **Dollars join the ordering, not replace it** (issue #501). Both ledgers may span several windows
+  never do. A renewal or persistence fault cannot silently select an environment API key. Ordinary count
+  and token guards apply to subscription requests too, with the credit-ceiling rule of
+  `REQ-SUBSCRIPTION-AUTHENTICATION` where a plan's provider bills overage.
+  **Tokens join the ordering, not replace it** (issue #501; token-only since the dollar windows' retirement).
+  Both ledgers may span several windows
   (day/week/month, `REQ-SPEND-CAPS-MULTI-WINDOW`), and the job-count ledger alone carries a soft-hold band. The
-  dollar reserve runs after both job-count reserves and before the container, so every free gate and every
-  job-count refusal costs no dollar counter. Its amount is the per-job cap because the runner enforces that cap
-  before every call, so a reservation is a true bound on the run, which a reservation of an estimate would not
-  be. A refused dollar reservation is given back at once, the one departure from the job-count ledger's "a
-  refused slot still counts": a refusal there costs one slot, here it would cost a whole per-job cap of a
+  token reserve runs after both job-count reserves and before the container, so every free gate and every
+  job-count refusal costs no token counter. Its amount is the per-job budget because that is the worst the run
+  can reach a window with, so a reservation is a true bound on the run, which a reservation of an estimate would not
+  be. A refused token reservation is given back at once, the one departure from the job-count ledger's "a
+  refused slot still counts": a refusal there costs one slot, here it would cost a whole per-job budget of a
   window that ran nothing. A job that cannot spend (every model it may call local and zero-rated) reserves
-  nothing and runs under a per-job cap of 0, so the ordering still holds: the cap is checked before each call.
-  **A durable run multiplies holds, never the cap behind each one** (issue #645, `REQ-RUN-RECOVERY`). A run armed
-  with `run.recover` records every dollar hold in a per-run ledger before its container starts
+  nothing and runs under a per-job budget of 0, so the ordering still holds: the budget's own enforcement stays
+  the settle-time lagging backstop inside the container.
+  **A durable run multiplies holds, never the budget behind each one** (issue #645, `REQ-RUN-RECOVERY`). A run armed
+  with `run.recover` records every token hold in a per-run ledger before its container starts
   (`DES-RUN-BUDGET-LEDGER`), each container reserves its own hold at the same place in the order as any job's, and a
-  recovery carries the run's job-count slot instead of reserving a second one. So the exposure is at most one dollar
+  recovery carries the run's job-count slot instead of reserving a second one. So the exposure is at most one token
   hold per container, and (1 + retries + recoveries) holds per run, each a full per-job hold: for a forge job, its
-  two queue attempts plus at most two recoveries (one attempt each), so at most four per-job caps per run. A hold that a crashed container left behind is settled at the floor
+  two queue attempts plus at most two recoveries (one attempt each), so at most four per-job budgets per run. A hold that a crashed container left behind is settled at the floor
   (its whole reservation stays charged in every window) and is never carried into the recovery as a remainder to
   spend, because the one record of what that container spent is the transcript's usage, which the agent can write.
   The ordering is UNCHANGED: every refusal a recovery can give (the cap, a superseded run, an absent or foreign
@@ -1036,7 +1041,8 @@ passing, on the record — issue #80.)
 - **Evidence (upstream)**: `Davidcreador/pi-routines @ 6d2aa64 (v0.5.1)` — `maxRunsPerDay`
 - **Traces to**: `REQ-RUNNER-TURN-BUDGET`, `CONST-RETRY-INFRA-ONLY`, `REQ-SPEND-CAPS-MULTI-WINDOW`
 - **Acceptance**: Given the cap is exhausted, a new trigger consumes zero provider tokens and comments
-  on the issue. Given a dollar window is exhausted, a new trigger consumes zero provider tokens. A deployment
+  on the issue. Given a token window is exhausted, a new trigger consumes zero provider tokens and its
+  job-count slots are given back. A deployment
   with no usable provider credential refuses before minting a token, cloning a repository or reserving a slot.
 
 ## CONST-RETRY-INFRA-ONLY
@@ -1319,9 +1325,9 @@ passing, on the record — issue #80.)
   credentials. They are access-only, expire after a bounded job, and never carry the reusable refresh grant
   into a container. The host private store is outside every overlay, workspace and sandbox; no auth file is
   mounted. An access token is still readable by trusted in-process extensions and, on container-custody
-  venues, the job's tools. Job count, token and conservative dollar bounds remain mandatory where configured;
-  account quota observations supplement them and cannot promise a provider-side monetary cap. Paid extra
-  usage requires an explicit positive credit ceiling and a compatible per-job dollar cap. Supported community
+  venues, the job's tools. Job count and token bounds remain mandatory where configured;
+  account quota observations supplement them and cannot promise a provider-side cap. Paid extra
+  usage requires an explicit positive token credit ceiling and a compatible per-job token budget. Supported community
   compatibility profiles describe tested exact code, not vendor endorsement or a sandbox around that code.
   **A workspace checkpoint is a durable medium this project writes on purpose** (issue #645,
   `INT-WORKSPACE-CHECKPOINT-STORE`), beside the two the paragraphs below admit (a session transcript, the engine's
@@ -1445,6 +1451,7 @@ passing, on the record — issue #80.)
 
 | Date | Change |
 |---|---|
+| 2026-11-05 | Token-only re-unit of the ledgers (the dollar windows' retirement). **`CONST-BUDGET-BEFORE-TOKENS` AMENDED**, Statement, Why and Acceptance: the second ledger is the token windows, a token reservation is the job's per-job token budget (`maxTokens`) held against every window that applies and replaced after the run by the metered total or kept whole when the count is not fully known; the per-job budget is stated as the settle-time lagging in-run backstop it is, never a pre-call bound (the cost guard, the one pre-call bound, is retired, `DES-TOKEN-RESERVE-AND-SETTLE`), and what bounds the run before it starts is the reservation's size, the whole budget; the durable-run paragraph records token holds, at most four per-job budgets per run; the Acceptance adds that a refused token reservation gives the job-count slots back. The **ordering** is UNCHANGED, checked: free gates, the token-cap read, both reserves, then the container, the same for both ledgers. **`CONST-TOKEN-SCOPED-PER-JOB` AMENDED**, its subscription paragraph only (#781): the conservative dollar bounds are the token bounds, and paid extra usage needs an explicit positive token credit ceiling with a compatible per-job token budget (`REQ-SUBSCRIPTION-AUTHENTICATION`). **`CONST-MERGE-NEVER-AUTOMATIC`, `CONST-PI-VERSION-PINNED` and `CONST-RETRY-INFRA-ONLY` UNCHANGED, checked** (the merge-word grep, the pin table, and `token-cap` as a returned policy refusal beside a Valkey fault in the reserve as a never-started retry). **Code evidence**: worker/src/token-budget.mjs; worker/src/processor.mjs; image/runner/src/usage-meter.mjs; image/runner/src/outcome.mjs. |
 | 2026-11-05 | `CONST-NO-CONTEXT-FILES-MANDATORY` UNCHANGED, checked: the recursion guard still protects jobs from legacy and third-party copies of the retired admin extension. The description no longer claims this repository ships that extension. |
 | 2026-11-04 | `CONST-ISOLATION-CONTAINER-PER-JOB` AMENDED: the worker may run in the Linux Compose profile with the local Docker socket; its authority is explicitly host-root-equivalent, and the socket remains absent from every job container. The job isolation contract otherwise remains unchanged. |
 | 2026-11-03 (#812) | `CONST-RETRY-INFRA-ONLY` UNCHANGED, checked: the attempt key's expiry and delete add no attempt, no retry and no paid path, and a console retry whose key has expired is refused `model-failover-no-candidate` before anything is spent, a returned refusal, never a throw the queue would retry. **Code evidence**: worker/src/model-attempts.mjs -> finishModelAttempt, dropModelAttempt; worker/src/model-failover.mjs -> selectFailoverJob. |

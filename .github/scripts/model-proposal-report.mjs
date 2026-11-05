@@ -2,7 +2,6 @@
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
 import { catalogDiff, renderCatalogProposal } from "../../worker/src/model-proposals.mjs";
-import { callCostBound } from "../../image/runner/src/usage-meter.mjs";
 
 const LIMIT = 32 * 1024 * 1024;
 export async function boundedBytes(response, limit = LIMIT) {
@@ -55,5 +54,5 @@ export async function modelProposalReport(from, to, config, deps = {}) {
 	if (!Array.isArray(config.providers) || !config.providers.length || !config.providers.every((p) => /^[a-z0-9-]+$/.test(p)) || !Array.isArray(config.capsUsd) || !config.capsUsd.length || !config.capsUsd.every((n) => Number.isFinite(n) && n > 0) || !Number.isInteger(config.outputTokens) || config.outputTokens < 1 || config.outputTokens > 1000000) throw new Error("invalid public model report configuration");
 	const read = deps.catalog ?? ((v) => registryCatalog(v, deps));
 	const [before, after] = await Promise.all([read(from), read(to)]);
-	return renderCatalogProposal(catalogDiff(before, after, config.providers), config, callCostBound);
+	return renderCatalogProposal(catalogDiff(before, after, config.providers), config);
 }

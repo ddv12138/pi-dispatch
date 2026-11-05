@@ -45,7 +45,7 @@ export function resolveJobImage(job, defaultImage) {
  *   { forgeUnsupported }  -- present, but declares it cannot serve this job's forge => POLICY, refuse
  *   { <gate.result>, declared } -- present, but does not declare a capability this job needs, one key per
  *                            CAPABILITY_GATES row (replicaUnsupported, commandUnsupported,
- *                            excludeToolsUnsupported, modelPolicyUnsupported, costCapUnsupported, mcpUnsupported,
+ *                            excludeToolsUnsupported, modelPolicyUnsupported, tokenBudgetUnsupported, mcpUnsupported,
  *                            forgeMcpUnsupported, awaitInputUnsupported, progressUnsupported, recoverUnsupported,
  *                            steerUnsupported)
  *                            => POLICY
@@ -143,7 +143,7 @@ export function makeImagePreflight({ image, spawnFn = spawn, bin = "docker", cop
  *            the FIX rather than the label that noticed it, because an operator reading "rebuild the image"
  *            is already where they need to be
  *
- * A new image-gated feature (`costCap`, `modelPolicy`) is a row here, not another branch in two files. Order
+ * A new image-gated feature (`modelPolicy`) is a row here, not another branch in two files. Order
  * is the order the branches had, so a job carrying several features is refused for the same one as before.
  */
 export const CAPABILITY_GATES = Object.freeze([	// REQ-REPLICA-RUNS: an image built before it bakes a HARD_RULES.md whose rule 3 hard-codes `pi/issue-<n>`
@@ -192,17 +192,17 @@ export const CAPABILITY_GATES = Object.freeze([	// REQ-REPLICA-RUNS: an image bu
 		event: "refused_image_model_policy_unsupported",
 		comment: (image, declared) => `Refused: the job image "${image}" does not declare allowed-model support (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner cannot hold this job to the models it may use. Rebuild the image from a version that has this feature. Not run.`,
 	}),
-	// Issue #501: a runner that predates the cost guard reads no PI_MAX_COST_MICROS, so a job with a dollar cap
-	// would run UNCAPPED and record a clean exit: a money limit quietly not kept. Needed whenever the job carries
-	// a cap, 0 included (`!== null`, buildContainerEnv's rule: 0 is the tightest cap, not none). The refusal is
-	// pre-spend like every row: nothing minted, nothing cloned, no budget reserved (`budgetReserved: false`).
+	// The per-job token budget rides the container env, and an image whose runner predates it reads no
+	// PI_MAX_TOKENS, so a budgeted job would run with none and record a clean exit. Needed whenever the job
+	// carries a budget, 0 included (`!== null`, buildContainerEnv's rule: 0 is the tightest budget, not none).
+	// The refusal is pre-spend like every row: nothing minted, nothing cloned, nothing reserved (`budgetReserved: false`).
 	Object.freeze({
-		token: "costCap",
-		needed: (job) => job?.maxCostMicros !== null && job?.maxCostMicros !== undefined,
-		result: "costCapUnsupported",
-		reason: "job-image-cost-cap-unsupported",
-		event: "refused_image_cost_cap_unsupported",
-		comment: (image, declared) => `Refused: the job image "${image}" does not declare cost-cap support (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner would ignore the per-job dollar cap and run this job with no cap at all. Rebuild the image from a version that has this feature. Not run.`,
+		token: "tokenBudget",
+		needed: (job) => job?.maxTokens !== null && job?.maxTokens !== undefined,
+		result: "tokenBudgetUnsupported",
+		reason: "job-image-token-budget-unsupported",
+		event: "refused_image_token_budget_unsupported",
+		comment: (image, declared) => `Refused: the job image "${image}" does not declare tokenBudget support (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner would ignore the per-job token budget and run this job with none. Rebuild the image from a version that has this feature. Not run.`,
 	}),
 	// REQ-MCP-OPERATOR-SERVERS: a runner that predates run.mcp reads no /job/mcp.json, so the job would run without
 	// the servers its flow was written against and record a clean exit while the file reads as though it named them.

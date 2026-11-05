@@ -269,11 +269,11 @@ test("/api/run gives agents only closed reasons and safe numeric transcript/prog
   assert.ok(!unknown.text.includes("private_decision") && !unknown.text.includes(CANARY));
   assert.equal(unknown.json().transcript.exists, false);
   assert.equal(typeof unknown.json().progress, "object");
-  r.reason = "cost-cap";
-  assert.equal((await c.get(`/api/run?id=${r.jobId}`, c.agent)).json().run.reason, "cost-cap");
+  r.reason = "token-cap";
+  assert.equal((await c.get(`/api/run?id=${r.jobId}`, c.agent)).json().run.reason, "token-cap");
 });
 test("/api/run gives an agent a newer record's core, newer and the run page's sentence, as it gives a viewer, and no other note (#761)", async () => {
-  const r = record("gh-agent-newer", { v: 2, project: "api", note: CANARY });
+  const r = record("gh-agent-newer", { v: 3, project: "api", note: CANARY });
   const c = await runConsole(fakeFleet({ records: { [r.jobId]: r } }));
   for (const [who, cookie] of [["agent", c.agent], ["viewer", c.viewer]]) {
     const res = await c.get(`/api/run?id=${r.jobId}`, cookie);
@@ -292,15 +292,15 @@ test("/api/run gives an agent a newer record's core, newer and the run page's se
 });
 test("/api/run gives an agent a run's end time as it gives a viewer, for a version-1 record and a newer one (#761)", async () => {
   const v1 = record("gh-agent-ended-v1");
-  const v2 = record("gh-agent-ended-v2", { v: 2 });
-  const c = await runConsole(fakeFleet({ records: { [v1.jobId]: v1, [v2.jobId]: v2 } }));
-  for (const r of [v1, v2]) {
+  const v3 = record("gh-agent-ended-v3", { v: 3 });
+  const c = await runConsole(fakeFleet({ records: { [v1.jobId]: v1, [v3.jobId]: v3 } }));
+  for (const r of [v1, v3]) {
     const times = {};
     for (const [who, cookie] of [["agent", c.agent], ["viewer", c.viewer]]) {
       const res = await c.get(`/api/run?id=${r.jobId}`, cookie);
       assert.equal(res.status, 200, res.text);
       const { run } = res.json();
-      assert.equal(run.newer, r.v === 2 ? true : undefined, `${r.jobId} ${who}`);
+      assert.equal(run.newer, r.v === 3 ? true : undefined, `${r.jobId} ${who}`);
       times[who] = [run.startedAt, run.finishedAt];
     }
     assert.deepEqual(times.agent, [iso(T0 - 600_000), iso(T0 - 300_000)], `${r.jobId}: the start and the end, as the record says`);

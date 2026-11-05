@@ -8,7 +8,7 @@ import * as nodeFs from "node:fs";
 import { scrubCredentials } from "./redact.mjs";
 import { basename, join } from "node:path";
 import { resolveBackendName } from "./backend-registry.mjs";
-import { reservedInOf } from "./dollar-budget.mjs";
+import { reservedInOf } from "./token-budget.mjs";
 import { isForgeKind, targetSeparator } from "./forges.mjs";
 import { MODEL_REF_PATTERN as USAGE_ID_PATTERN } from "./model-ref.mjs";
 import { modelListProblem } from "./model-ref.mjs";
@@ -122,7 +122,7 @@ export const EXIT_BY_SUPERVISOR = "supervisor";
  * tokens, usage and session the supervisor never has, so it decides, and the supervisor's line is ignored by every
  * scanner: the run reads exactly as it did before the supervisor existed (its container exit `137` still retries).
  * Read the other way round, the supervisor's `oom-killed` would turn a finished run into a stopped one, its tokens lost
- * from the daily cap and its dollars settled at the floor.
+ * from the daily cap and its windows settled at the floor.
  *
  * With a key the text is `authenticExitLines`' output, so both lines are signed and `by` is inside the MAC. Without
  * one nothing here is trusted anyway: a tool that writes a `by: "supervisor"` line after the runner's only makes the
@@ -187,9 +187,9 @@ export function parseExitTurns(text) {
  * literal in `image/runner/src/outcome.mjs`, which the shipped worker cannot import, so a test reads that
  * source and requires every member here to appear there verbatim.
  *
- * The last four are the policy stops of issues #501 (a per-job dollar cap) and #502 (an allowed-model list):
- * `cost-cap` and `model-not-allowed` when the runner's pre-call guard stopped a call, and
- * `cost-cap-unenforceable` and `model-policy-unenforceable` when the runner refused, before any call, a policy
+ * The last four are the policy stops of issues #501 (a per-job token cap) and #502 (an allowed-model list):
+ * `model-not-allowed` when the model guard stopped a call, and
+ * `model-policy-unenforceable` when the runner refused, before any call, a policy
  * it could not enforce before a call. The two refusals are live from the first image that knows the variables.
  * `cost-cap` is live from the image that declares `costCap`, whose runner carries the cost guard, and
  * `model-not-allowed` from the image that declares `modelPolicy`, whose runner carries the model guard.
@@ -221,7 +221,7 @@ export const PROGRESS_RUNNER_REASONS = Object.freeze(["report-progress-shadowed"
  * with the mount and a key; named for MCP_RUNNER_REASONS' reason, the operator's fix is not a budget.
  */
 export const STEER_RUNNER_REASONS = Object.freeze(["steer-inbox-missing", "steer-no-exit-key"]);
-export const RUNNER_POLICY_REASONS = new Set(["provider-auth-refused", "cost-cap", "model-not-allowed", "model-roles-invalid", "model-roles-shadowed", "cost-cap-unenforceable", "model-policy-unenforceable", ...MCP_RUNNER_REASONS, ...ANSWER_DRAFT_RUNNER_REASONS, ...AWAIT_INPUT_RUNNER_REASONS, ...PROGRESS_RUNNER_REASONS, ...STEER_RUNNER_REASONS, "question-group-refused", "question-group-unanswered", "approval-config-invalid", "approval-without-session", "approval-shadowed", "approval-decision-invalid"]);
+export const RUNNER_POLICY_REASONS = new Set(["provider-auth-refused", "model-not-allowed", "model-roles-invalid", "model-roles-shadowed", "model-policy-unenforceable", ...MCP_RUNNER_REASONS, ...ANSWER_DRAFT_RUNNER_REASONS, ...AWAIT_INPUT_RUNNER_REASONS, ...PROGRESS_RUNNER_REASONS, ...STEER_RUNNER_REASONS, "question-group-refused", "question-group-unanswered", "approval-config-invalid", "approval-without-session", "approval-shadowed", "approval-decision-invalid"]);
 
 /**
  * The runner's reasons that ride a COMPLETED exit (`code: 0`) and that the worker acts on, closed (issue #625). One so
@@ -270,20 +270,11 @@ export function approvalRecordOf(value) {
 }
 
 /**
- * The cost guard's refusal rules a `cost-cap` exit line may name as its `why` (issue #507): the runner's
- * `COST_REFUSALS` (`image/runner/src/outcome.mjs`), restated because the shipped worker cannot import the runner, and
- * pinned to it by a test that reads that source. CLOSED, because the value reaches the PII-free record.
- */
-export const COST_CAP_WHYS = Object.freeze(["unboundable", "external", "over-cap", "final-payload"]);
-
-/**
- * The `why` off the decisive exit line (`decisiveExitLine`), or `null`: a member of `COST_CAP_WHYS`, and only when that
- * same line says `code: 2` and `reason: "cost-cap"`. Read off the same line as `parseExitReason`, and NEVER throws.
+ * The decisive exit line's `why`, or `null`: the runner's cost guard is gone (a891b5f0 kept the token cap as an
+ * in-run backstop with no per-line `why`), so this is a null stub kept for its callers' shape. It never throws.
  *
- * The line is container-written, so nothing it carries is trusted as text: a value outside the closed set is null,
- * never a string copied through. It feeds no classification. The processor reads it only in its exit-2 branch, and
- * only beside a `cost-cap` reason, where it becomes the record's `why`: the worst a forged line can do is name the
- * wrong rule of the three.
+ * The line is container-written, so nothing it carries is trusted as text: an entry outside the catalog's closed
+ * set would be null, never a string copied through. It feeds no classification, and no record's `why`.
  */
 /** Bounded refusal diagnostics: hashes and closed reasons only, never agent-authored names. */
 export const MODEL_ROLE_REFUSAL_REASONS = Object.freeze(["unknown-role", "model-not-allowed", "unknown-agent", "invalid-arguments", "aborted"]);
@@ -316,16 +307,15 @@ export function parseExitToolsStarted(text) {
 }
 
 export function parseExitWhy(text) {
-	const parsed = decisiveExitLine(text);
-	if (parsed === null) return null;
-	return parsed?.code === 2 && parsed?.reason === "cost-cap" && COST_CAP_WHYS.includes(parsed?.why) ? parsed.why : null;
+	// The cost guard's `why` died with it: a decisive line no longer carries one, and the record's `why` is gone.
+	return null;
 }
 
 /**
  * The decisive exit line's own `code` (`decisiveExitLine`), an integer, or `null` (issue #501, PR #542's review round
  * 3). Read off the same line as its siblings, and NEVER throws.
  *
- * Read for ONE purpose: the dollar settlement trusts an exit line's cost only when the line's `code` equals the
+ * Read for ONE purpose: the settlement trusts an exit line's facts only when the line's `code` equals the
  * container's real exit code (processor.mjs). The runner writes the code it exits with on both exit lines
  * (`image/runner/run-job.mjs`: `...capExitMessage(outcome)` then `return outcome.code` on the decided path, and
  * `code: capped.code` on the catch path; pinned by a test), so the runner's genuine line always matches, while a line a
@@ -830,7 +820,7 @@ function rebuildResources(r) {
  * this closed list because a key missing from it is DROPPED, and the dollar settlement reads them to decide
  * whether a metered cost is complete: a dropped counter would read as an honest zero.
  */
-export const TOKEN_KEYS = Object.freeze(["input", "output", "total", "cost", "metered", "rootTotal", "otherTotal", "looseTotal", "sessions", "calls", "unresolved", "unpriced", "childTotal", "childProcesses", "unmeteredChildren", "costUnreported", "costCapMicros", "costRefused", "boundExceeded", "longContext", "costUnjudged", "costUnanswered", "modelRefused"]);
+export const TOKEN_KEYS = Object.freeze(["input", "output", "total", "metered", "rootTotal", "otherTotal", "looseTotal", "sessions", "calls", "unresolved", "usageUnreported", "childTotal", "childProcesses", "unmeteredChildren", "modelRefused"]);
 
 /**
  * Rebuild the billed totals from a closed key list rather than passing the container's object through.
@@ -870,7 +860,7 @@ export function parseExitTokens(text) {
 
 /** The eleven per-row counters, in the row's serialisation order. Absent is an honest zero, which is how a record from
  *  before `providerBilled` reads; anything present must be a finite non-negative number or the whole block is refused. */
-const USAGE_ROW_NUMERIC_KEYS = ["calls", "input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning", "total", "cost", "unpriced", "providerBilled"];
+const USAGE_ROW_NUMERIC_KEYS = ["calls", "input", "output", "cacheRead", "cacheWrite", "cacheWrite1h", "reasoning", "total"];
 
 /**
  * The runner's per-(provider,model) usage ledger off the exit line -- `{ v, piAi, truncated, models }`
@@ -942,8 +932,9 @@ function rebuildUsage(u) {
 			if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
 			nums[key] = value;
 		}
-		// The explicit 13-key literal: an unknown key on the emitted row is dropped HERE, by never
-		// being read -- the buildRecord no-spread posture, applied one level down.
+		// The explicit nine-key literal: an unknown key on the emitted row is dropped HERE, by never
+		// being read -- the buildRecord no-spread posture, applied one level down. The price columns
+		// (cost, unpriced, providerBilled) are dropped with the unknown keys: no token reader names them.
 		models.push({
 			provider,
 			model,
@@ -955,9 +946,6 @@ function rebuildUsage(u) {
 			cacheWrite1h: nums.cacheWrite1h,
 			reasoning: nums.reasoning,
 			total: nums.total,
-			cost: nums.cost,
-			unpriced: nums.unpriced,
-			providerBilled: nums.providerBilled,
 		});
 	}
 	return { v: u.v, piAi, truncated, models };
@@ -969,7 +957,7 @@ function rebuildUsage(u) {
  * additive and nullable or a conditional key, which every reader already skips when it does not know it, so a version
  * for one would only make older readers drop records they can read. A record written before `v` existed reads as 1.
  */
-export const RUN_RECORD_VERSION = 1;
+export const RUN_RECORD_VERSION = 2;
 
 /**
  * The stable core: the fields that keep their meaning in EVERY version, so a reader that meets a record from a newer
@@ -1014,7 +1002,7 @@ export function recordReadable(record, { supported = RUN_RECORD_VERSION } = {}) 
  * path stay out of the record -- for local jobs only the folder's `basename` is kept, because the full
  * path embeds the operator's OS account name.
  *
- * `reason` is a token of the fixed enum (worker-abort | over-budget | dollar-cap | allocation-cap | envelope-mismatch | portfolio-no-envelope | portfolio-snapshot-oversize | unprotected-branch |
+ * `reason` is a token of the fixed enum (worker-abort | over-budget | token-cap | allocation-cap | envelope-mismatch | portfolio-no-envelope | portfolio-snapshot-oversize | unprotected-branch |
  * runner-policy | provider-auth-refused | job-image-missing | egress-proxy-missing | container-infra-exit | ...), never free-form or payload text,
  * and it comes through ONE door, `recordReasonOf` (record-reason.mjs), rather than as `source.reason` copied: an InfraRetry
  * built without a token carries its whole message as its reason, and a forge host's message names an API path, a
@@ -1158,21 +1146,21 @@ export function buildRecord({ job, result, error, startedAt, endedAt, host = nul
 		// default was passed (a dependency-injection seam; `recordRun` in start.mjs always passes one) or
 		// where the job data carries an explicit null, which no producer writes and the blessed gate refuses.
 		backend,
-		// The dollar reservation's outcome (issue #501, INT-RUN-HISTORY-FILE-CONTRACT). Additive, nullable, an explicit
-		// literal REBUILT here (never the source's object), TAIL position after `backend` on the same contract: field order
-		// is the serialisation order. `{ reservedMicros, settledMicros, basis, modelBasis }`: two integers of micro-dollars,
+		// The token reservation's outcome (DES-TOKEN-RESERVE-AND-SETTLE, INT-RUN-HISTORY-FILE-CONTRACT). REBUILT here
+		// (never the source's object), TAIL position after `backend` on the same contract: field order
+		// is the serialisation order. `{ reservedTokens, settledTokens, basis, modelBasis }`: two integers of tokens,
 		// one fixed token (`metered` | `floor` | `refunded` | `unreserved`), and `modelBasis`, how the per-model windows
-		// settled (`metered` | `floor` | `refunded`, null when the job held none). Null when no dollar window applied to the job (no dollar setting, or a
+		// settled (`metered` | `floor` | `refunded`, null when the job held none). Null when no token window applied to the job (no token setting, or a
 		// refusal before the reservation step), which is every record of a deployment that sets none. Issue #761: then
 		// `reservedIn`, `{ day?, week?, month?, valkey }`, only where the job's settled amount is in a deployment window
 		// (`deploymentWindowsOf`), for doctor's reset check; absent otherwise.
-		dollars: dollarsOf(source.dollars),
+		tokensWindows: tokensWindowsOf(source.tokensWindows),
 		...(recordedWatchDecision(data.watch?.decision ?? source.decision) ? { decision: recordedWatchDecision(data.watch?.decision ?? source.decision) } : {}),
 		...(approvalRecordOf(source.approval) ? { approval: approvalRecordOf(source.approval) } : {}),
 		// The refusal's detail (PR #558, the end-of-round check of #501 and #502): which rule of the reason refused the job, the same fixed token
 		// the worker's log line carries, e.g. `overlay-link` under `model-unknown`, so the drill-in can tell the
-		// deployment's file from the job's model. Additive, nullable, an explicit literal, TAIL position after `dollars`
-		// on the same contract. A token of the fixed charset (`WHY_RE`) or null, never a free string, so the record stays
+		// deployment's file from the job's model. Additive, nullable, an explicit literal, TAIL position after
+		// `tokensWindows` on the same contract. A token of the fixed charset (`WHY_RE`) or null, never a free string, so the record stays
 		// PII-free by construction; null for every reason that carries no detail.
 		why: typeof source.why === "string" && WHY_RE.test(source.why) ? source.why : null,
 		// The job's project (issue #499, INT-PROJECTS-FILE-CONTRACT). Additive, nullable, an explicit literal, TAIL position
@@ -1235,8 +1223,8 @@ export function buildRecord({ job, result, error, startedAt, endedAt, host = nul
 		// would otherwise erase: it overwrites the same file and the same mirror key. `[{ host, startedAt, endedAt, memMiB,
 		// cpuCenti }]`, at most `EARLIER_MAX`, newest last, read by the processor from the previous record BEFORE this one
 		// replaces it (`earlierFrom`) and passed in. Additive, nullable, an explicit literal REBUILT here, TAIL position after
-		// `capacity`. A worker name, two ISO instants and two integers per entry: never the earlier attempt's dollars,
-		// tokens or usage, so every cost reader, which reads the top-level fields only, counts nothing twice. Null on a
+		// `capacity`. A worker name, two ISO instants and two integers per entry: never the earlier attempt's windows,
+		// tokens or usage, so every budget reader, which reads the top-level fields only, counts nothing twice. Null on a
 		// first attempt and when the previous record held no slot or could not be read.
 		earlier: recordedEarlier(earlier),
 		// Whether the FIRST attempt stalled and this pickup re-ran it (issue #599): BullMQ raised `stalledCounter`, not
@@ -1442,21 +1430,21 @@ function planOf(p) {
 /** The charset a record's `why` must match: a lowercase token, the shape of every `why` the processor returns. */
 const WHY_RE = /^[a-z][a-z0-9-]{0,63}$/;
 
-const DOLLAR_BASES = new Set(["metered", "floor", "refunded", "unreserved"]);
+const TOKEN_BASES = new Set(["metered", "floor", "refunded", "unreserved"]);
 // How the job's MODEL windows settled (issue #502 part 6); anything else, null included, records null.
 const MODEL_BASES = new Set(["metered", "floor", "refunded"]);
 
 /**
- * The record's `dollars`, rebuilt from named fields only, or null when the source carries none or a malformed one.
+ * The record's `tokensWindows`, rebuilt from named fields only, or null when the source carries none or a malformed one.
  * `reservedIn` (issue #761: which deployment windows the settled amount is in, and the Valkey's endpoint tag) is kept
  * only as `reservedInOf` rebuilds it, dates and a hash, and is absent otherwise, so the record stays PII-free and a
  * record of a job that reserved in no deployment window keeps the shape it had.
  */
-function dollarsOf(d) {
+function tokensWindowsOf(d) {
 	if (d === null || typeof d !== "object") return null;
-	if (!Number.isSafeInteger(d.reservedMicros) || d.reservedMicros < 0 || !Number.isSafeInteger(d.settledMicros) || d.settledMicros < 0 || !DOLLAR_BASES.has(d.basis)) return null;
+	if (!Number.isSafeInteger(d.reservedTokens) || d.reservedTokens < 0 || !Number.isSafeInteger(d.settledTokens) || d.settledTokens < 0 || !TOKEN_BASES.has(d.basis)) return null;
 	const reservedIn = reservedInOf(d.reservedIn);
-	return { reservedMicros: d.reservedMicros, settledMicros: d.settledMicros, basis: d.basis, modelBasis: MODEL_BASES.has(d.modelBasis) ? d.modelBasis : null, ...(reservedIn ? { reservedIn } : {}) };
+	return { reservedTokens: d.reservedTokens, settledTokens: d.settledTokens, basis: d.basis, modelBasis: MODEL_BASES.has(d.modelBasis) ? d.modelBasis : null, ...(reservedIn ? { reservedIn } : {}) };
 }
 
 /**
@@ -1600,7 +1588,6 @@ export function makeLogSink({ logsDir, enabled, fs = nodeFs, log = () => {} }) {
 			const answerDraftDigest = keyed && exitAuth === "verified" ? parseExitAnswerDraftDigest(exitText) : null;
 			const questionRefDigest = keyed && exitAuth === "verified" ? parseExitQuestionRefDigest(exitText) : null;
 			const exitLineCode = parseExitCode(exitText);
-			const exitWhy = parseExitWhy(exitText);
 			const modelRoles = keyed && exitAuth === "verified" ? parseExitModelRoles(exitText) : null;
 			const providerFailure = keyed && exitAuth === "verified" ? parseExitProviderFailure(exitText) : null;
 			const toolsStarted = keyed && exitAuth === "verified" ? parseExitToolsStarted(exitText) : null;
@@ -1644,7 +1631,7 @@ export function makeLogSink({ logsDir, enabled, fs = nodeFs, log = () => {} }) {
 			// (issue #507) only when the line named one, for the same reason.
 			// `resources` (issue #596) only when the line carried a block, and `exitOomKilled` only when true, for the same reason.
 			// `recovery` (issue #645) only when the line carried one, for the same reason, and `steer` (issue #646) the same.
-			return { ...(canaryLoad !== null ? { canaryLoad } : {}), turns, tokens, session, usage, context, exitReason, exitLineCode, ...(answerDraftDigest ? { answerDraftDigest } : {}), ...(questionRefDigest ? { questionRefDigest } : {}), ...(modelRoles ? { modelRoles } : {}), ...(providerFailure ? { providerFailure } : {}), ...(toolsStarted !== null ? { toolsStarted } : {}), ...(replaySafe !== null ? { replaySafe } : {}), ...(approval ? { approval } : {}), ...(exitWhy !== null ? { exitWhy } : {}), ...(resources !== null ? { resources } : {}), ...(oomKilled ? { exitOomKilled: true } : {}), ...(recovery !== null ? { recovery } : {}), ...(steer !== null ? { steer } : {}), ...(keyed ? { exitAuth } : {}) };
+			return { ...(canaryLoad !== null ? { canaryLoad } : {}), turns, tokens, session, usage, context, exitReason, exitLineCode, ...(answerDraftDigest ? { answerDraftDigest } : {}), ...(questionRefDigest ? { questionRefDigest } : {}), ...(modelRoles ? { modelRoles } : {}), ...(providerFailure ? { providerFailure } : {}), ...(toolsStarted !== null ? { toolsStarted } : {}), ...(replaySafe !== null ? { replaySafe } : {}), ...(approval ? { approval } : {}), ...(resources !== null ? { resources } : {}), ...(oomKilled ? { exitOomKilled: true } : {}), ...(recovery !== null ? { recovery } : {}), ...(steer !== null ? { steer } : {}), ...(keyed ? { exitAuth } : {}) };
 		}
 
 		return { write, close };

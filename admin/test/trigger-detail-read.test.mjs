@@ -43,7 +43,7 @@ test("cron tool display reads named counters without scanning and distinguishes 
   await readTriggersWithStalls({ triggersPath: "/t", fs: fileFs([]), redisFn: () => { throw Error("must not connect"); } });
 });
 
-const rec = (id, hours, extra = {}) => ({ jobId: id, triggerIndex: 2, triggerType: "label", startedAt: new Date(AT - hours * 3600_000).toISOString(), endedAt: new Date(AT - hours * 3600_000).toISOString(), outcome: "completed", tokens: { cost: 0.25, metered: true, input: 1, output: 1, total: 2, calls: 1 }, provider: "provider", model: "model", ...extra });
+const rec = (id, hours, extra = {}) => ({ jobId: id, triggerIndex: 2, triggerType: "label", startedAt: new Date(AT - hours * 3600_000).toISOString(), endedAt: new Date(AT - hours * 3600_000).toISOString(), outcome: "completed", tokens: { metered: true, input: 1, output: 1, total: 2, calls: 1 }, provider: "provider", model: "model", ...extra });
 
 test("detail counts only this trigger inside the day, uses wide history, orders five runs and preserves unknowns", () => {
   const runs = Array.from({ length: 7 }, (_, i) => rec(`j${i}`, i));
@@ -51,7 +51,7 @@ test("detail counts only this trigger inside the day, uses wide history, orders 
   const snapshot = { readAt: AT, triggers: { triggers: [{ index: 2, type: "label", replicas: 3 }] }, recordDetails: new Map(runs.map((r) => [r.jobId, r])), runs: [], defaultBackend: "openshell", sandboxRetentionHours: 0, waiting: { rows: [{ jobId: "queued", trigger: 2 }, { jobId: "other", trigger: 3 }] } };
   const got = triggerDetailOf(snapshot, 2, { now: AT });
   assert.equal(got.count24h, 7);
-  assert.equal(got.cost24h, 1.75);
+  assert.equal(got.cost24hTokens, 14);
   assert.equal(got.costIncomplete, false);
   assert.deepEqual(got.lastRuns.map((r) => r.jobId), ["j0", "j1", "j2", "j3", "j4"]);
   assert.deepEqual(got.queued.map((r) => r.jobId), ["queued"]);
@@ -99,10 +99,12 @@ test("skew warning uses the worker's identity guard and returns only matching re
 });
 
 
-test("detail metered spend excludes plan-covered and unmetered runs and names the incomplete coverage", () => {
+test("detail metered tokens count every measured run, plan-covered or not, and name the incomplete coverage", () => {
+  // Plans are counterfactual in the token era (DES-SUBSCRIPTIONS-ARE-COUNTERFACTUAL-ONLY): a
+  // plan-covered run still consumes metered tokens, so nothing is excluded for its provider.
   const runs = [rec("paid", 1), rec("plan", 2, { provider: "plan-provider" }), rec("unknown", 3, { tokens: null })];
-  const got = triggerDetailOf({ readAt: AT, triggers: { triggers: [{ index: 2, type: "label" }] }, runs }, 2, { subscriptions: [{ id: "plan", provider: "plan-provider", models: ["*"] }] });
-  assert.equal(got.cost24h, 0.25);
+  const got = triggerDetailOf({ readAt: AT, triggers: { triggers: [{ index: 2, type: "label" }] }, runs }, 2);
+  assert.equal(got.cost24hTokens, 4);
   assert.equal(got.count24h, 3);
   assert.equal(got.costIncomplete, true);
 });

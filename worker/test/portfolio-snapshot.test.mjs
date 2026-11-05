@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
-import { governedDollars, memberDollarKeyPrefix } from "../src/allocation.mjs";
+import { governedTokens, memberTokenKeyPrefix } from "../src/allocation.mjs";
 import { envelopeDigest, parseEnvelope } from "../src/envelope.mjs";
 import {
 	PORTFOLIO_SNAPSHOT_MAX_BYTES,
@@ -15,12 +15,12 @@ import {
 } from "../src/portfolio-snapshot.mjs";
 import { InfraRetry } from "../src/processor.mjs";
 import { scopeRef } from "../src/priorities.mjs";
-import { dollarCapsFor, parseScopedLimits, scopeDollarKeyPrefix } from "../src/scoped-limits.mjs";
+import { tokenCapsFor, parseScopedLimits, scopeTokenKeyPrefix } from "../src/scoped-limits.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The portfolio snapshot (issue #505, INT-CONTAINER-JOB-INPUTS). Every subject takes an injected `now`, always.
 
-const USD = 1_000_000;
+const TOKENS = 1;
 const NOW = new Date("2026-10-07T06:00:03.000Z");
 const TITLE = "Fix the login bug before Friday";
 const PROJECTS = [
@@ -28,9 +28,9 @@ const PROJECTS = [
 	{ id: "platform", name: null, members: ["github:acme/infra"] },
 ];
 const ENVELOPE = parseEnvelope(
-	JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", platform: "10" }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
+	JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, platform: 10 }, defaultWeights: { _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }),
 	"/e/envelope.json",
-	{ projects: PROJECTS, maxCostMicros: 2 * USD },
+	{ projects: PROJECTS, maxTokens: 2 },
 );
 const DIGEST = envelopeDigest(ENVELOPE);
 const WEB = scopeRef("github:acme/web");
@@ -52,7 +52,7 @@ const STATE = {
 	weights: { _other: 0, platform: 1, shop: 3 },
 	repoWeights: { shop: { [WEB]: 2, [TOOLS]: 1 } },
 	reasons: { shop: TITLE },
-	allocations: { _other: 0, platform: 30 * USD, shop: 70 * USD },
+	allocations: { _other: 0, platform: 30, shop: 70 },
 	unallocated: 0,
 	repos: { shop: { [WEB]: 46_666_667, [TOOLS]: 23_333_333 } },
 	clamped: false,
@@ -72,7 +72,7 @@ function fakeRedis(values = {}, { fail = false } = {}) {
 	};
 }
 const week = (prefix) => `${prefix}:w:2026-10-05`;
-const COUNTERS = { [week(scopeDollarKeyPrefix("project:shop"))]: "31000000", [week(scopeDollarKeyPrefix("project:platform"))]: "5000000", [week(scopeDollarKeyPrefix("github:acme/web"))]: "20000000" };
+const COUNTERS = { [week(scopeTokenKeyPrefix("project:shop"))]: "31", [week(scopeTokenKeyPrefix("project:platform"))]: "5", [week(scopeTokenKeyPrefix("github:acme/web"))]: "20" };
 
 /** Runs: one of each outcome, one too old, one in no envelope project, and one carrying a planted title everywhere it can. */
 const LOCAL = [
@@ -93,27 +93,27 @@ const EXPECTED = {
 	version: 1,
 	generatedAt: "2026-10-07T06:00:03.000Z",
 	window: { kind: "week", start: "2026-10-05", end: "2026-10-12" },
-	envelope: { digest: DIGEST, totalMicros: 100_000_000, maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14, planAllowedAfter: "2026-10-06T06:00:00.000Z" },
+	envelope: { digest: DIGEST, totalTokens: 100, maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14, planAllowedAfter: "2026-10-06T06:00:00.000Z" },
 	plan: { id: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", validUntil: "2026-10-19T06:00:00.000Z", clamped: false },
 	lastAttempt: { at: "2026-10-06T06:00:01.000Z", outcome: "refused", reason: "plan-too-soon", planId: "0123456789abcdef" },
 	projects: [
-		{ id: "_other", floorMicros: 0, weight: 0, allocationMicros: 0, spentMicros: 0, members: [], runs7d: { completed: 0, policy: 1, failed: 1, byReason: { "scope-cap": 1 } } },
-		{ id: "platform", floorMicros: 10_000_000, weight: 1, allocationMicros: 30_000_000, spentMicros: 5_000_000, members: [{ ref: INFRA, label: "github:acme/infra" }], runs7d: { completed: 1, policy: 0, failed: 0, byReason: {} } },
+		{ id: "_other", floorTokens: 0, weight: 0, allocationTokens: 0, spentTokens: 0, members: [], runs7d: { completed: 0, policy: 1, failed: 1, byReason: { "scope-cap": 1 } } },
+		{ id: "platform", floorTokens: 10, weight: 1, allocationTokens: 30, spentTokens: 5, members: [{ ref: INFRA, label: "github:acme/infra" }], runs7d: { completed: 1, policy: 0, failed: 0, byReason: {} } },
 		{
 			id: "shop",
-			floorMicros: 10_000_000,
+			floorTokens: 10,
 			weight: 3,
-			allocationMicros: 70_000_000,
-			spentMicros: 31_000_000,
+			allocationTokens: 70,
+			spentTokens: 31,
 			members: [
-				{ ref: TOOLS, label: "local:shop-tools", weight: 1, allocationMicros: 23_333_333, spentMicros: 0 },
-				{ ref: WEB, label: "github:acme/web", weight: 2, allocationMicros: 46_666_667, spentMicros: 20_000_000 },
+				{ ref: TOOLS, label: "local:shop-tools", weight: 1, allocationTokens: 23333333, spentTokens: 0 },
+				{ ref: WEB, label: "github:acme/web", weight: 2, allocationTokens: 46666667, spentTokens: 20 },
 			],
 			runs7d: { completed: 1, policy: 2, failed: 0, byReason: { "allocation-cap": 1, other: 1 } },
 		},
 	],
 	fleet: { runsComplete: true },
-};
+}
 
 function factory({ flag = true, governing = { envelope: ENVELOPE, digest: DIGEST }, redis = fakeRedis(COUNTERS), mirror = true, readMirror = async () => ({ runs: MIRRORED, degraded: "ok" }), indexMax, logsDir, state = STATE, reconcileThrows = false } = {}) {
 	const logs = [];
@@ -207,7 +207,7 @@ test("a snapshot over 64 KiB refuses the job before it spends, naming the projec
 		allocations[id] = 0;
 		projects.push({ id, members: [`github:acme/r${i}`] });
 	}
-	const envelope = { version: 1, window: "week", totalMicros: 100 * USD, floors, defaultWeights: weights, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
+	const envelope = { version: 1, window: "week", totalTokens: 100, floors, defaultWeights: weights, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
 	const logs = [];
 	const build = makePortfolioSnapshot({
 		checkPortfolioFlag: () => true,
@@ -282,25 +282,25 @@ test("readLocalRuns reads run records only, skips a file older than the window b
 });
 
 test("a member matched by a bare scoped-limits row is read from that row's key, the one enforcement settles into (#505 review)", async () => {
-	const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "acme/web", weekUsd: "50" }] }), "/l.json");
-	const rowKey = scopeDollarKeyPrefix("acme/web");
-	assert.notEqual(rowKey, scopeDollarKeyPrefix("github:acme/web"), "the bare row and the member spell different keys");
+	const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "acme/web", weekTokens: 50 }] }), "/l.json");
+	const rowKey = scopeTokenKeyPrefix("acme/web");
+	assert.notEqual(rowKey, scopeTokenKeyPrefix("github:acme/web"), "the bare row and the member spell different keys");
 	// Enforcement: a github job on acme/web with a repo share reserves in the matched row's key.
 	const job = { kind: "github", repo: "acme/web" };
-	const enforced = governedDollars({ envelope: ENVELOPE, state: STATE, member: { id: "shop", member: "github:acme/web" }, operator: { scopedDollars: dollarCapsFor(job, limits) } });
-	assert.equal(enforced.scopedDollars.keyPrefix, rowKey);
+	const enforced = governedTokens({ envelope: ENVELOPE, state: STATE, member: { id: "shop", member: "github:acme/web" }, operator: { scopedTokens: tokenCapsFor(job, limits) } });
+	assert.equal(enforced.scopedTokens.keyPrefix, rowKey);
 	// The snapshot reads the same key, through the same helper.
-	assert.equal(memberDollarKeyPrefix("github:acme/web", { limits }), rowKey);
-	const redis = fakeRedis({ [week(rowKey)]: "7000000" });
+	assert.equal(memberTokenKeyPrefix("github:acme/web", { limits }), rowKey);
+	const redis = fakeRedis({ [week(rowKey)]: "7" });
 	const snap = await buildPortfolioSnapshot({ envelope: ENVELOPE, digest: DIGEST, projects: PROJECTS, limits, allocation: { state: STATE }, redis, runs: { records: [] }, now: NOW });
-	assert.equal(snap.projects.find((p) => p.id === "shop").members.find((m) => m.ref === WEB).spentMicros, 7_000_000);
+	assert.equal(snap.projects.find((p) => p.id === "shop").members.find((m) => m.ref === WEB).spentTokens, 7);
 	assert.ok(redis.calls[0].includes(week(rowKey)));
 	// With no row the member's own synthetic key, both sides.
-	assert.equal(memberDollarKeyPrefix("github:acme/web", { limits: [] }), scopeDollarKeyPrefix("github:acme/web"));
-	assert.equal(governedDollars({ envelope: ENVELOPE, state: STATE, member: { id: "shop", member: "github:acme/web" }, operator: {} }).scopedDollars.keyPrefix, scopeDollarKeyPrefix("github:acme/web"));
+	assert.equal(memberTokenKeyPrefix("github:acme/web", { limits: [] }), scopeTokenKeyPrefix("github:acme/web"));
+	assert.equal(governedTokens({ envelope: ENVELOPE, state: STATE, member: { id: "shop", member: "github:acme/web" }, operator: {} }).scopedTokens.keyPrefix, scopeTokenKeyPrefix("github:acme/web"));
 	// A folder member matches a folder row the same way.
-	const folderLimits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "/srv/acct/shop-tools", weekUsd: "5" }] }), "/l.json");
-	assert.equal(memberDollarKeyPrefix("/srv/acct/shop-tools", { limits: folderLimits }), scopeDollarKeyPrefix("/srv/acct/shop-tools"));
+	const folderLimits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "/srv/acct/shop-tools", weekTokens: 5 }] }), "/l.json");
+	assert.equal(memberTokenKeyPrefix("/srv/acct/shop-tools", { limits: folderLimits }), scopeTokenKeyPrefix("/srv/acct/shop-tools"));
 });
 
 test("a member label holding a control, bidi or format character is replaced by the member's ref (#505 review)", () => {
@@ -311,14 +311,14 @@ test("a member label holding a control, bidi or format character is replaced by 
 });
 
 test("a run record from a newer pi-dispatch is counted from neither source, and makes runsComplete false (#761)", async () => {
-	const newerLocal = { jobId: "j8", outcome: "completed", project: "shop", endedAt: "2026-10-06T05:30:00.000Z", v: 2 };
+	const newerLocal = { jobId: "j8", outcome: "completed", project: "shop", endedAt: "2026-10-06T05:30:00.000Z", v: 3 };
 	const dir = logsDirWith([...LOCAL, newerLocal, { ...newerLocal, jobId: "j9", endedAt: "2026-09-29T00:00:00.000Z" }]);
 	const local = readLocalRuns({ logsDir: dir, sinceMs: NOW.getTime() - 7 * 86_400_000 });
 	assert.deepEqual([local.records.map((r) => r.jobId).sort(), local.newerSkipped, local.complete], [["j2", "j3", "j5", "repeat:pm-weekly:1"], 1, true], "only the one in the window is counted as skipped");
 	const fromLocal = JSON.parse((await factory({ logsDir: dir }).build(JOB)).body);
 	assert.equal(fromLocal.fleet.runsComplete, false);
 	assert.deepEqual(fromLocal.projects.find((p) => p.id === "shop").runs7d, EXPECTED.projects.find((p) => p.id === "shop").runs7d, "its run is not counted");
-	const newerMirrored = { jobId: "j10", outcome: "completed", project: "platform", endedAt: "2026-10-06T04:30:00.000Z", host: "mini3", v: 2 };
+	const newerMirrored = { jobId: "j10", outcome: "completed", project: "platform", endedAt: "2026-10-06T04:30:00.000Z", host: "mini3", v: 3 };
 	const fromMirror = JSON.parse((await factory({ logsDir: logsDirWith(LOCAL), readMirror: async () => ({ runs: [...MIRRORED, newerMirrored], degraded: "ok" }) }).build(JOB)).body);
 	assert.equal(fromMirror.fleet.runsComplete, false);
 	assert.deepEqual(fromMirror.projects.find((p) => p.id === "platform").runs7d, EXPECTED.projects.find((p) => p.id === "platform").runs7d);
@@ -328,7 +328,7 @@ test("a run record from a newer pi-dispatch is counted from neither source, and 
 test("a newer record touched inside the window but ended before it is not counted: its core times, not its mtime, place it (#761)", () => {
 	const sinceMs = NOW.getTime() - 7 * 86_400_000;
 	// Ended before the window, last written inside it (a copy restored from a backup, say).
-	const outside = { jobId: "j11", outcome: "completed", project: "shop", endedAt: "2026-09-29T00:00:00.000Z", v: 2 };
+	const outside = { jobId: "j11", outcome: "completed", project: "shop", endedAt: "2026-09-29T00:00:00.000Z", v: 3 };
 	const dir = logsDirWith([...LOCAL, outside]);
 	utimesSync(join(dir, "j11.json"), NOW, NOW);
 	const local = readLocalRuns({ logsDir: dir, sinceMs });

@@ -22,13 +22,13 @@ import { isPerMachineHost } from "./backends.mjs";
 import { hash16 } from "./fleet-lease.mjs";
 import { endpointsForModel } from "./model-endpoints.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
-import { effectiveCostCapMicros } from "./money.mjs";
-import { dollarWindowCaps, valkeyEndpointTag } from "./dollar-budget.mjs";
-import { concurrencyFor, dollarCapsFor, makeInFlight, modelDollarRows, projectDollarCapsFor, projectRowFor, rowScopeFor, scopedLedgers } from "./scoped-limits.mjs";
+import { effectiveTokenCap } from "./budget-rule.mjs";
+import { tokenWindowCaps, valkeyEndpointTag } from "./token-budget.mjs";
+import { concurrencyFor, tokenCapsFor, makeInFlight, modelTokenRows, projectTokenCapsFor, projectRowFor, rowScopeFor, scopedLedgers } from "./scoped-limits.mjs";
 import { memberScopeOf, projectOf } from "./projects.mjs";
 import { resolveJobSize } from "./job-size.mjs";
 import { BUDGET_RECHECK_MS, HOST_BUDGET_TICK_MS, NEVER_FITS_RECHECK_MS, makeHostBudget } from "./host-budget.mjs";
-import { governedDollars } from "./allocation.mjs";
+import { governedTokens } from "./allocation.mjs";
 import { WAIT_AFTER_MAX_DEFAULT_MS, WAIT_INTERVAL_FLOOR_MS, afterMs, unreadableConditions, waitArmed, waitBackoffMs, waitLabel, waitProfileNames } from "./wait-for.mjs";
 import { answerOf, makeWaitState } from "./wait-state.mjs";
 import { makeDeferTo } from "./defer-write.mjs";
@@ -227,12 +227,12 @@ export function effectiveJobOf(data, settings, allowedModels = null, log = () =>
 		maxTokens: data.maxTokens ?? settings.maxTokens, // optional per-job token budget (issue #25); null => runner meter only
 		...(models !== null ? { models } : {}),
 		// Issue #501: the per-job dollar cap in integer micro-dollars, or null for none. NOT `??` like the fields
-		// above: a trigger's `run.maxCostUsd` may only NARROW, so this is the smaller of the trigger's and the
+		// above: a trigger's `run.maxTokens` may only NARROW, so this is the smaller of the trigger's and the
 		// deployment's, each counted only when set (`effectiveCostCapMicros` says why a trigger-only cap applies
 		// and what a malformed job value reads as). buildContainerEnv sends it as PI_MAX_COST_MICROS, and the
 		// image preflight requires `costCap` of any job that carries one.
 		// A malformed queued value is logged by KEY only (`job_cost_cap_malformed`), never by value.
-		maxCostMicros: effectiveCostCapMicros(data.maxCostUsd, settings.maxCostUsd, (key) => log("job_cost_cap_malformed", { key })),
+		maxTokens: effectiveTokenCap(data.maxTokens, settings.maxTokens, (key) => log("job_token_budget_malformed", { key })),
 	};
 }
 
@@ -1178,7 +1178,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 						// model attempt key alone, locked to the model it names (with no key the job waited above), never started
 						// over from the primary on a record this build cannot vouch for.
 						recoveryModel, retryNeverStarted: recordReadable(priorAttemptRecord) && priorAttemptRecord.reason === "container-never-started" && priorAttemptRecord.budgetReserved === false && priorAttemptRecord.exitCode === null, models, limits, now, log: deps?.log,
-						reservationFor: (candidate) => zeroRatedFor(candidate, { modelEndpoints: failoverSnapshot, builtinModel: deps?.builtinModel }).zeroRated ? 0 : candidate.maxCostMicros,
+						reservationFor: (candidate) => candidate.maxTokens ?? null,
 						subscriptionCheck: deps?.subscriptionRuntime ? (candidate) => deps.subscriptionRuntime.check(candidate) : null,
 						checkCandidate: (candidate) => deps?.checkFailoverCandidate ? deps.checkFailoverCandidate(candidate, { models, endpoints }) : checkFailoverCandidate(candidate, { models, endpoints, credential: deps?.checkProviderCredential, lookup: deps?.builtinModel }),
 						acquireEndpoints: async (candidate) => {
@@ -1447,7 +1447,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			capacity = capacityNow();
 			// This host runs the job from here on (issue #599, phase 2): its entry, at the same instant as `startedAt`, given
 			// back by `releaseAllHolds` on every exit. `add` is total, so this block still cannot throw.
-			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt), holdMicros: 0, holdAt: Date.parse(startedAt) });
+			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt), holdTokens: 0, holdAt: Date.parse(startedAt) });
 			// The producer of the name both boot reapers sweep by substring. Built from the shared prefix
 			// rather than typed here, so a rename cannot land in the producer and not in the sweeps (#227).
 			// From the VENUE that will build the container, not from the local adapter reached for directly:
@@ -1617,16 +1617,16 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			// also brings the state in line (the neutral seed, expiry, a re-base) and says when this host's envelope is not
 			// the applied split's, which the processor refuses as `envelope-mismatch` before anything is spent. A Valkey
 			// fault throws here, inside the try, and is retried like any reserve fault: nothing has started.
-			const operatorDollars = { dollarCaps: dollarWindowCaps(settings), scopedDollars: dollarCapsFor(job.data, limits), projectDollars: projectDollarCapsFor(limits, project) };
-			let dollarInputs = { ...operatorDollars };
+			const operatorTokens = { tokenCaps: tokenWindowCaps(settings), scopedTokens: tokenCapsFor(job.data, limits), projectTokens: projectTokenCapsFor(limits, project) };
+			let tokenInputs = { ...operatorTokens };
 			const governing = allocation?.current?.() ?? null;
 			try {
 				if (governing?.envelope) {
 					const { state, mismatch } = await allocation.reconcile({ envelope: governing.envelope, digest: governing.digest, now: new Date(nowMs) });
-					dollarInputs = mismatch ? { ...operatorDollars, envelopeMismatch: true } : governedDollars({ envelope: governing.envelope, state, member: project === null ? null : { id: project, member: memberScopeOf(job.data) }, operator: operatorDollars });
+					tokenInputs = mismatch ? { ...operatorTokens, envelopeMismatch: true } : governedTokens({ envelope: governing.envelope, state, member: project === null ? null : { id: project, member: memberScopeOf(job.data) }, operator: operatorTokens });
 				} else if (typeof allocation?.fleetGoverned === "function" && (await allocation.fleetGoverned())) {
 					// A host with no envelope in a fleet with an applied split: ungoverned, so refused like a differing envelope.
-					dollarInputs = { ...operatorDollars, envelopeMismatch: "no-envelope" };
+					tokenInputs = { ...operatorTokens, envelopeMismatch: "no-envelope" };
 				}
 			} catch (error) {
 				// INFRASTRUCTURE, never a verdict (CONST-RETRY-INFRA-ONLY): Valkey did not answer, replied with an error, or the
@@ -1638,32 +1638,29 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 
 			const result = await runJob(effectiveJob, {
 				queueJobId: String(job.id),
-				deploymentMaxCostUsd: settings.maxCostUsd,
+				deploymentMaxTokens: settings.maxTokens,
 				rawApprovalJob: job.data,
 				redis,
-				// Issue #761: the tag of the Valkey the dollar counters are in, for the record's `dollars.reservedIn`.
+				// Issue #761: the tag of the Valkey the token counters are in, for the record's `tokensWindows.reservedIn`.
 				valkeyTag,
 				// The three spend windows (week/month null when disabled) and the soft-hold band, resolved this
 				// job-start under overlay > env. reserveBudget checks them before the container.
 				caps: { day: settings.dailyCap, week: settings.weeklyCap, month: settings.monthlyCap },
 				softHoldPct: settings.softHoldPct,
-				// The daily TOKEN cap (issue #25), same overlay > env resolution. Check-AFTER, so it gates the
-				// NEXT job on prior recorded spend; null => the daily token counter is disabled.
-				tokenCap: settings.dailyTokenCap,
 				// This job's scoped job-count ledgers in reserve order (issues #242 and #499 part B): its repo or folder
 				// row's, then its project row's, from the SAME limits snapshot and the SAME pickup project the gate above
 				// read -- one read per pickup, so gate, ledger and record agree for this attempt. Empty when no row carries
 				// a job-count window for this job.
 				scopedLedgers: scopedLedgers(job.data, limits, project),
-				// Issue #501: the deployment's dollar windows in micro-dollars, resolved this job-start under overlay > env
-				// like the caps above, or null when none is set (then nothing is reserved and no dollar key is written).
-				dollarCaps: dollarInputs.dollarCaps,
-				// Issues #501 part 5 and #502 part 6: this job's repo or folder dollar windows and the model dollar windows it
+				// The deployment's token windows, resolved this job-start under overlay > env
+				// like the caps above, or null when none is set (then nothing is reserved and no token key is written).
+				tokenCaps: tokenInputs.tokenCaps,
+				// This job's repo or folder token windows and the model token windows it
 				// reserves in, from the SAME limits snapshot. The model rows follow the job's EFFECTIVE list (the trigger's,
-				// else PI_ALLOWED_MODELS); a job with none reserves in every model row (`modelDollarRows` says why).
-				scopedDollars: dollarInputs.scopedDollars,
-				// Issue #499 part B: the project row's dollar windows, keyed by the project row's scope, for the pickup project.
-				projectDollars: dollarInputs.projectDollars,
+				// else PI_ALLOWED_MODELS); a job with none reserves in every model row (`modelTokenRows` says why).
+				scopedTokens: tokenInputs.scopedTokens,
+				// Issue #499 part B: the project row's token windows, keyed by the project row's scope, for the pickup project.
+				projectTokens: tokenInputs.projectTokens,
 				// Issue #504 part B: the project was decided on the folder AS NAMED; prepare mounts the
 				// folder it RESOLVES. The processor asks which project the resolved folder belongs to, from the same projects
 				// snapshot, and refuses before any reserve when it is another project's.
@@ -1678,13 +1675,13 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				...(hostBudget && Number.isSafeInteger(hostBudget.current().cpuCenti) ? { cpuBudgetCenti: hostBudget.current().cpuCenti } : {}),
 				// Issue #504 part B: `_other`'s ledger, the deployment cap's source and the envelope verdict, under an envelope;
 				// absent without one, so the processor's defaults keep such a deployment byte-identical.
-				...(dollarInputs.otherDollars ? { otherDollars: dollarInputs.otherDollars } : {}),
-				...(dollarInputs.dollarCapSource ? { dollarCapSource: dollarInputs.dollarCapSource } : {}),
-				...(dollarInputs.envelopeMismatch ? { envelopeMismatch: dollarInputs.envelopeMismatch } : {}),
+				...(tokenInputs.otherTokens ? { otherTokens: tokenInputs.otherTokens } : {}),
+				...(tokenInputs.tokenCapSource ? { tokenCapSource: tokenInputs.tokenCapSource } : {}),
+				...(tokenInputs.envelopeMismatch ? { envelopeMismatch: tokenInputs.envelopeMismatch } : {}),
 				// Issue #505: this host's envelope delegation block, for the `portfolio-no-envelope` gate; absent without an
 				// envelope, where the processor's default (null, no envelope) is the truth.
 				...(governing?.envelope ? { envelopeDelegation: governing.envelope.delegation ?? null } : {}),
-				modelDollars: modelDollarRows(limits, effectiveJob.models ?? null),
+				modelTokens: modelTokenRows(limits, effectiveJob.models ?? null),
 				// The endpoint gate's snapshot (issue #503): the declared endpoints, the overlay models and this job's
 				// derived set, read once at pickup. Absent on a wiring with no endpoint seam, so a bare processor's
 				// runJob context is unchanged.
@@ -1700,9 +1697,9 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// Issue #502: the skew check must see `models` as the job ARRIVED, not as `effectiveJobOf` filled it from
 				// PI_ALLOWED_MODELS, or a trigger list a stale receiver dropped would read as present and the job would run on
 				// the deployment's list. Only when the wiring supplies the check, so a bare processor keeps the default.
-				// The same for `maxCostUsd` (#501): `effectiveJobOf` keeps the arrived value under its own key and writes the
-				// resolved cap as `maxCostMicros`, but it is read off `job.data` here too, so no later fill can hide a drop.
-				...(deps?.checkWaitSkew ? { checkWaitSkew: (j, ...rest) => deps.checkWaitSkew({ ...j, models: job.data?.models, fallbackModels: job.data?.fallbackModels, maxCostUsd: job.data?.maxCostUsd }, ...rest) } : {}),
+				// The same for `run.maxTokens`: `effectiveJobOf` keeps the arrived value under its own key and writes the
+				// resolved budget as `maxTokens`, but it is read off `job.data` here too, so no later fill can hide a drop.
+				...(deps?.checkWaitSkew ? { checkWaitSkew: (j, ...rest) => deps.checkWaitSkew({ ...j, models: job.data?.models, fallbackModels: job.data?.fallbackModels, maxTokens: job.data?.maxTokens }, ...rest) } : {}),
 				// #227. BOUNDED AFTER THE ABORT, and this is what makes `abortable` an honest declaration.
 				//
 				// `makeRunContainer`'s promise settles ONLY on the docker child's `close` or `error`. Nothing
@@ -1835,7 +1832,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// HERE is delayed rather than started beside it. The processor's own ledger, unless a wiring hands one in.
 				runningJobs: deps.runningJobs ?? runningJobs,
 				// Observability follows the actual reservation, never the configured cap before admission.
-				onDollarHold: (hold) => runningJobs.update?.(runningKey, { holdMicros: hold?.amountMicros ?? 0, holdAt: hold?.at ?? Date.parse(startedAt) }),
+				onTokenHold: (hold) => runningJobs.update?.(runningKey, { holdTokens: hold?.amountTokens ?? 0, holdAt: hold?.at ?? Date.parse(startedAt) }),
 			});
 			// Gate round 4 of PR #479: stopped again as runJob returns, before anything is recorded (a result with no
 			// container never passed the exit stop above). A cancel that lands after is never acknowledged, and its
@@ -1903,7 +1900,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			const endCancelled = async ({ retryable }) => {
 				const spent = error?.budgetReserved === true;
 				const beforeStart = retryable && !spent;
-				const result = { outcome: "policy", reason: cancellationReason, exitCode: spent ? (error.exitCode ?? null) : null, turns: spent ? (error.turns ?? null) : null, tokens: spent ? (error.tokens ?? null) : null, ...(spent && error.usage ? { usage: error.usage } : {}), provider: error?.provider ?? null, model: error?.model ?? null, session: error?.session ?? null, budgetReserved: retryable ? spent : (error?.budgetReserved ?? null), ...(error?.dollars ? { dollars: error.dollars } : {}), ...(spent && error?.resources ? { resources: error.resources } : {}), ...(spent && error?.progress ? { progress: error.progress } : {}) };
+				const result = { outcome: "policy", reason: cancellationReason, exitCode: spent ? (error.exitCode ?? null) : null, turns: spent ? (error.turns ?? null) : null, tokens: spent ? (error.tokens ?? null) : null, ...(spent && error.usage ? { usage: error.usage } : {}), provider: error?.provider ?? null, model: error?.model ?? null, session: error?.session ?? null, budgetReserved: retryable ? spent : (error?.budgetReserved ?? null), ...(error?.tokensWindows ? { tokensWindows: error.tokensWindows } : {}), ...(spent && error?.resources ? { resources: error.resources } : {}), ...(spent && error?.progress ? { progress: error.progress } : {}) };
 				deps?.log?.("job_cancelled_instead_of_retry", { jobId: job.id, spent, retryable, ...(retryable ? {} : { failure: scrubCredentials(String(error?.message ?? error)).slice(0, 300) }) });
 				if (deps?.comment) await Promise.resolve(deps.comment(job.data, beforeStart && cancellationReason !== "agent-cancel" ? CANCELLED_BEFORE_START_COMMENT : TERMINAL_COMMENTS[cancellationReason])).catch(() => {});
 				await settleSteer({ result });

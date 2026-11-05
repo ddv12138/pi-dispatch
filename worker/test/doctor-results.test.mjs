@@ -86,7 +86,7 @@ function fakeRedis({ fail = false, hang = false } = {}) {
 }
 
 test("the sections are pinned, and every section doctor.mjs opens is one of them (and none is unused)", () => {
-	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "dollars", "venues", "images", "egress", "backends", "sizing", "job-user", "podman", "openshell", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "envelope", "console", "dirs", "state", "live"]);
+	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "tokens", "venues", "images", "egress", "backends", "sizing", "job-user", "podman", "openshell", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "envelope", "console", "dirs", "state", "live"]);
 	const opened = new Set([...DOCTOR_SRC.matchAll(/\bsection\("([a-z-]+)"\)/g)].map((m) => m[1]));
 	opened.add("sizing"); // the fleet's re-said budget lines are tagged by `tagSection(again, "sizing")`
 	opened.add("live"); // the --live read-backs, tagged by `publishResults`
@@ -152,7 +152,7 @@ async function proxyIdRun({ image }) {
 		"docker info": 0,
 		"docker image": 0,
 	};
-	return collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x" }, { cwd: tempDir("pi-doctor-ids-"), home: tempDir("pi-doctor-ids-home-"), out: () => {}, spawn: planSpawn(plan), probeValkey: async () => true, readHosts: async () => ({ hosts: [] }), dollarKeysExist: async () => false, fileExists: existsSync, nodeVersion: "22.19.0" });
+	return collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x" }, { cwd: tempDir("pi-doctor-ids-"), home: tempDir("pi-doctor-ids-home-"), out: () => {}, spawn: planSpawn(plan), probeValkey: async () => true, readHosts: async () => ({ hosts: [] }), tokenKeysExist: async () => false, fileExists: existsSync, nodeVersion: "22.19.0" });
 }
 
 test("egress.proxy is on docker's proxy line, or on the line that stands in for it, and provider.key on the key line (#737)", async () => {

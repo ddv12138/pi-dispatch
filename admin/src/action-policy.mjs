@@ -3,7 +3,6 @@
  * Keep this module independent of HTTP and pi so both surfaces judge exactly the same evidence.
  */
 import { SETUP_ACTION_NAMES } from "./setup-actions.mjs";
-import { parseUsdMicros } from "@edgehero/pi-dispatch/money";
 const rule = (mode, reason, ...tools) => Object.freeze({ mode, reason, tools: Object.freeze(tools) });
 export const AGENT_MODES = Object.freeze(["unattended", "confirm", "person"]);
 export const ACTION_AGENT_POLICIES = Object.freeze({
@@ -78,20 +77,19 @@ export function actionAgentPolicy(name) {
 const object = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const keysChanged = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !same(a[k], b[k]));
-const SETTINGS_CAPS = new Set(["dailyCap", "weeklyCap", "monthlyCap", "maxTurns", "maxTokens", "dailyTokenCap", "concurrency", "softHoldPct", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
-const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayUsd", "weekUsd", "monthUsd", "hostShare"]);
+const SETTINGS_CAPS = new Set(["dailyCap", "weeklyCap", "monthlyCap", "maxTurns", "maxTokens", "concurrency", "softHoldPct", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
+const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayTokens", "weekTokens", "monthTokens", "hostShare"]);
 const FLAGS = new Set(["recover", "steer", "progress", "statusComment"]);
-const dollar = (key) => /Usd$/.test(key);
-function amount(value, usd) {
-  if (!usd) return Number.isSafeInteger(value) && value >= 0 ? value : null;
-  try { return parseUsdMicros(value, "agent cap"); } catch { return null; }
+/** A cap is a whole number of tokens or a whole count; anything else (a string, a fraction, a float) cannot prove a decrease. */
+function amount(value) {
+  return Number.isSafeInteger(value) && value >= 0 ? value : null;
 }
 function decreased(before, after, allowed) {
   if (!object(before) || !object(after)) return false;
   const changed = keysChanged(before, after);
   return changed.length > 0 && changed.every((key) => {
     if (!allowed.has(key) || !Object.hasOwn(before, key) || !Object.hasOwn(after, key)) return false;
-    const old = amount(before[key], dollar(key)), next = amount(after[key], dollar(key));
+    const old = amount(before[key]), next = amount(after[key]);
     return old !== null && next !== null && next < old;
   });
 }
@@ -112,7 +110,7 @@ export function evaluateAgentAction(name, { before, after, plan = null, payload 
   if (name === "limit-add" && object(before) && object(after) && Array.isArray(before.limits) && Array.isArray(after.limits) && after.limits.length === before.limits.length + 1 && keysChanged(before, after).every((k) => k === "limits" || k === "version") && before.limits.every((row, i) => same(row, after.limits[i]))) {
     const row = after.limits.at(-1);
     const fields = object(row) ? Object.keys(row).filter((key) => row[key] !== null && row[key] !== undefined) : [];
-    if (fields.includes("scope") && fields.some((key) => LIMIT_CAPS.has(key)) && fields.every((key) => key === "scope" || LIMIT_CAPS.has(key)) && fields.filter((key) => key !== "scope").every((key) => amount(row[key], dollar(key)) !== null)) return unattended(base, "The added row only narrows ordinary limits and reserves no size or minimum.");
+    if (fields.includes("scope") && fields.some((key) => LIMIT_CAPS.has(key)) && fields.every((key) => key === "scope" || LIMIT_CAPS.has(key)) && fields.filter((key) => key !== "scope").every((key) => amount(row[key]) !== null)) return unattended(base, "The added row only narrows ordinary limits and reserves no size or minimum.");
   }
   if (name === "trigger-edit" && onlyRowChanged(before, after, "triggers", index)) {
     const a = before.triggers[index], b = after.triggers[index];

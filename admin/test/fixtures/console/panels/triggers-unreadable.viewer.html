@@ -73,7 +73,7 @@
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0 0 10 5 0 10z"/></marker>
 </defs></svg>
 <div class="page">
-<header class="top"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked</a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="who" data-name="watcher" data-role="viewer" title="watcher, Viewer"><span><b>watcher</b><small>Viewer</small></span><span class="avatar">wa</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button></div></header>
+<header class="top"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked</a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="who" data-name="watcher" data-role="viewer" title="watcher, Viewer"><span><b>watcher</b><small>Viewer</small></span><span class="avatar">wa</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button><button class="roundbtn" type="button" data-locale-toggle hidden aria-label="Switch language" title="Chinese / English">中</button></div></header>
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead"><h1>Triggers</h1><p class="titlebar__sub">What starts a job, in plain words. Rules from the triggers file.</p></div><div class="titlebar__end"><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/triggers"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
 <div class="stack"><section id="p-tr-tabs" data-panel><nav class="tabs tr-tabs" aria-label="Triggers views">
@@ -90,14 +90,11 @@ aria-current="page"
 <span class="count">proposed</span></span
 >
 </nav></section><section id="p-tr-viewer" data-panel><p class="collapsed tr-viewer">
-<svg class="ic ic--sm" aria-hidden="true"><use href="#i-eye"></use></svg><b>Viewer.</b> You can read every rule
-and check a hypothetical event. Adding and changing rules is for
-operators.
+<svg class="ic ic--sm" aria-hidden="true"><use href="#i-eye"></use></svg><b>Viewer.</b> You can read every rule and check a hypothetical event. Adding and changing rules is for operators.
 </p></section></div><div class="cards-3 triggers-kpis"><section id="p-tr-count" data-panel><div class="card"><div class="card__head"><h2>Set up</h2></div><p class="kpi"><b>?</b><span>rules</span></p>
 <p class="tr-kp">
 ? on a schedule,
-? from
-forges; ? spent one-shots.
+? from forges; ? spent one-shots.
 </p>
 <p class="tr-problem">
 <svg class="ic ic--sm" aria-hidden="true"><use href="#i-attention"></use></svg>History uses saved row, type and forge, or a cron id. Editing or renumbering rules can associate runs from an older configuration; these are not stable rule identities.
@@ -106,8 +103,7 @@ forges; ? spent one-shots.
 </p><p class="tr-problem">
 <svg class="ic ic--sm" aria-hidden="true"><use href="#i-attention"></use></svg>Counts and spend cover retained history only and may be lower bounds.
 </p></div></section><section id="p-tr-next" data-panel><div class="card"><div class="card__head"><h2>Next to fire</h2></div><p class="tr-empty">
-No next fire is published. Check the schedule's owning worker and its
-doctor result.
+No next fire is published. Check the schedule&#39;s owning worker and its doctor result.
 </p></div></section><section id="p-tr-spend" data-panel><div class="card"><div class="card__head"><h2>Recorded this UTC week</h2></div><p class="kpi"><b>unknown</b><span>attributed to these rules</span></p>
 <p class="tr-kp">
 unknown run records since
@@ -340,15 +336,12 @@ forge jobs only.
 </p>
 </div>
 <p class="tr-sub">
-Next 7 days, UTC. Schedule times use their owning host's verified timezone and
-are plotted as UTC instants. Forge repository quiet windows do not hold
-cron; matching local-folder and global windows can hold it.
+Next 7 days, UTC. Schedule times use their owning host&#39;s verified timezone and are plotted as UTC instants. Forge repository quiet windows do not hold cron; matching local-folder and global windows can hold it.
 </p>
 </div></section><section id="p-tr-schedule" data-panel></section><section id="p-tr-github" data-panel></section><section id="p-tr-gitlab" data-panel></section><section id="p-tr-forgejo" data-panel></section><section id="p-tr-azure" data-panel></section><section id="p-tr-unknown" data-panel><div class="card"><div class="card__head"><h2>Rules</h2></div><p>
 No rule can be shown from the available file.
 </p></div></section></div><div class="stack triggers-check-side"><section id="p-tr-check" data-panel><div class="card"><div class="card__head"><h2>Which rule would run?</h2><span class="card__sub">Hypothetical matching, not delivery authentication</span></div><p class="tr-p">
-Describe an event and see which rule matches, and why the others do not.
-Nothing is sent to a forge or spent.
+Describe an event and see which rule matches, and why the others do not. Nothing is sent to a forge or spent.
 </p>
 <p class="tr-check-phone-link">
 <a class="btn btn--primary" href="/triggers/check"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-search"></use></svg>Check an event</a>
@@ -543,8 +536,7 @@ spellcheck="false"
 </div>
 </div>
 <p class="tr-sub">
-Authority is a hypothetical assumption. Comment text stays in this
-request; it is never placed in the address bar or audit log.
+Authority is a hypothetical assumption. Comment text stays in this request; it is never placed in the address bar or audit log.
 </p>
 <button class="btn btn--primary" type="submit">
 <svg class="ic ic--sm" aria-hidden="true"><use href="#i-search"></use></svg>Check an event
@@ -552,8 +544,7 @@ request; it is never placed in the address bar or audit log.
 </fieldset>
 <noscript
 ><p class="tr-problem">
-Enable JavaScript to check an event. Rules, filters and navigation
-remain available; no event text can be submitted into the address bar.
+Enable JavaScript to check an event. Rules, filters and navigation remain available; no event text can be submitted into the address bar.
 </p></noscript
 >
 <div
@@ -564,8 +555,7 @@ aria-live="polite"
 tabindex="-1"
 >
 <p class="tr-sub">
-Describe an event to see hypothetical matching. Nothing will be sent to
-a forge, queued or spent.
+Describe an event to see hypothetical matching. Nothing will be sent to a forge, queued or spent.
 </p>
 </div>
 </form></div></div></section></div></div>

@@ -23,14 +23,14 @@
 
 import * as nodeFs from "node:fs";
 import { basename, isAbsolute, join } from "node:path";
-import { AUDIT_OUTCOMES, STATE_WRITERS, memberDollarKeyPrefix } from "./allocation.mjs";
+import { AUDIT_OUTCOMES, STATE_WRITERS, memberTokenKeyPrefix } from "./allocation.mjs";
 import { dayKey, monthKey, weekKey } from "./budget.mjs";
 import { OTHER, PLAN_FIELDS, PLAN_RULES, envelopeEntries, scopeRef } from "./priorities.mjs";
 import { InfraRetry } from "./processor.mjs";
 import { isProjectId } from "./project-id.mjs";
 import { recordReadable } from "./run-history.mjs";
 import { RUNS_INDEX_MAX, mergeRuns, readMirroredRuns } from "./run-mirror.mjs";
-import { scopeDollarKeyPrefix } from "./scoped-limits.mjs";
+import { scopeTokenKeyPrefix } from "./scoped-limits.mjs";
 
 /** The snapshot's shape version. */
 export const PORTFOLIO_SNAPSHOT_VERSION = 1;
@@ -55,7 +55,7 @@ const LABEL_REFUSED = /[\p{Cc}\p{Cf}\p{Cs}\p{Co}\p{Cn}\p{Zl}\p{Zp}]/u;
 
 const asDate = (now) => (now instanceof Date ? now : new Date(now));
 const instant = (value) => (typeof value === "string" && INSTANT_RE.test(value) && Number.isFinite(Date.parse(value)) ? value : null);
-const micros = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
+const tokens = (value) => (Number.isSafeInteger(value) && value >= 0 ? value : null);
 const ymd = (ms) => new Date(ms).toISOString().slice(0, 10);
 
 /** The envelope window that holds `now`: `{ kind, start, end }`, `end` the first day after it (UTC dates). */
@@ -77,7 +77,7 @@ function windowKey(prefix, kind, now) {
 }
 
 /** A counter's value as micro-dollars: absent is 0 (nothing reserved yet), anything that is no integer is 0. */
-function counterMicros(raw) {
+function counterTokens(raw) {
 	if (raw === null || raw === undefined) return 0;
 	const n = Number(raw);
 	return Number.isSafeInteger(n) && n > 0 ? n : 0;
@@ -164,7 +164,7 @@ function planAllowedAfter(state, envelope) {
 /**
  * Build the snapshot object. `envelope` and `digest` are this host's (envelope.mjs), `projects` the parsed projects.json,
  * `limits` the parsed scoped-limits.json (a member's spend is read from the key its matched row settles in,
- * `memberDollarKeyPrefix`, the one enforcement uses),
+ * `memberTokenKeyPrefix`, the one enforcement uses),
  * `allocation` `{ state, lastAttempt }` (the applied state `alloc:plan` and the newest `alloc:log` row of this trigger's
  * portfolio jobs), `redis` the client the counters are read from (one MGET), `runs` `{ records, complete }` (the merged
  * history) and `now` the clock. Throws on a Valkey fault; the caller turns that into an InfraRetry.
@@ -179,13 +179,13 @@ export async function buildPortfolioSnapshot({ envelope, digest, projects = [], 
 	// Every counter in ONE read: each entry's project key, then each member that has a repo share.
 	const keys = [];
 	const rows = entries.map((id) => {
-		const projectKey = keys.push(windowKey(scopeDollarKeyPrefix(`project:${id}`), kind, at)) - 1;
+		const projectKey = keys.push(windowKey(scopeTokenKeyPrefix(`project:${id}`), kind, at)) - 1;
 		const members = id === OTHER ? [] : (byId.get(id)?.members ?? []).filter((m) => typeof m === "string" && m !== "");
 		const memberRows = members
 			.map((m) => {
 				const ref = scopeRef(m);
 				const weight = state?.repoWeights?.[id]?.[ref];
-				return { ref, label: memberLabel(m), weight: Number.isInteger(weight) ? weight : null, allocation: micros(state?.repos?.[id]?.[ref]), key: Number.isInteger(weight) ? keys.push(windowKey(memberDollarKeyPrefix(m, { limits }), kind, at)) - 1 : null };
+				return { ref, label: memberLabel(m), weight: Number.isInteger(weight) ? weight : null, allocation: tokens(state?.repos?.[id]?.[ref]), key: Number.isInteger(weight) ? keys.push(windowKey(memberTokenKeyPrefix(m, { limits }), kind, at)) - 1 : null };
 			})
 			.sort((a, b) => (a.ref < b.ref ? -1 : a.ref > b.ref ? 1 : 0));
 		return { id, projectKey, memberRows };
@@ -199,7 +199,7 @@ export async function buildPortfolioSnapshot({ envelope, digest, projects = [], 
 		window: windowBounds(kind, at),
 		envelope: {
 			digest: typeof digest === "string" && HEX16_RE.test(digest) ? digest : null,
-			totalMicros: envelope.totalMicros,
+			totalTokens: envelope.totalTokens,
 			maxStepPct: envelope.delegation?.maxStepPct ?? null,
 			minIntervalHours: envelope.delegation?.minIntervalHours ?? null,
 			maxPlanDays: envelope.delegation?.maxPlanDays ?? null,
@@ -209,11 +209,11 @@ export async function buildPortfolioSnapshot({ envelope, digest, projects = [], 
 		lastAttempt: lastAttemptOf(allocation.lastAttempt),
 		projects: rows.map(({ id, projectKey, memberRows }) => ({
 			id,
-			floorMicros: envelope.floors[id],
+			floorTokens: envelope.floors[id],
 			weight: Number.isInteger(state?.weights?.[id]) ? state.weights[id] : envelope.defaultWeights[id],
-			allocationMicros: micros(state?.allocations?.[id]),
-			spentMicros: counterMicros(values[projectKey]),
-			members: memberRows.map((m) => ({ ref: m.ref, label: m.label, ...(m.weight === null ? {} : { weight: m.weight, allocationMicros: m.allocation, spentMicros: counterMicros(values[m.key]) }) })),
+			allocationTokens: tokens(state?.allocations?.[id]),
+			spentTokens: counterTokens(values[projectKey]),
+			members: memberRows.map((m) => ({ ref: m.ref, label: m.label, ...(m.weight === null ? {} : { weight: m.weight, allocationTokens: m.allocation, spentTokens: counterTokens(values[m.key]) }) })),
 			runs7d: counted[id],
 		})),
 		fleet: { runsComplete: runs.complete === true },

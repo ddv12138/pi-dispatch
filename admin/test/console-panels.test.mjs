@@ -4,7 +4,7 @@ import { parseDocument } from "./helpers/script-dom.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { PAGES, pagePanels, parsePageQuery, renderPage } from "../src/console/pages.mjs";
-import { BEAT_FRESH_MS, COUNT_WINDOWS_UTC_TEXT, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, moneyHtml, runCost, shownPath, timeHtml, usdText, utcText, workersOnline } from "../src/console/panels.mjs";
+import { BEAT_FRESH_MS, COUNT_WINDOWS_UTC_TEXT, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, tokensHtml, runCost, shownPath, timeHtml, tokensText, utcText, workersOnline } from "../src/console/panels.mjs";
 import { SHELL_PANEL_IDS } from "../src/console/shell.mjs";
 import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_OUTCOMES, CONSOLE_AUDIT_READ_MAX, makeConsoleAudit, readConsoleAudit, verifyConsoleAudit } from "@edgehero/pi-dispatch/console-audit";
@@ -20,20 +20,20 @@ import { secretsProfiles, secretsProblems } from "../src/console/panels/secrets.
 
 const NOW = Date.UTC(2026, 9, 8, 15, 39, 8);
 
-test("runCost classifies a run by the cost fold's own rules", () => {
-  const ledger = (rows) => ({ tokens: { total: 10, cost: 0.5 }, usage: { models: rows } });
-  assert.deepEqual(runCost(ledger([{ provider: "anthropic", model: "claude-sonnet-5-5", cost: 0.5 }])), { usd: 0.5, class: "metered", floor: false, planId: null });
-  assert.deepEqual(runCost(ledger([{ provider: "kimi-coding", model: "kimi-for-coding", cost: 0.3 }]), [{ id: "kimi", provider: "kimi-coding", models: ["*"] }]), { usd: 0, class: "plan", floor: false, planId: "kimi" });
-  assert.equal(runCost(ledger([{ provider: "x", model: "y", cost: 0 }])).class, "zero-rated");
-  const mixed = runCost(ledger([{ provider: "anthropic", model: "a", cost: 0.25 }, { provider: "x", model: "y", cost: 0 }]));
-  assert.deepEqual([mixed.class, mixed.usd], ["estimated", 0.25], "mixed classes read as an estimate of the metered part");
-  // No ledger: one row from the host-effective provider and model; a fallback meter is a floor.
-  assert.deepEqual(runCost({ provider: "anthropic", model: "m", tokens: { cost: 1.25, metered: false } }), { usd: 1.25, class: "metered", floor: true, planId: null });
+test("runCost classifies a run by the completeness counters the meter wrote", () => {
+  const ledger = (rows) => ({ tokens: { total: 10 }, usage: { models: rows } });
+  assert.deepEqual(runCost(ledger([{ provider: "anthropic", model: "claude-sonnet-5-5" }])), { tokens: 10, class: "metered", floor: false });
+  assert.deepEqual(runCost({ provider: "anthropic", model: "m", tokens: { total: 10, metered: false } }), { tokens: 10, class: "estimated", floor: true }, "a fallback meter's total is a floor");
+  for (const counter of ["unresolved", "usageUnreported", "unmeteredChildren"]) {
+    assert.deepEqual(runCost({ tokens: { total: 10, [counter]: 1 } }), { tokens: 10, class: "estimated", floor: true }, `${counter} above 0 floors the run`);
+    assert.deepEqual(runCost({ tokens: { total: 10, [counter]: 0 } }), { tokens: 10, class: "metered", floor: false }, `${counter} at 0 does not`);
+  }
+  assert.deepEqual(runCost({ tokens: { total: 10, unresolved: "junk" } }), { tokens: 10, class: "estimated", floor: true }, "a malformed counter floors rather than being ignored");
   assert.equal(runCost({ tokens: null }), null, "a run that measured nothing has no cost");
   assert.equal(runCost(null), null);
 });
 
-test("formatting: ages, UTC instants, dollars and paths, never the host's zone or locale", () => {
+test("formatting: ages, UTC instants, token counts and paths, never the host's zone or locale", () => {
   assert.equal(ageText(45_000), "45s");
   assert.equal(ageText(12 * 60_000), "12m");
   assert.equal(ageText(3 * 3_600_000 + 5 * 60_000), "3h 5m");
@@ -46,9 +46,9 @@ test("formatting: ages, UTC instants, dollars and paths, never the host's zone o
   assert.equal(utcText(253402300799999), "9999-12-31 23:59 UTC");
   for (const out of [253402300800000, 8e15, 8.64e15, -1, -1e15]) assert.equal(utcText(out), "unknown", String(out));
   assert.equal(utcText(0), "1970-01-01 00:00 UTC");
-  assert.equal(usdText(2_000_000), "$2.00");
-  assert.equal(usdText(-1), "-");
-  assert.equal(usdText(1.5), "-");
+  assert.equal(tokensText(2_000_000), "2,000,000");
+  assert.equal(tokensText(-1), "-");
+  assert.equal(tokensText(1.5), "-");
   assert.equal(shownPath("/srv/work/site"), ".../site");
   assert.equal(shownPath("C:\\work\\site"), ".../site");
   assert.equal(shownPath("github:acme/web"), "github:acme/web");
@@ -126,7 +126,7 @@ test("the secret profiles list PI_SECRET_PROFILES' names beside the overlay's, a
   const empty = await profilesOf(noOverlay, { PI_SECRET_PROFILES: "" });
   assert.match(empty, /No secret profiles are declared or named by the triggers in view\./, "both sources seen and empty");
   assert.doesNotMatch(empty, /environment declarations are unknown/);
-  assert.match(await profilesOf(noOverlay), /PI_SECRET_PROFILES is not visible here; the worker's environment declarations are unknown/, "an unseen env is unknown, not empty");
+  assert.match(await profilesOf(noOverlay), /PI_SECRET_PROFILES is not visible here; the worker&#39;s environment declarations are unknown/, "an unseen env is unknown, not empty");
   assert.match(await profilesOf(noOverlay, { PI_SECRET_PROFILES: "prod:relative" }), /PI_SECRET_PROFILES does not parse/);
   const both = await profilesOf({ settings: { overlay: { secretProfiles: { prod: "/opt/secret/p" } } } }, { PI_SECRET_PROFILES: "prod:/opt/secret/p" });
   assert.match(both, /Ambiguous: declared in both PI_SECRET_PROFILES and the settings overlay, so the worker refuses every secrets job/);
@@ -730,9 +730,9 @@ test("the audit panels: the chain banner, the filters, the log by state, the sid
   // Each cell beside the reason is bounded (a name, a write's kind, a target wrap in their own width: page-css.mjs
   // AUDIT_LAYOUT), and the reason's is never narrower than its minimum.
   assert.ok(ok.log.includes('<span class="au-who">anonymous<small>none</small></span></td><td data-l="Action"><span class="code">login-failed</span></td><td class="wide" data-l="Target"><span class="code au-tgt">/login</span></td><td data-l="Outcome"><span class="badge tone-refused"><svg class="ic" aria-hidden="true"><use href="#i-refused"></use></svg>refused</span></td><td class="wide" data-l="Reason"><span class="au-why">no token matched</span></td></tr>'), ok.log);
-  assert.ok(ok.log.includes('<span class="code">write</span><span class="reason au-kind">run-rerun</span>') && ok.log.includes(">reserve $2.50</span></td>"), "a paid write's kind and reserve");
+  assert.ok(ok.log.includes('<span class="code">write</span><span class="reason au-kind">run-rerun</span>') && ok.log.includes(">reserve 2,500,000</span></td>"), "a paid write's kind and reserve");
   assert.ok(ok.log.includes('<span class="au-who">pi<small>panel</small></span>') && ok.log.includes('<td class="wide" data-l="Reason"><span class="au-why">one of 3 in a bulk write</span></td>'), "a bulk row's size, as words of its own with no reason before it");
-  assert.ok(ok.log.includes('<td class="wide" data-l="Reason"><span class="au-why">reserve $2.50</span></td>'), "a reason with no bulk size has no bracket");
+  assert.ok(ok.log.includes('<td class="wide" data-l="Reason"><span class="au-why">reserve 2,500,000</span></td>'), "a reason with no bulk size has no bracket");
   assert.ok(ok.log.includes('<td class="wide" data-l="Target"><span class="faint">-</span></td>'), "an absent value, faint");
   assert.equal(ok.log.split('<td class="wide" data-l="Reason"><span class="au-why">').length - 1, 6, "every row's reason, in its bounded block");
   // Both controls lead nowhere, and are drawn alike (quiet), so neither looks like the live one.
@@ -988,7 +988,7 @@ test("the Progress panel of an attempt whose run continues as a recovery (issue 
   // The queue no longer holds the recovery job: still the record, with no link.
   const gone = String(runProgress(view({ run: { record: { ...record, progress: undefined } }, progress: { absent: true }, progressContinues: { as: null } })));
   assert.match(gone, /This run continues as a recovery job\./);
-  assert.match(gone, /This attempt's record holds no progress\./);
+  assert.match(gone, /This attempt&#39;s record holds no progress\./);
   // A hostile id is never linked.
   for (const as of ["x\"><script>", "", 7, { id: "gh-1.r1" }]) {
     const out = String(runProgress(view({ run: { record }, progress: recoveryKey, progressContinues: { as } })));
@@ -1304,12 +1304,11 @@ test("the what-if panel: a GET form for every role with the priced ids and the w
     assert.ok(out.includes('<datalist id="whatif-flows"><option value="tidy"></datalist>'), "the window's flows, in the flow charset");
   }
   const view = (whatIf, query) => String(insightsWhatIf({ data: { insights: PAYLOAD(), pricedModels: [], whatIf }, query: { ...parsePageQuery("insights", "").query, ...query }, role: "viewer", now: NOW }));
-  const known = view({ model: "acme/m-1", flow: "tidy", result: { class: "estimated", usd: 4, perRun: 2, coverage: 0.5, excluded: 1, ratesVersion: "1.2.3" } }, { whatif: "acme/m-1", flow: "tidy" });
+  const known = view({ model: "acme/m-1", flow: "tidy", result: { class: "estimated", tokens: 6_000_000, perRun: 2_000_000, coverage: 0.5, excluded: 1 } }, { whatif: "acme/m-1", flow: "tidy" });
   assert.ok(known.includes('value="acme/m-1"') && known.includes('value="tidy"'), "the form shows what was asked");
-  assert.match(known, /<pre class="answer">What-if tidy @ acme\/m-1:\n  estimate ~\$4\.00 est\. total · ~\$2\.00 est\. per run\n  coverage 50% of observed runs ledgered · excluded 1 \(no ledger\)\n  rates pi-ai 1\.2\.3<\/pre>/, "the old command's words");
-  const seeded = view({ model: "acme/m-1", flow: "tidy", result: { class: "seeded", low: 0.5, high: 5, note: "unmeasured (OQ-002)" } }, { whatif: "acme/m-1", flow: "tidy" });
-  assert.match(seeded, /no ledgered run to measure from/);
-  assert.match(seeded, /unmeasured \(OQ-002\)/);
+  assert.match(known, /<pre class="answer">What-if tidy @ acme\/m-1:\n  estimate ~6\.00M est\. total · ~2\.00M est\. per run\n  coverage 50% of observed runs ledgered · excluded 1 \(no ledger\)<\/pre>/, "the old command's words, now in tokens: no rates line, the profile is what is compared");
+  const unmeasured = view({ model: "acme/m-1", flow: "tidy", result: { class: "unknown", note: "unmeasured", runs: 2 } }, { whatif: "acme/m-1", flow: "tidy" });
+  assert.match(unmeasured, /<pre class="answer">What-if tidy @ acme\/m-1:\n  — \(unmeasured\)<\/pre>/, "no ledgered run to measure from reads as the honest em dash, never as a measurement (the seeded band died with its unit, OQ-002)");
   const unknown = view({ model: "acme/nope", flow: "tidy", unknown: true, near: ["acme/nope-2", "other/nope"] }, { whatif: "acme/nope", flow: "tidy" });
   assert.match(unknown, /Unknown model: <span class="mono">acme\/nope<\/span>/);
   assert.match(unknown, /<a class="mono" href="\/insights\?range=30d&amp;whatif=acme%2Fnope-2&amp;flow=tidy">acme\/nope-2<\/a>/, "each closest id asks again");
@@ -1326,12 +1325,12 @@ test("the what-if panel: a GET form for every role with the priced ids and the w
 test("loadPageData asks the what-if reader only for a whatif query, and a reader that throws is a stated failure", async () => {
   const { loadPageData } = await import("../src/console/pages.mjs");
   const asked = [];
-  const deps = { insights: async () => ({}), whatIf: async (a) => (asked.push(a), { ...a, result: { class: "seeded", low: 0.5, high: 5, note: "n" } }), pricedModels: () => ["a/b"], now: NOW };
+  const deps = { insights: async () => ({}), whatIf: async (a) => (asked.push(a), { ...a, result: { class: "unknown", note: "unmeasured" } }), pricedModels: () => ["a/b"], now: NOW };
   const none = await loadPageData("insights", parsePageQuery("insights", "").query, deps);
   assert.deepEqual([asked, none.whatIf, none.pricedModels], [[], undefined, ["a/b"]]);
   const one = await loadPageData("insights", parsePageQuery("insights", "whatif=a%2Fb&flow=tidy").query, deps);
   assert.deepEqual(asked, [{ model: "a/b", flow: "tidy", range: "30d", project: null, runs: "24h" }]);
-  assert.equal(one.whatIf.result.class, "seeded");
+  assert.equal(one.whatIf.result.class, "unknown");
   const broken = await loadPageData("insights", parsePageQuery("insights", "whatif=a%2Fb&flow=tidy").query, { ...deps, whatIf: async () => { throw new Error("x"); }, pricedModels: () => { throw new Error("y"); } });
   assert.deepEqual(broken.whatIf, { model: "a/b", flow: "tidy", unreachable: "the what-if estimate failed" });
   assert.deepEqual(broken.pricedModels, []);
@@ -1342,14 +1341,13 @@ test("loadPageData asks the what-if reader only for a whatif query, and a reader
 });
 
 test("the what-if reader: an unknown model never scans, one bounded scan serves every key per TTL, answers are capped, a failed scan is not kept", async () => {
-  const priced = new Set(["acme/m-1", "acme/m-2", "acme/m-3"]);
+  const pricedIds = new Set(["acme/m-1", "acme/m-2", "acme/m-3"]);
+  let priced = 0; // one getPricedModel call per worked-out answer; a cached answer (and an unknown model) makes none
   const pricing = {
-    getPricedModel: (p, id) => (priced.has(`${p}/${id}`) ? { provider: p, id } : null),
-    listPricedModels: () => [...priced].map((t) => ({ provider: t.split("/")[0], id: t.split("/")[1] })).concat([{ provider: "evil", id: "<b>" }]),
-    reprice: (quad) => (reprices++, { usd: (quad.input + quad.output) / 1_000_000, ratesVersion: "9.9.9" }),
+    getPricedModel: (p, id) => (pricedIds.has(`${p}/${id}`) ? (priced++, { provider: p, id }) : null),
+    listPricedModels: () => [...pricedIds].map((t) => ({ provider: t.split("/")[0], id: t.split("/")[1] })).concat([{ provider: "evil", id: "<b>" }]),
   };
-  let reprices = 0;
-  const run = (flow, input) => ({ flow, endedAt: new Date(NOW).toISOString(), outcome: "completed", usage: { models: [{ provider: "x", model: "y", input, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0 }] } });
+  const run = (flow, input) => ({ flow, endedAt: new Date(NOW).toISOString(), outcome: "completed", usage: { models: [{ provider: "x", model: "y", input, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, total: input }] } });
   let t = NOW;
   let scans = 0;
   let records = [run("tidy", 1_000_000), run("tidy", 3_000_000), run("tidy", 2_000_000), run("fix", 9)];
@@ -1358,16 +1356,16 @@ test("the what-if reader: an unknown model never scans, one bounded scan serves 
   assert.deepEqual(unknown, { model: "acme/m-1x", flow: "tidy", unknown: true, near: ["acme/m-1"] }, "the closest priced ids, from the catalog alone");
   assert.equal(scans, 0, "an unknown model never walks the logs");
   const a = await read({ model: "acme/m-1", flow: "tidy" });
-  assert.deepEqual(a.result, { class: "estimated", usd: 6, perRun: 2, coverage: 1, excluded: 0, ratesVersion: "9.9.9", windowRuns: 3 }, "the median run re-priced, times the runs");
+  assert.deepEqual(a.result, { class: "estimated", tokens: 6_000_000, perRun: 2_000_000, medianQuad: { input: 2_000_000, output: 0, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, total: 2_000_000 }, contextWindow: null, contextShare: null, coverage: 1, excluded: 0, windowRuns: 3 }, "the median per-run token profile, times the observed runs");
   await read({ model: "acme/m-2", flow: "tidy" });
   await read({ model: "acme/m-3", flow: "fix" });
   assert.equal(scans, 1, "one scan within the TTL, whatever the key");
-  assert.equal(reprices, 3);
-  assert.equal((await read({ model: "acme/m-3", flow: "fix" })).result.perRun, 9 / 1_000_000, "a cached answer within the TTL");
+  assert.equal(priced, 3);
+  assert.equal((await read({ model: "acme/m-3", flow: "fix" })).result.perRun, 9, "a cached answer within the TTL");
   await read({ model: "acme/m-2", flow: "tidy" });
-  assert.equal(reprices, 3, "both held answers served from the cache");
+  assert.equal(priced, 3, "both held answers served from the cache");
   await read({ model: "acme/m-1", flow: "tidy" });
-  assert.equal(reprices, 4, "the oldest answer was dropped past the cap of 2, so it is worked out again");
+  assert.equal(priced, 4, "the oldest answer was dropped past the cap of 2, so it is worked out again");
   assert.equal(scans, 1, "over the same held scan");
   records = [];
   t += W.WHATIF_LIMITS.ttlMs;
@@ -1382,10 +1380,10 @@ test("the what-if reader: an unknown model never scans, one bounded scan serves 
   // The flow is part of the key: one model, two flows, two answers.
   records = [run("tidy", 1_000_000), run("fix", 9)];
   const both = W.makeWhatIfReader({ pricing, scan: () => records, now: () => t });
-  assert.deepEqual([(await both({ model: "acme/m-1", flow: "tidy" })).result.perRun, (await both({ model: "acme/m-1", flow: "fix" })).result.perRun], [1, 9 / 1_000_000]);
+  assert.deepEqual([(await both({ model: "acme/m-1", flow: "tidy" })).result.perRun, (await both({ model: "acme/m-1", flow: "fix" })).result.perRun], [1_000_000, 9]);
   // A re-asked expired key is the NEWEST entry, so the cap drops the one that really is oldest.
   const t0 = t;
-  reprices = 0;
+  priced = 0;
   const lru = W.makeWhatIfReader({ pricing, scan: () => records, now: () => t, max: 2 });
   await lru({ model: "acme/m-1", flow: "tidy" });
   t = t0 + 20_000;
@@ -1393,11 +1391,11 @@ test("the what-if reader: an unknown model never scans, one bounded scan serves 
   t = t0 + W.WHATIF_LIMITS.ttlMs + 1_000;
   await lru({ model: "acme/m-1", flow: "tidy" });
   await lru({ model: "acme/m-3", flow: "tidy" });
-  assert.equal(reprices, 4);
+  assert.equal(priced, 4);
   await lru({ model: "acme/m-1", flow: "tidy" });
-  assert.equal(reprices, 4, "m-1, re-asked after it expired, outlived m-2 under the cap");
+  assert.equal(priced, 4, "m-1, re-asked after it expired, outlived m-2 under the cap");
   await lru({ model: "acme/m-2", flow: "tidy" });
-  assert.equal(reprices, 5, "m-2 was the one dropped");
+  assert.equal(priced, 5, "m-2 was the one dropped");
   // The closest ids: at most three, and never an id outside the form's own rule.
   const wide = { listPricedModels: () => ["m-1", "m-2", "m-3", "m-4"].map((id) => ({ provider: "acme", id })).concat([{ provider: "evil", id: "<m>" }]) };
   assert.deepEqual(W.closestPricedIds(wide, "m"), ["acme/m-1", "acme/m-2", "acme/m-3"], "the first three that resemble it");
@@ -1819,27 +1817,26 @@ test("clock skew: a host whose beats look stale while BullMQ sees its worker is 
 });
 
 test("readable numbers: money in one fixed form with the exact amount on hover, jobs started against their caps, CPUs as cores (#710)", async () => {
-  assert.equal(String(moneyHtml(1_234_567)), '<span title="$1.234567">$1.23</span>');
-  assert.equal(String(moneyHtml(2_000_000)), '<span title="$2.00">$2.00</span>');
-  assert.equal(String(moneyHtml(1_500_000_000)), '<span title="$1500.00">$1,500.00</span>', "one fixed form: never $1.5k beside $2.00");
-  assert.equal(String(moneyHtml(99_999_000, { spent: true })), '<span title="$99.999">$99.99</span>', "spent rounds down");
-  assert.equal(String(moneyHtml(99_999_000)), '<span title="$99.999">$100.00</span>');
-  for (const bad of [-1, 1.5, null, "3"]) assert.equal(String(moneyHtml(bad)), "-");
-  const snap = { ...snapshot(), dollars: { rows: [{ ledger: "deployment", name: "deployment", window: "day", counterMicros: 1_234_567, capMicros: 50_000_000, full: false }, { ledger: "deployment", name: "deployment", window: "month", counterMicros: 99_999_000, capMicros: 100_000_000, full: false }] } };
+  assert.equal(String(tokensHtml(1_234_567)), '<span title="1,234,567">1.23M</span>');
+  assert.equal(String(tokensHtml(2_000_000)), '<span title="2,000,000">2.00M</span>');
+  assert.equal(String(tokensHtml(1_500_000_000)), '<span title="1,500,000,000">1.50B</span>', "one fixed form at every magnitude");
+  assert.equal(String(tokensHtml(999)), '<span title="999">999</span>', "below the ladder's first rung the count is exact");
+  for (const bad of [-1, 1.5, null, "3"]) assert.equal(String(tokensHtml(bad)), "-");
+  const snap = { ...snapshot(), windows: { rows: [{ ledger: "deployment", name: "deployment", window: "day", counterTokens: 1_234_567, capTokens: 50_000_000, full: false }, { ledger: "deployment", name: "deployment", window: "month", counterTokens: 99_999_000, capTokens: 100_000_000, full: false }] } };
   const panels = new Map(await overviewOf(snap));
   // Spend today: the day window's spent and held, rounded down, the exact amount on hover; the cap beside it.
-  assert.match(panels.get("p-spend"), /<b><data value="1234567" title="\$1\.234567">\$1\.23<\/data><\/b><span>of <span title="\$50\.00">\$50\.00<\/span><\/span>/);
+  assert.match(panels.get("p-spend"), /<b><data value="1234567" title="1,234,567">1\.23M<\/data><\/b><span>of <span title="50,000,000">50\.00M<\/span><\/span>/);
   // Caps: jobs started against their caps, a capsule per window with a cap; the windows are UTC, and say so.
   const caps = panels.get("p-caps");
   assert.match(caps, /title="Jobs today: 30%"/, "3 started of 10");
   assert.ok(!caps.includes("Jobs week"), "no cap, no capsule");
-  assert.match(caps, /title="Deploy \$ month: 99%"/, "a window short of its cap never reads as the cap");
+  assert.match(caps, /title="Deploy tokens month: 99%"/, "a window short of its cap never reads as the cap");
   assert.ok(caps.includes(COUNT_WINDOWS_UTC_TEXT), "the windows are UTC, and say so");
   assert.match(COUNT_WINDOWS_UTC_TEXT, /UTC/);
   // The runs list's Job cap column.
-  const runs = [{ jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: "2026-10-08T15:00:00Z", dollars: { reservedMicros: 2_500_001 } }];
+  const runs = [{ jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: "2026-10-08T15:00:00Z", tokensWindows: { reservedTokens: 2_500_001, settledTokens: 2_000_000, basis: "metered", modelBasis: null } }];
   const list = (await pagePanels("runs", ctxOf("viewer", { runsPage: { runs, next: null, mirror: "ok" } }, parsePageQuery("runs", "").query))).map((p) => p.html).join("");
-  assert.match(list, /<td class="num hide-phone" data-l="Job cap"><span title="\$2\.500001">\$2\.50<\/span><\/td><\/tr>/);
+  assert.match(list, /<td class="num hide-phone" data-l="Job cap"><span title="2,500,001">2\.50M<\/span><\/td><\/tr>/);
   // Fleet hosts: hundredths as cores; off and unknown as before; a value that is not hundredths shown as it is.
   const hosts = [
     { name: "h1", concurrency: "2", jobs: [], staleMs: 1000, budgetMemMiB: "8192", usedMemMiB: "2048", budgetCpuCenti: "800", usedCpuCenti: "150" },

@@ -4,7 +4,7 @@ import { makeSubscriptionRuntime, subscriptionIdentity, subscriptionRoutes } fro
 
 const instant = 1_800_000_000_000;
 const connection = { id: "claude", connectionId: "claude", provider: "anthropic", ownerHost: "owner", adapter: "pi-anthropic-oauth@0.3.6", accountGroup: "opaque-group", generation: 2 };
-const job = { provider: "anthropic", model: "sonnet", models: ["anthropic/sonnet"], maxCostMicros: 500_000 };
+const job = { provider: "anthropic", model: "sonnet", models: ["anthropic/sonnet"], maxTokens: 500_000 };
 function fixture({ row = connection, quotaResult = { ok: true }, checkResult, stageResult } = {}) {
 	const calls = [];
 	const auth = {
@@ -48,11 +48,11 @@ test("an explicit binding refuses unrestricted, disabled-extension and unsupport
 	}
 });
 test("paid overage requires an explicit positive policy ceiling and a job bound no greater than it", async () => {
-	const { runtime, calls } = fixture({ row: { ...connection, extraUsageCreditMicros: 400_000 } });
+	const { runtime, calls } = fixture({ row: { ...connection, extraUsageCreditTokens: 400_000 } });
 	assert.equal((await runtime.check(job)).reason, "auth-credit-cap-required");
 	assert.deepEqual(calls, []);
-	assert.equal((await runtime.check({ ...job, maxCostMicros: 300_000 })).ok, true);
-	assert.equal(calls[0].policy.maxCreditMicros, 400_000);
+	assert.equal((await runtime.check({ ...job, maxTokens: 300_000 })).ok, true);
+	assert.equal(calls[0].policy.maxCreditTokens, 400_000);
 });
 test("OpenAI subscription classifier roles refuse before any quota claim", async () => {
 	const { runtime, calls } = fixture({ row: { ...connection, provider: "openai", adapter: "openai-chatgpt" } });

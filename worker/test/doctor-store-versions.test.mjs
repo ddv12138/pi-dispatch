@@ -125,7 +125,7 @@ function doctorWith(settingsText, { hosts = [], pauseWindows = null, triggers = 
 	const triggersFile = join(dir, "triggers.json");
 	if (triggers !== null) writeFileSync((env.PI_TRIGGERS_FILE = triggersFile), text(triggers));
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	return collectChecks(env, { cwd: dir, home: tempDir("pi-761-doctor-home-"), out: () => {}, spawn: planSpawn({ "docker info": 0, "docker image": 0 }), probeValkey: async () => true, readHosts: async () => ({ hosts: hosts.map((h) => ({ tz, ...h })) }), dollarKeysExist: async () => false, fileExists: existsSync, readEnvFile: (path) => readFileSync(path), nodeVersion: "22.19.0", ...(versionTables ? { versionTables } : {}) }).then((checks) => ({ checks, settingsFile, pauseWindowsFile, triggersFile }));
+	return collectChecks(env, { cwd: dir, home: tempDir("pi-761-doctor-home-"), out: () => {}, spawn: planSpawn({ "docker info": 0, "docker image": 0 }), probeValkey: async () => true, readHosts: async () => ({ hosts: hosts.map((h) => ({ tz, ...h })) }), tokenKeysExist: async () => false, fileExists: existsSync, readEnvFile: (path) => readFileSync(path), nodeVersion: "22.19.0", ...(versionTables ? { versionTables } : {}) }).then((checks) => ({ checks, settingsFile, pauseWindowsFile, triggersFile }));
 }
 
 test("the overlay keys this build does not know are named, sorted and capped, as a warning, never with a value", async () => {

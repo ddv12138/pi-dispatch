@@ -23,10 +23,11 @@
  * worker drops would be a silently WIDENED spend limit. Pause-windows shipping without a version is a
  * sunk decision, not a precedent to extend to enforcement config.
  *
- * Version 2 (issues #501 part 5, #502 part 6) is exactly that case made real: dollar windows (`dayUsd`,
- * `weekUsd`, `monthUsd`) on a scope row, and `model:<provider>/<model>` rows carrying those alone. They are
- * DOLLAR ledgers (dollar-budget.mjs, built here by `dollarCapsFor` and `modelDollarRows`), never job-count ones,
- * so `budgetCapsFor`, `concurrencyFor` and the mutex never see them.
+ * Version 2 (issues #501 part 5, #502 part 6) was that case made real with dollar windows; THIS release replaces
+ * them with token windows (`dayTokens`, `weekTokens`, `monthTokens`) on a scope row, and `model:<provider>/<model>`
+ * rows carrying those alone. They are TOKEN ledgers (token-budget.mjs, built here by `tokenCapsFor` and
+ * `modelTokenRows`), never job-count ones, so `budgetCapsFor`, `concurrencyFor` and the mutex never see them. The
+ * dollar fields are retired: a file carrying `dayUsd`/`weekUsd`/`monthUsd` is refused with the upgrade named.
  *
  * Issue #498 adds the forge-qualified scope (`github:acme/web`), which names one forge's repo where a bare
  * `acme/web` names that repo on every forge. A job matches its qualified row first, then its bare row, and a file
@@ -49,10 +50,9 @@
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { configError } from "./config.mjs";
-import { DOLLAR_KEY_PREFIX } from "./dollar-budget.mjs";
+import { TOKEN_KEY_PREFIX } from "./token-budget.mjs";
 import { hash16 } from "./fleet-lease.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
-import { formatMicros, parseUsdMicros } from "./money.mjs";
 import { parseScopeString, qualifiedScopeOf, scopeOf } from "./pause-windows.mjs";
 import { PROJECT_ID_RE, isProjectId } from "./project-id.mjs";
 import { formatCpus, formatMemory, parseCpus, parseMemory } from "./job-size.mjs";
@@ -61,7 +61,8 @@ import { formatCpus, formatMemory, parseCpus, parseMemory } from "./job-size.mjs
  * The highest schema version this build reads. A file declaring a higher one is refused loudly. The admin writes the
  * LOWEST version that expresses a file (`scopedLimitsVersionFor`), so a file with no dollar or model row stays 1.
  *
- * Version 2 (issues #501 part 5 and #502 part 6) adds dollar windows: `dayUsd`, `weekUsd` and `monthUsd` on a repo or
+ * Version 2 (issues #501 part 5 and #502 part 6) added the dollar windows; this release's version 4 carries the
+ * token windows `dayTokens`, `weekTokens` and `monthTokens` on a repo or
  * folder row, and `model:<provider>/<model>` rows that carry those three fields only. A version 1 file that uses
  * either is refused with an error naming version 2: a version 1 worker drops unknown fields, so a file that says 1
  * while it means 2 would read as a narrower cap on one build and no cap on another.
@@ -71,7 +72,7 @@ import { formatCpus, formatMemory, parseCpus, parseMemory } from "./job-size.mjs
  * cap, a concurrency limit and a lease that one build enforces and another silently ignores. Version 2 makes every
  * older build refuse the file loudly instead.
  */
-export const SCOPED_LIMITS_VERSION = 3;
+export const SCOPED_LIMITS_VERSION = 4;
 
 /**
  * The four size fields of version 3 (issue #596), on a PROJECT row only, in display order:
@@ -95,11 +96,13 @@ export const SIZE_LIMIT_FIELDS = Object.freeze(["memory", "cpus", "hostShare", "
 /** The four job-count limit fields a row may carry, in display order. */
 const LIMIT_FIELDS = ["day", "week", "month", "concurrent"];
 
-/** The three dollar window fields (version 2), in display order. Each maps to a dollar window: day, week, month. */
-export const USD_LIMIT_FIELDS = Object.freeze(["dayUsd", "weekUsd", "monthUsd"]);
+/** The three token window fields (version 4, the retired dollar fields' successor), in display order. Each maps to a token window: day, week, month. */
+export const TOKEN_LIMIT_FIELDS = Object.freeze(["dayTokens", "weekTokens", "monthTokens"]);
+/** The dollar fields version 2 shipped, refused on sight with the upgrade named. */
+export const RETIRED_DOLLAR_FIELDS = Object.freeze(["dayUsd", "weekUsd", "monthUsd"]);
 
 /** Every key a version 3 row may carry (issue #596). Any other key refuses a version 3 file (`normalizeLimit`). */
-const V3_ROW_KEYS = new Set(["scope", ...LIMIT_FIELDS, ...USD_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS]);
+const V4_ROW_KEYS = new Set(["scope", ...LIMIT_FIELDS, ...TOKEN_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS]);
 
 /**
  * The scope prefix of a per-model row (issue #502 part 6): `model:<provider>/<model>`. Reserved in BOTH versions. A
@@ -107,10 +110,10 @@ const V3_ROW_KEYS = new Set(["scope", ...LIMIT_FIELDS, ...USD_LIMIT_FIELDS, ...S
  */
 export const MODEL_SCOPE_PREFIX = "model:";
 
-/** The dollar key prefix of a repo or folder row: `budget:usd:s:<hash16>` (the deployment's is `budget:usd`). */
-export const SCOPE_DOLLAR_KEY_PREFIX = `${DOLLAR_KEY_PREFIX}:s`;
-/** The dollar key prefix of a model row: `budget:usd:mdl:<hash16>`. */
-export const MODEL_DOLLAR_KEY_PREFIX = `${DOLLAR_KEY_PREFIX}:mdl`;
+/** The token key prefix of a repo or folder row: `budget:tok:s:<hash16>` (the deployment's is `budget:tok`). */
+export const SCOPE_TOKEN_KEY_PREFIX = `${TOKEN_KEY_PREFIX}:s`;
+/** The token key prefix of a model row: `budget:tok:mdl:<hash16>`. */
+export const MODEL_TOKEN_KEY_PREFIX = `${TOKEN_KEY_PREFIX}:mdl`;
 
 /** A scope that LOOKS like a model row (any case, `models`, spaces before the colon) but is not the exact prefix form. */
 const MODEL_NEAR_MISS = /^models?\s*:/i;
@@ -184,7 +187,7 @@ export function canonicalScope(job) {
 /**
  * Parse, validate, and normalize the scoped-limits file TEXT. Returns the normalized `limits` array
  * (every row rebuilt as an explicit `{ scope, day, week, month, concurrent }` literal in a version 1 file,
- * `{ scope, day, week, month, concurrent, dayUsd, weekUsd, monthUsd }` in a version 2 one, and that plus `memory,
+ * `{ scope, day, week, month, concurrent, dayTokens, weekTokens, monthTokens }` in a version 2+ one, and that plus `memory,
  * cpus, hostShare, minJobs` in a version 3 one, `null` for absent fields, unknown fields dropped in a version 1 or 2
  * file -- the operator-file policy -- and refused in a version 3 one). Throws `configError` (fail-loud) on any
  * malformed entry. `path` is for error messages only -- this function touches no filesystem.
@@ -213,7 +216,7 @@ export function parseScopedLimits(text, path) {
 	refuseMixedForms(rows, path);
 	const seen = new Map();
 	rows.forEach((row, index) => {
-		// A model row's identity is its LOWERCASED ref, the one its dollar key hashes (`modelDollarKeyPrefix`): two rows
+		// A model row's identity is its LOWERCASED ref, the one its token key hashes (`modelTokenKeyPrefix`): two rows
 		// differing only in case would be two caps on one counter.
 		const id = isModelScope(row.scope) ? row.scope.toLowerCase() : row.scope;
 		if (seen.has(id)) {
@@ -246,17 +249,21 @@ function refuseMixedForms(rows, path) {
 	});
 }
 
-/** A dollar field's value, or the refusal: `parseUsdMicros`'s rules (strings recommended), named by row and field. */
-function usdField(value, field, at, path) {
-	try {
-		return parseUsdMicros(value, field);
-	} catch (error) {
-		throw configError(`${at}: ${error.message}: ${path}`);
+/** A retired dollar field's refusal, naming the upgrade (fail loud, never a silent drop). */
+function retiredDollarField(field, at, path) {
+	throw configError(`${at}: ${field} was retired with the dollar windows: budgets are token-denominated now, so write the row's ${field.replace(/Usd$/, "Tokens")} instead: ${path}`);
+}
+
+/** A token field's value, validated: a whole number of tokens from 1 up (0 would read as "never run"). */
+function tokenField(value, field, at, path) {
+	if (!Number.isSafeInteger(value) || value < 1) {
+		throw configError(`${at}: ${field} must be an integer >= 1 (a whole number of tokens): ${path}`);
 	}
+	return value;
 }
 
 /**
- * A per-model row (version 2): `{ scope: "model:<provider>/<model>", dayUsd?, weekUsd?, monthUsd? }`. The ref follows
+ * A per-model row (version 2+): `{ scope: "model:<provider>/<model>", dayTokens?, weekTokens?, monthTokens? }`. The ref follows
  * the allowed-model list's rule (`splitModelEntry`: split at the first `/`, each half a valid id). `day`, `week`,
  * `month` and `concurrent` are refused here: a model is not a scope a job runs IN, so a job-count cap or a
  * concurrency limit on it would read as enforced while nothing counts it.
@@ -269,16 +276,20 @@ function normalizeModelLimit(row, trimmed, at, path, version) {
 	// could never be told apart from the fold.
 	if (`${ref.provider}/${ref.model}`.toLowerCase() === "other/other") throw configError(`${at}: model:other/other names the usage ledger's fold row, not a model: ${path}`);
 	for (const field of [...LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS]) {
-		if (row[field] !== undefined && row[field] !== null) throw configError(`${at}: a model row carries dayUsd, weekUsd and monthUsd only (${field} is refused): ${path}`);
+		if (row[field] !== undefined && row[field] !== null) throw configError(`${at}: a model row carries dayTokens, weekTokens and monthTokens only (${field} is refused): ${path}`);
 	}
-	const norm = { scope: `${MODEL_SCOPE_PREFIX}${ref.provider}/${ref.model}`, day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: null, monthUsd: null, ...(version >= 3 ? sizeNulls() : {}) };
+	for (const field of RETIRED_DOLLAR_FIELDS) {
+		if (row[field] !== undefined && row[field] !== null) retiredDollarField(field, at, path);
+	}
+	const norm = { scope: `${MODEL_SCOPE_PREFIX}${ref.provider}/${ref.model}`, day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null, ...(version >= 3 ? sizeNulls() : {}) };
 	let any = false;
-	for (const field of USD_LIMIT_FIELDS) {
+	for (const field of TOKEN_LIMIT_FIELDS) {
 		if (row[field] === undefined || row[field] === null) continue;
-		norm[field] = formatMicros(usdField(row[field], field, at, path));
+		if (version < 2) throw configError(`${at}: ${field} needs "version": 2 (this file says ${version}): ${path}`);
+		norm[field] = tokenField(row[field], field, at, path);
 		any = true;
 	}
-	if (!any) throw configError(`${at}: a model row needs at least one of dayUsd, weekUsd, monthUsd: ${path}`);
+	if (!any) throw configError(`${at}: a model row needs at least one of dayTokens, weekTokens, monthTokens: ${path}`);
 	return norm;
 }
 
@@ -292,8 +303,13 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 	// keeps the row valid was dropped, and the project's jobs ran at the default size while the file read as sized.
 	// Versions 1 and 2 keep dropping unknown keys, so a file an older build wrote and reads still loads unchanged.
 	if (version >= 3) {
-		const unknown = Object.keys(row).filter((key) => !V3_ROW_KEYS.has(key));
-		if (unknown.length > 0) throw configError(`${at}: unknown key${unknown.length === 1 ? "" : "s"} ${unknown.map((k) => JSON.stringify(k)).join(", ")} (a version 3 row carries only scope, ${[...LIMIT_FIELDS, ...USD_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS].join(", ")}; keys are case-sensitive): ${path}`);
+		const unknown = Object.keys(row).filter((key) => !V4_ROW_KEYS.has(key));
+		if (unknown.length > 0) throw configError(`${at}: unknown key${unknown.length === 1 ? "" : "s"} ${unknown.map((k) => JSON.stringify(k)).join(", ")} (a version 4 row carries only scope, ${[...LIMIT_FIELDS, ...TOKEN_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS].join(", ")}; keys are case-sensitive): ${path}`);
+	}
+	// The dollar fields are retired fail-loud, in every version: an old file carried real caps, and reading it as
+	// version 4 without them would silently WIDEN every limit it set.
+	for (const field of RETIRED_DOLLAR_FIELDS) {
+		if (row[field] !== undefined && row[field] !== null) retiredDollarField(field, at, path);
 	}
 	const trimmed = row.scope.trim().normalize("NFC"); // the same NFC canonicalScope applies job-side
 	if (isModelScope(trimmed)) return normalizeModelLimit(row, trimmed, at, path, version);
@@ -343,20 +359,20 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 		week: null,
 		month: null,
 		concurrent: null,
-		// Version 2's dollar windows, each the canonical decimal string (`formatMicros`), so the admin's
-		// read-modify-write writes back exactly what the parser accepts. `dollarCapsFor` turns them into integers.
+		// The token windows (version 2's dollar windows' successor), each the integer the parser accepts, so the
+		// admin's read-modify-write writes back exactly what the parser accepts. `tokenCapsFor` reads them as caps.
 		// Only in a version 2 file's rows: a version 1 file reads into exactly the five-key literal it always did.
-		...(version >= 2 ? { dayUsd: null, weekUsd: null, monthUsd: null } : {}),
+		...(version >= 2 ? { dayTokens: null, weekTokens: null, monthTokens: null } : {}),
 		// Version 3's size fields (issue #596), the same way: only in a version 3 file's rows, null unless a project row
 		// sets them, so a version 1 or 2 file reads into exactly the literal it always did.
 		...(version >= 3 ? sizeNulls() : {}),
 	};
 	let any = false;
-	for (const field of USD_LIMIT_FIELDS) {
+	for (const field of TOKEN_LIMIT_FIELDS) {
 		const value = row[field];
 		if (value === undefined || value === null) continue;
 		if (version < 2) throw configError(`${at}: ${field} needs "version": 2 (this file says ${version}): ${path}`);
-		norm[field] = formatMicros(usdField(value, field, at, path));
+		norm[field] = tokenField(value, field, at, path);
 		any = true;
 	}
 	for (const field of LIMIT_FIELDS) {
@@ -378,7 +394,7 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 	// Issue #596: a project row may carry a size and nothing else, so the size fields count as limiting something.
 	if (sizeFields(row, norm, { at, path, version, project: isProjectScope(trimmed) })) any = true;
 	if (!any) {
-		throw configError(`${at}: at least one of day, week, month, concurrent${version >= 2 ? ", dayUsd, weekUsd, monthUsd" : ""}${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
+		throw configError(`${at}: at least one of day, week, month, concurrent${version >= 2 ? ", dayTokens, weekTokens, monthTokens" : ""}${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
 	}
 	return norm;
 }
@@ -445,7 +461,7 @@ export function loadScopedLimits(config, { readFileSync = fsReadFileSync, exists
  */
 export function limitFor(limits, job) {
 	if (!Array.isArray(limits)) return null;
-	// A model row is never a job's scope: it caps a model wherever it runs (`modelDollarRows`). Nor is a project row: it
+	// A model row is never a job's scope: it caps a model wherever it runs (`modelTokenRows`). Nor is a project row: it
 	// applies through the job's project (`projectRowFor`), never because a scope string happens to equal it.
 	const find = (scope) => (isNonEmptyString(scope) ? limits.find((l) => l.scope === scope && !isGroupScope(l.scope)) ?? null : null);
 	if (job?.kind !== "local") {
@@ -458,7 +474,7 @@ export function limitFor(limits, job) {
 /**
  * The scope every per-scope KEY of this job is built from (issue #498): the matched row's scope, or the job's
  * canonical scope when no row matches. The in-process slot, the fleet lease (`slot:s:<hash16>`), and through
- * `budgetCapsFor`/`dollarCapsFor` the job-count and dollar windows all hash this one string. Keyed by the ROW, never
+ * `budgetCapsFor`/`tokenCapsFor` the job-count and token windows all hash this one string. Keyed by the ROW, never
  * the job: a bare `acme/web` row then keeps the exact key it had before qualified scopes existed (its counts carry
  * over, and the admin, which recomputes keys from rows, keeps reading them), and it stays ONE shared cap across
  * forges as written. The boot sweeper already hashes row scopes, so the gate and the sweeper are one rule.
@@ -549,41 +565,41 @@ export function scopedLedgers(job, limits, projectId) {
 	return out;
 }
 
-/** A row's dollar windows as integer micro-dollars `{ day, week, month }`, each null when unset, or null when none is. */
-function usdCaps(row) {
+/** A row's token windows as integers `{ day, week, month }`, each null when unset, or null when none is. */
+function tokenCaps(row) {
 	const caps = {};
-	for (const [field, name] of [["dayUsd", "day"], ["weekUsd", "week"], ["monthUsd", "month"]]) {
-		caps[name] = row?.[field] === null || row?.[field] === undefined ? null : parseUsdMicros(row[field], field);
+	for (const [field, name] of [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]]) {
+		caps[name] = row?.[field] === null || row?.[field] === undefined ? null : row[field];
 	}
 	return caps.day === null && caps.week === null && caps.month === null ? null : caps;
 }
 
 /**
- * The repo or folder dollar windows this job reserves in (issue #501 part 5), or null when its scope's row has none
- * (or there is no row). Ledger-shaped for `reserveDollars`: `{ scope, keyPrefix, caps }`, the caps in integer
- * micro-dollars and `keyPrefix` `budget:usd:s:<hash16>` of the same MATCHED ROW scope the job-count windows hash
- * (issue #498). A sibling of `budgetCapsFor`: the job-count and dollar windows of one row are separate ledgers.
+ * The repo or folder token windows this job reserves in, or null when its scope's row has none
+ * (or there is no row). Ledger-shaped for `reserveTokens`: `{ scope, keyPrefix, caps }`, the caps in integer
+ * tokens and `keyPrefix` `budget:tok:s:<hash16>` of the same MATCHED ROW scope the job-count windows hash
+ * (issue #498). A sibling of `budgetCapsFor`: the job-count and token windows of one row are separate ledgers.
  */
-export function dollarCapsFor(job, limits) {
+export function tokenCapsFor(job, limits) {
 	const row = limitFor(limits, job);
-	const caps = row ? usdCaps(row) : null;
-	return caps === null ? null : { scope: row.scope, keyPrefix: scopeDollarKeyPrefix(row.scope), caps };
+	const caps = row ? tokenCaps(row) : null;
+	return caps === null ? null : { scope: row.scope, keyPrefix: scopeTokenKeyPrefix(row.scope), caps };
 }
 
 /**
- * The project dollar windows this job reserves in (issue #499 part B), or null when its project (resolved at pickup) has
- * no row or the row has no dollar window. Ledger-shaped like `dollarCapsFor`, with `keyPrefix`
- * `scopeDollarKeyPrefix("project:<id>")`: the project row's own scope, the rule every row's key follows, so no second
- * dollar keyspace exists for projects.
+ * The project token windows this job reserves in (issue #499 part B), or null when its project (resolved at pickup) has
+ * no row or the row has no token window. Ledger-shaped like `tokenCapsFor`, with `keyPrefix`
+ * `scopeTokenKeyPrefix("project:<id>")`: the project row's own scope, the rule every row's key follows, so no second
+ * token keyspace exists for projects.
  */
-export function projectDollarCapsFor(limits, projectId) {
+export function projectTokenCapsFor(limits, projectId) {
 	const row = projectRowFor(limits, projectId);
-	const caps = row ? usdCaps(row) : null;
-	return caps === null ? null : { scope: row.scope, keyPrefix: scopeDollarKeyPrefix(row.scope), caps };
+	const caps = row ? tokenCaps(row) : null;
+	return caps === null ? null : { scope: row.scope, keyPrefix: scopeTokenKeyPrefix(row.scope), caps };
 }
 
 /**
- * The model dollar windows this job reserves in (issue #502 part 6), as ledgers `{ ref, keyPrefix, caps }` in file
+ * The model token windows this job reserves in (issue #502 part 6), as ledgers `{ ref, keyPrefix, caps }` in file
  * order, where `ref` is the row's lowercased `provider/model`. `models` is the job's EFFECTIVE allowed-model list:
  *   - a list reserves in the rows of its listed models, compared ignoring case (the ledger lowercases ids, so the
  *     row and the usage row it settles from meet in lowercase);
@@ -592,7 +608,7 @@ export function projectDollarCapsFor(limits, projectId) {
  *     This fails closed: an unrestricted job is refused when any model window is full, and the remedy is a list.
  * A job that reserves nothing at all (the zero-reservation rule, the processor's) reserves in none of these either.
  */
-export function modelDollarRows(limits, models) {
+export function modelTokenRows(limits, models) {
 	if (!Array.isArray(limits)) return [];
 	const rows = limits.filter((l) => isModelScope(l?.scope));
 	let wanted = null;
@@ -601,29 +617,29 @@ export function modelDollarRows(limits, models) {
 	for (const row of rows) {
 		const ref = row.scope.slice(MODEL_SCOPE_PREFIX.length).toLowerCase();
 		if (wanted !== null && !wanted.has(ref)) continue;
-		const caps = usdCaps(row);
-		if (caps !== null) out.push({ ref, keyPrefix: modelDollarKeyPrefix(ref), caps });
+		const caps = tokenCaps(row);
+		if (caps !== null) out.push({ ref, keyPrefix: modelTokenKeyPrefix(ref), caps });
 	}
 	return out;
 }
 
-/** A row's kind for the dollar advisories: `model`, `project` (issue #499 part B) or `scope` (a repo or folder). */
+/** A row's kind for the token advisories: `model`, `project` (issue #499 part B) or `scope` (a repo or folder). */
 function rowKind(scope) {
 	return isModelScope(scope) ? "model" : isProjectScope(scope) ? "project" : "scope";
 }
 
 /**
- * The rows that carry a dollar window, as `[{ index, kind }]` (`kind` is `scope`, `project` or `model`), when the deployment has
- * NO per-job cap (`deploymentMaxCostUsd` null or undefined: env and overlay merged by the caller), else `[]` (PR #549's
+ * The rows that carry a token window, as `[{ index, kind }]` (`kind` is `scope`, `project` or `model`), when the deployment has
+ * NO per-job budget (`deploymentMaxTokens` null or undefined: env and overlay merged by the caller), else `[]` (PR #549's
  * review). Such a row refuses every job it applies to as `config-refused` unless the job's trigger sets its own
- * `run.maxCostUsd`, so the worker and doctor WARN, never refuse: a trigger may legitimately supply the cap. Index and
+ * `run.maxTokens`, so the worker and doctor WARN, never refuse: a trigger may legitimately supply the budget. Index and
  * kind only, never the scope string (a folder scope is a host path).
  */
-export function dollarRowsWithoutCap(limits, deploymentMaxCostUsd) {
-	if (deploymentMaxCostUsd !== null && deploymentMaxCostUsd !== undefined) return [];
+export function tokenRowsWithoutCap(limits, deploymentMaxTokens) {
+	if (deploymentMaxTokens !== null && deploymentMaxTokens !== undefined) return [];
 	const out = [];
 	(limits ?? []).forEach((row, index) => {
-		if (USD_LIMIT_FIELDS.some((f) => row?.[f] !== null && row?.[f] !== undefined)) out.push({ index, kind: rowKind(row.scope) });
+		if (TOKEN_LIMIT_FIELDS.some((f) => row?.[f] !== null && row?.[f] !== undefined)) out.push({ index, kind: rowKind(row.scope) });
 	});
 	return out;
 }
@@ -634,14 +650,13 @@ export function dollarRowsWithoutCap(limits, deploymentMaxCostUsd) {
  * until the cap is raised or the per-job cap lowered (a trigger's smaller `run.maxCostUsd` still fits). Doctor names
  * them; `[]` when no deployment cap is set or none is below it.
  */
-export function dollarRowsBelowJobCap(limits, deploymentMaxCostUsd) {
-	if (deploymentMaxCostUsd === null || deploymentMaxCostUsd === undefined) return [];
-	const jobCap = parseUsdMicros(deploymentMaxCostUsd, "maxCostUsd");
+export function tokenRowsBelowJobCap(limits, deploymentMaxTokens) {
+	if (deploymentMaxTokens === null || deploymentMaxTokens === undefined) return [];
 	const out = [];
 	(limits ?? []).forEach((row, index) => {
-		for (const [field, window] of [["dayUsd", "day"], ["weekUsd", "week"], ["monthUsd", "month"]]) {
+		for (const [field, window] of [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]]) {
 			if (row?.[field] === null || row?.[field] === undefined) continue;
-			if (parseUsdMicros(row[field], field) < jobCap) out.push({ index, kind: rowKind(row.scope), window });
+			if (row[field] < deploymentMaxTokens) out.push({ index, kind: rowKind(row.scope), window });
 		}
 	});
 	return out;
@@ -659,7 +674,7 @@ export function scopedLimitsVersionFor(rows) {
 	if ((rows ?? []).some((l) => SIZE_LIMIT_FIELDS.some((f) => l?.[f] !== null && l?.[f] !== undefined))) return 3;
 	const v2 = (rows ?? []).some((l) => {
 		const scope = typeof l?.scope === "string" ? l.scope.trim() : l?.scope;
-		return isModelScope(scope) || isProjectScope(scope) || isQualifiedScope(scope) || USD_LIMIT_FIELDS.some((f) => l?.[f] !== null && l?.[f] !== undefined);
+		return isModelScope(scope) || isProjectScope(scope) || isQualifiedScope(scope) || TOKEN_LIMIT_FIELDS.some((f) => l?.[f] !== null && l?.[f] !== undefined);
 	});
 	return v2 ? 2 : 1;
 }
@@ -711,24 +726,24 @@ export function scopeKeyPrefix(scope) {
 	return `budget:s:${hash16(scope)}`;
 }
 
-/** A repo or folder's DOLLAR key prefix: `budget:usd:s:<hash16(scope)>`, the same hash as `scopeKeyPrefix`. */
-export function scopeDollarKeyPrefix(scope) {
-	return `${SCOPE_DOLLAR_KEY_PREFIX}:${hash16(scope)}`;
+/** A repo or folder's TOKEN key prefix: `budget:tok:s:<hash16(scope)>`, the same hash as `scopeKeyPrefix`. */
+export function scopeTokenKeyPrefix(scope) {
+	return `${SCOPE_TOKEN_KEY_PREFIX}:${hash16(scope)}`;
 }
 
 /**
- * A model's DOLLAR key prefix: `budget:usd:mdl:<hash16(lowercase provider/model)>`. LOWERCASED before hashing,
+ * A model's TOKEN key prefix: `budget:tok:mdl:<hash16(lowercase provider/model)>`. LOWERCASED before hashing,
  * because the run record's ledger lowercases ids (`parseExitUsage`) and a model row settles from that ledger: one
  * model must be one counter whatever case a row, a list or the runner spells it in. `ref` is `provider/model`,
  * without the `model:` prefix.
  */
-export function modelDollarKeyPrefix(ref) {
-	return `${MODEL_DOLLAR_KEY_PREFIX}:${hash16(String(ref).toLowerCase())}`;
+export function modelTokenKeyPrefix(ref) {
+	return `${MODEL_TOKEN_KEY_PREFIX}:${hash16(String(ref).toLowerCase())}`;
 }
 
-/** The dollar key prefix of one normalized row, scope or model: what the admin reads its counters under. */
-export function dollarKeyPrefixFor(row) {
-	return isModelScope(row?.scope) ? modelDollarKeyPrefix(row.scope.slice(MODEL_SCOPE_PREFIX.length)) : scopeDollarKeyPrefix(row?.scope);
+/** The token key prefix of one normalized row, scope or model: what the admin reads its counters under. */
+export function tokenKeyPrefixFor(row) {
+	return isModelScope(row?.scope) ? modelTokenKeyPrefix(row.scope.slice(MODEL_SCOPE_PREFIX.length)) : scopeTokenKeyPrefix(row?.scope);
 }
 
 /**

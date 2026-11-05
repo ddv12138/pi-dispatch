@@ -6,7 +6,7 @@ import { triggerListOf, recordMatchesTrigger, scheduledOccurrences, quietInterva
 const NOW = Date.UTC(2026, 9, 30, 12);
 const DAY = 86400_000;
 const rule = (over = {}) => ({ index: 0, type: "label", forge: "github", flow: "fix", any: ["pi"], ...over });
-const record = (over = {}) => ({ jobId: "gh-a", kind: "github", triggerIndex: 0, triggerType: "label", flow: "fix", startedAt: new Date(NOW - 3600_000).toISOString(), endedAt: new Date(NOW - 3000_000).toISOString(), outcome: "completed", provider: "provider", model: "model", tokens: { cost: 0.25, metered: true, input: 1, output: 1, total: 2, calls: 1 }, ...over });
+const record = (over = {}) => ({ jobId: "gh-a", kind: "github", triggerIndex: 0, triggerType: "label", flow: "fix", startedAt: new Date(NOW - 3600_000).toISOString(), endedAt: new Date(NOW - 3000_000).toISOString(), outcome: "completed", provider: "provider", model: "model", tokens: { metered: true, input: 1, output: 1, total: 2, calls: 1 }, ...over });
 const snapshot = (triggers = [rule()], extra = {}) => ({ triggers: { triggers, count: triggers.length }, schedulers: [], pauseWindows: { windows: [] }, ...extra });
 const build = (extra = {}) => triggerListOf({ snapshot: snapshot(), records: [], coverage: { complete: true }, now: NOW, ...extra });
 
@@ -29,7 +29,8 @@ test("statistics use the 30-day range and separate UTC Monday spend from the rol
   const got = build({ records });
   assert.equal(got.rows[0].stats.runs30d, 2);
   assert.equal(got.rows[0].stats.weekRuns, 1);
-  assert.equal(got.rows[0].stats.weekCostMicros, 250000);
+  assert.equal(got.rows[0].stats.weekCostTokens, 2);
+  assert.deepEqual(got.rows[0].stats.weekCost, { tokens: 2, class: "metered", floor: false });
   assert.equal(got.rows[0].stats.costIncomplete, false, "the older duplicate must not overwrite the current metered record");
   assert.equal(got.rows[0].lastRun.jobId, "gh-a");
   assert.equal(got.rows[0].stats.incomplete, false);
@@ -41,7 +42,8 @@ test("statistics use the 30-day range and separate UTC Monday spend from the rol
 test("missing history stays unknown, a retained or cut view is a lower bound, and missing configuration is not zero rules", () => {
   const missing = build({ records: null });
   assert.equal(missing.rows[0].stats.runs30d, null);
-  assert.equal(missing.stats.weekCostMicros, null);
+  assert.equal(missing.stats.weekCostTokens, null);
+  assert.equal(missing.stats.weekCost, null);
   assert.equal(missing.coverage.complete, false);
   const retained = build({ records: [record()], coverage: {} });
   assert.equal(retained.rows[0].stats.incomplete, true);
@@ -55,17 +57,15 @@ test("missing history stays unknown, a retained or cut view is a lower bound, an
   assert.equal(unavailable.counts.schedule, null);
 });
 
-test("weekly spend keeps subscription classes and unknown cost separate from exact free refusals", () => {
-  const got = build({ records: [record({ jobId: "paid" }), record({ jobId: "plan", provider: "plan-provider" }), record({ jobId: "unknown", tokens: null }), record({ jobId: "free", tokens: null, exitCode: null, budgetReserved: false })], subscriptions: [{ id: "team", provider: "plan-provider", models: ["*"] }] });
-  assert.equal(got.stats.weekRuns, 4);
-  assert.equal(got.stats.weekCostMicros, 250000);
+test("weekly spend demotes an unknown run to estimated with a floor, and a free refusal stays an exact 0", () => {
+  const got = build({ records: [record({ jobId: "paid" }), record({ jobId: "unknown", tokens: null }), record({ jobId: "free", tokens: null, exitCode: null, budgetReserved: false })] });
+  assert.equal(got.stats.weekRuns, 3);
+  assert.equal(got.stats.weekCostTokens, 2);
   assert.equal(got.stats.costIncomplete, true);
-  assert.equal(got.stats.weekCost.floor, true);
-  const plan = build({ records: [record({ provider: "plan-provider" })], subscriptions: [{ id: "team", provider: "plan-provider", models: ["*"] }] });
-  assert.equal(plan.stats.weekCost.class, "plan");
-  assert.equal(plan.stats.weekCost.planId, "team");
+  assert.deepEqual(got.stats.weekCost, { tokens: 2, class: "estimated", floor: true, coverage: 0.5 });
   const free = build({ records: [record({ tokens: null, exitCode: null, budgetReserved: false })] });
-  assert.equal(free.stats.weekCostMicros, 0);
+  assert.equal(free.stats.weekCostTokens, 0);
+  assert.deepEqual(free.stats.weekCost, { tokens: 0, class: "metered", floor: false });
   assert.equal(free.stats.costIncomplete, false);
 });
 
@@ -235,14 +235,14 @@ test("portfolio run option survives the safe rule projection and explains its bu
   assert.ok(!ordinary.rows[0].chips.some(chip => chip.text === "budget split"));
 });
 
-test("fractional reviewed dollar caps survive projection while invalid money is excluded", () => {
-  const got = build({ snapshot: snapshot([rule({ maxCostUsd: 0.25, gateBudgetRaiseUsd: 0.5 })]) });
-  assert.equal(got.rows[0].trigger.maxCostUsd, 0.25);
-  assert.equal(got.rows[0].trigger.gateBudgetRaiseUsd, 0.5);
+test("reviewed token caps survive projection while invalid counts are excluded", () => {
+  const got = build({ snapshot: snapshot([rule({ maxTokens: 250000, gateBudgetRaiseTokens: 500000 })]) });
+  assert.equal(got.rows[0].trigger.maxTokens, 250000);
+  assert.equal(got.rows[0].trigger.gateBudgetRaiseTokens, 500000);
   assert.ok(got.rows[0].chips.some(chip => chip.kind === "narrows"));
-  for (const value of [-0.5, Infinity, NaN, "0.5"]) {
-    const invalid = build({ snapshot: snapshot([rule({ maxCostUsd: value, gateBudgetRaiseUsd: value })]) });
-    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "maxCostUsd"));
-    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "gateBudgetRaiseUsd"));
+  for (const value of [-0.5, Infinity, NaN, "500000"]) {
+    const invalid = build({ snapshot: snapshot([rule({ maxTokens: value, gateBudgetRaiseTokens: value })]) });
+    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "maxTokens"));
+    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "gateBudgetRaiseTokens"));
   }
 });

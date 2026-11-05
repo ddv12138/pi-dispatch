@@ -39,24 +39,35 @@ METERED = [r for r in RUNS if r[7] is not None]
 def in24h(r):
     return (r[0] == "08") or (r[0] == "07" and r[1] >= "15:39")
 M24 = [r for r in METERED if in24h(r)]
-COST24 = round(sum(r[7] for r in M24), 2)                      # 6.13
+# Token era (DES-TOKEN-RESERVE-AND-SETTLE): the demo data is whole tokens, the ladder is fmtTokens's.
+# A run's TOKENS ride in column 7 (was its dollar cost); windows are budgets, not caps.
+TOK = lambda r: round(r[7] * 1_000_000) if r[7] is not None else None
+COST24 = sum(TOK(r) for r in M24)                                # 6_130_000
 TOK24_METERED = sum(r[6] for r in M24)                          # metered tokens in 24h
-AVG24 = COST24 / len(M24)
-TODAY_METERED = round(sum(r[7] for r in METERED if r[0] == "08"), 2)   # 5.23
-OCT7 = round(sum(r[7] for r in METERED if r[0] == "07"), 2)           # 5.25
-RUNNING_HOLDS = [2.00, 2.00, 2.00, 3.81]  # sample actual reservations, not a counter difference
-HELD = round(sum(RUNNING_HOLDS), 2)
-MONTUE = round(33.07 - 15.04 - OCT7, 2)
+AVG24 = COST24 // len(M24)
+TODAY_METERED = sum(TOK(r) for r in METERED if r[0] == "08")     # 5_230_000
+OCT7 = sum(TOK(r) for r in METERED if r[0] == "07")              # 5_250_000
+RUNNING_HOLDS = [2_000_000, 2_000_000, 2_000_000, 3_810_000]  # sample actual reservations, not a counter difference
+HELD = sum(RUNNING_HOLDS)
+MONTUE = 33_070_000 - 15_040_000 - OCT7
 
-def money(v): return f"${v:,.2f}"
+def money(v): return fmt_tokens(v)
+def fmt_tokens(n):
+    """panel.mjs fmtTokens's ladder (DES-OPERATOR-CONSOLE): <=6 chars at any magnitude."""
+    if n is None or n < 0: return "-"
+    if n < 1_000: return str(round(n))
+    if n < 10_000: return f"{n // 100 / 10:.1f}k"
+    if n < 1_000_000: return f"{n // 1_000}k"
+    if n < 1e9: return f"{n / 1e6:.2f}M"
+    return f"{n / 1e9:.2f}B"
 def by(key):
     out = {}
     for r in METERED:
-        out[key(r)] = out.get(key(r), 0) + r[7]
+        out[key(r)] = out.get(key(r), 0) + TOK(r)
     return sorted(out.items(), key=lambda kv: -kv[1])
 BY_FLOW = by(lambda r: r[4])
 BY_PROJECT = by(lambda r: r[3])
-SONNET = round(sum(r[7] for r in METERED), 2)
+SONNET = sum(TOK(r) for r in METERED)
 KIMI_TOK = sum(r[6] for r in RUNS if r[5] == "kimi")
 NRUNS = len(METERED)
 
@@ -85,52 +96,53 @@ def hbars(rows, unit=money, maxv=None, note=""):
     return f'<ul class="sp-hbars">{"".join(out)}</ul>{f"<p class=sp-note>{note}</p>" if note else ""}'
 
 # ============================================================ SPEND
-DAYS = [("Fri 2", 4.88, 0, True), ("Sat 3", 0.31, 0, True), ("Sun 4", 0.00, 0, True), ("Mon 5", round(MONTUE - 6.16, 2), 0, True),
-        ("Tue 6", 6.16, 0, True), ("Wed 7", OCT7, 0, False), ("Thu 8", TODAY_METERED, HELD, False)]
+DAYS = [("Fri 2", round((MONTUE - 6_160_000) / 1), 0, True), ("Sat 3", 310_000, 0, True), ("Sun 4", 0, 0, True), ("Mon 5", 6_160_000, 0, True),
+        ("Tue 6", 6_160_000, 0, True), ("Wed 7", OCT7, 0, False), ("Thu 8", TODAY_METERED, HELD, False)]
+DAYS[0] = ("Fri 2", MONTUE - 6_160_000, 0, True)
 def spend_chart():
     H, top, plot = 230, 22, 170  # plot from y=top to y=top+plot
-    cap = 25.0
+    cap = 25_000_000
     def y(v): return top + plot - v / cap * plot
-    s = [f'<svg class="sp-chart" height="{H}" role="img" aria-label="Spend per day for 7 days against the $25.00 daily cap: today $15.04 spent and held">']
-    s.append(f'<line class="sp-cap" x1="0" x2="100%" y1="{y(cap):.1f}" y2="{y(cap):.1f}"/><text class="sp-ll" x="100%" y="{y(cap)-6:.1f}" text-anchor="end">daily cap $25.00</text>')
+    s = [f'<svg class="sp-chart" height="{H}" role="img" aria-label="Tokens per day for 7 days against the 25.00M daily budget: today {fmt_tokens(15_040_000)} reserved and held">']
+    s.append(f'<line class="sp-cap" x1="0" x2="100%" y1="{y(cap):.1f}" y2="{y(cap):.1f}"/><text class="sp-ll" x="100%" y="{y(cap)-6:.1f}" text-anchor="end">daily budget {fmt_tokens(cap)}</text>')
     s.append(f'<line class="sp-base" x1="0" x2="100%" y1="{top+plot}" y2="{top+plot}"/>')
     n = len(DAYS)
     for i, (d, v, held, sample) in enumerate(DAYS):
         cx = (i + .5) / n * 100; w = 7.5
         x = cx - w / 2
         if v > 0:
-            s.append(f'<rect class="sp-bar{" sp-bar--today" if held else ""}" x="{x:.2f}%" y="{y(v):.1f}" width="{w}%" height="{v/cap*plot:.1f}" rx="8"><title>{d}: {money(v)} metered</title></rect>')
+            s.append(f'<rect class="sp-bar{" sp-bar--today" if held else ""}" x="{x:.2f}%" y="{y(v):.1f}" width="{w}%" height="{v/cap*plot:.1f}" rx="8"><title>{d}: {money(v)} settled</title></rect>')
         if held:
             s.append(f'<rect class="sp-held" x="{x:.2f}%" y="{y(v+held):.1f}" width="{w}%" height="{held/cap*plot:.1f}" rx="8"><title>{d}: {money(held)} held for running jobs</title></rect>')
         tot = v + held
         s.append(f'<text class="sp-v" x="{cx:.2f}%" y="{y(tot)-7:.1f}" text-anchor="middle">{money(tot)}</text>')
         s.append(f'<text class="sp-d{" sp-d--now" if held else ""}" x="{cx:.2f}%" y="{H-6}" text-anchor="middle">{d}</text>')
     s.append("</svg>")
-    key = ('<p class="keyrow"><span><i class="sp-k sp-k--bar"></i>Metered</span><span><i class="sp-k sp-k--held"></i>Held for running jobs, released when they settle</span>'
+    key = ('<p class="keyrow"><span><i class="sp-k sp-k--bar"></i>Settled</span><span><i class="sp-k sp-k--held"></i>Held for running jobs, released when they settle</span>'
            '</p>')
     return "".join(s) + key
 
 def hist():
-    costs = [r[7] for r in METERED]
-    bins = [0] * 10  # $0.00 .. $0.50 in $0.05 steps
+    costs = [TOK(r) for r in METERED]
+    bins = [0] * 10  # 0 .. 500k tokens in 50k steps
     for c in costs:
-        bins[min(int(c / 0.05), 9)] += 1
+        bins[min(int(c / 50_000), 9)] += 1
     mx = max(bins)
     H, top, plot = 150, 16, 104
-    s = [f'<svg class="sp-hist" height="{H}" role="img" aria-label="Cost per run for {len(costs)} runs: most between $0.15 and $0.30, largest $0.48; the job cap is $2.00">']
-    span = 78  # percent of width used by $0.00-$0.50
+    s = [f'<svg class="sp-hist" height="{H}" role="img" aria-label="Tokens per run for {len(costs)} runs: most between 150k and 300k, largest 480k; the job budget is 2.00M">']
+    span = 78  # percent of width used by 0-500k
     for i, n in enumerate(bins):
         if not n: continue
         x = i / 10 * span + .6; w = span / 10 - 1.2
         h = n / mx * plot
-        s.append(f'<rect class="sp-hbin" x="{x:.2f}%" y="{top+plot-h:.1f}" width="{w:.2f}%" height="{h:.1f}" rx="5"><title>${i*0.05:.2f} to ${(i+1)*0.05:.2f}: {n} runs</title></rect>')
+        s.append(f'<rect class="sp-hbin" x="{x:.2f}%" y="{top+plot-h:.1f}" width="{w:.2f}%" height="{h:.1f}" rx="5"><title>{i*50_000:,} to {(i+1)*50_000:,}: {n} runs</title></rect>')
         s.append(f'<text class="sp-v" x="{x + w/2:.2f}%" y="{top+plot-h-5:.1f}" text-anchor="middle">{n}</text>')
     s.append(f'<line class="sp-base" x1="0" x2="{span}%" y1="{top+plot}" y2="{top+plot}"/>')
-    for i, lab in [(0, "$0.00"), (4, "$0.20"), (8, "$0.40")]:
+    for i, lab in [(0, "0"), (4, "200k"), (8, "400k")]:
         s.append(f'<text class="sp-d" x="{i/10*span:.2f}%" y="{top+plot+18}">{lab}</text>')
     s.append(f'<text class="sp-gap" x="{span+5:.1f}%" y="{top+plot+4}" text-anchor="middle">…</text>')
     s.append(f'<line class="sp-capline" x1="95%" x2="95%" y1="{top}" y2="{top+plot}"/>')
-    s.append(f'<text class="sp-ll sp-ll--cap" x="95%" dx="-6" y="{top+10}" text-anchor="end">job cap</text><text class="sp-d" x="95%" y="{top+plot+18}" text-anchor="middle">$2.00</text>')
+    s.append(f'<text class="sp-ll sp-ll--cap" x="95%" dx="-6" y="{top+10}" text-anchor="end">job budget</text><text class="sp-d" x="95%" y="{top+plot+18}" text-anchor="middle">2.00M</text>')
     s.append("</svg>")
     return "".join(s)
 
@@ -182,13 +194,13 @@ def spend_body():
 </div>"""
     over = card("Spend over time", spend_chart(), sub="per day, against the daily cap", id_="p-over")
     cost3 = f"""<div class="cards-3">
-  {card("By flow", hbars([(f'<b>{f}</b>', v, '') for f, v in BY_FLOW]), sub="metered", id_="p-byflow")}
-  {card("By model", hbars([('<b>claude-sonnet-5-5</b>', SONNET, f'{NRUNS} runs, metered'), ('<b>claude-haiku-5-5</b>', 0.06, '1 run, pm-weekly'), ('<b>kimi-for-coding</b>', 0.0, '2 runs on plan:kimi')], unit=lambda v: money(v) if v else 'plan'), id_="p-bymodel")}
-  {card("By project", hbars([(tag(p), v, '') for p, v in BY_PROJECT] + [(tag('ops'), 0.0, 'tidy, on plan')], unit=lambda v: money(v) if v else 'plan'), id_="p-byproject")}
+  {card("By flow", hbars([(f'<b>{f}</b>', v, '') for f, v in BY_FLOW]), sub="settled", id_="p-byflow")}
+  {card("By model", hbars([('<b>claude-sonnet-5-5</b>', SONNET, f'{NRUNS} runs, metered'), ('<b>claude-haiku-5-5</b>', 60_000, '1 run, pm-weekly'), ('<b>kimi-for-coding</b>', 0, '2 runs on the plan')], unit=lambda v: money(v) if v else '—'), id_="p-bymodel")}
+  {card("By project", hbars([(tag(p), v, '') for p, v in BY_PROJECT] + [(tag('ops'), 0, 'tidy, on the plan')], unit=lambda v: money(v) if v else '—'), id_="p-byproject")}
 </div>
 <p class="sp-note sp-note--wide">Cost by flow, model and project counts the {NRUNS} metered runs listed since Tue 6 Oct, 15:11 UTC: the first page of Runs.</p>"""
-    sizes = card("Job sizes", hist() + f'<p class="sp-note">While a dollar window is set, each non-zero-rated run reserves its job cap; the largest of these {len(METERED)} runs used <b>$0.48</b>.</p>',
-                 sub="cost per run", id_="p-sizes", end=btn("Change job cap", "", "config"))
+    sizes = card("Job sizes", hist() + f'<p class="sp-note">While a token window is set, each job reserves its per-job budget; the largest of these {len(METERED)} runs used <b>480k</b>.</p>',
+                 sub="tokens per run", id_="p-sizes", end=btn("Change job budget", "", "config"))
     left = f'<div class="stack">{over}{cost3}{sizes}{card("Budget split", split(), sub="this week", id_="p-split")}</div>'
     right = f'<div class="stack">{caps_card()}{card("What if", whatif(), sub="another model, the same runs", id_="p-whatif")}{card("Metered and plan", metered_plan(), sub="last 24 hours", id_="p-plan")}</div>'
     return kpis + f'<div class="cols">{left}{right}</div>'
@@ -399,7 +411,7 @@ READMES = {
 - **Four big numbers:** this week against its cap; today against its cap, split into metered and held; tokens today; and the average cost per run.
 - **Spend over time.** Daily settled bars against the $25.00 daily cap. Today's bar shows the money held for running jobs as a dashed top: it is released when they settle.
 - **Where it went.** Cost by flow, by model and by project, in one hue with values written out.
-- **Job sizes.** A histogram of cost per run against the $2.00 job cap, with how much the largest run used.
+- **Job sizes.** A histogram of tokens per run against the 2.00M job budget, with how much the largest run used.
 - **Right column:**
   - *Caps*: every window, with the 80% tick on job windows only;
   - *What if*: pick another model and see the same runs' estimated cost;

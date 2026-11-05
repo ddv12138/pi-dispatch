@@ -513,7 +513,7 @@ test("the #507 cells go through the gate: a run's plan and dollars, an allocatio
 	const flush = () => new Promise((r) => setImmediate(r));
 	const deps = (over) => ({ fetchSnapshot: async () => ({ queue: { counts: {} } }), pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => 0, ...over });
 	// A record file is read back from disk, so its plan and dollars are held to the gate like every record string.
-	const run = { jobId: "j1", target: "o/r#5", flow: "fix", outcome: "completed", turns: 1, plan: { outcome: "refused\u001b[2J", reason: "plan-stale\u001b[31m", planId: "abc\u0007", clamped: true }, dollars: { settledMicros: 1, basis: "metered\u001b]52;c;Zm9v\u0007" } };
+	const run = { jobId: "j1", target: "o/r#5", flow: "fix", outcome: "completed", turns: 1, plan: { outcome: "refused\u001b[2J", reason: "plan-stale\u001b[31m", planId: "abc\u0007", clamped: true }, tokensWindows: { settledTokens: 1, basis: "metered\u001b]52;c;Zm9v\u0007" } };
 	const detail = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: deps({ fetchSnapshot: async () => ({ queue: { counts: {} }, runs: [run] }) }) });
 	await flush();
 	detail.handleInput("\r");
@@ -523,7 +523,7 @@ test("the #507 cells go through the gate: a run's plan and dollars, an allocatio
 	for (const l of lines) assert.ok(!hasControls(l), `a run-detail line carries a control byte: ${JSON.stringify(l)}`);
 	const row = (label) => lines.map((l) => l.trim()).find((l) => l.startsWith(`│ ${label} `));
 	assert.equal(row("plan"), `│ ${"plan".padEnd(12)} ${"refused [2J plan-stale [31m · clamped · abc ".padEnd(53)} │`);
-	assert.equal(row("dollars"), `│ ${"dollars".padEnd(12)} ${"settled $0.000001 (metered ]52;c;Zm9v )".padEnd(53)} │`);
+	assert.equal(row("dollars"), `│ ${"dollars".padEnd(12)} ${"settled 1 (metered ]52;c;Zm9v )".padEnd(53)} │`);
 	// Under a theme the pane gate keeps SGR, because the styler emits it, so a data SGR (here the C1 CSI form) is stopped
 	// only where the field enters the renderer: `show`, per field. The raw line must carry the styler's escapes alone.
 	const theme = { fg: (_c, t) => `\x1b[38;5;42m${t}\x1b[39m`, bold: (t) => `\x1b[1m${t}\x1b[22m`, bg: (_c, t) => t };

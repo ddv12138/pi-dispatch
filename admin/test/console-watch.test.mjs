@@ -149,13 +149,13 @@ test("cooldown uses the injected snapshot clock and never invents an expiry", ()
   assert.equal(cooldownLeft({}, { cooldownMs: 6000 }, now), null);
 });
 
-test("model totals count retained decisions, distinguish unrecorded prices and declare truncation floors", () => {
-  const findings = [{ decision: { model: "openrouter/classifier", action: "ignore", costUsd: 0.001 } }, { decision: { model: "openrouter/classifier", action: "file_issue" } }, { decision: { model: "bad model text", action: "ignore", costUsd: 100 } }];
-  assert.deepEqual(decisionTotals(findings), [{ model: "openrouter/classifier", count: 2, costUsd: 0.001, unpriced: 1, investigate: 0, file_issue: 1, ignore: 1 }]);
+test("model totals count retained decisions, distinguish unrecorded token counts and declare truncation floors", () => {
+  const findings = [{ decision: { model: "openrouter/classifier", action: "ignore", tokensTotal: 1000 } }, { decision: { model: "openrouter/classifier", action: "file_issue" } }, { decision: { model: "bad model text", action: "ignore", tokensTotal: 900000 } }];
+  assert.deepEqual(decisionTotals(findings), [{ model: "openrouter/classifier", count: 2, tokens: 1000, uncounted: 1, investigate: 0, file_issue: 1, ignore: 1 }]);
   const output = String(watchBoardPanel(view({ board, findings: [...findings, ...Array.from({ length: 997 }, () => ({}))] })));
   assert.match(output, /This is a floor/);
-  assert.match(output, /known spend \$0.001000/);
-  assert.match(output, /1 without a recorded cost/);
+  assert.match(output, /1,000 tokens/);
+  assert.match(output, /1 without a recorded count/);
 });
 
 
@@ -208,17 +208,17 @@ test("viewers get structural board counts and no agent-authored numeric values",
   assert.ok(!output.includes("123456789") && !output.includes("987654321"));
 });
 
-test("trace shows a chosen action beside status, reviewed model, actual cost, time and query counts", () => {
-  const data = { board, trace: [{ kind: "decide", status: "answered", action: "investigate", model: "openrouter/typesafe/jev-1.13", modelReviewed: true, costUsd: 0.00002, at: 1000 }, { kind: "query", status: "completed", rows: 37, usage: { cost: 0.001 } }] };
+test("trace shows a chosen action beside status, reviewed model, the tokens it spent, time and query counts", () => {
+  const data = { board, trace: [{ kind: "decide", status: "answered", action: "investigate", model: "openrouter/typesafe/jev-1.13", modelReviewed: true, tokensTotal: 20000, at: 1000 }, { kind: "query", status: "completed", rows: 37, usage: { tokensTotal: 1000 } }] };
   const viewer = String(watchBoardPanel(view(data)));
-  for (const text of ["answered; chose investigate", "model openrouter/typesafe/jev-1.13", "cost $0.000020", "1970-01-01T00:00:01.000Z", "37 rows"]) assert.ok(viewer.includes(text), text);
+  for (const text of ["answered; chose investigate", "model openrouter/typesafe/jev-1.13", "20,000 tokens", "1970-01-01T00:00:01.000Z", "37 rows"]) assert.ok(viewer.includes(text), text);
   assert.ok(!viewer.includes("usage"));
   const operator = String(watchBoardPanel(view(data, "operator")));
-  assert.ok(operator.includes("usage") && operator.includes("0.001"));
+  assert.ok(operator.includes("usage") && operator.includes("1000"));
 });
 
 test("public trace rendering rejects malformed scalar metadata even from a private-loaded entry", () => {
-  const data = { board, trace: [{ kind: "decide", status: PRIVATE, action: PRIVATE, model: "PRIVATE-MODEL", modelReviewed: false, costUsd: PRIVATE, rows: PRIVATE, at: PRIVATE, confidence: PRIVATE, probabilities: { secret: PRIVATE } }] };
+  const data = { board, trace: [{ kind: "decide", status: PRIVATE, action: PRIVATE, model: "PRIVATE-MODEL", modelReviewed: false, tokensTotal: PRIVATE, rows: PRIVATE, at: PRIVATE, confidence: PRIVATE, probabilities: { secret: PRIVATE } }] };
   for (const role of ["viewer", "operator"]) {
     const output = String(watchBoardPanel(view(data, role)));
     assert.ok(!output.includes("PRIVATE-MODEL"));

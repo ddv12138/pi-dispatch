@@ -9,14 +9,14 @@ import { test } from "node:test";
 import { FAILOVER_PRICED_APIS, MODEL_COOLDOWN_MAX_MS, checkFailoverCandidate, failoverEgressRequired, failoverModelView, markModelCooldown, modelCooldownKey, readModelAttempt, readModelCooldown, readModelCooldowns, selectFailoverJob, writeModelAttempt } from "../src/model-failover.mjs";
 import { makeProcessor } from "../src/index.mjs";
 import { parseExitProviderFailure, parseExitReplaySafe, parseExitToolsStarted, buildRecord, makeLogSink } from "../src/run-history.mjs";
-import { modelDollarRows, parseScopedLimits, makeInFlight } from "../src/scoped-limits.mjs";
+import { modelTokenRows, parseScopedLimits, makeInFlight } from "../src/scoped-limits.mjs";
 import { dayKey } from "../src/budget.mjs";
 import { makeCollectChain } from "../src/outbox.mjs";
 
 const NOW = Date.parse("2026-10-28T12:00:00Z");
 const primary = "openai/primary";
 const fallback = "anthropic/fallback";
-const job = () => ({ kind: "github", repo: "org/repo", provider: "openai", model: "primary", models: [primary, fallback], fallbackModels: [fallback], maxCostMicros: 100 });
+const job = () => ({ kind: "github", repo: "org/repo", provider: "openai", model: "primary", models: [primary, fallback], fallbackModels: [fallback], maxTokens: 100 });
 function fakeRedis() {
 	const store = new Map();
 	const writes = [];
@@ -36,10 +36,11 @@ function fakeRedis() {
 }
 const select = (redis, overrides = {}) => selectFailoverJob(job(), { redis, id: "queue:j", now: () => NOW, checkCandidate: async () => null, ...overrides });
 
-test("the worker's eligibility APIs equal the runner's pinned cost-bound APIs", () => {
-	const source = readFileSync(new URL("../../image/runner/src/usage-meter.mjs", import.meta.url), "utf8");
-	const body = source.match(/export const PRICED_APIS = Object\.freeze\(\[([\s\S]*?)\]\)/)[1];
-	assert.deepEqual(FAILOVER_PRICED_APIS, [...body.matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+test("the worker's eligibility list is closed, and the wire vocabulary and cooldown stay pinned", () => {
+	// The runner's PRICED_APIS died with the meter; the worker's list stays as the closed set of apis
+	// whose candidates are eligible for failover, and a test holds its shape.
+	assert.ok(FAILOVER_PRICED_APIS.length > 0);
+	assert.ok(FAILOVER_PRICED_APIS.every((api) => typeof api === "string"));
 	assert.deepEqual(PROVIDER_FAILURE_KINDS, FAILURE_KINDS, "the signed wire vocabulary has one closed meaning");
 	assert.equal(MODEL_COOLDOWN_MAX_MS, MAX_RESET_MS, "worker TTL and measured runner reset use the same bound");
 });
@@ -206,16 +207,16 @@ test("transient subscription availability throws while permanently inadmissible 
 	}
 });
 
-test("per-model dollar windows select only a model that can cover the entire reservation", async () => {
+test("per-model token windows select only a model that can cover the entire reservation", async () => {
 	const redis = fakeRedis();
-	const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: `model:${primary}`, dayUsd: "0.0001" }] }), "limits.json");
-	const row = modelDollarRows(limits, [primary])[0];
-	redis.store.set(dayKey(new Date(NOW), row.keyPrefix), "1");
+	const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: `model:${primary}`, dayTokens: 1 }] }), "limits.json");
+	const row = modelTokenRows(limits, [primary])[0];
+	redis.store.set(dayKey(new Date(NOW), row.keyPrefix), "1"); // the window is already at its cap of 1
 	const picked = await select(redis, { limits });
 	assert.equal(picked.ref, fallback);
 	assert.equal(picked.job.modelWhy, "fallback-window");
 	assert.equal(redis.writes.length, 0);
-	const uncapped = { ...job(), maxCostMicros: null, fallbackModels: [primary], models: [primary] };
+	const uncapped = { ...job(), maxTokens: null, fallbackModels: [primary], models: [primary] };
 	assert.equal((await selectFailoverJob(uncapped, { redis, limits, now: () => NOW, checkCandidate: async () => null })).refused, "model-failover-no-candidate", "missing cap is a permanent candidate problem, never an infinite window wait");
 	assert.equal((await selectFailoverJob(uncapped, { redis, limits, now: () => NOW, checkCandidate: async () => null, reservationFor: () => 0 })).ref, primary, "a proven zero-rated model reserves zero even without a configured cap");
 });
@@ -468,7 +469,7 @@ test("a selected parent gives its outbox child the original reviewed ceiling, ke
 	assert.deepEqual(children[0].models, [primary, fallback], "index binds the real queue job to the collector, preserving reviewed authorization");
 	assert.deepEqual(children[0].fallbackModels, [fallback]);
 	assert.equal(JSON.stringify(children[0]).includes("attacker"), false);
-	const childChoice = await selectFailoverJob({ ...children[0], maxCostMicros: 100 }, { redis: fixture.redis, id: "queue:child", now: () => NOW, checkCandidate: async () => null });
+	const childChoice = await selectFailoverJob({ ...children[0], maxTokens: 100 }, { redis: fixture.redis, id: "queue:child", now: () => NOW, checkCandidate: async () => null });
 	assert.equal(childChoice.ref, fallback, "the inherited fallback remains eligible under its inherited reviewed list");
 	assert.deepEqual(childChoice.job.models, [fallback]);
 });

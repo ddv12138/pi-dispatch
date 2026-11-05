@@ -101,7 +101,7 @@ export function makeWatchRuntime({ store, triggersPath, readFile = nodeFs.readFi
 			Object.defineProperties(watch, { stage: { value: phase }, project: { value: doc.watchSources[rule.on.source].project ?? null }, runId: { value: runId }, finding: { value: finding }, board: { value: { version: 1, blocks: board.blocks } }, queries: { value: rule.run.queryLogs ?? {} } });
 			if (phase === "decision") {
 				Object.defineProperty(watch, "gate", { value: { version: 1, model: modelRef(rule.decide.model), state: projectWatchDecisionState({ ...finding, window: rule.on.window }, rule.decide.fields), questions: rule.decide.questions } });
-				execution.maxCostUsd = rule.decide.maxCostUsd;
+				execution.maxTokens = rule.decide.maxTokens;
 				// The read from before the take: a broken overlay is still refused here, as it always was.
 				if (settings.invalid) return { result: refusal("watch-config-changed") };
 				const primary = `${execution.provider ?? settings.provider}/${execution.model ?? settings.model}`;
@@ -135,7 +135,7 @@ export function makeWatchRuntime({ store, triggersPath, readFile = nodeFs.readFi
 				if (watch.stage === "decision") {
 					let output; try { output = JSON.parse(readWatchOutput(join(prepared.outboxDir, "decision.json"), 16384, fs)); } catch {}
 					const selected = completed ? selectWatchDecision(rule.decide, output) : { action: "file_issue", reason: policyRefused ? "decide-refused" : "decide-unanswered" };
-					const summary = recordedWatchDecision({ ...selected, model: rule.decide.model, questions: Object.keys(rule.decide.questions), shadow: rule.decide.shadow, costUsd: usage?.costUsd });
+					const summary = recordedWatchDecision({ ...selected, model: rule.decide.model, questions: Object.keys(rule.decide.questions), shadow: rule.decide.shadow, tokensTotal: usage?.tokensTotal });
 					watch.decision = summary;
 					try { await store.appendTrace(watch.findingId, privateEntry({ id: "decision", kind: "decide", state: watch.gate.state, questions: rule.decide.questions, ...summary, modelReviewed: true, status: selected.reason ?? "answered" })); } catch { traceUnavailable = true; }
 					await store.updateFinding(watch.findingId, { status: "decided", decision: summary, ...(selected.reason ? { reason: selected.reason } : {}) });

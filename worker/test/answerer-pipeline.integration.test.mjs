@@ -23,7 +23,7 @@ const skip = url ? false : "VALKEY_TEST_URL not set";
 const CLOCK = Date.UTC(2026, 9, 31, 12);
 const SHA = "b".repeat(40);
 const PRIVATE = "PRIVATE question: which test command?";
-const rule = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxCostUsd: "0.10" };
+const rule = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxTokens: 100000 };
 const standing = { id: "tests", title: "Test command", text: "Run npm test.", projects: ["web"], repo: "github:acme/web" };
 
 function isolatedLedger(redis, prefix, events) {
@@ -52,9 +52,9 @@ test("real durable park intent becomes an ordinary reserved forge job, then a pr
 	const job = await f.queue.getJob(f.meta.draftRunId);
 	assert.doesNotMatch(JSON.stringify(job.data), /PRIVATE|npm test|123/);
 	const prepare = makePrepareWorkspace({ jobsDir: f.jobsDir, forgeFor: () => ({ host: {} }), preparers: { github: async (_job, _token, { jobDir }) => { events.push("clone"); const workspace = join(jobDir, "workspace"); mkdirSync(workspace); writeFileSync(join(workspace, "README.md"), "Run npm test."); mkdirSync(join(workspace, ".pi/skills/answer"), { recursive: true }); writeFileSync(join(workspace, ".pi/skills/answer/SKILL.md"), "Cite the command and explain when it runs."); return { jobDir, workspace, sha: SHA, materialised: [] }; } } });
-	const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.prefix}ledger:`, events), now: () => CLOCK, projects: () => [{ id: "web", members: ["github:acme/web"] }], getSettings: () => ({ provider: "test", model: "chat", maxTurns: 10, concurrency: 1, dailyCap: 10, dailyCostUsd: "1", maxCostUsd: "0.20" }), cancelJob() {}, stopContainer() {}, cancelPollMs: 60000, recordRun: args => records.push(buildRecord(args)), deps: {
+	const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.prefix}ledger:`, events), now: () => CLOCK, projects: () => [{ id: "web", members: ["github:acme/web"] }], getSettings: () => ({ provider: "test", model: "chat", maxTurns: 10, concurrency: 1, dailyCap: 10, dailyTokenCap: 1000000, maxTokens: 100000 }), cancelJob() {}, stopContainer() {}, cancelPollMs: 60000, recordRun: args => records.push(buildRecord(args)), deps: {
 		answerDraftRuntime: f.runtime,
-		imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["answerDraft", "exitAuth", "costCap", "modelPolicy", "modelFailover"] }),
+		imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["answerDraft", "exitAuth", "tokenBudget", "modelPolicy", "modelFailover"] }),
 		checkProviderCredential: async job => { credentials.push(job.provider); return { ok: true }; }, checkModelsKnown: () => ({ ok: true }),
 		mintToken: async () => { events.push("mint"); return "scoped"; }, isDefaultBranchProtected: async () => true, prepareWorkspace: prepare,
 		async runContainer({ job, prepared }) {
@@ -66,13 +66,13 @@ test("real durable park intent becomes an ordinary reserved forge job, then a pr
 			const tools = createAnswerDraftTools({ input, outbox: prepared.outboxDir, reader: { sources, question: async () => PRIVATE, standing: id => { assert.equal(id, "tests"); sources.set(evidence.id, evidence); return evidence; } }, runtime: { getModelsOfType: () => [{ id: "classifier", cost: { input: 1, output: 0 } }], classify: async (_m, c) => { events.push("classify"); const category = Object.hasOwn(c.questions, "category"), name = category ? "category" : "coverage", selected = category ? "how-to" : "covered"; return { stopReason: "stop", answers: { [name]: { type: "choice", choice: selected, confidence: 1, probabilities: Object.fromEntries(Object.keys(c.questions[name].criteria).map(k => [k, Number(k === selected)])) } } }; } } });
 			assert.equal(await tools.initialize(), true); await tools.tools.find(t => t.name === "read_standing_answer").execute("read", { id: "tests" }); const submission = await tools.tools.find(t => t.name === "submit_answer_draft").execute("submit", { draft: "Run npm test.", sources: [evidence.id] }); assert.equal(submission.terminate, true);
 			prepared.answerDraftDigest = tools.state.receipt;
-			return { code: 0, aborted: false, turns: 1, tokens: { input: 10, output: 3, total: 13, cost: 0.01, metered: true }, exitLineCode: 0, exitAuth: "verified" };
+			return { code: 0, aborted: false, turns: 1, tokens: { input: 10, output: 3, total: 13, metered: true }, exitLineCode: 0, exitAuth: "verified" };
 		},
 		collectChain: async () => assert.fail("a draft result is not a chain channel"), collectPlan: async () => assert.fail("a draft cannot change allocations"), comment: async () => assert.fail("no draft status/refusal comment may post"), cleanup: async () => {},
 	} });
 	const result = await process(job, "token", new AbortController().signal);
 	assert.equal(result.outcome, "completed", JSON.stringify({ result, events })); assert.equal(events.filter(e => e === "classify").length, 2); assert.ok(events.indexOf("mint") < events.indexOf("clone")); assert.ok(events.indexOf("reserve") < events.indexOf("classify"));
-	const got = await f.store.privateDraft("parent-run"); assert.equal(got.draft, "Run npm test."); assert.equal(got.question, PRIVATE); assert.equal(got.meta.status, "drafted"); assert.equal(got.meta.costUsd, 0.01);
+	const got = await f.store.privateDraft("parent-run"); assert.equal(got.draft, "Run npm test."); assert.equal(got.question, PRIVATE); assert.equal(got.meta.status, "drafted"); assert.equal(got.meta.tokensTotal, 13);
 	assert.equal(records.at(-1).purpose, "answer-draft"); assert.deepEqual(records.at(-1).answerDraft, { sourceRunId: "parent-run", ruleId: "help" }); assert.equal(readFileSync(join(f.parentSession, "current.jsonl"), "utf8"), before);
 	assert.doesNotMatch(JSON.stringify(await f.store.publicSnapshot()), /PRIVATE|Run npm test/);
 });

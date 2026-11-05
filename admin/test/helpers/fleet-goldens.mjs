@@ -10,7 +10,7 @@ const HOUR = 60 * MIN;
 const host = (over = {}) => ({
   name: "build3", version: "4.3.1", startedAt: String(NOW - 5 * HOUR), pid: "4242", concurrency: "3",
   image: "ghcr.io/edgehero/pi-dispatch-job:4.3.1", imageDigest: `sha256:${"a".repeat(64)}`, piVersion: "1.5.0", tz: "UTC",
-  fpCron: "a".repeat(16), fpUsd: "b".repeat(16), fpProjects: "c".repeat(16), fpEnvelope: "none",
+  fpCron: "a".repeat(16), fpTok: "b".repeat(16), fpProjects: "c".repeat(16), fpEnvelope: "none",
   caps: ["s:github", "w:ci-green"], staleMs: 2000, ttlAgeMs: 2000, skewMs: 0, noExpiry: false, routes: "true",
   jobs: [{ id: "gh-e802", p: "web", m: 8192, c: 400, at: NOW - 12 * MIN, o: false }, { id: "gh-4a7e", p: "billing", m: 8192, c: 400, at: NOW - 18 * MIN, o: true, v: "podman", s: NOW - 7 * MIN }], jobsMore: 0,
   budgetMemMiB: "24576", budgetCpuCenti: "1200", usedMemMiB: "16384", usedCpuCenti: "800", heldMemMiB: "8192", heldCpuCenti: "400", budgetRunning: "2", budgetOrphans: "1", budgetHolds: "1", waiters: "1", budgetSeed: "listed",

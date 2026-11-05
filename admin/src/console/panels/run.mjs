@@ -36,7 +36,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { STEER_MAX_MESSAGES, STEER_TOTAL_MAX_BYTES } from "@edgehero/pi-dispatch/steer-inbox";
-import { SEC, MIN, cell, ageText, timeHtml, msOf, usdText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capMicrosOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
+import { SEC, MIN, cell, ageText, timeHtml, msOf, tokensText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capTokensOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
 
 const titled = (title, body, locale = "en") => ui.card({ title: uiText(title, locale), body });
 const t = (message, view) => uiText(message, view?.locale);
@@ -222,7 +222,7 @@ export function runOutcome(view) {
   const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
   const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: t("Fix configuration", view), kind: "sm", icon: "config" }) : null;
   const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${r.outcome === "completed" && !["awaiting-input", "awaiting-approval"].includes(token) ? ui.btn({ href: "#p-workspace", label: t("Try it in its workspace", view), kind: "sm", icon: "terminal" }) : null}${rerunLine(r, view)}${fixLink}`;
-  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `，${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
+  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `${view.locale === "zh" ? "，" : ", "}${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
 }
 
 /**
@@ -322,7 +322,7 @@ function liveProgressBody(g, view) {
     // The resume prior: what the session's earlier runs did before this run resumed it, not this job's retries.
     ["Earlier runs of this session", g.prior ? `${count(g.prior.turns)} turns, ${count(g.prior.steps)} steps before this run resumed the session` : null],
   ].filter(([, value]) => value !== null);
-  return html`${stale !== null ? html`<p class="warn">${uiText("Stale:", view.locale)} ${staleText(stale)}${view.data?.activeRun?.host ? ` ${uiText("on", view.locale)} ${view.data.activeRun.host}` : ""}. <a href="/fleet">${uiText("Open Fleet", view.locale)}</a>.</p>` : null}<div class="run-prog"><div class="run-big"><p class="kpi"><b class="run-tc">${Number.isFinite(now) && now >= g.startedAt ? timecode(now - g.startedAt) : "-"}</b><span>${uiText("elapsed since", view.locale)} ${timeHtml(g.startedAt)}</span></p></div><dl class="run-stats"><div><dt>${uiText("Turn", view.locale)}</dt><dd><span><b>${count(g.turn)}</b>${Number.isSafeInteger(max) ? ` ${uiText("of", view.locale)} ${max}` : ""}</span></dd></div><div><dt>${uiText("Steps", view.locale)}</dt><dd><span><b>${count(g.steps)}</b>${g.failed > 0 ? `，${count(g.failed)} ${uiText("failed", view.locale)}` : ""}</span></dd></div><div class="tone-running"><dt>${uiText("Running now", view.locale)}</dt><dd>${running}</dd></div></dl></div>${rare.length ? facts(rare, view.locale) : null}${phaseBody(g, operator, view.locale)}<h3 class="run-sub">${uiText("Recent steps", view.locale)}</h3>${recent.length ? html`<ul class="rows">${recent.map(stepRow)}</ul>` : html`<p class="note">${uiText("No step has finished yet.", view.locale)}</p>`}<p class="run-at">${uiText("Updated", view.locale)} ${timeHtml(g.updatedAt)}</p>`;
+  return html`${stale !== null ? html`<p class="warn">${uiText("Stale:", view.locale)} ${staleText(stale)}${view.data?.activeRun?.host ? ` ${uiText("on", view.locale)} ${view.data.activeRun.host}` : ""}. <a href="/fleet">${uiText("Open Fleet", view.locale)}</a>.</p>` : null}<div class="run-prog"><div class="run-big"><p class="kpi"><b class="run-tc">${Number.isFinite(now) && now >= g.startedAt ? timecode(now - g.startedAt) : "-"}</b><span>${uiText("elapsed since", view.locale)} ${timeHtml(g.startedAt)}</span></p></div><dl class="run-stats"><div><dt>${uiText("Turn", view.locale)}</dt><dd><span><b>${count(g.turn)}</b>${Number.isSafeInteger(max) ? ` ${uiText("of", view.locale)} ${max}` : ""}</span></dd></div><div><dt>${uiText("Steps", view.locale)}</dt><dd><span><b>${count(g.steps)}</b>${g.failed > 0 ? `, ${count(g.failed)} ${uiText("failed", view.locale)}` : ""}</span></dd></div><div class="tone-running"><dt>${uiText("Running now", view.locale)}</dt><dd>${running}</dd></div></dl></div>${rare.length ? facts(rare, view.locale) : null}${phaseBody(g, operator, view.locale)}<h3 class="run-sub">${uiText("Recent steps", view.locale)}</h3>${recent.length ? html`<ul class="rows">${recent.map(stepRow)}</ul>` : html`<p class="note">${uiText("No step has finished yet.", view.locale)}</p>`}<p class="run-at">${uiText("Updated", view.locale)} ${timeHtml(g.updatedAt)}</p>`;
 }
 
 /**
@@ -450,7 +450,7 @@ export function runInbox(view) {
       ? box.open === null
         ? t("Whether the run takes messages could not be read.", view)
         : t(INBOX_NOT_OPEN, view)
-      : `${t("The job is", view)} ${cell(t(box.state, view))}，${t("not running, so it takes no message; its inbox is kept for an hour after its run.", view)}`;
+      : `${t("The job is", view)} ${cell(t(box.state, view))}${view.locale === "zh" ? "，" : ", "}${t("not running, so it takes no message; its inbox is kept for an hour after its run.", view)}`;
   const act = canAct(view) && typeof jobId === "string" && RUN_ID_RE.test(jobId);
   const withdraw = (e) => {
     if (!act) return null;
@@ -472,7 +472,7 @@ export function runInbox(view) {
   // Issue #647: when the Chat panel draws the message forms (a live run an operator can steer), they are drawn THERE and
   // not here, so the page holds one steer form per mode, never two copies of the same action.
   const forms = act && takes && !chatDrawsSteer(view) ? steerForms(jobId, view.locale) : null;
-  const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}；${t("its run continues as", view)} ${runLink(next)}，${t("and a message sent here goes to that job.", view)}</p>` : null;
+  const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}${view.locale === "zh" ? "；" : "; "}${t("its run continues as", view)} ${runLink(next)}${view.locale === "zh" ? "，" : ", "}${t("and a message sent here goes to that job.", view)}</p>` : null;
   return titled(title, html`${cont}<p class="note">${status}</p>${entries ? ui.meter({ value: entries.length, max: STEER_MAX_MESSAGES, label: t("Messages", view) }) : null}${entries ? ui.meter({ value: entries.reduce((n, e) => n + (e.bytes ?? 0), 0), max: STEER_TOTAL_MAX_BYTES, label: t("Bytes", view) }) : null}${entries?.some((e) => e.state === "late") ? html`<p>${t("Late: the run ended before the message arrived, so the agent never saw it.", view)}</p>` : null}${list}${forms}<p class="note">${t("A message's text is never listed: the run reads it, and the audit log keeps its sha256.", view)}</p>`, view.locale);
 }
 
@@ -797,31 +797,31 @@ const recordSummary = withRun("Run", (r, view, source) => {
   ], view.locale)}`;
 });
 
-/** Dollar windows have no soft hold; these are settlement facts, never a promise to spend again. */
+/** Token windows have no soft hold; these are settlement facts, never a promise to spend again. */
 export function settlementText(basis, locale = "en") {
-  return uiText(({ metered: "settled from the reported model cost", floor: "the window keeps the whole hold because the full cost was not known", refunded: "the hold was released before the run spent", unreserved: "no dollar hold was reserved" })[basis] ?? "no settlement explanation was recorded", locale);
+  return uiText(({ metered: "settled from the run's metered tokens", floor: "the window keeps the whole reservation because the full token count was not known", refunded: "the reservation was released before the run started", unreserved: "no token reservation was made" })[basis] ?? "no settlement explanation was recorded", locale);
 }
 
-export const runCostPanel = withRun("Tokens and dollars", (r, view) => {
+export const runCostPanel = withRun("Tokens", (r, view) => {
   const tokens = r.tokens ?? null;
-  const d = r.dollars ?? null;
-  const cost = runCost(r, Array.isArray(view.data.subscriptions) ? view.data.subscriptions : []);
+  const d = r.tokensWindows ?? null;
+  const amount = runCost(r);
   const attempts = view.data?.recoveryRuns ?? [];
   const holds = Array.isArray(view.data?.runHolds) ? view.data.runHolds : [];
-  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a, view.data.subscriptions ?? []))}${a.dollars ? `; ${usdText(a.dollars.settledMicros)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${usdText(h.amountMicros)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole hold after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job caps: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capMicrosOf(r) > 0 && cost ? ui.meter({ value: Math.round(cost.usd * 1e6), max: capMicrosOf(r), label: t("Job cap (dollars)", view) }) : null}${facts([
-    ["Cost", t(costText(cost), view)],
-    ["Cost class", cost ? `${t(cost.class, view)}${cost.floor ? ` (${t("a floor: the meter could not see all of it", view)})` : ""}` : t("not metered", view)],
+  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a))}${a.tokensWindows ? `; ${tokensText(a.tokensWindows.settledTokens)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${tokensText(h.amountTokens)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole reservation after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job budgets: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capTokensOf(r) > 0 && amount ? ui.meter({ value: amount.tokens, max: capTokensOf(r), label: t("Job budget (tokens)", view) }) : null}${facts([
+    ["Tokens", t(costText(amount), view)],
+    ["Measurement", amount ? `${t(amount.class, view)}${amount.floor ? ` (${t("a floor: the meter could not see all of it", view)})` : ""}` : t("not metered", view)],
     ["Input tokens", tokens ? count(tokens.input) : "-"],
     ["Output tokens", tokens ? count(tokens.output) : "-"],
     ["Total tokens", tokens ? count(tokens.total) : "-"],
     ["Model calls", tokens ? cell(tokens.calls) : "-"],
-    ["Job cap", usdText(capMicrosOf(r))],
-    ["Reserved", d ? usdText(d.reservedMicros) : t("no dollar window applied", view)],
-    ["Settled", d && d.settledMicros !== null && d.settledMicros !== undefined ? `${usdText(d.settledMicros)}: ${settlementText(d.basis, view.locale)}` : null],
-    ["Released at the end", d && Number.isFinite(d.reservedMicros) && Number.isFinite(d.settledMicros) ? usdText(Math.max(0, d.reservedMicros - d.settledMicros)) : null],
+    ["Job budget", tokensText(capTokensOf(r))],
+    ["Reserved", d ? tokensText(d.reservedTokens) : t("no token window applied", view)],
+    ["Settled", d && d.settledTokens !== null && d.settledTokens !== undefined ? `${tokensText(d.settledTokens)}: ${settlementText(d.basis, view.locale)}` : null],
+    ["Released at the end", d && Number.isFinite(d.reservedTokens) && Number.isFinite(d.settledTokens) ? tokensText(Math.max(0, d.reservedTokens - d.settledTokens)) : null],
     ["Token split", tokens && (tokens.rootTotal != null || tokens.otherTotal != null || tokens.childTotal != null) ? `${count(tokens.rootTotal ?? 0)} this run, ${count(tokens.otherTotal ?? 0)} other sessions, ${count(tokens.childTotal ?? 0)} subprocesses` : null],
     ["Unmetered children", tokens?.unmeteredChildren],
-    ["Cost unreported", tokens?.costUnreported],
+    ["Usage unreported", tokens?.usageUnreported],
     ["Model window", d?.modelBasis ? settlementText(d.modelBasis) : null],
   ], view.locale)}`;
 });
@@ -955,7 +955,7 @@ export function runModels(view) {
   const r = recordOf(view), u = r?.usage;
   if (hiddenRecord(view) || !u) return html``;
   const models = Array.isArray(u.models) ? u.models : [];
-  return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${usdText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
+  return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${tokensText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
 }
 
 export function runTail(view) {

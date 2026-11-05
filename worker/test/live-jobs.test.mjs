@@ -135,10 +135,10 @@ test("orphan publication carries only a known runtime and integer stop instant, 
 });
 
 
-test("dollar holds preserve explicit zero, the reservation instant, and old-host unknowns", () => {
+test("token holds preserve explicit zero, the reservation instant, and old-host unknowns", () => {
 	const { jobs } = liveJobsOf({ running: [
-		{ id: "held", at: 10, holdMicros: 2_000_000, holdAt: 15 },
-		{ id: "zero", at: 20, holdMicros: 0, holdAt: 20 },
+		{ id: "held", at: 10, holdTokens: 2_000_000, holdAt: 15 },
+		{ id: "zero", at: 20, holdTokens: 0, holdAt: 20 },
 		{ id: "old", at: 30 },
 	] });
 	const parsed = parseLiveJobs(liveJobsFields({ jobs, skipped: 0 }).jobs).jobs;

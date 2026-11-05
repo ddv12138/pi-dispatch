@@ -524,7 +524,7 @@ test("the tick's snapshot carries each row's live fields through the worker's al
       budgetRunning: "1",
       waiters: "2",
       staleMs: 1500,
-      fpUsd: "secret-ish",
+      fpTok: "secret-ish",
       // a raw row as an unparsing reader hands it: one good entry, one hostile id the allowlist drops
       jobs: JSON.stringify([{ id: "gh-1", p: "web", m: 4096, c: 200, at: AT - 60_000 }, { id: "gh-\u001b[2J", p: "web", at: AT }]),
       jobsMore: "1",
@@ -541,7 +541,7 @@ test("the tick's snapshot carries each row's live fields through the worker's al
   assert.deepEqual(snap.hostBudgets[0], {
     name: "mini1",
     version: null, startedAt: null, pid: null, image: null, imageDigest: null, piVersion: null, tz: null,
-    fpCron: null, fpUsd: "secret-ish", fpProjects: null, fpEnvelope: null, budgetSeed: null,
+    fpCron: null, fpTok: "secret-ish", fpProjects: null, fpEnvelope: null, budgetSeed: null,
     sandboxes: null, sandboxesMore: null, sandboxRetentionHours: null, budgetFrom: null, cpuReserve: null,
     heldMemMiB: undefined, heldCpuCenti: undefined,
     budgetMemMiB: "8192",

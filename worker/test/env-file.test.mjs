@@ -686,7 +686,7 @@ test("E7: a line this reader cannot model is a HAZARD, never a key that is simpl
 	assert.equal(envFileHazard("unset K\nOTHER='open", { loader: "cmd" }), null, "no continuation, no multi-line value, no execution");
 	// ONE EXCEPTION, kept CAUTIOUSLY (issue #470): `set "%%A=%%B"` is itself quoted, and a `"` in a value was taken
 	// to close it. The parser's phase order says FOR variables are substituted after the quotes and operators are
-	// parsed, so it cannot, but that is not Microsoft's documentation and nothing here runs cmd, so the line stays
+	// parsed, so it cannot, but that is not Tokensoft's documentation and nothing here runs cmd, so the line stays
 	// unvouched and `renderEnvValue` still refuses to WRITE the character.
 	assert.deepEqual(envFileHazard('OTHER=x" & set "K=evil\nK=C:/ok.json', { loader: "cmd" }), { line: 1 }, "a double quote in a value stays the cmd loader's one hazard (cautious, issue #470)");
 });
@@ -893,7 +893,7 @@ test("E6: the cmd wrapper is a third loader, and it is read from its own source"
 	assert.deepEqual(cmd("K=/srv/a.json"), rec({ value: "/srv/a.json", plain: true, vouched: true }));
 	// The quotes are part of what `for /f` hands `set` -- which is why `renderEnvValue` writes none for
 	// win32 -- but they are NOT vouched for: the wrapper's `set "%%A=%%B"` is itself quoted, and whether a `"` in a
-	// value survives it is not documented by Microsoft (issue #470). The reading stands and the VOUCH does not, which
+	// value survives it is not documented by Tokensoft (issue #470). The reading stands and the VOUCH does not, which
 	// is the same distinction the POSIX side draws, and it is the one the writer already enforced by
 	// refusing to emit the character at all.
 	assert.deepEqual(cmd('K="/srv/a.json"'), rec({ value: '"/srv/a.json"', plain: true, vouched: false, hazardLine: 1 }), "a double quote in a value is not vouched for (cautious, issue #470)");
@@ -2034,7 +2034,7 @@ test("outside single quotes only $NAME and ${NAME} pass, and a backslash-newline
 		assert.deepEqual(envFileHazard(`${line}\n`, { loader: "shell" }), { line: 1 }, JSON.stringify(line));
 	}
 	// The writer refuses the delta reviewer's file, and the venue reader its PI_EGRESS twin (sh sets it to 0).
-	const dir = tempDir("pi-dispatch-env-dollar-");
+	const dir = tempDir("pi-dispatch-env-token-");
 	const path = join(dir, ".env");
 	const clobber = 'WEBHOOK_SECRET=\nK="${x:-$\\\n((WEBHOOK_SECRET=7))}"\n';
 	writeFileSync(path, clobber);

@@ -248,7 +248,7 @@ test("act: preview prints the summary and reserve, confirm sends the ticket; a n
 		routes: {
 			"/api/act/steer/preview": (req, res, body, { json }) => {
 				if (body.text === "") return json(400, { error: "the message is empty; nothing was sent" });
-				return json(200, { ticket: "t-1", summary: ["Send a steer to running job j1, as rob (message abc, 24 bytes)"], reserve: { dollarsMicros: 2_500_000 }, diffHtml: `<pre>${body.text}</pre>` });
+				return json(200, { ticket: "t-1", summary: ["Send a steer to running job j1, as rob (message abc, 24 bytes)"], reserve: { tokens: 2_500_000 }, diffHtml: `<pre>${body.text}</pre>` });
 			},
 			"/api/act/steer/confirm": (req, res, body, { json }) => {
 				confirms.push(body);
@@ -265,7 +265,7 @@ test("act: preview prints the summary and reserve, confirm sends the ticket; a n
 		assert.equal(yes.result.state, "queued");
 		assert.deepEqual(confirms, [{ ticket: "t-1" }]);
 		assert.match(printed.join("\n"), /Send a steer/);
-		assert.match(printed.join("\n"), /\$2\.50/);
+		assert.match(printed.join("\n"), /2500000 tokens/);
 		assert.ok(!printed.join("\n").includes(TEXT), "the message text is never printed back (the diff is not shown)");
 		const no = await client.act("steer", { jobId: "j1", text: TEXT }, { confirm: async () => false });
 		assert.deepEqual(no, { declined: true });

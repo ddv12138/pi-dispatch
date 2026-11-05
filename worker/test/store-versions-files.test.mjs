@@ -420,7 +420,7 @@ const OTHER_DOMAINS = Object.freeze([
 		baseline: ["convention", "how-to", "decided"],
 		what: (m) => `the answer category ${JSON.stringify(m)}`,
 		refusal: `${LOADER_REFUSES} when an answerRules entry names it`,
-		probes: [{ table: "blockValueTable", field: "answerRules", doc: (m) => ({ triggers: [], answerRules: [{ id: "docs", projects: ["web"], categories: [m], confidence: 0.9, mode: "draft", flow: "answer", model: "anthropic/claude-sonnet-4-5", decisionModel: "anthropic/claude-sonnet-4-5", maxCostUsd: "1" }] }) }],
+		probes: [{ table: "blockValueTable", field: "answerRules", doc: (m) => ({ triggers: [], answerRules: [{ id: "docs", projects: ["web"], categories: [m], confidence: 0.9, mode: "draft", flow: "answer", model: "anthropic/claude-sonnet-4-5", decisionModel: "anthropic/claude-sonnet-4-5", maxTokens: 1 }] }) }],
 		widened: "policy",
 	},
 	{
@@ -432,7 +432,7 @@ const OTHER_DOMAINS = Object.freeze([
 		refusal: `${LOADER_REFUSES} when a watch source's pull or a watch trigger's match names it`,
 		probes: [
 			{ table: "blockValueTable", field: "watchSources", doc: (m) => ({ triggers: [], watchSources: { app: { verify: "hmac-sha256", secretEnv: "WATCH_SECRET", pull: { kind: "file", path: "/var/log/app.log", fields: { msg: "message" }, severity: m } } } }) },
-			{ table: "entryValueTable", field: "on", doc: (m) => ({ watchSources: { app: { verify: "hmac-sha256", secretEnv: "WATCH_SECRET" } }, ...oneTrigger({ type: "watch", id: "errors", source: "app", fingerprint: ["msg"], match: { severity: [m] }, window: "10m", cooldown: "1h", minCount: 1, maxPerDay: 10, maxFingerprints: 10 }, { kind: "local", folder: "/srv/app", flow: "triage", task: "Investigate the error.", maxCostUsd: "1" }) }) },
+			{ table: "entryValueTable", field: "on", doc: (m) => ({ watchSources: { app: { verify: "hmac-sha256", secretEnv: "WATCH_SECRET" } }, ...oneTrigger({ type: "watch", id: "errors", source: "app", fingerprint: ["msg"], match: { severity: [m] }, window: "10m", cooldown: "1h", minCount: 1, maxPerDay: 10, maxFingerprints: 10 }, { kind: "local", folder: "/srv/app", flow: "triage", task: "Investigate the error.", maxTokens: "1" }) }) },
 		],
 		widened: "fatal",
 	},
@@ -504,7 +504,7 @@ test("closed domains: each probe is a document the loader accepts with a member 
 test("triggers: the nine narrowing fields are the baseline, and a row added later needs a version in both the trigger and the job data tables", () => {
 	// The nine rows `AUTHORED_NARROWING_FIELDS` held when issue #761 gave the triggers file and job data their versions.
 	// A later row is a field an older receiver or worker drops, so it must make both stores say an upgrade is needed.
-	const BASELINE = ["models", "fallbackModels", "maxCostUsd", "mcp", "awaitInput", "progress", "statusComment", "recover", "steer"];
+	const BASELINE = ["models", "fallbackModels", "maxTokens", "mcp", "awaitInput", "progress", "statusComment", "recover", "steer"];
 	const rows = AUTHORED_NARROWING_FIELDS.map((row) => row.key);
 	for (const key of BASELINE) assert.ok(rows.includes(key), `${key} is still a narrowing row`);
 	for (const key of rows.filter((k) => !BASELINE.includes(k))) {

@@ -269,7 +269,7 @@ const skewFile = (run) => ({ readFileSync: () => JSON.stringify({ triggers: [{ o
 const arrived = (extra = {}) => ({ trigger: { matched: { index: 0, type: "label" } }, kind: "github", flow: "fix", ...extra });
 
 test("the skew check refuses a job whose AUTHORED trigger lists models it arrived without, and reads one row per field", async () => {
-	assert.deepEqual(AUTHORED_NARROWING_FIELDS.map((row) => row.key), ["models", "fallbackModels", "maxCostUsd", "mcp", "awaitInput", "progress", "statusComment", "recover", "steer"], "a new narrowing field is one row here");
+	assert.deepEqual(AUTHORED_NARROWING_FIELDS.map((row) => row.key), ["models", "fallbackModels", "maxTokens", "mcp", "awaitInput", "progress", "statusComment", "recover", "steer"], "a new narrowing field is one row here");
 	const check = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ models: ["openai/gpt-x"] }) });
 	assert.deepEqual(await check(arrived()), { skewed: true, field: "models" }, "a stale receiver dropped the list");
 	assert.deepEqual(await check(arrived({ models: null })), { skewed: true, field: "models" }, "null is absent");
@@ -322,18 +322,18 @@ test("the skew check refuses a job whose AUTHORED trigger arms run.steer it arri
 	assert.deepEqual(await check(arrived({ flow: "other" })), { ok: true }, "the identity guard fails open");
 });
 
-test("the skew check refuses a job whose AUTHORED trigger sets maxCostUsd it arrived without (#501)", async () => {
+test("the skew check refuses a job whose AUTHORED trigger sets maxTokens it arrived without (#501)", async () => {
 	// A receiver from before #501 tolerated the key as unknown and dropped it: the job would run under the deployment's
 	// wider cap, or none, on a clean record.
 	for (const authored of ["2.50", 0.5]) {
-		const check = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxCostUsd: authored }) });
-		assert.deepEqual(await check(arrived()), { skewed: true, field: "maxCostUsd" }, `a stale receiver dropped ${authored}`);
-		assert.deepEqual(await check(arrived({ maxCostUsd: null })), { skewed: true, field: "maxCostUsd" }, "null is absent");
-		assert.deepEqual(await check(arrived({ maxCostUsd: authored })), { ok: true });
+		const check = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: authored }) });
+		assert.deepEqual(await check(arrived()), { skewed: true, field: "maxTokens" }, `a stale receiver dropped ${authored}`);
+		assert.deepEqual(await check(arrived({ maxTokens: null })), { skewed: true, field: "maxTokens" }, "null is absent");
+		assert.deepEqual(await check(arrived({ maxTokens: authored })), { ok: true });
 	}
 	assert.deepEqual(await makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({}) })(arrived()), { ok: true }, "nothing authored, nothing missing");
 	// The identity guard and the unreadable file fail OPEN, as for every row.
-	const check = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxCostUsd: "1" }) });
+	const check = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: "1" }) });
 	assert.deepEqual(await check(arrived({ flow: "other" })), { ok: true });
 });
 
@@ -344,10 +344,10 @@ test("the skew check refuses a job whose AUTHORED trigger names MCP servers it a
 	assert.deepEqual(await check(arrived({ flow: "other" })), { ok: true }, "the identity guard fails open");
 });
 
-test("the processor hands the skew check maxCostUsd as the job ARRIVED, and refuses a dropped cap as trigger-skew (#501)", { skip }, async () => {
+test("the processor hands the skew check maxTokens as the job ARRIVED, and refuses a dropped cap as trigger-skew (#501)", { skip }, async () => {
 	const seen = [];
-	const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxCostUsd: "2.50" }) });
-	const h = harness({ extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxCostUsd), checkWaitSkew(j)) } });
+	const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: 3 }) });
+	const h = harness({ extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), checkWaitSkew(j)) } });
 	const r = await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
 	assert.equal(r.reason, "trigger-skew");
 	assert.equal(r.budgetReserved, false);
@@ -355,14 +355,14 @@ test("the processor hands the skew check maxCostUsd as the job ARRIVED, and refu
 	assert.equal(h.seen.ctx.length, 0, "no container");
 });
 
-test("a deployment cap never fills a maxCostUsd the job arrived without, before the skew check (#540)", { skip }, async () => {
-	// The harness above sets no deployment cap, so a wrapper that fell back to it (`job.data?.maxCostUsd ??
-	// settings.maxCostUsd`) still handed the check undefined. Here the overlay holds a cap, the SAME value the trigger
+test("a deployment cap never fills a maxTokens the job arrived without, before the skew check (#540)", { skip }, async () => {
+	// The harness above sets no deployment cap, so a wrapper that fell back to it (`job.data?.maxTokens ??
+	// settings.maxTokens`) still handed the check undefined. Here the overlay holds a cap, the SAME value the trigger
 	// authored, so such a fill would make the dropped cap read as present and the job would run.
-	for (const deployment of ["2.50", "9"]) {
+	for (const deployment of [3, 9]) {
 		const seen = [];
-		const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxCostUsd: "2.50" }) });
-		const h = harness({ getSettings: SETTINGS({ maxCostUsd: deployment }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxCostUsd), checkWaitSkew(j)) } });
+		const checkWaitSkew = makeCheckWaitSkew({ triggersPath: "/t.json", fs: skewFile({ maxTokens: 3 }) });
+		const h = harness({ getSettings: SETTINGS({ maxTokens: deployment }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), checkWaitSkew(j)) } });
 		const r = await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
 		assert.equal(r.reason, "trigger-skew", `deployment cap ${deployment}`);
 		assert.equal(r.budgetReserved, false);
@@ -371,9 +371,9 @@ test("a deployment cap never fills a maxCostUsd the job arrived without, before 
 	}
 	// The arrived cap still reaches the check, beside a deployment cap.
 	const seen = [];
-	const h = harness({ getSettings: SETTINGS({ maxCostUsd: "9" }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxCostUsd), { ok: true }) } });
-	await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, maxCostUsd: "2.50", trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
-	assert.deepEqual(seen, ["2.50"]);
+	const h = harness({ getSettings: SETTINGS({ maxTokens: 9 }), extraDeps: { checkWaitSkew: (j) => (seen.push(j.maxTokens), { ok: true }) } });
+	await h.processor(qJob("j-cap", { kind: "github", repo: "o/r", flow: "fix", target: { number: 1 }, maxTokens: 3, trigger: { matched: { index: 0, type: "label" } } }), "tok", new AbortController().signal);
+	assert.deepEqual(seen, [3]);
 });
 
 test("a trigger-skew refusal is pre-spend and names the field, never its value", async () => {

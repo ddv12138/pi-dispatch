@@ -44,7 +44,7 @@
         "panels/models-populated.operator",
         "panels/models-populated.viewer"
       ],
-      "shows": "$32.46 of $80.00"
+      "shows": "324,600 of 800,000"
     },
     {
       "el": "p-proposals",
@@ -55,7 +55,7 @@
         "panels/models-populated.operator",
         "panels/models-populated.viewer"
       ],
-      "shows": "Known cost: 2 source and 2 candidate runs"
+      "shows": "Known tokens: 2 source and 2 candidate runs"
     },
     {
       "el": "Banners first",
@@ -122,17 +122,6 @@
       "kind": "provides",
       "status": "new",
       "source": "admin/src/models-view.mjs#modelsViewOf"
-    },
-    {
-      "el": "models-radius.operator",
-      "kind": "state",
-      "status": "new",
-      "panel": "p-model-problems",
-      "source": "admin/src/console/panels/models.mjs#modelsProblems",
-      "golden": [
-        "panels/models-radius.operator"
-      ],
-      "shows": "A capped Radius model cannot start"
     },
     {
       "el": "models-undeclared.operator",

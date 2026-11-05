@@ -9,7 +9,7 @@
  *     script: the one search pill, the project chips, a closed list per field and the repository as text, then the
  *     applied filters as chips, each removable. The browser script folds every control but the search behind one
  *     Filters toggle on a phone (`data-collapsible`); without it every filter shows.
- *   - `p-summary`, the last 24 hours by outcome, each count a link to those runs, and their settled spend: the fleet
+ *   - `p-summary`, the last 24 hours by outcome, each count a link to those runs, and their settled tokens: the fleet
  *     reader's `runsWindow`, a fold of the wide window it already caches, so it costs no read of its own.
  *   - `p-runs`, the runs themselves, newest first, 50 a page through the whole history (`readRunsPage`), grouped by UTC
  *     day, stacked on a phone, with where they were read from and the pager in the table's foot.
@@ -33,7 +33,7 @@ import { OUTCOME_KEYS, OUTCOME_KEY_WORDS, VENUE_LABEL, rowNumber } from "../../w
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { RUN_ID_RE, capMicrosOf, costText, count, moneyHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
+import { RUN_ID_RE, capTokensOf, costText, count, tokensHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
 
 // ---- the sentences ---------------------------------------------------------------------------------------------------
 
@@ -190,25 +190,25 @@ function windowTotal(w) {
 }
 
 /**
- * The counts and the spend the summary draws for the query's project, `{ by, spentMicros, unpriced, every }`: the
+ * The counts and the spend the summary draws for the query's project, `{ by, spentTokens, unpriced, every }`: the
  * window's whole with no project chosen, the project's own where the window counts it (`byProject`), none at all where
  * the window names every project that ran and not this one, and the whole again, said so (`every`), where more projects
  * ran than it counts one by one.
  */
 function countsFor(w, project) {
-  const whole = { by: w.byOutcome ?? {}, spentMicros: w.spentMicros, unpriced: w.unpriced, every: false };
+  const whole = { by: w.byOutcome ?? {}, spentTokens: w.spentTokens, unpriced: w.unpriced, every: false };
   if (project === undefined) return whole;
   const own = Array.isArray(w.byProject) ? w.byProject.find((p) => p?.project === project) : undefined;
-  if (own) return { by: own.byOutcome ?? {}, spentMicros: own.spentMicros, unpriced: own.unpriced, every: false };
+  if (own) return { by: own.byOutcome ?? {}, spentTokens: own.spentTokens, unpriced: own.unpriced, every: false };
   if (Number.isSafeInteger(w.projectsMore) && w.projectsMore > 0) return { ...whole, every: true };
-  return { by: {}, spentMicros: 0, unpriced: 0, every: false };
+  return { by: {}, spentTokens: 0, unpriced: 0, every: false };
 }
 
 /**
  * The last 24 hours by outcome (the RunsScreen card's strip), as the arguments the panel hands the kit, or null when
  * the window could not be read: the five counts (`strip`), each a link to those runs (the chosen project kept), "at
  * least" where the window is a floor (it ended inside the day, or a side of it was not read), the runs of an outcome
- * this release does not know when there are any; then the settled spend and how many runs settled no amount (the
+ * this release does not know when there are any; then the settled tokens and how many runs measured nothing (the
  * chosen project's, as the counts are), the Only problems switch (`show`), and what the counts count (`notes`). Pure.
  */
 export function runsSummaryModel(view) {
@@ -216,7 +216,7 @@ export function runsSummaryModel(view) {
   const f = view.query?.filter ?? {};
   if (!w) return null;
   const floor = w.floor === true || w.partial === true;
-  const { by, spentMicros, unpriced, every } = countsFor(w, f.project);
+  const { by, spentTokens, unpriced, every } = countsFor(w, f.project);
   const n = (k) => (Number.isSafeInteger(by[k]) && by[k] > 0 ? by[k] : 0);
   // A phone draws the four counts that need a look (the RunsPhone card's), leaving out the completed runs.
   const items = OUTCOME_KEYS.map((key) => ({ n: n(key), label: uiText(OUTCOME_KEY_WORDS[key].word, view.locale), status: OUTCOME_KEY_WORDS[key].status, href: runsHref({ project: f.project, outcome: key }), floor, hidePhone: key === "completed" }));
@@ -224,7 +224,7 @@ export function runsSummaryModel(view) {
   if (n("other") > 0) items.push({ n: n("other"), label: uiText("outcome not known", view.locale), status: "failed", href: null, floor });
   return {
     strip: { items, label: "Runs that ended in the last 24 hours, by outcome" },
-    spentMicros: Number.isSafeInteger(spentMicros) ? spentMicros : null,
+    spentTokens: Number.isSafeInteger(spentTokens) ? spentTokens : null,
     unpriced: Number.isSafeInteger(unpriced) && unpriced > 0 ? unpriced : 0,
     show: [
       { label: uiText("All outcomes", view.locale), href: runsHref(without(f, "problems")), on: f.problems === undefined },
@@ -240,7 +240,7 @@ export function runsSummary(view) {
   const m = runsSummaryModel(view);
   if (m === null) return ui.card({ body: html`<p class="muted">${uiText(RUNS_WINDOW_UNREAD, view.locale)}</p>` });
   const unpriced = m.unpriced > 0 ? html`<span class="muted">, ${count(m.unpriced)} ${m.unpriced === 1 ? uiText("run", view.locale) : uiText("runs", view.locale)} ${uiText("with no settled amount", view.locale)}</span>` : null;
-  const spend = html`<span><b>${moneyHtml(m.spentMicros)}</b> ${uiText("settled spend", view.locale)}${unpriced}</span>`;
+  const spend = html`<span><b>${tokensHtml(m.spentTokens)}</b> ${uiText("settled tokens", view.locale)}${unpriced}</span>`;
   return ui.card({ body: html`${ui.sumStrip(m.strip.items, { label: uiText(m.strip.label, view.locale) })}<div class="runs-sum">${spend}${ui.seg(m.show, { label: uiText("Show", view.locale) })}</div><p class="card__sub">${uiText(m.notes, view.locale)}</p>` });
 }
 
@@ -339,7 +339,7 @@ function runCells(r, env, subscriptions) {
     valueCell(r?.model),
     Number.isFinite(r?.tokens?.total) ? count(r.tokens.total) : "-",
     costText(runCost(r, subscriptions)),
-    moneyHtml(capMicrosOf(r)),
+    tokensHtml(capTokensOf(r)),
   ];
 }
 

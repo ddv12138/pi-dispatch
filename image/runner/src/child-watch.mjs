@@ -1,8 +1,8 @@
 /**
  * The parent's side of child metering (issue #500 part E; DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY): the `children`
  * hook run-job.mjs hands installProcessUsageMeter. On every tick of the meter's re-arm interval (1 s) and once at
- * teardown it folds the children's ledgers into the job's meter, writes the two control files the children read
- * (SPENT, STOP), applies the stop rules on the job's whole spend, and looks for pi processes that report through no
+ * teardown it folds the children's ledgers into the job's meter, writes the control file the children read
+ * (STOP), applies the stop rules on the job's whole usage, and looks for pi processes that report through no
  * ledger at all.
  *
  * No pi import: this file loads only usage-meter.mjs, child-route.mjs and node built-ins.
@@ -27,19 +27,18 @@
  *        A `starting` ledger of a DEAD process is done only when it was seen for less than the wall grace, used less
  *        than the CPU grace, and holds zero spend; otherwise it is unmetered. Judged once, when the file is retired.
  *   3. JUDGE. The fold goes to meter.setChildren with `unmetered` and `processes` widened by what the detector found
- *      (the token cap is judged there, on parent plus children). Then, first stop wins:
- *      - under a dollar cap: the parent's settled spend plus every child's settled spend (ledgerSettled: the larger
- *        of its guard's spend and its metered cost) past the cap, or any child `costRefused`, is `cost-cap`;
+ *      (the token cap is judged there, on parent plus children, at the meter's settle-time check). Then, first stop
+ *      wins:
  *      - under a model list: any child `modelRefused`, or any named child row whose pair is not on the PARENT's list
  *        (a spawner can widen a child's own list), is `model-not-allowed`. A model-less row is not judged here: the
  *        child's own guard judged that call against the list it inherited;
  *      - any unmetered child: one `unmetered_child` line (the first time), then the stop an unmetered child gets:
- *        `cost-cap` under a dollar cap, else `token_budget` under a token cap, else `model-not-allowed` under a list,
+ *        `token_budget` under a token cap, else `model-not-allowed` under a list,
  *        with `cause: "unmetered-child"` so the token stop does not log `token_budget_exceeded`. With no policy it
  *        is a floor only, and nothing stops.
- *   4. WRITE (ticks only). SPENT under a dollar cap (spentFile), and STOP with the meter's reason once it has stopped,
- *      rewritten on every tick so a deleted STOP comes back. The parent's own failure to write either is counted once
- *      as unmetered: a child it cannot reach is a child it cannot hold to the cap.
+ *   4. WRITE (ticks only). STOP with the meter's reason once it has stopped, rewritten on every tick so a deleted STOP
+ *      comes back. The parent's own failure to write it is counted once as unmetered: a child it cannot reach is a
+ *      child it cannot hold to the policy.
  *
  * TEARDOWN: STOP first (the meter's reason, or `token_budget` when the job ended without a stop: past the final fold no
  * child call could be counted), then the final pass. The directory and its STOP stay: the container ends right after,
@@ -47,15 +46,16 @@
  * call in flight at the STOP shows in the final fold as `unresolved`. The teardown line gains `distinct` and `peak` (pi
  * processes the detector saw, null with no detector) and `unmetered`.
  *
- * The parent's cost guard reads `external()`: every child's ledgerCharge() (settled plus in flight) as of the last
- * fold. The exit line's cost and model counters add the children's (`guardFields`).
+ * The exit line's model counter adds the children's (`guardFields`). The per-job cost guard and its SPENT
+ * control file are gone with the money: a child's spend reaches the job only as tokens, through its ledger's
+ * totals, and the token cap judges parent plus children at the meter's settle-time check.
  */
 import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_ENTRIES, RUN_JOB_PATH } from "./child-route.mjs";
-import { COST_CAP, MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "./outcome.mjs";
-import { foldChildLedgers, SPENT_FILE, spentFile, STOP_FILE, stopFile, writeFileAtomic } from "./usage-meter.mjs";
+import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "./outcome.mjs";
+import { foldChildLedgers, STOP_FILE, stopFile, writeFileAtomic } from "./usage-meter.mjs";
 
 /**
  * How much CPU a process may use with its ledger still `starting`. An honest child installs its meter at about 0.3 s of
@@ -91,17 +91,17 @@ export const SCAN_BUDGET_MS = 200;
 export const PF_FORKNOEXEC = 0x40;
 /** The NODE_OPTIONS flag the runner gives its descendants (openChildLedger), for this image's preload. */
 export const PRELOAD_FLAG = `--import=${new URL("./child-preload.mjs", import.meta.url).href}`;
-/** The cost and model counters the exit line carries and a child ledger adds to (guardFields). */
-const GUARD_FIELDS = Object.freeze(["costRefused", "boundExceeded", "longContext", "costUnjudged", "costUnanswered", "modelRefused"]);
+/** The model counters the exit line carries and a child ledger adds to (guardFields). */
+const GUARD_FIELDS = Object.freeze(["modelRefused"]);
 
 /** The fold of a directory with nothing in it: what setChildren gets before the first tick, so the keys are there. */
 function emptyFold() {
-	return { processes: 0, unmetered: 0, flooded: 0, totals: { input: 0, output: 0, total: 0, cost: 0, calls: 0, unresolved: 0, unpriced: 0, sessions: 0 }, rows: [], spentMicros: 0, inflightMicros: 0, costRefused: 0, modelRefused: 0, boundExceeded: 0, costUnanswered: 0, costUnreported: 0, longContext: 0, costUnjudged: 0, settledMicros: 0, chargeMicros: 0, missing: false, files: new Map(), retired: null };
+	return { processes: 0, unmetered: 0, flooded: 0, totals: { input: 0, output: 0, total: 0, calls: 0, unresolved: 0, usageUnreported: 0, sessions: 0 }, rows: [], modelRefused: 0, missing: false, files: new Map(), retired: null };
 }
 
-/** Whether a ledger's mark holds any spend at all. */
+/** Whether a ledger's mark holds any usage at all. */
 function spent(high) {
-	return Object.values(high.totals).some((value) => value !== 0) || high.spentMicros !== 0 || high.inflightMicros !== 0 || high.rows.size > 0;
+	return Object.values(high.totals).some((value) => value !== 0) || high.rows.size > 0;
 }
 
 /**
@@ -271,9 +271,9 @@ export function linuxProc({
  * written, and the detector alone sees the children). `guard()` returns the parent's policy guard or null (late, because
  * the guard's `external` is this hook's). `now` is a monotonic clock in ms (the wall-time grace off Linux, where a
  * proc with no `cpuMs` is used). Everything that touches the system is injected for the tests.
- * Returns `{ sample, teardown, external, stopped, guardFields, view }`: the two hook methods, the parent cost guard's
- * `external`, `stopped()` for the meter's onStop (writes STOP at once rather than on the next tick), `guardFields()`
- * (the exit line's guard counters plus the children's), and `view()` (the counts).
+ * Returns `{ sample, teardown, stopped, guardFields, view }`: the two hook methods, `stopped()` for the meter's
+ * onStop (writes STOP at once rather than on the next tick), `guardFields()` (the exit line's guard counters plus
+ * the children's), and `view()` (the counts).
  */
 export function createChildWatch({
 	dir,
@@ -375,7 +375,6 @@ export function createChildWatch({
 
 	/** The stop an unmetered child gets under the job's policies, or null with none. */
 	function unmeteredStop() {
-		if (meter.costCap !== null) return COST_CAP;
 		if (meter.cap !== null) return TOKEN_BUDGET;
 		if (meter.allowed !== null) return MODEL_NOT_ALLOWED;
 		return null;
@@ -390,10 +389,6 @@ export function createChildWatch({
 		const ledgered = ledgerPids(view);
 		const detected = [...noLedger].filter((pid) => !ledgered.has(pid)).length;
 		meter.setChildren({ ...view, processes: view.processes + detected, unmetered: count });
-		if (meter.costCap !== null) {
-			const own = guard()?.spend?.() ?? { spentMicros: 0 };
-			if (own.spentMicros + view.settledMicros > meter.costCap || view.costRefused > 0) meter.stop(COST_CAP);
-		}
 		if (meter.allowed !== null && (view.modelRefused > 0 || view.rows.some(offList))) meter.stop(MODEL_NOT_ALLOWED);
 		if (count > 0) {
 			if (!warned) {
@@ -431,10 +426,6 @@ export function createChildWatch({
 	/** Step 4. */
 	function writeControls() {
 		const before = writeFailed || dirLost;
-		if (meter.costCap !== null) {
-			const own = guard()?.spend?.() ?? { spentMicros: 0, inflightMicros: 0 };
-			writeControl(SPENT_FILE, JSON.stringify(spentFile(prev, own.spentMicros + own.inflightMicros)));
-		}
 		if (meter.state.stopReason !== null) writeStop(meter.state.stopReason);
 		// A write that failed (or found the directory gone) is judged in this pass, not the next.
 		if (!before && (writeFailed || dirLost)) judge();
@@ -544,9 +535,6 @@ export function createChildWatch({
 				closed = true;
 			}
 			return { distinct: proc === null ? null : seen.size, peak: proc === null ? null : peak, unmetered: count };
-		},
-		external() {
-			return current().chargeMicros;
 		},
 		stopped(reason) {
 			if (!closed) writeStop(reason);

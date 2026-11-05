@@ -84,10 +84,10 @@ function snapshot(over = {}) {
     ],
     budget: { day: 25, week: 165, month: 168, tokensToday: 3_120_000 },
     settings: { overlay: { dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8_000_000, softHoldPct: 80 } },
-    dollars: { rows: [
-      { ledger: "deployment", name: null, window: "day", capMicros: 25_000_000, counterMicros: 15_040_000, full: false },
-      { ledger: "scope", name: "project:web", window: "week", capMicros: 40_000_000, counterMicros: 10_400_000, full: false },
-      { ledger: "model", name: "claude-sonnet-5-5", window: "week", capMicros: 60_000_000, counterMicros: 24_600_000, full: false },
+    windows: { rows: [
+      { ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: 15_040_000, full: false },
+      { ledger: "scope", name: "project:web", window: "week", capTokens: 40_000_000, counterTokens: 10_400_000, full: false },
+      { ledger: "model", name: "claude-sonnet-5-5", window: "week", capTokens: 60_000_000, counterTokens: 24_600_000, full: false },
     ] },
     spendByHour: { hours: Array.from({ length: 24 }, (_, i) => (i > 15 ? null : i >= 9 ? 400_000 * (i - 8) : 0)), unpriced: 1, floor: false, partial: false },
     softHoldToday: { count: 3, floor: false, partial: false },
@@ -543,18 +543,18 @@ test("Running: the rows of a registry that could not be read are as last seen: n
 test("Spend today: the day window's spent and held of its cap, the hours' settled spend as dots, said under them", () => {
   const out = draw(overviewSpend, snapshot());
   assert.match(out, /<span class="chip tone-ok">60% of cap<\/span>/);
-  assert.match(out, /<p class="kpi"><b><data value="15040000" title="\$15\.04">\$15\.04<\/data><\/b><span>of <span title="\$25\.00">\$25\.00<\/span><\/span><\/p>/);
+  assert.match(out, /<p class="kpi"><b><data value="15040000" title="15,040,000">15\.04M<\/data><\/b><span>of <span title="25,000,000">25\.00M<\/span><\/span><\/p>/);
   assert.equal((out.match(/class="sd__c"/g) ?? []).length, 16, "one column per hour of the UTC day so far");
   assert.ok(out.includes(esc(SPEND_HOURS_TEXT)) && out.includes("1 run today carries no settled amount."));
-  const full = draw(overviewSpend, snapshot({ dollars: { rows: [{ ledger: "deployment", name: null, window: "day", capMicros: 25_000_000, counterMicros: 24_000_000, full: true }] } }));
+  const full = draw(overviewSpend, snapshot({ windows: { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: 24_000_000, full: true }] } }));
   assert.match(full, /<span class="chip tone-failed">96% of cap<\/span>/);
-  const plain = draw(overviewSpend, snapshot({ dollars: null }));
-  assert.match(plain, /<b><data value="\d+" title="\$[\d.]+">\$[\d.]+<\/data><\/b><span>settled today<\/span>/);
+  const plain = draw(overviewSpend, snapshot({ windows: null }));
+  assert.match(plain, /<b><data value="\d+" title="[\d,]+">[\d.]+[kMB]?<\/data><\/b><span>settled today<\/span>/);
   assert.ok(!plain.includes("% of cap"));
-  const quiet = draw(overviewSpend, snapshot({ dollars: null, spendByHour: { hours: Array.from({ length: 24 }, (_, i) => (i > 15 ? null : 0)), unpriced: 0 } }));
+  const quiet = draw(overviewSpend, snapshot({ windows: null, spendByHour: { hours: Array.from({ length: 24 }, (_, i) => (i > 15 ? null : 0)), unpriced: 0 } }));
   assert.ok(quiet.includes(SPEND_EMPTY.body));
   assert.ok(draw(overviewSpend, snapshot({ spendByHour: null })).includes("The run records could not be read"));
-  assert.ok(draw(overviewSpend, snapshot({ dollars: { rows: [], unreachable: "build3.lan" } })).includes("The dollar counters could not be read."));
+  assert.ok(draw(overviewSpend, snapshot({ windows: { rows: [], unreachable: "build3.lan" } })).includes("The token counters could not be read."));
 });
 
 test("Spend today with each read behind it failed: the note says where its number comes from, and what could not be read", () => {
@@ -562,17 +562,17 @@ test("Spend today with each read behind it failed: the note says where its numbe
   const win = draw(overviewSpend, snapshot());
   assert.ok(win.includes(esc(SPEND_HOURS_TEXT)) && !win.includes(esc(SPEND_SUM_TEXT)));
   // No day window (no day dollar cap): the dots' sum, never "the day window's".
-  const sum = draw(overviewSpend, snapshot({ dollars: { rows: [] } }));
+  const sum = draw(overviewSpend, snapshot({ windows: { rows: [] } }));
   assert.match(sum, /<span>settled today<\/span>/);
   assert.ok(sum.includes(esc(SPEND_SUM_TEXT)) && !sum.includes(esc(SPEND_HOURS_TEXT)));
   // The counters could not be read (the reader's failure, or the day window's counter null): the sum, and the line.
-  for (const dollars of [{ rows: [], unreachable: "connect build3.lan" }, { rows: [{ ledger: "deployment", name: null, window: "day", capMicros: 25_000_000, counterMicros: null, full: false }] }]) {
-    const out = draw(overviewSpend, snapshot({ dollars }));
-    assert.match(out, /<span>settled today<\/span>/, JSON.stringify(dollars));
-    assert.ok(out.includes(esc(SPEND_SUM_TEXT)) && out.includes("The dollar counters could not be read.") && !out.includes("% of cap") && !out.includes("build3.lan"), JSON.stringify(dollars));
+  for (const windows of [{ rows: [], unreachable: "connect build3.lan" }, { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: null, full: false }] }]) {
+    const out = draw(overviewSpend, snapshot({ windows }));
+    assert.match(out, /<span>settled today<\/span>/, JSON.stringify(windows));
+    assert.ok(out.includes(esc(SPEND_SUM_TEXT)) && out.includes("The token counters could not be read.") && !out.includes("% of cap") && !out.includes("build3.lan"), JSON.stringify(windows));
   }
   // The run records could not be read, and no window either: a dash and "not known", never "no runs".
-  const blind = draw(overviewSpend, snapshot({ dollars: { rows: [] }, spendByHour: null }));
+  const blind = draw(overviewSpend, snapshot({ windows: { rows: [] }, spendByHour: null }));
   assert.match(blind, /<p class="kpi"><b>-<\/b><span>not known<\/span><\/p>/);
   assert.ok(!blind.includes(SPEND_EMPTY.title) && blind.includes("The run records could not be read"));
   // A day of records not read whole (only the newest, or a side of them): its hours may be short, said.
@@ -581,12 +581,12 @@ test("Spend today with each read behind it failed: the note says where its numbe
   // The empty sentence only over the hours read whole: over a day read in part, no settled spend among the records read
   // is not "no run has settled any spend", so the note names its number's source as for any sum.
   const zero = { hours: Array.from({ length: 24 }, (_, i) => (i > 15 ? null : 0)), unpriced: 0, floor: false, partial: false };
-  assert.ok(draw(overviewSpend, snapshot({ dollars: { rows: [] }, spendByHour: zero })).includes(SPEND_EMPTY.body), "read whole: the empty sentence");
+  assert.ok(draw(overviewSpend, snapshot({ windows: { rows: [] }, spendByHour: zero })).includes(SPEND_EMPTY.body), "read whole: the empty sentence");
   for (const over of [{ floor: true }, { partial: true }]) {
-    for (const dollars of [{ rows: [] }, snapshot().dollars]) {
-      const out = draw(overviewSpend, snapshot({ dollars, spendByHour: { ...zero, ...over } }));
+    for (const windows of [{ rows: [] }, snapshot().windows]) {
+      const out = draw(overviewSpend, snapshot({ windows, spendByHour: { ...zero, ...over } }));
       assert.ok(!out.includes(SPEND_EMPTY.body), `${JSON.stringify(over)}: no empty sentence`);
-      assert.ok(out.includes(esc(dollars.rows.length > 0 ? SPEND_HOURS_TEXT : SPEND_SUM_TEXT)) && out.includes("Not every run record of today was read"), JSON.stringify(over));
+      assert.ok(out.includes(esc(windows.rows.length > 0 ? SPEND_HOURS_TEXT : SPEND_SUM_TEXT)) && out.includes("Not every run record of today was read"), JSON.stringify(over));
     }
   }
 });
@@ -681,30 +681,30 @@ test("the timeline shows every role a reason this console has no words for as re
 test("Caps: a capsule per window with a cap, the soft hold on the job windows alone, its words the worker's", () => {
   const out = draw(overviewCaps, snapshot());
   assert.match(out, /<a class="btn btn--sm" href="\/insights">Spend<\/a>/);
-  assert.equal((out.match(/<div class="cap"/g) ?? []).length, 7, "three job windows, tokens, three dollar windows");
+  assert.equal((out.match(/<div class="cap"/g) ?? []).length, 7, "three job windows, the token budget, three token windows");
   assert.equal((out.match(/class="cap__hold"/g) ?? []).length, 3, "the soft hold on the job windows only (budget.mjs)");
   assert.match(out, /title="Jobs week: 82%">[^]*?tone-attention[^]*?<\/div>/, "past the soft hold: attention; a share below the cap is rounded down");
   assert.match(out, /title="Jobs today: 62%">[^]*?tone-ok[^]*?<\/div>/);
-  // A window's "$" is joined to its name by a no-break space, so a long name never leaves it alone on a line.
-  assert.match(out, /<b>Deploy&nbsp;\$<\/b>today/);
-  assert.match(out, /title="Deploy \$ today: \d+%"/, "the title and the image's name keep a plain space");
-  assert.match(out, /web \$ is project web; claude-sonnet-5-5 \$ is model claude-sonnet-5-5/);
-  const provider = draw(overviewCaps, snapshot({ dollars: { rows: [{ ledger: "model", name: "anthropic/claude-sonnet-5-5", window: "week", capMicros: 10, counterMicros: 1, full: false }] } }));
-  assert.match(provider, /<b>claude-sonnet-5-5&nbsp;\$<\/b>week/);
-  assert.match(provider, /claude-sonnet-5-5 \$ is model anthropic\/claude-sonnet-5-5/);
+  // A window's unit is joined to its name by a no-break space, so a long name never leaves it alone on a line.
+  assert.match(out, /<b>Deploy&nbsp;tokens<\/b>today/);
+  assert.match(out, /title="Deploy tokens today: \d+%"/, "the title and the image's name keep a plain space");
+  assert.match(out, /web tokens is project web; claude-sonnet-5-5 tokens is model claude-sonnet-5-5/);
+  const provider = draw(overviewCaps, snapshot({ windows: { rows: [{ ledger: "model", name: "anthropic/claude-sonnet-5-5", window: "week", capTokens: 10, counterTokens: 1, full: false }] } }));
+  assert.match(provider, /<b>claude-sonnet-5-5&nbsp;tokens<\/b>week/);
+  assert.match(provider, /claude-sonnet-5-5 tokens is model anthropic\/claude-sonnet-5-5/);
   assert.match(out, /Soft hold line \(80%\)/);
   assert.ok(out.includes(SOFT_HOLD_TEXT) && out.includes(COUNT_WINDOWS_UTC_TEXT));
   assert.ok(!out.includes("new jobs wait"), "the design's words, which the worker does not do, are not drawn");
-  const noHold = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, dollars: null }));
+  const noHold = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: null }));
   assert.ok(!noHold.includes(SOFT_HOLD_TEXT) && !noHold.includes("cap__hold") && noHold.includes(COUNT_WINDOWS_UTC_TEXT));
-  assert.ok(draw(overviewCaps, snapshot({ settings: { overlay: {} }, dollars: null })).includes(CAPS_EMPTY_TEXT));
+  assert.ok(draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: null })).includes(CAPS_EMPTY_TEXT));
 });
 
 /** A capsule's tone, by its title's name and window ("Jobs today"). */
 const capTone = (out, what) => new RegExp(`title="${what}: \\d+%"><svg class="tone-([a-z]+)"`).exec(out)?.[1] ?? null;
 
 test("Caps: a window's tone is the budget's own band (budget.mjs windowState): amber from the soft hold, full at the cap", () => {
-  const caps = (budget, overlay, dollars = { rows: [] }) => draw(overviewCaps, snapshot({ budget, settings: { overlay }, dollars }));
+  const caps = (budget, overlay, windows = { rows: [] }) => draw(overviewCaps, snapshot({ budget, settings: { overlay }, windows }));
   // The soft hold turns a job window amber where the next start would pass it, floor(cap * pct / 100), and no sooner.
   assert.equal(capTone(caps({ day: 32 }, { dailyCap: 40, softHoldPct: 80 }), "Jobs today"), "attention");
   assert.equal(capTone(caps({ day: 31 }, { dailyCap: 40, softHoldPct: 80 }), "Jobs today"), "ok");
@@ -713,48 +713,48 @@ test("Caps: a window's tone is the budget's own band (budget.mjs windowState): a
   // The token window takes no soft hold: past the hold's percent it is still open, and full at its cap.
   assert.equal(capTone(caps({ tokensToday: 90 }, { dailyTokenCap: 100, softHoldPct: 80 }), "Tokens today"), "ok");
   assert.equal(capTone(caps({ tokensToday: 100 }, { dailyTokenCap: 100, softHoldPct: 80 }), "Tokens today"), "failed");
-  // A dollar window is full where its counter says so (the worker's own `full`), even short of 100%.
-  const dollar = (full) => caps({}, {}, { rows: [{ ledger: "deployment", name: null, window: "day", capMicros: 100, counterMicros: 99, full }] });
-  assert.equal(capTone(dollar(true), "Deploy \\$ today"), "failed");
-  assert.equal(capTone(dollar(false), "Deploy \\$ today"), "ok");
+  // A token window is full where its counter says so (the worker's own `full`), even short of 100%.
+  const windowRow = (full) => caps({}, {}, { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 100, counterTokens: 99, full }] });
+  assert.equal(capTone(windowRow(true), "Deploy tokens today"), "failed");
+  assert.equal(capTone(windowRow(false), "Deploy tokens today"), "ok");
 });
 
 test("Caps: a folder scope is named by its last folder for every role, and no line writes a scope's raw name", () => {
-  const dollars = { rows: [
-    { ledger: "scope", name: "/home/rob/clients/acme-secret", window: "day", capMicros: 5_000_000, counterMicros: 1_000_000, full: false },
-    { ledger: "scope", name: "C:\\Users\\rob\\clients\\winfolder", window: "week", capMicros: 5_000_000, counterMicros: 1, full: false },
-    { ledger: "scope", name: "acme/widgets", window: "week", capMicros: 5_000_000, counterMicros: 1, full: false },
-    { ledger: "scope", name: "github:acme/api", window: "month", capMicros: 5_000_000, counterMicros: 1, full: false },
+  const windows = { rows: [
+    { ledger: "scope", name: "/home/rob/clients/acme-secret", window: "day", capTokens: 5_000_000, counterTokens: 1_000_000, full: false },
+    { ledger: "scope", name: "C:\\Users\\rob\\clients\\winfolder", window: "week", capTokens: 5_000_000, counterTokens: 1, full: false },
+    { ledger: "scope", name: "acme/widgets", window: "week", capTokens: 5_000_000, counterTokens: 1, full: false },
+    { ledger: "scope", name: "github:acme/api", window: "month", capTokens: 5_000_000, counterTokens: 1, full: false },
   ] };
   for (const role of ["operator", "viewer"]) {
-    const out = draw(overviewCaps, snapshot({ dollars }), { role });
+    const out = draw(overviewCaps, snapshot({ windows }), { role });
     for (const raw of ["/home/rob", "clients/acme-secret", "Users", "rob\\"]) assert.ok(!out.includes(raw), `${role}: ${raw} is nowhere`);
-    assert.match(out, /<b>\.\.\.\/acme-secret&nbsp;\$<\/b>today/, `${role}: the folder by its last folder`);
-    assert.match(out, /<b>\.\.\.\/winfolder&nbsp;\$<\/b>week/, `${role}: a drive path too`);
-    assert.match(out, /<b>acme\/widgets&nbsp;\$<\/b>week/, `${role}: a repo as it is`);
-    assert.match(out, /<b>github:acme\/api&nbsp;\$<\/b>month/, `${role}: a forge's repo as it is`);
-    assert.ok(!/ \$ is (?!model|project)/.test(out), `${role}: the key names a project or a model, never a scope`);
+    assert.match(out, /<b>\.\.\.\/acme-secret&nbsp;tokens<\/b>today/, `${role}: the folder by its last folder`);
+    assert.match(out, /<b>\.\.\.\/winfolder&nbsp;tokens<\/b>week/, `${role}: a drive path too`);
+    assert.match(out, /<b>acme\/widgets&nbsp;tokens<\/b>week/, `${role}: a repo as it is`);
+    assert.match(out, /<b>github:acme\/api&nbsp;tokens<\/b>month/, `${role}: a forge's repo as it is`);
+    assert.ok(!/ tokens is (?!model|project)/.test(out), `${role}: the key names a project or a model, never a scope`);
   }
 });
 
 test("Caps with each read behind it failed: a counter not read is said, and the empty sentence only where no window has a cap", () => {
   const counts = "The job or token counters could not be read, so their windows are not drawn.";
-  // The dollar counters' read failed, with no count cap: the line, never the empty sentence, never the reader's message.
-  const lost = draw(overviewCaps, snapshot({ settings: { overlay: {} }, dollars: { rows: [], unreachable: "connect build3.lan" } }));
-  assert.ok(lost.includes("The dollar counters could not be read.") && !lost.includes(CAPS_EMPTY_TEXT) && !lost.includes("build3.lan"));
+  // The token counters' read failed, with no count cap: the line, never the empty sentence, never the reader's message.
+  const lost = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [], unreachable: "connect build3.lan" } }));
+  assert.ok(lost.includes("The token counters could not be read.") && !lost.includes(CAPS_EMPTY_TEXT) && !lost.includes("build3.lan"));
   // Beside a count window: its capsule, and the line.
-  const beside = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, dollars: { rows: [], unreachable: "x" } }));
-  assert.ok(beside.includes('title="Jobs today: ') && beside.includes("The dollar counters could not be read."));
-  // A dollar window whose counter came back null (the counters' one read failed): not drawn, said.
-  const nul = draw(overviewCaps, snapshot({ settings: { overlay: {} }, dollars: { rows: [{ ledger: "deployment", name: null, window: "day", capMicros: 25_000_000, counterMicros: null, full: false }] } }));
-  assert.ok(nul.includes("The dollar counters could not be read.") && !nul.includes(CAPS_EMPTY_TEXT) && !nul.includes("Deploy"));
+  const beside = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: { rows: [], unreachable: "x" } }));
+  assert.ok(beside.includes('title="Jobs today: ') && beside.includes("The token counters could not be read."));
+  // A token window whose counter came back null (the counters' one read failed): not drawn, said.
+  const nul = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: null, full: false }] } }));
+  assert.ok(nul.includes("The token counters could not be read.") && !nul.includes(CAPS_EMPTY_TEXT) && !nul.includes("Deploy"));
   // A job counter that is no number, or no budget read at all.
   for (const budget of [{ day: "junk" }, null, undefined]) {
-    const out = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, dollars: { rows: [] }, budget }));
+    const out = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: { rows: [] }, budget }));
     assert.ok(out.includes(counts) && !out.includes(CAPS_EMPTY_TEXT) && !out.includes("Jobs today"), JSON.stringify(budget));
   }
   // Every read made and no window with a cap: the empty sentence, naming the overlay it read, and no line of a read.
-  const none = draw(overviewCaps, snapshot({ settings: { overlay: {} }, dollars: { rows: [] } }));
+  const none = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [] } }));
   assert.ok(none.includes(CAPS_EMPTY_TEXT) && !none.includes("could not be read"));
   assert.ok(!none.includes("No cap is set"), "the worker's own caps from its environment are in no read, so never that no cap is set");
   assert.ok(!draw(overviewCaps, snapshot()).includes("could not be read"), "every read made: no line");
@@ -766,13 +766,13 @@ test("Caps draws the overlay's caps only from a settings read made whole: an inv
   // with no overlay object; and no settings read at all.
   for (const settings of [{ path: "/srv/pi/settings.json", invalid: "dailyCap: must be a positive integer" }, { path: "/srv/pi/settings.json", overlay: null }, { path: "/srv/pi/settings.json", overlay: [] }, null, undefined]) {
     const what = JSON.stringify(settings) ?? "undefined";
-    const out = draw(overviewCaps, snapshot({ settings, dollars: { rows: [] } }));
+    const out = draw(overviewCaps, snapshot({ settings, windows: { rows: [] } }));
     assert.ok(out.includes(settingsUnread), `${what}: said`);
     assert.ok(!out.includes(CAPS_EMPTY_TEXT) && !out.includes("No cap is set"), `${what}: never the empty sentence`);
     assert.ok(!out.includes("must be a positive") && !out.includes("/srv/pi"), `${what}: never the reader's message or path`);
     // Beside the dollar windows, read on their own: those are drawn, and the overlay's are not.
     const beside = draw(overviewCaps, snapshot({ settings }));
-    assert.ok(beside.includes(settingsUnread) && beside.includes('title="Deploy $ today: ') && !beside.includes('title="Jobs ') && !beside.includes("Soft hold"), `${what}: the dollar windows alone`);
+    assert.ok(beside.includes(settingsUnread) && beside.includes('title="Deploy tokens today: ') && !beside.includes('title="Jobs ') && !beside.includes("Soft hold"), `${what}: the token windows alone`);
   }
   // An invalid read that still carries an overlay's keys draws none of them.
   assert.ok(!draw(overviewCaps, snapshot({ settings: { invalid: "x", overlay: { dailyCap: 40, softHoldPct: 80 } } })).includes('title="Jobs today'));

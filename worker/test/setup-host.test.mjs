@@ -270,7 +270,7 @@ test("every browser-eligible pinned provider round-trips Add and Replace through
 	for (const provider of eligible) await t.test(provider, async () => {
 		const key = apiKeyVariable(providerKeyCandidates(provider));
 		const otherKey = key === "ANTHROPIC_API_KEY" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
-		const base = `# retained deployment context\nPI_AUTH_FROM_PI=0\nPI_PROVIDER=anthropic\nPI_MODEL=retained-default-model\nPI_SETTINGS_FILE=settings.json\nPI_TRIGGERS_FILE=triggers.json\nPI_AUTH_CONNECTIONS_FILE=connections.json\nPI_ALLOWED_MODELS=anthropic/retained-default-model\nPI_MAX_COST_USD=2\nPI_EGRESS=1\nUNRELATED=preserve-exactly\n${otherKey}=unrelated-private-value\n`;
+		const base = `# retained deployment context\nPI_AUTH_FROM_PI=0\nPI_PROVIDER=anthropic\nPI_MODEL=retained-default-model\nPI_SETTINGS_FILE=settings.json\nPI_TRIGGERS_FILE=triggers.json\nPI_AUTH_CONNECTIONS_FILE=connections.json\nPI_ALLOWED_MODELS=anthropic/retained-default-model\nPI_MAX_TOKENS=2\nPI_EGRESS=1\nUNRELATED=preserve-exactly\n${otherKey}=unrelated-private-value\n`;
 		const deps = await pinnedProviders(host(base));
 		const envPath = join(deps.cwd, ".env");
 		const files = {

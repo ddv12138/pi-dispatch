@@ -6,7 +6,7 @@ import { catalogDiff, lifecycleModels, roleProposalChecks } from "../src/model-p
 import { cheaperRouteChecks, doctorModelProposalChecks, fetchLifecycle, parseProposalConfig } from "../src/doctor-model-proposals.mjs";
 import { catalogFromArchive, modelProposalReport, registryCatalog } from "../../.github/scripts/model-proposal-report.mjs";
 
-const rates = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.25 };
+const rates = { input: 0.0002, output: 0.0004, cacheRead: 0.00002, cacheWrite: 0.00025 }; // a full-context call at these lands between the two reference caps
 const model = (id, cost = rates) => ({ provider: "anthropic", id, type: "chat", api: "anthropic-messages", cost, maxTokens: 4096 });
 const now = () => Date.parse("2026-01-01T00:00:00Z");
 
@@ -16,11 +16,11 @@ test("catalog proposals enumerate added, removed and repriced chat models determ
 	assert.throws(() => catalogDiff([], [model("same"), model("same")], ["anthropic"]), /ambiguous/);
 });
 
-test("report uses the enforcement bound and labels public reference caps honestly", async () => {
+test("report prices one full-context call and labels public reference caps honestly", async () => {
 	const report = await modelProposalReport("1.0.0", "1.0.1", { providers: ["anthropic"], capsUsd: [0.001, 5], outputTokens: 4096 }, { catalog: async (v) => v === "1.0.0" ? [] : [model("new")] });
 	assert.match(report, /not deployment caps/);
 	assert.match(report, /exceeds \$0.001, fits \$5/);
-	assert.match(report, /actual job prompts/);
+	assert.match(report, /actual job prompts, images and thinking/);
 	await assert.rejects(modelProposalReport("1.0.0", "1.0.1", { providers: ["bad`"], capsUsd: [1], outputTokens: 1 }), /configuration/);
 });
 
@@ -124,7 +124,7 @@ test("proposal configuration rejects unsupported providers and credential-bearin
 
 test("cheaper-route proposals require declared equivalence, mapped source and declared endpoints", () => {
 	const roles = { default: { editor: "local/old" } }, routes = [{ model: "local/old", alternative: "local/new" }];
-	const models = { providers: { local: { baseUrl: "http://server:8000/v1", models: [{ id: "old", cost: rates }, { id: "new", cost: { ...rates, output: 1 } }] } } };
+	const models = { providers: { local: { baseUrl: "http://server:8000/v1", models: [{ id: "old", cost: rates }, { id: "new", cost: { ...rates, output: 0.0003 } }] } } };
 	const endpoints = [{ host: "server", port: 8000 }];
 	assert.equal(cheaperRouteChecks(roles, routes, models, endpoints).length, 1);
 	assert.deepEqual(cheaperRouteChecks(roles, routes, models, []), []);

@@ -41,7 +41,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            task and every other field come from the triggers file (PI_TRIGGERS_FILE, else
                            ./triggers.json here); a second call in the same minute queues nothing.
                            Both run forms take PI_WORKER_NAME (and --trigger PI_TRIGGERS_FILE and
-                           PI_MAX_COST_USD) from this shell, else from ./.env here, refusing a disagreement
+                           PI_MAX_TOKENS) from this shell, else from ./.env here, refusing a disagreement
   pi-dispatch sandbox <jobId>
                            re-open a finished run's sandbox as a shell — same image, same workspace,
                            no credentials  [--publish <port>[:<containerPort>]] [--pin]
@@ -53,7 +53,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            register pi-dispatch-open for this account; terminal commands wait for Enter
   pi-dispatch sandbox --list
                            what is still re-openable, for how long, and what is running now
-  pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-usd <amount>
+  pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-tokens <tokens>
                            replay up to three retained recent jobs in disposable workspaces with forge
                            access blocked, under one experiment cap [--count 1..10] [--json]
 
@@ -418,7 +418,7 @@ async function runTrigger(values, positionals, env, { write, valkeyRefusal, now 
 	}
 	// PI_TRIGGERS_FILE and PI_WORKER_NAME by the deployment's rule (review of PR #575), the one VALKEY_URL is read by
 	// below: which file and which host queue are the deployment's facts, and a shell that does not export them must not
-	// read ./triggers.json or queue on the shared queue while the service uses the `.env`'s. PI_MAX_COST_USD too: it is
+	// read ./triggers.json or queue on the shared queue while the service uses the `.env`'s. PI_MAX_TOKENS too: it is
 	// the one other config value the worker's trigger loader (`loadSchedules`) accepts or refuses a file by (a trigger's
 	// `run.maxCostUsd` above it), so this command refuses exactly the files the worker refuses. `fleet` is the declared
 	// PI_WORKER_NAME, already here. Keep this list equal to the loader's config inputs.
@@ -475,7 +475,7 @@ async function runTrigger(values, positionals, env, { write, valkeyRefusal, now 
  * The env keys `run --trigger` resolves from the deployment: the file, the host, and every config value the worker's
  * trigger loader (`loadSchedules`: `triggersFile`, `maxCostUsd`, and `fleet` from a declared worker name) judges a file by.
  */
-export const TRIGGER_LOADER_ENV_KEYS = Object.freeze(["PI_TRIGGERS_FILE", "PI_WORKER_NAME", "PI_MAX_COST_USD"]);
+export const TRIGGER_LOADER_ENV_KEYS = Object.freeze(["PI_TRIGGERS_FILE", "PI_WORKER_NAME", "PI_MAX_TOKENS"]);
 
 /**
  * Deployment keys for a CLI verb that acts for the deployment (review of PR #575): `keys` resolved by issue #471's rule

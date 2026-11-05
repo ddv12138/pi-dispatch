@@ -410,22 +410,28 @@ test("renderRuns adds a REPLICA column, and an unreplicated run reads '-' rather
   assert.doesNotMatch(out, /\br0\b/);
 });
 
-test("renderWhatIf shows the estimate through fmtCost, and the seeded band verbatim", () => {
+test("renderWhatIf shows the token estimate and the target's context profile; an unmeasured flow stays honest", () => {
   const est = renderWhatIf(
-    { class: "estimated", usd: 12.5, perRun: 1.25, coverage: 0.8, excluded: 2, ratesVersion: "1.2.3" },
+    { class: "estimated", tokens: 1_250_000, perRun: 125_000, coverage: 0.8, excluded: 2, contextWindow: 200_000, contextShare: 0.625 },
     { flow: "fix", target: "anthropic/claude-sonnet-4" },
   );
   assert.match(est, /What-if fix @ anthropic\/claude-sonnet-4:/);
-  assert.match(est, /~\$12\.50 est\. total · ~\$1\.25 est\. per run/);
+  assert.match(est, /~1\.25M est\. total · ~125k est\. per run/);
   assert.match(est, /coverage 80% of observed runs ledgered · excluded 2 \(no ledger\)/);
-  assert.match(est, /rates pi-ai 1\.2\.3/);
+  assert.match(est, /a median run fills 63% of the target model's context window/, "the profile comparison the what-if exists for");
 
-  const seeded = renderWhatIf(
-    { class: "seeded", low: 0.5, high: 5, note: "unmeasured (OQ-002)" },
+  const noProfile = renderWhatIf(
+    { class: "estimated", tokens: 100, perRun: 10, coverage: 1, excluded: 0 },
+    { flow: "fix", target: "anthropic/claude-sonnet-4" },
+  );
+  assert.doesNotMatch(noProfile, /context window/, "a target with no declared window adds no profile line");
+
+  const unknown = renderWhatIf(
+    { class: "unknown", note: "unmeasured" },
     { flow: "new-flow", target: "anthropic/claude-sonnet-4" },
   );
-  assert.match(seeded, /~~\$0\.50 seeded to ~~\$5\.00 seeded/, "both band edges keep their seeded class marker");
-  assert.match(seeded, /unmeasured \(OQ-002\)/, "the fold's own note rides through verbatim");
+  assert.match(unknown, /— \(unmeasured\)/, "the fold's own note rides through verbatim behind the honest em dash");
+  assert.doesNotMatch(unknown, /\$|~\d/, "an unmeasured flow never reads like a measurement");
 });
 
 test("renderTriggers marks a replicating trigger, and an unflagged line is byte-identical", () => {
@@ -453,34 +459,34 @@ test("renderTriggers marks a replicating trigger, and an unflagged line is byte-
   assert.equal(all.split("[x").length - 1, 3, "label, comment and pull_request each show their count");
 });
 
-test("renderScopedLimits shows version 2 dollar windows, a model row's included (PR #549's review)", () => {
-  const limits = { limits: [{ scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayUsd: "3.00", weekUsd: null, monthUsd: null }] };
-  const out = renderScopedLimits({ limits, scopedBudget: { rows: [{ usdMicros: { day: 1_250_000 } }] } });
-  assert.match(out, /model:openai\/gpt-x: day \$1\.25\/\$3\.00/);
-  assert.match(renderScopedLimits({ limits }), /day \$-\/\$3\.00/);
+test("renderScopedLimits shows version 2 token windows, a model row's included (PR #549's review)", () => {
+  const limits = { limits: [{ scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayTokens: 3_000_000, weekTokens: null, monthTokens: null }] };
+  const out = renderScopedLimits({ limits, scopedBudget: { rows: [{ tokensUsed: { day: 1_250_000 } }] } });
+  assert.match(out, /model:openai\/gpt-x: day 1,250,000\/3,000,000/);
+  assert.match(renderScopedLimits({ limits }), /day -\/3,000,000/);
 });
 
-test("renderScopedLimits takes the counter and the full verdict from the panel's dollar rows by index, and keeps a cap they lack (#507)", () => {
+test("renderScopedLimits takes the counter and the full verdict from the panel's window rows by index, and keeps a cap they lack (#507)", () => {
   const limits = { limits: [
-    { scope: "acme/web", day: 10, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: null, monthUsd: null },
-    { scope: "project:shop", day: null, week: null, month: null, concurrent: null, dayUsd: null, weekUsd: "45.00", monthUsd: null },
-    { scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayUsd: "3.00", weekUsd: "80.00", monthUsd: null },
+    { scope: "acme/web", day: 10, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null },
+    { scope: "project:shop", day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: 45_000_000, monthTokens: null },
+    { scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayTokens: 3_000_000, weekTokens: 80_000_000, monthTokens: null },
   ] };
-  // The panel's own scoped read carries no `usdMicros`; a stale one here must not win over the DOLLAR WINDOWS rows.
-  const scopedBudget = { rows: [{ day: 2 }, { usdMicros: { week: 1 } }, {}] };
-  const dollars = { rows: [
-    { ledger: "deployment", name: null, index: null, window: "week", capMicros: 120_000_000, counterMicros: 5, full: false },
-    { ledger: "scope", name: "project:shop", index: 1, window: "week", capMicros: 45_000_000, counterMicros: 6_340_917, full: false },
-    { ledger: "model", name: "openai/gpt-x", index: 2, window: "week", capMicros: 80_000_000, counterMicros: 79_000_000, full: true },
+  // The panel's own scoped read carries no `tokensUsed`; a stale one here must not win over the TOKEN WINDOWS rows.
+  const scopedBudget = { rows: [{ day: 2 }, { tokensUsed: { week: 1 } }, {}] };
+  const windows = { rows: [
+    { ledger: "deployment", name: null, index: null, window: "week", capTokens: 120_000_000, counterTokens: 5, full: false },
+    { ledger: "scope", name: "project:shop", index: 1, window: "week", capTokens: 45_000_000, counterTokens: 6_340_917, full: false },
+    { ledger: "model", name: "openai/gpt-x", index: 2, window: "week", capTokens: 80_000_000, counterTokens: 79_000_000, full: true },
   ] };
-  assert.equal(renderScopedLimits({ limits, scopedBudget, dollars }), [
+  assert.equal(renderScopedLimits({ limits, scopedBudget, windows }), [
     "Scoped limits:",
     "  acme/web: day 2/10",
-    "  project:shop: week $6.340917/$45.00",
-    "  model:openai/gpt-x: day $-/$3.00 · week $79.00/$80.00 (full)",
+    "  project:shop: week 6,340,917/45,000,000",
+    "  model:openai/gpt-x: day -/3,000,000 · week 79,000,000/80,000,000 (full)",
   ].join("\n"));
-  // The dollar read failed as a whole: every cap stays, every counter is unknown.
-  assert.equal(renderScopedLimits({ limits, scopedBudget, dollars: { rows: [], unreachable: "down" } }).split("\n")[3], "  model:openai/gpt-x: day $-/$3.00 · week $-/$80.00");
+  // The window read failed as a whole: every cap stays, every counter is unknown.
+  assert.equal(renderScopedLimits({ limits, scopedBudget, windows: { rows: [], unreachable: "down" } }).split("\n")[3], "  model:openai/gpt-x: day -/3,000,000 · week -/80,000,000");
 });
 
 test("renderScopedLimits: rows with used/cap and config-only concurrency; null when nothing configured; invalid degrades", () => {
@@ -509,21 +515,21 @@ test("the status line NAMES the workers when the registry can, and is unchanged 
 
 test("a portfolio cron's plain line ends in [portfolio], the panel row's text; false and absent render alike (#507)", () => {
   const line = (t) => renderTriggers({ schedulers: [], triggers: { triggers: [t] } }).split("\n").find((l) => l.includes("plan-week"));
-  const cron = { type: "cron", id: "plan-week", pattern: "0 6 * * 1", folder: "/srv/ops", flow: "portfolio-manager", maxCostUsd: "2" };
-  assert.equal(line({ ...cron, portfolio: true }).trim(), "cron  plan-week  0 6 * * 1 → /srv/ops/portfolio-manager  [max $2]  [portfolio]");
+  const cron = { type: "cron", id: "plan-week", pattern: "0 6 * * 1", folder: "/srv/ops", flow: "portfolio-manager", maxTokens: 1_500_000 };
+  assert.equal(line({ ...cron, portfolio: true }).trim(), "cron  plan-week  0 6 * * 1 → /srv/ops/portfolio-manager  [max 1500000]  [portfolio]");
   assert.equal(line({ ...cron, portfolio: false }), line(cron), "false is the ordinary line, byte for byte");
   assert.ok(!line(cron).includes("[portfolio]"));
 });
 
 test("/dispatch priorities: the history row fits 80 columns, names a host only on a fleet, and the headroom names the total (#507)", () => {
   const M = 1_000_000;
-  const envelope = { window: "week", totalMicros: 100 * M, floors: { _other: 0, shop: 10 * M }, defaultWeights: { _other: 0, shop: 1 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
+  const envelope = { window: "week", totalTokens: 100 * M, floors: { _other: 0, shop: 10 * M }, defaultWeights: { _other: 0, shop: 1 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
   const state = { planId: "3f9a0c1d2e4b5a67", writer: "operator-session", appliedAt: "2026-10-05T12:00:00.000Z", envelopeDigest: "d", weights: { _other: 0, shop: 1 }, allocations: { _other: 0, shop: 100 * M }, unallocated: 0 };
   const refused = { at: "2026-10-05T12:30:00.000Z", host: "mini1", writer: "operator-session", outcome: "refused", reason: "plan-too-soon", planId: "aaaaaaaaaaaaaaaa" };
   const applied = { at: "2026-10-05T12:00:00.000Z", host: "mini1", writer: "operator-session", outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", clamped: true };
-  const text = (log) => renderAllocations({ envelope, digest: "d", alloc: { state, log, spend: { deployment: { micros: 76 * M }, projects: {} } } }).split("\n");
+  const text = (log) => renderAllocations({ envelope, digest: "d", alloc: { state, log, spend: { deployment: { tokens: 76 * M }, projects: {} } } }).split("\n");
   const one = text([refused, applied]);
-  assert.ok(one.includes("  unallocated $0.00 · deployment spent $76.00 of $100.00"), one.join("\n"));
+  assert.ok(one.includes("  unallocated 0 · deployment reserved+held 76,000,000 of 100,000,000"), one.join("\n"));
   assert.ok(one.includes("  10-05 12:30  operator-session  aaaaaaaa  refused plan-too-soon"));
   assert.ok(one.includes("  10-05 12:00  operator-session  3f9a0c1d  applied  clamped"));
   const fleet = text([{ ...refused, host: "build-host-number-7" }, applied]);
@@ -545,11 +551,11 @@ test("/dispatch priorities: the history row fits 80 columns, names a host only o
 
 test("/dispatch priorities shows - for a negative counter instead of throwing (#507)", () => {
   const M = 1_000_000;
-  const envelope = { window: "week", totalMicros: 100 * M, floors: { shop: 10 * M }, defaultWeights: { shop: 1 }, delegation: { enabled: false } };
+  const envelope = { window: "week", totalTokens: 100 * M, floors: { shop: 10 * M }, defaultWeights: { shop: 1 }, delegation: { enabled: false } };
   const state = { planId: null, writer: "default", appliedAt: "2026-10-05T12:00:00.000Z", envelopeDigest: "d", weights: { shop: 1 }, allocations: { shop: 100 * M }, unallocated: 0 };
-  const lines = renderAllocations({ envelope, digest: "d", alloc: { state, log: [], spend: { deployment: { micros: -5 }, projects: { shop: { micros: -1 } } } } }).split("\n");
-  assert.ok(lines.includes("  unallocated $0.00 · deployment spent - of $100.00"), lines.join("\n"));
-  assert.ok(lines.some((l) => /^ {2}shop +floor \$10\.00 +weight 1 +allocation \$100\.00 +spent -$/.test(l)), lines.join("\n"));
+  const lines = renderAllocations({ envelope, digest: "d", alloc: { state, log: [], spend: { deployment: { tokens: -5 }, projects: { shop: { tokens: -1 } } } } }).split("\n");
+  assert.ok(lines.includes("  unallocated 0 · deployment reserved+held - of 100,000,000"), lines.join("\n"));
+  assert.ok(lines.some((l) => /^ {2}shop +floor 10,000,000 +weight 1 +allocation 100,000,000 +spent -$/.test(l)), lines.join("\n"));
 });
 
 test("renderTriggers names a trigger's MCP servers on every kind, and nothing for one that names none (REQ-MCP-OPERATOR-SERVERS)", () => {

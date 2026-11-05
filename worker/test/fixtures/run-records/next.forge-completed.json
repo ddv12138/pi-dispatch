@@ -13,7 +13,8 @@
     "input": 48000,
     "output": 6200,
     "total": 54200,
-    "cost": 0.4125
+    "metered": true,
+    "usageUnreported": 0
   },
   "usage": {
     "v": 1,
@@ -30,9 +31,7 @@
         "cacheWrite": 0,
         "cacheWrite1h": 0,
         "reasoning": 0,
-        "total": 54200,
-        "cost": 0.4125,
-        "unpriced": 0
+        "total": 54200
       }
     ]
   },
@@ -54,9 +53,9 @@
   },
   "host": "mini-1",
   "backend": "docker",
-  "dollars": {
-    "reservedMicros": 2000000,
-    "settledMicros": 412500,
+  "tokensWindows": {
+    "reservedTokens": 2000000,
+    "settledTokens": 412500,
     "basis": "metered",
     "modelBasis": "metered"
   },
@@ -89,5 +88,5 @@
   },
   "earlier": null,
   "stalledRepick": false,
-  "v": 1
+  "v": 2
 }

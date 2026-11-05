@@ -12,16 +12,17 @@ import { SKILL_NAME_RE } from "@edgehero/pi-dispatch/flow-gate";
 import { MODEL_ROLE_RE } from "@edgehero/pi-dispatch/model-roles";
 import { failoverModelStatus } from "@edgehero/pi-dispatch/model-status";
 import { readOverlayModels } from "@edgehero/pi-dispatch/model-endpoints";
-import { resolveConfiguredModelRuns, cooldownModelRefs, RADIUS_COST_CAP_LABEL, RADIUS_COST_CAP_FIX } from "@edgehero/pi-dispatch/model-observation";
+import { resolveConfiguredModelRuns, cooldownModelRefs } from "@edgehero/pi-dispatch/model-observation";
 import { readModelCooldowns } from "@edgehero/pi-dispatch/model-cooldowns";
 import { modelProposalOf } from "@edgehero/pi-dispatch/model-proposal-protocol";
 import { MODEL_WHY, providerFailureOf } from "@edgehero/pi-dispatch/model-failover-protocol";
-import { effectiveCostCapMicros, formatMicros } from "@edgehero/pi-dispatch/money";
+import { effectiveTokenCap } from "@edgehero/pi-dispatch/budget-rule";
+import { fmtTokens } from "./panel.mjs";
 import { makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { readSettingsView } from "./read-model.mjs";
-import { dollarWindowSpecs } from "./dollar-windows.mjs";
+import { tokenWindowSpecs } from "./token-windows.mjs";
 import { doctorStale } from "./doctor-view.mjs";
-import { meteredRunMicros } from "./costs.mjs";
+import { meteredRunTokens } from "./costs.mjs";
 import { newerSkippedSentence, readableRecords } from "./newer-release.mjs";
 
 export const MODELS_LIMITS = Object.freeze({ fileBytes: 1024 * 1024, records: 1000, days: 30, hosts: 64, proposals: 256, waits: 200, canarySources: 64, timeoutMs: 2500 });
@@ -41,7 +42,7 @@ export function collectModelPolicies({ entries = [], modelRoles = {}, projects =
     const run = entry?.run;
     if (!run || typeof run !== "object") return [];
     return [{ sourceIndex: index, index, label: `trigger ${index + 1}`, authoredProvider: run.provider,
-      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "maxCostUsd", "flow"]),
+      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "maxTokens", "flow"]),
     }];
   });
   const out = resolveConfiguredModelRuns({ runs, modelRoles, projects, deployment, envList, conservativeLocal: true, ...(resolveFolder ? { resolveFolder } : {}) });
@@ -49,25 +50,26 @@ export function collectModelPolicies({ entries = [], modelRoles = {}, projects =
 }
 
 function metricRows(records) {
-  const costs = records.map(record => finite(record?.cost)).filter(value => value !== null);
+  const metered = records.map(record => integer(record?.meteredTokens)).filter(value => value !== null);
   const turns = records.map(record => integer(record?.turns)).filter(value => value !== null);
   const tokens = records.map(record => integer(record?.tokens)).filter(value => value !== null);
   const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   return { runs: records.length, completed: records.filter(record => record?.outcome === "completed").length,
-    costPerRun: mean(costs), averageTurns: mean(turns), averageTokens: mean(tokens), knownCosts: costs.length, knownTurns: turns.length, knownTokens: tokens.length };
+    meteredTokensPerRun: mean(metered), averageTurns: mean(turns), averageTokens: mean(tokens), knownMetered: metered.length, knownTurns: turns.length, knownTokens: tokens.length };
 }
 function comparisonRecord(record) {
   if (!record) return null;
   const ref = typeof record.provider === "string" && typeof record.model === "string" ? `${record.provider}/${record.model}` : null;
-  // A recorded numeric lower bound is not an exact comparison price. Share every floor and meter rule with Spend.
-  const costMicros = finite(record.tokens?.cost) === null ? null : meteredRunMicros(record);
+  // The exact figure a canary is read for is the METERED TOKEN COUNT, under the same floor and meter rules as
+  // Spend (`meteredRunTokens`); the recorded `tokens.total` beside it is the meter's own claim and may be a
+  // fallback meter's. The dollar era divided a micros figure by 1e6 here; no price exists to divide by now.
   return { model: splitModelEntry(ref) ? ref : null, outcome: ["completed", "policy", "failed", "error"].includes(record.outcome) ? record.outcome : "unknown",
-    cost: costMicros === null ? null : costMicros / 1_000_000, turns: integer(record.turns), tokens: integer(record.tokens?.total) };
+    meteredTokens: meteredRunTokens(record), turns: integer(record.turns), tokens: integer(record.tokens?.total) };
 }
 
 /** Missing meters keep their own denominators. A completed replay describes execution, never quality. */
 export function canaryComparisonLines(sample) {
-  const line = (name, metrics) => `${name}: ${metrics?.completed ?? 0}/${metrics?.runs ?? 0} completed; cost per metered run ${finite(metrics?.costPerRun) === null ? "unknown" : `$${metrics.costPerRun.toFixed(6)}`} (${metrics?.knownCosts ?? 0} metered); average turns ${finite(metrics?.averageTurns) === null ? "unknown" : metrics.averageTurns.toFixed(1)} (${metrics?.knownTurns ?? 0} known); average tokens ${finite(metrics?.averageTokens) === null ? "unknown" : Math.round(metrics.averageTokens)} (${metrics?.knownTokens ?? 0} known).`;
+  const line = (name, metrics) => `${name}: ${metrics?.completed ?? 0}/${metrics?.runs ?? 0} completed; metered tokens per run ${finite(metrics?.meteredTokensPerRun) === null ? "unknown" : Math.round(metrics.meteredTokensPerRun).toLocaleString("en-US")} (${metrics?.knownMetered ?? 0} metered); average turns ${finite(metrics?.averageTurns) === null ? "unknown" : metrics.averageTurns.toFixed(1)} (${metrics?.knownTurns ?? 0} known); average tokens ${finite(metrics?.averageTokens) === null ? "unknown" : Math.round(metrics.averageTokens)} (${metrics?.knownTokens ?? 0} known).`;
   return [line("Candidate", sample?.candidateStats ?? sample?.candidate), line("Sources", sample?.sourceStats), "These are retained comparisons grouped by role, candidate and flow, not a reconstructed experiment or a quality score."];
 }
 
@@ -91,18 +93,18 @@ function canariesOf(records, roles, deployment, now, sourceRecords = []) {
     const candidateStats = metricRows(group.rows.map(row => row.candidate));
     const sources = group.rows.flatMap(row => row.source ? [row.source] : []);
     const sourceStats = metricRows(sources);
-    const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownCosts, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
-    let suggestedCapUsd = null;
-    try { const cap = effectiveCostCapMicros(undefined, deployment.maxCostUsd); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapUsd = formatMicros(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
+    const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownMetered, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
+    let suggestedCapTokens = null;
+    try { const cap = effectiveTokenCap(undefined, deployment.maxTokens); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapTokens = fmtTokens(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
     const sample = { ...group, count: group.rows.length, candidateStats, sourceStats, partial,
-      scopes: roles.filter(row => row.role === group.role).map(row => row.scope), suggestedCapUsd,
+      scopes: roles.filter(row => row.role === group.role).map(row => row.scope), suggestedCapTokens,
       whatIf: `/insights?whatif=${encodeURIComponent(group.candidate)}&flow=${encodeURIComponent(group.flow)}` };
     return { ...sample, digest: sha({ role: sample.role, candidate: sample.candidate, flow: sample.flow, rows: sample.rows, candidateStats, sourceStats, partial }) };
   });
 }
 
 function modelWindows(ref, windows) {
-  return windows.filter(window => window.ledger === "model" && typeof window.name === "string" && window.name.toLowerCase() === ref.toLowerCase()).map(window => ({ scope: `model:${window.name}`, window: window.window, capMicros: integer(window.capMicros), spentMicros: integer(window.counterMicros ?? window.spentMicros), unavailable: integer(window.counterMicros ?? window.spentMicros) === null }));
+  return windows.filter(window => window.ledger === "model" && typeof window.name === "string" && window.name.toLowerCase() === ref.toLowerCase()).map(window => ({ scope: `model:${window.name}`, window: window.window, capTokens: integer(window.capTokens), spentTokens: integer(window.counterTokens), unavailable: integer(window.counterTokens) === null }));
 }
 function nextOf(model, fallbacks, cooldowns, status, cooldownsUnknown, policyUnknown = false) {
   if (policyUnknown) return { kind: "unknown", model: null, reason: "model-policy-unavailable" };
@@ -156,23 +158,13 @@ export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], dep
   for (const entry of entries) for (const ref of authoredRefs(entry, deployment, envList)) namedRefs.add(ref);
   const refusedRows = new Set(facts.checks.map(check => check.sourceIndex));
   const refusedRefs = new Set(entries.flatMap((entry, index) => refusedRows.has(index) ? authoredRefs(entry, deployment, envList) : []));
-  const radius = new Set();
-  for (const run of facts.runs) {
-    let cap = null; try { cap = effectiveCostCapMicros(run.maxCostUsd, deployment.maxCostUsd); } catch { /* Config warning already names invalid settings. */ }
-    if (cap === null) continue;
-    for (const ref of [`${run.provider}/${run.model}`, ...(run.models ?? [])]) if (status(ref).api === "pi-messages") radius.add(ref);
-  }
-  for (const entry of entries) {
-    let cap = null; try { cap = effectiveCostCapMicros(entry?.run?.maxCostUsd, deployment.maxCostUsd); } catch {}
-    if (cap !== null) for (const ref of authoredRefs(entry, deployment, envList)) if (status(ref).api === "pi-messages") radius.add(ref);
-  }
-  let roleCap = null; try { roleCap = effectiveCostCapMicros(undefined, deployment.maxCostUsd); } catch {}
-  if (roleCap !== null) for (const role of roles) for (const ref of [role.model, ...role.fallbackModels.map(item => item.ref)]) if (status(ref).api === "pi-messages") radius.add(ref);
-  if (radius.size) banners.unshift({ kind: "radius-cost-cap", reason: "cost-cap", label: `${RADIUS_COST_CAP_LABEL}: ${[...radius].join(", ")}`, fix: RADIUS_COST_CAP_FIX });
+  // The Radius cost-bound banner died with the cost era: a token cap bounds a locally unboundable API no better
+  // than a dollar cap did, but the banner said nothing an operator could act on. A capped Radius model surfaces
+  // through its own state and doctor instead of a per-model banner.
   const models = [...namedRefs].map(ref => {
     const parsed = splitModelEntry(ref), price = status(ref), modelWindowsRows = modelWindows(ref, windows);
     return { ref, provider: parsed.provider, model: parsed.model, known: price.known, priced: price.priced, reason: price.reason,
-      windows: modelWindowsRows, state: configUnknown || overlayUnknown || cooldowns === null || modelWindowsRows.some(window => window.unavailable) ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : price.priced === null ? "unknown" : !price.known ? "unknown-model" : !price.priced ? "unpriced" : modelWindowsRows.some(window => window.spentMicros >= window.capMicros) ? "window-full" : "available" };
+      windows: modelWindowsRows, state: configUnknown || overlayUnknown || cooldowns === null || modelWindowsRows.some(window => window.unavailable) ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : modelWindowsRows.some(window => window.spentTokens >= window.capTokens) ? "window-full" : "available" };
   });
   const hostRows = (snapshot?.doctor?.hosts ?? []).slice(0, MODELS_LIMITS.hosts);
   const proposals = hostRows.flatMap(host => (host.checks ?? []).flatMap(check => {
@@ -265,7 +257,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
   } catch { configUnknown = true; }
   try { overlay = reads.overlay ? await reads.overlay() : readOverlayModels(paths.globalPiDir, { readFileSync: (path, encoding) => readText(path, fs), lstatSync: path => fs.lstatSync(path) }); }
   catch { overlayUnknown = true; }
-  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxCostUsd: settings.maxCostUsd ?? env.PI_MAX_COST_USD ?? null };
+  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxTokens: settings.maxTokens ?? env.PI_MAX_TOKENS ?? null };
   if (providerIdProblem(deployment.provider) !== null || modelIdProblem(deployment.model) !== null) configUnknown = true;
   if (!snapshot && fleet) { try { snapshot = await fleet.snapshot({ waiting: true }); } catch { snapshot = null; } }
   const source = snapshot?.recordDetails instanceof Map ? [...snapshot.recordDetails.values()] : Array.isArray(snapshot?.runs) ? snapshot.runs : null;
@@ -277,7 +269,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
   const policies = collectModelPolicies({ entries, modelRoles, projects, deployment, envList });
   const configuredRefs = cooldownModelRefs(policies.runs, deployment);
   let client = redis, owned = false, cooldowns = configuredRefs.length ? null : [], counters = null;
-  const specs = dollarWindowSpecs({ caps: {}, limits, now: new Date(now) }).filter(row => row.ledger === "model");
+  const specs = tokenWindowSpecs({ caps: {}, limits, now: new Date(now) }).filter(row => row.ledger === "model");
   try {
     if (!client && (configuredRefs.length || specs.length) && (!reads.cooldowns && configuredRefs.length || !reads.counters && specs.length)) { client = (reads.redis ?? makeRedisClient)(paths.valkeyUrl); client.on?.("error", () => {}); owned = true; }
     if (configuredRefs.length) cooldowns = await bounded(reads.cooldowns ? reads.cooldowns(configuredRefs, { now: () => now }) : readModelCooldowns(client, configuredRefs, { now: () => now }));
@@ -288,7 +280,7 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
     }
   } catch { /* Unknown observations remain visible; a read never changes worker policy. */ }
   finally { if (owned) client?.disconnect?.(); }
-  const windows = specs.map(spec => ({ ...spec, counterMicros: counters?.get(spec.key) ?? null }));
+  const windows = specs.map(spec => ({ ...spec, counterTokens: counters?.get(spec.key) ?? null }));
   const subscriptionAuth = await readSubscriptionAuthView({ snapshot, read: reads.subscriptionAuth, now });
   return { subscriptionAuth, ...modelsViewOf({ entries, modelRoles, projects, deployment, envList, overlay, overlayUnknown, configUnknown, cooldowns, records, sourceRecords, snapshot, windows, coverage: historyCoverage, now, ...(reads.status ? { status: reads.status } : {}) }) };
 }
@@ -296,11 +288,11 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
 /** Explicit machine projection: no doctor prose, command, path, prompt, URL, arbitrary field or secret reaches a model. */
 export function modelsForAgent(view) {
   const model = value => splitModelEntry(value) ? value : null;
-  const metrics = value => Object.fromEntries(["runs", "completed", "costPerRun", "averageTurns", "averageTokens", "knownCosts", "knownTurns", "knownTokens"].map(key => [key, finite(value?.[key])]));
+  const metrics = value => Object.fromEntries(["runs", "completed", "meteredTokensPerRun", "averageTurns", "averageTokens", "knownMetered", "knownTurns", "knownTokens"].map(key => [key, finite(value?.[key])]));
   const next = value => ({ kind: ["direct", "candidate", "waiting", "unknown"].includes(value?.kind) ? value.kind : "unknown", model: model(value?.model), reason: ["pickup-checks-remain", "cooldowns-unavailable", "model-policy-unavailable", "model-cooldown", "model-failover-no-candidate"].includes(value?.reason) ? value.reason : null });
   const trigger = row => ({ index: integer(row?.index), number: integer(row?.number), project: safeId(row?.project), scope: safeId(row?.scope), flow: safeId(row?.flow), projectUnknown: row?.projectUnknown === true, model: model(row?.model), fallbackModels: (row?.fallbackModels ?? []).map(model).filter(Boolean) });
   const modelReason = reason => ["model-unknown", "model-not-allowed", "model-unpriced", "catalog-unavailable"].includes(reason) ? reason : null;
-  const bannerReasons = { "role-conflict": ["model-role-unknown", "model-role-provider-conflict", "model-roles-invalid"], "radius-cost-cap": ["cost-cap"], "configuration-unavailable": ["model-roles-invalid"], "catalog-unavailable": ["model-unknown"], "cooldowns-unavailable": ["model-cooldown"] };
+  const bannerReasons = { "role-conflict": ["model-role-unknown", "model-role-provider-conflict", "model-roles-invalid"], "configuration-unavailable": ["model-roles-invalid"], "catalog-unavailable": ["model-unknown"], "cooldowns-unavailable": ["model-cooldown"] };
 
   return { subscriptionAuth: subscriptionAuthForAgent(view?.subscriptionAuth), scopes: (view?.scopes ?? []).filter(scope => safeId(scope)), state: view?.state === "ready" ? "ready" : "unreadable", partial: view?.partial !== false, now: integer(view?.now),
     roles: (view?.roles ?? []).map(row => ({ scope: safeId(row.scope), role: roleValid(row.role) ? row.role : null, model: model(row.model),
@@ -311,12 +303,12 @@ export function modelsForAgent(view) {
     models: (view?.models ?? []).map(row => ({ ref: model(row.ref), provider: providerIdProblem(row.provider) === null ? row.provider : null, known: typeof row.known === "boolean" ? row.known : null, priced: typeof row.priced === "boolean" ? row.priced : null,
       reason: modelReason(row.reason),
       state: ["cooling-down", "window-full", "unknown", "unknown-model", "unpriced", "policy-refused", "available"].includes(row.state) ? row.state : "unknown",
-      windows: (row.windows ?? []).map(window => ({ window: ["day", "week", "month"].includes(window.window) ? window.window : null, scope: splitModelEntry(window.scope?.slice(6)) ? window.scope : null, capMicros: integer(window.capMicros), spentMicros: integer(window.spentMicros), unavailable: window.unavailable === true })) })),
+      windows: (row.windows ?? []).map(window => ({ window: ["day", "week", "month"].includes(window.window) ? window.window : null, scope: splitModelEntry(window.scope?.slice(6)) ? window.scope : null, capTokens: integer(window.capTokens), spentTokens: integer(window.spentTokens), unavailable: window.unavailable === true })) })),
     cooldowns: (view?.cooldowns ?? []).map(row => ({ ref: model(row.ref), kind: ["rate-limited", "quota-exhausted", "overloaded"].includes(row.kind) ? row.kind : null, until: integer(row.until) })),
     proposals: (view?.proposals ?? []).flatMap(row => modelProposalOf(row) ? [{ ...modelProposalOf(row), id: safeId(row.id), host: safeId(row.host), at: integer(row.at), ageMs: integer(row.ageMs), stale: row.stale === true, level: ["ok", "warn", "fail"].includes(row.level) ? row.level : null }] : []),
     canaries: (view?.canaries ?? []).map(row => ({ id: safeId(row.id), digest: /^[a-f0-9]{64}$/.test(row.digest ?? "") ? row.digest : null, role: roleValid(row.role) ? row.role : null, candidate: model(row.candidate), flow: safeId(row.flow),
       candidateStats: metrics(row.candidateStats), sourceStats: metrics(row.sourceStats), partial: row.partial === true,
-      rows: (row.rows ?? []).map(pair => ({ jobId: safeId(pair.jobId), sourceJobId: safeId(pair.sourceJobId), candidate: { model: model(pair.candidate?.model), outcome: safeId(pair.candidate?.outcome), cost: finite(pair.candidate?.cost), turns: integer(pair.candidate?.turns), tokens: integer(pair.candidate?.tokens) }, source: pair.source ? { model: model(pair.source.model), outcome: safeId(pair.source.outcome), cost: finite(pair.source.cost), turns: integer(pair.source.turns), tokens: integer(pair.source.tokens) } : null })) })),
+      rows: (row.rows ?? []).map(pair => ({ jobId: safeId(pair.jobId), sourceJobId: safeId(pair.sourceJobId), candidate: { model: model(pair.candidate?.model), outcome: safeId(pair.candidate?.outcome), meteredTokens: integer(pair.candidate?.meteredTokens), turns: integer(pair.candidate?.turns), tokens: integer(pair.candidate?.tokens) }, source: pair.source ? { model: model(pair.source.model), outcome: safeId(pair.source.outcome), meteredTokens: integer(pair.source.meteredTokens), turns: integer(pair.source.turns), tokens: integer(pair.source.tokens) } : null })) })),
     waiting: (view?.waiting ?? []).map(row => ({ jobId: safeId(row.jobId), reason: ["model-cooldown", "model-window"].includes(row.reason) ? row.reason : null })),
     recentFallbacks: (view?.recentFallbacks ?? []).map(row => ({ jobId: runId(row.jobId), provider: providerIdProblem(row.provider) === null ? row.provider : null, model: modelIdProblem(row.model) === null ? row.model : null, modelRole: roleValid(row.modelRole) ? row.modelRole : null, modelWhy: MODEL_WHY.includes(row.modelWhy) ? row.modelWhy : null, providerFailure: providerFailureOf(row.providerFailure) })),
     banners: (view?.banners ?? []).map(row => ({ kind: Object.hasOwn(bannerReasons, row.kind) ? row.kind : "unknown", reason: Object.hasOwn(bannerReasons, row.kind) && bannerReasons[row.kind].includes(row.reason) ? row.reason : null, index: integer(row.index), project: safeId(row.project), projectUnknown: row.projectUnknown === true })),
