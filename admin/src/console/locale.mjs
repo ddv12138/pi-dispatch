@@ -527,6 +527,7 @@ const ZH = Object.freeze({
   "projects over allocation. Includes held tokens.": "个项目超出分配额度。包含预留令牌数。",
   "Per-run estimate, multiplied by the flow's runs in this spend window.": "单次运行估算值，乘以此费用时间范围内该流程的运行次数。",
   "Total tokens": "令牌总数",
+  estimated: "估算",
   ...SPEND_ZH,
   ...PROVIDER_KEY_ZH,
 });
