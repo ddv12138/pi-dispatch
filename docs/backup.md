@@ -64,8 +64,8 @@ behaves as before; the rest is state that a lost or older volume takes with it.
 | Keys | What they hold |
 |---|---|
 | `bull:*` | BullMQ's queue: every waiting, delayed and finished job (a forge job's data holds issue text for 31 days), the cron schedulers, the pause flag, and a delivery's job id, which is what refuses a redelivery |
-| `budget:*` | The spend counters: jobs per day, week and month (`budget:<day>`, `budget:w:`, `budget:m:`, and `budget:s:` per scoped-limits row), tokens per day (`budget:t:`), and dollars (`budget:usd:`, with `budget:usd:s:` for a repo, folder or project row and `budget:usd:mdl:` for a model row) |
-| `run:budget:*` | Each durable run's dollar holds, so a recovery never reserves, settles or gives back one twice |
+| `budget:*` | The spend counters: jobs per day, week and month (`budget:<day>`, `budget:w:`, `budget:m:`, and `budget:s:` per scoped-limits row), and tokens per day, week and month (`budget:tok:` for the deployment, `budget:s:` per scoped repo, folder or project row, and `budget:tok:mdl:` per model row), with `budget:usd:` left behind by a pre-token upgrade, never written again |
+| `run:budget:*` | Each durable run's token holds, so a recovery never reserves, settles or gives back one twice |
 | `run:approval:*` | Approval requests and their decisions |
 | `run:checkpoint:*`, `run:recover:*` | Where each durable run's latest checkpoint is, and the recoveries queued or claimed |
 | `run:steer:*`, `run:inbox:*`, `run:await:*`, `run:held:*` | Steering: each running job's inbox, the targets a comment can reach, and answers held for a run that is parking |

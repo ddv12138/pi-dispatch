@@ -173,7 +173,7 @@ test("every store with a fixed name is pinned to its source and named on the bac
 // occur in its code. A family whose literal moves fails here, and so does one the page drops or adds.
 const KEY_FAMILIES = new Map([
 	["bull:*", [["worker/src/bullmq-internals.mjs", 'BULL_PREFIX = "bull"']]],
-	["budget:*", [["worker/src/budget.mjs", 'prefix = "budget"'], ["worker/src/budget.mjs", "}:t:"], ["worker/src/token-budget.mjs", '"budget:tok"'], ["worker/src/scoped-limits.mjs", "`budget:s:"]]],
+	["budget:*", [["worker/src/budget.mjs", 'prefix = "budget"'], ["worker/src/token-budget.mjs", '"budget:tok"'], ["worker/src/scoped-limits.mjs", "`budget:s:"]]],
 	["run:budget:*", [["worker/src/run-budget-ledger.mjs", '"run:budget:"']]],
 	["run:approval:*", [["worker/src/approval-state.mjs", '"run:approval:"']]],
 	["run:checkpoint:*", [["worker/src/run-checkpoint.mjs", '"run:checkpoint:"']]],
