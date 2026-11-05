@@ -578,7 +578,9 @@ function finishSpend(sum) {
 
 /** The named windows stay independent of the chart filter: today's counter is always today's counter. */
 export function spendSummaryOf({ records, hosts, budget, project = null, nowMs, jobCapTokens = null, subscriptions = [], pricing }) {
-  const rows = budget?.windows?.windows ?? [];
+  // The budget view's windows are `readTokenWindows`' `{ rows }` (the panel's own reader), so the counters the
+  // deployment configured ride in the same shape the framed rows show; a missing section is simply no windows.
+  const rows = budget?.windows?.rows ?? [];
   const scoped = project ? rows.filter((r) => r.ledger === "scope" && r.name === `project:${project}`) : [];
   const deployment = rows.filter((r) => r.ledger === "deployment");
   const window = (kind) => {
@@ -701,7 +703,7 @@ export async function assembleInsightsView(paths, window, { view = "spend", proj
   const scanned = Array.isArray(scannedAll) ? readableRecords(scannedAll).records : scannedAll;
   // A selected project's charts can coexist with deployment caps. For that fallback the KPI records must also be
   // deployment-wide; otherwise settled and held would describe different populations beside the same counter.
-  const hasProjectWindow = project && (out.budget?.windows?.windows ?? []).some((r) => r.ledger === "scope" && r.name === `project:${project}` && r.window === "day");
+  const hasProjectWindow = project && (out.budget?.windows?.rows ?? []).some((r) => r.ledger === "scope" && r.name === `project:${project}` && r.window === "day");
   const all = Array.isArray(scanned) ? inProject(scanned, hasProjectWindow ? project : null) : null;
   out.spend = spendSummaryOf({ records: all, hosts: out.hosts, budget: out.budget, project, nowMs, jobCapTokens, subscriptions, pricing });
   // The selected project's newer records up to now, as `dollars.newerSkipped` counts them, whichever population the

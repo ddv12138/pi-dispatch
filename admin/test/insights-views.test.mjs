@@ -10,7 +10,7 @@ import { writeFileSync } from "node:fs";
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 const DAY = 86_400_000;
 const pricing = { piAiVersion: () => "test", getPricedModel: () => ({}), isZeroRated: () => false, reprice: (q) => ({ usd: q.input + 2 * q.output + 3 * q.cacheRead + 4 * q.cacheWrite + 5 * q.cacheWrite1h, ratesVersion: "test" }) };
-const run = (id, over = {}) => ({ jobId: id, flow: "fix", project: "site", endedAt: new Date(NOW - 1000).toISOString(), usage: { v: 1, truncated: 0, models: [{ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cacheWrite1h: 5, cost: 7 }] }, tokens: { cost: 7, metered: true }, ...over });
+const run = (id, over = {}) => ({ jobId: id, flow: "fix", project: "site", endedAt: new Date(NOW - 1000).toISOString(), usage: { v: 1, truncated: 0, models: [{ input: 1, output: 2, cacheRead: 3, cacheWrite: 4, cacheWrite1h: 5, total: 15 }] }, tokens: { total: 15, metered: true }, ...over });
 
 function readsFixture() {
   const calls = [];
@@ -18,7 +18,7 @@ function readsFixture() {
   return { calls, reads: {
     projects: watch("projects", { projects: [{ id: "site", name: "Site" }] }),
     costs: watch("costs", { fold: { byFlow: [] }, records: [] }),
-    graph: watch("graph", {}), budget: watch("budget", { tokens: {}, dollars: { windows: [] } }),
+    graph: watch("graph", {}), budget: watch("budget", { tokens: {}, windows: { rows: [] } }),
     allocation: watch("allocation", { window: "week" }), capacity: watch("capacity", {}), sizing: watch("sizing", {}),
     hosts: watch("hosts", { hosts: [] }), scan: watch("scan", []), subscriptions: watch("subscriptions", { subscriptions: [] }), settings: watch("settings", { overlay: {} }),
   } };
@@ -51,7 +51,7 @@ test("holds use actual published amounts, distinguish old rows from zero, and ke
     { name: "new", jobsMore: "0", jobs: JSON.stringify([{ id: "a", p: "site", at: NOW - 1000, h: 3_000_000, ha: NOW - 1000 }, { id: "b", p: "site", at: NOW - DAY, h: 5_000_000, ha: NOW - DAY }, { id: "c", p: "site", at: NOW - 1000, h: 0, ha: NOW - 1000 }]) },
     { name: "old", jobsMore: "0", jobs: JSON.stringify([{ id: "d", p: "site", at: NOW - 1000 }]) },
   ];
-  assert.deepEqual(heldMoneyOf(hosts, { nowMs: NOW, project: "site" }), { heldMicros: 3_000_000, heldJobs: 1, unknownHosts: ["old"] });
+  assert.deepEqual(heldMoneyOf(hosts, { nowMs: NOW, project: "site" }), { heldTokens: 3_000_000, heldJobs: 1, unknownHosts: ["old"] });
 });
 
 test("missing or capped live lists are unknown rather than a claim of no holds", () => {
@@ -59,30 +59,28 @@ test("missing or capped live lists are unknown rather than a claim of no holds",
   assert.deepEqual(r.unknownHosts, ["missing", "capped"]);
 });
 
-test("today names the counter remainder and never turns it into held money", () => {
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 10_000_000, capMicros: 20_000_000 }] } };
-  const r = spendSummaryOf({ records: [run("a", { dollars: { settledMicros: 2_000_000 } })], hosts: [], budget, nowMs: NOW });
-  assert.equal(r.today.heldMicros, 0);
-  assert.equal(r.today.settledMicros, 2_000_000);
-  assert.equal(r.today.unattributedMicros, 8_000_000);
+test("today names the counter remainder and never turns it into held tokens", () => {
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 10_000_000, capTokens: 20_000_000 }] } };
+  const r = spendSummaryOf({ records: [run("a", { tokensWindows: { reservedTokens: 2_000_000, settledTokens: 2_000_000, basis: "metered" } })], hosts: [], budget, nowMs: NOW });
+  assert.equal(r.today.heldTokens, 0);
+  assert.equal(r.today.settledTokens, 2_000_000);
+  assert.equal(r.today.unattributedTokens, 8_000_000);
 });
 
 test("project windows are chosen where configured, else deployment fallback is explicit", () => {
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 9, capMicros: 20 }, { ledger: "scope", name: "project:site", window: "day", counterMicros: 3, capMicros: 10 }] } };
-  assert.equal(spendSummaryOf({ records: [], hosts: [], budget, project: "site", nowMs: NOW }).today.usedMicros, 3);
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 9, capTokens: 20 }, { ledger: "scope", name: "project:site", window: "day", counterTokens: 3, capTokens: 10 }] } };
+  assert.equal(spendSummaryOf({ records: [], hosts: [], budget, project: "site", nowMs: NOW }).today.usedTokens, 3);
   const fallback = spendSummaryOf({ records: [], hosts: [], budget, project: "other", nowMs: NOW });
-  assert.equal(fallback.today.usedMicros, 9);
+  assert.equal(fallback.today.usedTokens, 9);
   assert.equal(fallback.projectFallback, true);
 });
 
-test("run-set estimate sums full cache tiers per run, excludes missing/partial ledgers and identifies plan targets", () => {
-  const records = [run("a"), run("b", { flow: "review" }), run("missing", { usage: null }), run("partial", { usage: { truncated: 1, models: [{ input: 1, cost: 2 }] } })];
-  const r = whatIfRuns({ records, target: { provider: "test", id: "model" }, pricing, subscriptions: [{ id: "work", provider: "test", models: ["*"] }] });
-  assert.equal(r.usd, 2 * (1 + 4 + 9 + 16 + 25));
-  assert.equal(r.originalUsd, 14);
+test("run-set estimate sums full token totals per run, excluding missing and partial ledgers", () => {
+  const records = [run("a"), run("b", { flow: "review" }), run("missing", { usage: null }), run("partial", { usage: { truncated: 1, models: [{ input: 1 }] } })];
+  const r = whatIfRuns({ records, target: { provider: "test", id: "model" } });
+  assert.equal(r.tokens, 2 * 15);
   assert.equal(r.runs, 2);
   assert.equal(r.excluded, 2);
-  assert.equal(r.planId, "work");
 });
 
 test("what-if cache partitions project, window and run selection over one bounded scan", async () => {
@@ -101,7 +99,7 @@ test("flow total uses the requested window count while the per-run median retain
   const reader = makeWhatIfReader({ pricing, scan: () => records, now: () => NOW });
   const result = (await reader({ model: "test/model", flow: "fix", range: "7d" })).result;
   assert.equal(result.windowRuns, 1);
-  assert.equal(result.usd, result.perRun);
+  assert.equal(result.tokens, result.perRun);
 });
 
 test("24h and Monday week starts use the injected instant", () => {
@@ -121,28 +119,28 @@ test("tokens never enter the job soft hold band", async () => {
 test("an unread host registry makes both held money and its reconciliation unknown", async () => {
   const { reads } = readsFixture();
   reads.hosts = async () => ({ unreachable: "not answering" });
-  reads.budget = async () => ({ dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 100, capMicros: 200 }] } });
+  reads.budget = async () => ({ tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 100, capTokens: 200 }] } });
   const got = await assembleInsightsView({}, "7d", { pricing, nowMs: NOW, envFn: () => ({}), reads });
-  assert.equal(got.spend.today.heldMicros, null);
-  assert.equal(got.spend.today.unattributedMicros, null);
+  assert.equal(got.spend.today.heldTokens, null);
+  assert.equal(got.spend.today.unattributedTokens, null);
   assert.equal(got.spend.today.hostsUnreadable, true);
 });
 
 test("a project weekly limit does not disguise a deployment daily counter as the project's", () => {
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 9, capMicros: 20 }, { ledger: "scope", name: "project:site", window: "week", counterMicros: 3, capMicros: 10 }] } };
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 9, capTokens: 20 }, { ledger: "scope", name: "project:site", window: "week", counterTokens: 3, capTokens: 10 }] } };
   const got = spendSummaryOf({ records: [], hosts: [], budget, project: "site", nowMs: NOW });
-  assert.equal(got.today.usedMicros, 9);
+  assert.equal(got.today.usedTokens, 9);
   assert.equal(got.today.basis, "deployment");
   assert.equal(got.today.projectFallback, true);
-  assert.equal(got.week.usedMicros, 3);
+  assert.equal(got.week.usedTokens, 3);
   assert.equal(got.week.basis, "project:site");
 });
 
 test("a counter smaller than visible records is a reconciliation mismatch, never negative held money", () => {
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 1, capMicros: 20 }] } };
-  const got = spendSummaryOf({ records: [run("r", { dollars: { settledMicros: 3 } })], hosts: [], budget, nowMs: NOW });
-  assert.equal(got.today.heldMicros, 0);
-  assert.equal(got.today.unattributedMicros, -2);
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 1, capTokens: 20 }] } };
+  const got = spendSummaryOf({ records: [run("r", { tokensWindows: { reservedTokens: 3, settledTokens: 3, basis: "metered" } })], hosts: [], budget, nowMs: NOW });
+  assert.equal(got.today.heldTokens, 0);
+  assert.equal(got.today.unattributedTokens, -2);
   assert.equal(got.today.reconciliationMismatch, true);
 });
 
@@ -156,106 +154,103 @@ test("job and token counter keys use the supplied instant, even when the wall cl
 });
 
 test("Spend daily bars are settled facts, today's live holds are separate, and cost bins use metered runs only", () => {
-  const records = [run("a", { usage: null, tokens: { cost: 2, metered: true }, dollars: { settledMicros: 2_000_000 } }), run("plan", { usage: null, provider: "plan", model: "paid", tokens: { cost: 7, metered: true }, dollars: { settledMicros: 7_000_000 } }), run("yesterday", { usage: null, endedAt: new Date(NOW - DAY).toISOString(), tokens: { cost: 4, metered: true }, dollars: { settledMicros: 4_000_000 } })];
-  const r = spendChartsOf({ records, sinceMs: NOW - 2 * DAY, nowMs: NOW, jobCapMicros: 10_000_000, heldMicros: 3_000_000, subscriptions: [{ provider: "plan", models: ["paid"] }] });
-  assert.equal(r.daily.at(-1).settledMicros, 9_000_000);
-  assert.equal(r.daily.at(-1).heldMicros, 3_000_000);
-  assert.equal(r.daily.at(-2).heldMicros, 0);
-  assert.equal(r.histogram.reduce((sum, b) => sum + b.runs, 0), 2);
+  const records = [run("a", { usage: { v: 1, truncated: 0, models: [{ total: 2_000_000 }] }, tokens: { total: 2_000_000, metered: true }, tokensWindows: { reservedTokens: 2_000_000, settledTokens: 2_000_000, basis: "metered" } }), run("plan", { usage: { v: 1, truncated: 0, models: [{ total: 7_000_000 }] }, provider: "plan", model: "paid", tokens: { total: 7_000_000, metered: true }, tokensWindows: { reservedTokens: 7_000_000, settledTokens: 7_000_000, basis: "metered" } }), run("yesterday", { usage: { v: 1, truncated: 0, models: [{ total: 4_000_000 }] }, endedAt: new Date(NOW - DAY).toISOString(), tokens: { total: 4_000_000, metered: true }, tokensWindows: { reservedTokens: 4_000_000, settledTokens: 4_000_000, basis: "metered" } })];
+  const r = spendChartsOf({ records, sinceMs: NOW - 2 * DAY, nowMs: NOW, jobCapTokens: 10_000_000, heldTokens: 3_000_000 });
+  assert.equal(r.daily.at(-1).settledTokens, 9_000_000);
+  assert.equal(r.daily.at(-1).heldTokens, 3_000_000);
+  assert.equal(r.daily.at(-2).heldTokens, 0);
+  assert.equal(r.histogram.reduce((sum, b) => sum + b.runs, 0), 3, "every metered run's tokens bin, a plan run's included: they consumed real tokens");
   assert.equal(r.histogram[2].runs, 1);
   assert.equal(r.histogram[4].runs, 1);
-  assert.equal(r.largestRangeMicros, 4_000_000);
+  assert.equal(r.histogram[7].runs, 1);
+  assert.equal(r.largestRangeTokens, 7_000_000);
 });
 
-test("a run with paid and plan ledger children never becomes metered-only through its top-level model", () => {
-  const mixed = run("mixed", { provider: "paid", model: "api", usage: { models: [{ provider: "paid", model: "api", cost: 2 }, { provider: "plan", model: "prepaid", cost: 4 }] } });
-  const subs = [{ provider: "plan", models: ["prepaid"] }];
-  const charts = spendChartsOf({ records: [mixed], sinceMs: NOW - DAY, nowMs: NOW, jobCapMicros: 10_000_000, subscriptions: subs });
-  const summary = spendSummaryOf({ records: [mixed], hosts: [], budget: {}, nowMs: NOW, subscriptions: subs });
-  assert.equal(charts.meteredRangeRuns, 0);
-  assert.equal(summary.average.runs, 0);
+test("a fallback-meter run never enters the token bins, whatever its top-level model says", () => {
+  const mixed = run("mixed", { provider: "paid", model: "api", tokens: { total: 15, metered: false } });
+  const charts = spendChartsOf({ records: [mixed], sinceMs: NOW - DAY, nowMs: NOW, jobCapTokens: 10_000_000 });
+  const summary = spendSummaryOf({ records: [mixed], hosts: [], budget: {}, nowMs: NOW });
+  assert.equal(charts.meteredRangeRuns, 0, "the fallback meter's total is a floor, not a bin");
+  assert.equal(summary.average.runs, 0, "and it is no metered run in the average either");
 });
 
-test("a paid $7 run with unreserved/0 remains $7 in Today and the daily chart without dollar windows", () => {
-  const paid = run("unreserved-paid", { dollars: { reservedMicros: 0, settledMicros: 0, basis: "unreserved" } });
-  const summary = spendSummaryOf({ records: [paid], hosts: [], budget: {}, nowMs: NOW, pricing });
-  const day = spendChartsOf({ records: [paid], sinceMs: NOW - DAY, nowMs: NOW, jobCapMicros: null, pricing }).daily.at(-1);
-  assert.equal(summary.today.settledMicros, 7_000_000);
-  assert.equal(summary.today.ledgerMicros, 0);
-  assert.equal(summary.today.usedMicros, 7_000_000);
+test("a 7M-token run with unreserved/0 stays in Today and the daily chart with no window configured", () => {
+  const paid = run("unreserved-paid", { tokens: { total: 7_000_000, metered: true }, tokensWindows: { reservedTokens: 0, settledTokens: 0, basis: "unreserved" } });
+  const summary = spendSummaryOf({ records: [paid], hosts: [], budget: {}, nowMs: NOW });
+  const day = spendChartsOf({ records: [paid], sinceMs: NOW - DAY, nowMs: NOW, jobCapTokens: null }).daily.at(-1);
+  assert.equal(summary.today.settledTokens, 7_000_000);
+  assert.equal(summary.today.ledgerTokens, 0, "an unreserved settlement is the ledger's honest 0");
+  assert.equal(summary.today.usedTokens, 7_000_000);
   assert.equal(summary.today.counterConfigured, false);
   assert.equal(summary.today.usedSource, "records");
-  assert.equal(day.settledMicros, 7_000_000);
+  assert.equal(day.settledTokens, 7_000_000);
   assert.equal(day.settledFloor, false);
 });
 
-test("an unpriced run without a dollar ledger is unknown, not an exact empty day", () => {
+test("an unmetered run without a settlement is unknown, not an exact empty day", () => {
   const unknown = run("unknown", { tokens: null, usage: null });
   const summary = spendSummaryOf({ records: [unknown], hosts: [], budget: {}, nowMs: NOW });
-  const day = spendChartsOf({ records: [unknown], sinceMs: NOW - DAY, nowMs: NOW, jobCapMicros: null }).daily.at(-1);
+  const day = spendChartsOf({ records: [unknown], sinceMs: NOW - DAY, nowMs: NOW, jobCapTokens: null }).daily.at(-1);
   for (const result of [summary.today, day]) {
-    assert.equal(result.settledMicros, null);
+    assert.equal(result.settledTokens, null);
     assert.equal(result.settledFloor, true);
     assert.equal(result.unpriced, 1);
-    assert.equal(result.ledgerMicros, null);
+    assert.equal(result.ledgerTokens, null);
   }
-  assert.equal(summary.today.usedMicros, null);
+  assert.equal(summary.today.usedTokens, null);
 });
 
-test("legacy recorded prices are retained and mixed known/unknown spend stays a floor", () => {
-  const legacy = run("legacy", { usage: null, tokens: { cost: 7, metered: true } });
+test("a meter-recorded total without usage detail is kept as a floor, and mixed known/unknown stays a floor", () => {
+  const legacy = run("legacy", { usage: null, tokens: { total: 7_000_000, metered: true } });
   const unknown = run("unknown", { tokens: null, usage: null });
   const known = recordSpendOf(legacy);
-  assert.equal(known.micros, 7_000_000);
-  assert.equal(known.floor, false);
+  assert.equal(known.tokens, 7_000_000);
+  assert.equal(known.floor, true, "a total with no per-model rows cannot claim exactness");
   const sum = spendSummaryOf({ records: [legacy, unknown], hosts: [], budget: {}, nowMs: NOW });
-  assert.equal(sum.today.settledMicros, 7_000_000);
+  assert.equal(sum.today.settledTokens, 7_000_000);
   assert.equal(sum.today.settledFloor, true);
   assert.equal(sum.today.usedFloor, true);
   assert.equal(sum.today.unpriced, 1);
 });
 
 test("reserved settlements, refunds and floors keep the ledger semantics while unreserved prices do not enter reconciliation", () => {
-  const ledger = run("settled", { dollars: { reservedMicros: 9_000_000, settledMicros: 3_000_000, basis: "metered" } });
-  const refunded = run("refunded", { dollars: { reservedMicros: 9_000_000, settledMicros: 0, basis: "refunded" } });
-  const floor = run("floor", { dollars: { reservedMicros: 9_000_000, settledMicros: 9_000_000, basis: "floor" } });
-  const unreserved = run("unreserved", { dollars: { reservedMicros: 0, settledMicros: 0, basis: "unreserved" } });
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: 12_000_000, capMicros: 20_000_000 }] } };
+  const ledger = run("settled", { tokensWindows: { reservedTokens: 9_000_000, settledTokens: 3_000_000, basis: "metered" } });
+  const refunded = run("refunded", { tokens: { total: 0, metered: true }, tokensWindows: { reservedTokens: 9_000_000, settledTokens: 0, basis: "refunded" } });
+  const floor = run("floor", { tokensWindows: { reservedTokens: 9_000_000, settledTokens: 9_000_000, basis: "floor" } });
+  const unreserved = run("unreserved", { tokens: { total: 0, metered: true }, tokensWindows: { reservedTokens: 0, settledTokens: 0, basis: "unreserved" } });
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: 12_000_000, capTokens: 20_000_000 }] } };
   const today = spendSummaryOf({ records: [ledger, refunded, floor, unreserved], hosts: [], budget, nowMs: NOW }).today;
-  assert.equal(today.usedMicros, 12_000_000);
-  assert.equal(today.settledMicros, 19_000_000);
-  assert.equal(today.ledgerMicros, 12_000_000);
-  assert.equal(today.unattributedMicros, 0);
+  assert.equal(today.usedTokens, 12_000_000);
+  assert.equal(today.settledTokens, 12_000_000, "settled 3M + refunded 0 + floor 9M + unreserved 0");
+  assert.equal(today.ledgerTokens, 12_000_000);
+  assert.equal(today.unattributedTokens, 0);
   assert.equal(today.settledFloor, true);
   assert.equal(today.counterAvailable, true);
   assert.equal(today.usedSource, "counter");
 });
 
 test("a configured but unread daily counter stays unknown despite readable priced records", () => {
-  const budget = { dollars: { windows: [{ ledger: "deployment", window: "day", counterMicros: null, capMicros: 20_000_000 }] } };
-  const today = spendSummaryOf({ records: [run("paid", { dollars: { settledMicros: 0, basis: "unreserved" } })], hosts: [], budget, nowMs: NOW }).today;
-  assert.equal(today.settledMicros, 7_000_000);
-  assert.equal(today.usedMicros, null);
+  const budget = { tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", counterTokens: null, capTokens: 20_000_000 }] } };
+  const today = spendSummaryOf({ records: [run("paid", { tokens: { total: 7_000_000, metered: true }, tokensWindows: { settledTokens: 0, basis: "unreserved" } })], hosts: [], budget, nowMs: NOW }).today;
+  assert.equal(today.settledTokens, 7_000_000);
+  assert.equal(today.usedTokens, null);
   assert.equal(today.counterConfigured, true);
   assert.equal(today.counterAvailable, false);
   assert.equal(today.usedSource, "unknown-counter");
 });
 
-test("recorded plan API-equivalent spend is retained, and old zero-price plans need an explicit baseline", () => {
-  const subs = [{ id: "work", provider: "plan", models: ["paid"], counterfactualModel: { provider: "test", id: "api" } }];
-  const paidPlan = run("plan-api", { provider: "plan", model: "paid", usage: { models: [{ provider: "plan", model: "paid", input: 1, cost: 7 }] }, dollars: { settledMicros: 0, basis: "unreserved" } });
-  assert.equal(recordSpendOf(paidPlan, { subscriptions: subs, pricing }).micros, 7_000_000);
-  const oldPlan = run("plan-old", { provider: "plan", model: "paid", tokens: { cost: 0, metered: true }, usage: { models: [{ provider: "plan", model: "paid", input: 1, cost: 0 }] }, dollars: { settledMicros: 0, basis: "unreserved" } });
-  const estimated = recordSpendOf(oldPlan, { subscriptions: subs, pricing });
-  assert.equal(estimated.micros, 1_000_000);
-  assert.equal(estimated.estimated, true);
-  assert.equal(recordSpendOf(oldPlan, { subscriptions: [{ ...subs[0], counterfactualModel: null }], pricing }).micros, null);
+test("an unreserved settlement keeps its 0 in the ledger while the meter's own tokens still count", () => {
+  const paidPlan = run("plan-api", { provider: "plan", model: "paid", usage: { models: [{ provider: "plan", model: "paid", input: 1, total: 1_000_000 }] }, tokens: { total: 1_000_000, metered: true }, tokensWindows: { reservedTokens: 0, settledTokens: 0, basis: "unreserved" } });
+  const got = recordSpendOf(paidPlan);
+  assert.equal(got.tokens, 1_000_000);
+  assert.equal(got.ledgerTokens, 0, "nothing was reserved, so nothing is settled against the window");
+  assert.equal(got.floor, false);
 });
 
 test("a price floor is sticky for uncapped fallback meter records and their chart totals", () => {
-  const partial = run("partial", { usage: null, tokens: { cost: 7, metered: false }, dollars: { settledMicros: 0, basis: "unreserved" } });
-  const day = spendChartsOf({ records: [partial], sinceMs: NOW - DAY, nowMs: NOW, jobCapMicros: null }).daily.at(-1);
-  assert.equal(day.settledMicros, 7_000_000);
+  const partial = run("partial", { usage: null, tokens: { total: 7_000_000, metered: false }, tokensWindows: { settledTokens: 0, basis: "unreserved" } });
+  const day = spendChartsOf({ records: [partial], sinceMs: NOW - DAY, nowMs: NOW, jobCapTokens: null }).daily.at(-1);
+  assert.equal(day.settledTokens, 7_000_000);
   assert.equal(day.settledFloor, true);
   assert.equal(day.settledEstimated, true);
 });
@@ -263,16 +258,16 @@ test("a price floor is sticky for uncapped fallback meter records and their char
 test("project charts use that project's holds even when Today's headline falls back to deployment windows", async () => {
   const { reads } = readsFixture();
   reads.hosts = async () => ({ hosts: [{ name: "worker", jobsMore: "0", jobs: JSON.stringify([{ id: "site-job", p: "site", at: NOW - 1000, ha: NOW - 1000, h: 2_000_000 }, { id: "other-job", p: "other", at: NOW - 1000, ha: NOW - 1000, h: 3_000_000 }]) }] });
-  reads.budget = async () => ({ dollars: { windows: [{ ledger: "deployment", window: "day", capMicros: 10_000_000, counterMicros: 5_000_000 }] } });
+  reads.budget = async () => ({ tokens: {}, windows: { rows: [{ ledger: "deployment", window: "day", capTokens: 10_000_000, counterTokens: 5_000_000 }] } });
   const data = await assembleInsightsView({}, "7d", { project: "site", pricing, nowMs: NOW, envFn: () => ({}), reads });
   assert.equal(data.spend.today.basis, "deployment");
-  assert.equal(data.spend.today.heldMicros, 5_000_000);
-  assert.equal(data.spend.daily.at(-1).heldMicros, 2_000_000);
+  assert.equal(data.spend.today.heldTokens, 5_000_000);
+  assert.equal(data.spend.daily.at(-1).heldTokens, 2_000_000);
 });
 
 test("the spend view counts a newer pi-dispatch's records of the selected project up to now, as dispatch_costs does (#761)", async () => {
   // Only the core is judged: the project and the times. One that ends after now is past every fold here.
-  const newer = (id, project, over = {}) => run(id, { project, v: 2, ...over });
+  const newer = (id, project, over = {}) => run(id, { project, v: 3, ...over });
   const scanned = [run("site-ok"), newer("n-site-1", "site"), newer("n-site-2", "site", { flow: "other" }), newer("n-other", "other"), newer("n-none", undefined), newer("n-later", "site", { endedAt: new Date(NOW + 60_000).toISOString() })];
   const spendOf = async (project) => {
     const { reads } = readsFixture();
