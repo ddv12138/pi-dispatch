@@ -3783,80 +3783,69 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
 
 ## DES-COST-FOLD-BY-SCAN
 
-- **AMENDED 2026-10-29 (#749)**: Today’s holds are published actual worker reservations with timestamps, summed from live hosts; neither maxCostUsd nor counter minus settled records can reconstruct them. Unread/missing older telemetry and reconciliation differences are explicit. Spend’s run-set estimate is a sum of re-priced ledgers; Breakdown’s median flow estimate uses the selected window’s count. Enforcement `unreserved/0` records fall back to recorded metered prices, never zero paid spend; unknown/partial record costs keep their marks and the separately named counter ledger remains the reconciliation source.
+**RETIRED, token-only.** The money fold this entry decided — the typed `{ usd, class, floor, coverage }`
+with its six pricing classes (metered / plan / zero-rated / estimated / seeded / unknown), the plan
+verdicts and proration, the subscription price comparisons and the pricing-façade re-pricing — is deleted
+with the rate tables it folded against. The scan it ran on (the read-only, filename-keyed, retention-bounded,
+92-day-capped `scanRunRecords` over the run-history sidecars, folded by the pure, fs-free
+`admin/src/costs.mjs`) survives, and its decision record continues at `DES-TOKEN-FOLD-BY-SCAN`. The
+fact/opinion split survives too: the sidecars still hold immutable facts, and everything typed about them
+is computed at fold time and never stored.
 
-- **Decision**: Cost aggregation is a **read-only, filename-keyed scan** of the run-history sidecars
-  (`scanRunRecords` in the admin read-model — `listRuns`' sibling without the 50-record clamp), bounded by
-  `PI_LOG_RETENTION_DAYS` and hard-capped at **92 days** even when retention is the keep-forever `0`, folded
-  by a **pure, fs-free module** (`admin/src/costs.mjs`) into per-day/per-flow/per-model aggregates and plan
-  verdicts. Classification — metered / plan / zero-rated / estimated / seeded / unknown — happens **at fold
-  time and is never stored**: the sidecars hold immutable **facts** (what ran, what it spent, at which
-  rates-version), and everything derived from the operator's opinions (`subscriptions.json`, the pinned
-  rate tables reached through the worker's `./pricing` export) is recomputed on every fold, so editing a
-  subscription retroactively reclassifies history — correctly, because facts and opinions never share a
-  file. Every dollar the fold emits is a **typed value** `{ usd, class, floor, coverage }` rendered only by
-  the panel's `fmtCost`; a sum stays `metered` only when every addend is, and one estimated addend demotes
-  the whole sum visibly. The fold's `window.days` — the denominator every plan proration scales by — comes
-  from the **requested** window (`sinceMs`, the same instant the caller cut the scan at, minted by the one
-  `costsSinceMs` beside the fold), never from the span the records happen to cover; `firstRunMs` rides
-  beside it for renderers that want the observed left edge, and a caller folding an arbitrary record set
-  with no window to ask about (`sinceMs: null`) keeps the observed-span derivation.
-  The one class a sum keeps besides metered is `plan` (issue #492): a bucket whose
-  every run ONE declared plan covers, row for row, with no run a floor, stays `plan:<id>`, as the
-  per-model bucket always did, because `REQ-COST-ANALYTICS` (b) forbids a plan-covered run rendering as
-  `$0.00` and the demotion drew exactly that as `~$0 est.` on the trigger, flow and repo tables and the
-  trigger badge. A bucket mixing plan-covered and billed runs, holding one run with a billed row, holding
-  a floor (its `≥` may never be dropped, (d), and `plan:<id>` has no place for it), or covered by two
-  plans (a subscription id may hold any character, so no separator joins two unambiguously) still
-  demotes to `estimated` with its coverage; zero-rated and unknown buckets demote as before.
-  A run refused before any spend (issue #507) folds as an exact $0 with no rows: the record has no `tokens`, no
-  `exitCode`, and `budgetReserved: false`, which most pre-spend refusals write (the prepare refusals gained the field
-  in the same change). Such a contribution is CLASSLESS: it is left out of every class test and of the coverage
-  denominator, so it neither demotes a `plan:<id>` or metered bucket nor dilutes coverage, and a bucket of refusals
-  alone is vacuously metered, an exact $0. It is no plan's attributed run (no amortization share, no excluded row, no
-  peak-window event), no what-if member, no floor, and not counted in `runsUnmetered` or `runsUnledgered`, so the
-  insights page's "fully ledgered" count holds it: there was nothing to ledger. All three facts are required, because
-  each alone is also true of a run that spent: a pre-meter record has no tokens, a container killed before its exit
-  line may have no exit code, and an old record has no `budgetReserved`. Rejected: keying on `outcome: "policy"`,
-  which also holds paid runner stops and `worker-abort`, and on the reason token, a list that grows with every new
-  gate and would floor the next one until someone remembered to add it. **Residual**: some refusals before spend do
-  not match and stay floors. A refusal by the global count ledger (`over-budget`, the soft hold) keeps the global slot
-  it reserved (`budgetReserved: true`), any other refusal whose job-count give-back failed keeps it too, and a
-  container the runtime failed to start (`container-never-started` with an exit code, often 125) carries that code. Counting
-  them as $0 would need a fact the record states itself, never the reason token.
-- **Why**: The records are already the durable store (`DES-RUN-HISTORY-FLAT-FILES-NO-DB`), retention
-  already bounds them, and a retention-bounded directory of ≤2KB single-line files folds in milliseconds —
-  aggregation earns no second store. Fold-time classification is what keeps the one promise the whole
-  screen rests on: an estimate can never be mislabeled as truth, because the label is computed where the
-  comparison is made, not persisted where it could go stale.
+## DES-TOKEN-FOLD-BY-SCAN
+
+- **Decision**: token aggregation is the SAME **read-only, filename-keyed scan** of the run-history
+  sidecars (`scanRunRecords` in the admin read-model — `listRuns`' sibling without the 50-record clamp),
+  bounded by `PI_LOG_RETENTION_DAYS` and hard-capped at **92 days** even when retention is the keep-forever
+  `0`, folded by the SAME **pure, fs-free module** (`admin/src/costs.mjs`) into per-day/per-flow/per-model/
+  per-trigger/per-repository/per-project aggregates. Classification — **`metered` / `estimated` /
+  `unknown`, three classes only** — happens **at fold time and is never stored**: the sidecars hold
+  immutable **facts** (what ran, what the meter counted), and everything typed is recomputed on every fold.
+  The pricing classes (`plan`, `zero-rated`, `seeded`) are gone with pricing: there is no rate table to
+  rate anything zero, no plan price to amortize, and no unmeasured band to seed. Every amount the fold
+  emits is a **typed value** `{ tokens, class, floor, coverage? }` rendered only by the shared
+  `fmtAmount`; a sum stays `metered` only when every addend is, and one floored addend demotes the whole
+  sum visibly (`≥`). A floored amount is an **estimate of the true total from below**: some calls went
+  unmeasured or uncounted (`unresolved`, `usageUnreported`, `unmeteredChildren`, the pre-ledger and
+  pre-#25 records, issue #507's pre-meter rule), so the true total is higher — `floor: true`, rendered
+  `≥`, never dropped by aggregation. The fold's `window.days` — the denominator every rate-bounded series
+  scales by — still comes from the **requested** window, never the observed run span (issue #175's
+  refutation carries over unchanged).
+  **The what-if** is a **token-profile comparison**, not a re-pricing: for a flow it takes the median
+  per-run token total over the flow's ledgered runs (MEDIAN, not mean: one 10x outlier run must not move
+  the estimate) and its input/output/cache split, and compares that profile against the target model's
+  declared context window — how much of it one median run occupies (null when the target declares none).
+  There is no price to multiply and no rate table to consult. With no ledgered run to measure from, the
+  fold answers `unknown` (`unmeasured`) rather than emit a 0 that looks like an answer: no number was
+  measured, and inventing one is exactly what this fold refuses to do (the money-era `$0.5–$5/job` band
+  was `OQ-002`'s artifact and died with the band's unit). The per-run median times ALL observed runs of
+  the flow (the un-ledgered ones consumed tokens too), with `coverage`/`excluded` saying how much of that
+  extrapolation is measured. A refusal before any spend (issue #507) is no run of the flow: it is never
+  extrapolated and counts in `excluded`, not as a member; a newer release's record is not read at all
+  (issue #761) and counts in `newerSkipped`.
+- **Why**: the meter counts what each model used, so the honest question a flow comparison can answer
+  changed from "what would it cost" to "what does it use, and does it fit". Classes exist for the same
+  reason they always did — no rendering path can launder an estimate into a fact — but the estimate
+  direction is now one-sided (from below, `≥`), because uncounted tokens can only make the true total
+  larger, which is a stronger honesty guarantee than the pricing era's two-sided estimate marks.
 - **Rejected**:
-  - *An embedded analytics store (sqlite / lowdb) or a query layer* — re-refused for exactly
-    `DES-RUN-HISTORY-FLAT-FILES-NO-DB`'s reasons: a native build, a second retention authority, query
-    power that nothing needs at this size.
-  - *Rollup / index files beside the sidecars* — a second source of truth that must be invalidated on
-    every retention sweep, every retry overwrite, and every `subscriptions.json` edit; the failure mode is
-    a stale rollup silently disagreeing with the records it summarizes, and the win is milliseconds that
-    were never being lost.
-  - *A redis cost series beside `budget:t:*`* — the budget keys are TTL'd **enforcement state**, not
+  - *Re-pricing recorded tokens through a kept rate table* — the table is the drift axis the removal
+    deleted; a fold that priced again would drag pi-ai's pricing pin back into the admin.
+  - *A redis token series beside `budget:tok:*`* — the budget keys are TTL'd **enforcement state**, not
     history; parking analytics in them couples the screen to counter TTLs and adds a write path to what is
     deliberately a read-only feature.
-  - *Storing the classification on the record* — a record written under one subscriptions file lies under
-    the next; the fact/opinion split is the design.
-  - *Deriving `window.days` from the first observed run* — shipped that way once and refuted (issue #175):
-    on a sparse window the proration denominator shrank to the observed span (two runs early in a
-    month-to-date question prorated a $99 plan to pocket change), so verdicts read SAVING far too easily.
-    The observed span is a fact about the records; the denominator is a fact about the question asked.
-  - *The fold re-deriving the trigger join itself* — the per-trigger rollup (issue #175) takes the
-    read-model's `attributeRunsToTriggers` result as an ARGUMENT (`triggerJoin`), the injected-pricing
-    pattern: the index+type agreement doctrine and the raw `repeat:<id>:<millis>` grammar were
-    adversarial-review-hardened once in `read-model.mjs`, and a second implementation inside the fold is
-    a fork of that doctrine waiting to drift. The fold stays fs-free and worker-import-free; `byTrigger`
-    is null (not empty) when no join was wired, because "not computed" and "nothing attributed" are
-    different sentences.
-- **Traces to**: `DES-RUN-HISTORY-FLAT-FILES-NO-DB`, `DES-SUBSCRIPTIONS-ARE-COUNTERFACTUAL-ONLY`,
-  `INT-PRICING-EXPORT-CONTRACT`, `REQ-TOKEN-ACCOUNTING-AND-CAPS`; implemented in
+  - *Storing the classification on the record* — a record's totals are immutable facts; the typed view is
+    the fold's, and a stored class would lie under a newer meter the way a stored price lied under a newer
+    subscriptions file.
+  - *Deriving `window.days` from the first observed run* — shipped that way once and refuted (issue #175);
+    the denominator is a fact about the question asked.
+  - *The fold re-deriving the trigger join itself* — the per-trigger rollup takes the read-model's
+    `attributeRunsToTriggers` result as an ARGUMENT (`triggerJoin`), the injected-pricing pattern; the
+    fold stays fs-free and worker-import-free, and `byTrigger` is null (not empty) when no join was wired,
+    because "not computed" and "nothing attributed" are different sentences.
+- **Traces to**: `DES-RUN-HISTORY-FLAT-FILES-NO-DB`, `REQ-COST-ANALYTICS`, `REQ-TOKEN-ACCOUNTING-AND-CAPS`,
+  `DES-TOKEN-RESERVE-AND-SETTLE`; implemented in
   `admin/src/read-model.mjs` (`scanRunRecords`) and `admin/src/costs.mjs`.
-
 ## DES-GRAPH-EDGE-DERIVATION
 
 - **Decision**: The trigger/flow graph (issue #54) is assembled by **one pure fold**
@@ -4501,18 +4490,22 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     catalog cannot be loaded the meter degrades to delegating to the registry entry — still metering, and
     correct for the other 33. **Both silent degradations are reported on the install line** rather than
     hidden behind a bare "ok": whether the catalog loaded (and why not), and whether a pre-dispatch brake
-    exists at all — the latter alongside whether the job is capped, since an uncapped job has no brake by
-    design and `capped` without a brake is the alarm. A cost cap and a model list arm the brake too, reported
-    as `costCapped` and `listed` (issues #501, #502), and a job carrying either with `brake:false` is refused
-    before its first call (`cost-cap-unenforceable`, `model-policy-unenforceable`), because both are enforced
-    before a call or not at all.
+    exists at all — the latter alongside whether the job carries a token cap, since a cap that only the
+    settle-time check enforces has no brake of its own and `capped` without a brake is the readable state,
+    not an alarm (`DES-TOKEN-RESERVE-AND-SETTLE`: the per-job budget is a settle-time lagging in-run
+    backstop, never a pre-call bound). A model list is the one policy that arms the brake, reported as
+    `listed` (issue #502), and a job carrying one with `brake:false` is refused
+    before its first call (`model-policy-unenforceable`), because a list is enforced
+    before a call or not at all; the token cap is deliberately not asserted there, because it has no
+    pre-call form to enforce and nothing a missing brake would make it enforce early.
 - **Child processes (issue #500; the seams, which part E wires into the runner)**: a `pi` child process has its own
   copy of pi, so its calls reach neither this meter nor its guards on their own (`OQ-011`). The answer is a meter in
   each child that reports through a file, and a parent that folds those files. The pieces in `usage-meter.mjs`:
   - **The child's meter.** `createUsageMeter({ onChange })` calls `onChange` when a call is observed, when it
-    settles, and when the meter stops (every guard refusal stops it, so a raised `costRefused` or `modelRefused`
+    settles, and when the meter stops (the token budget's stop and the model list's refusal both stop it, so a
+    raised `usageUnreported` or `modelRefused`
     reaches the ledger at once). A child killed mid-call leaves `unresolved` behind. `record()` clamps a negative
-    usage field or price at 0, for the parent and the child alike, because a falling total reads as a shrink.
+    usage field at 0, for the parent and the child alike, because a falling total reads as a shrink.
     `meter.rows()` gives the rows to write: first seen order (a written row never moves into the bucket), at most
     120, with any id that is not printable ASCII or that the worker would refuse folded into one model-less row
     whose ids are null. `childLedger({ state, metered, meter, guard })` builds the whole ledger object.
@@ -4524,37 +4517,27 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     `isStopped` answering null, undefined or false means go. A stop reason is a stop for that reason. Any other
     answer, or a throw, is a stop as the token cap, because a garbled STOP is still a STOP.
   - **The parent's hook.** A `children` hook that throws, on a tick or at teardown, stops a meter that carries any
-    policy, for the stop an unmetered child gets: `cost-cap` under a dollar cap, else `token_budget` under a token
+    policy, for the stop an unmetered child gets: `token_budget` under a token
     cap, else `model-not-allowed` under a list. With no policy it is logged once. Failures are counted on the
     teardown line as `childrenFailed`, and the hook's teardown fields can never overwrite the meter's own.
-  - **The cost guard.** `createCostGuard({ external })` refuses when `spent + inflight + external() + bound > cap`,
-    with `external()` read at every admit. An answer that is not a finite number at or above 0, or a throw,
-    refuses the call. `spend()` returns `spentMicros` and `inflightMicros` (also on the policy guard, zeros with
-    no cap). They are not in `snapshot()`, so the exit line is byte-identical with or without `external`.
   - **The ledger file.** One per child, `<pid>.<nonce>.json` (a 16 hex character nonce) in the run's ledger
-    directory, written whole by rename, at most 64 KiB. Fields, all required in every state: `v` (3), `state`
-    (`starting`, `running` or `done`), `metered`, `totals` (`input`, `output`, `total`, `cost`, `calls`,
-    `unresolved`, `unpriced`, `sessions`), `rows` (at most 256, the run record's ten numerics, `provider` and
-    `model` both ids or both null), `spentMicros`, `inflightMicros`, `costRefused`, `modelRefused`, the cost
-    guard's four floor counters `boundExceeded`, `costUnanswered`, `longContext`, `costUnjudged` (version 2, part E's
-    review: the parent adds them to its own exit-line counters, so a child's partial count floors the settlement as
-    a parent call's would), and the meter's `costUnreported` (version 3, issue #571: written by the child's meter
-    with or without a cost guard, and added to the parent meter's own through the fold). A file of an older version
+    directory, written whole by rename, at most 64 KiB. Version **4** is the token-only shape (2 added the
+    guard counters, 3 `costUnreported`; both died with the cost guard). Fields, all required in every state:
+    `v` (4), `state`
+    (`starting`, `running` or `done`), `metered`, `totals` (`input`, `output`, `total`, `calls`,
+    `unresolved`, `usageUnreported`, `sessions`), `rows` (at most 256, the seven token numerics plus `calls`,
+    `provider` and
+    `model` both ids or both null), and `modelRefused`. The meter's `usageUnreported` (issue #571, the
+    token count's completeness signal) is written by the child's meter on every run and added to the parent
+    meter's own through the fold; it is the one completeness counter a ledger carries (`CHILD_FLOOR_COUNTERS`).
+    A file of an older version
     is malformed, so unmetered, and a child from an older image floors the job. Numbers only:
     amounts from 0 to `Number.MAX_SAFE_INTEGER` (so no sum of files can overflow), counts safe integers. Ids must
     be printable ASCII and pass the worker's id rule after lowercasing (a copy, `USAGE_ID_PATTERN`, held to the
     worker's by a test), because the worker drops the whole usage block for one row it refuses. The rows must
     partition the totals.
-  - **The SPENT file.** The parent tells each child what the rest of the job spent: `spentFile(fold, parentMicros)`
-    gives `{ v: 1, total, byLedger }`, with `total` the parent's spent and in-flight plus every ledger's charge, and
-    `byLedger` each ledger's part by file name, in whole micro-dollars rounded up. A ledger's charge
-    (`ledgerCharge`) is its settled spend (`ledgerSettled`: the larger of its guard's `spentMicros` and its metered
-    `totals.cost`, so a child whose spawner dropped `PI_MAX_COST_MICROS`, and so has no guard and `spentMicros` 0, is
-    still charged what it spent) plus its `inflightMicros`. `externalFor(spent, ownName)`
-    is the total less the child's own part, so a child never counts its own spend twice. A malformed SPENT gives
-    Infinity, which the cost guard refuses.
   - **The fold.** `foldChildLedgers({ dir, fs, prev })` keeps a high-water mark per file. A good file that reached
-    its mark in everything that only grows replaces it (`unresolved` and `inflightMicros` may fall). A file that
+    its mark in everything that only grows replaces it (`unresolved` may fall). A file that
     is malformed in any part, says `metered: false`, shrank in anything (a row included) or vanished counts
     once as unmetered, keeps the mark it had, and is not read again. A file is opened without following a
     symlink and without blocking, and must be a regular file, so a FIFO cannot hang the runner. A file whose
@@ -4580,9 +4563,8 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     overcharge. Named residuals, so far: a child whose file is deleted before the parent's first read of it; a
     forged small file kept rewritten; a forger that rewrites a live child's file with `unresolved` at 0 and then
     kills the child mid-call hides that call's floor signal (`unresolved` may fall, so the fold cannot tell); a
-    provider that reports a negative amount is clamped to 0, which can under-count by that amount; a forged
-    smaller SPENT, or a deleted STOP, only weakens a child's pre-call check, because the parent never reads SPENT
-    and a child's overshoot lands in its own ledger, charged in full.
+    provider that reports a negative amount is clamped to 0, which can under-count by that amount; a deleted
+    STOP only weakens a child's brake, because a child's overshoot lands in its own ledger, charged in full.
 - **The child route (issue #500 parts C and D)**: how a child's meter gets into the child. The parent reads what it
   writes through the children hook (part E, the next bullet).
   - **The runner.** Before its own meter installs, and so before any extension loads, `run-job.mjs` opens the
@@ -4688,34 +4670,33 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
       job's runner and has no ledger in the parent's directory is unmetered.
   - **The child's meter** (`startChildMeter`, called by the `child-meter.ts` extension at load, or by the library
     hook). It installs on the class the child's sessions use, with the child's own compat copy (`compat`),
-    `brake: true`, and `isStopped` reading `STOP`. Its guard is built from the inherited `PI_ALLOWED_MODELS` and
-    `PI_MAX_COST_MICROS`, read as the runner reads them. The cost guard's `external` is `externalFor(SPENT, own
-    name)`. A missing `SPENT` is 0, and a malformed or unreadable one refuses. The token cap is not the child's: the
+    `brake: true`, and `isStopped` reading `STOP`. Its model list is the inherited `PI_ALLOWED_MODELS`, read as
+    the runner reads it. The token cap is not the child's: the
     parent judges it on its own spend plus every child's, and answers through `STOP`. A policy that does not
     parse, a failed install, no class, or a session runtime the install does not cover (checked at every
     `session_start`) makes the child `metered: false` for good. The ledger is written whole after the install
     (library mode: not until the first call), before every call, on every `onChange`, and as `done` at exit. One
-    meter per process: a second class handed over is installed with the same meter and guard.
-  - **Every call is on disk before it goes out.** The guard is the last thing a call passes before dispatch, so the
-    child's guard wraps the policy guard (or stands alone): once the policy admits a call, the ledger is written
+    meter per process: a second class handed over is installed with the same meter.
+  - **Every call is on disk before it goes out.** The ledger write is the last thing a call passes before
+    dispatch, so once the policy admits a call, the ledger is written
     with that call counted, in flight (`unresolved`), and a write that fails refuses the call. The settle then
     updates it. A call admitted and never seen by the meter stays counted, unresolved, so the ledger never shrinks.
-    The refusal counters are read without the cost guard's snapshot, which would settle the pending admission at its
-    bound. One more write per call.
+    The refusal counters are read without a snapshot of in-flight admissions, which would settle the pending
+    admission early. One more write per call.
   - **A ledger that cannot be written stops the child.** The fold has no notion of a stale file, so a failed write
     (a full or unwritable `/tmp`) would leave an older, smaller ledger that still says metered. The failed
     pre-dispatch write refuses its own call; once any write fails, `isStopped` answers the token cap for every later
     call, and every later write that succeeds says `metered: false`. Measured with three children whose directory
     turns unwritable mid-run: every call that reached the provider is in a ledger.
-  - **The writer.** Every file in the directory (the child's ledger, and the parent's `STOP` and `SPENT`)
+  - **The writer.** Every file in the directory (the child's ledger, and the parent's `STOP`)
     is written by `writeFileAtomic`: a temporary file CREATED with `O_CREAT|O_EXCL|O_NOFOLLOW|O_NONBLOCK` under a
     random name, checked to be a regular file, written through its descriptor, then renamed. The directory is shared
     with the agent's processes, and a predictable temporary name let a planted FIFO block the writer for good, or a
     planted symlink redirect it.
-  - **The control files.** `STOP` is `{ "v": 1, "reason": <a stop reason> }` (`stopFile`). Once it exists, the
+  - **The control file.** `STOP` is `{ "v": 1, "reason": <a stop reason> }` (`stopFile`). Once it exists, the
     child's next call is braked with that reason. Any other content, or an unreadable file, is a stop as the token
-    cap. `SPENT` is `spentFile`'s object. Both are read on every call through the fold's reader: no link followed,
-    no blocking open, a regular file of at most 64 KiB. A missing file means go, or 0.
+    cap. It is read on every call through the fold's reader: no link followed,
+    no blocking open, a regular file of at most 64 KiB. A missing file means go.
   - **Why `child-meter.ts`, not `.mjs`.** pi's loader maps `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`
     to the child's own copies only for a module it transforms. A `.mjs` or `.js` extension is imported natively first,
     and its bare specifiers then bind whatever Node resolves from where the file sits. Measured at 0.99.1: from
@@ -4749,44 +4730,39 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     else stands at its path (a file or link the agent put there is not made over), and counted once as unmetered.
     Then the detector (below). Then `meter.setChildren`, with `unmetered` and `processes` widened by what the
     detector found; the token cap is judged there on parent plus children. Then the stop rules, first stop wins:
-    - under a dollar cap, the parent's settled spend plus every child's settled spend (`ledgerSettled`) past the cap,
-      or any child `costRefused`, is `cost-cap`. Settled spend, not in-flight bounds: a bound is an upper estimate,
-      and stopping on it would stop jobs that never reach the cap (in-flight bounds still reach the parent's guard
-      through `external`);
+    - under a token cap, parent plus children past the budget is the meter's own settle-time stop
+      (`token_budget`); a child's contribution reaches it through the fold, so a child's spend stops the job at
+      the next tick;
     - under a model list, any child `modelRefused`, or any NAMED child row whose pair is not on the PARENT's list, is
       `model-not-allowed`. The parent's list, because a spawner can widen a child's own. A model-less child row is
       not judged: an allowed model whose id the row rule refuses (a Bedrock ARN past 64 characters) lands there, and
       the child's own guard judged that call against the list it inherited;
     - any unmetered child: one `unmetered_child` line (the first time, with `why`, `pid` and the count), then the stop
-      an unmetered child gets: `cost-cap` under a dollar cap, else `token_budget` under a token cap, else
+      an unmetered child gets: `token_budget` under a token cap, else
       `model-not-allowed` under a list, with `cause: "unmetered-child"` as its detail, so the token stop does not also
       log `token_budget_exceeded` (`meterStopHandler` skips a stop with a cause; a failed children hook's stop carries
       `cause: "children-hook"` the same way). With no policy it is a floor only (`unmeteredChildren`), and nothing stops.
-    A child's `costRefused` or `modelRefused` stops the job only under the parent's own cap or list: with neither, it
+    A child's `modelRefused` stops the job only under the parent's own list: with none, it
     is a policy the spawner set for that child alone.
-  - **The control files.** On every tick: `SPENT` under a dollar cap (`spentFile`), and `STOP` with the meter's reason
+  - **The control file.** On every tick: `STOP` with the meter's reason
     once it has stopped. STOP is also written the moment the meter stops (`onStop`), and REWRITTEN on every tick after,
     so a deleted STOP comes back within a tick. A directory found gone on a write is made again and counted lost. The
-    parent's own failure to write either file is counted once as unmetered: a child the parent cannot reach is a child
-    it cannot hold to the cap. No SPENT without a dollar cap: no child of such a job judges spend against the parent,
-    and a write that cannot fail cannot count as a breach.
+    parent's own failure to write it is counted once as unmetered: a child the parent cannot reach is a child
+    it cannot brake.
   - **A promise of a stream** (issue #571). pi-ai's legacy `streamSimple` and `stream` (compat.js) hand a registry
     entry's answer on as it is, so an extension's entry that answers with `Promise<stream>` (an async function)
     reaches its caller as a promise, and a caller that awaits it (a router forwarding to it) gets a working stream
     and spends. pi's own paths never hand one on: ModelRuntime and the provider composer wrap every provider call in
     `lazyStream`, which awaits it. So the meter counts such a call when it is dispatched and settles it from the
-    stream it resolves to (its result), and the cost guard settles its admission the same way; a rejection, or a
-    value with no `result()`, is a call with no usage (`unpriced`, and the guard keeps its bound), as a rejected
+    stream it resolves to (its result); a rejection, or a
+    value with no `result()`, is a call with no usage (`usageUnreported`), as a rejected
     result is. A promise that resolves to a stream the meter already observed (an async router entry that forwards
-    through the legacy call and resolves to the forward's own stream) settles as a priced zero, not judged for broken
+    through the legacy call and resolves to the forward's own stream) settles as an observed zero, not judged for broken
     usage, so the forward's spend is counted once.
-  - **The parent's cost guard and exit line.** The guard's `external` is every child's `ledgerCharge` as of the last
-    fold. The exit line's guard counters (`costRefused`, `boundExceeded`, `longContext`, `costUnjudged`,
-    `costUnanswered`, `modelRefused`, each only where the parent's guard writes it) add the children's
-    (`guardFields`), so a child call that never started, or was charged past its bound, floors the dollar settlement
-    exactly as the parent's own would. The meter's `costUnreported` adds the children's in the meter (setChildren, a
-    high-water mark like the totals), on every line, so a child with no cost guard (its spawner dropped
-    `PI_MAX_COST_MICROS`) that got an answer with broken usage floors the job too.
+  - **The parent's exit line.** The exit line's guard counter (`modelRefused`) adds the children's
+    (`guardFields`), so a child call the parent's own list would refuse
+    counts exactly as the parent's own would. The meter's `usageUnreported` adds the children's in the meter (setChildren, a
+    high-water mark like the totals), on every line, so a child that got an answer with broken usage floors the job too.
   - **The detector** (Linux; it reads `/proc`, so elsewhere there is none and `distinct` and `peak` are null).
     - **What it scans.** All of `/proc`, not the runner's own children: a background child reparents to init. It skips
       this process, pid 1, and any process with `PF_FORKNOEXEC` set in `/proc/<pid>/stat`, read BEFORE the command line
@@ -4861,22 +4837,23 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     detector found with none. `unmeteredChildren` also counts the parent's own losses (a lost directory, a failed
     control write), so it can exceed `childProcesses`.
   - **Release coupling.** The worker's closed key list dropped the three keys until part F, and only part F's
-    `FLOOR_COUNTERS += unmeteredChildren` makes an unmetered child floor the dollar settlement. Parts E and F ship in
-    one release: a worker from before part F running this runner settles a capped job with an unmetered child as
-    metered (an undercharge), and a worker from part F running an image from before part E settles every capped job
-    at the floor (an overcharge, `DES-DOLLAR-RESERVE-AND-SETTLE`).
+    `COMPLETENESS_COUNTERS += unmeteredChildren` makes an unmetered child floor the token settlement. Parts E and F ship in
+    one release: a worker from before part F running this runner settles a job with an unmetered child as
+    metered (an undercount), and a worker from part F running an image from before part E settles every job
+    at the floor (an overcount, `DES-TOKEN-RESERVE-AND-SETTLE`).
   - **Rejected**: scanning only the runner's own children (`/proc/self/task/*/children`: a background child is
     reparented to init and drops out); matching any argument (an image read such as `tail -f run-job.mjs` stopped
-    honest jobs, measured); stopping on in-flight bounds (premature, above); a SPENT written for an uncapped job;
+    honest jobs, measured); a SPENT file telling each child the rest of the job's spend (its only reader was the
+    deleted cost guard, and the parent never read it back);
     a 10 s `starting` grace in wall time, and one in CPU time alone (above); a 1 s CPU grace (an honest child reached
     0.67 s under load, part F); counting a live `starting` ledger at teardown once it was seen for two ticks (an honest
     job that ended while children started exited 2, part F); counting every ledger ever seen against the file cap (an honest job's
     513th short child stopped it, measured); trusting a ledger by its pid alone (a forged zero `done` file hid an
     env-scrubbed child completely, measured); removing the directory at teardown (above).
   - **Residuals added**:
-    - children overshoot a cap by up to N children times the headroom at the last SPENT: each child's guard judges
-      against a SPENT up to one tick old, so N children that each start a call inside one tick each see the same
-      headroom, and those calls may stream for minutes (charged in full);
+    - children overshoot the budget by up to N children times the tick: each child's own meter judges its total
+      only when its calls settle, and the parent folds at most every tick, so N children that each settle inside
+      one tick pass calls the budget's next check then counts (charged in full);
     - a pi child that lives and spends inside one tick, with its file deleted before the parent's first read of it;
     - DELIBERATE CONCEALMENT: a spawner that scrubs the environment and keeps the title from changing (a no-op
       `process.title` setter in an `--import`) while starting pi through `node -e "import(<pinned entry>)"` or a copy of
@@ -4918,681 +4895,146 @@ money with no upstream turn limit (`REQ-RUNNER-TURN-BUDGET`).
     `require()` of pi's `dist/core/model-runtime.js` by absolute path throws (not in pi's exports map), which fails
     closed.
 - **The worker and the panel (issue #500 part F)**: the run record keeps what the runner reports.
-  - **The record.** The worker's closed key list (`TOKEN_KEYS`, `worker/src/run-history.mjs`) admits `childTotal`,
-    `childProcesses` and `unmeteredChildren` between `unpriced` and the cost fields, the runner's emission order, so
+  - **The record.** The worker's closed key list (`TOKEN_KEYS`, `worker/src/run-history.mjs`) admits `usageUnreported`
+    and the three child keys `childTotal`, `childProcesses` and `unmeteredChildren` (then `modelRefused`), the runner's
+    emission order, so
     a runner's `tokens` round-trips byte-identically (a test feeds the runner's own exit fields through the worker's
     parser). A record from an older image carries none of them.
-  - **The settlement.** `unmeteredChildren` is a floor counter (`FLOOR_COUNTERS`): present and 0, or the dollar
-    windows settle at the floor (`DES-DOLLAR-RESERVE-AND-SETTLE`).
+  - **The settlement.** `unmeteredChildren` is a completeness counter (`COMPLETENESS_COUNTERS`): present and 0, or the token
+    windows settle at the floor (`DES-TOKEN-RESERVE-AND-SETTLE`).
   - **The cost views.** `admin/src/costs.mjs` makes a run with `unmeteredChildren` above 0 a floor (`≥`), beside
-    `unresolved`, `unpriced`, the fallback meter and, from part F, the cost guard's `longContext`, `costUnjudged` and
-    `costUnanswered`, which it used to ignore. `boundExceeded` stays out: the metered cost is still pi's full price,
-    and the reservation it escaped is the worker's concern. An absent `unresolved`, `unpriced` or
-    `unmeteredChildren` is not a floor there, unlike the settlement: reading it as one would put `≥` on every record
-    from before the key. The price is a residual: a record from an image before part E whose job did spawn a pi child
-    undercounts with no mark. The new list does re-judge records that carry `longContext`, `costUnjudged` or
-    `costUnanswered` (only unreleased images wrote them): their dollar gains `≥`, no amount moves, and a plan-only
-    bucket holding one reads as an estimate, not `plan:<id>`. Issue #571 adds the meter's `costUnreported`, and the
-    rule for it and the guard's three is: present and not 0 (a negative, fractional or non-number value included, as
-    the worker reads anything but 0) is a floor, with or without a cap; ABSENT is a floor only on a record that
-    carries `costCapMicros` (an image with the cost guard that does not write one of them did not measure it), and a
-    record with no `costCapMicros` (from before the guard, or uncapped from an image before issue #571) stays exact.
-    History from before the cost guard is unchanged.
+    `unresolved`, `usageUnreported` and the fallback meter, the completeness counters the exit line carries. An absent
+    counter is not a floor there, unlike the settlement: reading it as one would put `≥` on every record
+    from before the key. A residual: a record from an image before part E whose job did spawn a pi child
+    undercounts with no mark. The rule for the counters is: present and not 0 (a negative, fractional or non-number value included, as
+    the worker reads anything but 0) is a floor; ABSENT is never a floor on its own (the dollar-era `costCapMicros`
+    pairing died with the guard, so there is no "capped image must have written one" reading left to make).
+    History from before the token-only release keeps its totals and is never rewritten.
   - **The run detail** labels `otherTotal` "other sessions" (it holds compaction and branch summaries since the
     0.99.1 pin, not only subagents) and adds "subprocesses" from `childTotal`, naming any unmetered children.
   - **No cache-warming pin.** A child builds its own pi settings (a pi CLI child, a pi-subagents foreground or
     background child), and pi reads `cacheWarming` from its global settings only, default `"streaming"`
     (`settings-manager.js` `getCacheWarmingMode`), so warming is on there; a project's `.pi/settings.json` does not
-    change it. pi-dispatch does not pin it off for children it did not create: the meter counts those calls and a
-    cost cap bounds them (`docs/costs.md`, #500's recommendation). In a job a child's agent folder is the image's
+    change it. pi-dispatch does not pin it off for children it did not create: the meter counts those calls and the
+    windows' reservation covers them (#500's recommendation). In a job a child's agent folder is the image's
     (`/home/pi/.pi/agent`), not the read-only overlay, so an operator turns it off only with a custom image or
     through the spawning package.
   - **Rejected**: an absent `unmeteredChildren` read as 0 in the settlement (an image from before part E would then
     settle a job whose children it never looked at as complete); a new reason token for an unmetered child
-    (`token_budget` or `cost-cap` with the `unmetered_child` log line names the cause, as #500 recommended).
+    (`token_budget` with the `unmetered_child` log line names the cause, as #500 recommended).
 - **Traces to**: `REQ-TOKEN-ACCOUNTING-AND-CAPS`, `REQ-RUNNER-TURN-BUDGET`, `CONST-BUDGET-BEFORE-TOKENS`,
   `CONST-PI-VERSION-PINNED`, `INT-SDK-SESSION-OPTIONS`, `INT-RUNNER-EXIT-CODE-PROTOCOL`,
   `INT-RUN-HISTORY-FILE-CONTRACT`, `INT-CONTAINER-RUNTIME-CONTRACT`, `OQ-010`, `OQ-011`
 
 ## DES-DOLLAR-RESERVE-AND-SETTLE
 
-**pi 1.4.0 summary and Radius policy (issue #693).** Compaction and branch summaries retain pi's own
-output limit, `model.maxTokens`; `reserveTokens` controls compaction/input preparation, not summary output.
-We do not inject a smaller summary cap. With reasoning disabled as well as enabled, the existing guard
-bounds the actual request and refuses before provider dispatch when the remaining cap cannot cover it.
-A tight cap can therefore terminate a job at compaction, even after affordable main turns. Real pinned-SDK
-integration tests with fake providers measure admitted and refused compaction and branch summaries, with
-session thinking off and high. Compaction forwards the thinking level; pi's branch summary omits it.
+**RETIRED, token-only.** The dollar ledger this entry decided — `worker/src/dollar-budget.mjs`, `money.mjs`,
+`dollar-fingerprint.mjs`, the runner's cost guard, `PI_MAX_COST_MICROS`, `budget:usd:*` and every `cost-cap`
+reason — is deleted. A retired decision's address stays here so history can be cited; its mechanism, its
+reserve-before/settle-after shape and its trusted-line settlement rules live on unit-for-unit in
+`DES-TOKEN-RESERVE-AND-SETTLE`, which is the entry to read. The one behavioural fact worth keeping from the
+dollar era: the reserve-before design was right because the reservation was the whole per-job cap, and that
+idea survives intact in the token ledger. The lagging day counter the dollar-era text shared with the token
+cap is retired too (`OQ-010`).
 
-Radius's `pi-messages` protocol stays outside `PRICED_APIS`. Its server supplies `event.usage` cost and may
-rewrite input. Catalog prices and a sent `maxTokens` do not prove an upper billing bound, so capped calls
-are refused before provider dispatch as `cost-cap`, `why: "unboundable"`, including zero-rate routes and
-custom gateways, in the root and child meter. This is a runner refusal, not a new worker preflight.
-Doctor names Radius and the protocol and directs operators to `docs/costs.md`; no unbounded org-budget
-mode is introduced. API keys still work without a local cap; OAuth credentials remain refused.
-Rejected: adding `pi-messages` to the source-derived priced set, treating a hosted zero-rate route as a
-free local model, or using a few successful live probes as proof of every routing/billing outcome.
+## DES-TOKEN-RESERVE-AND-SETTLE
 
+**pi 1.4.0 (issue #693).** Compaction and branch summaries meter through the same choke point as every other
+call, so a budget breach they cause settles and stops like any other; the runner injects no smaller summary
+cap. Radius's `pi-messages` protocol cannot be bounded before a call — nothing can, since the cost guard's
+death — and does not need to be: the per-job budget is a lagging in-run backstop, not a pre-call bound, and
+`pi-messages` usage reports into the same totals either way. `OQ-010` records why the old check-after day
+counter was right and why the windows replaced it.
 
-- **Decision**: A per-job dollar cap (`PI_MAX_COST_MICROS`, integer micro-dollars) is enforced by the RUNNER,
-  before every provider call, by a cost guard on the usage meter's guard seam (`createCostGuard`,
-  `image/runner/src/usage-meter.mjs`). This entry records the runner half (issue #501, part 2); the worker's
-  reservation against dollar windows and the settlement after the run are its other half (parts 3 and 4),
-  recorded under **The worker half** below. Per call, in both meter halves:
-  1. a job already stopped answers with the hard stop;
-  2. a virtual model (`pi-virtual`) on `streamSimple` passes unjudged, and its physical re-entry is judged, so one
-     request is bounded once and on the model that answers it. Only `streamSimple` re-enters that way; a virtual
-     model on any other method is judged as itself, and under a cap that is an unboundable call, refused;
-  3. the model check (issue #502, `DES-MODEL-POLICY-AT-THE-PROVIDER-WRAPPER`) refuses a call to a model the list
-     does not name, before the cost guard is asked, so such a call is never bounded or held in flight;
-  4. the guard computes the call's BOUND (`callCostBound`) and refuses when
-     `spent + in-flight bounds + bound > cap`, or when the bound is `Infinity`. A refusal counts `costRefused`,
-     logs `cost_refused` with numbers only, stops the job with `cost-cap` (the meter's one first-wins stop, which
-     aborts the root session) and answers this call with the hard stop. The first refusal's rule (`unboundable`,
-     `external`, `over-cap` or `final-payload`) rides the exit line as `why` and reaches the run record (issue #507), because a stop at
-     $0 read as a cap set too low when the fix was one models.json field. A closed enum, never the model id: the
-     record is PII-free and the line is container-written. An admitted call's bound is held in
-     flight until it settles.
-     **Final shaped payload (#781):** the prepared `onPayload` hook runs after provider shaping and the
-     caller/model hook. It clones the complete JSON to send and recomputes a conservative bound from that
-     body plus the original context/image allowances. Wire output caps, output multiplicity and one-hour
-     cache writes are judged from the final body; removing or disabling a local server's output cap is
-     unboundable. The same ticket grows to the larger bound, with spent, other in-flight tickets and external
-     child spend included before dispatch. It is never reserved or settled twice. A denial throws before the
-     guarded transport sends and records `final-payload`. Reviewed subscription adapters must demonstrate
-     that their actual SDK sends this checked body and performs no unadmitted internal retry. Trusted code
-     that does not participate in the payload protocol remains subject to the named extension trust boundary.
-  When the call settles, its bound leaves the in-flight sum and `ceil(cost x 1e6)`, never below zero (pi's
-  short-write term can go negative), joins `spent`. A charge above the bound counts `boundExceeded`. A call
-  whose cost is unknown (no finite `cost.total`, or a rejected result) stays charged at its bound, and the meter
-  counts it unpriced.
-  **A failed call: started or not** (PR #534's review). A call that settled `error` or `aborted` carries a
-  partial usage: openai-completions and openai-responses report usage only at the end of the stream, and
-  anthropic-messages what message_start carried (the input and one output token) until message_delta, so a stream
-  cut after thousands of output deltas settles at about 0, and pi then auto-retries it. One rule decides, on every
-  api alike, from the message pi settles with:
-  - a failed call that STARTED (its message holds any content block: text, thinking, a tool call or an image; or
-    an images result has output) is charged `max(ceil(cost x 1e6), bound)`. Usage counts do not decide it, the
-    output count included: pi copies message_start's `output_tokens` (Anthropic sends 1) into the usage, so an
-    in-band `overloaded_error` right after message_start reports one output token and no content;
-  - a failed call that never started (a 429 or a 5xx before the stream, an in-band error before any content, a
-    connection lost before the answer) is charged its metered cost, `max(ceil(cost x 1e6), 0)`, and counted as
-    `costUnanswered` on the exit line.
-  A SUCCESSFUL call that reports no input at all is broken usage reporting and is charged its bound.
-  **A call whose answer carries broken usage** (issue #571). pi fills a missing usage block with zeros and keeps the
-  part of a usage it did see, so the meter cannot tell "no usage reported" from "a free call" by the numbers, and
-  priced such a call at about $0 as metered. The METER counts it, on every run, capped or not, and in every child:
-  `costUnreported`, written on every metered exit line (after the child keys) and in every child ledger. Both
-  wrappers hand the meter the Model object a call was dispatched on, and when the call settles the meter counts it
-  when ALL of these hold:
-  - the model is PRICED (`pricedModel`): a rate above 0 in its cost table, one of its tiers, or an allowed fallback's
-    table, as pi composed it (pi gives a model with no `cost` all zeros, so through pi a table is never missing; a
-    Model object built by hand with no table, or with a rate that is not a number, counts as priced). A zero-rated
-    model never counts, so a free local model never floors a job;
-  - the answer has a finite `cost.total` (a missing one is already `unpriced`) and its usage is broken
-    (`unreportedUsage`): (a) its input side (input + cache read + cache write) is 0 and it is not a failed call that
-    never started (that stays the guard's `costUnanswered`); (b) it failed (`error` or `aborted`) after it started,
-    so its usage is partial, an Anthropic stream cut after message_start reported its input included; or (c) it
-    succeeded with answer content (non-empty text or thinking, or a tool call) but an output count of 0, or of at most
-    1 on `anthropic-messages`, where pi keeps message_start's output count (Anthropic sends 1) when a proxy's
-    message_delta carries none. A genuine one-token answer there (or a call capped at one output token) is floored
-    too: the safe side;
-  - the call did not FORWARD: no other model call was dispatched under its dispatch token (either half, the
-    asynchronous forward of a router or proxy provider included; both halves mark it before they dispatch the
-    forward, so a forward that throws marks it too). A forwarding call's own zero usage is the router's,
-    and the forward is metered on its own, so counting it would floor every job that runs through a router.
-  The count lands before the settle's change hook fires, so the child ledger written on that settle carries it. The
-  guard charges every call with broken usage at least its bound, by the SAME predicate (`unreportedUsage`), so what the
-  cap charges and what the settlement floors cannot drift apart, and counts nothing for it: ONE counter, the meter's.
-  The guard lifts a forwarding call too, though the meter does not count it: the cap judges each call on its own
-  worst case, and a router that answers itself after a failed forward must not run under the cap at $0.
-  A call the guard admitted whose dispatch THREW synchronously (the wrappers catch it, bind `undefined` and rethrow),
-  or that returned neither a stream nor a promise, stays charged at its bound and, on a bound above 0, counts
-  `costUnanswered`: it was never answered, the meter never saw it, and a provider may still have received it. A slot
-  merely flushed by the next admit (a call that dispatched a forward synchronously, before its own bind) or by the
-  snapshot is charged its bound and not counted: that call is answered and metered like any other.
-  The six counters (`costCapMicros`, `costRefused`, `boundExceeded`, `longContext`, `costUnjudged`,
-  `costUnanswered`) ride the exit line only when a cap is set. A job that ends by an abort or a stop while a call
-  that has not started is in flight settles that call unstarted too, so it gets `costUnanswered > 0` and settles
-  at the floor: conservative by design. A non-zero `costUnanswered` is part of the contract
-  the dollar settlement (the worker half, below) reads: such a job's metered cost is a floor, and the
-  settlement charges at least its reservation, as for `boundExceeded` and `longContext`. So is a non-zero
-  `costUnreported`, and an absent one (an image from before issue #571).
-- **The bound**, every term an upper bound and every pi-ai fact under it pinned by needle in
-  `image/runner/test/pinned-api.test.mjs`:
-  - **priced from one table pinned at install, never from the caller** (issue #587's review): the bound and pi's own
-    settlement both read the model object the call was made with, so a caller passing `{ ...model, cost: zeros }` ran
-    under a cap at $0, and a live registry is no better: it can be poisoned mid-run (`registerProvider` over a builtin
-    id, a rewritten `models.json` and any refresh, a `modelOverrides` entry, an extension's own `ModelRuntime.create`).
-    So the meter pins ONE table when it installs, from the job's runtime, before any extension loads: the builtin
-    catalog plus the operator overlay as loaded at start, `(provider, id, api)` to `{ api, cost, compat }`, copied as
-    plain data (`pinPriceTable`). Every capped call, on every runtime instance and every legacy pi-ai call, is held to
-    it: no entry, or an entry whose api, `cost` (tiers included) or `compat` (fallbacks and `maxTokensField` included)
-    differs from the call's model, is `Infinity`. A pi child gets the parent's table, written once into the ledger
-    directory (`PRICES`, mode 0444) with its sha256 in `PI_DISPATCH_PRICE_TABLE`, which the runner sets for its
-    descendants (reserved from `run.secrets` and `PI_FORWARD_ENV` with the other runner names); a missing, unreadable or
-    mismatched table is an EMPTY one, so the child refuses every capped call. Rejected: re-pricing a call from the table
-    instead of refusing it, since pi settles with the caller's object and the two would disagree. RESIDUALS: a model
-    the operator overlay adds is priced as the operator wrote it; a model an extension registers after the meter
-    installed has no entry, so it cannot run under a cap (without a cap nothing is compared); and the job's own
-    processes run as the runner's uid, so one that rewrites `PRICES` and exports a matching hash to a child it starts
-    itself defeats the child's check (it stops an extension or a model in a pi child from forging a price in passing);
-    and a pi child does not see the overlay `models.json`, so a builtin model whose cost, compat or api the overlay's
-    `modelOverrides` changes differs from its pinned entry in a child, and the child's capped calls on it are refused
-    as unboundable (fail closed);
-  - only the 12 api ids whose module reaches pi-ai's `calculateCost` price from the catalog (`PRICED_APIS`,
-    derived from the pinned source by that test); any other api is `Infinity`;
-  - the tables are the model's cost, each allowed fallback's cost (anthropic-messages bills a fallback answer
-    at the fallback's rates), each tier the input could reach, and a synthetic long-context tier (below);
-  - all-zero rates are `0`, so a zero-rated local model runs under a cap of `0`;
-  - input is the UTF-8 byte length of the serialised context plus 8,192, NOT capped by the context window
-    (pi does not enforce it, and gpt-5.4 prices a tier above its own listed window). The assumption that one
-    token is at least one byte is stated in the code and checked by use: `boundExceeded`;
-  - an IMAGE block counts at least a per-image ceiling, not just its base64 bytes (PR #534's review): providers
-    bill pixels, and a 2000 x 2000 one-bit PNG is 756 bytes and about 1,590 Anthropic tokens. The ceilings are for
-    the resize box pi fits an image into (2000 x 2000 in `image-resize-core.js`, pinned; scaled by area for a
-    model whose own `inputLimits.images.resize` is larger). The ceiling is the larger of the API's (48,169 on the
-    five openai apis, gpt-4o-mini's high detail, 2,833 + 8 tiles x 5,667 at the worst aspect in the box; 15,750 on
-    mistral-conversations, Pixtral's 16 px patches, 125 x 125 + 125; 5,334 elsewhere, Anthropic's w x h / 750,
-    with Gemini's 768 px tiles at 2,322) and the model FAMILY's, read off the id: an OpenAI id (any `gpt-`, or an
-    o-series id) is 48,169, a Mistral id (pixtral, mistral, ministral, magistral, devstral, codestral) is 15,750.
-    A gateway serves one family over another's api (vercel-ai-gateway's gpt-4o-mini on anthropic-messages,
-    Bedrock's Pixtral on bedrock-converse-stream), and the family decides how its images are billed. Its limits
-    are named under Residuals;
-  - output is the caller's positive `maxTokens` on an api that sends it, else `model.maxTokens`; raised to
-    `model.maxTokens` when reasoning is on (a thinking budget can lift it that far); at least 16 on
-    openai-responses and azure; `0` for a classifier, which is `Infinity` if it has an output rate. The apis
-    that never put the caller's cap on the request (openai-codex-responses, the two system-one
-    classifiers and openai-decisions), openai-responses with `supportsMaxOutputTokens: false`, and openai on api.openai.com without
-    an `sk-` key the caller passed (Sign in with ChatGPT drops the field; the key is resolved after the guard)
-    all use `model.maxTokens`. A present `maxTokens` that is not a finite number is `Infinity` (PR #534's review):
-    pi's context clamp turns NaN into a null on the wire (the provider's default) and Infinity into the
-    remaining window. On openai-completions, openai-responses and azure, the sampling parameters are merged into
-    the request AFTER the cap (pinned). Since pi 1.0.2 that object is `resolveSamplingParams`': the model's
-    `samplingParams`, then its `samplingParamsByThinkingLevel` entry for the call's thinking level (clamped per
-    model), then the call's, and streamSimple resolves twice, so keys of two levels can meet in one request (issue
-    #587). The bound tracks no level: it reads the model's params, EVERY level's and the call's as layers, takes the
-    largest output-cap key and the largest `n` in any layer, and applies the key rules below to every layer, so it is
-    never lower than what any level sends. An output-cap key in a layer
-    (`max_tokens`, `max_completion_tokens`, `max_output_tokens`) widens the bound when larger, `n` multiplies it,
-    and a present value that is not a positive finite number (an integer for `n`) is `Infinity` (PR #534's review).
-    Because that merge comes last, ANY key overrides the request (`model`, `service_tier`, `tools`), so a
-    layer holding a key outside a fixed safe list (`temperature`, `top_p`, `top_k`, `seed`, `stop`,
-    `presence_penalty`, `frequency_penalty`, the three output-cap keys, `n`), or a level map or level that is not a
-    plain object, makes the call `Infinity` too;
-  - **an output cap the server may ignore** (issue #507): openai-completions sends the cap as
-    `max_completion_tokens` unless the model's composed `compat.maxTokensField` is `"max_tokens"` (pinned), and
-    Ollama 0.35.0 ignores `max_completion_tokens` (measured: 20 asked, 440 answered), so a capped job on a priced
-    declared-endpoint model settled $3.41 under a $2 cap. pi chose that field per host only for the hosts its own
-    catalog serves openai-completions on (`COMPLETIONS_CATALOG_HOSTS`, derived from the pinned catalog by test; a
-    catalog row with an empty `baseUrl` names no host and is skipped, issue #587). On
-    ANY other host (`completionsOwnServer`: the operator's server, a declared endpoint or not, or a baseUrl that
-    does not parse, which includes the empty one every `azure` catalog row carries at pi 1.0.3, among them
-    `azure/deepseek-v4-pro` on openai-completions, whose real server the operator configures) the output term is
-    only the cap that travels as `max_tokens`: the asked cap or
-    `model.maxTokens` on `streamSimple` (pi always sends one there), the asked cap alone on a raw `stream`; a
-    model whose field is not `max_tokens`, or a raw `stream` with no cap, is `Infinity`, so it is refused under a
-    cap. ONE rule, in the runner, because the runner is the one place that sees the model as pi composed it; the
-    worker never writes `models.json` (`INT-MODEL-ENDPOINTS-FILE-CONTRACT`), and doctor warns about a priced model
-    on a declared endpoint that misses the field (`ignoredOutputCapModels`). Rejected: bounding by
-    `model.contextWindow` (the operator's number, not the server's, and Ollama shifts its context to keep
-    answering); rewriting the field for the operator (the overlay is the operator's file and a job mounts it
-    read-only); and trusting an explicit `"max_completion_tokens"` (Ollama ignores it however it was chosen). A
-    zero-rated model is `0` before this term, so a free local model is untouched. For a builtin model with an
-    empty baseUrl the way out is the operator's: `providers.azure.modelOverrides["<id>"].compat.maxTokensField:
-    "max_tokens"` in the overlay `models.json`, when that server reads `max_tokens`;
-  - the input rate is the dearest of input, cache read and cache write, and twice input when a 1h cache write
-    can happen (anthropic-messages or bedrock-converse-stream with retention `long`, resolved in pi's order:
-    the option, the call's env, the process env);
-  - the multiplier is 2.5 for gpt-5.5 and 2 otherwise on openai-responses and openai-codex-responses, because
-    pi prices the tier the RESPONSE reports, which an account default can set; 1 elsewhere, azure included;
-  - the result is the dearest table's `input x rate + output x rate`, times the multiplier, rounded up.
-  Examples at the pin: `claude-sonnet-4-5-20250929` (the default model until 2026-10-13) with a 50,000 byte request and no
-  output cap of its own is (58,192 x 3.75 + 64,000 x 15) micro-dollars, about $1.18 a call; gpt-5.5 on
-  openai-responses at an input bound of 200,000 is (200,000 x 5 + 128,000 x 30) x 2.5, $12.10.
-- **Long context (user decision, 2026-10-02)**: the catalog carries no Anthropic long-context prices, and the
-  provider bills input above 200,000 tokens higher. The bound adds a GENERIC tier on the two Anthropic apis
-  for a table with no tiers of its own: above 200,000 input tokens, 2 x input, cache read and cache write and
-  1.5 x output. The runner counts such settled calls (`longContext`) and charges them at that tier in-run,
-  because pi metered them at base rates; the dollar settlement (the worker half, below) treats a job with
-  `longContext > 0` as incomplete and settles it at the floor, at least its reservation.
-  No hand-kept price table: a model the provider does not bill higher is over-charged, the safe direction.
-- **The compat re-arm gap under a cap** (review of #533): when the compat half finds an api id it had wrapped
-  replaced (`resetApiProviders()` from `AgentSession.reload()`, or an extension re-registering it, also while it
-  loads), a legacy call on that api may have reached a provider unguarded in between, and nothing can tell
-  whether one did.
-  Under a cost cap that stops the job (`cost_guard_displaced`, then `cost-cap`), fail closed. Judging cost only
-  in the runtime half would not close it: a legacy compat call never enters a `ModelRuntime`. The displaced
-  entries are counted as `costUnjudged` on the exit line (PR #534's review), because the stop's reason is the same
-  `cost-cap` a plain refusal gives and a settlement must be able to tell that calls may have run unmetered.
-  Without a cap the re-arm keeps its old behaviour: the teardown's `rearms` count and `usage_meter_teardown`
-  line, whose comment says the window can hide only a legacy extension call, stay the evidence for an uncapped
-  job; under a cap that same window is a stop, so the comment's "hidden" call can no longer go unanswered.
-- **From the first extension load** (issue #543): the meter and the guard are installed, and an unenforceable cap
-  refused, BEFORE the resource loader is built. An extension factory runs inside the loader's `reload()` with no
-  ctx (its action methods throw and `pi.registerProvider` is queued for the session, measured at the pin), so a
-  model call it makes while it loads goes through a `ModelRuntime` of its own or pi-ai's legacy global stream
-  functions, and both halves are wrapped by then: the call is bounded and refused like any other, or admitted and
-  counted on the exit line. The loader's `reload()` never resets pi-ai's registry (pinned), so installing first
-  displaces nothing. A stop at load has no session to abort, so the runner does not send the prompt; the exit is
-  `2` / `cost-cap`. A legacy extension that re-registers an api id the registry already held, while it loads, is a
-  displaced entry (the re-arm gap above), so it stops a capped job too. Once the meter is installed EVERY exit line
-  carries its `tokens` and `usage`, the runner's outer catch included, so a load-time call that spent before a
-  later refusal (`command-unregistered`) is settled at what it spent, never read as a run with no exit counts. A
-  throw after a stop (a refused load-time call, then `command-unregistered`) exits with the stop's reason.
-- **A legacy call inside a runtime call's context** (PR #547's review): a runtime call runs under its own dispatch
-  TOKEN (an AsyncLocalStorage value, also carried in the call's options).
-  - The first compat call whose options carry that unused token on the SAME (provider, model) pair and the same api
-    is the runtime call's own dispatch (pi's composer re-enters on the same model): skipped by the guard and the meter, which judged
-    and count the runtime call. That claim uses the token up; a later call carrying it is an ordinary call.
-  - A token-carrying call on ANOTHER pair is a FORWARD (an extension provider calling pi-ai's legacy streamSimple
-    with the options spread), and a FULL call: judged on the list, prepared by the model guard (an `onPayload` that
-    rewrites the payload's model is refused, `why: payload`), judged on cost with ITS OWN bound, and observed and
-    counted under its own model. The runtime call stays bound and counted as an ordinary call: nothing can prove its
-    answer is the forward's (a fallback or router provider answers itself after a forward that failed, threw or was
-    refused, and that spend must count, PR #547's final review). So a cheap proxy in front of a dear or unboundable
-    target is refused as the target called directly is, and a proxy that answers with zero usage of its own cannot
-    hide the target's spend. With no policy the same accounting applies.
-  A legacy call a `before_provider_request` hook, an `onPayload`, or
-  a timer or promise scheduled from them makes is judged against the cap, the in-flight bound of the call it runs
-  inside included, and counted. Before the token any call in that context was skipped, and this was a named
-  residual; at load, where an extension's own runtime call can carry such an `onPayload`, it was reachable without
-  a session.
-- **The worker half** (issue #501, parts 3 and 4, and #503 part 7; `worker/src/dollar-budget.mjs`,
-  `worker/src/processor.mjs`). A deployment may set dollar WINDOWS (`dailyCostUsd`, `weeklyCostUsd`,
-  `monthlyCostUsd`, each needing `maxCostUsd`, `INT-CONFIG-OVERLAY-CONTRACT`):
-  1. **Keys**: `budget:usd:YYYY-MM-DD`, `budget:usd:w:<Monday>`, `budget:usd:m:YYYY-MM`, built by `budget.mjs`'s own
-     `dayKey`/`weekKey`/`monthKey` through the `keyPrefix` seam with its TTLs, so a dollar window and a job-count
-     window share their UTC boundaries and expiry. `budget:usd:s:<hash16>` (a repo or folder, and since issue #499
-     part B a project: the hash of its row scope `project:<id>`) and `budget:usd:mdl:<hash16>` (a model) are the
-     scoped, project and per-model windows (item 9), further ledgers in the same reservation. `budget:usd:p:` was
-     reserved for project windows and is WITHDRAWN (issue #499 part B): one key rule, every row keyed by its row scope,
-     and no second keyspace for the admin to recompute or the fingerprint to hash. Every amount is integer micro-dollars and
-     every write is an `INCRBY`.
-  2. **Reserve** (`reserveDollars`), after every job-count reserve and before `runContainer`, the last gate before the
-     spend line: the amount is the job's effective per-job cap (`maxCostMicros`), which the runner enforces before
-     every call, so it bounds the run and the worker needs no prices. Per active window `INCRBY key amount`, the TTL on
-     the first write, then `total > cap` refuses (equal fits). A refusal gives back every key it touched at once,
-     BEST EFFORT PER KEY: each key's `DECRBY` is tried whatever happened to the one before, and a key that fails is
-     logged (`dollar_giveback_error`, with the key) and left holding the amount, which the record then shows as a
-     `floor`. The job returns `{ outcome: "policy", reason: "dollar-cap" }` with every job-count slot given back (a
-     ledger that did not issue the refusal gives back, the scoped ledger's rule), so `budgetReserved` is `false`
-     unless the global slot's own give-back failed (global-only, the one rule every path uses since issue #499 part B). A fixed comment names the window and no amount, and the log says
-     `over_dollar_budget`. The reservation returns a HOLD listing the exact keys it added to. An amount of `0`
-     reserves nothing and touches no key (a cap of 0 cannot make a priced call), answered by `reserveDollars` itself
-     so no caller can turn it into a `TypeError` retried for ever. A Valkey fault in the reserve gives back what it
-     added, per key, and retries the job as `container-never-started`, which refunds the job-count slots. A window
-     set with no per-job cap on the job (a hand-built queue entry; the settings invariant forbids it) is
-     `config-refused`, before any dollar is reserved.
-  3. **Settle** (`settleDollars`), ONCE, right after the token record, for every exit where the container ran:
-     completed, runner policy, a worker abort or an operator's cancel, exit 1, an unknown exit and a detached
-     container. One step per HELD key, never keys rebuilt from the clock, so a job reserved at 23:59:59 UTC settles
-     into its own day. Each step is one atomic Lua script (`SETTLE_SCRIPT`): `INCRBY(settled - reserved)` on a key
-     that still EXISTS, a key that expired or was evicted in between skipped rather than recreated as a negative
-     counter (`dollar_settle_key_missing`), and a result below 0 clamped back to 0 (`dollar_settle_clamped`). It never
-     throws: a fault logs `dollar_settle_error` and the unadjusted keys keep the reservation; a settle that adjusted no
-     key is recorded as `floor`. One helper, `isNeverStartedExit`, decides for both the settlement and the exit switch
-     that a container never ran, so no exit is both settled and refunded, or neither. `InfraRetry` carries the outcome
-     (`dollars`). The run record is one file per job id, last write wins, so a retried job's record shows its LAST
-     attempt's `dollars` only; an earlier attempt's settlement stays in the window counters, which are the truth for
-     what a window was charged.
-  4. **Refunds**: a never-started exit and a `config-refused` job give the whole hold back (`releaseDollars`, the same
-     atomic step); the record says `refunded`, or `floor` when a key could not be given back. Any OTHER throw after the
-     reserve (a defect, `runContainer` itself throwing, an `InfraRetry` that is not never-started) leaves the hold
-     standing, the floor, and logs `dollar_hold_unsettled`: the container may have run.
-  5. **Basis**: FIRST, the exit line must be TRUSTED (PR #542's review, round 3): a job's own tool can write to the
-     runner's stdout (a child reaches `/proc/<ppid>/fd/1`), and the worker reads the decisive exit line in the tail
-     (`decisiveExitLine` since issue #596, normally the last), so a forged `{"event":"exit",...}` with a $0 cost,
-     followed by a stop that kills the runner before its genuine line,
-     would settle a spent hold at $0. So the line is believed only when the container exited ON ITS OWN (not aborted:
-     no timeout, cancel or shutdown stop; not detached), AND the line's own `code` equals the container's exit code
-     (`parseExitCode`; the runner writes the code it exits with on both of its exit lines, pinned by a test).
-     Otherwise the floor, whatever the line says, the zero-call rule included. On an image that declares
-     `exitAuth` (issue #545) the line is also SIGNED: the worker hands the runner a per-run key on stdin, the
-     runner MACs its exit line with it, and the worker reads only a line that verifies, so no line a job's tool
-     wrote can be the one settled on, before or after the genuine one. A run with no verified line has no exit
-     line as far as the settlement knows: the floor. The #542 rule above still applies to a verified line, so a
-     stopped container's real line (the runner now writes one on SIGTERM) settles at the floor too; what it
-     gains is a real token record. Then `metered` only when the count
-     is complete: `tokens.metered` is `true`; `costCapMicros` is present and
-     not above the reservation (a runner that ran under a wider cap than was reserved was not bounded by it); each
-     of `unresolved`, `unpriced`, `boundExceeded`, `longContext`, `costUnjudged`, `costUnanswered`, `costUnreported`
-     (issue #571) and
-     `unmeteredChildren` (issue #500 part F: pi child processes whose spend the runner could not count) is PRESENT
-     and `0`; and the per-model `usage` ledger is not null, OR the run made no provider call at all (`calls: 0` and a cost
-     of 0: the runner omits the ledger when it observed no call, and a call the cost guard refuses answers with the
-     hard stop without calling the provider and is never counted as a call, so `costRefused` may be above 0). Then the
-     windows are charged `meteredMicros(tokens.cost)`, `Math.ceil(cost x 1e6)`: the exit line's cost is a float of
-     dollars, and rounding UP means float noise reads at most one micro-dollar high (`0.1 + 0.2` is 300,001), never
-     low. A metered cost above the reservation is charged in full. Otherwise `floor`: AT LEAST the reservation, and
-     never less than a metered cost the exit line did report, `max(reservation, ceil(cost x 1e6))` whenever that cost
-     is a valid number, so a run whose count is incomplete but already known to be dearer than its hold is charged
-     what is known. An ABSENT counter is read as non-zero, because a runner that did not write it did not measure it;
-     `tokens: null` (no exit line) is the floor. **A 401 before any answer settles at the floor**: the call was sent
-     and never started, so the runner counts it as `costUnanswered`, and the worker does not let the exit line's
-     `provider-auth-refused` label lower the charge. That label is chosen in the container from the provider's error
-     TEXT (`providerAuthRefused`, `image/runner/src/outcome.mjs`: anchored message prefixes such as `401 ` and
-     `OpenAI API error (401): `, gated by pi's retry predicate), not from a status code the worker can check, and a
-     403 shape is also what a failing gateway answers; a container-written label that could release a reservation is
-     a lever this settlement does not hand to the container. The cost is one per-job cap per such run, the safe side.
-  6. **Zero reservation** (#503 part 7): when every model the job may call (its effective allowed-model list with
-     its main model, else the main model) is served by a declared endpoint AND zero-rated as pi composes its cost
-     (`zeroRatedVerdict`, `INT-MODEL-ENDPOINTS-FILE-CONTRACT`'s **Cost**), nothing is reserved, the container gets
-     `PI_MAX_COST_MICROS=0`, and the record says `unreserved`. So does a job whose effective cap is already `0` (a
-     malformed queued value reads as 0, `effectiveCostCapMicros`): there is nothing to hold. The cap of 0 is what makes
-     "cannot spend" true by construction: the cost guard refuses any call whose bound is above 0, so a cost table an
-     extension changes in the job meets the cap, not an empty window. An image without `costCap` never reaches this:
-     the capability gate refuses any job with a cap, and a window requires one. So the choice between failing closed
-     and reserving normally for such an image does not arise: it is refused, pre-spend, as every capped job on it
-     already is.
-  7. **Nothing set**: with no window, the processor reserves and settles nothing, the record's `dollars` is null, no
-     `budget:usd:*` key is written, and job data and the exit line are unchanged. A per-job cap alone reserves nothing.
-  8. **The merged invariant at the write** (PR #542's review): the admin's `dispatch_set` and console `set`/`unset` of a
-     dollar key judge the MERGED overlay and the env the admin can see (`mergedDollarProblem`): a change that would leave
-     a window with no `maxCostUsd` there is WARNED, in the confirm before anything is written and in the console's
-     answer, and is NEVER refused, in any layout. The warning names what was seen (the overlay plus the deployment's
-     `.env` with a pointer, else this session's environment) and says a cap set elsewhere is not visible: the worker's
-     service unit or its `--env-setup` script can set `PI_MAX_COST_USD` with nothing in `.env`, and a refusal would
-     block a valid change. The worker still fails closed per job (`settings-overlay-invalid`), and `doctor`, which
-     reads the worker's real env, names the merged fault for an overlay that is valid on its own.
-  9. **Scope and model windows** (issues #501 part 5 and #502 part 6; `scoped-limits.json` version 2,
-     `INT-SCOPED-LIMITS-FILE-CONTRACT`). A repo or folder row's `dayUsd`/`weekUsd`/`monthUsd` is a ledger under
-     `budget:usd:s:<hash16 of the matched row's scope>` (`dollarCapsFor`, the same hash as the job-count key; for a
-     bare or folder row the canonical scope it always was, issue #498), and each
-     `model:<provider>/<model>` row is one under `budget:usd:mdl:<hash16 of the lowercased provider/model>`
-     (`modelDollarRows`). Lowercased because the record's usage ledger lowercases ids, and a model window settles
-     from that ledger: one model is one counter, whatever case a row, a list or pi spells it in.
-     - **One reservation**: the deployment's, the scope's, the project's (issue #499 part B) and the model ledgers go
-       to ONE `reserveDollars` call, in that order, so a refusal in any window gives back every key the call added
-       (best effort per key, as above), the deployment's included, and every job-count slot goes back as for any
-       `dollar-cap`. The log names the refusing ledger (`deployment`, `scope`, `project` or `model`) with its key
-       prefix, a hash, and a model's ref; the comment names the repo for a forge job, "this folder" for a local one,
-       "this project" for a project row, or the model. A scoped or model
-       window needs a per-job cap like a deployment window, so a job with none is `config-refused`. Under an
-       allocation envelope item 10 adds `_other`'s ledger after the project's (log `ledger: "other"`), and a refusal
-       whose binding cap was the split or the envelope total is `allocation-cap` with `source: "allocation"`.
-     - **Which model windows**: a job with an effective allowed-model list reserves in the windows of its listed
-       models, compared ignoring case. A job with NO list reserves in EVERY model window: it may switch model
-       mid-run (`setModel`, a second session, an extension's direct call), so it could spend in any of them. This
-       fails closed: such a job is refused while any model window is full, and the remedy is a list. A job that
-       reserves nothing (`unreserved`, item 6) reserves in no model window.
-     - **Settle**: the hold records its keys per ledger (`hold.ledgers`; never split by key text, since
-       `budget:usd` prefixes every dollar key). The deployment, scope and project keys settle with the basis of item
-       5, to the job's cost: the processor names those prefixes (`holdPart` over a set of the three), rather than
-       taking "everything not a model", so a ledger kind added later settles nowhere until it is named. Each
-       model's keys settle from that model's OWN row of `usage.models` (`modelDollarSettlement`): `metered` is
-       `ceil(row.cost x 1e6)`, `0` for a model with no row. A model window settles at the floor (at least the
-       reservation, never less than the row's own cost) when ANY of these holds: the deployment basis is the floor;
-       the exit line is not trusted; `usage` is null while calls were made; `usage.truncated` is not present and
-       `0` (rows past the ledger's limit were folded together, so a model's own row may be short); or an
-       `other`/`other` row has a cost above `0` (spend attributed to no model). The record's `dollars.modelBasis`
-       says `metered`, `floor` (any model window at the floor) or `refunded`, and `null` with no model window.
-       Never a float: every amount is an integer and every step `SETTLE_SCRIPT`. Usage rows that differ only in
-       case are one model and are summed; an absent `truncated` stays `null` through the parser and floors.
-     - **Seen ahead, warned not refused** (PR #549's review): a dollar row with no per-job cap anywhere, and a row
-       window below the per-job cap, both refuse every job they apply to. The worker logs the first at boot and at
-       each reload, and `doctor` names both (env and overlay merged), by row index and kind. Warnings, because a
-       trigger's own `run.maxCostUsd` can supply or lower the cap. A refusal by a window below the job's cap says
-       so, apart from "no room left", which a wait would cure and this would not.
-  10. **Under an allocation envelope** (issue #504 part B, `DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE`), the pickup
-     narrows the ledgers of item 9 by the applied split, for the envelope's window only (`governedDollars`), and
-     nothing else about the reserve or the settle changes:
-     - **min, never replace**: a project's cap for that window is `min(operator row, allocation)`, a repo's
-       `min(operator row, repo share)` when the plan gives repo shares, and the deployment window
-       `min(operator cap, envelope total)`. A missing row or setting counts as no cap, so the allocation alone binds.
-     - **Synthetic ledgers**: a project with no row reserves in a ledger keyed `scopeDollarKeyPrefix("project:<id>")`,
-       the key its row would have, through the `projectDollars` slot; a repo share with no row in one keyed
-       `scopeDollarKeyPrefix(<member scope>)` through the `scopedDollars` slot; a job in no envelope project in
-       `_other`'s, keyed `scopeDollarKeyPrefix("project:_other")`, through a slot of its own, `otherDollars`, reserved
-       after the project ledger. Each joins the job-cost prefixes, so it settles to the job's cost through `holdPart`
-       like a row's; `dollarLedgers` and `holdPart` are otherwise unchanged. `_other` has its own slot rather than the
-       project slot because a project the envelope does not name keeps its own row's ledger AND counts in `_other`.
-     - **Whose number**: each of those ledgers carries `capSource: { day, week, month }` (`operator` or `allocation`
-       per window, null where it has none), and the deployment's rides as `dollarCapSource`. The refusal reads the
-       refusing ledger and window off the reservation: `allocation-cap` when that window's source is `allocation`,
-       else `dollar-cap`; a tie is the operator's. Its comment names the split and never says "raise the budget".
-     - **A shrink refuses new starts only**: a reservation already made is never taken back and a running job runs on,
-       because the narrowed caps are read at each pickup and a hold settles on its own keys.
-     - **`envelope-mismatch`** is a free gate with the others, before the mint: the pickup's reconcile found this
-       host's envelope digest is not the applied split's, so no narrowed ledger is computed at all.
-  11. **A counter that lost its history** (AMENDED 2026-11-03, #761, upgrade path). A dollar counter is the only copy
-     of what its window spent, so a flushed, replaced or restored Valkey, an evicted key or a hand edit reopens the cap
-     with nothing saying so. A record cannot be bucketed by its own times to find out (the reservation's clock is
-     neither `startedAt` nor `endedAt`, and a window whose cap was set mid-window was never written by the records
-     before it), so the record says which deployment windows hold its settled amount (`dollars.reservedIn`,
-     `INT-RUN-HISTORY-FILE-CONTRACT`), and doctor holds the counters to it (`dollars.window-reset`,
-     `doctorDollarWindows`, `INT-DOCTOR-RESULTS-KEY`).
-     - **The proof.** Money moves in one order: a reserve adds R to each key of the hold, a settle adds S - R to each
-       key it reaches, a release adds -R, and the record stating S is written after the step. So on a healthy
-       deployment each key holds at least the sum of what the finished holds put in it. `deploymentWindowsOf` names a
-       window only where its key holds at least the `settledMicros` the record states, counted along the keys the step
-       walked (the job's part for a settle, the whole hold for a release): a key the step moved holds the settled
-       amount (0 after a release), and one it did not reach still holds the reservation. A settle that stopped part-way
-       while the record states a metered cost above the reservation leaves out the windows it did not reach; a release
-       that stopped part-way while the record states the whole reservation leaves out the windows it already gave
-       back; a fault before any key and a settle whose run ledger did not move record the reservation, which every key
-       still holds. Each case is tested.
-       So the sum of this host's records whose `reservedIn` names the current bucket and this Valkey's endpoint tag
-       (`dollarWindowFloors`) is at most the counter, and a counter below it lost history; the check claims nothing else.
-     - **The check.** It reads the deployment's day, week and month caps, overlay over env (`dollarWindowCaps`; a value
-       it refuses is its own line, and this check then says nothing), and reads nothing with no cap set or no Valkey
-       this command may talk to. It reads this host's records FIRST (`readLocalWindow` from the start of the earliest
-       active window, which stops opening files at a deadline, `cutShort`) and sums them per window, and only THEN, for
-       the windows whose sum is above 0, the counters, in one `MGET`: every record it read was settled before the
-       counter was read, so the counter cannot legitimately be below it. Both reads share one 5 s bound
-       (`DOLLAR_WINDOWS_DOCTOR_TIMEOUT_MS`), the default reads are refused in tests (`forbidDefaultDollarWindowRead`),
-       and a read that fails or runs out of time says nothing: silence is never a claim that nothing was lost. A
-       counter that is absent, or an integer below the sum (a negative one included), is a finding; one that is not an
-       integer is skipped. Every finding goes in ONE warning, which names each window, its key, what it holds, this
-       host's sum and the cap, says the cap counts "at least" the difference too little, and says other hosts' runs are
-       not counted. Its fix gives three ways out for the rest of the window: put back at least this host's share
-       (`valkey-cli INCRBY <key> <shortfall>`, then `valkey-cli EXPIRE <key> <seconds>` with the window's own TTL
-       printed, 172800, 777600 or 3456000, and without `NX`, which an operator's older Valkey may not take; on a fleet,
-       `INCRBY` the sum, in micro-dollars, of every host's settled share less what the counter holds now, since each
-       host's doctor sees its own records only), lower the cap by what was already spent, or
-       `pi-dispatch pause` and resume once the window ends (its end printed, UTC). A counter lowered on purpose is named
-       until its window ends.
-     - **Not checked**: the job-count windows and the token counter (no record says which of their windows it counted
-       in), the scoped, project, `_other` and model dollar windows (each key a hash per ledger), and a deployment
-       window whose only cap is an allocation envelope's total (the caps are read from the settings alone).
-     - **Residuals, each of which only lowers the sum, so it can hide a reset and never invent one**: another host's
-       records are not here (so "this host's share" and "at least"); history lost before this host's records, and a
-       reset that has since re-accumulated past this host's share, are not seen; only records written from issue
-       #761's release on count; a retried job's record shows its last attempt, and a hold a crashed worker left has no
-       record; retention shorter than the window, a record over 256 KiB, a record a newer release wrote and a read cut
-       short by the bound leave records out; a tag that differs for the same Valkey (`localhost` against `127.0.0.1` on
-       a host that pins nothing) leaves its records out, and a moved `VALKEY_URL` does not fire at all, since the old
-       records carry the old tag. A clock set back by more than a TTL's slack could meet an expired key; that is
-       theoretical.
-- **Why**: one call's dollars are not bounded by the cap's scale. On the default model one call can cost
-  several dollars, so a cap checked after a call is a soft limit one call can pass by more than the cap. The
-  in-flight sum is what makes parallel sessions safe: each is judged against the other's worst case, not
-  against a total neither has added to yet.
+- **Decision**: the token ledger is the dollar ledger's unit-for-unit successor
+  (`worker/src/token-budget.mjs`, mirroring the deleted `dollar-budget.mjs`): the worker RESERVES the job's
+  per-job token budget (`maxTokens`) against every active token window before the container starts, and
+  SETTLES the reservation to what the run really used after it. Every amount is an **integer, in whole
+  tokens** — Valkey's `INCRBY` adds integers exactly, and nothing in the module stores, adds or compares a
+  float. The runner half is smaller than the cost guard's ever was: the meter checks the budget where usage
+  settles (`combinedTotal() > cap` in `image/runner/src/usage-meter.mjs`), stops the job `token_budget`, and
+  the meter's hard stop answers every call that comes after the breach before it reaches a provider — a
+  **settle-time, lagging in-run backstop** (`OQ-010`), the only in-run enforcement there is. A stop reaches
+  the pi children through the `STOP` file they read before every call, and the budget is judged on parent
+  plus children. The runner keeps no price bound: there is no rate table to bound with, and one call's
+  tokens are bounded by the budget's own scale, so the lag is at most one call.
+- **The worker half** (mirroring the dollar design's parts 3 and 4; `worker/src/token-budget.mjs`,
+  `worker/src/processor.mjs`):
+  1. **Reserve** (`reserveTokens`): one call over every ledger in reservation order — the deployment's
+     windows (when any of `dailyTokenCap`/`weeklyTokenCap`/`monthlyTokenCap` is set), the repo or folder
+     row's, the project row's, `_other`'s under an envelope, then each model row — per window one atomic
+     `INCRBY` with the set-once TTL, the new total against the cap; a total ABOVE the cap refuses
+     (`token-cap`, the ledger and window named in the log and the record's comment; a total equal to it
+     fits). `budget:tok:*` keys are built by `budget.mjs`'s own key functions, so a token window and a
+     job-count window share their UTC boundaries (the day, the Monday week, the month) and their TTLs; the
+     scoped, project and model ledgers are `budget:tok:s:<hash16>` and `budget:tok:mdl:<hash16>`, which
+     cannot collide with a day key. An amount of 0 reserves NOTHING and touches no key (the zero-rated
+     escape). A job with a window but no `maxTokens` is refused as configuration before any reserve, never
+     run uncapped against a window.
+  2. **Give-back**: a refused reservation is given back at once, every key it touched, best effort per key
+     (a key whose `DECRBY` fails is logged `token_giveback_error` and left holding the amount, counted as
+     `stranded` in the record); a Valkey fault part-way gives back what it had added and RETHROWS, so the
+     queue retries it as never-started with nothing stranded that can be helped. The refusal departs from
+     the job-count ledger's "a refused slot still counts" exactly as the dollar ledger did: five refused
+     whole-budget reservations would empty a window with nothing run.
+  3. **Settle** (`settleTokens`, `SETTLE_SCRIPT`): each step is one atomic Lua script,
+     `INCRBY(settled - reserved)` on a key that still EXISTS, a key that expired or was evicted in between
+     skipped rather than recreated as a negative counter (`token_settle_key_missing`), a result below 0
+     clamped back to 0 (`token_settle_clamped`). It never throws: a fault logs `token_settle_error` and the
+     unadjusted keys keep the reservation; a settle that adjusted no key is recorded as `floor`. A
+     reservation lands its settlement on its own day, week and month, whenever the run ends. The settlement
+     reads the exit line's token totals, and a retried job's record shows its LAST attempt's `tokensWindows`
+     only; the window counters remain the truth for what a window was charged.
+  4. **Refunds**: a never-started exit and a `config-refused` job give the whole hold back
+     (`releaseTokens`); the record says `refunded`, or `floor` when a key could not be given back. Any
+     OTHER throw after the reserve leaves the hold standing, the floor, and logs `token_hold_unsettled`:
+     the container may have run.
+  5. **Basis** (`tokenSettlement`): FIRST the exit line must be TRUSTED, exactly the dollar ledger's rule
+     (PR #542's review, round 3, issue #507): the container exited on its own, AND the line's own `code`
+     equals the container's real exit code; not trusted is the floor, whatever the line says. Then
+     `metered` (`settledTokens = tokens.total`) only when the line is trusted, `tokens.metered` is true,
+     every completeness counter is present and 0, the total converts, and the per-model `usage` ledger is
+     present or the run made NO provider call (`calls: 0` and a total of 0); otherwise `floor`: AT LEAST the
+     reservation, and never less than a reported metered total
+     (`max(reservedTokens, reported)`). The completeness counters are `unresolved`, `usageUnreported`
+     (issue #571's `costUnreported`, renamed when pricing left: a call that settled with a missing or
+     unusable usage block) and `unmeteredChildren` (issue #500 part F). `refunded` and `unreserved` (the
+     zero-rated escape) complete `TOKEN_BASIS`. A model window settles from its own `usage.models` row
+     (`modelTokenSettlement`), floored when the deployment basis is not `metered`, when `usage.truncated`
+     is not present and 0, or when an `other/other` row holds tokens. The record carries
+     `tokensWindows` = `{ reservedTokens, settledTokens, basis, modelBasis, reservedIn }`
+     (`INT-RUN-HISTORY-FILE-CONTRACT`), `reservedIn` naming the Valkey counter the reservation sits in
+     (`deploymentWindowsOf`, tagged by endpoint since #761).
+- **Why**: the windows reserve BEFORE because the reservation is the whole per-job budget, the worst the
+  run can reach a window with, so a reservation is a true bound on the run; that is what retired the
+  check-after day counter, which could only stop the NEXT job (`OQ-010`). The in-run budget keeps its
+  lagging shape because one call's tokens are knowable only when the call settles; the windows do not share
+  that shape and the two must not be conflated — pre-container describes the reservation, never the
+  per-job budget's enforcement. Integer whole tokens, not micro-something: tokens are discrete, the ledger
+  is shared state where every float is a drift, and the micro unit existed for `$0.000001`-scale amounts
+  that no longer exist.
 - **Rejected**:
-  - **Check the cap after each call** (the token cap's shape): the overshoot is one call, and one call can cost
-    more than the cap.
-  - **Reserve "the cap plus one worst call"** in the worker: several dollars per job on the default model, it
-    needs prices in the worker, and it still leaves the cap soft.
-  - **`min(contextWindow, bytes)` for the input**: pi does not enforce the window, and a tier above it exists.
-  - **Dearest input rate and dearest output rate across tables, separately**: also an upper bound, but looser
-    than needed: pi prices one call with exactly one table, so the bound takes the dearest table.
-  - **Guard at `before_provider_request`**: its event carries only the payload and a throwing handler is
-    logged and ignored, so it cannot refuse a call.
-  - **Guard at pi-ai's api-provider registry only**: at 0.99.1 a session never dispatches through it.
-  - **Lower `maxTokens` to fit the remaining budget**: deferred (an open question on #501). The guard bounds
-    what each call asks for and refuses; it does not rewrite the request.
-  - **A hand-kept long-context price table**: drifts, and is the derivable-table class this repo pins or
-    avoids. The generic tier errs high instead.
-  - **Trust `cacheWarming: "off"`**: it holds for the runner's own session only; warm calls are bounded like
-    any other.
-  - **Ask Valkey mid-run** (the container checking a shared dollar counter before a call): `DES-JOB-OUTBOX-CHAINING`
-    rejects a container-to-Valkey channel, and the worker's reservation already bounds the run; the per-job cap
-    is all the container needs to know.
-  - **Charge a failed call its partial cost** (the first version of this guard): the partial cost is often 0,
-    and pi's own retries then loop under the cap (PR #534's review).
-  - **Charge every failed call its bound** (the second version): a 429 bills nothing, and pi's retries then
-    stopped a rate-limited job as `cost-cap` with nothing spent.
-  - **Observe the response status through pi's `onResponse`** (the third version: a failed call with no 2xx seen
-    is metered): the openai and anthropic SDKs throw on an error status BEFORE pi reaches the hook, so the rule
-    could only be "no 2xx seen", and an in-band error after a 200 (Anthropic's `overloaded_error`, Bedrock
-    throttling inside the stream) had seen its 2xx and so was charged its bound, though no answer came. It also needed a
-    per-api list of which apis call the hook, and composing a hook into the caller's options. Parsing the status
-    out of the error message was rejected too: it is text, per api.
-  - **A hand-kept image price per model**: the ceiling is per api and per family, at the dearest rule each implies.
-  - **Keep a refused dollar reservation** (the job-count ledger's "a refused slot still counts"): five refused $2
-    reservations would empty a $10 window with nothing run. A dollar refusal gives back at once.
-  - **Floats in Valkey** (`INCRBYFLOAT`, or a float settled amount): a float total drifts, and a window compared
-    against a drifted total admits one job too many. Every stored amount is an integer; `settleDollars` refuses a
-    settled amount that is not one and keeps the reservation.
-  - **Settle at the metered cost whatever the counters say**: a partial count reads as a cheap job. A job whose cost
-    is not fully known settles at the floor: at least its reservation, and at least what was metered.
-  - **Settle with the settle-time date**: a job reserved at 23:59 and settled after midnight would subtract from a day
-    it never reserved in. The hold names its keys.
-  - **Zero-reserve on the main model alone when the job has a list**: the job may switch to any listed model, and a
-    hosted one would then spend with nothing reserved.
-  - **A repair sweep for holds a crashed worker left** (an open question on #501): it errs toward overcounting, the
-    TTL reclaims it, and a sweep would have to tell a crashed job from a slow one.
-  - **An unrestricted job reserving in no model window** (only listed jobs reserve): an unrestricted job can switch
-    to any model, so a model window would count only the jobs that promised to stay inside it, and the ones that
-    did not could spend it unseen.
-  - **Settling a model window to the job's total**: a job that spent on two models would charge each window the
-    sum, and a cheap model's window would fill with a dear model's spend.
-  - **Read a near miss of `model:` as a repo row** (the version 1 rule for any unknown scope): `Model:openai/x`
-    would then be a dollar cap on a repo no job has, inert while the file reads as capping a model. Refused, naming
-    the exact form.
-  - **A second reservation for the scope and model windows**: a refusal in it would have to give back the first
-    by a separate path, and the two could disagree on what a refusal returns. One call over every ledger keeps one
-    give-back rule.
-- **Residuals, named**:
-  - extension code in the job can still reach a provider the meter never sees: pi-ai's per-api stream
-    functions imported directly, an api id it registers in pi-ai's legacy registry and calls before the next
-    re-arm (its own stream function, while it loads or during the run), legacy `generateImages`, or a raw fetch.
-    The meter is accounting and a boundary against the agent's ordinary calls, not against the code it runs beside;
-  - an `onPayload` hook (`before_provider_request`) can raise the request's output cap after the guard
-    judged it, and a stored credential's own `env` can set `PI_CACHE_RETENTION`; both can push a call past its
-    bound, and `boundExceeded` is the evidence. The credential half is CLOSED for the job's own runtime, whose
-    credentials are auth.json read once at start and held in memory (issue #587's review), and OPEN for a runtime
-    an extension creates for itself and for a pi child, which read the file as pi does;
-  - a compaction whose summarization call is refused is still recorded by pi, with an empty summary
-    (measured at the pin, `usage-meter.integration.test.mjs`). The token cap's brake has always done the
-    same. The job stops either way, with a policy exit, so that transcript is never promoted; and a stored
-    transcript that holds an empty compaction for any other reason is never resumed: the read path
-    cold-starts it as `compaction-summary-empty` (`INT-SESSION-STORE-CONTRACT`, issue #535);
-  - a provider whose server output limit exceeds the catalog's `maxTokens`, on an api that does not send the
-    caller's cap, can exceed the bound; `boundExceeded` again;
-  - **an operator's server on an api other than openai-completions** (issue #507) is trusted to read that api's own
-    output-cap field (`max_output_tokens`, `max_tokens`); only openai-completions has a field choice pi makes per
-    host. A server that ignores its api's own field can exceed the bound; `boundExceeded` again;
-  - **an operator's server that ignores `max_tokens` too** (review of #507) can exceed the bound; `boundExceeded`
-    again. Ollama, vLLM, llama.cpp and LM Studio read it. On Ollama a `max_tokens` of 0 or less means no limit, which
-    is why a caller's cap of 0 or less is `Infinity` on such a server (and a negative one on any openai-completions
-    host);
-  - **pi's own field detection is not read** (review of #507): `detectCompat` also picks `max_tokens` by provider
-    name or URL substring (`chutes.ai`, `deepseek.com`, providers `deepseek`, `together`, `nvidia` and others behind a
-    proxy), while the guard reads only the composed `model.compat`. Such a model off the trusted hosts is refused
-    under a cap until `compat.maxTokensField` is set explicitly: a safe false refusal, not an overspend. The trusted
-    hosts are the catalog's plus `api.openai.com` (`COMPLETIONS_EXTRA_HOSTS`, pinned): pi sends
-    `max_completion_tokens` there, OpenAI reads it, and its reasoning models reject `max_tokens`, so refusing it
-    would leave no field that works;
-  - **api-id trust**: the bound believes `model.api`. An overlay or extension model that names a priced api but
-    is served by something that bills differently (a gateway with its own fees, a mislabelled api) is bounded by
-    the table it declares, not by what is billed;
-  - **uncatalogued fees**: server-side tools (web search, code execution), Bedrock regional or cross-region
-    pricing and any other charge the catalog does not carry are outside both the bound and pi's cost;
-  - **aborted and failed streams** that started count at their bound against the per-job cap, during the run, and
-    count `costUnreported` (issue #571), so the windows settle at the floor and the cost views show `≥`, not pi's
-    partial cost as exact;
-  - **a call that forwarded is trusted for its own usage** (issue #571): any model call dispatched under it marks it,
-    so an extension that makes a call from a request hook or an `onPayload` inside a runtime call exempts that call's
-    own broken usage too. The hook's call is metered; the outer call's lost count is not. Broken usage that pi fills
-    with plausible numbers (a partial count above the thresholds above) is not detected at all;
-  - **a server that never sends usage** (a local OpenAI-compatible server, or a model whose `compat` sets
-    `supportsUsageInStreaming: false`) floors every call on a priced model: a false floor, the safe side. `doctor`
-    warns on such a model the overlay configures with a nonzero cost table (issue #571);
-  - **deploy order for issue #571**: a new worker with an older image reads the absent `costUnreported` as a floor
-    and settles every capped job there (the `costUnjudged` precedent, an overcharge); an older worker with a new
-    image drops the key. Upgrade the image before the worker;
-  - **images**: the per-image ceilings assume pi's resize box and the families named above. An image an
-    extension puts in the context without pi's resize, or a family whose id matches neither name and whose image
-    billing is dearer than its api's ceiling, can exceed it; one the provider downscales further is over-bounded,
-    the safe side;
-  - **a failed call that never started may have been billed**: a request the provider accepted whose answer was
-    lost (a connection dropped after the request was sent) is charged its metered cost, usually 0, so the per-job
-    cap does not count it, and nothing bounds how many such calls a run makes. `costUnanswered` counts every one,
-    and a non-zero value makes the settlement charge the floor (at least the job's reservation) rather than its
-    metered cost.
-    That bounds what the window is charged afterwards, not what the provider may have billed during the run;
-  - **a call cut after hidden reasoning** (a reasoning model that streamed no visible content before the cut) is
-    unstarted by this rule: metered, counted, settled at the floor;
-  - **a `pi` subprocess** a package spawns is metered by its own child meter and folded into the job's cap and
-    totals (issue #500, `OQ-011`); one the runner could not meter is counted in `unmeteredChildren`, which floors
-    the settlement. What stays outside is a child that hides from both (`DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY`,
-    the residuals);
-  - **a provider that forwards to another model through the legacy API is counted for both calls** (PR #547's final review): its own runtime call and the forward are both bounded while in flight and
-    both counted, so a pure passthrough proxy's usage is counted twice. That errs on the safe side for money, but such
-    a proxy can reach a token or cost cap early;
-  - **a provider's own legacy call on the exact pair and api of its runtime call**, with the options spread, is still
-    skipped once as the composer's re-entry, as on main; a call on the same pair through another api is judged;
-  - **server-side fallbacks are billed on the requested model's row**: an Anthropic answer from a model in
-    `compat.allowedFallbackModels` is priced by pi at the fallback's rates but recorded on the requested model's
-    ledger row. The bound already takes the dearest fallback table, so the cap holds; the per-model attribution
-    the later per-model windows read is the requested model's;
-  - **a crash holds the reservation until the TTL**: a worker that dies between reserve and settle leaves the hold
-    in every window it touched until the key expires (2 days for a day key, 9 for a week, 40 for a month). It
-    errs toward overcounting, as the job-count ledger's own mid-reserve fault does;
-  - **prepaid coding plans fill windows at their implied price**: pi 0.99.1 prices `kimi-coding`, `zai` and
-    `zai-coding-cn` at API-equivalent rates, so a job on them meters a positive cost the plan does not charge, and
-    a dollar window on such a deployment caps the implied price (`docs/costs.md`);
-  - **contention near a cap**: each job reserves its whole per-job cap, so a window with $1 left refuses a $2-capped
-    job that would have spent $0.30, and two jobs racing for the last room both see each other's reservation. A
-    refusal is final for that delivery; the window has room again once jobs settle;
-  - **hosts may disagree on caps**: the counters are shared keys, but each host reads its own cap values, so two
-    hosts can judge one counter against different caps. Each host publishes a fingerprint of its caps (`fpUsd`,
-    `DES-HOST-REGISTRY`) and doctor names a host that differs; nothing refuses on it;
-  - **clock skew at a window boundary**: each host builds its window keys from its own clock, so two hosts whose
-    clocks disagree around midnight UTC (or a Monday, or a month's end) reserve into different day keys for the same
-    instant, and a window can briefly admit up to two days' worth across the boundary. The skew is the hosts' NTP
-    error, normally milliseconds; the settlement is unaffected, since it uses the hold's own keys;
-  - **a pi subprocess's spend is seen when it cooperates** (`OQ-011`, issue #500): a metered child's spend is in
-    `tokens.cost` and the per-model rows, and an unmetered one floors the job. A child that scrubs the environment
-    and hides every marker, a non-pi client and a direct API call are not seen, so a window can still undercount a
-    job that spawns one;
-  - **a new worker with an old image floors every capped job** (issue #500 part F): `unmeteredChildren` joined
-    `FLOOR_COUNTERS`, and an absent counter is a floor, so a worker from part F running an image from before part E
-    settles every capped job at its reservation or more, the `costUnjudged` precedent. That is an overcharge, never
-    an undercharge, and it ends when the image is rebuilt. The reverse pairing, an older worker with a newer image,
-    drops the key and settles a job with an unmetered child as metered, which is why parts E and F ship in one
-    release;
-  - **a model call made while extensions load** is no longer a residual (issue #543): the runner installs the meter
-    and the guards before it loads extensions, so such a call is judged and counted like any other. That makes the
-    zero-call rule in **Basis** safe for it: a run whose extension spent at load reports `calls` of at least 1, so it
-    is never read as a run that made no provider call;
-  - **a counter deleted by hand mid-run**: the settle step skips a missing key, but a key deleted and then recreated
-    by another job's reservation is present again, so this job's negative delta lands on the new key and can erase
-    part of the other job's hold (clamped at 0, never negative). Only a hand delete or a flush does this in a
-    supported setup: Valkey's default `maxmemory-policy` is `noeviction` (no repo file changes it, and BullMQ requires
-    it), so a live key is not evicted, and the TTLs outlive every window. A Valkey configured to evict could do it too;
-  - **a forged exit line with the right code**, NARROWED by issue #545 to images that do not declare `exitAuth`: on
-    such an image a line forged by the job's own tools with the correct `code`, written after the runner's real exit
-    line (in the teardown, before the container exits), is still read as the last line. The per-job cap bounds what
-    such a run can have spent, and the job-count windows bound how many runs there are. On an image that declares
-    `exitAuth` (this repo's, from the image that ships #545) it is closed: only a line signed with the run's key is
-    read, and the key is out of the tools' reach on every venue measured (`INT-RUNNER-EXIT-CODE-PROTOCOL`; that
-    holds since issue #596's review started every key holder with `--disable-sigusr1`: until then a tool's SIGUSR1
-    opened the runner's Node inspector, whose heap held the key). What
-    stays there is code running inside the runner process itself (an extension), which is trusted at the runner's
-    level; and a tool that takes the genuine line off the stdout pipe, which leaves no verified line and so the
-    floor, an overcharge and never an undercharge. The close needs BOTH halves from #545 or later: an older worker
-    hands no key, and a newer worker hands none to an image without `exitAuth`, so any other pairing runs unsigned
-    and keeps this residual exactly as before;
-  - **the runner's own `spent` is not on the exit line**: a floor charges `max(reservation, metered cost)`, and the
-    cost guard's settled `spent` (the in-run charge, which counts a failed started call at its bound) could raise it
-    further. Putting it on the exit line is a runner change, a named follow-up.
-- **Traces to**: `REQ-TOKEN-ACCOUNTING-AND-CAPS`, `INT-RUNNER-EXIT-CODE-PROTOCOL`,
-  `INT-RUN-HISTORY-FILE-CONTRACT`, `INT-CONTAINER-RUNTIME-CONTRACT`, `DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY`,
-  `CONST-BUDGET-BEFORE-TOKENS`, `OQ-010`, `OQ-011`, `REQ-SPEND-CAPS-MULTI-WINDOW`, `INT-CONFIG-OVERLAY-CONTRACT`,
-  `INT-MODEL-ENDPOINTS-FILE-CONTRACT`
-
+  - **Keep `money.mjs`'s integer micro units and multiply by the catalog price**: it resurrects the rate
+    table this removal deleted, and the micro unit's precision was for amounts a token count never needs.
+  - **Float tokens** (or micro-tokens): `INCRBY` takes integers only; a float ledger drifts across a
+    shared counter and can overflow `Number.MAX_SAFE_INTEGER` semantics that the integer asserts keep.
+  - **Keep the lagging day counter beside the windows**: two counters for one window drift apart, and the
+    counter's best-effort overshoot (N in-flight jobs passing the check) is exactly what the atomic
+    reservation removes.
+  - **Bound each call before it is made** (the cost guard's shape): the bound was derived from catalog
+    prices; with prices gone there is nothing to bound with, and the lag it leaves is one call.
+  - **A pre-container estimate as the reservation** (median tokens per run, say): a bound that is an
+    estimate is the dollar-era "cap plus one worst call" mistake again; the whole budget is known and free.
+- **Residuals, named**: an untrusted exit line settles at the floor (a forged zero cannot erase a hold); a
+  counter deleted by hand mid-run can let a negative delta land on a recreated key, clamped at 0; a forged
+  line with the right code on an image without `exitAuth` stays the dollar ledger's residual, closed on
+  images that declare it; a model row folded into `other` by truncation floors that model's window; and a
+  hold a crashed container left is settled at the floor and never carried into a recovery
+  (`DES-RUN-BUDGET-LEDGER`).
+- **Traces to**: `REQ-SPEND-CAPS-MULTI-WINDOW`, `REQ-TOKEN-ACCOUNTING-AND-CAPS`, `CONST-BUDGET-BEFORE-TOKENS`,
+  `DES-RUN-BUDGET-LEDGER`, `DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY`, `INT-RUN-HISTORY-FILE-CONTRACT`,
+  `INT-SCOPED-LIMITS-FILE-CONTRACT`, `INT-ENVELOPE-FILE-CONTRACT`, `INT-CONFIG-OVERLAY-CONTRACT`, `OQ-010`,
+  `OQ-011`
 ## DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE
 
 - **AMENDED 2026-10-29 (#749)**: Console allocation projection may carry host names and weights, and operator-only reasons, without widening the shareable export projection. Structured fields feed the existing confirmed action body contracts. Revert keeps machine indices internal and names rows from one.
@@ -17281,6 +16723,9 @@ Code evidence: `worker/src/watch-decision.mjs`, `watch-board.mjs`, `watch-store.
 
 | Date | Change |
 |---|---|
+| 2026-11-05 (token-only, 1 of 3) | **`DES-COST-FOLD-BY-SCAN` RETIRED, token-only, its mechanism carried by NEW `DES-TOKEN-FOLD-BY-SCAN`.** The money fold (the typed `{ usd, class, floor, coverage }`, the six pricing classes, plan verdicts and proration, subscription re-pricing against the rate tables) is deleted with the rate tables it folded against; the scan it ran on (the read-only, filename-keyed, retention-bounded, 92-day-capped `scanRunRecords`, folded by the pure, fs-free `admin/src/costs.mjs`) survives unchanged. The successor folds token totals with THREE classes only (`metered`, `estimated`, `unknown`), a typed `{ tokens, class, floor, coverage? }` where a floor is a one-sided estimate from below (uncounted tokens can only make the true total larger), and a what-if that compares a flow's median per-run token profile against a target model's declared context window instead of re-pricing. The fact/opinion split, fold-time classification never stored, the requested-window denominator and the injected trigger join are UNCHANGED, carried over. **Code evidence**: admin/src/costs.mjs; admin/src/read-model.mjs (`scanRunRecords`). |
+| 2026-11-05 (token-only, 2 of 3) | **`DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY` AMENDED, the cost-guard half deleted.** `createCostGuard`, `callCostBound`, the bound arithmetic (the priced-api set, the input and image ceilings, the samplingParams keys, the output-cap field rules, the long-context tier), the `PRICES` pin table, the `SPENT` file and the guard counters (`costRefused`, `boundExceeded`, `longContext`, `costUnjudged`, `costUnanswered`) are retired with the per-job dollar cap; what remains of the guard is the meter's own settle-time token check (`combinedTotal() > cap`, stop `token_budget`), a lagging in-run backstop with no pre-call form (`DES-TOKEN-RESERVE-AND-SETTLE`, `OQ-010`). The install line reports a token cap as the readable state, not an alarm (`capped` without a brake is expected, since only a model list arms the brake and is refused `model-policy-unenforceable`). The child ledger is version **4**: the guard counters leave it, and the meter's completeness counter `costUnreported` (issue #571) is renamed **`usageUnreported`** and stays, the one completeness counter a ledger carries. The registry choke point, the two meter halves and the forward accounting, the observe-don't-consume rule, the fallback meter, the detector, the control file (`STOP`) and the promise-of-a-stream rule are UNCHANGED, checked. **Code evidence**: image/runner/src/usage-meter.mjs. |
+| 2026-11-05 (token-only, 3 of 3) | **`DES-DOLLAR-RESERVE-AND-SETTLE` RETIRED, token-only, its mechanism carried by NEW `DES-TOKEN-RESERVE-AND-SETTLE`.** `worker/src/dollar-budget.mjs`, `money.mjs`, `dollar-fingerprint.mjs`, the runner's cost guard, `PI_MAX_COST_MICROS`, `PI_MAX_COST_USD`, the `budget:usd:*` keys and every `cost-cap` reason are deleted. The successor mirrors the design unit-for-unit in integer whole tokens: `worker/src/token-budget.mjs` reserves the job's per-job budget (`maxTokens`) against every active window (`budget:tok:*`, the deployment's, the scoped rows', the project's, `_other`'s and the model rows', one `reserveTokens` call, best-effort per-key give-back on a refusal) before the container and settles after it (`SETTLE_SCRIPT`, `token_settle_key_missing`, `token_settle_clamped`); the basis is `metered` only when the exit line is trusted and every completeness counter is present and 0 (`unresolved`, `usageUnreported`, `unmeteredChildren`), else the floor `max(reservedTokens, reported)`; the record block is `tokensWindows` (`reservedTokens`, `settledTokens`, `basis`, `modelBasis`, `reservedIn`). The per-job budget is stated as the settle-time lagging in-run backstop it is, never pre-call, and the check-after day counter is retired with the windows (`OQ-010`'s resolution records why each was right in its era). Rejected: keeping the micro unit times a price, float tokens, keeping the lagging counter beside the windows, bounding calls before they are made, an estimated reservation. The trusted-line rule (issue #542's review), the zero-rated escape, the hold rules and the window boundaries are UNCHANGED, unit-for-unit. **Code evidence**: worker/src/token-budget.mjs; worker/src/budget.mjs (`dayKey`/`weekKey`/`monthKey`, the shared window boundaries); worker/src/processor.mjs. |
 | 2026-11-04 | `DES-WORKER-ON-HOST` AMENDED: Compose derives worker/console cwd, same-path deployment mount targets and runtime paths from the deployment folder's `$PWD`, while absolute CLI paths retain image code. Live allowlist and endpoint config is read at any deployment path. The `.env` permission lets uid/gid 10001 read but not write `PI_VALKEY_SHARED`; Doctor receives the console token path. Host mode and job-container isolation: UNCHANGED, checked. **Code evidence**: `deploy/docker-compose.yml`, `worker/deploy/docker-compose.yml`, `docs/worker-container.md`. |
 | 2026-11-04 | `DES-QUEUE-BULLMQ-OVER-CUSTOM` AMENDED: token-verified GitLab webhook requests lacking native delivery headers use an event-header plus exact-raw-body SHA-256 delivery id; the best-effort boundary and signature-mode native-header requirement are recorded. Queue ownership, retention and semantic deduplication UNCHANGED, checked. **Code evidence**: `receiver/src/verify-gitlab.mjs`; `worker/src/queue.mjs`. |
 | 2026-11-04 | `DES-WORKER-ON-HOST` AMENDED: host mode remains the portable default; a Linux Compose worker profile is admitted with non-root execution, a same-path deployment mount and explicit root-equivalent Docker socket authority. Docker Desktop, remote daemon paths and arbitrary unmounted local folders stay on host mode. `CONST-ISOLATION-CONTAINER-PER-JOB` and `INT-CONTAINER-RUNTIME-CONTRACT` retain the per-job no-socket contract. **Code evidence**: `deploy/docker-compose.yml`, `deploy/worker.Dockerfile`, `worker/src/backend-local.mjs`, `worker/src/run-container.mjs`. |
