@@ -128,8 +128,11 @@ When `serve` refuses (exit 2: no operator token, another console holding the loc
 stays stopped instead of restarting. Fix the cause, then `pi-dispatch service start --console`.
 
 After a crash the lock (`console-audit/.console.lock` in your logs folder) still names the dead console's pid, and the
-next start takes it over. If another process has taken that pid since, every start refuses and names it: when that
-pid is not a console, remove the lock file and start the service again.
+next start takes it over. So does a lock naming the starting console's OWN pid, which is what a recreated container
+leaves behind: an init is pid 1 and its only child lands on the same low pid every start, so without that rule a
+`--force-recreate` refuses itself in a loop until the file is deleted by hand. A pid equal to its own is never a second
+console. If another process has taken the pid since, every start refuses and names it: when that pid is not a console,
+remove the lock file and start the service again.
 
 The service does not load your `.env` into its environment: `serve --deployment` reads the file itself and takes only
 the console's own settings from it, so the worker's secrets never reach the console process.
@@ -1116,7 +1119,7 @@ once jobs run. A temporary outage never turns an established deployment into a n
 Bootstrap from the deployment folder with the durable installed CLI:
 
 ```bash
-npm install --save-exact @edgehero/pi-dispatch@4.3.1 @edgehero/pi-dispatch-admin@4.3.1 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+npm install --save-exact @edgehero/pi-dispatch@4.3.2 @edgehero/pi-dispatch-admin@4.3.2 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
 ./node_modules/.bin/pi-dispatch up --console
 ```
 

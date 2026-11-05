@@ -9,6 +9,15 @@
  * alive, so it counts as held. A pid recycled by an unrelated process reads as held too, and the refusal says how to
  * clear it; that is the safe direction to be wrong in.
  *
+ * ONE PID IS NEVER ANOTHER CONSOLE: our own. Two processes in one pid namespace cannot share a pid, so a lock naming
+ * ours is this process's own or one a PREVIOUS CONTAINER left, and taking it over cannot admit a second console. That
+ * case is not hypothetical, and it is why this rule exists: measured on the 253 deployment, 2026-11-05, a
+ * `compose up -d --force-recreate console` left the lock naming the old container's pid 6. The new container's console
+ * came up as pid 6 as well (an init is pid 1 and its single child lands on the same low number every start, so this
+ * is deterministic rather than unlucky), `kill(6, 0)` succeeded because it was the new console, `serve` refused
+ * itself, exited 2, and `unless-stopped` restarted it into the same refusal until the file was deleted by hand. The
+ * refusal's own advice was the workaround; a recreate should need nobody.
+ *
  * Released on close: removed only when it still holds OUR pid, so a release after a takeover never deletes the lock
  * another console now holds.
  */
@@ -30,6 +39,14 @@ function defaultAlive(pid) {
 }
 
 /**
+ * The lock paths THIS process holds. The file alone cannot answer "is that pid a second server or me": a second
+ * `serve` inside one process has the same pid as the first, and pid equality is what tells a container's reused pid
+ * apart from another console (see the module comment). One in-process Set answers the first question, and the pid
+ * comparison answers the second, so neither rule has to weaken the other.
+ */
+const heldHere = new Set();
+
+/**
  * Take the lock. Returns `{path, release()}` or `{refusal}`. `alive(pid)` is the liveness seam.
  */
 export function acquireConsoleLock({ logsDir, fs = nodeFs, pid = process.pid, alive = defaultAlive }) {
@@ -43,12 +60,14 @@ export function acquireConsoleLock({ logsDir, fs = nodeFs, pid = process.pid, al
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       fs.writeFileSync(path, `${pid}\n`, { flag: "wx", mode: 0o600 });
+      heldHere.add(path);
       let released = false;
       return {
         path,
         release() {
           if (released) return;
           released = true;
+          heldHere.delete(path);
           try {
             if (fs.readFileSync(path, "utf8").trim() === String(pid)) fs.unlinkSync(path);
           } catch {
@@ -65,7 +84,13 @@ export function acquireConsoleLock({ logsDir, fs = nodeFs, pid = process.pid, al
     } catch {
       // unreadable or vanished between the create and the read: treat as stale and retry once
     }
-    if (Number.isInteger(held) && held > 0 && alive(held)) {
+    // Two questions, and this is the line that answers both.
+    // `held !== pid`: a pid equal to ours cannot be ANOTHER console, and `alive` says true about it precisely
+    // because it is us. That is the container fix -- `--force-recreate console` leaves the old container's pid 6 behind
+    // and the new container's console comes up on pid 6 too, so without this `serve` refused itself in a loop.
+    // `heldHere.has(path)`: inside ONE process, a second `serve` does share our pid, so the pid cannot tell it apart
+    // from that stale lock; the set of locks this process took can, and the refusal still names the real holder.
+    if (Number.isInteger(held) && held > 0 && alive(held) && (held !== pid || heldHere.has(path))) {
       return { refusal: `another console (pid ${held}) is already serving this deployment; stop it first. If no console runs, that pid belongs to something else: remove ${path}` };
     }
     try {

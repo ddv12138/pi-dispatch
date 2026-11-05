@@ -372,6 +372,20 @@ test("the lock: a dead holder is taken over, a live one refuses, and release nev
   c.release();
 });
 
+test("the lock: a pid that is OUR OWN is taken over, because a recreated container reuses it and cannot be a second console", () => {
+  const logsDir = join(tempDir("console-lock-self-"), "logs");
+  mkdirSync(join(logsDir, "console-audit"), { recursive: true });
+  // What `compose up -d --force-recreate console` leaves behind: the previous container's console, pid 6, and the
+  // new container's console lands on pid 6 again (an init is pid 1 and its single child takes the same low number
+  // every start). `alive` answers true because that pid IS this console -- which is why it cannot be another one.
+  writeFileSync(consoleLockPath(logsDir), "6\n");
+  const mine = acquireConsoleLock({ logsDir, pid: 6, alive: () => true });
+  assert.equal(typeof mine.release, "function", "our own pid is never another console, so it cannot refuse us");
+  assert.equal(readFileSync(mine.path, "utf8").trim(), "6", "the lock is ours, holding our pid");
+  mine.release();
+  assert.equal(existsSync(mine.path), false);
+});
+
 test("serve copies each audit row it writes to the Valkey list after the file holds it, and a Valkey that fails costs only the copy", async (t) => {
   const dep = deployment();
   let stop;
