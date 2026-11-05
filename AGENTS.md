@@ -376,12 +376,11 @@ are queued.
 - Conventional subjects citing the issue number. The body explains *why*, names the spec IDs touched, and
   states what was checked and left unchanged.
 - DCO sign-off (`git commit -s`). Branch names are `type/short-slug`.
-- **No personal email address in any commit message**, nor in a pull request, an issue or a comment. The
-  maintainer's commits are authored, committed and signed off as `Rob Boerman <edgehero@users.noreply.github.com>`
-  (set as the repository's `user.email` before committing): `git commit -s` writes the committer's address into
-  the `Signed-off-by` line, so a personal address in the git config ends up in the message. The pi bump workflow
-  authors as the same noreply address and is committed (so signed off) as its ID form, `BUMP_AUTHOR` and
-  `BUMP_COMMITTER` in `pi-bump.mjs`.
+- **No personal email address in any commit message**, nor in a pull request, an issue or a comment. Commits
+  are authored, committed and signed off as `ddv12138 <ddv12138@users.noreply.github.com>` (set as the
+  repository's `user.email` and `user.name` before committing): `git commit -s` writes the committer's address
+  into the `Signed-off-by` line, so a personal address in the git config ends up in the message. The pi bump
+  workflow keeps its own configured identity (`BUMP_AUTHOR` and `BUMP_COMMITTER` in `pi-bump.mjs`).
 - One PR per issue where possible; stacked PRs are merged one at a time, parent first, never with
   `--delete-branch` until the whole chain has landed.
 - **`gh pr merge --admin` is no longer the merge path.** It was, while `main` required an approving review
