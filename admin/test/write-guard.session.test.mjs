@@ -31,13 +31,13 @@ const pointed = tempDir("pd-504c-pointed-");
 writeFileSync(join(pointed, ".env"), `PI_PROJECTS_FILE=${join(pointed, "projects.json")}\n`);
 writeFileSync(join(pointed, "pointer.json"), JSON.stringify({ version: 1, deploymentDir: pointed, env: {} }));
 process.env.PI_DISPATCH_DEPLOYMENT_FILE = join(pointed, "pointer.json");
-const ENV_KEYS = ["PI_DISPATCH_AGENT_WRITES", "PI_PROJECTS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_ENVELOPE_FILE", "PI_SETTINGS_FILE", "PI_LOGS_DIR", "PI_MAX_COST_USD", "VALKEY_URL", "PI_WORKER_NAME", "PI_TRIGGERS_FILE"];
+const ENV_KEYS = ["PI_DISPATCH_AGENT_WRITES", "PI_PROJECTS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_ENVELOPE_FILE", "PI_SETTINGS_FILE", "PI_LOGS_DIR", "PI_MAX_TOKENS", "VALKEY_URL", "PI_WORKER_NAME", "PI_TRIGGERS_FILE"];
 
 const ENVELOPE = {
   version: 1,
   window: "week",
-  totalUsd: "100",
-  floorsUsd: { shop: "10", platform: "10", _other: "0" },
+  totalTokens: 100_000_000,
+  floorsTokens: { shop: 10_000_000, platform: 10_000_000, _other: 0 },
   defaultWeights: { shop: 1, platform: 1, _other: 0 },
   delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
 };
@@ -56,7 +56,7 @@ async function withDeployment(fn) {
   };
   writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web", "github:acme/api"] }, { id: "platform", members: ["github:acme/infra"] }] }));
   writeFileSync(files.envelope, JSON.stringify(ENVELOPE, null, 2));
-  writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
+  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2 }));
   writeFileSync(files.triggers, JSON.stringify({ triggers: [] }));
   process.env.PI_PROJECTS_FILE = files.projects;
   process.env.PI_SCOPED_LIMITS_FILE = files.limits;
@@ -66,7 +66,7 @@ async function withDeployment(fn) {
   process.env.PI_LOGS_DIR = files.logs;
   process.env.VALKEY_URL = "redis://127.0.0.1:6390"; // never dialled: the fake answers
   process.env.PI_WORKER_NAME = "mini1";
-  delete process.env.PI_MAX_COST_USD;
+  delete process.env.PI_MAX_TOKENS;
   const redis = fakeAllocRedis();
   indexMod._setAllocationSeamsForTests({ redisFn: () => redis, now: () => new Date(NOW) });
   try {

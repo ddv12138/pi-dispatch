@@ -159,7 +159,7 @@ test("the PROJECTS view shows each project's size, p95 peaks and verdict, then t
 
 test("the size suggestions say how many of the window's records a newer pi-dispatch wrote, which none of them reads (#761)", async () => {
   // The read the insights page, the PROJECTS view and the edit preview share passes the worker reader's count through.
-  const logsDir = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 }), { ...rec({ i: 1, peakMiB: 9000 }), v: 2 }]);
+  const logsDir = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 }), { ...rec({ i: 1, peakMiB: 9000 }), v: 3 }]); // v above RUN_RECORD_VERSION (2) is the newer marker now
   const paths = { logsDir, scopedLimitsPath: null, projectsFile: null };
   const read = projectSizing(paths, { projectIds: ["shop"], nowMs: NOW, envFn: () => ({}) });
   assert.equal(read.newerSkipped, 1);

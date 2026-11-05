@@ -79,7 +79,7 @@ function fakeProc() {
 }
 
 function PLAN() {
-  return { kind: "parked-answer", jobId: "j1", forge: "github", queue: "pi-jobs", job: { trigger: { comment: { body: "ship it" } } }, runFields: { flow: "fix", model: null, maxCostUsd: "2.00" }, reserve: { dollarsMicros: 2_000_000 } };
+  return { kind: "parked-answer", jobId: "j1", forge: "github", queue: "pi-jobs", job: { trigger: { comment: { body: "ship it" } } }, runFields: { flow: "fix", model: null, maxTokens: 2000000 }, reserve: { slots: 1, tokens: 2000000, maxTokens: 2000000, zeroRated: false } };
 }
 
 function fakeFork({ refusal = null, run = async () => 0 } = {}) {
@@ -135,8 +135,8 @@ test("reply: shows the question, asks, plans, confirms, writes through the audit
   const [, title, message] = h.log.find((l) => l[0] === "confirm");
   assert.match(title, /j1/);
   assert.match(message, /queue pi-jobs/);
-  assert.match(message, /flow fix; model the deployment's default; per-job cap \$2\.00/, "the run fields, as the console's preview words them");
-  assert.match(message, /\$2\.00 \(the per-job cap\)/, "the reserve, as the console's preview words it");
+  assert.match(message, /flow fix; model the deployment's default; per-job cap 2000000 tokens/, "the run fields, as the console's preview words them");
+  assert.match(message, /2,000,000 tokens \(the per-job budget\)/, "the reserve, as the console's preview words it");
   assert.match(message, /The answer:\nship it$/);
   const [, opts] = h.log.find((l) => l[0] === "write");
   assert.equal(opts.kind, "parked-answer");

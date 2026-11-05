@@ -388,13 +388,13 @@ test("readiness timeout, partial host outcomes and grant loss are never represen
 test("complete exposure uses real trigger validation and reserve estimates; partial queues and unreadable job data refuse", async () => {
   const dir = tempDir("pd-setup-exposure-");
   const path = join(dir, "triggers.json");
-  fs.writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 2 * * *" }, run: { kind: "local", flow: "tidy", folder: "/repo", task: "Tidy the repository", maxCostUsd: "2" } }] }));
+  fs.writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 2 * * *" }, run: { kind: "local", flow: "tidy", folder: "/repo", task: "Tidy the repository", maxTokens: 2 } }] }));
   let snapshot = { queue: {}, queueCounts: [{ name: "pi-jobs", counts: { waiting: 1, paused: 0, delayed: 0, active: 0 } }], waiting: { rows: [{ jobId: "local-job", queue: "pi-jobs" }], scheduled: [], truncated: false } };
-  const a = { fleet: { snapshot: async opts => { assert.equal(opts.switchQueues, true); assert.equal(opts.waiting, true); assert.equal(opts.freshWaiting, true); return snapshot; } }, paths: { triggersPath: path }, env: {}, rm: { estimateReserve }, readJobsData: async () => new Map([["local-job", { maxCostUsd: "3" }]]) };
+  const a = { fleet: { snapshot: async opts => { assert.equal(opts.switchQueues, true); assert.equal(opts.waiting, true); assert.equal(opts.freshWaiting, true); return snapshot; } }, paths: { triggersPath: path }, env: {}, rm: { estimateReserve }, readJobsData: async () => new Map([["local-job", { maxTokens: 3 }]]) };
   const ctx = { a, fs, now: () => T0 };
   const got = await readSetupExposure(ctx);
   assert.equal(got.complete, true);
-  assert.match(got.lines.join(" "), /\$3\.00.*\$2\.00/);
+  assert.match(got.lines.join(" "), /\b3 tokens across current jobs.*\b2 tokens across the configured cron triggers/);
   assert.match(got.lines.join(" "), /local-job.*nightly/);
   const whole = snapshot;
   snapshot = { ...snapshot, waiting: { ...snapshot.waiting, rows: [...snapshot.waiting.rows, { jobId: "local-job", queue: "pi-jobs@other" }] } };
