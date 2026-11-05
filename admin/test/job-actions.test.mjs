@@ -346,7 +346,7 @@ test("the expect a retry or remove carries is checked before anything is read: a
 // ---- re-run ----
 
 /** The label trigger a forge run in these tests matched (index 0), with the run fields a re-run must take from the file. */
-const LABEL_RUN = { kind: "github", flow: "fix", secretsProfile: "prod", secrets: { TOKEN: "op://x" }, maxCostUsd: "1.5", model: "claude-sonnet-5-5", provider: "anthropic", image: "pi-job:v1" };
+const LABEL_RUN = { kind: "github", flow: "fix", secretsProfile: "prod", secrets: { TOKEN: "op://x" }, maxTokens: "500000", model: "claude-sonnet-5-5", provider: "anthropic", image: "pi-job:v1" };
 function forgeTriggers(path, entries = [{ on: { type: "label", any: ["pi"] }, run: LABEL_RUN }]) {
   writeFileSync(path, JSON.stringify({ triggers: entries }));
 }
@@ -362,12 +362,12 @@ test("planRerun of a forge run: the where from retained data, the run fields fro
     await beat(v.redis, "mini2", "");
     const mini1 = await v.q("pi-jobs@mini1");
     const shared = await v.q("pi-jobs");
-    const original = { repo: "org/repo", target: { type: "issue", number: 7, title: "T", body: "B" }, flow: "fix", secretsProfile: "prod", secrets: { TOKEN: "op://x" }, maxCostUsd: "1.5", model: "claude-sonnet-5-5", provider: "anthropic", image: "pi-job:v1", trigger: { event: "issues", action: "labeled", deliveryId: "orig-1", sender: { id: 9 }, matched: { index: 0, type: "label", label: "pi" } } };
+    const original = { repo: "org/repo", target: { type: "issue", number: 7, title: "T", body: "B" }, flow: "fix", secretsProfile: "prod", secrets: { TOKEN: "op://x" }, maxTokens: "500000", model: "claude-sonnet-5-5", provider: "anthropic", image: "pi-job:v1", trigger: { event: "issues", action: "labeled", deliveryId: "orig-1", sender: { id: 9 }, matched: { index: 0, type: "label", label: "pi" } } };
     // On mini1's queue, where the receiver routed it: the one queue whose semantic window a re-run can collide with.
     const { jobId } = await enqueueForgeJob(mini1, "github", original);
     writeRecord(logsDir, { jobId, kind: "github", target: "org/repo#7", outcome: "failed", reason: "exit-1" });
     const random = (n) => Buffer.alloc(n, 0xab);
-    const planned = await planRerun({ url: URL12, logsDir, jobId, triggersPath, env: { PI_MAX_COST_USD: "2" }, random });
+    const planned = await planRerun({ url: URL12, logsDir, jobId, triggersPath, env: { PI_MAX_TOKENS: "800000" }, random });
     assert.equal(planned.plan.kind, "forge", JSON.stringify(planned));
     assert.equal(planned.plan.deliveryId, "console-abababababababab");
     assert.equal(planned.plan.queue, "pi-jobs@mini1", "a secret profile only mini1 serves: routed to its queue, as the receiver would");
@@ -376,9 +376,9 @@ test("planRerun of a forge run: the where from retained data, the run fields fro
     assert.deepEqual(reloadTriggers({ PI_TRIGGERS_FILE: triggersPath }, cfg), { ok: true });
     const fresh = filter("issues", { action: "labeled", sender: { id: 9 }, repository: { full_name: "org/repo" }, issue: { number: 7, title: "T", body: "B", labels: [{ name: "pi" }] } }, cfg, 1, "orig-1").job;
     assert.deepEqual(planned.plan.job, { ...fresh, trigger: { ...fresh.trigger, deliveryId: "console-abababababababab" } }, "field for field the receiver's job");
-    assert.deepEqual(planned.plan.runFields, { flow: "fix", model: "anthropic/claude-sonnet-5-5", models: null, maxCostUsd: "1.5", secretsProfile: "prod", image: "pi-job:v1", backend: null });
+    assert.deepEqual(planned.plan.runFields, { flow: "fix", model: "anthropic/claude-sonnet-5-5", models: null, maxTokens: "500000", secretsProfile: "prod", image: "pi-job:v1", backend: null });
     assert.equal(JSON.stringify(planned.plan.runFields).includes("op://"), false, "names only: no secret reference in what the preview shows");
-    assert.deepEqual(planned.plan.reserve, { slots: 1, dollarsMicros: 1_500_000, capMicros: 1_500_000, zeroRated: false });
+    assert.deepEqual(planned.plan.reserve, { slots: 1, tokens: 500000, maxTokens: 500000, zeroRated: false });
     // The original's semantic window still holds (same target and flow, minutes ago): the enqueue says so, nothing queued.
     const swallowed = await enqueueRerun(planned.plan, { url: URL12 });
     assert.equal(swallowed.deduplicated, true);
@@ -456,7 +456,7 @@ test("a forge re-run takes its authority from the trigger NOW: deleted, replaced
     const shared = await v.q("pi-jobs");
     // The retained job carries the WIDE fields it ran with, and a `console` field built by hand (enqueueForgeJob would
     // keep it), which a re-run must never carry: it is not an answer.
-    const data = { kind: "github", repo: "org/repo", target: { type: "issue", number: 7, title: "T", body: "B" }, flow: "fix", maxCostUsd: "5", models: ["anthropic/claude-opus-5-5"], secretsProfile: "prod", image: "pi-job:wide", console: { by: "alice" }, trigger: { event: "issues", action: "labeled", deliveryId: "auth-1", sender: { id: 9 }, matched: { index: 1, type: "label", label: "pi" } } };
+    const data = { kind: "github", repo: "org/repo", target: { type: "issue", number: 7, title: "T", body: "B" }, flow: "fix", maxTokens: "5000000", models: ["anthropic/claude-opus-5-5"], secretsProfile: "prod", image: "pi-job:wide", console: { by: "alice" }, trigger: { event: "issues", action: "labeled", deliveryId: "auth-1", sender: { id: 9 }, matched: { index: 1, type: "label", label: "pi" } } };
     await shared.add("github", data, { jobId: "gh-auth-1" });
     writeRecord(logsDir, { jobId: "gh-auth-1", kind: "github", target: "org/repo#7", outcome: "completed" });
     const cron = { on: { type: "cron", id: "n", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/tmp", flow: "audit", task: "t" } };
@@ -479,15 +479,15 @@ test("a forge re-run takes its authority from the trigger NOW: deleted, replaced
     assert.match((await plan()).refusal, /changed or is gone/);
     // Narrowed: the same trigger with a smaller cap, one model, no secret profile, the default image. The re-run takes
     // exactly those, never the retained wide ones.
-    forgeTriggers(triggersPath, [cron, { on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", maxCostUsd: "0.5", models: ["anthropic/claude-sonnet-5-5"], fallbackModels: ["anthropic/claude-sonnet-5-5"] } }]);
+    forgeTriggers(triggersPath, [cron, { on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", maxTokens: "500000", models: ["anthropic/claude-sonnet-5-5"], fallbackModels: ["anthropic/claude-sonnet-5-5"] } }]);
     const narrowed = await plan();
     assert.ok(narrowed.plan, JSON.stringify(narrowed));
-    assert.equal(narrowed.plan.job.maxCostUsd, "0.5");
+    assert.equal(narrowed.plan.job.maxTokens, "500000");
     assert.deepEqual(narrowed.plan.job.models, ["anthropic/claude-sonnet-5-5"]);
     assert.deepEqual(narrowed.plan.job.fallbackModels, ["anthropic/claude-sonnet-5-5"]);
     for (const k of ["secretsProfile", "image", "console"]) assert.equal(k in narrowed.plan.job, false, `${k} is not replayed from the retained job`);
-    assert.deepEqual(narrowed.plan.runFields, { flow: "fix", model: null, models: ["anthropic/claude-sonnet-5-5"], fallbackModels: ["anthropic/claude-sonnet-5-5"], maxCostUsd: "0.5", secretsProfile: null, image: null, backend: null });
-    assert.equal(narrowed.plan.reserve.capMicros, 500_000, "the reserve is the narrowed cap");
+    assert.deepEqual(narrowed.plan.runFields, { flow: "fix", model: null, models: ["anthropic/claude-sonnet-5-5"], fallbackModels: ["anthropic/claude-sonnet-5-5"], maxTokens: "500000", secretsProfile: null, image: null, backend: null });
+    assert.equal(narrowed.plan.reserve.maxTokens, 500000, "the reserve is the narrowed cap");
     assert.equal(narrowed.plan.queue, "pi-jobs", "no secret profile any more: the shared queue");
     assert.deepEqual([narrowed.plan.job.repo, narrowed.plan.job.target, narrowed.plan.job.trigger.matched], [data.repo, data.target, data.trigger.matched], "the where is the retained job's");
     // A comment run's `<phrase> <flow>` override re-runs while the file still routes that flow, but never through a
@@ -496,9 +496,9 @@ test("a forge re-run takes its authority from the trigger NOW: deleted, replaced
     await shared.add("github", said, { jobId: "gh-auth-2" });
     writeRecord(logsDir, { jobId: "gh-auth-2", kind: "github", target: "org/repo#7", outcome: "completed" });
     const review = { on: { type: "label", any: ["rv"] }, run: { kind: "github", flow: "review" } };
-    forgeTriggers(triggersPath, [review, { on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", maxCostUsd: "0.25" } }]);
+    forgeTriggers(triggersPath, [review, { on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", maxTokens: "250000" } }]);
     const overridden = await planRerun({ url: URL12, logsDir, jobId: "gh-auth-2", triggersPath, env: {} });
-    assert.deepEqual([overridden.plan?.job.flow, overridden.plan?.job.maxCostUsd], ["review", "0.25"], "the override's flow, the comment trigger's fields");
+    assert.deepEqual([overridden.plan?.job.flow, overridden.plan?.job.maxTokens], ["review", "250000"], "the override's flow, the comment trigger's fields");
     forgeTriggers(triggersPath, [review, { on: { type: "comment", phrase: "@pi" }, run: { kind: "github", command: "triage" } }]);
     assert.match((await planRerun({ url: URL12, logsDir, jobId: "gh-auth-2", triggersPath, env: {} })).refusal, /changed or is gone; .*runs a command now/);
     forgeTriggers(triggersPath, [{ on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix" } }, cron]);
@@ -644,14 +644,14 @@ test("the reserve of a re-run and a parked answer uses the deployment's model en
     const { jobId } = await enqueueForgeJob(shared, "github", data);
     writeRecord(logsDir, { jobId, kind: "github", target: "org/repo#7", outcome: "completed", reason: "awaiting-input", endedAt: "2026-10-15T10:00:00.000Z" });
     const now = () => Date.parse("2026-10-15T11:00:00Z");
-    const env = { PI_MAX_COST_USD: "2" };
+    const env = { PI_MAX_TOKENS: "2000000" };
     const rerun = (over) => planRerun({ url: URL12, logsDir, jobId, triggersPath, env, ...over });
     const answer = (over) => planParkedAnswer({ url: URL12, logsDir, jobId, text: "ok", by: "alice", triggersPath, env, runsFn: async () => [], now, ...over });
     for (const [what, fn] of [["re-run", rerun], ["parked answer", answer]]) {
-      assert.equal((await fn({ modelEndpoints })).plan.reserve.dollarsMicros, 0, `${what}: zero-rated on the declared endpoint, so $0`);
-      assert.equal((await fn({})).plan.reserve.dollarsMicros, 2_000_000, `${what}: without the snapshot, fail closed to the cap`);
+      assert.equal((await fn({ modelEndpoints })).plan.reserve.tokens, 0, `${what}: zero-rated on the declared endpoint, so 0 tokens`);
+      assert.equal((await fn({})).plan.reserve.tokens, 2_000_000, `${what}: without the snapshot, fail closed to the cap`);
       const listed = await fn({ modelEndpoints, env: { ...env, PI_ALLOWED_MODELS: "local-ollama/q,anthropic/claude-sonnet-5-5" } });
-      assert.equal(listed.plan.reserve.dollarsMicros, 2_000_000, `${what}: the deployment's list holds a hosted model, so the cap`);
+      assert.equal(listed.plan.reserve.tokens, 2_000_000, `${what}: the deployment's list holds a hosted model, so the cap`);
     }
   } finally {
     await v.done();
@@ -667,7 +667,7 @@ function parkedTriggers(path, kind) {
     JSON.stringify({
       triggers: [
         { on: { type: "label", any: ["pi"] }, run: { kind, flow: "fix", resume: true, awaitInput: true } },
-        { on: { type: "comment", phrase: "@pi" }, run: { kind, flow: "fix", resume: true, awaitInput: true, progress: true, statusComment: true, recover: true, steer: true, model: "claude-sonnet-5-5", provider: "anthropic", maxCostUsd: "1.25", instructions: "be brief" } },
+        { on: { type: "comment", phrase: "@pi" }, run: { kind, flow: "fix", resume: true, awaitInput: true, progress: true, statusComment: true, recover: true, steer: true, model: "claude-sonnet-5-5", provider: "anthropic", maxTokens: "1250000", instructions: "be brief" } },
       ],
     }),
   );
@@ -682,7 +682,7 @@ for (const targetType of ["issue", "pull_request"]) {
   const dir = tempDir("pd-649-approval-");
   const logsDir = join(dir, "logs");
   const triggersPath = join(dir, "triggers.json");
-  const gateFields = { gates: ["budget-raise", "deploy:staging"], gateTimeout: 3, maxCostUsd: 2, gateBudgetRaiseUsd: 3.5 };
+  const gateFields = { gates: ["budget-raise", "deploy:staging"], gateTimeout: 3, maxTokens: 2_000_000, gateBudgetRaiseTokens: 3_500_000 };
   try {
     writeFileSync(triggersPath, JSON.stringify({ triggers: [{ on: targetType === "issue" ? { type: "comment", phrase: "@pi" } : { type: "pull_request", action: ["opened"] }, run: { kind: "github", flow: "fix", resume: true, ...gateFields } }] }));
     const shared = await v.q("pi-jobs");
@@ -700,7 +700,7 @@ for (const targetType of ["issue", "pull_request"]) {
     assert.equal(got.plan.queue, "pi-jobs@worker", "preview reads the authoritative private session owner queue");
     assert.equal(got.plan.job.trigger.comment.body, "/approve");
     assert.equal(got.plan.job.approvalRequestId, "a".repeat(64));
-    assert.equal(got.plan.reserve.capMicros, 3_500_000, "approval previews the raised reservation without changing the original policy fields");
+    assert.equal(got.plan.reserve.tokens, 3_500_000, "approval previews the raised reservation without changing the original policy fields");
     for (const [key, value] of Object.entries(gateFields)) assert.deepEqual(got.plan.job[key], value, key);
     assert.deepEqual(got.plan.job.console, { by: "alice" });
     assert.equal(got.plan.job.target.type, targetType);
@@ -770,7 +770,7 @@ for (const kind of ["github", "gitlab", "forgejo"]) {
       if (kind === "github") assert.equal(consoleJob.trigger.comment.author_association, "OWNER");
       else assert.equal("author_association" in consoleJob.trigger.comment, false, "only GitHub's comments carry an association");
       assert.equal(planned.plan.queue, "pi-jobs");
-      assert.deepEqual(planned.plan.reserve, { slots: 1, dollarsMicros: 1_250_000, capMicros: 1_250_000, zeroRated: false });
+      assert.deepEqual(planned.plan.reserve, { slots: 1, tokens: 1_250_000, maxTokens: 1_250_000, zeroRated: false });
       // Queued with the console field, and a second answer while it is queued is the semantic window's duplicate.
       const ok = await enqueueParkedAnswer(planned.plan, { url: URL12 });
       assert.deepEqual(ok, { ok: true, jobIds: [forgeDeliveryJobId(kind, "console-0101010101010101")], queue: "pi-jobs" });
@@ -890,7 +890,7 @@ test("a park behind a paused queue of 1,200 forge jobs stays answerable: the pen
 });
 
 test("the read model re-exports the worker's reserve rule for the console", () => {
-  assert.deepEqual(estimateReserve({ kind: "github", maxCostUsd: "0.5" }, { env: { PI_MAX_COST_USD: "2" } }), { slots: 1, dollarsMicros: 500_000, capMicros: 500_000, zeroRated: false });
+  assert.deepEqual(estimateReserve({ kind: "github", maxTokens: "500000" }, { env: { PI_MAX_TOKENS: "800000" } }), { slots: 1, tokens: 500000, maxTokens: 500000, zeroRated: false });
 });
 
 // ---- steering a running job (issue #646) ----
@@ -1370,10 +1370,10 @@ test("Fire now uses the served BullMQ scheduler, preserves the cron template, an
     execFileSync("git", ["-C", folder, "add", ".pi"]);
     execFileSync("git", ["-C", folder, "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "flow"]);
     const triggersPath = join(tempDir("pd-750-fire-config-"), "triggers.json");
-    const trigger = { on: { type: "cron", id: "fire-live", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "private task", maxTurns: 7, progress: true, steer: true, maxCostUsd: "1" } };
+    const trigger = { on: { type: "cron", id: "fire-live", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "private task", maxTurns: 7, progress: true, steer: true, maxTokens: "1000000" } };
     writeFileSync(triggersPath, JSON.stringify({ triggers: [trigger] }));
     const queue = await v.q("pi-jobs@mini1");
-    const options = { index: 0, url: URL12, triggersPath, env: { PI_WORKER_NAME: "mini1", PI_MAX_COST_USD: "2" }, grantsEnv: { VALKEY_URL: URL12, PI_DISPATCH_RUN_ROOTS: folder, PI_DISPATCH_RUN_PER_HOUR: "3" }, now };
+    const options = { index: 0, url: URL12, triggersPath, env: { PI_WORKER_NAME: "mini1", PI_MAX_TOKENS: "2000000" }, grantsEnv: { VALKEY_URL: URL12, PI_DISPATCH_RUN_ROOTS: folder, PI_DISPATCH_RUN_PER_HOUR: "3" }, now };
     assert.match((await planTriggerFire(options)).refusal, /schedule is not in/);
     await queue.upsertJobScheduler("fire-live", { pattern: "0 6 * * *" }, { name: "local", data: { kind: "local", folder, flow: "fix" } });
     const { plan } = await planTriggerFire(options);
