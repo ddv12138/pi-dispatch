@@ -20,8 +20,8 @@ export function answererStats(rows, now) {
   const lower = now - 30 * 86400000;
   const kept = rows.filter(r => Number(r.at ?? r.completedAt ?? r.sentAt ?? 0) >= lower);
   const total = key => kept.filter(key).length;
-  const costs = kept.filter(r => Number.isFinite(r.costUsd) && r.costUsd >= 0);
-  return { sent: total(r => r.disposition === "as-drafted"), edited: total(r => r.disposition === "edited"), dropped: total(r => r.status === "dropped"), passed: total(r => r.status === "passed" || r.status === "classified"), jobs: kept.length, costUsd: costs.reduce((n, r) => n + r.costUsd, 0), costPartial: costs.length !== kept.length };
+  const spent = kept.filter(r => Number.isSafeInteger(r.tokensTotal) && r.tokensTotal >= 0);
+  return { sent: total(r => r.disposition === "as-drafted"), edited: total(r => r.disposition === "edited"), dropped: total(r => r.status === "dropped"), passed: total(r => r.status === "passed" || r.status === "classified"), jobs: kept.length, tokens: spent.reduce((n, r) => n + r.tokensTotal, 0), tokensPartial: spent.length !== kept.length };
 }
 
 export function makeAnswererService({ paths, env = {}, fs = nodeFs, now = Date.now, redisFn = makeRedisClient, storeFn = makeAnswerDraftStore } = {}) {

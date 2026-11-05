@@ -4,7 +4,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { actForm } from "./config-ui.mjs";
-import { ageText, timeHtml } from "./common.mjs";
+import { ageText, timeHtml, tokensText } from "./common.mjs";
 
 const data = (view) => view.data?.updates ?? null;
 const t = (message, view) => uiText(message, view?.locale);
@@ -20,7 +20,6 @@ const versions = (from, to) => (to && to !== from ? html`<span class="up-ver">${
 const runLink = (jobId) => (jobId ? html`<a class="link code" href="${`/run?id=${encodeURIComponent(jobId)}`}">${jobId}</a>` : "its run");
 const lineCell = (body) => ({ html: html`<div class="up-line">${body}</div>`, wide: true });
 const actCell = (body) => ({ html: body === null ? null : html`<div class="up-act">${body}</div>`, wide: true });
-const money = (usd) => (Number.isFinite(usd) ? `$${usd.toFixed(2)}` : null);
 
 /** Why a host cannot adopt, for a person who can do something about it. One sentence for each closed word; a test holds this to the word list. */
 export const CANNOT_ADOPT_WORDS = Object.freeze({
@@ -42,12 +41,12 @@ const notKnownLine = (state, view) => {
   return line("attention", "attention", t("Not known: the registry could not be read on the last look. It tries again on the next.", view));
 };
 
-/** What a canary would cost, in the row that offers it: a paid button says so where it is pressed. */
+/** What a canary reserves, in the row that offers it: a paid button says so where it is pressed. */
 function canaryCost(view) {
 	const triggers = data(view).triggers;
   if (triggers.length !== 1) return t("one paid job of the trigger you choose", view);
 	const [only] = triggers;
-  return `${t("one job of trigger", view)} ${only.index + 1}${only.capTokens !== null ? `, ${t("up to", view)} $${only.capTokens.toFixed(2)}` : `, ${t("up to its cap", view)}`}`;
+  return `${t("one job of trigger", view)} ${only.index + 1}${only.capTokens !== null ? `, ${t("up to", view)} ${tokensText(only.capTokens)} ${t("tokens", view)}` : `, ${t("up to its cap", view)}`}`;
 }
 
 function canaryForm(row, view, label = "Run a canary") {
@@ -78,7 +77,7 @@ function packageCells(row, view) {
 	const adopt = may && !row.adapter && row.newest ? actForm("package-adopt", { hidden: [["name", row.name], ["version", row.newest]], label: t("Adopt", view), icon: "done", locale: view.locale }) : null;
 	const undoToo = (action) => (may && row.desired?.op === "adopt" ? html`${action}${undoForm(row)}` : action);
 	const canaryRun = (label) => (may && !row.adapter && row.newest ? canaryForm(row, view, label) : null);
-	const spent = canary && money(canary.costUsd) ? `, ${money(canary.costUsd)}` : "";
+	const spent = canary && tokensText(canary.tokens) !== "-" ? `, ${tokensText(canary.tokens)} ${t("tokens", view)}` : "";
 	switch (row.state) {
 		case "current": return [versions(row.version), line("ok", "done", t("The newest version.", view)), null];
 		case "newer": return [versions(row.version, row.newest), row.adapter ? html`<span class="muted">${t("A reviewed subscription adapter. It moves with a pi-dispatch release.", view)}</span>` : html`${adoptedBefore}<span class="muted">${t("Not tried yet. A canary runs", view)} ${canaryCost(view)}${t(", with this version for that job only.", view)} ${npmLink(row)}</span>`, undoToo(canaryRun("Run a canary"))];
@@ -184,7 +183,7 @@ export function updatesHow(view) {
 	if (!v) return ui.card({ title: t("How it keeps up", view), body: unreadable(view) });
 	const looks = t(v.state === "not-looking" ? "off, until PI_UPDATES_LOOK=1 is set" : v.state === "unknown" ? "unknown" : v.state === "stale" ? "late: the last look" : "daily", view) + (v.state === "stale" ? ` ${ageText(nowOf(view) - v.at)} ${t("ago", view)}` : "");
 	const first = v.triggers[0];
-	const runs = first ? `${t("trigger", view)} ${first.index + 1}${first.id ? `, ${first.id}` : ""}${first.capTokens !== null ? `, ${t("up to its", view)} $${first.capTokens.toFixed(2)} ${t("cap", view)}` : `, ${t("up to its cap", view)}`}${v.triggers.length > 1 ? `, ${t("or", view)} ${v.triggers.length - 1} ${t("more", view)}` : ""}` : t("no cron trigger can", view);
+	const runs = first ? `${t("trigger", view)} ${first.index + 1}${first.id ? `, ${first.id}` : ""}${first.capTokens !== null ? `, ${t("up to", view)} ${tokensText(first.capTokens)} ${t("tokens", view)}` : `, ${t("up to its cap", view)}`}${v.triggers.length > 1 ? `, ${t("or", view)} ${v.triggers.length - 1} ${t("more", view)}` : ""}` : t("no cron trigger can", view);
 	return ui.card({ title: t("How it keeps up", view), body: ui.facts([[t("Looks for updates", view), t(looks, view)], [t("Last look", view), Number.isFinite(v.at) ? timeHtml(v.at) : t(v.state === "unknown" ? "unknown" : "never", view)], [t("A canary runs as", view), t(runs, view)], [t("Adopting", view), t("always a person, with a preview and Undo", view)]], { cols: 1 }) });
 }
 

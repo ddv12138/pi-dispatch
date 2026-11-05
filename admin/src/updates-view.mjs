@@ -44,7 +44,7 @@ export function canaryResultOf(records, name, version) {
 		// A missing report reads as did-not-load: the runner signs the word, so its absence is no evidence the candidate ran.
 		why: loaded ? (completed ? null : "run-ended") : "did-not-load",
 		outcome: typeof record.outcome === "string" ? record.outcome : null,
-		costUsd: Number.isFinite(record.tokens?.cost) ? record.tokens.cost : null,
+		tokens: Number.isFinite(record.tokens?.total) ? record.tokens.total : null,
 	};
 }
 
