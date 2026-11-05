@@ -20,7 +20,7 @@ import { WAIT_AFTER_MAX_DEFAULT_MS, WAIT_INTERVAL_FLOOR_MS, parseWaitProfiles } 
 import { imageRefProblem } from "./image-ref.mjs";
 import { jobSizeDefaults } from "./job-size.mjs";
 import { hostBudgetSettings } from "./host-budget.mjs";
-import { CONTAINER_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
+import { CONTAINER_ENV_NAMES, IMAGE_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
 import { modelIdProblem, modelListProblem, providerIdProblem } from "./model-ref.mjs";
 import { WORKER_NAME_RE } from "./worker-name.mjs";
 
@@ -217,6 +217,8 @@ function forwardEnvList(raw, egressArmed = false) {
 	if (runnerOwned.length > 0) {
 		throw configError(`PI_FORWARD_ENV must not forward ${runnerOwned.join(", ")} -- the job's runner sets ${runnerOwned.length === 1 ? "it" : "them"} inside the container for its own child processes, and a forwarded value would point their usage ledger at a directory nobody reads`);
 	}
+	const imageOwned = names.filter((n) => IMAGE_ENV_NAMES.has(n));
+	if (imageOwned.length > 0) throw configError(`PI_FORWARD_ENV must not forward ${imageOwned.join(", ")} -- the job image supplies its pi package path`);
 	const egress = egressArmed ? names.filter((n) => EGRESS_ENV_VARS.has(n)) : [];
 	if (egress.length > 0) {
 		throw configError(

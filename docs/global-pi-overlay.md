@@ -9,6 +9,11 @@ language runtime, system libraries); that is what [job-image.md](job-image.md) i
 
 ## Enable it
 
+When staging `pi-subagents@0.73.1`, pi-dispatch verifies the complete published package source and adapts its
+background peer aliases for pi 1.2.0 and 1.5.0. A different or modified source is refused with a reason.
+Existing staged trees are not changed: stage the package again to obtain the adaptation. Other pi versions
+keep the package's original alias requirements and require a fresh compatibility review.
+
 ```bash
 pi-dispatch import-pi          # stage the safe subset of ~/.pi/agent into ./pi-global
 # then in .env:
@@ -45,7 +50,11 @@ refines but never removes the one above:
   (pi is first-path-wins); names that don't collide all load.
   A trigger's own `run.skillsDir` sits **between** the two: repo beats injected beats global. "For this
   trigger" is a narrower statement than "for this deployment", so it refines the overlay, and the repo's
-  own committed skills refine both. Those skills are **copied** per job rather than mounted, which is what
+  own committed skills refine both.
+  Under all three sit the skills **baked into the image** (`/opt/pi-dispatch/skills`: `code-review`, `tdd`,
+  `implement-spec`), which every job gets whether or not a deployment has an overlay. They are the weakest tier
+  on purpose, so an operator who wants different bytes for one of them puts their own copy in the overlay and
+  wins the name; a staged package may not take one of those names either. Those skills are **copied** per job rather than mounted, which is what
   stops an edit to your skills directory from changing a job that is already running, and it means the
   feature adds no mount to any container.
 - **Persona**: the assembled prompt is `guardrails → outbox protocol → global persona → repo persona`. The

@@ -1455,6 +1455,12 @@ test("the runner's child-ledger names never reach a container from outside: a se
 	for (const name of names) assert.equal(name in smuggled, false, `${name}: the backstop deletes it after both loops`);
 });
 
+test("the image's pi-subagents SDK path cannot be replaced by forwarded values or secrets", { skip }, () => {
+	const name = "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT";
+	const env = mod.buildContainerEnv({ ...secretsBase, hostEnv: { ...HOST, [name]: "/outside" }, forwardEnv: [name], secrets: { [name]: "/other" } });
+	assert.equal(name in env, false);
+});
+
 test("PI_EXIT_AUTH names the stdin channel only when run-container hands a key over, and nothing else can set it (issue #545)", { skip }, () => {
 	assert.equal(mod.buildContainerEnv({ ...secretsBase, exitAuth: true }).PI_EXIT_AUTH, "stdin");
 	assert.equal("PI_EXIT_AUTH" in mod.buildContainerEnv({ ...secretsBase }), false, "absent by default, so a runner never blocks on a stdin no one writes");

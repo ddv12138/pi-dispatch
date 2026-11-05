@@ -29,13 +29,8 @@
 import { readFileSync } from "node:fs";
 import { configError } from "./outcome.mjs";
 import { subscriptionAccess } from "./subscription-credentials.mjs";
-export const DISCARDING_MODELS_STORE = Object.freeze({
-	async read() {
-		return undefined;
-	},
-	async write() {},
-	async delete() {},
-});
+import { DISCARDING_MODELS_STORE } from "./model-runtime-defaults.mjs";
+export { DISCARDING_MODELS_STORE, installDefaultModelsPath } from "./model-runtime-defaults.mjs";
 
 export function jobModelRuntimeOptions({ agentDir, modelsPath }) {
 	return { authPath: `${agentDir}/auth.json`, modelsPath, modelsStore: DISCARDING_MODELS_STORE, allowModelNetwork: false };

@@ -354,14 +354,14 @@ test("a plain node child gets no injection, starts normally and leaves no ledger
 });
 
 /** A Node script that runs pi as a LIBRARY (pi-subagents' background runner does): its own runtime, one call. */
-function libraryScript(w, { from = piIndexUrl, calls = 1 } = {}) {
+function libraryScript(w, { from = piIndexUrl, calls = 1, implicitModelsPath = false } = {}) {
 	const modelsPath = join(w.root, "models.json");
 	writeFileSync(modelsPath, JSON.stringify({ providers: { fake: { apiKey: "pi-dispatch-child-fake-key", baseUrl: "http://127.0.0.1:1", api: w.env.FAKE_API, models: [{ id: "m1", name: "m1", api: w.env.FAKE_API, reasoning: false, input: ["text"], cost: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 4096 }] } } }));
 	const script = join(w.root, "library-child.mjs");
 	writeFileSync(script, `import { appendFileSync } from "node:fs";
 const pi = await import(${JSON.stringify(from)});
 const compat = await import(${JSON.stringify(resolvePiAiCompat()[0].url)});
-const runtime = await pi.ModelRuntime.create({ authPath: ${JSON.stringify(join(w.agentDir, "auth.json"))}, modelsPath: ${JSON.stringify(modelsPath)}, allowModelNetwork: false });
+const runtime = await pi.ModelRuntime.create({ authPath: ${JSON.stringify(join(w.agentDir, "auth.json"))}, ${implicitModelsPath ? "" : `modelsPath: ${JSON.stringify(modelsPath)},`} allowModelNetwork: false });
 runtime.registerProvider("fake", {
 	api: ${JSON.stringify(w.env.FAKE_API)},
 	streamSimple(model) {
@@ -378,6 +378,35 @@ process.stdout.write(JSON.stringify({ stopReason }));
 `);
 	return script;
 }
+
+test("an SDK child gets the overlay default and remains metered and subject to model policy", { skip }, async () => {
+	const w = world();
+	const script = libraryScript(w, { implicitModelsPath: true });
+	const shim = join(w.root, "overlay-preload.mjs");
+	writeFileSync(shim, `const ledger = process.env.PI_DISPATCH_CHILD_LEDGER;\ndelete process.env.PI_DISPATCH_CHILD_LEDGER;\nconst { preload } = await import(${JSON.stringify(PRELOAD_URL)});\nprocess.env.PI_DISPATCH_CHILD_LEDGER = ledger;\nawait preload({ globalModelsPath: ${JSON.stringify(join(w.root, "models.json"))} });\n`);
+	const env = { ...w.env, NODE_OPTIONS: `--import=${pathToFileURL(shim).href}`, PI_ALLOWED_MODELS: "fake/m1" };
+	const result = await run([script], { env, cwd: w.root });
+	assert.equal(result.code, 0, result.stderr);
+	assert.deepEqual(JSON.parse(result.stdout), { stopReason: "stop" });
+	assert.equal(w.callCount(), 1);
+	assertMetered(w.ledger);
+	const denied = world();
+	const deniedScript = libraryScript(denied, { implicitModelsPath: true });
+	const deniedShim = join(denied.root, "overlay-preload.mjs");
+	writeFileSync(deniedShim, `const ledger = process.env.PI_DISPATCH_CHILD_LEDGER;\ndelete process.env.PI_DISPATCH_CHILD_LEDGER;\nconst { preload } = await import(${JSON.stringify(PRELOAD_URL)});\nprocess.env.PI_DISPATCH_CHILD_LEDGER = ledger;\nawait preload({ globalModelsPath: ${JSON.stringify(join(denied.root, "models.json"))} });\n`);
+	const blocked = await run([deniedScript], { env: { ...denied.env, NODE_OPTIONS: `--import=${pathToFileURL(deniedShim).href}`, PI_ALLOWED_MODELS: "fake/other" }, cwd: denied.root });
+	assert.equal(blocked.code, 0, blocked.stderr);
+	assert.equal(denied.callCount(), 0, blocked.stderr);
+	assert.notEqual(JSON.parse(blocked.stdout).stopReason, "stop");
+	const tight = priceFake(world({ api: "openai-completions" }), "openai-completions");
+	const tightScript = libraryScript(tight, { implicitModelsPath: true });
+	const tightShim = join(tight.root, "overlay-preload.mjs");
+	writeFileSync(tightShim, `const ledger = process.env.PI_DISPATCH_CHILD_LEDGER;\ndelete process.env.PI_DISPATCH_CHILD_LEDGER;\nconst { preload } = await import(${JSON.stringify(PRELOAD_URL)});\nprocess.env.PI_DISPATCH_CHILD_LEDGER = ledger;\nawait preload({ globalModelsPath: ${JSON.stringify(join(tight.root, "models.json"))} });\n`);
+	writeFileAtomic({ dir: tight.ledger, name: "SPENT", text: JSON.stringify(spentFile(null, 999_999)) });
+	const capped = await run([tightScript], { env: { ...tight.env, NODE_OPTIONS: `--import=${pathToFileURL(tightShim).href}`, PI_MAX_COST_MICROS: "1000000" }, cwd: tight.root });
+	assert.equal(tight.callCount(), 0, capped.stderr);
+	assert.notEqual(JSON.parse(capped.stdout).stopReason, "stop");
+});
 
 test("a Node child that runs pi as a library is metered through the preload's load hook (issue #500)", { skip }, async () => {
 	const w = world();

@@ -47,7 +47,7 @@ import { PROVIDER_STEERING_VARS } from "./provider-steering.mjs";
 import { normalizeWatchSources, normalizeWatchRule, watchDurationMs } from "./watch-contract.mjs";
 import { validateWatchDecision } from "./watch-decision.mjs";
 import { builtinModel } from "./model-catalog.mjs";
-import { CONTAINER_ENV_NAMES, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
+import { CONTAINER_ENV_NAMES, IMAGE_ENV_NAMES, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
 import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, versionProblem } from "./store-version.mjs";
 // The wait grammar's two shared halves (issue #230). `afterInstantMs` is imported rather than restated so
 // the loader and the pickup gate cannot disagree about what a legal instant is: a second spelling here is
@@ -286,7 +286,7 @@ export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * Every set is IMPORTED, never retyped, which is the rule `sandbox.test.mjs` keeps for the same reason: a
  * forge added to the table later must not need a second edit here to stay covered.
  */
-export const RESERVED_ENV_NAMES = new Set([...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS, ...RECEIVER_ONLY_VARS, ...WORKER_ONLY_SECRET_VARS, ...EGRESS_ENV_VARS, ...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...PROVIDER_STEERING_VARS]);
+export const RESERVED_ENV_NAMES = new Set([...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS, ...RECEIVER_ONLY_VARS, ...WORKER_ONLY_SECRET_VARS, ...EGRESS_ENV_VARS, ...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...IMAGE_ENV_NAMES, ...PROVIDER_STEERING_VARS]);
 
 function isNonEmptyString(value) {
 	return typeof value === "string" && value.trim() !== "";

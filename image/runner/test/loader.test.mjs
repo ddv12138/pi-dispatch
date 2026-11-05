@@ -184,6 +184,25 @@ test("guardrails reach the prompt", { skip }, async () => {
 	assert.ok(appended.includes(GUARDRAIL_SENTINEL), "the safety floor is missing from the prompt");
 });
 
+test("baked pi-subagents replaces a staged copy and yields to role subagents", { skip }, () => {
+	const paths = loaderModule.effectivePackagePaths({
+		packagePaths: ["/overlay/pi-subagents", "/overlay/other"],
+		includeBakedSubagents: true,
+		bakedSubagentsDir: "/app/node_modules/pi-subagents",
+		exists: (path) => path === "/app/node_modules/pi-subagents/package.json",
+		readPackage: (path) => ({ name: path.endsWith("other") ? "other" : "pi-subagents" }),
+	});
+	assert.deepEqual(paths, ["/app/node_modules/pi-subagents", "/overlay/other"]);
+	const rolePaths = loaderModule.effectivePackagePaths({
+		packagePaths: ["/overlay/pi-subagents"],
+		includeBakedSubagents: false,
+		bakedSubagentsDir: "/app/node_modules/pi-subagents",
+		exists: () => true,
+		readPackage: () => ({ name: "pi-subagents" }),
+	});
+	assert.deepEqual(rolePaths, []);
+});
+
 test("the project persona layers in alongside the guardrails", { skip }, async () => {
 	const { loader } = await load();
 	const appended = loader.getAppendSystemPrompt().join("\n\n");
@@ -1541,6 +1560,35 @@ test("enforceProtectedSkillPrecedence is a no-op with no packages, and never rea
 		loadDir: () => assert.fail("the protected roots must not be read when no package can collide"),
 	});
 	assert.deepEqual(result, base);
+});
+
+test("the baked skills tier: the path the runner reads is the path the image copies to, and the repo carries all three", { skip }, () => {
+	// Spelled on both sides of the container boundary (image/Dockerfile's COPY target and BAKED_SKILLS_DIR), so a
+	// change to one alone would leave the tier resolving to nothing: every job then runs WITHOUT these three skills
+	// and nothing logs it, which is the failure this whole tier exists to remove.
+	assert.equal(loaderModule.BAKED_SKILLS_DIR, "/opt/pi-dispatch/skills");
+	const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
+	assert.match(dockerfile, /^COPY image\/skills \/opt\/pi-dispatch\/skills$/m, "image/Dockerfile must copy image/skills onto BAKED_SKILLS_DIR");
+	for (const name of ["code-review", "tdd", "implement-spec"]) {
+		const body = readFileSync(new URL(`../../skills/${name}/SKILL.md`, import.meta.url), "utf8");
+		// pi registers a skill by the name in its frontmatter, so a mis-named file is a skill no flow can call.
+		assert.match(body, new RegExp(`^name: ${name}$`, "m"), `${name}/SKILL.md must declare its own name`);
+	}
+	// Upstream ships `implement-spec` with `disable-model-invocation: true`, which says only a PERSON may start it: an
+	// unattended job loads the skill and still cannot call it, then does the work without the procedure and exits 0.
+	assert.doesNotMatch(readFileSync(new URL("../../skills/implement-spec/SKILL.md", import.meta.url), "utf8"), /disable-model-invocation/, "implement-spec must stay model-invocable, or an unattended job can never call it");
+	// The other way these files can vanish from the image without a single test noticing: a .dockerignore pattern that
+	// keeps them out of the BUILD CONTEXT, which makes the COPY copy nothing. This reads the patterns literally and
+	// cannot see a wildcard that happens to match (one excluding `image/**` would still pass here) -- the Dockerfile's
+	// COPY failing on an empty directory is the backstop for the rest.
+	const ignored = readFileSync(new URL("../../../.dockerignore", import.meta.url), "utf8")
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "" && !line.startsWith("#"));
+	assert.ok(
+		!ignored.some((pattern) => pattern === "image" || pattern === "image/skills" || pattern.startsWith("image/skills/")),
+		".dockerignore must keep image/skills in the build context, or the image loses the three skills silently",
+	);
 });
 
 test("enforceProtectedSkillPrecedence leaves an already-correct load untouched", { skip }, () => {

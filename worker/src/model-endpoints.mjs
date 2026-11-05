@@ -29,7 +29,7 @@ import { isIPv4 } from "node:net";
 import { join, resolve } from "node:path";
 import { PROXY_LOCAL_ADDRESSES, isProxyLocalHost } from "./backends.mjs";
 import { configError, EGRESS_ENV_VARS, WORKER_ONLY_SECRET_VARS } from "./config.mjs";
-import { CONTAINER_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
+import { CONTAINER_ENV_NAMES, IMAGE_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
 import { FORGE_HOST_VARS, MINTED_TOKEN_VARS, RECEIVER_ONLY_VARS } from "./forges.mjs";
 import { PROVIDER_STEERING_VARS } from "./provider-steering.mjs";
 import { parseModelsJson } from "./models-json.mjs";
@@ -562,7 +562,7 @@ export function overlayApiKeyVariable(models, provider) {
 }
 
 const RESERVED_PROVIDER_ENV_NAMES = new Set([
-	...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS,
+	...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...IMAGE_ENV_NAMES, ...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS,
 	...RECEIVER_ONLY_VARS, ...EGRESS_ENV_VARS, ...WORKER_ONLY_SECRET_VARS, ...PROVIDER_STEERING_VARS,
 ]);
 

@@ -15,6 +15,7 @@ import {
 	zeroRatedVerdict,
 	loadModelEndpoints,
 	modelEndpointsPath,
+	overlayApiKeyVariable,
 	parseModelEndpoints,
 	readOverlayModels,
 	renderEndpointsInclude,
@@ -22,6 +23,10 @@ import {
 } from "../src/model-endpoints.mjs";
 import { PROXY_LOCAL_ADDRESSES } from "../src/backends.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
+
+test("a custom provider cannot use the image's pi-subagents SDK path as its API key", () => {
+	assert.equal(overlayApiKeyVariable({ providers: { custom: { apiKey: "$PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT" } } }, "custom"), null);
+});
 
 const tmp = () => tempDir("pi-endpoints-");
 const wrap = (endpoints, version = 1) => JSON.stringify({ version, endpoints });

@@ -49,7 +49,7 @@ import {
 import { restoreEnvProxyDispatcher } from "./src/env-proxy.mjs";
 import { readCgroupUsage } from "./src/cgroup-usage.mjs";
 import { createExitWriter, readExitKey, writeAllSync } from "./src/exit-line.mjs";
-import { createJobModelRuntime, loadPiAuthStorage } from "./src/model-runtime.mjs";
+import { createJobModelRuntime, installDefaultModelsPath, loadPiAuthStorage } from "./src/model-runtime.mjs";
 import { countPackageResources, findShadowedSkills, isFlowLoaded, owningRoot } from "./src/packages.mjs";
 import { isNestedRunner, runAsPiCli } from "./src/child-route.mjs";
 import { createChildWatch } from "./src/child-watch.mjs";
@@ -262,6 +262,7 @@ async function main() {
 	// overlay is mounted -- this is how a CUSTOM provider/model becomes resolvable.
 	const GLOBAL_MODELS = `${GLOBAL_PI_DIR}/models.json`;
 	const modelsPath = existsSync(GLOBAL_MODELS) ? GLOBAL_MODELS : `${agentDir}/models.json`;
+	if (modelsPath === GLOBAL_MODELS) installDefaultModelsPath(ModelRuntime, modelsPath);
 	// The credentials are auth.json as it is NOW, held in memory (issue #587's review, src/model-runtime.mjs has the why).
 	const modelRuntime = await createJobModelRuntime({ ModelRuntime, AuthStorage: await loadPiAuthStorage(), agentDir, modelsPath, subscriptionAuth: subscriptionEntries });
 	const subscriptionCredentials = subscriptionEntries.length ? installSubscriptionCredentials({ ModelRuntime, entries: subscriptionEntries }) : null;
@@ -446,6 +447,9 @@ async function main() {
 		settingsManager,
 		allowGlobalExtensions: cfg.allowGlobalExtensions,
 		packagePaths: cfg.packages,
+		// Role subagents own the same `subagent` tool name. In those jobs, the built-in
+		// pi-subagents extension is withheld; otherwise both register and the run refuses.
+		includeBakedSubagents: !roleSubagents,
 		log,
 		...(extensionFactories.length > 0 && { extensionFactories }),
 	});

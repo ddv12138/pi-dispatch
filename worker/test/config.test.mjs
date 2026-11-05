@@ -503,6 +503,10 @@ test("PI_FORWARD_ENV refuses the two names the runner sets for its child process
 	}
 });
 
+test("PI_FORWARD_ENV cannot replace the job image's pi-subagents SDK path", () => {
+	assert.throws(() => loadConfig({ PI_FORWARD_ENV: "PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT" }), /the job image supplies its pi package path/);
+});
+
 test("the allowed-model list is env only: no settings-overlay key can carry it (#502)", async () => {
 	const { KNOWN_KEYS } = await import("../src/runtime-settings.mjs");
 	for (const key of ["models", "allowedModels"]) assert.equal(KNOWN_KEYS.includes(key), false, `${key} must not be an overlay key, which dispatch_set writes`);

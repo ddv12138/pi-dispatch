@@ -60,6 +60,8 @@ import { basename, dirname, join, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread } from "node:worker_threads";
 import { CHILD_METER_PATH, injectChildMeter, ledgerDirProblem, nestedRunnerKind, PI_ENTRIES, PI_SUBCOMMANDS } from "./child-route.mjs";
+import { installDefaultModelsPath } from "./model-runtime-defaults.mjs";
+import { LAYOUT } from "./layout.mjs";
 
 export { CHILD_METER_PATH, injectChildMeter, PI_ENTRIES, PI_SUBCOMMANDS };
 
@@ -230,6 +232,7 @@ export async function preload({
 	isMain = isMainThread,
 	loadMeter = () => import(USAGE_METER_URL),
 	onExit = (listener) => process.on("exit", listener),
+	globalModelsPath = join(LAYOUT.global, "models.json"),
 } = {}) {
 	// env-internal PI_DISPATCH_CHILD_LEDGER: set by the runner in its own environment and inherited, never by the worker.
 	const dir = env.PI_DISPATCH_CHILD_LEDGER;
@@ -269,6 +272,12 @@ export async function preload({
 	const state = (global[HANDOFF] ??= { dir });
 	state.library = ({ ModelRuntime, compat, providers, meter }) => {
 		try {
+			try {
+				if (typeof ModelRuntime === "function" && existsSync(globalModelsPath)) installDefaultModelsPath(ModelRuntime, globalModelsPath);
+			} catch {
+				// Keep the meter, but name the failure: the preload must not terminate arbitrary Node children.
+				try { process.stderr.write("pi-dispatch: child model overlay default unavailable\n"); } catch {}
+			}
 			state.meter ??= meter;
 			state.name ??= meter.childLedgerName(pid);
 			let fallbackModels = null;

@@ -1,7 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { PackageStageError, UNDO_DIR, lockfileProblem, npmFailureKind, pruneStagedTrees, serviceNpmEnv, stagePackageTree, stagedStem, stagedTreeName, treeDigest, withStageLock, writeStageManifest, STAGED_TREE_KEEP_MS, STAGE_LOCK_STALE_MS } from "../src/package-stage.mjs";
 import { fakeNpm } from "./helpers/fake-npm.mjs";
@@ -20,6 +21,19 @@ const write = (path, value) => {
 /** npm, failing as told. */
 const npm = ({ fails = null, ...rest } = {}) => fakeNpm({ ...rest, fail: fails ? { "1.2.3": fails } : {} });
 const stage = ({ exec, packagesRoot }, entry = { name: "@acme/tool", version: "1.2.3", dir: "acme__tool" }) => stagePackageTree({ fs, exec, entry, packagesRoot, npmBin: "npm", platform: "linux" });
+function installedSubagents(root) {
+	const source = dirname(fileURLToPath(import.meta.resolve("pi-subagents")));
+	const manifest = JSON.parse(fs.readFileSync(join(source, "package.json"), "utf8"));
+	fs.cpSync(source, root, { recursive: true });
+	// npm may hoist dependencies of the test install; staging requires each inside the package.
+	for (const name of Object.keys(manifest.dependencies ?? {})) {
+		const target = join(root, "node_modules", name);
+		if (fs.existsSync(join(target, "package.json"))) continue;
+		const hoisted = join(dirname(source), name);
+		assert.ok(fs.existsSync(join(hoisted, "package.json")), `missing test dependency ${name}`);
+		fs.cpSync(hoisted, target, { recursive: true });
+	}
+}
 
 test("a stage lands in a directory of its own and touches nothing already staged", async () => {
 	const { packagesRoot } = overlay();
@@ -51,6 +65,45 @@ test("a package that fails an assertion is a determinate refusal, not an outage"
 	await assert.rejects(stage({ exec: writes(() => ({ version: "9.9.9", pi: {} })), packagesRoot }), (error) => error.kind === "policy" && /not the pinned/.test(error.message));
 	await assert.rejects(stage({ exec: writes(() => ({})), packagesRoot }), (error) => error.kind === "policy" && /not a pi package/.test(error.message));
 	await assert.rejects(stage({ exec: writes(() => ({ pi: { extensions: ["../../other"] } })), packagesRoot }), (error) => error.kind === "policy" && /leaves the package dir/.test(error.message));
+});
+
+test("a forged pi-subagents package refuses before a staged tree is published", async () => {
+	const { packagesRoot } = overlay();
+	const fake = fakeNpm({ materialize: (root, name, version) => write(join(root, "package.json"), JSON.stringify({ name, version, pi: { extensions: ["index.js"] } })) });
+	await assert.rejects(stage({ exec: fake.exec, packagesRoot }, { name: "pi-subagents", version: "0.73.1", dir: "pi-subagents" }), (error) => error.kind === "policy" && /reviewed npm package/.test(error.message));
+	assert.deepEqual(fs.readdirSync(packagesRoot), []);
+});
+
+test("the installed pi-subagents pin stages with its reviewed background compatibility adaptation", async () => {
+	const { packagesRoot } = overlay();
+	const source = dirname(fileURLToPath(import.meta.resolve("pi-subagents")));
+	const manifest = JSON.parse(fs.readFileSync(join(source, "package.json"), "utf8"));
+	assert.equal(manifest.name, "pi-subagents");
+	assert.equal(manifest.version, "0.73.1");
+	const originalAliases = fs.readFileSync(join(source, "src/runs/background/runner-aliases.js"), "utf8");
+	const fake = fakeNpm({ materialize: installedSubagents });
+	const { dir } = await stage({ exec: fake.exec, packagesRoot }, { name: manifest.name, version: manifest.version, dir: "pi-subagents" });
+	const staged = join(packagesRoot, dir);
+	const adapted = fs.readFileSync(join(staged, "src/runs/background/runner-aliases.js"), "utf8");
+	assert.notEqual(adapted, originalAliases);
+	assert.equal(fs.readFileSync(join(source, "src/runs/background/runner-aliases.js"), "utf8"), originalAliases, "the installed source was not modified");
+	const { resolveHostPeerAliases } = await import(pathToFileURL(join(staged, "src/runs/background/runner-aliases.js")).href);
+	const piRoot = dirname(dirname(fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"))));
+	assert.deepEqual(resolveHostPeerAliases(piRoot).missing, []);
+	assert.deepEqual(fs.readdirSync(packagesRoot).filter((name) => name.startsWith(".staging")), []);
+});
+
+test("pi-subagents staging classifies filesystem failures as infrastructure without exposing details", async () => {
+	for (const operation of ["lstatSync", "writeFileSync"]) {
+		const { packagesRoot } = overlay();
+		const fake = fakeNpm({ materialize: installedSubagents });
+		const injected = { ...fs, [operation]: (path, ...args) => {
+			if (operation === "lstatSync" && String(path).endsWith("node_modules/pi-subagents") || operation === "writeFileSync" && String(path).endsWith("runner-aliases.js")) throw Object.assign(new Error("private-host-path secret-value"), { code: operation === "lstatSync" ? "EIO" : "ENOSPC" });
+			return fs[operation](path, ...args);
+		} };
+		await assert.rejects(stagePackageTree({ fs: injected, exec: fake.exec, packagesRoot, npmBin: "npm", platform: "linux", entry: { name: "pi-subagents", version: "0.73.1", dir: "pi-subagents" } }), (error) => error.kind === "infra" && !/private-host-path|secret-value/.test(error.message));
+		assert.deepEqual(fs.readdirSync(packagesRoot), []);
+	}
 });
 
 test("--ignore-scripts and the other install flags hold on this path too", async () => {

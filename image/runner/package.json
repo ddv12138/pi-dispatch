@@ -13,6 +13,7 @@
     "@earendil-works/pi-agent-core": "1.5.0",
     "@earendil-works/pi-coding-agent": "1.5.0",
     "@earendil-works/pi-mcp": "1.5.0",
-    "@playwright/cli": "0.1.17"
+    "@playwright/cli": "0.1.17",
+    "pi-subagents": "0.73.1"
   }
 }

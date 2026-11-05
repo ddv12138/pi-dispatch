@@ -7,12 +7,14 @@
 #
 # What must STAY in the context is defined by the Dockerfiles' COPY lines:
 #   image/Dockerfile:    package.json, package-lock.json, image/runner, image/entrypoint.sh, guardrails/,
-#                        image/forge-mcp/{withhold.mjs,forge-mcp-github.sh,forge-mcp-gitlab.sh},
+#                        image/skills (the three baked skills), image/forge-mcp/{withhold.mjs,forge-mcp-github.sh,forge-mcp-gitlab.sh},
 #                        image/forge-mcp/gitlab/{package.json,package-lock.json} (the forge MCP servers)
+#   image/Dockerfile.java21: the same as image/Dockerfile (it is FROM the built image; nothing extra from the context)
 #   receiver/Dockerfile: package.json, package-lock.json, .npmrc, worker/{package.json,src},
 #                        receiver/{package.json,src}
 # image/ is therefore NOT excluded wholesale -- the pi-job build copies image/runner verbatim (its test/
-# included; excluding it would silently change that image's contents), and guardrails/ is the baked
+# included; excluding it would silently change that image's contents), image/skills is the three skills every
+# job gets, and guardrails/ is the baked
 # safety floor. Anything below is copied by no Dockerfile and never may be.
 
 # Installed deps -- each image runs its own `npm ci` from the lockfile; a host node_modules in the

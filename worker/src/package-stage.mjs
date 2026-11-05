@@ -13,6 +13,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { join, relative } from "node:path";
 import { PACKAGES_SUBDIR, RESOURCE_DIRS, STAGE_MANIFEST, stagedDirName } from "./packages.mjs";
+import { prepareSubagentsCompat, SUBAGENTS_PACKAGE, SubagentsSourceError } from "./subagents-compat.mjs";
 
 /**
  * What kind of failure this is, because `CONST-RETRY-INFRA-ONLY` depends on it. `not-found` and `policy` are determinate: the same
@@ -245,6 +246,16 @@ export async function preparePackage({ fs, exec, out = () => {}, entry, staging,
 		const { prepareCommunityAuthAdapter } = await import("./community-auth-patches.mjs");
 		const receipt = prepareCommunityAuthAdapter({ adapter: `${entry.name}@${entry.version}`, root: source, fs });
 		out(`  reviewed subscription adapter ${receipt.adapter}: ${receipt.digest}\n`);
+	}
+	if (`${entry.name}@${entry.version}` === SUBAGENTS_PACKAGE) {
+		try {
+			prepareSubagentsCompat({ root: source, fs });
+			out(`  reviewed pi-subagents compatibility adaptation applied\n`);
+		} catch (error) {
+			if (error instanceof SubagentsSourceError) throw new PackageStageError("policy", `pi-subagents compatibility adaptation refused: ${error.message}`);
+			// Filesystem errors can be transient and may contain host paths or other sensitive details.
+			throw new PackageStageError("infra", "pi-subagents compatibility adaptation could not read or write its staging tree");
+		}
 	}
 	return source;
 }

@@ -27,9 +27,18 @@ ENV DEBIAN_FRONTEND=noninteractive
 # screenshots that look plausible and contain no legible text. That would silently gut
 # REQ-FRONTEND-VISUAL-VERIFY -- the requirement full Chromium is here for -- while every
 # test still passed. fontconfig + a base font set + fc-cache is the fix.
+#
+# python3 is here because it is what a model reaches for to parse a forge CLI's JSON, and its absence
+# costs a failed tool call in EVERY job that tries before falling back to jq (measured on the 253
+# deployment, 2026-11-05: `python3: command not found` two tool calls into a run). It is not about any
+# one flow: `glab api | python3 -c '…'` is the shape a model writes unprompted, and a missing interpreter
+# reads to it as "this command is wrong", not as "this image lacks a tool" -- so it retries variations
+# instead of switching. The stdlib only, deliberately: no pip and no venv, because an installed package
+# is a dependency this image would carry invisibly, and pypi.org is not in the default egress allowlist.
 RUN apt-get update && apt-get install -y --no-install-recommends \
       git \
       jq \
+      python3 \
       ca-certificates \
       wget \
       fontconfig \
@@ -86,6 +95,9 @@ ENV GLAB_SEND_TELEMETRY=false
 # the container (image/runner/src/config.mjs, enforceTelemetryOff), so this line is for everything ELSE that
 # runs pi in this image: `pi-dispatch sandbox` re-opening a run with bash, verify-image.sh's `pi -p --help`.
 ENV PI_TELEMETRY=0
+# Staged pi-subagents resolves pi from its read-only overlay, outside /app's node_modules tree.
+# Give it the exact package this image runs instead of relying on Node's ancestor lookup.
+ENV PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT=/app/node_modules/@earendil-works/pi-coding-agent
 
 
 # tea, the Forgejo/Gitea CLI, for forgejo jobs (issue #61). Same reason glab is here: `gh` speaks the
@@ -130,6 +142,13 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY image/runner/package.json ./image/runner/
 RUN npm ci --omit=dev --no-audit --no-fund
+
+# The npm package's peer resolver expects three packages from a later pi release. The
+# reviewed compatibility adapter changes only that resolver for the pinned pi versions;
+# apply it while building the image so jobs never modify executable package bytes.
+COPY worker/src/subagents-compat.mjs /tmp/subagents-compat.mjs
+RUN node --input-type=module -e 'import { prepareSubagentsCompat } from "file:///tmp/subagents-compat.mjs"; import fs from "node:fs"; prepareSubagentsCompat({ root: "/app/node_modules/pi-subagents", fs });' \
+    && rm /tmp/subagents-compat.mjs
 
 # The pi and playwright-cli binaries come from that same install: one pin, one copy on disk,
 # no chance of the CLI and the imported library drifting to different versions.
@@ -264,6 +283,30 @@ RUN mkdir -p /sandbox /workspace && chown pi:pi /sandbox && chmod 0755 /sandbox 
 COPY guardrails/HARD_RULES.md /opt/pi-dispatch/HARD_RULES.md
 COPY guardrails/OUTBOX_PROTOCOL.md /opt/pi-dispatch/OUTBOX_PROTOCOL.md
 COPY guardrails/PORTFOLIO_PROTOCOL.md /opt/pi-dispatch/PORTFOLIO_PROTOCOL.md
+
+# The skills every job carries, baked rather than deployed (same trust class as the floor above: root-owned, and
+# `chmod -R a-w /opt/pi-dispatch` below takes their write bit, so an agent cannot rewrite the instructions it is
+# following).
+#
+# WHY THEY ARE HERE AT ALL. They existed only as files a person copied by hand into one server's overlay
+# (`runtime/pi-global/skills/`), which is the class of thing a redeploy loses: a machine rebuilt from this repository
+# had no `code-review`, `tdd` or `implement-spec`, and a flow whose prompt names them (a serviced repository's own
+# `spec-run` does, by name) then runs with skills that are silently missing. A missing skill is not an error in pi --
+# the model simply does the work without the procedure.
+#
+# WHY THEY ARE NOT IN THE OVERLAY'S PLACE (`/opt/pi-global/skills`), which is where the deployment that needed them put
+# them: that path is a MOUNT on every deployment that has an overlay, so anything baked there is hidden the moment a
+# real overlay is mounted -- and an overlay is where staged pi packages arrive too, so it is present in practice.
+# `image/runner/src/loader.mjs` therefore loads this directory as its OWN tier (`BAKED_SKILLS_DIR`), weakest of the
+# four: a serviced repo's `.pi/skills` still wins a name, then `run.skillsDir`, then the operator's overlay, then these.
+# The path is spelled in both files; CHANGE BOTH, IN THE SAME COMMIT.
+#
+# WHAT THEY ARE. Three skills vendored from the Matt Pocock skill pack, unmodified except for one line in
+# `implement-spec`: its `disable-model-invocation: true` is REMOVED, because upstream sets it so that only a person may
+# start the skill, and an unattended job would load it and still be unable to call it -- the silent no-op this project
+# exists to refuse. Nothing else differs, and no `.bak` sits beside it: a second markdown file in a skill directory is
+# something pi would read.
+COPY image/skills /opt/pi-dispatch/skills
 
 # The runner's own node: an EXEC-ONLY, root-owned copy (issue #545). The kernel marks a process that exec'd a binary its
 # user cannot read as not dumpable, and a non-dumpable process's /proc/<pid>/mem, environ and fd are refused to the

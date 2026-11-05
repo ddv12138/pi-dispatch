@@ -106,3 +106,6 @@ export const CONTAINER_ENV_NAMES = new Set([
  * buildContainerEnv after both loops as the backstop.
  */
 export const RUNNER_ENV_NAMES = new Set(["PI_DISPATCH_CHILD_LEDGER", "PI_DISPATCH_PRICE_TABLE", "PI_DISPATCH_RUNNER_PID"]);
+
+// The image supplies this path, including on custom images. A forwarded value or secret must not replace it.
+export const IMAGE_ENV_NAMES = new Set(["PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT"]);

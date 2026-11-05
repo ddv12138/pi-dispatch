@@ -607,7 +607,7 @@ the provider key and runs as the same user as the runner. Named gaps:
   counted;
 - a lot of output from a background child can push the job's exit line out of the part of the log the worker
   reads. The run then settles at the floor;
-- children do not see the overlay `models.json` (issue #503). So when the overlay's `modelOverrides` changes the
+- pi CLI children do not see the overlay `models.json` (issue #503). So when the overlay's `modelOverrides` changes the
   cost, compat or api of a builtin model, a child builds that model from the catalog, which differs from the
   pinned table, and every capped call the child makes on it is refused as `unboundable`;
 - `--no-mcp` turns off only pi's built-in MCP support. A child can still connect MCP servers when the job's code
@@ -615,9 +615,14 @@ the provider key and runs as the same user as the runner. Named gaps:
   calls pi's `main` itself, or a child the preload never reaches. Nothing detects this the way the process scan
   detects an unmetered child.
 
-**pi-subagents in a job.** It needs `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` set to pi's package folder, or it
-fails before any child runs. Its children do not see the overlay `models.json` (issue #503), so a model defined
-only there is not available to them.
+**pi-subagents in a job.** The standard job image sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` to its pi package
+folder; custom images need an equivalent correct path, or the package fails before any child runs. Staging the
+reviewed `pi-subagents@0.73.1` applies its background alias compatibility fix for pi 1.2.0 and 1.5.0; previously
+staged copies must be staged again. Its in-process sessions use the job's overlay `models.json` when they do not choose a
+models path themselves. SDK children also get that default when the child ledger and preload are active, Node
+supports `module.registerHooks`, and the preload recognizes their unbundled ModelRuntime. A failed default setup
+prints a diagnostic. Other package and pi versions need their own compatibility review, and pi CLI children still use
+their own model configuration.
 
 **Cache warming.** The runner turns pi's cache warming off for its own session. A child builds its own pi
 settings, and pi's default there is on (`streaming`), so a child's warm re-sends are paid. pi-dispatch does not

@@ -57,6 +57,27 @@ docker run --rm --entrypoint bash "$IMAGE_REF" -c 'exit 0' >/dev/null 2>&1 \
 	|| fail "bash is not present. \`pi-dispatch sandbox\` re-opens a run with --entrypoint bash and would fail at exit 127, and TMOUT (the sandbox idle logout) is a bash feature."
 ok "bash is present (an operator can re-open a finished run)"
 
+# A staged pi-subagents package lives outside /app and cannot resolve pi by walking its own parents.
+docker run --rm --network none --entrypoint node "$IMAGE_REF" -e 'const fs = require("node:fs"); const path = require("node:path"); const p = process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT; if (typeof p !== "string" || !path.isAbsolute(p) || JSON.parse(fs.readFileSync(`${p}/package.json`)).name !== "@earendil-works/pi-coding-agent") process.exit(1);' >/dev/null 2>&1 \
+	|| fail "pi-subagents cannot locate the image's pi package."
+ok "pi-subagents can locate the image's pi package"
+
+# A Java or other derived image can otherwise silently inherit a runner built before overlay propagation existed.
+docker run --rm --network none --entrypoint sh "$IMAGE_REF" -c 'grep -q installDefaultModelsPath /app/image/runner/run-job.mjs && grep -q installDefaultModelsPath /app/image/runner/src/child-preload.mjs && test -f /app/image/runner/src/model-runtime-defaults.mjs' >/dev/null 2>&1 \
+	|| fail "the job image does not contain the subagent model-overlay propagation. Rebuild the base image and then the derived image."
+ok "the runner carries subagent model-overlay propagation"
+
+# python3 with a stdlib that can parse JSON, for the reason image/Dockerfile gives: `glab api … | python3 -c
+# 'import json,sys…'` is the shape a model writes unprompted, and a missing interpreter reads to it as "my
+# command is wrong" rather than "this tool is absent", so it retries variations instead of falling back to jq.
+# The probe imports json rather than printing --version: a package that answers --version and cannot decode
+# the CLI's output is the failure this check exists for, and it is exactly how a trimmed python3-minimal
+# behaves. Offline, like everything here.
+docker run --rm --entrypoint python3 "$IMAGE_REF" -c 'import json,sys; sys.stdout.write(json.dumps(json.loads(sys.argv[1]))+"\n")' '{"a": [1]}' 2>/dev/null \
+	| grep -qxF '{"a": [1]}' \
+	|| fail "python3 is not present, or its stdlib cannot parse JSON. A model parses a forge CLI's output with \`python3 -c 'import json…'\` unprompted, and without it every such tool call fails before the agent falls back to jq."
+ok "python3 is present and its stdlib parses JSON (the one-liner a model writes for a forge CLI's output)"
+
 # The forge CLIs the job envelopes instruct the agent to use. Each is only meaningful for jobs on its own
 # forge, but a MISSING one fails the same silent way: the agent follows an envelope naming a command that
 # is not there, reports what went wrong in prose, and exits 0.

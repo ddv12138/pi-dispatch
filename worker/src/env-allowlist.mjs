@@ -651,6 +651,9 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 	delete env.PI_DISPATCH_RUNNER_PID;
 	// env-internal PI_DISPATCH_PRICE_TABLE: set by the runner inside the container, never by the worker, so removed here.
 	delete env.PI_DISPATCH_PRICE_TABLE;
+	// env-internal PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT: owned by the image, not supplied by the worker.
+	// Omitting this -e lets even a custom image supply its own SDK path.
+	delete env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT;
 
 	// Forge-backed jobs, and local cron jobs that opted in via run.github. Other local-folder jobs have
 	// no token (CONST-TOKEN-SCOPED-PER-JOB). The mint goes into EVERY one of its forge's variables because

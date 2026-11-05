@@ -1,6 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
+import { fileURLToPath } from "node:url";
 import { DefaultResourceLoader, SettingsManager, getAgentDir, loadSkillsFromDir } from "@earendil-works/pi-coding-agent";
 import { LAYOUT } from "./layout.mjs";
 import { extensionEntryName, isUnderAnyRoot, owningRoot, partitionAdminExtensions } from "./packages.mjs";
@@ -48,6 +49,47 @@ export const TRIGGER_SKILLS_DIR = `${LAYOUT.job}/trigger-skills`;
  */
 export const GLOBAL_PI_DIR = LAYOUT.global;
 
+/**
+ * The skills baked into the image (`image/skills/`, copied to this path by `image/Dockerfile`): `code-review`, `tdd`
+ * and `implement-spec`, the three an unattended flow names by name. Root-owned and made unwritable by the same
+ * `chmod -R a-w /opt/pi-dispatch` that protects the guardrails, so they sit in the floor's trust class.
+ *
+ * A TIER OF ITS OWN, and the weakest of the four. It cannot live at `${GLOBAL_PI_DIR}/skills`, which is where the
+ * deployment that needed it first put it: that path is a MOUNT whenever an overlay is configured (and an overlay is
+ * where staged pi packages arrive, so it is configured in practice), so anything baked there is hidden. Loading it
+ * separately instead means every deployment gets these three without a deploy step, while an operator who keeps their
+ * own copy in the overlay still wins the name.
+ *
+ * Spelled here AND as the COPY target in `image/Dockerfile`; this file is not on that host and that file is not in
+ * this container, so the duplication is forced. CHANGE BOTH, IN THE SAME COMMIT -- `TRIGGER_SKILLS_DIR` carries the
+ * same discipline and its own pin. A path that does not exist is skipped rather than passed on, because a missing
+ * skill path is a permanent "does not exist" diagnostic in pi and an older image legitimately has none.
+ */
+export const BAKED_SKILLS_DIR = "/opt/pi-dispatch/skills";
+
+/** The pinned pi-subagents package installed with pi, not staged from a deployment overlay. */
+export const BAKED_SUBAGENTS_DIR = dirname(fileURLToPath(import.meta.resolve("pi-subagents")));
+
+/** Bake the pinned extension into every ordinary session and discard a legacy staged copy. */
+export function effectivePackagePaths({
+	packagePaths = [],
+	includeBakedSubagents = false,
+	bakedSubagentsDir = BAKED_SUBAGENTS_DIR,
+	exists = existsSync,
+	readPackage = (path) => JSON.parse(readFileSync(join(path, "package.json"), "utf8")),
+} = {}) {
+	const staged = packagePaths.filter((path) => {
+		try {
+			// Loading a staged copy as well would register the same tools twice. The image's exact
+			// package pin is the sole owner of this extension name after it becomes built in.
+			return readPackage(path).name !== "pi-subagents";
+		} catch {
+			return true;
+		}
+	});
+	return [...(includeBakedSubagents && exists(join(bakedSubagentsDir, "package.json")) ? [bakedSubagentsDir] : []), ...staged];
+}
+
 export const WORKSPACE = LAYOUT.workspace;
 
 function readIfExists(path) {
@@ -72,8 +114,8 @@ function defaultLog(event, fields = {}) {
  *
  * The fact this exists for: `noExtensions: false` turned on native discovery, so a serviced repo's
  * /workspace/.pi/extensions now loads (project resources are gated on isProjectTrusted(), which is TRUE
- * here). This repo SHIPS such an extension -- `.pi/extensions/dispatch.ts`, a two-line re-export of the
- * admin extension -- and the operator services this very repo. Without this, a job container gets
+ * here). Older installations and serviced repositories can still carry the retired admin extension.
+ * Without this guard, a job container can get
  * LLM-callable `dispatch_run` (enqueues a PAID job), `dispatch_set` (moves the daily cap) and the
  * pause/resume/trigger writes, driven by a session whose prompt carries adversarial issue text. That is
  * the same recursion vector worker/src/import-pi.mjs refuses to copy into the overlay and
@@ -535,6 +577,7 @@ export function buildResourceLoader({
 	// which is exactly why it must not say the opposite of what a job does.
 	allowGlobalExtensions = true,
 	packagePaths = [],
+	includeBakedSubagents = false,
 	// Map<name, PromptTemplate> of the PROTECTED prompt templates (repo, then overlay), pre-loaded by
 	// buildLoadedResourceLoader because the promptsOverride seam below is synchronous and a loader
 	// cannot reload() inside its own override. `null` -- every job without staged packages -- makes
@@ -584,12 +627,14 @@ export function buildResourceLoader({
 	const portfolioProtocol = existsSync(portfolioPath) ? readIfExists(portfolioProtocolPath) : undefined;
 	// The roots a staged package may never take a skill name from. Both are listed unconditionally: a
 	// root that is not mounted contributes no skill to protect, so gating it would only add a way to
-	// forget one.
-	const protectedSkillRoots = [`${jobPiDir}/skills`, triggerSkillsDir, globalSkills];
+	// forget one. The baked tier joins them for the same reason a package must not shadow the floor the
+	// image ships: its skills are root-owned instructions, not the operator's third-party code.
+	const protectedSkillRoots = [`${jobPiDir}/skills`, triggerSkillsDir, globalSkills, BAKED_SKILLS_DIR];
 	// Roots the recursion guard can NAME in its log line, most specific FIRST: a staged package sits
 	// under the overlay, so an overlay-first list would report a package's extension as the operator's.
 	// The workspace is last because it is the catch-all -- a discovered repo extension is anywhere in it.
-	const extensionRoots = [...packagePaths, `${jobPiDir}/extensions`, globalExtensions, cwd];
+	const loadedPackagePaths = effectivePackagePaths({ packagePaths, includeBakedSubagents });
+	const extensionRoots = [...loadedPackagePaths, `${jobPiDir}/extensions`, globalExtensions, cwd];
 	// Read ONCE, here, so the layout and withheld lines are written once per job (issue #544).
 	const overlay = allowGlobalExtensions ? overlayExtensionEntries(globalExtensions, { log }) : { entries: [], skipped: [] };
 
@@ -609,8 +654,8 @@ export function buildResourceLoader({
 		// second path and take the mount out of force on a first-path-wins collision. See the docstring.
 		noSkills: true,
 		// Repo path FIRST so a repo skill overrides a global one of the same name (first-path-wins).
-		// then the trigger's INJECTED skills, then the deployment-wide overlay: repo > injected > overlay
-		// (REQ-GLOBAL-PI-OVERLAY, REQ-PER-TRIGGER-SKILLS). The middle tier is the narrower operator statement,
+		// then the trigger's INJECTED skills, then the deployment-wide overlay, then the image's baked three:
+		// repo > injected > overlay > baked (REQ-GLOBAL-PI-OVERLAY, REQ-PER-TRIGGER-SKILLS). The middle tier is the narrower operator statement,
 		// "for THIS trigger", so it refines the overlay and is refined by the repo -- the same most-specific-
 		// wins ordering the persona layers use. The order here is OURS: under noSkills, pi builds skillPaths as
 		// mergePaths(cliEnabledSkills, additionalSkillPaths), mergePaths preserves order, and loadSkills keeps
@@ -620,6 +665,10 @@ export function buildResourceLoader({
 			`${jobPiDir}/skills`,
 			...(existsSync(triggerSkillsDir) ? [triggerSkillsDir] : []),
 			...(existsSync(globalSkills) ? [globalSkills] : []),
+			// The image's baked three, LAST: the weakest tier, because it is the one nobody chose per job. A
+			// deployment that wants different bytes for one of these puts its own copy in the overlay, which sits
+			// above it here and wins the name -- `protectedSkillRoots` keeps a staged package from doing the same.
+			...(existsSync(BAKED_SKILLS_DIR) ? [BAKED_SKILLS_DIR] : []),
 		],
 		// Global overlay extensions load whenever the dir is present -- staging them IS the operator's
 		// decision, so a second arming step was friction rather than safety. PI_GLOBAL_ALLOW_EXTENSIONS=0
@@ -657,7 +706,7 @@ export function buildResourceLoader({
 		additionalExtensionPaths: [
 			`${jobPiDir}/extensions`,
 			...overlay.entries,
-			...packagePaths,
+			...loadedPackagePaths,
 		],
 		// The recursion guard (REQ-ADMIN-VIA-PI-EXTENSION Scope), run on the loaded extension set before
 		// the loader stores it -- so the admin surface a serviced repo can now ship through discovery
@@ -672,7 +721,7 @@ export function buildResourceLoader({
 		// repo's skill is gone by the time anyone can look.
 		skillsOverride: (loaded) =>
 			enforceProtectedSkillPrecedence(loaded, {
-				packageRoots: packagePaths,
+				packageRoots: loadedPackagePaths,
 				protectedRoots: protectedSkillRoots,
 			}),
 		// The operator's overlay prompt templates (issue #189, OQ-019 deferral (b)): the overlay's
@@ -690,7 +739,7 @@ export function buildResourceLoader({
 		// closure (DES-COMMAND-ENTRY-POINT).
 		promptsOverride: (loaded) =>
 			enforceProtectedPromptPrecedence(loaded, {
-				packageRoots: packagePaths,
+				packageRoots: loadedPackagePaths,
 				protectedPrompts,
 			}),
 		appendSystemPromptOverride: () => [guardrails, outboxProtocol, portfolioProtocol, globalPersona, projectPersona].filter(Boolean),

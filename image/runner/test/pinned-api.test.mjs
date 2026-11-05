@@ -1976,7 +1976,7 @@ test("-ne keeps explicit -e paths, \"--\" ends option parsing, and the subcomman
 });
 
 test("the child route's own files: the preload imports no pi module, the child meter imports only the child's own copies, and the library hook's line is at the pin (issue #500)", { skip }, () => {
-	// The preload runs in every Node child the job starts: Node built-ins only up front (usage-meter.mjs is imported
+	// The preload runs in every Node child the job starts: Node built-ins and tiny local helpers only up front (usage-meter.mjs is imported
 	// only in a pi process), and node:module only as a namespace (registerHooks is newer than some Node 22 releases, and
 	// a static named import of a missing export is a SyntaxError that would kill every Node child).
 	const preloadSrc = readFileSync(fileURLToPath(new URL("../src/child-preload.mjs", import.meta.url)), "utf8");
@@ -1987,7 +1987,13 @@ test("the child route's own files: the preload imports no pi module, the child m
 		'import { fileURLToPath, pathToFileURL } from "node:url";',
 		'import { isMainThread } from "node:worker_threads";',
 		'import { CHILD_METER_PATH, injectChildMeter, ledgerDirProblem, nestedRunnerKind, PI_ENTRIES, PI_SUBCOMMANDS } from "./child-route.mjs";',
+		'import { installDefaultModelsPath } from "./model-runtime-defaults.mjs";',
+		'import { LAYOUT } from "./layout.mjs";',
 	], "child-preload.mjs imports changed: no pi module, and node:module only as a namespace");
+	for (const file of ["model-runtime-defaults.mjs", "layout.mjs"]) {
+		const source = readFileSync(fileURLToPath(new URL(`../src/${file}`, import.meta.url)), "utf8");
+		assert.doesNotMatch(source, /^import\s/m, `${file} must not load other modules in every Node child`);
+	}
 	// The parent's children hook (issue #500 part E) runs in the job runner: no static pi import (it resolves pi's package
 	// root by specifier only to name the entry files), and not the preload, which runs on import.
 	const watchSrc = readFileSync(fileURLToPath(new URL("../src/child-watch.mjs", import.meta.url)), "utf8");
