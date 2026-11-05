@@ -105,16 +105,17 @@ test("the views say a project's size with its hostShare and minJobs, which the h
 });
 
 test("dispatch_limits lists a sized row with typed size fields", async () => {
-  deployment({ version: 3, limits: [{ scope: "project:shop", memory: "2g", cpus: 0.5, dayUsd: "5" }] });
+  deployment({ version: 3, limits: [{ scope: "project:shop", memory: "2g", cpus: 0.5, dayTokens: 5_000_000 }] });
   process.env.VALKEY_URL = "not-a-url"; // degrade synchronously
   const rows = JSON.parse((await toolByName("dispatch_limits").execute("id", {}, undefined, undefined, {})).content[0].text);
-  assert.equal(rows[0].summary, undefined);
+  assert.equal(rows[0].summary, undefined, "generated display prose stays outside the model read contract");
+  assert.deepEqual(rows[0].windows, [{ window: "day", capTokens: 5_000_000, counterTokens: null }], "a token window rides as its typed row");
   assert.equal(rows[0].cpus, 0.5);
   assert.equal(rows[0].memory, "2g");
 });
 
 test("the panel's edit dialogs carry a row's size, which they do not prompt for, through an edit of its counts", async () => {
-  const path = deployment({ version: 3, limits: [{ scope: "project:shop", concurrent: 2, memory: "2g", cpus: 0.5, hostShare: 40, minJobs: 1, dayUsd: "5" }] });
+  const path = deployment({ version: 3, limits: [{ scope: "project:shop", concurrent: 2, memory: "2g", cpus: 0.5, hostShare: 40, minJobs: 1, dayTokens: 5_000_000 }] });
   const answers = { scope: "", day: "", week: "", month: "", concurrent: "3" };
   const ui = {
     select: async (_title, labels) => labels[0],
@@ -123,7 +124,7 @@ test("the panel's edit dialogs carry a row's size, which they do not prompt for,
   };
   const said = [];
   await indexMod.editScopedLimitViaDialogs({ scopedLimitsPath: path, projectsFile: process.env.PI_PROJECTS_FILE }, ui, (m) => said.push(m));
-  assert.deepEqual(read(path).limits[0], { scope: "project:shop", concurrent: 3, dayUsd: "5.00", memory: "2g", cpus: 0.5, hostShare: 40, minJobs: 1 }, said.join("\n"));
+  assert.deepEqual(read(path).limits[0], { scope: "project:shop", concurrent: 3, dayTokens: 5_000_000, memory: "2g", cpus: 0.5, hostShare: 40, minJobs: 1 }, said.join("\n"));
   assert.equal(read(path).version, 3);
 });
 
