@@ -325,7 +325,6 @@ export function makeRunContainer({
 			fork: job.fork ?? null,
 			thinkingLevel: job.thinkingLevel ?? null,
 			maxTurns: job.maxTurns,
-			maxTokens: job.maxTokens, // optional per-job token budget (issue #25); undefined => runner meter only
 			maxTokens: job.maxTokens ?? null, // the per-job token budget: effectiveJobOf's min of trigger and deployment; null => none
 			jobId: name,
 			githubToken: token ?? undefined,
