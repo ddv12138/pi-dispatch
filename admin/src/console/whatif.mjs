@@ -101,7 +101,7 @@ export function whatIfAnswer({ model, flow, pricing, records, range = "30d", pro
   const result = whatIfFlow({ records: scoped, flow, target, pricing });
   if (result.class === "estimated") {
     const n = within(range).filter((r) => r?.flow === flow && !(r?.tokens == null && r?.exitCode == null && r?.budgetReserved === false)).length;
-    result.usd = result.perRun * n;
+    result.tokens = result.perRun * n;
     result.windowRuns = n;
   } else Object.assign(result, whatIfFlow({ records: within(range), flow, target, pricing }));
   return { model, flow, result };

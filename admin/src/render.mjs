@@ -240,7 +240,7 @@ function plainDuration(ms) {
 	return h < 24 ? `${h}h${m % 60}m` : `${Math.floor(h / 24)}d${h % 24}h`;
 }
 
-export function renderScopedLimits({ limits, scopedBudget, projects = null, dollars = null } = {}) {
+export function renderScopedLimits({ limits, scopedBudget, projects = null, windows = null } = {}) {
   if (limits?.invalid) return `Scoped limits: file invalid (${limits.invalid})`;
   const list = Array.isArray(limits?.limits) ? limits.limits : [];
   if (list.length === 0) return null; // nothing configured: say nothing (the mutex needs no line)
@@ -254,18 +254,18 @@ export function renderScopedLimits({ limits, scopedBudget, projects = null, doll
       bits.push(`${key} ${u}/${l[key]}`);
     }
     if (Number.isInteger(l.concurrent)) bits.push(`<=${l.concurrent} at once`);
-    // Version 2's dollar windows (issues #501, #502): the cap, and what is held or settled when the counter was read.
-    // Given `dollars` (the panel's DOLLAR WINDOWS rows, issue #507), the counter and its `(full)` verdict are that
+    // Version 2's token windows (issues #501, #502): the cap, and what is held or settled when the counter was read.
+    // Given `windows` (the panel's TOKEN WINDOWS rows, issue #507), the counter and its `(full)` verdict are that
     // section's row for this file index and window, so the two cannot disagree; a row missing there (the read failed)
     // keeps its cap with `-`. Without it (`/dispatch budget`), the counter is the scoped read's own `tokensUsed`.
-    const dollarRows = Array.isArray(dollars?.rows) ? dollars.rows : null;
+    const windowRows = Array.isArray(windows?.rows) ? windows.rows : null;
     for (const key of ["day", "week", "month"]) {
-      const cap = l[`${key}Usd`];
-      if (typeof cap !== "string") continue;
-      const d = dollarRows === null ? null : (dollarRows.find((r) => r?.index === i && r?.window === key) ?? null);
-      const counter = dollarRows === null ? used?.tokensUsed?.[key] : d?.counterTokens;
+      const cap = l[`${key}Tokens`];
+      if (!Number.isSafeInteger(cap)) continue;
+      const d = windowRows === null ? null : (windowRows.find((r) => r?.index === i && r?.window === key) ?? null);
+      const counter = windowRows === null ? used?.tokensUsed?.[key] : d?.counterTokens;
       const u = Number.isSafeInteger(counter) && counter >= 0 ? counter.toLocaleString("en-US") : "-";
-      bits.push(`${key} $${u}/$${cap}${d?.full === true ? " (full)" : ""}`);
+      bits.push(`${key} ${u}/${cap.toLocaleString("en-US")}${d?.full === true ? " (full)" : ""}`);
     }
     // Version 3's job size (issue #596): what each of the project's jobs gets. hostShare and minJobs are shown as not
     // enforced yet, so the line never reads as a bound the worker does not keep.
@@ -496,9 +496,10 @@ function schedulerLine(s) {
 
 /**
  * Render one `whatIfFlow` estimate (costs.mjs) as a compact block. The measured path shows the estimate
- * through `fmtAmount` with its coverage/excluded honesty and the rates version; the zero-knowledge path
- * shows the seeded band verbatim -- both bounds through `fmtAmount`'s seeded shape, plus the fold's own
- * note -- so an unmeasured flow can never read like a measurement.
+ * through `fmtAmount` with its coverage/excluded honesty, plus the target model's profile comparison
+ * (whatIfFlow's `contextShare`: how much of one context window a median run occupies, omitted when the
+ * target declares none); the zero-knowledge path shows the unmeasured note through `fmtAmount`'s honest
+ * em dash -- so an unmeasured flow can never read like a measurement.
  */
 export function renderWhatIf(result, { flow, target } = {}) {
   const head = `What-if ${flow} @ ${target}:`;
@@ -506,19 +507,16 @@ export function renderWhatIf(result, { flow, target } = {}) {
   // Issue #761: one more line only when records from a newer pi-dispatch were left out, so every other answer reads as before.
   const newer = newerSkippedSentence(result.newerSkipped);
   const tail = newer ? [`  ${newer}`] : [];
-  if (result.class === "seeded") {
-    return [
-      head,
-      `  no ledgered run to measure from — seeded band ${fmtAmount({ usd: result.low, class: "seeded" })} to ${fmtAmount({ usd: result.high, class: "seeded" })} · ${result.note}`,
-      ...tail,
-    ].join("\n");
+  if (result.class !== "estimated") {
+    return [head, `  ${fmtAmount(result)}${result.note ? ` (${result.note})` : ""}`, ...tail].join("\n");
   }
   const pct = Math.round((result.coverage ?? 0) * 100);
+  const share = typeof result.contextShare === "number" ? `  a median run fills ${Math.round(result.contextShare * 100)}% of the target model's context window` : null;
   return [
     head,
-    `  estimate ${fmtAmount({ usd: result.usd, class: "estimated" })} total · ${fmtAmount({ usd: result.perRun, class: "estimated" })} per run`,
+    `  estimate ${fmtAmount({ tokens: result.tokens, class: "estimated" })} total · ${fmtAmount({ tokens: result.perRun, class: "estimated" })} per run`,
     `  coverage ${pct}% of observed runs ledgered · excluded ${result.excluded} (no ledger)`,
-    `  rates pi-ai ${result.ratesVersion ?? "unknown"}`,
+    ...(share ? [share] : []),
     ...tail,
   ].join("\n");
 }

@@ -1832,9 +1832,9 @@ function renderPanelLines(snapshot: any, width: number, state: any, styler: any)
   ];
   // Scoped limits appear only when configured (the mutex needs no line) -- renderScopedLimits returns
   // null for the nothing-configured case, and a section with no lines would render an empty box.
-  // The dollar counters come from the DOLLAR WINDOWS rows (issue #507), as on the framed row: this snapshot's scoped
-  // read takes no dollar key, and a second read could disagree with the section beside it.
-  const scopedText = renderScopedLimits({ limits: snapshot.scopedLimits, scopedBudget: snapshot.scopedBudget, projects: snapshot.projects, dollars: snapshot.windows ?? null });
+  // The token counters come from the TOKEN WINDOWS rows (issue #507), as on the framed row: this snapshot's scoped
+  // read takes no token key, and a second read could disagree with the section beside it.
+  const scopedText = renderScopedLimits({ limits: snapshot.scopedLimits, scopedBudget: snapshot.scopedBudget, projects: snapshot.projects, windows: snapshot.windows ?? null });
   if (scopedText) sections.splice(2, 0, { title: "SCOPED LIMITS", lines: toLines(scopedText) });
   // Held jobs appear only when something is held, for the same reason: a section with no lines renders an
   // empty box, and a deployment that never waits must look exactly as it did before the feature existed.
