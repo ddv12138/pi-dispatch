@@ -14,7 +14,7 @@ import { html as escapedHtml } from "../html.mjs";
 const html = (strings, ...values) => escapedHtml(strings.map(s => s.replace(/[ \t]*\n[ \t]*/g, "\n")), ...values);
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { canAct, shownPath, runLink, moneyHtml, timeHtml } from "./common.mjs";
+import { canAct, shownPath, runLink, tokensHtml, timeHtml } from "./common.mjs";
 import { actForm, field, area, table, facts } from "./config-ui.mjs";
 const t = (message, v) => uiText(message, v?.locale);
 const card = (v, title, body) => body === undefined
@@ -83,7 +83,7 @@ export function triggerRuns(v) {
           >${d.historyIncomplete ? `${t("at least", v)} ` : ""}${d.count24h ??
           "unknown"}</b
         >
-        ${t("runs in the last 24 hours ·", v)} ${moneyHtml(d.cost24hTokens)} ${t("settled", v)}
+        ${t("runs in the last 24 hours ·", v)} ${tokensHtml(d.cost24hTokens)} ${t("settled", v)}
         spend${d.costIncomplete
           ? ` (${t("metered portion only; some runs have no cost", v)})`
           : ""}.

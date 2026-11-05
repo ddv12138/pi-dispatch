@@ -36,7 +36,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { STEER_MAX_MESSAGES, STEER_TOTAL_MAX_BYTES } from "@edgehero/pi-dispatch/steer-inbox";
-import { SEC, MIN, cell, ageText, timeHtml, msOf, usdText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capTokensOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
+import { SEC, MIN, cell, ageText, timeHtml, msOf, tokensText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capTokensOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
 
 const titled = (title, body, locale = "en") => ui.card({ title: uiText(title, locale), body });
 const t = (message, view) => uiText(message, view?.locale);
@@ -808,17 +808,17 @@ export const runCostPanel = withRun("Tokens", (r, view) => {
   const amount = runCost(r);
   const attempts = view.data?.recoveryRuns ?? [];
   const holds = Array.isArray(view.data?.runHolds) ? view.data.runHolds : [];
-  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a))}${a.tokensWindows ? `; ${usdText(a.tokensWindows.settledTokens)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${usdText(h.amountTokens)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole reservation after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job budgets: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capTokensOf(r) > 0 && amount ? ui.meter({ value: amount.tokens, max: capTokensOf(r), label: t("Job budget (tokens)", view) }) : null}${facts([
+  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a))}${a.tokensWindows ? `; ${tokensText(a.tokensWindows.settledTokens)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${tokensText(h.amountTokens)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole reservation after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job budgets: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capTokensOf(r) > 0 && amount ? ui.meter({ value: amount.tokens, max: capTokensOf(r), label: t("Job budget (tokens)", view) }) : null}${facts([
     ["Tokens", t(costText(amount), view)],
     ["Measurement", amount ? `${t(amount.class, view)}${amount.floor ? ` (${t("a floor: the meter could not see all of it", view)})` : ""}` : t("not metered", view)],
     ["Input tokens", tokens ? count(tokens.input) : "-"],
     ["Output tokens", tokens ? count(tokens.output) : "-"],
     ["Total tokens", tokens ? count(tokens.total) : "-"],
     ["Model calls", tokens ? cell(tokens.calls) : "-"],
-    ["Job budget", usdText(capTokensOf(r))],
-    ["Reserved", d ? usdText(d.reservedTokens) : t("no token window applied", view)],
-    ["Settled", d && d.settledTokens !== null && d.settledTokens !== undefined ? `${usdText(d.settledTokens)}: ${settlementText(d.basis, view.locale)}` : null],
-    ["Released at the end", d && Number.isFinite(d.reservedTokens) && Number.isFinite(d.settledTokens) ? usdText(Math.max(0, d.reservedTokens - d.settledTokens)) : null],
+    ["Job budget", tokensText(capTokensOf(r))],
+    ["Reserved", d ? tokensText(d.reservedTokens) : t("no token window applied", view)],
+    ["Settled", d && d.settledTokens !== null && d.settledTokens !== undefined ? `${tokensText(d.settledTokens)}: ${settlementText(d.basis, view.locale)}` : null],
+    ["Released at the end", d && Number.isFinite(d.reservedTokens) && Number.isFinite(d.settledTokens) ? tokensText(Math.max(0, d.reservedTokens - d.settledTokens)) : null],
     ["Token split", tokens && (tokens.rootTotal != null || tokens.otherTotal != null || tokens.childTotal != null) ? `${count(tokens.rootTotal ?? 0)} this run, ${count(tokens.otherTotal ?? 0)} other sessions, ${count(tokens.childTotal ?? 0)} subprocesses` : null],
     ["Unmetered children", tokens?.unmeteredChildren],
     ["Usage unreported", tokens?.usageUnreported],
@@ -955,7 +955,7 @@ export function runModels(view) {
   const r = recordOf(view), u = r?.usage;
   if (hiddenRecord(view) || !u) return html``;
   const models = Array.isArray(u.models) ? u.models : [];
-  return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${usdText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
+  return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${tokensText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
 }
 
 export function runTail(view) {

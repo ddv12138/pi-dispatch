@@ -187,7 +187,7 @@ export function parseExitTurns(text) {
  * literal in `image/runner/src/outcome.mjs`, which the shipped worker cannot import, so a test reads that
  * source and requires every member here to appear there verbatim.
  *
- * The last four are the policy stops of issues #501 (a per-job dollar cap) and #502 (an allowed-model list):
+ * The last four are the policy stops of issues #501 (a per-job token cap) and #502 (an allowed-model list):
  * `model-not-allowed` when the model guard stopped a call, and
  * `model-policy-unenforceable` when the runner refused, before any call, a policy
  * it could not enforce before a call. The two refusals are live from the first image that knows the variables.
@@ -270,13 +270,11 @@ export function approvalRecordOf(value) {
 }
 
 /**
- * The `why` off the decisive exit line (`decisiveExitLine`), or `null`: a member of `COST_CAP_WHYS`, and only when that
- * same line says `code: 2` and `reason: "cost-cap"`. Read off the same line as `parseExitReason`, and NEVER throws.
+ * The decisive exit line's `why`, or `null`: the runner's cost guard is gone (a891b5f0 kept the token cap as an
+ * in-run backstop with no per-line `why`), so this is a null stub kept for its callers' shape. It never throws.
  *
- * The line is container-written, so nothing it carries is trusted as text: a value outside the closed set is null,
- * never a string copied through. It feeds no classification. The processor reads it only in its exit-2 branch, and
- * only beside a `cost-cap` reason, where it becomes the record's `why`: the worst a forged line can do is name the
- * wrong rule of the three.
+ * The line is container-written, so nothing it carries is trusted as text: an entry outside the catalog's closed
+ * set would be null, never a string copied through. It feeds no classification, and no record's `why`.
  */
 /** Bounded refusal diagnostics: hashes and closed reasons only, never agent-authored names. */
 export const MODEL_ROLE_REFUSAL_REASONS = Object.freeze(["unknown-role", "model-not-allowed", "unknown-agent", "invalid-arguments", "aborted"]);
@@ -317,7 +315,7 @@ export function parseExitWhy(text) {
  * The decisive exit line's own `code` (`decisiveExitLine`), an integer, or `null` (issue #501, PR #542's review round
  * 3). Read off the same line as its siblings, and NEVER throws.
  *
- * Read for ONE purpose: the dollar settlement trusts an exit line's cost only when the line's `code` equals the
+ * Read for ONE purpose: the settlement trusts an exit line's facts only when the line's `code` equals the
  * container's real exit code (processor.mjs). The runner writes the code it exits with on both exit lines
  * (`image/runner/run-job.mjs`: `...capExitMessage(outcome)` then `return outcome.code` on the decided path, and
  * `code: capped.code` on the catch path; pinned by a test), so the runner's genuine line always matches, while a line a

@@ -52,7 +52,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { TIMELINE_ROWS, TIMELINE_WAIT_WORDS, TIMELINE_ZOOMS, timelineHtml, timelineLegend, timelineModel } from "../timeline.mjs";
-import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, moneyHtml, shownPath, timeHtml, usdText, workersOnline } from "./common.mjs";
+import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, tokensHtml, shownPath, timeHtml, tokensText, workersOnline } from "./common.mjs";
 
 const tr = (message, view) => uiText(message, view?.locale);
 
@@ -606,15 +606,15 @@ export const overviewActive = overviewPanel("Running", (s, view) => {
 // ---- Spend today -----------------------------------------------------------------------------------------------------------
 
 /**
- * A token count as a KPI's big number: `moneyHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
+ * A token count as a KPI's big number: `tokensHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
  * since the bundle draws every `span` inside a `.kpi` in its small label face (`.kpi span`).
  */
 function kpiMoney(tokens) {
-  return usdText(tokens) === "-" ? "-" : html`<data value="${String(tokens)}" title="${usdText(tokens)}">${fmtTokens(tokens)}</data>`;
+  return tokensText(tokens) === "-" ? "-" : html`<data value="${String(tokens)}" title="${tokensText(tokens)}">${fmtTokens(tokens)}</data>`;
 }
 
 /**
- * `used` as a percentage of `cap`, or null: rounded DOWN below the cap (`moneyHtml`'s spent rule), so a window one unit
+ * `used` as a percentage of `cap`, or null: rounded DOWN below the cap (`tokensHtml`'s spent rule), so a window one unit
  * short of its cap never reads as full; at or past it, as it is.
  */
 const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && cap > 0 ? (used >= cap ? (used / cap) * 100 : Math.floor((used / cap) * 100)) : null);
@@ -639,7 +639,7 @@ export const overviewSpend = overviewPanel("Spend today", (s, view) => {
   let chip = null;
   if (windowRead) {
     const pct = pctOf(day.counterTokens, day.capTokens);
-    kpi = ui.kpi(kpiMoney(day.counterTokens), html`of ${moneyHtml(day.capTokens)}`);
+    kpi = ui.kpi(kpiMoney(day.counterTokens), html`of ${tokensHtml(day.capTokens)}`);
     if (pct !== null) chip = ui.chip(`${count(Math.floor(pct))}% of cap`, { status: day.full ? "failed" : "ok" });
   } else if (settled !== null) kpi = ui.kpi(kpiMoney(settled), "settled today");
   else kpi = ui.kpi("-", "not known");

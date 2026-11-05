@@ -15,7 +15,7 @@ import { windowState } from "@edgehero/pi-dispatch/budget";
 import { fmtTokens } from "./panel.mjs";
 // Pure-to-pure, the same standing as the windowState import above: panel.mjs is the admin's other no-I/O
 // text module (asserted so by panel.test.mjs), and fmtAmount is THE single renderer of typed cost values,
-// so the what-if below routes every dollar through it rather than grow a second money formatter here.
+// so the what-if below routes every token figure through it rather than grow a second token formatter here.
 import { clip, columnsOf, fmtAmount, pad, scrubControls, sliceColumns } from "./panel.mjs";
 // The overlay keys, IMPORTED rather than retyped. This was a verbatim copy of the worker's array, in the
 // order the worker declares them, and the worker's side is pinned while this side was not -- so a key
@@ -422,7 +422,7 @@ function triggerLine(t) {
   // byte-identical.
   const shot = t?.disarmed ? "  [spent]" : t?.once === true ? "  [once]" : "";
   // The two spend narrowings no tool can set (issues #501 and #502): which models the trigger's jobs may call, and
-  // its per-job dollar cap. Listed in full: the models a job can reach are not a fact to summarize as a count.
+  // its per-job token cap. Listed in full: the models a job can reach are not a fact to summarize as a count.
   // Absent when unset, appended last, so every existing line is byte-identical.
   const pol = `${Array.isArray(t?.models) && t.models.length > 0 ? `  [models ${t.models.join(", ")}]` : ""}${t?.maxTokens ? `  [max ${t.maxTokens}]` : ""}${Array.isArray(t?.fallbackModels) && t.fallbackModels.length > 0 ? `  [fallbacks ${t.fallbackModels.join(", ")}]` : ""}`;
   // A portfolio trigger (issue #505) says so (issue #507): its jobs write the budget split every other project spends
@@ -539,7 +539,7 @@ export function renderSettingsView(settings) {
  * the envelope window, and the newest outcomes. NO reason text: this view goes to the PII-free channel, which reaches
  * model context, and a plan's reasons are agent text (`REQ-DELEGATED-ALLOCATION`); the panel's allocation view is the
  * one place they are drawn. `alloc` is `readAllocations`' result read WITHOUT reasons; `problem` says why there is no
- * envelope. Every amount is integer micro-dollars, shown in dollars.
+ * envelope. Every amount is an integer token count.
  */
 export function renderAllocations({ envelope = null, digest = null, problem = null, alloc = null, historyRows = 10 } = {}) {
   // `>= 0` as the panel's `usd` has it: `fmtTokens` throws on a negative, and a counter another writer set below 0
@@ -648,11 +648,11 @@ export function splitTotalTokens(state, envelopeTotalTokens) {
 
 /**
  * What the mismatch line adds when this host's file holds another total than the split shown (issue #507): the file's
- * total, said once, so the shown totals cannot be read as the file's. Empty when the two agree. `usdText` is the
+ * total, said once, so the shown totals cannot be read as the file's. Empty when the two agree. `tokensText` is the
  * file's total already in dollars, so each surface keeps its own formatting.
  */
-export function fileTotalText(usdText) {
-  return ` This host's file says total ${usdText}; the totals shown are the split's.`;
+export function fileTotalText(tokensText) {
+  return ` This host's file says total ${tokensText}; the totals shown are the split's.`;
 }
 
 /**

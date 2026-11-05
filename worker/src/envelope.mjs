@@ -29,7 +29,7 @@ import { isProjectId } from "./project-id.mjs";
 export const ENVELOPE_VERSION = 1;
 /** The windows an envelope may govern: the UTC day, the Monday week and the month of budget.mjs's keys. */
 export const ENVELOPE_WINDOWS = Object.freeze(["day", "week", "month"]);
-/** Each window's operator dollar field on a scoped-limits row (`project:<id>`). */
+/** Each window's operator token field on a scoped-limits row (`project:<id>`). */
 const WINDOW_TOKEN_FIELD = Object.freeze({ day: "dayTokens", week: "weekTokens", month: "monthTokens" });
 /** Each window's row fields that bound it: its own and every LONGER window's, since a week cap also caps each day in it. */
 const BOUNDING_FIELDS = Object.freeze({ day: ["dayTokens", "weekTokens", "monthTokens"], week: ["weekTokens", "monthTokens"], month: ["monthTokens"] });
@@ -73,7 +73,7 @@ function floorTokens(value, field, path) {
  * Throws `configError` on anything malformed. `path` is for messages only.
  *
  * `projects` (the parsed projects.json) and `limits` (the parsed scoped-limits.json) are what the floors are judged
- * against: a floor names a project or `_other`, and a project's operator dollar row for the envelope's window may not
+ * against: a floor names a project or `_other`, and a project's operator token row for the envelope's window may not
  * sit below its floor. `maxTokens` is the deployment's per-job token budget, or null: an envelope needs one, because
  * every governed job reserves its per-job cap against its project's allocation.
  */
@@ -109,7 +109,7 @@ export function parseEnvelope(text, path, { projects = [], limits = [], maxToken
 	}
 	const totalTokens = raw.totalTokens;
 
-	if (!isPlainObject(raw.floorsTokens)) throw configError(`envelope file: floorsTokens must be an object of project id to dollars: ${path}`);
+	if (!isPlainObject(raw.floorsTokens)) throw configError(`envelope file: floorsTokens must be an object of project id to token counts: ${path}`);
 	const known = new Set((Array.isArray(projects) ? projects : []).map((p) => p?.id));
 	const floors = {};
 	for (const id of Object.keys(raw.floorsTokens).sort()) {
@@ -146,11 +146,11 @@ function checkEntryId(id, known, field, path) {
 }
 
 /**
- * A project's operator dollar row (`project:<id>` in scoped-limits.json) for the envelope's window OR A LONGER ONE, below
+ * A project's operator token row (`project:<id>` in scoped-limits.json) for the envelope's window OR A LONGER ONE, below
  * the project's floor, refuses the file and names both. The allocation can only lower a project's cap
- * (`min(row, allocation)`), so such a floor promises money the operator's own row never lets the project spend: a
- * `weekUsd` of $1 bounds every day of that week, so a day floor of $50 under it is as empty as a day row of $1. A
- * shorter row (a `dayTokens` under a week envelope) is not compared: seven days of it may still reach the floor.
+ * (`min(row, allocation)`), so such a floor promises tokens the operator's own row never lets the project spend: a
+ * `weekTokens` of 1,000 bounds every day of that week, so a day floor of 50,000 under it is as empty as a day row of
+ * 1,000. A shorter row (a `dayTokens` under a week envelope) is not compared: seven days of it may still reach the floor.
  */
 function checkRowsAgainstFloors(floors, window, limits, path) {
 	for (const [id, floor] of Object.entries(floors)) {

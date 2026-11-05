@@ -30,7 +30,7 @@ import { AUDIT_ACTOR_ROLES, AUDIT_EXAMINE_MAX, AUDIT_OUTCOME_WORDS, AUDIT_Q_MAX,
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { msOf, timeHtml, usdText } from "./common.mjs";
+import { msOf, timeHtml, tokensText } from "./common.mjs";
 
 /** What a role that is not an operator reads in the log's panel (the belt; see the header). */
 export const AUDIT_OPERATORS_ONLY = "The audit log is shown to operators only.";
@@ -181,7 +181,7 @@ function rowOf({ entry, pos, state }, chain, used, locale = "en") {
   // inside its own width instead of taking the reason's.
   const action = html`<span class="code">${entry.action ?? "-"}</span>${typeof entry.kind === "string" ? html`<span class="reason au-kind">${entry.kind}</span>` : null}`;
   const target = typeof entry.target === "string" && entry.target !== "" ? html`<span class="code au-tgt">${entry.target}</span>` : none;
-  const said = [typeof entry.reason === "string" && entry.reason !== "" ? uiText(entry.reason, locale) : null, Number.isSafeInteger(entry.reserve) ? `${uiText("reserve", locale)} ${usdText(entry.reserve)}` : null].filter(Boolean).join(", ");
+  const said = [typeof entry.reason === "string" && entry.reason !== "" ? uiText(entry.reason, locale) : null, Number.isSafeInteger(entry.reserve) ? `${uiText("reserve", locale)} ${tokensText(entry.reserve)}` : null].filter(Boolean).join(", ");
   // The count after the reason in brackets, or alone as its own words (a bracket with nothing before it read as a stray
   // aside).
   const count = Number.isSafeInteger(entry.count) ? (said === "" ? countText(entry.kind, entry.count, true, locale) : ` (${countText(entry.kind, entry.count, false, locale)})`) : "";

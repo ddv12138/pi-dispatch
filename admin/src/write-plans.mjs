@@ -359,7 +359,7 @@ function unknownTriggerField(params, kind) {
 }
 
 /**
- * The trigger fields NO tool may set (issue #501, part 7): `run.maxTokens` (a trigger's per-job dollar cap),
+ * The trigger fields NO tool may set (issue #501, part 7): `run.maxTokens` (a trigger's per-job token cap),
  * `run.models` (the models its jobs may call), `run.fallbackModels` (their reviewed retry order) and
  * `run.mcp` (the MCP servers they connect, below). Each one decides
  * what a trigger's jobs can spend or reach, and removing or widening it is a widening, so it is written by hand in the

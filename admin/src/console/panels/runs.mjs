@@ -33,7 +33,7 @@ import { OUTCOME_KEYS, OUTCOME_KEY_WORDS, VENUE_LABEL, rowNumber } from "../../w
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { RUN_ID_RE, capTokensOf, costText, count, moneyHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
+import { RUN_ID_RE, capTokensOf, costText, count, tokensHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
 
 // ---- the sentences ---------------------------------------------------------------------------------------------------
 
@@ -240,7 +240,7 @@ export function runsSummary(view) {
   const m = runsSummaryModel(view);
   if (m === null) return ui.card({ body: html`<p class="muted">${uiText(RUNS_WINDOW_UNREAD, view.locale)}</p>` });
   const unpriced = m.unpriced > 0 ? html`<span class="muted">, ${count(m.unpriced)} ${m.unpriced === 1 ? uiText("run", view.locale) : uiText("runs", view.locale)} ${uiText("with no settled amount", view.locale)}</span>` : null;
-  const spend = html`<span><b>${moneyHtml(m.spentTokens)}</b> ${uiText("settled tokens", view.locale)}${unpriced}</span>`;
+  const spend = html`<span><b>${tokensHtml(m.spentTokens)}</b> ${uiText("settled tokens", view.locale)}${unpriced}</span>`;
   return ui.card({ body: html`${ui.sumStrip(m.strip.items, { label: uiText(m.strip.label, view.locale) })}<div class="runs-sum">${spend}${ui.seg(m.show, { label: uiText("Show", view.locale) })}</div><p class="card__sub">${uiText(m.notes, view.locale)}</p>` });
 }
 
@@ -339,7 +339,7 @@ function runCells(r, env, subscriptions) {
     valueCell(r?.model),
     Number.isFinite(r?.tokens?.total) ? count(r.tokens.total) : "-",
     costText(runCost(r, subscriptions)),
-    moneyHtml(capTokensOf(r)),
+    tokensHtml(capTokensOf(r)),
   ];
 }
 

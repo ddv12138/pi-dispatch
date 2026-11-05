@@ -55,7 +55,7 @@ export const NEWER_CACHE_MS = 30_000;
 /**
  * How long the run page's live loop reuses a park's pending-answer scan (`fleet.pendingAnswer`, a queue listing) and its
  * planner check (`fleet.parkedAnswerCheck`, a job read and the triggers file), per run id (review round 2: both ran on
- * every 2 s tick). The parked inbox's own refresh of the same scan (the snapshot's DOLLAR_RECORDS_TTL_MS), so the two
+ * every 2 s tick). The parked inbox's own refresh of the same scan (the snapshot's TOKEN_RECORDS_TTL_MS), so the two
  * screens see a newly queued answer within one window; the planner reads both afresh before anything is queued.
  */
 export const PARK_CHECK_CACHE_MS = 15_000;

@@ -128,7 +128,7 @@ export const DOCTOR_SECTIONS = Object.freeze([
  * one per store and kind of peer, so a run may publish `-2` and on). And for the upgrade path: `fleet.versions`, the
  * pi-dispatch versions the live workers report and this doctor's own against this host's worker row (a warning when
  * they differ or cannot all be read, an ok line when peers agree, absent on a single host that matches);
- * `tokens.window-reset`, a deployment dollar window counter below what this host's own runs settled into it (a
+ * `tokens.window-reset`, a deployment token window counter below what this host's own runs settled into it (a
  * warning, absent otherwise); and `state.older`,
  * a store an older release left in a shape this build no longer writes (a warning per finding, so a run may publish
  * `state.older-2` and on). Each is written at one site.

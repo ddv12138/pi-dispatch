@@ -2744,11 +2744,11 @@ function limitRow(l: any, used: any, inner: number, styler: any, projects: any =
   // The row's dollar windows (issue #507): a dollar-only row (a `model:` row, or a `project:` row with `weekTokens`) used to
   // show no cap at all here. Each is `window $spent+held/$cap`, after the concurrency, the order of the plain-text path
   // (`renderScopedLimits`). The CAP comes from the row's own field, so it stays on screen when the dollar read fails as a
-  // whole (the counter is then `-`, DOLLAR WINDOWS' convention for an unread counter). The counter and the verdict come
-  // from the DOLLAR WINDOWS row of the same window: amber and `full`, and the dot with it, when the next job at the
-  // deployment's per-job cap would be refused `dollar-cap`, which is what the dot means for a count window. A full
-  // window is drawn first among the row's dollar windows. The count windows still come before them, so on a row with
-  // both a long row can clip the dollar cell; DOLLAR WINDOWS above names the full window in that case.
+  // whole (the counter is then `-`, the Caps card's convention for an unread counter). The counter and the verdict come
+  // from the token window row of the same window: amber and `full`, and the dot with it, when the next job at the
+  // deployment's per-job cap would be refused `token-cap`, which is what the dot means for a count window. A full
+  // window is drawn first among the row's token windows. The count windows still come before them, so on a row with
+  // both a long row can clip the token cell; the Caps card names the full window in that case.
   const usdCells: { full: boolean; text: string }[] = [];
   for (const key of ["day", "week", "month"]) {
     let cap: number | null = null;

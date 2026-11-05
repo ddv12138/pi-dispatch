@@ -4064,7 +4064,7 @@ async function heldJobs(redis, { prune = true } = {}) {
  * read every tick (they are what the next job is admitted against), the records' side at most this often. The local
  * run index below (issue #641) is cached for the same span and the same reason.
  */
-const DOLLAR_RECORDS_TTL_MS = 15_000;
+const TOKEN_RECORDS_TTL_MS = 15_000;
 
 /**
  * A registry row as the snapshot carries it (issue #596 phase 3, issue #599 phase 3): the budget pair and what its jobs
@@ -4146,7 +4146,7 @@ export const SWITCH_SCAN_INCOMPLETE = "the scan for the deployment's queues did 
 /**
  * The wide window the fleet reader folds `parked` and `failures24h` from (issue #641): the newest runs of the local
  * index and the mirror, merged, at most this many. Wider than the TUI's 50 because a parked run waits for a person and
- * may be days old; bounded because it is read on the tick (at most once per `DOLLAR_RECORDS_TTL_MS`).
+ * may be days old; bounded because it is read on the tick (at most once per `TOKEN_RECORDS_TTL_MS`).
  */
 const WIDE_RUNS = 1000;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -4378,8 +4378,8 @@ export function createFleetReader(
     return killSwitchSet({ paused, plan, setFn: (args) => (args.url === paths.valkeyUrl ? poolSet(paused) : setQueuePaused(args)) });
   };
 
-  // The last records scan for the dollar windows, `{ at, sinceMs, records }`, reused for DOLLAR_RECORDS_TTL_MS.
-  let dollarRecords = null;
+  // The last records scan for the token windows, `{ at, sinceMs, records }`, reused for TOKEN_RECORDS_TTL_MS.
+  let tokenRecords = null;
   const dollarWindows = async (overlay, limits) => {
     const now = new Date(nowFn());
     const { caps, jobCapTokens, invalid } = deploymentTokenCaps(overlay ?? {}, budgetEnvFn() ?? {});
@@ -4391,14 +4391,14 @@ export function createFleetReader(
       (err) => ({ unreachable: err?.message ?? String(err) }),
     );
     const sinceMs = tokenWindowsSinceMs(specs, now);
-    if (!dollarRecords || dollarRecords.sinceMs !== sinceMs || now.getTime() - dollarRecords.at >= DOLLAR_RECORDS_TTL_MS) {
+    if (!tokenRecords || tokenRecords.sinceMs !== sinceMs || now.getTime() - tokenRecords.at >= TOKEN_RECORDS_TTL_MS) {
       const scanned = scanRecordsFn({ logsDir: paths.logsDir, sinceMs, nowMs: now.getTime() });
-      dollarRecords = { at: now.getTime(), sinceMs, records: Array.isArray(scanned) ? scanned : [] };
+      tokenRecords = { at: now.getTime(), sinceMs, records: Array.isArray(scanned) ? scanned : [] };
     }
-    return { rows: tokenWindowRows({ specs, counters, records: dollarRecords.records, jobCapTokens }), ...(invalid.length > 0 && { invalid }) };
+    return { rows: tokenWindowRows({ specs, counters, records: tokenRecords.records, jobCapTokens }), ...(invalid.length > 0 && { invalid }) };
   };
 
-  // Issue #641: this host's run records, indexed once per DOLLAR_RECORDS_TTL_MS (the dollar records' rhythm), for the
+  // Issue #641: this host's run records, indexed once per TOKEN_RECORDS_TTL_MS (the dollar records' rhythm), for the
   // wide window here and for `runsPage` below, so neither walks the logs directory on every tick or every request. Held
   // to the deployment's mirror cap (issue #761, `resolvePaths`), the built-in one for paths that name none.
   const localIndex = makeLocalRunIndex({ logsDir: paths.logsDir, fs, now: nowFn, ...(Number.isSafeInteger(paths.runMirrorMaxRuns) ? { max: paths.runMirrorMaxRuns } : {}) });
@@ -4412,11 +4412,11 @@ export function createFleetReader(
   // instant the cache runs out, and each would otherwise make its own mirror read of WIDE_RUNS runs. Cleared when it
   // settles, so a read that failed is retried by the next caller, never handed out again.
   let wideRead = null;
-  // The last pending-answer scan for the parked rows (issue #647), `{ at, key, got }`, reused for DOLLAR_RECORDS_TTL_MS.
+  // The last pending-answer scan for the parked rows (issue #647), `{ at, key, got }`, reused for TOKEN_RECORDS_TTL_MS.
   let parkedPending = null;
   const wideRuns = async () => {
     const at = nowFn();
-    if (wide && at >= wide.at && at - wide.at < DOLLAR_RECORDS_TTL_MS) return wide;
+    if (wide && at >= wide.at && at - wide.at < TOKEN_RECORDS_TTL_MS) return wide;
     if (wideRead !== null) return wideRead;
     const read = (async () => {
       const local = localIndex.records();
@@ -4444,12 +4444,12 @@ export function createFleetReader(
   };
 
   // The published doctor results (issue #712, `INT-DOCTOR-RESULTS-KEY`), `{ at, got }`, read at most once per
-  // DOLLAR_RECORDS_TTL_MS: a host publishes once a day, so a per-second MGET would be load for nothing. Read for the
+  // TOKEN_RECORDS_TTL_MS: a host publishes once a day, so a per-second MGET would be load for nothing. Read for the
   // index's hosts and the live ones, pruning only where this reader may write.
   let doctorRead = null;
   const doctorResults = async () => {
     const at = nowFn();
-    if (doctorRead && at >= doctorRead.at && at - doctorRead.at < DOLLAR_RECORDS_TTL_MS) return doctorRead.got;
+    if (doctorRead && at >= doctorRead.at && at - doctorRead.at < TOKEN_RECORDS_TTL_MS) return doctorRead.got;
     const got = await readDoctorResultsFn(redis, { names: lastHosts.map((h) => h?.name).filter((n) => typeof n === "string"), prune, now: nowFn, timeoutMs: FLEET_READ_TIMEOUT_MS }).catch((err) => ({ unreachable: err?.message ?? String(err) }));
     doctorRead = { at, got };
     return got;
@@ -4806,7 +4806,7 @@ export function createFleetReader(
       const dollars = await dollarWindows(settings?.overlay, limitRows).catch((err) => ({ rows: [], unreachable: err?.message ?? String(err) }));
 
       // Issue #641: the parked runs and the day's failures, off the wide window (cached, so at most one read of it per
-      // DOLLAR_RECORDS_TTL_MS). Caught as a unit: a failure here costs these two fields, never the snapshot.
+      // TOKEN_RECORDS_TTL_MS). Caught as a unit: a failure here costs these two fields, never the snapshot.
       const nowMs = nowFn();
       const fold = await wideRuns().then(
         (w) => ({
@@ -4843,13 +4843,13 @@ export function createFleetReader(
 
       // Issue #647: whether each waiting park is being answered now (a job queued or running on its target, which has no
       // record yet: `readPendingOnTargets`, the rule the Chat panel and the planner use). Read only while something is
-      // parked, and at most once per DOLLAR_RECORDS_TTL_MS for the same parks, so a park left for days does not list the
+      // parked, and at most once per TOKEN_RECORDS_TTL_MS for the same parks, so a park left for days does not list the
       // queues on every tick. `pendingScan` per row is the scan's answer for its target (`pendingScanFor`, the shape the
       // shared verdict `parkedVerdictOf` reads, so the inbox and the Chat panel decide alike), and `answering` the same
       // read as the job's id, false (the scan saw everything and found none), or null (unknown: partial or unreadable).
       if (fold.parked.length > 0) {
         const parkKey = fold.parked.map((p) => `${p.kind}\u0000${p.target}\u0000${p.jobId}`).join("\n");
-        if (!parkedPending || parkedPending.key !== parkKey || nowMs < parkedPending.at || nowMs - parkedPending.at >= DOLLAR_RECORDS_TTL_MS) {
+        if (!parkedPending || parkedPending.key !== parkKey || nowMs < parkedPending.at || nowMs - parkedPending.at >= TOKEN_RECORDS_TTL_MS) {
           const got = await readPendingOnTargets({ queues, targets: fold.parked.map((p) => ({ kind: p.kind, target: p.target, runId: typeof p.jobId === "string" ? p.jobId : null })), timeoutMs: FLEET_READ_TIMEOUT_MS });
           parkedPending = { at: nowMs, key: parkKey, got };
         }
@@ -4977,7 +4977,7 @@ export function createFleetReader(
      * The console navigation's Parked count (issue #737) on a page that reads no snapshot: how many unanswered parked
      * runs the wide window holds, by the snapshot's own rule (`readParkedRuns`, `unansweredOnly`) off the same cached
      * window (and the same read, when one is in flight), so it costs no read the snapshot did not already pay for
-     * within `DOLLAR_RECORDS_TTL_MS`. No chain counter is read (a count needs none), and no pending-answer scan. Null
+     * within `TOKEN_RECORDS_TTL_MS`. No chain counter is read (a count needs none), and no pending-answer scan. Null
      * when the window is partial or unreadable, as the snapshot's `parkedUnreachable` would say: a side that could not
      * be read is never offered as a whole count. Never throws.
      *
@@ -5993,7 +5993,7 @@ export async function readWaitingRow(redis, { q, jobId, state, now = () => Date.
  * reader passes the deployment's PI_RUN_MIRROR_MAX_RUNS), so the index costs what the fleet view already does; `capped`
  * says older ones exist on disk that no page reaches.
  */
-export function makeLocalRunIndex({ logsDir, fs = nodeFs, now = () => Date.now(), ttlMs = DOLLAR_RECORDS_TTL_MS, max = RUNS_INDEX_MAX } = {}) {
+export function makeLocalRunIndex({ logsDir, fs = nodeFs, now = () => Date.now(), ttlMs = TOKEN_RECORDS_TTL_MS, max = RUNS_INDEX_MAX } = {}) {
   let cache = null;
   return {
     records() {

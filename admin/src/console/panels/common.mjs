@@ -63,18 +63,18 @@ export function timeHtml(ms) {
 const msOf = (iso) => (typeof iso === "string" ? Date.parse(iso) : Number.NaN);
 
 /** A token count with thousands separators, `-` for a value that is not a count. */
-export function usdText(tokens) {
+export function tokensText(tokens) {
   return Number.isSafeInteger(tokens) && tokens >= 0 ? tokens.toLocaleString("en-US") : "-";
 }
 
 /**
  * A token count for a list row or an overview line (issue #710): `fmtTokens`' compact ladder, with the
- * exact amount (`usdText`, every digit the counter holds) in the `title`, so a reader sees a number
+ * exact amount (`tokensText`, every digit the counter holds) in the `title`, so a reader sees a number
  * they can read at a glance and can still hover for the one the ledger holds. `-` for a value that is
  * not a count.
  */
-export function moneyHtml(tokens) {
-  const full = usdText(tokens);
+export function tokensHtml(tokens) {
+  const full = tokensText(tokens);
   if (full === "-") return full;
   return html`<span title="${full}">${fmtTokens(tokens)}</span>`;
 }

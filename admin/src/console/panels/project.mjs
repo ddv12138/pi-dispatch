@@ -6,7 +6,7 @@ import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/bud
 import { bundleDeclaredText } from "../../read-model.mjs";
 import { OUTCOME_KEY_WORDS, reasonWords, shortSentence } from "../../words.mjs";
 import { newerSkippedSentence } from "../../newer-release.mjs";
-import { canAct, runLink, timeHtml, usdText, moneyHtml } from "./common.mjs";
+import { canAct, runLink, timeHtml, tokensText, tokensHtml } from "./common.mjs";
 import { actForm } from "./config-ui.mjs";
 import { uiText } from "../locale.mjs";
 
@@ -18,7 +18,7 @@ const card = (title, body, sub = null) => ui.card({ title, body, sub });
 const note = (s) => html`<p class="muted proj-note">${s}</p>`;
 const n = (value) => Number.isFinite(value) ? Math.round(value * 100) / 100 : 0;
 const sizeText = (mib) => Number.isFinite(mib) ? mib % 1024 === 0 ? `${mib / 1024} GiB` : `${mib} MiB` : "unknown";
-const money = (v) => usdText(v) === "-" ? "unknown" : moneyHtml(v);
+const money = (v) => tokensText(v) === "-" ? "unknown" : tokensHtml(v);
 const unknown = (v) => v === null || v === undefined ? "unknown" : v;
 const at = (value) => typeof value === "number" ? value : Date.parse(value ?? "");
 const linkRuns = (id) => `/runs?project=${encodeURIComponent(id)}`;

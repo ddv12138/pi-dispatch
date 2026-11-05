@@ -1,6 +1,6 @@
 /**
  * Delegated allocation, the pure half (issue #504; INT-PRIORITIES-PLAN-CONTRACT,
- * DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE). An agent writes PRIORITIES, never dollar numbers: a plan of integer
+ * DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE). An agent writes PRIORITIES, never allocation amounts: a plan of integer
  * weights per project (and per member repo), and this module does the arithmetic inside the operator's envelope
  * (envelope.mjs). Models reason poorly about a shared budget, and weights make every invariant checkable.
  *
@@ -33,7 +33,7 @@ export const PLAN_MAX_BYTES = 16 * 1024;
 export const DEFAULT_MAX_PLAN_DAYS = 14;
 /**
  * The envelope entry for every scope in no envelope project. `PROJECT_ID_RE` forbids `_`, so no real project can
- * collide with it, and its dollar keys (`scopeTokenKeyPrefix("project:_other")`) cannot either.
+ * collide with it, and its token keys (`scopeTokenKeyPrefix("project:_other")`) cannot either.
  */
 export const OTHER = "_other";
 /** The two writers that may send a plan: the operator's session tool and a flagged portfolio job (issue #505). */
@@ -399,14 +399,14 @@ function toNumbers(allocations, unallocated) {
 
 /**
  * The deterministic allocation (DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE). Returns
- * `{ allocations: { id: micros }, unallocated, clamped, target, repos }`, every amount a Number of micro-dollars:
+ * `{ allocations: { id: tokens }, unallocated, clamped, target, repos }`, every amount a Number of tokens:
  *
  *   1. FLOORS first: every entry gets its floor, and `R = total - sum(floors)` is what the weights split.
- *   2. The TARGET: `floor(R * w / W)` each, then the micro-dollars left one each by largest fractional remainder, ties
+ *   2. The TARGET: `floor(R * w / W)` each, then the tokens left one each by largest fractional remainder, ties
  *      by id ascending, so the target sums to the total exactly. All weights 0: floors only, and R stays UNALLOCATED,
- *      the money-safe direction.
+ *      the floor-safe direction.
  *   3. The STEP, only when `current` (the effective vector now applied) is given: `S = floor(total * maxStepPct / 100)`
- *      and `D` the largest move of any entry, the unallocated money counted as one more entry. `D <= S` applies the
+ *      and `D` the largest move of any entry, the unallocated tokens counted as one more entry. `D <= S` applies the
  *      target. Otherwise every entry moves the same fraction S/D of its way, and the blend is re-rounded by largest
  *      remainder (ties: the unallocated money first, then id ascending). Both ends of the blend keep every floor and
  *      the total, so the blend does; and a value within S of the start rounds to an integer within S of it, so no
@@ -482,7 +482,7 @@ export function allocate({ envelope, weights, current = null, repos = null }) {
 }
 
 /**
- * The step blend, re-rounded: each key moves `(t - b) * S / D` from `b`, floored, and the micro-dollars the floors
+ * The step blend, re-rounded: each key moves `(t - b) * S / D` from `b`, floored, and the tokens the floors
  * left (the fractional parts sum to a whole number, because the moves sum to 0) go one each to the largest fractional
  * parts, ties in `keys` order. Exact in BigInt.
  */

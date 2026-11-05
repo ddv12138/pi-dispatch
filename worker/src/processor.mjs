@@ -165,7 +165,7 @@ function egressProxyFix(venue, proxy = DEFAULT_EGRESS_PROXY) {
 
 /**
  * Did the runtime never hand control to the runner (issue #227)? ONE answer for the two places that ask it (issue
- * #501): the exit-code switch, which refunds such an exit as `container-never-started`, and the dollar settlement,
+ * #501): the exit-code switch, which refunds such an exit as `container-never-started`, and the token settlement,
  * which must not settle a container that never ran (the refund in the catch gives its reservation back instead).
  * Two answers could drift: a never-started exit settled at the floor AND refunded would give back twice, and one
  * neither settled nor refunded would leave its hold standing.
@@ -179,9 +179,9 @@ export function isNeverStartedExit({ code, aborted, detached }, neverStartedCode
 	return (neverStartedCodes ?? []).includes(code);
 }
 
-/** The key prefixes of a job's model dollar ledgers (`modelDollarRows`), to tell a model window's keys in a hold apart. */
-function modelPrefixesOf(modelDollars) {
-	return new Set((modelDollars ?? []).map((m) => m.keyPrefix));
+/** The key prefixes of a job's model token ledgers (`modelTokenRows`), to tell a model window's keys in a hold apart. */
+function modelPrefixesOf(modelTokens) {
+	return new Set((modelTokens ?? []).map((m) => m.keyPrefix));
 }
 
 /**
@@ -643,16 +643,16 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// null when no window is set. Null is the default and the off switch: nothing is reserved or settled and no
 		// `budget:tok:*` key is written, so a deployment with no token setting is byte-identical.
 		tokenCaps = null,
-		// Issues #501 part 5 and #502 part 6 (scoped-limits.json version 2): this job's repo or folder dollar windows,
+		// Issues #501 part 5 and #502 part 6 (scoped-limits.json version 2): this job's repo or folder token windows,
 		// `{ scope, keyPrefix, caps }` from `tokenCapsFor`, or null; and the model token windows it reserves in,
-		// `[{ ref, keyPrefix, caps }]` from `modelDollarRows` over its effective list (every model row when it has
+		// `[{ ref, keyPrefix, caps }]` from `modelTokenRows` over its effective list (every model row when it has
 		// none). Both default to nothing, so an unwired processor reserves exactly what it did before.
 		scopedTokens = null,
-		// Issue #499 part B: this job's project row's dollar windows, `{ scope, keyPrefix, caps }` from
-		// `projectDollarCapsFor` with the project resolved at pickup, or null. Reserved after the repo or folder row's.
+		// Issue #499 part B: this job's project row's token windows, `{ scope, keyPrefix, caps }` from
+		// `projectTokenCapsFor` with the project resolved at pickup, or null. Reserved after the repo or folder row's.
 		projectTokens = null,
 		modelTokens = [],
-		// Issue #504 part B (DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE): under an envelope, `governedDollars` narrows the
+		// Issue #504 part B (DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE): under an envelope, `governedTokens` narrows the
 		// ledgers above by the applied split, and these three ride beside them. `otherTokens` is `_other`'s ledger
 		// (`{ scope, keyPrefix, caps, capSource }`), for a job in no envelope project; `tokenCapSource` says, per window,
 		// whether the deployment cap came from the operator or the envelope total (`scopedTokens` and `projectTokens`
@@ -661,7 +661,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		otherTokens = null,
 		tokenCapSource = null,
 		envelopeMismatch = false,
-		// Issue #761: the endpoint tag of the Valkey this worker's dollar counters live in (`valkeyEndpointTag`), which the
+		// Issue #761: the endpoint tag of the Valkey this worker's token counters live in (`valkeyEndpointTag`), which the
 		// record's `tokensWindows.reservedIn` carries so doctor sums only the records of the counter it reads. Null (an unwired
 		// processor) writes no `reservedIn`, so such a record keeps the shape it had.
 		valkeyTag = null,
@@ -734,7 +734,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		return { outcome: "policy", reason, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false };
 	};
 	let transcriptPath = null;
-	// Whether this attempt's dollar hold has a durable record (`recordHold`): only then do its settle and release go through
+	// Whether this attempt's token hold has a durable record (`recordHold`): only then do its settle and release go through
 	// the ledger's compare-and-set. A hold that failed to be recorded is given back directly, since no one else can see it.
 	let holdRecorded = false;
 	// Issue #645: the job-count slot an armed run carries from an earlier attempt (`claimSlot` answered "carried"). It is
@@ -2203,7 +2203,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 
 		// Issue #645: THIS CONTAINER'S NUMBER in the run (`nextSeq`: attempt 1 is 1, its retry 2, a recovery's container the
-		// next), which addresses its dollar hold in the run's ledger and names its checkpoints' attempt. Before the dollar
+		// next), which addresses its token hold in the run's ledger and names its checkpoints' attempt. Before the token
 		// reserve, because a hold is recorded under it: without a number there is no record, and without a record there is
 		// no hold. A recovery then settles AT THE FLOOR every hold of the run's earlier containers still `held`: those
 		// containers are dead (the base-still-running gate above holds this job until none of the run's is alive here),
@@ -2265,12 +2265,12 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 					throw new InfraRetry("the token windows could not be reserved", { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
 				}
 				if (!reservation.allowed) {
-					// Refused, and every dollar key it touched given back, best effort per key (the departure from the job-count
-					// rule, see dollar-budget.mjs; a key that could not be is logged and the record says floor). Every held
+					// Refused, and every token key it touched given back, best effort per key (the departure from the job-count
+					// rule, see token-budget.mjs; a key that could not be is logged and the record says floor). Every held
 					// job-count slot goes back too, last first: a ledger that did not issue the refusal gives back, the rule
 					// the count ledgers follow among themselves above.
 					// WHOSE NUMBER bound (issue #504 part B): `allocation-cap` when the refusing window's cap came from the applied split
-					// or the envelope total (`capSource`), `dollar-cap` when it was the operator's own (a tie is the operator's). One
+					// or the envelope total (`capSource`), `token-cap` when it was the operator's own (a tie is the operator's). One
 					// ledger and one window refused, and the reservation names both.
 					const capSourceOf = (prefix) => (prefix === TOKEN_KEY_PREFIX ? tokenCapSource : [scopedTokens, projectTokens, otherTokens].find((l) => l?.keyPrefix === prefix)?.capSource);
 					const byAllocation = capSourceOf(reservation.ledger)?.[reservation.window] === "allocation";
@@ -2561,7 +2561,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				log("token_model_settled", { model: ref, key: part.keyPrefix, settledTokens: m.settledTokens, basis: mBasis });
 			}
 			// A fault that adjusted no key leaves the whole reservation in every window, which is a floor whatever the
-			// basis would have been, and the record says so. A partial one is logged (dollar_settle_error) and recorded
+			// basis would have been, and the record says so. A partial one is logged (token_settle_error) and recorded
 			// as computed: the keys that were adjusted hold the settled amount.
 			if (!ledgerMoved && modelPrefixes.size > 0) modelBasis = "floor";
 			const kept = applied === 0 && of > 0 && (settledTokens !== reservedTokens || !ledgerMoved);
@@ -3006,7 +3006,7 @@ const BUNDLE_FAILURES = {
 /**
  * Is this throw the "the runner never ran" retry (issue #227), whichever path raised it: a never-started exit
  * (`isNeverStartedExit`), a spawn fault, or a pre-start gate? The catch's refunds (the job-count slots and, issue
- * #501, the dollar hold) key off this one test.
+ * #501, the token hold) key off this one test.
  */
 function isNeverStartedRetry(e) {
 	return e instanceof InfraRetry && e.reason === "container-never-started";
@@ -3035,7 +3035,7 @@ export class InfraRetry extends Error {
 		this.provider = provider ?? null;
 		this.model = model ?? null;
 		this.budgetReserved = budgetReserved ?? null;
-		// Issue #501: the dollar reservation's outcome (`dollarsRecord`), or null when no dollar window applied. Set by
+		// Issue #501: the token reservation's outcome (`tokensWindows`), or null when no token window applied. Set by
 		// the processor on a throw after the reservation, so a retried attempt's record says what its window was charged.
 		this.tokensWindows = tokensWindows ?? null;
 		// Issue #596: what the container used, off its exit line, or null; set on a throw after a container ran.

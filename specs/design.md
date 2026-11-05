@@ -12717,7 +12717,7 @@ unknown data, invalid files and additional Forgejo/Azure groups retain readable 
   - **Tokens.** Lists and overview rows use `fmtTokens` (`panel.mjs`, a module with no import, so it adds no dependency to
     the bundle): a compact ladder at most six characters at any magnitude (`742`, `9.4k`, `123k`, `12.34M`, `4.12B`),
     truncating toward zero so a value never rounds up into the next rung's display class, with the exact whole count
-    beside it (`moneyHtml`, `panels/common.mjs`: the ladder in the cell, `usdText`'s every digit in the `title`; a
+    beside it (`tokensHtml`, `panels/common.mjs`: the ladder in the cell, `tokensText`'s every digit in the `title`; a
     value that is not a count degrades to `-`). The typed amount value `{ tokens, class, floor, coverage }` renders
     once through `fmtAmount` (`DES-TOKEN-FOLD-BY-SCAN`): `metered` a bare figure, `≥`-prefixed when only a floor is
     known; `estimated` `~`-prefixed with ` est.`; anything else the em dash, since the pricing classes died with

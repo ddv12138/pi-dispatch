@@ -4,7 +4,7 @@ import { parseDocument } from "./helpers/script-dom.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { PAGES, pagePanels, parsePageQuery, renderPage } from "../src/console/pages.mjs";
-import { BEAT_FRESH_MS, COUNT_WINDOWS_UTC_TEXT, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, moneyHtml, runCost, shownPath, timeHtml, usdText, utcText, workersOnline } from "../src/console/panels.mjs";
+import { BEAT_FRESH_MS, COUNT_WINDOWS_UTC_TEXT, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, tokensHtml, runCost, shownPath, timeHtml, tokensText, utcText, workersOnline } from "../src/console/panels.mjs";
 import { SHELL_PANEL_IDS } from "../src/console/shell.mjs";
 import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_OUTCOMES, CONSOLE_AUDIT_READ_MAX, makeConsoleAudit, readConsoleAudit, verifyConsoleAudit } from "@edgehero/pi-dispatch/console-audit";
@@ -46,9 +46,9 @@ test("formatting: ages, UTC instants, token counts and paths, never the host's z
   assert.equal(utcText(253402300799999), "9999-12-31 23:59 UTC");
   for (const out of [253402300800000, 8e15, 8.64e15, -1, -1e15]) assert.equal(utcText(out), "unknown", String(out));
   assert.equal(utcText(0), "1970-01-01 00:00 UTC");
-  assert.equal(usdText(2_000_000), "2,000,000");
-  assert.equal(usdText(-1), "-");
-  assert.equal(usdText(1.5), "-");
+  assert.equal(tokensText(2_000_000), "2,000,000");
+  assert.equal(tokensText(-1), "-");
+  assert.equal(tokensText(1.5), "-");
   assert.equal(shownPath("/srv/work/site"), ".../site");
   assert.equal(shownPath("C:\\work\\site"), ".../site");
   assert.equal(shownPath("github:acme/web"), "github:acme/web");
@@ -1817,11 +1817,11 @@ test("clock skew: a host whose beats look stale while BullMQ sees its worker is 
 });
 
 test("readable numbers: money in one fixed form with the exact amount on hover, jobs started against their caps, CPUs as cores (#710)", async () => {
-  assert.equal(String(moneyHtml(1_234_567)), '<span title="1,234,567">1.23M</span>');
-  assert.equal(String(moneyHtml(2_000_000)), '<span title="2,000,000">2.00M</span>');
-  assert.equal(String(moneyHtml(1_500_000_000)), '<span title="1,500,000,000">1.50B</span>', "one fixed form at every magnitude");
-  assert.equal(String(moneyHtml(999)), '<span title="999">999</span>', "below the ladder's first rung the count is exact");
-  for (const bad of [-1, 1.5, null, "3"]) assert.equal(String(moneyHtml(bad)), "-");
+  assert.equal(String(tokensHtml(1_234_567)), '<span title="1,234,567">1.23M</span>');
+  assert.equal(String(tokensHtml(2_000_000)), '<span title="2,000,000">2.00M</span>');
+  assert.equal(String(tokensHtml(1_500_000_000)), '<span title="1,500,000,000">1.50B</span>', "one fixed form at every magnitude");
+  assert.equal(String(tokensHtml(999)), '<span title="999">999</span>', "below the ladder's first rung the count is exact");
+  for (const bad of [-1, 1.5, null, "3"]) assert.equal(String(tokensHtml(bad)), "-");
   const snap = { ...snapshot(), windows: { rows: [{ ledger: "deployment", name: "deployment", window: "day", counterTokens: 1_234_567, capTokens: 50_000_000, full: false }, { ledger: "deployment", name: "deployment", window: "month", counterTokens: 99_999_000, capTokens: 100_000_000, full: false }] } };
   const panels = new Map(await overviewOf(snap));
   // Spend today: the day window's spent and held, rounded down, the exact amount on hover; the cap beside it.

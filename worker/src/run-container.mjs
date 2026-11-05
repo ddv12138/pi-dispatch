@@ -842,7 +842,7 @@ export function makeRunContainer({
 				// Issue #501 (PR #542's review, round 3): the decisive exit line's own `code` (decisiveExitLine), which the
 				// dollar settlement compares with the container's real exit code before it trusts that line's cost.
 				let exitLineCode = null;
-				// Issue #507: the cost guard's rule on a `cost-cap` line, already filtered by parseExitWhy to COST_CAP_WHYS.
+				// Issue #507: the cost guard's `why` died with it (parseExitWhy is a null stub now), so this stays null.
 				let exitWhy = null;
 				let providerFailure = null;
 				let modelRoles = null;
