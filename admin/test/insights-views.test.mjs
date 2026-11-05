@@ -111,7 +111,7 @@ test("tokens never enter the job soft hold band", async () => {
   const dir = tempDir("insights-token-cap-");
   const settingsFile = join(dir, "settings.json");
   writeFileSync(settingsFile, JSON.stringify({ dailyTokenCap: 100, softHoldPct: 50 }));
-  const view = await assembleBudgetView({ valkeyUrl: "redis://localhost:6379", settingsFile }, { redisFn: () => ({ get: async (key) => key.includes(":t:") ? "75" : "0", disconnect() {} }), nowMs: NOW });
+  const view = await assembleBudgetView({ valkeyUrl: "redis://localhost:6379", settingsFile }, { redisFn: () => ({ get: async (key) => (key.startsWith("budget:tok:") ? "75" : "0"), disconnect() {} }), nowMs: NOW });
   assert.equal(view.tokens.spent, 75);
   assert.equal(view.tokens.state, "ok");
 });
@@ -150,7 +150,7 @@ test("job and token counter keys use the supplied instant, even when the wall cl
   writeFileSync(settingsFile, "{}");
   const keys = [];
   await assembleBudgetView({ valkeyUrl: "redis://localhost:6379", settingsFile }, { nowMs: NOW, redisFn: () => ({ get: async (key) => (keys.push(key), "0"), disconnect() {} }) });
-  assert.deepEqual(keys.sort(), ["budget:2026-10-29", "budget:m:2026-10", "budget:t:2026-10-29", "budget:w:2026-10-26"].sort());
+  assert.deepEqual(keys.sort(), ["budget:2026-10-29", "budget:m:2026-10", "budget:tok:2026-10-29", "budget:w:2026-10-26"].sort());
 });
 
 test("Spend daily bars are settled facts, today's live holds are separate, and cost bins use metered runs only", () => {

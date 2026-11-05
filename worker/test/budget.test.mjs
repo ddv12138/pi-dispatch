@@ -2,13 +2,10 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { scopeKeyPrefix } from "../src/scoped-limits.mjs";
 import {
-	checkTokenCap,
 	dayKey,
 	monthKey,
-	recordTokenSpend,
 	releaseBudget,
 	reserveBudget,
-	tokenDayKey,
 	weekKey,
 	windowState,
 } from "../src/budget.mjs";
@@ -211,67 +208,6 @@ test("release only decrements active windows -- a disabled window is untouched",
 });
 
 // ---- daily token counter (issue #25): check-BEFORE (read) + record-AFTER (INCRBY) ----
-
-const TOKEN_DAY = "budget:t:2026-07-16";
-
-test("tokenDayKey is a distinct t: sub-namespace, never colliding with the job-count keys", () => {
-	assert.equal(tokenDayKey(NOW), TOKEN_DAY);
-	assert.notEqual(tokenDayKey(NOW), dayKey(NOW), "token ledger and job-count ledger are separate keys");
-});
-
-test("checkTokenCap: a null cap is disabled -- always allowed, reads nothing", async () => {
-	const redis = fakeRedis();
-	redis.store.set(TOKEN_DAY, 9_999_999);
-	const r = await checkTokenCap(redis, { cap: null, now: NOW });
-	assert.deepEqual(r, { allowed: true, reason: "ok", spent: 0, cap: null });
-});
-
-test("checkTokenCap: allowed below the cap, refused once accumulated spend reaches it", async () => {
-	const redis = fakeRedis();
-	assert.equal((await checkTokenCap(redis, { cap: 1000, now: NOW })).allowed, true, "no prior spend -> allowed");
-
-	redis.store.set(TOKEN_DAY, 999);
-	const below = await checkTokenCap(redis, { cap: 1000, now: NOW });
-	assert.deepEqual(below, { allowed: true, reason: "ok", spent: 999, cap: 1000 });
-
-	redis.store.set(TOKEN_DAY, 1000); // reached the cap
-	const at = await checkTokenCap(redis, { cap: 1000, now: NOW });
-	assert.equal(at.allowed, false, "at the cap the NEXT job is refused (>=)");
-	assert.equal(at.reason, "daily-token-cap");
-	assert.equal(at.spent, 1000);
-});
-
-test("checkTokenCap: read-only -- it never mutates the counter", async () => {
-	const redis = fakeRedis();
-	redis.store.set(TOKEN_DAY, 500);
-	await checkTokenCap(redis, { cap: 1000, now: NOW });
-	assert.equal(redis.store.get(TOKEN_DAY), 500, "a check must consume nothing (it precedes reserveBudget)");
-});
-
-test("checkTokenCap: a cap <= 0 fails closed (every job blocked), matching reserveBudget", async () => {
-	const redis = fakeRedis();
-	const r = await checkTokenCap(redis, { cap: 0, now: NOW });
-	assert.equal(r.allowed, false, "spent 0 >= cap 0 blocks -- a nonsensical cap is not 'unlimited'");
-});
-
-test("recordTokenSpend: INCRBY accumulates and sets the day TTL once, on first write", async () => {
-	const redis = fakeRedis();
-	assert.equal(await recordTokenSpend(redis, 400, { now: NOW }), 400);
-	assert.equal(redis.ttl.get(TOKEN_DAY), 2 * 24 * 60 * 60, "TTL set on the first write");
-
-	redis.ttl.delete(TOKEN_DAY); // prove the second write does NOT re-set it
-	assert.equal(await recordTokenSpend(redis, 600, { now: NOW }), 1000, "accumulates across jobs");
-	assert.equal(redis.ttl.has(TOKEN_DAY), false, "a busy day cannot push its own expiry forward");
-});
-
-test("check-before + record-after compose: prior jobs' recorded spend gates the next", async () => {
-	const redis = fakeRedis();
-	await recordTokenSpend(redis, 700, { now: NOW });
-	await recordTokenSpend(redis, 400, { now: NOW }); // 1100 recorded
-	const gate = await checkTokenCap(redis, { cap: 1000, now: NOW });
-	assert.equal(gate.allowed, false, "the lagging cap stops the NEXT job once the day is over budget");
-	assert.equal(gate.spent, 1100);
-});
 
 // ── the keyPrefix seam under a scoped prefix (issue #242) ───────────────────────────────────────────
 // The first PRODUCTION use of keyPrefix: the scoped budget windows reserve under

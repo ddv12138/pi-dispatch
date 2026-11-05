@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dayKey, weekKey, monthKey, tokenDayKey } from "@edgehero/pi-dispatch/budget";
+import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
+import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
 import { RUN_MIRROR_MAX_RUNS_DEFAULT } from "@edgehero/pi-dispatch/retention";
 import {
   resolvePaths,
@@ -371,7 +372,7 @@ test("readLogTail drops blank lines so newline-delimited runner events do not ea
 
 test("readBudget GETs the day/week/month/token keys and never mutates", async () => {
   const commands = [];
-  const values = { [dayKey()]: "7", [weekKey()]: "20", [monthKey()]: "55", [tokenDayKey()]: "123456" };
+  const values = { [dayKey()]: "7", [weekKey()]: "20", [monthKey()]: "55", [dayKey(new Date(), TOKEN_KEY_PREFIX)]: "123456" };
   const redis = {
     async get(key) {
       commands.push(["get", key]);
@@ -387,7 +388,7 @@ test("readBudget GETs the day/week/month/token keys and never mutates", async ()
   assert.deepEqual(new Set(ops.map((c) => c[0])), new Set(["get"]), "only GET -- never INCR/EXPIRE");
   assert.deepEqual(
     new Set(ops.map((c) => c[1])),
-    new Set([dayKey(), weekKey(), monthKey(), tokenDayKey()]),
+    new Set([dayKey(), weekKey(), monthKey(), dayKey(new Date(), TOKEN_KEY_PREFIX)]),
     "GETs the worker's own day/week/month/token keys",
   );
 });

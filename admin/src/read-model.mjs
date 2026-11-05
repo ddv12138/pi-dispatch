@@ -35,7 +35,7 @@ import { fmtTokens } from "./panel.mjs";
 import { modelRolesTelemetryOf, approvalRecordOf, BUNDLE_SKIPPED_REASONS, LIVE_SKIPPED_REASONS, OPENSHELL_RULE_HOSTS_MAX, RECOVER_SKIPPED_REASONS, STEER_SKIPPED_REASONS, recordedBundle, recordedCheckpoints, recordedOpenshell, recordedSecretsProfile, recordedRecovered, makeReadRecord, recordedRecoveryOf, sanitizeJobId, targetFor, queuedAtOf, UNREADABLE_RECORD } from "@edgehero/pi-dispatch/run-history";
 import { pendingFactsOf, QUEUED_STATES } from "@edgehero/pi-dispatch/chat-mode";
 import { FORGE_MCP_SERVER_NAME, MCP_SERVER_NAME_RE, mcpServerWhere, readOverlayMcp } from "@edgehero/pi-dispatch/mcp-config";
-import { dayKey, weekKey, monthKey, tokenDayKey } from "@edgehero/pi-dispatch/budget";
+import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
 import { parsePauseWindows, pauseWindowsText } from "@edgehero/pi-dispatch/pause-windows";
 // What this console says and skips for state a newer pi-dispatch wrote (issue #761): one leaf, shared with the console.
 import { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, newerSkippedSentence, pauseWindowsNewerRefusal, readableRecords, shownRecord } from "./newer-release.mjs";
@@ -858,11 +858,11 @@ export function overlayInvalidRefusal(reason, { newer = false } = {}) {
 }
 
 /**
- * The value a `dispatch_set` confirm shows for a key (issue #501), before or after the change. For a dollar key it is
+ * The value a `dispatch_set` confirm shows for a key (issue #501), before or after the change. For a token key it is
  * the EFFECTIVE value and where it comes from, because the overlay alone misleads exactly there: with
- * `PI_MAX_COST_USD=2` in the deployment's env and no overlay key, "maxTokens: (unset) -> 1000000" reads as adding a
- * cap while it raises one 500,000 times, and unsetting an overlay key falls back to the env cap, not to none. `env` is
- * `deploymentEnv()`, whose `panelEnv` reads the dollar variables from the deployment's `.env` (`PANEL_SERVICE_KEYS`).
+ * `PI_MAX_TOKENS=2000000` in the deployment's env and no overlay key, "maxTokens: (unset) -> 1000000" reads as adding a
+ * cap while it halves one, and unsetting an overlay key falls back to the env cap, not to none. `env` is
+ * `deploymentEnv()`, whose `panelEnv` reads the token variables from the deployment's `.env` (`PANEL_SERVICE_KEYS`).
  * Every other key keeps the overlay value, because its env default lives in the worker's config and a second copy of
  * those defaults here would drift.
  *
@@ -870,7 +870,7 @@ export function overlayInvalidRefusal(reason, { newer = false } = {}) {
  * reads the deployment's `.env` (the file the worker reads), so a variable absent from it really is unset. With no
  * pointer the panel sees only pi's own environment, which is not the worker's (a service unit, another shell), so an
  * absent variable proves nothing and the confirm says so rather than claiming "no cap". An empty value is unset, the
- * worker's own reading (`usdSetting`).
+ * worker's own reading.
  */
 export function settingShown(key, overlay, env, { deploymentDir = null } = {}) {
   const own = overlay?.[key];
@@ -883,14 +883,14 @@ export function settingShown(key, overlay, env, { deploymentDir = null } = {}) {
 }
 
 /**
- * Would this overlay, merged over the env the admin can see, break the dollar invariant (a window with no
+ * Would this overlay, merged over the env the admin can see, break the token invariant (a window with no
  * `maxTokens`, issue #501)? The worker checks it per job (`resolveSettings`) and refuses EVERY job as
  * `settings-overlay-invalid` when it breaks, so the operator should hear about it before a `set dailyTokenCap` or an
  * `unset maxTokens` lands.
  *
  * Returns null when the merged values hold, else `{ warning }`, and NEVER a refusal (PR #542's review, round 2). The
  * admin cannot see every source of the worker's env: a service unit's `Environment=` line or a `--env-setup` script
- * can set `PI_MAX_COST_USD` with nothing in `.env`, so a refusal here would block a valid change (and could make
+ * can set `PI_MAX_TOKENS` with nothing in `.env`, so a refusal here would block a valid change (and could make
  * `unset maxTokens` impossible). The worker still fails closed per job, and `doctor` on the worker reads its real
  * env. The warning names what was seen: the overlay plus the deployment's `.env` with a pointer, else this session's
  * environment, which is not the worker's. An empty env value is unset, the worker's own reading.
@@ -1457,8 +1457,8 @@ function allocKeys(prefix) {
 }
 
 /**
- * The per-job cost cap the worker judges the envelope against (its `envelopeCap`): the settings overlay's `maxTokens`
- * over `PI_MAX_COST_USD`, in integer micro-dollars, or null. `overlay` overrides the file's, for a write being judged.
+ * The per-job token cap the worker judges the envelope against (its `envelopeCap`): the settings overlay's `maxTokens`
+ * over `PI_MAX_TOKENS`, in integer tokens, or null. `overlay` overrides the file's, for a write being judged.
  */
 export function envelopeJobCap({ settingsFile, env = {}, overlay = undefined, fs = nodeFs }) {
   const ov = overlay !== undefined ? overlay : readSettingsView({ settingsFile, fs })?.overlay;
@@ -2491,7 +2491,8 @@ export function mapSchedulers(list, nowMs) {
 
 /**
  * Read the reserved counts for all three spend windows, plus the daily token counter, with plain,
- * side-effect-free GETs of the worker's own `dayKey()` / `weekKey()` / `monthKey()` / `tokenDayKey()` --
+ * side-effect-free GETs of the worker's own job-count keys (`dayKey()` / `weekKey()` / `monthKey()`) and
+ * the token day under `TOKEN_KEY_PREFIX` (`budget:tok:`) --
  * NEVER an INCR/EXPIRE, so observing the budget cannot consume a slot or a token. Returns
  * `{ day, week, month, tokensToday }` (the caps live in the settings overlay, resolved by the
  * renderer). `makeRedisClient` has no failFast option and would otherwise buffer the GETs forever while
@@ -2505,7 +2506,7 @@ export async function readBudget({ url, redisFn = makeRedisClient, timeoutMs = 2
   try {
     parseConnection(url, { failFast: true }); // throws on junk before any client exists
     redis = redisFn(url);
-    const settled = Promise.all([redis.get(dayKey(now)), redis.get(weekKey(now)), redis.get(monthKey(now)), redis.get(tokenDayKey(now))]).then(
+    const settled = Promise.all([redis.get(dayKey(now)), redis.get(weekKey(now)), redis.get(monthKey(now)), redis.get(dayKey(now, TOKEN_KEY_PREFIX))]).then(
       ([day, week, month, tokens]) => ({ day: Number(day ?? 0), week: Number(week ?? 0), month: Number(month ?? 0), tokensToday: Number(tokens ?? 0) }),
       (err) => ({ unreachable: err?.message ?? String(err) }),
     );
@@ -2881,7 +2882,7 @@ export function readTriggerEditor({ paths, env = {}, folder = null, deploymentDi
   const overlay = settings.overlay ?? {};
   // These are display facts only. In particular, this never resolves PI_BACKENDS or paid-start grants from .env.
   // Credentials are read only to decide endpoint presence and are projected to forge names before leaving here.
-  const metadata = deploymentDir === null ? null : deploymentServiceEnv({ env, dir: deploymentDir, keys: ["WEBHOOK_SECRET", "GITLAB_WEBHOOK_SECRET", "FORGEJO_WEBHOOK_SECRET", "AZURE_WEBHOOK_SECRET", "PI_MODEL", "PI_PROVIDER", "PI_MAX_TURNS", "PI_RUN_PROGRESS", "PI_JOB_IMAGE", "PI_ALLOWED_MODELS", "PI_MAX_COST_USD"], platform, fs, uid });
+  const metadata = deploymentDir === null ? null : deploymentServiceEnv({ env, dir: deploymentDir, keys: ["WEBHOOK_SECRET", "GITLAB_WEBHOOK_SECRET", "FORGEJO_WEBHOOK_SECRET", "AZURE_WEBHOOK_SECRET", "PI_MODEL", "PI_PROVIDER", "PI_MAX_TURNS", "PI_RUN_PROGRESS", "PI_JOB_IMAGE", "PI_ALLOWED_MODELS", "PI_MAX_TOKENS"], platform, fs, uid });
   const hints = metadata?.env ?? env;
   let backends = [];
   let venueProblem = null;
@@ -2909,7 +2910,7 @@ export function readTriggerEditor({ paths, env = {}, folder = null, deploymentDi
   let models = null;
   try { provider = overlay.provider ?? providerFrom(hints); model = overlay.model ?? modelFrom(hints); image = jobImageFrom(hints); models = allowedModelsFrom(hints); } catch {}
   return {
-    defaults: { flow: "required by the trigger", kind: "selected by the trigger kind", folder: "required for cron", task: "required for cron", repository: "forge routing", backend: backends[0]?.name ?? null, provider, model, image, models: models ?? "unrestricted", maxTokens: overlay.maxTokens ?? hints.PI_MAX_COST_USD ?? "no per-job dollar cap", packages: true, github: false, replicas: 1, resume: false, awaitInput: false, secrets: "none", secretsProfile: "none", secretBundle: "project default", waitFor: "none", skillsDir: "none", instructions: "none", command: "none", portfolio: false, fallbackModels: "none", excludeTools: "none", mcp: "none unless named by the trigger", gates: "none", gateTimeout: "no trigger expiry override", gateBudgetRaiseUsd: "none", maxTurns: overlay.maxTurns ?? parseNonNegInt(hints.PI_MAX_TURNS, 30), progress: false, statusComment: false, recover: false, steer: false },
+    defaults: { flow: "required by the trigger", kind: "selected by the trigger kind", folder: "required for cron", task: "required for cron", repository: "forge routing", backend: backends[0]?.name ?? null, provider, model, image, models: models ?? "unrestricted", maxTokens: overlay.maxTokens ?? hints.PI_MAX_TOKENS ?? "no per-job token cap", packages: true, github: false, replicas: 1, resume: false, awaitInput: false, secrets: "none", secretsProfile: "none", secretBundle: "project default", waitFor: "none", skillsDir: "none", instructions: "none", command: "none", portfolio: false, fallbackModels: "none", excludeTools: "none", mcp: "none unless named by the trigger", gates: "none", gateTimeout: "no trigger expiry override", gateBudgetRaiseUsd: "none", maxTurns: overlay.maxTurns ?? parseNonNegInt(hints.PI_MAX_TURNS, 30), progress: false, statusComment: false, recover: false, steer: false },
     ...readTriggerEgress({ deploymentDir, env, fs }),
     backends, venueProblem, forges, settingsProblem: settings.invalid ?? null, progressAvailable: hints.PI_RUN_PROGRESS !== "0", forgeProblem: metadata && (metadata.unreadable || metadata.untrusted || metadata.hazardSkipped.length || metadata.unread.length) ? "The deployment metadata could not be read completely; configured webhook endpoints may be missing." : null,
     flows: tiers.flatMap((t) => (t.skills ?? []).filter((s) => !s.isSub).map((s) => ({ name: s.name, tier: t.tier }))),
@@ -4686,7 +4687,7 @@ export function createFleetReader(
         redis.get(dayKey()),
         redis.get(weekKey()),
         redis.get(monthKey()),
-        redis.get(tokenDayKey()), // issue #25 daily token spend (budget:t:YYYY-MM-DD)
+        redis.get(dayKey(new Date(nowFn()), TOKEN_KEY_PREFIX)), // the token windows' day counter (budget:tok:YYYY-MM-DD)
         // The shared queue's failure is UNCAUGHT (the panel must not draw a scheduler list it could not read), a host
         // queue's is caught: one unreachable host degrades one host's triggers, never the view.
         Promise.all(queues.map((q, i) => (i === 0 ? q.getJobSchedulers(0, -1, true) : q.getJobSchedulers(0, -1, true).catch(() => [])))),

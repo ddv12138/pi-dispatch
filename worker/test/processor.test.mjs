@@ -16,7 +16,7 @@ const asLedgers = (c) => (c ? [{ scope: c.scope, keyPrefix: scopeKeyPrefix(c.sco
 
 /** A fake redis whose counter we can preset, to force over/under budget. `decrCalls` spies
  *  releaseBudget, so tests assert the slot is (or is not) given back and never double-released.
- *  `tokenSpent` presets the daily TOKEN counter that `checkTokenCap`'s read-only GET consults. */
+ *  `tokenSpent` presets the daily TOKEN counter the token windows' reserve read consults. */
 function fakeRedis(start = 0, tokenSpent = 0) {
 	let n = start;
 	const redis = { decrCalls: 0, incrCalls: 0, ops: [], store: new Map(Object.entries(tokenSpent ? { "budget:tok:2026-07-16": tokenSpent } : {})) };
