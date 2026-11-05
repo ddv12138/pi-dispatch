@@ -26,7 +26,7 @@ async function fixture(t, { minCount = 2, maxPerDay = 4 } = {}) {
 	const gitEnv = { ...process.env, GIT_AUTHOR_NAME: "Test", GIT_COMMITTER_NAME: "Test", GIT_AUTHOR_EMAIL: "edgehero@users.noreply.github.com", GIT_COMMITTER_EMAIL: "edgehero@users.noreply.github.com" };
 	execFileSync("git", ["init", "-q", folder]); execFileSync("git", ["-C", folder, "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "test fixture"], { env: gitEnv });
 	const triggersPath = join(root, "triggers.json");
-	const authored = { watchSources: { prod: { verify: "hmac-sha256", secretEnv: "WATCH_SECRET" } }, triggers: [{ on: { type: "watch", id: "errors", source: "prod", fingerprint: ["service"], minCount, window: "1s", cooldown: "1m", maxPerDay }, run: { kind: "local", folder, flow: "triage", task: "Investigate", maxTokens: "0.40" } }] };
+	const authored = { watchSources: { prod: { verify: "hmac-sha256", secretEnv: "WATCH_SECRET" } }, triggers: [{ on: { type: "watch", id: "errors", source: "prod", fingerprint: ["service"], minCount, window: "1s", cooldown: "1m", maxPerDay }, run: { kind: "local", folder, flow: "triage", task: "Investigate", maxTokens: 400000 } }] };
 	writeFileSync(triggersPath, JSON.stringify(authored)); const doc = parseTriggersDocument(JSON.stringify(authored), triggersPath);
 	let clock = CLOCK; const now = () => clock; const setNow = value => { clock = value; };
 	const name = `watch-pipeline-${Math.random().toString(36).slice(2)}`; const redis = makeRedisClient(url, {}); const queue = new Queue(name, { connection: redis });
