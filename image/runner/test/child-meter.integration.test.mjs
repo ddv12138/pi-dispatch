@@ -361,14 +361,20 @@ test("an SDK child gets the overlay default and remains metered and subject to m
 	assert.equal(blocked.code, 0, blocked.stderr);
 	assert.equal(denied.callCount(), 0, blocked.stderr);
 	assert.notEqual(JSON.parse(blocked.stdout).stopReason, "stop");
-	const tight = priceFake(world({ api: "openai-completions" }), "openai-completions");
+	// The spend backstop reaches the SDK child the way it reaches a CLI child, through the parent's STOP control file
+	// (child-watch.mjs writes it when the meter stops; the token cap is the settle-time backstop since the cost guard
+	// went). The dollar shape this block replaced wrote SPENT beside PI_MAX_COST_MICROS and refused pre-call on the
+	// child's own worst-case math; that guard is gone, and the api switch went with it -- the meter is api-agnostic
+	// now, so the default fake api covers the claim.
+	const tight = world();
 	const tightScript = libraryScript(tight, { implicitModelsPath: true });
 	const tightShim = join(tight.root, "overlay-preload.mjs");
 	writeFileSync(tightShim, `const ledger = process.env.PI_DISPATCH_CHILD_LEDGER;\ndelete process.env.PI_DISPATCH_CHILD_LEDGER;\nconst { preload } = await import(${JSON.stringify(PRELOAD_URL)});\nprocess.env.PI_DISPATCH_CHILD_LEDGER = ledger;\nawait preload({ globalModelsPath: ${JSON.stringify(join(tight.root, "models.json"))} });\n`);
-	writeFileAtomic({ dir: tight.ledger, name: "SPENT", text: JSON.stringify(spentFile(null, 999_999)) });
-	const capped = await run([tightScript], { env: { ...tight.env, NODE_OPTIONS: `--import=${pathToFileURL(tightShim).href}`, PI_MAX_COST_MICROS: "1000000" }, cwd: tight.root });
+	writeFileAtomic({ dir: tight.ledger, name: "STOP", text: JSON.stringify(stopFile(TOKEN_BUDGET)) });
+	const capped = await run([tightScript], { env: { ...tight.env, NODE_OPTIONS: `--import=${pathToFileURL(tightShim).href}` }, cwd: tight.root });
 	assert.equal(tight.callCount(), 0, capped.stderr);
-	assert.notEqual(JSON.parse(capped.stdout).stopReason, "stop");
+	// The brake's own answer: the hard stop's aborted result (defaultHardStopResult), not a completed turn.
+	assert.equal(JSON.parse(capped.stdout).stopReason, "aborted");
 });
 
 test("a Node child that runs pi as a library is metered through the preload's load hook (issue #500)", { skip }, async () => {
