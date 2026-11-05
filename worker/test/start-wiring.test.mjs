@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { makeBackendRegistry as realRegistry } from "../src/backend-registry.mjs";
 import { makePodmanBackend as realPodmanBackend } from "../src/backend-podman.mjs";
 import { makeOpenshellBackend as realOpenshellBackend } from "../src/backend-openshell.mjs";
-import { RUNNER_POLICY_REASONS, sanitizeJobId } from "../src/run-history.mjs";
+import { RUN_RECORD_VERSION, RUNNER_POLICY_REASONS, sanitizeJobId } from "../src/run-history.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { makeSandboxReaper as realSandboxReaper } from "../src/sandbox-store.mjs";
 import { sandboxInventoryKey, SANDBOX_INVENTORY_HOSTS } from "../src/sandbox-inventory.mjs";
@@ -1779,7 +1779,7 @@ function envelopeBoot() {
 	writeFileSync(projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
 	const envelope = join(dir, "conf", "envelope.json");
 	mkdirSync(join(dir, "conf"));
-	writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalTokens: "100", floorsTokens: { shop: "10" }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+	writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
 	const logsDir = join(dir, "logs");
 	// VALKEY_URL named: the worker's own default is 6379, which is not the test Valkey, and this boot writes `alloc:*`.
 	return { dir, envelope, logsDir, env: { VALKEY_URL, PI_PROJECTS_FILE: projects, PI_ENVELOPE_FILE: envelope, PI_MAX_TOKENS: "2", PI_LOGS_DIR: logsDir } };
@@ -1840,9 +1840,9 @@ test("reloadEnvelope keeps LAST-GOOD on a bad edit, swaps on a good one and says
 	assert.equal(ref.current, first, "the SAME object: last-good untouched");
 	assert.equal(logs.at(-1).event, "envelope_reload_invalid");
 	// A good edit swaps, logs the digest and asks for the re-base once.
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: "80", floorsTokens: { shop: "10" } }));
+	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 80, floorsTokens: { shop: 10 } }));
 	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(ref.current.totalTokens, 80_000_000);
+	assert.equal(ref.current.totalTokens, 80);
 	assert.equal(logs.at(-1).event, "envelope_reloaded");
 	assert.equal(logs.at(-1).fields.digest, ref.digest);
 	assert.equal(changes, 1);
@@ -1852,7 +1852,7 @@ test("reloadEnvelope keeps LAST-GOOD on a bad edit, swaps on a good one and says
 	// even though the edit itself parses.
 	const before = ref.current;
 	jobPaths = { cronFolders: [b.dir], runRoots: [], skillsDirs: [], globalPiDir: null };
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: "999", floorsTokens: { shop: "10" } }));
+	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 999, floorsTokens: { shop: 10 } }));
 	mod.reloadEnvelope(config, ref, log, ctx);
 	assert.equal(ref.current, before, "a file a job could have written is never adopted");
 	assert.equal(logs.at(-1).event, "envelope_reload_invalid");
@@ -1874,7 +1874,7 @@ test("the envelope reloads with the projects pair: a projects edit that commits 
 	const pair = mod.makeProjectPair(limits, projects);
 	pair.afterCommit = () => mod.reloadEnvelope(config, ref, log, ctx);
 	// The envelope saved FIRST with a floor for a project projects.json does not have yet: kept out.
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: "100", floorsTokens: { shop: "10", tools: "5" } }));
+	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, tools: 5 } }));
 	mod.reloadEnvelope(config, ref, log, ctx);
 	assert.equal(ref.current, first);
 	// Then projects.json gains the project: its commit re-judges the envelope from disk, which now applies.
@@ -2038,7 +2038,7 @@ for (const order of ["limits first", "projects first"]) {
 			const logs = [];
 			const log = (event, fields) => logs.push({ event, fields });
 			const saveLimits = () => {
-				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", dayTokens: "5" }] }));
+				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", dayTokens: 5 }] }));
 				mod.reloadScopedLimits(config, limits, log, noCap, pair);
 			};
 			const saveProjects = () => {
@@ -2048,7 +2048,7 @@ for (const order of ["limits first", "projects first"]) {
 			if (order === "limits first") (saveLimits(), saveProjects());
 			else (saveProjects(), saveLimits());
 			assert.deepEqual(limits.current.map((l) => l.scope), ["project:tools"]);
-			assert.deepEqual(logs.find((l) => l.event === "scoped_limits_token_rows_without_cap")?.fields, { rows: [{ index: 0, kind: "project" }] });
+			assert.deepEqual(logs.find((l) => l.event === "scoped_limits_token_rows_without_budget")?.fields, { rows: [{ index: 0, kind: "project" }] });
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -2123,25 +2123,25 @@ test("boot: a token row with no per-job cap WARNS, and an overlay-only maxTokens
 	try {
 		const file = join(dir, "scoped-limits.json");
 		const settingsFile = join(dir, "settings.json");
-		writeFileSync(file, `${JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: "5" }] })}\n`);
+		writeFileSync(file, `${JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }] })}\n`);
 		const armed = [];
 		const watchScopedLimits = (...args) => (armed.push(args), { close() {} });
 		const bare = await runStart({ env: { PI_SCOPED_LIMITS_FILE: file, PI_SETTINGS_FILE: settingsFile }, watchScopedLimits });
-		assert.deepEqual(bare.logs.find((l) => l.event === "scoped_limits_token_rows_without_cap")?.rows, [{ index: 0, kind: "scope" }], "no cap anywhere: the boot warning");
+		assert.deepEqual(bare.logs.find((l) => l.event === "scoped_limits_token_rows_without_budget")?.rows, [{ index: 0, kind: "scope" }], "no cap anywhere: the boot warning");
 		const thunk = armed[0][4];
 		assert.equal(typeof thunk, "function", "the watcher receives the cap thunk");
 		assert.equal(thunk(), null, "no cap yet");
 		// The reload path the watcher drives: a no-cap token row warns.
 		const reloadLogs = [];
 		mod.reloadScopedLimits({ scopedLimitsFile: file }, { current: [] }, (event, fields) => reloadLogs.push({ event, fields }), thunk);
-		assert.ok(reloadLogs.some((l) => l.event === "scoped_limits_token_rows_without_cap"), "the reload warns");
+		assert.ok(reloadLogs.some((l) => l.event === "scoped_limits_token_rows_without_budget"), "the reload warns");
 		// An OVERLAY-only cap: the thunk reads it (merged, not env only), and the boot warning is silent.
-		writeFileSync(settingsFile, JSON.stringify({ maxTokens: "2" }));
-		assert.equal(thunk(), "2", "the thunk re-reads the merged settings");
+		writeFileSync(settingsFile, JSON.stringify({ maxTokens: 2 }));
+		assert.equal(thunk(), 2, "the thunk re-reads the merged settings");
 		armed.length = 0;
 		const capped = await runStart({ env: { PI_SCOPED_LIMITS_FILE: file, PI_SETTINGS_FILE: settingsFile }, watchScopedLimits });
-		assert.ok(!capped.logs.some((l) => l.event === "scoped_limits_token_rows_without_cap"), "the overlay's cap silences the boot warning");
-		assert.equal(armed[0][4](), "2");
+		assert.ok(!capped.logs.some((l) => l.event === "scoped_limits_token_rows_without_budget"), "the overlay's cap silences the boot warning");
+		assert.equal(armed[0][4](), 2);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -2155,17 +2155,17 @@ test("reloadScopedLimits WARNS (never refuses) on a token row when the deploymen
 		const ref = { current: [] };
 		const logs = [];
 		const log = (event, fields) => logs.push({ event, fields });
-		writeFileSync(file, JSON.stringify({ version: 2, limits: [{ scope: "/srv/secret-path", day: 2 }, { scope: "/srv/secret-path2", dayTokens: "5" }, { scope: "model:openai/gpt-x", weekTokens: "9" }] }));
+		writeFileSync(file, JSON.stringify({ version: 2, limits: [{ scope: "/srv/secret-path", day: 2 }, { scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }] }));
 		mod.reloadScopedLimits(config, ref, log, () => null);
 		assert.equal(ref.current.length, 3, "loaded, not refused");
-		assert.deepEqual(logs[1], { event: "scoped_limits_token_rows_without_cap", fields: { rows: [{ index: 1, kind: "scope" }, { index: 2, kind: "model" }] } });
+		assert.deepEqual(logs[1], { event: "scoped_limits_token_rows_without_budget", fields: { rows: [{ index: 1, kind: "scope" }, { index: 2, kind: "model" }] } });
 		assert.ok(!JSON.stringify(logs).includes("secret-path"), "never a scope string");
 		logs.length = 0;
 		mod.reloadScopedLimits(config, ref, log, () => "2");
 		assert.deepEqual(logs.map((l) => l.event), ["scoped_limits_reloaded"], "a per-job cap: no warning");
 		logs.length = 0;
 		mod.warnTokenRowsWithoutCap(ref.current, undefined, log);
-		assert.equal(logs[0].event, "scoped_limits_token_rows_without_cap", "the boot call, same rule");
+		assert.equal(logs[0].event, "scoped_limits_token_rows_without_budget", "the boot call, same rule");
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -3276,8 +3276,9 @@ test("a lost-lock job whose record is a paid policy stop pages as that stop, onc
 
 test("a lost-lock job whose record a newer pi-dispatch wrote is settled by its outcome alone: its reason is neither logged nor paged on (issue #761)", { skip }, async () => {
 	const logsDir = tempDir("pi-lost-lock-");
-	// The same paid policy stop as above, but `v: 2`: that release's `reason` may mean something else.
-	writeFileSync(join(logsDir, "gh-n.json"), `${JSON.stringify({ ...lostLockRecord("gh-n", { outcome: "policy", reason: "runner-policy", exitCode: 2 }), v: 2 })}\n`);
+	// The same paid policy stop as above, but one record version AHEAD of this build: that release's `reason` may
+	// mean something else, so it settles by its outcome alone. (`v: 2` WAS ahead, until the token record shipped.)
+	writeFileSync(join(logsDir, "gh-n.json"), `${JSON.stringify({ ...lostLockRecord("gh-n", { outcome: "policy", reason: "runner-policy", exitCode: 2 }), v: RUN_RECORD_VERSION + 1 })}\n`);
 	const { drive, posted } = await lostLockBoot({ env: { PI_LOGS_DIR: logsDir } });
 	const lines = await drive(lostLockJob("gh-n"), await stalledError());
 	assert.deepEqual(posted, [], "the record still settles this attempt: no failure comment");
@@ -5256,7 +5257,7 @@ test("the host row's fpTok is the token fingerprint of the live settings and sco
 	const dir = tempDir("pi-fp-usd-wiring-");
 	const settingsFile = join(dir, "settings.json");
 	const limitsFile = join(dir, "scoped-limits.json");
-	writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: "5" }, { scope: "model:openai/gpt-4o", weekTokens: "9" }] }));
+	writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }, { scope: "model:openai/gpt-4o", weekTokens: 9 }] }));
 	let fields = null;
 	await runStart({
 		env: { VALKEY_URL, PI_WORKER_NAME: "fp-usd-1", PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "20", PI_SETTINGS_FILE: settingsFile, PI_SCOPED_LIMITS_FILE: limitsFile, PI_ALLOWED_MODELS: "anthropic/claude-sonnet-5-5" },
@@ -5273,8 +5274,8 @@ test("the host row's fpTok is the token fingerprint of the live settings and sco
 	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, LIST), "env settings and the token rows");
 	assert.notEqual(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, []), "the rows are in it");
 	assert.notEqual(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, null), "and the env list: with it, a job without its own list reserves in no model row here");
-	writeFileSync(settingsFile, JSON.stringify({ weeklyTokenCap: "40" }));
-	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20", weeklyTokenCap: "40" }, rows, LIST), "an overlay edit shows on the next beat, merged over env");
+	writeFileSync(settingsFile, JSON.stringify({ weeklyTokenCap: 40 }));
+	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20", weeklyTokenCap: 40 }, rows, LIST), "an overlay edit shows on the next beat, merged over env");
 	writeFileSync(settingsFile, "{ not json");
 	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, LIST), "an invalid overlay falls back to env, as the slot count does");
 });
@@ -5338,7 +5339,8 @@ test("issue #596 (gate round 1): a size flag the daemon drops rides beside the u
 	hook();
 	assert.deepEqual(await deps.jobUserPreflight(job, { capabilities: [] }), { user: null, home: null, hostCpus: 4 }, "the next pickup reads the resized daemon, and an enforcing one adds nothing");
 	assert.equal(reads, readsBefore + 1);
-	assert.equal(published?.limitsVersion, 3, "the highest scoped-limits version this build reads, for doctor's fleet line");
+	const { SCOPED_LIMITS_VERSION } = await import("../src/scoped-limits.mjs");
+	assert.equal(published?.limitsVersion, SCOPED_LIMITS_VERSION, "the highest scoped-limits version this build reads, for doctor's fleet line");
 	// Issue #761: beside it, the highest version this build reads of each store with a version, for doctor's
 	// `fleet.store-versions` line, from the stores' own constants, never a copy.
 	const { SETTINGS_VERSION } = await import("../src/runtime-settings.mjs");
@@ -6407,7 +6409,7 @@ test("issue #645: a returned recovery-failed pages once and comments nothing mor
 // takes the terminal failure path without its comment: what the job held is closed and the operator is paged once.
 const NEWER_POINTER = { v: 1, host: "h1", hostQueue: null, seq: 2, attempt: 1, at: DURABLE_NOW, jobDir: "job-ab12cd" };
 /** A run record of `id` as its file holds it: a newer release's (`v` 2) unless `v` says otherwise, null for none (a v1 record). */
-const newerRecordText = (id, fields = {}, v = 2) => `${JSON.stringify({ ...lostLockRecord(id, { outcome: "failed", reason: "infra", startedAt: new Date(DURABLE_NOW - 50_000).toISOString(), endedAt: new Date(DURABLE_NOW - 40_000).toISOString(), ...fields }), futureField: { kept: "by that release" }, ...(v === null ? {} : { v }) })}\n`;
+const newerRecordText = (id, fields = {}, v = RUN_RECORD_VERSION + 1) => `${JSON.stringify({ ...lostLockRecord(id, { outcome: "failed", reason: "infra", startedAt: new Date(DURABLE_NOW - 50_000).toISOString(), endedAt: new Date(DURABLE_NOW - 40_000).toISOString(), ...fields }), futureField: { kept: "by that release" }, ...(v === null ? {} : { v }) })}\n`;
 
 /**
  * A boot whose failure hook is a REAL script appending its argv, one line per page (as the end-to-end hook test above),
@@ -6854,7 +6856,7 @@ test("terminal approval failure closes only the exhausted job's claim; an interm
 test("Zero touch boot shares tracking and private grouping dependencies, rereads capture opt-in and stamps analysis history", { skip }, async () => {
 	const dir = tempDir("zero-touch-start-");
 	const triggersPath = join(dir, "triggers.json");
-	const grouping = { capture: true, model: "openrouter/typesafe/jev-1.13", maxTokens: "0.05", names: {} };
+	const grouping = { capture: true, model: "openrouter/typesafe/jev-1.13", maxTokens: 50000, names: {} };
 	writeFileSync(triggersPath, JSON.stringify({ triggers: [], zeroTouch: grouping }));
 	const nowMs = Date.UTC(2026, 9, 30, 12);
 	const calls = [], written = [];

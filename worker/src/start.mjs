@@ -547,7 +547,7 @@ export function reloadProjects(config, ref, log, pair = null) {
 			pair.limits.current = other;
 			log("scoped_limits_reloaded", { count: other.length, with: "projects" });
 			// Every limits list that goes live is warned on, whichever file's reload committed it.
-			if (pair.deploymentCap) warnDollarRowsWithoutCap(other, pair.deploymentCap(), log);
+			if (pair.deploymentCap) warnTokenRowsWithoutCap(other, pair.deploymentCap(), log);
 		}
 	} catch (err) {
 		// Escaped (PR #569's review): the parser's own refusals already are, and an fs error quoting the path is too.
