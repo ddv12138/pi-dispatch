@@ -1,5 +1,4 @@
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
@@ -291,12 +290,13 @@ test("round 1: hosts that publish no capability list are counted by capsSeen; a 
   assert.equal(profileLastText(last({ ...at, reason: "secret-profile-unknown", project: "shop" }, [{ id: "shop", project: "shop" }])), "last resolve: refused (secret-profile-unknown) at 2026-10-21T10:00:01.000Z", "a reason only the profile's read gives");
 });
 
-test("round 1: dispatch_runs' list carries an openshell run's host count only; a run read by id carries the names", () => {
+// The retired /dispatch tool's read shapes live on as the read-model export's contract (issue #704): a list-shaped
+// read counts the rule hosts, a by-id read carries the names. The wiring assertion that pinned the deleted
+// index.ts's call site went with the extension.
+test("round 1: the model-shaped runs list carries an openshell run's host count only; a run read by id carries the names", () => {
   const r = { jobId: "gh-1", backend: "openshell", openshell: OPENSHELL };
   assert.deepEqual(modelRunRecord(r, { list: true }).openshell, { mode: "copy", ruleHostCount: 2, providers: 1, placeholders: 3 });
   assert.deepEqual(modelRunRecord(r).openshell, OPENSHELL);
-  const src = readFileSync(new URL("../src/index.ts", import.meta.url), "utf8");
-  assert.match(src, /merged\.runs\.map\(\(r: any\) => modelRunRecord\(runShown\(r\), \{ list: true \}\)\)/);
 });
 
 test("final review: a registry read that failed says so, never 'no live host'; the snapshot passes no rows then", async () => {
