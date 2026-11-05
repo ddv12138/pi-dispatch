@@ -21,7 +21,7 @@ const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-a
 const { createJiti } = piRequire("jiti");
 const jiti = createJiti(import.meta.url);
 const indexMod = await jiti.import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
-indexMod.setToolReadDepsForTest({ held: async () => ({ heldMicros: 0, heldJobs: 0, unknownHosts: [] }) });
+indexMod.setToolReadDepsForTest({ held: async () => ({ heldTokens: 0, heldJobs: 0, unknownHosts: [] }) });
 // Issue #642: every write these drive is audited as the panel into PI_LOGS_DIR's console-audit chain, so the file's
 // writes land in a directory of its own rather than the account's default logs directory.
 process.env.PI_LOGS_DIR = tempDir("pd-642-panel-audit-");
@@ -55,7 +55,7 @@ async function withProjectToolReads(run) {
       readIds.push(options.id);
       return readProjectView({ ...options, reads: {
         ...options.reads,
-        scan: () => [{ jobId: "gh-tool-view", project: "shop", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: new Date(options.now - 1_000).toISOString(), tokens: { cost: 0.25, metered: true } }],
+        scan: () => [{ jobId: "gh-tool-view", project: "shop", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: new Date(options.now - 1_000).toISOString(), tokens: { input: 100_000, output: 150_000, total: 250_000, metered: true } }],
         allocation: () => ({ unset: true }),
         sizing: () => ({ projects: {} }),
       } });
@@ -288,8 +288,8 @@ test("dispatch_projects lists each project with safe member identities, limits a
       { id: "ops", members: ["ops"], limitRows: [] },
     ]);
     const [shop, ops] = out.projects;
-    assert.deepEqual(shop.spend, { window: "week", usedMicros: 250_000, settledMicros: 250_000, heldMicros: 0, shareMicros: null, incomplete: false });
-    assert.equal(ops.spend.settledMicros, 0, "a project's spend is selected by the record's project, not its current members");
+    assert.deepEqual(shop.spend, { window: "week", usedTokens: 250_000, settledTokens: 250_000, heldTokens: 0, shareTokens: null, incomplete: false });
+    assert.equal(ops.spend.settledTokens, 0, "a project's spend is selected by the record's project, not its current members");
     assert.deepEqual(shop.size, { memMiB: 4096, cpuCenti: 200, source: "default" });
     assert.equal(shop.suggestion, null, "no fabricated suggestion without measurements");
     assert.equal(shop.deleteRefused, true, "the actual planner blocked deletion");
@@ -306,10 +306,10 @@ test("dispatch_costs: byProject in the fold, and the project filter scopes every
   process.env.PI_LOGS_DIR = logsDir;
   const now = Date.now();
   const at = (ms) => new Date(ms).toISOString();
-  const rec = (jobId, project, cost) => ({ jobId, kind: "github", target: "acme/web#1", flow: "fix", startedAt: at(now - 60_000), endedAt: at(now - 30_000), outcome: "completed", tokens: { input: 1, output: 1, total: 2, cost, metered: true }, usage: null, dollars: null, ...(project === undefined ? {} : { project }) });
-  writeFileSync(join(logsDir, "a.json"), JSON.stringify(rec("a", "shop", 0.5)));
-  writeFileSync(join(logsDir, "b.json"), JSON.stringify(rec("b", null, 0.25)));
-  writeFileSync(join(logsDir, "c.json"), JSON.stringify(rec("c", undefined, 0.125)));
+  const rec = (jobId, project) => ({ jobId, kind: "github", target: "acme/web#1", flow: "fix", startedAt: at(now - 60_000), endedAt: at(now - 30_000), outcome: "completed", tokens: { input: 1, output: 1, total: 2, metered: true }, usage: null, ...(project === undefined ? {} : { project }) });
+  writeFileSync(join(logsDir, "a.json"), JSON.stringify(rec("a", "shop")));
+  writeFileSync(join(logsDir, "b.json"), JSON.stringify(rec("b", null)));
+  writeFileSync(join(logsDir, "c.json"), JSON.stringify(rec("c", undefined)));
   deployment({ projects: [] });
   const dir = tempDir("pd-499c-cfg-");
   process.env.PI_SETTINGS_FILE = join(dir, "settings.json");
@@ -318,7 +318,7 @@ test("dispatch_costs: byProject in the fold, and the project filter scopes every
   process.env.VALKEY_URL = "not-a-url";
   try {
     const all = textOf(await toolByName("dispatch_costs").execute("id", {}, undefined, undefined, undefined));
-    assert.deepEqual(all.fold.byProject.map((r) => [r.key, r.runs, r.cost.usd]), [["shop", 1, 0.5], [null, 2, 0.375]]);
+    assert.deepEqual(all.fold.byProject.map((r) => [r.key, r.runs, r.amount.tokens]), [[null, 2, 4], ["shop", 1, 2]]);
     const shop = textOf(await toolByName("dispatch_costs").execute("id", { project: "shop" }, undefined, undefined, undefined));
     assert.deepEqual(shop.fold.byProject.map((r) => [r.key, r.runs]), [["shop", 1]]);
     assert.equal(shop.fold.provenance.runsTotal, 1, "every arm is scoped, not one table");
