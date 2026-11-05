@@ -5366,7 +5366,7 @@ function runsDayOf(w, nowMs) {
  * Today's settled tokens per UTC hour (issue #737), `{ hours, unpriced, floor, partial }`: `hours` is 24 entries, the
  * micro-dollars of the records that ENDED in that hour of today (`dollars.settledTokens`, what the worker settled the
  * run at), 0 for an hour that has passed with none, and null for an hour still to come. `unpriced` counts today's
- * ended runs whose record carries no settled amount (no dollar window applied to them, or a malformed one), so a
+ * ended runs whose record carries no settled amount (no token window applied to them, or a malformed one), so a
  * surface can say the hours are not the day's whole spend. The window's counters stay the spend of record; these are
  * the records' side, by hour.
  */

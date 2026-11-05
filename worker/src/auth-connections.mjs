@@ -29,7 +29,7 @@ export function createAuthService({ policy = null, readPolicy = () => policy, st
 		return adapter;
 	}
 	function safe(row, saved, active, state = saved?.state ?? "disconnected", compatibility = state === "adapter-unavailable" ? "unavailable" : state === "other-host" ? "unknown" : "verified") {
-		return { id: row.id, provider: row.provider, adapter: row.adapter, ownerHost: row.ownerHost, active, state, compatibility, expiresAt: saved?.credential?.expires ?? null, generation: saved?.generation ?? 0, accountGroup: saved?.accountGroup ?? null, lastRefreshAt: saved?.lastRefreshAt ?? null, extraUsage: saved?.extraUsage ?? "unknown", extraUsageCreditMicros: row.extraUsageCreditMicros ?? null, quotaWindows: [...row.quotaWindows] };
+		return { id: row.id, provider: row.provider, adapter: row.adapter, ownerHost: row.ownerHost, active, state, compatibility, expiresAt: saved?.credential?.expires ?? null, generation: saved?.generation ?? 0, accountGroup: saved?.accountGroup ?? null, lastRefreshAt: saved?.lastRefreshAt ?? null, extraUsage: saved?.extraUsage ?? "unknown", extraUsageCreditTokens: row.extraUsageCreditTokens ?? null, quotaWindows: [...row.quotaWindows] };
 	}
 	async function status() {
 		const config = await read();
@@ -54,7 +54,7 @@ export function createAuthService({ policy = null, readPolicy = () => policy, st
 			const judge = async (saved) => {
 				if (!matching(row, saved) || !saved.credential || saved.state !== "connected") throw authError(saved?.state === "refresh-uncertain" ? "auth-refresh-uncertain" : "auth-reauth-required");
 				const publicRow = safe(row, saved, true);
-				return { ok: true, managed: true, ...publicRow, connectionId: id, connection: publicRow, bindingSignature: authBindingSignature(row), extraUsageCreditMicros: row.extraUsageCreditMicros ?? null };
+				return { ok: true, managed: true, ...publicRow, connectionId: id, connection: publicRow, bindingSignature: authBindingSignature(row), extraUsageCreditTokens: row.extraUsageCreditTokens ?? null };
 			};
 			const saved = store.read(id);
 			// Ordinary metadata reads are atomic and write nothing. Workers wait out an in-flight renewal;
