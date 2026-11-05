@@ -17,7 +17,7 @@ test("project unavailable descriptions are localized while the problem detail st
 
 function fixture() {
   const call = 'dispatch_limit_edit {"index":2,"memory":"4g","cpus":2}';
-  return { id: "billing", state: "ready", now: NOW, project: { id: "billing", name: "Billing" }, members: [{ label: "github:acme/billing", local: false, count: 5, last: null }], memberInput: "github:acme/billing", editRefusal: null, deleteRefusal: null, size: { memMiB: 8192, cpuCenti: 400 }, spend: { window: "week", settledMicros: 6_100_000, heldMicros: 2_000_000, usedMicros: 8_100_000, shareMicros: 25_000_000, envelope: true }, sizing: { memory: { current: 8192, suggested: 4096, reason: "oversized" }, cpu: { current: 400, suggested: 200, reason: "underused" }, call, action: projectSizeAction(call, "billing"), words: { memory: "p95 peak 2g", cpu: "p95 0.9 cores", cpuFact: "the median run was held back 4% of its time by this host's CPU ceiling, which a job's cpus do not change" }, series: [{ at: NOW - 20 * DAY, peakMiB: 1024, sizeMiB: 8192, oom: false }, { at: NOW - 10 * DAY, peakMiB: 2048, sizeMiB: 4096, oom: true }] } };
+  return { id: "billing", state: "ready", now: NOW, project: { id: "billing", name: "Billing" }, members: [{ label: "github:acme/billing", local: false, count: 5, last: null }], memberInput: "github:acme/billing", editRefusal: null, deleteRefusal: null, size: { memMiB: 8192, cpuCenti: 400 }, spend: { window: "week", settledTokens: 6_100_000, heldTokens: 2_000_000, usedTokens: 8_100_000, shareTokens: 25_000_000, envelope: true }, sizing: { memory: { current: 8192, suggested: 4096, reason: "oversized" }, cpu: { current: 400, suggested: 200, reason: "underused" }, call, action: projectSizeAction(call, "billing"), words: { memory: "p95 peak 2g", cpu: "p95 0.9 cores", cpuFact: "the median run was held back 4% of its time by this host's CPU ceiling, which a job's cpus do not change" }, series: [{ at: NOW - 20 * DAY, peakMiB: 1024, sizeMiB: 8192, oom: false }, { at: NOW - 10 * DAY, peakMiB: 2048, sizeMiB: 4096, oom: true }] } };
 }
 const view = (projectView, extra = {}) => ({ role: "operator", readOnly: false, data: { projectView }, ...extra });
 
@@ -79,28 +79,28 @@ test("chart units sit outside the scaled SVG and numeric labels center on their 
 
 test("spend meter is held-inclusive while headline settles and held are separate", () => {
   const markup = String(projectSpend(view(fixture())));
-  assert.match(markup, /\$6\.10/);
-  assert.match(markup, /\$2\.00/);
-  assert.match(markup, /\$8\.10/);
+  assert.match(markup, /<span title="6,100,000">6\.10M<\/span>/);
+  assert.match(markup, /<span title="2,000,000">2\.00M<\/span>/);
+  assert.match(markup, /<span title="8,100,000">8\.10M<\/span>/);
   assert.match(markup, /aria-valuenow="32"/);
   assert.match(markup, /width="32\.4%"/);
 });
 
 test("known total spend leads an unknown held split and the numeric meter remains held-inclusive", () => {
   const p = fixture();
-  Object.assign(p.spend, { usedMicros: 13_340_000, settledMicros: null, heldMicros: null, heldIncomplete: true, heldKnownMicros: 0, shareMicros: 39_550_000 });
+  Object.assign(p.spend, { usedTokens: 13_340_000, settledTokens: null, heldTokens: null, heldIncomplete: true, heldKnownTokens: 0, shareTokens: 39_550_000 });
   const markup = String(projectSpend(view(p)));
   const doc = parseDocument(markup);
-  assert.equal(doc.querySelector(".proj-kv b").textContent, "$13.34");
-  assert.match(doc.querySelector(".proj-kv").textContent, /spent and held, of a \$39\.55 share/);
-  assert.equal(doc.querySelector(".proj-meter-label").textContent, "$13.34 / $39.55");
+  assert.equal(doc.querySelector(".proj-kv b").textContent, "13.34M");
+  assert.match(doc.querySelector(".proj-kv").textContent, /spent and held, of a 39\.55M share/);
+  assert.equal(doc.querySelector(".proj-meter-label").textContent, "13.34M / 39.55M");
   assert.match(markup, /split between spent and held is unknown/);
   assert.equal(doc.querySelector('[role="meter"]').getAttribute("aria-valuenow"), "34");
-  Object.assign(p.spend, { usedMicros: null, settledMicros: null, shareMicros: null });
+  Object.assign(p.spend, { usedTokens: null, settledTokens: null, shareTokens: null });
   assert.equal(parseDocument(String(projectSpend(view(p)))).querySelector(".proj-kv b").textContent, "unknown", "an unread total is never invented from incomplete holds");
-  Object.assign(p.spend, { envelope: false, settledMicros: 3_400_000 });
+  Object.assign(p.spend, { envelope: false, settledTokens: 3_400_000 });
   const noEnvelope = parseDocument(String(projectSpend(view(p))));
-  assert.equal(noEnvelope.querySelector(".proj-kv b").textContent, "$3.40");
+  assert.equal(noEnvelope.querySelector(".proj-kv b").textContent, "3.40M");
   assert.equal(noEnvelope.querySelector('[role="meter"]'), null);
   assert.match(noEnvelope.textContent, /no envelope, so no share/);
 });
@@ -164,7 +164,7 @@ test("memory verdicts use one-decimal GiB without altering worker facts, reasons
 
 test("project badges reuse the Runs vocabulary, trigger kinds name their forge, and same-source sizes read once", () => {
   const p = fixture();
-  p.recent = ["completed", "refused", "cancelled", "awaiting-input"].map((outcome, i) => ({ jobId: `gh-${i}`, target: "acme/billing#1", outcome, at: NOW, micros: 0 }));
+  p.recent = ["completed", "refused", "cancelled", "awaiting-input"].map((outcome, i) => ({ jobId: `gh-${i}`, target: "acme/billing#1", outcome, at: NOW, tokens: 0 }));
   const recent = String(projectRecent(view(p)));
   for (const label of ["Completed", "Refused", "Cancelled", "Awaiting input"]) assert.match(recent, new RegExp(`>${label}</span>`));
   assert.match(recent, /href="\/run\?id=gh-0"/);
@@ -251,9 +251,9 @@ test("bundle variable names render only in the person's facts and hostile text s
   assert.ok(!String(projectBundle(view(p))).includes("<img"));
 });
 
-test("Recent's stacked rows keep each run's target, outcome, instant and exact cost together", () => {
+test("Recent's stacked rows keep each run's target, outcome, instant and exact amount together", () => {
   const p = fixture();
-  p.recent = [{ jobId: "gh-recent", target: "acme/billing#97", outcome: "refused", at: NOW - 1_000, micros: 240_000, costFloor: true }];
+  p.recent = [{ jobId: "gh-recent", target: "acme/billing#97", outcome: "refused", at: NOW - 1_000, tokens: 240_000, costFloor: true }];
   p.totalRuns = 8;
   const markup = String(projectRecent(view(p)));
   assert.match(markup, /class="tbl tbl--stack"/);
@@ -263,7 +263,7 @@ test("Recent's stacked rows keep each run's target, outcome, instant and exact c
   assert.match(row, /acme\/billing#97/);
   assert.match(row, />Refused<\/span>/);
   assert.match(row, /data-l="Ended".*datetime="2026-10-30T11:59:59\.000Z"/);
-  assert.match(row, /data-l="Cost">at least <span title="\$0\.24">\$0\.24<\/span>/);
+  assert.match(row, /data-l="Cost">at least <span title="240,000">240k<\/span>/);
   assert.match(markup, /All 8 in Runs, filtered to billing/);
 });
 
@@ -284,10 +284,10 @@ test("money stays readable at two decimals while each title retains the exact mi
 
 test("normalized null limit fields are omitted and actual settings read in human words", () => {
   const p = fixture();
-  p.limits = [{ index: 2, scope: "project:billing", memory: "8g", cpus: 4, day: null, week: null, month: null, concurrent: null, dayUsd: "2.50", weekUsd: null, monthUsd: null, hostShare: 50, minJobs: null }];
+  p.limits = [{ index: 2, scope: "project:billing", memory: "8g", cpus: 4, day: null, week: null, month: null, concurrent: null, dayTokens: "2500000", weekTokens: null, monthTokens: null, hostShare: 50, minJobs: null }];
   const markup = String(projectLimits(view(p)));
   assert.match(markup, /8 GiB memory, 4 CPUs/);
-  assert.match(markup, /title="\$2\.50">\$2\.50<\/span> a day/);
+  assert.match(markup, /title="2,500,000">2\.50M<\/span> a day/);
   assert.match(markup, /50% of each host&#39;s budget/);
   assert.match(markup, /not set; a local folder still runs one job at a time/);
   assert.doesNotMatch(markup, /null|day:|week:|concurrent:|minJobs:/);
