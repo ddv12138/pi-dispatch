@@ -14,12 +14,15 @@
  *     connection attempt, a write into its job inputs), plus two of the bundle's own answers: the sandbox listed gone
  *     after the run, and a job image the engine does not hold refused before any sandbox exists.
  *
- * AND ONE CASE OF ITS OWN: the real job image's real runner, keyed, on the sandbox layout, offline under a cost cap of 0,
- * through the bundle, which must end on its own signed `cost-cap` line with the session brought back, and (issue #686)
+ * AND ONE CASE OF ITS OWN: the real job image's real runner, keyed, on the sandbox layout, offline against the
+ * workflow's zero-rated stand-in model under a per-job token budget of 1 (the floor), through the bundle: the
+ * settle-time token budget is the runner's own stop now (the pre-call cost guard died with the cost era), so the
+ * case ends on the runner's own signed `token_budget` exit line with the session brought back, and (issue #686)
  * whose session lines must reach the live transcript publisher as verified records over the exec's stderr. And (issue
  * #686, part 2) the same runner STEERED: two messages through the real relay down the exec's stdin as frames, the
  * second written mid-run, their acks back over the stderr transcript and their ids on the signed exit line, still at
  * zero spend (issue #725: on a zero-rated fake model the workflow's stand-in serves, so the run lives long enough).
+ * The steering case runs first and leaves STEER_SIGNAL_FILE written, so this case's first request is not held.
  *
  * STRICTER THAN THE HARNESS, as podman-conformance.mjs is: any abstention among the read-back properties fails. Run it
  * with the worker STOPPED: the harness calls the real `reap`, which deletes every sandbox carrying this worker's owner
@@ -493,45 +496,6 @@ console.log(`${readings.readOnlyJobInputs?.ok ? "ok     " : "FAIL   "} readOnlyJ
 if (!readings.readOnlyJobInputs?.ok) failed = true;
 for (const [property, why] of Object.entries(UNVERIFIED_BY_THIS_HARNESS)) console.log(`not read ${property}: ${why}`);
 
-// The real runner, keyed and offline, under a cost cap of 0: its own signed exit line, the session brought back.
-{
-	const logs = join(scratch, "logs");
-	nodeFs.mkdirSync(logs);
-	// Under the same policy as the probes: with no rule no provider is made and the key reaches the job not at all
-	// (`openshell_secrets_unbound`), which is the venue working, and a runner with no key to read.
-	// Issue #686: the REAL publisher (live-transcript.mjs, the opener start.mjs builds), transcripts on and progress off,
-	// over a Valkey stand-in that records every XADD in memory, so what is checked is the path a job's lines take: the
-	// runner's mirror, the exec's stderr, the demux's verification under this attempt's key, the stdio source.
-	const xadds = [];
-	const redis = {
-		status: "ready",
-		multi() {
-			const tx = { del: () => tx, pexpire: () => tx, xadd: (_key, ...args) => (xadds.push(args), tx), exec: async () => [] };
-			return tx;
-		},
-	};
-	const openLiveTranscript = makeLiveTranscriptOpener({ redis, transcripts: true, progress: false });
-	const events = [];
-	const real = bundleFor(image, { ...POLICY_SOURCES, openJobLog: makeLogSink({ logsDir: logs, enabled: false }), openLiveTranscript, log: (event, fields) => events.push([event, fields]) });
-	const dirs = jobDirFor("Reply with the single word ok.");
-	// This run's output alone, so the record check below reads nothing an earlier probe wrote.
-	output.set("last", "");
-	const result = await real.runContainer({ job: { ...JOB, maxCostMicros: 0 }, prepared: dirs, name: `pi-job-conformance-${nonce}-runner`, signal: new AbortController().signal, exitAuth: true, transcriptStderr: true, jobId: `conformance-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
-	const session = nodeFs.readFileSync(join(dirs.jobDir, "session", "current.jsonl"), "utf8");
-	const ok = result.code === 2 && result.exitReason === "cost-cap" && result.exitAuth === "verified" && session.length > 0;
-	console.log(`${ok ? "ok     " : "FAIL   "} the real runner: exit ${result.code}, reason ${result.exitReason}, exit line ${result.exitAuth}, session ${session.length} bytes`);
-	// Every published entry's kind (the field list is flat: "kind", <kind>, "ts", ...): at least one from the session (the
-	// prompt's `user` entry is the one a cost cap of 0 always leaves), the `end`, and no forged or broken record on the way.
-	const kinds = xadds.map((fields) => fields[fields.indexOf("kind") + 1]);
-	const fromSession = kinds.filter((k) => k !== "end" && k !== "skipped").length;
-	const unverified = events.filter(([e]) => e === "transcript_record_unverified" || e === "transcript_record_dropped" || e === "transcript_demux_failed" || e === "live_transcript_skipped");
-	const piped = fromSession > 0 && kinds.at(-1) === "end" && unverified.length === 0 && !/\x1epidt /.test(String(output.get("last") ?? ""));
-	console.log(`${piped ? "ok     " : "FAIL   "} the live transcript over stderr: ${fromSession} entries from the session (${[...new Set(kinds)].join(", ") || "none"}), ${unverified.length} skip, unverified or dropped events, records kept out of the output`);
-	if (!piped) failed = true;
-	if (!ok) console.log(String(output.get("last") ?? "").split("\n").slice(-15).join("\n"));
-	if (!ok) failed = true;
-}
-
 // Issue #686, part 2: the real runner STEERED over the exec's stdin. The real relay (inbox-relay.mjs) over an in-memory
 // inbox holding one queued steer, the real publisher with the steer ack consumer (the opener start.mjs builds), and the
 // bundle handed both, as start.mjs hands them. A fresh job's relay is released at the spawn (an empty upload has no
@@ -546,8 +510,8 @@ for (const [property, why] of Object.entries(UNVERIFIED_BY_THIS_HARNESS)) consol
 // model call, so the run ended at the cap within milliseconds of the first ack; the second message then raced the exit
 // line's close of stdin (M1) and was left `queued` with one frame written on some runs. Now the run cannot pass its
 // first model call before the second frame is on the pipe, and pi delivers it with its second request, so both are
-// asserted delivered. Still at zero spend: the cap
-// stays 0 and a zero-rated model runs under it (usage-meter.mjs, `callCostBound`), and no cost refusal may appear.
+// asserted delivered. Still at zero spend: the fake's every rate is 0, its usage is metered but prices nothing, and
+// no per-job token budget is set, so the settle-time budget stop has nothing to fire on.
 // Asserted: the job ends clean (exit 0) on its own signed exit line, whose deliveredIds names BOTH messages; the acks
 // came back through the stderr transcript (the ack consumer verified them); the inbox calls both delivered; the relay
 // wrote two frames; and the stream never broke and carried no forged frame. The delivery with spend is still shown by
@@ -624,7 +588,7 @@ const STEER_FAKE_MODELS = { providers: { "steer-fake": { baseUrl: "http://host.o
 	const real = bundleFor(image, { ...POLICY_SOURCES, globalPiDir: overlay, openJobLog: makeLogSink({ logsDir: logs, enabled: false }), openLiveTranscript, openInboxRelay, log });
 	const dirs = jobDirFor("Read your prompt file, then reply with the single word done.");
 	output.set("last", "");
-	const steerJob = { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2, maxCostMicros: 0, steer: true };
+	const steerJob = { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2, steer: true };
 	const result = await real.runContainer({ job: steerJob, prepared: dirs, modelEndpoints, name: `pi-job-conformance-${nonce}-steer`, signal: new AbortController().signal, exitAuth: true, transcriptStderr: true, steerStdin: true, jobId: `conformance-steer-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
 	clearInterval(signal);
 	const said = String(output.get("last") ?? "");
@@ -636,9 +600,9 @@ const STEER_FAKE_MODELS = { providers: { "steer-fake": { baseUrl: "http://host.o
 	} catch {}
 	const deliveredIds = Array.isArray(exit?.steer?.deliveredIds) ? exit.steer.deliveredIds : [];
 	const named = deliveredIds.includes(id) && deliveredIds.includes(second);
-	// At zero spend by construction: the runner's guard refused nothing (no `cost_refused` line, the exit line's own
-	// `costRefused` 0, measured so on the runner against this stand-in), and the run did not end at the cap.
-	const refusedCost = /"event":"cost_refused"/.test(said) || (exit?.tokens?.costRefused ?? 0) !== 0 || (exit?.tokens?.cost ?? 0) !== 0 || result.exitReason === "cost-cap";
+	// At zero spend by construction: the zero-rated stand-in's usage is metered but prices nothing, and the run did
+	// not end at the runner's settle-time token budget (no per-job budget is set, so none can fire).
+	const refusedCost = /"event":"token_budget_exceeded"/.test(said) || result.exitReason === "token_budget";
 	const broken = /"event":"steer_(stream_broken|frame_unverified|stdin_shared)"/.test(said) || events.some(([e]) => e === "steer_relay_fault" || e === "steer_skipped" || e === "steer_frame_refused" || e === "steer_acks_unread");
 	const secondOutcome = state[second] ?? "never queued";
 	const written = relayRef?.counts().written ?? 0;
@@ -652,6 +616,57 @@ const STEER_FAKE_MODELS = { providers: { "steer-fake": { baseUrl: "http://host.o
 		console.log(JSON.stringify(events.filter(([e]) => /steer|transcript/.test(e))));
 		failed = true;
 	}
+}
+
+// The real runner, keyed and offline, stopped by its own settle-time token budget: its own signed exit line, the
+// session brought back. The cost cap of 0 this case used to run under died with the pre-call cost guard (token-only,
+// DES-TOKEN-RESERVE-AND-SETTLE): the runner's budget is a SETTLE-TIME stop now, the lagging in-run backstop OQ-010
+// keeps describing, and PI_MAX_TOKENS's floor is 1, so a per-job budget of 1 against the same zero-rated stand-in
+// model the steering case uses (13 usage tokens a turn) breaches on the first turn_end and the run ends on the
+// runner's own signed `token_budget` line, exit 2, without a cent of spend or a real provider anywhere. Runs AFTER
+// the steering case, which leaves STEER_SIGNAL_FILE written, so the stand-in's first request is not held; on a run
+// where that case failed first, this one eats the stand-in's 30 s hold and still holds or fails on its own facts.
+{
+	const logs = join(scratch, "logs");
+	nodeFs.mkdirSync(logs);
+	// The REAL publisher (live-transcript.mjs, the opener start.mjs builds), transcripts on and progress off, over a
+	// Valkey stand-in that records every XADD in memory, so what is checked is the path a job's lines take: the
+	// runner's mirror, the exec's stderr, the demux's verification under this attempt's key, the stdio source.
+	const xadds = [];
+	const redis = {
+		status: "ready",
+		multi() {
+			const tx = { del: () => tx, pexpire: () => tx, xadd: (_key, ...args) => (xadds.push(args), tx), exec: async () => [] };
+			return tx;
+		},
+	};
+	const openLiveTranscript = makeLiveTranscriptOpener({ redis, transcripts: true, progress: false });
+	const events = [];
+	// The stand-in's models.json as the steering case's overlay, uploaded with the job in copy mode, and the pickup's
+	// endpoint snapshot with the stand-in's alias declared keyless (env-allowlist.mjs, `keylessEndpointsFor`), so the
+	// keyless fake provider passes the credential gate and no real key reaches the job.
+	const overlay = join(scratch, "overlay-runner");
+	nodeFs.mkdirSync(overlay);
+	nodeFs.writeFileSync(join(overlay, "models.json"), `${JSON.stringify(STEER_FAKE_MODELS)}\n`);
+	const modelEndpoints = { endpoints: POLICY_SOURCES.readEndpoints().map((e) => ({ ...e, keyless: e.id === "lab-a" })), models: STEER_FAKE_MODELS };
+	const real = bundleFor(image, { ...POLICY_SOURCES, globalPiDir: overlay, openJobLog: makeLogSink({ logsDir: logs, enabled: false }), openLiveTranscript, log: (event, fields) => events.push([event, fields]) });
+	const dirs = jobDirFor("Reply with the single word ok.");
+	// This run's output alone, so the record check below reads nothing an earlier probe wrote.
+	output.set("last", "");
+	const result = await real.runContainer({ job: { ...JOB, provider: "steer-fake", model: "m1", maxTurns: 2, maxTokens: 1 }, prepared: dirs, modelEndpoints, name: `pi-job-conformance-${nonce}-runner`, signal: new AbortController().signal, exitAuth: true, transcriptStderr: true, jobId: `conformance-${nonce}`, size: { memMiB: 2048, cpuCenti: 200 } });
+	const session = nodeFs.readFileSync(join(dirs.jobDir, "session", "current.jsonl"), "utf8");
+	const ok = result.code === 2 && result.exitReason === "token_budget" && result.exitAuth === "verified" && session.length > 0;
+	console.log(`${ok ? "ok     " : "FAIL   "} the real runner under a token budget of 1: exit ${result.code}, reason ${result.exitReason}, exit line ${result.exitAuth}, session ${session.length} bytes`);
+	// Every published entry's kind (the field list is flat: "kind", <kind>, "ts", ...): at least one from the session
+	// (the prompt's `user` entry is one a budgeted run always leaves), the `end`, and no forged or broken record on the way.
+	const kinds = xadds.map((fields) => fields[fields.indexOf("kind") + 1]);
+	const fromSession = kinds.filter((k) => k !== "end" && k !== "skipped").length;
+	const unverified = events.filter(([e]) => e === "transcript_record_unverified" || e === "transcript_record_dropped" || e === "transcript_demux_failed" || e === "live_transcript_skipped");
+	const piped = fromSession > 0 && kinds.at(-1) === "end" && unverified.length === 0 && !/\x1epidt /.test(String(output.get("last") ?? ""));
+	console.log(`${piped ? "ok     " : "FAIL   "} the live transcript over stderr: ${fromSession} entries from the session (${[...new Set(kinds)].join(", ") || "none"}), ${unverified.length} skip, unverified or dropped events, records kept out of the output`);
+	if (!piped) failed = true;
+	if (!ok) console.log(String(output.get("last") ?? "").split("\n").slice(-15).join("\n"));
+	if (!ok) failed = true;
 }
 
 // Issue #730, PERMANENT: the readable runner this venue uses must let a tool reach an allowed host and still keep the
