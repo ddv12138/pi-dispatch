@@ -20,6 +20,14 @@ const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PW = "0123456789abcdef".repeat(4);
 const ctx = (password = {}, over = {}) => ({ envPath: "/d/.env", shared: false, rootRefused: false, error: null, password: { environment: null, file: null, ...password }, ...over });
 
+// A private database per test, named as the URL's one whole path segment: appending `/13` to a base that already
+// carries a path (`.../8`) names no database at all, which the strict URL parser refuses (fail loud).
+const withDb = (base, db) => {
+	const u = new URL(base);
+	u.pathname = `/${db}`;
+	return u.toString();
+};
+
 test("a generated password is 64 hex characters that every .env loader reads back byte for byte (#468)", () => {
 	const seen = new Set();
 	for (let i = 0; i < 50; i++) {
@@ -534,8 +542,8 @@ setTimeout(() => { console.log("NOT-REACHED"); process.exit(0); }, 6000);
 test("the kill switch on a shell/.env disagreement: pause pauses both, status shows both, resume and cancel refuse until named (#468)", { timeout: 60_000 }, async (t) => {
 	const base = process.env.VALKEY_TEST_URL;
 	if (!base) return t.skip("needs a Valkey (VALKEY_TEST_URL); CI runs it");
-	const shellUrl = `${base}/13`;
-	const fileUrl = `${base}/14`;
+	const shellUrl = withDb(base, 13);
+	const fileUrl = withDb(base, 14);
 	const dir = tempDir("valkey-kill-");
 	writeFileSync(join(dir, ".env"), `VALKEY_URL=${fileUrl}\n`);
 	const { main } = await import("../src/cli.mjs");
@@ -586,7 +594,7 @@ test("the kill switch on a shell/.env disagreement: pause pauses both, status sh
 		assert.match(flagFirst.err, /no job local-0123456789abcdef in \d+ queue\(s\)/, flagFirst.err);
 		assert.doesNotMatch(flagFirst.err, /no job --valkey-url/);
 		// A URL that is neither side's is used, and said.
-		const third = await run(["status", "--valkey-url", `${base}/15`]);
+		const third = await run(["status", "--valkey-url", withDb(base, 15)]);
 		assert.equal(third.code, 0, third.err);
 		assert.match(third.err, /warning: using --valkey-url redis:\/\/127\.0\.0\.1:\d+\/15, which is neither this shell's VALKEY_URL \(redis:\/\/127\.0\.0\.1:\d+\/13\) nor .*\.env's \(redis:\/\/127\.0\.0\.1:\d+\/14\)/);
 		const named = await run(["resume", "--valkey-url", fileUrl]);
@@ -758,7 +766,7 @@ test("claimValkeyOwner records pi-dispatch:owner once and reads it back: a secon
 	const base = process.env.VALKEY_TEST_URL;
 	if (!base) return t.skip("needs a Valkey (VALKEY_TEST_URL); CI runs it");
 	const { claimValkeyOwner } = await import("../src/connection.mjs");
-	const url = `${base}/12`;
+	const url = withDb(base, 12);
 	const dir = tempDir("valkey-owner-");
 	const context = valkeyClientContext({ env: {}, cwd: dir });
 	const wipe = makeRedisClient(url, { context });
