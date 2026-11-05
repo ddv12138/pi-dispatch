@@ -188,3 +188,78 @@ export function targetSeparator(kind, targetType) {
 	if (targetType !== "pull_request") return "#";
 	return forgeSpec(kind)?.pullRequestSep ?? "#";
 }
+
+/**
+ * The environment variable names a job's git credential helper occupies (`GIT_CONFIG_COUNT`, `_KEY_0`, `_VALUE_0`),
+ * spelled once so `NON_SECRET_ENV_KEYS`, `CONTAINER_ENV_NAMES` and the helper itself cannot drift apart.
+ */
+export const GIT_HELPER_ENV_NAMES = Object.freeze(["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]);
+
+/**
+ * The commit identity a job's git gets: four variables rather than `user.name`/`user.email` in a config file.
+ * `GIT_AUTHOR_*` and `GIT_COMMITTER_*` are read by git itself, so they hold in a container that has no
+ * `~/.gitconfig` and nothing writes one.
+ *
+ * Without them `git commit` dies with `Author identity unknown`, and the agent has to invent a name. That is not
+ * hypothetical: on the 253 deployment the commits of a real run are authored by `pi-dispatch
+ * <pi-dispatch@localhost>` only because the model ran `git config user.name` and `user.email` by hand two tool calls
+ * after the failure. A different model, or the same one on a colder day, would have produced a different author for
+ * the same deployment, and nothing in the run record would say which.
+ *
+ * The name is that same one, deliberately, so a job's history stays comparable across deployments. It is not a
+ * credential, which is why it sits in `NON_SECRET_ENV_KEYS` beside the helper's three.
+ */
+export const GIT_JOB_IDENTITY = Object.freeze({
+	GIT_AUTHOR_NAME: "pi-dispatch",
+	GIT_AUTHOR_EMAIL: "pi-dispatch@localhost",
+	GIT_COMMITTER_NAME: "pi-dispatch",
+	GIT_COMMITTER_EMAIL: "pi-dispatch@localhost",
+});
+
+/** The identity names, derived from the map above rather than written out a second time. */
+export const GIT_IDENTITY_ENV_NAMES = Object.freeze(Object.keys(GIT_JOB_IDENTITY));
+
+/** Everything `buildContainerEnv` writes for the job's own git: the helper's three names and the identity's four. */
+export const GIT_ENV_NAMES = Object.freeze([...GIT_HELPER_ENV_NAMES, ...GIT_IDENTITY_ENV_NAMES]);
+
+/**
+ * The git credential helper a forge job gets, as `GIT_CONFIG_COUNT`, `_KEY_0` and `_VALUE_0`: it answers `get` with
+ * this forge's username and `password=$<token variable>`, the token read from the job's own environment at the moment
+ * git asks. Never the token itself, never argv, never a URL, never `.git/config`.
+ *
+ * WHY A HELPER AT ALL. A job's clone is made on the HOST (`prepare-github.mjs`, `host-clone.mjs`, whose credential
+ * lives outside every agent-reachable tree) and its remote is deliberately tokenless: an `origin` URL carrying a token
+ * would sit in `.git/config`, which the agent can rewrite and which the sandbox keeps for a day after the run. So git
+ * needs a credential source inside the container, and a helper is the only one that never writes the token down.
+ *
+ * WHY IT IS HERE RATHER THAN ONLY ON ONE VENUE. It was born on `openshell` (issue #684), where an exec's `--env` is
+ * the only way to hand a job a variable and a provider rewrites the token's PLACEHOLDER into the Basic header.
+ * `local` and `podman` were never given it, so `git push` in a job there authenticated only when the model improvised:
+ * measured on the 253 deployment, 2026-11-05, where a `spec-run` job had to build `git -c
+ * http.extraHeader="Authorization: Basic <base64 of oauth2:$GITLAB_TOKEN>"` itself after a bare `git ls-remote` failed
+ * with `could not read Username`, while its envelope's step 2 says plainly to `git push`. A weaker model, or one that
+ * does not think to base64 an Authorization header, fails that step instead, having already paid for the work.
+ *
+ * WHAT ITS VALUE HOLDS, AND SO WHAT ITS REACH IS. Only the token's NAME. That is what lets it travel as a non-secret
+ * name on the openshell exec argv (`NON_SECRET_ENV_KEYS`) and what makes it safe in a container whose `.git/config` the
+ * agent controls. Its reach is the helper's: any host git is pointed at, because git decides the host and the helper
+ * answers. The token's own scoping is what bounds that (CONST-TOKEN-SCOPED-PER-JOB), and with the egress policy armed,
+ * squid's allowlist bounds which hosts are reachable at all. A host check here would be a false comfort for the same
+ * reason: the token is already in the job's environment, which is the thing the helper hands it to git FROM.
+ *
+ * Null for a job whose environment carries no forge token: a helper with nothing to answer would turn
+ * `could not read Username` into a prompt for a password nobody has.
+ */
+export function gitCredentialEnv(env = {}) {
+	// The forge is the one whose token variable the env carries: the worker writes a token into its own forge's names
+	// only (env-allowlist.mjs), so at most one forge matches.
+	const kind = FORGE_KINDS.find((k) => (FORGES[k].tokenVars ?? []).some((v) => typeof env[v] === "string" && env[v] !== ""));
+	if (!kind) return null;
+	const tokenVar = FORGES[kind].tokenVars.find((v) => typeof env[v] === "string" && env[v] !== "");
+	const user = kind === "github" ? "x-access-token" : kind === "gitlab" ? "oauth2" : "pi-dispatch";
+	return {
+		GIT_CONFIG_COUNT: "1",
+		GIT_CONFIG_KEY_0: "credential.helper",
+		GIT_CONFIG_VALUE_0: `!f() { test "$1" = get || exit 0; echo username=${user}; echo "password=$${tokenVar}"; }; f`,
+	};
+}

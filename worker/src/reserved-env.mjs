@@ -1,3 +1,5 @@
+import { GIT_ENV_NAMES } from "./forges.mjs";
+
 /**
  * Issue #503: the variable a keyless provider's `models.json` key names (`"apiKey": "$PI_DISPATCH_KEYLESS"`), so pi
  * composes the provider. `buildContainerEnv` writes it, with the fixed, non-secret value `keyless`, only when the
@@ -15,11 +17,12 @@ export const KEYLESS_ENV_NAME = "PI_DISPATCH_KEYLESS";
  * for, on a clean exit 0) or silently WIN (a trigger redirecting `PI_OFFLINE` or `PI_MAX_TURNS`). Both
  * are the inversion `env-allowlist.mjs`'s header exists to prevent, arriving through a new door.
  *
- * A SEPARATE MODULE, and it has no imports at all, on purpose. `triggers.mjs` is the shared validator:
- * it is pure and fs-free, the receiver loads it, and `admin/build.mjs` INLINES it into the published
- * console. Importing `env-allowlist.mjs` to reach these names would drag `node:fs`, `node:os` and pi's
- * compat shim into all three, to read a list of strings. So the list moves down here, where both can
- * have it for free.
+ * A SEPARATE MODULE, and it imports nothing but `forges.mjs`, on purpose. `triggers.mjs` is the shared validator: it
+ * is pure and fs-free, the receiver loads it, and `admin/build.mjs` INLINES it into the published console. Importing
+ * `env-allowlist.mjs` to reach these names would drag `node:fs`, `node:os` and pi's compat shim into all three, to read
+ * a list of strings. So the list moves down here, where both can have it for free. `forges.mjs` is the one exception and
+ * is safe for the same reason: it imports nothing itself (issue #684's git helper names are derived there, and a second
+ * hand-written copy of them here is the drift this file exists to prevent).
  *
  * Only the STATIC names live here. The rest of the closed map is deployment state and cannot be known
  * from a triggers file at all: the provider's credential variable names come from `providerKeyCandidates`
@@ -93,6 +96,10 @@ export const CONTAINER_ENV_NAMES = new Set([
 	"HOME",
 	// Issue #503: written only on the keyless branch of the credential gate (see KEYLESS_ENV_NAME at the top).
 	KEYLESS_ENV_NAME,
+	// The job's own git: the credential helper's three names and the commit identity's four (forges.mjs). Reserved for the
+	// two ways a trigger could otherwise use them -- a helper of its own pointing the job's forge token at a host the
+	// operator never allowlisted, and an author name/address that is not this deployment's.
+	...GIT_ENV_NAMES,
 ]);
 
 /**

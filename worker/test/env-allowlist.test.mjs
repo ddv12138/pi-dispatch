@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { CONTAINER_ENV_NAMES } from "../src/reserved-env.mjs";
 // Static, unlike env-allowlist itself below: forges.mjs imports nothing, so it is available even on a
 // box where pi-ai will not load and the rest of this file skips.
-import { FORGES, FORGE_KINDS } from "../src/forges.mjs";
+import { FORGES, FORGE_KINDS, GIT_ENV_NAMES } from "../src/forges.mjs";
 import { apiKeyVariable } from "../src/provider-key.mjs";
 
 // env-allowlist imports @earendil-works/pi-ai (for findEnvKeys). That needs node >=22.19.0 and
@@ -200,6 +200,15 @@ test("the container env is a CLOSED set: only the provider key, never the whole 
 			"ANTHROPIC_API_KEY",
 			"GH_TOKEN",
 			"GITHUB_TOKEN",
+			// The job's own git (forges.mjs GIT_ENV_NAMES): a helper for the token this job carries, and an identity for
+			// the commits it makes. Seven names, and the drift check further down holds them to reserved-env.mjs.
+			"GIT_AUTHOR_EMAIL",
+			"GIT_AUTHOR_NAME",
+			"GIT_COMMITTER_EMAIL",
+			"GIT_COMMITTER_NAME",
+			"GIT_CONFIG_COUNT",
+			"GIT_CONFIG_KEY_0",
+			"GIT_CONFIG_VALUE_0",
 			"PI_CODEMODE_MAX_WORKERS",
 			"PI_JOB_ID",
 			"PI_MAX_TURNS",
@@ -211,6 +220,51 @@ test("the container env is a CLOSED set: only the provider key, never the whole 
 			"PLAYWRIGHT_MCP_SANDBOX",
 		],
 	);
+});
+
+// The job's own git. Two failures measured on a real deployment (2026-11-05) are what these pin: a `git ls-remote`
+// that answered `could not read Username for 'https://…'` because nothing in the container could answer for the forge,
+// and a `git commit` that died with `Author identity unknown` because nothing had told git who the job is.
+test("a forge job's git: a helper that reads the token BY NAME (never holding it), and a commit identity", { skip }, () => {
+	const env = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", githubToken: "ghs_scoped", forgeKind: "github", hostEnv: HOST });
+	assert.equal(env.GIT_CONFIG_COUNT, "1");
+	assert.equal(env.GIT_CONFIG_KEY_0, "credential.helper");
+	assert.match(env.GIT_CONFIG_VALUE_0, /test "\$1" = get \|\| exit 0/, "it answers `get` and nothing else");
+	assert.match(env.GIT_CONFIG_VALUE_0, /username=x-access-token/);
+	assert.match(env.GIT_CONFIG_VALUE_0, /password=\$GITHUB_TOKEN/);
+	// THE VALUE MUST NOT CARRY THE TOKEN. It is on the openshell exec argv and in a transcript; only its NAME is safe
+	// there, and git reads the variable when it asks.
+	assert.ok(!env.GIT_CONFIG_VALUE_0.includes("ghs_scoped"), "the helper names the token's variable, never the token");
+	// Git's own variables, so they hold with no ~/.gitconfig in the container and nothing writing one.
+	assert.deepEqual(
+		[env.GIT_AUTHOR_NAME, env.GIT_AUTHOR_EMAIL, env.GIT_COMMITTER_NAME, env.GIT_COMMITTER_EMAIL],
+		["pi-dispatch", "pi-dispatch@localhost", "pi-dispatch", "pi-dispatch@localhost"],
+	);
+});
+
+test("each forge's helper names its own token and username, and a job with no token gets no helper at all", { skip }, () => {
+	const gitlab = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", githubToken: "glpat-x", forgeKind: "gitlab", hostEnv: HOST });
+	assert.match(gitlab.GIT_CONFIG_VALUE_0, /username=oauth2/);
+	assert.match(gitlab.GIT_CONFIG_VALUE_0, /password=\$GITLAB_TOKEN/);
+	const forgejo = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", githubToken: "fj-t", forgeKind: "forgejo", hostEnv: HOST });
+	assert.match(forgejo.GIT_CONFIG_VALUE_0, /password=\$FORGEJO_TOKEN/);
+	// A local-folder cron job has no forge token (CONST-TOKEN-SCOPED-PER-JOB): a helper with nothing to answer would
+	// only turn "could not read Username" into a password prompt nobody can satisfy.
+	const local = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", githubToken: undefined, hostEnv: HOST });
+	for (const name of ["GIT_CONFIG_COUNT", "GIT_CONFIG_KEY_0", "GIT_CONFIG_VALUE_0"]) {
+		assert.equal(local[name], undefined, `${name} must be absent on a job with no forge token`);
+	}
+	// The identity is NOT conditional: a local job commits too.
+	assert.equal(local.GIT_AUTHOR_NAME, "pi-dispatch");
+});
+
+test("GIT_ENV_NAMES is exactly what a forge job emits, and every name is reserved", { skip }, () => {
+	const env = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", githubToken: "ghs_scoped", forgeKind: "github", hostEnv: HOST });
+	const emitted = Object.keys(env).filter((k) => k.startsWith("GIT_")).sort();
+	assert.deepEqual(emitted, [...GIT_ENV_NAMES].sort(), "a name added to the set or the map without the other would drift here");
+	for (const name of GIT_ENV_NAMES) {
+		assert.ok(CONTAINER_ENV_NAMES.has(name), `${name} must be reserved, or run.secrets could set it`);
+	}
 });
 
 test("a local-folder job (no token) gets NO GITHUB_TOKEN or GH_TOKEN var at all -- not an empty one", { skip }, () => {

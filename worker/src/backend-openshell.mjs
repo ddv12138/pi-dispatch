@@ -4,7 +4,7 @@ import { cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, write
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
 import { isJobNamespace, jobContainerName, JOB_NAME_PREFIX, reaperExec } from "./backend-local.mjs";
-import { FORGES } from "./forges.mjs";
+import { gitCredentialEnv } from "./forges.mjs";
 import { NON_SECRET_ENV_KEYS } from "./redact-secrets.mjs";
 import { BACKENDS, OPENSHELL_BACKEND, OPENSHELL_BIND_BACKEND } from "./backends.mjs";
 import { containerSpec, SHIPPED_IMAGE_UID, SIZE_LABEL_CPU, SIZE_LABEL_MEM, transfersFromSpec } from "./container-spec.mjs";
@@ -482,26 +482,12 @@ export function bundleProviderPlan({ name, env = {}, bundleKeys = null } = {}) {
 }
 
 /**
- * The git credential helper a forge job's exec gets on this venue (issue #684), as `GIT_CONFIG_COUNT`, `_KEY_0` and
- * `_VALUE_0`: it prints the forge token's PLACEHOLDER as the password, and OpenShell's supervisor rewrites it into the
- * real token in the Basic header (measured), at any host the policy admits, as every credential of the provider is bound
- * to every endpoint (squid's reach, not narrower). git sends a token only through a helper, and
- * the clone's remote is tokenless (prepare-github.mjs), so without it a push would never authenticate. Null for a job
- * whose forge token is not in its env.
+ * The git credential helper's three variables live in `forges.mjs` since the `local` and `podman` venues came to need
+ * them too (a job there could not authenticate a push at all: `buildContainerEnv` writes them now). Re-exported here
+ * because this venue's tests and readers know them as this module's, and because on this venue the value is what makes
+ * the token's PLACEHOLDER resolvable.
  */
-export function gitCredentialEnv(env = {}) {
-	// The forge is the one whose token variable the env carries: the worker writes a minted token into its own forge's
-	// names only (env-allowlist.mjs), so at most one forge matches.
-	const kind = Object.keys(FORGES).find((k) => (FORGES[k].tokenVars ?? []).some((v) => typeof env[v] === "string" && env[v] !== ""));
-	if (!kind) return null;
-	const tokenVar = FORGES[kind].tokenVars.find((v) => typeof env[v] === "string" && env[v] !== "");
-	const user = kind === "github" ? "x-access-token" : kind === "gitlab" ? "oauth2" : "pi-dispatch";
-	return {
-		GIT_CONFIG_COUNT: "1",
-		GIT_CONFIG_KEY_0: "credential.helper",
-		GIT_CONFIG_VALUE_0: `!f() { test "$1" = get || exit 0; echo username=${user}; echo "password=$${tokenVar}"; }; f`,
-	};
-}
+export { gitCredentialEnv } from "./forges.mjs";
 
 /**
  * The targets OpenShell refuses for a bind (measured on 0.1.4: `/sandbox` "is reserved for the OpenShell workspace", and

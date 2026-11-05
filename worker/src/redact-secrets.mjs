@@ -1,5 +1,5 @@
 import { egressEnv } from "./egress.mjs";
-import { FORGE_HOST_VARS } from "./forges.mjs";
+import { FORGE_HOST_VARS, GIT_ENV_NAMES } from "./forges.mjs";
 import { KEYLESS_ENV_NAME } from "./reserved-env.mjs";
 
 /**
@@ -176,6 +176,11 @@ export const NON_SECRET_ENV_KEYS = new Set([
 	"HOME",
 	KEYLESS_ENV_NAME,
 	...FORGE_HOST_VARS,
+	// The job's own git (forges.mjs): the credential helper's three variables -- whose value holds the token's NAME, never
+	// the token -- and the four identity variables. Non-secret is not cosmetic here: this list is also what the openshell
+	// venue may put on an exec argv, and what `secretValuesOf` does NOT redact. A helper text treated as a secret would be
+	// masked in every transcript, which is the one place an operator can see why a push authenticated or did not.
+	...GIT_ENV_NAMES,
 ]);
 
 /** The variables the worker writes when the egress policy is armed, by name: what `workerSet` may vouch for. */

@@ -32,7 +32,7 @@ import { findEnvKeys } from "@earendil-works/pi-ai/compat";
 import { getBuiltinProviders } from "@earendil-works/pi-ai/providers/all";
 import { codemodeWorkersOf, DEFAULT_JOB_SIZE } from "./job-size.mjs";
 import { egressEnv } from "./egress.mjs";
-import { RECEIVER_ONLY_VARS, forgeSpec } from "./forges.mjs";
+import { GIT_JOB_IDENTITY, RECEIVER_ONLY_VARS, forgeSpec, gitCredentialEnv } from "./forges.mjs";
 import { apiKeyVariable } from "./provider-key.mjs";
 import { isDeterminateFsCode } from "./transient.mjs";
 import { KEYLESS_HOW, keylessVerdict, overlayApiKeyProblem, overlayApiKeyVariable, providerRenameHint, readOverlayModels, RENAMED_PROVIDERS } from "./model-endpoints.mjs";
@@ -683,6 +683,18 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 		const host = forgeHosts?.[forgeKind];
 		if (host) for (const name of spec.hostVars) env[name] = host;
 	}
+
+	// git, for the work the agent does INSIDE the container: a credential helper when this job carries a forge token, and
+	// a commit identity always. Both are `forges.mjs`'s (their headers carry the why: the remote is tokenless on purpose,
+	// and `git commit` in a container with no `~/.gitconfig` has no author unless one is handed to it). Written after the
+	// token above, because the helper's value names the token's variable and is derived from which one is set.
+	//
+	// These are in `CONTAINER_ENV_NAMES` (reserved-env.mjs) and refused in `run.secrets`/`PI_FORWARD_ENV` for a reason
+	// that is not bookkeeping: a trigger able to set `GIT_CONFIG_VALUE_0` could install a helper of its own and send the
+	// job's token anywhere egress reaches, and one able to set `GIT_AUTHOR_EMAIL` could author commits as somebody else.
+	const gitCred = gitCredentialEnv(env);
+	if (gitCred) Object.assign(env, gitCred);
+	Object.assign(env, GIT_JOB_IDENTITY);
 
 	// OQ-043: the receiver's own lookup credential (FORGEJO_PERMISSION_TOKEN) is an admin account's token and never a
 	// job's. PI_FORWARD_ENV and run.secrets both refuse it upstream; this is the line that holds if either is bypassed.
