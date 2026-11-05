@@ -147,7 +147,7 @@ export const HAND_FIELDS = Object.freeze([
   "secretsProfile",
   "gates",
   "gateTimeout",
-  "gateBudgetRaiseUsd",
+  "gateBudgetRaiseTokens",
   "excludeTools",
 ]);
 export function triggerRun(v) {

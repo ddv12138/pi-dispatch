@@ -16,16 +16,15 @@ const MINUTE = 60_000;
 export const TRIGGER_LIST_LIMITS = Object.freeze({ records: 1000, lanes: 64, occurrences: 512, quietWindows: 16 });
 export const TRIGGER_LIST_KINDS = Object.freeze(["all", "schedule", "label", "comment", "pull_request", "issue"]);
 const TYPES = new Set(["cron", "label", "comment", "pull_request", "issue"]);
-const PRICING = Object.freeze({ getPricedModel: () => null, isZeroRated: () => false });
 const atOf = (r) => Date.parse(r?.endedAt ?? r?.startedAt ?? "");
 const safeTime = (n) => Number.isSafeInteger(n) && n >= 0 ? n : null;
 const copyStrings = (value) => Array.isArray(value) ? value.filter((v) => typeof v === "string").slice(0, 64) : [];
 const recordOf = (r) => Object.fromEntries(["jobId", "target", "project", "kind", "triggerIndex", "triggerType", "flow", "startedAt", "endedAt", "outcome"].filter((k) => typeof r?.[k] === "string" || Number.isSafeInteger(r?.[k])).map((k) => [k, r[k]]).concat([["reason", recordReason(r)]]));
 
 function ruleOf(t) {
-  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "portfolio", "replicas", "maxTokens", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout", "gateBudgetRaiseUsd"];
+  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "portfolio", "replicas", "maxTokens", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout", "gateBudgetRaiseTokens"];
   const out = Object.fromEntries(scalar.filter((k) => typeof t[k] === "string" || typeof t[k] === "boolean" || Number.isSafeInteger(t[k])).map((k) => [k, t[k]]));
-  for (const key of ["maxTokens", "gateBudgetRaiseUsd"]) {
+  for (const key of ["maxTokens", "gateBudgetRaiseTokens"]) {
     if (typeof t[key] === "number" && Number.isFinite(t[key]) && t[key] >= 0) out[key] = t[key];
     else delete out[key];
   }
@@ -123,12 +122,14 @@ export function quietIntervals(window, { start, end, formatters = new Map() } = 
   } catch { return { intervals: [], incomplete: true, problem: "This quiet window cannot be projected." }; }
 }
 
-function statsOf(records, weekStart, now, incomplete, subscriptions, pricing) {
+function statsOf(records, weekStart, now, incomplete) {
   if (records === null) return { runs30d: null, weekRuns: null, weekCostTokens: null, weekCost: null, incomplete: true, costIncomplete: true };
   const week = records.filter((r) => atOf(r) >= weekStart && atOf(r) <= now);
   const costs = week.map((r) => refusedBeforeSpend(r) ? 0 : meteredRunTokens(r));
   const joined = { byJobId: Object.fromEntries(week.map((r) => [r.jobId, { key: "trigger:sum" }])) };
-  const cost = foldTriggerCosts({ records: week, subscriptions, pricing, triggerJoin: joined })["trigger:sum"]?.cost ?? { usd: 0, class: "metered", floor: false };
+  // The fold's per-key entry is { amount, runs }; amount is the typed token shape the panel formats
+  // (fmtAmount). The join hands every week record to one bucket, so the key is the synthetic "trigger:sum".
+  const cost = foldTriggerCosts({ records: week, triggerJoin: joined })["trigger:sum"]?.amount ?? { tokens: 0, class: "metered", floor: false };
   return { runs30d: records.length, weekRuns: week.length, weekCostTokens: costs.reduce((sum, n) => sum + (n ?? 0), 0), weekCost: cost, incomplete, costIncomplete: costs.some((n) => n === null) };
 }
 
@@ -137,7 +138,7 @@ function statsOf(records, weekStart, now, incomplete, subscriptions, pricing) {
  * seven-day lanes and quiet intervals. Records are a bounded retained view; only coverage.complete:true asserts
  * a full requested history. A missing read is null, never a fabricated empty history.
  */
-export function triggerListOf({ snapshot = null, records = null, coverage = {}, now, subscriptions = [], pricing = PRICING, scheduleZones = {} } = {}) {
+export function triggerListOf({ snapshot = null, records = null, coverage = {}, now, scheduleZones = {} } = {}) {
   if (!Number.isSafeInteger(now)) throw new TypeError("triggerListOf requires the caller's clock");
   const dayStart = Math.floor(now / DAY) * DAY;
   const weekStart = dayStart - ((new Date(dayStart).getUTCDay() + 6) % 7) * DAY;
@@ -173,7 +174,7 @@ export function triggerListOf({ snapshot = null, records = null, coverage = {}, 
     const spec = scheduleZones instanceof Map ? scheduleZones.get(trigger.id) : scheduleZones[trigger.id];
     const zone = typeof spec === "string" ? spec : typeof spec?.zone === "string" ? spec.zone : null;
     const hosts = Array.isArray(spec?.hosts) ? spec.hosts.filter(h => typeof h === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(h)).slice(0, 64) : [];
-    return { trigger, index: trigger.index, group: trigger.type === "cron" ? "schedule" : trigger.forge ?? "unknown", stats: statsOf(own, weekStart, now, incomplete, subscriptions, pricing), lastRun: own?.[0] ? recordOf(own[0]) : null,
+    return { trigger, index: trigger.index, group: trigger.type === "cron" ? "schedule" : trigger.forge ?? "unknown", stats: statsOf(own, weekStart, now, incomplete), lastRun: own?.[0] ? recordOf(own[0]) : null,
       nextFire: trigger.type === "cron" ? { at, health: stalls !== null && stalls >= stallLimit ? "stalled" : at === null ? "unknown" : at < now ? "overdue" : "on-time", stalls, stallLimit, hosts: scheduleConflict || schedulers.length === 0 ? [] : hosts, zone: scheduleConflict || schedulers.length === 0 ? null : zone, problem: schedulerProblem } : null,
       chips: chipsOf(trigger, (snapshot?.stagedPackages?.packages?.length ?? 0) > 0), unknown: [...(trigger.displayCut ? ["Some selector or option names are omitted from this bounded display."] : []), ...(own === null ? ["History unavailable"] : []), ...(trigger.type === "cron" && at === null ? [schedulerProblem ?? "Scheduler next fire unavailable"] : [])] };
   });
@@ -201,5 +202,5 @@ export function triggerListOf({ snapshot = null, records = null, coverage = {}, 
   if ((windows?.length ?? 0) > TRIGGER_LIST_LIMITS.quietWindows) problems.push("Only the first quiet windows are projected.");
   if (scheduled.length > TRIGGER_LIST_LIMITS.lanes) problems.push("Only the first schedule lanes are projected.");
   const attributed = Array.isArray(view?.triggers) ? kept?.filter((r) => rules.some((t) => recordMatchesTrigger(r, t))) ?? null : null;
-  return { now, rows, groups, counts, next, weekStart, stats: statsOf(attributed, weekStart, now, incomplete, subscriptions, pricing), week: { start: dayStart, end, zone: "UTC", label: "Next 7 days, UTC", lanes, quiet, quietUnknown: windows === null, quietCut: Math.max(0, (windows?.length ?? 0) - TRIGGER_LIST_LIMITS.quietWindows), lanesCut: Math.max(0, scheduled.length - TRIGGER_LIST_LIMITS.lanes) }, coverage: { complete: !incomplete, records: kept?.length ?? null }, problems };
+  return { now, rows, groups, counts, next, weekStart, stats: statsOf(attributed, weekStart, now, incomplete), week: { start: dayStart, end, zone: "UTC", label: "Next 7 days, UTC", lanes, quiet, quietUnknown: windows === null, quietCut: Math.max(0, (windows?.length ?? 0) - TRIGGER_LIST_LIMITS.quietWindows), lanesCut: Math.max(0, scheduled.length - TRIGGER_LIST_LIMITS.lanes) }, coverage: { complete: !incomplete, records: kept?.length ?? null }, problems };
 }

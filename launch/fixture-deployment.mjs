@@ -604,7 +604,7 @@ export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 		await redis.set(W.budget.dayKey(now), slots(dayStart));
 		await redis.set(W.budget.weekKey(now), slots(weekStart));
 		await redis.set(W.budget.monthKey(now), slots(monthStart));
-		await redis.set(W.budget.tokenDayKey(now), records.filter((r) => since(r, dayStart)).reduce((s, r) => s + (r.tokens?.total ?? 0), 0));
+		await redis.set(W.budget.dayKey(now, W.tokenBudget.TOKEN_KEY_PREFIX), records.filter((r) => since(r, dayStart)).reduce((s, r) => s + (r.tokens?.total ?? 0), 0));
 		const web = (r) => r.kind === "github" && r.target?.startsWith("acme/web#");
 		const webScope = W.scopedLimits.scopeKeyPrefix("github:acme/web");
 		await redis.set(W.budget.dayKey(now, webScope), records.filter((r) => web(r) && r.budgetReserved && since(r, dayStart)).length + 1);
