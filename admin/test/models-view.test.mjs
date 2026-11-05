@@ -5,16 +5,16 @@ import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { collectModelPolicies, modelsViewOf, readModelsView, modelsForAgent, readModelsHistory, canaryComparisonLines, MODELS_LIMITS } from "../src/models-view.mjs";
 import { dayKey } from "@edgehero/pi-dispatch/budget";
-import { modelDollarKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
+import { modelTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 const NOW = Date.UTC(2026, 9, 31, 12);
-const deployment = { provider: "p", model: "main", maxCostUsd: "2" };
+const deployment = { provider: "p", model: "main", maxTokens: "2000000" };
 const status = ref => ({ known: ref !== "p/missing", priced: !["p/unpriced", "p/missing", "radius/model"].includes(ref), reason: ref === "p/unpriced" ? "model-unpriced" : null, api: ref.startsWith("radius/") ? "pi-messages" : "openai-completions" });
 const entry = (run = {}) => ({ on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", model: "role:editor", ...run } });
 const snapshot = { waiting: { rows: [] }, doctor: { hosts: [] }, settings: { overlay: {} } };
 function view(options = {}) { return modelsViewOf({ now: NOW, deployment, status, snapshot, ...options }); }
-const original = (jobId = "original", overrides = {}) => ({ jobId, modelRole: "editor", flow: "fix", provider: "p", model: "main", outcome: "completed", endedAt: new Date(NOW - 60000).toISOString(), turns: 2, tokens: { total: 100, cost: .2, metered: true }, ...overrides });
-const candidate = (jobId = "canary", sourceJobId = "original", overrides = {}) => ({ jobId, flow: "fix", provider: "p", model: "candidate", outcome: "completed", endedAt: new Date(NOW - 30000).toISOString(), turns: 4, tokens: { total: 200, cost: .1, metered: true }, canary: { sourceJobId, role: "editor", candidate: "p/candidate" }, ...overrides });
+const original = (jobId = "original", overrides = {}) => ({ jobId, modelRole: "editor", flow: "fix", provider: "p", model: "main", outcome: "completed", endedAt: new Date(NOW - 60000).toISOString(), turns: 2, tokens: { total: 100, metered: true }, ...overrides });
+const candidate = (jobId = "canary", sourceJobId = "original", overrides = {}) => ({ jobId, flow: "fix", provider: "p", model: "candidate", outcome: "completed", endedAt: new Date(NOW - 30000).toISOString(), turns: 4, tokens: { total: 200, metered: true }, canary: { sourceJobId, role: "editor", candidate: "p/candidate" }, ...overrides });
 
 test("role associations expand every reachable scope, preserve fallback order and separate trigger-owned lists", () => {
   const modelRoles = { default: { editor: "p/main" }, web: { editor: { model: "p/web", fallbackModels: ["p/unpriced", "p/backup"] } } };
@@ -56,7 +56,7 @@ test("refused triggers retain their physical literal, allowed and fallback model
   const inherited = view({ entries: [entry({ model: "main" })], envList: ["p/main", "p/backup"] });
   assert.deepEqual(new Set(inherited.models.map(row => row.ref)), new Set(["p/main", "p/backup"]));
   const radius = view({ entries: [entry({ model: "role:missing", models: ["radius/model"], fallbackModels: ["radius/model"] })] });
-  assert.deepEqual(radius.banners.map(row => row.kind), ["radius-cost-cap", "role-conflict"]);
+  assert.deepEqual(radius.banners.map(row => row.kind), ["role-conflict"], "the cost-bound banner died with the cost era");
 });
 
 test("cooldowns expire under the caller clock, only failover skips them, and unknown routing stays unknown", () => {
@@ -70,62 +70,60 @@ test("cooldowns expire under the caller clock, only failover skips them, and unk
   assert.equal(view({ modelRoles: roles, cooldowns: [...cooling, { ref: "p/backup", kind: "overloaded", until: NOW + 1 }] }).roles[0].next.kind, "waiting");
 });
 
-test("Radius warnings use doctor's exact diagnosis for capped roles for the same locally unboundable API regardless of listed zero rates", () => {
-  for (const maxCostUsd of ["0.01", "2"]) {
-    const got = view({ deployment: { ...deployment, maxCostUsd }, modelRoles: { default: { editor: "radius/model" } } });
-    assert.equal(got.banners[0].kind, "radius-cost-cap");
-    assert.match(got.banners[0].label, /no verified local cost bound.*unboundable/);
-    assert.match(got.banners[0].fix, /raising the cap.*cannot bound Radius/);
+test("a token cap no longer flags locally unboundable APIs: the Radius cost-bound banner died with the cost era", () => {
+  for (const maxTokens of ["1000", "2000000"]) {
+    const got = view({ deployment: { ...deployment, maxTokens }, modelRoles: { default: { editor: "radius/model" } } });
+    assert.deepEqual(got.banners.map(row => row.kind), [], "no banner for a pi-messages model under a cap");
   }
-  assert.equal(view({ deployment: { ...deployment, maxCostUsd: null }, modelRoles: { default: { editor: "radius/model" } } }).banners.length, 0);
+  assert.equal(view({ deployment: { ...deployment, maxTokens: null }, modelRoles: { default: { editor: "radius/model" } } }).banners.length, 0);
 });
 
 test("model windows match refs case-insensitively while unknown counters never become zero", () => {
-  const got = view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "P/MAIN", window: "day", capMicros: 10, counterMicros: 10 }, { ledger: "model", name: "p/main", window: "week", capMicros: 20, counterMicros: null }] });
+  const got = view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "P/MAIN", window: "day", capTokens: 10, counterTokens: 10 }, { ledger: "model", name: "p/main", window: "week", capTokens: 20, counterTokens: null }] });
   assert.equal(got.models[0].state, "unknown", "an unread window prevents a claim that every admission observation is available");
-  assert.deepEqual(got.models[0].windows.map(row => [row.spentMicros, row.unavailable]), [[10, false], [null, true]]);
-  assert.equal(view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "p/main", window: "day", capMicros: 10, counterMicros: 10 }] }).models[0].state, "window-full");
+  assert.deepEqual(got.models[0].windows.map(row => [row.spentTokens, row.unavailable]), [[10, false], [null, true]]);
+  assert.equal(view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "p/main", window: "day", capTokens: 10, counterTokens: 10 }] }).models[0].state, "window-full");
 });
 
 test("retained canary comparisons deduplicate mirrored IDs, name unknown metrics and bind exact numbers", () => {
-  const records = [candidate("canary-zero", "original", { tokens: { cost: 0, total: 0, metered: true }, turns: 0 }), candidate("canary-missing", "gone", { outcome: "error", tokens: null, turns: null }), original(), original("original", { tokens: { cost: 999, total: 999, metered: true } })];
+  const records = [candidate("canary-zero", "original", { tokens: { total: 0, metered: true }, turns: 0 }), candidate("canary-missing", "gone", { outcome: "error", tokens: null, turns: null }), original(), original("original", { tokens: { total: 999, metered: true } })];
   const got = view({ records, modelRoles: { default: { editor: "p/main" } } });
   const c = got.canaries[0];
   assert.equal(c.count, 2);
-  assert.deepEqual(c.candidateStats, { runs: 2, completed: 1, costPerRun: 0, averageTurns: 0, averageTokens: 0, knownCosts: 1, knownTurns: 1, knownTokens: 1 });
+  assert.deepEqual(c.candidateStats, { runs: 2, completed: 1, meteredTokensPerRun: 0, averageTurns: 0, averageTokens: 0, knownMetered: 1, knownTurns: 1, knownTokens: 1 });
   assert.equal(c.sourceStats.runs, 1);
-  assert.equal(c.sourceStats.costPerRun, .2);
+  assert.equal(c.sourceStats.meteredTokensPerRun, 100);
   assert.equal(c.partial, true);
   assert.equal(c.rows.find(row => row.sourceJobId === "gone").source, null);
-  assert.match(canaryComparisonLines(c).join(" "), /Candidate: 1\/2 completed.*\$0.000000 \(1 metered\)/);
-  const changed = view({ records: [candidate("canary-zero", "original", { tokens: { cost: .01, total: 0, metered: true }, turns: 0 }), ...records.slice(1)] }).canaries[0];
+  assert.match(canaryComparisonLines(c).join(" "), /Candidate: 1\/2 completed.*metered tokens per run 0 \(1 metered\)/);
+  const changed = view({ records: [candidate("canary-zero", "original", { tokens: { total: 5, metered: true }, turns: 0 }), ...records.slice(1)] }).canaries[0];
   assert.notEqual(changed.digest, c.digest);
   assert.equal(changed.id, c.id);
 });
 
-test("canary exact-cost means exclude every incomplete meter and keep known-zero distinct from legacy-zero", () => {
-  const floors = ["costUnreported", "unresolved", "unpriced", "unmeteredChildren", "longContext", "costUnjudged", "costUnanswered"];
-  const records = floors.map((flag, index) => candidate(`floor-${index}`, "original", { tokens: { total: 200, cost: .9, metered: true, [flag]: 1 } }));
-  records.push(candidate("fallback-meter", "original", { tokens: { total: 200, cost: .9, metered: false } }));
-  records.push(candidate("legacy-zero", "original", { tokens: { total: 200, cost: 0 } }));
-  records.push(candidate("legacy-positive", "original", { tokens: { total: 200, cost: .9 } }));
-  records.push(candidate("missing-guard-evidence", "original", { tokens: { total: 200, cost: .9, metered: true, costCapMicros: 1000000 } }));
-  records.push(candidate("missing-cost", "original", { tokens: { total: 200, metered: true } }));
-  records.push(candidate("known-zero", "original", { tokens: { total: 0, cost: 0, metered: true } }));
+test("canary exact metering excludes every floored run and keeps known-zero distinct from unmetered", () => {
+  const floors = ["unresolved", "usageUnreported", "unmeteredChildren"];
+  const records = floors.map((flag, index) => candidate(`floor-${index}`, "original", { tokens: { total: 200, metered: true, [flag]: 1 } }));
+  records.push(candidate("fallback-meter", "original", { tokens: { total: 200, metered: false } }));
+  records.push(candidate("legacy-unmetered", "original", { tokens: { total: 200 } }));
+  records.push(candidate("pre-meter", "original", { tokens: null }));
+  records.push(candidate("refused-before-spend", "original", { tokens: null, exitCode: null, budgetReserved: false }));
+  records.push(candidate("dollar-era-flags-are-not-floors", "original", { tokens: { total: 200, metered: true, costUnreported: 1, costCapMicros: 1000000 } }));
+  records.push(candidate("known-zero", "original", { tokens: { total: 0, metered: true } }));
   const sample = view({ records: [...records, original()] }).canaries[0];
   assert.equal(sample.count, floors.length + 6);
-  assert.equal(sample.candidateStats.knownCosts, 1);
-  assert.equal(sample.candidateStats.costPerRun, 0);
-  for (const row of sample.rows) assert.equal(row.candidate.cost, row.jobId === "known-zero" ? 0 : null, row.jobId);
+  assert.equal(sample.candidateStats.knownMetered, 2);
+  assert.equal(sample.candidateStats.meteredTokensPerRun, 100);
+  for (const row of sample.rows) assert.equal(row.candidate.meteredTokens, row.jobId === "known-zero" ? 0 : row.jobId === "dollar-era-flags-are-not-floors" ? 200 : null, row.jobId);
   assert.equal(sample.partial, true);
-  assert.match(canaryComparisonLines(sample).join(" "), /\$0.000000 \(1 metered\)/);
-  const withoutExact = view({ records: [...records.filter(record => record.jobId !== "known-zero"), original()] }).canaries[0];
-  assert.equal(withoutExact.candidateStats.knownCosts, 0);
-  assert.equal(withoutExact.candidateStats.costPerRun, null);
-  assert.match(canaryComparisonLines(withoutExact).join(" "), /cost per metered run unknown \(0 metered\)/);
-  const sourceFloor = view({ records: [candidate(), original("original", { tokens: { total: 100, cost: .2, metered: true, costUnreported: 1 } })] }).canaries[0];
-  assert.equal(sourceFloor.sourceStats.knownCosts, 0);
-  assert.equal(sourceFloor.rows[0].source.cost, null);
+  assert.match(canaryComparisonLines(sample).join(" "), /metered tokens per run 100 \(2 metered\)/);
+  const withoutExact = view({ records: [...records.filter(record => !["known-zero", "dollar-era-flags-are-not-floors"].includes(record.jobId)), original()] }).canaries[0];
+  assert.equal(withoutExact.candidateStats.knownMetered, 0);
+  assert.equal(withoutExact.candidateStats.meteredTokensPerRun, null);
+  assert.match(canaryComparisonLines(withoutExact).join(" "), /metered tokens per run unknown \(0 metered\)/);
+  const sourceFloor = view({ records: [candidate(), original("original", { tokens: { total: 100, metered: true, unresolved: 1 } })] }).canaries[0];
+  assert.equal(sourceFloor.sourceStats.knownMetered, 0);
+  assert.equal(sourceFloor.rows[0].source.meteredTokens, null);
   assert.equal(sourceFloor.partial, true);
 });
 
@@ -181,9 +179,9 @@ test("reader touches only configured failover cooldown keys; a simple role perfo
 });
 
 test("reader marks an incomplete MGET and a malformed overlay unknown, with no builtin routing fallback", async () => {
-  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayUsd: "1" }] });
-  const got = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelDollarKeyPrefix("p/main"))]); return []; } } });
-  assert.equal(got.models[0].windows[0].spentMicros, null);
+  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayTokens: 1 }] });
+  const got = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelTokenKeyPrefix("p/main"))]); return []; } } });
+  assert.equal(got.models[0].windows[0].spentTokens, null);
   assert.equal(got.models[0].windows[0].unavailable, true);
   assert.equal(got.models[0].state, "unknown");
   const unknown = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { records: () => [], counters: async () => [null], overlay: async () => { throw new Error("secret catalog payload"); } } });
@@ -194,12 +192,12 @@ test("reader marks an incomplete MGET and a malformed overlay unknown, with no b
   assert.doesNotMatch(JSON.stringify(unknown), /secret catalog payload/);
 });
 
-test("real model dollar rows retain their scope and spent counter through reader and agent projection", async () => {
-  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayUsd: "1" }] });
+test("real model token rows retain their scope and spent counter through reader and agent projection", async () => {
+  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayTokens: 200000 }] });
   const got = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: {
-    status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelDollarKeyPrefix("p/main"))]); return ["123456"]; },
+    status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelTokenKeyPrefix("p/main"))]); return ["123456"]; },
   } });
-  const expected = { scope: "model:p/main", window: "day", capMicros: 1000000, spentMicros: 123456, unavailable: false };
+  const expected = { scope: "model:p/main", window: "day", capTokens: 200000, spentTokens: 123456, unavailable: false };
   assert.deepEqual(got.models[0].windows, [expected]);
   assert.deepEqual(modelsForAgent(got).models[0].windows, [expected]);
   assert.equal(got.models[0].state, "available");
@@ -251,7 +249,7 @@ test("machine model reasons retain the shared failover verdicts and reject arbit
   ];
   const projected = modelsForAgent(got);
   assert.equal(projected.models.at(-1).reason, null);
-  assert.deepEqual(projected.banners.map(row => [row.kind, row.reason]), [["role-conflict", null], ["role-conflict", null], ["unknown", null], ["radius-cost-cap", "cost-cap"], ["configuration-unavailable", "model-roles-invalid"], ["catalog-unavailable", "model-unknown"], ["cooldowns-unavailable", "model-cooldown"]]);
+  assert.deepEqual(projected.banners.map(row => [row.kind, row.reason]), [["role-conflict", null], ["role-conflict", null], ["unknown", null], ["unknown", null], ["configuration-unavailable", "model-roles-invalid"], ["catalog-unavailable", "model-unknown"], ["cooldowns-unavailable", "model-cooldown"]]);
   assert.equal(projected.banners[0].projectUnknown, false);
   assert.ok(!JSON.stringify(projected).includes(privateText));
 });

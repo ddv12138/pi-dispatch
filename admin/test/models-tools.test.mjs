@@ -11,7 +11,7 @@ const primary = "anthropic/claude-sonnet-5-5", candidate = "openai/gpt-4o";
 function view() {
   const source = { jobId: "gh-source", provider: "anthropic", model: "claude-sonnet-5-5", modelRole: "editor", flow: "fix", outcome: "completed", endedAt: new Date(NOW - 60000).toISOString(), turns: 8, tokens: { metered: true, cost: 0.24, total: 120000 } };
   const replay = { ...source, jobId: "canary-773", provider: "openai", model: "gpt-4o", turns: 10, tokens: { metered: true, cost: 0.06, total: 140000 }, canary: { sourceJobId: source.jobId, role: "editor", candidate }, endedAt: new Date(NOW - 30000).toISOString() };
-  const value = modelsViewOf({ now: NOW, entries: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", model: "role:editor", flow: "fix" } }], modelRoles: { default: { editor: { model: primary, fallbackModels: [candidate] } } }, deployment: { provider: "anthropic", model: "claude-sonnet-5-5" }, records: [source, replay], cooldowns: [{ ref: primary, kind: "rate-limited", until: NOW + 10000 }], windows: [{ ledger: "model", name: primary, window: "week", capMicros: 80000000, counterMicros: 32460000 }], snapshot: { doctor: { hosts: [{ name: "host1", at: NOW, ageMs: 0, checks: [{ id: "models.1", level: "ok", label: PRIVATE, proposal: { kind: "newer-sibling", scope: "default", role: "editor", model: primary, candidate } }] }] }, waiting: { rows: [] } } });
+  const value = modelsViewOf({ now: NOW, entries: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", model: "role:editor", flow: "fix" } }], modelRoles: { default: { editor: { model: primary, fallbackModels: [candidate] } } }, deployment: { provider: "anthropic", model: "claude-sonnet-5-5" }, records: [source, replay], cooldowns: [{ ref: primary, kind: "rate-limited", until: NOW + 10000 }], windows: [{ ledger: "model", name: primary, window: "week", capTokens: 800000, counterTokens: 324600 }], snapshot: { doctor: { hosts: [{ name: "host1", at: NOW, ageMs: 0, checks: [{ id: "models.1", level: "ok", label: PRIVATE, proposal: { kind: "newer-sibling", scope: "default", role: "editor", model: primary, candidate } }] }] }, waiting: { rows: [] } } });
   value.command = PRIVATE; value.path = `/private/${PRIVATE}`; value.diff = PRIVATE;
   return value;
 }
@@ -31,11 +31,11 @@ test("the Models tool retains safe candidate, lineage, cooldown and window facts
   assert.equal(io.calls.at(-1), "disposed");
   assert.equal(result.roles[0].model, primary);
   assert.equal(result.proposals[0].candidate, candidate);
-  assert.equal(result.canaries[0].candidateStats.costPerRun, 0.06);
+  assert.equal(result.canaries[0].candidateStats.meteredTokensPerRun, 140000);
   assert.equal(result.canaries[0].sourceStats.averageTokens, 120000);
   assert.equal(result.canaries[0].rows[0].sourceJobId, "gh-source");
   assert.equal(result.cooldowns[0].until, NOW + 10000);
-  assert.equal(result.models.find(row => row.ref === primary).windows[0].spentMicros, 32460000);
+  assert.equal(result.models.find(row => row.ref === primary).windows[0].spentTokens, 324600);
   assert.ok(!JSON.stringify(result).includes(PRIVATE));
 });
 

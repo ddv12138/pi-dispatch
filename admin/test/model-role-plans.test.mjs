@@ -203,13 +203,13 @@ test("the shared writer refuses a live lock and preserves the policy on parse an
 
 test("adoption binds retained server numbers and rechecks the sample instead of trusting request metrics", async () => {
   let digest = "a".repeat(64);
-  const sample = () => ({ digest, candidateStats: { runs: 2, completed: 1, costPerRun: 0.02, knownCosts: 2, averageTurns: 4, knownTurns: 2, averageTokens: 120, knownTokens: 2 }, sourceStats: { runs: 2, completed: 2, costPerRun: 0.04, knownCosts: 2, averageTurns: 5, knownTurns: 2, averageTokens: 150, knownTokens: 2 } });
+  const sample = () => ({ digest, candidateStats: { runs: 2, completed: 1, meteredTokensPerRun: 20000, knownMetered: 2, averageTurns: 4, knownTurns: 2, averageTokens: 120, knownTokens: 2 }, sourceStats: { runs: 2, completed: 2, meteredTokensPerRun: 40000, knownMetered: 2, averageTurns: 5, knownTurns: 2, averageTokens: 150, knownTokens: 2 } });
   let calls = 0;
   const f = fixture({ canarySample: async tuple => { assert.deepEqual(tuple, { role: "editor", candidate: "openai/new", flow: "fix" }); calls++; return sample(); } });
   const adopted = { ...body, canary: { role: "editor", candidate: "openai/new", flow: "fix", digest } };
   const p = await preview(f, adopted);
   assert.equal(calls, 1);
-  assert.match(p.summary.join(" "), /Candidate: 1\/2 completed.*0.020000.*Sources: 2\/2 completed.*0.040000/);
+  assert.match(p.summary.join(" "), /Candidate: 1\/2 completed.*metered tokens per run 20,000.*Sources: 2\/2 completed.*metered tokens per run 40,000/);
   digest = "b".repeat(64);
   assert.match((await f.service.apply(p, operator)).invalid, /comparison changed/);
   assert.deepEqual(f.read(), f.doc);

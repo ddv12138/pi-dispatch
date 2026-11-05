@@ -50,25 +50,26 @@ export function collectModelPolicies({ entries = [], modelRoles = {}, projects =
 }
 
 function metricRows(records) {
-  const costs = records.map(record => finite(record?.cost)).filter(value => value !== null);
+  const metered = records.map(record => integer(record?.meteredTokens)).filter(value => value !== null);
   const turns = records.map(record => integer(record?.turns)).filter(value => value !== null);
   const tokens = records.map(record => integer(record?.tokens)).filter(value => value !== null);
   const mean = values => values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   return { runs: records.length, completed: records.filter(record => record?.outcome === "completed").length,
-    costPerRun: mean(costs), averageTurns: mean(turns), averageTokens: mean(tokens), knownCosts: costs.length, knownTurns: turns.length, knownTokens: tokens.length };
+    meteredTokensPerRun: mean(metered), averageTurns: mean(turns), averageTokens: mean(tokens), knownMetered: metered.length, knownTurns: turns.length, knownTokens: tokens.length };
 }
 function comparisonRecord(record) {
   if (!record) return null;
   const ref = typeof record.provider === "string" && typeof record.model === "string" ? `${record.provider}/${record.model}` : null;
-  // A recorded numeric lower bound is not an exact comparison price. Share every floor and meter rule with Spend.
-  const costTokens = finite(record.tokens?.cost) === null ? null : meteredRunTokens(record);
+  // The exact figure a canary is read for is the METERED TOKEN COUNT, under the same floor and meter rules as
+  // Spend (`meteredRunTokens`); the recorded `tokens.total` beside it is the meter's own claim and may be a
+  // fallback meter's. The dollar era divided a micros figure by 1e6 here; no price exists to divide by now.
   return { model: splitModelEntry(ref) ? ref : null, outcome: ["completed", "policy", "failed", "error"].includes(record.outcome) ? record.outcome : "unknown",
-    cost: costTokens === null ? null : costTokens / 1_000_000, turns: integer(record.turns), tokens: integer(record.tokens?.total) };
+    meteredTokens: meteredRunTokens(record), turns: integer(record.turns), tokens: integer(record.tokens?.total) };
 }
 
 /** Missing meters keep their own denominators. A completed replay describes execution, never quality. */
 export function canaryComparisonLines(sample) {
-  const line = (name, metrics) => `${name}: ${metrics?.completed ?? 0}/${metrics?.runs ?? 0} completed; cost per metered run ${finite(metrics?.costPerRun) === null ? "unknown" : `$${metrics.costPerRun.toFixed(6)}`} (${metrics?.knownCosts ?? 0} metered); average turns ${finite(metrics?.averageTurns) === null ? "unknown" : metrics.averageTurns.toFixed(1)} (${metrics?.knownTurns ?? 0} known); average tokens ${finite(metrics?.averageTokens) === null ? "unknown" : Math.round(metrics.averageTokens)} (${metrics?.knownTokens ?? 0} known).`;
+  const line = (name, metrics) => `${name}: ${metrics?.completed ?? 0}/${metrics?.runs ?? 0} completed; metered tokens per run ${finite(metrics?.meteredTokensPerRun) === null ? "unknown" : Math.round(metrics.meteredTokensPerRun).toLocaleString("en-US")} (${metrics?.knownMetered ?? 0} metered); average turns ${finite(metrics?.averageTurns) === null ? "unknown" : metrics.averageTurns.toFixed(1)} (${metrics?.knownTurns ?? 0} known); average tokens ${finite(metrics?.averageTokens) === null ? "unknown" : Math.round(metrics.averageTokens)} (${metrics?.knownTokens ?? 0} known).`;
   return [line("Candidate", sample?.candidateStats ?? sample?.candidate), line("Sources", sample?.sourceStats), "These are retained comparisons grouped by role, candidate and flow, not a reconstructed experiment or a quality score."];
 }
 
@@ -92,7 +93,7 @@ function canariesOf(records, roles, deployment, now, sourceRecords = []) {
     const candidateStats = metricRows(group.rows.map(row => row.candidate));
     const sources = group.rows.flatMap(row => row.source ? [row.source] : []);
     const sourceStats = metricRows(sources);
-    const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownCosts, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
+    const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownMetered, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
     let suggestedCapTokens = null;
     try { const cap = effectiveTokenCap(undefined, deployment.maxTokens); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapTokens = fmtTokens(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
     const sample = { ...group, count: group.rows.length, candidateStats, sourceStats, partial,
@@ -157,20 +158,9 @@ export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], dep
   for (const entry of entries) for (const ref of authoredRefs(entry, deployment, envList)) namedRefs.add(ref);
   const refusedRows = new Set(facts.checks.map(check => check.sourceIndex));
   const refusedRefs = new Set(entries.flatMap((entry, index) => refusedRows.has(index) ? authoredRefs(entry, deployment, envList) : []));
-  const radius = new Set();
-  for (const run of facts.runs) {
-    let cap = null; try { cap = effectiveTokenCap(run.maxTokens, deployment.maxTokens); } catch { /* Config warning already names invalid settings. */ }
-    if (cap === null) continue;
-    for (const ref of [`${run.provider}/${run.model}`, ...(run.models ?? [])]) if (status(ref).api === "pi-messages") radius.add(ref);
-  }
-  for (const entry of entries) {
-    let cap = null; try { cap = effectiveTokenCap(entry?.run?.maxTokens, deployment.maxTokens); } catch {}
-    if (cap !== null) for (const ref of authoredRefs(entry, deployment, envList)) if (status(ref).api === "pi-messages") radius.add(ref);
-  }
-  let roleCap = null; try { roleCap = effectiveTokenCap(undefined, deployment.maxTokens); } catch {}
-  if (roleCap !== null) for (const role of roles) for (const ref of [role.model, ...role.fallbackModels.map(item => item.ref)]) if (status(ref).api === "pi-messages") radius.add(ref);
-  // The Radius cost-bound banner died with the cost era: nothing reads it and nothing writes it.
-  void radius;
+  // The Radius cost-bound banner died with the cost era: a token cap bounds a locally unboundable API no better
+  // than a dollar cap did, but the banner said nothing an operator could act on. A capped Radius model surfaces
+  // through its own state and doctor instead of a per-model banner.
   const models = [...namedRefs].map(ref => {
     const parsed = splitModelEntry(ref), price = status(ref), modelWindowsRows = modelWindows(ref, windows);
     return { ref, provider: parsed.provider, model: parsed.model, known: price.known, priced: price.priced, reason: price.reason,
@@ -298,11 +288,11 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
 /** Explicit machine projection: no doctor prose, command, path, prompt, URL, arbitrary field or secret reaches a model. */
 export function modelsForAgent(view) {
   const model = value => splitModelEntry(value) ? value : null;
-  const metrics = value => Object.fromEntries(["runs", "completed", "costPerRun", "averageTurns", "averageTokens", "knownCosts", "knownTurns", "knownTokens"].map(key => [key, finite(value?.[key])]));
+  const metrics = value => Object.fromEntries(["runs", "completed", "meteredTokensPerRun", "averageTurns", "averageTokens", "knownMetered", "knownTurns", "knownTokens"].map(key => [key, finite(value?.[key])]));
   const next = value => ({ kind: ["direct", "candidate", "waiting", "unknown"].includes(value?.kind) ? value.kind : "unknown", model: model(value?.model), reason: ["pickup-checks-remain", "cooldowns-unavailable", "model-policy-unavailable", "model-cooldown", "model-failover-no-candidate"].includes(value?.reason) ? value.reason : null });
   const trigger = row => ({ index: integer(row?.index), number: integer(row?.number), project: safeId(row?.project), scope: safeId(row?.scope), flow: safeId(row?.flow), projectUnknown: row?.projectUnknown === true, model: model(row?.model), fallbackModels: (row?.fallbackModels ?? []).map(model).filter(Boolean) });
   const modelReason = reason => ["model-unknown", "model-not-allowed", "model-unpriced", "catalog-unavailable"].includes(reason) ? reason : null;
-  const bannerReasons = { "role-conflict": ["model-role-unknown", "model-role-provider-conflict", "model-roles-invalid"], "radius-cost-cap": ["cost-cap"], "configuration-unavailable": ["model-roles-invalid"], "catalog-unavailable": ["model-unknown"], "cooldowns-unavailable": ["model-cooldown"] };
+  const bannerReasons = { "role-conflict": ["model-role-unknown", "model-role-provider-conflict", "model-roles-invalid"], "configuration-unavailable": ["model-roles-invalid"], "catalog-unavailable": ["model-unknown"], "cooldowns-unavailable": ["model-cooldown"] };
 
   return { subscriptionAuth: subscriptionAuthForAgent(view?.subscriptionAuth), scopes: (view?.scopes ?? []).filter(scope => safeId(scope)), state: view?.state === "ready" ? "ready" : "unreadable", partial: view?.partial !== false, now: integer(view?.now),
     roles: (view?.roles ?? []).map(row => ({ scope: safeId(row.scope), role: roleValid(row.role) ? row.role : null, model: model(row.model),
@@ -318,7 +308,7 @@ export function modelsForAgent(view) {
     proposals: (view?.proposals ?? []).flatMap(row => modelProposalOf(row) ? [{ ...modelProposalOf(row), id: safeId(row.id), host: safeId(row.host), at: integer(row.at), ageMs: integer(row.ageMs), stale: row.stale === true, level: ["ok", "warn", "fail"].includes(row.level) ? row.level : null }] : []),
     canaries: (view?.canaries ?? []).map(row => ({ id: safeId(row.id), digest: /^[a-f0-9]{64}$/.test(row.digest ?? "") ? row.digest : null, role: roleValid(row.role) ? row.role : null, candidate: model(row.candidate), flow: safeId(row.flow),
       candidateStats: metrics(row.candidateStats), sourceStats: metrics(row.sourceStats), partial: row.partial === true,
-      rows: (row.rows ?? []).map(pair => ({ jobId: safeId(pair.jobId), sourceJobId: safeId(pair.sourceJobId), candidate: { model: model(pair.candidate?.model), outcome: safeId(pair.candidate?.outcome), cost: finite(pair.candidate?.cost), turns: integer(pair.candidate?.turns), tokens: integer(pair.candidate?.tokens) }, source: pair.source ? { model: model(pair.source.model), outcome: safeId(pair.source.outcome), cost: finite(pair.source.cost), turns: integer(pair.source.turns), tokens: integer(pair.source.tokens) } : null })) })),
+      rows: (row.rows ?? []).map(pair => ({ jobId: safeId(pair.jobId), sourceJobId: safeId(pair.sourceJobId), candidate: { model: model(pair.candidate?.model), outcome: safeId(pair.candidate?.outcome), meteredTokens: integer(pair.candidate?.meteredTokens), turns: integer(pair.candidate?.turns), tokens: integer(pair.candidate?.tokens) }, source: pair.source ? { model: model(pair.source.model), outcome: safeId(pair.source.outcome), meteredTokens: integer(pair.source.meteredTokens), turns: integer(pair.source.turns), tokens: integer(pair.source.tokens) } : null })) })),
     waiting: (view?.waiting ?? []).map(row => ({ jobId: safeId(row.jobId), reason: ["model-cooldown", "model-window"].includes(row.reason) ? row.reason : null })),
     recentFallbacks: (view?.recentFallbacks ?? []).map(row => ({ jobId: runId(row.jobId), provider: providerIdProblem(row.provider) === null ? row.provider : null, model: modelIdProblem(row.model) === null ? row.model : null, modelRole: roleValid(row.modelRole) ? row.modelRole : null, modelWhy: MODEL_WHY.includes(row.modelWhy) ? row.modelWhy : null, providerFailure: providerFailureOf(row.providerFailure) })),
     banners: (view?.banners ?? []).map(row => ({ kind: Object.hasOwn(bannerReasons, row.kind) ? row.kind : "unknown", reason: Object.hasOwn(bannerReasons, row.kind) && bannerReasons[row.kind].includes(row.reason) ? row.reason : null, index: integer(row.index), project: safeId(row.project), projectUnknown: row.projectUnknown === true })),

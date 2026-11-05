@@ -56,19 +56,19 @@ test("cooldown sentences distinguish direct jobs, fallback eligibility, wait kin
   const text = cardText(await render(consoleModelsFixture(AT))).replace(/ +([.,])/g, "$1");
   assert.ok(text.includes("No fallback: its jobs start on anthropic/claude-sonnet-4-5."));
   assert.ok(text.includes("First candidate by price and cooldown: openai/gpt-5.")); assert.ok(text.includes(MODELS_WORDS.next));
-  assert.ok(text.includes("2026-10-31 12:13:00 UTC")); assert.ok(text.includes("model dollar window"));
+  assert.ok(text.includes("2026-10-31 12:13:00 UTC")); assert.ok(text.includes("model token window"));
   assert.ok(text.includes("This run used fallback openai/gpt-5 for role planner because the primary model was cooling down."));
   assert.ok(!text.includes("Rate limited at") && !text.includes("429") && !text.includes("13 of"));
 });
 
 test("canary arithmetic and missing meter denominators remain visible beside linked sources", async () => {
   const m = consoleModelsFixture(AT), text = cardText(await render(m));
-  for (const value of ["$0.19", "$0.06", "2 of 2", "1 of 2", "9.4", "11.2", "118,400", "131,900"]) assert.ok(text.includes(value), value);
-  assert.ok(text.includes("Known cost: 2 source and 2 candidate runs"));
-  const partial = m.canaries[0]; partial.partial = true; partial.rows[1].source = null; partial.sourceStats = { runs: 1, completed: 1, costPerRun: null, averageTurns: null, averageTokens: null, knownCosts: 0, knownTurns: 0, knownTokens: 0 };
+  for (const value of ["120,000", "140,000", "2 of 2", "1 of 2", "9.4", "11.2", "118,400", "131,900"]) assert.ok(text.includes(value), value);
+  assert.ok(text.includes("Known metered: 2 source and 2 candidate runs"));
+  const partial = m.canaries[0]; partial.partial = true; partial.rows[1].source = null; partial.sourceStats = { runs: 1, completed: 1, meteredTokensPerRun: null, averageTurns: null, averageTokens: null, knownMetered: 0, knownTurns: 0, knownTokens: 0 };
   const doc = await render(m), changed = cardText(doc);
   assert.ok(changed.includes("Partial canary comparison") && changed.includes("Not known"));
-  assert.ok(changed.includes("Known cost: 0 source and 2 candidate runs"));
+  assert.ok(changed.includes("Known metered: 0 source and 2 candidate runs"));
   assert.match(doc, /href="\/run\?id=canary-c41f"/); assert.match(doc, /href="\/run\?id=gh-c41f"/);
   assert.ok(changed.includes("gh-c42f (source unavailable)"));
   assert.ok(!doc.includes('href="/run?id=gh-c42f"'), "missing retained source is not represented as a readable source result");
@@ -82,16 +82,16 @@ test("Edit fixes existing identity, Adopt requires a chosen scope and carries on
   const adopt = String(modelRoleForm(m, { canary: m.canaries[0], key: "adopt" }));
   assert.match(adopt, /<select[^>]*name="scope"[^>]*required><option value="" selected>Choose a scope/);
   assert.match(adopt, /name="role" value="planner"/); assert.match(adopt, /value="openai\/gpt-5"/);
-  assert.match(adopt, /name="canary"[^>]*digest/); assert.doesNotMatch(adopt, /costPerRun|averageTurns|knownCosts/);
+  assert.match(adopt, /name="canary"[^>]*digest/); assert.doesNotMatch(adopt, /meteredTokensPerRun|averageTurns|knownMetered/);
   assert.ok(adopt.includes('<fieldset data-config-controls disabled>'), "without script a filled form cannot write");
 });
 
 test("viewers, agents and read-only operators see every factual panel and no edit, adopt, removal or command", async () => {
   const m = consoleModelsFixture(AT);
-  const op = await render(m); assert.match(op, /data-action="model-role-edit"/); assert.match(op, /pi-dispatch/); assert.match(op, /&lt;cap-usd&gt;/); assert.match(op, /deployment lease holds every other start/);
+  const op = await render(m); assert.match(op, /data-action="model-role-edit"/); assert.match(op, /pi-dispatch/); assert.match(op, /&lt;cap-tokens&gt;/); assert.match(op, /deployment lease holds every other start/);
   for (const opts of [{ role: "viewer" }, { role: "agent" }, { role: "operator", readOnly: true }]) {
     const doc = await render(m, opts), text = cardText(doc);
-    for (const fact of ["Model roles", "Cooling down", "$32.46 of $80.00", "Proposals and canaries", "131,900"]) assert.ok(text.includes(fact), `${JSON.stringify(opts)} ${fact}`);
+    for (const fact of ["Model roles", "Cooling down", "324,600 of 800,000", "Proposals and canaries", "131,900"]) assert.ok(text.includes(fact), `${JSON.stringify(opts)} ${fact}`);
     assert.doesNotMatch(doc, /data-action=|data-copy|Adopt for|Preview removing|pi-dispatch canary/);
   }
 });
@@ -100,7 +100,7 @@ test("empty and failed sources differ, all required banner states carry actionab
   for (const name of MODELS_PANEL_STATES) assertClean(name, String(await MODELS_DRAW[name]()));
   const empty = cardText(String(await MODELS_DRAW["models-empty.viewer"]())), unread = cardText(String(await MODELS_DRAW["models-unreadable.viewer"]()));
   assert.ok(empty.includes("No model roles are configured.")); assert.ok(!unread.includes("No model roles are configured.")); assert.ok(unread.includes("Models unavailable"));
-  for (const name of ["models-radius.operator", "models-undeclared.operator", "models-provider-clash.operator", "models-fallback-clash.operator"]) {
+  for (const name of ["models-undeclared.operator", "models-provider-clash.operator", "models-fallback-clash.operator"]) {
     const doc = String(await MODELS_DRAW[name]()); assert.ok(doc.indexOf('id="p-model-problems"') < doc.indexOf('id="p-roles"')); assert.match(doc, /Fix:/);
   }
   const m = consoleModelsFixture(AT); m.proposals[0].label = '<img src=x onerror="alert(1)">';
@@ -127,7 +127,7 @@ test("unread catalog status is not an unpriced refusal or a green configured sta
   const m = consoleModelsFixture(AT); m.models[0] = { ref: "openai/gpt-5", provider: "openai", known: null, priced: null, state: "unknown", windows: [] };
   m.models = [m.models[0]];
   const d = cardDocument(await render(m)), panel = d.within(d.byId.get("p-models")), text = cardText(panel);
-  assert.ok(text.includes("Price status unavailable")); assert.ok(text.includes("No model-specific dollar windows are configured; other deployment and scope caps still apply."));
+  assert.ok(text.includes("Price status unavailable")); assert.ok(text.includes("No model-specific token windows are configured; other deployment and scope caps still apply."));
   assert.ok(!text.includes("Unpriced: skipped") && !text.includes("Configured"));
   assert.ok(!panel.includes("tone-ok")); assert.ok(panel.includes("tone-idle"));
 });
@@ -137,7 +137,7 @@ test("a full primary window makes no admission promise, refused policy models ar
   const m = consoleModelsFixture(AT);
   m.roles[0].next = { kind: "candidate", model: m.roles[0].model };
   m.models[0].state = "window-full";
-  m.models[0].windows[0].spentMicros = m.models[0].windows[0].capMicros;
+  m.models[0].windows[0].spentTokens = m.models[0].windows[0].capTokens;
   m.models.push({ ref: "example/refused", provider: "example", known: true, priced: true, state: "policy-refused", windows: [] });
   const d = cardDocument(await render(m)), cooldown = d.within(d.byId.get("p-cooldowns")), text = cardText(cooldown);
   assert.ok(text.includes("First candidate by price and cooldown: anthropic/claude-sonnet-4-5"));
@@ -150,8 +150,8 @@ test("a full primary window makes no admission promise, refused policy models ar
   assert.match(inventory, /badge tone-attention[^>]*><svg[^>]*><use href="#i-refused"><\/use><\/svg>Trigger policy refused/);
   const c = m.canaries[0]; c.partial = true;
   const partial = cardText(await render(m));
-  assert.ok(partial.includes("Incomplete or unmetered costs are excluded from exact cost averages"));
-  assert.ok(partial.includes("Unknown cost, turns or tokens are not zeroes"));
+  assert.ok(partial.includes("Incomplete or unmetered runs are excluded from exact token averages"));
+  assert.ok(partial.includes("Unknown metering, turns or tokens are not zeroes"));
 });
 
 
@@ -185,7 +185,7 @@ test("typed agent conflicts keep their precise refusal and possible local-projec
 
 test("every model state and skipped fallback has a shared glyph-and-word badge, including neutral unknown", async () => {
   const m = consoleModelsFixture(AT);
-  const expected = [["cooling-down", "Cooling down", "clock", "attention"], ["window-full", "Dollar window full", "spend", "attention"], ["policy-refused", "Trigger policy refused", "refused", "attention"], ["unknown", "Not known", "info", "idle"], ["available", "Configured", "done", "ok"], ["unpriced", "Unpriced", "attention", "attention"]];
+  const expected = [["cooling-down", "Cooling down", "clock", "attention"], ["window-full", "Token window full", "spend", "attention"], ["policy-refused", "Trigger policy refused", "refused", "attention"], ["unknown", "Not known", "info", "idle"], ["available", "Configured", "done", "ok"], ["unpriced", "Unpriced", "attention", "attention"]];
   m.models = expected.map(([state], index) => ({ ref: `example/model-${index}`, provider: "example", known: true, priced: state !== "unpriced", state, windows: [] }));
   const d = cardDocument(await render(m)), inventory = d.byId.get("p-models");
   const badges = d.descendants(inventory).filter(n => n.classes.includes("badge"));
