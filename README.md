@@ -646,7 +646,8 @@ These forges have one auth source each, a token you create, so setting theirs to
 ## Docs
 
 **Getting started and running it:** [console](docs/console.md), [panel](docs/panel.md), [service](docs/service.md),
-[backup](docs/backup.md), [upgrading](docs/upgrading.md), [multi host](docs/multi-host.md), [polling](docs/polling.md),
+[backup](docs/backup.md), [upgrading](docs/upgrading.md), [253 server deployment](docs/253-deployment.md),
+[multi host](docs/multi-host.md), [polling](docs/polling.md),
 [notifications](docs/notifications.md).
 
 **Watching and steering:** [steering](docs/steering.md), [chat](docs/chat.md), [sessions](docs/sessions.md),

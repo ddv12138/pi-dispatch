@@ -1,211 +1,188 @@
 # 253 server deployment
 
-Deployment notes for the server reachable as `root@192.168.99.253` in the local SSH configuration.
-This is an instance record, not the general install guide; use [Linux Compose worker](worker-container.md)
-and [upgrading](upgrading.md) for the supported deployment model.
+What is deployed on the server reachable as `root@192.168.99.253`, and how to change it. This is a runbook, not a
+record of past rollouts: it says what is true now. For the supported model see
+[Linux Compose worker](worker-container.md), [upgrading](upgrading.md) and [job images](job-image.md).
 
 ## Layout
 
-- Deployment directory: `/root/pi-dispatch`.
-- Compose file: `deploy/docker-compose.yml`, project name `deploy`.
-- The `worker` and `console` profiles use the locally built `deploy-worker` image. The image contains the
-  application under `/opt/pi-dispatch`; the host directory is mounted for deployment data and same-path job
-  access. The server directory has no Git metadata, so updates are staged from a committed source snapshot.
-- The worker uses the host Docker socket. The console publishes port `4790` on all host interfaces and serves
-  plain HTTP. Valkey is `valkey/valkey:8.1`, published on `127.0.0.1:6379`. The egress proxy is a separate
-  container. The receiver profile was not part of the running deployment observed on 2026-11-04; it was added
-  later the same day, see [the GitLab forge and the receiver](#the-gitlab-forge-and-the-receiver-2026-11-04).
-- Runtime files live under `/root/pi-dispatch/runtime`; `.env` and runtime data stay on the server and their
-  credential values do not belong in this document.
+- Deployment directory `/root/pi-dispatch`. The directory has **no Git metadata**: source updates are staged from a
+  committed snapshot of this repository, and `.env` and `runtime/` stay on the server across an update.
+- Compose project `deploy`; the shipped file is `deploy/docker-compose.yml`, plus this host's
+  `deploy/docker-compose.override.yml` (the receiver, below).
+- The `worker` and `console` profiles run the locally built `deploy-worker` image (application under
+  `/opt/pi-dispatch`), with the deployment directory mounted at the same absolute path so job paths resolve on the
+  daemon host. The worker uses the host Docker socket.
+- Ports: console `4790` on all host interfaces, plain HTTP; Valkey `127.0.0.1:6379`; receiver
+  `192.168.99.253:3000` (the shipped file publishes `127.0.0.1:3000`, the override adds the LAN address).
+- Egress is armed (`PI_EGRESS` unset) with a `pi-dispatch-egress-proxy` container in front of the jobs.
+- Runtime state is under `/root/pi-dispatch/runtime`: `jobs/`, `logs/`, `sandboxes/`, `tmp/`, `home/`, the trigger and
+  settings files, and the read-only job overlay `pi-global/`.
 
-## Deployment record
+## Compose commands
 
-On 2026-11-04, commit `1790266c` (`feat(admin): add Chinese console locale`) was built and deployed. The worker
-and console packages and the job image use version `4.3.1`. The worker and console were recreated; Valkey and the egress
-proxy were left running. The shared queue was paused for the rollout and resumed after verification.
-
-The image's console modules passed `node --check`, the locale-selection smoke check passed, and the console login
-page returned Chinese for `Accept-Language: zh-CN`. The final worker status was unpaused with zero active, waiting,
-paused, delayed, or failed jobs. Before deployment, the full admin test suite was not green: some tests could not
-open local sockets in the sandbox, several assertions did not account for HTML escaping, and width-table checks
-failed independently of the locale changes.
-
-On 2026-11-04, the fixed operator login was deployed from base commit `1790266c` with the local changes to
-`admin/src/console/config.mjs` and `admin/src/console/server.mjs`. The rebuilt `deploy-worker` image is
-`sha256:960efd2dee43db7c8b8a52acc98309f86f8420e41c96b370ae5a996429e2e82a`. The random credential is stored only
-in the server's `.env`, which retains its original mode `0640`; no credential value belongs here. Console healthz
-returned 200, a fixed-token login returned 200 as `fixed-token` / `operator`, logout returned 200, and the queue was
-resumed with zero active, waiting, paused, delayed, or failed jobs. The worker and console containers were running.
-
-Also on 2026-11-04, a follow-up corrected the fixed-token session recheck after the first login smoke showed that
-`/api/whoami` immediately answered 401 `revoked`. The final image is
-`sha256:bb6489a8776d229b30dc16fde14aeaffb3a7292ecfa06a8d89bf49c0e71700d8`, containing the session-store, console
-wiring and gateway step-up fix. The repeated loop returned login 200, whoami 200 as `fixed-token` / `operator`, and
-logout 200. Both containers were running without restarts, and the queue was resumed with all counts at zero.
-
-## The GitLab forge and the receiver (2026-11-04)
-
-The receiver is now part of this deployment for the first time. What was set up, in the files an operator
-would have to touch again:
-
-| What | Where | Value, or why |
-|---|---|---|
-| GitLab credentials | `.env` | `GITLAB_TOKEN` (a personal PAT of `liukang`, id 340), `GITLAB_URL=https://git.133ec.com`, `GITLAB_WEBHOOK_MODE=token`, `GITLAB_WEBHOOK_SECRET` (generated, read it from the file, never from this record) |
-| GitHub arm disabled | `.env` | `GITHUB_AUTH_SOURCE=gh` is commented out. `decideServesGithub` treats an explicit source as "this deployment serves GitHub", and the GitHub arm then hard-fails boot resolving its own identity (`gh api user`, with no `gh` login in the container and an empty `GITHUB_PAT`). `triggers.json` names no GitHub rule, so nothing was lost. Re-enable it only together with `WEBHOOK_SECRET` and a resolvable `gh` identity. |
-| Clone and API reach | `egress-allowlist.conf` | one line, `git.133ec.com`. Egress is armed by default (`PI_EGRESS` unset), and a job's clone and push go through the proxy. Reload with `docker exec pi-dispatch-egress-proxy squid -k reconfigure`. |
-| Receiver image and port | `deploy/docker-compose.override.yml` (new) | builds `deploy-receiver` from `receiver/Dockerfile` at this same 4.3.1 snapshot instead of pulling `:latest`, and publishes `192.168.99.253:3000` beside the shipped `127.0.0.1:3000`. The shipped compose file stays byte-identical to `worker/deploy/`. |
-
-**Compose needs BOTH files named on this host.** `docker compose -f deploy/docker-compose.yml ...` does not
-pick up `docker-compose.override.yml` beside it (measured on Compose v2.21.0), so the receiver commands are:
+**Both files must be named.** `docker compose -f deploy/docker-compose.yml …` does not pick up
+`docker-compose.override.yml` beside it, so:
 
 ```bash
 cd /root/pi-dispatch
 C="docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml"
-$C --profile receiver up -d
+$C --profile worker --profile console up -d              # worker and console
+$C --profile receiver up -d                              # receiver
 $C --profile receiver logs --tail 30 receiver
 ```
 
-### The bot-loop guard is disarmed here (2026-11-04)
+## The job image
 
-`PI_RECEIVER_ALLOW_SELF=1` is set in `.env`. The reason is the one this section keeps arriving at: this GitLab
-has a **single identity**, so `liukang`'s own comments and labels arrive as the harness's, and with the guard
-armed every gitlab rule matches nothing. The switch disarms **only** that comparison: the author gate still
-needs Developer or above, resolution and verification are untouched, and the receiver announces it at boot
-(`{"event":"bot_loop_guard_disabled","reason":"PI_RECEIVER_ALLOW_SELF=1"}`) while `pi-dispatch doctor` warns
-about it by name.
+The job image is published from a checkout, not by CI: on the maintainer's machine
+`./image/publish.sh` builds and pushes
 
-**What bounds the spend from now on is `PI_DAILY_CAP` (25 container starts a day) and `PI_MAX_TURNS`, not the
-guard.** So no trigger may be shaped like the harness's own output. Concretely, do not write:
+| Repository | What runs it |
+|---|---|
+| `docker.io/ddv12138/pi-job:<version>` | every job without its own `run.image` |
+| `docker.io/ddv12138/pi-job-java21:<version>` | a Java flow, through that trigger's `run.image` |
 
-- `on: {type:"pull_request", action:["update"]}` — every push the agent makes to its own merge request is an
-  `update` authored by it, so one job would start the next;
-- `on: {type:"comment", phrase:"@pi"}` where a flow's own output can contain `@pi` — the reply quotes the
-  request, and a status comment is a comment too;
-- close rules on items the agent closes itself.
+Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
+Maven. What this host runs is `PI_JOB_IMAGE` from `deploy/docker-compose.yml`, which wins over the same key in
+`.env` (`environment:` beats `env_file:`). Keep the `.env` line pointing at the same image so nothing reads two
+answers.
 
-A label rule keyed to a label a person applies is the safe shape. The full reasoning is in `docs/gitlab.md`,
-"One identity: PI_RECEIVER_ALLOW_SELF".
+Jobs launch with `--pull=never`, so nothing is fetched at job time: pull the image here first, and verify it here
+(`./image/verify-image.sh docker.io/ddv12138/pi-job:<version>`). Docker Hub itself is not reachable directly from
+this host (`registry-1.docker.io` refuses); the pull works through the registry mirror configured in
+`/etc/docker/daemon.json`.
 
-Verified after the change: a delivery authored by `liukang` (creating an issue on project 3022) logs
-`reason: "no-label-change"` instead of `reason: "self"`, i.e. the self compare stepped aside and routing
-decided. `triggers.json` is still empty by choice, so nothing was enqueued.
+Roll back by re-running the previous tag: keep the old `deploy-worker` image tag and the old job image tag in the
+local store before an update.
 
-Rollback: `.env.bak-allowself-2026-11-04`, then recreate the receiver and the worker (both read `.env` at
-start). Removing the line restores the guard with no code change.
+## The Java trigger
 
-### This GitLab is 13.2.10, and what that needed
+A Java flow needs a JVM, so its trigger names the Java image by hand in `runtime/triggers.json` (the console's
+trigger form has no image field):
 
-The instance is **13.2.10**, which is why `GITLAB_WEBHOOK_MODE` is `token`: `signature` needs 19.0+ and the
-native delivery id needs 17.4+, so deliveries are deduplicated by `body-sha256-<hex>` over the event header
-and the raw body (`docs/gitlab.md`).
+```json
+{ "on": { "type": "label", "any": ["afk-spec"] },
+  "run": { "kind": "gitlab", "flow": "spec-run",
+           "image": "docker.io/ddv12138/pi-job-java21:4.3.2",
+           "statusComment": true, "maxTurns": 300 } }
+```
 
-Two consequences of that version were measured here, not inferred:
+A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
+Maven settings are baked at build time, not passed by the job:
 
-1. **Webhook bodies carry no `user.id`.** An `Issue Hook` body's `user` is `{name, username, avatar_url,
-   email}` and nothing else. The gate requires a numeric sender id before it looks at anything else, so every
-   delivery was verified and then dropped as `missing-sender-id`, forever, with the endpoint configured
-   correctly.
-2. **There are no project or group access tokens.** `/projects/:id/access_tokens` and
-   `/groups/:id/access_tokens` both answer 404, so the credential is a personal PAT of `liukang` (id 340),
-   which `CONST-TOKEN-SCOPED-PER-JOB` calls a residual: it reaches every project that account belongs to, and
-   it makes the harness's own identity that human account. Measured reach on 2026-11-04: 137 projects
-   visible, **130 of them at Maintainer**, 0 at Owner, and the account is not an admin. The token's own
-   record is unreadable on this version, so its **name, scopes and expiry cannot be audited from the API at
-   all** (`/personal_access_tokens/self`, `/personal_access_tokens`, `/users/:id/personal_access_tokens` all
-   answer 404). Read them at `https://git.133ec.com/profile/personal_access_tokens` as that account, where
-   the row whose **Last used** is the most recent is the one this deployment holds.
+- mirror `https://maven.aliyun.com/repository/public`, whose host must also be in `egress-allowlist.conf`;
+- a `<proxies>` block, because **Java ignores `HTTPS_PROXY`** and a Maven job on the job network reaches nothing
+  without it. The proxy host baked in must be the address a **job container** reaches, not the host's loopback.
 
-**This deployment therefore carries a local patch**, applied to `receiver/src/gitlab-members.mjs`,
-`receiver/src/receiver.mjs` and `receiver/src/start.mjs` on top of the 4.3.1 snapshot, with the spec amended in
-`INT-GITLAB-PAYLOAD-SUBSET` and `docs/gitlab.md` describing it. The sender is resolved from `user.username`
-when the body has no `id` (one exact match only, never a lookalike), the payload's own `id` still wins when
-present, an absent actor still drops as `missing-sender-id`, and an unreadable `/users` answer is a 503. A
-deployment rebuilt from an upstream release that predates this patch would lose it: check that release before
-staging a new snapshot over this folder.
+## Triggers
 
-Verified on 2026-11-04 with a real delivery from `git.133ec.com`: creating an issue on project
-`liukang/test-afk` (3022) now logs `{"event":"dropped","reason":"self"}` rather than
-`missing-sender-id`, which is the resolution working and the bot-loop guard comparing the resolved id to this
-deployment's own identity (340). `triggers.json` is empty by choice, so nothing is enqueued yet.
+`runtime/triggers.json`, pointed at by `PI_TRIGGERS_FILE`. It holds one rule: an issue label change that adds
+`afk-spec` runs `spec-run`. `maxTurns` on the rule (300) overrides the deployment's `PI_MAX_TURNS` (30), and
+`PI_DAILY_CAP` (25) bounds the number of containers a day.
 
-Four hand-built deliveries against the running receiver, all token-verified, show every arm of the resolver
-asking the real instance:
+The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
+different: see below.
 
-| `user.username` in the body | Drop reason | What it proves |
-|---|---|---|
-| `liukang` (this deployment's own account) | `self` | the resolved id is compared to the harness's identity |
-| `guofj` (a real account, not a member of 3022) | `author-not-allowed` | the id was resolved AND the `members/all` lookup ran |
-| a username nobody has | `missing-sender-id` | absence is determinate and spends no members lookup |
-| no `user` object at all | `missing-sender-id` | an actor-less body is still refused before any call |
+## The receiver (GitLab)
 
-**Who can trigger a job here.** Not the account the token belongs to: the guard drops its events as `self`.
-Mint the PAT from a dedicated account with Developer access on the serviced projects, or accept that a second
-person's account must be the one that comments and labels.
+`deploy/docker-compose.override.yml` builds `deploy-receiver` from `receiver/Dockerfile` at this snapshot instead of
+pulling `:latest`, and publishes the LAN address. Settings live in `.env`: `GITLAB_URL=https://git.133ec.com`,
+`GITLAB_TOKEN` (a personal PAT of `liukang`, id 340), `GITLAB_WEBHOOK_MODE=token`, `GITLAB_WEBHOOK_SECRET`.
+`GITHUB_AUTH_SOURCE=gh` is commented out, so this deployment serves GitLab only; re-enable it only together with
+`WEBHOOK_SECRET` and a resolvable `gh` identity.
 
-Other checks with the receiver running: no header and a wrong header answer 401, the correct secret answers
-204 (verified, no rule matched), `/` answers 404, and `pi-dispatch doctor` reports no GitLab problem. The hook
-created on project 3022 pointing at `http://192.168.99.253:3000/gitlab` reported no delivery error, so the LAN
-path from `git.133ec.com` to this host works.
+**An edited `triggers.json` needs `--force-recreate receiver`.** The container reads it through a SINGLE-FILE bind
+mount, so an in-place rewrite changes the bytes but produces no directory event: `triggers_reloaded` never fires and
+the process keeps its boot-time rules. Writing by rename instead leaves the mount on the old inode. Edit the file,
+then:
 
-Rollback: `.env.bak-gitlab-2026-11-04`, `egress-allowlist.conf.bak-gitlab-2026-11-04`, delete
-`deploy/docker-compose.override.yml`, `$C --profile receiver down` (never `rm -f` the Valkey container), and
-delete the hook. `docker image tag` nothing: `deploy-receiver` is built here, not pulled. Reverting the patch
-means restoring the three `receiver/src` files from the 4.3.1 snapshot and rebuilding.
+```bash
+$C --profile receiver up -d --no-deps --force-recreate receiver
+```
 
-## Update this source deployment
+**The bot-loop guard is disarmed here**: `PI_RECEIVER_ALLOW_SELF=1`, because this GitLab has a single identity, so
+`liukang`'s own comments and labels arrive as the harness's. The switch disarms only that comparison; the author
+gate, resolution and verification are unchanged, and the receiver says so at boot
+(`bot_loop_guard_disabled`) while `pi-dispatch doctor` warns by name.
 
-Keep `.env` and `runtime/` on the server. Before changing source, inspect the queue through the running worker and
-confirm that active jobs have finished. This host has no `PI_WORKER_NAME`, so the shared queue pause covers its
-worker. After pausing, repeat `status` until `active` is zero before building or recreating either service.
+What bounds the spend is therefore `PI_DAILY_CAP` and the flow itself, so **no trigger may be shaped like the
+harness's own output**:
+
+- no `on: {type:"pull_request", action:["update"]}`: every push the agent makes to its own merge request is one;
+- no `on: {type:"comment", phrase:"@pi"}` where a flow's output can contain `@pi`: a status comment is a comment;
+- no close rules on items the agent closes itself.
+
+A label rule keyed to a label a person applies is the safe shape ([gitlab.md](gitlab.md), "One identity").
+
+**Who can trigger a job**: not the account the token belongs to (its events are its own). Use a second account with
+Developer access on the serviced projects.
+
+## This GitLab is 13.2.10
+
+- `GITLAB_WEBHOOK_MODE=token`, because `signature` needs 19.0+ and the native delivery id needs 17.4+. Deliveries
+  are deduplicated by `body-sha256-<hex>` over the event header and the raw body.
+- **No project or group access tokens** exist on this version, so the credential is a personal PAT of `liukang`,
+  which `CONST-TOKEN-SCOPED-PER-JOB` calls a residual: it reaches every project that account belongs to and makes
+  the harness's identity that human account. Its name, scopes and expiry cannot be audited from the API on this
+  version; read them at `https://git.133ec.com/profile/personal_access_tokens` as that account, where the row with
+  the most recent **Last used** is the one this deployment holds.
+- Webhook bodies carry **no `user.id`**, so the receiver resolves the sender from `user.username` (one exact match
+  only) and still drops a delivery whose actor cannot be resolved as `missing-sender-id`.
+- Endpoint behaviour: no header or a wrong header answers 401, the correct secret answers 204, `/` answers 404.
+
+## Egress
+
+`egress-allowlist.conf` holds one host per line: `git.133ec.com` (a job's clone and push) and `maven.aliyun.com`
+(the Java image's Maven mirror). Reload after an edit:
+
+```bash
+docker exec pi-dispatch-egress-proxy squid -k reconfigure
+```
+
+## The overlay
+
+`runtime/pi-global` is mounted read-only into every job as `/opt/pi-global`: `models.json` (this deployment's
+`tencentmaas` provider and its two models), `packages/` (the staged `pi-subagents`), and `skills/`. The three skills
+(`code-review`, `tdd`, `implement-spec`) are also baked into the job image now; the overlay's copies win here and
+may be deleted. `implement-spec` in the overlay has its `disable-model-invocation: true` line removed, because an
+unattended job that loads that flag can never call the skill.
+
+`pi-subagents` is staged, not baked. A worker built from the current source applies its own reviewed compatibility
+adaptation while staging, so re-stage the package instead of hand-patching the staged tree.
+
+## Updating
+
+Stage a committed snapshot over the source (keeping `.env` and `runtime/`) and rebuild the worker image, because the
+worker code decides the container env, the image defaults and the trigger validation.
 
 ```bash
 cd /root/pi-dispatch
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs pause
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
-docker compose --env-file .env -f deploy/docker-compose.yml --profile worker build worker
-docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --profile console up -d --no-deps --force-recreate worker console
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
-curl -L -H 'Accept-Language: zh-CN' http://127.0.0.1:4790/ | grep '切换语言'
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs resume
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
-```
-
-Resume only after both containers are running and the console check succeeds. If the build or rollout fails, keep
-the queue paused while restoring service.
-
-## Rollback record
-
-The previous image is retained as `deploy-worker:pre-zh-1790266`. The pre-deployment copies of the changed source
-files that existed on the server are in `/root/pi-dispatch-backup-1790266/source-before.tar`.
-
-To roll the running services back to the previous image, pause the queue, retag the saved image, then recreate the
-same two services. Wait until `status` reports zero active jobs before recreating them:
-
-```bash
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs pause
-docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
-docker image tag deploy-worker:pre-zh-1790266 deploy-worker
-docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --profile console up -d --no-deps --force-recreate worker console
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status   # repeat until active is 0
+$C --profile worker --profile console build worker
+docker pull docker.io/ddv12138/pi-job:<version>
+docker pull docker.io/ddv12138/pi-job-java21:<version>
+./image/verify-image.sh docker.io/ddv12138/pi-job:<version>
+$C --profile worker --profile console up -d --no-deps --force-recreate worker console
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4790/healthz
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs resume
 ```
 
-The source archive and image tag are rollback material; keep them until the deployment has been accepted.
-Update this record when a later source snapshot is deployed, including its commit, image tag and verification.
+Resume only after both containers run and the console health check answers. If the build or the rollout fails, leave
+the queue paused.
 
-## Chinese console completion (2026-11-04)
+There is no `PI_WORKER_NAME` here, so the shared queue pause covers this worker. Never `docker rm -f` the Valkey
+container: the normal stop is what makes it write the AOF out.
 
-Commit `33418a90` (`feat(admin): complete Chinese console copy`) was deployed from the committed source snapshot.
-The `deploy-worker` image is `sha256:232863863e50eab399dacc5513e26dc48ebd5f8fcd526ee7c6685d692bf87999`.
-Before rebuilding, the prior image (`sha256:bb6489a8776d229b30dc16fde14aeaffb3a7292ecfa06a8d89bf49c0e71700d8`)
-was tagged `deploy-worker:pre-33418a90` for rollback. The queue was paused with zero active jobs; only the worker and
-console were recreated. `.env`, `runtime/`, the receiver override, receiver, Valkey and the egress proxy were kept in
-place. The console health check returned `ok`, a request with `Accept-Language: zh-CN` returned `lang="zh-CN"` and
-the Chinese language-switch label, and the worker queue was resumed with zero active, waiting, paused, delayed or
-failed jobs. The receiver and Valkey remained healthy.
+## Doctor expectations
 
-Local verification: the admin build passed and the focused Chinese-console batch passed 96/96. The full admin test
-suite was not green in this environment: 3,288 passed, 263 failed, 29 were cancelled and 91 skipped; terminal width
-checks failed and Valkey-dependent tests logged that no local Valkey answered. Two Project assertions in the broader
-focused batch also reproduce on the base revision.
+`pi-dispatch doctor` legitimately reports these on this host, and they are configuration rather than faults:
+
+- `PI_RECEIVER_ALLOW_SELF=1`, the disarmed bot-loop guard (see above);
+- `GITHUB_AUTH_SOURCE=gh` with no `gh` login in the container, because the GitHub arm is off;
+- `WEBHOOK_SECRET` unset: the GitLab arm verifies with `GITLAB_WEBHOOK_SECRET`;
+- the console listening on `0.0.0.0:4790` in plain HTTP, and `PI_CONSOLE_ALLOWED_HOSTS=*`;
+- `cpu_reserve_fail_open` on the local venue: this kernel is cgroup v1, so no CPU quota is held across jobs;
+- staged packages load in every job (no trigger sets `run.packages: false`).
