@@ -5039,8 +5039,8 @@ counter was right and why the windows replaced it.
 
 - **AMENDED 2026-10-29 (#749)**: Console allocation projection may carry host names and weights, and operator-only reasons, without widening the shareable export projection. Structured fields feed the existing confirmed action body contracts. Revert keeps machine indices internal and names rows from one.
 
-- **Decision**: An agent may split the dollar budget between projects with no keypress, inside an envelope the
-  operator writes (issue #504, `REQ-DELEGATED-ALLOCATION`). The agent writes **weights**, never dollars, and
+- **Decision**: An agent may split the token budget between projects with no keypress, inside an envelope the
+  operator writes (issue #504, `REQ-DELEGATED-ALLOCATION`). The agent writes **weights**, never token amounts, and
   pi-dispatch does the arithmetic in one pure module, `worker/src/priorities.mjs`, which the worker and the admin
   both import. The envelope is parsed by `worker/src/envelope.mjs`. Part A of the issue shipped those two modules and
   this doctrine; part B ships the apply path, the Valkey state, the audit and the enforcement
@@ -5055,16 +5055,16 @@ counter was right and why the windows replaced it.
     optionally per member repo, a `basis` naming the plan the writer saw (or null while the neutral split is applied:
     no plan yet, after a flush, after expiry, or with delegation turned off), and optional reasons. `parsePlan` refuses
     with a fixed reason and a field from a fixed list, never with the plan's own text.
-  - **The algorithm** (`allocate`), in BigInt micro-dollars inside, Numbers at its edges, each checked as a safe
+  - **The algorithm** (`allocate`), in BigInt tokens inside, Numbers at its edges, each checked as a safe
     integer:
     1. Every entry gets its floor. `R = total - sum(floors)`.
-    2. The target: `floor(R * w / W)` each, then the micro-dollars left one each by largest fractional remainder,
+    2. The target: `floor(R * w / W)` each, then the tokens left one each by largest fractional remainder,
        ties by id ascending, so the target sums to the total exactly. With all weights 0, every entry keeps its
-       floor and R stays unallocated, the money-safe direction.
+       floor and R stays unallocated, the budget-safe direction.
     3. The step, against the vector applied now: `S = floor(total * maxStepPct / 100)`, an integer, and `D` the
-       largest change of any entry, the unallocated money counted as one more entry. `D <= S` (including `D = 0`)
+       largest change of any entry, the unallocated tokens counted as one more entry. `D <= S` (including `D = 0`)
        applies the target. Otherwise every entry moves the same fraction `S / D` of its way, and the blend is
-       re-rounded by largest remainder, ties to the unallocated money first and then by id. Both ends of the blend
+       re-rounded by largest remainder, ties to the unallocated tokens first and then by id. Both ends of the blend
        keep every floor and the total, so the blend does; an exact value within S of the start rounds to an integer
        within S of it, because S is an integer; so `|after - before| <= S` holds exactly, and the furthest entry
        moves by exactly S. The result is recorded `clamped: true`.
@@ -5075,14 +5075,14 @@ counter was right and why the windows replaced it.
   - **The re-base** (`rebase`): any envelope change (total, floors, window, delegation, rules) projects the applied
     EFFECTIVE vector onto the new envelope, with no step, because the change is the operator's act. The weights are
     the vector's current above-floor shares, never the plan's weights, so a plan that was clamped part of the way to
-    its target stays part of the way: an envelope edit cannot carry it to its target. The unallocated money weighs
-    what it holds, so it stays unallocated in proportion. An entry the envelope adds gets its floor; an entry it
+    its target stays part of the way: an envelope edit cannot carry it to its target. The unallocated tokens weigh
+    what they hold, so they stay unallocated in proportion. An entry the envelope adds gets its floor; an entry it
     drops brings its allocation to `_other`, where its jobs now count.
   - **`_other`** is every scope in no envelope project, a project in `projects.json` that the envelope does not name
-    included, so adding a project never breaks a boot. Its ledger is keyed `scopeDollarKeyPrefix("project:_other")`.
+    included, so adding a project never breaks a boot. Its ledger is keyed `scopeTokenKeyPrefix("project:_other")`.
     `PROJECT_ID_RE` forbids `_`, so no real project can collide with it.
   - **Where the applied state lives: Valkey `alloc:plan`**, because every host must enforce one split. It holds the
-    effective micro-dollar vector per project and repo, which is the "current" of the next step, the plan id, the
+    effective token vector per project and repo, which is the "current" of the next step, the plan id, the
     weights, the reasons, the writer, when it applied, when a writer's plan last applied, its expiry and the envelope
     digest. The neutral state (the default weights, no step) is **persisted** too: the first host to find no
     `alloc:plan` writes it with `SET NX`, writer `default`, carrying the digest, so a reference always exists. After a
@@ -5146,20 +5146,20 @@ counter was right and why the windows replaced it.
   - **A fault while the pickup reads the split is infrastructure**: a Valkey that does not answer or replies with an
     error, or an audit file that cannot be written, throws `InfraRetry` (`container-never-started`, nothing reserved),
     so the job is retried, never dropped (`CONST-RETRY-INFRA-ONLY`).
-  - **The stored state is checked before it is trusted**: every amount (each allocation, the unallocated money, each
-    repo share) must be a safe non-negative integer of micro-dollars and `_other` must be present, or the state is
+  - **The stored state is checked before it is trusted**: every amount (each allocation, the unallocated tokens, each
+    repo share) must be a safe non-negative integer of whole tokens and `_other` must be present, or the state is
     corrupt and the next reconcile replaces it with the neutral split through an exact-value compare. A state a NEWER
     build wrote (a higher `version`) is neither trusted nor overwritten: this host's governed jobs refuse as
-    `envelope-mismatch` until it is upgraded, the money-safe direction.
-  - **Enforcement**: for the envelope's window, a project's dollar cap is `min(operator row, allocation)`, a repo's
+    `envelope-mismatch` until it is upgraded, the budget-safe direction.
+  - **Enforcement**: for the envelope's window, a project's token cap is `min(operator row, allocation)`, a repo's
     `min(operator row, repo share)`, and the deployment window `min(operator cap, envelope total)`. A missing row counts
     as no cap, so a project with no row still reserves against its allocation, in a synthetic ledger keyed as its row
-    would be. `_other` reserves in a ledger of its own (`otherDollars`), not through the project slot: a project in
+    would be. `_other` reserves in a ledger of its own (`otherTokens`), not through the project slot: a project in
     `projects.json` that the envelope does not name keeps its own row's ledger and counts in `_other` as well. Each
     ledger carries where its cap came from (`capSource`), and the refusal is `allocation-cap` when the allocation or the
-    envelope total bound, `dollar-cap` when the operator's number did (a tie says `dollar-cap`);
-    `DES-DOLLAR-RESERVE-AND-SETTLE` item 10 has the mechanics. A reservation already made is never taken back, and a
-    running job runs on: a shrink refuses new starts only.
+    envelope total bound, `token-cap` when the operator's number did (a tie says `token-cap`);
+    the reserve order in `DES-TOKEN-RESERVE-AND-SETTLE`'s worker half has the mechanics. A reservation already made is
+    never taken back, and a running job runs on: a shrink refuses new starts only.
   - **The audit**: the file is the record, `PI_LOGS_DIR/allocations/YYYY-MM.jsonl` on the host that applied or refused.
     A writer's change (a plan, a revert) writes its row FIRST, then the CAS, and a CAS that fails after its row was
     written adds an `apply-failed` row; the system's own changes (the neutral seed, expiry, a re-base) are written by
@@ -5168,7 +5168,7 @@ counter was right and why the windows replaced it.
     digests, never a reason, and still pushed to `alloc:log`), since a retry cannot write it back; and when a writer's
     CAS itself throws (Valkey gone mid-apply) after its applied row was written, no `apply-failed` row follows, so the
     file shows an applied row whose change may not have happened. Valkey `alloc:log` is a view across hosts, `LPUSH`
-    then `LTRIM` to 500 entries, carrying weights and micro-dollars and never reasons. That list idiom is new here
+    then `LTRIM` to 500 entries, carrying weights and token amounts and never reasons. That list idiom is new here
     (`run-mirror.mjs` mirrors with SET and ZADD); a capped list is the simplest shape for "the last N outcomes, newest
     first", and it is a view, so losing it loses nothing the file does not hold. The panel's history reads `alloc:log`,
     because the files are per host.
@@ -5179,9 +5179,10 @@ counter was right and why the windows replaced it.
     page draws the envelope, each entry's allocation, spend and floor, the headroom, the plan line and the newest 20
     `alloc:log` outcomes, cut to enum fields in the assembler (no host: the page is a file meant to be shared), and
     counts the split's refusals and the collected plans from the run records it already scans, saying "not counted"
-    when the scan is unreadable. Amounts there are exact micro-dollars (`formatMicros`, restated in the page and held
-    equal by a test), not the compact cost ladder, because a split amount is the envelope's arithmetic, not a priced
-    cost, and the panel beside it prints the same numbers to the micro-dollar. Its counts are this host's run records,
+    when the scan is unreadable. Amounts there are exact whole-token counts (the panel's thousands-separated
+    integers, restated in the page and held
+    equal by a test), not the compact token ladder, because a split amount is the envelope's arithmetic, not a metered
+    cost, and the panel beside it prints the same numbers exact. Its counts are this host's run records,
     while its history is the fleet's `alloc:log`, and the page says which is which. The outside-edit notice is one
     rule and one sentence on the panel, `/dispatch priorities` and the page (render.mjs `outsideEdit`): it shows while
     the NEWEST `envelope-changed-externally` row reports a digest other than the applied split's, and it is worded as
@@ -5190,10 +5191,11 @@ counter was right and why the windows replaced it.
     tell whether that host still runs the edited file, and it cannot see a hand restore at all; a present-tense claim
     would be wrong either way. Rejected: the first rule, "newer than the last re-base or applied plan", which cleared
     on a later plan or a re-base to a third digest while the reporting host still refused. The totals shown beside the
-    split are the applied split's own (render.mjs `splitTotalMicros`: its allocations plus its unallocated money,
+    split are the applied split's own (render.mjs `splitTotalTokens`: its allocations plus its unallocated tokens,
     which the worker holds equal to the total of the envelope it was made for), on all three surfaces; the envelope
     file's total only when no split is applied. During a mismatch the file says one total and every number beside it
-    is the other split's, so a header from the file made the rows look short (the e2e showed $30 over a $28 split).
+    is the other split's, so a header from the file made the rows look short (the e2e showed 30,000 tokens over a
+    28,000-token split).
     The mismatch line says the file's total in one fixed sentence. Rejected: showing both totals in the header (two
     numbers where the eye wants one, and the frame is 80 columns). The rows follow the same split: during a mismatch an entry the split
     allocates and the file does not name is listed after the file's entries (`allocationRowIds`), with no floor or
@@ -5205,8 +5207,8 @@ counter was right and why the windows replaced it.
     row is 87 columns on one host) loses the reason's tail, never the id. Rejected: a host column always (it repeats one word on a single host and costs a sixth of the row),
     and the full plan id in the row (the applied-plan line, `dispatch_allocations` and the audit file keep it whole). A
     revert's note says a due plan may move the split again, since a revert is a split, not a hold. A run's drill-in
-    shows its record's `plan` and settled `dollars`, and a portfolio trigger carries `[portfolio]` in `accent`: it moves
-    money only inside the envelope, so it is an override of the neutral split and not a risk badge; it is a node fact
+    shows its record's `plan` and settled `tokensWindows`, and a portfolio trigger carries `[portfolio]` in `accent`: it moves
+    spend only inside the envelope, so it is an override of the neutral split and not a risk badge; it is a node fact
     and a tooltip line on the graph, never a chip, glyph or node kind.
   - **The boot refuses an envelope inside a job-visible path**: a cron `run.folder`, a `PI_DISPATCH_RUN_ROOTS` root, a
     `run.skillsDir` or `PI_GLOBAL_PI_DIR` (`envelopeInsideJobPaths`). The envelope path must be its own canonical path
@@ -5276,14 +5278,15 @@ counter was right and why the windows replaced it.
     of the same trigger. The folder mutex (`DES-SCOPED-LIMITS-AND-FOLDER-MUTEX`) defers the second until the first ends,
     so the second reads a snapshot taken after the first's plan applied and meets `plan-too-soon` (or `plan-stale` if
     its flow ignored the snapshot): the overlap costs at most a second paid run, never a second step.
-  - **An envelope needs a per-job cost cap** (`PI_MAX_COST_USD`): every governed job reserves its per-job cap against
-    its allocation, and without one every governed job would be a configuration refusal. A floor below the per-job
-    cap admits no job of its own, so doctor warns on one (issue #504 part B); the parser does not refuse it, because
-    a project's allocation is usually above its floor.
-  - **A floor no operator row lets the project spend refuses the file**: a project's dollar row for the envelope's
-    window, or for any longer window (a week row caps every day of its week), below the project's floor.
+  - **An envelope needs a per-job token budget** (`maxTokens`, `PI_MAX_TOKENS`): every governed job reserves its
+    per-job budget against its allocation, and without one every governed job would be a configuration refusal
+    (`DES-TOKEN-RESERVE-AND-SETTLE`'s worker half). A floor below the per-job budget admits no job of its own, so
+    doctor warns on one (issue #504 part B); the parser does not refuse it, because a project's allocation is usually
+    above its floor.
+  - **A floor no operator row lets the project spend refuses the file**: a project's token row for the envelope's
+    window, or for any longer window (a week row bounds every day of its week), below the project's floor.
 - **Why**: Weights make every invariant checkable: the sum, the floors and the step are properties of one function,
-  and a property test can hold them. Dollars written by a model cannot be checked that way, and models misjudge a
+  and a property test can hold them. Token amounts written by a model cannot be checked that way, and models misjudge a
   shared budget. The envelope stays a file for the reason `OQ-008` gives: an operator's edit must survive a flush and
   a boot reconcile. The applied split lives in Valkey because two hosts enforcing two splits against one shared
   counter would each admit what the other refuses. The step is computed against the EFFECTIVE vector, never the last
@@ -5292,8 +5295,8 @@ counter was right and why the windows replaced it.
 - **Threat model**:
   - **Prompt injection.** Issue text read by a portfolio flow (issue #505), or any text in the operator's session, can
     at worst move `maxStepPct` of the total per `minIntervalHours`. It cannot touch a floor or the total. Worked
-    example: $100 a week, floors of $10, a 25% step and a 24-hour interval. An attacker can push one project to $90
-    and the other to $10 in four days, and total spend stays at or under $100. A Valkey flush resets the interval and
+    example: 100,000 tokens a week, floors of 10,000, a 25% step and a 24-hour interval. An attacker can push one project to 90,000
+    and the other to 10,000 in four days, and total spend stays at or under 100,000. A Valkey flush resets the interval and
     puts the neutral split back, so it buys one extra step per flush; a flush is an operator-level act, and it is
     named here rather than designed away.
   - **A compromised flow** (a malicious skill in the manager's folder) has the same bound. It cannot write the
@@ -5310,7 +5313,7 @@ counter was right and why the windows replaced it.
   - **Reason text** is agent-authored, shown in the panel only through the control-byte gate, under the raw `.log`
     rule of `REQ-ADMIN-VIA-PI-EXTENSION`'s Why.
 - **Rejected**:
-  - *The model writes dollar amounts.* Every invariant would then be a check on the model's arithmetic, not a
+  - *The model writes token amounts.* Every invariant would then be a check on the model's arithmetic, not a
     property of ours.
   - *The envelope in Valkey.* `OQ-008`: a flush or a boot reconcile would lose an operator's edit.
   - *The applied split in a per-host file.* Two hosts would enforce two splits against one shared counter.
@@ -5320,17 +5323,17 @@ counter was right and why the windows replaced it.
   - *Re-basing by the plan's weights.* A clamped plan would reach its target through any envelope edit, a step the
     step rule never granted.
   - *Truncating the blend without re-rounding.* The entries would sum to less than the total, and the missing
-    micro-dollars would land nowhere on record.
+    tokens would land nowhere on record.
   - *`S = total * maxStepPct / 100` as a float, or rounded up.* The step bound would hold only approximately, and a
     property test would catch it only sometimes.
   - *A lock alone, with no compare-and-set.* A lock that expires mid-write lets a second writer overwrite the first
     with no error; the CAS makes the write itself the check.
-  - *Unknown plan keys dropped, as the outbox does.* A plan is a money file; a dropped key could be a misspelled
+  - *Unknown plan keys dropped, as the outbox does.* A plan is a budget file; a dropped key could be a misspelled
     weight read as absent.
   - *`_other` through the project slot.* A project the envelope does not name may carry its own row, and its jobs
     must reserve in that row AND in `_other`'s share; one slot cannot hold both.
   - *Refusing a triggers reload whose new job path holds the envelope.* The live envelope is already safe, because
-    every envelope reload re-runs the check; refusing the triggers edit would couple two files for no money effect.
+    every envelope reload re-runs the check; refusing the triggers edit would couple two files for no budget effect.
   - *Trusting the portfolio flag on job data alone* (issue #505). The data says what the trigger said when the job was
     queued; the live file says what the operator says now, so it is read at pickup, at prepare and at collection.
   - *Checking only the live file at collection.* A job the pickup ran as an ordinary one (its flag was off then) would
@@ -5343,7 +5346,7 @@ counter was right and why the windows replaced it.
     judged by where it is NAMED: inside a job path, it must resolve inside it.
 - **Traces to**: `REQ-DELEGATED-ALLOCATION`, `REQ-ADMIN-VIA-PI-EXTENSION`, `REQ-SCOPED-LIMITS`,
   `CONST-BUDGET-BEFORE-TOKENS`, `CONST-RETRY-INFRA-ONLY`, `CONST-ISOLATION-CONTAINER-PER-JOB`,
-  `DES-DOLLAR-RESERVE-AND-SETTLE`, `DES-FLEET-LEASES-FOR-SHARED-BOUNDS`, `DES-HOST-REGISTRY`,
+  `DES-TOKEN-RESERVE-AND-SETTLE`, `DES-FLEET-LEASES-FOR-SHARED-BOUNDS`, `DES-HOST-REGISTRY`,
   `DES-ADMIN-VIA-PI-EXTENSION`, `INT-ENVELOPE-FILE-CONTRACT`, `INT-PRIORITIES-PLAN-CONTRACT`,
   `INT-PROJECTS-FILE-CONTRACT`, `INT-SCOPED-LIMITS-FILE-CONTRACT`, `OQ-008`
 
@@ -16723,6 +16726,7 @@ Code evidence: `worker/src/watch-decision.mjs`, `watch-board.mjs`, `watch-store.
 
 | Date | Change |
 |---|---|
+| 2026-11-05 (token-only, allocation) | **`DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE` AMENDED to the token envelope.** The envelope is a total in integer whole tokens with token floors (`INT-ENVELOPE-FILE-CONTRACT`'s whole-token shape), `allocate` and `rebase` compute in BigInt tokens inside and safe-integer Numbers at the edges, the applied split's vector and every stored amount are whole tokens, the ledgers are the token ones (`scopeTokenKeyPrefix`, the `otherTokens` slot, `governedTokens`), a governed refusal reads `token-cap` when the operator's number bound and `allocation-cap` when the allocation or the envelope total did, a governed job needs the per-job token budget (`maxTokens`) instead of a dollar cap, and the surfaces print exact whole-token counts with the split total from `splitTotalTokens`. The workflow decisions are UNCHANGED, carried over: weights never amounts, the envelope a file (`OQ-008`), the applied split in Valkey, the compare-and-set writes, the apply ladder, the step, the re-base, the fleet reconcile, the audit file and `alloc:log`, the job-path checks and the portfolio writer path; the threat model's worked example is restated in tokens (100,000 a week, floors of 10,000, a 25% step). **Code evidence**: worker/src/envelope.mjs (integer total and floors); worker/src/priorities.mjs (the BigInt token arithmetic); worker/src/allocation.mjs (`governedTokens`, `otherTokens`, `capSource`); admin/src/render.mjs (`splitTotalTokens`, the exact-integer rendering). |
 | 2026-11-05 (token-only, 1 of 3) | **`DES-COST-FOLD-BY-SCAN` RETIRED, token-only, its mechanism carried by NEW `DES-TOKEN-FOLD-BY-SCAN`.** The money fold (the typed `{ usd, class, floor, coverage }`, the six pricing classes, plan verdicts and proration, subscription re-pricing against the rate tables) is deleted with the rate tables it folded against; the scan it ran on (the read-only, filename-keyed, retention-bounded, 92-day-capped `scanRunRecords`, folded by the pure, fs-free `admin/src/costs.mjs`) survives unchanged. The successor folds token totals with THREE classes only (`metered`, `estimated`, `unknown`), a typed `{ tokens, class, floor, coverage? }` where a floor is a one-sided estimate from below (uncounted tokens can only make the true total larger), and a what-if that compares a flow's median per-run token profile against a target model's declared context window instead of re-pricing. The fact/opinion split, fold-time classification never stored, the requested-window denominator and the injected trigger join are UNCHANGED, carried over. **Code evidence**: admin/src/costs.mjs; admin/src/read-model.mjs (`scanRunRecords`). |
 | 2026-11-05 (token-only, 2 of 3) | **`DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY` AMENDED, the cost-guard half deleted.** `createCostGuard`, `callCostBound`, the bound arithmetic (the priced-api set, the input and image ceilings, the samplingParams keys, the output-cap field rules, the long-context tier), the `PRICES` pin table, the `SPENT` file and the guard counters (`costRefused`, `boundExceeded`, `longContext`, `costUnjudged`, `costUnanswered`) are retired with the per-job dollar cap; what remains of the guard is the meter's own settle-time token check (`combinedTotal() > cap`, stop `token_budget`), a lagging in-run backstop with no pre-call form (`DES-TOKEN-RESERVE-AND-SETTLE`, `OQ-010`). The install line reports a token cap as the readable state, not an alarm (`capped` without a brake is expected, since only a model list arms the brake and is refused `model-policy-unenforceable`). The child ledger is version **4**: the guard counters leave it, and the meter's completeness counter `costUnreported` (issue #571) is renamed **`usageUnreported`** and stays, the one completeness counter a ledger carries. The registry choke point, the two meter halves and the forward accounting, the observe-don't-consume rule, the fallback meter, the detector, the control file (`STOP`) and the promise-of-a-stream rule are UNCHANGED, checked. **Code evidence**: image/runner/src/usage-meter.mjs. |
 | 2026-11-05 (token-only, 3 of 3) | **`DES-DOLLAR-RESERVE-AND-SETTLE` RETIRED, token-only, its mechanism carried by NEW `DES-TOKEN-RESERVE-AND-SETTLE`.** `worker/src/dollar-budget.mjs`, `money.mjs`, `dollar-fingerprint.mjs`, the runner's cost guard, `PI_MAX_COST_MICROS`, `PI_MAX_COST_USD`, the `budget:usd:*` keys and every `cost-cap` reason are deleted. The successor mirrors the design unit-for-unit in integer whole tokens: `worker/src/token-budget.mjs` reserves the job's per-job budget (`maxTokens`) against every active window (`budget:tok:*`, the deployment's, the scoped rows', the project's, `_other`'s and the model rows', one `reserveTokens` call, best-effort per-key give-back on a refusal) before the container and settles after it (`SETTLE_SCRIPT`, `token_settle_key_missing`, `token_settle_clamped`); the basis is `metered` only when the exit line is trusted and every completeness counter is present and 0 (`unresolved`, `usageUnreported`, `unmeteredChildren`), else the floor `max(reservedTokens, reported)`; the record block is `tokensWindows` (`reservedTokens`, `settledTokens`, `basis`, `modelBasis`, `reservedIn`). The per-job budget is stated as the settle-time lagging in-run backstop it is, never pre-call, and the check-after day counter is retired with the windows (`OQ-010`'s resolution records why each was right in its era). Rejected: keeping the micro unit times a price, float tokens, keeping the lagging counter beside the windows, bounding calls before they are made, an estimated reservation. The trusted-line rule (issue #542's review), the zero-rated escape, the hold rules and the window boundaries are UNCHANGED, unit-for-unit. **Code evidence**: worker/src/token-budget.mjs; worker/src/budget.mjs (`dayKey`/`weekKey`/`monthKey`, the shared window boundaries); worker/src/processor.mjs. |
