@@ -266,7 +266,10 @@ test("enqueueGitHubJob builds the github data shape and dedup opts (fake queue c
 	// Opts: exact-per-delivery jobId + additive semantic window + 31d retention.
 	assert.equal(captured.opts.jobId, `gh-${trigger.deliveryId}`);
 	assert.equal(captured.opts.deduplication.id, "owner/repo#7:frontend-fix");
-	assert.equal(captured.opts.deduplication.ttl, 10 * 60 * 1000);
+	// Pinned to what the source builds: cc2b23df shortened SEMANTIC_WINDOW_MS to one second on this deployment,
+	// deliberately and temporarily (queue.mjs's own comment carries the revert line), and the ten-minute pin
+	// went red against it. When the window is restored upstream, this pin moves back with it, same commit.
+	assert.equal(captured.opts.deduplication.ttl, 1_000);
 	assert.ok(captured.opts.removeOnComplete.age >= 30 * 24 * 3600, "retention >= 30d");
 	assert.ok(captured.opts.removeOnFail.age >= 30 * 24 * 3600, "fail retention >= 30d");
 });
