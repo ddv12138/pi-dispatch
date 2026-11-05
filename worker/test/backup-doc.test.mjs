@@ -157,7 +157,7 @@ const FIXED_STORES = new Map([
 	["valkey.env", [["worker/src/podman-stack.mjs", '".config", "pi-dispatch", "valkey.env"']]],
 	["packages/.undo", [["worker/src/packages.mjs", 'PACKAGES_SUBDIR = "packages"'], ["worker/src/package-stage.mjs", 'UNDO_DIR = ".undo"']]],
 	["pi-dispatch-valkey-data", [["worker/src/valkey-auth.mjs", 'VALKEY_VOLUME = "pi-dispatch-valkey-data"']]],
-	[".pi-dispatch-valkey-volume.json", [["worker/src/valkey-auth.mjs", 'VALKEY_VOLUME_RECORD = ".pi-dispatch-valkey-volume.json"'], ["worker/src/up.mjs", "join(cwd, VALKEY_VOLUME_RECORD)"], ["admin/src/setup-wizard.ts", "join(dir, VALKEY_VOLUME_RECORD)"]]],
+	[".pi-dispatch-valkey-volume.json", [["worker/src/valkey-auth.mjs", 'VALKEY_VOLUME_RECORD = ".pi-dispatch-valkey-volume.json"'], ["worker/src/up.mjs", "join(cwd, VALKEY_VOLUME_RECORD)"]]],
 	["console-login-codes/", [["admin/src/console/login-codes.mjs", 'join(dirname(tokensPath), "console-login-codes")']]],
 ]);
 

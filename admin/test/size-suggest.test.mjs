@@ -1,4 +1,3 @@
-import { withOperatorDiagnosis } from "./helpers/tool-diagnosis.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
@@ -27,7 +26,7 @@ const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-a
 const { createJiti } = piRequire("jiti");
 const jiti = createJiti(import.meta.url);
 const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-const indexMod = await jiti.import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
+
 
 const NOW = Date.UTC(2026, 9, 1, 12, 0, 0);
 const MIB = 1024 * 1024;
@@ -262,61 +261,16 @@ test("the PROJECTS view says when the sizes could not be read, and draws no size
 
 // ── the dispatch_limit_edit preview ───────────────────────────────────────────────────────────────────
 
-function registeredTools() {
-  const tools = [];
-  const pi = new Proxy({}, { get: (_t, k) => (k === "registerTool" ? (t) => tools.push(t) : () => {}) });
-  indexMod.default(pi);
-  return tools;
-}
-const toolByName = (name) => withOperatorDiagnosis(registeredTools().find((t) => t.name === name));
+
+
 function toolCtx() {
   const shown = [];
   return { ctx: { hasUI: true, ui: { confirm: async (title, message) => (shown.push({ title, message }), false) } }, shown };
 }
 
-test("dispatch_limit_edit's confirm shows the project's peaks when a size field is edited, and only then", async () => {
-  const dir = tempDir("pd-596-preview-");
-  writeFileSync(join(dir, "projects.json"), JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(join(dir, "scoped-limits.json"), JSON.stringify({ version: 3, limits: [{ scope: "project:shop", memory: "4g" }, { scope: "acme/api", day: 3 }] }));
-  const logs = join(dir, "logs");
-  mkdirSync(logs);
-  // dated relative to the clock the tool reads (the real one), so the record is inside its window on any day.
-  const now = Date.now();
-  Array.from({ length: 12 }, (_, i) => rec({ i, at: now, peakMiB: 2000, cores: 0.5 })).forEach((r, i) => {
-    writeFileSync(join(logs, `r${i}.json`), JSON.stringify(r));
-    utimesSync(join(logs, `r${i}.json`), now / 1000, now / 1000); // the reader prefilters by mtime, against that clock
-  });
-  process.env.PI_PROJECTS_FILE = join(dir, "projects.json");
-  process.env.PI_SCOPED_LIMITS_FILE = join(dir, "scoped-limits.json");
-  process.env.PI_LOGS_DIR = logs;
-  const edit = toolByName("dispatch_limit_edit");
-  const sized = toolCtx();
-  await edit.execute("id", { index: 0, memory: "3g" }, undefined, undefined, sized.ctx);
-  assert.match(sized.shown[0].message, /\nProject shop's runs \(the last 30 days, measured inside the jobs, so advisory\): size now 4g, 2 CPUs; p95 peak 2000m over 12 runs, p95 0\.5 cores used over 12 runs\. They suggest memory 2560m \(oversized: p95 peak 2000m, largest 2000m, over 12 runs\), CPUs 0\.75 \(underused: p95 0\.5 cores used, largest 0\.5 cores, over 12 runs\)\.\nUndo: .+$/);
-  const counted = toolCtx();
-  await edit.execute("id", { index: 0, day: 4 }, undefined, undefined, counted.ctx);
-  assert.doesNotMatch(counted.shown[0].message, /runs \(the last/, "a count edit shows no peaks");
-  const repo = toolCtx();
-  await edit.execute("id", { index: 1, day: 5 }, undefined, undefined, repo.ctx);
-  assert.doesNotMatch(repo.shown[0].message, /runs \(the last/);
-  // a row that is not a project's has no note
-  assert.equal(indexMod.sizingNote({ logsDir: logs, scopedLimitsPath: join(dir, "nope.json"), projectsFile: join(dir, "projects.json") }, "acme/web", now), "");
-});
 
-test("sizingNote names a project with no measured runs, and a limits file that does not load", () => {
-  const dir = tempDir("pd-596-note-");
-  writeFileSync(join(dir, "projects.json"), JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(join(dir, "bad.json"), "{nope");
-  const paths = { logsDir: join(dir, "logs"), scopedLimitsPath: join(dir, "absent.json"), projectsFile: join(dir, "projects.json") };
-  assert.match(indexMod.sizingNote(paths, "project:shop", NOW), /size now 4g, 2 CPUs; p95 peak none over 0 runs, p95 none used over 0 runs\. They suggest memory not enough runs at 4g \(0\), CPUs not enough runs at 2 CPUs \(0\)\.$/);
-  assert.equal(indexMod.sizingNote({ ...paths, scopedLimitsPath: join(dir, "bad.json") }, "project:shop", NOW), "\nThe project's runs could not be read (the scoped-limits file does not load).");
-  // a raise: no host budget is read in a confirm, so it names what the runs ask for and says the budget was not checked
-  const oomLogs = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 })]);
-  assert.match(indexMod.sizingNote({ ...paths, logsDir: oomLogs }, "project:shop", NOW), /They suggest memory 6g \(oom-killed: 1 run ended oom-killed \(the largest size killed 4g\); budget not checked here\), CPUs not enough runs at 2 CPUs \(1\)\.$/);
-  // a fact rides along as a sentence of its own
-  const hot = logsWith(Array.from({ length: 10 }, (_, i) => rec({ i, cores: 1, throttle: 0.5 })));
-  assert.match(indexMod.sizingNote({ ...paths, logsDir: hot }, "project:shop", NOW), /CPUs fits\. The median run was held back 50% of its time by this host's CPU ceiling \(its CPU budget, shared by every job\), which a job's cpus do not change\.$/);
-});
+
+
 
 // ── the insights page ─────────────────────────────────────────────────────────────────────────────────
 
@@ -444,23 +398,7 @@ test("the insights sizing slice is allowlisted: junk ids, reasons, calls and poi
   assert.doesNotMatch(String(insightsBody({ sizing: hostile }, NOW)), /job sizes/);
 });
 
-test("assembleSizingView reads the registry through its seam and caps a raise per host", async () => {
-  const dir = tempDir("pd-596-assemble-");
-  writeFileSync(join(dir, "projects.json"), JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  const logsDir = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 })]);
-  const paths = { logsDir, projectsFile: join(dir, "projects.json"), scopedLimitsPath: join(dir, "absent.json"), valkeyUrl: "not-a-url" };
-  const rows = [{ name: "mini1", budgetMemMiB: "5120", budgetCpuCenti: "700", usedMemMiB: "0", usedCpuCenti: "0" }, { name: "big1", budgetMemMiB: "16384", budgetCpuCenti: "100", usedMemMiB: "0", usedCpuCenti: "0" }];
-  const view = await indexMod.assembleSizingView(paths, NOW, { readHostsFn: async () => ({ hosts: rows }) });
-  assert.deepEqual(view.hosts, { rows });
-  // big1's 16g is no cap for a 2-CPU job: it offers 1 CPU. mini1's 5g is.
-  assert.deepEqual([view.projects.shop.memory.suggested, view.projects.shop.memory.held, view.projects.shop.memory.overBudget, view.projects.shop.series.length, view.windowDays, view.hostBudgetCount], [5120, "cap", false, 1, 30, 2]);
-  assert.equal(view.projects.shop.call, 'dispatch_limit_add {"scope":"project:shop","memory":"5g"}');
-  const down = await indexMod.assembleSizingView(paths, NOW, { readHostsFn: async () => ({ unreachable: "timed out" }) });
-  assert.deepEqual([down.hosts, down.projects.shop.memory.suggested, down.projects.shop.memory.held, down.projects.shop.call], [{ unreachable: "timed out" }, null, "no-cap", null]);
-  // the real reader on an unparseable URL degrades at once, without a connection
-  const real = await indexMod.assembleSizingView(paths, NOW);
-  assert.ok(typeof real.hosts.unreachable === "string");
-});
+
 
 test("the panel withholds the call when every live host refuses the pair, even in the dimension it does not suggest", async () => {
   // a memory lowering whose 4 CPUs stay above the project's 40% share of the one host's 8 CPUs: admission refuses it

@@ -10,7 +10,7 @@
  *   - the overrides name every pi package the lockfile holds, each at the pin;
  *   - every pi package entry in package-lock.json (at any depth) is at the pin;
  *   - the places the pin is written by hand agree with it: the runner's pi-mcp and pi-agent-core, the worker's pi-ai
- *     and pi-tui, the admin devDependency, admin/src/index.ts's SUPPORTED_PI_VERSION, image/Dockerfile's PI_VERSION
+ *     and pi-tui, image/Dockerfile's PI_VERSION
  *     and the durable-install commands in README.md and docs/console.md.
  *
  * `piPinProblems` is pure (the files are handed in) so its test pins the rule on constructed input as well as on this
@@ -25,7 +25,7 @@ export const PI_DOC_SITES = Object.freeze(["README.md", "docs/console.md"]);
 export const PI_DOC_VERSION_RE = /@earendil-works\/pi-coding-agent@([^\s`]+)/;
 
 /** The problems with these files' pi pins, as sentences; empty when every pin agrees. */
-export function piPinProblems({ root, lock, runner, worker, admin, adminIndex, dockerfile, documents }) {
+export function piPinProblems({ root, lock, runner, worker, dockerfile, documents }) {
 	const problems = [];
 	const pin = runner?.dependencies?.[`${SCOPE}pi-coding-agent`];
 	if (typeof pin !== "string" || !/^\d+\.\d+\.\d+$/.test(pin)) return [`image/runner/package.json pins pi-coding-agent at ${JSON.stringify(pin)}, not an exact version`];
@@ -42,8 +42,6 @@ export function piPinProblems({ root, lock, runner, worker, admin, adminIndex, d
 	// The terminal chat draws with pi-tui (issue #647, chat-view.mjs), the renderer pi itself uses: one copy at the pin,
 	// so the screen it draws and the escapes it can emit are the ones the pinned pi was checked against.
 	want("worker/package.json's @earendil-works/pi-tui", worker?.dependencies?.[`${SCOPE}pi-tui`]);
-	want("admin/package.json's devDependency @earendil-works/pi-coding-agent", admin?.devDependencies?.[`${SCOPE}pi-coding-agent`]);
-	want("admin/src/index.ts's SUPPORTED_PI_VERSION", /^export const SUPPORTED_PI_VERSION = "([^"]*)";$/m.exec(adminIndex ?? "")?.[1]);
 	want("image/Dockerfile's PI_VERSION", /^ARG PI_VERSION=(\S*)$/m.exec(dockerfile ?? "")?.[1]);
 	for (const path of PI_DOC_SITES) {
 		const copies = [...String(documents?.[path] ?? "").matchAll(new RegExp(PI_DOC_VERSION_RE.source, "g"))];
@@ -74,8 +72,6 @@ export function repositoryPins(repo) {
 		lock: json("package-lock.json"),
 		runner: json("image/runner/package.json"),
 		worker: json("worker/package.json"),
-		admin: json("admin/package.json"),
-		adminIndex: readFileSync(new URL("admin/src/index.ts", repo), "utf8"),
 		dockerfile: readFileSync(new URL("image/Dockerfile", repo), "utf8"),
 		documents: Object.fromEntries(PI_DOC_SITES.map((path) => [path, readFileSync(new URL(path, repo), "utf8")])),
 	};

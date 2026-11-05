@@ -17,7 +17,7 @@
  *   0  the mirror holds, OR it moved and that is reported as a `::warning::` annotation.
  *   1  the canary could not RUN (no pi installed) -- an infrastructure failure, which must be loud,
  *      because reading a canary that never executed as either verdict would be a guess (the same doctrine
- *      admin-pi-canary.mjs and release.yml's npm-view step follow).
+ *      release.yml's npm-view step follows).
  *
  * Drift is a warning rather than a failure, and the distinction is deliberate rather than a softening.
  * This canary and the admin one differ in KIND. A red admin canary means the PUBLISHED admin may already

@@ -92,8 +92,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            --yes answers that question
 
 Config comes from the environment (see .env.example); flags override it per run.
-Prefer being walked through all of this? The operator panel's /dispatch setup does every step
-with a consent per action:  pi install npm:@edgehero/pi-dispatch-admin`;
+For the web console, install the matching admin package and run: pi-dispatch up --console`;
 
 	// Where this command's output goes. Defaults to the real stdout, so the CLI is byte-identical; a test
 	// injects a collector instead of reassigning `process.stdout.write`. That matters because `node --test`

@@ -54,11 +54,11 @@ test("the bump's table covers every pin pi-pin-check checks, and pi-pin-check ch
 });
 
 test("a package.json site rewrites exactly its one value, leaving a wildcard peer of the same package alone", () => {
-	const admin = PI_PIN_SITES.find((site) => site.path === "admin/package.json");
-	const text = '{\n  "peerDependencies": {\n    "@earendil-works/pi-coding-agent": "*"\n  },\n  "devDependencies": {\n    "@earendil-works/pi-coding-agent": "1.0.3"\n  }\n}\n';
+	const admin = PI_PIN_SITES.find((site) => site.path === "image/runner/package.json" && site.json?.[1] === "@earendil-works/pi-coding-agent");
+	const text = '{\n  "peerDependencies": {\n    "@earendil-works/pi-coding-agent": "*"\n  },\n  "dependencies": {\n    "@earendil-works/pi-coding-agent": "1.0.3"\n  }\n}\n';
 	assert.equal(rewriteSite(admin, text, "1.0.4"), text.replace('"1.0.3"', '"1.0.4"'));
 	assert.throws(() => rewriteSite(admin, text.replace('"*"', '"1.0.3"'), "1.0.4"), /2 entries read/, "two entries at the old value: which one is the pin is not guessed");
-	assert.throws(() => siteVersion(admin, '{"devDependencies":{}}'), /admin\/package\.json: no devDependencies\.@earendil-works\/pi-coding-agent/);
+	assert.throws(() => siteVersion(admin, '{"dependencies":{}}'), /image\/runner\/package\.json: no dependencies\.@earendil-works\/pi-coding-agent/);
 	const docker = PI_PIN_SITES.find((site) => site.path === "image/Dockerfile");
 	assert.equal(rewriteSite(docker, "FROM x\nARG PI_VERSION=1.0.3\nLABEL v=${PI_VERSION}\n", "1.0.4"), "FROM x\nARG PI_VERSION=1.0.4\nLABEL v=${PI_VERSION}\n");
 	assert.throws(() => siteVersion(docker, "ARG PI_VERSION\n"), /image\/Dockerfile: no line/);

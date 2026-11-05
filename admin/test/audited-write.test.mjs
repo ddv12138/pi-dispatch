@@ -1,4 +1,3 @@
-import { withOperatorDiagnosis } from "./helpers/tool-diagnosis.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -16,7 +15,7 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
 const { createJiti } = piRequire("jiti");
 const jiti = createJiti(import.meta.url);
-const indexMod = await jiti.import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
+
 const { makeDashboard, withAuditedWrites } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
 
 const ACTOR = { name: "rob", role: "panel", session: null };
@@ -154,13 +153,8 @@ test("panelActor: the login name in a plain charset, role panel, no session; unk
 
 // ---- the wirings, through the real extension ----
 
-function registeredTools() {
-  const tools = [];
-  const pi = new Proxy({}, { get: (_t, k) => (k === "registerTool" ? (t) => tools.push(t) : () => {}) });
-  indexMod.default(pi);
-  return tools;
-}
-const toolByName = (name) => withOperatorDiagnosis(registeredTools().find((t) => t.name === name));
+
+
 const confirming = () => ({ hasUI: true, ui: { confirm: async () => true } });
 
 /** Run `fn` with the deployment's env pointed at a fresh triggers file and `logsDir`, restoring both after. */
@@ -180,68 +174,11 @@ async function withDeployment(logsDir, fn) {
   }
 }
 
-test("a tool write is audited as an agent in the deployment's PI_LOGS_DIR, and the file changes after the ok row", async () => {
-  const logsDir = tempDir("pd-642-tool-");
-  await withDeployment(logsDir, async ({ triggersPath }) => {
-    await toolByName("dispatch_trigger_add").execute("id", { kind: "label", flow: "fix", labels: ["bug"] }, undefined, undefined, confirming());
-    assert.equal(JSON.parse(readFileSync(triggersPath, "utf8")).triggers.length, 1, "the write landed");
-    const rows = rowsOf(logsDir);
-    assert.deepEqual(rows.map((r) => [r.kind, r.outcome, r.target, r.actor.role]), [["trigger-add", "ok", triggersPath, "agent"], ["trigger-add", "ok", triggersPath, "agent"]]);
-    // A refused one: the loader rejects a gitlab action word on github, after the ok row.
-    await assert.rejects(toolByName("dispatch_trigger_add").execute("id", { kind: "pull_request", flow: "fix", action: ["update"] }, undefined, undefined, confirming()), /rejected:/);
-    assert.deepEqual(rowsOf(logsDir).slice(2).map((r) => r.outcome), [], "the shared dry-run refuses invalid fields before any write intent");
-  });
-});
 
-test("an append failure refuses a tool write, a command write, the kill switch and an enqueue, and changes nothing", async () => {
-  const logsDir = unwritableLogsDir();
-  await withDeployment(logsDir, async ({ triggersPath, settingsFile }) => {
-    await assert.rejects(
-      toolByName("dispatch_trigger_add").execute("id", { kind: "label", flow: "fix", labels: ["bug"] }, undefined, undefined, confirming()),
-      { message: AUDIT_REFUSAL },
-    );
-    assert.deepEqual(JSON.parse(readFileSync(triggersPath, "utf8")).triggers, [], "the triggers file is untouched");
-    // The kill switch and the paid enqueue refuse BEFORE reaching Valkey: no queue is needed to prove it.
-    await assert.rejects(toolByName("dispatch_pause").execute("id", {}), { message: AUDIT_REFUSAL });
-    await assert.rejects(toolByName("dispatch_resume").execute("id", {}), { message: AUDIT_REFUSAL });
-    await assert.rejects(toolByName("dispatch_run").execute("id", { folder: "/nowhere", flow: "fix", task: "t" }), { message: AUDIT_REFUSAL });
-    // The operator-typed command: /dispatch set says the refusal on its own line, and the settings file is not made.
-    let handler = null;
-    const pi = new Proxy({}, { get: (_t, k) => (k === "registerCommand" ? (_n, def) => (handler = def.handler) : () => {}) });
-    indexMod.default(pi);
-    const notes = [];
-    await handler("set dailyCap 3", { ui: { notify: (m, t) => notes.push({ m, t }) } });
-    assert.ok(notes.some((n) => n.m === `set: ${AUDIT_REFUSAL}` && n.t === "error"), JSON.stringify(notes));
-    assert.equal(existsSync(settingsFile), false, "nothing was written");
-  });
-});
 
-test("the dialog writes and /dispatch secrets are audited too", async () => {
-  const logsDir = tempDir("pd-642-dialogs-");
-  await withDeployment(logsDir, async ({ triggersPath }) => {
-    const ui = { select: async () => "label", input: (() => { const a = ["github", "bug", "fix"]; return async () => a.shift(); })(), confirm: async () => true, notify() {} };
-    await indexMod.handleDashboardAction({ action: "addTrigger" }, { triggersPath }, { ui });
-    assert.deepEqual(rowsOf(logsDir).map((r) => [r.kind, r.outcome]), [["trigger-add", "ok"]]);
-  });
-  const { runSecretsCommand } = await jiti.import("../src/secrets-command.ts");
-  const files = {};
-  const fs = {
-    readFileSync: (p) => { if (!(p in files)) throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); return files[p]; },
-    writeFileSync: (p, d) => (files[p] = d),
-    renameSync: (a, b) => { files[b] = files[a]; delete files[a]; },
-    mkdirSync: () => {},
-  };
-  const seen = [];
-  const audit = { append: (row) => { seen.push({ ...row, wroteYet: "/s/settings.json" in files }); return row; } };
-  const ctx = { ui: { input: async (t) => (/profile name/.test(t) ? "prod" : "/opt/pi/resolve.sh"), confirm: async () => true, notify() {} } };
-  await runSecretsCommand({ settingsFile: "/s/settings.json" }, ctx, () => {}, ["add"], { fs, audit });
-  assert.deepEqual(seen.map((r) => [r.kind, r.outcome, r.target, r.wroteYet]), [["secret-profile-add", "ok", "/s/settings.json", false]]);
-  // An audit that cannot append refuses the declaration with nothing written.
-  const notes = [];
-  const fs2 = { ...fs, writeFileSync: () => assert.fail("must not write"), renameSync: () => assert.fail("must not write") };
-  await runSecretsCommand({ settingsFile: "/t/settings.json" }, ctx, (m) => notes.push(m), ["add"], { fs: fs2, audit: brokenAudit() });
-  assert.deepEqual(notes, [`rejected: ${AUDIT_REFUSAL}`]);
-});
+
+
+
 
 test("the TUI's writes: pause, resume and both cancels go through the injected writer; a refusal is the footer note", async () => {
   const calls = [];
@@ -294,67 +231,7 @@ test("the TUI's pause note renders a kill-switch refusal the reader returns, and
   await comp.dispose();
 });
 
-test("every confirm-gated tool and operator-typed write refuses, unchanged files and all, when the audit cannot be appended", async () => {
-  const logsDir = unwritableLogsDir();
-  const keys = ["PI_LOGS_DIR", "PI_TRIGGERS_FILE", "PI_SETTINGS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE"];
-  const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-  const dir = tempDir("pd-642-all-");
-  const files = {
-    PI_TRIGGERS_FILE: [join(dir, "triggers.json"), { triggers: [{ on: { type: "label", any: ["bug"] }, run: { kind: "github", flow: "fix" } }] }],
-    PI_PAUSE_WINDOWS_FILE: [join(dir, "pause-windows.json"), { windows: [{ scope: "acme/web", from: "22:00", to: "06:00" }] }],
-    PI_SCOPED_LIMITS_FILE: [join(dir, "scoped-limits.json"), { version: 1, limits: [{ scope: "acme/web", day: 5 }] }],
-    PI_PROJECTS_FILE: [join(dir, "projects.json"), { version: 1, projects: [{ id: "web", members: ["github:acme/web"] }] }],
-    PI_SETTINGS_FILE: [join(dir, "settings.json"), { model: "m" }],
-  };
-  process.env.PI_LOGS_DIR = logsDir;
-  for (const [k, [p, body]] of Object.entries(files)) {
-    writeFileSync(p, JSON.stringify(body));
-    process.env[k] = p;
-  }
-  const snapshot = () => Object.values(files).map(([p]) => readFileSync(p, "utf8"));
-  const before = snapshot();
-  try {
-    const t = Object.fromEntries(registeredTools().map((x) => [x.name, x]));
-    const calls = [
-      ["dispatch_set", { key: "dailyCap", value: "4" }],
-      ["dispatch_set", { key: "model" }],
-      ["dispatch_trigger_edit", { index: 0, flow: "review" }],
-      ["dispatch_trigger_delete", { index: 0 }],
-      ["dispatch_pause_add", { scope: "*", from: "01:00", to: "02:00" }],
-      ["dispatch_pause_edit", { index: 0, to: "07:00" }],
-      ["dispatch_pause_delete", { index: 0 }],
-      ["dispatch_limit_add", { scope: "acme/api", day: 2 }],
-      ["dispatch_limit_edit", { index: 0, day: 9 }],
-      ["dispatch_limit_delete", { index: 0 }],
-      ["dispatch_project_add", { id: "api", members: ["github:acme/api"] }],
-      ["dispatch_project_edit", { id: "web", name: "Web" }],
-      ["dispatch_project_delete", { id: "web" }],
-    ];
-    for (const [name, params] of calls) {
-      await assert.rejects(t[name].execute("id", params, undefined, undefined, confirming()), (e) => e.message.endsWith(AUDIT_REFUSAL), name);
-    }
-    let handler = null;
-    const pi = new Proxy({}, { get: (_t, k) => (k === "registerCommand" ? (_n, def) => (handler = def.handler) : () => {}) });
-    indexMod.default(pi);
-    for (const line of ["unset model", "pause", "resume", "run /nowhere fix go"]) {
-      const notes = [];
-      await handler(line, { ui: { notify: (m) => notes.push(m) } });
-      assert.ok(notes.some((m) => String(m).endsWith(AUDIT_REFUSAL)), `${line}: ${JSON.stringify(notes)}`);
-    }
-    // The panel's dialogs: a pause-window add, a scoped-limit add and a trigger delete.
-    const paths = { triggersPath: files.PI_TRIGGERS_FILE[0], pauseWindowsPath: files.PI_PAUSE_WINDOWS_FILE[0], scopedLimitsPath: files.PI_SCOPED_LIMITS_FILE[0], projectsFile: files.PI_PROJECTS_FILE[0], settingsFile: files.PI_SETTINGS_FILE[0] };
-    const answers = (sel, inp) => ({ select: async () => sel.shift(), input: async () => inp.shift(), confirm: async () => true, notify: (m) => notes.push(m) });
-    const notes = [];
-    await indexMod.handleDashboardAction({ action: "managePauses" }, paths, { ui: answers(["Add a pause window"], ["*", "01:00", "02:00", "", "", "", ""]) });
-    await indexMod.handleDashboardAction({ action: "manageLimits" }, paths, { ui: answers(["Add a scoped limit"], ["acme/api", "3", "", "", ""]) });
-    await indexMod.handleDashboardAction({ action: "deleteTrigger", index: 0, confirmed: true }, paths, { ui: answers([], []) });
-    await indexMod.handleDashboardAction({ action: "editSettings" }, paths, { ui: answers(["dailyCap"], ["5"]) });
-    assert.equal(notes.filter((m) => String(m).endsWith(AUDIT_REFUSAL)).length, 4, JSON.stringify(notes));
-    assert.deepEqual(snapshot(), before, "no file changed");
-  } finally {
-    for (const k of keys) if (saved[k] === undefined) delete process.env[k]; else process.env[k] = saved[k];
-  }
-});
+
 
 test("the TUI's switch note reads killSwitchSet's results shape: a half switch and an unreachable Valkey fail loudly, a disagreement is said", async () => {
   const shapes = {

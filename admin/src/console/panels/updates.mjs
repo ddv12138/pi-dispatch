@@ -166,7 +166,6 @@ export const HOST_STATES_DRAWN = Object.freeze(Object.keys(HOST_CELLS));
 function hostSentence(h, view) {
 	const notes = [];
 	if (h.needles === "drift") notes.push(t("This pi has changed in a way this pi-dispatch has not been checked against, so copying its packages and settings may miss some. Use the version it is tested with, or a newer pi-dispatch.", view));
-	if (h.extension === "drift") notes.push(t("This pi may not load the /dispatch extension. Use the version pi-dispatch is tested with.", view));
 	if (h.stale) notes.push(html`${t("Its last look is", view)} ${ageText(nowOf(view) - h.at)} ${t("old.", view)}`);
 	return html`<p>${HOST_CELLS[h.state]?.(h, view) ?? HOST_CELLS.unknown(h, view)}</p>${notes.map((n) => html`<p class="muted">${n}</p>`)}`;
 }
@@ -176,7 +175,7 @@ export function updatesHosts(view) {
 	if (!v) return ui.card({ title: t("pi on each host", view), body: unreadable(view) });
 	const rows = v.hosts.map((h) => ({ cells: [what(h.name, t("worker host", view)), h.version ? versions(h.version) : html`<span class="muted">${t(h.state === "absent" ? "none" : "unknown", view)}</span>`, lineCell(hostSentence(h, view))] }));
 	const body = ui.tbl({ label: t("pi on each host", view), heads: ["Host", "pi", { label: "" }].map((h) => typeof h === "string" ? t(h, view) : h), rows, stack: true, empty: html`<p class="note up-note">${t(v.state === "not-looking" ? "No host has looked yet, so nothing is known about the pi on each host." : "No host's look could be read.", view)}</p>` });
-	return ui.card({ title: t("pi on each host", view), sub: t("where /dispatch and the host files run", view), flush: true, body: html`${body}${v.moreHosts > 0 ? html`<p class="note up-note">${t("And", view)} ${String(v.moreHosts)} ${t("more hosts, past what this page reads.", view)}</p>` : null}<p class="up-foot">${ui.icon("info", { size: "sm" })}<span>${t("Your own pi is yours to update, for example with", view)} <span class="code">pi update --all</span>. ${t("pi-dispatch reads its version and whether its host files still hold.", view)}</span></p>` });
+	return ui.card({ title: t("pi on each host", view), sub: t("where the host files run", view), flush: true, body: html`${body}${v.moreHosts > 0 ? html`<p class="note up-note">${t("And", view)} ${String(v.moreHosts)} ${t("more hosts, past what this page reads.", view)}</p>` : null}<p class="up-foot">${ui.icon("info", { size: "sm" })}<span>${t("Your own pi is yours to update, for example with", view)} <span class="code">pi update --all</span>. ${t("pi-dispatch reads its version and whether its host files still hold.", view)}</span></p>` });
 }
 
 export function updatesHow(view) {

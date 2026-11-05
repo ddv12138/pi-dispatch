@@ -12,7 +12,6 @@ import { join } from "node:path";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { withOperatorDiagnosis } from "./helpers/tool-diagnosis.mjs";
 import { blankSettingsFile, overlayInvalidRefusal, readSettingsView, writeSettings } from "../src/read-model.mjs";
 import * as RM from "../src/read-model.mjs";
 import * as WP from "../src/write-plans.mjs";
@@ -21,7 +20,7 @@ import { ACTIONS } from "../src/console/actions.mjs";
 const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
 const { createJiti } = piRequire("jiti");
 const jiti = createJiti(import.meta.url);
-const indexMod = await jiti.import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
+
 const { runSecretsCommand } = await jiti.import(fileURLToPath(new URL("../src/secrets-command.ts", import.meta.url)));
 // Every write below is audited into PI_LOGS_DIR's console-audit chain, so it lands in a directory of its own.
 process.env.PI_LOGS_DIR = tempDir("settings-carry-logs-");
@@ -109,29 +108,9 @@ test("writeSettings re-checks against its OWN read when no expect is given: a wr
 });
 
 /** The extension's `/dispatch` command handler, with `notify` recorded. */
-function commandPi() {
-  let def = null;
-  const pi = new Proxy({}, { get: (_t, k) => (k === "registerCommand" ? (_n, d) => (def = d) : () => {}) });
-  indexMod.default(pi);
-  return (args) => {
-    const notes = [];
-    return def.handler(args, { hasUI: true, ui: { notify: (m, t) => notes.push({ m, t }) } }).then(() => notes);
-  };
-}
 
-test("/dispatch set and unset keep a later release's key and the secretBundles block in place (#761)", async () => {
-  const { settingsFile } = seeded();
-  const run = commandPi();
-  assert.match((await run("set maxTurns 41")).at(-1).m, /^set maxTurns = 41/);
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: 41 }));
-  assert.match((await run("unset maxTurns")).at(-1).m, /^unset maxTurns/);
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: undefined }));
-  // A newer file: refused in the upgrade's words, nothing written.
-  const newer = text({ version: 2, ...FILE });
-  writeFileSync(settingsFile, newer);
-  assert.deepEqual((await run("set maxTurns 42")).at(-1), { m: "set: the settings file was written by a newer pi-dispatch (version 2; this build understands 1), so nothing was written and no key in it was lost. Upgrade this panel or console to the release that wrote it", t: "error" });
-  assert.equal(readFileSync(settingsFile, "utf8"), newer);
-});
+
+
 
 /** A pi `ctx.ui` whose dialogs answer in order. */
 function mockUi({ select = [], input = [], confirm = [] } = {}) {
@@ -139,13 +118,7 @@ function mockUi({ select = [], input = [], confirm = [] } = {}) {
   return { notes, select: async () => select.shift(), input: async () => input.shift(), confirm: async () => confirm.shift(), notify: (m, t) => notes.push({ m, t }) };
 }
 
-test("the panel's settings dialog keeps a later release's key and the secretBundles block in place (#761)", async () => {
-  const { settingsFile } = seeded();
-  await indexMod.handleDashboardAction({ action: "editSettings" }, { settingsFile }, { ui: mockUi({ select: ["maxTurns"], input: ["43"] }) });
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: 43 }));
-  await indexMod.handleDashboardAction({ action: "editSettings" }, { settingsFile }, { ui: mockUi({ select: ["model"], input: [""] }) });
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: 43, model: undefined }), "a blank value unsets the key, the rest stay");
-});
+
 
 test("/dispatch secrets add and remove keep a later release's key and the secretBundles block in place (#761)", async () => {
   const { settingsFile } = seeded();
@@ -206,17 +179,4 @@ test("the console's setting and secret actions keep a later release's key and th
   assert.equal(refused.refusal, "rejected: the settings file was written by a newer pi-dispatch (version 2; this build understands 1), so nothing was written and no key in it was lost. Upgrade this panel or console to the release that wrote it");
 });
 
-test("dispatch_set keeps a later release's key and the secretBundles block in place (#761)", async () => {
-  const { settingsFile } = seeded();
-  const tools = [];
-  const pi = new Proxy({}, { get: (_t, k) => (k === "registerTool" ? (t) => tools.push(t) : () => {}) });
-  indexMod.default(pi);
-  const tool = withOperatorDiagnosis(tools.find((t) => t.name === "dispatch_set"));
-  const ctx = { hasUI: true, ui: { confirm: async () => true } };
-  const set = JSON.parse((await tool.execute("id", { key: "maxTurns", value: "46" }, undefined, undefined, ctx)).content[0].text);
-  assert.equal(set.applied, true);
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: 46 }));
-  const unset = JSON.parse((await tool.execute("id", { key: "maxTurns", value: "" }, undefined, undefined, ctx)).content[0].text);
-  assert.equal(unset.applied, true);
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ maxTurns: undefined }));
-});
+

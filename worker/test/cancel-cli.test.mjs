@@ -401,9 +401,7 @@ test("no operator-facing text says a removed or held job never ran, or has spent
 	const cancelHelp = usage.slice(usage.indexOf("pi-dispatch cancel <jobId>"), usage.indexOf("Config comes from"));
 	assert.doesNotMatch(cancelHelp, /never ran/);
 	assert.match(cancelHelp, /the line says whether it had\s+made attempts; cancel records nothing/);
-	assert.doesNotMatch(read("admin/skills/operate-pi-dispatch/SKILL.md"), /\(the\s+job never ran\)|held job has spent nothing/);
 	assert.doesNotMatch(read("docs/wait-for.md"), /because a\s+held job never ran/);
-	assert.doesNotMatch(read("admin/src/index.ts"), /A held job has spent nothing|because the job never ran/);
 	assert.doesNotMatch(read("admin/src/read-model.mjs"), /a held job has spent nothing/);
 	// The removeHeldJob docblock is its own again, and says what the result carries.
 	const state = read("worker/src/cancel-state.mjs");

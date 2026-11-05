@@ -20,8 +20,7 @@ import { scrubControlsPerLine } from "./panel.mjs";
  * pi. Wrapping twice is harmless, because the scrub is idempotent.
  *
  * `custom` IS NOT WRAPPED. It takes a FACTORY, and rebuilding one would change what pi calls. What the two
- * overlay factories return is already gated (`renderPanel` and `clipData`); `setup-wizard.ts`'s attached
- * view is NOT, and that is its own residual rather than something this wrapper can reach.
+ * overlay factories return is already gated (`renderPanel` and `clipData`).
  */
 export function gateDialogs(ctx) {
   const ui = ctx?.ui;

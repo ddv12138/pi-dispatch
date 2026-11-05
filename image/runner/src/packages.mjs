@@ -38,8 +38,8 @@ export const ADMIN_EXTENSION_RE = /pi-dispatch|dispatch-admin/i;
  * filename, it is `dispatch_run` (enqueues a PAID job from inside a paid job), `dispatch_set` (moves
  * the daily cap) and `dispatch_pause`/`_resume`/`_trigger_*` (durable queue controls) becoming
  * LLM-callable inside a container whose prompt carries adversarial issue text. This project's own
- * `.pi/extensions/dispatch.ts` is exactly that shape: two lines, a name no pattern would flag, and the
- * whole admin tool set behind it. An extension that registers these tools IS the admin surface however
+ * A legacy `.pi/extensions/dispatch.ts` can have exactly that shape: a name no pattern would flag and
+ * the whole admin tool set behind it. An extension that registers these tools IS the admin surface however
  * it is spelled on disk.
  *
  * The cost is stated rather than hidden: a serviced repo whose own extension registers a `dispatch_*`

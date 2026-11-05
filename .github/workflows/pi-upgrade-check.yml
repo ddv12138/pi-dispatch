@@ -35,7 +35,6 @@ on:
       - "pi-packages.example.json"
       - "triggers.example.json"
       - ".github/workflows/pi-upgrade-check.yml"
-      - ".github/scripts/admin-pi-canary.mjs"
       - ".github/scripts/host-pi-canary.mjs"
       - ".github/scripts/job-user-e2e.mjs"
       - ".github/scripts/fake-key-smoke.mjs"
@@ -127,8 +126,8 @@ jobs:
           # range (^1.0.3), so a lockfile regenerated on another day can resolve pi-tui or pi-agent-core to
           # a release nobody verified while every package.json still shows an exact pin. The root
           # package.json's overrides pin every @earendil-works package to the runner's pin; this holds the
-          # overrides, every pi entry in package-lock.json and the hand-written pins (worker, admin,
-          # SUPPORTED_PI_VERSION, the Dockerfile's PI_VERSION) to that one version. Its rule is tested in
+          # overrides, every pi entry in package-lock.json and the hand-written pins (worker, admin, the
+          # Dockerfile's PI_VERSION) to that one version. Its rule is tested in
           # worker/test/pi-pin-check.test.mjs.
           node .github/scripts/pi-pin-check.mjs
 
@@ -1153,59 +1152,22 @@ jobs:
             || { cat watch.tap; echo "::error::The parent's children hook did not fold, stop or detect in the image. Check, in order: run-job.mjs hands createChildWatch to installProcessUsageMeter, child-watch.mjs still matches pi's titles (pi, pi-rpc) and entry files, and the child meter still reads STOP (image/runner/test/child-watch.test.mjs and child-watch.integration.test.mjs run the same rules outside the image)."; exit 1; }
 
   admin-extension-canary:
-    # The admin extension is the default front door (issue #96): it is TESTED against an exact pi
-    # (SUPPORTED_PI_VERSION, locked to the admin devDependency pin by admin/test/load.test.mjs) but
-    # declares a "*" peer, because pi never installs peers for host-provided packages and an exact
-    # peer pin ERESOLVEs every plain-npm consumer whose pi differs by a patch -- the full reasoning
-    # lives in .github/scripts/admin-pi-canary.mjs's header. A wildcard peer without a canary is a
-    # hope; this job is the canary. It installs pi@latest into a SCRATCH dir and asserts the admin's
-    # pinned assumptions against THAT install: the pinned-api needle list, the USED_API members on
-    # ExtensionAPI, the runtime VERSION export, and an actual load-and-register of the built bundle.
-    #
-    # Failure protocol: a red run here means pi moved underneath the admin. Retest locally against
-    # the new pi, bump SUPPORTED_PI_VERSION and the admin devDependency pin TOGETHER (load.test.mjs
-    # locks them to each other), and republish @edgehero/pi-dispatch-admin.
+    # Branch protection requires this exact historical context. Keep it while verifying the
+    # replacement contract: the admin package ships the console, not a pi extension.
     name: the admin extension survives latest pi (canary)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
-
-      # NEVER install anything extra into the repo root. admin/test/load.test.mjs and
-      # admin/test/pinned-extension-api.test.mjs anchor on the HOISTED PIN the lockfile resolves; a
-      # root `npm install @earendil-works/pi-coding-agent@latest` would silently flip both from
-      # pinned-version assertions into HEAD assertions -- green-lighting exactly the drift they
-      # exist to catch. The @latest copy goes into a mktemp scratch dir outside the checkout.
       - run: npm ci --no-audit --no-fund
-
       - run: node admin/build.mjs
-
-      - name: Install pi@latest into a scratch dir (never the repo)
+      - name: Verify the admin package exposes only the console
         run: |
-          SCRATCH=$(mktemp -d)
-          echo "SCRATCH=$SCRATCH" >> "$GITHUB_ENV"
-          cd "$SCRATCH"
-          npm init -y >/dev/null
-          # Distinguish failures (release.yml's npm-view doctrine): an install error here is
-          # infrastructure -- network, registry, npm itself -- NOT a canary verdict about pi, and
-          # reading it as either "pi broke us" or "all clear" would be a guess. Fail loudly instead.
-          if ! npm install @earendil-works/pi-coding-agent@latest --no-audit --no-fund; then
-            echo "::error::npm install @earendil-works/pi-coding-agent@latest failed -- an infrastructure failure, not a pi-drift verdict. Re-run before reading anything into it."
-            exit 1
-          fi
-          node -p "'canary pi: ' + require('$SCRATCH/node_modules/@earendil-works/pi-coding-agent/package.json').version"
-
-      - name: Run the canary against the scratch pi
-        run: |
-          # The bundle is copied INTO the scratch dir so its bare pi import resolves against
-          # scratch/node_modules -- ESM resolves bare specifiers from the importing file's own
-          # location, which is what keeps the repo's hoisted pin out of the probe entirely. The
-          # canary script re-copies fresh and asserts (a)-(d); see its header for the mechanics.
-          cp admin/dist/index.mjs "$SCRATCH/admin-bundle.mjs"
-          node .github/scripts/admin-pi-canary.mjs "$SCRATCH"
+          node -e 'const p = require("./admin/package.json"); if (p.pi?.extensions?.length || p.pi?.skills?.length || p.bin?.["pi-dispatch-console"] !== "./dist/console.mjs") process.exit(1)'
+          test ! -e admin/dist/index.mjs
+          node admin/dist/console.mjs --help
 
   mcp-canary:
     # The job's MCP (REQ-MCP-OPERATOR-SERVERS) rests on pi internals the runner drives directly: the MCP extension's

@@ -33,7 +33,7 @@ test("init scaffolds the config files with the empty templates the loaders valid
 	// could silently widen. Empty is inert, and the folder mutex needs no scaffold at all.
 	assert.deepEqual(JSON.parse(readFileSync(join(dir, "scoped-limits.json"), "utf8")), { version: 1, limits: [] });
 	assert.match(text(), /the folder mutex needs no file/, "the scaffold line says what is NOT configuration");
-	assert.match(text(), /pi install npm:@edgehero\/pi-dispatch-admin/, "next steps name the operator panel");
+	assert.match(text(), /pi-dispatch up --console/, "next steps name the web console");
 	// Issue #503: the declared model endpoints, empty and versioned, which the worker's own loader reads as none, and the
 	// proxy include rendered from them, the header alone (squid starts on it and refuses a missing file).
 	assert.equal(readFileSync(join(dir, "model-endpoints.json"), "utf8"), '{\n  "version": 1,\n  "endpoints": []\n}\n');
@@ -149,8 +149,7 @@ Next:
   4. pi-dispatch doctor                                 # verify Docker, Valkey, image, and key
   5. pi-dispatch worker                                 # drain the queue
 
-Operator panel (optional): pi install npm:@edgehero/pi-dispatch-admin   then   /dispatch
-  (or let the panel do all of the above: /dispatch setup walks these steps with a consent per action)
+Web console (optional): pi-dispatch up --console
 `;
 
 // The podman ladder, docs/podman.md "Setup" in the order a fresh folder needs it, linger named up front (gate 456).
@@ -166,8 +165,7 @@ sudo loginctl enable-linger <account>, without which a job gets no bounds):
   5. pi-dispatch service install                        # the worker as a user service, after those units (also installs them)
   6. pi-dispatch doctor --live                          # read the bounds, egress and job user back off real containers
 
-Operator panel (optional): pi install npm:@edgehero/pi-dispatch-admin   then   /dispatch
-  (or let the panel do all of the above: /dispatch setup walks these steps with a consent per action)
+Web console (optional): pi-dispatch up --console
 `;
 
 // Off Linux the podman venue refuses the host, so there is no ladder to print.

@@ -8,7 +8,7 @@ import { fakeNpm } from "./helpers/fake-npm.mjs";
 import { readStageManifest, parsePackagesFile } from "../src/packages.mjs";
 import { STAGED_TREE_KEEP_MS, pruneStagedTrees } from "../src/package-stage.mjs";
 import { runUpdatesCli } from "../src/updates-cli.mjs";
-import { ADMIN_USED_API, boundedJson, bumpChecks, buildLook, hostPiFacts, newestVersion } from "../src/updates-look.mjs";
+import { boundedJson, bumpChecks, buildLook, hostPiFacts, newestVersion } from "../src/updates-look.mjs";
 import { applyDesired, isSubscriptionAdapter, reconcileUpdates } from "../src/updates-reconcile.mjs";
 import { CANNOT_ADOPT_REASONS, UPDATES_DESIRED, UPDATES_GENERATION, UPDATES_HOSTS, changelogExcerpt, compareVersions, hostHasPending, lookIsStale, parseApplied, parseCanaryFacts, parseDesired, parseLookRecord, publishCanaryFacts, publishLook, readApplied, readCanaryFacts, readDesired, readLooks, setDesired, updatesAppliedKey, updatesCanaryKey, updatesLookKey, writeApplied } from "../src/updates.mjs";
 
@@ -122,25 +122,20 @@ const hostFs = (files, real = "/opt/pi/bin/pi") => ({
 	},
 });
 const NEEDLES = { "dist/x.js": ["needle one"] };
-const PI_FILES = { "/opt/pi/package.json": JSON.stringify({ name: "@earendil-works/pi-coding-agent" }), "/opt/pi/dist/x.js": "needle one", "/opt/pi/dist/core/extensions/loader.js": ADMIN_USED_API.map((m) => `${m}(a) {}`).join("\n") };
+const PI_FILES = { "/opt/pi/package.json": JSON.stringify({ name: "@earendil-works/pi-coding-agent" }), "/opt/pi/dist/x.js": "needle one" };
 
 test("a host's own pi: same, newer, older, none here, and what cannot be read is unknown", () => {
 	const facts = (version, files = PI_FILES, found = { path: "/usr/bin/pi" }) => hostPiFacts({ tested: "1.5.0", resolvePi: () => found, versionOf: () => version, fs: hostFs(files), needles: NEEDLES });
-	assert.deepEqual(facts("1.5.0"), { version: "1.5.0", tested: "1.5.0", state: "same", needles: "ok", extension: "ok" });
+	assert.deepEqual(facts("1.5.0"), { version: "1.5.0", tested: "1.5.0", state: "same", needles: "ok", extension: "unknown" });
 	assert.equal(facts("1.6.0").state, "newer");
 	assert.equal(facts("1.4.0").state, "older");
 	assert.equal(facts(null).state, "unknown");
 	assert.equal(facts("1.5.0", PI_FILES, { refusal: "no pi" }).state, "absent", "no pi on a host is a normal host");
 	assert.equal(facts("1.5.0", { ...PI_FILES, "/opt/pi/dist/x.js": "moved" }).needles, "drift");
-	const noApi = { ...PI_FILES, "/opt/pi/dist/core/extensions/loader.js": "on(a) {}" };
-	assert.equal(facts("1.5.0", noApi).extension, "drift");
 	assert.equal(facts("1.5.0", { "/elsewhere": "" }).needles, "unknown", "a wrapper that lives elsewhere is unknown, not a failure");
 	const noFile = { ...PI_FILES };
 	delete noFile["/opt/pi/dist/x.js"];
 	assert.equal(facts("1.5.0", noFile).needles, "drift", "a file this pi no longer has is drift, not a pass");
-	const noLoader = { ...PI_FILES };
-	delete noLoader["/opt/pi/dist/core/extensions/loader.js"];
-	assert.equal(facts("1.5.0", noLoader).extension, "drift");
 });
 
 // ---- the records

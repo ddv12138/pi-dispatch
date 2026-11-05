@@ -1,32 +1,14 @@
-/**
- * Bundle the operator extension into a single self-contained `dist/index.mjs` for publishing as a pi-package.
- *
- * The admin extension imports ~10 `@edgehero/pi-dispatch` subpaths (the worker workspace); esbuild INLINES those
- * local `.mjs` files so the published package has no worker dependency — the admin tarball stands alone even
- * though the worker is now published too (a devDependency, resolved through the workspace symlink at build
- * time and never declared at runtime). The pi runtime is
- * host-provided (a peerDependency) and `bullmq`/`ioredis` are heavy real deps kept EXTERNAL and declared in
- * package.json; everything else — the admin's own files, the inlined worker internals, and `typebox` — is
- * bundled in. `import.meta.url` is preserved (esm), so the extension's `../skills` resolution still points at
- * the shipped `skills/` dir (dist/ and skills/ sit side by side in the published tarball).
- */
+/** Build the operator console for publishing. */
 import { build } from "esbuild";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { NODE_BUNDLE_OPTIONS, NODE_REQUIRE_PRELUDE } from "./bundle-options.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
-await build({
-	...NODE_BUNDLE_OPTIONS,
-	entryPoints: [join(here, "src/index.ts")],
-	outfile: join(here, "dist/index.mjs"),
-	// Host-provided peer + heavy runtime deps stay external (declared in package.json). typebox is bundled.
-	banner: { js: `// pi-dispatch operator extension (bundled). Source: https://github.com/edgehero/pi-dispatch\n${NODE_REQUIRE_PRELUDE}` },
-	logLevel: "info",
-});
-
-console.log("[built admin/dist/index.mjs]");
+// A build may reuse a dist directory from an older release. Do not ship its retired extension.
+await rm(join(here, "dist/index.mjs"), { force: true });
 
 // The operator console's command (issue #640), a second program from the same sources: `pi-dispatch-console`, the
 // package's `bin`. Same bundling rule as the extension (worker internals inlined, the heavy deps external, so the

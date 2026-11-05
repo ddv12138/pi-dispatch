@@ -1,4 +1,3 @@
-import { withOperatorDiagnosis } from "./helpers/tool-diagnosis.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
@@ -15,7 +14,7 @@ import * as plans from "../src/write-plans.mjs";
 // each plan says exactly what the tool says, refusal and confirm alike, because the tools now run these plans.
 const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
 const { createJiti } = piRequire("jiti");
-const indexMod = await createJiti(import.meta.url).import(fileURLToPath(new URL("../src/index.ts", import.meta.url)));
+
 // Every tool write below is audited as the panel; keep those rows out of the account's own logs directory.
 process.env.PI_LOGS_DIR = tempDir("pd-642-plans-logs-");
 
@@ -43,16 +42,11 @@ test("write-plans.mjs and audited-write.mjs reach neither the pi runtime nor typ
     assert.deepEqual(files.filter((f) => PI_OR_TYPEBOX.test(f)), [], entry);
   }
   assert.ok((await reached("./write-plans.mjs")).some((f) => f.endsWith("src/read-model.mjs")));
-  // The control: index.ts, which these left, does reach typebox, so a regression that imports it here turns this red.
-  assert.ok((await reached("./index.ts")).some((f) => PI_OR_TYPEBOX.test(f)), "the walk finds typebox where it is");
+  // A direct import is the positive control for the dependency walk.
+  assert.ok((await reached("typebox")).some((f) => PI_OR_TYPEBOX.test(f)), "the walk finds typebox where it is");
 });
 
-function tools() {
-  const list = [];
-  const pi = new Proxy({}, { get: (_t, k) => (k === "registerTool" ? (t) => list.push(t) : () => {}) });
-  indexMod.default(pi);
-  return Object.fromEntries(list.map((t) => [t.name, withOperatorDiagnosis(t)]));
-}
+
 /** A ctx whose confirm records what it was shown and declines, so a tool shows its confirm and writes nothing. */
 function recordingCtx() {
   const shown = [];
@@ -104,46 +98,7 @@ function deployment(env = {}) {
   return { paths, restore };
 }
 
-test("each trigger plan says what its tool says: every refusal and the confirm, byte for byte", async () => {
-  const t = tools();
-  const { paths, restore } = deployment({ PI_BACKENDS: "local" });
-  try {
-    const env = process.env;
-    const addCases = [
-      { kind: "label", flow: "fix", labels: ["bug"] },
-      { kind: "label", flow: "fix", labels: ["bug"], maxCostUsd: "1" },
-      { kind: "label", flow: "fix", labels: ["bug"], run: { max_cost_usd: "1" } },
-      { kind: "label", flow: "fix", labels: ["bug"], backend: "podman" },
-      { kind: "label", flow: "fix", labels: ["bug"], provider: "anthropic" },
-      { kind: "cron", flow: "fix", id: "n", pattern: "0 3 * * *", folder: "/srv", task: "t", maxTurns: 0 },
-      { kind: "telepathy", flow: "fix" },
-      { kind: "label", flow: "fix", labels: ["bug"], progress: true, statusComment: true },
-      { kind: "cron", flow: "fix", id: "n", pattern: "0 3 * * *", folder: "/srv", task: "t", statusComment: true },
-      { kind: "label", flow: "fix", labels: ["bug"], recover: true },
-      { kind: "cron", flow: "fix", id: "n", pattern: "0 3 * * *", folder: "/srv", task: "t", recover: true },
-      { kind: "label", flow: "fix", labels: ["bug"], steer: true },
-      { kind: "cron", flow: "fix", id: "n", pattern: "0 3 * * *", folder: "/srv", task: "t", steer: true },
-      { kind: "label", flow: "fix", labels: ["bug"], steer: "yes" },
-      // Issue #737: a field the kind does not take is refused by name, a field the pull_request arm used to drop
-      // (`repository`) among them, and reviewState is carried into the confirm's entry.
-      { kind: "label", flow: "fix", labels: ["bug"], colour: "red" },
-      { kind: "pull_request", flow: "fix", action: ["opened"], repository: "web" },
-      { kind: "pull_request", flow: "fix", action: ["review_submitted"], reviewState: ["approved"] },
-    ];
-    for (const params of addCases) {
-      assert.deepEqual(planSays(plans.planTriggerAdd({ params, paths, env })), await toolSays(t.dispatch_trigger_add, params), JSON.stringify(params));
-    }
-    const editCases = [{ index: 0, flow: "review", maxTurns: 17 }, { index: 0, flow: "review", maxTurns: 0 }, { index: 0, flow: "review", maxTurns: 1.5 }, { index: 0, flow: "review" }, { index: 0, flow: "review", backend: "local", model: "m1", provider: "openai" }, { index: 3, flow: "x" }, { index: 0, flow: "  " }, { index: 0, flow: "x", backend: "vapour" }, { index: 0, flow: "x", models: ["a/b"] }, { index: 0, flow: "x", progress: true, statusComment: false }, { index: 0, flow: "x", recover: true }, { index: 0, flow: "x", recover: "yes" }, { index: 0, flow: "x", steer: true }, { index: 0, flow: "x", steer: "yes" }];
-    for (const params of editCases) {
-      assert.deepEqual(planSays(plans.planTriggerEdit({ params, paths, env })), await toolSays(t.dispatch_trigger_edit, params), JSON.stringify(params));
-    }
-    for (const index of [0, 9]) assert.deepEqual(planSays(plans.planTriggerDelete({ index, paths })), await toolSays(t.dispatch_trigger_delete, { index }));
-    // Under an EMPTY blessed set, refused too (#227).
-    assert.equal(plans.planTriggerAdd({ params: { kind: "label", flow: "f", labels: ["b"], backend: "local" }, paths, env: { PI_BACKENDS: "vapour" } }).refusal, "this deployment blesses no backends, so run.backend cannot be set (see PI_BACKENDS)");
-  } finally {
-    restore();
-  }
-});
+
 
 /** The keys `buildTriggerEntry`'s arm for `kind` reads from its field bag, through a recording Proxy that answers `value(key)`. */
 function armReads(kind, value) {
@@ -371,126 +326,11 @@ test("run.steer (issue #646): carried only as a boolean, allowed on cron, refuse
   }
 });
 
-test("the settings plans: the tool surface says what dispatch_set says, the command surface what /dispatch set says", async () => {
-  const t = tools();
-  const { paths, restore } = deployment();
-  try {
-    const env = process.env;
-    for (const params of [{ key: "dailyCap", value: "7" }, { key: "nope", value: "1" }, { key: "dailyCostUsd", value: "1e3" }, { key: "dailyCap" }, { key: "model", value: " " }]) {
-      assert.deepEqual(planSays(plans.planSettingChange({ key: params.key, value: params.value, paths, env })), await toolSays(t.dispatch_set, params), JSON.stringify(params));
-    }
-    assert.equal(plans.planSettingSet({ key: "nope", value: "1", paths, env }).refusal, "unknown key 'nope'. valid keys: " + plans.planSettingSet({ key: "nope", value: "1", paths, env }).refusal.split("valid keys: ")[1]);
-    assert.match(plans.planSettingSet({ key: "nope", valueTokens: ["1"], paths, env, surface: "command" }).refusal, /^set: unknown key 'nope'\. valid keys: /);
-    assert.match(plans.planSettingUnset({ key: "nope", paths, env, surface: "command" }).refusal, /^unset: unknown key 'nope'\. valid keys: /);
-    assert.equal(plans.planSettingSet({ key: "model", valueTokens: ["a", "b"], paths, env, surface: "command" }).refusal, "set: model takes exactly one value");
-    const set = plans.planSettingSet({ key: "dailyCap", value: "7", paths, env }).plan;
-    assert.deepEqual(set.mutate({ model: "m" }), { model: "m", dailyCap: 7 });
-    // The change in words, before and after (issue #737), and as the pair the console draws in bold.
-    assert.deepEqual([set.message, set.changes], ["dailyCap: (unset) to 7", [["dailyCap", "(unset)", "7"]]]);
-    assert.equal(set.unset, false);
-    const unset = plans.planSettingUnset({ key: "model", paths, env }).plan;
-    assert.deepEqual(unset.mutate({ model: "m", dailyCap: 7 }), { dailyCap: 7 });
-    const dollar = plans.planSettingSet({ key: "dailyCostUsd", valueTokens: ["2.50"], paths, env, shown: { deploymentDir: "/d" }, surface: "command" }).plan;
-    assert.deepEqual(dollar.mutate({}), { dailyCostUsd: "2.50" }, "a dollar key keeps the typed text");
-    assert.deepEqual(dollar.writeArgs, { dollarEnv: env, deploymentDir: "/d" }, "and its write warns over the merged values");
-    // An invalid file is refused on the tool surface BEFORE the confirm.
-    writeFileSync(paths.settingsFile, "{ not json");
-    assert.deepEqual(planSays(plans.planSettingChange({ key: "dailyCap", value: "3", paths, env })), await toolSays(t.dispatch_set, { key: "dailyCap", value: "3" }));
-    assert.match(plans.planSettingChange({ key: "dailyCap", value: "3", paths, env }).refusal, /^rejected: the settings file is invalid/);
-  } finally {
-    restore();
-  }
-});
 
-test("the pause-window and scoped-limit plans say what their tools say", async () => {
-  const t = tools();
-  const { paths, restore } = deployment();
-  try {
-    const env = process.env;
-    const fields = { scope: "*", from: "01:00", to: "02:00", days: ["mon"] };
-    assert.deepEqual(planSays(plans.planPauseWindowAdd({ fields, paths })), await toolSays(t.dispatch_pause_add, fields));
-    for (const p of [{ index: 0, to: "07:00" }, { index: 4 }]) assert.deepEqual(planSays(plans.planPauseWindowEdit({ index: p.index, fields: p, paths })), await toolSays(t.dispatch_pause_edit, p), JSON.stringify(p));
-    for (const index of [0, 4]) assert.deepEqual(planSays(plans.planPauseWindowDelete({ index, paths })), await toolSays(t.dispatch_pause_delete, { index }));
-    for (const p of [{ scope: "acme/api", day: 3 }, { scope: "acme/api" }, { scope: "acme/api", dayUsd: "1e-9" }, { scope: "acme/api", memory: "12q" }]) {
-      assert.deepEqual(planSays(plans.planLimitAdd({ params: p, paths, env })), await toolSays(t.dispatch_limit_add, p), JSON.stringify(p));
-    }
-    for (const p of [{ index: 0, week: 9 }, { index: 0, scope: "github:acme/web" }, { index: 2, day: 1 }, { index: 0, weekUsd: "x" }]) {
-      assert.deepEqual(planSays(plans.planLimitEdit({ params: p, paths, env })), await toolSays(t.dispatch_limit_edit, p), JSON.stringify(p));
-    }
-    for (const index of [0, 5]) assert.deepEqual(planSays(plans.planLimitDelete({ index, paths, env })), await toolSays(t.dispatch_limit_delete, { index }));
-    // An edit says its row before and after in words, never an arrow (issue #737); the console's surface by index.
-    assert.equal(plans.planLimitEdit({ params: { index: 0, week: 9 }, paths, env }).plan.message, 'scoped limit #1:\n{"scope":"acme/web","day":5}\nto {"scope":"acme/web","day":5,"week":9}');
-    assert.equal(plans.planLimitEdit({ params: { index: 0, week: 9 }, paths, env, surface: "console" }).plan.title, "Edit scoped limit row 1");
-    assert.equal(plans.planPauseWindowEdit({ index: 0, fields: { to: "07:00" }, paths }).plan.message, 'pause window #1:\n{"scope":"acme/web","from":"22:00","to":"06:00","tz":"UTC"}\nto {"scope":"acme/web","from":"22:00","to":"07:00","tz":"UTC"}');
-    assert.match(plans.planLimitEdit({ params: { index: 0, scope: "github:acme/web" }, paths, env }).plan.message, /starts a new count under a new key/);
-    // The plan's writeArgs ARE the funnel's arguments, expect included: a concurrent change after the plan refuses.
-    const add = plans.planLimitAdd({ params: { scope: "acme/api", day: 3 }, paths, env }).plan;
-    writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 1, limits: [] }));
-    assert.ok(writeScopedLimits(add.writeArgs).invalid, "the file changed after the plan, so the write refuses");
-    const fresh = plans.planLimitAdd({ params: { scope: "acme/api", day: 3 }, paths, env }).plan;
-    assert.ok(writeScopedLimits(fresh.writeArgs).ok);
-    assert.deepEqual(JSON.parse(readFileSync(paths.scopedLimitsPath, "utf8")).limits, [{ scope: "acme/api", day: 3 }]);
-  } finally {
-    restore();
-  }
-});
 
-test("the project, envelope, secret-profile and priorities plans", async () => {
-  const t = tools();
-  const { paths, restore } = deployment();
-  try {
-    const env = process.env;
-    // No projects file yet: the add plans through the parser; edit and delete name the missing id as the tools do.
-    for (const p of [{ id: "web", members: ["github:acme/web"] }, { id: "BAD", members: ["github:acme/web"] }, { id: "web", members: ["acme/web"] }]) {
-      assert.deepEqual(planSays(plans.planProjectAdd({ params: p, paths, env })), await toolSays(t.dispatch_project_add, p), JSON.stringify(p));
-    }
-    assert.deepEqual(planSays(plans.planProjectEdit({ params: { id: "web", name: "W" }, paths, env })), await toolSays(t.dispatch_project_edit, { id: "web", name: "W" }));
-    assert.deepEqual(planSays(plans.planProjectDelete({ id: "web", paths, env })), await toolSays(t.dispatch_project_delete, { id: "web" }));
-    assert.deepEqual(planSays(plans.planEnvelope({ params: {}, paths, env })), await toolSays(t.dispatch_envelope_set, {}));
-    // Secret profiles: the command's own sentences.
-    assert.match(plans.planSecretProfileAdd({ name: "pro,d", path: "/x", profiles: {}, settingsFile: "/s" }).refusal, /^a profile name may use letters, digits, dot, dash and underscore only \u2014 PI_SECRET_PROFILES/);
-    assert.equal(plans.planSecretProfileAdd({ name: "prod", path: "rel/x", profiles: {}, settingsFile: "/s" }).refusal, "the resolver needs an absolute path: a service manager's working directory is not your shell's");
-    const add = plans.planSecretProfileAdd({ name: "prod", path: "/opt/r.sh", profiles: { dev: "/opt/d.sh" }, settingsFile: "/s/settings.json" }).plan;
-    assert.equal(add.title, "Declare a secret resolver");
-    assert.match(add.message, /^\/s\/settings\.json gets:\n\{\n {2}"secretProfiles": \{\n {4}"dev": "\/opt\/d\.sh",\n {4}"prod": "\/opt\/r\.sh"/);
-    assert.deepEqual(add.mutate({ model: "m" }), { model: "m", secretProfiles: { dev: "/opt/d.sh", prod: "/opt/r.sh" } });
-    assert.equal(plans.planSecretProfileRemove({ name: "gone", profiles: {}, settingsFile: "/s" }).refusal, "no such profile. No resolver profiles are declared in the settings overlay.");
-    assert.deepEqual(plans.planSecretProfileRemove({ name: "dev", profiles: { dev: "/d", x: "/x" }, settingsFile: "/s" }).plan.mutate({}), { secretProfiles: { x: "/x" } });
-    // Bundle resolvers (issue #704): the validator's `{ path, format }` shape, a replace said, and the stranded bundles named.
-    const badd = plans.planSecretBundleAdd({ name: "op-shop", path: "/opt/b2.mjs", format: "dotenv", bundles: { "op-shop": { path: "/opt/b.mjs", format: "json" } }, settingsFile: "/s/settings.json" }).plan;
-    assert.equal(badd.title, "Declare a secret bundle resolver");
-    assert.deepEqual(badd.mutate({ secretProfiles: { a: "/a" } }), { secretProfiles: { a: "/a" }, secretBundles: { "op-shop": { path: "/opt/b2.mjs", format: "dotenv" } } });
-    // Sentence case, no all-caps (issue #737): the console's bar shows this text too.
-    assert.match(badd.message, /\n\nThis replaces the current resolver, op-shop: \/opt\/b\.mjs \(json\)\n\nThe worker executes/);
-    assert.match(badd.message, /The worker executes this script, as the account it runs as, once per job start of every project a bundle in triggers\.json binds to it, and hands that job every variable it prints \(dotenv\)/);
-    assert.match(plans.planSecretProfileAdd({ name: "dev", path: "/opt/d2.sh", profiles: { dev: "/opt/d.sh" }, settingsFile: "/s" }).plan.message, /\n\nThis replaces the current resolver, dev: \/opt\/d\.sh\n\nThe worker executes this script/);
-    assert.equal(plans.planSecretProfileRemove({ name: "dev", profiles: { dev: "/d" }, settingsFile: "/s" }).plan.message, "dev: /d\n\nEvery trigger naming it is refused before spend after this, rather than running without its secrets. The triggers file could not be read, so its users cannot be named.\nThe resolver script stays on disk; only the declaration goes.");
-    for (const plan of [badd, add]) assert.doesNotMatch(plan.message, /\b(?:REPLACES|EXECUTES|EVERY|PRE-SPEND|AMBIGUOUS|ABSOLUTE)\b/);
-    const brm = plans.planSecretBundleRemove({ name: "op-shop", bundles: { "op-shop": { path: "/opt/b.mjs", format: "json" } }, bound: ["shop", "web"], settingsFile: "/s" }).plan;
-    assert.deepEqual(brm.mutate({}), { secretBundles: {} });
-    assert.match(brm.message, /The jobs of bundles shop, web are refused pre-spend .*, or on a multi-host worker's shared queue held for a host that declares it/);
-    const one = { "op-shop": { path: "/b", format: "json" } };
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: one, bound: null, settingsFile: "/s" }).plan.message, /The triggers file could not be read, so the jobs of any bundle naming it are refused/);
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: one, bound: [], settingsFile: "/s" }).plan.message, /No bundle in triggers\.json names it, so no project's jobs depend on it\.\nThe resolver script stays on disk; only the declaration goes\.$/);
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: one, bound: ["shop"], envBundles: { "op-shop": { path: "/e", format: "json" } }, settingsFile: "/s" }).plan.message, /PI_SECRET_BUNDLES also declares op-shop, so removing it here resolves the ambiguity/);
-    // Any colliding name makes EVERY bundle ambiguous (mergeSecretProfiles), so another collision left keeps it so.
-    const two = { "op-shop": { path: "/b", format: "json" }, "op-web": { path: "/w", format: "json" } };
-    const env2 = { "op-shop": { path: "/e", format: "json" }, "op-web": { path: "/f", format: "json" } };
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: two, bound: [], envBundles: env2, settingsFile: "/s" }).plan.message, /so this removes one collision\. Still ambiguous after this: op-web also collides with PI_SECRET_BUNDLES/);
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: two, bound: [], envBundles: { "op-web": { path: "/f", format: "json" } }, settingsFile: "/s" }).plan.message, /removing op-shop does not change that\. Still ambiguous after this: op-web also collides/);
-    // A bundle resolver the overlay holds with no format is named so, in the removal's first line and in the add that
-    // replaces it, never with an empty bracket or as a profile (which declares none).
-    const formatless = { "op-shop": { path: "/opt/b.mjs" } };
-    assert.match(plans.planSecretBundleRemove({ name: "op-shop", bundles: formatless, bound: [], settingsFile: "/s" }).plan.message, /^op-shop: \/opt\/b\.mjs \(no format\)\n\n/);
-    assert.match(plans.planSecretBundleAdd({ name: "op-shop", path: "/opt/b2.mjs", format: "json", bundles: formatless, settingsFile: "/s" }).plan.message, /\n\nThis replaces the current resolver, op-shop: \/opt\/b\.mjs \(no format\)\n\nThe worker executes/);
-    // Priorities: the plan applyPriorities takes, validUntil from the injected clock.
-    const now = new Date(Date.UTC(2026, 9, 15, 0, 0, 0));
-    assert.deepEqual(plans.planPriorities({ projects: [{ id: "web", weight: 3, reason: "r" }], validDays: 2, now }).plan.plan, { validUntil: "2026-10-17T00:00:00.000Z", projects: [{ id: "web", weight: 3, reason: "r" }] });
-    assert.deepEqual(plans.planPriorities({ projects: [{ id: "a", weight: 1 }], now }).plan.plan, { projects: [{ id: "a", weight: 1 }] });
-  } finally {
-    restore();
-  }
-});
+
+
+
 
 // ---- the refusal sentences themselves (issue #642's review) ----
 //

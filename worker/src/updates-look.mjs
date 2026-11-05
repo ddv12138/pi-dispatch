@@ -20,13 +20,6 @@ export const PI_PACKAGE = "@earendil-works/pi-coding-agent";
 const DEFAULT_REGISTRY = "https://registry.npmjs.org";
 const MAX_BYTES = 1024 * 1024;
 
-/**
- * The members of pi's extension API the admin extension needs, by the names `USED_API` declares in `admin/src/index.ts`. A dependency points from admin
- * to the worker, so this is a copy, bolted to that list by `admin/test/updates-view.test.mjs`. A look starts pi only to ask its version and loads no extension, so
- * it can only say whether the host's pi still defines them: the real probe is the extension's own at load.
- */
-export const ADMIN_USED_API = Object.freeze(["registerCommand", "registerTool", "sendMessage", "on"]);
-
 /** Refusals here are thrown and turn into `unknown` at the caller: nothing below this line decides a state. */
 export async function boundedJson(url, { proxyUrl = null, request = undiciFetch, timeoutMs = 5000, maxBytes = MAX_BYTES, headers = {}, ProxyAgentClass = ProxyAgent } = {}) {
 	const dispatcher = proxyUrl ? new ProxyAgentClass(proxyUrl) : undefined;
@@ -74,25 +67,22 @@ export async function bumpChecks(version, { get, api = "https://api.github.com" 
  * This host's own pi against the version pi-dispatch is tested with, and whether what it mirrors still holds there. `resolvePi` and `versionOf` are
  * `chat-fork.mjs`'s, the pi this account would run. `needles` are `PINNED_PI_NEEDLES`; `absent` means there is simply no pi here, which is a normal host.
  */
-export function hostPiFacts({ tested, resolvePi, versionOf, fs = nodeFs, needles = PINNED_PI_NEEDLES, api = ADMIN_USED_API }) {
+export function hostPiFacts({ tested, resolvePi, versionOf, fs = nodeFs, needles = PINNED_PI_NEEDLES }) {
 	const found = resolvePi();
 	if (!found?.path) return { version: null, tested, state: "absent", needles: "unknown", extension: "unknown" };
 	const version = versionOf(found.path);
 	const state = !version || !tested ? "unknown" : compareVersions(version, tested) === 0 ? "same" : compareVersions(version, tested) > 0 ? "newer" : "older";
 	const root = piPackageRoot(found.path, fs);
 	if (!root) return { version, tested, state, needles: "unknown", extension: "unknown" };
-	let needlesHold = "ok", extension = "ok";
+	let needlesHold = "ok";
 	try {
 		for (const [file, list] of Object.entries(needles)) {
 			const text = fs.readFileSync(join(root, file), "utf8");
 			if (!list.every((needle) => text.includes(needle))) needlesHold = "drift";
 		}
 	} catch { needlesHold = "drift"; }
-	try {
-		const loader = fs.readFileSync(join(root, "dist/core/extensions/loader.js"), "utf8");
-		if (!api.every((member) => loader.includes(`${member}(`))) extension = "drift";
-	} catch { extension = "drift"; }
-	return { version, tested, state, needles: needlesHold, extension };
+	// Keep the legacy field readable by older fleet members; there is no admin extension to probe.
+	return { version, tested, state, needles: needlesHold, extension: "unknown" };
 }
 
 /** The pi package a `pi` command belongs to, through its symlink. `null` for a wrapper that lives elsewhere: unknown, not a failure. */

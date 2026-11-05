@@ -72,8 +72,6 @@ export const PI_PIN_SITES = Object.freeze([
 	{ path: "image/runner/package.json", json: ["dependencies", `${SCOPE}pi-agent-core`] },
 	{ path: "worker/package.json", json: ["dependencies", `${SCOPE}pi-ai`] },
 	{ path: "worker/package.json", json: ["dependencies", `${SCOPE}pi-tui`] },
-	{ path: "admin/package.json", json: ["devDependencies", `${SCOPE}pi-coding-agent`] },
-	{ path: "admin/src/index.ts", line: /^export const SUPPORTED_PI_VERSION = "([^"]*)";$/m },
 	{ path: "image/Dockerfile", line: /^ARG PI_VERSION=(\S*)$/m },
 	...PI_DOC_SITES.map((path) => ({ path, line: PI_DOC_VERSION_RE })),
 ]);
@@ -427,7 +425,7 @@ export function renderPullRequest({ from, to, versions, modelReport = "Model cat
 		].map((item) => `- [ ] ${item}`),
 		"",
 	].join("\n");
-	const commit = [titleFor(to), "", `Moves every pi pin from ${from} to ${to} (the runner, the worker's pi-ai and pi-tui, the`, "admin devDependency and SUPPORTED_PI_VERSION, the image's PI_VERSION, the root overrides and", "documented durable-install commands) and resolves pi's tree in package-lock.json again.", "", "Prepared by .github/workflows/pi-bump.yml. CONST-PI-VERSION-PINNED, REQ-UPSTREAM-CONTRACT-TESTS.", ""].join("\n");
+	const commit = [titleFor(to), "", `Moves every pi pin from ${from} to ${to} (the runner, the worker's pi-ai and pi-tui, the`, "image's PI_VERSION, the root overrides and", "documented durable-install commands) and resolves pi's tree in package-lock.json again.", "", "Prepared by .github/workflows/pi-bump.yml. CONST-PI-VERSION-PINNED, REQ-UPSTREAM-CONTRACT-TESTS.", ""].join("\n");
 	return { title: titleFor(to), body, commit };
 }
 

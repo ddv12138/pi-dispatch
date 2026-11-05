@@ -3,13 +3,11 @@ import assert from "node:assert/strict";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CANNOT_ADOPT_REASONS, CHECK_STATES, HOST_PI_STATES, UPDATES_OVERDUE_MS } from "@edgehero/pi-dispatch/updates";
-import { ADMIN_USED_API } from "../../worker/src/updates-look.mjs";
 import { CANNOT_ADOPT_WORDS, HOST_STATES_DRAWN, PI_STATES_DRAWN, updatesProblems } from "../src/console/panels/updates.mjs";
 import { scanFleetRunRecords } from "../src/read-model.mjs";
 import { HOST_ADOPT_STATES, PI_ROW_STATES, UPDATE_ROW_STATES, canaryResultOf, hostStandings, packageRow, piRow, readDeploymentUpdates, readStaged, readTriggersDocument, readUpdates } from "../src/updates-view.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { UPDATES_CANARY_RECORD, UPDATES_CONFIRM_STATES, UPDATES_DRAW, updatesFacts } from "./helpers/updates-goldens.mjs";
-import { USED_API } from "../src/index.ts";
 
 const NOW = 1_800_000_000_000;
 /** A Valkey holding these rows. */
@@ -104,10 +102,6 @@ test("every state has its words, each held to the list it comes from, both ways"
 	assert.deepEqual([...PI_STATES_DRAWN].sort(), [...PI_ROW_STATES].sort());
 	assert.deepEqual([...HOST_STATES_DRAWN].sort(), [...HOST_PI_STATES].sort());
 	assert.deepEqual([...HOST_ADOPT_STATES].sort(), ["adopted", "cannot-adopt", "no-change", "overdue", "pending", "undone"]);
-});
-
-test("the look's copy of the admin extension's API list is that list", () => {
-	assert.deepEqual([...ADMIN_USED_API], [...USED_API]);
 });
 
 test("each row state and each pi state is actually drawn by a golden, so none is unreviewed", async () => {

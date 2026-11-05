@@ -257,8 +257,10 @@ test("the ENTRY name is matched, never the whole path -- an ancestor directory i
 });
 
 test("an admin re-export under ANY name is dropped -- the tools are the identity, not the file name", () => {
-	// THE case this repo is: `.pi/extensions/dispatch.ts`, two lines, re-exporting admin/src/index.ts.
-	// Its entry name matches no admin pattern (and could not -- a repo may name the file anything), so
+	// THE case this repo used to be: `.pi/extensions/dispatch.ts`, two lines, re-exporting an admin
+	// extension. This repo shipped exactly that until the extension was retired (4.3.2), and a serviced
+	// repo or an older checkout still can. Its entry name matches no admin pattern (and could not -- a repo
+	// may name the file anything), so
 	// the name signal alone would hand a job container the paid-enqueue tools. What is being defended is
 	// the surface, so the surface is what the second signal reads.
 	const shim = "/workspace/.pi/extensions/dispatch.ts";
