@@ -3513,8 +3513,8 @@ const PROJECT_SNAPSHOT = {
   scopedBudget: { rows: [{ day: 1 }, { day: 0 }, { day: 0 }] },
 };
 const PROJECT_INFO = { byProject: [
-  { key: "shop", label: "shop", runs: 4, tokens: 9000, cost: { usd: 1.2, class: "metered", floor: false } },
-  { key: null, label: "(no project)", runs: 2, tokens: 900, cost: { usd: 0.3, class: "metered", floor: false } },
+  { key: "shop", label: "shop", runs: 4, tokens: 9000, amount: { tokens: 1_234_567, class: "metered", floor: false } },
+  { key: null, label: "(no project)", runs: 2, tokens: 900, amount: { tokens: 300_000, class: "metered", floor: false } },
 ] };
 
 test("issue #499 part C: j opens the projects view with members and this month's spend, read once through the seam", async () => {
@@ -3527,11 +3527,11 @@ test("issue #499 part C: j opens the projects view with members and this month's
   await comp.dispose();
   assert.equal(reads, 1, "one read on entry, never per frame");
   assert.match(out, /projects · 2/);
-  assert.match(out, /shop {2}2 members {2}\$1\.20 · 4 runs/, "the project, its member count and its spend");
+  assert.match(out, /shop {2}2 members {2}1\.23M · 4 runs/, "the project, its member count and its spend");
   assert.match(out, /github:acme\/web/);
   assert.match(out, /\/srv\/shop-tools/);
   assert.match(out, /constructor {2}1 member {2}no runs/, "a project with no runs this month says so; a prototype-key id is just an id");
-  assert.match(out, /\(no project\) {2}\$0\.30 · 2 runs/, "the runs under no project");
+  assert.match(out, /\(no project\) {2}300k · 2 runs/, "the runs under no project");
 });
 
 test("issue #499 part C: a project name is escaped and drawn LAST on its line, so a bidi override reorders nothing", async () => {
@@ -3607,12 +3607,12 @@ test("issue #499 part C: the limits view says how many members a project row cap
 });
 
 test("PR #569's lab: the projects view lists ids the month's records carry that projects.json no longer defines, so it adds up", async () => {
-  const info = { byProject: [...PROJECT_INFO.byProject, { key: "tools", label: "tools", runs: 1, tokens: 10, cost: { usd: 0.15, class: "metered", floor: false } }] };
+  const info = { byProject: [...PROJECT_INFO.byProject, { key: "tools", label: "tools", runs: 1, tokens: 10, amount: { tokens: 150_000, class: "metered", floor: false } }] };
   const comp = makeDashboard({ paths: {}, done() {}, tui: fakeTui(), intervalMs: 100000, deps: cannedDeps({ fetchSnapshot: async () => PROJECT_SNAPSHOT, projectsInfo: () => info }) });
   await flush();
   comp.handleInput("j");
   const out = stripAnsi(comp.render(120).join("\n"));
-  assert.match(out, /tools {2}not in projects\.json {2}\$0\.15 · 1 run/, "a deleted project's spend is still shown, marked");
+  assert.match(out, /tools {2}not in projects\.json {2}150k · 1 run/, "a deleted project's spend is still shown, marked");
   // Its row is selectable: shop, constructor, tools, (no project).
   comp.handleInput("\u001b[B");
   comp.handleInput("\u001b[B");
@@ -3630,7 +3630,7 @@ test("PR #569's review: an unreadable projects file is said to be unreadable, no
   await comp.dispose();
   assert.match(out, /the projects file is unreadable: EACCES/);
   assert.ok(!/missing/.test(out));
-  assert.match(out, /shop {2}not in projects\.json {2}\$1\.20 · 4 runs/, "its recorded spend still shows");
+  assert.match(out, /shop {2}not in projects\.json {2}1\.23M · 4 runs/, "its recorded spend still shows");
 });
 
 // ── the ALLOCATION view (issue #504 part C, key `b`) ───────────────────────────────────────────────────────────────

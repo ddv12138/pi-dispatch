@@ -2961,7 +2961,7 @@ function projectRows(snapshot: any, info: any = null): any[] {
 
 /**
  * The PROJECTS view (issue #499 part C): each project with its members and its spend this month, then the runs
- * recorded under no project. Spend is the cost fold's `byProject` (typed dollars through `fmtAmount`, the panel's one
+ * recorded under no project. Spend is the cost fold's `byProject` (typed token amounts through `fmtAmount`, the panel's one
  * money renderer), keyed by the project id each RECORD carries, read once when the view opened.
  *
  * THE NAME is the operator's free text, and `projects.json` admits a bidi override or an invisible character in it.
@@ -2996,7 +2996,7 @@ function projectsView(snapshot: any, info: any, selected: number, runProject: an
   rows.forEach((row: any, i: number) => {
     const cursor = i === selected ? styler.fg("accent", "›") : " ";
     const s = spend.get(row.key);
-    const money = s ? `${fmtAmount(s.cost)} · ${s.runs} run${s.runs === 1 ? "" : "s"}` : "no runs";
+    const money = s ? `${fmtAmount(s.amount)} · ${s.runs} run${s.runs === 1 ? "" : "s"}` : "no runs";
     const filtering = runProject === row.key ? styler.fg("warning", " · filtering runs") : "";
     if (row.orphan) {
       lines.push(fitLine(`${cursor} ${styler.fg("accent", cellOf(row.key))}  ${styler.fg("warning", "not in projects.json")}  ${styler.fg("text", money)}${filtering}`, iw, styler));
