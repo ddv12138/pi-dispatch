@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { planZeroTouchName, planZeroTouchGroup, planZeroTouchInstruction, planZeroTouchInstructionUndo, applyZeroTouchFilePlan } from "../src/zero-touch-actions.mjs";
 import { checkTriggerFixSource } from "../src/job-actions.mjs";
-const config = { capture: true, model: "test/classifier", maxCostUsd: "0.05", names: {} };
+const config = { capture: true, model: "test/classifier", maxTokens: 5000, names: {} };
 const groupId = "a".repeat(32), scopeId = "b".repeat(64);
 function fixture() {
   const paths = { triggersPath: join(tempDir("zt-action-"), "triggers.json") };
@@ -74,7 +74,8 @@ test("grouping plan refuses absent capture, invalid source and tool calls; previ
   assert.match(planZeroTouchGroup({ ...args, config: { ...config, capture: false } }).refusal, /not enabled/);
   assert.match(planZeroTouchGroup({ ...args, meta: { ...args.meta, status: "source-expired" } }).refusal, /no available/);
   const { plan } = planZeroTouchGroup(args);
-  assert.equal(plan.model, "test/classifier"); assert.equal(plan.maxCostUsd, "0.05");
+  assert.equal(plan.model, "test/classifier"); assert.equal(plan.maxTokens, 5000);
+  assert.match(plan.summary.join(" "), /capped at 5,000 tokens\./);
   for (const status of ["failed", "stale", "refused"]) assert.ok(planZeroTouchGroup({ ...args, meta: { ...args.meta, status } }).plan, status);
   assert.match(planZeroTouchGroup({ ...args, meta: { ...args.meta, status: "pending" } }).plan.summary.join(" "), /pay for another classification/);
 });
