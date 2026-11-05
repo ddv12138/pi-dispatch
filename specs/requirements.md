@@ -5410,6 +5410,8 @@ without suggesting an OpenAI compatibility-field fix. `DES-DOLLAR-RESERVE-AND-SE
   `PI_CODING_AGENT_DIR`), **refusing** a `models.json` with a literal key and **never** copying `auth.json`,
   `settings.json` or `mcp-auth.json`; `pi-dispatch doctor` re-verifies. The overlay's `mcp.json` is the one list
   of MCP servers a job may connect (`REQ-MCP-OPERATOR-SERVERS`), rewritten by `import-pi` rather than copied.
+  Independent in-process runtimes and SDK children reached by the child-ledger library hook default to the overlay
+  models file when present and no models path was explicitly chosen; pi CLI and unhooked children remain separate.
   Overlay **extensions are staged and loaded by
   DEFAULT**: `import-pi` copies `extensions/` unless the operator passes `--no-extensions`, **prints every
   extension it staged by name** (the vetting step is a list the operator can read, not a flag they can
@@ -5431,6 +5433,15 @@ without suggesting an OpenAI compatibility-field fix. `DES-DOLLAR-RESERVE-AND-SE
   version, an **admin-like name** (a package that can enqueue paid jobs from inside a job container is the
   same recursion vector the admin extension is blocked for), a package that contributes no pi resources, a
   manifest entry that leaves the package dir, a missing transitive dependency, or a colliding staged dir.
+  For `pi-subagents@0.73.1`, staging also verifies the complete published package source, including paths,
+  types and file contents but excluding separately installed dependencies, against the reviewed digest; a
+  mismatch refuses before publication. A verified private stage receives the reviewed background peer-alias
+  adaptation for pi 1.2.0 and 1.5.0 only. Existing staged trees remain unchanged and require restaging.
+  The standard job image supplies `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT` pointing to its installed
+  pi-coding-agent package, so the staged package can find the host SDK without an operator setting. That image-owned
+  name cannot be set by a trigger secret, forwarded host environment or custom provider API-key mapping; a custom
+  image can still supply its own value. The Java image builds from the locally built, versioned base and refuses a
+  base lacking the SDK path or overlay propagation, so an older local tag cannot silently discard the fix.
   (3) A **per-trigger** `run.packages` (all four trigger kinds; `INT-TRIGGERS-FILE-CONTRACT`) decides
   whether the worker emits `PI_PACKAGES` — an **opt-OUT**: absent or `true` loads what the operator staged,
   and only an explicit `false` withholds it, since staging is itself the deliberate act and the flag exists
@@ -5484,6 +5495,18 @@ without suggesting an OpenAI compatibility-field fix. `DES-DOLLAR-RESERVE-AND-SE
   reader shared with doctor, manifest order preserved because it is the loader's shadowing order), and
   where it is not — the deployment pointer deliberately cannot carry `PI_GLOBAL_PI_DIR` — a dangling
   claim softens to `skill-not-at-head` naming the unchecked tiers, never a false red.
+- **A fourth tier sits UNDER all of them: the skills baked into the image** (`/opt/pi-dispatch/skills`:
+  `code-review`, `tdd`, `implement-spec`, copied by `image/Dockerfile` from `image/skills/`). They are the
+  weakest tier on purpose, so an operator who wants different bytes for one of them puts their own copy in
+  the overlay and wins the name, and `protectedSkillRoots` bars a staged package from taking one of those
+  names. They exist because they previously existed only as files copied by hand into one server's overlay,
+  which is the class of thing a redeploy loses: a machine rebuilt from this repository had no
+  `implement-spec`, and a flow whose prompt names it ran without the procedure while reporting success. The
+  path is spelled in two places on opposite sides of the container boundary (`image/Dockerfile`'s COPY target
+  and `loader.mjs`'s `BAKED_SKILLS_DIR`), pinned by a runner test. STATED RESIDUAL: the topology graph reads
+  the repo, injected, overlay and staged tiers, so a `run.flow` name satisfied ONLY by a baked skill still
+  reads `no-skill` there — a false red narrow enough to name rather than model, until the graph grows a
+  tier it cannot see into the image.
 - **A third skill tier sits between the overlay and the repo** (`REQ-PER-TRIGGER-SKILLS`, issue #60).
   "Repo wins on conflict" is unchanged and now reads in full as **repo > injected > overlay**: a trigger's
   own `run.skillsDir` refines this deployment-wide overlay, because "for THIS trigger" is the narrower
@@ -7426,7 +7449,7 @@ without suggesting an OpenAI compatibility-field fix. `DES-DOLLAR-RESERVE-AND-SE
   venues, whose gateway policy is the egress control (`openshellSetupOf`, `DES-OPENSHELL-VENUE`). On either venue the image step checks only the image
   the worker will run (issue #523): `PI_JOB_IMAGE` by the worker's own rule (`||` to `pi-job:latest`, then the image
   rule), from this shell where it sets it and otherwise from `.env` (doctor's resolver). Unset, that is the default,
-  pulled from `ghcr.io/edgehero/pi-job:latest` and tagged `pi-job:latest` when absent; set, it is that name, left
+  pulled from `docker.io/ddv12138/pi-job:latest` (the job image's registry since 4.3.2, published by `image/publish.sh` from a checkout, not by a workflow) and tagged `pi-job:latest` when absent; set, it is that name, left
   alone when present and, when absent, pulled under that name with no tag only if the name is registry-qualified (its
   first path segment holds a `.` or a `:`, or is `localhost`, as the docker reference grammar reads it): an absent
   short name is never pulled, under `--yes` too, since the runtime would resolve it on a public registry where anyone
@@ -8747,3 +8770,9 @@ instead of drifting.
 | 2026-11-04 | `REQ-CONSOLE-SECURITY` CORRECTED: a fixed-token operator session remains valid only while its digest matches the configured process hash and the tokens file generation remains unchanged; the named-token session checks no longer revoke it immediately. All expiry, logout, role and write guards: UNCHANGED, checked. |
 | 2026-11-04 | `REQ-OPERATOR-CONSOLE-SCREENS` behavior UNCHANGED, checked: locale selection is presentation-only, defaults to English and persists a manual Simplified Chinese choice. Fixed copy audited across Provider keys/guides, Overview, browser messages, Spend/Capacity, Models, Trigger, subscription quota, Fleet/Host, Project, Parked, Connections, Secrets and Updates now routes through the shared catalogue or a closed locale-aware sentence helper. The literal-key catalogue scan and duplicate-key guard run in `admin/test/locale.test.mjs`; every `PAGES` entry has a Chinese title and representative body assertion, with targeted dynamic-value tests and panel-state suites for high-variance output. Remaining verification gap is exhaustive Chinese rendering of every exceptional state combination: Connections receiver/forge combinations; subscription adapter compatibility variants; Trigger schedule/refusal states; Fleet venue/scheduler failures; Host doctor missing/stale/fail states; Project bundle declaration variants; and multiple Parked unread reasons. Runtime names, IDs, paths, commands, operator-authored copy and host-published diagnostics remain verbatim by design. |
 | 2026-11-04 | `REQ-TRIGGER-AUTHOR-GATE` AMENDED, in its bot-loop clause only: "events sent by our own identity shall be ignored" gains the deployment switch `PI_RECEIVER_ALLOW_SELF=1`, which disarms exactly that comparison on all four forge arms (`filter`, `filterGitLab`, `filterForgejo`, `filterAzure`) and nothing else — the author gate, the fail-closed identity check that precedes the compare, and every routing refusal are untouched, and each gate's tests now pin both the disarmed delivery and the still-refused unauthorised one. The reason is an operator with ONE forge identity: their own comment or label arrives as ours, so with the guard armed every rule they write is dead, which is a silent no-op of the kind this project refuses. The reason it is a switch and not a default: with it on, the only bound on a runaway loop is the deployment's own caps (`PI_DAILY_CAP`, `PI_MAX_TURNS`), since our own output is an event a trigger matches — a status comment carrying the phrase, a label a flow applied, and above all a push to a merge request's source branch, which both forges report as an update of that MR. So the switch is loud in three places: the receiver logs `bot_loop_guard_disabled` at boot, `doctor` warns by name, and `.env.example` states which rules an operator must then avoid. Strict parse, house rule: `1` on, unset/`0` off, anything else a boot refusal rather than a guess. **`CONST-TRIGGER-AUTHOR-GATE` UNCHANGED, checked** — the write-access threshold and how each forge resolves it do not move; only the self-authored refusal is now operator-switchable. **`CONST-BUDGET-BEFORE-TOKENS` UNCHANGED, checked**: the switch sits below every free gate and above the spend, exactly where the self compare already was. **`INT-GITLAB-PAYLOAD-SUBSET`, `INT-WEBHOOK-PAYLOAD-SUBSET`, `INT-FORGEJO-PAYLOAD-SUBSET`, `INT-AZURE-PAYLOAD-SUBSET` and `INT-TRIGGERS-FILE-CONTRACT` UNCHANGED, checked** — no payload field, trigger field or stored value is added; the switch is a receiver environment key. **`INT-RUN-HISTORY-FILE-CONTRACT` UNCHANGED, checked** — nothing new is recorded, and a self-triggered run is an ordinary run. |
+| 2026-11-05 | `REQ-GLOBAL-PI-OVERLAY` AMENDED: independent SDK runtimes in the runner and in SDK children reached by the library preload can resolve overlay models by default. Explicit model paths retain their meaning. Existing model and cost guards and child accounting UNCHANGED, checked; pi CLI child behavior remains unchanged. |
+| 2026-11-05 | `REQ-GLOBAL-PI-OVERLAY` AMENDED: staging pi-subagents 0.73.1 checks the complete reviewed npm package and applies its exact pi 1.2.0 and 1.5.0 background alias compatibility adaptation before publishing; existing trees require restaging. The standard image also supplies the pi-subagents SDK package root. The package mount and isolation UNCHANGED, checked. |
+| 2026-11-05 | `REQ-GLOBAL-PI-OVERLAY` AMENDED: the image-owned pi-subagents SDK path is reserved against trigger secrets, forwarded environment and custom provider API-key mappings; custom images may set their own image value. The worker strips it from its container env as a backstop. |
+| 2026-11-05 | `REQ-GLOBAL-PI-OVERLAY` AMENDED: the Java recipe uses a versioned local base and rejects one missing the SDK path or overlay propagation. The package staging and image isolation UNCHANGED, checked. |
+| 2026-11-05 | `REQ-DEPLOYMENT-BOOTSTRAP` AMENDED, one clause: the default job image is pulled from `docker.io/ddv12138/pi-job:latest` (Docker Hub, since 4.3.2) instead of `ghcr.io/edgehero/pi-job:latest`, and that repository is published from a checkout by `image/publish.sh` rather than by a workflow. The job image's CI publishing workflow is deleted; CI keeps only the required check that the image builds and satisfies `verify-image.sh`. `up`, `doctor` and `init` name the same repository, and `jobImageFix`'s hint spells the registry out (`docker.io/...`) because the rule it answers refuses an unqualified name. UNCHANGED, checked: the `--pull=never` job-time rule, the short-name and `localhost/` refusals, and the re-tag to `pi-job:latest` for the deployment default. |
+| 2026-11-05 | `REQ-GLOBAL-PI-OVERLAY` AMENDED: a FOURTH skill tier, weakest of the four, is baked into the image at `/opt/pi-dispatch/skills` (`code-review`, `tdd`, `implement-spec`, copied from `image/skills/` by `image/Dockerfile` and loaded through `loader.mjs`'s `BAKED_SKILLS_DIR`). It exists because those three lived only as hand-copied files in one deployment's overlay, which a redeploy loses: a machine rebuilt from this repository had no `implement-spec`, and a flow naming it ran without the procedure while reporting success. The operator overrides it from the overlay above it, and `protectedSkillRoots` bars a staged package from taking one of the names. STATED RESIDUAL: the topology graph reads the repo, injected, overlay and staged tiers only, so a `run.flow` name satisfied solely by a baked skill still reads `no-skill` there. `REQ-PER-TRIGGER-SKILLS` UNCHANGED, checked: injected still refines the overlay and is refined by the repo, which is the ordering it owns. |

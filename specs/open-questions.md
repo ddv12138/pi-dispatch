@@ -647,8 +647,8 @@ Status values: `OPEN` (unanswered) · `WATCH` (not a question — a known-incomi
     `detached`, with the full environment and stdio `ignore` or log files under its own temp dir. It never runs
     the pi CLI: it runs the child session in its own process through `createAgentSession` from pi's
     `dist/index.js`. Its call was missing from the parent's totals. Its output never reached the container's
-    stdout, so it cannot push the exit line out of the tail. Its children do not see the overlay models.json
-    (issue #503).
+    stdout, so it cannot push the exit line out of the tail. At that measurement its children did not see the overlay models.json
+    (issue #503); in-process runtimes and SDK children reached by the library hook now default to it when present and no path is specified.
   - **M3, the injection.** A `NODE_OPTIONS=--import` preload ran in the root runner, the nested runner (both
     `runner-node`) and a pi CLI child. Spliced in FRONT of the child's arguments, `-e <file>` loaded before every
     other extension, explicit or discovered. The lab rows cover the bundle (plain, `-ne`, `--`) and `dist/cli.js`
@@ -2811,3 +2811,5 @@ adversarial passes did.
 | 2026-11-02 (#753, shipped-scope reconciliation) | `OQ-051` position reconciled to #772 already implementing draft-only assistance. Its OPEN status, requirements for unattended sending and person-confirmed answer boundary UNCHANGED, checked. `OQ-050` gateway adoption is unchanged by displaying already retained draft-answer counts. |
 | 2026-11-02 (#754, measured implementation) | `OQ-050` is ADOPTED and IMPLEMENTED: the recorded decision/threat model preceded gateway code, and subsequent live runtime and genuine-HTTPS distinct-site browser evidence is linked by permanent spec IDs. Final PR closure and final-commit checks remain separate from the adoption answer. Native opener, console CSP/process isolation, socket/renderer/browser/Valkey residuals, zero-touch causes and `OQ-051` human confirmation UNCHANGED, checked. |
 | 2026-11-02 (#792, implemented) | `OQ-050`'s amended limit (one writing driver plus at most three consented read-only watchers) is built, and its pending marker is removed. The threat model stands as written: a watcher sees what is typed, which is why watching starts off and the roster stays on the driver's screen. Evidence: `gateway/test/two-process.test.mjs` (real processes, real sockets, live Valkey), `gateway/test/browser/workbench-browser.mjs` and the permanent TLS browser flow on Docker and rootless Podman. Container isolation, credentials, money and run slots, retries, the exit protocol, the native opener and its monitor and End, preparation admission, retention policy, the run-record schema, fork and answer authority, console CSP, origin and cookies, and OQ-051: UNCHANGED, checked. |
+| 2026-11-05 | `OQ-011` AMENDED: its overlay visibility residual remains for pi CLI and unhooked children; in-process and hooked SDK runtimes now default to the overlay. The measured M2 entry retains its historical result and marks the subsequent change. Child metering and accepted residuals otherwise UNCHANGED, checked. |
+| 2026-11-05 | `OQ-011` UNCHANGED, checked: the staged package compatibility adaptation does not change child metering or its documented residuals. |

@@ -21,6 +21,12 @@ Evidence convention as in `constitution.md`.
 *invisibly*.
 
 - **Contract**:
+  Independent runtimes created in the runner default to the selected overlay models file when present and no models
+  path was supplied. SDK children get the same default only when the child-ledger preload's library hook reaches
+  their unbundled ModelRuntime; explicit paths and stores stay authoritative. The default uses a discarding store.
+  The root runtime's credential snapshot and explicit options are unchanged. Failure to install the child default
+  is reported on stderr without interrupting the meter. CLI and unhooked children keep their own model paths.
+
   **Verified against the published `0.99.1` tarball, not against HEAD** (see the evidence convention
   in `constitution.md`). At this pin the model/auth wiring is ONE `ModelRuntime` (`OQ-005`'s migration,
   shipped between 0.80.7 and this pin): `AuthStorage` is no longer exported (0.80.8), `ModelRegistry` is a
@@ -124,7 +130,7 @@ Evidence convention as in `constitution.md`.
     // paths now), is named once (`overlay_extensions_layout`).
     additionalExtensionPaths: ["/job/pi/extensions", ...overlay.entries, ...packagePaths],  // overlay = allowGlobalExtensions ? overlayExtensionEntries("/opt/pi-global/extensions", { log }) : none
     // The recursion guard (REQ-ADMIN-VIA-PI-EXTENSION Scope), and the reason discovery is affordable at
-    // all: a serviced repo may ship an admin extension (THIS repo does, at .pi/extensions/dispatch.ts),
+    // all: a serviced repo may still carry a legacy admin extension,
     // which would hand a job's model dispatch_run — a PAID enqueue from inside a paid job. Applied to
     // the loaded set BEFORE the loader stores it, so a dropped extension registers no tool and receives
     // no event. FILTER, not refuse: refusing would end self-hosting. See (j).
@@ -386,9 +392,8 @@ Evidence convention as in `constitution.md`.
   record. A job with no staged packages passes the loaded set through unchanged.
 
   **(j) `extensionsOverride` is the recursion guard, and it does LESS than its name suggests.** Turning
-  on extension discovery (c) means a serviced repo's `/workspace/.pi/extensions` loads — and **this repo
-  ships one**, `.pi/extensions/dispatch.ts`, a two-line re-export of the admin extension, in a deployment
-  that services this very repo. Loaded into a job, it hands the model `dispatch_run` (enqueues a **paid**
+  on extension discovery (c) means a serviced repo's `/workspace/.pi/extensions` loads. A serviced
+  repository or older checkout can still contain the retired admin extension. Loaded into a job, it hands the model `dispatch_run` (enqueues a **paid**
   job), `dispatch_set` (moves the daily cap) and the pause/resume/trigger writes, driven by a session
   whose prompt carries adversarial issue text — the same recursion vector `import-pi` refuses to copy and
   the package stager refuses to stage. `DefaultResourceLoaderOptions.extensionsOverride` is the analogue
@@ -1291,6 +1296,14 @@ refactor apart.
 
 ## INT-CONTAINER-JOB-INPUTS
 
+- **Standard image pi-subagents lookup**: the standard image sets `PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT`
+  to `/app/node_modules/@earendil-works/pi-coding-agent`, the installed pi package root. The image contract
+  check verifies that the value is absolute and its manifest names the pi coding agent; a test pins the standard
+  image's value. This is an image default,
+  not a new host credential or staged-file field. The name is reserved against `run.secrets`, `PI_FORWARD_ENV`
+  and custom provider API-key mappings; the worker removes any such value as a backstop, leaving custom images free
+  to supply their own SDK path.
+
 - **Reviewed draft flow (#772)**: Staged answer input additionally holds `flow: {name, revision, text}` from `.pi/skills/<rule.flow>/SKILL.md` in the freshly prepared default-branch workspace. Its revision must equal baseSha; text is at most 16 KiB, valid UTF-8, with no symlink parents/file or forbidden controls. The full reviewed text enters the fixed prompt, but no script, extension, context file or package can execute. Staged input is bounded at 300000 bytes including the scoped standing corpus; the private captured reference record is separately bounded at 16 KiB.
 
 - **Draft profile (#772)**: `/job/answer-draft.json` is an immutable host-written bounded input with the closed rule, actual question reference, admitted standing corpus and default-branch SHA. No question body is taken from queued delivery text. Forge draft jobs alone additionally receive the existing `/outbox` writable path (ordinary forge jobs still do not), with `/workspace` read only. Only `answer-draft.json` structured output is imported; ordinary chain/plan collectors never run for this purpose. A draft gets a fresh disposable session and cannot mount/promote the parent’s canonical transcript.
@@ -1846,7 +1859,13 @@ a sandbox not confirmed gone marks the run's result `lingering`, its exit code u
     baked env facts (`PLAYWRIGHT_BROWSERS_PATH`, `PLAYWRIGHT_MCP_BROWSER`, `PLAYWRIGHT_MCP_SANDBOX`) for any
     flow doing frontend work; **root-owned, agent-unwritable guardrails** at
     `/opt/pi-dispatch/HARD_RULES.md` (an agent that can rewrite its own safety floor has none); fonts
-    (absent is silent — plausible screenshots containing no legible text); and the **loader posture** in
+    (absent is silent — plausible screenshots containing no legible text); `python3` with a stdlib that can
+    parse JSON (a model parses a forge CLI's output with `python3 -c 'import json…'` unprompted, and a missing
+    interpreter reads to it as "my command is wrong" rather than "this tool is absent", so it retries
+    variations instead of falling back to `jq`); the three vendored skills at `/opt/pi-dispatch/skills`
+    (`code-review`, `tdd`, `implement-spec`), which the loader loads as the WEAKEST tier — an image without
+    them runs a flow that names one without the procedure and reports nothing, which is the silent no-op
+    class; and the **loader posture** in
     `image/runner/src/loader.mjs`, which `CONST-NO-CONTEXT-FILES-MANDATORY` records is switchable only by a
     two-line source edit plus an image rebuild — i.e. **the security posture is per-image**, so a
     deployment that turned discovery off for multi-tenancy in one image **has not turned it off in
@@ -2252,7 +2271,19 @@ a sandbox not confirmed gone marks the run's result `lingering`, its exit code u
     (gh prefers `GH_TOKEN`, glab prefers `GITLAB_TOKEN`), which forecloses precedence surprises.
     **Cross-forge export is refused by construction**: a GitLab credential exported as `GITHUB_TOKEN`
     would be sent by `gh` to github.com on the agent's first invocation — a working credential handed to
-    the wrong host, which is precisely how a scoped token stops being scoped. Absent otherwise; `PI_JOB_ID`; `PI_PROVIDER`;
+    the wrong host, which is precisely how a scoped token stops being scoped. Absent otherwise. `GIT_CONFIG_COUNT`,
+    `GIT_CONFIG_KEY_0` (`credential.helper`) and `GIT_CONFIG_VALUE_0`, whose shell body asserts nothing itself and
+    only NAMES the forge's token variable (`… echo "password=$GITLAB_TOKEN"; …`, `forges.mjs` `GIT_HELPER_ENV_NAMES`),
+    present only for a job that carries a forge token: a helper is how git authenticates a push without the token
+    ever entering a URL, an argv or `.git/config`, which the agent can rewrite and a retained sandbox keeps for a
+    day. `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, always, fixed at
+    `pi-dispatch <pi-dispatch@localhost>` (`GIT_IDENTITY_ENV_NAMES`): a container has no `~/.gitconfig`, so without
+    them `git commit` fails with `Author identity unknown` and the author becomes whatever name the model invents.
+    All seven are in `CONTAINER_ENV_NAMES`, so neither `run.secrets` nor `PI_FORWARD_ENV` can bind them — a trigger
+    able to set `GIT_CONFIG_VALUE_0` could point a job's credential at a host the operator never allowlisted, and one
+    able to set `GIT_AUTHOR_EMAIL` could author commits as somebody else — and all seven are in
+    `NON_SECRET_ENV_KEYS`, since the helper's value holds no credential (only its variable's name), which is what
+    lets the `openshell` venue put it on an exec argv; `PI_JOB_ID`; `PI_PROVIDER`;
     `PI_MODEL`; `PI_CODEMODE_MAX_WORKERS` (always worker-owned, derived from the resolved job memory
     by `DES-CODEMODE-WORKERS`, reserved against secrets and forwarding); `PI_MAX_TURNS`; `PI_MAX_TOKENS` (the per-job token budget — forwarded ONLY when set, omitted
     otherwise so the runner meters usage without a cap; `REQ-TOKEN-ACCOUNTING-AND-CAPS`); no
@@ -13271,6 +13302,7 @@ increase its existing cost ticket only before dispatch; a larger/unboundable pay
 
 | Date | Change |
 |---|---|
+| 2026-11-05 | `INT-SDK-SESSION-OPTIONS` AMENDED: the admin recursion guard remains in place for legacy or third-party extensions after the in-repository extension is retired. Its load-order and filtering limits are unchanged. |
 | 2026-11-04 | `INT-WORKER-CONTAINER-DEPLOYMENT` AMENDED: the Compose caller's deployment-folder `$PWD` is the worker cwd and same-path mount target; live allowlist and endpoint files resolve from that mount at any deployment path. Worker/console CLI code remains at absolute image paths, and the worker gets the console token path. `.env` is readable but not writable by uid/gid 10001 for the worker's `PI_VALKEY_SHARED` check. `INT-CONTAINER-RUNTIME-CONTRACT` UNCHANGED, checked: job argv, per-job mounts and the absence of the daemon socket from job containers are unchanged. **Code evidence**: `deploy/docker-compose.yml`, `worker/deploy/docker-compose.yml`, `docs/worker-container.md`. |
 | 2026-11-04 | `INT-WORKER-CONTAINER-DEPLOYMENT` AMENDED: the Compose caller's deployment-folder `$PWD` is both the worker's cwd and the same-path mount target, so live allowlist and endpoint files are read from that deployment at any path. The image's worker/console CLIs remain absolute `/opt` paths; the worker receives the console token path for Doctor. `INT-CONTAINER-RUNTIME-CONTRACT` UNCHANGED, checked: job argv, per-job mounts and the absence of the daemon socket from job containers are unchanged. **Code evidence**: `deploy/docker-compose.yml`, `worker/deploy/docker-compose.yml`. |
 | 2026-11-04 | `INT-GITLAB-PAYLOAD-SUBSET` AMENDED: native delivery headers are optional in token mode; absent IDs derive from event header + NUL + exact raw body, after token verification, as a `body-sha256-` value. `INT-GITLAB-PAYLOAD-SUBSET` body projection and every forge's routing fields UNCHANGED, checked. **Code evidence**: `receiver/src/verify-gitlab.mjs`. |
@@ -13669,3 +13701,8 @@ increase its existing cost ticket only before dispatch; a larger/unboundable pay
 | 2026-11-04 | `INT-CONSOLE-TOKENS-FILE-CONTRACT` AMENDED: optional `PI_CONSOLE_LOGIN_TOKEN` is a fixed operator credential, hashed at configuration load, audited as `fixed-token`, and never persisted or logged. The valid tokens file and its operator entry remain required for service installation/readiness; file generation and the exact configured digest jointly govern fixed-token sessions. Existing token format, revocation, modes and writers: UNCHANGED, checked. |
 | 2026-11-04 | `INT-CONSOLE-TOKENS-FILE-CONTRACT` CORRECTED after the first deployed login smoke test showed a successful sign-in immediately read as revoked: the live-session check now recognizes only the reserved fixed-token operator session whose digest equals the process-configured hash, while still checking expiry and file generation. Sandbox browser step-up also accepts that exact token as the session's own credential. Named token revocation/role changes and all ordinary session checks: UNCHANGED, checked. |
 | 2026-11-04 | `INT-GITLAB-PAYLOAD-SUBSET` AMENDED: `user.username` is the sender's identity when the payload carries no `user.id` (measured on GitLab 13.2.10, whose webhook `user` object is `{name, username, avatar_url, email}` and nothing else), so an instance whose configuration was entirely correct could arm `/gitlab` and then drop every delivery as `missing-sender-id`. The id is resolved BEFORE the gate, by the same resolver that already asks for the access level (renamed `makeResolveAuthority` to `makeResolveActor` because it now answers who as well as whether), and three rules keep it from becoming a second gate: the payload's own `user.id` wins whenever present, the username must match EXACTLY ONE account through `GET /users?username=`, and an absent actor resolves to no id at all so the gate's own first step still drops it as `missing-sender-id`. A failed or unreadable `/users` answer is INDETERMINATE like every other lookup failure, so the receiver answers 503 and GitLab redelivers. `filterGitLab`, the bot-loop guard, `trigger.sender.id` and every `no-pii-in-logs` rule are UNCHANGED, checked: the gate still refuses a non-numeric sender before anything else, still compares numbers, and no username reaches a job, a log line or the run record. **CONST-TRIGGER-AUTHOR-GATE UNCHANGED, checked**: the Developer threshold and the `members/all` lookup are byte-identical, only the id they are asked about can now also come from the username. **INT-WEBHOOK-PAYLOAD-SUBSET, INT-FORGEJO-PAYLOAD-SUBSET, INT-AZURE-PAYLOAD-SUBSET, INT-TRIGGERS-FILE-CONTRACT and INT-RUN-HISTORY-FILE-CONTRACT UNCHANGED, checked**: no other forge's projection changes, no trigger field moves, and nothing new is stored. **Code evidence**: `receiver/src/gitlab-members.mjs`, `receiver/src/receiver.mjs`, `receiver/src/start.mjs`. |
+| 2026-11-05 | `INT-SDK-SESSION-OPTIONS` AMENDED: an independent runtime with no modelsPath defaults to the job overlay when present, in the runner process and in SDK children reached by the library preload. Its explicit path and store options remain authoritative; a default store discards catalog writes. The root runtime credentials, store and network options UNCHANGED, checked; pi CLI children are not covered. |
+| 2026-11-05 | `INT-CONTAINER-JOB-INPUTS` AMENDED: the standard image supplies the pi-subagents host SDK package root and the image check verifies it. The adapted package remains under the existing read-only staged overlay; a changed reviewed source refuses staging before publication. |
+| 2026-11-05 | `INT-CONTAINER-JOB-INPUTS` AMENDED: the image-owned pi-subagents SDK path is reserved from trigger secrets, forwarded host environment and custom provider API-key mappings, and stripped from the worker's container env. Custom image values remain available. |
+| 2026-11-05 | `INT-CONTAINER-JOB-INPUTS` CLARIFIED: the generic image check accepts any absolute SDK root naming pi-coding-agent; a separate test pins the standard image's path. |
+| 2026-11-05 | `INT-CONTAINER-RUNTIME-CONTRACT` AMENDED twice. (a) The conformance checklist gains `python3` with a JSON-capable stdlib, because a model parses a forge CLI's output with it unprompted and a missing interpreter reads to it as a wrong command rather than a missing tool, and it gains the three baked skills at `/opt/pi-dispatch/skills`, whose absence is the silent no-op class. (b) The env list gains seven worker-written names for the job's own git: `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_0` and `GIT_CONFIG_VALUE_0`, whose shell body asserts nothing and only NAMES the forge's token variable, present only for a job carrying a forge token, so a push authenticates with the token in no URL, no argv and no `.git/config`; and `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL`, `GIT_COMMITTER_NAME` and `GIT_COMMITTER_EMAIL`, always, fixed at `pi-dispatch <pi-dispatch@localhost>`, because a container has no `~/.gitconfig` and `git commit` otherwise fails with `Author identity unknown`. All seven are reserved in `CONTAINER_ENV_NAMES`, so neither `run.secrets` nor `PI_FORWARD_ENV` can bind them, and all seven are in `NON_SECRET_ENV_KEYS`, since the helper's value holds no credential and may therefore ride the `openshell` exec argv. `INT-TRIGGERS-FILE-CONTRACT` UNCHANGED, checked: no field is added, and the reservation is what refuses the names in `run.secrets`. |

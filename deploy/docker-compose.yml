@@ -81,7 +81,7 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       DOCKER_CONTEXT: default
       VALKEY_URL: redis://valkey:6379
-      PI_JOB_IMAGE: ghcr.io/edgehero/pi-job:4.3.1
+      PI_JOB_IMAGE: docker.io/ddv12138/pi-job:4.3.2
       PI_JOBS_DIR: ${PWD}/runtime/jobs
       PI_LOGS_DIR: ${PWD}/runtime/logs
       PI_SANDBOX_DIR: ${PWD}/runtime/sandboxes
