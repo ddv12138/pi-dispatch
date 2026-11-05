@@ -1834,12 +1834,12 @@ function renderPanelLines(snapshot: any, width: number, state: any, styler: any)
   // null for the nothing-configured case, and a section with no lines would render an empty box.
   // The dollar counters come from the DOLLAR WINDOWS rows (issue #507), as on the framed row: this snapshot's scoped
   // read takes no dollar key, and a second read could disagree with the section beside it.
-  const scopedText = renderScopedLimits({ limits: snapshot.scopedLimits, scopedBudget: snapshot.scopedBudget, projects: snapshot.projects, dollars: snapshot.dollars ?? null });
+  const scopedText = renderScopedLimits({ limits: snapshot.scopedLimits, scopedBudget: snapshot.scopedBudget, projects: snapshot.projects, dollars: snapshot.windows ?? null });
   if (scopedText) sections.splice(2, 0, { title: "SCOPED LIMITS", lines: toLines(scopedText) });
   // Held jobs appear only when something is held, for the same reason: a section with no lines renders an
   // empty box, and a deployment that never waits must look exactly as it did before the feature existed.
   // The dollar windows, after SPEND, only when one is set (issue #501, part 7).
-  const dollarText = renderTokenWindows(snapshot.dollars);
+  const dollarText = renderTokenWindows(snapshot.windows);
   if (dollarText) sections.splice(2, 0, { title: "DOLLAR WINDOWS", lines: toLines(dollarText) });
   const heldText = renderHeldJobs({ held: snapshot.held });
   if (heldText) sections.push({ title: HELD_LABEL.toUpperCase(), lines: toLines(heldText) });
@@ -1946,7 +1946,7 @@ function buildListLines(snapshot: any, selected: number, inner: number, styler: 
   // Triggers are selectable and come FIRST in buildRows, so a trigger's file index == its selection index.
   const trg = triggerLines(snapshot, selected, inner, styler);
   const pw = pauseLines(snapshot.pauseWindows, inner, styler, snapshot.fetchedAt);
-  const sl = limitLines(snapshot.scopedLimits, snapshot.scopedBudget, inner, styler, snapshot.projects, snapshot.dollars);
+  const sl = limitLines(snapshot.scopedLimits, snapshot.scopedBudget, inner, styler, snapshot.projects, snapshot.windows);
   // Active + run rows follow the triggers in buildRows, so offset the selection index by the trigger count.
   const runRows = buildRows(snapshot, runSort, runProject).slice(trg.count);
   // Under a project filter (issue #499 part C) the count is of the runs shown, and the divider names the filter.
@@ -1961,7 +1961,7 @@ function buildListLines(snapshot: any, selected: number, inner: number, styler: 
     // `b split` rides this divider's meta when the deployment has an allocation envelope (issue #504 part C): the footer
     // has no headroom for another hint (`keyHints`' arithmetic), the `j projects` precedent on the runs divider.
     { key: "spend", head: [`${SPEND_TITLE.toLowerCase()} & limits`, `jobs & tokens/day · s set${snapshot.envelopeSet ? " · b split" : ""}`], body: spendLines(snapshot.budget, snapshot.settings, inner, styler, snapshot.fetchedAt), priority: 4, viewKey: "s" },
-    ...dollarSection(snapshot.dollars, inner, styler),
+    ...dollarSection(snapshot.windows, inner, styler),
     { key: "triggers", head: ["triggers", `${trg.count} standing · a add · ↵ open`], body: [...trg.lines, ...((snapshot?.triggers?.triggers ?? []).some((t: any) => t.type === "watch") ? ["z watch findings and outcomes"] : [])], priority: 3, viewKey: "tab" },
     ...bundlesSection(snapshot.secretBundles, inner, styler),
     ...profilesSection(snapshot.secretProfiles, inner, styler),
@@ -2016,9 +2016,9 @@ function buildListLines(snapshot: any, selected: number, inner: number, styler: 
 function dollarSection(dollars: any, inner: number, styler: any): any[] {
   if (!dollars) return [];
   const body: string[] = [];
-  if (dollars.unreachable) body.push(styler.cell(`dollar windows unreadable (${cellOf(dollars.unreachable)})`, inner, { color: "error" }));
+  if (dollars.unreachable) body.push(styler.cell(`token windows unreadable (${cellOf(dollars.unreachable)})`, inner, { color: "error" }));
   // A dollar setting that does not parse: the worker refuses it, and the panel names the key rather than guess a cap.
-  if (Array.isArray(dollars.invalid) && dollars.invalid.length > 0) body.push(styler.cell(`not a dollar amount: ${dollars.invalid.join(", ")}`, inner, { color: "error" }));
+  if (Array.isArray(dollars.invalid) && dollars.invalid.length > 0) body.push(styler.cell(`not a whole number of tokens: ${dollars.invalid.join(", ")}`, inner, { color: "error" }));
   const rows: any[] = Array.isArray(dollars.rows) ? dollars.rows : [];
   for (const r of rows) body.push(dollarRow(r, inner, styler));
   if (body.length === 0) return [];
@@ -2040,13 +2040,10 @@ function dollarRow(r: any, inner: number, styler: any): string {
     styler.fg(full ? "warning" : "text", `${usd(r.counterTokens)}/${usd(r.capTokens)}${full ? " full" : ""}`),
   ];
   if (r.records) {
-    // Fitted to 80 columns with exact micro-dollar amounts (issue #507): the amounts are the one part a reader cannot
-    // round, so the words around them got shorter. `boundExceeded` is drawn only when it is above zero, amber and
-    // BEFORE the settled part, because a non-zero count is the evidence that reopens the bound and a zero is the
-    // normal case; the plain-text path (`renderTokenWindows`) still prints the 0. The runs are counted by basis alone
+    // Fitted to 80 columns with exact token amounts (issue #507): the amounts are the one part a reader cannot
+    // round, so the words around them got shorter. The runs are counted by basis alone
     // ("13 metered, 1 floor") when those counts add up to the runs, so the total is implied; a run with a basis this
     // panel does not know keeps the long form, "5 runs (4 metered)", which says that one run is not in a count.
-    if (r.records.boundExceeded > 0) bits.push(styler.fg("warning", `boundExceeded ${r.records.boundExceeded}`));
     const b = r.records.basis ?? {};
     const runs = r.records.runs;
     const present = ["metered", "floor", "refunded", "unreserved"].filter((k) => Number(b[k]) > 0);
@@ -2557,7 +2554,7 @@ function triggerRow(raw: any, sel: boolean, inner: number, styler: any, sched: a
   // ([once], [image]), never amber. The model list is free text that may be clipped; the drill-in lists it whole.
   const mdl = Array.isArray(t?.models) && t.models.length > 0 ? rowBadge("accent", false, "[models ", cellOf(t.models.join(", ")), "]") : null;
   const fallbacks = Array.isArray(t?.fallbackModels) && t.fallbackModels.length > 0 ? rowBadge("accent", false, "[fallbacks ", cellOf(t.fallbackModels.join(", ")), "]") : null;
-  const cap = t?.maxTokens ? rowBadge("accent", false, "[max $", cellOf(t.maxTokens), "]") : null;
+  const cap = t?.maxTokens ? rowBadge("accent", false, "[max ", cellOf(t.maxTokens), "]") : null;
   // A portfolio trigger (issues #505 and #507): its jobs write the budget split. `accent`, NOT `warning`: amber marks
   // what raises the bill ([xN]), what a job can reach ([secrets]) or what leaves it ([resume]), and a plan can do none
   // of those. It moves money between projects only inside the operator's envelope, above every floor and by at most
@@ -3699,7 +3696,7 @@ function renderTriggerDetail(raw: any, inner: number, styler: any, sched: any = 
   // under the deployment's list and cap, and a trigger that sets neither keeps exactly the pane it had.
   if (Array.isArray(t.models) && t.models.length > 0) kvWrap("models", t.models.map((m: any) => cellOf(m)).join(", "), "accent");
   if (Array.isArray(t.fallbackModels) && t.fallbackModels.length > 0) kvWrap("fallbacks", t.fallbackModels.map((m: any) => cellOf(m)).join(", "), "accent");
-  if (t.maxTokens) out.push(kv("max cost", `$${cellOf(t.maxTokens)} per job`, "accent"));
+  if (t.maxTokens) out.push(kv("max tokens", `${cellOf(t.maxTokens)} per job`, "accent"));
   // The portfolio flag (issue #507), the row badge's fact in words: what the job may write back. A row only when set, so
   // every other pane is byte-identical; `accent` for the row badge's reason.
   if (t.portfolio === true) out.push(kv("portfolio", "its jobs write the budget split", "accent"));

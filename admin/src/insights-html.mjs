@@ -476,9 +476,7 @@ function splitWord(v) {
  */
 export function tokensText(m) {
   if (!Number.isSafeInteger(m) || m < 0) return "-";
-  const whole = Math.floor(m / 1000000);
-  const fraction = String(m % 1000000).padStart(6, "0").replace(/0+$/, "").padEnd(2, "0");
-  return `$${whole}.${fraction}`;
+  return m.toLocaleString("en-US");
 }
 
 /**
@@ -716,7 +714,8 @@ export function layoutBarList(rows, { width } = {}) {
     const runs = posInt(r.runs);
     const barW = cls === "unknown" ? null : max > 0 ? Math.max(1, (Math.max(0, a.tokens) / max) * span) : 1;
     const failed = posInt(r.failed);
-    const tip = `${label} · ${fmtAmount(a)} · ${fmt(runs)} runs${failed > 0 ? ` · ${fmt(failed)} failed` : ""}`;
+    const failedAmount = normAmount(r.failedAmount);
+    const tip = `${label} · ${fmtAmount(a)} · ${fmt(runs)} runs${failed > 0 ? ` · ${fmt(failed)} failed (${fmtAmount(failedAmount)})` : ""}`;
     return {
       y: i * LIST_ROW_H,
       barW,
@@ -1077,13 +1076,13 @@ export function budgetSectionHtml(nb, translate = (message) => message) {
         if (w.state !== "ok") worst = w.state;
       }
       if (s.concurrent !== null) bits.push(`${translate("concurrent")} ≤${fmt(s.concurrent)} (${translate("config; in-flight not shown")})`);
-      // The dollar windows (issue #507), exact micro-dollars like the panel's: the counter is spent and held, what the
-      // worker admits the next job against. No state word: a dollar window is full before its counter reaches the cap
-      // (a reservation adds the whole per-job cap), and this page does not hold the per-job cap to judge it.
+      // The token windows (issue #507), exact counts like the panel's: the counter is reserved and held, what the
+      // worker admits the next job against. No state word: a token window is full before its counter reaches the cap
+      // (a reservation adds the whole per-job budget), and this page does not hold the per-job budget to judge it.
       for (const key of ["day", "week", "month"]) {
         const w = s.tokens[key];
         if (w === null) continue;
-        bits.push(`${translate(key)} ${translate("spent+held")} ${w.usedTokens !== null ? tokensText(w.usedTokens) : "?"} / ${translate("cap")} ${tokensText(w.capTokens)}`);
+        bits.push(`${translate(key)} ${translate("reserved+held")} ${w.usedTokens !== null ? tokensText(w.usedTokens) : "?"} / ${translate("cap")} ${tokensText(w.capTokens)}`);
       }
       bits.push(...s.size);
       rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span>${worst !== "ok" ? stateWord(worst, translate) : ""}</div>`);
@@ -1192,7 +1191,7 @@ export function splitSectionHtml(na, tips, names, windowLabel, translate = (mess
     rows.push(splitBarsSvg(na, tips, names, translate));
     rows.push(projectNamesHtml(na.rows.map((r) => ({ key: r.id })), names));
   }
-  if (st) rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("headroom"))}</span><span>${escapeHtml(`${translate("unallocated")} ${tokensText(st.unallocated)} · ${translate("deployment spent")} ${tokensText(na.deploymentSpent)} ${translate("of")} ${tokensText(na.totalTokens)}`)}</span></div>`);
+  if (st) rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("headroom"))}</span><span>${escapeHtml(`${translate("unallocated")} ${tokensText(st.unallocated)} · ${translate("deployment reserved+held")} ${tokensText(na.deploymentSpent)} ${translate("of")} ${tokensText(na.totalTokens)}`)}</span></div>`);
   rows.push(`<div class="dim small">${escapeHtml(translate("amounts are this"))} ${escapeHtml(translate(na.window ?? "envelope"))} ${escapeHtml(translate("window's; the bar is the allocation, the solid bar the spend (held included), the amber tick the floor"))}</div>`);
   // From THIS host's run records, over the spend window; the history below is the fleet's (`alloc:log` is shared).
   rows.push(`<div class="small">${escapeHtml(splitCountsLine(`${translate("refusals in runs on this host")}, ${windowLabel}`, na.refusals, translate("none"), translate))}</div>`);
@@ -1261,7 +1260,7 @@ function listSection(title, rows, aria, tips, extra = "", translate = (message) 
     const agg = {
       tokens: rest.reduce((s, r) => s + r.amount.tokens, 0),
       class: "estimated",
-      floor: rest.some((r) => r.cost.floor === true),
+      floor: rest.some((r) => r.amount?.floor === true),
     };
     tail = `<div class="dim small">(+${fmt(rest.length)} ${escapeHtml(translate("more"))} · ${escapeHtml(fmtAmount(agg))})</div>`;
   }
@@ -1284,7 +1283,7 @@ export function breakdownHtml(nf, minted, tips, names = new Map(), translate = (
         amount: r.amount,
         runs: r.runs,
         failed: r.outcomes.failed,
-        failedCost: r.failedCost,
+        failedAmount: r.failedAmount,
         nodeId: minted.get(r.key) ?? null,
       })),
       translate("spend by trigger"),

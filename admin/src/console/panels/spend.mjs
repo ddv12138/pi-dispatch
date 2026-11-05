@@ -481,7 +481,7 @@ export function spendCaps(v) {
       t(v, "Caps"),
       t(v, "The settings or counters could not be read. No cap usage can be claimed."),
     );
-  const dollar = b.dollars ?? {};
+  const dollar = b.windows ?? {};
   const windows = Array.isArray(dollar.windows) ? dollar.windows : [];
   return card(
     t(v, "Caps"),

@@ -4888,7 +4888,7 @@ export function createFleetReader(
         failed,
         scopedLimits,
         scopedBudget,
-        dollars,
+        windows: dollars,
         queue: { pausedState, pausedPartial, counts, workers, queues: queues.length, fleetDegraded },
         // Issue #641: each queue's own counts beside the summed ones, so a surface can say which host's queue is deep.
         queueCounts: queues.map((q, i) => ({ queue: q?.name ?? "-", paused: Boolean(pausedStates[i]), counts: Object.fromEntries(Object.entries(countsPer[i] ?? {}).map(([k, v]) => [k, Number(v ?? 0)])) })),
