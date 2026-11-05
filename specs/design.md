@@ -6985,7 +6985,7 @@ counter was right and why the windows replaced it.
 
 - **Status**: issue #645, part 2 (2026-10-17). `worker/src/run-budget-ledger.mjs`, used by the processor for
   `run.recover` jobs only.
-- **Decision**: every dollar hold of a durable run is recorded in ONE Valkey hash per run (`INT-RUN-BUDGET-LEDGER`)
+- **Decision**: every token hold of a durable run is recorded in ONE Valkey hash per run (`INT-RUN-BUDGET-LEDGER`)
   before its container starts, and every transition of a hold is one Lua compare-and-set that moves it only FROM
   `held`, so a hold is settled, released or written off exactly once whichever attempt or recovery asks.
   1. **The slot**: the run's job-count slot is claimed once (`claimSlot`, `HSETNX slot held`). "new": the attempt
@@ -6995,7 +6995,7 @@ counter was right and why the windows replaced it.
      counts (the safe side: a run whose every attempt never started keeps one slot counted).
   2. **The container number**: `nextSeq` (one `HINCRBY` with the TTL): attempt 1 is 1, its retry 2, a recovery's
      container the next. It addresses the hold and is the checkpoints' `attempt`.
-  3. **The hold record**: after `reserveDollars`, `recordHold(seq, hold)` writes `h<seq>` (the validated hold JSON)
+  3. **The hold record**: after `reserveTokens`, `recordHold(seq, hold)` writes `h<seq>` (the validated hold JSON)
      and `s<seq> = held` only when that seq has no state yet. **Contract: an armed run never runs a container without a
      recorded hold.** Any error releases the hold just reserved and throws a never-started `InfraRetry` before tokens.
   4. **Settle and release**: a recorded hold is settled after the exit only by the call that moved it `held` to
@@ -7013,7 +7013,7 @@ counter was right and why the windows replaced it.
   usage is agent-writable, so settling down from it would let an agent that crashed itself refund its own spend. The
   exposure is stated in `CONST-BUDGET-BEFORE-TOKENS`: one hold per container, (1 + retries + recoveries) per run.
 - **Every method never throws**: a Valkey fault or a bad argument returns `{ error }` and logs
-  `run_budget_ledger_error` with the operation and the error code only; for every write that guards money the
+  `run_budget_ledger_error` with the operation and the error code only; for every write that guards a hold the
   processor turns it into a never-started `InfraRetry`.
 - **Rejected**:
   - *Carrying a crashed hold's remainder into the recovery's budget.* It rests on the agent-writable usage.
@@ -7021,7 +7021,7 @@ counter was right and why the windows replaced it.
     that lost its worker, spending against a hold already given back.
   - *A read, then a write.* That is the race the scripts exist to avoid; `read` is for doctor and tests only.
 - **Traces to**: `REQ-RUN-RECOVERY`, `CONST-BUDGET-BEFORE-TOKENS`, `INT-RUN-BUDGET-LEDGER`,
-  `DES-DOLLAR-RESERVE-AND-SETTLE`.
+  `DES-TOKEN-RESERVE-AND-SETTLE`.
 - **Code evidence**: worker/src/run-budget-ledger.mjs (`makeRunBudgetLedger`, `validHold`, the five scripts);
   worker/src/processor.mjs (`claimSlot`, `nextSeq`, `settleCrashed`, `recordHold`, `settle`, `release`);
   worker/test/run-budget-ledger.test.mjs; worker/test/processor-durable.test.mjs.
@@ -16726,6 +16726,7 @@ Code evidence: `worker/src/watch-decision.mjs`, `watch-board.mjs`, `watch-store.
 
 | Date | Change |
 |---|---|
+| 2026-11-05 (token-only, durable runs) | **`DES-RUN-BUDGET-LEDGER` AMENDED to the token hold.** A durable run's recorded hold is the per-job token budget's (`reserveTokens`'s `{ amountTokens, keys, ledgers }`), and every transition is unchanged: the job-count slot claimed once, the container number, the hold written before the container, settle/release/settled-crashed moving only FROM `held` in one Lua compare-and-set, and a crashed hold settled as bookkeeping only, the window keys keeping the whole reservation. **Code evidence**: worker/src/run-budget-ledger.mjs (`RUN_BUDGET_STATES`, the five scripts); worker/src/processor.mjs (`reserveTokens`/`releaseTokens` around the ledger). |
 | 2026-11-05 (token-only, allocation) | **`DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE` AMENDED to the token envelope.** The envelope is a total in integer whole tokens with token floors (`INT-ENVELOPE-FILE-CONTRACT`'s whole-token shape), `allocate` and `rebase` compute in BigInt tokens inside and safe-integer Numbers at the edges, the applied split's vector and every stored amount are whole tokens, the ledgers are the token ones (`scopeTokenKeyPrefix`, the `otherTokens` slot, `governedTokens`), a governed refusal reads `token-cap` when the operator's number bound and `allocation-cap` when the allocation or the envelope total did, a governed job needs the per-job token budget (`maxTokens`) instead of a dollar cap, and the surfaces print exact whole-token counts with the split total from `splitTotalTokens`. The workflow decisions are UNCHANGED, carried over: weights never amounts, the envelope a file (`OQ-008`), the applied split in Valkey, the compare-and-set writes, the apply ladder, the step, the re-base, the fleet reconcile, the audit file and `alloc:log`, the job-path checks and the portfolio writer path; the threat model's worked example is restated in tokens (100,000 a week, floors of 10,000, a 25% step). **Code evidence**: worker/src/envelope.mjs (integer total and floors); worker/src/priorities.mjs (the BigInt token arithmetic); worker/src/allocation.mjs (`governedTokens`, `otherTokens`, `capSource`); admin/src/render.mjs (`splitTotalTokens`, the exact-integer rendering). |
 | 2026-11-05 (token-only, 1 of 3) | **`DES-COST-FOLD-BY-SCAN` RETIRED, token-only, its mechanism carried by NEW `DES-TOKEN-FOLD-BY-SCAN`.** The money fold (the typed `{ usd, class, floor, coverage }`, the six pricing classes, plan verdicts and proration, subscription re-pricing against the rate tables) is deleted with the rate tables it folded against; the scan it ran on (the read-only, filename-keyed, retention-bounded, 92-day-capped `scanRunRecords`, folded by the pure, fs-free `admin/src/costs.mjs`) survives unchanged. The successor folds token totals with THREE classes only (`metered`, `estimated`, `unknown`), a typed `{ tokens, class, floor, coverage? }` where a floor is a one-sided estimate from below (uncounted tokens can only make the true total larger), and a what-if that compares a flow's median per-run token profile against a target model's declared context window instead of re-pricing. The fact/opinion split, fold-time classification never stored, the requested-window denominator and the injected trigger join are UNCHANGED, carried over. **Code evidence**: admin/src/costs.mjs; admin/src/read-model.mjs (`scanRunRecords`). |
 | 2026-11-05 (token-only, 2 of 3) | **`DES-USAGE-METER-VIA-API-PROVIDER-REGISTRY` AMENDED, the cost-guard half deleted.** `createCostGuard`, `callCostBound`, the bound arithmetic (the priced-api set, the input and image ceilings, the samplingParams keys, the output-cap field rules, the long-context tier), the `PRICES` pin table, the `SPENT` file and the guard counters (`costRefused`, `boundExceeded`, `longContext`, `costUnjudged`, `costUnanswered`) are retired with the per-job dollar cap; what remains of the guard is the meter's own settle-time token check (`combinedTotal() > cap`, stop `token_budget`), a lagging in-run backstop with no pre-call form (`DES-TOKEN-RESERVE-AND-SETTLE`, `OQ-010`). The install line reports a token cap as the readable state, not an alarm (`capped` without a brake is expected, since only a model list arms the brake and is refused `model-policy-unenforceable`). The child ledger is version **4**: the guard counters leave it, and the meter's completeness counter `costUnreported` (issue #571) is renamed **`usageUnreported`** and stays, the one completeness counter a ledger carries. The registry choke point, the two meter halves and the forward accounting, the observe-don't-consume rule, the fallback meter, the detector, the control file (`STOP`) and the promise-of-a-stream rule are UNCHANGED, checked. **Code evidence**: image/runner/src/usage-meter.mjs. |
