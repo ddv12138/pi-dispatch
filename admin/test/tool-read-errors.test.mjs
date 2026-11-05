@@ -58,8 +58,8 @@ test("the registered allocations read withholds a private infrastructure excepti
   const dir = tempDir("pd-766-private-alloc-read-");
   const projects = join(dir, "projects.json"), envelope = join(dir, "envelope.json"), settings = join(dir, "settings.json");
   writeFileSync(projects, JSON.stringify({ version: 1, projects: [{ id: "web", members: ["github:acme/web"] }] }));
-  writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "10", floorsUsd: { web: "0", _other: "0" }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(settings, '{"maxCostUsd":"1"}');
+  writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 10, floorsTokens: { web: 0, _other: 0 }, defaultWeights: { web: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(settings, '{"maxTokens":1}');
   Object.assign(process.env, { PI_PROJECTS_FILE: projects, PI_ENVELOPE_FILE: envelope, PI_SETTINGS_FILE: settings, VALKEY_URL: "redis://unit.invalid" });
   module._setAllocationSeamsForTests({ redisFn: () => { throw Object.assign(new Error(PRIVATE), { publicMessage: PRIVATE, safe: true }); }, now: () => new Date(Date.UTC(2026, 9, 31)) });
   try {

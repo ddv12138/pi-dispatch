@@ -1191,7 +1191,7 @@ const SNAPSHOT = {
   queueCounts: [{ queue: "pi", paused: false, counts: { waiting: 3 } }],
   hostBudgets: [{ name: "h1", staleMs: 1200, budgetMemMiB: "4096", budgetCpuCenti: "off", concurrency: "2", jobs: [{ id: "j9" }], jobsMore: 1, routes: "secret-route" }],
   budget: { day: 1, week: 2, month: 3, tokensToday: 400 },
-  dollars: { rows: [{ ledger: "scope", name: "/home/rob/work/repo", window: "day", capMicros: 5, counterMicros: 1, full: false, records: [{ target: "x" }] }, { ledger: "model", name: "openai/gpt", window: "week", capMicros: 9, counterMicros: 9, full: true }] },
+  windows: { rows: [{ ledger: "scope", name: "/home/rob/work/repo", window: "day", capTokens: 5, counterTokens: 1, full: false }, { ledger: "model", name: "openai/gpt", window: "week", capTokens: 9, counterTokens: 9, full: true }] },
   parked: [{ target: "o/r#12", kind: "github", jobId: "j1", parkedAt: "2026-10-14T11:00:00.000Z", ageMs: 3600000, answered: false, chainCount: 2 }],
   failures24h: 4,
   failures24hFloor: false,
