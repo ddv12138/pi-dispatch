@@ -819,8 +819,8 @@ export function writeSettings({ settingsFile, mutate, expect = null, fs = nodeFs
   const next = mutate({ ...(res.overlay ?? {}) });
   // Issue #501 (PR #542's review): a write that touches a dollar key is judged on the MERGED values when the caller
   // passes the env, and the answer is a WARNING returned beside the result, never a refusal: the worker's cap may come
-  // from a source not visible here (`mergedDollarProblem`). Other keys are not judged.
-  const warning = budgetEnv === undefined ? undefined : mergedDollarProblem(next, budgetEnv, { deploymentDir })?.warning;
+  // from a source not visible here (`mergedTokenProblem`). Other keys are not judged.
+  const warning = budgetEnv === undefined ? undefined : mergedTokenProblem(next, budgetEnv, { deploymentDir })?.warning;
   const w = writeOverlay(settingsFile, next, { fs, expect: Array.isArray(expect) ? expect : [{ path: settingsFile, text: read }], carry: res.carry ?? null });
   if (w.invalid) return { invalid: w.invalid };
   return { ok: true, overlay: next, ...(warning ? { warning } : {}) };
@@ -895,7 +895,7 @@ export function settingShown(key, overlay, env, { deploymentDir = null } = {}) {
  * env. The warning names what was seen: the overlay plus the deployment's `.env` with a pointer, else this session's
  * environment, which is not the worker's. An empty env value is unset, the worker's own reading.
  */
-export function mergedDollarProblem(overlay, env, { deploymentDir = null } = {}) {
+export function mergedTokenProblem(overlay, env, { deploymentDir = null } = {}) {
   const merged = {};
   for (const key of TOKEN_SETTING_KEYS) {
     if (overlay?.[key] !== undefined) merged[key] = overlay[key];

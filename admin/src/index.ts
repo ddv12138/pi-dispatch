@@ -607,7 +607,7 @@ function registerTools(pi: ExtensionAPI): void {
       const runShown = (record: any) => runForAgent(record, { self: deploymentEnv().PI_WORKER_NAME ?? hostname(), retention: (jobId: string) => sandboxRetentionOf(paths, jobId, { env: deploymentEnv(), venuePolicy: "unknown" }) });
       if (params.jobId) return toolText(JSON.stringify(runShown(readRun({ logsDir: paths.logsDir, jobId: params.jobId }))));
       // `{runs, hosts, mirror}` rather than a bare array (issue #57, Gap 3). The one deliberate tool-shape
-      // change here, and this surface's own doctrine is the justification: typed dollars carry their
+      // change here, and this surface's own doctrine is the justification: typed token amounts carry their
       // `class` so a model consuming them cannot launder an estimate into a fact by dropping the label, and
       // a bare array holding some unstated fraction of a fleet's runs is exactly that laundering. `mirror`
       // says whether the list is the whole deployment ("ok"), this host alone ("off"), capped
@@ -621,22 +621,22 @@ function registerTools(pi: ExtensionAPI): void {
     name: "dispatch_costs",
     label: "pi-dispatch costs",
     description:
-      "Read-only. Folds the PII-free run history against the operator's declared subscriptions and pi-ai's " +
-      "rate tables into the costs read-model: window totals, daily buckets, per-flow and per-model rollups, " +
+      "Read-only. Folds the PII-free run history against the operator's declared subscriptions and pi-ai's model " +
+      "catalog into the token read-model: window totals, daily buckets, per-flow and per-model rollups, " +
       "per-plan verdicts, and provenance. window = 7d | 30d | mtd (default mtd); flow filters to one flow's " +
       "runs; repo filters to one repo's runs: a bare \"acme/web\" selects that repo on every forge, a forge-qualified " +
       "\"github:acme/web\" (the by-repo rollup's key) one forge, and \"local:site\" a local folder's runs; project " +
       "filters to the runs recorded under one project id (the by-project rollup's key). `byProject` groups by the " +
       "project id each run record carries: runs outside every project, and runs recorded before projects existed, are " +
       "\"(no project)\", and a record is never re-attributed from the projects file as it is now. " +
-      "`dollars` adds the dollar caps: `windows` has one row per active dollar window (the deployment's, then each " +
-      "scoped-limits dollar row), with `counterTokens` (spent and held, the Valkey counter the next job is admitted " +
-      "against, null when unreadable) beside the records' side (settled micro-dollars, how many runs settled metered, " +
-      "floor, refunded or unreserved, and the boundExceeded count; null for a folder or model row, which a run record " +
-      "cannot name); `runs` lists the per-run `dollars` of this window's records, newest first, and `newerSkipped`, when " +
+      "`windows` holds the token windows: `rows` has one row per active token window (the deployment's day, week and month, then each " +
+      "scoped-limits token row), with `capTokens` and `counterTokens` (spent and held, the Valkey counter the next job is admitted " +
+      "against, null when unreadable) beside the records' side (settledTokens, how many runs, the basis counts " +
+      "metered/floor/refunded/unreserved, and malformed; null for a folder or model row, which a run record " +
+      "cannot name); `runs` lists the per-run `tokensWindows` ({ reservedTokens, settledTokens, basis }) of this window's records, newest first, and `newerSkipped`, when " +
       "present, counts the records a newer pi-dispatch wrote, which neither the fold nor `runs` reads: the project " +
       "filter narrows it, the flow and repo filters do not, since this build cannot read such a record's flow or target. " +
-      "All amounts are integer micro-dollars (1 USD = 1000000).",
+      "All amounts are whole numbers of tokens.",
     parameters: Type.Object({ window: Type.Optional(Type.String()), flow: Type.Optional(Type.String()), repo: Type.Optional(Type.String()), project: Type.Optional(Type.String()), whatif: Type.Optional(Type.String()), runs: Type.Optional(Type.String()) }),
     async execute(_toolCallId, params) {
       const window = params.window ?? "mtd";
@@ -1022,17 +1022,17 @@ function registerTools(pi: ExtensionAPI): void {
       "forge's repo, or a local folder path, ABSOLUTE, matched exactly like pause windows, no globs) exceed the `day`/`week`/`month` " +
       "job-count caps are REFUSED before any spend (reason scope-cap, never retried); jobs over `concurrent` " +
       "are DEFERRED, never dropped, and run when a slot frees. At least one of day/week/month/concurrent is " +
-      "required, each an integer >= 1. `dayTokens`/`weekTokens`/`monthTokens` are DOLLAR windows (a decimal string such as " +
-      "\"2.50\": above 0, at most 1000000, at most 6 decimals): what the scope's jobs may spend per UTC day, Monday " +
-      "week and month; a job that does not fit is refused dollar-cap. A scope of model:<provider>/<model> caps one " +
-      "model across every scope and takes the three dollar fields only. A scope of project:<id> (an id from " +
+      "required, each an integer >= 1. `dayTokens`/`weekTokens`/`monthTokens` are TOKEN windows (a whole number of tokens " +
+      "written as a string, such as \"500000\"): what the scope's jobs may spend per UTC day, Monday " +
+      "week and month; a job that does not fit is refused token-cap. A scope of model:<provider>/<model> caps one " +
+      "model across every scope and takes the three token fields only. A scope of project:<id> (an id from " +
       "projects.json) caps every member of that project as one: a job over its day/week/month is refused " +
-      "project-cap, over its dollar window dollar-cap, and its `concurrent` defers; the id must already be in " +
+      "project-cap, over its token window token-cap, and its `concurrent` defers; the id must already be in " +
       "projects.json. Under an allocation envelope (PI_ENVELOPE_FILE) a project's or a repo's share of the split " +
-      "narrows its dollar window further, and the envelope total the deployment's: a job refused by a share or the " +
-      "envelope total is allocation-cap, not dollar-cap. " +
+      "narrows its token window further, and the envelope total the deployment's: a job refused by a share or the " +
+      "envelope total is allocation-cap, not token-cap. " +
       "A bare row and a qualified row for the same " +
-      "repo are refused together: keep one form. A dollar window needs a per-job cap " +
+      "repo are refused together: keep one form. A token window needs a per-job cap " +
       "(maxTokens). A project:<id> row may also set its jobs' SIZE: `memory` (a string such as \"512m\", \"1536m\" " +
       "or \"4g\", at least 512m; no swap is given beyond it) and `cpus` (a number such as 0.5 or 2, at least 0.25, at " +
       "most two decimals; a CPU WEIGHT under contention, not a cap). Unset, a job takes PI_JOB_MEMORY and PI_JOB_CPUS " +
@@ -1053,7 +1053,7 @@ function registerTools(pi: ExtensionAPI): void {
       month: Type.Optional(Type.Integer({ minimum: 1 })),
       concurrent: Type.Optional(Type.Integer({ minimum: 1 })),
       // Issue #501, part 7. Strings, the form `parseTokenCount` reads exactly as written. pi's own validation turns a
-      // JSON number into a string before `execute` (`dollarFieldsOf`), so a number is read by its value; one that does
+      // JSON number into a string before `execute` (`tokenFieldsOf`), so a number is read by its value; one that does
       // not print as a plain decimal of at most 6 places is refused.
       dayTokens: Type.Optional(Type.String()),
       weekTokens: Type.Optional(Type.String()),
@@ -1081,10 +1081,10 @@ function registerTools(pi: ExtensionAPI): void {
       "Provide only the fields to change (scope/day/week/month/concurrent/dayTokens/weekTokens/monthTokens, and on a project:<id> " +
       "row memory/cpus/hostShare/minJobs as dispatch_limit_add describes them); the rest keep " +
       "their current value. `scope` is a repo \"owner/name\" on every forge, a forge-qualified " +
-      "\"<forge>:owner/name\" such as \"github:acme/web\" for that forge only, or an ABSOLUTE local folder path. `dayTokens`/`weekTokens`/`monthTokens` are dollar windows, written as a decimal string (\"2.50\"). " +
+      "\"<forge>:owner/name\" such as \"github:acme/web\" for that forge only, or an ABSOLUTE local folder path. `dayTokens`/`weekTokens`/`monthTokens` are token windows, written as a whole number of tokens (\"500000\"). " +
       "No field can be removed here: to drop a cap from an entry, edit scoped-limits.json by hand. Changing `scope` " +
       "(such as a bare \"acme/web\" rewritten to \"github:acme/web\") starts a NEW count under a new key: the old " +
-      "row's used runs and dollars do not carry over, and jobs already running keep their slot under the old scope " +
+      "row's used runs and tokens do not carry over, and jobs already running keep their slot under the old scope " +
       "until they finish while the new row counts from zero, so with `concurrent: N` up to 2N jobs can run until " +
       "then. A new size applies to the project's NEXT jobs; a running job keeps the size it started with. The file stays " +
       "version 1 unless a row needs version 2, or 3 for a size field. UI always confirms. Headless requires the process grant and may only decrease explicit caps in the same scope, preserving size and minimums.",
@@ -1197,8 +1197,8 @@ function registerTools(pi: ExtensionAPI): void {
     description:
       "Read-only. The allocation envelope and the split applied inside it (PI_ENVELOPE_FILE, docs/allocation.md): the " +
       "envelope's window, total, floors, default weights and delegation rules; the applied split (plan id, writer, when " +
-      "it was applied and until when, the weights, and each project's and repo's allocation in integer micro-dollars, " +
-      "1 USD = 1000000); what each project has spent and holds in the envelope window; and the last 20 outcomes " +
+      "it was applied and until when, the weights, and each project's and repo's allocation in whole tokens); what each " +
+      "project has spent and holds in the envelope window; and the last 20 outcomes " +
       "(applied, refused with its reason, expired, rebased, reverted). It returns no reason text a plan carried. " +
       "`unset` means PI_ENVELOPE_FILE is unset: no envelope, no delegation.",
     parameters: Type.Object({}),
@@ -1228,7 +1228,7 @@ function registerTools(pi: ExtensionAPI): void {
       "neutral split. The plan's basis is filled in from the applied plan. The result is the outcome (applied, " +
       "duplicate, refused or apply-failed), the refusal's reason (delegation-off, writer-not-allowed, " +
       "envelope-mismatch, plan-duplicate, plan-stale, plan-too-soon, plan-incomplete, plan-busy, or plan-invalid " +
-      "with the field and rule), the plan id, whether the step clamped it, and each project's micro-dollars before " +
+      "with the field and rule), the plan id, whether the step clamped it, and each project's tokens before " +
       "and after. A refusal changes nothing; every attempt is recorded.",
     executionMode: "sequential",
     parameters: Type.Object({
@@ -1250,11 +1250,11 @@ function registerTools(pi: ExtensionAPI): void {
     label: "pi-dispatch set the allocation envelope",
     description:
       "Changes the allocation envelope (PI_ENVELOPE_FILE) and applies it live: any of `window` (day, week or month), " +
-      "`totalTokens` (a decimal string such as \"100\"), `floorsTokens` (project id to a decimal string; merged with the " +
+      "`totalTokens` (a whole number of tokens written as a string, such as \"100\"), `floorsTokens` (project id to a whole number of tokens; merged with the " +
       "file's, \"0\" is a floor), `defaultWeights` (project id to an integer 0 to 1000; merged), and the delegation " +
       "rules `enabled`, `writers` (operator-session, portfolio-job), `maxStepPct` (1 to 100), `minIntervalHours` and " +
       "`maxPlanDays`. The result is judged by the worker's own parser before the confirm (floors may not exceed the " +
-      "total, a floor names a project in projects.json or _other, no floor above a project's own dollar row). The " +
+      "total, a floor names a project in projects.json or _other, no floor above a project's own token row). The " +
       "operator MUST approve a confirm dialog showing the before->after; refused with no interactive operator. The " +
       "fleet re-bases the split onto the new envelope with no step.",
     executionMode: "sequential",
@@ -1307,7 +1307,7 @@ function allocationContext(): any {
   return { env, paths, maxTokens, read };
 }
 
-/** The envelope as a tool shows it: numbers and ids the parser checked, in micro-dollars, with its digest. */
+/** The envelope as a tool shows it: numbers and ids the parser checked, in whole tokens, with its digest. */
 function envelopeShown(e: any, digest: string): any {
   return { digest, window: e.window, totalTokens: e.totalTokens, floors: e.floors, defaultWeights: e.defaultWeights, delegation: e.delegation };
 }
@@ -1315,7 +1315,7 @@ function envelopeShown(e: any, digest: string): any {
 /**
  * Apply a priorities plan as the operator's session (`dispatch_priorities_set`, `/dispatch priorities set`). The plan
  * is built from what was given, the basis filled in by `applyPriorities` from the applied state, and `_other` keeps
- * its current weight when it is left out. Returns the worker's outcome with the micro-dollars before and after, and
+ * its current weight when it is left out. Returns the worker's outcome with the token counts before and after, and
  * NEVER a reason text. Throws only when there is no envelope to apply against or on infrastructure.
  */
 async function setPriorities(projects: any[], validDays?: number): Promise<any> {
@@ -1855,7 +1855,7 @@ async function openDashboard(paths: any, ctx: any, notify: Notify, { initialTail
         return t;
       })(),
       deps: {
-        // The dollar caps' env (issue #501, part 7): the deployment's, the source `dispatch_set`'s confirm reads. Its
+        // The token caps' env (issue #501, part 7): the deployment's, the source `dispatch_set`'s confirm reads. Its
         // writes (pause, resume, both cancels) go through the console's audit chain as the panel (issue #642).
         // The kill switch's plan (issue #642) is the CLI's and the tools' (`killSwitchPlan`): both Valkeys on a pause when this
         // process's and the deployment's disagree, and a resume refused then, so the TUI cannot resume one and strand the other.
@@ -2215,7 +2215,7 @@ async function addScopedLimitViaDialogs(paths: any, ui: any, notify: Notify): Pr
 
 /**
  * Edit a scoped limit: select which, re-prompt each field with its current value (blank keeps it). Exported for its
- * test: the fields it does not prompt for (the dollar windows and, since issue #596, the size) must be carried.
+ * test: the fields it does not prompt for (the token windows and, since issue #596, the size) must be carried.
  */
 export async function editScopedLimitViaDialogs(paths: any, ui: any, notify: Notify): Promise<void> {
   const expect = writeInputs({ paths: [paths.scopedLimitsPath, paths.projectsFile] }); // the files as the change is built from them (PR #569's second review)
@@ -2246,7 +2246,7 @@ export async function editScopedLimitViaDialogs(paths: any, ui: any, notify: Not
     week: keep(week, cur.week),
     month: keep(month, cur.month),
     concurrent: keep(concurrent, cur.concurrent),
-    // Carried unchanged (see dispatch_limit_edit): editing a count must never drop a dollar cap, nor a size (#596).
+    // Carried unchanged (see dispatch_limit_edit): editing a count must never drop a token cap, nor a size (#596).
     dayTokens: cur.dayTokens,
     weekTokens: cur.weekTokens,
     monthTokens: cur.monthTokens,
@@ -2518,7 +2518,7 @@ type Notify = ((message: string, type?: string) => void) | undefined;
  * key's type, and exactly one value token is accepted (model ids carry no spaces). A rejected candidate
  * surfaces `writeOverlay`'s key-only reason, and a present-but-invalid file is refused rather than rebuilt
  * (`writeSettings`, issue #501), so no prior overlay is ever lost to a set. The checks are `planSettingSet`'s
- * (write-plans.mjs, the command surface); a dollar key's write carries the deployment's env, so `writeSettings`
+ * (write-plans.mjs, the command surface); a token key's write carries the deployment's env, so `writeSettings`
  * returns a WARNING beside it (issue #501, PR #542's review), never a refusal.
  */
 function applySet(settingsFile: string, tokens: string[], notify: Notify): void {
@@ -2539,7 +2539,7 @@ function applySet(settingsFile: string, tokens: string[], notify: Notify): void 
 
 /**
  * The deployment as the operator-typed `set`/`unset` judge it: its paths with the settings file the command writes,
- * its environment (the dollar settings' source and the envelope's per-job cap), and the pointer's folder.
+ * its environment (the token settings' source and the envelope's per-job cap), and the pointer's folder.
  */
 function settingsCommandContext(settingsFile: string): any {
   return { paths: { ...resolvePaths(deploymentEnv()), settingsFile }, env: deploymentEnv(), shown: { deploymentDir: pointerState().deploymentDir ?? null } };

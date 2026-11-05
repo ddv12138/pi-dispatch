@@ -31,7 +31,7 @@ import {
   panelValkeyContext,
   writeSettings,
   blankSettingsFile,
-  mergedDollarProblem,
+  mergedTokenProblem,
   writeTriggers,
   readPauseWindows,
   writePauseWindows,
@@ -2989,16 +2989,16 @@ test("the panel's Valkey reads fail open, naming it, on a database that Valkey d
 
 test("mergedTokenProblem: a window with no maxTokens in the MERGED overlay and env is a WARNING naming what was seen, never a refusal (#501, PR #542)", () => {
   const dir = "/deploy";
-  assert.equal(mergedDollarProblem({ dailyTokenCap: 10_000 }, { PI_MAX_TOKENS: "2000" }, { deploymentDir: dir }), null, "the budget in env");
-  assert.equal(mergedDollarProblem({ dailyTokenCap: 10_000, maxTokens: 2000 }, {}, { deploymentDir: dir }), null, "the budget in the overlay");
-  assert.equal(mergedDollarProblem({ maxTokens: 2000 }, { PI_WEEKLY_TOKEN_CAP: "50000" }, { deploymentDir: dir }), null, "the window in env");
-  assert.equal(mergedDollarProblem({}, {}, { deploymentDir: dir }), null, "nothing set");
-  const pointed = mergedDollarProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: dir });
+  assert.equal(mergedTokenProblem({ dailyTokenCap: 10_000 }, { PI_MAX_TOKENS: "2000" }, { deploymentDir: dir }), null, "the budget in env");
+  assert.equal(mergedTokenProblem({ dailyTokenCap: 10_000, maxTokens: 2000 }, {}, { deploymentDir: dir }), null, "the budget in the overlay");
+  assert.equal(mergedTokenProblem({ maxTokens: 2000 }, { PI_WEEKLY_TOKEN_CAP: "50000" }, { deploymentDir: dir }), null, "the window in env");
+  assert.equal(mergedTokenProblem({}, {}, { deploymentDir: dir }), null, "nothing set");
+  const pointed = mergedTokenProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: dir });
   assert.equal(pointed.invalid, undefined, "the worker's unit or --env-setup script may hold the budget: never a refusal");
   assert.match(pointed.warning, /^dailyTokenCap needs maxTokens.*Neither the settings overlay nor the deployment's \.env sets maxTokens/);
   assert.match(pointed.warning, /service unit or its --env-setup script, is not visible here/);
-  assert.match(mergedDollarProblem({}, { PI_WEEKLY_TOKEN_CAP: "50000", PI_MAX_TOKENS: "" }, { deploymentDir: dir }).warning, /^weeklyTokenCap needs maxTokens/, "an empty variable is unset");
-  const blind = mergedDollarProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: null });
+  assert.match(mergedTokenProblem({}, { PI_WEEKLY_TOKEN_CAP: "50000", PI_MAX_TOKENS: "" }, { deploymentDir: dir }).warning, /^weeklyTokenCap needs maxTokens/, "an empty variable is unset");
+  const blind = mergedTokenProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: null });
   assert.equal(blind.invalid, undefined);
   assert.match(blind.warning, /this session's environment \(not the worker's\)/);
 });

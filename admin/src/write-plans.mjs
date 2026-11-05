@@ -30,7 +30,7 @@ import { ISSUE_ACTIONS, isModelRolesField, isMcpNearMiss, recoverVenueProblem, r
 import { TOKEN_SETTING_KEYS, optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { fmtTokens } from "./panel.mjs";
 import { modelIdProblem, providerIdProblem } from "@edgehero/pi-dispatch/model-ref";
-import { SIZE_LIMIT_FIELDS, TOKEN_LIMIT_FIELDS as USD_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { SIZE_LIMIT_FIELDS, TOKEN_LIMIT_FIELDS as TOKEN_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
 import { formatCpus, formatMemory, parseCpus, parseMemory } from "@edgehero/pi-dispatch/job-size";
 import {
   BUNDLE_FORMATS,
@@ -38,7 +38,7 @@ import {
   blankSettingsFile,
   envelopeJobCap,
   envelopeRefusal,
-  mergedDollarProblem,
+  mergedTokenProblem,
   overlayInvalidRefusal,
   planEnvelopeWrite,
   planProjectsWrite,
@@ -415,7 +415,7 @@ export function wideningFieldRefusal(params, tool) {
       const meant = runModelFieldNearMiss(key) ?? mcpFieldNearMiss(key);
       if (meant === null || !TOOL_PROOF_FIELDS.has(meant)) continue;
       const what =
-        meant === "run.fallbackModels" ? "fallback-model list" : meant === "run.models" ? "allowed-model list" : meant === "run.mcp" ? "list of MCP servers" : "per-job dollar cap";
+        meant === "run.fallbackModels" ? "fallback-model list" : meant === "run.models" ? "allowed-model list" : meant === "run.mcp" ? "list of MCP servers" : "per-job token cap";
       return `${tool} cannot set ${meant} (sent as ${label}${key}): a trigger's ${what} is set by hand in the triggers file, never by a tool`;
     }
   }
@@ -626,7 +626,7 @@ export function planTriggerDelete({ index, paths, surface = "tool", fs = nodeFs 
 // ---- settings ----
 
 /**
- * Coerce a raw token to the settings value its key expects: `model`, `provider` and the four dollar keys keep
+ * Coerce a raw token to the settings value its key expects: `model`, `provider` and the four token keys keep
  * the raw string; every other overlay key is numeric and parses via `Number` (a non-numeric token becomes `NaN`, which
  * `writeOverlay` then rejects with a key-only reason). Keying off the string exceptions rather than an
  * enumerated numeric list keeps this in lockstep with `KNOWN_KEYS` -- a new numeric knob (weekly/monthly
@@ -661,7 +661,7 @@ export function settingsEnvelopeRefusal(key, beforeOverlay, afterOverlay, paths,
 /**
  * A `model` or `provider` value the worker's `writeOverlay` would refuse, as the sentence it refuses with (`model must
  * be a model id of ...`), else null (issue #673, review round 1). The worker's own rule (`modelIdProblem`,
- * `providerIdProblem`, worker/src/model-ref.mjs), asked BEFORE the confirm, the dollar keys' rule: the operator is never
+ * `providerIdProblem`, worker/src/model-ref.mjs), asked BEFORE the confirm, the token keys' rule: the operator is never
  * asked to approve a value the write would then refuse. The same words `validateOverlay` builds, so a refusal reads
  * the same at plan time as it would at the write. Never the value.
  */
@@ -680,8 +680,8 @@ function idSettingProblem(key, value) {
 /**
  * The tool's settings plan (`dispatch_set`): a `value` that is absent or blank unsets `key`. Refused BEFORE the confirm
  * over an invalid file (issue #501; a BLANK file, issue #540, reads as a missing one, `writeSettings`' rule), over a
- * dollar value the worker's parser refuses, over a model or provider id outside the worker's shape (issue #673), and over a change that would break the allocation envelope (issue #504 part
- * C). A dollar change that leaves a window uncapped is WARNED in the confirm, never refused (`mergedDollarProblem`).
+ * token value the worker's parser refuses, over a model or provider id outside the worker's shape (issue #673), and over a change that would break the allocation envelope (issue #504 part
+ * C). A token change that leaves a window uncapped is WARNED in the confirm, never refused (`mergedTokenProblem`).
  */
 function planSettingTool({ key, value, paths, env, shown, fs }) {
   if (!KNOWN_KEYS.includes(key)) return { refusal: `unknown key '${key}'. valid keys: ${KNOWN_KEYS.join(", ")}` };
@@ -689,12 +689,12 @@ function planSettingTool({ key, value, paths, env, shown, fs }) {
   if (view?.invalid && !blankSettingsFile(paths.settingsFile, fs)) return { refusal: `rejected: ${overlayInvalidRefusal(view.invalid, { newer: view.newer === true })}` };
   const unset = value === undefined || value === null || String(value).trim() === "";
   const newVal = unset ? undefined : coerceSettingValue(key, String(value).trim());
-  const isDollarKey = TOKEN_SETTING_KEYS.includes(key);
-  // Issue #501, part 7: a dollar value is judged by the worker's own parser BEFORE the confirm, so the operator is
+  const isTokenKey = TOKEN_SETTING_KEYS.includes(key);
+  // Issue #501, part 7: a token value is judged by the worker's own parser BEFORE the confirm, so the operator is
   // never asked to approve a value the write would then refuse (the edit tools' rule). The message names the key.
-  if (!unset && isDollarKey) {
-    const dollar = refusalOf(() => parseTokenCount(newVal, key));
-    if (dollar !== null) return { refusal: dollar };
+  if (!unset && isTokenKey) {
+    const tokenRefusal = refusalOf(() => parseTokenCount(newVal, key));
+    if (tokenRefusal !== null) return { refusal: tokenRefusal };
   }
   // Issue #673, review round 1: a model or provider id by the worker's own rule, before the confirm, for the same reason.
   const idProblem = unset ? null : idSettingProblem(key, newVal);
@@ -702,7 +702,7 @@ function planSettingTool({ key, value, paths, env, shown, fs }) {
   // The AFTER side of an unset is what the key falls back to, by the same rule as the before side.
   const afterOverlay = unset ? Object.fromEntries(Object.entries(view?.overlay ?? {}).filter(([k]) => k !== key)) : { ...(view?.overlay ?? {}), [key]: newVal };
   const after = unset ? settingShown(key, afterOverlay, env, shown) : String(newVal);
-  const problem = isDollarKey ? mergedDollarProblem(afterOverlay, env, shown) : null;
+  const problem = isTokenKey ? mergedTokenProblem(afterOverlay, env, shown) : null;
   const broken = settingsEnvelopeRefusal(key, view?.overlay ?? {}, afterOverlay, paths, env);
   if (broken) return { refusal: `rejected: ${escapeInterpreted(broken)}` };
   // The change as one `[key, before, after]` pair (`changeText`), which the console draws with the values in bold.
@@ -728,7 +728,7 @@ function planSettingTool({ key, value, paths, env, shown, fs }) {
  * since `writeOverlay` silently drops unknown keys and would report ok on a no-op), a set takes exactly one value
  * token (model ids carry no spaces), a model or provider id outside the worker's shape is refused (issue #673), and a
  * change that would break the allocation envelope is refused. Every refusal
- * is the line the command shows, prefixed with its verb. A dollar key's write carries the deployment's env so
+ * is the line the command shows, prefixed with its verb. A token key's write carries the deployment's env so
  * `writeSettings` returns a WARNING beside the write, never a refusal (issue #501, PR #542's review).
  */
 function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
@@ -774,7 +774,7 @@ function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
  * Plan setting `key` to `value`. `surface: "tool"` (the default, and the console's) is `dispatch_set`'s plan, with its
  * confirm showing the before and after; `surface: "command"` is `/dispatch set`'s, with `valueTokens` the typed value
  * tokens. `paths` is the deployment's (`settingsFile`, `envelopeFile`, `projectsFile`, `scopedLimitsPath`), `env` its
- * environment (the dollar settings' source), `shown` `{ deploymentDir }`. The write is `writeSettings({ settingsFile,
+ * environment (the token settings' source), `shown` `{ deploymentDir }`. The write is `writeSettings({ settingsFile,
  * mutate, ...writeArgs })`. `{ plan }` or `{ refusal }`.
  */
 export function planSettingSet({ key, value, valueTokens, paths, env, shown = { deploymentDir: null }, surface = "tool", fs = nodeFs }) {
@@ -966,14 +966,14 @@ export function sizeFieldsOf(f) {
 }
 
 /**
- * The dollar fields a scoped-limit tool was SENT (issue #501, part 7), each judged by the worker's own
- * `parseTokenCount` and returned in its canonical form (`fmtTokens`: "2.5" becomes "2.50"), the form the parser
- * stores, so a confirm shows exactly what the file will hold. A blank or absent field is not sent. A malformed one
+ * The token fields a scoped-limit tool was SENT (issue #501, part 7), each judged by the worker's own
+ * `parseTokenCount` and returned as the NUMBER the scoped-limits parser stores, so a confirm shows
+ * exactly what the file will hold. A blank or absent field is not sent. A malformed one
  * throws with the parser's message (the key named, never the value) before any confirm is shown.
  */
-export function dollarFieldsOf(f) {
+export function tokenFieldsOf(f) {
   const out = {};
-  for (const k of USD_LIMIT_FIELDS) {
+  for (const k of TOKEN_FIELDS) {
     const raw = f?.[k];
     if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) continue;
     // A JSON number cannot be refused here: pi's own argument validation (`validateToolArguments`, `Value.Convert`)
@@ -1021,7 +1021,7 @@ export function liveOr(res) {
  */
 export function scopeChangeNote(before, after) {
   if (before?.scope === after?.scope) return "";
-  return "\nThe scope changes, so this row starts a new count under a new key: the used runs and dollars of the old scope do not carry over. Jobs already running keep their slot under the old scope until they finish, and the new row counts from zero, so with `concurrent: N` up to 2N jobs can run until then.";
+  return "\nThe scope changes, so this row starts a new count under a new key: the used runs and tokens of the old scope do not carry over. Jobs already running keep their slot under the old scope until they finish, and the new row counts from zero, so with `concurrent: N` up to 2N jobs can run until then.";
 }
 
 /** The envelope cross-check context the scoped-limits and projects writers take (`envelopeRefusal`). */
@@ -1059,7 +1059,7 @@ function limitPlan({ paths, expect, envelope, mutate, title, message, extra }) {
 }
 
 /**
- * Plan a scoped-limit add (`dispatch_limit_add`): the dollar and size fields judged by the worker's parsers, then the
+ * Plan a scoped-limit add (`dispatch_limit_add`): the token and size fields judged by the worker's parsers, then the
  * whole change judged without writing (the parser, the project pair and the allocation envelope, issue #504 part C), so
  * the operator is never asked to approve a row the write would refuse. `expect` is the files as the change is built
  * from them (PR #569's second review). The write is `writeScopedLimits(plan.writeArgs)`. `{ plan }` or `{ refusal }`.
@@ -1068,7 +1068,7 @@ export function planLimitAdd({ params, paths, env, fs = nodeFs }) {
   const expect = writeInputs({ paths: [paths.scopedLimitsPath, paths.projectsFile], fs });
   let l;
   const fields = refusalOf(() => {
-    l = buildScopedLimit({ ...params, ...dollarFieldsOf(params), ...sizeFieldsOf(params) });
+    l = buildScopedLimit({ ...params, ...tokenFieldsOf(params), ...sizeFieldsOf(params) });
   });
   if (fields !== null) return { refusal: fields };
   const envelope = envelopeGuard(paths, env, fs);
@@ -1080,7 +1080,7 @@ export function planLimitAdd({ params, paths, env, fs = nodeFs }) {
 
 /**
  * Plan a scoped-limit edit (`dispatch_limit_edit`): a provided field replaces, an omitted one keeps the current value
- * (the dollar windows and the size fields are CARRIED, never dropped), rebuilt through the shared builder and judged
+ * (the token windows and the size fields are CARRIED, never dropped), rebuilt through the shared builder and judged
  * like an add. `sizingNoteFn(scope)`, when given, adds the project's size evidence to the confirm when a size field
  * changes (index.ts's `sizingNote`). `surface` names the row (`rowName`). `{ plan }` or `{ refusal }`.
  */
@@ -1090,11 +1090,11 @@ export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface
   const at = limitAt(paths, index, fs);
   if (at.refusal) return { refusal: at.refusal };
   const cur = at.cur;
-  let usd;
+  let tok;
   let size;
   const fields = refusalOf(() => {
-    // Issue #501, part 7: a dollar field is judged BEFORE the confirm; issue #596: the size fields the same way.
-    usd = dollarFieldsOf(params);
+    // Issue #501, part 7: a token field is judged BEFORE the confirm; issue #596: the size fields the same way.
+    tok = tokenFieldsOf(params);
     size = sizeFieldsOf(params);
   });
   if (fields !== null) return { refusal: fields };
@@ -1105,11 +1105,11 @@ export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface
     week: params.week ?? cur.week,
     month: params.month ?? cur.month,
     concurrent: params.concurrent ?? cur.concurrent,
-    // The dollar windows (version 2): a sent one replaces, an omitted one is CARRIED, never dropped, so an edit of
-    // a count field cannot silently remove a dollar cap.
-    dayTokens: usd.dayTokens ?? cur.dayTokens,
-    weekTokens: usd.weekTokens ?? cur.weekTokens,
-    monthTokens: usd.monthTokens ?? cur.monthTokens,
+    // The token windows (version 2): a sent one replaces, an omitted one is CARRIED, never dropped, so an edit of
+    // a count field cannot silently remove a token cap.
+    dayTokens: tok.dayTokens ?? cur.dayTokens,
+    weekTokens: tok.weekTokens ?? cur.weekTokens,
+    monthTokens: tok.monthTokens ?? cur.monthTokens,
     // The size fields (version 3) the same way: a sent one replaces, an omitted one is carried.
     ...sizeFieldsFrom((k) => size[k] ?? cur[k]),
   });

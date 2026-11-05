@@ -703,7 +703,7 @@ test("USAGE and KNOWN_SUBCOMMANDS agree, member for member, in order", () => {
  * JSON cannot launder an estimate into a fact by dropping the label. Driven fully offline: a temp logs dir
  * holding one canned ledgered record, and a canned subscriptions file via PI_SUBSCRIPTIONS_FILE.
  */
-test("dispatch_costs.execute returns the typed fold as JSON, class on every dollar, flow-filterable", async () => {
+test("dispatch_costs.execute returns the typed fold as JSON, class on every amount, flow-filterable", async () => {
   const prevLogsDir = process.env.PI_LOGS_DIR;
   const prevSubs = process.env.PI_SUBSCRIPTIONS_FILE;
   const dir = tempDir("admin-coststool-");
@@ -720,12 +720,12 @@ test("dispatch_costs.execute returns the typed fold as JSON, class on every doll
       endedAt,
       provider: "anthropic",
       model: "claude-sonnet-4",
-      tokens: { input: 1000, output: 500, total: 1500, cost: 0.5, metered: true, calls: 2, unpriced: 0, unresolved: 0 },
+      tokens: { input: 1000, output: 500, total: 1500, metered: true, rootTotal: 1500, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 2, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 },
       usage: {
         v: 1,
         piAi: "1.2.3",
         truncated: 0,
-        models: [{ provider: "anthropic", model: "claude-sonnet-4", calls: 2, input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, total: 1500, cost: 0.5 }],
+        models: [{ provider: "anthropic", model: "claude-sonnet-4", calls: 2, input: 1000, output: 500, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 1500 }],
       },
     }),
   );
@@ -750,9 +750,9 @@ test("dispatch_costs.execute returns the typed fold as JSON, class on every doll
     assert.equal(parsed.window, "7d");
     assert.equal(parsed.fold.provenance.runsTotal, 1);
     assert.equal(parsed.fold.provenance.total.class, "metered", "the window total carries its class");
-    assert.equal(parsed.fold.provenance.total.usd, 0.5);
-    assert.equal(parsed.fold.byFlow[0].cost.class, "metered", "per-flow money is typed too");
-    assert.equal(parsed.fold.byModel[0].cost.class, "metered", "per-model money is typed too");
+    assert.equal(parsed.fold.provenance.total.tokens, 1500);
+    assert.equal(parsed.fold.byFlow[0].amount.class, "metered", "per-flow tokens are typed too");
+    assert.equal(parsed.fold.byModel[0].amount.class, "metered", "per-model tokens are typed too");
     assert.equal(parsed.fold.plans[0].id, "kimi", "the declared subscription was read and scored");
 
     const filtered = await costs.execute("call-2", { window: "7d", flow: "other" });
@@ -880,12 +880,11 @@ test("junk insights arguments answer usage with zero side effects; the removed v
 
 test("argument completion offers the known settings keys for `set`/`unset`", async () => {
   const { def } = await loadRegistered();
-  // "da" prefixes dailyCap, dailyTokenCap and (issue #501) dailyCostUsd, in KNOWN_KEYS order.
+  // "da" prefixes dailyCap and dailyTokenCap, in KNOWN_KEYS order (the retired dailyCostUsd is no longer a key).
   const set = await def.getArgumentCompletions("set da");
   assert.deepEqual(set, [
     { value: "set dailyCap", label: "dailyCap" },
     { value: "set dailyTokenCap", label: "dailyTokenCap" },
-    { value: "set dailyCostUsd", label: "dailyCostUsd" },
   ]);
   const unset = await def.getArgumentCompletions("unset con");
   assert.deepEqual(unset, [{ value: "unset concurrency", label: "concurrency" }]);
@@ -947,25 +946,21 @@ test("set dailyCap 5 coerces the numeric string, persists it, and acks via notif
   assert.equal(calls.sendMessage.length, 0);
 });
 
-test("set maxCostUsd keeps the typed dollar text, refuses a widened spelling, and a dollar window is written as typed (#501)", async () => {
+test("a retired dollar key is refused by name and writes nothing (#501)", async () => {
   const { def } = await loadRegistered();
   const file = withSettingsFile();
   const ok = fakeCtx();
   await def.handler("set maxCostUsd 2.50", ok.ctx);
-  assert.equal(ok.notes[0][1], "info");
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxCostUsd: "2.50" }, "as typed, never Number()'d");
-  for (const [line, why] of [["set maxCostUsd 1e3", /maxCostUsd must be a dollar amount/], ["set maxCostUsd 0x10", /maxCostUsd must be a dollar amount/], ["set dailyCostUsd 1.1234567", /dailyCostUsd must be a dollar amount/]]) {
+  assert.equal(ok.notes[0][1], "error", "the key was retired with the dollar windows");
+  assert.match(ok.notes[0][0], /set: unknown key 'maxCostUsd'/, "named as unknown, with the valid keys listed");
+  assert.equal(existsSync(file), false, "a refused write touches no file");
+  for (const line of ["set dailyCostUsd 25.00", "unset maxCostUsd"]) {
     const ctx = fakeCtx();
     await def.handler(line, ctx.ctx);
     assert.equal(ctx.notes[0][1], "error", line);
-    assert.match(ctx.notes[0][0], why, line);
+    assert.match(ctx.notes[0][0], /unknown key/, line);
   }
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxCostUsd: "2.50" }, "the refused writes left the file alone");
-  // The windows are enforced (issue #501, part 3), so a valid one is written like any other dollar key, as typed.
-  const win = fakeCtx();
-  await def.handler("set dailyCostUsd 25.00", win.ctx);
-  assert.equal(win.notes[0][1], "info");
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { maxCostUsd: "2.50", dailyCostUsd: "25.00" });
+  assert.equal(existsSync(file), false, "the refused writes left no file");
 });
 
 test("unset removes a key, leaving a valid empty overlay", async () => {
@@ -1645,32 +1640,32 @@ test("index.ts resolves paths and the worker name only through deploymentEnv (#4
   assert.match(src, /executeToolAction\(definition.name, params, ctx, \{ paths, env, grantsEnv, granted, deploymentDir: pointerState\(\)\.deploymentDir/);
 });
 
-test("console set dailyCostUsd / unset maxCostUsd with no cap anywhere WRITE and WARN, never refuse (#501, PR #542)", async () => {
+test("console set dailyTokenCap / unset maxTokens with no per-job cap anywhere WRITE and WARN, never refuse (#501, PR #542)", async () => {
   // No deployment pointer in this file: the env seen is this session's, not the worker's.
-  const saved = process.env.PI_MAX_COST_USD;
-  delete process.env.PI_MAX_COST_USD;
+  const saved = process.env.PI_MAX_TOKENS;
+  delete process.env.PI_MAX_TOKENS;
   try {
     const { def } = await loadRegistered();
     const file = withSettingsFile();
     const set = fakeCtx();
-    await def.handler("set dailyCostUsd 10", set.ctx);
-    const setNote = set.notes.find(([m]) => /^set dailyCostUsd = 10/.test(m));
+    await def.handler("set dailyTokenCap 10000", set.ctx);
+    const setNote = set.notes.find(([m]) => /^set dailyTokenCap = 10000/.test(m));
     assert.ok(setNote, JSON.stringify(set.notes));
     assert.equal(setNote[1], "warning");
-    assert.match(setNote[0], /warning: dailyCostUsd needs maxCostUsd.*this session's environment \(not the worker's\).*not visible here/);
-    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyCostUsd: "10" }, "written");
-    await def.handler("set maxCostUsd 2", fakeCtx().ctx);
+    assert.match(setNote[0], /warning: dailyTokenCap needs maxTokens.*this session's environment \(not the worker's\).*not visible here/);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyTokenCap: 10000 }, "written as the number the overlay stores");
+    await def.handler("set maxTokens 2000", fakeCtx().ctx);
     const unset = fakeCtx();
-    await def.handler("unset maxCostUsd", unset.ctx);
-    const unsetNote = unset.notes.find(([m]) => /^unset maxCostUsd/.test(m));
+    await def.handler("unset maxTokens", unset.ctx);
+    const unsetNote = unset.notes.find(([m]) => /^unset maxTokens/.test(m));
     assert.equal(unsetNote[1], "warning");
-    assert.match(unsetNote[0], /warning: dailyCostUsd needs maxCostUsd/);
-    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyCostUsd: "10" }, "unset written");
-    // A dollar write that keeps the invariant says nothing extra.
+    assert.match(unsetNote[0], /warning: dailyTokenCap needs maxTokens/);
+    assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyTokenCap: 10000 }, "unset written");
+    // A token write that keeps the invariant says nothing extra.
     const ok = fakeCtx();
-    await def.handler("set maxCostUsd 3", ok.ctx);
-    assert.deepEqual(ok.notes.find(([m]) => /^set maxCostUsd/.test(m)), ["set maxCostUsd = 3", "info"]);
+    await def.handler("set maxTokens 3000", ok.ctx);
+    assert.deepEqual(ok.notes.find(([m]) => /^set maxTokens/.test(m)), ["set maxTokens = 3000", "info"]);
   } finally {
-    if (saved !== undefined) process.env.PI_MAX_COST_USD = saved;
+    if (saved !== undefined) process.env.PI_MAX_TOKENS = saved;
   }
 });

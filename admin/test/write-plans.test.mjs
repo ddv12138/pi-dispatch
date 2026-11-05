@@ -174,8 +174,9 @@ test("the trigger add judges, in order, the tool-proof fields, the kind, then an
     const env = process.env;
     const say = (params) => plans.planTriggerAdd({ params, paths, env }).refusal ?? null;
     const label = { kind: "label", flow: "fix", labels: ["bug"] };
-    // The widening sweep stays first: a near miss of a cap is refused as the widening it is.
-    assert.match(say({ ...label, run: { maxCostUsd: "9" }, colour: "red" }), /^dispatch_trigger_add cannot set run\.maxCostUsd/);
+    // The widening sweep stays first: a near miss of a cap is refused as the widening it is (the retired dollar
+    // spelling reads as the token cap it replaced).
+    assert.match(say({ ...label, run: { maxCostUsd: "9" }, colour: "red" }), /^dispatch_trigger_add cannot set run\.maxTokens \(sent as run\.maxCostUsd\)/);
     // The kind before its fields (the fields depend on it).
     // The kinds it takes are named; the kind it was sent never is (issue #737: a caller's bytes stay out of the sentence).
     const kinds = "unknown trigger kind: kind must be one of cron, label, comment, pull_request, issue";
@@ -376,7 +377,7 @@ test("the settings plans: the tool surface says what dispatch_set says, the comm
   const { paths, restore } = deployment();
   try {
     const env = process.env;
-    for (const params of [{ key: "dailyCap", value: "7" }, { key: "nope", value: "1" }, { key: "dailyCostUsd", value: "1e3" }, { key: "dailyCap" }, { key: "model", value: " " }]) {
+    for (const params of [{ key: "dailyCap", value: "7" }, { key: "nope", value: "1" }, { key: "dailyTokenCap", value: "1e3" }, { key: "dailyCap" }, { key: "model", value: " " }]) {
       assert.deepEqual(planSays(plans.planSettingChange({ key: params.key, value: params.value, paths, env })), await toolSays(t.dispatch_set, params), JSON.stringify(params));
     }
     assert.equal(plans.planSettingSet({ key: "nope", value: "1", paths, env }).refusal, "unknown key 'nope'. valid keys: " + plans.planSettingSet({ key: "nope", value: "1", paths, env }).refusal.split("valid keys: ")[1]);
@@ -390,9 +391,9 @@ test("the settings plans: the tool surface says what dispatch_set says, the comm
     assert.equal(set.unset, false);
     const unset = plans.planSettingUnset({ key: "model", paths, env }).plan;
     assert.deepEqual(unset.mutate({ model: "m", dailyCap: 7 }), { dailyCap: 7 });
-    const dollar = plans.planSettingSet({ key: "dailyCostUsd", valueTokens: ["2.50"], paths, env, shown: { deploymentDir: "/d" }, surface: "command" }).plan;
-    assert.deepEqual(dollar.mutate({}), { dailyCostUsd: "2.50" }, "a dollar key keeps the typed text");
-    assert.deepEqual(dollar.writeArgs, { budgetEnv: env, deploymentDir: "/d" }, "and its write warns over the merged values");
+    const token = plans.planSettingSet({ key: "dailyTokenCap", valueTokens: ["500000"], paths, env, shown: { deploymentDir: "/d" }, surface: "command" }).plan;
+    assert.deepEqual(token.mutate({}), { dailyTokenCap: 500000 }, "a token key is carried as the NUMBER the overlay stores");
+    assert.deepEqual(token.writeArgs, { budgetEnv: env, deploymentDir: "/d" }, "and its write warns over the merged values");
     // An invalid file is refused on the tool surface BEFORE the confirm.
     writeFileSync(paths.settingsFile, "{ not json");
     assert.deepEqual(planSays(plans.planSettingChange({ key: "dailyCap", value: "3", paths, env })), await toolSays(t.dispatch_set, { key: "dailyCap", value: "3" }));
@@ -566,10 +567,10 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
     const projectsFile = join(dir, "projects.json");
     writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
     const envelopeFile = join(dir, "envelope.json");
-    const envelope = { version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
+    const envelope = { version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
     writeFileSync(envelopeFile, JSON.stringify(envelope));
     const settingsFile = join(dir, "settings.json");
-    writeFileSync(settingsFile, JSON.stringify({ maxCostUsd: "2" }));
+    writeFileSync(settingsFile, JSON.stringify({ maxTokens: 2000 }));
     const alloc = { ...paths, projectsFile, envelopeFile, settingsFile, scopedLimitsPath: join(dir, "none.json") };
     const badProjects = join(dir, "bad-projects.json");
     writeFileSync(badProjects, "{ not json");
@@ -598,8 +599,8 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["command unknown key (unset)", plans.planSettingUnset({ key: "nope", paths, env, surface: "command" }).refusal, `unset: unknown key 'nope'. valid keys: ${keys}`],
       ["one value", plans.planSettingSet({ key: "model", valueTokens: ["a", "b"], paths, env, surface: "command" }).refusal, "set: model takes exactly one value"],
       ["a value is needed", plans.planSettingSet({ key: "model", value: " ", paths, env }).refusal, "a value is needed to set a key; unset it instead"],
-      ["tool envelope break", plans.planSettingChange({ key: "maxCostUsd", paths: alloc, env: {} }).refusal, { prefix: "rejected: this change would leave the allocation envelope invalid" }],
-      ["command envelope break", plans.planSettingUnset({ key: "maxCostUsd", paths: alloc, env: {}, surface: "command" }).refusal, { prefix: "unset: this change would leave the allocation envelope invalid" }],
+      ["tool envelope break", plans.planSettingChange({ key: "maxTokens", paths: alloc, env: {} }).refusal, { prefix: "rejected: this change would leave the allocation envelope invalid" }],
+      ["command envelope break", plans.planSettingUnset({ key: "maxTokens", paths: alloc, env: {}, surface: "command" }).refusal, { prefix: "unset: this change would leave the allocation envelope invalid" }],
       ["pause window index", plans.planPauseWindowEdit({ index: 4, fields: {}, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["pause window delete index", plans.planPauseWindowDelete({ index: 4, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["scoped limit index", plans.planLimitEdit({ params: { index: 2, day: 1 }, paths, env }).refusal, "no scoped limit at index 2 (have 1)"],
@@ -609,9 +610,9 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["no such project", plans.projectAt(alloc, "nope").refusal, "no project with id \"nope\" (dispatch_projects lists them)"],
       ["no such project, thrown", thrown(() => plans.currentProject(alloc, "nope")), "no project with id \"nope\" (dispatch_projects lists them)"],
       ["project add refused", plans.planProjectAdd({ params: { id: "BAD", members: ["github:acme/web"] }, paths, env }).refusal, { prefix: "rejected: " }],
-      ["nothing to change", plans.planEnvelope({ params: {}, paths, env }).refusal, "nothing to change: name at least one of window, totalUsd, floorsUsd, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays"],
-      ["envelope refused", plans.planEnvelope({ params: { totalUsd: "x" }, paths: alloc, env: {} }).refusal, { prefix: "rejected: " }],
-      ["envelope unchanged", plans.planEnvelope({ params: { totalUsd: "100" }, paths: alloc, env: {} }).unchanged, "no change: the envelope already says this"],
+      ["nothing to change", plans.planEnvelope({ params: {}, paths, env }).refusal, "nothing to change: name at least one of window, totalTokens, floorsTokens, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays"],
+      ["envelope refused", plans.planEnvelope({ params: { totalTokens: "x" }, paths: alloc, env: {} }).refusal, { prefix: "rejected: " }],
+      ["envelope unchanged", plans.planEnvelope({ params: { totalTokens: 100 }, paths: alloc, env: {} }).unchanged, "no change: the envelope already says this"],
       ["no such profile", plans.planSecretProfileRemove({ name: "gone", profiles: {}, settingsFile: "/s" }).refusal, "no such profile. No resolver profiles are declared in the settings overlay."],
       ["no such profile, with some", plans.planSecretProfileRemove({ name: "gone", profiles: { dev: "/d" }, settingsFile: "/s" }).refusal, "no such profile. Resolver profiles (settings overlay):\n  dev: /d"],
       ["profile name", plans.planSecretProfileAdd({ name: "pro d", path: "/x", profiles: {}, settingsFile: "/s" }).refusal, "a profile name may use letters, digits, dot, dash and underscore only \u2014 PI_SECRET_PROFILES is a comma-separated list of name:path pairs"],
@@ -629,7 +630,7 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["run.recover on a venue that does not recover", plans.planTriggerAdd({ params: { kind: "label", flow: "fix", labels: ["go"], recover: true }, paths, env: { PI_BACKENDS: "openshell" } }).refusal, { prefix: "run.recover cannot be armed on a trigger whose jobs run in the openshell venue" }],
       ["no backends", plans.backendRefusal("local", { PI_BACKENDS: "vapour" }), "this deployment blesses no backends, so run.backend cannot be set (see PI_BACKENDS)"],
       ["backend not blessed", plans.backendRefusal("podman", { PI_BACKENDS: "local" }), "backend 'podman' is not blessed by this deployment (PI_BACKENDS: local)"],
-      ["tool-proof dollar cap", plans.wideningFieldRefusal({ maxCostUsd: "1" }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.maxCostUsd (sent as maxCostUsd): a trigger's per-job dollar cap is set by hand in the triggers file, never by a tool"],
+      ["tool-proof token cap", plans.wideningFieldRefusal({ maxCostUsd: "1" }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.maxTokens (sent as maxCostUsd): a trigger's per-job token cap is set by hand in the triggers file, never by a tool"],
       ["tool-proof model list", plans.wideningFieldRefusal({ run: { models: ["a/b"] } }, "dispatch_trigger_edit"), "dispatch_trigger_edit cannot set run.models (sent as run.models): a trigger's allowed-model list is set by hand in the triggers file, never by a tool"],
       ["tool-proof mcp", plans.wideningFieldRefusal({ mcp: [] }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.mcp (sent as mcp): a trigger's list of MCP servers is set by hand in the triggers file, never by a tool"],
       ["memory size", thrown(() => plans.sizeFieldsOf({ memory: "12q" })), { prefix: "memory: " }],
@@ -800,9 +801,9 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
     const env = process.env;
     const dir = paths.triggersPath.replace(/\/triggers\.json$/, "");
     paths.envelopeFile = join(dir, "envelope.json");
-    writeFileSync(paths.settingsFile, JSON.stringify({ maxTurns: 30, maxCostUsd: "2" }));
+    writeFileSync(paths.settingsFile, JSON.stringify({ maxTurns: 30, maxTokens: 2000 }));
     writeFileSync(paths.projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "spare", members: ["github:acme/spare"] }] }));
-    writeFileSync(paths.envelopeFile, JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+    writeFileSync(paths.envelopeFile, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
     const profiles = { dev: "/opt/d.sh" };
     const bundles = { "op-shop": { path: "/opt/b.mjs", format: "json" } };
     const both = (fn) => ["tool", "console"].map((surface) => fn(surface));
@@ -810,7 +811,7 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
       planTriggerAdd: () => [plans.planTriggerAdd({ params: { kind: "label", flow: "fix", labels: ["bug"], backend: "local" }, paths, env })],
       planTriggerEdit: () => both((surface) => plans.planTriggerEdit({ params: { index: 0, flow: "review", backend: "local", model: "m1", progress: true }, paths, env, surface })),
       planTriggerDelete: () => both((surface) => plans.planTriggerDelete({ index: 0, paths, surface })),
-      planSettingSet: () => [plans.planSettingSet({ key: "maxTurns", value: "40", paths, env }), plans.planSettingSet({ key: "dailyCostUsd", value: "5", paths, env: {} }), plans.planSettingSet({ key: "maxTurns", valueTokens: ["40"], paths, env, surface: "command" })],
+      planSettingSet: () => [plans.planSettingSet({ key: "maxTurns", value: "40", paths, env }), plans.planSettingSet({ key: "dailyTokenCap", value: "500000", paths, env: {} }), plans.planSettingSet({ key: "maxTurns", valueTokens: ["40"], paths, env, surface: "command" })],
       planSettingUnset: () => [plans.planSettingUnset({ key: "maxTurns", paths, env }), plans.planSettingUnset({ key: "maxTurns", paths, env, surface: "command" })],
       planSettingChange: () => [plans.planSettingChange({ key: "maxTurns", value: "40", paths, env })],
       planPauseWindowAdd: () => [plans.planPauseWindowAdd({ fields: { scope: "*", from: "01:00", to: "02:00" }, paths })],
@@ -822,7 +823,7 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
       planProjectAdd: () => [plans.planProjectAdd({ params: { id: "web", members: ["github:acme/api"] }, paths, env })],
       planProjectEdit: () => [plans.planProjectEdit({ params: { id: "shop", name: "Shop" }, paths, env })],
       planProjectDelete: () => [plans.planProjectDelete({ id: "spare", paths, env })],
-      planEnvelope: () => [plans.planEnvelope({ params: { minIntervalHours: 0, totalUsd: "120" }, paths, env })],
+      planEnvelope: () => [plans.planEnvelope({ params: { minIntervalHours: 0, totalTokens: 120 }, paths, env })],
       // A priorities plan has no confirm: the worker applies it with no keypress (REQ-DELEGATED-ALLOCATION).
       planPriorities: () => [plans.planPriorities({ projects: [{ id: "shop", weight: 2 }], validDays: 1, now: new Date(Date.UTC(2026, 9, 15)) })],
       planSecretProfileAdd: () => [plans.planSecretProfileAdd({ name: "dev", path: "/opt/d2.sh", profiles, settingsFile: "/s" }), plans.planSecretProfileAdd({ name: "prod", path: "/opt/p.sh", profiles, settingsFile: "/s" })],
