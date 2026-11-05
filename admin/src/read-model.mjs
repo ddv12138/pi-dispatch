@@ -2966,7 +2966,7 @@ export async function readTriggersWithStalls({ triggersPath, url, fs = nodeFs, r
  * A trigger's bounded history, using the same raw-index/type guard as attribution and the same cost classifier as
  * Spend. Prompt maps deliberately stay outside this object. Missing queue/record reads remain unknown.
  */
-export function triggerDetailOf(snapshot, index, { now = snapshot?.readAt, subscriptions = [], pricing } = {}) {
+export function triggerDetailOf(snapshot, index, { now = snapshot?.readAt } = {}) {
   const trigger = snapshot?.triggers?.triggers?.find((t) => t.index === index);
   if (!trigger) return null;
   const value = trigger.type === "cron" ? trigger.id : String(index);
@@ -2981,7 +2981,6 @@ export function triggerDetailOf(snapshot, index, { now = snapshot?.readAt, subsc
   const backend = trigger.backend ?? snapshot.defaultBackend ?? null;
   return {
     trigger, index, runs24h, count24h: runs24h.length,
-    cost24h: measured.reduce((sum, n) => sum + (n ?? 0), 0) / 1_000_000,
     cost24hTokens: measured.reduce((sum, n) => sum + (n ?? 0), 0),
     costIncomplete: measured.some((n) => n === null),
     historyIncomplete: Boolean(snapshot.parkedUnreachable || snapshot.failures24hFloor),

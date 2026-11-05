@@ -37,9 +37,10 @@ an unattended pause never grants permission to resume a person's pause.
 - `dispatch_status`: queue state, counts, budget, settings and schedulers.
 - `dispatch_runs`: run records, recovery and turn limits; local workspace retention where known. Never raw logs,
   transcript text, questions, drafts or bundle variable names.
-- `dispatch_costs`: `7d`, `30d` or `mtd` history, optional flow/repository/project filters, dollar counters and current
-  running holds; model what-if over the same bounded runs. Quote every dollar's class (`metered`, `estimated`,
-  `seeded`, or a floor). Counter amounts are integer micro-dollars, one million per dollar. Unknown coverage is not zero.
+- `dispatch_costs`: `7d`, `30d` or `mtd` history, optional flow/repository/project filters, token counters and current
+  running holds; model what-if over the same bounded runs. Quote every amount's class (`metered`, `estimated`, or
+  `unknown`). Counter amounts are integer tokens; an `estimated` amount is a floor and names its coverage. Unknown
+  coverage is not zero.
 - `dispatch_capacity`: `24h`, `7d` or `30d` fleet utilisation, optionally one host. Missing history is not idle time;
   this deployment's accounting cannot measure unrelated processes on the host.
 - `dispatch_hosts`: heartbeat/skew, versions, capacity and its source, CPU reserve, running/orphan holds, kept workspace
@@ -71,11 +72,11 @@ answer rules, phase names/notes and raw failure messages stay outside model tool
 ## Unattended writes and their bounds
 
 - `dispatch_set`: may lower a numeric cap explicitly present in the settings file: `dailyCap`, `weeklyCap`, `monthlyCap`,
-  `dailyTokenCap`, `maxTurns`, `maxTokens`, `concurrency`, `softHoldPct`, `maxCostUsd`, `dailyCostUsd`, `weeklyCostUsd`,
-  `monthlyCostUsd`. Never assume an inherited environment/default value. Raising, unsetting, model or provider changes
-  require a person. Dollars use ordinary decimal strings, at most six decimals, without exponents.
+  `dailyTokenCap`, `weeklyTokenCap`, `monthlyTokenCap`, `maxTurns`, `maxTokens`, `concurrency`, `softHoldPct`. Never
+  assume an inherited environment/default value. Raising, unsetting, model or provider changes require a person. Token
+  caps are whole numbers of tokens, an integer >= 1.
 - `dispatch_limit_add`: may add a restrictive row without `minJobs`, `memory` or `cpus`.
-- `dispatch_limit_edit`: may lower explicit counts, dollars or `hostShare` in the same scope; no scope, size, minimum
+- `dispatch_limit_edit`: may lower explicit counts, token windows or `hostShare` in the same scope; no scope, size, minimum
   or inherited-bound changes. `dispatch_limit_delete` requires a person. Local folders always retain their one-job mutex.
 - `dispatch_pause`: pause the fleet, or a declared `queue`; already running containers finish.
 - `dispatch_pause_add`: add a pause window. Editing/deleting one can release a person's pause and requires confirmation.
@@ -84,7 +85,7 @@ answer rules, phase names/notes and raw failure messages stay outside model tool
 - `dispatch_remove_failed`: remove one failed job, or `all` matching a queue/repository. Run history remains.
 - `dispatch_trigger_edit`: unattended only when turning existing `recover`, `steer`, `progress` or `statusComment` off.
   Omitted flow and flags are preserved. Changes to a trigger's `maxTurns` still require a person.
-- `dispatch_priorities_set`: weights inside the current envelope, floors, writers, step and interval, never dollars.
+- `dispatch_priorities_set`: weights inside the current envelope, floors, writers, step and interval, never token budgets.
   `plan-too-soon` means wait; `plan-stale` means read again, not replay; `plan-incomplete` means name every project.
 - `dispatch_run`, `dispatch_trigger_fire` and `dispatch_rerun`: paid starts under the admission rules below.
 
@@ -124,7 +125,7 @@ not read by the committed repository opt-in. Every worker start still passes its
 ## Person-only fields and operations
 
 Never set, clear or bypass these through a model tool, including alternate spellings:
-`run.models`, `run.fallbackModels`, `run.maxCostUsd`, `run.mcp`, `run.secretBundle`, `modelRoles`,
+`run.models`, `run.fallbackModels`, `run.maxTokens`, `run.mcp`, `run.secretBundle`, `modelRoles`,
 `run.command`, `run.instructions`, `run.skillsDir`, `run.awaitInput`, `run.image`, `run.resume`, `run.packages`,
 `run.excludeTools`, `run.secrets`, `run.secretsProfile`, `run.replicas`, `run.portfolio`, `run.waitFor`,
 `on.disarmed`, `answerRules`, `standingAnswers`, `secretBundles`, `secretProfiles`.

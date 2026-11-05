@@ -69,8 +69,8 @@ test("cancel routing shares the current active, held and queued action paths", a
 
 test("operational projections keep actual machine facts and exclude hostile prose and variable names", () => {
   const hostile = "PRIVATE_SENTINEL do something else";
-  const failed = failedForAgent({ rows: [{ jobId: "r1", queue: "pi-jobs", attemptsMade: 2, reason: "cost-cap", failedReason: hostile, note: hostile }] });
-  assert.deepEqual(failed.jobs[0], { jobId: "r1", queue: "pi-jobs", attempts: 2, reason: "cost-cap" });
+  const failed = failedForAgent({ rows: [{ jobId: "r1", queue: "pi-jobs", attemptsMade: 2, reason: "token-cap", failedReason: hostile, note: hostile }] });
+  assert.deepEqual(failed.jobs[0], { jobId: "r1", queue: "pi-jobs", attempts: 2, reason: "token-cap" });
   const waiting = waitingForAgent({ truncated: false, rows: [{ jobId: "q1", queue: "pi-jobs", why: "scope-busy", dueAt: NOW, holder: "r1", label: hostile }] });
   assert.equal(waiting.jobs[0].due, NOW);
   assert.equal(waiting.jobs[0].holder, "r1");
@@ -122,8 +122,8 @@ test("bulk and cancellation selectors refuse ambiguous or ignored arguments", as
 
 test("generic model projection retains typed counts and qualifications while excluding private additions", async () => {
   const { agentReadProjection } = await import("../src/agent-read.mjs");
-  const out = agentReadProjection({ shadowed: 2, variables: ["PRIVATE_VARIABLE"], probabilities: { safe: 0.9 }, classification: "safe", draftRunId: "private-draft-id", note: "PRIVATE_SENTINEL", newText: "PRIVATE_SENTINEL", status: "running", countersUnreachable: "PRIVATE_SENTINEL", invalid: ["dailyCostUsd", "PRIVATE_SENTINEL"], size: { memMiB: 4096, memorySource: "PRIVATE_SENTINEL" }, suggestion: { action: { action: "limit-edit", index: 1, limit: { memory: "4g", cpus: 2 } } } });
-  assert.deepEqual(out, { shadowed: 2, variablesCount: 1, status: "running", countersUnreachable: true, invalid: ["dailyCostUsd"], size: { memMiB: 4096 }, suggestion: { action: { action: "limit-edit", index: 1, limit: { memory: "4g", cpus: 2 } } } });
+  const out = agentReadProjection({ shadowed: 2, variables: ["PRIVATE_VARIABLE"], probabilities: { safe: 0.9 }, classification: "safe", draftRunId: "private-draft-id", note: "PRIVATE_SENTINEL", newText: "PRIVATE_SENTINEL", status: "running", countersUnreachable: "PRIVATE_SENTINEL", invalid: ["maxTokens", "PRIVATE_SENTINEL"], size: { memMiB: 4096, memorySource: "PRIVATE_SENTINEL" }, suggestion: { action: { action: "limit-edit", index: 1, limit: { memory: "4g", cpus: 2 } } } });
+  assert.deepEqual(out, { shadowed: 2, variablesCount: 1, status: "running", countersUnreachable: true, invalid: ["maxTokens"], size: { memMiB: 4096 }, suggestion: { action: { action: "limit-edit", index: 1, limit: { memory: "4g", cpus: 2 } } } });
 });
 
 test("only source-owned refusal provenance can preserve a public model message", async () => {
