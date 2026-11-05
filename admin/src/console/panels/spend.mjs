@@ -706,12 +706,8 @@ function envelopeForm(p) {
   return {
     ...source,
     ...source.delegation,
-    totalTokens: source.totalTokens ?? source.totalTokens / 1e6,
-    floorsTokens:
-      source.floorsTokens ??
-      Object.fromEntries(
-        Object.entries(source.floors ?? {}).map(([id, n]) => [id, n / 1e6]),
-      ),
+    totalTokens: source.totalTokens ?? null,
+    floorsTokens: source.floorsTokens ?? {},
   };
 }
 function allocation(v) {
@@ -1081,7 +1077,7 @@ export function splitEnvelope(v) {
     html`${ui.facts(
       [
         [t(v, "Window"), t(v, e.window)],
-        [t(v, "Total"), `$${e.totalTokens ?? t(v, "unknown")}`],
+        [t(v, "Total"), `${e.totalTokens ?? t(v, "unknown")} tokens`],
         [[t(v, "Delegation"), e.enabled ? t(v, "On") : t(v, "Off")]],
         [t(v, "Writers"), (e.writers ?? []).join(", ")],
         [t(v, "Step"), `${e.maxStepPct}%`],
@@ -1128,11 +1124,11 @@ export function splitEnvelope(v) {
                 )}
               </select></label
             ><label
-               >${t(v, "Total USD")}<input
+               >${t(v, "Total tokens")}<input
                 type="number"
                 name="totalTokens"
                 min="0"
-                step="0.000001"
+                step="1"
                 required
                 value="${e.totalTokens}" /></label
             >${Object.entries(e.floorsTokens ?? {}).map(

@@ -73,7 +73,7 @@
 <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="arrowhead" d="M0 0 10 5 0 10z"/></marker>
 </defs></svg>
 <div class="page">
-<header class="top top--ro"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked</a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models, Audit" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a><a href="/audit"><svg class="ic" aria-hidden="true"><use href="#i-audit"></use></svg>Audit</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="chip tone-attention"><svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg>Read-only console</span><span class="who" data-name="ops" data-role="operator" title="ops, Operator"><span><b>ops</b><small>Operator</small></span><span class="avatar">op</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button></div></header>
+<header class="top top--ro"><a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a><nav class="pillnav" aria-label="Console screens"><a href="/"><svg class="ic" aria-hidden="true"><use href="#i-home"></use></svg>Overview</a><a href="/runs"><svg class="ic" aria-hidden="true"><use href="#i-runs"></use></svg>Runs</a><a href="/parked"><svg class="ic" aria-hidden="true"><use href="#i-parked"></use></svg>Parked</a><a href="/fleet"><svg class="ic" aria-hidden="true"><use href="#i-fleet"></use></svg>Fleet</a><a href="/insights"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Spend</a><a href="/triggers" aria-current="page"><svg class="ic" aria-hidden="true"><use href="#i-bolt"></use></svg>Triggers</a><a href="/config"><svg class="ic" aria-hidden="true"><use href="#i-config"></use></svg>Configuration</a><details class="more"><summary aria-label="More: Models, Audit" title="More"><svg class="ic" aria-hidden="true"><use href="#i-more"></use></svg></summary><div><a href="/models"><svg class="ic" aria-hidden="true"><use href="#i-spend"></use></svg>Models</a><a href="/audit"><svg class="ic" aria-hidden="true"><use href="#i-audit"></use></svg>Audit</a></div></details></nav><div class="top__end"><a class="roundbtn hide-phone top__search" href="/runs#q" aria-label="Search runs" title="Search runs"><svg class="ic" aria-hidden="true"><use href="#i-search"></use></svg></a><button class="roundbtn" type="button" data-theme-toggle hidden aria-label="Theme: follows the system" title="Theme: follows the system"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button><span class="chip tone-attention"><svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg>Read-only console</span><span class="who" data-name="ops" data-role="operator" title="ops, Operator"><span><b>ops</b><small>Operator</small></span><span class="avatar">op</span></span><button id="logout" class="roundbtn" type="button" aria-label="Sign out" title="Sign out"><svg class="ic" aria-hidden="true"><use href="#i-logout"></use></svg></button><button class="roundbtn" type="button" data-locale-toggle hidden aria-label="Switch language" title="Chinese / English">中</button></div></header>
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead"><h1>Triggers</h1><p class="titlebar__sub">What starts a job, in plain words. Rules in the triggers file.</p></div><div class="titlebar__end"><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/triggers"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
 <div class="banner banner--sm tone-attention" role="status"><span class="tile"><svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg></span><div><p class="banner__t">This console is read-only</p><p class="banner__s">It was started with <span class="code">PI_CONSOLE_READ_ONLY=1</span>, so every change is refused and no page shows a form. Operators still see reasons, transcripts and the audit log.</p></div></div><div class="stack"><section id="p-tr-tabs" data-panel><nav class="tabs tr-tabs" aria-label="Triggers views">
@@ -90,13 +90,11 @@ aria-current="page"
 <span class="count">proposed</span></span
 >
 </nav></section><section id="p-tr-viewer" data-panel><p class="collapsed tr-viewer">
-<svg class="ic ic--sm" aria-hidden="true"><use href="#i-shield"></use></svg>Changes are off. The event checker
-only reads and remains available.
+<svg class="ic ic--sm" aria-hidden="true"><use href="#i-shield"></use></svg>Changes are off. The event checker only reads and remains available.
 </p></section></div><div class="cards-3 triggers-kpis"><section id="p-tr-count" data-panel><div class="card"><div class="card__head"><h2>Set up</h2></div><p class="kpi"><b>4</b><span>rules</span></p>
 <p class="tr-kp">
 1 on a schedule,
-3 from
-forges; 0 spent one-shots.
+3 from forges; 0 spent one-shots.
 </p>
 <p class="tr-problem">
 <svg class="ic ic--sm" aria-hidden="true"><use href="#i-attention"></use></svg>History uses saved row, type and forge, or a cron id. Editing or renumbering rules can associate runs from an older configuration; these are not stable rule identities.
@@ -106,7 +104,7 @@ forges; 0 spent one-shots.
 <p class="tr-kp">
 <time datetime="2026-10-08T16:39:08.000Z">2026-10-08 16:39 UTC</time> ·
 <a href="/config/trigger?index=0">row 1</a>
-</p></div></section><section id="p-tr-spend" data-panel><div class="card"><div class="card__head"><h2>Recorded this UTC week</h2></div><p class="kpi"><b>$0.01</b><span>attributed to these rules</span></p>
+</p></div></section><section id="p-tr-spend" data-panel><div class="card"><div class="card__head"><h2>Recorded this UTC week</h2></div><p class="kpi"><b>-</b><span>attributed to these rules</span></p>
 <p class="tr-kp">
 at least 1 run record since
 <time datetime="2026-10-05T00:00:00.000Z">2026-10-05 00:00 UTC</time>.
@@ -415,9 +413,7 @@ forge jobs only.
 </p>
 </div>
 <p class="tr-sub">
-Next 7 days, UTC. Schedule times use their owning host's verified timezone and
-are plotted as UTC instants. Forge repository quiet windows do not hold
-cron; matching local-folder and global windows can hold it.
+Next 7 days, UTC. Schedule times use their owning host&#39;s verified timezone and are plotted as UTC instants. Forge repository quiet windows do not hold cron; matching local-folder and global windows can hold it.
 </p>
 <p class="tr-problem">
 1 · nightly:
@@ -518,7 +514,7 @@ deployment default model
 
 <p class="tr-sub">
 at least 1 runs in 30 days ·
-$0.01 (retained or partially metered history) this UTC week
+- (retained or partially metered history) this UTC week
 </p>
 
 </div>
@@ -642,8 +638,7 @@ aria-label="Open row 4"
 </details>
 </li>
 </ol></div></section><section id="p-tr-forgejo" data-panel></section><section id="p-tr-azure" data-panel></section><section id="p-tr-unknown" data-panel></section></div><div class="stack triggers-check-side"><section id="p-tr-check" data-panel><div class="card"><div class="card__head"><h2>Which rule would run?</h2><span class="card__sub">Hypothetical matching, not delivery authentication</span></div><p class="tr-p">
-Describe an event and see which rule matches, and why the others do not.
-Nothing is sent to a forge or spent.
+Describe an event and see which rule matches, and why the others do not. Nothing is sent to a forge or spent.
 </p>
 <p class="tr-check-phone-link">
 <a class="btn btn--primary" href="/triggers/check"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-search"></use></svg>Check an event</a>
@@ -838,8 +833,7 @@ spellcheck="false"
 </div>
 </div>
 <p class="tr-sub">
-Authority is a hypothetical assumption. Comment text stays in this
-request; it is never placed in the address bar or audit log.
+Authority is a hypothetical assumption. Comment text stays in this request; it is never placed in the address bar or audit log.
 </p>
 <button class="btn btn--primary" type="submit">
 <svg class="ic ic--sm" aria-hidden="true"><use href="#i-search"></use></svg>Check an event
@@ -847,8 +841,7 @@ request; it is never placed in the address bar or audit log.
 </fieldset>
 <noscript
 ><p class="tr-problem">
-Enable JavaScript to check an event. Rules, filters and navigation
-remain available; no event text can be submitted into the address bar.
+Enable JavaScript to check an event. Rules, filters and navigation remain available; no event text can be submitted into the address bar.
 </p></noscript
 >
 <div
@@ -859,8 +852,7 @@ aria-live="polite"
 tabindex="-1"
 >
 <p class="tr-sub">
-Describe an event to see hypothetical matching. Nothing will be sent to
-a forge, queued or spent.
+Describe an event to see hypothetical matching. Nothing will be sent to a forge, queued or spent.
 </p>
 </div>
 </form></div></div></section></div></div>

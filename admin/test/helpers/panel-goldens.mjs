@@ -106,7 +106,7 @@ const SNAPSHOT = Object.freeze({
   schedulerStallMax: 3,
   doctor: { hosts: [], more: 0 },
   parked: [],
-  settings: { overlay: { maxTurns: 30, maxCostUsd: "2" } },
+  settings: { overlay: { maxTurns: 30, maxTokens: 2000000 } },
   triggers: { triggers: [{ type: "label", any: ["pi"], forge: "github", repository: "acme/web", flow: "triage" }] },
   pauseWindows: { windows: [{ scope: "*", from: "01:00", to: "02:00" }] },
   scopedLimits: { limits: [{ scope: "acme/web", day: 10 }] },
@@ -118,7 +118,7 @@ const SNAPSHOT = Object.freeze({
 });
 
 /** The settings file the snapshot's overlay was read from, which the setting actions plan against. */
-const SETTINGS = Object.freeze({ maxTurns: 30, maxCostUsd: "2" });
+const SETTINGS = Object.freeze({ maxTurns: 30, maxTokens: 2000000 });
 
 /**
  * The failed jobs as the bulk planner lists them (`planFailedBulk`), and each one's queued data as `readJobsData` reads
@@ -197,7 +197,7 @@ function actionWorld({ fleet: fleetOver = {}, rm: rmOver = {}, updates = null } 
     sessions: { setFlash: () => true },
     writePauseWindows: RM.writePauseWindows,
     hub: null,
-    actionDeps: { ...(updates ? { updates } : {}), rm, plans: WP, paths, fleet, env: { PI_MAX_COST_USD: "2" }, readJobsData: async ({ jobs }) => new Map(jobs.filter((j) => JOB_DATA.has(j.jobId)).map((j) => [j.jobId, JOB_DATA.get(j.jobId)])), urlShown: (u) => u, host: "mini1" },
+    actionDeps: { ...(updates ? { updates } : {}), rm, plans: WP, paths, fleet, env: { PI_MAX_TOKENS: "2000000" }, readJobsData: async ({ jobs }) => new Map(jobs.filter((j) => JOB_DATA.has(j.jobId)).map((j) => [j.jobId, JOB_DATA.get(j.jobId)])), urlShown: (u) => u, host: "mini1" },
   };
   const ctxOf = (name, step, body) => ({
     deps,
@@ -409,7 +409,7 @@ async function auditPage(deps) {
 const record = (over) => ({
   jobId: "gh-0000", kind: "github", target: "acme/web#1", project: "web", host: "mini1", backend: "podman", flow: "fix", provider: "anthropic", model: "claude-sonnet-5-5",
   outcome: "completed", reason: null, startedAt: new Date(NOW - 40 * MIN).toISOString(), endedAt: new Date(NOW - 20 * MIN).toISOString(),
-  tokens: { input: 900, output: 300, total: 1200, cost: 0.11 }, dollars: { reservedMicros: 2_000_000 }, parentJobId: null, ...over,
+  tokens: { input: 900, output: 300, total: 1200, metered: true }, tokensWindows: { reservedTokens: 2_000_000, settledTokens: 1_200, basis: "metered", modelBasis: null }, parentJobId: null, ...over,
 });
 
 /** The runs a runs state shows: a completed one, a refusal with its reason, a failure with none, one cancelled. */
@@ -851,7 +851,7 @@ const DRAW = {
   ...SANDBOX_DRAW,
   ...UPDATES_DRAW,
   "updates-confirm-canary.operator": async () => {
-    const plan = { index: 2, schedulerId: "nightly", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: {} }, reserve: { slots: 1, dollarsMicros: 2_000_000, capMicros: 2_000_000, zeroRated: false }, title: "Fire cron trigger now", summary: [] };
+    const plan = { index: 2, schedulerId: "nightly", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: {} }, reserve: { slots: 1, tokens: 2_000_000, zeroRated: false }, title: "Fire cron trigger now", summary: [] };
     const answer = await actionWorld({ updates: { read: async () => updatesFacts({}), setDesired: async () => 1 }, rm: { planTriggerFire: async () => ({ plan }) } }).preview("package-canary", { index: 2, name: "pi-lint", version: "1.4.3" });
     return openSlotAfter(await UPDATES_DRAW["updates-newer-available.operator"](), "p-up-jobs", { inner: answerHtml(answer, 200, "package-canary") });
   },
@@ -968,7 +968,7 @@ const DRAW = {
   "confirm-done-rerun.operator": async () => {
     const world = actionWorld({
       rm: {
-        planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:nightly:1760000000000", queue: "pi-jobs", schedule: {}, job: { flow: "nightly" }, runFields: null, reserve: { slots: 1, dollarsMicros: 2_000_000, capMicros: 2_000_000, zeroRated: false } } }),
+        planRerun: async () => ({ plan: { kind: "cron", jobId: "cron:nightly:1760000000000", queue: "pi-jobs", schedule: {}, job: { flow: "nightly" }, runFields: null, reserve: { slots: 1, tokens: 2_000_000, zeroRated: false } } }),
         enqueueRerun: async () => ({ ok: true, jobId: "cron:nightly:1760010000000", queue: "pi-jobs" }),
       },
     });

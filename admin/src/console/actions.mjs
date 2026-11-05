@@ -292,15 +292,15 @@ export function reserveText(r) {
   if (!r) return null;
   if (r.bulk) {
     const known = r.slots - r.unknown;
-    const reserve = r.tokensWindowsTokens > 0 ? ` and ${r.tokensWindowsTokens.toLocaleString("en-US")}${r.unknown > 0 ? ` for the ${plural(known, "job whose reserve is", "jobs whose reserve is")} known` : ""} tokens in each token window that applies` : "";
+    const reserve = r.reserveTokens > 0 ? ` and ${r.reserveTokens.toLocaleString("en-US")} tokens${r.unknown > 0 ? ` for the ${plural(known, "job whose reserve is", "jobs whose reserve is")} known` : ""} in each token window that applies` : "";
     // A list of one is "It holds", as a single act's sentence reads; "Together they" is for two or more.
-    return `${r.slots === 1 ? "It holds" : "Together they hold"} ${plural(r.slots, "job slot")}${dollars}${r.unknown > 0 ? `; the reserve of ${plural(r.unknown, "job")} is unknown (${r.unknown === 1 ? "its" : "their"} data could not be read), so the total is at least this` : ""}.`;
+    return `${r.slots === 1 ? "It holds" : "Together they hold"} ${plural(r.slots, "job slot")}${reserve}${r.unknown > 0 ? `; the reserve of ${plural(r.unknown, "job")} is unknown (${r.unknown === 1 ? "its" : "their"} data could not be read), so the total is at least this` : ""}.`;
   }
   if (r.unknown) return "Reserve unknown: the job's data could not be read, so what the worker will hold for it cannot be said.";
-  if (r.invalid) return `The deployment's dollar setting does not parse (${r.invalid}), so the worker refuses every job until it is fixed.`;
-  if (r.zeroRated) return "It holds 1 job slot and $0.00: every model it may call is zero-rated.";
-  if (!Number.isSafeInteger(r.tokensWindowsTokens)) return "It holds 1 job slot. No per-job token budget is set, so no token window can hold anything for it.";
-  return `It holds 1 job slot and ${r.tokensWindowsTokens.toLocaleString("en-US")} tokens (the per-job budget) in each token window that applies, until it settles.`;
+  if (r.invalid) return `The deployment's token setting does not parse (${r.invalid}), so the worker refuses every job until it is fixed.`;
+  if (r.zeroRated) return "It holds 1 job slot and 0 tokens: every model it may call is zero-rated.";
+  if (!Number.isSafeInteger(r.tokens)) return "It holds 1 job slot. No per-job token budget is set, so no token window can hold anything for it.";
+  return `It holds 1 job slot and ${r.tokens.toLocaleString("en-US")} tokens (the per-job budget) in each token window that applies, until it settles.`;
 }
 
 /**
@@ -365,37 +365,37 @@ export async function readSetupExposure(ctx) {
     const cronReserves = cron.map(row => ctx.a.rm.estimateReserve(row.run, reserveInputs(ctx)));
     if (cronReserves.some(r => !r || r.unknown || r.invalid)) return { complete: false, at };
     const queued = [...reserves.values()];
-    const finiteSum = list => list.every(r => Number.isSafeInteger(r.tokensWindowsTokens)) ? list.reduce((sum, r) => sum + r.tokensWindowsTokens, 0) : null;
-    const dollars = finiteSum(queued), cronDollars = finiteSum(cronReserves);
-    if (dollars !== null && !Number.isSafeInteger(dollars) || cronDollars !== null && !Number.isSafeInteger(cronDollars)) return { complete: false, at };
+    const finiteSum = list => list.every(r => Number.isSafeInteger(r.tokens)) ? list.reduce((sum, r) => sum + r.tokens, 0) : null;
+    const queuedTokens = finiteSum(queued), cronTokens = finiteSum(cronReserves);
+    if (queuedTokens !== null && !Number.isSafeInteger(queuedTokens) || cronTokens !== null && !Number.isSafeInteger(cronTokens)) return { complete: false, at };
     const jobIds = jobs.map(row => row.jobId).sort();
     const cronIds = cron.map(row => row.on.id).sort();
     const lines = [`Observed ${new Date(at).toISOString()}: ${jobs.length} queued/scheduled jobs and ${cron.length} cron triggers; starting permits ongoing consumption and future arrivals.`,
-      `Queued reserves: ${dollars === null ? "one slot per job; no single dollar bound" : `$${fmtTokens(dollars)} across current jobs in each applicable dollar window`}.`,
-      `Cron reserves per future occurrence: ${cronDollars === null ? "one slot each; no single dollar bound" : `$${fmtTokens(cronDollars)} across the configured cron triggers in each applicable window`}. No setup reservation is taken.`];
+      `Queued reserves: ${queuedTokens === null ? "one slot per job; no single token bound" : `${fmtTokens(queuedTokens)} tokens across current jobs in each applicable token window`}.`,
+      `Cron reserves per future occurrence: ${cronTokens === null ? "one slot each; no single token bound" : `${fmtTokens(cronTokens)} tokens across the configured cron triggers in each applicable window`}. No setup reservation is taken.`];
     if (jobIds.length) lines.push(`Current job IDs: ${jobIds.join(", ")}.`);
     if (cronIds.length) lines.push(`Cron triggers: ${cronIds.join(", ")}.`);
     return { complete: true, at, queued: jobs.length, cron: cron.length, lines, identity: sha256(JSON.stringify({ jobIds, cronIds, queued, cronReserves })) };
   } catch { return { complete: false, at }; }
 }
 
-/** A bulk list's reserves summed: slots, the known dollars, and how many are unknown. */
+/** A bulk list's reserves summed: slots, the known tokens, and how many are unknown. */
 function bulkReserve(reserves) {
   let reserveTokens = 0;
   let unknown = 0;
   for (const r of reserves) {
     if (!r || r.unknown || r.invalid) unknown += 1;
-    else if (Number.isSafeInteger(r.tokensWindowsTokens)) reserveTokens += r.tokensWindowsTokens;
+    else if (Number.isSafeInteger(r.tokens)) reserveTokens += r.tokens;
   }
   return { bulk: true, slots: reserves.length, reserveTokens, unknown };
 }
 
 /** One job's reserve as a summary line's tail. */
-const reserveTail = (r) => (!r || r.unknown || r.invalid ? ", reserve unknown" : r.zeroRated ? ", reserve 0 tokens (zero-rated)" : Number.isSafeInteger(r.tokensWindowsTokens) ? `, reserve ${r.tokensWindowsTokens.toLocaleString("en-US")} tokens` : ", reserve 1 slot (no token budget)");
+const reserveTail = (r) => (!r || r.unknown || r.invalid ? ", reserve unknown" : r.zeroRated ? ", reserve 0 tokens (zero-rated)" : Number.isSafeInteger(r.tokens) ? `, reserve ${r.tokens.toLocaleString("en-US")} tokens` : ", reserve 1 slot (no token budget)");
 
-/** The reserve's micro-dollars for the audit row, or null. */
-function reserveMicros(r) {
-  return Number.isSafeInteger(r?.tokensWindowsTokens) && r.tokensWindowsTokens >= 0 ? r.tokensWindowsTokens : null;
+/** The reserve's token count for the audit row, or null. */
+function reserveTokensOf(r) {
+  return Number.isSafeInteger(r?.tokens) && r.tokens >= 0 ? r.tokens : null;
 }
 
 // ---- shared steps ------------------------------------------------------------------------------------------------------
@@ -1017,7 +1017,7 @@ export function runFieldsLines(f, lead) {
     `model ${f.model !== null && f.model !== undefined ? fieldText(f.model) : "the deployment's default"}`,
     ...(f.models !== null && f.models !== undefined ? [`allowed models ${fieldText(f.models)}`] : []),
     ...(Array.isArray(f.fallbackModels) && f.fallbackModels.length > 0 ? [`fallbacks ${fieldText(f.fallbackModels)}`] : []),
-    `per-job cap ${f.maxTokens !== null && f.maxTokens !== undefined ? `$${fieldText(f.maxTokens)}` : "the deployment's"}`,
+    `per-job cap ${f.maxTokens !== null && f.maxTokens !== undefined ? `${fieldText(f.maxTokens)} tokens` : "the deployment's"}`,
     ...(f.secretsProfile !== null && f.secretsProfile !== undefined ? [`secret profile ${fieldText(f.secretsProfile)}`] : []),
     ...(f.image !== null && f.image !== undefined ? [`image ${fieldText(f.image)}`] : []),
     ...(f.backend !== null && f.backend !== undefined ? [`backend ${fieldText(f.backend)}`] : []),
@@ -1805,23 +1805,23 @@ const byHand = (what, field) => `Edit ${what} back by hand: ${field} had no valu
 function paidLabel(verb, r) {
   if (!r || r.unknown || r.invalid) return `${verb} (reserve unknown)`;
   if (r.zeroRated) return `${verb} (zero-rated)`;
-  if (!Number.isSafeInteger(r.tokensWindowsTokens)) return `${verb}, 1 job slot`;
-  return `${verb} for up to ${r.tokensWindowsTokens.toLocaleString("en-US")} tokens`;
+  if (!Number.isSafeInteger(r.tokens)) return `${verb}, 1 job slot`;
+  return `${verb} for up to ${r.tokens.toLocaleString("en-US")} tokens`;
 }
 
 /**
  * A paid bulk act's confirm words: the sum of the known reserves, "at least" when some are unknown (the total is then
- * a floor), "zero-rated" when every job is, and "no dollar reserve" when no job holds dollars (no per-job cap, or a cap
- * of $0): the slots alone would repeat the count ("Retry 3, 3 job slots"), and the reserve sentence says them.
+ * a floor), "zero-rated" when every job is, and "no token reserve" when no job holds a token budget (no per-job cap,
+ * or a cap of 0): the slots alone would repeat the count ("Retry 3, 3 job slots"), and the reserve sentence says them.
  */
 function bulkPaidLabel(verb, out) {
   const n = Array.isArray(out.targets) ? out.targets.length : 0;
   const r = out.reserve ?? {};
   const each = (out.targets ?? []).map((t) => t.reserve);
-  if (r.unknown > 0) return r.tokensWindowsTokens > 0 ? `${verb} ${n}, at least ${r.tokensWindowsTokens.toLocaleString("en-US")} tokens` : `${verb} ${n} (reserve unknown)`;
-  if (r.tokensWindowsTokens > 0) return `${verb} ${n} for up to ${r.tokensWindowsTokens.toLocaleString("en-US")} tokens`;
+  if (r.unknown > 0) return r.reserveTokens > 0 ? `${verb} ${n}, at least ${r.reserveTokens.toLocaleString("en-US")} tokens` : `${verb} ${n} (reserve unknown)`;
+  if (r.reserveTokens > 0) return `${verb} ${n} for up to ${r.reserveTokens.toLocaleString("en-US")} tokens`;
   if (each.length > 0 && each.every((x) => x?.zeroRated)) return `${verb} ${n} (zero-rated)`;
-  return `${verb} ${n}, no dollar reserve`;
+  return `${verb} ${n}, no token reserve`;
 }
 
 const say = (sentence) => () => sentence;
@@ -2647,7 +2647,7 @@ export async function confirmAction(ctx, action) {
   let result;
   try {
     result = await auditedWrite(
-      { audit, actor, kind: action.kind, target: entry.target, beforeDigest: entry.beforeDigest ?? null, afterDigest: entry.afterDigest ?? null, reserve: reserveMicros(entry.reserve), count: Number.isSafeInteger(entry.count) && entry.count >= 1 ? entry.count : null, ticket: tag, failure: r => { const why = failureOf(r); return session.role === "agent" && why ? "action-refused" : why; }, refusal: () => ({ [AUDIT]: true }), log },
+      { audit, actor, kind: action.kind, target: entry.target, beforeDigest: entry.beforeDigest ?? null, afterDigest: entry.afterDigest ?? null, reserve: reserveTokensOf(entry.reserve), count: Number.isSafeInteger(entry.count) && entry.count >= 1 ? entry.count : null, ticket: tag, failure: r => { const why = failureOf(r); return session.role === "agent" && why ? "action-refused" : why; }, refusal: () => ({ [AUDIT]: true }), log },
       () => action.apply(entry, actx),
     );
   } catch (e) {
@@ -2682,7 +2682,7 @@ async function confirmBulk(ctx, action, entry, { actor, tag, actx }) {
   const audit = capturingAudit(deps.audit);
   const targets = Array.isArray(entry.targets) ? entry.targets : [];
   const count = targets.length;
-  const reserveBy = new Map(targets.map((t) => [t.jobId, reserveMicros(t.reserve)]));
+  const reserveBy = new Map(targets.map((t) => [t.jobId, reserveTokensOf(t.reserve)]));
   const rowOf = (jobId) => ({ actor, action: "write", kind: action.kind, target: jobId, count, reserve: reserveBy.get(jobId) ?? null, ticket: tag });
   const compensate = (jobId, reason) => {
     try {

@@ -141,10 +141,10 @@ test("the confirm states: the slot open right after the wrapper of the card that
   // attempts, so the cancel of a queued job never takes it back: the ConfirmStates ledger names the design's "Cancel
   // the new run" as absent for a retry, and a re-run's banner offers it.
   const paid = pages["confirm-preview-paid.operator"];
-  assert.ok(paid.includes(">Retry for up to $2.00</button>") && paid.includes("It holds 1 job slot and $2.00 (the per-job cap)"), "the paid label and the reserve");
+  assert.ok(paid.includes(">Retry for up to 2,000,000 tokens</button>") && paid.includes("It holds 1 job slot and 2,000,000 tokens (the per-job budget)"), "the paid label and the reserve");
   assert.ok(paid.includes(`<span>No undo: ${UNDO_SENTENCES.retried}</span>`), "retry's Undo is the retried sentence, muted after No undo");
   assert.ok(pages["confirm-preview-danger.operator"].includes(">Pause the fleet</button>"), "the danger label");
-  assert.ok(pages["confirm-bulk-preview.operator"].includes(">Retry 3, at least $4.00</button>") && pages["confirm-bulk-preview.operator"].includes("2 more match and are <b>not in this action</b>"), "the bulk label, each reserve, how many more");
+  assert.ok(pages["confirm-bulk-preview.operator"].includes(">Retry 3, at least 4,000,000 tokens</button>") && pages["confirm-bulk-preview.operator"].includes("2 more match and are <b>not in this action</b>"), "the bulk label, each reserve, how many more");
   assert.ok(pages["confirm-bulk-results.operator"].includes(">3 audit rows, from row 44</a>") && pages["confirm-bulk-results.operator"].includes("data-reload>Reload</button>"), "the rows the confirm wrote, and Reload");
   assert.ok(pages["confirm-preview.operator"].includes('<span class="ticket">Preview expires in <b data-expires="300000">5:00</b></span>'), "the expiry");
   // The partial refusal says some of it may have been done, never that nothing was; the person refusal names the

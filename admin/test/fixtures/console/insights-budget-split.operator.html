@@ -473,7 +473,7 @@
                 </tr>
             </tbody>
           </table>
-        </div></div></div></section><section id="p-priorities" data-panel><div class="card"><div class="card__head"><h2>Set priorities</h2><span class="card__sub">a plan of weights, previewed first</span></div><div class="card__body "><form data-action="priorities-set" data-structured="priorities"><div class="pr-grid"><label class="pr-row"><span class="ptag">_other</span><span class="sr">Weight for _other</span><input class="input pr-in" type="number" name="weight:_other" min="0" max="1000" step="1" required value="0"><output class="pr-share" data-weight-share="_other" >about 0%</output></label><label class="pr-row"><span class="ptag">api</span><span class="sr">Weight for api</span><input class="input pr-in" type="number" name="weight:api" min="0" max="1000" step="1" required value="1"><output class="pr-share" data-weight-share="api" >about 9%</output></label><label class="pr-row"><span class="ptag">billing</span><span class="sr">Weight for billing</span><input class="input pr-in" type="number" name="weight:billing" min="0" max="1000" step="1" required value="5"><output class="pr-share" data-weight-share="billing" >about 45%</output></label><label class="pr-row"><span class="ptag">ops</span><span class="sr">Weight for ops</span><input class="input pr-in" type="number" name="weight:ops" min="0" max="1000" step="1" required value="1"><output class="pr-share" data-weight-share="ops" >about 9%</output></label><label class="pr-row"><span class="ptag">web</span><span class="sr">Weight for web</span><input class="input pr-in" type="number" name="weight:web" min="0" max="1000" step="1" required value="4"><output class="pr-share" data-weight-share="web" >about 36%</output></label></div><div class="formrow pr-foot"><label class="field" >Days this plan holds<input class="input pr-in" type="number" name="validDays" data-type="int" min="1" max="14" value="14" required><small class="field__hint">At most 14, the envelope&#39;s limit.</small></label><button class="btn btn--primary" type="submit">Preview the plan</button></div></form><p class="sp-note note">Writer operator-session. Weights are whole numbers from 0 to 1000. Floors come first, the rest is split by weight, and a change moves each share by at most the envelope&#39;s step.</p></div></div></section></div><div class="stack"><section id="p-envelope" data-panel><div class="card"><div class="card__head"><h2>Envelope</h2><span class="end"><a class="btn btn--sm" href="#envelope-form"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-config"></use></svg>Edit envelope</a></span></div><div class="card__body "><dl class="facts facts--1"><div class="fact"><dt>Window</dt><dd>week</dd></div><div class="fact"><dt>Total</dt><dd>$120000000</dd></div><div class="fact"><dt>DelegationOn</dt><dd>-</dd></div><div class="fact"><dt>Writers</dt><dd>operator-session, portfolio-job</dd></div><div class="fact"><dt>Step</dt><dd>25%</dd></div><div class="fact"><dt>Minimum interval</dt><dd>24 hours</dd></div><div class="fact"><dt>Longest plan</dt><dd>14 days</dd></div><div class="fact"><dt>Floors</dt><dd>_other: $0, api: $12, billing: $12, ops: $6, web: $12</dd></div><div class="fact"><dt>Default weights</dt><dd>_other: 1, api: 1, billing: 1, ops: 1, web: 1</dd></div><div class="fact"><dt>File</dt><dd>envelope.json</dd></div><div class="fact"><dt>Envelope digest, build3</dt><dd>not published</dd></div><div class="fact"><dt>Envelope digest, mini1</dt><dd>not published</dd></div><div class="fact"><dt>Envelope digest, mini2</dt><dd>not published</dd></div></dl><details>
+        </div></div></div></section><section id="p-priorities" data-panel><div class="card"><div class="card__head"><h2>Set priorities</h2><span class="card__sub">a plan of weights, previewed first</span></div><div class="card__body "><form data-action="priorities-set" data-structured="priorities"><div class="pr-grid"></div><div class="formrow pr-foot"><label class="field" >Days this plan holds<input class="input pr-in" type="number" name="validDays" data-type="int" min="1" max="14" value="14" required><small class="field__hint">At most 14, the envelope&#39;s limit.</small></label><button class="btn btn--primary" type="submit">Preview the plan</button></div></form><p class="sp-note note">Writer operator-session. Weights are whole numbers from 0 to 1000. Floors come first, the rest is split by weight, and a change moves each share by at most the envelope&#39;s step.</p></div></div></section></div><div class="stack"><section id="p-envelope" data-panel><div class="card"><div class="card__head"><h2>Envelope</h2><span class="end"><a class="btn btn--sm" href="#envelope-form"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-config"></use></svg>Edit envelope</a></span></div><div class="card__body "><dl class="facts facts--1"><div class="fact"><dt>Window</dt><dd>week</dd></div><div class="fact"><dt>Total</dt><dd>120000000 tokens</dd></div><div class="fact"><dt>DelegationOn</dt><dd>-</dd></div><div class="fact"><dt>Writers</dt><dd>operator-session, portfolio-job</dd></div><div class="fact"><dt>Step</dt><dd>25%</dd></div><div class="fact"><dt>Minimum interval</dt><dd>24 hours</dd></div><div class="fact"><dt>Longest plan</dt><dd>14 days</dd></div><div class="fact"><dt>Floors</dt><dd>-</dd></div><div class="fact"><dt>Default weights</dt><dd>_other: 1, api: 1, billing: 1, ops: 1, web: 1</dd></div><div class="fact"><dt>File</dt><dd>envelope.json</dd></div><div class="fact"><dt>Envelope digest, build3</dt><dd>not published</dd></div><div class="fact"><dt>Envelope digest, mini1</dt><dd>not published</dd></div><div class="fact"><dt>Envelope digest, mini2</dt><dd>not published</dd></div></dl><details>
           <summary>Edit envelope</summary>
           <form
             id="envelope-form" data-action="envelope-set"
@@ -500,99 +500,14 @@
                     </option>
               </select></label
             ><label
-               >Total USD<input
+               >Total tokens<input
                 type="number"
                 name="totalTokens"
                 min="0"
-                step="0.000001"
+                step="1"
                 required
                 value="120000000" /></label
             ><label
-                      >_other floor USD<input
-                      type="number"
-                      name="floor:_other"
-                      min="0"
-                      step="0.000001"
-                      value="0"
-                      required /></label
-                  ><label
-                    >_other default weight<input
-                      type="number"
-                      name="weight:_other"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value="1"
-                      required
-                  /></label><label
-                      >api floor USD<input
-                      type="number"
-                      name="floor:api"
-                      min="0"
-                      step="0.000001"
-                      value="12"
-                      required /></label
-                  ><label
-                    >api default weight<input
-                      type="number"
-                      name="weight:api"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value="1"
-                      required
-                  /></label><label
-                      >billing floor USD<input
-                      type="number"
-                      name="floor:billing"
-                      min="0"
-                      step="0.000001"
-                      value="12"
-                      required /></label
-                  ><label
-                    >billing default weight<input
-                      type="number"
-                      name="weight:billing"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value="1"
-                      required
-                  /></label><label
-                      >ops floor USD<input
-                      type="number"
-                      name="floor:ops"
-                      min="0"
-                      step="0.000001"
-                      value="6"
-                      required /></label
-                  ><label
-                    >ops default weight<input
-                      type="number"
-                      name="weight:ops"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value="1"
-                      required
-                  /></label><label
-                      >web floor USD<input
-                      type="number"
-                      name="floor:web"
-                      min="0"
-                      step="0.000001"
-                      value="12"
-                      required /></label
-                  ><label
-                    >web default weight<input
-                      type="number"
-                      name="weight:web"
-                      min="0"
-                      max="1000"
-                      step="1"
-                      value="1"
-                      required
-                  /></label><label
               ><input
                 type="checkbox"
                 name="enabled"
