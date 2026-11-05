@@ -267,19 +267,19 @@ test("Recent's stacked rows keep each run's target, outcome, instant and exact a
   assert.match(markup, /All 8 in Runs, filtered to billing/);
 });
 
-test("money stays readable at two decimals while each title retains the exact micro-dollar amount", () => {
+test("money stays readable at two decimals while each title retains the exact token amount", () => {
   const p = fixture();
-  p.spend.settledMicros = 6_123_456;
-  p.spend.heldMicros = 2_654_321;
-  p.spend.usedMicros = 8_777_777;
-  p.spend.shareMicros = 25_987_654;
+  p.spend.settledTokens = 6_123_456;
+  p.spend.heldTokens = 2_654_321;
+  p.spend.usedTokens = 8_777_777;
+  p.spend.shareTokens = 25_987_654;
   const markup = String(projectSpend(view(p)));
-  assert.match(markup, /<span title="\$6\.123456">\$6\.12<\/span>/);
-  assert.match(markup, /<span title="\$2\.654321">\$2\.65<\/span>/);
-  assert.match(markup, /<span title="\$25\.987654">\$25\.99<\/span>/);
+  assert.match(markup, /<span title="6,123,456">6\.12M<\/span>/);
+  assert.match(markup, /<span title="2,654,321">2\.65M<\/span>/);
+  assert.match(markup, /<span title="25,987,654">25\.98M<\/span>/);
   assert.ok(!markup.includes("&lt;span"), "formatted fragments are never stringified into visible markup");
-  p.allocation = { window: "week", floorMicros: 10_123_456, shareMicros: 25_987_654, totalMicros: 100_000_000, refused: 0 };
-  assert.match(String(projectAllocation(view(p))), /<span title="\$10\.123456">\$10\.12<\/span> a week/);
+  p.allocation = { window: "week", floorTokens: 10_123_456, shareTokens: 25_987_654, totalTokens: 100_000_000, refused: 0 };
+  assert.match(String(projectAllocation(view(p))), /<span title="10,123,456">10\.12M<\/span> a week/);
 });
 
 test("normalized null limit fields are omitted and actual settings read in human words", () => {
