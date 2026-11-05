@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { test } from "node:test";
 import { parseDocument } from "./helpers/script-dom.mjs";
 import * as fleet from "../src/console/panels/fleet.mjs";
 import * as host from "../src/console/panels/host.mjs";
-import * as venue from "../src/console/panels/venue.mjs";
-import { venuesView } from "../src/read-model.mjs";
 
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 const base = () => ({
@@ -141,7 +138,7 @@ test("orphans render separately from active jobs and Free the slot is a host lin
   const out = draw(fleet.fleetActive, view(s));
   assert.match(out, /row--attention/);
   assert.match(out, /still holds a build3 slot/);
-  assert.match(out, /href="\/fleet\/host\?name=build3#p-hostsandboxes"/);
+  assert.match(out, /href="\/fleet\/host\?name=build3#p-hostbudget"/);
   assert.doesNotMatch(out, /data-action="free/);
 });
 
@@ -167,7 +164,7 @@ test("held jobs sort longest first and report every condition with a bounded che
   assert.ok(out.indexOf("gh-long") < out.indexOf("gh-short"));
   assert.match(out, /14 of 96/);
   assert.match(out, /in 10s/);
-  assert.match(out, /fault/);
+  assert.match(out, /Fault/);
   assert.match(out, /class="fl-cond"/);
   assert.match(out, /<span class="chip tone-ok">.*?Met<\/span>/);
   assert.match(out, /ci-green/, "an operator reads the check's name");
@@ -235,32 +232,18 @@ test("failed queue text is escaped, collapsed and exclusive to operators", () =>
   );
 });
 
-test("orphan cleanup chooses the correct runtime and hashes the actual OpenShell container name", () => {
-  assert.deepEqual(host.orphanCommand({ id: "gh-1", v: "local" }), [
-    "docker",
-    "rm",
-    "-f",
-    "pi-job-gh-1",
-  ]);
-  assert.deepEqual(host.orphanCommand({ id: "gh-1", v: "podman" }), [
-    "podman",
-    "rm",
-    "-f",
-    "pi-job-gh-1",
-  ]);
-  const expected = `pi-job-s${createHash("sha256").update("pi-job-gh-1").digest("hex").slice(0, 11)}`;
-  for (const v of ["openshell", "openshell-bind"])
+test("orphan cleanup names the container the worker would and refuses nothing in the id's place", () => {
+  for (const v of ["local", "podman"])
     assert.deepEqual(host.orphanCommand({ id: "gh-1", v }), [
-      "openshell",
-      "sandbox",
-      "delete",
-      expected,
+      "docker",
+      "rm",
+      "-f",
+      "pi-job-gh-1",
     ]);
   assert.deepEqual(
     host.orphanCommand({ id: "container:pi-job-old", v: "local" }),
     ["docker", "rm", "-f", "pi-job-old"],
   );
-  assert.equal(host.orphanCommand({ id: "gh-1" }), null);
 });
 
 test("digested orphan ids get listing commands, never invented removable container names", () => {
@@ -268,66 +251,6 @@ test("digested orphan ids get listing commands, never invented removable contain
     assert.ok(
       host.orphanCommand({ id: "sha256:0123456789abcdef", v }).includes("ps"),
     );
-  assert.deepEqual(
-    host.orphanCommand({ id: "sha256:0123456789abcdef", v: "openshell" }),
-    [
-      "openshell",
-      "sandbox",
-      "list",
-      "--selector",
-      "pi.dispatch.owner=pi-dispatch",
-    ],
-  );
-});
-
-test("host retention shows pin, deadline, expired pin form and venue shell refusal", () => {
-  const s = base();
-  const h = {
-    ...row(),
-    sandboxes: [
-      { id: "gh-old", v: "podman", until: NOW - 1000, pin: false },
-      { id: "gh-new", v: "openshell", until: NOW + 1000, pin: true },
-    ],
-    sandboxesMore: 2,
-  };
-  s.hostBudgets = [h];
-  const out = draw(host.hostSandboxes, view(s));
-  assert.match(out, /--pin/);
-  assert.match(out, /Pinned/);
-  assert.match(out, /no sandbox shell/);
-  assert.match(out, /2 more retained/);
-  assert.match(out, /prompt.md and event.json/);
-  const viewer = draw(host.hostSandboxes, view(s, "viewer"));
-  assert.doesNotMatch(viewer, /class="cmd/);
-  h.sandboxRetentionHours = 0;
-  assert.match(draw(host.hostSandboxes, view(s)), /Workspace retention is off/);
-});
-
-test("host orphan commands are operator-only, and Podman commands name the worker account", () => {
-  const s = base();
-  s.hostBudgets = [
-    {
-      ...row(),
-      jobs: [
-        {
-          id: "gh-orphan",
-          v: "podman",
-          o: true,
-          m: 8192,
-          c: 400,
-          s: NOW - 1000,
-        },
-      ],
-    },
-  ];
-  const out = draw(host.hostSandboxes, view(s));
-  assert.match(out, /8192 MiB and 4 cores/);
-  assert.match(out, /worker's account/);
-  assert.match(
-    out,
-    /podman<\/span><span>rm<\/span><span>-f<\/span><span>pi-job-gh-orphan/,
-  );
-  assert.doesNotMatch(draw(host.hostSandboxes, view(s, "viewer")), /podman rm/);
 });
 
 test("host budget splits running/orphan/free promises and words the published origin and CPU reserve", () => {
@@ -423,28 +346,6 @@ test("host capacity draws seven-day hourly bars with peak ticks and explicit mis
   );
 });
 
-test("each venue shows all properties, a highlighted comparison, serving and gateway explanations", () => {
-  const s = base();
-  s.hostBudgets = [row()];
-  const m = venuesView(s.hostBudgets);
-  for (const x of m.venues) {
-    const v = view(s, "viewer", { query: { name: x.name } });
-    const properties = draw(venue.venueProperties, v);
-    for (const p of x.properties)
-      assert.ok(properties.includes(p.property), `${x.name}: ${p.property}`);
-    assert.match(
-      draw(venue.venueCompare, v),
-      new RegExp(`${x.name} \\(this venue\\)`),
-    );
-    assert.match(draw(venue.venueServes, v), /what the venue can do/);
-    assert.doesNotMatch(draw(venue.venueSummary, v), /data-action=/);
-    assert.match(
-      draw(venue.venueHosts, v),
-      x.name.startsWith("openshell") ? /not published/ : /runs no gateway/,
-    );
-  }
-});
-
 test("renderers escape peer-published text and never emit inline style/script or event handlers", () => {
   const s = base();
   s.hostBudgets = [
@@ -458,10 +359,8 @@ test("renderers escape peer-published text and never emit inline style/script or
       host.hostState,
       host.hostBudget,
       host.hostRow,
-      host.hostSandboxes,
       host.hostDoctor,
     ],
-    ...Object.values(venue),
   ]) {
     const out = draw(fn, view(s));
     assert.doesNotMatch(
@@ -475,17 +374,12 @@ test("renderers escape peer-published text and never emit inline style/script or
 
 test("orphan commands preserve seeded sandbox names and sanitize scheduled container ids", () => {
   assert.deepEqual(
-    host.orphanCommand({ id: "container:pi-job-s123456789ab", v: "openshell" }),
-    ["openshell", "sandbox", "delete", "pi-job-s123456789ab"],
+    host.orphanCommand({ id: "container:pi-job-s123456789ab", v: "local" }),
+    ["docker", "rm", "-f", "pi-job-s123456789ab"],
   );
   assert.deepEqual(
-    host.orphanCommand({ id: "repeat:nightly:123", v: "podman" }),
-    ["podman", "rm", "-f", "pi-job-repeat_nightly_123"],
-  );
-  const expected = `pi-job-s${createHash("sha256").update("pi-job-repeat_nightly_123").digest("hex").slice(0, 11)}`;
-  assert.deepEqual(
-    host.orphanCommand({ id: "repeat:nightly:123", v: "openshell-bind" }),
-    ["openshell", "sandbox", "delete", expected],
+    host.orphanCommand({ id: "repeat:nightly:123", v: "local" }),
+    ["docker", "rm", "-f", "pi-job-repeat_nightly_123"],
   );
 });
 
@@ -501,10 +395,6 @@ test("unpublished budgets, sandbox lists and truncated slots never become zero o
   );
   const s = base();
   s.hostBudgets = [{ ...row(), sandboxes: null, jobsMore: 2 }];
-  assert.match(
-    draw(host.hostSandboxes, view(s)),
-    /unreadable or was not published/,
-  );
   assert.match(draw(host.hostBudget, view(s)), /Free slots are not known/);
   assert.match(draw(fleet.fleetHosts, view(s)), /Free slots not known/);
 });
@@ -586,35 +476,21 @@ test("an absent progress projection draws stripes and held answer words follow t
     },
   ];
   const out = draw(fleet.fleetHeld, view(s, "viewer"));
-  assert.match(out, /not yet/);
-  assert.match(out, /refused/);
+  assert.match(out, /Not yet/);
+  assert.match(out, /Refused/);
   assert.match(out, /4 of 12/);
   assert.match(out, /3 in a row ends the wait/);
   assert.match(out, /1 hours or 12 checks/);
   assert.match(out, /after time \+ ci-green/);
 });
 
-test("Fleet's comparison stays short while the venue page carries the complete declaration table", () => {
-  const out = draw(fleet.fleetVenues, view());
-  assert.match(out, /<th scope="col">Egress<\/th>/);
-  assert.match(out, /<th scope="col">Local folders<\/th>/);
-  assert.match(out, /Credentials/);
-  assert.doesNotMatch(out, /agent not root|stoppable on timeout/);
-  const detail = draw(
-    venue.venueProperties,
-    view(base(), "viewer", { query: { name: "local" } }),
-  );
-  assert.match(detail, /agent not root/);
-});
-
 test("host Doctor keeps every published state in a readable card with a single command", () => {
   const s = base();
-  s.doctor = { hosts: [{ name: "build3", version: "4.3.1", ageMs: 72 * 3600000, every: 24, openshell: true, by: { worker: false, uid: 1002 }, workerRun: { at: NOW - 1000, uid: 1001 }, counts: { fail: 1, warn: 1, ok: 1 }, checks: [{ id: "docker.39", level: "fail", label: "Image missing", fix: "Pull the image" }, { id: "provider.key", level: "warn", label: "Provider warning", fix: "Check the key" }, { id: "env.1", level: "ok" }], more: 12 }] };
+  s.doctor = { hosts: [{ name: "build3", version: "4.3.1", ageMs: 72 * 3600000, every: 24, by: { worker: false, uid: 1002 }, workerRun: { at: NOW - 1000, uid: 1001 }, counts: { fail: 1, warn: 1, ok: 1 }, checks: [{ id: "docker.39", level: "fail", label: "Image missing", fix: "Pull the image" }, { id: "provider.key", level: "warn", label: "Provider warning", fix: "Check the key" }, { id: "env.1", level: "ok" }], more: 12 }] };
   const out = draw(host.hostDoctor, view(s));
   assert.equal((out.match(/<h2>Doctor<\/h2>/g) ?? []).length, 1);
   assert.equal((out.match(/data-copy/g) ?? []).length, 1);
   assert.match(out, /version 4.3.1/);
-  assert.match(out, /openshell venue was judged/);
   assert.match(out, /Stale:/);
   assert.match(out, /uid 1001/);
   assert.match(out, /docker: failing/);

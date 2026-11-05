@@ -372,18 +372,6 @@ The image cannot continue a lost run from a checkpoint, so its runner would igno
 The image cannot receive messages while it runs, so its runner would ignore `run.steer`. See
 [steering.md](steering.md).
 
-### job-image-sandbox-layout-unsupported
-
-The job runs on a venue that copies its files into a sandbox, and the image does not support that layout. Its runner
-would not find the files.
-
-### job-image-observable-runner-unsupported
-
-The job runs on a venue whose sandbox must observe the runner before it lets it reach the network, and the image does
-not support that. The job could reach neither its model nor anything else. See [backends.md](backends.md).
-
-## The venue and the host
-
 ### backend-unblessed
 
 The trigger asks for a venue (`run.backend`) that this deployment does not allow in `PI_BACKENDS`.
@@ -400,14 +388,6 @@ process limits, or it adds mounts of its own. The comment names which. Nothing w
 What to do: run `pi-dispatch doctor` on the worker to see which observation failed, then fix the runtime, or lower the
 floor. See [backends.md](backends.md).
 
-### venue-local-folders-unsupported
-
-The job runs against a folder on this machine, and its venue copies a job's files into a sandbox instead of editing the
-folder in place. Copying back afterwards would race every edit you make meanwhile, so it is refused.
-
-What to do: run folder jobs on a venue that mounts folders (`local` or `podman`), with the trigger's `run.backend`. See
-[backends.md](backends.md).
-
 ### job-user-unmappable
 
 The host's container runtime cannot give the job a user that is not root and can still read and write its own files,
@@ -416,24 +396,6 @@ namespace remapping, a worker running as root, and a worker whose primary group 
 cause the first, among others.
 
 What to do: run `pi-dispatch doctor` on the worker: it names the cause. See [backends.md](backends.md).
-
-### podman-conf-widens-job
-
-The host's Podman configuration lets a job's container reach more than the venue allows: the host's own services, the
-worker account's groups, or looser limits than the worker sets. It can be rootful Podman's configuration behind the
-`local` venue, the `podman` venue's files, or its running rootless network. A configuration the worker could not read
-in full is refused the same way.
-
-What to do: run `pi-dispatch doctor` on the worker. It names the file and key to change, or the network to restart. See
-[podman.md](podman.md).
-
-### podman-service-restart-hold-expired
-
-Rootful Podman's service kept running with a configuration older than its files for an hour. The job was held that
-long and never ran. Nothing was spent.
-
-What to do: restart the service while no local job runs (`sudo systemctl restart podman.service`), then run the job
-again. See [podman.md](podman.md).
 
 ### netns-keeper-not-holding
 
@@ -532,121 +494,6 @@ is read, so remove a `version` you added yourself. See [backup.md](backup.md).
 The `openshell` and `openshell-bind` venues refuse a job before anything is spent when the gateway or the host cannot
 give the guarantees they are built on. Each comment says what to change. See [backends.md](backends.md).
 
-### openshell-gateway-not-local
-
-The OpenShell gateway is not observed on this host. The venue keeps the job's credentials in the gateway, so it only
-runs on a gateway the deployment runs itself.
-
-What to do: run the gateway on this host, or run the job on another venue.
-
-### openshell-global-policy
-
-The gateway has a gateway wide policy in force, which would replace the policy the worker writes for the job.
-
-What to do: remove that policy, or run the job on another venue.
-
-### openshell-landlock-missing
-
-The host's kernel does not offer Landlock, which the venue needs to confine the sandbox and keep its inputs read only.
-
-What to do: run OpenShell jobs on a host with Landlock, or run the job on another venue.
-
-### openshell-recover-unsupported
-
-The trigger sets `run.recover`, and the OpenShell venue cannot checkpoint a run yet.
-
-What to do: run the job on another venue, or drop `run.recover`.
-
-### openshell-credential-reads-value
-
-The job's model provider needs its key's real value inside the job (to sign requests, for example), and on this venue
-the job only sees a placeholder.
-
-What to do: run the job on another venue, or with a provider whose key is sent as it is.
-
-### openshell-gateway-untested
-
-The gateway runs a release other than the one this venue was measured on.
-
-What to do: run the OpenShell release this pi-dispatch release names. `pi-dispatch doctor` says which.
-
-### openshell-egress-untranslatable
-
-The egress allowlist holds an entry the venue cannot turn into its network policy without widening it.
-
-What to do: change the entry `pi-dispatch doctor` names, or run the job on another venue. See [egress.md](egress.md).
-
-### openshell-bind-mounts-disabled
-
-The `openshell-bind` venue mounts the job's files into the sandbox, and the gateway is not configured to allow that.
-
-What to do: in the gateway's `gateway.toml`, allow driver config and bind mounts and turn resource admission off, then
-restart the gateway.
-
-### openshell-ptrace-scope-unprotected
-
-The host's kernel lets a process read the memory of the process that started it (Yama `ptrace_scope` is 0, or cannot
-be read). On this venue that is what keeps the job's tools away from the key that signs its result.
-
-What to do: set `kernel.yama.ptrace_scope` to 1 on the host.
-
-### openshell-ptrace-scope-too-strict
-
-Yama `ptrace_scope` is 2 or 3. That also stops the sandbox from observing the job well enough to let it reach the
-network, so the job would start and then fail.
-
-What to do: set `kernel.yama.ptrace_scope` to exactly 1 on the host.
-
-### openshell-bind-sandbox-lingering
-
-A job on `openshell-bind` ran, and afterwards its sandbox could not be confirmed gone. Something in it may still be
-changing the folder's files, so the run's result is not used and it is not run again. What it already changed stays.
-
-What to do: check the sandbox on the gateway and remove it, then check the folder before running the job again.
-
-### openshell-bundle-endpoint-not-allowed
-
-The project's secret bundle names an endpoint host the job's network policy does not admit by that exact name. A bundle
-may not widen what a job can reach.
-
-What to do: add the host to `egress-allowlist.conf` as itself, or remove it from the bundle's endpoints. See
-[secrets.md](secrets.md).
-
-### openshell-bundle-endpoint-shared
-
-The bundle names an endpoint host that the job's own forge, model or MCP credentials already go to. A host holds one
-credential provider on this venue, so the job's own would stop working.
-
-What to do: remove that host from the bundle's endpoints. See [secrets.md](secrets.md).
-
-### openshell-bundle-endpoint-unknown
-
-The bundle's endpoints name a variable its resolver did not deliver.
-
-What to do: fix the name in the bundle's endpoints, or add the variable in the secrets manager. See
-[secrets.md](secrets.md).
-
-### openshell-bundle-name-taken
-
-The bundle holds a variable the sandbox already sets itself, so one of the two would be lost.
-
-What to do: rename the variable in the secrets manager. See [secrets.md](secrets.md).
-
-### openshell-bundle-unpassable
-
-The bundle holds a variable the venue cannot keep as a placeholder: a value over 8 KiB, or more endpoint variables or
-hosts than a sandbox holds.
-
-What to do: run the project on another venue, or change the bundle's endpoints. See [secrets.md](secrets.md).
-
-### openshell-bundle-image-too-old
-
-The bundle's variables reach the job as a file only a newer job image reads, so this image would run without them.
-
-What to do: rebuild the job image from a release that declares `bundleEnvFile`. See [job-image.md](job-image.md).
-
-## The repository or folder
-
 ### unprotected-branch
 
 The repository's default branch is not protected. The job's token can merge, so branch protection is the only thing
@@ -660,13 +507,6 @@ The default branch moved past the commit the job was resolved to, and the forge 
 was spent.
 
 What to do: run the job again. It resolves the default branch afresh.
-
-### local-folder-is-sandbox
-
-This folder is a kept sandbox workspace for a person, so it cannot become an agent job workspace.
-The refusal happens before a host slot or any paid work, and the local preparer checks again before Git.
-Choose the original repository outside the sandbox retention directory. Symlinks and aliases into that
-retained root are refused too.
 
 ### local-folder-not-a-repo
 

@@ -1,7 +1,7 @@
 // The admin's half of the shared version rule (issue #761, `DES-STORE-VERSION-WHEN-NEEDED`) for the files it writes
 // besides the overlay: the pause windows (the writer and the console's whole-list action on one serializer, keys carried,
 // a newer file refused), the triggers view (a newer file is invalid, one with a repeated key broken), the projects
-// writer's version (computed, never a literal), the sandbox verdict for a manifest a newer release kept, and the re-run
+// writer's version (computed, never a literal), and the re-run
 // and parked answer of a job a newer release queued (refused, since the copy would drop what this build cannot read).
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -14,7 +14,6 @@ import { parkedAnswerRefusalOf, planParkedAnswer, planProjectsWrite, planRerun, 
 import { sanitizeJobId } from "@edgehero/pi-dispatch/run-history";
 import * as RM from "../src/read-model.mjs";
 import { ACTIONS } from "../src/console/actions.mjs";
-import { sandboxRetentionOf } from "../src/sandbox-verdict.mjs";
 import { PAUSE_WINDOW_FIELDS, parsePauseWindows } from "@edgehero/pi-dispatch/pause-windows";
 import { PROJECTS_FIELD_VERSIONS, PROJECTS_VERSION, projectsVersionFor } from "@edgehero/pi-dispatch/projects";
 import { versionTableProblems } from "@edgehero/pi-dispatch/store-version";
@@ -154,27 +153,6 @@ test("planProjectsWrite writes the version projectsVersionFor computes, never a 
   const projectsPath = join(dir, "projects.json");
   assert.deepEqual(writeProjects({ projectsPath, mutate: () => [{ id: "web", members: ["github:acme/web"] }], fs: nodeFs }), { ok: true });
   assert.equal(readFileSync(projectsPath, "utf8"), text({ version: 1, projects: [{ id: "web", members: ["github:acme/web"] }] }));
-});
-
-/** A retained run's directory under a fresh sandbox root, holding `manifest`. */
-function retained(jobId, manifest) {
-  const sandboxDir = tempDir("pd-761-sb-");
-  mkdirSync(join(sandboxDir, jobId), { recursive: true });
-  writeFileSync(join(sandboxDir, jobId, "manifest.json"), JSON.stringify({ jobId, kind: "github", image: "pi-job:latest", workspace: join(sandboxDir, jobId, "workspace"), createdAt: new Date(0).toISOString(), keepUntil: null, backend: "local", ...manifest }));
-  return sandboxDir;
-}
-
-test("the sandbox verdict for a manifest a newer pi-dispatch kept is manifest-newer, before the venue, and a broken version is its own word (#761)", () => {
-  const now = () => 3_600_000;
-  // A newer manifest is refused whatever its venue says: that release may have redefined it.
-  const newer = retained("gh-1", { version: 2, backend: "not-a-venue-here" });
-  assert.deepEqual(sandboxRetentionOf({ sandboxDir: newer, sandboxRetentionHours: 24 }, "gh-1", { now, venuePolicy: "unknown" }), { retained: false, why: "manifest-newer", reason: "not reopenable here: kept by a newer pi-dispatch" });
-  const broken = retained("gh-2", { version: "2" });
-  assert.deepEqual(sandboxRetentionOf({ sandboxDir: broken, sandboxRetentionHours: 24 }, "gh-2", { now, venuePolicy: "unknown" }), { retained: false, why: "manifest-unreadable", reason: "not reopenable (its manifest's version is unreadable)" });
-  // A manifest this build reads (no version, or 1) is judged as before.
-  const known = retained("gh-3", { version: 1 });
-  const ok = sandboxRetentionOf({ sandboxDir: known, sandboxRetentionHours: 24 }, "gh-3", { now, venuePolicy: "unknown" });
-  assert.equal(ok.why, "workspace-gone", "past the version check, the next refusal is the run's own");
 });
 
 // ---- a job a newer pi-dispatch queued: neither re-run nor answered from here ----

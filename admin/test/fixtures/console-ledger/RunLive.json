@@ -7,7 +7,6 @@
     {"el":"p-transcript","kind":"panel","status":"new","source":"admin/src/console/panels/run.mjs#runTranscriptState","golden":["panels/run-chat-live.operator"]},
     {"el":"p-record","kind":"panel","status":"new","source":"admin/src/console/panels/run.mjs#runRecord","golden":["panels/run-chat-live.operator"]},
     {"el":"p-chat","kind":"panel","status":"new","source":"admin/src/console/panels/run.mjs#runChat","golden":["panels/run-chat-live.operator"]},
-    {"el":"p-terminal","kind":"panel","status":"new","source":"admin/src/console/panels/run.mjs#runTerminal","golden":["panels/run-chat-live.operator"]},
     {"el":"p-run","kind":"panel","status":"new","source":"admin/src/console/panels/run.mjs#runSummary","golden":["panels/run-chat-live.operator"]},
     {"el":"The live run page leads with progress and the live transcript; steering and the terminal command sit beside them, and everything that only exists after the run ends collapses to one line.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runProgress"},
     {"el":"**How a person uses it.** The Progress card answers \"how far along is it\":","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runProgress"},

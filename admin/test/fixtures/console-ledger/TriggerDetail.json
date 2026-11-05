@@ -142,21 +142,6 @@
       ]
     },
     {
-      "el": "Sandbox declaration, retention, OpenShell mode, replicas and secret names",
-      "kind": "readme",
-      "status": "new",
-      "panel": "p-trigger-run",
-      "source": "admin/src/console/panels/trigger.mjs#triggerRun",
-      "golden": [
-        "panels/trigger-cron.operator"
-      ],
-      "shows": [
-        "Its runs",
-        "sandbox",
-        "OpenShell"
-      ]
-    },
-    {
       "el": "Edit previews the file and uses the shared five-minute confirmation",
       "kind": "readme",
       "status": "new",

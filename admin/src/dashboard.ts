@@ -132,52 +132,6 @@ function scrubControl(value: string): string {
   return scrubControls(value);
 }
 
-/**
- * The proxy name `b` will look for, rendered so a reader can actually see it (issue #367).
- *
- * It is shown UNTRIMMED, because the line's whole point is to name what `openSandbox` will look for and
- * `openSandbox` does not trim either, so `" myproxy "` is a container called `" myproxy "`. Bare, that is
- * unreadable: a leading space is indistinguishable from the separator before it and a trailing one is
- * invisible. So a name is shown verbatim ONLY when every character of it is printable ASCII, its first and
- * last are visible glyphs, and it holds no quote; anything else is quoted and fully escaped.
- *
- * THE EDGE TEST IS "VISIBLE", NOT "WHITESPACE", and that is the correction rather than the first idea. A
- * `\s` test misses U+200B and U+2060, which are exactly the edges a reader cannot see, so the first version
- * of this rendered them bare -- the failure it exists to prevent. `[\x21-\x7e]` is one rule covering
- * space, tab, NBSP, zero-width anything and any non-ASCII edge.
- *
- * ESCAPED, NOT JUST WRAPPED, for two reasons the first version got wrong. It ran on the SCRUBBED value, so
- * a tab at the edge was already a space: the operator read `" myproxy "` and typed spaces while `b` looked
- * for tabs. And bare quotes are not injective -- a name that already contains quotes rendered identically
- * to the padded one, which is precisely the over-quoted `.env` this line exists to expose. It runs on the
- * RAW value now, and the escape covers the control bytes that would otherwise reach the terminal, so this
- * is safe ahead of `show`.
- *
- * ACCEPTED, because clipping is not this function's to solve: a name long enough for `fitLine` to clip
- * loses its closing quote, like any other clipped text. The budget is 39 columns and the leading edge,
- * which is the one a reader meets first, survives.
- */
-function proxyName(raw: any): string {
-  const value = String(raw ?? "");
-  // EMPTY OR SPACES ONLY gets the sentence, and it is `[ ]` rather than `\s` deliberately. A first version
-  // tested `\s` and ran this branch FIRST, so a name made of one tab, an ideographic space or a BOM was
-  // reported as "blank or spaces" -- a different value described as the one thing it is not. Everything
-  // else with odd bytes falls through and is escaped, where a reader can see exactly what it is.
-  // SPACES ARE COUNTED, because this branch was not injective either: `" "`, `"       "` and a name whose
-  // text literally is this sentence all rendered the same line, and the line's whole point is to name what
-  // `b` will look for. An empty value is a different thing from a name made of spaces and says so.
-  if (value === "") return "a proxy whose name is empty";
-  if (/^ +$/.test(value)) return `a proxy whose name is ${value.length} space${value.length === 1 ? "" : "s"}`;
-  // VERBATIM only when the whole value is plainly printable, its edges are visible, and it holds no quote.
-  // The interior matters as much as the edges: an earlier version tested only the edges and then passed the
-  // value through `scrubControl`, so `my<TAB>proxy` and `my proxy` rendered identically -- the operator
-  // read a space and `b` looked for a tab, which is the exact failure this rule was rewritten to remove.
-  // The quote test keeps the rendering injective: `" myproxy "` stored verbatim would otherwise draw
-  // exactly like the escaped form of ` myproxy `, and an over-quoted `.env` is the mistake this line exists
-  // to expose.
-  if (!value.includes('"') && /^[\x21-\x7e][\x20-\x7e]*$/.test(value) && /[\x21-\x7e]$/.test(value)) return value;
-  return JSON.stringify(value).replace(/[^\x20-\x7e]/g, (c) => `\\u${c.codePointAt(0)!.toString(16).padStart(4, "0")}`);
-}
 
 /**
  * One cell of a RECORD pane, scrubbed, with a dash for an absent value. Every pane that renders a job --
@@ -369,13 +323,9 @@ export function makeDashboard({
   let readingWatch = false;
   let selected = 0;
   let detailRun: any = null;
-  // REQ-RESURRECTABLE-SANDBOX: whether the run opened in RUN_DETAIL still has a retained workspace, read
-  // ONCE on entry through the injected seam rather than on every tick -- the answer changes at worker boot,
-  // not per second, and this module does no I/O of its own.
-  let detailSandbox: any = null;
   // Issue #662: the run opened in RUN_DETAIL, when its record says its run went on as a #645 recovery
   // (`recovery-enqueued`): `{ jobId, as }`, `as` the recovery job's id once `progressOfRun` has answered with one, else
-  // null. Read once on entry like the sandbox state, never per tick; `continuesSeq` drops an answer for a run the pane
+  // null. Read once on entry, never per tick; `continuesSeq` drops an answer for a run the pane
   // has already left.
   let detailContinues: { jobId: string; as: string | null } | null = null;
   let continuesSeq = 0;
@@ -709,9 +659,7 @@ export function makeDashboard({
         tailSearchInput,
         tailQuery,
         tailMatchLine,
-        detailSandbox,
         detailContinues,
-        sandboxAvailable: typeof deps?.launchSandbox === "function",
         pendingDelete,
         pendingCancel,
         steerInput,
@@ -835,7 +783,6 @@ export function makeDashboard({
         if (matchesKey(data, "escape")) {
           view = detailFrom;
           detailFrom = "LIST";
-          detailSandbox = null;
           continuesSeq++;
           detailContinues = null;
           tui?.requestRender?.();
@@ -851,37 +798,9 @@ export function makeDashboard({
           const next = rows[i + step];
           if (!next || next.kind !== "run") return;
           detailRun = next.record;
-          // Same one-read-on-entry rule as Enter: sandbox state through the injected seam, never per tick.
-          detailSandbox = typeof deps?.sandboxInfo === "function" ? deps.sandboxInfo({ jobId: detailRun?.jobId }) : null;
           readContinues(detailRun);
           selected = i + step;
           tui?.requestRender?.();
-          return;
-        }
-        // `b` re-opens this run's sandbox as a shell (REQ-RESURRECTABLE-SANDBOX).
-        //
-        // Launched IN PLACE, unlike TRIGGER_DETAIL's `e`/`x`, which resolve the overlay so ctx.ui dialogs
-        // can run after it closes. This needs the opposite: the LIVE `tui`, because handing the terminal to
-        // an interactive container means suspending pi's own render loop and input handling for the
-        // duration and restoring them after. `stop()`/`start()` are pi's designed pair for exactly that --
-        // it uses them itself to launch $EDITOR -- and `requestRender(true)` forces the full redraw that
-        // an external program's output has invalidated.
-        //
-        // The spawn itself is the injected `launchSandbox`; this module holds the tui and nothing else.
-        if (data === "b" || data === "B") {
-          if (typeof deps?.launchSandbox !== "function" || !detailRun?.jobId) return;
-          if (detailSandbox && detailSandbox.retained === false) return; // nothing to open; the view says so
-          void (async () => {
-            tui?.stop?.();
-            try {
-              await deps.launchSandbox({ jobId: detailRun.jobId });
-            } catch {
-              // A failed launch must not leave the panel suspended -- the `finally` is the whole guarantee.
-            } finally {
-              tui?.start?.();
-              tui?.requestRender?.(true);
-            }
-          })();
           return;
         }
         // OSC 52 copy, bound only while the seam is wired (the terminal write lives in index.ts beside
@@ -1116,8 +1035,6 @@ export function makeDashboard({
           const open = (record: any) => {
             detailRun = record;
             detailFrom = "PARKED";
-            // The Enter rule on the LIST: sandbox state read once on entry, through the seam.
-            detailSandbox = typeof deps?.sandboxInfo === "function" ? deps.sandboxInfo({ jobId: record?.jobId }) : null;
             readContinues(record);
             view = "RUN_DETAIL";
             tui?.requestRender?.();
@@ -1332,8 +1249,6 @@ export function makeDashboard({
         } else {
           detailRun = row.record;
           detailFrom = "LIST";
-          // One read on entry, through the seam whose fs access lives in index.ts.
-          detailSandbox = typeof deps?.sandboxInfo === "function" ? deps.sandboxInfo({ jobId: row.record?.jobId }) : null;
           readContinues(row.record);
           view = "RUN_DETAIL";
           tui?.requestRender?.();
@@ -1610,7 +1525,7 @@ function degradeWidth(width: number): number | null {
 }
 
 function renderPanelLines(snapshot: any, width: number, state: any, styler: any): string[] {
-  const { view, selected, detailRun, detailTrigger, tailJobId, tail, tailTop, tailFollow, tailAvailable, tailSearchInput, tailQuery, tailMatchLine, detailSandbox, detailContinues, sandboxAvailable, pendingDelete, pendingCancel, steerInput, actionNote, heldSelected, runSort, copiedNote, copyAvailable, terminalRows } = state;
+  const { view, selected, detailRun, detailTrigger, tailJobId, tail, tailTop, tailFollow, tailAvailable, tailSearchInput, tailQuery, tailMatchLine, detailContinues, pendingDelete, pendingCancel, steerInput, actionNote, heldSelected, runSort, copiedNote, copyAvailable, terminalRows } = state;
   const runProject = "runProject" in (state ?? {}) ? state.runProject : ALL_RUNS;
   const framed = framedAt(width);
   const inner = Math.trunc(width) - 4;
@@ -1645,18 +1560,16 @@ function renderPanelLines(snapshot: any, width: number, state: any, styler: any)
     const detailTitle = `run ${scrubControl(String(detailRun?.jobId ?? "-"))}`;
     const dw = framed ? Math.min(Math.trunc(width), DRILL_WIDTH) : Math.trunc(width);
     const allRuns = Array.isArray(snapshot?.runs) ? snapshot.runs : [];
-    const canOpen = Boolean(sandboxAvailable && detailSandbox?.retained);
     const canCopy = Boolean(copyAvailable);
     const continues = detailContinues !== null && detailContinues.jobId === detailRun?.jobId ? detailContinues : null;
-    const lines = renderRunDetail(detailRun, framed ? dw - 4 : 24, styler, allRuns, detailSandbox, continues);
+    const lines = renderRunDetail(detailRun, framed ? dw - 4 : 24, styler, allRuns, continues);
     if (!framed) {
       const bits = ["←→ prev/next"];
-      if (canOpen) bits.push("b sandbox");
       if (canCopy) bits.push("y copy");
       bits.push("esc back");
       return [detailTitle, "", ...lines.map((l: string) => styler.stripAnsi(l)), "", (copiedNote ? `${copiedNote} · ` : "") + bits.join(" · ")];
     }
-    const boxed = frame(styler, { title: detailTitle, width: dw, lines, footer: runDetailHints(dw - 4, styler, canOpen, canCopy, copiedNote) });
+    const boxed = frame(styler, { title: detailTitle, width: dw, lines, footer: runDetailHints(dw - 4, styler, canCopy, copiedNote) });
     return centerBlock(boxed, Math.trunc(width), dw);
   }
 
@@ -3754,7 +3667,7 @@ function renderTriggerDetail(raw: any, inner: number, styler: any, sched: any = 
   // The same "I checked" dim default, for the one field on this pane that changes what a delivery COSTS
   // (REQ-REPLICA-RUNS). `warning` when armed: this row is a multiplier, and a multiplier that renders like
   // a preference is the polarity mistake 0.1.4 shipped a fix for on [packages].
-  out.push(kv("replicas", t.replicas > 1 ? `${t.replicas} sandboxes race this flow` : "one run per delivery", t.replicas > 1 ? "warning" : "dim"));
+  out.push(kv("replicas", t.replicas > 1 ? `${t.replicas} runs race this flow` : "one run per delivery", t.replicas > 1 ? "warning" : "dim"));
   // REQ-MCP-OPERATOR-SERVERS: the servers the jobs connect, by name, `warning` for the secrets row's reason.
   kvWrap("mcp", Array.isArray(t.mcp) && t.mcp.length > 0 ? t.mcp.map((n: any) => cellOf(n)).join(", ") : "none", Array.isArray(t.mcp) && t.mcp.length > 0 ? "warning" : "dim");
 
@@ -4340,7 +4253,7 @@ function renderLiveTail({ snapshot, framed, width, tailJobId, tail, tailTop, tai
  * already in the snapshot: no read, no `.log`, no `.data` -- exactly the PII-free run-history fields
  * (INT-RUN-HISTORY-FILE-CONTRACT). Every line is `inner` cols; a missing field renders `-` rather than throw.
  */
-function renderRunDetail(record: any, inner: number, styler: any, allRuns: any[] = [], sandbox: any = null, continues: { as: string | null } | null = null): string[] {
+function renderRunDetail(record: any, inner: number, styler: any, allRuns: any[] = [], continues: { as: string | null } | null = null): string[] {
   const r = record ?? {};
   // Every record string this pane prints goes through here, which is why the scrub lives INSIDE `show`
   // rather than around the lines it builds: `styler.fg("accent", show(r.target))` puts the value inside an
@@ -4571,57 +4484,6 @@ function renderRunDetail(record: any, inner: number, styler: any, allRuns: any[]
     out.push(kv("replica", repBits.join(" · "), "warning"));
   }
 
-  // REQ-RESURRECTABLE-SANDBOX. A retention state, never a path: the manifest holds a host path (which on
-  // Windows embeds the operator's account name) and this view is the one that renders beside PII-free
-  // record fields, so only the verdict crosses.
-  if (sandbox) {
-    // `retained`, never `running`: `readSandboxInfo` deliberately asks docker nothing, so it cannot know
-    // whether a container is up, and the branch that rendered "running" was unreachable from the day it was
-    // written (issue #367). Removed rather than reserved, because the one state it would have shown is the
-    // one that warns an operator BEFORE `openSandbox`'s `already-running` refusal, and a dead branch is a
-    // worse placeholder for that than nothing: it reads as covered.
-    // BOTH halves through `show`. `expiresIn` is computed arithmetically by `readSandboxInfo` today, so a
-    // control byte in it is latent rather than live -- but it was the one raw interpolation left in a
-    // framed record pane, beside a sibling that is scrubbed, on the line this round rewrote for a
-    // different reason. "One field with a belt beside one without" is the defect #367 reports.
-    const state = sandbox.retained ? `retained${sandbox.expiresIn ? ` · ${show(sandbox.expiresIn)} left` : ""}` : show(sandbox.reason ?? "swept");
-    out.push(kv("sandbox", state, sandbox.retained ? "success" : "dim"));
-    // WHAT `b` WOULD GIVE THIS SHELL, and that it is this shell's (#337). The panel resolves PI_EGRESS
-    // from its OWN process, because that is what `openSandbox` uses when the key is pressed, and it
-    // genuinely cannot see the deployment's: nothing here loads a `.env`, the panel may have been started
-    // anywhere, and the deployment pointer carries paths and never capability grants
-    // (`INT-DEPLOYMENT-POINTER-CONTRACT`, not `OQ-025`, which is about tier resolution). So this
-    // states the posture AND its provenance rather than claiming a mismatch it cannot detect.
-    //
-    // TWO LINES, and the second is not decoration. `kv` pays a 12-column label plus a space out of an
-    // `inner` of 66 at the pane's DRILL_WIDTH, leaving 53 for a value that `fitLine` CLIPS rather than
-    // wraps; `retained · 19h left · egress on (this shell, not the deployment)` is 64 and would lose its
-    // own point silently. The caveat gets its own budget under a blank label.
-    if (sandbox.retained && sandbox.egress) {
-      // NO HAND-CAP on the name, and that is a measured retraction rather than an omission. One was
-      // written, on the reasoning that an operator-set name is unbounded and `fitLine` truncates
-      // silently. It is a no-op: `kv` leaves 53 columns and `egress on via ` is 14, so the budget is 39,
-      // and `styler.cell` already clips to 38 plus an ellipsis -- byte-identical at every width the pane
-      // can take, across 568 renders. Worse, the hand-cap hardcoded the ellipsis while `fitLine` swaps it
-      // under `PI_DISPATCH_ASCII`, so it pushed a non-ASCII glyph into the one mode that exists to avoid
-      // them.
-      //
-      // `egressProxyName` falls back with `||`, so an EMPTY `PI_EGRESS_PROXY` gets the default and a
-      // whitespace one does not: unsaid, the line reads `egress on via` and then stops, naming a
-      // container whose name is three spaces. Said rather than hidden, because that value is what `b`
-      // will actually look for, and shown WITHOUT trimming for the same reason: `openSandbox` reads the
-      // variable itself and does not trim, so `" myproxy "` is a container called `" myproxy "`.
-      const named = proxyName(sandbox.egress.proxy);
-      // "egress off" alone reads as "no network at all", and it is the opposite: `PI_EGRESS=0` omits
-      // `--network` entirely, so the shell lands on docker's default bridge with the whole internet.
-      // On the podman venue (issue #429) an egress-off shell gets the job's own `--network=private`, not a bridge.
-      const offLands = sandbox.runtime === "podman" ? "podman's private network" : "docker's default bridge";
-      const posture = sandbox.egress.malformed ? "egress unreadable" : sandbox.egress.armed ? `egress on via ${named}` : `egress off (${offLands})`;
-      out.push(kv("", posture, sandbox.egress.malformed ? "error" : "text"));
-      out.push(kv("", "read from this shell, not the deployment", "dim"));
-    }
-  }
-
   out.push(styler.cell("", inner));
   out.push(styler.divider("post-mortem", null, inner));
   // WRAPPED, not clipped (issue #482): the sentence is 86 columns and the pane's inner width is 66, so a
@@ -4686,16 +4548,14 @@ function formatDuration(ms: number): string {
 }
 
 /**
- * The RUN_DETAIL footer hint. Still a read-only post-mortem, with two actions: `b` re-opens this run's
- * sandbox, offered ONLY while a retained workspace exists, and `y` copies -- offered only when the OSC 52
- * seam is wired, the same capability pattern, so neither key is ever advertised where it would do nothing
- * (`triggerDetailHints` is the shape). A fresh copy's acknowledgment leads the line and is gone by the
- * next input.
+ * The RUN_DETAIL footer hint. Still a read-only post-mortem, with one action: `y` copies -- offered only
+ * when the OSC 52 seam is wired, the same capability pattern, so the key is never advertised where it
+ * would do nothing (`triggerDetailHints` is the shape). A fresh copy's acknowledgment leads the line and
+ * is gone by the next input. The `b` hint (re-open this run's sandbox) left with the sandbox backends.
  */
-function runDetailHints(inner: number, styler: any, canOpen = false, canCopy = false, copiedNote: any = null): string {
+function runDetailHints(inner: number, styler: any, canCopy = false, copiedNote: any = null): string {
   const k = (key: string, label: string) => styler.fg("accent", key) + " " + styler.fg("dim", label);
   const bits = [k("←→", "prev/next")];
-  if (canOpen) bits.push(k("b", "sandbox"));
   if (canCopy) bits.push(k("y", "copy"));
   bits.push(k("esc", "back"));
   const line = bits.join(styler.fg("dim", "  ·  "));

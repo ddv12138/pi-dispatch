@@ -15,6 +15,9 @@ export const LAYOUTS = Object.freeze({
 
 export const DEFAULT_LAYOUT = "mounts";
 
+/** The one layout a single-backend deployment can ever name: `docker-run.mjs` reads its mount targets from here. */
+export const LAYOUT = LAYOUTS.mounts;
+
 /** The layout `name` names, refusing one the table does not hold: a spec built on a guessed tree reads nothing. */
 export function layoutFor(name = DEFAULT_LAYOUT) {
 	if (typeof name !== "string" || !Object.hasOwn(LAYOUTS, name)) throw new Error(`unknown job layout ${JSON.stringify(name)} (known: ${Object.keys(LAYOUTS).join(", ")})`);

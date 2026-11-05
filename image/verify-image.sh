@@ -49,13 +49,12 @@ docker run --rm --entrypoint pi "$IMAGE_REF" -p --help >/dev/null 2>&1 \
 	|| fail "pi is not on PATH, or -p is no longer a flag. The image must carry the pinned pi (CONST-PI-VERSION-PINNED); a stale or absent pi makes jobs no-ops that still report success."
 ok "pi is present and -p is still a flag"
 
-# bash, because `pi-dispatch sandbox` re-opens a finished run with `--entrypoint bash`
-# (REQ-RESURRECTABLE-SANDBOX). An image without it fails that at exit 127 -- long after the run it is
-# meant to let you inspect, and with an error naming a flag rather than a missing shell. It is also what
-# reads TMOUT, which is the only thing that closes a forgotten sandbox.
+# bash, because an operator inspecting a finished container (`--entrypoint bash`) lands in a shell
+# they know, and TMOUT is what closes a forgotten interactive one. An image without bash fails
+# tool children that assume a POSIX shell with more than /bin/sh's builtins at exit 127.
 docker run --rm --entrypoint bash "$IMAGE_REF" -c 'exit 0' >/dev/null 2>&1 \
-	|| fail "bash is not present. \`pi-dispatch sandbox\` re-opens a run with --entrypoint bash and would fail at exit 127, and TMOUT (the sandbox idle logout) is a bash feature."
-ok "bash is present (an operator can re-open a finished run)"
+	|| fail "bash is not present. An operator inspecting a finished run with --entrypoint bash would fail at exit 127, and TMOUT (the idle logout of a forgotten shell) is a bash feature."
+ok "bash is present (an operator can open a finished container's shell)"
 
 # A staged pi-subagents package lives outside /app and cannot resolve pi by walking its own parents.
 docker run --rm --network none --entrypoint node "$IMAGE_REF" -e 'const fs = require("node:fs"); const path = require("node:path"); const p = process.env.PI_SUBAGENTS_PI_CODING_AGENT_PACKAGE_ROOT; if (typeof p !== "string" || !path.isAbsolute(p) || JSON.parse(fs.readFileSync(`${p}/package.json`)).name !== "@earendil-works/pi-coding-agent") process.exit(1);' >/dev/null 2>&1 \
@@ -116,22 +115,6 @@ else
 			|| fail "the image declares it serves '$forge' but $cli is not on PATH -- the label would turn a pre-spend refusal into a paid container that fails at step 3"
 	done
 	ok "dev.pi-dispatch.forges ($declared) matches the CLIs actually installed"
-fi
-
-# Issue #683: the binaries the image says may need the network, at their real paths, for a venue whose egress policy
-# names executables (issue #684 generates it). Each entry must be an absolute path to a regular file that is its own
-# realpath: such a policy matches the executable the kernel ran, so a symlink or a moved binary would match nothing and
-# the job would lose the network with no word why. Absent is no claim, and a venue that needs the list refuses it.
-net_binaries=$(docker image inspect --format '{{index .Config.Labels "dev.pi-dispatch.net-binaries"}}' "$IMAGE_REF" 2>/dev/null)
-if [ -z "$net_binaries" ] || [ "$net_binaries" = "<no value>" ]; then
-	ok "no dev.pi-dispatch.net-binaries label -- the image makes no claim, and a venue that needs one refuses the image"
-else
-	for bin in $(echo "$net_binaries" | tr ',' ' '); do
-		case "$bin" in /*) ;; *) fail "dev.pi-dispatch.net-binaries names '$bin', which is not an absolute path" ;; esac
-		docker run --rm --entrypoint sh "$IMAGE_REF" -c '[ -f "$1" ] && [ ! -L "$1" ] && [ "$(readlink -f "$1")" = "$1" ]' sh "$bin" >/dev/null 2>&1 \
-			|| fail "dev.pi-dispatch.net-binaries names '$bin', which is not a regular file at its own real path in the image -- a policy naming it would match nothing"
-	done
-	ok "dev.pi-dispatch.net-binaries ($net_binaries) are regular files at their real paths"
 fi
 
 # THE CAPABILITIES LABEL MUST NOT LIE EITHER, and this one guards a quieter failure than the forge check
@@ -571,228 +554,6 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				fi
 				rm -rf "$inbox_dir"
 				;;
-			sandboxLayout)
-				# Issue #683. Two claims. First, the runner reads PI_JOB_LAYOUT and, under `sandbox`, finds its job under
-				# /sandbox: proved by the fake-key job above run on that layout, its prompt mounted at /sandbox/job and nothing
-				# at /job, which must reach the first dispatch (a runner reading /job would exit "missing job input").
-				layout_job=$(mktemp -d)
-				layout_ws=$(mktemp -d)
-				echo "Reply with the single word ok." >"$layout_job/prompt.md"
-				chmod -R a+rX "$layout_job"
-				chmod 0777 "$layout_ws"
-				layout_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges \
-					-v "$layout_job:/sandbox/job:ro" -v "$layout_ws:/sandbox/workspace" --workdir /sandbox/workspace \
-					-e PI_JOB_LAYOUT=sandbox -e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 \
-					"$IMAGE_REF" 2>&1) && layout_code=0 || layout_code=$?
-				layout_exit=$(echo "$layout_out" | grep '"event":"exit"' | tail -1)
-				# Issue #684: a copying venue's network policy names the image's binaries, so the claim needs the label.
-				[ -n "$net_binaries" ] && [ "$net_binaries" != "<no value>" ] \
-					|| { rm -rf "$layout_job" "$layout_ws"; fail "the image declares 'sandboxLayout' but no dev.pi-dispatch.net-binaries label: a copying venue's network policy would match no binary"; }
-				[ "$layout_code" = 2 ] && echo "$layout_exit" | grep -q '"reason":"provider-auth-refused"' \
-					|| { rm -rf "$layout_job" "$layout_ws"; fail "the image declares 'sandboxLayout' but a job on PI_JOB_LAYOUT=sandbox did not find its prompt under /sandbox/job (exit $layout_code: $layout_exit)"; }
-				# Second, /opt/pi-dispatch/pi-landlock confines every write of the tree it starts to the --rw paths. Where the
-				# kernel has no Landlock (Docker Desktop's LinuxKit, measured) the helper must refuse to run anything (126,
-				# "Landlock is unavailable"): fail closed, never start the runner unconfined. VERIFY_REQUIRE_LANDLOCK=1 (the
-				# image job in CI) turns that host into a failure, because there the enforcement itself must be proved.
-				ll_out=$(docker run --rm --cap-drop=ALL --security-opt no-new-privileges --entrypoint /opt/pi-dispatch/pi-landlock "$IMAGE_REF" \
-					--rw /tmp -- /bin/sh -c 'exit 0' 2>&1) && ll_code=0 || ll_code=$?
-				if [ "$ll_code" = 126 ] && echo "$ll_out" | grep -q "Landlock is unavailable"; then
-					rm -rf "$layout_job" "$layout_ws"
-					[ "${VERIFY_REQUIRE_LANDLOCK:-0}" = 1 ] && fail "VERIFY_REQUIRE_LANDLOCK=1 but this host's kernel has no Landlock, so pi-landlock's confinement cannot be proved here"
-					echo "  note this host's kernel has no Landlock: pi-landlock refused to run anything (exit 126), which is the"
-					echo "       fail-closed half; its confinement is proved on a host with Landlock (the image job in CI)."
-				elif [ "$ll_code" = 0 ]; then
-					chmod 0777 "$layout_job"
-					# The control: the same write WITHOUT the helper must succeed, else the refusal below would prove nothing.
-					docker run --rm --cap-drop=ALL -v "$layout_job:/sandbox/job" --entrypoint sh "$IMAGE_REF" -c 'echo control > /sandbox/job/control' 2>/dev/null \
-						|| { rm -rf "$layout_job" "$layout_ws"; fail "the control write to a writable /sandbox/job failed, so the pi-landlock check would prove nothing"; }
-					# Judged on the host, by what changed in the directories, not by the shell's exit status.
-					docker run --rm --cap-drop=ALL --security-opt no-new-privileges -v "$layout_job:/sandbox/job" -v "$layout_ws:/sandbox/workspace" \
-						--entrypoint /opt/pi-dispatch/pi-landlock "$IMAGE_REF" --rw /sandbox/workspace --rw /dev/null -- /bin/sh -c \
-						'echo planted > /sandbox/job/planted; echo appended >> /sandbox/job/control; ( : > /sandbox/job/prompt.md ); rm -f /sandbox/job/prompt.md; mv /sandbox/job/control /sandbox/workspace/stolen; /opt/pi-dispatch/pi-landlock --rw / -- /bin/sh -c "echo widened > /sandbox/job/widened"; echo ok > /sandbox/workspace/ok' >/dev/null 2>&1 || true
-					# The truncate runs in a subshell: `:` is a special builtin, and a POSIX sh EXITS when its redirection fails, which
-					# would skip every step after it and read as the helper refusing a --rw write.
-					# The overwrite and the truncate are the two rights (WRITE_FILE, TRUNCATE) a file the job's own uid owns is
-					# protected by alone, which is every uploaded file on a copying venue: the content must be untouched.
-					if [ -e "$layout_job/planted" ] || [ -e "$layout_job/widened" ] || [ ! -s "$layout_job/prompt.md" ] || [ "$(cat "$layout_job/control" 2>/dev/null)" != control ]; then
-						rm -rf "$layout_job" "$layout_ws"
-						fail "pi-landlock let the tree it starts write, remove or move a file under /sandbox/job. The agent could rewrite its own job inputs on a copying venue."
-					fi
-					[ -e "$layout_ws/ok" ] || { rm -rf "$layout_job" "$layout_ws"; fail "pi-landlock refused a write under a --rw path (/sandbox/workspace), so a job could not write its own workspace"; }
-					rm -rf "$layout_job" "$layout_ws"
-				else
-					rm -rf "$layout_job" "$layout_ws"
-					fail "pi-landlock neither ran a confined command nor refused for want of Landlock (exit $ll_code: $ll_out)"
-				fi
-				;;
-			transcriptStderr)
-				# Issue #686. The runner mirrors its session file over stderr as records signed with the exit key, the channel
-				# a copying venue's live transcript comes over. Proved by running it: exitAuth's keyed offline job (a cap of 0
-				# stops it before any call, after pi has written the prompt to its session), with PI_TRANSCRIPT=stderr and a
-				# writable session, must put records on stderr and none on stdout: first the baseline (seq 1, type b, the empty
-				# session's size 0), then a line record whose payload decodes to a session line; that record's MAC must be
-				# HMAC-SHA256 under the handed key over the record's domain, run id, seq, type, end and decoded payload
-				# (INT-RUNNER-EXIT-CODE-PROTOCOL's transcript records), and must NOT be under another key, else this check would
-				# accept any MAC. The worker's own verifier is held to the runner's by the unit tests.
-				tr_job=$(mktemp -d)
-				tr_session=$(mktemp -d)
-				tr_err=$(mktemp)
-				echo "Reply with the single word ok." >"$tr_job/prompt.md"
-				chmod -R a+rX "$tr_job"
-				: >"$tr_session/current.jsonl"
-				chmod 0777 "$tr_session"
-				chmod 0666 "$tr_session/current.jsonl"
-				tr_key=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-				tr_other=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-				tr_out=$(printf '%s\n' "$tr_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
-					-v "$tr_job:/job:ro" -v "$tr_session:/session" \
-					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
-					-e PI_JOB_ID=pi-job-verify-transcript -e PI_SESSION_FILE=/session/current.jsonl -e PI_TRANSCRIPT=stderr \
-					"$IMAGE_REF" 2>"$tr_err") || true
-				tr_rs=$(printf '\036')
-				tr_count=$(grep -ac "^${tr_rs}pidt " "$tr_err" || true)
-				tr_on_stdout=$(printf '%s\n' "$tr_out" | grep -ac "^${tr_rs}pidt " || true)
-				tr_first=$(grep -a "^${tr_rs}pidt " "$tr_err" | head -1 | sed "s/^${tr_rs}pidt //" | cut -d' ' -f1-3)
-				tr_record=$(grep -a "^${tr_rs}pidt [0-9]* l " "$tr_err" | head -1 | sed "s/^${tr_rs}pidt //")
-				rm -rf "$tr_job" "$tr_session" "$tr_err"
-				tr_seq=$(echo "$tr_record" | cut -d' ' -f1)
-				tr_end=$(echo "$tr_record" | cut -d' ' -f3)
-				tr_mac=$(echo "$tr_record" | cut -d' ' -f4)
-				tr_b64=$(echo "$tr_record" | cut -d' ' -f5)
-				tr_hmac() { { printf 'pi-dispatch-transcript\000pi-job-verify-transcript\000%s\000l\000%s\000' "$tr_seq" "$tr_end"; printf '%s' "$tr_b64" | base64 -d; } | openssl dgst -sha256 -hmac "$1" | awk '{print $NF}'; }
-				[ "$tr_count" -gt 1 ] && [ "$tr_on_stdout" = 0 ] && [ "$tr_first" = "1 b 0" ] && [ "$tr_seq" = 2 ] && [ "$(printf '%s' "$tr_b64" | base64 -d | head -c 1)" = "{" ] \
-					&& [ -n "$tr_mac" ] && [ "$tr_mac" = "$(tr_hmac "$tr_key")" ] && [ "$tr_mac" != "$(tr_hmac "$tr_other")" ] \
-					|| fail "the image declares 'transcriptStderr' but a keyed job with PI_TRANSCRIPT=stderr did not mirror its session over stderr as records signed with the handed key (records on stderr: $tr_count, on stdout: $tr_on_stdout, first: ${tr_first:-none}, first line seq: ${tr_seq:-none})"
-				;;
-			steerStdin)
-				# Issue #686, part 2. The runner reads a copying venue's steer messages as frames on stdin (INT-STEER-INBOX-
-				# CONTRACT's second transport). Proved by running it: the offline keyed job above (a cap of 0 stops it before
-				# any model call, after pi has polled its steering queue once) with PI_EXIT_AUTH=stdin-frames and PI_STEER=1, fed
-				# frame 1 (the key), one genuine steer frame and one with a wrong MAC, on a stdin HELD OPEN past the run. Three
-				# claims, each judged here:
-				#   - the key read took EXACTLY frame 1: the exit line is signed with that key, and the genuine frame right after
-				#     it in the same write reached the inbox (a read past frame 1 would have swallowed or broken it), while the
-				#     writer was still holding the pipe open (a runner that waited for EOF would not have ended);
-				#   - a frame round-trips: its id is on the signed exit line's `deliveredIds`, the transcript holds its ack under
-				#     the key, and the forged frame was dropped and counted (`steer_frame_unverified`), never delivered;
-				#   - a tool child sees /dev/null on stdin: a workspace extension runs a command through pi's OWN bash tool
-				#     operations (createLocalBashOperations, what the bash tool spawns with) and a child that INHERITS the
-				#     runner's stdin, and both read fd 0 as /dev/null (steer-frames.mjs isolateStdin) and have NO fd 3 (the frames
-				#     ride the runner's fd 3, and the isolation rests on no child of the runner inheriting it), and no
-				#     `steer_stdin_shared` was logged.
-				st_dir=$(mktemp -d)
-				mkdir -p "$st_dir/job" "$st_dir/ws/.pi/extensions" "$st_dir/session"
-				echo "Reply with the single word ok." >"$st_dir/job/prompt.md"
-				cat >"$st_dir/ws/.pi/extensions/stdin-probe.ts" <<'STPROBE'
-import { spawnSync } from "node:child_process";
-import { createLocalBashOperations } from "/app/node_modules/@earendil-works/pi-coding-agent/dist/index.js";
-export default function (pi) {
-	pi.on("agent_start", async () => {
-		let bash = "";
-		try {
-			await createLocalBashOperations().exec("readlink /proc/self/fd/0; readlink /proc/self/fd/3 || echo no-fd3", process.cwd(), { onData: (d) => (bash += String(d)), timeout: 10 });
-		} catch {
-			bash = "error";
-		}
-		const inherit = spawnSync("sh", ["-c", "readlink /proc/self/fd/0; readlink /proc/self/fd/3 || echo no-fd3"], { stdio: ["inherit", "pipe", "ignore"] });
-		const one = (text) => String(text ?? "").trim().split("\n").join(",") || "none";
-		console.log(`steer-stdin-probe bash=${one(bash)} inherit=${one(inherit.stdout)}`);
-	});
-}
-STPROBE
-				: >"$st_dir/session/current.jsonl"
-				chmod -R a+rX "$st_dir/job"
-				chmod -R a+rwX "$st_dir/ws" "$st_dir/session"
-				st_key=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
-				st_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-				st_run=pi-job-verify-steer
-				# One frame: a 4-byte big-endian length (ASCII payloads, so characters are bytes), then the JSON.
-				st_frame() { st_n=${#1}; printf "\\$(printf %03o $((st_n >> 24 & 255)))\\$(printf %03o $((st_n >> 16 & 255)))\\$(printf %03o $((st_n >> 8 & 255)))\\$(printf %03o $((st_n & 255)))"; printf '%s' "$1"; }
-				st_body="{\"v\":1,\"id\":\"$st_id\",\"mode\":\"steer\",\"source\":\"cli\",\"content\":\"verify-image steer probe\"}"
-				st_mac=$(printf 'pi-dispatch-inbox-frame\000%s\000%s\000%s' "$st_run" 2 "$st_body" | openssl dgst -sha256 -hmac "$st_key" | awk '{print $NF}')
-				st_forged_id=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \n')
-				st_forged="{\"t\":\"steer\",\"seq\":3,\"v\":1,\"id\":\"$st_forged_id\",\"mode\":\"steer\",\"source\":\"cli\",\"content\":\"planted\",\"mac\":\"$(printf '%064d' 0)\"}"
-				mkfifo "$st_dir/stdin"
-				# The writer holds the pipe open for two minutes after its frames, far past the run: it is killed below.
-				( st_frame "{\"t\":\"key\",\"key\":\"$st_key\"}"; st_frame "{\"t\":\"steer\",\"seq\":2,\"v\":1,\"id\":\"$st_id\",\"mode\":\"steer\",\"source\":\"cli\",\"content\":\"verify-image steer probe\",\"mac\":\"$st_mac\"}"; st_frame "$st_forged"; exec sleep 120 ) >"$st_dir/stdin" &
-				st_writer=$!
-				st_out=$(docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
-					-v "$st_dir/job:/job:ro" -v "$st_dir/ws:/workspace" -v "$st_dir/session:/session" --workdir /workspace \
-					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin-frames -e PI_STEER=1 \
-					-e PI_JOB_ID="$st_run" -e PI_SESSION_FILE=/session/current.jsonl \
-					"$IMAGE_REF" <"$st_dir/stdin" 2>&1) || true
-				kill -0 "$st_writer" 2>/dev/null && st_open=yes || st_open=no
-				kill "$st_writer" 2>/dev/null || true
-				wait "$st_writer" 2>/dev/null || true
-				st_exit=$(echo "$st_out" | grep '"event":"exit"' | tail -1)
-				st_exit_mac=$(echo "$st_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
-				st_exit_body=$(echo "$st_exit" | sed -E 's/,"auth":"[0-9a-f]{64}"\}$/}/')
-				st_exit_want=$(printf '%s' "$st_exit_body" | openssl dgst -sha256 -hmac "$st_key" | awk '{print $NF}')
-				st_ack_want=$(printf 'pi-dispatch-inbox-ack\000%s\000%s' "$st_run" "$st_id" | openssl dgst -sha256 -hmac "$st_key" | awk '{print $NF}')
-				st_acked=$(grep -c "\"ack\":\"$st_ack_want\"" "$st_dir/session/current.jsonl" 2>/dev/null || true)
-				st_probe=$(echo "$st_out" | grep '^steer-stdin-probe ' | tail -1)
-				rm -rf "$st_dir"
-				[ -n "$st_exit_mac" ] && [ "$st_exit_mac" = "$st_exit_want" ] && [ "$st_open" = yes ] \
-					|| fail "the image declares 'steerStdin' but a job keyed over stdin-frames did not end, signed with the frame-1 key, while its stdin was still open (writer open: $st_open; $st_exit)"
-				echo "$st_exit" | grep -q "\"deliveredIds\":\[\"$st_id\"\]" && [ "${st_acked:-0}" -ge 1 ] \
-					&& echo "$st_out" | grep -q '"event":"steer_frame_unverified".*"count":1' \
-					&& ! echo "$st_out" | grep -q '"event":"steer_stream_broken"' \
-					|| fail "the image declares 'steerStdin' but the frame after the key did not round-trip (delivered and acked under the key), or the forged one was not dropped and counted ($st_exit)"
-				[ "$st_probe" = "steer-stdin-probe bash=/dev/null,no-fd3 inherit=/dev/null,no-fd3" ] && ! echo "$st_out" | grep -q '"event":"steer_stdin_shared"' \
-					|| fail "the image declares 'steerStdin' but a tool child of the steered runner does not see /dev/null on stdin, or holds an fd 3 (${st_probe:-no probe line}): the frames are reachable from it"
-				;;
-			observableRunner)
-				# Issue #730. The OpenShell venues start both key holders from a readable copy of the runner's node, because
-				# the sandbox's connect broker must read the caller's memory. Held here: the copy exists at its path, is
-				# root-owned and readable (0555 at runtime), has runner-node's exact bytes (so a policy hash and a version are one answer), is named in
-				# the net-binaries label (else a policy matches nothing), and on PI_RUNNER_OBSERVABLE=1 the entrypoint and
-				# the supervisor really start the supervisor AND the runner from it, both still with --disable-sigusr1 (the
-				# holder probe, by executable). The default stays the exec-only node (the exitAuth checks above).
-				docker run --rm --init --cap-drop=ALL --security-opt no-new-privileges --entrypoint /bin/sh "$IMAGE_REF" \
-					-c '[ "$(stat -c "%a %U:%G" /opt/pi-dispatch/runner-observable)" = "555 root:root" ] && cmp -s /opt/pi-dispatch/runner-observable /usr/local/bin/node' >/dev/null 2>&1 \
-					|| fail "the image declares 'observableRunner' but /opt/pi-dispatch/runner-observable is missing, not root-owned and readable (555 after /opt/pi-dispatch is made read-only; installed 0755), or not the image's node byte for byte"
-				docker run --rm --init --cap-drop=ALL --security-opt no-new-privileges --user 0 --entrypoint cmp "$IMAGE_REF" \
-					-s /opt/pi-dispatch/runner-observable /opt/pi-dispatch/runner-node >/dev/null 2>&1 \
-					|| fail "the image declares 'observableRunner' but /opt/pi-dispatch/runner-observable differs from /opt/pi-dispatch/runner-node"
-				case ",$net_binaries," in *,/opt/pi-dispatch/runner-observable,*) ;; *) fail "the image declares 'observableRunner' but dev.pi-dispatch.net-binaries does not name /opt/pi-dispatch/runner-observable: an OpenShell policy would match no rule for the runner" ;; esac
-				obs_line=$(holder_probe -e PI_RUNNER_OBSERVABLE=1 -e VERIFY_HOLDER=/opt/pi-dispatch/runner-observable)
-				echo "$obs_line" | grep -Eq '^inspector-probe holders=[0-9]+:closed(,[0-9]+:closed)+ control=open$' \
-					|| fail "the image declares 'observableRunner' but on PI_RUNNER_OBSERVABLE=1 fewer than two key holders run under /opt/pi-dispatch/runner-observable, or one opens its inspector (${obs_line:-no probe line})"
-				obs_core=$(core_limit_probe -e PI_RUNNER_OBSERVABLE=1)
-				[ "$obs_core" = "core-limit runner=[0 0] supervisor=[0 0]" ] \
-					|| fail "the image declares 'observableRunner' but a readable key holder can be core-dumped: its RLIMIT_CORE is not 0/0, so a tool's SIGABRT could drop a core holding the exit key (${obs_core:-no probe line}); set ulimit -c 0 in the entrypoint"
-				;;
-			bundleEnvFile)
-				# Issue #704 part 3. The runner reads a project secret bundle's plain variables from /job/bundle-env.json on
-				# PI_BUNDLE_ENV=1, into its own environment, which pi and its tools inherit. Proved by running it: the offline
-				# job under a cap of 0 (stopped before any model call, after pi started the agent), a JSON file with one plain
-				# and one multi-line variable, and a workspace extension printing what it sees at agent_start.
-				be_dir=$(mktemp -d)
-				mkdir -p "$be_dir/job" "$be_dir/ws/.pi/extensions"
-				echo "Reply with the single word ok." >"$be_dir/job/prompt.md"
-				printf '%s' '{"VERIFY_PLAIN":"plain-value","VERIFY_PEM":"line1\nline2"}' >"$be_dir/job/bundle-env.json"
-				cat >"$be_dir/ws/.pi/extensions/bundle-env-probe.ts" <<'BEPROBE'
-export default function (pi) {
-	pi.on("agent_start", async () => {
-		const pem = String(process.env.VERIFY_PEM ?? "").split("\n").join("|");
-		console.log(`bundle-env-probe plain=${process.env.VERIFY_PLAIN ?? "unset"} pem=${pem} flag=${process.env.PI_BUNDLE_ENV ?? "gone"}`);
-	});
-}
-BEPROBE
-				chmod -R a+rX "$be_dir/job"
-				chmod -R a+rwX "$be_dir/ws"
-				be_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
-					-v "$be_dir/job:/job:ro" -v "$be_dir/ws:/workspace" --workdir /workspace \
-					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_BUNDLE_ENV=1 \
-					"$IMAGE_REF" 2>&1) || true
-				rm -rf "$be_dir"
-				echo "$be_out" | grep -q '^bundle-env-probe plain=plain-value pem=line1|line2 flag=gone$' \
-					|| fail "the image declares 'bundleEnvFile' but a job with PI_BUNDLE_ENV=1 did not see the bundle's variables from /job/bundle-env.json in its environment ($(echo "$be_out" | grep '^bundle-env-probe' | tail -1))"
-				;;
 			answerDraft)
 				# Invalid profile input must refuse before extension discovery or a provider request.
 				ad_dir=$(mktemp -d)
@@ -923,8 +684,8 @@ fi
 if [ "$any_uid" != 1 ]; then
 	# Said out loud for the same reason as the playwright skip below: a check that silently does not apply reads
 	# like one that passed.
-	echo "  note no 'anyUid' capability -- on a daemon that enforces bind-mount ownership (native Linux Docker, rootful"
-	echo "       Podman), a job on this image can only run as the image's own user (issue #341)."
+	echo "  note no 'anyUid' capability -- on a daemon that enforces bind-mount ownership (native Linux Docker), a"
+	echo "       job on this image can only run as the image's own user (issue #341)."
 fi
 
 # --cap-drop=ALL is CONST-ISOLATION-CONTAINER-PER-JOB's enforcement surface. Read the effective capability

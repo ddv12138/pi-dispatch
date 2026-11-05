@@ -20,6 +20,11 @@ const OUTSIDE_LEDGERS = Object.freeze({
   RunLivePhone: "The built RunLive route at phone width (#747), covered by its family ledger and browser sweep.",
   ApprovalRequest: "Built separately by #649; approval request state belongs to the run and parked pages.",
   ForkRun: "Built separately by #648; managed forks belong to the run page.",
+  SandboxesScreen: "Built under #771 for the sandbox screens; the screens left the console with the sandbox and gateway retirement, and the card stays as design history.",
+  RunWorkspace: "Built under #790 for the run's retained-workspace panel; the panel left the console with the sandbox and gateway retirement, and the card stays as design history.",
+  RunWorkspaceStates: "Built under #790 for the retained-workspace panel's states; the panel left the console with the sandbox and gateway retirement, and the card stays as design history.",
+  VenueDetail: "Built under #748 for the fleet's venue page; the page left the console with the sandbox and gateway retirement, and the card stays as design history.",
+  RunSandboxed: "Built under #747 for the run page's sandbox panel; the panel left the console with the sandbox and gateway retirement, and the card stays as design history.",
   SandboxWorkbench: "#754 maintained-library standalone gateway workbench, checked by gateway/test/design.test.mjs and its element ledger; not a console route.",
   SandboxTerminalRun: "#793 authorized per-terminal run context in the gateway, checked by gateway/test/design.test.mjs and its element ledger; not a console route.",
   SandboxWatch: "#792 standalone read-only observer surface, checked by gateway/test/design.test.mjs and its element ledger; not a console route.",
@@ -42,7 +47,6 @@ const COMPONENTS = new URL("../../design/system/components/", import.meta.url);
 const LEDGERS = new URL("./fixtures/console-ledger/", import.meta.url);
 const CARDS = Object.freeze({
   ModelsScreen: { page: "models", path: "/models" },
-  SandboxesScreen: { page: "sandboxes", path: "/runs/sandboxes", auth: "operator" },
   ZeroTouchScreen: { page: "zero-touch", path: "/runs/zero-touch" },
   ZeroTouchViewer: { page: "zero-touch", path: "/runs/zero-touch" },
   SecretsScreen: { page: "secrets", path: "/config/secrets" },

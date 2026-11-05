@@ -9,7 +9,6 @@ import * as live from "../src/console/live.mjs";
 import { acquireConsoleLock, consoleLockPath } from "../src/console/lock.mjs";
 import * as realPages from "../src/console/pages.mjs";
 import * as server from "../src/console/server.mjs";
-import * as sandboxData from "../src/sandbox-data.mjs";
 import { readTriggerEditor, configLocationsOf, panelEnv, PANEL_SERVICE_KEYS } from "../src/read-model.mjs";
 import * as realWhatif from "../src/console/whatif.mjs";
 
@@ -818,24 +817,6 @@ test("serve gives Fire now the process environment separately from deployment de
   assert.equal(typeof captured.pageDeps.triggerFireCheck, "function");
 });
 
-test("serve's sandbox service reads the hosts file a PI_SANDBOX_HOSTS_FILE set only in the deployment .env names", { skip: process.platform === "win32" ? "posix modes" : false }, async () => {
-  const dep = deployment();
-  const mapping = { target: "ops@mini1", deployment: "/srv/pi", nodePath: "/usr/bin/node", cliPath: "/srv/pi/cli.mjs", shell: "posix" };
-  writeFileSync(join(dep.dir, ".env"), "PI_SANDBOX_HOSTS_FILE=state/hosts.json\n", { mode: 0o600 });
-  mkdirSync(join(dep.dir, "state"), { mode: 0o700 });
-  writeFileSync(join(dep.dir, "state", "hosts.json"), JSON.stringify({ version: 1, hosts: { mini1: mapping } }), { mode: 0o600 });
-  const modules = fakeModules();
-  let service;
-  modules.sandboxData = { ...sandboxData, makeSandboxService: (args) => (service = sandboxData.makeSandboxService(args)) };
-  let stop;
-  const until = new Promise((resolve) => { stop = resolve; });
-  const errors = [];
-  const code = await runCli(["serve", "--deployment", dep.dir], { env: dep.env, modules, now: () => T0, uid: process.geteuid?.(), out: () => {}, err: (line) => errors.push(line), until, onListening: () => stop() });
-  assert.equal(code, 0, errors.join("\n"));
-  assert.equal(dep.env.PI_SANDBOX_HOSTS_FILE, undefined, "this shell does not set it");
-  assert.deepEqual(service.hosts().config?.hosts, { mini1: mapping });
-});
-
 test("serve hands each live load's who to loadPageData: a load no operator's stream shows says viewer, one an operator's shows names no role, each is marked live, and the console's readOnly rides along", async (t) => {
   const nullRes = () => ({ writableLength: 0, write: () => true, end() {}, destroy() {} });
   const dep = deployment();
@@ -959,7 +940,7 @@ test("the rules read joins retained local history, mirrored records and verified
 test("host setup authority comes only from the serve flag, and production wiring keeps preview/apply separate from page reads", async () => {
   for (const explicit of [false, true]) {
     const dep = deployment({ PI_CONSOLE_HOST_SETUP: "1" });
-    writeFileSync(join(dep.dir, ".env"), `PI_CONSOLE_HOST_SETUP=1\nPI_BACKENDS=openshell\nPI_PROVIDER=openai\nPI_LOGS_DIR=${dep.env.PI_LOGS_DIR}\nPI_CONSOLE_LISTEN=${dep.env.PI_CONSOLE_LISTEN}\n`, { mode: 0o600 });
+    writeFileSync(join(dep.dir, ".env"), `PI_CONSOLE_HOST_SETUP=1\nPI_BACKENDS=local\nPI_PROVIDER=openai\nPI_LOGS_DIR=${dep.env.PI_LOGS_DIR}\nPI_CONSOLE_LISTEN=${dep.env.PI_CONSOLE_LISTEN}\n`, { mode: 0o600 });
     const modules = fakeModules();
     const { deploymentServiceEnv } = await import("@edgehero/pi-dispatch/service-env");
     modules.serviceEnv = { deploymentServiceEnv };
@@ -982,7 +963,6 @@ test("host setup authority comes only from the serve flag, and production wiring
       assert.equal(typeof options.provider, "function");
       assert.equal(options.provider(), "openai", "safe metadata uses the current actual deployment provider");
       assert.equal(options.deployment, dep.dir, "the viewer lock binds the host-resolved deployment");
-      assert.equal(options.operations.includes("setup-egress-start"), false, "gateway-only deployments offer no proxy action");
     }
     await captured.pageDeps.setup({ role: "viewer", snapshot: {} });
     assert.equal(pageReads, 1);

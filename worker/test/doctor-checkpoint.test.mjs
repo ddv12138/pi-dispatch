@@ -133,20 +133,15 @@ test("under the OS temp dir, an old git and an unanswered git are warnings", () 
 	assert.equal([...temp, ...old, ...silent].some((c) => !c.ok && !c.warn), false, "never a ✗");
 });
 
-test("whether each venue can freeze a job is a fact line, from podman info's cgroup version on podman", () => {
+test("whether each venue can freeze a job is a fact line: local can, a venue that declares no freeze gets exit checkpoints only", () => {
 	const fs = { lstatSync: () => ({ isSymbolicLink: () => false, isDirectory: () => true, uid: 1000, mode: 0o40700 }) };
-	const venue = (podmanRead) => checkpointStoreChecks({ dir: "/srv/ckpt", uid: 1000, gitVersion: GIT, fs, venues: ["local", "podman"], podmanRead }).slice(-2);
-	const v2 = venue({ answered: true, info: { cgroupVersion: "v2" } });
-	assert.deepEqual(labels(v2), ["ok checkpoint store: local can freeze a job while its workspace is read (docker pause, the cgroup freezer)", "ok checkpoint store: podman can freeze a job while its workspace is read (podman pause, cgroup v2)"]);
-	const [, v1] = venue({ answered: true, info: { cgroupVersion: "v1" } });
-	assert.equal(v1.ok, true, "a fact, not a warning: nothing but another host clears it");
+	const venue = (names) => checkpointStoreChecks({ dir: "/srv/ckpt", uid: 1000, gitVersion: GIT, fs, venues: names }).slice(-2);
+	const [local, unknown] = venue(["local", "nope"]);
+	assert.equal(local.label, "checkpoint store: local can freeze a job while its workspace is read (docker pause, the cgroup freezer)");
 	// What a venue that cannot freeze actually gets: checkpoints at EXIT only, after the container is gone, and so no
 	// recovery from a worker crash. Never a read of a workspace the job is still writing.
-	assert.match(v1.label, /podman cannot freeze a job here \(rootless Podman on cgroup v1\), so its jobs get exit checkpoints only, taken once the container is gone, and are not recovered from a worker crash mid-run/);
-	assert.match(venue(null)[1].label, /whether podman can freeze a job is not known .*exit checkpoints only/);
-	const absent = checkpointStoreChecks({ dir: "/srv/ckpt", uid: 1000, gitVersion: GIT, fs, venues: ["nope"] }).at(-1);
-	assert.match(absent.label, /nope declares no freeze, so its jobs get exit checkpoints only/);
-	for (const c of [v1, ...venue(null), absent]) assert.doesNotMatch(c.label, /read while the job runs/);
+	assert.match(unknown.label, /nope declares no freeze, so its jobs get exit checkpoints only, taken once the container is gone, and are not recovered from a worker crash mid-run/);
+	for (const c of [local, unknown]) assert.doesNotMatch(c.label, /read while the job runs/);
 });
 
 test("a store that collides with the session store is a ✗, the one hard failure in the group (#645)", () => {

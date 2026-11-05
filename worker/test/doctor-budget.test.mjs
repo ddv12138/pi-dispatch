@@ -44,19 +44,6 @@ test("an unknown budget is a warning naming host_budget_unknown, and a setting t
 	assert.match(bad[0].label, /PI_HOST_MEMORY_BUDGET: 1g is below one job of the default size .* REFUSES TO START/);
 });
 
-test("on rootless Podman doctor reads the user service's limits as the worker does, and takes the smaller of the venues", () => {
-	const files = { "/sys/fs/cgroup/user.slice/user-1234.slice/user@1234.service/memory.max": "8589934592\n" };
-	const readFile = (path) => {
-		if (!(path in files)) throw Object.assign(new Error("absent"), { code: "ENOENT" });
-		return files[path];
-	};
-	const podman = { answered: true, info: { rootless: true, hostCpus: 4, memTotalMiB: 16384 } };
-	const view = doctorHostBudget({}, { daemon: DOCKER(), podman, readFile, euid: 1234 });
-	assert.deepEqual(view.facts, { memTotalMiB: 16384, hostCpus: 4, userMemMiB: 8192, userCpuCenti: null });
-	assert.equal(view.memMiB, 8192 - 1024);
-	assert.equal(doctorHostBudget({}, { podman: { ...podman, info: { ...podman.info, rootless: false } }, readFile, euid: 1234 }).facts.userMemMiB, undefined, "rootful: no user service read");
-});
-
 test("project sizes: a size the budget can never hold, a size over its share, and minimums the budget cannot keep are WARNINGS", () => {
 	const view = doctorHostBudget({ PI_HOST_MEMORY_BUDGET: "32g", PI_HOST_CPU_BUDGET: "8" }, {});
 	const limits = limitsOf([

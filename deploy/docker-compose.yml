@@ -84,7 +84,6 @@ services:
       PI_JOB_IMAGE: docker.io/ddv12138/pi-job:4.3.2
       PI_JOBS_DIR: ${PWD}/runtime/jobs
       PI_LOGS_DIR: ${PWD}/runtime/logs
-      PI_SANDBOX_DIR: ${PWD}/runtime/sandboxes
       PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
       PI_TRIGGERS_FILE: ${PWD}/runtime/triggers.json
       PI_PROJECTS_FILE: ${PWD}/runtime/projects.json
@@ -128,7 +127,6 @@ services:
       VALKEY_URL: redis://valkey:6379
       PI_JOBS_DIR: ${PWD}/runtime/jobs
       PI_LOGS_DIR: ${PWD}/runtime/logs
-      PI_SANDBOX_DIR: ${PWD}/runtime/sandboxes
       PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
       PI_TRIGGERS_FILE: ${PWD}/runtime/triggers.json
       PI_PROJECTS_FILE: ${PWD}/runtime/projects.json

@@ -17,8 +17,8 @@
  *     retried, never "another host".
  *   - On Linux, a listener held by a uid that is neither this account's euid, nor one of its subordinate uids, nor
  *     root is refused, from any cwd, unless PI_VALKEY_SHARED=1 in the deployment's `.env` says it is shared on purpose.
- *   - Root's listener (docker-proxy) is refused as well only where the deployment's venue is podman without `local`
- *     (`valkeyClientContext`'s `rootRefused`), which is where it cannot be the deployment's queue.
+ *   - Root's listener (docker-proxy) is the deployment's own Valkey wherever `local` is blessed, so it is accepted
+ *     (`valkeyClientContext`'s `rootRefused`; a caller that knows better may refuse it).
  *   - Of this host's addresses that answer, the first this account holds is pinned (else the first acceptable one), and
  *     every later connect of the process goes to that literal address, its owner judged again on each one (a Valkey that
  *     restarts is a port another account may take meanwhile).
@@ -29,9 +29,8 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { readFileSync } from "node:fs";
 import { networkInterfaces, userInfo } from "node:os";
 import { join } from "node:path";
-import { openshellSetupOf, venuesOf } from "./backends.mjs";
 import { DEFAULT_VALKEY_URL } from "./config.mjs";
-import { VALKEY_SHARED_KEY, judgeValkeyListeners, passwdNameFrom, pinnedValkeyUrl, probeTcpAddress, readStackKeys, readSubuidRanges, readValkeyKeys, valkeySharedOn, valkeySchemeOf } from "./podman-stack.mjs";
+import { VALKEY_SHARED_KEY, judgeValkeyListeners, passwdNameFrom, pinnedValkeyUrl, probeTcpAddress, readStackKeys, readSubuidRanges, readValkeyKeys, valkeySharedOn, valkeySchemeOf } from "./stack.mjs";
 import { VALKEY_PASSWORD_KEY, isLoopbackHost } from "./valkey-auth.mjs";
 
 /** A refused Valkey: tagged as the configError it is, so the worker's CLI exits 2 on it. */
@@ -64,9 +63,9 @@ export function defaultValkeyContext() {
  * listener held by a uid that is neither this account's euid, nor one of its subordinate uids, nor root, from any cwd.
  * Only two facts come from here:
  *   - `rootRefused`: root's listener (and one no socket row explains) is refused too where the deployment's venue is
- *     podman without `local`: this environment's PI_BACKENDS, else the `.env` in `cwd`. Elsewhere root's is docker's
- *     Valkey, published by root's docker-proxy, and is accepted. A caller that has judged its venue (the worker) passes
- *     it.
+ *     `local` is not blessed. The table holds `local` alone, so nothing refuses it here: this environment's PI_BACKENDS,
+ *     else the `.env` in `cwd`, still travels in the context for the caller that wants it. A caller that has judged its
+ *     venue (the worker) passes `rootRefused` itself.
  *   - `shared`: PI_VALKEY_SHARED=1 from the `.env` in `cwd`, and from nowhere else. NEVER from the environment, even
  *     where no `.env` is found: the opt-in states a fact about the DEPLOYMENT (this Valkey is shared on purpose), and
  *     the service's worker reads it from the deployment's `.env` alone. An environment opt-in would let `pi-dispatch run`
@@ -97,8 +96,6 @@ export function valkeyClientContext({ env = process.env, cwd = process.cwd(), pl
 		if (stack.error) error = stack.error;
 		else {
 			if (typeof stack.keys.PI_BACKENDS === "string") fileKeys.PI_BACKENDS = stack.keys.PI_BACKENDS;
-			// Issue #707: the engine decides whether the queue is this account's Quadlet Valkey (`openshellSetupOf`).
-			if (typeof stack.keys.PI_OPENSHELL_ENGINE === "string") fileKeys.PI_OPENSHELL_ENGINE = stack.keys.PI_OPENSHELL_ENGINE;
 		}
 		const keys = readValkeyKeys(content, { loader: "systemd", path: envPath });
 		if (keys.error) error ??= keys.error;
@@ -123,16 +120,12 @@ export function valkeyContextFromResolution({ service, envPath = null, shared, p
 		if (typeof fileValue(key) === "string") fileKeys[key] = fileValue(key);
 	}
 	if (typeof service?.env?.PI_BACKENDS === "string") env.PI_BACKENDS = service.env.PI_BACKENDS;
-	// Issue #707 (review round 2 of #715): the engine beside the list, which decides whether an openshell venue's queue is
-	// this account's Quadlet Valkey (`openshellSetupOf`).
-	if (typeof service?.env?.PI_OPENSHELL_ENGINE === "string") env.PI_OPENSHELL_ENGINE = service.env.PI_OPENSHELL_ENGINE;
 	if (typeof shared === "string") fileKeys[VALKEY_SHARED_KEY] = shared;
 	return valkeyContextFromKeys({ env, envPath, fileKeys, platform });
 }
 
 /** The keys a client's context takes from a deployment `.env` (`valkeyContextFromKeys`). */
-// Issue #707 (review round 2 of #715): and PI_OPENSHELL_ENGINE, which `valkeyContextFromKeys` reads beside PI_BACKENDS.
-export const VALKEY_CONTEXT_KEYS = Object.freeze(["VALKEY_URL", VALKEY_PASSWORD_KEY, VALKEY_SHARED_KEY, "PI_BACKENDS", "PI_OPENSHELL_ENGINE"]);
+export const VALKEY_CONTEXT_KEYS = Object.freeze(["VALKEY_URL", VALKEY_PASSWORD_KEY, VALKEY_SHARED_KEY, "PI_BACKENDS"]);
 
 /**
  * A context from keys a caller has already read out of the deployment's `.env` (`fileKeys`, the `VALKEY_CONTEXT_KEYS`
@@ -141,20 +134,13 @@ export const VALKEY_CONTEXT_KEYS = Object.freeze(["VALKEY_URL", VALKEY_PASSWORD_
  * `valkeyClientContext`'s.
  */
 export function valkeyContextFromKeys({ env = process.env, envPath = null, fileKeys = {}, error = null, platform = process.platform, rootRefused } = {}) {
-	const fileVenue = typeof fileKeys.PI_BACKENDS === "string" ? { PI_BACKENDS: fileKeys.PI_BACKENDS } : {};
 	const shared = valkeySharedOn(fileKeys[VALKEY_SHARED_KEY]);
 	const filePassword = fileKeys[VALKEY_PASSWORD_KEY] || null;
 	const fileUrl = typeof fileKeys.VALKEY_URL === "string" ? fileKeys.VALKEY_URL : null;
 	const envPassword = typeof env[VALKEY_PASSWORD_KEY] === "string" && env[VALKEY_PASSWORD_KEY] !== "" ? env[VALKEY_PASSWORD_KEY] : null;
-	let venues = { localUsed: true, podmanUsed: false };
-	try {
-		venues = venuesOf({ PI_BACKENDS: typeof env.PI_BACKENDS === "string" ? env.PI_BACKENDS : fileVenue.PI_BACKENDS });
-	} catch {
-		// An unparseable list: the default venue, as doctor reads it; the worker refuses to boot on it anyway.
-	}
-	// Issue #707 (review round 1 of #715): and an openshell venue on Podman that is the queue's engine, as the worker judges it.
-	const engine = typeof env.PI_OPENSHELL_ENGINE === "string" ? env.PI_OPENSHELL_ENGINE : fileKeys.PI_OPENSHELL_ENGINE;
-	const derived = platform === "linux" && ((venues.podmanUsed && !venues.localUsed) || openshellSetupOf(venues, { PI_OPENSHELL_ENGINE: engine }).valkeyEngine === "podman");
+	// The venue list is still read (the file's PI_BACKENDS travels in the context), but the table holds `local` alone,
+	// so root's docker-proxy listener is the deployment's own Valkey everywhere: nothing derives a refusal any more.
+	const derived = false;
 	const envUrl = typeof env.VALKEY_URL === "string" ? env.VALKEY_URL : null;
 	return { envPath, shared, rootRefused: typeof rootRefused === "boolean" ? rootRefused : derived, error, password: { environment: envPassword, file: filePassword }, url: { environment: envUrl, file: fileUrl } };
 }

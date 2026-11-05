@@ -16,7 +16,6 @@ import {
 } from "../src/reason-catalog.mjs";
 import * as tables from "../src/comment-tables.mjs";
 import { MCP_REFUSAL_COMMENT, mcpRefusalComment } from "../src/mcp-preflight.mjs";
-import { OPENSHELL_BIND_LINGERING } from "../src/backends.mjs";
 import { BUNDLE_SKIPPED_REASONS, LIVE_SKIPPED_REASONS, PLAN_RECORD_REASONS, RECOVER_SKIPPED_REASONS, SESSION_REASONS, STEER_SKIPPED_REASONS } from "../src/run-history.mjs";
 import { recordNestedEnum, recordReasonEnum } from "./helpers/spec-enum.mjs";
 import { CONTAINER_EXIT_UNKNOWN, CONTAINER_INFRA_EXIT, WORKER_ERROR } from "../src/record-reason.mjs";
@@ -43,7 +42,6 @@ const AMBIGUOUS = new Map([
 	["awaiting-input", { posts: [tables.PARKED_COMMENT, tables.PARKED_COMMENT_PR, tables.HELD_TAKEN_COMMENT], because: "an issue's park, a pull request's (the reply keeps the comment phrase), and a held reply already taken" }],
 	["job-user-unmappable", { posts: Object.values(tables.JOB_USER_COMMENTS), because: "JOB_USER_COMMENTS is keyed by the cause, which the record does not carry" }],
 	["envelope-mismatch", { posts: Object.values(tables.ENVELOPE_MISMATCH_COMMENTS), because: "ENVELOPE_MISMATCH_COMMENTS is keyed by the cause (no envelope, or a different one), which the record does not carry" }],
-	["podman-conf-widens-job", { posts: Object.values(tables.PODMAN_CONF_COMMENTS), because: "PODMAN_CONF_COMMENTS is keyed by the source and the finding, which the record does not carry" }],
 ]);
 
 /** Is this export a plain table (an object literal, frozen or not), as opposed to a string, a function or a class? */
@@ -60,7 +58,6 @@ const CAUSE_KEYED = new Map([
 	["JOB_USER_COMMENTS", { reason: "job-user-unmappable", keys: "the cause (default, runtime-unreadable)" }],
 	["MODEL_NOT_ALLOWED_COMMENTS", { reason: "model-not-allowed", keys: "the pre-start path: main (no why) or the why fallback-unlisted", whyKeys: ["fallback-unlisted"] }],
 	["ENVELOPE_MISMATCH_COMMENTS", { reason: "envelope-mismatch", keys: "the cause (no-envelope, mismatch)" }],
-	["PODMAN_CONF_COMMENTS", { reason: "podman-conf-widens-job", keys: "the source and finding (rootful-*, live-*, widens, unread)" }],
 ]);
 
 /**
@@ -177,7 +174,7 @@ test("every plain-object export of comment-tables.mjs is classified: keyed by re
 		}
 		for (const key of whyKeys) assert.ok(Object.hasOwn(tables[name], key), `${name}.${key} is still a row`);
 	}
-	assert.ok(Object.keys(KEYED).includes("TERMINAL_COMMENTS") && Object.keys(KEYED).includes("OPENSHELL_REFUSALS"), "the derivation sees the leaf's tables");
+	assert.ok(Object.keys(KEYED).includes("TERMINAL_COMMENTS") && Object.keys(KEYED).includes("FAILED_COMMENT_BY_REASON"), "the derivation sees the leaf's tables");
 });
 
 test("a reason with a fixed comment explains itself with that comment, identical, wherever a table is keyed by it", () => {
@@ -196,7 +193,6 @@ test("a reason with a fixed comment explains itself with that comment, identical
 	const pairs = [
 		["model-unknown", tables.MODEL_UNKNOWN_COMMENT],
 		["recovery-host-lost", tables.RECOVERY_HOST_LOST_COMMENT],
-		["openshell-bind-sandbox-lingering", OPENSHELL_BIND_LINGERING.comment],
 	];
 	for (const reason of Object.keys(MCP_REFUSAL_COMMENT)) if (!AMBIGUOUS.has(reason)) pairs.push([reason, mcpRefusalComment(reason, null)]);
 	for (const [reason, sentence] of pairs) {
@@ -225,7 +221,7 @@ test("each ambiguous reason really has two or more different comments, and the c
 		assert.ok(posts.length + (templated ? 1 : 0) >= 2, `${reason} (${because}): two or more paths, or it is not ambiguous and must be derived`);
 		for (const post of posts) assert.notEqual(REASONS[reason].sentence, post, `${reason}: ${because}, so the catalog's sentence is general`);
 	}
-	assert.equal(AMBIGUOUS.size, 8, "the list stays tight: a new entry is a reviewed decision");
+	assert.equal(AMBIGUOUS.size, 7, "the list stays tight: a new entry is a reviewed decision");
 });
 
 test("why picks the comment that was posted, where the table is keyed by it", () => {

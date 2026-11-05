@@ -241,9 +241,9 @@ test("a floor naming a switched-off control REFUSES BOOT, and doctor says which 
 test("PI_BACKENDS need not include local, and its FIRST entry is the default (#354)", () => {
 	// MOVED DELIBERATELY. This test used to pin the guard that refused a set without `local`, on the reasoning that
 	// an unflagged trigger is dispatched to the default. It is dispatched to `backends[0]`, whatever that names, and
-	// the registry refuses at boot a default it does not hold; the operator decided `PI_BACKENDS=podman` alone is a
-	// deployment. `known` was the stand-in for a table with a second entry; since the podman venue landed the real table
-	// has one too, and both are driven below.
+	// the registry refuses at boot a default it does not hold; the operator decided a venue set is a deployment. The
+	// sandbox prune shrank the real table to `local`, so the second-entry behaviour is driven through the `known`
+	// seam, the same stand-in the guard's removal was first tested with.
 	const known = ["local", "podman"];
 	assert.deepEqual(parseBackendList("podman", { known }), ["podman"], "a set without local parses");
 	assert.deepEqual(parseBackendList(" podman , local , podman ", { known }), ["podman", "local"], "deduped, order kept, so the default is the first named");
@@ -252,9 +252,8 @@ test("PI_BACKENDS need not include local, and its FIRST entry is the default (#3
 	for (const raw of [undefined, "", "   "]) assert.deepEqual(parseBackendList(raw, { known }), [DEFAULT_BACKEND]);
 	// The seam narrows what is known, never widens the refusal away: an unknown name is still refused, by name.
 	assert.throws(() => parseBackendList("vapour", { known }), /unknown backend "vapour" \(known: local, podman\)/);
-	// And without the seam, the real table, which holds `podman` now: a set without `local` is written through it.
-	assert.deepEqual(parseBackendList("podman"), ["podman"]);
-	assert.throws(() => parseBackendList("vapour"), /unknown backend "vapour" \(known: local, podman, openshell, openshell-bind\)/);
+	// And without the seam, the real table, which the prune shrank to `local`: an unknown name names what is known.
+	assert.throws(() => parseBackendList("vapour"), /unknown backend "vapour" \(known: local\)/);
 	// The guard is GONE rather than merely unreachable, so reinstating it fails here rather than silently.
 	const src = readFileSync(new URL("../src/backends.mjs", import.meta.url), "utf8");
 	assert.doesNotMatch(src, /PI_BACKENDS must include/);

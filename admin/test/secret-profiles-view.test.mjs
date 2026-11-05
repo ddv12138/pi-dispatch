@@ -171,20 +171,15 @@ test("recordOpenshell and recordSecretsProfile rebuild, and the model projection
 
 const ctxOf = (role, data) => ({ query: { id: "gh-1" }, session: { name: role, role }, data: { now: AT, env: {}, ...data }, readOnly: false });
 
-test("the console's run page: the sandbox policy, the rule hosts and the secrets profile, escaped; nothing for a run without them", async () => {
+test("the console's run page: the secrets profile, escaped; nothing for a run without it", async () => {
   const page = async (extra) => (await pagePanels("run", ctxOf("operator", { run: { record: { jobId: "gh-1", kind: "github", target: "acme/web#1", backend: "openshell", ...extra }, source: "local" } }))).map((p) => p.html).join("");
-  const got = await page({ openshell: OPENSHELL, secretsProfile: "prod" });
-  assert.match(got, /<dt>Sandbox policy<\/dt><dd>copy mode, 1 credential provider, 3 placeholders<\/dd>/);
-  const hostFacts = parseDocument(`<html><body>${got}</body></html>`).querySelectorAll(".fact");
-  const ruleHosts = [...hostFacts].find((f) => f.querySelector("dt")?.textContent === "Rule hosts");
-  assert.ok(ruleHosts.querySelector("dd").textContent.startsWith("2 rule hosts:"));
-  assert.deepEqual([...ruleHosts.querySelectorAll(".chip")].map((e) => e.textContent), OPENSHELL.ruleHosts, "each validated host is a chip, in record order");
+  const got = await page({ secretsProfile: "prod" });
   assert.match(got, /<dt>Secrets profile<\/dt><dd>prod<\/dd>/);
   const none = await page({});
-  assert.ok(!none.includes("Sandbox policy") && !none.includes("Secrets profile"));
-  for (const hostile of [{ openshell: { ...OPENSHELL, mode: "<b>HOSTILE-MODE</b>" } }, { secretsProfile: "<script>" }, { openshell: { ...OPENSHELL, ruleHosts: ["<img src=x>"], ruleHostCount: 0 } }]) {
+  assert.ok(!none.includes("Secrets profile"));
+  for (const hostile of [{ secretsProfile: "<script>" }]) {
     const html = await page(hostile);
-    assert.ok(!html.includes("<img") && !html.includes("<script>") && !html.includes("HOSTILE-MODE"), JSON.stringify(hostile));
+    assert.ok(!html.includes("<script>"), JSON.stringify(hostile));
   }
 });
 

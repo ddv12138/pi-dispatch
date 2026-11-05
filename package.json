@@ -2,7 +2,7 @@
   "name": "pi-dispatch",
   "version": "4.3.2",
   "private": true,
-  "description": "Run the pi coding agent as a self-hosted service: queued jobs in locked down Docker or Podman containers, spend caps checked before anything is spent, triggered by cron, the CLI, or GitHub, GitLab, Forgejo and Azure DevOps events.",
+  "description": "Run the pi coding agent as a self-hosted service: queued jobs in locked down Docker containers, spend caps checked before anything is spent, triggered by cron, the CLI, or GitHub, GitLab, Forgejo and Azure DevOps events.",
   "license": "MIT",
   "type": "module",
   "engines": {
@@ -12,11 +12,10 @@
     "image/runner",
     "worker",
     "receiver",
-    "admin",
-    "gateway"
+    "admin"
   ],
   "scripts": {
-    "test": "node --test \"image/runner/test/*.test.mjs\" \"worker/test/*.test.mjs\" \"receiver/test/*.test.mjs\" \"admin/test/*.test.mjs\" \"gateway/test/*.test.mjs\"",
+    "test": "node --test \"image/runner/test/*.test.mjs\" \"worker/test/*.test.mjs\" \"receiver/test/*.test.mjs\" \"admin/test/*.test.mjs\"",
     "test:affected": "node scripts/test-affected.mjs"
   },
   "overrides": {

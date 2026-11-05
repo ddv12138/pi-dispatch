@@ -52,8 +52,8 @@ export function readPidNamespace({ readlink = readlinkSync } = {}) {
 /**
  * The value the job's runner puts in PI_DISPATCH_RUNNER_PID (openChildLedger): its pid, and its pid namespace where it
  * can read one, as `<pid>:<namespace>`. A pid alone is not an identity: a process in a NEW pid namespace (`unshare
- * -Upf`, a sandbox wrapper that runs its command as the first child) can have the job runner's pid (measured: 2 under
- * Podman, 7 under Docker Desktop, both reached from inside a job). With the namespace beside it, that process is nested.
+ * -Upf`, an isolation wrapper that runs its command as the first child) can have the job runner's pid (measured:
+ * 7 under Docker Desktop, reached from inside a job). With the namespace beside it, that process is nested.
  */
 export function runnerIdentity(pid, namespace = readPidNamespace()) {
 	return namespace === null ? String(pid) : `${pid}:${namespace}`;

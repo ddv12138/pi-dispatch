@@ -63,13 +63,10 @@ import { awaitInputShadow, createAwaitInput, parkedTerminal } from "./src/await-
 import { createRoleSubagents, readRoleInputs, roleSubagentShadow } from "./src/model-roles.mjs";
 import { createReportProgress, reportProgressShadow } from "./src/report-progress.mjs";
 import { assertSteerReady, createInbox } from "./src/inbox.mjs";
-import { FRAME_FD, frameFdOpen, isolateStdin, openFrameReader } from "./src/steer-frames.mjs";
 import { RECOVERY_PROMPT, recoverSession } from "./src/recover.mjs";
 import { attachTurnBudget } from "./src/turn-budget.mjs";
 import { createToolStartLatch, installProviderFailureObserver, providerReplaySafe } from "./src/provider-failure.mjs";
 import { LAYOUT } from "./src/layout.mjs";
-import { applyBundleEnv } from "./src/bundle-env.mjs";
-import { createTranscriptMirror, transcriptMirrorWanted } from "./src/transcript-mirror.mjs";
 // NOTE: usage-meter.mjs meters at ModelRuntime.prototype, with the class handed over from the import above,
 // and reaches pi-ai (its compat half, the brake's stream factory) only through a copy it proves at runtime,
 // never a static import. Never add a pi-ai package specifier to this file's imports: two copies of that
@@ -145,12 +142,6 @@ let finishMeter = () => {};
 /** The exit line's key (issue #545) and its one writer, both set in the job runner's block at the end of this file before main runs. */
 let exitKey;
 let exitWriter;
-/**
- * Issue #686: the stdin frame channel a stdin-steered attempt's messages arrive on (`{ open, consumed }` for
- * src/inbox.mjs), set beside the key in the job runner's block; null when frame 1 brought no key. Read only when the
- * key came over `stdin-frames`; every other attempt is the mount transport, exactly as before.
- */
-let frameChannel = null;
 // The job's MCP servers' close (REQ-MCP-OPERATOR-SERVERS), for the catch path: a throw after they connected (a refused
 // command, a shadowed tool) skips the prompt's finally, and a live stdio server's pipes would keep this process up.
 let stopMcp = async () => {};
@@ -159,9 +150,7 @@ async function main() {
 	// A worker that asked for a signed exit line and did not deliver a usable key: the run goes on with an unsigned
 	// line, which that worker reads as no line at all (the floor, tokens unknown). Said here, by kind only.
 	if (exitKey.problem !== null) log("exit_key_unread", { problem: exitKey.problem });
-	// Issue #686: whether the key came as frame 1 of the stdin frame channel, the one fact that admits PI_STEER on the
-	// sandbox layout (PI_EXIT_AUTH itself has already left the environment).
-	const cfg = parseRunnerEnv(process.env, { steerFrames: exitKey.frames === true });
+	const cfg = parseRunnerEnv(process.env);
 	let subscriptionEntries = [];
 	try { subscriptionEntries = verifySubscriptionAuthEntries(JSON.parse(process.env.PI_SUBSCRIPTION_AUTH ?? "[]")); }
 	catch { throw configError("the subscription snapshot or adapter is unavailable; reconnect or re-stage on its owner host"); }
@@ -182,8 +171,7 @@ async function main() {
 	if (cfg.approvalGates.length && !cfg.sessionFile) throw configError("approval gates require a session", "approval-without-session");
 	// Same moment, same exit code (issue #646): a steer-armed job with no readable /inbox, or no exit key to sign its
 	// acks with, would run while every message sent to it waited unread. The worker arms steer only with both.
-	// On the stdin frame channel (issue #686) the channel is checked instead of /inbox.
-	assertSteerReady({ steer: cfg.steer, exitKey: exitKey.key, ...(exitKey.frames === true ? { frames: frameChannel } : {}) });
+	assertSteerReady({ steer: cfg.steer, exitKey: exitKey.key });
 	// Same moment, same exit code, and for EVERY job, command jobs included (issue #341): a job user that cannot
 	// traverse /job loses its trigger skills without a word and would otherwise spend anyway.
 	// /workspace joins the list for READ only (issue #355). On an SELinux-enforcing host, an operator's local folder
@@ -205,11 +193,6 @@ async function main() {
 	const watchToolsConfig = watchReadOnly && !watchDecisionInput ? readWatchTools() : null;
 	const roleInputs = readRoleInputs();
 	if (watchReadOnly || questionGroupingInput || answerDraftInput) assertWatchCompatible(cfg, { roles: roleInputs });
-	// Issue #704 part 3: a project secret bundle's plain variables on a gateway venue, from the job's own directory into
-	// this process's environment (pi's), before any runtime or request exists. Same moment, same exit code: a flag
-	// without a usable file refuses before spend rather than running the job without a variable it was given.
-	const bundleVars = applyBundleEnv();
-	if (bundleVars > 0) log("bundle_env_applied", { count: bundleVars });
 	// Offline is a property of the RUNNER, not of whoever started it. Set before the loader is built,
 	// because the loader is what resolves package sources: with offline off, an unresolved source is a
 	// live `npm install` at agent runtime, from inside the job, against a network the job's own input
@@ -405,14 +388,7 @@ async function main() {
 	// attempt, and that key is what separates one attempt's acks from another's. It holds what it reads while the run is
 	// parked, so it reads the await tool's flag.
 	// env-internal PI_JOB_ID: set by the worker on the container (its container name, `pi-job-<queue id>`).
-	// Issue #686: on a copying venue its messages come as frames on stdin (`frames`), else from the /inbox mount.
-	const inbox = cfg.steer ? createInbox({ exitKey: exitKey.key, runId: process.env.PI_JOB_ID, log, isParked: () => awaitInput?.state.called === true || requestApproval?.state.called === true, ...(exitKey.frames === true ? { frames: frameChannel } : {}) }) : null;
-	// Issue #686: the frame channel (fd 3) is open from here on, the moment the inbox exists: the key left the pipe at the
-	// top of this file, and a frame is only verified and held, never run. It is read synchronously at the inbox's own
-	// moments (steer-frames.mjs openFrameReader says why), so a frame the worker wrote at the spawn is read at the first
-	// agent_start at the latest; the seed below drops whatever the transcript already delivered. A no-op on the mount
-	// transport.
-	inbox?.listen();
+	const inbox = cfg.steer ? createInbox({ exitKey: exitKey.key, runId: process.env.PI_JOB_ID, log, isParked: () => awaitInput?.state.called === true || requestApproval?.state.called === true }) : null;
 	const extensionFactories = [...(jobMcp?.factories ?? []), ...(awaitInput?.factories ?? []), ...(requestApproval?.factories ?? []), ...(reportProgress?.factories ?? []), ...(roleSubagents?.factories ?? []), ...(inbox ? [inbox.factory] : [])];
 	const watchTools = watchReadOnly ? createWatchTools({ config: watchToolsConfig, runtime: modelRuntime }) : null;
 	const answerTools = answerDraftInput ? createAnswerDraftTools({ input: answerDraftInput, runtime: modelRuntime }) : null;
@@ -825,47 +801,12 @@ if (!nestedRunner) {
 	// it as this runner does would drain a stdin that is not its own, or wait on one no one writes.
 	// env-internal PI_EXIT_AUTH: written by the worker into the job's closed env map, removed here once read.
 	delete process.env.PI_EXIT_AUTH;
-	// Issue #686: on the stdin frame channel frame 1 came on fd 0, which the supervisor then closed, and the message frames
-	// follow on fd 3 (steer-frames.mjs FRAME_FD says why not fd 0). Now, before any extension or tool exists, /dev/null is
-	// put on fd 0, so a child that inherits stdin inherits /dev/null. A close that failed is said by code and fails open
-	// (fd 0 is then a socket at EOF, never the frames); the other swap failures, and no supervisor's socket on fd 3 (a
-	// runner started without the supervisor), are no frame channel, which a steered run refuses before it spends.
-	if (exitKey.frames === true && exitKey.key !== null) {
-		const isolated = isolateStdin();
-		if (!isolated.isolated) log("steer_stdin_shared", { code: isolated.code });
-		// A swap that left fd 0 unvouched for (review round 1, L5), or no supervisor's socket on fd 3 (L4): no channel, so a
-		// steered run refuses before pi loads (assertSteerReady, `steer-inbox-missing`).
-		frameChannel = !isolated.refuse && frameFdOpen() ? { open: () => openFrameReader(FRAME_FD), consumed: exitKey.consumed } : null;
-	}
-	// Issue #686: on a copying venue the worker asks for the session file's lines over stderr, signed with the same key
-	// (transcript-mirror.mjs), because the file is in the sandbox until the download. Decided now, beside the key, and the
-	// variable leaves this process's environment at once, as PI_EXIT_AUTH does: a nested runner or any child that read it
-	// would mirror a file it was never asked to. Unset (every binding venue), nothing is started and stderr is untouched.
-	const mirrorWanted = transcriptMirrorWanted(process.env, { key: exitKey.key });
-	// env-internal PI_TRANSCRIPT: written by the worker into the job's closed env map, removed here once read.
-	delete process.env.PI_TRANSCRIPT;
-	if (mirrorWanted.problem !== null) log("transcript_mirror_off", { problem: mirrorWanted.problem });
-	const transcriptMirror = mirrorWanted.on
-		? createTranscriptMirror({
-				// env-internal PI_SESSION_FILE, PI_JOB_ID: the worker's own per-job inputs. PI_JOB_ID is the run id the MAC
-				// names, the same string the exit line and the steer ack carry.
-				file: process.env.PI_SESSION_FILE,
-				key: exitKey.key,
-				runId: process.env.PI_JOB_ID,
-				log,
-			})
-		: null;
-	transcriptMirror?.start();
 	exitWriter = createExitWriter({
 		key: exitKey.key,
 		// env-internal PI_JOB_ID: set by the worker on the container, so the exit line can name its job.
 		jobId: process.env.PI_JOB_ID,
 		// Synchronously, every byte, to fd 1 (writeAllSync): the SIGTERM path exits the moment the line is written.
-		// Issue #686: the transcript's last lines first, on every path (the decided line, the catch path, SIGTERM), so a
-		// record is never left unwritten behind an exit line the process dies right after. Never throws (drain swallows).
 		write: (line) => {
-			transcriptMirror?.drain();
-			transcriptMirror?.stop();
 			writeAllSync(1, line);
 		},
 		exit: (code) => process.exit(code),

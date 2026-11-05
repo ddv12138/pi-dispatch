@@ -29,7 +29,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** The workspace test trees, matching the root package.json test glob. Non-recursive, so `helpers/` is not scanned. */
-const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test", "gateway/test"];
+const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test"];
 
 /**
  * A `mkdtemp` or `mkdtempSync` whose argument reaches `tmpdir()` textually: `join(tmpdir(), ...)`,

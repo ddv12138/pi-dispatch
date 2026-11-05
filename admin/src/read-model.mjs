@@ -1,6 +1,4 @@
 import { readSubscriptionStatus } from "@edgehero/pi-dispatch/subscription-status";
-import { readSandboxInventories } from "@edgehero/pi-dispatch/sandbox-inventory";
-import { readSandboxSessions, requestSandboxEnd } from "@edgehero/pi-dispatch/sandbox-sessions";
 /**
  * The admin extension's whole data-access surface: reads the queue, the budget counter, the durable
  * run-history files (INT-RUN-HISTORY-FILE-CONTRACT, admin is the named consumer), the settings overlay
@@ -18,7 +16,6 @@ import { readSandboxSessions, requestSandboxEnd } from "@edgehero/pi-dispatch/sa
  * `{ missing }` rather than throwing to the command handler.
  */
 
-import { readTriggerEgress } from "./read-trigger-egress.mjs";
 import { watchDurationMs, WATCH_ID_RE as WATCH_RULE_ID_RE } from "@edgehero/pi-dispatch/watch-contract";
 import { makeWatchStore } from "@edgehero/pi-dispatch/watch-store";
 import { MODEL_WHY, providerFailureOf } from "@edgehero/pi-dispatch/model-failover-protocol";
@@ -28,7 +25,7 @@ import { GIT_READ_FLAGS } from "@edgehero/pi-dispatch/git-hardening";
 import { join, delimiter, sep, isAbsolute, resolve as resolvePath } from "node:path";
 import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
-import { logsDirPath, defaultSandboxDir, delimitedList, workerName, CHAIN_DEPTH_MAX_DEFAULT, CHAIN_MAX_PER_JOB_DEFAULT, WORKER_NAME_RE } from "@edgehero/pi-dispatch/config";
+import { logsDirPath, delimitedList, workerName, CHAIN_DEPTH_MAX_DEFAULT, CHAIN_MAX_PER_JOB_DEFAULT, WORKER_NAME_RE } from "@edgehero/pi-dispatch/config";
 import { settingsFilePath, readOverlay, readOverlayDocument, writeOverlay, KNOWN_KEYS, OPERATOR_ONLY_KEYS } from "@edgehero/pi-dispatch/runtime-settings";
 import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, checkTokenInvariant } from "@edgehero/pi-dispatch/budget-rule";
 import { fmtTokens } from "./panel.mjs";
@@ -47,7 +44,10 @@ import { danglingProjectRows, tokenKeyPrefixFor, isModelScope, isProjectScope, p
 // worker would load (issue #499 part B).
 import { PROJECT_ID_RE, parseProjects, projectOf, projectsVersionFor } from "@edgehero/pi-dispatch/projects";
 import { BUNDLE_FORMATS, parseSecretBundleProfiles, parseSecretProfiles, withinRoots } from "@edgehero/pi-dispatch/secret-profiles";
-import { ABSENT, BACKEND_NAMES, BACKENDS, CREDENTIAL_CUSTODY, OBSERVATIONS, OPENSHELL_BACKENDS, PROPERTY_NAMES, SERVES, UNATTRIBUTED_BACKEND, declarationOf, effectiveWord, meets, isDeclaration, parseBackendList, parseHostBackends, servesOf } from "@edgehero/pi-dispatch/backends";
+import { ABSENT, BACKEND_NAMES, BACKENDS, CREDENTIAL_CUSTODY, OBSERVATIONS, PROPERTY_NAMES, SERVES, UNATTRIBUTED_BACKEND, declarationOf, effectiveWord, meets, isDeclaration, parseBackendList, parseHostBackends, servesOf } from "@edgehero/pi-dispatch/backends";
+// The openshell backends left the registry with the sandbox suite's removal, but a run record an older release wrote
+// may still name one, so the openshell-only reads here keep the names by hand instead of the export that is gone.
+const OPENSHELL_BACKENDS = Object.freeze(["openshell", "openshell-bind"]);
 import { parseTriggersDocument, triggersFileNewer, triggersFileVersionProblem } from "@edgehero/pi-dispatch/triggers";
 // The allocation envelope, the plan module and the applied split (issue #504 part C), the worker's own: the admin judges an
 // envelope with the parser the worker boots with, and applies or reverts a plan through the worker's `applyPlan` and
@@ -85,7 +85,7 @@ import { runMirrorMaxRunsOf } from "@edgehero/pi-dispatch/retention";
 import { stallKey } from "@edgehero/pi-dispatch/scheduler-stall-guard";
 import { makeCheckWaitSkew } from "@edgehero/pi-dispatch/triggers-file";
 import { modelFrom, providerFrom, jobImageFrom, allowedModelsFrom } from "@edgehero/pi-dispatch/config";
-import { parseSandboxes, parseBudgetFrom, parseCpuReserve } from "@edgehero/pi-dispatch/host-telemetry";
+import { parseBudgetFrom, parseCpuReserve } from "@edgehero/pi-dispatch/host-telemetry";
 import { parseJobsMore, parseLiveJobs } from "@edgehero/pi-dispatch/live-jobs";
 import { CAP_SECRET, parseCaps } from "@edgehero/pi-dispatch/capabilities";
 import { sessionKeyOfRecord } from "@edgehero/pi-dispatch/session-key";
@@ -169,13 +169,6 @@ export function resolvePaths(env = process.env) {
     // Resolved here like every other env read; panel.mjs itself stays env-free -- the extension entry
     // point flips its `setGlyphs` switch from this value before anything renders.
     asciiGlyphs: env.PI_DISPATCH_ASCII === "1",
-    // REQ-RESURRECTABLE-SANDBOX: where finished runs' directories are retained, and for how long. Read
-    // from env for the same reason as everything above -- never loadConfig. The `0` here means retention
-    // OFF (the panel then says so rather than offering a key that always refuses), which is the opposite
-    // of the log/session sentinels; worker/src/config.mjs carries the full reasoning.
-    sandboxDir: env.PI_SANDBOX_DIR || defaultSandboxDir(env),
-    sandboxRetentionHours: parseNonNegInt(env.PI_SANDBOX_RETENTION_HOURS, 24),
-    sandboxIdleMinutes: parseNonNegInt(env.PI_SANDBOX_IDLE_MINUTES, 30),
     // The two dispatch_run bounds the extension enforces producer-side, read DIRECTLY from env (never
     // loadConfig, which throws on unrelated GitHub-auth problems). `delimitedList`/`nonNegativeInt` are
     // private to the worker's config, so the same shapes are reimplemented here. Default roots [] fails
@@ -219,7 +212,7 @@ export const DEPLOYMENT_SCAFFOLD_FILES = Object.freeze([".env", "triggers.json",
  * own on purpose (`OQ-038`, `INT-DEPLOYMENT-POINTER-CONTRACT`), and so do the panel's own settings (PI_DISPATCH_*).
  */
 const TOKEN_ENV_NAMES = Object.freeze({ maxTokens: "PI_MAX_TOKENS", ...WORKER_TOKEN_ENV_NAMES });
-export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_SANDBOX_DIR", "PI_SANDBOX_RETENTION_HOURS", "PI_SANDBOX_IDLE_MINUTES", "PI_CAPTURE_JOB_LOGS", "PI_SCHEDULER_STALL_MAX", "PI_CHAIN_DEPTH_MAX", "PI_CHAIN_MAX_PER_JOB", "PI_RUN_MIRROR_MAX_RUNS", "PI_WORKER_NAME", "PI_CONSOLE_LISTEN", "PI_CONSOLE_BIND_PUBLIC", "PI_SESSIONS_DIR", "PI_SECRET_BUNDLES", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "TMPDIR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
+export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_CAPTURE_JOB_LOGS", "PI_SCHEDULER_STALL_MAX", "PI_CHAIN_DEPTH_MAX", "PI_CHAIN_MAX_PER_JOB", "PI_RUN_MIRROR_MAX_RUNS", "PI_WORKER_NAME", "PI_CONSOLE_LISTEN", "PI_CONSOLE_BIND_PUBLIC", "PI_SESSIONS_DIR", "PI_SECRET_BUNDLES", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "TMPDIR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
 // The console's address (the insights move to the console): `/dispatch insights` and the `i` key print the spend
 // screen's URL from the PI_CONSOLE_LISTEN the console itself reads from this `.env` (`console/link.mjs`).
 // The session store (issue #647, part 2): `/dispatch chat` forks a finished run from the PI_SESSIONS_DIR the worker
@@ -235,7 +228,7 @@ export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "P
 // The dollar settings (issue #501) are among them: `dispatch_set`'s confirm states a dollar key's effective value, and
 // in a pointer deployment the cap the worker runs under lives in the deployment's `.env`, not in pi's environment.
 // Of those, the paths: a relative one in `.env` is relative to the service's working directory, the deployment folder.
-const PANEL_PATH_KEYS = new Set(["PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_SANDBOX_DIR", "PI_SESSIONS_DIR", "TMPDIR", "TEMP"]);
+const PANEL_PATH_KEYS = new Set(["PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_SESSIONS_DIR", "TMPDIR", "TEMP"]);
 
 /**
  * Issue #471: the environment `resolvePaths` should see, by the rule `doctor` judges the service by
@@ -2911,7 +2904,6 @@ export function readTriggerEditor({ paths, env = {}, folder = null, deploymentDi
   try { provider = overlay.provider ?? providerFrom(hints); model = overlay.model ?? modelFrom(hints); image = jobImageFrom(hints); models = allowedModelsFrom(hints); } catch {}
   return {
     defaults: { flow: "required by the trigger", kind: "selected by the trigger kind", folder: "required for cron", task: "required for cron", repository: "forge routing", backend: backends[0]?.name ?? null, provider, model, image, models: models ?? "unrestricted", maxTokens: overlay.maxTokens ?? hints.PI_MAX_TOKENS ?? "no per-job token cap", packages: true, github: false, replicas: 1, resume: false, awaitInput: false, secrets: "none", secretsProfile: "none", secretBundle: "project default", waitFor: "none", skillsDir: "none", instructions: "none", command: "none", portfolio: false, fallbackModels: "none", excludeTools: "none", mcp: "none unless named by the trigger", gates: "none", gateTimeout: "no trigger expiry override", gateBudgetRaiseTokens: "none", maxTurns: overlay.maxTurns ?? parseNonNegInt(hints.PI_MAX_TURNS, 30), progress: false, statusComment: false, recover: false, steer: false },
-    ...readTriggerEgress({ deploymentDir, env, fs }),
     backends, venueProblem, forges, settingsProblem: settings.invalid ?? null, progressAvailable: hints.PI_RUN_PROGRESS !== "0", forgeProblem: metadata && (metadata.unreadable || metadata.untrusted || metadata.hazardSkipped.length || metadata.unread.length) ? "The deployment metadata could not be read completely; configured webhook endpoints may be missing." : null,
     flows: tiers.flatMap((t) => (t.skills ?? []).filter((s) => !s.isSub).map((s) => ({ name: s.name, tier: t.tier }))),
     flowProblems: tiers.filter((t) => t.unreachable || t.truncated).map((t) => ({ tier: t.tier, unavailable: Boolean(t.unreachable), truncated: Boolean(t.truncated) })),
@@ -2978,7 +2970,6 @@ export function triggerDetailOf(snapshot, index, { now = snapshot?.readAt } = {}
   const queued = snapshot.waiting?.unreachable || !snapshot.waiting ? null : (snapshot.waiting.rows ?? []).filter((r) => String(r.trigger ?? triggerValueOf(r)) === value);
   const scheduler = snapshot.schedulers?.find((s) => s.key === trigger.id) ?? null;
   const stalls = snapshot.schedulerStalls?.[trigger.id] ?? null;
-  const backend = trigger.backend ?? snapshot.defaultBackend ?? null;
   return {
     trigger, index, runs24h, count24h: runs24h.length,
     cost24hTokens: measured.reduce((sum, n) => sum + (n ?? 0), 0),
@@ -2988,7 +2979,6 @@ export function triggerDetailOf(snapshot, index, { now = snapshot?.readAt } = {}
     skewed: snapshot.triggerSkew?.[index]?.rows ?? null,
     skewIncomplete: snapshot.triggerSkew?.[index]?.incomplete ?? true,
     cron: trigger.type === "cron" ? { scheduler, next: scheduler?.next ?? null, overdueMs: scheduler?.overdueMs ?? null, stalls, stallLimit: (snapshot.schedulerStallMax ?? 2) + 1 } : null,
-    sandbox: { backend, deploymentDefault: trigger.backend == null, serves: servesOf(backend), retentionHours: snapshot.sandboxRetentionHours ?? 24, replicas: trigger.once ? 1 : trigger.replicas ?? 1 },
   };
 }
 
@@ -4079,9 +4069,6 @@ function hostRowOf(h) {
   return {
     name: h?.name,
     ...Object.fromEntries(["version", "startedAt", "pid", "image", "imageDigest", "piVersion", "tz", "fpCron", "fpTok", "fpProjects", "fpEnvelope", "budgetSeed"].map((key) => [key, typeof h?.[key] === "string" || Number.isSafeInteger(h?.[key]) ? h[key] : null])),
-    sandboxes: parseSandboxes(h?.sandboxes),
-    sandboxesMore: parseJobsMore(h?.sandboxesMore),
-    sandboxRetentionHours: parseJobsMore(h?.sandboxRetentionHours),
     budgetFrom: parseBudgetFrom(h?.budgetFrom),
     cpuReserve: parseCpuReserve(h?.cpuReserve),
     budgetMemMiB: h?.budgetMemMiB,
@@ -4209,29 +4196,12 @@ export function createFleetReader(
     killSwitchPlanFn = null,
     // Issue #712: the published doctor results' read (`readDoctorResults`), a seam so a test hands rows without a Valkey.
     readDoctorResultsFn = readDoctorResults,
-    // Issue #710: the panel's sandbox manifest verdict (`sandboxRetentionOf`, admin/src/sandbox-verdict.mjs), a seam
-    // rather than an import because that module imports this one (`sandboxShellRefusal`), and the read model is
-    // imported by modules held to a small graph (insights-assembly, write-plans). Null: `sandboxCheck` cannot tell, so
-    // the run page keeps the command. The console passes the real one.
-    sandboxRetentionFn = null,
-    readSandboxInventoriesFn = readSandboxInventories,
-    readSandboxSessionsFn = readSandboxSessions,
-    requestSandboxEndFn = requestSandboxEnd,
-    makeSandboxPrepareQueueFn = null,
-    enqueueSandboxPreparationFn = null,
-    readSandboxPreparationFn = null,
   } = {},
 ) {
   const prune = readOnly !== true;
   const activePerQueue = Number.isSafeInteger(activeLimit) ? Math.min(Math.max(activeLimit, 1), ACTIVE_PER_QUEUE_MAX) : 1;
   const queue = makeQueueFn(parseConnectionFn(paths.valkeyUrl, { failFast: true }));
   const redis = redisFn(paths.valkeyUrl);
-  const sandboxQueues = new Map();
-  const sandboxQueue = (host) => {
-    if (typeof host !== "string" || !WORKER_NAME_RE.test(host)) throw new Error("a sandbox request needs a worker name");
-    if (!sandboxQueues.has(host)) sandboxQueues.set(host, makeSandboxPrepareQueueFn(parseConnectionFn(paths.valkeyUrl, { failFast: true }), { host }));
-    return sandboxQueues.get(host);
-  };
   const watchStore = makeWatchStore(redis, { now: nowFn });
   const watch = { ...watchStore,
     async listSources() {
@@ -4914,7 +4884,6 @@ export function createFleetReader(
         // changes.
         schedulerStalls: Object.fromEntries(cronIds.map((id, i) => [id, stallCounts === null ? null : decimalOf(stallCounts?.[i] ?? "0")])),
         schedulerStallMax: paths.schedulerStallMax,
-        sandboxRetentionHours: paths.sandboxRetentionHours,
         // Merged across the fleet (issue #57, Gap 3). This host's files stay the truth and the single-host path; the
         // mirror adds the other hosts' records. On a shared `PI_LOGS_DIR` the local read is already the merged read and
         // the mirror adds nothing, which is why there is no second code path.
@@ -5160,27 +5129,6 @@ export function createFleetReader(
         return { unreachable: true };
       }
     },
-    // Whether run `jobId`'s workspace is still re-openable (issue #710): the panel's manifest verdict
-    // (`sandboxRetentionOf`, through the `sandboxRetentionFn` seam), read only for a record THIS host wrote, since the
-    // manifest is on the host that ran the job and the console's host can say nothing of another's. `{ retained, why }`,
-    // or `{ elsewhere: true }` for a run of another host, a host name this reader cannot tell, or no verdict wired. The
-    // venue policy is unknown here (review round 1): PI_BACKENDS is the opener's shell's, never a key the console takes
-    // (`OQ-038`), so the verdict is asked with `venuePolicy: "unknown"` and can refuse only what no shell's PI_BACKENDS
-    // could open. Never throws.
-    async sandboxCheck(jobId, record) {
-      if (typeof jobId !== "string" || !RUN_ID_RE.test(jobId)) return { elsewhere: true };
-      try {
-        const env = budgetEnvFn() ?? {};
-        const self = doctorSelfName(env);
-        const host = typeof record?.host === "string" && record.host !== "" ? record.host : null;
-        if (host !== null && host !== self) return { elsewhere: true };
-        if (typeof sandboxRetentionFn !== "function") return { elsewhere: true };
-        const got = sandboxRetentionFn(paths, jobId, { now: nowFn, venuePolicy: "unknown" });
-        return got.retained ? { retained: true, why: null, until: typeof got.until === "string" && Number.isFinite(Date.parse(got.until)) ? new Date(got.until).toISOString() : Number.isSafeInteger(got.until) && got.until >= 0 ? got.until : null } : { retained: false, why: got.why, reason: got.reason };
-      } catch {
-        return { elsewhere: true };
-      }
-    },
     // The kill switch (issue #642): ONE funnel with the tools' `killSwitchSet`, so a resume across two disagreeing
     // Valkeys is refused here too. Returns `killSwitchSet`'s shape: `{ refused }`, or `{ results: [{ url, shown, res }],
     // disagreement }`, where `res` is `{ ok: true, paused, queues }`, or `{ unreachable, partial: { done, failed, error } }`
@@ -5204,20 +5152,7 @@ export function createFleetReader(
       // can raise it directly.
       return requestCancel({ redis, jobId, interventionOrigin });
     },
-    // Only dedicated operator page/action reads ask for these. snapshot()/api/state never carry them.
-    async sandboxInventory() {
-      await fleetQueues();
-      return readSandboxInventoriesFn(redis, { now: nowFn, hosts: lastHosts.map((h) => h.name) });
-    },
-    async sandboxSessions() {
-      await fleetQueues();
-      return readSandboxSessionsFn(redis, { now: nowFn, hosts: lastHosts.map((h) => h.name), timeoutMs: FLEET_READ_TIMEOUT_MS });
-    },
-    async sandboxPrepare(request) { if (!enqueueSandboxPreparationFn) return { refused: "sandbox-not-wired", message: "Sandbox requests are not wired in this console." }; return enqueueSandboxPreparationFn(sandboxQueue(request.host), request, { now: nowFn }); },
-    async sandboxPreparationStatus(host, id) { return readSandboxPreparationFn ? readSandboxPreparationFn(sandboxQueue(host), id) : { id, host, state: "unknown" }; },
-    async sandboxEnd(request) { return requestSandboxEndFn({ redis, ...request, now: nowFn }); },
     async dispose() {
-      for (const q of sandboxQueues.values()) { try { await q.close(); } catch { /* best effort teardown */ } }
       for (const q of pool.values()) {
         try {
           await q.close();
@@ -7350,19 +7285,6 @@ export function progressAbsentText(record) {
   if (cause?.skipped) return `No live progress: it is read from the live transcript, and ${cause.skipped}.`;
   return cause?.venue ? `No live progress: not published (PI_RUN_PROGRESS=0), expired, no step recorded yet, ${VENUE_MAY_NOT_STREAM}.` : "No live progress: not published (PI_RUN_PROGRESS=0), expired, or no step has been recorded yet.";
 }
-
-/**
- * Why `pi-dispatch sandbox <id>` cannot reopen a run on `venue`, or null when the venue has a sandbox shell
- * (`serves.sandboxShell`, held to SANDBOX_LAUNCHERS by the worker's test). The panel's sandbox pane and the console's run
- * page say it in these words; kept under the pane's 53 columns for every venue name the table holds. A record with no
- * venue is a `local` run from before attribution (`UNATTRIBUTED_BACKEND`), which the caller passes as such.
- */
-export function sandboxShellRefusal(venue) {
-  const serves = servesOf(venue);
-  if (serves?.sandboxShell === "yes") return null;
-  return serves !== null ? `not reopenable (${venue} has no sandbox shell)` : `not reopenable here (ran on ${venue})`;
-}
-
 
 /**
  * A record's OpenShell policy facts (issue #712, INT-RUN-HISTORY-FILE-CONTRACT): the worker's own rebuild

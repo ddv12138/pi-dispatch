@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { chmodSync, existsSync, mkdirSync, statSync, symlinkSync } from "node:fs";
 import { delimiter, join } from "node:path";
 import { test } from "node:test";
-import { CHAIN_DEPTH_MAX_DEFAULT, CHAIN_MAX_PER_JOB_DEFAULT, DEFAULT_MODEL, DEFAULT_PROVIDER, accountTempRoot, configError, defaultLogsDir, defaultSandboxDir, defaultSettingsFile, ensureAccountTempRoot, ensureJobsDir, ensureSandboxDir, ensureUnderAccountRoot, globalExtensionsEnabled, jobsDirPath, legacyTempStateDir, loadConfig, loadGitLabAuth, logsDirPath, normalizeAppPrivateKey, underOsTempDir } from "../src/config.mjs";
+import { CHAIN_DEPTH_MAX_DEFAULT, CHAIN_MAX_PER_JOB_DEFAULT, DEFAULT_MODEL, DEFAULT_PROVIDER, accountTempRoot, configError, defaultLogsDir, defaultSettingsFile, ensureAccountTempRoot, ensureJobsDir, ensureUnderAccountRoot, globalExtensionsEnabled, jobsDirPath, legacyTempStateDir, loadConfig, loadGitLabAuth, logsDirPath, normalizeAppPrivateKey, underOsTempDir } from "../src/config.mjs";
 import { FORGES, FORGE_KINDS } from "../src/forges.mjs";
 import { CONTAINER_ENV_NAMES, RUNNER_ENV_NAMES } from "../src/reserved-env.mjs";
 import { WAIT_INTERVAL_FLOOR_MS } from "../src/wait-for.mjs";
@@ -953,13 +953,13 @@ test("loadConfig and logsDirPath resolve the SAME durable defaults, so nothing r
 	assert.ok(!underOsTempDir(c.settingsFile), "a default deployment's caps are durable");
 });
 
-test("loadConfig, the sandbox default and doctor --live read ONE jobs-dir derivation (#278)", () => {
+test("loadConfig and doctor --live read ONE jobs-dir derivation (#278)", () => {
 	// doctor --live builds its fixture under jobsDirPath; a worker that derived the path on its own could disagree
 	// about an injected TMPDIR or PI_JOBS_DIR="" and the probe would read back a directory no job uses.
+	// (The sandbox default and ensureSandboxDir went with the sandbox prune.)
 	const env = { TMPDIR: "/injected/tmp" };
 	assert.equal(jobsDirPath(env), `/injected/tmp/pi-dispatch-${process.geteuid()}/jobs`, "per account (issue #464)");
 	assert.equal(loadConfig(env).jobsDir, jobsDirPath(env), "an injected TMPDIR now reaches loadConfig too");
-	assert.equal(defaultSandboxDir(env), `${jobsDirPath(env)}/sandboxes`);
 	assert.equal(jobsDirPath({ PI_JOBS_DIR: "/srv/jobs" }), "/srv/jobs");
 	assert.equal(jobsDirPath({ PI_JOBS_DIR: "" }), "", "?? not ||, exactly as loadConfig always read it");
 	assert.equal(loadConfig({ PI_JOBS_DIR: "" }).jobsDir, "");
@@ -1052,7 +1052,6 @@ test("the ceiling on one knob did not loosen the shared parser for the others", 
 	// optionalBoundedInt already documented -- so every pre-existing caller must be untouched by it.
 	assert.equal(loadConfig({ PI_LOG_RETENTION_DAYS: "100000" }).logRetentionDays, 100000);
 	assert.equal(loadConfig({ PI_SESSIONS_TTL_DAYS: "99999" }).sessionsTtlDays, 99999);
-	assert.equal(loadConfig({ PI_SANDBOX_RETENTION_HOURS: "8760" }).sandboxRetentionHours, 8760);
 });
 
 // Issue #464: the default jobs dir is per account, and the worker makes it this account's or refuses it.
@@ -1063,7 +1062,6 @@ test("accountTempRoot and the defaults under it are per account: <tmp>/pi-dispat
 	assert.equal(accountTempRoot({ TEMP: "C:\\Temp" }, null), "C:/Temp/pi-dispatch", "Windows: no uid, TEMP is per user already");
 	assert.equal(jobsDirPath({ TMPDIR: "/t" }, 1234), "/t/pi-dispatch-1234/jobs");
 	assert.equal(jobsDirPath({ TMPDIR: "/t" }, 1235), "/t/pi-dispatch-1235/jobs", "a second account gets a second dir");
-	assert.equal(defaultSandboxDir({ TMPDIR: "/t" }, 1234), "/t/pi-dispatch-1234/jobs/sandboxes");
 	assert.equal(jobsDirPath({ TMPDIR: "/t", PI_JOBS_DIR: "/srv/jobs" }, 1234), "/srv/jobs", "an explicit value still wins");
 	assert.equal(loadConfig({ TMPDIR: "/t" }).jobsDir, `/t/pi-dispatch-${process.geteuid()}/jobs`, "the worker reads the same derivation");
 });
@@ -1199,35 +1197,6 @@ test("ensureAccountTempRoot refuses a real symlink at the root, on the real file
 	assert.ok(!existsSync(join(elsewhere, "jobs")), "nothing was created through the link");
 });
 
-// Gate round 1: an explicit PI_SANDBOX_DIR another account owns (a 0777 directory of its own) was used, and that
-// account swapped a retained workspace for one with its own manifest.
-test("ensureSandboxDir refuses a sandbox dir another account owns, secures the account root for the default, and leaves an absent one to the retention step (#464)", () => {
-	const enoent = () => Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-	const fake = (entries) => ({
-		mkdirSync: () => assert.fail("ensureSandboxDir creates no sandbox dir"),
-		chmodSync: () => {},
-		lstatSync: (p) => {
-			if (!entries[p]) throw enoent();
-			return { uid: entries[p].uid, isDirectory: () => true, isSymbolicLink: () => false, mode: 0o40700 };
-		},
-		statSync: (p) => {
-			if (!entries[p]) throw enoent();
-			return { uid: entries[p].uid, isDirectory: () => entries[p].file !== true };
-		},
-	});
-	const env = { TMPDIR: "/t", PI_SANDBOX_DIR: "/srv/sb" };
-	assert.throws(() => ensureSandboxDir("/srv/sb", { env, uid: 501, fs: fake({ "/srv/sb": { uid: 1270 } }) }), (err) => {
-		assert.equal(err.piDispatchConfig, true);
-		assert.equal(err.message, "the sandbox dir /srv/sb is owned by uid 1270, not by this account (uid 501), and that account could swap a retained workspace for one of its own: point PI_SANDBOX_DIR at a directory this account owns (or remove the line for the default), or chown /srv/sb to this account");
-		return true;
-	});
-	assert.throws(() => ensureSandboxDir("/srv/sb", { env, uid: 501, fs: fake({ "/srv/sb": { uid: 501, file: true } }) }), /the sandbox dir \/srv\/sb is not a directory/);
-	assert.doesNotThrow(() => ensureSandboxDir("/srv/sb", { env, uid: 501, fs: fake({ "/srv/sb": { uid: 501 } }) }));
-	assert.doesNotThrow(() => ensureSandboxDir("/srv/sb", { env, uid: 501, fs: fake({}) }), "absent: made 0700 by the retention step, which asks again");
-	assert.throws(() => ensureSandboxDir("/t/pi-dispatch-501/jobs/sandboxes", { env: { TMPDIR: "/t" }, uid: 501, fs: fake({ "/t/pi-dispatch-501": { uid: 1270 } }) }), /^Error: \/t\/pi-dispatch-501 is owned by uid 1270/, "the default's account root is judged first");
-	assert.doesNotThrow(() => ensureSandboxDir("/srv/sb", { env, uid: null, fs: fake({ "/srv/sb": { uid: 1270 } }) }), "no uid (Windows): nothing judged");
-});
-
 test("PI_JOB_MEMORY and PI_JOB_CPUS: 4g and 2 when unset or empty, parsed when set, and a bad value refuses the boot naming the key (#596)", () => {
 	assert.deepEqual(loadConfig({}).jobSize, { memMiB: 4096, cpuCenti: 200, memSet: false, cpuSet: false });
 	assert.deepEqual(loadConfig({ PI_JOB_MEMORY: "", PI_JOB_CPUS: "" }).jobSize, { memMiB: 4096, cpuCenti: 200, memSet: false, cpuSet: false });
@@ -1246,23 +1215,4 @@ test("issue #596, phase 2: the host budget's four settings are judged at boot, a
 	}
 	// Judged against the deployment's own default size: 1 CPU is a budget when the default job takes 1.
 	assert.equal(hostBudgetFrom({ PI_HOST_CPU_BUDGET: "1", PI_JOB_CPUS: "1" }).cpus.cpuCenti, 100);
-});
-
-test("the openshell venue's two settings (#684): judged only while it is blessed, docker and the active gateway by default", () => {
-	assert.deepEqual(loadConfig({}).openshell, { engine: "docker", gateway: null });
-	assert.deepEqual(loadConfig({ PI_OPENSHELL_ENGINE: "lxc", PI_OPENSHELL_GATEWAY: "bad name" }).openshell, { engine: "lxc", gateway: "bad name" }, "unblessed: a stray value refuses nothing");
-	assert.deepEqual(loadConfig({ PI_BACKENDS: "local,openshell", PI_OPENSHELL_ENGINE: "podman", PI_OPENSHELL_GATEWAY: "lab" }).openshell, { engine: "podman", gateway: "lab" });
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "lxc" }), (e) => e.piDispatchConfig === true && /PI_OPENSHELL_ENGINE must be docker or podman/.test(e.message));
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell", PI_OPENSHELL_GATEWAY: "bad name" }), (e) => e.piDispatchConfig === true && /PI_OPENSHELL_GATEWAY/.test(e.message));
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell", PI_EGRESS: "0" }), (e) => e.piDispatchConfig === true && /^PI_EGRESS=0 cannot run openshell/.test(e.message));
-});
-
-test("openshell-bind shares the two settings (#686 part 3): judged when either mode is blessed, and bind mode is refused on the podman driver", () => {
-	assert.deepEqual(loadConfig({ PI_BACKENDS: "openshell-bind", PI_OPENSHELL_GATEWAY: "lab" }).openshell, { engine: "docker", gateway: "lab" });
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell-bind", PI_OPENSHELL_ENGINE: "lxc" }), (e) => e.piDispatchConfig === true && /PI_OPENSHELL_ENGINE must be docker or podman/.test(e.message));
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell-bind", PI_OPENSHELL_GATEWAY: "bad name" }), (e) => e.piDispatchConfig === true && /PI_OPENSHELL_GATEWAY/.test(e.message));
-	assert.throws(() => loadConfig({ PI_BACKENDS: "local,openshell-bind", PI_OPENSHELL_ENGINE: "podman" }), (e) => e.piDispatchConfig === true && /openshell-bind with PI_OPENSHELL_ENGINE=podman: bind mode was measured on OpenShell's Docker driver only/.test(e.message));
-	// The copy venue keeps podman.
-	assert.deepEqual(loadConfig({ PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" }).openshell, { engine: "podman", gateway: null });
-	assert.throws(() => loadConfig({ PI_BACKENDS: "openshell-bind", PI_EGRESS: "0" }), (e) => e.piDispatchConfig === true && /^PI_EGRESS=0 cannot run openshell-bind/.test(e.message));
 });

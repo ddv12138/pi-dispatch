@@ -1588,13 +1588,13 @@ test("the script's closed lists are written in from their one source each, never
   assert.deepEqual(named("mark"), Object.keys(LIVE_STATES).filter((k) => k !== "start").sort());
   // The sign-in page goes where a reason is the console's own, and nowhere else.
   // Sign-out's only one is its 200's (issue #737): an unconfirmed sign-out stays on the page.
-  assert.deepEqual(CONSOLE_SCRIPT.match(/location\.assign\(.*?\);/g), ['location.assign(isReason(r) ? "/login?ended=" + r : "/login");', 'location.assign("/");', 'location.assign("/login");', 'location.assign("/runs/sandboxes?request=" + encodeURIComponent(b.requestId) + "&host=" + encodeURIComponent(b.host));']);
+  assert.deepEqual(CONSOLE_SCRIPT.match(/location\.assign\(.*?\);/g), ['location.assign(isReason(r) ? "/login?ended=" + r : "/login");', 'location.assign("/");', 'location.assign("/login");']);
   assert.match(CONSOLE_SCRIPT, /if \(r\.status === 200\) location\.assign\("\/login"\);\n\s+else unconfirmed\(\);\n\s+\}, unconfirmed\);/);
   // The signed-out sentence is said as text, in the slot's message line (slotSays), never as markup.
   assert.match(CONSOLE_SCRIPT, /function signedOut\(r\) \{[^]*?slotSays\(CONFIRM_SIGNED_OUT\);/);
   // The three sentences the script owns are set as text, in their elements, never as markup.
-  for (const name of ["SIGN_IN_GAVE_UP.title", "SIGN_IN_GAVE_UP[kind]", "SIGN_OUT_UNCONFIRMED.title", "SIGN_OUT_UNCONFIRMED.body"]) assert.ok(CONSOLE_SCRIPT.includes(`.textContent = ${name};`), name);
-  assert.ok(CONSOLE_SCRIPT.includes("sayWithCode(staleBody, tokens ? STALE_TOKENS_BODY : staleData);"));
+  for (const name of ["uiText(SIGN_IN_GAVE_UP.title)", "uiText(SIGN_IN_GAVE_UP[kind])", "uiText(SIGN_OUT_UNCONFIRMED.title)", "uiText(SIGN_OUT_UNCONFIRMED.body)"]) assert.ok(CONSOLE_SCRIPT.includes(`.textContent = ${name};`), name);
+  assert.ok(CONSOLE_SCRIPT.includes("sayWithCode(staleBody, tokens ? uiText(STALE_TOKENS_BODY) : uiText(staleData));"));
   assert.match(CONSOLE_SCRIPT, /function sayWithCode\(el, sentence\) \{[^]*?code\.textContent = parts\[i\];[^]*?\n {2}\}/, "the code run set as text, never markup");
 });
 

@@ -22,7 +22,7 @@
 export { containerSpec, CONTAINER_GLOBAL_PI_DIR, CONTAINER_SESSION_DIR, CONTAINER_SESSION_FILE } from "./container-spec.mjs";
 import { isAbsolute, relative } from "node:path";
 import { SIZE_LABEL_CPU, SIZE_LABEL_MEM, assertCidFile, assertJobUser, containerSpec } from "./container-spec.mjs";
-import { LAYOUTS } from "./job-layout.mjs";
+import { LAYOUT } from "./job-layout.mjs";
 import { CGROUP_PARENT, CPU_SHARES_MAX, CPU_SHARES_MIN } from "./job-size.mjs";
 
 /** The fixed isolation flags. Not configurable -- these ARE the boundary. */
@@ -184,12 +184,12 @@ export const DOCKER_EXTRA_ALLOWED = Object.freeze({
 });
 
 export function dockerArgsFromSpec(spec) {
-	// Issue #354. REFUSED, never dropped: the docker CLI rejects `--userns=keep-id` client-side (exit 125, measured in
+	// REFUSED, never dropped: the docker CLI rejects `--userns=keep-id` client-side (exit 125, measured)
 	// issue #345), and silently omitting it would run the job under the daemon's own mapping, where the "<uid>:<gid>"
 	// the caller chose for bind-mount ownership names a different host identity. `undefined` is a hand-built spec that
 	// predates the field, which asked for nothing.
 	if (spec?.userns !== null && spec?.userns !== undefined) {
-		throw new Error(`docker run: refusing a spec with userns ${JSON.stringify(spec.userns)}: the docker CLI has no --userns=keep-id, and only a podman venue builds one`);
+		throw new Error(`docker run: refusing a spec with userns ${JSON.stringify(spec.userns)}: the docker CLI has no --userns flag`);
 	}
 	return argsFromSpec(spec, { userns: null });
 }
@@ -205,34 +205,8 @@ export function dockerArgsFromSpec(spec) {
  * with the worker's gid only as a supplementary group, and `/job` is unreadable again (both measured on Fedora 44,
  * Podman 5.8.1). Either argv would start, spend its slot and fail inside the container, so both are refused here.
  */
-export function podmanArgsFromSpec(spec) {
-	if (spec?.userns !== "keep-id") {
-		throw new Error(`podman run: refusing a spec whose userns is not "keep-id": ${JSON.stringify(spec?.userns ?? null)} (a rootless job without it cannot read its own mounts)`);
-	}
-	if (spec.user === null || spec.user === undefined) {
-		throw new Error("podman run: refusing a keep-id spec with no job user: the image's own user would run with /job unreadable");
-	}
-	return argsFromSpec(spec, { userns: "keep-id" });
-}
-
 /**
- * The namespaces and inheritances a rootless Podman argv pins, because the account's own containers.conf can set every
- * container's defaults for them: `pidns` (PID), `ipcns` (IPC), `utsns` (UTS), `cgroupns` (cgroup), `env_host` and `http_proxy`. (dockerd's
- * daemon.json can default the cgroup and IPC modes too, and the docker argv pins neither: a gap older than this venue.) Measured on Podman 5.8.1 with a user containers.conf of `pidns = "host"` and `env_host = true`: an
- * unpinned job ran outside its own PID namespace and received the worker's environment (the provider key with it);
- * with these flags it got its own namespaces and nothing. `http_proxy` is on by default, which copies the worker's proxy
- * variables into every job. A job's network is pinned the same way where it has none of its own (`--network=private`,
- * Podman's word for the rootless default), or `netns = "host"` would put it on the host's. What cannot be pinned is
- * that network's OPTIONS: containers.conf `pasta_options` come before the command line's in pasta's argv, and a conf
- * `-T <port>` survives even `--network=pasta:--map-host-loopback,none` (measured), so no flag here could close it. It is
- * REFUSED instead, not left open: the venue refuses to run while the account's containers.conf sets `pasta_options`, `network_cmd_options`, `annotations`, `env`, `helper_binaries_dir`, `network_cmd_path`, `default_sysctls`, `default_ulimits`, `seccomp_profile`, `init_path`, `dns_servers`, `dns_options`, `dns_searches`, `base_hosts_file`, `oom_score_adj`, `privileged`, `label`, `cgroup_conf`, `host_containers_internal_ip`, `runtimes`, `conmon_path`, `cgroups` or `umask` at all, the list
- * `PODMAN_WIDENING_KEYS` in backends.mjs (`podmanConfWidening` in backend-podman.mjs, issues #428 and #450).
- */
-export const PODMAN_PINNED_FLAGS = Object.freeze(["--pid=private", "--ipc=private", "--uts=private", "--cgroupns=private", "--env-host=false", "--http-proxy=false"]);
-
-/**
- * The shared body of both builders. `userns` is the caller's, never the spec's: each public builder has already decided
- * what its runtime may say, and reading the spec here would let a docker argv carry a flag its CLI refuses.
+ * The argv body. `userns` is the caller's, never the spec's.
  */
 function argsFromSpec(spec, { userns }) {
 	// The builder CANNOT DECLINE the boundary. `containerSpec` cannot produce anything but `true`, so this
@@ -336,12 +310,11 @@ function argsFromSpec(spec, { userns }) {
 		args.push("-v", `${m.host}:${m.container}${options.length > 0 ? `:${options.join(",")}` : ""}`);
 	}
 
-	// Issue #683: the job starts in its workspace mount because the ARGV says so, not because the image's WORKDIR
-	// happens to match. The shipped image's WORKDIR is now /sandbox (a copying venue's writable tree, image/Dockerfile),
-	// so without this a binding venue's job would start in an empty /sandbox and every relative path the agent writes
-	// would land outside the repository it was asked to change. A binding venue always uses the `mounts` layout. An
-	// older image, whose WORKDIR was /workspace, starts exactly where it did.
-	args.push(`--workdir=${LAYOUTS.mounts.workspace}`);
+	// The job starts in its workspace mount because the ARGV says so, not because the image's WORKDIR happens to match.
+	// The image this repository builds pins WORKDIR /workspace, but the argv, not the image, is the contract (issue #683):
+	// an image whose WORKDIR is anything else starts the job exactly here, so no relative path the agent writes can land
+	// outside the repository it was asked to change.
+	args.push(`--workdir=${LAYOUT.workspace}`);
 	args.push(spec.image);
 	return args;
 }
@@ -380,15 +353,6 @@ function assertSizing(spec) {
  */
 export function buildDockerRunArgs(opts) {
 	return dockerArgsFromSpec(containerSpec(opts));
-}
-
-/**
- * The `podman run` argv (excluding the leading "podman"), issue #354. `userns` is not the caller's to choose: a podman
- * job runs keep-id or not at all (see `podmanArgsFromSpec`), so an opts bag carrying another value is overridden rather
- * than read. A null `user` is refused by the builder, before anything spawns.
- */
-export function buildPodmanRunArgs(opts) {
-	return podmanArgsFromSpec(containerSpec({ ...opts, userns: "keep-id" }));
 }
 
 /**

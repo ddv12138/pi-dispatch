@@ -582,10 +582,13 @@ test("a skew is claimed only past two beats: a read between a beat's HSET and it
 // ---- issue #712: the `backends` field ----------------------------------------------------------------------------------
 
 test("the backends field (#712): names and fixed words that pass the content rule, read back through an allowlist", async () => {
-	const { BACKEND_NAMES, HOST_GATEWAY_WORDS, OPENSHELL_ENGINES, hostBackendsField, parseHostBackends } = await import("../src/backends.mjs");
-	const field = hostBackendsField({ backends: ["podman", "local", "openshell", "openshell-bind"], backendFloor: { egress: "enforced", nonRoot: "asserted" }, openshellEngine: "docker", gatewayWord: "local" });
-	assert.equal(field, "blessed=podman,local,openshell,openshell-bind;floor=egress:enforced,nonRoot:asserted;os=docker:local");
-	assert.deepEqual(parseHostBackends(field), { blessed: ["podman", "local", "openshell", "openshell-bind"], default: "podman", floor: { egress: "enforced", nonRoot: "asserted" }, openshell: { engine: "docker", gateway: "local", modes: ["copy", "bind"] } });
+	const { BACKEND_NAMES, hostBackendsField, parseHostBackends } = await import("../src/backends.mjs");
+	// The podman and OpenShell venues left with the sandbox prune; what stays pinned here is the field's own
+	// content rule: shape-checked venue names (a name this build's table does not hold is still published, since
+	// the row is peer-written display), the floor's words, and nothing else.
+	const field = hostBackendsField({ backends: ["local", "far-venue"], backendFloor: { egress: "enforced", nonRoot: "asserted" } });
+	assert.equal(field, "blessed=local,far-venue;floor=egress:enforced,nonRoot:asserted");
+	assert.deepEqual(parseHostBackends(field), { blessed: ["local", "far-venue"], default: "local", floor: { egress: "enforced", nonRoot: "asserted" } });
 	// Through the registry's own write: not path-shaped, so it is published as it is.
 	const redis = fakeRedis();
 	const logs = [];
@@ -597,12 +600,9 @@ test("the backends field (#712): names and fixed words that pass the content rul
 	const { HOST_VENUE_NAME_RE } = await import("../src/backends.mjs");
 	for (const name of BACKEND_NAMES) assert.match(name, HOST_VENUE_NAME_RE, name);
 	for (const name of BACKEND_NAMES) assert.deepEqual(parseHostBackends(hostBackendsField({ backends: [name] })).blessed, [name], name);
-	for (const engine of OPENSHELL_ENGINES) {
-		for (const word of HOST_GATEWAY_WORDS) assert.deepEqual(parseHostBackends(hostBackendsField({ backends: ["openshell"], openshellEngine: engine, gatewayWord: word })).openshell, { engine, gateway: word, modes: ["copy"] });
-	}
-	// A word outside its list is never written: an engine is docker (the default the config reads), a gateway unknown.
-	assert.equal(hostBackendsField({ backends: ["openshell"], openshellEngine: "/usr/bin/podman", gatewayWord: "https://gw:1" }), "blessed=openshell;os=docker:unknown");
-	assert.equal(hostBackendsField({ backends: ["local"], openshellEngine: "podman" }), "blessed=local", "no os part without an openshell venue");
+	// The openshell `os=` part and its engine and gateway words left with the venue: the field carries `blessed`
+	// and `floor` and nothing else.
+	assert.equal(hostBackendsField({ backends: ["local"] }), "blessed=local");
 });
 
 test("parseHostBackends (#712) re-checks a peer's row: shapes kept, anything else dropped, an older row is null", async () => {
@@ -616,6 +616,6 @@ test("parseHostBackends (#712) re-checks a peer's row: shapes kept, anything els
 	assert.deepEqual(got.blessed, ["far-venue", "local"]);
 	assert.equal(got.default, "far-venue");
 	assert.deepEqual(got.floor, { egress: "enforced" }, "the first of a twice-named property, words from the three only");
-	assert.deepEqual(got.openshell, { engine: "unknown", gateway: "unknown", modes: [] });
-	assert.deepEqual(parseHostBackends("blessed="), { blessed: [], default: null, floor: {}, openshell: null });
+	assert.equal("openshell" in got, false, "the os= part and its engine and gateway words left with the venue");
+	assert.deepEqual(parseHostBackends("blessed="), { blessed: [], default: null, floor: {} });
 });

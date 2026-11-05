@@ -26,12 +26,12 @@ import { APPROVAL_LABEL } from "./parked.mjs";
 import { createForkStore } from "./fork-store.mjs";
 import { makeCheckForkPolicy } from "./fork-policy.mjs";
 import { thinkingLevelAllowed } from "./thinking-level.mjs";
-import { readdirSync, readFileSync, statSync, watch } from "node:fs";
+import { readFileSync, watch } from "node:fs";
 import { lookup as dnsLookup } from "node:dns/promises";
 import { homedir, networkInterfaces, release as osRelease, userInfo } from "node:os";
 import { dirname, basename, join } from "node:path";
-import { configError, ensureJobsDir, ensureSandboxDir, ensureUnderAccountRoot, loadConfig } from "./config.mjs";
-import { passwdNameFrom, probeTcpAddress, readSubuidRanges, resolveWorkerValkey } from "./podman-stack.mjs";
+import { configError, ensureJobsDir, ensureUnderAccountRoot, loadConfig } from "./config.mjs";
+import { passwdNameFrom, probeTcpAddress, readSubuidRanges, resolveWorkerValkey } from "./stack.mjs";
 import { valkeyClientContext } from "./valkey-endpoint.mjs";
 import { authRefusalFor, makeRedisClient, onValkeyError, parseConnection, valkeyAuthState, valkeyPasswordFor } from "./connection.mjs";
 import { reconcileGated, reloadSchedules } from "./cron.mjs";
@@ -57,8 +57,8 @@ import { cronFingerprint } from "./fingerprint.mjs";
 import { makeHostRegistry, readLiveHosts } from "./host-registry.mjs";
 import { endpointStatusFields, ENDPOINT_STATUS_VERSION } from "./endpoint-status.mjs";
 import { liveJobsFields, liveJobsOf } from "./live-jobs.mjs";
-import { makeSandboxTelemetry, parseBudgetFrom, parseCpuReserve } from "./host-telemetry.mjs";
-import { budgetField, readUserServiceLimits } from "./host-budget.mjs";
+import { parseBudgetFrom, parseCpuReserve } from "./host-telemetry.mjs";
+import { budgetField } from "./host-budget.mjs";
 import { makeCpuReserve, reservePlan } from "./cpu-reserve.mjs";
 import { makeImagePreflight } from "./image-preflight.mjs";
 import { createWorker, JOB_TIMEOUT_MS, STALLED_FAILED_REASON } from "./index.mjs";
@@ -68,12 +68,7 @@ import { makeCollectChain } from "./outbox.mjs";
 import { makeCollectPlan } from "./outbox-plan.mjs";
 import { makePortfolioSnapshot } from "./portfolio-snapshot.mjs";
 import { containerPackagePaths, readStageManifest } from "./packages.mjs";
-import { makeCleanup, makeForgePreparers, makePrepareWorkspace } from "./prepare.mjs";
-import { listRunningSandboxes, makeSandboxNetworkSweeper, makeSandboxRuntimeWatch, sandboxSyncRefusal } from "./sandbox.mjs";
-import { createSandboxPreparer } from "./sandbox-prepare.mjs";
-import { checkSandboxWorkspace } from "./sandbox-workspace-guard.mjs";
-import { startSandboxPrepareWorker } from "./sandbox-prepare-requests.mjs";
-import { makeSandboxInventory } from "./sandbox-inventory.mjs";
+import { cleanup, makeForgePreparers, makePrepareWorkspace } from "./prepare.mjs";
 import { makeRetentionSweep } from "./retention-sweep.mjs";
 import { FORGE_JOB_RETENTION_S } from "./retention.mjs";
 import { makeDoctorSpawner } from "./doctor-spawner.mjs";
@@ -84,7 +79,6 @@ import { makePackageCanaryRuntime } from "./package-canary.mjs";
 const UPDATES_RECONCILE_EVERY_MS = 2 * 60 * 1000;
 const UPDATES_RECONCILE_TIMEOUT_MS = 15 * 60 * 1000;
 import { fileURLToPath } from "node:url";
-import { listSandboxes, sandboxDeadline, makeSandboxReaper } from "./sandbox-store.mjs";
 import { makeSessionStore } from "./session-store.mjs";
 import { scrubCredentials } from "./redact.mjs";
 import { makeCheckOnceSpent, makeCheckPortfolioFlag, makeCheckWaitSkew, makeDisarmOnce, makeFindSecretBundle } from "./triggers-file.mjs";
@@ -102,12 +96,10 @@ import { makeWaitChecker } from "./wait-check.mjs";
 import { makeWaitState } from "./wait-state.mjs";
 import { hostQueueName, makeQueue, enqueueWatchJob, discoverHostQueuesReporting, QUEUE } from "./queue.mjs";
 import { endpointShown, execDockerBounded, makeDockerEndpointResolver, makeJobContainerLister, makeLocalBackend, makeReaper, makeStopContainer, quotedShown } from "./backend-local.mjs";
-import { NETNS_KEEPER_MIN_AGE_MS, NETNS_KEEPER_YOUNG_MARGIN_MS, runtimeFromFacts } from "./netns-keeper.mjs";
+import { runtimeFromFacts } from "./netns-keeper.mjs";
 import { makeBackendRegistry, reapAll, resolveBackendName } from "./backend-registry.mjs";
-import { DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, OPENSHELL_BACKEND, OPENSHELL_BIND_BACKEND, PODMAN_ADDS_NO_MOUNTS, PODMAN_BACKEND, PODMAN_BOUNDS_DELEGATED, PODMAN_SERVICE_LOCAL, backendFor, hostBackendsField, isPerMachineHost, observationRefusalIsTransient, observationRefusals, unobservedFloor } from "./backends.mjs";
-import { makeOpenshellBackend, makeOpenshellReaper, openshellBootVersions } from "./backend-openshell.mjs";
-import { PODMAN_BOOT_REFUSING_CAUSES, PODMAN_INFO_TIMEOUT_MS, cachedPodmanInfo, decidePodmanJobUser, makePodmanBackend, makePodmanInfoReader, makePodmanReaper, observePodman, podmanConfRefusal, unavailableFor, podmanConfWidening, podmanJobUserRefusal, resolvePodmanImageUser } from "./backend-podman.mjs";
-import { makePodmanServiceReader, onceFs, makeRootfulMemory, observeHost, observeRootfulConf, readRootfulService, rootfulConfRefusal, rootfulConfRetries, rootfulUnreadList, runtimeObservationKey } from "./runtime-observations.mjs";
+import { DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, backendFor, hostBackendsField, isPerMachineHost, observationRefusalIsTransient, observationRefusals, unobservedFloor } from "./backends.mjs";
+import { observeHost, runtimeObservationKey } from "./runtime-observations.mjs";
 
 import { makeRunContainer } from "./run-container.mjs";
 import { isCustomProvider, piProviders, providerKeyCandidates, resolveProviderCredential } from "./env-allowlist.mjs";
@@ -769,7 +761,7 @@ export async function startWorker(
 		write = (chunk) => process.stdout.write(chunk),
 		// Issue #354: the configuration loader, a seam for ONE reason: a test venue that is not in the backend table (an
 		// injected `extraBackends` bundle) cannot be written through the real loader, which refuses a name it does not know.
-		// The table's own venues (`local`, and `podman` since part 2) go through the real loader.
+		// The table's own venue (`local`) goes through the real loader.
 		loadConfig: loadConfigFn = loadConfig,
 		makeAuth = makeGitHubAuth,
 		makeHost = makeGitHubHost,
@@ -790,15 +782,6 @@ export async function startWorker(
 		// The fleet copy's by-id read, seamed so a wiring test can answer it without a live mirror.
 		readMirroredRecord: readMirroredRecordFn = readMirroredRecord,
 		makeLogReaper: makeLogReaperFn = makeLogReaper,
-		makeSandboxReaper: makeSandboxReaperFn = makeSandboxReaper,
-		createSandboxPreparer: createSandboxPreparerFn = createSandboxPreparer,
-		startSandboxPrepareWorker: startSandboxPrepareWorkerFn = startSandboxPrepareWorker,
-		makeSandboxInventory: makeSandboxInventoryFn = makeSandboxInventory,
-		listSandboxes: listSandboxesFn = listSandboxes,
-		makeSandboxNetworkSweeper: makeSandboxNetworkSweeperFn = makeSandboxNetworkSweeper,
-		// Issue #429: the one call that asks a runtime which sandboxes are open, seamed so a wiring test can drive the real
-		// sandbox reaper against a real retention root without spawning docker or podman.
-		listRunningSandboxes: listRunningSandboxesFn = listRunningSandboxes,
 		makeRetentionSweep: makeRetentionSweepFn = makeRetentionSweep,
 		makeTouchStore: makeTouchStoreFn = makeTouchStore,
 		makeTouchOutbox: makeTouchOutboxFn = makeTouchOutbox,
@@ -831,33 +814,15 @@ export async function startWorker(
 		// Issue #341: the one `docker info` the job-user decision reads, and the process facts it reads beside it.
 		// Seams for the same reason as the endpoint: a wiring test decides what the daemon and the process say.
 		readDaemonFacts: readDaemonFactsFn = makeDaemonFactsReader(),
-		// Issue #596, phase 2: a cgroup file's text (a rootless account's `memory.max` and `cpu.max`), for the host budget.
-		readCgroupFile: readCgroupFileFn = (path) => readFileSync(path, "utf8"),
 		// Issue #596, phase 2: whether an orphaned job container is gone, per venue's CLI.
 		containerGone: containerGoneFn = null,
 		// Issue #596, gate round 1 of phase 2: the job containers a venue's CLI still lists after the boot reaper,
 		// with their size labels, `(bin) => async () => [{ name, memMiB, cpuCenti }]`, throwing when the CLI does not answer.
 		listJobContainers: listJobContainersFn = (bin) => makeJobContainerLister({ bin }),
-		// `home` (issue #354) is the account whose rootless Podman runs the podman venue's jobs: its own mounts.conf and
-		// containers.conf are read from there. Absent in a test's identity, it falls to the observation's own default.
+		// The process facts the job-user decision and the host budget's CPU reserve read beside the daemon's: which
+		// platform this is and whose uid/gid the worker runs as. `home` is absent in a test's identity and falls to the
+		// reader's own default.
 		jobUserIdentity = { platform: process.platform, release: osRelease(), euid: process.geteuid?.(), egid: process.getegid?.(), home: homedir() },
-		// Issue #345: the host files the runtime-mounts observation reads (Podman's mounts.conf and containers.conf). A seam so
-		// a wiring test never reads this machine's /etc.
-		observationFs = { statSync, readFileSync, readdirSync },
-		// Issue #448: `systemctl show podman.service`, read only where a local job runs on rootful Podman's Docker API on this
-		// host. A seam so a wiring test decides what the unit says, and never asks this machine's systemd.
-		readPodmanService: readPodmanServiceFn = makePodmanServiceReader(),
-		// Issue #354: the podman venue's three boot collaborators, each a seam for the endpoint's reason: the real ones spawn
-		// `podman`, and a wiring test must decide what `podman info` says, what the reaper lists and what the bundle is
-		// built from. Constructing the default reader spawns nothing; only a call does, and only while `podman` is blessed.
-		readPodmanInfo: readPodmanInfoFn = makePodmanInfoReader(),
-		makePodmanReaper: makePodmanReaperFn = makePodmanReaper,
-		makePodmanBackend: makePodmanBackendFn = makePodmanBackend,
-		// Issue #684: the openshell venue's three, podman's pattern: the boot's version read, its reaper and its bundle,
-		// each a seam because the real ones spawn `openshell`, and only while the venue is blessed.
-		readOpenshellVersions: readOpenshellVersionsFn = openshellBootVersions,
-		makeOpenshellReaper: makeOpenshellReaperFn = makeOpenshellReaper,
-		makeOpenshellBackend: makeOpenshellBackendFn = makeOpenshellBackend,
 		makeGitLabAuth: makeGitLabAuthFn = makeGitLabAuth,
 		makeGitLabHost: makeGitLabHostFn = makeGitLabHost,
 		makeForgejoAuth: makeForgejoAuthFn = makeForgejoAuth,
@@ -868,9 +833,6 @@ export async function startWorker(
 		// beside a subject built on the default `Date.now` is a fuse: it passes until the wall clock drifts
 		// past that window, then fails in CI on a tree nobody touched (issue #284).
 		now = () => Date.now(),
-		// Issue #476: how the boot waits out a rootless network keeper that is only too young. A seam so a wiring test
-		// proves the wait and its bound without spending real seconds.
-		sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 		// How long a job waits for a forge-auth re-resolve. A seam rather than a constant because the
 		// property under test is that the bound EXISTS, and a test that proved it by waiting ten real
 		// seconds would be paid for on every run for the life of the file.
@@ -879,8 +841,6 @@ export async function startWorker(
 		ensureJobsDir: ensureJobsDirFn = ensureJobsDir,
 		// Issue #464: the same rule for the two durable stores, which default into that root on an account with no home.
 		ensureUnderAccountRoot: ensureUnderAccountRootFn = ensureUnderAccountRoot,
-		// Issue #464 (gate round 1): the sandbox dir, refused at boot when another account owns it, as the jobs dir is.
-		ensureSandboxDir: ensureSandboxDirFn = ensureSandboxDir,
 		// Issue #464 (gate round 2): whose Valkey VALKEY_URL reaches, judged here, where the connection is made, and the
 		// literal address every Valkey client of this worker then connects to. A seam: the real one reads /proc, probes
 		// this host's addresses and resolves the name, none of which belongs in a wiring test.
@@ -916,20 +876,10 @@ export async function startWorker(
 	// Issue #354: whether this deployment blesses the local adapter (its name is `DEFAULT_BACKEND`, the word
 	// `makeLocalBackend` stamps on its bundle). `local` stopped being mandatory in `PI_BACKENDS`, and every read
 	// below that asks THIS HOST'S DOCKER CLI something is a read about that one venue: its endpoint, its daemon's
-	// facts, its image, its reaper, its sandboxes. With `local` unblessed none of them runs, so a host without
+	// facts, its image, its reaper. With `local` unblessed none of them runs, so a host without
 	// Docker never spawns `docker` at boot for a venue it will never use, and a floor naming an observation only
 	// `local` makes cannot hold such a worker at exit 1 forever. Everything is byte-identical while it is blessed.
 	const localBlessed = config.backends.includes(DEFAULT_BACKEND);
-	// The same split for the native podman venue (issue #354, `DES-PODMAN-NATIVE-ROOTLESS-BACKEND`): its `podman info`
-	// read, its reaper and its bundle exist only while it is blessed, so a deployment that never chose it spawns no
-	// `podman` and pays nothing for it being in the table.
-	const podmanBlessed = config.backends.includes(PODMAN_BACKEND);
-	// Issue #684: and for the openshell venue, blessable since this issue: its CLI is spawned only while it is blessed.
-	// Issue #686 part 3: either of its two modes, which share the gateway, the CLI, the version read and the boot reaper;
-	// each mode's own bundle is built only while that mode is blessed.
-	const openshellCopyBlessed = config.backends.includes(OPENSHELL_BACKEND);
-	const openshellBindBlessed = config.backends.includes(OPENSHELL_BIND_BACKEND);
-	const openshellBlessed = openshellCopyBlessed || openshellBindBlessed;
 	// Issue #354: an ABSENT `observationPreflight` admits every job, which is the right answer only for a venue whose
 	// words hold without observing anything. A venue whose table entry names an `observedBy` and carries no preflight
 	// would have those words hold with nothing looking, and a floor naming one would pass on capability alone: the
@@ -949,7 +899,6 @@ export async function startWorker(
 	// shared `<tmp>/pi-dispatch/jobs` default let one account's jobs dir fail every other account's jobs with EACCES
 	// while the worker ran on. A failed mkdir is the fs error it is (exit 1).
 	ensureJobsDirFn(config.jobsDir, { env });
-	ensureSandboxDirFn(config.sandboxDir, { env });
 	for (const store of [config.logsDir, dirname(config.settingsFile)]) ensureUnderAccountRootFn(store, { env });
 	// `host` sits AFTER the spread, so it is authoritative rather than overridable (issue #57). No call
 	// site can know better than this closure which process wrote a line, and one that passed `host` would
@@ -965,10 +914,7 @@ export async function startWorker(
 	// worker judges it itself, before it contacts Valkey at all, with the same function (`resolveWorkerValkey`), and
 	// every client below connects to the judged literal address, never to a name resolved again later. A refusal is a
 	// configError (exit 2, not restarted into the same answer); nothing answering is a plain error (exit 1, restarted).
-	// `openshellUsed` (issue #707, review round 2 of #715): an openshell venue on Podman is the queue's engine where no
-	// `local` or `podman` venue is (`openshellSetupOf`), and the judgement refuses root's listener there as `up` does. Left
-	// out, as it was, the rule saw no openshell venue and the boot took a root-held Valkey `up` had refused.
-	const valkey = await judgeValkey({ url: config.valkeyUrl, venues: { localUsed: localBlessed, podmanUsed: podmanBlessed, openshellUsed: openshellBlessed }, env });
+	const valkey = await judgeValkey({ url: config.valkeyUrl, env });
 	for (const note of valkey.notes ?? []) log("valkey_note", { note });
 	if (valkey.pinned) log("valkey_pinned", { address: valkey.pinned.address, port: valkey.pinned.port, heldBy: valkey.pinned.heldBy });
 	// Every client below connects through connection.mjs' JudgedConnector, which judges the (pinned) address again on
@@ -1074,7 +1020,7 @@ export async function startWorker(
 	//
 	// Issue #354: judged for `local` ALONE, not for every blessed venue. These are observations of this host's docker
 	// CLI and its daemon, which mean nothing for another venue's words: a venue with its own `observedBy` brings its own
-	// boot read (the podman venue's is below, judged for `podman` alone the same way).
+	// boot read.
 	const bootEndpoint = localBlessed ? await resolveDockerEndpointFn() : null;
 	if (bootEndpoint) {
 		logDockerEndpoint(log, bootEndpoint);
@@ -1128,12 +1074,7 @@ export async function startWorker(
 	// Issue #354: for `local` alone, like the endpoint above, and not at all with `local` unblessed. This is the site that
 	// would otherwise hold a worker without `local` at exit 1 forever: a floor naming `isolation` against observations
 	// nobody made reads as unanswered, which is the transient arm, which the supervisor retries without end.
-	// Issue #448: `systemctl show podman.service`, read once here where the local daemon is rootful Podman on this host, and
-	// handed to both the mounts observation and the containers.conf refusal below, so they judge one answer.
-	// The deletion rule's memory (gate round 1 of PR #473): which chain files this worker saw while one service start ran.
-	const rootfulMemory = makeRootfulMemory();
-	const bootUnit = bootEndpoint && bootJobUser?.daemon ? await readRootfulService({ endpoint: bootEndpoint, daemon: bootJobUser.daemon, readService: readPodmanServiceFn }) : undefined;
-	const bootObserved = bootEndpoint ? observeHost({ endpoint: bootEndpoint, daemon: bootJobUser?.daemon ?? { answered: false, reason: "boot-read-timeout", transient: true }, fs: observationFs, unit: bootUnit, env, memory: rootfulMemory }) : null;
+	const bootObserved = bootEndpoint ? observeHost({ endpoint: bootEndpoint, daemon: bootJobUser?.daemon ?? { answered: false, reason: "boot-read-timeout", transient: true } }) : null;
 	if (bootObserved) {
 		const bootObservedArgs = { backends: [DEFAULT_BACKEND], backendFloor: config.backendFloor, observations: bootObserved.observations, evidence: bootObserved.evidence };
 		const [runtimeRefusal] = observationRefusals(bootObservedArgs);
@@ -1143,55 +1084,14 @@ export async function startWorker(
 
 	const bootRefusal = jobUserBootRefusal(bootDecision, config.defaultBackend);
 	if (bootRefusal) throw configError(bootRefusal);
-	// Issue #684: the openshell venue's releases, read once at boot (the half #683 left to the blessing). A CLI or a gateway
-	// at another release than the one this venue was measured on refuses the boot (exit 2); a CLI that does not answer is
-	// restarted into (exit 1); a gateway that does not answer refuses nothing, since every job's preflight reads it again.
-	// Issue #712: whether the gateway is on this host, as the boot read it, for the registry row's `backends` word.
-	// `unknown` while not read (a gateway down at boot): a word published per beat must not spawn the CLI per beat.
-	let openshellGatewayWord = "unknown";
-	if (openshellBlessed) {
-		const versions = await readOpenshellVersionsFn({ gateway: config.openshell.gateway });
-		if (versions?.refusal) throw versions.transient ? new Error(versions.refusal) : configError(versions.refusal);
-		if (versions?.gatewayDown) log("openshell_gateway_down_at_boot", { gateway: config.openshell.gateway });
-		if (typeof versions?.gatewayLocal === "boolean") openshellGatewayWord = versions.gatewayLocal ? "local" : "remote";
-	}
-	// Issue #448: where a local job runs on rootful Podman's Docker API service on this host, the containers.conf that
-	// service reads (the system chain, root's own, the unit's CONTAINERS_CONF) and whether the running service started
-	// before it last changed. A VENUE refusal, as the podman venue's #428 one is and for its reason: with egress off no
-	// declared property covers what `env` or `annotations` add to a job. After the identity, whose fix comes first, and
-	// only while `local` is the default venue; merely blessed, each local job is refused and the default venue's run.
-	// Tagged (exit 2) since a restart reads the same bytes, except what heals by itself (exit 1): a read that failed for a
-	// moment, a running service older than its containers.conf, a change time ahead of the clock. What the worker's account
-	// cannot read under root's own config home is said once here, never refused on; any other unreadable part refuses.
-	const bootRootful = bootEndpoint && bootJobUser?.daemon ? await observeRootfulConf({ endpoint: bootEndpoint, daemon: bootJobUser.daemon, fs: observationFs, readService: readPodmanServiceFn, env, unit: bootUnit, memory: rootfulMemory }) : null;
-	let rootfulUnreadSaid = "";
-	const sayRootfulUnread = (rootful) => {
-		const said = rootfulUnreadList(rootful?.unread);
-		if (said === rootfulUnreadSaid) return;
-		rootfulUnreadSaid = said;
-		if (said !== "") log("local_podman_conf_unread", { unread: said });
-	};
-	sayRootfulUnread(bootRootful);
-	const localConfBoot = localConfBootRefusal(bootDecision, config.defaultBackend, bootRootful);
-	if (localConfBoot) throw localConfBoot.transient ? new Error(localConfBoot.message) : configError(localConfBoot.message);
-
-	// Issue #354: the podman venue's ONE facts read, `podman info --format json`, at boot, where local's reads are and for
-	// their reasons: free, before forge auth, the reaper and any Valkey client (the Valkey owner judgement above only reads
-	// sockets and probes addresses), so a refusal here stops a process that built nothing.
-	// Wrapped once in `cachedPodmanInfo` and the SAME wrapper is handed to the bundle below, so an answer read here is the
-	// one the first job is decided from rather than a second spawn. Bounded twice: the reader's own timeout (docker info's
-	// 15 s, reused) and this fuse two seconds past it, because a spawn that never settles has no timeout to fire.
-	const podmanInfo = podmanBlessed ? cachedPodmanInfo(readPodmanInfoFn, { now, log }) : null;
-	// Issue #596, phase 2: what the host budget's `auto` is computed from, read on its tick (off every job path) from the
-	// two cached readers above: each blessed venue's memory and CPU count, the SMALLER where both answered (two venues on
-	// one host share it; a desktop VM is the smaller), and on rootless Podman the user service's own `memory.max` and
-	// `cpu.max` beside them. A venue that did not answer adds nothing, so the budget is unknown only when none did.
-	// The same reads also say how each venue manages cgroups (`reserveVenues`), from which the CPU reserve keeps the jobs'
+	// Issue #596, phase 2: what the host budget's `auto` is computed from, read on its tick (off every job path) from
+	// the cached daemon facts read: this blessed venue's memory and CPU count. A read that did not answer adds nothing,
+	// so the budget is unknown only when nothing answered.
+	// The same read also says how the venue manages cgroups (`reserveVenues`), from which the CPU reserve keeps the jobs'
 	// parent cgroup's quota at the budget (`cpu-reserve.mjs`, on every refresh, off every job path).
 	const readHostFacts = async () => {
 		const views = [];
 		const reserveVenues = [];
-		let user = {};
 		if (localBlessed && budgetEndpoint) {
 			const read = await resolveJobUser(budgetEndpoint).catch(() => null);
 			if (read?.daemon?.answered === true) {
@@ -1199,63 +1099,16 @@ export async function startWorker(
 				reserveVenues.push({ venue: DEFAULT_BACKEND, facts: read.daemon.facts, endpointLocal: budgetEndpoint.endpoint?.local === true });
 			}
 		}
-		if (podmanInfo) {
-			const read = await podmanInfo().catch(() => null);
-			if (read?.answered === true) {
-				views.push(read.info);
-				reserveVenues.push({ venue: PODMAN_BACKEND, facts: read.info, endpointLocal: read.info?.serviceIsRemote === false });
-				if (read.info?.rootless === true) user = readUserServiceLimits({ uid: jobUserIdentity.euid, readFile: readCgroupFileFn });
-			}
-		}
 		const least = (key) => {
 			const known = views.map((v) => v?.[key]).filter((v) => Number.isSafeInteger(v));
 			return known.length > 0 ? Math.min(...known) : null;
 		};
-		return { memTotalMiB: least("memTotalMiB"), hostCpus: least("hostCpus"), ...user, reserveVenues };
+		return { memTotalMiB: least("memTotalMiB"), hostCpus: least("hostCpus"), reserveVenues };
 	};
 	// Issue #596, phase 2: the aggregate CPU reserve. One per worker; the helper container (Docker's cgroupfs driver) runs
 	// the job image this worker already pins, with `--pull=never`, never an image fetched for it.
 	const cpuReserve = makeCpuReserveFn({ run: (bin, args, { timeoutMs }) => execDockerBounded(args, { bin, timeoutMs }), image: config.jobImage, now, log });
 	const syncCpuReserve = (budget, facts) => cpuReserve.sync({ cpuCenti: budget.cpuCenti, plans: (facts?.reserveVenues ?? []).map((v) => reservePlan({ ...v, platform: jobUserIdentity.platform })) });
-	const bootPodmanRead = podmanInfo
-		? await settleWithin(
-				Promise.resolve()
-					.then(() => podmanInfo())
-					.catch(() => ({ answered: false, reason: "spawn-failed", transient: true })),
-				PODMAN_INFO_TIMEOUT_MS + 2_000,
-				{ answered: false, reason: "boot-read-timeout", transient: true },
-			)
-		: null;
-	const bootPodmanDecision = bootPodmanRead ? decidePodmanJobUser({ platform: jobUserIdentity.platform, euid: jobUserIdentity.euid, egid: jobUserIdentity.egid, read: bootPodmanRead }) : null;
-	// The IDENTITY verdict first, before the observations, and unlike `local`'s order on purpose: a rootful or remote
-	// Podman also fails the observations (the mounts check reads a rootless user's files, the service one its remoteness),
-	// and a floor refusal naming `podmanAddsNoMounts` would send the operator after a mounts.conf when the fix is the
-	// account Podman runs as. Only when `podman` is the DEFAULT venue, as `jobUserBootRefusal` for `local`: with it merely
-	// blessed, the jobs that name it are refused one by one and the default venue's still run.
-	const podmanRefusal = podmanBootRefusal(bootPodmanDecision, config.defaultBackend);
-	if (podmanRefusal) throw configError(podmanRefusal);
-	// Issue #428: the account's containers.conf, next, under the same rule (only while `podman` is the default venue; merely
-	// blessed, each podman job is refused and the default venue's still run). A VENUE refusal rather than a floor
-	// observation: with egress off no declared property covers what a job reaches on the host, so a floor would never
-	// fire on the deployments at risk. Read from this host's files with no daemon, so it is determinate whatever the info
-	// read said, and tagged (exit 2): a restart reads the same bytes. After the identity, whose fix comes first. The one
-	// exception is a read that failed for a moment (out of descriptors, an I/O error), which is untagged (exit 1) so the
-	// supervisor restarts it, as an unanswered observation is.
-	const podmanConfBoot = podmanConfBootRefusal(bootPodmanDecision, config.defaultBackend, { fs: observationFs, home: jobUserIdentity.home, env, euid: jobUserIdentity.euid, runRoot: bootPodmanRead?.answered === true && bootPodmanRead.info ? (bootPodmanRead.info.runRoot ?? null) : undefined });
-	if (podmanConfBoot) throw podmanConfBoot.transient ? new Error(podmanConfBoot.message) : configError(podmanConfBoot.message);
-	// The podman venue's own observations, judged for `podman` ALONE, as the endpoint and the daemon's are for `local`
-	// alone: each venue's words are earned by its own reads, and judging one venue's answers over every blessed venue
-	// would read the other's observations as unanswered, which is the transient arm, exit 1 on every restart. Same split
-	// as `local`'s: a refusal resting only on a read that did not answer is untagged (retried), one on an answer tagged.
-	const bootPodmanObserved = bootPodmanRead ? observePodman({ read: bootPodmanRead, fs: observationFs, home: jobUserIdentity.home, env, euid: jobUserIdentity.euid }) : null;
-	// Not judged at all when the venue's identity is already refused (it is then merely blessed, or the refusal above would
-	// have stopped the boot): every job naming it is refused by that cause, and a floor refusal here would stop the whole
-	// worker, the default venue's jobs included, with a fix (delegate controllers, empty a mounts.conf) that is not the one.
-	if (bootPodmanObserved && bootPodmanDecision?.mode !== "unmappable") {
-		const podmanObservedArgs = { backends: [PODMAN_BACKEND], backendFloor: config.backendFloor, observations: bootPodmanObserved.observations, evidence: bootPodmanObserved.evidence };
-		const [podmanObservationRefusal] = observationRefusals(podmanObservedArgs);
-		if (podmanObservationRefusal) throw observationRefusalIsTransient(podmanObservedArgs) ? new Error(podmanObservationRefusal) : configError(podmanObservationRefusal);
-	}
 
 	// The forge a job belongs to is resolved PER JOB from `job.kind`, not bound once for the process.
 	// Each entry is `{ auth, host }`: `auth` is get-token's `{ mintToken, selfId, source }` (null when that
@@ -1440,17 +1293,8 @@ export async function startWorker(
 		// there is one place. `local`'s is built here because its bundle cannot exist yet.
 		// Issue #354: `local`'s only while it is blessed, since its bundle is built only then and the registry refuses a
 		// boot reaper for a venue it does not hold.
-		// Issue #354: podman's the same way and for the same reason, `makeReaper` with `bin: "podman"`, so the sweep lists
-		// the store this account's jobs actually ran in. Docker's listing says nothing about it, and the reverse.
-		// Issue #684: the openshell venue's, by its owner label: crashed jobs' sandboxes, then their providers. Issue #686 part
-		// 3: ONE reaper for both modes, registered under each blessed name and run once: the owner label is shared, a crash's
-		// leftover of either mode is an orphan alike, and at boot no job of this process is live in either.
-		const openshellReap = openshellBlessed ? makeOpenshellReaperFn({ gateway: config.openshell.gateway, log }) : null;
 		backendReaps = {
 			...(localBlessed ? { [DEFAULT_BACKEND]: makeReaperFn({ log }) } : {}),
-			...(podmanBlessed ? { [PODMAN_BACKEND]: makePodmanReaperFn({ log }) } : {}),
-			...(openshellCopyBlessed ? { [OPENSHELL_BACKEND]: openshellReap } : {}),
-			...(openshellBindBlessed ? { [OPENSHELL_BIND_BACKEND]: openshellReap } : {}),
 			...Object.fromEntries(extraBackends.map((b) => [b?.name, b?.reap])),
 		};
 		const swept = (await reapAll([...new Set(Object.values(backendReaps))], { log }))?.reaped === true;
@@ -1495,50 +1339,6 @@ export async function startWorker(
 	// re-runs this closure, so boot and every tick read the one value.
 	const reapConsoleAudit = makeConsoleAuditReaper({ logsDir: config.logsDir, retentionDays: config.consoleAuditRetentionDays, log });
 	reapConsoleAudit();
-
-	// REQ-RESURRECTABLE-SANDBOX: sweep retained per-job directories past their window, so what `cleanup`
-	// kept for re-opening stays bounded. Third in the row and deliberately its own sweep -- a different
-	// retention policy, a different PII class, and one thing neither sibling needs: it asks the container runtimes
-	// which sandboxes are live first, because an operator's shell can outlive a worker restart by design and
-	// deleting a bind mount underneath it is a confusing failure with a boring cause. Same double-wrap.
-	// Held for the periodic sweep, same as the log reaper above. Safe to re-run on a timer without any
-	// state carried between calls: `makeSandboxReaper` declares `running` INSIDE its returned function and
-	// re-issues `listRunning` every call, so a docker outage costs one interval of retention overshoot
-	// rather than latching the sweep off until the next boot.
-	let reapSandboxes = async () => {};
-	try {
-		// Issue #429, as corrected by its review: which sandboxes are open is asked PER RETAINED RUN, of the runtime that
-		// run's manifest records, never of the runtimes this worker blesses. The opener's blessing is the OPENER's
-		// `PI_BACKENDS` and routinely differs from the worker's (`OQ-038`), so a blessed-list listing let a podman-only
-		// worker delete a local run's directory under a docker shell an operator had just opened. A runtime that cannot
-		// answer holds its own runs this pass and nothing else, so a stale docker CLI does not stop a podman sweep, and a
-		// run it cannot place (an unreadable manifest, a venue with no launcher) is asked of every runtime present.
-		// `blessed` only adds runtimes to the network sweep; a host that blesses neither and retains nothing from either
-		// spawns neither CLI.
-		// The store a podman run recorded is compared with THIS worker's podman store (review round 2): the cached boot
-		// read when podman is blessed, else one read through the same seam, asked only when a podman run recorded one.
-		const readPodmanStore = async () => {
-			const read = await (podmanInfo ?? readPodmanInfoFn)();
-			return read?.answered === true ? (read.info?.graphRoot ?? null) : null;
-		};
-		const watch = makeSandboxRuntimeWatch({ sandboxDir: config.sandboxDir, blessed: config.backends, list: listRunningSandboxesFn, readPodmanStore, makeSweeper: makeSandboxNetworkSweeperFn, proxy: config.egressProxy, log });
-		reapSandboxes = makeSandboxReaperFn({
-			sandboxDir: config.sandboxDir,
-			retentionHours: config.sandboxRetentionHours,
-			listRunning: watch.listRunning,
-			// Issue #337: the session networks a died-mid-session process left, one sweeper per runtime present (issue
-			// #429), each listing and removing in its own runtime. Unconditional on `PI_EGRESS`, on the boot reaper's own
-			// precedent (it lists `pi-job-` networks whatever the posture) and for a sharper reason: a deployment that has
-			// turned the policy OFF is exactly where the leftovers are guaranteed dead, since nothing is making new ones.
-			sweepNetworks: watch.sweepNetworks,
-			// Issue #446, gate round 1: each expired run's own runtime is asked once more right before it is renamed aside.
-			isOpen: watch.isOpen,
-			log,
-		});
-		await reapSandboxes();
-	} catch (err) {
-		log("sandbox_reaper_skipped", { reason: scrubCredentials(err?.message) });
-	}
 
 	// One raw Redis client, shared by the budget (via the worker) and the scheduler stall guard, so it is
 	// hoisted out of the createWorkerFn arg object.
@@ -1671,10 +1471,7 @@ export async function startWorker(
 		},
 	};
 	const enqueueRecovery = makeRecoveryEnqueuerFn({ redis, queues: recoveryQueues, hostQueueName, now, log });
-	// Issue #686 part 3, review round 1 (#714): on the openshell-bind venue a lost attempt's job dir is a sandbox's bind,
-	// and that sandbox may still be writing it, so the salvage first has the venue end it and confirm it gone. Resolved at
-	// call time: the bundle is built further down, and a salvage runs only once jobs are consumed.
-	const salvageCheckpoint = makeSalvager({ jobsDir: config.jobsDir, hostName: durableHost, workspaceCheckpointer, runCheckpointer, log, settleJobDir: (name) => (openshellBindBackend ? openshellBindBackend.settleJobDir(name) : true) });
+	const salvageCheckpoint = makeSalvager({ jobsDir: config.jobsDir, hostName: durableHost, workspaceCheckpointer, runCheckpointer, log });
 	// The boot sweep of orphaned `jobs/job-*` directories: a crashed worker's processor never cleaned up after its jobs.
 	// Here, before `createWorker` starts consuming, so no job of THIS process owns any of them; the age bound (the job
 	// timeout plus the abort grace's margin) covers another process on this host. A directory a checkpoint pointer of this
@@ -1814,8 +1611,7 @@ export async function startWorker(
 	};
 	// Issue #643 (DES-LIVE-TRANSCRIPT-STREAM): every running job's transcript, redacted, to its own capped Valkey stream,
 	// on every deployment unless PI_LIVE_TRANSCRIPTS=0. Not gated on a worker name, unlike the mirror above: the panel on
-	// a single host reads the same stream. Handed to every venue's runContainer, which publish only beside a staged file,
-	// or, on openshell (issue #686), from the exec's stderr records.
+	// a single host reads the same stream. Handed to every venue's runContainer, which publish only beside a staged file.
 	//
 	// Issue #644 (DES-RUN-PROGRESS): the same opener reads each job's progress off the same file unless PI_RUN_PROGRESS=0,
 	// so it is built when either switch is on; with transcripts off it tails the file and writes no stream.
@@ -1833,7 +1629,7 @@ export async function startWorker(
 			? makeLiveTranscriptOpenerFn({ redis, log, transcripts: config.liveTranscripts, progress: config.runProgress, makeCommenter: makeProgressCommenter, ...(runCheckpointer ? { checkpoint: (args) => runCheckpointer.open(args) } : {}), ...(steerWired ? { steer: true } : {}) })
 			: null;
 	// Issue #646 (DES-STEER-VIA-READONLY-INBOX-MOUNT): the inbox relay's opener, handed to every venue's runContainer, which
-	// opens one per steer-ARMED attempt (on openshell, issue #686, one writing frames on the exec's stdin). Bound here to the worker's client and to the host name the run checkpointer
+	// opens one per steer-ARMED attempt. Bound here to the worker's client and to the host name the run checkpointer
 	// writes (`durableHost`), the one this host is known by in the fleet: the open key names it.
 	const openInboxRelay = steerWired ? (args) => makeInboxRelayFn({ redis, host: durableHost, now, log, ...args,
 		onDelivered: async ({ runId, id, at }) => {
@@ -2110,73 +1906,7 @@ export async function startWorker(
 	// Issue #354: built only while `local` is blessed, since it IS local's (`docker image inspect`). Without `local` the
 	// boot read below asks the default venue's own preflight instead, the one its jobs will be gated on.
 	const imagePreflight = localBlessed ? makeImagePreflightFn({ image: config.jobImage }) : null;
-	// Issue #354: the podman bundle, built only while `podman` is blessed, from the SAME deployment inputs local's
-	// runContainer is handed below (one image, one overlay, one forward list, one egress posture: a venue must not quietly
-	// run a different job than the one configured), plus what only this venue reads: the cached `podman info` the boot
-	// read above already asked, the floor its per-job observation preflight judges, the boot-built reaper, and the
-	// process's identity and host files, through the same seams local's decisions read. Built HERE rather than beside
-	// local's, because the boot image read just below asks the default venue's own preflight when that venue is podman.
-	const podmanBackend = podmanBlessed
-		? makePodmanBackendFn({
-				image: config.jobImage,
-				hostEnv: env,
-				egress: config.egress,
-				egressProxy: config.egressProxy,
-				openJobLog,
-				...(openLiveTranscript ? { openLiveTranscript } : {}),
-				...(openInboxRelay ? { openInboxRelay } : {}),
-				globalPiDir: config.globalPiDir,
-				allowGlobalExtensions: config.allowGlobalExtensions,
-				packagePaths: getPackagePaths,
-				forwardEnv: config.forwardEnv,
-				authFromPi: config.authFromPi,
-				forgeHosts: { gitlab: config.gitlab?.apiUrl ?? null, forgejo: config.forgejo?.apiUrl ?? null, azure: config.azure?.orgUrl ?? null },
-				backendFloor: config.backendFloor,
-				reap: backendReaps[PODMAN_BACKEND],
-				// Issue #681: the budget's leftover listing, through the same seam local's takes.
-				listJobContainers: listJobContainersFn("podman"),
-				readInfo: podmanInfo,
-				platform: jobUserIdentity.platform,
-				euid: jobUserIdentity.euid,
-				egid: jobUserIdentity.egid,
-				fs: observationFs,
-				home: jobUserIdentity.home,
-				env,
-				log,
-			})
-		: null;
-	// Issue #458 (PR #463 round 2): on Podman 4.x with egress armed, the keeper read ONCE at boot through the bundle's own
-	// preflight, bounded, and said as its own event with the whole sentence. A deployment that upgraded without re-running
-	// `service install` or `up` has no keeper, and would otherwise learn it only from retried jobs. Only a warning: the
-	// per-job preflight is the gate: once the keeper holds, the next job runs (under a proxy up longer than the grace,
-	// 15 s, after the proxy's restart, which the job's retry message and doctor both ask for).
-	if (podmanBackend && config.egress) {
-		const readBootKeeper = () =>
-			settleWithin(
-				Promise.resolve()
-					.then(() => podmanBackend.egressPreflight({}))
-					.catch(() => ({})),
-				BOOT_IMAGE_TIMEOUT_MS * 4,
-				{},
-			);
-		let bootKeeper = await readBootKeeper();
-		// Issue #476: a keeper whose only fault is its age is waited out, once and bounded (at most the minimum age plus
-		// the margin), then judged again. A stack started together reads it under a second old (measured 0.5 to 0.8 s on
-		// 4.9.3), and warning then was wrong every time; a keeper still young after the wait restarted in it, and is said.
-		if (bootKeeper?.young && typeof bootKeeper.young === "object") {
-			const waitMs = Math.min(Number.isFinite(bootKeeper.young.waitMs) ? bootKeeper.young.waitMs : 0, NETNS_KEEPER_MIN_AGE_MS + NETNS_KEEPER_YOUNG_MARGIN_MS);
-			// Said as information, not a warning: the one line that shows a joint start was waited out, and for how long.
-			log("netns_keeper_young_at_boot", { keeperAgeMs: bootKeeper.young.ageMs ?? null, waitMs });
-			await sleep(Math.max(0, waitMs));
-			bootKeeper = await readBootKeeper();
-		}
-		// Its own sentence (PR #463 round 3): the job-shaped one says "this job is retried", and at boot there is no job.
-		if (typeof bootKeeper?.keeper === "string") log("netns_keeper_not_holding_at_boot", { reason: bootKeeper.keeperAtBoot ?? bootKeeper.keeper });
-	}
-	// Issue #684: the openshell bundle, while blessed. Its policy reads the same two sources the squid venues' proxy reads
-	// and the MCP check reads (this folder's egress-allowlist.conf, a missing one admitting nothing, and the pickup's
-	// endpoint snapshot, or the boot-loaded one where a job carries none); its reaper is the boot sweep's own.
-	// ONE reader of this folder's egress-allowlist.conf for the MCP check and the openshell policy, so the two cannot
+	// ONE reader of this folder's egress-allowlist.conf for the MCP check, so the check and the proxy cannot
 	// disagree about what the proxy admits. No allowlist here: every host outside a declared endpoint is unreachable,
 	// which it is. Any other failure is the caller's to classify (a transient errno is retried).
 	const readEgressAllowlist = () => {
@@ -2187,38 +1917,8 @@ export async function startWorker(
 			throw error;
 		}
 	};
-	// Issue #686 part 3: one option set, so the two modes cannot drift apart in anything but their mode (and their key in
-	// the boot sweep's map, which holds one reaper for both).
-	const readOpenshellEndpoints = () => modelEndpoints.current ?? [];
-	const openshellOptions = (mode) => ({
-		mode,
-		image: config.jobImage,
-		// Review round 1 (#714): the bind probe's empty source directory is made under the jobs dir.
-		jobsDir: config.jobsDir,
-		engine: config.openshell.engine,
-		gateway: config.openshell.gateway,
-		readAllowlist: readEgressAllowlist,
-		readEndpoints: readOpenshellEndpoints,
-		hostEnv: env,
-		openJobLog,
-		// Issue #686: the same opener the binding venues get, fed from the exec's stderr records, and the same inbox relay
-		// opener, whose relay writes a steered job's messages as frames on the exec's stdin there (part 2).
-		...(openLiveTranscript ? { openLiveTranscript } : {}),
-		...(openInboxRelay ? { openInboxRelay } : {}),
-		globalPiDir: config.globalPiDir,
-		allowGlobalExtensions: config.allowGlobalExtensions,
-		packagePaths: getPackagePaths,
-		forwardEnv: config.forwardEnv,
-		authFromPi: config.authFromPi,
-		forgeHosts: { gitlab: config.gitlab?.apiUrl ?? null, forgejo: config.forgejo?.apiUrl ?? null, azure: config.azure?.orgUrl ?? null },
-		reap: backendReaps[mode === "bind" ? OPENSHELL_BIND_BACKEND : OPENSHELL_BACKEND],
-		log,
-	});
-	const openshellBackend = openshellCopyBlessed ? makeOpenshellBackendFn(openshellOptions("copy")) : null;
-	const openshellBindBackend = openshellBindBlessed ? makeOpenshellBackendFn(openshellOptions("bind")) : null;
-	// Every bundle this boot built beside local's, in registration order: podman, openshell, openshell-bind, then the
-	// injected ones.
-	const builtBackends = [...(podmanBackend ? [podmanBackend] : []), ...(openshellBackend ? [openshellBackend] : []), ...(openshellBindBackend ? [openshellBindBackend] : []), ...extraBackends];
+	// Every bundle this boot built beside local's, in registration order: the injected ones.
+	const builtBackends = [...extraBackends];
 	// BOUNDED, because `.catch()` cannot rescue a promise that never settles: `runDocker` resolves only on
 	// the child's `close` or `error` and has no timeout of its own, so a wedged daemon would hang boot
 	// here. This read is a nicety -- a digest for the boot line and the registry -- and a nicety may
@@ -2242,21 +1942,11 @@ export async function startWorker(
 		else if (planned.refused) log("job_user_group_refused", { cause: planned.cause });
 		if (planned.user && config.forwardEnv.includes("HOME")) log("forward_env_home_overridden", { reason: "HOME is set beside --user" });
 	}
-	// Issue #354: the same boot sentence for a podman DEFAULT venue, whose image was read from this account's own store
-	// just above. Only as the default: with `local` the default, `bootImage` is docker's copy of the tag, which says
-	// nothing about the one in the podman store. `backend` names the venue, since `local`'s lines carry none.
-	if (config.defaultBackend === PODMAN_BACKEND && bootPodmanDecision?.mode === "worker" && bootImage.ok) {
-		const planned = resolvePodmanImageUser(bootPodmanDecision, { capabilities: bootImage.capabilities ?? [], euid: jobUserIdentity.euid, egid: jobUserIdentity.egid });
-		if (planned.refused === "job-image-any-uid-unsupported") log("job_image_any_uid_unsupported", { image: config.jobImage, backend: PODMAN_BACKEND });
-		else if (planned.refused) log("job_user_group_refused", { cause: planned.cause, backend: PODMAN_BACKEND });
-		if (planned.user && config.forwardEnv.includes("HOME")) log("forward_env_home_overridden", { reason: "HOME is set beside --user", backend: PODMAN_BACKEND });
-	}
 	// Resolved once: `Intl` is not free, and this value cannot change without a restart.
 	const hostTz = Intl.DateTimeFormat().resolvedOptions().timeZone ?? "";
 	const endpointSlots = makeInFlight();
 	const endpointStatusNow = () => endpointStatusFields(modelEndpoints.current, endpointSlots, config.workerNameDeclared);
 	const registry = makeHostRegistryFn({ redis, name: config.workerName, log });
-	const retainedNow = makeSandboxTelemetry({ list: () => listSandboxesFn({ sandboxDir: config.sandboxDir, throwOnReadFailure: true }), deadline: sandboxDeadline, retentionHours: config.sandboxRetentionHours, canOpen: (manifest) => !sandboxSyncRefusal({ jobId: manifest.jobId, manifest, blessed: config.backends }), now, log });
 	// Issue #596, phase 2: one integer of the host budget's snapshot for the beat, or "" before the worker exists.
 	const snapshotField = (key) => {
 		const snap = worker?.hostBudget?.snapshot?.();
@@ -2353,9 +2043,6 @@ export async function startWorker(
 		// Issue #596, phase 2: this host's budget and what its jobs hold against it, integers (MiB and hundredths of a CPU),
 		// `off` for a budget switched off and "" while unknown, so doctor and a forge job's never-fits check can read which
 		// host a size fits on. Thunks over the worker's one budget, so every beat says what is held now.
-		sandboxes: () => retainedNow().sandboxes,
-		sandboxesMore: () => retainedNow().sandboxesMore,
-		sandboxRetentionHours: () => retainedNow().sandboxRetentionHours,
 		budgetFrom: () => { const value = parseBudgetFrom(worker?.hostBudget?.detail?.()); return value ? JSON.stringify(value) : ""; },
 		cpuReserve: () => JSON.stringify(parseCpuReserve(cpuReserve.states?.()) ?? []),
 		budgetMemMiB: () => budgetField(worker?.hostBudget?.current().memMiB ?? null),
@@ -2387,10 +2074,10 @@ export async function startWorker(
 			if (typeof snap?.seeded !== "boolean") return "";
 			return snap.seeded ? "listed" : `unlisted:${(snap.unseeded ?? []).join(",")}`;
 		},
-		// Issue #712: the venues this host blesses (the first is its default), its floor and its OpenShell engine and
-		// gateway word, for the console's and the panel's Venues view (`hostBackendsField`: names and fixed words only).
-		// A value, not a thunk: every part is boot configuration or the boot's gateway read, none changes without a restart.
-		backends: hostBackendsField({ backends: config.backends, backendFloor: config.backendFloor, openshellEngine: config.openshell?.engine ?? null, gatewayWord: openshellGatewayWord }),
+		// Issue #712: the venues this host blesses (the first is its default) and its floor, for the console's and the
+		// panel's Venues view (`hostBackendsField`: names and fixed words only).
+		// A value, not a thunk: every part is boot configuration, none changes without a restart.
+		backends: hostBackendsField({ backends: config.backends, backendFloor: config.backendFloor }),
 	});
 
 
@@ -2402,8 +2089,7 @@ export async function startWorker(
 	// wrong decision all day (the image preflight is not cached for the same reason). Only for a venue
 	// whose declaration is observation-gated on it, and only a refusal under a floor that needs it.
 	// Issue #345: the runtime observations come from the same per-job read, in the same place: the facts the job user is
-	// decided from (cached per endpoint state, so no second daemon call) and this host's Podman files, re-read per job
-	// because an operator creating the empty mounts.conf override must not need a restart.
+	// decided from (cached per endpoint state, so no second daemon call).
 	const localObservationPreflight = async (job) => {
 		const venue = resolveBackendName(job, config.defaultBackend);
 		if (Object.keys(backendFor(venue)?.observedBy ?? {}).length === 0) return { ok: true };
@@ -2429,21 +2115,11 @@ export async function startWorker(
 		}
 		budgetEndpoint = { endpoint, key: state };
 		const jobUser = await resolveJobUser({ endpoint, key: state });
-		const unit = await readRootfulService({ endpoint, daemon: jobUser.daemon, readService: readPodmanServiceFn });
-		// One read of each host path for this job's two checks (`onceFs`, gate round 3 of PR #473), fresh per job.
-		const jobFs = onceFs(observationFs);
-		const observed = observeHost({ endpoint, daemon: jobUser.daemon, fs: jobFs, unit, env, memory: rootfulMemory });
+		const observed = observeHost({ endpoint, daemon: jobUser.daemon });
 		if (runtimeObservationKey(observed) !== runtimeObservedSaid) {
 			runtimeObservedSaid = runtimeObservationKey(observed);
 			log("runtime_observed", { daemonAppliesBounds: observed.observations.daemonAppliesBounds, runtimeAddsNoMounts: observed.observations.runtimeAddsNoMounts, changed: true });
 		}
-		// Issue #448: rootful Podman's containers.conf, per job and before any spend, re-read every time because removing a
-		// key must need no worker restart (only the Podman service's). Handed back as the podman venue's refusal is
-		// (`podmanConfRefused`, `rootful: true`), ahead of the floor: it is what the venue IS on this host, and the processor
-		// returns it before the image preflight. Nothing is read where the daemon is not rootful Podman on this host.
-		const rootful = await observeRootfulConf({ endpoint, daemon: jobUser.daemon, fs: jobFs, readService: readPodmanServiceFn, env, unit, memory: rootfulMemory });
-		sayRootfulUnread(rootful);
-		if (rootful?.refusal) return { ok: true, endpoint, jobUser, podmanConfRefused: rootfulRefused(rootful.refusal) };
 		const args = {
 			backends: [venue],
 			backendFloor: config.backendFloor,
@@ -2453,7 +2129,9 @@ export async function startWorker(
 		const [refusal] = observationRefusals(args);
 		if (!refusal) return { ok: true, endpoint, jobUser };
 		const missed = [...new Set(unobservedFloor(args.backends, args.backendFloor, args.observations).map((m) => m.observedBy))];
-		if (observationRefusalIsTransient(args)) return unavailableFor(observed, missed[0]);
+		// The venue word that gave this its "file-unread" flavour (rootless Podman's conf read) left with the podman
+		// backend: an observation the job could not re-read is transient, full stop.
+		if (observationRefusalIsTransient(args)) return { unavailable: true, reason: observed?.reasons?.[missed[0]] ?? "unknown" };
 		return { refused: true, message: refusal, observations: missed };
 	};
 	// Issue #452, gate round 5: the runtime each local job was admitted on, by job id, taken (and forgotten) by that job's
@@ -2835,7 +2513,7 @@ export async function startWorker(
 			readFacts: readHostFacts,
 			onRefresh: syncCpuReserve,
 			// Issue #681: asked of the venue that holds the container, through the registry. This used to pick the CLI from the
-			// venue's name and send every venue but podman to docker, so a third venue's orphan was either freed while it still
+			// venue's name and send every venue but the default to docker, so a third venue's orphan was either freed while it still
 			// ran (docker lists no such name) or never freed (no docker on the host).
 			containerGone: containerGoneFn ?? backends.containerGone,
 			// AFTER the boot reaper (above), every blessed venue's remaining job containers, seeded into the ledger
@@ -2846,14 +2524,14 @@ export async function startWorker(
 			// cause that refuses a boot (the venue's boot-refusing set: every job on it is refused before a container, so this
 			// worker starts none there). A cause decided from one unreadable answer is re-decided per job and can clear, so
 			// it leaves the venue unread.
-			// Issue #681: every BLESSED registered venue, each listed by its own bundle; it used to be local and podman by name,
-			// so a third venue was never seeded and its leftover containers were never counted. Only local and podman have a
+			// Issue #681: every BLESSED registered venue, each listed by its own bundle; it used to be local by name,
+			// so a third venue was never seeded and its leftover containers were never counted. Only `local` has a
 			// boot job-user decision; another venue's holds-none rule is ENOENT alone.
 			survivors: Object.fromEntries(
 				Object.entries(backends.listers())
 					.filter(([backend]) => config.backends.includes(backend))
 					.map(([backend, list]) => {
-						const [decision, stable] = backend === DEFAULT_BACKEND ? [bootDecision, BOOT_REFUSING_JOB_USER_CAUSES] : backend === PODMAN_BACKEND ? [bootPodmanDecision, PODMAN_BOOT_REFUSING_CAUSES] : [null, new Set()];
+						const [decision, stable] = backend === DEFAULT_BACKEND ? [bootDecision, BOOT_REFUSING_JOB_USER_CAUSES] : [null, new Set()];
 						return [
 							backend,
 							async () => {
@@ -3148,7 +2826,7 @@ export async function startWorker(
 			},
 			// REQ-MCP-OPERATOR-SERVERS: the overlay's mcp.json read once per job that names a server, never at boot (an
 			// operator who re-runs import-pi must not have to restart the worker). The allowlist is the one the proxy
-			// mounts, this folder's egress-allowlist.conf on both venues (up.mjs, podman-stack.mjs), and the endpoints
+			// mounts, this folder's egress-allowlist.conf (up.mjs), and the endpoints
 			// are the pickup's snapshot, so the check and the proxy read the same declarations.
 			checkMcp: makeMcpCheck({
 				globalPiDir: config.globalPiDir,
@@ -3188,7 +2866,6 @@ export async function startWorker(
 			// Off the REGISTRY's surface, like every other per-job backend fact. Rebuilding it at the call site
 			// is how a fact ends up dispatched on one path and hardcoded on another.
 			neverStartedExits: backends.neverStartedExits,
-			checkSandboxWorkspace: (job) => checkSandboxWorkspace(job, { sandboxDir: config.sandboxDir }),
 			packageCanary: makePackageCanaryRuntime({ globalPiDir: config.globalPiDir, env, host: config.workerName, log, publishFacts: (facts) => publishCanaryFacts(redis, facts) }),
 			prepareWorkspace: makePrepareWorkspaceFn({
 				jobsDir: config.jobsDir,
@@ -3199,14 +2876,9 @@ export async function startWorker(
 				// Issue #464: the boot's own check, asked again before every job against the same env.
 				ensureDir: (dir) => ensureJobsDirFn(dir, { env }),
 				forgeFor,
-				// REQ-RESURRECTABLE-SANDBOX: the deployment default, resolved per job against run.image so a
-				// retained directory records the image that actually ran and a sandbox re-opens that one.
-				jobImage: config.jobImage,
-				// #277: the venue a retained directory records, which the sandbox refuses by when it is not here.
-				defaultBackend: config.defaultBackend,
 				// Issue #504 part B: a local job's folder is resolved at prepare and mounted resolved; one named inside a run
 				// root or a cron folder must still resolve inside it, and none may be the envelope's folder or above it.
-				localPlacement: { jobPaths: envelopeJobPathsNow, envelopeFile: config.envelopeFile ?? null, sandboxDir: config.sandboxDir, authStoreDir: subscriptions?.storeDir ?? null },
+				localPlacement: { jobPaths: envelopeJobPathsNow, envelopeFile: config.envelopeFile ?? null, authStoreDir: subscriptions?.storeDir ?? null },
 				// Issue #505: /job/portfolio.json for a confirmed portfolio job.
 				portfolioSnapshot,
 				preparers: makeForgePreparers({ gitlabApiUrl: config.gitlab?.apiUrl ?? null, forgejoApiUrl: config.forgejo?.apiUrl ?? null, azureOrgUrl: config.azure?.orgUrl ?? null }),
@@ -3218,9 +2890,9 @@ export async function startWorker(
 				// PI_SESSIONS_DIR is unset -- and a null means no mount and nothing written.
 				resolveSession: sessionStore.resolveSession,
 			}),
-			// REQ-RESURRECTABLE-SANDBOX. With the window at 0 this IS the old bare `cleanup`, by the same
-			// `rm` on the same path -- a deployment that wants no retention keeps today's behaviour exactly.
-			cleanup: makeCleanup({ sandboxDir: config.sandboxDir, retentionHours: config.sandboxRetentionHours, log }),
+			// The teardown the processor runs in its `finally`: remove the per-job dir. Never throws
+			// (the processor swallows it), so a cleanup fault cannot turn a finished run into a failure.
+			cleanup,
 			comment,
 			log,
 			// Resolved per job so the credential always comes from the job's OWN forge. A job whose forge has
@@ -3286,15 +2958,6 @@ export async function startWorker(
 	// the live Worker held the loop forever. The catch below covers the REGION, not a list of calls,
 	// so a step added tomorrow is covered the day it is added.
 	try {
-		// Human preparation uses its own bounded control worker, outside the paid processor and its slot ledgers.
-		const prepareSandbox = createSandboxPreparerFn({ config, env, forgeFor, readTriggers: () => readFileSync(onceTriggersFile, "utf8"), projects: () => projects.current, limits: () => scopedLimits.current, now });
-		const sandboxControl = startSandboxPrepareWorkerFn({ connection: valkeyConn(), host: config.workerName, config, prepare: prepareSandbox, now, log });
-		settleCloseOf(sandboxControl);
-		extraClosers.push(sandboxControl);
-		const sandboxInventory = makeSandboxInventoryFn({ redis, host: config.workerName, read: retainedNow, settings: { image: config.jobImage, defaultBackend: config.defaultBackend, backends: config.backends, egress: config.egress, egressProxy: config.egressProxy, sandboxRetentionHours: config.sandboxRetentionHours, sandboxPinDays: config.sandboxPinDays, jobMemory: env.PI_JOB_MEMORY, jobCpus: env.PI_JOB_CPUS }, now, log });
-		sandboxInventory.start();
-		extraClosers.push(sandboxInventory);
-
 		// REQ-LOCAL-JOB-VISIBILITY: exactly one terminal line per job, carrying the job id and outcome,
 		// where the operator is already looking. This is the local counterpart of the GitHub issue
 		// comment and the signal for CONST-PI-VERSION-PINNED's silent-no-op mode -- a missing line is
@@ -3645,7 +3308,6 @@ export async function startWorker(
 					{ name: "allocation_log", reap: reapAllocationLogs },
 					{ name: "console_audit", reap: reapConsoleAudit },
 					{ name: "touch_outbox", reap: () => touchOutbox.repair() },
-					{ name: "sandbox", reap: reapSandboxes },
 					{ name: "session", reap: () => sessionStore.reapSessions() },
 					...(reapForkSources ? [{ name: "fork_source", reap: reapForkSources }] : []),
 					{ name: "recovery_host_lost", reap: reapHostLost },
@@ -3700,14 +3362,6 @@ export async function startWorker(
 			// Issue #345: whether this daemon is observed applying a container's bounds and adding no mounts of its own; null = not read.
 			daemonAppliesBounds: bootObserved ? bootObserved.observations.daemonAppliesBounds : null,
 			runtimeAddsNoMounts: bootObserved ? bootObserved.observations.runtimeAddsNoMounts : null,
-			// Issue #354: the podman venue's own boot answers, all null with `podman` unblessed (no `podman info` was asked):
-			// the version it reported, whether it is rootless and whose uid its jobs run as, and its three observations.
-			podmanVersion: bootPodmanRead?.answered ? bootPodmanRead.info.version : null,
-			podmanRootless: bootPodmanRead?.answered ? bootPodmanRead.info.rootless : null,
-			podmanJobUser: bootPodmanDecision ? { mode: bootPodmanDecision.mode, user: bootPodmanDecision.user, cause: bootPodmanDecision.cause, reason: bootPodmanDecision.reason } : null,
-			podmanBoundsDelegated: bootPodmanObserved ? bootPodmanObserved.observations[PODMAN_BOUNDS_DELEGATED] : null,
-			podmanAddsNoMounts: bootPodmanObserved ? bootPodmanObserved.observations[PODMAN_ADDS_NO_MOUNTS] : null,
-			podmanServiceLocal: bootPodmanObserved ? bootPodmanObserved.observations[PODMAN_SERVICE_LOCAL] : null,
 			host: config.workerName, // issue #57; `log` stamps it on every line, and the boot line names it where an operator looks first
 			imageDigest: bootImage.imageDigest ?? null, // two hosts on two builds of one tag used to emit byte-identical boot lines
 			concurrency: bootConcurrency, // the slot count the Worker is actually constructed with (overlay may raise/lower it)
@@ -3735,7 +3389,6 @@ export async function startWorker(
 			logRetentionDays: config.logRetentionDays,
 			consoleAuditRetentionDays: config.consoleAuditRetentionDays, // issue #761: the console audit trail's own; 0 = kept forever
 			runMirrorMaxRuns: config.runMirrorMaxRuns, // issue #761: the shared run index's cap this host trims to
-			sandboxRetentionHours: config.sandboxRetentionHours, // 0 = retention off; a run's directory is deleted as before
 			// Issue #645 (durable runs): where checkpoints go (null = none: an armed job is refused before it spends) and
 			// whether this host takes them (the store AND the run checkpointer); doctor reads the same directory.
 			checkpointsDir: config.checkpointsDir ?? null,
@@ -3759,66 +3412,11 @@ export async function startWorker(
 
 /**
  * The boot refusal text for a job-user decision, or `null` to boot. Exported so its default-venue branch is pinned on the
- * predicate as well as end to end (a podman default reaches it since issue #354 part 2, and must not refuse on local's causes).
+ * predicate as well as end to end.
  */
 export function jobUserBootRefusal(decision, defaultBackend) {
 	if (decision?.mode !== "unmappable" || !BOOT_REFUSING_JOB_USER_CAUSES.has(decision.cause)) return null;
 	return defaultBackend === DEFAULT_BACKEND ? jobUserRefusal(decision) : null;
-}
-
-/**
- * The boot refusal text for a podman job-user decision, or `null` to boot (issue #354): an identity cause no podman job
- * can get past (`PODMAN_BOOT_REFUSING_CAUSES`), and only while `podman` is the DEFAULT venue, `jobUserBootRefusal`'s rule.
- * Kept apart from that function rather than merged into it, because the two venues' causes share a name
- * (`worker-is-root`) and not a remedy, and each venue's text comes from its own map.
- */
-export function podmanBootRefusal(decision, defaultBackend) {
-	if (defaultBackend !== PODMAN_BACKEND) return null;
-	if (decision?.mode !== "unmappable" || !PODMAN_BOOT_REFUSING_CAUSES.has(decision.cause)) return null;
-	return podmanJobUserRefusal(decision);
-}
-
-/**
- * The boot refusal for a rootful Podman containers.conf that reaches a local job (issue #448), from `observeRootfulConf`'s
- * answer, or `null`: only while `local` is the default venue, and not when the local job user is already refused (that
- * refusal, earlier at boot or per job, is the one to fix first). `transient` (thrown untagged, exit 1, so the supervisor
- * restarts it) is a read that failed for a moment AND, since gate round 1 of PR #473, a service older than its
- * containers.conf or a change time ahead of the clock: each heals by itself, so none may strand a unit with
- * `RestartPreventExitStatus=2`. Exported for the doc test, as `podmanConfBootRefusal` is.
- */
-export function localConfBootRefusal(decision, defaultBackend, rootful) {
-	if (defaultBackend !== DEFAULT_BACKEND || !rootful?.refusal || decision?.mode === "unmappable") return null;
-	return { message: rootfulConfRefusal(rootful.refusal), transient: rootfulConfRetries(rootful.refusal) };
-}
-
-/**
- * A rootful finding as the processor's `podmanConfRefused` (issue #448): the podman venue's shape, marked `rootful`.
- * `retry` marks what the processor throws for the queue's retry rather than returns (a moment's read failure, a service
- * older than its containers.conf, a clock behind a change time), with the evidence its retry message names.
- */
-function rootfulRefused(found) {
-	return {
-		reason: found.cause,
-		key: found.key ?? null,
-		message: rootfulConfRefusal(found),
-		rootful: true,
-		...(found.restart ? { restart: true } : {}),
-		...(found.skew ? { skew: true } : {}),
-		...(found.transient ? { transient: true } : {}),
-		...(rootfulConfRetries(found) ? { retry: true, evidence: found.evidence } : {}),
-	};
-}
-
-/**
- * The boot refusal for a widening containers.conf on the podman venue (issue #428), as `{ message, transient }`, or
- * `null` to boot: only while `podman` is the DEFAULT venue, `podmanBootRefusal`'s rule, and not when the identity is
- * already refused (that refusal names the fix that comes first, and with `podman` merely blessed its jobs are refused
- * one by one anyway). `transient` is a read that failed for a moment, which the caller throws untagged.
- */
-export function podmanConfBootRefusal(decision, defaultBackend, files) {
-	if (defaultBackend !== PODMAN_BACKEND || !decision || decision.mode === "unmappable") return null;
-	const widened = podmanConfWidening(files);
-	return widened ? { message: podmanConfRefusal(widened), transient: widened.transient === true } : null;
 }
 
 /** What makes two job-user decisions the same for the `job_user` log line. */
@@ -3860,7 +3458,7 @@ export function workerValkeyContext(valkey, env, { cwd = process.cwd(), readEnv 
  * deployment `.env` is the one in the working directory (the unit's WorkingDirectory is the deployment folder), read
  * only for PI_VALKEY_SHARED; nothing else of it is loaded into this process.
  */
-async function defaultJudgeValkey({ url, venues, env }) {
+async function defaultJudgeValkey({ url, env }) {
 	const envPath = join(process.cwd(), ".env");
 	let envText = null;
 	try {
@@ -3880,7 +3478,6 @@ async function defaultJudgeValkey({ url, venues, env }) {
 	}
 	const valkey = await resolveWorkerValkey({
 		url,
-		venues,
 		platform: process.platform,
 		env,
 		envText,

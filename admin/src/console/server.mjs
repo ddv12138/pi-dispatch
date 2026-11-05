@@ -106,7 +106,6 @@ import { CONSOLE_CSS } from "./style.mjs";
 import { themeOf } from "./theme.mjs";
 import { localeOf } from "./locale.mjs";
 import { TRANSCRIPT_FORMATS } from "./transcript.mjs";
-import { gatewayApi, gatewayLanding } from "./gateway.mjs";
 
 /** The largest request body a write may send. A pause-windows file is a few hundred bytes; 64 KiB is generous. */
 export const BODY_LIMIT = 64 * 1024;
@@ -661,9 +660,6 @@ export const ROUTES = Object.freeze([
   // `auth: "none"` (issue #737): a sign-out judges no session, it ends the one the cookie names (`postLogout`), so an
   // unreadable tokens file cannot keep a browser signed in that asked to sign out.
   { method: "POST", path: "/logout", auth: "none", write: true, readOnlyExempt: true, handler: postLogout },
-  // Public generic shells recover the Strict cookie with a same-origin request, without replacing the sign-in.
-  ...["launch", "authorize", "return", "select"].map((mode) => ({ method: "GET", path: `/sandbox/gateway/${mode}`, auth: "none", write: false, handler: (ctx) => sendHtml(ctx.res, 200, gatewayLanding({ mode, theme: themeOf(ctx.req.headers.cookie), locale: localeOf(ctx.req.headers.cookie, ctx.req.headers["accept-language"]), gesture: ctx.req.headers["sec-fetch-site"] !== "same-origin" })) })),
-  ...["launch", "context", "authorize"].map((method) => ({ method: "POST", path: `/api/sandbox-gateway/${method}`, auth: "operator", write: true, handler: (ctx) => { ctx.gatewayTheme = themeOf(ctx.req.headers.cookie); return gatewayApi(ctx, method); } })),
   ...pageRoutes(realPages.PAGES),
   { method: "GET", path: "/api/whoami", auth: "viewer", write: false, handler: (ctx) => sendJson(ctx.res, 200, { name: ctx.session.name, role: ctx.session.role, readOnly: Boolean(ctx.deps.config.readOnly) }) },
   { method: "GET", path: "/static/console.js", auth: "none", write: false, anyHost: true, handler: (ctx) => {
@@ -680,11 +676,6 @@ export const ROUTES = Object.freeze([
   { method: "GET", path: "/favicon.ico", auth: "none", write: false, anyHost: true, handler: (ctx) => {
     ctx.res.writeHead(204);
     ctx.res.end();
-  } },
-  { method: "GET", path: "/api/sandbox-hosts", auth: "operator", write: false, handler: (ctx) => {
-    const result = ctx.deps.pageDeps?.sandboxes?.hosts();
-    if (!result?.config) return sendError(ctx.res, 503, result?.refusal ?? "The terminal host configuration could not be read.");
-    return sendJson(ctx.res, 200, result.config, { "content-disposition": 'attachment; filename="sandbox-hosts.json"' });
   } },
   { method: "GET", path: "/api/state", auth: "viewer", write: false, handler: getState },
   { method: "POST", path: "/api/trigger-check", auth: "viewer", write: false, readJson: true, handler: postTriggerCheck },
@@ -960,12 +951,11 @@ export function createConsoleServer({
   stateOf = defaultStateOf,
   errorPage = realErrorPage,
   limits: limitsOverride = {},
-  gateway = null,
   consoleOrigin = null,
 }) {
   const limits = { ...SERVER_LIMITS, streamsTotal: STREAMS_TOTAL_MAX, streamsOperatorReserve: STREAMS_OPERATOR_RESERVE, ...limitsOverride };
   const refusalRows = makeLoginLimiter({ now, perMinute: REFUSAL_ROWS_PER_MINUTE, burst: 2 * REFUSAL_ROWS_PER_MINUTE });
-  const deps = { config, fs, now, random, audit, sessions, cookies, tickets, limiter, log, readTokens, findToken, keptTokens, consumeLoginCode, writePauseWindows, actionDeps, refusalRows, quieted: { count: 0 }, pages, pageDeps, hub, stateOf, errorPage, limits, streams: { open: 0 }, gateway, consoleOrigin };
+  const deps = { config, fs, now, random, audit, sessions, cookies, tickets, limiter, log, readTokens, findToken, keptTokens, consumeLoginCode, writePauseWindows, actionDeps, refusalRows, quieted: { count: 0 }, pages, pageDeps, hub, stateOf, errorPage, limits, streams: { open: 0 }, consoleOrigin };
   // `connectionsCheckingInterval` makes the two timeouts bite within a second of expiring rather than within node's
   // default 30: a client holding connections open without sending holds a slot of `maxConnections` only that long.
   const server = createServer({ headersTimeout: limits.headersTimeout, requestTimeout: limits.requestTimeout, connectionsCheckingInterval: limits.connectionsCheckingInterval }, (req, res) => {
@@ -977,7 +967,7 @@ export function createConsoleServer({
       sendFailure({ req, res, deps }, 500, CONSOLE_FAILED, { page: { kind: "failed" } });
     });
   });
-  server.once("close", () => { actionDeps?.setup?.close?.(); tickets?.close?.(); gateway?.close?.(); });
+  server.once("close", () => { actionDeps?.setup?.close?.(); tickets?.close?.(); });
   server.maxConnections = limits.maxConnections;
   return server;
 }

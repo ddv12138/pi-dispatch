@@ -1,9 +1,7 @@
 import { SETUP_DRAW } from "./setup-goldens.mjs";
 import { MODELS_DRAW } from "./models-goldens.mjs";
 import { ANSWERER_DRAW, AGENT_OVERVIEW_DRAW } from "./answerer-goldens.mjs";
-import { SANDBOX_DRAW } from "./sandbox-goldens.mjs";
 import { UPDATES_CANARY_RECORD, UPDATES_DRAW, updatesFacts } from "./updates-goldens.mjs";
-import { WORKSPACE_DRAW } from "./workspace-goldens.mjs";
 import { ZERO_TOUCH_DRAW } from "./zero-touch-goldens.mjs";
 import { CONFIGURATION_DRAW } from "./configuration-goldens.mjs";
 import { TRIGGER_LIST_DRAW } from "./trigger-list-goldens.mjs";
@@ -827,16 +825,9 @@ const RUN_CARD_STATES = {
   "run-refused.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "policy", reason: "job-image-missing", tokens: null, dollars: null, budgetReserved: false, exitCode: null }) }),
   "run-cancelled-before-start.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "policy", reason: "operator-cancel", tokens: null, dollars: null, budgetReserved: false, exitCode: null }) }),
   "run-recovering.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "failed", reason: "recovery-enqueued", checkpoints: { written: 4, failed: 1, skipped: 2 }, recovered: { from: "gh-before", n: 1, fromAttempt: 1, checkpointSeq: 4, replayed: 2, interrupted: 1, notStarted: 1 } }), chat: { state: "active", mode: "live", activeJobId: "gh-pulse.r1", jobState: "failed" } }),
-  "run-sandbox-openshell.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "openshell", openshell: { mode: "copy", providers: 2, placeholders: 2, ruleHosts: ["api.example.com"], ruleHostCount: 1 }, secretsProfile: "forge", bundle: { id: "web-ci", variables: ["API_TOKEN", "CONFIG"], shadowed: [], placeholders: 1, plain: 1, placeholderNames: ["API_TOKEN"] } }) }),
-  "run-sandbox-openshell-bind.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "openshell-bind" }) }),
-  "run-sandbox-kept.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "local" }), sandboxCheck: { retained: true, until: NOW + 23 * HOUR } }),
-  "run-sandbox-past-window.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "local" }), sandboxCheck: { retained: false, why: "past-window" } }),
-  "run-sandbox-swept.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "local" }), sandboxCheck: { retained: false, why: "swept" } }),
-  // Issue #761: a workspace a newer pi-dispatch kept, as the run page's sandbox check reads its manifest.
-  "run-sandbox-manifest-newer.operator": () => runCard({ rec: record({ jobId: "gh-pulse", backend: "local" }), sandboxCheck: { retained: false, why: "manifest-newer", reason: "not reopenable here: kept by a newer pi-dispatch" } }),
   // Issue #761: a record a newer pi-dispatch wrote, as every admin read hands it to the page: its stable core and `v`.
   "run-newer-record.operator": () => runCard({ rec: RM.coreRecordOf({ ...record({ jobId: "gh-pulse", attempt: 2 }), lane: { name: "batch" }, v: 2 }) }),
-  "run-sandbox-replica.operator": () => runCard({ rec: record({ jobId: "gh-pulse-r2", replica: 2, replicas: 3 }), siblings: [record({ jobId: "gh-pulse-r1", outcome: "failed" }), record({ jobId: "gh-pulse-r3" })] }),
+  "run-replica.operator": () => runCard({ rec: record({ jobId: "gh-pulse-r2", replica: 2, replicas: 3 }), siblings: [record({ jobId: "gh-pulse-r1", outcome: "failed" }), record({ jobId: "gh-pulse-r3" })] }),
   "run-failed-no-reason.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "failed", reason: null }) }),
   "run-failed-no-reason.viewer": () => runCard({ role: "viewer", rec: record({ jobId: "gh-pulse", outcome: "failed", reason: null }) }),
   "run-unknown-reason.viewer": () => runCard({ role: "viewer", rec: record({ jobId: "gh-pulse", outcome: "failed", reason: "future-refusal" }) }),
@@ -848,7 +839,6 @@ const DRAW = {
   ...SETUP_DRAW,
   ...ANSWERER_DRAW,
   ...AGENT_OVERVIEW_DRAW,
-  ...SANDBOX_DRAW,
   ...UPDATES_DRAW,
   "updates-confirm-canary.operator": async () => {
     const plan = { index: 2, schedulerId: "nightly", queue: "pi-jobs", fileDigest: "a".repeat(64), schedule: { data: {} }, reserve: { slots: 1, tokens: 2_000_000, zeroRated: false }, title: "Fire cron trigger now", summary: [] };
@@ -860,7 +850,6 @@ const DRAW = {
     const answer = await actionWorld({ updates: { read: async () => updatesFacts(facts), setDesired: async () => 1 } }).preview("package-adopt", { name: "pi-lint", version: "1.4.3" });
     return openSlotAfter(await UPDATES_DRAW["updates-canary-completed.operator"](), "p-up-jobs", { inner: answerHtml(answer, 200, "package-adopt") });
   },
-  ...WORKSPACE_DRAW,
   ...MODELS_DRAW,
   ...ZERO_TOUCH_DRAW,
   ...CONFIGURATION_DRAW,

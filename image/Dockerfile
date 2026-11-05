@@ -10,15 +10,6 @@
 # vendor. This is the MANIFEST-LIST digest (pinning a per-arch manifest would break
 # multi-arch); it resolves to node 22.23.1 and carries amd64 + arm64/v8, so Apple
 # Silicon works. 22.23.1 clears pi's 22.19.0 floor.
-# pi-landlock (issue #683, image/landlock/pi-landlock.c), built in a stage of its own so the compiler never reaches the job
-# image. The SAME pinned base as the job image below, so this adds no second vendor pin; gcc and libc6-dev come from
-# that base's own Debian release. Static, so the binary needs nothing from the image it lands in. `-Werror` because a
-# warning in a forty-line security helper is a defect, not noise.
-FROM node:22-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3 AS landlock
-RUN apt-get update && apt-get install -y --no-install-recommends gcc libc6-dev && rm -rf /var/lib/apt/lists/*
-COPY image/landlock/pi-landlock.c /src/pi-landlock.c
-RUN gcc -O2 -Wall -Wextra -Werror -static -o /pi-landlock /src/pi-landlock.c
-
 FROM node:22-bookworm-slim@sha256:6c74791e557ce11fc957704f6d4fe134a7bc8d6f5ca4403205b2966bd488f6b3
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -93,7 +84,7 @@ ENV GLAB_SEND_TELEMETRY=false
 # ping, and PI_TELEMETRY also gates the attribution headers pi adds to OpenRouter, NVIDIA and Cloudflare
 # requests. A job never runs pi interactively and the runner forces this to "0" itself, over whatever reached
 # the container (image/runner/src/config.mjs, enforceTelemetryOff), so this line is for everything ELSE that
-# runs pi in this image: `pi-dispatch sandbox` re-opening a run with bash, verify-image.sh's `pi -p --help`.
+# runs pi in this image: verify-image.sh's `pi -p --help`.
 ENV PI_TELEMETRY=0
 # Staged pi-subagents resolves pi from its read-only overlay, outside /app's node_modules tree.
 # Give it the exact package this image runs instead of relying on Node's ancestor lookup.
@@ -260,16 +251,11 @@ RUN useradd --create-home --shell /bin/bash --uid 1001 pi
 RUN mkdir -p /home/pi/.pi/agent && chown -R pi:pi /home/pi \
     && chmod 0777 /home/pi /home/pi/.pi /home/pi/.pi/agent
 
-# The image's WORKDIR is /sandbox (issue #683), not /workspace, because a copying venue (OpenShell) makes the WORKDIR
-# its sandbox's writable tree and uploads and downloads nothing outside it: the `sandbox` layout
-# (image/runner/src/layout.mjs) puts the job, workspace and session there. A binding venue is not moved by it: the
-# worker's argv carries `--workdir=/workspace` (worker/src/docker-run.mjs), so a job there starts where it always did,
-# and an older image under a newer worker too. Owned by pi and not world-writable: OpenShell runs the image's own USER
-# there, and on a binding venue nothing is mounted at /sandbox at all.
-# /workspace stays in the image, root-owned and empty, exactly as `WORKDIR /workspace` used to leave it: a container
-# started without a workspace mount (verify-image.sh's offline jobs, an operator's hand-run one) still has the
-# directory the runner names as its cwd.
-RUN mkdir -p /sandbox /workspace && chown pi:pi /sandbox && chmod 0755 /sandbox /workspace
+# /workspace is root-owned and empty in the image: a container started without a workspace mount
+# (verify-image.sh's offline jobs, an operator's hand-run one) still has the directory the runner
+# names as its cwd. The worker's argv pins `--workdir=/workspace` (worker/src/docker-run.mjs), so
+# a job there starts where it always did.
+RUN mkdir -p /workspace && chmod 0755 /workspace
 
 # The safety floor and the runner are ROOT-OWNED and NOT writable by pi. The agent runs AS pi;
 # if it could overwrite /opt/pi-dispatch/HARD_RULES.md it would own its own constraints, and if
@@ -316,26 +302,6 @@ COPY image/skills /opt/pi-dispatch/skills
 # this copy on every venue. A COPY, not a chmod of /usr/local/bin/node: every tool's node stays an ordinary readable
 # binary, and both cost the same one 120MB layer. The entrypoint execs this one.
 RUN install -o root -g root -m 0711 /usr/local/bin/node /opt/pi-dispatch/runner-node
-
-# The runner's node for a venue whose connections are mediated by a broker that reads the caller's memory (issue #730):
-# OpenShell 0.1.4's sandbox answers every workload connect through a seccomp notification whose broker runs as the
-# job's uid with no capabilities and copies the caller's sockaddr out of the caller's memory (process_vm_readv, then
-# /proc/<tid>/mem), and hashes the caller's and every ancestor's executable. A process started from the exec-only copy
-# above is not dumpable, so that read is refused and every connect of the runner AND of every tool below it fails
-# (measured on the openshell lane, copy and bind: EAI_AGAIN for the runner, EACCES for a tool child). So the OpenShell
-# venues start the supervisor and the runner from this readable copy instead, chosen by the worker-set
-# PI_RUNNER_OBSERVABLE=1 (the entrypoint). Same bytes, mode 0755, its own path, named in the net-binaries label below.
-# What keeps the exit key from the job's tools there is not this file's mode but three things: OpenShell's workload
-# seccomp denies process_vm_readv, ptrace and pidfd_getfd; Yama (ptrace_scope exactly 1, which the worker requires
-# before spend) refuses a tool /proc/<pid>/mem of its ancestor; and the entrypoint's ulimit -c 0 keeps a holder's core
-# from carrying the key. Every other venue keeps runner-node.
-RUN install -o root -g root -m 0755 /usr/local/bin/node /opt/pi-dispatch/runner-observable
-
-# The write confinement a copying venue starts the runner through (issue #683): root-owned, so the agent cannot replace
-# the helper that confines it (COPY keeps root:root and the 0755 gcc gave it; the chmod below takes the write bit), and
-# readable, because it holds no secret. Only the worker's own exec argv on such a venue names it; a binding venue's
-# `:ro` mounts do the same job there.
-COPY --from=landlock /pi-landlock /opt/pi-dispatch/pi-landlock
 
 # Source last: everything above is cacheable and this layer changes on every commit.
 COPY image/runner /app/image/runner
@@ -400,9 +366,9 @@ LABEL dev.pi-dispatch.forges="github,gitlab,forgejo"
 # the worker refuses that pairing pre-spend instead of letting the container fail open.
 # `anyUid` (issue #341) tells the worker this image runs correctly under an ARBITRARY non-root uid with
 # HOME=/home/pi: the home above is writable by any uid, and Chromium renders under one (verify-image.sh
-# runs both as uid 4242). An older image run with `--user` gets HOME=/ (Docker) or HOME=/workspace
-# (Podman, measured), so auth.json lands nowhere or in the operator's repository, and Chromium does not
-# start. The label is how the worker can tell the two apart before it spends anything.
+# runs both as uid 4242). An older image run with `--user` gets HOME=/ (measured on Docker), so auth.json
+# lands nowhere, and Chromium does not start. The label is how the worker can tell the two apart before it
+# spends anything.
 # `modelPolicy` (issue #502) tells the worker this runner reads PI_ALLOWED_MODELS and refuses, before each provider call,
 # a call to a model the list does not name. An older runner handed the variable would ignore it and call any model,
 # reporting a clean exit: a model choice quietly not enforced. The worker sends the list only to an image declaring this
@@ -454,53 +420,12 @@ LABEL dev.pi-dispatch.forges="github,gitlab,forgejo"
 # a collaborator sent would wait unread while the run reported success. The worker refuses that pairing pre-spend (its
 # `steer` capability row, reason job-image-steer-unsupported). verify-image.sh checks the baked runner reads the
 # variable and carries the inbox module, and that an /inbox mounted read-only is read-only inside the container.
-# `sandboxLayout` (issue #683) tells the worker this runner reads PI_JOB_LAYOUT and, under `sandbox`, finds every job
-# path under /sandbox (image/runner/src/layout.mjs), and that the image carries /opt/pi-dispatch/pi-landlock, the write
-# confinement a copying venue starts it through. An older runner on such a venue would read /job, find nothing, and
-# exit "missing job input" after the sandbox was made and the budget reserved; without the helper its /job would be
-# writable by the agent. The worker refuses that pairing pre-spend on a copying venue only (its `sandboxLayout`
-# capability row, reason job-image-sandbox-layout-unsupported). verify-image.sh runs an offline job on the sandbox
-# layout and proves the helper refuses a write under /sandbox/job while allowing one under /sandbox/workspace.
-# `transcriptStderr` (issue #686) tells the worker this runner reads PI_TRANSCRIPT=stderr and mirrors its session file's
-# lines over stderr as records signed with the exit key (image/runner/src/transcript-mirror.mjs), which is how a copying
-# venue serves the live transcript, run progress and the status comment. Not a gate: an image without it runs there
-# without them (`live_transcript_skipped`, reason no-capability). verify-image.sh runs an offline keyed job with the
-# variable set and checks a record's HMAC under the key it handed over, and that another key does not verify it.
-# `steerStdin` (issue #686, part 2) tells the worker this runner reads PI_EXIT_AUTH=stdin-frames: the exit key as frame 1
-# of a length-prefixed frame stream on stdin, read before pi loads, then steer messages as frames MAC'd under that key
-# (image/runner/src/steer-frames.mjs), the stream moved off fd 0 so a tool child inherits /dev/null. It is how a copying
-# venue steers a running job. Not a gate: an image without it runs there unsteered (`steerSkipped: "venue-copies"`).
-# verify-image.sh feeds an offline steered job a key frame and one message frame on a held-open stdin, and checks that
-# the key read took exactly frame 1, that pi's bash tool child and an inheriting child see /dev/null on fd 0, and that
-# the message came back acked under the key on the signed exit line.
-# `bundleEnvFile` (issue #704 part 3) tells the worker this runner reads PI_BUNDLE_ENV=1: a project secret bundle's plain
-# variables as one JSON object in the job directory's bundle-env.json, put into the runner's own environment before pi's
-# runtime exists (image/runner/src/bundle-env.mjs). It is how an OpenShell venue hands those values to a job without its
-# exec's argv, which the gateway logs. A gate on those venues only: a job there that would carry plain bundle variables
-# on an image without it is refused before spend (openshell-bundle-image-too-old). verify-image.sh runs an offline job
-# with such a file and checks a workspace extension sees the variable, a multi-line one intact.
-# `observableRunner` (issue #730) tells the worker this image has /opt/pi-dispatch/runner-observable and an entrypoint
-# that starts the supervisor and the runner from it on PI_RUNNER_OBSERVABLE=1, which an OpenShell venue needs before any
-# connection of the job can be made. A gate on those venues only: an image without it is refused there before spend.
-# verify-image.sh holds the copy to runner-node's bytes, its mode, its label entry, and both key holders to it.
 # subscriptionAuth (#781) verifies access lifetime and exact community receipts before loading code,
 # then holds final shaped requests to the admitted model/account and existing cost ticket.
 # verify-image.sh exercises receipt rejection, deadline checks and final-payload cost refusal offline.
-LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,tokenBudget,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,sandboxLayout,transcriptStderr,steerStdin,bundleEnvFile,observableRunner,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
-
-# The binaries in this image that may need the network, at their real paths (issue #683). A venue whose egress policy
-# names binaries rather than hosts alone (OpenShell decides every connection per executable) needs the paths before it
-# can write a rule; issue #684 generates that policy from this list. Real paths, not PATH names or symlinks, because
-# such a policy matches the executable the kernel ran. verify-image.sh holds every entry to an existing regular file
-# that is its own realpath, so a moved binary fails the image job rather than a policy silently matching nothing.
-# /opt/pi-dispatch/runner-node FIRST: it is the binary the runner and pi run as (the exec-only copy above), so every
-# provider call leaves through it, not through /usr/local/bin/node. Playwright's Chromium is deliberately NOT listed:
-# its path carries a build number and the architecture, and a job's browser reaches its own dev server on loopback,
-# which no egress rule governs; a trigger that needs it to reach the internet is #684's to decide.
-# /opt/pi-dispatch/runner-observable SECOND (issue #730): the runner's node on the OpenShell venues.
-LABEL dev.pi-dispatch.net-binaries="/opt/pi-dispatch/runner-node,/opt/pi-dispatch/runner-observable,/usr/local/bin/node,/usr/bin/git,/usr/lib/git-core/git-remote-http,/usr/bin/gh,/usr/local/bin/glab,/usr/local/bin/tea,/usr/local/bin/github-mcp-server,/usr/bin/wget"
+LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,tokenBudget,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
 
 USER pi
-WORKDIR /sandbox
+WORKDIR /workspace
 
 ENTRYPOINT ["/entrypoint.sh"]

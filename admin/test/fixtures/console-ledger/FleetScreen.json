@@ -294,10 +294,9 @@
         "Live transcript",
         "Recovery",
         "Credentials held by",
-        "enforced",
-        "asserted",
-        "absent"
-      ]
+        "enforced"
+      ],
+      "reason": "The build's table holds the one venue the retirement left, and its two shown properties are both enforced, so the asserted and absent words have no chip to show in the rendered state. The footer's link went with the venue detail page the retirement removed; the floor and the word legend stay."
     },
     {
       "el": "Queue counts per queue.",
@@ -407,8 +406,7 @@
         "panels/fleet-running.operator"
       ],
       "shows": [
-        "Floor on",
-        "All 14 properties"
+        "Floor on"
       ]
     },
     {
@@ -448,15 +446,8 @@
     {
       "el": "*With the image* means a venue serves the feature only when the job image supports it.",
       "kind": "readme",
-      "status": "new",
-      "panel": "p-venues",
-      "source": "admin/src/console/panels/fleet.mjs#fleetVenues",
-      "golden": [
-        "panels/fleet-running.operator"
-      ],
-      "shows": [
-        "with the image"
-      ]
+      "status": "illustrative",
+      "reason": "The serve word has no venue to show in this build: the table's one venue serves every feature itself. The word stays in the chip's closed set (servesChip renders it when a venue publishes it), so the card's sentence still describes the table, but no state can render it."
     },
     {
       "el": "The venue table is what each host's worker published when it started; nothing in it is read live.",

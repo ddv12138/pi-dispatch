@@ -41,7 +41,9 @@ test("weekly and unknown-reset exhaustion defer without refreshing or inference"
 	}
 });
 test("an explicit binding refuses unrestricted, disabled-extension and unsupported-venue jobs", async () => {
-	for (const [patch, reason] of [[{ models: null }, "auth-route-unbounded"], [{ packages: false }, "auth-adapter-disabled"], [{ backend: "openshell" }, "auth-venue-unsupported"]]) {
+	// The openshell venue words of auth-venue-unsupported left with the sandbox backends; the canary replay is the
+	// route the reason now names.
+	for (const [patch, reason] of [[{ models: null }, "auth-route-unbounded"], [{ packages: false }, "auth-adapter-disabled"], [{ canary: true }, "auth-venue-unsupported"]]) {
 		const { runtime, calls } = fixture();
 		assert.equal((await runtime.check({ ...job, ...patch })).reason, reason);
 		assert.deepEqual(calls, []);

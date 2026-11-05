@@ -13,7 +13,6 @@
     {"el":"The banner says what happened (\"Refused: …\"), why (the egress proxy on build3 is not running), what to do (start the proxy, then re-run) and that nothing was spent.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runSummary"},
     {"el":"The one primary action is **Open Fleet**, where the proxy and doctor live. **Preview a re-run** is shown but disabled, with the reason beside it, so the person knows it exists and why it waits.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runSummary"},
     {"el":"Progress, transcript, tokens and chain do not apply, so they collapse into one line instead of five empty panels.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runChain"},
-    {"el":"The sandbox command is hidden because the run kept no workspace (#710), and a small line says there is none to open.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runSandbox"},
     {"el":"*Why it was refused* names the rule in one sentence, counts the same reason in 24 hours and links the reason's docs.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runSummary"},
     {"el":"## Panels","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runSummary"},
     {"el":"`p-outcome`, `p-run`, `p-rest` (the collapsed line), `p-why`, `p-host`.","kind":"readme","status":"new","source":"admin/src/console/panels/run.mjs#runOutcome"},

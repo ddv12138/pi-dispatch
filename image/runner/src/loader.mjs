@@ -128,7 +128,7 @@ function defaultLog(event, fields = {}) {
  * before the loader stores anything, and createAgentSession builds its ExtensionRunner from
  * `resourceLoader.getExtensions().extensions` -- so an extension removed here registers no tool, receives
  * no event, and contributes no command to the session. Module-level side effects of the import itself are
- * NOT prevented by this and never could be at this layer; the container sandbox is what bounds those.
+ * NOT prevented by this and never could be at this layer; the container's isolation is what bounds those.
  *
  * `errors` and `runtime` are passed through untouched: `runtime` is what the session needs, and the errors
  * are pi's own record of the load. Nothing dropped means the base object is returned as-is, so the

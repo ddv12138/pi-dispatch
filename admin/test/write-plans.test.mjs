@@ -467,7 +467,6 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["resolver outside the roots", plans.planSecretProfileAdd({ name: "prod", path: "/tmp/r", profiles: {}, env: { PI_SECRET_RESOLVER_ROOTS: "/opt/pi" }, settingsFile: "/s", fs: { realpathSync: (p) => p } }).refusal, "/tmp/r is outside PI_SECRET_RESOLVER_ROOTS (/opt/pi), so the worker would refuse it on every job; put the resolver inside one of them, or add its directory to PI_SECRET_RESOLVER_ROOTS"],
       ["resolver under a root written through a link", plans.resolverRootsRefusal("/tmp/pi/r", { PI_SECRET_RESOLVER_ROOTS: "/tmp/pi" }, "/private/tmp/pi/r", "/private/tmp/pi"), "/tmp/pi/r (it resolves to /private/tmp/pi/r) is outside PI_SECRET_RESOLVER_ROOTS (/tmp/pi), so the worker would refuse it on every job; put the resolver inside one of them, or add its directory to PI_SECRET_RESOLVER_ROOTS, or write the root as its real path (/private/tmp/pi)"],
       ["roots set and empty", plans.resolverRootsJudgement("/opt/pi/r", { PI_SECRET_RESOLVER_ROOTS: "" }).refusal, "PI_SECRET_RESOLVER_ROOTS is set and empty on this deployment, so the worker refuses every resolver the settings overlay declares; set it to the directory your resolvers live in first"],
-      ["run.recover on a venue that does not recover", plans.planTriggerAdd({ params: { kind: "label", flow: "fix", labels: ["go"], recover: true }, paths, env: { PI_BACKENDS: "openshell" } }).refusal, { prefix: "run.recover cannot be armed on a trigger whose jobs run in the openshell venue" }],
       ["no backends", plans.backendRefusal("local", { PI_BACKENDS: "vapour" }), "this deployment blesses no backends, so run.backend cannot be set (see PI_BACKENDS)"],
       ["backend not blessed", plans.backendRefusal("podman", { PI_BACKENDS: "local" }), "backend 'podman' is not blessed by this deployment (PI_BACKENDS: local)"],
       ["tool-proof token cap", plans.wideningFieldRefusal({ maxCostUsd: "1" }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.maxTokens (sent as maxCostUsd): a trigger's per-job token cap is set by hand in the triggers file, never by a tool"],
@@ -547,27 +546,9 @@ test("the project tools refuse to change a bundled project's members, before the
 
 // ---- issue #712 --------------------------------------------------------------------------------------------------------
 
-test("run.recover is refused before the confirm on a venue that does not serve recovery: named, or PI_BACKENDS[0] when none is (#712)", async () => {
-  const { recoverVenueProblem } = await import("../../worker/src/triggers.mjs");
-  const { paths, restore } = deployment();
-  try {
-    const add = (params, env) => plans.planTriggerAdd({ params: { kind: "label", flow: "fix", labels: ["go"], ...params }, paths, env });
-    assert.equal(add({ recover: true, backend: "openshell" }, { PI_BACKENDS: "local,openshell" }).refusal, recoverVenueProblem("openshell"), "an explicit venue: the loader's own sentence");
-    assert.equal(add({ recover: true }, { PI_BACKENDS: "openshell,local" }).refusal, recoverVenueProblem("openshell"), "no venue named: the deployment default, which the loader cannot see");
-    assert.ok(add({ recover: true }, { PI_BACKENDS: "local,openshell" }).plan, "the default serves it");
-    assert.ok(add({ recover: true, backend: "openshell-bind" }, { PI_BACKENDS: "openshell-bind" }).plan, "bind mode serves it");
-    assert.ok(add({ recover: false, backend: "openshell" }, { PI_BACKENDS: "openshell" }).plan, "false arms nothing");
-    // The edit judges the entry as it would be after it, and only when it sends `recover` or a venue.
-    const edit = (params, env) => plans.planTriggerEdit({ params: { index: 0, flow: "fix", ...params }, paths, env });
-    assert.equal(edit({ recover: true }, { PI_BACKENDS: "openshell" }).refusal, recoverVenueProblem("openshell"));
-    writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["bug"] }, run: { kind: "github", flow: "fix", recover: true } }] }));
-    assert.equal(edit({ backend: "openshell" }, { PI_BACKENDS: "local,openshell" }).refusal, recoverVenueProblem("openshell"), "moving a recovering trigger onto the venue");
-    assert.ok(edit({}, { PI_BACKENDS: "openshell" }).plan, "an edit of the flow alone is not refused over a pairing it did not touch");
-    assert.ok(edit({ recover: false }, { PI_BACKENDS: "openshell" }).plan, "and turning recovery off is the fix, so it passes");
-  } finally {
-    restore();
-  }
-});
+// The run.recover pairing refusal (a venue that does not serve recovery) has no case left while every venue in
+// BACKEND_NAMES serves recovery; the loader's sentence stays for a venue that stops serving it, and
+// worker/test holds its words.
 
 test("the profile list names PI_SECRET_PROFILES' profiles beside the overlay's, and a name in both is marked ambiguous (#712)", async () => {
   const { envSecretProfiles } = await import("../src/read-model.mjs");

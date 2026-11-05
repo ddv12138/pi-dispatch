@@ -336,9 +336,8 @@ export async function parkedAnswerCheckOf(fleet, id, record, { now = Date.now, l
   return (await parkCheckCached(answerCheckCache, fleet, id, record, now, read, { reuseUnreachable: lookup.live === true })).got;
 }
 
-// The run page's action checks (issue #710), per fleet reader, then per run id, `parkCheckCached`'s entries.
+// The run page's action check (issue #710), per fleet reader, then per run id, `parkCheckCached`'s entries.
 const rerunCheckCache = new WeakMap();
-const sandboxCheckCache = new WeakMap();
 
 /** A fleet check of run `id`, never throwing (an error reads as unreachable), reused as the parked answer's is. */
 async function actionCheckOf(cache, fleet, method, id, record, now, lookup = {}) {
@@ -362,15 +361,6 @@ async function actionCheckOf(cache, fleet, method, id, record, now, lookup = {})
  */
 export async function rerunCheckOf(fleet, id, record, { now = Date.now, lookup = {} } = {}) {
   return actionCheckOf(rerunCheckCache, fleet, "rerunCheck", id, record, now, lookup);
-}
-
-/**
- * Whether run `id`'s workspace is still re-openable on this host (issue #710): `fleet.sandboxCheck`, the panel's
- * manifest verdict (`sandboxRetentionOf`), reused like `rerunCheckOf`. `{ retained, why }`, `{ elsewhere: true }`,
- * `{ unreachable: true }`, or null without the reader.
- */
-export async function sandboxCheckOf(fleet, id, record, { now = Date.now } = {}) {
-  return actionCheckOf(sandboxCheckCache, fleet, "sandboxCheck", id, record, now);
 }
 
 /**

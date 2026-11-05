@@ -6,7 +6,7 @@ import { effectiveTokenCap } from "./budget-rule.mjs";
 import { validateFork, forkBranch, forkArchiveFact, FORK_THINKING_LEVELS } from "./fork-job.mjs";
 import { sessionKeyFor } from "./session-key.mjs";
 import { join } from "node:path";
-import { ABSENT, OPENSHELL_BIND_LINGERING, backendFor, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, DOCKER_NEVER_STARTED_EXITS, PODMAN_ADDS_NO_MOUNTS, PODMAN_BACKEND, PODMAN_BOUNDS_DELEGATED, PODMAN_CONF_WIDENS_JOB, OPENSHELL_GATEWAY_LOCAL, PODMAN_SERVICE_LOCAL, RUNTIME_ADDS_NO_MOUNTS } from "./backends.mjs";
+import { backendFor, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, DOCKER_NEVER_STARTED_EXITS, RUNTIME_ADDS_NO_MOUNTS } from "./backends.mjs";
 import { resolveBackendName } from "./backend-registry.mjs";
 import { lstatSync } from "node:fs";
 import { releaseLedgers, reserveLedgers } from "./budget.mjs";
@@ -24,7 +24,7 @@ import { EXIT_OOM_KILLED, RUNNER_POLICY_REASONS, recoveryCounts, recoveryCountsF
 import { baseHasExtensions as baseHasExtensionsDefault, resetTrustPaths as resetTrustPathsDefault } from "./trust-paths.mjs";
 import { normalizeHost, removeCheckpointPointer as removePointerDefault } from "./run-checkpoint.mjs";
 import { DEFAULT_EGRESS_PROXY } from "./egress.mjs";
-import { CAPABILITY_GATES, EXIT_AUTH_CAPABILITY, STEER_STDIN_CAPABILITY, TRANSCRIPT_STDERR_CAPABILITY } from "./image-preflight.mjs";
+import { CAPABILITY_GATES, EXIT_AUTH_CAPABILITY } from "./image-preflight.mjs";
 import { modelListProblem, modelOnList, splitModelEntry } from "./model-ref.mjs";
 import { ALLOCATION_CAP_REASON, ENVELOPE_MISMATCH_REASON } from "./allocation.mjs";
 
@@ -40,7 +40,7 @@ import { forgeDeliveryJobId } from "./job-id.mjs";
 import { FORGE_JOB_RETENTION_MS } from "./retention.mjs";
 // The forge-comment tables (issue #710): every fixed sentence this file posts, in one leaf the reason catalog can import
 // without the job path. Re-exported below under the names they always had here.
-import { MODEL_AGENTS_INVALID_COMMENT, APPROVAL_COMMENTS, APPROVAL_PARK_NEWER_COMMENT, BUNDLE_COMMENTS, ENVELOPE_MISMATCH_COMMENTS, HELD_TAKEN_COMMENT, JOB_USER_COMMENTS, MODEL_NOT_ALLOWED_COMMENTS, MODEL_UNKNOWN_COMMENT, modelUnknownComment, NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, OVERLAY_REFUSED_COMMENT, PARKED_COMMENT, PARKED_COMMENT_PR, PODMAN_CONF_COMMENTS, RECOVERY_COMMENTS, REFUSAL_COMMENTS, TERMINAL_COMMENTS, VENUE_BUNDLE_REFUSED_COMMENT, VENUE_REFUSED_COMMENT, parkedComment } from "./comment-tables.mjs";
+import { MODEL_AGENTS_INVALID_COMMENT, APPROVAL_COMMENTS, APPROVAL_PARK_NEWER_COMMENT, BUNDLE_COMMENTS, ENVELOPE_MISMATCH_COMMENTS, HELD_TAKEN_COMMENT, JOB_USER_COMMENTS, MODEL_NOT_ALLOWED_COMMENTS, MODEL_UNKNOWN_COMMENT, modelUnknownComment, NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, OVERLAY_REFUSED_COMMENT, PARKED_COMMENT, PARKED_COMMENT_PR, RECOVERY_COMMENTS, REFUSAL_COMMENTS, TERMINAL_COMMENTS, VENUE_BUNDLE_REFUSED_COMMENT, VENUE_REFUSED_COMMENT, parkedComment } from "./comment-tables.mjs";
 
 /**
  * The forge comment's reason for each observation a floor refusal missed (issues #278 and #345), keyed like
@@ -50,17 +50,6 @@ export const OBSERVATION_COMMENT = Object.freeze({
 	[DOCKER_ENDPOINT_LOCAL]: "the docker CLI is not observed sending containers to a daemon on this host, so the job's credentials could cross a network the deployment does not own",
 	[DAEMON_APPLIES_BOUNDS]: "the container runtime is not observed applying a container's pid and memory bounds",
 	[RUNTIME_ADDS_NO_MOUNTS]: "the container runtime is not observed adding no mounts of its own to a job container",
-	// Issue #354: the podman venue's three, in the same fixed register. No path, no controller list and no service URL:
-	// those are the evidence, which goes to the operator's log only.
-	// Cause-neutral (issue #453): the observation misses both when a controller is not delegated and when no systemd user
-	// manager runs for the account (measured: podman info then still lists every controller). Which one is the evidence's
-	// to say, in the operator's log.
-	[PODMAN_BOUNDS_DELEGATED]: "the worker's rootless Podman is not observed applying a container's pid, memory and cpu bounds",
-	[PODMAN_ADDS_NO_MOUNTS]: "the worker's rootless Podman is not observed adding no mounts of its own to a job container",
-	[PODMAN_SERVICE_LOCAL]: "the podman CLI is not observed running containers on this host rather than through a remote service, so the job's credentials could cross a network the deployment does not own",
-	// Issue #683. Never reached through a floor alone: the openshell venue refuses a gateway it does not observe local
-	// whatever the floor says (`venueRefused`), and this sentence is the floor's half for a deployment that also asks.
-	[OPENSHELL_GATEWAY_LOCAL]: "the OpenShell gateway is not observed listening on this host, so the job's credentials could cross a network the deployment does not own",
 });
 
 /**
@@ -136,29 +125,25 @@ export { HELD_TAKEN_COMMENT, MODEL_UNKNOWN_COMMENT, NETNS_KEEPER_CRASH_LOOP, NET
 
 /**
  * The runtime a venue's own preflights talk to, named in a retry's words (issue #354). The message is the job_failed log
- * line and BullMQ's failedReason, so `local`'s stays byte-identical ("docker unavailable, ..."), the native podman venue
- * names podman (an operator reading "docker unavailable" on a host with no docker would chase the wrong daemon), and a
+ * line and BullMQ's failedReason, so `local`'s stays byte-identical ("docker unavailable, ..."), and a
  * venue this build has no runtime word for gets the neutral phrase rather than a guess. `Object.hasOwn`, so a venue
  * named like a prototype key is not a runtime.
  */
-const VENUE_RUNTIME = Object.freeze({ [DEFAULT_BACKEND]: "docker", [PODMAN_BACKEND]: "podman" });
+const VENUE_RUNTIME = Object.freeze({ [DEFAULT_BACKEND]: "docker" });
 
 function runtimeUnavailable(venue, gate) {
 	return Object.hasOwn(VENUE_RUNTIME, venue) ? `${VENUE_RUNTIME[venue]} unavailable, ${gate} could not run` : `the container runtime is unavailable, ${gate} could not run`;
 }
 
 /**
- * The remedy an egress-proxy refusal's comment names. The compose profile starts the proxy on the DOCKER daemon, which a
- * job on the native podman venue cannot reach: rootless podman's `--internal` network reaches nothing on the host
- * (measured, issue #354), so its proxy must run under the SAME rootless podman on a named bridge network, which is what
- * docs/podman.md sets up. Every other venue names `pi-dispatch up` from the deployment folder, and ONLY that (issue #480,
- * PR #488's review): it starts the proxy in any folder init made, and it knows the folder. A compose line printed from
- * here could not: a folder /dispatch setup laid out needs its project and override, and without them `--profile egress
- * up -d` also starts compose's unprofiled valkey under project `deploy`, a second Valkey on a fresh volume or a clash on
- * its port. A proxy PI_EGRESS_PROXY names is the operator's own, which `up` never starts, so that one is theirs to start.
+ * The remedy an egress-proxy refusal's comment names: `pi-dispatch up` from the deployment folder, and ONLY that
+ * (issue #480, PR #488's review): it starts the proxy in any folder init made, and it knows the folder. A compose line
+ * printed from here could not: a folder /dispatch setup laid out needs its project and override, and without them
+ * `--profile egress up -d` also starts compose's unprofiled valkey under project `deploy`, a second Valkey on a fresh
+ * volume or a clash on its port. A proxy PI_EGRESS_PROXY names is the operator's own, which `up` never starts, so that
+ * one is theirs to start.
  */
 function egressProxyFix(venue, proxy = DEFAULT_EGRESS_PROXY) {
-	if (venue === PODMAN_BACKEND) return "Start it under the worker account's own rootless podman, on a named bridge network (docs/podman.md)";
 	if (proxy !== DEFAULT_EGRESS_PROXY) return `PI_EGRESS_PROXY names your own proxy, which \`pi-dispatch up\` does not start: start ${proxy} yourself`;
 	return "Start it with `pi-dispatch up` from the deployment folder";
 }
@@ -542,7 +527,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		sessionsDir = process.env.PI_SESSIONS_DIR || null,
 		// REQ-PER-TRIGGER-SKILLS. Injected so the pre-spend gate is testable without a real directory, and
 		// lstat rather than stat so a symlinked skillsDir is judged on its own inode -- the habit copy-tree.mjs,
-		// outbox.mjs and sandbox-store.mjs all keep. A throw is a refusal: an unreadable path is still absent
+		// outbox.mjs all keep. A throw is a refusal: an unreadable path is still absent
 		// as far as this job is concerned.
 		isReadableDir = (p) => {
 			try {
@@ -583,8 +568,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// on a multi-host worker's shared queue (index.mjs, the never-fits gate's predicate), where another host may serve
 		// it. False by default, so a single host refuses, as it always did.
 		bundleProfileDeferrable = false,
-		// Issue #704 part 3: the job's venue's judgement of its project secret bundle (the registry's `bundleGate`,
-		// backend-openshell.mjs's for both OpenShell venues), `(job, { endpoints, vars, shadowed })` => `{ ok, placeholders?,
+		// Issue #704 part 3: the job's venue's judgement of its project secret bundle (the registry's `bundleGate`),
+		// `(job, { endpoints, vars, shadowed })` => `{ ok, placeholders?,
 		// plain? }`, `{ venueRefused: { reason, comment } }` or `{ unavailable }`. The default admits, which is every venue
 		// that holds its env as values: there a bundle's variables simply join the env.
 		bundleGate = async () => ({ ok: true }),
@@ -678,9 +663,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		pickupProject = null,
 		folderProject = null,
 		// Issue #596: the job's size `{ memMiB, cpuCenti, source }`, resolved at pickup from the same limits snapshot as
-		// every other gate (index.mjs). Handed to `prepareWorkspace` (a retained run's manifest records it, so a sandbox
-		// reopens the run at its size) and to `runContainer`, never through `job.data`. null on a bare wiring: neither call
-		// then carries it, and the container gets the built-in 4g and 2.
+		// every other gate (index.mjs). Handed to `prepareWorkspace` and to `runContainer`, never through `job.data`. null
+		// on a bare wiring: neither call then carries it, and the container gets the built-in 4g and 2.
 		jobSize = null,
 		// Issue #596, phase 2: the host's CPU budget at pickup in hundredths (`host-budget.mjs`), or null when it is off or
 		// unknown. It becomes every job's `--cpus` (capped at the runtime's count), so no job can use the reserve.
@@ -892,17 +876,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			log("refused_backend_unblessed", { backend: job.backend, blessed: blessedBackends });
 			return { outcome: "policy", reason: "backend-unblessed", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
 		}
-		// Issue #683: a folder job (a local run, a cron trigger's folder) on a venue that declares `localFolders` absent.
-		// The loader refuses a trigger that NAMES such a venue (`refusesLocalWorkspace`); this is the one it could not
-		// see, a trigger with no `run.backend` on a deployment whose DEFAULT is such a venue. A copy is edited elsewhere
-		// and written back afterwards, racing every edit the operator makes meanwhile (`DES-OPENSHELL-VENUE`).
-		const venueName = resolveBackendName(job, blessedBackends[0]);
-		if (job.kind === "local" && backendFor(venueName)?.declares?.localFolders === ABSENT) {
-			await comment(job, `Refused: this job runs against a folder on this machine, and its venue "${venueName}" copies a job's files instead of editing a folder in place. Run it on a venue that mounts folders (local or podman). Not run.`);
-			log("refused_venue_local_folders", { backend: venueName });
-			return { outcome: "policy", reason: "venue-local-folders-unsupported", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
-		}
-
 		// Issue #278. PI_BACKEND_FLOOR can ask for a guarantee a backend declares but EARNS only while something
 		// about this host is observed -- `local`'s credentialTransit, which holds only while the docker CLI sends
 		// containers to a daemon on this host. The read is repeated here, per job, because the CLI's context can
@@ -949,7 +922,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				budgetReserved: false,
 			};
 		}
-		// Issue #683: a venue's own refusal, made before spend whatever the floor says: the openshell venue's gateway is not
+		// Issue #683: a venue's own refusal, made before spend whatever the floor says (the venue's own preflight returns it)
 		// on this host, has a gateway-wide policy in force, or the host has no Landlock (`CONST-VENUE-EGRESS-LAYER`'s third
 		// and fourth conditions). Determinate, so a RETURN (CONST-RETRY-INFRA-ONLY), ahead of the image preflight and the
 		// mint. The comment is the venue's fixed sentence for its reason, never anything the runtime said.
@@ -973,54 +946,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// without the image is refused as `job-image-missing`, both the wrong fix. Only an answer no image can change
 		// comes this way; the per-image half (`anyUid`) stays below, after the probe that reads it.
 		if (observed?.jobUserRefused?.refused === "job-user-unmappable") return refuseJobUserUnmappable(observed.jobUserRefused.cause);
-		// Issue #428: the podman venue's account sets a containers.conf key that widens what every job reaches (the host's
-		// loopback services, the account's groups) and no argv takes back. A VENUE refusal, not a floor miss: with egress
-		// off no declared property covers what a job reaches on the host, so a floor would never ask on the deployments at
-		// risk. Determinate (the account's own files), so a RETURN (CONST-RETRY-INFRA-ONLY), here for the identity's reason:
-		// ahead of the image preflight and every spend. The file and key go to the operator's log; the comment is fixed,
-		// and says the configuration widens a job only when a key was FOUND: a chain that could not be read whole is
-		// refused for not being known, which is a different sentence. A read that failed for a moment (`transient`) is
-		// infrastructure, so it throws and is retried, pre-reserve, exactly like an unanswered observation.
-		if (observed?.podmanConfRefused?.transient) {
-			// `evidence` names the file (`<path> could not be read (<errno>)`), so the retry says which one: a containers.conf,
-			// or since issue #450 the /proc entry of the account's running rootless network. Issue #448: `rootful` is the local
-			// venue's, a containers.conf or unit file of rootful Podman's service on this host.
-			const what = observed.podmanConfRefused.rootful ? "rootful Podman's containers.conf or podman.service" : "the podman venue's containers.conf or running rootless network";
-			throw new InfraRetry(`${what} could not be read just now, so whether it widens a job is not known (${observed.podmanConfRefused.evidence ?? "no file named"})`, { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
-		}
-		if (observed?.podmanConfRefused?.retry) {
-			// Gate round 1 of PR #473: rootful Podman's service running since before its containers.conf changed (or a change
-			// time ahead of the clock) heals by itself, once the service restarts or idles out or the clock passes, so it is
-			// never a final `policy` outcome, pre-reserve. Gate round 2: a HOLD, not a retry (`PodmanRestartHold`), which the
-			// processor moves back to the delayed set without spending an attempt, for up to `PODMAN_RESTART_HOLD_MAX_MS`.
-			throw new PodmanRestartHold(`rootful Podman's service may still hold a containers.conf older than the files, so this job waits for it to restart (${observed.podmanConfRefused.evidence ?? "no file named"})`, { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
-		}
-		if (observed?.podmanConfRefused) {
-			// Issue #450: `live` is the account's RUNNING rootless network, not a file, so it has its own two sentences: one
-			// still carrying an option a removed key gave it (the fix is a restart, not a configuration change), and one
-			// whose process could not be read.
-			const { key, live, rootful } = observed.podmanConfRefused;
-			// Issue #448: `rootful` is the LOCAL venue on rootful Podman's Docker API service, with its own sentences: a key
-			// that reaches every local job, and a file it cannot read or does not decode. (A service older than its
-			// configuration is a retry, above, since gate round 1 of PR #473.)
-			await comment(
-				job,
-				rootful
-					? key
-						? PODMAN_CONF_COMMENTS["rootful-widens"]
-						: PODMAN_CONF_COMMENTS["rootful-unread"]
-					: live
-						? key
-							? PODMAN_CONF_COMMENTS["live-widens"]
-							: PODMAN_CONF_COMMENTS["live-unread"]
-						: key
-							? PODMAN_CONF_COMMENTS.widens
-							: PODMAN_CONF_COMMENTS.unread,
-			);
-			log("refused_podman_conf_widens_job", { key: key ?? null, ...(live ? { live: true } : {}), ...(rootful ? { rootful: true } : {}), message: observed.podmanConfRefused.message });
-			return { outcome: "policy", reason: PODMAN_CONF_WIDENS_JOB, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
-		}
-
 		// The job image must exist on THIS host before anything else happens. Free, determinate and
 		// credential-less, so it precedes the mint, the clone and the reservation: a host that cannot run the
 		// image refuses without minting a credential it will not use, cloning a repo it will not read, or
@@ -1344,7 +1269,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			};
 		}
 		if (egress.unavailable && egress.keeper) {
-			// Issue #458: the podman venue on Podman 4.x, proxy up, its rootless network keeper not holding. INFRA, not a
+			// Issue #458: the egress proxy up, its rootless network keeper not holding. INFRA, not a
 			// refusal: the keeper is one `systemctl --user` away, and a retry after it holds runs the job. Pre-reserve, so
 			// nothing is refunded. Its OWN reason token (PR #463 round 2), so the run record, the failure hook and the
 			// terminal comment can name the keeper rather than a generic never-started container; the full sentence rides
@@ -1397,8 +1322,9 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		if (job.fork !== undefined) {
 			try { validateFork(job.fork); } catch { return await forkRefusal("fork-request-invalid"); }
 			if (job.kind === "local" || job.target?.type !== "issue" || job.command || job.replica !== undefined || job.replicas !== undefined) return await forkRefusal("fork-target-unsupported");
+			// The openshell fork refusal left with the venue; the binding stays, because the source manifest's venue
+			// (what recorded the fork's point) is checked against this deployment's below.
 			const venue = resolveBackendName(job, blessedBackends[0]);
-			if (venue === "openshell") return await forkRefusal("openshell-fork-unsupported");
 			if (job.awaitInput === true) return await forkRefusal("fork-await-input-unsupported");
 			if (!isRecovery && !forkStore) return await forkRefusal("fork-source-store-unset");
 			const policy = await checkForkPolicy(job);
@@ -1672,9 +1598,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 					log(reason === "secret-bundle-profile-ambiguous" ? "refused_secret_bundle_profile_ambiguous" : "refused_secret_bundle_profile_unknown", { kind: job.kind ?? null, bundle: bundleFound.id, profile: bundleFound.bundle.profile });
 					return { outcome: "policy", reason, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
 				}
-				// Issue #704 part 3: no venue refusal here any more. Part 2 refused a bundled job on both OpenShell venues at
-				// this point, which was AHEAD of the fork check, so a fork's job that would have run without the bundle was
-				// refused for it. The venue's own judgement of the bundle (`bundleGate`) now runs inside the read below,
+				// The venue's own judgement of the bundle (`bundleGate`) runs inside the read below,
 				// which a fork's job never reaches.
 				bundleBinding = { id: bundleFound.id, ...bundleFound.bundle };
 			}
@@ -1798,7 +1722,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// the job may call (the overlay's models.json over pi's catalog, `outputCapView`, the composition the output cap and
 		// the zero-rated check read), every declared model endpoint's host (keyed or not: the simple rule), and every
 		// HTTP MCP server's host (its headers may carry a run.secrets value). A model whose baseUrl cannot be composed adds
-		// nothing, and is said so in DES-OPENSHELL-VENUE.
+		// nothing.
 		const credentialHosts = () => {
 			const hosts = new Set();
 			const add = (url) => {
@@ -1835,9 +1759,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		const readBundle = async () => {
 			if (bundleBinding === null) return null;
 			// Issue #704 part 3: the hosts first, before the resolver runs, so a file naming a host this job's venue cannot
-			// bind costs no read of the operator's manager. Here rather than among the free gates above (where part 2
-			// refused every OpenShell bundle), because only here is the fork check behind it: a fork's job runs without
-			// the bundle, so nothing about the bundle may refuse it.
+			// bind costs no read of the operator's manager. Here rather than among the free gates above, because only here
+			// is the fork check behind it: a fork's job runs without the bundle, so nothing about the bundle may refuse it.
 			const endpoints = bundleBinding.endpoints ?? {};
 			if (Object.keys(endpoints).length > 0) {
 				const pre = await askBundleGate({ endpoints, vars: null });
@@ -1987,13 +1910,12 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			}
 		}
 
-		// `podmanStore` (issue #429) only where the venue's job user carried one: the podman store the container ran in.
 		// `portfolio` (issue #505) only for a job the gate above confirmed: prepare then writes /job/portfolio.json, after
 		// asking the live file once more. Absent otherwise, so every other job's prepare call is unchanged.
 		// The existing read-only event file carries accepted human text. Environment/exec metadata stays id-only,
 		// including on gateways that log their exec argv. Keep the queued command for the operator's forge trail.
 		const stagedJob = job.approvalDecision ? { ...job, trigger: { ...job.trigger, comment: { ...job.trigger?.comment, body: job.approvalDecision.text ?? "" } } } : job;
-		prepared = await prepareWorkspace(stagedJob, token, { piVersion, jobUser: { user: jobUser?.user ?? null, home: jobUser?.home ?? null }, ...(typeof jobUser?.store === "string" ? { podmanStore: jobUser.store } : {}), ...(portfolio ? { portfolio: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(mcpChecked.document ? { mcp: mcpChecked.document } : {}), ...(job.watch ? { watchSecrets: secrets } : {}), ...(isRecovery ? { pin: { sha: manifest.workspace.baseSha, from: workspaceCheckpointer.baseSourceUrl(runId) } } : forkSource ? { pin: { sha: forkSource.manifest.baseSha, from: forkStore.baseSourceUrl(job.fork.fromJob) } } : {}) }); // resolves SHA, clones, materialises .pi/, writes prompt
+		prepared = await prepareWorkspace(stagedJob, token, { piVersion, jobUser: { user: jobUser?.user ?? null, home: jobUser?.home ?? null }, ...(portfolio ? { portfolio: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(mcpChecked.document ? { mcp: mcpChecked.document } : {}), ...(job.watch ? { watchSecrets: secrets } : {}), ...(isRecovery ? { pin: { sha: manifest.workspace.baseSha, from: workspaceCheckpointer.baseSourceUrl(runId) } } : forkSource ? { pin: { sha: forkSource.manifest.baseSha, from: forkStore.baseSourceUrl(job.fork.fromJob) } } : {}) }); // resolves SHA, clones, materialises .pi/, writes prompt
 
 		// A determinate prepare refusal -- sha-gone (the default branch advanced past the resolved tip),
 		// or a `pi-*` materialiser cap breach (the repo's .pi/ is too large to place in /job, issue #60)
@@ -2369,12 +2291,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// then only a signed line is read (run-container.mjs, run-history.mjs `authenticExitLines`). An image that does not
 		// declare it is read as before, under the #542 trust rule below alone.
 		const exitAuth = (img.capabilities ?? []).includes(EXIT_AUTH_CAPABILITY);
-		// Issue #686: an image whose runner can mirror its transcript over stderr. Handed as a fact; runContainer arms it only
-		// on a venue that copies (`transcript: "stdio"`) and only beside a key, so every other run is called as before.
-		const transcriptStderr = (img.capabilities ?? []).includes(TRANSCRIPT_STDERR_CAPABILITY);
-		// Issue #686, part 2: an image whose runner reads steer frames on stdin. Handed as a fact, like the one above;
-		// runContainer arms it only for a steer job on a venue that copies, so every other run is called as before.
-		const steerStdin = (img.capabilities ?? []).includes(STEER_STDIN_CAPABILITY);
 		// Issue #645: a FRESH armed run seeds the checkpoint store from its clone, now, before the container: the one moment
 		// the workspace's `.git` is still the worker's own (workspace-checkpoint.mjs `primeBase`). After every reserve, so a
 		// refused job never writes to the store. A recovery's base is already there. A base that could not be primed means
@@ -2404,7 +2320,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 		if (job.watch?.stage === "decision") await deps.watchRuntime?.started(job);
 		if (subscriptionAuth.length > 0 && !(await validateSubscriptionAuth(subscriptionAuth))) throw new InfraRetry("subscription binding changed before container start", { reason: "container-never-started", budgetReserved: true });
-		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null, lingering = false } = await runContainer({ job: containerJob, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(transcriptStderr ? { transcriptStderr: true } : {}), ...(steerStdin ? { steerStdin: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
+		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null } = await runContainer({ job: containerJob, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
 		const answeredPark = prepared.session?.parkedSource;
 		// A phrase-prefixed comment uses ordinary routing, but resuming this exact parked transcript still
 		// answers its question. A held receipt also identifies an answer whose legacy source cannot be proved.
@@ -2422,7 +2338,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		watchPolicyRefused = code === EXIT_POLICY;
 		watchUsage = Number.isSafeInteger(tokens?.total) && tokens.total >= 0 ? { tokensTotal: tokens.total } : null;
 		answerUsage = { tokens };
-		if (sourcePrimed && !lingering && !detached && !aborted && code === EXIT_COMPLETED) {
+		if (sourcePrimed && !detached && !aborted && code === EXIT_COMPLETED) {
 			const rootKey = sessionKeyFor(job).split(".")[0];
 			const transcriptPath = join(prepared.session?.hostDir ?? prepared.live?.hostDir ?? join(prepared.jobDir, "session"), "current.jsonl");
 			let pointSkipped = null;
@@ -2451,7 +2367,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// `oom_kill` above 0 it writes the signed line `code: 137, reason: "oom-killed"` (parseExitOomKilled). All three
 		// facts must agree: that line, verified under this run's key (an unsigned line is a tool's), and the container's
 		// own exit 137. Docker's `oom` event is not used: it fires also when only a child was killed and the job went on
-		// to exit 0, and Podman has no such event at all (both measured in the issue #596 lab). And a fourth: the line's
+		// to exit 0 (both measured in the issue #596 lab). And a fourth: the line's
 		// `memPeak` at 90% of the `--memory` this container got (`memoryLimit`, from runContainer) or more, because
 		// `oom_kill` counts the HOST's OOM killer too (`peakReachedLimit`). A report below it stays infrastructure.
 		const oomReported = exitOomKilled === true && exitAuthResult === "verified" && code === EXIT_SIGKILL;
@@ -2478,11 +2394,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// defensively: absent, or without `exit`, means no exit checkpoint, never a failure. Neither call may throw out of here.
 		const neverStartedExit = isNeverStartedExit({ code, aborted, detached }, neverStartedExits(job));
 		const recoverable = armed && !aborted && !oomKilled && code !== EXIT_COMPLETED && code !== EXIT_POLICY && !neverStartedExit;
-		// Issue #686 part 3, review round 2 of #714: a venue whose box was not confirmed gone after the run (`lingering`,
-		// `openshell-bind`) takes NO exit checkpoint: the host tree may still be written, so a snapshot of it is not a state
-		// the run reached. A recovery then continues from the last committed checkpoint.
 		if (ranCheckpoint !== null && typeof ranCheckpoint === "object") {
-			if (recoverable && lingering !== true && typeof ranCheckpoint.exit === "function") {
+			if (recoverable && typeof ranCheckpoint.exit === "function") {
 				const taken = await Promise.resolve().then(() => ranCheckpoint.exit({ kind: "exit" })).catch(() => ({ skipped: "error" }));
 				log("checkpoint_exit", taken && Number.isSafeInteger(taken.seq) ? { seq: taken.seq } : { skipped: typeof taken?.skipped === "string" ? taken.skipped.slice(0, 40) : "unknown" });
 			}
@@ -2595,7 +2508,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 
 		// Issue #345: `docker run` exited with a never-started code, but THIS attempt's container was found by its cidfile,
-		// still there, and was stopped and removed (run-container.mjs, measured on Podman with its API service killed
+		// still there, and was stopped and removed (run-container.mjs, measured with the daemon's API service killed
 		// mid-job). It DID start, so this is never refunded as never-started: it keeps its slot and retries as infrastructure,
 		// BEFORE the exit-code switch, where the same code would read as a free never-started exit.
 		if (detached === true) {
@@ -2636,19 +2549,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			await comment(job, TERMINAL_COMMENTS[EXIT_OOM_KILLED]);
 			return { outcome: "policy", reason: EXIT_OOM_KILLED, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 		}
-		// Issue #686 part 3, review round 2 of #714 (CONST-RETRY-INFRA-ONLY): a box not confirmed gone after the run. Exit 2
-		// keeps its own reason below, and a worker's abort stays the abort. A COMPLETED run is not thrown away as a retry,
-		// and a FOLDER job is not retried while the first sandbox may still write the folder: both RETURN the venue's named
-		// result, never retried, spend kept and settled above. The completed run's work stays where the agent put it (a
-		// pushed branch, a folder's edits), but nothing more is done with its result: no session promotion, no chained
-		// child, no completion comment, since the tree it would read may still change. Any other exit of a forge job is
-		// infrastructure as before (its retry gets a fresh clone; its recovery the last committed checkpoint).
-		if (lingering === true && !aborted && code !== EXIT_POLICY && (code === EXIT_COMPLETED || job.kind === "local")) {
-			log("venue_box_lingering", { exitCode: code, kind: job.kind ?? null });
-			await comment(job, OPENSHELL_BIND_LINGERING.comment);
-			return { outcome: "policy", reason: OPENSHELL_BIND_LINGERING.reason, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
-		}
-
 		switch (code) {
 			case EXIT_COMPLETED: {
 				watchCompleted = true;
@@ -3064,18 +2964,6 @@ export class InfraRetry extends Error {
 	}
 }
 
-/**
- * A local job held until rootful Podman's service restarts (issue #448, gate round 2 of PR #473). An `InfraRetry`, so
- * any path that does not know it still retries rather than failing the job for good; `makeProcessor` knows it, and
- * moves the job to the delayed set without spending an attempt until the hold has lasted `PODMAN_RESTART_HOLD_MAX_MS`.
- */
-export class PodmanRestartHold extends InfraRetry {
-	constructor(message, options) {
-		super(message, options);
-		this.name = "PodmanRestartHold";
-		this.holdUntilRestart = true;
-	}
-}
 
 /**
  * A job held on a rootless network keeper that is running on its own bridge but younger than the minimum age (issue

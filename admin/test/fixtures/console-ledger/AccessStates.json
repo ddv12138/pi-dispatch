@@ -192,24 +192,23 @@
     {
       "el": "Read-only console: talking to a run points to the terminal command",
       "kind": "readme",
-      "status": "real",
-      "source": "admin/src/console/panels/run.mjs#runChat",
-      "holds": "This console is read-only, so it sends nothing.",
-      "golden": [
-        "run-live.operator"
+      "status": "absent",
+      "sentence": "admin/src/console/shell.mjs#READ_ONLY_TITLE",
+      "roles": [
+        "operator",
+        "viewer"
       ],
-      "shows": "Terminal chat"
+      "golden": [
+        "panels/read-only.operator",
+        "panels/read-only.viewer"
+      ],
+      "reason": "the terminal chat panel the command served is gone with the sandbox and gateway removal; a read-only console says its banner instead"
     },
     {
       "el": "The terminal command in a copy box",
       "kind": "readme",
-      "status": "real",
-      "panel": "p-chat",
-      "source": "admin/src/console/kit.mjs#cmd",
-      "golden": [
-        "panels/run-chat-reply.operator"
-      ],
-      "shows": "class=\"cmd\""
+      "status": "illustrative",
+      "reason": "the run page's terminal chat panel is gone with the sandbox and gateway removal, so the card's copy box is the card's alone; the chat card offers the steer and follow-up forms instead"
     },
     {
       "el": "The signed-in token's name and role, and the read-only flag",

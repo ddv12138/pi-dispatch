@@ -305,51 +305,6 @@ test("every forge the table knows has a preparer -- a kind with none throws 'unk
 	}
 });
 
-test("a prepared job carries the stamp cleanup needs to retain it (REQ-RESURRECTABLE-SANDBOX)", async () => {
-	const { jobsDir, cleanup } = withJobsDir();
-	try {
-		const prepareWorkspace = makePrepareWorkspace({
-			jobsDir,
-			jobImage: "pi-job:deployment-default",
-			defaultBackend: "local",
-			preparers: { github: async (_j, _t, { jobDir }) => ({ jobDir, workspace: join(jobDir, "workspace"), sha: "s" }) },
-			forgeFor: () => ({ host: { resolveDefaultBranchSha: async () => ({ sha: "s" }) } }),
-		});
-
-		const plain = await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-7" });
-		assert.deepEqual(plain.sandbox, { jobId: "gh-7", kind: "github", image: "pi-job:deployment-default", backend: "local" });
-		// Issue #341: the job user the processor decided rides the stamp, so a sandbox re-opens as the uid owning the files.
-		const stamped = await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-8", jobUser: { user: "1234:1234", home: "/home/pi" } });
-		assert.deepEqual(stamped.sandbox.jobUser, { user: "1234:1234", home: "/home/pi" });
-		const imageUser = await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-11", jobUser: { user: null, home: null } });
-		assert.deepEqual(imageUser.sandbox.jobUser, { user: null, home: null }, "the image's own user is stamped too, as a decision rather than an absence");
-		// Issue #429: a podman run's store rides the stamp; nothing else carries the key.
-		assert.equal((await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-12", podmanStore: "/home/op/.local/share/containers/storage" })).sandbox.podmanStore, "/home/op/.local/share/containers/storage");
-		assert.equal(Object.hasOwn(stamped.sandbox, "podmanStore"), false);
-		// Issue #596: the size the processor resolved rides the stamp, rebuilt; nothing else carries the key.
-		assert.deepEqual((await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-13", size: { memMiB: 1536, cpuCenti: 50, source: "project", x: 1 } })).sandbox.size, { memMiB: 1536, cpuCenti: 50, source: "project" });
-		assert.equal(Object.hasOwn((await prepareWorkspace({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-14", size: { memMiB: 1, cpuCenti: 50, source: "env" } })).sandbox, "size"), false, "a size that does not rebuild is not stamped");
-		assert.equal(Object.hasOwn(stamped.sandbox, "size"), false);
-		// #277: the venue is resolved exactly as the registry dispatches it, so a trigger's own run.backend wins.
-		assert.equal((await prepareWorkspace({ kind: "github", repo: "a/b", backend: "far" }, "tok", { queueJobId: "gh-9" })).sandbox.backend, "far");
-		// No default wired (a DI seam) stamps a null venue, which the sandbox refuses -- never a guessed local.
-		const unwired = makePrepareWorkspace({
-			jobsDir,
-			jobImage: "pi-job:deployment-default",
-			preparers: { github: async (_j, _t, { jobDir }) => ({ jobDir, workspace: join(jobDir, "workspace"), sha: "s" }) },
-			forgeFor: () => ({ host: { resolveDefaultBranchSha: async () => ({ sha: "s" }) } }),
-		});
-		assert.equal((await unwired({ kind: "github", repo: "a/b" }, "tok", { queueJobId: "gh-10" })).sandbox.backend, null);
-
-		// A trigger's own run.image wins, resolved through the SAME function the preflight and the runner
-		// use -- so the tag that was checked, the tag that ran and the tag a sandbox re-opens are one answer.
-		const perTrigger = await prepareWorkspace({ kind: "github", repo: "a/b", image: "pi-job:custom" }, "tok", { queueJobId: "gh-8" });
-		assert.equal(perTrigger.sandbox.image, "pi-job:custom");
-	} finally {
-		cleanup();
-	}
-});
-
 test("a preparer's policy refusal carries no jobDir, so it is passed through unstamped", async () => {
 	const { jobsDir, cleanup } = withJobsDir();
 	try {
@@ -414,44 +369,6 @@ test("a local job's policy refusal removes its jobDir too", async () => {
 		const refused = await prepareWorkspace({ kind: "local", folder: "/tmp/x", flow: "tidy", task: "t" }, null, {});
 		assert.deepEqual(refused, { outcome: "policy", reason: "pi-too-many-files" });
 		assert.equal(existsSync(seenJobDir), false, "the refused local job's directory was left on disk");
-	} finally {
-		cleanup();
-	}
-});
-
-test("with retention OFF, cleanup is the rm it always was", async () => {
-	const { jobsDir, cleanup } = withJobsDir();
-	try {
-		const { makeCleanup } = await import("../src/prepare.mjs");
-		const jobDir = mkdtempSync(join(jobsDir, "job-"));
-		const prepared = { jobDir, workspace: join(jobDir, "workspace"), sandbox: { jobId: "gh-1", kind: "github", image: "i" } };
-
-		await makeCleanup({ sandboxDir: join(jobsDir, "sandboxes"), retentionHours: 0 })(prepared);
-		assert.equal(existsSync(jobDir), false, "the per-job dir is deleted, exactly as before the feature");
-		assert.equal(existsSync(join(jobsDir, "sandboxes")), false, "and nothing is retained anywhere");
-	} finally {
-		cleanup();
-	}
-});
-
-test("with retention ON, cleanup retains the directory under the sandbox root", async () => {
-	const { jobsDir, cleanup } = withJobsDir();
-	try {
-		const { makeCleanup } = await import("../src/prepare.mjs");
-		const sandboxDir = join(jobsDir, "sandboxes");
-		const jobDir = mkdtempSync(join(jobsDir, "job-"));
-		mkdirSync(join(jobDir, "workspace"), { recursive: true });
-		writeFileSync(join(jobDir, "prompt.md"), "task");
-		const prepared = { jobDir, workspace: join(jobDir, "workspace"), sandbox: { jobId: "gh-1", kind: "github", image: "pi-job:latest" } };
-
-		await makeCleanup({ sandboxDir, retentionHours: 24 })(prepared);
-		assert.equal(existsSync(jobDir), false, "the original per-job dir is gone -- moved, not copied");
-		assert.equal(existsSync(join(sandboxDir, "gh-1", "prompt.md")), true, "the run's /job inputs travelled with it");
-		const manifest = JSON.parse(readFileSync(join(sandboxDir, "gh-1", "manifest.json"), "utf8"));
-		assert.equal(manifest.workspace, join(sandboxDir, "gh-1", "workspace"), "the workspace path follows the rename");
-		// Issue #446: the worker's window reaches the manifest, as the deadline every opener reads. Without it a
-		// production worker silently stops writing `retainUntil` and a panel with a longer window overstates what is left.
-		assert.equal(Date.parse(manifest.retainUntil) - Date.parse(manifest.createdAt), 24 * 3600000);
 	} finally {
 		cleanup();
 	}

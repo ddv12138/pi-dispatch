@@ -16,7 +16,6 @@ import { CANCEL_ACK_TTL_MS, cancelAckKey, cancelReqKey, agentCancelReqKey, agent
 import { InfraRetry, NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, NewerReleaseHold, TERMINAL_COMMENTS, runJob, checkDraftAnswerSource } from "./processor.mjs";
 import { CANCELLED_BEFORE_START_COMMENT, SIZE_REFUSAL_COMMENTS } from "./comment-tables.mjs";
 import { NETNS_KEEPER_YOUNG_HOLD_MAX_MS, netnsKeeperCrashLoopSentence, netnsKeeperLoopAgainSentence } from "./netns-keeper.mjs";
-import { PODMAN_RESTART_HOLD_EXPIRED, PODMAN_RESTART_HOLD_MAX_MS, PODMAN_RESTART_HOLD_RECHECK_MS } from "./runtime-observations.mjs";
 import { earlierFrom, recordOfThisJob, recordReadable, targetFor } from "./run-history.mjs";
 import { isPerMachineHost } from "./backends.mjs";
 import { hash16 } from "./fleet-lease.mjs";
@@ -1930,21 +1929,6 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				if (error.wait === "subscription-auth") await deferTo(job, token, error.until, "subscription-auth", { project });
 				if (error.wait === "subscription-quota") await deferTo(job, token, error.until, "subscription-quota", { project });
 				if (error.wait === "subscription-owner") await deferTo(job, token, error.until, "subscription-owner", { project });
-			}
-			if (error?.holdUntilRestart === true) {
-				const heldAt = now();
-				const last = job.data?.podmanRestartHoldLastMs;
-				const resumed = !Number.isFinite(last) || heldAt - last > 2 * PODMAN_RESTART_HOLD_RECHECK_MS;
-				const since = !resumed && Number.isFinite(job.data?.podmanRestartHoldSinceMs) ? job.data.podmanRestartHoldSinceMs : heldAt;
-				if (heldAt - since < PODMAN_RESTART_HOLD_MAX_MS) {
-					await job.updateData({ ...job.data, podmanRestartHoldSinceMs: since, podmanRestartHoldLastMs: heldAt });
-					deps?.log?.("podman_restart_hold", { jobId: job.id, heldForMs: heldAt - since, delayMs: PODMAN_RESTART_HOLD_RECHECK_MS, reason: String(error.message).slice(0, 300) });
-					await deferTo(job, token, heldAt + PODMAN_RESTART_HOLD_RECHECK_MS, "podman-restart", { project });
-				}
-				const expired = Object.assign(new UnrecoverableError(`held ${Math.round((heldAt - since) / 60_000)} min for rootful Podman's service to restart, and it did not: ${error.message}`), { reason: PODMAN_RESTART_HOLD_EXPIRED, provider: error.provider ?? null, model: error.model ?? null, budgetReserved: false });
-				await settleSteer({ error: expired });
-				recordAfterGate({ job, error: expired, startedAt, endedAt: new Date().toISOString() });
-				throw expired;
 			}
 			// Issue #645: a recovery job whose base attempt is still running on this host waits for it (`RecoveryWaitHold`, a
 			// never-started InfraRetry carrying `recoveryWaitMs`). A recovery job has ONE attempt, so a plain throw would fail

@@ -36,7 +36,7 @@ const doc = read("docs/backup.md");
 
 // The trees whose code runs on a host. `image/runner` runs inside a job's container, so what it reads there is a job
 // input, never a store of the deployment's.
-const TREES = ["worker/src", "receiver/src", "admin/src", "gateway/src"];
+const TREES = ["worker/src", "receiver/src", "admin/src"];
 const SOURCE_EXTS = new Set([".mjs", ".js", ".cjs", ".ts", ".mts"]);
 const SKIP_DIRS = new Set(["test", "node_modules", "dist"]);
 
@@ -137,7 +137,7 @@ test("every subfolder the source makes in the run history or the session store i
 		}
 	}
 	// Not vacuous: the folders the page names today, found through a literal, a member expression and both constants.
-	for (const name of ["allocations", "console-audit", "touch-outbox", "sandbox-gateway-active", ".checkpoints", ".fork-sources", "forks"]) {
+	for (const name of ["allocations", "console-audit", "touch-outbox", ".checkpoints", ".fork-sources", "forks"]) {
 		assert.ok(found.has(name), `the scan finds ${name}`);
 	}
 	const missing = [...found].filter(([name]) => !named(name) && !NOT_A_STORE_FOLDER.has(name)).map(([name, path]) => `${name} (${path})`);
@@ -153,8 +153,6 @@ const FIXED_STORES = new Map([
 	["model-proposals.json", [["worker/src/doctor-model-proposals.mjs", 'join(cwd, "model-proposals.json")']]],
 	["egress-allowlist.conf", [["worker/src/start.mjs", 'join(process.cwd(), "egress-allowlist.conf")']]],
 	["model-endpoints.conf", [["worker/src/model-endpoints.mjs", 'MODEL_ENDPOINTS_INCLUDE_NAME = "model-endpoints.conf"']]],
-	["opener/hosts.json", [["worker/src/opener-cli.mjs", '"pi-dispatch", "opener")'], ["worker/src/opener-cli.mjs", 'join(directory, "hosts.json")']]],
-	["valkey.env", [["worker/src/podman-stack.mjs", '".config", "pi-dispatch", "valkey.env"']]],
 	["packages/.undo", [["worker/src/packages.mjs", 'PACKAGES_SUBDIR = "packages"'], ["worker/src/package-stage.mjs", 'UNDO_DIR = ".undo"']]],
 	["pi-dispatch-valkey-data", [["worker/src/valkey-auth.mjs", 'VALKEY_VOLUME = "pi-dispatch-valkey-data"']]],
 	[".pi-dispatch-valkey-volume.json", [["worker/src/valkey-auth.mjs", 'VALKEY_VOLUME_RECORD = ".pi-dispatch-valkey-volume.json"'], ["worker/src/up.mjs", "join(cwd, VALKEY_VOLUME_RECORD)"]]],
@@ -201,8 +199,6 @@ const KEY_FAMILIES = new Map([
 	["runs:*", [["worker/src/run-mirror.mjs", '"runs:index"']]],
 	["console:audit", [["worker/src/console-audit.mjs", '"console:audit"']]],
 	["console:trail:*", [["worker/src/processor.mjs", "`console:trail:"]]],
-	["sandbox:*", [["worker/src/sandbox-sessions.mjs", '"sandbox:shells"'], ["worker/src/sandbox-inventory.mjs", '"sandbox:inventory:hosts"'], ["worker/src/sandbox-prepare-requests.mjs", "`sandbox:prepare:pending:"]]],
-	["sandbox-gateway:*", [["worker/src/sandbox-gateway-protocol.mjs", 'prefix = "sandbox-gateway:"']]],
 	["updates:*", [["worker/src/updates.mjs", '"updates:hosts"']]],
 	["poll:*", [["receiver/src/poller.mjs", "`poll:"]]],
 	["steer:steered:*", [["receiver/src/steer.mjs", "`steer:steered:"]]],
@@ -225,12 +221,32 @@ function pageFamilies() {
 	return { out, section };
 }
 
+// Families the page's table still names but no source builds any more, retired with the sandbox and
+// podman/openshell backends they served. The docs pass of that removal rewrites the table; until it
+// lands, a retired name is excused here only while the scanned trees have stopped building it, so a
+// resurrected store cannot hide behind the excuse.
+const RETIRED_FAMILIES = new Map([
+	["sandbox:*", "the sandbox venues are removed (prune/sandbox-gateway); the page's row goes with the docs pass"],
+	["sandbox-gateway:*", "the sandbox gateway is removed (prune/sandbox-gateway); the page's row goes with the docs pass"],
+]);
+
 test("every Valkey key family is pinned to its source and named in the backup page's Valkey table", () => {
 	for (const [family, pins] of KEY_FAMILIES) {
 		for (const [file, literal] of pins) assert.ok(codeOf(file).includes(literal), `${family}: ${file} builds it (${literal})`);
 	}
+	const prefixOf = (family) => family.replace(/\*$/, "");
+	for (const [family, reason] of RETIRED_FAMILIES) {
+		const prefix = prefixOf(family);
+		// Quoted only: an unquoted `sandbox:` object key (the layout name) is not a key builder.
+		const builders = SOURCES.filter((f) => new RegExp(`["'\`]${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`).test(f.code));
+		assert.deepEqual(builders.map((f) => f.path), [], `${reason} (and no source may still build it): ${builders.map((f) => f.path).join(", ")}`);
+	}
 	const { out, section } = pageFamilies();
-	assert.deepEqual([...out].sort(), [...KEY_FAMILIES.keys()].sort(), "the page's Valkey table names exactly the pinned families");
+	const extra = out.filter((name) => !KEY_FAMILIES.has(name) && !RETIRED_FAMILIES.has(name));
+	assert.deepEqual(extra, [], `the page's Valkey table names a family nothing pins and nothing retired: ${extra.join(", ")}`);
+	const missing = [...KEY_FAMILIES.keys()].filter((name) => !out.includes(name));
+	assert.deepEqual(missing, [], `the page's Valkey table drops a pinned family: ${missing.join(", ")}`);
+	assert.ok(out.every((name) => KEY_FAMILIES.has(name) || RETIRED_FAMILIES.has(name)), "the page's Valkey table names exactly the pinned and retired families");
 	// The row says what a reset costs, and what doctor sees of it.
 	assert.ok(section.includes("tokens.window-reset") && /Every cap reopens/.test(section), "the Valkey section says a reset reopens caps and names tokens.window-reset");
 	assert.ok(/`Queue and counters`|\| Queue and counters \|/.test(doc) && doc.includes("(#what-the-valkey-volume-holds)"), "the Valkey row links the family table");

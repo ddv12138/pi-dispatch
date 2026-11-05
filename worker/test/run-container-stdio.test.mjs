@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
-import { transcriptRecord } from "../../image/runner/src/transcript-mirror.mjs";
+import { transcriptRecordMac } from "../src/stderr-transcript.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
+
+/** The stderr record `\x1epidt <seq> <type> <end> <mac> <base64>\n`, restated from the format stderr-transcript.mjs states (the runner's writer went with the copying venues). */
+const transcriptRecord = (key, run, seq, type, end, payload = Buffer.alloc(0)) =>
+	`\x1epidt ${seq} ${type} ${end} ${transcriptRecordMac(key, run, String(seq), type, String(end), payload)} ${Buffer.from(payload).toString("base64")}\n`;
 
 // Issue #686: the stdio transcript in runContainer. Its arming matrix, each skip by name, the env it writes, and the
 // stderr demux between the CLI child and the tee: records verified under the attempt's key and pushed into the
@@ -88,7 +92,9 @@ test("armed: PI_TRANSCRIPT=stderr, the opener on the stdio source, verified line
 		}),
 	});
 	await go();
-	assert.equal(seen.env.PI_TRANSCRIPT, "stderr");
+	// PI_TRANSCRIPT itself went with the venues that copied their files; the arming is read off the opener and the env's
+	// exit-auth channel instead.
+	assert.equal("PI_TRANSCRIPT" in seen.env, false, "the env write is gone");
 	assert.equal(seen.env.PI_EXIT_AUTH, "stdin");
 	assert.equal(seen.opened.length, 1);
 	assert.equal(seen.opened[0].source, "stdio");

@@ -65,7 +65,7 @@ say(`node ${process.versions.node}, uid ${euid}:${egid}, ${image} declares anyUi
 const endpoint = await makeDockerEndpointResolver()();
 assert.equal(endpoint.local, true, `the docker endpoint must be local (${endpoint.reason})`);
 const { decision, socket, daemon } = await makeJobUserResolver({ readFacts: makeDaemonFactsReader() })({ endpoint, key: "e2e" });
-// Issue #355: on Podman with SELinux enforcing, the worker relabels its own per-job mounts (`:Z`) and never an
+// Issue #355: on a daemon with SELinux enforcing, the worker relabels its own per-job mounts (`:Z`) and never an
 // operator's folder. Decided from the same answer the worker decides from; false on Docker and wherever SELinux is off,
 // where every argv below is the one this script always built.
 const relabel = relabelsPrivateMounts(daemon?.answered ? daemon.facts : null, endpoint);
@@ -112,7 +112,6 @@ assert.ok(img.piVersion, `${image} declares no pi version, so nothing could ever
 const forge = await prepareWorkspace(forgeJob, "unused-token", { queueJobId: "gh-e2e", jobUser, piVersion: img.piVersion });
 assert.ok(forge.jobDir && forge.session?.hostDir, `the forge job prepared a session: ${JSON.stringify(Object.keys(forge))}`);
 assert.equal(statSync(forge.jobDir).mode & 0o777, 0o700, "a job dir is a 0700 mkdtemp");
-assert.deepEqual(forge.sandbox.jobUser, jobUser, "the retention stamp carries the job user");
 
 // A RESUMED session, which is the shape the canonical file is COPIED for rather than created empty. The cold
 // prepare above staged a 0-byte transcript; writing a real one into it and promoting it is exactly how a

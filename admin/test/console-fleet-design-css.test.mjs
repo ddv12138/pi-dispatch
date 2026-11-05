@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { FLEET_DESIGN_CSS } from "../src/console/fleet-css.mjs";
-import { HOST_DETAIL_CSS, VENUE_DETAIL_CSS } from "../src/console/host-venue-css.mjs";
 import { PAGE_CSS, pageCss } from "../src/console/page-css.mjs";
 
 // The reference's local card rules are part of the design, just like the shared bundle. Export existence alone
@@ -10,8 +9,6 @@ import { PAGE_CSS, pageCss } from "../src/console/page-css.mjs";
 for (const [card, css, page] of [
   ["FleetScreen", FLEET_DESIGN_CSS, "fleet"],
   ["FleetPartPaused", FLEET_DESIGN_CSS, "fleet"],
-  ["HostDetail", HOST_DETAIL_CSS, "host"],
-  ["VenueDetail", VENUE_DETAIL_CSS, "venue"],
 ]) {
   test(`${card}: the page includes its published card rules, confined to its own page`, () => {
     const source = readFileSync(new URL(`../../design/system/components/${card}/preview.html`, import.meta.url), "utf8");

@@ -70,17 +70,10 @@ const states = {
   "host-stale.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ staleMs: 3 * MIN, ttlAgeMs: 3 * MIN, skewMs: 40_000, noExpiry: true })] }) }),
   "host-gone.operator": () => draw("host", { snap: snapshot({ hostBudgets: [] }), history: [{ jobId: "gh-last", host: "build3", endedAt: new Date(NOW - HOUR).toISOString(), outcome: "completed" }] }),
   "host-unknown.viewer": () => draw("host", { role: "viewer", name: "unknown", snap: snapshot({ hostBudgets: [], doctor: { hosts: [], more: 0 } }) }),
-  "host-retention-off.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ sandboxes: [], sandboxRetentionHours: 0 })] }) }),
-  "host-sandboxes-unreadable.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ sandboxes: null, sandboxesMore: null })] }) }),
-  "host-sandboxes-more.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ sandboxesMore: 12 })] }) }),
   "host-orphan-digest.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ jobs: [{ ...host().jobs[1], id: "sha256:0123456789abcdef" }] })] }) }),
   "host-orphan-legacy.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ jobs: [{ ...host().jobs[1], id: "container:pi-job-old" }] })] }) }),
   "host-orphan-no-venue.operator": () => draw("host", { snap: snapshot({ hostBudgets: [host({ jobs: [{ ...host().jobs[1], v: undefined, s: undefined }] })] }) }),
-  ...Object.fromEntries(["local", "podman", "openshell", "openshell-bind"].map((v) => [`host-orphan-${v}.operator`, () => draw("host", { snap: snapshot({ hostBudgets: [host({ jobs: [{ ...host().jobs[1], v }] })] }) })])),
   ...Object.fromEntries(["held", "no-parent", "unmanaged", "budget-unknown", "unreadable", "unset", "differs"].map((status) => [`host-reserve-${status}.operator`, () => draw("host", { snap: snapshot({ hostBudgets: [host({ cpuReserve: [{ venue: "podman", status, wantCenti: 1200, quotaCenti: status === "differs" ? 800 : null }] })] }) })])),
-  ...Object.fromEntries(["local", "podman", "openshell", "openshell-bind"].flatMap((name) => ["operator", "viewer"].map((role) => [`venue-${name}.${role}`, () => draw("venue", { name, role })]))),
-  ...Object.fromEntries(["local", "remote", "unknown"].map((word) => [`venue-gateway-${word}.operator`, () => draw("venue", { name: "openshell", snap: snapshot({ hostBudgets: [host({ backends: parseHostBackends(`blessed=openshell,openshell-bind;floor=nonRoot:enforced;os=podman:${word}`) })] }) })])),
-  "venue-unpublished.operator": () => draw("venue", { name: "openshell", snap: snapshot({ hostBudgets: [host({ backends: null })] }) }),
   ...Object.fromEntries(Object.entries({ stale: doctor({ ageMs: 72 * HOUR }), manual: doctor({ by: { worker: false, uid: 1002 }, workerRun: { uid: 1001, at: NOW - 2 * HOUR } }), more: doctor({ more: 12 }), passing: doctor({ counts: { ok: 43, warn: 0, fail: 0 }, checks: [{ id: "docker.1", level: "ok" }] }), unreadable: { name: "build3", unreadable: true }, missing: null }).map(([key, d]) => [`host-doctor-${key}.operator`, () => draw("host", { snap: snapshot({ doctor: { hosts: d ? [d] : [], more: 0 } }) })])),
 };
 export const FLEET_PANEL_STATES = Object.freeze(Object.keys(states));

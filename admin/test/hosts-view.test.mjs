@@ -542,7 +542,7 @@ test("the tick's snapshot carries each row's live fields through the worker's al
     name: "mini1",
     version: null, startedAt: null, pid: null, image: null, imageDigest: null, piVersion: null, tz: null,
     fpCron: null, fpTok: "secret-ish", fpProjects: null, fpEnvelope: null, budgetSeed: null,
-    sandboxes: null, sandboxesMore: null, sandboxRetentionHours: null, budgetFrom: null, cpuReserve: null,
+    budgetFrom: null, cpuReserve: null,
     heldMemMiB: undefined, heldCpuCenti: undefined,
     budgetMemMiB: "8192",
     budgetCpuCenti: "700",
@@ -561,7 +561,7 @@ test("the tick's snapshot carries each row's live fields through the worker's al
     routes: "true",
     caps: ["s:deploy", "w:ci"],
     capsSeen: true,
-    backends: { blessed: ["local", "openshell"], default: "local", floor: { egress: "enforced" }, openshell: { engine: "docker", gateway: "local", modes: ["copy"] } },
+    backends: { blessed: ["local", "openshell"], default: "local", floor: { egress: "enforced" } },
   }, "these keys and no other; the dropped entry joins jobsMore");
   assert.deepEqual([snap.hostBudgets[1].caps, snap.hostBudgets[1].backends], [[], null], "a row without either: none advertised, no venues published");
   assert.equal(snap.hostBudgets[1].capsSeen, false, "and is said to publish no list, not an empty one");

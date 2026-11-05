@@ -147,6 +147,6 @@ test("private decision text comes only from one bounded event-file read before r
 	assert.deepEqual(approvalDecisionFromEvent({ ...decision, text: "env text must not win" }, { jobDir: "/job", readFile }), { ...decision, text: "the person's actual explanation" });
 	assert.equal(reads, 1);
 	for (const body of [null, {}, { comment: {} }, { comment: { body: 7 } }, { comment: { body: "x".repeat(8193) } }, { comment: { body: "é".repeat(4097) } }]) assert.throws(() => approvalDecisionFromEvent(decision, { jobDir: "/job", readFile: () => JSON.stringify(body) }), (error) => error.piDispatchReason === "approval-decision-invalid" && !error.message.includes("é"));
-	assert.equal(approvalDecisionFromEvent(decision, { jobDir: "/sandbox/job", readFile: (path) => { assert.equal(path, "/sandbox/job/event.json"); return '{"comment":{"body":""}}'; } }).text, "");
+	assert.equal(approvalDecisionFromEvent(decision, { jobDir: "/some/other/job", readFile: (path) => { assert.equal(path, "/some/other/job/event.json"); return '{"comment":{"body":""}}'; } }).text, "");
 	assert.throws(() => approvalDecisionFromEvent(decision, { jobDir: "/job", readFile: () => { throw new Error("private human text"); } }), (error) => error.piDispatchReason === "approval-decision-invalid" && !error.message.includes("private human text"));
 });

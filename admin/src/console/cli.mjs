@@ -34,8 +34,6 @@ import { acquireConsoleLock } from "./lock.mjs";
 import { keptTokenLinkRefusal } from "./login-codes.mjs";
 import { makeAnswererService } from "../answerer-data.mjs";
 import { readAgentWritesToday } from "../agent-write-count.mjs";
-import { readSandboxGateways } from "../sandbox-gateways.mjs";
-import { makeGatewayBroker } from "./gateway-broker.mjs";
 
 export const USAGE = `usage: pi-dispatch-console <command> [--deployment <dir>]
 
@@ -58,7 +56,7 @@ class Refusal extends Error {}
 
 /** Load the real collaborators. Dynamic so `--help` and the tests never need them; static strings so esbuild inlines them. */
 export async function loadModules() {
-  const [updatesView, updates, tokens, audit, sessions, loginCodes, confirm, readModel, connection, server, live, pages, insights, pricing, serviceEnv, forges, writePlans, jobData, workerConfig, modelEndpoints, modelCatalog, whatif, sandboxVerdict, triggerList, triggerCheck, scheduleZones, secretsView, connectionsView, projectView, zeroTouchData, sandboxData, modelsView, modelRolePlans, setupActions, setupHostClient, consoleActions] = await Promise.all([
+  const [updatesView, updates, tokens, audit, sessions, loginCodes, confirm, readModel, connection, server, live, pages, insights, pricing, serviceEnv, forges, writePlans, jobData, workerConfig, modelEndpoints, modelCatalog, whatif, triggerList, triggerCheck, scheduleZones, secretsView, connectionsView, projectView, zeroTouchData, modelsView, modelRolePlans, setupActions, setupHostClient, consoleActions] = await Promise.all([
     import("../updates-view.mjs"),
     import("@edgehero/pi-dispatch/updates"),
     import("@edgehero/pi-dispatch/console-tokens"),
@@ -81,7 +79,6 @@ export async function loadModules() {
     import("@edgehero/pi-dispatch/model-endpoints"),
     import("@edgehero/pi-dispatch/model-catalog"),
     import("./whatif.mjs"),
-    import("../sandbox-verdict.mjs"),
     import("../trigger-list.mjs"),
     import("../trigger-check.mjs"),
     import("../trigger-schedule-zones.mjs"),
@@ -89,14 +86,13 @@ export async function loadModules() {
     import("../connections-view.mjs"),
     import("../project-view.mjs"),
     import("../zero-touch-data.mjs"),
-    import("../sandbox-data.mjs"),
     import("../models-view.mjs"),
     import("../model-role-plans.mjs"),
     import("../setup-actions.mjs"),
     import("../setup-host-client.mjs"),
     import("./actions.mjs"),
   ]);
-  return { updatesView, updates, tokens, audit, sessions, loginCodes, confirm, readModel, connection, server, live, pages, insights, pricing, serviceEnv, forges, writePlans, jobData, workerConfig, modelEndpoints, modelCatalog, whatif, sandboxVerdict, triggerList, triggerCheck, scheduleZones, secretsView, connectionsView, projectView, zeroTouchData, sandboxData, modelsView, modelRolePlans, setupActions, setupHostClient, consoleActions };
+  return { updatesView, updates, tokens, audit, sessions, loginCodes, confirm, readModel, connection, server, live, pages, insights, pricing, serviceEnv, forges, writePlans, jobData, workerConfig, modelEndpoints, modelCatalog, whatif, triggerList, triggerCheck, scheduleZones, secretsView, connectionsView, projectView, zeroTouchData, modelsView, modelRolePlans, setupActions, setupHostClient, consoleActions };
 }
 
 /** How long one insights assembly is reused per window: it walks every run record, far too much for each request. */
@@ -481,7 +477,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
   let hub = null;
   let setup = null;
   let setupBroker = null;
-  let gateway = null;
   try {
     // Every Valkey client of this process (the audit copy's, the fleet reader's) takes its password and its facts
     // about the deployment's Valkey from THIS deployment's `.env`, through the panel's one reader, as the pi extension
@@ -527,15 +522,8 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     // `/api/state`, so the overview's load asks for them per call (`pages.mjs` `PAGE_READS`), and a page that draws no
     // waiting job pays no read for one.
     const killSwitchPlanFn = ({ paused }) => m.readModel.killSwitchPlan({ paused, env: shellEnv, stateFn: () => ({ deploymentDir: config.dir, owned: [] }), fs, uid });
-    fleet = m.readModel.createFleetReader(side.paths, { budgetEnvFn: () => side.env, nowFn: now, fs, readOnly: true, activeLimit: CONSOLE_ACTIVE_LIMIT, killSwitchPlanFn, ...(m.sandboxData?.SANDBOX_READ_DEPS ?? {}), sandboxRetentionFn: m.sandboxVerdict?.sandboxRetentionOf ?? null });
+    fleet = m.readModel.createFleetReader(side.paths, { budgetEnvFn: () => side.env, nowFn: now, fs, readOnly: true, activeLimit: CONSOLE_ACTIVE_LIMIT, killSwitchPlanFn });
     const zeroTouch = m.zeroTouchData?.makeZeroTouchService({ paths: side.paths, env: side.env, fs, now, log: () => log("console: Zero touch accounting needs repair") });
-    // The console's hosts file, always a path: the read side's environment takes PI_SANDBOX_HOSTS_FILE from this shell
-    // only, so a value set only in the deployment .env reaches the service through the console's configuration.
-    const sandboxes = m.sandboxData?.makeSandboxService({ paths: side.paths, env: { ...side.env, PI_SANDBOX_HOSTS_FILE: config.sandboxHostsFile }, deploymentDir: config.dir, fleet, fs, now });
-    const gatewayRegistry = () => config.sandboxGatewaysFile ? readSandboxGateways(config.sandboxGatewaysFile, { fs, uid, platform: io.platform ?? process.platform }) : { disabled: true };
-    const gatewayEnrollment = gatewayRegistry();
-    if (gatewayEnrollment.refusal) io.err(`pi-dispatch-console: ${gatewayEnrollment.refusal}`);
-    if (redis) gateway = makeGatewayBroker({ redis, sessions, readTokens, findToken: m.tokens.findToken, fixedLoginTokenHash: config.loginTokenHash, readRegistry: gatewayRegistry, audit, readOnly: () => config.readOnly, now, ...(random ? { random } : {}), readSessions: () => fleet.sandboxSessions(), readRun: (id) => fleet.runById(id) });
     const answerer = makeAnswererService({ paths: side.paths, env: side.env, fs, now });
     const pricing = pricingOf(m.pricing);
     const modelsView = m.modelsView ? (snapshot = null) => m.modelsView.readModelsView({ paths: side.paths, env: side.env, deploymentDir: config.dir, now: now(), snapshot, fleet, fs, redis }) : null;
@@ -550,19 +538,11 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     const setupEnabled = config.hostSetup && setupPlatform && !config.readOnly && typeof setupEntry?.entry === "string";
     const setupReason = !config.hostSetup ? "host-setup-disabled" : !setupPlatform ? "unsupported" : config.readOnly ? "read-only" : setupEntry?.refusal ?? null;
     if (setupEnabled) setupBroker = m.setupHostClient.makeSetupBroker({ cliPath: setupEntry.entry, deployment: config.dir, env: shellEnv });
-    let setupBackends = null;
     const setupProvider = () => setupProviderOf({ m, env: shellEnv, dir: config.dir, fs, platform: io.platform ?? process.platform, uid });
-    if (config.hostSetup && typeof m.serviceEnv?.deploymentServiceEnv === "function") {
-      try {
-        const declared = m.serviceEnv.deploymentServiceEnv({ env: {}, dir: config.dir, keys: ["PI_BACKENDS", "PI_PROVIDER"], fs, platform: io.platform ?? process.platform, uid }).env;
-        setupBackends = declared.PI_BACKENDS ?? "local";
-      } catch { /* unknown provider metadata leaves the key form unavailable; the terminal can repair it */ }
-    }
-    const gatewayOnly = typeof setupBackends === "string" && setupBackends.split(",").every(name => ["openshell", "openshell-bind"].includes(name.trim()));
     setup = m.setupActions?.makeSetupActions({
       broker: setupBroker, enabled: setupEnabled, reason: setupReason, tokensPath: config.tokensPath, deployment: config.dir,
       provider: setupProvider, sessions, readTokens, now, fs,
-      operations: m.setupActions?.SETUP_ACTION_NAMES.filter(name => !gatewayOnly || name !== "setup-egress-start"),
+      operations: m.setupActions?.SETUP_ACTION_NAMES,
       readExposure: makeSetupExposureReader({
         initial: side,
         keys: [...(m.readModel.PANEL_SERVICE_KEYS ?? []), ...RESERVE_ENV_KEYS],
@@ -584,14 +564,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     };
     const pageDeps = {
       fleet,
-      sandboxes,
-      gatewayView: async () => {
-        if (gateway) return gateway.view();
-        const read = gatewayRegistry();
-        if (!read.config) return { enabledHosts: [], sessions: [], ...(read.refusal ? { problem: read.refusal } : {}) };
-        const shells = await fleet.sandboxSessions();
-        return { enabledHosts: Object.keys(read.config.hosts), sessions: shells?.sessions ?? [], partial: Boolean(shells?.unreachable || shells?.more || shells?.unreadable) };
-      },
       answerer,
       modelsView,
       setup: async ({ role, snapshot } = {}) => {
@@ -683,7 +655,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     modelRoles,
     watch: fleet.watch,
     zeroTouch,
-    sandboxes,
     answerer,
     rm: m.readModel,
     plans: m.writePlans ?? null,
@@ -726,8 +697,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
       pageDeps,
       hub,
       stateOf: m.live.stateOf,
-      gateway,
-      consoleOrigin: () => { const read = gatewayRegistry(); return read.refusal ? false : read.config?.consoleOrigin ?? null; },
     });
     const bound = await listenOn(server, config.listen, { fs, uid });
     if (bound.refusal) throw new Refusal(bound.refusal);
@@ -762,7 +731,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     // The streams first, so closing the server is not held open by them; then the listener, the reader, the copy.
     setup?.close();
     setupBroker?.close();
-    await gateway?.close();
     hub?.close();
     if (server?.listening) {
       await new Promise((resolve) => {

@@ -9,7 +9,7 @@ import { chmodSync, existsSync, lstatSync, mkdirSync, realpathSync, statSync } f
 import { homedir, hostname, tmpdir } from "node:os";
 import { delimiter, isAbsolute, posix, relative, resolve, sep } from "node:path";
 import { SESSION_KEY_PATTERN } from "./session-key.mjs";
-import { DEFAULT_BACKEND, OPENSHELL_BACKENDS, OPENSHELL_BIND_BACKEND, backendRefusals, parseBackendFloor, parseBackendList } from "./backends.mjs";
+import { DEFAULT_BACKEND, backendRefusals, parseBackendFloor, parseBackendList } from "./backends.mjs";
 import { egressArmed, egressProxyName } from "./egress.mjs";
 import { MINTED_TOKEN_VARS, RECEIVER_ONLY_VARS } from "./forges.mjs";
 import { SWEEP_INTERVAL_HOURS, SWEEP_INTERVAL_MAX_HOURS } from "./retention-sweep.mjs";
@@ -336,26 +336,6 @@ function backendFloorOf(env) {
 	}
 }
 
-/**
- * The openshell venue's two settings (issue #684): `PI_OPENSHELL_ENGINE`, the gateway's compute driver whose CLI reads the
- * job image (`docker`, the default, or `podman`, the two v1 admits), and `PI_OPENSHELL_GATEWAY`, a registered gateway's
- * name (unset: the CLI's active one). Judged only while the venue is blessed, as doctor judges them, so a value left in
- * the env of a deployment that never chose the venue refuses nothing; while blessed a bad one stops the boot here rather
- * than every job at its start.
- *
- * Issue #686 part 3: both OpenShell venues share them (one gateway, one engine), so either name in PI_BACKENDS judges
- * them. Bind mode is refused on the Podman driver: it was measured on the Docker driver only, and a rootless Podman maps
- * the sandbox's uid away from the worker's, so a bind would be neither readable nor removable by the uid that owns it.
- */
-export function openshellFrom(env, backends) {
-	const engine = env.PI_OPENSHELL_ENGINE === undefined || env.PI_OPENSHELL_ENGINE === "" ? "docker" : env.PI_OPENSHELL_ENGINE;
-	const gateway = env.PI_OPENSHELL_GATEWAY || null;
-	if (!OPENSHELL_BACKENDS.some((name) => backends.includes(name))) return { engine, gateway };
-	if (engine !== "docker" && engine !== "podman") throw configError(`PI_OPENSHELL_ENGINE must be docker or podman, the compute drivers the openshell venue admits (got ${JSON.stringify(engine)})`);
-	if (gateway !== null && !/^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/.test(gateway)) throw configError("PI_OPENSHELL_GATEWAY must be a registered gateway's name (`openshell gateway list`), or unset for the CLI's active gateway");
-	if (engine === "podman" && backends.includes(OPENSHELL_BIND_BACKEND)) throw configError(`PI_BACKENDS names ${OPENSHELL_BIND_BACKEND} with PI_OPENSHELL_ENGINE=podman: bind mode was measured on OpenShell's Docker driver only, and a rootless Podman maps the sandbox's uid away from the worker's, so its binds would not be the worker's to read or remove. Use the docker driver, or the copy venue (openshell)`);
-	return { engine, gateway };
-}
 
 /**
  * THE BOOT REFUSAL. A deployment whose configuration needs something its backends cannot provide is refused
@@ -559,22 +539,12 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		// trigger says otherwise". `parseBackendList` never returns empty, so the fallback is belt-and-braces
 		// against a future edit rather than a reachable branch today.
 		defaultBackend: backends[0] ?? DEFAULT_BACKEND,
-		egressProxy: egressProxyName(env), // one derivation, shared with the panel's sandbox (#277)
+		egressProxy: egressProxyName(env), // one derivation, shared with the panel (#277)
 		forwardEnv: forwardEnvList(env.PI_FORWARD_ENV, egressEnabled(env)), // extra host var NAMES to forward (e.g. a custom provider's key); explicit allowlist, GitHub token names refused
 		authFromPi: env.PI_AUTH_FROM_PI !== "0", // ON by default: use the key in ~/.pi/agent/auth.json when the env has none (api-key only). PI_AUTH_FROM_PI=0 forces env-only.
 		authConnectionsFile: env.PI_AUTH_CONNECTIONS_FILE ? resolve(env.PI_AUTH_CONNECTIONS_FILE) : null,
 		authStoreDir: env.PI_AUTH_STORE_DIR ? resolve(env.PI_AUTH_STORE_DIR) : null,
 		jobsDir: jobsDirPath(env),
-		// REQ-RESURRECTABLE-SANDBOX. `||` (not `??`) so an empty string falls back, matching logsDir.
-		sandboxDir: env.PI_SANDBOX_DIR || defaultSandboxDir(env),
-		// Hours a finished run's directory stays re-openable. NOTE THE SENTINEL, which is the OPPOSITE of
-		// logRetentionDays' and sessionsTtlDays': 0 means the feature is OFF (nothing is retained, cleanup
-		// is the `rm` it always was), NOT keep-forever. There is deliberately no keep-forever value -- a
-		// full repository clone per run with no ceiling is a disk bomb, and `--pin` exists for the one run
-		// worth keeping longer, bounded by sandboxPinDays.
-		sandboxRetentionHours: nonNegativeInt(env, "PI_SANDBOX_RETENTION_HOURS", 24),
-		sandboxPinDays: nonNegativeInt(env, "PI_SANDBOX_PIN_DAYS", 7), // `--pin` extends to now + this, never to forever
-		sandboxIdleMinutes: nonNegativeInt(env, "PI_SANDBOX_IDLE_MINUTES", 30), // bash's own TMOUT inside a sandbox; 0 = no idle logout
 		triggersFile: env.PI_TRIGGERS_FILE ?? null, // DES-CRON-VIA-BULLMQ-SCHEDULER: unified triggers file; null = cron disabled for the worker (it selects on.type:"cron")
 		pauseWindowsFile: pauseWindowsFilePath(env), // REQ-SCOPED-PAUSE-WINDOWS: per-folder/repo timed pause; null = no scoped pauses
 		modelEndpointsFile: modelEndpointsFilePath(env), // issue #503: the declared model endpoints (INT-MODEL-ENDPOINTS-FILE-CONTRACT); null = model-endpoints.json in the deployment folder, and a missing default file declares none
@@ -714,7 +684,6 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		gitlab: loadGitLabAuth(env),
 		forgejo: loadForgejoAuth(env),
 		azure: loadAzureAuth(env),
-		openshell: openshellFrom(env, backends), // issue #684: the openshell venue's engine and gateway
 	};
 
 	// #227, and it runs AFTER the object is built rather than inside it: the refusal reads `egress` as well
@@ -778,7 +747,7 @@ export function normalizeAppPrivateKey(raw) {
  * Fails loud at load time so a misconfigured worker refuses to boot rather than failing per-job.
  *
  * `privateKey` carries KEY MATERIAL when the operator supplied it inline, so nothing may serialise this
- * block: its three consumers (start.mjs, cli.mjs, sandbox-cli.mjs) pass it along and never print it, and
+ * block: its consumers (start.mjs, cli.mjs) pass it along and never print it, and
  * that is a property to keep rather than a coincidence to rely on.
  */
 export function loadGitHubAuth(env, fileExists) {
@@ -833,7 +802,7 @@ export function loadGitHubAuth(env, fileExists) {
 	return { source, patVar, appId, installationId, privateKeyPath, privateKey };
 }
 
-// env-internal TMPDIR, TEMP: the OS temp dir, read to place the default job and sandbox paths
+// env-internal TMPDIR, TEMP: the OS temp dir, read to place the default job paths
 // below -- and, only on a host with no home directory to name, as the last-resort fallback for the
 // durable state root. Not a variable of this project's and not a deployment knob: PI_JOBS_DIR,
 // PI_LOGS_DIR and PI_SETTINGS_FILE are how an operator moves any of them, and .env.example says so.
@@ -844,14 +813,14 @@ function currentUid() {
 }
 
 /**
- * The per-account root under the OS temp dir that the default jobs and sandbox paths live in (issue #464):
+ * The per-account root under the OS temp dir that the default jobs dir lives in (issue #464):
  * `<tmp>/pi-dispatch-<uid>`, or `<tmp>/pi-dispatch` where the platform has no uid (Windows, whose TEMP is per user).
  *
  * Per ACCOUNT because the OS temp dir is shared by every account on a host. The old `<tmp>/pi-dispatch` was created by
  * whichever account ran a job first (mode 775 or 755 under that account), and every other account's jobs then failed
  * `EACCES` at `mkdtemp`, their worker service included, while doctor said ready (measured on Fedora 44 and Ubuntu
- * 24.04). Not `$XDG_RUNTIME_DIR`: that is a small tmpfs (10% of RAM by default) that a retained sandbox, a whole repo
- * clone, would fill, it is removed at the account's last logout without linger, and a shell reached through `sudo -iu`
+ * 24.04). Not `$XDG_RUNTIME_DIR`: that is a small tmpfs (10% of RAM by default) that a whole repo clone would fill, it
+ * is removed at the account's last logout without linger, and a shell reached through `sudo -iu`
  * has none, so the worker and doctor could disagree about where the jobs are. `ensureAccountTempRoot` creates this
  * directory 0700 and refuses one this account does not own, since anyone can create a name under a sticky /tmp first.
  */
@@ -865,8 +834,8 @@ function defaultJobsDir(env = process.env, uid = currentUid()) {
 	// stores). Holds only the read-only /job inputs (prompt + .pi/), rebuilt from scratch every job; the
 	// workspace for a local job is the operator's own folder, not here.
 	//
-	// Takes `env` because its caller `defaultSandboxDir` advertises one and could not honour it while
-	// this function read `process.env` directly -- an injected TMPDIR was silently ignored one frame in.
+	// Takes `env` because its caller `jobsDirPath` advertises one and this function could not honour it while
+	// it read `process.env` directly -- an injected TMPDIR was silently ignored one frame in.
 	return `${accountTempRoot(env, uid)}/jobs`;
 }
 
@@ -874,8 +843,8 @@ function defaultJobsDir(env = process.env, uid = currentUid()) {
  * The per-job directory root, ONE derivation (issue #278). `doctor --live` builds its fixture here, and a probe that
  * derived the path on its own could disagree with the worker about `PI_JOBS_DIR=""` (kept as given, `??` not `||`,
  * as `loadConfig` always has) or an injected `TMPDIR`, and read back a directory no job uses. `loadConfig` read
- * `defaultJobsDir()` without its `env` before this, which ignored an injected TMPDIR exactly as `defaultSandboxDir`'s
- * comment below records for itself; identical on the real path, where env is process.env.
+ * `defaultJobsDir()` without its `env` before this, which ignored an injected TMPDIR one frame in; identical on the
+ * real path, where env is process.env.
  */
 export function jobsDirPath(env = process.env, uid = currentUid()) {
 	return env.PI_JOBS_DIR ?? defaultJobsDir(env, uid);
@@ -899,35 +868,8 @@ export function ensureJobsDir(jobsDir, { env = process.env, uid = currentUid(), 
 }
 
 /**
- * The sandbox dir (retained workspaces), checked at boot as the jobs dir is (issue #464, gate round 1): inside the
- * per-account root that root is secured first; a sandbox dir that exists must be a directory this account owns. Not
- * created here: the retention step makes it 0700 when it first keeps a run (`retainJobDir`), and asks the owner again
- * then. The owner of the directory holding a retained workspace can rename it and plant a manifest of its own in its
- * place, which `pi-dispatch sandbox` then lists and opens (measured: an explicit PI_SANDBOX_DIR another account made
- * 0777 was used, and that account swapped the entry). A `configError`, since a restart meets the same owner.
- */
-export function ensureSandboxDir(sandboxDir, { env = process.env, uid = currentUid(), fs = { mkdirSync, lstatSync, statSync, chmodSync } } = {}) {
-	ensureUnderAccountRoot(sandboxDir, { env, uid, fs });
-	if (!Number.isInteger(uid)) return;
-	let st;
-	try {
-		st = fs.statSync(sandboxDir);
-	} catch (err) {
-		if (err?.code === "ENOENT") return;
-		throw configError(`the sandbox dir ${sandboxDir} could not be read (${err?.code ?? err?.message}): point PI_SANDBOX_DIR at a directory this account owns`);
-	}
-	if (!st.isDirectory()) throw configError(`the sandbox dir ${sandboxDir} is not a directory: point PI_SANDBOX_DIR at a directory this account owns`);
-	if (st.uid !== uid) throw configError(`the sandbox dir ${sandboxDir} is owned by uid ${st.uid}, not by this account (uid ${uid}), and that account could swap a retained workspace for one of its own: ${sandboxDirOwnerFix(sandboxDir)}`);
-}
-
-/** The remedy for a sandbox dir another account owns, shared with doctor. */
-export function sandboxDirOwnerFix(dir) {
-	return `point PI_SANDBOX_DIR at a directory this account owns (or remove the line for the default), or chown ${dir} to this account`;
-}
-
-/**
  * Secure the per-account root (`ensureAccountTempRoot`) when `path` lies in it, else do nothing (issue #464). The one
- * rule for every default that can live there: the jobs and sandbox dirs, and, on an account with no home, the
+ * rule for every default that can live there: the jobs dir, and, on an account with no home, the
  * run history and the settings overlay (`defaultStateDir`). Returns whether it did.
  */
 export function ensureUnderAccountRoot(path, { env = process.env, uid = currentUid(), fs = { mkdirSync, lstatSync, statSync, chmodSync } } = {}) {
@@ -985,19 +927,6 @@ export function ensureAccountTempRoot(root, { uid = currentUid(), fs = { mkdirSy
 	if (st.isSymbolicLink() || !st.isDirectory()) throw refuse("is not a directory (a symlink or a file there is refused, since any account can create a name under the temp dir)");
 	if (st.uid !== uid) throw refuse(`is owned by uid ${st.uid}, not by this account (uid ${uid})`);
 	if ((st.mode & 0o077) !== 0) fs.chmodSync(root, 0o700);
-}
-
-export function defaultSandboxDir(env = process.env, uid = currentUid()) {
-	// Beside the per-job dirs, because a retained directory IS a per-job dir -- `cleanup` renames it here
-	// rather than copying, which only stays atomic while both live on one filesystem. Created mode 0700 by
-	// the retention step, since the OS temp dir is 1777 on POSIX and a retained tree holds a repository
-	// clone plus the run's prompt.md/event.json. Exported so the admin extension resolves the same default
-	// without calling loadConfig, which throws on unrelated env problems.
-	//
-	// Under temp deliberately, and unmoved by issue #290: a retained workspace is bounded by
-	// PI_SANDBOX_RETENTION_HOURS and is disposable by design, so a swept temp dir costs nothing that the
-	// sweep was not already going to take.
-	return `${jobsDirPath(env, uid)}/sandboxes`.replace(/\\/g, "/");
 }
 
 /**

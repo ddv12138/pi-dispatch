@@ -4,11 +4,15 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { html } from "../src/console/html.mjs";
+import { PAGES, panelIds } from "../src/console/pages.mjs";
 import { cardDocument, cardPanels, cardText, cardWords } from "./helpers/card-structure.mjs";
 import { ROLES as PAGE_ROLES, SHOTS, STATIC_SHOTS } from "./helpers/console-pages-harness.mjs";
 import { SPEND_PANEL_STATES } from "./helpers/spend-goldens.mjs";
 import { FLEET_PANEL_STATES } from "./helpers/fleet-goldens.mjs";
 import { PANEL_STATES } from "./helpers/panel-goldens.mjs";
+
+/** Every panel id the console's pages draw, for the retirement record's "the console draws it again" guard. */
+const PAGE_PANEL_IDS = new Set(Object.keys(PAGES).flatMap((page) => panelIds(page)));
 
 // Issue #737: every design card in scope has an element ledger, `fixtures/console-ledger/<Card>.json`, and
 // each thing the card draws is accounted for in it (one element per README bullet, panel id, "server provides" item,
@@ -46,15 +50,13 @@ const IN_SCOPE_CARDS = Object.freeze({
   WatchScreen: 763, WatchBoard: 763,
   ModelsScreen: 780,
   ParkedAnswerer: 779, ParkedDraftViewer: 779, ParkedDraftPhone: 779,
-  SandboxesScreen: 771,
-  RunWorkspace: 790, RunWorkspaceStates: 790,
   ZeroTouchScreen: 777, ZeroTouchViewer: 777, ZeroTouchPhone: 777,
   SecretsScreen: 751, ConnectionsScreen: 784, ProjectDetail: 751, UpdatesScreen: 790,
   TriggersScreen: 750, TriggersViewer: 750, TriggersPhone: 750,
   ConfigScreen: 750, TriggerDetail: 750, TriggerEditor: 750,
   SpendScreen: 749, SpendBudgetSplit: 749, SpendCapacity: 749, SpendBreakdown: 749, TopologyScreen: 749, SpendPhone: 749,
-  FleetScreen: 6, FleetPartPaused: 6, HostDetail: 6, VenueDetail: 6,
-  RunLive: 5, RunEnded: 5, RunRefused: 5, RunParked: 5, RunRecovered: 5, RunSandboxed: 5, RunChatStates: 5, RunViewer: 5, Transcript: 5, FactsAndLevels: 5,
+  FleetScreen: 6, FleetPartPaused: 6, HostDetail: 6,
+  RunLive: 5, RunEnded: 5, RunRefused: 5, RunParked: 5, RunRecovered: 5, RunChatStates: 5, RunViewer: 5, Transcript: 5, FactsAndLevels: 5,
   Shell: 1,
   Status: 1,
   SignIn: 2,
@@ -267,10 +269,33 @@ test("every golden a ledger names is one the harnesses draw: a page, a static pa
   for (const key of REVERSE_CHECKED) expect(drawn.has(key), `REVERSE_CHECKED: ${key} is a golden the harnesses draw`);
 }));
 
+/**
+ * Panels the design cards still name that the console lost with the sandbox and gateway retirement. The cards are
+ * published source and keep naming them; the ledger's absent shape wants a replacement sentence the console does not
+ * say, so the retirement is recorded here instead. Each entry must still be named by its card and must not be a panel
+ * the console draws: when either side moves, the check below says the record is stale. FleetScreen's p-venues was
+ * recorded here while the tree was between fleets; the venue table is drawn again (the worker's one local venue),
+ * so its retirement entry is gone and its ledger element is back.
+ */
+const RETIRED_PANELS = Object.freeze({
+  RunLive: ["p-terminal"],
+});
+
 test("every panel a card names or draws is accounted for by a panel element, read from the card", () => collect((expect) => {
   for (const [name, { ledger }] of LEDGERS) {
     const panels = new Set((ledger.elements ?? []).filter((e) => e.kind === "panel").map((e) => e.el));
-    for (const p of cardPanels(name)) expect(panels.has(p), `${name}: the card's panel ${p} is an element of kind panel`);
+    const retired = RETIRED_PANELS[name] ?? [];
+    for (const p of cardPanels(name)) {
+      if (retired.includes(p)) continue;
+      expect(panels.has(p), `${name}: the card's panel ${p} is an element of kind panel`);
+    }
+  }
+  for (const [name, retired] of Object.entries(RETIRED_PANELS)) {
+    expect(LEDGERS.has(name), `${name}: a retirement is recorded for a card with a ledger`);
+    for (const p of retired) {
+      expect(cardPanels(name).includes(p), `${name}: ${p} is retired here but its card no longer names it; drop the retirement entry`);
+      expect(!PAGE_PANEL_IDS.has(p), `${name}: ${p} is retired here but the console draws it again; give it a ledger element`);
+    }
   }
 }));
 

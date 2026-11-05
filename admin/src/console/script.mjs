@@ -197,7 +197,6 @@ import { ENDED_REASONS, NOTICE_OF_STATUS, PERSON_HEADER, PERSON_PARAM, STREAM_EN
 import { SEARCH_ID } from "./kit.mjs";
 import { LIVE_NOTES, LIVE_STATES, SEARCH_HREF } from "./shell.mjs";
 import { SYSTEM_SCHEME, THEME_COOKIE, THEME_COOKIE_MAX_AGE_SEC, THEME_COOKIE_SAME_SITE, THEME_LABELS, THEMES } from "./theme.mjs";
-import { GATEWAY_CONSOLE_SCRIPT } from "./gateway-console-script.mjs";
 import { CLIENT_ZH_TEXT } from "./locale.mjs";
 
 /**
@@ -1570,7 +1569,6 @@ ${FIT_JS}
         var refused = false;
         if (b.results && b.results.length) for (var i = 0; i < b.results.length; i++) if (b.results[i] && b.results[i].ok === false) refused = true;
         if (refused && typeof b.html === "string") refill(b.html);
-        else if (typeof b.requestId === "string" && /^sb-[0-9a-f]{32}$/.test(b.requestId) && typeof b.host === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(b.host)) location.assign("/runs/sandboxes?request=" + encodeURIComponent(b.requestId) + "&host=" + encodeURIComponent(b.host));
         else location.reload();
         return;
       }
@@ -1685,8 +1683,7 @@ ${FIT_JS}
     return null;
   }
   // A press and its release must land on the same element for the browser to send a click. A panel swapped between them
-  // replaces that element, so the click goes nowhere and a person's button press silently does nothing. Measured in the
-  // gateway's browser flow, where the Sandboxes page's first live update lost its Open in browser click, and any panel
+  // replaces that element, so the click goes nowhere and a person's button press silently does nothing: any panel
   // redrawn on a tick can do the same. So an update waits for the release, however brief the press.
   var pressed = null;
   function pressEnded() {
@@ -2513,5 +2510,4 @@ ${FIT_JS}
     filterTranscript();
   }
 })();
-${GATEWAY_CONSOLE_SCRIPT}
 `;

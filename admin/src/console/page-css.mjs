@@ -1,7 +1,5 @@
-import { GATEWAY_CONSOLE_CSS } from "./gateway-css.mjs";
 import { SETUP_CSS } from "./setup-css.mjs";
 import { ANSWERER_CSS } from "./answerer-css.mjs";
-import { SANDBOX_CSS } from "./sandbox-css.mjs";
 import { ZERO_TOUCH_CSS } from "./zero-touch-css.mjs";
 /**
  * The console's own rules after the Pulse stylesheet (issue #737): what the shell needs that `components/bundle.css`
@@ -25,7 +23,6 @@ import { ZERO_TOUCH_CSS } from "./zero-touch-css.mjs";
  */
 import { SPEND_CSS } from "./spend-css.mjs";
 import { FLEET_DESIGN_CSS } from "./fleet-css.mjs";
-import { HOST_DETAIL_CSS, VENUE_DETAIL_CSS } from "./host-venue-css.mjs";
 import { BTN_KINDS } from "./kit.mjs";
 import { PARKED_CSS } from "./parked-css.mjs";
 import { PULSE_CSS } from "./pulse-css.mjs";
@@ -429,7 +426,7 @@ section[data-panel]>.held{margin:0 0 var(--space-3)}
 @media ${DESKTOP}{@media not all and (min-width: ${TOP_BAR.phoneMax + 1 + TOP_BAR.searchRoom}px){.top--ro .top__search{display:none}}}
 @media (min-width: ${TOP_BAR.oneRowMin}px){@media not all and (min-width: ${TOP_BAR.oneRowMin + TOP_BAR.searchRoom}px){.top:not(.top--ro) .top__search{display:none}}}
 @media (min-width: ${TOP_BAR.oneRowReadOnlyMin}px){@media not all and (min-width: ${TOP_BAR.oneRowReadOnlyMin + TOP_BAR.searchRoom}px){.top--ro .top__search{display:none}}}
-@media ${PHONE}{.sandbox-opener{display:none!important}main{gap:12px}.titlebar__end>.drawn{flex-basis:100%}.titlebar__end>.drawn+.btn--ghost{margin-left:-10px}.pillnav{flex:0 0 auto;margin:-4px calc(var(--space-4) * -1);padding:4px var(--space-4);overflow-y:hidden}.pillnav::-webkit-scrollbar{display:none}details.more{position:static}details.more>summary{width:40px;height:40px}.top__end{flex:0 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;gap:6px}.top__end .live{display:inline-flex;position:relative;justify-content:center;width:16px;height:16px;padding:0;gap:0;background:transparent}.top__end .live>.ic{width:16px;height:16px}.top__end .live--retry>.dot,.top__end .live--off>.dot{display:none}.top__end .live--retry>.live__retry,.top__end .live--off:not(.live--out)>.live__off{display:block}.top__end .live [data-live-word]{${VISUALLY_HIDDEN}}.top__end .live>.dot{animation-name:live-phone}}
+@media ${PHONE}{main{gap:12px}.titlebar__end>.drawn{flex-basis:100%}.titlebar__end>.drawn+.btn--ghost{margin-left:-10px}.pillnav{flex:0 0 auto;margin:-4px calc(var(--space-4) * -1);padding:4px var(--space-4);overflow-y:hidden}.pillnav::-webkit-scrollbar{display:none}details.more{position:static}details.more>summary{width:40px;height:40px}.top__end{flex:0 1 auto;min-width:0;flex-wrap:wrap;justify-content:flex-end;gap:6px}.top__end .live{display:inline-flex;position:relative;justify-content:center;width:16px;height:16px;padding:0;gap:0;background:transparent}.top__end .live>.ic{width:16px;height:16px}.top__end .live--retry>.dot,.top__end .live--off>.dot{display:none}.top__end .live--retry>.live__retry,.top__end .live--off:not(.live--out)>.live__off{display:block}.top__end .live [data-live-word]{${VISUALLY_HIDDEN}}.top__end .live>.dot{animation-name:live-phone}}
 `.trim();
 
 /**
@@ -748,15 +745,8 @@ const FLEET_CSS = `${FLEET_DESIGN_CSS}
 .vw--asserted>.chip{background:var(--surface-2);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-strong)}
 .vw--absent>.chip{background:transparent;color:var(--ink-muted);box-shadow:none;border:1px dashed var(--line)}
 `;
-const VENUE_CSS = `${VENUE_DETAIL_CSS}
-${FLEET_CSS}
-#p-venue .seg{flex-wrap:wrap;height:auto;max-width:100%}
-.venue-compare--local th:nth-child(2),.venue-compare--local td:nth-child(2),.venue-compare--podman th:nth-child(3),.venue-compare--podman td:nth-child(3),.venue-compare--openshell th:nth-child(4),.venue-compare--openshell td:nth-child(4),.venue-compare--openshell-bind th:nth-child(5),.venue-compare--openshell-bind td:nth-child(5){background:var(--surface-2)}
-`;
-
 /** Each page's own rules, by page name, unscoped as written; `pageCss()` confines them. */
-export const PAGE_CSS = Object.freeze({ "sandbox-gateway": GATEWAY_CONSOLE_CSS, setup: SETUP_CSS, sandboxes: SANDBOX_CSS, "zero-touch": ZERO_TOUCH_CSS, insights: SPEND_CSS, "insights-budget-split": SPEND_CSS, "insights-capacity": SPEND_CSS, "insights-breakdown": SPEND_CSS, "insights-flows": SPEND_CSS, login: SIGN_IN_CSS, "login-code": SIGN_IN_CSS, error: ERROR_CSS, audit: `${AUDIT_CSS}${ERROR_CSS}`, overview: OVERVIEW_CSS, run: `${RUN_CSS}${ANSWERER_CSS}`, runs: RUNS_CSS, parked: `${PARKED_CSS}${ANSWERER_CSS}`, "answer-rules": ANSWERER_CSS, fleet: FLEET_CSS, host: `${HOST_DETAIL_CSS}
-${FLEET_CSS}`, venue: VENUE_CSS });
+export const PAGE_CSS = Object.freeze({ setup: SETUP_CSS, "zero-touch": ZERO_TOUCH_CSS, insights: SPEND_CSS, "insights-budget-split": SPEND_CSS, "insights-capacity": SPEND_CSS, "insights-breakdown": SPEND_CSS, "insights-flows": SPEND_CSS, login: SIGN_IN_CSS, "login-code": SIGN_IN_CSS, error: ERROR_CSS, audit: `${AUDIT_CSS}${ERROR_CSS}`, overview: OVERVIEW_CSS, run: `${RUN_CSS}${ANSWERER_CSS}`, runs: RUNS_CSS, parked: `${PARKED_CSS}${ANSWERER_CSS}`, "answer-rules": ANSWERER_CSS, fleet: FLEET_CSS, host: FLEET_CSS });
 
 /**
  * Every page's rules, each confined to `body[data-page="<page>"]`, in the table's order. `table` is `PAGE_CSS`; a test

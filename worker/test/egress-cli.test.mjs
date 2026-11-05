@@ -111,13 +111,9 @@ test("writeInPlace keeps the inode where a temp file renamed over the path does 
 	assert.throws(() => writeInPlace(join(dir, "absent.conf"), "x"), /ENOENT/, "never creates a file");
 });
 
-test("egress render names the reload per venue: podman for the rootless venue, both for both, the operator's own proxy (#503)", async () => {
-	const podman = await render(deployment(), { env: { PI_BACKENDS: "podman" } });
-	assert.match(podman.out, /^ {2}podman exec pi-dispatch-egress-proxy squid -k reconfigure$/m);
-	assert.doesNotMatch(podman.out, /docker exec/);
-	const both = await render(deployment(), { env: { PI_BACKENDS: "local,podman" } });
-	assert.match(both.out, /docker exec pi-dispatch-egress-proxy squid -k reconfigure/);
-	assert.match(both.out, /podman exec pi-dispatch-egress-proxy squid -k reconfigure/);
+test("egress render names the reload for the operator's own proxy, and says nothing when egress is off (#503)", async () => {
+	// The venue split (docker for local, podman for the rootless venue, both for both) left with the venues: the
+	// render reads one venue and names its one reload.
 	const own = await render(deployment(), { env: { PI_EGRESS_PROXY: "my-squid" } });
 	assert.match(own.out, /docker exec my-squid squid -k reconfigure/);
 	assert.match(own.out, /my-squid is your own proxy/);
@@ -125,7 +121,7 @@ test("egress render names the reload per venue: podman for the rootless venue, b
 	assert.equal(off.code, 0);
 	assert.match(off.out, /egress policy is off/);
 	assert.doesNotMatch(off.out, /squid -k reconfigure/);
-	assert.equal(reloadCommand("podman", "x"), "podman exec x squid -k reconfigure");
+	assert.equal(reloadCommand("podman", "x"), "podman exec x squid -k reconfigure", "the command is the runtime's word, whatever venues this build holds");
 });
 
 test("egress render reads PI_MODEL_ENDPOINTS_FILE from .env, and refuses a shell value that disagrees with it (#503)", async () => {
@@ -210,11 +206,6 @@ test("egress render names the rules refresh when endpoints are declared and the 
 	assert.match(d.out, /⚠ model endpoints are declared, but deploy\/egress-proxy\.conf predates #503 and does not include model-endpoints\.conf, so the endpoints stay unreachable until the rules are refreshed: `pi-dispatch up`, and accept the refresh/);
 	writeFileSync(join(docker, "deploy", "egress-proxy.conf"), INCL);
 	assert.doesNotMatch((await render(docker)).out, /predates #503/);
-	const home = tempDir("pd-egress-home-");
-	mkdirSync(join(home, ".config", "pi-dispatch"), { recursive: true });
-	writeFileSync(join(home, ".config", "pi-dispatch", "egress-proxy.conf"), PRE);
-	const p = await render(deployment(), { env: { PI_BACKENDS: "podman" }, home });
-	assert.match(p.out, /⚠ model endpoints are declared, but the podman proxy's rules \(~\/\.config\/pi-dispatch\/egress-proxy\.conf\) predate #503[^\n]*`pi-dispatch service install --force`/);
 	// No endpoints declared: nothing to say.
 	const empty = deployment({ endpoints: { version: 1, endpoints: [] } });
 	mkdirSync(join(empty, "deploy"));

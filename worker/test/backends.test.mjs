@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { ABSENT, HOST_ROUTE_LAN, HOST_ROUTE_LOOPBACK, HOST_ROUTE_OTHER_MACHINE, HOST_ROUTE_OWN_ADDRESS, HOST_ROUTE_REACHABLE, HOST_ROUTE_REFUTED, HOST_ROUTE_UNMEASURED, HOST_ROUTE_WORKS, HOST_ROUTES, PROXY_LOCAL_ADDRESSES, hostRouteFor, isPerMachineHost, isProxyLocalHost, ASSERTED, BACKENDS, BACKEND_NAMES, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, ENFORCED, OBSERVATION_FIX, OBSERVATIONS, PODMAN_ADDS_NO_MOUNTS, PODMAN_BACKEND, PODMAN_BOUNDS_DELEGATED, PODMAN_SERVICE_LOCAL, RUNTIME_ADDS_NO_MOUNTS, PROPERTIES, PROPERTY_NAMES, UNATTRIBUTED_BACKEND, backendFor, backendRefusals, declarationOf, effectiveWord, isDeclaration, isProperty, meets, parseBackendFloor, parseBackendList, shortfall, venuesOf, openshellSetupOf } from "../src/backends.mjs";
+import { ABSENT, CREDENTIAL_CUSTODY, HOST_ROUTE_LAN, HOST_ROUTE_LOOPBACK, HOST_ROUTE_OTHER_MACHINE, HOST_ROUTE_OWN_ADDRESS, HOST_ROUTE_REACHABLE, HOST_ROUTE_REFUTED, HOST_ROUTE_UNMEASURED, HOST_ROUTE_WORKS, HOST_ROUTES, PROXY_LOCAL_ADDRESSES, hostRouteFor, isPerMachineHost, isProxyLocalHost, ASSERTED, BACKENDS, BACKEND_NAMES, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, ENFORCED, OBSERVATION_FIX, OBSERVATIONS, RUNTIME_ADDS_NO_MOUNTS, PROPERTIES, PROPERTY_NAMES, UNATTRIBUTED_BACKEND, backendFor, backendRefusals, declarationOf, effectiveWord, isDeclaration, isProperty, meets, parseBackendFloor, parseBackendList, shortfall, venuesOf } from "../src/backends.mjs";
 
 test("the table is a LEAF -- it imports nothing", () => {
 	// `forges.mjs`'s reason, and it is why doctor and the config loader can read a declaration without
@@ -308,7 +308,7 @@ test("every observedBy names a property and an observation from the closed list 
 
 test("isolation and mountSet are ENFORCED only while the runtime is OBSERVED providing them (#345)", () => {
 	assert.deepEqual({ ...BACKENDS.local.observedBy }, { isolation: DAEMON_APPLIES_BOUNDS, mountSet: RUNTIME_ADDS_NO_MOUNTS, credentialTransit: DOCKER_ENDPOINT_LOCAL });
-	assert.deepEqual(Object.keys(OBSERVATIONS), [DOCKER_ENDPOINT_LOCAL, DAEMON_APPLIES_BOUNDS, RUNTIME_ADDS_NO_MOUNTS, PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOUNTS, PODMAN_SERVICE_LOCAL, "openshellGatewayLocal"]);
+	assert.deepEqual(Object.keys(OBSERVATIONS), [DOCKER_ENDPOINT_LOCAL, DAEMON_APPLIES_BOUNDS, RUNTIME_ADDS_NO_MOUNTS]);
 	assert.deepEqual(Object.keys(OBSERVATION_FIX), Object.keys(OBSERVATIONS), "every observation has its own remedy, and no remedy names an observation that does not exist");
 	assert.ok(Object.isFrozen(OBSERVATION_FIX));
 	for (const [property, observation] of [["isolation", DAEMON_APPLIES_BOUNDS], ["mountSet", RUNTIME_ADDS_NO_MOUNTS]]) {
@@ -320,45 +320,11 @@ test("isolation and mountSet are ENFORCED only while the runtime is OBSERVED pro
 	}
 });
 
-test("the podman venue declares every word ENFORCED, three of them only while podman's OWN observations hold (#354)", () => {
-	// Pinned word by word, so a word moved without its reason fails here beside the entry's comments. Each rests on a
-	// measurement on rootless Podman 5.8.1 (DES-PODMAN-NATIVE-ROOTLESS-BACKEND); `nonRoot` is the one that differs from
-	// local, because this venue's argv always supplies the worker's own non-zero uid.
-	assert.equal(PODMAN_BACKEND, "podman");
-	assert.ok(BACKEND_NAMES.includes(PODMAN_BACKEND));
-	const entry = BACKENDS[PODMAN_BACKEND];
-	assert.equal(entry.remote, false, "a remote service is refused, never declared");
-	for (const property of PROPERTY_NAMES) assert.equal(entry.declares[property], ENFORCED, property);
-	assert.deepEqual({ ...entry.asserts }, {}, "nothing asserted, so nothing names an asserter");
-	assert.deepEqual({ ...entry.observedBy }, { isolation: PODMAN_BOUNDS_DELEGATED, mountSet: PODMAN_ADDS_NO_MOUNTS, credentialTransit: PODMAN_SERVICE_LOCAL });
-	// Podman's observations are its own: local's read `docker info` and the docker CLI's endpoint, which say nothing about
-	// the podman CLI's rootless store, and podman's say nothing about a Docker daemon.
-	for (const observation of Object.values(entry.observedBy)) assert.equal(Object.values(BACKENDS.local.observedBy).includes(observation), false, observation);
-	const all = { [PODMAN_BOUNDS_DELEGATED]: true, [PODMAN_ADDS_NO_MOUNTS]: true, [PODMAN_SERVICE_LOCAL]: true };
-	for (const [property, observation] of Object.entries(entry.observedBy)) {
-		assert.equal(effectiveWord(PODMAN_BACKEND, property, all), ENFORCED, property);
-		for (const seen of [{ ...all, [observation]: false }, { ...all, [observation]: null }, {}, { [DOCKER_ENDPOINT_LOCAL]: true, [DAEMON_APPLIES_BOUNDS]: true, [RUNTIME_ADDS_NO_MOUNTS]: true }]) {
-			assert.equal(effectiveWord(PODMAN_BACKEND, property, seen), ASSERTED, `${property} degrades for ${JSON.stringify(seen)}`);
-		}
-	}
-	assert.equal(effectiveWord(PODMAN_BACKEND, "nonRoot", {}), ENFORCED, "not observation-gated");
-	assert.deepEqual(shortfall(PODMAN_BACKEND, { nonRoot: ENFORCED }), [], "the floor local cannot meet, podman can");
-	for (const observation of [PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOUNTS, PODMAN_SERVICE_LOCAL]) {
-		assert.ok(OBSERVATIONS[observation].length > 40, observation);
-		assert.match(OBSERVATION_FIX[observation], /or lower that entry to `asserted`/, observation);
-	}
-	assert.ok(Object.isFrozen(entry) && Object.isFrozen(entry.declares) && Object.isFrozen(entry.asserts) && Object.isFrozen(entry.observedBy));
-	assert.deepEqual(parseBackendList("podman"), ["podman"], "PI_BACKENDS=podman alone is a deployment through the real table");
-});
-
-// Issue #503: the measured routes from the egress proxy to a model server on the host.
+// Issue #503: the measured routes from the egress proxy to a model server on the host. The podman runtimes the
+// table measured left with the venue; the rows that named them went with it, and the runtime input is docker's.
 const LAN_HOST = ["192.168.5.15"];
-const PASTA = { backend: "podman", rootless: true, helper: "pasta", version: "5.8.1", hostAddresses: LAN_HOST };
-const SLIRP = { backend: "podman", rootless: true, helper: "slirp4netns", version: "4.9.3", hostAddresses: LAN_HOST };
-const ROOTFUL = { backend: "podman", rootless: false, version: "5.8.1", hostAddresses: LAN_HOST };
 const ENGINE = { backend: "docker", desktop: false, version: "29.1.3", hostAddresses: LAN_HOST };
 const DESKTOP = { backend: "docker", desktop: true, os: "darwin", version: "27.4.0" };
-const RUNTIMES = [DESKTOP, ENGINE, ROOTFUL, SLIRP, PASTA];
 // Issue #530: the Mac's own LAN address in #503's acceptance run.
 const DESKTOP_HOST = ["192.168.68.54"];
 
@@ -387,9 +353,6 @@ test("the table holds exactly what the two published measurement comments state 
 	assert.deepEqual(routes, {
 		"docker-desktop": ["host.docker.internal=works", `${HOST_ROUTE_OWN_ADDRESS}=works`],
 		"docker-engine": ["host.docker.internal=works", "host.containers.internal=refuted", `${HOST_ROUTE_OWN_ADDRESS}=works`, `${HOST_ROUTE_OTHER_MACHINE}=reachable`],
-		"podman-rootful": ["host.containers.internal=works", `${HOST_ROUTE_OWN_ADDRESS}=works`, `${HOST_ROUTE_OTHER_MACHINE}=reachable`],
-		"podman-rootless-slirp4netns": ["host.containers.internal=works", `${HOST_ROUTE_OWN_ADDRESS}=works`, `${HOST_ROUTE_OTHER_MACHINE}=reachable`],
-		"podman-rootless-pasta": ["host.containers.internal=works", `${HOST_ROUTE_OWN_ADDRESS}=refuted`, `${HOST_ROUTE_OTHER_MACHINE}=reachable`],
 		"every-venue": [`${HOST_ROUTE_LOOPBACK}=refuted`],
 	});
 	for (const row of HOST_ROUTES["docker-desktop"]) assert.deepEqual({ ...row.when }, { backend: "docker", desktop: true, os: "darwin", version: "27.4.0" }, "Docker Desktop was measured on macOS, engine 27.4.0, only");
@@ -411,12 +374,6 @@ test("hostRouteFor answers each measured row (#503)", () => {
 		[ENGINE, "host.docker.internal", HOST_ROUTE_WORKS, /--add-host host\.docker\.internal:host-gateway` on the proxy/],
 		[ENGINE, "host.containers.internal", HOST_ROUTE_REFUTED, /not defined on Docker Engine/],
 		[ENGINE, "192.168.5.15", HOST_ROUTE_WORKS, /bound to that address/],
-		[ROOTFUL, "host.containers.internal", HOST_ROUTE_WORKS, /0\.0\.0\.0 only/],
-		[ROOTFUL, "192.168.5.15", HOST_ROUTE_WORKS, /bound to that address/],
-		[SLIRP, "host.containers.internal", HOST_ROUTE_WORKS, /192\.168\.5\.15/],
-		[SLIRP, "192.168.5.15", HOST_ROUTE_WORKS, /bound to that address/],
-		[PASTA, "host.containers.internal", HOST_ROUTE_WORKS, /169\.254\.1\.2/],
-		[PASTA, "192.168.5.15", HOST_ROUTE_REFUTED, /Declare host\.containers\.internal/],
 	];
 	for (const [runtime, host, status, needs] of cases) {
 		const got = hostRouteFor(runtime, host);
@@ -432,11 +389,11 @@ test("hostRouteFor answers each measured row (#503)", () => {
 });
 
 test("another machine is lan, an ordinary outbound route, and never works (#503)", () => {
-	for (const runtime of RUNTIMES) {
+	for (const runtime of [DESKTOP, ENGINE]) {
 		for (const host of ["192.168.5.2", "8.8.8.8", "100.64.0.1", "10.0.2.3", "172.17.0.1", "ollama.lan", "myhost.local", "gpu_box.lan", "ollama.example.com"]) {
 			const got = hostRouteFor({ ...runtime, hostAddresses: LAN_HOST }, host);
 			assert.equal(got.status, HOST_ROUTE_LAN, `${JSON.stringify(runtime)} ${host}: ${got.sentence}`);
-			assert.match(got.sentence, /is not a route to this host: an ordinary outbound route through the proxy\. Another machine on the LAN was measured reachable \(IPv4, 192\.168\.5\.2\) on Docker Engine 29\.1\.3, Ubuntu 24\.04; Podman 5\.8\.1 rootful, Fedora; Podman 4\.9\.3 rootless, slirp4netns, Ubuntu 24\.04; Podman 5\.8\.1 rootless, pasta, Fedora\.$/);
+			assert.match(got.sentence, /is not a route to this host: an ordinary outbound route through the proxy\. Another machine on the LAN was measured reachable \(IPv4, 192\.168\.5\.2\) on Docker Engine 29\.1\.3, Ubuntu 24\.04\.$/);
 		}
 	}
 	// A name needs no host addresses to be lan: no name but the two aliases is ever this host's route.
@@ -444,7 +401,7 @@ test("another machine is lan, an ordinary outbound route, and never works (#503)
 });
 
 test("an address the proxy denies as host-local is refuted on every runtime, from the one shared set (#503)", () => {
-	for (const runtime of [...RUNTIMES, {}, null, undefined]) {
+	for (const runtime of [DESKTOP, ENGINE, {}, null, undefined]) {
 		for (const host of ["localhost", "localhost.", "ollama.localhost", "127.0.0.1", "127.1.2.3", "0.0.0.0", "10.0.2.2", "::1", "[::1]", "::", "[::]"]) {
 			const got = hostRouteFor(runtime, host);
 			assert.equal(got.status, HOST_ROUTE_REFUTED, `${JSON.stringify(runtime)} ${host}: ${got.sentence}`);
@@ -464,26 +421,16 @@ test("an address the proxy denies as host-local is refuted on every runtime, fro
 	assert.equal(isProxyLocalHost("other", "::1"), false, "an unknown kind is never local by default");
 });
 
-test("pasta 5.8.1 refuses the host's own LAN address, where slirp4netns 4.9.3 takes it (#503)", () => {
-	// The one row where the two rootless helpers split, and the reason the issue's "LAN endpoints only for 4.x" fallback
-	// is refuted: 4.9.3 reaches the host, and 5.8.1 reaches it only by host.containers.internal.
-	assert.equal(hostRouteFor(PASTA, "192.168.5.15").status, HOST_ROUTE_REFUTED);
-	assert.equal(hostRouteFor(SLIRP, "192.168.5.15").status, HOST_ROUTE_WORKS);
-	// Without the host's addresses no IPv4 literal is judged: it may be this host's own.
-	assert.equal(hostRouteFor({ ...PASTA, hostAddresses: undefined }, "192.168.5.15").status, HOST_ROUTE_UNMEASURED);
-	assert.equal(hostRouteFor({ ...SLIRP, hostAddresses: undefined }, "192.168.5.2").status, HOST_ROUTE_UNMEASURED);
-});
-
 test("host addresses must each be a plain IPv4, or nothing is judged (#503)", () => {
 	for (const bad of ["192.168.5.15/24", "%eth0", "garbage", "[]", "fe80::1", " 192.168.5.15", 7, null]) {
 		for (const host of ["192.168.5.15", "192.168.5.2", "ollama.lan", "host.containers.internal"]) {
-			const got = hostRouteFor({ ...PASTA, hostAddresses: [...LAN_HOST, bad] }, host);
+			const got = hostRouteFor({ ...ENGINE, hostAddresses: [...LAN_HOST, bad] }, host);
 			assert.equal(got.status, HOST_ROUTE_UNMEASURED, `${JSON.stringify(bad)} ${host}`);
 			assert.ok(got.sentence.startsWith(`The host address ${JSON.stringify(bad)} is not a plain IPv4 address`), got.sentence);
 		}
 	}
 	for (const empty of [[], "192.168.5.15", {}]) {
-		const got = hostRouteFor({ ...PASTA, hostAddresses: empty }, "192.168.5.15");
+		const got = hostRouteFor({ ...ENGINE, hostAddresses: empty }, "192.168.5.15");
 		assert.equal(got.status, HOST_ROUTE_UNMEASURED);
 		assert.match(got.sentence, /^No host addresses were given/);
 	}
@@ -499,23 +446,16 @@ test("Docker Engine's host.docker.internal names host-gateway on the proxy and t
 
 test("anything not measured reads unmeasured, never works (#503)", () => {
 	const unmeasured = [
-		[SLIRP, "169.254.1.2"],
-		[PASTA, "169.254.1.2"],
+		[ENGINE, "169.254.1.2"],
 		[ENGINE, "2001:db8::1"],
 		[ENGINE, "[fd00::16]"],
 		[ENGINE, "64:ff9b::7f00:1"],
 		[ENGINE, "::ffff:a00:1"],
 		[ENGINE, "fe80::1"],
-		[{ ...PASTA, version: "5.8.2" }, "host.containers.internal"],
-		[{ ...PASTA, version: "5.8.1-dev" }, "host.containers.internal"],
-		[{ ...SLIRP, version: "5.0.0" }, "192.168.5.15"],
 		[{ ...ENGINE, version: "28.0.0" }, "host.docker.internal"],
 		[{ ...DESKTOP, os: "linux" }, "host.docker.internal"],
 		[{ ...DESKTOP, os: "win32" }, "host.docker.internal"],
 		[DESKTOP, "host.containers.internal"],
-		[ROOTFUL, "host.docker.internal"],
-		[SLIRP, "host.docker.internal"],
-		[PASTA, "host.docker.internal"],
 		// Issue #530: the Desktop own-address row is bound to what was measured, and widens to nothing else.
 		[DESKTOP, "192.168.68.54"],
 		[{ ...DESKTOP, version: "27.4.1", hostAddresses: DESKTOP_HOST }, "192.168.68.54"],
@@ -529,9 +469,6 @@ test("anything not measured reads unmeasured, never works (#503)", () => {
 		const got = hostRouteFor(runtime, host);
 		assert.equal(got.status, HOST_ROUTE_UNMEASURED, `${JSON.stringify(runtime)} ${host}: ${got.sentence}`);
 	}
-	assert.equal(hostRouteFor({ ...SLIRP, version: "v4.9.3" }, "host.containers.internal").status, HOST_ROUTE_WORKS, "a leading v is the same version");
-	assert.equal(hostRouteFor({ ...SLIRP, helper: "SLIRP4NETNS" }, "host.containers.internal").status, HOST_ROUTE_WORKS, "the helper is lowercased");
-	assert.equal(hostRouteFor({ ...ROOTFUL, helper: undefined }, "host.containers.internal").status, HOST_ROUTE_WORKS, "a rootful podman's helper is not read");
 });
 
 test("only a host in a declared form is judged: what parseModelEndpoints stores (#503)", async () => {
@@ -552,14 +489,12 @@ test("only a host in a declared form is judged: what parseModelEndpoints stores 
 test("an invalid runtime input reads unmeasured and names what is missing (#503)", () => {
 	const inputs = [
 		[null, /the runtime \(an object\)/],
-		[{ ...ENGINE, backend: "local" }, /backend \("docker" or "podman"\)/],
+		[{ ...ENGINE, backend: "local" }, /backend \("docker"\)/],
+		[{ ...ENGINE, backend: "podman" }, /backend \("docker"\)/],
 		[{ ...ENGINE, version: undefined }, /version \(a string\)/],
 		[{ ...ENGINE, version: 29 }, /version/],
 		[{ ...ENGINE, desktop: undefined }, /desktop \(a boolean, for docker\)/],
 		[{ ...DESKTOP, os: undefined }, /os \(a string such as "darwin", for Docker Desktop\)/],
-		[{ ...ROOTFUL, rootless: "false" }, /rootless \(a boolean, for podman\)/],
-		[{ ...PASTA, helper: undefined }, /helper \("slirp4netns" or "pasta", for rootless podman\)/],
-		[{ ...PASTA, helper: "vopono" }, /helper/],
 	];
 	for (const [runtime, problem] of inputs) {
 		const got = hostRouteFor(runtime, "host.docker.internal");
@@ -576,86 +511,15 @@ test("isPerMachineHost: only the two alias NAMES are a different server on every
 	for (const host of ["169.254.1.2", "[fe80::1]", "fe80::1", "[febf::1]", "gpu.lan", "192.168.5.2", "172.17.0.1", "[fd00::2]", "docker.internal", "", null]) assert.equal(isPerMachineHost(host), false, String(host));
 });
 
-test("the openshell venue (#683): every word it cannot build is asserted with its asserter, two are absent, and it holds the credentials in its layer", async () => {
-	const { OPENSHELL_BACKEND, OPENSHELL_GATEWAY_LOCAL, CREDENTIAL_CUSTODY, NOT_YET_BLESSABLE } = await import("../src/backends.mjs");
-	assert.equal(OPENSHELL_BACKEND, "openshell");
-	const entry = BACKENDS[OPENSHELL_BACKEND];
-	assert.equal(entry.remote, false);
-	assert.equal(entry.credentialCustody, "layer");
-	// Pinned word by word, as podman's are: each rests on the #683 lab (OpenShell 0.1.4, Docker driver, Linux 6.17).
-	const want = { isolation: ASSERTED, ephemeral: ASSERTED, mountSet: ASSERTED, egress: ASSERTED, jobToJobIsolation: ASSERTED, imagePinning: ASSERTED, exitCodes: ASSERTED, abortable: ASSERTED, readOnlyJobInputs: ASSERTED, nonRoot: ASSERTED, secretsCustody: ASSERTED, credentialTransit: ENFORCED, localFolders: "absent", pausable: "absent" };
-	assert.deepEqual({ ...entry.declares }, want);
-	assert.deepEqual({ ...entry.observedBy }, { credentialTransit: OPENSHELL_GATEWAY_LOCAL });
-	assert.equal(effectiveWord(OPENSHELL_BACKEND, "credentialTransit", { [OPENSHELL_GATEWAY_LOCAL]: true }), ENFORCED);
-	assert.equal(effectiveWord(OPENSHELL_BACKEND, "credentialTransit", {}), ASSERTED);
-	// The closed choice of who holds the credentials: every entry names one of the two, and the floor never compares it.
+test("who holds the credentials stays a closed choice, and the floor never compares it (#684)", () => {
+	// The podman and openshell venues left with the sandbox prune; `local` is the only entry. The closed list and
+	// the floor's refusal of a custody word stay pinned: both are live code (`backendRefusals`'s layer rule reads
+	// custody by name, not by table), and a new entry must still name one of the two.
 	assert.deepEqual(CREDENTIAL_CUSTODY, ["container", "layer"]);
 	for (const name of BACKEND_NAMES) assert.ok(CREDENTIAL_CUSTODY.includes(BACKENDS[name].credentialCustody), name);
 	assert.equal(BACKENDS.local.credentialCustody, "container");
-	assert.equal(BACKENDS[PODMAN_BACKEND].credentialCustody, "container");
 	assert.throws(() => parseBackendFloor("credentialCustody=enforced"), /credentialCustody/, "not a property, so a floor cannot name it");
-	// Blessed by #684: the mechanism stays, empty, and the venue parses like any other.
-	assert.deepEqual({ ...NOT_YET_BLESSABLE }, {});
-	assert.ok(Object.isFrozen(NOT_YET_BLESSABLE));
-	for (const [raw, want] of [["openshell", ["openshell"]], ["local,openshell", ["local", "openshell"]], ["openshell,podman", ["openshell", "podman"]]]) assert.deepEqual(parseBackendList(raw), want, raw);
-	assert.equal(venuesOf({ PI_BACKENDS: "openshell" }).openshellUsed, true);
-	assert.equal(venuesOf({}).openshellUsed, false);
-});
-
-test("the openshell-bind venue (#686 part 3): openshell's words but mountSet, readOnlyJobInputs and localFolders by the driver's binds, each with its asserter", async () => {
-	const { OPENSHELL_BACKEND, OPENSHELL_BIND_BACKEND, OPENSHELL_BACKENDS, OPENSHELL_GATEWAY_LOCAL } = await import("../src/backends.mjs");
-	assert.equal(OPENSHELL_BIND_BACKEND, "openshell-bind");
-	assert.deepEqual(OPENSHELL_BACKENDS, ["openshell", "openshell-bind"]);
-	const entry = BACKENDS[OPENSHELL_BIND_BACKEND];
-	assert.equal(entry.remote, false);
-	assert.equal(entry.credentialCustody, "layer", "CONST-VENUE-EGRESS-LAYER unchanged: the same provider and policy");
-	// Pinned word by word, as the copy mode's are: the #686 lab (OpenShell 0.1.4, Docker driver, binds enabled).
-	const want = { isolation: ASSERTED, ephemeral: ASSERTED, mountSet: ASSERTED, egress: ASSERTED, jobToJobIsolation: ASSERTED, imagePinning: ASSERTED, exitCodes: ASSERTED, abortable: ASSERTED, readOnlyJobInputs: ASSERTED, nonRoot: ASSERTED, secretsCustody: ASSERTED, credentialTransit: ENFORCED, localFolders: ASSERTED, pausable: "absent" };
-	assert.deepEqual({ ...entry.declares }, want);
-	assert.deepEqual({ ...entry.observedBy }, { credentialTransit: OPENSHELL_GATEWAY_LOCAL });
-	// Every asserted word names its asserter, and the three words bind mode changes name the driver's binds.
-	for (const [word, level] of Object.entries(want)) if (level === ASSERTED) assert.equal(typeof entry.asserts[word], "string", word);
-	assert.match(entry.asserts.mountSet, /--driver-config-json/);
-	assert.match(entry.asserts.readOnlyJobInputs, /binds \/job read-only/);
-	assert.match(entry.asserts.localFolders, /read-write as \/workspace/);
-	// Every other word is the copy mode's own, so the two cannot drift apart where they agree.
-	for (const word of Object.keys(want).filter((w) => !["mountSet", "readOnlyJobInputs", "localFolders"].includes(w))) assert.equal(entry.declares[word], BACKENDS[OPENSHELL_BACKEND].declares[word], word);
-	assert.ok(Object.isFrozen(entry.declares) && Object.isFrozen(entry.asserts));
-	for (const [raw, wantList] of [["openshell-bind", ["openshell-bind"]], ["local,openshell-bind", ["local", "openshell-bind"]], ["openshell,openshell-bind", ["openshell", "openshell-bind"]]]) assert.deepEqual(parseBackendList(raw), wantList, raw);
-	assert.deepEqual(venuesOf({ PI_BACKENDS: "openshell-bind" }), { localUsed: false, podmanUsed: false, podmanDefault: false, openshellUsed: true, openshellCopyUsed: false, openshellBindUsed: true });
-	assert.deepEqual(venuesOf({ PI_BACKENDS: "local,openshell" }), { localUsed: true, podmanUsed: false, podmanDefault: false, openshellUsed: true, openshellCopyUsed: true, openshellBindUsed: false });
-	// A folder job is admitted (the loader's and the processor's refusals read `localFolders: absent` only).
-	const { refusesLocalWorkspace } = await import("../src/triggers.mjs");
-	assert.equal(refusesLocalWorkspace(entry, "/home/op/folder"), false);
-	assert.equal(refusesLocalWorkspace(BACKENDS[OPENSHELL_BACKEND], "/home/op/folder"), true);
-	// The layer rule applies by custody, not by name.
-	const [refusal] = backendRefusals({ backends: ["local", OPENSHELL_BIND_BACKEND], backendFloor: {}, egress: false });
-	assert.match(refusal, /^PI_EGRESS=0 cannot run openshell-bind: /);
-});
-
-test("a layer venue cannot run with PI_EGRESS=0 (#684): its policy is the egress control and holds the credentials", () => {
-	const [refusal] = backendRefusals({ backends: ["local", "openshell"], backendFloor: {}, egress: false });
-	assert.match(refusal, /^PI_EGRESS=0 cannot run openshell: .*CONST-VENUE-EGRESS-LAYER.*Arm PI_EGRESS, or remove that backend from PI_BACKENDS/);
-	assert.deepEqual(backendRefusals({ backends: ["local", "openshell"], backendFloor: {}, egress: true }), []);
-	// Only a layer venue: a container-custody set is untouched with egress off.
-	assert.deepEqual(backendRefusals({ backends: ["local", PODMAN_BACKEND], backendFloor: {}, egress: false }), []);
-});
-
-test("openshellSetupOf: one rule for the image's engine and Valkey's, which up, service install, init and doctor follow (#707)", () => {
-	const of = (list, env = {}) => openshellSetupOf(venuesOf({ PI_BACKENDS: list }), env);
-	assert.deepEqual(of("local"), { used: false, engine: null, gateway: null, imageEngine: null, valkeyEngine: null, engineError: null }, "not blessed: nothing, whatever .env says");
-	assert.deepEqual(of("openshell"), { used: true, engine: "docker", gateway: null, imageEngine: "docker", valkeyEngine: "docker", engineError: null }, "alone: docker by default, the image and Valkey on it");
-	assert.deepEqual(of("openshell-bind", { PI_OPENSHELL_ENGINE: "", PI_OPENSHELL_GATEWAY: "lab" }), { used: true, engine: "docker", gateway: "lab", imageEngine: "docker", valkeyEngine: "docker", engineError: null }, "empty is the default, as openshellFrom reads it");
-	assert.deepEqual(of("openshell", { PI_OPENSHELL_ENGINE: "podman" }), { used: true, engine: "podman", gateway: null, imageEngine: "podman", valkeyEngine: "podman", engineError: null });
-	// Beside a venue that already decides the queue, or already fills the same store.
-	assert.equal(of("local,openshell").imageEngine, null, "local already put the image into docker's store");
-	assert.equal(of("local,openshell").valkeyEngine, null, "local's Valkey is the queue");
-	assert.equal(of("local,openshell", { PI_OPENSHELL_ENGINE: "podman" }).imageEngine, "podman", "a different store gets its own");
-	assert.equal(of("podman,openshell", { PI_OPENSHELL_ENGINE: "podman" }).imageEngine, null);
-	assert.equal(of("podman,openshell").imageEngine, "docker");
-	assert.equal(of("podman,openshell").valkeyEngine, null, "the podman venue's Quadlet Valkey is the queue");
-	const bad = of("openshell", { PI_OPENSHELL_ENGINE: "lxc" });
-	assert.equal(bad.imageEngine, null);
-	assert.equal(bad.valkeyEngine, null);
-	assert.match(bad.engineError, /^PI_OPENSHELL_ENGINE must be docker or podman/);
+	// A container-custody set is untouched with egress off, and the layer refusal stays dead-but-coherent:
+	// no entry holds custody `layer` today, so `backendRefusals`'s #684 branch names no venue.
+	assert.deepEqual(backendRefusals({ backends: ["local"], backendFloor: {}, egress: false }), []);
 });

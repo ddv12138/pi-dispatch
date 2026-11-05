@@ -10,7 +10,7 @@ import { CONSOLE_PICKS } from "../../launch/console-picks.mjs";
 
 const REPO = fileURLToPath(new URL("../../", import.meta.url));
 const read = (path) => readFileSync(`${REPO}${path}`, "utf8");
-const READMES = Object.freeze(["README.md", "admin/README.md", "worker/README.md", "receiver/README.md", "gateway/README.md"]);
+const READMES = Object.freeze(["README.md", "admin/README.md", "worker/README.md", "receiver/README.md"]);
 const ROOT = read("README.md");
 /** Text with its fenced code blocks taken out, since a command or a diagram may spell a dash. */
 const prose = (text) => text.replace(/^```[\s\S]*?^```$/gm, "");

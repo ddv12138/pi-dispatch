@@ -37,7 +37,7 @@ import { detachBlockedSentence, makeDetachGate } from "./netns-keeper.mjs";
 
 /**
  * The namespace every live-probe object carries: every container name, the peer networks and the fixture directory. OUTSIDE the
- * boot reapers' `pi-job-` filter, the sandbox tooling's `pi-sandbox-` and the loopback `pi-dispatch-valkey`, so no
+ * boot reapers' `pi-job-` filter and the loopback `pi-dispatch-valkey`, so no
  * sweep of theirs can touch a probe and no probe name can be mistaken for one of theirs.
  */
 export const LIVE_PREFIX = "pi-dispatch-live-";

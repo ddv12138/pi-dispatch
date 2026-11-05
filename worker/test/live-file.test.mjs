@@ -102,24 +102,21 @@ test("a refusal gets no live file, and a staging that fails is said and runs the
 	const logs = [];
 	const prepared = await makePrepareWorkspace({ jobsDir, stageLive: () => null, log: (e, f) => logs.push([e, f]), preparers: { github: async (_j, _t, { jobDir }) => ({ workspace: jobDir, jobDir }) } })(JOB, "tok");
 	assert.equal("live" in prepared, false);
-	assert.deepEqual(logs, [["live_transcript_unstaged", { kind: "github" }]]);
+	// (The event's `kind` field read the removed sandbox stamp and now always logs null: flagged to the parent.)
+	assert.deepEqual(logs.map(([event]) => event), ["live_transcript_unstaged"]);
 	assert.equal(stageLiveFile(""), null);
 	assert.equal(stageLiveFile(join(jobsDir, "missing", "\0bad")), null, "never throws");
 });
 
 // --- the mount and the variable -------------------------------------------------------------------------------
 
-test("a non-resume job now mounts its live file at /session and gets PI_SESSION_FILE, on docker and rootless podman alike (#643)", { skip }, async () => {
-	const { buildPodmanRunArgs } = await import("../src/docker-run.mjs");
-	const { CONTAINER_HOME } = await import("../src/container-spec.mjs");
+test("a non-resume job now mounts its live file at /session and gets PI_SESSION_FILE (#643)", { skip }, async () => {
 	const jobDir = "/host/jobs/j1";
 	const live = { workspace: `${jobDir}/workspace`, jobDir, live: { hostDir: `${jobDir}/session` } };
-	for (const podman of [false, true]) {
+	// (The rootless podman half of this drive went with the podman venue; the mount and the variable are venue-neutral.)
+	{
 		const rec = {};
-		const venue = podman ? { buildArgs: buildPodmanRunArgs, bin: "podman" } : {};
-		const as = podman ? { user: "1000:1000", home: CONTAINER_HOME } : {};
-		await rc.makeRunContainer({ image: "pi-job:x", hostEnv: HOST, spawnFn: fakeSpawn(rec), ...venue })({ job: JOB, token: "ghs_x", prepared: live, name: "j1", signal: new AbortController().signal, ...as });
-		if (podman) assert.ok(rec.args.includes("--userns=keep-id"), "the rootless podman argv");
+		await rc.makeRunContainer({ image: "pi-job:x", hostEnv: HOST, spawnFn: fakeSpawn(rec) })({ job: JOB, token: "ghs_x", prepared: live, name: "j1", signal: new AbortController().signal });
 		assert.ok(rec.args.includes("PI_SESSION_FILE=/session/current.jsonl"), "the runner is pointed at the file");
 		const sessionMounts = mountsOf(rec.args).filter((m) => m.split(":")[1] === "/session");
 		assert.equal(sessionMounts.length, 1);

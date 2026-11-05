@@ -48,7 +48,6 @@ export async function triggerGolden({
               liveTranscript: "yes",
               steering: "yes",
               recovery: "yes",
-              sandboxShell: "yes",
             },
           },
         ],

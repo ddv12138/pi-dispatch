@@ -91,22 +91,12 @@ none in view.
 <dl class="facts"><div class="fact"><dt>run.flow</dt><dd>close; deployment default: not set</dd></div><div class="fact"><dt>run.backend</dt><dd>not set; deployment default: local</dd></div><div class="fact"><dt>run.provider</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.model</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.maxTurns</dt><dd>not set; deployment default: 30</dd></div><div class="fact"><dt>run.progress</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.statusComment</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.steer</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.recover</dt><dd>not set; deployment default: not set</dd></div></dl>
 <h3>By hand</h3>
 <dl class="facts"><div class="fact"><dt>run.maxTokens</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.models</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.mcp</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secrets</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secretBundle</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.resume</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.awaitInput</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.image</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.waitFor</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.replicas</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.packages</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.skillsDir</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.instructions</dt><dd>set (operator only); deployment default: not set</dd></div><div class="fact"><dt>run.task</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.kind</dt><dd>github; deployment default: not set</dd></div><div class="fact"><dt>run.folder</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.repository</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.command</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.portfolio</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.github</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.fallbackModels</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secretsProfile</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gates</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gateTimeout</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gateBudgetRaiseTokens</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.excludeTools</dt><dd>not set; deployment default: not set</dd></div></dl>
-<h3>Its runs&#39; sandbox</h3>
-<p>No live host blessing facts are available.</p>
-<p>These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend. Hosts missing its required secret or wait profile are excluded where their capability list is published.</p>
+<p>Hosts missing its required secret or wait profile are excluded where their capability list is published.</p>
 <p>
 <svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg>
-<a href="/fleet/venue?name=local"
->local</a
+<span class="code">local</span
 > (deployment default).
 </p>
-<dl class="facts"><div class="fact"><dt>liveTranscript</dt><dd>yes</dd></div><div class="fact"><dt>steering</dt><dd>yes</dd></div><div class="fact"><dt>recovery</dt><dd>yes</dd></div><div class="fact"><dt>sandboxShell</dt><dd>yes</dd></div></dl>
-<p>
-Reopen a retained workspace with pi-dispatch sandbox &lt;job id&gt;.
-Workspaces are kept for 24 hours; 0 keeps none.
-</p>
-<p><a class="link" href="/runs/sandboxes?index=0">Prepare a sandbox as this trigger</a></p>
-
 <p>
 A one-shot never races.
 Secret profile: none. Bundle:
@@ -139,7 +129,7 @@ spellcheck="false"
 <p class="field__err" data-field-error="flow" hidden></p>
 </div><div class="field">
 <label
->Venue (run.backend)<select
+>Backend (run.backend)<select
 class="select"
 name="backend"
 
@@ -154,7 +144,7 @@ Keep current (deployment default)
 value="local"
 
 >
-local: live transcript yes, steering yes, recovery yes, sandbox shell yes
+local: live transcript yes, steering yes, recovery yes
 </option>
 </select></label
 ><p class="field__hint">Blank keeps the current value not set; deployment default: local </p>

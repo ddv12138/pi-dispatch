@@ -17,6 +17,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { tempDir } from "./helpers/temp-dir.mjs";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const WORKER_DIR = join(REPO_ROOT, "worker");
@@ -36,19 +37,16 @@ const MIRRORED_DEPLOY = [
 	// mounts it, and the operator's own list lives in the deployment folder where `init` scaffolds it.
 	"egress-proxy.conf",
 	"nssm-install.cmd",
-	// The podman venue's stack as Quadlet units (issue #430): installed by `service install` and `up` from the SHIPPED
-	// copies, so an npm install needs them exactly as a checkout has them.
-	"pi-dispatch-egress-out.network",
-	"pi-dispatch-egress-proxy.container",
-	// The rootless network keeper (issue #458), installed with the proxy's units by the same installer.
-	"pi-dispatch-netns-keeper.container",
-	"pi-dispatch-netns-keeper.network",
-	"pi-dispatch-valkey.container",
-	"pi-dispatch-valkey.network",
+	// The podman venue's Quadlet units and the sandbox gateway's systemd unit left with the sandbox prune:
+	// the compose file and `up` are the only carriers of the stack this package ships.
 	"receiver.service",
-	"sandbox-gateway.service",
+	// The containerized worker and console images' build inputs (e9d67831): the compose file builds the
+	// worker from the Dockerfile it sits beside, so an npm install needs both exactly as a checkout has
+	// them. They render nothing; they ship because the compose file names them.
 	"worker-env-wrapper.cmd",
 	"worker-env-wrapper.sh",
+	"worker.Dockerfile",
+	"worker.Dockerfile.dockerignore",
 	"worker.service",
 ];
 
@@ -156,17 +154,18 @@ test("receiver's caret worker range actually SATISFIES the in-repo worker versio
 	}
 });
 
-test("every worker subpath the receiver, console and gateway import EXISTS in the worker's exports map", () => {
+test("every worker subpath the receiver and console import EXISTS in the worker's exports map", () => {
 	// The workspaces are symlinked, so in this repo a subpath import resolves against the on-disk worker
 	// and a missing exports entry can never fail a test here: it fails on the first REAL npm install of a
 	// published receiver, at module load, on the operator's machine. The map is hand-kept and the imports
 	// are scattered, which is the shape the derived-or-pinned rule exists for. The version FLOOR half of
 	// the same hazard (a range admitting a published worker too old to carry the subpath) is undecidable
-	// offline and stays a release-PR obligation, stated where the range moves.
+	// offline and stays a release-PR obligation, stated where the range moves. gateway/src left with the
+	// sandbox prune.
 	const exportsMap = JSON.parse(readFileSync(join(WORKER_DIR, "package.json"), "utf8")).exports;
 	const importRe = /@edgehero\/pi-dispatch\/([A-Za-z0-9-]+)/g;
 	const used = new Map(); // subpath -> first file seen importing it
-	for (const dir of [join(RECEIVER_DIR, "src"), join(REPO_ROOT, "admin", "src"), join(REPO_ROOT, "gateway", "src")]) {
+	for (const dir of [join(RECEIVER_DIR, "src"), join(REPO_ROOT, "admin", "src")]) {
 		// Recursive, so the scan keeps protecting the day either src/ grows a subdirectory.
 		for (const name of readdirSync(dir, { recursive: true })) {
 			if (!/\.(mjs|ts)$/.test(name)) continue;
@@ -186,8 +185,11 @@ test("every worker subpath the receiver, console and gateway import EXISTS in th
 
 /** The pack report for the package at cwd. --dry-run --json is offline: no tarball, no registry. */
 function npmPack(cwd) {
+	// A cache under this workspace: a host whose ~/.npm is not writable to this process (a sandboxed run) would
+	// otherwise fail the pack itself, which is not what the tarball list below is about. tempDir cleans it up.
+	const cache = tempDir("npm-cache-");
 	return new Promise((resolvePromise, reject) => {
-		const child = spawn("npm", ["pack", "--dry-run", "--json"], { cwd, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn("npm", ["pack", "--dry-run", "--json"], { cwd, env: { ...process.env, npm_config_cache: cache }, stdio: ["ignore", "pipe", "pipe"] });
 		let out = "";
 		let errOut = "";
 		child.stdout.on("data", (d) => (out += d));
@@ -232,7 +234,7 @@ test("npm pack (receiver): ships src (cli.mjs included) — and never test/", PA
 
 test("drift: the old @pi-dispatch/worker specifier appears nowhere in receiver/src or admin/src", () => {
 	const offenders = [];
-	for (const dir of [join(RECEIVER_DIR, "src"), join(REPO_ROOT, "admin", "src"), join(REPO_ROOT, "gateway", "src")]) {
+	for (const dir of [join(RECEIVER_DIR, "src"), join(REPO_ROOT, "admin", "src")]) {
 		for (const rel of readdirSync(dir, { recursive: true })) {
 			if (!/\.(mjs|ts)$/.test(rel)) continue;
 			if (readFileSync(join(dir, rel), "utf8").includes("@pi-dispatch/worker")) offenders.push(join(dir, rel));

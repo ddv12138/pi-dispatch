@@ -13,7 +13,7 @@ function fakeFs(files) {
 	};
 }
 
-// What a job saw on every venue of the issue #596 lab (Docker Desktop, rootful Docker 29, rootless Podman 4.9 and 5.8):
+// What a job saw on every venue of the issue #596 lab (Docker Desktop, rootful Docker 29):
 // a private cgroup namespace, the container's own cgroup at the mount's root.
 const V2 = {
 	"/proc/self/cgroup": "0::/\n",
@@ -32,8 +32,8 @@ test("reads every key off a cgroup v2 job, in RESOURCE_KEYS order", () => {
 	assert.deepEqual(r, { memPeak: 602259456, swapPeak: 1048576, oomKills: 1, memSomeUsec: 1234, memFullUsec: 567, cpuUsec: 50062, throttledUsec: 900, throttled: 2, pidsPeak: 6 });
 });
 
-test("only oom_kill is read from memory.events: under crun the job's leaf shows oom 0 and max 0 beside a real kill", () => {
-	// Measured on rootless Podman 4.9 and 5.8 (issue #596 lab): the limit sits on the parent scope, so the OOM is counted
+test("only oom_kill is read from memory.events: a leaf that shows oom 0 and max 0 beside a real kill still reports the kill", () => {
+	// Measured (issue #596 lab): on a runtime that counts the limit on a parent scope, the OOM is counted
 	// there, and only the kill is charged to the leaf the job sees.
 	const r = readCgroupUsage({ fs: fakeFs({ ...V2, [`${CGROUP_ROOT}/memory.events`]: "low 0\nhigh 0\nmax 0\noom 0\noom_kill 1\noom_group_kill 0\n" }) });
 	assert.equal(r.oomKills, 1);

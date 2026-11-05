@@ -2,7 +2,7 @@ import { AbstractConnector, Command, Redis } from "ioredis";
 import { Socket, connect as netConnect } from "node:net";
 import { connect as tlsConnect } from "node:tls";
 import { valkeyAuthRefusal } from "./valkey-auth.mjs";
-import { valkeySchemeOf } from "./podman-stack.mjs";
+import { valkeySchemeOf } from "./stack.mjs";
 import { decodedUserinfo, judgeValkeyAtStart as judgeEndpointAtStart, judgedEndpoint, killSwitchValkeyUrls, defaultValkeyContext, urlShown, useValkeyContext, valkeyClientContext, valkeyContextFromKeys, VALKEY_CONTEXT_KEYS, valkeyPasswordFor, valkeyDbRangeSentence, valkeyRefusal, valkeyUrlFor, valkeyUrlProblem } from "./valkey-endpoint.mjs";
 
 // Re-exported for the receiver and the admin, which import this module from the package (issues #464 and #468).

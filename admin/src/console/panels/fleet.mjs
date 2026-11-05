@@ -4,7 +4,7 @@ import {
   DEFER_BUCKET_WORDS,
   DEFER_WHYS,
 } from "@edgehero/pi-dispatch/defer-reasons";
-import { GATEWAY_TEXT, venuesView } from "../../read-model.mjs";
+import { venuesView } from "../../read-model.mjs";
 import { VENUE_LABEL, reasonWords } from "../../words.mjs";
 import {
   DOCTOR_CHECKS_SHOWN,
@@ -39,7 +39,6 @@ const t = (view, message) => uiText(message, view.locale);
 
 const list = (x) => (Array.isArray(x) ? x : []);
 const hostHref = (name) => `/fleet/host?${new URLSearchParams({ name })}`;
-const venueHref = (name) => `/fleet/venue?${new URLSearchParams({ name })}`;
 const linkHost = (name) =>
   name ? html`<a href="${hostHref(name)}">${name}</a>` : "host not published";
 const project = (p, view) => (p ? ui.ptag(p) : t(view, "No project recorded"));
@@ -236,7 +235,7 @@ export const fleetActive = wrap(
               ui.btn({
                 kind: ["danger", "sm"],
                 label: "Free the slot",
-                href: `${hostHref(j.host.name)}#p-hostsandboxes`,
+                href: `${hostHref(j.host.name)}#p-hostbudget`,
               }),
             ]
           : []),
@@ -442,12 +441,16 @@ export const fleetDoctor = wrap(
       const hidden =
         Math.max(0, problems.length - DOCTOR_CHECKS_SHOWN) +
         Number(r.more ?? 0);
-      return html`<div class="fl-doc"><div class="fl-doc__h"><b>${linkHost(r.name)}</b>${r.unreadable ? html`<span class="faint">${t(v, "Result unreadable")}</span>` : doctorCounts(r, v)}</div>${r.unreadable ? html`<p class="muted fl-doc__p">${t(v, "Its published result cannot be read (a worker of another version may have written it).")}</p>` : html`<p class="muted fl-doc__p">${t(v, "Doctor ran")} ${ageText(r.ageMs)} ${t(v, "ago, from")}, ${t(v, doctorByText(r))}: ${t(v, doctorCountsText(r))}. ${t(v, "Worker")} ${r.version ?? t(v, "version not published")}. ${r.openshell ? t(v, "The openshell venue was judged.") : null}</p>${doctorStale(r) ? ui.banner({ status: "attention", title: `${t(v, "Stale: this result is")} ${ageText(r.ageMs)} ${t(v, "old")}`, body: html`${t(v, "Older than two of this host's doctor runs (every")} ${r.every}h), ${t(v, "so it may no longer describe the host.")} ${t(v, "Version")} ${r.version ?? t(v, "not published")}, ${t(v, doctorByText(r))}.`, sm: true, icon: "clock" }) : null}${r.workerRun && !r.by?.worker ? html`<p class="muted fl-doc__p">${t(v, "It replaced the worker's own run")}${r.workerRun.uid !== undefined ? ` (uid ${r.workerRun.uid})` : ""}${t(v, ", so it shows another account's view of the host.")}</p>` : null}${problems.length ? html`<ul class="fl-chks">${problems.slice(0, DOCTOR_CHECKS_SHOWN).map((c) => html`<li class="fl-chk">${ui.chip(t(v, c.level === "fail" ? "Failing" : "Warning"), { status: c.level === "fail" ? "failed" : "attention", icon: c.level === "fail" ? "failed" : "attention" })}<span class="code">${c.id}</span><span class="fl-chk__said">${c.label}</span>${c.fix ? html`<span class="fl-chk__fix"><b>${t(v, "Fix:")}</b> ${c.fix}</span>` : null}</li>`)}</ul>` : html`<p class="muted fl-doc__p">${t(v, "Every check passed.")}</p>`}${hidden ? html`<p class="muted fl-doc__p">${hidden} ${t(v, "more not shown here; doctor on that host prints them all.")}</p>` : null}`}${v.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: r.name }) : html`<p class="muted fl-doc__p">${t(v, "Run doctor on this host to inspect these checks.")}</p>`}</div>`;
+      return html`<div class="fl-doc"><div class="fl-doc__h"><b>${linkHost(r.name)}</b>${r.unreadable ? html`<span class="faint">${t(v, "Result unreadable")}</span>` : doctorCounts(r, v)}</div>${r.unreadable ? html`<p class="muted fl-doc__p">${t(v, "Its published result cannot be read (a worker of another version may have written it).")}</p>` : html`<p class="muted fl-doc__p">${t(v, "Doctor ran")} ${ageText(r.ageMs)} ${t(v, "ago, from")}, ${t(v, doctorByText(r))}: ${t(v, doctorCountsText(r))}. ${t(v, "Worker")} ${r.version ?? t(v, "version not published")}.</p>${doctorStale(r) ? ui.banner({ status: "attention", title: `${t(v, "Stale: this result is")} ${ageText(r.ageMs)} ${t(v, "old")}`, body: html`${t(v, "Older than two of this host's doctor runs (every")} ${r.every}h), ${t(v, "so it may no longer describe the host.")} ${t(v, "Version")} ${r.version ?? t(v, "not published")}, ${t(v, doctorByText(r))}.`, sm: true, icon: "clock" }) : null}${r.workerRun && !r.by?.worker ? html`<p class="muted fl-doc__p">${t(v, "It replaced the worker's own run")}${r.workerRun.uid !== undefined ? ` (uid ${r.workerRun.uid})` : ""}${t(v, ", so it shows another account's view of the host.")}</p>` : null}${problems.length ? html`<ul class="fl-chks">${problems.slice(0, DOCTOR_CHECKS_SHOWN).map((c) => html`<li class="fl-chk">${ui.chip(t(v, c.level === "fail" ? "Failing" : "Warning"), { status: c.level === "fail" ? "failed" : "attention", icon: c.level === "fail" ? "failed" : "attention" })}<span class="code">${c.id}</span><span class="fl-chk__said">${c.label}</span>${c.fix ? html`<span class="fl-chk__fix"><b>${t(v, "Fix:")}</b> ${c.fix}</span>` : null}</li>`)}</ul>` : html`<p class="muted fl-doc__p">${t(v, "Every check passed.")}</p>`}${hidden ? html`<p class="muted fl-doc__p">${hidden} ${t(v, "more not shown here; doctor on that host prints them all.")}</p>` : null}`}${v.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: r.name }) : html`<p class="muted fl-doc__p">${t(v, "Run doctor on this host to inspect these checks.")}</p>`}</div>`;
     })}${silent.map((h) => html`<div class="fl-doc"><div class="fl-doc__h"><b>${linkHost(h.name)}</b><span class="faint">${t(v, "No doctor result published")}</span></div><p class="muted fl-doc__p">${t(v, "Run doctor on")} ${h.name} ${t(v, "so this page can describe it.")}</p>${v.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: h.name }) : null}</div>`)}${silent.length ? html`<p class="note">${t(v, "No doctor result published by:")} ${silent.map((h) => h.name).join(", ")}.</p>` : null}${!rows.length ? html`<p class="note">${t(v, "No host has published doctor results yet. Each worker runs doctor a minute after it starts and then every PI_DOCTOR_INTERVAL_HOURS (24 by default).")}</p>` : null}${s.doctor.more ? html`<p>${s.doctor.more} ${t(v, "more hosts published results; not every one is read.")}</p>` : null}`;
   },
   { sub: (s, v) => t(v, "each host's latest health check") },
 );
 
+// The venue table of the fleet redesign, restored on the tree the retirement left. The worker's table holds one
+// venue (local), so the row is what that venue declares and serves, and the footer keeps the floor and the word
+// legend. The venue detail page and the OpenShell gateway note went with the sandbox venues: names render plain,
+// and the "Sandbox shell" serve is not a column (the worker's SERVES set no longer carries it).
 const declarationChip = (p, v) =>
   html`<span class="vw vw--${p.word}">${ui.chip(t(v, p.word), { status: p.word === "enforced" ? "ok" : null, icon: p.word === "enforced" ? "shield" : p.word === "asserted" ? "done" : "minus" })}</span>`;
 const servesChip = (feature, v) =>
@@ -459,22 +462,20 @@ export const fleetVenues = wrap(
     const property = (venue, key) =>
       venue.properties.find((p) => p.property === key);
     const feature = (venue, key) => venue.serves.find((s) => s.key === key);
-    return html`${ui.tbl({ label: t(v, "Venue properties and what each venue serves"), heads: [VENUE_LABEL, "Blessed on", "Default on", "Egress", "Local folders", "Steering", "Live transcript", "Recovery", "Sandbox shell", "Credentials held by"].map((label) => t(v, label)), rows: m.venues.map((x) => [html`<b>${runVenueLink(x.name)}</b><span class="reason">${t(v, x.describe)}</span>`, x.blessedOn.join(", ") || t(v, "no live host"), x.defaultOn.join(", ") || t(v, "no live host"), declarationChip(property(x, "egress"), v), declarationChip(property(x, "localFolders"), v), servesChip(feature(x, "steering"), v), servesChip(feature(x, "liveTranscript"), v), servesChip(feature(x, "recovery"), v), servesChip(feature(x, "sandboxShell"), v), t(v, x.custody === "layer" ? "the venue's egress layer" : "the container")]), empty: t(v, "No venue in this build.") })}<div class="fl-vfoot"><span>${ui.icon("shield", { size: "sm" })}${t(v, "Enforced: the worker builds and verifies the boundary.")}</span><span>${t(v, "Asserted: relies on a named assertion.")}</span><span>${t(v, "Absent: promises nothing.")}</span>${m.floors.map(
+    return html`${ui.tbl({ label: t(v, "Venue properties and what each venue serves"), heads: [VENUE_LABEL, "Blessed on", "Default on", "Egress", "Local folders", "Steering", "Live transcript", "Recovery", "Credentials held by"].map((label) => t(v, label)), rows: m.venues.map((x) => [html`<b>${x.name}</b><span class="reason">${t(v, x.describe)}</span>`, x.blessedOn.join(", ") || t(v, "no live host"), x.defaultOn.join(", ") || t(v, "no live host"), declarationChip(property(x, "egress"), v), declarationChip(property(x, "localFolders"), v), servesChip(feature(x, "steering"), v), servesChip(feature(x, "liveTranscript"), v), servesChip(feature(x, "recovery"), v), t(v, x.custody === "layer" ? "the venue's egress layer" : "the container")]), empty: t(v, "No venue in this build.") })}<div class="fl-vfoot"><span>${ui.icon("shield", { size: "sm" })}${t(v, "Enforced: the worker builds and verifies the boundary.")}</span><span>${t(v, "Asserted: relies on a named assertion.")}</span><span>${t(v, "Absent: promises nothing.")}</span>${m.floors.map(
       (f) =>
         html`<span class="fl-floor">${t(v, "Floor on")} ${f.host}: <span class="code">${Object.entries(
           f.floor,
         )
           .map(([key, word]) => `${key}=${word}`)
           .join(", ")}</span></span>`,
-    )}<a class="link" href="${venueHref("local")}#p-venue-compare">${t(v, "All 14 properties")}</a></div>${m.unpublished.length ? html`<p class="note">${t(v, "Not published by")} ${m.unpublished.join(", ")}.</p>` : null}<details class="pp-pad"><summary>${t(v, "OpenShell setup published by the hosts")}</summary>${m.venues.flatMap((x) => list(x.openshell).map((o) => html`<p class="note">${x.name} ${t(v, "on")} ${o.host}: ${o.unpublished ? t(v, "not published") : t(v, GATEWAY_TEXT[o.gateway] ?? GATEWAY_TEXT.unknown)}.</p>`))}</details>`;
+    )}</div>${m.unpublished.length ? html`<p class="note">${t(v, "Not published by")} ${m.unpublished.join(", ")}.</p>` : null}`;
   },
   {
     flush: true,
     sub: (s, v) => t(v, "published by each host's worker when it started; nothing here is read live"),
   },
 );
-const runVenueLink = (name) =>
-  html`<a class="code" href="${venueHref(name)}">${name}</a>`;
 
 export const fleetSchedulers = wrap(
   "Schedules",

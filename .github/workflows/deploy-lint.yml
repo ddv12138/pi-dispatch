@@ -5,15 +5,12 @@
 # plist ships silently and only fails on the operator's box. This workflow is the cheap gate: it checks
 # STRUCTURE, not runtime behaviour.
 #
-#   - worker.service / receiver.service / console.service / sandbox-gateway.service : `systemd-analyze verify` parses the units. The PLACEHOLDER
+#   - worker.service / receiver.service / console.service : `systemd-analyze verify` parses the units. The PLACEHOLDER
 #     paths (/opt/pi-dispatch, /usr/bin/node) do not exist on the runner, so path-existence warnings are
 #     EXPECTED and ignored; only genuine syntax errors (unknown directives, parse failures) fail.
 #   - com.pi-dispatch.worker.plist : `xmllint --noout` proves the plist is well-formed XML. plutil is
 #     macOS-only, so xmllint (libxml2-utils) is the Linux stand-in for well-formedness.
 #   - worker-env-wrapper.sh : `sh -n` is a POSIX shell parse check (no execution).
-#   - the Quadlet templates (pi-dispatch-*.container / .network, issue #430) : rendered by the real planner, then
-#     Podman 4.9's own generator in `-dryrun` mode (the `quadlet` job below). The planner is in the path filter for
-#     that reason: it is half of what the generator is fed.
 #
 # The `.cmd` wrappers (worker-env-wrapper.cmd, nssm-install.cmd) have no practical Linux linter and are
 # not checked here -- deliberately, rather than with a flaky approximation.
@@ -29,13 +26,11 @@ on:
     branches: [main]
     paths:
       - "deploy/**"
-      - "worker/src/podman-stack.mjs"
       - "worker/src/service.mjs"
       - ".github/workflows/deploy-lint.yml"
   pull_request:
     paths:
       - "deploy/**"
-      - "worker/src/podman-stack.mjs"
       - "worker/src/service.mjs"
       - ".github/workflows/deploy-lint.yml"
   workflow_dispatch:
@@ -61,7 +56,7 @@ jobs:
           # verify exits non-zero for the missing PLACEHOLDER exec paths, which is expected -- so gate on
           # the CONTENT of the diagnostics, not the exit code. A real defect is an unknown directive or a
           # parse failure; a missing /opt/pi-dispatch or /usr/bin/node is not.
-          systemd-analyze verify --no-pager deploy/worker.service deploy/receiver.service deploy/console.service deploy/sandbox-gateway.service > verify.log 2>&1 || true
+          systemd-analyze verify --no-pager deploy/worker.service deploy/receiver.service deploy/console.service > verify.log 2>&1 || true
           cat verify.log
           if grep -Eiq 'Unknown (key name|lvalue|section)|Failed to parse|Invalid setting|not a valid|expected ' verify.log; then
             echo "::error::systemd-analyze found a syntax error in a unit file. See the log above."
@@ -69,32 +64,13 @@ jobs:
           fi
           echo "OK: unit files are syntactically valid (path-existence warnings ignored)"
 
-      # Issue #707: the templates above, and one unit as `service install` RENDERS it for an openshell deployment (the
-      # gateway's Wants=/After= lines inserted at the template's anchor), since the rewrite is what the templates alone
-      # cannot show. The docker engine's render: a Podman one appends the Quadlet files after the unit.
+      # node and the workspace deps the render steps below need: `service render` resolves the worker's own
+      # modules (BullMQ and friends), and the console render builds admin/dist first (esbuild).
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
 
       - run: npm ci --no-audit --no-fund
-
-      - name: a rendered openshell worker unit parses (issue #707)
-        run: |
-          d="$RUNNER_TEMP/render-707"
-          mkdir -p "$d"
-          printf 'PI_BACKENDS=openshell\n' > "$d/.env"
-          (cd "$d" && node "$GITHUB_WORKSPACE/worker/src/cli.mjs" service render) > "$d/pi-dispatch-worker.service"
-          cat "$d/pi-dispatch-worker.service"
-          # Wants= and never After=: the deb's gateway unit is After=default.target, so an After= here is an ordering cycle (#707).
-          grep -qx 'Wants=openshell-gateway.service' "$d/pi-dispatch-worker.service" || { echo "::error::the rendered unit does not want openshell-gateway.service"; exit 1; }
-          if grep -q '^After=.*openshell-gateway' "$d/pi-dispatch-worker.service"; then echo "::error::the rendered unit is ordered after openshell-gateway.service, which cycles with its default.target ordering"; exit 1; fi
-          systemd-analyze verify --no-pager "$d/pi-dispatch-worker.service" > verify-707.log 2>&1 || true
-          cat verify-707.log
-          if grep -Eiq 'Unknown (key name|lvalue|section)|Failed to parse|Invalid setting|not a valid|expected ' verify-707.log; then
-            echo "::error::systemd-analyze found a syntax error in the rendered openshell unit. See the log above."
-            exit 1
-          fi
-          echo "OK: the rendered openshell unit is syntactically valid"
 
       # Issue #708: the console's unit as `service install --console` renders it: the whole ExecStart replaced by the
       # console package's entry with `serve --deployment`, which the template alone cannot show. The admin package is
@@ -135,82 +111,3 @@ jobs:
           sh -n deploy/worker-env-wrapper.sh \
             || { echo "::error::deploy/worker-env-wrapper.sh has a shell syntax error."; exit 1; }
           echo "OK: worker-env-wrapper.sh parses"
-
-  quadlet:
-    # The podman venue's Quadlet templates (issue #430), put through Podman's own generator in dry-run mode, rendered
-    # first by the real planner (worker/src/podman-stack.mjs) so what is checked is what `service install` writes.
-    # ubuntu-24.04 PINNED, not -latest: it ships Podman 4.9.3, the oldest Podman the templates claim to support, with
-    # the generator at /usr/libexec/podman/quadlet. A key 4.9 does not know is exactly the defect this exists to catch.
-    name: deploy/ Quadlet templates generate on Podman 4.9
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: ".nvmrc"
-
-      - name: Install podman (for its quadlet generator; nothing is run)
-        run: sudo apt-get update && sudo apt-get install -y podman && podman --version
-
-      - name: Render the templates and dry-run the generator
-        run: |
-          set -eu
-          units="$RUNNER_TEMP/quadlet"
-          mkdir -p "$units"
-          # A deployment folder the planner accepts, with the allowlist and the model endpoints' include the proxy mounts.
-          deploy="$RUNNER_TEMP/deploy"
-          mkdir -p "$deploy" && : > "$deploy/egress-allowlist.conf" && : > "$deploy/model-endpoints.conf"
-          node --input-type=module -e "
-            import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-            import { basename, join, resolve } from 'node:path';
-            import { planStack } from './worker/src/podman-stack.mjs';
-            const plan = planStack({ components: { valkey: true, proxy: true, keeper: true }, templatesDir: resolve('worker/deploy'), deployDir: process.argv[1], home: '/nonexistent', fs: { readFileSync, existsSync } });
-            if (plan.error) { console.error(plan.error); process.exit(1); }
-            for (const f of plan.files) writeFileSync(join(process.argv[2], basename(f.path)), f.text);
-          " "$deploy" "$units"
-          ls -l "$units"
-          QUADLET_UNIT_DIRS="$units" /usr/libexec/podman/quadlet -dryrun -user > generated.txt 2> quadlet.log || { cat quadlet.log; echo "::error::quadlet refused a template"; exit 1; }
-          cat quadlet.log generated.txt
-          if grep -Eiq 'unsupported|error|invalid' quadlet.log; then
-            echo "::error::quadlet reported a problem with a template. See the log above."
-            exit 1
-          fi
-          # What the worker relies on by name, read off the generated units rather than the templates. Extended
-          # regexes, because the two generators spell an option differently: Podman 4.9.3 writes `--name=X` and
-          # `--network=X` (run 36275999554), 5.8.1 writes `--name X` (the M0-b measurement). Either is one argv word
-          # pair to podman, so both are accepted and nothing else is.
-          for needle in \
-            'ExecStart=/usr/bin/podman network create --ignore pi-dispatch-valkey$' \
-            'ExecStart=/usr/bin/podman network create --ignore pi-dispatch-egress-out$' \
-            'ExecStart=/usr/bin/podman network create --ignore --disable-dns --internal pi-dispatch-netns-keeper$' \
-            '--name[= ]pi-dispatch-valkey ' \
-            '--name[= ]pi-dispatch-egress-proxy ' \
-            '--network[= ]pi-dispatch-valkey ' \
-            '--network[= ]pi-dispatch-egress-out ' \
-            '--publish[= ]127\.0\.0\.1:6379:6379 ' \
-            '--health-cmd[= ]"\[\\"bash\\",'; do
-            grep -qE -- "$needle" generated.txt || { echo "::error::generated units lack: $needle"; exit 1; }
-          done
-          # The keeper's own flags (issue #458), read off ITS ExecStart line alone: `--read-only` or `--cap-drop` anywhere
-          # else in the generated units would otherwise satisfy a needle the keeper itself had lost.
-          keeper="$(grep -E '^ExecStart=/usr/bin/podman run .*--name[= ]pi-dispatch-netns-keeper ' generated.txt)"
-          test "$(printf '%s\n' "$keeper" | wc -l)" -eq 1 || { echo "::error::expected exactly one keeper ExecStart"; exit 1; }
-          for needle in \
-            ' --network[= ]pi-dispatch-netns-keeper ' \
-            ' --init ' \
-            ' --cap-drop[= ]all ' \
-            ' --read-only ' \
-            ' --user[= ]65534:65534 ' \
-            ' --security-opt[= ]no-new-privileges ' \
-            ' --entrypoint[= ]sleep --image-volume[= ]ignore docker\.io/ubuntu/squid@sha256:[0-9a-f]{64} infinity$'; do
-            printf '%s\n' "$keeper" | grep -qE -- "$needle" || { echo "::error::the keeper's ExecStart lacks: $needle"; exit 1; }
-          done
-          # And its unit-level restart policy, passed through by the generator: no start limit, a one-second retry.
-          for needle in '^StartLimitIntervalSec=0$' '^RestartSec=1s$' '^Restart=always$'; do
-            grep -qE -- "$needle" generated.txt || { echo "::error::the keeper's unit lacks: $needle"; exit 1; }
-          done
-          for banned in ' --publish' ' -p ' ' --volume' ' -v ' ' --cap-add' ' --privileged' ' --mount'; do
-            if printf '%s\n' "$keeper" | grep -qF -- "$banned"; then echo "::error::the keeper's ExecStart carries $banned"; exit 1; fi
-          done
-          echo "OK: every Quadlet template generates on $(podman --version)"

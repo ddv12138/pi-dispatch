@@ -55,12 +55,12 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { homedir, networkInterfaces, release as osRelease, tmpdir, userInfo } from "node:os";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import * as nodeFs from "node:fs";
-import { NETNS_KEEPER, NETNS_KEEPER_FORMAT, NETNS_KEEPER_START, STACK_KEYS, STARTED_AT_FORMAT, VALKEY_SHARED_KEY, judgeNetnsKeeper, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, podmanNeedsNetnsKeeper, probeTcpAddress, proxyConfCopyPath, readSubuidRanges, proxyRestartAdvice, readLinger, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./podman-stack.mjs";
+import { NETNS_KEEPER, NETNS_KEEPER_START, STACK_KEYS, VALKEY_SHARED_KEY, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, probeTcpAddress, proxyRestartAdvice, readLinger, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./stack.mjs";
 import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSandboxDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, sandboxDirOwnerFix, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, envelopeFilePath, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
+import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, envelopeFilePath, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue, envFileWrapperInternal, wrapperInternalSentence } from "./env-file.mjs";
 import { canonicalScope, danglingProjectRows, tokenRowsBelowJobCap, tokenRowsWithoutCap, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
 import { EMPTY_PROJECTS_FINGERPRINT, escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
@@ -89,17 +89,15 @@ import { readDeploymentEnv, resolveServiceEnv, serviceEnvFileOf, serviceEnvLoade
 import { imageRefProblem, jobImageFix, pullOffered } from "./image-ref.mjs";
 import { PROXY_STATE_FORMAT, parseProxyState, rulesIncludeEndpoints, shippedProxyDrift } from "./egress-proxy-state.mjs";
 import { PACKAGED_EGRESS_PROXY_CONF, PACKAGE_VERSION, judgeProxyConfCopy, packageCopyName, readPackagedProxyConf } from "./egress-conf-copy.mjs";
-import { ABSENT, ASSERTED, BACKENDS, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, OBSERVATION_FIX, OBSERVATIONS, PODMAN_ADDS_NO_MOUNTS, PODMAN_BACKEND, PODMAN_BOUNDS_DELEGATED, PODMAN_ROOTFUL_WIDENING_KEYS, PODMAN_SERVICE_LOCAL, PROPERTY_NAMES, RUNTIME_ADDS_NO_MOUNTS, HOST_ROUTE_LAN, HOST_ROUTE_REFUTED, HOST_ROUTE_WORKS, backendRefusals, declarationOf, floorShortfall, hostRouteFor, isProxyLocalHost, openshellSetupOf, parseBackendFloor, parseBackendList, unarmedFloor, unobservedFloor, venuesOf } from "./backends.mjs";
-import { PODMAN_BOOT_REFUSING_CAUSES, PODMAN_FIRST_START_TIMEOUT_MS, PODMAN_INFO_TIMEOUT_MS, PODMAN_JOB_USER_FIX, decidePodmanJobUser, makePodmanInfoReader, podmanPausable, observePodman, observeRootlessNetns, podmanConfFix, podmanConfWidening, resolvePodmanImageUser } from "./backend-podman.mjs";
-import { PODMAN_PINNED_FLAGS, buildDockerRunArgs, buildPodmanRunArgs, containerSpec, podmanArgsFromSpec } from "./docker-run.mjs";
-import { PODMAN_SERVICE_TIMEOUT_MS, PODMAN_SERVICE_UNIT, makePodmanServiceReader, observeHost, observeRootfulConf, readRootfulService, rootfulConfFix, rootfulConfRetries, rootfulConfResidual, rootfulUnreadList } from "./runtime-observations.mjs";
+import { ABSENT, ASSERTED, BACKENDS, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOCAL, OBSERVATION_FIX, OBSERVATIONS, PROPERTY_NAMES, RUNTIME_ADDS_NO_MOUNTS, HOST_ROUTE_LAN, HOST_ROUTE_REFUTED, HOST_ROUTE_WORKS, backendRefusals, declarationOf, floorShortfall, hostRouteFor, isProxyLocalHost, parseBackendFloor, parseBackendList, unarmedFloor, unobservedFloor, venuesOf } from "./backends.mjs";
+import { buildDockerRunArgs, containerSpec } from "./docker-run.mjs";
+import { observeHost } from "./runtime-observations.mjs";
 import { JOB_NAME_PREFIX, endpointShown, makeDockerEndpointResolver, quotedShown } from "./backend-local.mjs";
 import { DEFAULT_EGRESS_PROXY, STOPPED_PROXY_STATES, EGRESS_CANARY_NET_PREFIX, EGRESS_CANARY_PROBE_PREFIX, EGRESS_ENDPOINT_PROBE_PREFIX, egressArmed, egressCanaryNetwork, egressCanaryProbe, egressEndpointProbe, egressEnv, egressProxyName, egressProxyUrl, networkEndpoints, removeNetworkOrSay } from "./egress.mjs";
 import { detachBlockedSentence, makeDetachGate, runtimeFromFacts } from "./netns-keeper.mjs";
 import { runLiveProbes } from "./live-probes.mjs";
 import { COMPOSE_VALKEY_OVERRIDE, VALKEY_PASSWORD_KEY, VALKEY_PASSWORD_HOWTO, VALKEY_PORT_KEY, isLoopbackHost, valkeyContainerOwner, valkeyPasswordProblem, valkeyPortConflict } from "./valkey-auth.mjs";
 import { urlShown, valkeyContextFromResolution, valkeyPasswordFor, valkeyUrlProblem } from "./valkey-endpoint.mjs";
-import { SANDBOX_TOMBSTONE_STUCK_MS, isSandboxTombstone, sandboxTombstoneAge } from "./sandbox-store.mjs";
 import { installedConsoleUnitPath, installedUnitPaths, readUnitSeam, readUnitUser } from "./service.mjs";
 import { CONTAINER_HOME, SHIPPED_IMAGE_UID, SIZE_LABEL_CPU, SIZE_LABEL_MEM } from "./container-spec.mjs";
 import { DEFAULT_JOB_SIZE, codemodeWorkersOf, cpuCeilingCenti, formatCpus, formatMemory, jobSizeDefaults, resolveJobSize } from "./job-size.mjs";
@@ -108,7 +106,7 @@ import { SIZING_RECORD_MAX_BYTES, readSizingRecords } from "./size-records.mjs";
 import { CAPACITY_WINDOWS, computeCapacity } from "./capacity.mjs";
 import { JOBS_ONLY, durationText, milliText, notSharedWhy, percentText, shareText } from "./capacity-cli.mjs";
 import { CGROUP_PARENT, cgroupParentFor, operatorQuotaCommand, readQuota, reservePlan, userQuotaCommand } from "./cpu-reserve.mjs";
-import { HOST_BUDGET_KEYS, computeHostBudget, hostBudgetSettings, largestFit, neverFits, projectBudgetRow, publishedBudget, readUserServiceLimits } from "./host-budget.mjs";
+import { HOST_BUDGET_KEYS, computeHostBudget, hostBudgetSettings, largestFit, neverFits, projectBudgetRow, publishedBudget } from "./host-budget.mjs";
 import { makeImagePreflight, normalizeImageId } from "./image-preflight.mjs";
 import { BOOT_REFUSING_JOB_USER_CAUSES, DAEMON_FACTS_TIMEOUT_MS, JOB_USER_FIX, makeDaemonFactsReader, makeJobUserResolver, relabelsPrivateMounts, resolveImageUser } from "./job-user.mjs";
 import { mergeSecretProfiles, parseSecretProfiles, servableSecretProfiles } from "./secret-profiles.mjs";
@@ -148,28 +146,10 @@ const NODE_FLOOR = [22, 19]; // pi's engine floor (22.19.0)
 // gh login scopes that reach well past what a job should ever hold — called out by name in the fix line.
 const BROAD_SCOPES = ["admin:org", "delete_repo", "workflow"];
 
-/**
- * What to do when the podman venue's bounds miss for a reason in the account's systemd setup (issue #453, measured on
- * Fedora 44 with Podman 5.8.1), per `observePodman`'s `boundsCause`. Linger leads: it is what keeps the user manager
- * running for a service, where a login session keeps it only while that session lasts (a plain ssh started one,
- * measured, and a `sudo -iu` shell started none). Which manager a doctor sees does not depend on the shell it runs in:
- * with linger off, a `sudo -iu` doctor saw a running manager while another login session of the account was open
- * (gate 456), and that ✓ lasted only as long as the session did.
- */
-const PODMAN_BOUNDS_FIX = Object.freeze({
-	"no-user-manager": "turn on linger for the worker's account: `sudo loginctl enable-linger <account>` starts its systemd user manager and keeps it running with no one logged in, and `pi-dispatch service install` runs the worker as a systemd user service inside it. A hand-written system unit with `User=` also needs `Wants=user@<uid>.service` and `After=user@<uid>.service` (docs/podman.md); `pi-dispatch doctor --live` reads pids.max and memory.max back off a real container",
-	"user-manager-unreachable": "run the worker inside the account's user manager, as a systemd user service (`pi-dispatch service install`, with linger on), where a job's container lands under the manager whichever cgroup manager Podman uses; or let Podman reach the manager over the account's user bus, /run/user/<uid>/bus (on Debian and Ubuntu the dbus-user-session package provides it), with no DBUS_SESSION_BUS_ADDRESS pointing elsewhere and no `cgroup_manager = \"cgroupfs\"` in its containers.conf; `pi-dispatch doctor --live` reads pids.max and memory.max back off a real container",
-});
-
-// The podman venue's pull of the deployment's default job image into this account's store (issue #433): the fix line's
-// words and `--fix`'s prompt, one string so the two cannot name different commands.
-const PODMAN_JOB_IMAGE_PULL = jobImageFix("podman", "pi-job:latest");
-
 // The fix for a trigger-named image without the runner entrypoint, one sentence for either runtime (issue #433).
 const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's image/Dockerfile so it keeps /entrypoint.sh -- an image without the runner can exit 0 without ever starting the agent, and the queue records that as success (docs/job-image.md)";
 
-// The in-image gh probe's argv after the runtime's name, shared by docker and podman (issue #433) so the two cannot
-// drift. Not the job builder's argv: the probe asks whether the image's gh can reach the forge with this token, which is
+// The in-image gh probe's argv after the runtime's name (issue #433). Not the job builder's argv: the probe asks whether the image's gh can reach the forge with this token, which is
 // a question about the image and the network, not about a job's bounds.
 //
 // The token rides STDIN (issue #521), never the container's environment. It used to ride value-less `-e` flags, which
@@ -180,21 +160,14 @@ const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's imag
 // This token is the operator's own, so unlike a job's minted one it does not expire within the hour. `-i` attaches
 // stdin, the entrypoint becomes `sh`, and the script reads one line and exports it to the `gh auth status` it execs,
 // so the value lives only in that process's memory. Rejected: `--env-file` (the CLI expands it into the same create
-// request) and a mounted file (a host temp file that must be written, protected and removed, and on rootless Podman
-// made readable across a uid map, to say what one pipe says). An image without `sh` (or `gh`) fails the probe with
+// request) and a mounted file (a host temp file that must be written, protected and removed, to say what one pipe
+// says). An image without `sh` (or `gh`) fails the probe with
 // exit 126 or 127, and the line says gh could not be run inside the job image; an image built FROM image/Dockerfile
 // has both. `gh auth status` stays separate argv words after the script's `$0`, so the probe still reads as what it
 // runs.
 //
-// EXCEPT the venue's pins, on podman (review round 1): the account's containers.conf may default what the argv does not
-// name, and two of those defaults hand the probe far more than the token. `env_host = true` (which the podman venue
-// deliberately does not refuse, because every job pins it off) would copy doctor's WHOLE environment into the container,
-// provider keys, GITHUB_PAT and WEBHOOK_SECRET with it, and `http_proxy` copies the proxy variables. So a podman probe
-// carries `PODMAN_PINNED_FLAGS` whole, the same array every podman job carries: `--env-host=false` and
-// `--http-proxy=false` for that, and the private namespaces so the probe is no less contained than a job. docker has no
-// such defaults to pin (its CLI forwards only what `-e` names, and the probe names nothing), so its argv carries no pins.
 const GH_PROBE_SCRIPT = 'read -r t; export GH_TOKEN="$t" GITHUB_TOKEN="$t"; exec "$@"';
-const ghProbeArgs = (image, bin) => ["run", "--rm", "-i", "--pull=never", ...(bin === "podman" ? PODMAN_PINNED_FLAGS : []), "--entrypoint", "sh", image, "-c", GH_PROBE_SCRIPT, "sh", "gh", "auth", "status"];
+const ghProbeArgs = (image) => ["run", "--rm", "-i", "--pull=never", "--entrypoint", "sh", image, "-c", GH_PROBE_SCRIPT, "sh", "gh", "auth", "status"];
 
 
 // Issue #471: `shellVars` is THIS shell's environment and is read in exactly the places a test pins (the venue and
@@ -267,9 +240,6 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		live = false,
 		// The granted browser action publishes observations without starting/sweeping probe containers (#774).
 		setupReadOnly = false,
-		// Issue #683: `--openshell`, the openshell venue's lines (doctor-openshell.mjs), strictly `=== true` as `live`.
-		// `openshellRun` is their spawn seam, for the tests.
-		openshell = false,
 		// Issue #704: `--secrets`, resolve each project secret bundle on this host and print its variable names and count,
 		// never a value (doctor-bundles.mjs). Strictly `=== true`, as `live`: it spawns every bundle resolver, which reads
 		// the operator's manager. `bundleSpawn` is its spawn seam, for the tests.
@@ -287,7 +257,6 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		publishDoctor = defaultPublishDoctor,
 		writeErr = (s) => process.stderr.write(s),
 		publishNow = Date.now,
-		openshellRun,
 		liveFs = { chmodSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync },
 		// Issue #341: who a job on this host would run as, decided from the same facts the worker reads. Seams because
 		// the answer is this process's own ids and a daemon, neither of which belongs in a unit test. `stat` reads the
@@ -302,7 +271,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		// BYTES since issue #447: systemd refuses to load a `.env` with a NUL or invalid UTF-8 in it, which decoded text
 		// cannot show. `envFileKeys` decodes; the boot-file loaders below get text through `seamsForLoad`.
 		readEnvFile = (path) => readFileSync(path),
-		// Issue #345: the host files the runtime-mounts observation reads (Podman's mounts.conf and containers.conf).
+		// Issue #345: the host files the runtime-mounts observation reads.
 		observationFs = { statSync, readFileSync, readdirSync },
 		// Issue #464: the jobs dir check's reads (its owner, whether this account may write it, the old shared default's
 		// retained workspaces). Never a write: doctor says what the worker will meet, and the worker creates the dir.
@@ -310,7 +279,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		// The uid the worker's files are created as, which is what `ensureJobsDir` compares an owner with: this process's
 		// own, not `jobUserIdentity`'s (the job-user decision's facts, which a test fakes for another reason).
 		jobsDirUid = process.geteuid?.(),
-		// Issue #453: this shell's account name, asked of loginctl for linger on the podman venue; and whether this folder
+		// Issue #453: this shell's account name, asked of loginctl for linger; and whether this folder
 		// holds the shipped proxy's two files, so its running proxy's mounts can be compared with them.
 		userName,
 		// Issue #464 (gate round 1): whose Valkey VALKEY_URL reaches, `(url, { shared, user, envPath })` answering as
@@ -346,9 +315,6 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		// Issue #596, phase 3: the run records the size suggestions read, `(nowMs) => records`. A seam so a test decides
 		// the runs; absent, the logs directory's records of the window are read (`readSizingRecords`).
 		readRunRecords,
-		// Issue #448: `systemctl show podman.service`, read only where the local daemon is rootful Podman on this host. A seam
-		// so a test decides what the unit says; absent, it spawns systemctl through `spawn`, as the docker reads do.
-		readPodmanService,
 		// Issue #471 (gate round 1): the account a `.env` and the paths it names must belong to (or root) before doctor lets
 		// a value in them steer anything. This process's own; a seam so a test can stand for another account's file.
 		trustUid = process.geteuid?.(),
@@ -361,11 +327,11 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 	// `isAlive` and `pid` ride the SHARED seams since issue #350, not just the `--live` spread below: the egress
 	// canary names its network after the doctor PROCESS and now sweeps what an earlier doctor run left,
 	// so it needs both, and a test cannot drive that sweep while the names come from `process.pid` directly.
-	// `live` rides the shared seams since issue #431 for ONE reader: the podman section, whose allowlist line points at
+	// `live` rides the shared seams since issue #431 for the egress checks: whose allowlist line points at
 	// `--live` on a plain run and has nothing to say on a `--live` run, where the read-back's own canary answers it.
 	// Issue #453 (gate round 1): the venue keys, decided as `up`, `init` and `service install` decide them. doctor read
-	// PI_BACKENDS from its shell alone, so on a podman-only deployment whose `.env` says so (the documented setup) its
-	// plain run judged docker, while the service it was checking ran podman. This shell wins where it sets a key; the
+	// PI_BACKENDS from its shell alone, so on a deployment whose `.env` says something else, its
+	// plain run judged another venue than the service it was checking ran. This shell wins where it sets a key; the
 	// deployment `.env` fills the rest; a disagreement is its own ✗, and doctor then judges this shell's values.
 	//
 	// ONE read of the file, shared: a regular file only (a FIFO would hang a synchronous read, as `envFileKeys` guards
@@ -382,7 +348,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 	const envText = envRead.bytes;
 	const envUnread = envRead.unreadable;
 	// Issue #471 (gate round 1): a `.env` another account can write decides nothing doctor runs, connects to or writes.
-	// Measured: a CONTAINERS_CONF in it naming a containers.conf with a `conmon_path` made doctor's own `podman info` run
+	// Measured: a CONTAINERS_CONF in it naming a containers.conf made the runtime's reads run
 	// that program. So from such a file no value is taken at all (the venue keys included), and that is a ✗: the service's
 	// loader has no such rule, so the deployment runs on a file someone else chose. The read above still happens, for the
 	// two-subject pause and limits reading (`envFileKeys`), which only decides what doctor SAYS.
@@ -449,7 +415,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 						return { ...(await valkeyAuthState(url, { context, withoutPassword })), passwordSet: Boolean(sent.password), from: sent.from };
 					}
 				: null;
-	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), openshell: openshell === true, ...(openshellRun ? { openshellRun } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readUnit, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), ...(readPodmanService ? { readPodmanService } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
+	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readUnit, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
 	// Issue #471: every other service key, resolved ONCE for the whole run (the fix pass's re-collect and `--live` judge the
 	// same resolution). THE RULE (PR #474's round cap, after three rounds of trust patches): no program doctor starts is
 	// handed anything from `.env`. Every child gets this shell's own environment, the one it had before #471; a `.env`
@@ -489,18 +455,11 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 	// ONCE, and after --fix: the probes read the host as the fix pass left it, so a fix that pulled the job image is
 	// read back rather than reported absent. Rendered like every other check and judged by the same rule.
 	if (live === true) {
-		// Issue #354: one read-back per venue that runs jobs here, each labelled with its venue. `localUsed` is unset only
+		// Issue #354: the read-back of the venue that runs jobs here, labelled with it. `localUsed` is unset only
 		// where no collection filled the facts, which reads as the default: local, exactly as before.
-		// Each venue's results are rendered BEFORE the next venue announces its containers, so what podman is about to
-		// start never lands between local's announcement and local's verdicts.
 		const liveSeams = { ...seams, liveFs, isAlive, pid, nonce, ...(now ? { now } : {}), ...(delay ? { delay } : {}) };
 		if (facts.localUsed !== false) {
 			const read = await liveChecks(env, liveSeams, facts);
-			liveRendered.push(...read);
-			if (render(read, out)) failed = true;
-		}
-		if (facts.podman) {
-			const read = await podmanLiveChecks(env, liveSeams, facts);
 			liveRendered.push(...read);
 			if (render(read, out)) failed = true;
 		}
@@ -545,7 +504,7 @@ export function doctorResultsRecord({ checks, liveRendered = [], seams, env, at,
 	const secrets = secretValuesIn(env, service.fromFile, service.extraFromFile, fileSide);
 	const worker = by?.worker === true;
 	const every = worker && Number.isSafeInteger(by.every) ? by.every : seams.publishTo?.every;
-	return buildDoctorRecord({ checks, ids, at, version: PACKAGE_VERSION, openshell: seams.openshellJudged === true, every, secrets, by: { uid: process.geteuid?.() ?? null, worker } });
+	return buildDoctorRecord({ checks, ids, at, version: PACKAGE_VERSION, every, secrets, by: { uid: process.geteuid?.() ?? null, worker } });
 }
 
 async function publishResults({ seams, publishDoctor, writeErr, record }) {
@@ -709,7 +668,7 @@ export const ENV_FILE_READABLE_KEYS = Object.freeze(["PI_PAUSE_WINDOWS_FILE", "P
  * The keys doctor takes from the deployment's `.env` as the SERVICE's values (issue #453, and since issue #471 every key
  * the service reads that doctor judges): the venue keys `up` and `service install` read, the Valkey the worker connects
  * to, the provider, the GitHub auth source and App keys (PR #466 gate round 2, `GITHUB_SERVICE_KEYS`), that provider's
- * key variables (pi's own names for it, passed in, and judged for presence only, never printed), the jobs and sandbox
+ * key variables (pi's own names for it, passed in, and judged for presence only, never printed), the jobs
  * dirs and the TMPDIR the default jobs root lives under (issue #464), PI_VALKEY_SHARED, the opt-in the Valkey owner check
  * reads, and (issue #471) the rest of the worker's settings doctor judges and the receiver's (`WORKER_SERVICE_KEYS`,
  * `RECEIVER_SERVICE_KEYS`). ONE structural allowlist: every `.env` value doctor acts on passes `serviceEnvKeys` first,
@@ -727,39 +686,27 @@ export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_AUTH_SOURCE", "GITHUB_
  *  `.env`. TEMP is TMPDIR's twin in the worker's temp root; PI_CODING_AGENT_DIR is where the worker reads auth.json.
  *  Issue #761: PI_CONSOLE_AUDIT_RETENTION_DAYS is here and not in `CONSOLE_ENV_KEYS` although it is named for the
  *  console: the worker reads it (it runs the audit reaper), and a console key set alone makes doctor judge a console. */
-export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", "PI_MAX_TOKENS", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_SANDBOX_RETENTION_HOURS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
+export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", "PI_MAX_TOKENS", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
 /** Issue #471: the receiver's keys doctor judges its boot by (the receiver's unit reads the same `.env`). */
 export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "PI_RECEIVER_ALLOW_SELF", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
 /**
  * Issue #471 (follow-up): the variables the CLIs doctor spawns read from their environment, by the CLI that reads them.
- * The worker starts podman, docker and gh with its OWN environment (no `env` option: `image-preflight.mjs`,
- * `run-container.mjs`, `backend-podman.mjs`, `egress.mjs`, `get-token.mjs`), which under systemd includes `.env`, and
- * its conf-chain checks (#428, #448) read that same environment. So a `.env` CONTAINERS_CONF, DOCKER_HOST or GH_CONFIG_DIR
- * moves the SERVICE's runtime, and doctor, spawning with its shell's, judged another containers.conf chain, another
- * daemon or another gh login. Each is a service key, resolved like the rest, and used where doctor judges IN-PROCESS
- * (the containers.conf chain check reads CONTAINERS_CONF, CONTAINERS_CONF_OVERRIDE and XDG_CONFIG_HOME as the worker
- * does). None is handed to a program doctor starts (PR #474's round cap): three rounds of rules for handing them on
- * safely each had a hole (a flipped link, a missing tail under /tmp another account created in time, a socket held
- * back that should not have been), and a spawn that never sees them has none. Each one the file sets gets its own ⚠
- * (`cliNotHandedLines`): the podman, docker and gh probes describe this shell's view, not the service's.
+ * The worker starts docker and gh with its OWN environment (no `env` option: `image-preflight.mjs`,
+ * `run-container.mjs`, `egress.mjs`, `get-token.mjs`), which under systemd includes `.env`. So a `.env` DOCKER_HOST or
+ * GH_CONFIG_DIR moves the SERVICE's runtime or login, and doctor, spawning with its shell's, judged another daemon or
+ * another gh login. Each is a service key, resolved like the rest. None is handed to a program doctor starts (PR #474's
+ * round cap): three rounds of rules for handing them on safely each had a hole (a flipped link, a missing tail under
+ * /tmp another account created in time, a socket held back that should not have been), and a spawn that never sees them
+ * has none. Each one the file sets gets its own ⚠ (`cliNotHandedLines`): the docker and gh probes describe this shell's
+ * view, not the service's.
  */
 export const CLI_SERVICE_KEYS = Object.freeze({
-	// HOME since #448 (PR #473): rootful Podman's containers.conf chain, as `observeHost` and `observeRootfulConf` read
-	// it through podman-docker, includes `$HOME/.config`, so the service's HOME decides a chain doctor judges in-process.
-	podman: Object.freeze(["CONTAINERS_CONF", "CONTAINERS_CONF_OVERRIDE", "CONTAINERS_STORAGE_CONF", "CONTAINERS_REGISTRIES_CONF", "CONTAINER_HOST", "CONTAINER_CONNECTION", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME"]),
 	docker: Object.freeze(["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "HOME"]),
 	gh: Object.freeze(["GH_TOKEN", "GITHUB_TOKEN", "GH_CONFIG_DIR", "GH_HOST", "XDG_CONFIG_HOME", "HOME"]),
-	// Issue #707: the openshell CLI keeps its gateway registrations (and so which gateway is the active one) under this
-	// account's config dir, XDG_CONFIG_HOME or else HOME/.config (measured on 0.1.4: `gateway add` writes there), so a
-	// `.env` that moves either points the SERVICE's CLI at another registration than doctor's. PATH is not listed: every
-	// shell sets one, which would make the line fire on every run, and where the CLI is found is `service install`'s to
-	// put in the unit (the plist's PATH carries its directory on macOS).
-	openshell: Object.freeze(["XDG_CONFIG_HOME", "HOME"]),
 });
 const CLI_KEY_NAMES = [...new Set(Object.values(CLI_SERVICE_KEYS).flat())];
-// A Set, since issue #707 made two of the worker's keys (PI_OPENSHELL_ENGINE, PI_OPENSHELL_GATEWAY) venue keys too: each
-// key once, in the order it is first named.
-export const SERVICE_ENV_KEYS = Object.freeze([...new Set([...STACK_KEYS, "VALKEY_URL", VALKEY_SHARED_KEY, VALKEY_PASSWORD_KEY, VALKEY_PORT_KEY, "PI_PROVIDER", "PI_MODEL", ...GITHUB_SERVICE_KEYS, "PI_JOBS_DIR", "PI_SANDBOX_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...CLI_KEY_NAMES])]);
+// Each key once, in the order it is first named.
+export const SERVICE_ENV_KEYS = Object.freeze([...new Set([...STACK_KEYS, "VALKEY_URL", VALKEY_SHARED_KEY, VALKEY_PASSWORD_KEY, VALKEY_PORT_KEY, "PI_PROVIDER", "PI_MODEL", ...GITHUB_SERVICE_KEYS, "PI_JOBS_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...CLI_KEY_NAMES])]);
 
 /** Issue #471 (gate round 1): what a service manager gives every service itself, so a `.env` need not carry it. */
 const AMBIENT_SERVICE_KEYS = Object.freeze(["TMPDIR", "TEMP", "XDG_RUNTIME_DIR", "HOME"]);
@@ -784,37 +731,9 @@ function installedWorkerUnit(seams, cwd) {
 	return null;
 }
 
-/**
- * Issue #707: whether the worker unit installed for this folder pulls in the OpenShell gateway's own user unit
- * (`Wants=openshell-gateway.service`, which the 0.1.4 deb ships), as `service install` writes it for an openshell venue,
- * and is NOT ordered after it: that unit is `After=default.target`, so an `After=` from a worker that is WantedBy
- * default.target is an ordering cycle, and systemd deletes the worker's start job to break it (review round 1 of #715,
- * measured). Read only on Linux, from the unit file itself (`installedWorkerUnit`); no unit for this folder says nothing,
- * since the worker may run by hand. A ⚠, not a ✗: a missing `Wants=` costs a gateway the worker's boot only logs as
- * down, and `service install --force` rewrites the unit.
- */
-export function openshellUnitOrderChecks(seams, cwd) {
-	if (seams.platform !== "linux" || typeof seams.fileExists !== "function") return [];
-	const unit = installedWorkerUnit(seams, cwd);
-	if (!unit) return [];
-	if (unit.scope === "system") {
-		return [{ ok: true, warn: true, label: `openshell: the worker's unit (${unit.path}) is a system unit, which cannot pull in the gateway's user unit (openshell-gateway.service)`, fix: "install the worker in user scope (`pi-dispatch service install`, without --system), in the account whose user manager runs the gateway and whose home holds the CLI's gateway registration" }];
-	}
-	let text;
-	try {
-		text = String((seams.readUnit ?? ((path) => readFileSync(path, "utf8")))(unit.path));
-	} catch {
-		return [{ ok: true, warn: true, label: `openshell: whether the worker's unit (${unit.path}) pulls in the gateway could not be read`, fix: "make the unit file readable by this account, then re-run doctor" }];
-	}
-	const names = (key) => new RegExp(`^${key}=(?:.*\\s)?openshell-gateway\\.service(?:\\s|$)`, "m").test(text);
-	if (names("After")) return [{ ok: true, warn: true, label: `openshell: the worker's unit (${unit.path}) is After=openshell-gateway.service, an ordering cycle (the gateway's unit is After=default.target), which systemd breaks by deleting the worker's start job at boot`, fix: "`pi-dispatch service install --force` in the deployment folder rewrites the unit with Wants=openshell-gateway.service and no After= on it" }];
-	return [names("Wants") ? { ok: true, label: "openshell: the worker's unit pulls in the gateway's (Wants=openshell-gateway.service)" } : { ok: true, warn: true, label: `openshell: the worker's unit (${unit.path}) does not pull in the gateway's (openshell-gateway.service), so at boot the gateway starts only if something else starts it`, fix: "`pi-dispatch service install --force` in the deployment folder rewrites the unit with Wants=openshell-gateway.service" }];
-}
 
 /** The CLI variables that name a path, whose value a ⚠ may show; the rest (endpoints, names, tokens) it never shows. */
-const CLI_PATH_KEYS = Object.freeze(["CONTAINERS_CONF", "CONTAINERS_CONF_OVERRIDE", "CONTAINERS_STORAGE_CONF", "CONTAINERS_REGISTRIES_CONF", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "GH_CONFIG_DIR", "HOME"]);
-/** The ones the worker's containers.conf chain check reads, which doctor runs in-process on the resolved values. */
-const PODMAN_CHAIN_KEYS = Object.freeze(["CONTAINERS_CONF", "CONTAINERS_CONF_OVERRIDE", "XDG_CONFIG_HOME", "HOME"]);
+const CLI_PATH_KEYS = Object.freeze(["XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "GH_CONFIG_DIR", "HOME"]);
 
 /**
  * Issue #471 (PR #474's round cap): one ⚠ per CLI variable the deployment `.env` sets, none of which doctor hands to a
@@ -822,22 +741,20 @@ const PODMAN_CHAIN_KEYS = Object.freeze(["CONTAINERS_CONF", "CONTAINERS_CONF_OVE
  * context name, or a token. Says that doctor's probes through that CLI describe this shell's view, and, for the keys
  * the containers.conf chain check reads, that the check itself judged the file's value, in-process, as the worker does.
  */
-export function cliNotHandedLines(service, envPath, { openshellUsed = false } = {}) {
+export function cliNotHandedLines(service, envPath) {
 	const listed = (items) => (items.length < 2 ? items.join("") : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`);
 	// Issue #481: an empty value is left out only where the tool's own source reads it as unset (`fileConfigures`).
 	return CLI_KEY_NAMES.filter((k) => Object.hasOwn(service.fromFile, k) && fileConfigures(k, service.fromFile[k])).map((k) => {
-		// The openshell CLI is named only where an openshell venue is blessed (review round 1 of #715): elsewhere no probe
-		// of it runs, and the service never starts it.
-		const names = Object.entries(CLI_SERVICE_KEYS).filter(([cli, ks]) => ks.includes(k) && (cli !== "openshell" || openshellUsed)).map(([cli]) => cli);
+		const names = Object.entries(CLI_SERVICE_KEYS).filter(([cli, ks]) => ks.includes(k)).map(([cli]) => cli);
 		const clis = listed(names);
-		// Grammar by count (round-cap re-review, D2): "podman, docker and gh use it", "podman uses it".
+		// Grammar by count (round-cap re-review, D2): "docker and gh use it", "docker uses it".
 		const verb = names.length > 1 ? "use" : "uses";
 		// An empty HOME in quotes, so the line does not read "(" and ")" around nothing.
 		const shown = CLI_PATH_KEYS.includes(k) ? ` (${service.fromFile[k] === "" ? '""' : envValueShown(service.fromFile[k])})` : "";
 		return {
 			ok: false,
 			warn: true,
-			label: `${k} is set in ${envPath}${shown}, and doctor hands nothing from that file to a program it starts, so its ${clis} probes ran without it and describe this shell's view, not the service's${PODMAN_CHAIN_KEYS.includes(k) ? "; the containers.conf check below read it as the worker does" : ""}`,
+			label: `${k} is set in ${envPath}${shown}, and doctor hands nothing from that file to a program it starts, so its ${clis} probes ran without it and describe this shell's view, not the service's`,
 			// Not "export it and re-run" alone: what it names may be a program, and the lab's case was another account's.
 			fix: `the service's own ${clis} ${verb} it: check what ${k} names and who can change it, then, to see that view, run doctor from a shell that exports the same ${k}`,
 		};
@@ -853,7 +770,6 @@ export const STEERING_SERVICE_KEYS = Object.freeze({
 	PI_BACKENDS: "which runtime doctor spawns: judged by the worker's own list parser, a shell/.env disagreement a ✗ (deploymentVenueEnv)",
 	PI_EGRESS: "whether the egress canary runs: the worker's own reading, a disagreement a ✗ (deploymentVenueEnv)",
 	PI_EGRESS_PROXY: "which proxy container doctor inspects: the worker's own name resolution, a disagreement a ✗ (deploymentVenueEnv)",
-	PI_OPENSHELL_ENGINE: "which engine the openshell lines spawn (its version, the job image in its store): docker or podman only, anything else named and nothing spawned (doctor-openshell.mjs), a disagreement a ✗ (deploymentVenueEnv, issue #707)",
 	VALKEY_URL: "which Valkey doctor connects to: the owner rule the worker applies at boot, and a line doctor cannot read makes it contact none",
 	PI_JOB_IMAGE: "the image doctor inspects and runs (the canary, the gh probe, --live): the worker's `||` default and the one image rule its boot applies (image-ref.mjs: blank, padded, a leading dash, a control character), a refused value named and not used",
 	GITHUB_AUTH_SOURCE: "whether doctor runs gh on this host: the worker's own three values",
@@ -862,11 +778,8 @@ export const STEERING_SERVICE_KEYS = Object.freeze({
 	PI_TRIGGERS_FILE: "the file whose images, repos and folders doctor probes: a regular file only, parsed by the worker's own parser before any of its values is used",
 	PI_SESSIONS_DIR: "the directory `--fix` creates: silent only for this shell's own value; a value from .env is offered at the prompt tier, shown first",
 	PI_JOBS_DIR: "where --live makes its fixture: the jobs dir owner rule the worker applies at boot (#464)",
-	PI_SANDBOX_DIR: "the retained-run count doctor reads: the same owner rule (#464)",
 	TMPDIR: "the default jobs root: the same owner rule (#464)",
 	TEMP: "TMPDIR's twin in the worker's temp root: the same owner rule (#464)",
-	CONTAINERS_CONF: "which containers.conf chain the conf-chain check judges, in-process, as the worker reads it (#428, #448); never handed to a program doctor starts",
-	CONTAINER_HOST: "which Podman service the SERVICE's podman talks to: never handed to doctor's podman, named in a ⚠",
 	DOCKER_HOST: "which daemon the SERVICE's docker talks to: never handed to doctor's docker, named in a ⚠",
 	GH_CONFIG_DIR: "which gh login the SERVICE's gh reads: never handed to doctor's gh, named in a ⚠",
 });
@@ -959,12 +872,11 @@ function disagreementShown({ key, shell, file }, path) {
  *   - a CLI key, which neither loader reads: the tool's own source reads it with `os.Getenv(...) != ""`. docker
  *     (docker/cli `cli/command/cli.go` for DOCKER_HOST and DOCKER_CONTEXT, `cli/config/config.go` `Dir()` for
  *     DOCKER_CONFIG), gh (cli/go-gh `pkg/auth/auth.go` for GH_TOKEN, GITHUB_TOKEN and GH_HOST, `pkg/config/config.go`
- *     for GH_CONFIG_DIR), and Podman's containers.conf pair (containers/common v0.57.4 `pkg/config/new.go`, as the
- *     worker's own chain check reads them). NOT CONTAINER_HOST or CONTAINER_CONNECTION (podman's
- *     `cmd/podman/registry/remote.go` asks `os.LookupEnv`, so an empty one switches it to remote), CONTAINERS_STORAGE_CONF
- *     (LookupEnv, then a stat of ""), XDG_CONFIG_HOME, XDG_RUNTIME_DIR, HOME, TMPDIR or TEMP, each read by more than one
- *     program, some of which take empty as a value (`os.homedir()` returns an empty HOME as it is; containers/common
- *     takes a set TMPDIR by LookupEnv).
+ *     for GH_CONFIG_DIR). (Podman's containers.conf pair was here until the sandbox venues took the Podman CLI away.)
+ *     NOT CONTAINER_HOST or CONTAINER_CONNECTION (a runtime that asks `os.LookupEnv` switches to remote on an empty
+ *     one), CONTAINERS_STORAGE_CONF (LookupEnv, then a stat of ""), XDG_CONFIG_HOME, XDG_RUNTIME_DIR, HOME, TMPDIR or
+ *     TEMP, each read by more than one program, some of which take empty as a value (`os.homedir()` returns an empty
+ *     HOME as it is).
  * Where an empty value refuses the boot, the key is not here, and a ✗ of its own names it besides (the boot files,
  * PI_JOBS_DIR, PI_TRIGGERS_FILE, GITHUB_AUTH_SOURCE, the PAT and its variable, the App keys while app is the source).
  * Judged HERE and not in `resolveServiceEnv`, whose `fromFile` must keep the "" so every check judges what the service
@@ -975,7 +887,6 @@ export const EMPTY_READ_AS_UNSET = Object.freeze({
 	PI_EGRESS: "empty",
 	PI_EGRESS_PROXY: "empty",
 	GITHUB_APP_PRIVATE_KEY: "blank",
-	PI_SANDBOX_DIR: "empty",
 	PI_WORKER_NAME: "empty",
 	PI_JOB_IMAGE: "empty",
 	PI_LOGS_DIR: "empty",
@@ -993,7 +904,6 @@ export const EMPTY_READ_AS_UNSET = Object.freeze({
 	PI_SECRET_RESOLVER_ROOTS: "blank",
 	PI_WAIT_PROFILES: "blank",
 	PI_WAIT_AFTER_MAX_MS: "empty",
-	PI_SANDBOX_RETENTION_HOURS: "empty",
 	WEBHOOK_SECRET: "blank",
 	RECEIVER_PORT: "empty",
 	GITLAB_TOKEN: "empty",
@@ -1016,8 +926,6 @@ export const EMPTY_READ_AS_UNSET = Object.freeze({
 	GITHUB_TOKEN: "empty",
 	GH_HOST: "empty",
 	GH_CONFIG_DIR: "empty",
-	CONTAINERS_CONF: "empty",
-	CONTAINERS_CONF_OVERRIDE: "empty",
 });
 
 /** Issue #481: whether a value the `.env` supplied configures anything (`EMPTY_READ_AS_UNSET`): unproven keys always do. */
@@ -1460,7 +1368,7 @@ export function parseGitVersion(text) {
  * container is gone, so a job there is not recovered from a worker that crashed mid-run. A checkpoint is never read
  * from a workspace the job is still writing.
  */
-export function checkpointStoreChecks({ dir, explicit = false, sessionsDir = null, fs = { lstatSync, statSync, accessSync }, uid, underTemp = () => false, gitVersion = null, venues = [DEFAULT_BACKEND], podmanRead = null }) {
+export function checkpointStoreChecks({ dir, explicit = false, sessionsDir = null, fs = { lstatSync, statSync, accessSync }, uid, underTemp = () => false, gitVersion = null, venues = [DEFAULT_BACKEND] }) {
 	const checks = [];
 	const shown = envValueShown(dir);
 	const where = explicit ? "PI_CHECKPOINTS_DIR" : "the default inside PI_SESSIONS_DIR";
@@ -1549,15 +1457,7 @@ export function checkpointStoreChecks({ dir, explicit = false, sessionsDir = nul
 		let label;
 		const exitOnly = "so its jobs get exit checkpoints only, taken once the container is gone, and are not recovered from a worker crash mid-run";
 		if (word === ABSENT) label = `checkpoint store: ${venue} declares no freeze, ${exitOnly}`;
-		else if (venue === PODMAN_BACKEND) {
-			const can = podmanPausable(podmanRead);
-			label =
-				can.pausable === true
-					? `checkpoint store: ${venue} can freeze a job while its workspace is read (podman pause, cgroup v2)`
-					: can.pausable === false
-						? `checkpoint store: ${venue} cannot freeze a job here (rootless Podman on cgroup v1), ${exitOnly}`
-						: `checkpoint store: whether ${venue} can freeze a job is not known (podman info did not answer: ${can.reason}); on cgroup v1 it cannot, ${exitOnly}`;
-		} else label = `checkpoint store: ${venue} can freeze a job while its workspace is read (docker pause, the cgroup freezer)`;
+		else label = `checkpoint store: ${venue} can freeze a job while its workspace is read (docker pause, the cgroup freezer)`;
 		checks.push({ ok: true, label });
 	}
 	return checks;
@@ -1757,10 +1657,10 @@ export async function collectChecks(shellVars, seams) {
 	// disagreement is said once at the end rather than lost.
 	const envPathShown = serviceEnvFile?.path ?? join(cwd, ".env");
 	// PR #474's round cap: each CLI variable the file sets, which no program doctor starts is handed.
-	checks.push(...cliNotHandedLines(service, envPathShown, { openshellUsed: venuesOf(env).openshellUsed }));
+	checks.push(...cliNotHandedLines(service, envPathShown));
 	const saidAtTop = { disagreements: service.disagreements.length, unread: service.unread.length };
 	// A CLI variable is not listed as read: no program doctor starts used it, and its own ⚠ says so.
-	checks.push(...serviceEnvLines(service, envPathShown, { said: ["VALKEY_URL", "PI_PROVIDER", ...GITHUB_SERVICE_KEYS, "PI_JOBS_DIR", "PI_SANDBOX_DIR", "TMPDIR", ...CLI_KEY_NAMES] }));
+	checks.push(...serviceEnvLines(service, envPathShown, { said: ["VALKEY_URL", "PI_PROVIDER", ...GITHUB_SERVICE_KEYS, "PI_JOBS_DIR", "TMPDIR", ...CLI_KEY_NAMES] }));
 	section("image");
 	if (jobImageRefused) {
 		checks.push({
@@ -1772,12 +1672,8 @@ export async function collectChecks(shellVars, seams) {
 
 	// Issue #354: which venues run jobs here. An unparseable PI_BACKENDS reads as the unset default, so every docker line
 	// below is exactly what it always was, and the backend section is what fails on it (the worker refuses to boot).
-	const { localUsed, podmanUsed, podmanDefault } = venuesOf(env);
-	// Issue #707: where an openshell-only deployment's Valkey runs (`openshellSetupOf`, the rule `up` and `service install`
-	// follow): on the gateway's engine, docker by default. The Valkey lines' fixes name THAT engine's way to start it, as
-	// they name docker's where `local` is blessed and the Quadlet unit's where `podman` is.
-	const openshellSetup = openshellSetupOf(venuesOf(env), env);
-	const valkeyVenues = { localUsed: localUsed || openshellSetup.valkeyEngine === "docker", podmanUsed: podmanUsed || openshellSetup.valkeyEngine === "podman" };
+	const { localUsed } = venuesOf(env);
+	const valkeyVenues = { localUsed };
 	section("docker");
 	// THE FIRST DOCKER CALL OF THE RUN, which is why it was the one that hung (issue #397): a daemon that
 	// accepts the connection and never answers held doctor here, before it had printed anything. Bounded
@@ -2064,13 +1960,8 @@ export async function collectChecks(shellVars, seams) {
 	//
 	// Issue #433: each image is asked of the runtime its triggers' jobs START on, which is knowable here: a job runs on its
 	// trigger's run.backend, or on the deployment default (PI_BACKENDS' first entry), by the worker's own rule
-	// (`resolveBackendName`). A podman job starts from THIS ACCOUNT'S Podman store, so that is where its image is looked
-	// for; asking docker would answer about a store no such job reads, and on a podman-only host would spawn a runtime the
-	// deployment never asked for. Every route that is not podman stays docker's, exactly as before (a third venue's own
-	// image check is that venue's change), so a deployment whose triggers all run on local prints what it always did.
-	// The podman venue's own image read gates its half as `docker info` gates docker's: not asked on top of a runtime that
-	// did not answer, off Linux, or past a refusal of every podman job, all of which end the podman section before it.
-	const defaultVenue = podmanDefault ? PODMAN_BACKEND : DEFAULT_BACKEND;
+	// (`resolveBackendName`). The table holds `local` alone, so every route is docker's and every image check is docker's,
+	// exactly as a deployment whose triggers all run on local always printed.
 	// Issue #433 review round 1: a trigger whose run.backend names a venue PI_BACKENDS does not list. The loader accepts
 	// it (PI_BACKENDS is a per-host setting a reviewed file must not be refused over), and the worker refuses every one of
 	// its jobs pre-spend as `backend-unblessed`, so without this line such a trigger was silent here: routed nowhere this
@@ -2108,12 +1999,7 @@ export async function collectChecks(shellVars, seams) {
 			});
 		}
 	}
-	const podmanRouted = new Set(imageRoutes.filter((r) => resolveBackendName(r, defaultVenue) === PODMAN_BACKEND).map((r) => r.image));
-	const dockerRouted = new Set(imageRoutes.filter((r) => resolveBackendName(r, defaultVenue) !== PODMAN_BACKEND).map((r) => r.image));
-	// Issue #354: the podman venue's own reads. Taken HERE, ahead of the per-trigger images (issue #433), because its read
-	// of the default image is what gates their podman half; its lines are still printed after the backend section, where
-	// they always were, so moving the read changed the order of spawns and not a byte of output.
-	const podman = podmanUsed ? await podmanChecks(env, seams, { jobImage, jobImageNote }) : null;
+	const dockerRouted = new Set(imageRoutes.map((r) => r.image));
 	section("images");
 	for (const img of images.filter((i) => i !== jobImage)) {
 		if (dockerRun !== null && dockerCode === 0 && dockerRouted.has(img)) {
@@ -2136,30 +2022,12 @@ export async function collectChecks(shellVars, seams) {
 				}
 			}
 		}
-		if (podman?.imagesReadable === true && podmanRouted.has(img)) {
-			const run = await runCmd(spawn, "podman", ["image", "inspect", img], runTimeouts.cmd);
-			// No fixAction on either runtime: a trigger-named image is a per-flow trust posture (the never tier above).
-			checks.push({
-				ok: run.code === 0,
-				label: run.ended === "timeout" ? `podman: trigger job image present in this account's Podman store (${img}) -- podman did not answer` : `podman: trigger job image present in this account's Podman store (${img})`,
-				fix: `pull, load or build it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull ${img} -- a trigger names it in run.image, and jobs run with --pull=never, so the worker never fetches it at job time`,
-			});
-			if (run.code !== 0) continue;
-			const entry = await runCmdCapture(spawn, "podman", ["image", "inspect", "--format={{json .Config.Entrypoint}}", img]);
-			if (entry.code === 0 && !entry.output.includes("entrypoint.sh")) {
-				checks.push({ ok: false, warn: true, label: `podman: ${img} does not appear to carry the pi-dispatch runner entrypoint`, fix: TRIGGER_IMAGE_ENTRYPOINT_FIX });
-			}
-		}
 	}
 
 	section("egress");
 	// REQ-EGRESS-ALLOWLIST (issue #202). [] when PI_EGRESS=0, so a deployment that declined it gets
 	// byte-identical output. Gated on docker and the image, because two of these checks run a container and
-	// the rest are noise on top of a down daemon.
-	// Issue #354: NOT RUN when no job runs on docker. The proxy it reads is docker's, which no job of this deployment is
-	// wired to (a podman job's network is joined to a proxy under the same rootless Podman, read in the podman section
-	// below), and its canary starts containers on a daemon nothing else here uses. Said there, not silently dropped.
-	// Issue #431: that venue's own canary is `runEgressCanary` under podman, run by its `--live` (`podmanLiveChecks`).
+	// the rest are noise on top of a down daemon. NOT RUN when no job runs on docker (`localUsed`).
 	// ONE `docker info` for this doctor run (issue #452, gate round 3), memoised: the job-user section reads it, and the
 	// egress canary's detach gate reads which runtime answered from the same answer, rather than asking twice.
 	let factsRead = null;
@@ -2215,8 +2083,6 @@ export async function collectChecks(shellVars, seams) {
 	// `mountSet` are observed, so the backend section and the job-user section speak from one read. Printed after them.
 	// Issue #354: every line it prints is `local: ...`, about a venue this deployment may not run; without local, none.
 	const jobUser = localUsed ? await jobUserChecks(env, { ...seams, readFactsOnce }, { endpoint, dockerCode, imageCode, jobImage }) : { checks: [], forLive: { run: true, user: null }, daemon: null };
-	// Issue #354: the podman venue's own reads (taken above, with the per-trigger images) are BEFORE the backend lines for
-	// the same reason as the job user's: its observations are what the podman rows of the backend section and the floor judge.
 	// No docker binary at all is an ANSWER for the observations, as it is for the worker (exit 2 under a floor, not a retry).
 	// A daemon that did not ANSWER is the opposite class, and telling them apart is the whole point of `ended`
 	// (issue #397): `docker-not-found` is DETERMINATE in `runtime-observations` -- it resolves to `value: false`,
@@ -2236,15 +2102,15 @@ export async function collectChecks(shellVars, seams) {
 					? { answered: false, reason: "docker-not-found", transient: true }
 					: null);
 	section("backends");
-	checks.push(...backendChecks(env, { endpoint, daemon, fs: seams.observationFs, unit: jobUser.unit, ...(podman ? { podman: podman.observed } : {}) }));
+	checks.push(...backendChecks(env, { endpoint, daemon }));
 	section("sizing");
 	// Issue #596: the default job size, and what this host's runtime says about the bounds a size becomes.
 	// Each venue this deployment runs, from that venue's own read: `undefined` leaves a venue out, null is "not read".
 	// Issue #596, phase 2: the host budget a worker started now would compute, from the same two reads, and what it means
 	// beside PI_CONCURRENCY and the project sizes in the scoped-limits file (a file that does not load adds no project).
 	// Computed first, because its CPU budget is every job's `--cpus` and the size lines say so.
-	const budgetView = doctorHostBudget(env, { daemon: localUsed ? (daemon ?? null) : undefined, podman: podman?.observed?.read ?? undefined, readFile: (path) => (seams.observationFs ?? { readFileSync }).readFileSync(path, "utf8"), euid: seams.jobUserIdentity?.euid ?? null });
-	checks.push(...jobSizeChecks(env, { daemon: localUsed ? (daemon ?? null) : undefined, podman: podman?.observed?.read !== undefined && podman?.observed?.read !== null ? podman.observed.read : undefined, cpuBudgetCenti: Number.isSafeInteger(budgetView.cpuCenti) ? budgetView.cpuCenti : null }));
+	const budgetView = doctorHostBudget(env, { daemon: localUsed ? (daemon ?? null) : undefined, readFile: (path) => (seams.observationFs ?? { readFileSync }).readFileSync(path, "utf8") });
+	checks.push(...jobSizeChecks(env, { daemon: localUsed ? (daemon ?? null) : undefined, cpuBudgetCenti: Number.isSafeInteger(budgetView.cpuCenti) ? budgetView.cpuCenti : null }));
 	const concurrencyHere = /^[1-9][0-9]{0,5}$/.test(String(env.PI_CONCURRENCY ?? "").trim()) ? Number(String(env.PI_CONCURRENCY).trim()) : 3;
 	// Said again once the registry is read (below), in this place, when a worker that declares no fleet has peers.
 	const budgetChecksArgs = { concurrency: concurrencyHere, limits: scopedLimitFacts.parseError === null ? scopedLimitFacts.limits : [], env };
@@ -2278,7 +2144,6 @@ export async function collectChecks(shellVars, seams) {
 	if (!budgetView.error) {
 		const reserveReads = await doctorCpuReserve({
 			daemon: localUsed ? (daemon ?? null) : undefined,
-			podman: podman?.observed?.read ?? undefined,
 			endpointLocal: endpoint?.local === true,
 			platform: seams.jobUserIdentity?.platform ?? seams.platform ?? process.platform,
 			run: (bin, args, { timeoutMs }) => dockerRunVia(spawn, timeoutMs, { bin })(args),
@@ -2289,39 +2154,17 @@ export async function collectChecks(shellVars, seams) {
 	}
 	section("job-user");
 	checks.push(...jobUser.checks);
-	section("podman");
-	if (podman) checks.push(...podman.checks);
-	section("openshell");
-	// Issue #683: the openshell venue's lines, asked by `--openshell` (before a deployment blesses it), or on every run
-	// once PI_BACKENDS does (blessable since #684).
-	// Issue #686 part 3: either OpenShell venue runs the section; copy mode's image line where `openshell` is blessed (or
-	// asked for with neither blessed), bind mode's lines where `openshell-bind` is.
-	const openshellVenues = venuesOf(env);
-	// Issue #712: whether this run judged the openshell venue, for the published record.
-	seams.openshellJudged = seams.openshell === true || Boolean(openshellVenues.openshellUsed);
-	if (seams.openshell === true || openshellVenues.openshellUsed) {
-		const { openshellChecks } = await import("./doctor-openshell.mjs");
-		const modes = { copy: openshellVenues.openshellCopyUsed || !openshellVenues.openshellUsed, bind: openshellVenues.openshellBindUsed };
-		// Bind mode's job-user line reads the same identity doctor's local and podman lines read.
-		const ids = seams.jobUserIdentity ? { ids: { euid: seams.jobUserIdentity.euid ?? null, egid: seams.jobUserIdentity.egid ?? null } } : {};
-		const osPlatform = seams.jobUserIdentity?.platform ?? seams.platform;
-		// The probe's source under the jobs dir the service will use (review round 2 of #714).
-		const probeJobsDir = Number.isInteger(seams.jobsDirUid) ? jobsDirPath(env, seams.jobsDirUid) : null;
-		checks.push(...(await openshellChecks(env, { image: jobImage, modes, ...ids, jobsDir: probeJobsDir || null, ...(osPlatform ? { platform: osPlatform } : {}), ...(seams.openshellRun ? { run: seams.openshellRun } : {}), ...(seams.openshellMkdtemp ? { mkdtemp: seams.openshellMkdtemp, rmdir: () => {} } : {}) })));
-		if (openshellVenues.openshellUsed) checks.push(...openshellUnitOrderChecks(seams, cwd));
-	}
 	if (facts) facts.jobUser = jobUser.forLive;
 	// Issue #596, phase 2: the CPU budget the parent's quota is read back against by `--live`.
 	if (facts) facts.cpuBudgetCenti = budgetView.cpuCenti ?? null;
 	// Issue #355: the same answer, kept for `--live`, which decides from it whether its probes' own mounts carry `:Z`.
 	if (facts) facts.daemon = jobUser.daemon;
-	// Issue #354: which read-backs `--live` runs, and the podman venue's facts for its own.
-	if (facts) Object.assign(facts, { localUsed, podman: podman?.forLive ?? null });
+	// Issue #354: which read-backs `--live` runs.
+	if (facts) Object.assign(facts, { localUsed });
 	section("selinux");
-	// Issue #355: on a Podman host that confines containers with SELinux, the directories a job mounts that the worker
-	// did NOT make, which it therefore never relabels. Read from the same facts and endpoint as the line above. Issue #354:
-	// the podman venue relabels on the same rule (its own directories only), so the same lines, ONCE when both venues do.
-	if (relabelsPrivateMounts(jobUser.daemon?.answered ? jobUser.daemon.facts : null, endpoint, seams.jobUserIdentity?.platform ?? seams.platform) || podman?.relabel === true) {
+	// Issue #355: on a host that confines containers with SELinux, the directories a job mounts that the worker
+	// did NOT make, which it therefore never relabels. Read from the same facts and endpoint as the line above.
+	if (relabelsPrivateMounts(jobUser.daemon?.answered ? jobUser.daemon.facts : null, endpoint, seams.jobUserIdentity?.platform ?? seams.platform)) {
 		checks.push(...(await selinuxLabelChecks({ folders, overlay: env.PI_GLOBAL_PI_DIR || null, spawn: seams.spawn })));
 	}
 
@@ -2724,22 +2567,8 @@ export async function collectChecks(shellVars, seams) {
 	// Preflight gh INSIDE the job image: a token that works host-side but not in-container (no egress from
 	// containers, stale image) fails jobs mid-run, not at submit. Only meaningful when docker and the image
 	// are green; otherwise it is noise on top of the failures already reported above. Issue #354: and only where a job
-	// runs on docker at all. On a deployment without `local` it would hand the operator's gh token to a container in a
-	// store no job starts from, to answer a question about an image no job uses.
-	//
-	// Issue #433: a deployment without `local` asks it of the podman venue instead, where its jobs start: the job image in
-	// this account's store, through `podman`, with the same argv (`ghProbeArgs`). Only once the podman section has read
-	// the image there, decided a job may run, and seen the service as this host's own (`serviceIsRemote: false`), which
-	// is podman's answer to the question docker's endpoint read answers below: the token must not ride to another
-	// machine. A deployment with `local` probes on docker exactly as before, and only there: one hand-off of the token per
-	// doctor run, not one per venue, and that deployment's output unchanged.
-	const ghProbeBin = seams.setupReadOnly ? null : localUsed
-		? dockerCode === 0 && imageCode === 0
-			? "docker"
-			: null
-		: podman?.forLive?.run === true && podman.forLive.imagePresent === true && podman.forLive.info?.serviceIsRemote === false
-			? "podman"
-			: null;
+	// runs on docker at all.
+	const ghProbeBin = seams.setupReadOnly ? null : localUsed && dockerCode === 0 && imageCode === 0 ? "docker" : null;
 	if (ghProbeBin !== null) {
 		if (ghSource === "app") {
 			checks.push({ ok: true, label: "in-image gh auth: skipped (GITHUB_AUTH_SOURCE=app mints per-job)" });
@@ -2791,7 +2620,7 @@ export async function collectChecks(shellVars, seams) {
 				// with this same environment, so a trimmed one could send the token to a service nothing here checked.
 				// An allowlist of what Podman needs was rejected for that reason: it is a list nothing derives.
 				const probe = await runCmdCapture(spawn, ghProbeBin, ghProbeArgs(jobImage, ghProbeBin), { env: spawnEnv, input: `${token}\n` });
-				const where = ghProbeBin === "podman" ? "podman: " : "";
+				const where = "";
 				// 126 and 127 are the runtime's and the shell's "could not run that program" (measured on docker 27.4: a
 				// missing entrypoint and a missing exec target both exit 127, a non-executable one 126); `gh auth status`
 				// itself exits 0, 1, 2, 4 or 8. Since the probe's entrypoint became `sh` (#521), an image without one
@@ -2823,13 +2652,13 @@ export async function collectChecks(shellVars, seams) {
 	}
 
 	section("valkey");
-	// Issue #464 (gate rounds 1 and 2): WHOSE Valkey that is, on the podman venue, by the one rule the worker applies at
+	// Issue #464 (gate rounds 1 and 2): WHOSE Valkey that is, by the one rule the worker applies at
 	// boot and `service install` and `up` apply (`judgeValkeyListeners`). Reachable is not enough: on a shared host a
 	// VALKEY_URL that reaches another account's Valkey (its port, its ::1 for a `localhost` URL, or 0.0.0.0) passed here,
 	// and the worker then took and ran that account's jobs. Judged BEFORE anything talks to Valkey: after a refusal
 	// doctor neither PINGs that Valkey nor reads its fleet, and otherwise it talks to the address the worker pins.
 	// Gate round 3: on EVERY venue, as the worker and every client now judge it: another account's listener is refused
-	// wherever it is; root's (docker-proxy) only where `local` is not blessed, since docker's Valkey is the queue there.
+	// wherever it is; root's (docker-proxy) listener is this deployment's own Valkey wherever `local` is blessed.
 	// Only on Linux, where /proc names the owner (the default seam is null elsewhere). PI_VALKEY_SHARED comes from the
 	// deployment `.env` alone, as the worker reads it; one in this shell is named as ignored.
 	let ownerVerdict = null;
@@ -2840,7 +2669,8 @@ export async function collectChecks(shellVars, seams) {
 	})();
 	if (!unreadValkey && !valkeyDbProblem && seams.valkeyOwner) {
 		if (typeof env[VALKEY_SHARED_KEY] === "string") checks.push({ ok: false, warn: true, label: sharedShellIgnored(env[VALKEY_SHARED_KEY], join(cwd, ".env")), fix: "put PI_VALKEY_SHARED=1 in the deployment's .env if that Valkey is shared on purpose, and unset it in this shell" });
-		ownerVerdict = await seams.valkeyOwner(valkeyUrl, { shared: valkeySharedOn(sharedInFile), user: userNameOf(seams), envPath: join(cwd, ".env"), rootOk: !((podmanUsed && !localUsed) || openshellSetup.valkeyEngine === "podman") });
+		// Root's listener is this deployment's own docker Valkey (published by docker-proxy), so it is accepted.
+		ownerVerdict = await seams.valkeyOwner(valkeyUrl, { shared: valkeySharedOn(sharedInFile), user: userNameOf(seams), envPath: join(cwd, ".env"), rootOk: true });
 	}
 	// A name that does not resolve here cannot be judged (gate round 3): said, and talked to no more than a refused one.
 	const valkeyUnresolved = ownerVerdict?.unresolved ? `VALKEY_URL's host ${ownerVerdict.unresolved} did not resolve here (${ownerVerdict.why}), so whose Valkey it reaches cannot be judged; the worker waits for it and retries` : null;
@@ -2874,7 +2704,7 @@ export async function collectChecks(shellVars, seams) {
 	} else if (valkeyAuthVerdict && (valkeyAuthVerdict.state === "noauth" || valkeyAuthVerdict.state === "wrongpass")) {
 		// Issue #468: a Valkey that refuses this deployment's credential answers, so "not reachable" would be the wrong
 		// sentence: it is the password, named by its key and where it came from, never its value.
-		checks.push({ ok: false, label: `Valkey (${urlShown(valkeyUrl)}) answers, and ${valkeyAuthVerdict.state === "noauth" ? "requires a password this deployment does not send" : `refuses the ${VALKEY_PASSWORD_KEY} this deployment sends`}: the worker refuses to start on it (exit 2)`, fix: valkeyAuthFix(valkeyAuthVerdict.state, { ...valkeyVenues, envPath: join(cwd, ".env") }) });
+		checks.push({ ok: false, label: `Valkey (${urlShown(valkeyUrl)}) answers, and ${valkeyAuthVerdict.state === "noauth" ? "requires a password this deployment does not send" : `refuses the ${VALKEY_PASSWORD_KEY} this deployment sends`}: the worker refuses to start on it (exit 2)`, fix: valkeyAuthFix(valkeyAuthVerdict.state, { envPath: join(cwd, ".env") }) });
 	} else checks.push({
 		ok: await probeValkey(valkeyTalkUrl),
 		label: `Valkey reachable (${urlShown(valkeyUrl)})${fromFileNote(fileSays("VALKEY_URL"))}`,
@@ -2883,11 +2713,7 @@ export async function collectChecks(shellVars, seams) {
 		// the deployment's VALKEY_PASSWORD in the docker CLI's environment, and doctor hands no program anything from
 		// `.env`). It names the step: `pi-dispatch up`, which starts it with the password, labels its container and volume
 		// with this folder, and asks before it uses a volume it cannot attribute. The words hold on both venues.
-		fix: valkeyVenues.localUsed
-			? "run `pi-dispatch up` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD (or, in a folder /dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.valkey.yml up -d valkey`)"
-			: openshellSetup.valkeyEngine !== "podman"
-				? "run `pi-dispatch up` (or `pi-dispatch service install`) as this account: on the podman venue both start Valkey as a Quadlet unit under its Podman (docs/podman.md, setup step 6); a Valkey you run yourself, a distribution package say, works too"
-				: "run `pi-dispatch up` (or `pi-dispatch service install`) as this account: with PI_OPENSHELL_ENGINE=podman both start Valkey as a Quadlet unit under its Podman (the openshell venue's engine; no egress proxy is started for it); a Valkey you run yourself, a distribution package say, works too",
+		fix: "run `pi-dispatch up` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD (or, in a folder /dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.valkey.yml up -d valkey`)",
 	});
 
 	// Round 3 of PR #475's review: PI_VALKEY_PORT is the port compose publishes its Valkey on, and VALKEY_URL's is the one
@@ -2910,7 +2736,7 @@ export async function collectChecks(shellVars, seams) {
 	if (ownerVerdict?.heldBy) {
 		checks.push({ ok: true, label: `Valkey (${urlShown(valkeyUrl)}) answers from a listener of ${ownerVerdict.heldBy}${ownerVerdict.chosen ? `; the worker connects to ${ownerVerdict.chosen} only` : ""}` });
 	}
-	checks.push(...(await valkeyPasswordChecks({ verdict: valkeyAuthVerdict, context: valkeyContext, seams, valkeyUrl, valkeyTalkUrl, ...valkeyVenues, platform, statSeam, fileValue })));
+	checks.push(...(await valkeyPasswordChecks({ verdict: valkeyAuthVerdict, context: valkeyContext, seams, valkeyUrl, valkeyTalkUrl, platform, statSeam, fileValue })));
 	for (const other of ownerVerdict?.elsewhere ?? []) {
 		checks.push({ ok: false, warn: true, label: `another account also listens on an address VALKEY_URL's host resolves to: ${other}. The worker connects only to the address judged this account's, so it never reaches that one`, fix: "nothing to change for this deployment; a client that resolves the name itself (`pi-dispatch run` from a shell) may still reach it, so prefer VALKEY_URL=redis://127.0.0.1:<port>" });
 	}
@@ -2949,14 +2775,14 @@ export async function collectChecks(shellVars, seams) {
 			.slice("unlisted:".length)
 			.split(",")
 			.filter((v) => /^[a-z][a-z0-9-]{0,31}$/.test(v));
-		const bins = unread.map((v) => (v === "podman" ? "`podman ps -a`" : "`docker ps -a`"));
+		const bins = unread.map(() => "`docker ps -a`");
 		const where = unread.length === 0 ? "NO job" : `NO job on the ${unread.join(" and ")} venue${unread.length === 1 ? "" : "s"} (the other venues' jobs still run)`;
-		checks.push({ ok: false, warn: true, label: `this host's worker admits ${where}: it could not list the job containers left from before it started there, so it cannot count what they hold (host_budget_seed_unread)`, fix: `make the runtime answer for the worker's account (${bins.length > 0 ? [...new Set(bins)].join(", ") : "`docker ps -a`, `podman ps -a`"}); the worker asks again every few seconds and starts admitting once it reads the listing` });
+		checks.push({ ok: false, warn: true, label: `this host's worker admits ${where}: it could not list the job containers left from before it started there, so it cannot count what they hold (host_budget_seed_unread)`, fix: `make the runtime answer for the worker's account (${[...new Set(bins)].join(", ")}); the worker asks again every few seconds and starts admitting once it reads the listing` });
 	}
 	if (selfRow && typeof selfRow.usedMemMiB === "string" && selfRow.usedMemMiB !== "") {
 		const listed = [];
 		let listedAll = true;
-		for (const bin of [...(localUsed ? ["docker"] : []), ...(podmanUsed ? ["podman"] : [])]) {
+		for (const bin of ["docker"]) {
 			const ps = await runCmdCapture(spawn, bin, [...SIZE_LABEL_PS_ARGS], { stdoutOnly: true });
 			if (ps.code !== 0) listedAll = false;
 			else listed.push(...parseSizeLabels(ps.output));
@@ -2982,16 +2808,12 @@ export async function collectChecks(shellVars, seams) {
 	// Read only when there is a peer to compare against. Every line below is gated on a peer existing, and
 	// the SUBPROCESS has to be too: otherwise every `doctor` run on every single-host deployment spawns an
 	// extra docker call whose answer nothing reads.
-	// Issue #433: without `local`, the id the podman section's own image read already returned, and no spawn: a worker
-	// without `local` publishes exactly that one (its default venue's preflight, `start.mjs`), so it is the id to compare.
 	const imageDigest =
 		peers.length === 0
 			? null
-			: localUsed
-				? imageCode === 0
-					? normalizeImageId((await runCmdCapture(spawn, "docker", ["image", "inspect", "--format={{.Id}}", jobImage], { stdoutOnly: true })).output.trim()) || null
-					: null
-				: (podman?.imageDigest ?? null);
+			: imageCode === 0
+				? normalizeImageId((await runCmdCapture(spawn, "docker", ["image", "inspect", "--format={{.Id}}", jobImage], { stdoutOnly: true })).output.trim()) || null
+				: null;
 	if (peers.length > 0) {
 		const mine = workerNameOf(declaredWorkerName);
 		checks.push({ ok: true, label: `Fleet: ${peers.length + 1} worker${peers.length === 0 ? "" : "s"} (${[mine, ...peers.map((h) => h.name)].sort().join(", ")})` });
@@ -3916,7 +3738,7 @@ export async function collectChecks(shellVars, seams) {
 		if (localSecretFolders.length > 0) {
 			checks.push({
 				ok: true,
-				label: `${localSecretFolders.length} local trigger(s) bind secrets and run IN the operator's own folder: ${localSecretFolders.join(", ")} -- a credential the agent writes to .env, .netrc or .git-credentials there lands in your real repository (and in a retained sandbox). Nothing scans for that: keep those folders out of anything you push`,
+				label: `${localSecretFolders.length} local trigger(s) bind secrets and run IN the operator's own folder: ${localSecretFolders.join(", ")} -- a credential the agent writes to .env, .netrc or .git-credentials there lands in your real repository. Nothing scans for that: keep those folders out of anything you push`,
 			});
 		}
 	}
@@ -4070,7 +3892,6 @@ export async function collectChecks(shellVars, seams) {
 				underTemp: (path) => underTemp(path, env),
 				gitVersion: gitRead.code === 0 ? gitRead.output : null,
 				venues: blessedList ?? [DEFAULT_BACKEND],
-				podmanRead: podman?.observed?.read ?? null,
 			}),
 		);
 	}
@@ -4483,40 +4304,13 @@ export async function collectChecks(shellVars, seams) {
 	}
 
 	section("dirs");
-	// Issue #464: the jobs dir is this account's to write. PI_JOBS_DIR, PI_SANDBOX_DIR and TMPDIR as the service reads them
+	// Issue #464: the jobs dir is this account's to write. PI_JOBS_DIR and TMPDIR as the service reads them
 	// (TMPDIR in .env is a documented way out of a squatted default root, so doctor judges the root the service will use).
-	let dirRefused = false;
 	if (seams.jobsDirFs) {
 		const uid = seams.jobsDirUid;
 		const ownerName = (id) => ownerNameFromPasswd(seams.passwd, id);
-		const dirChecks = jobsDirChecks(env, { uid, fs: seams.jobsDirFs, ownerName, note: fromFileNote(fileSays("PI_JOBS_DIR", "PI_SANDBOX_DIR", "TMPDIR", "TEMP")) });
-		dirRefused = dirChecks.some((c) => c.ok === false && !c.warn);
+		const dirChecks = jobsDirChecks(env, { uid, fs: seams.jobsDirFs, ownerName, note: fromFileNote(fileSays("PI_JOBS_DIR", "TMPDIR", "TEMP")) });
 		checks.push(...dirChecks);
-	}
-
-	// REQ-RESURRECTABLE-SANDBOX. A fact line, never a failure: retention is a convenience, and the only thing
-	// worth surfacing is that finished runs' directories -- a repository clone plus the run's prompt.md and
-	// event.json, so issue text -- are sitting on disk, and how many. An operator who never opens a sandbox
-	// should still know they are being kept. Issue #462: not a warning either, since retention on is the default and
-	// nothing needs changing, so what each holds and how to turn it off live in the label (`ok: true` prints no fix).
-	// Issue #464 (gate round 1): the sandbox dir the SERVICE uses (`env`, resolved), and nothing at all after a ✗ above on the
-	// jobs dir, its root or the sandbox dir: that worker does not start, and a ✓ counting what sits in a directory another
-	// account made would read as this account's.
-	if (!dirRefused) {
-		const retentionHours = nonNegativeEnvInt(env.PI_SANDBOX_RETENTION_HOURS, 24);
-		const sandboxDir = env.PI_SANDBOX_DIR || defaultSandboxDir(env);
-		// Counted in BOTH branches (gate round 1): a tombstone the worker cannot delete does not go away because retention
-		// was turned off, and turning it off is exactly when an operator expects the disk back.
-		const kept = countRetained(sandboxDir, fileExists);
-		if (retentionHours === 0) {
-			checks.push({ ok: true, label: "Workspace retention off (PI_SANDBOX_RETENTION_HOURS=0) — finished runs are deleted, none are re-openable" });
-		} else {
-			checks.push({
-				ok: true,
-				label: `${kept.count} retained workspace(s) in ${sandboxDir}, swept after ${retentionHours}h, re-open one with \`pi-dispatch sandbox <jobId>\`${kept.count > 0 ? "; each holds the run's clone plus its prompt.md/event.json (issue text), and PI_SANDBOX_RETENTION_HOURS=0 turns retention off" : ""}`,
-			});
-		}
-		checks.push(...sandboxTombstoneChecks(sandboxDir, kept));
 	}
 
 	section("state");
@@ -4529,8 +4323,7 @@ export async function collectChecks(shellVars, seams) {
 	// ~/.pi-dispatch, so this block is normally one green line; it warns only when a path RESOLVES under a
 	// temp dir, which after the move means an operator put it there.
 	//
-	// Deliberately NOT checked HERE: PI_JOBS_DIR and PI_SANDBOX_DIR. Those are per-run and
-	// retention-bounded respectively, and they stay under temp on purpose. Warning about a
+	// Deliberately NOT checked HERE: PI_JOBS_DIR. That one is per-run, and it stays under temp on purpose. Warning about a
 	// directory that is SUPPOSED to be swept is how an operator learns to skim this section, which costs
 	// more than it buys. Whose the jobs dir is, is checked above (`jobsDirChecks`, issue #464): that is a
 	// different question, and the one that failed every job of a second account on a shared host.
@@ -4769,83 +4562,6 @@ export async function collectChecks(shellVars, seams) {
 }
 
 /**
- * How many retained workspaces are sitting in the retention root.
- *
- * Reads its OWN env rather than loadConfig, like every other doctor check (`doctor.mjs` header): a broken
- * GitHub auth must not stop the operator finding out how much disk this is using. Never throws -- an
- * unreadable or absent root reports zero, which is the honest answer to "how many can I open".
- */
-export function countRetained(sandboxDir, fileExists, { readdir = readdirSync, now = Date.now, readFile = readFileSync } = {}) {
-	if (!fileExists(sandboxDir)) return { count: 0, tombstones: 0, stuck: [], pinned: [] };
-	try {
-		// Issue #446: a TOMBSTONE (`.reap-...`) is a run the sweep has already decided to delete, so it is not one an
-		// operator can open and is not counted as one. Counted apart instead, and the ones older than a delete takes
-		// (`SANDBOX_TOMBSTONE_STUCK_MS`) are named: a tree the worker cannot delete (root-owned files under a non-root
-		// worker, the ordinary shape) stays a tombstone, and every pass retries it with a line a day, so this is where an
-		// operator sees one. A name this module did not write (no parseable age) is stuck by definition.
-		const names = readdir(sandboxDir);
-		const tombs = names.filter((n) => isSandboxTombstone(n));
-		const at = now();
-		// A negative age (a name stamped by a clock that ran ahead) is unknowable, and counts as old, as the sweep reads it.
-		const old = tombs.filter((n) => {
-			const age = sandboxTombstoneAge(n, at);
-			return age === null || age < 0 || age >= SANDBOX_TOMBSTONE_STUCK_MS;
-		});
-		// TWO stories, and NEVER told apart by the pid in the name (gate round 3): after any worker restart the pid is
-		// dead whether or not a delete has failed, so a pid rule called the ordinary stuck tombstone a harmless crash
-		// leftover and dropped its fix, and a pid means nothing across pid namespaces anyway. A tombstone holding a pin
-		// that has not run out is HELD by the sweep, never deleted, and goes back under its run's name once that is free;
-		// calling it stuck, with a removal command beside it, would have an operator delete a run someone was told was
-		// pinned. Its manifest is read for that one field; one that cannot be read is not called pinned. Every other old
-		// tombstone is one the sweep has not removed, whatever the reason, and gets its exact-path removal.
-		const pinned = old.filter((n) => {
-			try {
-				const keepUntil = Date.parse(JSON.parse(String(readFile(join(sandboxDir, n, "manifest.json"), "utf8")))?.keepUntil ?? "");
-				return Number.isFinite(keepUntil) && keepUntil > at;
-			} catch {
-				return false;
-			}
-		});
-		const stuck = old.filter((n) => !pinned.includes(n));
-		return { count: names.length - tombs.length, tombstones: tombs.length, stuck, pinned };
-	} catch {
-		return { count: 0, tombstones: 0, stuck: [], pinned: [] };
-	}
-}
-
-/**
- * The warnings for old tombstones (issue #446): pinned ones held aside, and every other one, or [] when there are none.
- * Never a failure, since nothing is at risk, and in the WARNING shape, `ok: false, warn: true` (gate round 2): `render`
- * prints a ⚠ and the fix line only for `!ok`, and the first version's `ok: true` rendered as a green tick with no fix.
- */
-export function sandboxTombstoneChecks(sandboxDir, kept) {
-	const out = [];
-	const list = (names) => `${names.slice(0, 3).join(", ")}${names.length > 3 ? ", ..." : ""}`;
-	if (kept?.pinned?.length > 0) {
-		out.push({
-			ok: false,
-			warn: true,
-			label: `${kept.pinned.length} pinned workspace(s) in ${sandboxDir} are held aside by the retention sweep (${list(kept.pinned)}) because their run's name was taken when they were put back`,
-			fix: "do NOT remove them: each holds a pinned run, and the sweep puts it back under its run's name as soon as that name is free (move away whatever now holds the name, if it is not a run you want)",
-		});
-	}
-	if (kept?.stuck?.length > 0) out.push(stuckCheck(sandboxDir, kept, list));
-	return out;
-}
-
-function stuckCheck(sandboxDir, kept, list) {
-	const n = kept.stuck.length;
-	return {
-		ok: false,
-		warn: true,
-		label: `${n} deleted workspace(s) in ${sandboxDir} are still on disk (${list(kept.stuck)}) -- the sweep could not remove them; if the worker is running it retries each pass`,
-		// Each one BY NAME, never a `.reap-*` glob (gate round 2): a glob would take a pinned tombstone, or one being
-		// deleted right now, with it.
-		fix: `the usual cause is files the worker's account cannot delete (root-owned files a job left in its clone); remove each as their owner: ${kept.stuck.map((n) => `\`sudo rm -rf ${join(sandboxDir, n)}\``).join(", ")}. They are no longer re-openable either way`,
-	};
-}
-
-/**
  * Is this directory one any local account can write, or one owned by somebody else?
  *
  * The legacy state root is `<OS temp>/pi-dispatch`, and on POSIX the OS temp dir is mode 1777. So the
@@ -4882,7 +4598,7 @@ function recordCount(dir, fileExists) {
 	}
 }
 
-/** PI_SANDBOX_RETENTION_HOURS, parsed the same permissive way the admin's own env reads are. */
+/** A non-negative integer as the admin's own env reads are. */
 function nonNegativeEnvInt(raw, fallback) {
 	if (raw === undefined || raw === "") return fallback;
 	const n = Number.parseInt(raw, 10);
@@ -6047,7 +5763,7 @@ const UNKNOWN_KEY_NAME_MAX = 64;
  *
  * A lower peer that watches the pause windows or the triggers file defers every job from its next reload of it, not
  * only the jobs that read the file: its worker-wide newer state is read by the triggers gate at the processor's head,
- * and by the pickup's pause gate and the watch branch's (a job ended before those, by the draft-source or sandbox
+ * and by the pickup's pause gate and the watch branch's (a job ended before those, by the draft-source
  * check, a runtime's own result, a lost lock's replay or a grouping job's deleted project, spends nothing). Job data
  * is written by the receivers, the console and the workers' own builders, and a receiver publishes no registry row,
  * so its fix names the receivers as a set doctor cannot see.
@@ -6328,7 +6044,7 @@ export async function doctorSubscriptionCredentials(env, { cwd = process.cwd(), 
 	let auth;
 	try {
 		configure ??= (await import("./subscription-config.mjs")).configuredSubscriptions;
-		const config = { authConnectionsFile: resolve(cwd, env.PI_AUTH_CONNECTIONS_FILE), authStoreDir: env.PI_AUTH_STORE_DIR ? resolve(cwd, env.PI_AUTH_STORE_DIR) : null, settingsFile: settingsFilePath(env, home), workerName: workerNameFrom(env), globalPiDir: env.PI_GLOBAL_PI_DIR || null, jobsDir: jobsDirPath(env), sandboxDir: env.PI_SANDBOX_DIR || defaultSandboxDir(env) };
+		const config = { authConnectionsFile: resolve(cwd, env.PI_AUTH_CONNECTIONS_FILE), authStoreDir: env.PI_AUTH_STORE_DIR ? resolve(cwd, env.PI_AUTH_STORE_DIR) : null, settingsFile: settingsFilePath(env, home), workerName: workerNameFrom(env), globalPiDir: env.PI_GLOBAL_PI_DIR || null, jobsDir: jobsDirPath(env) };
 		auth = configure({ config, redis: null, now })?.auth;
 		if (typeof auth?.check !== "function") throw new Error();
 	} catch { return { check: async () => ({ ok: false, managed: true, reason: "auth-policy-invalid" }) }; }
@@ -7444,69 +7160,49 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 }
 
 /**
- * The canary's probe containers' argv after the runtime's name (issue #431), per direction.
+ * The canary's probe containers' argv (issue #431), per direction.
  *
- * docker's is what it always was: a plain `docker run` on the canary network with the two proxy variables, which is
- * pinned byte for byte and not widened here, because moving it is its own change with its own review.
+ * A plain `docker run` on the canary network with the two proxy variables, pinned byte for byte and not widened here,
+ * because moving it is its own change with its own review.
  *
  * `script` is what the container runs, the runner's route (`egressCanaryScript`) unless a probe says otherwise: the
  * plain HTTP probe (issue #508) passes `egressCanaryPlainScript`, and its argv differs from the others in nothing else.
- * A model endpoint's probe (issue #503) passes its own `name` and `httpProxy`, which adds the job's HTTP_PROXY on docker.
- *
- * podman's is a JOB's, built by the podman venue's own builder (`podmanArgsFromSpec` over `containerSpec`, the path
- * `buildPodmanRunArgs` takes), never a hand-rolled argv: `ISOLATION_FLAGS`, the job's memory and cpu bounds,
- * the job user this host decides as `--user`, `--userns=keep-id` and `PODMAN_PINNED_FLAGS`, and a job's own egress
- * environment (`egressEnv`, the four variables a podman job gets) with a job's HOME. That is what makes its answer one
- * about a JOB. A hand-rolled argv like docker's would be weaker than a job's in exactly the places the account's
- * containers.conf can reach (#428): with no `--env-host=false` an `env_host = true` default copies doctor's
- * environment, provider key with it, into the probe, and with no `--http-proxy=false` this shell's proxy variables
- * (lowercase spellings and `no_proxy` among them) would ride beside the ones under test, so what a pass proved would
- * depend on the shell doctor ran in rather than on what a job gets. Rejected for that reason, as was
- * "PODMAN_PINNED_FLAGS plus the user" alone, which is still a second argv for a job-shaped container that can drift.
- *
- * NO MOUNT, and that is the one departure from a job: the canary reads nothing from the host, and a mount only ever adds
- * reach. `containerSpec` requires a workspace (every job has one), so a placeholder is named and the spec's mounts are
- * then replaced by none; `CANARY_NO_WORKSPACE` is a path nothing creates, so if a later edit ever kept the mount, the
- * run would fail on a missing source rather than bind a real directory.
+ * A model endpoint's probe (issue #503) passes its own `name` and `httpProxy`, which adds the job's HTTP_PROXY.
  */
-export function egressCanaryProbeArgs({ bin = "docker", slug, pid, network, proxy, image, url, user = null, script = egressCanaryScript(url), name = egressCanaryProbe(slug, pid), httpProxy = false, size = DEFAULT_JOB_SIZE, hostCpus = null }) {
-	if (bin !== "podman") {
-		return [
-			"run",
-			"--rm",
-			// Named, and outside the boot reaper's `pi-job-` filter by construction. `--rm` disposes of it,
-			// so the name exists for the operator watching `docker ps` during a doctor run and for the one
-			// reading `ps` afterwards to find out what a wedged probe was doing.
-			"--name",
-			// The PID too, so two doctor runs at once do not collide on a name and read the loser's exit 125 as a deny.
-			name,
-			"--pull=never",
-			`--network=${network}`,
-			"-e",
-			`HTTPS_PROXY=http://${proxy}:3128`,
-			// Only for a model endpoint's probe (issue #503), whose URL is `http://`: the runner's dispatcher sends that to
-			// HTTP_PROXY, as a job's does. The canary's own three argv are unchanged.
-			...(httpProxy ? ["-e", `HTTP_PROXY=http://${proxy}:3128`] : []),
-			"-e",
-			"NODE_USE_ENV_PROXY=1",
-			"--entrypoint",
-			"node",
-			image,
-			"-e",
-			script,
-		];
-	}
-	// HOME as a podman job gets it (`resolvePodmanImageUser` always answers CONTAINER_HOME): under keep-id the job user's
-	// passwd entry otherwise names this host's home path, which does not exist in the image, and the canary loads pi as
-	// that user. No credential rides along: the canary proves the route, and a 401 from the provider is its success.
-	// Issue #596: at a job's size (the deployment's default, which doctor reads from the same settings the worker does) and
-	// under the same `--cpus` ceiling, so the canary's container is a job's in its bounds as well as its flags.
-	const { mounts: _placeholder, ...spec } = containerSpec({ image, name, env: { HOME: CONTAINER_HOME, ...egressEnv({ proxy, armed: true }) }, workspace: CANARY_NO_WORKSPACE, network, user, userns: "keep-id", extraFlags: ["--entrypoint", "node"], size, hostCpus });
-	return [...podmanArgsFromSpec({ ...spec, mounts: [] }), "-e", script];
+export function egressCanaryProbeArgs({ slug, pid, network, proxy, image, url, script = egressCanaryScript(url), name = egressCanaryProbe(slug, pid), httpProxy = false }) {
+	return [
+		"run",
+		"--rm",
+		// Named, and outside the boot reaper's `pi-job-` filter by construction. `--rm` disposes of it,
+		// so the name exists for the operator watching `docker ps` during a doctor run and for the one
+		// reading `ps` afterwards to find out what a wedged probe was doing.
+		"--name",
+		// The PID too, so two doctor runs at once do not collide on a name and read the loser's exit 125 as a deny.
+		name,
+		"--pull=never",
+		`--network=${network}`,
+		"-e",
+		`HTTPS_PROXY=http://${proxy}:3128`,
+		// Only for a model endpoint's probe (issue #503), whose URL is `http://`: the runner's dispatcher sends that to
+		// HTTP_PROXY, as a job's does. The canary's own three argv are unchanged.
+		...(httpProxy ? ["-e", `HTTP_PROXY=http://${proxy}:3128`] : []),
+		"-e",
+		"NODE_USE_ENV_PROXY=1",
+		"--entrypoint",
+		"node",
+		image,
+		"-e",
+		script,
+	];
 }
 
-/** The workspace `containerSpec` requires and the canary never mounts (see `egressCanaryProbeArgs`). */
-const CANARY_NO_WORKSPACE = "/nonexistent/pi-dispatch-egress-canary-mounts-nothing";
+/**
+ * The keeper's start advice, in the canary's detach-gate refusal and the sweep's "held" line (issue #458). Survives the
+ * podman removal because the gate still answers on it: a rootless Podman 4.x reached THROUGH the docker CLI
+ * (podman-docker or the Docker API) is a `local` deployment here, and tearing a network the proxy is on down there cuts
+ * the proxy's route out (measured, #452 gate round 3), so the refusal names the same start command the worker's units run.
+ */
+const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (else \`pi-dispatch service install\` or \`pi-dispatch up\` installs it, or start it by hand, docs/podman.md step 6; a container of its name that is not the shipped keeper must be removed first)`;
 
 /**
  * The egress canary (REQ-EGRESS-ALLOWLIST, issue #431): a throwaway `--internal` network built like a job's, the proxy
@@ -7533,9 +7229,9 @@ const CANARY_NO_WORKSPACE = "/nonexistent/pi-dispatch-egress-canary-mounts-nothi
  * `mcpOnly` maps the ids of those only an overlay MCP server uses (`mcpOnlyEndpoints`), whose `models` probe proves
  * the route and is not judged as a model server's answer.
  */
-export async function runEgressCanary({ run, bin = "docker", proxy, image, pid = process.pid, user = null, probeRun = null, endpoints = [], mcpOnly = new Map(), size = DEFAULT_JOB_SIZE, hostCpus = null, gate = makeDetachGate((args, opts) => run(args, { timeoutMs: opts?.timeoutMs ?? CANARY_STEP_TIMEOUT_MS }), { bin }) }) {
+export async function runEgressCanary({ run, bin = "docker", proxy, image, pid = process.pid, probeRun = null, endpoints = [], mcpOnly = new Map(), gate = makeDetachGate((args, opts) => run(args, { timeoutMs: opts?.timeoutMs ?? CANARY_STEP_TIMEOUT_MS }), { bin }) }) {
 	const venue = canaryVenueFor(bin);
-	const probe = probeRun ?? ((args) => run(args, { timeoutMs: bin === "podman" ? PODMAN_FIRST_START_TIMEOUT_MS : RUN_TIMEOUTS.cmd }));
+	const probe = probeRun ?? ((args) => run(args, { timeoutMs: RUN_TIMEOUTS.cmd }));
 	const checks = [];
 	const net = egressCanaryNetwork(pid);
 	// A runner that captures BOTH streams and is bounded: `runCmd` answers with an exit code only and `stdio:
@@ -7612,7 +7308,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 			[CANARY_PROBE_SLUGS[1], "an unlisted host", "https://example.com/", false],
 			[CANARY_PROBE_SLUGS[2], "plain HTTP to a listed host off port 80", "http://api.anthropic.com:443/", false, egressCanaryPlainScript("http://api.anthropic.com:443/", { proxyUrl: egressProxyUrl(proxy) })],
 		]) {
-			const answer = await probe(egressCanaryProbeArgs({ bin, slug, pid, network: net, proxy, image, url, user, size, hostCpus, ...(script ? { script } : {}) }));
+			const answer = await probe(egressCanaryProbeArgs({ slug, pid, network: net, proxy, image, url, ...(script ? { script } : {}) }));
 			// The script exits 0 (reached) or 3 (blocked). Anything else is the container not running it -- a name clash,
 			// the image, the daemon -- which is no reading at all, and must not pass for a deny.
 			// `code === null` is the ONE case where a container may still be RUNNING under a name we chose: the
@@ -7688,7 +7384,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 			if (staleRunner) {
 				checks.push({ ok: false, warn: true, label: `${venue.prefix}Model endpoints: not probed, because the job image has no runner module (above), and their probes take the runner's route`, fix: "use a job image built after issue #427, then re-run doctor" });
 			} else {
-				checks.push(...(await runEndpointProbes({ probe, bin, pid, network: net, proxy, image, user, endpoints, mcpOnly, venue, unfinished, size, hostCpus })));
+				checks.push(...(await runEndpointProbes({ probe, pid, network: net, proxy, image, endpoints, mcpOnly, venue, unfinished })));
 			}
 		}
 	} finally {
@@ -7928,9 +7624,7 @@ function endpointProbeCheck({ slug, endpoint, answer, venue, bin, proxy, next, m
 						? mcpOnly
 							? "the server is there but stuck or busy: check its own log, then re-run doctor"
 							: "the server is there but stuck or busy (a model still loading, every slot taken): check its own log, then re-run doctor"
-						: bin === "podman"
-							? `start the ${server}, bound to this host's LAN address or 0.0.0.0 (never 127.0.0.1 alone), and declare a server on this host as host.containers.internal (docs/egress.md, "Local model servers"). A job meets this as "Connection error"`
-							: `start the ${server}, and check it listens where the proxy reaches it (docs/egress.md, "Local model servers"; on Docker Engine that is 172.17.0.1 or 0.0.0.0, never 127.0.0.1 alone). A job meets this as "Connection error"`;
+						: `start the ${server}, and check it listens where the proxy reaches it (docs/egress.md, "Local model servers"; on Docker Engine that is 172.17.0.1 or 0.0.0.0, never 127.0.0.1 alone). A job meets this as "Connection error"`;
 		return { ok: false, warn: true, label: `${head} does NOT answer: ${why}`, fix, endpointProbe: tag };
 	}
 	const wider = `the proxy's rules are wider than model-endpoints.conf renders: compare the include inside it (\`${bin} exec ${proxy} cat ${ENDPOINTS_INCLUDE_IN_PROXY}\`) with \`pi-dispatch egress render\`'s, check egress-allowlist.conf does not list ${endpoint.host}, then \`${reload}\``;
@@ -7979,7 +7673,7 @@ export function undeclaredPortNear(endpoint, endpoints) {
  * variable as well on docker: the runner's dispatcher sends an `http://` origin to HTTP_PROXY, which docker's canary
  * argv does not otherwise carry (podman's is a job's environment and has it).
  */
-async function runEndpointProbes({ probe, bin, pid, network, proxy, image, user, endpoints, mcpOnly = new Map(), venue, unfinished, size = DEFAULT_JOB_SIZE, hostCpus = null }) {
+async function runEndpointProbes({ probe, pid, network, proxy, image, endpoints, mcpOnly = new Map(), venue, unfinished }) {
 	const checks = [];
 	for (const endpoint of endpointsById(endpoints)) {
 		const next = undeclaredPortNear(endpoint, endpoints);
@@ -7992,9 +7686,9 @@ async function runEndpointProbes({ probe, bin, pid, network, proxy, image, user,
 		];
 		for (const [slug, url, script] of runs) {
 			const name = egressEndpointProbe(slug, endpoint.id, pid);
-			const answer = await probe(egressCanaryProbeArgs({ bin, slug, name, pid, network, proxy, image, url, user, script, httpProxy: true, size, hostCpus }));
+			const answer = await probe(egressCanaryProbeArgs({ slug, name, pid, network, proxy, image, url, script, httpProxy: true }));
 			if (answer?.code === null && answer.ended !== "error") unfinished.push(name);
-			checks.push(endpointProbeCheck({ slug, endpoint, answer, venue, bin, proxy, next, mcpOnly: mcpOnly.get(endpoint.id) ?? null }));
+			checks.push(endpointProbeCheck({ slug, endpoint, answer, venue, bin: "docker", proxy, next, mcpOnly: mcpOnly.get(endpoint.id) ?? null }));
 		}
 	}
 	return checks;
@@ -8485,15 +8179,14 @@ function runCmd(spawn, cmd, args, timeoutMs = RUN_TIMEOUTS.cmd) {
  * venue's Quadlet Valkey through `service install --force`, docker's through `up` (or compose's own recreate). Named,
  * never run by doctor (issue #471's rule).
  */
-export function valkeyPasswordUpgradeStep({ localUsed, podmanUsed }) {
-	if (podmanUsed && !localUsed) return "run `pi-dispatch service install --force` as this account: it writes a VALKEY_PASSWORD into .env, restarts the Quadlet Valkey with it (the queue in its volume is kept) and then the worker and the receiver";
+export function valkeyPasswordUpgradeStep() {
 	return "run `pi-dispatch up`: it writes a VALKEY_PASSWORD into .env and restarts pi-dispatch-valkey with it (its volume, and the queue, is kept); a compose-started Valkey is recreated with `docker compose --env-file .env -f deploy/docker-compose.yml up -d`. Then restart the worker and the receiver so they send it";
 }
 
 /** The fix for a Valkey that refuses this deployment's credential (issue #468). */
-function valkeyAuthFix(state, { localUsed, podmanUsed, envPath }) {
+function valkeyAuthFix(state, { envPath }) {
 	if (state === "noauth") return `put ${VALKEY_PASSWORD_KEY}=<that Valkey's password> in ${envPath} (for a Valkey shared with PI_VALKEY_SHARED=1, the password of the account that runs it), then restart the worker and the receiver`;
-	return `${VALKEY_PASSWORD_KEY} in ${envPath} is not that Valkey's password. If you changed it, restart Valkey with it: ${valkeyPasswordUpgradeStep({ localUsed, podmanUsed })}`;
+	return `${VALKEY_PASSWORD_KEY} in ${envPath} is not that Valkey's password. If you changed it, restart Valkey with it: ${valkeyPasswordUpgradeStep()}`;
 }
 
 /**
@@ -8503,7 +8196,7 @@ function valkeyAuthFix(state, { localUsed, podmanUsed, envPath }) {
  * is not judged. A `.env` holding VALKEY_PASSWORD that other accounts can read is a warning too, and a value the start
  * script could not hand to Valkey is a failure. The file's value comes from issue #471's one resolution (`fileValue`).
  */
-async function valkeyPasswordChecks({ verdict, context, seams, valkeyUrl, valkeyTalkUrl, localUsed, podmanUsed, platform, statSeam, fileValue }) {
+async function valkeyPasswordChecks({ verdict, context, seams, valkeyUrl, valkeyTalkUrl, platform, statSeam, fileValue }) {
 	const checks = [];
 	const inFile = fileValue(VALKEY_PASSWORD_KEY);
 	if (typeof inFile === "string" && inFile !== "" && seams.serviceEnvFile) {
@@ -8531,7 +8224,7 @@ async function valkeyPasswordChecks({ verdict, context, seams, valkeyUrl, valkey
 	// A Valkey on another machine is the operator's own to secure; the threat this answers is another account on THIS one.
 	if (!isLoopbackHost(host)) return checks;
 	const open = await seams.valkeyAuth(valkeyTalkUrl, { context, withoutPassword: true });
-	const upgrade = valkeyPasswordUpgradeStep({ localUsed, podmanUsed });
+	const upgrade = valkeyPasswordUpgradeStep();
 	if (open.state === "ok") {
 		checks.push(
 			verdict.passwordSet
@@ -8776,9 +8469,9 @@ export function doctorJobSize(env) {
  * only, the worker's `size_bound_unenforced`). A setting that does not parse is a FAILURE: the worker refuses to start
  * on it (`loadConfig`).
  * `daemon` is the local venue's one `docker info` answer (null where it was not read), `undefined` where this
- * deployment does not run `local`; `podman` is the podman venue's one `podman info` read the same way.
+ * deployment does not run `local`.
  */
-export function jobSizeChecks(env, { daemon = undefined, podman = undefined, cpuBudgetCenti = null } = {}) {
+export function jobSizeChecks(env, { daemon = undefined, cpuBudgetCenti = null } = {}) {
 	let d;
 	try {
 		d = jobSizeDefaults(env);
@@ -8791,7 +8484,6 @@ export function jobSizeChecks(env, { daemon = undefined, podman = undefined, cpu
 	// `reason` is the reader's own token (`timeout`, `unparseable`, ...), never the runtime's text.
 	const reasonOf = (read) => (typeof read?.reason === "string" && /^[a-z0-9-]{1,40}$/.test(read.reason) ? read.reason : "not read");
 	if (daemon !== undefined) venues.push({ venue: "local", answered: daemon?.answered === true, reason: reasonOf(daemon), hostCpus: daemon?.answered === true ? daemon.facts?.hostCpus : null, cmd: "docker info" });
-	if (podman !== undefined) venues.push({ venue: "podman", answered: podman?.answered === true, reason: reasonOf(podman), hostCpus: podman?.answered === true ? podman.info?.hostCpus : null, cmd: "podman info" });
 	for (const v of venues) {
 		// Issue #596, phase 2: the host's CPU budget is every job's `--cpus` (capped at the runtime's count) once it is known.
 		const ceilingCenti = Number.isSafeInteger(v.hostCpus) ? cpuCeilingCenti(v.hostCpus, cpuBudgetCenti) : null;
@@ -8818,12 +8510,11 @@ export function jobSizeChecks(env, { daemon = undefined, podman = undefined, cpu
 /**
  * The host budget as doctor computes it (issue #596, phase 2, DES-HOST-BUDGET), by the worker's own functions from the
  * same reads the size lines use: `{ settings, jobDefault, facts, memMiB, cpuCenti, detail }`, or `{ error, jobDefault }`
- * when a setting does not parse (the worker refuses to start on it). `daemon` is the local venue's `docker info` answer
- * and `podman` the podman venue's `podman info` read, either absent; on rootless Podman the user service's `memory.max`
- * and `cpu.max` are read beside them (`readFile`, the observation seam), as the worker reads them. Doctor answers for the
+ * when a setting does not parse (the worker refuses to start on it). `daemon` is the local venue's `docker info` answer.
+ * Doctor answers for the
  * CONFIGURATION, so this is the budget a worker started now would compute; the registry row says what a running one has.
  */
-export function doctorHostBudget(env, { daemon = undefined, podman = undefined, readFile = null, euid = null } = {}) {
+export function doctorHostBudget(env, { daemon = undefined, readFile = null } = {}) {
 	let jobDefault;
 	try {
 		const d = jobSizeDefaults(env);
@@ -8838,17 +8529,14 @@ export function doctorHostBudget(env, { daemon = undefined, podman = undefined, 
 		return { error: error.message, jobDefault };
 	}
 	const views = [];
-	let user = {};
 	if (daemon?.answered === true) views.push(daemon.facts);
-	if (podman?.answered === true) {
-		views.push(podman.info);
-		if (podman.info?.rootless === true && typeof readFile === "function") user = readUserServiceLimits({ uid: euid, readFile });
-	}
 	const least = (key) => {
 		const known = views.map((v) => v?.[key]).filter((v) => Number.isSafeInteger(v));
 		return known.length > 0 ? Math.min(...known) : null;
 	};
-	const facts = { memTotalMiB: least("memTotalMiB"), hostCpus: least("hostCpus"), ...user };
+	// The `...user` spread this facts object once took (rootless Podman's service limits, read per venue) left with the
+	// podman venue: the docker daemon's own facts are the only view a single-backend deployment has.
+	const facts = { memTotalMiB: least("memTotalMiB"), hostCpus: least("hostCpus") };
 	return { settings, jobDefault, facts, ...computeHostBudget(settings, facts, jobDefault) };
 }
 
@@ -8859,10 +8547,9 @@ export function doctorHostBudget(env, { daemon = undefined, podman = undefined, 
  * when that image is present). Doctor never WRITES a quota; the worker does at boot where it may.
  * `run(bin, args, { timeoutMs })` resolves `{ code, stdout, error }`.
  */
-export async function doctorCpuReserve({ daemon = undefined, podman = undefined, endpointLocal = false, platform = process.platform, run, image, imagePresent = false }) {
+export async function doctorCpuReserve({ daemon = undefined, endpointLocal = false, platform = process.platform, run, image, imagePresent = false }) {
 	const venues = [];
 	if (daemon !== undefined && daemon?.answered === true) venues.push({ venue: "local", facts: daemon.facts, endpointLocal });
-	if (podman !== undefined && podman?.answered === true) venues.push({ venue: "podman", facts: podman.info, endpointLocal: podman.info?.serviceIsRemote === false });
 	const out = [];
 	for (const v of venues) {
 		const plan = reservePlan({ ...v, platform });
@@ -8889,7 +8576,6 @@ function reserveUnmanaged(why, want) {
 		"remote-daemon": ["the Docker daemon uses the systemd driver and is not observed on this host, so its slice cannot be read from here", `on the daemon's host, run once as root: \`sudo systemctl set-property ${CGROUP_PARENT} ${pct}\``],
 		"rootless-docker": ["rootless Docker's slice is its own account's, which the worker does not manage", `as the daemon's account: \`systemctl --user set-property ${CGROUP_PARENT} ${pct}\``],
 		"driver-unknown": ["the runtime did not say which cgroup driver it uses", "make `docker info` report its CgroupDriver, then re-run doctor"],
-		"podman-rootful-remote": ["this Podman is rootful or remote, whose slice the worker does not manage", `on Podman's host, run once as root: \`sudo systemctl set-property ${CGROUP_PARENT} ${pct}\``],
 	};
 	return table[why] ?? ["the worker keeps no quota on this venue", `set it yourself: \`sudo systemctl set-property ${CGROUP_PARENT} ${pct}\``];
 }
@@ -8906,7 +8592,7 @@ export function cpuReserveChecks(reads, cpuCenti) {
 	for (const { plan, read, cgroupManager } of reads) {
 		const v = plan.venue;
 		if (!plan.parent) {
-			checks.push({ ok: false, warn: true, label: `${v}: jobs run without the ${CGROUP_PARENT} parent cgroup (Podman uses the ${cgroupManager ?? "unknown"} cgroup manager here), so each job's CPU weight is capped at 1024: the egress proxy and Valkey get a fair share of the CPU, not a reserve`, fix: "run the worker as a systemd user service with linger on, so Podman uses the systemd cgroup manager, then re-run doctor" });
+			checks.push({ ok: false, warn: true, label: `${v}: jobs run without the ${CGROUP_PARENT} parent cgroup (the runtime uses the ${cgroupManager ?? "unknown"} cgroup manager here), so each job's CPU weight is capped at 1024: the egress proxy and Valkey get a fair share of the CPU, not a reserve`, fix: "run the worker as a systemd user service with linger on, so the runtime uses the systemd cgroup manager, then re-run doctor" });
 			continue;
 		}
 		if (cpuCenti === null || cpuCenti === undefined) {
@@ -9620,14 +9306,13 @@ export function budgetLedgerChecks(selfRow, containers) {
  * Reads the environment directly, like every other check here, and parses through `backends.mjs` so doctor
  * and the worker cannot disagree about what a floor says.
  */
-export function backendChecks(env, { endpoint = null, daemon = null, fs = { statSync, readFileSync, readdirSync }, podman = null, unit } = {}) {
+export function backendChecks(env, { endpoint = null, daemon = null } = {}) {
 	const checks = [];
-	// What this shell's docker CLI resolves (#278), and what its daemon and this host's files say about bounds and mounts
+	// What this shell's docker CLI resolves (#278), and what its daemon says about bounds and mounts
 	// (#345), as the observation map the table's `observedBy` reads. Anything doctor was not given is not observed, which
-	// gets no credit -- the same polarity as everywhere. Issue #354: `podman` is `observePodman`'s answer plus the info
-	// read it came from (`read`), or null where the podman venue is not blessed, which adds nothing to the map.
-	const observed = observeHost({ endpoint, daemon, fs, unit, env });
-	const observations = { ...observed.observations, [DOCKER_ENDPOINT_LOCAL]: endpoint?.local === true, ...(podman?.observations ?? {}) };
+	// gets no credit -- the same polarity as everywhere.
+	const observed = observeHost({ endpoint, daemon });
+	const observations = { ...observed.observations, [DOCKER_ENDPOINT_LOCAL]: endpoint?.local === true };
 	let backends;
 	let floor;
 	try {
@@ -9702,32 +9387,9 @@ export function backendChecks(env, { endpoint = null, daemon = null, fs = { stat
 				});
 				continue;
 			}
-			// Issue #354: the podman venue's three, from its own `podman info` and this account's files, never from the docker
-			// daemon's answer. Said when `podman info` answered, or failed in a way that may pass (a timeout); NOT when it was
-			// never read or cannot answer here (no podman, a refused platform), where the podman section's refusal line is the
-			// whole story, as the docker branch below is not said without a docker binary. A floor still refuses on it below.
-			if (PODMAN_OBSERVATIONS.has(d.observedBy)) {
-				if (observations[d.observedBy] !== true && (podman?.read?.answered === true || podman?.read?.transient === true)) {
-					const unread = observations[d.observedBy] !== false;
-					// The endpoint is the operator's to point, as docker's is; bounds and mounts are this account's Podman setup.
-					const by = d.observedBy === PODMAN_SERVICE_LOCAL ? "the operator" : "this account's Podman setup";
-					// Issue #453: when the bounds miss for a reason in the account's systemd setup (no user manager, or one Podman
-					// cannot reach), this line is the ONE that says so (the podman section below does not repeat it), and its fix is
-					// that cause's rather than the floor's generic remedy. Keyed on the observation's own cause, so a miss with
-					// another cause keeps OBSERVATION_FIX.
-					const causeFix = d.observedBy === PODMAN_BOUNDS_DELEGATED && !unread ? PODMAN_BOUNDS_FIX[podman.boundsCause] : undefined;
-					checks.push({
-						ok: false,
-						warn: true,
-						label: `${name}: ${property} is ASSERTED by ${by}, not enforced: ${podman.evidence?.[d.observedBy] ?? "not observed"}`,
-						fix: causeFix ?? (!unread ? OBSERVATION_FIX[d.observedBy] : podman.reasons?.[d.observedBy] === "file-unread" ? fileUnreadFix(OBSERVATIONS[d.observedBy]) : `nothing shows whether ${OBSERVATIONS[d.observedBy]}; fix what stops \`podman info\` answering for the worker's account, then re-run doctor`),
-					});
-					continue;
-				}
-			}
 			// Not said when no daemon read happened at all, or there is no docker binary (the daemon line above already failed): a
 			// floor still refuses on it below.
-			else if (d.observedBy && d.observedBy !== DOCKER_ENDPOINT_LOCAL && observations[d.observedBy] !== true && daemon !== null && daemon.reason !== "docker-not-found") {
+			if (d.observedBy && d.observedBy !== DOCKER_ENDPOINT_LOCAL && observations[d.observedBy] !== true && daemon !== null && daemon.reason !== "docker-not-found") {
 				// #345: the word holds only while this daemon, or this host's runtime configuration, is observed providing it.
 				// Printed as what it degrades to, with what was seen, and the worker's own boot line named.
 				const unread = observations[d.observedBy] !== false;
@@ -9742,7 +9404,7 @@ export function backendChecks(env, { endpoint = null, daemon = null, fs = { stat
 							: `nothing shows whether ${OBSERVATIONS[d.observedBy]}; fix what stops the daemon answering, then re-run doctor. The worker logs its own answer at boot (worker_started.${d.observedBy})`
 						: bounds
 							? `the pid and memory bounds in the job argv are the daemon's to apply, and it is not observed applying them: \`pi-dispatch doctor --live\` reads pids.max and memory.max off a real container on this daemon. The worker logs its own answer at boot (worker_started.${d.observedBy})`
-							: `Podman mounts what its mounts.conf and containers.conf list into every job container, invisible to docker inspect: create an empty /etc/containers/mounts.conf and remove any volumes or mounts key. The worker logs its own answer at boot (worker_started.${d.observedBy})`,
+							: `check for a docker CLI plugin or wrapper that rewrites \`docker run\`, or a daemon that mounts its own defaults into every container beyond what the job argv names. The worker logs its own answer at boot (worker_started.${d.observedBy})`,
 				});
 				continue;
 			}
@@ -9809,7 +9471,7 @@ export function backendChecks(env, { endpoint = null, daemon = null, fs = { stat
  * above already failed.
  */
 export async function jobUserChecks(env, seams, { endpoint, dockerCode, imageCode, jobImage }) {
-	const { spawn, cwd, home, fileExists, jobUserIdentity: ids = {}, stat, passwd, readUnit = (path) => readFileSync(path, "utf8"), observationFs = { statSync, readFileSync, readdirSync } } = seams;
+	const { spawn, cwd, home, fileExists, jobUserIdentity: ids = {}, stat, passwd, readUnit = (path) => readFileSync(path, "utf8") } = seams;
 	if (dockerCode !== 0) return { checks: [], forLive: { run: true, user: null }, daemon: null };
 	const platform = ids.platform ?? seams.platform;
 	// The worker's bound, not the endpoint read's 5 s: `docker info` is the slow read on a busy host, and a doctor that
@@ -9824,47 +9486,9 @@ export async function jobUserChecks(env, seams, { endpoint, dockerCode, imageCod
 		// the backend section above reports an unparseable PI_BACKENDS
 	}
 	const checks = [];
-	// Issue #345: WHICH runtime answered, display only, from the same read. Podman's docker emulation (podman-docker) is
-	// named as a warning: it resolves no docker context, so credentialTransit is never observed there and --live does not
-	// run; the real docker CLI pointed at Podman's socket is the route that reads everything back.
+	// Issue #345: WHICH runtime answered, display only, from the same read.
 	const runtime = runtimeLine(daemon);
 	if (runtime) checks.push(runtime);
-	// Issue #448: on rootful Podman's Docker API service on this host, the containers.conf that service reads, judged by
-	// the worker's own function, next to the line that says which runtime this is. Nothing is read or spawned elsewhere.
-	// Severity by the boot rule: ✗ where a worker with `local` as its default venue refuses to boot, ⚠ where it boots and
-	// refuses each local job. What this account cannot read is its own ⚠, a residual named, never a refusal.
-	const readPodmanService = seams.readPodmanService ?? makePodmanServiceReader({ run: dockerRunVia(spawn, PODMAN_SERVICE_TIMEOUT_MS, { bin: "systemctl" }) });
-	// One read of the unit, handed back for the backend section's mounts observation too (issue #448).
-	const unit = await readRootfulService({ endpoint, daemon, readService: readPodmanService });
-	const rootful = await observeRootfulConf({ endpoint, daemon, fs: observationFs, readService: readPodmanService, env, unit });
-	const rootfulRefused = rootful?.refusal ?? null;
-	if (rootfulRefused?.transient) {
-		checks.push({ ok: false, warn: true, label: `local: whether rootful Podman's containers.conf widens a job could not be read just now: ${rootfulRefused.evidence}`, fix: rootfulConfFix(rootfulRefused) });
-	} else if (rootfulConfRetries(rootfulRefused)) {
-		// Gate round 1 of PR #473: a service older than its containers.conf (or a clock behind a change time) heals by
-		// itself, so the worker holds each job (gate round 2: re-checked every minute, no attempt spent, for up to an hour)
-		// and a boot exits 1: ⚠, never the ✗ a configuration fix earns.
-		checks.push({ ok: false, warn: true, label: `local: every local job is held, not refused, until rootful Podman's service restarts: ${rootfulRefused.evidence}`, fix: rootfulConfFix(rootfulRefused) });
-	} else if (rootfulRefused) {
-		const boot = defaultIsLocal && decision.mode !== "unmappable";
-		checks.push({
-			ok: false,
-			...(boot ? {} : { warn: true }),
-			label: `local: no job can run on this venue (${rootfulRefused.cause}): ${rootfulRefused.evidence}${boot ? " -- a worker running as this account refuses to boot" : " -- every local job is refused"}`,
-			fix: rootfulConfFix(rootfulRefused),
-		});
-	} else if (rootful) {
-		// Says only what was judged: "among those this account can read" beside an unread part, and nothing about the running
-		// service when systemctl did not answer for it (the ⚠ below names both). Doctor keeps no deletion memory (a worker
-		// does, from the files it saw while the service ran), so the ✓ claims only changes a change time shows, and names
-		// the deletion it cannot see (gate round 2 of PR #473: it said "not running with an older one" while one leaked).
-		const serviceUnread = rootful.unread.some((u) => !u.path.startsWith("/"));
-		const filesUnread = rootful.unread.some((u) => u.path.startsWith("/"));
-		checks.push({ ok: true, label: `local: no containers.conf rootful Podman's service reads here sets any of the ${PODMAN_ROOTFUL_WIDENING_KEYS.length} keys the local venue refuses (docs/podman.md)${filesUnread ? ", among those this account can read" : ""}${serviceUnread ? "" : `, and none of them changed since ${PODMAN_SERVICE_UNIT} started (a file deleted while it runs is not seen here: only a running worker remembers what it saw)`}` });
-	}
-	if (rootful && rootful.unread.length > 0) {
-		checks.push({ ok: false, warn: true, label: `local: part of rootful Podman's configuration is not judged here: ${rootfulUnreadList(rootful.unread)}`, fix: rootfulConfResidual(rootful.unread) });
-	}
 	let forLive = { run: true, user: null };
 	if (decision.mode === "image") {
 		const why = decision.cause === "desktop-platform" ? "a VM-backed daemon that maps file ownership" : "the docker endpoint is not on this host";
@@ -9976,13 +9600,8 @@ export async function jobUserChecks(env, seams, { endpoint, dockerCode, imageCod
 			}
 		}
 	}
-	// A local job refused on rootful Podman's configuration (issue #448) runs no container, so neither does the probe.
-	if (rootfulRefused) forLive = { run: false, reason: rootfulRefused.transient ? "rootful Podman's containers.conf could not be read just now, so whether a probe would match a job is not known" : rootfulConfRetries(rootfulRefused) ? "a local job waits for rootful Podman's service to restart, so a probe would read back a container no job gets yet" : `a local job is refused here (${rootfulRefused.cause}), so a probe would read back a container no job gets` };
-	return { checks, forLive, daemon, unit };
+	return { checks, forLive, daemon };
 }
-
-/** The podman venue's observations (issue #354), which only its own `podman info` and this account's files answer. */
-const PODMAN_OBSERVATIONS = new Set([PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOUNTS, PODMAN_SERVICE_LOCAL]);
 
 /**
  * The fix for an observation left unanswered by a HOST FILE that could not be read for a moment (`reason:
@@ -9991,381 +9610,6 @@ const PODMAN_OBSERVATIONS = new Set([PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOU
  */
 function fileUnreadFix(what) {
 	return `nothing shows whether ${what}, because the file named above could not be read just now (the runtime itself answered); a job the floor needs it for is retried rather than refused, so if this recurs, fix what the host ran out of (file descriptors, memory, a failing disk), then re-run doctor`;
-}
-
-/**
- * The podman venue's section (issue #354, DES-PODMAN-NATIVE-ROOTLESS-BACKEND): ONE bounded `podman info` as this shell's
- * account, under the worker's own bound, answering the job user (`decidePodmanJobUser`, the worker's own rows), the three
- * observations (`observePodman`) and the display facts; then the job image in THIS account's store and, with egress
- * armed, the proxy under the same rootless Podman. Returns `{ checks, observed, relabel, forLive }`; `observed` feeds the
- * backend section (printed before this) and `forLive` is what `--live` reads back on podman with.
- *
- * Severity follows the worker, as the local job-user line does: ✗ only for what stops it booting (a refusing cause
- * while podman is the DEFAULT venue); a per-job refusal and an unanswered read are ⚠, since the worker runs and refuses
- * or retries each podman job. The image and the proxy are ✗ as they are for local: every job is refused without them.
- *
- * What goes wrong with the observations is NOT repeated here: the backend section above names each degraded word with
- * what was seen, so this section prints the bounds line only when they hold. That includes a missing systemd user
- * manager (issue #453): the backend section's isolation line carries it as evidence with its own fix, and the floor
- * line there carries the ✗, so a line here would only repeat both.
- */
-export async function podmanChecks(env, seams, { jobImage, jobImageNote = "" }) {
-	const { spawn, home = safeHomeDir(), jobUserIdentity: ids = {}, observationFs = { statSync, readFileSync, readdirSync }, runTimeouts = RUN_TIMEOUTS } = seams;
-	const platform = ids.platform ?? seams.platform;
-	const { podmanDefault, localUsed } = venuesOf(env);
-	const readInfo = makePodmanInfoReader({ run: dockerRunVia(spawn, PODMAN_INFO_TIMEOUT_MS, { bin: "podman" }) });
-	// ONE read, handed to all three: the decision, the observations and the display line must speak from the same answer,
-	// and a second `podman info` could land on a different one. Not asked off Linux, where the decision's first row refuses
-	// before any read (Podman machine is unmeasured), so doctor spawns nothing there either.
-	const infoRead = platform === "linux" ? await readInfo() : null;
-	const decision = decidePodmanJobUser({ platform, euid: ids.euid, egid: ids.egid, read: infoRead });
-	const info = infoRead?.answered ? infoRead.info : null;
-	const observed = infoRead
-		? { ...observePodman({ read: infoRead, fs: observationFs, home, env, euid: ids.euid }), read: infoRead }
-		: // Never read: nothing is observed, and the backend section stays quiet about it, since the refusal line below is
-			// the whole story.
-			{ observations: { [PODMAN_BOUNDS_DELEGATED]: null, [PODMAN_ADDS_NO_MOUNTS]: null, [PODMAN_SERVICE_LOCAL]: null }, evidence: {}, reasons: {}, read: null };
-	const checks = [];
-	// `fix` names the line above that stops the read-back, so `--live` points at the conf refusal when that is the one.
-	const notRun = (reason, fix) => ({ run: false, reason, ...(fix ? { fix } : {}) });
-	let forLive = notRun("podman was not read");
-
-	if (info) {
-		const version = typeof info.version === "string" ? ` ${info.version}` : "";
-		checks.push({ ok: true, label: `podman: \`podman info\` answered as this account (Podman${version}${info.rootless === true ? ", rootless" : ""}${info.serviceIsRemote === false ? ", this host's own" : ""})` });
-	}
-
-	if (decision.mode === "unmappable") {
-		const boot = PODMAN_BOOT_REFUSING_CAUSES.has(decision.cause) && podmanDefault;
-		checks.push({
-			ok: false,
-			...(boot ? {} : { warn: true }),
-			label: `podman: no job can run on this venue (${decision.cause})${boot ? " -- a worker running as this account refuses to boot" : " -- every podman job is refused"}`,
-			fix: PODMAN_JOB_USER_FIX[decision.cause] ?? JOB_USER_FIX[decision.cause] ?? "see DES-PODMAN-NATIVE-ROOTLESS-BACKEND",
-		});
-		return { checks, observed, relabel: false, forLive: notRun(`a podman job is refused here (${decision.cause}), so a probe would read back a container no job gets`) };
-	}
-	// Issue #428: the account's containers.conf, read from the files the worker reads, by the worker's own function, so the
-	// line cannot say something the worker does not do. Severity by the boot rule, as the identity line above: ✗ where a
-	// worker with `podman` as its default venue refuses to boot, ⚠ where it boots and refuses each podman job. No spawn.
-	// `runRoot` from the same read (issue #450), `undefined` while it has not answered (the worker retries such a job).
-	const widened = podmanConfWidening({ fs: observationFs, home, env, euid: ids.euid, runRoot: infoRead?.answered === true && infoRead.info ? (infoRead.info.runRoot ?? null) : undefined });
-	// What `--live` points at (issue #450): the line above is the RUNNING rootless network's when the finding is `live`, and
-	// its fix is that network's reset, not a containers.conf edit.
-	const firstFix = widened?.live
-		? widened.key && !widened.transient
-			? "reset this account's rootless network as the podman line above says first, then re-run `pi-dispatch doctor --live`"
-			: "fix the podman rootless network line above first, then re-run `pi-dispatch doctor --live`"
-		: "fix the podman containers.conf line above first, then re-run `pi-dispatch doctor --live`";
-	if (widened?.transient) {
-		// A read that failed for a moment is the worker's retry, never its refusal, so it is ⚠ and says so.
-		checks.push({ ok: false, warn: true, label: `podman: whether this account's containers.conf or running rootless network widens a job could not be read just now: ${widened.evidence}`, fix: podmanConfFix(widened) });
-		return { checks, observed, relabel: false, forLive: notRun("this account's containers.conf or running rootless network could not be read just now, so whether a probe would match a job is not known", firstFix) };
-	}
-	if (widened) {
-		checks.push({
-			ok: false,
-			...(podmanDefault ? {} : { warn: true }),
-			label: `podman: no job can run on this venue (${widened.cause}): ${widened.evidence}${podmanDefault ? " -- a worker running as this account refuses to boot" : " -- every podman job is refused"}`,
-			fix: podmanConfFix(widened),
-		});
-		return { checks, observed, relabel: false, forLive: notRun(`a podman job is refused here (${widened.cause}), so a probe would read back a container no job gets`, firstFix) };
-	}
-	// Issue #464: Podman's run directory gone from under it, after the containers.conf refusal (read from files, so it holds
-	// whatever Podman answers) and in place of the undecided line below, which it explains. Podman keeps the run root it
-	// first used in its database (/run/user/<uid>/containers, while the account's user manager ran), and once linger is
-	// switched off that directory is removed with the manager; every podman call as the account then fails before it does
-	// anything (measured on Fedora 44 with 5.8.1 and Ubuntu 24.04 with 4.9.3: exit 125, `default OCI runtime "crun" not
-	// found`; exit 1 with XDG_RUNTIME_DIR set to the missing directory on 5.8.1). stderr is never read (dockerRunVia), so
-	// this rests on two facts: the read failed with an exit status, and /run/user/<uid> does not exist.
-	const runRootGone = infoRead ? podmanRunDirGone({ read: infoRead, euid: ids.euid, fs: observationFs, home, env }) : null;
-	if (runRootGone) {
-		const user = userNameOf(seams);
-		const linger = user ? await readLingerOrFlag(user, { spawn, fs: observationFs }) : null;
-		const who = user ?? "<account>";
-		checks.push({
-			ok: false,
-			...(podmanDefault ? {} : { warn: true }),
-			label: `podman: every podman command fails as this account (${infoRead.reason}): its run directory ${runRootGone} does not exist${linger === false ? `, because linger is off for ${who}` : linger === null ? " (linger could not be read)" : ""}. Podman keeps the run root it first used, under that directory, and cannot start a container or answer \`podman info\` without it${podmanDefault ? " -- no podman job can run" : " -- every podman job fails"}`,
-			fix: `sudo loginctl enable-linger ${who} -- it starts the account's user manager, which recreates ${runRootGone}, and keeps it with no one logged in (measured, Podman 5.8.1 and 4.9.3). \`podman system migrate\` does not get past this (measured: it fails the same way), and a login session of the account (ssh, \`machinectl shell ${who}@\`) recreates the directory only while that session lasts. Then re-run doctor`,
-		});
-		return { checks, observed, relabel: false, forLive: notRun(`podman cannot run as this account (${runRootGone} does not exist)`, "fix the podman run directory line above first, then re-run `pi-dispatch doctor --live`") };
-	}
-
-	if (decision.mode !== "worker") {
-		checks.push({ ok: false, warn: true, label: `podman: which uid a job runs as could not be decided (${decision.reason})`, fix: "the worker retries every podman job until it can decide; fix what stops `podman info` answering for the worker's account, then re-run doctor" });
-		return { checks, observed, relabel: false, forLive: notRun(`the podman job user could not be decided (${decision.reason}), so a probe as any uid would read back a container no job gets`) };
-	}
-
-	// The bounds, said when they hold; see the header for why a miss is left to the backend section.
-	if (observed.observations[PODMAN_BOUNDS_DELEGATED] === true) {
-		// The user manager's delegated list the answer rests on (issue #453), not `podman info`'s, which is the caller's cgroup.
-		const controllers = Array.isArray(observed.boundsControllers) ? observed.boundsControllers : [];
-		checks.push({ ok: true, label: `podman: cgroup v2 controllers are delegated to this account (${controllers.join(", ")}), so a job's pid, memory and cpu bounds are applied` });
-		// Issue #453 (gate round 1, measured): with linger off the user manager runs only while the account has a login
-		// session, and a doctor run then reads it running, from any shell, `sudo -iu` included. That ✓ ends with the last
-		// session, and a service-run worker then gets no bounds. Asked of loginctl as `up` asks it; an answer it cannot
-		// read says nothing, since the ✓ above is still what this read saw.
-		const user = userNameOf(seams);
-		const linger = user ? await readLinger(user, (cmd, args) => runCmdCapture(spawn, cmd, args, { stdoutOnly: true, timeoutMs: 5000 })) : null;
-		if (linger === false) {
-			checks.push({
-				ok: false,
-				warn: true,
-				label: `podman: linger is off for ${user}, so the user manager above runs only while a login session of the account is open: when the last one ends, a worker run as a user service stops with it, and one run as a system unit with User= runs on with no bounds (refused per job under an isolation floor)`,
-				fix: `sudo loginctl enable-linger ${user} -- it keeps the manager running with no one logged in, which is what a service needs`,
-			});
-		}
-	}
-
-	// SELinux, and what it means for a job's mounts: the worker's rule (#355) is `:Z` on a job's own directories only.
-	const relabel = decision.relabel === true;
-	if (relabel) {
-		checks.push({ ok: true, label: "podman: SELinux confines containers here, so a job's own directories are relabelled (:Z) and your local folders are not: the SELinux label lines below read those" });
-	} else if (info?.selinux === false) {
-		checks.push({ ok: true, label: "podman: SELinux does not confine containers here, so nothing a job mounts is relabelled" });
-	} else {
-		checks.push({ ok: false, warn: true, label: "podman: whether SELinux confines containers here was not reported, so nothing a job mounts is relabelled", fix: "on an SELinux host an unlabelled job directory is unreadable in the container and every job fails before it starts; check `podman info` as the worker's account (host.security.selinuxEnabled)" });
-	}
-
-	// The job image, in THIS ACCOUNT'S store: rootless Podman keeps one per account, so an image docker, root or another
-	// account holds is not one a job here can start from (and `--pull=never` fetches nothing). The worker's own preflight.
-	//
-	// Issue #433: on a deployment without `local` this is THE image check (docker's is not asked), so there, and ONLY
-	// there, it carries the same `--fix` offer docker's line does. Not with `local` listed (review round 1): that
-	// deployment's `--fix` is what it always was (DES-CLI-SURFACE, REQ-DEPLOYMENT-BOOTSTRAP), and one run offering two
-	// pulls of one image into two stores is a change of that tier, not of this issue. The line and its words still say
-	// how. The offer follows docker's rules: the prompt tier, only for the deployment default (an
-	// overridden PI_JOB_IMAGE is the operator's trust choice, which pulling the published image would not satisfy), and only for
-	// an answered miss, never for a store that did not answer. Into THIS shell's account's store, which is the store the
-	// line reads and the one a worker running as this account starts jobs from. `pi-job:latest` is tagged as is: Podman
-	// stores it as `localhost/pi-job:latest`, and `--pull=never` resolves the short name to exactly that (docs/podman.md).
-	const image = await makeImagePreflight({ image: jobImage, spawnFn: spawn, bin: "podman" })({});
-	const imagePresent = image?.ok === true;
-	// The per-trigger images are asked of this store only when it answered for the default one (issue #433).
-	const imagesReadable = imagePresent || image?.missing !== undefined;
-	const imageDigest = imagePresent ? (image.imageDigest ?? null) : null;
-	if (imagePresent) {
-		checks.push({ ok: true, label: `podman: job image present in this account's Podman store (${jobImage})${jobImageNote}` });
-	} else if (image?.missing) {
-		checks.push({
-			ok: false,
-			label: `podman: job image is not in this account's Podman store (${jobImage})`,
-			// A name no pull is offered for (issue #523, round 2) is built or loaded, never pulled.
-			fix: `${jobImage === "pi-job:latest" || pullOffered(jobImage) ? "pull or load" : "build or load"} it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: ${jobImageFix("podman", jobImage)} -- jobs run with --pull=never, so the worker never fetches it`,
-			...(!localUsed && jobImage === "pi-job:latest"
-				? {
-						fixAction: {
-							tier: "prompt",
-							describe: PODMAN_JOB_IMAGE_PULL,
-							run: async ({ spawn: fixSpawn }) => {
-								// The PULL bound, as docker's: a cold pull of the job image is minutes of real work.
-								const pulled = await runCmd(fixSpawn, "podman", ["pull", "docker.io/ddv12138/pi-job:latest"], runTimeouts.pull);
-								if (pulled.code !== 0) return { ok: false, note: pulled.ended === "timeout" ? `podman pull did not finish within ${Math.round(runTimeouts.pull / 60000)} minutes` : "podman pull failed" };
-								if ((await runCmd(fixSpawn, "podman", ["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"], runTimeouts.cmd)).code !== 0) return { ok: false, note: "podman tag failed" };
-								return { ok: true };
-							},
-						},
-					}
-				: {}),
-		});
-	} else {
-		checks.push({ ok: false, warn: true, label: `podman: whether the job image is in this account's Podman store could not be read (${jobImage})`, fix: "`podman image inspect` and `podman info` did not answer; fix that, then re-run doctor" });
-	}
-
-	// Who a job runs as: the decision, with the image's `anyUid` where the image could be read.
-	let user = decision.user;
-	if (imagePresent) {
-		const chosen = resolvePodmanImageUser(decision, { capabilities: image.capabilities ?? [], euid: ids.euid, egid: ids.egid });
-		if (chosen.refused || chosen.unavailable) {
-			const cause = chosen.cause ?? chosen.reason;
-			checks.push({
-				ok: false,
-				warn: true,
-				label: chosen.refused === "job-image-any-uid-unsupported" ? `podman: every job on ${jobImage} is refused as this uid (${chosen.refused})` : `podman: every podman job is refused as this uid (${cause})`,
-				fix: PODMAN_JOB_USER_FIX[cause] ?? JOB_USER_FIX[cause] ?? "see DES-PODMAN-NATIVE-ROOTLESS-BACKEND",
-			});
-			return { checks, observed, relabel, imagesReadable, imageDigest, forLive: notRun(`a podman job is refused as this uid (${cause}), so a probe would read back a container no job gets`) };
-		}
-		user = chosen.user;
-		checks.push({ ok: true, label: `podman: jobs run as uid:gid ${chosen.user} (passed as --user, with --userns=keep-id) with HOME=${chosen.home}` });
-	} else {
-		checks.push({ ok: true, label: `podman: jobs run as uid:gid ${decision.user} (passed as --user, with --userns=keep-id) with HOME=${CONTAINER_HOME}, once the job image is in this account's store${ids.euid === SHIPPED_IMAGE_UID ? "" : " and declares anyUid"}` });
-	}
-
-	// The proxy, with egress armed: under the SAME rootless Podman, since a rootless `--internal` network reaches nothing on
-	// the host (measured), so a proxy under docker or another account cannot serve a podman job. A malformed PI_EGRESS
-	// reads as armed here, as it does for local's proxy line: the .env check fails on it, and the worker refuses to boot.
-	let armed;
-	try {
-		armed = egressArmed(env);
-	} catch {
-		armed = null;
-	}
-	const proxy = egressProxyName(env);
-	let proxyRunning = null;
-	// Issue #458: why `--live` must not tear a network down under the proxy here, or null where nothing stops it.
-	let keeperBlocked = null;
-	// Issue #503: the declared model endpoints `--live` probes on this venue, `[]` for none; and whether the rules the
-	// proxy runs include their file (only the shipped proxy's account copy is read; another proxy must include it).
-	let endpoints = [];
-	let mcpOnly = new Map();
-	let endpointRulesInclude = true;
-	if (armed !== false) {
-		// `.State.Status` (issue #453): only `running` carries traffic; Podman reports paused and between-restarts states
-		// with their own words (measured on 4.9.3 and 5.8.1).
-		const state = await runCmdCapture(spawn, "podman", ["inspect", "--format={{.State.Status}}", proxy], { stdoutOnly: true });
-		const status = state.code === 0 ? state.output.trim() : null;
-		proxyRunning = status === "running";
-		// The worker's simple rule (egress.mjs), as on docker: a state it retries through is ⚠, one it refuses on is ✗.
-		// A CRASH LOOP is ✗ too, as docker's `restarting` is, since every job is retried once and then failed. Podman reads
-		// a `--restart=always` crash loop as `stopped` continuously (PR #466 gate round 1, Podman 5.8.1: about eight restarts
-		// a second), while `podman stop`, `--restart=no` and an exhausted `on-failure` read `exited`; the worker retries
-		// through `stopped` (`egress.mjs` keeps that mapping), so a ⚠ saying jobs wait was the wrong line while every job
-		// failed. The label names the raw word, so `stopped` and `exited` read apart, and the fix names the crash loop as
-		// the likely cause, not as a fact.
-		const crashLoop = status === "stopped" || status === "restarting";
-		const retried = state.code === 0 && !proxyRunning && /^[a-z]{1,20}$/.test(status ?? "") && !STOPPED_PROXY_STATES.has(status) && !crashLoop;
-		checks.push({
-			// Issue #737: docker's proxy line's id, for this venue's proxy (`REPEATED_CHECK_IDS`).
-			id: "egress.proxy",
-			ok: proxyRunning,
-			...(retried ? { warn: true } : {}),
-			label: proxyRunning ? `podman: egress proxy running under this account's Podman (${proxy})` : state.code === 0 ? `podman: egress proxy is ${/^[a-z]{1,20}$/.test(status ?? "") ? status : "in a state it did not report"} under this account's Podman (${proxy})` : `podman: egress proxy is not under this account's Podman (${proxy})`,
-			fix: retried
-				? `a podman job meanwhile is retried once, then failed (the worker does not refuse it outright on this state); if it stays ${status}, \`podman logs ${proxy}\` says why`
-				: crashLoop
-				? `if a restart policy keeps bringing it back, its squid keeps exiting (Podman reads such a crash loop as ${status}) and every podman job is retried once, then failed; \`podman logs ${proxy}\` says why`
-				: "start it as the worker's account, under the same rootless Podman, on a named bridge network (docs/podman.md): a job's --internal network reaches nothing on the host, so a proxy under docker or another account cannot serve it. Every podman job is refused pre-spend while this is down (PI_EGRESS=0 opts out)",
-		});
-		// Said, never implied by the ✓ above: running is not the same as enforcing the allowlist. Issue #431: on this venue
-		// the canary that reads it back runs with `--live` (`podmanLiveChecks`), not here, so a plain run says where it is
-		// read and a `--live` run says nothing, since its read-back prints the canary's own lines a moment later. Not run
-		// here on every doctor, as docker's is: a podman canary is two job-shaped keep-id containers, whose first start of
-		// an image copies its layers (27 to 32 s measured), and `--live` is where this venue already starts containers
-		// built like a job's.
-		if (proxyRunning && seams.live !== true) {
-			checks.push({ ok: false, warn: true, label: "podman: the egress allowlist is read back by `pi-dispatch doctor --live` on this venue, not by this run", fix: "run `pi-dispatch doctor --live`: its egress canary runs three containers built like a podman job's (the job user, --userns=keep-id, the venue's pinned flags) on a job-shaped --internal network under this account's Podman, one that must reach the provider through the proxy, one that must not reach an unlisted host, and one that must not get plain HTTP through to a listed host off port 80" });
-		}
-		// Issue #484: the account-owned copy of the rules the shipped unit mounts, against the installed package's. `service
-		// install` compares it on every run and replaces a differing one only under --force, and `up` installs nothing
-		// while it differs, so after an upgrade that changed the shipped rules neither said so unless asked to install. A
-		// proxy PI_EGRESS_PROXY names mounts no copy of ours.
-		if (proxy === DEFAULT_EGRESS_PROXY) {
-			const stale = proxyConfCopyCheck({
-				path: proxyConfCopyPath(home),
-				name: `podman: the egress proxy's rules copy ${proxyConfCopyPath(home)}`,
-				seams,
-				refresh: "`pi-dispatch service install` lists it among what differs and `pi-dispatch service install --force` replaces it and restarts the proxy (squid reads its rules only at start); --force also replaces every other item that list names",
-			});
-			if (stale) checks.push(stale);
-			// Issue #503: endpoints declared while the account copy predates the include, said as docker's venue says it.
-			let rulesInclude = false;
-			try {
-				rulesInclude = rulesIncludeEndpoints(String((seams.readProxyConf ?? ((p) => readFileSync(p, "utf8")))(proxyConfCopyPath(home))));
-			} catch {
-				// No copy yet: `service install` writes the current rules, include and all.
-				rulesInclude = true;
-			}
-			const declared = (seams.includeNeeds ? seams.includeNeeds({ env, cwd: seams.cwd, platform: seams.platform ?? process.platform }).endpointsDeclared : endpointsDeclaredIn({ env, cwd: seams.cwd, fs: { readFileSync, existsSync }, platform: seams.platform ?? process.platform }));
-			if (declared && !rulesInclude) checks.push({ ok: false, warn: true, label: `podman: ${rulesPredateEndpointsLine("podman")}`, fix: "a reload changes nothing here: the rules themselves must include the file, and `service install --force` writes them with the unit that mounts it" });
-			endpointRulesInclude = rulesInclude;
-		}
-		// Issue #503: the declared model endpoints on this venue, as docker's section reads them. The route rows and the
-		// include read here; the three probes per endpoint run with `--live`, beside the canary they share a network with.
-		// None declared, or rules that predate the include (the line above says it all), is nothing more.
-		const { declaredEndpoints = ({ env: e, cwd, platform: p }) => declaredEndpointsIn({ env: e, cwd, fs: { readFileSync, existsSync }, platform: p }), hostAddresses = () => lanIPv4Addresses(networkInterfaces()) } = seams;
-		const declaredList = declaredEndpoints({ env, cwd: seams.cwd, platform: seams.platform ?? process.platform });
-		if (declaredList.length > 0 && endpointRulesInclude) {
-			endpoints = declaredList;
-			mcpOnly = mcpOnlyEndpoints({ endpoints, ...overlayEndpointUsers(env, seams) });
-			// The helper as Podman 5 names it in `podman info` (`rootlessNetworkCmd`), else as this account's running rootless
-			// network shows it (`observeRootlessNetns`, the record or the 4.x argv the worker's widening check reads), else
-			// not known, which the route row says as such.
-			const helper = info?.rootless === true ? (info.rootlessNetworkCmd ?? runningNetnsHelper({ fs: observationFs, euid: ids.euid, runRoot: info.runRoot })) : null;
-			const runtime = info ? { backend: "podman", version: info.version ?? "", ...(typeof info.rootless === "boolean" ? { rootless: info.rootless } : {}), ...(helper ? { helper } : {}) } : null;
-			const addresses = hostAddresses();
-			checks.push(...endpointRouteChecks({ runtime: runtime && addresses ? { ...runtime, hostAddresses: addresses } : runtime, endpoints, prefix: "podman: ", proof: seams.live === true ? "The endpoint probes in this --live run are the proof." : "`pi-dispatch doctor --live` probes it, which is the proof." }));
-			if (proxyRunning) {
-				const inside = await runCmdCapture(spawn, "podman", ["exec", proxy, "cat", ENDPOINTS_INCLUDE_IN_PROXY], { stdoutOnly: true, timeoutMs: CANARY_STEP_TIMEOUT_MS });
-				// The file the proxy actually mounts there, from its own inspect (the Quadlet unit mounts the deployment folder's,
-				// which need not be the folder doctor runs in). Podman gives the source as a plain host path (4.9.3, 5.8.1).
-				const mounts = await runCmdCapture(spawn, "podman", ["inspect", "--format", "{{json .Mounts}}", proxy], { stdoutOnly: true, timeoutMs: CANARY_STEP_TIMEOUT_MS });
-				const mounted = mounts.code === 0 ? readIncludeBindSource(mountsFromJson(mounts.output)) : null;
-				checks.push(endpointsIncludeCheck({ answer: inside, endpoints, bin: "podman", proxy, prefix: "podman: ", mounted, recreate: proxy === DEFAULT_EGRESS_PROXY ? "`systemctl --user restart pi-dispatch-egress-proxy.service` starts a new container on the file (a restart cuts running jobs' tunnels)" : `recreate ${proxy} so it mounts the file anew` }));
-			}
-		}
-		const keeper = await netnsKeeperCheck(spawn, info?.version, { proxy, now: typeof seams.wallClock === "function" ? seams.wallClock : Date.now });
-		keeperBlocked = keeper.keeperBlocked ?? null;
-		checks.push(keeper);
-		const keeperNetwork = await netnsKeeperNetworkCheck(spawn);
-		if (keeperNetwork) checks.push(keeperNetwork);
-	}
-
-	forLive = { run: true, user, relabel, info, imagePresent, egress: { armed, proxy, proxyRunning, keeperBlocked, endpoints, mcpOnly } };
-	return { checks, observed, relabel, imagesReadable, imageDigest, forLive };
-}
-
-/**
- * The rootless network keeper (issue #458), read with egress armed, whatever the proxy's name, since the worker
- * disconnects any proxy from every egress job's network. Read and judged by the one shared rule (`judgeNetnsKeeper`):
- * it counts only when RUNNING, in BRIDGE mode and ON its own network (issue #463 gate: a keeper on `--network none`,
- * slirp4netns, pasta or host runs and holds nothing open), off stdout alone.
- *
- * ✗ on Podman 4.x (and on a version `podman info` did not give, which is no evidence of 5.x) whenever it does not hold:
- * measured on 4.9.3, the first egress job's teardown then cuts the proxy's route out, and every egress job after it
- * starts, spends and gets 503 from the proxy until the proxy restarts, while the proxy line above still reads ✓. ✓ on
- * 5.x either way, where the teardown leaves the proxy alone (measured on 5.8.1) and the keeper is one idle container.
- */
-const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (else \`pi-dispatch service install\` or \`pi-dispatch up\` installs it, or start it by hand, docs/podman.md step 6; a container of its name that is not the shipped keeper must be removed first)`;
-
-export async function netnsKeeperCheck(spawn, version, { proxy = DEFAULT_EGRESS_PROXY, now = Date.now } = {}) {
-	const state = await runCmdCapture(spawn, "podman", ["inspect", NETNS_KEEPER_FORMAT, NETNS_KEEPER], { stdoutOnly: true });
-	// PR #463 round 2: the worker's own rule, read the worker's way: running for 3 s, and not started more than 15 s
-	// after the proxy (a keeper that restarted under a running proxy may already have let a teardown cut its route out).
-	// On 5.x neither rule is asked: there the keeper is one idle container and nothing depends on it.
-	const needs = podmanNeedsNetnsKeeper(version);
-	const proxyState = needs ? await runCmdCapture(spawn, "podman", ["inspect", STARTED_AT_FORMAT, proxy], { stdoutOnly: true }) : null;
-	const proxyStarted = proxyState?.code === 0 ? proxyState.output.trim() : "";
-	const keeper = judgeNetnsKeeper({ code: state.code, stdout: state.output }, needs ? { now: now(), proxyStartedMs: /^\d+$/.test(proxyStarted) ? Number(proxyStarted) : null } : {});
-	if (keeper.holds) {
-		return { ok: true, label: `podman: rootless network keeper running under this account's Podman on its own bridge network (${NETNS_KEEPER}), so a job's network teardown cannot cut the proxy's route out` };
-	}
-	const where = `${NETNS_KEEPER} ${keeper.problem}`;
-	if (!needs) {
-		return { ok: true, label: `podman: rootless network keeper ${where}, which Podman ${version} does not need: its job network teardown leaves the proxy's route out alone` };
-	}
-	const on = `Podman ${typeof version === "string" && version.trim() ? version.trim() : "of an unreported version"}`;
-	return {
-		ok: false,
-		// Not rendered: what `--live` reads to run nothing that detaches the proxy (`podmanEgressCanary`, `runLiveProbes`).
-		keeperBlocked: `the rootless network keeper ${where} on ${on}, where tearing down a network the proxy is on would cut the proxy's route out (issue #458)`,
-		label: keeper.restartProxy
-			? `podman: rootless network keeper ${where}: on ${on}, so every egress job may get 503 from the proxy until the proxy restarts, and the worker retries each one rather than start it`
-			: `podman: rootless network keeper ${where}: on ${on}, the first egress job's network teardown then cuts the proxy's route out, and every egress job after it gets 503 from the proxy`,
-		fix: keeper.restartProxy
-			? `${netnsKeeperRemedy(keeper, proxy)}. The keeper itself is fine; a proxy started after it counts again. If egress still fails after that, docs/podman.md has the aardvark-dns repair`
-			: `${keeper.thenRestartProxy ? `${NETNS_KEEPER_FIX}, then ${proxyRestartAdvice(proxy)}, since the proxy has been up since before it` : NETNS_KEEPER_FIX}. \`pi-dispatch doctor --live\` runs no egress canary and no peer networks here until it holds, since their teardown is the same trigger. If egress still fails after that, docs/podman.md has the aardvark-dns repair`,
-	};
-}
-
-/**
- * The keeper's network, as it IS (PR #463 round 3). Its units create it with `--ignore`, which keeps a network of that
- * name that already exists whatever its options, so one made by hand without `--internal` or with DNS on would stay
- * that way unseen, and a keeper on it has a route out. ✗ unless `podman network inspect` says internal and DNS off, on
- * every Podman version (it is about what the keeper can reach, not about the 4.x defect); nothing when the network is
- * not there, which the keeper line above already covers; ⚠ when podman answered in words this cannot read.
- */
-export async function netnsKeeperNetworkCheck(spawn) {
-	const read = await runCmdCapture(spawn, "podman", ["network", "inspect", "--format", "{{.Internal}} {{.DNSEnabled}}", NETNS_KEEPER], { stdoutOnly: true });
-	if (read.code !== 0) return null;
-	const answer = read.output.trim();
-	if (answer === "true false") return { ok: true, label: `podman: the keeper's network ${NETNS_KEEPER} is internal with DNS off, so the keeper reaches nothing` };
-	const fix = `remove the network and restart the keeper units, which recreate it as shipped: systemctl --user stop ${NETNS_KEEPER}.service; podman network rm ${NETNS_KEEPER}; ${NETNS_KEEPER_START}`;
-	const m = /^(true|false) (true|false)$/.exec(answer);
-	if (!m) return { ok: false, warn: true, label: `podman: whether the keeper's network ${NETNS_KEEPER} is internal with DNS off could not be read (podman said ${quotedShown(answer)})`, fix };
-	const wrong = [m[1] !== "true" ? "not internal (it has a route out)" : null, m[2] !== "false" ? "DNS on" : null].filter(Boolean).join(" and ");
-	return { ok: false, label: `podman: the keeper's network ${NETNS_KEEPER} is ${wrong}, which is not the network this project ships: its units create it with --ignore, which keeps an existing network of that name whatever its options`, fix };
 }
 
 /** The two SELinux types a container may read a bind mount under without it being relabelled (container-selinux). */
@@ -10496,15 +9740,6 @@ function runtimeLine(daemon) {
 	if (!daemon?.answered || !daemon.facts) return null;
 	const { facts } = daemon;
 	const version = facts.serverVersion ? ` ${facts.serverVersion}` : "";
-	if (facts.shape === "podman") {
-		return {
-			ok: false,
-			warn: true,
-			label: `local: the daemon is Podman${version}, reached through podman-docker, Podman's own emulation of the docker command`,
-			fix: "podman-docker resolves no docker context, so credentialTransit is never observed and `doctor --live` does not run: install the real docker CLI and point it at Podman's socket (`docker context create podman --docker host=unix:///run/podman/podman.sock`, then `docker context use podman`)",
-		};
-	}
-	if (facts.podman) return { ok: true, label: `local: the daemon is Podman${version}, through its Docker API` };
 	if (facts.os === "Docker Desktop") return { ok: true, label: `local: the daemon is Docker Desktop (engine${version})` };
 	return { ok: true, label: `local: the daemon is Docker Engine${version}${facts.rootless ? ", rootless" : ""}` };
 }
@@ -10663,7 +9898,7 @@ function readBackChecks({ venue, bin, result, user, ids, relabel, facts, userFix
 			if (v.ok) return { ok: true, label: `${prefix}: ${v.property} holds (${v.detail})` };
 			if (v.warn) return { ok: false, warn: true, label: `${prefix}: ${v.property} ${v.detail}`, fix: LIVE_UNREAD_FIX };
 			const declared = declarationOf(venue, v.property)?.word ?? "undeclared";
-			const fix = liveFailFix(bin, v.cause ? `${v.property}:${v.cause}` : v.property) ?? liveFailFix(bin, v.property);
+			const fix = liveFailFix(v.cause ? `${v.property}:${v.cause}` : v.property) ?? liveFailFix(v.property);
 			return { ok: false, label: `${prefix}: ${v.property} does NOT hold -- declared ${declared}, observed: ${v.detail}`, fix };
 		}),
 	);
@@ -10703,138 +9938,12 @@ function readBackChecks({ venue, bin, result, user, ids, relabel, facts, userFix
 }
 
 /**
- * A failed read-back's fix for one runtime (issue #354). `LIVE_FAIL_FIX` is written for docker, whose words are returned
- * untouched; for another runtime its CLI's name replaces docker's wherever the text names a command or a wrapper, so a
- * podman venue is never sent to `docker ps -a`. "Docker Desktop" and "rootful Podman" are proper names and stay.
+ * A failed read-back's fix for one property (issue #354). Words only: none of these is a thing doctor could do for you.
  */
-function liveFailFix(bin, key) {
-	const text = (bin === "podman" ? LIVE_FAIL_FIX_PODMAN[key] : undefined) ?? LIVE_FAIL_FIX[key];
-	return text === undefined ? text : forRuntime(text, bin);
+function liveFailFix(key) {
+	return LIVE_FAIL_FIX[key];
 }
 
-/**
- * `doctor --live` on the podman venue (issue #354, INT-LIVE-PROBE-CONTRACT): the same eight read back by the same
- * `runLiveProbes`, through `podman` with the podman venue's own builder (`--userns=keep-id` exactly where its jobs carry
- * it) and as the uid its jobs run as, rendered as `read back on podman: ...`. The local gate is the service's own answer,
- * `serviceIsRemote === false`, read by the collection and ASKED AGAIN right before the first command, as docker's
- * endpoint is: a CONTAINER_HOST exported in between would otherwise send every read to another machine.
- *
- * egress IS read back here since issue #431, by the same canary docker's doctor runs (`runEgressCanary`), under this
- * account's Podman: its probe containers built by the podman builder as a job's are, as the job user, on a job-shaped
- * `--internal` network with the proxy attached. Its lines come first in what this returns, so the egress verdict's "see
- * the egress lines above" points at them. The refusals above stop it with everything else, and so does a podman
- * service not seen as this host's own, asked AGAIN right before its first command for the reason given above.
- */
-export async function podmanLiveChecks(env, seams, facts) {
-	const { spawn, out = () => {}, home = safeHomeDir(), liveFs, isAlive = defaultIsAlive, pid = process.pid, nonce = randomBytes(6).toString("hex"), jobUserIdentity: ids = {}, now, delay } = seams;
-	const podman = facts.podman;
-	if (podman.run === false) {
-		return [{ ok: false, warn: true, label: `read back on podman: not run -- ${podman.reason}`, fix: podman.fix ?? "fix the podman job-user line above first, then re-run `pi-dispatch doctor --live`" }];
-	}
-	const readInfo = makePodmanInfoReader({ run: dockerRunVia(spawn, PODMAN_INFO_TIMEOUT_MS, { bin: "podman" }) });
-	const run = liveRunVia(spawn, { bin: "podman" });
-	const image = facts.jobImage ?? jobImageOf(env).image;
-	const canary = await podmanEgressCanary({ podman, readInfo, run, image, pid, isAlive, size: doctorJobSize(env), announce: (line) => out(`\nread back on podman: ${line}\n`) });
-	const egress = { armed: podman.egress.armed, results: canary.results, proxy: podman.egress.proxy, proxyRunning: podman.egress.proxyRunning, keeperBlocked: podman.egress.keeperBlocked ?? null };
-	const result = await runLiveProbes({
-		image,
-		// Issue #596: as the docker read-back, from this account's own `podman info`.
-		size: doctorJobSize(env),
-		hostCpus: podman.info?.hostCpus ?? null,
-		// Issue #596, phase 2: the parent as this venue's jobs get it (none where Podman's cgroup manager is not systemd),
-		// and its quota against the CPU budget doctor computed above.
-		cgroupParent: cgroupParentFor({ podman: true, cgroupManager: podman.info?.cgroupManager ?? null }),
-		cpuBudgetCenti: facts.cpuBudgetCenti ?? null,
-		endpoint: podman.info,
-		resolveEndpoint: async () => {
-			const again = await readInfo();
-			return again?.answered ? again.info : null;
-		},
-		isLocal: (info) => info?.serviceIsRemote === false,
-		dockerReachable: podman.info !== null,
-		imagePresent: podman.imagePresent === true,
-		jobsDir: jobsDirPath(env),
-		home,
-		sessionsDir: env.PI_SESSIONS_DIR || null,
-		egress,
-		// The section's own `podman info` answer, for the detach gate (issue #452, gate round 3): one read per run.
-		readRuntime: async () => (podman.info ? { podman: true, rootless: podman.info.rootless, version: podman.info.version } : null),
-		pid,
-		nonce,
-		run,
-		// The first keep-id run of an image copies its layers (27 s measured), longer than the 20 s step bound.
-		startTimeoutMs: PODMAN_FIRST_START_TIMEOUT_MS,
-		buildArgs: buildPodmanRunArgs,
-		bin: "podman",
-		fs: liveFs,
-		isAlive,
-		announce: (line) => out(`\nread back on podman: ${line}\n`),
-		user: podman.user,
-		relabel: podman.relabel === true,
-		euid: ids.euid === 0 ? undefined : ids.euid,
-		...(now ? { now } : {}),
-		...(delay ? { delay } : {}),
-	});
-	return [
-		...canary.checks,
-		...readBackChecks({
-			venue: PODMAN_BACKEND,
-			bin: "podman",
-			result,
-			user: podman.user,
-			ids,
-			relabel: podman.relabel === true,
-			facts: { ...facts, egress },
-			userFix: "podman did not apply --user with --userns=keep-id as the worker passes it: no job here runs as the uid its files belong to",
-			peersOn: "this account's Podman job networks",
-		}),
-	];
-}
-
-/**
- * The podman venue's egress canary for `--live` (issue #431): the stale-network sweep, then `runEgressCanary`, both
- * through `podman`. Returns `{ checks, results }` like the canary does, with `results` empty wherever it did not run,
- * which `egressVerdict` reads as not read back.
- *
- * Gated like docker's, on the facts the podman section read: nothing with the policy off (a malformed PI_EGRESS reads as
- * armed, as it does for the proxy line and for docker's canary, and the verdict says it could not be read); the SWEEP
- * whenever it is armed, because a proxy that has since stopped is no reason to leave a dead run's network behind; the
- * canary only with the proxy seen running and the job image in this account's store, whose absence the section above
- * already names. Before either, `podman info` is asked again and must still say `serviceIsRemote: false`: the sweep
- * judges a pid against THIS process table and the canary's containers must start where the section looked, and both of
- * those are false the moment CONTAINER_HOST points elsewhere. The re-ask costs one spawn and only with egress armed.
- */
-async function podmanEgressCanary({ podman, readInfo, run, image, pid, isAlive, size = DEFAULT_JOB_SIZE, announce = () => {} }) {
-	const none = { checks: [], results: [] };
-	if (podman.egress?.armed === false) return none;
-	// Issue #458: on Podman 4.x without the keeper, the canary's own teardown (and the stale sweep's detach) is the step
-	// that cuts the proxy's route out, so neither runs: a read-back that breaks what it reads is worse than none. Said
-	// as ✗, beside the keeper line, and the egress verdict below says it was not read back because of it.
-	if (podman.egress?.keeperBlocked) {
-		return { checks: [{ ok: false, label: `podman: Egress policy: not proved, and no egress canary was run (nor a stale canary network swept), because ${podman.egress.keeperBlocked}`, fix: `${NETNS_KEEPER_FIX}, then re-run \`pi-dispatch doctor --live\`` }], results: [] };
-	}
-	const again = await readInfo();
-	if (!(again?.answered && again.info?.serviceIsRemote === false)) {
-		return { checks: [{ ok: false, warn: true, label: "podman: Egress policy: not proved, because this shell's podman CLI is not observed to point at this host, so no canary container was started", fix: "fix what the podman lines above say about this account's Podman service (CONTAINER_HOST, or a service that did not answer), then re-run `pi-dispatch doctor --live`" }], results: [] };
-	}
-	// The service is this host's own, which is `endpoint.local === true` in the sweep's terms: its pid test is sound here.
-	const canaryRun = (args, opts) => run(args, { timeoutMs: opts?.timeoutMs ?? CANARY_STEP_TIMEOUT_MS });
-	// One detach gate for this pass, shared with the canary below (issue #452, gate round 3).
-	const gate = makeDetachGate(canaryRun, { bin: "podman", readRuntime: async () => (again.info ? { podman: true, rootless: again.info.rootless, version: again.info.version } : null) });
-	const checks = await sweepStaleCanaryNetworks({ run: canaryRun, pid, isAlive, endpoint: { local: true }, venue: CANARY_PODMAN, gate });
-	if (podman.egress.proxyRunning !== true || podman.imagePresent !== true) return { checks, results: [] };
-	// Announced, as `runLiveProbes` announces its own containers: these start before it, and a cold first keep-id start
-	// can take half a minute each, which is a long silence on an operator's terminal.
-	const probes = CANARY_PROBE_SLUGS.map((slug) => egressCanaryProbe(slug, pid));
-	// Issue #503: three more per declared model endpoint, said in a second sentence so the canary's own stays as it was.
-	const endpoints = podman.egress.endpoints ?? [];
-	const more = endpoints.length > 0 ? `; then three per declared model endpoint (${endpointsById(endpoints).map((e) => e.id).join(", ")}), named ${EGRESS_ENDPOINT_PROBE_PREFIX}<probe>-<id>-${pid}, removed the same way` : "";
-	announce(`starting ${probes.slice(0, -1).join(", ")} and ${probes.at(-1)} from ${image} (as the job user ${podman.user}) on the --internal network ${egressCanaryNetwork(pid)}, with ${podman.egress.proxy} attached, to read the egress allowlist back; all three are removed when the canary ends${more}`);
-	const canary = await runEgressCanary({ run, bin: "podman", proxy: podman.egress.proxy, image, pid, user: podman.user, gate, endpoints, mcpOnly: podman.egress.mcpOnly ?? new Map(), size, hostCpus: again.info?.hostCpus ?? null });
-	return { checks: [...checks, ...canary.checks], results: canary.results };
-}
-
-/** The backend `doctor --live` reads back: the table default, which is the only venue on this host's docker CLI. */
 const DEFAULT_LOCAL_BACKEND = "local";
 
 const LIVE_UNREAD_FIX = "this property was not read back, which is not the same as holding: see the reason, fix it if you can, and re-run `pi-dispatch doctor --live`";
@@ -10843,7 +9952,7 @@ const LIVE_UNREAD_FIX = "this property was not read back, which is not the same 
 const LIVE_FAIL_FIX = {
 	isolation: "the runtime did not apply a flag the worker passes (on rootless docker, cgroup delegation; otherwise the daemon's security options) -- jobs on this host do not have the boundary the table declares",
 	mountSet: "a container built by the job builder has a mount the contract does not allow -- check the daemon's defaults and any volume plugins before running jobs here",
-	"mountSet:runtime-mount": "the container runtime mounted something into a job-built container that docker inspect does not list (on rootful Podman, /run/secrets from its default mounts.conf, with host subscription files a job can read): create an empty /etc/containers/mounts.conf, remove any volumes or mounts key from containers.conf, and re-run `pi-dispatch doctor --live`",
+	"mountSet:runtime-mount": "a container built by the job builder has a mount the contract does not allow -- check the daemon's defaults and any volume plugin, CLI wrapper or credentials helper that mounts into every container before running jobs here",
 	egress: "see the egress lines above: the proxy's allowlist, or the job image's NODE_USE_ENV_PROXY support",
 	imagePinning: "the daemon ran or pulled an image this host does not have -- check for a docker CLI plugin or wrapper that rewrites `docker run`",
 	nonRoot: "PI_JOB_IMAGE runs as root: the root-owned hard-rules floor does not bind a root agent -- use an image with a non-root USER (the shipped pi-job image does)",
@@ -10852,31 +9961,14 @@ const LIVE_FAIL_FIX = {
 	"localFolders:mount-not-writable": "the job user cannot write the outbox or session mount, which a local job and a resumed job write; the same ownership rule as the job directory applies",
 	"localFolders:not-yours": "a job's files land owned by another uid, so the worker cannot remove what a job leaves: run doctor as the worker's own account, and check the job-user line above",
 	"ephemeral:survived": "a container run with --rm was still listed after it exited: the daemon or a wrapper is not removing containers, so every job leaves one behind -- check `docker ps -a` and any docker wrapper or alias",
-	"ephemeral:name-held": "a container name stayed taken after its container was seen gone, so a retried job id cannot start. The read-back removed whatever held the name when it ended, so re-run `pi-dispatch doctor --live`; if it recurs, check the daemon for a stale name reservation (on Podman, `podman ps -a --external` also lists storage containers another tool made)",
+	"ephemeral:name-held": "a container name stayed taken after its container was seen gone, so a retried job id cannot start. The read-back removed whatever held the name when it ended, so re-run `pi-dispatch doctor --live`; if it recurs, check the daemon for a stale name reservation (`docker ps -a` and, on a daemon that keeps them, `docker ps -a --external`-style storage listings another tool made)",
 	"ephemeral:reused": "the daemon handed a second run the first run's container: a job would inherit another job's state -- do not run jobs on this daemon until that is explained",
 	"ephemeral:residue": "a new container found a file the previous one wrote to its own /tmp: a job would inherit another job's filesystem -- check the runtime's storage driver and any volume the image declares",
-	"jobToJobIsolation:reached": "one job's container reached another's across their own --internal networks: the network driver or firewall is not keeping job networks apart (on Podman, check netavark's firewall driver), so a job can talk to a concurrent job",
+	"jobToJobIsolation:reached": "one job's container reached another's across their own --internal networks: the network driver or firewall is not keeping job networks apart, so a job can talk to a concurrent job",
 	"localFolders:not-visible": "the daemon is not sharing the jobs directory's filesystem with containers as a live bind mount (on Docker Desktop, check its file sharing settings), so a local-folder job's edits would not land in the folder",
 	localFolders: "a bind-mounted host folder did not behave as one a job edits in place",
 };
 
-/**
- * Where rootless Podman's cause is not docker's with the name swapped (issue #453). A failed isolation read-back on
- * podman is, in the measured case, an account with no systemd user manager running, which the isolation line names;
- * "cgroup delegation" alone sent the operator to controllers that already read delegated.
- */
-const LIVE_FAIL_FIX_PODMAN = {
-	isolation: `the runtime did not apply a bound the worker passes: on rootless Podman that is the account's systemd user manager not running, Podman not reaching it, or a controller not delegated to it (the "isolation is ASSERTED" line above names which, when the static read sees it) -- jobs on this host do not have the boundary the table declares. ${capitalized(PODMAN_BOUNDS_FIX["no-user-manager"])}`,
-};
-
-/**
- * The jobs dir as this account's worker will meet it (issue #464): ✓ when it is a directory this account owns and may
- * write, or does not exist yet under a directory this account may write; ✗ otherwise, with the fix. Where it lies in
- * the per-account temp root (the default), the root is judged too, as `ensureJobsDir` judges it: a real directory owned
- * by this account. Then the sandbox dir, as `ensureSandboxDir` judges it: one that exists must be this account's. Then,
- * only for the default paths, a ⚠ when the OLD shared default still holds retained workspaces of this account, which
- * this version neither re-opens nor sweeps. Nothing where the platform has no uid (Windows).
- */
 export function jobsDirChecks(env, { uid, fs, ownerName = () => null, note = "" }) {
 	if (!Number.isInteger(uid)) return [];
 	const jobsDir = jobsDirPath(env, uid);
@@ -10928,40 +10020,6 @@ export function jobsDirChecks(env, { uid, fs, ownerName = () => null, note = "" 
 		if (!found || !writable(parent)) return refuse(`the jobs dir ${jobsDir} does not exist, and this account cannot create it (${found ? `${parent} is not writable by it` : "no parent of it could be read"})`, "point PI_JOBS_DIR at a directory this account owns, or create it for this account");
 		checks.push({ ok: true, label: `Jobs dir ${jobsDir} does not exist yet; the worker creates it (mode 0700) at boot${note}` });
 	}
-	// Issue #464 (gate round 1): the sandbox dir, as `ensureSandboxDir` judges it at boot. Its default lies in the jobs dir
-	// just judged; one set elsewhere that another account owns (seen: a 0777 directory of another account's) is where
-	// that account could swap a retained workspace for its own.
-	const sandboxDir = env.PI_SANDBOX_DIR || defaultSandboxDir(env, uid);
-	const sb = read(sandboxDir, true);
-	if (sb?.error) return [...checks, ...refuse(`the sandbox dir ${sandboxDir} could not be read (${sb.error})`, sandboxDirOwnerFix(sandboxDir))];
-	if (sb && !sb.isDirectory()) return [...checks, ...refuse(`the sandbox dir ${sandboxDir} is not a directory`, sandboxDirOwnerFix(sandboxDir))];
-	if (sb && sb.uid !== uid) return [...checks, ...refuse(`the sandbox dir ${sandboxDir} is owned by ${owner(sb.uid)}, not by this account (uid ${uid}), which could swap a retained workspace for one of its own; the worker refuses it at boot`, sandboxDirOwnerFix(sandboxDir))];
-	if (env.PI_JOBS_DIR === undefined && !env.PI_SANDBOX_DIR) {
-		// Issue #464's migration: before it, the default was the SHARED `<tmp>/pi-dispatch/jobs`, and a retained workspace
-		// there is this account's data the new default does not see. Counted by owner, so another account's are not named.
-		const old = `${accountTempRoot(env, null)}/jobs/sandboxes`;
-		let mine = [];
-		try {
-			mine = fs.readdirSync(old).filter((name) => {
-				try {
-					return fs.lstatSync(join(old, name)).uid === uid;
-				} catch {
-					return false;
-				}
-			});
-		} catch {
-			// Absent or unreadable: nothing of this account's is known to be there.
-		}
-		if (mine.length > 0) {
-			const now = `${jobsDir}/sandboxes`;
-			checks.push({
-				ok: false,
-				warn: true,
-				label: `${mine.length} retained workspace(s) of this account are in ${old}, the shared default before issue #464: this version keeps them in ${now}, so \`pi-dispatch sandbox\` cannot re-open them and the retention sweep no longer removes them`,
-				fix: `move the ones worth keeping (the same filesystem, so a rename): mkdir -m 700 -p ${root} ${now} && mv ${old}/<name> ${now}/, and delete the rest: rm -rf ${old}/<name>. Naming ${root} makes it 0700 too (\`mkdir -m\` sets only the directories named, and a plain \`mkdir -p\` leaves ${root} 755); the worker also tightens it to 0700 at its next boot`,
-			});
-		}
-	}
 	return checks;
 }
 
@@ -11012,50 +10070,6 @@ function ownerNameFromPasswd(passwd, uid) {
 	return null;
 }
 
-/**
- * The account's run directory, `/run/user/<euid>`, when a `podman info` read failed with an exit status, that directory
- * does not exist, and Podman's own database records a run root under it (issue #464), else null. Only ENOENT counts: a
- * stat that fails another way says nothing.
- *
- * The database is the evidence that Podman ran under /run/user before (gate round 1): an account that never had a
- * session has no /run/user/<uid> either, and a podman failing there for any other reason was named "linger off". Podman
- * keeps the run root it first used in `db.sql` (SQLite; measured on Podman 5.8.1 and on Ubuntu's 4.9.3) or
- * `libpod/bolt_state.db` (BoltDB, older installs) under its storage root, `$XDG_DATA_HOME/containers/storage`, else
- * `~/.local/share/containers/storage`; both hold the path as plain bytes (measured: `/run/user/501/containers` in a
- * Lima account's db.sql). A storage root moved in storage.conf is not followed, and then nothing is claimed.
- */
-export function podmanRunDirGone({ read, euid, fs, home = null, env = {} }) {
-	if (!read || read.answered !== false || !/^exit-[0-9]+$/.test(String(read.reason ?? ""))) return null;
-	if (!Number.isInteger(euid) || euid <= 0) return null;
-	const dir = `/run/user/${euid}`;
-	try {
-		fs.statSync(dir);
-		return null;
-	} catch (err) {
-		if (err?.code !== "ENOENT") return null;
-	}
-	// env-internal XDG_DATA_HOME: where Podman keeps this account's storage, the XDG base directory it reads itself;
-	// the operator sets it for Podman, never for this project.
-	const data = env.XDG_DATA_HOME ? env.XDG_DATA_HOME : home ? `${home}/.local/share` : null;
-	if (!data) return null;
-	const needle = `${dir}/`;
-	for (const db of [`${data}/containers/storage/db.sql`, `${data}/containers/storage/libpod/bolt_state.db`]) {
-		try {
-			const bytes = fs.readFileSync(db);
-			if ((Buffer.isBuffer(bytes) ? bytes : Buffer.from(String(bytes))).includes(needle)) return dir;
-		} catch {
-			// Absent or unreadable: no evidence from this one.
-		}
-	}
-	return null;
-}
-
-/**
- * Linger for `user`: loginctl's answer, else logind's own flag file (issue #464). Measured on Ubuntu 24.04 (systemd 255):
- * `loginctl show-user` exits 1 for an account that is neither logged in nor lingering ("is not logged in or lingering"),
- * which is exactly the account whose linger this is asked about, while Fedora's 259 answers `Linger=no`. logind keeps
- * one empty file per lingering account in /var/lib/systemd/linger, readable by every account on both.
- */
 export async function readLingerOrFlag(user, { spawn, fs }) {
 	const asked = await readLinger(user, (cmd, args) => runCmdCapture(spawn, cmd, args, { stdoutOnly: true, timeoutMs: 5000 }));
 	if (asked !== null) return asked;

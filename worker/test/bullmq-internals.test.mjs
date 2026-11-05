@@ -139,7 +139,7 @@ test("every pin of bullmq, ioredis and cron-parser agrees, exactly, and the inst
 	const pkg = (ws) => JSON.parse(read(`${ws}/package.json`));
 	const exact = /^\d+\.\d+\.\d+$/;
 	const bullmqPins = ["worker", "receiver", "admin"].map((ws) => [ws, pkg(ws).dependencies?.bullmq]);
-	const ioredisPins = ["worker", "receiver", "admin", "gateway"].map((ws) => [ws, pkg(ws).dependencies?.ioredis]);
+	const ioredisPins = ["worker", "receiver", "admin"].map((ws) => [ws, pkg(ws).dependencies?.ioredis]);
 	for (const [ws, pin] of [...bullmqPins, ...ioredisPins]) assert.match(String(pin), exact, `${ws}: an exact pin, never a range`);
 	assert.deepEqual(new Set(bullmqPins.map(([, pin]) => pin)).size, 1, `every workspace runs one bullmq: ${JSON.stringify(bullmqPins)}`);
 	assert.deepEqual(new Set(ioredisPins.map(([, pin]) => pin)).size, 1, `every workspace runs one ioredis: ${JSON.stringify(ioredisPins)}`);
@@ -315,7 +315,7 @@ test("the repeat-only readers keep a manual: run's answer: no scheduled instant,
 // one found in them before issue #761) and misses a spelling built across lines or from variables; review catches
 // those. An exemption names the file and the line's text, and must match exactly one hit, so a stale one fails too.
 
-const SCAN_TREES = ["worker/src", "receiver/src", "admin/src", "image/runner", "gateway/src"];
+const SCAN_TREES = ["worker/src", "receiver/src", "admin/src", "image/runner"];
 const SCAN_SKIP = new Set(["test", "node_modules", "dist"]);
 const SCAN_EXTS = new Set([".mjs", ".js", ".cjs", ".ts", ".mts"]);
 

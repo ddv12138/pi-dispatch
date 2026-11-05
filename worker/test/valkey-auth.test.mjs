@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { authRefusalFor, judgeValkeyAtStart, makeRedisClient, parseConnection, valkeyAuthState } from "../src/connection.mjs";
 import { readEnvAssignments, renderEnvValue, updateEnvFile } from "../src/env-file.mjs";
-import { readValkeyKeys } from "../src/podman-stack.mjs";
+import { readValkeyKeys } from "../src/stack.mjs";
 import { refuseValkeyAuth } from "../src/start.mjs";
 import { DEPLOYMENT_LABEL, OWNER_MARKER_KEY, valkeyVolumeCreateArgs, valkeyVolumeOwner, VALKEY_HEALTH_SCRIPT, VALKEY_PASSWORD_KEY, VALKEY_PORT_KEY, VALKEY_START_SCRIPT, VALKEY_VOLUME, composeHandoverPlan, dollarsDoubled, foreignVolumeUsers, valkeyContainerIsOurs, valkeyContainerOwner, valkeyPortEnvDecision, isLoopbackHost, managedValkeyUrl, newValkeyPassword, valkeyAuthRefusal, valkeyDockerRunArgs, valkeyEnvFileText, valkeyPasswordDecision, valkeyPasswordProblem } from "../src/valkey-auth.mjs";
 import { defaultValkeyContext, useValkeyContext, valkeyClientContext, valkeyContextFromKeys, valkeyPasswordFor } from "../src/valkey-endpoint.mjs";
@@ -78,20 +78,10 @@ test("valkeyPasswordDecision: kept when set, generated only for this machine's o
 // The one start script, in three carriers, and never on a command line
 // ---------------------------------------------------------------------------------------------------------------------
 
-const quadlet = readFileSync(join(REPO, "deploy", "pi-dispatch-valkey.container"), "utf8");
 const compose = readFileSync(join(REPO, "deploy", "docker-compose.yml"), "utf8");
 const undoubled = (s) => s.replaceAll("$$", "$");
 
-test("the Quadlet unit, the compose file and `up`'s docker run carry the ONE start script and health check, the password in the environment only (#468)", () => {
-	// Quadlet: Exec=sh -c '<script>' with every $ doubled for systemd, and the 0600 file the password comes from.
-	const exec = /^Exec=sh -c '(.*)'$/m.exec(quadlet);
-	assert.ok(exec, "the Exec= line");
-	assert.equal(undoubled(exec[1]), VALKEY_START_SCRIPT);
-	assert.equal(exec[1], dollarsDoubled(VALKEY_START_SCRIPT));
-	assert.doesNotMatch(exec[1].replaceAll("$$", ""), /\$/, "no single $ systemd would expand (with the password loaded into the unit's environment)");
-	assert.equal(undoubled(/^HealthCmd=(.*)$/m.exec(quadlet)[1]), VALKEY_HEALTH_SCRIPT);
-	assert.doesNotMatch(/^HealthCmd=(.*)$/m.exec(quadlet)[1].replaceAll("$$", ""), /\$/);
-	assert.match(quadlet, /^EnvironmentFile=%h\/\.config\/pi-dispatch\/valkey\.env$/m);
+test("the compose file and `up`'s docker run carry the ONE start script and health check, the password in the environment only (#468)", () => {
 	// compose: the same, `$$` being compose's escape, and the value interpolated from --env-file .env into the environment.
 	const cmd = /^ {4}command: \["sh", "-c", '(.*)'\]$/m.exec(compose);
 	assert.ok(cmd, "the command: line");
@@ -108,11 +98,10 @@ test("the Quadlet unit, the compose file and `up`'s docker run carry the ONE sta
 	assert.equal(argv[argv.indexOf("--health-cmd") + 1], VALKEY_HEALTH_SCRIPT);
 	// And the three things no carrier may do: a password on a command line, a systemd specifier, a quote or escape a
 	// carrier would read differently.
-	for (const [where, text] of [["Quadlet", quadlet], ["compose", compose], ["docker run", argv.join(" ")]]) {
+	for (const [where, text] of [["compose", compose], ["docker run", argv.join(" ")]]) {
 		assert.doesNotMatch(text.split("\n").filter((l) => !/^\s*#/.test(l)).join("\n"), /requirepass\s+[^$"\s]|--requirepass|VALKEY_EXTRA_FLAGS/, where);
 	}
 	for (const script of [VALKEY_START_SCRIPT, VALKEY_HEALTH_SCRIPT]) assert.doesNotMatch(script, /[%\\']/, "no %, backslash or single quote: each carrier would read one differently");
-	assert.ok(existsSync(join(REPO, "worker", "deploy", "pi-dispatch-valkey.container")), "the published mirror (publish.test.mjs holds it byte-identical)");
 	assert.equal(valkeyEnvFileText(PW).split("\n").filter((l) => !l.startsWith("#")).join("\n"), `VALKEY_PASSWORD=${PW}\n`);
 	assert.match(valkeyEnvFileText(null), /^VALKEY_PASSWORD=$/m, "no password: an empty value, which starts Valkey without one");
 });

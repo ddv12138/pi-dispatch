@@ -43,7 +43,7 @@ test("a name this BUILD does not know is refused at load, and the message says w
 	// list is not, so the refusal points at PI_BACKENDS rather than pretending to have checked it.
 	assert.throws(
 		() => parse([cron({ backend: "vapour" })]),
-		(err) => /is not a backend this build knows \(known: local, podman, openshell, openshell-bind\)/.test(err.message) && /PI_BACKENDS/.test(err.message),
+		(err) => /is not a backend this build knows \(known: local\)/.test(err.message) && /PI_BACKENDS/.test(err.message),
 	);
 });
 
@@ -176,11 +176,11 @@ test("the processor's default blesses local, so a correctly-authored trigger sti
 	assert.equal(reached, true, "the default must admit the backend every deployment already runs");
 });
 
-test("a folder-bound trigger naming a venue that copies files (openshell) is refused at load, in its own words (#683)", async () => {
+test("a folder-bound trigger is admitted only where a venue cannot edit the folder in place (#683)", async () => {
+	// The openshell venues left with the sandbox prune; the rule stays live (`refusesLocalWorkspace` reads a
+	// backend's `localFolders` word, not its name), so the boundary it draws stays pinned on the table's one entry.
 	const { refusesLocalWorkspace } = await import("../src/triggers.mjs");
 	const { BACKENDS } = await import("../src/backends.mjs");
-	assert.equal(refusesLocalWorkspace(BACKENDS.openshell, true), true, "on this host, and still cannot edit a folder in place");
-	assert.equal(refusesLocalWorkspace(BACKENDS.openshell, false), false, "a forge job copies a clone, which is fine");
 	assert.equal(refusesLocalWorkspace(BACKENDS.local, true), false);
-	assert.equal(refusesLocalWorkspace(BACKENDS.podman, true), false);
+	assert.equal(refusesLocalWorkspace(BACKENDS.local, false), false);
 });

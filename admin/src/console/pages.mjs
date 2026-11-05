@@ -6,7 +6,6 @@ import { connectionsSubscriptionAuth } from "./panels/subscription-auth.mjs";
 import { connectionsProviderKeys } from "./panels/provider-keys.mjs";
 import { MODELS_PANELS } from "./panels/models.mjs";
 import { modelsForAgent } from "../models-view.mjs";
-import { SANDBOX_PANELS } from "./panels/sandboxes.mjs";
 import { ZERO_TOUCH_PANELS, zeroTouchTabs, zeroTouchControls } from "./panels/zero-touch.mjs";
 import { zeroTouchView } from "../zero-touch-view.mjs";
 /**
@@ -47,7 +46,6 @@ import { readForkPoints } from "../run-fork.mjs";
 import { readTriggerEditor, triggerDetailOf, TRANSCRIPT_ID_RE } from "../read-model.mjs";
 import { ageText, beatAgeOf } from "./panels/common.mjs";
 import { WORKER_NAME_RE } from "@edgehero/pi-dispatch/config";
-import { BACKEND_NAMES, BACKENDS } from "@edgehero/pi-dispatch/backends";
 import { RECOVERY_CAP } from "@edgehero/pi-dispatch/recovery-queue";
 import { REPLICAS_MAX } from "@edgehero/pi-dispatch/triggers";
 import { FORGES } from "@edgehero/pi-dispatch/forges";
@@ -78,12 +76,11 @@ import {
   fleetHeld,
   fleetHosts,
   fleetDoctor,
+  fleetVenues,
   fleetBar, fleetDelayed,
-  hostState, hostJobs, hostSandboxes, hostBudget, hostCapacity, hostRow, hostDoctor,
-  venueSummary, venueServes, venueHosts, venueProperties, venueFix, venueCompare,
+  hostState, hostJobs, hostBudget, hostCapacity, hostRow, hostDoctor,
   fleetQueues,
   fleetSchedulers,
-  fleetVenues,
   INSIGHTS_DEFAULT_RANGE,
   INSIGHTS_RANGES,
   insightsPanel,
@@ -104,12 +101,11 @@ import {
   overviewWaitlists,
   parkedCheckRows,
   parkedQuestions,
-  runChain, runHeadline, runRecord, runRest, runTranscriptState, runTerminal, runActionsPanel, runSandbox, runSecrets, runModels, runTail, runRecovery, runWhy, runHost, runViewer,
+  runChain, runHeadline, runRecord, runRest, runTranscriptState, runActionsPanel, runSecrets, runModels, runTail, runRecovery, runWhy, runHost, runViewer,
   runChat,
   runCostPanel,
   runInbox,
   runOutcome,
-  runWorkspace,
   runProgress,
   runResources,
   runSession,
@@ -120,10 +116,10 @@ import {
   RUN_ID_RE,
   refusedBeforeStart,
 } from "./panels.mjs";
-import { chatFactsOf, parkedAnswerCheckOf, rerunCheckOf, sandboxCheckOf } from "./run-api.mjs";
+import { chatFactsOf, parkedAnswerCheckOf, rerunCheckOf } from "./run-api.mjs";
 import { runTranscriptSection } from "./transcript.mjs";
 import { WHATIF_MODEL_RE } from "./whatif.mjs";
-import { SPEND_TITLE, VENUE_LABEL, recordReason } from "../words.mjs";
+import { SPEND_TITLE, recordReason } from "../words.mjs";
 import { RUN_RECORD_UNREAD, runAbsent, runPlaces } from "../read-model.mjs";
 import { fromNewerRelease } from "../newer-release.mjs";
 import { agentReadProjection } from "../agent-read.mjs";
@@ -147,7 +143,6 @@ export const PAGES = Object.freeze({
   models: Object.freeze({ path: "/models", auth: "viewer", live: false, title: "Models", nav: "Models", icon: "spend" }),
   overview: Object.freeze({ path: "/", auth: "viewer", live: true, title: "Overview", nav: "Overview", icon: "home" }),
   runs: Object.freeze({ path: "/runs", auth: "viewer", live: true, title: "Runs", nav: "Runs", icon: "runs" }),
-  sandboxes: Object.freeze({ path: "/runs/sandboxes", auth: "operator", live: true, title: "Sandboxes", nav: null, icon: "box" }),
   "zero-touch": Object.freeze({ path: "/runs/zero-touch", auth: "viewer", live: false, title: "Zero touch", nav: null, icon: "flag" }),
   run: Object.freeze({ path: "/run", auth: "viewer", live: true, title: "Run", nav: null, icon: "runs" }),
   parked: Object.freeze({ path: "/parked", auth: "viewer", live: true, title: "Parked inbox", nav: "Parked", icon: "parked" }),
@@ -159,7 +154,6 @@ export const PAGES = Object.freeze({
   "insights-flows": Object.freeze({ path: "/insights/flows", auth: "viewer", live: false, title: SPEND_TITLE, nav: null, icon: "spend" }),
   fleet: Object.freeze({ path: "/fleet", auth: "viewer", live: true, title: "Fleet", nav: "Fleet", icon: "fleet" }),
   host: Object.freeze({ path: "/fleet/host", auth: "viewer", live: true, title: "Host", nav: null, icon: "fleet" }),
-  venue: Object.freeze({ path: "/fleet/venue", auth: "viewer", live: false, title: VENUE_LABEL, nav: null, icon: "fleet" }),
   trigger: Object.freeze({ path: "/config/trigger", auth: "viewer", live: false, title: "Trigger", nav: null, icon: "config" }),
   triggers: Object.freeze({ path: "/triggers", auth: "viewer", live: false, title: "Triggers", nav: "Triggers", icon: "bolt" }),
   "trigger-check": Object.freeze({ path: "/triggers/check", auth: "viewer", live: false, title: "Check an event", nav: null, icon: "bolt" }),
@@ -178,7 +172,6 @@ export const PAGES = Object.freeze({
 const PAGE_PANELS = Object.freeze({
   setup: SETUP_PANELS,
   models: MODELS_PANELS,
-  sandboxes: SANDBOX_PANELS,
   "zero-touch": ZERO_TOUCH_PANELS,
   secrets: [["p-secret-problems", secretsProblems], ["p-secret-profiles", secretsProfiles], ["p-secret-bundles", secretsBundles], ["p-secret-add", secretsAdd], ["p-secret-help", secretsHelp]],
   updates: [["p-up-problems", updatesProblems], ["p-up-jobs", updatesJobs], ["p-up-hosts", updatesHosts], ["p-up-how", updatesHow], ["p-up-recent", updatesRecent]],
@@ -192,13 +185,12 @@ const PAGE_PANELS = Object.freeze({
   // swapping panels; on a phone, where the layout is one column, Needs you comes first once the checklist is gone.
   overview: [["p-setup", overviewSetup], ["p-setup-pi", overviewSetupPi], ["p-setup-empty", overviewSetupEmpty], ["p-needs", overviewNeeds], ["p-waiting", overviewWaiting], ["p-active", overviewActive], ["p-spend", overviewSpend], ["p-agent-writes", overviewAgentWrites], ["p-timeline", overviewTimeline], ["p-caps", overviewCaps], ["p-waitlists", overviewWaitlists], ["p-hosts", overviewHosts]],
   runs: [["p-filters", runsFilters], ["p-summary", runsSummary], ["p-runs", runsTable]],
-  run: [["p-viewer", runViewer], ["p-outcome", runOutcome], ["p-workspace", runWorkspace], ["p-progress", runProgress], ["p-recovery", runRecovery], ["p-transcript", runTranscriptState], ["p-record", runRecord], ["p-rest", runRest], ["p-chat", runChat], ["p-answer-draft", runAnswerDraft], ["p-terminal", runTerminal], ["p-inbox", runInbox], ["p-run", runSummary], ["p-sandbox", runSandbox], ["p-secrets", runSecrets], ["p-actions", runActionsPanel], ["p-why", runWhy], ["p-host", runHost], ["p-cost", runCostPanel], ["p-models", runModels], ["p-resources", runResources], ["p-session", runSession], ["p-chain", runChain], ["p-tail", runTail]],
+  run: [["p-viewer", runViewer], ["p-outcome", runOutcome], ["p-progress", runProgress], ["p-recovery", runRecovery], ["p-transcript", runTranscriptState], ["p-record", runRecord], ["p-rest", runRest], ["p-chat", runChat], ["p-answer-draft", runAnswerDraft], ["p-inbox", runInbox], ["p-run", runSummary], ["p-secrets", runSecrets], ["p-actions", runActionsPanel], ["p-why", runWhy], ["p-host", runHost], ["p-cost", runCostPanel], ["p-models", runModels], ["p-resources", runResources], ["p-session", runSession], ["p-chain", runChain], ["p-tail", runTail]],
   parked: [["p-questions", parkedQuestions]],
   "answer-rules": [["p-questions", parkedQuestions]],
   ...SPEND_PANELS,
   fleet: [["p-fleetbar", fleetBar], ["p-queues", fleetQueues], ["p-active", fleetActive], ["p-held", fleetHeld], ["p-failed", fleetFailed], ["p-delayed", fleetDelayed], ["p-schedules", fleetSchedulers], ["p-hosts", fleetHosts], ["p-doctor", fleetDoctor], ["p-venues", fleetVenues]],
-  host: [["p-hoststate", hostState], ["p-hostjobs", hostJobs], ["p-hostsandboxes", hostSandboxes], ["p-hostbudget", hostBudget], ["p-hostcap", hostCapacity], ["p-hostrow", hostRow], ["p-hostdoctor", hostDoctor]],
-  venue: [["p-venue", venueSummary], ["p-venue-serves", venueServes], ["p-venue-hosts", venueHosts], ["p-venue-props", venueProperties], ["p-venue-fix", venueFix], ["p-venue-compare", venueCompare]],
+  host: [["p-hoststate", hostState], ["p-hostjobs", hostJobs], ["p-hostbudget", hostBudget], ["p-hostcap", hostCapacity], ["p-hostrow", hostRow], ["p-hostdoctor", hostDoctor]],
   config: [["cf-navigation", configNavigation], ["cf-settings", configSettings], ["cf-triggers", configTriggers], ["cf-pause-windows", configPauseWindows], ["cf-scoped-limits", configScopedLimits], ["cf-projects", configProjects], ["cf-files", configFiles], ["cf-unset", configUnset], ["cf-mcp-servers", configMcp], ["cf-packages", configPackages], ["cf-secret-profiles", configSecretProfiles], ["cf-secret-bundles", configSecretBundles]],
   trigger: [["p-trigger-on", triggerOn], ["p-trigger-runs", triggerRuns], ["p-trigger-run", triggerRun], ["p-trigger-edit", triggerEdit], ["p-trigger-trust", triggerTrust], ["p-trigger-kinds", triggerKinds], ["p-trigger-change", triggerChange]],
   "trigger-add": [["p-trigger-add", triggerAdd], ["p-kinds", triggerKindHelp], ["p-forge-words", triggerForgeWords], ["p-refusals", triggerRefusals]],
@@ -241,7 +233,6 @@ const PAGE_HEADLINES = Object.freeze({ overview: overviewHeadline, run: runHeadl
 const PAGE_LAYOUT = Object.freeze({
   setup: [{ cls: "cols setup-layout", items: ["p-setup", { cls: "stack", items: ["p-setup-ready", "p-setup-start"] }] }],
   models: [{ cls: "stack", items: ["p-model-problems"] }, { cls: "cols models-layout", items: [{ cls: "stack", items: ["p-roles"] }, { cls: "stack", items: ["p-cooldowns", "p-models"] }] }, { cls: "stack", items: ["p-subscription-quota", "p-proposals"] }],
-  sandboxes: [{ cls: "cols", items: [{ cls: "stack", items: ["p-sb-run", "p-sb-new"] }, { cls: "stack", items: ["p-sb-open", "p-sb-kept", "p-sb-browser"] }] }],
   "zero-touch": [{ cls: "cards-4 zt-kpis", items: ["p-zt-rate", "p-zt-streak", "p-zt-wait", "p-zt-handled"] }, { cls: "cols zt-layout", items: [{ cls: "stack zt-main", items: ["p-zt-projects", "p-zt-questions"] }, { cls: "stack zt-side", items: ["p-zt-causes", "p-zt-fixes"] }] }],
   updates: [{ cls: "stack", items: ["p-up-problems"] }, { cls: "cols updates-layout", items: [{ cls: "stack", items: ["p-up-jobs", "p-up-hosts"] }, { cls: "stack", items: ["p-up-how", "p-up-recent"] }] }],
   connections: [{ cls: "stack", items: ["p-connection-problems"] }, { cls: "cols connections-layout", items: [{ cls: "stack", items: ["p-provider-keys", "p-forges", "p-egress", "p-endpoints", "p-subscription-auth"] }, { cls: "stack", items: ["p-notify", "p-mcp", "p-env", "p-packages"] }] }],
@@ -252,9 +243,8 @@ const PAGE_LAYOUT = Object.freeze({
   trigger: [{ cls: "cols config-layout", items: [{ cls: "stack", items: ["p-trigger-on", "p-trigger-runs", "p-trigger-run", "p-trigger-edit"] }, { cls: "stack", items: ["p-trigger-trust", "p-trigger-kinds", "p-trigger-change"] }] }],
   "trigger-add": [{ cls: "cols cols--wide-side config-layout", items: [{ cls: "stack", items: ["p-trigger-add"] }, { cls: "stack", items: ["p-kinds", "p-forge-words", "p-refusals"] }] }],
   fleet: [{ cls: "stack", items: ["p-fleetbar", "p-active"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-queues", "p-held", "p-failed", "p-delayed", "p-schedules"] }, { cls: "stack", items: ["p-hosts", "p-doctor"] }] }, { cls: "stack", items: ["p-venues"] }],
-  host: [{ cls: "stack", items: ["p-hoststate"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-hostjobs", "p-hostsandboxes", "p-hostbudget", "p-hostcap"] }, { cls: "stack", items: ["p-hostrow", "p-hostdoctor"] }] }],
-  venue: [{ cls: "cols", items: [{ cls: "stack", items: ["p-venue-props"] }, { cls: "stack", items: ["p-venue", "p-venue-serves", "p-venue-hosts", "p-venue-fix"] }] }, { cls: "stack", items: ["p-venue-compare"] }],
-  run: [{ cls: "stack", items: ["p-viewer"] }, { cls: "cols", items: [{ cls: "stack run-main", items: ["p-outcome", "p-workspace", "p-run", "p-progress", "p-recovery", "p-transcript", "p-record", "p-rest", "p-sandbox", "p-secrets", "p-actions", "p-why", "p-host"] }, { cls: "stack run-side", items: ["p-chat", "p-answer-draft", "p-terminal", "p-inbox", "p-cost", "p-models", "p-resources", "p-session", "p-chain", "p-tail"] }] }],
+  host: [{ cls: "stack", items: ["p-hoststate"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-hostjobs", "p-hostbudget", "p-hostcap"] }, { cls: "stack", items: ["p-hostrow", "p-hostdoctor"] }] }],
+  run: [{ cls: "stack", items: ["p-viewer"] }, { cls: "cols", items: [{ cls: "stack run-main", items: ["p-outcome", "p-run", "p-progress", "p-recovery", "p-transcript", "p-record", "p-rest", "p-secrets", "p-actions", "p-why", "p-host"] }, { cls: "stack run-side", items: ["p-chat", "p-answer-draft", "p-inbox", "p-cost", "p-models", "p-resources", "p-session", "p-chain", "p-tail"] }] }],
   overview: Object.freeze([
     Object.freeze({ cls: "cols", items: Object.freeze(["p-setup", Object.freeze({ cls: "stack", items: Object.freeze(["p-setup-pi", "p-setup-empty"]) })]) }),
     Object.freeze({ cls: "cards-4", slotAfter: true, items: Object.freeze(["p-needs", "p-waiting", "p-active", "p-spend"]) }),
@@ -291,7 +281,6 @@ export function panelIds(name) {
 /** The parameters each screen takes; any other refuses the request. */
 const PAGE_PARAMS = Object.freeze({
   setup: [],
-  sandboxes: ["id", "repo", "index", "ref", "host", "pin", "request", "gatewaySelect", "fromRun"],
   overview: ["rows", "zoom", "project"],
   runs: [...RUN_FILTER_FIELDS, "before", "touched", "days", "scope"],
   "zero-touch": ["days", "project", "scope"],
@@ -306,7 +295,6 @@ const PAGE_PARAMS = Object.freeze({
   "insights-flows": ["range", "project", "view", "paths", "select"],
   fleet: [],
   host: ["name"],
-  venue: ["name"],
   config: [],
   secrets: [],
   connections: [],
@@ -388,23 +376,6 @@ export function parsePageQuery(name, searchParams) {
     return v === null || v === "" ? null : v;
   };
   switch (name) {
-    case "sandboxes": {
-      if (params.has("gatewaySelect")) {
-        if (params.get("gatewaySelect") !== "1" || !WORKER_NAME_RE.test(params.get("host") ?? "") || [...params.keys()].some((key) => !["gatewaySelect", "host"].includes(key))) return { refusal: "gatewaySelect must be 1 with one valid host and no other fields" };
-        return { query: Object.freeze({ gatewaySelect: true, host: params.get("host") }) };
-      }
-      const id = one("id"), repo = one("repo"), rawIndex = one("index"), ref = one("ref") ?? "HEAD", host = one("host"), pin = one("pin") ?? "0", request = one("request");
-      const fromRun = one("fromRun");
-      if (params.has("fromRun") && (fromRun === null || !RUN_ID_RE.test(fromRun))) return { refusal: "fromRun must name one run id" };
-      if (id !== null && !RUN_ID_RE.test(id)) return { refusal: "id must be a sandbox or run id" };
-      if (repo !== null && (!/^[A-Za-z0-9._/-]{1,200}$/.test(repo) || repo.split("/").some((part) => !part || part === "." || part === ".."))) return { refusal: "repo must be a repository path" };
-      if (rawIndex !== null && !/^(?:0|[1-9]\d{0,5})$/.test(rawIndex)) return { refusal: "index must be a triggers-file index" };
-      if (host !== null && !WORKER_NAME_RE.test(host)) return { refusal: "host must be a worker name" };
-      if (!ref || ref.length > 200 || /[\x00-\x20\x7f]/.test(ref) || ref.startsWith("-")) return { refusal: "ref must be a branch, tag, full SHA or pr:number without spaces or control bytes" };
-      if (!["0", "1"].includes(pin)) return { refusal: "pin must be 0 or 1" };
-      if (request !== null && !/^sb-[0-9a-f]{32}$/.test(request)) return { refusal: "request must be a sandbox preparation id" };
-      return { query: Object.freeze({ id, repo, index: rawIndex === null ? null : Number(rawIndex), ref, host, pin: pin === "1", request, ...(fromRun ? { fromRun } : {}) }) };
-    }
     case "triggers": {
       const kind = one("kind") ?? "all";
       if (!TRIGGER_LIST_KINDS.includes(kind)) return { refusal: `kind must be one of ${TRIGGER_LIST_KINDS.join(", ")}` };
@@ -415,12 +386,10 @@ export function parsePageQuery(name, searchParams) {
       if (index === null || !/^(?:0|[1-9]\d{0,5})$/.test(index)) return { refusal: "index must be a triggers-file index" };
       return { query: Object.freeze({ index: Number(index) }) };
     }
-    case "host":
-    case "venue": {
+    case "host": {
       const value = one("name");
       if (value === null) return { refusal: `the ${name} page needs ?name=` };
-      if (name === "host" && !WORKER_NAME_RE.test(value)) return { refusal: "name must be a worker name (letters, digits, '.', '_', '-', at most 64 characters)" };
-      if (name === "venue" && !BACKEND_NAMES.includes(value)) return { refusal: `name must be one of ${BACKEND_NAMES.join(", ")}` };
+      if (!WORKER_NAME_RE.test(value)) return { refusal: "name must be a worker name (letters, digits, '.', '_', '-', at most 64 characters)" };
       return { query: Object.freeze({ name: value }) };
     }
     case "watch":
@@ -535,19 +504,13 @@ export function pageQueryString(name, query) {
   }
   if (name === "trigger-add" && q.recipe) p.set("recipe", q.recipe);
   if (name === "trigger" && Number.isSafeInteger(q.index)) p.set("index", String(q.index));
-  if (name === "sandboxes") {
-    if (q.gatewaySelect) return new URLSearchParams({ gatewaySelect: "1", host: q.host }).toString();
-    if (q.fromRun) p.set("fromRun", q.fromRun);
-    for (const k of ["id", "repo", "index", "ref", "host", "request"]) if (q[k] !== null && q[k] !== undefined) p.set(k, String(q[k]));
-    if (q.pin) p.set("pin", "1");
-  }
   if (name === "triggers" && q.kind && q.kind !== "all") p.set("kind", q.kind);
   if (name === "watch" || name === "watch-board") {
     for (const k of ["rule", "finding"]) if (q[k]) p.set(k, q[k]);
   } else if (name === "runs") {
     for (const k of [...RUN_FILTER_FIELDS, "touched", "days", "scope"]) if (q.filter?.[k] !== undefined) p.set(k, q.filter[k]);
     if (q.before !== null && q.before !== undefined) p.set("before", String(q.before));
-  } else if ((name === "host" || name === "venue") && q.name) p.set("name", q.name);
+  } else if (name === "host" && q.name) p.set("name", q.name);
   else if ((name === "run" || name === "project") && q.id) p.set("id", q.id);
   else if (name.startsWith("insights")) {
     for (const k of PAGE_PARAMS[name]) if (typeof q[k] === "string" && q[k] !== "") p.set(k, q[k]);
@@ -614,7 +577,6 @@ export function returnPathOf(raw) {
 const PAGE_READS = Object.freeze({
   setup: ["snapshot", "setup"],
   models: ["snapshot", "waiting", "models"],
-  sandboxes: ["parkedCount"],
   "zero-touch": ["parkedCount"],
   overview: ["snapshot", "waiting"],
   runs: ["runsPage", "subscriptions", "runsWindow", "parkedCount"],
@@ -628,7 +590,6 @@ const PAGE_READS = Object.freeze({
   "insights-flows": ["insights", "parkedCount"],
   fleet: ["snapshot", "waiting"],
   host: ["snapshot", "waiting", "hostCapacity"],
-  venue: ["snapshot"],
   config: ["snapshot"],
   secrets: ["snapshot", "secrets"],
   connections: ["snapshot", "connections", "setup"],
@@ -772,16 +733,6 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
   }
   if (name === "overview" && (who?.role === "operator" || who?.live === true && who?.role === undefined) && typeof deps.agentWrites === "function") {
     try { data.agentWrites = await deps.agentWrites(); } catch { data.agentWrites = { unavailable: true, partial: true }; }
-  }
-  // Private workspace and opener configuration reads never join /api/state or a viewer's shared load.
-  if ((who?.role === "operator" || who?.live === true && who?.role === undefined) && ["sandboxes", "run", "host", "trigger"].includes(name) && deps.sandboxes) {
-    if (["sandboxes", "run"].includes(name) && typeof deps.gatewayView === "function") {
-      try { data.browserGateways = await deps.gatewayView(); } catch { data.browserGateways = { enabledHosts: [], sessions: [], problem: "Browser-terminal information could not be read. Use the native terminal route." }; }
-    }
-    try { const hosts = deps.sandboxes.hosts(); data.sandboxHosts = hosts.config ?? null; data.sandboxHostsProblem = hosts.refusal ?? null; } catch { data.sandboxHosts = null; data.sandboxHostsProblem = "Terminal host configuration could not be read. Inspect its owner, permissions and format."; }
-    if (name === "sandboxes") {
-      try { data.sandboxes = await deps.sandboxes.read(q); } catch { data.sandboxes = null; data.readFailed = true; }
-    }
   }
   if (name === "zero-touch") {
     try { data.zeroTouch = typeof deps.zeroTouch === "function" ? await deps.zeroTouch({ windowDays: q.days, project: q.project, scopeId: q.scope, role: who?.role }) : null; } catch { data.zeroTouch = null; }
@@ -943,21 +894,16 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
     }
   };
   const actionsRead = async () => {
-    // Issue #710: whether the run's two actions can work, so the page offers only those (REQ-OPERATOR-CONSOLE-ACTIONS):
-    // the planner's cheap re-run refusals over the retained job's data (`rerunCheck`) and the panel's sandbox manifest
-    // verdict for a run of this host (`sandboxCheck`), each reused for PARK_CHECK_CACHE_MS per run id, so the live loop
-    // does not read them every tick. Read for both roles, as all page data is; only an operator's page draws the actions.
-    // A run refused before it started has no workspace, whatever a manifest says, so its sandbox check is not read.
+    // Issue #710: whether the run's action can work, so the page offers it only then (REQ-OPERATOR-CONSOLE-ACTIONS):
+    // the planner's cheap re-run refusals over the retained job's data (`rerunCheck`), reused for PARK_CHECK_CACHE_MS
+    // per run id, so the live loop does not read it every tick. Read for both roles, as all page data is; only an
+    // operator's page draws the actions.
     const record = data.run.record;
     const forkPoints = await readForkPoints({ jobId: q.id, env: deps.env ?? {}, now: () => now });
     data.forkPoints = forkPoints.ok ? { ok: true, entries: forkPoints.entries } : { refusal: forkPoints.refusal };
     data.rerunCheck = await rerunCheckOf(deps.fleet, q.id, record, { now: () => now, lookup });
-    if (!refusedBeforeStart(record)) data.sandboxCheck = await sandboxCheckOf(deps.fleet, q.id, record, { now: () => now });
   };
   await Promise.all([reads.includes("chat") ? chatRead() : null, reads.includes("actions") && data.run?.record ? actionsRead() : null]);
-  if (name === "run" && data.run?.record && (who?.role === "operator" || who?.live === true && who?.role === undefined) && typeof deps.sandboxes?.workspace === "function") {
-    try { data.workspace = await deps.sandboxes.workspace(data.run.record); } catch { data.workspace = { unknown: true, sessionsUnknown: true }; }
-  }
   if (name === "run" && data.run?.record) {
     const record = data.run.record;
     // These lookups are bounded by the worker's own replica/recovery caps, never a history scan. A related record
@@ -1057,7 +1003,7 @@ export const RUN_VIEWER_PANELS = Object.freeze(["p-viewer", "p-outcome", "p-prog
 
 /**
  * The run page's panels for a record a NEWER pi-dispatch wrote (issue #761), for both roles: the outcome banner and the
- * run's stable core, nothing else. Every other panel reads fields past that core (progress, chat, the sandbox, the
+ * run's stable core, nothing else. Every other panel reads fields past that core (progress, chat, the
  * money), whose meaning that release may have changed, and the record reaches this page cut to its core, so they would
  * say what the record does not ("no session", "not armed"). The other ids stay empty for live state swaps.
  */
@@ -1154,9 +1100,9 @@ export async function renderPage(name, ctx) {
   const headline = headlineOf(name, ctx);
   const triggerListOptions = name === "triggers" ? { description: triggersDescription(viewOf(name, ctx)), end: role === "operator" && !ctx?.readOnly ? html`<a class="btn btn--primary" href="${PAGES["trigger-add"].path}">${uiText("Add a trigger", ctx?.locale)}</a>` : null } : name === "trigger-check" ? { description: "Describe a hypothetical event. Nothing is sent or spent.", end: html`<a class="btn" href="${PAGES.triggers.path}">${uiText("Back to Triggers", ctx?.locale)}</a>` } : null;
   const configOptions = name === "connections" ? { description: connectionsDescription(ctx?.locale) } : name === "updates" ? { description: updatesDescription(ctx?.locale) } : name === "project" ? { title: projectTitle(ctx?.data?.projectView, ctx?.locale), description: projectDescription(ctx?.data?.projectView, ctx?.locale), end: html`<a class="btn" href="${`/runs?project=${encodeURIComponent(ctx?.query?.id ?? "")}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : null;
-  const titleOptions = configOptions ?? triggerListOptions ?? (name === "setup" ? { description: SETUP_DESCRIPTION } : name === "models" ? { description: "Which model each role runs, its fallbacks and cooldowns. Every role change is reviewed; this page starts no run." } : name === "sandboxes" ? { description: ctx?.query?.gatewaySelect ? "Choose an already-open shell on the workspace host. No sandbox starts here." : "A kept workspace or a fresh clone, in your own terminal. A job’s isolation, no credentials and no agent.", end: ctx?.query?.gatewaySelect ? null : html`<a class="btn" href="/runs/sandboxes#p-sb-new">New sandbox</a>` } : name === "config" ? { description: configDescription(viewOf(name, ctx)) } : name === "trigger" ? { title: triggerTitle(viewOf(name, ctx)), end: html`<a class="btn" href="${`/runs?trigger=${encodeURIComponent(String(ctx?.data?.triggerDetail?.trigger?.type === "cron" ? ctx.data.triggerDetail.trigger.id : ctx?.query?.index))}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : name === "venue" ? { description: BACKENDS[ctx?.query?.name]?.describe ?? null, end: seg(BACKEND_NAMES.map((venue) => ({ label: venue, href: `/fleet/venue?${new URLSearchParams({ name: venue })}`, on: venue === ctx?.query?.name })), { label: "Venues" }) } : name === "fleet" ? { description: "Queues, hosts and their health. Every pause, cancel and removal previews first." } : {});
-  const body = shellHtml(name, ctx, html`${["runs", "zero-touch", "sandboxes"].includes(name) ? zeroTouchTabs(viewOf(name, ctx)) : name.startsWith("insights") ? spendTabs(viewOf(name, ctx)) : null}${ctx?.query?.becauseRun ? html`<p class="note">${uiText("Configuration fix started from", ctx?.locale)} <a href="${`/run?id=${encodeURIComponent(ctx.query.becauseRun)}`}">${ctx.query.becauseRun}</a>. ${uiText("Confirmed changes on this page will be linked to that refusal.", ctx?.locale)}</p>` : null}${inner}`, { ...titleOptions, ...(name === "zero-touch" ? { description: "How often a run needed a person, per project and repository. The goal is zero.", end: zeroTouchControls(viewOf(name, ctx)) } : {}), ...(name.startsWith("insights") ? { description: spendDescription(name, viewOf(name, ctx).locale), end: spendControls(viewOf(name, ctx)) } : {}), ...(headline === null ? {} : { headline }) });
+  const titleOptions = configOptions ?? triggerListOptions ?? (name === "setup" ? { description: SETUP_DESCRIPTION } : name === "models" ? { description: "Which model each role runs, its fallbacks and cooldowns. Every role change is reviewed; this page starts no run." } : name === "config" ? { description: configDescription(viewOf(name, ctx)) } : name === "trigger" ? { title: triggerTitle(viewOf(name, ctx)), end: html`<a class="btn" href="${`/runs?trigger=${encodeURIComponent(String(ctx?.data?.triggerDetail?.trigger?.type === "cron" ? ctx.data.triggerDetail.trigger.id : ctx?.query?.index))}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : name === "fleet" ? { description: "Queues, hosts and their health. Every pause, cancel and removal previews first." } : {});
+  const body = shellHtml(name, ctx, html`${["runs", "zero-touch"].includes(name) ? zeroTouchTabs(viewOf(name, ctx)) : name.startsWith("insights") ? spendTabs(viewOf(name, ctx)) : null}${ctx?.query?.becauseRun ? html`<p class="note">${uiText("Configuration fix started from", ctx?.locale)} <a href="${`/run?id=${encodeURIComponent(ctx.query.becauseRun)}`}">${ctx.query.becauseRun}</a>. ${uiText("Confirmed changes on this page will be linked to that refusal.", ctx?.locale)}</p>` : null}${inner}`, { ...titleOptions, ...(name === "zero-touch" ? { description: "How often a run needed a person, per project and repository. The goal is zero.", end: zeroTouchControls(viewOf(name, ctx)) } : {}), ...(name.startsWith("insights") ? { description: spendDescription(name, viewOf(name, ctx).locale), end: spendControls(viewOf(name, ctx)) } : {}), ...(headline === null ? {} : { headline }) });
   // A run no place shows while one could not be read is a run page that cannot say whether the run exists: 503.
   const status = name === "project" && ctx?.data?.projectView?.state !== "ready" || places !== null && !runPlaces(places).shown ? 503 : 200;
-  return { status, html: page({ title: `pi-dispatch console: ${["host", "venue"].includes(name) ? ctx?.query?.name ?? uiText(meta.title, ctx?.locale) : uiText(meta.title, ctx?.locale)}`, name, body, live, query, theme, locale: ctx?.locale, becauseRun: ctx?.query?.becauseRun ?? null }) };
+  return { status, html: page({ title: `pi-dispatch console: ${["host"].includes(name) ? ctx?.query?.name ?? uiText(meta.title, ctx?.locale) : uiText(meta.title, ctx?.locale)}`, name, body, live, query, theme, locale: ctx?.locale, becauseRun: ctx?.query?.becauseRun ?? null }) };
 }

@@ -1169,23 +1169,12 @@ test("an empty or non-string value emits NO variable at all, never `NAME=`", { s
 	assert.equal(env.GOOD, "x");
 });
 
-test("issue #730: PI_RUNNER_OBSERVABLE is the venue's alone: written on observableRunner, absent otherwise, never from a forwarded or secret value", { skip }, () => {
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, observableRunner: true }).PI_RUNNER_OBSERVABLE, "1");
-	assert.equal("PI_RUNNER_OBSERVABLE" in mod.buildContainerEnv({ ...secretsBase }), false, "every other venue keeps the exec-only node");
-	const smuggled = mod.buildContainerEnv({ ...secretsBase, hostEnv: { ...secretsBase.hostEnv, PI_RUNNER_OBSERVABLE: "1" }, forwardEnv: ["PI_RUNNER_OBSERVABLE"], secrets: { PI_RUNNER_OBSERVABLE: "1" } });
-	assert.equal("PI_RUNNER_OBSERVABLE" in smuggled, false, "settled after both loops, so a forwarded or secret value is removed");
-	assert.ok(CONTAINER_ENV_NAMES.has("PI_RUNNER_OBSERVABLE"), "reserved, so the triggers loader refuses it in run.secrets");
-});
-
 test("the reserved-name list triggers.mjs refuses covers every STATIC name this map writes", { skip }, () => {
 	// The drift guard. reserved-env.mjs is a hand-written list in a module with no imports (so the shared
 	// validator and the admin bundle can have it for free), and a variable added to the closed map without
 	// being added there would open a hole a trigger could drive through. This is the test that closes it.
-	const env = mod.buildContainerEnv({ ...secretsBase, maxTokens: 100, packagePaths: ["/opt/pi-global/packages/x"], sessionFile: "/session/current.jsonl", flow: "fix", excludeTools: ["bash"], allowGlobalExtensions: false, home: "/home/pi", exitAuth: true, transcriptStderr: true, reportProgress: true, recover: true, recovering: true, steer: true, bundleEnvFile: true, observableRunner: true });
+	const env = mod.buildContainerEnv({ ...secretsBase, maxTokens: 100, packagePaths: ["/opt/pi-global/packages/x"], sessionFile: "/session/current.jsonl", flow: "fix", excludeTools: ["bash"], allowGlobalExtensions: false, home: "/home/pi", exitAuth: true, reportProgress: true, recover: true, recovering: true, steer: true });
 	assert.equal(env.PI_STEER, "1", "the drift check must see PI_STEER (issue #646)");
-	assert.equal(env.PI_RUNNER_OBSERVABLE, "1", "the drift check must see PI_RUNNER_OBSERVABLE (issue #730)");
-	assert.equal(env.PI_BUNDLE_ENV, "1", "the drift check must see PI_BUNDLE_ENV (issue #704 part 3)");
-	assert.equal(env.PI_TRANSCRIPT, "stderr", "the drift check must see PI_TRANSCRIPT (issue #686)");
 	assert.equal(env.PI_REPORT_PROGRESS, "1", "the drift check must see PI_REPORT_PROGRESS (issue #644)");
 	assert.equal(env.PI_RECOVER, "1", "the drift check must see PI_RECOVER (issue #645)");
 	assert.equal(env.PI_RECOVERING, "1", "the drift check must see PI_RECOVERING (issue #645)");
@@ -1535,41 +1524,6 @@ test("PI_EXIT_AUTH names the stdin channel only when run-container hands a key o
 	assert.equal(mod.buildContainerEnv({ ...secretsBase, secrets: { PI_EXIT_AUTH: "off" }, exitAuth: true }).PI_EXIT_AUTH, "stdin");
 	assert.ok(CONTAINER_ENV_NAMES.has("PI_EXIT_AUTH"), "reserved, so run.secrets cannot bind it");
 });
-
-test("PI_EXIT_AUTH=stdin-frames (#686): only beside the key, PI_STEER and the stdin-steer flag; every other attempt keeps stdin", { skip }, async () => {
-	const framed = mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steer: true, steerStdin: true });
-	assert.equal(framed.PI_EXIT_AUTH, "stdin-frames");
-	assert.equal(framed.PI_STEER, "1");
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steerStdin: true }).PI_EXIT_AUTH, "stdin", "never without PI_STEER");
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steer: true }).PI_EXIT_AUTH, "stdin", "a bind venue's steered attempt: the key and EOF");
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steer: true, steerStdin: "yes" }).PI_EXIT_AUTH, "stdin", "only the boolean true asks for it");
-	assert.equal("PI_EXIT_AUTH" in mod.buildContainerEnv({ ...secretsBase, steer: true, steerStdin: true }), false, "no key, no channel");
-	// Byte-identical: the flag changes nothing but that one value.
-	const a = mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steer: true, steerStdin: true });
-	const b = mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steer: true });
-	assert.deepEqual({ ...a, PI_EXIT_AUTH: "stdin" }, b);
-	assert.deepEqual(mod.buildContainerEnv({ ...secretsBase, exitAuth: true, steerStdin: true }), mod.buildContainerEnv({ ...secretsBase, exitAuth: true }));
-});
-
-test("PI_TRANSCRIPT (#686): stderr only beside a key and the armed flag, reserved, structural, and nothing else can set it", { skip }, async () => {
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, exitAuth: true, transcriptStderr: true }).PI_TRANSCRIPT, "stderr");
-	assert.equal("PI_TRANSCRIPT" in mod.buildContainerEnv({ ...secretsBase, exitAuth: true }), false, "absent by default: every binding venue's env is what it was");
-	assert.equal("PI_TRANSCRIPT" in mod.buildContainerEnv({ ...secretsBase, transcriptStderr: true }), false, "never without the key its records are signed with");
-	assert.equal("PI_TRANSCRIPT" in mod.buildContainerEnv({ ...secretsBase, exitAuth: true, transcriptStderr: "yes" }), false, "only the boolean true asks for it");
-	assert.equal("PI_TRANSCRIPT" in mod.buildContainerEnv({ ...secretsBase, secrets: { PI_TRANSCRIPT: "stderr" } }), false, "the backstop overrules a secret of that name");
-	assert.ok(CONTAINER_ENV_NAMES.has("PI_TRANSCRIPT"), "reserved, so run.secrets cannot bind it");
-	const { NON_SECRET_ENV_KEYS } = await import("../src/redact-secrets.mjs");
-	assert.ok(NON_SECRET_ENV_KEYS.has("PI_TRANSCRIPT"), "structural, so on openshell it rides the exec's --env and is never a provider placeholder");
-});
-
-test("PI_JOB_LAYOUT (#683): written only for a copying venue's sandbox layout, absent on a binding one, refused otherwise", { skip }, () => {
-	assert.equal(mod.buildContainerEnv(secretsBase).PI_JOB_LAYOUT, undefined, "the default is mounts, and mounts writes nothing (an undefined value emits no -e)");
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, layout: "mounts" }).PI_JOB_LAYOUT, undefined);
-	assert.equal(mod.buildContainerEnv({ ...secretsBase, layout: "sandbox" }).PI_JOB_LAYOUT, "sandbox");
-	for (const layout of ["Sandbox", "", null, "/sandbox"]) assert.throws(() => mod.buildContainerEnv({ ...secretsBase, layout }), /unknown job layout/, String(layout));
-	assert.ok(CONTAINER_ENV_NAMES.has("PI_JOB_LAYOUT"), "reserved, so run.secrets cannot bind it");
-});
-
 
 test("codemode workers follow the resolved job size and cannot be replaced through host forwarding or secrets (#693)", { skip }, () => {
 	assert.ok(CONTAINER_ENV_NAMES.has("PI_CODEMODE_MAX_WORKERS"));

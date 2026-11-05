@@ -375,13 +375,6 @@ function resolveEnvName(provider) {
 	return apiKeyVariable(providerKeyCandidates(provider));
 }
 
-/** PI_JOB_LAYOUT's value for `layout`: absent for the default, the name for `sandbox`, refused for anything else. */
-function layoutEnv(layout) {
-	if (layout === "mounts") return undefined;
-	if (layout === "sandbox") return "sandbox";
-	throw new Error(`buildContainerEnv: unknown job layout ${JSON.stringify(layout)} (want "mounts" or "sandbox")`);
-}
-
 /**
  * Assemble the container env. `hostEnv` is the worker's process.env; `job` carries the resolved
  * config and the per-job scoped token (GitHub-backed jobs, and local cron jobs that opted in via
@@ -398,7 +391,7 @@ function layoutEnv(layout) {
  * `allowGlobalExtensions` defaults to TRUE here, matching loadConfig's default (REQ-GLOBAL-PI-OVERLAY): a
  * caller that says nothing gets the operator's staged setup, and only an explicit `false` withholds it.
  */
-export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondaryProvider = null, model, maxTurns, maxTokens, jobId, githubToken, forgeKind, forgeHosts = {}, hostEnv, allowGlobalExtensions = true, packagePaths = [], packageCanaryPath = undefined, forwardEnv = [], secrets = {}, sessionFile = null, flow = null, command = null, excludeTools = [], mcpServers = [], awaitInput = false, approvalGates = null, approvalDecision = null, reportProgress = false, recover = false, recovering = false, steer = false, layout = "mounts", allowedModels = null, authFromPi = false, egress = false, egressProxy, agentDir, home = null, readFile = readFileSync, modelEndpoints = null, exitAuth = false, transcriptStderr = false, steerStdin = false, bundleEnvFile = false, observableRunner = false, fork = null, thinkingLevel = null, subscriptionAuth = [] }) {
+export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondaryProvider = null, model, maxTurns, maxTokens, jobId, githubToken, forgeKind, forgeHosts = {}, hostEnv, allowGlobalExtensions = true, packagePaths = [], packageCanaryPath = undefined, forwardEnv = [], secrets = {}, sessionFile = null, flow = null, command = null, excludeTools = [], mcpServers = [], awaitInput = false, approvalGates = null, approvalDecision = null, reportProgress = false, recover = false, recovering = false, steer = false, allowedModels = null, authFromPi = false, egress = false, egressProxy, agentDir, home = null, readFile = readFileSync, modelEndpoints = null, exitAuth = false, fork = null, thinkingLevel = null, subscriptionAuth = [] }) {
 	// The provider credential(s), by pi's expected variable name(s) -- from the worker env, or (when
 	// PI_AUTH_FROM_PI is set and the env has none) host-side from pi's auth.json. Throws (config) if
 	// neither source yields one, which the processor turns into a policy refusal that refunds any reserve
@@ -494,11 +487,6 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 		// Issue #646: the trigger armed run.steer, so the runner delivers the files the worker writes into its read-only
 		// /inbox mount. "1" or absent, PI_AWAIT_INPUT's rule, strictly `=== true` for PI_RECOVER's reason.
 		PI_STEER: steer === true ? "1" : undefined,
-		// Issue #683: which file layout the runner reads (worker/src/job-layout.mjs), set only for a venue that copies the
-		// job's files (`sandbox`). Absent is `mounts`, so every binding venue's env is byte-identical to one built before
-		// the variable existed. Any other value is the caller's bug and is refused rather than written: the runner would
-		// refuse it too, but only inside a container the budget already paid for.
-		PI_JOB_LAYOUT: layoutEnv(layout),
 		// The job's EFFECTIVE allowed-model list (issue #502): its trigger's `run.models`, else the deployment's
 		// PI_ALLOWED_MODELS. Comma-joined `provider/model` entries, which the runner splits at each entry's first `/`
 		// (image/runner/src/config.mjs). Comma is safe because both list parsers refuse an entry carrying one. NULL is
@@ -588,8 +576,8 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 
 	// Issue #341: the job's HOME, only when the worker runs it under `--user` (`home` is passed then and only then).
 	// AFTER the PI_FORWARD_ENV and secrets loops, for the egress variables' reason: a forwarded or secret HOME must
-	// not win, because a uid with no passwd entry in the image would otherwise get `HOME=/` (Docker) or
-	// `HOME=/workspace` (Podman, measured), and pi's auth.json lands nowhere or in the operator's repository.
+	// not win, because a uid with no passwd entry in the image would otherwise get a daemon-default HOME
+	// (measured: `/` or `/workspace` across runtimes), and pi's auth.json lands nowhere or in the operator's repository.
 	// env-internal HOME: written into the job's closed env map here, never read from the worker's environment.
 	if (typeof home === "string" && home !== "") env.HOME = home;
 
@@ -624,33 +612,8 @@ export function buildContainerEnv({ size = DEFAULT_JOB_SIZE, provider, secondary
 	// the cap above, and ONLY for a run the worker actually hands a key, so a runner never blocks on a stdin no one
 	// writes. `=== true`, so only run-container's own boolean asks for it.
 	// env-internal PI_EXIT_AUTH: written into the job's closed env map here, never read from the worker's environment.
-	// Issue #686: `stdin-frames` names the stdin frame channel instead, the key as frame 1 and the pipe left open for
-	// message frames: only for an attempt run-container armed for stdin steering (`steerStdin`, a copying venue and an
-	// image declaring it), and only beside PI_STEER=1, so every other attempt's value stays `stdin`, byte-identical.
-	if (exitAuth === true) env.PI_EXIT_AUTH = steerStdin === true && steer === true ? "stdin-frames" : "stdin";
+	if (exitAuth === true) env.PI_EXIT_AUTH = "stdin";
 	else delete env.PI_EXIT_AUTH;
-
-	// Issue #686: the runner mirrors its session file over stderr as signed records, for an attempt run-container armed
-	// (a copying venue, an image that declares `transcriptStderr`, and a key). Settled here like PI_EXIT_AUTH, and only
-	// beside it: a record is signed with that key, so without one the runner would mirror nothing anyway. `=== true`.
-	// env-internal PI_TRANSCRIPT: written into the job's closed env map here, never read from the worker's environment.
-	if (transcriptStderr === true && exitAuth === true) env.PI_TRANSCRIPT = "stderr";
-	else delete env.PI_TRANSCRIPT;
-
-	// Issue #704 part 3: the runner reads a project secret bundle's plain variables from the job directory's
-	// bundle-env.json, for an attempt run-container armed (a venue that hands them by file, `openshell`, and a bundle
-	// with plain variables). Settled after both loops like the two above, so no forwarded or secret value can set it.
-	// env-internal PI_BUNDLE_ENV: written into the job's closed env map here, never read from the worker's environment.
-	if (bundleEnvFile === true) env.PI_BUNDLE_ENV = "1";
-	else delete env.PI_BUNDLE_ENV;
-
-	// Issue #730: the readable runner node (image/entrypoint.sh), for a venue whose connections are mediated by a broker
-	// that reads the caller's memory (OpenShell, both modes), and no other. Settled after both loops like the flags above,
-	// so no forwarded or secret value can set it, and deleted otherwise: on every other venue the key holders stay on
-	// the exec-only node.
-	// env-internal PI_RUNNER_OBSERVABLE: written into the job's closed env map here, never read from the worker's environment.
-	if (observableRunner === true) env.PI_RUNNER_OBSERVABLE = "1";
-	else delete env.PI_RUNNER_OBSERVABLE;
 
 	// Issue #693: only the resolved container size chooses this concurrency limit. Set after forwarding and secrets
 	// so even a caller bypassing their reservation cannot replace it with a host or trigger value.

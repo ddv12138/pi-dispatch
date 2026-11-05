@@ -208,9 +208,6 @@ test("resolvePaths reads env with safe defaults and never calls loadConfig", () 
     PI_DISPATCH_RUN_ROOTS: "/root-a",
     PI_DISPATCH_RUN_PER_HOUR: "5",
     PI_SUBSCRIPTIONS_FILE: "/subs.json",
-    // Pinned so the sandbox default does not drag the OS temp dir into this equality
-    // (REQ-RESURRECTABLE-SANDBOX); the defaulting itself is asserted in its own test below.
-    PI_SANDBOX_DIR: "/sbx",
     // A retired key (the insights move to the console): set, and read by nothing, so it is in no field below.
     PI_GRAPH_DIR: "/g",
   });
@@ -219,9 +216,6 @@ test("resolvePaths reads env with safe defaults and never calls loadConfig", () 
     logsDir: "/l",
     settingsFile: "/s.json",
     triggersPath: "/f.json",
-    sandboxDir: "/sbx",
-    sandboxRetentionHours: 24,
-    sandboxIdleMinutes: 30,
     globalPiDir: "/srv/pi-global",
     captureJobLogs: true,
     asciiGlyphs: false,
@@ -2947,14 +2941,6 @@ test("panelValkeyContext: the pointer's folder only, through #471's reader: noth
   chmodSync(join(dir, ".env"), 0o600);
   // What the pointer layered is not pi's own: the file is compared with an operator export only.
   assert.equal(panelValkeyContext({ env: { VALKEY_URL: "redis://127.0.0.1:1" }, pointerDir: dir, owned: ["VALKEY_URL"] }).url.environment, null);
-});
-
-test("panelValkeyContext: an openshell venue on Podman in the pointer's .env refuses root's Valkey, as the worker does (#707)", () => {
-  const dir = realpathSync(tempDir("admin-ctx-os-"));
-  writeFileSync(join(dir, ".env"), "PI_BACKENDS=openshell\nPI_OPENSHELL_ENGINE=podman\n", { mode: 0o600 });
-  assert.equal(panelValkeyContext({ env: {}, pointerDir: dir, platform: "linux" }).rootRefused, true);
-  writeFileSync(join(dir, ".env"), "PI_BACKENDS=openshell\n", { mode: 0o600 });
-  assert.equal(panelValkeyContext({ env: {}, pointerDir: dir, platform: "linux" }).rootRefused, false, "on docker, docker-proxy's root is the queue");
 });
 
 test("the panel's Valkey reads fail open on a VALKEY_URL whose path names no database (#477 follow-up)", async () => {

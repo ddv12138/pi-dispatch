@@ -9,7 +9,6 @@ import { UP_FS } from "../src/up.mjs";
 import { SERVICE_FS } from "../src/service.mjs";
 import { SETUP_GITHUB_FS } from "../src/github-app-setup.mjs";
 import { SYSTEMD_259_ENV_BYTES, SYSTEMD_259_ENV_FILES } from "./helpers/systemd-env-259.mjs";
-import { readStackKeys } from "../src/podman-stack.mjs";
 
 // -- setEnvKeyIfEmpty: pure transform, table-driven over the text shapes it must handle ---------------
 //
@@ -1902,7 +1901,6 @@ test("a shell command is judged through its quoted newlines, so a second assignm
 		assert.equal(readFileSync(path, "utf8"), text);
 		const venue = text.replace("WEBHOOK_SECRET=two", "PI_EGRESS=0");
 		if (measured !== null) assert.equal(shReads(venue, "PI_EGRESS"), "0", `the oracle: ${JSON.stringify(venue)}`);
-		assert.match(readStackKeys(venue, { loader: "shell" }).error ?? "", /line 1 is one this command cannot read .* the file names PI_EGRESS/, JSON.stringify(venue));
 	}
 	// A multi-line quoted value that is ONE assignment is no hazard: the documented key reads, and the line below it is
 	// filled in place.
@@ -2042,7 +2040,6 @@ test("outside single quotes only $NAME and ${NAME} pass, and a backslash-newline
 	assert.equal(readFileSync(path, "utf8"), clobber);
 	const venue = 'PI_BACKENDS=podman\nK="$\\\n((PI_EGRESS=0))"\n';
 	if (existsSync("/bin/sh")) assert.equal(shReads(venue, "PI_EGRESS"), "0", "the oracle");
-	assert.match(readStackKeys(venue, { loader: "shell" }).error ?? "", /line 2 is one this command cannot read/);
 
 	// MUST PASS, read identically by every shell: a plain or braced name, a `$(` inside single quotes, an escaped `\$`,
 	// an EVEN backslash run before a newline inside double quotes (the newline stays), and the documented PEM.
@@ -2088,7 +2085,6 @@ test("a word after an unquoted blank is a command or a second assignment, so it 
 	assert.throws(() => updateEnvFile(path, "WEBHOOK_SECRET", "new", { platform: "darwin" }), /refusing to edit .*: line 2 is one the wrapper that sources this file reads differently/);
 	const venue = 'PI_BACKENDS=podman\nK= eval "PI_EGRESS=0"\n';
 	if (existsSync("/bin/sh")) assert.equal(shReads(venue, "PI_EGRESS"), "0", "the oracle");
-	assert.match(readStackKeys(venue, { loader: "shell" }).error ?? "", /line 2 is one this command cannot read/);
 	// MUST PASS, read identically by every shell: trailing blanks, a comment after a blank, blanks inside quotes, and an
 	// escaped blank, which is part of the word.
 	for (const [line, value] of [["K=a   ", "a"], ["K=a # c z", "a"], ["K= # note", ""], ['K="a b"', "a b"], ["K='a\tb'", "a\tb"], ["K=a\\ b", "a b"]]) {
@@ -2118,11 +2114,6 @@ test("a NUL is a shell hazard on its line: the macOS /bin/sh stops reading the f
 	writeFileSync(path, "WEBHOOK_SECRET=\nK=a\0b\n");
 	assert.throws(() => updateEnvFile(path, "WEBHOOK_SECRET", "new", { platform: "darwin" }), /^Error: refusing to edit .*: line 2 has a NUL byte, and the macOS \/bin\/sh stops reading the file there, so no key below it is set\. To fix it, remove the NUL byte\. Nothing was written$/);
 	assert.equal(readFileSync(path, "utf8"), "WEBHOOK_SECRET=\nK=a\0b\n");
-	// The venue reader names it too, and a CRLF file with its fix.
-	assert.match(readStackKeys("PI_BACKENDS=podman\nK=a\0b\n", { loader: "shell" }).error ?? "", /line 2 has a NUL byte, .* remove the NUL byte$/);
-	assert.match(readStackKeys("PI_BACKENDS=podman\r\n", { loader: "shell" }).error ?? "", /line 1 has a carriage return \(CR\) at its end, .* convert the file to LF line endings$/);
-	// Also where the key is only named mid-line (no line starts with it), which is the shell's own branch.
-	assert.match(readStackKeys("K=a\0b PI_EGRESS=0\n", { loader: "shell" }).error ?? "", /line 1 has a NUL byte, .* and the file names PI_EGRESS, .* remove the NUL byte$/);
 	// systemd's own NUL rule is its load hazard, unchanged: its line-level reading has no shell shape.
 	assert.equal(envFileHazard("K=a\nB=2\n", { loader: "shell" }), null);
 	assert.equal(envFileHazard(text, { loader: "systemd" })?.shape, undefined);
@@ -2216,12 +2207,12 @@ test("a later duplicate's inline comment is read the way the shell reads it, and
 	if (existsSync("/bin/sh")) assert.equal(shReads(emptyCommented, "WEBHOOK_SECRET"), "", "the oracle");
 	writeFileSync(path, emptyCommented);
 	assert.throws(() => updateEnvFile(path, "WEBHOOK_SECRET", "new", { platform: "darwin" }), /takes the assignment on line 2, which is empty, so the service gets an empty WEBHOOK_SECRET/);
-	// ONE line read two ways (docs/sandbox.md's own example): a comment after an empty value is the shell's comment, and
-	// systemd's value. Named as that line, not as two.
-	const oneLine = "PI_SANDBOX_DIR=                 # default <PI_JOBS_DIR>/sandboxes\n";
-	if (existsSync("/bin/sh")) assert.equal(shReads(oneLine, "PI_SANDBOX_DIR"), "", "the oracle");
+	// ONE line read two ways: a comment after an empty value is the shell's comment, and systemd's value. Named as that
+	// line, not as two. (Was docs/sandbox.md's PI_SANDBOX_DIR line; the key is a fixture here, any path key does.)
+	const oneLine = "PI_LOGS_DIR=                 # default <PI_JOBS_DIR>/logs\n";
+	if (existsSync("/bin/sh")) assert.equal(shReads(oneLine, "PI_LOGS_DIR"), "", "the oracle");
 	writeFileSync(path, oneLine);
-	assert.throws(() => updateEnvFile(path, "PI_SANDBOX_DIR", "/srv/sandboxes", { platform: "darwin" }), /^Error: refusing to edit .*: PI_SANDBOX_DIR on line 1 looks set to this command, but the wrapper that sources the file reads it as empty, so the service gets an empty PI_SANDBOX_DIR\. Put the value after the =, or remove the text after it\. Nothing was written$/);
+	assert.throws(() => updateEnvFile(path, "PI_LOGS_DIR", "/srv/logs", { platform: "darwin" }), /^Error: refusing to edit .*: PI_LOGS_DIR on line 1 looks set to this command, but the wrapper that sources the file reads it as empty, so the service gets an empty PI_LOGS_DIR\. Put the value after the =, or remove the text after it\. Nothing was written$/);
 });
 
 test("on Windows an empty last assignment gives the service NO key, and the refusal says so (#447 regression review)", () => {

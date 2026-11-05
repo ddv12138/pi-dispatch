@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { DAEMON_APPLIES_BOUNDS, DOCKER_ENDPOINT_LOCAL, OBSERVATIONS, PODMAN_ADDS_NO_MOUNTS, PODMAN_BOUNDS_DELEGATED, PODMAN_SERVICE_LOCAL, RUNTIME_ADDS_NO_MOUNTS } from "../src/backends.mjs";
+import { DAEMON_APPLIES_BOUNDS, DOCKER_ENDPOINT_LOCAL, OBSERVATIONS, RUNTIME_ADDS_NO_MOUNTS } from "../src/backends.mjs";
 import { test } from "node:test";
 import { budgetCapsFor, parseScopedLimits, scopeKeyPrefix } from "../src/scoped-limits.mjs";
 import { readFileSync, readdirSync } from "node:fs";
@@ -1269,35 +1269,13 @@ test("the retry's words: docker's on the local venue, as they always were, and t
 	await assert.rejects(() => runJob(ghJob, farDefault), (err) => err.message === "the container runtime or its CLI is unavailable, an observation the floor needs could not run");
 });
 
-test("a podman job's floor refusal names podman's own observations in fixed words, never docker's (#354)", async () => {
-	const texts = [];
-	const { deps: d } = deps({
-		blessedBackends: ["local", "podman"],
-		observationPreflight: async () => ({ refused: true, message: "floor ... /home/pdjob/.config/containers/mounts.conf ... unix:///run/user/1234/podman", observations: [PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOUNTS, PODMAN_SERVICE_LOCAL] }),
-		comment: async (_j, t) => texts.push(t),
-		log: () => {},
-	});
-	const r = await runJob({ ...ghJob, backend: "podman" }, d);
-	assert.equal(r.reason, "backend-floor-unobserved");
-	for (const o of [PODMAN_BOUNDS_DELEGATED, PODMAN_ADDS_NO_MOUNTS, PODMAN_SERVICE_LOCAL]) assert.ok(texts[0].includes(OBSERVATION_COMMENT[o]), `${o}: ${texts[0]}`);
-	assert.doesNotMatch(texts[0], /docker|mounts\.conf|\/home\/|unix:/, "no docker word, and none of the evidence, reaches a forge comment");
-});
-
-test("the podman bounds comment is true for either cause, controllers or no user manager, and names neither (#453)", () => {
-	// Pinned whole: the observation misses when a controller is not delegated AND when no systemd user manager runs for
-	// the account while podman info lists every controller, so a sentence blaming the controllers was false for the
-	// second. The cause is evidence, and evidence stays in the operator's log.
-	assert.equal(OBSERVATION_COMMENT[PODMAN_BOUNDS_DELEGATED], "the worker's rootless Podman is not observed applying a container's pid, memory and cpu bounds");
-	assert.doesNotMatch(OBSERVATION_COMMENT[PODMAN_BOUNDS_DELEGATED], /controller|cgroupfs|systemd|manager|session/);
-});
-
 test("a proxy on its way somewhere is a retry that names the proxy and its state, never the runtime, and spends nothing (#453 gate 3)", async () => {
 	const { deps: d, calls } = deps({ redis: fakeRedis(), egressPreflight: async () => ({ unavailable: "pi-dispatch-egress-proxy", state: "restarting" }) });
 	await assert.rejects(runJob(ghJob, d), (err) => err instanceof InfraRetry && err.message === 'egress proxy "pi-dispatch-egress-proxy" is restarting, not running; the job is retried once, then failed');
 	assert.ok(!calls.some((c) => c[0] === "incr"), "no budget reserved");
 });
 
-test("the image and egress retries name the venue's runtime: docker's words on local byte-identical, podman's on podman (#354)", async () => {
+test("the image and egress retries name the venue's runtime: docker's words on local byte-identical (#354)", async () => {
 	// The message is the job_failed log line and BullMQ's failedReason. "docker unavailable" on a host with no docker
 	// sends the operator after the wrong daemon.
 	const retry = async (job, blessedBackends, gate) => {
@@ -1312,13 +1290,11 @@ test("the image and egress retries name the venue's runtime: docker's words on l
 	};
 	assert.equal(await retry(ghJob, ["local"], "image"), "docker unavailable, image preflight could not run");
 	assert.equal(await retry(ghJob, ["local"], "egress"), "docker unavailable, egress preflight could not run");
-	assert.equal(await retry({ ...ghJob, backend: "podman" }, ["local", "podman"], "image"), "podman unavailable, image preflight could not run");
-	assert.equal(await retry(ghJob, ["podman"], "egress"), "podman unavailable, egress preflight could not run", "the DEFAULT venue's runtime for a job naming none");
 	assert.equal(await retry({ ...ghJob, backend: "far" }, ["local", "far"], "image"), "the container runtime is unavailable, image preflight could not run");
 	assert.equal(await retry({ ...ghJob, backend: "toString" }, ["local", "toString"], "egress"), "the container runtime is unavailable, egress preflight could not run", "a prototype key is not a runtime");
 });
 
-test("an egress-proxy refusal on the podman venue names the rootless-podman remedy, not the docker compose profile (#354)", async () => {
+test("an egress-proxy refusal names the deployment-folder remedy, not the docker compose profile (#354)", async () => {
 	const texts = [];
 	const run = async (job, blessedBackends, egress) => {
 		const { deps: d } = deps({ blessedBackends, egressPreflight: async () => egress, comment: async (_j, t) => texts.push(t), log: () => {} });
@@ -1329,15 +1305,9 @@ test("an egress-proxy refusal on the podman venue names the rootless-podman reme
 	// folder, where a compose line printed here would start a second Valkey in a folder /dispatch setup laid out.
 	assert.ok(texts[0].includes("Start it with `pi-dispatch up` from the deployment folder, or set PI_EGRESS=0"), texts[0]);
 	assert.doesNotMatch(texts[0], /docker compose/);
-	const r = await run({ ...ghJob, backend: "podman" }, ["local", "podman"], { proxyStopped: "pi-dispatch-egress-proxy" });
-	assert.equal(r.reason, "egress-proxy-stopped");
-	assert.ok(texts[1].includes("Start it under the worker account's own rootless podman, on a named bridge network (docs/podman.md), or set PI_EGRESS=0"), texts[1]);
-	assert.doesNotMatch(texts[1], /docker compose/);
-	await run(ghJob, ["podman"], { proxyMissing: "p" });
-	assert.match(texts[2], /rootless podman/, "the default venue's remedy for a job naming none");
 	// PI_EGRESS_PROXY's own proxy: `up` never starts it, so the comment does not say it would (PR #488's review).
 	await run(ghJob, ["local"], { proxyStopped: "my-squid" });
-	assert.ok(texts[3].includes("PI_EGRESS_PROXY names your own proxy, which `pi-dispatch up` does not start: start my-squid yourself, or set PI_EGRESS=0"), texts[3]);
+	assert.ok(texts[1].includes("PI_EGRESS_PROXY names your own proxy, which `pi-dispatch up` does not start: start my-squid yourself, or set PI_EGRESS=0"), texts[1]);
 });
 
 test("a proxy that exists but is STOPPED is its own reason, because the fix is a different one", async () => {
@@ -2511,95 +2481,6 @@ test("the job-user gate sits after the image probe and before the credential gat
 
 // --- issue #428: a podman account whose containers.conf widens every job ------------------------------------------
 
-test("a widening podman containers.conf is a venue refusal that RETURNS before the image probe, the mint and the reserve (#428)", async () => {
-	const order = [];
-	const texts = [];
-	const logged = [];
-	const redis = fakeRedis();
-	const message = "Refused: /home/op/.config/containers/containers.conf sets pasta_options, ...; remove that key (issue #428).";
-	const { deps: d, calls } = deps({
-		redis,
-		observationPreflight: async () => (order.push("observation"), { ok: true, podman: { answered: true }, podmanConfRefused: { reason: "podman-conf-widens-job", key: "pasta_options", message } }),
-		imagePreflight: async () => (order.push("image"), { ok: true, image: "pi-job:x", capabilities: ["anyUid"] }),
-		egressPreflight: async () => (order.push("egress"), { ok: true }),
-		jobUserPreflight: async () => (order.push("job-user"), { user: "1234:1234", home: "/home/pi" }),
-		comment: async (_j, t) => texts.push(t),
-		log: (e, f) => logged.push([e, f]),
-	});
-	// Resolved, never rejected: a thrown refusal would be retried by the queue forever (CONST-RETRY-INFRA-ONLY).
-	const r = await runJob(ghJob, d);
-	assert.deepEqual(order, ["observation"], "nothing after the observation ran, the image probe included");
-	assert.equal(r.outcome, "policy");
-	assert.equal(r.reason, "podman-conf-widens-job");
-	assert.equal(r.budgetReserved, false);
-	assert.equal(redis.incrCalls, 0);
-	assert.ok(!calls.includes("prepare") && !calls.includes("run-container") && !calls.some((c) => c.startsWith("mint:")));
-	assert.equal(texts.length, 1);
-	assert.match(texts[0], /^Refused: the worker host's Podman configuration lets a job's container reach more than this venue allows/);
-	assert.doesNotMatch(texts[0], /\/home\/|pasta_options|containers\.conf/, "the host path and the key go to the log, never the forge");
-	assert.deepEqual(logged.find(([e]) => e === "refused_podman_conf_widens_job"), ["refused_podman_conf_widens_job", { key: "pasta_options", message }]);
-});
-
-test("a podman conf that could not be read whole is refused without claiming it widens; one read failing for a moment is retried (#428)", async () => {
-	const run = async (podmanConfRefused) => {
-		const texts = [];
-		const redis = fakeRedis();
-		const { deps: d, calls } = deps({
-			redis,
-			observationPreflight: async () => ({ ok: true, podmanConfRefused }),
-			imagePreflight: async () => {
-				throw new Error("the image preflight ran");
-			},
-			comment: async (_j, t) => texts.push(t),
-			log: () => {},
-		});
-		try {
-			return { r: await runJob(ghJob, d), texts, incr: redis.incrCalls, calls };
-		} catch (error) {
-			return { error, texts, incr: redis.incrCalls, calls };
-		}
-	};
-	const unread = await run({ reason: "podman-conf-widens-job", key: null, message: "Refused: CONTAINERS_CONF is set, ..." });
-	assert.equal(unread.r.reason, "podman-conf-widens-job");
-	assert.match(unread.texts[0], /could not be read in full, or is written in a form the worker does not decode, so whether it lets a job's container reach more than this venue allows is not known/);
-	assert.doesNotMatch(unread.texts[0], /configuration lets a job's container reach more/, "an unread conf is not said to widen");
-	const busy = await run({ reason: "podman-conf-widens-job", key: null, message: "Not read yet: ...", transient: true, evidence: "/etc/containers/containers.conf could not be read (EMFILE)" });
-	assert.ok(busy.error instanceof InfraRetry, "a transient read is infrastructure: thrown, so the queue retries it");
-	assert.equal(busy.error.message, "the podman venue's containers.conf or running rootless network could not be read just now, so whether it widens a job is not known (/etc/containers/containers.conf could not be read (EMFILE))");
-	assert.deepEqual([busy.texts.length, busy.incr], [0, 0], "no comment, nothing reserved");
-	// Issue #450: the RUNNING rootless network is not configuration. Unread, it says the network could not be read; still
-	// widened after the key went, it says the network must be restarted, not the configuration changed.
-	const liveUnread = await run({ reason: "podman-conf-widens-job", key: null, live: true, message: "Refused: /proc/10/cmdline could not be read (EACCES), ..." });
-	assert.equal(liveUnread.r.reason, "podman-conf-widens-job");
-	assert.equal(liveUnread.texts[0], "Refused: the worker host's running Podman network could not be read, so whether it lets a job's container reach more than this venue allows is not known, and the operator must fix that before podman jobs run. Not run.");
-	const liveWide = await run({ reason: "podman-conf-widens-job", key: "pasta_options", live: true, message: "Refused: this account's running rootless network ..." });
-	assert.equal(liveWide.texts[0], "Refused: the worker host's running Podman network still lets a job's container reach the host's own services, with an option from a configuration since changed, so the operator must restart that network before podman jobs run. Not run.");
-	for (const r of [liveUnread, liveWide]) assert.doesNotMatch(r.texts[0], /configuration could not be read|must change it/);
-	// Issue #448: the LOCAL venue on rootful Podman's Docker API hands back the same refusal marked `rootful`, with its
-	// own sentences: a key, a running service older than its configuration (a restart, not an edit), a spelling.
-	const rootfulKey = await run({ reason: "podman-conf-widens-job", key: "env", rootful: true, message: "Refused: /etc/containers/containers.conf sets env, ..." });
-	assert.deepEqual([rootfulKey.r.reason, rootfulKey.r.budgetReserved, rootfulKey.incr], ["podman-conf-widens-job", false, 0]);
-	assert.equal(rootfulKey.texts[0], "Refused: the worker host's Podman configuration adds to every job's container what this venue does not allow (variables, the Podman service's groups, looser limits and filters, or the programs that run it), so the operator must change it before local jobs run. Not run.");
-	// Gate round 1 of PR #473: a service older than its configuration (or a clock behind a change time) heals by itself, so
-	// it is a RETRY, pre-reserve, with no comment and no final policy outcome.
-	for (const extra of [{ restart: true }, { skew: true }]) {
-		const retried = await run({ reason: "podman-conf-widens-job", key: null, rootful: true, ...extra, retry: true, message: "Not run yet: ...", evidence: "/etc/containers/containers.conf changed after the running podman.service started, ..." });
-		assert.ok(retried.error instanceof InfraRetry, JSON.stringify(extra));
-		// Gate round 2 of PR #473: marked a HOLD, which makeProcessor defers without spending an attempt (hold.test.mjs).
-		assert.deepEqual([retried.error.holdUntilRestart, retried.error.name], [true, "PodmanRestartHold"], JSON.stringify(extra));
-		assert.match(retried.error.message, /^rootful Podman's service may still hold a containers\.conf older than the files, so this job waits for it to restart \(\/etc\/containers\/containers\.conf changed after/);
-		assert.deepEqual([retried.texts.length, retried.incr], [0, 0]);
-	}
-	const rootfulSpelling = await run({ reason: "podman-conf-widens-job", key: null, rootful: true, message: "Refused: ... escaped key ..." });
-	assert.match(rootfulSpelling.texts[0], /^Refused: the worker host's Podman configuration could not be read in full, or is written in a form the worker does not decode, [^]*before local jobs run\. Not run\.$/);
-	for (const r of [rootfulKey, rootfulSpelling]) assert.doesNotMatch(r.texts[0], /podman jobs|\/etc|\/root/, "the local venue's words, and no path in a forge comment");
-	const rootfulBusy = await run({ reason: "podman-conf-widens-job", key: null, rootful: true, transient: true, message: "Not read yet: ...", evidence: "/root/.config/containers/containers.conf could not be read (EIO)" });
-	assert.ok(rootfulBusy.error instanceof InfraRetry);
-	assert.equal(rootfulBusy.error.holdUntilRestart, undefined, "a moment's failed read is the queue's ordinary retry, not a hold");
-	assert.equal(rootfulBusy.error.message, "rootful Podman's containers.conf or podman.service could not be read just now, so whether it widens a job is not known (/root/.config/containers/containers.conf could not be read (EIO))");
-	assert.deepEqual([rootfulBusy.texts.length, rootfulBusy.incr], [0, 0]);
-});
-
 test("an unmappable job user comments fixed text and logs the cause; an image without anyUid is named in the comment", async () => {
 	for (const [refusal, reason, pattern, event] of [
 		[{ refused: "job-user-unmappable", cause: "docker-group" }, "job-user-unmappable", /cannot give this job a non-root user/, "refused_job_user_unmappable"],
@@ -2636,7 +2517,7 @@ test("an undecidable job user is retried as never-started, before any reserve", 
 	assert.deepEqual(logged.find(([e]) => e === "job_user_unavailable")?.[1], { reason: "endpoint-unresolved" }, "why it keeps retrying is in the log");
 });
 
-test("the user the gate decided is the user that runs, and prepare stamps it for the sandbox", async () => {
+test("the user the gate decided is the user that runs, and prepare is handed the uid stamp", async () => {
 	let ran = null;
 	let prepOpts = null;
 	const { deps: d } = deps({
@@ -2649,17 +2530,7 @@ test("the user the gate decided is the user that runs, and prepare stamps it for
 	assert.equal(ran.user, "1234:1234");
 	assert.equal(ran.home, "/home/pi");
 	assert.deepEqual(prepOpts.jobUser, { user: "1234:1234", home: "/home/pi" });
-	assert.equal(Object.hasOwn(prepOpts, "podmanStore"), false, "no store from the gate, none handed on");
-	// Issue #429: a podman gate's store reaches prepare, so the retained run records the store its container lived in.
-	let storedOpts = null;
-	const { deps: p } = deps({
-		jobUserPreflight: async () => ({ user: "1234:1234", home: "/home/pi", store: "/home/op/.local/share/containers/storage" }),
-		prepareWorkspace: async (_j, _t, opts) => ((storedOpts = opts), { workspaceDir: "/w", jobDir: "/j" }),
-		runContainer: async () => ({ code: 0, aborted: false }),
-	});
-	await runJob(ghJob, p);
-	assert.equal(storedOpts.podmanStore, "/home/op/.local/share/containers/storage");
-	assert.deepEqual(storedOpts.jobUser, { user: "1234:1234", home: "/home/pi" }, "the stamp stays the uid only");
+		// The podman store stamp (issue #429) went with the venue; the jobUser stamp to prepare stays.
 });
 
 test("the gate's relabel reaches runContainer as a boolean, and only a true one relabels (issue #355)", async () => {
@@ -2679,7 +2550,7 @@ test("the gate's relabel reaches runContainer as a boolean, and only a true one 
 		await runJob(ghJob, d);
 		assert.equal(ran.relabel, want, JSON.stringify(answer));
 		assert.equal(ran.user, answer.user);
-		assert.deepEqual(prepOpts.jobUser, { user: answer.user, home: answer.home }, "the sandbox stamp stays the uid only: a sandbox re-reads its own daemon");
+		assert.deepEqual(prepOpts.jobUser, { user: answer.user, home: answer.home }, "the stamp is the uid only");
 	}
 	let plain = null;
 	const { deps: d } = deps({ runContainer: async (ctx) => ((plain = ctx), { code: 0, aborted: false }) });
@@ -2820,21 +2691,6 @@ test("a venue's own refusal (#683) is a policy result before any spend, with the
 	assert.ok(!calls.includes("run-container") && !calls.includes("prepare") && !calls.some((c) => c.startsWith("mint:")));
 	assert.deepEqual(texts, ["Refused: fixed words. Not run."]);
 	assert.ok(logged.some(([e, f]) => e === "refused_venue" && f.reason === "openshell-gateway-not-local"));
-});
-
-test("a folder job on a venue that declares localFolders absent is refused before any spend, the loader's blind spot (#683)", async () => {
-	// A trigger with no run.backend on a deployment whose DEFAULT is such a venue: the loader could not see it.
-	const redis = fakeRedis();
-	const texts = [];
-	const { deps: d, calls } = deps({ redis, blessedBackends: ["openshell"], comment: async (_j, t) => texts.push(t), log: () => {} });
-	const r = await runJob({ kind: "local", folder: "/home/rob/proj", task: "t", provider: "anthropic", model: "m", maxTurns: 5 }, d);
-	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "venue-local-folders-unsupported", false]);
-	assert.equal(redis.incrCalls, 0);
-	assert.ok(!calls.includes("run-container"));
-	assert.match(texts[0], /copies a job's files/);
-	// The same job on a binding venue is not refused for it.
-	const { deps: ok } = deps({ redis: fakeRedis(), blessedBackends: ["local"], observationPreflight: async () => ({ venueRefused: { reason: "stop-here", comment: "x" } }), comment: async () => {}, log: () => {} });
-	assert.equal((await runJob({ kind: "local", folder: "/home/rob/proj", task: "t", provider: "anthropic", model: "m", maxTurns: 5 }, ok)).reason, "stop-here", "past the folder check, stopped at the next gate");
 });
 
 test("watch classifier credential is probed before mint, prepare, token reads or budget reservation", async () => {

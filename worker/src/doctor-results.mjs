@@ -89,8 +89,6 @@ export const DOCTOR_SECTIONS = Object.freeze([
 	"backends",
 	"sizing",
 	"job-user",
-	"podman",
-	"openshell",
 	"selinux",
 	"forges",
 	"github",
@@ -118,10 +116,8 @@ export const DOCTOR_SECTIONS = Object.freeze([
  * this shell's; the console quotes the first beside its own "does not load" sentence.
  *
  * Issue #737, for the console's first-run steps and its hosts:
- *   - `egress.proxy`: whether the egress proxy runs, on each venue that has one. Docker's line carries it, or, for a
- *     running proxy that is not this deployment's, the line saying so, which doctor prints in its place; Podman's line
- *     carries it too. A host on both venues publishes `egress.proxy` and `egress.proxy-2` (`assignCheckIds`), and a
- *     reader judges the worst of the two.
+ *   - `egress.proxy`: whether the egress proxy runs. Docker's line carries it, or, for a running proxy that is not
+ *     this deployment's, the line saying so, which doctor prints in its place (and which takes the id from its check).
  *   - `provider.key`: whether the provider's key is found where the worker looks.
  * Issue #761, for an upgrade: `settings.unknown-keys`, the overlay keys this build does not know (names only, a warning),
  * and `fleet.store-versions`, a peer that cannot read a store this host's files need a version above 1 for (a warning,
@@ -163,12 +159,11 @@ export const NAMED_CHECK_IDS = Object.freeze([
 
 /**
  * The named ids doctor.mjs writes at more than one site, with how many. Every other named id is written once, which a
- * test holds against the source. `egress.proxy` is written twice because the proxy is a different container on each
- * venue (docker's, and the one under this account's rootless Podman), each judged by its own line, and the question a
- * reader asks of either is the same one. Docker's stand-in line takes the id from its check (`proxyCheck.id`) rather
- * than writing it a third time.
+ * test holds against the source. Empty today: the podman venue's proxy line (the reason `egress.proxy` was written
+ * twice) went with the sandbox backends, so docker's line and the stand-in that takes its id from its check
+ * (`proxyCheck.id`) are the only sites.
  */
-export const REPEATED_CHECK_IDS = Object.freeze({ "egress.proxy": 2 });
+export const REPEATED_CHECK_IDS = Object.freeze({});
 
 /** An id as published: a section, a dot, a name or a number, with a `-<n>` tail when a run repeated one. */
 export const CHECK_ID_RE = /^[a-z][a-z0-9-]{0,31}\.[a-z0-9][a-z0-9-]{0,39}$/;

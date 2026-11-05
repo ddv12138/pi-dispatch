@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { assertUserns, CONTAINER_HOME, SHIPPED_IMAGE_UID, transfersFromSpec, USERNS_MODES } from "../src/container-spec.mjs";
-import { buildDockerRunArgs, buildPodmanRunArgs, containerSpec, DOCKER_EXTRA_ALLOWED, DOCKER_EXTRA_FORBIDDEN, dockerArgsFromSpec, insideDir, ISOLATION_FLAGS, PODMAN_PINNED_FLAGS, podmanArgsFromSpec } from "../src/docker-run.mjs";
+import { buildDockerRunArgs, containerSpec, DOCKER_EXTRA_ALLOWED, DOCKER_EXTRA_FORBIDDEN, dockerArgsFromSpec, insideDir, ISOLATION_FLAGS } from "../src/docker-run.mjs";
 
 const base = {
 	image: "pi-job:pinned",
@@ -238,14 +238,11 @@ test("ISOLATION_FLAGS is frozen intent -- the exact set the spec pins", () => {
 	assert.equal(ISOLATION_FLAGS.some((f) => f.startsWith("--shm-size")), false);
 });
 
-test("the job's size reaches the argv beside --memory, on both runtimes, in one fixed order (issue #596)", () => {
+test("the job's size reaches the argv beside --memory, in one fixed order (issue #596)", () => {
 	const sized = { ...base, size: { memMiB: 1536, cpuCenti: 75 }, hostCpus: 8 };
 	const docker = buildDockerRunArgs(sized);
 	const at = docker.indexOf("--pids-limit=512") + 1;
 	assert.deepEqual(docker.slice(at, at + 5), ["--memory=1536m", "--memory-swap=1536m", "--cpus=7", "--cpu-shares=768", "--shm-size=768m"]);
-	const podman = buildPodmanRunArgs({ ...sized, user: "1234:1234" });
-	const pat = podman.indexOf("--pids-limit=512") + 1;
-	assert.deepEqual(podman.slice(pat, pat + 5), docker.slice(at, at + 5), "the podman argv sizes a job exactly as the docker one does");
 	// Each size flag exactly once, so no later token can be a second, wider one.
 	for (const flag of ["--memory=", "--memory-swap=", "--cpus=", "--cpu-shares=", "--shm-size="]) {
 		assert.equal(docker.filter((a) => a.startsWith(flag)).length, 1, flag);
@@ -491,7 +488,7 @@ test("a copying runtime's transfers carry no relabel: the label is a bind-mount 
 	for (const t of transfersFromSpec(spec)) assert.equal("relabel" in t, false, t.container);
 });
 
-// --- issue #354: the userns field, and the podman argv that shares the docker builder -------------------------------
+// --- issue #354: the userns field ------------------------------------------------------------------------------------
 
 test("userns is a closed field: null by default, \"keep-id\" accepted, every other spelling refused", () => {
 	assert.equal(containerSpec(base).userns, null, "present and null, the runtime's own default");
@@ -516,105 +513,7 @@ test("the docker builder REFUSES a spec with a userns: the docker CLI rejects --
 	const { userns, ...legacy } = containerSpec(base);
 	assert.equal(userns, null);
 	assert.deepEqual(dockerArgsFromSpec(legacy), buildDockerRunArgs(base));
-});
-
-test("the podman argv, literally: --userns=keep-id immediately after --user=, then the cidfile, dockerExtra, env, mounts and the image", () => {
-	const args = buildPodmanRunArgs({
-		image: "pi-job:pinned",
-		env: { A: "1" },
-		jobDir: "/j",
-		workspace: "/j/workspace",
-		name: "pi-job-1",
-		network: "pi-job-1-net",
-		user: "1234:1234",
-		cidFile: "/j.cid",
-		relabel: true,
-		workspaceOwned: true,
-		size: { memMiB: 1024, cpuCenti: 50 },
-		hostCpus: 4,
-	});
-	assert.deepEqual(args, [
-		"run",
-		"--name=pi-job-1",
-		"--pull=never",
-		"--rm",
-		"--init",
-		"--cap-drop=ALL",
-		"--security-opt",
-		"no-new-privileges",
-		"--pids-limit=512",
-		"--memory=1g",
-		"--memory-swap=1g",
-		"--cpus=3",
-		"--cpu-shares=512",
-		"--shm-size=512m",
-		"--cgroup-parent=pidispatch.slice",
-		"--label=pi.dispatch.mem=1024",
-		"--label=pi.dispatch.cpu=50",
-		"--network=pi-job-1-net",
-		"--user=1234:1234",
-		"--userns=keep-id",
-		"--pid=private",
-		"--ipc=private",
-		"--uts=private",
-		"--cgroupns=private",
-		"--env-host=false",
-		"--http-proxy=false",
-		"--cidfile=/j.cid",
-		"-e",
-		"A=1",
-		"-v",
-		"/j:/job:ro,Z",
-		"-v",
-		"/j/workspace:/workspace:Z",
-		"--workdir=/workspace",
-		"pi-job:pinned",
-	]);
-	assert.equal(args.filter((a) => a.startsWith("--userns")).length, 1);
-});
-
-test("the podman argv is the docker argv plus keep-id and the pinned namespaces: one private builder, so the boundary cannot drift between runtimes", () => {
-	const shapes = [
-		{ ...base, user: "1234:1234" },
-		{ ...base, user: "1234:1234", sessionDir: "/s", globalPiDir: "/g", network: "n", cidFile: "/c.cid", relabel: true, workspaceOwned: true },
-		{ image: "i", name: "pi-sandbox-1", workspace: "/w", jobDir: "/j", user: "1:1", extraFlags: ["-i", "-t", "--entrypoint", "bash"] },
-	];
-	for (const s of shapes) {
-		const podman = buildPodmanRunArgs(s);
-		const at = podman.indexOf("--userns=keep-id");
-		assert.equal(podman[at - 1], `--user=${s.user}`);
-		assert.deepEqual(podman.slice(at + 1, at + 1 + PODMAN_PINNED_FLAGS.length), [...PODMAN_PINNED_FLAGS], "the pinned namespaces follow keep-id");
-		// A job with no network of its own is pinned to Podman's private default; one with a network keeps its own.
-		const docker = buildDockerRunArgs(s);
-		const net = podman.indexOf("--network=private");
-		assert.equal(net !== -1, !s.network, JSON.stringify(s));
-		const stripped = podman.filter((a, i) => i !== net && (i < at || i > at + PODMAN_PINNED_FLAGS.length));
-		assert.deepEqual(stripped, docker, JSON.stringify(s));
-	}
-	// The same refusals reach the podman path: they live in the shared body, not in the docker wrapper.
-	assert.throws(() => buildPodmanRunArgs({ ...base, user: "1:1", extraFlags: ["--userns=host"] }), /supersede the isolation boundary/);
-	assert.throws(() => buildPodmanRunArgs({ ...base, user: "1:1", extraFlags: ["--privileged"] }), /supersede the isolation boundary/);
-	assert.throws(() => podmanArgsFromSpec({ ...containerSpec({ ...base, user: "1:1", userns: "keep-id" }), isolated: false }), /not isolated/);
-	assert.throws(() => podmanArgsFromSpec({ ...containerSpec({ ...base, user: "1:1", userns: "keep-id" }), user: "0:0" }), /refusing a job user/);
-	assert.ok(DOCKER_EXTRA_FORBIDDEN.includes("--userns"), "a dockerExtra repeat could otherwise supersede keep-id");
-	assert.deepEqual([...PODMAN_PINNED_FLAGS], ["--pid=private", "--ipc=private", "--uts=private", "--cgroupns=private", "--env-host=false", "--http-proxy=false"]);
-	for (const flag of ["--pid", "--ipc", "--uts", "--cgroupns", "--network", "--env-host", "--http-proxy"]) {
-		assert.throws(() => buildPodmanRunArgs({ ...base, user: "1:1", extraFlags: [`${flag}=host`] }), /supersede|not allowed|refus/i, `${flag} cannot be re-set by dockerExtra`);
-	}
-});
-
-test("the podman builder refuses a spec without keep-id, and keep-id without a job user (/job would be unreadable)", () => {
-	assert.throws(() => buildPodmanRunArgs(base), /no job user/, "user absent");
-	assert.throws(() => buildPodmanRunArgs({ ...base, user: null }), /no job user/);
-	assert.throws(() => podmanArgsFromSpec(containerSpec({ ...base, user: "1234:1234" })), /userns is not "keep-id": null/);
-	assert.throws(() => podmanArgsFromSpec({ ...containerSpec({ ...base, user: "1234:1234" }), userns: "host" }), /userns is not "keep-id"/);
-	assert.throws(() => podmanArgsFromSpec(null), /userns is not "keep-id"/);
-	assert.throws(() => podmanArgsFromSpec({ ...containerSpec({ ...base, userns: "keep-id" }) }), /no job user/);
-	// An opts bag cannot talk the podman path out of keep-id: the wrapper sets it last.
-	for (const userns of [null, "host"]) {
-		const args = buildPodmanRunArgs({ ...base, user: "1234:1234", userns });
-		assert.deepEqual(args.filter((a) => a.startsWith("--userns")), ["--userns=keep-id"], JSON.stringify(userns));
-	}
+	assert.ok(DOCKER_EXTRA_FORBIDDEN.includes("--userns"), "a dockerExtra repeat could otherwise supersede the field the builder refuses");
 });
 
 test("insideDir: strictly inside, failing closed on anything else (issue #355)", () => {
@@ -648,8 +547,6 @@ test("issue #596, phase 2: every job container carries its size as two labels, a
 	const args = dockerArgsFromSpec(spec);
 	assert.deepEqual(args.filter((a) => a.startsWith("--label=") || a.startsWith("--cpus=")), ["--cpus=3.5", "--label=pi.dispatch.mem=1536", "--label=pi.dispatch.cpu=50"]);
 	assert.equal(args.indexOf("--label=pi.dispatch.mem=1536"), args.indexOf("--shm-size=768m") + 2, "right after the size flags and the parent, before the network");
-	// The podman argv is built by the same function, so it carries them too.
-	assert.ok(buildPodmanRunArgs({ image: "i", name: "pi-job-1", workspace: "/w", user: "1234:1234", size: { memMiB: 1536, cpuCenti: 50 } }).includes("--label=pi.dispatch.cpu=50"));
 	for (const flag of ["--label", "-l", "--label-file"]) {
 		assert.ok(DOCKER_EXTRA_FORBIDDEN.includes(flag), `${flag} must be denied`);
 		assert.throws(() => buildDockerRunArgs({ image: "i", name: "n", workspace: "/w", extraFlags: [flag, "pi.dispatch.mem=1"] }), /supersede the isolation boundary/, flag);
@@ -659,11 +556,11 @@ test("issue #596, phase 2: every job container carries its size as two labels, a
 // ---------------------------------------------------------------------------------------------------------------------
 // Issue #596, phase 2: the parent cgroup every job shares (the aggregate CPU reserve, `cpu-reserve.mjs`).
 
-test("issue #596, phase 2: every docker and podman job argv carries --cgroup-parent=pidispatch.slice exactly once, right after the size flags", () => {
+test("issue #596, phase 2: every docker job argv carries --cgroup-parent=pidispatch.slice exactly once, right after the size flags", () => {
 	const job = { image: "i", name: "pi-job-1", workspace: "/w", size: { memMiB: 1536, cpuCenti: 50 } };
 	const docker = buildDockerRunArgs(job);
-	const podman = buildPodmanRunArgs({ ...job, user: "1234:1234" });
-	for (const args of [docker, podman]) {
+	{
+		const args = docker;
 		assert.deepEqual(args.filter((a) => a.startsWith("--cgroup-parent")), ["--cgroup-parent=pidispatch.slice"]);
 		assert.equal(args.indexOf("--cgroup-parent=pidispatch.slice"), args.indexOf("--shm-size=768m") + 1);
 	}
@@ -699,7 +596,6 @@ test("issue #596, phase 2: --cgroup-parent is refused in dockerExtra in both spe
 	assert.ok(DOCKER_EXTRA_FORBIDDEN.includes("--cgroup-parent"));
 	for (const extra of [["--cgroup-parent=other.slice"], ["--cgroup-parent", "other.slice"], ["--cgroup-parent=pidispatch.slice"]]) {
 		assert.throws(() => buildDockerRunArgs({ image: "i", name: "n", workspace: "/w", extraFlags: extra }), /supersede the isolation boundary/, JSON.stringify(extra));
-		assert.throws(() => buildPodmanRunArgs({ image: "i", name: "n", workspace: "/w", user: "1234:1234", extraFlags: extra }), /supersede the isolation boundary/, JSON.stringify(extra));
 	}
 });
 
@@ -715,9 +611,9 @@ test("issue #596, phase 2: only the job builder and the reserve's helper spell -
 	assert.equal(readFileSync(new URL("up.mjs", dir), "utf8").includes("cgroup"), false);
 });
 
-test("the argv pins the working directory to the workspace mount, on docker and podman alike, and a dockerExtra cannot move it (#683)", () => {
+test("the argv pins the working directory to the workspace mount, and a dockerExtra cannot move it (#683)", () => {
 	// The image's WORKDIR moved to /sandbox (a copying venue's tree); a binding venue's job must still start in its repo.
-	for (const args of [buildDockerRunArgs(base), buildPodmanRunArgs({ ...base, user: "1234:1234" })]) {
+	for (const args of [buildDockerRunArgs(base)]) {
 		assert.deepEqual(args.filter((a) => a.startsWith("--workdir") || a === "-w"), ["--workdir=/workspace"]);
 		assert.equal(args[args.length - 2], "--workdir=/workspace", "last before the image, after every dockerExtra token");
 	}
@@ -728,8 +624,8 @@ test("the argv pins the working directory to the workspace mount, on docker and 
 	}
 });
 
-test("the image's WORKDIR is /sandbox, owned by its user, and /workspace still exists in it (#683)", () => {
+test("the image's WORKDIR is /workspace and it exists, 0755, before the job mounts its repo there (#683)", () => {
 	const dockerfile = readFileSync(new URL("../../image/Dockerfile", import.meta.url), "utf8");
-	assert.deepEqual([...dockerfile.matchAll(/^WORKDIR (\S+)$/gm)].map((m) => m[1]).slice(-1), ["/sandbox"], "the final stage's last WORKDIR");
-	assert.match(dockerfile, /^RUN mkdir -p \/sandbox \/workspace && chown pi:pi \/sandbox && chmod 0755 \/sandbox \/workspace$/m);
+	assert.deepEqual([...dockerfile.matchAll(/^WORKDIR (\S+)$/gm)].map((m) => m[1]).slice(-1), ["/workspace"], "the final stage's last WORKDIR");
+	assert.match(dockerfile, /^RUN mkdir -p \/workspace && chmod 0755 \/workspace$/m);
 });

@@ -188,7 +188,7 @@ test("readWaiting: each bucket from the worker's record, a hold with no record, 
   addJob(v, "pi-jobs", "gh-check", { dueAt: AT + 3000, record: rec("wait-hold") });
   addJob(v, "pi-jobs", "gh-retry", { dueAt: AT + 4000, fields: { atm: "1" }, record: rec("retry", { attempt: 2, attempts: 3 }) });
   addJob(v, "pi-jobs", "gh-pause", { dueAt: AT + 5000, record: rec("pause-window") });
-  addJob(v, "pi-jobs", "gh-ready", { dueAt: AT + 6000, record: rec("podman-restart") });
+  addJob(v, "pi-jobs", "gh-ready", { dueAt: AT + 6000, record: rec("netns-keeper") });
   addJob(v, "pi-jobs", "gh-held", { dueAt: AT + 7000 });
   addJob(v, "pi-jobs", "gh-none", { dueAt: AT + 8000 });
   addJob(v, "pi-jobs", "gh-new", { dueAt: AT + 9000 });
@@ -209,7 +209,7 @@ test("readWaiting: each bucket from the worker's record, a hold with no record, 
       "gh-check": ["check", "wait-hold", true],
       "gh-retry": ["retry", "retry", true],
       "gh-pause": ["pause", "pause-window", true],
-      "gh-ready": ["ready", "podman-restart", true],
+      "gh-ready": ["ready", "netns-keeper", true],
       "gh-held": ["check", null, false],
       "gh-none": ["none", null, false],
       // A reason a newer worker recorded and this console has no words for: its own bucket, never "no reason recorded".

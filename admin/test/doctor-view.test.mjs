@@ -24,7 +24,6 @@ const ROWS = [
     ageMs: 3 * H,
     at: AT - 3 * H,
     version: "4.3.1",
-    openshell: true,
     every: 24,
     by: { uid: 1001, worker: true },
     counts: { ok: 40, warn: 1, fail: 1 },
@@ -35,7 +34,7 @@ const ROWS = [
     ],
     more: 0,
   },
-  { name: "build3", ageMs: 72 * H, at: AT - 72 * H, version: "4.3.0", openshell: false, every: 24, by: { uid: 0, worker: false }, workerRun: { uid: 1001, at: AT - 96 * H }, counts: { ok: 30, warn: 0, fail: 0 }, checks: [{ id: "node.1", level: "ok" }], more: 0 },
+  { name: "build3", ageMs: 72 * H, at: AT - 72 * H, version: "4.3.0", every: 24, by: { uid: 0, worker: false }, workerRun: { uid: 1001, at: AT - 96 * H }, counts: { ok: 30, warn: 0, fail: 0 }, checks: [{ id: "node.1", level: "ok" }], more: 0 },
   { name: "odd", unreadable: true },
 ];
 
@@ -69,7 +68,6 @@ test("the console's Doctor panel: per host its age, counts and problems with fix
   assert.match(out, /Worker 4\.3\.1/);
   assert.match(hostText("mini1"), /1 failing 1 warning 40 passing/, "the count strip belongs to mini1");
   assert.match(hostText("mini1"), /run by the worker/);
-  assert.match(out, /The openshell venue was judged/);
   assert.ok(out.indexOf("triggers.file") < out.indexOf("valkey.2"), "failing before warning");
   assert.match(hostText("mini1"), /Fix: fix <path> so it loads/, "the failing check keeps its actionable fix despite emphasis markup");
   assert.doesNotMatch(out, /node\.1/, "an ok check is never listed");
@@ -78,7 +76,7 @@ test("the console's Doctor panel: per host its age, counts and problems with fix
   assert.match(out, /Worker 4\.3\.0/);
   assert.match(hostText("build3"), /0 failing 0 warnings? 30 passing/, "the passing host has its own count strip");
   assert.match(hostText("build3"), /run by hand \(uid 0\)/);
-  assert.match(out, /It replaced the worker's own run/);
+  assert.match(out, /It replaced the worker&#39;s own run/);
   assert.match(out, /uid 1001/);
   assert.match(hostText("build3"), /Older than two of this host's doctor runs \(every 24h\)/);
   assert.match(out, /Every check passed\./);

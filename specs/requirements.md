@@ -3489,7 +3489,7 @@ writes retain their existing interactive confirmation. This adds no unattended p
     answer and every refusal carry `html` too, a refusal beside its `error`. `danger` is true for the destructive
     actions (`cancel-active`, `cancel-held`, `cancel-all-held`, `cancel-queued`, `remove-failed`, `remove-all-failed`,
     `fleet-pause`, `queue-pause`, `trigger-delete`, `pause-window-delete`, `limit-delete`, `project-delete`,
-    `secret-profile-remove`, `secret-bundle-remove`, `board-freeze`, `board-clear`, `board-revert`, `sandbox-end`, `setup-worker-stop`, `setup-worker-restart`, `setup-receiver-stop`,
+    `secret-profile-remove`, `secret-bundle-remove`, `board-freeze`, `board-clear`, `board-revert`, `setup-worker-stop`, `setup-worker-restart`, `setup-receiver-stop`,
     `setup-receiver-restart`, `setup-viewer-revoke`, `setup-provider-key-replace`) and never beside `paid`, and the bar's ring and its Confirm's
     fill follow (paid, danger or plain). `confirmLabel` says what the button does: a paid act's most ("Retry for up to
     $2.00", "Re-run (reserve

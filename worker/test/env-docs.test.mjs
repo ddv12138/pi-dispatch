@@ -47,7 +47,7 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // Every tree whose code runs in a deployment. `image/runner` rather than `image/runner/src`, because
 // `run-job.mjs` sits beside `src/` and reads the environment too.
-const TREES = ["worker/src", "receiver/src", "admin/src", "image/runner", "gateway/src"];
+const TREES = ["worker/src", "receiver/src", "admin/src", "image/runner"];
 const SOURCE_EXTS = new Set([".mjs", ".js", ".cjs", ".ts", ".mts"]);
 // admin/ is TypeScript and .mjs together; a `*.mjs` glob would silently drop six names.
 const SKIP_DIRS = new Set(["test", "node_modules", "dist"]);
@@ -318,7 +318,7 @@ test("the scan still reaches every tree it claims to cover", () => {
 	// Iterating TREES was the wrong SECOND canary, and for the more instructive reason: a check derived
 	// from the constant is correct at every value of it, so deleting a tree deleted its own assertion.
 	// The list is pinned literally first. Adding a deployment tree is meant to be a deliberate edit here.
-	assert.deepEqual(TREES, ["worker/src", "receiver/src", "admin/src", "image/runner", "gateway/src"], "the scanned trees changed");
+	assert.deepEqual(TREES, ["worker/src", "receiver/src", "admin/src", "image/runner"], "the scanned trees changed");
 	for (const tree of TREES) {
 		const names = scanEnvReads(sourceFiles(join(REPO_ROOT, tree)));
 		assert.ok(names.size > 0, `${tree} contributed no environment reads at all, so the walk is not reaching it`);
@@ -567,9 +567,11 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The count also carries ONE
 	// assignment this file already had at the pin's last edit, which is why it moves by two: at HEAD the file
 	// carried 137 assignments against this pin's 136, so this assertion was already failing before the switch.
-	// The token-only accounting removes the last two retired dollar keys (PI_WEEKLY_COST_USD,
-	// PI_MONTHLY_COST_USD), whose token replacements the file already declared, so the pin follows the file down.
-	assert.equal(scanned, 136, "the scan must actually reach every assignment in the file");
+	// The token-only accounting removed the retired dollar keys (the last two, PI_WEEKLY_COST_USD and
+	// PI_MONTHLY_COST_USD, whose token replacements the file already declared), and the sandbox prune removes
+	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
+	// with the podman, OpenShell and sandbox stack, so the pin follows the file down.
+	assert.equal(scanned, 128, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

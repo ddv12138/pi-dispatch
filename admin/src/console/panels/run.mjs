@@ -1,5 +1,4 @@
 import { answererRun, standingAnswerEditor, offeredAnswerDraft } from "./answerer.mjs";
-import { sandboxLinks, sandboxBrowserLink, sandboxCopy, sandboxNativeLink, sandboxDriverLine } from "../sandbox-links.mjs";
 import { modelRolesTelemetryOf } from "@edgehero/pi-dispatch/run-history";
 import { modelChoiceSentence, providerFailureSentence } from "../../model-words.mjs";
 /**
@@ -14,8 +13,8 @@ import { FORK_THINKING_LEVELS } from "../../run-fork.mjs";
 import { forkArchiveFact } from "@edgehero/pi-dispatch/fork-job";
 import { modelIdProblem } from "@edgehero/pi-dispatch/model-ref";
 import { recordedProgress } from "@edgehero/pi-dispatch/run-history";
-import { UNATTRIBUTED_BACKEND, servesOf, SERVES, declarationOf, BACKENDS } from "@edgehero/pi-dispatch/backends";
-import { BUNDLE_SKIPPED_TEXT, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, VENUE_MAY_NOT_STREAM, liveAbsentCause, progressAbsentText, recordSkips, sandboxShellRefusal, bundleCountsText, bundleReceivedText, checkpointsText, isProgressSnapshot, progressStaleFor, recordBundle, recordRecovery, recoveredText, openshellCountsText, openshellHostsText, recordOpenshell, recordSecretsProfile, RUN_RECORD_UNREAD, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, runPlaces, runPlacesText, SERVES_TEXT, CUSTODY_TEXT, venueCustody, transcriptAbsentText, forgeLinkOf } from "../../read-model.mjs";
+import { UNATTRIBUTED_BACKEND, declarationOf } from "@edgehero/pi-dispatch/backends";
+import { BUNDLE_SKIPPED_TEXT, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, VENUE_MAY_NOT_STREAM, liveAbsentCause, progressAbsentText, recordSkips, bundleCountsText, bundleReceivedText, checkpointsText, isProgressSnapshot, progressStaleFor, recordBundle, recordRecovery, recoveredText, recordSecretsProfile, RUN_RECORD_UNREAD, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, runPlaces, runPlacesText, transcriptAbsentText, forgeLinkOf } from "../../read-model.mjs";
 import { CHAIN_MAX_PER_JOB_DEFAULT } from "@edgehero/pi-dispatch/config";
 import { RECOVERY_CAP, RECOVERY_TTL_MS, RECOVERY_MAX_WAIT_MS } from "@edgehero/pi-dispatch/recovery-queue";
 import { recordedEarlier } from "@edgehero/pi-dispatch/run-history";
@@ -68,7 +67,7 @@ function runningWithoutRecord(view) {
  * Whether the record is a run REFUSED BEFORE IT STARTED (issue #710): a policy outcome (never retried,
  * CONST-RETRY-INFRA-ONLY, so no later attempt of the same id can start) whose record says no spend at all, the cost
  * fold's own `refusedBeforeSpend` (no tokens, no exit code, `budgetReserved: false`). Such a run made no container and
- * no workspace, so its page draws no Progress, no Chat, no transcript section and no sandbox command. A refusal the fold
+ * no workspace, so its page draws no Progress, no Chat and no transcript section. A refusal the fold
  * cannot tell from a spend (one that kept its count slot, `over-budget`) keeps those panels, and says what they say.
  */
 export function refusedBeforeStart(record) {
@@ -212,7 +211,7 @@ export function runOutcome(view) {
   const recovering = token === "recovery-enqueued" && [view.data?.chat?.activeJobId, view.data?.chat?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
   const word = view.locale === "zh" ? recovering ? "失败，正在继续" : refusedBeforeStart(r) ? w.word === "cancelled" ? "启动前已取消" : "启动前已拒绝" : t(capitalised(w.known ? w.word : bannerCut(r.outcome)), view) : recovering ? "Failed, continuing" : refusedBeforeStart(r) ? w.word === "cancelled" ? "Cancelled before it started" : "Refused before it started" : capitalised(w.known ? w.word : bannerCut(r.outcome));
   const started = msOf(r.startedAt), ended = msOf(r.endedAt);
-  const where = view.locale === "zh" ? r.host ? `，主机：${r.host}${String(r.backend).startsWith("openshell") ? "，运行于 OpenShell 沙盒" : ""}` : "" : r.host ? ` on ${r.host}${String(r.backend).startsWith("openshell") ? ", in an OpenShell sandbox" : ""}` : "";
+  const where = view.locale === "zh" ? r.host ? `，主机：${r.host}` : "" : r.host ? ` on ${r.host}` : "";
   const duration = Number.isFinite(started) && Number.isFinite(ended) ? view.locale === "zh" ? `，耗时 ${ageText(ended - started)}${where}` : `: finished in ${ageText(ended - started)}${where}` : where;
   const said = token ? explainReason(token, { why: r.why }) : null;
   const reason = said?.known ? ui.withCode(t(said.sentence, view)) : token ? html`${bannerCut(token)}, ${t(NO_EXPLANATION, view)}.` : html`${t(NO_REASON_TEXT[w.word] ?? NO_REASON_TEXT.failed, view)}${w.word === "failed" ? t(view.role === "operator" ? " The Fleet page's failed list may say more." : " Failure reasons are shown to operators only.", view) : ""}`;
@@ -221,7 +220,7 @@ export function runOutcome(view) {
   const recoveryId = view.data?.chat?.activeJobId ?? view.data?.chat?.queuedJobId;
   const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
   const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: t("Fix configuration", view), kind: "sm", icon: "config" }) : null;
-  const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${r.outcome === "completed" && !["awaiting-input", "awaiting-approval"].includes(token) ? ui.btn({ href: "#p-workspace", label: t("Try it in its workspace", view), kind: "sm", icon: "terminal" }) : null}${rerunLine(r, view)}${fixLink}`;
+  const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${rerunLine(r, view)}${fixLink}`;
   return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `${view.locale === "zh" ? "，" : ", "}${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
 }
 
@@ -413,7 +412,7 @@ export function runProgress(view) {
 // ---- run inbox (issue #646) ------------------------------------------------------------------------------------------
 
 /** Why an active, steer-armed job's run takes no message: the open key cannot tell these apart, so all are named. */
-export const INBOX_NOT_OPEN = "The run is not accepting messages: it has not started its loop yet, it has finished, or its venue cannot deliver (bind mounts, an exit key and an image with the steer capability).";
+export const INBOX_NOT_OPEN = "The run is not accepting messages: it has not started its loop yet, or it has finished.";
 
 const MODE_WORD = Object.freeze({ steer: "steer", followUp: "follow-up" });
 /** A message id as the inbox mints it (INT-STEER-INBOX-CONTRACT): only such an id gets a withdraw button. */
@@ -497,7 +496,7 @@ function chatHeldBy(chat) {
  *     here from the Inbox panel while this panel shows them (`chatDrawsSteer`);
  *   - reply: the parked answer form, the very one the parked inbox draws (`parkedAnswerForm`);
  *   - fork: the exact `pi-dispatch chat <id>` command to fork the run's session on a host that holds the session store
- *     (shown to copy, never run, like the sandbox command), or why its session cannot be found from the record.
+ *     (shown to copy, never run), or why its session cannot be found from the record.
  *
  * A VIEWER SEES STATUS ONLY (REQ-CONSOLE-SECURITY clause l): the state, the mode and a refusal's sentence, never a form
  * or a command; a read-only console draws no form for anyone. Nothing here is free text: the state words are this
@@ -589,86 +588,12 @@ function chatDrawsSteer(view) {
   return view.data?.chat?.mode === "live" && canAct(view) && typeof jobId === "string" && RUN_ID_RE.test(jobId) && inboxTakes(view);
 }
 
-/**
- * What the run page says of a sandbox whose manifest this host read and refused (`sandboxRetentionOf`'s `why`), when
- * the pane's own words (`reason`) would not read as a sentence after "Its workspace is".
- */
-const SANDBOX_KEPT_TEXT = Object.freeze({
-  "retention-off": "Its workspace was not kept: sandbox retention is off on this host (PI_SANDBOX_RETENTION_HOURS=0).",
-  swept: "Its workspace is no longer kept on this host: it was swept after its retention window, or never kept.",
-  // Issue #761: the manifest's version is above what this release reads, so no shell of it opens the workspace; the
-  // retention sweep still honours its deadline, which keeps its meaning in every version.
-  "manifest-newer": "Its workspace was kept by a newer pi-dispatch, whose manifest this release cannot read: open it with the pi-dispatch of that release on its host.",
-});
-
-/**
- * The verdicts (`sandboxRetentionOf`'s `why`) that hide the sandbox command: the ones true whatever the shell that runs
- * it blesses. A venue-policy verdict (`unblessed`, `policy-unreadable`, and any word added later) never hides it
- * (review round 1): the console never sees the PI_BACKENDS that shell opens under (`OQ-038`), so it would hide the
- * command of every podman run, and the opener's own venue check (`sandboxVenueRefusal`) is the one that can tell. The
- * fleet reader asks with the policy unknown, so those words should not reach here; this list is the backstop.
- */
-const SANDBOX_CERTAIN = new Set(["retention-off", "swept", "id-mismatch", "manifest-newer", "no-image", "workspace-gone", "venue", "no-venue", "no-launcher"]);
-
 /** Codes the fork reader returns, in words a person can act on. Anything else it says is already a sentence. */
 const FORK_REFUSAL_WORDS = Object.freeze({
   "fork-source-store-unset": "this host keeps no saved sessions (PI_SESSIONS_DIR is not set)",
   "fork-source-unavailable": "no saved session is available for this run",
 });
 const forkRefusalWords = (refusal) => FORK_REFUSAL_WORDS[refusal] ?? refusal;
-
-/** One decision for the row and its action. Tracking loss is unknown, never evidence that a shell or workspace ended. */
-export function runWorkspaceState(view) {
-  const r = recordOf(view), data = view.data ?? {};
-  const id = r?.jobId ?? view.query?.id;
-  const active = data.chat?.jobState === "active" || data.chat?.state === "active" || runningWithoutRecord(view) || r?.reason === "recovery-enqueued" && Boolean(data.chat?.activeJobId || data.chat?.queuedJobId);
-  if (active) return { kind: "running", id, title: t("Opens when it ends.", view), text: t("To change it now, steer it. The running job's container is never a browser terminal.", view) };
-  if (!r) return { kind: "unknown", id, title: t("Workspace unknown.", view), text: t("This run's record is unavailable; no workspace or shell is inferred.", view) };
-  if (refusedBeforeStart(r) || r.reason === "container-never-started") return { kind: "nothing", id, title: t("Nothing to open.", view), text: t(r.reason === "container-never-started" ? "Its container never started." : "The run was refused before it started.", view) };
-  const published = data.workspace ?? {};
-  const check = data.sandboxCheck;
-  const shell = published.shell ?? data.browserGateways?.sessions?.find((s) => s.host === r.host && s.id === r.jobId) ?? null;
-  const certain = check?.retained === true || check?.retained === false && SANDBOX_CERTAIN.has(check.why) || check?.why === "past-window" ? check : null;
-  const evidence = certain ?? published;
-  const until = Number.isSafeInteger(evidence.until) ? evidence.until : msOf(evidence.until);
-  const venue = r.backend ?? UNATTRIBUTED_BACKEND;
-  const noVenue = sandboxShellRefusal(venue);
-  if (!shell && (noVenue || evidence.retained === false || Number.isFinite(until) && until <= view.now)) return { kind: "prepare", id, host: r.host, title: t(noVenue ? "Cannot reopen." : evidence.why === "retention-off" ? "Not kept." : "Workspace gone.", view), text: t(noVenue ? `Its ${venue} venue cannot reopen a sandbox.` : evidence.why === "retention-off" ? "Workspace retention is off on its host." : "It was swept, or is past its opening window.", view), until };
-  const purpose = ["awaiting-input", "awaiting-approval"].includes(recordReason(r)) ? { title: t("Look before you answer.", view), text: t("Your answer starts a new job, so put what you find in it; shell edits do not reach it.", view) } : outcomeWord(r.outcome, recordReason(r)).word === "failed" ? { title: t("Reproduce it.", view), text: t("The kept sandbox uses the run's recorded limits.", view) } : { title: t("Try it before you merge.", view), text: t("The native terminal checks the workspace again before opening.", view) };
-  return { kind: shell ? "open" : evidence.retained === true ? "kept" : "unknown", id, host: r.host, shell, until, ...purpose, ...(shell || evidence.retained === true ? {} : { text: t("The workspace's current retention could not be verified. The native command checks again; missing tracking does not prove it was swept.", view) }) };
-}
-
-export function runWorkspace(view) {
-  if (view.role !== "operator") return html``;
-  const state = runWorkspaceState(view), r = recordOf(view);
-  let actions = null, more = null;
-  if (state.kind === "running") actions = !view.readOnly ? ui.btn({ href: "#p-chat", label: t("Steer this run", view), kind: "sm", icon: "steer" }) : null;
-  else if (state.kind === "prepare") actions = !view.readOnly ? ui.btn({ href: `/runs/sandboxes?${new URLSearchParams({ fromRun: state.id })}`, label: t("Prepare from this run", view), kind: "sm", icon: "plus" }) : null;
-  else if (r && ["open", "kept", "unknown"].includes(state.kind) && RUN_ID_RE.test(state.id ?? "")) {
-    const verb = state.shell ? "attach" : "open";
-    if (!view.readOnly) actions = html`${state.shell ? sandboxBrowserLink(view, state.shell) : null}${typeof state.host === "string" ? sandboxNativeLink({ id: state.id, host: state.host, verb, locale: view.locale }) : null}`;
-    const copy = typeof state.host === "string" ? sandboxCopy({ id: state.id, host: state.host, verb, config: view.data?.sandboxHosts, locale: view.locale }) : html`<aside data-sandbox-command>${ui.cmd(["pi-dispatch", "sandbox", state.id], { host: t("Run on the host that kept this workspace; its historical host was not recorded.", view) })}</aside>`;
-    more = html`<details class="ws-more"><summary>${t(view.readOnly || !state.shell ? "Copy the command" : "Copy the command, or end the shell", view)}</summary><div class="ws-more__b">${copy}${!view.readOnly && state.shell ? ui.actForm({ action: "sandbox-end", hidden: [["host", state.shell.host], ["id", state.shell.id], ["nonce", state.shell.nonce], ["containerId", state.shell.containerId]], label: t("Preview End", view), kind: ["sm", "danger"], icon: "cancel" }) : null}</div></details>`;
-  }
-  // Who is in it comes first, and what opening it would do depends on who is reading: a watcher never joins, they only see.
-  const driver = state.shell ? view.data?.browserGateways?.drivers?.find((s) => s.host === state.shell.host && s.id === state.shell.id && s.containerId === state.shell.containerId && s.nonce === state.shell.nonce) : null;
-  const since = Number.isFinite(state.shell?.since) ? html`, ${uiText("since", view.locale)} ${timeHtml(state.shell.since)}` : null;
-  const opener = html`<b>${state.shell?.by ?? t("The native terminal operator", view)}</b> ${t("opened the shell", view)}${since}.`;
-  const shared = driver?.watching && driver.by !== view.name;
-  const line = !state.shell ? html`<b>${state.title}</b> ${state.text}`
-    : shared ? html`<b>${driver.by} ${t("is driving", view)}</b>, ${t("and lets operators watch. You see new output and cannot type.", view)}`
-    : html`${opener}${view.readOnly ? null : ` ${t("Opening it joins that shell.", view)}`}`;
-  // Watching and joining are different promises: Open in Terminal still shares the driver's prompt, so say so here.
-  const below = !state.shell ? null
-    : shared ? html`<p class="sx-open__s">${opener}${view.readOnly ? null : ` ${t("A native terminal joins that shell and its prompt.", view)}`}${driver.watchers?.length ? ` ${t("Watching now:", view)} ${driver.watchers.map((w) => w.name).join(", ")}.` : null}</p>`
-    : sandboxDriverLine(view, state.shell);
-  const points = view.data?.forkPoints;
-  const canFork = points?.ok && points.entries?.some((entry) => entry.positions?.length);
-  const found = r && !view.readOnly && !["nothing", "running"].includes(state.kind) ? html`<p class="ws-found"><b>${t("Found something?", view)}</b><a class="link" href="/triggers">${t("Add it to a trigger’s instructions", view)}</a>${canFork ? html`<a class="link" href="#run-fork">${t("Fork it with a message", view)}</a>` : html`<span>${t("Fork unavailable:", view)} ${t((r.forkSource?.saved === false ? forkRefusalWords(forkArchiveFact(r.forkSource).reason) : forkRefusalWords(points?.refusal)) ?? "no exact retained point is available", view)}.</span>`}</p>` : null;
-  // A gone workspace has no "kept until", and "not verified" would contradict the row beneath it.
-  const sub = !state.host ? null : state.kind === "prepare" ? html`${t("on", view)} ${state.host}` : state.until && Number.isFinite(state.until) ? html`${t("kept on", view)} ${state.host} ${t("until", view)} ${timeHtml(state.until)}` : html`${t("on", view)} ${state.host}, ${t("retention not verified", view)}`;
-  return ui.card({ title: t("Workspace", view), sub, body: html`<div class="ws-row"><p class="ws-row__t"><span class="dot ${state.kind === "open" ? "tone-running" : "tone-idle"}"></span><span>${line}</span></p><div class="ws-row__a">${actions}</div></div>${below}${view.data?.workspace?.sessionsUnknown || view.data?.browserGateways?.partial ? html`<p class="note" role="status">${t("Some shell or browser status could not be read; an absent watcher is not inferred.", view)}</p>` : null}${more}${found}` });
-}
 
 /**
  * The re-run line: the form, or, where the planner would refuse on the record and the job's retained data alone, its
@@ -695,22 +620,6 @@ function skipRows(r, view) {
   return [
     ["Steering", t(steerSkipped !== null ? `skipped: ${STEER_SKIPPED_TEXT[steerSkipped]}` : r.steered ? `armed: ${r.steered.delivered} delivered, ${r.steered.late} late, ${r.steered.withdrawn} withdrawn` : "not armed: its trigger sets no run.steer", view)],
     ["Live transcript", liveSkipped !== null ? t(`none: ${LIVE_SKIPPED_TEXT[liveSkipped]}`, view) : view?.data?.transcript?.exists ? t("streamed, kept 24 hours after the end", view) : transcriptAbsent(r, view?.locale)],
-  ];
-}
-
-/**
- * The run summary's OpenShell rows (issue #712): "Sandbox policy" (the mode, the credential providers and placeholders
- * the sandbox was given) and "Rule hosts" (the hosts its policy admitted, with the count of any the record does not
- * list), the worker's rebuild (`recordOpenshell`: hosts held to the host-name charset), escaped by the renderer; and
- * "Secrets profile", the profile NAME run.secrets resolved through. No row for a record without the keys, so every
- * other run renders byte-identical. MCP connection state is not recorded on any venue, so no row claims it.
- */
-function openshellRows(r) {
-  const o = recordOpenshell(r);
-  return [
-    ["Sandbox policy", o !== null ? openshellCountsText(o) : null],
-    ["Rule hosts", o !== null ? openshellHostsText(o) : null],
-    ["Secrets profile", recordSecretsProfile(r)],
   ];
 }
 
@@ -902,7 +811,7 @@ export function runRecord(view) {
 }
 
 export function runRest(view) {
-  return refusedBeforeStart(recordOf(view)) ? ui.collapsed({ icon: "runs", title: t("Nothing ran, so there is no progress, transcript or spend.", view), body: t("Session fresh, no parent or child runs. No workspace to reopen: none was made.", view) }) : html``;
+  return refusedBeforeStart(recordOf(view)) ? ui.collapsed({ icon: "runs", title: t("Nothing ran, so there is no progress, transcript or spend.", view), body: t("Session fresh, no parent or child runs.", view) }) : html``;
 }
 
 export function runTranscriptState(view) {
@@ -914,12 +823,6 @@ export function runTranscriptState(view) {
   return titled("Live transcript", html`<p data-transcript-status role="status" aria-live="polite">${state}</p>`, view.locale);
 }
 
-export function runTerminal(view) {
-  const chat = view.data?.chat;
-  if (view.role !== "operator" || refusedBeforeStart(recordOf(view)) || !["live", "reply"].includes(chat?.mode)) return html``;
-  return titled("Terminal chat", command(view.query.id, recordOf(view)?.host ?? view.data?.activeRun?.host, view.locale), view.locale);
-}
-
 export function runActionsPanel(view) {
   const r = recordOf(view);
   if (!r || view.role !== "operator" || !RUN_ID_RE.test(r.jobId ?? "")) return html``;
@@ -928,27 +831,13 @@ export function runActionsPanel(view) {
   return titled("Actions", html`${rerunLine(r, view)}${forkLine(r, view)}${isSchedulerJobId(r.jobId) ? html`<p>${t("A cron run is fired again by hand from its trigger as the triggers file says now.", view)}</p>` : null}`, view.locale);
 }
 
-export function runSandbox(view) {
-  const record = recordOf(view);
-  const r = record ?? view.data?.activeRun;
-  if (!r || (!record && !runningWithoutRecord(view))) return html``;
-  // Only a historical record can predate venue attribution. Missing live facts are unknown, never legacy local.
-  if (!record && !r.backend) return titled("Sandbox", html`<p>${t("This running job's venue could not yet be read. Its host's default is not known here.", view)}</p>`, view.locale);
-  const venue = r.backend ?? UNATTRIBUTED_BACKEND;
-  const serves = servesOf(venue), custody = venueCustody(venue);
-  const check = view.data?.sandboxCheck;
-  const o = recordOpenshell(r);
-  const workspace = refusedBeforeStart(r) ? t("No workspace was made: the run was refused before it started.", view) : sandboxShellRefusal(venue) ? `${t("Its workspace is", view)} ${t(sandboxShellRefusal(venue), view)}.` : check?.retained === true && Number.isFinite(check.until) ? html`${t("Kept on", view)} ${r.host} ${t("until", view)} ${timeHtml(check.until)}. PI_SANDBOX_RETENTION_HOURS ${t("controls this window (24 hours by default; 0 keeps none).", view)}` : check?.retained === false ? check.why === "past-window" ? t("Past its retention window: the sandbox command needs --pin.", view) : t(SANDBOX_KEPT_TEXT[check.why] ?? check.reason ?? "Its workspace cannot be reopened.", view) : t("Kept on its host for PI_SANDBOX_RETENTION_HOURS after the run (24 hours by default, when retention is on there). This console cannot read another host's retention setting; the CLI on that host decides.", view);
-  const siblings = Array.isArray(view.data?.siblings) ? view.data.siblings : [];
-  return titled(`${t("Sandbox", view)}: ${venue}${r.host ? ` ${t("on", view)} ${r.host}` : ""}`, html`${r.backend ? null : html`<p>${t("A local run from before venues were recorded.", view)}</p>`}${factsOne([...(serves ? SERVES.map((key) => [key === "liveTranscript" ? "Live transcript" : key === "sandboxShell" ? "Sandbox shell" : capitalised(key), t(SERVES_TEXT[key]?.[serves[key]], view)]) : [[VENUE_LABEL, t("This console does not know this venue yet.", view)]]), [VENUE_LABEL, t(BACKENDS[venue]?.describe ?? "This console does not know this venue yet.", view)], ["Who holds the credentials", t(custody ? CUSTODY_TEXT[custody] : "unknown", view)], ["Sandbox policy", o ? t(openshellCountsText(o), view) : null], ["Rule hosts", o ? o.ruleHostCount === 0 ? t(openshellHostsText(o), view) : html`${o.ruleHostCount} ${t("rule hosts:", view)} ${o.ruleHosts.map((name) => ui.chip(name))}${o.ruleHostCount > o.ruleHosts.length ? ` ${t("and", view)} ${o.ruleHostCount - o.ruleHosts.length} ${t("more", view)}` : ""}` : null], ["Workspace", workspace], ["Replica", Number.isInteger(r.replica) ? `${t("replica", view)} ${r.replica} ${t("of", view)} ${r.replicas}: ${t("each replica is its own sandbox, racing the others on the same event", view)}` : null]], view.locale)}${siblings.length ? html`<p>${t("Sibling replicas:", view)} ${siblings.map((s) => html`${runLink(s.jobId)} ${ui.badge(outcomeWord(s.outcome, recordReason(s)).status, t(capitalised(outcomeWord(s.outcome, recordReason(s)).word), view))} `)}</p>` : null}`, view.locale);
-}
-
 export function runSecrets(view) {
   const r = recordOf(view);
   if (!r || (!recordBundle(r) && !recordSecretsProfile(r))) return html``;
   const got = recordBundle(r), b = got?.bundle;
   const names = (b?.variables ?? []).filter((name) => !b.shadowed.includes(name));
-  return titled("Secrets", html`${facts([["Secrets profile", t(recordSecretsProfile(r), view)], ...bundleRows(r, view.locale)], view.locale)}${Array.isArray(names) && names.length ? html`<p>${names.map((name) => ui.chip(`${name}${Array.isArray(b.placeholderNames) ? b.placeholderNames.includes(name) ? `（${t("placeholder", view)}）` : `（${t("value", view)}）` : ""}`))}</p>` : null}${b?.shadowed?.length ? html`<p>${t("The trigger's value won; the bundle's was not passed:", view)} ${b.shadowed.join(", ")}.</p>` : null}<p class="card__sub">${t("Names only: no secret value reaches a log, a record or this page.", view)}</p>`, view.locale);
+  const chipTag = (name) => ui.chip(`${name}${Array.isArray(b.placeholderNames) ? `${view.locale === "zh" ? "（" : " ("}${b.placeholderNames.includes(name) ? t("placeholder", view) : t("value", view)}${view.locale === "zh" ? "）" : ")"}` : ""}`);
+  return titled("Secrets", html`${facts([["Secrets profile", t(recordSecretsProfile(r), view)], ...bundleRows(r, view.locale)], view.locale)}${Array.isArray(names) && names.length ? html`<p>${names.map(chipTag)}</p>` : null}${b?.shadowed?.length ? html`<p>${t("The trigger's value won; the bundle's was not passed:", view)} ${b.shadowed.join(", ")}.</p>` : null}<p class="card__sub">${t("Names only: no secret value reaches a log, a record or this page.", view)}</p>`, view.locale);
 }
 
 export function runModels(view) {

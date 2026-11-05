@@ -87,12 +87,12 @@ test("the address and the state: running, not running (with how to start it), un
   const r = await consoleCommand(["runs"], running.deps);
   assert.equal(r.state, "running");
   assert.equal(running.notes.length, 1);
-  assert.deepEqual(running.notes[0][0].split("\n").slice(0, 2), ["http://127.0.0.1:4790/runs", "the console: running"]);
+  assert.deepEqual(running.notes[0][0].split("\n").slice(0, 2), ["http://<this host>:4790/runs", "the console: running"]);
   assert.equal(running.notes[0][1], "info");
 
   const stopped = harness({ state: "not-running" });
   await consoleCommand(["gh-1"], stopped.deps);
-  assert.match(text(stopped), /^http:\/\/127\.0\.0\.1:4790\/run\?id=gh-1\nthe console: not running: start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console/);
+  assert.match(text(stopped), /^http:\/\/<this host>:4790\/run\?id=gh-1\nthe console: not running: start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console/);
   assert.equal(stopped.notes[0][1], "warning");
   assert.deepEqual(stopped.opened, [], "a console that is not running is not opened");
 
@@ -112,13 +112,13 @@ test("--link with one operator token: audit first, then the mint, then the link 
   const h = harness({ tokens: [{ name: "alice", role: "operator" }, { name: "watcher", role: "viewer" }] });
   const r = await consoleCommand(["runs", "--link"], h.deps);
   assert.equal(r.minted, true);
-  assert.deepEqual(h.order, ["probe", "guarded", "read", "audit:ok", "mint", "openLink"], "a link is opened through the private page, never handed to the opener");
+  assert.deepEqual(h.order, ["probe", "guarded", "read", "audit:ok", "mint"], "a link is printed; the default address binds every host, so no browser is opened");
   assert.deepEqual(h.rows, [{ actor: { name: "rob", role: "panel", session: null }, action: "login-code", target: "alice", outcome: "ok", ticket: "0123456789ab" }]);
-  const link = `http://127.0.0.1:4790/login/code#${CODE}&next=/runs`;
+  const link = `http://<this host>:4790/login/code#${CODE}&next=/runs`;
   assert.ok(text(h).includes(`sign-in link for "alice" (it works once, within 60 seconds): ${link}`), text(h));
-  assert.deepEqual(h.opened, [link], "the local browser gets the link itself");
-  assert.match(text(h), /handed to your browser$/m, "darwin: no snap or Flatpak note");
-  const linux = harness();
+  assert.deepEqual(h.opened, [], "<this host> is no address to open; the printed link is the contract");
+  assert.doesNotMatch(text(h), /handed to your browser/);
+  const linux = harness({ env: { PI_CONSOLE_LISTEN: "127.0.0.1:4790" } });
   linux.deps.platform = "linux";
   await consoleCommand(["--link"], linux.deps);
   assert.match(text(linux), /handed to your browser \(a snap or Flatpak browser cannot read the page in \/tmp and shows it as not found: open the link above instead\)/);
@@ -234,22 +234,22 @@ test("--link mints only into a drop the write guard holds, and only in pi's term
   }
   const rpc = harness({ mode: "rpc" });
   await consoleCommand(["runs"], rpc.deps);
-  assert.match(text(rpc), /^http:\/\/127\.0\.0\.1:4790\/runs\nthe console: running/, "the address and the state are fine in rpc mode");
+  assert.match(text(rpc), /^http:\/\/<this host>:4790\/runs\nthe console: running/, "the address and the state are fine in rpc mode");
 });
 
 test("the browser: opened on a local session for a TCP listener, never with --no-open or off a local session", async () => {
-  const local = harness();
+  const local = harness({ env: { PI_CONSOLE_LISTEN: "127.0.0.1:4790" } });
   assert.equal((await consoleCommand(["config"], local.deps)).opened, true);
   assert.deepEqual(local.opened, ["http://127.0.0.1:4790/config"]);
   assert.match(text(local), /handed to your browser$/m);
 
-  const noOpen = harness();
+  const noOpen = harness({ env: { PI_CONSOLE_LISTEN: "127.0.0.1:4790" } });
   const r = await consoleCommand(["config", "--no-open"], noOpen.deps);
   assert.equal(r.opened, false);
   assert.deepEqual(noOpen.opened, []);
   assert.ok(text(noOpen).includes("http://127.0.0.1:4790/config"), "the URL is printed all the same");
 
-  const remote = harness({ local: false });
+  const remote = harness({ local: false, env: { PI_CONSOLE_LISTEN: "127.0.0.1:4790" } });
   await consoleCommand(["config"], remote.deps);
   assert.deepEqual(remote.opened, []);
   assert.match(text(remote), /not opened: this is not a local session/);
@@ -261,7 +261,7 @@ test("the browser: opened on a local session for a TCP listener, never with --no
 });
 
 test("the default local-session check reads the session's env: SSH prints only", async () => {
-  const h = harness();
+  const h = harness({ env: { PI_CONSOLE_LISTEN: "127.0.0.1:4790" } });
   delete h.deps.isLocal;
   h.deps.sessionEnv = { SSH_CONNECTION: "10.0.0.2 5000 10.0.0.1 22" };
   await consoleCommand([], h.deps);
@@ -321,8 +321,9 @@ test("setup link uses the private guarded opener and validated /setup destinatio
   const result = await consoleCommand(["setup", "--link"], h.deps);
   assert.equal(result.minted, true);
   assert.equal(consolePagePath("setup"), "setup");
-  assert.deepEqual(h.order, ["probe", "guarded", "read", "audit:ok", "mint", "openLink"]);
-  assert.equal(h.opened[0], `http://127.0.0.1:4790/login/code#${CODE}&next=/setup`);
+  assert.deepEqual(h.order, ["probe", "guarded", "read", "audit:ok", "mint"]);
+  assert.ok(text(h).includes(`http://<this host>:4790/login/code#${CODE}&next=/setup`), text(h));
+  assert.deepEqual(h.opened, [], "<this host> is no address to open");
   assert.ok(!JSON.stringify(h.rows).includes(CODE));
   const unsafe = harness({ guarded: false });
   assert.equal((await consoleCommand(["setup", "--link"], unsafe.deps)).minted, undefined);

@@ -17,7 +17,8 @@ import { tempDir } from "./helpers/temp-dir.mjs";
  * shows the hazard is real on this Node: if the hook ever ran after the late test, the fixture would prove nothing.
  */
 const root = fileURLToPath(new URL("../../", import.meta.url));
-const HELPERS = ["worker", "receiver", "admin", "image/runner", "gateway"].map((ws) => join(root, ws, "test", "helpers", "temp-dir.mjs"));
+// gateway left with the sandbox prune; its helper went with it.
+const HELPERS = ["worker", "receiver", "admin", "image/runner"].map((ws) => join(root, ws, "test", "helpers", "temp-dir.mjs"));
 
 function runChild(helper) {
 	const work = tempDir("pi-dispatch-tla-");

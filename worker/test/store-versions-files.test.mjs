@@ -11,9 +11,6 @@ import { JOB_DATA_FIELD_VERSIONS, JOB_DATA_VALUE_VERSIONS, jobDataVersionFor } f
 import { FORGE_MCP_KINDS } from "../src/mcp-config.mjs";
 import { DAYS, PAUSE_WINDOWS_VERSION, PAUSE_WINDOW_FIELDS, PAUSE_WINDOW_FIELD_VERSIONS, PAUSE_WINDOW_VALUE_VERSIONS, parsePauseWindows, pauseWindowsText, pauseWindowsVersionFor, pauseWindowsVersionRefusal } from "../src/pause-windows.mjs";
 import { KNOWN_KEYS, OPERATOR_ONLY_KEYS, SETTINGS_KEY_VERSIONS, SETTINGS_VALUE_VERSIONS, SETTINGS_VERSION, readOverlayDocument, settingsVersionFor, validateOverlay, writeOverlay } from "../src/runtime-settings.mjs";
-import { sandboxSyncRefusal } from "../src/sandbox-policy.mjs";
-import { createSandboxPinHandler } from "../src/sandbox-prepare.mjs";
-import { SANDBOX_MANIFEST, SANDBOX_MANIFEST_FIELD_VERSIONS, SANDBOX_MANIFEST_VERSION, makeSandboxReaper, pinSandbox, retainJobDir, sandboxManifestNewer, sandboxManifestVersionFor, withManifestVersion } from "../src/sandbox-store.mjs";
 import { BUNDLE_FORMATS } from "../src/secret-profiles.mjs";
 import { valueNeededVersion, valueTableProblems, versionTableProblems } from "../src/store-version.mjs";
 import { AUTHORED_NARROWING_FIELDS, disarmTrigger, makeCheckOnceSpent, makeCheckWaitSkew, readDisarmState, writeTriggers } from "../src/triggers-file.mjs";
@@ -22,8 +19,8 @@ import { WAIT_CONDITION_KEYS } from "../src/wait-for.mjs";
 import { WATCH_SEVERITIES } from "../src/watch-contract.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
-// Issue #761, item 9: the optional version of the overlay, the pause windows file, the triggers file and the sandbox
-// manifest. Every shipped table is empty, so nothing is stamped in this release; each store's machinery is run here with
+// Issue #761, item 9: the optional version of the overlay, the pause windows file and the triggers file. (The
+// sandbox manifest's version machinery went with the sandbox prune.) Every shipped table is empty, so nothing is stamped in this release; each store's machinery is run here with
 // an INJECTED table, as a later release will run it: the writer stamps the lowest version needed, unsetting the field
 // drops the stamp, the same build reads the file, and a build that reads less calls it newer.
 
@@ -388,7 +385,8 @@ const OTHER_DOMAINS = Object.freeze([
 		name: "BACKEND_NAMES",
 		refused: "is not a backend this build knows",
 		members: () => [...BACKEND_NAMES],
-		baseline: ["local", "podman", "openshell", "openshell-bind"],
+		// The sandbox prune shrank the venue table to `local`; the baseline is issue #761's list intersected with it.
+		baseline: ["local", "podman", "openshell", "openshell-bind"].filter((m) => BACKEND_NAMES.includes(m)),
 		what: (m) => `the venue ${JSON.stringify(m)}`,
 		// An older worker's PI_BACKENDS can name only its own venues, so its blessed list never holds the new one.
 		refusal: `${LOADER_REFUSES} when a run.backend names it, and an older worker refuses its jobs as backend-unblessed`,
@@ -740,79 +738,4 @@ test("approval: the live digest check says newer for a newer file and keeps its 
 	assert.deepEqual(check(job), { refused: "approval-policy-unavailable" });
 	writeFileSync(path, JSON.stringify({ triggers: [gated] }));
 	assert.equal(check(job).ok, true);
-});
-
-// ── sandbox manifest ───────────────────────────────────────────────────────────────────────────────────────────────
-
-test("sandbox: the shipped table holds the rule against the fields the writers write, and today's manifest carries no version", () => {
-	assert.equal(SANDBOX_MANIFEST_VERSION, 1);
-	const root = tempDir("store-versions-");
-	const jobDir = join(root, "job");
-	mkdirSync(jobDir);
-	const written = retainJobDir({ jobDir, workspace: join(jobDir, "workspace"), sha: "a".repeat(40), sandbox: { jobId: "gh-1", kind: "github", image: "i", backend: "local", jobUser: null, podmanStore: "/s", size: { memMiB: 1 } } }, { sandboxDir: join(root, "sbx"), retentionHours: 24, now: () => T0 });
-	const prepared = /withManifestVersion\(\{(.*)\}\);/.exec(src("sandbox-prepare.mjs"))?.[1] ?? "";
-	const known = [...Object.keys(written), ...[...prepared.matchAll(/(\w+):/g)].map((m) => m[1])];
-	assert.ok(known.includes("origin") && known.includes("sandboxEgress") && known.includes("prepared"), "the prepared manifest's own fields were found");
-	assert.deepEqual(versionTableProblems(SANDBOX_MANIFEST_FIELD_VERSIONS, { known, version: SANDBOX_MANIFEST_VERSION }), []);
-	// Today's manifest carries no version: its exact text, keys in their order (only the workspace path is the test's own).
-	assert.equal(Object.hasOwn(written, "version"), false);
-	assert.equal(
-		readFileSync(join(root, "sbx", "gh-1", SANDBOX_MANIFEST), "utf8"),
-		`{\n  "jobId": "gh-1",\n  "baseSha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",\n  "kind": "github",\n  "image": "i",\n  "backend": "local",\n  "jobUser": null,\n  "podmanStore": "/s",\n  "size": {\n    "memMiB": 1\n  },\n  "workspace": ${JSON.stringify(join(root, "sbx", "gh-1", "workspace"))},\n  "createdAt": "2026-08-28T09:00:00.000Z",\n  "retainUntil": "2026-08-29T09:00:00.000Z",\n  "keepUntil": null\n}\n`,
-	);
-});
-
-test("sandbox: with an injected table the stamp leads, is kept in place, and goes when nothing needs it", () => {
-	const table = Object.freeze({ podmanStore: 2 });
-	const plain = { jobId: "gh-1", image: "i" };
-	assert.equal(withManifestVersion(plain, { table }), plain, "nothing needed: the very same object");
-	assert.equal(sandboxManifestVersionFor({ ...plain, podmanStore: "/s" }, { table }), 2);
-	assert.deepEqual(Object.keys(withManifestVersion({ ...plain, podmanStore: "/s" }, { table })), ["version", "jobId", "image", "podmanStore"]);
-	assert.deepEqual(withManifestVersion({ jobId: "gh-1", version: 2, image: "i" }, { table }), { jobId: "gh-1", version: 2, image: "i" }, "a declared version is never lowered");
-	assert.deepEqual(withManifestVersion({ jobId: "gh-1", version: 1, image: "i" }), plain, "a version of 1 is written as nothing");
-	assert.equal(sandboxManifestNewer({ version: 2 }, { supported: 2 }), null);
-	assert.deepEqual(sandboxManifestNewer({ version: 2 }), { version: 2 });
-	assert.deepEqual(sandboxManifestNewer({ version: "2" }), { version: null });
-	assert.equal(sandboxManifestNewer(plain), null);
-});
-
-test("sandbox: a newer manifest is refused FIRST, before the venue a newer release may have redefined", () => {
-	const manifest = { jobId: "gh-1", version: 2, backend: "elsewhere", image: "i", workspace: "/w" };
-	assert.deepEqual(sandboxSyncRefusal({ jobId: "gh-1", manifest, blessed: ["local"], fileExists: () => true }), {
-		refused: "manifest-newer",
-		message: "the retained workspace for gh-1 was kept by a newer pi-dispatch (manifest version 2; this build understands 1); open it with that release",
-	});
-	assert.equal(sandboxSyncRefusal({ jobId: "gh-1", manifest, blessed: ["local"], fileExists: () => true, supported: 2 }).refused, "venue-unreachable", "a build that reads it judges the venue as ever");
-	const broken = sandboxSyncRefusal({ jobId: "gh-1", manifest: { ...manifest, version: "two" }, blessed: ["local"], fileExists: () => true });
-	assert.equal(broken.refused, "manifest-newer");
-	assert.equal(broken.message, 'the manifest for gh-1 carries a "version" that is not an integer of 1 or more, which no pi-dispatch writes, so this host cannot tell how to read it');
-	assert.equal(sandboxSyncRefusal({ jobId: "gh-1", manifest: { jobId: "gh-1", backend: "local", image: "i", workspace: "/w" }, blessed: ["local"], fileExists: () => true }), null);
-});
-
-test("sandbox: a pin refuses a newer manifest without rewriting it, and the console's pin says why", async () => {
-	const sandboxDir = join(tempDir("store-versions-"), "sbx");
-	mkdirSync(join(sandboxDir, "gh-1"), { recursive: true });
-	const file = join(sandboxDir, "gh-1", SANDBOX_MANIFEST);
-	const text = `${JSON.stringify({ jobId: "gh-1", version: 2, createdAt: new Date(T0).toISOString(), retainUntil: null, keepUntil: null }, null, 2)}\n`;
-	writeFileSync(file, text);
-	assert.deepEqual(pinSandbox({ sandboxDir, jobId: "gh-1", pinDays: 7, now: () => T0 }), { pinned: false, reason: "manifest-newer" });
-	assert.equal(readFileSync(file, "utf8"), text);
-	assert.deepEqual(readdirSync(join(sandboxDir, "gh-1")), [SANDBOX_MANIFEST], "no temp file");
-	const handler = createSandboxPinHandler({ config: { workerName: "h1", sandboxDir, sandboxRetentionHours: 24, sandboxPinDays: 7 }, now: () => T0 });
-	assert.deepEqual(await handler({ host: "h1", runId: "gh-1" }), { refused: "manifest-newer", message: "the kept workspace was kept by a newer pi-dispatch, so this host does not rewrite it; pin it with that release" });
-	// A build that reads it pins it and keeps its stamp in place.
-	assert.equal(pinSandbox({ sandboxDir, jobId: "gh-1", pinDays: 7, now: () => T0, supported: 2 }).pinned, true);
-	const pinned = JSON.parse(readFileSync(file, "utf8"));
-	assert.deepEqual(Object.keys(pinned), ["jobId", "version", "createdAt", "retainUntil", "keepUntil"]);
-	assert.equal(pinned.keepUntil, new Date(T0 + 7 * 24 * HOUR).toISOString());
-});
-
-test("sandbox: the sweep is unchanged, so a newer manifest past its deadline is still swept on time", async () => {
-	const sandboxDir = join(tempDir("store-versions-"), "sbx");
-	for (const [id, ageHours] of [["old", 30], ["fresh", 2]]) {
-		mkdirSync(join(sandboxDir, id), { recursive: true });
-		writeFileSync(join(sandboxDir, id, SANDBOX_MANIFEST), JSON.stringify({ jobId: id, version: 9, laterField: { x: 1 }, createdAt: new Date(T0 - ageHours * HOUR).toISOString() }));
-	}
-	await makeSandboxReaper({ sandboxDir, retentionHours: 24, now: () => T0 })();
-	assert.deepEqual(readdirSync(sandboxDir), ["fresh"], "the deadline fields keep their meaning in every version");
 });
