@@ -12,7 +12,7 @@ function fixture() {
   const folder = join(root, "repo");
   mkdirSync(folder);
   const triggersPath = join(root, "triggers.json");
-  const raw = { on: { type: "cron", id: "daily", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "operator task never in display", provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 7, progress: true, steer: true, backend: "local", maxCostUsd: "1", excludeTools: ["bash"], secrets: { TOKEN: "vault/private" }, secretsProfile: "work" } };
+  const raw = { on: { type: "cron", id: "daily", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "operator task never in display", provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 7, progress: true, steer: true, backend: "local", maxTokens: "1000000", excludeTools: ["bash"], secrets: { TOKEN: "vault/private" }, secretsProfile: "work" } };
   const save = () => writeFileSync(triggersPath, JSON.stringify({ triggers: [raw] }));
   save();
   const jobs = new Map(), latches = new Set(), admissions = [], queues = [], adds = [];
@@ -28,7 +28,7 @@ function fixture() {
     getJob: async (id) => jobs.get(id),
   };
   const options = {
-    index: 0, triggersPath, url: "redis://unit.invalid", env: { PI_WORKER_NAME: "host1", PI_MAX_COST_USD: "2", PI_DISPATCH_RUN_ROOTS: "/ignored-deployment-grant" },
+    index: 0, triggersPath, url: "redis://unit.invalid", env: { PI_WORKER_NAME: "host1", PI_MAX_TOKENS: "2000000", PI_DISPATCH_RUN_ROOTS: "/ignored-deployment-grant" },
     grantsEnv: { PI_DISPATCH_RUN_ROOTS: root, PI_DISPATCH_RUN_PER_HOUR: "3" }, now: () => instant,
     queueFn: (_c, opts) => { queues.push(opts.name); return queue; }, parseConnectionFn: () => ({}),
     admissionFn: async (args) => { admissions.push(args); return {}; },
@@ -42,7 +42,7 @@ test("Fire now previews without rate writes, executes the worker's entire cron t
   const { plan } = await planTriggerFire(f.options);
   assert.ok(plan);
   assert.equal(plan.queue, "pi-jobs@host1");
-  assert.equal(plan.reserve.dollarsMicros, 1_000_000);
+  assert.equal(plan.reserve.tokens, 1_000_000);
   assert.equal(f.adds.length, 0);
   assert.equal(f.admissions.length, 1);
   assert.equal(f.admissions[0].consumeRate, false);
