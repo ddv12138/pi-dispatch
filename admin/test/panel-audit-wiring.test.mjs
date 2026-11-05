@@ -94,8 +94,8 @@ function deployment({ alloc = false, valkey = NO_VALKEY } = {}) {
   let redis = null;
   if (alloc) {
     writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "platform", members: ["github:acme/infra"] }] }));
-    writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", platform: "10", _other: "0" }, defaultWeights: { shop: 1, platform: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2));
-    writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
+    writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { shop: 10_000_000, platform: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, platform: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }, null, 2));
+    writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
     redis = fakeAllocRedis();
     let clock = ALLOC_NOW;
     indexMod._setAllocationSeamsForTests({ redisFn: () => redis, now: () => new Date((clock += 1000)) });
@@ -311,7 +311,7 @@ const CASES = [
   { site: "index.ts:project-edit", name: "dispatch_project_edit", kind: "project-edit", outcomes: ["ok"], state: (fx) => bytes(fx.files.projects), run: () => tool("dispatch_project_edit", { id: "web", name: "Web" }) },
   { site: "index.ts:project-delete", name: "dispatch_project_delete", kind: "project-delete", outcomes: ["ok"], state: (fx) => bytes(fx.files.projects), run: () => tool("dispatch_project_delete", { id: "web" }) },
   { site: "index.ts:trigger-delete", name: "dispatch_trigger_delete", kind: "trigger-delete", outcomes: ["ok"], state: (fx) => bytes(fx.files.triggers), run: () => tool("dispatch_trigger_delete", { index: 0 }) },
-  { site: "index.ts:envelope-set", name: "dispatch_envelope_set", kind: "envelope-set", alloc: true, outcomes: ["ok"], state: (fx) => bytes(fx.files.envelope), run: () => tool("dispatch_envelope_set", { totalUsd: "120" }) },
+  { site: "index.ts:envelope-set", name: "dispatch_envelope_set", kind: "envelope-set", alloc: true, outcomes: ["ok"], state: (fx) => bytes(fx.files.envelope), run: () => tool("dispatch_envelope_set", { totalTokens: 120_000_000 }) },
   { site: "index.ts:priorities-set", name: "dispatch_priorities_set", kind: "priorities-set", alloc: true, outcomes: ["ok"], state: (fx) => fx.redis.store.get("alloc:plan") ?? "<none>", run: () => tool("dispatch_priorities_set", { projects: [{ id: "shop", weight: 3 }, { id: "platform", weight: 1 }] }, { hasUI: false, ui: {} }) },
   {
     // The ALLOCATION view's `r` then `y` (index.ts `revertTo`), on the row the history shows for the plan just applied.
@@ -348,7 +348,7 @@ const CASES = [
     state: (fx) => fx.fired ?? 0,
     run: async (fx) => {
       await executeToolAction("dispatch_trigger_fire", { index: 0 }, { hasUI: true, ui: { confirm: async () => true } }, { paths: resolvedPaths(), env: {}, grantsEnv: { PI_DISPATCH_RUN_ROOTS: "/test-root", PI_DISPATCH_RUN_PER_HOUR: "3" }, readModel: { ...readModel,
-        planTriggerFire: async () => ({ plan: { title: "Fire cron trigger now", message: "Fire daily now", schedulerId: "daily", fileDigest: "a".repeat(64), reserve: { dollarsMicros: 2_000_000 } } }),
+        planTriggerFire: async () => ({ plan: { title: "Fire cron trigger now", message: "Fire daily now", schedulerId: "daily", fileDigest: "a".repeat(64), reserve: { slots: 1, tokens: 2_000_000, maxTokens: 2_000_000, zeroRated: false } } }),
         enqueueTriggerFire: async () => { fx.fired = (fx.fired ?? 0) + 1; return { ok: true, jobId: "manual:daily:1", queue: "pi-jobs" }; },
       } }).catch((e) => { assert.match(e.message, /audit log/); });
     },
