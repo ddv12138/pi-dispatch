@@ -222,7 +222,7 @@ export function runOutcome(view) {
   const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
   const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: t("Fix configuration", view), kind: "sm", icon: "config" }) : null;
   const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${r.outcome === "completed" && !["awaiting-input", "awaiting-approval"].includes(token) ? ui.btn({ href: "#p-workspace", label: t("Try it in its workspace", view), kind: "sm", icon: "terminal" }) : null}${rerunLine(r, view)}${fixLink}`;
-  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `，${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
+  return ui.banner({ block: true, status: recovering ? "running" : w.status, title: `${word}${refusedBeforeStart(r) ? "" : duration}`, body: html`<p>${reason}</p>${next}${(view.data?.children?.length ?? 0) > 0 || r.chainRefused > 0 ? html`<p>${t("It queued", view)} ${view.data?.children?.length ?? 0} ${t("runs from /outbox", view)}${r.chainRefused > 0 ? `${view.locale === "zh" ? "，" : ", "}${t("and", view)} ${r.chainRefused} ${t("more requests were refused: a job may queue at most", view)} ${view.data?.chainMaxPerJob ?? CHAIN_MAX_PER_JOB_DEFAULT}` : ""}. ${view.data?.children?.map((child) => runLink(child.jobId))}</p>` : null}${refusedBeforeStart(r) ? html`<p>${t("Nothing was spent.", view)}</p>` : href ? html`<p>${t("Merges are never automatic: a person merges the pull request on the forge.", view)}</p>` : null}`, actions });
 }
 
 /**
@@ -450,7 +450,7 @@ export function runInbox(view) {
       ? box.open === null
         ? t("Whether the run takes messages could not be read.", view)
         : t(INBOX_NOT_OPEN, view)
-      : `${t("The job is", view)} ${cell(t(box.state, view))}，${t("not running, so it takes no message; its inbox is kept for an hour after its run.", view)}`;
+      : `${t("The job is", view)} ${cell(t(box.state, view))}${view.locale === "zh" ? "，" : ", "}${t("not running, so it takes no message; its inbox is kept for an hour after its run.", view)}`;
   const act = canAct(view) && typeof jobId === "string" && RUN_ID_RE.test(jobId);
   const withdraw = (e) => {
     if (!act) return null;
@@ -472,7 +472,7 @@ export function runInbox(view) {
   // Issue #647: when the Chat panel draws the message forms (a live run an operator can steer), they are drawn THERE and
   // not here, so the page holds one steer form per mode, never two copies of the same action.
   const forms = act && takes && !chatDrawsSteer(view) ? steerForms(jobId, view.locale) : null;
-  const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}；${t("its run continues as", view)} ${runLink(next)}，${t("and a message sent here goes to that job.", view)}</p>` : null;
+  const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}${view.locale === "zh" ? "；" : "; "}${t("its run continues as", view)} ${runLink(next)}${view.locale === "zh" ? "，" : ", "}${t("and a message sent here goes to that job.", view)}</p>` : null;
   return titled(title, html`${cont}<p class="note">${status}</p>${entries ? ui.meter({ value: entries.length, max: STEER_MAX_MESSAGES, label: t("Messages", view) }) : null}${entries ? ui.meter({ value: entries.reduce((n, e) => n + (e.bytes ?? 0), 0), max: STEER_TOTAL_MAX_BYTES, label: t("Bytes", view) }) : null}${entries?.some((e) => e.state === "late") ? html`<p>${t("Late: the run ended before the message arrived, so the agent never saw it.", view)}</p>` : null}${list}${forms}<p class="note">${t("A message's text is never listed: the run reads it, and the audit log keeps its sha256.", view)}</p>`, view.locale);
 }
 
