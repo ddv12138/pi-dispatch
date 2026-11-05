@@ -9,8 +9,8 @@
  * Dependency posture: exactly two imports, both pure. graph-html.mjs is the scene/escaping/theme source of truth
  * (buildGraphScene lays out the topology; PAGE_THEME is the palette; `clip`, `clipColumns` and `drawnColumns` are the
  * one answer to how a string is cut and sized on these pages, issue #418; FIT_JS, which the console's script carries,
- * shortens at view time a drawn label the static estimate let run past its box, issue #422), and panel.mjs is THE money
- * renderer -- fmtAmount/fmtTokens are the only functions allowed to turn a dollar into text, because the typed-cost class
+ * shortens at view time a drawn label the static estimate let run past its box, issue #422), and panel.mjs is THE amount
+ * renderer -- fmtAmount/fmtTokens are the only functions allowed to turn a count into text, because the typed class
  * system is what keeps an estimate structurally distinguishable behind every figure on this page. costs.mjs is
  * deliberately NOT loaded: it reaches into the worker for its day bucketing, and one worker coupling would drag the
  * queue stack into a renderer. Its class list is duplicated below and pinned byte-for-byte by a parity test in
@@ -33,13 +33,14 @@ import { escapeInterpreted, fmtAmount, fmtTokens } from "./panel.mjs";
 
 // Must equal costs.mjs's COST_CLASSES; the parity test compares the two literals. Duplicated rather
 // than re-exported because loading costs.mjs is exactly the worker coupling this module refuses.
-export const INSIGHTS_COST_CLASSES = Object.freeze(["metered", "plan", "zero-rated", "estimated", "seeded", "unknown"]);
+// Three classes only: the pricing classes ("plan", "zero-rated", "seeded") died with pricing.
+export const INSIGHTS_COST_CLASSES = Object.freeze(["metered", "estimated", "unknown"]);
 
 // The verdict vocabulary buildPlans emits; anything else degrades to NO_BASELINE, which renders a
 // sentence and never a number -- the safe direction for a malformed verdict to fail in.
 const VERDICT_KINDS = Object.freeze(["SAVING", "LOSING", "WOULD_SAVE", "WOULD_LOSE", "NO_BASELINE"]);
 
-// The fold pins its honesty buckets to the table's tail whatever the dollars say (a bucket named
+// The fold pins its honesty buckets to the table's tail whatever the totals say (a bucket named
 // "(unattributed)" sorting above real triggers would read as the biggest spender when it is really
 // the biggest unknown); re-sorting here must preserve that or a permuted payload changes the story.
 const TRIGGER_TAIL = Object.freeze(["chained", "manual", "unattributed"]);
@@ -421,7 +422,7 @@ function normScopedRow(v) {
       state: BUDGET_STATES.includes(w.state) ? w.state : "ok",
     };
   };
-  // A dollar window (issue #507): integer micro-dollars, the cap above 0 or the window is not drawn; the counter null when
+  // A token window (issue #507): whole tokens, the cap above 0 or the window is not drawn; the counter null when
   // it could not be read, never an invented 0. A payload from before the key lacks `tokens` and draws no window.
   const usdWin = (w) => {
     if (w === null || w === undefined || typeof w !== "object") return null;
@@ -468,11 +469,11 @@ function splitWord(v) {
 }
 
 /**
- * Integer micro-dollars as dollars, exactly: `fmtTokens` (worker/src/money.mjs) restated, because this module loads
+ * Whole tokens, exactly: the panel's fmtTokens (worker/src/money.mjs) restated, because this module loads
  * nothing from the worker; `insights-html.test.mjs` holds the two equal. NOT fmtAmount or fmtTokens, on purpose: those render
- * a PRICED cost with its class, and a split amount is neither priced nor estimated. It is the envelope's arithmetic and
- * a counter's integer, which the panel's `b` view and `/dispatch priorities` print to the micro-dollar, and a page that
- * rounded $70.00 to "$70" would disagree with them on the screen beside it. Null renders "-", never $0.
+ * a typed amount with its class, and a split amount is neither estimated nor unknown. It is the envelope's arithmetic and
+ * a counter's integer, which the panel's `b` view and `/dispatch priorities` print to the token, and a page that
+ * rounded 70000 to "70k" would disagree with them on the screen beside it. Null renders "-", never 0.
  */
 export function tokensText(m) {
   if (!Number.isSafeInteger(m) || m < 0) return "-";
@@ -1015,7 +1016,7 @@ function stateWord(state, translate = (message) => message) {
  * that prices everything shows the dial beside the spend and names how to turn it. FACTS ONLY, the
  * meter doctrine throughout: an overlay-unset cap is unknown (day) or off (week/month with nothing
  * reserved) -- no bar, no percentage, no derived room; an unreachable queue leaves the caps as facts
- * and states the absence; slots and tokens are counts, never dollars, so nothing here touches
+ * and states the absence; slots and tokens are counts, never amounts, so nothing here touches
  * fmtAmount. Renders even when the cost fold is null: the lever does not depend on the spend scan.
  */
 export function budgetSectionHtml(nb, translate = (message) => message) {
@@ -1231,8 +1232,6 @@ function barListSvg(rows, aria, tips) {
     } else if (row.barW !== null) {
       if (row.cls === "metered") {
         parts.push(`<rect x="${fmt(bx)}" y="${fmt(row.y + 5)}" width="${fmt(row.barW)}" height="11" rx="2" fill="${PAGE_THEME.accent}"/>`);
-      } else if (row.cls === "zero-rated") {
-        parts.push(`<rect x="${fmt(bx)}" y="${fmt(row.y + 5)}" width="1" height="11" fill="${PAGE_THEME.dim}"/>`);
       } else {
         parts.push(`<rect x="${fmt(bx)}" y="${fmt(row.y + 5)}" width="${fmt(row.barW)}" height="11" rx="2" fill="${PAGE_THEME.accent}" fill-opacity=".45" stroke="${PAGE_THEME.accent}" stroke-dasharray="4,3"/>`);
       }
@@ -1340,20 +1339,17 @@ export function planCardsHtml(plans, translate = (message) => message) {
   return `<div id="plans">${cards.join("")}</div>`;
 }
 
-// The dollars legend beside the reused graph legend. "seeded" is deliberately absent: only the
-// what-if command emits it and this page never renders a what-if, so listing it would promise an
-// encoding no bar here can carry (it stays in INSIGHTS_COST_CLASSES because the class exists).
+// The tokens legend beside the reused graph legend. Three classes only (the pricing classes died with
+// pricing): a bar's fill carries them, so no class without an encoding is listed.
 export function dollarsLegendHtml(translate = (message) => message) {
   const sw = (inner) => `<svg width="20" height="12" aria-hidden="true">${inner}</svg>`;
   const rows = [];
   const row = (sample, text) => rows.push(`<div class="row">${sample}<span>${escapeHtml(text)}</span></div>`);
-  rows.push(`<h2>${escapeHtml(translate("dollars"))}</h2>`);
-  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}"/>`), translate("metered: pi-ai computed price"));
+  rows.push(`<h2>${escapeHtml(translate("tokens"))}</h2>`);
+  row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}"/>`), translate("metered: pi's meter read complete"));
   row(sw(`<rect x="1" y="2" width="18" height="8" rx="2" fill="${PAGE_THEME.accent}" fill-opacity=".45" stroke="${PAGE_THEME.accent}" stroke-dasharray="4,3"/>`), translate("estimated (~): partly measured"));
-  row(sw(`<rect x="1" y="2" width="18" height="8" rx="4" fill="none" stroke="${PAGE_THEME.chipStroke}"/>`), translate("plan: covered by a subscription, never a dollar"));
-  row(sw(`<rect x="9" y="2" width="1" height="8" fill="${PAGE_THEME.dim}"/>`), translate("zero-rated: a rate table priced it $0"));
   row(sw(`<text x="6" y="10" font-size="10" fill="${PAGE_THEME.dim}">—</text>`), translate("unknown: not measured, not guessed"));
-  rows.push(`<div class="caps">${escapeHtml(translate("≥ marks a floor: the window holds spend the meter could not fully price"))}</div>`);
+  rows.push(`<div class="caps">${escapeHtml(translate("≥ marks a floor: the window holds tokens the meter could not fully count"))}</div>`);
   return `<div id="dollars">${rows.join("")}</div>`;
 }
 
@@ -1956,11 +1952,11 @@ function utcDateStr(ms) {
 export function footerHtml(nf, windowLabel, translate = (message) => message) {
   const p = nf.provenance;
   const lines = [];
-  lines.push(`${translate("~ marks estimates · metered = pi-ai computed prices, not invoices · pi-ai")} ${p.piAiPin ?? "—"}`);
+  lines.push(`${translate("~ marks estimates · metered = the meter read complete · pi-ai")} ${p.piAiPin ?? "—"}`);
   // The always-on pair states how much of the window was measured at all; the bracketed counters
-  // appear only when nonzero because "rates drifted 0" reads as an accusation retracted.
-  let counters = `${translate("unmetered")} ${fmt(p.runsUnmetered)} · ${translate("no ledger (not re-priceable)")} ${fmt(p.runsUnledgered)}`;
-  if (p.ratesDrifted > 0) counters += ` · ${translate("rates drifted")} ${fmt(p.ratesDrifted)}`;
+  // appear only when nonzero because "pi-ai differs 0" reads as an accusation retracted.
+  let counters = `${translate("unmetered")} ${fmt(p.runsUnmetered)} · ${translate("no ledger (totals only)")} ${fmt(p.runsUnledgered)}`;
+  if (p.ratesDrifted > 0) counters += ` · ${translate("pi-ai differs")} ${fmt(p.ratesDrifted)}`;
   if (p.runsLedgerTruncated > 0) counters += ` · ${translate("ledgers truncated")} ${fmt(p.runsLedgerTruncated)}`;
   lines.push(counters);
   lines.push(`${translate("spend window")} ${utcDateStr(nf.window.fromMs)} – ${utcDateStr(nf.window.toMs)} UTC (${windowLabel})`);
@@ -2002,7 +1998,7 @@ export function topologySpend(scene, spend) {
     const entry = spend !== null && spend !== undefined ? spend.get(orig) : undefined;
     if (!entry) continue;
     const cls = entry.amount.class;
-    const fill = cls === "estimated" || cls === "seeded" ? PAGE_THEME.amber : PAGE_THEME.dim;
+    const fill = cls === "estimated" ? PAGE_THEME.amber : PAGE_THEME.dim;
     // At the scene's own badge line: the scene routes a trigger's re-arm loop below that line, so a badge
     // drawn anywhere else could land on the loop again (issue #483).
     // The badge fits its chip (issue #492): a plan badge carries the plan's free-form id, and one long enough
@@ -2017,7 +2013,7 @@ export function topologySpend(scene, spend) {
 }
 
 /**
- * The topology section: the scene's pane with the spend badges (`topologySpend`'s html) over it, the dollars legend and
+ * The topology section: the scene's pane with the spend badges (`topologySpend`'s html) over it, the tokens legend and
  * the scene's legend. Pan, zoom, the tooltip and label fitting are the console's script (`console/script.mjs`), which
  * reads the chips' data from the page's hidden `#graph-nodes` list.
  */

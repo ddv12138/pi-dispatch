@@ -232,11 +232,12 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
     };
     // The row's token windows (issue #507), from the `tokensUsed` the same read already returned: a `model:` row, or a
     // `project:` row with only `weekTokens`, has no job-count window, and the page drew its scope with no number beside
-    // it. Integer micro-dollars both ways (the cap through the worker's own parser), so the page formats them exactly.
+    // it. Whole tokens both ways (the cap through the worker's own parser, which reads the file's integer as it is), so
+    // the page formats them exactly.
     const usdWin = (field, key) => {
       let cap = null;
       try {
-        cap = typeof l[field] === "string" ? parseTokenCount(l[field], field) : null;
+        cap = parseTokenCount(l[field], field);
       } catch {
         cap = null; // the shared parser already refused such a file; a hand-built row is skipped, never guessed
       }

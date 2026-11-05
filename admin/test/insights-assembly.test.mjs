@@ -12,7 +12,7 @@ import { bannersHtml, buildGraphScene } from "../src/graph-html.mjs";
 import { uiText } from "../src/console/locale.mjs";
 import * as ia from "../src/insights-assembly.mjs";
 import { insightsBody } from "../src/console/panels.mjs";
-import { modelDollarKeyPrefix, scopeDollarKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
+import { modelTokenKeyPrefix, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 /**
  * The insights assembly as the operator console uses it (issue #641): a separate process that never loads pi, so the
@@ -104,7 +104,7 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
   const zhPage = String(insightsBody(payload, nowMs, { locale: "zh" }));
   assert.match(zhPage, /累计/);
   assert.match(zhPage, /每日费用/);
-  assert.match(zhPage, /费用图例/);
+  assert.match(zhPage, /令牌图例|已计量：pi 的计量器读取完整/);
   assert.match(zhPage, /连线/);
   assert.doesNotMatch(zhPage, /no project to size|peak memory against size|no graph model supplied/);
   const zh = (message) => uiText(message, "zh");
@@ -112,7 +112,7 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
   assert.doesNotMatch(zhSizing, /no project to size|peak memory against size/);
   const zhTopology = html.topologySectionHtml(scene, spendHtml, zh);
   assert.match(zhTopology, /链深度/);
-  assert.match(zhTopology, /费用图例/);
+  assert.match(zhTopology, /已计量：pi 的计量器读取完整/);
   assert.match(bannersHtml({ ok: false, meta: { triggersMissing: true, triggersInvalid: null } }, zh), /未提供图模型/);
   assert.doesNotMatch(zhPage, /cumulative window spend|no spend recorded/);
   const sections = {
@@ -230,11 +230,11 @@ test("the budget slice carries a scoped row's dollar windows, so a dollar-only r
   const slPath = join(dir, "scoped-limits.json");
   writeFileSync(slPath, JSON.stringify({ version: 2, limits: [
     { scope: "acme/web", day: 10 },
-    { scope: "project:shop", weekUsd: "45" },
-    { scope: "model:anthropic/claude-sonnet-4-5", weekUsd: "80", monthUsd: "300.5" },
+    { scope: "project:shop", weekTokens: 45000000 },
+    { scope: "model:anthropic/claude-sonnet-4-5", weekTokens: 80000000, monthTokens: 300500000 },
   ] }));
-  const shop = scopeDollarKeyPrefix("project:shop");
-  const model = modelDollarKeyPrefix("anthropic/claude-sonnet-4-5");
+  const shop = scopeTokenKeyPrefix("project:shop");
+  const model = modelTokenKeyPrefix("anthropic/claude-sonnet-4-5");
   const redis = {
     on() {},
     disconnect() {},
@@ -247,11 +247,11 @@ test("the budget slice carries a scoped row's dollar windows, so a dollar-only r
   const view = await ia.assembleBudgetView({ valkeyUrl: "redis://127.0.0.1:1", scopedLimitsPath: slPath }, { redisFn: () => redis });
   assert.deepEqual(view.scoped.map((r) => r.usd), [
     { day: null, week: null, month: null },
-    { day: null, week: { usedMicros: 6_340_917, capMicros: 45_000_000 }, month: null },
-    { day: null, week: { usedMicros: 7_966_101, capMicros: 80_000_000 }, month: { usedMicros: 0, capMicros: 300_500_000 } },
+    { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null },
+    { day: null, week: { usedTokens: 7_966_101, capTokens: 80_000_000 }, month: { usedTokens: 0, capTokens: 300_500_000 } },
   ]);
   const dead = await ia.assembleBudgetView({ valkeyUrl: "not-a-url", scopedLimitsPath: slPath });
-  assert.deepEqual(dead.scoped[1].usd.week, { usedMicros: null, capMicros: 45_000_000 }, "a dead queue leaves the counter unknown, never $0");
+  assert.deepEqual(dead.scoped[1].usd.week, { usedTokens: null, capTokens: 45_000_000 }, "a dead queue leaves the counter unknown, never 0");
 });
 
 test("with an envelope set, the split is read through readAllocations, without hosts or reasons, and counted from the records (#507)", async () => {
@@ -262,12 +262,12 @@ test("with an envelope set, the split is read through readAllocations, without h
   const dir = tempDir("admin-insights-split-");
   const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
   writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
-  const digest = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxCostMicros: 2_000_000 }).digest;
+  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
+  const digest = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 }).digest;
   const redis = fakeAllocRedis();
   const M = 1_000_000;
-  redis.store.set("t507:plan", JSON.stringify({ version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100 * M, _other: 0 }, unallocated: 0, repos: {}, clamped: false, reasons: { shop: "CANARY-REASON" } }));
+  redis.store.set("t507:plan", JSON.stringify({ version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100_000_000, _other: 0 }, unallocated: 0, repos: {}, clamped: false, reasons: { shop: "CANARY-REASON" } }));
   redis.lists.set("t507:log", [JSON.stringify({ at: "2026-10-05T06:00:00.000Z", host: "CANARY-HOST", writer: "portfolio-job", outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", weights: { shop: 1 } })]);
   const records = [
     { jobId: "a", outcome: "policy", reason: "allocation-cap" },
@@ -297,7 +297,7 @@ test("with an envelope set, the split is read through readAllocations, without h
   assert.equal(JSON.stringify(slice).includes("CANARY"), false, "no host and no reason text leave the assembler");
   assert.equal(slice.mismatch, false);
   const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes('<span class="wl">envelope</span><span>$100.00 per week · delegation on</span>'), "the envelope the worker's parser read");
+  assert.ok(page.includes('<span class="wl">envelope</span><span>100,000,000 per week · delegation on</span>'), "the envelope the worker's parser read");
   assert.ok(page.includes('plan 3f9a0c1d2e4b5a67 · written by portfolio-job · applied <time datetime="2026-10-05T06:00:00Z">2026-10-05 06:00 UTC</time>'));
   assert.ok(page.includes("plans collected in runs on this host, last 30d: applied 1 · plan-absent 1 · plan-stale 1</div>"));
   assert.equal(ia.splitCounts({ unreachable: "EACCES" }), null, "an unread scan counts nothing");
@@ -326,22 +326,22 @@ test("with an envelope set, the split is read through readAllocations, without h
 
 test("during an envelope mismatch every total shown is the applied split's, and the mismatch line says this host's file differs, on the text twin, the assembler and the insights page (#507)", async () => {
   const { fakeAllocRedis } = await import("./helpers/fake-alloc-redis.mjs");
-  const { fileTotalText, renderAllocations, splitTotalMicros } = await import("../src/render.mjs");
+  const { fileTotalText, renderAllocations, splitTotalTokens } = await import("../src/render.mjs");
   const { readEnvelope } = await import("../src/read-model.mjs");
   const dir = tempDir("admin-insights-total-");
   const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
   writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
   // This host's file says $30; the applied split was made for a $28 envelope (the e2e's outside edit).
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "30", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxCostMicros: 2_000_000 });
+  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 30_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
+  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
   const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
   const M = 1_000_000;
   const made = "5428cdb615bcf0d2";
-  const state = { version: 1, envelopeDigest: made, planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 27 * M, _other: 0 }, unallocated: 1 * M, repos: {}, clamped: false };
-  assert.equal(splitTotalMicros(state, 30 * M), 28 * M);
-  assert.equal(splitTotalMicros(null, 30 * M), 30 * M, "no split: the envelope's");
-  assert.equal(splitTotalMicros({ ...state, unallocated: -1 }, 30 * M), 30 * M, "a split that does not decode: the envelope's");
+  const state = { version: 1, envelopeDigest: made, planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 27_000_000, _other: 0 }, unallocated: 1_000_000, repos: {}, clamped: false };
+  assert.equal(splitTotalTokens(state, 30_000_000), 28 * M);
+  assert.equal(splitTotalTokens(null, 30_000_000), 30 * M, "no split: the envelope's");
+  assert.equal(splitTotalTokens({ ...state, unallocated: -1 }, 30 * M), 30 * M, "a split that does not decode: the envelope's");
   const redis = fakeAllocRedis();
   redis.store.set("t507t:plan", JSON.stringify(state));
   ia._setAllocationSeamsForTests({ redisFn: () => redis, prefix: "t507t", now: () => new Date(Date.parse("2026-10-05T14:00:00Z")) });
@@ -351,20 +351,20 @@ test("during an envelope mismatch every total shown is the applied split's, and 
   } finally {
     ia._setAllocationSeamsForTests({});
   }
-  assert.deepEqual([slice.totalMicros, slice.fileTotalMicros, slice.mismatch], [28 * M, 30 * M, true]);
-  const note = fileTotalText("$30.00");
-  assert.equal(note, " This host's file says total $30.00; the totals shown are the split's.");
-  const text = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state, log: [], spend: { deployment: { micros: 8 * M } } } }).split("\n");
-  assert.match(text[0], /^ALLOCATION · week · total \$28\.00 · /);
+  assert.deepEqual([slice.totalTokens, slice.fileTotalTokens, slice.mismatch], [28_000_000, 30_000_000, true]);
+  const note = fileTotalText("30,000,000");
+  assert.equal(note, " This host's file says total 30,000,000; the totals shown are the split's.");
+  const text = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state, log: [], spend: { deployment: { tokens: 8_000_000 } } } }).split("\n");
+  assert.match(text[0], /^ALLOCATION · week · total 28,000,000 · /);
   assert.ok(text.includes(`made for envelope ${made}, not this host's: governed jobs here refuse as envelope-mismatch.${note}`), text.join("\n"));
-  assert.ok(text.includes("  unallocated $1.00 · deployment spent $8.00 of $28.00"), text.join("\n"));
+  assert.ok(text.includes("  unallocated 1,000,000 · deployment reserved+held 8,000,000 of 28,000,000"), text.join("\n"));
   const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes("<span>$28.00 per week · delegation on</span>"), "the envelope row");
+  assert.ok(page.includes("<span>28,000,000 per week · delegation on</span>"), "the envelope row");
   assert.ok(page.includes(`governed jobs on this host refuse as envelope-mismatch.${note.replaceAll("'", "&#39;")}</span>`), "the page's mismatch line, in render.mjs' words");
-  assert.ok(page.includes("of $28.00</span>"), "the headroom");
-  assert.ok(!page.includes("of $30.00"));
+  assert.ok(page.includes("of 28,000,000</span>"), "the headroom");
+  assert.ok(!page.includes("of 30,000,000"));
   // The same split on a host whose file agrees: no note, and the totals are the same number.
-  const agreeing = renderAllocations({ envelope: { ...read.envelope, totalMicros: 28 * M }, digest: read.digest, alloc: { state, log: [], spend: {} } });
+  const agreeing = renderAllocations({ envelope: { ...read.envelope, totalTokens: 28_000_000 }, digest: read.digest, alloc: { state, log: [], spend: {} } });
   assert.ok(!agreeing.includes("This host's file says"), agreeing);
   assert.ok(agreeing.includes(`made for envelope ${made}, not this host's: governed jobs here refuse as envelope-mismatch\n`), "the line ends where it always did");
 });
@@ -377,19 +377,19 @@ test("during an envelope mismatch an entry only the split allocates is listed an
   const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
   writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
   // This host's file dropped `legacy`; the applied split, made for the old envelope, still allocates it.
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "30", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxCostMicros: 2_000_000 });
+  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 30_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
+  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
   const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
   const M = 1_000_000;
-  const state = { version: 1, envelopeDigest: "5428cdb615bcf0d2", planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 2, legacy: 1, _other: 0 }, allocations: { shop: 20 * M, legacy: 7 * M, _other: 0 }, unallocated: 1 * M, repos: {}, clamped: false };
+  const state = { version: 1, envelopeDigest: "5428cdb615bcf0d2", planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 2, legacy: 1, _other: 0 }, allocations: { shop: 20_000_000, legacy: 7_000_000, _other: 0 }, unallocated: 1_000_000, repos: {}, clamped: false };
   assert.deepEqual(allocationRowIds(read.envelope.floors, state, true).filter((r) => r.splitOnly).map((r) => r.id), ["legacy"]);
   assert.deepEqual(allocationRowIds(read.envelope.floors, state, false).filter((r) => r.splitOnly), [], "no mismatch: the file's entries alone");
   const text = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state, log: [], spend: {} } }).split("\n");
   const legacy = text.find((l) => l.trim().startsWith("legacy"));
   assert.ok(legacy, text.join("\n"));
-  assert.match(legacy, new RegExp(`^  legacy\\s+floor -\\s+weight 1\\s+allocation \\$7\\.00\\s+spent -\\s+${SPLIT_ONLY_MARK}$`));
-  assert.ok(text[0].includes("total $28.00"), "the row the total counted is the row shown");
+  assert.match(legacy, new RegExp(`^  legacy\\s+floor -\\s+weight 1\\s+allocation 7,000,000\\s+spent -\\s+${SPLIT_ONLY_MARK}$`));
+  assert.ok(text[0].includes("total 28,000,000"), "the row the total counted is the row shown");
   const agreeing = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state: { ...state, envelopeDigest: read.digest }, log: [], spend: {} } });
   assert.ok(!agreeing.includes("legacy"), "the same split on its own envelope lists the file's entries alone");
   const redis = fakeAllocRedis();
@@ -402,7 +402,7 @@ test("during an envelope mismatch an entry only the split allocates is listed an
     ia._setAllocationSeamsForTests({});
   }
   const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes(`$7.00 allocated · ${SPLIT_ONLY_MARK.replace("'", "&#39;")}`), "the page's bar row, in render.mjs' words, escaped");
+  assert.ok(page.includes(`7,000,000 allocated · ${SPLIT_ONLY_MARK.replace("'", "&#39;")}`), "the page's bar row, in render.mjs' words, escaped");
   assert.ok(page.includes(`>legacy</text>`), "its label");
   const agreeingPage = pageOf({ allocation: { ...slice, mismatch: false }, window: "30d" }, 0);
   assert.ok(!agreeingPage.includes(">legacy</text>"));
@@ -415,13 +415,13 @@ test("the outside-edit notice is one rule and one sentence on the panel's text t
   const dir = tempDir("admin-insights-outside-");
   const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
   writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalUsd: "100", floorsUsd: { shop: "10", _other: "0" }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxCostUsd: "2" }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxCostMicros: 2_000_000 });
+  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
+  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
+  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
   const digest = read.digest;
   const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
   const M = 1_000_000;
-  const state = { version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100 * M, _other: 0 }, unallocated: 0, repos: {}, clamped: false };
+  const state = { version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100_000_000, _other: 0 }, unallocated: 0, repos: {}, clamped: false };
   const other = "e2e2e2e2e2e2e2e2";
   const outside = { at: "2026-10-05T13:00:00.000Z", writer: "envelope-change", outcome: "envelope-changed-externally", reason: "envelope-mismatch", envelopeDigest: other };
   const applied = { at: "2026-10-05T12:00:00.000Z", writer: "operator-session", outcome: "applied", planId: "3f9a0c1d2e4b5a67", envelopeDigest: digest };

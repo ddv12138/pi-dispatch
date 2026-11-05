@@ -198,6 +198,10 @@ test("insights-html.mjs imports only graph-html and panel, and reads no clock, r
 
 // ---- 2. class parity vs the fold ----
 
+test("the insights class table is the fold's, the three token classes and nothing else", () => {
+  assert.deepEqual(INSIGHTS_COST_CLASSES, COST_CLASSES);
+  assert.ok(!INSIGHTS_COST_CLASSES.includes("plan") && !INSIGHTS_COST_CLASSES.includes("zero-rated") && !INSIGHTS_COST_CLASSES.includes("seeded"), "the pricing classes died with pricing");
+});
 
 // ---- 3. escaping / breakout ----
 
@@ -366,9 +370,9 @@ test("unexpected fields and host paths never reach the page; fullPaths widens gr
 
 test("provenance counters, the pi-ai pin, the dual window statement and the date span all render", () => {
   const out = cannedHtml();
-  assert.ok(out.includes("unmetered 1 · no ledger (not re-priceable) 2 · rates drifted 1 · ledgers truncated 1"));
+  assert.ok(out.includes("unmetered 1 · no ledger (totals only) 2 · pi-ai differs 1 · ledgers truncated 1"));
   assert.ok(out.includes("pi-ai 0.9.7"));
-  assert.ok(out.includes("~ marks estimates · metered = pi-ai computed prices, not invoices"));
+  assert.ok(out.includes("~ marks estimates · metered = the meter read complete"));
   assert.ok(out.includes("spend window: last 30d"), "the spend window label");
   assert.ok(out.includes("topology: fixed 30d record window"), "the topology window beside it");
   assert.ok(out.includes("series bounded by retention (PI_LOG_RETENTION_DAYS) and the 92-day scan cap"));
