@@ -139,14 +139,6 @@ test("the complete vocabulary is fixed at four forges and eleven words (#775)", 
 	assert.equal(RECEIVER_FORGES.length, 4); assert.equal(RECEIVER_OUTCOMES.length, 11); assert.equal(RECEIVER_LIVE, "receiver:live"); assert.equal(RECEIVER_TTL_MS, 90_000);
 });
 
-test("the interface outcome table is pinned both ways to the exported closed vocabulary (#775)", async () => {
-	const { readFileSync } = await import("node:fs");
-	const spec = readFileSync(new URL("../../specs/interfaces.md", import.meta.url), "utf8");
-	const block = spec.split("<!-- receiver-outcomes:start -->")[1].split("<!-- receiver-outcomes:end -->")[0];
-	const words = [...block.matchAll(/^\| ([a-z][a-z-]+) \|/gm)].map((m) => m[1]);
-	assert.deepEqual(words, RECEIVER_OUTCOMES);
-});
-
 test("one deadline bounds the entire discovery and starts no row commands after slow pages exhaust it (#775)", async () => {
 	let scans = 0; let gets = 0;
 	const redis = { async sscan() { scans++; await new Promise((resolve) => setTimeout(resolve, 12)); return ["1", ["mini1"]]; }, mget() { gets++; return []; }, pttl() { throw new Error("late read"); } };

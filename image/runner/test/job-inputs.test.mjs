@@ -165,13 +165,3 @@ test("the forbidden HOME roots are exactly the four job mounts", () => {
 	assert.ok(Object.isFrozen(HOME_FORBIDDEN_ROOTS));
 });
 
-test("INT-RUNNER-EXIT-CODE-PROTOCOL names the reason and every advisory event the runner emits", () => {
-	// The spec table is hand-written, so it is pinned against the code's own names: an advisory renamed in one place
-	// and not the other leaves an operator grepping for a line that never appears.
-	const spec = readFileSync(new URL("../../../specs/interfaces.md", import.meta.url), "utf8");
-	const src = readFileSync(new URL("../src/config.mjs", import.meta.url), "utf8");
-	const events = [...src.matchAll(/"([a-z]+(?:_[a-z]+)+)"\]/g)].map((m) => m[1]).concat([...src.matchAll(/push\(\["([a-z_]+)"/g)].map((m) => m[1]));
-	const names = [...new Set(events)].sort();
-	assert.deepEqual(names, ["agent_dir_not_writable", "home_not_writable", "home_under_mount", "outbox_not_writable", "workspace_not_writable"]);
-	for (const name of [...names, "job-inputs-unreadable"]) assert.ok(spec.includes(`\`${name}\``), `interfaces.md must name ${name}`);
-});

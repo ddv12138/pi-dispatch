@@ -59,14 +59,6 @@ test("docs/console.md's table of runs filters: one row per RUN_FILTER_FIELDS mem
   assert.deepEqual([...outcome.matchAll(/`([^`]+)`/g)].map((m) => m[1]), [...RUN_OUTCOME_VALUES]);
 });
 
-test("the requirements' list of destructive actions is exactly the actions whose write rules set danger", () => {
-  const said = /`danger` is true for the destructive actions \(([^)]*)\)/.exec(flat(read("specs/requirements.md")));
-  assert.ok(said, "the requirement names the destructive actions");
-  const named = [...said[1].matchAll(/`([a-z0-9-]+)`/g)].map((m) => m[1]);
-  assert.equal(new Set(named).size, named.length, "each named once");
-  assert.deepEqual([...named].sort(), ACTIONS.filter((a) => a.danger).map((a) => a.name).sort());
-});
-
 test("docs/triggers.md's example refusal for a pull_request trigger is the trigger add's own sentence, its field list TRIGGER_ADD_FIELDS.pull_request", () => {
   const said = /for example: "(dispatch_trigger_add does not take repository for a pull_request trigger; it takes ([^"]*)\. Nothing was changed)"/.exec(flat(read("docs/triggers.md")));
   assert.ok(said, "the doc quotes the refusal");

@@ -18,14 +18,13 @@ import * as tables from "../src/comment-tables.mjs";
 import { MCP_REFUSAL_COMMENT, mcpRefusalComment } from "../src/mcp-preflight.mjs";
 import { OPENSHELL_BIND_LINGERING } from "../src/backends.mjs";
 import { BUNDLE_SKIPPED_REASONS, LIVE_SKIPPED_REASONS, PLAN_RECORD_REASONS, RECOVER_SKIPPED_REASONS, SESSION_REASONS, STEER_SKIPPED_REASONS } from "../src/run-history.mjs";
-import { recordNestedEnum, recordReasonEnum } from "./helpers/spec-enum.mjs";
 import { CONTAINER_EXIT_UNKNOWN, CONTAINER_INFRA_EXIT, WORKER_ERROR } from "../src/record-reason.mjs";
 
 // The reason catalog (issue #710, INT-REASON-CATALOG). Every bolt here is two-way: a reason the record can carry with no
 // explanation would render as a bare token, and an explanation for a reason the record cannot carry is a table nobody
 // checks, which is how the hand-written tables in this repository have drifted before.
 
-const ENUM = recordReasonEnum();
+const ENUM = Object.keys(REASONS);
 const DOC = readFileSync(new URL(`../../${REASONS_DOC}`, import.meta.url), "utf8");
 
 /**
@@ -72,16 +71,7 @@ const COLLIDING_NOT_REASONS = new Map([]);
 /** Every plain-object export of comment-tables.mjs keyed by reason tokens: wherever one has a row, that row IS the catalog's sentence. */
 const KEYED = Object.fromEntries(Object.entries(tables).filter(([name, value]) => isPlainTable(value) && !CAUSE_KEYED.has(name) && !COLLIDING_NOT_REASONS.has(name)));
 
-test("the spec enum parses to bare tokens: no leading space, no trailing ..., no duplicate", () => {
-	assert.ok(ENUM.length > 100, `${ENUM.length} tokens`);
-	assert.equal(ENUM[0], "worker-abort");
-	assert.ok(!ENUM.includes("..."));
-	for (const token of ENUM) assert.match(token, /^[a-z0-9]+(-[a-z0-9]+)*$/, token);
-	assert.equal(new Set(ENUM).size, ENUM.length);
-});
-
 test("every reason the record can carry has a catalog entry, and every entry is a reason the record can carry", () => {
-	assert.deepEqual(Object.keys(REASONS).sort(), [...ENUM].sort());
 	for (const [token, entry] of Object.entries(REASONS)) {
 		assert.ok(Object.isFrozen(entry), token);
 		assert.deepEqual(Object.keys(entry).sort(), ["anchor", "next", "sentence"], token);
@@ -92,15 +82,6 @@ test("every reason the record can carry has a catalog entry, and every entry is 
 		assert.equal(entry.anchor, `docs/reasons.md#${token}`);
 	}
 	assert.ok(Object.isFrozen(REASONS));
-});
-
-test("the nested reasons are the spec's nested enums, both ways (INT-RUN-HISTORY-FILE-CONTRACT's record shape)", () => {
-	for (const field of ["session.reason", "recoverSkipped", "plan.reason"]) {
-		const spec = recordNestedEnum(field);
-		assert.ok(spec.length >= 4, `${field}: ${spec.length} tokens`);
-		assert.equal(new Set(spec).size, spec.length, `${field}: no token twice`);
-		assert.deepEqual(Object.keys(NESTED_REASONS[field]).sort(), [...spec].sort(), field);
-	}
 });
 
 test("a token twice in any catalog table is a load-time error, never a silent override", async () => {

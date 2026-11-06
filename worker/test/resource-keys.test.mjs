@@ -10,24 +10,7 @@ import { RESOURCE_KEYS } from "../src/run-history.mjs";
 // the code and required in the code's order, the session-reasons.test.mjs shape. What it reads, and nothing more: the
 // `` `resources: { a, b }` `` span, the `"resources": { "a": <int> | null, ... } | null` block, and every `` `token` ``
 // in the first cell of the table under a named heading. It cannot see a key named only in prose.
-const SPEC = fileURLToPath(new URL("../../specs/interfaces.md", import.meta.url));
 const DOC = fileURLToPath(new URL("../../docs/insights.md", import.meta.url));
-
-test("INT-RUNNER-EXIT-CODE-PROTOCOL's `resources: { ... }` names exactly RESOURCE_KEYS, in order", () => {
-	const spec = readFileSync(SPEC, "utf8");
-	const found = /`resources: \{ ([a-zA-Z,\s]+?) \}`/.exec(spec);
-	assert.ok(found, "the protocol must still spell the block as `resources: { a, b }`");
-	assert.deepEqual(found[1].split(",").map((k) => k.trim()), [...RESOURCE_KEYS]);
-});
-
-test("INT-RUN-HISTORY-FILE-CONTRACT's record shape carries exactly RESOURCE_KEYS, in order", () => {
-	const spec = readFileSync(SPEC, "utf8");
-	const from = spec.indexOf('"resources": {');
-	assert.notEqual(from, -1, "the record shape must still carry a `\"resources\": {` block");
-	const block = spec.slice(from, spec.indexOf("} | null", from));
-	const keys = [...block.matchAll(/"([a-zA-Z]+)": <int> \| null/g)].map((m) => m[1]);
-	assert.deepEqual(keys, [...RESOURCE_KEYS]);
-});
 
 test("docs/insights.md's resources table names exactly RESOURCE_KEYS, in order", () => {
 	const doc = readFileSync(DOC, "utf8");

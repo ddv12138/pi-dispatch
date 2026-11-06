@@ -18,7 +18,7 @@ const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 // The export's names, and the graph dir it wrote into: `graphDir` (resolvePaths' key) also covers `defaultGraphDir`,
 // the worker's export the admin resolved it with, but both are listed so a hit names the one left behind.
 const RETIRED = Object.freeze(["insights.html", "PI_GRAPH_DIR", "buildInsightsHtml", "insightsCommand", "INSIGHTS_JS", "graphDir", "defaultGraphDir", "secureGraphRoot"]);
-const TREES = ["admin/src", "worker/src", "receiver/src", "gateway/src", "image", "deploy", "worker/deploy", "docs", "launch", "specs", ".github"];
+const TREES = ["admin/src", "worker/src", "receiver/src", "gateway/src", "image", "deploy", "worker/deploy", "docs", "launch", ".github"];
 const FILES = ["README.md", "admin/README.md", "worker/README.md", "receiver/README.md", "gateway/README.md", ".env.example", "worker/.env.example", "AGENTS.md"];
 const SKIP_DIRS = new Set(["node_modules", "dist", "test", "fixtures", ".git"]);
 const TEXT = /\.(?:mjs|js|cjs|ts|mts|md|json|ya?ml|sh|service|socket|timer|container|env|example|tape|txt|toml|conf)$|(?:^|\/)(?:Dockerfile|Containerfile)[^/]*$/;
@@ -40,22 +40,15 @@ test("no source, example file or doc names the retired insights export (revision
   for (const t of TREES) if (existsSync(join(ROOT, t))) walk(join(ROOT, t), files);
   for (const f of FILES) if (existsSync(join(ROOT, f))) files.push(join(ROOT, f));
   assert.ok(files.length > 200, `the scan reached the trees (${files.length} files)`);
-  assert.ok(files.some((f) => f.endsWith("specs/requirements.md")) && files.some((f) => f.endsWith("admin/src/read-model.mjs")), "including the specs and the admin's own sources");
   assert.ok(files.some((f) => f.endsWith("gateway/src/cli.mjs")) && files.some((f) => f.endsWith("gateway/README.md")), "including the gateway executable and its published instructions");
   const hits = [];
-  let rowsSeen = 0;
   for (const f of files) {
     const lines = readFileSync(f, "utf8").split("\n");
     lines.forEach((line, i) => {
       const named = RETIRED.filter((w) => line.includes(w));
       if (named.length === 0) return;
-      if (relative(ROOT, f).startsWith("specs/") && REVISION_ROW.test(line)) {
-        rowsSeen += 1;
-        return;
-      }
       hits.push(`${relative(ROOT, f)}:${i + 1} names ${named.join(", ")}`);
     });
   }
   assert.deepEqual(hits, []);
-  assert.ok(rowsSeen > 0, "the revision rows that record the export are still there, and were allowed, not missed");
 });

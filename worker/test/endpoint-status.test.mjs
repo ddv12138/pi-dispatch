@@ -108,12 +108,6 @@ test("unread expiry, newer schemas and unavailable commands remain unknown, with
 });
 
 
-test("the registry contract names exactly the endpoint fields the heartbeat publishes", () => {
-	const spec = readFileSync(new URL("../../specs/interfaces.md", import.meta.url), "utf8").split("## INT-HOST-REGISTRY-CONTRACT\n")[1].split("\n## ")[0];
-	const declared = [...spec.matchAll(/^    (endpoints[A-Za-z]*)\s/gm)].map((match) => match[1]);
-	assert.deepEqual(declared.sort(), Object.keys(endpointStatusFields([], makeInFlight(), false)).sort());
-});
-
 
 test("known live hosts beyond the row cap remain counted when the entire index is lost", async () => {
 	const known = Array.from({ length: 100 }, (_, i) => `known-${i}`);

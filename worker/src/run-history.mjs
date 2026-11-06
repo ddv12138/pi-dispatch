@@ -1717,7 +1717,7 @@ export function makeRecordWriter({ logsDir, fs = nodeFs, log = () => {}, random 
 		let data;
 		try {
 			// Custom: flat JSON sidecar per job over a DB/logging lib -- records are immutable, filename-keyed
-			// by jobId, no cross-record queries; DES-RUN-HISTORY-FLAT-FILES-NO-DB; specs/interfaces.md:11
+			// by jobId, no cross-record queries; DES-RUN-HISTORY-FLAT-FILES-NO-DB
 			// (there is deliberately no database).
 			path = join(logsDir, `${sanitizeJobId(record.jobId)}.json`);
 			data = `${JSON.stringify(record)}\n`;

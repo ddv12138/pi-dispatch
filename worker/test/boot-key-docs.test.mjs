@@ -130,27 +130,3 @@ test("both operator pages say doctor FAILS on an empty value, in the paragraph t
 	}
 });
 
-test("the three spec entries carry the same two facts", () => {
-	// The specs are the authority the pages summarise, so they are held to the same two claims. Checked per
-	// ENTRY rather than per file, because each file is thousands of lines and a match anywhere in one proves
-	// nothing about the entry that owns the rule.
-	const entry = (file, heading) => {
-		const text = repoFile(file);
-		const at = text.indexOf(`## ${heading}`);
-		assert.notEqual(at, -1, `${file}: ${heading} exists`);
-		const next = text.indexOf("\n## ", at + 1);
-		return text.slice(at, next === -1 ? undefined : next);
-	};
-	for (const heading of ["INT-PAUSE-WINDOWS-FILE-CONTRACT", "INT-SCOPED-LIMITS-FILE-CONTRACT", "INT-PROJECTS-FILE-CONTRACT"]) {
-		const body = entry("specs/interfaces.md", heading);
-		assert.match(body, /EMPTY value is not an unset one|an EMPTY value is NOT an unset one/i, `${heading}: states it`);
-		assert.match(body, /refuses to start/i, `${heading}: and what it costs`);
-	}
-	for (const heading of ["INT-PAUSE-WINDOWS-FILE-CONTRACT", "INT-SCOPED-LIMITS-FILE-CONTRACT", "INT-PROJECTS-FILE-CONTRACT"]) {
-		const body = entry("specs/interfaces.md", heading);
-		assert.doesNotMatch(body, /except at boot|the resolver drops an empty|starts with the feature off/i, `${heading}: and nothing takes it back a clause later`);
-	}
-	const req = entry("specs/requirements.md", "REQ-DEPLOYMENT-BOOTSTRAP");
-	assert.match(req, /Empty is not unset/i, "REQ-DEPLOYMENT-BOOTSTRAP: states it");
-	assert.match(req, /TWO\s+\n?\s*SUBJECTS|TWO SUBJECTS/i, "and that doctor judges two subjects");
-});

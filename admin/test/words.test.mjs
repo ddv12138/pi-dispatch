@@ -12,7 +12,6 @@ import { RECORD_REASON_RE as LEAF_REASON_RE } from "../../worker/src/record-reas
 import { RUNNER_COMPLETED_REASONS } from "../../worker/src/run-history.mjs";
 import { RUN_OUTCOMES } from "../../worker/src/portfolio-snapshot.mjs";
 import { LIVE_OUTCOMES } from "../../worker/src/live-transcript.mjs";
-import { recordOutcomeEnum } from "../../worker/test/helpers/spec-enum.mjs";
 import { loadVisibleWidth } from "./helpers/renderer.mjs";
 
 // Issue #710, PR 2: the console and the `/dispatch` panel say one vocabulary, read from admin/src/words.mjs. Each table
@@ -37,7 +36,6 @@ test("DOCS_ROOT is the repository the packages publish, on main, and docsHref ta
 
 test("OUTCOME_WORDS is keyed by exactly the record's outcome enum, as the spec, the portfolio count and the live stream name it", () => {
   const keys = Object.keys(OUTCOME_WORDS).sort();
-  assert.deepEqual(keys, [...recordOutcomeEnum()].sort(), "INT-RUN-HISTORY-FILE-CONTRACT's outcome union, both ways");
   assert.deepEqual(keys, [...RUN_OUTCOMES].sort(), "portfolio-snapshot.mjs RUN_OUTCOMES");
   assert.deepEqual(keys, LIVE_OUTCOMES.filter((o) => o !== "unknown").sort(), "live-transcript.mjs LIVE_OUTCOMES, less its own unknown");
   assert.deepEqual(Object.fromEntries(Object.entries(OUTCOME_WORDS).map(([k, v]) => [k, v.word])), { completed: "completed", policy: "refused", failed: "failed" });

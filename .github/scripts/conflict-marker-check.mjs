@@ -2,7 +2,7 @@
  * No tracked text file may carry a merge-conflict marker (issue #446's gate, PR #457).
  *
  * THE FAILURE THIS EXISTS FOR merged once already in spirit: a rebase left `<<<<<<< HEAD`, `=======` and `>>>>>>> ...`
- * in `specs/requirements.md`'s revision table, and every guard was green. `revision-row-check.mjs` skips lines that
+ * in a revision table, and every guard was green. A revision-row check skips lines that
  * are not table rows, the suite never reads a spec's history, and the markers render on the page as plain text. So
  * this looks for the markers themselves, in EVERY tracked text file (`git ls-files`; gate round 3 widened it from a
  * list of directories, which a new top-level file or directory would have silently escaped).

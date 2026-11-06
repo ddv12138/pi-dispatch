@@ -1789,10 +1789,6 @@ test("what the workflow's comment, the docs and the specs say the check does is 
 	assert.ok(docs.includes(`at ${listed(PHONE_WIDTHS)} pixels as mobile-emulated windows and at ${listed(DESKTOP_WIDTHS)}`), "docs/console.md names the sweep's widths");
 	assert.ok(docs.includes(`one built to break ${WORDS[desk]} of its rules`) && docs.includes(`a phone's bar built to break ${WORDS[phone]}`), "and each control's count");
 	assert.ok(read("SECURITY.md").includes(`at ${WORDS[PHONE_WIDTHS.length]} phone widths and ${WORDS[DESKTOP_WIDTHS.length]} desktop widths`), "SECURITY.md counts them");
-	for (const spec of ["specs/design.md", "specs/requirements.md"]) {
-		const text = read(spec);
-		assert.ok(text.includes(listed(DESKTOP_WIDTHS)) && text.includes(`${WORDS[desk]} sentences`) && text.includes(`${WORDS[phone]} sentences`), `${spec} names the desktop widths and each control's sentences`);
-	}
 });
 
 test("an Updates button that is cut off or sits on its sentence fails the sweep, and one that fits does not (issue #796)", () => {

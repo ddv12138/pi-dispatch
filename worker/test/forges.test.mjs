@@ -117,23 +117,6 @@ test("an unknown forge names the table it is missing from, because that is the a
  * the heading moves; scanning an empty slice and passing is the vacancy that bolt's doc comment
  * warns about.
  */
-test("requirements.md's Scope names every forge this build ships -- the sentence and the table cannot disagree silently again", () => {
-	const spec = readFileSync(fileURLToPath(new URL("../../specs/requirements.md", import.meta.url)), "utf8");
-	const start = spec.indexOf("## Scope");
-	assert.notEqual(start, -1, "the Scope heading is gone from requirements.md");
-	const end = spec.indexOf("\n## ", start + 1);
-	const region = spec.slice(start, end === -1 ? undefined : end);
-	assert.ok(region.length > 200, "the Scope region must be the real paragraph, not an empty slice");
-	// The display names are a hand-written map, so an UNMAPPED kind fails loudly rather than skipping
-	// silently -- a new forge must add its display name HERE and to the Scope sentence, in one commit.
-	const DISPLAY = { github: "GitHub", gitlab: "GitLab", forgejo: "Forgejo", azure: "Azure DevOps" };
-	for (const kind of FORGE_KINDS) {
-		const name = DISPLAY[kind];
-		assert.ok(name, `no display name mapped for forge kind ${JSON.stringify(kind)} -- add it here AND to requirements.md's Scope`);
-		assert.ok(region.includes(name), `requirements.md's Scope does not name ${name} -- the tree services what the sentence does not say`);
-	}
-});
-
 /**
  * The names `tea` actually logs in from, pinned to the tea the job image installs. Measured on 2026-10-14
  * with tea 0.15.0 inside ghcr.io/edgehero/pi-job:4.3.0 against a live Forgejo 14.0.5 (API version

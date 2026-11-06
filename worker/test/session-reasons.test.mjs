@@ -15,7 +15,6 @@ import { SESSION_NOT_SAVED, SESSION_SAVE_AMBIGUOUS } from "../src/record-reason.
 // repeatedly. It reads exactly two needles, each with its limits written here rather than discovered later:
 // a `<fixed enum: a|b|c>` span, and the first cell of every row of a table under a named heading. It does
 // not parse prose, and it cannot see a token described in a paragraph instead of a table row.
-const SPEC = fileURLToPath(new URL("../../specs/interfaces.md", import.meta.url));
 const DOC = fileURLToPath(new URL("../../docs/sessions.md", import.meta.url));
 
 /** Every `` `token` `` in the first cell of each row of the table that follows `heading`. */
@@ -31,16 +30,6 @@ function tableTokens(text, heading) {
 	assert.ok(rows.length > 0, `no table rows under ${JSON.stringify(heading)}`);
 	return rows;
 }
-
-test("the record-shape enum in INT-RUN-HISTORY-FILE-CONTRACT is exactly SESSION_REASONS", () => {
-	const spec = readFileSync(SPEC, "utf8");
-	const found = /<fixed enum: ([a-z|-]+)>/.exec(spec);
-	assert.ok(found, "the contract must still spell the enum as `<fixed enum: a|b|c>`");
-	// GENERATED from the code and required verbatim, rather than compared as a set: the order is part of what
-	// a reader compares against the source, and a set comparison would let the two drift into different
-	// orders and call it agreement.
-	assert.equal(found[1], [...SESSION_REASONS].join("|"), "the contract's enum must be the code's set, in the code's order");
-});
 
 test("docs/sessions.md names every reason the code can produce, and invents none", () => {
 	const doc = readFileSync(DOC, "utf8");

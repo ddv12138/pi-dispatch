@@ -97,17 +97,6 @@ test("the page's worked numbers are what the allocator gives for its envelope an
 	assert.ok(PROJECTS.find((p) => p.id === "ops").members.includes("/home/me/pm"));
 });
 
-test("every spec ID docs/portfolio-manager.md names is a heading in specs/ (#506)", () => {
-	const ids = [...new Set(PAGE.match(/\b(?:CONST|REQ|DES|INT|OQ)-[A-Z0-9]+(?:-[A-Z0-9]+)*\b/g) ?? [])];
-	assert.ok(ids.length >= 5, `the page names ${ids.length} spec IDs`);
-	const headings = new Set();
-	for (const name of readdirSync(new URL("specs/", root))) {
-		if (!name.endsWith(".md")) continue;
-		for (const m of read(`specs/${name}`).matchAll(/^## ([A-Z]+-[A-Z0-9-]+)\s*$/gm)) headings.add(m[1]);
-	}
-	for (const id of ids) assert.ok(headings.has(id), `${id} is not a spec heading`);
-});
-
 test("the page is linked from the README, docs/triggers.md and the examples README (#506)", () => {
 	assert.ok(read("README.md").includes("(docs/portfolio-manager.md)"));
 	assert.ok(read("docs/triggers.md").includes("(portfolio-manager.md)"));

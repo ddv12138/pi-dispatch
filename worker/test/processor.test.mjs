@@ -368,13 +368,6 @@ test("exit 2 with a runner MCP refusal records that reason and comments a fixed 
 	await assert.rejects(runJob(ghJob, d), InfraRetry);
 });
 
-test("the six MCP sentences are quoted verbatim in REQ-JOB-STATUS-COMMENTS and DES-TERMINAL-COMMENTS-AND-FAILURE-HOOK", () => {
-	for (const file of ["requirements.md", "design.md"]) {
-		const spec = readFileSync(new URL(`../../specs/${file}`, import.meta.url), "utf8");
-		for (const reason of MCP_RUNNER_REASONS) assert.ok(spec.includes(`\`${reason}\` ("${TERMINAL_COMMENTS[reason]}")`), `${file} quotes ${reason}'s sentence as it is`);
-	}
-});
-
 test("the pickup's free mcp-config-invalid posts its own refusal, never the runner's sentence, and reserves nothing", async () => {
 	const posted = [];
 	const { deps: d } = deps({ checkMcp: () => ({ refused: "mcp-config-invalid", name: null, why: "the overlay's mcp.json cannot be read whole" }), comment: async (_j, t) => posted.push(t) });

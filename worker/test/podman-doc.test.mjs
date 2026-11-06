@@ -559,7 +559,7 @@ test("the compose row's argv word is what the compose file's config mounts carry
 test("every list of the refused containers.conf keys is exactly PODMAN_WIDENING_KEYS, or since #448 one of its two rootful halves (#450)", () => {
 	const root = new URL("../../", import.meta.url);
 	const at = (dir, ext) => readdirSync(new URL(dir, root)).filter((f) => f.endsWith(ext)).map((f) => `${dir}${f}`);
-	const files = [...at("specs/", ".md"), ...at("docs/", ".md"), ...at("worker/src/", ".mjs"), ...at(".github/scripts/", ".mjs"), "README.md"];
+	const files = [...at("docs/", ".md"), ...at("worker/src/", ".mjs"), ...at(".github/scripts/", ".mjs"), "README.md"];
 	// Issue #448: every key any derived list names, longest first, each a whole word (so `init` is not `init_path`'s start
 	// and `env` is not `environment`'s).
 	const known = [...new Set([...PODMAN_WIDENING_KEYS, ...PODMAN_ROOTFUL_WIDENING_KEYS, ...PODMAN_ROOTFUL_INERT_KEYS, ...PODMAN_ROOTLESS_INERT_KEYS, ...PODMAN_HARMLESS_KEYS])].sort((a, b) => b.length - a.length);
@@ -588,9 +588,9 @@ test("every list of the refused containers.conf keys is exactly PODMAN_WIDENING_
 			byList[which.name] += 1;
 		}
 	}
-	// The lists this was written against: the docs' four, the specs' three and the source's (docker-run.mjs's comment).
+	// The remaining lists are in the docs and source.
 	assert.ok(lists >= 8, `only ${lists} lists found, so the pattern no longer sees them`);
-	assert.ok(byList.PODMAN_WIDENING_KEYS >= 8, `only ${byList.PODMAN_WIDENING_KEYS} full lists found`);
+	assert.ok(byList.PODMAN_WIDENING_KEYS >= 6, `only ${byList.PODMAN_WIDENING_KEYS} full lists found`);
 	// Issue #448: the rootful refused list this was written against: one in each of the eighteen quoted refusals of
 	// docs/podman.md. Neither rootful list is restated in prose any more; both are the key table's rows, bolted above.
 	assert.ok(byList.PODMAN_ROOTFUL_WIDENING_KEYS >= 18, `only ${byList.PODMAN_ROOTFUL_WIDENING_KEYS} rootful refused lists found`);

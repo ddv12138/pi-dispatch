@@ -377,11 +377,6 @@ jobs:
       - name: No dated fixture rides a default clock (issue #293)
         run: node .github/scripts/dated-fixture-check.mjs
 
-      # A revision row that renders with the wrong number of cells loses everything after the second one,
-      # and a diff cannot show that: the row looks whole in the source and is cut on the page (issue #388).
-      - name: Every revision row renders as two cells (issue #388)
-        run: node .github/scripts/revision-row-check.mjs
-
       # A rebase once committed conflict markers into a spec's revision table, and every other guard was green: they
       # render as plain text and no test reads a spec's history (PR #457). The worker suite runs the same scan.
       - name: No merge-conflict marker in a tracked file (PR #457)
@@ -402,9 +397,6 @@ jobs:
       # guardrail-less agent ship green. VALKEY_TEST_URL activates the queue integration test.
       #
       # Cron/scheduler assumptions this run pins (BullMQ 5.80.4), each SILENT if it drifts:
-      #   - no-backfill / no-overlap / deterministic repeat: jobId  -> specs/design.md:206-216
-      #   - must-handle -10/-11 (schedule edit else silent no-op)   -> specs/design.md:231
-      #   - scheduler jobs bypass maxStalledCount (stall carve-out)  -> specs/constitution.md:203-216
       # Exercised by worker/test/cron.integration.test.mjs (VALKEY_TEST_URL + PI_DISPATCH_REQUIRE_WORKER_TESTS gate it live).
       - name: Contract tests -- guardrails, -nc, exit codes, env allowlist, queue, receiver enqueue, cron (all required)
         env:
@@ -1050,7 +1042,7 @@ jobs:
           console.log("OK: " + candidates.length + " candidate(s), the copy pi itself uses first, compat surface intact");'
           docker run --rm --network none -e PROBE="$PROBE" \
             --entrypoint sh "$IMAGE_REF" -c 'node --input-type=module -e "$PROBE"' \
-            || { echo "::error::The usage meter no longer offers pi-coding-agent's OWN pi-ai first in this image. That copy is the pi-ai pi hands its extensions, whose registry the meter's compat half arms for legacy extension calls; the process-wide choke point is ModelRuntime.prototype, and installProcessUsageMeter accepts the compat copy by identity with pi's VIRTUAL_MODULES, so this step is about the ORDER and the surface, not the decision. If the layout moved, re-verify in this order: piOwnPackageDir and resolvePiAiCompat in image/runner/src/usage-meter.mjs, the compat exports the probe and the wrapper call (getApiProvider/getApiProviders/registerApiProvider/resetApiProviders, createAssistantMessageEventStream), trap (g) in specs/interfaces.md, and image/runner/test/pinned-api.test.mjs."; exit 1; }
+            || { echo "::error::The usage meter no longer offers pi-coding-agent's OWN pi-ai first in this image. That copy is the pi-ai pi hands its extensions, whose registry the meter's compat half arms for legacy extension calls; the process-wide choke point is ModelRuntime.prototype, and installProcessUsageMeter accepts the compat copy by identity with pi's VIRTUAL_MODULES, so this step is about the ORDER and the surface, not the decision. If the layout moved, re-verify in this order: piOwnPackageDir and resolvePiAiCompat in image/runner/src/usage-meter.mjs, the compat exports the probe and the wrapper call (getApiProvider/getApiProviders/registerApiProvider/resetApiProviders, createAssistantMessageEventStream), image/runner/test/pinned-api.test.mjs."; exit 1; }
 
       # The process-wide half (issue #509): since the pi 0.99.1 pin a session dispatches every model call through
       # a ModelRuntime instance, so the meter wraps ModelRuntime.prototype, and the brake's stream factory

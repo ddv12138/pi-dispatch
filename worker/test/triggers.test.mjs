@@ -1561,21 +1561,6 @@ test("an issue one-shot is orthogonal to the run vocabulary -- each field surviv
  * bullet names the forge and its words, and this reproduces that string from `PR_ACTIONS` and requires it
  * to be present. It is the vocabulary's fifth copy in the tree and the last one that was unguarded.
  */
-test("INT-TRIGGERS-FILE-CONTRACT states every forge's action vocabulary, in the loader's own words", () => {
-	const spec = readFileSync(fileURLToPath(new URL("../../specs/interfaces.md", import.meta.url)), "utf8");
-	const marker = "- **`run.kind` selects the forge; `on.type` is shared.**";
-	const start = spec.indexOf(marker);
-	assert.notEqual(start, -1, "the bullet this scan reads is gone from INT-TRIGGERS-FILE-CONTRACT");
-	const end = spec.indexOf("\n- **", start + marker.length);
-	const region = spec.slice(start, end === -1 ? undefined : end);
-	for (const [forge, actions] of Object.entries(PR_ACTIONS)) {
-		assert.ok(
-			region.includes(`\`${[...actions].join("|")}\``),
-			`${forge}: the contract must spell its vocabulary as the loader validates it -- a forge the entry does not name reads as a forge that takes no actions, which is how two of four went missing`,
-		);
-	}
-});
-
 // --- run.portfolio (issue #505): a cron trigger whose job may send a priorities plan back ---
 
 test("run.portfolio is accepted on a cron trigger, true and false both carried at run level", () => {

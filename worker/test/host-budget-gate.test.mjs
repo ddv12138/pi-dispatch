@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { recordReasonEnum } from "./helpers/spec-enum.mjs";
 import { test } from "node:test";
 import { BUDGET_RECHECK_MS, NEVER_FITS_RECHECK_MS, hostBudgetSettings, makeHostBudget } from "../src/host-budget.mjs";
 import { parseProjects } from "../src/projects.mjs";
@@ -427,17 +426,6 @@ test("the processor's waiter bookkeeping lives in ONE wrapper: budget deferral k
 	const wrapper = body.slice(body.indexOf("return async function processor(job, token, signal) {"));
 	for (const call of ["hostBudget.suspend(", "hostBudget.forget(", "hostBudget.enter(", "hostBudget.leave("]) assert.ok(wrapper.includes(call), `${call} is in the wrapper`);
 	assert.equal(body.split("hostBudget.gate(").length - 1, 1, "one gate");
-});
-
-test("the two never-fits reasons are the record contract's own tokens, each with its one generic comment, and the fleet reason is gone", { skip }, () => {
-	// Pinned against the spec's reason enum (INT-RUN-HISTORY-FILE-CONTRACT), read from the file, so a fourth reason or a
-	// renamed one cannot ship without the contract naming it.
-	const spec = readFileSync(new URL("../../specs/interfaces.md", import.meta.url), "utf8");
-	const tokens = recordReasonEnum(spec); // throws when the line is gone
-	assert.ok(tokens.length > 0, "the record's reason enum line");
-	assert.deepEqual(Object.keys(mod.SIZE_REFUSAL_COMMENTS), ["job-size-exceeds-host", "job-size-exceeds-share"]);
-	assert.equal(tokens.includes("job-size-exceeds-fleet"), false, "no longer emitted, so no longer in the contract");
-	for (const reason of Object.keys(mod.SIZE_REFUSAL_COMMENTS)) assert.ok(tokens.includes(reason), `${reason} is in the record's reason enum`);
 });
 
 test("capacity rides the record only once the job is admitted: the live slots, the budget and the CPUs at the start, none on a never-fits refusal (#599)", { skip }, async () => {

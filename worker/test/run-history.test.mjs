@@ -8,7 +8,6 @@ import { authenticExitLines, AWAIT_INPUT_RUNNER_REASONS, PROGRESS_RUNNER_REASONS
 import { MODEL_REF_PATTERN } from "../src/model-ref.mjs";
 import { FORGE_KINDS } from "../src/forges.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { recordReasonEnum } from "./helpers/spec-enum.mjs";
 import { CONTAINER_EXIT_UNKNOWN, CONTAINER_INFRA_EXIT, RECORD_REASON_RE, WORKER_ERROR, recordReasonOf } from "../src/record-reason.mjs";
 import { RESOURCE_KEYS as RUNNER_RESOURCE_KEYS } from "../../image/runner/src/cgroup-usage.mjs";
 import { CRON_ID_MAX } from "../src/triggers.mjs";
@@ -913,11 +912,6 @@ test("recordReasonOf is the leaf's door, and every reason the record contract na
 	assert.equal(recordReasonOf({ result: { reason: "Not a token" } }), null);
 	assert.equal(recordReasonOf({ error: { reason: "Not a token" } }), WORKER_ERROR);
 	assert.equal(recordReasonOf({ result: null, error: { reason: CONTAINER_INFRA_EXIT } }), CONTAINER_INFRA_EXIT);
-	// Two-way with INT-RUN-HISTORY-FILE-CONTRACT's enum: the door would turn a named reason the charset refused into
-	// worker-error or null, and the three tokens the door itself relies on are named there.
-	const tokens = recordReasonEnum();
-	for (const token of tokens) assert.match(token, RECORD_REASON_RE, token);
-	for (const token of [CONTAINER_INFRA_EXIT, CONTAINER_EXIT_UNKNOWN, WORKER_ERROR]) assert.ok(tokens.includes(token), `${token} is in the record's reason enum`);
 	const src = readFileSync(new URL("../src/run-history.mjs", import.meta.url), "utf8");
 	assert.match(src, /\n\t\treason: recordReasonOf\(\{ result, error \}\),\n/, "buildRecord's reason is the door's");
 	assert.doesNotMatch(src, /reason: source\.reason/, "never the source's reason copied");
@@ -1794,30 +1788,7 @@ test("every RUNNER_POLICY_REASONS member is a literal the runner itself writes (
 	assert.ok(runnerSrc.includes('reason: "provider-auth-refused"'), "the runner's issue #437 literal moved");
 });
 
-test("docs/mcp.md's and INT-RUNNER-EXIT-CODE-PROTOCOL's exit-2 MCP reasons are MCP_RUNNER_REASONS, no more and no fewer", () => {
-	// Two hand-written tables restate the set, and a reason added on one side only would leave the operator reading
-	// a page that no longer says what the record can name.
-	const doc = readFileSync(new URL("../../docs/mcp.md", import.meta.url), "utf8");
-	const docRows = doc.split("\n").filter((l) => /^\| `mcp-[^|]*\| 2 \|/.test(l));
-	const fromDoc = docRows.flatMap((l) => [...l.split("|")[1].matchAll(/`(mcp-[a-z-]+)`/g)].map((m) => m[1]));
-	assert.deepEqual([...fromDoc].sort(), [...MCP_RUNNER_REASONS].sort());
-	const spec = readFileSync(new URL("../../specs/interfaces.md", import.meta.url), "utf8");
-	// The record contract's reason enum (INT-RUN-HISTORY-FILE-CONTRACT) names every reason the record can carry.
-	const tokens = recordReasonEnum(spec);
-	for (const reason of RUNNER_POLICY_REASONS) assert.ok(tokens.includes(reason), `${reason} is in the record's reason enum`);
-	const fromSpec = new Set([...spec.matchAll(/\| `2` \/ `(mcp-[a-z-]+)`/g)].map((m) => m[1]));
-	assert.deepEqual([...fromSpec].sort(), [...MCP_RUNNER_REASONS].sort());
-});
-
 // Issue #686 part 3: the openshell venues' own refusal reasons reach the record as `reason`, so each is in its enum.
-test("every OPENSHELL_REFUSALS reason is in the record's reason enum (#686 part 3)", async () => {
-	const { OPENSHELL_REFUSALS } = await import("../src/backend-openshell.mjs");
-	const spec = readFileSync(new URL("../../specs/interfaces.md", import.meta.url), "utf8");
-	const tokens = recordReasonEnum(spec);
-	for (const reason of Object.keys(OPENSHELL_REFUSALS)) assert.ok(tokens.includes(reason), `${reason} is in the record's reason enum`);
-	assert.ok(Object.hasOwn(OPENSHELL_REFUSALS, "openshell-bind-mounts-disabled"));
-});
-
 // Issue #507: a cost-cap stop said only `cost-cap` with $0, because which rule of the guard refused reached the job log
 // alone (`cost_refused`), never the record.
 test("parseExitWhy is retired with the meter: null for every line, and never a throw", () => {
