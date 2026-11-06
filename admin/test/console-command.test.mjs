@@ -312,7 +312,7 @@ test("the probe is the worker's one rule: through its request seam only loopback
 
 test("probeLine: running, not running with the reason and both ways to start it, unknown with why", () => {
   assert.equal(probeLine({ state: "running" }), "running");
-  assert.equal(probeLine({ state: "not-running", reason: "nothing listens there" }), "not running (nothing listens there): start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console (docs/console.md)");
+  assert.equal(probeLine({ state: "not-running", reason: "nothing listens there" }), "not running (nothing listens there): start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console");
   assert.match(probeLine({ state: "unknown", reason: "port 0" }), /not known: port 0/);
 });
 

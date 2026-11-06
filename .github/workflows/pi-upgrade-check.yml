@@ -567,7 +567,7 @@ jobs:
     # checklist has ONE definition rather than a copy here and a copy in the docs. RUNNER asserts properties
     # of the runner THIS repo ships (its exact refusal strings, a path under /app a foreign image need not
     # have) and stays here, because it is not portable. That distinction is the difference between
-    # "conformant" and "built from this repo", which docs/job-image.md and OQ-012 both have to draw.
+    # "conformant" and "built from this repo", which the job image's own checklist and OQ-012 both have to draw.
     #
     # An operator verifying THEIR image runs the script directly, on the host that holds it. It cannot be a
     # workflow input: jobs launch with --pull=never, so the images pi-dispatch can run are exactly the ones
@@ -604,7 +604,7 @@ jobs:
       # --entrypoint is required: ENTRYPOINT is the runner and ignores CMD, so `docker run img pi ...`
       # would silently run the runner instead of pi and the assertion would test nothing.
       # The CORE checklist, from the single definition an operator also runs against their own image
-      # (docs/job-image.md). Kept as a script rather than inlined steps so the portable half cannot drift
+      # (the image's own checklist). Kept as a script rather than inlined steps so the portable half cannot drift
       # from what the docs promise: pi present, CapEff=0, non-root, /job:ro enforced by the kernel, a
       # writable agent dir, guardrails present AND unwritable, Chromium rendering a real page, fonts, and
       # for an image claiming anyUid a writable home and a render as an arbitrary uid (issue #341), and for one

@@ -89,10 +89,6 @@ jobs:
             printf '\n**Full changelog**: %s/%s/compare/%s...v%s\n' \
               "${{ github.server_url }}" "${{ github.repository }}" "$PREV" "${{ steps.v.outputs.version }}" >> /tmp/notes.md
           fi
-          # The upgrade guide at this release's own tag, appended outside the PREV test so a first release carries it too,
-          # and after both paths: the order to upgrade in and what the release changed in stored state live there.
-          printf '\n**Upgrading**: %s/%s/blob/v%s/docs/upgrading.md\n' \
-            "${{ github.server_url }}" "${{ github.repository }}" "${{ steps.v.outputs.version }}" >> /tmp/notes.md
 
       - name: Create GitHub Release
         if: steps.v.outputs.release == 'yes'

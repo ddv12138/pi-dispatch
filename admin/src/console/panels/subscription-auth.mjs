@@ -41,7 +41,7 @@ function empty(view) {
 }
 
 export function subscriptionGuides(view) {
-  return html`<div class="pk-help">${Object.entries(PROVIDER_AUTH_GUIDES).map(([provider, guide]) => html`<details class="pk-guide" data-subscription-help="${provider}"><summary>${guide.label}</summary><div class="pk-links">${ui.outLink({ href: guide.docsUrl, label: "Host connection guide", btn: "sm" })}${ui.outLink({ href: guide.officialUrl, label: "Official provider guidance" })}</div><ol>${guide.steps.map(step => html`<li>${step}</li>`)}</ol><p class="pk-note pk-notice">${guide.notice}</p>${allowed(view) && guide.command ? html`<p class="pk-note pk-notice">Replace &lt;connection-id&gt; with the configured connection name before running on its owning host.</p>${ui.cmd(guide.command.split(" "))}` : null}</details>`)}</div>`;
+  return html`<div class="pk-help">${Object.entries(PROVIDER_AUTH_GUIDES).map(([provider, guide]) => html`<details class="pk-guide" data-subscription-help="${provider}"><summary>${guide.label}</summary><div class="pk-links">${guide.docsUrl ? ui.outLink({ href: guide.docsUrl, label: "Host connection guide", btn: "sm" }) : null}${ui.outLink({ href: guide.officialUrl, label: "Official provider guidance" })}</div><ol>${guide.steps.map(step => html`<li>${step}</li>`)}</ol><p class="pk-note pk-notice">${guide.notice}</p>${allowed(view) && guide.command ? html`<p class="pk-note pk-notice">Replace &lt;connection-id&gt; with the configured connection name before running on its owning host.</p>${ui.cmd(guide.command.split(" "))}` : null}</details>`)}</div>`;
 }
 
 export function connectionsSubscriptionAuth(view) {

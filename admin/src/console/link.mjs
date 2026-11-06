@@ -58,7 +58,7 @@ export function consolePageUrl(env, path, { platform = process.platform } = {}) 
  * How to start a console that is not running: ONE constant, so a new way to run it (a service) is added in one place and
  * every surface that says it (this hint and `/dispatch console`'s "not running" line) says the same.
  */
-export const CONSOLE_START_ADVICE = "start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console (docs/console.md)";
+export const CONSOLE_START_ADVICE = "start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console";
 
 /** How to start the console, said wherever its address is printed. */
 export const CONSOLE_START_HINT = `if the console is not running, ${CONSOLE_START_ADVICE}`;

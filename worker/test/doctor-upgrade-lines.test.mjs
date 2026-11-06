@@ -29,7 +29,7 @@ test("fleetVersionChecks: this doctor against this host's worker row, as two fac
 		ok: false,
 		warn: true,
 		label: "pi-dispatch versions differ: this doctor 5.0.0, this host's worker row reports 4.3.1",
-		fix: "finish the upgrade in one window (docs/upgrading.md): the same version on every host; on each host `pi-dispatch pause`, wait until `pi-dispatch status` shows no active job, restart the worker, then `pi-dispatch resume`. If this doctor is not the install the service runs (npx, another checkout), run that install's doctor instead",
+		fix: "finish the upgrade in one window: the same version on every host; on each host `pi-dispatch pause`, wait until `pi-dispatch status` shows no active job, restart the worker, then `pi-dispatch resume`. If this doctor is not the install the service runs (npx, another checkout), run that install's doctor instead",
 	});
 	assert.doesNotMatch(line.label, /restart/);
 	// The row, not "the running worker": a worker killed without deleting its row leaves it for up to HOST_TTL_MS (90 s).
@@ -63,7 +63,7 @@ test("fleetVersionChecks: an unreadable or hostile version is 'unknown', its own
 		// One readable version and one doctor could not read: they may be the same, so the headline does not say "differ".
 		assert.equal(line.label, "pi-dispatch versions cannot all be read: the live workers report 2 versions: 5.0.0 (mini1), unknown (mini2)", JSON.stringify(v));
 		assert.equal(line.warn, true);
-		assert.match(line.fix, /^finish the upgrade in one window \(docs\/upgrading\.md\)/);
+		assert.match(line.fix, /^finish the upgrade in one window:/);
 	}
 	// "differ" where doctor read two versions that differ, an unknown beside them or not, or this doctor's own against this
 	// host's row.

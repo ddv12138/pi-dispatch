@@ -1165,7 +1165,7 @@ test("first run: the progress, each step's tile, word and sentence, and an opera
   assert.match(out, /<p class="su-alt">Or run it yourself in a terminal:<\/p>/);
   for (const argv of [FIRST_RUN_COMMANDS.token, FIRST_RUN_COMMANDS.service, FIRST_RUN_COMMANDS.worker, FIRST_RUN_COMMANDS.up, FIRST_RUN_COMMANDS.doctor]) assert.ok(out.includes(`<span>${argv[1]}</span>`), argv.join(" "));
   assert.ok(out.includes("<span>&#39;&lt;receiver URL&gt;&#39;</span>") || out.includes("<span>'&lt;receiver URL&gt;'</span>"), "the webhook URL is a quoted placeholder");
-  assert.match(out, /<div class="su-act"><a class="btn btn--primary" href="\/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-plus"><\/use><\/svg>Add a trigger<\/a><a class="btn btn--ghost" href="https:\/\/github\.com\/edgehero\/pi-dispatch\/blob\/main\/docs\/triggers\.md" rel="noreferrer noopener" target="_blank">What triggers can do<\/a><\/div>/);
+  assert.match(out, /<div class="su-act"><a class="btn btn--primary" href="\/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-plus"><\/use><\/svg>Add a trigger<\/a><\/div>/);
   assert.equal((out.match(/btn--primary/g) ?? []).length, 1, "one primary");
   assert.ok(!out.includes("redis://") && !out.includes("6379"), "the queue step names no address");
   // The trigger editor, once PAGES has it, is where Add goes.

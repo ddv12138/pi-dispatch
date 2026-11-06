@@ -34,7 +34,7 @@ export const RETIRED_DOLLAR_ENV_NAMES = Object.freeze({ maxCostUsd: "PI_MAX_COST
 /** One refusal sentence for a retired dollar key, used by every fail-loud door (config, overlay, triggers). */
 export function retiredDollarMessage(key) {
 	const replacement = key === "maxCostUsd" ? "maxTokens" : `${key.replace("CostUsd", "TokenCap")}`;
-	return `${key} was retired with the dollar windows: budgets are token-denominated now, so set ${replacement} instead (docs/upgrading.md)`;
+	return `${key} was retired with the dollar windows: budgets are token-denominated now, so set ${replacement} instead`;
 }
 
 /**

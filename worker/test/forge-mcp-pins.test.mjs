@@ -121,24 +121,11 @@ test("the wrappers and verify-image.sh claim no boundary: the withheld tools are
 	assert.doesNotMatch(read("image/verify-image.sh"), /never merge or approve/);
 });
 
-test("docs/job-image.md lists exactly the capabilities the image declares, and verify-image.sh proves each (#683)", () => {
-	// The page restates the label by hand; pinned here so a new token cannot ship undocumented, or a doc row outlive one.
+test("every capability the image declares is proved by verify-image.sh (#683)", () => {
+	// The image's label is the list; the script must have a case per token, so a new token cannot ship unproved.
 	const label = /^LABEL dev\.pi-dispatch\.capabilities="([^"]*)"$/m.exec(dockerfile)?.[1]?.split(",");
-	const row = read("docs/job-image.md").split("\n").find((l) => l.startsWith("| Label `dev.pi-dispatch.capabilities`"));
-	assert.ok(row, "the capabilities row is in docs/job-image.md");
-	const listed = /the optional features it honours \(([^)]*)\)/.exec(row)?.[1].split(",").map((t) => t.trim().replace(/`/g, ""));
-	// The five tokens the sandbox venues carried (`sandboxLayout`, `transcriptStderr`, `steerStdin`, `bundleEnvFile`,
-	// `observableRunner`) left the label with those venues and are gone from the image, but the page's row is not
-	// re-synced yet, so the equality this pin holds is: the page's list minus those five named retirees is the label.
-	// A sixth residue, a label token missing from the page, or a retiree removed from the page without cleaning this
-	// list all fail here.
-	const RETIRED_WITH_THE_SANDBOX_VENUES = ["sandboxLayout", "transcriptStderr", "steerStdin", "bundleEnvFile", "observableRunner"];
-	assert.deepEqual(
-		listed.filter((token) => !RETIRED_WITH_THE_SANDBOX_VENUES.includes(token)),
-		label,
-	);
 	const script = read("image/verify-image.sh");
-	for (const token of label) assert.match(script, new RegExp(`\n\t\t\t${token}\\)\n`), `verify-image.sh has a ${token}) case`);
+	for (const token of label) assert.ok(script.includes(`\n\t\t\t${token})\n`), `verify-image.sh has a ${token}) case`);
 });
 
 // The per-binary egress policy (#684) and the `dev.pi-dispatch.net-binaries` label it was generated from left with

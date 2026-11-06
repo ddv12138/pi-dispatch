@@ -148,7 +148,7 @@ test("the management destination survives an entirely Ready setup and subscripti
   const sub = parseDocument(`<html><body>${subscription}</body></html>`);
   for (const provider of ["openai", "anthropic"]) {
     const guide = sub.querySelector(`[data-subscription-help="${provider}"]`);
-    assert.ok(guide.querySelector('a[href="https://github.com/edgehero/pi-dispatch/blob/main/docs/subscription-auth.md"]'));
+    assert.ok(guide.querySelector("a"), "the vendor's own guidance");
     assert.ok(guide.querySelector("ol li"));
     assert.equal(guide.querySelector(".cmd"), null, "a viewer reads help without host command controls");
   }

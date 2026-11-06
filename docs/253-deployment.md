@@ -1,8 +1,7 @@
 # 253 server deployment
 
 What is deployed on the server reachable as `root@192.168.99.253`, and how to change it. This is a runbook, not a
-record of past rollouts: it says what is true now. For the supported model see
-[Linux Compose worker](worker-container.md), [upgrading](upgrading.md) and [job images](job-image.md).
+record of past rollouts: it says what is true now.
 
 ## Layout
 
@@ -135,7 +134,7 @@ harness's own output**:
 - no `on: {type:"comment", phrase:"@pi"}` where a flow's output can contain `@pi`: a status comment is a comment;
 - no close rules on items the agent closes itself.
 
-A label rule keyed to a label a person applies is the safe shape ([gitlab.md](gitlab.md), "One identity").
+A label rule keyed to a label a person applies is the safe shape.
 The deliberate exception here is the `ticket-merge` rule on MR **`open`**: it fires once per MR, and the merger
 only merges — it never opens a MR — so it does not create a loop. Do not widen it to `update`, and do not copy
 the shape to a flow that can create MRs or comment before it exits.

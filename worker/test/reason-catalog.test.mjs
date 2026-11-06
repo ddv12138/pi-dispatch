@@ -7,7 +7,6 @@ import {
 	NESTED_REASONS,
 	PLAN_REASON_TEXT,
 	REASONS,
-	REASONS_DOC,
 	RECOVER_SKIPPED_TEXT,
 	SESSION_REASON_TEXT,
 	STEER_SKIPPED_TEXT,
@@ -24,7 +23,6 @@ import { CONTAINER_EXIT_UNKNOWN, CONTAINER_INFRA_EXIT, WORKER_ERROR } from "../s
 // checks, which is how the hand-written tables in this repository have drifted before.
 
 const ENUM = Object.keys(REASONS);
-const DOC = readFileSync(new URL(`../../${REASONS_DOC}`, import.meta.url), "utf8");
 
 /**
  * A reason two or more paths share with DIFFERENT comments, and the record cannot say which one ran (no `why` tells them
@@ -71,12 +69,11 @@ const KEYED = Object.fromEntries(Object.entries(tables).filter(([name, value]) =
 test("every reason the record can carry has a catalog entry, and every entry is a reason the record can carry", () => {
 	for (const [token, entry] of Object.entries(REASONS)) {
 		assert.ok(Object.isFrozen(entry), token);
-		assert.deepEqual(Object.keys(entry).sort(), ["anchor", "next", "sentence"], token);
+		assert.deepEqual(Object.keys(entry).sort(), ["next", "sentence"], token);
 		assert.equal(typeof entry.sentence, "string", token);
 		assert.ok(entry.sentence.length > 20, `${token}: a sentence`);
 		assert.equal(typeof entry.next, "string", token);
 		assert.ok(entry.next.length > 5, `${token}: a next step`);
-		assert.equal(entry.anchor, `docs/reasons.md#${token}`);
 	}
 	assert.ok(Object.isFrozen(REASONS));
 });
@@ -110,7 +107,6 @@ test("the nested reasons, both ways: session.reason, recoverSkipped and plan.rea
 		assert.equal(NESTED_REASONS[label], table, `${label} is reachable through explainReason's field`);
 		for (const [token, entry] of Object.entries(table)) {
 			assert.ok(entry.sentence.length > 20 && entry.next.length > 5, `${label} ${token}`);
-			assert.match(entry.anchor, /^docs\/reasons\.md#[a-z-]+$/, `${label} ${token}`);
 		}
 	}
 	assert.deepEqual(Object.keys(NESTED_REASONS).sort(), ["plan.reason", "recoverSkipped", "session.reason"]);
@@ -262,51 +258,8 @@ test("every sentence, next step and clause is a fixed string: no control byte, n
 	}
 });
 
-test("docs/reasons.md has one ### heading per reason token and no other", () => {
-	const headings = [...DOC.matchAll(/^### (.+)$/gm)].map((m) => m[1].trim());
-	assert.deepEqual([...headings].sort(), [...ENUM].sort());
-	assert.equal(new Set(headings).size, headings.length, "no token twice");
-});
 
-test("docs/reasons.md's nested tables name exactly their enums, under the headings the catalog's anchors point at", () => {
-	const slug = (heading) => heading.toLowerCase().replace(/[^a-z0-9 -]/g, "").replace(/ /g, "-");
-	const sections = new Map();
-	let current = null;
-	for (const line of DOC.split("\n")) {
-		const h = /^## (.+)$/.exec(line);
-		if (h) {
-			current = slug(h[1].trim());
-			sections.set(current, []);
-			continue;
-		}
-		const row = /^\| `([a-z0-9-]+)` \|/.exec(line);
-		if (row && current !== null) sections.get(current).push(row[1]);
-	}
-	for (const [table, vocabulary] of [
-		[SESSION_REASON_TEXT, [...SESSION_REASONS]],
-		[RECOVER_SKIPPED_TEXT, [...RECOVER_SKIPPED_REASONS]],
-		[PLAN_REASON_TEXT, [...PLAN_RECORD_REASONS]],
-	]) {
-		const anchors = new Set(Object.values(table).map((e) => e.anchor));
-		assert.equal(anchors.size, 1, "one section per nested enum");
-		const section = [...anchors][0].slice(`${REASONS_DOC}#`.length);
-		assert.ok(sections.has(section), `## heading for #${section}`);
-		assert.deepEqual([...sections.get(section)].sort(), vocabulary.sort(), section);
-	}
-	for (const [section, vocabulary] of [
-		["bundle-skipped-reasons", [...BUNDLE_SKIPPED_REASONS]],
-		["steering-skipped-reasons", [...STEER_SKIPPED_REASONS]],
-		["live-transcript-skipped-reasons", [...LIVE_SKIPPED_REASONS]],
-	]) {
-		assert.ok(sections.has(section), `## heading for #${section}`);
-		assert.deepEqual([...sections.get(section)].sort(), vocabulary.sort(), section);
-	}
-});
 
-test("docs/reasons.md is plain prose: no em dash, no spaced hyphen as punctuation", () => {
-	assert.doesNotMatch(DOC, /—|–/);
-	for (const line of DOC.split("\n")) if (!line.startsWith("|")) assert.doesNotMatch(line, / - /, line);
-});
 
 test("the processor posts no inline fixed sentence any more: each one is a table's entry", () => {
 	// The rule, not the sites: a double-quoted "Refused:", "Stopped:" or "Failed:" literal in the processor is a comment

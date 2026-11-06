@@ -202,9 +202,8 @@ function hrefOf(href, who) {
  *
  * No pattern for the host on top: a canonical host can still be an odd name (`x..y`, `a'b`), but it is the name the
  * browser opens, so it misleads no one, and refusing it would throw on a page whose forge instance URL an operator
- * spelled that way. `forgeLinkOf` builds on `new URL(...).origin` (GitHub on its literal host) and `docsHref` on its
- * fixed root, each followed by a path of plain characters, so every link they return is its own canonical form and
- * passes (the kit test holds the two to each other).
+ * spelled that way. `forgeLinkOf` builds on `new URL(...).origin` (GitHub on its literal host), followed by a path of plain
+ * characters, so every link it returns is its own canonical form and passes.
  */
 function outHrefOf(href, who) {
   let u = null;
@@ -1037,8 +1036,8 @@ export function approvalForms({ jobId, id, locale = "en" }) {
 }
 
 /**
- * A link out of the console (a run's issue on its forge, a reasons docs page): `href` an http(s) URL in its own
- * canonical form with no user name (`outHrefOf`; every link `forgeLinkOf` and `docsHref` build is one), drawn as the
+ * A link out of the console (a run's issue on its forge): `href` an http(s) URL in its own
+ * canonical form with no user name (`outHrefOf`; every link `forgeLinkOf` builds is one), drawn as the
  * design's link (`code` sets it in the code face), opening in a new tab that gets no handle on this window and no
  * Referer. The attributes are written in exactly the order `console-pages-harness.mjs`'s outbound-link rule reads
  * (`href`, then `rel="noreferrer noopener"`, then `target="_blank"`, last), the one shape of reference to another host

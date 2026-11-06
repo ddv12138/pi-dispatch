@@ -2,8 +2,6 @@
 import { PROVIDER_KEY_NAMES } from "./provider-key-names.mjs";
 import { HOST_AUTH_PROVIDERS, needsHostAuthentication } from "@edgehero/pi-dispatch/provider-key";
 export const PROVIDER_HELP_REVIEWED_AT = "2026-11-01";
-export const PROVIDER_KEY_GUIDE = "https://github.com/edgehero/pi-dispatch/blob/main/docs/provider-keys.md";
-export const SUBSCRIPTION_AUTH_GUIDE = "https://github.com/edgehero/pi-dispatch/blob/main/docs/subscription-auth.md";
 // A new pinned provider must be reviewed before it gains a browser credential workflow or help claim.
 const REVIEWED = ["amazon-bedrock", "ant-ling", "anthropic", "azure", "baseten", "cerebras", "cloudflare-ai-gateway", "cloudflare-workers-ai", "deepseek", "fireworks", "github-copilot", "google", "google-vertex", "groq", "huggingface", "kimi-coding", "meta", "minimax", "minimax-cn", "mistral", "moonshotai", "moonshotai-cn", "nvidia", "openai", "openai-codex", "opencode", "opencode-go", "openrouter", "qwen-token-plan", "qwen-token-plan-cn", "qwen-token-plan-individual", "radius", "together", "typesafe", "vercel-ai-gateway", "xai", "xiaomi", "xiaomi-token-plan-ams", "xiaomi-token-plan-cn", "xiaomi-token-plan-sgp", "zai", "zai-coding-cn"];
 export const SPECIAL_AUTH_PROVIDERS = HOST_AUTH_PROVIDERS;
@@ -24,18 +22,18 @@ export const PROVIDER_HELP = Object.freeze(Object.fromEntries(REVIEWED.map(provi
   label: core[provider]?.label ?? provider,
   kind: needsHostAuthentication(provider) ? "special" : "api-key",
   url: core[provider]?.url ?? null,
-  docsUrl: core[provider]?.docsUrl ?? PROVIDER_KEY_GUIDE,
+  docsUrl: core[provider]?.docsUrl ?? null,
   steps: Object.freeze(special[provider]?.steps ?? core[provider]?.steps ?? ["Use the provider's own account and credential instructions.", "Create an API key only if the provider supports the canonical slot shown here.", "Paste only that API key here; preview the target and any shared-provider effect before confirming."]),
   notice: special[provider]?.notice ?? core[provider]?.notice ?? "Saving a key does not select this provider, validate a credential or change model routing.",
 })])));
 export function providerHelp(provider) {
-  return typeof provider === "string" && Object.hasOwn(PROVIDER_HELP, provider) ? PROVIDER_HELP[provider] : { label: "Custom provider", kind: "special", url: null, docsUrl: PROVIDER_KEY_GUIDE, steps: ["The generic form cannot configure a custom provider's credentials.", "A custom main provider requires the declared keyless local endpoint setup in the host guide."], notice: "Custom keyed main providers and extension-only models are not enabled by this form." };
+  return typeof provider === "string" && Object.hasOwn(PROVIDER_HELP, provider) ? PROVIDER_HELP[provider] : { label: "Custom provider", kind: "special", url: null, docsUrl: null, steps: ["The generic form cannot configure a custom provider's credentials.", "A custom main provider requires the declared keyless local endpoint setup in the host guide."], notice: "Custom keyed main providers and extension-only models are not enabled by this form." };
 }
 export const PRIMARY_PROVIDER_HELP = Object.freeze(["anthropic", "openai", "google", "openrouter", "deepseek"]);
 // Tests compare both directions; do not silently add a newly generated provider to this reviewed catalog.
 export const providerHelpCatalogMatchesPin = () => Object.keys(PROVIDER_HELP).sort().join("\n") === Object.keys(PROVIDER_KEY_NAMES).sort().join("\n");
 
 export const PROVIDER_AUTH_GUIDES = Object.freeze({
-  openai: Object.freeze({ label: "Sign in with ChatGPT on the owning host", docsUrl: SUBSCRIPTION_AUTH_GUIDE, officialUrl: "https://developers.openai.com/siwc/token-sharing-open-source", command: "pi-dispatch auth login <connection-id>", steps: Object.freeze(["Configure an openai-chatgpt connection and explicit openai binding in the reviewed policy.", "On its owning host, run the login command from this deployment with the worker's settings and Valkey context.", "Complete the provider browser authorization. A remote browser needs callback port 1455 forwarded to that host."]), notice: "The console never receives OAuth credentials. Complete the loopback authorization on the owning host; this page does not perform a sign-in." }),
-  anthropic: Object.freeze({ label: "Claude subscription and community compatibility", docsUrl: SUBSCRIPTION_AUTH_GUIDE, officialUrl: "https://code.claude.com/docs/en/legal-and-compliance", command: null, steps: Object.freeze(["Read the vendor's current authentication restrictions before selecting a community route.", "The reviewed pi community adapters are pinned compatibility paths with their own host staging and login instructions.", "Official claude setup-token is for Claude Code; its token is not an API key to paste here."]), notice: "Compatibility with pinned community packages is not vendor endorsement. Follow the host guide rather than pasting a Claude login token." }),
+  openai: Object.freeze({ label: "Sign in with ChatGPT on the owning host", docsUrl: null, officialUrl: "https://developers.openai.com/siwc/token-sharing-open-source", command: "pi-dispatch auth login <connection-id>", steps: Object.freeze(["Configure an openai-chatgpt connection and explicit openai binding in the reviewed policy.", "On its owning host, run the login command from this deployment with the worker's settings and Valkey context.", "Complete the provider browser authorization. A remote browser needs callback port 1455 forwarded to that host."]), notice: "The console never receives OAuth credentials. Complete the loopback authorization on the owning host; this page does not perform a sign-in." }),
+  anthropic: Object.freeze({ label: "Claude subscription and community compatibility", docsUrl: null, officialUrl: "https://code.claude.com/docs/en/legal-and-compliance", command: null, steps: Object.freeze(["Read the vendor's current authentication restrictions before selecting a community route.", "The reviewed pi community adapters are pinned compatibility paths with their own host staging and login instructions.", "Official claude setup-token is for Claude Code; its token is not an API key to paste here."]), notice: "Compatibility with pinned community packages is not vendor endorsement. Follow the host guide rather than pasting a Claude login token." }),
 });

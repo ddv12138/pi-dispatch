@@ -3,8 +3,7 @@
 A flow that plans the week's budget split between your projects, then reports what it asked for. It runs
 as a weekly cron job with `"portfolio": true`. The worker gives it a snapshot of the budget
 (`/job/portfolio.json`), the flow writes a priorities plan (`/outbox/priorities.json`), and the worker
-decides after the job ends whether the plan applies. The full guide is
-[`docs/portfolio-manager.md`](../../docs/portfolio-manager.md).
+decides after the job ends whether the plan applies.
 
 | File | What it is |
 |---|---|
@@ -31,7 +30,7 @@ decides after the job ends whether the plan applies. The full guide is
 3. Edit `priorities.md`: one section per project id in your envelope, `_other` included. Commit.
 4. Add the entry from `triggers.portfolio.example.json` to your triggers file, with `folder` set to the
    absolute path of your copy. Keep only the secret of the channel you use, and declare the resolver that
-   reads it (`PI_SECRET_PROFILES=default:/path/to/resolver.sh`, see [`docs/secrets.md`](../../docs/secrets.md)).
+   reads it (`PI_SECRET_PROFILES=default:/path/to/resolver.sh`).
 5. Add the hosts the job talks to in `egress-allowlist.conf`: `api.github.com` for the GitHub channel, or
    your webhook's host.
 

@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/banner.png?v=2026-11-03" alt="pi-dispatch: hand software work to an AI coding agent, and decide how closely you watch it" width="880">
-</p>
-
 # pi-dispatch: hand software work to an AI coding agent, and decide how closely you watch it
 
 [pi](https://github.com/earendil-works/pi) is an open source coding agent that you normally run in a terminal. pi-dispatch runs it for you
@@ -11,10 +7,6 @@ move to near the loop, where it asks when it needs you, and to out of the loop, 
 anything, so what ships stays a person's decision. It runs on a provider key or a subscription you already have, falls back to other models you
 list, and brings your own pi setup and extensions along with `pi-dispatch import-pi`. The [main README](https://github.com/edgehero/pi-dispatch#readme)
 explains all of it.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/console/console-overview.png?v=2026-11-03" alt="The web console's overview page: what needs you, what is waiting and why, what is running, what today has cost, and a timeline of every project's runs" width="820">
-</p>
 
 > This npm package, **`@edgehero/pi-dispatch-admin`**, holds the way to work with a deployment: the **web console**
 > (`pi-dispatch-console`, above). The service itself is
@@ -51,10 +43,8 @@ Every trigger produces the same job, through the same path: one queue, one conta
 The container is the boundary, and it is pi's missing permission system. The worker builds the isolation
 flags itself, so nothing an image contains can weaken them. The non root user comes from the **image** on
 Docker Desktop (and for a worker running as uid 1001), and from the worker's own uid on a native Linux
-daemon. That is why an image has to meet the checklist in
-[`docs/job-image.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/job-image.md). What each
-container runtime guarantees is declared in
-[`docs/backends.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/backends.md), and
+daemon. That is why an image has to meet a checklist. What each
+container runtime guarantees is declared by the venue, and
 `pi-dispatch doctor --live` reads it back from real containers.
 
 **Where it runs.** On any Linux server or VM you control, or your own Mac or Windows machine with Docker
@@ -71,8 +61,7 @@ the forge token, and **the agent can read both**. The guardrails tell it never t
 that is prompt text, not enforcement. Set a spend limit at your provider. On GitHub, the default `gh` auth
 source forwards **your whole login, full scope and never expiring**, and `pi-dispatch doctor` warns about
 it; the GitHub App gives each job a one hour token for one repo instead. Network egress is denied by
-default and goes through an allowlist proxy, and the allowed hosts are yours to list
-([`docs/egress.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/egress.md)).
+default and goes through an allowlist proxy, and the allowed hosts are yours to list.
 
 ## Triggers: what starts a job
 
@@ -93,8 +82,7 @@ decision, not this service's.** On GitHub the label *is* the approval, because o
 one. GitLab, Forgejo and Azure check the actor's permission through their APIs. A close trigger checks the
 person who **closed** the item (Azure has no close trigger yet, and refuses one at load). Each forge's
 action words are checked when the file loads, so a word from the wrong forge is refused instead of never
-matching. The full reference is
-[`docs/triggers.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/triggers.md).
+matching.
 
 **Flows and workflows.** `run.flow` names a skill committed to the target repo at
 `.pi/skills/<flow>/SKILL.md`, read from the **default branch**. The repo owns the prompt, and merging it
@@ -116,8 +104,7 @@ Four things to know before you build on it:
 - One trigger is **one job, one budget slot and one turn budget**. Ten stages share the same
   `PI_MAX_TURNS` and token budget, and running out ends the job as a policy refusal that is never retried.
 - **State survives only on local jobs.** A cron or CLI job has your folder mounted read-write, so state
-  persists. A forge job gets a fresh clone that is thrown away with the container
-  ([`docs/workflows.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/workflows.md)).
+  persists. A forge job gets a fresh clone that is thrown away with the container.
 
 ## The operator console
 
@@ -137,8 +124,7 @@ where there is a way back. When `serve` starts it prints how to sign in (the com
 link, never a token), and `pi-dispatch-console link --name <you> --port <n>` prints the link for an SSH tunnel's local
 port. The sign-in page says why a session ended. Every running job's progress shows in its row on the fleet page
 and on its run page, and its transcript, redacted, streams live
-on its run page for operators. Nothing listens unless you start it. See
-[`docs/console.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/console.md).
+on its run page for operators. Nothing listens unless you start it.
 
 - **Triggers, editable live.** Add, edit and delete triggers without a restart, on the Triggers page and a page per
   trigger. Drill-ins show what fires each one, what it runs and who may fire it. A one-shot shows armed or spent. A
@@ -157,11 +143,7 @@ on its run page for operators. Nothing listens unless you start it. See
   budget split with each project's share, spend and floor and the split's history, how busy each host was
   (jobs only), and the trigger and flow topology with spend on each trigger, plus a what if form that re-prices a
   flow on another model. A plan covered run never shows as $0.00, and an estimate is
-  always marked as one ([`docs/insights.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/insights.md)).
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/console/console-spend.png?v=2026-11-03" alt="The Spend page: KPI tiles, budget dials, the budget split, a plan verdict, spend charts, the five breakdowns, how busy each host was, and the topology with spend badges" width="820">
-</p>
+  always marked as one.
 
 - **Quiet hours.** Pause windows per folder or repo, timezone aware, edited on the Configuration page. A paused job
   waits, never drops, and costs nothing.
@@ -175,29 +157,26 @@ on its run page for operators. Nothing listens unless you start it. See
 - **Job sizes.** A project row can set the memory and CPUs of its jobs, and how much of a machine they may hold
   (`hostShare`) or keep room for (`minJobs`). The project page shows each project's measured size, the runs' peaks
   against it and a suggestion, with the exact call behind a **Preview this size** confirm; nothing applies a
-  size by itself ([`docs/sizing.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/sizing.md)).
+  size by itself.
 - **Dollar windows.** With dollar caps set, the Spend page's Caps card shows each window's spend and holds against
-  its cap, and what the run records settled ([`docs/costs.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/costs.md)).
+  its cap, and what the run records settled.
 - **Projects.** The project page shows each project with its members and this month's spend, and links to its
   runs. Member edits, adds and deletes go through the console's preview and confirm.
 - **Hosts.** The fleet page shows each worker host: how long ago it beat, its slots in use, what its budget has
   promised its jobs, and its running jobs with project, size and age, then how busy it was over the last 7 days (busy
   share, jobs at once, time full, the wait and the top projects). Time before a host's history starts is said and not counted,
   but a host that is new, or was down, inside history that is here reads as idle for that time. `pi-dispatch capacity`
-  prints the same report
-  ([`docs/multi-host.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/multi-host.md#what-the-console-and-doctor-show-you)).
+  prints the same report.
   It counts jobs only: a machine busy with other work reads as idle.
 
 - **The budget split.** With an allocation envelope (a dollar total per window and a floor per project), the Spend
   page's budget split shows each project's share and spend, the applied plan with the reasons it gave, and the history.
   Revert on a history row goes back to it after a preview and a confirm. The page's priorities and envelope forms set a
-  plan of weights and change the envelope inside the same checks the worker applies
-  ([`docs/allocation.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/allocation.md)).
+  plan of weights and change the envelope inside the same checks the worker applies.
   A run's detail names the plan a portfolio run wrote and the dollars it settled.
 
 - **The portfolio manager.** A weekly flow you own reads the budget and writes a plan of weights. The
-  worker applies it inside the envelope, bounds each move and logs it, so you can revert it
-  ([`docs/portfolio-manager.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/portfolio-manager.md)).
+  worker applies it inside the envelope, bounds each move and logs it, so you can revert it.
 - **Held and failed jobs.** A trigger with `run.waitFor` holds its job in the queue, unstarted and
   unbilled, until a time passes or your check script exits 0. The fleet page shows a **held** section while
   anything waits (the target, the condition and how long), and a **failed** section for jobs the queue
@@ -211,7 +190,6 @@ schedules view spans hosts. On a single host none of that shows, because there i
 The fleet page's Hosts card shows each machine's slots, budget and running jobs now and how busy it was over the last 7
 days; `pi-dispatch capacity`, doctor and the insights page read the same capacity report, from
 the run records (jobs only: a machine busy with other work reads as idle).
-See [`docs/multi-host.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/multi-host.md).
 
 ## Install
 
@@ -227,7 +205,7 @@ consented pass: the job image, Valkey, the egress proxy, `init` and the console'
 tokens, or creates an operator hash and discards its durable plaintext, starts only the console service and prints a
 one-use `/setup` sign-in link after that console answers. The checklist uses actual heartbeat and doctor evidence,
 keeps Starting distinct from Ready, and offers individually previewed and confirmed service actions, a create-only
-provider key field and editable first-trigger recipes. [First run](../docs/console.md#first-run) explains the
+provider key field and editable first-trigger recipes. First run explains the
 explicit local host grant, read-only/viewer/agent views, key and invitation privacy, and terminal recovery.
 
 Forge credentials are the one terminal step: `pi-dispatch setup github --webhook-url '<receiver URL>'` creates a
@@ -241,8 +219,7 @@ deployment's `.env`; a value exported in your shell wins. The switches that gran
 `PI_EGRESS`, `DOCKER_HOST`) are never read from a file.
 
 Run every `pi-dispatch-console` command as the account that runs the deployment, on the deployment's host, and keep
-the worker's and the console's packages on the same release: upgrade them together
-([`docs/upgrading.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/upgrading.md)).
+the worker's and the console's packages on the same release: upgrade them together.
 
 ## Get the whole thing
 
@@ -254,7 +231,7 @@ GitHub Action's. Whoever can merge to your default branch can instruct the agent
 
 ## Configuration in the browser
 
-The [operator console](../docs/console.md#configuration-and-trigger-pages) includes a Pulse Configuration
+The operator console includes a Pulse Configuration
 page, a page per trigger and a structured editor for five trigger kinds. Edit and Delete work from each
 row, with a diff, confirmation and Undo. Human row numbers count from 1.
 The editor and its JSON fallback keep the `run.secretBundle: false` opt-out a new trigger carries.

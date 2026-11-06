@@ -70,7 +70,7 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | The **checkpoint store** (`PI_CHECKPOINTS_DIR`, else `<PI_SESSIONS_DIR>/.checkpoints`) | **None** for its contents (agent-authored trees and transcripts); **Operator** for the directory | Since #645 a trigger with `run.recover` has its running jobs checkpointed into it: the job's whole workspace and its transcript, written by the worker from the host side, never mounted into any container. A recovery writes those bytes back into a new job's workspace, so a restore re-checks every path with the snapshot's own rules and then resets `.pi/`, `.agents/` and the root `AGENTS.md`/`CLAUDE.md` to the run's base commit, so nothing the agent wrote there loads as the repository's own; a repository with `.pi/extensions/` gets no recovery, because an extension's imports cannot be reset ([Durable runs](#what-is-not-defended-v1)) |
 | A steer-armed job's **inbox** (`run.steer`, `pi-dispatch steer`, a phrase comment) | **Operator** for who may send from the host (whoever can run `pi-dispatch steer` against the deployment's Valkey, which is the queue's own trust); **Collaborator** (write access) for a comment, whose author passes the same forge author gate that starting a job takes, on a comment trigger that also set `run.steer`; **None** for the text, which reaches the agent as data | Since #646 a trigger with `run.steer` lets a message reach its running agent. The worker writes it into a per-job directory mounted **read-only** at `/inbox` (the agent can neither plant nor withdraw a message), framed as data with the same fence the issue text gets and with no operator authority, and the agent's receipt is counted only under a MAC keyed by a per-attempt key the agent cannot read. A collaborator's phrase comment on the job's issue or pull request is routed there instead of starting a job; an operator also sends from the console (the operator role, behind its session rules, the text never listed or audited) and from the `/dispatch` panel ([Steering](#what-is-not-defended-v1)) |
 | A **resurrected sandbox**'s operator shell (`pi-dispatch sandbox`) | **Operator — the same trust as a terminal on this host** | A third channel, and the first the **operator** opens rather than the agent. Not a job container: no minted token, no provider key, no agent running, started only by a keypress. It re-mounts a finished run's workspace, which for a forge job holds attacker-influenced code — the same trust shape as checking out a stranger's pull request locally. Every isolation flag still applies; ports it publishes are `127.0.0.1`-only and last only while it does |
-| The **venue** a job's container is built in (`run.backend`, `PI_BACKENDS`) | **Operator — the same trust as the daemon they point the worker at** | A different axis from every row above. Those ask *who wrote this*; this asks *who is holding the execution*. Today there is one venue, the Docker daemon the worker's docker CLI resolves, which is the operator's own machine unless `DOCKER_HOST` or a docker context points it elsewhere; the worker reads that answer at boot and before each job, logs a redirect, and a floor asking `credentialTransit=enforced` refuses one. It judges the endpoint's form, so a unix socket or loopback port that is really a tunnel to another machine still reads as this host. A venue that is not this host holds the container, the job's files, the provider key and the per-job forge token, and the isolation flags in **this worker's argv do not reach it**. What bounds it is a declaration an operator reads (`docs/backends.md`), a floor they can require of every blessed venue, and a boot refusal when the two disagree. |
+| The **venue** a job's container is built in (`run.backend`, `PI_BACKENDS`) | **Operator — the same trust as the daemon they point the worker at** | A different axis from every row above. Those ask *who wrote this*; this asks *who is holding the execution*. Today there is one venue, the Docker daemon the worker's docker CLI resolves, which is the operator's own machine unless `DOCKER_HOST` or a docker context points it elsewhere; the worker reads that answer at boot and before each job, logs a redirect, and a floor asking `credentialTransit=enforced` refuses one. It judges the endpoint's form, so a unix socket or loopback port that is really a tunnel to another machine still reads as this host. A venue that is not this host holds the container, the job's files, the provider key and the per-job forge token, and the isolation flags in **this worker's argv do not reach it**. What bounds it is a declaration an operator reads, a floor they can require of every blessed venue, and a boot refusal when the two disagree. |
 | The **`openshell` venue's supervisor**, which holds a job's credentials (`credentialCustody: layer`, issue #684) | **Vendor code on this host, `asserted`, never `enforced`** | On `local` and `podman` the provider key, the forge token and a trigger's resolved secrets are in the job container's environment, where the agent reads them. On `openshell` they are not: per job the worker creates an OpenShell provider holding them (the values reach the `openshell` CLI through its own environment, never an argv or a file), and the agent's environment holds placeholders (`openshell:resolve:env:v<rev>_NAME`). OpenShell's supervisor, beside the sandbox, terminates TLS and swaps the real value in only in a request to a host the job's policy admits, a policy the worker generates from your allowlist and model endpoints and reads back. An injected agent that dumps its environment dumps placeholders, and `OQ-028`'s host-argv exposure is closed on this venue. The price: the values and the provider and forge plaintext now live in a vendor process, so a compromised supervisor holds everything the job held, bounded by the token's scope and expiry and your provider spend limit, not by trusting its code (`OQ-047`). Its gateway must be on this host (loopback or a unix socket), refused per job otherwise; `PI_EGRESS=0` refuses the boot with it, because its policy is the only path the credentials resolve through. A credential rotated mid-run does not reach a running job (jobs are bounded at 30 minutes). Since issue #730 the runner there runs under a READABLE node (the supervisor's broker must read the runner's memory to let it connect, which a non-dumpable one refuses), so the exit-line key the runner holds is kept from the job's tools not by the node's mode but by three things: OpenShell's workload seccomp (`process_vm_readv`, `ptrace`, `pidfd_getfd` denied), Yama for `/proc/<pid>/mem` (the worker refusing the venue before spend unless the host's `kernel.yama.ptrace_scope` is exactly 1, so the protection is never silently absent: 0 or unreadable and 2 or 3 are each refused by name), and `ulimit -c 0` in the entrypoint so a holder's core cannot carry the key (a file `core_pattern` writes nothing; a pipe `core_pattern` goes to a host-root handler outside the sandbox, which a tool cannot read). A tool can reopen a holder's steer-frame pipe and its stdout and so break or garble a steered job's messages or the worker's exit-line read, never forge a signed line without the key nor read the key (`OQ-047`) |
 | The **`openshell-bind` venue's binds** (bind mode, issue #686) | **Worker-built read-only binds plus the sandbox policy, applied by vendor code, `asserted`** | Upstream says it plainly: "Bind mounts expose gateway-host files to the sandbox and can bypass workspace isolation and filesystem policy." So on this venue OpenShell's own filesystem isolation does NOT keep the agent off the job's host directories. What holds is the worker's side: `/job`, `/inbox` and the overlay are bound read-only (a write fails with EROFS, measured), every bind target is listed in the sandbox's filesystem policy (`read_only` or `read_write`, read back before the job starts), and no other host path of the job's is bound; the compute driver still mounts its own runtime and the supervisor's socket beside them, as it does for every OpenShell sandbox (vendor code, `asserted`). Because a sandbox outlives its exec, the worker deletes it and waits until the gateway no longer lists it before it reads the job's tree (60 s at most; a sandbox still listed then is named in the log, the run takes no recovery snapshot, and a completed run or a folder job is not run again), and a salvage of a lost attempt's tree waits the same way. `/workspace`, `/session` and `/outbox` are the job's to write, exactly as on `local`, and a folder job edits the operator's folder in place. The credentials, the network policy and the placeholders are the `openshell` row's, unchanged. Opt-in per host: the gateway refuses every bind until its gateway.toml allows them, and the worker refuses each job before it spends while it does |
 | The operator console process (`pi-dispatch-console serve`) | **Operator, the same trust as the admin extension** | It runs as the deployment's account and writes through the same read-model funnels as the panel. It renders untrusted text (issue titles, and from #641 on run text) but only escaped, after the control-byte scrub, under a strict CSP and behind the operator role; it executes none of it and feeds none of it to a model. It listens on loopback or a 0600 unix socket, never on the receiver ([The operator console](#the-operator-console)) |
@@ -169,7 +169,7 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   worker's own non-root uid otherwise, passed as `--user` so the job can use its own files (issue #341; see
   *What is NOT defended* for what each costs). Per-job rather
   than per-session, so state cannot leak between mutually-untrusting issue authors.
-  **An operator can re-open a finished run's sandbox** (`pi-dispatch sandbox`, `docs/sandbox.md`), and
+  **An operator can re-open a finished run's sandbox** (`pi-dispatch sandbox`), and
   that does not weaken this: the *job* container is still single-use and still gone the moment it exits.
   A sandbox is a **new** container, built from the same argv builder so it carries every flag above by
   construction, holding **no credential of any kind**, started by an operator at a keyboard and never by
@@ -306,12 +306,12 @@ Only safe typed status reaches Connections, Models and machine readers. Refresh 
 raw account/profile data and provider diagnostics are withheld. Stable local account groups provide
 connection continuity, not automatic identification of two independently linked vendor accounts. Browser
 pages do not authenticate or renew credentials. Unsupported subscription OpenShell and canary routes
-refuse; resurrected sandboxes remain credential-free. See [subscription-auth.md](docs/subscription-auth.md).
+refuse; resurrected sandboxes remain credential-free.
 
 ## The operator console
 
 The admin extension binds no port. The optional sandbox gateway binds its own, on a hostname of its own (below). The operator console does too: `pi-dispatch-console serve` is a separate process
-that serves a web page to manage the deployment ([`docs/console.md`](docs/console.md), `DES-OPERATOR-CONSOLE`,
+that serves a web page to manage the deployment (the console, `DES-OPERATOR-CONSOLE`,
 `REQ-CONSOLE-SECURITY`, `REQ-OPERATOR-CONSOLE-ACTIONS`). It never runs on the receiver, which faces the internet. It listens on `127.0.0.1:4790` by
 default, or on a unix socket at mode 0600, and refuses any other address unless you set `PI_CONSOLE_BIND_PUBLIC=1`
 (doctor then warns). It terminates no TLS: reach it from another machine through `ssh -L`.
@@ -570,7 +570,7 @@ The threat model, and what answers each part:
 
 ## The sandbox browser gateway
 
-The optional [gateway](docs/sandbox-gateway.md) is disabled until an operator enrolls and starts it on the sandbox
+The optional gateway is disabled until an operator enrolls and starts it on the sandbox
 host. It uses a separate hostname and tab; another port on the console hostname would receive the host-only console
 cookie and is refused. Public origins require HTTPS. The explicit local development exception uses distinct
 loopback hosts. Protected enrollment supplies the exact canonical console Origin for login and writes, matching
@@ -640,7 +640,7 @@ residuals. The native opener, job isolation/credentials, paid admission and pers
 Stated openly rather than discovered later:
 
 - **An MCP server is input, and a stdio one is code.** A job connects only the servers the operator lists in
-  the overlay's `mcp.json` and its trigger names (`run.mcp`, [`docs/mcp.md`](docs/mcp.md)): never a repository's
+  the overlay's `mcp.json` and its trigger names (`run.mcp`): never a repository's
   `.pi/mcp.json`, never one an extension registers, never one a pi the job starts reads (it gets `--no-mcp`;
   `pi mcp`, the subcommand, is the residual OQ-011 records). But what a connected server returns (its tools'
   results, its instructions, its resources) is text the model reads, as untrusted as an issue's body, and a
@@ -650,8 +650,7 @@ Stated openly rather than discovered later:
   environment.
 
 - **The forge's own MCP server holds the job's forge token.** A github or gitlab trigger that names `forge` in
-  `run.mcp` gives its job github-mcp-server or mcp-gitlab, started with the token the worker minted for that job
-  ([`docs/mcp.md`](docs/mcp.md#the-forges-own-server)). It is the one server the pickup hands a forge token, and it
+  `run.mcp` gives its job github-mcp-server or mcp-gitlab, started with the token the worker minted for that job. It is the one server the pickup hands a forge token, and it
   holds no power the job's `gh` or `glab` lacks with that token. The image's wrapper withholds each server's
   dedicated merge and approval tools, so the harness does not hand the agent a ready made one
   (`CONST-MERGE-NEVER-AUTOMATIC`), but that is not a boundary: GitLab runs a `/merge` or `/approve` quick action
@@ -718,8 +717,7 @@ Stated openly rather than discovered later:
   container also gets a `/run/secrets` mount carrying the host's subscription files where they exist, so the
   worker does not credit `mountSet` there: doctor says it is asserted, a `PI_BACKEND_FLOOR` asking for it refuses,
   and `doctor --live` fails it by reading the container's own mount table (issue #345). Where the image provides non-root:
-  `docs/job-image.md` requires a
-  non-root runtime user with a writable home, and nothing here verifies that the image you named
+  The job image's checklist requires a non-root runtime user with a writable home, and nothing here verifies that the image you named
   honours it. What is **not** checked is the image's contents, and every way that can be wrong fails
   **silently**: absent guardrails at `/opt/pi-dispatch/HARD_RULES.md` remove the safety floor with no error;
   a stale pi turns jobs into no-ops that report success; wrong exit codes make the queue pay to retry work
@@ -727,7 +725,7 @@ Stated openly rather than discovered later:
   turned discovery off in one image has **not** turned it off in another. What bounds it: only an operator
   editing `triggers.json` can name an image (no tool parameter, no panel key, no settings-overlay key), and
   jobs run with `--pull=never` behind a pre-spend presence check, so the only images that can run are ones
-  you built or pulled onto that host yourself. `docs/job-image.md` is the conformance checklist; `OQ-012` in
+  you built or pulled onto that host yourself. A conformance checklist covers the image; `OQ-012` in
   the project history is the honest statement of what nothing here can check.
 - **`pi-job-*` is a name, not a claim, so a boot reaper will clear your object that happens to use it.**
   The namespace is the string, and nothing checks whether this deployment made the thing. On start, the
@@ -796,7 +794,7 @@ Stated openly rather than discovered later:
   removing the human who would have noticed.
 - **An egress allowlist bounds where an induced agent can send your environment; it does not prevent it.**
   Egress is **denied by default** now: every job runs on its own `--internal` network behind a hostname
-  allowlist proxy, and a job the policy cannot serve is refused before it spends (`docs/egress.md`). That
+  allowlist proxy, and a job the policy cannot serve is refused before it spends. That
   is a real narrowing and it is **not** a fix for this row, for a reason worth reading twice: **your forge
   is on the allowlist, because a job that cannot push has nothing to do**, and a repository is a perfectly
   good place to write a secret to. A successful injection still has somewhere to send things; it has fewer
@@ -841,8 +839,7 @@ Stated openly rather than discovered later:
   (`PI_LOG_RETENTION_DAYS`, `0` = keep forever; `PI_SWEEP_INTERVAL_HOURS` sets the cadence). Leave capture off unless you need it, and treat the log directory as personal data while it is on.
   The raw log never leaves its host. The live transcript is a separate, structured and redacted copy that does
   (the next bullet).
-- **Live transcripts are in Valkey (PII), redacted but not secret-proof.** This reverses what this file and
-  `docs/multi-host.md` said until #643, that transcripts stay on the host that ran the job. Unless you set
+- **Live transcripts are in Valkey (PII), redacted but not secret-proof.** This reverses what this file said until #643, that transcripts stay on the host that ran the job. Unless you set
   `PI_LIVE_TRANSCRIPTS=0`, every worker publishes each running job's transcript to the deployment's Valkey (one
   stream per job, `run:live:<job id>`), so the console and the `/dispatch` panel on any host can show it live.
   - **What the worker reads**: only the job's own transcript file, as a regular file. The agent can replace that
@@ -1143,7 +1140,7 @@ Stated openly rather than discovered later:
   it is an admin account's token that only the receiver's author gate reads, and no job may hold it. If a secrets manager supplies
   the worker's environment, its own credential belongs on the host and never in `PI_FORWARD_ENV`: a token
   that can read every secret in your project is a worse thing to hand an agent than the two credentials a
-  job already carries (`docs/secrets.md`).
+  job already carries.
 - **An `--env-setup` script is a boot-time exec as the account that holds every credential this
   deployment has.** `pi-dispatch service render|install --env-setup <path>` records a file the service
   manager **sources at every boot**, as the service user, with the deployment's environment — so
@@ -1153,7 +1150,7 @@ Stated openly rather than discovered later:
   `pi-dispatch doctor` warns on all three (gone; group- or world-writable; in a work tree that does
   not ignore it) and offers no `--fix` for any of them — it will not `chmod` your file and will not
   move it. The path can only ever be named by an operator typing the flag: never `.env`, never a
-  trigger file, never the panel (`docs/secrets.md`). **That sentence is about the `--env-setup` script
+  trigger file, never the panel. **That sentence is about the `--env-setup` script
   specifically**, and a second, narrower exec now exists: see the next bullet.
 - **A secret resolver is a host exec of the same trust class, reached two ways this document once
   reserved for the flag alone.** `PI_SECRET_PROFILES` names resolver scripts in `.env`, and
@@ -1211,7 +1208,7 @@ Stated openly rather than discovered later:
 - **Every image you name in `triggers.json` is production code, and you are its build gate.** Pull or build
   it yourself on the machine running the worker — jobs launch with `--pull=never`, so nothing is ever fetched
   at job time and a name this host does not have is refused before the job costs anything. Hold it to the
-  conformance checklist in `docs/job-image.md` (non-root with a writable home, the runner as entrypoint,
+  conformance checklist (non-root with a writable home, the runner as entrypoint,
   the exit-code protocol, the pinned pi version, root-owned guardrails, fonts, the loader posture), and run
   the `image` CI job against your own tag. `PI_JOB_IMAGE` and each `run.image` are **separate security
   postures**, not one: a carve-out you made in one image is not inherited by another. `pi-dispatch doctor`
@@ -1226,7 +1223,7 @@ Stated openly rather than discovered later:
   them; there is deliberately no env flag deciding it fleet-wide — and runner-side validation: a
   package that did not mount is refused before any spend, and a package skill that takes the name of a repo
   or overlay skill loses — the repo's stays in force, and the attempt is logged. Since issue #796 a person can also try
-  one exact version on one job, or adopt it fleet-wide, from the console's [Updates](docs/console.md#updates) page: both
+  one exact version on one job, or adopt it fleet-wide, from the console's Updates page: both
   go through the same staging with `--ignore-scripts`, refuse a dependency tree holding anything but registry tarballs with a hash (npm runs a git dependency's build script whatever that flag says), neither is open to an agent, and a tried version is new third-party
   code in a job that holds its trigger's credentials, which is why that is a person's call. Two facts to hold on to.
   Staging runs
@@ -1346,7 +1343,7 @@ Stated openly rather than discovered later:
   (`pi-dispatch up`, and the `docker run` doctor's Valkey fix shows, pass `-e VALKEY_PASSWORD`; the compose
   file's Valkey sets it in `environment:`) and, on a compose deployment, the receiver's whole `.env`
   (`env_file: ../.env`: webhook secrets and forge credentials). doctor's in-image `gh` check passes your
-  token on stdin, so doctor itself adds no copy. See `docs/backends.md`.
+  token on stdin, so doctor itself adds no copy.
 - **`PI_SESSIONS_DIR` is a PII store, and it has no default.** Unset means the feature is unavailable and
   a trigger that asked for it is refused before it costs anything — deliberately, because a default would
   turn that refusal into a silent success, writing the most PII-bearing thing this system holds to a path

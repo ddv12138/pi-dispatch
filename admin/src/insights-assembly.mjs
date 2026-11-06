@@ -85,7 +85,7 @@ export function allocNow() {
 
 /** Why there is no envelope to work with, in one sentence (the read's own words, escaped). */
 export function envelopeProblem(r) {
-  if (r.unset) return "PI_ENVELOPE_FILE is unset: there is no envelope, so delegation is off (docs/allocation.md)";
+  if (r.unset) return "PI_ENVELOPE_FILE is unset: there is no envelope, so delegation is off";
   if (r.missing) return "the envelope file (PI_ENVELOPE_FILE) does not exist";
   if (r.unreadable) return `the envelope file (PI_ENVELOPE_FILE) could not be read (${r.unreadable})`;
   return `the envelope file does not load: ${escapeInterpreted(String(r.invalid ?? "unknown"))}`;

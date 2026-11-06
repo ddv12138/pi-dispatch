@@ -40,7 +40,7 @@ fi
 # both of which used to swallow a stop in silence.
 #
 # Until this line TERM/INT carry their DEFAULT disposition, and the sourcing below can take arbitrarily
-# long: PI_ENV_SETUP is an operator's secrets manager, so docs/secrets.md's own worked example makes a
+# long: PI_ENV_SETUP is an operator's secrets manager, so a real one's own worked example makes a
 # network round trip inside it. A stop landing there killed this shell where it stood, mid-preparation,
 # with nothing anywhere saying the environment had been half-built. That is reachable from this project's
 # own CLI, not just from the daemon: `pi-dispatch service stop` on macOS is `launchctl kill SIGTERM` at
@@ -135,7 +135,7 @@ fi
 # restores it. Its two variables are assigned here too, after the load, for the reason given at the
 # top. What it cannot undo is a script that IGNORES TERM (`trap '' TERM`): a signal discarded while it
 # was ignored is already gone, and the child forked below would inherit SIG_IGN and be unable to trap
-# TERM at all. That is why docs/secrets.md now tells operators not to touch signals in a setup script.
+# TERM at all. That is why operators are told not to touch signals in a setup script.
 signaled=0
 child=
 wrapper_on_stop() {

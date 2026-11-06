@@ -47,7 +47,7 @@ const WRITE_PERMISSIONS = new Set(["owner", "admin", "write"]);
  */
 const FORBIDDEN_REASON = Object.freeze({
 	FORGEJO_PERMISSION_TOKEN: "collaborator permission lookup returned 403 (the account behind FORGEJO_PERMISSION_TOKEN must be an admin or the owner of the repository, and the token must carry read:repository)",
-	FORGEJO_TOKEN: "collaborator permission lookup returned 403 (FORGEJO_TOKEN's account is not an admin of the repository: set FORGEJO_PERMISSION_TOKEN to a read:repository token of an account that is, docs/forgejo.md)",
+	FORGEJO_TOKEN: "collaborator permission lookup returned 403 (FORGEJO_TOKEN's account is not an admin of the repository: set FORGEJO_PERMISSION_TOKEN to a read:repository token of an account that is an admin or the owner of the repository)",
 });
 
 /**

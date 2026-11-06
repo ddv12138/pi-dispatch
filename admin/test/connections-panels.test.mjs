@@ -100,7 +100,7 @@ test("proxy rows carry concise glyph-word states and stale evidence stays separa
   marked(row(result, "absent"), "not published", "minus", "idle");
   assert.equal(cardText(result).match(/No proxy check can mean/g).length, 1);
   assert.doesNotMatch(result, /diagnostic detail belongs/);
-  assert.match(result, /href="https:\/\/github\.com\/edgehero\/pi-dispatch\/blob\/[^\"]+\/docs\/egress\.md"[^>]+rel="noreferrer noopener"/);
+  assert.doesNotMatch(result, /docs\//, "no link to a removed page");
   assert.doesNotMatch(cardText(result), /HTTPS tunnels|leading dot covers|Bundle endpoints never widen|Jobs cannot reach another job/);
   facts.egress.on = false;
   marked(draw("connectionsEgress", facts), "off: jobs reach what their host reaches (PI_EGRESS=0)", "minus", "idle");

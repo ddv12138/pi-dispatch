@@ -73,7 +73,7 @@ test("the overrides move every pi package and may add only pi packages, and only
 });
 
 test("documented install commands bump only pi, including when worker/admin versions equal the old pi pin", () => {
-	for (const path of ["README.md", "docs/console.md"]) {
+	for (const path of ["README.md"]) {
 		const site = PI_PIN_SITES.find((row) => row.path === path);
 		assert.ok(site, `${path} participates in the actual bump path set`);
 		const text = "npm install --save-exact @edgehero/pi-dispatch@1.0.3 @edgehero/pi-dispatch-admin@1.0.3 @earendil-works/pi-coding-agent@1.0.3 --ignore-scripts\n";

@@ -66,7 +66,7 @@ test("special-provider guidance matches the actual worker credential boundary an
 
 test("host-auth guides distinguish API keys, official SIWC and Claude Code from pinned community compatibility", async () => {
   const { PROVIDER_AUTH_GUIDES } = await import("../src/provider-help.mjs");
-  for (const guide of Object.values(PROVIDER_AUTH_GUIDES)) for (const value of [guide.docsUrl, guide.officialUrl]) {
+  for (const guide of Object.values(PROVIDER_AUTH_GUIDES)) for (const value of [guide.docsUrl, guide.officialUrl].filter((v) => v !== null)) {
     const url = new URL(value);
     assert.equal(url.protocol, "https:");
     assert.ok(["https://github.com", "https://developers.openai.com", "https://code.claude.com"].includes(url.origin));

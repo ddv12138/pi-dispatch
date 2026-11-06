@@ -44,8 +44,4 @@ are `WEBHOOK_SECRET`, `VALKEY_URL` and `VALKEY_PASSWORD`, `PI_TRIGGERS_FILE`, `R
 webhook secret (see its setup guide). It needs `@edgehero/pi-dispatch` of the same major
 version, which it installs as a dependency.
 
-Setup guides: [GitHub](https://github.com/edgehero/pi-dispatch/blob/main/docs/github.md),
-[GitLab](https://github.com/edgehero/pi-dispatch/blob/main/docs/gitlab.md),
-[Forgejo](https://github.com/edgehero/pi-dispatch/blob/main/docs/forgejo.md),
-[Azure DevOps](https://github.com/edgehero/pi-dispatch/blob/main/docs/azure-devops.md),
-polling. MIT licensed.
+MIT licensed.

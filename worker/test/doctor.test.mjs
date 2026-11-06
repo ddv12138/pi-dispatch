@@ -370,7 +370,7 @@ test("doctor: a trigger image present but without the runner entrypoint WARNS, n
 	const code = await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, "my-python:1.2.0") }), imgDeps(out, plan));
 	assert.equal(code, 0, "warn, never fail");
 	assert.match(text(), /⚠ my-python:1\.2\.0 does not appear to carry the pi-dispatch runner entrypoint/);
-	assert.match(text(), /docs\/job-image\.md/);
+	assert.match(text(), /FROM this repo's image\/Dockerfile/);
 });
 
 test("doctor: a conformant trigger image passes both checks silently", async () => {
@@ -1717,10 +1717,10 @@ test("a credential missing from shell and .env is a ⚠ naming the env-setup scr
 	// No script at all: the ✗ stands, and its fix line says an env-setup deployment may ignore it.
 	const none = capture();
 	assert.equal(await runDoctor(noPat, seamDeps(none.out)), 1);
-	assert.ok(none.text().includes("✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset: the worker and the receiver refuse to start (exit 2)\n    → set GITHUB_PAT to a fine-grained PAT in .env, or switch GITHUB_AUTH_SOURCE. A deployment whose service gets GITHUB_PAT from an --env-setup script (docs/secrets.md) can ignore this line; doctor found no service installed for this folder to read\n"), none.text());
+	assert.ok(none.text().includes("✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset: the worker and the receiver refuse to start (exit 2)\n    → set GITHUB_PAT to a fine-grained PAT in .env, or switch GITHUB_AUTH_SOURCE. A deployment whose service gets GITHUB_PAT from an --env-setup script can ignore this line; doctor found no service installed for this folder to read\n"), none.text());
 	const noKeyNone = capture();
 	assert.equal(await runDoctor(noKey, seamDeps(noKeyNone.out)), 1);
-	assert.match(noKeyNone.text(), /✗ Provider key set \(anthropic: [^\n]*\n {4}→ [^\n]*\. A deployment whose service gets one of [A-Za-z_ ]+ from an --env-setup script \(docs\/secrets\.md\) can ignore this line; doctor found no service installed for this folder to read\n/);
+	assert.match(noKeyNone.text(), /✗ Provider key set \(anthropic: [^\n]*\n {4}→ [^\n]*\. A deployment whose service gets one of [A-Za-z_ ]+ from an --env-setup script can ignore this line; doctor found no service installed for this folder to read\n/);
 	assert.ok(!pat.text.includes(SETUP_BODY.trim()) && !app.text.includes(SETUP_BODY.trim()), "the script is named, never read out");
 });
 
@@ -3010,7 +3010,7 @@ test("doctor: forgejo triggers with nothing set warn with the exact vars receive
 	const code = await runDoctor(imgEnv({ PI_TRIGGERS_FILE: forgeTriggersFile("forgejo") }), imgDeps(out, green));
 	assert.equal(code, 0, "warn, never fail");
 	assert.match(text(), /⚠ triggers\.json has forgejo triggers but FORGEJO_URL, FORGEJO_WEBHOOK_SECRET, FORGEJO_TOKEN are unset/);
-	assert.match(text(), /docs\/forgejo\.md/, "the fix says where the setup is documented");
+	assert.match(text(), /\.env\.example documents each/, "the fix says where the setup is documented");
 	assert.match(text(), /FORGEJO_BOT_ID/, "the repository-scoped-token caveat is named");
 });
 
@@ -3058,7 +3058,7 @@ test("doctor: azure triggers with nothing set warn for the undefaulted mode AND 
 	assert.match(text(), /⚠ triggers\.json has azure triggers but AZURE_WEBHOOK_MODE is unset -- the receiver will refuse to start/);
 	assert.match(text(), /"basic" \(HTTP Basic on the service hook\) or "header"/, "the fix names both legal modes");
 	assert.match(text(), /⚠ triggers\.json has azure triggers but AZURE_WEBHOOK_SECRET, AZURE_TOKEN, AZURE_ORG_URL are unset/);
-	assert.match(text(), /docs\/azure-devops\.md/);
+	assert.match(text(), /\.env\.example documents each/);
 });
 
 test("doctor: AZURE_WEBHOOK_MODE=header pulls AZURE_WEBHOOK_HEADER into the required set", async () => {
@@ -3958,10 +3958,6 @@ test("doctor: each declared model endpoint is proved through the proxy by three 
 	assert.equal(runs[5].at(-1), egressCanaryPlainScript("http://host.docker.internal:11434/v1/models", { proxyUrl: "http://pi-dispatch-egress-proxy:3128" }));
 	assert.deepEqual(checks.filter((c) => c.readBack).map((c) => c.readBack.probe), ["provider", "unlisted", "plainhttp"], "the egress verdict reads exactly the canary's three");
 	assert.ok(calls.findIndex((c) => c.args.slice(0, 2).join(" ") === "network rm") > calls.findLastIndex((c) => c.args[0] === "run"), "the network goes after the last endpoint probe");
-	// docs/egress.md's sample is these lines, in this order: generated here, so the page cannot drift from what doctor prints.
-	const doc = readFileSync(new URL("../../docs/egress.md", import.meta.url), "utf8");
-	const sample = checks.filter((c) => c.endpointProbe || /^Model endpoints: the include/.test(c.label)).map((c) => `✓ ${c.label}\n`).join("");
-	assert.ok(doc.includes(sample), "docs/egress.md shows the include line and the three probe lines exactly");
 });
 
 test("doctor: an endpoint probe fails on a silent server, a rule that is not port-exact and a plain request let through, and shows the proxy's status (#503)", async () => {
@@ -4137,10 +4133,10 @@ test("doctor: a route the measurements refute on this runtime is ✗ naming the 
 	const HCI = { id: "hci", host: "host.containers.internal", port: 11434, slots: 1 };
 	const refuted = await doctorEndpoints({ endpoints: [HCI], facts: ENGINE_2913_FACTS });
 	assert.equal(refuted.failed, true);
-	assert.match(refuted.text, /✗ Model endpoint hci \(host\.containers\.internal:11434\) has no route from the egress proxy on this runtime: host\.containers\.internal does not work from the proxy \(measured 2026-09-30, Docker Engine 29\.1\.3, Ubuntu 24\.04\)\. The name is not defined on Docker Engine\. Declare host\.docker\.internal\.\n {4}→ declare the host this runtime reaches \(docs\/backends\.md/);
+	assert.match(refuted.text, /✗ Model endpoint hci \(host\.containers\.internal:11434\) has no route from the egress proxy on this runtime: host\.containers\.internal does not work from the proxy \(measured 2026-09-30, Docker Engine 29\.1\.3, Ubuntu 24\.04\)\. The name is not defined on Docker Engine\. Declare host\.docker\.internal\.\n {4}→ declare the host this runtime reaches \(host\.docker\.internal on Docker, host\.containers\.internal on Podman\)/);
 	const unmeasured = await doctorEndpoints({ facts: { ...ENGINE_2913_FACTS, ServerVersion: "28.0.1" } });
 	assert.equal(unmeasured.failed, false, unmeasured.text);
-	assert.match(unmeasured.text, /✓ Model endpoint mac-ollama \(host\.docker\.internal:11434\): the route from the proxy is not measured here\. No route from the proxy to host\.docker\.internal was measured on docker 28\.0\.1 engine\. docs\/backends\.md lists the measured ones\. The endpoint probes below are the proof/);
+	assert.match(unmeasured.text, /✓ Model endpoint mac-ollama \(host\.docker\.internal:11434\): the route from the proxy is not measured here\. No route from the proxy to host\.docker\.internal was measured on docker 28\.0\.1 engine\. The endpoint probes below are the proof/);
 });
 
 test("doctor: no declared endpoint is no new line and no new container, and rules that predate the include say only the refresh (#503)", async () => {
@@ -6326,20 +6322,6 @@ test("a proxy that lets plain HTTP through fails its own line and reads back as 
 	assert.deepEqual(unrun.find((c) => c.readBack?.probe === "plainhttp").readBack, { property: "egress", want: false, reached: null, probe: "plainhttp" });
 });
 
-// Issue #508, gate round 1: docs/egress.md's sample doctor output is the code's own wording. The page's generated rows
-// (CANARY_LINES) are the leftover sweep's lines only, so the probe lines were free to drift; they are pinned here, read
-// off a real canary run and the real verdict rather than retyped.
-test("docs/egress.md's sample egress lines are what doctor prints, on docker and on podman (#508)", async () => {
-	const doc = readFileSync(new URL("../../docs/egress.md", import.meta.url), "utf8");
-	const probes = (await collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x" }, collectSeams(green))).filter((c) => c.readBack);
-	assert.deepEqual(probes.map((c) => c.readBack.probe), ["provider", "unlisted", "plainhttp"]);
-	const docker = probes.map((c) => `✓ ${c.label}\n`).join("");
-	const podman = probes.map((c) => `✓ podman: ${c.label}\n`).join("");
-	assert.ok(doc.includes(`✓ Egress proxy health: healthy\n${docker}\`\`\``), "the docker sample, all three lines in order");
-	const held = egressVerdict({ armed: true, results: probes.map((c) => c.readBack) });
-	assert.equal(held.ok, true);
-	assert.ok(doc.includes(`${podman}✓ read back on podman: egress holds (${held.detail})\n`), "the podman sample, with the read-back's own wording");
-});
 
 // Issue #508, gate rounds 1 and 2: with the egress policy on a job reaches a forge only over https on 443. git ignores the
 // job's uppercase HTTP_PROXY for an http:// remote (measured in the job image), and the proxy refuses a CONNECT off 443.
@@ -6356,7 +6338,7 @@ test("doctor warns when egress is on and a forge URL is anything but https:// on
 		assert.match(other.label, /^GITLAB_URL \(.*\) is not an https:\/\/ URL, so with the egress policy on a job cannot reach it \(issue #508\)$/, value);
 		assert.match(other.fix, /^serve the forge over https:\/\/ on port 443/, value);
 	}
-	assert.equal(gitlab.fix, "serve the forge over https:// on port 443 and point GITLAB_URL there, or set PI_EGRESS=0 if you accept jobs without the policy (docs/egress.md)");
+	assert.equal(gitlab.fix, "serve the forge over https:// on port 443 and point GITLAB_URL there, or set PI_EGRESS=0 if you accept jobs without the policy");
 	const [tls] = forgeUrlEgressChecks({ GITLAB_URL: "https://gitlab.example:8443" }, ["gitlab"]);
 	assert.equal(tls.label, "GITLAB_URL (https://gitlab.example:8443) is https:// on port 8443, and the egress proxy refuses a CONNECT to any port but 443, so with the egress policy on every job's push, fetch and API call to it fails (issue #508)");
 	for (const [why, env, forges] of [
@@ -7104,46 +7086,6 @@ test("a teardown that KEEPS the network does not then remove it (#379)", async (
 	);
 });
 
-test("docs/egress.md's canary rows ARE the table, generated (#379)", () => {
-	const doc = readFileSync(new URL("../../docs/egress.md", import.meta.url), "utf8");
-	const region = /<!-- CANARY-LINES -->\n([\s\S]*?)<!-- \/CANARY-LINES -->/.exec(doc);
-	assert.ok(region, "the generated region is still there");
-	// EVERY TABLE ROW IN THE REGION, not only the ones that look right: filtering to lines starting "| `"
-	// let a fabricated row whose first cell is not backticked sit inside the generated region and be
-	// silently dropped.
-	const all = region[1].split("\n").filter((l) => l.startsWith("|") && !/^\|\s*(Line|-)/.test(l));
-	assert.ok(
-		all.every((l) => l.startsWith("| `")),
-		"every row in the generated region has a backticked first cell, or it is not a generated row",
-	);
-	const rows = all.map((l) => l.slice(3, l.indexOf("` |")));
-	// The page's placeholders, which are the only hand-written part: the table builds the sentence, this
-	// decides what stands in for a network name. The `notRemoved` command is DERIVED rather than typed,
-	// because it is the one placeholder that is itself a command the code composes.
-	const placeholders = {
-		unlisted: { prefix: EGRESS_CANARY_NET_PREFIX },
-		foreign: { name: "<net>", cliSays: "<what it resolved>" },
-		unreadable: { name: "<net>" },
-		kept: { name: "<net>", stuck: ["<probe>"] },
-		removed: { name: "<net>", after: "after removing <probes> and detaching <endpoints>" },
-		gone: { name: "<net>", did: "removed <probes> and detached <endpoints>" },
-		notRemoved: { name: "<net>", command: null },
-		held: { name: "<net>", because: "<why>" },
-	};
-	assert.deepEqual(Object.keys(placeholders), Object.keys(CANARY_LINES), "a shape with no placeholder row is a shape the page cannot describe");
-	const expected = Object.entries(CANARY_LINES).map(([shape, spec]) => {
-		const params = shape === "notRemoved" ? { ...placeholders[shape], command: `docker network rm ${placeholders[shape].name}` } : placeholders[shape];
-		return `${spec.tier === "ok" ? "✓" : "⚠"} Egress canary: ${spec.label(params)}`;
-	});
-	assert.deepEqual(rows, expected, "the page's first column is the table, in the table's order, or it is stale");
-	// THE RETIRED PHRASES, carried over from the test this replaced. It guarded them with the note that a
-	// correction had landed everywhere except the page four times on that branch, and dropping the guard let
-	// all three back into the columns this test does not otherwise read.
-	const section = doc.slice(doc.indexOf("### Lines about leftovers"), doc.indexOf("The provider and unlisted-host lines each run"));
-	for (const retired of ["left by a doctor run that did not finish", "from an interrupted doctor", "the network itself was already gone"]) {
-		assert.equal(section.includes(retired), false, `the page must not quote a sentence no site can emit: ${retired}`);
-	}
-});
 
 test("doctor: a canary network that could not be READ names the command that failed (#350, #360)", async () => {
 	// This file's convention is that a label carries the command that FAILED. This line carried
@@ -8966,7 +8908,7 @@ const DOCKER_CANARY_PIN = {
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
 			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
+			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
 			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
 			"✓ local: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
 			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
@@ -9048,7 +8990,7 @@ const DOCKER_CANARY_PIN = {
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
 			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
+			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
 			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
 			"✓ local: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
 			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
@@ -9136,7 +9078,7 @@ const DOCKER_CANARY_PIN = {
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
 			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
+			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
 			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
 			"✓ local: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
 			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
@@ -9228,7 +9170,7 @@ const DOCKER_CANARY_PIN = {
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
 			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
+			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
 			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
 			"✓ local: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
 			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
@@ -9320,7 +9262,7 @@ const DOCKER_CANARY_PIN = {
 			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
 			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
 			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
+			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
 			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
 			"✓ local: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
 			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
@@ -9446,7 +9388,7 @@ test("forgejo: a set FORGEJO_PERMISSION_TOKEN is a FACT LINE naming whose accoun
 	const base = { PI_TRIGGERS_FILE: forgeTriggersFile("forgejo"), FORGEJO_URL: "https://code.example.org", FORGEJO_WEBHOOK_SECRET: "s", FORGEJO_TOKEN: "fj_token_val" };
 	const checks = await collectChecks(imgEnv({ ...base, FORGEJO_PERMISSION_TOKEN: "fj_lookup_val" }), adviceSeams());
 	const line = renderedOne(checks, /author-gate lookups use FORGEJO_PERMISSION_TOKEN/);
-	assert.match(line.text, /^✓ forgejo author-gate lookups use FORGEJO_PERMISSION_TOKEN: its account must be an admin \(or the owner\).*read:repository only.*write collaborator's \(docs\/forgejo\.md\)\n$/);
+	assert.match(line.text, /^✓ forgejo author-gate lookups use FORGEJO_PERMISSION_TOKEN: its account must be an admin \(or the owner\).*read:repository only.*write collaborator's\n$/);
 	assert.equal(line.failed, false);
 	assert.equal(checks.some((c) => /FORGEJO_PERMISSION_TOKEN is unset/.test(c.label)), false, "no fallback warning when it is set");
 	assert.equal(JSON.stringify(checks).includes("fj_lookup_val"), false, "presence only");
@@ -9467,7 +9409,7 @@ test("persisted transcripts and a context bound that may be inert are FACT LINES
 	const transcripts = renderedOne(checks, /persist agent transcripts/);
 	assert.equal(
 		transcripts.text,
-		"✓ 1 trigger(s) persist agent transcripts to /srv/pi-sessions -- PII-bearing, host-only, never committed: keep it outside every git repo, on a disk you would put issue text on (docs/sessions.md)\n",
+		"✓ 1 trigger(s) persist agent transcripts to /srv/pi-sessions -- PII-bearing, host-only, never committed: keep it outside every git repo, on a disk you would put issue text on\n",
 	);
 	assert.equal(transcripts.failed, false);
 	// Gate round 1: a fact line, not a warning, because doctor has no image capability to check, so a ⚠ here could never

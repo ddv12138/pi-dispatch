@@ -1,8 +1,8 @@
 /**
  * A headless Chrome driven over `--remote-debugging-pipe` (the DevTools protocol on fds 3 and 4, NUL-terminated JSON):
  * no browser library, no port, and nothing it loads can reach the network (`--host-resolver-rules`). Lifted out of
- * `launch/render-images.mjs` (issue #737) so `.github/scripts/console-width-check.mjs` drives the same browser the same
- * way; render-images calls it with the arguments it always used, so its run is unchanged.
+ * `.github/scripts/console-width-check.mjs` (issue #737), so the width check drives Chrome the way the console
+ * once did for its README images.
  *
  * The caller owns the lifetime: `work` is a directory it removes, `children` the set of processes its own cleanup kills
  * whatever ends the run (a crash, a signal), and `Refusal` the error class it reports as an operator-actionable line.
@@ -35,10 +35,10 @@ export function frozenDateSource(ms) {
  *   removeSingleton()                     see below; synchronous, safe in an exit handler
  *   close()                               `Browser.close`, then SIGKILL after 5 s
  *
- * `env` is the child's whole environment besides TMPDIR (render-images passes only HOME). `extraArgs` go before the
+ * `env` is the child's whole environment besides TMPDIR. `extraArgs` go before the
  * start URL. `resolverRules` is Chrome's `--host-resolver-rules`: by default every name maps to nothing, and Chrome
  * applies the rules to an IP literal too, so a caller serving pages on loopback must `EXCLUDE` that address. With `captureStderr`, the last 4 KB of Chrome's stderr are kept and quoted when it dies, which is how a
- * sandbox that cannot start says so; without it, stderr is ignored as render-images always had it.
+ * sandbox that cannot start says so; without it, stderr is ignored.
  */
 export async function openChrome({ chrome, work, children, Refusal = Error, stepMs = 30_000, env = {}, extraArgs = [], captureStderr = false, resolverRules = "MAP * ~NOTFOUND" }) {
 	const profile = join(work, "chrome");

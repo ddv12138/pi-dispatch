@@ -238,18 +238,6 @@ test("the record's bundle is rebuilt from names only: anything that is not an en
 	}
 });
 
-test("docs/secrets.md's list of names a bundle may not carry is the worker's table, both directions", async () => {
-	const { readFileSync } = await import("node:fs");
-	const { BUNDLE_LOADER_NAMES, BUNDLE_LOADER_PREFIXES, BUNDLE_LOADER_PREFIXES_ANY_CASE, bundleLoaderName } = await import("../src/secret-bundles.mjs");
-	const doc = readFileSync(new URL("../../docs/secrets.md", import.meta.url), "utf8");
-	const between = /<!-- bundle-loader-names:start -->([\s\S]*?)<!-- bundle-loader-names:end -->/.exec(doc);
-	assert.ok(between, "the markers are there");
-	const listed = [...between[1].matchAll(/`([^`]+)`/g)].map((m) => m[1]).sort();
-	const table = [...BUNDLE_LOADER_NAMES, ...BUNDLE_LOADER_PREFIXES.map((p) => `${p.replace(/_$/, "_")}*`), ...BUNDLE_LOADER_PREFIXES_ANY_CASE.map((p) => `${p}*`)].sort();
-	assert.deepEqual(listed, table);
-	assert.ok(bundleLoaderName("NPM_CONFIG_REGISTRY") && bundleLoaderName("npm_config_registry") && bundleLoaderName("Npm_Config_Script_Shell"), "npm_config_ in any case");
-	assert.ok(!bundleLoaderName("STRIPE_KEY") && !bundleLoaderName("DATABASE_URL"));
-});
 
 test("a missing triggers file is no bundles on a host that declares none, and a failure on one that declares any", () => {
 	const dir = tempDir("pi-trig-missing-");

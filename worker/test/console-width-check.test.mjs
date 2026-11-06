@@ -1786,9 +1786,6 @@ test("what the workflow's comment, the docs say the check does is what it does: 
 	assert.ok(comment.includes(`must fail with exactly their ${WORDS[desk]} and ${WORDS[phone]} problems`), "and each control's count");
 	assert.ok(comment.includes(`blind to one of those ${WORDS[desk + phone]} cannot pass`), "and what the two prove together, no more");
 	const read = (path) => prose(readFileSync(join(repo, path), "utf8"));
-	const docs = read("docs/console.md");
-	assert.ok(docs.includes(`at ${listed(PHONE_WIDTHS)} pixels as mobile-emulated windows and at ${listed(DESKTOP_WIDTHS)}`), "docs/console.md names the sweep's widths");
-	assert.ok(docs.includes(`one built to break ${WORDS[desk]} of its rules`) && docs.includes(`a phone's bar built to break ${WORDS[phone]}`), "and each control's count");
 	assert.ok(read("SECURITY.md").includes(`at ${WORDS[PHONE_WIDTHS.length]} phone widths and ${WORDS[DESKTOP_WIDTHS.length]} desktop widths`), "SECURITY.md counts them");
 });
 

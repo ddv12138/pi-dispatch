@@ -46,7 +46,7 @@
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
 import { FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
-import { NO_EXPLANATION, docsHref } from "../../words.mjs";
+import { NO_EXPLANATION } from "../../words.mjs";
 import { fmtTokens } from "../../panel.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
@@ -1190,8 +1190,7 @@ function stepHtml(st, i, view) {
     return hint === null ? null : html`<p class="su-alt">${partsHtml(hint, view)}</p>`;
   };
   const cmds = operator ? st.commands.map((argv, k) => html`${k === 1 && st.id === "worker" ? html`<p class="su-alt">${uiText("Or run it yourself in a terminal:", view.locale)}</p>` : null}${ui.cmd([...argv])}${hintOf(argv)}`) : null;
-  const href = docsHref("docs/triggers.md");
-  const add = st.id === "trigger" && st.state !== "ready" && canAct(view) ? html`<div class="su-act">${ui.btn({ kind: "primary", label: uiText("Add a trigger", view.locale), icon: "plus", href: hrefTo(view, "trigger-add", null, "config") })}${href === null ? null : ui.outLink({ href, label: uiText("What triggers can do", view.locale), btn: "ghost" })}</div>` : null;
+  const add = st.id === "trigger" && st.state !== "ready" && canAct(view) ? html`<div class="su-act">${ui.btn({ kind: "primary", label: uiText("Add a trigger", view.locale), icon: "plus", href: hrefTo(view, "trigger-add", null, "config") })}</div>` : null;
   return html`<li class="${st.state === "ready" ? "su-step su-step--done" : "su-step"}">${ui.tile(word.status, { icon: stepIcon(st) })}<div class="su-step__b"><p class="su-step__t"><span class="su-n">${count(i + 1)}</span>${uiText(st.title, view.locale)}${ui.chip(uiText(word.word, view.locale), { status: word.status })}</p><p class="su-step__s">${partsHtml(st.sentence, view)}</p>${cmds}${add}</div></li>`;
 }
 

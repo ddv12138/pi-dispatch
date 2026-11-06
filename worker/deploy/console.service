@@ -8,7 +8,7 @@
 # The console listens on PI_CONSOLE_LISTEN (default 127.0.0.1:4790, loopback only) and reads its tokens file
 # (PI_CONSOLE_TOKENS_FILE, default console-tokens.json in the deployment folder). It never needs Docker or Podman, so
 # this unit is ordered after nothing but the network and has no Quadlet companion. Reach it from another machine
-# with ssh -L, never by binding a public address: it speaks plain HTTP (docs/console.md).
+# with ssh -L, never by binding a public address: it speaks plain HTTP.
 #
 # NO EnvironmentFile= on purpose: `serve --deployment` reads the deployment's `.env` itself, takes only its own
 # PI_CONSOLE_* keys and the Valkey keys it needs from it, and refuses a `.env` another account can change. Loading the

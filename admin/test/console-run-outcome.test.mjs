@@ -8,7 +8,6 @@ import { createFleetReader, fleetQueuesOn, readFleetQueues, RUN_FILE_UNREADABLE,
 import { runUnreadText, runUntoldText } from "../src/console/panels/run.mjs";
 import { parkedAnswerRefusalOf, RERUN_DATA_KEPT_MS, RERUN_DATA_KEPT_TEXT, RERUN_KEPT_SLACK_MS, rerunRefusalOf } from "../src/job-actions.mjs";
 import { FORGE_JOB_RETENTION_MS, LOCAL_JOB_KEPT_FAILED_S } from "@edgehero/pi-dispatch/retention";
-import { DOCS_ROOT } from "../src/words.mjs";
 import { parseDocument } from "./helpers/script-dom.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -35,7 +34,7 @@ test("the viewer disclosure precedes the outcome and the run's progress", () => 
   assert.deepEqual(panelIds("run").slice(0, 3), ["p-viewer", "p-outcome", "p-progress"]);
 });
 
-test("a refused run: the banner says the outcome word, the catalog's sentence for its why, the next step and the docs link; Progress and the answer draft draw nothing", async () => {
+test("a refused run: the banner says the outcome word, the catalog's sentence for its why, the next step; Progress and the answer draft draw nothing", async () => {
   const queueState = { found: false, jobState: null, activeJobId: null, queuedJobId: null };
   for (const role of ["operator", "viewer"]) {
     const panels = await panelsOf(role, { run: { record: REFUSED, source: "local" }, queueState, progress: { absent: true }, transcript: { exists: false } }, REFUSED.jobId);
@@ -47,7 +46,6 @@ test("a refused run: the banner says the outcome word, the catalog's sentence fo
     assert.notEqual(variant, REASONS["model-unknown"].sentence, "the fixture's why has a variant");
     assert.ok(banner.includes(variant.split("`")[0].replace(/'/g, "&#39;")), `${role}: the why variant`);
     assert.ok(banner.includes("<strong>What to do:</strong>"), role);
-    assert.ok(banner.includes(`href="${DOCS_ROOT}docs/reasons.md#model-unknown" rel="noreferrer noopener" target="_blank"`), `${role}: the docs link`);
     const byId = Object.fromEntries(panels.map((p) => [p.id, p.html]));
     assert.equal(byId["p-progress"], "", `${role}: no progress for a run that never started`);
     assert.equal(byId["p-answer-draft"], "", `${role}: no answer draft either`);

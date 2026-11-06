@@ -66,7 +66,7 @@ coverage/
 # of; the EMPTY one an operator actually runs is scaffolded into the deployment folder by `pi-dispatch
 # init` (worker/src/init.mjs), which is why the scaffold is committable by accident without this rule.
 # There is no copy under deploy/: the worker resolves this file only via PI_PAUSE_WINDOWS_FILE, so one
-# sitting among the service templates would be read by nothing. See docs/pause-windows.md.
+# sitting among the service templates would be read by nothing.
 /pause-windows.json
 !pause-windows.example.json
 
@@ -128,6 +128,3 @@ plan-artifacts/
 # The release tags' worker/src, extracted while .github/scripts/run-record-fixtures.mjs builds the run-record fixtures
 # (issue #761). Inside the repository so each tag's imports resolve; the generator removes it when it finishes.
 /.run-record-fixtures/
-
-# render-images.mjs --console --all: every golden at both widths and themes, about a gigabyte. Rendered on demand.
-docs/images/console/all/

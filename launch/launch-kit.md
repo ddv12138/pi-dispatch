@@ -147,8 +147,7 @@ registers what it names:
 ```json
 "pi": {
   "extensions": ["./dist/index.mjs"],
-  "skills": ["./skills"],
-  "image": "https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/banner.png?v=2026-11-03"
+  "skills": ["./skills"]
 }
 ```
 
@@ -159,8 +158,6 @@ registers what it names:
 - `skills` points at a directory that ships beside the bundle. `files: ["dist", "skills"]` is what puts
   both in the tarball, and the build preserves `import.meta.url` so `../skills` still resolves from inside
   `dist/`.
-- `image` is the gallery card's artwork. `pi.video` would be new here (nothing in this repo sets it); see
-  [demo.md](demo.md) for what to point either at.
 - The `pi-package` keyword is what a package directory would index on.
 
 **The name is not negotiable.** Scoped only, `@edgehero/pi-dispatch-admin`, per the naming rule at the top

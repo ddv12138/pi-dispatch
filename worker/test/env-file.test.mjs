@@ -844,9 +844,9 @@ test("every uncommented line of .env.example, and each documented PI_BACKEND_FLO
 			assert.equal(r.plain, true, `.env.example line ${n} (${line}) is not plain to ${loader}`);
 		}
 	}
-	// The floor is commented there; the forms docs/podman.md and the example's own comment show, uncommented.
+	// The floor is commented there; the forms the example's own comment shows, uncommented.
 	const shown = new Set();
-	for (const doc of ["../../docs/podman.md", "../../.env.example", "../../docs/backends.md"]) {
+	for (const doc of ["../../.env.example"]) {
 		for (const m of readFileSync(new URL(doc, import.meta.url), "utf8").matchAll(/PI_BACKEND_FLOOR=([A-Za-z]+=[A-Za-z]+(?:,[A-Za-z]+=[A-Za-z]+)*)/g)) shown.add(m[1]);
 		for (const m of readFileSync(new URL(doc, import.meta.url), "utf8").matchAll(/e\.g\. ([A-Za-z]+=[A-Za-z]+(?:,[A-Za-z]+=[A-Za-z]+)+)/g)) shown.add(m[1]);
 	}

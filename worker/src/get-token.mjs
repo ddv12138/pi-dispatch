@@ -288,6 +288,6 @@ function classifyAppMintError(error) {
 export function assertResumeAllowedOnGhSource(job, allowGhResume) {
 	if (job?.resume !== true || allowGhResume === true) return;
 	throw configError(
-		"GITHUB_AUTH_SOURCE=gh is a full-scope, non-expiring credential, and run.resume writes the agent's transcript to disk -- any command that echoed an auth header would persist it. Use GITHUB_AUTH_SOURCE=app or a short-expiry fine-grained PAT, drop run.resume from this trigger, or set PI_SESSIONS_ALLOW_GH_SOURCE=1 to accept the trade explicitly (docs/sessions.md, SECURITY.md)",
+		"GITHUB_AUTH_SOURCE=gh is a full-scope, non-expiring credential, and run.resume writes the agent's transcript to disk -- any command that echoed an auth header would persist it. Use GITHUB_AUTH_SOURCE=app or a short-expiry fine-grained PAT, drop run.resume from this trigger, or set PI_SESSIONS_ALLOW_GH_SOURCE=1 to accept the trade explicitly (SECURITY.md)",
 	);
 }

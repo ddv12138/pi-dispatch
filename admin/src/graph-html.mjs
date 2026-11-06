@@ -12,7 +12,7 @@
  * and skills), so longest-path ranking plus two median sweeps buys everything dagre would and stays
  * auditable. The visual language is authentic Node-RED chips (pale category fills, dark labels,
  * 20px grid, 10x10 ports) on the repo's dark chrome: Node-RED authenticity is shape language, the
- * page around it stays consistent with docs/images/banner.svg.
+ * page around it stays consistent with the project banner.
  */
 
 // Must equal graph-model.mjs's GRAPH_EDGE_KINDS; a parity test in graph-html.test.mjs compares the

@@ -19,7 +19,7 @@ import { DEFER_BUCKETS, DEFER_TIME_MAX_MS } from "@edgehero/pi-dispatch/defer-re
 import { ACTIONS } from "../src/console/actions.mjs";
 import { HEADLINE_ID, SHELL_PANEL_IDS, loginCodePage, loginPage, shellHtml } from "../src/console/shell.mjs";
 import { forgeLinkOf } from "../src/read-model.mjs";
-import { DOCS_ROOT, OUTCOME_WORDS, REASON_WORDS, STATUS_KINDS, docsHref, outcomeWord } from "../src/words.mjs";
+import { OUTCOME_WORDS, REASON_WORDS, STATUS_KINDS, outcomeWord } from "../src/words.mjs";
 import { assertOwnReferences } from "./helpers/console-pages-harness.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -588,20 +588,17 @@ test("outLink: a link out of the console, rel and target stamped as the page rul
   assert.equal(out(ui.outLink({ href: "http://gitlab.internal:8080/g/p/-/issues/3", label: "g/p#3", code: true })), `<a class="link code" href="http://gitlab.internal:8080/g/p/-/issues/3" rel="noreferrer noopener" target="_blank">g/p#3</a>`);
   assert.equal(out(ui.outLink({ href: "https://x.example/?a=1&b=%22#f", label: HOSTILE })), `<a class="link" href="https://x.example/?a=1&amp;b=%22#f" rel="noreferrer noopener" target="_blank">${ESCAPED}</a>`);
   // Drawn as a button (the SetupScreen card's ghost "What triggers can do"), the same link: rel and target as ever.
-  assert.equal(out(ui.outLink({ href: "https://github.com/edgehero/pi-dispatch/blob/main/docs/triggers.md", label: "What triggers can do", btn: "ghost" })), `<a class="btn btn--ghost" href="https://github.com/edgehero/pi-dispatch/blob/main/docs/triggers.md" rel="noreferrer noopener" target="_blank">What triggers can do</a>`);
+  assert.equal(out(ui.outLink({ href: "https://guide.example/triggers", label: "What triggers can do", btn: "ghost" })), `<a class="btn btn--ghost" href="https://guide.example/triggers" rel="noreferrer noopener" target="_blank">What triggers can do</a>`);
   assert.equal(out(ui.outLink({ href: "https://x.example/", label: "x", btn: ["sm", "ghost"] })), `<a class="btn btn--sm btn--ghost" href="https://x.example/" rel="noreferrer noopener" target="_blank">x</a>`);
   assert.throws(() => ui.outLink({ href: "https://x.example/", label: "x", btn: "bogus" }), RangeError);
-  // Whatever forgeLinkOf and docsHref build, every forge and an instance URL with a port, a path, upper case and an
-  // IPv6 literal, is a link outLink draws: the console's own builders and the kit's rule agree.
+  // Whatever forgeLinkOf builds, every forge and an instance URL with a port, a path, upper case and an
+  // IPv6 literal, is a link outLink draws: the console's own builder and the kit's rule agree.
   const env = { GITLAB_URL: "http://[::1]:8080/gl/", FORGEJO_URL: "https://Forge.Example.COM:3000", AZURE_ORG_URL: "http://azure_devops:8080/acme" };
   const built = [
     ...[["github", "acme/web#7"], ["gitlab", "grp/sub/proj#3"], ["gitlab", "grp/proj!4"], ["forgejo", "o/r#5"], ["azure", "proj/repo#6"], ["azure", "proj/repo!8"]].map(([kind, target]) => forgeLinkOf({ kind, target }, env)),
-    docsHref("docs/reasons.md#scope-cap"),
-    docsHref("docs/console.md"),
   ];
   assert.ok(built.every((u) => typeof u === "string"), JSON.stringify(built));
   assert.ok(built.includes("http://[::1]:8080/gl/grp/proj/-/merge_requests/4") && built.includes("https://forge.example.com:3000/o/r/issues/5"), JSON.stringify(built));
-  assert.ok(built.at(-1).startsWith(DOCS_ROOT));
   for (const href of built) assert.ok(out(ui.outLink({ href, label: "x" })).includes(`href="${href}"`), href);
   // An instance URL an operator spelled oddly still builds a link outLink draws: forgeLinkOf writes the parser's own
   // origin (127.1 is 127.0.0.1 there, a default port is dropped), and a canonical odd name is the name the browser
@@ -1187,8 +1184,6 @@ test("every link form the kit writes passes the page reference rule (assertOwnRe
     ui.seg([{ label: "1h", href: ui.pageHref(PAGES, "overview", { zoom: "1h" }) }, { label: "3h", href: "/?zoom=3h", on: true }], { label: "Zoom" }),
     ui.pager({ newer: runs, older: ui.pageHref(PAGES, "audit", { before: "2026-10:41" }) }),
     ui.outLink({ href: forgeLinkOf({ kind: "github", target: "acme/web#415" }), label: "acme/web#415" }),
-    ui.outLink({ href: docsHref("docs/reasons.md#scope-cap"), label: "the reasons docs", code: true }),
-    ui.outLink({ href: docsHref("docs/triggers.md"), label: "What triggers can do", btn: "ghost" }),
     ui.field({ label: "Answer", id: "answer", control: ui.textarea({ id: "answer" }), hint: "h", error: "e" }),
     // PR 4's: the filter pills and chips, the summary strip's links, the question card's run link and its Open run.
     ui.chipRow([ui.fpill({ label: "web", count: 2, href: ui.pageHref(PAGES, "runs", { project: "web" }), on: true }), ui.fchip({ label: "Outcome", value: "failed", href: ui.pageHref(PAGES, "runs") })], { label: "Filters" }),

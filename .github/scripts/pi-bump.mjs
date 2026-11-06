@@ -415,7 +415,7 @@ export function renderPullRequest({ from, to, versions, modelReport = "Model cat
 		...[
 			"Read each release above for a change to what pi reads from the environment, the model or auth wiring, the tools, or the package layout.",
 			"`dist/core/sdk.d.ts` in the new tarball: `createAgentSession`'s options, how `model` is obtained, `excludeTools` still `string[]`.",
-			"`EXCLUDABLE_TOOL_NAMES` matches `allToolNames`. If it moved, grow `image/runner/src/tools.mjs`, `docs/exclude-tools.md` and `triggers.example.json` with it, and check pi still ignores an unknown name silently.",
+			"`EXCLUDABLE_TOOL_NAMES` matches `allToolNames`. If it moved, grow `image/runner/src/tools.mjs` and `triggers.example.json` with it, and check pi still ignores an unknown name silently.",
 			"Every catalog host added: which output field pi sends there.",
 			"The human-judged copies (provider steering variables, pricing pins, the admin's width table): their tests name what changed.",
 			"Each red content-hash test: re-verify the copied logic against the named pi file, then update the hash in the same commit.",

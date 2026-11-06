@@ -1122,7 +1122,7 @@ export function hostRouteFor(runtime, endpointHost) {
 	}
 	const rows = Object.values(HOST_ROUTES).flat().filter((row) => rowApplies(row.when, runtime));
 	const what = [runtime.backend, runtime.version, runtime.desktop ? `desktop ${runtime.os}` : "engine"].join(" ");
-	const none = () => unmeasured(`No route from the proxy to ${target.host} was measured on ${what}. docs/backends.md lists the measured ones.`);
+	const none = () => unmeasured(`No route from the proxy to ${target.host} was measured on ${what}.`);
 	if (target.kind === "name" && ALIASES.has(target.host)) {
 		const row = rows.find((r) => r.name === target.host);
 		return row ? verdict(row) : none();

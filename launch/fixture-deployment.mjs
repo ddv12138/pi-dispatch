@@ -1,5 +1,5 @@
 /**
- * The one canned deployment the README images are drawn from (`launch/render-images.mjs`): config files, a month of
+ * The one canned deployment the console tests render over: config files, a month of
  * run records across three hosts, and a Valkey seeded with the registry rows, the run mirror, the counters, a held
  * job, the cron schedulers and the budget split's history, all dated around one frozen instant (`NOW`).
  *

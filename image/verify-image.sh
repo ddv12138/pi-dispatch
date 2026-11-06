@@ -16,7 +16,7 @@
 # Every check below covers a failure that is SILENT or LATE. That is the whole reason the list exists: an
 # image missing its guardrails, or carrying a stale pi, does not crash -- it produces jobs that look fine.
 #
-# Exits 0 when every check passes, 1 on the first failure. See docs/job-image.md.
+# Exits 0 when every check passes, 1 on the first failure.
 
 set -eu
 
@@ -33,7 +33,7 @@ fail() {
 }
 ok() { echo "  ok   $1"; }
 
-echo "Verifying $IMAGE_REF against the job-image conformance checklist (docs/job-image.md)"
+echo "Verifying $IMAGE_REF against the job-image conformance checklist"
 echo
 
 # The image must be present locally -- the same thing the worker's pre-spend preflight checks, and for the
@@ -791,4 +791,4 @@ echo "PASS: $IMAGE_REF satisfies the CORE conformance checklist."
 echo
 echo "What this did NOT check, and nothing in this project can: that the pi version inside matches the pin,"
 echo "that the entrypoint honours the exit-code protocol on every path, or that the loader flags carry the"
-echo "posture you expect. Those are yours (docs/job-image.md, OQ-012)."
+echo "posture you expect. Those are yours (OQ-012)."

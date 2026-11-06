@@ -1,5 +1,5 @@
 /**
- * Where `launch/render-images.mjs` finds the Valkey-protocol server it starts, in its own module so its test can ask
+ * Where the console width check finds the Valkey-protocol server it starts, in its own module so its test can ask
  * the same question without running the script.
  */
 import { accessSync, constants } from "node:fs";

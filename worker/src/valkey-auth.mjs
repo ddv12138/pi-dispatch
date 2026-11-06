@@ -54,7 +54,7 @@ export const VALKEY_PASSWORD_KEY = "VALKEY_PASSWORD";
  * it was the image `:8` pulled (both resolved to Valkey 8.1.11, and no `:8.2` existed), so neither a fresh pull nor a
  * host that pulled `:8` moved, and a volume written by 8.0.2 or by 8.1.11 loaded in the other, measured both ways.
  * Moving it: change this value, add the old one to `OLDER_VALKEY_IMAGES` (older-state.mjs), re-measure the claims above
- * and the load in both directions, and add a row to docs/upgrading.md.
+ * and the load in both directions.
  */
 export const VALKEY_IMAGE = "valkey/valkey:8.1";
 

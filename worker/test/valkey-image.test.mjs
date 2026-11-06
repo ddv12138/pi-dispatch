@@ -17,7 +17,7 @@ const codeLines = (text) => text.split("\n").filter((l) => !/^\s*[#;]/.test(l));
 
 test("VALKEY_IMAGE is a Docker Hub valkey minor, never a floating major, a patch or a digest (#761)", () => {
 	assert.match(VALKEY_IMAGE, /^valkey\/valkey:\d+\.\d+$/);
-	assert.equal(VALKEY_IMAGE, "valkey/valkey:8.1", "moving it is a release with a docs/upgrading.md row and the measurements re-run (valkey-auth.mjs)");
+	assert.equal(VALKEY_IMAGE, "valkey/valkey:8.1", "moving it is a release with the measurements re-run (valkey-auth.mjs)");
 	// The value it replaced is an older image in both spellings, and it is not one itself.
 	assert.ok(!OLDER_VALKEY_IMAGES.includes(VALKEY_IMAGE));
 	assert.ok(!OLDER_VALKEY_IMAGES.includes(`docker.io/${VALKEY_IMAGE}`));

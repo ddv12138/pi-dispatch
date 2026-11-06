@@ -28,8 +28,6 @@
  * a key here (a newer worker's reason, or anything else) is `{ known: false }`, never a guess: the caller shows the
  * token as it is and says it has no explanation yet.
  *
- * `anchor` points at the token's own heading in `docs/reasons.md`, whose `###` headings are exactly these keys (a test
- * holds them both ways).
  */
 
 import {
@@ -45,14 +43,11 @@ import {
 } from "./comment-tables.mjs";
 import { mcpRefusalComment } from "./mcp-preflight.mjs";
 
-/** The page every anchor points into, relative to the repository root. */
-export const REASONS_DOC = "docs/reasons.md";
-
 const imageRefusal = (what, so) => `Refused: the job image does not declare ${what}, so ${so}. Rebuild the image from a version that has this feature. Not run.`;
 const REBUILD = "Rebuild the job image from a release that declares the feature, or set the trigger's `run.image` to one that does.";
 
 /**
- * Every top-level reason: `[token, sentence, next]`. Grouped as `docs/reasons.md` groups them. A sentence written as a
+ * Every top-level reason: `[token, sentence, next]`. A sentence written as a
  * table read is derived; a string literal is written here for one of the three reasons in the header.
  */
 const ROWS = [
@@ -270,22 +265,22 @@ const ROWS = [
 	["recovery-failed", RECOVERY_COMMENTS["recovery-failed"], "Read the worker log for why the continuation was lost, then run the job again."],
 ];
 
-const entry = (anchor, sentence, next) => Object.freeze({ sentence, next, anchor });
+const entry = (sentence, next) => Object.freeze({ sentence, next });
 /**
  * A frozen token table from rows. A token twice is a load-time error, not a silent override: `Object.fromEntries` keeps
  * the LAST row, so a second row added for a token (a copy-paste, a merge) would quietly replace the first one's text.
  */
-function tableOf(rows, anchorOf) {
+function tableOf(rows) {
 	const out = {};
 	for (const [token, sentence, next] of rows) {
 		if (Object.hasOwn(out, token)) throw new Error(`reason-catalog: the token ${token} has two rows`);
-		out[token] = entry(anchorOf(token), sentence, next);
+		out[token] = entry(sentence, next);
 	}
 	return Object.freeze(out);
 }
 
-/** token -> `{ sentence, next, anchor }`, every reason the run record's `reason` can carry (INT-RUN-HISTORY-FILE-CONTRACT). */
-export const REASONS = tableOf(ROWS, (token) => `${REASONS_DOC}#${token}`);
+/** token -> `{ sentence, next }`, every reason the run record's `reason` can carry (INT-RUN-HISTORY-FILE-CONTRACT). */
+export const REASONS = tableOf(ROWS);
 
 /**
  * The `why` variants: a record whose `why` says which of a reason's comments was posted gets that comment as its
@@ -298,7 +293,6 @@ export const WHY_VARIANTS = Object.freeze({
 
 // ── The nested reasons ──────────────────────────────────────────────────────────────────────────────────────────────
 
-const SESSION_ANCHOR = `${REASONS_DOC}#session-reasons`;
 const RESUME_NEXT = "Nothing to fix: the job ran from the start. See the session docs if you expected it to continue.";
 
 /** The record's `session.reason` (run-history.mjs `SESSION_REASONS`): why a job resumed, or ran from the start. */
@@ -323,7 +317,6 @@ export const SESSION_REASON_TEXT = tableOf(
 		["promote-failed", "Saving the conversation failed (a full disk, or a permission change in the session store), so this run's conversation was not saved.", "Check the session store's disk and permissions on the worker."],
 		["disabled", "The trigger does not set `run.resume`, so the job did not continue a saved conversation.", "Set `run.resume` on the trigger if its runs should continue one conversation."],
 	],
-	() => SESSION_ANCHOR,
 );
 
 /** The record's `recoverSkipped` (run-history.mjs `RECOVER_SKIPPED_REASONS`): why a job that set `run.recover` ran without it. */
@@ -334,10 +327,7 @@ export const RECOVER_SKIPPED_TEXT = tableOf(
 		["base-unprimed", "The checkpoint store could not take the run's base commit, so no checkpoint of it could ever be restored, and it ran without recovery.", "Check the checkpoint store's disk and permissions on the worker."],
 		["workspace-extensions", "The repository's base commit holds `.pi/extensions/`, whose imports could load code the agent wrote, so the run was not armed for recovery.", "Nothing to fix: such a repository runs without recovery by design."],
 	],
-	() => `${REASONS_DOC}#recovery-skipped-reasons`,
 );
-
-const PLAN_ANCHOR = `${REASONS_DOC}#plan-reasons`;
 
 /** The record's `plan.reason` (run-history.mjs `PLAN_RECORD_REASONS`): why a portfolio job's priorities plan did not apply. */
 export const PLAN_REASON_TEXT = tableOf(
@@ -359,7 +349,6 @@ export const PLAN_REASON_TEXT = tableOf(
 		["plan-incomplete", "The plan left out a project or member it must name, so it was refused.", "Read the audit file for what was missing."],
 		["plan-busy", "Another plan or a revert was being applied at the same moment, so this plan was refused.", "Run the portfolio job again if this plan should still apply."],
 	],
-	() => PLAN_ANCHOR,
 );
 
 /** The nested tables `explainReason` reads by `field`, keyed by the record's field path. */
@@ -396,7 +385,7 @@ export const LIVE_SKIPPED_TEXT = Object.freeze({
 });
 
 /**
- * Explain a reason: `{ known: true, token, sentence, next, anchor }`, or `{ known: false }` for anything that is not a
+ * Explain a reason: `{ known: true, token, sentence, next }`, or `{ known: false }` for anything that is not a
  * key of the table (a newer worker's token, a non-string, `__proto__`). `why` picks a variant of the sentence where the
  * reason has one (`WHY_VARIANTS`); `field` names a nested reason (`session.reason`, `recoverSkipped`, `plan.reason`)
  * instead of the record's top-level `reason`. Never throws, whatever it is given: `opts` may be absent, `null` or any
@@ -410,7 +399,7 @@ export function explainReason(token, opts) {
 		if (table === null || typeof token !== "string" || !Object.hasOwn(table, token)) return { known: false };
 		const found = table[token];
 		const variant = field === null && Object.hasOwn(WHY_VARIANTS, token) ? WHY_VARIANTS[token](why) : null;
-		return { known: true, token, sentence: variant ?? found.sentence, next: found.next, anchor: found.anchor };
+		return { known: true, token, sentence: variant ?? found.sentence, next: found.next };
 	} catch {
 		return { known: false };
 	}

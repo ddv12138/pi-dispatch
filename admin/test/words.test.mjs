@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { DOCS_ROOT, capitalised, HELD_LABEL, NO_EXPLANATION, NO_REASON_FAILED, OUTCOME_KEYS, OUTCOME_KEY_WORDS, RECORD_REASON_RE, docsHref, fieldNamed, OUTCOME_WORDS, OUTCOME_WORD_OF, REASON_WORDS, rowNumber, SHORT_MAX, SPEND_TITLE, STATUS_KINDS, UNNAMED_FIELD, VENUE_LABEL, outcomeKey, outcomeWord, reasonWords, recordReason, shortSentence } from "../src/words.mjs";
+import { capitalised, HELD_LABEL, NO_EXPLANATION, NO_REASON_FAILED, OUTCOME_KEYS, OUTCOME_KEY_WORDS, RECORD_REASON_RE, fieldNamed, OUTCOME_WORDS, OUTCOME_WORD_OF, REASON_WORDS, rowNumber, SHORT_MAX, SPEND_TITLE, STATUS_KINDS, UNNAMED_FIELD, VENUE_LABEL, outcomeKey, outcomeWord, reasonWords, recordReason, shortSentence } from "../src/words.mjs";
 import { NESTED_REASONS, REASONS, explainReason } from "../../worker/src/reason-catalog.mjs";
 import { RECOVERY_COMMENTS } from "../../worker/src/comment-tables.mjs";
 import { RECORD_REASON_RE as LEAF_REASON_RE } from "../../worker/src/record-reason.mjs";
@@ -21,15 +21,6 @@ const DANGLING_END = /(?:\s(?:the|a|an|so|no|not|never|of|to|and|or|in|on|for|wi
 const SRC = (p) => readFileSync(fileURLToPath(new URL(`../src/${p}`, import.meta.url)), "utf8");
 
 // ---- the bolts -------------------------------------------------------------------------------------------------------
-
-test("DOCS_ROOT is the repository the packages publish, on main, and docsHref takes only a catalog anchor (issue #710)", () => {
-  const pkg = JSON.parse(readFileSync(fileURLToPath(new URL("../../worker/package.json", import.meta.url)), "utf8"));
-  const repo = pkg.repository.url.replace(/^git\+/, "").replace(/\.git$/, "");
-  assert.equal(DOCS_ROOT, `${repo}/blob/main/`, "worker/package.json repository.url");
-  for (const [token, entry] of Object.entries(REASONS)) assert.equal(docsHref(entry.anchor), `${DOCS_ROOT}docs/reasons.md#${token}`, token);
-  for (const table of Object.values(NESTED_REASONS)) for (const entry of Object.values(table)) assert.ok(docsHref(entry.anchor)?.startsWith(`${DOCS_ROOT}docs/reasons.md#`), entry.anchor);
-  for (const bad of [null, "", "javascript:alert(1)", "https://evil.example/docs/x.md", "docs/../x.md", "docs/reasons.md#<x>"]) assert.equal(docsHref(bad), null, String(bad));
-});
 
 test("OUTCOME_WORDS is keyed by exactly the record's outcome enum, as the spec, the portfolio count and the live stream name it", () => {
   const keys = Object.keys(OUTCOME_WORDS).sort();

@@ -237,7 +237,7 @@ function forwardEnvList(raw, egressArmed = false) {
 	const egress = egressArmed ? names.filter((n) => EGRESS_ENV_VARS.has(n)) : [];
 	if (egress.length > 0) {
 		throw configError(
-			`PI_FORWARD_ENV must not forward ${egress.join(", ")} while the egress policy is armed -- it sets them itself, pointing at the proxy on this job's network, and a forwarded value would silently redirect every job while looking like the control working (REQ-EGRESS-ALLOWLIST). Set PI_EGRESS=0 to use your own proxy: docs/egress.md`,
+			`PI_FORWARD_ENV must not forward ${egress.join(", ")} while the egress policy is armed -- it sets them itself, pointing at the proxy on this job's network, and a forwarded value would silently redirect every job while looking like the control working (REQ-EGRESS-ALLOWLIST). Set PI_EGRESS=0 to use your own proxy.`,
 		);
 	}
 	return names;

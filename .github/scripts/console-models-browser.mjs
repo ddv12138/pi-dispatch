@@ -154,7 +154,7 @@ export async function checkModelsBrowser({ chrome, shots = null, sandbox = proce
       assert.ok(result.text.includes(longId) && result.text.includes(longHost), "The complete accepted identifiers remain present");
       assert.equal(result.owner, `/fleet/host?name=${longHost}`);
       assert.equal(result.ownerText, longHost, "The account owner link retains the complete accepted host identifier");
-      if (page === "connections") assert.ok(result.guides.includes("https://github.com/edgehero/pi-dispatch/blob/main/docs/subscription-auth.md"), "Host guides coexist with the account owner and exact account commands");
+      assert.ok(result.guides.length >= 1, `${page}: the guide links coexist with the account owner and exact account commands`);
       assert.equal(result.commands.length, page === "connections" ? 3 : 1);
       assert.ok(result.commands.every(command => command.endsWith(longId)), "Every complete copy command retains the full connection identifier");
       assert.deepEqual(result.csp, []);

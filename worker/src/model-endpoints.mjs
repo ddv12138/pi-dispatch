@@ -550,7 +550,7 @@ export function providerRenameHint(provider, { models = null, piProviders = [], 
 /**
  * The second way into the credential gate, said once for every refusal and doctor line that names it (issue #503).
  */
-export const KEYLESS_HOW = `for a custom provider served by a local model server, declare that server in model-endpoints.json with "keyless": true and set "apiKey": "${KEYLESS_API_KEY}" on the provider in models.json (docs/egress.md, "Local model servers")`;
+export const KEYLESS_HOW = `for a custom provider served by a local model server, declare that server in model-endpoints.json with "keyless": true and set "apiKey": "${KEYLESS_API_KEY}" on the provider in models.json`;
 
 /** The environment variable a custom provider's models.json apiKey explicitly names, else null. */
 export function overlayApiKeyVariable(models, provider) {

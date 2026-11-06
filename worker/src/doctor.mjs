@@ -147,7 +147,7 @@ const NODE_FLOOR = [22, 19]; // pi's engine floor (22.19.0)
 const BROAD_SCOPES = ["admin:org", "delete_repo", "workflow"];
 
 // The fix for a trigger-named image without the runner entrypoint, one sentence for either runtime (issue #433).
-const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's image/Dockerfile so it keeps /entrypoint.sh -- an image without the runner can exit 0 without ever starting the agent, and the queue records that as success (docs/job-image.md)";
+const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's image/Dockerfile so it keeps /entrypoint.sh -- an image without the runner can exit 0 without ever starting the agent, and the queue records that as success";
 
 // The in-image gh probe's argv after the runtime's name (issue #433). Not the job builder's argv: the probe asks whether the image's gh can reach the forge with this token, which is
 // a question about the image and the network, not about a job's bounds.
@@ -533,7 +533,7 @@ export async function defaultPublishDoctor(url, name, record) {
 
 /**
  * Issue #477: how to start a worker that runs with what doctor judged. `pi-dispatch worker` started by hand reads this
- * shell's environment and no `.env` (docs/secrets.md: the worker parses no `.env` file), so where doctor took any value
+ * shell's environment and no `.env` (the worker parses no `.env` file), so where doctor took any value
  * from the deployment's `.env`, the worker that sees it is the service, whose loader reads the file; the line names that
  * command (restart for a service installed for this folder), and what a hand-started worker needs. Where doctor took
  * nothing from the file, what it judged is this shell's, and a worker started from it runs with the same.
@@ -656,7 +656,7 @@ function asText(content, enc) {
  *     unset, so the worker ignores it" is a positive claim about a file nobody opened. A file that is
  *     there and malformed comes back as records plus a hazard, naming the line that stopped the read.
  *
- * `docs/secrets.md` opens with "the worker parses no `.env` file" and that stays true: doctor is not the
+ * The worker parses no `.env` file, and that stays true: doctor is not the
  * worker, and `worker/test/service.test.mjs` still pins that a `PI_ENV_SETUP` line in `./.env` is not
  * honoured. Parsing is `readEnvAssignments`, in the same module as the writer `up` uses, so a key one can
  * set is a key the other reads back the same way -- and it is asked for THIS PLATFORM's loader, because
@@ -1594,7 +1594,7 @@ export async function collectChecks(shellVars, seams) {
 	const services = await installedServices(seams);
 	checks.push(...(await envSetupChecks(env, seams, envSetupSources(env, services))));
 	// Issue #481 (PR #485's final review): WHICH script may supply a value, by one strict rule. A value missing from this
-	// shell and the `.env` is one an --env-setup script may export, invisible to doctor by design (docs/secrets.md), so
+	// shell and the `.env` is one an --env-setup script may export, invisible to doctor by design, so
 	// its refusal is softened to a ⚠ naming the script, but ONLY where every installed service of this folder that READS
 	// the value names a USABLE script, and the worker's service is installed wherever the worker reads it (every such
 	// value here does). Usable is a regular file, after symlinks, that this account can read: a script the service
@@ -1628,7 +1628,7 @@ export async function collectChecks(shellVars, seams) {
 	const notSupplied = (names, readers) => {
 		const reading = services.filter((s) => readers.includes(s.which));
 		if (shellSetup !== null && !reading.some((s) => s.setup)) return `. PI_ENV_SETUP in this shell is not what the service runs: install with \`pi-dispatch service install --env-setup ${shellSetup}\``;
-		if (!services.some((s) => s.which === "worker")) return `. A deployment whose service gets ${names} from an --env-setup script (docs/secrets.md) can ignore this line; doctor found no service installed for this folder to read`;
+		if (!services.some((s) => s.which === "worker")) return `. A deployment whose service gets ${names} from an --env-setup script can ignore this line; doctor found no service installed for this folder to read`;
 		return "";
 	};
 	/**
@@ -2056,7 +2056,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `egress-allowlist.conf lists ${named}, which lets a job open a CONNECT to that host's port 443 and send plain HTTP to its port 80, and reaches no model server's port`,
-				fix: `remove it, and declare the model server in model-endpoints.json instead, which opens a tunnel to exactly its host and port: docs/egress.md, "Local model servers"`,
+				fix: `remove it, and declare the model server in model-endpoints.json instead, which opens a tunnel to exactly its host and port`,
 			});
 		}
 	}
@@ -2260,7 +2260,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `triggers.json has gitlab triggers but GITLAB_WEBHOOK_MODE is ${glMode === undefined ? "unset" : JSON.stringify(glMode)} -- the receiver will refuse to start`,
-				fix: 'set it to "signature" (HMAC, GitLab 19.0+) or "token" (X-Gitlab-Token, any version) -- deliberately undefaulted, which verification a deployment runs must be a thing somebody chose (.env.example, docs/gitlab.md)',
+				fix: 'set it to "signature" (HMAC, GitLab 19.0+) or "token" (X-Gitlab-Token, any version) -- deliberately undefaulted, which verification a deployment runs must be a thing somebody chose (.env.example)',
 			});
 		}
 		if (typeof env.GITLAB_WEBHOOK_SECRET !== "string" || env.GITLAB_WEBHOOK_SECRET.trim() === "") {
@@ -2268,7 +2268,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: "triggers.json has gitlab triggers but GITLAB_WEBHOOK_SECRET is unset -- the receiver cannot verify deliveries and will refuse to start",
-				fix: "set GITLAB_WEBHOOK_SECRET in .env to the secret configured on the project webhook (.env.example, docs/gitlab.md)",
+				fix: "set GITLAB_WEBHOOK_SECRET in .env to the secret configured on the project webhook (.env.example)",
 			});
 		}
 	}
@@ -2285,7 +2285,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `triggers.json has forgejo triggers but ${missing.join(", ")} ${missing.length === 1 ? "is" : "are"} unset -- the receiver will refuse to start (or serve no /forgejo endpoint at all)`,
-				fix: "set them in .env (.env.example documents each; docs/forgejo.md walks the webhook setup); FORGEJO_BOT_ID is also needed when FORGEJO_TOKEN is repository-scoped -- a scoped token cannot call GET /user to identify itself",
+				fix: "set them in .env (.env.example documents each); FORGEJO_BOT_ID is also needed when FORGEJO_TOKEN is repository-scoped -- a scoped token cannot call GET /user to identify itself",
 			});
 		} else {
 			checks.push({ ok: true, label: `forgejo triggers configured (${urlShown(env.FORGEJO_URL)})` });
@@ -2301,14 +2301,14 @@ export async function collectChecks(shellVars, seams) {
 		if (permissionToken) {
 			checks.push({
 				ok: true,
-				label: "forgejo author-gate lookups use FORGEJO_PERMISSION_TOKEN: its account must be an admin (or the owner) of every repository the triggers serve and the token needs read:repository only, while FORGEJO_TOKEN, which every job carries, stays a write collaborator's (docs/forgejo.md)",
+				label: "forgejo author-gate lookups use FORGEJO_PERMISSION_TOKEN: its account must be an admin (or the owner) of every repository the triggers serve and the token needs read:repository only, while FORGEJO_TOKEN, which every job carries, stays a write collaborator's",
 			});
 		} else {
 			checks.push({
 				ok: false,
 				warn: true,
 				label: "FORGEJO_PERMISSION_TOKEN is unset, so forgejo author-gate lookups use FORGEJO_TOKEN: Forgejo answers them only to a repository admin, so that account must be one, and then every forgejo job carries an admin's token that can change repository settings and branch protection (OQ-043)",
-				fix: "keep FORGEJO_TOKEN's account a write collaborator, and set FORGEJO_PERMISSION_TOKEN to a read:repository token of an account that is an admin (or the owner) of the repositories; only the receiver reads it (docs/forgejo.md)",
+				fix: "keep FORGEJO_TOKEN's account a write collaborator, and set FORGEJO_PERMISSION_TOKEN to a read:repository token of an account that is an admin (or the owner) of the repositories; only the receiver reads it",
 			});
 		}
 	}
@@ -2329,7 +2329,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `triggers.json has azure triggers but AZURE_WEBHOOK_MODE is ${azMode === undefined ? "unset" : JSON.stringify(azMode)} -- the receiver will refuse to start`,
-				fix: 'set it to "basic" (HTTP Basic on the service hook) or "header" (a custom header) -- deliberately undefaulted, Azure offers no HMAC, so which shared-secret compare gates the endpoint must be a chosen thing (.env.example, docs/azure-devops.md)',
+				fix: 'set it to "basic" (HTTP Basic on the service hook) or "header" (a custom header) -- deliberately undefaulted, Azure offers no HMAC, so which shared-secret compare gates the endpoint must be a chosen thing (.env.example)',
 			});
 		}
 		const azRequired = ["AZURE_WEBHOOK_SECRET", "AZURE_TOKEN", "AZURE_ORG_URL", ...(azMode === "header" ? ["AZURE_WEBHOOK_HEADER"] : [])];
@@ -2339,7 +2339,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `triggers.json has azure triggers but ${azMissing.join(", ")} ${azMissing.length === 1 ? "is" : "are"} unset -- the receiver will refuse to start (or serve no /azure endpoint at all)`,
-				fix: "set them in .env (.env.example documents each; docs/azure-devops.md walks the service-hook setup)",
+				fix: "set them in .env (.env.example documents each)",
 			});
 		} else if (azModeOk) {
 			checks.push({ ok: true, label: `azure triggers configured (${urlShown(env.AZURE_ORG_URL)})` });
@@ -2480,7 +2480,7 @@ export async function collectChecks(shellVars, seams) {
 			checks.push({
 				ok: false,
 				label: "GITHUB_APP_PRIVATE_KEY and GITHUB_APP_PRIVATE_KEY_PATH are both set -- the worker will refuse to boot",
-				fix: "unset one of them: the inline value for a deployment fed by a secrets manager, the path for a key on disk (docs/secrets.md)",
+				fix: "unset one of them: the inline value for a deployment fed by a secrets manager, the path for a key on disk",
 			});
 		} else if (inlineKey !== "") {
 			// A flattened key still starts with the header -- the `\n` escapes come after it -- so one sniff
@@ -2492,7 +2492,7 @@ export async function collectChecks(shellVars, seams) {
 					ok: false,
 					warn: true,
 					label: `GITHUB_APP_PRIVATE_KEY does not look like a PEM (does not begin "-----BEGIN ...") -- the worker will refuse to boot; contents not shown`,
-					fix: "check for a truncated paste, or point GITHUB_APP_PRIVATE_KEY_PATH at the key file instead (docs/secrets.md)",
+					fix: "check for a truncated paste, or point GITHUB_APP_PRIVATE_KEY_PATH at the key file instead",
 				});
 			}
 		} else if (!keyPathSet) {
@@ -3009,7 +3009,7 @@ export async function collectChecks(shellVars, seams) {
 	const keyCheck = subscriptionDefault.managed ? subscriptionCredentialCheck(provider, subscriptionDefault) : providerKeyCheck({ provider, env: { ...env, ...credentialFromFile }, agentDir: keyAgentDir, oracle, nodeOk: checks[0]?.ok, keyless: { endpoints: keylessEndpoints, models: keylessModels, unreadable: keylessUnreadable, hintModels, hintUnread } });
 	const keyNamed = Object.keys(credentialFromFile).filter((name) => keyCheck.label?.includes(`: ${name})`));
 	// Issue #481 (PR #485 review round 2): a key found nowhere doctor can look is one an env-setup script may export, which
-	// is the documented home for a provider key fetched from a secrets manager (docs/secrets.md).
+	// is the documented home for a provider key fetched from a secrets manager.
 	const { absent: keyAbsent, ...keyShown } = keyCheck;
 	const keyNames = keyAbsent ? `one of ${keyAbsent.join(" or ")}` : null;
 	const keyLine = !keyAbsent
@@ -3209,7 +3209,7 @@ export async function collectChecks(shellVars, seams) {
 						ok: false,
 						warn: true,
 						label: `Overlay models.json points ${loopback.join(", ")} at a loopback address, which inside a job is the job's own container, so no job reaches that server`,
-						fix: "serve the model on an address the egress proxy reaches, declare it in model-endpoints.json (host.docker.internal on Docker, host.containers.internal on Podman), and point the baseUrl there: docs/egress.md, \"Local model servers\"",
+						fix: "serve the model on an address the egress proxy reaches, declare it in model-endpoints.json (host.docker.internal on Docker, host.containers.internal on Podman), and point the baseUrl there",
 					});
 				}
 				// Issue #571: a model that costs money but asks for no usage in the stream. pi records each of its calls as
@@ -3226,7 +3226,7 @@ export async function collectChecks(shellVars, seams) {
 						ok: false,
 						warn: true,
 						label: `Overlay models.json sets compat.supportsUsageInStreaming to false on ${named}${more} with a nonzero cost table, so those calls report no usage: each counts as usageUnreported, and every job that calls one settles at the floor`,
-						fix: "remove supportsUsageInStreaming: false if the server sends usage when asked (stream_options.include_usage), or set the model's cost to zeros if it is free: docs/costs.md, \"A call that reports no usage\"",
+						fix: "remove supportsUsageInStreaming: false if the server sends usage when asked (stream_options.include_usage), or set the model's cost to zeros if it is free",
 					});
 				}
 				// Issue #507: a priced model on a declared endpoint whose output cap would travel as max_completion_tokens,
@@ -3245,7 +3245,7 @@ export async function collectChecks(shellVars, seams) {
 						ok: false,
 						warn: true,
 						label: `Overlay models.json sends the output cap of ${named}${more} as max_completion_tokens to a declared model endpoint, which a local server may ignore (Ollama does), so the run's measured total can run past what the model's own limit suggests`,
-						fix: "set \"compat\": { \"maxTokensField\": \"max_tokens\" } on the model or its provider in models.json, or use a model whose output field the server honours: docs/egress.md, \"Local model servers\"",
+						fix: "set \"compat\": { \"maxTokensField\": \"max_tokens\" } on the model or its provider in models.json, or use a model whose output field the server honours",
 					});
 				}
 			}
@@ -3839,7 +3839,7 @@ export async function collectChecks(shellVars, seams) {
 			// listed are the fact line right below.
 			checks.push({
 				ok: true,
-				label: `${resuming} trigger(s) persist agent transcripts to ${envValueShown(sessionsDir)} -- PII-bearing, host-only, never committed: keep it outside every git repo, on a disk you would put issue text on (docs/sessions.md)`,
+				label: `${resuming} trigger(s) persist agent transcripts to ${envValueShown(sessionsDir)} -- PII-bearing, host-only, never committed: keep it outside every git repo, on a disk you would put issue text on`,
 			});
 			// Which of the four bounds are actually on, as a FACT LINE rather than a warning: how long a
 			// lineage may run is an operator's call, not a defect, and doctor's warnings are for things that
@@ -3993,7 +3993,7 @@ export async function collectChecks(shellVars, seams) {
 	//
 	// So doctor reads `<cwd>/.env` for EXACTLY the key each check names, and never to configure anything.
 	// That narrowing is the whole licence: the project's stance is that nothing parses `.env`
-	// (`docs/secrets.md`), and `worker/test/service.test.mjs` pins that a `PI_ENV_SETUP` line in `./.env` is
+	// (the worker parses no `.env` file), and `worker/test/service.test.mjs` pins that a `PI_ENV_SETUP` line in `./.env` is
 	// deliberately NOT honoured. Both stay true.
 	//
 	// WHAT CHANGED SINCE, and this comment said otherwise for a round: the read no longer only softens a
@@ -4030,8 +4030,7 @@ export async function collectChecks(shellVars, seams) {
 	// ITS LIMIT, stated because the wording would otherwise imply more: this command reads two keys, so the
 	// line says what it cannot answer about THOSE. The same hazard may also stop a sourcing shell reaching
 	// `WEBHOOK_SECRET`, which the receiver refuses to start without, and nothing here says so -- widening
-	// the read is how a narrow reader grows into "load the .env", which `envFileKeys`' own docblock and
-	// `docs/secrets.md` both refuse.
+	// the read is how a narrow reader grows into "load the .env", which `envFileKeys`' own docblock refuses.
 	// Beside the readings, not in place of them: the line changes no other key (issue #470 follow-up).
 	if (envFile.wrapperInternal != null) {
 		checks.push({ ok: false, warn: true, label: `${join(cwd, ".env")}: ${wrapperInternalSentence(envFile.wrapperInternal).replace(/\. To fix it, .*$/, "")}`, fix: `${wrapperInternalSentence(envFile.wrapperInternal).replace(/^.*\. To fix it, /, "")}, then run doctor again` });
@@ -4842,7 +4841,7 @@ function noKeyVariableCheck(provider, oracle, keyless = null, env = {}) {
 		return {
 			ok: false,
 			label: `PI_PROVIDER is ${JSON.stringify(provider)}, which pi authenticates without an API-key variable`,
-			fix: "pick a provider whose credential is a single environment variable -- the container env is a closed set of variables, so a credential file, an AWS profile or an OAuth login has no way in (docs/secrets.md)",
+			fix: "pick a provider whose credential is a single environment variable -- the container env is a closed set of variables, so a credential file, an AWS profile or an OAuth login has no way in",
 		};
 	}
 	// The did-you-mean is DERIVED like everything else here: ask pi which provider reads
@@ -4884,7 +4883,7 @@ function noKeyVariableCheck(provider, oracle, keyless = null, env = {}) {
 		ok: false,
 		label: `PI_PROVIDER is ${JSON.stringify(provider)}, which is not a provider pi has${why}${renamed ? `;${renamed}` : ""}`,
 		fix: renamed
-			? `set PI_PROVIDER=${RENAMED_PROVIDERS[provider]}, and rename the provider in every trigger's model and allowed-models entries and in models.json the same way (docs/triggers.md)`
+			? `set PI_PROVIDER=${RENAMED_PROVIDERS[provider]}, and rename the provider in every trigger's model and allowed-models entries and in models.json the same way`
 			: owner
 			? `set PI_PROVIDER=${owner}, the provider pi reads ${wanted} from -- or unset it for the default \`anthropic\`; or, ${KEYLESS_HOW}`
 			: `set PI_PROVIDER to a provider id pi has, or unset it for the default \`anthropic\`: ${oracle.piProviders().join(", ")}; or, ${KEYLESS_HOW}`,
@@ -6376,7 +6375,7 @@ export function triggersPath(env, cwd) {
  * EVERY LINE THIS SWEEP CAN PRINT, in one frozen table, with its tier, its fix and its wording.
  *
  * What this replaces (issue #379, item 3) is a test that COUNTED occurrences of ``label: `Egress canary: ``
- * in this file's source and required `docs/egress.md` to carry a matching number. Its own comment recorded
+ * in this file's source and required the page to carry a matching number. Its own comment recorded
  * why it was written that way and what it could not see: a constant holding the prefix, a plain
  * double-quoted string, `label:` on its own line, an interpolation inside the phrase, or a label built in
  * another module -- all invisible. It could also go FALSE RED, because this file's house style quotes its
@@ -6439,7 +6438,7 @@ export const CANARY_LINES = Object.freeze({
 });
 
 /** What to do about a `held` leftover: the keeper first, then doctor again, which removes it. */
-const CANARY_HELD_FIX = "start the rootless network keeper as docs/podman.md step 6 shows (pi-dispatch service install or pi-dispatch up installs it), then re-run doctor, which removes the network once the keeper holds";
+const CANARY_HELD_FIX = "start the rootless network keeper (pi-dispatch service install or pi-dispatch up installs it), then re-run doctor, which removes the network once the keeper holds";
 
 /**
  * One canary check, built from the table and CARRYING what it was built from.
@@ -6450,7 +6449,7 @@ const CANARY_HELD_FIX = "start the rootless network keeper as docs/podman.md ste
  *
  * `venue` (issue #431) is the runtime the canary ran on. docker's is the default and adds nothing, so its params, its
  * line and its fix are exactly what they were; another runtime's CLI name rides the params (the table's labels read
- * `bin`, defaulting to docker, which is also what `docs/egress.md`'s generated rows are built with) and its prefix leads
+ * `bin`, defaulting to docker, which is also what the generated rows are built with) and its prefix leads
  * the line, so a podman line is never mistaken for one about docker's proxy.
  */
 function canaryCheck(shape, params, venue = CANARY_DOCKER) {
@@ -6709,7 +6708,7 @@ export function forgeUrlEgressChecks(env, forges = []) {
 			ok: false,
 			warn: true,
 			label: `${key} (${urlShown(env[key])}) is ${why} (issue #508)`,
-			fix: `serve the forge over https:// on port 443 and point ${key} there, or set PI_EGRESS=0 if you accept jobs without the policy (docs/egress.md)`,
+			fix: `serve the forge over https:// on port 443 and point ${key} there, or set PI_EGRESS=0 if you accept jobs without the policy`,
 		});
 	}
 	return checks;
@@ -6729,7 +6728,7 @@ export function overlayMcpChecks({ overlay, env, fileExists, read, allowlist = [
 		checks.push({
 			ok: false,
 			label: "Overlay holds mcp-auth.json, pi's MCP sign-ins, which no job may hold",
-			fix: "delete mcp-auth.json from the overlay; a job's MCP server takes its credential as a ${NAME} reference from run.secrets: docs/mcp.md",
+			fix: "delete mcp-auth.json from the overlay; a job's MCP server takes its credential as a ${NAME} reference from run.secrets",
 			fixAction: {
 				tier: "prompt",
 				describe: `rm ${authPath}`,
@@ -6745,14 +6744,14 @@ export function overlayMcpChecks({ overlay, env, fileExists, read, allowlist = [
 		parsed = read();
 	} catch (error) {
 		const why = error?.mcpConfig ? error.message : `cannot be read (${error?.code ?? "unreadable"})`;
-		checks.push({ ok: false, label: `Overlay mcp.json: ${why}`, fix: "re-run `pi-dispatch import-pi`, or fix the file: docs/mcp.md. Until it reads, no job can use an MCP server" });
+		checks.push({ ok: false, label: `Overlay mcp.json: ${why}`, fix: "re-run `pi-dispatch import-pi`, or fix the file. Until it reads, no job can use an MCP server" });
 		return checks;
 	}
 	if (parsed === null) return checks;
 	const names = Object.keys(parsed.servers);
 	checks.push({ ok: true, label: names.length === 0 ? "Overlay mcp.json offers no MCP server" : `Overlay mcp.json offers ${names.length} MCP server${names.length === 1 ? "" : "s"} to triggers that name them (${names.join(", ")})` });
 	for (const { name, problem } of parsed.refused) {
-		checks.push({ ok: false, label: `Overlay mcp.json: server ${quotedShown(name)} is refused: ${problem}`, fix: "fix the entry and re-run `pi-dispatch import-pi`: docs/mcp.md. Until then no job can use it" });
+		checks.push({ ok: false, label: `Overlay mcp.json: server ${quotedShown(name)} is refused: ${problem}`, fix: "fix the entry and re-run `pi-dispatch import-pi`. Until then no job can use it" });
 	}
 	let armed = false;
 	try {
@@ -6771,7 +6770,7 @@ export function overlayMcpChecks({ overlay, env, fileExists, read, allowlist = [
 				ok: false,
 				warn: true,
 				label: `MCP server ${name} runs ${mcpServerWhere(server)}, which fetches the server from a package registry at the start of every job that uses it`,
-				fix: armed && !listed ? `install the server in the job image instead, or allowlist ${registry} in egress-allowlist.conf: docs/mcp.md` : "install the server in the job image instead, so every job runs the version you chose: docs/mcp.md",
+				fix: armed && !listed ? `install the server in the job image instead, or allowlist ${registry} in egress-allowlist.conf` : "install the server in the job image instead, so every job runs the version you chose",
 			});
 		}
 		if (!armed || server.transport !== "http" || server.enabled === false) continue;
@@ -6782,7 +6781,7 @@ export function overlayMcpChecks({ overlay, env, fileExists, read, allowlist = [
 			ok: false,
 			warn: true,
 			label: `MCP server ${name} (${mcpServerWhere(server)}) is not reachable with the egress policy on: ${refusal}`,
-			fix: "use an https:// url and allowlist its host for 443, or declare its host and port in model-endpoints.json: docs/egress.md. Until then no job can reach it",
+			fix: "use an https:// url and allowlist its host for 443, or declare its host and port in model-endpoints.json. Until then no job can reach it",
 		});
 	}
 	return checks;
@@ -7133,7 +7132,7 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 	//
 	// Credential-free by construction: `api.anthropic.com` answers 401 to an unauthenticated request, so
 	// reaching the provider and being refused for the key proves the entire path and costs nothing. That is
-	// docs/egress.md's own method, promoted from prose to a check.
+	// A method the page once documented, promoted from prose to a check.
 	// Issue #503: the include as the running proxy sees it. Not for a shipped proxy already judged stale above: its mounts
 	// are that line's to name, and a two-mount proxy has no include to read.
 	if (endpoints.length > 0 && !(!custom && judged.drift.length > 0)) {
@@ -7202,7 +7201,7 @@ export function egressCanaryProbeArgs({ slug, pid, network, proxy, image, url, s
  * (podman-docker or the Docker API) is a `local` deployment here, and tearing a network the proxy is on down there cuts
  * the proxy's route out (measured, #452 gate round 3), so the refusal names the same start command the worker's units run.
  */
-const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (else \`pi-dispatch service install\` or \`pi-dispatch up\` installs it, or start it by hand, docs/podman.md step 6; a container of its name that is not the shipped keeper must be removed first)`;
+const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (else \`pi-dispatch service install\` or \`pi-dispatch up\` installs it, or start it by hand; a container of its name that is not the shipped keeper must be removed first)`;
 
 /**
  * The egress canary (REQ-EGRESS-ALLOWLIST, issue #431): a throwaway `--internal` network built like a job's, the proxy
@@ -7374,7 +7373,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 							: `Egress policy ALLOWS ${host} that is not on your allowlist`
 				}`,
 				fix: want
-					? `add api.anthropic.com to egress-allowlist.conf and restart the proxy -- until then every job starts, fails at its first turn, and spends two budget slots proving it (docs/egress.md)`
+					? `add api.anthropic.com to egress-allowlist.conf and restart the proxy -- until then every job starts, fails at its first turn, and spends two budget slots proving it`
 					: `check egress-allowlist.conf: a rule wider than you meant (a bare domain where you wanted a subdomain) lets a job reach hosts you did not list`,
 			});
 		}
@@ -7491,7 +7490,7 @@ function endpointsById(endpoints) {
 /**
  * The declared endpoints that an overlay MCP server dials (an enabled streamable HTTP server's `url` in `mcp.json`, the
  * servers doctor's own MCP check and the pickup judge) and no overlay model does (a provider's or a model's `baseUrl` in `models.json`), each matched by `endpointsAt`, as the
- * pickup's egress check matches an MCP server to an endpoint. docs/egress.md has an operator declare an MCP server off
+ * pickup's egress check matches an MCP server to an endpoint. An operator declares an MCP server off
  * port 443 there, and such a server does not serve `/v1/models`: it answers 404 or 405, and the `models` probe used to
  * warn on every run that the port was not the model server's. Its tunnel is still opened and its route proved; only its
  * answer is not judged as a model server's. An endpoint both use is probed as a model server, since a model needs that.
@@ -7624,7 +7623,7 @@ function endpointProbeCheck({ slug, endpoint, answer, venue, bin, proxy, next, m
 						? mcpOnly
 							? "the server is there but stuck or busy: check its own log, then re-run doctor"
 							: "the server is there but stuck or busy (a model still loading, every slot taken): check its own log, then re-run doctor"
-						: `start the ${server}, and check it listens where the proxy reaches it (docs/egress.md, "Local model servers"; on Docker Engine that is 172.17.0.1 or 0.0.0.0, never 127.0.0.1 alone). A job meets this as "Connection error"`;
+						: `start the ${server}, and check it listens where the proxy reaches it (on Docker Engine that is 172.17.0.1 or 0.0.0.0, never 127.0.0.1 alone). A job meets this as "Connection error"`;
 		return { ok: false, warn: true, label: `${head} does NOT answer: ${why}`, fix, endpointProbe: tag };
 	}
 	const wider = `the proxy's rules are wider than model-endpoints.conf renders: compare the include inside it (\`${bin} exec ${proxy} cat ${ENDPOINTS_INCLUDE_IN_PROXY}\`) with \`pi-dispatch egress render\`'s, check egress-allowlist.conf does not list ${endpoint.host}, then \`${reload}\``;
@@ -7776,7 +7775,7 @@ function endpointRouteChecks({ runtime, endpoints, prefix, proof }) {
 		const { status, sentence } = hostRouteFor(runtime, endpoint.host);
 		const head = `${prefix}Model endpoint ${endpoint.id} (${endpointAddress(endpoint.host, endpoint.port)})`;
 		if (status === HOST_ROUTE_REFUTED) {
-			return { ok: false, label: `${head} has no route from the egress proxy on this runtime: ${sentence}`, fix: "declare the host this runtime reaches (docs/backends.md lists the measured routes per venue: host.docker.internal on Docker, host.containers.internal on Podman), then `pi-dispatch egress render` and the reload it prints" };
+			return { ok: false, label: `${head} has no route from the egress proxy on this runtime: ${sentence}`, fix: "declare the host this runtime reaches (host.docker.internal on Docker, host.containers.internal on Podman), then `pi-dispatch egress render` and the reload it prints" };
 		}
 		if (status === HOST_ROUTE_WORKS) return { ok: true, label: `${head}: ${sentence}` };
 		// Another machine: an ordinary route out, said as such, never prefixed "not measured" before a sentence that names
@@ -7991,7 +7990,7 @@ async function envSetupChecks(env, seams, sources) {
 				ok: false,
 				warn: true,
 				label: `the env-setup script at ${envValueShown(setup)} does not exist (named by ${source})`,
-				fix: "restore it, or re-render without --env-setup -- the service manager sources it at every boot, so until it is back the unit exits 1 in a restart loop and the worker never starts (docs/secrets.md)",
+				fix: "restore it, or re-render without --env-setup -- the service manager sources it at every boot, so until it is back the unit exits 1 in a restart loop and the worker never starts",
 			});
 			continue;
 		}
@@ -8479,7 +8478,7 @@ export function jobSizeChecks(env, { daemon = undefined, cpuBudgetCenti = null }
 		return [{ ok: false, label: `job size does not parse: ${error.message}, so the worker REFUSES TO START`, fix: "set PI_JOB_MEMORY like 512m, 1536m or 4g and PI_JOB_CPUS like 0.5 or 2 (or unset them for 4g and 2), then re-run doctor" }];
 	}
 	const where = d.memSet || d.cpuSet ? "PI_JOB_MEMORY and PI_JOB_CPUS" : "the built-in default";
-	const checks = [{ ok: true, label: `Job size: ${formatMemory(d.memMiB)} of memory with no swap beyond it, and the CPU weight of ${formatCpus(d.cpuCenti)} CPUs, per job (${where}; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: ${codemodeWorkersOf(d.memMiB)} (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)` }];
+	const checks = [{ ok: true, label: `Job size: ${formatMemory(d.memMiB)} of memory with no swap beyond it, and the CPU weight of ${formatCpus(d.cpuCenti)} CPUs, per job (${where}; a project row's memory and cpus override it); codemode workers: ${codemodeWorkersOf(d.memMiB)} (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)` }];
 	const venues = [];
 	// `reason` is the reader's own token (`timeout`, `unparseable`, ...), never the runtime's text.
 	const reasonOf = (read) => (typeof read?.reason === "string" && /^[a-z0-9-]{1,40}$/.test(read.reason) ? read.reason : "not read");
@@ -8857,7 +8856,7 @@ const rowVersion = (v) => (typeof v === "string" && ROW_VERSION_RE.test(v) ? v :
  * to its TTL (`HOST_TTL_MS`, 90 s), so what reports the version is the row, not a worker known to run. The headline says
  * "differ" only of versions it read: two readable ones among the workers, or this doctor's against this host's row.
  * Where the only other group is "unknown" it says the versions "cannot all be read", since an unread version may be the
- * same one. The fix is the order of docs/upgrading.md for each host: pause, wait for no active job, restart, resume.
+ * same one. The fix is the order for each host: pause, wait for no active job, restart, resume.
  * Not `service restart --drain`, which pauses and watches the shared queue only, so a job running on a host queue
  * (PI_WORKER_NAME) is not waited for. An ok line when peers exist and every one, this host's included, reports one known
  * version, naming them as the workers with a live row (this host's worker may publish none); nothing on a single host
@@ -8879,7 +8878,7 @@ export function fleetVersionChecks({ installed, self = null, selfName = null, pe
 	const differ = [...groups.keys()].filter((v) => v !== "unknown").length > 1 || apart;
 	const agreed = !warn && others.length > 0 && groups.size === 1 && !groups.has("unknown");
 	if (!warn && !agreed) return [];
-	const fix = `finish the upgrade in one window (docs/upgrading.md): the same version on every host; on each host \`pi-dispatch pause\`, wait until \`pi-dispatch status\` shows no active job, restart the worker, then \`pi-dispatch resume\`${apart ? ". If this doctor is not the install the service runs (npx, another checkout), run that install's doctor instead" : ""}`;
+	const fix = `finish the upgrade in one window: the same version on every host; on each host \`pi-dispatch pause\`, wait until \`pi-dispatch status\` shows no active job, restart the worker, then \`pi-dispatch resume\`${apart ? ". If this doctor is not the install the service runs (npx, another checkout), run that install's doctor instead" : ""}`;
 	const one = rows.length === 1;
 	const ok = `Fleet versions: the ${rows.length} ${one ? "worker with a live row reports" : "workers with a live row report"} ${[...groups.keys()][0]}`;
 	return [{ id: "fleet.versions", ok: !warn, ...(warn ? { warn: true } : {}), label: warn ? `pi-dispatch versions ${differ ? "differ" : "cannot all be read"}: ${parts.join("; ")}` : ok, ...(warn ? { fix } : {}) }];
@@ -8980,7 +8979,7 @@ export function tokenWindowResetChecks(found) {
 			ok: false,
 			warn: true,
 			label: `${one ? "A dollar window counter is" : "Dollar window counters are"} below what this host's own runs settled into ${one ? "it" : "them"}, so ${one ? "its" : "their"} history was lost (a flushed, replaced or restored Valkey, an evicted key, or a hand edit) and the cap can let at least that much more be spent: ${parts.join("; ")}. Other hosts' runs are not counted here`,
-			fix: `put back at least this host's share for the rest of the window: ${put.join("; ")} (on a fleet, run doctor on every host first, then \`INCRBY\` the sum, in micro-dollars, of what each says its records settled, less what the counter holds now), or lower the cap by what was already spent, or run \`pi-dispatch pause\` and resume once the window ends (${ends.join("; ")}). A counter lowered on purpose is named here until its window ends (docs/costs.md, "When a counter resets")`,
+			fix: `put back at least this host's share for the rest of the window: ${put.join("; ")} (on a fleet, run doctor on every host first, then \`INCRBY\` the sum, in micro-dollars, of what each says its records settled, less what the counter holds now), or lower the cap by what was already spent, or run \`pi-dispatch pause\` and resume once the window ends (${ends.join("; ")}). A counter lowered on purpose is named here until its window ends`,
 		},
 	];
 }

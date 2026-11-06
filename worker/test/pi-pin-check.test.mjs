@@ -25,7 +25,7 @@ function pins(pin = "1.0.3") {
 		runner: { dependencies: { "@earendil-works/pi-agent-core": pin, "@earendil-works/pi-coding-agent": pin, "@earendil-works/pi-mcp": pin } },
 		worker: { dependencies: { "@earendil-works/pi-ai": pin } },
 		dockerfile: `FROM x\nARG PI_VERSION=${pin}\n`,
-		documents: Object.fromEntries(["README.md", "docs/console.md"].map((path) => [path, `npm install --save-exact @earendil-works/pi-coding-agent@${pin}\n`])),
+		documents: Object.fromEntries(["README.md"].map((path) => [path, `npm install --save-exact @earendil-works/pi-coding-agent@${pin}\n`])),
 	};
 }
 
@@ -62,7 +62,6 @@ test("each hand-written pin is held to the runner's", () => {
 		["worker/package.json's @earendil-works/pi-ai", (p) => (p.worker.dependencies["@earendil-works/pi-ai"] = "1.0.2")],
 		["image/Dockerfile's PI_VERSION", (p) => (p.dockerfile = "ARG PI_VERSION=1.0.2")],
 		["README.md's documented pi installation pin", (p) => (p.documents["README.md"] = "npm install --save-exact @earendil-works/pi-coding-agent@1.0.2")],
-		["docs/console.md's documented pi installation pin", (p) => (p.documents["docs/console.md"] = "npm install --save-exact @earendil-works/pi-coding-agent@1.0.2")],
 	]) {
 		const p = pins();
 		edit(p);
@@ -82,8 +81,8 @@ test("documented install pins refuse floating, missing and unregistered duplicat
 	}
 	for (const count of [0, 2]) {
 		const p = pins();
-		p.documents["docs/console.md"] = "npm install @earendil-works/pi-coding-agent@1.0.3\n".repeat(count);
-		assert.deepEqual(piPinProblems(p), [`docs/console.md holds ${count} documented pi installation pins, want exactly one`]);
+		p.documents["README.md"] = "npm install @earendil-works/pi-coding-agent@1.0.3\n".repeat(count);
+		assert.deepEqual(piPinProblems(p), [`README.md holds ${count} documented pi installation pins, want exactly one`]);
 	}
 });
 

@@ -1442,7 +1442,7 @@ export function writeProjects({ projectsPath, scopedLimitsPath = null, triggersP
 // and the Valkey, and never re-derives a number.
 
 /** Why an envelope write cannot happen with PI_ENVELOPE_FILE unset: the worker reads no envelope then. */
-const ENVELOPE_UNSET = "PI_ENVELOPE_FILE is unset, so the worker reads no envelope and delegation is off; set it in the deployment's .env (docs/allocation.md) and restart the worker. Nothing was written";
+const ENVELOPE_UNSET = "PI_ENVELOPE_FILE is unset, so the worker reads no envelope and delegation is off; set it in the deployment's .env and restart the worker. Nothing was written";
 
 /** The Valkey keys of the applied split; `prefix` exists for the live tests alone, as in `makeAllocationState`. */
 function allocKeys(prefix) {
@@ -1677,7 +1677,7 @@ export async function writeEnvelope({ envelopeFile, projectsPath = null, scopedL
       previous = await redis.set(key, plan.digest, "GET");
     } catch (err) {
       // A SET that failed on the client side may still have been applied by the server (a timeout after the write).
-      return { invalid: `could not record the new envelope's digest in ${key} (${boundedText(err?.message ?? String(err))}), so the file was not written; ${key} may already hold the new digest ${plan.digest}, in which case set it back to the envelope digest the hosts run (doctor prints it) by hand (docs/allocation.md)` };
+      return { invalid: `could not record the new envelope's digest in ${key} (${boundedText(err?.message ?? String(err))}), so the file was not written; ${key} may already hold the new digest ${plan.digest}, in which case set it back to the envelope digest the hosts run (doctor prints it) by hand` };
     }
     await afterExpected?.(); // a test seam: the window between the key and the file, where a second writer can land
     let replaced;
@@ -1694,7 +1694,7 @@ export async function writeEnvelope({ envelopeFile, projectsPath = null, scopedL
       try {
         restored = Number(await redis.eval(RESTORE_EXPECTED_SCRIPT, 1, key, plan.digest, previous ?? ""));
       } catch (err) {
-        return { invalid: `${replaced.invalid}; and ${key} could not be put back to ${previous ?? "absent"} (${boundedText(err?.message ?? String(err))}): it may hold ${plan.digest}, a digest no file has; set it by hand (docs/allocation.md)` };
+        return { invalid: `${replaced.invalid}; and ${key} could not be put back to ${previous ?? "absent"} (${boundedText(err?.message ?? String(err))}): it may hold ${plan.digest}, a digest no file has; set it by hand` };
       }
       return restored === 1 ? replaced : { invalid: `${replaced.invalid}; ${key} was not put back, because another write changed it meanwhile` };
     }

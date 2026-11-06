@@ -11,7 +11,7 @@
  *   - every pi package entry in package-lock.json (at any depth) is at the pin, which also holds the ones only pi's
  *     own tree installs (pi-coding-agent's pi-tui): they ride pi's own pin and need no override;
  *   - the places the pin is written by hand agree with it: the runner's pi-mcp and pi-agent-core, the worker's pi-ai,
- *     image/Dockerfile's PI_VERSION and the durable-install commands in README.md and docs/console.md.
+ *     image/Dockerfile's PI_VERSION and the durable-install commands in README.md.
  *
  * `piPinProblems` is pure (the files are handed in) so its test pins the rule on constructed input as well as on this
  * repository's own files. Run as a script it reads the repository and exits 1 on any problem.
@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 const SCOPE = "@earendil-works/";
 /** One documented command per file; the bump uses the same sites and version capture. */
-export const PI_DOC_SITES = Object.freeze(["README.md", "docs/console.md"]);
+export const PI_DOC_SITES = Object.freeze(["README.md"]);
 export const PI_DOC_VERSION_RE = /@earendil-works\/pi-coding-agent@([^\s`]+)/;
 
 /** The problems with these files' pi pins, as sentences; empty when every pin agrees. */

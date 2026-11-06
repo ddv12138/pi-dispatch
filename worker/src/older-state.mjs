@@ -4,7 +4,7 @@
  *
  * THE RULE for every later release: one that moves or reshapes a store and keeps the old shape readable registers a
  * detector here, gated so that it retires itself (it fires only while the old shape is really there, and says nothing
- * once it is gone), and adds a row to docs/upgrading.md. A detector fires on an EXACT older reference, never on
+ * once it is gone). A detector fires on an EXACT older reference, never on
  * something an operator chose (an image they picked, a file they edited, a path they set): a warning that cannot go
  * away, or that argues with a deliberate choice, is one nobody reads.
  *

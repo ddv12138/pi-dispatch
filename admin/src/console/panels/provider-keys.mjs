@@ -18,7 +18,7 @@ const guideId = provider => `provider-help-${provider}`;
 
 function guide(provider, locale = "en") {
   const help = providerHelp(provider);
-  return html`<details class="pk-guide" id="${guideId(provider)}" data-provider-help="${provider}"><summary>${tr(help.kind === "api-key" ? "Find or create an API key for" : "Set up", locale)} ${name(provider)}</summary><div class="pk-links">${help.url ? ui.outLink({ href: help.url, label: help.kind === "api-key" ? `${tr("Get API key at", locale)} ${help.label}` : `${tr("Open", locale)} ${help.label} ${tr("setup", locale)}`, btn: "sm" }) : null}${ui.outLink({ href: help.docsUrl, label: tr(GUIDED.includes(provider) ? "Official guide" : "Setup guide", locale) })}</div><ol>${help.steps.map(step => html`<li>${tr(step, locale)}</li>`)}</ol>${help.notice ? html`<p class="pk-note pk-notice">${tr(help.notice, locale)}</p>` : null}</details>`;
+  return html`<details class="pk-guide" id="${guideId(provider)}" data-provider-help="${provider}"><summary>${tr(help.kind === "api-key" ? "Find or create an API key for" : "Set up", locale)} ${name(provider)}</summary><div class="pk-links">${help.url ? ui.outLink({ href: help.url, label: help.kind === "api-key" ? `${tr("Get API key at", locale)} ${help.label}` : `${tr("Open", locale)} ${help.label} ${tr("setup", locale)}`, btn: "sm" }) : null}${help.docsUrl ? ui.outLink({ href: help.docsUrl, label: tr(GUIDED.includes(provider) ? "Official guide" : "Setup guide", locale) }) : null}</div><ol>${help.steps.map(step => html`<li>${tr(step, locale)}</li>`)}</ol>${help.notice ? html`<p class="pk-note pk-notice">${tr(help.notice, locale)}</p>` : null}</details>`;
 }
 
 function row(view, item) {

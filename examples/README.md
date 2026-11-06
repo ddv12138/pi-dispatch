@@ -16,4 +16,4 @@ Commit first: a local job edits the folder in place, and the worker refuses a fo
 changes. Forge triggers read flows from the default branch, so merge a flow before a trigger uses it.
 
 `portfolio-manager/` is a second, larger example: a weekly flow that plans the budget split between your
-projects and reports it ([`docs/portfolio-manager.md`](../docs/portfolio-manager.md)).
+projects and reports it.

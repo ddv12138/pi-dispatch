@@ -28,7 +28,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            every write shown first and individually consented — no --yes here
                            (--webhook-url <URL> | --no-webhook) [--org <org>] [--name <appName>]
   pi-dispatch auth <status|login CONNECTION|logout CONNECTION|usage CONNECTION|trial CONNECTION>
-                           manage host-owned subscription authentication, see docs/subscription-auth.md
+                           manage host-owned subscription authentication
   pi-dispatch import-pi    stage your host pi setup (models/skills/persona) into a global overlay
                            [--no-extensions] [--with-packages] [--no-host-packages]
                            [--packages-file <path>] [--from <agentDir>] [--to <overlayDir>]
@@ -46,7 +46,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            access blocked, under one experiment cap [--count 1..10] [--json]
 
   pi-dispatch worker       drain the queue (run this in another terminal, or as a service)
-  pi-dispatch-receiver     webhook receiver for forge triggers, its own bin (see docs/github.md)
+  pi-dispatch-receiver     webhook receiver for forge triggers, its own bin
   pi-dispatch service <render|install|uninstall|status|start|stop|restart> [--receiver|--console] [--user|--system] [--force]
                            run the worker (or --receiver, or --console) as an OS service — the deploy/ templates
                            rendered with this host's real paths, installed user-level;

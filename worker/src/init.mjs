@@ -53,7 +53,7 @@ const DEFAULT_EGRESS_ALLOWLIST = `# Hosts a job container may reach, one per lin
 # the proxy, and a job container has no other route out. A leading dot matches subdomains.
 #
 # Not read when PI_EGRESS=0. Edit freely -- \`pi-dispatch init\` never overwrites this file, and
-# \`pi-dispatch doctor\` reports what the running policy actually permits. See docs/egress.md.
+# \`pi-dispatch doctor\` reports what the running policy actually permits.
 #
 # Your flows are the part nobody can list for you: a job that browses, or installs, or calls an API you
 # added, reaches hosts that are not here. doctor names what it can; the rest you have to know.
@@ -126,8 +126,7 @@ export function runInit(cwd = process.cwd(), deps = {}) {
 		scaffold(fs, results, join(cwd, "projects.json"), EMPTY_PROJECTS, "empty projects list (group repos and folders into a project, recorded per run)");
 		// Issue #504 part B: NO envelope.json. Unset is no delegation, the safe default, and an envelope is a decision (a
 		// total, a floor per project, the delegation rules) with no neutral empty form: a scaffold would either govern every
-		// job or refuse the boot. The .env written above documents PI_ENVELOPE_FILE (from .env.example), and
-		// docs/allocation.md the file.
+		// job or refuse the boot. The .env written above documents PI_ENVELOPE_FILE (from .env.example).
 		scaffold(fs, results, join(cwd, "egress-allowlist.conf"), DEFAULT_EGRESS_ALLOWLIST, "egress allowlist (provider + forge + registry; the egress policy is on unless PI_EGRESS=0)");
 		// Issue #503: the declared model endpoints, empty, and the proxy include rendered from them, which is the empty
 		// render (its header only). squid refuses to start on a missing include file and starts on a comments-only one
@@ -245,8 +244,7 @@ function lstatOrNull(fs, path) {
  * The docker text is the same for every set that includes `local`. Its step 2 was a compose command naming
  * deploy/docker-compose.yml, a file a folder made by init alone does not have (issue #480), and it started no egress
  * proxy either; it is now `pi-dispatch up`, which starts Valkey and the proxy itself. A podman-only deployment (issue
- * #453) gets the podman ladder instead, the steps of docs/podman.md "Setup" in the order a fresh folder needs them
- * (named by its URL since #480, because a folder made without a clone has no docs/):
+ * #453) gets the podman ladder instead, the Podman setup steps in the order a fresh folder needs them:
  * the job image into this account's own store, the venue key and provider key in `.env` (what `up` and `service
  * install` read), the stack as Quadlet units, doctor, and the worker as a user service.
  */
@@ -274,9 +272,8 @@ PI_BACKENDS to run jobs on Docker here (then run \`pi-dispatch init\` again for 
 `;
 
 const PODMAN_NEXT_STEPS = `
-Next (the podman venue; run these as the worker's own account. First set the account up as the Podman guide's "Setup"
-steps 1-4 say (https://github.com/edgehero/pi-dispatch/blob/main/docs/podman.md), linger included:
-sudo loginctl enable-linger <account>, without which a job gets no bounds):
+Next (the podman venue; run these as the worker's own account, with linger enabled
+(sudo loginctl enable-linger <account>, without which a job gets no bounds)):
   1. podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest
                                                         # the prebuilt job image, in this account's own store
   2. edit .env                                          # PI_BACKENDS=podman, and ANTHROPIC_API_KEY (or your provider's key)

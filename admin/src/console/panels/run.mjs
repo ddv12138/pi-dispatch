@@ -22,7 +22,7 @@ import { beatAgeOf, doctorHostsOf, doctorProblems, doctorCountsText } from "../.
 import { PROPERTY_LABEL, DECLARATION_TEXT } from "../../read-model.mjs";
 import { recordedProgress } from "@edgehero/pi-dispatch/run-history";
 import { coresText } from "@edgehero/pi-dispatch/size-suggest";
-import { NO_EXPLANATION, VENUE_LABEL, capitalised, docsHref, outcomeWord, recordReason } from "../../words.mjs";
+import { NO_EXPLANATION, VENUE_LABEL, capitalised, outcomeWord, recordReason } from "../../words.mjs";
 import { explainReason } from "@edgehero/pi-dispatch/reason-catalog";
 import { QUEUED_STATES } from "@edgehero/pi-dispatch/parked-facts";
 import { rerunRefusalOf } from "../../job-actions.mjs";
@@ -200,7 +200,7 @@ export function runOutcome(view) {
   const duration = Number.isFinite(started) && Number.isFinite(ended) ? view.locale === "zh" ? `，耗时 ${ageText(ended - started)}${where}` : `: finished in ${ageText(ended - started)}${where}` : where;
   const said = token ? explainReason(token, { why: r.why }) : null;
   const reason = said?.known ? ui.withCode(t(said.sentence, view)) : token ? html`${bannerCut(token)}, ${t(NO_EXPLANATION, view)}.` : html`${t(NO_REASON_TEXT[w.word] ?? NO_REASON_TEXT.failed, view)}${w.word === "failed" ? t(view.role === "operator" ? " The Fleet page's failed list may say more." : " Failure reasons are shown to operators only.", view) : ""}`;
-  const next = said?.known ? html`<p><strong>${t("What to do:", view)}</strong> ${ui.withCode(t(token === "awaiting-input" ? AWAITING_INPUT_ELSEWHERE : said.next, view))}</p>${docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read more in the reasons docs", view) }) : null}` : null;
+  const next = said?.known ? html`<p><strong>${t("What to do:", view)}</strong> ${ui.withCode(t(token === "awaiting-input" ? AWAITING_INPUT_ELSEWHERE : said.next, view))}</p>` : null;
   const href = forgeLinkOf(r, view.env);
   const recoveryId = view.data?.queueState?.activeJobId ?? view.data?.queueState?.queuedJobId;
   const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
@@ -769,7 +769,7 @@ export function runWhy(view) {
   const floor = host?.backends?.floor;
   const properties = floor && typeof floor === "object" ? Object.entries(floor) : [];
   const said = token ? explainReason(token, { why: r.why }) : null;
-  return titled("Why it was refused", html`${facts([["Rule", said?.known ? ui.withCode(t(said.sentence, view)) : t("No explanation is recorded for this rule yet.", view)], ["Venue floor (PI_BACKEND_FLOOR)", properties.length ? properties.map(([name, want]) => html`<span>${t(PROPERTY_LABEL[name] ?? name, view)}: ${want}; ${r.backend ?? UNATTRIBUTED_BACKEND} ${t("declares", view)} ${t(DECLARATION_TEXT[declarationOf(r.backend ?? UNATTRIBUTED_BACKEND, name)?.word] ?? "unknown", view)}. </span>`) : t("This host has not published a floor.", view)], ["Same reason in the last 24 hours", Number.isFinite(n) ? html`<a href="/runs?reason=${encodeURIComponent(token)}">${count(n)}</a>` : t("could not be read", view)], ["Newest doctor result", doctor && !doctor.unreadable ? `${doctorCountsText(doctor)}, ${ageText(doctor.ageMs)} ${t("ago", view)}` : t("not published or could not be read", view)]], view.locale)}${said?.known && docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read the rule in the reasons docs", view) }) : null}${view.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: `${t("Run it on", view)} ${r.host ?? t("the worker host", view)}; ${t("the console runs nothing on a host.", view)}` }) : html`<p>${t("Ask an operator to run the host's doctor checks.", view)}</p>`}`, view.locale);
+  return titled("Why it was refused", html`${facts([["Rule", said?.known ? ui.withCode(t(said.sentence, view)) : t("No explanation is recorded for this rule yet.", view)], ["Venue floor (PI_BACKEND_FLOOR)", properties.length ? properties.map(([name, want]) => html`<span>${t(PROPERTY_LABEL[name] ?? name, view)}: ${want}; ${r.backend ?? UNATTRIBUTED_BACKEND} ${t("declares", view)} ${t(DECLARATION_TEXT[declarationOf(r.backend ?? UNATTRIBUTED_BACKEND, name)?.word] ?? "unknown", view)}. </span>`) : t("This host has not published a floor.", view)], ["Same reason in the last 24 hours", Number.isFinite(n) ? html`<a href="/runs?reason=${encodeURIComponent(token)}">${count(n)}</a>` : t("could not be read", view)], ["Newest doctor result", doctor && !doctor.unreadable ? `${doctorCountsText(doctor)}, ${ageText(doctor.ageMs)} ${t("ago", view)}` : t("not published or could not be read", view)]], view.locale)}${view.role === "operator" ? ui.cmd(["pi-dispatch", "doctor"], { host: `${t("Run it on", view)} ${r.host ?? t("the worker host", view)}; ${t("the console runs nothing on a host.", view)}` }) : html`<p>${t("Ask an operator to run the host's doctor checks.", view)}</p>`}`, view.locale);
 }
 
 export function runHost(view) {
