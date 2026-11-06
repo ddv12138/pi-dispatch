@@ -55,7 +55,7 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { homedir, networkInterfaces, release as osRelease, tmpdir, userInfo } from "node:os";
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import * as nodeFs from "node:fs";
-import { NETNS_KEEPER, NETNS_KEEPER_START, STACK_KEYS, VALKEY_SHARED_KEY, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, probeTcpAddress, proxyRestartAdvice, readLinger, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./stack.mjs";
+import { NETNS_KEEPER, NETNS_KEEPER_START, STACK_KEYS, VALKEY_SHARED_KEY, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, probeTcpAddress, proxyRestartAdvice, readLinger, readSubuidRanges, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./stack.mjs";
 import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
