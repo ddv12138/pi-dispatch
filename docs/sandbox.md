@@ -15,23 +15,21 @@ pi-dispatch sandbox gh-12345 --publish 3000
 A fresh container starts from the **same image** with the **same workspace** and the **same isolation
 flags** — and no credentials at all. The agent is not running. You are.
 
-You can also open one from the admin panel: `/dispatch`, Enter on a finished run, then `b`. The panel
-suspends itself, hands the terminal to the shell, and comes back when you exit. If the container never
-starts, the panel stops and tells you the exit code before it redraws, rather than painting over the one
-line docker printed.
+You can also open one from the console: the **Sandboxes** page under Runs, or a run's own page, opens the shell in
+your terminal through a checked local handler, or gives you the host command to run
+([console.md](console.md#opening-a-sandbox)).
 
 The command **needs a terminal**: it opens an interactive shell, so from a pipe, a TTY-less script or CI it
 refuses by name before anything else, rather than letting docker fail with "the input device is not a
-TTY". And if a sandbox for that id is **already running**, both the CLI and the panel refuse and point at
+TTY". And if a sandbox for that id is **already running**, the CLI refuses and points at
 it: `docker attach pi-sandbox-<jobId>` (`podman attach` for a run on the podman venue), or exit that one first.
 
 A sandbox reopens a run **in the runtime that ran it**. The retained record says which backend ran the job: a
 `local` run opens through this host's docker CLI, and a run on the native `podman` venue through this account's
 rootless Podman, with that venue's own flags (`--userns=keep-id`, `--user`, the pinned namespaces) and its own
 refusals (`docs/podman.md`, "The sandbox on this venue"). Either opens only where `PI_BACKENDS`, read from the
-shell you run the command or the panel from, names that venue; a run from any other backend, or from one this
-shell does not bless, is refused by name from the CLI and the panel alike (the panel does not offer `b` for it,
-and `--list` shows it as `not here`). Open it on the venue that ran it. A run retained before backends were
+shell you run the command in, names that venue; a run from any other backend, or from one this
+shell does not bless, is refused by name from the CLI, and `--list` shows it as `not here`. Open it on the venue that ran it. A run retained before backends were
 recorded ran locally and opens as it always did.
 
 ## What is preserved, and what is not
@@ -69,7 +67,7 @@ already retained too. A pinned run is the exception: it keeps its pin either way
 
 Since issue #446 the worker also writes each run's deadline into its manifest (`retainUntil`) when it retains it,
 and a run ends at the EARLIER of that and its creation time plus the current window. The written deadline is what
-keeps a shell with a longer window than the worker's (the admin panel is the usual one) from calling a run open
+keeps a shell with a longer window than the worker's (the console's is the usual one) from calling a run open
 that the worker is about to delete. The other side of the same rule: **raising** the window does not extend a run
 that is already retained, which keeps the deadline it was retained with; only runs retained after the change get
 the longer one. Pin a run to keep it longer.
@@ -126,26 +124,26 @@ you need to push from inside a sandbox, authenticate yourself — `gh auth login
 ## Egress
 
 A sandbox lands on **the network your egress setting gives a job**, whether you open it from the CLI or from
-the panel. By default that is its own `--internal` network whose only other member is the allowlist proxy, with no
+the console. By default that is its own `--internal` network whose only other member is the allowlist proxy, with no
 route off this host (`docs/egress.md` says what that does and does not bound); with `PI_EGRESS=0` it is Docker's
 default bridge and the whole internet (for a run on the podman venue, the job's own `--network=private`, which
 reaches the internet too), which is what `SECURITY.md` discloses. The setting is read from the
 environment of whatever opens the sandbox: the shell you run
-`pi-dispatch sandbox` in, or the environment pi was started in for the panel. Neither reads your
-deployment's `.env`, so if you set `PI_EGRESS` or `PI_EGRESS_PROXY` only there, export them where you open
-sandboxes too (otherwise the sandbox is refused rather than guessed at, and the refusal says so).
+`pi-dispatch sandbox` in, which does not read your
+deployment's `.env` (the console's copied command loads the deployment's sandbox settings instead,
+[console.md](console.md#opening-a-sandbox)). So if you set `PI_EGRESS` or `PI_EGRESS_PROXY` only in the
+deployment's `.env`, export them in the shell you open sandboxes from too (otherwise the sandbox is refused rather
+than guessed at, and the refusal says so).
 
-**The panel now shows you which posture it would use, before you press `b`.** RUN_DETAIL's sandbox block
-carries two more lines, `egress on via <proxy>` (or `egress off (docker's default bridge)`, `egress off
-(podman's private network)` for a run on the podman venue, or `egress unreadable`) and `read from this shell, not the deployment`. The parenthetical on the off state is not
-decoration: on docker `PI_EGRESS=0` omits `--network` entirely, so the shell lands on the default bridge and
+**The posture the opening shell resolves is the one it gets.** `pi-dispatch sandbox` resolves it from its own
+environment, and it has no way to see what your deployment's `.env` sets, so the two can disagree and only you can
+tell. On docker `PI_EGRESS=0` omits `--network` entirely, so the shell lands on the default bridge and
 the whole internet, which "off" on its own reads as the opposite of (on podman it names `--network=private`,
-which reaches the internet as well). The second is the part that matters: the panel reports what IT resolved,
-and it has no way to see what your deployment's `.env` sets, so the two can disagree and only you can
-tell. The same is true of the other sandbox settings the panel resolves from its own environment, which
-`OQ-038` records in full: the retention window it reports, the idle timeout your shell gets, which
-directory of retained runs it can see at all, and `DOCKER_HOST`, which on a Podman deployment can point
-the panel at a different daemon than the one your jobs ran on. (Before #277 a sandbox opened from the panel
+which reaches the internet as well). The same is true of the other sandbox settings resolved from the opening
+environment, which
+`OQ-038` records in full: the retention window reported, the idle timeout your shell gets, which
+directory of retained runs is visible at all, and `DOCKER_HOST`, which on a Podman deployment can point
+the command at a different daemon than the one your jobs ran on. (Before #277 a sandbox opened from the panel
 skipped the network and got the whole internet even with the policy on. If you rely on the policy for
 sandboxes, run a version that carries #277.)
 
@@ -241,8 +239,8 @@ still refused. The reason is that an open is not in any runtime's `ps`
 until its container starts, and a sweep that asked just before that could delete the directory under the new
 shell. With `--pin` the new deadline is written first, before any `docker` or `podman` call, and the sweep reads
 the manifest again before it deletes anything, so a pin that lands mid-sweep holds the run. A pin that cannot be
-written refuses the open (it used to print a warning and open anyway). The admin panel has no pin, so it does not
-offer `b` for such a run, and says to use the CLI.
+written refuses the open (it used to print a warning and open anyway). The console has no pin, so it says to use the
+CLI for such a run.
 
 The one case this cannot see: the worker's window was LOWERED after the run was retained, while the shell you
 open from still has the old, longer one. That shell then opens a run the worker's next sweep may delete. The sweep
@@ -300,9 +298,7 @@ at another daemon is invisible to it, and only the rules above protect it.
   release"), before its venue, image or workspace is judged, and a pin refuses before it rewrites anything. A
   `version` that is not a whole number of 1 or more is refused under the same word, since no release writes one. The
   console's run page says "Its workspace was kept by a newer pi-dispatch, whose manifest this release cannot read:
-  open it with the pi-dispatch of that release on its host.", and offers no command; the `/dispatch` panel says "not
-  reopenable here: kept by a newer pi-dispatch" (for a broken `version`, "not reopenable (its manifest's version is
-  unreadable)"). The retention sweep does not read the version: a run's deadline means the same in every release, so
+  open it with the pi-dispatch of that release on its host.", and offers no command. The retention sweep does not read the version: a run's deadline means the same in every release, so
   it is deleted on time whichever release kept it.
 - **Sandbox *containers* are not reaped by the worker.** They are named `pi-sandbox-*`, outside the
   `pi-job-*` filter the boot reaper uses, precisely so a worker restart cannot kill a shell you are

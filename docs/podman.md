@@ -185,11 +185,11 @@ and `pi-dispatch up` was not.
    docker context use podman
    ```
 
-   A context rather than `DOCKER_HOST`, so the worker, the CLI you type into and the panel all resolve the same
-   daemon. `DOCKER_HOST` set in one environment and not another is how two of them end up on different daemons.
+   A context rather than `DOCKER_HOST`, so the worker and the CLI you type into resolve the same
+   daemon. `DOCKER_HOST` set in one environment and not another is how they end up on different daemons.
    Either works for the daemon itself: the lab's measurements were taken with `DOCKER_HOST` set and the Fedora 44
    host's through this context, and nothing failed for either, `credentialTransit` included. The context is about the
-   three surfaces agreeing with each other.
+   two surfaces agreeing with each other.
 6. **Load the job image and name it as Podman stores it.** `docker pull docker.io/ddv12138/pi-job:latest`, then set
    `PI_JOB_IMAGE` to the name `docker images` shows for it.
 7. **Start the stack the same way you would on Docker.** It is the same compose file:
@@ -205,7 +205,7 @@ and `pi-dispatch up` was not.
    without the key started Valkey with no password as before; the same command after the key was added recreated the
    container, which then answered `NOAUTH` to a client with no password and kept the key written before (the volume
    is kept), and no command line on the host carried the password meanwhile.
-   In a folder `/dispatch setup` laid out (PR #475's review), the file sits in `deploy/` of that folder and every
+   In a deployment folder (PR #475's review), the file sits in `deploy/` of that folder and every
    command names the folder's project, `docker compose -p <folder name> ...`, since compose otherwise names the
    project after `deploy/` and every such folder would share one. The name is the folder's, as compose normalises a
    directory name: lower case, only letters, digits, `_` and `-`, no leading `_` or `-` ("My Deploy.v2" is
@@ -1113,7 +1113,7 @@ an unprivileged account (uid 1234), on 2026-09-25. Run everything below as the w
      (`install -m 600 /dev/null ~/.config/pi-dispatch/valkey.env`, then one line `VALKEY_PASSWORD=<the .env's value>`):
      the unit does not start without it. Every client sends the password through the one connection module: the
      worker and the receiver from their environment (the service's loader puts the `.env` there), a CLI command run
-     in the deployment folder from its `.env`, the admin panel from the `.env` of the deployment its pointer names
+     in the deployment folder from its `.env`, the console from the `.env` of the deployment folder it resolves
      (the pointer itself never holds it). Another account connecting without it gets `NOAUTH`, and a client of this
      deployment that lacks it, or sends the wrong one, is refused as a configuration error naming
      `VALKEY_PASSWORD`: the worker exits 2, `pi-dispatch run` and the receiver say so, doctor prints a ✗.
@@ -1149,14 +1149,14 @@ an unprivileged account (uid 1234), on 2026-09-25. Run everything below as the w
    file with sh, which may read an unquoted `[` as a pattern. With `local` in `PI_BACKENDS`, docker's Valkey is the
    queue, published by root's docker-proxy, and root's listener is taken; another account's is refused there too.
    Every OTHER Valkey client applies the same rule when it connects, wherever it runs from: `pi-dispatch run`,
-   `pause`, `resume`, `status` and `cancel`, the receiver, the admin panel and doctor all build their connections
+   `pause`, `resume`, `status` and `cancel`, the receiver, the console and doctor all build their connections
    through one module, which resolves the name once per process, connects to the literal address judged (this
    account's first, else root's where root may hold it), and refuses another account's Valkey on every venue. Only
    whether root's is refused depends on the deployment (the environment's `PI_BACKENDS`, else the `.env` in the folder
    the command runs in). The receiver judges before it listens and exits 2 on a refusal. The compose file is docker-only. Without `local` in `PI_BACKENDS`, doctor's fix for an unreachable Valkey points at `up` and
    `service install`, and `doctor --fix` offers no `docker run` for it (on no venue since issue #468: its Valkey needs the deployment's password in a child's environment, and doctor hands no program anything from `.env`).
-8. **`PI_BACKENDS=podman`** in `.env` (the setup wizard, `/dispatch setup`, writes it when you choose rootless Podman
-   at its runtime step), then start the worker, and run `pi-dispatch doctor` and
+8. **`PI_BACKENDS=podman`** in `.env` (write it when you choose rootless Podman
+   as the venue), then start the worker, and run `pi-dispatch doctor` and
    `pi-dispatch doctor --live` as the same account, from the deployment folder. doctor reads `PI_BACKENDS`,
    `PI_EGRESS` and `PI_EGRESS_PROXY` as `up` and `service install` do: this shell's value where it sets one, else
    `.env`'s, and a line naming the file when it supplied one; a shell and a `.env` that set one differently is a ✗,
@@ -1209,7 +1209,7 @@ pull pays it ahead of the first job.
 
 ### The sandbox on this venue
 
-`pi-dispatch sandbox <jobId>` (and `b` on an opened run in the panel) reopens a run this venue ran under this account's rootless Podman,
+`pi-dispatch sandbox <jobId>` reopens a run this venue ran under this account's rootless Podman,
 never under Docker: every step of the session goes through the `podman` CLI, the running check, the session's
 egress network and its removal, the launch and `podman attach` after a detach. It opens only where the shell you run it
 from has `PI_BACKENDS` naming `podman`, because that is read from your environment and not from the deployment's

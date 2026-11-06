@@ -77,8 +77,8 @@ moves 25/312,500 of the way, to shop 250,000, platform 600,000 and ops 150,000.
                         "REPORT_WEBHOOK_URL": "op://ops/pm-report/webhook" } } }
 ```
 
-- The panel's trigger list and `/dispatch triggers` mark it `[portfolio]`. After a run, the run's detail shows
-  the plan's outcome and id, and the panel's `b` view and the insights page show the split it led to.
+- The console's trigger list marks it "writes the budget split". After a run, the run's detail shows
+  the plan's outcome and id, and the insights page's budget split shows the split it led to.
 - It runs Monday at 06:00 UTC, at the start of the week window. The flow writes no `validUntil`, so its plan
   stays in force for `maxPlanDays` (14 in the example) unless a newer plan replaces it, which outlives a
   weekly run.
@@ -140,8 +140,8 @@ The flow proposes. The host decides, after the job exits, by the rules in `INT-P
 - **Validity.** A plan lives until its `validUntil`, at most `maxPlanDays`. Then the neutral split returns.
 - **Writers.** `portfolio-job` must be in `delegation.writers`, or the job is refused before it costs anything.
 - **The audit log and revert.** Every plan the job sends, applied or refused, is a row in the audit file and
-  in `alloc:log` ([allocation](allocation.md#portfolio-jobs) names the one exception). The panel's ALLOCATION
-  view (`b`) shows the history, and `r` on a row reverts to it.
+  in `alloc:log` ([allocation](allocation.md#portfolio-jobs) names the one exception). The budget split page
+  shows the history, and Revert on a row goes back to it.
 
 The full rules are `REQ-DELEGATED-ALLOCATION`, `INT-ENVELOPE-FILE-CONTRACT` and `INT-OUTBOX-CONTRACT`.
 
@@ -150,7 +150,7 @@ The full rules are `REQ-DELEGATED-ALLOCATION`, `INT-ENVELOPE-FILE-CONTRACT` and 
 - **Stop the manager only.** Delete its trigger to stop its runs. Removing only `"portfolio": true` leaves a
   weekly job that still runs and costs: any plan it writes is refused as `plan-not-portfolio`, and the split
   stays as it is.
-- **Stop every plan.** Set `enabled` to false with `dispatch_envelope_set`. The neutral split returns, and a
+- **Stop every plan.** Set `enabled` to false with the budget split page's envelope form. The neutral split returns, and a
   portfolio job is refused as `portfolio-no-envelope` before it costs anything. An operator plan is refused too.
 - **Remove the split.** Follow "Several hosts" in [allocation](allocation.md#several-hosts): remove
   `PI_ENVELOPE_FILE` from every host, then delete the split and its digest:
@@ -170,18 +170,18 @@ that someone else wrote must never reach it. A reason your last plan gave is age
 
 - **That its plan applied.** The host judges it after the job ends. The report says "requested", and the next
   run learns the outcome from `lastAttempt`.
-- **That `lastAttempt` shows a revert.** It holds only this trigger's own plans. A revert in the panel shows in the
+- **That `lastAttempt` shows a revert.** It holds only this trigger's own plans. A revert on the budget split page shows in the
   snapshot's `plan`: its `writer` is then `operator-revert`, and the report's "In force" line names it. A revert to
   the neutral split leaves `plan` null, and the line says so.
 - **That `plan.writer` wrote the plan.** It is the split's last writer. After an envelope edit the worker re-bases
   the plan onto the new envelope: same plan id and weights, writer `envelope-change`. The report then says
-  "re-based onto a changed envelope". The plan's author is in the panel's history.
+  "re-based onto a changed envelope". The plan's author is in the budget split's history.
 - **That the numbers are exact to the cent mid run.** Spend counters include what running jobs still hold, and
   other jobs settle while the manager runs.
 - **That run counts cover the whole fleet.** They do only with a run mirror (`PI_WORKER_NAME` set on every
   host). `fleet.runsComplete` says which.
 - **That its reasons reach you unaltered.** A reason holding a control or format character refuses the whole
-  plan, the panel shows the rest escaped, and the snapshot never shows them.
+  plan, the budget split page shows the rest escaped, and the snapshot never shows them.
 - **That it can compute dollars.** It writes weights. The host ignores any dollar amount, and models misjudge
   shared budgets.
 
@@ -210,12 +210,12 @@ pi sends otherwise, so nothing would stop the answer at the output cap.
    matches a deployment where no plan has applied yet. A small local model may answer without running the
    flow at all, so put the flow's one command in the task as well (the `task` line below). Run
    `pi-dispatch run --trigger pm-weekly`. The worker logs `plan_collected` with outcome `applied`, and the
-   ALLOCATION view shows the fixture's split (shop $47.50, platform $35.00, ops $17.50) with writer
+   budget split page shows the fixture's split (shop $47.50, platform $35.00, ops $17.50) with writer
    `portfolio-job`.
 5. Set `"flow": "portfolio-manager"` and the task back, and run again. The report opens with
    `Last plan: applied`, and the new plan follows `priorities.md`. Mark a project "on fire", commit, and run
    again: its weight rises, or the step clamps it.
-6. Revert in the panel: `b`, then `r` on the first row. The next report shows the reverted split under
+6. Revert on the budget split page, with Revert on the first history row. The next report shows the reverted split under
    "In force".
 
 ```text
@@ -245,4 +245,4 @@ Put `minIntervalHours` back afterwards. A hand edit of the envelope needs the di
 | Report script | `/job/pi/skills/portfolio-manager/report.mjs`, with `--dry-run` |
 | Report secrets | `REPORT_GH_TOKEN`, `REPORT_WEBHOOK_URL` |
 | Report output | `report-sent: <channel>` or `report-not-sent: <reason>`, exit code 0 always |
-| Panel | ALLOCATION view, key `b`; `r` on a history row reverts |
+| Revert | Revert on a history row of the budget split page |

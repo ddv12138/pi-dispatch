@@ -1,8 +1,8 @@
 # The operator console
 
-A web page for managing the deployment, served by a process of its own, `pi-dispatch-console`. It sits beside the
-`/dispatch` panel in pi, not in place of it: both read the same files and the same Valkey, and both write through the
-same validated functions, so neither can do anything the other would refuse.
+A web page for managing the deployment, served by a process of its own, `pi-dispatch-console`. It reads the same files
+and the same Valkey as the worker, and writes through the same validated functions, so it can do nothing the worker
+would refuse.
 
 It shows the whole deployment, live: what is running and queued on every host, every run with filters, the runs
 waiting for an answer, spend and insights for a range of days, the schedules, the configuration and the console's own
@@ -17,16 +17,16 @@ host. [The screens](#the-screens) starts below that.
 
 ## Install
 
-The console ships in the admin package, the same one that gives pi the `/dispatch` panel:
+The console ships in the admin package:
 
 ```bash
 npm i -g @edgehero/pi-dispatch-admin
 ```
 
 Run every `pi-dispatch-console` command as the account that runs the deployment, on the deployment's host. It finds
-the deployment the way the panel does: `--deployment <dir>` if you pass it, else the folder the deployment pointer
-names (written by `/dispatch setup`), else the current folder. It reads its settings from that deployment's `.env`;
-a value exported in your shell wins, as it does for the panel.
+the deployment: `--deployment <dir>` if you pass it, else the folder a deployment pointer
+(`pi-dispatch-deployment.json`) names, else the current folder. It reads its settings from that deployment's `.env`;
+a value exported in your shell wins.
 
 ## Create the first token
 
@@ -206,8 +206,8 @@ ever open to other accounts, the console refuses it: remove the folder (what it 
 new link, which creates it again.
 
 The link's page says "Signing in with a one-time link" while it works. A link that was used, has expired or is
-unknown says so and gives both commands for a new one (`pi-dispatch-console link --name <you>` on the host, and
-`/dispatch console --link` in pi); a link that lost the part after `#` says it carries no code. Each state offers the
+unknown says so and gives the command for a new one (`pi-dispatch-console link --name <you>` on the host); a link
+that lost the part after `#` says it carries no code. Each state offers the
 token form instead. If the console does not answer, the page stays, says "Console not reachable, retrying" and posts
 the same code again every 2 seconds, for at most 30 tries or 60 seconds, whichever comes first. Then it stops, says the
 link has expired (a link lasts 60 seconds), and asks you for a new one once the console is back. Too many sign-in
@@ -221,48 +221,17 @@ operator should run `pi-dispatch doctor` on the host), or an audit log it could 
 (A used or expired link is said on the link's own page, above.) A sign-in that reaches nothing keeps the page and is
 sent again every 2 seconds until the console answers, for at most 30 tries or 60 seconds: then nothing more is sent,
 the page no longer holds the token, and it asks you to paste it and press Sign in again once the console is back.
-The field is cleared as soon as you press Sign in. Under it, "No token yet?" gives the pi command
-for a link (`/dispatch console --link`) and the host command for a token, each in a box to copy, and a line says where
+The field is cleared as soon as you press Sign in. Under it, "No token yet?" gives the host commands for a link and
+for a token, each in a box to copy, and a line says where
 the console answers: on this host's loopback address only, on its unix socket only, or nothing about it on a public
 bind. Signing in needs JavaScript. A page without it says so first, and shows only what still holds: the token form,
 its lead-in and the link page's "Signing in" state are drawn hidden, and the page's script shows them as it loads.
 
-### From pi: `/dispatch console`
-
-In pi, `/dispatch console` does the same in one step, without a second terminal:
-
-```text
-/dispatch console [runs|fleet|insights|config|parked|audit|<run id>] [--link [token name]] [--no-open]
-```
-
-- **The address.** It prints the page's URL by the same rules as `/dispatch insights`: the loopback URL, the `ssh -L`
-  line for a unix socket, `<this host>` for a bind on every address, and a sentence for port 0 or a value that does
-  not parse. A run id opens `/run?id=<id>`; no page opens the overview.
-- **Running or not.** It asks the console once, `GET /healthz` with a one second limit, at this host's loopback
-  address or the socket and nowhere else (the same check doctor makes), and says `running`, `not running` (with why,
-  and how to start it or keep it running as a service), or that it cannot tell and why (port 0, a non loopback
-  address).
-- **`--link`** makes a one-time sign-in link, like `pi-dispatch-console link`, for an operator token: the one there
-  is, the one you name (`--link rob`; the page goes before `--link`), or the one you pick when there are several. It
-  is shown only to you, in pi's notice: never in the conversation, never a tool. Its row is written to the audit log
-  (actor role `panel`) before the code is made, so no code exists that the log does not hold. None is made unless the
-  console answers as running, and none in pi's RPC mode (where the notice goes to another program) or where the panel
-  cannot see the deployment's tokens file (start pi in the deployment folder, or run `/dispatch setup`). The link
-  names the page too, after the code: `.../login/code#<code>&next=/runs`, and after signing in you land there. The
-  console only ever lands you on one of its own pages; anything else lands on the overview.
-- **The browser** opens by itself on a local session: not over SSH (`SSH_CONNECTION`, `SSH_CLIENT` or `SSH_TTY`),
-  and on Linux only with a display (`DISPLAY` or `WAYLAND_DISPLAY`), for a TCP address (a socket needs your tunnel
-  first). `--no-open` keeps it closed. The URL is printed every time. A sign-in link is handed to the browser through
-  a small private page in a temporary folder, so the code never sits on the opener's command line, where other
-  accounts on the host could read it. It still shows in pi's notice and, until it is used, in the browser's history.
-  The page is opened by your desktop's handler for `.html` files, usually the browser. A snap or Flatpak browser on
-  Linux has a private `/tmp` and shows the page as not found; the notice says so, so open the printed link instead.
-
 One-time links do not work on a Windows host: Windows reports every folder as open to other accounts, so the console
 refuses the `console-login-codes/` folder there. Paste the token instead.
 
-It never starts the console: run `pi-dispatch-console serve` for that, or keep it running with `pi-dispatch service
-install --console` ([above](#keep-it-running-as-a-service)).
+The link command never starts the console: run `pi-dispatch-console serve` for that, or keep it running with
+`pi-dispatch service install --console` ([above](#keep-it-running-as-a-service)).
 
 ## Sessions
 
@@ -351,16 +320,15 @@ refuses its name too. Whatever else a later release wrote in the file (a field o
 kept by every command that writes it. Doctor warns while such a token is there; upgrading pi-dispatch and the console
 lets it sign in. A release before this one refuses the whole file when it holds a role it does not know.
 
-Your pi session's `write` and `edit` tools cannot touch the tokens file or anything in `console-login-codes/`: the
-`/dispatch` extension guards both (a code file planted there would be a sign-in), so a prompt injection in the
-operator's session cannot mint itself a login that way. Its `bash` tool can, which is the
-same residual every guarded file has ([`SECURITY.md`](../SECURITY.md)).
+The tokens file and everything in `console-login-codes/` are readable only by the account that runs the console (a
+code file planted there would be a sign-in), so another account on the host cannot mint itself a login that way. A
+shell of that account can, which is the same residual every guarded file has ([`SECURITY.md`](../SECURITY.md)).
 
 ## Writes
 
 A write is two steps. The preview shows the change as a diff; the confirm applies it. The confirm carries only a
 ticket the preview handed out, which works once, for your session, for 5 minutes, and only for that change: if the
-file changed after the preview (the panel, another browser, a hand edit), or a job is no longer as the preview showed
+file changed after the preview (another session, a hand edit), or a job is no longer as the preview showed
 it, the confirm is refused and nothing is written. Preview again. [Actions](#actions) lists every write.
 
 **The preview bar.** A preview opens in one bar right after the card whose button you pressed, never inside a table.
@@ -480,13 +448,6 @@ target and its outcome, and for a write the digests of the file before and after
 the reserve it showed (`reserve`, in micro-dollars), and a bulk action writes one line per job, each with the size of
 the batch (`count`). It never holds a token, a code, a cookie or what was sent: an answer to a parked run is recorded
 by its sha256, never its text.
-
-**Writes from pi are in the same log.** What you change from the `/dispatch` panel, its commands and dialogs, or what
-the pi extension's tools change after your confirm, is written to this log too, with the role `panel` and your
-account's login name, so one log says what changed whichever surface changed it. The line is written before the
-change, and if it cannot be written (a full disk, a logs folder you cannot write) the change is refused with a
-sentence saying so. Fix the folder and try again. The one exception is `/dispatch setup`, which builds the deployment
-before there is a log to write to.
 
 Each line carries the sha256 of the line before it, so an edit shows:
 
@@ -665,7 +626,7 @@ readers ([Live updates](#live-updates)).
 | `/config/trigger-add` | Operators only: add a trigger, with the forge words and venue capabilities beside the form. |
 | `/watch?rule=<rule>` | Watch sources, rules and the retained findings for a rule, read fresh with Reload (Watch). |
 | `/watch/board?rule=<rule>&finding=<finding>` | A finding's board, its evidence and each decision (Watch decisions). |
-| `/config` | The triggers, the settings overlay, the pause windows, the scoped limits, the projects, the envelope and allocation, the MCP servers, the staged packages, the secret profiles (their names only, never where a secret comes from or its value; those `PI_SECRET_PROFILES` declares are listed beside the overlay's, and a name in both is marked ambiguous; a "Secret profiles in use" table gives each profile's source, where its resolver stands against `PI_SECRET_RESOLVER_ROOTS`, the triggers and projects that use it, the last resolve a run recorded and the live hosts that advertise it, still with no path: [`secrets.md`](secrets.md#from-the-panel)), and the secret bundles: each project bundle in `triggers.json` with its project, its profile and whether this deployment declares it, fork reviews, its endpoint names and hosts, the triggers that opt out and the variable names the newest run received, plus the bundle resolvers by name and format ([`secrets.md`](secrets.md#from-the-panel)). Never a bundle's reference or a value. |
+| `/config` | The triggers, the settings overlay, the pause windows, the scoped limits, the projects, the envelope and allocation, the MCP servers, the staged packages, the secret profiles (their names only, never where a secret comes from or its value; those `PI_SECRET_PROFILES` declares are listed beside the overlay's, and a name in both is marked ambiguous; a "Secret profiles in use" table gives each profile's source, where its resolver stands against `PI_SECRET_RESOLVER_ROOTS`, the triggers and projects that use it, the last resolve a run recorded and the live hosts that advertise it, still with no path: [`secrets.md`](secrets.md#from-the-console)), and the secret bundles: each project bundle in `triggers.json` with its project, its profile and whether this deployment declares it, fork reviews, its endpoint names and hosts, the triggers that opt out and the variable names the newest run received, plus the bundle resolvers by name and format ([`secrets.md`](secrets.md#from-the-console)). Never a bundle's reference or a value. |
 | `/config/secrets` | Secret profiles and bundles by name, never a value ([Secrets](secrets.md)). |
 | `/config/connections` | Forges, the receiver, model endpoints, provider keys, MCP servers and the egress rules. |
 | `/config/project?id=<project>` | One project: its members, limits, spend and share of a budget split (Projects). |
@@ -1129,7 +1090,7 @@ Bootstrap preserves existing tokens, or creates an operator hash and discards it
 only the console service and prints a one-use `/setup` sign-in link after that console answers. The link is good
 for 60 seconds. Its recovery instructions name `pi-dispatch-console link --name '<operator>' --next /setup` and
 `token rotate`. Multiple operators require an explicit choice. On a remote machine, open your own tunnel before
-using its loopback link. `/dispatch setup` offers the same browser route and retains its terminal guided route.
+using its loopback link.
 
 The steps keep this order:
 
@@ -1224,13 +1185,12 @@ for every reader), and the page's script turns it into local time, so with scrip
 stay UTC on purpose: the overview timeline's axis, its marks' tooltips (they say UTC) and the times on its pills, the
 hours under the Spend today card's dots (plain `HH:00`, under a chart of UTC hours), the live transcript's entry
 times (`HH:MM:SS UTC`, to the second), the hover tips on the Spend page's charts (they say "UTC"), the charts' day
-labels and daily buckets (UTC days, the budget's), and the budget split's short "at MM-DD HH:MM" notice, which uses
-the panel's words.
+labels and daily buckets (UTC days, the budget's), and the budget split's short "at MM-DD HH:MM" notice.
 
 ### Outcomes and reasons
 
-The console and the `/dispatch` panel use the same words for how a run ended. The run record's `outcome` is `completed`,
-`policy` or `failed`; both surfaces say completed, refused (for `policy`) and failed. Some reasons change the word: a
+The words for how a run ended come from the run record. Its `outcome` is `completed`,
+`policy` or `failed`; the console says completed, refused (for `policy`) and failed. Some reasons change the word: a
 completed run with `awaiting-input` is **awaiting input**, a run with `operator-cancel` is **cancelled**, and a durable
 run that was lost and could not be continued (`recovery-cap`, `recovery-checkpoint-absent`,
 `recovery-unsafe-extensions`, recorded as `policy`) is **failed**. The record's
@@ -1253,11 +1213,7 @@ reason this console does not know (from a newer worker) is shown as its word wit
 record names no reason word says "No reason was recorded": a record written by a worker older than the reasons for
 infrastructure exits may name none, or may keep an error's own words where the reason belongs, which the runs list does
 not show ([reasons.md](reasons.md)); the run page follows the same rule. Only the
-record's reason word is ever shown in a list, never a job's own failure text. In pi, the panel's list row says the word
-and puts the reason's word last (`✘ failed · 3t · 12.3k · container-never-started`), so a narrow terminal cuts the
-reason before the counts, and its run detail prints the whole sentence and the next step under the reason.
-`/dispatch runs` says the same word in its OUTCOME column and the reason's word in REASON. The panel's row, its run
-detail and that REASON column leave out a reason that is not a reason word, as the runs list does.
+record's reason word is ever shown in a list, never a job's own failure text.
 
 **The Venues panel** on `/fleet` lists every venue this release knows, and any venue a newer worker blesses that it does
 not. For each one: the hosts that bless it and the ones whose default it is, each host's
@@ -1268,7 +1224,7 @@ its worker started. The hosts' parts are what each worker published about itself
 release's own table.
 Nothing is checked live from the console, so a word is the venue's declared one: `pi-dispatch doctor` on a host says
 whether it holds there. A host running a worker older than this console shows "not published". The runs table has a
-Venue column, and in pi, `/dispatch` shows the same view: `u` for the hosts, then `v`.
+Venue column.
 
 **Links to the forge** come from your deployment's own settings, never from a guess. A GitHub run links to
 `github.com`; a GitLab, Forgejo or Azure DevOps run links to the instance URL in your `.env` (`GITLAB_URL`,
@@ -1377,8 +1333,7 @@ it.
 When a file on the configuration page does not load (the triggers, the pause windows, the scoped limits, the projects
 or the settings overlay), the sentence quotes the newest published doctor check about that file and names the host
 and how long ago it ran. Without one it still says to run `pi-dispatch doctor` for the reason. Run
-`pi-dispatch doctor --no-publish` to check a host without publishing. The `/dispatch` panel shows the same lines in
-its hosts view (`u`).
+`pi-dispatch doctor --no-publish` to check a host without publishing.
 
 ### Run progress
 
@@ -1417,8 +1372,6 @@ run page is a live page: its panels and transcript share one connection and one 
   shows the run's live progress, and the page of the attempt it continues shows that attempt's own numbers with
   "This run continues as" and a link to the recovery job.
 
-The `/dispatch` panel's running rows show the same, with the phase name clipped.
-
 ### The live transcript
 
 An operator's run page shows what the run is doing: what the agent said, each tool it called with its arguments,
@@ -1449,11 +1402,8 @@ or not started yet."
 - **An OpenShell run's sandbox.** A run on `openshell` or `openshell-bind` shows a "Sandbox policy" row (copy or bind
   mode, how many credential providers the sandbox was given and how many placeholders they bound) and a "Rule hosts"
   row (the hosts its network policy admitted, from your allowlist, model endpoints and the forge; up to 32 listed, the
-  rest counted). A run that armed `run.secrets` shows a "Secrets profile" row with the profile's name. The `/dispatch`
-  panel's run detail has the same lines. Whether an MCP server connected is not recorded on any venue, so no row says it.
+  rest counted). A run that armed `run.secrets` shows a "Secrets profile" row with the profile's name. Whether an MCP server connected is not recorded on any venue, so no row says it.
 - The transcript shares the run page's one live connection. A queued run attaches when its transcript appears, without reload. Reconnect resumes entries from their cursor and refreshes every panel. Transcript completion leaves the page connection open for later state updates.
-
-The `/dispatch` panel's live tail (`l`) reads the same transcript.
 
 ## Finding runs
 
@@ -1504,7 +1454,7 @@ whole history in one request, one page examines at most 2000 runs; when it stops
 carries on from where it stopped. Under the table the page says how many runs it shows and, when the fleet's run
 mirror was read, from how many hosts.
 
-The runs come from two places, merged as the panel merges them: this host's run records, and the fleet's run mirror
+The runs come from two places, merged: this host's run records, and the fleet's run mirror
 in Valkey, which holds every host's recent runs (see [multi-host](multi-host.md)). When the mirror cannot be reached,
 the page shows this host's runs and says so. Reading the pages never changes the mirror.
 
@@ -1514,8 +1464,8 @@ Operators can change the deployment from the pages that show it. Every action is
 ([Writes](#writes)): **Preview** shows exactly what will happen (a diff for a file, the list of jobs for a job
 action) and **Confirm** does it. Nothing happens on a preview. If something changed in between, the confirm is
 refused with "changed since the preview" and nothing is done; preview again and you see the new state. Every action
-goes through the same functions as the `/dispatch` panel and the pi extension's tools, so a value the panel refuses
-is refused here with the same words, and every action lands in the [audit log](#the-audit-log).
+goes through the same validated functions, so a value the worker refuses is refused here with the same words, and
+every action lands in the [audit log](#the-audit-log).
 
 | Where | Action | What it does |
 |---|---|---|
@@ -1525,7 +1475,7 @@ is refused here with the same words, and every action lands in the [audit log](#
 | Fleet | Cancel | Stops a running job on whichever host runs it, or removes a held one. A running job that no worker acknowledges is reported as not cancelled, never as done. A held job whose removal was asked for and not answered within the time limit, or whose hold was cleared while the job itself could not be removed, is reported as a change that did not finish, never as nothing changed. A held job's preview comes within 10 seconds whatever Valkey does (past that it says the fleet did not answer within 10 seconds, and that nothing was changed), and its answer within its own time limit. |
 | Fleet | Retry | Puts a failed job back in the queue. The worker runs it again from the start, through every budget check, so it can cost money. The job keeps the attempts it made, so it has no Undo: Cancel stops it once it runs. |
 | Fleet | Remove | Deletes a failed job from the queue. Its run record stays. |
-| Fleet | Pause, Resume | The whole fleet, as `p` and `r` do in the panel, or one queue. A fleet resume is refused while the console's environment and the deployment's `.env` name different Valkeys, as in the panel and the tools. A queue's preview waits for the fleet at most 10 seconds, then says it did not answer and that nothing was changed; a fleet resume's preview then leaves out how many jobs wait to start, and says whether the fleet did not answer in time or could not be read. A preview reads at most 200 of the fleet's queues and names at most 20 in a line, then says how many more; when it could not read them all it says so, its counts are "at least", and its Undo is by hand. The pause and resume themselves still reach every queue. |
+| Fleet | Pause, Resume | The whole fleet, or one queue. A fleet resume is refused while the console's environment and the deployment's `.env` name different Valkeys. A queue's preview waits for the fleet at most 10 seconds, then says it did not answer and that nothing was changed; a fleet resume's preview then leaves out how many jobs wait to start, and says whether the fleet did not answer in time or could not be read. A preview reads at most 200 of the fleet's queues and names at most 20 in a line, then says how many more; when it could not read them all it says so, its counts are "at least", and its Undo is by hand. The pause and resume themselves still reach every queue. |
 | Fleet | Retry all, Remove all, Cancel all held | The bulk actions (below). |
 | Parked | Answer | Sends your answer to a run that is waiting on an issue, where the console has checked it can build the answer ([below](#answering-a-parked-run)). Costs money. |
 | Run | Re-run | Runs the same thing again ([below](#re-running-a-run)). Costs money. Its banner's Undo cancels the new run before it starts. |
@@ -1544,11 +1494,11 @@ Resuming the fleet or a queue shows how many jobs are waiting to start, each of 
 message to a running job is paid too, but reserves nothing new: it spends from what its run already holds, and the
 run's turn, dollar and token caps still bind, so its preview says so instead of showing a figure.
 
-**Configuration edits** change the same files the panel writes (`triggers.json`, the settings overlay, the money
+**Configuration edits** change the deployment's configuration files (`triggers.json`, the settings overlay, the money
 files) and nothing else. Nothing is committed to git: if you keep the deployment folder in git, commit the change
 yourself. A secret profile is a name and the path of its resolver script, and a bundle resolver also says the format its script
 prints; the console never asks for or shows a secret's value, nor a bundle's reference. A project edit refused because
-a secret bundle names the project shows that refusal in the form, and nothing is written. If another session (the panel, a tool, a hand edit) wrote the file after your preview, the confirm is
+a secret bundle names the project shows that refusal in the form, and nothing is written. If another session (a tool, a hand edit) wrote the file after your preview, the confirm is
 refused and the file is left as it is.
 
 ### Bulk actions
@@ -1581,8 +1531,7 @@ posts one comment as the deployment:
 >
 > > your answer, quoted
 
-The name is your token's name. A token named `panel` is refused here: that name is the one an answer sent from the pi
-extension's panel is signed with, so the forge would say the panel answered; give it another name. Any
+The name is your token's name. A token named `panel` is refused here; give it another name. Any
 `@name` in your answer is changed so it does not notify anyone. That comment is
 the record of what the agent was told, for anyone who reads the issue later.
 
@@ -1632,8 +1581,8 @@ explains a failed archive or skipped workspace point.
 
 Re-run on a run's page queues the same work again:
 
-- **A local run** (from `/dispatch run` or `pi-dispatch run`) runs its folder, flow and task again on this host,
-  refused when the folder has uncommitted changes, as `/dispatch run` refuses. Its queue data is kept a day after it
+- **A local run** (from `pi-dispatch run`) runs its folder, flow and task again on this host,
+  refused when the folder has uncommitted changes, as `pi-dispatch run` refuses. Its queue data is kept a day after it
   completes and a week after it fails.
 - **A scheduled run** fires its trigger once, as the triggers file says now, like `pi-dispatch run --trigger <id>`.
 - **A forge run** runs again on the same issue as a new delivery, so it gets a new job id, on the queue the receiver
@@ -1727,8 +1676,8 @@ spends from the run's existing reservation; Confirm sends it, signed with your t
 before sending, what `pi-dispatch steer` refuses (the job is not running, the run takes no messages, the text is empty
 or above 8 KiB), and a confirm after the run finished is refused with nothing sent. A withdraw is guaranteed for a
 queued message and best effort for a written one, and its preview says which. Once the agent read a written message, there is no undo. The audit log records the job, the
-message id and a hash of the message, never the text. In the `/dispatch` panel the same is `t` (steer) and `T` (follow-up) on the
-ACTIVE row, offered only while the run's inbox takes a message (a steer-armed run whose loop has not started, has
+message id and a hash of the message, never the text. The forms are offered only while the run's inbox takes a
+message (a steer-armed run whose loop has not started, has
 ended, or whose venue or image cannot deliver says so instead). All of it is in `steering`.
 
 ### Updates
@@ -1737,7 +1686,7 @@ ended, or whose venue or image cannot deliver says so instead). All of it is in 
 
 **The look is off until you turn it on.** Set `PI_UPDATES_LOOK=1` on a worker host, and it looks a minute after it starts and then once a day: the newest pi and the newest version of each staged extension from the npm registry, and this project's public checks on its bump pull request. It runs on the host and never in a job, changes nothing and spends nothing. It does send your staged package names to the registry, so set `PI_UPDATES_REGISTRY` to a private mirror if those names are private, and `PI_UPDATES_PROXY` to send its requests through a proxy with no direct fallback. A read that fails says **unknown**, never that all is well, and a look older than two days says so.
 
-**pi** arrives in a pi-dispatch release, so its row only tells you where it stands and links to the bump pull request. **pi on each host** is the pi where `/dispatch` runs. That one is yours to update, for example with `pi update --all`, and the page says when it is newer or older than pi-dispatch is tested with.
+**pi** arrives in a pi-dispatch release, so its row only tells you where it stands and links to the bump pull request. **pi on each host** is the pi your jobs run. That one is yours to update, for example with `pi update --all`, and the page says when it is newer or older than pi-dispatch is tested with.
 
 **Run a canary** tries one exact version of one extension on one paid job. Pick a cron trigger that loads staged packages; the preview shows the reserve. The version replaces the staged copy for that job only, installed under that job's own folder, so a job running beside it never sees it, and it is deleted from a kept workspace. What it does to the trigger's own folder or repository stays done, as with any job of that trigger, and a failed canary cannot be retried: start another from this page. It is refused for free, before anything is spent, if the trigger sets `run.packages: false` or resumes its transcript (its next run would continue the candidate's work), the package is a reviewed subscription adapter, it is not staged on that host, the version does not exist, or the image is too old to report the result.
 
@@ -2025,25 +1974,12 @@ scheduler's `name` in `schedulers` is its cron trigger's id, or null for a sched
 (never its job name).
 Whether a park is being answered is not in `/api/state`.
 
-For a run whose record a newer pi-dispatch wrote, the `dispatch_runs` tool gives only its ids, kind, outcome, times,
-host, project and attempt (every other field null), plus `newer: true` and a `note` with the run page's sentence, and
-it names the fields it gives and says the others are left out. The tool gives both times, `startedAt` and
-`finishedAt`, for every run (before issue #761's release an agent's copy had no `finishedAt`).
-
 Without a session, `/api/state` answers 401 with a JSON error, never a redirect to the sign-in page:
 `{"error": "sign in first", "ended": "idle"}`, where `ended` says why the session behind your cookie ended (one of the
 reasons in [Sessions](#sessions), or null), so a script can tell an expired session from a revoked token. The 401
 does not clear your cookie, so asking again still says why. While the console cannot use its tokens file it answers
 503 instead and leaves your cookie as it is too: wait and ask again rather than signing in. Give a script its own token, named after the script, with the `viewer` role, so the audit log names
 it and a revoke ends only its access.
-
-## Parked runs in pi
-
-The `/dispatch` panel in pi shows the same parked runs: press `k` in the list to open the PARKED
-view, with each run's target, forge, age and resume count (`?` when this host cannot see the session store). Enter
-opens the run's detail; when the run's record cannot be read it says so, and it says there is no record only when this
-host and the run mirror were both read and hold none. The panel and the console read the deployment
-through the same code, so the two never disagree about what is waiting.
 
 ## Reference
 
@@ -2103,7 +2039,7 @@ describes tested exact package compatibility, not vendor endorsement. No read st
 
 When watch rules are configured, Configuration, Triggers links to `/watch`. Select a rule for its findings and
 `/watch/board?rule=<id>` for its board. A finding selection shows public stages and choice probabilities; an expired
-or failed store read says unavailable. The panel's Watch view reads the same store. Rules and sources are written
+or failed store read says unavailable. Rules and sources are written
 by hand; these pages do not edit trigger authority.
 
 Operators can inspect private evidence at `/api/watch-trace?finding=<id>`. This includes samples, query text and
@@ -2172,15 +2108,12 @@ kind filters and native disclosures still work.
 
 ### Fire a cron trigger now
 
-Fire now previews the reserve for a cron trigger with a scheduler in this deployment's queue. The tool
-`dispatch_trigger_fire` takes its zero-based `index` from `dispatch_triggers`. Interactive calls require a
-person's confirm. A headless call may fire unattended with the process's `PI_DISPATCH_AGENT_WRITES=1` grant
-and explicit valid roots and hourly grants.
-Both paths refuse commands and portfolio triggers, require a clean repository under `PI_DISPATCH_RUN_ROOTS`,
-and require the flow's committed `SKILL.md` at current HEAD to set `ai-trigger: allow`. Grants come only
-from the console or pi process environment, never the deployment pointer or settings overlay.
+Fire now previews the reserve for a cron trigger with a scheduler in this deployment's queue. Confirming needs a
+person. It refuses commands and portfolio triggers, requires a clean repository under `PI_DISPATCH_RUN_ROOTS`,
+and requires the flow's committed `SKILL.md` at current HEAD to set `ai-trigger: allow`. Grants come only
+from the console process environment, never the deployment pointer or settings overlay.
 
-`PI_DISPATCH_RUN_PER_HOUR` bounds attempts with the same counter as `dispatch_run`. Preview does not
+`PI_DISPATCH_RUN_PER_HOUR` bounds attempts. Preview does not
 consume an attempt. Execution rechecks the trigger file, scheduler and admission gates, then counts the attempt.
 A second fire in the same minute is refused; it may still count as an attempt. A successful fire keeps the
 trigger's full model, image, secret and run configuration. Worker budget gates still run before spending.
@@ -2211,9 +2144,7 @@ the env resolver in use. It names the affected triggers. The script stays on dis
 the same name again with the same resolver. A viewer or a read-only console has no declaration/removal controls.
 
 **What a run gets** explains profiles, bundles, resolver execution, variable/output bounds, precedence, all
-five bundle exclusions, and how local/Podman values differ from OpenShell placeholders. The safe agent read
-`dispatch_secrets` goes further than this person page: it returns variable counts, never variable names,
-paths, roots, references or values. See [Secrets](secrets.md).
+five bundle exclusions, and how local/Podman values differ from OpenShell placeholders. See [Secrets](secrets.md).
 
 ## Connections
 
@@ -2265,8 +2196,7 @@ these extra file/lease reads.
 - **Staged packages:** exact package versions, receipt time and trigger opt-outs. Stage them using
   `pi-dispatch import-pi --with-packages`; the receipt does not record who staged them.
 
-Viewers read fixes as sentences without commands to copy. `dispatch_connections` provides a safe agent read
-of names, hosts, receiver counts/times and key presence, with no credentials, references or full paths. See [Egress](egress.md) and
+Viewers read fixes as sentences without commands to copy. See [Egress](egress.md) and
 [Notifications](notifications.md).
 
 ## One project
@@ -2298,8 +2228,7 @@ no button and a reason. This section moves from Capacity; Capacity keeps host ut
 
 The side column shows allocation weight/floor/share/current split, scoped limits, bundle facts and trigger
 activity. A viewer sees the chart and facts with no copy call, member form, size preview or Delete.
-`dispatch_projects` includes safe spend/share, size suggestions/calls and edit/delete refusal facts; project
-and sizing writes still require a person. See Projects.
+Project and sizing writes still require a person.
 
 
 ## Zero touch
@@ -2328,27 +2257,12 @@ pi-dispatch-console token add --name automation --role agent
 ```
 
 An agent reads a redacted viewer copy: typed counts and reason tokens, without job/operator prose, variable names,
-resolver paths or private answer data. It uses the same preview and single-use Confirm tickets as an operator.
-Every action shows one policy and its reason: unattended, person-confirmed, or person-only. A cap decrease is
-unattended only when the file explicitly sets the old cap. Raising, unsetting or inheriting one requires a person.
-Undo is checked again; it cannot raise a cap an agent just lowered. Revocation ends sessions on their next request.
+resolver paths or private answer data. Revocation ends sessions on their next request.
 
-The pi tools use the same planners and policy. With a UI, every model write asks a person. Without a UI, unattended
-writes additionally require `PI_DISPATCH_AGENT_WRITES=1` in that pi process’s own environment. This is a process
-lifetime grant, never read from the deployment `.env` or pointer. Restart pi to remove it. Disable pi’s own bash,
-write and edit tools for such a session; those tools are outside the dispatch action policy.
-
-Agent Fire now and local/cron re-run require explicit `PI_DISPATCH_RUN_ROOTS` and `PI_DISPATCH_RUN_PER_HOUR` in
-the console/pi process. Current HEAD flow permission, realpath containment, a clean tree and the shared hourly
-attempt count are checked again before enqueue. Commands and portfolio starts refuse; a forge re-run stays with
-a person. These starts still use the chosen trigger’s model, secrets, turns and forge token and can spend outside
-its schedule. The worker’s own gates apply when it consumes the job.
-
-Audit filters include `role=agent`. The overview’s count uses this console host’s verified applied-write receipts
+Audit filters include `role=agent`. The overview's count uses this console host's verified applied-write receipts
 since UTC midnight, not a fleet total or a pre-write intent. Partial/unavailable counts say so. Its audit link has
 the broader retained history. A missing receipt after a successful write is an accounting warning, not a reason
-to repeat the action. Interactive model proposals are audited as agent writes; their human confirmation still
-counts as a human intervention for Zero touch.
+to repeat the action.
 
 ## Cited answer drafts
 
@@ -2381,6 +2295,5 @@ The host policy's `quotaWindows` preference chooses the Models monitoring focus 
 
 The Subscription quota card shows account and application-bucket observations separately from dollar caps: their freshness, five-hour and seven-day windows, utilization, reset times, extra usage and explicit paid-overage policy. Unknown utilization and resets remain unknown; stale observations do not promise remaining capacity. Retained exhaustion still matters after its observation becomes stale. A resetless exhaustion offers a host trial command only to a writable operator, and a trial does not clear exhaustion or bypass other pickup gates. Jobs using the same connection and application bucket share its quota. Quota observations cannot prove that separately linked connections belong to the same vendor account.
 
-The model tool `dispatch_models` shares the reader but receives only bounded machine facts, not doctor prose,
-commands, paths, diffs or repository-agent definitions. See Model roles,
+See Model roles,
 Model failover, Proposals and Canaries.

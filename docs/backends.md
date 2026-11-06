@@ -275,7 +275,7 @@ that carries it and an exit key (on `openshell`: `transcriptStderr` for the live
 `transcriptStderr` for steering, since the acks come back over the transcript). `yes` is about the venue only: on any
 venue a feature can still be refused before the job spends when the image lacks what it needs (the `steer` or
 `recover` capability, or `exitAuth`). These are not on the three-word scale, and `PI_BACKEND_FLOOR` never compares them: they say what the venue can
-do for you, not what it guarantees. The console and the `/dispatch` panel word them from this table (a run on a venue
+do for you, not what it guarantees. The console words them from this table (a run on a venue
 with no sandbox shell is shown no `pi-dispatch sandbox` command, for example), and a trigger that names a venue whose
 `recovery` is `no` together with `run.recover` is refused when the triggers file loads.
 
@@ -291,12 +291,11 @@ whether your `observationPreflight` refuses `run.recover`. A new venue must be b
 | `openshell` | image | image | no | no |
 | `openshell-bind` | yes | yes | yes | no |
 
-**Where to see them.** The console's Fleet page has a Venues panel, and the `/dispatch` panel a VENUES view (`u` for
-the hosts, then `v`): every venue with the hosts that bless it and use it as their default, each host's floor, every
+**Where to see them.** The console's Fleet page has a Venues panel: every venue with the hosts that bless it and use it as their default, each host's floor, every
 property in words with its word, what the venue serves, who holds its credentials, and for the OpenShell venues each
 host's engine, mode and whether its gateway was on that host when its worker started. Each worker publishes its own
 part when it starts (the `backends` field of its registry row, names and fixed words only); nothing is checked live
-from either surface.
+from the page.
 
 ## A declaration is not a claim that the property holds
 
@@ -604,8 +603,7 @@ credential provider, and with them it is **blessable**.
 [release](https://github.com/NVIDIA/OpenShell/releases/tag/v0.1.4): the deb, rpm or snap on Linux; on macOS the
 release's own formula, `brew install https://github.com/NVIDIA/OpenShell/releases/download/v0.1.4/openshell.rb`, since
 only that formula defines the Homebrew service (homebrew-core's `openshell` has none); there is no Windows build, so the
-venue is refused there). `/dispatch setup` (the panel's wizard) asks about the gateway's engine and checks the
-openshell CLI and gateway only when `PI_BACKENDS` names the OpenShell venues alone. A mixed list (`local,openshell`)
+venue is refused there). A mixed list (`local,openshell`)
 keeps the docker (or podman) check and asks nothing about openshell, so there `up` and `pi-dispatch doctor --openshell`
 are where a missing CLI or gateway shows. Then, in the deployment folder, with `PI_BACKENDS` (and `PI_OPENSHELL_ENGINE`
 for Podman) in `.env`:
@@ -665,7 +663,7 @@ its network policy (your allowlist's, your model endpoints' and the forge's, all
 holds nothing a webhook or an issue chose; up to 32 listed and the total counted), how many credential providers the
 sandbox was given (the job's own, made only when it has a secret and the policy a rule, and one per bundle host) and
 how many keys they bound as placeholders. Counts only for credentials, never a name or a value. The console's run page
-and the panel's run detail show them ([`console.md`](console.md)). MCP connection state is not recorded.
+shows them ([`console.md`](console.md)). MCP connection state is not recorded.
 
 **git push.** The clone's remote carries no token, so a forge job's exec gets a git credential helper (through
 `GIT_CONFIG_COUNT`) that prints the forge token's placeholder as the password, the supervisor rewriting it in a request to
@@ -813,7 +811,7 @@ the TOML above in the fix), and upstream's warning, quoted. The CI lane runs a b
 - **`PI_BACKEND_FLOOR` bounds you.** An operator can require a minimum of every blessed backend, and a floor
   naming a switched-off control, or a guarantee this host is not observed to provide, refuses at boot (and,
   for an observation, before each job).
-- **The sandbox runs on this host, per job.** `pi-dispatch sandbox` and the panel open a shell against a
+- **The sandbox runs on this host, per job.** `pi-dispatch sandbox` opens a shell against a
   retained job directory in the runtime that ran it, and only `local` and `podman` have a launcher, so a run
   whose retained record names another backend is refused by name, as is one on a venue the shell's own
   `PI_BACKENDS` does not bless. That refusal is per run, not per deployment: blessing a remote venue does not

@@ -4,7 +4,7 @@ Every run ends with an outcome, and every run that did not simply complete also 
 fixed word, such as `scope-cap` or `oom-killed`. This page says what each one means and what to do about it.
 
 The worker keeps one short explanation and one next step per reason in `worker/src/reason-catalog.mjs`, for the
-console and the `/dispatch` panel to show beside a link to the entry here. Where the worker posts a fixed comment on
+console to show beside a link to the entry here. Where the worker posts a fixed comment on
 the issue for a reason, that comment is the explanation, word for word, so the issue and the explanation never
 disagree.
 
@@ -27,8 +27,8 @@ the word as it is.
 A failed record written by an older worker may name no reason, or may keep an error's own words where a reason belongs
 (a container exit or a forge call that failed, before `container-infra-exit`, `container-exit-unknown` and
 `worker-error` existed): the worker that ran it predates the reasons for infrastructure exits. The console's runs list
-and the `/dispatch` panel (its list, its run detail and the REASON column of `/dispatch runs`) show those words to no
-one: they read such a record as having no reason, and the runs list says "No reason was recorded". The console's run
+shows those words to no
+one: it reads such a record as having no reason, and the runs list says "No reason was recorded". The console's run
 page still shows the reason as it was recorded.
 
 ## Stopped while running
@@ -42,7 +42,7 @@ What to do: check the worker log for which one it was. Run the job again if its 
 
 ### operator-cancel
 
-An operator cancelled the run (`pi-dispatch cancel`, the panel or the console). If it had started, partial work may
+An operator cancelled the run (`pi-dispatch cancel` or the console). If it had started, partial work may
 exist. If it was cancelled while it waited to start, nothing was spent.
 
 What to do: nothing to fix. Run the job again if its work is still wanted.
@@ -113,7 +113,7 @@ What to do: nothing to fix. See [sessions.md](sessions.md).
 The deployment's cap on how many jobs may start in a day, week or month was already reached. The refused attempt still
 counts in its window.
 
-What to do: wait for the window to roll over, or raise the cap with `/dispatch set` if it is too low. See
+What to do: wait for the window to roll over, or raise the cap on the console's Configuration page if it is too low. See
 [costs.md](costs.md).
 
 ### soft-hold
@@ -481,7 +481,7 @@ What to do: run `pi-dispatch doctor` on the worker. It names the setting or file
 
 ### settings-overlay-invalid
 
-The settings file (the overlay `/dispatch set` writes) is present but invalid. The worker refuses every job rather
+The settings file (the overlay) is present but invalid. The worker refuses every job rather
 than run with settings nobody chose.
 
 What to do: fix the key `pi-dispatch doctor` names, or delete the file to start from an empty overlay. A top-level

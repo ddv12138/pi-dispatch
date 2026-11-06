@@ -304,10 +304,11 @@ Two supported ways to continue work **across** jobs:
 - **Runtime imports of omitted peers.** pi aliases its own package at load, so a pi peer is fine. Any other
   peer that is imported as a **value** will not resolve in the container. Type-only peers are erased and
   cost nothing.
-- **Editing the packages flag from the panel or an AI tool.** Both deliberately refuse: the panel displays
-  each trigger's packages state and the staged `name@version` set, and changing it stays a file edit.
+- **Editing the packages flag with an AI tool.** The tools deliberately refuse, and changing it stays a file edit.
+  The console's triggers page marks a trigger that loads the staged packages, and the Connections page shows the
+  staged `name@version` set.
 - **A model starting a command.** Job chaining refuses any `/outbox` request naming a `command`, and
-  `dispatch_run` cannot express one -- its parameters speak flows only. A command dispatches from the
+  A command dispatches from the
   reviewed `triggers.json` alone, and unlike a flow there is no `ai-trigger`-style opt-in to widen that.
 - **GitHub Actions, GitLab CI, Azure Pipelines.** pi-dispatch is the trigger and the box; CI stays your
   repo's business. If you meant a CI workflow rather than a pi workflow, nothing here applies.

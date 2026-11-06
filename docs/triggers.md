@@ -26,13 +26,13 @@ The forge and cron reference below keeps their existing behavior.
 The [Configuration page](console.md#configuration-and-trigger-pages) has Edit and Delete on each row,
 a page per trigger and a structured add editor. Human row labels count from 1; tool indexes remain zero-based.
 The add editor and its JSON fallback write the add tool's entry, including `run.secretBundle: false`.
-The edit form and `dispatch_trigger_edit` share flow, venue (`backend`), provider, model, `maxTurns`,
+The edit form covers flow, venue (`backend`), provider, model, `maxTurns`,
 progress, statusComment, steer and recover. Omitted fields keep their existing values; unrelated
 hand-written bounds are preserved. Cron cannot enable statusComment or recover.
 
-Fire now and `dispatch_trigger_fire(index)` start a served cron schedule after a person's confirmation.
-They apply the folder allowlist, clean-tree check, committed flow opt-in and hourly attempt count of
-`dispatch_run`, refuse command and portfolio triggers, and refuse a duplicate in the same minute.
+Fire now starts a served cron schedule after a person's confirmation.
+It applies the folder allowlist, the clean-tree check, the committed flow opt-in and the hourly attempt count,
+refuses command and portfolio triggers, and refuses a duplicate in the same minute.
 These extra gates do not change ordinary scheduled ticks or the CLI's `run --trigger` behavior.
 
 ## Reading and checking rules in the browser
@@ -77,8 +77,8 @@ relative path resolves against the worker's own directory) and, with `flow`, a `
 The webhook types also charset check `run.flow` at load (skill names are lowercase). A flow that could
 never name a repo skill is refused when the file loads, at no cost, instead of failing inside a paid
 container. A cron `id` longer than 176 characters refuses the file too: each run its schedule starts is the job
-`repeat:<id>:<time>`, and the console and the panel read a job id of at most 200 characters, so a longer one would
-run with nothing able to name its runs. Earlier releases took an id of any length: the console and the panel still
+`repeat:<id>:<time>`, and the console reads a job id of at most 200 characters, so a longer one would
+run with nothing able to name its runs. Earlier releases took an id of any length: the console still
 name a schedule whose id is up to 200 characters long, so you can find one an earlier release made and remove it,
 and a run record is read whatever its id's length.
 
@@ -114,11 +114,9 @@ to pick the verdicts worth paying for:
   "run": { "kind": "github", "flow": "address-review" } }
 ```
 
-The AI tool `dispatch_trigger_add` sets `reviewState` too, behind the operator's confirm, and the write checks it like
+The console's add editor sets `reviewState` too, behind the operator's confirm, and the write checks it like
 the file's own (GitHub only, beside `review_submitted`, a non-empty list of `approved`, `changes_requested` and
-`commented`). **Upgrading:** before this release the tool's description offered `reviewState` but the tool dropped it
-without a word, so a review trigger added that way fired on every verdict. Check the review triggers you added with
-the tool, and add the narrowing by hand, or add them again.
+`commented`).
 
 Two behaviours to know before you turn it on. A **Comment** type review whose remarks are all line comments
 and whose summary box is empty starts nothing. Those remarks arrive on an event this service
@@ -157,7 +155,7 @@ checks the sender, who is the closer.
 
 Spending is written into the file itself. After the run record exists, the worker adds
 `"disarmed": { "at": ..., "jobId": ... }` to the entry's `on`. The entry is never deleted, because run
-history refers to triggers by their position in the file. A spent entry still shows in the panel with a
+history refers to triggers by their position in the file. A spent entry still shows on the console's triggers page with a
 spent marker while
 matching nothing. Deleting `on.disarmed` re-arms it; nothing else is needed. A one-shot whose
 run **failed** still counts as fired. The record is the definition, so a failed run spends it too. The
@@ -177,7 +175,7 @@ Four deployment notes:
 ## The file's version
 
 `triggers.json` may carry a top-level `version` (issue #761). Absent means `1`. You never need to write it: every
-writer (the panel, the console and the trigger tools) writes it, first in the file, only when an entry uses a `run`
+writer (the console and the trigger tools) writes it, first in the file, only when an entry uses a `run`
 field, a top-level block or a value (a new `on.type`, a new `waitFor` condition, a new `run.kind`) that an older
 release would misread (a field whose absence would let a job run wider than the file says, or a value it would refuse
 as broken). Nothing needs one yet, so today's files have none and every write leaves them byte for byte as before. A
@@ -194,7 +192,7 @@ pi-dispatch (version 2; this build understands 1)"):
 - A job whose one-shot, `waitFor`, narrowing field, approval check, answer draft or question grouping reads such a
   file waits the same way, also on a worker that does not watch the file: a one-shot is never fired because this
   release could not read its disarm.
-- The panel, the console and the trigger tools refuse to write over it ("nothing was written and nothing in it was
+- The console's trigger forms refuse to write over it ("nothing was written and nothing in it was
   lost; change it with that release"), and the console's lists show it as unreadable.
 - The worker still spends a one-shot that ran: its disarm adds `on.disarmed` to the entry and keeps every other key of
   the file, `version` included, so a one-shot whose file turned newer while it ran is not fired again by the release
@@ -206,30 +204,30 @@ Upgrade the hosts that refuse it; do not edit the `version` away, which would hi
 exception is a `version` you wrote yourself (below): no release wrote that file, so remove the key. `pi-dispatch
 doctor` says so in its fix ("unless you added `version` to it yourself: then remove that key"). A file that is merely
 broken (bad JSON, a bad entry, `version` written twice) is handled as it always was: the services refuse it, and an
-unparseable one is rebuilt from empty by the next panel write. No reader, the console's triggers view included,
+unparseable one is rebuilt from empty by the next console write. No reader, the console's triggers view included,
 reads a `version` written twice as newer: the services refuse the file as broken, and the console's view calls it
 broken when its last value reads newer and otherwise shows the file as it did before.
 
 **Upgrading.** Earlier releases ignored a top-level `version` in this file; since issue #761 it is read. If you put one
 there yourself, remove it before you upgrade: one that is not a whole number of 1 or more makes the file broken, so the
-worker and the receiver refuse to start on it (a running worker keeps its schedules, and the next panel write drops
+worker and the receiver refuse to start on it (a running worker keeps its schedules, and the next console write drops
 it), and one above 1 reads as a file a newer release wrote, so every job waits.
 
 Every top-level key beside `triggers`, and every `run` key of an entry, including ones this release does not know, is
-kept by every write of a release with issue #704 or later. A `/dispatch` panel or worker from before it (4.3.1
+kept by every write of a release with issue #704 or later. A worker from before it (4.3.1
 included, which had no web console) or an earlier console build writes `triggers` alone, dropping `version` and every
 other top-level block, `secretBundles` among them, so upgrade them first.
 
 ## Optional `run` fields
 
-Each one is a deliberate edit to the file: neither the panel nor any AI tool can set it, because each one
+Each one is a deliberate edit to the file: no AI tool can set it, because each one
 changes what code runs or what it costs.
 
 - `"command"` replaces `flow`. You can use exactly one of the two on any trigger type. The job runs a
   registered pi extension command headlessly, with no interactive session. The whole prompt is `/command
   args`. The arguments are fixed in the reviewed file. The event text reaches the handler only as
   `/job/event.json`, which it reads itself. A command is never AI-triggerable. Job chaining refuses any
-  request that names one. `dispatch_run` cannot express one ([`docs/workflows.md`](workflows.md)). The
+  request that names one. The
   job image must declare the `commands` capability. The shipped image does. A command job on an image
   that does not declare it is refused before it costs anything.
 
@@ -307,12 +305,12 @@ changes what code runs or what it costs.
   `portfolio-no-envelope` before it costs anything. A chained child never inherits the flag. A working flow to
   copy is in [`docs/portfolio-manager.md`](portfolio-manager.md).
 
-Two more fields change what you see of a run, not what it can do, so the AI tools that add and edit a trigger
-(`dispatch_trigger_add`, `dispatch_trigger_edit`) can set them too, behind the operator's confirm:
+Two more fields change what you see of a run, not what it can do; the console's add and edit forms can set
+them too, behind the operator's confirm:
 
 - `"progress": true` gives that trigger's jobs one more tool, `report_progress`, with which the agent names the phase
   of its plan it is in (up to 64 characters), optionally how far through it is (`done` of `total`) and a short note
-  (up to 200 characters). The console's run page and the `/dispatch` panel show the phases; the turns, steps and the
+  (up to 200 characters). The console's run page shows the phases; the turns, steps and the
   tool running show for every job without this field. The tool only records: it changes nothing and the run goes on.
   Any trigger type, cron included. The phase names and notes are the agent's words, so they are redacted and shown to
   operators only, never on the forge and never in the run record. The job image must declare the `reportProgress`
@@ -392,8 +390,8 @@ A local job's folder is resolved when the job is prepared, and the container mou
 spelling you wrote. A folder named inside a job path (a cron trigger's `run.folder` or a `PI_DISPATCH_RUN_ROOTS` root)
 must still resolve inside one. If it does not, the job is refused as `local-folder-escaped`, and nothing is spent.
 
-The reason is that a job can write inside its own folder. A link planted there could otherwise send a later job, a
-chained child or a `dispatch_run` job, to a folder nobody checked, mounted read-write.
+The reason is that a job can write inside its own folder. A link planted there could otherwise send a later job or a
+chained child to a folder nobody checked, mounted read-write.
 
 So a run root used as a symlink farm (`root/shop` linking to `/srv/shop`) is refused. List the real folder instead:
 add `/srv/shop` to `PI_DISPATCH_RUN_ROOTS`, or name it as the cron trigger's `run.folder`. A folder named outside every
@@ -514,9 +512,9 @@ had taken its budget slot. It is now refused before anything is spent. Declare s
 `models.json`. A virtual model (`pi.registerVirtualModel`) cannot be the main model: set `PI_MODEL` or
 `run.model` to a physical one.
 
-`dispatch_trigger_add` and `dispatch_trigger_edit` can set `provider` and `model`, behind the same
-operator confirm as every other trigger write. Both check the value with the same rule before they ask.
-The panel's drill-in and `dispatch_triggers` show a trigger's own model, provider and turn limit on every
+The console's add and edit forms can set `provider` and `model`, behind the same
+operator confirm as every other trigger write, and check the value with the same rule before they ask.
+The console's trigger page shows a trigger's own model, provider and turn limit on every
 trigger type.
 
 **Upgrading.** Before this release a webhook trigger's `provider`, `model` and `maxTurns` were ignored, and
@@ -547,12 +545,11 @@ line.
 A deployment can set a default list with `PI_ALLOWED_MODELS` in `.env`, in the same form, comma
 separated, with no spaces (a shell that sources `.env` cuts the value at a space and leaves it unset, so
 the worker refuses a spaced value at boot, and `pi-dispatch doctor` names it). A trigger's own `models` replaces it for that trigger's jobs. With neither, a job may call any
-model, as before. The default list is read from the environment only. The settings overlay cannot set
-it, so no AI tool can widen it.
+model, as before. The default list is read from the environment only; the settings overlay cannot set it.
 
 Before a job spends anything, the worker checks every model on its list exists (`model-unknown`), and
 that the model the job runs on is on the list (`model-not-allowed`). The second catches a default model
-that is not on `PI_ALLOWED_MODELS`, and a `dispatch_set model` that moves the default off a trigger's list.
+that is not on `PI_ALLOWED_MODELS`.
 
 `pi-dispatch doctor` asks the same questions of the triggers file before any job does:
 
@@ -618,10 +615,8 @@ A chained job (`/outbox`) keeps its parent's provider, model and list. A request
 If a listed model is served by a declared model endpoint ([`docs/egress.md`](egress.md)), the job holds
 a slot on that endpoint too, not only on its main model's.
 
-No AI tool can set `models`. Edit the file. `dispatch_trigger_add` and `dispatch_trigger_edit` refuse a
-call that carries `models`, and an edit keeps the list the entry has. `dispatch_trigger_edit` also refuses,
-before it asks, a new provider or model that is not on the trigger's own list. `dispatch_triggers` and the
-panel show the list.
+No form can set `models`: edit the file, and an edit of the entry keeps the list it has. The
+console's trigger page shows the list.
 
 **Upgrading, and services out of step.** A receiver from before this release does not know `models` and
 drops it, and so does a current one that still reads an old copy of the triggers file (compose's
@@ -638,19 +633,17 @@ refused as `trigger-skew` when that neighbour sets `models`, `maxCostUsd`, `mcp`
 changed after the job was queued. Re-run those jobs too. Upgrade the worker and the receiver together
 ([the order](upgrading.md#the-order)), and restart the receiver after editing the file.
 
-Everything else is editable from the panel (`a` adds kind-first, `e` edits the flow, `x` deletes) or via
-the confirm-gated AI tools. Every write is validated. Both services reload it live.
+Everything else is editable on the console's triggers page. Every write is validated. Both services reload it live.
 
-`dispatch_trigger_add` takes only the fields its trigger type uses. A field the type does not take is refused before
-the operator is asked to confirm, by its name and with the list the type does take, for example: "dispatch_trigger_add
-does not take repository for a pull_request trigger; it takes kind, action, reviewState, labels, any, number, once,
-flow, forge, backend, model, provider, maxTurns, progress, statusComment, recover, steer. Nothing was changed". A
+The console's add editor takes only the fields its trigger type uses. A field the type does not take is refused in
+the preview, by its name and with the list the type does take, for example: "this form does not take repository for a
+pull_request trigger; it takes kind, action, reviewState, labels, any, number, once, flow, forge, backend, model,
+provider, maxTurns, progress, statusComment, recover, steer. Nothing was changed". A
 field whose name is not a plain word is called "a field it was sent", and the value is never repeated. Before this
 release such a field was dropped without a word (`repository` on a pull request or issue trigger, for one), and the
-operator approved an entry without it. The console's trigger form refuses the same way, in the same words, naming
-itself where the tool's name stands ("this form does not take repository for a pull_request trigger; ..."). The fields
+operator approved an entry without it. The fields
 that decide what a trigger's jobs may spend, reach or hold (`maxCostUsd`, `models`, `mcp`, `secretBundle`) are
-refused first, as before: no AI tool sets them.
+refused first, as before: no form offers them.
 
 The worker itself
 writes exactly one thing back, the `on.disarmed` mark. That mark spends a one-shot. Every local job also
@@ -676,7 +669,7 @@ Any trigger type can set the most one of its jobs may spend, in US dollars:
 - The runner checks it before every model call. A call that could take the job past the cap is not sent,
   and the run stops with reason `cost-cap`.
 - It can only lower the cap. The job runs under the smaller of this value and the deployment's
-  `PI_MAX_COST_USD` (or the panel's `maxCostUsd`). When the deployment sets no cap, the trigger's applies on
+  `PI_MAX_COST_USD` (or the overlay's `maxCostUsd`). When the deployment sets no cap, the trigger's applies on
   its own.
 - A value above `PI_MAX_COST_USD` is a mistake. When the worker reads the triggers file (`PI_TRIGGERS_FILE`
   is set for it), it refuses to load such a file: at startup it will not start, and on a live edit it keeps
@@ -687,8 +680,7 @@ Any trigger type can set the most one of its jobs may spend, in US dollars:
   older image the job is refused before it costs anything, with reason `job-image-cost-cap-unsupported`.
   That image's runner would ignore the cap. A deployment that sets no dollar cap anywhere needs no new image.
 - A chained job (job chaining) keeps its parent's cap.
-- No AI tool can set or change it. `dispatch_trigger_add` and `dispatch_trigger_edit` refuse a call that
-  carries it, and an edit leaves it as it is. `dispatch_triggers` and the panel show it.
+- No form sets or changes it. An edit leaves it as it is, and the console's trigger page shows it.
 
 **Upgrading, and services out of step.** The same as for `models` above: a receiver from before this
 release drops `maxCostUsd`, and its job would run under the deployment's cap or none. The worker refuses
@@ -700,7 +692,7 @@ of this once when a trigger sets `maxCostUsd`, as it does for `models`.
 
 **Dollar windows.** A deployment can also cap what all its jobs spend per UTC day, Monday week and month:
 `PI_DAILY_COST_USD`, `PI_WEEKLY_COST_USD` and `PI_MONTHLY_COST_USD` (or `dailyCostUsd`, `weeklyCostUsd` and
-`monthlyCostUsd` in the panel). Each needs `PI_MAX_COST_USD`.
+`monthlyCostUsd` in the overlay). Each needs `PI_MAX_COST_USD`.
 
 - Before a job starts, its cap (the smaller of the trigger's `maxCostUsd` and the deployment's) is held in
   every window that is set. A job that does not fit is refused with reason `dollar-cap`, and nothing is spent.
@@ -729,8 +721,8 @@ gives a reason naming the cap. This happens before anything is spent. The skill 
 in part.
 
 **`ai-trigger` controls a different choice.** It answers
-which flows a model may fire. It does not answer who may fire a job. Only two paths read it. One is
-the model-callable `dispatch_run` tool. The other is job chaining, which happens when a finished job
+which flows a model may fire. It does not answer who may fire a job. Only one path reads it:
+job chaining, which happens when a finished job
 requests a follow-up. A cron entry or forge trigger in your reviewed `triggers.json` runs its flow
 either way, because a human already approved that pairing by writing the file. Omitting the line does
 **not** stop a label or comment trigger from firing. Who may fire a forge trigger is a separate gate

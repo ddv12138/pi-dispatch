@@ -1,96 +1,15 @@
 # Recording the demo (GIF / video)
 
-The `/dispatch` panel is the hook — a short recording of it is worth more than any paragraph. This is the
-recipe; it needs a real terminal and pi itself, so it's yours to run (the still panel images are drawn headless by
-`launch/render-images.mjs`, below, but a recording needs pi's own TUI moving). Two options:
+The web console is the hook now. Its still images are drawn from the committed goldens (`launch/console-picks.mjs`,
+below), and a short recording of it moving, live, is worth more than any paragraph. A recording needs a real browser
+and a running console, so it is yours to make: a screen recorder over `http://127.0.0.1:4790/` on a deployment with a
+little state, or a terminal recorder over the CLI. Two terminal tools, if you want scripted output:
 [`vhs`](https://github.com/charmbracelet/vhs) (scripted, reproducible, best for a clean GIF) or
 [`asciinema`](https://asciinema.org) + [`agg`](https://github.com/asciinema/agg) (records a real session).
 
-## What to show (≈ 20–30s)
-
-1. `pi install npm:@edgehero/pi-dispatch-admin`, then `/dispatch`, for the live panel's six sections: status
-   header, spend & limits, triggers, pause windows, runs, settings. (From a checkout the dev form is
-   `pi -e admin/src/index.ts`; the published extension's entry point is its built `./dist/index.mjs`.)
-2. `↵` on a trigger → the MATCHES / RUNS / TRUST MODEL drill-in.
-3. `↵` on a run → the colored post-mortem.
-4. `i` → a notice with the console's insights URL (`http://127.0.0.1:4790/insights?range=30d` by default). Open it in
-   the browser, with the console started (`pi-dispatch-console serve`), for the budget lever, the plan verdicts, how
-   busy each host was, the spend charts and the topology, one page. (In a pure-terminal recording, the notice is the
-   beat.)
-5. (optional) `w` on the dashboard → the pause-window dialogs: a three-way select (add / edit / delete a
-   pause window), then seven prompts for an add. Watch a PAUSE WINDOWS row flip to
-   `● paused · resumes in …`.
-6. `q` to close.
-
-The footer is the shot list, in order:
-`↑↓ open · a add · w pauses · l logs · i insights · p/r pause · q quit`
-
-If the recording is for **onboarding** rather than for the README, lead with `/dispatch setup` instead: the
-guided wizard is the front door now, and a panel that opens already configured is the payoff shot.
-
-Run against a deployment with a little state (a couple of triggers, a finished run or two) so the panel isn't
+Run against a deployment with a little state (a couple of triggers, a finished run or two) so the pages aren't
 empty: start the stack (`docker compose --env-file .env -f deploy/docker-compose.yml up -d`), queue one local job, let it
 finish, then record.
-
-## Option A — vhs (recommended for a crisp GIF)
-
-`brew install vhs` (or see its README). Save as `launch/demo.tape`:
-
-```tape
-# launch/demo.tape
-Output docs/images/dispatch-demo.gif
-Set FontSize 15
-Set Width 1200
-Set Height 760
-Set Theme "Dracula"
-Set Padding 16
-
-Hide
-# Assumes the extension is installed: pi install npm:@edgehero/pi-dispatch-admin
-# From a checkout, swap the next line for:  Type "pi -e admin/src/index.ts"
-Type "pi"  Enter
-Sleep 3s
-Show
-
-Type "/dispatch"  Enter
-Sleep 3s
-Enter  Sleep 3s   Escape Sleep 1s                      # a trigger drill-in (selection starts on trigger 1)
-Tab  Sleep 500ms  Enter  Sleep 3s  Escape Sleep 1s     # a run post-mortem (Tab jumps triggers <-> runs)
-Type "i"  Sleep 4s                                        # the notice with the console's insights URL
-Type "q"
-Sleep 1s
-```
-
-Then: `vhs launch/demo.tape` → produces `docs/images/dispatch-demo.gif`.
-
-**Why `Tab` and not a row of `Down`s.** Selection is one flat list, triggers first and then runs, so a blind
-`Down` count only lands where you meant it against the exact fixture you recorded on. `Tab` jumps between the
-first trigger and the first row below the triggers, which needs no counting. Two fixture facts still bite:
-with a job **in flight** there is an ACTIVE row directly under the triggers, so `Tab` lands there instead of
-on a finished run (add one `Down`, or record with the queue idle), and in a **short** terminal sections
-collapse by priority (pause windows first, then settings, then triggers, then spend), which moves everything
-below them. Record at the `Set Height` above, on a fixture you control.
-
-## Option B — asciinema + agg (records a real session)
-
-```bash
-asciinema rec launch/dispatch-demo.cast --cols 120 --rows 40
-#   ... do the walkthrough above, then exit the shell (Ctrl-D) ...
-agg --font-size 15 --theme dracula launch/dispatch-demo.cast docs/images/dispatch-demo.gif
-```
-
-An `.cast` file can also be uploaded to asciinema.org and embedded (autoplaying) in the README.
-
-## Where the output goes
-
-- **README**: add the GIF near the top, under the existing SVG panel images.
-- **Social preview** (GitHub → Settings → General → Social preview): export a single crisp PNG frame of the
-  panel — reuse `docs/images/dispatch-dashboard.svg` rendered to PNG until the GIF exists.
-- **pi.dev gallery card**: `admin/package.json` already carries `pi.image` (the banner PNG) next to
-  `pi.extensions` and `pi.skills`; repoint it at a panel frame, or add a `pi.video` field with a hosted
-  `.mp4`/`.gif` URL. `pi.video` would be **new** here (nothing in this repo sets it today), so check pi's own
-  manifest schema before relying on it. The rest of the manifest is described in
-  [launch-kit.md](launch-kit.md#packaging-the-extension), and submission context is in the same file.
 
 Keep the file small (< ~3 MB): trim to ~25s, cap width at ~1200px, and prefer the GIF for GitHub autoplay.
 
@@ -143,15 +62,12 @@ node launch/render-images.mjs --console --only panels/confirm-done.operator   # 
 It needs Google Chrome and no server. `--all` is about a gigabyte and four minutes, and its folder is gitignored. After a change to the look,
 re-render the picks and bump the `?v=` on each changed image, since no test catches a stale PNG.
 
-## The panel and insights images
+## The insights image
 
-Every panel and command image in `docs/images` is drawn by the shipped code over one canned deployment, by a
-committed script: `dispatch-dashboard.svg`, `dispatch-hosts.svg`, `dispatch-allocation.svg`,
-`dispatch-run-detail.svg`, `dispatch-commands.svg`, the `.png` copies of the first three and `insights-view.png`.
+`docs/images/insights-view.png`, the console's Spend page, is drawn on demand by the shipped code over one canned deployment:
 
 ```sh
-node launch/render-images.mjs          # the five SVGs
-node launch/render-images.mjs --png    # also the three PNGs (for the npm page) and insights-view.png
+node launch/render-images.mjs          # docs/images/insights-view.png
 ```
 
 What it needs:
@@ -159,9 +75,9 @@ What it needs:
 - `valkey-server` or `redis-server` on PATH. The script starts its own on a free port of 127.0.0.1, with no
   persistence and its files in a temporary directory, and stops it at the end. `--url redis://host:port/<db>` uses
   an existing database instead; it must be empty, and is emptied again when the script ends.
-- Google Chrome, for `--png` only: `/Applications/Google Chrome.app/...` on macOS, or set `CHROME` to its executable.
+- Google Chrome: `/Applications/Google Chrome.app/...` on macOS, or set `CHROME` to its executable.
   It is driven headless over its DevTools pipe, with every host name mapped to nothing.
-- git, for `--png` only (the insights topology reads the two job folders' flow gate from git).
+- git (the insights topology reads the two job folders' flow gate from git).
 
 The deployment is `launch/fixture-deployment.mjs`: three hosts (`mini1`, `mini2`, `build3`), four projects (`web`,
 `api`, `billing`, `ops`), repos under `acme`, a month of run records, all dated around one frozen instant and written
@@ -170,16 +86,7 @@ no run breaks a cap, a scoped limit, a host's slots or budget, or a project's sh
 days and trims the shared run mirror by them, so its history here starts at the age cutoff of its last trim that
 removed a run (that write's time less 7 days), and the insights page hatches the time before as no data. The script empties its
 environment before anything loads, so no key or deployment of the machine running it is read, and nothing is fetched.
-Only live state is canned: the queue's live counts, its workers, the active job and the failed job, and the parked
-run's retained sandbox (a directory on a worker's disk, with this shell's egress setting). The panel images are one
-`makeDashboard` at width 80, driven by its own keys: the LIST, then `u` for the hosts, `b` for the budget split, and
-the cursor moved to the parked run (a triage run that asked a question and ended `awaiting-input`) with Enter for its
-run detail. The commands image is what `/dispatch status`, `budget`, `runs 5`, `triggers` and `priorities` send,
-assembled from the same reads and renderers the extension uses, with the deployment's folder shown as `~/pi-work`.
-Each SVG is checked against the renderer's lines before it is written, and two runs write the same bytes
-(`admin/test/render-images.test.mjs`). The
-insights page is the console's `/insights?range=30d` page over the same fixture, shot at 1240 px and device scale 2,
-full page.
+The page is the console's `/insights?range=30d` page over that fixture, shot at 1240 px and device scale 2,
+full page. The PNG is Chrome's rendering and is not held to bytes.
 
-After a render, bump the `?v=` on each changed image in both READMEs (the admin README links the PNGs by their
-absolute raw.githubusercontent.com URLs, because the npm page cannot show an SVG from there).
+After a render, bump the `?v=` on each changed image in the README, so GitHub's image cache fetches the new one.

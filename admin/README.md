@@ -16,8 +16,8 @@ explains all of it.
   <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/console/console-overview.png?v=2026-11-03" alt="The web console's overview page: what needs you, what is waiting and why, what is running, what today has cost, and a timeline of every project's runs" width="820">
 </p>
 
-> This npm package, **`@edgehero/pi-dispatch-admin`**, holds the two ways to work with a deployment: the **web console**
-> (`pi-dispatch-console`, above) and the **`/dispatch` panel**, a pi extension. The service itself is
+> This npm package, **`@edgehero/pi-dispatch-admin`**, holds the way to work with a deployment: the **web console**
+> (`pi-dispatch-console`, above). The service itself is
 > [`@edgehero/pi-dispatch`](https://www.npmjs.com/package/@edgehero/pi-dispatch) (worker and CLI) and
 > [`@edgehero/pi-dispatch-receiver`](https://www.npmjs.com/package/@edgehero/pi-dispatch-receiver) (the webhook edge). The
 > [main repo](https://github.com/edgehero/pi-dispatch) has the job image, the docs (Docker, Podman, egress, every forge) and SECURITY.md.
@@ -77,7 +77,7 @@ default and goes through an allowlist proxy, and the allowed hosts are yours to 
 ## Triggers: what starts a job
 
 Every trigger is one `{ on, run }` entry in a single `triggers.json`. The worker reads it live for cron,
-the receiver reads it live for forge webhooks, and the panel and the web console can edit it. **`on` is what fires it;
+the receiver reads it live for forge webhooks, and the web console can edit it. **`on` is what fires it;
 `run` is the skill it runs.**
 
 | `on.type` | Fires on | What the agent gets as its task |
@@ -107,7 +107,7 @@ your host's version.
 `run.command` is the second entry point. A trigger may name a registered command that a staged extension
 provides (`"command": "wf run nightly"`). The job's whole prompt is that line, handled by the extension
 with no model turn in between. It picks which vetted command runs, never what code runs, and it is never
-AI triggerable: job chaining refuses a request naming one, and `dispatch_run` cannot express one.
+AI triggerable: job chaining refuses a request naming one.
 
 Four things to know before you build on it:
 
@@ -119,24 +119,40 @@ Four things to know before you build on it:
   persists. A forge job gets a fresh clone that is thrown away with the container
   ([`docs/workflows.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/workflows.md)).
 
-## The panel: `/dispatch`
+## The operator console
 
-One command puts a live terminal view over the whole deployment:
+The same package installs `pi-dispatch-console`, a separate process that serves a live web console for the
+deployment on loopback or on a private unix socket, behind a named token per person. It shows the
+whole fleet as it changes: an overview of what needs you, what waits and why, and the last hours as a timeline (on a
+deployment that has not run yet, what stands before its first job), every run with filters, one search by
+repository, target or job id, the last 24 hours counted by outcome and paging, a card for each run waiting for an
+answer, spend and insights by range, queues, hosts and schedules, the configuration and its own audit
+log, plus `/api/state` as JSON for scripts. It also has Models (roles, fallbacks and canary comparisons), Updates
+(what jobs run and what is newer), Watch (findings from your alerts), Zero touch (how often runs needed a person) and
+Setup (a live checklist for a new deployment).
+It can act as well as show: cancel, retry, remove and re-run jobs, answer a parked run, pause the fleet or one queue
+and edit the configuration, each previewed (with how to undo it), confirmed and recorded in one audit log, and after
+each change the page names it, who made it and its audit row, with an Undo
+where there is a way back. When `serve` starts it prints how to sign in (the commands that make a token or a one time
+link, never a token), and `pi-dispatch-console link --name <you> --port <n>` prints the link for an SSH tunnel's local
+port. The sign-in page says why a session ended. Every running job's progress shows in its row on the fleet page
+and on its run page, and its transcript, redacted, streams live
+on its run page for operators. Nothing listens unless you start it. See
+[`docs/console.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/console.md).
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/dispatch-dashboard.png?v=2026-10-22-710" alt="The /dispatch panel: status, spend meters, dollar windows, triggers with a portfolio trigger, pause windows, scoped limits with their dollar caps, held and failed jobs, runs with their projects and the u hosts key, and settings" width="820">
-</p>
-
-- **MCP servers, read-only.** A trigger that names MCP servers says so on its row (`[mcp ...]`), and its
-  drill-in shows each one as the overlay offers it now: where it runs, how its tools are reached, and the
-  variable names it is handed, or why every job of it would be refused. No tool and no key changes them.
-- **Status and spend.** Queue and worker state, day, week and month spend meters, a daily token counter,
-  and the run history with tokens and cost per job. Each running job shows where it is: its turn, steps done and
-  failed, the tool running and for how long, and the phase it reported (or, when its worker has written nothing for
-  3 minutes, that the worker may be gone). `Enter` on a run opens its full record, `x`
-  on a running job cancels it after asking, and `b` on an opened run reopens its workspace.
-- **Insights, the one analytics page.** It is `/insights` in the web console (below); press `i` (or type
-  `/dispatch insights`) and the panel shows its address. It shows the budget dials, plan verdicts against API rates, daily,
+- **Triggers, editable live.** Add, edit and delete triggers without a restart, on the Triggers page and a page per
+  trigger. Drill-ins show what fires each one, what it runs and who may fire it. A one-shot shows armed or spent. A
+  spent entry stays in the list, matches nothing, and is re-armed when you delete its `on.disarmed` mark from the
+  file. Triggers that run third party code or a custom image carry a badge. Turning either on or off stays an
+  edit to the reviewed `triggers.json`, which no form makes for you.
+  A portfolio manager's cron trigger is marked "writes the budget split". The console's editor can turn on
+  `progress` (the job gets a `report_progress` tool to name its phases) and `statusComment` (one forge comment
+  the worker edits as the run goes, numbers only), and `recover` (a run the worker loses continues from its last
+  checkpoint), behind your confirm.
+- **MCP servers, read-only.** The Connections page shows each overlay MCP server as the overlay offers it now:
+  where it runs, how its tools are reached, the variable names it is handed, and any server the worker refuses,
+  with why. No form and no key changes them; they are rewritten by `pi-dispatch import-pi`.
+- **Insights, the one analytics page.** `/insights` shows the budget dials, plan verdicts against API rates, daily,
   cumulative and per flow spend charts, five breakdowns (by flow, trigger, model, repo and project), the
   budget split with each project's share, spend and floor and the split's history, how busy each host was
   (jobs only), and the trigger and flow topology with spend on each trigger, plus a what if form that re-prices a
@@ -147,17 +163,8 @@ One command puts a live terminal view over the whole deployment:
   <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/console/console-spend.png?v=2026-11-03" alt="The Spend page: KPI tiles, budget dials, the budget split, a plan verdict, spend charts, the five breakdowns, how busy each host was, and the topology with spend badges" width="820">
 </p>
 
-- **Triggers, editable live.** Add, edit and delete triggers without a restart. Drill-ins show what
-  fires each one, what it runs and who may fire it. A one-shot shows armed or spent. A spent entry
-  stays in the list, matches nothing, and is re-armed when you delete its `on.disarmed` mark from the file.
-  Triggers that run third party code or a custom image carry a badge. Turning either on or off stays an
-  edit to the reviewed `triggers.json`, which neither the console nor a model callable tool makes for you.
-  A portfolio manager's cron trigger carries `[portfolio]`: its jobs write the budget split. The trigger tools can
-  turn on `progress` (the job gets a `report_progress` tool to name its phases) and `statusComment` (one forge comment
-  the worker edits as the run goes, numbers only), and `recover` (a run the worker loses continues from its last
-  checkpoint), behind your confirm.
-- **Quiet hours.** Pause windows per folder or repo, timezone aware. A paused job waits, never drops, and
-  costs nothing.
+- **Quiet hours.** Pause windows per folder or repo, timezone aware, edited on the Configuration page. A paused job
+  waits, never drops, and costs nothing.
 - **Scoped limits.** Job caps per repo, folder or project (day, week, month), refused before any spend, plus a
   ceiling on how many run at once, enforced by making jobs wait. Dollar caps per day, week or month for a
   repo, a folder, a model (`model:<provider>/<id>`) or a project (`project:<id>`). Write a repo with its
@@ -166,146 +173,76 @@ One command puts a live terminal view over the whole deployment:
   daemon is the supported shape), because two agents editing one working tree race each other with no
   gate and no undo.
 - **Job sizes.** A project row can set the memory and CPUs of its jobs, and how much of a machine they may hold
-  (`hostShare`) or keep room for (`minJobs`). The PROJECTS view (`j`) shows each project's size, the p95 of its
-  runs' memory peaks and cores used, a suggested size and the exact `dispatch_limit_edit` call that applies it.
-  `dispatch_limit_add` and `dispatch_limit_edit` take the four fields behind your confirm, and nothing applies a
+  (`hostShare`) or keep room for (`minJobs`). The project page shows each project's measured size, the runs' peaks
+  against it and a suggestion, with the exact call behind a **Preview this size** confirm; nothing applies a
   size by itself ([`docs/sizing.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/sizing.md)).
-- **Dollar windows.** With dollar caps set, the panel shows each window's spend and holds against its cap,
-  and what the run records settled ([`docs/costs.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/costs.md)).
-- **Projects.** `j` shows each project with its members and this month's spend, and `Enter` on one filters
-  the runs list. `dispatch_projects` lists them, and `dispatch_project_add`, `dispatch_project_edit` and
-  `dispatch_project_delete` change `projects.json` behind your confirm.
-- **Hosts.** `u` shows each worker host: its slots in use of its limit, what its budget has promised its jobs,
-  how many jobs wait for its budget, and its running jobs with project, size and age, then how busy it was over the last 7 days (busy
-  share, jobs at once, time full, the wait and the top projects), labelled with when they were read. The 7 days
-  are read when the view opens and again on `u` in it. Time before a host's history starts is said and not counted,
-  but a host that is new, or was down, inside history that is here reads as idle for that time. `dispatch_capacity` returns the same report
-  ([`docs/multi-host.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/multi-host.md#what-the-panel-and-doctor-show-you)).
+- **Dollar windows.** With dollar caps set, the Spend page's Caps card shows each window's spend and holds against
+  its cap, and what the run records settled ([`docs/costs.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/costs.md)).
+- **Projects.** The project page shows each project with its members and this month's spend, and links to its
+  runs. Member edits, adds and deletes go through the console's preview and confirm.
+- **Hosts.** The fleet page shows each worker host: how long ago it beat, its slots in use, what its budget has
+  promised its jobs, and its running jobs with project, size and age, then how busy it was over the last 7 days (busy
+  share, jobs at once, time full, the wait and the top projects). Time before a host's history starts is said and not counted,
+  but a host that is new, or was down, inside history that is here reads as idle for that time. `pi-dispatch capacity`
+  prints the same report
+  ([`docs/multi-host.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/multi-host.md#what-the-console-and-doctor-show-you)).
   It counts jobs only: a machine busy with other work reads as idle.
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/dispatch-hosts.png?v=2026-10-26" alt="The panel's hosts view: three machines, each with its slots in use, the memory and CPU its budget has promised, its running jobs with project, size and age, a host with an orphaned container, and the last 7 days as busy share, jobs at once, time full, the wait and the top projects, then each host's last doctor run with its failing and warning checks" width="820">
-</p>
-
-- **The budget split.** With an allocation envelope (a dollar total per window and a floor per project), `b`
-  in the list shows each project's share and spend, the applied plan with the reasons it gave, and the history.
-  `r` on a history row reverts to it after a yes or no. `dispatch_priorities_set` sets a plan of weights inside the envelope,
-  confirmed in an interactive session or delegated headless with the explicit process grant; `dispatch_envelope_set` changes the envelope
-  behind your confirm; `dispatch_allocations` reads the split. pi's own `write` and `edit` tools are blocked on
-  the envelope, `projects.json`, `scoped-limits.json`, `triggers.json` and the settings file
+- **The budget split.** With an allocation envelope (a dollar total per window and a floor per project), the Spend
+  page's budget split shows each project's share and spend, the applied plan with the reasons it gave, and the history.
+  Revert on a history row goes back to it after a preview and a confirm. The page's priorities and envelope forms set a
+  plan of weights and change the envelope inside the same checks the worker applies
   ([`docs/allocation.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/allocation.md)).
-  `/dispatch priorities` shows the split as text, and `/dispatch priorities set shop=3 platform=1` sets a
-  plan. A run's detail names the plan a portfolio run wrote and the dollars it settled.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/edgehero/pi-dispatch/main/docs/images/dispatch-allocation.png?v=2026-10-14" alt="The panel's budget split view: the weekly envelope, each project's floor, weight, share and spend, the headroom, the applied plan with its reasons, and the history across two hosts with a revert and a refused plan" width="820">
-</p>
+  A run's detail names the plan a portfolio run wrote and the dollars it settled.
 
 - **The portfolio manager.** A weekly flow you own reads the budget and writes a plan of weights. The
   worker applies it inside the envelope, bounds each move and logs it, so you can revert it
   ([`docs/portfolio-manager.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/portfolio-manager.md)).
 - **Held and failed jobs.** A trigger with `run.waitFor` holds its job in the queue, unstarted and
-  unbilled, until a time passes or your check script exits 0. The panel shows a **held** section while
+  unbilled, until a time passes or your check script exits 0. The fleet page shows a **held** section while
   anything waits (the target, the condition and how long), and a **failed** section for jobs the queue
-  marked failed after their last attempt. `dispatch_waits` lists held jobs and `dispatch_wait_cancel` stops one behind your confirm.
-- **AI operable, with explicit authority.** Every model write uses the same action policy as the browser.
-  Interactive sessions confirm every change, including pause, priorities and paid starts. Headless sessions
-  need `PI_DISPATCH_AGENT_WRITES=1` in the actual pi process before it starts, and can use only unattended
-  actions. That includes explicit cap decreases, adding ordinary restrictive limit rows and pauses,
-  turning existing run flags off, cancellation, failed-job removal and bounded priorities. Scope, size,
-  minimums, inherited limits and mixed widening requests stay confirmed. The deployment file and pointer
-  cannot grant this authority. Answers, draft decisions, standing-answer adoption and forge reruns remain
-  person actions. Tool writes are audited as agents; human-confirmed intervention is tracked separately.
-- **Paid starts stay bounded.** `dispatch_run`, Fire now and local or cron reruns need explicit valid
-  `PI_DISPATCH_RUN_ROOTS` in the pi process environment. Fire now and reruns also require an explicit valid
-  `PI_DISPATCH_RUN_PER_HOUR`. `dispatch_run` keeps its default of three starts per hour when that value is
-  absent or invalid; a valid zero disables it. They check the
-  current committed flow's `ai-trigger: allow`, a clean tree and the shared hourly allowance again before
-  enqueue. They accept no spend settings, cannot run commands or portfolio flows, and still pass the
-  worker's budget gates. A paid run edits its folder in place. Read
-  [`SECURITY.md`](https://github.com/edgehero/pi-dispatch/blob/main/SECURITY.md) before enabling it.
-  The bundled `operate-pi-dispatch` skill explains each action mark and refusal.
-- **Agent reads expose operational facts.** Failed jobs, all waiting jobs, hosts and setup have dedicated
-  read tools. Runs report local retention when known; hosts report budgets, holds, CPU reserve, orphans,
-  kept sandboxes, doctor counts and qualified venue declarations. Costs include running holds and bounded
-  what-if estimates. Model results omit private job/operator text, question and draft content, variable
-  names and host paths. Setup suggestions come from the trusted command catalogue.
-- **Logs stay put.** Raw container output shows only in the panel's viewer, never in model context.
-
-**A web console as well.** The same package installs `pi-dispatch-console`, a separate process that serves a live web
-console for the deployment on loopback or on a private unix socket, behind a named token per person. It shows the
-whole fleet as it changes: an overview of what needs you, what waits and why, and the last hours as a timeline (on a
-deployment that has not run yet, what stands before its first job), every run with filters, one search by
-repository, target or job id, the last 24 hours counted by outcome and paging, a card for each run waiting for an
-answer, spend and insights by range, queues, hosts and schedules, the configuration and its own audit
-log, plus `/api/state` as JSON for scripts. It also has Models (roles, fallbacks and canary comparisons), Updates (what jobs run and what is
-newer), Watch (findings from your alerts), Sandboxes (kept workspaces and shells), Zero touch (how often runs needed a person) and
-Setup (a live checklist for a new deployment). It reads through the same code as the panel, so the two never disagree;
-the panel shows the waiting runs too.
-It can act as well as show: cancel, retry, remove and re-run jobs, answer a parked run, pause the fleet or one queue
-and edit the configuration, each previewed (with how to undo it), confirmed and recorded in one audit log that holds
-the panel's own writes too, and after each change the page names it, who made it and its audit row, with an Undo
-where there is a way back. When `serve` starts it prints how to sign in (the commands that make a token or a one time
-link, never a token), and `pi-dispatch-console link --name <you> --port <n>` prints the link for an SSH tunnel's local
-port. The sign-in page says why a session ended. Every running job's progress shows in its row on the fleet page
-and on its run page, and its transcript, redacted, streams live
-on its run page for operators, and the panel's live tail
-(`l`) reads the same transcript for a run on any host. Nothing listens unless you start it. In pi,
-`/dispatch console [page] [--link]` prints a page's address, says whether the console is running, makes a one time
-sign-in link for an operator token (shown only to you, and recorded in the audit log first), and opens your browser
-when the session is local (not over SSH; `--no-open` keeps it closed). See
-[`docs/console.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/console.md).
+  marked failed after their last attempt, each with its record's reason.
 
 ## More than one machine
 
-The panel reads the whole deployment, not one host. The status line names the workers once they have
-names. The run detail names the machine that ran a job. The pause switch stops every queue, and the
-scheduler view spans hosts. On a single host none of that shows, because there is nothing to tell apart.
-The HOSTS view (`u`) shows each machine's slots, budget and running jobs now and how busy it was over the last 7
-days; `pi-dispatch capacity`, doctor, the insights page and `dispatch_capacity` read the same capacity report, from
+The console reads the whole deployment, not one host. Its overview names the workers once they have
+names, and a run's page names the machine that ran a job. The pause switch stops every queue, and the
+schedules view spans hosts. On a single host none of that shows, because there is nothing to tell apart.
+The fleet page's Hosts card shows each machine's slots, budget and running jobs now and how busy it was over the last 7
+days; `pi-dispatch capacity`, doctor and the insights page read the same capacity report, from
 the run records (jobs only: a machine busy with other work reads as idle).
 See [`docs/multi-host.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/multi-host.md).
 
 ## Install
 
 ```bash
-pi install npm:@edgehero/pi-dispatch-admin   # then, in pi:  /dispatch
+mkdir my-dispatch && cd my-dispatch
+npm install --save-exact @edgehero/pi-dispatch@<version> @edgehero/pi-dispatch-admin@<version> @earendil-works/pi-coding-agent@<version> --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+./node_modules/.bin/pi-dispatch up --console
 ```
 
-**This is the default way to set up pi-dispatch.** With nothing configured, `/dispatch` offers
-**Finish setup in browser**, checks Docker or rootless Podman (and OpenShell when configured), installs
-exact worker, admin and pi packages in a durable deployment folder, then runs the consented
-`up --console` pass. It offers a deployment pointer and opens `/setup` with a private one-use link.
-The checklist uses actual heartbeat and doctor evidence, keeps Starting distinct from Ready, and offers
-individually previewed and confirmed service actions, a create-only provider key field and editable
-first-trigger recipes. [First run](../docs/console.md#first-run) explains the explicit local host grant,
-read-only/viewer/agent views, key and invitation privacy, and terminal recovery.
+**This is the way to set up pi-dispatch.** `up --console` checks the installed console, the exact pi peer, the
+supported user manager, the deployment, the token file and the service paths before changing anything, then runs the
+consented pass: the job image, Valkey, the egress proxy, `init` and the console's service. It preserves existing
+tokens, or creates an operator hash and discards its durable plaintext, starts only the console service and prints a
+one-use `/setup` sign-in link after that console answers. The checklist uses actual heartbeat and doctor evidence,
+keeps Starting distinct from Ready, and offers individually previewed and confirmed service actions, a create-only
+provider key field and editable first-trigger recipes. [First run](../docs/console.md#first-run) explains the
+explicit local host grant, read-only/viewer/agent views, key and invitation privacy, and terminal recovery.
 
-**Guided setup** retains the terminal workflow: runtime check and pinned install, `up`, deployment pointer,
-provider-key guidance, optional worker service, GitHub credentials, receiver or polling, and a first local
-cron trigger. GitHub setup asks for a webhook URL or `--no-webhook`; browser App creation remains open.
+Forge credentials are the one terminal step: `pi-dispatch setup github --webhook-url '<receiver URL>'` creates a
+GitHub App in one browser click, or `--no-webhook` for polling. Every step says what it will do, asks first and can
+be declined. Nothing is written into your repo, and no credential passes through a dialog. A deployment whose queue
+is only down keeps the unreachable banner: setup appears when there is nothing, never over an outage.
 
-Every step says what it will do, asks first and can be declined. Nothing is written into your repo, and no
-credential passes through a dialog. A deployment whose queue is only down keeps the unreachable banner:
-setup appears when there is nothing, never over an outage.
+**Already have a deployment?** The console finds it with `--deployment <dir>` if you pass it, else the folder a
+deployment pointer (`pi-dispatch-deployment.json`) names, else the current folder. It reads its settings from that
+deployment's `.env`; a value exported in your shell wins. The switches that grant a capability (`PI_BACKENDS`,
+`PI_EGRESS`, `DOCKER_HOST`) are never read from a file.
 
-**Already have a deployment?** The panel finds it through the deployment pointer, or through the same env
-vars your worker uses (`VALKEY_URL`, `PI_LOGS_DIR`, `PI_SETTINGS_FILE`, `PI_TRIGGERS_FILE`,
-`PI_PAUSE_WINDOWS_FILE`, `PI_SCOPED_LIMITS_FILE`, `PI_SUBSCRIPTIONS_FILE`, `PI_PROJECTS_FILE`,
-`PI_ENVELOPE_FILE`). Your env always wins. What your env does not set comes
-from the deployment's own `.env`, by the same rule `pi-dispatch doctor` uses: only the pointer's
-deployment folder (never a `.env` in the folder pi started in, which any repository could ship), and only
-when that file is yours and nobody else can write it. A key your env sets differently is named once as a
-warning, never with its value. The switches that grant a capability (`PI_BACKENDS`, `PI_EGRESS`,
-`DOCKER_HOST`, `PI_DISPATCH_RUN_ROOTS`) are never read from a file.
-
-Paid model starts need explicit valid `PI_DISPATCH_RUN_ROOTS` in the actual pi process environment.
-Fire now and local or cron reruns also require explicit valid `PI_DISPATCH_RUN_PER_HOUR`; `dispatch_run`
-defaults to three starts per hour when that value is absent or invalid, and zero disables it.
-Headless mutation additionally requires
-`PI_DISPATCH_AGENT_WRITES=1`. None is loaded from the deployment pointer or its `.env`. A reviewed external
-skill may use private owner context to propose a permitted operation, but it cannot grant authority or
-send an answer. Upgrade the host runtime and console together before using an agent token.
+Run every `pi-dispatch-console` command as the account that runs the deployment, on the deployment's host, and keep
+the worker's and the console's packages on the same release: upgrade them together
+([`docs/upgrading.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/upgrading.md)).
 
 ## Get the whole thing
 
@@ -319,14 +256,12 @@ GitHub Action's. Whoever can merge to your default branch can instruct the agent
 
 The [operator console](../docs/console.md#configuration-and-trigger-pages) includes a Pulse Configuration
 page, a page per trigger and a structured editor for five trigger kinds. Edit and Delete work from each
-row, with a diff, confirmation and Undo. Human row numbers count from 1; tool indexes remain zero-based.
-The editor and its JSON fallback preserve the add tool's secret-bundle opt-out.
+row, with a diff, confirmation and Undo. Human row numbers count from 1.
+The editor and its JSON fallback keep the `run.secretBundle: false` opt-out a new trigger carries.
 
-`dispatch_trigger_edit` also takes `maxTurns` and the four run-option flags. `dispatch_trigger_fire(index)`
-shares the console's Fire now planner, reserve and refusals. It fires a served cron trigger after the same fresh folder, committed flow, clean tree and hourly checks
-as `dispatch_run`. Interactive callers confirm; headless callers need the process write grant and both
-paid-start grant values in the pi or console process environment.
-Viewers see trigger facts and runs without private prompt text or write controls.
+The editor also takes `maxTurns` and the four run-option flags. **Fire now** fires a served cron trigger after
+the same fresh folder, committed flow, clean tree and hourly checks, previewed and confirmed like every console
+write. Viewers see trigger facts and runs without private prompt text or write controls.
 
 The Triggers page groups rules by schedule and forge, with retained history, spend and a timezone-aware
 schedule view. Its phone and viewer layouts keep the same facts readable. **Check an event** uses the

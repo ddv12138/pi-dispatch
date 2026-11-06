@@ -43,7 +43,7 @@ with at least one commit, and `run` refuses any other folder before it queues an
 |---|---|
 | `init` | write `.env` and the config files into this folder (never overwrites) |
 | `up` | one pass that asks before each container action: image, Valkey, egress proxy, `init`, `doctor` |
-| `doctor [--fix] [--live] [--openshell] [--secrets] [--no-publish]` | check the whole setup; `--live` reads the isolation guarantees back from real containers; each run publishes its checks (paths, URLs and secret values cut out) for the console and the panel, unless `--no-publish` |
+| `doctor [--fix] [--live] [--openshell] [--secrets] [--no-publish]` | check the whole setup; `--live` reads the isolation guarantees back from real containers; each run publishes its checks (paths, URLs and secret values cut out) for the console, unless `--no-publish` |
 | `worker` | run jobs from the queue |
 | `run <folder> --task "..."` | queue one job against a local folder |
 | `run --trigger <id>` | fire one cron trigger from the triggers file now, once, as its schedule would |
@@ -66,5 +66,5 @@ guardrails that tell it not to leak them are prompt text. The default GitHub sou
 whole login, full scope and never expiring. pi-dispatch never merges anything, but the job's token can,
 so branch protection on your default branch is the real control.
 
-The full guide, with the console, triggers, providers, the panel and every forge, is the
+The full guide, with the console, triggers, providers and every forge, is the
 [main README](https://github.com/edgehero/pi-dispatch#readme). MIT licensed.

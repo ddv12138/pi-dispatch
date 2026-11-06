@@ -42,7 +42,7 @@ on:
       - ".github/scripts/pi-bump.mjs"
       - ".github/workflows/pi-bump.yml"
       # Issue #737: the console width check below drives Chrome through launch/chrome-pipe.mjs, and
-      # admin/test/render-images.test.mjs runs launch/render-images.mjs, so a launch/ change can break
+      # launch/render-images.mjs writes the docs images the READMEs show, so a launch/ change can break
       # this workflow without touching anything listed above. The pin file is the browser it measures with.
       - "launch/**"
       - ".github/scripts/console-width-check.mjs"

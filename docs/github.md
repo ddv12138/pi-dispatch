@@ -45,8 +45,7 @@ neither (`GITHUB_AUTH_SOURCE`).
 
 ## Three ways to run the trigger edge
 
-Pick one, or let `/dispatch setup` walk you through the choice, which it offers right after the
-credentials step:
+Pick one:
 
 1. **Webhook receiver on the host** (lowest latency): Run `npx @edgehero/pi-dispatch-receiver` from your
    deployment
@@ -55,11 +54,9 @@ credentials step:
 2. **Webhook receiver in a container**: Run `docker compose --env-file .env -f deploy/docker-compose.yml
    --profile receiver up -d`. This runs the prebuilt
    [`ghcr.io/edgehero/pi-dispatch-receiver`](https://github.com/edgehero/pi-dispatch/pkgs/container/pi-dispatch-receiver)
-   beside Valkey. It needs `deploy/docker-compose.yml`, which a clone carries and `/dispatch setup` copies in
+   beside Valkey. It needs `deploy/docker-compose.yml`, which a clone carries; copy it into your deployment folder
    when you choose the receiver container. Triggers are mounted read-only. The receiver has no Docker socket.
-   In a folder `/dispatch
-   setup` built, the
-   compose file sits in `deploy/` of that folder. The command names the folder's own project with `-p <folder
+   The compose file sits in `deploy/` of the deployment folder. The command names the folder's own project with `-p <folder
    name>` (lower case, only letters, digits, `_` and `-`). Where `pi-dispatch up` had already started the
    deployment's Valkey, add `-f deploy/docker-compose.valkey.yml`. This gives compose's Valkey that same
    volume, so the worker and the receiver share one queue. Run it the same way afterwards. Setup hands

@@ -82,7 +82,7 @@ secret are set when your triggers name GitLab, plus `WEBHOOK_SECRET` for any for
 **6. Start it.** `pi-dispatch-receiver` from your deployment folder; `serve` is the default command, so
 there is nothing to type after the name. A container profile is the alternative
 (`docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d`, which needs
-`deploy/docker-compose.yml`: a clone carries it, and `/dispatch setup` copies it in when you choose the receiver
+`deploy/docker-compose.yml`: a clone carries it, and you copy it in when you choose the receiver
 container), and [`docs/github.md`](github.md#three-ways-to-run-the-trigger-edge) lays out the choice. The third way it offers, `pi-dispatch-receiver poll`, cannot serve this forge: the poller
 reads api.github.com and has no GitLab path at all.
 

@@ -23,7 +23,7 @@ compose starts the same proxy instead:
 docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d
 ```
 
-In a folder `/dispatch setup` laid out, name the folder's project and, when setup wrote it, its Valkey override, so
+In a deployment folder, name the folder's project and, when the folder has one, its Valkey override, so
 compose addresses the containers it already runs:
 `docker compose -p <folder name> --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.valkey.yml --profile egress up -d`
 (the project name rule, and its edge cases, are in [podman.md](podman.md), step 7). `pi-dispatch up` prints the
@@ -534,7 +534,7 @@ install --force` does. A proxy you started by hand must be RECREATED, never just
 include `model-endpoints.conf` and it does not mount that file: remove it (`docker rm -f -v
 pi-dispatch-egress-proxy`, or `podman rm -f -v`) and start it again with the third mount (`pi-dispatch up` does
 this, or the recipe in [podman.md](podman.md)). With compose, the compose file must be the new one too: in a
-folder `/dispatch setup` laid out, `deploy/docker-compose.yml` is a create-only copy no upgrade refreshes, so copy
+deployment folder, `deploy/docker-compose.yml` is a create-only copy no upgrade refreshes, so copy
 it again from the installed package (or pull the clone), or use `pi-dispatch up` instead. The same copy names the
 Valkey image: since issue #761 the package's file pins `valkey/valkey:8.1`, and `pi-dispatch doctor` names a copy whose
 `valkey` service still says `valkey/valkey:8` in a `state.older` line ([upgrading.md](upgrading.md#valkey-and-bullmq)).

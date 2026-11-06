@@ -1,7 +1,7 @@
 # Upgrading a deployment
 
 A deployment is several programs that share one Valkey and a few files: the worker on each host, the receiver, the
-console service and every operator's `/dispatch` (both from `@edgehero/pi-dispatch-admin`), the job image, and the
+console service (from `@edgehero/pi-dispatch-admin`), the job image, and the
 Valkey itself. An upgrade moves all of them, and for a while some run the new release and some the old one. This page
 says in which order to move them so that nothing is lost or paid for twice in between, what each release changed in
 what they store, and how to go back.
@@ -18,7 +18,7 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
 3. **Run `pi-dispatch doctor` on every host** and clear what it fails on, so that a failure afterwards is the
    upgrade's and not one that was already there.
 4. **Pick one version for everything.** The packages of one release share its number: `@edgehero/pi-dispatch` (the
-   worker and the CLI), `@edgehero/pi-dispatch-receiver`, `@edgehero/pi-dispatch-admin` (the console and `/dispatch`),
+   worker and the CLI), `@edgehero/pi-dispatch-receiver`, `@edgehero/pi-dispatch-admin` (the console),
    and `@edgehero/pi-dispatch-sandbox-gateway` if you run one. Install them with `npm install --save-exact`, never a
    range, and use the job image of the same release, `docker.io/ddv12138/pi-job:<version>` ([job-image.md](job-image.md)).
    A receiver you run from `deploy/docker-compose.yml` takes `ghcr.io/edgehero/pi-dispatch-receiver:<version>`, never
@@ -53,12 +53,11 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
    docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d --no-deps receiver
    ```
 
-   In a folder `/dispatch setup` laid out, add `-p <project>` after `compose`, and `-f deploy/docker-compose.valkey.yml`
-   where setup wrote that override. `--no-deps` recreates the receiver alone and leaves the Valkey it depends on as it
+   In a deployment folder, add `-p <project>` after `compose`, and `-f deploy/docker-compose.valkey.yml`
+   where the folder has that override. `--no-deps` recreates the receiver alone and leaves the Valkey it depends on as it
    is.
-6. **Upgrade the console and every `/dispatch`.** The console service takes the admin package from the same
-   `npm install`, then `pi-dispatch service restart --console`. Each operator runs
-   `pi install npm:@edgehero/pi-dispatch-admin@<version>` and starts pi again. A sandbox gateway goes now too.
+6. **Upgrade the console.** The console service takes the admin package from the same
+   `npm install`, then `pi-dispatch service restart --console`. A sandbox gateway goes now too.
 7. **Run `pi-dispatch doctor` on every host.** `fleet.versions` should be quiet, or say that the workers with a live
    row report one version. Act on `state.older` and `dollars.window-reset` if either shows
    ([below](#valkey-and-bullmq), and [costs.md](costs.md#when-a-counter-resets)).
@@ -73,7 +72,6 @@ npm install --save-exact @edgehero/pi-dispatch@<version> @edgehero/pi-dispatch-r
 pi-dispatch service restart --drain   # pause the shared queue, wait for its running jobs, restart the worker, resume it
 pi-dispatch service restart --receiver
 pi-dispatch service restart --console
-pi install npm:@edgehero/pi-dispatch-admin@<version>   # then start pi again, for /dispatch
 pi-dispatch doctor
 ```
 
@@ -109,7 +107,7 @@ new used (a key, a field, a role) until every part runs the new release.
 
 - **Workers first**, because the receiver routes a delivery when it queues it, by what each worker says it can serve,
   and a worker says nothing about a feature it predates. An older worker does not offer a secret profile declared
-  through the panel, so a newer receiver can send a job that binds one to a host that refuses it
+  through the console, so a newer receiver can send a job that binds one to a host that refuses it
   ([secrets.md](secrets.md)). An upgraded worker also refuses, before it spends, a job whose fields an older receiver
   dropped (`trigger-skew`, `wait-skew`), where an older worker would have run it without them.
 - **The receivers right after**, in the same `npm install` as the worker, because a receiver drops every `run` field it
@@ -119,9 +117,9 @@ new used (a key, a field, a role) until every part runs the new release.
   wait for). For `run.secrets` it
   cannot, and a job a stale receiver queued runs with the variable unset
   ([secrets.md](secrets.md#six-things-worth-knowing-before-you-wire-one)).
-- **The console and every `/dispatch` in the same window**, because they write the files the others read. A `/dispatch`
-  from 4.3.1 or earlier drops every settings key it does not know when it writes the file
-  and an older admin bundles an older trigger validator, so it can refuse every trigger edit. Upgrade every panel and console before anyone writes
+- **The console in the same window**, because it writes the files the others read. A console
+  from 4.3.1 or earlier drops every settings key it does not know when it writes the file,
+  and an older admin bundles an older trigger validator, so it can refuse every trigger edit. Upgrade the console before anyone writes
   something only the new release knows.
 - **The job image before the worker**, because a worker reads the counters an older image does not write as missing,
   and settles every capped job at the floor until the image moves ([costs.md](costs.md#a-call-that-reports-no-usage)).
@@ -138,15 +136,15 @@ for what an older receiver queued, and run those jobs again.
 |---|---|---|
 | A newer worker, an older job image | The worker reads `costUnreported` and `unmeteredChildren` as missing and settles every capped job at the floor: an overcharge, never an undercharge | Upgrade the image first ([costs.md](costs.md#a-call-that-reports-no-usage)) |
 | An older worker, a newer job image | The worker drops what the image added to its exit line | Ship them in one window |
-| An older worker, a newer receiver or console | An older worker does not offer a secret profile declared through the panel, so the receiver can route a job that binds it to a host that refuses it | Workers first ([secrets.md](secrets.md)) |
+| An older worker, a newer receiver or console | An older worker does not offer a secret profile declared through the console, so the receiver can route a job that binds it to a host that refuses it | Workers first ([secrets.md](secrets.md)) |
 | A newer worker, an older receiver | The receiver drops a `run` field it does not know; the worker refuses such a job before it spends (`trigger-skew`, `wait-skew`) when it can read the triggers file | Receivers right after the workers, in the same `npm install`; run refused jobs again |
 | A receiver older than the triggers file | From 5.0.0 on, a receiver refuses a triggers file whose `version` is above what it reads: it does not start on one, and on a live edit it keeps the triggers it had. Deliveries in between match nothing, and a forge does not send them again on its own | Upgrade every receiver before any trigger uses a field that needs version 2. No field needs one yet |
-| A worker older than the settings file, `pause-windows.json` or `triggers.json` | From 5.0.0 on, the worker defers jobs as `newer-release` ("Queued or configured by a newer pi-dispatch: waits for this host's upgrade") and looks again every ten minutes. A 4.x worker ignores `version` and drops what it does not know | No file needs more than version 1 yet. Doctor's `fleet.store-versions` names the hosts ([multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you)) |
+| A worker older than the settings file, `pause-windows.json` or `triggers.json` | From 5.0.0 on, the worker defers jobs as `newer-release` ("Queued or configured by a newer pi-dispatch: waits for this host's upgrade") and looks again every ten minutes. A 4.x worker ignores `version` and drops what it does not know | No file needs more than version 1 yet. Doctor's `fleet.store-versions` names the hosts ([multi-host.md](multi-host.md#what-the-console-and-doctor-show-you)) |
 | A job queued by a newer release, on an older worker | From 5.0.0 on, the job waits (`newer-release`). A 4.x worker has no such gate and runs a job by the fields it knows. A canary from the console's Updates page queues job data version 2, which a 4.x worker would run as the trigger's ordinary job, without the candidate package | Every worker on 5.0.0 before anyone runs a canary from the Updates page ([console.md](console.md#updates)) |
-| An older `/dispatch` or console writing the settings file | A `/dispatch` from 4.3.1 or earlier drops every key it does not know (`secretBundles` included). From 5.0.0 on, an unknown key is kept | Write no setting a newer release added until every panel and console is upgraded |
+| An older console writing the settings file | A console from 4.3.1 or earlier drops every key it does not know (`secretBundles` included). From 5.0.0 on, an unknown key is kept | Write no setting a newer release added until every console is upgraded |
 | An older console, a newer tokens file or audit log | 5.0.0 is the first release with the web console. From it on, a console keeps a token of a role it does not know (it signs in nowhere) and reads an audit row with an action it does not know as unknown, not as a broken chain | Upgrade every console before you mint a token of a new role ([console.md](console.md#managing-tokens)) |
 | Run records from different releases | From 5.0.0 on, a record carries `"v": 1`, and a reader shows a record a newer release wrote by its core facts only and leaves it out of totals. A 4.x reader reads a newer record in full and ignores fields it does not know | Nothing to do |
-| Workers of different releases on one Valkey | Doctor warns: `fleet.versions` names each version the workers with a live row report ("pi-dispatch versions differ", or "pi-dispatch versions cannot all be read" when the only other group is a worker whose version is unknown), and says "this doctor X, this host's worker row reports Y" when the doctor you ran is not the release this host's worker row reports (a worker not restarted since its `npm install`, a doctor from another install, or, for up to 90 seconds, the row a killed worker left) | Finish the window: the same version on every host, each worker restarted while it runs no job, then `pi-dispatch resume` ([multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you)) |
+| Workers of different releases on one Valkey | Doctor warns: `fleet.versions` names each version the workers with a live row report ("pi-dispatch versions differ", or "pi-dispatch versions cannot all be read" when the only other group is a worker whose version is unknown), and says "this doctor X, this host's worker row reports Y" when the doctor you ran is not the release this host's worker row reports (a worker not restarted since its `npm install`, a doctor from another install, or, for up to 90 seconds, the row a killed worker left) | Finish the window: the same version on every host, each worker restarted while it runs no job, then `pi-dispatch resume` ([multi-host.md](multi-host.md#what-the-console-and-doctor-show-you)) |
 | Workers with different `PI_RUN_MIRROR_MAX_RUNS` | Each trims the shared run mirror to its own cap, so the lowest wins. A 4.x worker trims at 5000 | Set the same value on every host |
 | Workers sharing `PI_LOGS_DIR` with different `PI_CONSOLE_AUDIT_RETENTION_DAYS` | Each host's sweep prunes the one `console-audit/` folder, so the shortest wins. A 4.x worker never touches that folder | Set the same value on every host ([console.md](console.md#the-audit-log)) |
 | A recovery on a worker older than its checkpoint | The recovery waits for a worker that reads the checkpoint, for up to seven days. Each release reads two checkpoint versions | Let durable runs finish before you skip a release |
@@ -171,7 +169,7 @@ What moves an existing deployment:
 - **`pi-dispatch up` (Docker).** `up` leaves a running `pi-dispatch-valkey` container alone, so it keeps the image it
   was made from. While that is `valkey/valkey:8`, doctor's `state.older` names it, and so does `up`'s summary, in a
   `valkey image` row, whenever `up` leaves that container as it is. Both name only a container this deployment's `up`
-  started and still runs itself: never one another deployment owns, and never in a folder `/dispatch setup` handed to
+  started and still runs itself: never one another deployment owns, and never a folder handed to
   compose, where compose runs the Valkey (the next item). To move it, pause and wait for the running jobs, then run
   this in the deployment folder:
 
@@ -182,7 +180,7 @@ What moves an existing deployment:
   Stop it before you remove it, never `docker rm -f`: the normal stop is what makes Valkey write its AOF out and save
   a final snapshot, so the last writes to the queue are kept. `up` then starts `valkey/valkey:8.1` on the same volume,
   `pi-dispatch-valkey-data`, and the queue in it is kept.
-- **Compose.** In a folder `/dispatch setup` laid out, `deploy/docker-compose.yml` is a copy no upgrade refreshes.
+- **Compose.** In a deployment folder, `deploy/docker-compose.yml` is a copy no upgrade refreshes.
   Doctor's `state.older` names it while the `valkey` service's `image:` line says `valkey/valkey:8`. Change that line to
   `image: valkey/valkey:8.1` (the installed package's `deploy/docker-compose.yml` has it). Then ask compose, from the
   folder, whether it runs this deployment's Valkey:
@@ -254,17 +252,17 @@ Release numbers come from the git tags. The next release is 5.0.0.
 
 | Store | What changed, and what an older release does with it | Guide |
 |---|---|---|
-| Settings file (`PI_SETTINGS_FILE`) | Every writer keeps a key it does not know. An optional top-level `version`, written only when a key needs it (none does yet). A `version` you added by hand is now read. A 4.x `/dispatch` drops every key it does not know when it writes, and a 4.x worker ignores `version` | — |
+| Settings file (`PI_SETTINGS_FILE`) | Every writer keeps a key it does not know. An optional top-level `version`, written only when a key needs it (none does yet). A `version` you added by hand is now read. A 4.x console drops every key it does not know when it writes, and a 4.x worker ignores `version` | Nothing to do |
 | `pause-windows.json` | An optional `version`, as above. The writer keeps top-level keys it does not own. A 4.x writer drops them and `version`; a 4.x worker reads a newer file and drops what it does not know | pause windows |
-| `triggers.json` | An optional `version`, as above. A cron `on.id` longer than 176 characters is refused. A 4.x writer (the panel, and the worker's one-shot disarm) writes `triggers` alone, dropping `version` and every other top-level block, `secretBundles` among them; a 4.x worker or receiver reads a newer file and drops what it does not know | [triggers.md](triggers.md#the-files-version) |
+| `triggers.json` | An optional `version`, as above. A cron `on.id` longer than 176 characters is refused. A 4.x writer (an old console, and the worker's one-shot disarm) writes `triggers` alone, dropping `version` and every other top-level block, `secretBundles` among them; a 4.x worker or receiver reads a newer file and drops what it does not know | [triggers.md](triggers.md#the-files-version) |
 | Queued jobs and the sandbox manifest | An optional version. A canary from the Updates page queues job data version 2 (issue #796), which a 4.x worker would run as the trigger's ordinary job, without the candidate package: every worker on 5.0.0 before anyone runs one. A worker defers a job or a file a newer release wrote as `newer-release`; a 4.x worker runs a job by the fields it knows | [console.md](console.md#updates), [sandbox.md](sandbox.md) |
 | Run records (`PI_LOGS_DIR`) | Written to a temporary file and renamed into place, with `"v": 1`. A record that reserved in the deployment's dollar windows says which ones (`dollars.reservedIn`: dates and a hash of the Valkey's address, never the address). Doctor's `dollars.window-reset` counts only such records, so it sees nothing of the runs before 5.0.0. A 4.x reader ignores fields it does not know, and its sweep leaves a crash leftover `<job id>.json.<pid>.<12 hex>.tmp`, which is harmless | [costs.md](costs.md#when-a-counter-resets) |
 | The web console | New: `console-tokens.json`, `console-login-codes/` and `<PI_LOGS_DIR>/console-audit/`. A token of a role a console does not know is kept and signs in nowhere. An audit row with an action or outcome a console does not know reads as unknown, not as damage. `PI_CONSOLE_AUDIT_RETENTION_DAYS` keeps the audit for its own number of days. 4.x has no console and leaves these files alone | [console.md](console.md#managing-tokens), [console.md](console.md#the-audit-log) |
 | Durable runs, steering, approvals, live transcripts, watch, zero-touch, Updates, the sandbox gateway, model failover | New Valkey keys and new files. A 4.x worker knows none of them, so a run held for an approval or waiting for its recovery is not continued | durable runs |
 | Workspace checkpoints | The boot sweep keeps the job folder of a checkpoint pointer of any version. A recovery whose checkpoint a newer release wrote waits for an upgraded worker instead of being refused | durable runs |
-| Run mirror (`runs:*`) | `PI_RUN_MIRROR_MAX_RUNS` (5000 by default, 1000 to 20000) caps it; the lowest setting in a fleet wins. A 4.x worker trims at 5000 | [multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you) |
+| Run mirror (`runs:*`) | `PI_RUN_MIRROR_MAX_RUNS` (5000 by default, 1000 to 20000) caps it; the lowest setting in a fleet wins. A 4.x worker trims at 5000 | [multi-host.md](multi-host.md#what-the-console-and-doctor-show-you) |
 | Valkey image | Pinned to `valkey/valkey:8.1`. Doctor's `state.older` names each of these still on `valkey/valkey:8`: a compose file's `valkey` service, a Quadlet, and a container this deployment's `up` started and still runs. `up`'s summary names that container too | [Valkey and BullMQ](#valkey-and-bullmq) |
-| Cron run ids | One reader for `repeat:<id>:<time>` and `manual:<id>:<time>` everywhere. A run record's cron id is read whatever its length, and the console and `/dispatch` name a schedule whose id is 177 to 200 characters long, which an earlier release made and showed with no id, so you can find and remove it. An id no release makes (a time with a leading 0, a `:` in the id) no longer counts as a cron run | [triggers.md](triggers.md#trigger-types-what-fires-each-one-and-what-it-runs) |
+| Cron run ids | One reader for `repeat:<id>:<time>` and `manual:<id>:<time>` everywhere. A run record's cron id is read whatever its length, and the console names a schedule whose id is 177 to 200 characters long, which an earlier release made and showed with no id, so you can find and remove it. An id no release makes (a time with a leading 0, a `:` in the id) no longer counts as a cron run | [triggers.md](triggers.md#trigger-types-what-fires-each-one-and-what-it-runs) |
 | Model ids | A model id defined in the overlay can be the deployment's default only in the shape a trigger's `run.model` takes (issue #673). Outside it `PI_MODEL` stops the worker at boot, and a settings file holding one refuses every job | [global-pi-overlay.md](global-pi-overlay.md#custom-providers) |
 | The job image's pi | pi 1.4.0 (issue #693) and then 1.5.0 (issue #796). 59 catalog models are gone, and a trigger whose `watch.decide` names one refuses the triggers file. Each session key starts cold once, as after every pi change | [job-image.md](job-image.md#pi-150-upgrade-issue-796), [sessions.md](sessions.md#when-it-silently-doesnt-resume) |
 | Console tokens | A token may carry the `agent` role (issue #766) | [console.md](console.md#managing-tokens) |
@@ -326,7 +324,7 @@ Release numbers come from the git tags. The next release is 5.0.0.
   [floor for `run.secrets`](secrets.md#six-things-worth-knowing-before-you-wire-one).
 - [scoped-limits.md](scoped-limits.md#job-sizes-version-3) and [sizing.md](sizing.md#2-set-a-size-per-project): every
   worker before you write a size.
-- [multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you): mixed releases, `fleet.store-versions`,
+- [multi-host.md](multi-host.md#what-the-console-and-doctor-show-you): mixed releases, `fleet.store-versions`,
   `fleet.versions`, and [the forge-qualified scopes](multi-host.md#two-bounds-that-used-to-multiply).
 - [triggers.md](triggers.md#the-files-version): the file's version, and the receiver for
   [`models`](triggers.md#limiting-which-models-a-job-may-call) and [`maxCostUsd`](triggers.md#a-dollar-cap-per-job).
