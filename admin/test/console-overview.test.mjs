@@ -8,7 +8,7 @@ import {
   REGISTRY_UNREAD_TEXT, RUNNING_EMPTY, SOFT_HOLD_REFUSED_TEXT, SOFT_HOLD_TEXT, SPEND_EMPTY, SPEND_HOURS_TEXT,
   STALE_BEATS_TEXT, WAITING_EMPTY, WAITING_MAIN_BUCKETS, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, WAITLIST_ROWS_MAX,
   hostSkewText, overviewActive, overviewCaps, overviewHeadline, overviewHosts, overviewNeeds, overviewSetup,
-  overviewSetupEmpty, overviewSetupPi, overviewSpend, overviewTimeline, overviewWaiting, overviewWaitlists,
+  overviewSetupEmpty, overviewSpend, overviewTimeline, overviewWaiting, overviewWaitlists,
   JOBS_UNREAD_TEXT, JOBS_UNREAD_WORDS, NOT_BEATING_WORDS, SPEND_SUM_TEXT, WAITING_CUT_TEXT, waitingSentence,
   CAPS_EMPTY_TEXT, LAST_SEEN_WORDS, BEAT_NOT_READ_WORDS,
 } from "../src/console/panels/overview.mjs";
@@ -117,7 +117,7 @@ const draw = (render, snap, opts) => String(render(viewOf(snap, opts)));
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const EIGHT = [overviewNeeds, overviewWaiting, overviewActive, overviewSpend, overviewTimeline, overviewCaps, overviewWaitlists, overviewHosts];
-const SETUP = [overviewSetup, overviewSetupPi, overviewSetupEmpty];
+const SETUP = [overviewSetup, overviewSetupEmpty];
 
 // ---- the frame of the rules -------------------------------------------------------------------------------------------
 
@@ -1177,14 +1177,11 @@ test("first run for a viewer: the same steps and states, without a command or th
   assert.ok(!viewer.includes('class="cmd"') && !viewer.includes("Add a trigger") && !viewer.includes("su-alt"));
   assert.match(viewer, /You are signed in as <b>a viewer<\/b>\./);
   assert.match(viewer, /aria-label="3 of 8 ready/);
-  assert.ok(!draw(overviewSetupPi, fresh(), { role: "viewer" }).includes('class="cmd"'));
   const ro = draw(overviewSetup, fresh(), { readOnly: true });
   assert.ok(ro.includes('class="cmd"') && !ro.includes("Add a trigger"));
 });
 
-test("first run: Do it from pi, and the overview's panels as they will read, in the panels' own words", () => {
-  const pi = draw(overviewSetupPi, fresh());
-  assert.match(pi, /<h2>Do it from pi<\/h2><\/div><p class="muted su-p">The guided setup in pi walks through every step and asks before each one\. It never asks for the provider key\.<\/p><div class="cmd"><code><span>\/dispatch<\/span> <span>setup<\/span><\/code>/);
+test("first run: the overview's panels as they will read, in the panels' own words", () => {
   const empty = draw(overviewSetupEmpty, fresh({ waiting: waitingOf([]) }));
   assert.match(empty, /<h2>The Overview, once it runs<\/h2><span class="card__sub">each panel says what it is waiting for<\/span>/);
   for (const [title, words] of [["Needs you", NEEDS_EMPTY.title], ["In line", WAITING_EMPTY.title], ["Running", RUNNING_EMPTY.title], ["Spend today", SPEND_EMPTY.title], ["Hosts", HOSTS_EMPTY.title]]) assert.ok(empty.includes(`<b>${title}</b> ${words}</p>`), title);

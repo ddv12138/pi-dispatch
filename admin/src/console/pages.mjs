@@ -94,7 +94,6 @@ import {
   overviewNeeds,
   overviewSetup,
   overviewSetupEmpty,
-  overviewSetupPi,
   overviewSpend,
   overviewTimeline,
   overviewWaiting,
@@ -181,7 +180,7 @@ const PAGE_PANELS = Object.freeze({
   // what runs and what it costs, the timeline and the caps, then the waitlists and the hosts. Every one of the eleven is
   // on the page in both states (`panels/overview.mjs`'s header), so the stream moves a first run to the overview by
   // swapping panels; on a phone, where the layout is one column, Needs you comes first once the checklist is gone.
-  overview: [["p-setup", overviewSetup], ["p-setup-pi", overviewSetupPi], ["p-setup-empty", overviewSetupEmpty], ["p-needs", overviewNeeds], ["p-waiting", overviewWaiting], ["p-active", overviewActive], ["p-spend", overviewSpend], ["p-agent-writes", overviewAgentWrites], ["p-timeline", overviewTimeline], ["p-caps", overviewCaps], ["p-waitlists", overviewWaitlists], ["p-hosts", overviewHosts]],
+  overview: [["p-setup", overviewSetup], ["p-setup-empty", overviewSetupEmpty], ["p-needs", overviewNeeds], ["p-waiting", overviewWaiting], ["p-active", overviewActive], ["p-spend", overviewSpend], ["p-agent-writes", overviewAgentWrites], ["p-timeline", overviewTimeline], ["p-caps", overviewCaps], ["p-waitlists", overviewWaitlists], ["p-hosts", overviewHosts]],
   runs: [["p-filters", runsFilters], ["p-summary", runsSummary], ["p-runs", runsTable]],
   run: [["p-viewer", runViewer], ["p-outcome", runOutcome], ["p-progress", runProgress], ["p-recovery", runRecovery], ["p-transcript", runTranscriptState], ["p-record", runRecord], ["p-rest", runRest], ["p-answer-draft", runAnswerDraft], ["p-inbox", runInbox], ["p-run", runSummary], ["p-secrets", runSecrets], ["p-actions", runActionsPanel], ["p-why", runWhy], ["p-host", runHost], ["p-cost", runCostPanel], ["p-models", runModels], ["p-resources", runResources], ["p-session", runSession], ["p-chain", runChain]],
   parked: [["p-questions", parkedQuestions]],
@@ -244,7 +243,7 @@ const PAGE_LAYOUT = Object.freeze({
   host: [{ cls: "stack", items: ["p-hoststate"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-hostjobs", "p-hostbudget", "p-hostcap"] }, { cls: "stack", items: ["p-hostrow", "p-hostdoctor"] }] }],
   run: [{ cls: "stack", items: ["p-viewer"] }, { cls: "cols", items: [{ cls: "stack run-main", items: ["p-outcome", "p-run", "p-progress", "p-recovery", "p-transcript", "p-record", "p-rest", "p-secrets", "p-actions", "p-why", "p-host"] }, { cls: "stack run-side", items: ["p-answer-draft", "p-inbox", "p-cost", "p-models", "p-resources", "p-session", "p-chain"] }] }],
   overview: Object.freeze([
-    Object.freeze({ cls: "cols", items: Object.freeze(["p-setup", Object.freeze({ cls: "stack", items: Object.freeze(["p-setup-pi", "p-setup-empty"]) })]) }),
+    Object.freeze({ cls: "cols", items: Object.freeze(["p-setup", Object.freeze({ cls: "stack", items: Object.freeze(["p-setup-empty"]) })]) }),
     Object.freeze({ cls: "cards-4", slotAfter: true, items: Object.freeze(["p-needs", "p-waiting", "p-active", "p-spend"]) }),
     Object.freeze({ cls: "cols", items: Object.freeze([Object.freeze({ cls: "stack", items: Object.freeze(["p-agent-writes", "p-timeline", "p-caps"]) }), Object.freeze({ cls: "stack", items: Object.freeze(["p-waitlists", "p-hosts"]) })]) }),
   ]),

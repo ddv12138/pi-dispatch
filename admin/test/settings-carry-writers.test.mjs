@@ -1,7 +1,8 @@
 // Every writer of the settings overlay keeps what it does not know (issue #761): a key a later release added and a
 // `secretBundles` block survive a write from each entry point that writes the file, byte for byte in their places. One
-// test per writer family: `writeSettings` itself, `/dispatch set|unset`, the panel's settings dialog, `/dispatch
-// secrets` (profiles and bundles), the console's setting and secret actions, and the model-callable `dispatch_set`.
+// test per writer family: `writeSettings` itself, and the console's setting and secret actions. The retired panel's
+// writers (`/dispatch set|unset`, its settings dialog, `/dispatch secrets`) went with the panel (58ef2369); the
+// model-callable `dispatch_set` rides the same `writeSettings` the first test pins.
 // Each compares the file's whole text, so a reordered, dropped or rewritten key fails, not just a missing one.
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -9,19 +10,12 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { blankSettingsFile, overlayInvalidRefusal, readSettingsView, writeSettings } from "../src/read-model.mjs";
 import * as RM from "../src/read-model.mjs";
 import * as WP from "../src/write-plans.mjs";
 import { ACTIONS } from "../src/console/actions.mjs";
 
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-
-const { runSecretsCommand } = await jiti.import(fileURLToPath(new URL("../src/secrets-command.ts", import.meta.url)));
 // Every write below is audited into PI_LOGS_DIR's console-audit chain, so it lands in a directory of its own.
 process.env.PI_LOGS_DIR = tempDir("settings-carry-logs-");
 
@@ -109,42 +103,6 @@ test("writeSettings re-checks against its OWN read when no expect is given: a wr
   assert.match(writeSettings({ settingsFile: second, expect: [{ path: second, text: "{}" }], mutate: (o) => o }).invalid, /changed after this change was built from it/);
 });
 
-/** The extension's `/dispatch` command handler, with `notify` recorded. */
-
-
-
-
-/** A pi `ctx.ui` whose dialogs answer in order. */
-function mockUi({ select = [], input = [], confirm = [] } = {}) {
-  const notes = [];
-  return { notes, select: async () => select.shift(), input: async () => input.shift(), confirm: async () => confirm.shift(), notify: (m, t) => notes.push({ m, t }) };
-}
-
-
-
-test("/dispatch secrets add and remove keep a later release's key and the secretBundles block in place (#761)", async () => {
-  const { settingsFile } = seeded();
-  const audit = { append: (row) => ({ ...row, seq: 1 }) };
-  const answers = (map) => async (title) => map[Object.keys(map).find((k) => title.startsWith(k))];
-  const ctx = (map) => ({ ui: { input: answers(map), confirm: async () => true, notify: () => {} } });
-  await runSecretsCommand({ settingsFile }, ctx({ "profile name": "prod", resolver: "/opt/pi/resolve.sh" }), () => {}, ["add"], { env: {}, audit });
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ secretProfiles: { prod: "/opt/pi/resolve.sh" } }));
-  await runSecretsCommand({ settingsFile }, ctx({ "bundle profile name": "ops", resolver: "/opt/pi/ops.mjs", format: "json" }), () => {}, ["add", "--bundle"], { env: {}, audit });
-  const both = { ...BUNDLES, ops: { path: "/opt/pi/ops.mjs", format: "json" } };
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ secretBundles: both, secretProfiles: { prod: "/opt/pi/resolve.sh" } }), "the bundle joins the block in its place");
-  await runSecretsCommand({ settingsFile }, ctx({}), () => {}, ["remove", "prod"], { env: {}, audit });
-  await runSecretsCommand({ settingsFile }, ctx({}), () => {}, ["remove", "--bundle", "ops"], { env: {}, audit });
-  assert.equal(readFileSync(settingsFile, "utf8"), fileWith({ secretProfiles: {} }));
-  // A newer file is not "unreadable, fix it": the command names the upgrade and asks nothing.
-  const newer = text({ version: 2, ...FILE });
-  writeFileSync(settingsFile, newer);
-  const notes = [];
-  let asked = 0;
-  await runSecretsCommand({ settingsFile }, { ui: { input: async () => (asked++, "x"), confirm: async () => (asked++, true), notify: () => {} } }, (m) => notes.push(m), ["add"], { env: {}, audit });
-  assert.equal(asked, 0);
-  assert.deepEqual(notes, ["the settings file was written by a newer pi-dispatch (version 2; this build understands 1), so nothing was written and no key in it was lost. Upgrade this panel or console to the release that wrote it"]);
-  assert.equal(readFileSync(settingsFile, "utf8"), newer);
-});
 
 /** One console file action, previewed and applied as the confirm applies it: the preview's own `expect` and run. */
 async function consoleAct(name, body, paths) {

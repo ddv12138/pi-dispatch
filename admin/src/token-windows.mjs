@@ -32,7 +32,7 @@ import { TOKEN_BASIS, TOKEN_KEY_PREFIX, MODEL_BASIS } from "@edgehero/pi-dispatc
 import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, optionalTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { tokenKeyPrefixFor, isModelScope, isProjectScope, MODEL_SCOPE_PREFIX } from "@edgehero/pi-dispatch/scoped-limits";
 import { recordInProject, recordInRepo } from "./costs.mjs";
-import { fromNewerRelease, newerSkippedSentence } from "./newer-release.mjs";
+import { fromNewerRelease } from "./newer-release.mjs";
 
 const WINDOWS = [
   { window: "day", keyOf: dayKey, setting: "dailyTokenCap", field: "dayTokens" },
@@ -267,29 +267,4 @@ export function runTokenWindows(records, { limit = 50 } = {}) {
   return { runs: rows.slice(0, limit), more: Math.max(0, rows.length - limit), ...(newerSkipped > 0 ? { newerSkipped } : {}) };
 }
 
-/** A token count with thousands separators, or `-` for a value that is not a count. */
-function tokensCell(tokens) {
-  return isCount(tokens) ? tokens.toLocaleString("en-US") : "-";
-}
 
-/**
- * The token windows as plain text (the panel's narrow-terminal path), or null when there is none to show, so a
- * deployment without a token window renders exactly what it always did. The same facts as the framed rows.
- */
-export function renderTokenWindows(windows) {
-  if (!windows) return null;
-  const out = [];
-  if (windows.unreachable) out.push(`  token windows unreadable (${windows.unreachable})`);
-  if (Array.isArray(windows.invalid) && windows.invalid.length > 0) out.push(`  not a whole number of tokens: ${windows.invalid.join(", ")}`);
-  for (const r of Array.isArray(windows.rows) ? windows.rows : []) {
-    const name = r.ledger === "deployment" ? "deployment" : r.ledger === "model" ? `model:${r.name}` : r.name;
-    let tail = "records n/a";
-    if (r.records) {
-      const counts = TOKEN_BASIS.filter((k) => r.records.basis?.[k] > 0).map((k) => `${r.records.basis[k]} ${k}`);
-      const newer = newerSkippedSentence(r.records.newerSkipped);
-      tail = `settled ${tokensCell(r.records.settledTokens)} from ${r.records.runs} run${r.records.runs === 1 ? "" : "s"}${counts.length > 0 ? ` (${counts.join(", ")})` : ""}${newer ? ` (${newer})` : ""}`;
-    }
-    out.push(`  ${String(r.window).padEnd(6)}${name}  reserved+held ${tokensCell(r.counterTokens)} of ${tokensCell(r.capTokens)}${r.full ? " (full)" : ""}  ${tail}`);
-  }
-  return out.length > 0 ? out.join("\n") : null;
-}

@@ -40,7 +40,7 @@ export {
   NEEDS_EMPTY, WAITING_EMPTY, RUNNING_EMPTY, SPEND_EMPTY, HOSTS_EMPTY, WAITLISTS_CALM, SOFT_HOLD_TEXT,
   SOFT_HOLD_REFUSED_TEXT, FREE_SLOT_TEXT, HOST_NO_EXPIRY_TEXT, NO_DOCTOR_TEXT, SPEND_HOURS_TEXT, OVERVIEW_LINKS,
   NEEDS_ROWS_MAX, WAITING_MAIN_BUCKETS, WAITLIST_ROWS_MAX, hostSkewText, waitingSentence, overviewHeadline,
-  overviewSetup, overviewSetupPi, overviewSetupEmpty, overviewNeeds, overviewWaiting, overviewActive, overviewSpend,
+  overviewSetup, overviewSetupEmpty, overviewNeeds, overviewWaiting, overviewActive, overviewSpend,
   overviewTimeline, overviewCaps, overviewWaitlists, overviewHosts
 } from "./panels/overview.mjs";
 export { runsFilters, runsSummary, runsTable, RUNS_UNREADABLE, RUNS_HOST_UNREADABLE, RUNS_MIRROR_OFF, RUNS_MIRROR_DEGRADED, RUNS_EMPTY, RUNS_WINDOW_TEXT, runsTruncatedText, runsSourceText } from "./panels/runs.mjs";

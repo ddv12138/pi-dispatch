@@ -146,10 +146,10 @@ test("the configuration shows names and basenames, never a parser message or a r
 
 test("panels state degraded reads instead of drawing nothing: no snapshot, a floor, a partly paused fleet", async () => {
   // The shell's Parked count (`p-nav-parked`) is a panel too; with no snapshot it is drawn empty, never "could not be read".
-  // Issue #737: the overview's eight say so; the first run's three draw nothing (no snapshot is never a first run).
+  // Issue #737: the overview's eight say so; the first run's two draw nothing (no snapshot is never a first run).
   const none = (await pagePanels("overview", ctxOf("viewer", { snapshot: null }))).filter((p) => !SHELL_PANEL_IDS.includes(p.id)).map((p) => p.html);
-  assert.equal(none.length, 12);
-  assert.equal(none.filter((h) => h === "").length, 4, "the three setup panels and operator-only agent-write count stay empty for a viewer");
+  assert.equal(none.length, 11);
+  assert.equal(none.filter((h) => h === "").length, 3, "the two setup panels and operator-only agent-write count stay empty for a viewer");
   for (const h of none.filter((x) => x !== "")) assert.match(h, /could not be read/);
   const some = (await pagePanels("overview", ctxOf("viewer", { snapshot: snapshot() }))).map((p) => p.html).join("");
   assert.match(some, /Partly paused/);
@@ -1737,9 +1737,9 @@ test("the chain's children carry their reason through loadPageData, so a waiting
 
 const overviewOf = async (snap, role = "viewer") => (await pagePanels("overview", ctxOf(role, { snapshot: snap }))).map((p) => [p.id, p.html]);
 
-test("the overview: the first run's three, then what needs a person, what waits, what runs and spend, the timeline and caps, waitlists and hosts (#710, #737)", async () => {
+test("the overview: the first run's two, then what needs a person, what waits, what runs and spend, the timeline and caps, waitlists and hosts (#710, #737)", async () => {
   const ids = (await overviewOf(snapshot())).map(([id]) => id);
-  assert.deepEqual(ids.filter((id) => !SHELL_PANEL_IDS.includes(id)), ["p-setup", "p-setup-pi", "p-setup-empty", "p-needs", "p-waiting", "p-active", "p-spend", "p-agent-writes", "p-timeline", "p-caps", "p-waitlists", "p-hosts"]);
+  assert.deepEqual(ids.filter((id) => !SHELL_PANEL_IDS.includes(id)), ["p-setup", "p-setup-empty", "p-needs", "p-waiting", "p-active", "p-spend", "p-agent-writes", "p-timeline", "p-caps", "p-waitlists", "p-hosts"]);
   assert.deepEqual(ids.filter((id) => SHELL_PANEL_IDS.includes(id)).sort(), [...SHELL_PANEL_IDS].sort(), "and the shell's Parked count and headline");
 });
 

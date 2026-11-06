@@ -11,7 +11,7 @@ import { runUntoldText } from "../src/console/panels/run.mjs";
 import { ESC, FIXTURES, ROLES, SHOTS, STATIC_SHOTS, assertClean, assertPanelsMatch, renderAll, skip } from "./helpers/console-pages-harness.mjs";
 
 /**
- * The console's screens rendered over the canned deployment (issue #641), in `render-images.test.mjs`'s style: the
+ * The console's screens rendered over the canned deployment (issue #641): the
  * fixture (`launch/fixture-deployment.mjs`) is written and seeded through the project's own writers, the page data is
  * read through the REAL `createFleetReader`, `readConsoleAudit` and `assembleInsights`, and every screen is rendered for
  * both roles at the fixture's frozen instant. Each page must be byte-identical to its committed fixture in

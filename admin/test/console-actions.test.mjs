@@ -632,11 +632,6 @@ test("every form a golden draws names a known action and sends only fields that 
   }
 });
 
-test("the cancel-timeout refusal is the TUI's sentence, byte for byte (REQ-OPERATOR-JOB-CANCEL)", () => {
-  const dashboard = readFileSync(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)), "utf8");
-  assert.ok(dashboard.includes(`if (res?.timeout) return ${JSON.stringify(CANCEL_TIMEOUT_SENTENCE)};`), "dashboard.ts cancelNote says the same sentence");
-});
-
 // ---- the dry run and the diff ------------------------------------------------------------------------------------------
 
 test("dryRunFs keeps every write in memory: the real file and its directory are untouched", () => {

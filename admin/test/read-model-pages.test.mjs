@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -27,11 +26,6 @@ const live = URL_ ? false : "needs VALKEY_TEST_URL";
 const AT = Date.parse("2026-10-14T12:00:00.000Z");
 const MIN = 60_000;
 const iso = (ms) => new Date(ms).toISOString();
-
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { targetUrl } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
 
 /** A key-prefixed live client; `cleanup` deletes every key under its prefix and quits. */
 async function prefixed(tag) {
@@ -598,10 +592,13 @@ test("secretProfileNames: names only, sorted, never a path; anything else is no 
   for (const v of [null, {}, { overlay: {} }, { overlay: { secretProfiles: ["a"] } }, { invalid: "x" }]) assert.deepEqual(secretProfileNames(v), []);
 });
 
-test("forgeLinkOf: GitHub as targetUrl builds it; GitLab, Forgejo and Azure from the deployment's own host", () => {
+test("forgeLinkOf: GitHub as the retired panel's targetUrl built it; GitLab, Forgejo and Azure from the deployment's own host", () => {
   const env = { GITLAB_URL: "https://git.example.com/", FORGEJO_URL: "https://forge.example.org/sub", AZURE_ORG_URL: "https://dev.azure.com/acme" };
   const link = (kind, target, e = env) => forgeLinkOf({ kind, target }, e);
-  for (const target of ["acme/web#12", "a.b/c-d_e#1"]) assert.equal(link("github", target), targetUrl({ kind: "github", target }), target);
+  // The shape the retired panel's targetUrl drew, pinned as literals now that the module is gone (58ef2369):
+  // `owner/repo#n` under /issues/.
+  assert.equal(link("github", "acme/web#12"), "https://github.com/acme/web/issues/12");
+  assert.equal(link("github", "a.b/c-d_e#1"), "https://github.com/a.b/c-d_e/issues/1");
   assert.equal(link("github", "acme/web#12", {}), "https://github.com/acme/web/issues/12", "GitHub needs no variable");
   assert.equal(link("gitlab", "grp/sub/proj#3"), "https://git.example.com/grp/sub/proj/-/issues/3");
   assert.equal(link("gitlab", "grp/proj!4"), "https://git.example.com/grp/proj/-/merge_requests/4");

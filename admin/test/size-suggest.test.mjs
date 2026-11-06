@@ -2,10 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { stripAnsi } from "../src/style.mjs";
 import { hostBudgetsOf, readSizeSuggestions } from "../src/read-model.mjs";
 import { projectSizing } from "../src/insights-assembly.mjs";
 import { PAGE_THEME } from "../src/graph-html.mjs";
@@ -18,21 +15,14 @@ import { sizeSuggestionChecks } from "../../worker/src/doctor.mjs";
 
 /**
  * Issue #596, phase 3 (DES-SIZE-SUGGESTIONS): the admin's size suggestion surfaces. The reader over the run records,
- * the PROJECTS view (size, p95 peaks, the suggestion and the exact call), the `dispatch_limit_edit` preview (the
- * project's peaks when a size field is edited) and the insights page (peak against size over time, the hosts'
- * budgets). Every clock is injected; records written to disk are dated relative to the clock the subject reads.
+ * the insights page (peak against size over time, the hosts' budgets) and the doctor/reader one-rule check. Every
+ * clock is injected; records written to disk are dated relative to the clock the subject reads. The retired panel's
+ * PROJECTS view and its `callPieces` wrapper went with the panel (58ef2369); the insights page draws the same facts.
  */
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-
 
 const NOW = Date.UTC(2026, 9, 1, 12, 0, 0);
 const MIB = 1024 * 1024;
 const MIN = 60 * 1000;
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-const fakeTui = () => ({ requestRender() {} });
 
 function rec({ i = 0, at = NOW, project = "shop", memMiB = 4096, cpuCenti = 200, peakMiB = 1024, cores = 1, throttle = 0, reason = null } = {}) {
   const end = at - (i + 1) * MIN;
@@ -90,71 +80,6 @@ test("hostBudgetsOf: each live host's own budget pair, as published; never merge
   ]);
 });
 
-// ── the PROJECTS view ─────────────────────────────────────────────────────────────────────────────────
-
-const SNAP = {
-  queue: { pausedState: false, counts: { waiting: 0, active: 0, paused: 0, delayed: 0, failed: 0 }, workers: 1 },
-  budget: { day: 0, week: 0, month: 0 },
-  settings: { path: "/s", overlay: {} },
-  runs: [],
-  schedulers: [],
-  projects: { projects: [{ id: "shop", name: null, members: ["github:acme/web"] }, { id: "ops", name: null, members: ["/srv/ops"] }, { id: "new", name: null, members: ["/srv/new"] }, { id: "big", name: null, members: ["/srv/big"] }, { id: "wide", name: null, members: ["/srv/wide"] }, { id: "a-project-whose-id-is-32-chars-x", name: null, members: ["/srv/long"] }] },
-  scopedLimits: { limits: [{ scope: "project:shop", memory: "4g" }, { scope: "project:big", memory: "16g", cpus: 8 }] },
-  hostBudgets: [{ name: "mini1", budgetMemMiB: "5120", budgetCpuCenti: "700", usedMemMiB: "0", usedCpuCenti: "0" }],
-};
-
-function sizingInfo() {
-  const logsDir = logsWith([
-    rec({ reason: "oom-killed", peakMiB: 4096 }),
-    ...Array.from({ length: 12 }, (_, i) => rec({ i: 10 + i, project: "ops", peakMiB: 3000, cores: 1.5, throttle: 0.5 })),
-    rec({ i: 40, project: "new" }),
-    ...Array.from({ length: 10 }, (_, i) => rec({ i: 50 + i, project: "big", memMiB: 16384, cpuCenti: 800, peakMiB: 6000, cores: 3 })),
-    ...Array.from({ length: 10 }, (_, i) => rec({ i: 70 + i, project: "wide", peakMiB: 1000, cores: 0.3 })),
-    ...Array.from({ length: 10 }, (_, i) => rec({ i: 90 + i, project: "a-project-whose-id-is-32-chars-x", peakMiB: 1000, cores: 0.4 })),
-  ]);
-  const limits = parseScopedLimits(JSON.stringify({ version: 3, limits: SNAP.scopedLimits.limits }), "sl.json");
-  const hostBudgets = hostBudgetsOf(SNAP.hostBudgets);
-  return { ...readSizeSuggestions({ logsDir, projectIds: ["shop", "ops", "new", "big", "wide", "a-project-whose-id-is-32-chars-x"], limits, env: {}, hostBudgets, nowMs: NOW }), hostBudgetCount: hostBudgets.length };
-}
-
-async function projectsAt(width, sizing = sizingInfo()) {
-  const asked = [];
-  const deps = { fetchSnapshot: async () => SNAP, pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => NOW, projectsInfo: (arg) => (asked.push(arg), { byProject: [], sizing }) };
-  const comp = makeDashboard({ paths: {}, done() {}, tui: fakeTui(), intervalMs: 100000, deps });
-  await flush();
-  comp.handleInput("j");
-  const raw = comp.render(width);
-  await comp.dispose();
-  return { raw, lines: raw.map(stripAnsi), asked };
-}
-/** A frame row's content: the border and the padding off. */
-const content = (l) => l.trim().replace(/^│/, "").replace(/│$/, "").trim();
-
-test("the PROJECTS view shows each project's size, p95 peaks and verdict, then the suggestion, the exact call and any fact", async () => {
-  const { lines, asked } = await projectsAt(140);
-  const out = lines.map(content).join("\n");
-  assert.deepEqual(asked, [{ hosts: SNAP.hostBudgets }], "the seam is handed the registry rows the tick read");
-  assert.match(out, /^sizes: p95 of 30 days' runs · capped by 1 host budget$/m);
-  assert.match(out, /^(?:› )?shop .*\n4g, 2 CPUs · p95 4g, 1 core · suggest\nmemory 5g \(oom-killed, the most a live host offers\)\ndispatch_limit_edit \{"index":0,"memory":"5g"\}\ngithub:acme\/web$/m);
-  assert.match(out, /^ops .*\n4g, 2 CPUs · p95 3000m, 1\.5 cores · fits\nthe median run was held back 50% of its time by this host's\nCPU ceiling/m);
-  // neither dimension has enough runs: each says its own count, never memory's alone
-  assert.match(out, /^new .*\n4g, 2 CPUs · p95 1g, 1 core\nmemory not enough runs at 4g \(1\), CPUs not enough runs at 2\nCPUs \(1\)\n\/srv\/new$/m);
-  // a lowering every live host would still refuse (its 7 CPUs hold the 3.75 the lowering leaves, its 5g budget does
-  // not hold 7680m) names the dimension that does not fit, and carries NO call: it would never fit; only that project
-  assert.match(out, /^big .*\n16g, 8 CPUs · p95 6000m, 3 cores · suggest\nmemory 7680m \(oversized\); CPUs 3\.75 \(underused\)\nno live host admits it \(memory 7680m is above every live\nhost's budget\)/m);
-  assert.doesNotMatch(out, /"index":1/, "no call for a size that never fits");
-  assert.equal(lines.filter((l) => /no live host admits it/.test(l)).length, 1);
-  assert.doesNotMatch(out, /raise|budget first/i, "never advises growing a host");
-  assert.doesNotMatch(out, /over 256 KiB/, "nothing skipped, nothing said");
-  const skipped = (await projectsAt(140, { ...sizingInfo(), skipped: 2 })).lines.map(content).join("\n");
-  assert.match(skipped, /^sizes: p95 of 30 days' runs · capped by 1 host budget\n2 run records over 256 KiB skipped$/m);
-  // no host budget read: a raise wants its size and offers no call
-  const bare = { ...sizingInfo(), hostBudgetCount: 0 };
-  const shop = readSizeSuggestions({ logsDir: logsWith([rec({ reason: "oom-killed", peakMiB: 4096 })]), projectIds: ["shop"], limits: parseScopedLimits(JSON.stringify({ version: 3, limits: SNAP.scopedLimits.limits }), "sl.json"), hostBudgets: [], nowMs: NOW });
-  const none = (await projectsAt(140, { ...bare, projects: { ...bare.projects, shop: shop.projects.shop } })).lines.map(content).join("\n");
-  assert.match(none, /^sizes: p95 of 30 days' runs · no host budget read$/m);
-  assert.match(none, /^4g, 2 CPUs · p95 4g, 1 core · suggest\nmemory wants 6g \(oom-killed, no host budget read as a\nnumber: no call\)\ngithub:acme\/web$/m);
-});
 
 test("the size suggestions say how many of the window's records a newer pi-dispatch wrote, which none of them reads (#761)", async () => {
   // The read the insights page, the PROJECTS view and the edit preview share passes the worker reader's count through.
@@ -164,80 +89,8 @@ test("the size suggestions say how many of the window's records a newer pi-dispa
   assert.equal(read.newerSkipped, 1);
   assert.equal(read.projects.shop.runs, 1, "the newer run's peak is not one of the runs read");
   assert.equal(Object.hasOwn(projectSizing({ ...paths, logsDir: logsWith([rec()]) }, { projectIds: ["shop"], nowMs: NOW, envFn: () => ({}) }), "newerSkipped"), false, "absent when there were none");
-  // The PROJECTS view says it beside the oversize count, in the worker's words.
-  const { lines } = await projectsAt(140, { ...sizingInfo(), skipped: 2, newerSkipped: 3 });
-  assert.match(lines.map(content).join("\n"), /^2 run records over 256 KiB skipped\n3 records from a newer pi-dispatch not read$/m);
 });
 
-/** True when `text` ends outside every JSON string (an even count of unescaped quotes). */
-const outsideString = (text) => (text.replace(/\\./g, "").match(/"/g) ?? []).length % 2 === 0;
-
-test("the PROJECTS view wraps the exact call so it pastes: never clipped, never broken inside a JSON string, at 140, 80, 60 and 47 columns", async () => {
-  // a row's edit, a row-less project's add, and the longest project id there is (its scope string alone is 43 columns,
-  // the narrowest frame's whole inner width: the indent gives way rather than the string breaking)
-  const calls = [
-    ["p95 4g, 1 core", 'dispatch_limit_edit {"index":0,"memory":"5g"}'],
-    ["p95 1000m, 0.3 cores", 'dispatch_limit_add {"scope":"project:wide","memory":"1280m","cpus":0.5}'],
-    ["p95 1000m, 0.4 cores", 'dispatch_limit_add {"scope":"project:a-project-whose-id-is-32-chars-x","memory":"1280m","cpus":0.5}'],
-  ];
-  let wrapped = 0;
-  for (const width of [140, 80, 60, 47]) {
-    const { lines } = await projectsAt(width);
-    for (const l of lines) assert.ok(l.length <= width, `${width}: a row past the frame: ${l}`);
-    const inner = lines[0].trim().length - 4;
-    for (const [marker, call] of calls) {
-      const at = lines.findIndex((l) => l.includes(marker));
-      const body = lines.slice(at + 1).map(content);
-      const from = body.findIndex((l) => l.startsWith("dispatch_limit_"));
-      const to = body.findIndex((l, i) => i > from && /^join the lines before running it$|^\/srv\/|^github:/.test(l));
-      const frags = body.slice(from, to);
-      assert.equal(frags.join(""), call, `${width}: the call reads whole, joined with nothing between`);
-      for (const f of frags) assert.ok(f.length <= inner, `${width}: a call line past the frame: ${f}`);
-      // every break is outside a string: each line but the last ends outside one, on a piece boundary
-      for (const f of frags.slice(0, -1)) assert.match(f, /[,{:]$|^dispatch_limit_(?:edit|add)$/, `${width}: ${f}`);
-      // between a key and its value only where a whole key and value (with its comma) is wider than the frame
-      const widestField = Math.max(...call.slice(call.indexOf("{") + 1).split(",").map((x) => x.length + 1));
-      if (widestField <= inner) assert.deepEqual(frags.filter((f) => f.endsWith(":")), [], `${width}: a key split from its value with room for both`);
-      let seen = "";
-      for (const f of frags) {
-        seen += f;
-        assert.ok(outsideString(seen), `${width}: a break inside a JSON string after: ${f}`);
-      }
-      // a call on more than one line is followed by the note to join them, and only then
-      if (frags.length > 1) {
-        wrapped++;
-        assert.equal(body[to], "join the lines before running it", `${width}: the join note under ${call}`);
-      } else assert.notEqual(body[to], "join the lines before running it", `${width}: no note under a one-line call`);
-    }
-  }
-  assert.ok(wrapped >= 4, "the narrow frames wrap the calls");
-});
-
-test("callPieces breaks only outside a JSON string, after a colon only when asked; an escaped quote does not end a string", async () => {
-  const { callPieces } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-  assert.deepEqual(callPieces('dispatch_limit_edit {"index":0,"memory":"5g"}'), ["dispatch_limit_edit ", "{", '"index":0,', '"memory":"5g"}']);
-  assert.deepEqual(callPieces('x {"a":"b,c:{d","e":1}', true), ["x ", "{", '"a":', '"b,c:{d",', '"e":', "1}"]);
-  assert.deepEqual(callPieces('x {"a":"q\\",{","b":2}'), ["x ", "{", '"a":"q\\",{",', '"b":2}']);
-});
-
-test("the PROJECTS view says why a raise has no cap (none read, none holds the size, every budget off) and when a size is above the cap", async () => {
-  const limits = parseScopedLimits(JSON.stringify({ version: 3, limits: SNAP.scopedLimits.limits }), "sl.json");
-  const logsDir = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 })]);
-  const shopWith = async (hostBudgets) => {
-    const shop = readSizeSuggestions({ logsDir, projectIds: ["shop"], limits, hostBudgets, nowMs: NOW }).projects.shop;
-    const base = sizingInfo();
-    const out = (await projectsAt(140, { ...base, projects: { ...base.projects, shop } })).lines.map(content).join("\n");
-    // the verdict, its wrapped continuation lines joined back with the space they broke at
-    return out.match(/^4g, 2 CPUs · p95 4g, 1 core · suggest\n([^]*?)\ngithub:acme\/web$/m)?.[1].replace(/\n/g, " ");
-  };
-  assert.equal(await shopWith([]), `memory wants 6g (oom-killed, ${SIZING_NO_CAP_WORDS.unread}: no call)`);
-  assert.equal(await shopWith([{ memMiB: 16384, cpuCenti: 100 }]), `memory wants 6g (oom-killed, ${SIZING_NO_CAP_WORDS["none-holds"]}: no call)`);
-  assert.equal(await shopWith([{ memMiB: Infinity, cpuCenti: Infinity }]), `memory wants 6g (oom-killed, ${SIZING_NO_CAP_WORDS.off}: no call)`);
-  assert.deepEqual(Object.values(SIZING_NO_CAP_WORDS), ["no host budget read as a number", "no live host's budget holds this size", "every live host's budget is off"]);
-  // a host whose budget is below the size already set: the size is above what it offers, not at it
-  assert.equal(await shopWith([{ memMiB: 2048, cpuCenti: 800 }]), "memory stays (oom-killed, already above the most a live host offers)");
-  assert.equal(await shopWith([{ memMiB: 4096, cpuCenti: 800 }]), "memory stays (oom-killed, already the largest size a live host offers)");
-});
 
 test("readSizeSuggestions caps a raise at the project's hostShare of each live host's budget", () => {
   const logsDir = logsWith([rec({ reason: "oom-killed", peakMiB: 4096 })]);
@@ -247,31 +100,6 @@ test("readSizeSuggestions caps a raise at the project's hostShare of each live h
   const whole = parseScopedLimits(JSON.stringify({ version: 3, limits: [{ scope: "project:shop", memory: "4g" }] }), "sl.json");
   assert.equal(readSizeSuggestions({ logsDir, projectIds: ["shop"], limits: whole, hostBudgets: [{ memMiB: 10240, cpuCenti: 800 }], nowMs: NOW }).projects.shop.call, 'dispatch_limit_edit {"index":0,"memory":"6g"}');
 });
-
-test("the PROJECTS view says when the sizes could not be read, and draws no size line then", async () => {
-  const deps = { fetchSnapshot: async () => SNAP, pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => NOW, projectsInfo: () => ({ byProject: [], sizing: { unreachable: "the scoped-limits file does not load" } }) };
-  const comp = makeDashboard({ paths: {}, done() {}, tui: fakeTui(), intervalMs: 100000, deps });
-  await flush();
-  comp.handleInput("j");
-  const out = stripAnsi(comp.render(140).join("\n"));
-  await comp.dispose();
-  assert.match(out, /sizes unreadable \(the scoped-limits file does not load\)/);
-  assert.doesNotMatch(out, /4g, 2 CPUs/);
-});
-
-// ── the dispatch_limit_edit preview ───────────────────────────────────────────────────────────────────
-
-
-
-function toolCtx() {
-  const shown = [];
-  return { ctx: { hasUI: true, ui: { confirm: async (title, message) => (shown.push({ title, message }), false) } }, shown };
-}
-
-
-
-
-
 // ── the insights page ─────────────────────────────────────────────────────────────────────────────────
 
 test("the insights page restates the worker's reasons and spellings, held equal here", () => {
@@ -410,9 +238,6 @@ test("the panel withholds the call when every live host refuses the pair, even i
   assert.equal(one.words.refusal, "its 4 CPUs are above its hostShare (40%) of every live host's budget");
   // the PROJECTS view says so in the error tone, though neither suggested dimension is above any cap
   assert.deepEqual([one.memory.overBudget, one.cpu.overBudget], [false, false]);
-  const base = sizingInfo();
-  const view = (await projectsAt(140, { ...base, projects: { ...base.projects, shop: one } })).lines.map(content).join("\n");
-  assert.match(view, /^4g, 4 CPUs · p95 500m, 3\.9 cores · suggest\nmemory 768m \(oversized\)\nno live host admits it \(its 4 CPUs are above its hostShare\n\(40%\) of every live host's budget\): a job of it would wait\nfor a host that never comes\ngithub:acme\/web$/m);
   // a second host whose share holds 4 CPUs admits it, and so does a fleet with no integer budget: the call is offered
   for (const hosts of [[{ memMiB: 16384, cpuCenti: 800 }, { memMiB: 16384, cpuCenti: 1600 }], [{ memMiB: Infinity, cpuCenti: Infinity }], [], null]) {
     const s = judged(hosts);
@@ -492,13 +317,4 @@ test("the page's not-enough-runs words are the worker's (#599)", async () => {
     assert.equal(sizingNotEnoughText({ current, samples, smaller }, sizeMemText), notEnoughRunsText({ current, evidence: { samples, smaller } }, formatMemory));
   }
   assert.equal(sizingNotEnoughText({ current: 100, samples: 0, smaller: 2 }, (v) => `${sizeCpuText(v)} CPU${v === 100 ? "" : "s"}`), notEnoughRunsText({ current: 100, evidence: { samples: 0, smaller: 2 } }, cpusText));
-});
-
-test("the PROJECTS view says fits only when both dimensions fit; one still short of runs says so beside the other (#599)", async () => {
-  const sizing = sizingInfo();
-  const ops = sizing.projects.ops;
-  sizing.projects.ops = { ...ops, memory: { ...ops.memory, reason: "fits", suggested: null, held: null }, cpu: { ...ops.cpu, reason: "not-enough-runs", suggested: null, held: null, fact: null, evidence: { ...ops.cpu.evidence, samples: 3, smaller: 0 } }, call: null };
-  const out = (await projectsAt(140, sizing)).lines.map(content).join("\n");
-  assert.match(out, /^ops .*\n4g, 2 CPUs · p95 3000m, 1\.5 cores(?: · |\n)memory fits, CPUs not enough runs at 2 CPUs \(3\)$/m);
-  assert.doesNotMatch(out, /^ops .*\n.* · fits$/m, "never a bare fits while CPUs lack runs");
 });

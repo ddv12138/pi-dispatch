@@ -4251,7 +4251,7 @@ export async function collectChecks(shellVars, seams) {
 				ok: false,
 				warn: true,
 				label: `${dead.length} scoped limit(s) name a folder no trigger runs in (${dead.join(", ")}) -- no trigger runs there, so unless a CLI or local job does, the cap guards nothing; scopes match exactly (no globs, folders by resolved ABSOLUTE path), so check the spelling against triggers.json run.folder or delete the entry`,
-				fix: `edit ${scopedLimitFacts.path} by hand or via dispatch_limit_edit/_delete -- repo-shaped scopes are never flagged here, because a webhook job's repo comes from the delivery, which triggers.json cannot enumerate`,
+				fix: `edit ${scopedLimitFacts.path} on the console's scoped-limits editor or by hand -- repo-shaped scopes are never flagged here, because a webhook job's repo comes from the delivery, which triggers.json cannot enumerate`,
 			});
 		}
 	}
@@ -9155,8 +9155,8 @@ export function fleetBudgetChecks(rows, { limits = [], env = {} } = {}) {
 /**
  * One line per project in projects.json with its job size and what its recent runs suggest (issue #596, phase 3,
  * DES-SIZE-SUGGESTIONS), from the one pure `suggestSize` the panel and the insights page also call: "fits", "not enough
- * runs", or a suggestion naming the exact `dispatch_limit_edit` call (`dispatch_limit_add` for a project with no row)
- * that applies it. A RAISE is a warning with the call as its fix; a lowering is a fact line carrying the call.
+ * runs", or a suggestion naming the exact call that applies it (`dispatch_limit_edit`, `dispatch_limit_add` for a
+ * project with no row) and the console surface to apply it on. A RAISE is a warning with the call as its fix; a lowering is a fact line carrying the call.
  *
  * Every raise is CAPPED at what this host offers the project (`hostCap`: its budget per dimension, the project's
  * `hostShare` of it where the row has one, or with the budget off or unknown the runtime's memory and CPU count, `total`): where the cap binds the line says the project's runs need more than
@@ -9213,7 +9213,7 @@ export function sizeSuggestionChecks({ projects = [], limits = [], env = {}, rec
 		const suggests = parts.length > 0 ? `its runs in the last ${SUGGEST_WINDOW_DAYS} days suggest ${parts.join(" and ")}` : "";
 		const label = `project ${id}: size ${size}; ${[heldText ? `in the last ${SUGGEST_WINDOW_DAYS} days ${heldText}` : "", suggests].filter(Boolean).join("; ")}${over.length > 0 ? `, but ${over.join(" and ")}, so a job of it would never fit this host` : ""}${note}${factTail}`;
 		// a size that would never fit is never offered as a call: applying it would turn a refusal into the same refusal.
-		const apply = call === null ? "" : over.length > 0 ? "" : `apply it in the admin panel with ${call} (an operator confirms it; nothing applies a size by itself)`;
+		const apply = call === null ? "" : over.length > 0 ? "" : `apply it on the console's project page with Preview this size: ${call} (an operator confirms it; nothing applies a size by itself)`;
 		const never = over.length > 0 ? "no call is offered: a job of that size would never fit this host" : "";
 		if (held) {
 			const above = Number.isSafeInteger(s.memory.cap) && current.memMiB > s.memory.cap;

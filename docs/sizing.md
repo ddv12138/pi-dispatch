@@ -58,12 +58,10 @@ Where to see them:
 - **The run record** itself, `<PI_LOGS_DIR>/<jobId>.json`.
 - **The insights page** (the console's `/insights`): its job sizes section draws each project's memory peaks over the last
   30 days against its size line, with every `oom-killed` run in red ([insights](insights.md#the-job-sizes-section)).
-- **The panel's PROJECTS view** (`j` in `/dispatch`): each project's size and the p95 of its runs' memory peaks and
-  cores used (the p95 is the value 95 of every 100 runs stay at or below, so one odd run does not move it).
 - **`pi-dispatch doctor`**: one line per project with its size and what its runs suggest.
 
 A run record written by a newer pi-dispatch (issue #761) counts toward no suggestion, since its numbers may mean
-something else in that release. Doctor and the panel's PROJECTS view say how many they left out ("2 records from a newer
+something else in that release. Doctor says how many it left out ("2 records from a newer
 pi-dispatch not read"); the insights page's job sizes section does not say so yet.
 
 Only runs that carry both `size` and `resources` count, which means runs of an upgraded worker with an upgraded job
@@ -100,9 +98,9 @@ A size lives on a project's row in the scoped-limits file, so first group the re
 - **`/dev/shm`** is half the job's memory, at most `1g`. Nothing sets it separately, and what a job writes there
   counts toward its memory.
 - **Processes** stay at 512 per job whatever the size.
-- **A size needs `"version": 3`,** and only a `project:<id>` row may carry one. The tools (`dispatch_limit_add`,
-  `dispatch_limit_edit`) write the version for you, behind your confirm. The panel's limit dialogs (`m`) keep a row's
-  size as it is and cannot set one.
+- **A size needs `"version": 3`,** and only a `project:<id>` row may carry one. The console's limit editor writes
+  the version for you, behind your confirm, and keeps a row's
+  size as it is unless you change it.
 - **Upgrade and restart every worker before you write a size** ([the order](upgrading.md#the-order)). An older
   worker refuses a version 3 file when it starts, and one already running keeps its last good file, so neither the
   size nor any later edit applies on it.
@@ -127,7 +125,7 @@ in memory and in CPU, set by four `.env` settings ([the full table](multi-host.m
 - **A value** (`64g`, `49152m`, `12`, `3.5`) is the budget itself: no reserve is taken from it. A value below one
   default job stops the worker at boot.
 - **`off`** puts no limit on that resource. Only `PI_CONCURRENCY` then bounds it.
-- The four budget settings are read from `.env` only, never from the panel's settings, and only when the worker
+- The four budget settings are read from `.env` only, never from the settings overlay, and only when the worker
   starts, so a budget never moves under running jobs. Restart the worker after you change one.
 
 To turn the budget off, so that only `PI_CONCURRENCY` bounds the jobs, put these lines in `.env` and restart the
@@ -255,13 +253,12 @@ venue](podman.md#the-cpu-reserve-on-this-venue).
 
 pi-dispatch suggests a size for each project from its measured runs of the last 30 days (the newest 50 at most).
 It reads the run records of this machine only (`PI_LOGS_DIR`), so on a fleet each machine suggests from its own runs
-unless the machines share that directory. The same runs and the same rules show in four places:
+unless the machines share that directory. The same runs and the same rules show in three places:
 
 - **`pi-dispatch doctor`**: one line per project, with the exact call that applies it.
-- **The panel's PROJECTS view** (`j`): the size, the p95 peaks, the suggestion and the call.
+- **The console's project page**: the measured size chart, the peaks against the size line, the suggestion and
+  the call.
 - **The insights page**: the suggestion above each project's chart of peaks against its size.
-- **`dispatch_limit_edit`**: when you change a project row's `memory` or `cpus`, its confirm shows the project's
-  peaks and what they suggest.
 
 How to read one:
 
@@ -280,24 +277,22 @@ How to read one:
 - **A call is offered exactly when the suggested size could ever start on this host.** Where it could not, the line
   names what does not fit and offers no call.
 - **Nothing is applied automatically.** The numbers come from inside the job, so a job could make them up. You apply
-  a suggestion with the call it names, `dispatch_limit_edit` (or `dispatch_limit_add` for a project without a row),
-  behind your confirm.
+  a suggestion yourself, behind a confirm; nothing applies a size by itself.
 
-**How to apply a call.** Open pi with the admin extension (the one that gives you `/dispatch`) and ask it to run the
-call, for example "run dispatch_limit_edit {"index":1,"memory":"12g"}". It shows you the row before and after, with
-the project's peaks, and asks you to confirm; nothing is written until you do, and it refuses where nobody can
-confirm. The panel's limit dialogs (`m` in `/dispatch`) cannot do this: they edit a row's counts and keep its size.
+**How to apply a call.** The project page's Job size card shows the exact call the suggestion needs and offers
+**Preview this size**, which changes the project's row, or adds one for a project without a row, through the
+existing confirm: it shows you the row before and after, with
+the project's peaks; nothing is written until you confirm, and it refuses where nobody can
+confirm. An edit that changes only a row's counts keeps its size, so a size suggestion needs the call.
 
 The rules in full, with their rounding steps, are in [choosing a size from the
 runs](scoped-limits.md#choosing-a-size-from-the-runs).
 
 **How busy each host is** is a separate report, from the same run records plus the jobs running now: busy and idle
-time, jobs at once, the memory and CPU promised against the budget and the CPU used. It shows in five places:
+time, jobs at once, the memory and CPU promised against the budget and the CPU used. It shows in three places:
 
 - **`pi-dispatch capacity`** (`--since 24h|7d|30d`, `--host`, `--json`).
 - **`pi-dispatch doctor`**: one line per host for the last 7 days, never a warning.
-- **`dispatch_capacity`**: the same report to a model in pi.
-- **The panel's HOSTS view** (`u`): each host's slots, budget and running jobs now, with its last 7 days.
 - **The insights page**: a chart per host of the jobs at once over the page's window, with the same numbers
   ([the capacity section](insights.md#the-capacity-section)).
 
@@ -402,7 +397,7 @@ peaked well below. Doctor's line for it:
 
 ```text
 ⚠ project medium: size 8g, 2 CPUs; its runs in the last 30 days suggest memory 12g (oom-killed: 1 run ended oom-killed (the largest size killed 8g))
-    → apply it in the admin panel with dispatch_limit_edit {"index":1,"memory":"12g"} (an operator confirms it; nothing applies a size by itself)
+    → apply it on the console's project page with Preview this size: dispatch_limit_edit {"index":1,"memory":"12g"} (an operator confirms it; nothing applies a size by itself)
 ```
 
 The index is the row's place in the file, counted from 0. Nothing changes until you run that call and confirm it,

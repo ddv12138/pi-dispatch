@@ -1,17 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { NAMED_CHECK_IDS } from "@edgehero/pi-dispatch/doctor-results";
 import { DOCTOR_FILE_CHECKS, FIRST_RUN_COMMANDS, FIRST_RUN_COMMAND_HINTS, FIRST_RUN_STATES, FIRST_RUN_STEPS, doctorQuote, doctorStale, firstRunCommandHint, firstRunState, stepSentenceText } from "../src/doctor-view.mjs";
 import { BEAT_FRESH_MS, configPauseWindows, configSettings, configTriggers, fleetDoctor } from "../src/console/panels.mjs";
-import { stripAnsi, visibleLen } from "../src/style.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
 
 /**
- * The published doctor results on both surfaces (issue #712, `INT-DOCTOR-RESULTS-KEY`): the console's Doctor panel and
- * its "does not load" sentences, and the `/dispatch` panel's HOSTS view. Canned snapshots at a fixed instant; nothing
- * here reads a Valkey or the wall clock.
+ * The console's published doctor results (issue #712, `INT-DOCTOR-RESULTS-KEY`): the Doctor panel and its
+ * "does not load" sentences, plus the first run's checklist. Canned snapshots at a fixed instant; nothing
+ * here reads a Valkey or the wall clock. The `/dispatch` panel's HOSTS view, which these functions also fed,
+ * was retired with the panel (58ef2369).
  */
 
 const AT = Date.UTC(2026, 9, 21, 9, 0, 0);
@@ -134,61 +132,6 @@ test("a file that does not load quotes the newest published check about it, nami
   assert.match(render(configSettings, settingsBroken), /The settings overlay does not load\. pi-dispatch doctor on mini1 \(its own copy of the file, 3h 0m ago\) says: settings overlay &lt;path&gt; is invalid \(duplicate key maxTurns\)/);
   assert.equal(doctorQuote(snapshot(), "settings.overlay"), null, "an id nobody published quotes nothing");
   assert.equal(doctorQuote(snapshot({ hosts: [{ ...ROWS[0], checks: [{ id: "settings.overlay", level: "ok" }] }] }), "settings.overlay"), null, "an ok result is not a reason");
-});
-
-// ---- the /dispatch panel's HOSTS view ----------------------------------------------------------------------------------
-
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-const SGR_THEME = { fg: (_c, t) => `\x1b[38;5;42m${t}\x1b[39m`, bold: (t) => `\x1b[1m${t}\x1b[22m`, bg: (_c, t) => t };
-
-async function openHosts(snap, theme = undefined) {
-  const deps = { fetchSnapshot: async () => snap, pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => AT, capacityInfo: async () => ({ unreachable: "not in this test" }) };
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, theme, deps });
-  await flush();
-  comp.handleInput("u");
-  await flush();
-  return comp;
-}
-const body = (comp, w) => comp.render(w).map((l) => stripAnsi(l).trim().replace(/^│ ?/, "").replace(/ *│$/, "").trim()).filter(Boolean).join(" ");
-
-test("the HOSTS view: each host's doctor age and counts, its problems with fixes, stale, silent and doctor-only hosts", async () => {
-  const comp = await openHosts({ ...snapshot(), hostBudgets: [{ name: "mini1", staleMs: 2000, concurrency: "2" }, { name: "quiet", staleMs: 2000, concurrency: "1" }] });
-  const text = body(comp, 140);
-  assert.match(text, /doctor 3h ago, run by the worker: 1 failing, 1 warning, 40 passing/);
-  assert.match(text, /✗ triggers file is refused at load: <path>: <script>alert\(1\)<\/script>/);
-  assert.match(text, /→ fix <path> so it loads/);
-  assert.match(text, /⚠ another account also listens on <path> → stop it/);
-  assert.ok(text.indexOf("✗ triggers file") < text.indexOf("⚠ another account"), "failing first");
-  assert.match(text, /quiet .*doctor: nothing published by this host yet/);
-  assert.match(text, /build3 {2}no live row doctor 3d ago, run by hand \(uid 0\): 0 failing, 0 warnings, 30 passing · stale \(runs every 24h\) · replaced the worker's run/, "a host with a result and no live row is still drawn");
-  assert.match(text, /odd {2}no live row doctor: its published result cannot be read/);
-  await comp.dispose();
-});
-
-test("the HOSTS view: an unreadable doctor read is one line, and a host never reads as unchecked because of it", async () => {
-  const comp = await openHosts({ ...snapshot({ unreachable: "timeout" }) });
-  const text = body(comp, 140);
-  assert.match(text, /doctor results unreadable \(timeout\)/);
-  assert.doesNotMatch(text, /nothing published by this host yet/);
-  await comp.dispose();
-});
-
-test("the HOSTS view's doctor lines fit at 140, 80, 60 and 47, coloured; a hostile label reaches the terminal as text", async () => {
-  const long = { ...ROWS[0], name: `a${"b".repeat(70)}`, checks: [{ id: "env.1", level: "fail", label: `${"word ".repeat(60)}${"x".repeat(200)}`, fix: "y".repeat(150) }, { id: "env.2", level: "warn", label: "w2" }, { id: "env.3", level: "warn", label: "w3" }, ...ROWS[0].checks] };
-  const comp = await openHosts({ ...snapshot({ hosts: [long, ...ROWS], more: 0 }) }, SGR_THEME);
-  for (const w of [140, 80, 60, 47]) {
-    const lines = comp.render(w);
-    for (const l of lines) assert.ok(visibleLen(l) <= w, `width ${w}: ${JSON.stringify(stripAnsi(l))} is ${visibleLen(l)} columns`);
-    const plain = lines.map(stripAnsi).join("\n");
-    assert.doesNotMatch(plain, /[\x00-\x09\x0b-\x1f\x7f-\x9f]/, `width ${w}: no control byte survives`);
-    assert.doesNotMatch(plain, /‮/, `width ${w}: the override does not reach the terminal`);
-  }
-  assert.match(body(comp, 140), /\+1 more: the console's Fleet page lists them/, "past four, the rest are counted");
-  await comp.dispose();
 });
 
 // ---- the read ----------------------------------------------------------------------------------------------------------
@@ -414,13 +357,10 @@ test("first run's commands are the CLIs' own: each is in its usage, and setup gi
   assert.match(usage, /\n {2}pi-dispatch doctor \[--json\] \[--fix\]/);
   assert.match(usage, /pi-dispatch setup github[^]*\(--webhook-url <URL> \| --no-webhook\)/);
   assert.deepEqual(FIRST_RUN_COMMANDS.github.slice(0, 4), ["pi-dispatch", "setup", "github", "--webhook-url"]);
-  // The /dispatch panel is retired (58ef2369): the worker CLI no longer advertises it and its entry is gone
-  // from the package. Every console panel and route was kept deliberately, so the "Do it from pi" card still
-  // offers the guided setup to a deployment whose host still runs the previous release's extension -- the
-  // command survives, pinned to the card that renders it rather than to a file that no longer exists.
+  // The /dispatch panel is retired (58ef2369), its guided-setup card with it: the worker CLI no longer
+  // advertises `/dispatch setup`, and the checklist offers the CLIs' own commands alone -- a deployment whose host
+  // still runs the previous release's extension runs the guided setup from that copy, not from this one.
   assert.doesNotMatch(usage, /\/dispatch setup/);
-  const overview = readFileSync(new URL("../src/console/panels/overview.mjs", import.meta.url), "utf8");
-  assert.ok(overview.includes("[...FIRST_RUN_COMMANDS.pi]"), "the pi card still offers the guided setup");
-  assert.deepEqual(FIRST_RUN_COMMANDS.pi, ["/dispatch", "setup"]);
+  assert.equal(Object.hasOwn(FIRST_RUN_COMMANDS, "pi"), false, "no command of the retired panel's surface");
   for (const argv of Object.values(FIRST_RUN_COMMANDS)) assert.ok(Object.isFrozen(argv) && argv.every((a) => typeof a === "string"));
 });

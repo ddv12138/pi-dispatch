@@ -590,7 +590,7 @@ const AUDIT_CSS = `
  * The overview's layout between a phone and the cards' 1440 px, in CSS pixels of viewport width.
  *
  * - `stackMax`: up to here the overview's two-column rows (`.cols`: the timeline and the caps beside the waitlists and
- *   the hosts, and on a first run the steps beside "Do it from pi") are one column, and the four KPI cards
+ *   the hosts, and on a first run the checklist beside its empty-panels preview) are one column, and the four KPI cards
  *   (`.cards-4`) stand two to a row. bundle.css keeps both from 761 px, as the cards draw them at 1440, and its side
  *   column is `--side-w` (470 px) wide. Measured over the cards' own sample: at 1024 px a KPI card had 192 px inside,
  *   and Needs you's rows (an icon, a project, an id and an action: 188 to 205 px) ran past it, while the timeline's
@@ -602,7 +602,7 @@ export const OVERVIEW_LAYOUT = Object.freeze({ stackMax: 1199 });
 /**
  * The overview (the OverviewScreen, OverviewAllClear, OverviewPhone, SetupScreen and TimelineAndWaitlists cards):
  *
- * - the first run's checklist (`p-setup`, `p-setup-pi`, `p-setup-empty`), the SetupScreen card's own rules as it
+ * - the first run's checklist (`p-setup`, `p-setup-empty`), the SetupScreen card's own rules as it
  *   writes them, its `su-` names kept: the progress inset with its big count and segmented bar, the steps (a done step
  *   outlined, the others on the inset ground, each a tile beside its number, title, word, sentence and commands), the
  *   one primary's row, and the overview's empty panels as collapsed lines; on a phone a step's tile stands over its text;

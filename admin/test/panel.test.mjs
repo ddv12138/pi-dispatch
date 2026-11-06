@@ -9,7 +9,6 @@ import {
   clip,
   pad,
   box,
-  meter,
   sparkline,
   fmtTokens,
   fmtAmount,
@@ -61,29 +60,6 @@ test("box degrades on a tiny width without emitting over-width lines", () => {
   }
 });
 
-test("meter renders a bar glyph and reserved/cap", () => {
-  const out = meter(3, 10, 24);
-  assert.match(out, new RegExp(GLYPHS.full), "a filled block glyph appears");
-  assert.match(out, /3\/10/);
-});
-
-test("meter appends a textual state marker for soft-hold and over (no colour in a monochrome panel)", () => {
-  assert.match(meter(9, 10, 24, "soft-hold"), /9\/10 soft-hold/);
-  assert.match(meter(11, 10, 24, "over"), /11\/10 over/);
-  // "ok" (the default) adds nothing, so a plain call is unchanged.
-  assert.doesNotMatch(meter(3, 10, 24, "ok"), /soft-hold|over/);
-  assert.doesNotMatch(meter(3, 10, 24), /soft-hold|over/);
-});
-
-test("meter renders (worker env cap) with no bar glyph when cap is not a positive integer, saying where the cap lives (#507)", () => {
-  const out = meter(5, null, 24);
-  assert.equal(out, "5 / ? (worker env cap)");
-  assert.equal(meter(500, null, 24), "500 / ? (worker env cap)", "three digits still fit the panel's 24 columns");
-  assert.doesNotMatch(out, new RegExp(GLYPHS.full), "no bar when the cap is unknown");
-  assert.doesNotMatch(out, new RegExp(GLYPHS.empty), "no bar when the cap is unknown");
-  assert.doesNotMatch(meter(5, 0, 24), /\[/, "cap of 0 is not a positive integer");
-});
-
 test("clip truncates long input to width and ends with the ellipsis glyph", () => {
   const out = clip("abcdefghij", 5);
   assert.equal(out.length, 5);
@@ -120,21 +96,18 @@ test("GLYPHS and ASCII stay in key parity; ramp and gap are equal-length pairs",
   assert.equal(GLYPHS.gap.length, 1, "sparkline cells are single columns");
 });
 
-test("setGlyphs(true) swaps box, meter, and clip to ASCII; setGlyphs(false) restores the default", () => {
+test("setGlyphs(true) swaps box and clip to ASCII; setGlyphs(false) restores the default", () => {
   try {
     setGlyphs(true);
     const out = box({ title: "S", sections: [{ lines: ["x"] }], width: 20 });
     assert.match(out[0], /^\+-/, "ASCII corners");
     assert.doesNotMatch(out.join("\n"), new RegExp(GLYPHS.v), "no box-drawing glyph leaks through");
-    assert.match(meter(3, 10, 24), /#/);
-    assert.doesNotMatch(meter(3, 10, 24), new RegExp(GLYPHS.full));
     const clipped = clip("abcdefghij", 5);
     assert.equal(clipped.length, 5, "the 3-char ASCII ellipsis still lands on exactly width");
     assert.ok(clipped.endsWith(ASCII.ellipsis));
   } finally {
     setGlyphs(false);
   }
-  assert.match(meter(3, 10, 24), new RegExp(GLYPHS.full), "the switch restores cleanly");
 });
 
 test("sparkline repeats cells to fill width and never exceeds it", () => {

@@ -1,28 +1,17 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 import { box, clip, clipData, columnsOf, hasControls, scrubControls } from "../src/panel.mjs";
 import { frame, makeStyler, PLAIN_THEME, stripAnsi, visibleLen } from "../src/style.mjs";
-import { renderRuns, renderTriggers } from "../src/render.mjs";
 import { loadVisibleWidth as loadPinnedVisibleWidth } from "./helpers/renderer.mjs";
-
-/** The TypeScript dashboard, through the loader the other suites use: `dashboard.ts` is not plain ESM. */
-async function tsLoader() {
-	const { createRequire } = await import("node:module");
-	const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-	const { createJiti } = piRequire("jiti");
-	return createJiti(import.meta.url);
-}
 
 // ONE CLASS, ONE OPERATION, and this file is where that claim is held (issue #382, item 1).
 //
 // Five copies of `[\u0000-\u001f\u007f-\u009f]` lived across four modules and did not agree about what to
-// DO with a match: `cell` (render.mjs) and `cellOf` (dashboard.ts) SUBSTITUTE a space so a framed pane and a
-// plain one clip identically -- and `cell`'s docblock says deleting instead "would make the panes clip
-// differently" -- while the unframed degrade composed with `clip`, which DELETES. So it did. Two mutants
-// flipping `cell` and `cellOf` to deletion were killed by the suite; nothing noticed a third renderer
-// already deleting.
+// DO with a match: `cell` (render.mjs, its framed twin now retired with the panel) SUBSTITUTE a space so a
+// framed pane and a plain one clip identically -- and `cell`'s docblock says deleting instead "would make
+// the panes clip differently" -- while the unframed degrade composed with `clip`, which DELETES. So it
+// did. Two mutants flipping `cell` and its framed twin to deletion were killed by the suite; nothing
+// noticed a third renderer already deleting.
 
 /**
  * The pinned renderer's own width, as the oracle for what "draws as nothing" means. Loaded the way
@@ -169,29 +158,6 @@ test("clipData substitutes and then clips, so width is what the operator sees", 
 	assert.equal(clipData("abcdefghij", 5), "abcd…", "and it still clips");
 });
 
-test("the plain `renderRuns` pane substitutes a record's bytes rather than deleting them", () => {
-	// ONE of the three renderers, named as such: the framed and degraded twins of this record are driven in
-	// dashboard.test.mjs, where the dashboard lives. The defect was that the same record rendered three
-	// ways -- framed "a b . c d", degraded "ab . cd", plain "a b     c d".
-	const run = { jobId: "a\u0001b", target: "c\u0001d", flow: "f", outcome: "done", turns: 1, tokens: { total: 1 } };
-	const plain = renderRuns([run]);
-	assert.match(plain, /a b/, "the plain pane substitutes");
-	assert.match(plain, /c d/);
-	assert.doesNotMatch(plain, /ab/, "and never deletes");
-	for (const line of plain.split("\n")) assert.doesNotMatch(line, /[\u0000-\u001f\u007f-\u009f]/, "no control byte survives any renderer");
-});
-
-test("a scheduler key read back from the queue goes through the belt too", () => {
-	// Defence in depth, named as such: the worker restricts a cron `on.id` to `[A-Za-z0-9._-]+` before the
-	// upsert, so a key arriving with a control byte came from a writer that is not the worker (issue #382,
-	// item 2). The pane it lands in is a "config" pane, which is exactly why the carve-out had to be drawn
-	// by PROVENANCE rather than by pane.
-	const out = renderTriggers({ triggers: [], schedulers: [{ key: "cron\u0001evil", next: 0 }] });
-	assert.match(out, /cron evil/, "substituted, not deleted and not raw");
-	// PER LINE, because the joined output is multi-line and `\n` is itself in the class this checks for.
-	for (const l of out.split("\n")) assert.doesNotMatch(l, /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/, "no control byte reaches a line");
-});
-
 test("styler.cell measures what it will print, and never cuts its own escape", () => {
 	// It sliced the RAW string, so pre-coloured text spent its budget on SGR bytes: a 16-column cell came
 	// out 6 columns wide, and at the widths inside MIN_WIDTH the slice landed mid-sequence and emitted a
@@ -271,13 +237,6 @@ test("every migrated cell asks the theme for its colour instead of pre-colouring
 	const styler = makeStyler({ ...PLAIN_THEME, fg: (c, t) => { asked.push(c); return t; } });
 	styler.cell("text", 10, { color: "dim" });
 	assert.deepEqual(asked, ["dim"], "the cell asks the theme for the colour, AFTER laying the text out");
-
-	// And the five migrated sites, by SHAPE. Stated as the limit it is: this reads the source, so it catches
-	// the reversion it names and nothing subtler. The behavioural half cannot see it -- a reverted site is
-	// still exactly `width` columns, because `cell` strips the colour it was handed, so every width
-	// assertion in this file passes while the pane quietly loses its dim.
-	const src = readFileSync(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)), "utf8");
-	assert.equal(/styler\.cell\(\s*styler\.fg\(/.test(src), false, "no site hands `cell` pre-coloured text");
 });
 
 test("a cut never leaves half a surrogate pair behind", () => {
@@ -423,28 +382,6 @@ test("two identifiers that draw alike cannot stay distinct through the gate (#40
 	assert.notEqual(scrubControls(plain), scrubControls(hidden), "and after the gate they no longer look alike");
 });
 
-test("the tail search finds the line the pane draws (#402)", async () => {
-	// A REGRESSION THIS CHANGE INTRODUCED AND A REVIEW PASS MEASURED. The pane substitutes the class, the
-	// search box DELETES it from what the operator types, and the haystack used to be the raw bytes. Once
-	// the class held the invisible characters that real log output carries, a line drawn as `repo -prod`
-	// could be found by NO query: what is on screen missed the raw byte, and the original missed because
-	// the box had dropped it. Both sides are scrubbed now, so what is read is what can be searched.
-	const { makeLineInput } = await import("../src/panel.mjs");
-	const jiti = await tsLoader();
-	const { tailMatches } = await jiti.import("../src/dashboard.ts");
-	const lines = ["pulled:acme/repo​-prod:ok", "unrelated line", "pulled:acme/other:ok"];
-	// What the operator sees, typed back in. The editor drops the invisible byte from the query, exactly as
-	// it does for anything an operator pastes.
-	const typed = makeLineInput("");
-	typed.insert("repo -prod");
-	assert.deepEqual(tailMatches(lines, typed.value()), [0], "typing what is drawn finds it");
-	// And the original bytes, pasted, still find it: the haystack is scrubbed, so both spellings land.
-	const pasted = makeLineInput("");
-	pasted.insert("repo​-prod");
-	assert.deepEqual(tailMatches(lines, pasted.value()), [0], "pasting the original finds it too");
-	assert.deepEqual(tailMatches(lines, "nothing here"), [], "and a miss is still a miss");
-});
-
 test("a flag needs at least one tag, and the search window is what keeps this linear (#402)", () => {
 	// TWO GUARDS THE SUITE DID NOT HOLD, both found by mutating them rather than by reading.
 	//
@@ -461,96 +398,4 @@ test("a flag needs at least one tag, and the search window is what keeps this li
 	assert.equal([...longest].length, 8, "the longest valid sequence is eight code points");
 	assert.equal(scrubControls(longest), longest, "and it is recognised whole");
 	assert.equal(scrubControls(`x${longest}y`), `x${longest}y`, "including when it is not at the start");
-});
-
-test("a plan's reason in the ALLOCATION view goes through the gate: a bidi override shows as text, an escape reaches no terminal (#504)", async () => {
-	// Reasons are agent text (REQ-DELEGATED-ALLOCATION). The worker's parser refuses control characters in them, but the
-	// panel reads `alloc:plan` from a Valkey any writer could have set, so the view holds the gate itself.
-	const jiti = await tsLoader();
-	const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-	const M = 1_000_000;
-	const nasty = "launch\u202Ereversed \u001b[2J\u001b]52;c;Zm9v\u0007 hidden​join⁦iso";
-	const info = {
-		envelope: { window: "week", totalMicros: 100 * M, floors: { shop: 10 * M, platform: 10 * M, _other: 0 }, defaultWeights: { shop: 1, platform: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } },
-		digest: "d1d1d1d1d1d1d1d1",
-		alloc: { state: { planId: "3f9a0c1d2e4b5a67", writer: "operator-session", appliedAt: "2026-10-05T12:00:00.000Z", envelopeDigest: "d1d1d1d1d1d1d1d1", weights: { shop: 3, platform: 1, _other: 0 }, allocations: { shop: 70 * M, platform: 30 * M, _other: 0 }, unallocated: 0, reasons: { shop: nasty, platform: "hidden\u200Bjoin\u2066iso" } }, log: [{ at: "2026-10-05T12:00:00.000Z", writer: "op\u202Eer", outcome: "applied\u001b[31m", planId: "3f9a0c1d2e4b5a67\u202E", weights: { shop: 3 } }] },
-	};
-	const theme = { fg: (_c, t) => `\x1b[38;5;42m${t}\x1b[39m`, bold: (t) => `\x1b[1m${t}\x1b[22m`, bg: (_c, t) => t };
-	for (const t of [undefined, theme]) {
-		const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, theme: t, deps: { fetchSnapshot: async () => ({ queue: { counts: {} } }), pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => 0, allocationInfo: async () => info } });
-		await new Promise((r) => setImmediate(r));
-		comp.handleInput("b");
-		await new Promise((r) => setImmediate(r));
-		for (const width of [100, 4]) {
-			const lines = comp.render(width);
-			for (const line of lines) assert.ok(!hasControls(stripAnsi(line)), `width ${width}: a line carries a control byte: ${JSON.stringify(line)}`);
-			const text = lines.map(stripAnsi).join("\n");
-			if (width === 100) {
-				assert.match(text, /launch\\u\{202E\}reversed/, "the bidi override is VISIBLE text, so it reorders nothing");
-				assert.match(text, /hidden\\u\{200B\}join\\u\{2066\}iso/, "an invisible joiner and an isolate show too");
-				assert.match(text, /op\\u\{202E\}er/, "a history cell's bidi override is escaped too, not only the reasons");
-			}
-		}
-		await comp.dispose();
-	}
-});
-
-test("`/dispatch priorities` text carries no reason at all, whatever the split holds (#504)", async () => {
-	const { renderAllocations } = await import("../src/render.mjs");
-	const M = 1_000_000;
-	const text = renderAllocations({
-		envelope: { window: "week", totalMicros: 100 * M, floors: { shop: 10 * M }, defaultWeights: { shop: 1 }, delegation: { enabled: false } },
-		digest: "d",
-		alloc: { state: { planId: "p\u001b[2J", writer: "operator-session", appliedAt: "x", envelopeDigest: "d", weights: { shop: 1 }, allocations: { shop: 100 * M }, unallocated: 0, reasons: { shop: "secret" } }, log: [{ at: "t", writer: "w", outcome: "refused", reason: "plan-too-soon\u202E" }] },
-	});
-	assert.ok(!text.includes("secret"), "a reason is never rendered here");
-	assert.ok(!hasControls(text.replace(/\n/g, " ")), "and every cell is gated");
-});
-
-test("the #507 cells go through the gate: a run's plan and dollars, an allocation row's host, the priorities text (#507)", async () => {
-	const jiti = await tsLoader();
-	const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-	const flush = () => new Promise((r) => setImmediate(r));
-	const deps = (over) => ({ fetchSnapshot: async () => ({ queue: { counts: {} } }), pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => 0, ...over });
-	// A record file is read back from disk, so its plan and dollars are held to the gate like every record string.
-	const run = { jobId: "j1", target: "o/r#5", flow: "fix", outcome: "completed", turns: 1, plan: { outcome: "refused\u001b[2J", reason: "plan-stale\u001b[31m", planId: "abc\u0007", clamped: true }, tokensWindows: { settledTokens: 1, basis: "metered\u001b]52;c;Zm9v\u0007" } };
-	const detail = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: deps({ fetchSnapshot: async () => ({ queue: { counts: {} }, runs: [run] }) }) });
-	await flush();
-	detail.handleInput("\r");
-	await flush();
-	const lines = detail.render(80).map(stripAnsi);
-	await detail.dispose();
-	for (const l of lines) assert.ok(!hasControls(l), `a run-detail line carries a control byte: ${JSON.stringify(l)}`);
-	const row = (label) => lines.map((l) => l.trim()).find((l) => l.startsWith(`│ ${label} `));
-	assert.equal(row("plan"), `│ ${"plan".padEnd(12)} ${"refused [2J plan-stale [31m · clamped · abc ".padEnd(53)} │`);
-	assert.equal(row("dollars"), `│ ${"dollars".padEnd(12)} ${"settled 1 (metered ]52;c;Zm9v )".padEnd(53)} │`);
-	// Under a theme the pane gate keeps SGR, because the styler emits it, so a data SGR (here the C1 CSI form) is stopped
-	// only where the field enters the renderer: `show`, per field. The raw line must carry the styler's escapes alone.
-	const theme = { fg: (_c, t) => `\x1b[38;5;42m${t}\x1b[39m`, bold: (t) => `\x1b[1m${t}\x1b[22m`, bg: (_c, t) => t };
-	const themed = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, theme, deps: deps({ fetchSnapshot: async () => ({ queue: { counts: {} }, runs: [run] }) }) });
-	await flush();
-	themed.handleInput("\r");
-	await flush();
-	const raw = themed.render(80).find((l) => stripAnsi(l).includes("plan-stale"));
-	await themed.dispose();
-	assert.ok(!raw.includes("\u001b[31m") && !raw.includes("\u001b[2J"), `a data escape reached the terminal: ${JSON.stringify(raw)}`);
-	// Two hosts, so the host column shows, and one of them carries an escape and a bidi override.
-	const M = 1_000_000;
-	const info = {
-		envelope: { window: "week", totalMicros: 100 * M, floors: { shop: 10 * M }, defaultWeights: { shop: 1 }, delegation: { enabled: false } },
-		digest: "d",
-		alloc: { state: null, log: [{ at: "2026-10-05T12:00:00.000Z", host: "h\u001b[31m‮1", writer: "operator-session", outcome: "applied", planId: "3f9a0c1d2e4b5a67", weights: { shop: 1 } }, { at: "2026-10-05T11:00:00.000Z", host: "h2", writer: "default", outcome: "neutral", weights: { shop: 1 } }] },
-	};
-	const alloc = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: deps({ allocationInfo: async () => info }) });
-	await flush();
-	alloc.handleInput("b");
-	await flush();
-	const view = alloc.render(80).map(stripAnsi);
-	await alloc.dispose();
-	for (const l of view) assert.ok(!hasControls(l), `an allocation line carries a control byte: ${JSON.stringify(l)}`);
-	assert.ok(view.includes(`│ ${"› 10-05 12:00  h\\u{001B}…  operator-session  3f9a0c1d  applied".padEnd(76)} │`), view.join("\n"));
-	const { renderAllocations } = await import("../src/render.mjs");
-	const text = renderAllocations({ envelope: info.envelope, digest: "d", alloc: info.alloc });
-	assert.ok(!hasControls(text.replace(/\n/g, " ")), "the text twin's host cell is gated too");
-	assert.ok(text.split("\n").some((l) => l.startsWith("  10-05 12:00  h [31m") && l.endsWith("  operator-session  3f9a0c1d  applied")), text);
 });

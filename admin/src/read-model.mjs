@@ -2682,8 +2682,8 @@ export async function scanFleetRunRecords({ redis = null, logsDir, sinceMs, nowM
 }
 
 /**
- * The size suggestions of the given projects (issue #596, phase 3, DES-SIZE-SUGGESTIONS), for the PROJECTS view, the
- * `dispatch_limit_edit` preview and the insights page: per project id, the worker's own `suggestSize` over this host's
+ * The size suggestions of the given projects (issue #596, phase 3, DES-SIZE-SUGGESTIONS), for the console's project
+ * page and the insights page: per project id, the worker's own `suggestSize` over this host's
  * run records, with the exact call that applies it (`suggestionCall`) and its evidence in words. The records are read
  * ONCE for every project, by the worker's own bounded reader (`readSizingRecords`: an mtime prefilter, a 256 KiB cap
  * per file, the newest 50 measured runs per project), the one doctor uses. `limits` are the parsed scoped-limits rows

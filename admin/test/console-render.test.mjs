@@ -61,8 +61,8 @@ test("the flags refuse what makes no sense, in a sentence, before anything start
     [["--all"], /--all and --only go with --console/],
     [["--only", "overview.operator"], /--all and --only go with --console/],
     [["--console", "--all", "--only", "overview.operator"], /pick one/],
-    [["--console", "--png"], /--console takes neither --png nor --url/],
-    [["--console", "--url", "redis://127.0.0.1:6379/9"], /--console takes neither --png nor --url/],
+    [["--png"], /unexpected argument: --png/],
+    [["--console", "--url", "redis://127.0.0.1:6379/9"], /--console takes no --url/],
   ]) {
     const got = run(args);
     assert.equal(got.status, 2, args.join(" "));
@@ -73,6 +73,6 @@ test("the flags refuse what makes no sense, in a sentence, before anything start
 test("--console needs Chrome and says so, and needs no server", () => {
   const got = run(["--console", "--out", tempDir("console-render-")], { CHROME: "/nonexistent/chrome", PATH: "/nonexistent" });
   assert.equal(got.status, 2);
-  assert.match(got.stderr, /--console needs Google Chrome/);
+  assert.match(got.stderr, /needs Google Chrome/);
   assert.doesNotMatch(got.stderr, /valkey-server/, "it never asks for a server");
 });

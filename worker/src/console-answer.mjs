@@ -18,9 +18,10 @@
 import { TOKEN_NAME_RE } from "./console-tokens.mjs";
 
 /**
- * The `by` an answer from the panel's `/dispatch chat` carries (issue #647, part 2): it has no console token, so it is
- * signed with this reserved word, and its trail says it came from the panel rather than naming a token. RESERVED: the
- * console refuses to answer as a token of this name (`planParkedAnswer`'s `from`), so no token can sign as the panel.
+ * The reserved `by` the retired panel's chat answers were signed with (issue #647, part 2): that surface is gone
+ * (58ef2369), but a host still running the previous release can queue an answer signed with it, so the word stays
+ * reserved -- its trail still says where such an answer came from, and the console refuses to answer as a token of
+ * this name (`planParkedAnswer`'s `from`), so no token can sign as the panel.
  */
 export const PANEL_ANSWER_BY = "panel";
 

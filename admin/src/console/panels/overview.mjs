@@ -8,10 +8,10 @@
  * THE PANELS, each `(view) -> SafeHtml`:
  *   - the headline (`overviewHeadline`), the shell's `#p-headline` under the title: what needs the person, or "All
  *     clear", or on a first run how many steps stand before the first job;
- *   - the first run's three (`overviewSetup`, `overviewSetupPi`, `overviewSetupEmpty`), drawn only while
+ *   - the first run's two (`overviewSetup`, `overviewSetupEmpty`), drawn only while
  *     `firstRunState(...).applies`, and the overview's eight (`overviewNeeds`, `overviewWaiting`, `overviewActive`,
  *     `overviewSpend`, `overviewTimeline`, `overviewCaps`, `overviewWaitlists`, `overviewHosts`), drawn only while it does
- *     not. Every one of the eleven is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
+ *     not. Every one of the ten is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
  *     the live stream moves a deployment from the checklist to the overview by swapping panels, with no reload.
  *
  * THE ROLE RULE. A viewer reads counts, ids, hosts and why each job waits, in the worker's closed vocabulary: a
@@ -45,7 +45,7 @@
  */
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
-import { FIRST_RUN_COMMANDS, FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
+import { FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
 import { NO_EXPLANATION, docsHref } from "../../words.mjs";
 import { fmtTokens } from "../../panel.mjs";
 import { html } from "../html.mjs";
@@ -1205,12 +1205,6 @@ export function overviewSetup(view) {
   const from = st.doctor === null ? null : `from doctor on ${st.doctor.host}${Number.isSafeInteger(st.doctor.ageMs) ? `, ${ageWords(st.doctor.ageMs)} ago` : ""}`;
   const prog = html`<div class="su-prog"><p><b class="su-big">${count(st.ready)}</b> ${uiText(`of ${count(st.total)} ready`, view.locale)}</p>${progressBar(st.steps, view.locale)}<p class="muted">${uiText(st.sub, view.locale)}</p></div>`;
   return ui.card({ title: uiText("Getting ready", view.locale), sub: uiText(from, view.locale), body: html`${prog}<p class="su-p"><a class="btn" href="/setup">${uiText("Open setup", view.locale)}</a></p><ol class="su-steps">${st.steps.map((x, i) => stepHtml(x, i, view))}</ol>` });
-}
-
-/** "Do it from pi": the guided setup, `/dispatch setup`, its command an operator's. */
-export function overviewSetupPi(view) {
-  if (!setupOf(view).applies) return html``;
-  return ui.card({ title: uiText("Do it from pi", view.locale), body: html`<p class="muted su-p">${uiText("The guided setup in pi walks through every step and asks before each one. It never asks for the provider key.", view.locale)}</p>${view.role === "operator" ? ui.cmd([...FIRST_RUN_COMMANDS.pi]) : null}` });
 }
 
 /**

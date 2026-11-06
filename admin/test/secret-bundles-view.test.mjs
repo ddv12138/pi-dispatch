@@ -2,10 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { stripAnsi, visibleLen } from "../src/style.mjs";
 import {
   BUNDLE_FORMATS,
   BUNDLE_SKIPPED_TEXT,
@@ -29,14 +26,9 @@ import { BUNDLE_SKIPPED_REASONS } from "../../worker/src/run-history.mjs";
 
 // Issue #704, part 4: the project secret bundles on the operator's surfaces. The bundles view (the triggers file's
 // `secretBundles`, read leniently and never with its `ref`), a run's `bundle` and `bundleSkipped`, and the two copies
-// the admin keeps of worker vocabulary, each bolted to its source here.
+// the admin keeps of worker vocabulary, each bolted to its source here. The retired panel's list, RUN_DETAIL and
+// TRIGGER_DETAIL rows drew the same facts framed; they went with the panel (58ef2369).
 
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-
-const flush = () => new Promise((resolve) => setImmediate(resolve));
 const AT = Date.UTC(2026, 9, 20, 12, 0, 0);
 const REF = "op-environment-ref-canary";
 
@@ -230,78 +222,3 @@ test("the console's Secrets page lists each bundle with its facts, the resolvers
 });
 
 // ---- the panel -------------------------------------------------------------------------------------------------------------
-
-const BASE = {
-  queue: { pausedState: false, counts: { waiting: 0, active: 0, paused: 0, delayed: 0, failed: 0 }, workers: 1 },
-  budget: { day: 0, week: 0, month: 0 },
-  settings: { path: "/s", overlay: {} },
-  runs: [],
-  stagedPackages: { stagedAt: null, packages: [] },
-};
-
-async function render(snap, width, keys = []) {
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: { fetchSnapshot: async () => snap, pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => AT } });
-  await flush();
-  for (const k of keys) {
-    comp.handleInput(k);
-    await flush();
-  }
-  const lines = comp.render(width);
-  await comp.dispose();
-  return lines;
-}
-
-test("the panel's list: [bundle <id>] beside [secrets], [no bundle] on an opt-out, a secret bundles section, every row in the frame", async () => {
-  const view = fixture({ env: { PI_SECRET_BUNDLES: "op-shop:/opt/r/shop.mjs:json" } });
-  const triggers = { triggers: [
-    { type: "cron", id: "nightly", pattern: "0 3 * * *", folder: "/srv/shop", flow: "tidy", packages: false, secrets: 1, secretsProfile: "prod", index: 0 },
-    { type: "cron", id: "off", pattern: "0 4 * * *", folder: "/srv/shop", flow: "tidy", packages: false, index: 1, secretBundle: false },
-  ] };
-  const lines = (await render({ ...BASE, triggers, secretBundles: view }, 120)).map(stripAnsi);
-  const all = lines.join("\n");
-  assert.match(all, /nightly .*\[secrets 1 via prod\] \[bundle shop\]/);
-  assert.match(all, /off .*\[no bundle\]/);
-  assert.match(all, /SECRET BUNDLES .* 3 · names only · doctor --secrets resolves/);
-  assert.match(all, /│ shop  project shop · profile op-shop \(env, json\) · forks yes · 1 endpoint · opt-out #2 #4 +│/);
-  assert.match(all, /│ ghost  project ghost \(not in projects\.json\) · profile nowhere \(NOT DECLARED\) · forks no · 0 endpoints · opt-out #4 +│/);
-  assert.match(all, /last received: A_URL, B_TOKEN/);
-  // Without a bundle the list is what it was: no section, no badge.
-  const before = (await render({ ...BASE, triggers }, 120)).map(stripAnsi).join("\n");
-  assert.ok(!before.includes("bundle"), before);
-  for (const width of [40, 60, 80, 120]) for (const l of await render({ ...BASE, triggers, secretBundles: view }, width)) assert.ok(visibleLen(l) <= width, `width ${width}: ${JSON.stringify(stripAnsi(l))}`);
-});
-
-test("the panel's RUN_DETAIL wraps the received names under the label, says why a run went without, and drops a hostile record", async () => {
-  const run = { jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", startedAt: "2026-10-20T10:00:00Z", endedAt: "2026-10-20T10:05:00Z", flow: "fix" };
-  const open = async (extra, width = 80) => (await render({ ...BASE, triggers: { triggers: [] }, runs: [{ ...run, ...extra }] }, width, ["\r"])).map(stripAnsi);
-  const names = Array.from({ length: 30 }, (_, i) => `VARIABLE_${String(i).padStart(2, "0")}`);
-  const got = (await open({ bundle: { id: "shop", variables: names, shadowed: ["VARIABLE_00"], placeholders: 2, plain: 28 } })).join("\n");
-  assert.match(got, /bundle\s+Variables received: VARIABLE_00, VARIABLE_01/);
-  assert.match(got, /more line\(s\) in the run record/, "a long list is counted, never cut silently");
-  assert.match(got, /shadowed by run\.secrets: VARIABLE_00/);
-  assert.match(got, /2 as placeholders, 28 as values/);
-  assert.match((await open({ bundleSkipped: "chained" })).join("\n"), /bundle\s+skipped \(chained\): a chained \/outbox child/);
-  const older = await open({});
-  for (const hostile of [{ bundle: { id: "s\u001b[31m", variables: [], shadowed: [] } }, { bundleSkipped: "because \u001b[31m" }]) assert.deepEqual(await open(hostile), older, JSON.stringify(hostile));
-  for (const width of [30, 40, 60, 80, 120]) {
-    for (const l of await render({ ...BASE, triggers: { triggers: [] }, runs: [{ ...run, bundle: { id: "b".repeat(128), variables: names, shadowed: names, placeholders: 30, plain: 0 } }] }, width, ["\r"])) assert.ok(visibleLen(l) <= width, `width ${width}: ${JSON.stringify(stripAnsi(l))}`);
-  }
-});
-
-test("the panel's TRIGGER_DETAIL names the bundle a trigger's jobs hold, its opt-out, or the bundles a webhook trigger's jobs may hold", async () => {
-  const view = fixture({ env: { PI_SECRET_BUNDLES: "op-shop:/opt/r/shop.mjs:json" } });
-  const open = async (trigger, bundles = view) => {
-    const lines = await render({ ...BASE, triggers: { triggers: [trigger] }, ...(bundles ? { secretBundles: bundles } : {}) }, 80, ["\r"]);
-    for (const l of lines) assert.ok(visibleLen(l) <= 80, JSON.stringify(stripAnsi(l)));
-    // The rows' text with the frame and the wrap folded away, so a value wrapped under its label reads whole.
-    return lines.map((l) => stripAnsi(l).replace(/[│┌┐└┘─]/g, " ")).join(" ").replace(/\s+/g, " ");
-  };
-  const cron = { type: "cron", id: "nightly", pattern: "0 3 * * *", folder: "/srv/shop", flow: "tidy", packages: false, index: 0 };
-  const held = await open(cron);
-  assert.match(held, /bundle\s+shop: its project's whole environment/);
-  assert.match(held, /bundle shop: every variable its resolver prints/);
-  assert.match(await open({ ...cron, index: 1, secretBundle: false }), /bundle\s+opted out of shop \(run\.secretBundle: false\)/);
-  assert.match(await open({ ...cron, index: 4, folder: "/srv/elsewhere" }), /bundle\s+none: the folder is in no bundled project/);
-  assert.match(await open({ type: "label", any: ["pi"], all: [], none: [], flow: "fix", packages: false, index: 2 }), /bundle\s+a job on a bundled project's repository holds it \(shop, web, ghost\)/);
-  assert.ok(!/\bbundle\b/.test(await open(cron, null)), "no bundle bound, no row");
-});

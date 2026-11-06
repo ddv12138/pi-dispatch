@@ -44,15 +44,15 @@ test("a RAISE is a warning whose fix is the exact dispatch_limit_edit call; a lo
 	const limits = limitsOf([{ scope: "acme/web", day: 5 }, { scope: "project:web", memory: "4g" }, { scope: "project:api", memory: "8g", cpus: 4 }]);
 	const records = [rec({ project: "web", reason: "oom-killed", peakMiB: 4096 }), ...runs(12, { project: "api", memMiB: 8192, cpuCenti: 400, peakMiB: 2000, cores: 0.5 })];
 	assert.deepEqual(labels(sizeSuggestionChecks({ projects: projects("web", "api"), limits, env: {}, budget: ROOMY, records, nowMs: NOW })), [
-		'warn: project web: size 4g, 2 CPUs; its runs in the last 30 days suggest memory 6g (oom-killed: 1 run ended oom-killed (the largest size killed 4g)) -> apply it in the admin panel with dispatch_limit_edit {"index":1,"memory":"6g"} (an operator confirms it; nothing applies a size by itself)',
-		'ok: project api: size 8g, 4 CPUs; its runs in the last 30 days suggest memory 2560m (oversized: p95 peak 2000m, largest 2000m, over 12 runs) and 0.75 CPUs (underused: p95 0.5 cores used, largest 0.5 cores, over 12 runs); apply it in the admin panel with dispatch_limit_edit {"index":2,"memory":"2560m","cpus":0.75}',
+		'warn: project web: size 4g, 2 CPUs; its runs in the last 30 days suggest memory 6g (oom-killed: 1 run ended oom-killed (the largest size killed 4g)) -> apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":1,"memory":"6g"} (an operator confirms it; nothing applies a size by itself)',
+		'ok: project api: size 8g, 4 CPUs; its runs in the last 30 days suggest memory 2560m (oversized: p95 peak 2000m, largest 2000m, over 12 runs) and 0.75 CPUs (underused: p95 0.5 cores used, largest 0.5 cores, over 12 runs); apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":2,"memory":"2560m","cpus":0.75}',
 	]);
 });
 
 test("a project with no row of its own is named with dispatch_limit_add, its size is the deployment's, and one CPU is singular", () => {
 	const checks = checksOf({ env: { PI_JOB_MEMORY: "2g", PI_JOB_CPUS: "1" }, records: [rec({ memMiB: 2048, cpuCenti: 100, reason: "oom-killed", peakMiB: 2048 })] });
 	assert.deepEqual(labels(checks), [
-		'warn: project web: size 2g, 1 CPU; its runs in the last 30 days suggest memory 3g (oom-killed: 1 run ended oom-killed (the largest size killed 2g)) -> apply it in the admin panel with dispatch_limit_add {"scope":"project:web","memory":"3g"} (an operator confirms it; nothing applies a size by itself)',
+		'warn: project web: size 2g, 1 CPU; its runs in the last 30 days suggest memory 3g (oom-killed: 1 run ended oom-killed (the largest size killed 2g)) -> apply it on the console\'s project page with Preview this size: dispatch_limit_add {"scope":"project:web","memory":"3g"} (an operator confirms it; nothing applies a size by itself)',
 	]);
 });
 
@@ -67,9 +67,9 @@ test("a raise is capped at this host's budget, or at its own total where the bud
 	const oom = [rec({ reason: "oom-killed", peakMiB: 4096 })];
 	const table = [
 		// [budget, total, the label's end, the fix]
-		[{ memMiB: 5120, cpuCenti: 700 }, null, "suggest memory 5g (oom-killed: 1 run ended oom-killed (the largest size killed 4g); this project's runs need more than this host offers: they ask for 6g, the largest here is 5g)", 'apply it in the admin panel with dispatch_limit_add {"scope":"project:web","memory":"5g"} (an operator confirms it; nothing applies a size by itself)'],
-		[{ memMiB: Infinity, cpuCenti: Infinity }, { memMiB: 5632, cpuCenti: 800 }, "suggest memory 5632m (oom-killed: 1 run ended oom-killed (the largest size killed 4g); this project's runs need more than this host offers: they ask for 6g, the largest here is 5632m)", 'apply it in the admin panel with dispatch_limit_add {"scope":"project:web","memory":"5632m"} (an operator confirms it; nothing applies a size by itself)'],
-		[{ memMiB: null, cpuCenti: null }, { memMiB: 16384, cpuCenti: 800 }, "suggest memory 6g (oom-killed: 1 run ended oom-killed (the largest size killed 4g))", 'apply it in the admin panel with dispatch_limit_add {"scope":"project:web","memory":"6g"} (an operator confirms it; nothing applies a size by itself)'],
+		[{ memMiB: 5120, cpuCenti: 700 }, null, "suggest memory 5g (oom-killed: 1 run ended oom-killed (the largest size killed 4g); this project's runs need more than this host offers: they ask for 6g, the largest here is 5g)", 'apply it on the console\'s project page with Preview this size: dispatch_limit_add {"scope":"project:web","memory":"5g"} (an operator confirms it; nothing applies a size by itself)'],
+		[{ memMiB: Infinity, cpuCenti: Infinity }, { memMiB: 5632, cpuCenti: 800 }, "suggest memory 5632m (oom-killed: 1 run ended oom-killed (the largest size killed 4g); this project's runs need more than this host offers: they ask for 6g, the largest here is 5632m)", 'apply it on the console\'s project page with Preview this size: dispatch_limit_add {"scope":"project:web","memory":"5632m"} (an operator confirms it; nothing applies a size by itself)'],
+		[{ memMiB: null, cpuCenti: null }, { memMiB: 16384, cpuCenti: 800 }, "suggest memory 6g (oom-killed: 1 run ended oom-killed (the largest size killed 4g))", 'apply it on the console\'s project page with Preview this size: dispatch_limit_add {"scope":"project:web","memory":"6g"} (an operator confirms it; nothing applies a size by itself)'],
 		[{ memMiB: 4096, cpuCenti: 700 }, null, "in the last 30 days 1 run ended oom-killed (the largest size killed 4g); already at the largest size this host offers", "no larger memory is offered: no larger size fits this host"],
 		[{ memMiB: Infinity, cpuCenti: Infinity }, null, "in the last 30 days 1 run ended oom-killed (the largest size killed 4g); they ask for 6g, but the largest size this host offers is not known here, so no call is offered", "no memory call is offered while the largest size this host offers is unknown (its budget is off or unknown and its runtime's memory was not read)"],
 		[null, null, "in the last 30 days 1 run ended oom-killed (the largest size killed 4g); they ask for 6g, but the largest size this host offers is not known here, so no call is offered", "no memory call is offered while the largest size this host offers is unknown (its budget is off or unknown and its runtime's memory was not read)"],
@@ -85,7 +85,7 @@ test("a raise is capped at this host's budget, or at its own total where the bud
 	const limits = limitsOf([{ scope: "project:web", memory: "4g", cpus: 4 }]);
 	const [both] = checksOf({ limits, budget: { memMiB: 4096, cpuCenti: 800 }, records: [rec({ cpuCenti: 400, reason: "oom-killed", peakMiB: 4096, cores: 0.2 }), ...runs(10, { cpuCenti: 400, peakMiB: 1000, cores: 0.2 }).map((r, i) => ({ ...r, jobId: `x${i}` }))] });
 	assert.match(both.label, /^project web: size 4g, 4 CPUs; in the last 30 days 1 run ended oom-killed \(the largest size killed 4g\); already at the largest size this host offers; its runs in the last 30 days suggest 0\.25 CPUs/);
-	assert.equal(both.fix, 'no larger memory is offered: no larger size fits this host; for the rest, apply it in the admin panel with dispatch_limit_edit {"index":0,"cpus":0.25} (an operator confirms it; nothing applies a size by itself)');
+	assert.equal(both.fix, 'no larger memory is offered: no larger size fits this host; for the rest, apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":0,"cpus":0.25} (an operator confirms it; nothing applies a size by itself)');
 });
 
 test("a lowering still above what this host offers is a warning that says a job of it would never fit here", () => {
@@ -105,7 +105,7 @@ test("a lowering still above what this host offers is a warning that says a job 
 	// a lowering that fits is a fact line, with the call
 	const [low] = checksOf({ limits: big, records: runs(10, { memMiB: 16384, peakMiB: 1000 }), budget: { memMiB: 65536, cpuCenti: 700 } });
 	assert.equal(low.ok, true);
-	assert.match(low.label, /suggest memory 1280m .*; apply it in the admin panel with dispatch_limit_edit \{"index":0,"memory":"1280m"\}$/);
+	assert.match(low.label, /suggest memory 1280m .*; apply it on the console\'s project page with Preview this size: dispatch_limit_edit \{"index":0,"memory":"1280m"\}$/);
 });
 
 test("a raise is capped at the project's hostShare of this host's budget, never the whole budget", () => {
@@ -115,7 +115,7 @@ test("a raise is capped at the project's hostShare of this host's budget, never 
 	const [line] = checksOf({ limits, records: oom, budget: { memMiB: 10240, cpuCenti: 800 } });
 	assert.deepEqual([line.ok, line.warn], [false, true]);
 	assert.match(line.label, /suggest memory 5g \(oom-killed: .*; this project's runs need more than this host offers: they ask for 6g, the largest here is 5g\)$/);
-	assert.equal(line.fix, 'apply it in the admin panel with dispatch_limit_edit {"index":0,"memory":"5g"} (an operator confirms it; nothing applies a size by itself)');
+	assert.equal(line.fix, 'apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":0,"memory":"5g"} (an operator confirms it; nothing applies a size by itself)');
 	// floor(budget x share / 100): 50% of 10241m is 5120m, not 5120.5m rounded up past the share
 	const [odd] = checksOf({ limits, records: oom, budget: { memMiB: 10241, cpuCenti: 800 } });
 	assert.match(odd.fix, /"memory":"5g"/);
@@ -156,7 +156,7 @@ test("a line whose suggestion would never fit the share or the host never carrie
 	assert.match(over[0].label, /, but its 6 CPUs are above its hostShare \(50%\) of this host's budget \(4 CPUs\), so a job of it would never fit this host$/);
 	assert.match(over[1].label, /, but memory 7680m is above its hostShare \(25%\) of this host's budget \(4g\), so/);
 	// the raise held at the share is no such line: it carries the call for the share's own size, 8g of the 16g
-	assert.match(lines[0].fix, /^apply it in the admin panel with dispatch_limit_edit \{"index":0,"memory":"8g"\}/);
+	assert.match(lines[0].fix, /^apply it on the console\'s project page with Preview this size: dispatch_limit_edit \{"index":0,"memory":"8g"\}/);
 });
 
 test("a size already ABOVE what this host offers is said to be above it, not at it", () => {
@@ -195,6 +195,6 @@ test("the apply call is offered exactly when this host's admission would accept 
 	for (const budget of [{ memMiB: Infinity, cpuCenti: Infinity }, { memMiB: null, cpuCenti: null }, null]) {
 		const [low] = checksOf({ limits: big, records: runs(10, { memMiB: 65536, peakMiB: 36000 }), budget, total: { memMiB: 32768, cpuCenti: 800 } });
 		assert.match(low.label, /suggest memory 44g \(oversized: .*\) \(note: memory 44g is above 32g, this host's own memory; its budget is off or unknown, so the worker admits it\)$/, JSON.stringify(budget));
-		assert.equal(low.fix, 'apply it in the admin panel with dispatch_limit_edit {"index":0,"memory":"44g"} (an operator confirms it; nothing applies a size by itself)', JSON.stringify(budget));
+		assert.equal(low.fix, 'apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":0,"memory":"44g"} (an operator confirms it; nothing applies a size by itself)', JSON.stringify(budget));
 	}
 });
