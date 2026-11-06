@@ -101,6 +101,27 @@ test("sync: the root deploy/ holds the mirrored templates and the example trigge
 	);
 });
 
+// The worker image's ignore file REPLACES the root .dockerignore for that build (Docker reads the file named
+// `<dockerfile>.dockerignore` beside the Dockerfile first), and compose builds it with the DEPLOYMENT folder as
+// context. Excluding the exact name `.env` therefore left every backup an operator keeps beside it in the layer:
+// measured on the 253 deployment, the image carried `.env.bak-<date>` files holding the GitLab
+// token, the provider key and the Valkey password. The example is re-included because `worker/src/init.mjs` reads
+// it from the package, so a containerized `init` keeps working.
+test("the worker image's ignore file keeps credential backups out and the shipped example in", () => {
+	for (const path of ["../../deploy/worker.Dockerfile.dockerignore", "../deploy/worker.Dockerfile.dockerignore"]) {
+		const patterns = readFileSync(new URL(path, import.meta.url), "utf8")
+			.split("\n")
+			.map((line) => line.trim())
+			.filter((line) => line !== "" && !line.startsWith("#"));
+		const last = (pattern) => patterns.lastIndexOf(pattern);
+		assert.ok(patterns.includes(".env") && patterns.includes("**/.env"), `${path}: the exact names stay excluded`);
+		assert.ok(patterns.includes(".env.*") && patterns.includes("**/.env.*"), `${path}: a variant beside .env holds every credential, so the pattern has to cover it`);
+		// Docker's last matching pattern wins, so the example must be re-included AFTER the variant pattern.
+		assert.ok(last("!.env.example") > last(".env.*"), `${path}: !.env.example must follow .env.* or Docker's last match drops the example`);
+		assert.ok(last("!**/.env.example") > last("**/.env.*"), `${path}: !**/.env.example must follow **/.env.*`);
+	}
+});
+
 // ---------------------------------------------------------------------------------------------------
 // manifest: what package.json promises the registry
 // ---------------------------------------------------------------------------------------------------
