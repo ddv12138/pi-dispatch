@@ -65,7 +65,7 @@ export async function bumpChecks(version, { get, api = "https://api.github.com" 
 
 /**
  * This host's own pi against the version pi-dispatch is tested with, and whether what it mirrors still holds there. `resolvePi` and `versionOf` are
- * `chat-fork.mjs`'s, the pi this account would run. `needles` are `PINNED_PI_NEEDLES`; `absent` means there is simply no pi here, which is a normal host.
+ * `pi-bin.mjs`'s, the pi this account would run. `needles` are `PINNED_PI_NEEDLES`; `absent` means there is simply no pi here, which is a normal host.
  */
 export function hostPiFacts({ tested, resolvePi, versionOf, fs = nodeFs, needles = PINNED_PI_NEEDLES }) {
 	const found = resolvePi();

@@ -16,12 +16,12 @@
  *
  * EACH CARD'S ANSWER, in this order:
  *   1. a run queued or running on its target takes the answer (`parkedVerdictOf`'s `answeringJobId`): that run, linked;
- *   2. the pending-answer scan could not tell (`parkedVerdictOf`'s sentence, the run page's Chat panel's own): said;
+ *   2. the pending-answer scan could not tell (`parkedVerdictOf`'s sentence): said;
  *   3. a viewer, or a console that takes no changes: nothing more (cards without forms);
  *   4. the planner's own check (`data.parkedChecks[jobId]`, `parkedAnswerCheckOf`'s answer, which the page reads for
  *      the first `PARKED_CHECKS_MAX` rows `parkedCheckRows` names): ok draws the answer form (`ui.answerForm`); a
  *      refusal draws the attention banner (`PARKED_ELSEWHERE_TITLE`) with the planner's sentence; a check that could
- *      not be read, or none read, says so and leaves the answer to the run page, whose Chat panel checks again.
+ *      not be read, or none read, says so; the planner checks the answer again before anything is queued.
  * The form follows an ok alone: a pull request's park, expired job data or a comment trigger without `run.resume` is
  * refused by the planner whatever the page draws, and a box that refuses after the answer is typed wastes the typing.
  *
@@ -31,7 +31,7 @@
  * adds no "answer on the forge" of its own.
  */
 import { answererParked } from "./answerer.mjs";
-import { parkedVerdictOf } from "@edgehero/pi-dispatch/chat-mode";
+import { parkedVerdictOf } from "@edgehero/pi-dispatch/parked-facts";
 import { DEFER_PROJECT_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { forgeLinkOf } from "../../read-model.mjs";
 import { capitalised } from "../../words.mjs";
@@ -82,7 +82,7 @@ export const parkedUnreadText = (reason) => `The parked runs could not be read (
  */
 export const PARKED_CHECKS_MAX = 20;
 
-/** A parked row's verdict, from its pending-answer scan (`parkedVerdictOf`, the Chat panel's rule). */
+/** A parked row's verdict, from its pending-answer scan (`parkedVerdictOf`, parked-facts's rule). */
 const verdictOf = (p) => parkedVerdictOf(p?.pendingScan);
 
 /** Whether a row's job id is one `/run?id=` and the answer action take. */
