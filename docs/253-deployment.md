@@ -53,22 +53,22 @@ The job image is published from a checkout, not by CI: on the maintainer's machi
 | `docker.io/ddv12138/pi-job-java21` | a Java flow, through that trigger's `run.image` |
 
 Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
-Maven. The tag this host runs for both is `4.3.2-5d10c5d2`, the image built from commit `5d10c5d2`.
+Maven. The tag this host runs for both is `4.3.3`, the current release.
 
 The worker service declares the default job image as a compose interpolation default:
 
 ```yaml
-PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}
+PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.3}
 ```
 
 Because compose interpolation reads `--env-file .env`, **a value in `.env` wins** and the shipped default applies
-only when the key is absent from `.env`. The default is the image built from commit `5d10c5d2`, the one this
-deployment runs; a release bump moves it. There is no hand-edited `PI_JOB_IMAGE` line and no override file to keep
+only when the key is absent from `.env`. The default is the published 4.3.3 image, the one this deployment
+runs; a release bump moves it. There is no hand-edited `PI_JOB_IMAGE` line and no override file to keep
 in step: setting `PI_JOB_IMAGE` in `.env` is the supported way to point the whole deployment at another tag, and
 removing the key from `.env` returns it to the default.
 
 Jobs launch with `--pull=never`, so nothing is fetched at job time: pull the image here first, and verify it here
-(`./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.2-5d10c5d2`). Docker Hub itself is not reachable directly
+(`./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.3`). Docker Hub itself is not reachable directly
 from this host (`registry-1.docker.io` refuses); the pull works through the registry mirror configured in
 `/etc/docker/daemon.json`.
 
@@ -88,15 +88,16 @@ trigger form has no image field):
 ```json
 { "on": { "type": "label", "any": ["afk-spec"] },
   "run": { "kind": "gitlab", "flow": "spec-run",
-           "image": "docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2",
+           "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
            "statusComment": true, "maxTurns": 300 } }
 ```
 
 All three rules in `runtime/triggers.json` — `spec-run`, `ticket-run` and `ticket-merge` — name that Java image by
 hand. The merger needs Maven to test the candidate, even though it writes no code.
 
-The only job images on the host are the two commit-pinned ones above. The bare `4.3.2` and `latest` tags of
-`pi-job` and `pi-job-java21`, `ghcr.io/edgehero/pi-job:4.3.1` and the `pi-job:java21` alias have been deleted.
+The job images on the host are the two 4.3.3 images above, plus the previous `4.3.2-5d10c5d2` pair kept for
+rollback. The bare `4.3.2` and `latest` tags of `pi-job` and `pi-job-java21`, `ghcr.io/edgehero/pi-job:4.3.1` and
+the `pi-job:java21` alias have been deleted.
 
 A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
 Maven settings are baked at build time, not passed by the job:
@@ -249,9 +250,9 @@ docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs pause
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status   # repeat until active is 0
 $C --profile worker --profile console build worker
 $C --profile receiver build receiver
-docker pull docker.io/ddv12138/pi-job:4.3.2-5d10c5d2
-docker pull docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2
-./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.2-5d10c5d2
+docker pull docker.io/ddv12138/pi-job:4.3.3
+docker pull docker.io/ddv12138/pi-job-java21:4.3.3
+./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.3
 $C --profile worker --profile console up -d --no-deps --force-recreate worker console
 $C --profile receiver up -d --no-deps --force-recreate receiver
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4790/healthz

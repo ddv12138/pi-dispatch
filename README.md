@@ -521,7 +521,7 @@ $C ps                                           # what is running
   the receiver; an update builds them again (`$C --profile worker --profile console build worker`,
   `$C --profile receiver build receiver`) and recreates the containers.
 - **The job image is pulled on the host, never at job time** (jobs run `--pull=never`). Its default is
-  `${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}`; a value in `.env` wins over it.
+  `${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.3}`; a value in `.env` wins over it.
 - **The receiver answers on `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`.** Set it in `.env` when the host has a LAN
   address or a reverse proxy in front.
 - **The worker keeps the host Docker socket.** That is authority equivalent to root, so the console and the

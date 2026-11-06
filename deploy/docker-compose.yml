@@ -82,9 +82,9 @@ services:
       DOCKER_CONTEXT: default
       VALKEY_URL: redis://valkey:6379
       # Compose interpolation reads `--env-file .env`: a value there wins, the default is only a
-      # fallback. The default is the job image built from commit 5d10c5d2 (what the 253 deployment runs
-      # today); a version bump/release moves it.
-      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}
+      # fallback. The default follows the current release (4.3.3), built and pushed by
+      # ./image/publish.sh; bump it together with the root package.json version.
+      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.3}
       PI_JOBS_DIR: ${PWD}/runtime/jobs
       PI_LOGS_DIR: ${PWD}/runtime/logs
       PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
