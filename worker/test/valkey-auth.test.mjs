@@ -35,9 +35,9 @@ test("a generated password is 64 hex characters that every .env loader reads bac
 		assert.match(pw, /^[0-9a-f]{64}$/);
 		assert.equal(valkeyPasswordProblem(pw), null);
 		seen.add(pw);
-		// The writer renders it bare (nothing to quote), and systemd, a sourcing shell and the cmd wrapper all read the same.
+		// The writer renders it bare (nothing to quote), and every remaining loader reads the same.
 		assert.equal(renderEnvValue(pw, { platform: "linux" }), pw);
-		for (const loader of ["systemd", "shell", "cmd"]) {
+		for (const loader of ["systemd", "shell"]) {
 			const read = readEnvAssignments(`A=1\n${VALKEY_PASSWORD_KEY}=${pw}\n`, [VALKEY_PASSWORD_KEY], { loader })[VALKEY_PASSWORD_KEY];
 			assert.deepEqual([read.plain, read.value], [true, pw], loader);
 		}

@@ -61,7 +61,7 @@ import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, envelopeFilePath, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
-import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue, envFileWrapperInternal, wrapperInternalSentence } from "./env-file.mjs";
+import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue } from "./env-file.mjs";
 import { canonicalScope, danglingProjectRows, tokenRowsBelowJobCap, tokenRowsWithoutCap, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
 import { EMPTY_PROJECTS_FINGERPRINT, escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
 import { parseModelsJson, stripBom, stripJsonComments } from "./models-json.mjs";
@@ -827,7 +827,7 @@ function disagreementShown({ key, shell, file }, path) {
  * Where an empty value refuses the boot, the key is not here, and a ✗ of its own names it besides (the boot files,
  * PI_JOBS_DIR, PI_TRIGGERS_FILE, GITHUB_AUTH_SOURCE, the PAT and its variable, the App keys while app is the source).
  * Judged HERE and not in `resolveServiceEnv`, whose `fromFile` must keep the "" so every check judges what the service
- * is given, and whose cmd rule already drops the empty value where the loader unsets the key.
+ * is given.
  */
 export const EMPTY_READ_AS_UNSET = Object.freeze({
 	PI_BACKENDS: "blank",
@@ -946,16 +946,14 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 	try {
 		const serviceLoader = serviceEnvLoader(platform);
 		const { text, loadHazard } = decodeEnvFile(readEnvFile(path), { loader: serviceLoader });
-		// THE DEPLOYMENT'S OWN LOADER FIRST, because this file has three and they disagree (issue #384). Which one is
+		// THE DEPLOYMENT'S OWN LOADER FIRST, because this file has two and they disagree (issue #384). Which one is
 		// the deployment's comes from `serviceEnvLoader`, the same one-loader-per-platform mapping `up`, the worker's
 		// own readers and the CLI use. Reporting a reading from a loader this deployment does not use is how doctor
 		// told half its operators the wrong file under the previous shape, which asked systemd's grammar everywhere.
 		const service = readEnvAssignments(text, allowed, { loader: serviceLoader });
-		// The shell reading stays beside it on POSIX, because a `.env` is also sourced by hand
+		// The other loader's reading stays beside it, because a `.env` is also sourced by hand
 		// (`set -a; . ./.env`) and because the two disagree about an `export` line, which is the third state
-		// below. ON WIN32 THERE IS NO SECOND LOADER, and computing one anyway reported a file that assigns the
-		// key ONCE as "assigned twice with different values" -- on the very line `renderEnvValue` writes there,
-		// since every Windows path carries a backslash that no POSIX loader will vouch for.
+		// below.
 		const shell = readEnvAssignments(text, allowed, { loader: serviceLoader === "shell" ? "systemd" : "shell" });
 		// One line elsewhere can take the vouch off every reading in the file, and a key with NO record at all
 		// is the case that needs this most: a BOM'd line, a `K+=` line or a line the shells simply run leaves
@@ -964,7 +962,7 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 		const hazard = loadHazard ?? envFileHazard(text, { loader: serviceLoader });
 		// A line INSIDE a multi-line quoted value is part of that value to systemd and to the shells (issue #447), so
 		// its fix is about the quote above it, not about the line's own form.
-		const regions = serviceLoader === "cmd" ? [] : quotedRegions(text);
+		const regions = quotedRegions(text);
 		const plain = {};
 		const notPlain = {};
 		const insideValue = {};
@@ -972,10 +970,7 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 		const alsoExported = {};
 		const blankInFile = {};
 		for (const key of allowed) {
-			// An empty value UNSETS under the cmd wrapper (`set "K="`), so on win32 such a line leaves the service
-			// WITHOUT the key rather than with a blank one. Treating it as blank failed a Windows deployment that
-			// starts, in a sentence that named the .cmd wrapper as the thing keeping the empty value.
-			const own = serviceLoader === "cmd" && service[key]?.value === "" ? undefined : service[key];
+			const own = service[key];
 			const other = shell[key];
 			// WHAT THE SERVICE READS, and only when this file can say so. A shape outside the grammar every
 			// loader agrees on is reported as a LINE, never as a value (issue #384): the reader's own docblock
@@ -992,14 +987,10 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 				if (region) insideValue[key] = region.open;
 			}
 			// Export-only means NO bare assignment anywhere, not "none that survived". A file holding both
-			// `KEY=/systemd.json` and `export KEY=/wrapper.json` is configured under systemd, and calling it
+			// `KEY=/systemd.json` and `export KEY=/other.json` is configured under systemd, and calling it
 			// export-only would print a value systemd never sees and advise dropping a prefix, which would
 			// change which file the worker loads. The empty case is part of "anywhere": a bare `KEY=` IS an
 			// assignment, and systemd reads it as the empty value that refuses the boot.
-			// THE FILE's export line, not "this platform's view happens to be undefined". Nulling the cmd
-			// reading of an empty value (below) dropped a bare `KEY=` straight into this branch, so doctor
-			// quoted `export PI_PAUSE_WINDOWS_FILE=` at a Windows operator whose file contains no such line
-			// and told them to drop a prefix that is not there.
 			//
 			// `other.vouched`, not `other.plain`: this prints the value, and a file with a hazard in it is a
 			// file where that value is a guess.
@@ -1007,16 +998,12 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 			// BOTH readings plain, or there is nothing to compare. A reading that is not plain carries no value
 			// at all, and `?? ""` renamed it "an EMPTY value, which refuses the boot" -- the same "is it set"
 			// trap the record shape exists to abolish, reintroduced inside this function.
-			// NOT ON WIN32, where no POSIX shell reads this file at all: comparing the cmd reading against one
-			// reported a file that assigns the key ONCE as "assigned twice with different values", on the very
-			// line `renderEnvValue` writes there. The export-only signal above stays on every platform, because
-			// "only a sourcing shell reads this line" is true and useful wherever the line is.
 			// `vouched` on both, because this PRINTS two values and a file this command cannot read is one
 			// where neither is worth quoting. It is equivalent to `plain` wherever the branch is reachable --
 			// the caller stands the service verdicts down entirely when the file carries a hazard -- and it
 			// is written as the question actually being asked, so that a later caller cannot reach it from
 			// somewhere the equivalence does not hold.
-			else if (serviceLoader !== "cmd" && own !== undefined && other !== undefined && own.vouched && other.vouched && own.value !== other.value) alsoExported[key] = other.value;
+			else if (own !== undefined && other !== undefined && own.vouched && other.vouched && own.value !== other.value) alsoExported[key] = other.value;
 			// BLANK ALONE, because the file being readable is already decided: the caller answers an
 			// unreadable file once and says nothing else about the key, so everything here is about a file
 			// whose lines mean what they say. Requiring `vouched` as well looked like the same rule and was
@@ -1025,10 +1012,7 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 			// shape doctor could not vouch for and exited 0 on a deployment that cannot start.
 			if (own !== undefined && own.blank) blankInFile[key] = true;
 		}
-		// A line assigning one of the service wrapper's own variables (issue #470 follow-up): no effect, since the wrapper
-		// assigns them again after the load, and said as such. The line's NAME, never its value.
-		const wrapperInternal = envFileWrapperInternal(text, { loader: serviceLoader });
-		return { ...plain, notPlain, insideValue, exported, alsoExported, blankInFile, serviceLoader, hazard, wrapperInternal };
+		return { ...plain, notPlain, insideValue, exported, alsoExported, blankInFile, serviceLoader, hazard };
 	} catch {
 		// COULD NOT READ is not "this key is unset". Returning the same `{}` for both told an operator whose
 		// `.env` is a directory, or is not readable by this account, that the worker ignores a key -- a positive
@@ -3878,8 +3862,8 @@ export async function collectChecks(shellVars, seams) {
 	//
 	// AND ONE NARROWING, added with `pi-dispatch up`'s four env lines (issue #357). Both checks above fire
 	// on the PROCESS environment, which is the only thing the worker reads. But `up` writes these two keys
-	// into `<cwd>/.env`, which configures the SERVICE through `EnvironmentFile=` and the wrappers and
-	// configures nothing about a shell an operator later types `pi-dispatch doctor` into. Unqualified, the
+	// into `<cwd>/.env`, which configures the SERVICE and configures nothing about a shell an operator later
+	// types `pi-dispatch doctor` into. Unqualified, the
 	// warning then cries wolf at a correctly configured deployment, and this module's own rule is that a
 	// check nobody can silence must never do that.
 	//
@@ -3923,14 +3907,10 @@ export async function collectChecks(shellVars, seams) {
 	// line says what it cannot answer about THOSE. The same hazard may also stop a sourcing shell reaching
 	// `WEBHOOK_SECRET`, which the receiver refuses to start without, and nothing here says so -- widening
 	// the read is how a narrow reader grows into "load the .env", which `envFileKeys`' own docblock refuses.
-	// Beside the readings, not in place of them: the line changes no other key (issue #470 follow-up).
-	if (envFile.wrapperInternal != null) {
-		checks.push({ ok: false, warn: true, label: `${join(cwd, ".env")}: ${wrapperInternalSentence(envFile.wrapperInternal).replace(/\. To fix it, .*$/, "")}`, fix: `${wrapperInternalSentence(envFile.wrapperInternal).replace(/^.*\. To fix it, /, "")}, then run doctor again` });
-	}
 	if (envFile.hazard != null) {
 		const named = BOOT_FILES.map((spec) => spec.key).join(" or ");
 		// A SHAPE comes from systemd's own line structure (issue #447): the line is one systemd reads differently from
-		// this command, and the table names it and what to change -- the same words `service install` refuses with.
+		// this command, and the table names it and what to change -- the same words the writer refuses with.
 		const shape = envFile.hazard.shape ? SYSTEMD_HAZARD_SHAPES[envFile.hazard.shape] : null;
 		const limit = `Other keys in the same file are affected too and are not checked here: this command reads only the ${countWord(BOOT_FILES.length)} it names`;
 		// A file systemd will not LOAD is a service that does not start (measured on systemd 259), which is a failure
@@ -3942,7 +3922,7 @@ export async function collectChecks(shellVars, seams) {
 			label: `whether ${named} reaches the service cannot be read off ${join(cwd, ".env")}: line ${envFile.hazard.line} ${shape ? `has ${shape.what}${envFile.hazard.detail ? ` (${envFile.hazard.detail})` : ""}` : "is not one this command can read"}`,
 			fix: shape
 				? `on line ${envFile.hazard.line} of that file, ${shape.fix}, then run doctor again. ${limit}`
-				: `fix line ${envFile.hazard.line} of that file and run doctor again -- a line that is not an assignment is RUN by the wrappers that source this file, an unclosed quote or a trailing backslash makes the line below it part of that value, and a value that can run a command or end the shell leaves every key in the file unset. ${limit}`,
+				: `fix line ${envFile.hazard.line} of that file and run doctor again -- a line that is not an assignment is RUN by a shell that sources this file, an unclosed quote or a trailing backslash makes the line below it part of that value, and a value that can run a command or end the shell leaves every key in the file unset. ${limit}`,
 		});
 	}
 
@@ -3955,9 +3935,9 @@ export async function collectChecks(shellVars, seams) {
 		const blankInFile = envFile.blankInFile?.[spec.key] === true;
 		const onlyExported = envFile.exported?.[spec.key];
 		const alsoExported = envFile.alsoExported?.[spec.key];
-		const loaderName = envFile.serviceLoader === "systemd" ? "systemd's EnvironmentFile=" : envFile.serviceLoader === "cmd" ? "the .cmd wrapper" : "the wrapper's `set -a; . ./.env`";
-		// The OTHER POSIX loader, named for what it is rather than as "a shell that sources the file": on darwin
-		// the service IS the sourcing shell, and the reading it disagrees with is systemd's.
+		const loaderName = envFile.serviceLoader === "systemd" ? "systemd's EnvironmentFile=" : "a shell that sources the file";
+		// The OTHER loader, named for what it is: on darwin the service IS the sourcing shell, and the reading it
+		// disagrees with is systemd's.
 		const otherName = envFile.serviceLoader === "shell" ? "systemd's EnvironmentFile=" : "a shell that sources the file";
 		// A FILE THIS COMMAND CANNOT READ IS ANSWERED ONCE, and then nothing else is said about the key.
 		// Three adversarial passes found what the alternative costs: with a verdict computed beside the
@@ -3993,13 +3973,12 @@ export async function collectChecks(shellVars, seams) {
 			});
 		} else if (envFile.hazard == null && onlyExported !== undefined) {
 			// The loader that reads an `export` line is a SOURCING SHELL, and naming it "this platform's loader"
-			// was false on win32, where the cmd wrapper splits on the first `=` and makes `export KEY` a variable
-			// name -- so neither loader on that platform reads the line the label said it read.
+			// would be false where the service's loader does not source the file.
 			checks.push({
 				ok: false,
 				warn: true,
 				label: `${spec.key} is set in ${join(cwd, ".env")} as \`export ${spec.key}=${envValueShown(onlyExported)}\`, which only a shell that SOURCES this file reads${envFile.serviceLoader === "shell" ? "" : `, and ${loaderName} does not`}`,
-				fix: `drop the \`export \` prefix if this deployment runs under systemd or the Windows wrapper (both want a bare KEY=value); keep it if the worker starts through a wrapper that sources the file`,
+				fix: `drop the \`export \` prefix if this deployment does not run through a shell that sources the file (a bare KEY=value is what systemd reads); keep it if the worker starts through such a shell`,
 			});
 		} else if (envFile.hazard == null && alsoExported !== undefined) {
 			checks.push({

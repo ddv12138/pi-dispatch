@@ -362,8 +362,8 @@ test("up: a key whose value is `\"\"` is named as EMPTY, not merely `already set
 	// refuses to start on a path that is nothing. So `up` said "already set" three lines above a doctor
 	// warning saying the feature is OFF, when the deployment was in fact DOWN.
 	//
-	// The cmd wrapper is the third reading and the one exception: `set "K="` genuinely unsets there, so a
-	// Windows service under nssm sees no key where the POSIX loaders see an empty one.
+	// The literal loader keeps an empty value as an empty one, as the POSIX loaders do: the old cmd
+	// grammar was the one exception, and it is gone with host-service deployment.
 	//
 	// NAMED ON `up`'S SIDE. A fourth doctor state was rejected: a state exists to carry a DECISION, and
 	// this is a wording overlap between two correct sentences.
@@ -412,17 +412,17 @@ test("up: a key whose value is `\"\"` is named as EMPTY, not merely `already set
 	assert.equal(none.store.get("/deploy/.env").includes("PI_ENVELOPE_FILE"), false);
 
 	// The other direction of "both readings are asked": set for systemd, EMPTIED by a later export line. The
-	// key is configured for `EnvironmentFile=` and unset for the wrappers, so calling it empty would be wrong
+	// key is configured for `EnvironmentFile=` and unset for a sourcing shell, so calling it empty would be wrong
 	// for the systemd operator. (The mirror of this is pinned above.)
 	const halfEmpty = harness({ plan: green, files: { "/deploy/.env": "WEBHOOK_SECRET=x\nPI_PAUSE_WINDOWS_FILE=/systemd.json\nexport PI_PAUSE_WINDOWS_FILE=\n" } });
 	await halfEmpty.run();
 	assert.doesNotMatch(halfEmpty.text(), /PI_PAUSE_WINDOWS_FILE[^\n]*its value is/, "set for one consumer is not empty, whichever consumer it is");
 
 	// BOTH READINGS ARE ASKED, and this is the case that needs the second one. A bare `PI_X=` with an
-	// `export PI_X=/v.json` below it is empty for systemd's `EnvironmentFile=` and SET for the wrapper
-	// deployments, which source the file and take the last assignment. Calling that "empty" would tell a
-	// launchd or nssm operator their configured key is unset. `up` leaves it alone either way, because the
-	// export line is a value the operator wrote.
+	// `export PI_X=/v.json` below it is empty for systemd's `EnvironmentFile=` and SET for a shell that
+	// sources the file and takes the last assignment. Calling that "empty" would tell such an operator
+	// their configured key is unset. `up` leaves it alone either way, because the export line is a value
+	// the operator wrote.
 	const halfSet = harness({ plan: green, files: { "/deploy/.env": "WEBHOOK_SECRET=x\nPI_PAUSE_WINDOWS_FILE=\nexport PI_PAUSE_WINDOWS_FILE=/v.json\n" } });
 	await halfSet.run();
 	assert.doesNotMatch(halfSet.text(), /PI_PAUSE_WINDOWS_FILE[^\n]*the line is there and its value is empty/, "set for one consumer is not empty");
@@ -498,7 +498,7 @@ test("up does NOT refuse a computed default that happens to sit under this folde
 });
 
 test("up: the inside-the-folder compare folds case on Windows and does not on POSIX (#357)", async () => {
-	// `nssm-install.cmd` is a supported deployment. Windows paths are case-insensitive and accept either
+	// Windows is a supported deployment. Windows paths are case-insensitive and accept either
 	// separator, so a byte compare misses `c:\\pi\\deploy\\logs` against `C:/pi/deploy` and writes exactly
 	// the value this guard exists to refuse. POSIX is case-sensitive, where folding would refuse a
 	// different directory that merely looks alike.
@@ -518,11 +518,11 @@ test("up: the inside-the-folder compare folds case on Windows and does not on PO
 	assert.doesNotMatch(otherDrive.text(), /not an absolute path/);
 });
 
-test("up writes Windows paths with forward slashes, so the cmd loader reads them bare (#357)", async () => {
-	// `deploy/worker-env-wrapper.cmd` states its own contract: "Values MUST be UNQUOTED -- cmd's `set`
-	// keeps surrounding quotes as part of the value." A backslash is outside the bare set, so quoting one
-	// there produces four directories that do not exist, behind four ✓. Forward slashes are accepted
-	// everywhere Node accepts a path on Windows, and `config.mjs` already spells its own defaults that way.
+test("up writes Windows paths with forward slashes, which the literal loader reads bare (#357)", async () => {
+	// A backslash is outside the bare set the writer and the reader share, so the writer would quote a path
+	// carrying one, and the service would read the quotes as part of the path: four directories that do not
+	// exist, behind four ✓. Forward slashes are accepted everywhere Node accepts a path on Windows, and
+	// `config.mjs` already spells its own defaults that way.
 	const h = harness({
 		plan: green,
 		files: { "C:/pi/deploy/.env": "" },
@@ -536,8 +536,8 @@ test("up writes Windows paths with forward slashes, so the cmd loader reads them
 	});
 	await h.run();
 	const written = h.store.get("C:/pi/deploy/.env") ?? "";
-	assert.doesNotMatch(written, /'/, "no value is quoted, because cmd's `set` would keep the quotes");
-	assert.doesNotMatch(written, /\\\\/, "and none carries a backslash, which the bare set excludes for the shells");
+	assert.doesNotMatch(written, /'/, "no value is quoted, because the shared grammar writes a plain path bare");
+	assert.doesNotMatch(written, /\\\\/, "and none carries a backslash, which the bare set excludes");
 	assert.match(written, /^PI_LOGS_DIR=C:\/Users\/op\/\.pi-dispatch\/logs$/m);
 });
 
@@ -1272,7 +1272,7 @@ test("deploy/docker-compose.yml's PI_JOB_IMAGE is a concrete, .env-overridable j
 	// The repository half comes from the one place that names the default's upstream (`jobImageFix`), so a later move
 	// to another registry fails here as well as in the literals above.
 	assert.equal(jobImageFix("docker", "pi-job:latest").split(" ")[2], "docker.io/ddv12138/pi-job:latest");
-	const line = "      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}";
+	const line = "      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.3}";
 	for (const path of ["../../deploy/docker-compose.yml", "../deploy/docker-compose.yml"]) {
 		const compose = readFileSync(new URL(path, import.meta.url), "utf8");
 		assert.ok(compose.split("\n").includes(line), `${path}: the concrete default, overridable from .env`);

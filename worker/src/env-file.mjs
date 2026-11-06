@@ -49,11 +49,11 @@ import { chmodSync, chownSync, closeSync, constants as fsConstants, fchmodSync, 
  * documentation above the key is untouched either way: only the key's own line is ever replaced.
  *
  * The obvious alternative, carrying the inline `# ...` onto the new line, was written first and then
- * REJECTED: `deploy/worker.service` feeds this file to systemd through `EnvironmentFile=`, whose parser
- * recognises a comment only at the start of a line, so `PI_LOGS_DIR=/srv/logs   # where records land`
+ * REJECTED: systemd's `EnvironmentFile=` parser recognises a comment only at the start of a line, so
+ * `PI_LOGS_DIR=/srv/logs   # where records land`
  * sets that variable to the path PLUS the sentence. On this one key that is the difference between the run
- * history landing in the right directory and the worker creating a directory named after a sentence. The
- * wrapper scripts source the file with shell semantics, where the same line is harmless, so the two
+ * history landing in the right directory and the worker creating a directory named after a sentence. A
+ * sourcing shell reads the file with shell semantics, where the same line is harmless, so the two
  * consumers disagree and the safe shape is the one both read identically: a value with nothing after it.
  *
  * Only a line that was ALREADY a comment is kept. Replacing a set line means replacing a real value, and
@@ -73,11 +73,11 @@ function replacementLines(key, value, bare, wasComment, opts) {
  * A value rendered so that BOTH consumers of this file read back exactly what was written.
  *
  * Measured rather than assumed, in `/bin/sh`, `/bin/bash` and `/bin/zsh` through the same
- * `set -a; . ./.env; set +a` the wrapper scripts use:
+ * `set -a; . ./.env; set +a` a sourcing shell uses:
  *
  *   - bare `KEY=/a b/c.json`   -> the shell splits at the space, the key ends up EMPTY, and the tail is
  *     RUN as a command by the service account. A deployment folder with a space in its name is ordinary
- *     on macOS, which is exactly the platform whose wrapper sources this file.
+ *     on macOS, which is exactly the platform where a shell sources this file.
  *   - bare `KEY=/a #2/c.json`  -> truncated at the `#`, and a path that does not exist is written with a ✓.
  *   - `KEY="/x$HOME/y"`        -> the shell EXPANDS `$HOME`; double quotes are not enough.
  *   - `KEY='/x$HOME/y'`        -> exact, in all three, and systemd's `EnvironmentFile=` parser has a
@@ -94,17 +94,6 @@ function replacementLines(key, value, bare, wasComment, opts) {
  */
 
 /**
- * cmd's own bare set, derived from `deploy/worker-env-wrapper.cmd` rather than borrowed from the POSIX
- * one, which is a distinction this got wrong once. That loader is
- * `for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"`, the QUOTED `set` form,
- * which preserves spaces exactly. So a space is fine there and `C:\Program Files\...` needs no quoting,
- * while the POSIX predicate would have refused all four keys on the commonest Windows layout there is.
- *
- * What cmd cannot be shown to carry is `cmdValueRefusal`'s list (issue #470): a line break or another control
- * character, a `"`, a `%`, a `!`, a `^`, a character outside ASCII, and an `=` at the start of the value. Each
- * row there says whether it is cmd's documented behaviour or a cautious refusal. `'` is ordinary there.
- */
-/**
  * The `code` on every error `renderEnvValue` throws (issue #522): the VALUE cannot be written, so a caller may add advice
  * about the value (`up` says where its path came from). Every other refusal of the writer is about the FILE and carries
  * its own fix, and `up` once gave those this one's advice, telling a gid mismatch to move the deployment somewhere
@@ -113,16 +102,8 @@ function replacementLines(key, value, bare, wasComment, opts) {
 export const ENV_VALUE_UNWRITABLE = "ENV_VALUE_UNWRITABLE";
 const unwritableValue = (message) => Object.assign(new Error(message), { code: ENV_VALUE_UNWRITABLE });
 
-export function renderEnvValue(value, { platform = process.platform } = {}) {
+export function renderEnvValue(value) {
 	const v = String(value);
-	// The Windows loader keeps surrounding quotes as part of the value ("Values MUST be UNQUOTED", its own
-	// header), so nothing is ever quoted for it: a value it can take is written bare, and one it cannot is
-	// refused rather than dressed in quotes that become part of a path.
-	if (platform === "win32") {
-		const bad = cmdValueRefusal(v);
-		if (bad !== null) throw unwritableValue(`cannot write this value into a .env on Windows: it contains ${bad}, and the .cmd wrapper (deploy/worker-env-wrapper.cmd) cannot be shown to read that back as written. Choose a value without it, or give the service this key through its own environment (pi-dispatch service install --env-setup)`);
-		return v;
-	}
 	if (UNQUOTED_PLAIN.test(v)) return v;
 	if (v.includes("'") || /[\n\r]/.test(v)) throw unwritableValue(`cannot write this value into a .env safely: ${v.includes("'") ? "it contains a single quote" : "it contains a newline"}`);
 	// Gate round 2 of PR #478: a control or invisible character is read alike by every loader inside single quotes, but
@@ -131,155 +112,6 @@ export function renderEnvValue(value, { platform = process.platform } = {}) {
 	const hidden = invisibleCharacter(v);
 	if (hidden !== null) throw unwritableValue(`cannot write this value into a .env safely: it contains ${hidden}, which doctor would not show back. Remove it`);
 	return `'${v}'`;
-}
-
-/**
- * HOW THE WINDOWS WRAPPER READS THIS FILE, and what the writer refuses there (issue #470). The loader is one line of
- * `deploy/worker-env-wrapper.cmd`, run under a bare `setlocal`:
- *
- *     for /f "usebackq eol=# tokens=1,* delims==" %%A in (".env") do set "%%A=%%B"
- *
- * Nobody can run cmd.exe where this is tested, so every row is either DOCUMENTED (Microsoft's `for /?`, `set /?` and
- * `cmd /?` texts), COMMUNITY (the batch parser's phase model and set's quote handling, as the long-standing write-ups
- * of cmd's parser record them, not Microsoft), or CAUTIOUS: behaviour this command cannot confirm, so it is refused by
- * name rather than guessed. A refusal names the line and the character, never the value.
- *
- *   THE LINE (for /f)
- *   `delims==` REPLACES the default space and tab       DOCUMENTED. A name is everything before the first `=`,
- *                                                       its blanks included
- *   `eol=#`: a line whose first character is `#`       DOCUMENTED. Skipped. It replaces the default `;`, so a `;`
- *                                                       line is a variable named `;...`, not a comment
- *   `tokens=1,*`: the value is the rest of the line    DOCUMENTED. `=` inside it survives (base64, API keys)
- *   an empty line                                      skipped, and assigns nothing either way
- *   CRLF                                               COMMUNITY: for /f drops the CR before the LF (relied on
- *                                                       since #447, and CRLF is the platform's own ending)
- *   a CR anywhere else, a NUL, a Ctrl-Z (0x1A)         CAUTIOUS, file-wide: whether for /f ends a line, stops the
- *                                                       file or keeps the byte is not documented, so no line below
- *                                                       can be vouched for
- *   a line whose `set "..."` exceeds 8191 characters   CAUTIOUS, file-wide: 8191 is cmd's documented command-line
- *                                                       limit, and whether it binds after FOR substitution is not
- *
- *   THE NAME (set, for the key being written)
- *   `webhook_secret=` for WEBHOOK_SECRET               DOCUMENTED: Windows variable names ignore case, so the line
- *                                                       assigns (or, empty, removes) the key. REFUSED by name: the
- *                                                       line scan here is case-sensitive, and a Windows line should
- *                                                       spell the key as the service reads it
- *   `WEBHOOK_SECRET` with no `=`                       DOCUMENTED: `set "WEBHOOK_SECRET="` removes the key.
- *                                                       REFUSED by name
- *   `WEBHOOK_SECRET =x` (a blank before the `=`)       COMMUNITY: the name keeps the blank, so the service gets no
- *                                                       WEBHOOK_SECRET. REFUSED by name
- *   `  WEBHOOK_SECRET=x` (indented), a BOM, a `"`       for /f keeps the leading blanks in the name (DOCUMENTED, the
- *   around the name                                    `delims==` row); what `set` makes of them is not, so
- *                                                       CAUTIOUS: REFUSED by name
- *   `=WEBHOOK_SECRET=x` (a leading `=`)                COMMUNITY: for /f skips leading delimiters, so this sets the
- *                                                       key where no line scan sees it. REFUSED by name
- *   a `!` in any name, a name starting with `/`         CAUTIOUS, file-wide: with delayed expansion on (see `!`
- *                                                       below) a name can expand into the key's, and `set` might
- *                                                       read `/A` or `/P` as its switch
- *   a `^` in any name                                  CAUTIOUS, file-wide: on a line delayed expansion touches
- *                                                       (one with a `!`, the value's included) the caret is an
- *                                                       escape and is removed, so `WEBHOOK_SECRE^T=evil!` sets
- *                                                       WEBHOOK_SECRET (COMMUNITY: the phase model)
- *   a character outside ASCII in any name              CAUTIOUS, file-wide: how `set` folds case beyond ASCII
- *   (blanks, quotes and a BOM around it set aside)     is not documented, and Unicode folds `ı` to I and `ſ` to
- *                                                       S, so `Pı_BACKENDS` may be PI_BACKENDS
- *   `export WEBHOOK_SECRET=x`                          a variable named `export WEBHOOK_SECRET`, so the key is not
- *                                                       set (`noOpMisread` says so)
- *
- *   THE VALUE (the line the wrapper takes for the key, and every value written: `cmdValueRefusal`)
- *   `& | < > ( )`                                      COMMUNITY: FOR variables are substituted AFTER the line is
- *                                                       parsed for operators and quotes, so these are text
- *                                                       (`for %%a in ("a&b") do echo %%~a` prints `a&b`). Carried
- *   a trailing blank                                   COMMUNITY: the quoted `set` keeps it. Carried, as written
- *   `"`                                                COMMUNITY: by the same phase order it cannot end the command,
- *                                                       and `set "..."` keeps the text up to the LAST quote, which
- *                                                       is the wrapper's own. CAUTIOUS all the same: the wrapper's
- *                                                       header forbids quotes, and set's quote rule is not
- *                                                       Microsoft's documentation
- *   `%`                                                COMMUNITY: percent expansion runs before FOR substitution,
- *                                                       so it is text. CAUTIOUS all the same, as it has always been
- *   `!`                                                DOCUMENTED dependence: with delayed expansion on, `!NAME!`
- *                                                       expands and a lone `!` is removed. `cmd /?` documents the
- *                                                       registry's DelayedExpansion value turning it on, and a bare
- *                                                       `setlocal` leaves it as it was. REFUSED
- *   `^`                                                COMMUNITY: an escape only on a line delayed expansion
- *                                                       touches. CAUTIOUS
- *   a character outside ASCII                          CAUTIOUS: for /f decodes the file in the console code page,
- *                                                       not UTF-8, and the wrapper sets none
- *   a control character but TAB                        CAUTIOUS
- *   an `=` at the start of the value (`K==v`)          COMMUNITY: the remainder starts after the run of delimiters,
- *                                                       so the `=` is lost. CAUTIOUS
- *   empty                                              DOCUMENTED: `set "K="` removes K, so the service has no key
- *
- * Linux and macOS never reach any of this: it runs only for the cmd loader (win32).
- */
-const CMD_LINE_MAX = 8191;
-
-/** Why a value cannot be shown to reach the service intact through the cmd wrapper, as words, or `null`. */
-function cmdValueRefusal(v) {
-	if (v.startsWith("=")) return "an = at the start, which for /f drops with the = after the name";
-	const c = /[\x00-\x08\x0a-\x1f\x7f"%!^]|[^\x00-\x7f]/u.exec(v)?.[0];
-	if (c === undefined) return null;
-	if (c === "\n" || c === "\r") return "a line break";
-	if (c === '"') return "a double quote";
-	if (c === "%") return "a % (cmd's expansion character)";
-	if (c === "!") return "a ! (cmd's delayed-expansion character, on whenever the registry's DelayedExpansion value is set)";
-	if (c === "^") return "a ^ (cmd's escape character)";
-	if (c.codePointAt(0) > 0x7f) return "a character outside ASCII, which cmd reads in the console code page rather than as UTF-8";
-	return `a control character (U+${c.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")})`;
-}
-
-/**
- * The cmd wrapper's reading of this text for `key` (see the table above): `hazard`, the first line this command
- * cannot vouch for (file-wide, or one that names the key other than as a plain `KEY=` line), as `{ line, what, fix }`;
- * and `taken`, the last plain `KEY=...` line, as `{ line, value }` with the value exactly as the line holds it.
- */
-function cmdReading(text, key) {
-	const lines = text.split("\n");
-	const upper = (s) => s.replace(/[a-z]+/g, (m) => m.toUpperCase());
-	const K = upper(key);
-	let hazard = null;
-	let taken;
-	const note = (line, what, fix) => {
-		hazard ??= { line, what, fix };
-	};
-	for (let i = 0; i < lines.length; i++) {
-		const last = i === lines.length - 1;
-		// The CR of a CRLF ending goes; a CR at the very end of the file stays in the line, where it is a control
-		// character in the value if the line is the key's.
-		const l = !last && lines[i].endsWith("\r") ? lines[i].slice(0, -1) : lines[i];
-		const n = i + 1;
-		const inner = last && l.endsWith("\r") ? l.slice(0, -1) : l;
-		if (inner.includes("\r")) note(n, "has a carriage return (CR) that is not part of a CRLF line ending, and whether the .cmd wrapper's for /f reads it as a line break is not documented", "remove the CR, or save the file with CRLF (or LF) line endings");
-		if (l.includes("\0")) note(n, "has a NUL byte, and whether the .cmd wrapper's for /f reads past it is not documented", "remove the NUL byte");
-		if (l.includes("\x1a")) note(n, "has a Ctrl-Z byte (0x1A), which cmd may read as the end of the file", "remove the byte");
-		if (Buffer.byteLength(l, "utf8") + 6 > CMD_LINE_MAX) note(n, `is ${Buffer.byteLength(l, "utf8")} bytes long, and the .cmd wrapper's set "..." for it would pass cmd's ${CMD_LINE_MAX}-character command-line limit`, "shorten that value, or move the large content into a file and put its path in the .env");
-		const body = l.replace(/^=+/, "");
-		if (body === "" || body[0] === "#") continue;
-		const eq = body.indexOf("=");
-		const name = eq === -1 ? body : body.slice(0, eq);
-		// Where the name is, said truthfully: a line with no `=` is ALL name to for /f (its %%B is empty).
-		const inName = eq === -1 ? "in its name (the whole line, since it has no =)" : "before its first =";
-		if (name.includes("!")) note(n, `has a ! ${inName}, and with delayed expansion on (the registry's DelayedExpansion value) the .cmd wrapper's set can expand that into another variable's name`, "remove the ! from that line");
-		if (name.includes("^")) note(n, `has a ^ ${inName}, which cmd removes as an escape on a line delayed expansion touches (one with a !, the value's included), so the .cmd wrapper's set can read that name as another variable's`, "remove the ^ from that line");
-		if (/[^\x00-\x7f]/u.test(name.replace(/^[ \t\r\ufeff"]+|[ \t\r\ufeff"]+$/g, ""))) note(n, `has a character outside ASCII ${inName}, and how the .cmd wrapper's set folds the case of such a name (\`ı\` to I, \`ſ\` to S) is not documented, so which variable that line sets cannot be confirmed`, "spell the name in ASCII, or remove the line");
-		if (/^[ \t"]*\//.test(name)) note(n, "starts with /, which the .cmd wrapper's set might read as its /A or /P switch", "remove the / at the start of that line");
-		const internal = envFileWrapperInternal(l, { loader: "cmd" });
-		if (internal !== null) note(n, WRAPPER_INTERNAL_WHAT(internal.name), WRAPPER_INTERNAL_FIX);
-		if (upper(name.replace(/^[ \t\r\ufeff"]+|[ \t\r\ufeff"]+$/g, "")) !== K) continue;
-		if (name !== key && upper(name) === K) note(n, `sets ${name}, which the .cmd wrapper's set reads as ${key}, since Windows variable names ignore case`, `write the name as ${key}, or remove the line`);
-		else if (/^[A-Za-z0-9_]+[ \t]+$/.test(name)) note(n, `has a blank between ${key} and the =, which the .cmd wrapper's set keeps in the name, so the variable that line sets is not ${key}`, "remove the blank before the =");
-		else if (name !== key) note(n, `spells ${key} with a blank, a quote, a CR or a byte-order mark beside the name, which the .cmd wrapper's for /f keeps as part of the name (it splits only on =), so whether that line sets ${key} cannot be confirmed`, `write ${key}=value at the very start of the line`);
-		else if (eq === -1) note(n, `is ${key} with no =, which the .cmd wrapper reads as set "${key}=", removing ${key}`, `write ${key}=value, or remove the line`);
-		else if (l[0] === "=") note(n, `starts with =, which the .cmd wrapper's for /f skips, so that line sets ${key}`, "remove the = at the start of the line");
-		else taken = { line: n, value: body.slice(eq + 1) };
-	}
-	return { hazard, taken };
-}
-
-/** A `cmdReading` hazard as the writer says it: the line, what is there, and the fix. */
-function cmdHazardSentence(h) {
-	return `line ${h.line} ${h.what}. To fix it, ${h.fix}`;
 }
 
 /**
@@ -294,16 +126,15 @@ function cmdHazardSentence(h) {
  * derived from it rather than deciding the question a second time.
  *
  * WHY BLANK IS NOT UNSET, measured in sh, bash and zsh: `set -a; . ./.env` on a `KEY=` line SETS and
- * EXPORTS `KEY=""` -- it does not leave the key absent. `deploy/worker-env-wrapper.sh` does exactly that,
- * so a blank line reaches the worker as an empty string, `config.mjs` keeps it (`??`, not `||`) for
+ * EXPORTS `KEY=""` -- it does not leave the key absent. The shell loader does exactly that, so a blank line
+ * reaches the worker as an empty string, `config.mjs` keeps it (`??`, not `||`) for
  * `PI_PAUSE_WINDOWS_FILE` and `PI_SCOPED_LIMITS_FILE`, and the unconditional loader at `start.mjs` throws.
  *
- * BOTH POSIX LOADERS ARE ASKED, so a key that is blank for one and set for another is not blank: a bare
- * `KEY=` with a later `export KEY=/v.json` is empty under `EnvironmentFile=` and configured under the POSIX
- * wrapper, and calling that "blank" would tell half the operators their configured key is empty. A loader
+ * BOTH LOADERS ARE ASKED, so a key that is blank for one and set for another is not blank: a bare
+ * `KEY=` with a later `export KEY=/v.json` is empty under `EnvironmentFile=` and configured under a sourcing
+ * shell, and calling that "blank" would tell half the operators their configured key is empty. A loader
  * that does not see the key at all does not vote, which is what keeps a systemd-only shape from reading as
- * blank because the other loader ignored it. The cmd wrapper is left out for the reason given at the call
- * below, and this header said "EVERY LOADER" for a round while the code asked two of three.
+ * blank because the other loader ignored it.
  *
  * `up` IS THE CALLER, and doctor is not: doctor answers the same question per SUBJECT, with the platform's
  * own loader and the vouch beside it, because its answer becomes a refusal rather than a sentence.
@@ -312,11 +143,7 @@ export function envKeyIsBlank(text, key) {
 	// DERIVED from the reader rather than re-deciding it. The regex pre-check this used to carry existed only
 	// because the old reader deleted an empty key, so "no value" and "no line" arrived identical; the reader
 	// now returns a record per assignment and the distinction is in it (issue #384).
-	// THE TWO POSIX LOADERS, and the omission is deliberate. The cmd wrapper splits on the first `=` and
-	// keeps what follows verbatim, so `K=""` is two quote characters to it where systemd and a sourcing shell
-	// both read nothing. The CONSEQUENCE is the same either way -- a path named `""` does not exist and the
-	// boot refuses on it exactly as an empty one does -- but the word "empty" is only true of the POSIX
-	// readings, and this predicate answers a question about emptiness rather than about usability.
+	// BOTH LOADERS, and a loader that cannot see the key does not vote.
 	const readings = ["systemd", "shell"].map((loader) => readEnvAssignments(text, [key], { loader })[key]).filter((r) => r !== undefined);
 	if (readings.length === 0) return false;
 	// `blank`, not `value === ""`, and the difference is every shape this file cannot vouch for. A reading
@@ -359,7 +186,7 @@ function appendEol(text) {
 export function setEnvKeyIfEmpty(text, key, value, opts) {
 	const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	// `export ` is part of the SET shape here, and that is a never-clobber decision rather than dotenv
-	// pedantry: the wrapper scripts source this file with `set -a; . ./.env`, where `export KEY=value` is an
+	// pedantry: a shell sources this file with `set -a; . ./.env`, where `export KEY=value` is an
 	// ordinary assignment the operator made. Without it the key reads as absent, a second assignment is
 	// appended, and the shell takes the LAST one -- so filling four "empty" keys would replace four values
 	// the operator set, in one pass, with no prompt. `readEnvAssignments` is deliberately stricter about what
@@ -448,7 +275,7 @@ export function setEnvKey(text, key, value, opts) {
 	};
 
 	// Pass 1: the FIRST set line, whatever its value — this is the overwrite discipline. Already
-	// exactly `KEY=value` (modulo the CRLF tail) → the input object back, so the wrapper skips the write.
+	// exactly `KEY=value` (modulo the CRLF tail) → the input object back, so the caller skips the write.
 	for (let i = 0; i < lines.length; i++) {
 		if (insideValue.all[i]) continue;
 		const line = lines[i].endsWith("\r") ? lines[i].slice(0, -1) : lines[i];
@@ -498,10 +325,9 @@ export function envFileEditRefusal(content, path) {
  *
  * What it asks is whether the written line is SWALLOWED: inside a multi-line quoted value or a continuation for that
  * loader, or (for systemd) in a file systemd splits into lines differently from this module or will not load. The
- * value of the line the loader takes is compared with a clean `KEY=value` line's. For the cmd wrapper a CRLF line's CR
- * is set aside, as its `for /f` strips it; for a sourcing shell it is KEPT, as the shell keeps it, so a CR-ended line
- * never reads as written (on macOS `planEnvEdit` refuses such a file first, and this is the backstop, regression
- * review).
+ * value of the line the loader takes is compared with a clean `KEY=value` line's. For a sourcing shell a CRLF line's CR
+ * is KEPT, as the shell keeps it, so a CR-ended line never reads as written (on macOS `planEnvEdit` refuses such a file
+ * first, and this is the backstop, regression review).
  */
 function editedValueRefusal(next, key, value, platform) {
 	const loader = loaderFor(platform);
@@ -538,18 +364,6 @@ function editedValueRefusal(next, key, value, platform) {
 		if (want.plain && taken.value !== want.value) return `after the edit, ${where} would read ${key} as something other than what was written (the assignment it takes is on line ${taken.line})`;
 		return null;
 	}
-	// The cmd wrapper, by its own reading (issue #470, `cmdReading`): nothing on the edited file it cannot vouch for, and
-	// the line it takes for the key holds exactly the value written. An empty one removes the key there, so it is never
-	// "written". The line taken is the LAST plain one, with a CRLF line's CR set aside as for /f drops it (the final
-	// review of #447: with two empty CRLF lines for the key the first was filled while the loader took the second). This
-	// replaced a comparison through `readEnvAssignments`, which read `K==v` as `=v` where for /f reads `v`.
-	const { hazard, taken } = cmdReading(next, key);
-	if (hazard !== null) return `after the edit, ${cmdHazardSentence(hazard)}`;
-	if (taken === undefined) return `after the edit, ${where} would find no ${key} line`;
-	const bad = cmdValueRefusal(taken.value);
-	if (bad !== null) return `after the edit, ${where} would take ${key} from line ${taken.line}, whose value has ${bad}, so what the service reads cannot be confirmed`;
-	if (taken.value === "") return `after the edit, ${where} would take ${key} from line ${taken.line}, which is empty, and an empty value removes ${key} there`;
-	if (taken.value !== renderEnvValue(value, { platform })) return `after the edit, ${where} would read ${key} as something other than what was written (the assignment it takes is on line ${taken.line})`;
 	return null;
 }
 
@@ -559,11 +373,11 @@ function systemdHazardSentence(h) {
 }
 
 function loaderFor(platform) {
-	return platform === "win32" ? "cmd" : platform === "darwin" ? "shell" : "systemd";
+	return platform === "darwin" ? "shell" : "systemd";
 }
 
 function loaderName(loader) {
-	return loader === "systemd" ? "systemd's EnvironmentFile=" : loader === "shell" ? "the wrapper that sources the file" : "the .cmd wrapper";
+	return loader === "systemd" ? "systemd's EnvironmentFile=" : "a shell that sources the file";
 }
 
 /**
@@ -600,8 +414,8 @@ function setOnlyForAShell(text, key, platform) {
  * "some line already sets the key" (fill) or "the first set line is already `KEY=value`" (overwrite); the platform's
  * loader takes the LAST assignment, so `WEBHOOK_SECRET=old` above `WEBHOOK_SECRET=` gives the service an empty key, and
  * `PI_BACKENDS=podman` above `PI_BACKENDS=docker` gives it docker, while the writer said nothing needed doing. Asked
- * of the loader's own reading (systemd's parser on Linux, the last assignment outside a value for a shell or the cmd
- * wrapper). Values are never echoed: the lines are named.
+ * of the loader's own reading (systemd's parser, or the last command a sourcing shell takes for the key).
+ * Values are never echoed: the lines are named.
  *
  * NOT for a key every POSIX loader reads as BLANK (`envKeyIsBlank`): that "unchanged" is `up`'s EMPTY sentence, which is
  * true (`KEY=""`, or `KEY=old` above `KEY=`), and the never-clobber rule keeps such a line the operator's (#365).
@@ -624,12 +438,12 @@ function noOpMisread(text, key, value, overwrite, platform) {
 		const r = lastAssignment(text, key, loader);
 		taken = r?.line;
 		const clean = readEnvAssignments(rendered, [key], { loader })[key];
-		// Empty for the cmd wrapper UNSETS the key (`set "K="`), so it is no value either.
-		differs = r === undefined || (overwrite ? clean.plain && (!r.plain || r.value !== clean.value) : r.blank || (loader === "cmd" && r.value === ""));
+		// An empty value is blank for a shell, so it is no value either.
+		differs = r === undefined || (overwrite ? clean.plain && (!r.plain || r.value !== clean.value) : r.blank);
 		// A reading this module cannot vouch for is not a DIFFERENT value, only an unknown one: said so (regression review).
 		unconfirmed = overwrite && r !== undefined && !r.plain;
 		// A fill whose value is nothing but expansions (`WEBHOOK_SECRET=$X`) is empty when those are unset at load time,
-		// which the wrapper's environment decides and this command cannot see: "unchanged" would vouch for a value the
+		// which the shell's environment decides and this command cannot see: "unchanged" would vouch for a value the
 		// service may not get (second regression review). Refused as unconfirmable, never as set. One with literal text
 		// in it (`PI_LOGS_DIR=$HOME/logs`) is never empty, so it stays set.
 		if (!overwrite && r !== undefined && r.expansionOnly) {
@@ -641,8 +455,8 @@ function noOpMisread(text, key, value, overwrite, platform) {
 	if (taken === undefined) return `${key} looks set${at} to this command, but ${where} reads no assignment of it from this file, so the service does not get it. Write it as ${key}=... on a line of its own`;
 	if (unconfirmed && !overwrite) return `${key} on line ${taken} is only an expansion ($NAME), which ${where} fills in when it loads the file and leaves empty if that variable is unset then, so this command cannot confirm what line ${taken} reads. Write the value itself there`;
 	if (unconfirmed) return `${key} already reads as asked${at}, but ${where} takes the assignment on line ${taken}, and this command cannot confirm what line ${taken} reads. Write it as a plain ${key}=value line, or remove one of the two lines`;
-	// The cmd wrapper's `set "K="` UNSETS the key, so there the service gets no key at all, not an empty one.
-	const gets = `so the service gets ${loader === "cmd" ? "no" : "an empty"} ${key}`;
+	// Every remaining loader keeps an empty assignment as an empty value: the service gets the key, empty.
+	const gets = `so the service gets an empty ${key}`;
 	// ONE line, read two ways: `KEY=   # a note` is set to this command's scan and to systemd (which reads the note as
 	// the value) and empty to a shell, whose comment it is (regression review, docs/sandbox.md's own example).
 	if (!overwrite && seen === taken) return `${key} on line ${taken} looks set to this command, but ${where} reads it as empty, ${gets}. Put the value after the =, or remove the text after it`;
@@ -666,13 +480,12 @@ function firstSetLine(text, key, nonEmpty) {
 }
 
 /**
- * The last assignment of `key` a shell or the cmd wrapper takes: its line outside any value, read as that loader reads
- * it. For the cmd wrapper, the line alone with its CR set aside (`for /f` strips it). For a shell, the WORD its joined
- * command starts with (`shellCommand`, `shellWord`): on a line with no shell hazard only blanks or a `#` comment may
- * follow that word, so `KEY=podman # c` reads `podman`, and `KEY=podman \` above an empty line reads `podman` too, as
- * sh, bash and dash do (regression reviews). A CR the word runs into stays in it, as the shell keeps it. `expansionOnly`
- * says the word is nothing but `$NAME`/`${NAME}` expansions and quotes, so it is EMPTY whenever those are unset at load
- * time, which this command cannot see.
+ * The last assignment of `key` a sourcing shell takes: the WORD its joined command starts with (`shellCommand`,
+ * `shellWord`): on a line with no shell hazard only blanks or a `#` comment may follow that word, so `KEY=podman # c`
+ * reads `podman`, and `KEY=podman \` above an empty line reads `podman` too, as sh, bash and dash do (regression
+ * reviews). A CR the word runs into stays in it, as the shell keeps it. `expansionOnly` says the word is nothing but
+ * `$NAME`/`${NAME}` expansions and quotes, so it is EMPTY whenever those are unset at load time, which this command
+ * cannot see.
  */
 function lastAssignment(text, key, loader) {
 	const lines = text.split("\n");
@@ -681,12 +494,6 @@ function lastAssignment(text, key, loader) {
 	const bare = lines.map((l, k) => (cr[k] ? l.slice(0, -1) : l));
 	for (let i = lines.length - 1; i >= 0; i--) {
 		if (inside[i]) continue;
-		if (loader !== "shell") {
-			const m = ASSIGNMENT.exec(bare[i]);
-			if (m === null || m[2] !== key || m[1]) continue;
-			const read = readEnvAssignments(`${bare[i]}\n`, [key], { loader })[key];
-			return read === undefined ? undefined : { ...read, line: i + 1 };
-		}
 		// By COMMAND for a shell: the line starts one, and its joined text is what assigns (`export \` + `KEY=v`).
 		const { logical, end } = shellCommand(bare, cr, i);
 		const m = COMMAND_ASSIGNMENT.exec(logical);
@@ -741,8 +548,8 @@ function shellWord(rest) {
 
 /**
  * Whether the platform's loader ALREADY reads `key` as set to something non-empty in this text, as a sentence, or
- * `null`. systemd's answer is its own reading (`systemdReading`); the shells' and the cmd wrapper's is the last
- * assignment line that is not inside a value for them.
+ * `null`. systemd's answer is its own reading (`systemdReading`); a sourcing shell's is the last assignment line that
+ * is not inside a value for it.
  */
 function keyAlreadySet(text, key, platform) {
 	const loader = loaderFor(platform);
@@ -752,7 +559,7 @@ function keyAlreadySet(text, key, platform) {
 		return got !== undefined && got.value !== "" ? `${where} already reads ${key} as set on line ${got.line}` : null;
 	}
 	const got = readEnvAssignments(text, [key], { loader })[key];
-	// Blank, or empty under the cmd wrapper, where `set "K="` UNSETS the key: nothing to protect.
+	// Blank: nothing to protect.
 	if (got === undefined || got.blank || got.value === "") return null;
 	if (quoteSpans(text.split("\n"), loader).inside[got.line - 1]) return null;
 	return `${where} already reads ${key} as set on line ${got.line}`;
@@ -789,36 +596,19 @@ export function planEnvEdit(raw, path, key, value, { overwrite = false, platform
 	// key where no line scan sees it (`X=1 WEBHOOK_SECRET=abc`, a continuation into ` WEBHOOK_SECRET=abc`), so the
 	// append would replace the operator's value: any shell hazard refuses the edit (gate round 4, measured in sh,
 	// bash, dash and zsh).
-	// On Windows, the same rule by the cmd wrapper's own reading (issue #470, `cmdReading`): a line it cannot be shown
-	// to read line by line, or one that names the key other than as a plain `KEY=` line (`webhook_secret=`, an indented
-	// or blank-suffixed name, a bare `KEY`), refuses the edit by name, whatever the edit would have been.
-	if (loaderFor(platform) === "cmd") {
-		const h = cmdReading(text, key).hazard;
-		if (h !== null) return { error: `refusing to edit ${path}: ${cmdHazardSentence(h)}. Nothing was written` };
-	}
 	if (loaderFor(platform) === "shell") {
 		const h = envFileHazard(text, { loader: "shell" });
 		// A NUL or a CRLF file is named, with its fix: the generic sentence below sends an operator looking for a command
 		// on a line that has none (round-cap review).
 		if (h?.shape !== undefined) return { error: `refusing to edit ${path}: line ${h.line} has ${SYSTEMD_HAZARD_SHAPES[h.shape].what}. To fix it, ${SYSTEMD_HAZARD_SHAPES[h.shape].fix}. Nothing was written` };
-		if (h !== null) return { error: `refusing to edit ${path}: line ${h.line} is one the wrapper that sources this file reads differently from this command (a second assignment on a line, a continuation, a command), so whether ${key} is already set there is unknown. Fix that line first. Nothing was written` };
-		const internal = envFileWrapperInternal(text, { loader: "shell" });
-		if (internal !== null) return { error: `refusing to edit ${path}: ${wrapperInternalSentence(internal)}. Nothing was written` };
+		if (h !== null) return { error: `refusing to edit ${path}: line ${h.line} is one a shell that sources this file reads differently from this command (a second assignment on a line, a continuation, a command), so whether ${key} is already set there is unknown. Fix that line first. Nothing was written` };
 	}
 	const next = (overwrite ? setEnvKey : setEnvKeyIfEmpty)(text, key, value, { platform });
 	const already = next === text || overwrite ? null : keyAlreadySet(text, key, platform);
-	// The cmd wrapper's value, where the answer would be "unchanged" or "already set" (issue #470): the line it takes
-	// for the key must hold a value it can be shown to carry, or neither claim is one this command can make.
-	if (loaderFor(platform) === "cmd" && (next === text || already !== null)) {
-		const t = cmdReading(text, key).taken;
-		const bad = t === undefined ? null : cmdValueRefusal(t.value);
-		if (bad !== null) return { error: `refusing to edit ${path}: line ${t.line} is the ${key} line the .cmd wrapper takes, and its value has ${bad}, so what the service reads cannot be confirmed. To fix it, write that value without it, or give the service ${key} through its own environment (pi-dispatch service install --env-setup). Nothing was written` };
-	}
 	// systemd's two, the ones `editedValueRefusal` asks of the edited text: a file it will not load (the key is then set
 	// for nobody) or splits into lines differently from this module. Asked of the file AS IT STANDS only where the
 	// answer would otherwise be "unchanged" or "already set", which are claims about that file; an edit keeps being
-	// judged on its result below, where replacing the one offending line can leave a file systemd reads cleanly. The cmd
-	// wrapper's are asked above and below this, by `cmdReading`.
+	// judged on its result below, where replacing the one offending line can leave a file systemd reads cleanly.
 	if (loaderFor(platform) === "systemd" && (next === text || already !== null)) {
 		const h = envFileLoadHazard(raw) ?? envFileSystemdHazard(text);
 		// With its fix, as the macOS branch says it (focus review): the line alone left an operator to work out the change.
@@ -856,15 +646,6 @@ export function planEnvEdit(raw, path, key, value, { overwrite = false, platform
  * shape and by the text of the line, so a hazard the file already had, moved by the edit's line count, is not new.
  */
 function newHazard(text, next, loader) {
-	// The cmd wrapper's one hazard, a `"` in a value (`quoteSpans`), belongs to its own line, so it is compared as a SET of
-	// lines: overwriting the first of two such lines leaves the second first, and that is not new (the corpus example). The line the writer renders never holds a `"` (`renderEnvValue` refuses it there).
-	if (loader === "cmd") {
-		const quoted = (l) => (ASSIGNMENT.exec(l.replace(/\r$/, ""))?.[3] ?? "").includes('"');
-		const had = new Set(text.split("\n").filter(quoted).map((l) => l.replace(/\r$/, "")));
-		const lines = next.split("\n");
-		for (let i = 0; i < lines.length; i++) if (quoted(lines[i]) && !had.has(lines[i].replace(/\r$/, ""))) return i + 1;
-		return null;
-	}
 	const after = envFileHazard(next, { loader });
 	if (after === null) return null;
 	const before = envFileHazard(text, { loader });
@@ -997,10 +778,9 @@ function createTmp(fs, tmp, content) {
  */
 export function updateEnvFile(path, key, value, deps = {}) {
 	// `platform` is derived HERE rather than passed by each caller, which is what the first version got
-	// wrong: `up` passed it and `github-app-setup.mjs` did not, so on Windows a PEM path was single-quoted
-	// and the cmd wrapper kept the quotes, making the path the worker loads wrong behind a ✓ on the key
-	// that decides forge auth. A rendering rule that every writer of this file must remember is a rule one
-	// of them will forget.
+	// wrong: `up` passed it and `github-app-setup.mjs` did not, so a writer could apply a different grammar
+	// from the one the service's loader uses, on the line that decides forge auth. A rule that every writer
+	// of this file must remember is a rule one of them will forget.
 	const { fs = ENV_WRITER_FS, overwrite = false, platform = process.platform, narrow = false } = deps;
 	// Every refusal is `planEnvEdit`'s (bytes first, never clobber, read back), made before anything is written.
 	const plan = planEnvEdit(fs.readFileSync(path), path, key, value, { overwrite, platform, verify: deps.verify });
@@ -1127,10 +907,9 @@ export function updateEnvFile(path, key, value, deps = {}) {
  * line inside `./.env` is deliberately NOT honoured. This reader exists so `doctor` can decide WHAT TO SAY
  * about a file, never what to configure.
  *
- * THREE LOADERS READ THIS FILE AND THEY DISAGREE (issue #384). `deploy/worker.service` and
- * `deploy/receiver.service` hand it to systemd's `EnvironmentFile=`; `deploy/worker-env-wrapper.sh` sources
- * it with `set -a`; `deploy/worker-env-wrapper.cmd` splits each line on its first `=`. So a reading is only
- * meaningful beside the loader that produced it, which is what `loader` selects.
+ * TWO LOADERS READ THIS FILE AND THEY DISAGREE (issue #384). systemd's `EnvironmentFile=` reads it; a shell
+ * that sources it with `set -a` reads it too. So a reading is only meaningful beside the loader that produced
+ * it, which is what `loader` selects.
  *
  * AND THEY DISAGREE ABOUT MORE THAN QUOTING. Measured, systemd 252 against /bin/sh, bash and zsh, the same
  * line in each:
@@ -1145,9 +924,8 @@ export function updateEnvFile(path, key, value, deps = {}) {
  *
  * ZSH IS CHECKED BUT NOT PROMISED, and the distinction is worth stating because the oracle asserts it
  * (issue #396). The grammar is the intersection of what the SERVICE LOADERS read the same way -- systemd's
- * `EnvironmentFile=`, the `/bin/sh` the wrappers source with, and the cmd wrapper on Windows. zsh is none
- * of those: `deploy/worker-env-wrapper.sh` has a `#!/bin/sh` shebang and the launchd wrapper runs `/bin/sh`,
- * which is bash 3.2 in posix mode on macOS. It is driven anyway because a disagreement there is usually a
+ * `EnvironmentFile=` and the `/bin/sh` that sources the file. zsh is neither of those: `/bin/sh` is bash 3.2
+ * in posix mode on macOS. It is driven anyway because a disagreement there is usually a
  * hole in the grammar rather than a fact about zsh.
  *
  * One FAMILY of shapes is the exception, and it is why this paragraph exists rather than a wider refusal.
@@ -1223,31 +1001,28 @@ export function readEnvAssignments(text, keys, { loader = "systemd" } = {}) {
 		const [, exported, key, rest] = m;
 		// One loader per reading, never a blend. systemd's `EnvironmentFile=` grammar is bare `NAME=VALUE`:
 		// an `export` line is not an assignment there and does not cancel one either (measured: the journal
-		// says `Ignoring invalid environment assignment`). The wrapper sources the file, so `export` is
-		// ordinary. The cmd wrapper splits on the first `=`, which makes `export K` a variable NAME.
+		// says `Ignoring invalid environment assignment`). A sourcing shell reads the file, so `export` is
+		// ordinary there.
 		if (exported && loader !== "shell") continue;
 		if (!want.has(key)) continue;
-		const read = readValue(rest, loader);
-		// CR is the cmd wrapper's own line ending, and `for /f` strips it. Holding a CRLF file against the
-		// Windows loader disabled every verdict on the platform where CRLF is NATIVE, including for the exact
-		// line `setEnvKeyIfEmpty` writes into such a file, which preserves CRLF by contract.
-		// A trailing CR belongs to the loaders that KEEP it. systemd 252 strips it (measured) and so does the
-		// cmd wrapper's `for /f`, so a CRLF file is ordinary to both; only a sourcing shell reads the CR as
-		// part of the value. Holding it against systemd made a CRLF deployment on linux unjudgeable -- no
-		// pass, no failure -- on files `up` itself writes that way.
+		const read = readValue(rest);
+		// A trailing CR belongs to the loaders that KEEP it. systemd 252 strips it (measured), so a CRLF
+		// file is ordinary there; only a sourcing shell reads the CR as part of the value. Holding it
+		// against systemd made a CRLF deployment on linux unjudgeable -- no pass, no failure -- on files
+		// `up` itself writes that way.
 		const crBreaks = hadCR && loader === "shell";
 		// A line INSIDE a multi-line quote is part of the value above it in every shell, whatever it looks
 		// like, so it is not this key's line at all.
 		const plain = read.plain && !crBreaks && !spans.inside[i];
-		// The LAST assignment, because every loader takes it: `set -a; . ./.env`, `EnvironmentFile=` and the
-		// cmd wrapper's `set` all overwrite as they go.
+		// The LAST assignment, because every loader takes it: `set -a; . ./.env` and `EnvironmentFile=`
+		// both overwrite as they go.
 		// `blank` is the LOOSE answer, on purpose: it asks only what this line assigns, so `up` can tell an
 		// operator their `WEBHOOK_SECRET` line is empty even in a file with a stray line somewhere in it.
 		// A caller that turns blankness into a REFUSAL asks for `vouched` beside it -- doctor does -- because
 		// a hazard can mean the shells never reach this line at all (a heredoc body, an `if false` block) or
 		// that one of them clears the key afterwards (`unset K`), and a hard "REFUSES TO START" is the one
 		// verdict that must never be reached by inference. A swallowed line is not a line in either sense.
-		found[key] = { value: plain ? read.value : null, plain, vouched: plain && hazardLine === null, blank: loader !== "cmd" && !spans.inside[i] && assignsNothing(rest), line: i + 1, hazardLine };
+		found[key] = { value: plain ? read.value : null, plain, vouched: plain && hazardLine === null, blank: !spans.inside[i] && assignsNothing(rest), line: i + 1, hazardLine };
 	}
 	return found;
 }
@@ -1293,16 +1068,8 @@ function quoteSpans(input, loader) {
 	const cr = input.map((l) => l.endsWith("\r"));
 	const bare = input.map((l, i) => (cr[i] ? l.slice(0, -1) : l));
 	const inside = bare.map(() => false);
-	if (loader === "cmd") {
-		// `for /f` reads one line at a time: no continuation, no multi-line value, no execution. A `"` in a value is
-		// kept as this loader's one hazard, CAUTIOUSLY: the parser's phase order says FOR variables are substituted after
-		// the line's quotes and operators are parsed, so it cannot make the rest of the line a command, but that is not
-		// Microsoft's documentation and nothing here can run cmd (issue #470; the writer's own rules are `cmdReading`'s).
-		const at = bare.findIndex((l) => (ASSIGNMENT.exec(l)?.[3] ?? "").includes('"'));
-		return { inside, hazard: at === -1 ? null : at + 1 };
-	}
-	// PER LOADER, because the two POSIX loaders do different things with the same file, and one answer for
-	// both was wrong for whichever one it was not written for. Measured on systemd 252:
+	// PER LOADER, because systemd and a sourcing shell do different things with the same file, and one answer
+	// for both was wrong for whichever one it was not written for. Measured on systemd 252:
 	//
 	//   a quote opened MID-value does not continue across lines: `OTHER='a'b'` reads as `ab'` and the NEXT line
 	//   is read as an ordinary assignment, where every shell swallows it. CORRECTED (issue #430 review round 2):
@@ -1338,7 +1105,7 @@ function quoteSpans(input, loader) {
 		inside[i] = within;
 		// TWO BYTES the shell reads differently from this module, on any line, inside a value or not (round-cap review,
 		// measured on macOS). A NUL: bash 3.2 as /bin/sh stops reading the file at the first one, so nothing after it is
-		// set, while dash drops the byte and reads on. A CR ending a line (a CRLF line ending): the wrapper keeps it, so
+		// set, while dash drops the byte and reads on. A CR ending a line (a CRLF line ending): a sourcing shell keeps it, so
 		// `WEBHOOK_SECRET=abc<CR>` is `abc<CR>` to the service, a line of only a CR runs it as a command, and a key
 		// written into such a file would not read as written. Measured: no shipped `.env.example` has one; the fix is to
 		// convert the file to LF line endings.
@@ -1457,7 +1224,7 @@ function shellCommand(bare, cr, i) {
  *                             source under dash); a positional or special parameter; and a `$` before
  *                             anything else or at the end
  *   `( ) ; & | < >` unquoted  the line stops being an assignment: `OTHER=(` is a syntax error that aborts
- *                             the source, and `OTHER=a; exit 0` ends the wrapper before it launches
+ *                             the source, and `OTHER=a; exit 0` ends the sourcing shell before it launches
  *                             anything. Both leave EVERY key in the file unset
  *   a word after a blank      unquoted: the value ended at the blank, so the word is a command (`K=1 z`,
  *                             `K= unset WEBHOOK_SECRET`, `K=1 exit 0`) or a second assignment (`X=a PI_EGRESS=0`
@@ -1586,17 +1353,13 @@ function scanQuotes(text, q0, blank0 = false) {
  * `K="" # tbd` is NOT in it, and the version of this docblock that said otherwise was describing a comment
  * arm the rule does not have: no loader of this file treats a trailing `#` as a comment, so systemd hands
  * the service ` # tbd` while the shells see nothing. That is a disagreement, not an empty value.
- *
- * NOT for the cmd wrapper, which is why the caller passes the loader: `set "K="` UNSETS there, so an empty
- * value is an absent key rather than a blank one, and calling it blank made doctor fail a Windows
- * deployment that starts.
  */
 function assignsNothing(rest) {
 	return /^(?:''|"")*[ \t]*$/.test(rest.replace(/\r+$/, "").replace(/[ \t]+$/, ""));
 }
 
 /**
- * The PLAIN grammar: the shapes systemd, the sourcing shells and the cmd wrapper all read the same way.
+ * The PLAIN grammar: the shapes systemd and a sourcing shell both read the same way.
  * Measured rather than derived, with the corpus and the readings recorded on `readEnvAssignments` above.
  *
  *   empty, `""` and `''`   -> ""
@@ -1608,13 +1371,13 @@ function assignsNothing(rest) {
  * An `=` INSIDE a bare value is literal to every loader (issue #477): systemd's `EnvironmentFile=` splits a line on its
  * first `=` and keeps the rest, the shells expand nothing at an `=` that follows another character (measured in
  * /bin/sh, bash, dash and zsh: `K=isolation=enforced`, `K=a=b=c`, `K=a==b`, `K=a=` and `K=a=:b` all set the text as
- * written), and the cmd wrapper's `tokens=1,*` takes everything after the first `=` run. Refusing it made doctor refuse
+ * written). Refusing it made doctor refuse
  * the documented `PI_BACKEND_FLOOR=isolation=enforced` and then judge no floor at all. Only the two `=` shapes zsh
  * expands stay out: one at the start of the value and one after a `:`.
  *
  * The exclusions each have a measurement behind them. `$`, a backtick and `~` are expanded by the shells and
- * not by systemd. A backslash is an escape to systemd and to the shells, and a literal to the cmd wrapper,
- * so `C:\pi\x` reads as `C:pix` on two of the three. A leading `=` or an embedded `:=` is expanded by zsh
+ * not by systemd. A backslash is an escape to systemd and to the shells, so `C:\pi\x` reads as `C:pix` to
+ * both. A leading `=` or an embedded `:=` is expanded by zsh
  * alone. Whitespace outside quotes ends the value for the shells and does not for systemd. A `#` after
  * whitespace is a comment to the shells and part of the value to systemd, which is the defect issue #392
  * shipped in the scaffold.
@@ -1753,11 +1516,11 @@ export const SYSTEMD_HAZARD_SHAPES = Object.freeze({
 		fix: "put that quoted value on one line and remove the unusual character, or end the line before it with no trailing backslash",
 	},
 	"shell-crlf": {
-		what: "a carriage return (CR) at its end, a CRLF line ending, which the wrapper that sources this file on macOS keeps: a value on that line reaches the service with the CR on its end, and a line holding nothing else runs the CR as a command",
+		what: "a carriage return (CR) at its end, a CRLF line ending, which a shell that sources this file on macOS keeps: a value on that line reaches the service with the CR on its end, and a line holding nothing else runs the CR as a command",
 		fix: "convert the file to LF line endings",
 	},
 	"shell-crlf-comment": {
-		what: "a carriage return (CR) at the end of a comment line, a CRLF line ending: the wrapper that sources this file on macOS would still read the lines below it, but this command refuses CR line endings there, because a key it writes into the file would take the same ending and reach the service with the CR on its end",
+		what: "a carriage return (CR) at the end of a comment line, a CRLF line ending: a shell that sources this file on macOS would still read the lines below it, but this command refuses CR line endings there, because a key it writes into the file would take the same ending and reach the service with the CR on its end",
 		fix: "convert the file to LF line endings",
 	},
 	"shell-nul": {
@@ -2056,93 +1819,23 @@ export function decodeEnvFile(content, { loader = "systemd" } = {}) {
 	return { text, loadHazard: loader === "systemd" ? envFileLoadHazard(content) : null };
 }
 
-/**
- * The variables each service wrapper keeps for itself (issue #470 follow-up). Both wrappers load `.env` into their own
- * scope, so a line could once set one: `env_setup=` (sh) or `ENV_SETUP=` (cmd) named a script the wrapper then ran,
- * `signaled=1` made the sh wrapper exit 0 without starting, and `ERRORLEVEL=` shadowed the exit code the cmd wrapper
- * converts. The wrappers now assign all of them after the load, from values no line reaches, so such a line has no
- * effect, and the reader and writer name it rather than let an operator believe it does anything. PI_ENV_SETUP is on
- * both lists: it is unit configuration and never honoured from the file. The cmd list is compared ignoring case, as
- * `set` does. Kept beside the wrappers' text by a test, which fails when either wrapper's own variables change.
- * PI_WRAPPER_NO_DOTENV (issue #708) joins both: the console's unit sets it, the wrappers test it BEFORE the load and
- * unset it after, so a `.env` line naming it can neither start nor stop the load.
- */
-export const WRAPPER_INTERNAL_KEYS = Object.freeze({
-	shell: Object.freeze(["PI_ENV_SETUP", "PI_WRAPPER_NO_DOTENV", "env_setup", "signaled", "child", "rc"]),
-	cmd: Object.freeze(["PI_ENV_SETUP", "PI_WRAPPER_NO_DOTENV", "ENV_SETUP", "RC", "ERRORLEVEL"]),
-});
-
-/** What a line assigning one of the wrapper's own variables is, and what to do, in the words doctor and the writer use. */
-const WRAPPER_INTERNAL_WHAT = (name) => `assigns ${name}, a variable the service wrapper keeps for itself (deploy/worker-env-wrapper.sh on macOS, .cmd on Windows) and assigns again after loading this file, so the line has no effect${/^pi_env_setup$/i.test(name) ? "; PI_ENV_SETUP is never honoured from this file" : /^pi_wrapper_no_dotenv$/i.test(name) ? "; PI_WRAPPER_NO_DOTENV is unit configuration (the console's service sets it) and never honoured from this file" : ""}`;
-const WRAPPER_INTERNAL_FIX = "remove the line (a setup script is named with pi-dispatch service install --env-setup <path>, never in .env)";
-
-/** A `envFileWrapperInternal` finding as one sentence: the line, what it is, and the fix. */
-export function wrapperInternalSentence(found) {
-	return `line ${found.line} ${WRAPPER_INTERNAL_WHAT(found.name)}. To fix it, ${WRAPPER_INTERNAL_FIX}`;
-}
-
-/**
- * The first line of this text assigning one of the service wrapper's own variables (`WRAPPER_INTERNAL_KEYS`) for this
- * loader, as `{ line, name }`, or `null`; always `null` for systemd, which runs no wrapper. Not a hazard: such a line
- * changes no other key's reading, so doctor says it beside its readings rather than in place of them.
- */
-export function envFileWrapperInternal(text, { loader = "systemd" } = {}) {
-	if (loader === "systemd") return null;
-	const lines = String(text ?? "").split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));
-	if (loader === "cmd") {
-		// The cmd wrapper's own name for the line (`cmdReading`): after any leading `=`, up to the first `=`, with blanks,
-		// quotes and a BOM around it set aside, compared ignoring case. A `#` line (skipped by `eol=#`) needs no test of
-		// its own: its name starts with `#`, which no name on the list does.
-		const names = new Set(WRAPPER_INTERNAL_KEYS.cmd);
-		for (let i = 0; i < lines.length; i++) {
-			const body = lines[i].replace(/^=+/, "");
-			const eq = body.indexOf("=");
-			const name = (eq === -1 ? body : body.slice(0, eq)).replace(/^[ \t\r\ufeff"]+|[ \t\r\ufeff"]+$/g, "");
-			const upper = name.replace(/[a-z]+/g, (m) => m.toUpperCase());
-			if (names.has(upper)) return { line: i + 1, name };
-		}
-		return null;
-	}
-	const names = new Set(WRAPPER_INTERNAL_KEYS.shell);
-	const inside = quoteSpans(lines, loader).inside;
-	for (let i = 0; i < lines.length; i++) {
-		if (inside[i]) continue;
-		const m = ASSIGNMENT.exec(lines[i]);
-		if (m !== null && names.has(m[2])) return { line: i + 1, name: m[2] };
-	}
-	return null;
-}
 
 /**
  * The first line of this file that this command cannot read, or `null`. Same rule as the reader's.
  *
  * Exported because ABSENCE OF A READING IS NOT ABSENCE OF AN ASSIGNMENT, and doctor printed the second when
  * it had the first: a key with no record at all, in a file with a line like this in it, was reported as
- * "unset, so the worker ignores it". Answered for the cmd loader too, which an earlier version refused to
- * do -- so the one cross-line hazard Windows has was invisible to the caller that needed it.
+ * "unset, so the worker ignores it".
  */
 export function envFileHazard(text, { loader = "systemd" } = {}) {
 	const spans = quoteSpans(String(text ?? "").split("\n"), loader);
 	if (spans.hazard !== null) return spans.shape === undefined ? { line: spans.hazard } : { line: spans.hazard, shape: spans.shape };
 	// systemd's own line structure, where it differs from this reader's (issue #447). Only for that loader: the
-	// shells split on LF and carry every quote, and the cmd wrapper reads one line at a time.
+	// shells split on LF and carry every quote.
 	return loader === "systemd" ? envFileSystemdHazard(text) : null;
 }
 
-function readValue(rest, loader) {
-	if (loader === "cmd") {
-		// `for /f "delims=="` takes the rest of the line verbatim, so there is no quoting and no comment.
-		// An empty value UNSETS the variable there (`set "K="`), read from the wrapper's own source rather
-		// than run on Windows.
-		// Verbatim: there is no quoting to strip and no comment syntax. It can still DISAGREE with the POSIX loaders,
-		// which is why a caller asks the loader its own deployment uses rather than blending them.
-		// NOT PLAIN where this reading is not the wrapper's (issue #470, the table at `cmdReading`): `K==v` is `v` to
-		// for /f, not `=v`; a `!` (and a `^` beside one) depends on the registry's delayed expansion; a character outside
-		// ASCII is decoded in the console code page; a control character is not documented at all. A `"` and a `%` keep
-		// the reading the wrapper's own header describes (the quote stays unvouched, as the file's hazard); the WRITER is
-		// stricter and refuses all of them on the line it takes (`cmdValueRefusal`).
-		return rest.startsWith("=") || /[\x00-\x08\x0a-\x1f\x7f!^]|[^\x00-\x7f]/u.test(rest) ? { plain: false, value: null } : { plain: true, value: rest };
-	}
+function readValue(rest) {
 	const trimmedEnd = rest.replace(/[ \t]+$/, "");
 	if (trimmedEnd === "") return { plain: true, value: "" };
 	if (/^[ \t]/.test(trimmedEnd)) return { plain: false, value: null }; // the shells drop it

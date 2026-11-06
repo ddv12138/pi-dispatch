@@ -31,7 +31,7 @@ export function deploymentVenueEnv({ env, fs, envPath, platform, command = "up",
 	// line that platform's loader reads differently is noted and never stops `up`.
 	const linux = platform === "linux";
 	// A caller with a mapping of its own passes it (doctor, so every `.env` read it makes uses one loader).
-	const loader = loaderGiven ?? (linux ? "systemd" : platform === "darwin" ? "shell" : "cmd");
+	const loader = loaderGiven ?? (linux ? "systemd" : platform === "darwin" ? "shell" : "systemd");
 	if (fs.existsSync(envPath)) {
 		let text = null;
 		try {
@@ -85,7 +85,7 @@ export function deploymentVenueEnv({ env, fs, envPath, platform, command = "up",
  */
 export function deploymentValkeyEnv({ env, fs, envPath, platform, command = "up" }) {
 	const linux = platform === "linux";
-	const loader = linux ? "systemd" : platform === "darwin" ? "shell" : "cmd";
+	const loader = platform === "darwin" ? "shell" : "systemd";
 	const notes = [];
 	let keys = {};
 	if (fs.existsSync(envPath)) {

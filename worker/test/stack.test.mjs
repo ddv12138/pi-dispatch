@@ -355,9 +355,6 @@ test("#447 gate round 2: the comment gate, per line: a lone CR elsewhere does no
 	assert.match(readStackKeys("# note\rPI_BACKENDS=podman\n").error, /has a carriage return/, "text after a lone CR on the comment's own line is a line");
 	// To a shell a `#` line reached by a continuation is joined text (b52, measured: bash sets PI_EGRESS=0).
 	assert.ok(readStackKeys("X=a\\\n#;PI_EGRESS=0\n", { loader: "shell" }).error);
-	// The cmd wrapper has no shell hazards, even for a caller about to write.
-	assert.deepEqual(readStackKeys("X=1\nunset Y\n", { loader: "cmd", assumeSpelled: true }), { keys: {} });
-	assert.deepEqual(readStackKeys('X=a"b\n', { loader: "cmd", assumeSpelled: true }), { keys: {} }, "nor the shell branch at all: this line is a cmd hazard, and not what the writer asks about");
 });
 
 test("#447 gate round 3: a file too large for systemd to start the service with is refused, naming the key or the total", () => {
@@ -398,9 +395,8 @@ test("#447: a file that never names a venue key outside a comment is not refused
 	// docker deployment with an odd line elsewhere keeps working.
 	assert.deepEqual(readStackKeys('FOO-BAR="x\nOTHER=1\n"\n'), { keys: {} });
 	assert.deepEqual(readStackKeys("X=1\rOTHER=2\n"), { keys: {} });
-	// The shells split on LF and carry every quote, and the cmd wrapper reads one line at a time: this is systemd's.
+	// The shells split on LF and carry every quote; a bare reader reads one line at a time.
 	assert.deepEqual(readStackKeys("X=1\rPI_BACKENDS=podman\n", { loader: "shell" }), { keys: {} });
-	assert.deepEqual(readStackKeys("PI_BACKENDS=podman\nX=1\rY=2\n", { loader: "cmd" }).keys, { PI_BACKENDS: "podman" });
 });
 
 test("nits/R7/R32: `;` comments, a key inside another key's value, and a leading blank read as systemd reads them", () => {

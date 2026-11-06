@@ -1329,7 +1329,7 @@ function dockerValkeyPasswordStep({ fs, envPath, platform, out, summary, newPass
 		summary.push([VALKEY_PASSWORD_KEY, "no .env here, skipped (set it wherever your env lives); the Valkey up starts then has no password"]);
 		return null;
 	}
-	const loader = platform === "linux" ? "systemd" : platform === "darwin" ? "shell" : "cmd";
+	const loader = platform === "darwin" ? "shell" : "systemd";
 	let keys;
 	try {
 		const read = readValkeyKeys(fs.readFileSync(envPath), { loader, path: envPath });
@@ -1374,7 +1374,7 @@ function dockerValkeyPasswordStep({ fs, envPath, platform, out, summary, newPass
  */
 function dockerValkeyPortStep({ fs, envPath, platform, port, out, summary }) {
 	if (!fs.existsSync(envPath)) return;
-	const loader = platform === "linux" ? "systemd" : platform === "darwin" ? "shell" : "cmd";
+	const loader = platform === "darwin" ? "shell" : "systemd";
 	let decided;
 	try {
 		const found = readEnvAssignments(fs.readFileSync(envPath), [VALKEY_PORT_KEY], { loader })[VALKEY_PORT_KEY];

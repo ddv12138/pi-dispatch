@@ -629,7 +629,7 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 	// A line TOUCHES a key when the key is its leading word, `export ` allowed: that is where a loader could read an
 	// assignment of it. A key name inside another key's value (`PI_ENV_SETUP=/opt/PI_BACKENDS.sh`) touches nothing.
 	const touches = new RegExp(`^[ \\t]*(?:export[ \\t]+)?(${KEYS.join("|")})(?![A-Za-z0-9_])`);
-	// `export K=v` is an assignment only to a loader that SOURCES the file (the macOS wrapper); systemd ignores it.
+	// `export K=v` is an assignment only to a loader that SOURCES the file (a sourcing shell); systemd ignores it.
 	const exact = new RegExp(`^[ \\t]*${loader === "shell" ? "(?:export[ \\t]+)?" : ""}(${KEYS.join("|")})=`);
 	// A `#` line is a comment to every loader. A `;` line (a comment to systemd's EnvironmentFile=) needs no rule of its
 	// own: its leading word is `;`, never a key, so it touches nothing and is not refused (the round 2 nit).
@@ -652,7 +652,7 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 	// A comment is a line that STARTS as one: a `#` line inside a value or a continuation for this loader is part of that
 	// value, and to a shell part of the joined line (`X=a\` + `#;PI_EGRESS=0` sets PI_EGRESS, gate round 2).
 	const afterLoneCr = (l) => (l.includes("\r") ? l.slice(l.indexOf("\r") + 1) : "");
-	const inValue = loader === "cmd" ? [] : envFileValueLines(text, { loader });
+	const inValue = envFileValueLines(text, { loader });
 	const spelledOutside = (commentLine) => (assumeSpelled ? KEYS[0] : KEYS.find((k) => lines.some((l, i) => (commentLine.test(l) && !inValue[i] ? afterLoneCr(l) : l).includes(k))));
 	if (loader === "systemd") {
 		const h = envFileSystemdHazard(text);
@@ -681,15 +681,13 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 		// GITHUB_APP_PRIVATE_KEY="-----BEGIN ...-----" closes, and a PI_BACKENDS above or below it reads normally
 		// (measured on systemd 259: the unit saw both). A quote that never closes runs to the end of the file, so every
 		// key line after it is in doubt.
-		if (loader !== "cmd") {
-			const regions = quotedRegions(text);
-			for (let i = 0; i < lines.length; i++) {
-				const m = touches.exec(lines[i]);
-				if (!m || comment.test(lines[i])) continue;
-				const inside = regions.find((r) => i + 1 > r.open && (r.close === null || i + 1 <= r.close));
-				if (inside) {
-					return { error: `${path} line ${i + 1} (${m[1]}) lies inside the quoted value that opens on line ${inside.open}${inside.close === null ? " and never closes" : ` and closes on line ${inside.close}`}, so the service reads it as part of that value, not as ${m[1]}. Close that quote on its own line, write the value's newlines as \\n escapes, or for a GitHub App key use GITHUB_APP_PRIVATE_KEY_PATH` };
-				}
+		const regions = quotedRegions(text);
+		for (let i = 0; i < lines.length; i++) {
+			const m = touches.exec(lines[i]);
+			if (!m || comment.test(lines[i])) continue;
+			const inside = regions.find((r) => i + 1 > r.open && (r.close === null || i + 1 <= r.close));
+			if (inside) {
+				return { error: `${path} line ${i + 1} (${m[1]}) lies inside the quoted value that opens on line ${inside.open}${inside.close === null ? " and never closes" : ` and closes on line ${inside.close}`}, so the service reads it as part of that value, not as ${m[1]}. Close that quote on its own line, write the value's newlines as \\n escapes, or for a GitHub App key use GITHUB_APP_PRIVATE_KEY_PATH` };
 			}
 		}
 		const hazard = envFileHazard(text, { loader });
@@ -697,7 +695,7 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 		if (hazard !== null) {
 			return { error: `${path} line ${hazard.line} is one this command cannot read (an open quote, a continuation, or a line that runs), and the file assigns ${touched.key}, so what the service reads for it is unknown. Fix that line first` };
 		}
-	} else if (loader === "shell" || (assumeSpelled && loader !== "cmd")) {
+	} else if (loader === "shell" || assumeSpelled) {
 		// A sourcing shell can assign a key in the MIDDLE of a line (`X=a PI_EGRESS=0` is two assignments), which touches
 		// no line at its start, so here the shell's file-level hazard is asked whenever a key is spelled on a line that is
 		// not a comment (issue #447, gate round 1; the same gate as systemd's above, with `#` the shells' only comment).
@@ -776,7 +774,7 @@ export function readValkeyKeys(content, { loader = "systemd", path = ".env" } = 
 function unplainCause(value) {
 	const v = String(value).replace(/[ \t]+$/, "");
 	const quoted = /^["']/.test(v);
-	if (!quoted && /[[\]]/.test(v)) return `an unquoted [ or ]: the macOS wrapper sources the file with sh, which may read it as a filename pattern. Quote the value, for example VALKEY_URL="redis://[::1]:6379", which every loader reads the same`;
+	if (!quoted && /[[\]]/.test(v)) return `an unquoted [ or ]: a shell that sources the file runs sh, which may read it as a filename pattern. Quote the value, for example VALKEY_URL="redis://[::1]:6379", which every loader reads the same`;
 	// A control or invisible character is refused quoted or not (gate round 2 of PR #478), so quoting cannot help.
 	const hidden = invisibleCharacter(v);
 	if (hidden !== null) return `${hidden}, which doctor does not show back, quoted or not. Remove it`;

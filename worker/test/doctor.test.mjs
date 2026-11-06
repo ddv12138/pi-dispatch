@@ -1972,20 +1972,19 @@ test("doctor: a .env that is a FIFO does not hang the boot-file checks (#384)", 
 });
 
 test("doctor: an `export`ed key is honoured by the loader this platform's service uses (#357, #384)", async () => {
-	// Three states, not two, and WHICH of them an `export` line is depends on the platform: systemd's
-	// `EnvironmentFile=` does not read it (measured on 252, the journal says so), while the darwin and
-	// win32 wrappers source or split the file and do. Doctor names the loader its own platform renders.
+	// Two states, not one, and WHICH an `export` line is depends on the platform: systemd's literal grammar
+	// does not read it (measured on 252, the journal says so), while a shell that sources the file does.
+	// Doctor names the loader its own platform renders.
 	// ALL THREE PLATFORMS, driven explicitly. This test used to branch on `process.platform` and assert one
 	// of two shapes, which meant it checked darwin's answer on a mac and linux's in CI and NEVER checked
-	// win32 at all -- and win32 is where the label was wrong: the cmd wrapper splits on the first `=`, so
-	// `export PI_X` is a variable NAME there and that loader does not read the key either.
+	// win32 at all.
 	const cwd = scaffoldedCwd();
 	const path = join(cwd, "pause-windows.json");
 	writeFileSync(join(cwd, ".env"), `export PI_PAUSE_WINDOWS_FILE=${path}\n`);
 	for (const [platform, expected, why] of [
 		["linux", /only a shell that SOURCES this file reads, and systemd's EnvironmentFile= does not/, "systemd's grammar is bare NAME=VALUE (measured on 252: the journal says `Ignoring invalid environment assignment`)"],
-		["darwin", /and loads: the service reads that file/, "the launchd wrapper SOURCES the file, so the export line is an ordinary assignment to it"],
-		["win32", /only a shell that SOURCES this file reads, and the \.cmd wrapper does not/, "`for /f ... delims==` makes `export PI_PAUSE_WINDOWS_FILE` the variable NAME"],
+		["darwin", /and loads: the service reads that file/, "a shell that sources the file SOURCES the file, so the export line is an ordinary assignment to it"],
+		["win32", /only a shell that SOURCES this file reads, and systemd's EnvironmentFile= does not/, "win32 uses the same literal grammar as Linux, so the export line is not an assignment there either"],
 	]) {
 		const { out, text } = capture();
 		await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform });
@@ -2141,34 +2140,29 @@ test("doctor: a control byte in a value from THIS SHELL never reaches the termin
 	assert.match(text(), /PI_PAUSE_WINDOWS_FILE is set in this shell to a file the worker cannot load/, "the finding still lands");
 });
 
-test("doctor: the WINDOWS loader is judged by its own rules, not by the POSIX ones (#384)", async () => {
-	// Three findings in one platform, all of them doctor telling a Windows operator something false:
-	//
-	//   KEY=                      `set "K="` UNSETS in cmd, so this is a key that is off, not a refused boot
-	//   export KEY=<path>         cmd makes `export KEY` a variable NAME, so THAT loader does not read it
-	//   KEY=C:\pi\pause.json      one assignment, and comparing it against a POSIX loader that will not
-	//                             vouch for a backslash reported it as "assigned TWICE with different values"
-	//
-	// The third is the line `renderEnvValue` itself writes on win32, so doctor was contradicting the command
-	// that wrote the file, on the commonest path shape the platform has.
+test("doctor: win32 uses the literal .env grammar, the same as Linux (#384)", async () => {
+	// win32 has no separate cmd grammar: it reads the file with the same literal rule systemd's
+	// `EnvironmentFile=` uses. So a blank line is blank (a refused boot) and an `export` line is not an
+	// assignment, exactly as on Linux.
 	const cwd = scaffoldedCwd();
 	const win = (out) => ({ ...scaffoldDeps(out, cwd), platform: "win32" });
 
 	writeFileSync(join(cwd, ".env"), "PI_PAUSE_WINDOWS_FILE=\n");
 	const a = capture();
 	const codeA = await runDoctor(imgEnv(), win(a.out));
-	assert.doesNotMatch(a.text(), /assigned an EMPTY value/, "an empty value is an UNSET key under the cmd wrapper");
-	assert.notEqual(codeA, 1, "so a deployment that starts is not failed");
+	assert.match(a.text(), /assigned an EMPTY value/, "an empty value is an empty value on win32 too");
+	assert.equal(codeA, 1, "so a deployment that cannot start is failed");
 
 	writeFileSync(join(cwd, ".env"), `export PI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json")}\n`);
 	const b = capture();
 	await runDoctor(imgEnv(), win(b.out));
-	assert.match(b.text(), /which only a shell that SOURCES this file reads, and the \.cmd wrapper does not/, "the loader that reads an export line is a sourcing shell, and it is not this platform's");
+	assert.match(b.text(), /which only a shell that SOURCES this file reads, and systemd's EnvironmentFile= does not/, "the loader that reads an export line is a sourcing shell, and it is not this platform's");
 
 	writeFileSync(join(cwd, ".env"), "PI_PAUSE_WINDOWS_FILE=C:\\pi\\pause-windows.json\n");
 	const c = capture();
 	await runDoctor(imgEnv(), win(c.out));
-	assert.doesNotMatch(c.text(), /assigned TWICE/, "one assignment is not two, whatever a loader this platform does not use would make of it");
+	assert.doesNotMatch(c.text(), /assigned TWICE/, "one assignment is not two, whatever another loader would make of it");
+	assert.match(c.text(), /is not in the form every loader reads the same way/, "a bare backslash path is outside the shared grammar, said as a line and not as a value");
 });
 
 test("doctor: a CRLF .env is judged on Windows, where CRLF is what writes it (#384)", async () => {
@@ -2179,8 +2173,8 @@ test("doctor: a CRLF .env is judged on Windows, where CRLF is what writes it (#3
 	writeFileSync(join(cwd, ".env"), `PI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json")}\r\n`);
 	const { out, text } = capture();
 	await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform: "win32" });
-	assert.match(text(), /✓ PI_PAUSE_WINDOWS_FILE is set in .*\.env .* and loads/, "the cmd wrapper's `for /f` strips the CR");
-	// AND ON LINUX TOO, because systemd 252 strips the CR (measured on the rig) exactly as `for /f` does.
+	assert.match(text(), /✓ PI_PAUSE_WINDOWS_FILE is set in .*\.env .* and loads/, "the literal loader strips the CR");
+	// AND ON LINUX TOO, because systemd 252 strips the CR (measured on the rig) exactly as the literal loader does.
 	// Only a SOURCING shell keeps it in the value, so only darwin sees an ambiguity here -- and holding the
 	// CR against all three made a CRLF deployment unjudgeable on the two platforms that read it cleanly,
 	// on files `setEnvKeyIfEmpty` writes that way by contract.
@@ -2189,9 +2183,9 @@ test("doctor: a CRLF .env is judged on Windows, where CRLF is what writes it (#3
 	assert.match(text2(), /✓ PI_PAUSE_WINDOWS_FILE is set in .*\.env .* and loads/, "systemd strips the CR, so the line is ordinary there");
 	const { out: out3, text: text3 } = capture();
 	await runDoctor(imgEnv(), { ...scaffoldDeps(out3, cwd), platform: "darwin" });
-	// On macOS the wrapper sources the file and keeps every CR, so the whole file is named, with its fix (round-cap
+	// On macOS a shell sources the file and keeps every CR, so the whole file is named, with its fix (round-cap
 	// review of #447), rather than one line's form.
-	assert.match(text3(), /line 1 has a carriage return \(CR\) at its end, a CRLF line ending, which the wrapper that sources this file on macOS keeps/, "and the disagreement is reported where it is real: a sourcing shell keeps the CR");
+	assert.match(text3(), /line 1 has a carriage return \(CR\) at its end, a CRLF line ending, which a shell that sources this file on macOS keeps/, "and the disagreement is reported where it is real: a sourcing shell keeps the CR");
 	assert.match(text3(), /on line 1 of that file, convert the file to LF line endings, then run doctor again/);
 });
 
@@ -2249,17 +2243,16 @@ test("doctor: a .env that is a DIRECTORY is not a key that is unset (#384)", asy
 	assert.doesNotMatch(text(), /exists but PI_PAUSE_WINDOWS_FILE is unset/, "and makes no claim about a key in a file nobody opened");
 });
 
-test("doctor: on win32 a bare KEY= is not an `export` line that the file does not contain (#384)", async () => {
-	// The round-1 repair nulled the cmd reading of an empty value so Windows would stop being failed for a
-	// key that is simply unset there -- and that dropped the key into the export-only branch, so doctor
-	// quoted `export PI_PAUSE_WINDOWS_FILE=` at an operator whose file has no such line and told them to
-	// drop a prefix that is not there. The export signal asks the FILE, not the per-platform view.
+test("doctor: on win32 a bare KEY= is an empty value, never an `export` line the file does not contain (#384)", async () => {
+	// win32 reads the file with the literal grammar, so an empty value is the refused boot it is on Linux --
+	// and the export-only signal must still ask the FILE, quoting no line the operator did not write.
 	const cwd = scaffoldedCwd();
 	writeFileSync(join(cwd, ".env"), "PI_PAUSE_WINDOWS_FILE=\n");
 	const { out, text } = capture();
 	const code = await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform: "win32" });
 	assert.doesNotMatch(text(), /as `export PI_PAUSE_WINDOWS_FILE=/, "no line is quoted that the file does not contain");
-	assert.notEqual(code, 1, "and an empty value still just unsets the key there");
+	assert.match(text(), /is assigned an EMPTY value/, "the empty value is judged as what it is");
+	assert.equal(code, 1, "so a deployment that cannot start fails on win32 too");
 });
 
 test("doctor: a line swallowed by the one above it points at the line above (#384)", async () => {
@@ -2307,19 +2300,16 @@ test("doctor: a value it will not vouch for is never printed as what another loa
 	assert.match(text(), /cannot be read off .*\.env: line 3/, "the line that stopped it is named instead");
 });
 
-test("doctor: the win32 comparison guard is exercised by the paths `up` actually writes there (#384)", async () => {
-	// The guard that stops a single assignment being reported as "assigned TWICE" on Windows was unpinned:
-	// the only win32 fixture used a BACKSLASH path, which no POSIX loader vouches for, so the comparison
-	// never ran and deleting the guard left the suite green. `up` writes FORWARD slashes on win32
-	// (`renderEnvValue` quotes nothing there), and those ARE vouched for by both readers.
+test("doctor: the win32 path shape `up` writes resolves as Windows would, and the literal loader judges it (#384)", async () => {
+	// win32 now compares the literal reading against a sourcing shell's, so an `export` line really is a
+	// disagreement there; and `C:/pi/...` is not absolute to a POSIX `isAbsolute`, so the host's own rule
+	// used to join it under doctor's cwd and compute every win32 verdict against a path shape Windows never
+	// produces -- including the ones these tests assert.
 	const cwd = scaffoldedCwd();
 	writeFileSync(join(cwd, ".env"), "PI_PAUSE_WINDOWS_FILE=C:/pi/pause-windows.json\nexport PI_PAUSE_WINDOWS_FILE=C:/pi/other.json\n");
 	const { out, text } = capture();
 	await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform: "win32" });
-	assert.doesNotMatch(text(), /assigned TWICE/, "no POSIX shell reads a .env on Windows, so there is nothing to disagree with");
-	// AND THE PATH IS RESOLVED AS WINDOWS WOULD. `C:/pi/...` is not absolute to a POSIX `isAbsolute`, so the
-	// host's own rule joined it under doctor's cwd and every win32 verdict was computed against a path shape
-	// Windows never produces -- including the ones these tests assert.
+	assert.match(text(), /assigned TWICE/, "the two loaders disagree about the export line, and doctor names it");
 	assert.match(text(), /C:\/pi\/pause-windows\.json/, "the path is reported as the operator wrote it");
 	assert.doesNotMatch(text(), /pi-scaffold-[^/]*\/C:/, "and never joined under this cwd as though it were relative");
 });
@@ -8177,7 +8167,7 @@ test("doctor's .env reads pass ONE allowlist and ONE loader mapping (#453 gate 3
 	// The three the issue keeps shell-only on purpose stay out of the allowlist.
 	for (const key of ["XDG_DATA_HOME", "DOCKER_CONTENT_TRUST"]) assert.ok(!SERVICE_ENV_KEYS.includes(key) && Object.hasOwn(DOCTOR_SHELL_KEYS, key), key);
 	assert.deepEqual(serviceEnvKeys(["PI_JOB_IMAGE", "PI_ENV_SETUP", "VALKEY_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"], ["ANTHROPIC_API_KEY"]), ["PI_JOB_IMAGE", "VALKEY_URL", "ANTHROPIC_API_KEY"]);
-	assert.deepEqual(["linux", "win32", "darwin", "freebsd"].map(serviceEnvLoader), ["systemd", "cmd", "shell", "shell"]);
+	assert.deepEqual(["linux", "win32", "darwin", "freebsd"].map(serviceEnvLoader), ["systemd", "systemd", "shell", "shell"]);
 	// The venue read uses that mapping too: on freebsd a sourcing shell reads `export PI_BACKENDS=local` as an assignment.
 	const cwd = scaffoldedCwd();
 	writeFileSync(join(cwd, ".env"), "export PI_BACKENDS=local\n");
@@ -8897,29 +8887,6 @@ test("doctor --live on `local` reaching a rootless Podman 4.9 builds no peer net
 	assert.ok(!calls.some((c) => c.args.slice(0, 2).join(" ") === "network create"), "no peer network");
 	assert.ok(checks.some((c) => /jobToJobIsolation not read back: no peer networks were built, because the rootless network keeper pi-dispatch-netns-keeper does not hold/.test(c.label)), checks.map((c) => c.label).join("\n"));
 	assert.ok(!calls.some((c) => c.args[0] === "info"), "the collection's answer is used, not a second read");
-});
-
-test("doctor: a .env line assigning a wrapper's own variable is named beside the readings, never its value (#470)", async () => {
-	// The wrappers assign their own variables again after the load, so such a line has no effect; doctor says so for the
-	// platforms that run a wrapper, keeps its readings of the two boot keys, and prints the NAME only.
-	for (const [platform, line, name] of [["darwin", "PI_ENV_SETUP=/tmp/evil.sh", "PI_ENV_SETUP"], ["darwin", "env_setup=/tmp/evil.sh", "env_setup"], ["win32", "Env_Setup=/tmp/evil.sh", "Env_Setup"]]) {
-		const cwd = scaffoldedCwd();
-		writeFileSync(join(cwd, ".env"), [`PI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json").replace(/\\/g, "/")}`, line].join("\n"));
-		const { out, text } = capture();
-		const checks = await collectChecks(imgEnv(), { out, cwd, home: cwd, platform, spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fileExists: existsSync, readEnvFile: (p) => readFileSync(p, "utf8") });
-		const warned = checks.find((c) => c.label.includes(`line 2 assigns ${name}, a variable the service wrapper keeps for itself`));
-		assert.ok(warned, `${platform}: the line is named`);
-		assert.equal(warned.warn, true, "a warning: the line has no effect");
-		assert.match(warned.fix, /remove the line \(a setup script is named with pi-dispatch service install --env-setup <path>, never in \.env\), then run doctor again/);
-		assert.ok(!(JSON.stringify(checks) + text()).includes("/tmp/evil.sh"), "the value never leaves .env");
-		assert.ok(checks.some((c) => /PI_PAUSE_WINDOWS_FILE is set in/.test(c.label)), "and the boot key's reading stands");
-	}
-	// Linux runs no wrapper: nothing to say.
-	const cwd = scaffoldedCwd();
-	writeFileSync(join(cwd, ".env"), "env_setup=/tmp/evil.sh\n");
-	const { out } = capture();
-	const checks = await collectChecks(imgEnv(), { out, cwd, home: cwd, platform: "linux", spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fileExists: existsSync, readEnvFile: (p) => readFileSync(p, "utf8") });
-	assert.ok(!checks.some((c) => c.label.includes("keeps for itself")));
 });
 
 // Issue #464: the jobs dir is this account's. A fake fs whose files are `{ path: { uid, dir, link, writable } }`; any

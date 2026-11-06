@@ -2,11 +2,12 @@
  * ONE resolver for the keys a pi-dispatch service reads from its deployment's `.env` (issue #471), shared by `doctor`
  * and the admin panel so the two cannot answer "what does the service run with" two ways.
  *
- * The service never sees the environment of the shell an operator runs a command in: under systemd its environment is
- * the unit's plus `EnvironmentFile=`, and the launchd and Windows wrappers source the file inside the child. A worker
- * started by hand (`pi-dispatch worker`) sees that shell and no file at all. A command asked about the deployment
- * cannot tell which of the two runs it, and does not guess. Its rule, the one `up` and doctor already apply to the
- * venue keys (`deploymentVenueEnv`, issue #453) and doctor to `PI_WORKER_NAME` (#464), now for every key:
+ * The service never sees the environment of the shell an operator runs a command in: a containerised service gets its
+ * environment from compose's `env_file`, and a worker on a host reads its `.env` with the loader its platform selects
+ * (systemd's literal grammar, or a sourcing shell). A worker started by the operator (`pi-dispatch worker`) sees that
+ * shell and no file at all. A command asked about the deployment cannot tell which of the two runs it, and does not
+ * guess. Its rule, the one `up` and doctor already apply to the venue keys (`deploymentVenueEnv`, issue #453) and
+ * doctor to `PI_WORKER_NAME` (#464), now for every key:
  *
  *   - this shell's value where it sets the key (an operator who starts the worker by hand from this shell runs it);
  *   - else the `.env` value, read with the service's own loader, from a line that loader reads exactly as written;
@@ -16,8 +17,8 @@
  *   - a file the service's loader reads differently somewhere, or refuses to load (`hazard`), gives no value for any
  *     key the file spells, and each such key is named.
  *
- * A key only this shell sets is taken as the shell's and not reported: the service may be given it by its
- * `--env-setup` script or its unit, neither of which a command can read in general.
+ * A key only this shell sets is taken as the shell's and not reported: the service may be given it by its deployment's
+ * environment, which a command cannot read in general.
  *
  * Nothing here loads a `.env` into a process (`docs/secrets.md`): the result is an object the caller judges from.
  */
@@ -26,10 +27,10 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, readEnvAssignments } from "./env-file.mjs";
 
-/** The loader of the deployment's `.env` on this platform: systemd's grammar, the cmd grammar, or a sourcing shell.
- * sourcing shell everywhere else. ONE mapping for every `.env` read. */
+/** The loader of the deployment's `.env` on this platform: systemd's literal grammar on Linux and Windows, a
+ * sourcing shell on macOS and the other POSIX hosts. ONE mapping for every `.env` read. */
 export function serviceEnvLoader(platform) {
-	return platform === "linux" ? "systemd" : platform === "win32" ? "cmd" : "shell";
+	return platform === "linux" || platform === "win32" ? "systemd" : "shell";
 }
 
 /**
@@ -72,8 +73,8 @@ export function resolveServiceEnv({ env, file, keys }) {
 			if (shell === undefined) out.hazardSkipped.push(key);
 			continue;
 		}
-		// An empty value UNSETS under the cmd wrapper (`set "K="`), so there the service runs without the key.
-		const own = file.loader === "cmd" && reads[key]?.plain && reads[key].value === "" ? undefined : reads[key];
+		// An empty value is an empty value to every loader left, so the service gets the key, blank.
+		const own = reads[key];
 		if (own === undefined) {
 			// Set only in this shell (issue #471, gate round 1): a worker started from this shell runs with it, a service
 			// reading this file does not, so the caller can name it where it knows a service is installed.

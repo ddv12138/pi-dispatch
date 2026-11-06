@@ -60,7 +60,7 @@ export function endpointsFileSetting({ env, cwd, platform = process.platform, re
 		} catch (err) {
 			return { error: `${envPath} could not be read (${err?.code ?? err?.message}), so where the declared model endpoints are is not known` };
 		}
-		const loader = platform === "linux" ? "systemd" : platform === "win32" ? "cmd" : "shell";
+		const loader = platform === "linux" || platform === "win32" ? "systemd" : "shell";
 		const found = readEnvAssignments(text, ["PI_MODEL_ENDPOINTS_FILE"], { loader }).PI_MODEL_ENDPOINTS_FILE;
 		if (found) {
 			if (!found.plain) return { error: `${envPath} line ${found.line} sets PI_MODEL_ENDPOINTS_FILE in a way this command cannot read the same as the service does: write it as a plain KEY=value line` };

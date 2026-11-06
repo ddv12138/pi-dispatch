@@ -50,13 +50,13 @@ test("a file the service's loader reads differently somewhere gives no value for
 	assert.equal(r.env.B, "shell");
 });
 
-test("under the cmd wrapper an empty value unsets the key, so the service runs without it (#471)", () => {
-	const cmd = resolveServiceEnv({ env: {}, file: fileOf("A=\n", "cmd"), keys: ["A"] });
-	assert.equal(cmd.env.A, undefined);
-	assert.deepEqual(cmd.fromFile, {});
+test("an empty value is an empty value to every loader (#471)", () => {
+	// win32 uses the same literal grammar as Linux: an empty assignment gives the service the empty value,
+	// not an absent key.
 	const systemd = resolveServiceEnv({ env: {}, file: fileOf("A=\n"), keys: ["A"] });
-	assert.equal(systemd.env.A, "", "systemd hands the worker the empty value");
-	assert.deepEqual(["linux", "win32", "darwin"].map(serviceEnvLoader), ["systemd", "cmd", "shell"]);
+	assert.equal(systemd.env.A, "", "the literal loader hands the worker the empty value");
+	assert.deepEqual(systemd.fromFile, { A: "" });
+	assert.deepEqual(["linux", "win32", "darwin"].map(serviceEnvLoader), ["systemd", "systemd", "shell"]);
 });
 
 test("deploymentServiceEnv reads a regular file once, and says a path it cannot read rather than calling it unset (#471)", () => {

@@ -507,7 +507,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	//   K=30<TAB>   # comment      systemd "30\t# comment"          compose "30\t# comment"
 	//   K=30# comment              systemd "30# comment"            compose "30# comment"
 	//
-	// Only a shell sourcing the file (`deploy/worker-env-wrapper.sh`) reads `#` as a comment everywhere. So
+	// Only a shell that sources the file reads `#` as a comment everywhere. So
 	// five live values reached the worker with prose in them, four were refused by `loadConfig`, and the boot
 	// exited 2 -- the code `RestartPreventExitStatus=2` deliberately leaves stopped.
 	//
@@ -536,9 +536,8 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// half of this defect, where a job asks docker for an image with a sentence in its name.
 	//
 	// A value that genuinely needs a space is not refused by the three parsers above: systemd, compose and a
-	// sourcing shell all agree on `'a b'` and `"a b"`. The one that does not is
-	// `deploy/worker-env-wrapper.cmd`, which splits on the first `=` and keeps the quotes. So the no-whitespace
-	// bound is about the scaffold staying legible to every reader it has, not about quoting being ambiguous.
+	// sourcing shell all agree on `'a b'` and `"a b"`. So the no-whitespace bound is about the scaffold
+	// staying legible to every reader it has, not about quoting being ambiguous.
 	const txt = readFileSync(join(REPO_ROOT, ".env.example"), "utf8");
 	const offenders = [];
 	let scanned = 0;
