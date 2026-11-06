@@ -135,24 +135,14 @@ none in view.
 <dl class="facts"><div class="fact"><dt>run.flow</dt><dd>fix; deployment default: required by the trigger</dd></div><div class="fact"><dt>run.backend</dt><dd>not set; deployment default: local</dd></div><div class="fact"><dt>run.provider</dt><dd>not set; deployment default: anthropic</dd></div><div class="fact"><dt>run.model</dt><dd>not set; deployment default: claude-sonnet-5-5</dd></div><div class="fact"><dt>run.maxTurns</dt><dd>not set; deployment default: 30</dd></div><div class="fact"><dt>run.progress</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.statusComment</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.steer</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.recover</dt><dd>not set; deployment default: false</dd></div></dl>
 <h3>By hand</h3>
 <dl class="facts"><div class="fact"><dt>run.maxTokens</dt><dd>not set; deployment default: 2000000</dd></div><div class="fact"><dt>run.models</dt><dd>not set; deployment default: unrestricted</dd></div><div class="fact"><dt>run.mcp</dt><dd>not set; deployment default: none unless named by the trigger</dd></div><div class="fact"><dt>run.secrets</dt><dd>0; deployment default: none</dd></div><div class="fact"><dt>run.secretBundle</dt><dd>not set; deployment default: project default</dd></div><div class="fact"><dt>run.resume</dt><dd>true; deployment default: false</dd></div><div class="fact"><dt>run.awaitInput</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.image</dt><dd>not set; deployment default: pi-job:latest</dd></div><div class="fact"><dt>run.waitFor</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.replicas</dt><dd>not set; deployment default: 1</dd></div><div class="fact"><dt>run.packages</dt><dd>false; deployment default: true</dd></div><div class="fact"><dt>run.skillsDir</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.instructions</dt><dd>set (operator only); deployment default: none</dd></div><div class="fact"><dt>run.task</dt><dd>not set; deployment default: required for cron</dd></div><div class="fact"><dt>run.kind</dt><dd>github; deployment default: selected by the trigger kind</dd></div><div class="fact"><dt>run.folder</dt><dd>not set; deployment default: required for cron</dd></div><div class="fact"><dt>run.repository</dt><dd>not set; deployment default: forge routing</dd></div><div class="fact"><dt>run.command</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.portfolio</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.github</dt><dd>not set; deployment default: false</dd></div><div class="fact"><dt>run.fallbackModels</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.secretsProfile</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.gates</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.gateTimeout</dt><dd>not set; deployment default: no trigger expiry override</dd></div><div class="fact"><dt>run.gateBudgetRaiseTokens</dt><dd>not set; deployment default: none</dd></div><div class="fact"><dt>run.excludeTools</dt><dd>not set; deployment default: none</dd></div></dl>
-<h3>Its runs&#39; sandbox</h3>
-<dl class="facts"><div class="fact"><dt>build3</dt><dd>podman (that host&#39;s deployment default); blessed; liveTranscript: yes, steering: yes, recovery: yes, sandboxShell: yes</dd></div><div class="fact"><dt>mini1</dt><dd>local (that host&#39;s deployment default); blessed; liveTranscript: yes, steering: yes, recovery: yes, sandboxShell: yes</dd></div><div class="fact"><dt>mini2</dt><dd>local (that host&#39;s deployment default); blessed; liveTranscript: yes, steering: yes, recovery: yes, sandboxShell: yes</dd></div></dl>
-<p>These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend. Hosts missing its required secret or wait profile are excluded where their capability list is published.</p>
+<p>Hosts missing its required secret or wait profile are excluded where their capability list is published.</p>
 <p>
 <svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg>
-<a href="/fleet/venue?name=local"
->local</a
+<span class="code">local</span
 > (deployment default).
 </p>
-<dl class="facts"><div class="fact"><dt>liveTranscript</dt><dd>yes</dd></div><div class="fact"><dt>steering</dt><dd>yes</dd></div><div class="fact"><dt>recovery</dt><dd>yes</dd></div><div class="fact"><dt>sandboxShell</dt><dd>yes</dd></div></dl>
 <p>
-Reopen a retained workspace with pi-dispatch sandbox &lt;job id&gt;.
-Workspaces are kept for 24 hours; 0 keeps none.
-</p>
-
-
-<p>
-1 independent sandbox(s) race each event, on separate branches and, for development flows, separate pull requests.
+1 independent runs race each event, on separate branches and, for development flows, separate pull requests.
 Secret profile: none. Bundle:
 no declared project bundle.
 </p></div></section><section id="p-trigger-edit" data-panel></section></div><div class="stack"><section id="p-trigger-trust" data-panel><div class="card"><div class="card__head"><h2>Trust model</h2></div><p>

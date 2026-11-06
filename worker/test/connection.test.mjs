@@ -117,7 +117,7 @@ test("a connector whose client's SELECT was refused fails the ready check and re
 test("valkey:// and valkeys:// are aliases of redis:// and rediss:// wherever a scheme is judged (gate round 3 of PR #478)", async () => {
 	// They connected before #477's scheme check refused them; an upgrading deployment must keep working.
 	const { valkeyUrlProblem } = await import("../src/connection.mjs");
-	const { pinnedValkeyUrl, valkeySchemeOf, valkeyTarget } = await import("../src/podman-stack.mjs");
+	const { pinnedValkeyUrl, valkeySchemeOf, valkeyTarget } = await import("../src/stack.mjs");
 	assert.deepEqual(["redis:", "valkey:", "rediss:", "valkeys:", "unix:", "http:"].map(valkeySchemeOf), ["redis:", "redis:", "rediss:", "rediss:", null, null]);
 	for (const url of ["valkey://127.0.0.1:6379", "valkey://127.0.0.1:6379/3", "valkeys://valkey.lan:6380/2"]) {
 		assert.equal(valkeyUrlProblem(url), null, url);

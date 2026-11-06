@@ -373,7 +373,8 @@ test("tokens kept for a role this release does not know: a warning, in the singu
 	assert.deepEqual(labels(consoleChecks(d.env, { cwd: d.cwd })), [
 		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only and outside every job folder (1 operator, 0 viewers)`,
 		"warn console: 2 tokens carry a role this pi-dispatch does not know, so a console of this release signs them in nowhere",
-		"ok console: listens on 127.0.0.1:4790 (the default)",
+		"ok console: listens on 0.0.0.0:4790 (the default)",
+		"warn console: the default 0.0.0.0:4790 listens on every IPv4 interface, where tokens and session cookies cross the network in plain HTTP",
 	]);
 	assert.equal(consoleChecks(d.env, { cwd: d.cwd })[1].fix, "upgrade pi-dispatch and the console");
 	write(kept.slice(0, 1));

@@ -24,7 +24,7 @@ import { fileURLToPath } from "node:url";
 import { execFileSync, spawnSync } from "node:child_process";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test", "gateway/test"];
+const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test"];
 
 const run = (cmd, args) => execFileSync(cmd, args, { cwd: ROOT, encoding: "utf8" });
 

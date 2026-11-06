@@ -152,29 +152,6 @@ Next:
 Web console (optional): pi-dispatch up --console
 `;
 
-// The podman ladder, docs/podman.md "Setup" in the order a fresh folder needs it, linger named up front (gate 456).
-const PODMAN_NEXT = `
-Next (the podman venue; run these as the worker's own account. First set the account up as the Podman guide's "Setup"
-steps 1-4 say (https://github.com/edgehero/pi-dispatch/blob/main/docs/podman.md), linger included:
-sudo loginctl enable-linger <account>, without which a job gets no bounds):
-  1. podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest
-                                                        # the prebuilt job image, in this account's own store
-  2. edit .env                                          # PI_BACKENDS=podman, and ANTHROPIC_API_KEY (or your provider's key)
-  3. pi-dispatch up                                     # Valkey and the egress proxy as Quadlet units in your user manager
-  4. pi-dispatch doctor                                 # verify Podman, Valkey, image, and key
-  5. pi-dispatch service install                        # the worker as a user service, after those units (also installs them)
-  6. pi-dispatch doctor --live                          # read the bounds, egress and job user back off real containers
-
-Web console (optional): pi-dispatch up --console
-`;
-
-// Off Linux the podman venue refuses the host, so there is no ladder to print.
-const PODMAN_OFF_LINUX = `
-Next: PI_BACKENDS lists only the podman venue, which runs on Linux alone: on this host the worker refuses it
-(podman-platform), so there are no podman steps to run here. Run this deployment on a Linux host, or add \`local\` to
-PI_BACKENDS to run jobs on Docker here (then run \`pi-dispatch init\` again for those steps).
-`;
-
 function nextFor({ envFile, env, venues, platform = "linux" } = {}) {
 	const dir = tmp();
 	writeFileSync(join(dir, ".env.example"), "ANTHROPIC_API_KEY=\n");
@@ -185,33 +162,18 @@ function nextFor({ envFile, env, venues, platform = "linux" } = {}) {
 }
 
 test("init's next steps: the docker text byte for byte wherever `local` is a venue (#453)", () => {
+	// The podman venue left with the sandbox prune: every list naming it is refused as an unknown backend (the
+	// gate test below), so the docker ladder is what any readable deployment gets.
 	for (const [label, opts] of [
 		["no env, fresh .env", {}],
 		["shell PI_BACKENDS unset, .env without it", { envFile: "ANTHROPIC_API_KEY=\n" }],
-		["local,podman in .env", { envFile: "PI_BACKENDS=local,podman\n" }],
-		["podman,local in the shell", { env: { PI_BACKENDS: "podman,local" } }],
-		["'local, podman' in the shell", { env: { PI_BACKENDS: "local, podman" } }],
-		["up's venues", { venues: { localUsed: true, podmanUsed: true, podmanDefault: false }, env: { PI_BACKENDS: "podman" } }],
-		["off Linux with local listed", { env: { PI_BACKENDS: "local,podman" }, platform: "darwin" }],
+		["local in the shell", { env: { PI_BACKENDS: "local" } }],
+		["up's venues", { venues: { localUsed: true } }],
+		["off Linux with local listed", { env: { PI_BACKENDS: "local" }, platform: "darwin" }],
 	]) {
 		const { text } = nextFor(opts);
 		assert.ok(text.endsWith(DOCKER_NEXT), `${label}:\n${text}`);
 		assert.doesNotMatch(text, /podman pull/, label);
-	}
-});
-
-test("init's next steps: the podman ladder when podman is the only venue, from the shell, the .env or up (#453)", () => {
-	for (const [label, opts] of [
-		["the shell", { env: { PI_BACKENDS: "podman" } }],
-		["the shell, spaced", { env: { PI_BACKENDS: " podman " } }],
-		["the deployment .env", { envFile: "ANTHROPIC_API_KEY=\nPI_BACKENDS=podman\n" }],
-		["the .env with CRLF", { envFile: "PI_BACKENDS=podman\r\n" }],
-		["the .env, quoted, which systemd unquotes", { envFile: 'PI_BACKENDS="podman"\n' }],
-		["up's venues, whatever the shell says", { venues: { localUsed: false, podmanUsed: true, podmanDefault: true }, env: { PI_BACKENDS: "local" } }],
-	]) {
-		const { text } = nextFor(opts);
-		assert.ok(text.endsWith(PODMAN_NEXT), `${label}:\n${text}`);
-		assert.doesNotMatch(text, /\bdocker (pull|tag|run|volume|compose)\b/, label);
 	}
 });
 
@@ -230,10 +192,12 @@ test("init decides the venue exactly as up does: a disagreement, a line the load
 		const { text } = nextFor({ env });
 		assert.match(text, /\nNext: which venue this deployment runs is unknown, so no steps are shown: PI_BACKENDS names an unknown backend/, JSON.stringify(env));
 	}
-	// Off Linux, podman alone: the venue refuses the host, so no Quadlet steps. The .env is read with that platform's
-	// loader, and a line it reads differently is a note, as up says it.
-	assert.ok(nextFor({ env: { PI_BACKENDS: "podman" }, platform: "darwin" }).text.endsWith(PODMAN_OFF_LINUX));
-	assert.ok(nextFor({ envFile: "PI_BACKENDS=podman\n", platform: "darwin" }).text.endsWith(PODMAN_OFF_LINUX));
+	// Off Linux too: podman is not a venue any more, so its refusal is the unknown-backend one, platform aside.
+	for (const platform of ["linux", "darwin"]) {
+		const { text } = nextFor({ env: { PI_BACKENDS: "podman" }, platform });
+		assert.match(text, /\nNext: which venue this deployment runs is unknown, so no steps are shown: PI_BACKENDS names an unknown backend/, platform);
+		assert.doesNotMatch(text, /podman pull/, platform);
+	}
 });
 
 // --- issue #480: the no-clone folder gets the proxy's rules, and init's output names only what the folder has --------------
@@ -261,7 +225,7 @@ test("init never overwrites an existing deploy/egress-proxy.conf, and reports it
 });
 
 test("init's ladders name no file the folder does not have, docker and podman (#480)", () => {
-	for (const [label, opts] of [["docker", {}], ["podman", { env: { PI_BACKENDS: "podman" } }]]) {
+	for (const [label, opts] of [["docker", {}], ["docker, PI_BACKENDS=local", { env: { PI_BACKENDS: "local" } }]]) {
 		const { text, dir } = nextFor(opts);
 		const ladder = text.slice(text.indexOf("\nNext"));
 		assert.ok(ladder.length > 5, `${label}: a ladder was printed`);
@@ -365,18 +329,10 @@ test("a write that throws part way still prints what init already created, then 
 });
 
 test("init's next steps for the openshell venues: their own ladder alone, one line beside another venue, and Windows refused (#707)", () => {
+	// The openshell venues left with the sandbox prune: `venuesOf` answers `local` alone and `nextSteps` has no
+	// openshell branch to reach, so there is no openshell ladder to pin. What stays true is that an unknown
+	// venue never reaches a ladder at all: `init` refuses the list before the steps (the gate test above).
 	const steps = (list, env = {}, platform = "linux") => nextSteps(venuesOf({ PI_BACKENDS: list }), { platform, env });
-	const alone = steps("openshell", { PI_OPENSHELL_ENGINE: "podman" });
-	assert.match(alone, /^Next \(the openshell venue on podman\)\. First install OpenShell 0\.1\.4/m);
-	assert.match(alone, /https:\/\/github\.com\/NVIDIA\/OpenShell\/releases\/tag\/v0\.1\.4/);
-	assert.match(alone, /pi-dispatch up\s+# the gateway \(offers to start and register it\), the job image into podman, Valkey there/);
-	assert.match(alone, /pi-dispatch service install\s+# the worker as a user service that pulls in openshell-gateway\.service/);
-	assert.doesNotMatch(alone, /docker pull|podman pull|egress proxy/, "neither another venue's ladder nor a proxy");
-	assert.match(steps("openshell", {}, "darwin"), /brew services start openshell/);
-	assert.match(steps("openshell", {}, "darwin"), /brew install https:\/\/github\.com\/NVIDIA\/OpenShell\/releases\/download\/v0\.1\.4\/openshell\.rb`, the release formula/);
-	const beside = steps("local,openshell");
-	assert.ok(beside.startsWith(steps("local")), "the docker ladder as it was");
-	assert.match(beside, /The openshell venue too: install OpenShell 0\.1\.4/);
-	assert.equal(steps("local"), nextSteps(venuesOf({})), "no openshell, no change");
-	assert.match(steps("openshell", {}, "win32"), /ships no Windows build/);
+	assert.equal(steps("local"), nextSteps(venuesOf({})), "no venue but local, no change");
+	assert.doesNotMatch(steps("local"), /openshell/i);
 });

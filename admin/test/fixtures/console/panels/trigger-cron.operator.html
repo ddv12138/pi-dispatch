@@ -91,28 +91,14 @@ none in view.
 <dl class="facts"><div class="fact"><dt>run.flow</dt><dd>tidy; deployment default: not set</dd></div><div class="fact"><dt>run.backend</dt><dd>openshell; deployment default: local</dd></div><div class="fact"><dt>run.provider</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.model</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.maxTurns</dt><dd>not set; deployment default: 30</dd></div><div class="fact"><dt>run.progress</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.steer</dt><dd>not set; deployment default: not set</dd></div></dl>
 <h3>By hand</h3>
 <dl class="facts"><div class="fact"><dt>run.maxTokens</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.models</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.mcp</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secrets</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secretBundle</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.resume</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.awaitInput</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.image</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.waitFor</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.replicas</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.packages</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.skillsDir</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.instructions</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.task</dt><dd>set (operator only); deployment default: not set</dd></div><div class="fact"><dt>run.kind</dt><dd>local; deployment default: not set</dd></div><div class="fact"><dt>run.folder</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.repository</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.command</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.portfolio</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.github</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.fallbackModels</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.secretsProfile</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gates</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gateTimeout</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.gateBudgetRaiseTokens</dt><dd>not set; deployment default: not set</dd></div><div class="fact"><dt>run.excludeTools</dt><dd>not set; deployment default: not set</dd></div></dl>
-<h3>Its runs&#39; sandbox</h3>
-<p>No live host blessing facts are available.</p>
-<p>These live host declarations show published venue choices; a host that does not bless the selected venue refuses it before spend. The schedule&#39;s owning host runs a cron trigger&#39;s local folder; the registry alone does not prove which host has that folder.</p>
+<p>The schedule&#39;s owning host runs a cron trigger&#39;s local folder; the registry alone does not prove which host has that folder.</p>
 <p>
 <svg class="ic" aria-hidden="true"><use href="#i-shield"></use></svg>
-<a href="/fleet/venue?name=openshell"
->openshell</a
+<span class="code">openshell</span
 > (trigger override).
 </p>
-<dl class="facts"><div class="fact"><dt>liveTranscript</dt><dd>with the image</dd></div><div class="fact"><dt>steering</dt><dd>with the image</dd></div><div class="fact"><dt>recovery</dt><dd>no</dd></div><div class="fact"><dt>sandboxShell</dt><dd>no</dd></div></dl>
 <p>
-This venue has no sandbox shell for reopening a workspace.
-Workspaces are kept for 24 hours; 0 keeps none.
-</p>
-<p><a class="link" href="/runs/sandboxes?index=0">Prepare a sandbox as this trigger</a></p>
-<p>
-OpenShell copy mode.
-Current egress rule hosts in this deployment: not published.
-Other hosts read their own deployment&#39;s rules; credentials and project-bundle endpoints can further qualify a run&#39;s policy.
-</p>
-<p>
-1 independent sandbox(s) race each event, on separate branches and, for development flows, separate pull requests.
+1 independent runs race each event, on separate branches and, for development flows, separate pull requests.
 Secret profile: none. Bundle:
 no declared project bundle.
 </p></div></section><section id="p-trigger-edit" data-panel><div class="card"><div class="card__head"><h2>Edit</h2></div><form
@@ -143,7 +129,7 @@ spellcheck="false"
 <p class="field__err" data-field-error="flow" hidden></p>
 </div><div class="field">
 <label
->Venue (run.backend)<select
+>Backend (run.backend)<select
 class="select"
 name="backend"
 
@@ -158,7 +144,7 @@ Keep current (openshell)
 value="local"
 
 >
-local: live transcript yes, steering yes, recovery yes, sandbox shell yes
+local: live transcript yes, steering yes, recovery yes
 </option>
 </select></label
 ><p class="field__hint">Blank keeps the current value openshell; deployment default: local </p>

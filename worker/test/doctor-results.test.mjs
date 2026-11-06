@@ -86,7 +86,7 @@ function fakeRedis({ fail = false, hang = false } = {}) {
 }
 
 test("the sections are pinned, and every section doctor.mjs opens is one of them (and none is unused)", () => {
-	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "tokens", "venues", "images", "egress", "backends", "sizing", "job-user", "podman", "openshell", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "envelope", "console", "dirs", "state", "live"]);
+	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "tokens", "venues", "images", "egress", "backends", "sizing", "job-user", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "envelope", "console", "dirs", "state", "live"]);
 	const opened = new Set([...DOCTOR_SRC.matchAll(/\bsection\("([a-z-]+)"\)/g)].map((m) => m[1]));
 	opened.add("sizing"); // the fleet's re-said budget lines are tagged by `tagSection(again, "sizing")`
 	opened.add("live"); // the --live read-backs, tagged by `publishResults`
@@ -104,7 +104,7 @@ test("the named ids are pinned against the source: each literal id once (REPEATE
 		assert.ok(n > 1, `${id}: a repeat is two sites or more`);
 		assert.ok(NAMED_CHECK_IDS.includes(id), `${id} is a named id`);
 	}
-	assert.deepEqual(Object.keys(REPEATED_CHECK_IDS), ["egress.proxy"]);
+	assert.deepEqual(Object.keys(REPEATED_CHECK_IDS), []);
 	assert.ok(Object.isFrozen(REPEATED_CHECK_IDS));
 	const derived = BOOT_FILES.flatMap((spec) => [bootFileId(spec), bootFileId(spec, "shell")]);
 	const all = [...sites.keys(), ...derived];
@@ -176,13 +176,12 @@ test("egress.proxy is on docker's proxy line, or on the line that stands in for 
 	assert.ok(!stale.some((c) => /^Egress proxy running/.test(c.label ?? "")));
 });
 
-test("podman's proxy line carries egress.proxy too, and nothing else in doctor.mjs does (#737)", () => {
-	// podmanChecks needs a Linux host's whole `podman info` to reach its proxy line, so this one is pinned on the source:
-	// each literal site sits in the check whose label is a proxy's running line.
+test("docker's proxy line carries egress.proxy, and the stand-in takes the id from its check (#737)", () => {
+	// The podman venue's proxy line (the second site) went with the sandbox backends, so the one literal site sits in
+	// the check whose label is the proxy's running line, and docker's stand-in line takes the id from its check.
 	const sites = [...DOCTOR_SRC.matchAll(/\bid: "egress\.proxy"/g)].map((m) => DOCTOR_SRC.slice(m.index, m.index + 600));
-	assert.equal(sites.length, 2);
+	assert.equal(sites.length, 1);
 	assert.match(sites[0], /label: up\s*\?\s*`Egress proxy running \(\$\{proxy\}\)`/);
-	assert.match(sites[1], /label: proxyRunning \? `podman: egress proxy running under this account's Podman \(\$\{proxy\}\)`/);
 	assert.equal([...DOCTOR_SRC.matchAll(/\bid: proxyCheck\.id\b/g)].length, 1, "the stand-in line takes the id from its check");
 });
 

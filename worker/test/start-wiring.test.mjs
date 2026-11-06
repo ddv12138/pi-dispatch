@@ -4,12 +4,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, 
 import { basename, join } from "node:path";
 import { test } from "node:test";
 import { makeBackendRegistry as realRegistry } from "../src/backend-registry.mjs";
-import { makePodmanBackend as realPodmanBackend } from "../src/backend-podman.mjs";
-import { makeOpenshellBackend as realOpenshellBackend } from "../src/backend-openshell.mjs";
 import { RUN_RECORD_VERSION, RUNNER_POLICY_REASONS, sanitizeJobId } from "../src/run-history.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { makeSandboxReaper as realSandboxReaper } from "../src/sandbox-store.mjs";
-import { sandboxInventoryKey, SANDBOX_INVENTORY_HOSTS } from "../src/sandbox-inventory.mjs";
 import { hookRunsKey, HOOK_HOSTS } from "../src/hook-runs.mjs";
 
 // start.mjs imports index.mjs (bullmq), connection.mjs (ioredis), and the octokit-backed auth/host
@@ -54,16 +50,6 @@ const VALKEY_URL = process.env.VALKEY_TEST_URL ?? "redis://127.0.0.1:6399";
 const bootLines = [];
 
 /** Parse the raw chunks a slice of `bootLines` holds; a non-JSON chunk survives as `{ raw }`. */
-async function sandboxControlClosers(captured) {
-	const controls = captured.extraClosers.filter((c) => c.name === `pi-sandbox-prepare@${captured.name}`);
-	assert.equal(controls.length, 1, "exactly one separate host control queue joins shutdown");
-	assert.ok(controls[0].closing, "the control worker was actually closed");
-	const inventories = captured.extraClosers.filter((c) => c !== captured.extraClosers[1] && typeof c.publish === "function");
-	assert.equal(inventories.length, 1, "one durable publisher shares the retained telemetry projection");
-	assert.deepEqual(await inventories[0].publish(), { closed: true }, "shutdown stopped publication, not only its timer");
-	return 2;
-}
-
 function parseLines(chunks) {
 	return chunks.flatMap((l) =>
 		String(l)
@@ -91,20 +77,6 @@ function fakeHost(overrides = {}) {
 // Drive startWorker with injected fakes and capture the exact object handed to createWorker
 // (deps are nested under `deps`). No real Redis: createWorkerFn is faked. The real ioredis client
 // startWorker constructs via makeRedisClient is torn down so it leaves no dangling handle.
-/** A host filesystem with none of the files the runtime-mounts observation reads. */
-const enoent = (path) => Object.assign(new Error(`ENOENT: ${path}`), { code: "ENOENT" });
-const NO_HOST_FILES = { statSync: (p) => { throw enoent(p); }, readFileSync: (p) => { throw enoent(p); }, readdirSync: (p) => { throw enoent(p); } };
-
-/**
- * `podman info` as `makePodmanInfoReader` answers it (issue #354): a healthy rootless Podman on cgroup v2 with the three
- * controllers delegated, unless a test overrides a fact. `answer` replaces the whole answer (an unanswered read).
- */
-function PODMAN_INFO(over = {}, { answer, calls } = {}) {
-	return async () => {
-		calls?.push("podman info");
-		return answer ?? { answered: true, info: { rootless: true, serviceIsRemote: false, selinux: false, cgroupVersion: "v2", cgroupManager: "systemd", controllers: ["cpuset", "cpu", "io", "memory", "pids"], version: "5.8.1", runRoot: "/run/user/1234/containers", ...over } };
-	};
-}
 
 /**
  * A venue other than `local` with the five required functions and NEITHER optional preflight (issue #354), so a job on it
@@ -126,12 +98,7 @@ function OTHER_VENUE(name, { spawned = [], reap = async () => ({ reaped: true })
 	};
 }
 
-/** Issue #448: `systemctl show podman.service` for a loaded, idle service with no environment of note. */
-const IDLE_PODMAN_SERVICE = async () => ({ read: true, loaded: true, running: false, startedAtMs: null, environment: {}, environmentFiles: [], unitPaths: [], modules: [], manager: { read: true, environment: {}, modules: [] }, listen: ["/test.sock"] });
-/** A running service's answer for the default test socket, started at `startedAtMs`. */
-const RUNNING_PODMAN_SERVICE = (startedAtMs) => async () => ({ read: true, loaded: true, running: true, startedAtMs, environment: {}, environmentFiles: [], unitPaths: [], modules: [], manager: { read: true, environment: {}, modules: [] }, listen: ["/test.sock"] });
-
-async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorSpawner, makeAuth, makeHost, makeGitLabAuth, makeGitLabHost, makeReaper, makeLogSink, makeRecordWriter, makeLogReaper, makeSandboxReaper, makeSandboxNetworkSweeper, makeRetentionSweep, makeRunContainer, makeHostRegistry, makeScopeClaimSweeper, makeClaimSweeper, makeBackendRegistry, extraBackends, order, stops, now, authResolveTimeoutMs, resolveDockerEndpoint, readDaemonFacts, jobUserIdentity, bootImage, observationFs, loadConfig, readPodmanInfo, makePodmanReaper, makePodmanBackend, readOpenshellVersions, makeOpenshellReaper, makeOpenshellBackend, listRunningSandboxes, ensureJobsDir, ensureUnderAccountRoot, ensureSandboxDir, judgeValkey, readPodmanService, sleep, watchFs, watchScopedLimits, watchProjects, readMirroredRecord, readCgroupFile, readProgressKey, makeCpuReserve, listJobContainers, workerHostBudget, workerRunningJobs, makePrepareWorkspace, makeLiveTranscriptOpener, makeStatusCommenter, makeRunMirror, makePortfolioSnapshot, finishModelAttempt, durable = {} } = {}) {
+async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorSpawner, makeAuth, makeHost, makeGitLabAuth, makeGitLabHost, makeReaper, makeLogSink, makeRecordWriter, makeLogReaper, makeRetentionSweep, makeRunContainer, makeHostRegistry, makeScopeClaimSweeper, makeClaimSweeper, makeBackendRegistry, extraBackends, order, stops, now, authResolveTimeoutMs, resolveDockerEndpoint, readDaemonFacts, jobUserIdentity, bootImage, loadConfig, ensureJobsDir, ensureUnderAccountRoot, judgeValkey, sleep, watchFs, watchScopedLimits, watchProjects, readMirroredRecord, readProgressKey, makeCpuReserve, listJobContainers, workerHostBudget, workerRunningJobs, makePrepareWorkspace, makeLiveTranscriptOpener, makeStatusCommenter, makeRunMirror, makePortfolioSnapshot, finishModelAttempt, durable = {} } = {}) {
 	// Every real socket in this helper must use the injected test service, including callers that only override other settings.
 	env = { VALKEY_URL, ...env };
 	const secretsResolverCalls = [];
@@ -195,32 +162,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 			logReaperCalls.push(args);
 			return () => {};
 		});
-	// The sandbox reaper is faked for the SAME reason as makeReaper above, and it is the stronger case of
-	// the two: this one asks docker which sandboxes are live before it sweeps, so a real one here would
-	// shell out to `docker ps` on every wiring test -- and block for as long as an unreachable daemon takes
-	// to answer. Ordering/threading tests inject their own.
-	const sandboxReaperCalls = [];
-	const sandboxReaper =
-		makeSandboxReaper ??
-		((args) => {
-			sandboxReaperCalls.push(args);
-			return async () => {};
-		});
-
-	// Its network sweeper is faked for exactly the same reason, and one more: the real one's default runner
-	// is the docker CLI, so CALLING it in a wiring test would shell out. Tests assert what boot hands the
-	// reaper, never a docker call.
-	const sandboxSweeperCalls = [];
-	const sandboxSweeper =
-		makeSandboxNetworkSweeper ??
-		(() => {
-			const sweep = async (args) => {
-				sandboxSweeperCalls.push(args);
-				return { swept: [], notes: [] };
-			};
-			return sweep;
-		});
-
 	// The container factory is faked for the same reason as the run-history ones: the wiring tests assert
 	// what boot HANDS it (image, overlay, staged packages), never a docker launch. It records its args and
 	// returns an inert runContainer that is stored in deps and never invoked here.
@@ -237,34 +178,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 	// `process.stdout.write`. Under `node --test` the child process serialises its results over that same
 	// stdout, so holding a replacement across this `await` swallowed the runner's result frames: three tests
 	// in this file were reported as never existing -- no name, no count, exit 0 (issue #266).
-	// Issue #354: the podman venue's bundle is the REAL one, so what the wiring hands it is what a job gets, with its two
-	// spawning edges replaced: the image preflight answers like local's fake above, and every other podman spawn throws, so
-	// a wiring test can never start one. `podmanBackendCalls` records the options boot handed it.
-	const podmanBackendCalls = [];
-	const podmanBackend =
-		makePodmanBackend ??
-		((opts) => {
-			podmanBackendCalls.push(opts);
-			return realPodmanBackend({
-				...opts,
-				makeImagePreflight: (args) => (imagePreflightCalls.push({ ...args, podman: true }), async () => bootImage ?? { ok: true }),
-				spawnFn: () => {
-					throw new Error("a wiring test must never spawn podman");
-				},
-			});
-		});
-
-	// Issue #684: the openshell venue's bundle is the REAL one too, every CLI and engine spawn replaced by a throw.
-	const openshellBackendCalls = [];
-	const openshellBackend =
-		makeOpenshellBackend ??
-		((opts) => {
-			openshellBackendCalls.push(opts);
-			const never = () => {
-				throw new Error("a wiring test must never spawn openshell");
-			};
-			return realOpenshellBackend({ ...opts, spawnFn: never, exec: never });
-		});
 
 	const from = bootLines.length;
 	let captured;
@@ -283,9 +196,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 			makeLogSink: logSink,
 			makeRecordWriter: recordWriter,
 			makeLogReaper: logReaper,
-			makeSandboxReaper: sandboxReaper,
-			listSandboxes: () => [],
-			makeSandboxNetworkSweeper: sandboxSweeper,
 			makeRunContainer: runContainerFactory,
 			makeSecretsResolver: (args) => (secretsResolverCalls.push(args), async () => ({ ok: true, secrets: {} })),
 			makeImagePreflight: (args) => (imagePreflightCalls.push(args), async () => bootImage ?? { ok: true }),
@@ -295,28 +205,8 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 			// job-user decision is `worker` with no --user (the shipped image's own uid) unless a test says otherwise.
 			readDaemonFacts: readDaemonFacts ?? (async () => ({ answered: true, facts: { shape: "docker", podman: false, os: "Test Linux", rootless: false, userns: false, bounds: { pids: true, memory: true }, serviceIsRemote: null, remoteSocketPath: null } })),
 			jobUserIdentity: jobUserIdentity ?? { platform: "linux", release: "6.8.0-test", euid: 1001, egid: 1001 },
-			// Issue #345: never this machine's /etc. A host with none of Podman's files unless a test says otherwise.
-			observationFs: observationFs ?? NO_HOST_FILES,
-			// Issue #354: never the real `podman info` under test. A healthy rootless Podman unless a test says otherwise; only
-			// a boot that blesses `podman` ever asks.
-			readPodmanInfo: readPodmanInfo ?? PODMAN_INFO(),
-			// Issue #448: never this machine's systemd. An idle podman.service unless a test says otherwise; only a local
-			// daemon that is rootful Podman on this host ever asks.
-			readPodmanService: readPodmanService ?? IDLE_PODMAN_SERVICE,
-			// Issue #596, phase 2: never this machine's cgroup files. No user service limit unless a test says otherwise.
-			readCgroupFile:
-				readCgroupFile ??
-				(() => {
-					throw Object.assign(new Error("absent"), { code: "ENOENT" });
-				}),
-			makePodmanReaper: makePodmanReaper ?? (() => async () => ({ reaped: true })),
-			// Issue #596, never this machine's containers. Nothing left from a previous worker unless a test says so.
+			// Issue #596, phase 2: never this machine's containers. Nothing left from a previous worker unless a test says so.
 			listJobContainers: listJobContainers ?? (() => async () => []),
-			makePodmanBackend: podmanBackend,
-			// Issue #684: never the real openshell CLI. The tested release on both ends unless a test says otherwise.
-			readOpenshellVersions: readOpenshellVersions ?? (async () => ({})),
-			makeOpenshellReaper: makeOpenshellReaper ?? (() => async () => ({ reaped: true })),
-			makeOpenshellBackend: openshellBackend,
 			...(makeBackendRegistry ? { makeBackendRegistry } : {}),
 			...(makePrepareWorkspace ? { makePrepareWorkspace } : {}),
 			...(makeLiveTranscriptOpener ? { makeLiveTranscriptOpener } : {}),
@@ -328,7 +218,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 			// Issue #645: the durable-run seams (makeWorkspaceCheckpointer, loadRunCheckpoint, makeRunBudgetLedger,
 			// makeRecoveryEnqueuer, sweepOrphanJobDirs), handed through whole.
 			...durable,
-			...(listRunningSandboxes ? { listRunningSandboxes } : {}),
 			...(extraBackends ? { extraBackends } : {}),
 			...(loadConfig ? { loadConfig } : {}),
 			...(makeRetentionSweep ? { makeRetentionSweep } : {}),
@@ -349,7 +238,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 			...(authResolveTimeoutMs ? { authResolveTimeoutMs } : {}),
 			...(ensureJobsDir ? { ensureJobsDir } : {}),
 			...(ensureUnderAccountRoot ? { ensureUnderAccountRoot } : {}),
-			...(ensureSandboxDir ? { ensureSandboxDir } : {}),
 			// Issue #464 (gate round 2): never this host's /proc, DNS or ports. The URL as given unless a test judges it.
 			judgeValkey: judgeValkey ?? (async ({ url }) => ({ url, servername: null, pinned: null, notes: [] })),
 		});
@@ -419,8 +307,6 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 					}
 				}
 				if (captured?.name) {
-					await sweeper.del(sandboxInventoryKey(captured.name));
-					await sweeper.srem(SANDBOX_INVENTORY_HOSTS, captured.name);
 					await sweeper.del(hookRunsKey(captured.name));
 					await sweeper.srem(HOOK_HOSTS, captured.name);
 				}
@@ -442,7 +328,7 @@ async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorS
 	// Expose the registration map under both names: `handlers` for the completed/failed handler tests,
 	// `registered` for the scheduler stall-guard test. Same object, one capture path.
 	// `logs` is the boot's lines; `logsNow()` re-reads, for a line a job-path call writes after the boot returned.
-	return { captured, stopCalls, deps: captured?.deps, logs, logsNow: () => parseLines(bootLines.slice(from)), handlers: registered, registered, logSinkCalls, recordWriterCalls, logReaperCalls, sandboxReaperCalls, runContainerCalls, imagePreflightCalls, secretsResolverCalls, podmanBackendCalls, openshellBackendCalls };
+	return { captured, stopCalls, deps: captured?.deps, logs, logsNow: () => parseLines(bootLines.slice(from)), handlers: registered, registered, logSinkCalls, recordWriterCalls, logReaperCalls, runContainerCalls, imagePreflightCalls, secretsResolverCalls };
 }
 
 // Capture the JSON log lines a synchronous fn emits through the injected writer.
@@ -1144,58 +1030,6 @@ test("run-history: the log reaper sweeps aged history BEFORE the worker starts d
 	assert.equal(reaperArgs.retentionDays, 7, "the log reaper must receive config.logRetentionDays");
 });
 
-test("sandbox: the retention sweep runs BEFORE the worker drains, and is handed a way to ask docker", { skip }, async () => {
-	const order = [];
-	let reaperArgs;
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
-	const makeSandboxReaper = (args) => {
-		reaperArgs = args;
-		return async () => {
-			order.push("reapSandboxes");
-		};
-	};
-	let sweeperRan = 0;
-	const madeSweeper = async () => (sweeperRan++, { swept: [], notes: [] });
-	const { deps } = await runStart({
-		env: { PI_SANDBOX_DIR: "/tmp/pi-sbx", PI_SANDBOX_RETENTION_HOURS: "6", PI_JOB_IMAGE: "pi-job:pinned" },
-		makeAuth,
-		makeHost: () => fakeHost(),
-		makeSandboxReaper,
-		makeSandboxNetworkSweeper: () => madeSweeper,
-		order,
-	});
-	assert.deepEqual(order, ["reapSandboxes", "createWorker"], "retained directories are swept before the worker takes a job");
-	assert.equal(reaperArgs.sandboxDir, "/tmp/pi-sbx");
-	assert.equal(reaperArgs.retentionHours, 6);
-	// The one thing this reaper needs that its siblings do not: without it the sweep is blind and can
-	// delete a bind mount out from under a shell an operator is sitting in.
-	assert.equal(typeof reaperArgs.listRunning, "function", "the sweep must be able to ask which sandboxes are live");
-	// And the session networks beside them (issue #337). Assert the reaper got the factory's RESULT, not
-	// merely something callable: `typeof` cannot tell the sweeper from the factory that makes it, and passing
-	// the factory uncalled is a one-character slip that leaves the whole feature dead while the suite stays
-	// green. At runtime it would surface only as a `sandbox_reaper_skipped` line reading "swept is not
-	// iterable", which is the line a dozen ordinary faults also produce. The reaper defaults this dep to a
-	// no-op as well, so an unwired one sweeps directories and is SILENT rather than broken.
-	// Since issue #429 the reaper is handed the runtime watch's sweep, which builds one sweeper per runtime present and
-	// runs it: so it is asked BEHAVIOURALLY that the factory's result is what runs, not merely that something callable
-	// was handed over.
-	assert.deepEqual(await reaperArgs.sweepNetworks({}), { swept: [], notes: [] }, "the reaper's sweep runs the factory's sweeper");
-	assert.equal(sweeperRan, 1, "and it was the factory's own sweeper that ran");
-	assert.equal(typeof deps.cleanup, "function", "teardown is the retention-aware closure, not the bare rm");
-});
-
-test("sandbox: retention off still wires a cleanup, and it is the delete-only one", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
-	const { deps, logs } = await runStart({
-		env: { PI_SANDBOX_RETENTION_HOURS: "0" },
-		makeAuth,
-		makeHost: () => fakeHost(),
-	});
-	assert.equal(typeof deps.cleanup, "function");
-	// Boot says which way it is configured, so "why was nothing retained" is answerable from the log alone.
-	assert.equal(logs.find((l) => l.event === "worker_started")?.sandboxRetentionHours, 0);
-});
-
 // REQ-GLOBAL-PI-OVERLAY staged packages. The overlay dir EXISTS (config refuses a missing one at load)
 // but holds no packages.json -- the shape of every deployment that never opted into staged packages.
 test("staged packages: an overlay with no packages.json boots to packagePaths [] and logs it -- never a boot failure", { skip }, async () => {
@@ -1464,16 +1298,15 @@ test("every session bound config reads is actually handed to the store", () => {
 	}
 });
 
-test("the sandbox stamp resolves its venue with the same default (#277)", () => {
-	// A window of the source between the preparer's construction and its preparers argument, rather than a
+test("the transcript's venue stamp resolves its venue with the same default (#277)", () => {
+	// A window of the source between the session store's construction and its close, rather than a
 	// regex over the whole object literal: that literal nests other calls' braces.
 	const src = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8");
-	// `makePrepareWorkspaceFn` since issue #643: the factory is a seam (startWorker's `makePrepareWorkspace` option).
-	const from = src.indexOf("prepareWorkspace: makePrepareWorkspaceFn({");
-	const to = src.indexOf("preparers: makeForgePreparers(", from);
-	assert.ok(from >= 0 && to > from, "the preparer is constructed where this pin expects");
+	const from = src.indexOf("const sessionStore = makeSessionStore({");
+	const to = src.indexOf("});", from);
+	assert.ok(from >= 0 && to > from, "the session store is constructed where this pin expects");
 	// A whole line: a `//` comment or `config.defaultBackends` must not satisfy it.
-	assert.match(src.slice(from, to), /^\s*defaultBackend:\s*config\.defaultBackend,\s*$/m, "the retained manifest records the venue the registry dispatches to");
+	assert.match(src.slice(from, to), /^\s*defaultBackend:\s*config\.defaultBackend,\s*$/m, "the venue a transcript is stamped with is the one the registry dispatches to");
 });
 
 test("the record's default venue and the registry's come from the one config value (#277)", () => {
@@ -2300,7 +2133,7 @@ test("the live-edit watchers are CLOSED with the worker that armed them", { skip
 		// UNREF'D IS NOT CLEANED UP: that handle holds an `rmSync`, and the shut-down canary below waits
 		// 600ms, so a leaked DAILY timer would be invisible here and real in production.
 		// 7 since issue #499's projects watch, registered by the same rule; 8 since issue #712's doctor runs.
-		assert.equal(captured.extraClosers.length, 11 + await sandboxControlClosers(captured), "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + one closer per armed watch + the retention sweep + the doctor runs");
+		assert.equal(captured.extraClosers.length, 11, "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + one closer per armed watch + the retention sweep + the doctor runs");
 
 		// `runStart` has already drained every closer. An operator edit now reaches a worker that is gone.
 		const before = bootLines.length;
@@ -2728,7 +2561,7 @@ test("PI_SWEEP_INTERVAL_HOURS=0 does not CONSTRUCT the sweep, so nothing it coul
 	assert.equal(constructions.length, 0, "the factory is never called at all");
 	// No watch files in this env, so the list is just the runtime queue and the registry. The point is
 	// the DELTA against the twin test below: the sweep contributes exactly one closer, or none at 0.
-	assert.equal(captured.extraClosers.length, 6 + await sandboxControlClosers(captured), "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the doctor runs (issue #712), and nothing from the sweep");
+	assert.equal(captured.extraClosers.length, 6, "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the doctor runs (issue #712), and nothing from the sweep");
 	assert.equal(logs.filter((l) => l.event === "retention_sweep").length, 0);
 	const started = logs.find((l) => l.event === "worker_started");
 	assert.equal(started.sweepIntervalHours, 0, "the boot line still SAYS the sweep is off, which is the one visible difference");
@@ -2751,8 +2584,8 @@ test("the default arms one daily sweep and registers it as a closer", { skip }, 
 	// The allocation audit files (issue #504 part B) second: boot reaps them right after the logs, and a tick re-runs that
 	// same closure in the same place.
 	// Issue #645: the host-lost sweep on every host, last; the checkpoint store's retention only where there is a store.
-	assert.deepEqual(constructions[0].reapers.map((r) => r.name), ["log", "allocation_log", "console_audit", "touch_outbox", "sandbox", "session", "recovery_host_lost"], "boot's own order");
-	assert.equal(captured.extraClosers.length, 7 + await sandboxControlClosers(captured), "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the sweep + the doctor runs (no watch files in this env)");
+	assert.deepEqual(constructions[0].reapers.map((r) => r.name), ["log", "allocation_log", "console_audit", "touch_outbox", "session", "recovery_host_lost"], "boot's own order");
+	assert.equal(captured.extraClosers.length, 7, "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the sweep + the doctor runs (no watch files in this env)");
 	assert.equal(logs.find((l) => l.event === "worker_started").sweepIntervalHours, 24);
 });
 
@@ -2810,7 +2643,7 @@ test("the default arms the doctor runs daily on the worker's own CLI and registe
 	const off = [];
 	const second = await runStart({ env: { PI_DOCTOR_INTERVAL_HOURS: "0" }, makeDoctorSpawner: (args) => (off.push(args), { start() {}, close: async () => {} }) });
 	assert.equal(off.length, 0, "at 0 the factory is never called: no timer, no closer, no child");
-	assert.equal(second.captured.extraClosers.length, 6 + await sandboxControlClosers(second.captured), "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the sweep");
+	assert.equal(second.captured.extraClosers.length, 6, "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the sweep");
 	assert.equal(second.logs.find((l) => l.event === "worker_started").doctorIntervalHours, 0);
 });
 
@@ -2818,7 +2651,6 @@ test("the sweep re-runs the SAME closures boot already built, so one config read
 	// The claim that makes this safe: nothing is rebuilt on a tick, so a tick cannot read a different
 	// logsDir or a different retention window than boot did.
 	const logReaperCalls = [];
-	const sandboxReaperCalls = [];
 	let handed;
 	await runStart({
 		env: { PI_LOGS_DIR: "/x/logs", PI_LOG_RETENTION_DAYS: "9" },
@@ -2826,24 +2658,19 @@ test("the sweep re-runs the SAME closures boot already built, so one config read
 			logReaperCalls.push(args);
 			return () => {};
 		},
-		makeSandboxReaper: (args) => {
-			sandboxReaperCalls.push(args);
-			return async () => {};
-		},
 		makeRetentionSweep: (args) => {
 			handed = args;
 			return { start() {}, sweepOnce: async () => {}, close: async () => {} };
 		},
 	});
 	assert.equal(logReaperCalls.length, 1, "built once at boot, not once per tick");
-	assert.equal(sandboxReaperCalls.length, 1);
 	assert.equal(logReaperCalls[0].logsDir, "/x/logs");
 	assert.equal(logReaperCalls[0].retentionDays, 9);
 
 	// Driving the handed reapers must reach those same closures, which is what "no drift" means.
-	const before = logReaperCalls.length + sandboxReaperCalls.length;
+	const before = logReaperCalls.length;
 	for (const r of handed.reapers) await r.reap();
-	assert.equal(logReaperCalls.length + sandboxReaperCalls.length, before, "a sweep constructs nothing");
+	assert.equal(logReaperCalls.length, before, "a sweep constructs nothing");
 });
 
 test("boot itself reaps the allocation and console audit month files past retention, keeping the console chain's head", { skip }, async () => {
@@ -3749,19 +3576,6 @@ test("PI_FORWARD_ENV=HOME on a worker that runs jobs under --user is said at boo
 // --- issue #345: the runtime observations ------------------------------------------------------------------------
 
 const PODMAN_FACTS = (over = {}) => DOCKER_FACTS({ podman: true, bounds: null, ...over });
-const hostFiles = (files) => ({
-	statSync: (p) => {
-		if (files[p] === undefined) throw enoent(p);
-		return { size: Buffer.byteLength(files[p]) };
-	},
-	readFileSync: (p) => {
-		if (files[p] === undefined) throw enoent(p);
-		return files[p];
-	},
-	readdirSync: (p) => {
-		throw enoent(p);
-	},
-});
 
 test("a floor asking isolation=enforced refuses to BOOT on a daemon not observed applying the bounds, tagged, with its own remedy, before anything is built (#345)", { skip: skipNoModule }, async () => {
 	const order = [];
@@ -3780,19 +3594,6 @@ test("a floor asking isolation=enforced refuses to BOOT on a daemon not observed
 		(err) => err.piDispatchConfig === true && /answered in a shape nothing here reads \(unparseable\)/.test(err.message),
 		"an answer nothing reads is determinate: exit 2, not a restart loop",
 	);
-});
-
-test("a floor asking mountSet=enforced boots on Podman only with the empty mounts.conf override, and the observations reach worker_started (#345)", { skip }, async () => {
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKEND_FLOOR: "mountSet=enforced" }, readDaemonFacts: PODMAN_FACTS(), makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() }),
-		(err) => err.piDispatchConfig === true && /mountSet=enforced/.test(err.message) && /mounts\.conf does not exist/.test(err.message) && /create an empty \/etc\/containers\/mounts\.conf/.test(err.message),
-	);
-	const { logs } = await runStart({ env: { PI_BACKEND_FLOOR: "mountSet=enforced" }, readDaemonFacts: PODMAN_FACTS(), observationFs: hostFiles({ "/etc/containers/mounts.conf": "" }), makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	const started = logs.find((l) => l.event === "worker_started");
-	assert.deepEqual([started.daemonAppliesBounds, started.runtimeAddsNoMounts], [false, true], "Podman: bounds not credited, mounts credited with the override");
-	const docker = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	const dockerStarted = docker.logs.find((l) => l.event === "worker_started");
-	assert.deepEqual([dockerStarted.daemonAppliesBounds, dockerStarted.runtimeAddsNoMounts], [true, true]);
 });
 
 test("per job: the runtime observations are read from the job user's cached facts, logged on change, and refuse under a floor with which observation missed (#345)", { skip }, async () => {
@@ -4058,9 +3859,8 @@ test("a deployment WITHOUT local boots on its own venue, and asks this host's do
 	const spawned = [];
 	let registryArgs = null;
 	const swept = [];
-	const { captured, logs, imagePreflightCalls, runContainerCalls, sandboxReaperCalls } = await runStart({
-		env: { PI_WORKER_NAME: "no-docker-1", VALKEY_URL, PI_SANDBOX_DIR: tempDir("no-docker-sbx-") },
-		listRunningSandboxes: forbidden("listRunningSandboxes", seen),
+	const { captured, logs, imagePreflightCalls, runContainerCalls } = await runStart({
+		env: { PI_WORKER_NAME: "no-docker-1", VALKEY_URL },
 		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
 		makeHost: () => fakeHost(),
 		// A floor naming an observation only `local` makes. With `local` blessed and unobserved this is the unanswered,
@@ -4091,13 +3891,6 @@ test("a deployment WITHOUT local boots on its own venue, and asks this host's do
 		assert.equal(started[key], null, `${key} is null: this host's docker CLI was not asked`);
 	}
 	assert.ok(!logs.some((l) => l.event === "job_user"), "no job-user decision is said about a daemon nobody asked");
-
-	// The sandbox reaper is built, and with nothing retained it asks no runtime (issue #429: it asks, per retained run,
-	// the runtime that run recorded), and its network sweep visits none, since neither runtime is blessed or recorded.
-	assert.equal(sandboxReaperCalls.length, 1);
-	assert.deepEqual(await sandboxReaperCalls[0].listRunning(), []);
-	assert.deepEqual(await sandboxReaperCalls[0].sweepNetworks({}), { swept: [], notes: [] });
-	assert.deepEqual(seen, [], "no runtime was asked which sandboxes are open");
 
 	// Every reaper answered, and the host is still not proven: Docker containers from before may remain.
 	assert.deepEqual(swept, [{ reaped: false }]);
@@ -4221,468 +4014,6 @@ test("with local blessed, the preflights are local's own members and a job namin
 	assert.equal(reads, atBoot, "neither asked this host's daemon anything");
 });
 
-// ── issue #354 part 2: the native podman venue at boot ─────────────────────────────────────────────────────
-
-const PODMAN_ID = { platform: "linux", release: "6.8.0-test", euid: 1234, egid: 1234, home: "/home/pdjob" };
-/** The one file that earns `podmanAddsNoMounts`: this account's own mounts.conf override, empty. */
-// The account's user manager running with the controllers delegated (issue #453): user@1234.service's cgroup.
-const PODMAN_USER_MANAGER = "/sys/fs/cgroup/user.slice/user-1234.slice/user@1234.service/cgroup.controllers";
-const PODMAN_FILES = hostFiles({ "/home/pdjob/.config/containers/mounts.conf": "", [PODMAN_USER_MANAGER]: "cpuset cpu io memory pids\n" });
-const PODMAN_KEYS = ["podmanVersion", "podmanRootless", "podmanJobUser", "podmanBoundsDelegated", "podmanAddsNoMounts", "podmanServiceLocal"];
-
-test("podman unblessed: no podman info, no podman reaper, no podman bundle, and the boot line's podman keys are null (#354)", { skip }, async () => {
-	const seen = [];
-	let registryArgs = null;
-	const { logs, podmanBackendCalls } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		readPodmanInfo: forbidden("readPodmanInfo", seen),
-		makePodmanReaper: forbidden("makePodmanReaper", seen),
-		makeBackendRegistry: (args) => ((registryArgs = args), realRegistry(args)),
-	});
-	assert.deepEqual(seen, []);
-	assert.equal(podmanBackendCalls.length, 0);
-	assert.deepEqual(registryArgs.bundles.map((b) => b.name), ["local"]);
-	const started = logs.find((l) => l.event === "worker_started");
-	for (const key of PODMAN_KEYS) assert.equal(started[key], null, key);
-});
-
-test("openshell blessed (#684): its versions read once with the gateway, its reaper and bundle registered from the deployment's settings", { skip }, async () => {
-	let registryArgs = null;
-	const versionCalls = [];
-	const reap = async () => ({ reaped: true });
-	const { openshellBackendCalls, runContainerCalls } = await runStart({
-		env: { PI_BACKENDS: "local,openshell", PI_OPENSHELL_ENGINE: "podman", PI_OPENSHELL_GATEWAY: "lab", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		readOpenshellVersions: async (args) => (versionCalls.push(args), {}),
-		makeOpenshellReaper: (args) => (assert.equal(args.gateway, "lab"), reap),
-		makeBackendRegistry: (args) => ((registryArgs = args), realRegistry(args)),
-	});
-	assert.deepEqual(versionCalls, [{ gateway: "lab" }]);
-	assert.deepEqual(registryArgs.bundles.map((b) => b.name), ["local", "openshell"]);
-	assert.equal(registryArgs.reaps.openshell, reap);
-	assert.equal(openshellBackendCalls.length, 1);
-	const opts = openshellBackendCalls[0];
-	assert.equal(opts.engine, "podman");
-	assert.equal(opts.gateway, "lab");
-	assert.equal(opts.image, "pi-job:ci");
-	assert.equal(opts.reap, reap, "the boot sweep's reaper, not one of its own");
-	assert.equal(typeof opts.readAllowlist, "function");
-	assert.deepEqual(opts.readEndpoints(), [], "no model-endpoints.json declares none");
-	// Issue #686: the live transcript opener, the very one local's runContainer is handed, fed there from the exec's
-	// stderr records; and since part 2 the very inbox relay opener local's is handed, whose relay writes frames on the
-	// exec's stdin there.
-	assert.equal(typeof opts.openLiveTranscript, "function");
-	assert.equal(opts.openLiveTranscript, runContainerCalls[0].openLiveTranscript, "one opener for every venue");
-	assert.equal(typeof opts.openInboxRelay, "function", "the steer relay opener, with Valkey");
-	assert.equal(opts.openInboxRelay, runContainerCalls[0].openInboxRelay, "one relay opener for every venue");
-});
-
-test("openshell-bind blessed (#686 part 3): beside openshell, one version read and ONE reaper for both, each mode its own bundle from one option set", { skip }, async () => {
-	let registryArgs = null;
-	const versionCalls = [];
-	const reaperCalls = [];
-	let reapRuns = 0;
-	const reap = async () => ((reapRuns += 1), { reaped: true });
-	const { openshellBackendCalls, logs } = await runStart({
-		env: { PI_BACKENDS: "local,openshell,openshell-bind", PI_OPENSHELL_GATEWAY: "lab", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		readOpenshellVersions: async (args) => (versionCalls.push(args), {}),
-		makeOpenshellReaper: (args) => (reaperCalls.push(args), reap),
-		makeBackendRegistry: (args) => ((registryArgs = args), realRegistry(args)),
-	});
-	assert.deepEqual(versionCalls, [{ gateway: "lab" }], "the gateway's releases read once for both modes");
-	assert.equal(reaperCalls.length, 1, "one reaper: the owner label is shared");
-	assert.equal(reapRuns, 1, "and the boot sweep RUNS it once, though both names hold it");
-	assert.deepEqual(registryArgs.bundles.map((b) => b.name), ["local", "openshell", "openshell-bind"]);
-	assert.equal(registryArgs.reaps.openshell, reap);
-	assert.equal(registryArgs.reaps["openshell-bind"], reap);
-	assert.deepEqual(openshellBackendCalls.map((o) => o.mode), ["copy", "bind"]);
-	const [copy, bind] = openshellBackendCalls;
-	assert.deepEqual(Object.keys(bind), Object.keys(copy));
-	for (const key of Object.keys(copy)) if (key !== "mode") (typeof copy[key] === "function" ? assert.equal : assert.deepEqual)(bind[key], copy[key], `${key}: the same option for both modes`);
-	assert.equal(bind.reap, reap);
-	assert.equal(bind.gateway, "lab");
-	assert.equal(bind.engine, "docker");
-	assert.equal(typeof bind.jobsDir, "string", "the bind probe's source goes under the jobs dir");
-	assert.ok(!logs.some((l) => l.event === "host_reap_unproven" && /no boot reaper/.test(l.reason ?? "")), "every blessed venue has its reaper");
-});
-
-test("openshell-bind alone (#686 part 3): no copy bundle, the bind bundle and its reaper", { skip }, async () => {
-	let registryArgs = null;
-	const reap = async () => ({ reaped: true });
-	const { openshellBackendCalls } = await runStart({
-		env: { PI_BACKENDS: "local,openshell-bind" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		makeOpenshellReaper: () => reap,
-		makeBackendRegistry: (args) => ((registryArgs = args), realRegistry(args)),
-	});
-	assert.deepEqual(openshellBackendCalls.map((o) => o.mode), ["bind"]);
-	assert.deepEqual(registryArgs.bundles.map((b) => b.name), ["local", "openshell-bind"]);
-	assert.deepEqual(Object.keys(registryArgs.reaps).sort(), ["local", "openshell-bind"]);
-});
-
-test("openshell unblessed: no version read, no reaper, no bundle (#684)", { skip }, async () => {
-	const seen = [];
-	const { openshellBackendCalls } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		readOpenshellVersions: forbidden("readOpenshellVersions", seen),
-		makeOpenshellReaper: forbidden("makeOpenshellReaper", seen),
-	});
-	assert.deepEqual(seen, []);
-	assert.equal(openshellBackendCalls.length, 0);
-});
-
-test("openshell's boot releases (#684): another release refuses (exit 2), a silent CLI is restarted into (exit 1), a gateway down is said and boots", { skip }, async () => {
-	const base = { env: { PI_BACKENDS: "local,openshell" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
-	await assert.rejects(runStart({ ...base, readOpenshellVersions: async () => ({ refusal: "the CLI is 0.1.5", transient: false }) }), (e) => e.piDispatchConfig === true && /0\.1\.5/.test(e.message));
-	await assert.rejects(runStart({ ...base, readOpenshellVersions: async () => ({ refusal: "the CLI did not answer", transient: true }) }), (e) => e.piDispatchConfig !== true && /did not answer/.test(e.message));
-	const { logs } = await runStart({ ...base, readOpenshellVersions: async () => ({ gatewayDown: true }) });
-	assert.ok(logs.some((l) => l.event === "openshell_gateway_down_at_boot"));
-});
-
-test("the registry row's backends field (#712): the blessed venues in order, the floor, and the openshell engine with the boot's gateway word", { skip }, async () => {
-	const { makeHostRegistry } = await import("../src/host-registry.mjs");
-	const { parseHostBackends } = await import("../src/backends.mjs");
-	const rowOf = async (env, versions) => {
-		let published = null;
-		await runStart({
-			env,
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-			makeHost: () => fakeHost(),
-			...(versions ? { readOpenshellVersions: async () => versions } : {}),
-			makeHostRegistry: (args) => {
-				const real = makeHostRegistry(args);
-				return { ...real, start: (fields, opts) => ((published = fields), real.start(fields, opts)) };
-			},
-		});
-		return published.backends;
-	};
-	const remote = await rowOf({ PI_BACKENDS: "local,openshell-bind", PI_BACKEND_FLOOR: "nonRoot=asserted", PI_OPENSHELL_GATEWAY: "lab" }, { gatewayLocal: false });
-	assert.equal(typeof remote, "string", "a value: every part is boot configuration");
-	assert.equal(remote, "blessed=local,openshell-bind;floor=nonRoot:asserted;os=docker:remote");
-	assert.doesNotMatch(remote, /lab/, "the gateway's name is not the row's to carry, only whether it is on this host");
-	assert.deepEqual(parseHostBackends(remote), { blessed: ["local", "openshell-bind"], default: "local", floor: { nonRoot: "asserted" }, openshell: { engine: "docker", gateway: "remote", modes: ["bind"] } });
-	assert.equal(await rowOf({ PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" }, { gatewayLocal: true }), "blessed=openshell;os=podman:local");
-	assert.equal(await rowOf({ PI_BACKENDS: "local,openshell" }, { gatewayDown: true }), "blessed=local,openshell;os=docker:unknown", "a gateway down at boot is not read");
-	assert.equal(await rowOf({}), "blessed=local", "the unset default, with no openshell part");
-});
-
-test("openshell with PI_EGRESS=0 refuses the boot by name (#684, the operator's decision)", { skip }, async () => {
-	await assert.rejects(runStart({ env: { PI_BACKENDS: "local,openshell", PI_EGRESS: "0" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() }), (e) => e.piDispatchConfig === true && /^PI_EGRESS=0 cannot run openshell/.test(e.message));
-});
-
-test("podman as the only venue: one podman info at boot shared with the first job, its reaper and bundle registered, its facts on the boot line (#354)", { skip }, async () => {
-	const calls = [];
-	const seen = [];
-	let registryArgs = null;
-	const podmanReap = async () => ({ reaped: true });
-	const { captured, logs, podmanBackendCalls, imagePreflightCalls } = await runStart({
-		env: { PI_BACKENDS: "podman", PI_BACKEND_FLOOR: "isolation=enforced,mountSet=enforced,credentialTransit=enforced", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		jobUserIdentity: PODMAN_ID,
-		observationFs: PODMAN_FILES,
-		readPodmanInfo: PODMAN_INFO({}, { calls }),
-		makePodmanReaper: () => podmanReap,
-		bootImage: { ok: true, image: "pi-job:ci", imageDigest: "sha256:pod", piVersion: "0.80.7", capabilities: ["anyUid"] },
-		resolveDockerEndpoint: forbidden("resolveDockerEndpoint", seen),
-		readDaemonFacts: forbidden("readDaemonFacts", seen),
-		makeReaper: forbidden("makeReaper", seen),
-		makeBackendRegistry: (args) => ((registryArgs = args), realRegistry(args)),
-	});
-	assert.deepEqual(seen, [], "nothing of local's is asked");
-	assert.deepEqual(registryArgs.bundles.map((b) => b.name), ["podman"]);
-	assert.equal(registryArgs.defaultName, "podman");
-	assert.deepEqual(Object.keys(registryArgs.reaps), ["podman"]);
-	assert.equal(registryArgs.reaps.podman, podmanReap, "the boot-built podman reaper is the one the registry holds");
-	assert.equal(registryArgs.bundles[0].reap, podmanReap, "and the one the bundle carries");
-
-	// What boot handed the bundle: the deployment's own inputs, the floor, and the podman identity and files.
-	assert.equal(podmanBackendCalls.length, 1);
-	const opts = podmanBackendCalls[0];
-	assert.equal(opts.image, "pi-job:ci");
-	assert.deepEqual(opts.backendFloor, { isolation: "enforced", mountSet: "enforced", credentialTransit: "enforced" });
-	assert.deepEqual([opts.platform, opts.euid, opts.egid, opts.home], ["linux", 1234, 1234, "/home/pdjob"]);
-	assert.equal(opts.fs, PODMAN_FILES);
-	assert.equal(typeof opts.packagePaths, "function", "a resolver, as local's runContainer gets");
-
-	// The boot image read asked podman's own preflight, the one podman jobs are gated on.
-	assert.deepEqual(imagePreflightCalls.map((c) => [c.image, c.bin, c.podman]), [["pi-job:ci", "podman", true]]);
-	const started = logs.find((l) => l.event === "worker_started");
-	assert.equal(started.imageDigest, "sha256:pod");
-	assert.equal(started.podmanVersion, "5.8.1");
-	assert.equal(started.podmanRootless, true);
-	assert.deepEqual(started.podmanJobUser, { mode: "worker", user: "1234:1234", cause: null, reason: null });
-	assert.deepEqual([started.podmanBoundsDelegated, started.podmanAddsNoMounts, started.podmanServiceLocal], [true, true, true]);
-	for (const key of ["dockerContext", "dockerEndpointLocal", "jobUser", "daemonAppliesBounds", "runtimeAddsNoMounts"]) assert.equal(started[key], null, key);
-	assert.ok(!logs.some((l) => l.event === "job_image_any_uid_unsupported"), "the image declares anyUid");
-
-	// Per job, through the registry: the floor holds on the SAME cached read, and the job runs as the worker's uid.
-	const job = { kind: "github", repo: "o/r", target: { type: "issue", number: 1 } };
-	const observed = await captured.deps.observationPreflight(job);
-	assert.equal(observed.ok, true, JSON.stringify(observed));
-	assert.deepEqual(await captured.deps.jobUserPreflight(job, { capabilities: ["anyUid"], observed }), { user: "1234:1234", home: "/home/pi", relabel: false });
-	assert.deepEqual(calls, ["podman info"], "one podman info for the boot and the job together");
-});
-
-test("a podman default whose image lacks anyUid is said at boot, with the venue named (#354)", { skip }, async () => {
-	const { logs } = await runStart({
-		env: { PI_BACKENDS: "podman", PI_FORWARD_ENV: "HOME" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		jobUserIdentity: PODMAN_ID,
-		bootImage: { ok: true, image: "pi-job:latest", capabilities: [] },
-	});
-	assert.deepEqual(logs.find((l) => l.event === "job_image_any_uid_unsupported"), { event: "job_image_any_uid_unsupported", image: "pi-job:latest", backend: "podman", host: logs[0].host });
-	// uid 1001 is the image's own: no anyUid needed, so nothing is said, and HOME beside --user is.
-	const own = await runStart({ env: { PI_BACKENDS: "podman", PI_FORWARD_ENV: "HOME" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: { ...PODMAN_ID, euid: 1001, egid: 1001 }, bootImage: { ok: true, capabilities: [] } });
-	assert.ok(!own.logs.some((l) => l.event === "job_image_any_uid_unsupported"));
-	assert.equal(own.logs.find((l) => l.event === "forward_env_home_overridden")?.backend, "podman");
-	// With local the default, docker's copy of the tag says nothing about the podman store: not said.
-	const localDefault = await runStart({ env: { PI_BACKENDS: "local,podman" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, bootImage: { ok: true, capabilities: [] } });
-	assert.ok(!localDefault.logs.some((l) => l.event === "job_image_any_uid_unsupported" && l.backend === "podman"));
-});
-
-test("a podman default refuses to BOOT on every identity cause, tagged, before anything is built; merely blessed it boots (#354)", { skip: skipNoModule }, async () => {
-	for (const [label, readPodmanInfo, jobUserIdentity, pattern] of [
-		["rootful", PODMAN_INFO({ rootless: false }), PODMAN_ID, /podman is not rootless for this account/],
-		["remote", PODMAN_INFO({ serviceIsRemote: true }), PODMAN_ID, /through a remote service/],
-		["not-found", PODMAN_INFO({}, { answer: { answered: false, reason: "podman-not-found", transient: false } }), PODMAN_ID, /no podman CLI was found/],
-		["root", PODMAN_INFO(), { ...PODMAN_ID, euid: 0, egid: 0 }, /the worker runs as root/],
-		["platform", PODMAN_INFO(), { ...PODMAN_ID, platform: "darwin" }, /runs only on Linux/],
-	]) {
-		const order = [];
-		const makeAuth = async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" });
-		await assert.rejects(
-			() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo, jobUserIdentity, order, makeAuth, makeHost: () => fakeHost(), makePodmanReaper: () => (order.push("makePodmanReaper"), async () => ({ reaped: true })) }),
-			(err) => err.piDispatchConfig === true && pattern.test(err.message) && /\(issue #354\)/.test(err.message),
-			label,
-		);
-		assert.deepEqual(order, [], `${label}: before forge auth, the reaper and the worker`);
-	}
-	// The identity verdict comes BEFORE the observations: a rootful Podman fails the mounts observation too, and a floor
-	// refusal naming mounts.conf would send the operator after the wrong fix.
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman", PI_BACKEND_FLOOR: "mountSet=enforced" }, readPodmanInfo: PODMAN_INFO({ rootless: false }), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES }),
-		(err) => err.piDispatchConfig === true && /podman is not rootless for this account/.test(err.message) && !/mountSet/.test(err.message),
-	);
-	// Blessed beside a default `local`, a rootful Podman boots: its jobs are refused one by one, local's still run.
-	const { logs } = await runStart({ env: { PI_BACKENDS: "local,podman" }, readPodmanInfo: PODMAN_INFO({ rootless: false }), jobUserIdentity: PODMAN_ID, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	assert.deepEqual(logs.find((l) => l.event === "worker_started").podmanJobUser, { mode: "unmappable", user: null, cause: "podman-rootful", reason: null });
-	// Even under a floor the rootful Podman's observations cannot meet: its identity refusal is what its jobs get, and the
-	// worker is not stopped with a mounts.conf fix that is not the one.
-	// Each row under the floor its own venue misses: a remote service fails credentialTransit's observation.
-	for (const [info, floor, cause] of [[{ rootless: false }, "mountSet=enforced", "podman-rootful"], [{ serviceIsRemote: true }, "credentialTransit=enforced", "podman-remote"]]) {
-		const floored = await runStart({ env: { PI_BACKENDS: "local,podman", PI_BACKEND_FLOOR: floor }, readPodmanInfo: PODMAN_INFO(info), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-		assert.equal(floored.logs.find((l) => l.event === "worker_started").podmanJobUser.cause, cause);
-	}
-	// And the reverse: with podman the default, local's identity causes do not refuse the boot (local's rule, end to end).
-	const localRootless = await runStart({ env: { PI_BACKENDS: "podman,local" }, readDaemonFacts: DOCKER_FACTS({ rootless: true }), jobUserIdentity: PODMAN_ID, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	assert.equal(localRootless.logs.find((l) => l.event === "worker_started").jobUser.cause, "rootless");
-	// A transient unanswered read is `unknown`, never a boot exit, even as the default.
-	const slow = await runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO({}, { answer: { answered: false, reason: "timeout", transient: true } }), jobUserIdentity: PODMAN_ID, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	const slowStarted = slow.logs.find((l) => l.event === "worker_started");
-	assert.deepEqual(slowStarted.podmanJobUser, { mode: "unknown", user: null, cause: null, reason: "timeout" });
-	assert.deepEqual([slowStarted.podmanVersion, slowStarted.podmanRootless, slowStarted.podmanBoundsDelegated], [null, null, null]);
-});
-
-test("a podman default whose account's containers.conf widens a job refuses to BOOT, tagged, before anything is built; merely blessed it boots (#428)", { skip: skipNoModule }, async () => {
-	const widened = (_key, text) => hostFiles({ "/home/pdjob/.config/containers/mounts.conf": "", "/home/pdjob/.config/containers/containers.conf": text });
-	const auth = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
-	for (const [key, text] of [
-		["pasta_options", '[network]\npasta_options = ["-T", "6379"]\n'],
-		["network_cmd_options", '[engine]\nnetwork_cmd_options = ["allow_host_loopback=true"]\n'],
-		["annotations", '[containers]\nannotations = ["run.oci.keep_original_groups=1"]\n'],
-	]) {
-		const order = [];
-		const makeAuth = async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" });
-		await assert.rejects(
-			// No floor at all: this is the venue's own refusal, not a floor's.
-			() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: widened(key, text), order, makeAuth, makeHost: () => fakeHost(), makePodmanReaper: () => (order.push("makePodmanReaper"), async () => ({ reaped: true })) }),
-			(err) => err.piDispatchConfig === true && err.message.startsWith(`Refused: /home/pdjob/.config/containers/containers.conf sets ${key}, which `) && /remove that key from that file/.test(err.message) && /\(issue #428\)\.$/.test(err.message),
-			key,
-		);
-		assert.deepEqual(order, [], `${key}: before forge auth, the reaper and the worker`);
-	}
-	// A podman info that has not answered yet does not delay it: the files are read with no daemon, so it is still tagged.
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO({}, { answer: { answered: false, reason: "timeout", transient: true } }), jobUserIdentity: PODMAN_ID, observationFs: widened("annotations", "annotations = []\n"), ...auth }),
-		(err) => err.piDispatchConfig === true && /sets annotations/.test(err.message),
-	);
-	// The identity refusal names its fix first.
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO({ rootless: false }), jobUserIdentity: PODMAN_ID, observationFs: widened("annotations", "annotations = []\n"), ...auth }),
-		(err) => err.piDispatchConfig === true && /podman is not rootless/.test(err.message) && !/annotations/.test(err.message),
-	);
-	// Merely blessed beside a default local, the worker boots, and the podman bundle refuses each podman job.
-	const { logs, captured } = await runStart({ env: { PI_BACKENDS: "local,podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: widened("pasta_options", "pasta_options = []\n"), ...auth });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	const observed = await captured.deps.observationPreflight({ id: "j1", kind: "local", backend: "podman" });
-	assert.equal(observed.podmanConfRefused?.reason, "podman-conf-widens-job");
-	assert.match(observed.podmanConfRefused.message, /^Refused: \/home\/pdjob\/\.config\/containers\/containers\.conf sets pasta_options/);
-	// A conf read that failed for a moment is the supervisor's retry (untagged, exit 1), never a config error (exit 2)
-	// that strands the unit; one the account cannot read is a config error.
-	const failing = (code) => ({ ...PODMAN_FILES, readFileSync: (p) => (p === "/etc/containers/containers.conf" ? (() => { throw Object.assign(new Error(code), { code }); })() : PODMAN_FILES.readFileSync(p)) });
-	for (const code of ["EMFILE", "EIO"]) {
-		await assert.rejects(
-			() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: failing(code), ...auth }),
-			(err) => err.piDispatchConfig !== true && err.message.startsWith("Not read yet: /etc/containers/containers.conf could not be read"),
-			code,
-		);
-	}
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: failing("EACCES"), ...auth }),
-		(err) => err.piDispatchConfig === true && /could not be read \(EACCES\)/.test(err.message),
-	);
-	// A clean conf boots as the default.
-	const clean = await runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, ...auth });
-	assert.ok(clean.logs.some((l) => l.event === "worker_started"));
-});
-
-// Issue #450: the account's rootless network still running with an option a removed key gave it, as Podman 4.9.3's
-// slirp4netns was measured after `allow_host_loopback=true` was removed (no --disable-host-loopback), read from /proc.
-const LIVE_WIDE = ["/usr/bin/slirp4netns", "--mtu=65520", "--enable-sandbox", "--enable-seccomp", "--enable-ipv6", "-c", "-r", "3", "--netns-type=path", "/run/user/1234/netns/rootless-netns-95a67c32c4d4ea4d7b39", "tap0"];
-const withLiveNetns = (argv) => {
-	// NSpid with one field: 4.9.3's slirp4netns runs in the worker's own pid namespace (measured).
-	const proc = { "/proc/4887/status": "Name:\tslirp4netns\nUid:\t1234\t1234\t1234\t1234\nNSpid:\t4887\n", "/proc/4887/cmdline": `${argv.join("\0")}\0` };
-	return { ...PODMAN_FILES, readFileSync: (p) => (Object.hasOwn(proc, p) ? proc[p] : PODMAN_FILES.readFileSync(p)), readdirSync: (p) => (p === "/proc" ? ["self", "4887"] : PODMAN_FILES.readdirSync(p)) };
-};
-
-test("a podman default whose rootless network still carries a removed key's option refuses to BOOT, tagged; merely blessed each job is refused (#450)", { skip: skipNoModule }, async () => {
-	const auth = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
-	const order = [];
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: withLiveNetns(LIVE_WIDE), order, makeAuth: async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() }),
-		(err) => err.piDispatchConfig === true && err.message.startsWith("Refused: this account's running rootless network (slirp4netns, pid 4887), ") && /still lacks Podman's own --disable-host-loopback/.test(err.message) && /systemctl --user stop [^;]*pi-dispatch-netns-keeper\.service/.test(err.message) && /\(issue #450\)\.$/.test(err.message),
-	);
-	assert.deepEqual(order, [], "before forge auth and the worker");
-	// Merely blessed, it boots, and the bundle refuses each podman job pre-spend on the same finding.
-	const { logs, captured } = await runStart({ env: { PI_BACKENDS: "local,podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: withLiveNetns(LIVE_WIDE), ...auth });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	const observed = await captured.deps.observationPreflight({ id: "j1", kind: "local", backend: "podman" });
-	assert.deepEqual([observed.podmanConfRefused?.reason, observed.podmanConfRefused?.key], ["podman-conf-widens-job", "network_cmd_options"]);
-	// The boot reads runRoot from its own info read: one that reports none refuses, tagged and named; one that has not
-	// answered boots, and each job is retried until it has.
-	await assert.rejects(
-		() => runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO({ runRoot: null }), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, ...auth }),
-		(err) => err.piDispatchConfig === true && err.message.startsWith("Refused: podman info reports no store.runRoot, so where Podman records this account's running rootless network is not known;"),
-	);
-	const slowInfo = await runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO({}, { answer: { answered: false, reason: "timeout", transient: true } }), jobUserIdentity: PODMAN_ID, observationFs: withLiveNetns(LIVE_WIDE), ...auth });
-	assert.ok(slowInfo.logs.some((l) => l.event === "worker_started"));
-	// The same helper narrow again (every bridge container stopped and started) boots as the default.
-	const narrow = await runStart({ env: { PI_BACKENDS: "podman" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID, observationFs: withLiveNetns([LIVE_WIDE[0], "--disable-host-loopback", ...LIVE_WIDE.slice(1)]), ...auth });
-	assert.ok(narrow.logs.some((l) => l.event === "worker_started"));
-});
-
-test("podmanConfBootRefusal: only while podman is the default venue and its identity is not already refused (#428)", { skip: skipNoModule }, () => {
-	const files = { fs: hostFiles({ "/home/pdjob/.config/containers/containers.conf": "pasta_options = []\n" }), home: "/home/pdjob", env: {}, euid: 1234 };
-	const worker = { mode: "worker", user: "1234:1234" };
-	assert.match(mod.podmanConfBootRefusal(worker, "podman", files).message, /^Refused: .* sets pasta_options, .*\(issue #428\)\.$/);
-	assert.equal(mod.podmanConfBootRefusal(worker, "podman", files).transient, false);
-	assert.match(mod.podmanConfBootRefusal({ mode: "unknown", reason: "timeout" }, "podman", files).message, /sets pasta_options/, "an unanswered info read does not wave it through");
-	assert.equal(mod.podmanConfBootRefusal(worker, "local", files), null, "blessed but not default boots");
-	assert.equal(mod.podmanConfBootRefusal({ mode: "unmappable", cause: "podman-rootful" }, "podman", files), null, "the identity's own refusal comes first");
-	assert.equal(mod.podmanConfBootRefusal(null, "podman", files), null, "podman not blessed: nothing read");
-	assert.equal(mod.podmanConfBootRefusal(worker, "podman", { ...files, fs: NO_HOST_FILES }), null, "a clean account boots");
-});
-
-test("local's observation preflight retries a host file read that failed for a moment, naming the file (#428)", { skip: skipNoModule }, async () => {
-	// Boots clean, then the hooks directory starts failing with EMFILE, as a host running out of descriptors would.
-	let failing = false;
-	const base = hostFiles({ "/etc/containers/mounts.conf": "" });
-	const fs = {
-		...base,
-		readdirSync: (p) => {
-			if (failing && p === "/etc/containers/oci/hooks.d") throw Object.assign(new Error("EMFILE"), { code: "EMFILE" });
-			return base.readdirSync(p);
-		},
-	};
-	const { captured } = await runStart({ env: { PI_BACKEND_FLOOR: "mountSet=enforced" }, readDaemonFacts: PODMAN_FACTS(), observationFs: fs, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	failing = true;
-	assert.deepEqual(await captured.deps.observationPreflight({ id: "j1", kind: "local" }), { unavailable: true, reason: "file-unread", message: "/etc/containers/oci/hooks.d could not be read (EMFILE)" });
-});
-
-test("podmanBootRefusal: only a boot-refusing cause, and only while podman is the default venue (#354)", { skip: skipNoModule }, () => {
-	for (const cause of ["podman-platform", "podman-not-found", "podman-remote", "podman-rootful", "worker-is-root"]) {
-		assert.match(mod.podmanBootRefusal({ mode: "unmappable", cause }, "podman"), /^Refused: .*\(issue #354\)\.$/, cause);
-		assert.equal(mod.podmanBootRefusal({ mode: "unmappable", cause }, "local"), null, `${cause}: podman blessed but not default boots`);
-	}
-	for (const decision of [{ mode: "unmappable", cause: "podman-unreadable" }, { mode: "unmappable", cause: "root-group" }, { mode: "unknown", reason: "timeout" }, { mode: "worker", user: "1234:1234" }, null]) {
-		assert.equal(mod.podmanBootRefusal(decision, "podman"), null, JSON.stringify(decision));
-	}
-	// Local's rule does not answer for podman's causes, and podman's does not for local's.
-	assert.equal(mod.jobUserBootRefusal({ mode: "unmappable", cause: "podman-rootful" }, "podman"), null);
-	assert.equal(mod.podmanBootRefusal({ mode: "unmappable", cause: "rootless" }, "podman"), null);
-});
-
-test("a floor naming a podman observation refuses to BOOT on a missed one, tagged when answered, untagged when the read did not answer (#354)", { skip: skipNoModule }, async () => {
-	const base = { jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
-	const order = [];
-	await assert.rejects(
-		() => runStart({ ...base, env: { PI_BACKENDS: "podman", PI_BACKEND_FLOOR: "isolation=enforced" }, readPodmanInfo: PODMAN_INFO(), observationFs: hostFiles({ "/home/pdjob/.config/containers/mounts.conf": "", [PODMAN_USER_MANAGER]: "memory pids\n" }), order, makePodmanReaper: () => (order.push("makePodmanReaper"), async () => ({ reaped: true })) }),
-		(err) => err.piDispatchConfig === true && /podman: isolation=enforced/.test(err.message) && /cpu cgroup controller is not delegated to this account's systemd user manager/.test(err.message),
-	);
-	assert.deepEqual(order, [], "before the reaper and the worker");
-	// Issue #453: an account with no systemd user manager running, podman info still listing every controller (measured
-	// E1), is refused at boot under an isolation floor, tagged (exit 2), with the missing manager named.
-	await assert.rejects(
-		() => runStart({ ...base, env: { PI_BACKENDS: "podman", PI_BACKEND_FLOOR: "isolation=enforced" }, readPodmanInfo: PODMAN_INFO(), observationFs: hostFiles({ "/home/pdjob/.config/containers/mounts.conf": "" }), order }),
-		(err) => err.piDispatchConfig === true && /podman: isolation=enforced/.test(err.message) && /no systemd user manager is running for this account \(\/sys\/fs\/cgroup\/user\.slice\/user-1234\.slice\/user@1234\.service\/cgroup\.controllers does not exist\)/.test(err.message),
-	);
-	assert.deepEqual(order, [], "before the reaper and the worker");
-	// Blessed but NOT the default, it is still judged: the floor is over every blessed venue.
-	await assert.rejects(
-		() => runStart({ ...base, env: { PI_BACKENDS: "local,podman", PI_BACKEND_FLOOR: "mountSet=enforced" }, observationFs: NO_HOST_FILES, readPodmanInfo: PODMAN_INFO() }),
-		(err) => err.piDispatchConfig === true && /podman: mountSet=enforced/.test(err.message),
-	);
-	// A read that did not answer is the supervisor's retry, never a config error that strands the unit. (Blessed beside
-	// local, so the identity verdict cannot refuse first: `unknown` is never a boot exit anyway.)
-	await assert.rejects(
-		() => runStart({ ...base, env: { PI_BACKENDS: "local,podman", PI_BACKEND_FLOOR: "credentialTransit=enforced" }, readPodmanInfo: PODMAN_INFO({}, { answer: { answered: false, reason: "timeout", transient: true } }) }),
-		(err) => err.piDispatchConfig !== true && /podman info was not read \(timeout\)/.test(err.message),
-	);
-});
-
-test("each venue's boot observations are judged for that venue alone, so local and podman blessed together boot under a full floor (#354, M14)", { skip }, async () => {
-	// PR #425's surviving mutant: judging local's observations over EVERY blessed venue reads podman's observedBy names
-	// as unanswered in local's map, the transient arm, exit 1 on every restart. And the reverse for podman's.
-	const floor = "isolation=enforced,mountSet=enforced,credentialTransit=enforced";
-	const { logs } = await runStart({
-		env: { PI_BACKENDS: "local,podman", PI_BACKEND_FLOOR: floor },
-		jobUserIdentity: PODMAN_ID,
-		observationFs: PODMAN_FILES,
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-	});
-	const started = logs.find((l) => l.event === "worker_started");
-	assert.deepEqual([started.daemonAppliesBounds, started.runtimeAddsNoMounts, started.dockerEndpointLocal], [true, true, true], "local's own observations hold");
-	assert.deepEqual([started.podmanBoundsDelegated, started.podmanAddsNoMounts, started.podmanServiceLocal], [true, true, true], "and podman's");
-});
-
-test("the boot line carries each podman observation under its own key (#354)", { skip }, async () => {
-	// Three different answers, so a key reading another observation's value cannot pass: bounds withheld (no cpu
-	// controller delegated to the user manager, issue #453), mounts credited (the empty override), service local. No
-	// floor, so nothing refuses.
-	const { logs } = await runStart({
-		env: { PI_BACKENDS: "local,podman" },
-		jobUserIdentity: PODMAN_ID,
-		observationFs: hostFiles({ "/home/pdjob/.config/containers/mounts.conf": "", [PODMAN_USER_MANAGER]: "memory pids\n" }),
-		readPodmanInfo: PODMAN_INFO(),
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-	});
-	const started = logs.find((l) => l.event === "worker_started");
-	assert.deepEqual([started.podmanBoundsDelegated, started.podmanAddsNoMounts, started.podmanServiceLocal], [false, true, true]);
-	const noOverride = await runStart({ env: { PI_BACKENDS: "local,podman" }, jobUserIdentity: PODMAN_ID, observationFs: hostFiles({ [PODMAN_USER_MANAGER]: "cpuset cpu io memory pids\n" }), makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
-	const s2 = noOverride.logs.find((l) => l.event === "worker_started");
-	assert.deepEqual([s2.podmanBoundsDelegated, s2.podmanAddsNoMounts, s2.podmanServiceLocal], [true, false, true]);
-});
-
 test("a backend registry refusal releases every handle boot opened before it, not only the raw client (#354)", { skip }, async () => {
 	// The registry refuses AFTER the job queue, the host queue and the host registry's heartbeat exist, and createWorker
 	// has not been handed them, so neither the product's shutdown nor this harness's teardown can reach them. Before this
@@ -4693,8 +4024,7 @@ test("a backend registry refusal releases every handle boot opened before it, no
 	await assert.rejects(
 		() =>
 			runStart({
-				env: { PI_BACKENDS: "podman", PI_WORKER_NAME: "refused-1", VALKEY_URL },
-				jobUserIdentity: PODMAN_ID,
+				env: { PI_WORKER_NAME: "refused-1", VALKEY_URL },
 				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
 				makeHost: () => fakeHost(),
 				makeBackendRegistry: () => {
@@ -4753,115 +4083,6 @@ test("backend registry refusal settles both queue starts before closing and obse
 	for (const queue of queues) assert.deepEqual(events.filter(([name]) => name === queue.name).map(([, phase]) => phase), ["waiting", "close", "disconnect"], "failed readiness still closes, and an async disconnect rejection cannot become unhandled");
 });
 
-test("the sandbox reaper holds a directory its OWN runtime reports open, whatever the worker blesses (#429 review)", { skip }, async () => {
-	// THE REPRODUCTION, driven through the real wiring and the real `makeSandboxReaper` on a real retention root: a
-	// worker blessing podman alone, a local run retained earlier and reopened under docker from a shell with no
-	// PI_BACKENDS. Every directory here is past its window, so only the runtime answers keep one.
-	const base = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, readPodmanInfo: PODMAN_INFO({}), bootImage: { ok: true, capabilities: ["anyUid"] }, makeSandboxReaper: realSandboxReaper };
-	const seed = (podmanStore) => {
-		const root = tempDir("wired-sbx-");
-		const old = "2020-01-01T00:00:00.000Z";
-		for (const [id, backend] of [["d-live", "local"], ["d-idle", "local"], ["p-live", "podman"], ["p-idle", "podman"]]) {
-			mkdirSync(join(root, id), { recursive: true });
-			const store = backend === "podman" && podmanStore ? { podmanStore } : {};
-			writeFileSync(join(root, id, "manifest.json"), JSON.stringify({ jobId: id, kind: "github", image: "pi-job:x", backend, ...store, workspace: join(root, id), createdAt: old, keepUntil: null }));
-		}
-		return root;
-	};
-	const left = (root) => ["d-live", "d-idle", "p-live", "p-idle"].filter((id) => { try { return readFileSync(join(root, id, "manifest.json")) && true; } catch { return false; } });
-	const sweeper = () => async () => ({ swept: [], notes: [] });
-	const run = async (backends, answers, { podmanStore, graphRoot = "/home/op/.local/share/containers/storage" } = {}) => {
-		const root = seed(podmanStore);
-		const asked = [];
-		const { logs } = await runStart({
-			...base,
-			readPodmanInfo: PODMAN_INFO({ graphRoot }),
-			env: { PI_BACKENDS: backends, PI_SANDBOX_DIR: root, PI_SANDBOX_RETENTION_HOURS: "1" },
-			makeSandboxNetworkSweeper: sweeper,
-			listRunningSandboxes: async ({ bin }) => {
-				asked.push(bin);
-				const a = answers[bin];
-				if (a instanceof Error) throw a;
-				return a;
-			},
-		});
-		return { left: left(root), asked, skipped: logs.filter((l) => l.event === "sandbox_reaper_skipped").map(({ event, host, ...f }) => f) };
-	};
-
-	for (const backends of ["podman", "local", "local,podman"]) {
-		// Both runtimes answer: each live directory is held by ITS runtime, and each idle one is swept.
-		const both = await run(backends, { docker: ["d-live"], podman: ["p-live"] });
-		assert.deepEqual(both.left, ["d-live", "p-live"], `${backends}: live kept, idle swept`);
-		// Issue #446, gate round 1: and each run about to be deleted is asked of ITS runtime once more, right before the
-		// rename (d-idle of docker, p-idle of podman), which is the wiring of the sweep's `isOpen`.
-		assert.deepEqual(both.asked, ["docker", "podman", "docker", "podman"], `${backends}: each run's own runtime is asked, and asked again before a delete`);
-		// Docker down (a stale CLI, no daemon): its runs are held, and podman's idle one is still swept.
-		const dockerDown = await run(backends, { docker: new Error("Cannot connect to the Docker daemon"), podman: ["p-live"] });
-		assert.deepEqual(dockerDown.left, ["d-live", "d-idle", "p-live"], `${backends}: docker down holds docker's runs only`);
-		// And the worker's own log says which runtime held what (through start.mjs's own `log`).
-		assert.deepEqual(dockerDown.skipped, [{ reason: "runtime-unanswered", runtime: "docker", held: 2 }], `${backends}: the hold is said`);
-		// Podman absent: the reverse.
-		const podmanGone = await run(backends, { docker: ["d-live"], podman: Object.assign(new Error("spawn podman ENOENT"), { code: "ENOENT" }) });
-		assert.deepEqual(podmanGone.left, ["d-live", "p-live", "p-idle"], `${backends}: podman absent holds podman's runs only`);
-		// A podman run whose recorded store is not this worker's podman store: held and said (review round 2, measured:
-		// that podman's `ps` answers empty for another store), while the one in the same store sweeps as usual.
-		const moved = await run(backends, { docker: ["d-live"], podman: [] }, { podmanStore: "/home/op/.local/share/containers/storage", graphRoot: "/home/other/.local/share/containers/storage" });
-		assert.deepEqual(moved.left, ["d-live", "p-live", "p-idle"], `${backends}: another store holds the podman runs`);
-		assert.deepEqual(moved.skipped.map((f) => f.reason), ["podman-store-mismatch", "podman-store-mismatch"]);
-		const same = await run(backends, { docker: ["d-live"], podman: ["p-live"] }, { podmanStore: "/home/op/.local/share/containers/storage" });
-		assert.deepEqual(same.left, ["d-live", "p-live"], `${backends}: the same store sweeps as before`);
-	}
-});
-
-test("the sandbox network sweep visits each runtime present, built through the seam (#429)", { skip }, async () => {
-	const base = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, observationFs: PODMAN_FILES, readPodmanInfo: PODMAN_INFO({}), bootImage: { ok: true, capabilities: ["anyUid"] } };
-	const factory = (made) => (opts) => {
-		made.push(opts?.bin);
-		return async () => ({ swept: [{ network: `pi-sandbox-${opts?.bin}-net`, detached: [] }], notes: [] });
-	};
-	const sweepOf = async (backends) => {
-		const made = [];
-		let args;
-		await runStart({ ...base, env: { PI_BACKENDS: backends, PI_SANDBOX_DIR: tempDir("net-sbx-") }, makeSandboxNetworkSweeper: factory(made), makeSandboxReaper: (a) => ((args = a), async () => {}) });
-		const swept = (await args.sweepNetworks({})).swept.map((s) => s.network);
-		return { made, swept };
-	};
-	assert.deepEqual(await sweepOf("podman"), { made: ["podman"], swept: ["pi-sandbox-podman-net"] });
-	assert.deepEqual(await sweepOf("local,podman"), { made: ["docker", "podman"], swept: ["pi-sandbox-docker-net", "pi-sandbox-podman-net"] });
-	assert.deepEqual(await sweepOf("local"), { made: ["docker"], swept: ["pi-sandbox-docker-net"] });
-	// The configured proxy reaches every sweeper (issue #452 gate round 1): the sweep detaches a STOPPED one by that name.
-	const proxies = [];
-	let args;
-	await runStart({ ...base, env: { PI_BACKENDS: "local,podman", PI_EGRESS_PROXY: "my-proxy", PI_SANDBOX_DIR: tempDir("net-sbx-") }, makeSandboxNetworkSweeper: (opts) => (proxies.push(opts?.proxy), async () => ({ swept: [], notes: [] })), makeSandboxReaper: (a) => ((args = a), async () => {}) });
-	await args.sweepNetworks({});
-	assert.deepEqual(proxies, ["my-proxy", "my-proxy"]);
-});
-
-// Issue #458 (PR #463 round 2): on Podman 4.x with egress armed, the keeper is read ONCE at boot through the bundle's own
-// egress preflight, and a keeper that does not hold is said as its own event with the WHOLE sentence, since a
-// deployment that upgraded without re-running `service install` would otherwise learn it only from retried jobs. Never
-// a refusal: the per-job preflight is the gate.
-test("a podman worker says at boot, whole, that its rootless network keeper does not hold (#458)", { skip }, async () => {
-	const SENTENCE = `the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman, and on Podman 4.9.3 ... To fix it, start it as the worker's account: ${"x".repeat(200)}`;
-	const withPreflight = (answer, seen) => (opts) => ({ ...realPodmanBackend({ ...opts, spawnFn: () => { throw new Error("no spawn"); } }), egressPreflight: async () => (seen.push("egress"), answer) });
-	const seen = [];
-	const { logs } = await runStart({ env: { PI_BACKENDS: "podman" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, makePodmanBackend: withPreflight({ unavailable: "pi-dispatch-egress-proxy", keeper: SENTENCE }, seen) });
-	assert.equal(logs.find((l) => l.event === "netns_keeper_not_holding_at_boot")?.reason, SENTENCE, "the whole sentence, never cut");
-	// PR #463 round 3: the boot line takes the preflight's own no-job sentence where it gives one.
-	const bootSeen = [];
-	const AT_BOOT = "the rootless network keeper pi-dispatch-netns-keeper is exited, so every egress job is retried rather than started until this is fixed";
-	const withBoot = await runStart({ env: { PI_BACKENDS: "podman" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, makePodmanBackend: withPreflight({ unavailable: "pi-dispatch-egress-proxy", keeper: `${SENTENCE} so this job is retried`, keeperAtBoot: AT_BOOT }, bootSeen) });
-	assert.equal(withBoot.logs.find((l) => l.event === "netns_keeper_not_holding_at_boot")?.reason, AT_BOOT);
-	assert.equal(seen.length, 1, "read once at boot");
-	const heldSeen = [];
-	const held = await runStart({ env: { PI_BACKENDS: "podman" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, makePodmanBackend: withPreflight({ ok: true }, heldSeen) });
-	assert.ok(!held.logs.some((l) => l.event === "netns_keeper_not_holding_at_boot"));
-	const offSeen = [];
-	const off = await runStart({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, makePodmanBackend: withPreflight({ unavailable: "x", keeper: SENTENCE }, offSeen) });
-	assert.equal(offSeen.length, 0, "egress off: nothing is read");
-	assert.ok(!off.logs.some((l) => l.event === "netns_keeper_not_holding_at_boot"));
-});
-
 // Issue #458 (PR #463 round 2): a job that ran out of retries on the podman venue's rootless network keeper gets a
 // terminal comment that names the keeper, keyed by the error's fixed reason token (never its message, which a host read
 // produced), and the whole sentence is logged beside the cut `job_failed` line. Any other reason keeps the one sentence.
@@ -4888,24 +4109,6 @@ test("a TERMINAL netns-keeper-not-holding failure comments the keeper's fixed se
 	assert.deepEqual(posted, []);
 });
 
-// Issue #476: a keeper whose only fault is its age is waited out at boot, once and bounded, then judged again. The
-// measured joint start read it at 0.5 to 0.8 s and warned every time; a keeper that passes after the wait is not said.
-test("a podman worker waits out a young keeper at boot, once and bounded, and warns only if it still does not hold (#476)", { skip }, async () => {
-	const boot = async (answers) => {
-		const reads = [];
-		const slept = [];
-		const withPreflight = (opts) => ({ ...realPodmanBackend({ ...opts, spawnFn: () => { throw new Error("no spawn"); } }), egressPreflight: async () => answers[Math.min(reads.push("egress") - 1, answers.length - 1)] });
-		const { logs } = await runStart({ env: { PI_BACKENDS: "podman" }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), jobUserIdentity: PODMAN_ID, makePodmanBackend: withPreflight, sleep: async (ms) => void slept.push(ms) });
-		return { reads: reads.length, slept, warned: logs.filter((l) => l.event === "netns_keeper_not_holding_at_boot").map((l) => l.reason), waited: logs.filter((l) => l.event === "netns_keeper_young_at_boot").map((l) => [l.keeperAgeMs, l.waitMs]) };
-	};
-	const YOUNG = { unavailable: "pi-dispatch-egress-proxy", keeper: "k", keeperAtBoot: "the rootless network keeper pi-dispatch-netns-keeper has been running for only 0.6 s", young: { startedMs: 1, ageMs: 600, waitMs: 3_400 } };
-	assert.deepEqual(await boot([YOUNG, { ok: true }]), { reads: 2, slept: [3_400], warned: [], waited: [[600, 3_400]] }, "young, then holds: no warning, the wait said as information");
-	assert.deepEqual(await boot([YOUNG, YOUNG]), { reads: 2, slept: [3_400], warned: [YOUNG.keeperAtBoot], waited: [[600, 3_400]] }, "still young after the wait (it restarted): said, once");
-	const GONE = { unavailable: "pi-dispatch-egress-proxy", keeper: "k", keeperAtBoot: "the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman" };
-	assert.deepEqual(await boot([GONE]), { reads: 1, slept: [], warned: [GONE.keeperAtBoot], waited: [] }, "not young: said at once, no wait");
-	assert.deepEqual(await boot([{ ...YOUNG, young: { ...YOUNG.young, waitMs: 60_000 } }, { ok: true }]), { reads: 2, slept: [4_000], warned: [], waited: [[600, 4_000]] }, "the wait is capped at the minimum age plus the margin");
-});
-
 test("a TERMINAL netns-keeper-crash-loop failure comments its own fixed sentence and logs the reason whole (#476)", { skip }, async () => {
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
@@ -4916,17 +4119,6 @@ test("a TERMINAL netns-keeper-crash-loop failure comments its own fixed sentence
 	await settleListeners();
 	assert.deepEqual(posted, ["Failed before it started: this worker's rootless network keeper (pi-dispatch-netns-keeper), which its Podman egress proxy needs, kept restarting while the job waited for it, so the job was retried and never run. Nothing was spent. Ask the operator to run `pi-dispatch doctor` on the worker and read the keeper's log (`journalctl --user -u pi-dispatch-netns-keeper.service`)."]);
 	assert.equal(parseLines(bootLines.slice(from)).find((l) => l.event === "job_failed_netns_keeper")?.reason, SENTENCE, "the whole sentence, beside the cut line");
-});
-
-test("a hold on podman.service's restart that ran out comments its own fixed sentence, never the error's words (#448)", { skip }, async () => {
-	const posted = [];
-	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const { handlers } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => host });
-	const err = Object.assign(new Error("held 60 min for rootful Podman's service to restart, and it did not: /etc/containers/containers.conf.d/zz.conf was removed"), { reason: "podman-service-restart-hold-expired" });
-	handlers.failed({ id: "h1", data: { kind: "github", repo: "o/r", target: { type: "issue", number: 7 } }, attemptsMade: 0, finishedOn: 123 }, err);
-	await settleListeners();
-	assert.deepEqual(posted, ["Failed before it started: rootful Podman's service on this worker kept running with a containers.conf older than its files (or a file's change time stayed ahead of the host's clock) for an hour, so the job was held and never run. Nothing was spent. Ask the operator to restart it while no local job runs (`sudo systemctl restart podman.service`), then run the job again."]);
-	assert.ok(!posted[0].includes("/etc"), "no host path in a forge comment");
 });
 
 test("local's job teardown uses the runtime THAT job was admitted on, recorded per job, even after the endpoint's answer changes mid-job (#452 gate round 5)", { skip }, async () => {
@@ -4965,20 +4157,6 @@ test("boot makes the jobs dir this account's before it builds anything, and anot
 	assert.deepEqual(refusedOrder, [], "no worker was created, nothing was connected");
 });
 
-// Gate round 1: an explicit PI_SANDBOX_DIR another account owned (0777) was used, and that account swapped a retained
-// workspace for its own. Refused at boot like the jobs dir, before anything is built.
-test("boot asks the sandbox dir's owner too, and another account's refuses boot as a configError before anything is built (#464)", { skip }, async () => {
-	const asked = [];
-	await runStart({ env: { PI_SANDBOX_DIR: "/srv/pd-sb" }, ensureJobsDir: () => {}, ensureSandboxDir: (dir, opts) => asked.push([dir, opts.env.PI_SANDBOX_DIR]) });
-	assert.deepEqual(asked, [["/srv/pd-sb", "/srv/pd-sb"]]);
-	const refusal = Object.assign(new Error("the sandbox dir /srv/pd-sb is owned by uid 1270"), { piDispatchConfig: true });
-	const order = [];
-	await assert.rejects(runStart({ order, env: { PI_SANDBOX_DIR: "/srv/pd-sb" }, ensureJobsDir: () => {}, ensureSandboxDir: () => {
-		throw refusal;
-	} }), (err) => err === refusal);
-	assert.deepEqual(order, [], "no worker was created");
-});
-
 // Gate round 2: the owner rule runs where the connection is made. A VALKEY_URL edited after install refused it, a
 // 0.0.0.0 URL, or a ::1 squat after install each reached another account's queue through an unjudged worker.
 test("boot judges VALKEY_URL's owner before any Valkey contact, refuses as a configError, and every client connects to the pinned address (#464)", { skip }, async () => {
@@ -4986,34 +4164,37 @@ test("boot judges VALKEY_URL's owner before any Valkey contact, refuses as a con
 	const refusal = Object.assign(new Error("the Valkey VALKEY_URL reaches is refused: 127.0.0.1:6379 is held by op2 (uid 1235)"), { piDispatchConfig: true });
 	const order = [];
 	await assert.rejects(
-		runStart({ order, env: { PI_BACKENDS: "podman" }, judgeValkey: async (args) => {
-			asked.push([args.url, args.venues]);
+		runStart({ order, judgeValkey: async (args) => {
+			asked.push([args.url, args.env]);
 			throw refusal;
 		} }),
 		(err) => err === refusal,
 	);
 	assert.deepEqual(order, [], "no worker was created, nothing was connected");
-	assert.deepEqual(asked[0][1], { localUsed: false, podmanUsed: true, openshellUsed: false }, "judged for the venues the deployment blesses");
-	// Issue #707 (review round 2 of #715): an openshell venue on Podman reaches the rule, which then refuses root's listener.
-	const openshellAsked = [];
-	await assert.rejects(runStart({ order: [], env: { PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" }, judgeValkey: async (args) => {
-		openshellAsked.push(args);
-		throw refusal;
-	} }), (err) => err === refusal);
-	assert.deepEqual(openshellAsked[0].venues, { localUsed: false, podmanUsed: false, openshellUsed: true });
-	assert.equal(openshellAsked[0].env.PI_OPENSHELL_ENGINE, "podman");
-	const { openshellSetupOf } = await import("../src/backends.mjs");
-	assert.equal(openshellSetupOf(openshellAsked[0].venues, openshellAsked[0].env).valkeyEngine, "podman", "so resolveWorkerValkey refuses root there");
+	assert.equal(typeof asked[0][0], "string", "the judge reads the deployment's own URL");
 	// Pinned: the worker's clients use the judged literal, not VALKEY_URL's name. VALKEY_URL here names a host that does not
 	// resolve, so the boot can only succeed if every client took the pinned URL instead.
 	const pinnedUrl = process.env.VALKEY_TEST_URL;
-	const r = await runStart({ env: { VALKEY_URL: "redis://valkey-name-never-resolves.invalid:1" }, judgeValkey: async () => ({ url: pinnedUrl, servername: null, pinned: { address: "127.0.0.1", port: 6399, heldBy: "this account" }, notes: ["another account also listens on [::1]:6399"] }) });
+	const r = await runStart({
+		env: { VALKEY_URL: "redis://valkey-name-never-resolves.invalid:1", PI_ON_FAILURE: "/nope/pi-notify-does-not-exist" },
+		judgeValkey: async () => ({ url: pinnedUrl, servername: null, pinned: { address: "127.0.0.1", port: 6399, heldBy: "this account" }, notes: ["another account also listens on [::1]:6399"] }),
+		whileRunning: async ({ captured }) => {
+			// Seed the durable hook-runs row the boot's publisher owns, so the fixture cleanup below has real work
+			// to do on the server it was told to reach.
+			const { makeRedisClient } = await import("../src/connection.mjs");
+			const seeder = makeRedisClient(pinnedUrl);
+			try {
+				await seeder.set(hookRunsKey(captured.name), JSON.stringify({ v: 1, at: 1, jobId: null, outcome: "failed", reason: "infra", detail: "exit", code: 1 }));
+				await seeder.sadd(HOOK_HOSTS, captured.name);
+			} finally { await seeder.quit(); }
+		},
+	});
 	assert.equal(r.captured.connection.host, new URL(pinnedUrl).hostname, "BullMQ's worker connection");
 	const { makeRedisClient } = await import("../src/connection.mjs");
 	const inventoryProbe = makeRedisClient(pinnedUrl);
 	try {
-		assert.equal(await inventoryProbe.get(sandboxInventoryKey(r.captured.name)), null, "fixture cleanup used the judged server despite the unresolvable ambient URL");
-		assert.equal(await inventoryProbe.sismember(SANDBOX_INVENTORY_HOSTS, r.captured.name), 0);
+		assert.equal(await inventoryProbe.get(hookRunsKey(r.captured.name)), null, "fixture cleanup used the judged server despite the unresolvable ambient URL");
+		assert.equal(await inventoryProbe.sismember(HOOK_HOSTS, r.captured.name), 0);
 	} finally { await inventoryProbe.quit(); }
 	assert.ok(r.logs.some((l) => l.event === "valkey_pinned" && l.address === "127.0.0.1" && l.heldBy === "this account"), JSON.stringify(r.logs.slice(0, 5)));
 	assert.ok(r.logs.some((l) => l.event === "valkey_note" && /\[::1\]:6399/.test(l.note)));
@@ -5051,171 +4232,6 @@ test("boot secures the account root for the two durable stores too, and a refusa
 	assert.deepEqual(order, [], "no worker was created");
 });
 
-// --- issue #448: rootful Podman's containers.conf keys that reach a `local` job ---------------------------------------
-
-/** The real docker CLI against rootful Podman's compat API on this host: Docker's shape, Podman's licence. */
-const ROOTFUL_FACTS = DOCKER_FACTS({ podman: true, bounds: null, os: "fedora" });
-const rootfulHost = (files, errors = {}) => ({
-	statSync: (p) => {
-		if (errors[p]) throw Object.assign(new Error(errors[p]), { code: errors[p] });
-		if (files[p] === undefined) throw enoent(p);
-		return { size: Buffer.byteLength(files[p]), ctimeMs: 1_000 };
-	},
-	readFileSync: (p) => {
-		if (errors[p]) throw Object.assign(new Error(errors[p]), { code: errors[p] });
-		if (files[p] === undefined) throw enoent(p);
-		return files[p];
-	},
-	readdirSync: (p) => {
-		if (errors[p]) throw Object.assign(new Error(errors[p]), { code: errors[p] });
-		throw enoent(p);
-	},
-});
-const ROOTFUL_AUTH = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
-
-test("a local default on rootful Podman whose containers.conf sets a refused key refuses to BOOT, tagged, before anything is built (#448)", { skip: skipNoModule }, async () => {
-	for (const [key, text] of [
-		["annotations", '[containers]\nannotations = ["run.oci.keep_original_groups=1"]\n'],
-		["env", '[containers]\nenv = ["PD_X=1"]\n'],
-		["helper_binaries_dir", '[engine]\nhelper_binaries_dir = ["/opt/hb"]\n'],
-	]) {
-		const order = [];
-		const makeAuth = async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" });
-		await assert.rejects(
-			() => runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: rootfulHost({ "/etc/containers/containers.conf": text }), order, makeAuth, makeHost: () => fakeHost() }),
-			(err) => err.piDispatchConfig === true && err.message.startsWith(`Refused: /etc/containers/containers.conf sets ${key}, which `) && /sudo systemctl restart podman\.service/.test(err.message) && /\(issue #448\)\.$/.test(err.message),
-			key,
-		);
-		assert.deepEqual(order, [], `${key}: before forge auth and the worker`);
-	}
-	// Measured inert on this route: not refused, the worker boots.
-	for (const text of ['[network]\npasta_options = ["--map-gw"]\n', '[engine]\nnetwork_cmd_options = ["allow_host_loopback=true"]\n', '[engine]\nnetwork_cmd_path = "/opt/slirp"\n']) {
-		const { logs } = await runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: rootfulHost({ "/etc/containers/containers.conf": text }), ...ROOTFUL_AUTH });
-		assert.ok(logs.some((l) => l.event === "worker_started"), text);
-	}
-	// The running service older than its conf is the same refusal with the restart as its fix.
-	const running = RUNNING_PODMAN_SERVICE(500);
-	await assert.rejects(
-		() => runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: rootfulHost({ "/etc/containers/containers.conf": "[containers]\n" }), readPodmanService: running, ...ROOTFUL_AUTH }),
-		// Gate round 1 of PR #473: it heals by itself (the service restarts or idles out), so exit 1, never a tagged exit 2.
-		(err) => err.piDispatchConfig !== true && err.message.startsWith("Not run yet: /etc/containers/containers.conf changed after the running podman.service started"),
-	);
-	// A read that failed for a moment is the supervisor's retry (untagged), never exit 2.
-	await assert.rejects(
-		() => runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: rootfulHost({}, { "/etc/containers/containers.conf": "EMFILE" }), ...ROOTFUL_AUTH }),
-		(err) => err.piDispatchConfig !== true && err.message.startsWith("Not read yet: /etc/containers/containers.conf could not be read (EMFILE)"),
-	);
-	// The identity refusal names its fix first.
-	await assert.rejects(
-		() => runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(0), observationFs: rootfulHost({ "/etc/containers/containers.conf": "env = []\n" }), ...ROOTFUL_AUTH }),
-		(err) => err.piDispatchConfig === true && /the worker runs as root/.test(err.message) && !/sets env/.test(err.message),
-	);
-});
-
-test("rootful Podman merely blessed: the worker boots, and each local job is refused pre-spend as podman-conf-widens-job, rootful (#448)", { skip: skipNoModule }, async () => {
-	// Root's own conf, which the rootless podman venue's account does not read, so only local's check sees it.
-	const files = rootfulHost({ "/home/pdjob/.config/containers/mounts.conf": "", [PODMAN_USER_MANAGER]: "cpuset cpu io memory pids\n", "/root/.config/containers/containers.conf": '[containers]\nenv = ["PD_X=rootuser"]\n' });
-	const { logs, captured } = await runStart({ env: { PI_BACKENDS: "podman,local" }, readPodmanInfo: PODMAN_INFO(), readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: PODMAN_ID, observationFs: files, ...ROOTFUL_AUTH });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	const observed = await captured.deps.observationPreflight({ id: "j1", kind: "local", backend: "local" });
-	assert.deepEqual([observed.ok, observed.podmanConfRefused?.reason, observed.podmanConfRefused?.key, observed.podmanConfRefused?.rootful], [true, "podman-conf-widens-job", "env", true]);
-	assert.match(observed.podmanConfRefused.message, /^Refused: \/root\/\.config\/containers\/containers\.conf sets env, which /);
-	// The podman venue's own jobs are not judged by it.
-	const podmanJob = await captured.deps.observationPreflight({ id: "j2", kind: "local", backend: "podman" });
-	assert.equal(podmanJob.podmanConfRefused, undefined);
-});
-
-test("what the worker cannot read of rootful Podman's chain is logged by name at boot and never refused (#448)", { skip: skipNoModule }, async () => {
-	const errors = { "/root/.config/containers/containers.conf": "EACCES", "/root/.config/containers/containers.conf.d": "EACCES" };
-	const files = rootfulHost({}, errors);
-	const { logs, captured } = await runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: files, ...ROOTFUL_AUTH });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	const said = logs.filter((l) => l.event === "local_podman_conf_unread");
-	assert.deepEqual(said.map((l) => l.unread), ["/root/.config/containers/containers.conf (EACCES), /root/.config/containers/containers.conf.d (EACCES)"]);
-	// Per job: never refused on it, and said again only when the list changes (the log after boot is read off the stream).
-	const before = bootLines.length;
-	for (const id of ["j1", "j2"]) assert.equal((await captured.deps.observationPreflight({ id, kind: "local" })).podmanConfRefused, undefined);
-	assert.deepEqual(parseLines(bootLines.slice(before)).filter((l) => l.event === "local_podman_conf_unread"), [], "not said per job while it does not change");
-	delete errors["/root/.config/containers/containers.conf.d"];
-	await captured.deps.observationPreflight({ id: "j3", kind: "local" });
-	assert.deepEqual(parseLines(bootLines.slice(before)).filter((l) => l.event === "local_podman_conf_unread").map((l) => l.unread), ["/root/.config/containers/containers.conf (EACCES)"], "said again once it changes");
-});
-
-test("Docker, a remote endpoint and rootless Podman read no rootful file and never ask systemctl: byte-unchanged (#448)", { skip: skipNoModule }, async () => {
-	const asked = [];
-	const readPodmanService = async () => (asked.push("systemctl"), { read: true, loaded: true, running: true, startedAtMs: 0, environment: {}, environmentFiles: [], unitPaths: [] });
-	const reads = [];
-	const loud = { statSync: (p) => (reads.push(p), NO_HOST_FILES.statSync(p)), readFileSync: (p) => (reads.push(p), NO_HOST_FILES.readFileSync(p)), readdirSync: (p) => (reads.push(p), NO_HOST_FILES.readdirSync(p)) };
-	for (const [label, over] of [
-		["docker", { readDaemonFacts: DOCKER_FACTS() }],
-		["remote rootful Podman", { readDaemonFacts: ROOTFUL_FACTS, resolveDockerEndpoint: async () => ({ local: false, context: "far", endpoint: "tcp://10.0.0.9:2376", reason: null, transient: false }) }],
-		["rootless Podman", { readDaemonFacts: DOCKER_FACTS({ podman: true, bounds: null, rootless: true }), env: { PI_BACKENDS: "podman,local" }, readPodmanInfo: PODMAN_INFO(), jobUserIdentity: PODMAN_ID }],
-	]) {
-		asked.length = 0;
-		reads.length = 0;
-		const { logs, captured } = await runStart({ jobUserIdentity: LINUX_ID(1234), observationFs: loud, readPodmanService, ...ROOTFUL_AUTH, ...over });
-		assert.ok(logs.some((l) => l.event === "worker_started"), label);
-		const observed = await captured.deps.observationPreflight({ id: "j1", kind: "local", backend: "local" });
-		assert.equal(observed.podmanConfRefused, undefined, label);
-		assert.deepEqual(asked, [], `${label}: systemctl is never asked`);
-		assert.ok(!reads.some((p) => p.startsWith("/root/") || p === "/etc/passwd"), `${label}: ${reads.join(" ")}`);
-		assert.ok(!logs.some((l) => l.event === "local_podman_conf_unread"), label);
-	}
-});
-
-test("podman.service is read once per boot and once per job, and that one answer judges both mountSet and the refusal (#448)", { skip: skipNoModule }, async () => {
-	let reads = 0;
-	// Running since t=500; /etc/containers/containers.conf changed at t=1000 (rootfulHost's change time): stale.
-	const readPodmanService = async () => (reads++, await RUNNING_PODMAN_SERVICE(500)());
-	const files = rootfulHost({ "/etc/containers/mounts.conf": "", "/etc/containers/containers.conf": "" });
-	const { logs, captured } = await runStart({ env: { PI_BACKENDS: "podman,local" }, readPodmanInfo: PODMAN_INFO(), readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: PODMAN_ID, observationFs: files, readPodmanService, ...ROOTFUL_AUTH });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	assert.equal(reads, 1, "one read at boot");
-	assert.equal(logs.find((l) => l.event === "worker_started").runtimeAddsNoMounts, false, "the stale service withholds mountSet at boot");
-	const before = bootLines.length;
-	const observed = await captured.deps.observationPreflight({ id: "j1", kind: "local", backend: "local" });
-	assert.equal(reads, 2, "one read per job");
-	assert.deepEqual([observed.podmanConfRefused?.restart, observed.podmanConfRefused?.rootful], [true, true]);
-	assert.equal(parseLines(bootLines.slice(before)).find((l) => l.event === "runtime_observed"), undefined, "and per job, the same answer, so nothing changed to say");
-});
-
-test("per job, the two rootful checks read each host path once, and the next job reads it afresh (#448)", { skip: skipNoModule }, async () => {
-	// Gate round 3 of PR #473: with 1000 drop-ins each path was stat-ed about eight times a job (onceFs, one per job).
-	const counts = new Map();
-	const base = rootfulHost({ "/etc/containers/mounts.conf": "", "/etc/containers/containers.conf": "[containers]\n" });
-	const counted = (name) => (...args) => (counts.set(`${name} ${args[0]}`, (counts.get(`${name} ${args[0]}`) ?? 0) + 1), base[name](...args));
-	const host = { statSync: counted("statSync"), readFileSync: counted("readFileSync"), readdirSync: counted("readdirSync") };
-	const { captured } = await runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: host, readPodmanService: RUNNING_PODMAN_SERVICE(5_000), ...ROOTFUL_AUTH });
-	counts.clear();
-	await captured.deps.observationPreflight({ id: "j1", kind: "local" });
-	const twice = [...counts].filter(([, n]) => n > 1);
-	assert.deepEqual(twice, [], "no path is read twice in one job");
-	assert.equal(counts.get("statSync /etc/containers/containers.conf"), 1);
-	assert.equal(counts.get("readFileSync /etc/containers/containers.conf"), 1, "and it IS read");
-	counts.clear();
-	await captured.deps.observationPreflight({ id: "j2", kind: "local" });
-	assert.equal(counts.get("readFileSync /etc/containers/containers.conf"), 1, "the next job reads it afresh");
-});
-
-test("per job: a service older than its conf, and a chain file deleted under the running service, are retries; a 0600 drop-in refuses (#448)", { skip: skipNoModule }, async () => {
-	const files = { "/etc/containers/containers.conf": "[containers]\n" };
-	const host = {
-		statSync: (p) => (Object.hasOwn(files, p) ? { size: 0, ctimeMs: 100 } : (() => { throw enoent(p); })()),
-		readFileSync: (p) => (Object.hasOwn(files, p) ? (typeof files[p] === "object" ? (() => { throw Object.assign(new Error(p), { code: files[p].error }); })() : files[p]) : (() => { throw enoent(p); })()),
-		readdirSync: (p) => (p === "/etc/containers/containers.conf.d" && files["/etc/containers/containers.conf.d/zz.conf"] ? ["zz.conf"] : (() => { throw enoent(p); })()),
-	};
-	const { logs, captured } = await runStart({ readDaemonFacts: ROOTFUL_FACTS, jobUserIdentity: LINUX_ID(1234), observationFs: host, readPodmanService: RUNNING_PODMAN_SERVICE(500), ...ROOTFUL_AUTH });
-	assert.ok(logs.some((l) => l.event === "worker_started"));
-	assert.equal((await captured.deps.observationPreflight({ id: "j1", kind: "local" })).podmanConfRefused, undefined, "seen, unchanged");
-	delete files["/etc/containers/containers.conf"];
-	const gone = (await captured.deps.observationPreflight({ id: "j2", kind: "local" })).podmanConfRefused;
-	assert.deepEqual([gone?.retry, gone?.restart, gone?.rootful], [true, true, true]);
-	assert.match(gone.evidence, /^\/etc\/containers\/containers\.conf was removed after the running podman\.service started/);
-	files["/etc/containers/containers.conf.d/zz.conf"] = { error: "EACCES" };
-	const refused = (await captured.deps.observationPreflight({ id: "j3", kind: "local" })).podmanConfRefused;
-	assert.deepEqual([refused?.key, refused?.retry], [null, undefined]);
-	assert.match(refused.message, /^Refused: \/etc\/containers\/containers\.conf\.d\/zz\.conf could not be read \(EACCES\)/);
-});
 
 test("the host row's fpProjects follows the LIVE projects ref through a reload (#499 part C)", { skip }, async () => {
 	const { makeHostRegistry } = await import("../src/host-registry.mjs");
@@ -5483,30 +4499,6 @@ test("issue #761: a running worker's watchers carry a newer pause windows or tri
 	assert.ok(lines.some((l) => l.event === "triggers_reload_newer"), "and the triggers reload");
 });
 
-test("issue #596 (gate round 2): the boot's clock and log reach the podman info cache the bundle is handed, so a re-read past the age that fails serves the last answer and says so", { skip }, async () => {
-	let t = 2_000_000;
-	let fail = false;
-	const answer = PODMAN_INFO({ hostCpus: 6 });
-	const { podmanBackendCalls, logsNow } = await runStart({
-		env: { PI_BACKENDS: "podman", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		now: () => t,
-		jobUserIdentity: PODMAN_ID,
-		observationFs: PODMAN_FILES,
-		readPodmanInfo: async () => (fail ? { answered: false, reason: "timeout", transient: true } : answer()),
-		makePodmanReaper: () => async () => ({ reaped: true }),
-		bootImage: { ok: true, image: "pi-job:ci", imageDigest: "sha256:pod", piVersion: "0.80.7", capabilities: ["anyUid"] },
-	});
-	const readInfo = podmanBackendCalls[0].readInfo;
-	fail = true;
-	t += 10 * 60_000;
-	const read = await readInfo();
-	assert.equal(read.answered, true, "the last answer, not a failed read");
-	assert.equal(read.info.hostCpus, 6);
-	assert.deepEqual(logsNow().filter((l) => l.event === "podman_info_stale").map((l) => [l.reason, l.ageMs]), [["timeout", 10 * 60_000]], "the boot's log, the boot's clock");
-});
-
 test("issue #596 (gate round 2): the boot's clock and log reach the job-user resolver, so a re-read past the age that fails serves the last answer and says so", { skip }, async () => {
 	const endpoint = { local: true, context: "default", endpoint: "unix:///run/pd-test/docker.sock", reason: null, transient: false };
 	const job = { kind: "github", repo: "o/r", target: { type: "issue", number: 1 } };
@@ -5578,14 +4570,11 @@ test("issue #596, phase 2: createWorker is handed the host budget's inputs and t
 	};
 	await assert.rejects(() => opts.survivors.local(), /Cannot connect/);
 	assert.equal(captured.deps.hostBudget, undefined, "beside the other worker-wide inputs, never in deps");
-	for (const key of ["budgetMemMiB", "budgetCpuCenti", "usedMemMiB", "usedCpuCenti", "heldMemMiB", "heldCpuCenti", "budgetRunning", "budgetHolds", "budgetOrphans", "budgetSeed", "sandboxes", "sandboxesMore", "sandboxRetentionHours", "budgetFrom", "cpuReserve"]) {
+	for (const key of ["budgetMemMiB", "budgetCpuCenti", "usedMemMiB", "usedCpuCenti", "heldMemMiB", "heldCpuCenti", "budgetRunning", "budgetHolds", "budgetOrphans", "budgetSeed", "budgetFrom", "cpuReserve"]) {
 		assert.equal(typeof published[key], "function", `${key} is a thunk, re-read every beat`);
 	}
 	assert.deepEqual(JSON.parse(published.budgetFrom()), detail, "provenance comes from the budget itself");
 	assert.ok(Array.isArray(JSON.parse(published.cpuReserve())));
-	assert.equal(published.sandboxRetentionHours(), "24");
-	assert.ok(Array.isArray(JSON.parse(published.sandboxes())));
-	assert.equal(published.sandboxesMore(), "0");
 	// the boot listing's state, read at every beat.
 	assert.equal(published.budgetSeed(), "unlisted:local", "the unread venues, named");
 	snap.seeded = true;
@@ -5638,24 +4627,6 @@ test("issue #599, phase 2: the registry beat publishes the jobs running now and 
 	assert.deepEqual([plain.waiters(), JSON.parse(plain.jobs()), plain.jobsMore()], ["", [{ id: "local-0123456789abcdef", p: null, m: 2048, c: 200, at: 5 }], "0"]);
 });
 
-test("issue #596, each blessed venue is listed on its own, and a venue whose job user is unmappable counts as holding none", { skip }, async () => {
-	const failing = (bin) => async () => {
-		throw Object.assign(new Error(`${bin} does not answer`), { code: 125 });
-	};
-	// Rootful podman beside local: every podman job is refused before a container (podman-rootful), so its listing
-	// failing is no unread venue; local's failing still is.
-	const { captured } = await runStart({ env: { PI_BACKENDS: "local,podman" }, readPodmanInfo: PODMAN_INFO({ rootless: false }), jobUserIdentity: PODMAN_ID, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), listJobContainers: failing });
-	const opts = captured.hostBudget;
-	assert.deepEqual(Object.keys(opts.survivors).sort(), ["local", "podman"]);
-	assert.deepEqual(await opts.survivors.podman(), [], "unmappable: none");
-	await assert.rejects(() => opts.survivors.local(), /docker does not answer/, "local's decision maps a user: unread");
-	// An unmappable cause decided from one unreadable answer is re-decided per job and can clear, so the venue stays
-	// unread: podman's info that no rule reads, and local's daemon facts that no rule reads.
-	const unreadable = await runStart({ env: { PI_BACKENDS: "local,podman" }, readPodmanInfo: PODMAN_INFO({}, { answer: { answered: false, reason: "unparseable", transient: false } }), readDaemonFacts: async () => ({ answered: false, reason: "unparseable", transient: false }), jobUserIdentity: PODMAN_ID, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), listJobContainers: failing });
-	await assert.rejects(() => unreadable.captured.hostBudget.survivors.podman(), /podman does not answer/, "podman-unreadable: unread");
-	await assert.rejects(() => unreadable.captured.hostBudget.survivors.local(), /docker does not answer/, "runtime-unreadable: unread");
-});
-
 test("issue #596, phase 2: the CPU reserve plan reads a systemd daemon's slice only where the endpoint is observed on this host", { skip }, async () => {
 	for (const [local, method] of [[true, "system-systemd"], [false, null]]) {
 		const endpoint = { local, context: "x", endpoint: local ? "unix:///run/pd-test/docker.sock" : "tcp://10.1.2.3:2375", reason: null, transient: false };
@@ -5673,94 +4644,24 @@ test("issue #596, phase 2: the CPU reserve plan reads a systemd daemon's slice o
 	}
 });
 
-test("issue #596, phase 2: on rootless Podman the budget's facts carry the user service's own memory.max and cpu.max, the smaller over both cgroup levels", { skip }, async () => {
-	const files = {
-		"/sys/fs/cgroup/user.slice/user-1234.slice/memory.max": "max\n",
-		"/sys/fs/cgroup/user.slice/user-1234.slice/cpu.max": "max 100000\n",
-		"/sys/fs/cgroup/user.slice/user-1234.slice/user@1234.service/memory.max": "8589934592\n",
-		"/sys/fs/cgroup/user.slice/user-1234.slice/user@1234.service/cpu.max": "250000 100000\n",
-	};
-	const { captured } = await runStart({
-		env: { PI_BACKENDS: "podman", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		jobUserIdentity: PODMAN_ID,
-		observationFs: PODMAN_FILES,
-		makePodmanReaper: () => async () => ({ reaped: true }),
-		bootImage: { ok: true, image: "pi-job:ci", imageDigest: "sha256:pod", piVersion: "0.80.7", capabilities: ["anyUid"] },
-		readPodmanInfo: PODMAN_INFO({ hostCpus: 4, memTotalMiB: 16384 }),
-		readCgroupFile: (path) => {
-			if (!(path in files)) throw Object.assign(new Error("absent"), { code: "ENOENT" });
-			return files[path];
-		},
-	});
-	const facts = await captured.hostBudget.readFacts();
-	assert.deepEqual({ ...facts, reserveVenues: undefined }, { memTotalMiB: 16384, hostCpus: 4, userMemMiB: 8192, userCpuCenti: 250, reserveVenues: undefined });
-	assert.deepEqual(facts.reserveVenues.map((v) => [v.venue, v.endpointLocal]), [["podman", true]]);
-});
-
-test("issue #596, phase 2: every budget refresh keeps the jobs' parent cgroup's quota through the worker's one CPU reserve, with each venue's plan and the job image as the helper", { skip }, async () => {
-	const made = [];
-	const syncs = [];
-	const { captured } = await runStart({
-		env: { PI_BACKENDS: "podman", PI_JOB_IMAGE: "pi-job:ci" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-		makeHost: () => fakeHost(),
-		jobUserIdentity: PODMAN_ID,
-		observationFs: PODMAN_FILES,
-		makePodmanReaper: () => async () => ({ reaped: true }),
-		bootImage: { ok: true, image: "pi-job:ci", imageDigest: "sha256:pod", piVersion: "0.80.7", capabilities: ["anyUid"] },
-		readPodmanInfo: PODMAN_INFO({ hostCpus: 4, memTotalMiB: 16384 }),
-		readCgroupFile: () => {
-			throw Object.assign(new Error("absent"), { code: "ENOENT" });
-		},
-		makeCpuReserve: (args) => {
-			made.push(args);
-			return { sync: async (x) => (syncs.push(x), true), states: () => [] };
-		},
-	});
-	assert.equal(made.length, 1, "one reserve per worker");
-	assert.equal(made[0].image, "pi-job:ci");
-	assert.equal(typeof made[0].run, "function");
-	await captured.hostBudget.onRefresh({ memMiB: 14746, cpuCenti: 300 }, await captured.hostBudget.readFacts());
-	assert.equal(syncs.length, 1);
-	assert.equal(syncs[0].cpuCenti, 300);
-	assert.deepEqual(syncs[0].plans, [{ venue: "podman", parent: true, method: "user-systemd", why: null }]);
-	// No facts (the runtime did not answer): no venue, nothing to keep.
-	await captured.hostBudget.onRefresh({ memMiB: null, cpuCenti: null }, {});
-	assert.deepEqual(syncs[1], { cpuCenti: null, plans: [] });
-});
-
 // Issue #643: the off switch reaches BOTH venues and the preparer. With PI_LIVE_TRANSCRIPTS=0 neither venue's runContainer
 // is handed an opener and the preparer stages no live file; a resume job, which always has a transcript file, then
-// publishes nothing either, because publishing needs the opener, not just the file. With it on, both venues get the
+// publishes nothing either, because publishing needs the opener, not just the file. With it on, the venue gets the
 // same opener, and a resume job run through the options local was handed does open the publisher.
-test("PI_LIVE_TRANSCRIPTS=0 hands neither venue an opener and the preparer no live file; on, both get one, resume jobs included (#643)", { skip }, async () => {
+test("PI_LIVE_TRANSCRIPTS=0 hands local no publishing opener and the preparer no live file; on, it gets one, resume jobs included (#643)", { skip }, async () => {
 	const { EventEmitter } = await import("node:events");
 	const rc = await import("../src/run-container.mjs");
 	const { makePrepareWorkspace: realPrepare } = await import("../src/prepare.mjs");
 	const auth = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
 	const boot = async (env) => {
 		const prepareCalls = [];
-		const podmanRcCalls = [];
 		const out = await runStart({
-			env: { PI_BACKENDS: "local,podman", ...env },
-			readPodmanInfo: PODMAN_INFO(),
-			jobUserIdentity: PODMAN_ID,
+			env: { ...env },
 			bootImage: { ok: true, capabilities: [] },
 			makePrepareWorkspace: (opts) => (prepareCalls.push(opts), realPrepare(opts)),
-			makePodmanBackend: (opts) =>
-				realPodmanBackend({
-					...opts,
-					makeImagePreflight: () => async () => ({ ok: true }),
-					makeRunContainer: (o) => (podmanRcCalls.push(o), async () => ({ code: 0 })),
-					spawnFn: () => {
-						throw new Error("a wiring test must never spawn podman");
-					},
-				}),
 			...auth,
 		});
-		return { ...out, prepareCalls, podmanRcCalls };
+		return { ...out, prepareCalls };
 	};
 	// A resume job through the REAL runContainer built from the options the wiring handed local's factory.
 	const runResume = async (opts, spy) => {
@@ -5791,10 +4692,7 @@ test("PI_LIVE_TRANSCRIPTS=0 hands neither venue an opener and the preparer no li
 	assert.equal(off.runContainerCalls.length, 1, "local's factory was built");
 	// Issue #646: an opener still, for steer-armed jobs alone; it reads nothing for any other job (the resume job below).
 	assert.equal(typeof off.runContainerCalls[0].openLiveTranscript, "function", "local: an opener, for steer alone");
-	assert.equal(off.podmanRcCalls.length, 1, "podman's factory was built");
-	assert.equal(off.podmanRcCalls[0].openLiveTranscript, off.runContainerCalls[0].openLiveTranscript, "podman: the same opener");
 	assert.equal(typeof off.runContainerCalls[0].openInboxRelay, "function", "local: the steer inbox relay");
-	assert.equal(off.podmanRcCalls[0].openInboxRelay, off.runContainerCalls[0].openInboxRelay, "podman: the same relay opener");
 	assert.equal(off.prepareCalls[0].stageLive, null, "the preparer stages no live file");
 	const offSpy = [];
 	await runResume(off.runContainerCalls[0], offSpy);
@@ -5803,7 +4701,6 @@ test("PI_LIVE_TRANSCRIPTS=0 hands neither venue an opener and the preparer no li
 	const on = await boot({});
 	const opener = on.runContainerCalls[0].openLiveTranscript;
 	assert.equal(typeof opener, "function", "local: the opener");
-	assert.equal(on.podmanRcCalls[0].openLiveTranscript, opener, "podman: the same opener");
 	assert.equal("stageLive" in on.prepareCalls[0], false, "the preparer's own default stages the live file");
 	const onSpy = [];
 	await runResume(on.runContainerCalls[0], onSpy);
@@ -6898,72 +5795,6 @@ test("Zero touch boot shares tracking and private grouping dependencies, rereads
 	assert.equal(classifier.type, "classifier", "the real pinned catalog, not a text-model-only lookup, reaches grouping preflight");
 	assert.equal(written.at(-1).purpose, "zero-touch-grouping");
 	assert.equal(written.at(-1).touchTrackingVersion, 1);
-});
-
-test("a failing paid-worker constructor starts no sandbox control worker or inventory publisher (#771)", { skip }, async () => {
-	const dir = tempDir("sandbox-before-worker-");
-	const failure = new Error("paid worker constructor refused (test)");
-	const made = [];
-	let captured;
-	try {
-		await assert.rejects(() => runStart({
-			env: { VALKEY_URL, PI_WORKER_NAME: "sandbox-constructor-refusal", PI_SANDBOX_DIR: join(dir, "sandboxes"), PI_SWEEP_INTERVAL_HOURS: "0" },
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-			makeHost: () => fakeHost(),
-			durable: {
-				createWorkerFn: (args) => { captured = args; throw failure; },
-				createSandboxPreparer: () => { made.push("preparer"); throw new Error("sandbox preparer ran too early"); },
-				startSandboxPrepareWorker: () => { made.push("control"); throw new Error("sandbox control ran too early"); },
-				makeSandboxInventory: () => { made.push("inventory"); throw new Error("sandbox publisher ran too early"); },
-			},
-		}), (error) => error === failure);
-		assert.ok(captured, "the intended constructor failure was reached");
-		assert.deepEqual(made, [], "sandbox startup is below successful construction of the paid worker");
-	} finally {
-		// This double throws before runStart's ordinary capture. Its earlier runtime handles still need a harness drain.
-		for (const closer of captured?.extraClosers ?? []) await Promise.resolve(closer?.close?.()).catch(() => {});
-		await Promise.resolve(captured?.redis?.quit?.()).catch(() => captured?.redis?.disconnect?.());
-	}
-});
-
-test("runStart removes only its own durable inventory after the publisher closes, including a default worker name", { skip }, async (t) => {
-	const { makeRedisClient } = await import("../src/connection.mjs");
-	const redis = makeRedisClient(VALKEY_URL);
-	const nonce = `${process.pid}-${Math.random().toString(16).slice(2)}`;
-	const unrelated = `inventory-unrelated-${nonce}`;
-	const owned = [];
-	const now = () => 1_800_000_000_000;
-	const otherRecord = JSON.stringify({ version: 1, host: unrelated, at: now(), rows: [], more: 0, retentionHours: 24, settings: null });
-	t.after(async () => {
-		await redis.del(...[unrelated, ...owned].map(sandboxInventoryKey));
-		await redis.srem(SANDBOX_INVENTORY_HOSTS, unrelated, ...owned);
-		await redis.quit();
-	});
-	await redis.set(sandboxInventoryKey(unrelated), otherRecord);
-	await redis.sadd(SANDBOX_INVENTORY_HOSTS, unrelated);
-	for (const declared of [false, true]) {
-		let name;
-		await runStart({
-			env: { VALKEY_URL, PI_SWEEP_INTERVAL_HOURS: "0", ...(declared ? { PI_WORKER_NAME: `inventory-owned-${nonce}` } : {}) },
-			now,
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
-			makeHost: () => fakeHost(),
-			whileRunning: async ({ captured }) => {
-				name = captured.name;
-				owned.push(name);
-				assert.notEqual(name, unrelated);
-				const publisher = captured.extraClosers.find((closer) => closer !== captured.extraClosers[1] && typeof closer.publish === "function");
-				assert.ok(publisher);
-				assert.deepEqual(await publisher.publish(), { published: true });
-				assert.notEqual(await redis.get(sandboxInventoryKey(name)), null, "the real fixture publication exists before teardown");
-				assert.equal(await redis.sismember(SANDBOX_INVENTORY_HOSTS, name), 1);
-			},
-		});
-		assert.equal(await redis.get(sandboxInventoryKey(name)), null, "the closed publisher cannot leave a durable fixture record");
-		assert.equal(await redis.sismember(SANDBOX_INVENTORY_HOSTS, name), 0);
-		assert.equal(await redis.get(sandboxInventoryKey(unrelated)), otherRecord, "another host's durable evidence stays byte-identical");
-		assert.equal(await redis.sismember(SANDBOX_INVENTORY_HOSTS, unrelated), 1);
-	}
 });
 
 test("endpoint heartbeat thunks share startWorker's admission map and follow a live file reload", { skip }, async () => {

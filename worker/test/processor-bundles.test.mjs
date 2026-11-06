@@ -226,23 +226,18 @@ function gated(answer = () => ({ ok: true, placeholders: 1, plain: 1 }), over = 
 	return { ...d, asks, kept };
 }
 
-test("on both OpenShell venues a bundled job runs: hosts judged before the read, variables after, the split handed on and counted", async () => {
-	for (const backend of ["openshell", "openshell-bind"]) {
-		const g = gated();
-		const job = { ...issueOn, backend };
-		const r = await runJob(job, g.deps);
-		assert.equal(r.outcome, "completed", backend);
-		assert.deepEqual(g.asks.map((a) => a.ask), [
-			{ endpoints: endpointBundles.shop.endpoints, vars: null },
-			{ endpoints: endpointBundles.shop.endpoints, vars: { STRIPE_KEY: "sk_live_value", DB_URL: "postgres://u:pw@db/shop" }, shadowed: [] },
-		], backend);
-		assert.deepEqual(g.asks.map((a) => a.calls), [[], []], "both asks come before the mint for a job that needs no fork check");
-		assert.deepEqual(g.kept[0], { endpoints: { STRIPE_KEY: { host: "api.stripe.com", auth: "bearer" } }, plain: ["DB_URL"] });
-		assert.deepEqual(record(job, r).bundle, { id: "shop", variables: ["DB_URL", "STRIPE_KEY"], shadowed: [], placeholders: 1, plain: 1 });
-	}
-	// On local the same gate admits (a venue without one), the split still rides the call bag, and the record has no counts.
-	const local = gated(() => ({ ok: true }));
-	const r = await runJob(cronJob, local.deps);
+test("a bundled job runs: hosts judged before the read, variables after, the split handed on; on local the record has no counts", async () => {
+	// The OpenShell venues, whose layer held the credentials and whose own counts the record carried, left with the
+	// sandbox prune. `local` admits (a venue without a layer), the split still rides the call bag, and the record
+	// carries no placeholders or plain counts.
+	const g = gated();
+	const r = await runJob(cronJob, g.deps);
+	assert.deepEqual(g.asks.map((a) => a.ask), [
+		{ endpoints: endpointBundles.shop.endpoints, vars: null },
+		{ endpoints: endpointBundles.shop.endpoints, vars: { STRIPE_KEY: "sk_live_value", DB_URL: "postgres://u:pw@db/shop" }, shadowed: [] },
+	]);
+	assert.deepEqual(g.asks.map((a) => a.calls), [[], []], "both asks come before the mint for a job that needs no fork check");
+	assert.deepEqual(g.kept[0], { endpoints: { STRIPE_KEY: { host: "api.stripe.com", auth: "bearer" } }, plain: ["DB_URL"] });
 	assert.deepEqual(record(cronJob, r).bundle, { id: "shop", variables: ["DB_URL", "STRIPE_KEY"], shadowed: [] });
 });
 
@@ -271,11 +266,12 @@ test("part 2's residual is gone: a fork's pull request on OpenShell runs without
 
 test("a run.secrets value that shadows an endpoint variable keeps the declared host binding with the trigger's value, and the venue is told which", async () => {
 	const g = gated(() => ({ ok: true, placeholders: 0, plain: 1 }), { resolveSecrets: async () => ({ ok: true, secrets: { STRIPE_KEY: "sk_trigger_value" } }) });
-	const job = { ...issueOn, backend: "openshell", secrets: { STRIPE_KEY: "op://ci/stripe" } };
+	const job = { ...issueOn, backend: "local", secrets: { STRIPE_KEY: "op://ci/stripe" } };
 	const r = await runJob(job, g.deps);
 	assert.deepEqual(g.asks[1].ask, { endpoints: endpointBundles.shop.endpoints, vars: { DB_URL: "postgres://u:pw@db/shop" }, shadowed: ["STRIPE_KEY"] });
 	assert.deepEqual(g.kept[0], { endpoints: { STRIPE_KEY: { host: "api.stripe.com", auth: "bearer" } }, plain: ["DB_URL"] }, "review round 1, M2: the trigger's STRIPE_KEY stays on the host the bundle binds the name to");
-	assert.deepEqual(record(job, r).bundle, { id: "shop", variables: ["DB_URL", "STRIPE_KEY"], shadowed: ["STRIPE_KEY"], placeholders: 0, plain: 1 });
+	// The venue's own counts rode only a layer-custody venue's record; `local` is container-custody, so none.
+	assert.deepEqual(record(job, r).bundle, { id: "shop", variables: ["DB_URL", "STRIPE_KEY"], shadowed: ["STRIPE_KEY"] });
 });
 
 test("on a multi-host worker's shared queue a profile this host lacks defers the job; a single host refuses it", async () => {

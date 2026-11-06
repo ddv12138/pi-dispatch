@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { containerSpec, memoryBytes, memoryBytesOfArgs } from "../src/container-spec.mjs";
-import { buildDockerRunArgs, buildPodmanRunArgs, dockerArgsFromSpec } from "../src/docker-run.mjs";
+import { buildDockerRunArgs, dockerArgsFromSpec } from "../src/docker-run.mjs";
 import {
 	codemodeWorkersOf,
 	CODEMODE_WORKER_HEAP_MIB,
@@ -91,14 +91,13 @@ test("EVERY size parseMemory accepts round-trips through the emitted --memory an
 		const emitted = formatMemory(mib);
 		if (memoryBytes(emitted) !== mib * MiB || parseMemory(emitted) !== mib) assert.fail(`${mib} MiB emits ${emitted}, which reads back as ${memoryBytes(emitted)} bytes`);
 	}
-	// And through the real argv of both runtimes, for every whole gigabyte and a dense run of odd sizes.
+	// And through the real docker argv, for every whole gigabyte and a dense run of odd sizes.
 	const sizes = [];
 	for (let mib = JOB_MEMORY_FLOOR_MIB; mib <= 9000; mib += 7) sizes.push(mib);
 	for (let g = 1; g <= 1024; g++) sizes.push(g * 1024);
 	for (const memMiB of sizes) {
 		const opts = { image: "i", name: "n", workspace: "/w", size: { memMiB, cpuCenti: 200 } };
 		assert.equal(memoryBytesOfArgs(buildDockerRunArgs(opts)), memMiB * MiB, `docker argv at ${memMiB} MiB`);
-		assert.equal(memoryBytesOfArgs(buildPodmanRunArgs({ ...opts, user: "1234:1234" })), memMiB * MiB, `podman argv at ${memMiB} MiB`);
 	}
 });
 
@@ -203,7 +202,7 @@ test("unenforcedSizeFlags names the size flags a Docker daemon says it drops, an
 	assert.deepEqual(unenforcedSizeFlags({ swapLimit: false, cpuShares: true }), ["--memory-swap"]);
 	assert.deepEqual(unenforcedSizeFlags({ swapLimit: true, cpuShares: false }), ["--cpu-shares"]);
 	assert.deepEqual(unenforcedSizeFlags({ swapLimit: false, cpuShares: false }), ["--memory-swap", "--cpu-shares"]);
-	assert.deepEqual(unenforcedSizeFlags({ swapLimit: null, cpuShares: null }), [], "Podman: not read, so not claimed");
+	assert.deepEqual(unenforcedSizeFlags({ swapLimit: null, cpuShares: null }), [], "unmeasured: not read, so not claimed");
 	assert.deepEqual(unenforcedSizeFlags(null), []);
 });
 

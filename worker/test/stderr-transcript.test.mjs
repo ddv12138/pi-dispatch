@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { transcriptRecord } from "../../image/runner/src/transcript-mirror.mjs";
-import { makeStderrTranscript, TRANSCRIPT_RECORD_MAX_BYTES, verifyTranscriptRecord } from "../src/stderr-transcript.mjs";
+import { makeStderrTranscript, TRANSCRIPT_RECORD_MAX_BYTES, transcriptRecordMac, verifyTranscriptRecord } from "../src/stderr-transcript.mjs";
 
 /**
- * Issue #686: the worker's stderr demux. Records are built with the RUNNER's own writer (image/runner/src/
- * transcript-mirror.mjs), so the format the two sides agree on is exercised, never a copy of it.
+ * Issue #686: the worker's stderr demux. Records were once built with the RUNNER's own writer
+ * (image/runner/src/transcript-mirror.mjs) so the two sides' agreement was exercised, never a copy of it; that half
+ * went with the copying venues. The writer is restated here from the format stderr-transcript.mjs itself states, only
+ * to make the bytes the demux must read, and its MAC comes from the worker's own (the same function the demux
+ * verifies with).
  */
+
+/** `\x1epidt <seq> <type> <end> <mac> <base64>\n`, the format the runner's deleted mirror wrote. */
+const transcriptRecord = (key, run, seq, type, end, payload = Buffer.alloc(0)) =>
+	`\x1epidt ${seq} ${type} ${end} ${transcriptRecordMac(key, run, String(seq), type, String(end), payload)} ${Buffer.from(payload).toString("base64")}\n`;
 
 const KEY = "0123456789abcdef".repeat(4);
 const OTHER = "fedcba9876543210".repeat(4);

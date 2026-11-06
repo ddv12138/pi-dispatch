@@ -149,7 +149,7 @@ test("a writable HOME with an agent dir pi cannot write is named, and an absent 
 });
 
 test("a HOME inside a mount root is named, and a sibling that merely shares a prefix is not", () => {
-	// Podman's passwd injection gives a --user with no entry HOME=/workspace (measured), which would put auth.json in
+	// A `--user` with no passwd entry can leave HOME=/workspace (measured), which would put auth.json in
 	// the operator's repository.
 	for (const home of ["/workspace", "/workspace/.home", "/job", "/outbox/x", "/session"]) {
 		const events = mountAdvisories({ env: { HOME: home }, uid: 1234, accessCode: codes({}) }).map(([e]) => e);

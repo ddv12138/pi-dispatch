@@ -1,4 +1,3 @@
-import { parseSandboxOpenUrl } from "@edgehero/pi-dispatch/opener-protocol";
 import { uiText } from "./locale.mjs";
 /**
  * The console's kit (issue #737): the Pulse design's components as pure functions, each returning a fragment built with
@@ -191,7 +190,7 @@ function hrefOf(href, who) {
 }
 
 /**
- * A link out of the console, or a throw. The one custom scheme is the canonical, fixed-field sandbox opener protocol.
+ * A link out of the console, or a throw. Every href is an http(s) URL.
  * Every web link must parse (`new URL`), be `http:` or `https:`, carry no user name and no
  * password (`https://github.com@evil.example/` opens evil.example), and be EXACTLY what the parser writes back for it,
  * byte for byte. That last rule is the one that makes the host a reader sees the host the browser opens: the parser
@@ -213,9 +212,6 @@ function outHrefOf(href, who) {
     u = typeof href === "string" ? new URL(href) : null;
   } catch {
     u = null;
-  }
-  if (typeof href === "string" && href.startsWith("pi-dispatch-open:")) {
-    try { parseSandboxOpenUrl(href); return href; } catch { throw new RangeError(`kit.${who}: an opener URL must be canonical and name an allowed verb, id and host`); }
   }
   const plain = u !== null && (u.protocol === "https:" || u.protocol === "http:") && u.username === "" && u.password === "" && u.href === href;
   if (!plain) throw new RangeError(`kit.${who}: a link out of the console is an http(s) URL with no user name, written as the browser writes it back, not ${JSON.stringify(href)}`);
@@ -1041,7 +1037,7 @@ export function approvalForms({ jobId, id, locale = "en" }) {
 }
 
 /**
- * A link out of the console (a run's issue on its forge, a reasons docs page): `href` a canonical sandbox opener URI or an http(s) URL in its own
+ * A link out of the console (a run's issue on its forge, a reasons docs page): `href` an http(s) URL in its own
  * canonical form with no user name (`outHrefOf`; every link `forgeLinkOf` and `docsHref` build is one), drawn as the
  * design's link (`code` sets it in the code face), opening in a new tab that gets no handle on this window and no
  * Referer. The attributes are written in exactly the order `console-pages-harness.mjs`'s outbound-link rule reads

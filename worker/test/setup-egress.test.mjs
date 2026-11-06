@@ -55,15 +55,16 @@ test("a stopped current proxy is started, while a running proxy is unchanged", a
 	}
 });
 
-test("remote, foreign, paused, attached, old-rules and OpenShell proxy operations refuse without mutation", async () => {
-	for (const bad of ["remote", "foreign", "paused", "attached", "old-rules", "openshell", "custom", "off"]) {
+test("remote, foreign, paused, attached and old-rules proxy operations refuse without mutation", async () => {
+	// The openshell scenario left with the venue: `PI_BACKENDS=openshell` is no longer a backend word this
+	// planner knows, so it is not a refusal here any more, and planning reads the docker proxy alone.
+	for (const bad of ["remote", "foreign", "paused", "attached", "old-rules", "custom", "off"]) {
 		const { ctx, calls, shape, setState } = fixture();
 		if (bad === "remote") ctx.resolveEndpoint = async () => ({ local: false });
 		if (bad === "foreign") setState(shape("exited", { image: "another/image:old" }));
 		if (bad === "paused") setState(shape("paused"));
 		if (bad === "attached") setState(shape("exited", { networks: { "pi-job-active": {} } }));
 		if (bad === "old-rules") fs.writeFileSync(join(ctx.dir, "deploy/egress-proxy.conf"), "old rules");
-		if (bad === "openshell") fs.writeFileSync(join(ctx.dir, ".env"), "PI_BACKENDS=openshell\n", { mode: 0o600 });
 		if (bad === "custom") fs.writeFileSync(join(ctx.dir, ".env"), "PI_EGRESS_PROXY=someone-elses-proxy\n", { mode: 0o600 });
 		if (bad === "off") fs.writeFileSync(join(ctx.dir, ".env"), "PI_EGRESS=0\n", { mode: 0o600 });
 		assert.equal(typeof (await planSetupEgress(ctx)).refusal, "string", bad);
@@ -79,31 +80,5 @@ test("runtime context disagreement cannot start a proxy on a different daemon th
 	assert.deepEqual(calls, []);
 });
 
-test("native Podman first install reuses Quadlet files/start order and never replaces a container", async () => {
-	const { ctx, calls } = fixture();
-	const home = join(ctx.dir, "home"); fs.mkdirSync(home);
-	if (ctx.uid === 0) {
-		ctx.uid = 1000;
-		ctx.fs = { ...fs, lstatSync(path) { const st = fs.lstatSync(path); Object.defineProperty(st, "uid", { value: 1000 }); return st; } };
-	}
-	fs.writeFileSync(join(ctx.dir, ".env"), "PI_BACKENDS=podman\n", { mode: 0o600 });
-	ctx.serviceDeps = { home, user: "operator" };
-	ctx.env.XDG_RUNTIME_DIR = `/run/user/${ctx.uid}`;
-	ctx.readPodmanInfo = async () => ({ answered: true, info: { rootless: true, serviceIsRemote: false } });
-	let running = false;
-	ctx.run = async (bin, args) => {
-		calls.push([bin, ...args]);
-		if (bin === "systemctl") { if (args.includes("start")) running = true; return { code: 0, stdout: "", stderr: "" }; }
-		if (args[0] === "container") return { code: 125, stdout: "", stderr: "no such container" };
-		if (args[0] === "inspect") return running ? { code: 0, stdout: JSON.stringify({ status: "running" }), stderr: "" } : { code: 125, stdout: "", stderr: "no such container" };
-		return { code: 0, stdout: "", stderr: "" };
-	};
-	const plan = await planSetupEgress(ctx);
-	assert.equal(plan.refusal, undefined);
-	assert.equal(fs.existsSync(join(home, ".config", "containers", "systemd")), false);
-	assert.equal((await applySetupEgress(plan, ctx)).state, "applied");
-	assert.equal(fs.existsSync(join(home, ".config", "containers", "systemd", "pi-dispatch-egress-proxy.container")), true);
-	assert.ok(calls.some((args) => args[0] === "systemctl" && args.includes("daemon-reload")));
-	assert.ok(calls.some((args) => args[0] === "systemctl" && args.includes("start")));
-	assert.equal(calls.some((args) => args.includes("restart") || args.includes("rm")), false);
-});
+// The native Podman first install (Quadlet files, start order) left with the podman venue: the planner plans the
+// docker proxy alone, and `PI_BACKENDS=podman` is no longer a word this module knows.

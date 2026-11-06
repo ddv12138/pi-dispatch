@@ -4,9 +4,8 @@ import * as realFs from "node:fs";
 import { lstatSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { defaultPrompt, runUp, valkeyContainerPublishes } from "../src/up.mjs";
+import { defaultPrompt, runUp } from "../src/up.mjs";
 import { jobImageFix, registryQualified } from "../src/image-ref.mjs";
-import { NETNS_KEEPER_FORMAT } from "../src/podman-stack.mjs";
 import { runInit } from "../src/init.mjs";
 import { readPackagedProxyConf } from "../src/egress-conf-copy.mjs";
 import { addToken } from "../src/console-tokens.mjs";
@@ -69,17 +68,6 @@ function harness({ plan = {}, listening = true, answers = [], files = {}, doctor
 	// Issue #503: `init` scaffolds the model endpoints' include beside the allowlist, and this harness fakes init, so a
 	// folder that holds the allowlist holds the include too unless a test says otherwise (`includeFile: false`).
 	if (includeFile && `${cwd}/egress-allowlist.conf` in files && !(`${cwd}/model-endpoints.conf` in files)) files = { ...files, [`${cwd}/model-endpoints.conf`]: "# generated\n" };
-	// The podman tests (those that inject a podman info reader) get what a real login has unless they say otherwise: a
-	// user manager to talk to (XDG_RUNTIME_DIR, round 2 E8) and a podman that answers "no such container" for the two
-	// names the stack would claim (E3: any other failure now refuses).
-	if (extra.readPodmanInfo) {
-		if (!("XDG_RUNTIME_DIR" in env) && !extra.noBus) env = { ...env, XDG_RUNTIME_DIR: "/run/user/1234" };
-		if (!Object.keys(plan).some((k) => k.startsWith("podman container inspect"))) plan = { "podman container inspect": { code: 125, stderr: "Error: no such container pi-dispatch-valkey\n" }, ...plan };
-		// Issue #464: a listener, unless a test says whose, is this account's own (uid 1234, the euid podmanExtra gives),
-		// which is what "something already listens" meant before the owner rule; a test about another owner seeds its own.
-		if (listening && !("/proc/net/tcp" in files)) files = { ...listenerFiles(1234), ...files };
-		extra = { lookup: async () => { throw Object.assign(new Error("ENOTFOUND"), { code: "ENOTFOUND" }); }, interfaces: () => ({}), runSync: () => null, ...extra };
-	}
 	// PR #475's review, round 3: docker answers the ownership questions up asks before it acts on a Valkey container or
 	// volume. Unless a test says otherwise: no pi-dispatch-valkey, and nothing mounts pi-dispatch-valkey-data.
 	const dockerDefaults = {};
@@ -778,7 +766,7 @@ function eaccesOn(h, path) {
 		return read(p, ...rest);
 	};
 }
-const imageCalls = (h) => h.calls.filter((c) => (c.cmd === "docker" || c.cmd === "podman") && (c.args[0] === "pull" || c.args[0] === "tag" || (c.args[0] === "image" && (c.args[1] === "inspect" || c.args[1] === "exists")))).map((c) => [c.cmd, ...c.args]);
+const imageCalls = (h) => h.calls.filter((c) => c.cmd === "docker" && (c.args[0] === "pull" || c.args[0] === "tag" || (c.args[0] === "image" && (c.args[1] === "inspect" || c.args[1] === "exists")))).map((c) => ["docker", ...c.args]);
 
 test("up: a PI_JOB_IMAGE that is present is checked by its own name, and nothing is pulled or tagged (#523)", async () => {
 	for (const [label, env, files, from] of [
@@ -819,28 +807,21 @@ test("up: an absent SHORT PI_JOB_IMAGE is never pulled, under --yes too, and up 
 		assert.doesNotMatch(h.text(), /up would run:\n {2}docker pull/, short);
 		assert.equal(h.doctorCalls.length, 1, `${short}: doctor still runs and judges the missing image`);
 	}
-	// The same on podman, in this account's store.
-	const p = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman", PI_JOB_IMAGE: "pi-job:2.1.0" }, plan: { "podman image exists": 1, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" }, "podman pull": 0 }, listening: false, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" }, extra: podmanExtra() });
-	assert.equal(await p.run(), 0);
-	assert.deepEqual(imageCalls(p), [["podman", "image", "exists", "pi-job:2.1.0"]]);
-	assert.match(p.text(), /`podman tag` an image you have as pi-job:2\.1\.0/);
 });
 
 test("up: an absent localhost/ name is a locally built one, never offered as a pull; localhost:<port>/ is a registry and is (#523 round 2)", async () => {
-	for (const bin of ["docker", "podman"]) {
+	{
 		const local = "localhost/my-job:dev";
-		const podman = bin === "podman";
 		const h = harness({
-			env: { PI_PROVIDER: "anthropic", PI_JOB_IMAGE: local, ...(podman ? { PI_BACKENDS: "podman" } : {}) },
-			plan: podman ? { "podman image exists": 1, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" }, "podman pull": 0 } : { [`docker image inspect ${local}`]: 1, ...green, "docker pull": 0 },
-			listening: !podman,
+			env: { PI_PROVIDER: "anthropic", PI_JOB_IMAGE: local },
+			plan: { [`docker image inspect ${local}`]: 1, ...green, "docker pull": 0 },
+			listening: true,
 			argv: ["--yes"],
-			...(podman ? { files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" }, extra: podmanExtra() } : {}),
 		});
-		assert.equal(await h.run(), 0, bin);
-		assert.deepEqual(imageCalls(h), [[bin, "image", podman ? "exists" : "inspect", local]], `${bin}: checked, never pulled`);
-		assert.ok(h.text().includes(`and up does not pull it: localhost/my-job:dev is a locally built name (localhost/ is no registry to pull from): build it on this host, or \`${bin} tag\` an image you have as localhost/my-job:dev\n`), bin);
-		assert.match(h.text(), /not pulled, since it is a locally built name/, bin);
+		assert.equal(await h.run(), 0);
+		assert.deepEqual(imageCalls(h), [["docker", "image", "inspect", local]], "checked, never pulled");
+		assert.ok(h.text().includes(`and up does not pull it: localhost/my-job:dev is a locally built name (localhost/ is no registry to pull from): build it on this host, or \`docker tag\` an image you have as localhost/my-job:dev\n`));
+		assert.match(h.text(), /not pulled, since it is a locally built name/);
 	}
 	const port = "localhost:5000/team/job:7";
 	const h = harness({ env: { PI_PROVIDER: "anthropic", PI_JOB_IMAGE: port }, plan: { [`docker image inspect ${port}`]: 1, ...green, "docker pull": 0 }, listening: true, argv: ["--yes"] });
@@ -893,11 +874,6 @@ test("up: when it cannot tell which image the worker runs, it checks and pulls n
 		assert.equal(await h.run(), 1);
 		assert.deepEqual(imageCalls(h), []);
 	}
-	// The podman step skips on the same verdict: never `podman image exists undefined`.
-	const p = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman", PI_JOB_IMAGE: PINNED }, plan: { "podman image exists": 1, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" }, "podman pull": 0, "podman tag": 0 }, listening: false, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n", "/deploy/.env": "PI_BACKENDS=podman\nPI_JOB_IMAGE=pi-job:latest\n" }, extra: podmanExtra() });
-	assert.equal(await p.run(), 0);
-	assert.deepEqual(imageCalls(p), [], "podman: no image is asked about or pulled");
-	assert.match(p.text(), /podman job image\s+not checked: which image the worker runs is unknown/);
 });
 
 test("up: the shell and .env spelling the SAME image differently is not a disagreement (#523 review)", async () => {
@@ -926,25 +902,8 @@ test("up: a PI_JOB_IMAGE from this shell only says an installed service reads .e
 
 test("jobImageFix: one text for up and doctor: the default pull and tag, a qualified pull, a short name never pulled (#523 review)", () => {
 	assert.equal(jobImageFix("docker", "pi-job:latest"), "docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest");
-	assert.equal(jobImageFix("podman", PINNED), `podman pull ${PINNED}`);
-	const short = jobImageFix("podman", "pi-job:2.1.0");
-	assert.doesNotMatch(short, /podman pull/);
-	assert.match(short, /^pi-job:2\.1\.0 names no registry host.*build it on this host, `podman tag` an image you have as pi-job:2\.1\.0, or set PI_JOB_IMAGE to a registry-qualified name/);
 	assert.equal(jobImageFix("docker", "localhost/my-job:dev"), "localhost/my-job:dev is a locally built name (localhost/ is no registry to pull from): build it on this host, or `docker tag` an image you have as localhost/my-job:dev");
 	assert.equal(jobImageFix("docker", "localhost:5000/job"), "docker pull localhost:5000/job");
-});
-
-test("up on podman: the same rule, in this account's store: a present PI_JOB_IMAGE is left alone, an absent one is pulled untagged (#523)", async () => {
-	const base = { "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" }, "podman pull": 0, "podman tag": 0 };
-	const files = { "/deploy/egress-allowlist.conf": "api.anthropic.com\n", "/deploy/deploy/egress-proxy.conf": "conf\n", "/deploy/.env": `PI_BACKENDS=podman\nPI_JOB_IMAGE=${PINNED}\n` };
-	const present = harness({ env: { PI_PROVIDER: "anthropic" }, plan: { [`podman image exists ${PINNED}`]: 0, "podman image exists": 1, ...base }, listening: false, argv: ["--yes"], files: { ...files }, extra: podmanExtra() });
-	assert.equal(await present.run(), 0);
-	assert.deepEqual(imageCalls(present), [["podman", "image", "exists", PINNED]]);
-	assert.match(present.text(), /✓ Job image present in this account's Podman store \(ghcr\.io\/edgehero\/pi-job:2\.1\.0, PI_JOB_IMAGE from \/deploy\/\.env\)/);
-	const absent = harness({ env: { PI_PROVIDER: "anthropic" }, plan: { "podman image exists": 1, ...base }, listening: false, argv: ["--yes"], files: { ...files }, extra: podmanExtra() });
-	assert.equal(await absent.run(), 0);
-	assert.deepEqual(imageCalls(absent), [["podman", "image", "exists", PINNED], ["podman", "pull", PINNED]]);
-	assert.match(absent.text(), /podman job image\s+pulled ghcr\.io\/edgehero\/pi-job:2\.1\.0\n/);
 });
 
 test("defaultPrompt: non-TTY stdin declines immediately without readline (the event-loop-drain trap)", async () => {
@@ -1062,238 +1021,9 @@ test("up: a declined proxy prompt runs nothing, and the summary says what that c
 	assert.match(h.text(), /every job is refused pre-spend until the proxy is up/);
 });
 
-// ---------------------------------------------------------------------------------------------------
-// The podman venue (issue #430): with PI_BACKENDS naming podman and not local, `up` drives rootless Podman and the
-// SAME Quadlet installer `service install` uses, and never runs docker. The info read is injected as the venue's own
-// reader shape, so the gate is the worker's `decidePodmanJobUser` and nothing re-implemented here.
-// ---------------------------------------------------------------------------------------------------
 
-const QDIR = "/home/op/.config/containers/systemd";
-const rootless = async () => ({ answered: true, info: { rootless: true, serviceIsRemote: false, selinux: false } });
-const podmanExtra = (over = {}) => ({ readPodmanInfo: rootless, euid: 1234, egid: 1234, home: "/home/op", user: "op", mkdir: () => {}, ...over });
-
-test("up on podman: --yes runs exactly the lines it showed, installs the Quadlet stack, and never spawns docker", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman" },
-		plan: { "podman image exists": 1, "podman pull": 0, "podman tag": 0, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=no\n" } },
-		listening: false,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "api.anthropic.com\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.ok(!h.calls.some((c) => c.cmd === "docker"), "a podman-only deployment never asks docker anything");
-	const text = h.text();
-	// What was shown: the consent block's indented lines after the Quadlet intro.
-	const from = text.indexOf("as Quadlet units in your user manager");
-	const block = text.slice(from, text.indexOf("--yes: accepted", from));
-	const shown = block.split("\n").slice(1).filter((l) => l.startsWith("  ")).map((l) => l.trim());
-	const ran = [];
-	for (const c of h.calls) if ((c.cmd === "systemctl" && c.args[1] !== "show-environment")) ran.push([c.cmd, ...c.args].join(" "));
-	const written = [...h.store.keys()].filter((p) => p.startsWith(QDIR) || p === "/home/op/.config/pi-dispatch/egress-proxy.conf" || p === "/home/op/.config/pi-dispatch/valkey.env").map((p) => `write ${p}`);
-	assert.deepEqual(shown, [...written, ...ran], "shown then run: the same lines, in the same order");
-	assert.deepEqual(ran, ["systemctl --user daemon-reload", "systemctl --user start pi-dispatch-valkey.service pi-dispatch-egress-proxy.service pi-dispatch-netns-keeper.service"]);
-	assert.equal(written.length, 8, "six units (the keeper's two since #458), the account-owned copy of the rules, and the Valkey's password file (#468)");
-	assert.ok(!ran.some((l) => / enable /.test(l)), "a generated unit is never enabled");
-	assert.deepEqual(h.calls.filter((c) => c.cmd === "podman" && c.args[0] !== "inspect" && c.args[0] !== "container").map((c) => c.args), [
-		["image", "exists", "pi-job:latest"],
-		["pull", "docker.io/ddv12138/pi-job:latest"],
-		["tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"],
-	]);
-	assert.match(text, /⚠ linger is OFF for op/);
-	assert.match(text, /sudo loginctl enable-linger op/);
-	assert.match(text, /podman stack\s+installed as Quadlet units and started/);
-});
-
-test("up on podman: a rootful Podman stops up with the worker's own refusal, having run and written nothing", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		listening: false,
-		argv: ["--yes"],
-		extra: podmanExtra({ readPodmanInfo: async () => ({ answered: true, info: { rootless: false, serviceIsRemote: false } }) }),
-	});
-	assert.equal(await h.run(), 1);
-	assert.match(h.text(), /podman is not rootless for this account/);
-	assert.equal(h.calls.length, 0);
-	assert.equal(h.initCalls.length, 0, "stops before init, like the docker gate");
-	assert.equal(h.doctorCalls.length, 0);
-});
-
-test("up on podman: declining the stack runs nothing and writes no Quadlet file", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: { "podman image exists": 0 },
-		listening: false,
-		answers: [""],
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.equal(h.promptCalls.length, 1);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-	assert.match(h.text(), /valkey\s+skipped \(declined\)/);
-});
-
-// Issue #464: who holds 127.0.0.1:<port>, as /proc/net/tcp says (the measured row shape) and /etc/passwd names.
-const TCP_HEAD = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
-const listenerFiles = (uid, port = 6379) => ({
-	"/proc/net/tcp": `${TCP_HEAD}   3: 0100007F:${port.toString(16).toUpperCase().padStart(4, "0")} 00000000:0000 0A 00000000:00000000 00:00000000 00000000  ${uid}        0 1589654 1 00000000cd751f2b 100 0 0 10 0\n`,
-	"/proc/net/tcp6": TCP_HEAD,
-	"/etc/subuid": "op:1234000000:65536\n",
-	"/etc/passwd": "root:x:0:0:root:/root:/bin/bash\nop:x:1234:1234::/home/op:/bin/bash\nop2:x:1235:1235::/home/op2:/bin/bash\n",
-});
-const VALKEY_UNIT = `${QDIR}/pi-dispatch-valkey.container`;
-
-test("up on podman: a listener on 6379 is left alone, as on docker, when it is this account's, and named as our container only when that container publishes the port (#464)", async () => {
-	const at = (ports) =>
-		harness({
-			env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-			plan: { "podman image exists": 0, "podman ps": { code: 0, output: `pi-dispatch-valkey|${ports}\n` } },
-			listening: true,
-			files: listenerFiles(1234),
-			extra: podmanExtra(),
-		});
-	const ours = at("127.0.0.1:6379->6379/tcp");
-	assert.equal(await ours.run(), 0);
-	assert.equal(ours.promptCalls.length, 0);
-	assert.match(ours.text(), /valkey\s+container pi-dispatch-valkey already running on 6379/);
-	assert.match(ours.text(), /✓ something is listening on 6379, assuming your Valkey \(it is the pi-dispatch-valkey container, published there\): something already listens on 127\.0\.0\.1:6379, held by this account/);
-	assert.ok(ours.calls.some((c) => c.cmd === "podman" && c.args.join(" ") === "ps --filter name=^pi-dispatch-valkey$ --format {{.Names}}|{{.Ports}}"));
-	// Gate round 1: a pi-dispatch-valkey container on ANOTHER port (a second deployment's) says nothing about who answers
-	// on 6379, so it is not named.
-	const elsewhere = at("127.0.0.1:16468->6379/tcp");
-	assert.equal(await elsewhere.run(), 0);
-	assert.doesNotMatch(elsewhere.text(), /it is the pi-dispatch-valkey container/);
-	assert.match(elsewhere.text(), /valkey\s+port 6379 already has a listener, left alone/);
-});
-
-test("valkeyContainerPublishes reads podman's Ports column for the host port mapped to 6379", () => {
-	assert.equal(valkeyContainerPublishes("pi-dispatch-valkey|127.0.0.1:16468->6379/tcp", 16468), true);
-	assert.equal(valkeyContainerPublishes("pi-dispatch-valkey|0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp", 6379), true);
-	assert.equal(valkeyContainerPublishes("pi-dispatch-valkey|127.0.0.1:16468->6379/tcp", 6379), false);
-	assert.equal(valkeyContainerPublishes("pi-dispatch-valkey|", 6379), false, "--network host publishes nothing");
-	assert.equal(valkeyContainerPublishes("other|127.0.0.1:6379->6379/tcp", 6379), false);
-	assert.equal(valkeyContainerPublishes("pi-dispatch-valkey|127.0.0.1:6379->6380/tcp", 6379), false);
-});
-
-test("up on podman: another account's listener is neither adopted nor doubled, the way out is named, and up exits non-zero (#464)", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: { "podman image exists": 0 },
-		listening: true,
-		files: listenerFiles(1235),
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 1, "a refused Valkey fails `up`, whatever doctor says (gate round 1)");
-	assert.equal(h.promptCalls.length, 0, "nothing is offered for a port another account holds");
-	assert.match(h.text(), /✗ 127\.0\.0\.1:6379 is held by op2 \(uid 1235\), not by this account \(uid 1234\) or its containers \(subordinate uids read from \/etc\/subuid\): taking it as this deployment's Valkey would put this account's jobs in a queue another account can read and drain\. Give this account a Valkey of its own on another port, VALKEY_URL=redis:\/\/127\.0\.0\.1:<port> in \/deploy\/\.env/);
-	assert.match(h.text(), /valkey\s+NOT added and NOT adopted: 127\.0\.0\.1:6379 is held by op2 \(uid 1235\)/);
-	assert.match(h.text(), /up: the Valkey VALKEY_URL reaches is not this account's \(above\); give this account its own port, or opt in with PI_VALKEY_SHARED=1 in \.env/);
-	assert.ok(!h.calls.some((c) => c.cmd === "systemctl" && c.args.includes("start")), "no Valkey unit started");
-	assert.equal(h.doctorCalls.length, 1, "doctor still runs, and says what else is wrong");
-	// Root's (docker-proxy, a rootful container) too, and a doctor failure keeps its own code.
-	const root = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: { "podman image exists": 0 }, listening: true, files: listenerFiles(0), doctorCode: 2, extra: podmanExtra() });
-	assert.equal(await root.run(), 2);
-	assert.match(root.text(), /✗ 127\.0\.0\.1:6379 is held by root \(uid 0/);
-	// Opted in, in .env: taken, and exit 0.
-	const shared = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: { "podman image exists": 0 }, listening: true, files: { ...listenerFiles(1235), "/deploy/.env": "PI_VALKEY_SHARED=1\n" }, extra: podmanExtra() });
-	assert.equal(await shared.run(), 0);
-	assert.match(shared.text(), /held by op2 \(uid 1235\), shared on purpose as PI_VALKEY_SHARED=1 in \/deploy\/\.env says/);
-});
-
-test("up on podman: VALKEY_URL and PI_VALKEY_SHARED come from .env as the service reads them, a disagreement with this shell stops up, and an unreadable line is not judged as 6379 (#464)", async () => {
-	// The .env's port is where the Quadlet Valkey is published (gate round 1, M13: up read only this shell before).
-	const fromFile = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: { "podman image exists": 0, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } },
-		listening: false,
-		argv: ["--yes"],
-		files: { "/deploy/.env": "VALKEY_URL=redis://127.0.0.1:16468\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await fromFile.run(), 0, fromFile.text());
-	assert.match(fromFile.store.get(VALKEY_UNIT), /^PublishPort=127\.0\.0\.1:16468:6379$/m);
-	// The shell's value where the file sets none (the wizard runs up before init writes .env).
-	const fromShell = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0", VALKEY_URL: "redis://127.0.0.1:16469" }, plan: { "podman image exists": 0, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } }, listening: false, argv: ["--yes"], extra: podmanExtra() });
-	assert.equal(await fromShell.run(), 0);
-	assert.match(fromShell.store.get(VALKEY_UNIT), /^PublishPort=127\.0\.0\.1:16469:6379$/m);
-	// Both, differently: stopped before anything runs, as a venue key is.
-	const both = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0", VALKEY_URL: "redis://127.0.0.1:6379" }, listening: false, files: { "/deploy/.env": "VALKEY_URL=redis://127.0.0.1:16468\n" }, extra: podmanExtra() });
-	assert.equal(await both.run(), 1);
-	assert.match(both.text(), /✗ VALKEY_URL is "redis:\/\/127\.0\.0\.1:6379" in this shell and "redis:\/\/127\.0\.0\.1:16468" in \/deploy\/\.env\. up would judge the shell's Valkey while the service uses the file's\. Make them agree/);
-	assert.deepEqual(both.calls, [], "nothing ran");
-	assert.equal(both.initCalls.length, 0);
-	// PI_VALKEY_SHARED from .env ONLY (gate round 2): a shell opt-in is ignored and named, never honoured, so another
-	// account's Valkey is refused and up fails, as the worker and service install would.
-	const shellOptIn = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0", PI_VALKEY_SHARED: "1" }, listening: true, files: { ...listenerFiles(1235), "/deploy/.env": "PI_VALKEY_SHARED=0\n" }, extra: podmanExtra() });
-	assert.equal(await shellOptIn.run(), 1);
-	assert.match(shellOptIn.text(), /⚠ PI_VALKEY_SHARED is "1" in this shell: ignored, since only \/deploy\/\.env may say a Valkey is shared on purpose/);
-	assert.match(shellOptIn.text(), /✗ 127\.0\.0\.1:6379 is held by op2 \(uid 1235\)/);
-	assert.doesNotMatch(shellOptIn.text(), /shared on purpose as PI_VALKEY_SHARED=1/);
-	const shellOnly = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0", PI_VALKEY_SHARED: "1" }, listening: true, files: listenerFiles(1235), extra: podmanExtra() });
-	assert.equal(await shellOnly.run(), 1, "with no .env line at all, too");
-	assert.match(shellOnly.text(), /PI_VALKEY_SHARED is "1" in this shell: ignored/);
-	// A line the loaders read differently is refused, naming why, never judged as the default 6379 (gate round 1).
-	const unplain = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, listening: true, files: { ...listenerFiles(1235), "/deploy/.env": "VALKEY_URL=redis://[::1]:16510\n" }, extra: podmanExtra() });
-	assert.equal(await unplain.run(), 1);
-	assert.match(unplain.text(), /✗ \/deploy\/\.env line 1 assigns VALKEY_URL in a form this command cannot read the way the service's loader will \(an unquoted \[ or \]/);
-	assert.doesNotMatch(unplain.text(), /127\.0\.0\.1:6379|held by/, "nothing was judged, least of all the default port");
-	assert.deepEqual(unplain.calls, []);
-});
-
-// Gate round 2: the closing line says which fault it was, an owner refusal (above) or a URL the Quadlet Valkey cannot serve.
-test("up on podman: a VALKEY_URL the Quadlet Valkey cannot serve is its own failure, worded as such (#464)", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: { "podman image exists": 0 }, listening: false, files: { "/deploy/.env": 'VALKEY_URL="redis://[::1]:16499"\n' }, extra: podmanExtra() });
-	assert.equal(await h.run(), 1);
-	assert.match(h.text(), /VALKEY_URL's host is ::1, not 127\.0\.0\.1, and the Quadlet Valkey is published on 127\.0\.0\.1 only/);
-	assert.match(h.text(), /up: VALKEY_URL cannot be served as it is written \(above\); fix it in \.env, then re-run `pi-dispatch up`\./);
-	assert.doesNotMatch(h.text(), /is not this account's \(above\)/);
-});
-
-test("up on podman: a localhost VALKEY_URL is judged on every address it resolves to, so another account's ::1 is refused (#464, gate round 1 D1)", async () => {
-	const tcp6 = `${TCP_HEAD}   1: 00000000000000000000000001000000:407E 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1235        0 1 1 0 100 0 0 10 0\n`;
-	const probed = [];
-	const h = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: { "podman image exists": 0 },
-		listening: false,
-		files: { ...listenerFiles(1234), "/proc/net/tcp": TCP_HEAD, "/proc/net/tcp6": tcp6, "/deploy/.env": "VALKEY_URL=redis://localhost:16510\n" },
-		extra: podmanExtra({
-			lookup: async () => [{ address: "::1", family: 6 }, { address: "127.0.0.1", family: 4 }],
-			probeTcp: async (host, port) => (probed.push(`${host}:${port}`), host === "::1"),
-		}),
-	});
-	assert.equal(await h.run(), 1);
-	assert.deepEqual(probed, ["::1:16510", "127.0.0.1:16510"]);
-	assert.match(h.text(), /✗ \[::1\]:16510 is held by op2 \(uid 1235\), not by this account \(uid 1234\)/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)), "no Quadlet Valkey beside another account's");
-});
-
-test("up on local,podman: the docker steps are unchanged, then podman's image and proxy; Valkey stays docker's", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "local,podman" },
-		plan: { ...green, [PROXY_INSPECT]: proxyState("running"), "podman image exists": 0, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } },
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	// Issue #468: docker's Valkey step runs after init and the .env keys now (its password comes from .env), so the
-	// podman image step comes before it; the docker steps themselves are the ones they were.
-	assert.deepEqual(h.calls.slice(0, 4).map((c) => [c.cmd, ...c.args]), [
-		["docker", "version"],
-		["docker", "image", "inspect", "pi-job:latest"],
-		["podman", "image", "exists", "pi-job:latest"],
-		["docker", "container", "inspect", "pi-dispatch-valkey"],
-	]);
-	assert.ok(![...h.store.keys()].some((p) => p.endsWith("pi-dispatch-valkey.container")), "no second Valkey on a docker host");
-	assert.ok(h.store.has(`${QDIR}/pi-dispatch-egress-proxy.container`), "podman jobs still need podman's own proxy");
-	assert.ok(h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment") && c.args.join(" ") === "--user start pi-dispatch-egress-proxy.service pi-dispatch-netns-keeper.service"));
-});
-
-// Issue #453: the docker proxy is RUNNING only when `docker inspect` prints `true` on stdout, as the podman path has read it
-// since #430. An exited container also exits 0, so the exit code alone called a stopped proxy present and offered nothing.
+// Issue #453: the docker proxy is RUNNING only when `docker inspect` prints `running` on stdout. An exited container
+// also exits 0, so the exit code alone called a stopped proxy present and offered nothing.
 const EGRESS_START = ["start", "pi-dispatch-egress-proxy"];
 
 test("up on docker: a stopped shipped proxy is started as it is, never recreated, with exactly the argv shown (#453)", async () => {
@@ -1547,11 +1277,10 @@ test("deploy/docker-compose.yml's PI_JOB_IMAGE is this release's job image, on t
 	}
 });
 
-test("up's proxy image is the compose file's and the Quadlet unit's, one pinned digest (#453 gate)", () => {
+test("up's proxy image is the compose file's, one pinned digest (#453 gate)", () => {
 	const compose = readFileSync(new URL("../../deploy/docker-compose.yml", import.meta.url), "utf8");
-	const quadlet = readFileSync(new URL("../../deploy/pi-dispatch-egress-proxy.container", import.meta.url), "utf8");
 	assert.match(compose, new RegExp(`^\\s*image: ${PINNED_SQUID.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\s*$`, "m"));
-	assert.ok(quadlet.includes(`Image=docker.io/${PINNED_SQUID}\n`));
+	// The Quadlet unit that pinned the same digest beside compose went with the venues that installed it.
 	assert.equal(EGRESS_RUN.at(-1), PINNED_SQUID);
 });
 
@@ -1655,7 +1384,7 @@ test("the compose scan's own judgement: flags in any order, docker-compose, pros
 test("no source line names a docker compose command without --env-file; the prose mentions are the named ones (#480)", () => {
 	const commands = [];
 	const prose = [];
-	for (const dir of ["../src", "../../receiver/src", "../../admin/src", "../../gateway/src"]) {
+	for (const dir of ["../src", "../../receiver/src", "../../admin/src"]) {
 		const root = new URL(`${dir}/`, import.meta.url);
 		for (const name of realFs.readdirSync(root, { recursive: true })) {
 			if (!/\.(mjs|js|ts)$/.test(name)) continue;
@@ -1729,10 +1458,7 @@ test("up tells init to print no next steps of its own (#480)", async () => {
 test("up hands init the venues it decided, so init's next steps match the pass (#453)", async () => {
 	const docker = harness({ plan: green, listening: true });
 	await docker.run();
-	assert.deepEqual(docker.initOpts.map((o) => o.venues), [{ localUsed: true, podmanUsed: false, podmanDefault: false, openshellUsed: false, openshellCopyUsed: false, openshellBindUsed: false }]);
-	const podman = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan(), listening: true, extra: podmanExtra() });
-	await podman.run();
-	assert.deepEqual(podman.initOpts.map((o) => o.venues), [{ localUsed: false, podmanUsed: true, podmanDefault: true, openshellUsed: false, openshellCopyUsed: false, openshellBindUsed: false }]);
+	assert.deepEqual(docker.initOpts.map((o) => o.venues), [{ localUsed: true }]);
 });
 
 test("up on docker: PI_EGRESS_PROXY is the name up looks for, and it never starts the shipped proxy in its place", async () => {
@@ -1746,27 +1472,6 @@ test("up on docker: PI_EGRESS_PROXY is the name up looks for, and it never start
 	assert.ok(h.calls.some((c) => c.args.join(" ") === "inspect --format={{.State.Status}} my-squid"));
 	assert.ok(!h.calls.some((c) => c.args[0] === "run" || c.args[0] === "network"), "nothing started");
 	assert.match(h.text(), /PI_EGRESS_PROXY names my-squid, and docker has no container of that name/);
-});
-
-// ---------------------------------------------------------------------------------------------------
-// Review round 1 (issue #430): the defects and the gaps each mutation survived
-// ---------------------------------------------------------------------------------------------------
-
-const KEEPER_READ = `podman inspect ${NETNS_KEEPER_FORMAT} pi-dispatch-netns-keeper`;
-const podmanPlan = (over = {}) => ({ "podman image exists": 0, "podman ps": { code: 0, output: "" }, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" }, ...over });
-
-test("D2: PI_BACKENDS=podman in the deployment's .env drives the podman pass, as it drives service install", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic" },
-		plan: podmanPlan(),
-		listening: true,
-		files: { "/deploy/.env": "PI_BACKENDS=podman\nPI_EGRESS=0\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.ok(!h.calls.some((c) => c.cmd === "docker"), "the .env's venue, not the docker default");
-	assert.equal(h.doctorCalls[0].PI_BACKENDS, "podman", "doctor judges the venue this pass drove");
-	assert.match(h.text(), /export the same PI_BACKENDS there first/, "the closing lines say how a hand-run worker gets the venue");
 });
 
 test("E5: a shell and a .env that disagree on a venue key stop up before anything runs, naming both and which to change", async () => {
@@ -1787,245 +1492,6 @@ test("D2/D6: a .env line the loaders read differently stops up before anything r
 	assert.match(h.text(), /cannot tell which venue this deployment runs/);
 	assert.equal(h.calls.length, 0);
 	assert.equal(h.initCalls.length, 0);
-});
-
-test("D4: an EXITED proxy prints false with exit 0, and is offered the unit rather than called present", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		plan: podmanPlan({ "podman inspect": { code: 0, output: "exited\n" } }),
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.ok(h.store.has(`${QDIR}/pi-dispatch-egress-proxy.container`), "the stopped proxy's replacement was installed");
-});
-
-test("M7: a RUNNING proxy (true) is left alone and nothing is planned for it", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		// Issue #458: the keeper answers its own read, holding (the keeper key FIRST: the fake takes the first matching prefix).
-		plan: podmanPlan({ [KEEPER_READ]: { code: 0, output: "running|bridge|pi-dispatch-netns-keeper,\n" }, "podman inspect": { code: 0, output: "running\n" } }),
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /Egress proxy already present under this account's Podman/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-});
-
-test("D3: up installs nothing over a container of the unit's name that the unit does not own", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		plan: podmanPlan({ "podman inspect": { code: 0, output: "exited\n" }, "podman container inspect": { code: 0, output: "<no value>\n" } }),
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	// Issue #458: the keeper is read by the same rule, and this fake answers "<no value>" for both.
-	assert.match(h.text(), /pi-dispatch-egress-proxy and pi-dispatch-netns-keeper already exist under this account's Podman and are not managed by the Quadlet units/);
-	assert.match(h.text(), /pi-dispatch service install --force/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-});
-
-test("M6: up never overwrites a Quadlet file that differs from what it renders", async () => {
-	const edited = `${QDIR}/pi-dispatch-valkey.container`;
-	const h = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: podmanPlan(),
-		listening: false,
-		argv: ["--yes"],
-		files: { [edited]: "[Container]\nImage=mine\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.equal(h.store.get(edited), "[Container]\nImage=mine\n");
-	assert.match(h.text(), /podman stack\s+NOT installed: a Quadlet file differs/);
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-});
-
-test("M13: on podman an armed policy with no allowlist starts no proxy and says which file", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan({ "podman inspect": 1 }), listening: true, argv: ["--yes"], extra: podmanExtra() });
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /egress-allowlist\.conf is not here, not starting a proxy with no allowlist/);
-	// Issue #458: the keeper mounts nothing, and the proxy started after `init` needs it just the same, so only its two
-	// files are written; nothing of the proxy's is.
-	assert.deepEqual([...h.store.keys()].filter((p) => p.startsWith(QDIR)).sort(), [`${QDIR}/pi-dispatch-netns-keeper.container`, `${QDIR}/pi-dispatch-netns-keeper.network`]);
-	assert.ok(h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment") && c.args.join(" ") === "--user start pi-dispatch-netns-keeper.service"));
-	assert.match(h.text(), /netns keeper \(podman\)\s+installed as Quadlet units and started/);
-});
-
-// Issue #458: up reads the keeper like the proxy, off stdout: running is left alone, anything else is offered the unit.
-test("up on podman (#458): a keeper that holds is left alone, a stopped one or one off its bridge is offered its unit with the proxy already up", async () => {
-	// The keeper's own key FIRST: the fake takes the first matching prefix.
-	const inspect = (keeper) => ({ [KEEPER_READ]: { code: 0, output: `${keeper}\n` }, "podman inspect": { code: 0, output: "running\n" } });
-	const running = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan(inspect("running|bridge|pi-dispatch-netns-keeper,")), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra() });
-	assert.equal(await running.run(), 0);
-	assert.match(running.text(), /✓ Rootless network keeper already running under this account's Podman on its own bridge network \(pi-dispatch-netns-keeper\)/);
-	assert.ok(![...running.store.keys()].some((p) => p.startsWith(QDIR)));
-	// Issue #463's gate: RUNNING on `--network none` holds nothing, and was called "already running" here.
-	const offBridge = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan(inspect("running|none|none,")), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra() });
-	assert.equal(await offBridge.run(), 0);
-	assert.doesNotMatch(offBridge.text(), /already running/);
-	assert.match(offBridge.text(), /⚠ pi-dispatch-netns-keeper is running on the none network mode, not on its pi-dispatch-netns-keeper bridge network, so it holds nothing open: offering its unit, restarted/);
-	assert.ok(offBridge.store.has(`${QDIR}/pi-dispatch-netns-keeper.container`));
-	const stopped = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan(inspect("exited|bridge|pi-dispatch-netns-keeper,")), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra() });
-	assert.equal(await stopped.run(), 0);
-	assert.match(stopped.text(), /the rootless network keeper \(pi-dispatch-netns-keeper, which keeps the proxy's route out on Podman 4\.x\) is not running under this account's Podman/);
-	assert.deepEqual([...stopped.store.keys()].filter((p) => p.startsWith(QDIR)).sort(), [`${QDIR}/pi-dispatch-netns-keeper.container`, `${QDIR}/pi-dispatch-netns-keeper.network`]);
-	assert.deepEqual(stopped.calls.filter((c) => c.cmd === "podman" && c.args[0] === "inspect").map((c) => c.args), [
-		["inspect", "--format={{.State.Status}}", "pi-dispatch-egress-proxy"],
-		["inspect", NETNS_KEEPER_FORMAT, "pi-dispatch-netns-keeper"],
-	]);
-	// Egress off: neither is asked about, and nothing of the keeper's is written.
-	const off = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: podmanPlan(inspect("exited|bridge|pi-dispatch-netns-keeper,")), listening: true, argv: ["--yes"], extra: podmanExtra() });
-	assert.equal(await off.run(), 0);
-	assert.ok(!off.calls.some((c) => c.cmd === "podman" && c.args[0] === "inspect"));
-	assert.ok(![...off.store.keys()].some((p) => p.includes("netns-keeper")));
-});
-
-// PR #463 round 2: a Quadlet keeper that is there, ours and unchanged, but not holding (paused, say). `start` on its
-// active unit is a no-op, and up used to report "installed as Quadlet units and started" over a keeper still paused.
-// Its unit is RESTARTED instead, the files are left alone, and since the proxy stayed up, up says to restart it.
-test("up on podman (#458): a Quadlet keeper that does not hold, with its files unchanged, is restarted, and the proxy's restart is asked for", async () => {
-	const unit = (name) => readFileSync(new URL(`../deploy/${name}`, import.meta.url), "utf8");
-	const files = { "/deploy/egress-allowlist.conf": "x\n", [`${QDIR}/pi-dispatch-netns-keeper.container`]: unit("pi-dispatch-netns-keeper.container"), [`${QDIR}/pi-dispatch-netns-keeper.network`]: unit("pi-dispatch-netns-keeper.network") };
-	const plan = podmanPlan({
-		[KEEPER_READ]: { code: 0, output: "paused|bridge|pi-dispatch-netns-keeper,|1000000\n" },
-		"podman inspect": { code: 0, output: "running\n" },
-		"podman container inspect": { code: 0, output: "pi-dispatch-netns-keeper.service\n" },
-	});
-	const h = harness({ env: { PI_BACKENDS: "podman" }, plan, listening: true, argv: ["--yes"], files, extra: podmanExtra() });
-	assert.equal(await h.run(), 0);
-	const ran = h.calls.filter((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")).map((c) => c.args.join(" "));
-	assert.deepEqual(ran, ["--user daemon-reload", "--user restart pi-dispatch-netns-keeper.service"], "restarted, never a no-op start");
-	assert.equal(h.store.get(`${QDIR}/pi-dispatch-netns-keeper.container`), unit("pi-dispatch-netns-keeper.container"), "the files are left as they were");
-	assert.match(h.text(), /✓ restarted pi-dispatch-netns-keeper\.service/);
-	assert.doesNotMatch(h.text(), /✓ started /);
-	assert.match(h.text(), /netns keeper \(podman\)\s+installed as Quadlet units and restarted \(pi-dispatch-netns-keeper\.service\)/);
-	assert.match(h.text(), /⚠ pi-dispatch-netns-keeper was restarted while the egress proxy \(pi-dispatch-egress-proxy\) is not part of this install: if it is running, restart the egress proxy once no job is running: systemctl --user restart pi-dispatch-egress-proxy\.service/);
-});
-
-test("E7: up stops on a podman info that did not answer, stricter than the worker on purpose, and says so", async () => {
-	for (const read of [{ answered: false, reason: "timeout", transient: true }, { answered: false, reason: "unparseable", transient: false }]) {
-		const h = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: podmanPlan(), listening: true, extra: podmanExtra({ readPodmanInfo: async () => read }) });
-		assert.equal(await h.run(), 1, read.reason);
-		assert.match(h.text(), /✗ podman venue not answering/);
-		assert.match(h.text(), /up stops here although the worker would only retry this per job: it will not install units for a Podman it could not see/);
-		assert.equal(h.calls.length, 0, "no podman command without a timeout runs after it");
-	}
-});
-
-test("M32: the gate judges the worker's own ids: as root, up refuses exactly as the worker's boot does", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman" }, listening: true, extra: podmanExtra({ euid: 0, egid: 0 }) });
-	assert.equal(await h.run(), 1);
-	assert.match(h.text(), /the worker runs as root/);
-	assert.equal(h.calls.length, 0);
-});
-
-test("M17/M28: on local,podman a refused podman gate leaves the docker pass whole and installs no podman stack", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "local,podman" },
-		plan: { ...green, [PROXY_INSPECT]: proxyState("running") },
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra({ readPodmanInfo: async () => ({ answered: true, info: { rootless: false, serviceIsRemote: false } }) }),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /the docker steps above are unaffected; the podman steps below are skipped/);
-	assert.ok(h.calls.some((c) => c.cmd === "docker" && c.args[0] === "version"));
-	assert.ok(!h.calls.some((c) => c.cmd === "podman"), "no podman step after a refused gate");
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.equal(h.initCalls.length, 1);
-});
-
-test("M30: a deployment path the proxy's Volume= cannot carry is reported by up, and nothing is installed", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		plan: podmanPlan({ "podman inspect": 1 }),
-		listening: true,
-		argv: ["--yes"],
-		cwd: "/srv/pi deploy",
-		files: { "/srv/pi deploy/egress-allowlist.conf": "x\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /podman stack\s+NOT installed: the egress proxy's Quadlet unit would mount/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-});
-
-// ---------------------------------------------------------------------------------------------------
-// Review round 2 (issue #430)
-// ---------------------------------------------------------------------------------------------------
-
-const PODMAN_WARN = "time=\"2026-09-27T10:00:00Z\" level=warning msg=\"The cgroupv2 manager is set to systemd but there is no systemd user session available\"\n";
-
-test("E2: a running proxy is read off stdout, so podman's stderr warnings cannot make `true` unequal", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		plan: podmanPlan({ "podman inspect": { code: 0, output: "running\n", stderr: PODMAN_WARN } }),
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /Egress proxy already present under this account's Podman/);
-	// And our own label with a warning beside it is ours.
-	const own = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: podmanPlan({ "podman container inspect": { code: 0, output: "pi-dispatch-valkey.service\n", stderr: PODMAN_WARN } }),
-		listening: false,
-		argv: ["--yes"],
-		extra: podmanExtra(),
-	});
-	assert.equal(await own.run(), 0);
-	assert.ok(own.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment") && c.args[1] === "start"), "installed, not refused as foreign");
-});
-
-test("E3: up installs nothing when podman cannot say whether a container exists", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: podmanPlan({ "podman container inspect": { code: 125, stderr: "Error: database is locked\n" } }),
-		listening: false,
-		argv: ["--yes"],
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /podman stack\s+NOT installed: podman did not say whether the containers exist/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-});
-
-test("E8: up with no user manager reachable writes nothing and names the remedy", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: podmanPlan(), listening: false, argv: ["--yes"], extra: podmanExtra({ noBus: true, euid: 1234 }) });
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /as under `sudo -iu op`/);
-	assert.match(h.text(), /XDG_RUNTIME_DIR=\/run\/user\/1234/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)), "no file left behind that nothing loaded");
-	assert.ok(!h.calls.some((c) => (c.cmd === "systemctl" && c.args[1] !== "show-environment")));
-});
-
-test("E6/R31: the .env is read with the platform's loader, and off Linux a line it reads differently never stops up", async () => {
-	const file = { "/deploy/.env": "export PI_BACKENDS=podman\n" };
-	const linux = harness({ env: {}, plan: green, files: file });
-	assert.equal(await linux.run(), 1, "systemd ignores `export`: which venue the service runs is unknown");
-	// The macOS wrapper sources the file, so `export` IS the assignment there: the podman venue, refused on this host.
-	const mac = harness({ env: {}, platform: "darwin", plan: green, files: file, extra: podmanExtra() });
-	await mac.run();
-	assert.match(mac.text(), /the podman venue runs only on Linux/);
-	// A line that loader cannot read off Linux: noted, and up goes on with the shell's venue.
-	const odd = harness({ env: {}, platform: "darwin", plan: green, listening: true, files: { "/deploy/.env": "PI_BACKENDS =podman\n" } });
-	assert.equal(await odd.run(), 0);
-	assert.match(odd.text(), /off Linux the podman venue refuses this host anyway, so this pass reads the venue from this shell/);
 });
 
 test("#447 gate round 1: a .env systemd will not LOAD (a NUL, invalid UTF-8 in a value) stops up on Linux before anything runs", async () => {
@@ -2068,7 +1534,7 @@ test("nit: an unreadable .env is said, not silently replaced by the shell's venu
 		throw new Error(`ENOENT: ${p}`);
 	};
 	await h.run();
-	assert.match(h.text(), /\/deploy\/\.env could not be read \(EACCES: permission denied\), so the venue keys \(PI_BACKENDS, PI_EGRESS, PI_EGRESS_PROXY, PI_OPENSHELL_ENGINE, PI_OPENSHELL_GATEWAY\) come from this shell alone/);
+	assert.match(h.text(), /\/deploy\/\.env could not be read \(EACCES: permission denied\), so the venue keys \(PI_BACKENDS, PI_EGRESS, PI_EGRESS_PROXY\) come from this shell alone/);
 });
 
 test("R25: the docker path never asks the passwd database, so an account with no entry and no USER still runs up", async () => {
@@ -2077,8 +1543,8 @@ test("R25: the docker path never asks the passwd database, so an account with no
 });
 
 test("D4 (round 3): shell and .env are compared as the worker reads them, and shown in quotes", async () => {
-	for (const shell of [" podman", "podman,podman", "podman "]) {
-		const h = harness({ env: { PI_BACKENDS: shell, PI_EGRESS: "0" }, plan: podmanPlan(), listening: true, files: { "/deploy/.env": "PI_BACKENDS=podman\nPI_EGRESS=0\n" }, extra: podmanExtra() });
+	for (const shell of [" local", "local,local", "local "]) {
+		const h = harness({ env: { PI_BACKENDS: shell, PI_EGRESS: "0" }, plan: green, listening: true, files: { "/deploy/.env": "PI_BACKENDS=local\nPI_EGRESS=0\n" } });
 		assert.equal(await h.run(), 0, JSON.stringify(shell));
 		assert.doesNotMatch(h.text(), /in this shell and/);
 	}
@@ -2097,93 +1563,6 @@ test("D4 (round 3): shell and .env are compared as the worker reads them, and sh
 	assert.equal(await empty.run(), 1);
 	assert.match(empty.text(), /PI_BACKENDS is "" in this shell and "podman" in \/deploy\/\.env/);
 });
-
-// PR #463 round 3: up asks the manager's environment with service install's rule, before its consent, and installs
-// nothing when it names another account's XDG_RUNTIME_DIR or XDG_CONFIG_HOME.
-test("up on podman (#458): a manager environment naming another account's directories installs nothing", async () => {
-	const h = harness({
-		env: { PI_BACKENDS: "podman" },
-		// The environment key FIRST: the fake takes the first matching prefix, and podmanPlan answers every `systemctl`.
-		plan: { "systemctl --user show-environment": { code: 0, output: "XDG_CONFIG_HOME=/home/runner/.config\n" }, ...podmanPlan({ "podman inspect": 1 }) },
-		listening: true,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n" },
-		extra: podmanExtra(),
-	});
-	assert.equal(await h.run(), 0);
-	assert.match(h.text(), /✗ op's user manager runs with XDG_CONFIG_HOME=\/home\/runner\/\.config, not \/home\/op\/\.config/);
-	assert.match(h.text(), /podman stack\s+NOT installed: the user manager's environment names another account's directories/);
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)));
-	assert.ok(!h.calls.some((c) => c.cmd === "systemctl" && c.args[1] !== "show-environment"));
-});
-
-// PR #463 round 3: the operator's own proxy (PI_EGRESS_PROXY) is never ours to restart, and a keeper started beside it
-// leaves it up since before the keeper: said, with its real name. A keeper that stays holding says nothing.
-test("up on podman (#458): starting the keeper beside the operator's own proxy names that proxy's restart", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS_PROXY: "my-squid" }, plan: podmanPlan({ [KEEPER_READ]: { code: 125, output: "" } }), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra() });
-	assert.equal(await h.run(), 0);
-	assert.ok(h.store.has(`${QDIR}/pi-dispatch-netns-keeper.container`));
-	assert.match(h.text(), /⚠ pi-dispatch-netns-keeper was started while the egress proxy \(my-squid\) is not part of this install: if it is running, restart the egress proxy once no job is running: podman restart my-squid \(or its own unit\)/);
-	const held = harness({ env: { PI_BACKENDS: "podman", PI_EGRESS_PROXY: "my-squid" }, plan: podmanPlan({ [KEEPER_READ]: { code: 0, output: "running|bridge|pi-dispatch-netns-keeper,|1000000\n" } }), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra() });
-	assert.equal(await held.run(), 0);
-	assert.doesNotMatch(held.text(), /is not part of this install/);
-});
-
-// PR #463 final review: the symlinked-home tolerance through up, so dropping its realpath seam is caught.
-test("up on podman (#458): a manager XDG_CONFIG_HOME that resolves to this home's .config is not refused", async () => {
-	const env = { "systemctl --user show-environment": { code: 0, output: "XDG_CONFIG_HOME=/srv/link/.config\n" } };
-	const links = { "/srv/link/.config": "/home/op/.config", "/home/op/.config": "/home/op/.config" };
-	const run = (realpath) => harness({ env: { PI_BACKENDS: "podman" }, plan: { ...env, ...podmanPlan({ "podman inspect": 1 }) }, listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, extra: podmanExtra(realpath ? { realpath } : {}) });
-	const linked = run((p) => links[p] ?? p);
-	assert.equal(await linked.run(), 0);
-	assert.doesNotMatch(linked.text(), /user manager runs with/);
-	assert.ok([...linked.store.keys()].some((p) => p.startsWith(QDIR)), "installed");
-	const plain = run((p) => p);
-	assert.equal(await plain.run(), 0);
-	assert.match(plain.text(), /✗ op's user manager runs with XDG_CONFIG_HOME=\/srv\/link\/\.config, not \/home\/op\/\.config/);
-});
-
-test("up on podman: a Quadlet write that fails puts back every file this run wrote, runs nothing, and names what it could not put back (#464)", async () => {
-	const keeperFile = `${QDIR}/pi-dispatch-netns-keeper.container`;
-	const proxyUnit = `${QDIR}/pi-dispatch-egress-proxy.container`;
-	const confCopy = "/home/op/.config/pi-dispatch/egress-proxy.conf";
-	const base = {
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman" },
-		plan: { "podman image exists": 0, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } },
-		listening: false,
-		argv: ["--yes"],
-		extra: podmanExtra(),
-	};
-	// up writes new files only (a file that differs is refused before anything is written), so every one is removed.
-	const files = { "/deploy/egress-allowlist.conf": "api.anthropic.com\n", "/deploy/deploy/egress-proxy.conf": "conf\n" };
-	const h = harness({ ...base, files, failWrites: { [keeperFile]: Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" }) } });
-	assert.equal(await h.run(), 0, "up carries on to doctor, as for any failed step");
-	assert.ok(![...h.store.keys()].some((p) => p.startsWith(QDIR)), "no Quadlet file of this run is left");
-	assert.ok(!h.store.has(confCopy), "nor the rules copy it wrote before them");
-	assert.ok(!h.calls.some((c) => c.cmd === "systemctl" && c.args[1] !== "show-environment"), "nothing was reloaded or started");
-	assert.match(h.text(), new RegExp(`✗ write ${keeperFile.replaceAll(".", "\\.")} failed \\(EACCES: permission denied\\), so nothing was installed: rolled back what this run wrote \\(removed [^)]*${proxyUnit.replaceAll(".", "\\.")}[^)]*${confCopy.replaceAll(".", "\\.")}[^)]*\\); no file of this run remains`));
-	const stuck = harness({ ...base, files, failWrites: { [keeperFile]: new Error("EROFS") }, failUnlinks: { [proxyUnit]: new Error("EBUSY: resource busy") } });
-	await stuck.run();
-	assert.ok(stuck.store.has(proxyUnit));
-	assert.match(stuck.text(), new RegExp(`these could NOT be put back and remain as this run wrote them: ${proxyUnit.replaceAll(".", "\\.")} \\(EBUSY: resource busy\\)`));
-});
-
-test("up on podman: a stack command that fails names the files this run wrote, which remain (#464)", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman", PI_EGRESS: "0" },
-		plan: { "podman image exists": 0, "systemctl --user start": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } },
-		listening: false,
-		argv: ["--yes"],
-		extra: podmanExtra(),
-	});
-	await h.run();
-	assert.match(h.text(), new RegExp(`Files this run wrote, which remain: ${QDIR.replaceAll(".", "\\.")}/pi-dispatch-valkey\\.network, /home/op/\\.config/pi-dispatch/valkey\\.env, ${QDIR.replaceAll(".", "\\.")}/pi-dispatch-valkey\\.container`));
-	assert.ok(h.store.has(`${QDIR}/pi-dispatch-valkey.container`));
-});
-
-// ---------------------------------------------------------------------------------------------------------------------
-// Issue #468: the Valkey `up` starts gets the deployment's password, from .env, through the environment only
-// ---------------------------------------------------------------------------------------------------------------------
 
 test("up on docker (#468): a .env without a password gets one first, and docker's Valkey starts with it in the CLI's environment, never its argv", async () => {
 	const h = harness({ plan: { "docker version": 0, "docker image inspect": 0, "docker volume": 0, "docker run": 0 }, listening: false, argv: ["--yes"], files: { "/deploy/.env": "A=1\n" }, env: { PI_PROVIDER: "anthropic", VALKEY_PASSWORD: "a-shell-value-that-is-not-the-deployments" } });
@@ -2263,28 +1642,6 @@ test("up on docker (#468): our pi-dispatch-valkey answering without a password i
 	assert.match(fine.text(), /valkey\s+container pi-dispatch-valkey already running/);
 });
 
-test("up on podman (#468): the Valkey it adds gets a password written into .env only once the plan is accepted, shown as a line of it, never valued", async () => {
-	const base = { env: { PI_BACKENDS: "podman", PI_EGRESS: "0" }, plan: { "podman image exists": 0, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } }, listening: false, files: { "/deploy/.env": "PI_BACKENDS=podman\n" }, extra: podmanExtra() };
-	const no = harness({ ...base, answers: [""] });
-	await no.run();
-	assert.doesNotMatch(no.store.get("/deploy/.env"), /VALKEY_PASSWORD/, "declined: no password written (the other keys `up` fills are unrelated)");
-	assert.match(no.text(), /^ {2}generate VALKEY_PASSWORD into \/deploy\/\.env \(32 random bytes, hex; the value is not shown\)$/m);
-	const yes = harness({ ...base, argv: ["--yes"] });
-	assert.equal(await yes.run(), 0);
-	assert.match(yes.store.get("/deploy/.env"), new RegExp(`\nVALKEY_PASSWORD=${PASSWORD}\n$`));
-	assert.match(yes.store.get("/home/op/.config/pi-dispatch/valkey.env"), new RegExp(`^VALKEY_PASSWORD=${PASSWORD}$`, "m"));
-	assert.ok(!yes.text().includes(PASSWORD));
-	// A password Valkey could not take stops the Valkey step and fails `up`, naming the key.
-	const bad = harness({ ...base, argv: ["--yes"], files: { "/deploy/.env": "PI_BACKENDS=podman\nVALKEY_PASSWORD=short\n" } });
-	assert.equal(await bad.run(), 1);
-	assert.match(bad.text(), /✗ VALKEY_PASSWORD in \/deploy\/\.env cannot be handed to Valkey: it is 5 characters long/);
-	assert.match(bad.text(), /up: VALKEY_PASSWORD in \.env cannot be handed to Valkey \(above\); fix it, then re-run `pi-dispatch up`\./);
-	assert.ok(![...bad.store.keys()].some((p) => p.startsWith(QDIR)));
-});
-
-// Issue #468 follow-up: docker's Valkey step used to probe and publish 6379 whatever VALKEY_URL said, so a deployment on
-// another port was offered a Valkey its worker never dialled, or had its own listener there ignored. The port is now
-// VALKEY_URL's, read as the service reads it (the podman step's reader since #464).
 test("up on docker: VALKEY_URL's port is the one probed and published; another host adds none; an IPv6 literal is refused", async () => {
 	const probed = [];
 	const h = harness({ plan: { "docker version": 0, "docker image inspect": 0, "docker volume": 0, "docker run": 0 }, listening: false, argv: ["--yes"], files: { "/deploy/.env": `VALKEY_URL=redis://127.0.0.1:16470\nVALKEY_PASSWORD=${PASSWORD}\n` }, extra: { probeTcp: async (host, port) => (probed.push(`${host}:${port}`), false) } });
@@ -2833,271 +2190,6 @@ test("up on docker: after a declined or blocked coupled refresh, a stopped proxy
 
 test("up's proxy removal takes its anonymous volumes with it (#503 review)", () => {
 	assert.deepEqual(EGRESS_RM, ["rm", "-f", "-v", "pi-dispatch-egress-proxy"]);
-});
-
-test("up on podman: no model-endpoints.conf in the folder means no proxy unit is installed (#503)", async () => {
-	const h = harness({ env: { PI_BACKENDS: "podman" }, plan: podmanPlan(), listening: true, argv: ["--yes"], files: { "/deploy/egress-allowlist.conf": "x\n" }, includeFile: false, extra: podmanExtra() });
-	await h.run();
-	assert.match(h.text(), /✗ the egress policy is on but model-endpoints\.conf is not here, and the proxy's rules include it/);
-	assert.ok(!h.calls.some((c) => c.cmd === "podman" && c.args.includes("pi-dispatch-egress-proxy") && c.args[0] === "run"));
-});
-
-// ---------------------------------------------------------------------------------------------------
-// The openshell venues (issue #707): `up` checks the CLI and its gateway (offering a start and a registration, each
-// asked), puts the job image into the gateway's engine (PI_OPENSHELL_ENGINE), runs Valkey there where no `local` or
-// `podman` venue decides it (`openshellSetupOf`), and never starts the egress proxy for them.
-// ---------------------------------------------------------------------------------------------------
-
-const GATEWAY_UP = { status: "connected", server: "https://127.0.0.1:17670", version: "0.1.4" };
-const openshellPlan = (over = {}) => ({
-	"openshell --version": { code: 0, output: "openshell 0.1.4\n" },
-	"openshell status": { code: 0, output: JSON.stringify(GATEWAY_UP) },
-	// What the start and registration offers ask first (review round 1 of #715): the unit is there, none registered.
-	"systemctl --user cat": { code: 0, output: "[Unit]\n" },
-	"openshell gateway list": { code: 0, output: "[]\n" },
-	...over,
-});
-const CAPS = { code: 0, output: "sandboxLayout,transcriptStderr,mounts\n" };
-
-test("up on openshell (docker): the gateway is checked, the image goes into docker, Valkey runs on docker, and no proxy or podman is touched (#707)", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" },
-		plan: openshellPlan({ "docker version": 0, "docker image inspect pi-job:latest": 1, "docker image inspect --format": CAPS, "docker pull": 0, "docker tag": 0, "docker volume create": 0, "docker run": 0 }),
-		listening: false,
-		argv: ["--yes"],
-	});
-	assert.equal(await h.run(), 0);
-	const text = h.text();
-	assert.match(text, /^pi-dispatch up: one pass over the quickstart for openshell on docker; every docker, openshell and systemctl action asks first \(--yes accepts\)$/m, "the banner names the venue, never 'not docker means podman'");
-	assert.match(text, /✓ OpenShell CLI 0\.1\.4, the tested release/);
-	assert.match(text, /✓ OpenShell gateway 0\.1\.4, the tested release, on this host \(https:\/\/127\.0\.0\.1:17670\)/);
-	const runs = h.calls.filter((c) => c.cmd === "docker" && (["pull", "tag", "run"].includes(c.args[0]) || (c.args[0] === "volume" && c.args[1] === "create"))).map((c) => c.args);
-	assert.deepEqual(runs, [PULL, TAG, VOLUME, VALKEY_RUN], "the image into docker's store once, then Valkey on docker, and nothing else run");
-	assert.ok(!h.calls.some((c) => c.args.includes("pi-dispatch-egress-proxy") || c.args.includes("pi-dispatch-egress-out")), "a dockerUsed-style gate would have started squid here");
-	assert.ok(!h.calls.some((c) => c.cmd === "podman"), "no podman spawn");
-	assert.ok(!h.calls.some((c) => c.cmd === "openshell" && c.args[0] === "gateway"), "a registered, connected gateway is left alone");
-	assert.match(text, /openshell image\s+pi-job:latest declares sandboxLayout and transcriptStderr/);
-	assert.match(text, /pi-dispatch service install\n {6}the worker as a user service that pulls in the gateway's own unit \(openshell-gateway\.service\)/);
-});
-
-test("up on openshell (podman): the image goes into podman without the podman venue's gate, and Valkey alone as a Quadlet unit, with no docker (#707)", async () => {
-	let gated = 0;
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" },
-		plan: openshellPlan({ "podman version": 0, "podman image exists": 1, "podman pull": 0, "podman tag": 0, "podman image inspect": CAPS, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } }),
-		listening: false,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra({ readPodmanInfo: async () => (gated++, { answered: false, reason: "never asked" }) }),
-	});
-	assert.equal(await h.run(), 0);
-	assert.equal(gated, 0, "podmanGate's rootless job-user rule is the podman venue's, not this one's");
-	assert.ok(!h.calls.some((c) => c.cmd === "docker"), "no docker spawn");
-	assert.deepEqual(h.calls.filter((c) => c.cmd === "podman" && ["pull", "tag"].includes(c.args[0])).map((c) => c.args), [PULL, TAG]);
-	const started = h.calls.filter((c) => c.cmd === "systemctl" && c.args[1] === "start").map((c) => c.args.slice(2));
-	assert.deepEqual(started, [["pi-dispatch-valkey.service"]], "the Quadlet Valkey alone: no proxy, no keeper");
-	assert.ok(![...h.store.keys()].some((p) => /egress|netns-keeper/.test(p) && p.startsWith(QDIR)), "no proxy or keeper unit is written");
-	assert.match(h.text(), /openshell on podman/);
-});
-
-test("up on openshell beside local: one image pull and one Valkey, the docker venue's (#707)", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "local,openshell" },
-		plan: openshellPlan({ "docker version": 0, "docker image inspect pi-job:latest": 1, "docker image inspect --format": CAPS, "docker pull": 0, "docker tag": 0, "docker volume create": 0, "docker run": 0 }),
-		listening: false,
-		argv: ["--yes"],
-	});
-	assert.equal(await h.run(), 0);
-	assert.equal(h.calls.filter((c) => c.cmd === "docker" && c.args[0] === "pull").length, 1, "no second pull into the same store");
-	assert.equal(h.calls.filter((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("pi-dispatch-valkey")).length, 1, "no second Valkey");
-	assert.equal(h.calls.filter((c) => c.cmd === "docker" && c.args[0] === "version").length, 1, "the docker venue's gate asks the engine; the openshell gate does not ask it again");
-	assert.match(h.text(), /quickstart for the docker venue \(local\) and openshell on docker/);
-});
-
-test("up on openshell: a gateway that is down is offered a start, and a decline leaves exit 1 with the fix, before anything else runs (#707)", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" },
-		plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify({ status: "error", server: "https://127.0.0.1:17670" }) } }),
-		listening: false,
-		answers: [""],
-	});
-	assert.equal(await h.run(), 1);
-	assert.equal(h.promptCalls.length, 1, "asked");
-	assert.match(h.text(), /The OpenShell gateway is not answering \(nothing listens on 127\.0\.0\.1:17670\)\. up would start it \(the user unit OpenShell's package ships\):\n {2}systemctl --user start openshell-gateway\n/);
-	assert.match(h.text(), /✗ the OpenShell gateway is not running \(declined the start\)\n {4}→ start it with `systemctl --user start openshell-gateway`, then re-run `pi-dispatch up`/);
-	assert.ok(!h.calls.some((c) => c.cmd === "systemctl" && c.args[1] !== "cat"), "declined, so nothing but the read-only unit check ran");
-	assert.equal(h.initCalls.length, 0, "stops before init, like the docker gate");
-	assert.equal(h.doctorCalls.length, 0);
-	assert.ok(!h.calls.some((c) => c.cmd === "docker" && c.args[0] !== "version"));
-});
-
-test("up on openshell: under --yes a stopped, registered gateway is started and waited for; an unregistered one is registered (#707)", async () => {
-	let started = false;
-	const registered = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" },
-		plan: openshellPlan({ "docker version": 0, "docker image inspect": CAPS, "systemctl --user start openshell-gateway": () => ((started = true), 0), "openshell status": () => ({ code: 0, output: JSON.stringify(started ? GATEWAY_UP : { status: "error", server: "https://127.0.0.1:17670" }) }) }),
-		listening: true,
-		argv: ["--yes"],
-		extra: { probeTcp: async (_host, port) => port === 17670 && started, sleep: async () => {} },
-	});
-	assert.equal(await registered.run(), 0);
-	assert.ok(started);
-	assert.ok(!registered.calls.some((c) => c.cmd === "openshell" && c.args[0] === "gateway"), "a registered gateway is never registered again");
-
-	let added = false;
-	const bare = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" },
-		plan: openshellPlan({ "docker version": 0, "docker image inspect": CAPS, "openshell gateway add": () => ((added = true), 0), "openshell status": () => ({ code: 0, output: JSON.stringify(added ? GATEWAY_UP : { status: "error" }) }) }),
-		listening: true,
-		argv: ["--yes"],
-		extra: { probeTcp: async (_host, port) => port === 17670, sleep: async () => {} },
-	});
-	assert.equal(await bare.run(), 0);
-	assert.deepEqual(bare.calls.filter((c) => c.cmd === "openshell" && c.args[0] === "gateway" && c.args[1] === "add").map((c) => c.args), [["gateway", "add", "https://127.0.0.1:17670", "--local", "--name", "openshell"]], "the conformance lane's own registration, once");
-	assert.ok(!bare.calls.some((c) => c.cmd === "systemctl"), "it answered, so nothing was started");
-	assert.ok(bare.calls.some((c) => c.cmd === "openshell" && c.args.join(" ") === "gateway list -o json"), "asked first whether any gateway is registered");
-
-	// Started and never answering: bounded, then exit 1 with where to look.
-	const silent = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" },
-		plan: openshellPlan({ "docker version": 0, "systemctl --user start": 0, "openshell status": { code: 0, output: JSON.stringify({ status: "error" }) } }),
-		listening: false,
-		argv: ["--yes"],
-		extra: { sleep: async () => {}, gatewayWaitMs: 3000 },
-	});
-	assert.equal(await silent.run(), 1);
-	assert.equal(silent.calls.filter((c) => c.cmd === "openshell" && c.args.includes("status")).length, 4, "the first read, then three polls: bounded");
-	assert.match(silent.text(), /✗ the OpenShell gateway was started and did not answer within 3 s\n {4}→ `journalctl --user -u openshell-gateway\.service` says why/);
-});
-
-test("up on openshell: a CLI at another release, or none, stops up with the pinned download and pulls nothing (#707)", async () => {
-	for (const [answer, said] of [[{ code: 0, output: "openshell 0.1.5\n" }, /✗ OpenShell CLI 0\.1\.5 is not the tested release \(0\.1\.4\)/], ["enoent", /✗ OpenShell CLI not found/]]) {
-		const h = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, plan: openshellPlan({ "docker version": 0, "openshell --version": answer }), listening: false, argv: ["--yes"] });
-		assert.equal(await h.run(), 1);
-		assert.match(h.text(), said);
-		assert.match(h.text(), /install OpenShell 0\.1\.4 \(https:\/\/github\.com\/NVIDIA\/OpenShell\/releases\/tag\/v0\.1\.4\), the release this venue was measured on; up installs nothing/);
-		assert.ok(!h.calls.some((c) => c.cmd === "docker" && c.args[0] === "pull"));
-		assert.equal(h.initCalls.length, 0);
-	}
-});
-
-test("up on openshell: Windows is refused (no gateway ships for it), and openshell-bind prints the gateway's settings without editing them (#707)", async () => {
-	const win = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, plan: openshellPlan(), platform: "win32", listening: false, argv: ["--yes"] });
-	assert.equal(await win.run(), 1);
-	assert.match(win.text(), /ships no Windows build of its CLI or gateway/);
-	assert.ok(!win.calls.some((c) => c.cmd === "openshell"));
-	const bind = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell-bind" }, plan: openshellPlan({ "docker version": 0, "docker image inspect": 0, "docker volume create": 0, "docker run": 0 }), listening: false, argv: ["--yes"] });
-	assert.equal(await bind.run(), 0);
-	assert.match(bind.text(), /⚠ openshell-bind: the gateway must admit bind mounts, and up never edits its configuration[^\n]*\n {4}\[openshell\]\n {4}version = 2\n\n {4}\[openshell\.drivers\.docker\]\n {4}allow_driver_config = true\n {4}enable_bind_mounts = true\n/);
-});
-
-test("up reads PI_OPENSHELL_ENGINE from .env as the service does: a file value decides, an equal meaning agrees, a different one stops up (#707)", async () => {
-	const fromFile = harness({ env: { PI_PROVIDER: "anthropic" }, files: { "/deploy/.env": "PI_BACKENDS=openshell\nPI_OPENSHELL_ENGINE=podman\n" }, plan: openshellPlan({ "podman version": 1 }), listening: false, argv: ["--yes"] });
-	assert.equal(await fromFile.run(), 1);
-	assert.match(fromFile.text(), /✗ podman not responding \(PI_OPENSHELL_ENGINE=podman, the gateway's engine\)/, "the file's engine, not docker");
-	const agree = harness({ env: { PI_PROVIDER: "anthropic", PI_OPENSHELL_ENGINE: "" }, files: { "/deploy/.env": "PI_BACKENDS=openshell\nPI_OPENSHELL_ENGINE=docker\n" }, plan: openshellPlan({ "docker version": 1 }), listening: false });
-	assert.equal(await agree.run(), 1);
-	assert.match(agree.text(), /✗ docker not responding/, "empty and docker mean the same engine: no disagreement");
-	const differ = harness({ env: { PI_PROVIDER: "anthropic", PI_OPENSHELL_ENGINE: "docker" }, files: { "/deploy/.env": "PI_BACKENDS=openshell\nPI_OPENSHELL_ENGINE=podman\n" }, listening: false });
-	assert.equal(await differ.run(), 1);
-	assert.match(differ.text(), /PI_OPENSHELL_ENGINE is "docker" in this shell and "podman" in \/deploy\/\.env/);
-	assert.equal(differ.calls.length, 0);
-});
-
-test("up on openshell-bind with the podman engine stops with the worker's own boot refusal, having run nothing (#707)", async () => {
-	const h = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell-bind", PI_OPENSHELL_ENGINE: "podman" }, plan: openshellPlan(), listening: false, argv: ["--yes"] });
-	assert.equal(await h.run(), 1);
-	assert.match(h.text(), /✗ openshell-bind with PI_OPENSHELL_ENGINE=podman: the worker refuses this at boot/);
-	assert.equal(h.calls.length, 0);
-});
-
-test("up on openshell: no start is offered where there is nothing to start, a registered gateway is never registered beside, and a silent status read is bounded (#715 review)", async () => {
-	const down = { status: "error" };
-	// Linux: no user unit, so the fix, not a dead offer.
-	const noUnit = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify(down) }, "systemctl --user cat": { code: 1, stderr: "No files found for openshell-gateway.service.\n" } }), listening: false, argv: ["--yes"] });
-	assert.equal(await noUnit.run(), 1);
-	assert.match(noUnit.text(), /✗ the OpenShell gateway is not answering, and this user manager has no openshell-gateway\.service to start/);
-	assert.ok(!noUnit.calls.some((c) => c.cmd === "systemctl" && c.args[1] === "start"));
-	// macOS: homebrew-core's formula defines no service; the release formula is named.
-	const noBrew = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, platform: "darwin", plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify(down) }, "brew services info": 1 }), listening: false, argv: ["--yes"] });
-	assert.equal(await noBrew.run(), 1);
-	assert.match(noBrew.text(), /brew install https:\/\/github\.com\/NVIDIA\/OpenShell\/releases\/download\/v0\.1\.4\/openshell\.rb/);
-	assert.ok(!noBrew.calls.some((c) => c.cmd === "brew" && c.args[1] === "start"));
-	// Registered (a server named), not connected, the port answering: never registered over, exit 1 (M3).
-	const named = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify({ status: "error", server: "https://127.0.0.1:17670" }) } }), listening: true, argv: ["--yes"], extra: { probeTcp: async (_h, port) => port === 17670 } });
-	assert.equal(await named.run(), 1);
-	assert.match(named.text(), /does not answer as connected, while something listens on 127\.0\.0\.1:17670/);
-	assert.ok(!named.calls.some((c) => c.cmd === "openshell" && c.args[0] === "gateway" && c.args[1] === "add"));
-	// No server, but the list names one, or cannot be read: the command as a fix, never the offer.
-	for (const [list, said] of [[{ code: 0, output: JSON.stringify([{ name: "lab" }]) }, /has 1 gateway registered, none of which it reads connected as lab \(PI_OPENSHELL_GATEWAY\)/], [{ code: 2, output: "" }, /could not be read \(`openshell gateway list -o json`\)/]]) {
-		const h = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell", PI_OPENSHELL_GATEWAY: "lab" }, plan: openshellPlan({ "docker version": 0, "openshell --gateway lab status": { code: 0, output: JSON.stringify(down) }, "openshell --gateway lab --version": { code: 0, output: "openshell 0.1.4\n" }, "openshell gateway list": list }), listening: true, argv: ["--yes"], extra: { probeTcp: async (_h, port) => port === 17670 } });
-		assert.equal(await h.run(), 1);
-		assert.match(h.text(), said);
-		assert.match(h.text(), /openshell gateway add https:\/\/127\.0\.0\.1:17670 --local --name lab/, "the command, as a fix");
-		assert.equal(h.promptCalls.length, 0);
-		assert.ok(!h.calls.some((c) => c.cmd === "openshell" && c.args[1] === "add"));
-	}
-	// A status read that never finishes: killed at its bound, read as not answering.
-	const hang = harness({ env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" }, plan: openshellPlan({ "docker version": 0 }), listening: false, argv: ["--yes"] });
-	const real = hang.deps.spawn;
-	let killed = 0;
-	hang.deps.spawn = (cmd, args, opts) => {
-		if (cmd === "openshell" && args.includes("status")) return { stdout: { on() {} }, stderr: { on() {} }, on() { return this; }, kill() { killed++; } };
-		return real(cmd, args, opts);
-	};
-	const code = await runUp(["--yes"], { ...hang.deps, gatewayWaitMs: 1000, sleep: async () => {}, openshellReadTimeoutMs: 5 });
-	assert.equal(code, 1);
-	assert.ok(killed >= 1, "the silent read was killed, not waited on");
-});
-
-test("up on podman,openshell (docker engine): the podman venue's Quadlet Valkey is the queue, so no docker Valkey runs (#715 review)", async () => {
-	const h = harness({
-		env: { PI_PROVIDER: "anthropic", PI_BACKENDS: "podman,openshell", PI_EGRESS: "1" },
-		plan: openshellPlan({ "docker version": 0, "docker image inspect": CAPS, "podman image exists": 0, "podman inspect": 1, systemctl: 0, "loginctl show-user": { code: 0, output: "Linger=yes\n" } }),
-		listening: false,
-		argv: ["--yes"],
-		files: { "/deploy/egress-allowlist.conf": "x\n", "/deploy/deploy/egress-proxy.conf": "conf\n" },
-		extra: podmanExtra(),
-	});
-	await h.run();
-	assert.ok(!h.calls.some((c) => c.cmd === "docker" && c.args[0] === "run"), "no docker Valkey, and no docker run at all");
-	assert.ok(!h.calls.some((c) => c.cmd === "docker" && c.args[0] === "volume" && c.args[1] === "create"));
-	assert.ok(h.calls.some((c) => c.cmd === "systemctl" && c.args[1] === "start" && c.args.includes("pi-dispatch-valkey.service")), "the podman venue's Valkey");
-	assert.ok(h.calls.some((c) => c.cmd === "docker" && c.args[0] === "image" && c.args[1] === "inspect"), "the openshell image step still reads docker's store");
-});
-
-test("up compares the two openshell keys between this shell and .env only where an openshell venue is blessed (#715 review)", async () => {
-	const h = harness({ env: { PI_PROVIDER: "anthropic", PI_OPENSHELL_ENGINE: "docker" }, files: { "/deploy/.env": "PI_BACKENDS=local\nPI_OPENSHELL_ENGINE=podman\n" }, plan: green, argv: ["--yes"] });
-	await h.run();
-	assert.doesNotMatch(h.text(), /PI_OPENSHELL_ENGINE is "docker" in this shell/, "nothing here reads it");
-	assert.match(h.text(), /✓ Docker daemon reachable/, "the pass ran");
-});
-
-test("up on openshell: the gateway list's shapes, the poll's wall-clock deadline, a wedged engine and a shell with no user bus (#715 review round 2)", async () => {
-	const answering = { listening: true, extra: { probeTcp: async (_h, port) => port === 17670, sleep: async () => {} } };
-	const env = { PI_PROVIDER: "anthropic", PI_BACKENDS: "openshell" };
-	for (const [list, offered] of [["[]", true], [JSON.stringify({ gateways: [] }), true], ["{}", false], [JSON.stringify({ items: [] }), false], ["not json", false]]) {
-		const h = harness({ env, plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify({ status: "error" }) }, "openshell gateway list": { code: 0, output: list } }), answers: [""], ...answering });
-		assert.equal(await h.run(), 1);
-		assert.equal(h.promptCalls.length, offered ? 1 : 0, `${list}: ${offered ? "offered" : "refused"}`);
-		if (!offered) assert.match(h.text(), /could not be read \(`openshell gateway list -o json`\)/);
-	}
-	// The poll after a start ends at the wall-clock deadline, however many polls the count allows.
-	let clock = 0;
-	const slow = harness({ env, plan: openshellPlan({ "docker version": 0, "systemctl --user start": 0, "openshell status": () => ((clock += 10_000), { code: 0, output: JSON.stringify({ status: "error" }) }) }), listening: false, argv: ["--yes"], extra: { sleep: async () => {}, now: () => clock, gatewayWaitMs: 30_000 } });
-	assert.equal(await slow.run(), 1);
-	assert.ok(slow.calls.filter((c) => c.cmd === "openshell" && c.args.includes("status")).length <= 5, "about 30 s of 10 s reads, not thirty of them");
-	// A wedged engine: bounded and said.
-	const wedged = harness({ env, plan: openshellPlan(), listening: false, argv: ["--yes"] });
-	const real = wedged.deps.spawn;
-	wedged.deps.spawn = (cmd, args, opts) => (cmd === "docker" ? { stdout: { on() {} }, stderr: { on() {} }, on() { return this; }, kill() {} } : real(cmd, args, opts));
-	assert.equal(await runUp(["--yes"], { ...wedged.deps, openshellReadTimeoutMs: 5 }), 1);
-	assert.match(wedged.text(), /✗ docker did not answer `docker version` within 0 s/);
-	// No user bus: said as that, not as a missing unit.
-	const nobus = harness({ env, plan: openshellPlan({ "docker version": 0, "openshell status": { code: 0, output: JSON.stringify({ status: "error" }) }, "systemctl --user cat": { code: 1, stderr: "Failed to connect to bus: No medium found\n" } }), listening: false, argv: ["--yes"] });
-	assert.equal(await nobus.run(), 1);
-	assert.match(nobus.text(), /this shell reaches no user manager to ask for its unit/);
-	assert.doesNotMatch(nobus.text(), /has no openshell-gateway\.service/);
 });
 
 test("up's closing Next: offers the console as a service only where an operator token exists (#708)", async () => {

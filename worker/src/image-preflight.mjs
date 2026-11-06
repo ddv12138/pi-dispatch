@@ -61,15 +61,7 @@ export function resolveJobImage(job, defaultImage) {
  * `unavailable` and retry; if it comes up between them we report `missing` on an image that is genuinely
  * absent. Nothing is cached, deliberately -- see the note at the call site in start.mjs.
  */
-export function makeImagePreflight({ image, spawnFn = spawn, bin = "docker", copies = false, brokered = false }) {
-	// Issue #683: `copies` is the venue's, not the job's: a venue that copies the job's files into the box (`binds:
-	// false`, `openshell`) needs the `sandboxLayout` row below on EVERY job, and a binding venue never does. A boolean
-	// and nothing else, so a truthy string from a hand-built bundle cannot arm a gate it did not mean.
-	if (typeof copies !== "boolean") throw new TypeError("makeImagePreflight: `copies` must be a boolean");
-	// Issue #730: `brokered` is the venue's too: a venue whose every connection is mediated by a broker that reads the
-	// caller's memory (both OpenShell venues, copy and bind) needs the `observableRunner` row below on EVERY job. A
-	// boolean, for the same reason.
-	if (typeof brokered !== "boolean") throw new TypeError("makeImagePreflight: `brokered` must be a boolean");
+export function makeImagePreflight({ image, spawnFn = spawn, bin = "docker" }) {
 	// Issue #354: `bin` is the venue's CLI. Both probes go through it, because a `podman image inspect` answered by one
 	// store and an `info` answered by another daemon would tell "absent" from "unavailable" about two different hosts.
 	return async function imagePreflight(job, { subscriptionAuthRequired = false } = {}) {
@@ -113,7 +105,7 @@ export function makeImagePreflight({ image, spawnFn = spawn, bin = "docker", cop
 			// the job actually carries the feature it guards. The gates, their order and why each exists are
 			// the CAPABILITY_GATES table; the first one this job needs and the image lacks refuses.
 			for (const gate of CAPABILITY_GATES) {
-				if (gate.needed(job, { copies, brokered, subscriptionAuthRequired }) && !(capabilities ?? []).includes(gate.token)) {
+				if (gate.needed(job, { subscriptionAuthRequired }) && !(capabilities ?? []).includes(gate.token)) {
 					return { [gate.result]: wanted, declared: capabilities ?? [] };
 				}
 			}
@@ -134,8 +126,7 @@ export function makeImagePreflight({ image, spawnFn = spawn, bin = "docker", cop
  * row whose `needed(job)` holds and whose `token` the image does not declare, before any spend.
  *
  *   token    the capability the image must declare
- *   needed   whether this job carries the feature (a job that does not pays nothing for the row), given the job and
- *            the venue's `{ copies }` (issue #683: the one row a venue rather than a trigger arms)
+ *   needed   whether this job carries the feature (a job that does not pays nothing for the row), given the job
  *   result   the key the preflight result names the image under, which the processor branches on
  *   reason   the run record's reason for the refusal
  *   event    the worker log event
@@ -268,31 +259,6 @@ export const CAPABILITY_GATES = Object.freeze([	// REQ-REPLICA-RUNS: an image bu
 		event: "refused_image_steer_unsupported",
 		comment: (image, declared) => `Refused: the job image "${image}" does not declare support for receiving messages while it runs (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner would ignore \`run.steer\`. Rebuild the image from a version that has this feature. Not run.`,
 	}),
-	// Issue #683: on a venue that copies the job's files (`openshell`), a runner that predates PI_JOB_LAYOUT looks for
-	// /job, finds nothing in a sandbox whose files sit under /sandbox, and exits "missing job input" after the sandbox
-	// was made and the budget reserved; and without /opt/pi-dispatch/pi-landlock its /job would be writable by the
-	// agent. Armed by the VENUE, on every job there, never by a trigger, so a binding venue never reads the token.
-	Object.freeze({
-		token: "sandboxLayout",
-		needed: (_job, { copies } = {}) => copies === true,
-		result: "sandboxLayoutUnsupported",
-		reason: "job-image-sandbox-layout-unsupported",
-		event: "refused_image_sandbox_layout_unsupported",
-		comment: (image, declared) => `Refused: the job image "${image}" does not declare support for a venue that copies the job's files into its sandbox (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner would not find them, and could not keep the agent from rewriting them. Rebuild the image from a version that has this feature. Not run.`,
-	}),
-	// Issue #730: on a venue whose connections are mediated by a broker that must read the caller's memory (OpenShell,
-	// both modes), a runner started from the exec-only node cannot be read, so its own provider call and every tool's
-	// connection below it are refused: the job would reserve, start, and fail its first model call. An image that has
-	// the readable copy and the entrypoint that chooses it declares `observableRunner`. Armed by the VENUE, on every job
-	// there, never by a trigger.
-	Object.freeze({
-		token: "observableRunner",
-		needed: (_job, { brokered } = {}) => brokered === true,
-		result: "observableRunnerUnsupported",
-		reason: "job-image-observable-runner-unsupported",
-		event: "refused_image_observable_runner_unsupported",
-		comment: (image, declared) => `Refused: the job image "${image}" does not declare support for a venue whose sandbox must observe the runner to let it reach the network (\`dev.pi-dispatch.capabilities\` ${declared}), so the job could reach neither its model nor anything else. Rebuild the image from a version that has this feature. Not run.`,
-	}),
 	Object.freeze({
 		token: "fork",
 		needed: (job) => job?.fork !== undefined || job?.thinkingLevel !== undefined,
@@ -335,36 +301,6 @@ export const CAPABILITY_GATES = Object.freeze([	// REQ-REPLICA-RUNS: an image bu
  * image without it runs and is read exactly as before, under the #542 trust rule alone.
  */
 export const EXIT_AUTH_CAPABILITY = "exitAuth";
-
-/**
- * The capability an image declares when its runner mirrors the session file over stderr as records signed with the exit
- * key, on PI_TRANSCRIPT=stderr (issue #686, image/runner/src/transcript-mirror.mjs). NOT a gate, like `exitAuth`: no job
- * is refused for lacking it. On a venue that copies the job's files (`openshell`) it is what the live transcript, run
- * progress and the status comment come from; an image without it runs there without them (`live_transcript_skipped`,
- * reason `no-capability`). A binding venue never reads it.
- */
-export const TRANSCRIPT_STDERR_CAPABILITY = "transcriptStderr";
-
-/**
- * The capability an image declares when its runner reads steer messages as MAC'd frames on stdin, on
- * PI_EXIT_AUTH=stdin-frames (issue #686, image/runner/src/steer-frames.mjs): the key as frame 1, read before pi loads,
- * the stream moved off fd 0 so a tool child inherits /dev/null. NOT a gate, like `transcriptStderr`: `steer` stays the
- * gate a `run.steer` job needs. On a venue that copies the job's files (`openshell`) it is what steering comes over; an
- * image without it runs there unsteered (`steerSkipped: "venue-copies"`, as before it existed). A binding venue never
- * reads it: it keeps the read-only `/inbox` mount, which the agent cannot withdraw a message from.
- */
-export const STEER_STDIN_CAPABILITY = "steerStdin";
-
-/**
- * The capability an image declares when its runner reads PI_BUNDLE_ENV=1: a project secret bundle's plain variables
- * from `bundle-env.json` in the job directory into its own environment (issue #704 part 3, image/runner/src/
- * bundle-env.mjs). A gate on the OpenShell venues only, judged by their bundle gate rather than a CAPABILITY_GATES row
- * (the need is known only once the bundle is read, which is after those rows run): a job there that would carry plain
- * bundle variables on an image without it is refused before spend (`openshell-bundle-image-too-old`), since an older
- * runner would ignore the file and the job would run without them. Every other venue hands the values as env and never
- * reads it.
- */
-export const BUNDLE_ENV_FILE_CAPABILITY = "bundleEnvFile";
 
 /**
  * Exported so the test cannot drift from the format string above. `|` because an image id is

@@ -1,40 +1,27 @@
 /**
- * The native rootless `podman` venue's long-lived stack as Quadlet units (issue #430): Valkey, and while the egress
- * policy is armed the allowlist proxy on its named route-out network and the rootless network keeper (issue #458) on a
- * network of its own. ONE installer, used by both
- * `pi-dispatch service install` (user scope) and `pi-dispatch up`, on up.mjs's own doctrine that two ways of starting
- * one thing is two places for it to drift.
+ * What every command that touches the deployment's `.env` shares: the Valkey owner rule (issue #464), the hardened
+ * readers of the deployment `.env`'s keys (issue #447), the install journal and its rollback, and the user-manager
+ * environment refusals `service install` runs before it writes.
  *
- * Quadlet rather than `podman run --restart`: rootless Podman has no daemon to restart anything, so a container
- * started by hand is gone after a reboot. `podman-restart.service` could bring back `--restart=always` containers,
- * but it is a unit the operator would have to enable separately and it orders nothing; a Quadlet unit is a real
- * systemd user unit the worker's own unit can `Wants=`/`After=`. Measured on Fedora 44 with Podman 5.8.1:
- *   - `NetworkName=` and `ContainerName=` give exactly those names (no `systemd-` prefix), and `Network=X.network`
- *     resolves through the network file's `NetworkName=`.
- *   - `systemctl --user enable` REFUSES a generated unit ("transient or generated"); the generator reads the
- *     file's own `[Install] WantedBy=default.target` instead. So install is: write the files, daemon-reload,
- *     `systemctl --user start`. Never enable.
- *   - With linger on, the units were active 25 s after a reboot with nobody logged in; with linger off they did
- *     not start at all. Hence the linger read after every install.
- *   - `systemctl --user restart` of the proxy creates a NEW container (`--replace --rm`), and every per-job network
- *     the worker had connected to the old one is gone. New jobs connect at their start and are fine; see docs.
+ * The name is what is left of the Quadlet stack installer (`service install` and `up`'s shared installer, issues #430
+ * and #464), whose podman venue this release removes: the Valkey owner rule and the `.env` readers outlived it, and
+ * moving them would have broken every import for nothing.
  *
  * This module decides and describes; it spawns only through the `run` seam it is handed and writes only through the
  * `fs` seam, so `service` and `up` each keep their own spawn helpers and their own tests' fakes.
  */
 import { execFileSync } from "node:child_process";
 import { connect as netConnect } from "node:net";
-import { dirname, join } from "node:path";
-import { openshellSetupOf, venuesOf } from "./backends.mjs";
-import { DEFAULT_EGRESS_PROXY, egressProxyName } from "./egress.mjs";
-import { MODEL_ENDPOINTS_INCLUDE_NAME } from "./model-endpoints.mjs";
-import { VALKEY_PASSWORD_KEY, valkeyEnvFileText } from "./valkey-auth.mjs";
+import { join } from "node:path";
+import { DEFAULT_EGRESS_PROXY } from "./egress.mjs";
+import { VALKEY_PASSWORD_KEY } from "./valkey-auth.mjs";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envFileSystemdHazard, envFileValueLines, invisibleCharacter, quotedRegions, readEnvAssignments } from "./env-file.mjs";
-import { NETNS_KEEPER, NETNS_KEEPER_FORMAT, NETNS_KEEPER_NOW_FORMAT, STARTED_AT_FORMAT, NETNS_KEEPER_MIN_AGE_MS, NETNS_KEEPER_AFTER_PROXY_GRACE_MS, judgeNetnsKeeper, podmanNeedsNetnsKeeper, makeDetachGate, detachBlockedSentence, DETACH_GATE_READ_TIMEOUT_MS, DETACH_GATE_READ_MAX_BUFFER, runtimeFromFacts } from "./netns-keeper.mjs";
+import { NETNS_KEEPER } from "./netns-keeper.mjs";
 
-// The keeper's identity, its judge and the network detach gate live in the leaf `netns-keeper.mjs` (issue #452, gate
-// round 3), because `egress.mjs`, which this module imports, routes every detach through that gate. Re-exported here.
-export { NETNS_KEEPER, NETNS_KEEPER_FORMAT, NETNS_KEEPER_NOW_FORMAT, STARTED_AT_FORMAT, NETNS_KEEPER_MIN_AGE_MS, NETNS_KEEPER_AFTER_PROXY_GRACE_MS, judgeNetnsKeeper, podmanNeedsNetnsKeeper, makeDetachGate, detachBlockedSentence, DETACH_GATE_READ_TIMEOUT_MS, DETACH_GATE_READ_MAX_BUFFER, runtimeFromFacts };
+// The keeper's identity and its judge live in the leaf `netns-keeper.mjs` (issue #452, gate round 3), where
+// `egress.mjs` and the worker's egress preflight read the rest of that family directly. Re-exported here for doctor,
+// which has read the name from this module since it judged the podman venue.
+export { NETNS_KEEPER };
 
 /**
  * What to run for a keeper that does not hold: the proxy's restart when that is the damage the order rule cannot rule
@@ -53,104 +40,12 @@ export function proxyRestartAdvice(proxy) {
 }
 
 /**
- * The installer's hint (PR #463 round 3): a plan that starts the keeper for the first time or restarts it, while the
- * proxy is NOT in the plan (an operator's own PI_EGRESS_PROXY, or `up` leaving a running proxy alone), leaves a proxy up
- * since before the keeper, which the worker's order rule then answers with a retry and a request for the proxy's
- * restart. So both commands say it now, with the proxy's real name. `null` when nothing of that happened.
- */
-export function keeperUnderRunningProxyHint(plan, proxy, { keeperStarting = null } = {}) {
-	const keeper = plan.files?.find((f) => f.unit === QUADLET_FILES.keeper.unit);
-	if (!keeper) return null;
-	const restarted = (plan.restart ?? []).includes(keeper.unit);
-	// `keeperStarting`: a caller that knows the keeper was not running (`up` plans it only then) says so; otherwise a
-	// file the plan writes new, or a restart, is what moves it (a `start` over a running unit changes nothing).
-	if (!(keeperStarting ?? (keeper.state === "new" || restarted))) return null;
-	if ((plan.start ?? []).includes(QUADLET_FILES.proxy.unit)) return null;
-	return `${NETNS_KEEPER} was ${restarted ? "restarted" : "started"} while the egress proxy (${proxy}) is not part of this install: if it is running, ${proxyRestartAdvice(proxy)}; on Podman 4.x the worker retries every egress job, asking for exactly that, until the proxy has started after the keeper`;
-}
-
-/**
  * The start command every "the keeper is not holding" message names (doctor, the worker's preflight).
  */
 export const NETNS_KEEPER_START = `systemctl --user reset-failed ${NETNS_KEEPER}-network.service ${NETNS_KEEPER}.service; systemctl --user restart ${NETNS_KEEPER}-network.service ${NETNS_KEEPER}.service`;
 
-/**
- * The Quadlet files, in the order they are shown and written. `unit` is the service the generator makes of each; the
- * networks' units are pulled in by the containers' own `Requires=` (Quadlet adds it for `Network=X.network`), so only
- * the container services are ever started by name.
- */
-export const QUADLET_FILES = Object.freeze({
-	valkeyNetwork: Object.freeze({ file: "pi-dispatch-valkey.network", unit: "pi-dispatch-valkey-network.service" }),
-	valkey: Object.freeze({ file: "pi-dispatch-valkey.container", unit: "pi-dispatch-valkey.service", container: "pi-dispatch-valkey" }),
-	egressNetwork: Object.freeze({ file: "pi-dispatch-egress-out.network", unit: "pi-dispatch-egress-out-network.service" }),
-	proxy: Object.freeze({ file: "pi-dispatch-egress-proxy.container", unit: "pi-dispatch-egress-proxy.service", container: DEFAULT_EGRESS_PROXY }),
-	keeperNetwork: Object.freeze({ file: `${NETNS_KEEPER}.network`, unit: `${NETNS_KEEPER}-network.service` }),
-	keeper: Object.freeze({ file: `${NETNS_KEEPER}.container`, unit: `${NETNS_KEEPER}.service`, container: NETNS_KEEPER }),
-});
-
-/** Every Quadlet file this project ships, for uninstall and status, which act on what exists rather than on a plan. */
-export const ALL_QUADLET_FILES = Object.freeze(Object.values(QUADLET_FILES));
-
-/** The three placeholders the proxy's template carries, and what each becomes (TEMPLATE_PINS in service.mjs pins them). */
-export const PROXY_CONF_PLACEHOLDER = "/opt/pi-dispatch/deploy/egress-proxy.conf";
-export const ALLOWLIST_PLACEHOLDER = "/opt/pi-dispatch/egress-allowlist.conf";
-/**
- * The declared model endpoints' rules (issue #503): the deployment folder's own `model-endpoints.conf`, mounted
- * directly as the allowlist is, never copied like the rules are. `pi-dispatch egress render` rewrites that file in
- * place and the proxy's reload reads the mounted inode, so a copy here would be a file the render never wrote. The
- * rules are copied only because `z` cannot relabel a root-owned package file; this one is the operator's, as the
- * allowlist is.
- */
-export const MODEL_ENDPOINTS_PLACEHOLDER = "/opt/pi-dispatch/model-endpoints.conf";
-
-/**
- * Where the proxy's RULES are mounted from: an account-owned COPY of the package's `egress-proxy.conf`, never the
- * package file itself (issue #430 review round 2, E1). The mount carries `z`, which relabels the file, and rootless
- * Podman cannot relabel a file this account does not own: measured on Fedora 44 with the package installed by
- * `sudo npm i -g` under /usr/local/lib/node_modules, the unit failed with `lsetxattr ... operation not permitted`,
- * exit 126. A copy under this account's own config directory can always be relabelled, and is written, compared and
- * forced exactly like the Quadlet files (a planned write, shown before it happens). Not the deployment folder: that
- * is the operator's and may be shared with another account; this file belongs to the account whose Podman mounts it.
- */
-export function proxyConfCopyPath(home) {
-	return join(home, ".config", "pi-dispatch", "egress-proxy.conf");
-}
-
-/**
- * The file the Quadlet Valkey reads its password from (issue #468): `EnvironmentFile=%h/.config/pi-dispatch/valkey.env`
- * in the shipped unit, so the template needs no rewrite, and systemd expands `%h` to this account's home in both lines
- * Quadlet generates from it (measured on Podman 5.8.1 and 4.9.3). Mode 0600: it holds the password. Written, compared
- * and restarted-for like the proxy's rules copy, never printed (`service render` names it only).
- */
-export function valkeyEnvPath(home) {
-	return join(home, ".config", "pi-dispatch", "valkey.env");
-}
-
-/** The mode of `valkeyEnvPath`: this account alone may read it. */
-export const VALKEY_ENV_MODE = 0o600;
-
-/**
- * Where the user's Quadlet files live. ALWAYS `~/.config/containers/systemd`, deliberately not `$XDG_CONFIG_HOME`
- * from this shell: the generator runs in the user MANAGER's environment, which usually has no XDG_CONFIG_HOME at
- * all, so a shell that exports one would put the files where the generator never looks, and install would report a
- * start failure for units that simply do not exist.
- */
-export function quadletDir(home) {
-	return join(home, ".config", "containers", "systemd");
-}
-
-/**
- * Characters a path may not carry into a Quadlet `Volume=`. Each is a real parse on the way to `podman run`: `:`
- * splits the volume spec itself; whitespace splits the `RequiresMountsFor=` list Quadlet adds for every absolute
- * source; `%` is a systemd specifier there; `$` is expanded by systemd in the generated `ExecStart=` (`${X}` and
- * `$X` alike); quotes and backslashes are systemd's quoting; control bytes end the line.
- * Refused rather than escaped: none of the escapes was measured, and a unit that fails at boot is the worst place to
- * find out.
- */
-const UNSAFE_VOLUME_PATH = /[:\s%$"'\\\x00-\x1f\x7f]/;
-
-/** The port the Quadlet Valkey publishes on 127.0.0.1 when VALKEY_URL names none (the template's own). */
-export const DEFAULT_VALKEY_PORT = 6379;
+/** The port the Quadlet Valkey published on 127.0.0.1 when VALKEY_URL names none. */
+const DEFAULT_VALKEY_PORT = 6379;
 
 /** The opt-in, in the deployment `.env`, that lets a Valkey another uid holds be this deployment's queue (issue #464). */
 export const VALKEY_SHARED_KEY = "PI_VALKEY_SHARED";
@@ -240,7 +135,7 @@ function addressOf(address) {
  * `00000000000000000000000001000000`, ::ffff:127.0.0.1 is `0000000000000000FFFF00000100007F` (measured on Fedora 44
  * and Ubuntu 24.04, both aarch64).
  */
-export function procNetHex(bytes) {
+function procNetHex(bytes) {
 	let hex = "";
 	for (let i = 0; i < bytes.length; i += 4) {
 		for (const b of bytes.slice(i, i + 4).reverse()) hex += b.toString(16).toUpperCase().padStart(2, "0");
@@ -264,7 +159,7 @@ function hostPort(address, port) {
  * container's or docker-proxy's a socket of root; every account can read both files, where `ss -p` names the process
  * only for the caller's own sockets.
  */
-export function listenerUids(address, port, fs) {
+function listenerUids(address, port, fs) {
 	const at = addressOf(address);
 	if (!at) return { error: `${address} is not an IP address` };
 	const hexPort = port.toString(16).toUpperCase().padStart(4, "0");
@@ -299,7 +194,7 @@ export function listenerUids(address, port, fs) {
  * `user` or by `euid` (issue #464). A container run with `--network host` publishes from a socket owned by one of these,
  * not by the account (measured: subuid 1467000998 for a valkey container of uid 1467). `[]` when the file cannot be read.
  */
-export function subordinateUids(fs, { user, euid }) {
+function subordinateUids(fs, { user, euid }) {
 	let text;
 	try {
 		text = String(fs.readFileSync("/etc/subuid", "utf8"));
@@ -390,7 +285,7 @@ function isThisHost(address, interfaces) {
  * 44: `redis://0.0.0.0:16483` reached another account's 127.0.0.1:16483), an IPv4-mapped address its IPv4 form, and
  * any other address itself. This is what is probed, judged and pinned.
  */
-export function reachedAddress(address) {
+function reachedAddress(address) {
 	const at = addressOf(address);
 	if (!at) return String(address);
 	if (at.family === 4) return at.bytes[0] === 0 ? "127.0.0.1" : at.bytes.join(".");
@@ -427,8 +322,8 @@ function lookupWithin(lookup, host, timeoutMs) {
  *     publishing a port, while the pinned client cannot reach it;
  *   - else, with `shared` (PI_VALKEY_SHARED=1, read from the deployment `.env` only), the first answering address;
  *   - else nothing is chosen, and `refusal` names the owners of the answering addresses and both ways out.
- * Nothing answering chooses nothing and refuses nothing: the caller decides (install adds a Quadlet Valkey; the worker
- * waits, then retries through its service manager).
+ * Nothing answering chooses nothing and refuses nothing: the caller decides (the worker waits, then retries through
+ * its service manager).
  *
  * Returns `{ error }` for a value that is not a redis URL, `{ remote: host }` when none of its addresses is this host's,
  * else `{ host, port, addresses, answered: [{ address, uids, own }], chosen, refusal, heldBy, own, elsewhere }`.
@@ -539,52 +434,11 @@ export function pinnedValkeyUrl(url, address) {
 }
 
 /**
- * Whether the podman venue's stack adds its Valkey, and on which port (issue #464, and #430 before it). Returns
- * `{ include, port, notes, refusal, error? }`. The rule, on `judgeValkeyListeners`' verdict:
- *   - `local` blessed: never (docker's Valkey is the queue, as before).
- *   - VALKEY_URL on another host: never, and said.
- *   - a refusal (no answering address is this account's, and no PI_VALKEY_SHARED=1): refused, whether or not our Quadlet
- *     Valkey is installed. Not forceable: the way out is a port of this account's own, or the named opt-in.
- *   - our Quadlet Valkey already installed: kept (and republished on VALKEY_URL's port) while what the worker will use
- *     is this account's; a shared Valkey taken with the opt-in is the queue instead.
- *   - nothing answers: added, published on 127.0.0.1 at that port, when VALKEY_URL reaches 127.0.0.1 (an `[::1]` or
- *     interface-address URL would not reach it, which is an error naming the fix).
- *   - this account's listener (or a shared one, opted in): taken to be the queue, as `up` always did, and named, with
- *     any other account's listener on another address of the name said too (the worker never dials it).
- */
-export async function decideValkey({ venues, url, installed, probeTcp, lookup, euid, user = null, shared = false, fs, ownerName = () => null, interfaces = () => ({}), envPath = ".env", subuids = null }) {
-	const notes = [];
-	if (venues.localUsed) return { include: false, port: DEFAULT_VALKEY_PORT, notes, refusal: null };
-	const verdict = await judgeValkeyListeners({ url, probeTcp, lookup, fs, euid, user, shared, ownerName, interfaces, envPath, subuids });
-	if (verdict.error) return { include: false, port: DEFAULT_VALKEY_PORT, notes, refusal: null, error: `${envPath}: ${verdict.error}` };
-	if (verdict.unresolved) return { include: false, port: DEFAULT_VALKEY_PORT, notes, refusal: null, error: `VALKEY_URL's host ${verdict.unresolved} did not resolve here (${verdict.why}), so whose Valkey it reaches cannot be judged. Retry when it resolves, or write the address` };
-	if (verdict.remote) {
-		notes.push(`VALKEY_URL names ${verdict.remote}, not this host, so no Valkey is added here`);
-		return { include: false, port: DEFAULT_VALKEY_PORT, notes, refusal: null, remote: true };
-	}
-	const { port } = verdict;
-	if (verdict.refusal) return { include: false, port, notes, refusal: verdict.refusal };
-	for (const other of verdict.elsewhere) notes.push(`another account also listens on an address VALKEY_URL's host resolves to: ${other}. The worker connects only to the address judged this account's, so it never reaches that one`);
-	if (verdict.chosen === null || (installed && verdict.own)) {
-		if (!verdict.addresses.includes("127.0.0.1")) {
-			// Said as what it is (gate round 2): a literal is itself, or the loopback an unspecified one reaches, and only a name
-			// "resolves" to something.
-			const literal = addressOf(verdict.host) !== null;
-			const is = !literal ? `resolves to ${verdict.addresses.join(", ")} here` : verdict.addresses[0] === verdict.host ? `is ${verdict.host}` : `is ${verdict.host}, which reaches ${verdict.addresses[0]}`;
-			return { include: false, port, notes, refusal: null, error: `${envPath}: VALKEY_URL's host ${is}, not 127.0.0.1, and the Quadlet Valkey is published on 127.0.0.1 only, so the worker would not reach it. Write VALKEY_URL=redis://127.0.0.1:${port}` };
-		}
-		return { include: true, port, notes, refusal: null };
-	}
-	notes.push(`something already listens on ${hostPort(verdict.chosen, port)}, held by ${verdict.heldBy}, so no Valkey is added for it: that listener is taken to be your Valkey, as \`up\` does`);
-	return { include: false, port, notes, refusal: null, chosen: verdict.chosen };
-}
-
-/**
  * The worker's own Valkey endpoint, judged at boot by `judgeValkeyListeners` (issue #464, gate round 2): the owner rule
  * where the connection is made, so a VALKEY_URL edited after `service install` refused it, a 0.0.0.0 URL, or another
  * account publishing on ::1 after the install cannot hand this account's jobs to someone else's queue.
  *
- * Only on the podman venue without `local`, on Linux (where /proc names the owner), as install, `up` and doctor judge
+ * Judged on Linux (where /proc names the owner), as install, `up` and doctor judge
  * it: docker's Valkey is the queue wherever `local` is blessed, published by root's docker-proxy. PI_VALKEY_SHARED is
  * read from the deployment `.env` (`envText`) only; one in the worker's environment but not the file is ignored, and
  * said. Returns `{ url, servername, pinned, notes }` (the URL unchanged, pinned null, when nothing is judged), or throws:
@@ -592,11 +446,11 @@ export async function decideValkey({ venues, url, installed, probeTcp, lookup, e
  * nothing answers within `waitMs`, since then no owner can be judged and the Valkey may still be starting.
  */
 export async function resolveWorkerValkey({ url, venues, platform, env, envText, envPath, probeTcp, lookup, fs, euid, user, ownerName, interfaces, subuids, waitMs = 20_000, sleep = (ms) => new Promise((r) => setTimeout(r, ms)), now = () => Date.now(), configError: refuse }) {
-	// Gate round 3: judged on EVERY venue on Linux, not only podman's. Another account's listener is refused everywhere
-	// (item 7: a local-venue worker silently adopted another account's rootless Valkey); root's (docker-proxy) is refused
-	// only where the podman venue is this deployment's and `local` is not, or (issue #707, review round 1 of #715) where an
-	// openshell venue on Podman is the queue's engine (`openshellSetupOf`), whose Quadlet Valkey is this account's too.
-	const rootRefused = (venues.podmanUsed && !venues.localUsed) || openshellSetupOf(venues, env).valkeyEngine === "podman";
+	// Gate round 3: judged on EVERY venue on Linux. Another account's listener is refused everywhere
+	// (item 7: a local-venue worker silently adopted another account's rootless Valkey); root's (docker-proxy) listener is
+	// the deployment's own docker Valkey, published by docker-proxy, so it is accepted. The parameter `venues` stays for
+	// the callers' shape, but with the table holding `local` alone nothing refuses root's listener any more.
+	const rootRefused = false;
 	const same = { url, servername: null, pinned: null, notes: [], rootRefused };
 	if (platform !== "linux") return same;
 	const notes = [];
@@ -657,228 +511,11 @@ export function probeTcpAddress(host, port, timeoutMs = 1500) {
 }
 
 /**
- * What the stack for this deployment should hold, and why each part is or is not in it. Pure: every fact is a
- * parameter, so `service` and `up` can each answer "is it listening" and "is it already installed" their own way
- * and get the same rule.
- *
- *   valkey   only where `local` is NOT blessed. With `local` in the list, docker is on this host and its Valkey
- *            (compose, or up's docker step) is the queue, as it always was; a second Valkey on the same port would
- *            only fail to bind. Then `includeValkey` (the caller's own "listening / already installed" answer).
- *   proxy    only while the egress policy is armed, and only under the default name. A PI_EGRESS_PROXY naming
- *            another container is the operator's own proxy: a Quadlet of that name would `podman run --replace`
- *            it away, so it is left alone and the reason is said.
- *   keeper   whenever the egress policy is armed (issue #458), WHATEVER the proxy's name: the worker disconnects the
- *            proxy from every egress job's network, an operator's own proxy as much as ours, and that disconnect is
- *            what Podman 4.9 turns into a dead route out. On every Podman version, since on 5.x it is one idle
- *            container (measured harmless on 5.8.1), and a rule with no version read in it cannot misread one.
- */
-export function stackComponents({ venues, env, includeValkey, armed, valkeyPort = DEFAULT_VALKEY_PORT, valkeyPassword = null }) {
-	const notes = [];
-	const valkey = !venues.localUsed && includeValkey;
-	const keeper = armed === true;
-	let proxy = false;
-	if (armed) {
-		const name = egressProxyName(env);
-		if (name === DEFAULT_EGRESS_PROXY) proxy = true;
-		else notes.push(`PI_EGRESS_PROXY names ${name}, your own proxy: the shipped ${DEFAULT_EGRESS_PROXY} unit is not installed for it, because its \`--replace\` would remove any container of that name. Keep ${name} running under this account's Podman yourself`);
-	}
-	// Issue #468: the password the Quadlet Valkey starts with (null for none, which starts it without one, as before).
-	return { valkey, proxy, keeper, notes, valkeyPort, valkeyPassword: valkey ? valkeyPassword : null };
-}
-
-/**
- * The files and commands for `components`, rendered from the shipped templates (`readTemplate(name)`, separate from
- * `fs` because the templates are the PACKAGE's files while `fs` is the host's, and a caller's fake of the one is not a
- * fake of the other). Returns `{ error }` for a path the
- * proxy's mounts cannot carry, else `{ dir, files: [{ path, text, unit, state }], start: [units], actions }`, where
- * `state` is "new", "same" or "changed" against what is on disk, and `actions` is exactly what `applyStack` does,
- * in order: the caller shows these lines, and a test holds the two equal.
- */
-export function planStack({ components, templatesDir, deployDir, home, fs, readTemplate = (name) => fs.readFileSync(join(templatesDir, name), "utf8"), restartUnits = [], restartAfterValkey = [] }) {
-	const dir = quadletDir(home);
-	const picked = [];
-	if (components.valkey) picked.push(QUADLET_FILES.valkeyNetwork, QUADLET_FILES.valkey);
-	if (components.proxy) picked.push(QUADLET_FILES.egressNetwork, QUADLET_FILES.proxy);
-	if (components.keeper) picked.push(QUADLET_FILES.keeperNetwork, QUADLET_FILES.keeper);
-	const conf = proxyConfCopyPath(home);
-	const allowlist = join(deployDir, "egress-allowlist.conf");
-	const endpointsInclude = join(deployDir, MODEL_ENDPOINTS_INCLUDE_NAME);
-	if (components.proxy) {
-		for (const p of [conf, allowlist, endpointsInclude]) {
-			if (UNSAFE_VOLUME_PATH.test(p)) {
-				return { error: `the egress proxy's Quadlet unit would mount ${JSON.stringify(p)}, and a Quadlet Volume= cannot carry a colon, whitespace, %, $, a quote, a backslash or a control byte in a path (each is split or expanded on the way to podman run). Move the deployment folder, or start the proxy by hand (docs/podman.md)` };
-			}
-		}
-	}
-	const files = picked.map(({ file, unit }) => {
-		let text = String(readTemplate(file));
-		if (file === QUADLET_FILES.proxy.file) {
-			// Function replacements: a computed path is the REPLACEMENT, and String.replace reads `$&` out of a string one.
-			text = text
-				.replace(`Volume=${PROXY_CONF_PLACEHOLDER}:`, () => `Volume=${conf}:`)
-				.replace(`Volume=${ALLOWLIST_PLACEHOLDER}:`, () => `Volume=${allowlist}:`)
-				.replace(`Volume=${MODEL_ENDPOINTS_PLACEHOLDER}:`, () => `Volume=${endpointsInclude}:`);
-		}
-		if (file === QUADLET_FILES.valkey.file && Number.isInteger(components.valkeyPort) && components.valkeyPort !== DEFAULT_VALKEY_PORT) {
-			// Issue #464: VALKEY_URL's loopback port, where this account's own Valkey is published (the container still
-			// listens on 6379 inside). The template's line is pinned (TEMPLATE_PINS), so this replacement always lands.
-			text = text.replace(`PublishPort=127.0.0.1:${DEFAULT_VALKEY_PORT}:6379`, () => `PublishPort=127.0.0.1:${components.valkeyPort}:6379`);
-		}
-		const path = join(dir, file);
-		let state = "new";
-		if (fs.existsSync(path)) {
-			let current = null;
-			try {
-				current = String(fs.readFileSync(path, "utf8"));
-			} catch {
-				// Unreadable reads as changed: the write below is then what tells the operator.
-			}
-			state = current === text ? "same" : "changed";
-		}
-		// `restarts`: the unit a CHANGE to this file must restart. A .container file restarts its own unit; a .network file
-		// restarts nothing, because its unit runs `podman network create --ignore`, which cannot change an existing
-		// network, so restarting the container over it would cost the proxy's per-job networks and apply nothing.
-		return { path, text, unit, state, restarts: file.endsWith(".container") ? unit : null };
-	});
-	if (components.proxy) {
-		// The account-owned copy of the rules (E1), placed before the proxy's unit so it exists when the unit starts.
-		// squid reads it only at start, so a changed copy restarts the proxy, as a changed unit file does.
-		const text = String(readTemplate("egress-proxy.conf"));
-		let state = "new";
-		if (fs.existsSync(conf)) {
-			let current = null;
-			try {
-				current = String(fs.readFileSync(conf, "utf8"));
-			} catch {
-				// Unreadable reads as changed, as for the unit files.
-			}
-			state = current === text ? "same" : "changed";
-		}
-		files.splice(files.findIndex((f) => f.unit === QUADLET_FILES.proxy.unit), 0, { path: conf, text, unit: null, state, restarts: QUADLET_FILES.proxy.unit, kind: "conf" });
-	}
-	if (components.valkey) {
-		// Issue #468: the Valkey's password file, placed before its unit so it exists when the unit starts (its
-		// EnvironmentFile= is not optional). Valkey reads the password only at start, so a changed file restarts it, as a
-		// changed unit file does; the volume, and the queue in it, is kept across that restart. A file readable by anyone
-		// else counts as changed, so the write puts its mode back to 0600.
-		const path = valkeyEnvPath(home);
-		const text = valkeyEnvFileText(components.valkeyPassword);
-		let state = "new";
-		if (fs.existsSync(path)) {
-			let current = null;
-			let wide = false;
-			try {
-				current = String(fs.readFileSync(path, "utf8"));
-				wide = typeof fs.statSync === "function" && (fs.statSync(path).mode & 0o077) !== 0;
-			} catch {
-				// Unreadable reads as changed, as for the unit files.
-			}
-			state = current === text && !wide ? "same" : "changed";
-		}
-		files.splice(files.findIndex((f) => f.unit === QUADLET_FILES.valkey.unit), 0, { path, text, unit: null, state, restarts: QUADLET_FILES.valkey.unit, kind: "secret", mode: VALKEY_ENV_MODE });
-	}
-	const containers = files.filter((f) => f.path.endsWith(".container"));
-	const start = containers.map((f) => f.unit);
-	// A unit whose file changed is RESTARTED, not started: `start` on an active unit is a no-op, so a replaced file
-	// would otherwise change nothing until the next reboot while the command said it was done.
-	// `restartUnits`: units the caller knows are up but wrong with their files unchanged (PR #463 round 2: `up` meeting a
-	// Quadlet keeper that does not hold, a paused one say), where `start` would be the same no-op.
-	const restart = start.filter((u) => restartUnits.includes(u) || files.some((f) => f.state === "changed" && f.restarts === u));
-	// A keeper (re)started under a proxy that stays up is what the worker and doctor read as possible damage (issue #458,
-	// PR #463 round 2): a teardown while it was down cuts the proxy's route out for good, nothing outside shows it, so
-	// both ask for a proxy restart whenever the keeper started more than the grace (15 s) after the proxy. So a plan that
-	// restarts the keeper, or starts it beside a proxy whose unit file it leaves as it was (an upgrade: that proxy has
-	// been up all along), restarts the proxy with it. Both files new is a first install: both start together.
-	const keeperFile = files.find((f) => f.unit === QUADLET_FILES.keeper.unit);
-	const proxyFile = files.find((f) => f.unit === QUADLET_FILES.proxy.unit);
-	const keeperMoves = keeperFile && (restart.includes(keeperFile.unit) || keeperFile.state === "new");
-	if (keeperMoves && proxyFile && proxyFile.state === "same" && !restart.includes(proxyFile.unit)) restart.push(proxyFile.unit);
-	const fresh = start.filter((u) => !restart.includes(u));
-	const actions = [];
-	for (const f of files) if (f.state !== "same") actions.push({ kind: "write", path: f.path });
-	if (files.length > 0) {
-		// daemon-reload even when every file is unchanged: a file written by an earlier run that failed before its own
-		// reload is otherwise invisible to the manager, and the reload is idempotent.
-		actions.push({ kind: "run", argv: ["systemctl", "--user", "daemon-reload"] });
-		if (fresh.length > 0) actions.push({ kind: "run", argv: ["systemctl", "--user", "start", ...fresh] });
-		if (restart.length > 0) actions.push({ kind: "run", argv: ["systemctl", "--user", "restart", ...restart] });
-	}
-	// Issue #468: a Valkey whose password this plan changes (a first password for a deployment that had none, most often)
-	// is one every running client of it can no longer talk to, since the worker and the receiver read VALKEY_PASSWORD at
-	// start. `restartAfterValkey` names those the caller found running; they are restarted after it (`try-restart`: one
-	// that stopped meanwhile stays stopped). A worker restart lets its in-flight job finish first (its SIGTERM drain).
-	const secret = files.find((f) => f.kind === "secret");
-	const clients = secret && secret.state !== "same" ? restartAfterValkey : [];
-	if (clients.length > 0) actions.push({ kind: "run", argv: ["systemctl", "--user", "try-restart", ...clients] });
-	return { dir, files, start, restart, actions, clientsRestarted: clients };
-}
-
-/**
- * What a plan that sets Valkey's password costs, said wherever one does (issue #468): the Valkey restart, and the running
- * clients restarted after it. Null when the plan leaves the password file as it is.
- */
-export function valkeyPasswordRestartWarning(plan) {
-	const secret = plan.files?.find((f) => f.kind === "secret");
-	if (!secret || secret.state === "same") return null;
-	const valkeyMoves = (plan.restart ?? []).includes(QUADLET_FILES.valkey.unit);
-	if (!valkeyMoves) return null;
-	const clients = plan.clientsRestarted ?? [];
-	return `${QUADLET_FILES.valkey.unit} restarts with the password in ${secret.path} (the queue in its volume is kept)${clients.length > 0 ? `, and ${clients.join(" and ")} ${clients.length === 1 ? "restarts" : "restart"} after it to send that password` : ""}. A job running right now is interrupted: pause first if one is (pi-dispatch pause, wait for active jobs, then pi-dispatch resume)`;
-}
-
-/** The measured cost of restarting the proxy, said wherever a plan restarts it. */
-export function proxyRestartWarning(plan) {
-	if (!plan.restart?.includes(QUADLET_FILES.proxy.unit)) return null;
-	return `restarting ${QUADLET_FILES.proxy.unit} makes a NEW proxy container (measured: the unit runs podman run --replace --rm), so a job running right now loses its only route out for the rest of that run. Pause first if one is (pi-dispatch pause, wait for active jobs, then pi-dispatch resume)`;
-}
-
-/**
- * Containers this plan would REPLACE without owning them (issue #430 review). A Quadlet container unit runs
- * `podman run --replace`, which removes any container of the same name, running or not: a proxy started by hand from
- * docs/podman.md, with every job's per-job network on it, would vanish without a word. One rule for both commands and
- * both containers: a container of the unit's name that does not carry the `PODMAN_SYSTEMD_UNIT` label naming OUR unit
- * is someone else's, and the caller refuses unless told to replace it. Podman labels a container with the unit
- * that started it from the `PODMAN_SYSTEMD_UNIT` variable the generated unit sets (the auto-update mechanism reads
- * the same label).
- *
- * `runQuery(cmd, args)` resolves `{ code, stdout, stderr }`, the two streams SEPARATE (round 2, E2): podman prints
- * warnings on stderr on an ordinary account ("cgroupv2 manager is set to systemd but there is no systemd user session
- * available", "/ is not a shared mount"), and a merged capture made our own containers read as foreign. Only stdout
- * is the label.
- *
- * FAILS CLOSED (round 2, E3). podman exits 125 for a container that does not exist AND for a store it cannot open
- * ("database is locked"), so a non-zero exit is "absent" only when stderr says no such container or object; any other
- * failure means the state is not known, and a caller must not run a `--replace` into it.
- *
- * Returns `{ found: [{ container, unit, label }], unknown: [{ container, detail }] }`.
- */
-export async function foreignContainers(plan, runQuery) {
-	const found = [];
-	const unknown = [];
-	for (const q of [QUADLET_FILES.valkey, QUADLET_FILES.proxy, QUADLET_FILES.keeper]) {
-		if (!plan.start.includes(q.unit)) continue;
-		const res = await runQuery("podman", ["container", "inspect", "--format", '{{index .Config.Labels "PODMAN_SYSTEMD_UNIT"}}', q.container]);
-		if (res.code === 0) {
-			const label = String(res.stdout ?? "").trim();
-			if (label !== q.unit) found.push({ container: q.container, unit: q.unit, label });
-			continue;
-		}
-		if (res.code !== null && /no such (container|object)/i.test(String(res.stderr ?? ""))) continue;
-		unknown.push({ container: q.container, detail: res.code === null ? "podman could not be run" : `podman container inspect exited ${res.code} without saying the container does not exist` });
-	}
-	return { found, unknown };
-}
-
-/** The refusal for containers whose state could not be read. Not forceable: `--replace` into an unknown is a guess. */
-export function unknownContainerRefusal(unknown) {
-	return `whether ${unknown.map((u) => u.container).join(" and ")} already ${unknown.length === 1 ? "exists" : "exist"} could not be read (${unknown.map((u) => u.detail).join("; ")}). The unit's podman run --replace would remove whatever is there, so nothing is installed until podman answers: check \`podman ps -a\` as this account, then re-run`;
-}
-
 /**
  * The refusal when this process cannot reach its own user manager (round 2, E8, measured). `sudo -iu <account>` is the
  * natural way to act as a dedicated account and gives neither XDG_RUNTIME_DIR nor a session bus, so every
  * `systemctl --user` fails with "Failed to connect to user scope bus"; checked BEFORE anything is written, so a
- * refused run leaves no Quadlet file behind that nothing loaded. `null` when either is set.
+ * refused run leaves no unit file behind that nothing loaded. `null` when either is set.
  */
 export function userBusRefusal({ env, user, euid }) {
 	// env-internal XDG_RUNTIME_DIR, DBUS_SESSION_BUS_ADDRESS: how systemctl --user finds the user manager; set by a login.
@@ -888,23 +525,30 @@ export function userBusRefusal({ env, user, euid }) {
 }
 
 /**
- * The user MANAGER's own environment, read before anything is written (PR #463 round 3, measured). Every Quadlet unit
- * this installer starts, and the worker unit, runs with the manager's environment, and the Quadlet generator reads its
- * unit files from the manager's XDG_CONFIG_HOME. On a host whose /etc/environment names another account's
+ * The user MANAGER's own environment, read before anything is written (PR #463 round 3, measured). The units
+ * `service install` writes run with the manager's environment, and the user MANAGER reads its unit files from its own
+ * XDG_CONFIG_HOME. On a host whose /etc/environment names another account's
  * XDG_RUNTIME_DIR or XDG_CONFIG_HOME (Ubuntu's user managers read /etc/environment through environment.d; a GitHub
  * runner image writes both), measured on Podman 4.9.3: the generator looked in the other home and the units were "not
  * found" (exit 5), and with that fixed, every podman command in a unit failed "XDG_RUNTIME_DIR directory
- * \"/run/user/1001\" is not owned by the current user". This installer writes to ~/.config/containers/systemd (see
- * `quadletDir`), so either value being another account's makes a stack that cannot start. `read` is
+ * \"/run/user/1001\" is not owned by the current user". Either value being another account's makes an install that
+ * cannot start. `read` is
  * `systemctl --user show-environment`'s `{ code, stdout }`; `null` when both are this account's own or unset.
  * A manager that did not answer is left to the commands that follow, whose failures are said already.
  */
+/**
+ * Where the user's Quadlet files lived, `~/.config/containers/systemd`, kept only because the refusal sentence below
+ * still names it (the message's only consumer reads the return as a boolean, never the text).
+ */
+function quadletDir(home) {
+	return join(home, ".config", "containers", "systemd");
+}
 /**
  * One value as `systemctl --user show-environment` prints it (PR #463 round 3): plain when it needs no quoting, else
  * shell-quoted as `$'...'` with C escapes (systemd's shell_maybe_quote with ESCAPE_POSIX), so a home with a space reads
  * `XDG_CONFIG_HOME=$'/home/a b/.config'`. Anything else is taken as printed.
  */
-export function unquoteShowEnvironment(value) {
+function unquoteShowEnvironment(value) {
 	const m = /^\$'(.*)'$/s.exec(value);
 	if (!m) return value;
 	return m[1].replace(/\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3}|.)/g, (_all, e) => {
@@ -942,31 +586,21 @@ export function managerEnvRefusal(read, { home, euid, user, realpath = (p) => p 
 	return `${user}'s user manager runs with ${wrong.join("; and ")}. That environment is what every unit it starts inherits, so nothing is installed. Find where it is set (a line in /etc/environment, which Ubuntu's user managers read through environment.d, or a file in ~/.config/environment.d), override it for this account in ~/.config/environment.d/ (for example a file zz-pi-dispatch.conf with ${ownRuntime ? `XDG_RUNTIME_DIR=${ownRuntime}` : "XDG_RUNTIME_DIR=/run/user/<uid>"}${ownConfig ? ` and XDG_CONFIG_HOME=${ownConfig}` : ""}), restart the manager (sudo systemctl restart user@${Number.isInteger(euid) ? euid : "<uid>"}.service, which stops this account's units), check \`systemctl --user show-environment\`, and re-run`;
 }
 
-/** The refusal for `foreignContainers`' answer, naming both ways out. */
-export function foreignContainerRefusal(found, { forceHint }) {
-	const names = found.map((f) => f.container).join(" and ");
-	return `${names} already ${found.length === 1 ? "exists" : "exist"} under this account's Podman and ${found.length === 1 ? "is" : "are"} not managed by the Quadlet ${found.length === 1 ? "unit" : "units"} (started by hand, or by an older setup). The unit's podman run --replace would remove ${found.length === 1 ? "it" : "them"} without asking, and a proxy takes every running job's per-job network with it. Remove ${found.length === 1 ? "it" : "them"} yourself (podman rm -f ${found.map((f) => f.container).join(" ")}), or ${forceHint}`;
-}
-
 /**
  * The three stack keys as a deployment's `.env` assigns them, for the loader that reads that file (issue #430 review,
  * D6). `{ keys }` (only keys the file assigns), or `{ error }` when a line touching one of them is in a form this
- * reader cannot vouch for. A key with NO record is not proof of no assignment: `PI_BACKENDS =podman` is set by
- * systemd 252 (measured, see env-file.mjs's ASSIGNMENT) and produces no record here, `export PI_BACKENDS=podman` is
+ * reader cannot vouch for. A key with NO record is not proof of no assignment: `PI_BACKENDS =local` is set by
+ * systemd 252 (measured, see env-file.mjs's ASSIGNMENT) and produces no record here, `export PI_BACKENDS=local` is
  * ignored by systemd and set by the shells, and a line inside a multi-line quote belongs to the value above it. Any
- * such line, or any file-level hazard while a key is mentioned at all, refuses: guessing "no podman" installs a
- * docker-shaped worker for a podman deployment, and the opposite guess a stack for a docker one. So does a line systemd
- * splits differently from this reader (`envFileSystemdHazard`, issue #447), for the whole file.
+ * such line, or any file-level hazard while a key is mentioned at all, refuses: guessing "no egress" arms nothing for
+ * jobs whose policy needs the proxy, and the opposite guess points every job at a proxy that is not there. So does a
+ * line systemd splits differently from this reader (`envFileSystemdHazard`, issue #447), for the whole file.
  */
-// Issue #707: and the openshell venues' two keys, read from the same place for the same reason. `up` and `service install`
-// decide from PI_OPENSHELL_ENGINE which engine's store gets the job image and where Valkey runs (`openshellSetupOf`), so
-// a shell value the service never sees would stand the stack up on the wrong engine.
-const PODMAN_VENUE_KEYS = Object.freeze(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY"]);
-const OPENSHELL_VENUE_KEYS = Object.freeze(["PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY"]);
-export const STACK_KEYS = Object.freeze([...PODMAN_VENUE_KEYS, ...OPENSHELL_VENUE_KEYS]);
+const VENUE_KEYS = Object.freeze(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY"]);
+export const STACK_KEYS = VENUE_KEYS;
 
 /** The longest venue-key value `readStackKeys` accepts, in bytes (issue #447 gate round 2; systemd's own limit is ~128 KiB). */
-export const STACK_VALUE_MAX = 4096;
+const STACK_VALUE_MAX = 4096;
 
 /** A sourcing shell's named hazard (a NUL, a CRLF file), as the sentence that names it and its fix. systemd's shapes are refused above. */
 function shapedRefusal(path, hazard, why) {
@@ -975,22 +609,11 @@ function shapedRefusal(path, hazard, why) {
 }
 
 /**
- * The venue keys of a deployment's `.env` (`STACK_KEYS`), read by `readVenueKeys` below in two passes since review round 2
- * of #715. The three the podman venue decides from are read and refused as ever. The openshell venues' two are read the
- * same way but REFUSED only where an openshell venue is blessed (the file's PI_BACKENDS, or `openshellBlessed` from the
- * caller, which knows this shell's): a stray `export PI_OPENSHELL_ENGINE=...` or a continued line in a `local`-only
- * deployment names a key nothing there reads, and stopping `up` or `service install` on it is a refusal with no reason.
+ * The venue keys of a deployment's `.env` (`STACK_KEYS`), read by `readVenueKeys` below. The three the deployment
+ * decides from are read and refused as ever.
  */
-export function readStackKeys(content, { loader = "systemd", path = ".env", assumeSpelled = false, openshellBlessed = false } = {}) {
-	const base = readVenueKeys(content, { loader, path, assumeSpelled, keys: PODMAN_VENUE_KEYS, about: "whether this deployment runs the podman venue" });
-	if (base.error) return base;
-	let blessed = openshellBlessed === true;
-	try {
-		blessed ||= venuesOf({ PI_BACKENDS: base.keys.PI_BACKENDS }).openshellUsed;
-	} catch {}
-	const openshell = readVenueKeys(content, { loader, path, assumeSpelled, keys: OPENSHELL_VENUE_KEYS, about: "which engine and gateway the openshell venue uses (PI_OPENSHELL_ENGINE, PI_OPENSHELL_GATEWAY)" });
-	if (openshell.error) return blessed ? openshell : base;
-	return { keys: { ...base.keys, ...openshell.keys } };
+export function readStackKeys(content, { loader = "systemd", path = ".env", assumeSpelled = false } = {}) {
+	return readVenueKeys(content, { loader, path, assumeSpelled, keys: VENUE_KEYS, about: "which venues this deployment blesses and whether its egress policy is armed" });
 }
 
 function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about }) {
@@ -1110,7 +733,7 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
  * `{ keys }` (only keys the file assigns), or `{ error }` naming the line and the fix. Never an error dropped into
  * "unset": a key this cannot read is not a key the service lacks.
  */
-export function readServiceKeys(content, keys, { loader = "systemd", path = ".env" } = {}) {
+function readServiceKeys(content, keys, { loader = "systemd", path = ".env" } = {}) {
 	const { text, loadHazard } = decodeEnvFile(content, { loader });
 	if (loadHazard !== null) {
 		const shape = SYSTEMD_HAZARD_SHAPES[loadHazard.shape];
@@ -1150,7 +773,7 @@ export function readValkeyKeys(content, { loader = "systemd", path = ".env" } = 
 }
 
 /** What in a `.env` value keeps it from reading the same under every loader, with the way to write it (issue #464). */
-export function unplainCause(value) {
+function unplainCause(value) {
 	const v = String(value).replace(/[ \t]+$/, "");
 	const quoted = /^["']/.test(v);
 	if (!quoted && /[[\]]/.test(v)) return `an unquoted [ or ]: the macOS wrapper sources the file with sh, which may read it as a filename pattern. Quote the value, for example VALKEY_URL="redis://[::1]:6379", which every loader reads the same`;
@@ -1169,53 +792,6 @@ export function unplainCause(value) {
 	const bad = /[^A-Za-z0-9_@+=:,./-]/u.exec(v)?.[0];
 	const shown = bad === undefined ? "" : /^[\x21-\x7e]$/.test(bad) ? `\`${bad}\` ` : `U+${bad.codePointAt(0).toString(16).toUpperCase().padStart(4, "0")} `;
 	return `a character (${shown.trim() || "one"}) outside A-Z, a-z, 0-9 and _@+=:,./- in an unquoted value. Quote the whole value`;
-}
-
-/** The shown form of one action. `applyStack` runs the same objects these lines were made from. */
-export function describeAction(action) {
-	return action.kind === "write" ? `write ${action.path}` : action.argv.join(" ");
-}
-
-/**
- * Carry out `plan.actions`, in order, stopping at the first failure. `run(cmd, args)` resolves an exit code, null for
- * a command that could not launch. Returns `{ ok: true }` or `{ ok: false, failed, code, ran }`, `ran` saying whether
- * any command had run before the failure.
- *
- * Issue #464: `journal`, when given, is an array each write is recorded in BEFORE it happens (`journalWrite`), so a
- * caller can put every file back when a later step fails (`rollBackWrites`). `beforeRuns`, when given, is awaited
- * once after the last write and before the first command, and a `{ ok: false, ... }` from it stops the apply there:
- * `service install` writes its worker unit in it, so every file is written before anything is started.
- */
-export async function applyStack(plan, { fs, run, journal = null, beforeRuns = null }) {
-	const byPath = new Map(plan.files.map((f) => [f.path, f]));
-	let ran = false;
-	const gate = async () => {
-		if (!beforeRuns) return null;
-		const hook = beforeRuns;
-		beforeRuns = null;
-		const res = await hook();
-		return res && res.ok === false ? { ...res, ran } : null;
-	};
-	for (const action of plan.actions) {
-		if (action.kind === "write") {
-			try {
-				fs.mkdirSync(dirname(action.path), { recursive: true });
-				journalWrite(fs, journal, action.path, byPath.get(action.path).text, { mode: byPath.get(action.path).mode });
-			} catch (err) {
-				return { ok: false, failed: describeAction(action), code: null, message: err?.message, ran };
-			}
-			continue;
-		}
-		const stopped = await gate();
-		if (stopped) return stopped;
-		const [cmd, ...args] = action.argv;
-		ran = true;
-		const code = await run(cmd, args);
-		if (code !== 0) return { ok: false, failed: describeAction(action), code, ran };
-	}
-	const stopped = await gate();
-	if (stopped) return stopped;
-	return { ok: true };
 }
 
 /**
@@ -1313,16 +889,6 @@ export function describeRollBack(rolled, { partial = false } = {}) {
 }
 
 /**
- * The worker unit's dependency lines on the stack. `Wants=`, never `Requires=`: a Valkey that failed to start must not
- * also take the worker down with it, since the worker's own queue connection retries and says why, and a proxy that
- * is down refuses jobs pre-spend by itself. `After=` so a boot starts the queue before the worker reaches for it.
- */
-export function workerUnitDeps(units, { forWhat = "the podman venue (issue #430)" } = {}) {
-	if (units.length === 0) return "";
-	return `# Added by \`pi-dispatch service install\` for ${forWhat}: the Quadlet units it installed.\nWants=${units.join(" ")}\nAfter=${units.join(" ")}\n`;
-}
-
-/**
  * Linger, read without side effects. `loginctl show-user <user> -p Linger` prints `Linger=yes|no`, and unlike
  * `systemctl --machine=<user>@ --user status` it does not START the user manager it asks about (measured: that probe
  * starts it, and the units with it, which would report a boot-time answer that is not one). Returns true, false, or
@@ -1333,11 +899,4 @@ export async function readLinger(user, runCapture) {
 	if (res.code !== 0) return null;
 	const m = /^Linger=(yes|no)\s*$/m.exec(String(res.output ?? ""));
 	return m ? m[1] === "yes" : null;
-}
-
-/** The sentence for each linger answer, shared by `service install` and `up`. */
-export function lingerNote(linger, user) {
-	if (linger === true) return `linger is on for ${user}: measured, the Quadlet units come back at boot with nobody logged in\n`;
-	if (linger === false) return `⚠ linger is OFF for ${user}: measured, without it neither these Quadlet units nor a user-scope worker start at boot. Turn it on:  sudo loginctl enable-linger ${user}\n`;
-	return `note: could not read linger for ${user} (loginctl did not answer). Without linger these units start only while you have a session:  sudo loginctl enable-linger ${user}\n`;
 }

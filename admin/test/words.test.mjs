@@ -281,10 +281,11 @@ test("every cut short form keeps what its cause did: at least 40 characters, ove
     assert.ok(Array.from(s).length >= 40, `${key}: ${s}`);
     assert.doesNotMatch(s, DANGLING_END, key);
   }
-  assert.equal(shortSentence(REASONS["podman-conf-widens-job"].sentence), "The worker host's Podman configuration lets a job's container reach…");
+  // The podman venue reasons are gone from the catalog (the sandbox removal); the pins live on over reasons that cut.
+  assert.equal(shortSentence(REASONS["job-image-package-canary-unsupported"].sentence), "The job image does not declare package canaries, so it could not report…");
   assert.equal(shortSentence(REASONS["secret-name-reserved"].sentence), "A secret this job would receive uses a name this deployment already…");
   assert.equal(shortSentence(REASONS["netns-keeper-crash-loop"].sentence), "This worker's rootless network keeper kept restarting while the job…");
-  assert.equal(shortSentence(REASONS["podman-service-restart-hold-expired"].sentence), "Rootful Podman's service on this worker kept running…");
+  assert.equal(shortSentence(REASONS["watch-cap"].sentence), "The source, rule or active-fingerprint cap refused the finding…");
 });
 
 test("a cut never ends on a negation alone, and never splits a character (#710 round 2)", () => {

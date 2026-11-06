@@ -1,10 +1,5 @@
-import { sandboxLinks } from "../sandbox-links.mjs";
-import { sandboxHostEditor } from "../sandbox-host-editor.mjs";
 /** Host pages report published facts; runtime cleanup remains an explicit command on that host. */
-import {
-  jobContainerName,
-  sandboxNameOf,
-} from "@edgehero/pi-dispatch/container-names";
+import { jobContainerName } from "@edgehero/pi-dispatch/container-names";
 import { projectBudgetRow } from "@edgehero/pi-dispatch/host-budget";
 import { hostQueueName } from "@edgehero/pi-dispatch/queue";
 import { DOCTOR_SECTIONS } from "@edgehero/pi-dispatch/doctor-results";
@@ -16,7 +11,6 @@ import {
   doctorByText,
   DOCTOR_CHECKS_SHOWN,
 } from "../../doctor-view.mjs";
-import { VENUE_LABEL } from "../../words.mjs";
 import { html } from "../html.mjs";
 import { uiText } from "../locale.mjs";
 import * as ui from "../kit.mjs";
@@ -76,39 +70,19 @@ const gone = (view) => html`<p class="note">${t(view, "This host has no live reg
 
 /** A published id can be a digest; that never becomes a guessed container name. */
 export function orphanCommand(job) {
-  const venue = job.v ?? job.venue;
   const id = job.id;
   const named =
     typeof id === "string" &&
     !id.startsWith("sha256:") &&
     /^[A-Za-z0-9._:-]{1,128}$/.test(id);
-  if (venue === "openshell" || venue === "openshell-bind") {
-    if (!named)
-      return [
-        "openshell",
-        "sandbox",
-        "list",
-        "--selector",
-        "pi.dispatch.owner=pi-dispatch",
-      ];
-    const containerName = id.startsWith("container:")
-      ? id.slice(10)
-      : jobContainerName(id);
-    const sandboxName = sandboxNameOf(containerName);
-    return ["openshell", "sandbox", "delete", sandboxName];
-  }
-  if (venue === "local" || venue === "podman") {
-    const runtime = venue === "local" ? "docker" : "podman";
-    return named
-      ? [
-          runtime,
-          "rm",
-          "-f",
-          id.startsWith("container:") ? id.slice(10) : jobContainerName(id),
-        ]
-      : [runtime, "ps", "-a", "--filter", "name=pi-job-"];
-  }
-  return null;
+  if (named)
+    return [
+      "docker",
+      "rm",
+      "-f",
+      id.startsWith("container:") ? id.slice(10) : jobContainerName(id),
+    ];
+  return ["docker", "ps", "-a", "--filter", "name=pi-job-"];
 }
 
 export const hostState = (v) => {
@@ -170,7 +144,7 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
         v.role === "operator"
           ? ui.btn({
               label: "Free the slot",
-              href: `${`/fleet/host?${new URLSearchParams({ name: label(v) })}`}#p-hostsandboxes`,
+              href: `${`/fleet/host?${new URLSearchParams({ name: label(v) })}`}#p-hostbudget`,
               kind: ["danger", "sm"],
             })
           : null,
@@ -222,67 +196,6 @@ export const hostJobs = card("Jobs on the host", (h, v) => {
       : s.waiting.truncated
         ? html`<p>Not every waiting job was read.</p>`
         : null
-  }`;
-});
-
-export const hostSandboxes = card("Sandboxes left on the host", (h, v) => {
-  if (!h) return gone(v);
-  const orphans = jobsOf(h).filter((j) => j.o);
-  const sandboxes = Array.isArray(h.sandboxes) ? h.sandboxes : [];
-  const sandboxesKnown = Array.isArray(h.sandboxes);
-  return html`${orphans.map((j) => {
-    const argv = orphanCommand(j);
-    return html`<div class="card card--tint tone-attention"> <h3>${t(v, "Orphaned hold")} ${j.id}</h3> <p> ${String(j.id).startsWith("sha256:") ? digestOrphanObservation(j, v) : String(j.id).startsWith("container:") ? html`${t(v, "Found left from before the worker started")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : `; ${t(v, "observation time was not published")}`}` : html`${t(v, "Its stop did not take")}${j.s ? html` ${t(v, "at")} ${timeHtml(j.s)}` : ` ${t(v, "at an unpublished time")}`}`}; ${t(v, "it still holds")} ${j.m ?? t(v, "unknown")} MiB ${t(v, "and")} ${j.c === undefined || j.c === null ? t(v, "unknown") : Number(j.c) / 100} ${t(v, "cores")}. </p> ${
-      argv
-        ? command(v, argv)
-        : html`<p> The venue was not published, so the console cannot name its container or runtime. Inspect the host's runtime and identify the orphan there. </p>`
-    }${
-      String(j.id).startsWith("sha256:")
-        ? html`<p> The published id is a digest; the listing command helps identify the container. </p>`
-        : null
-    }${
-      j.v === "podman" ? html`<p>Run Podman as the worker's account.</p>` : null
-    } </div>`;
-  })}${
-    orphans.length
-      ? html`<p>${t(v, "The host budget gives the room back within 5 seconds once its runtime says the container is gone.")}</p>`
-      : html`<p>No orphan container was published.</p>`
-  }${ui.tbl({
-    label: t(v, "Retained workspaces"),
-    stack: true,
-    heads: ["Run", VENUE_LABEL, "Kept until", "Pin", "Open on the host"].map((label) => t(v, label)),
-    rows: sandboxes.map((x) => {
-      const id = x.id ?? x.jobId;
-      const venue = x.v ?? x.venue;
-      const until = x.until;
-      const shell = venue === "local" || venue === "podman";
-      return [
-        runLink(id),
-        venue,
-        until ? timeHtml(until) : "not published",
-        (x.pin ?? x.pinned) ? "Pinned" : "Not pinned",
-        !shell
-          ? "This venue has no sandbox shell: pi-dispatch sandbox cannot reopen its runs."
-          : typeof id === "string" && !id.startsWith("sha256:")
-            ? v.role === "operator" && !(until && until <= v.now) ? sandboxLinks({ id, host: h.name, config: v.data?.sandboxHosts, compact: true, locale: v.locale }) : command(v, ["pi-dispatch", "sandbox", id, ...(until && until <= v.now ? ["--pin"] : [])])
-            : "The published id is a digest; identify the run on this host.",
-      ];
-    }),
-    empty: t(v, sandboxesKnown
-      ? "No retained workspace was published."
-      : "The retained workspace list is unreadable or was not published by this worker."),
-  })}${
-    h.sandboxesMore > 0
-      ? html`<p>${h.sandboxesMore} more retained workspaces.</p>`
-      : null
-  } <p> ${
-    h.sandboxRetentionHours === 0
-      ? "Workspace retention is off on this host."
-      : `Retention window: ${h.sandboxRetentionHours ?? "not published"} hours (24 by default).`
-  } Each workspace holds the run's clone, prompt.md and event.json (issue text). Open shells are listed on the operator’s Sandboxes tab from the terminal’s live registration. </p> ${
-    v.role === "operator"
-      ? html`${ui.cmd(["pi-dispatch", "sandbox", "--list"], { host: h.name })}<a class="link" href="/runs/sandboxes">Open Sandboxes</a>${sandboxHostEditor(v, h.name)}`
-      : null
   }`;
 });
 
@@ -645,7 +558,7 @@ export const hostDoctor = (v) => {
     ? html`<p>${t(v, "No doctor result published by this host. Run doctor on this host to publish its result.")}</p>`
     : d.unreadable
       ? html`<p>${t(v, "Its published result cannot be read (a worker of another version may have written it).")}</p>`
-      : html`<p class="hd-docline tinted ${d.counts?.fail ? "tone-failed" : d.counts?.warn ? "tone-attention" : "tone-ok"}">${ui.icon(d.counts?.fail ? "failed" : d.counts?.warn ? "attention" : "done", { size: "sm" })}<span>${t(v, "Doctor ran")} ${ageText(d.ageMs)} ${t(v, "ago")}${d.version ? ` (${t(v, "version")} ${d.version})` : ""}, ${t(v, doctorByText(d))}: ${t(v, doctorCountsText(d))}.${d.openshell ? ` ${t(v, "The openshell venue was judged.")}` : ""}</span></p>${doctorStale(d) ? ui.banner({ status: "attention", icon: "clock", sm: true, title: `${t(v, "Stale: older than two of this host's doctor runs")} (${t(v, "every")} ${d.every}h)`, body: `${t(v, "So it may no longer describe the host. Run doctor on")} ${label(v)} ${t(v, "to publish a fresh result.")}` }) : null}${d.workerRun && !d.by?.worker ? html`<p>${t(v, "It replaced the worker's own run")}${d.workerRun.uid !== undefined ? ` (uid ${d.workerRun.uid})` : ""}${t(v, ", so it shows another account's view of the host.")}</p>` : null}`;
+      : html`<p class="hd-docline tinted ${d.counts?.fail ? "tone-failed" : d.counts?.warn ? "tone-attention" : "tone-ok"}">${ui.icon(d.counts?.fail ? "failed" : d.counts?.warn ? "attention" : "done", { size: "sm" })}<span>${t(v, "Doctor ran")} ${ageText(d.ageMs)} ${t(v, "ago")}${d.version ? ` (${t(v, "version")} ${d.version})` : ""}, ${t(v, doctorByText(d))}: ${t(v, doctorCountsText(d))}</span></p>${doctorStale(d) ? ui.banner({ status: "attention", icon: "clock", sm: true, title: `${t(v, "Stale: older than two of this host's doctor runs")} (${t(v, "every")} ${d.every}h)`, body: `${t(v, "So it may no longer describe the host. Run doctor on")} ${label(v)} ${t(v, "to publish a fresh result.")}` }) : null}${d.workerRun && !d.by?.worker ? html`<p>${t(v, "It replaced the worker's own run")}${d.workerRun.uid !== undefined ? ` (uid ${d.workerRun.uid})` : ""}${t(v, ", so it shows another account's view of the host.")}</p>` : null}`;
   const problemsHtml =
     d && !d.unreadable
       ? html`<p class="sect-h">${t(v, "Failing first, then warnings")}</p>${problems.length ? html`<ul class="fl-chks">${problems.slice(0, DOCTOR_CHECKS_SHOWN).map((c) => html`<li class="fl-chk"><span class="badge tone-${c.level === "fail" ? "failed" : "attention"}">${ui.icon(c.level === "fail" ? "failed" : "attention", { size: "sm" })}${t(v, c.level === "fail" ? "Failing" : "Warning")}</span><span class="code">${c.id}</span><span class="fl-chk__said">${c.label}</span><span class="fl-chk__fix"><b>${t(v, "Fix:")}</b> ${c.fix}</span></li>`)}</ul>` : html`<p>${t(v, "Every check passed.")}</p>`}${hidden ? html`<p>${hidden} ${t(v, "more not shown here; doctor on this host prints them all.")}</p>` : null}`

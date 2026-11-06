@@ -5,7 +5,6 @@ import { dirname, extname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { VALKEY_IMAGE, valkeyContainerOwner, valkeyDockerRunArgs, valkeyOwnerCheckArgs } from "../src/valkey-auth.mjs";
 import { OLDER_VALKEY_IMAGES, olderValkeyImage } from "../src/older-state.mjs";
-import { TEMPLATE_PINS } from "../src/service.mjs";
 
 // Issue #761: every Valkey this project starts or ships runs ONE pinned minor, `VALKEY_IMAGE`. A copy that moved alone
 // would put the fleet's hosts, CI and the measurements on different Valkeys, and the smoke script's
@@ -26,7 +25,7 @@ test("VALKEY_IMAGE is a Docker Hub valkey minor, never a floating major, a patch
 	assert.equal(olderValkeyImage(`docker.io/${VALKEY_IMAGE}`), null);
 });
 
-test("the compose file and the Quadlet unit, and their published mirrors, name VALKEY_IMAGE on their one image line (#761)", () => {
+test("the compose file, and its published mirror, name VALKEY_IMAGE on their one image line (#761)", () => {
 	for (const dir of ["deploy", "worker/deploy"]) {
 		const compose = codeLines(read(`${dir}/docker-compose.yml`));
 		const valkeyImages = compose.filter((l) => /^\s*image:\s*\S*valkey/.test(l));
@@ -35,11 +34,8 @@ test("the compose file and the Quadlet unit, and their published mirrors, name V
 		const at = compose.indexOf("  valkey:");
 		assert.ok(at >= 0);
 		assert.equal(compose.slice(at + 1).find((l) => /^\s*image:/.test(l)), `    image: ${VALKEY_IMAGE}`);
-		const quadlet = codeLines(read(`${dir}/pi-dispatch-valkey.container`));
-		assert.deepEqual(quadlet.filter((l) => /^\s*Image\s*=/.test(l)), [`Image=docker.io/${VALKEY_IMAGE}`], `${dir}/pi-dispatch-valkey.container`);
+		// The Quadlet unit that pinned the same image beside compose went with the venues that installed it.
 	}
-	// service install refuses to render a unit whose pinned lines moved (service.test.mjs reads them back).
-	assert.ok(TEMPLATE_PINS["pi-dispatch-valkey.container"].includes(`Image=docker.io/${VALKEY_IMAGE}`));
 });
 
 test("up's docker run and the owner check run VALKEY_IMAGE (#761)", () => {
@@ -64,9 +60,8 @@ test("CI's Valkey services name VALKEY_IMAGE, and the smoke script runs the imag
 			}
 		}
 	}
-	// Non-vacuous: the three services of pi-upgrade-check.yml (the suite's, the Connections lane's and the image job's
-	// gateway) and podman-conformance.yml's one.
-	assert.deepEqual(images.sort(), ["pi-upgrade-check.yml", "pi-upgrade-check.yml", "pi-upgrade-check.yml", "podman-conformance.yml"]);
+	// Non-vacuous: the two services of pi-upgrade-check.yml (the suite's, and the Connections lane's own).
+	assert.deepEqual(images.sort(), ["pi-upgrade-check.yml", "pi-upgrade-check.yml"]);
 	// The image job pulls what the smoke script then runs with --pull=never, both from the constant, in one step.
 	const step = read(".github/workflows/pi-upgrade-check.yml");
 	const pull = `docker pull "$(node --input-type=module -e 'import {VALKEY_IMAGE} from "./worker/src/valkey-auth.mjs"; console.log(VALKEY_IMAGE)')"`;
@@ -81,7 +76,7 @@ test("CI's Valkey services name VALKEY_IMAGE, and the smoke script runs the imag
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 test("no source names a Valkey image but valkey-auth.mjs (the constant) and older-state.mjs (the older ones) (#761)", () => {
-	const trees = ["worker/src", "receiver/src", "admin/src", "gateway/src", "image/runner", ".github/scripts"];
+	const trees = ["worker/src", "receiver/src", "admin/src", "image/runner", ".github/scripts"];
 	const found = [];
 	let scanned = 0;
 	const walk = (dir) => {

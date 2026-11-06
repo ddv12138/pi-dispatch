@@ -15,10 +15,9 @@
  * dir, retained workspaces under the old shared jobs root) keep their own lines in doctor's `state` and `dirs` sections.
  *
  * What is here: the Valkey image older releases shipped, the floating `valkey/valkey:8`, which this release pins as
- * `VALKEY_IMAGE` (valkey-auth.mjs says why). An upgrade rewrites none of the three places that keep it:
+ * `VALKEY_IMAGE` (valkey-auth.mjs says why). An upgrade rewrites none of the places that keep it:
  *   - a compose file in the deployment folder, which /dispatch setup copies create-only into `deploy/` (an earlier setup
  *     copied it to the folder's top);
- *   - the installed Quadlet unit, which only `service install --force` rewrites (`up` leaves a changed one as it is);
  *   - the `pi-dispatch-valkey` container an older `up` started, which keeps its image until it is recreated.
  *
  * Pure but for two seams, and it never throws: `readFile(path)` gives a file's text (a throw, a missing file, is no
@@ -29,7 +28,6 @@
  */
 import { join } from "node:path";
 import { COMPOSE_FILE, COMPOSE_VALKEY_OVERRIDE, VALKEY_IMAGE, VALKEY_VOLUME, composeArgs, composeProjectName } from "./valkey-auth.mjs";
-import { QUADLET_FILES, quadletDir } from "./podman-stack.mjs";
 
 /**
  * Every Valkey image reference an older release shipped, as each place spelled it: compose and `up`'s `docker run` the
@@ -72,7 +70,7 @@ function upRunsValkey(owner, { handedOver } = {}) {
 /** The legacy place an earlier /dispatch setup copied the compose file to, relative to the deployment folder. */
 export const LEGACY_COMPOSE_FILE = "docker-compose.yml";
 
-// Said by every fix below, as `podman-stack.mjs` says it for a Valkey restart: the cost, and how to avoid it.
+// Said by every fix below, as the stack installer says it for a Valkey restart: the cost, and how to avoid it.
 const INTERRUPTS = "A job running right now is interrupted: pause first if one is (pi-dispatch pause, wait for active jobs, then pi-dispatch resume)";
 const PINS = `this release pins ${VALKEY_IMAGE}`;
 
@@ -135,15 +133,7 @@ function composeValkeyImages(text) {
 	return images;
 }
 
-/** The value of each `Image=` line of a unit file (systemd: a `#` or `;` line is a comment, the value is trimmed). */
-function quadletImages(text) {
-	const found = [];
-	for (const line of String(text).split(/\r?\n/)) {
-		const m = /^\s*Image\s*=\s*(.*?)\s*$/.exec(line);
-		if (m) found.push(m[1]);
-	}
-	return found;
-}
+
 
 /** A file's text through the seam, or null when it cannot be read (absent above all). */
 async function textOf(readFile, path) {
@@ -192,8 +182,8 @@ const olderComposeImage = (text) => composeValkeyImages(text).map(olderValkeyIma
 
 /**
  * Every finding for this deployment, in a fixed order: the folder's compose file, the earlier setup's copy at the
- * folder's top, the installed Quadlet unit, the container. `cwd` is the deployment folder, `home` this account's home
- * (where the Quadlet unit is installed); either missing skips its detectors. `handedOver` is whether the folder holds
+ * folder's top, the container. `cwd` is the deployment folder, `home` this account's home
+ * (kept in the signature for its callers); either missing skips its detectors. `handedOver` is whether the folder holds
  * `COMPOSE_VALKEY_OVERRIDE`, as `up` reads it. The container's verdict is asked once, and decides the compose fix too:
  * where this deployment's `up` runs the Valkey (`upRunsValkey`), the compose file only needs its line changed, since
  * recreating compose's valkey would start a second, empty Valkey beside the queue. Where compose runs it, or the verdict
@@ -226,17 +216,6 @@ export async function olderStateFindings({ cwd, home, readFile, valkeyContainer,
 					store: "valkey-compose",
 					label: `${legacy} names ${old} for Valkey, the floating tag an older pi-dispatch shipped; ${PINS}`,
 					fix: `that file is an earlier /dispatch setup's copy, which setup no longer runs (${COMPOSE_FILE} is the one, and this copy's ../ paths reach the folder above ${cwd}): move any edits of yours there and remove it, or, if you still run it, change that line to \`image: ${VALKEY_IMAGE}\``,
-				});
-			}
-		}
-		if (typeof readFile === "function" && typeof home === "string" && home !== "") {
-			const path = join(quadletDir(home), QUADLET_FILES.valkey.file);
-			const found = quadletImages((await textOf(readFile, path)) ?? "").map(olderValkeyImage).find(Boolean);
-			if (found) {
-				findings.push({
-					store: "valkey-quadlet",
-					label: `${path} runs Valkey as ${found}, the floating tag an older pi-dispatch installed; this release pins docker.io/${VALKEY_IMAGE}`,
-					fix: `\`pi-dispatch service install --force\` in the deployment folder rewrites the unit and restarts ${QUADLET_FILES.valkey.unit} on the same ${VALKEY_VOLUME} volume (stopped first, so Valkey writes its AOF out; the queue is kept); \`pi-dispatch up\` leaves a changed unit file as it is. ${INTERRUPTS}`,
 				});
 			}
 		}

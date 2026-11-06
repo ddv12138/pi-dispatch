@@ -6,7 +6,7 @@ import { Socket } from "node:net";
 import { fileURLToPath } from "node:url";
 import { JudgedConnector, assertJudgedConnection, isJudgedConnection, makeRedisClient, parseConnection } from "../src/connection.mjs";
 import { makeQueue } from "../src/queue.mjs";
-import { PINNED, judgedEndpoint, valkeyClientContext, valkeyContextFromResolution, VALKEY_CONTEXT_KEYS } from "../src/valkey-endpoint.mjs";
+import { PINNED, judgedEndpoint, valkeyClientContext } from "../src/valkey-endpoint.mjs";
 
 // Issue #464, gate round 2 follow-up: EVERY Valkey client in the repo goes through one judge-and-pin function
 // (valkey-endpoint.mjs), by construction: connection.mjs builds each ioredis and BullMQ client with JudgedConnector,
@@ -14,7 +14,7 @@ import { PINNED, judgedEndpoint, valkeyClientContext, valkeyContextFromResolutio
 // with VALKEY_URL=localhost used to carry a job's task text to that account's Valkey (measured on Fedora 44).
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
-const TREES = ["worker/src", "receiver/src", "admin/src", "image/runner", "gateway/src"];
+const TREES = ["worker/src", "receiver/src", "admin/src", "image/runner"];
 const SKIP_DIRS = new Set(["test", "node_modules", "dist"]);
 const EXTS = new Set([".mjs", ".js", ".cjs", ".ts", ".mts"]);
 
@@ -46,7 +46,7 @@ function stripComments(text) {
 const LIB = (name) => new RegExp(`["'\`]${name}(?:/[^"'\`]*)?["'\`]`);
 const RULES = [
 	{ what: "the ioredis driver", re: LIB("ioredis"), allowed: ["worker/src/connection.mjs"] },
-	{ what: "the bullmq library", re: LIB("bullmq"), allowed: ["worker/src/queue.mjs", "worker/src/index.mjs", "worker/src/sandbox-prepare-requests.mjs"] },
+	{ what: "the bullmq library", re: LIB("bullmq"), allowed: ["worker/src/queue.mjs", "worker/src/index.mjs"] },
 	// The two that load pi's own packages (undici, pi-coding-agent's keys) by pi's install path; neither names a Valkey library.
 	{ what: "createRequire", re: /\bcreateRequire\b/, allowed: ["admin/src/keys.mjs", "image/runner/src/env-proxy.mjs", "image/runner/src/loader.mjs"] },
 	{ what: "a computed dynamic import", re: /\bimport\(\s*(?:[^"'`\s)]|`[^`]*\$\{)/, allowed: ["image/runner/src/env-proxy.mjs", "image/runner/src/usage-meter.mjs", "image/runner/src/outcome.mjs", "image/runner/src/child-preload.mjs", "image/runner/src/child-meter.ts", "image/runner/src/child-route.mjs", "image/runner/src/model-runtime.mjs", "worker/src/doctor.mjs", "worker/src/pi-model-loader.mjs"] },
@@ -64,14 +64,14 @@ function violations(files) {
 
 test("no file constructs a Valkey client except through connection.mjs' judged connection (the bolt, #464)", () => {
 	const files = sources();
-	assert.ok(files.some((f) => f.path.startsWith("receiver/src/")) && files.some((f) => f.path.startsWith("admin/src/")) && files.some((f) => f.path === "gateway/src/cli.mjs"), "the scan reaches the receiver, admin and gateway executable");
-	assert.deepEqual(violations(files), [], "open Valkey only through parseConnection/makeRedisClient (worker/src/connection.mjs) and makeQueue; receiver, admin and gateway import the shared connection");
-	const gateway = files.find((file) => file.path === "gateway/src/cli.mjs");
-	// Exercise the same scan against planted source at the new executable's actual path. A
+	assert.ok(files.some((f) => f.path.startsWith("receiver/src/")) && files.some((f) => f.path.startsWith("admin/src/")), "the scan reaches the receiver and the admin");
+	assert.deepEqual(violations(files), [], "open Valkey only through parseConnection/makeRedisClient (worker/src/connection.mjs) and makeQueue; receiver and admin import the shared connection");
+	const receiverRoute = files.find((file) => file.path === "receiver/src/route.mjs");
+	// Exercise the same scan against planted source at an executable's actual path. A
 	// patterns-only assertion could pass while its directory was absent from the census.
 	for (const code of ['import Redis from "ioredis";', 'const driver = await import("ioredis/built/Redis.js");', "const client = new Redis(url);", 'import { Queue } from "bullmq";']) {
-		const planted = files.map((file) => file === gateway ? { ...file, code: `${file.code}\n${code}` } : file);
-		assert.ok(violations(planted).some((hit) => hit.startsWith("gateway/src/cli.mjs:")), `${code}: the gateway cannot bypass judged connection construction`);
+		const planted = files.map((file) => file === receiverRoute ? { ...file, code: `${file.code}\n${code}` } : file);
+		assert.ok(violations(planted).some((hit) => hit.startsWith("receiver/src/route.mjs:")), `${code}: a receiver file cannot bypass judged connection construction`);
 	}
 	// The two allowed BullMQ constructions assert the connection is judged right before they build on it.
 	const at = (path) => files.find((f) => f.path === path).code;
@@ -80,20 +80,16 @@ test("no file constructs a Valkey client except through connection.mjs' judged c
 	// Issue #468: and each carries the one-line `error` listener, so BullMQ never prints the whole error object.
 	assert.match(at("worker/src/queue.mjs"), /const queue = new Queue\([^;]*\);\s*onValkeyError\(queue, /);
 	assert.match(at("worker/src/index.mjs"), /worker = new Worker\([\s\S]*?\}\);\s*onValkeyError\(worker, /);
-	// #771's host-bound control worker is a third construction, outside paid processors. Its injected constructor
-	// seam must not become a way around the same endpoint judgment or one-line error handling.
-	const control = at("worker/src/sandbox-prepare-requests.mjs");
-	assert.match(control, /assertJudgedConnection\(connection\);[\s\S]*?const worker = new WorkerClass\(/);
-	assert.match(control, /const worker = new WorkerClass\([\s\S]*?\}\);\s*onValkeyError\(worker, /);
-	assert.equal((control.match(/new WorkerClass\(/g) ?? []).length, 1);
+	// (The #771 host-bound control worker, a third construction outside paid processors, went with the sandbox
+	// venues; the two paid constructions are all that is left.)
 	// And connection.mjs' own client is built from parseConnection's options, never from a bare URL.
 	assert.match(at("worker/src/connection.mjs"), /return new Redis\(\{ \.\.\.parseConnection\(url,/);
 	assert.equal((at("worker/src/connection.mjs").match(/new Redis\(/g) ?? []).length, 1);
-	// Non-vacuity: the sites that DO connect are there to be found, including the optional gateway.
+	// Non-vacuity: the sites that DO connect are there to be found.
 	// (admin/src/dashboard.ts was on this list until issue #641 moved the panel's reader, and its clients, into
-	// read-model.mjs's `createFleetReader`.)
+	// read-model.mjs's `createFleetReader`; gateway/src/cli.mjs went with the gateway.)
 	const users = files.filter((f) => /\b(parseConnection|makeRedisClient)\b/.test(f.code)).map((f) => f.path);
-	for (const expected of ["worker/src/start.mjs", "worker/src/cli.mjs", "worker/src/cancel-cli.mjs", "worker/src/doctor.mjs", "worker/src/service.mjs", "receiver/src/start.mjs", "receiver/src/route.mjs", "receiver/src/poller.mjs", "admin/src/read-model.mjs", "gateway/src/cli.mjs"]) {
+	for (const expected of ["worker/src/start.mjs", "worker/src/cli.mjs", "worker/src/cancel-cli.mjs", "worker/src/doctor.mjs", "worker/src/service.mjs", "receiver/src/start.mjs", "receiver/src/route.mjs", "receiver/src/poller.mjs", "admin/src/read-model.mjs"]) {
 		assert.ok(users.includes(expected), `${expected} opens its Valkey clients through connection.mjs`);
 	}
 	for (const rule of RULES) assert.equal(rule.re.test(""), false);
@@ -340,17 +336,14 @@ test("judgeValkeyAtStart: a refusal at once, a retryable judgement retried until
 	assert.ok(clock >= 2000, "waited the whole window");
 });
 
-test("valkeyClientContext: root refused on the podman venue without local on Linux, PI_VALKEY_SHARED from the .env only, never from the environment, and a .env the hardened reader refuses is an error, never dropped (#464)", () => {
+test("valkeyClientContext: a caller's own root decision wins, PI_VALKEY_SHARED from the .env only, never from the environment, and a .env the hardened reader refuses is an error, never dropped (#464)", () => {
 	const readEnv = (text) => () => Buffer.from(text);
 	const none = () => {
 		throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 	};
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "podman" }, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, true);
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "local,podman" }, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, false, "docker's Valkey is the queue");
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "podman" }, cwd: "/d", platform: "darwin", readEnv: none }).rootRefused, false, "no /proc to judge by");
-	assert.equal(valkeyClientContext({ env: {}, cwd: "/d", platform: "linux", readEnv: readEnv("PI_BACKENDS=podman\n") }).rootRefused, true);
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "local" }, cwd: "/d", platform: "linux", readEnv: readEnv("PI_BACKENDS=podman\n") }).rootRefused, false, "this environment's PI_BACKENDS first");
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "podman" }, cwd: "/d", platform: "linux", readEnv: none, rootRefused: false }).rootRefused, false, "a caller's own decision wins");
+	// No venue derives a refusal any more (the table holds `local` alone); the knob stays for a caller that knows better.
+	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "podman" }, cwd: "/d", platform: "linux", readEnv: none, rootRefused: true }).rootRefused, true, "a caller's own decision wins");
+	assert.equal(valkeyClientContext({ env: {}, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, false, "nothing derives one");
 	// PI_VALKEY_SHARED: the deployment's .env, never the environment, not even with no .env found (see the module).
 	assert.equal(valkeyClientContext({ env: { PI_VALKEY_SHARED: "1" }, cwd: "/d", platform: "linux", readEnv: none }).shared, false, "no .env: never the environment's");
 	assert.equal(valkeyClientContext({ env: { PI_VALKEY_SHARED: "1" }, cwd: "/d", platform: "linux", readEnv: readEnv("PI_BACKENDS=podman\n") }).shared, false, "nor over a .env that does not say it");
@@ -364,7 +357,7 @@ test("valkeyClientContext: root refused on the podman venue without local on Lin
 		assert.match(String(c.error), re, JSON.stringify(content));
 		assert.equal(c.shared, false);
 	}
-	// A line only the venue's reader refuses (a $ in PI_BACKENDS): the venue is then unknown, and that is an error too.
+	// A line only the venue's reader refuses (a $ in PI_BACKENDS): the stack keys it carries are then unknown, and that is an error too.
 	const venue = valkeyClientContext({ env: {}, cwd: "/d", platform: "linux", readEnv: readEnv("PI_BACKENDS=pod$man\n") });
 	assert.match(String(venue.error), /PI_BACKENDS/);
 	const denied = valkeyClientContext({
@@ -387,21 +380,6 @@ test("the worker's clients are enforced exactly as its boot judgement was (#464)
 		throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
 	};
 	assert.equal(workerValkeyContext({ rootRefused: true }, {}, { cwd: "/d", readEnv: none }).rootRefused, true, "a boot that refused root");
-	assert.equal(workerValkeyContext({ rootRefused: false }, { PI_BACKENDS: "podman" }, { cwd: "/d", readEnv: none }).rootRefused, false, "a boot on docker's venue");
+	assert.equal(workerValkeyContext({ rootRefused: false }, { PI_BACKENDS: "podman" }, { cwd: "/d", readEnv: none }).rootRefused, false, "no venue derives a refusal any more");
 	assert.equal(workerValkeyContext({}, {}, { cwd: "/d", readEnv: () => "PI_VALKEY_SHARED=1\n" }).shared, true);
-});
-
-test("valkeyClientContext: root refused for an openshell venue on Podman, from this environment or the .env, never on the docker engine (#707)", () => {
-	const none = () => { throw Object.assign(new Error("no"), { code: "ENOENT" }); };
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" }, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, true);
-	assert.equal(valkeyClientContext({ env: {}, cwd: "/d", platform: "linux", readEnv: () => Buffer.from("PI_BACKENDS=openshell\nPI_OPENSHELL_ENGINE=podman\n") }).rootRefused, true);
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "openshell" }, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, false);
-	assert.equal(valkeyClientContext({ env: { PI_BACKENDS: "local,openshell", PI_OPENSHELL_ENGINE: "podman" }, cwd: "/d", platform: "linux", readEnv: none }).rootRefused, false, "local's docker Valkey is the queue");
-});
-
-test("the engine reaches every client context: VALKEY_CONTEXT_KEYS names it, and doctor's resolution carries it beside PI_BACKENDS (#715 review round 2)", () => {
-	assert.ok(VALKEY_CONTEXT_KEYS.includes("PI_OPENSHELL_ENGINE"));
-	const service = { env: { PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: "podman" }, fromFile: {}, disagreements: [] };
-	assert.equal(valkeyContextFromResolution({ service, platform: "linux" }).rootRefused, true);
-	assert.equal(valkeyContextFromResolution({ service: { ...service, env: { PI_BACKENDS: "openshell" } }, platform: "linux" }).rootRefused, false);
 });

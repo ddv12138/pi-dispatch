@@ -1,9 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { BACKEND_NAMES, servesOf, SERVES } from "@edgehero/pi-dispatch/backends";
-import { SERVES_TEXT, CUSTODY_TEXT, venueCustody } from "../src/read-model.mjs";
 import { phases, noProgress } from "../src/console/kit.mjs";
-import { runChat, runSummary, runSandbox, runTranscriptState, runHeadline, runRest, runTail, runSecrets, runModels, runResources, runCostPanel } from "../src/console/panels/run.mjs";
+import { runChat, runSummary, runTranscriptState, runHeadline, runRest, runTail, runSecrets, runModels, runResources, runCostPanel } from "../src/console/panels/run.mjs";
 import { pagePanels, renderPage, loadPageData } from "../src/console/pages.mjs";
 
 const AT = Date.UTC(2026, 9, 28, 10);
@@ -42,17 +40,6 @@ test("#739 cancelled before start collapses unused panels; saved sessions alone 
   assert.match(fork({ resumed: false, reason: "promote-failed", bytes: 22 }), /no saved transcript to fork/);
   assert.doesNotMatch(fork(null), /data-copy/);
   assert.match(fork({ resumed: true, bytes: 2000 }), /data-copy/);
-});
-
-test("sandbox words come from every venue's declarations and credential custody; retained deadline is shown", () => {
-  for (const backend of BACKEND_NAMES) {
-    const out = String(runSandbox(view({ run: { record: record({ backend }) } })));
-    for (const key of SERVES) assert.ok(out.includes(SERVES_TEXT[key][servesOf(backend)[key]].replace(/'/g, "&#39;")), `${backend}: ${key}`);
-    assert.ok(out.includes(CUSTODY_TEXT[venueCustody(backend)].replace(/'/g, "&#39;")), backend);
-  }
-  const kept = String(runSandbox(view({ run: { record: record() }, sandboxCheck: { retained: true, until: AT + 60_000 } })));
-  assert.match(kept, /until <time datetime="2026-10-28T10:01:00.000Z"/);
-  assert.match(String(runSandbox(view({ run: { record: record() }, sandboxCheck: { retained: false, why: "swept" } }))), /swept/);
 });
 
 test("title cancel guard, trigger numbering and turn budget use the shared state and record facts", () => {
@@ -135,13 +122,4 @@ test("the parked question leads the main column while live steering stays in the
   assert.equal((parked.match(/id="p-chat"/g) ?? []).length, 1);
   const live = String((await renderPage("run", ctx("live"))).html);
   assert.match(live, /class="stack run-side"><section id="p-chat" data-panel>/);
-});
-
-
-test("queued jobs claim no sandbox and an unread live venue is unknown rather than a legacy local run", () => {
-  const data = { run: { missing: true }, activeRun: { target: "acme/web#42", host: null, backend: null }, chat: { state: "queued", jobState: "waiting" } };
-  assert.equal(String(runSandbox(view(data))), "");
-  const running = String(runSandbox(view({ ...data, chat: { state: "active", jobState: "active" } })));
-  assert.match(running, /venue could not yet be read/);
-  assert.doesNotMatch(running, /local run from before|Kept on|Who holds the credentials/);
 });

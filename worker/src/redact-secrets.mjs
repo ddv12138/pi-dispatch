@@ -164,14 +164,6 @@ export const NON_SECRET_ENV_KEYS = new Set([
 	"PI_ALLOWED_MODELS",
 	"PI_OFFLINE",
 	"PI_EXIT_AUTH",
-	// Issue #686: names the transcript channel (`stderr`), never a secret; on openshell it must ride the exec's --env.
-	"PI_TRANSCRIPT",
-	// Issue #704 part 3: `1`, the bundle env file's flag, never a secret; on openshell it must ride the exec's --env.
-	"PI_BUNDLE_ENV",
-	// Issue #683: the runner's layout name, `sandbox` on the openshell venue.
-	"PI_JOB_LAYOUT",
-	// Issue #730: `1`, the readable runner's flag, never a secret; on openshell it must ride the exec's --env.
-	"PI_RUNNER_OBSERVABLE",
 	"HOME",
 	KEYLESS_ENV_NAME,
 	...FORGE_HOST_VARS,

@@ -9,7 +9,6 @@ import {
   fleetHeld,
   fleetHosts,
   fleetDoctor,
-  fleetVenues,
   fleetSchedulers,
   fleetFailed,
 } from "../src/console/panels/fleet.mjs";
@@ -65,7 +64,7 @@ test("the active table separates job and project and keeps phases, stripes and o
   assert.match(out, /aria-label="Run phases"/);
   assert.match(out, /This worker reports no progress/);
   assert.match(out, /Orphaned hold/);
-  assert.match(out, /#p-hostsandboxes/);
+  assert.match(out, /#p-hostbudget/);
 });
 
 test("queues have numerical columns, quiet zeros and play/pause state chips", () => {
@@ -114,25 +113,6 @@ test("Doctor uses per-host count strips and compact semantic problem rows with f
   assert.match(out, /class="fl-chk__fix"/);
   assert.match(out, /Fix:<\/b>/);
   assert.doesNotMatch(out, /<table/);
-});
-
-test("Venues is one row per venue with properties, capability chips and custody together", () => {
-  const out = render(fleetVenues);
-  assert.equal((out.match(/<table /g) ?? []).length, 1);
-  for (const title of [
-    "Egress",
-    "Local folders",
-    "Steering",
-    "Live transcript",
-    "Recovery",
-    "Sandbox shell",
-    "Credentials held by",
-  ])
-    assert.ok(out.includes(title), title);
-  assert.match(out, /with the image/);
-  assert.match(out, /class="fl-vfoot"/);
-  assert.match(out, /All 14 properties/);
-  assert.doesNotMatch(out, /<th[^>]*>Property<\/th>/);
 });
 
 test("schedule next occurrence carries its distance below it and failed cards show header bulk controls", () => {

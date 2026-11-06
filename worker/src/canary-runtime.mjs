@@ -5,7 +5,6 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { loadConfig, ensureJobsDir } from "./config.mjs";
 import { readOverlay, resolveSettings } from "./runtime-settings.mjs";
-import { readManifest, sandboxExpiry, sandboxManifestNewer } from "./sandbox-store.mjs";
 import { builtinModel, isBuiltinModel } from "./model-catalog.mjs";
 import { resolveProviderCredential } from "./env-allowlist.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
@@ -69,14 +68,31 @@ export function copyCanaryObjects(source, destination) {
 	copy(source, destination);
 }
 
-function sourceFor(record, config, now) {
-	const source = readManifest({ sandboxDir: config.sandboxDir, jobId: record.jobId });
-	if (!source || source.jobId !== record.jobId || sandboxExpiry(source, { at: now(), retentionHours: config.sandboxRetentionHours }).expired) fail("a selected source sandbox is absent or expired; enable retention and run the flow again");
-	// Issue #761: a manifest a newer pi-dispatch kept may have reshaped the fields read below (its venue, its base commit,
-	// its workspace), the reason `sandboxSyncRefusal` refuses to reopen one. Before any of them is read.
-	if (sandboxManifestNewer(source)) fail("a selected source sandbox was kept by a newer pi-dispatch; run the canary with that release");
-	if (source.backend !== "local" || !SHA.test(source.baseSha ?? "")) fail("a selected source has no retained base commit on the local venue; run the flow again with this version");
-	if (!source.workspace || !fs.lstatSync(source.workspace).isDirectory() || !fs.lstatSync(join(source.workspace, ".git")).isDirectory()) fail("a selected source has no self-contained retained git repository");
+/**
+ * The root a canary source is curated under: `canary-sources` beside the run history's job directories. With no
+ * sandbox retention to keep a run's workspace, a replay source is a directory an operator (or a smoke fixture)
+ * curates by hand: one folder per source job id, holding `manifest.json` (`{ jobId, backend, baseSha, workspace }`),
+ * `prompt.md`, `event.json` and `model-roles.json`. The manifest is read here directly, with the shape checks the
+ * replay actually rests on, instead of through the retention module that no longer exists.
+ */
+function canarySourceRoot(config) {
+	return join(config.jobsDir, "canary-sources");
+}
+
+function sourceFor(record, config) {
+	// `record.jobId` is worker-generated and this file's own regex keeps it to one path segment, but `.` and `..` are
+	// segments too: refused by name before either joins a path.
+	if (record.jobId === "." || record.jobId === "..") fail("a selected source has a job id that names no directory");
+	const dir = join(canarySourceRoot(config), record.jobId);
+	let source;
+	try {
+		source = { ...JSON.parse(regular(join(dir, "manifest.json"))), dir };
+	} catch {
+		source = null;
+	}
+	if (!source || source.jobId !== record.jobId) fail("no canary source is curated for this run; add one under canary-sources/<jobId>/ (manifest.json, prompt.md, event.json, model-roles.json) and run the flow again");
+	if (source.backend !== "local" || !SHA.test(source.baseSha ?? "")) fail("a curated source has no base commit on the local venue; run the flow again with this version");
+	if (!source.workspace || !fs.lstatSync(source.workspace).isDirectory() || !fs.lstatSync(join(source.workspace, ".git")).isDirectory()) fail("a curated source has no self-contained git repository");
 	// These files were mounted read-only to the original job. Never reconstruct a task from its PII-free record.
 	if (record.bundle || record.secretsProfile || record.session?.resumed === true || record.fork || record.recoveryOf) fail("canary cannot replay a source requiring secrets, a previous session, recovery or a fork");
 	const roles = JSON.parse(regular(join(source.dir, "model-roles.json")));
@@ -196,7 +212,7 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 		return {
 			records, deploymentCapTokens: settings.maxTokens, close,
 			inspectSource: async (record) => {
-				const source = sourceFor(record, config, now);
+				const source = sourceFor(record, config);
 				for (const entry of Object.values({ ...source.roles, [options.role]: options.model })) {
 					const ref = splitModelEntry(entry);
 					if (ref.provider !== provider || !isBuiltinModel(ref.provider, ref.model, { chatOnly: true }) || new URL(builtinModel(ref.provider, ref.model).baseUrl).hostname !== PROVIDER_HOSTS[provider]) fail("canary source roles need endpoints outside the isolated provider policy; use a single first-party provider");

@@ -330,8 +330,9 @@ test("Podman's bare-hex image id is published in docker's sha256: spelling, and 
 
 // --- the capability gates are ONE table (issues #501, #502) ---
 
-test("CAPABILITY_GATES: the old three in their old order, then modelPolicy (#502), tokenBudget (#501), mcp, forgeMcp, awaitInput (#625), reportProgress (#644), recover (#645), steer (#646), sandboxLayout (#683) and observableRunner (#730), each keyed once, each free for a job without its feature", async () => {
-	assert.deepEqual(CAPABILITY_GATES.map((gate) => gate.token), ["replicas", "commands", "excludeTools", "modelPolicy", "tokenBudget", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "observableRunner", "fork", "approvalGates", "modelFailover", "modelRoles", "watch", "questionGrouping", "answerDraft", "subscriptionAuth", "packageCanary"], "the order the branches had, so a job carrying several is refused for the same one; a new row appends, in the order the features landed");
+test("CAPABILITY_GATES: the old three in their old order, then modelPolicy (#502), tokenBudget (#501), mcp, forgeMcp, awaitInput (#625), reportProgress (#644), recover (#645) and steer (#646), each keyed once, each free for a job without its feature", async () => {
+	// The sandboxLayout (#683) and observableRunner (#730) rows left with the venue that armed them.
+	assert.deepEqual(CAPABILITY_GATES.map((gate) => gate.token), ["replicas", "commands", "excludeTools", "modelPolicy", "tokenBudget", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "fork", "approvalGates", "modelFailover", "modelRoles", "watch", "questionGrouping", "answerDraft", "subscriptionAuth", "packageCanary"], "the order the branches had, so a job carrying several is refused for the same one; a new row appends, in the order the features landed");
 	for (const key of ["token", "result", "reason", "event"]) {
 		assert.equal(new Set(CAPABILITY_GATES.map((gate) => gate[key])).size, CAPABILITY_GATES.length, `${key} is unique per row`);
 	}
@@ -453,45 +454,3 @@ test("forgeMcp (DES-FORGE-MCP): a job whose run.mcp names `forge` needs it besid
 	assert.deepEqual(await none({ kind: "github", mcp: ["forge"] }), { mcpUnsupported: "i", declared: ["forgeMcp"] });
 });
 
-test("observableRunner (#730): armed by the VENUE, on every job of a brokered one (both OpenShell modes), and never elsewhere", async () => {
-	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer", "sandboxLayout", "transcriptStderr", "steerStdin", "bundleEnvFile"];
-	// Bind mode is brokered and does not copy: the row is armed there too.
-	for (const copies of [true, false]) {
-		const brokered = makeImagePreflight({ image: "i", copies, brokered: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
-		for (const job of [{ kind: "github" }, { kind: "local" }, { kind: "github", steer: true }]) {
-			assert.deepEqual(await brokered(job), { observableRunnerUnsupported: "i", declared }, `${copies} ${JSON.stringify(job)}`);
-		}
-	}
-	const plain = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
-	assert.equal((await plain({ kind: "github" })).ok, true, "every other venue never reads the token");
-	const fresh = makeImagePreflight({ image: "i", copies: true, brokered: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label([...declared, "observableRunner"].join(","))) });
-	assert.equal((await fresh({ kind: "github" })).ok, true);
-	const row = CAPABILITY_GATES.find((gate) => gate.token === "observableRunner");
-	assert.equal(row.reason, "job-image-observable-runner-unsupported");
-	assert.equal(row.event, "refused_image_observable_runner_unsupported");
-	assert.equal(row.needed({ kind: "github" }), false, "no venue context is an unbrokered venue");
-	assert.equal(row.needed({ kind: "github" }, { brokered: "yes" }), false, "only `true` arms it");
-	assert.throws(() => makeImagePreflight({ image: "i", brokered: "yes" }), /`brokered` must be a boolean/);
-});
-
-test("sandboxLayout (#683): armed by the VENUE, on every job of a copying one, and never on a binding one", async () => {
-	const label = (caps) => `sha256:abc${FIELD_SEP}0.99.1${FIELD_SEP}github${FIELD_SEP}${caps}\n`;
-	const declared = ["replicas", "commands", "excludeTools", "anyUid", "tokenBudget", "modelPolicy", "exitAuth", "mcp", "forgeMcp", "awaitInput", "reportProgress", "recover", "steer"];
-	const copying = makeImagePreflight({ image: "i", copies: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
-	for (const job of [{ kind: "github" }, { kind: "local" }, { kind: "github", steer: false }]) {
-		assert.deepEqual(await copying(job), { sandboxLayoutUnsupported: "i", declared }, JSON.stringify(job));
-	}
-	// A binding venue (the default, and every venue before #683) never reads the token, whatever the job carries.
-	const binding = makeImagePreflight({ image: "i", spawnFn: fakeSpawn([], { image: 0, info: 0 }, label(declared.join(","))) });
-	assert.equal((await binding({ kind: "github" })).ok, true);
-	const fresh = makeImagePreflight({ image: "i", copies: true, spawnFn: fakeSpawn([], { image: 0, info: 0 }, label([...declared, "sandboxLayout"].join(","))) });
-	assert.equal((await fresh({ kind: "github" })).ok, true);
-	const row = CAPABILITY_GATES.find((gate) => gate.token === "sandboxLayout");
-	assert.equal(row.reason, "job-image-sandbox-layout-unsupported");
-	assert.equal(row.event, "refused_image_sandbox_layout_unsupported");
-	assert.equal(row.needed({ kind: "github" }), false, "no venue context is a binding venue");
-	assert.equal(row.needed({ kind: "github" }, { copies: "yes" }), false, "only `true` arms it");
-	// The option is the venue's and a boolean, refused otherwise, so a truthy string cannot arm or disarm the row.
-	for (const copies of ["true", 1, null]) assert.throws(() => makeImagePreflight({ image: "i", copies }), TypeError, String(copies));
-});

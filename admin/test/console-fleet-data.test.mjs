@@ -6,12 +6,10 @@ import { PAGES, parsePageQuery, pageQueryString, loadPageData, pagePanels, rende
 
 const AT = Date.UTC(2026, 9, 28, 12);
 
-test("host and venue queries are strict closed routes and round trip without echoing rejected values", () => {
+test("host queries are strict closed routes and round trip without echoing rejected values", () => {
   assert.equal(PAGES.host.path, "/fleet/host");
   assert.equal(PAGES.host.live, true);
-  assert.equal(PAGES.venue.path, "/fleet/venue");
-  assert.equal(PAGES.venue.live, false);
-  for (const [page, name] of [["host", "build3"], ["venue", "openshell-bind"]]) {
+  for (const [page, name] of [["host", "build3"]]) {
     const result = parsePageQuery(page, new URLSearchParams({ name }));
     assert.deepEqual(result.query, { name });
     assert.equal(pageQueryString(page, result.query), `name=${name}`);
@@ -21,7 +19,6 @@ test("host and venue queries are strict closed routes and round trip without ech
       assert.ok(!refusal.includes("canary-secret"));
     }
   }
-  assert.ok(parsePageQuery("venue", new URLSearchParams("name=new-venue")).refusal);
 });
 
 test("Fleet asks for waiting jobs and rechecks the kill-switch plan on every load without carrying connection credentials", async () => {

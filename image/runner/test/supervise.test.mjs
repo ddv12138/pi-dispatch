@@ -4,7 +4,7 @@ import { EventEmitter } from "node:events";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { authenticExitLines, EXIT_OOM_KILLED, parseExitOomKilled } from "../../../worker/src/run-history.mjs";
-import { BY_SUPERVISOR, deathFields, FORWARDED_SIGNALS, KILLED, OOM_KILLED, RAISE_THEN_EXEC, RUNNER_NODE, RUNNER_NODE_FLAGS, RUNNER_OBSERVABLE, RUNNER_OBSERVABLE_ENV, RUNNER_SCRIPT, runnerNodeFor, superviseRunner, TERMINATED } from "../src/supervise.mjs";
+import { BY_SUPERVISOR, deathFields, FORWARDED_SIGNALS, KILLED, OOM_KILLED, RAISE_THEN_EXEC, RUNNER_NODE, RUNNER_NODE_FLAGS, RUNNER_SCRIPT, superviseRunner, TERMINATED } from "../src/supervise.mjs";
 
 /**
  * Issue #596: the supervisor between the container's init and the runner. Every effect is a seam here; the last test
@@ -48,17 +48,6 @@ function run({ env = { PI_EXIT_AUTH: "stdin", PI_JOB_ID: "j1" }, raw = `${KEY}\n
 	});
 	return { child, out, exits, spawned, handlers, drained: () => drained };
 }
-
-test("issue #730: on PI_RUNNER_OBSERVABLE=1 the runner starts from the readable copy, otherwise from the exec-only node", () => {
-	assert.equal(RUNNER_OBSERVABLE, "/opt/pi-dispatch/runner-observable");
-	assert.equal(RUNNER_OBSERVABLE_ENV, "PI_RUNNER_OBSERVABLE");
-	const { spawned } = run({ env: { PI_EXIT_AUTH: "stdin", PI_JOB_ID: "j1", PI_RUNNER_OBSERVABLE: "1" } });
-	assert.deepEqual(spawned[0].args, ["-c", RAISE_THEN_EXEC, RUNNER_OBSERVABLE, "--disable-sigusr1", RUNNER_SCRIPT], "the same flags: the runner still holds the key");
-	// Only the exact "1" the worker writes; the entrypoint refuses any other value before this runs, and the default is
-	// the exec-only node, so a value that slipped past it can only keep the stricter one.
-	for (const value of [undefined, "", "0", "true", " 1", "yes"]) assert.equal(runnerNodeFor(value === undefined ? {} : { PI_RUNNER_OBSERVABLE: value }), RUNNER_NODE, String(value));
-	assert.equal(runnerNodeFor(null), RUNNER_NODE);
-});
 
 test("the runner is started under the exec-only node through a shell that raises its OOM score, then execs it", () => {
 	const { spawned } = run();
@@ -177,25 +166,12 @@ test("the image runs the supervisor from an entry file that always calls it: no 
 test("the entrypoint starts the supervisor under the exec-only node with --disable-sigusr1, and the supervisor is the file the Dockerfile copies", () => {
 	const entrypoint = readFileSync(new URL("../../entrypoint.sh", import.meta.url), "utf8");
 	// The supervisor holds the key: a tool's SIGUSR1 would otherwise open its inspector on 127.0.0.1:9229.
-	assert.match(entrypoint, /\nexec "\$node" --disable-sigusr1 \/app\/image\/runner\/supervise\.mjs\n/);
-	// Issue #730: which node, run for real. Outside the image neither node exists, so the shell's exec fails naming the
-	// path it tried (126 or 127): the exec-only node by default, the readable copy on exactly "1", and any other value
-	// refused with 2 before anything is started.
+	assert.match(entrypoint, /\nexec \/opt\/pi-dispatch\/runner-node --disable-sigusr1 \/app\/image\/runner\/supervise\.mjs\n/);
+	// Outside the image the node does not exist, so the shell's exec fails naming the path it tried (126 or 127).
 	const path = new URL("../../entrypoint.sh", import.meta.url).pathname;
-	const tried = (value) => {
-		const env = { PATH: process.env.PATH, ...(value === undefined ? {} : { PI_RUNNER_OBSERVABLE: value }) };
-		return spawnSync("/bin/sh", [path], { encoding: "utf8", env, timeout: 10000 });
-	};
-	for (const [value, node] of [[undefined, "/opt/pi-dispatch/runner-node"], ["", "/opt/pi-dispatch/runner-node"], ["1", "/opt/pi-dispatch/runner-observable"]]) {
-		const r = tried(value);
-		assert.notEqual(r.status, 0, String(value));
-		assert.match(r.stderr, new RegExp(node.replace(/[/.-]/g, "\\$&")), `${value} tries ${node}`);
-	}
-	for (const value of ["0", "true", "yes", " 1"]) {
-		const r = tried(value);
-		assert.equal(r.status, 2, value);
-		assert.match(r.stderr, /PI_RUNNER_OBSERVABLE must be 1 or unset/);
-	}
+	const r = spawnSync("/bin/sh", [path], { encoding: "utf8", env: { PATH: process.env.PATH }, timeout: 10000 });
+	assert.notEqual(r.status, 0);
+	assert.match(r.stderr, /\/opt\/pi-dispatch\/runner-node/);
 	const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 	assert.match(dockerfile, /\nCOPY image\/runner \/app\/image\/runner\n/, "the whole runner directory, entry file and src/ alike");
 });
@@ -209,59 +185,7 @@ test("the entry file, run by node, runs the supervisor: never a silent exit 0", 
 	assert.ok(r.status === 126 || r.status === 127, `the runner's own code, got ${r.status}: ${r.stderr}`);
 });
 
-// --- issue #686: the stdin frame channel ---------------------------------------------------------------------------
-
-import { PassThrough } from "node:stream";
-import { FRAME_FD } from "../src/steer-frames.mjs";
-
-function framedRun({ key = KEY, bytes = Buffer.from("frame-1-bytes") } = {}) {
-	const child = fakeChild();
-	const fd3 = new PassThrough();
-	const got = [];
-	fd3.on("data", (c) => got.push(Buffer.from(c)));
-	child.stdio = [child.stdin, null, null, fd3];
-	const src = new PassThrough();
-	const spawned = [];
-	const exits = [];
-	let read = 0;
-	superviseRunner({
-		env: { PI_EXIT_AUTH: "stdin-frames", PI_JOB_ID: "j1" },
-		spawnFn: (cmd, args, opts) => (spawned.push({ cmd, args, opts }), child),
-		drain: () => assert.fail("never drained to EOF on the frame channel"),
-		readFrame: () => ((read += 1), { key, problem: key ? null : "malformed", bytes }),
-		openStdin: () => src,
-		write: () => {},
-		exit: (c) => exits.push(c),
-		readResources: () => USED(0),
-		onSignal: () => {},
-	});
-	return { child, fd3, got, src, spawned, exits, read: () => read };
-}
-
-test("stdin-frames: EXACTLY frame 1 is read (never drained), handed on the runner's stdin and closed; every later byte forwarded to fd 3, in order, unchanged (#686)", async () => {
-	const { child, got, src, spawned, read, fd3 } = framedRun();
-	assert.equal(read(), 1);
-	assert.equal(FRAME_FD, 3);
-	assert.deepEqual(spawned[0].opts.stdio, ["pipe", "inherit", "inherit", "pipe"], "a fourth descriptor, the runner's fd 3");
-	assert.deepEqual(child.stdinWritten, Buffer.from("frame-1-bytes"), "the bytes frame 1 was, as read");
-	assert.equal(spawned[0].opts.env.PI_EXIT_AUTH, "stdin-frames", "the runner reads frame 1 too");
-	src.write(Buffer.from([0, 0, 0]));
-	src.write(Buffer.from("rest"));
-	await new Promise((r) => setImmediate(r));
-	assert.deepEqual(Buffer.concat(got), Buffer.from([0, 0, 0, ...Buffer.from("rest")]));
-	assert.equal(fd3.writableEnded, false, "held open while the supervisor's own stdin is");
-	src.end();
-	await new Promise((r) => setImmediate(r));
-	assert.equal(fd3.writableEnded, true, "EOF passed on");
-});
-
-test("stdin-frames: a frame 1 that is no key is handed on as read and nothing more is forwarded (the runner refuses it the same way) (#686)", () => {
-	const { child, spawned } = framedRun({ key: null, bytes: Buffer.from([0, 0, 1, 0]) });
-	assert.deepEqual(spawned[0].opts.stdio, ["pipe", "inherit", "inherit"], "no fd 3 without a key");
-	assert.deepEqual(child.stdinWritten, Buffer.from([0, 0, 1, 0]));
-});
-
-test("PI_EXIT_AUTH=stdin is untouched by the frame channel: drained, three descriptors, closed at once (#686)", () => {
+test("PI_EXIT_AUTH=stdin: drained, three descriptors, the key handed whole and closed", () => {
 	const { spawned, drained, child } = run();
 	assert.equal(drained(), 1);
 	assert.deepEqual(spawned[0].opts.stdio, ["pipe", "inherit", "inherit"]);

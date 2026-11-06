@@ -48,18 +48,13 @@ const rec = (id, hours, extra = {}) => ({ jobId: id, triggerIndex: 2, triggerTyp
 test("detail counts only this trigger inside the day, uses wide history, orders five runs and preserves unknowns", () => {
   const runs = Array.from({ length: 7 }, (_, i) => rec(`j${i}`, i));
   runs.push(rec("old", 25), rec("future", -1), rec("wrong-type", 1, { triggerType: "comment" }), rec("wrong-index", 1, { triggerIndex: 3 }));
-  const snapshot = { readAt: AT, triggers: { triggers: [{ index: 2, type: "label", replicas: 3 }] }, recordDetails: new Map(runs.map((r) => [r.jobId, r])), runs: [], defaultBackend: "openshell", sandboxRetentionHours: 0, waiting: { rows: [{ jobId: "queued", trigger: 2 }, { jobId: "other", trigger: 3 }] } };
+  const snapshot = { readAt: AT, triggers: { triggers: [{ index: 2, type: "label", replicas: 3 }] }, recordDetails: new Map(runs.map((r) => [r.jobId, r])), runs: [], defaultBackend: "local", waiting: { rows: [{ jobId: "queued", trigger: 2 }, { jobId: "other", trigger: 3 }] } };
   const got = triggerDetailOf(snapshot, 2, { now: AT });
   assert.equal(got.count24h, 7);
   assert.equal(got.cost24hTokens, 14);
   assert.equal(got.costIncomplete, false);
   assert.deepEqual(got.lastRuns.map((r) => r.jobId), ["j0", "j1", "j2", "j3", "j4"]);
   assert.deepEqual(got.queued.map((r) => r.jobId), ["queued"]);
-  assert.equal(got.sandbox.backend, "openshell");
-  assert.equal(got.sandbox.serves.recovery, "no");
-  assert.equal(got.sandbox.serves.sandboxShell, "no");
-  assert.equal(got.sandbox.retentionHours, 0);
-  assert.equal(got.sandbox.replicas, 3);
   assert.equal(got.skewed, null);
   assert.equal(triggerDetailOf(snapshot, 99), null);
   assert.equal(triggerDetailOf({ ...snapshot, waiting: { unreachable: true } }, 2).queued, null);
@@ -75,12 +70,11 @@ test("cron detail matches the scheduler id, not a neighbouring row, and uses the
 });
 
 test("editor suggestions expose tier names and blessed capabilities without secret values", () => {
-  const got = readTriggerEditor({ folder: "/repo", paths: { settingsFile: "/settings", globalPiDir: "/pi" }, env: { PI_BACKENDS: "openshell,local", WEBHOOK_SECRET: "PRIVATE_SECRET", GITLAB_TOKEN: "PRIVATE_TOKEN", FORGEJO_WEBHOOK_SECRET: "PRIVATE_SECRET" }, fs: { readFileSync: () => "{}" }, folderSkillsFn: () => ({ skills: [{ name: "fix" }, { name: "helper", isSub: true }] }), overlaySkillsFn: () => ({ skills: [{ name: "review" }] }), stagedSkillsFn: () => ({ skills: [{ name: "test" }] }) });
+  const got = readTriggerEditor({ folder: "/repo", paths: { settingsFile: "/settings", globalPiDir: "/pi" }, env: { PI_BACKENDS: "local", WEBHOOK_SECRET: "PRIVATE_SECRET", GITLAB_TOKEN: "PRIVATE_TOKEN", FORGEJO_WEBHOOK_SECRET: "PRIVATE_SECRET" }, fs: { readFileSync: () => "{}" }, folderSkillsFn: () => ({ skills: [{ name: "fix" }, { name: "helper", isSub: true }] }), overlaySkillsFn: () => ({ skills: [{ name: "review" }] }), stagedSkillsFn: () => ({ skills: [{ name: "test" }] }) });
   assert.deepEqual(got.forges, ["github", "forgejo"]);
   assert.deepEqual(got.flows, [{ name: "fix", tier: "repository" }, { name: "review", tier: "overlay" }, { name: "test", tier: "packages" }]);
   assert.equal(got.defaults.maxTurns, 30);
-  assert.equal(got.defaults.backend, "openshell");
-  assert.equal(got.backends[0].serves.sandboxShell, "no");
+  assert.equal(got.defaults.backend, "local");
   assert.doesNotMatch(JSON.stringify(got), /PRIVATE/);
 });
 

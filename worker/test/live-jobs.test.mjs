@@ -119,7 +119,7 @@ test("jobsMore reads back as a non-negative integer or null", () => {
 });
 
 test("orphan publication carries only a known runtime and integer stop instant, including seeded and digested ids (#748)", () => {
-	for (const venue of ["local", "podman", "openshell", "openshell-bind"]) {
+	for (const venue of ["local"]) {
 		const { jobs } = liveJobsOf({ budgetEntries: [{ id: "unsafe/path", at: 10, orphan: { venue: { backend: venue, task: "private" }, since: 20 } }] });
 		assert.equal(jobs[0].v, venue);
 		assert.equal(jobs[0].s, 20);
@@ -129,8 +129,17 @@ test("orphan publication carries only a known runtime and integer stop instant, 
 		assert.equal(parsed[0].v, venue);
 		assert.equal(parsed[0].s, 20);
 	}
-	const { jobs } = liveJobsOf({ defaultVenue: "podman", budgetEntries: [{ id: "container:pi-job-old", at: 1, orphan: { venue: {}, since: 2 } }] });
-	assert.equal(jobs[0].v, "podman", "an unnamed venue uses the deployment's actual default");
+	// A runtime outside the closed table (a removed venue's leftover ledger row) publishes without `v`, and reads back.
+	// The read-back form is parse-of-parse, like the loop above: the parser normalizes a row (o as a boolean, absent
+	// m and c as null), so a parse of the writer's own rows is never deepEqual to them.
+	const removed = liveJobsOf({ budgetEntries: [{ id: "x2", at: 3, orphan: { venue: { backend: "openshell" }, since: 4 } }] });
+	assert.equal("v" in removed.jobs[0], false);
+	const removedParsed = parseLiveJobs(liveJobsFields({ jobs: removed.jobs, skipped: 0 }).jobs).jobs;
+	assert.deepEqual(parseLiveJobs(removedParsed).jobs, removedParsed);
+	assert.equal("v" in removedParsed[0], false);
+	assert.equal(removedParsed[0].s, 4);
+	const { jobs } = liveJobsOf({ defaultVenue: "local", budgetEntries: [{ id: "container:pi-job-old", at: 1, orphan: { venue: {}, since: 2 } }] });
+	assert.equal(jobs[0].v, "local", "an unnamed venue uses the deployment's actual default");
 	for (const extra of [{ v: "unknown" }, { s: -1 }, { s: "20" }]) assert.equal(parseLiveJobs([{ id: "a", at: 1, o: 1, ...extra }]).dropped, 1);
 });
 

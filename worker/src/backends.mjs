@@ -3,9 +3,8 @@
  * ABLE to guarantee (issue #227).
  *
  * A backend is where the box is built. `local` is the Docker daemon on the worker's own host and is what
- * every deployment has always used; since issue #354 `podman` is the worker account's own rootless Podman.
- * The table exists so another can be added without reading the worker's source, and so that adding one
- * cannot quietly weaken a control.
+ * every deployment uses. The table exists so another can be added without reading the worker's source, and
+ * so that adding one cannot quietly weaken a control.
  *
  * This module imports NOTHING, deliberately, for `forges.mjs`'s reason: it is a leaf, and `doctor`, the
  * config loader and (later) the receiver all need to read a declaration without pulling the Docker
@@ -73,7 +72,7 @@
  *
  * THE PROPERTIES ARE NOT A RENDERING OF `ISOLATION_FLAGS`, and must not become one. That array is the
  * literal, value-free, unconditional set the local argv splices in, and two tests assert every member of it
- * reaches the sandbox argv AGAINST THE IMPORTED ARRAY. Issue #261 explicitly rejected "expressing isolation
+ * reaches the job argv AGAINST THE IMPORTED ARRAY. Issue #261 explicitly rejected "expressing isolation
  * as semantic spec fields (`dropCapabilities`, `pidsLimit`), which is more portable", because it would
  * retire those assertions. So a property here names a GUARANTEE an operator can reason about, and the flags
  * that deliver it stay where they are.
@@ -374,192 +373,6 @@ export const DAEMON_APPLIES_BOUNDS = "daemonAppliesBounds";
 export const RUNTIME_ADDS_NO_MOUNTS = "runtimeAddsNoMounts";
 
 /**
- * The observation that a ROOTLESS Podman applies a job container's pid, memory and cpu bounds (issue #354; the facts it
- * rests on corrected by issue #453's measurements). From the `podman info` read the venue's job user is decided from
- * (rootless, cgroup v2, the cgroup manager Podman uses) and this host's files: the account's systemd user manager
- * running with `pids`, `memory` and `cpu` delegated to it (its `user@<uid>.service` cgroup), and Podman able to put a
- * container under it (the `systemd` cgroup manager, or the worker itself inside that manager). Measured on Podman
- * 5.8.1, Fedora 44: without a reachable user manager a container lands in the caller's own cgroup and its bounds read
- * back `max`, exit 0, and `--cgroups=disabled` does the same; so the word rests on those facts being OBSERVED, and a
- * `cgroups` key in a containers.conf this user's Podman reads withholds it. `pi-dispatch doctor --live` reads
- * `pids.max` and `memory.max` back off a container.
- */
-export const PODMAN_BOUNDS_DELEGATED = "podmanBoundsDelegated";
-
-/**
- * The observation that this worker account's rootless Podman adds no mounts of its own to a job container (issue #354):
- * the mounts.conf that wins (the user's `~/.config/containers/mounts.conf` when it exists, which OVERRIDES
- * `/etc/containers/mounts.conf`, measured) is empty, no containers.conf this user's Podman reads sets `volumes`,
- * `mounts`, `devices` or `hooks_dir`, no OCI hook is installed and FIPS mode is off (`runtime-observations.mjs`,
- * `observePodman`).
- */
-export const PODMAN_ADDS_NO_MOUNTS = "podmanAddsNoMounts";
-
-/**
- * The observation that the podman CLI this worker spawns runs its containers in-process on this host rather than through
- * a remote service (issue #354): `podman info` reports `host.serviceIsRemote: false`. `CONTAINER_HOST`, `--remote` or a
- * `containers.conf` service destination turn it `true` (measured), and a remote service is where the provider key and
- * the per-job forge token would travel as `-e NAME=VALUE`.
- */
-export const PODMAN_SERVICE_LOCAL = "podmanServiceLocal";
-
-/**
- * The observation that the OpenShell gateway this worker's CLI talks to listens on this host (issue #683,
- * `CONST-VENUE-EGRESS-LAYER`'s third condition): `openshell status -o json` names a server on a loopback address or a
- * unix socket. Every job's provider key and forge token reach that gateway, so a remote one is where they would travel.
- * Unlike the docker and podman observations it is not only a floor's business: the openshell venue REFUSES a job on a
- * gateway it does not observe local, whatever the floor says, because the constitution admits a layer venue only so.
- */
-export const OPENSHELL_GATEWAY_LOCAL = "openshellGatewayLocal";
-
-/**
- * The podman venue's refusal of an account containers.conf that widens every job (issue #428), and the run record's
- * `reason` for a job it refuses. Here, in the leaf, rather than in backend-podman.mjs beside the check, so the processor
- * can name it without importing the venue's module (which pulls in the run path and pi-ai).
- */
-export const PODMAN_CONF_WIDENS_JOB = "podman-conf-widens-job";
-
-/**
- * The containers.conf keys that refusal refuses on presence (issues #428, #450 and #448), in the order every text names
- * them. The ONE list for the podman venue: backend-podman.mjs builds `WIDENING_KEY` and its refusal texts from it, and
- * `podman-doc.test.mjs` requires every list of these keys in the docs and the source to be exactly this one,
- * since three copies drifted when #450 added two. The rule for a key issue #448 measured: REFUSED when the job saw its
- * value cross a boundary the worker's argv sets (what the job may reach, run, read or be limited by), or when it could
- * not be measured; documented as INERT when the argv's own pins overrode it; documented as HARMLESS
- * (`PODMAN_HARMLESS_KEYS`) when it reached the job but moved nothing that is a boundary. Measured with the podman venue's
- * own argv on rootless Podman 5.8.1 (Fedora 44) and 4.9.3 (Ubuntu 24.04), each key alone in the account's own
- * containers.conf, on `--network=private` and on an `--internal` network, one parenthesis each:
- * `default_sysctls` (a sysctl set in the job, the vendor's own block excepted), `default_ulimits` (a ulimit set),
- * `seccomp_profile` (the job ran under the named profile), `init_path` (the named binary as its PID 1), `dns_servers`
- * (its nameserver, on `--network=private`), `dns_options` (its resolver options), `dns_searches` (its search list),
- * `base_hosts_file` (its /etc/hosts), `oom_score_adj` (its OOM score), `privileged` (a full capability bounding set, no
- * seccomp filter, the host's devices and an unconfined SELinux label, though `--cap-drop=ALL` still empties its
- * effective set), and from gate round 1 of PR #473: `label` (false ran it as `spc_t` on Fedora), `cgroup_conf` (its
- * pids.max became max past `--pids-limit`), `host_containers_internal_ip` (the address it reaches as
- * host.containers.internal), `runtimes` (the `[engine.runtimes]` table: a wrapper runtime ran for every job),
- * `conmon_path` (a wrapper conmon ran for every job), `cgroups` (disabled left its pids and memory bounds unapplied) and
- * `umask` (its umask became the one named, so what it writes to the host is as open as that says).
- */
-export const PODMAN_WIDENING_KEYS = Object.freeze([
-	"pasta_options",
-	"network_cmd_options",
-	"annotations",
-	"env",
-	"helper_binaries_dir",
-	"network_cmd_path",
-	"default_sysctls",
-	"default_ulimits",
-	"seccomp_profile",
-	"init_path",
-	"dns_servers",
-	"dns_options",
-	"dns_searches",
-	"base_hosts_file",
-	"oom_score_adj",
-	"privileged",
-	"label",
-	"cgroup_conf",
-	"host_containers_internal_ip",
-	"runtimes",
-	"conmon_path",
-	"cgroups",
-	"umask",
-]);
-
-/**
- * The keys of `PODMAN_WIDENING_KEYS` that shape this account's shared rootless network helper (pasta or slirp4netns, the
- * program behind it, and `env`, whose `[engine]` form can point Podman at another containers.conf that does): only these
- * leave a running network carrying the setting after the key is gone, so only their remedy resets that network (issue
- * #450). Every other refused key is applied per container, and the next job after its removal runs (gate round 1 of PR
- * #473, which found the reset asked for every key).
- */
-export const PODMAN_NETWORK_HELPER_KEYS = Object.freeze(["pasta_options", "network_cmd_options", "env", "helper_binaries_dir", "network_cmd_path"]);
-
-/**
- * The keys MEASURED INERT for a podman venue job (issue #448), on rootless Podman 5.8.1 and 4.9.3 with the venue's own
- * argv, one parenthesis each: `userns` (the argv's `--userns=keep-id`), `pidns` (its `--pid=private`), `ipcns` (its
- * `--ipc=private`), `utsns` (its `--uts=private`), `cgroupns` (its `--cgroupns=private`), `netns` (its `--network`),
- * `apparmor_profile` (rootless Podman applies no AppArmor profile: the job's label was `crun (unconfined)` with and
- * without it on Ubuntu 24.04), `default_capabilities` (`--cap-drop=ALL`), `no_new_privileges` (`no-new-privileges`),
- * `init` (`--init`), `pids_limit` (`--pids-limit`), `shm_size` (`--shm-size`), `env_host` (`--env-host=false`) and
- * `http_proxy` (`--http-proxy=false`: a proxy in the account's environment did not reach the job). Documented, not
- * refused.
- */
-export const PODMAN_ROOTLESS_INERT_KEYS = Object.freeze(["userns", "pidns", "ipcns", "utsns", "cgroupns", "netns", "apparmor_profile", "default_capabilities", "no_new_privileges", "init", "pids_limit", "shm_size", "env_host", "http_proxy"]);
-
-/**
- * The containers.conf keys the `local` venue refuses where rootful Podman's Docker API service on this host runs its jobs
- * (issue #448), whatever the value, under `PODMAN_WIDENING_KEYS`' rule, each MEASURED with the job argv the worker
- * builds, on the default network and on an `--internal` one, on Fedora 44 with rootful Podman 5.8.1 and on Ubuntu 24.04
- * with 4.9.3 (`apparmor_profile` on Ubuntu alone, which runs AppArmor; `label` reached the job on Fedora alone, which runs
- * SELinux). What each did, key by key, one parenthesis each so no two keys are read as a list:
- *   `annotations` (the job got the service's own supplementary groups), `env` (a variable in every job),
- *   `helper_binaries_dir` (the netavark and aardvark-dns Podman ran as root for the job's network were the named
- *   directory's), `default_sysctls` (a sysctl set in the job), `default_ulimits` (a ulimit set in the job), `userns`
- *   (with `auto` and no subordinate range the container could not be created), `pidns` (a host PID namespace, refused
- *   at create against the argv's `--init`), `ipcns` (a host IPC namespace, refused at create against `--shm-size`),
- *   `utsns` (the host's UTS namespace and hostname), `cgroupns` (the host's cgroup namespace), `netns` (the host's
- *   network namespace, on the default network), `seccomp_profile` (the job ran under the named profile),
- *   `apparmor_profile` (`unconfined` replaced the job's `containers-default` profile), `init_path` (the job's PID 1 was
- *   the named binary), `dns_servers` (its resolv.conf nameserver, default network), `dns_options` (its resolv.conf
- *   options), `dns_searches` (its resolv.conf search list), `base_hosts_file` (its /etc/hosts), `label` (false ran it as
- *   `spc_t`), `cgroup_conf` (its pids.max became max), `host_containers_internal_ip` (the address of
- *   host.containers.internal), `runtimes` (a wrapper runtime ran for every job), `conmon_path` (a wrapper conmon ran for
- *   every job) and `cgroups` (disabled left its pids and memory bounds unapplied).
- * The one value that is not refused is the vendor's own `default_sysctls = ["net.ipv4.ping_group_range=0 0"]`,
- * uncommented in the stock containers.conf of Fedora 44 and Ubuntu 24.04 (`STOCK_CONF_BLOCKS` in
- * runtime-observations.mjs). The rest are `PODMAN_ROOTFUL_INERT_KEYS` and `PODMAN_HARMLESS_KEYS`. The first three are in
- * `PODMAN_WIDENING_KEYS`' order, and `podman-doc.test.mjs` holds every three-key list of these keys to exactly one of the
- * derived lists.
- */
-export const PODMAN_ROOTFUL_WIDENING_KEYS = Object.freeze([
-	"annotations",
-	"env",
-	"helper_binaries_dir",
-	"default_sysctls",
-	"default_ulimits",
-	"userns",
-	"pidns",
-	"ipcns",
-	"utsns",
-	"cgroupns",
-	"netns",
-	"seccomp_profile",
-	"apparmor_profile",
-	"init_path",
-	"dns_servers",
-	"dns_options",
-	"dns_searches",
-	"base_hosts_file",
-	"label",
-	"cgroup_conf",
-	"host_containers_internal_ip",
-	"runtimes",
-	"conmon_path",
-	"cgroups",
-]);
-
-/**
- * The keys MEASURED INERT for a rootful local job (issue #448), on both hosts, one parenthesis each: `pasta_options`
- * (rootful Podman runs no pasta for these networks; netavark sets them up), `network_cmd_options` (nor slirp4netns),
- * `network_cmd_path` (no slirp4netns ran), `default_capabilities` (the argv's `--cap-drop=ALL`), `no_new_privileges`
- * (the argv's `no-new-privileges`), `init` (the argv's `--init`), `oom_score_adj` (the compat API sends its own, on
- * Fedora and on Ubuntu), `pids_limit` (the argv's `--pids-limit`), `shm_size` (the argv's `--shm-size`), `privileged`
- * (the compat API sends its own, on both), `env_host` (the service's environment did not reach the job), `umask` (the
- * job's umask stayed 0022) and `http_proxy` (a proxy in the service's environment reached no job, with the key absent,
- * true or false): nothing the job saw changed. Documented, not refused.
- */
-export const PODMAN_ROOTFUL_INERT_KEYS = Object.freeze(["pasta_options", "network_cmd_options", "network_cmd_path", "default_capabilities", "no_new_privileges", "init", "oom_score_adj", "pids_limit", "shm_size", "privileged", "env_host", "umask", "http_proxy"]);
-
-/**
- * The keys MEASURED REACHING a job, on both venues and both hosts, that move nothing the worker's argv sets as a boundary
- * (issue #448, gate round 1 of PR #473), so they are documented and not refused: `tz` (the job's clock read the named
- * zone) and `no_hosts` (Podman wrote no /etc/hosts into the job, so it has less, not more). Refusing them would refuse
- * a harmless preference, and a refusal that fires on harmless settings stops being read.
- */
-export const PODMAN_HARMLESS_KEYS = Object.freeze(["tz", "no_hosts"]);
-
-/**
  * The closed list of observations a backend's `observedBy` may name, each with what it means. Closed for the
  * reason `PROPERTIES` is: a typo in a table entry must not become an observation nobody makes, which would
  * degrade a word forever with nothing saying why.
@@ -568,10 +381,6 @@ export const OBSERVATIONS = Object.freeze({
 	[DOCKER_ENDPOINT_LOCAL]: "the docker endpoint this host's docker CLI resolves is on this host",
 	[DAEMON_APPLIES_BOUNDS]: "the daemon reports that it applies a container's pid and memory bounds, and is neither rootless nor Podman",
 	[RUNTIME_ADDS_NO_MOUNTS]: "the container runtime adds no mounts of its own to a job container",
-	[PODMAN_BOUNDS_DELEGATED]: "this worker's rootless Podman runs on cgroup v2 with a systemd user manager running for its account, the pids, memory and cpu controllers delegated to that manager, and Podman putting containers under it, and no containers.conf it reads sets `cgroups`",
-	[PODMAN_ADDS_NO_MOUNTS]: "this worker's rootless Podman adds no mounts of its own to a job container",
-	[PODMAN_SERVICE_LOCAL]: "the podman CLI this worker spawns runs containers on this host, not through a remote service",
-	[OPENSHELL_GATEWAY_LOCAL]: "the OpenShell gateway this worker's openshell CLI talks to listens on a loopback address or a unix socket on this host",
 });
 
 /** What to do about each observation that a floor needed and did not get, keyed like `OBSERVATIONS` and pinned to it. */
@@ -579,10 +388,6 @@ export const OBSERVATION_FIX = Object.freeze({
 	[DOCKER_ENDPOINT_LOCAL]: "Point the docker CLI back at this host (DOCKER_HOST, DOCKER_CONTEXT or `docker context use`), or lower that entry to `asserted` if the redirect is deliberate.",
 	[DAEMON_APPLIES_BOUNDS]: "Run jobs on a rootful Docker Engine that reports PidsLimit and MemoryLimit, or lower that entry to `asserted`: on Podman and rootless daemons `pi-dispatch doctor --live` reads pids.max and memory.max off a real container instead.",
 	[RUNTIME_ADDS_NO_MOUNTS]: "On Podman, create an empty /etc/containers/mounts.conf and remove any `volumes` or `mounts` key from containers.conf (and write it in plain ASCII with no escaped key or multi-line string, which the check refuses rather than guesses at), then restart podman.service if it is running, since it keeps the containers.conf it started with, or lower that entry to `asserted`.",
-	[PODMAN_BOUNDS_DELEGATED]: "Turn on linger for the worker account (`loginctl enable-linger <account>`, which keeps its systemd user manager running with no one logged in) and run the worker as a systemd user service (`pi-dispatch service install`), or give Podman the account's user bus so it uses the systemd cgroup manager; delegate the cpu, memory and pids controllers to that manager on cgroup v2 (a systemd `Delegate=` drop-in for user@.service), remove any `cgroups` key from its containers.conf (written in plain ASCII with no escaped key or multi-line string, which the check refuses rather than guesses at), or lower that entry to `asserted`: `pi-dispatch doctor --live` reads pids.max and memory.max off a real container.",
-	[PODMAN_ADDS_NO_MOUNTS]: "As the worker account, create an empty ~/.config/containers/mounts.conf (or, when it has none, an empty /etc/containers/mounts.conf), remove any `volumes`, `mounts`, `devices` or `hooks_dir` key from every containers.conf it reads (and write those in plain ASCII with no escaped key or multi-line string, which the check refuses rather than guesses at) and any OCI hook, or lower that entry to `asserted`.",
-	[PODMAN_SERVICE_LOCAL]: "Unset CONTAINER_HOST and any containers.conf service destination for the worker account so `podman info` reports serviceIsRemote false, or lower that entry to `asserted`.",
-	[OPENSHELL_GATEWAY_LOCAL]: "Run the OpenShell gateway on this host and register it on loopback (`openshell gateway add https://127.0.0.1:17670 --local`); a remote gateway is refused, not lowered.",
 });
 
 const BACKENDS_TABLE = {
@@ -600,8 +405,8 @@ const BACKENDS_TABLE = {
 		credentialCustody: "container",
 		// Issue #712: what the run-time features this venue serves, in words (`SERVES`). The bundle binds the job's
 		// directories (`binds: true`) and its transcript is a file on the host, so live transcript, progress and `/inbox`
-		// steering work as built; `run.recover` snapshots the host workspace; `pi-dispatch sandbox` has a docker launcher.
-		serves: { liveTranscript: "yes", steering: "yes", recovery: "yes", sandboxShell: "yes" },
+		// steering work as built; `run.recover` snapshots the host workspace.
+		serves: { liveTranscript: "yes", steering: "yes", recovery: "yes" },
 		declares: {
 			// Built by this worker's own argv, in `ISOLATION_FLAGS`, and asserted back member-by-member
 			// against the imported array by two tests. `dockerArgsFromSpec` additionally refuses a
@@ -703,259 +508,7 @@ const BACKENDS_TABLE = {
 			credentialTransit: DOCKER_ENDPOINT_LOCAL,
 		},
 	},
-	podman: {
-		/**
-		 * The worker account's own ROOTLESS Podman, driven through the real `podman` CLI (issue #354,
-		 * `DES-PODMAN-NATIVE-ROOTLESS-BACKEND`). Not `local` pointed at Podman: that route goes through Podman's Docker
-		 * API and keeps `local`'s words. This one runs `podman run` itself, always as the worker's own `<euid>:<egid>`
-		 * under `--userns=keep-id`, and REFUSES what it was not measured on: a rootful Podman (keep-id there is not
-		 * refused, and adds supplementary group 0, measured), a remote service, a root worker, and any platform but
-		 * Linux (`backend-podman.mjs`, `decidePodmanJobUser`). Every word below was measured on rootless Podman 5.8.1,
-		 * Fedora 44, 2026-09-25.
-		 */
-		describe: "this worker account's own rootless Podman, through the podman CLI",
-		// The containers run on this host, as this account. A remote service is refused rather than declared remote, so
-		// the venue is never one; `credentialTransit`'s observation is what notices a CLI that tries.
-		remote: false,
-		// `local`'s: the credentials are `-e` values in the job's own container.
-		credentialCustody: "container",
-		// `local`'s, for `local`'s reasons: the bundle binds, the transcript is a host file, and SANDBOX_LAUNCHERS has a podman row.
-		serves: { liveTranscript: "yes", steering: "yes", recovery: "yes", sandboxShell: "yes" },
-		declares: {
-			// The same `ISOLATION_FLAGS` through the same builder (`buildPodmanRunArgs` shares `argsFromSpec`), read back on
-			// a live rootless container: CapEff 0, NoNewPrivs 1, seccomp 2, pids.max 512, memory.max 4 GiB. AND ONLY WHILE
-			// OBSERVED: the bounds are cgroup v2's, and a user without the controllers delegated accepts the flags and
-			// applies nothing, so the word is earned by `podmanBoundsDelegated`.
-			isolation: ENFORCED,
-			// `--rm` leads ISOLATION_FLAGS and the name carries the job id; measured, `--rm` removes the container (and its
-			// cidfile) when it exits.
-			ephemeral: ENFORCED,
-			// The same `containerSpec` mount list. AND ONLY WHILE OBSERVED: rootless Podman mounts what the winning
-			// mounts.conf lists (`/run/secrets` on Fedora and RHEL by default), invisible in `.Mounts`, so the word is earned
-			// by `podmanAddsNoMounts`. Nothing is relabelled but the job's own per-job directories (`:Z`).
-			mountSet: ENFORCED,
-			// CAPABILITY, gated by PI_EGRESS, as on `local`: a per-job `--internal` network and the proxy attached to it.
-			// Measured rootless: an `--internal` network reaches NOTHING on the host (its IP, host.containers.internal,
-			// 10.0.2.2 and the gateway all fail), and a proxy started on a NAMED bridge network under the same rootless
-			// Podman can be `network connect`ed to it (a pasta or slirp4netns one cannot: exit 125).
-			// The PROXY does reach a server on the host, a reachability fact kept apart in `HOST_ROUTES` (issue #503).
-			egress: ENFORCED,
-			// Same switch: the job and the proxy are the only endpoints on an `--internal` network. Measured, a peer on
-			// another job's network is unreachable (ENOTFOUND / ENETUNREACH).
-			jobToJobIsolation: ENFORCED,
-			// `--pull=never` in ISOLATION_FLAGS; measured, an absent image exits 125 "image not known" with no lookup.
-			imagePinning: ENFORCED,
-			// `spawn` on the CLI, and a payload's exit N reaches `close` as N (measured). The one residual, named in the
-			// design entry and not normalised: with `--init`, an entrypoint catatonit cannot exec exits 1, which only its
-			// stderr tells from a payload's own exit 1, so it retries as infra.
-			exitCodes: ENFORCED,
-			// `podman stop -t 5` on the name, and the abort FLAG is the discriminator, as on `local`.
-			abortable: ENFORCED,
-			// `-v <host>:/job:ro`: the kernel's, and the bundle says it binds.
-			readOnlyJobInputs: ENFORCED,
-			// ENFORCED here where `local` can only assert it, because the ARGV supplies the uid on every job: `--user
-			// <euid>:<egid>` beside `--userns=keep-id`, which the builder refuses to emit without a user and refuses for a
-			// uid or gid of 0 (`assertJobUser`). A root worker and a rootful Podman are refused before any spawn, so the uid
-			// inside is the worker's own unprivileged one on the host (measured rootless: runs as 1234, no root group).
-			nonRoot: ENFORCED,
-			// The same resolver, record and comment code as `local`; where the values go is `credentialTransit`'s.
-			secretsCustody: ENFORCED,
-			// ENFORCED, AND ONLY WHILE OBSERVED, for `local`'s reason with Podman's knob: `CONTAINER_HOST`, `--remote` or a
-			// service destination in containers.conf send the run, and its `-e` values, to a service elsewhere. The worker
-			// asks `podman info` whether the service is remote, and the word is earned by `podmanServiceLocal`.
-			credentialTransit: ENFORCED,
-			// A bind mount of the operator's folder, as on `local`, never relabelled (on an SELinux host it needs the
-			// `semanage fcontext` doctor names), and writable because the job runs as the account that owns it.
-			localFolders: ENFORCED,
-			// `podman pause` on the name, AND ONLY ON CGROUP V2: rootless Podman cannot freeze on v1 (the freezer needs a
-			// cgroup the user owns, which v1 never delegates). The venue already reads which version from `podman info`
-			// (`isolation`'s observation needs v2 too), so the bundle answers `{ ok: false, reason: "cgroup-v1-rootless" }`
-			// there without spawning (`podmanPausable`), and doctor says so. Not an `observedBy` entry: that machinery
-			// lowers a word to `asserted`, which would name an asserter for a freeze nobody provides.
-			pausable: ENFORCED,
-		},
-		// Nothing asserted: every word above is this worker's own argv or an observation of this host.
-		asserts: {},
-		// Podman's OWN observations, never `local`'s: those read `docker info` and the docker CLI's endpoint, which say
-		// nothing about the podman CLI's rootless store.
-		observedBy: {
-			isolation: PODMAN_BOUNDS_DELEGATED,
-			mountSet: PODMAN_ADDS_NO_MOUNTS,
-			credentialTransit: PODMAN_SERVICE_LOCAL,
-		},
-	},
-	openshell: {
-		/**
-		 * An NVIDIA OpenShell sandbox on a gateway this deployment owns (issue #683, `DES-OPENSHELL-VENUE`), driven through
-		 * the real `openshell` CLI with `-o json`, on its Docker or Podman compute driver only. The vendor builds the box:
-		 * an agent container with networking off beside a supervisor container that decides every connection, under
-		 * Landlock and seccomp. So every word this worker cannot build or read back itself is `asserted`, with its asserter
-		 * named, where `local` says `enforced`; `PI_BACKEND_FLOOR` lets an operator refuse that trade at boot. Measured on
-		 * OpenShell 0.1.4, Docker driver, ubuntu-24.04 (Linux 6.17), 2026-10-19.
-		 *
-		 * BLESSABLE SINCE ISSUE #684, which shipped the policy layer `CONST-VENUE-EGRESS-LAYER` asks of a layer venue: the
-		 * per-job network policy generated from the squid venues' own sources, and the per-job credential provider, with
-		 * placeholders in the agent. What the venue does not serve yet (live transcript, progress, steering, recovery) is
-		 * refused or skipped by name until issue #686, which serves the first three here and recovery in bind mode only
-		 * (`openshell-bind`, below).
-		 */
-		describe: "an NVIDIA OpenShell sandbox on this host's gateway, through the openshell CLI",
-		// The gateway is refused unless it is on this host (`OPENSHELL_GATEWAY_LOCAL`), so the venue is never remote.
-		remote: false,
-		// `CONST-VENUE-EGRESS-LAYER`: the venue's own layer holds the credentials, placeholders in the agent (issue #684):
-		// a per-job provider holds the values and the supervisor swaps them in for a request to a host the policy admits.
-		credentialCustody: "layer",
-		// Issue #712: copy mode COPIES the job's files (`binds: false`), so the live transcript comes over the exec's stderr
-		// and steering over its stdin, each only when the job image declares the capability (`transcriptStderr`; for
-		// steering `steerStdin` AND `transcriptStderr`, whose stream carries the acks) and an exit key: `image`. `run.recover` is refused before spend (`openshell-recover-unsupported`)
-		// and refused in the triggers file for a trigger naming this venue (`recoverVenueProblem`). No sandbox launcher.
-		serves: { liveTranscript: "image", steering: "image", recovery: "no", sandboxShell: "no" },
-		declares: {
-			// The agent container and its bounds are the compute driver's (`cap_drop ALL`, `no-new-privileges`, networking
-			// off, a pids limit of 2048, `--cpu` and `--memory`), not an argv this worker builds.
-			isolation: ASSERTED,
-			// The worker creates one sandbox per job and deletes it in a `finally`, and the reaper deletes a crashed one;
-			// that the delete really removes the agent and supervisor containers is the gateway's.
-			ephemeral: ASSERTED,
-			// No mount is the worker's: the job's files are uploaded and downloaded, and what the driver mounts beside them
-			// (its runtime, the supervisor's socket) is the vendor's.
-			mountSet: ASSERTED,
-			// The layer's per-job policy (issue #684), deny-all but for the hosts the allowlist, the model endpoints and the
-			// forge admit. The boot refuses PI_EGRESS=0 with this venue blessed: the layer has no "off" (`config.mjs`).
-			egress: ASSERTED,
-			// Each sandbox's agent has networking off and reaches only its own supervisor, so another job is not on any
-			// network it can see: the driver's construction.
-			jobToJobIsolation: ASSERTED,
-			// The image is resolved by the gateway's driver (`image_pull_policy`, `if_not_present` by default), not by a
-			// `--pull=never` this worker passes.
-			imagePinning: ASSERTED,
-			// `sandbox exec` returns the command's own code and 128+n for a signal (measured: 0, 1, 2, 3, 137, 255, 143
-			// and 137), but through the vendor's relay; a CLI failure also exits 1.
-			exitCodes: ASSERTED,
-			// `sandbox delete` on the name ends the exec (measured: 143), and the abort FLAG is the discriminator as on
-			// every venue; the delete itself is the gateway's.
-			abortable: ASSERTED,
-			// Not a `:ro` bind: the uploaded `/sandbox/job` is read-only because the worker starts the runner through the
-			// image's `pi-landlock`, AFTER the upload (`DES-OPENSHELL-VENUE`, corrected in #683).
-			readOnlyJobInputs: ASSERTED,
-			// OpenShell refuses a root workload, and the worker's policy names the image's uid as `run_as_user`.
-			nonRoot: ASSERTED,
-			// The same resolver and record as `local`, but the values reach a vendor's gateway and supervisor.
-			secretsCustody: ASSERTED,
-			// ENFORCED, AND ONLY WHILE OBSERVED, for `local`'s reason: the values reach the gateway the CLI talks to, and the
-			// worker reads where that is (`openshellGatewayLocal`). A gateway not observed local is refused outright.
-			credentialTransit: ENFORCED,
-			// Copy mode edits a copy, not the operator's folder: a local or cron folder job is refused at load
-			// (`refusesLocalWorkspace`). Bind mode, which can, is its own venue, `openshell-bind` (issue #686 part 3).
-			localFolders: ABSENT,
-			// OpenShell has no pause verb, so live checkpoints are off (`DES-RUN-CHECKPOINT-PAIRED`).
-			pausable: ABSENT,
-		},
-		asserts: {
-			isolation: "OpenShell's compute driver (the agent container it creates with every capability dropped, no new privileges, networking off and a pids limit, under Landlock and seccomp)",
-			ephemeral: "the OpenShell gateway, which removes a sandbox's containers when the worker deletes it",
-			mountSet: "OpenShell's compute driver, which mounts its own runtime and the supervisor's socket and nothing of the job's",
-			egress: "OpenShell's supervisor, which decides every connection by the sandbox's policy",
-			jobToJobIsolation: "OpenShell's compute driver, which gives each sandbox's agent no network beside its own supervisor",
-			imagePinning: "the OpenShell gateway's image pull policy on its compute driver",
-			exitCodes: "OpenShell's exec relay, which returns the command's own code and 128 plus the signal",
-			abortable: "the OpenShell gateway, whose sandbox delete ends the running exec",
-			readOnlyJobInputs: "the job image's /opt/pi-dispatch/pi-landlock (the sandboxLayout capability), which the worker starts the runner through after the upload",
-			nonRoot: "OpenShell, which refuses a root workload, with the image's uid as the policy's run_as_user",
-			secretsCustody: "the OpenShell gateway and supervisor, which hold the job's environment while it runs",
-		},
-		observedBy: {
-			credentialTransit: OPENSHELL_GATEWAY_LOCAL,
-		},
-	},
-	"openshell-bind": {
-		/**
-		 * The OpenShell venue in BIND MODE (issue #686 part 3, `DES-OPENSHELL-VENUE`'s "Bind mode"): the same gateway, the
-		 * same driver, the same per-job network policy and credential provider as `openshell`, but the job's host
-		 * directories are BIND-MOUNTED into the sandbox, as `local` mounts them, through the compute driver's
-		 * `--driver-config-json` mounts. Its own venue rather than a setting of `openshell`, so a floor, a trigger's
-		 * `run.backend` and the run record each name which of the two a job ran in: the words below differ where it
-		 * matters. Opt-in per host: the gateway's gateway.toml must allow driver config and bind mounts and turn resource
-		 * admission off, and upstream warns that a bind "can bypass workspace isolation and filesystem policy".
-		 * Measured on OpenShell 0.1.4, Docker driver, 2026-10-19. Every word not commented is `openshell`'s, for its reason.
-		 */
-		describe: "an NVIDIA OpenShell sandbox on this host's gateway with the job's directories bind-mounted, through the openshell CLI",
-		remote: false,
-		// `CONST-VENUE-EGRESS-LAYER`, UNCHANGED: the provider, the policy and the placeholders are copy mode's exactly.
-		credentialCustody: "layer",
-		// Issue #712: the binds make it `local`'s for the transcript (a host file), `/inbox` steering and recovery (the host
-		// workspace is salvaged and snapshotted at exit); no sandbox launcher, as in copy mode.
-		serves: { liveTranscript: "yes", steering: "yes", recovery: "yes", sandboxShell: "no" },
-		declares: {
-			isolation: ASSERTED,
-			ephemeral: ASSERTED,
-			// The job's mounts ARE the worker's now (the spec's mounts, handed to the driver), but the driver applies them,
-			// beside its own runtime and the supervisor's socket: no argv of the worker's is read back from a daemon.
-			mountSet: ASSERTED,
-			egress: ASSERTED,
-			jobToJobIsolation: ASSERTED,
-			imagePinning: ASSERTED,
-			exitCodes: ASSERTED,
-			abortable: ASSERTED,
-			// A read-only bind (measured: EROFS on a write) and the policy listing `/job` read_only (measured: a write
-			// denied), both applied by the vendor. No pi-landlock here: the bind is the control `local`'s `:ro` is, and the
-			// policy a second one.
-			readOnlyJobInputs: ASSERTED,
-			nonRoot: ASSERTED,
-			secretsCustody: ASSERTED,
-			credentialTransit: ENFORCED,
-			// The operator's folder, bind-mounted read-write as /workspace and edited in place (measured: rw binds write
-			// through, host writes are visible inside live), so a local or cron folder job is admitted. Asserted, not
-			// `local`'s enforced: the driver applies the bind.
-			localFolders: ASSERTED,
-			// Still no pause verb: live checkpoints stay off (`DES-RUN-CHECKPOINT-PAIRED`); an exit snapshot and a salvage
-			// of the host workspace need none.
-			pausable: ABSENT,
-		},
-		asserts: {
-			isolation: "OpenShell's compute driver (the agent container it creates with every capability dropped, no new privileges, networking off and a pids limit, under Landlock and seccomp)",
-			ephemeral: "the OpenShell gateway, which removes a sandbox's containers when the worker deletes it",
-			mountSet: "OpenShell's compute driver, which applies the binds the worker passes in --driver-config-json and mounts its own runtime and the supervisor's socket beside them",
-			egress: "OpenShell's supervisor, which decides every connection by the sandbox's policy",
-			jobToJobIsolation: "OpenShell's compute driver, which gives each sandbox's agent no network beside its own supervisor",
-			imagePinning: "the OpenShell gateway's image pull policy on its compute driver",
-			exitCodes: "OpenShell's exec relay, which returns the command's own code and 128 plus the signal",
-			abortable: "the OpenShell gateway, whose sandbox delete ends the running exec",
-			readOnlyJobInputs: "OpenShell's compute driver, which binds /job read-only, and its supervisor, which applies the policy that lists it read_only",
-			nonRoot: "OpenShell, which refuses a root workload, with the job user's uid as the policy's run_as_user",
-			secretsCustody: "the OpenShell gateway and supervisor, which hold the job's environment while it runs",
-			localFolders: "OpenShell's compute driver, which binds the operator's folder read-write as /workspace",
-		},
-		observedBy: {
-			credentialTransit: OPENSHELL_GATEWAY_LOCAL,
-		},
-	},
 };
-
-/**
- * The podman venue's name (issue #354): the table key, the bundle's `name` and what `PI_BACKENDS` spells, one constant so
- * the adapter, the boot wiring and doctor cannot disagree about it.
- */
-export const PODMAN_BACKEND = "podman";
-
-/** The OpenShell venue's name (issue #683), for `PODMAN_BACKEND`'s reason. */
-export const OPENSHELL_BACKEND = "openshell";
-/** Its bind mode's (issue #686 part 3): a venue of its own, on the same gateway, settings and CLI. */
-export const OPENSHELL_BIND_BACKEND = "openshell-bind";
-/**
- * Review round 2 of #714 (CONST-RETRY-INFRA-ONLY): the named result of an `openshell-bind` run whose sandbox could not
- * be confirmed gone after its exec, where a retry would be wrong: a run that COMPLETED (its work is done and must not be
- * thrown away as a retry) or a FOLDER job (a second agent must not start on a folder the first sandbox may still be
- * writing). Determinate, so a policy outcome, never retried; its spend is recorded. Here, in the leaf, so the processor
- * and the adapter's `OPENSHELL_REFUSALS` share one sentence.
- */
-export const OPENSHELL_BIND_LINGERING = Object.freeze({
-	reason: "openshell-bind-sandbox-lingering",
-	comment: "Stopped: this job ran in an OpenShell sandbox with its files bound from this machine, and the sandbox could not be confirmed gone after the run, so something in it may still be changing those files. The run's result is not used and it is not run again; what it already changed stays as it is. The operator must check the sandbox on the gateway.",
-});
-
-/** Both OpenShell venues, the copy mode first: what "is any OpenShell venue blessed" asks of a list. */
-export const OPENSHELL_BACKENDS = Object.freeze([OPENSHELL_BACKEND, OPENSHELL_BIND_BACKEND]);
 
 /**
  * Who holds a venue's credentials (issue #683, `DES-CONTAINER-BACKEND-REGISTRY`): `container` (the job's own container,
@@ -967,23 +520,20 @@ export const CREDENTIAL_CUSTODY = Object.freeze(["container", "layer"]);
 
 /**
  * The run-time features a venue serves (issue #712, `DES-CONTAINER-BACKEND-REGISTRY`), each entry's `serves` in words:
- * `liveTranscript` (the live transcript and the progress it drives), `steering` (`run.steer` messages), `recovery`
- * (`run.recover`) and `sandboxShell` (`pi-dispatch sandbox <id>`). NOT properties on the three-word scale: they say what a
+ * `liveTranscript` (the live transcript and the progress it drives), `steering` (`run.steer` messages) and `recovery`
+ * (`run.recover`). NOT properties on the three-word scale: they say what a
  * venue CAN DO for an operator, not what it guarantees, so `PI_BACKEND_FLOOR` never compares them. Derived facts held to
- * their sources by `worker/test/backends-serves.test.mjs` (the bundle's `binds` and `transcript`, `SANDBOX_LAUNCHERS`, the
- * copy-mode recovery refusal), so a surface that words them (the console, the panel) reads this table instead of
- * restating which venue does what.
+ * their sources by `worker/test/backends-serves.test.mjs` (the bundle's `binds` and `transcript`), so a surface that
+ * words them (the console, the panel) reads this table instead of restating which venue does what.
  */
-export const SERVES = Object.freeze(["liveTranscript", "steering", "recovery", "sandboxShell"]);
+export const SERVES = Object.freeze(["liveTranscript", "steering", "recovery"]);
 
 /**
  * The words a `serves` entry takes. `yes`: the venue carries the feature itself. `no`: it never does (and `run.recover`
  * naming such a venue is refused). `image`: the venue SKIPS the feature by name (a `liveSkipped` or `steerSkipped`
- * reason on the record) unless the job image declares the capability that carries it, and an exit key: a copying
- * venue's stderr transcript (`transcriptStderr`) and its stdin steering (`steerStdin`, which also needs
- * `transcriptStderr` for the acks). `yes` is about the VENUE only: a feature it serves can still be refused before
- * spend by what the image lacks on any venue (`job-image-steer-unsupported`, `job-image-recover-unsupported`, a
- * missing `exitAuth`), as it always was.
+ * reason on the record) unless the job image declares the capability that carries it. `yes` is about the VENUE only:
+ * a feature it serves can still be refused before spend by what the image lacks on any venue
+ * (`job-image-steer-unsupported`, `job-image-recover-unsupported`, a missing `exitAuth`), as it always was.
  */
 export const SERVES_WORDS = Object.freeze(["yes", "no", "image"]);
 
@@ -993,9 +543,9 @@ export function servesOf(name) {
 }
 
 /**
- * Venues in the table that `PI_BACKENDS` refuses by name (issue #683): built and tested, and not yet admitted, each with
- * the sentence that says why. Removing a name here is the whole of blessing it. EMPTY since issue #684 blessed
- * `openshell`; kept, so the next venue that lands before its gate has the same one-line switch.
+ * Venues in the table that `PI_BACKENDS` refuses by name: built and tested, and not yet admitted, each with
+ * the sentence that says why. Removing a name here is the whole of blessing it. EMPTY; kept, so the next
+ * venue that lands before its gate has the same one-line switch.
  */
 export const NOT_YET_BLESSABLE = Object.freeze({});
 
@@ -1030,7 +580,7 @@ export const DEFAULT_BACKEND = "local";
 
 /**
  * The venue an artifact that NAMES NO VENUE was produced in (issue #277): a session transcript with no stamp
- * beside it, or a sandbox manifest with no `backend` key. Both are written with a venue from #277 on, so one
+ * beside it. Such a stamp is written with a venue from #277 on, so one
  * without was written before venues were recorded, when `local` was the only entry this table had -- a fact
  * about the past rather than a setting.
  *
@@ -1043,8 +593,7 @@ export const DEFAULT_BACKEND = "local";
  * Such a host's default is another venue, so an unstamped transcript there matches no venue it runs and the key
  * cold-starts once as `venue-changed`, then carries the new venue's stamp. Resolving absence to the default
  * instead would resume a Docker-written transcript in a container another runtime built, on the strength of a
- * stamp that was never written: the one thing the stamp exists to refuse. A sandbox manifest with no key is
- * likewise a `local` run, reopened only through the local adapter's own CLI.
+ * stamp that was never written: the one thing the stamp exists to refuse.
  */
 export const UNATTRIBUTED_BACKEND = "local";
 
@@ -1140,15 +689,11 @@ export function parseBackendList(raw, { known = BACKEND_NAMES } = {}) {
 }
 
 /**
- * Which venues run jobs here (issue #354), from the same parse the worker boots with. An unparseable PI_BACKENDS reads as
- * the unset default, `local` alone, so every docker line is exactly what it always was and only the backend section,
- * which reports the parse, fails on it: guessing another venue from a list the worker refuses would be doctor inventing
- * a deployment.
+ * Which venues run jobs here, from the same parse the worker boots with. The table holds `local` alone, so
+ * the answer is `local` unless PI_BACKENDS fails to parse, in which case it is the unset default, `local`
+ * alone, exactly as doctor reads it.
  *
- * Lives here rather than in doctor (where it started) since issue #430: `up` asks the same question to decide whether to
- * drive docker, podman or both, and two copies of "which venues does this list bless" is two answers to one question.
- * A caller that must REFUSE on an unparseable list (`service install`, which would otherwise install a docker-shaped
- * unit for a deployment that meant podman) calls `parseBackendList` itself first.
+ * Lives here rather than in doctor so `up`, `service install` and the Valkey clients read the one answer.
  */
 export function venuesOf(env) {
 	let blessed;
@@ -1157,45 +702,9 @@ export function venuesOf(env) {
 	} catch {
 		blessed = [DEFAULT_BACKEND];
 	}
-	// `openshellUsed` (issue #683, blessable since #684): the doctor's openshell section runs on it, for either mode (issue
-	// #686 part 3), whose gateway, CLI and settings are one; the two mode flags say which mode's own lines to add.
-	const openshellCopyUsed = blessed.includes(OPENSHELL_BACKEND);
-	const openshellBindUsed = blessed.includes(OPENSHELL_BIND_BACKEND);
-	return { localUsed: blessed.includes(DEFAULT_BACKEND), podmanUsed: blessed.includes(PODMAN_BACKEND), podmanDefault: blessed[0] === PODMAN_BACKEND, openshellUsed: openshellCopyUsed || openshellBindUsed, openshellCopyUsed, openshellBindUsed };
+	return { localUsed: blessed.includes(DEFAULT_BACKEND) };
 }
 
-/** The two engines an OpenShell gateway's compute driver may be in v1 (`config.mjs` `openshellFrom` refuses any other). */
-export const OPENSHELL_ENGINES = Object.freeze(["docker", "podman"]);
-
-/**
- * What setting up the openshell venues needs on this host (issue #707), from the venues `venuesOf` read and the two keys
- * the worker boots with (`PI_OPENSHELL_ENGINE`, `PI_OPENSHELL_GATEWAY`, read as `openshellFrom` reads them). ONE rule, so
- * `up`, `service install`, `init`'s next steps and doctor cannot disagree about it:
- *
- *   - `engine`: the gateway's compute driver, docker unless the key says podman. It is the image store the gateway runs
- *     sandboxes from, so the job image must be in it;
- *   - `imageEngine`: that engine, or null where another blessed venue's own step already puts the image in the SAME
- *     store (`local` in docker's, `podman` in this account's rootless Podman store), so `up` pulls it once;
- *   - `valkeyEngine`: the engine Valkey runs on for this deployment, only where neither `local` nor `podman` is blessed
- *     (each of those already decides where the queue runs, and a second Valkey on the same port would only fail to bind);
- *   - `gateway`: the registered gateway's name the worker addresses, or null for the CLI's active one;
- *   - `engineError`: a sentence when the key names an engine v1 does not admit (then both engines above are null).
- *
- * The squid egress proxy is NOT part of it, on purpose: the gateway's per-sandbox network policy is the openshell venue's
- * egress layer (`CONST-VENUE-EGRESS-LAYER`), and a proxy started for it would be one no job of this venue attaches to.
- * Not blessed: `{ used: false }` with every other field null, so a value left in `.env` changes nothing.
- */
-export function openshellSetupOf(venues, env = {}) {
-	if (!venues?.openshellUsed) return { used: false, engine: null, gateway: null, imageEngine: null, valkeyEngine: null, engineError: null };
-	const raw = env?.PI_OPENSHELL_ENGINE;
-	const engine = raw === undefined || raw === null || raw === "" ? "docker" : String(raw);
-	const gateway = typeof env?.PI_OPENSHELL_GATEWAY === "string" && env.PI_OPENSHELL_GATEWAY !== "" ? env.PI_OPENSHELL_GATEWAY : null;
-	if (!OPENSHELL_ENGINES.includes(engine)) {
-		return { used: true, engine, gateway, imageEngine: null, valkeyEngine: null, engineError: `PI_OPENSHELL_ENGINE must be docker or podman, the compute drivers the openshell venue admits (got ${JSON.stringify(engine)})` };
-	}
-	const covered = (engine === "docker" && venues.localUsed) || (engine === "podman" && venues.podmanUsed);
-	return { used: true, engine, gateway, imageEngine: covered ? null : engine, valkeyEngine: venues.localUsed || venues.podmanUsed ? null : engine, engineError: null };
-}
 
 /**
  * `PI_BACKEND_FLOOR` -- the minimum every blessed backend must declare, as `property=word` pairs, comma
@@ -1235,13 +744,6 @@ export function parseBackendFloor(raw) {
 }
 
 /**
- * Whether this host's OpenShell gateway is on this host, as a word for the host registry (issue #712): `local`, `remote`,
- * or `unknown` (not read: the gateway did not answer at boot). A WORD and never the gateway's address, which is operator
- * topology the registry's content rule keeps out. Closed, so a reader can refuse anything else.
- */
-export const HOST_GATEWAY_WORDS = Object.freeze(["local", "remote", "unknown"]);
-
-/**
  * A venue name as a host row may carry one: lowercase-led, lowercase letters, digits and `-`, at most 32 characters.
  * Exported for the runs filter (issue #712), so a venue a newer worker blesses, which the Venues view lists, is also one
  * the filter takes. Every name in BACKENDS has this shape (a test holds it).
@@ -1251,45 +753,38 @@ export const HOST_VENUE_NAME_RE = /^[a-z][a-z0-9-]{0,31}$/;
 const HOST_PROPERTY_NAME_RE = /^[a-z][A-Za-z0-9]{0,47}$/;
 
 /**
- * The registry row's `backends` field (issue #712, `INT-HOST-REGISTRY-CONTRACT`): what venues this host blesses, its
- * floor, and its OpenShell setup, for the console's and the panel's Venues view. One compact string of names and fixed
- * words only, so the row keeps its content rule (names, integers, digests):
+ * The registry row's `backends` field (issue #712, `INT-HOST-REGISTRY-CONTRACT`): what venues this host blesses and its
+ * floor, for the console's and the panel's Venues view. One compact string of names and fixed words only, so the row
+ * keeps its content rule (names, integers, digests):
  *
- *   blessed=<venue>[,<venue>...];floor=<property>:<word>[,...];os=<engine>:<gateway word>
+ *   blessed=<venue>[,<venue>...];floor=<property>:<word>[,...]
  *
  * `blessed` is `PI_BACKENDS` as the worker parsed it, in its order, so the FIRST is the default (the parse's own rule,
  * not a second field that could disagree with it). `floor` is `PI_BACKEND_FLOOR` as `parseBackendFloor` read it, its
- * property names and words, and is left out when there is none. `os` only while an OpenShell venue is blessed: the
- * engine (`OPENSHELL_ENGINES`) and whether the gateway is on this host (`HOST_GATEWAY_WORDS`); the modes are the blessed
- * OpenShell venues themselves (`openshell` copies, `openshell-bind` binds), so they are not written twice.
+ * property names and words, and is left out when there is none.
  *
  * NOT JSON, which `jobs` uses: `jobs` is a list of records, and this is three flat lists a reader splits on two
  * characters, none of which a venue name, a property name or a word can hold. Nothing reads it to decide anything, so
  * deleting `host:*` still changes nothing: it is what the host says about itself, displayed.
  */
-export function hostBackendsField({ backends = [], backendFloor = {}, openshellEngine = null, gatewayWord = "unknown" } = {}) {
+export function hostBackendsField({ backends = [], backendFloor = {} } = {}) {
 	const blessed = (backends ?? []).filter((n) => typeof n === "string" && HOST_VENUE_NAME_RE.test(n));
 	const parts = [`blessed=${blessed.join(",")}`];
 	const floor = Object.entries(backendFloor ?? {}).filter(([p, w]) => HOST_PROPERTY_NAME_RE.test(p) && isDeclaration(w));
 	if (floor.length > 0) parts.push(`floor=${floor.map(([p, w]) => `${p}:${w}`).join(",")}`);
-	if (OPENSHELL_BACKENDS.some((n) => blessed.includes(n))) {
-		const engine = OPENSHELL_ENGINES.includes(openshellEngine) ? openshellEngine : "docker";
-		parts.push(`os=${engine}:${HOST_GATEWAY_WORDS.includes(gatewayWord) ? gatewayWord : "unknown"}`);
-	}
 	return parts.join(";");
 }
 
 /**
- * A peer's `backends` field read back: `{ blessed, default, floor, openshell }`, or null for a row without the field (a
+ * A peer's `backends` field read back: `{ blessed, default, floor }`, or null for a row without the field (a
  * worker from before it) or one that does not read. PEER-WRITTEN, so every element is re-checked as `parseCaps` does:
  * a venue name of the right shape is kept even when this build's table does not hold it (a newer worker's venue, which
- * a reader names rather than hides), a floor entry needs a property-shaped name and one of the three words, and
- * `openshell` is `{ engine, gateway, modes }` with each value from its closed list (`unknown` otherwise). Unknown keys
+ * a reader names rather than hides), a floor entry needs a property-shaped name and one of the three words. Unknown keys
  * are skipped, so a later field does not make an older reader drop the row.
  */
 export function parseHostBackends(raw) {
 	if (typeof raw !== "string" || raw === "" || raw.length > 1024) return null;
-	const out = { blessed: [], default: null, floor: {}, openshell: null };
+	const out = { blessed: [], default: null, floor: {} };
 	let sawBlessed = false;
 	for (const part of raw.split(";")) {
 		const at = part.indexOf("=");
@@ -1304,14 +799,10 @@ export function parseHostBackends(raw) {
 				const [property, word, extra] = item.split(":");
 				if (extra === undefined && HOST_PROPERTY_NAME_RE.test(property ?? "") && isDeclaration(word) && !Object.hasOwn(out.floor, property)) out.floor[property] = word;
 			}
-		} else if (key === "os") {
-			const [engine, gateway] = (items[0] ?? "").split(":");
-			out.openshell = { engine: OPENSHELL_ENGINES.includes(engine) ? engine : "unknown", gateway: HOST_GATEWAY_WORDS.includes(gateway) ? gateway : "unknown", modes: [] };
 		}
 	}
 	if (!sawBlessed) return null;
 	out.default = out.blessed[0] ?? null;
-	if (out.openshell) out.openshell.modes = [...(out.blessed.includes(OPENSHELL_BACKEND) ? ["copy"] : []), ...(out.blessed.includes(OPENSHELL_BIND_BACKEND) ? ["bind"] : [])];
 	return out;
 }
 
@@ -1421,7 +912,7 @@ export function backendRefusals({ backends = [], backendFloor = {}, egress = fal
 	// cannot run with PI_EGRESS=0. Its policy IS the egress control and the provider's placeholders resolve only through
 	// it, so "egress off" has no meaning there: honouring it would mean a policy admitting everything, which hands the
 	// real credential to any host the agent names, and ignoring it would run the job under a control the operator
-	// switched off. Refused at boot, by name, rather than either guess. Every layer venue, not `openshell` by name.
+	// switched off. Refused at boot, by name, rather than either guess.
 	if (egress !== true) {
 		const layered = backends.filter((name) => (BACKENDS[name]?.credentialCustody ?? "container") === "layer");
 		if (layered.length > 0) {
@@ -1499,14 +990,8 @@ const MEASURED_DESKTOP = "2026-09-30, Docker Desktop 4.37.2 (engine 27.4.0), mac
 // Issue #530: the own-address route, measured in the #503 acceptance run on the same Desktop two days later.
 const MEASURED_DESKTOP_OWN = "2026-10-02, Docker Desktop 4.37.2 (engine 27.4.0), macOS";
 const MEASURED_ENGINE = "2026-09-30, Docker Engine 29.1.3, Ubuntu 24.04";
-const MEASURED_ROOTFUL = "2026-09-30, Podman 5.8.1 rootful, Fedora";
-const MEASURED_SLIRP = "2026-09-30, Podman 4.9.3 rootless, slirp4netns, Ubuntu 24.04";
-const MEASURED_PASTA = "2026-09-30, Podman 5.8.1 rootless, pasta, Fedora";
 const DESKTOP = { backend: "docker", desktop: true, os: "darwin", version: "27.4.0" };
 const ENGINE = { backend: "docker", desktop: false, version: "29.1.3" };
-const ROOTFUL = { backend: "podman", rootless: false, version: "5.8.1" };
-const SLIRP = { backend: "podman", rootless: true, helper: "slirp4netns", version: "4.9.3" };
-const PASTA = { backend: "podman", rootless: true, helper: "pasta", version: "5.8.1" };
 const BOUND = "The server is bound to that address.";
 const LAN = "Another machine on the LAN (192.168.5.2) answered through the proxy.";
 
@@ -1521,21 +1006,6 @@ const HOST_ROUTES_TABLE = {
 		{ name: HOST_ROUTE_OWN_ADDRESS, when: ENGINE, status: HOST_ROUTE_WORKS, needs: BOUND, measured: MEASURED_ENGINE },
 		{ name: HOST_ROUTE_OTHER_MACHINE, when: ENGINE, status: HOST_ROUTE_REACHABLE, needs: LAN, measured: MEASURED_ENGINE },
 	],
-	"podman-rootful": [
-		{ name: HCI, when: ROOTFUL, status: HOST_ROUTE_WORKS, needs: "The name is the network gateway, and the server listens on 0.0.0.0 only.", measured: MEASURED_ROOTFUL },
-		{ name: HOST_ROUTE_OWN_ADDRESS, when: ROOTFUL, status: HOST_ROUTE_WORKS, needs: BOUND, measured: MEASURED_ROOTFUL },
-		{ name: HOST_ROUTE_OTHER_MACHINE, when: ROOTFUL, status: HOST_ROUTE_REACHABLE, needs: LAN, measured: MEASURED_ROOTFUL },
-	],
-	"podman-rootless-slirp4netns": [
-		{ name: HCI, when: SLIRP, status: HOST_ROUTE_WORKS, needs: "No flag and no containers.conf key. The name resolves to 192.168.5.15, and the server listens on its LAN address or 0.0.0.0.", measured: MEASURED_SLIRP },
-		{ name: HOST_ROUTE_OWN_ADDRESS, when: SLIRP, status: HOST_ROUTE_WORKS, needs: BOUND, measured: MEASURED_SLIRP },
-		{ name: HOST_ROUTE_OTHER_MACHINE, when: SLIRP, status: HOST_ROUTE_REACHABLE, needs: LAN, measured: MEASURED_SLIRP },
-	],
-	"podman-rootless-pasta": [
-		{ name: HCI, when: PASTA, status: HOST_ROUTE_WORKS, needs: "No flag and no containers.conf key. The name resolves to 169.254.1.2, and the server listens on its LAN address or 0.0.0.0.", measured: MEASURED_PASTA },
-		{ name: HOST_ROUTE_OWN_ADDRESS, when: PASTA, status: HOST_ROUTE_REFUTED, needs: "Refused under pasta. Declare host.containers.internal.", measured: MEASURED_PASTA },
-		{ name: HOST_ROUTE_OTHER_MACHINE, when: PASTA, status: HOST_ROUTE_REACHABLE, needs: LAN, measured: MEASURED_PASTA },
-	],
 	"every-venue": [
 		{ name: HOST_ROUTE_LOOPBACK, when: {}, status: HOST_ROUTE_REFUTED, needs: "From the proxy this is the proxy's own host-local address, and the proxy denies it. A server that listens on loopback only answers on Docker Desktop alone, through host.docker.internal.", measured: "2026-09-30, true on every runtime by construction, and measured on the four VM runtimes" },
 	],
@@ -1547,7 +1017,6 @@ export const HOST_ROUTES = Object.freeze(
 );
 
 const ALIASES = new Set([HDI, HCI]);
-const HELPERS = new Set(["slirp4netns", "pasta"]);
 const IPV4_RE = /^(?:(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(?:25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
 const LABEL_RE = /^[a-z0-9_](?:[a-z0-9_-]{0,61}[a-z0-9_])?$/;
 
@@ -1579,23 +1048,17 @@ function declaredHostForm(raw) {
 /** Which runtime input is missing or invalid, or null. */
 function runtimeInputProblem(runtime) {
 	if (!runtime || typeof runtime !== "object") return "the runtime (an object)";
-	if (runtime.backend !== "docker" && runtime.backend !== "podman") return 'backend ("docker" or "podman")';
+	if (runtime.backend !== "docker") return 'backend ("docker")';
 	if (typeof runtime.version !== "string" || runtime.version.trim() === "") return "version (a string)";
-	if (runtime.backend === "docker" && typeof runtime.desktop !== "boolean") return "desktop (a boolean, for docker)";
-	if (runtime.backend === "docker" && runtime.desktop && typeof runtime.os !== "string") return 'os (a string such as "darwin", for Docker Desktop)';
-	if (runtime.backend === "podman" && typeof runtime.rootless !== "boolean") return "rootless (a boolean, for podman)";
-	if (runtime.backend === "podman" && runtime.rootless && !(typeof runtime.helper === "string" && HELPERS.has(runtime.helper.toLowerCase()))) {
-		return 'helper ("slirp4netns" or "pasta", for rootless podman)';
-	}
+	if (typeof runtime.desktop !== "boolean") return "desktop (a boolean, for docker)";
+	if (runtime.desktop && typeof runtime.os !== "string") return 'os (a string such as "darwin", for Docker Desktop)';
 	return null;
 }
 
 function rowApplies(when, runtime) {
 	if (when.backend === undefined) return true;
 	if (when.backend !== runtime.backend || when.version !== runtime.version.trim().replace(/^v/, "")) return false;
-	if (when.backend === "docker") return when.desktop === runtime.desktop && (!when.desktop || when.os === runtime.os);
-	if (when.rootless !== runtime.rootless) return false;
-	return !when.rootless || when.helper === runtime.helper.toLowerCase();
+	return when.desktop === runtime.desktop && (!when.desktop || when.os === runtime.os);
 }
 
 /** The runtimes another machine on the LAN was measured reachable on, from the informational rows. */
@@ -1658,7 +1121,7 @@ export function hostRouteFor(runtime, endpointHost) {
 		if (bad !== undefined) return unmeasured(`The host address ${JSON.stringify(bad)} is not a plain IPv4 address, so no route to ${target.host} is judged.`);
 	}
 	const rows = Object.values(HOST_ROUTES).flat().filter((row) => rowApplies(row.when, runtime));
-	const what = [runtime.backend, runtime.version, runtime.backend === "podman" ? (runtime.rootless ? `rootless ${runtime.helper}` : "rootful") : runtime.desktop ? `desktop ${runtime.os}` : "engine"].join(" ");
+	const what = [runtime.backend, runtime.version, runtime.desktop ? `desktop ${runtime.os}` : "engine"].join(" ");
 	const none = () => unmeasured(`No route from the proxy to ${target.host} was measured on ${what}. docs/backends.md lists the measured ones.`);
 	if (target.kind === "name" && ALIASES.has(target.host)) {
 		const row = rows.find((r) => r.name === target.host);

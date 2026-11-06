@@ -7,7 +7,7 @@
  * flaky API never blocks a release. Model is overridable via RELEASE_MODEL (default: a current Sonnet).
  *
  * PRODUCT is READ rather than hard-coded because two workflows call this script: release.yml ships the
- * four npm packages (`worker-v*`, `receiver-v*`, `admin-v*`, `gateway-v*`) and repo-release.yml ships the whole
+ * three npm packages (`worker-v*`, `receiver-v*`, `admin-v*`) and repo-release.yml ships the whole
  * tool (`v*`). It named the admin extension unconditionally, so every tool release asked the model to describe the
  * operator extension and then handed it repo-wide commits to describe it with. The name is the caller's fact, not
  * this file's.

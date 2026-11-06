@@ -25,12 +25,10 @@
 import { closeSync, constants as fsConstants, fstatSync, ftruncateSync, lstatSync, openSync, readFileSync, fsyncSync, writeSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
-import { venuesOf } from "./backends.mjs";
 import { DEFAULT_VALKEY_URL } from "./config.mjs";
 import { deploymentVenueEnv } from "./deployment-venue.mjs";
 import { egressArmed, egressProxyName } from "./egress.mjs";
 import { rulesIncludeEndpoints } from "./egress-proxy-state.mjs";
-import { proxyConfCopyPath } from "./podman-stack.mjs";
 import { readEnvAssignments } from "./env-file.mjs";
 import { MODEL_ENDPOINTS_INCLUDE_NAME, loadModelEndpoints, renderEndpointsInclude } from "./model-endpoints.mjs";
 import { valkeyClientContext } from "./valkey-endpoint.mjs";
@@ -142,18 +140,13 @@ export function writeInPlace(path, text, fs = { openSync, fstatSync, ftruncateSy
 }
 
 /**
- * The reload lines for this deployment's venues: docker's for the docker venue (Docker Engine, Docker Desktop, and
- * rootful Podman through its Docker API, all reached as `docker`), podman's for the native rootless one. Both when
- * the deployment runs both. The proxy's name is PI_EGRESS_PROXY's when it names the operator's own proxy, which then
- * has to mount the include itself.
+ * The reload line for this deployment: docker's, whatever daemon the docker CLI on this host resolves (Docker Engine,
+ * Docker Desktop, or another engine reached through its Docker API). The proxy's name is PI_EGRESS_PROXY's when it
+ * names the operator's own proxy, which then has to mount the include itself.
  */
 export function reloadLines(env) {
-	const venues = venuesOf(env);
 	const proxy = egressProxyName(env);
-	const lines = [];
-	if (venues.localUsed) lines.push(reloadCommand("docker", proxy));
-	if (venues.podmanUsed) lines.push(reloadCommand("podman", proxy));
-	return { lines, proxy };
+	return { lines: [reloadCommand("docker", proxy)], proxy };
 }
 
 /**
@@ -234,7 +227,7 @@ export async function runEgress(argv = [], deps = {}) {
 		out(`✓ wrote ${path} (in place)\n`);
 	}
 	if (venue.error) {
-		out(`The reload depends on the venue, which could not be read: ${venue.error}\nOn Docker: ${reloadCommand("docker", "pi-dispatch-egress-proxy")}\nOn rootless Podman: ${reloadCommand("podman", "pi-dispatch-egress-proxy")}\n`);
+		out(`The reload depends on the venue, which could not be read: ${venue.error}\nOn Docker: ${reloadCommand("docker", "pi-dispatch-egress-proxy")}\n`);
 		return 0;
 	}
 	let armed = true;
@@ -252,19 +245,16 @@ export async function runEgress(argv = [], deps = {}) {
 	if (proxy !== "pi-dispatch-egress-proxy") out(`${proxy} is your own proxy (PI_EGRESS_PROXY): it must mount ${path} at /etc/pi-dispatch/model-endpoints.conf and include it, as the shipped rules do.\n`);
 	// The one state the reload cannot fix (issue #503): endpoints declared, and the rules the proxy runs predate the include.
 	if (proxy === "pi-dispatch-egress-proxy" && endpoints.length > 0) {
-		const venues = venuesOf(venue.env);
-		for (const v of [...(venues.localUsed ? ["docker"] : []), ...(venues.podmanUsed ? ["podman"] : [])]) {
-			const rules = runningRulesPath(v, { cwd, home });
-			// No rules file at all is not that state: init or `service install` writes the current rules, include and all.
-			if (exists(rules) && !rulesFileIncludes(rules, { readFileSync: readRules })) out(`⚠ ${rulesPredateEndpointsLine(v)}\n`);
-		}
+		const rules = runningRulesPath("docker", { cwd, home });
+		// No rules file at all is not that state: init or `service install` writes the current rules, include and all.
+		if (exists(rules) && !rulesFileIncludes(rules, { readFileSync: readRules })) out(`⚠ ${rulesPredateEndpointsLine("docker")}\n`);
 	}
 	return 0;
 }
 
 /**
  * The rules file the shipped proxy runs, per venue (issue #503): docker's mounts the deployment folder's
- * `deploy/egress-proxy.conf`; the rootless podman venue's mounts the account-owned copy `service install` writes.
+ * `deploy/egress-proxy.conf`; the account-owned copy `service install` writes for the stack units is the other.
  */
 export function runningRulesPath(venue, { cwd, home }) {
 	return venue === "podman" ? proxyConfCopyPath(home) : join(cwd, "deploy/egress-proxy.conf");

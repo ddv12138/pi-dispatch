@@ -1,4 +1,3 @@
-import { resolveBackendName } from "./backend-registry.mjs";
 import { MODEL_WHY, providerFailureOf } from "./model-failover-protocol.mjs";
 import { modelListProblem, modelOnList, splitModelEntry } from "./model-ref.mjs";
 import { modelTokenRows } from "./scoped-limits.mjs";
@@ -9,8 +8,10 @@ import { LOCAL_FOLDER_HOLDS_SUBSCRIPTION_AUTH } from "./private-store-boundary.m
 
 export { MODEL_WHY, PROVIDER_FAILURE_KINDS, providerFailureOf } from "./model-failover-protocol.mjs";
 
-export function failoverEgressRequired(job, { egress = false, defaultBackend = "local" } = {}) {
-	return egress || ["openshell", "openshell-bind"].includes(resolveBackendName(job, defaultBackend));
+export function failoverEgressRequired(job, { egress = false } = {}) {
+	// The venue words that used to widen this (openshell copied job files, so failover re-read its own egress) left
+	// with the sandbox backends: the only backend binds the job's directories, so the egress switch alone decides.
+	return egress === true;
 }
 
 import { MODEL_COOLDOWN_MAX_MS, MODEL_RECHECK_MS, modelCooldownKey, readModelCooldown, readModelCooldowns } from "./model-cooldowns.mjs";

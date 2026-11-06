@@ -3,11 +3,8 @@ import { stageAnswerDraft } from "./answerer-runtime.mjs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { resolveBackendName } from "./backend-registry.mjs";
 import { ensureJobsDir } from "./config.mjs";
 import { JOB_MCP_FILE } from "./mcp-config.mjs";
-import { resolveJobImage } from "./image-preflight.mjs";
-import { retainJobDir } from "./sandbox-store.mjs";
 import { prepareGithubWorkspace } from "./prepare-github.mjs";
 import { gitlabRemoteUrl } from "./gitlab-host.mjs";
 import { forgejoRemoteUrl } from "./forgejo-host.mjs";
@@ -17,7 +14,6 @@ import { buildForgejoPrompt } from "./forgejo-prompt.mjs";
 import { buildAzurePrompt } from "./azure-prompt.mjs";
 import { prepareLocalWorkspace } from "./prepare-local.mjs";
 import { copySkillTree } from "./copy-tree.mjs";
-import { recordedJobSize } from "./job-size.mjs";
 import { scheduledForMillis } from "./bullmq-internals.mjs";
 import { stageLiveFile } from "./live-transcript.mjs";
 
@@ -50,16 +46,6 @@ export const TRIGGER_SKILLS_SUBDIR = "trigger-skills";
 export function makePrepareWorkspace({
 	jobsDir,
 	forgeFor,
-	// #277. The deployment's default venue, for the sandbox stamp: a retained directory records the venue the
-	// job resolved to through the SAME function the registry dispatches on, so the venue that ran and the
-	// venue a sandbox later checks are one answer. Null (a DI seam) stamps no venue, and the sandbox refuses.
-	defaultBackend = null,
-	// REQ-RESURRECTABLE-SANDBOX. The DEPLOYMENT default image, resolved per job against the trigger's own
-	// `run.image` through the SAME function the pre-spend preflight and run-container use -- so the tag that
-	// was checked, the tag that ran and the tag a sandbox later re-opens are one answer by construction
-	// rather than three call sites that happen to agree. Null leaves the stamp imageless, and
-	// `resolveSandbox` then refuses rather than guessing.
-	jobImage = null,
 	findPreviousRun = () => null,
 	// REQ-RESUMABLE-SESSION. The default returns null, so an unwired dispatcher -- tests, a bare
 	// construction -- prepares exactly what it always did: no /session mount, nothing on disk.
@@ -95,7 +81,7 @@ export function makePrepareWorkspace({
 	ensureDir(jobsDir);
 	// `pin` (issue #645) is a recovery job's `{ sha, from }`: clone from the checkpoint store at the checkpoint's base
 	// commit (prepare-github.mjs). Forge jobs only; a local job works on its folder in place and has no clone to pin.
-	return async function prepareWorkspace(job, token, { queueJobId, piVersion = null, jobUser = null, podmanStore = null, portfolio = false, size = null, mcp = null, pin = null, watchSecrets = null } = {}) {
+	return async function prepareWorkspace(job, token, { queueJobId, piVersion = null, jobUser = null, portfolio = false, size = null, mcp = null, pin = null, watchSecrets = null } = {}) {
 		ensureDir(jobsDir);
 		const jobDir = mkdtempSync(join(jobsDir, "job-"));
 		// Issue #524: a THROW out of anything below leaves `jobDir` to nobody. The processor tears down only what
@@ -105,7 +91,7 @@ export function makePrepareWorkspace({
 		// covers the thrown ones, in one place for every kind, rather than in each preparer that can throw.
 		// A retry makes a fresh directory, so nothing is lost by removing this one.
 		try {
-			return await prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, podmanStore, portfolio, size, mcp, pin, watchSecrets });
+			return await prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, portfolio, size, mcp, pin, watchSecrets });
 		} catch (error) {
 			// GUARDED: a removal that fails (a busy mount, a permission flipped mid-job) must never replace the error
 			// that is the job's actual outcome. The directory is then left, which is what happened before this catch.
@@ -116,7 +102,7 @@ export function makePrepareWorkspace({
 		}
 	};
 
-	async function prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, podmanStore, portfolio, size, mcp, pin, watchSecrets }) {
+	async function prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, portfolio, size, mcp, pin, watchSecrets }) {
 		if (job.questionGrouping) return prepareQuestionGrouping(job, { jobDir });
 		// The trigger's injected skills (REQ-PER-TRIGGER-SKILLS, issue #60), COPIED here rather than
 		// mounted, and copied ONCE for every job kind because this is where local and forge converge.
@@ -145,23 +131,6 @@ export function makePrepareWorkspace({
 			writeFileSync(join(jobDir, JOB_MCP_FILE), `${JSON.stringify(mcp, null, 2)}\n`, { mode: 0o444 });
 			log("mcp_config_written", { servers: Object.keys(mcp.servers).length, refs: Object.values(mcp.refs).reduce((n, list) => n + list.length, 0) });
 		}
-		// What `cleanup` needs to retain this run's directory, stamped here because this is the only place
-		// that holds all of it at once. Applied to the RESULT rather than mutated in, so a preparer's
-		// `{ outcome: "policy" }` refusal -- which carries no jobDir -- is passed through untouched.
-		const sandbox = {
-			jobId: queueJobId ?? null,
-			kind: job.kind ?? null,
-			image: resolveJobImage(job, jobImage),
-			backend: resolveBackendName(job, defaultBackend),
-			// Issue #341: WHO the job ran as, so a re-opened sandbox runs as the uid that owns these files. Only when the
-			// processor decided it; a direct call stamps nothing, and the sandbox then decides from its own facts.
-			...(jobUser ? { jobUser: { user: jobUser.user ?? null, home: jobUser.home ?? null } } : {}),
-			// Issue #429: the podman store the run's container lived in, for a podman run only.
-			...(typeof podmanStore === "string" && podmanStore !== "" ? { podmanStore } : {}),
-			// Issue #596: the size the run's container had, so a re-opened sandbox gets the same memory and CPU weight.
-			// Rebuilt (`recordedJobSize`), and only when the processor resolved one; a direct call stamps nothing.
-			...(recordedJobSize(size) ? { size: recordedJobSize(size) } : {}),
-		};
 		if (job.kind === "local") {
 			// Harness text above, operator DATA below: the fixed pointer line names /job/event.json so a
 			// flow can discover the trigger context (mirroring the github prompt, which names the same
@@ -184,27 +153,24 @@ export function makePrepareWorkspace({
 			// The snapshot only for a confirmed portfolio job, and never for a chained child or a manual run, whatever its data
 			// says (the processor's gate already holds both; this keeps a direct caller to the same rule).
 			const snapshot = portfolio === true && typeof portfolioSnapshot === "function" && event.source === "cron" ? { portfolio: () => portfolioSnapshot(job) } : {};
-			return withLiveFile(discardOnPolicy(stampSandbox(await prepareLocal({ folder: job.folder, task, jobDir, event, ...(job.watch ? { watch: job.watch, watchDecisionModel: job.watchDecisionModel, watchSecrets } : {}), ...(localPlacement ? { jobPaths: localPlacement.jobPaths, envelopeFile: localPlacement.envelopeFile ?? null, authStoreDir: localPlacement.authStoreDir ?? null, ...(typeof localPlacement.sandboxDir === "string" ? { sandboxDir: localPlacement.sandboxDir } : {}) } : {}), ...snapshot }), sandbox), jobDir));
+			return withLiveFile(discardOnPolicy(await prepareLocal({ folder: job.folder, task, jobDir, event, ...(job.watch ? { watch: job.watch, watchDecisionModel: job.watchDecisionModel, watchSecrets } : {}), ...(localPlacement ? { jobPaths: localPlacement.jobPaths, envelopeFile: localPlacement.envelopeFile ?? null, authStoreDir: localPlacement.authStoreDir ?? null } : {}), ...snapshot }), jobDir));
 		}
 		const prepare = preparers[job.kind];
 		if (prepare) {
 			const host = forgeFor?.(job)?.host;
 			return withLiveFile(discardOnPolicy(stageAnswerDraft(job,
-				stampSandbox(
-					await prepare(job, token, {
-						jobDir,
-						resolveDefaultBranchSha: host?.resolveDefaultBranchSha,
-						// The head ref a pull/merge-request job keys on comes from the FORGE API, never the webhook
-						// payload: an issue_comment on a PR carries no head at all, and a payload-supplied head repo
-						// is attacker-controlled data that must not decide which transcript a job is handed.
-						resolvePullRequestHead: host?.resolvePullRequestHead,
-						resolveSession,
-						piVersion,
-						// Only when set, so a preparer injected by a caller that predates it is called exactly as before.
-						...(pin ? { pin } : {}),
-					}),
-					sandbox,
-				),
+				await prepare(job, token, {
+					jobDir,
+					resolveDefaultBranchSha: host?.resolveDefaultBranchSha,
+					// The head ref a pull/merge-request job keys on comes from the FORGE API, never the webhook
+					// payload: an issue_comment on a PR carries no head at all, and a payload-supplied head repo
+					// is attacker-controlled data that must not decide which transcript a job is handed.
+					resolvePullRequestHead: host?.resolvePullRequestHead,
+					resolveSession,
+					piVersion,
+					// Only when set, so a preparer injected by a caller that predates it is called exactly as before.
+					...(pin ? { pin } : {}),
+				}),
 			), jobDir));
 		}
 		throw new Error(`unknown job kind: ${job.kind}`);
@@ -221,7 +187,7 @@ export function makePrepareWorkspace({
 		if (!prepared?.jobDir || prepared.outcome === "policy" || prepared.session || typeof stageLive !== "function") return prepared;
 		const live = stageLive(prepared.jobDir);
 		if (!live) {
-			log("live_transcript_unstaged", { kind: prepared.sandbox?.kind ?? null });
+			log("live_transcript_unstaged", { kind: prepared.outcome ?? null });
 			return prepared;
 		}
 		return { ...prepared, live };
@@ -258,29 +224,17 @@ function localEventContext(job, queueJobId, findPreviousRun) {
 }
 
 /**
- * Attach the sandbox stamp to a successful prepare, and to nothing else.
- *
- * A preparer's determinate refusal (`{ outcome: "policy", reason: "sha-gone" }`) carries no `jobDir`, so
- * it is returned verbatim: there is no directory to retain and the processor's policy branch reads the
- * same object it always did.
- */
-function stampSandbox(prepared, sandbox) {
-	if (!prepared?.jobDir) return prepared;
-	return { ...prepared, sandbox };
-}
-
-/**
  * Remove the mkdtemp'd job dir when the preparer REFUSED, because nothing downstream will.
  *
- * A determinate refusal carries no `jobDir` (see stampSandbox), and both teardown paths -- `cleanup`
- * and `makeCleanup`'s retention branch -- guard on `prepared?.jobDir`. So the directory this function
- * created two dozen lines up, which by then may hold a partial clone, was simply left on disk: one
- * per refusal, forever. That has been true of `sha-gone` since it shipped and was only ever invisible
- * because refusals are rare; issue #60 adds cap refusals that a misconfigured repo hits on EVERY
- * delivery, which turns a slow leak into a fast one.
+ * A determinate refusal (`{ outcome: "policy", reason: "sha-gone" }`) carries no `jobDir`, and the
+ * teardown paths guard on `prepared?.jobDir`. So the directory this function created a few lines up,
+ * which by then may hold a partial clone, was simply left on disk: one per refusal, forever. That has
+ * been true of `sha-gone` since it shipped and was only ever invisible because refusals are rare;
+ * issue #60 adds cap refusals that a misconfigured repo hits on EVERY delivery, which turns a slow
+ * leak into a fast one.
  *
- * Deliberately not folded into stampSandbox: that function's job is to decide what a RESULT carries,
- * and a filesystem side effect hidden inside it would be the kind of thing the next reader has to
+ * Deliberately a free function rather than a filesystem side effect folded into the prepare call: a
+ * side effect hidden where a reader expects a value is the kind of thing the next reader has to
  * discover. Deliberately `rmSync` rather than the async `rm`, so the directory is gone before the
  * refusal is returned and no teardown ordering has to be reasoned about.
  */
@@ -293,29 +247,6 @@ function discardOnPolicy(prepared, jobDir) {
 /** Remove a per-job dir after the run. The workspace (the operator's folder) is never touched here. */
 export async function cleanup(prepared) {
 	if (prepared?.jobDir) await rm(prepared.jobDir, { recursive: true, force: true });
-}
-
-/**
- * The teardown the worker injects: retain this run's directory for a bounded window instead of deleting
- * it, so `pi-dispatch sandbox` can re-open it (REQ-RESURRECTABLE-SANDBOX).
- *
- * With the window at 0 -- the documented "off" -- this IS `cleanup`, by the same `rm` on the same path,
- * so a deployment that does not want retention keeps today's behaviour exactly rather than a
- * near-equivalent of it. `retainJobDir` owns the other branch entirely, including removing `jobDir` on
- * every failure path, which is why there is no `rm` here to pair with it.
- *
- * NEVER THROWS -- the processor already swallows this in a `finally`, and a retention fault must not be
- * the thing that turns a paid, completed run into a failure.
- */
-export function makeCleanup({ sandboxDir, retentionHours = 0, log = () => {} } = {}) {
-	return async function cleanupWithRetention(prepared) {
-		if (!prepared?.jobDir) return;
-		if (!sandboxDir || retentionHours <= 0) {
-			await cleanup(prepared);
-			return;
-		}
-		retainJobDir(prepared, { sandboxDir, retentionHours, log });
-	};
 }
 
 /**

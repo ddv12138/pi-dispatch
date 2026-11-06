@@ -21,23 +21,3 @@ test("the published ESM entry point loads in plain Node without jiti's CommonJS 
     assert.equal(execFileSync(process.execPath, ["--input-type=module", "--eval", program], { encoding: "utf8", timeout: 30_000 }).trim(), "loaded");
   }
 });
-
-test("the shipped sandbox monitor is a separate bundled IPC program and refuses invalid tracking configuration", async () => {
-  const source = fileURLToPath(new URL("../../worker/src/sandbox-session-monitor.mjs", import.meta.url));
-  const script = readFileSync(new URL("../build.mjs", import.meta.url), "utf8");
-  assert.ok(script.includes('entryPoints: [join(here, "../worker/src/sandbox-session-monitor.mjs")]'));
-  assert.ok(script.includes('outfile: join(here, "dist/sandbox-session-monitor.mjs")'));
-  const dir = tempDir("dispatch-monitor-bundle-");
-  symlinkSync(fileURLToPath(new URL("../../node_modules", import.meta.url)), join(dir, "node_modules"), "junction");
-  const outfile = join(dir, "sandbox-session-monitor.mjs");
-  await build({ ...NODE_BUNDLE_OPTIONS, entryPoints: [source], outfile, banner: { js: NODE_REQUIRE_PRELUDE }, logLevel: "silent" });
-  const child = fork(outfile, [], { stdio: ["ignore", "ignore", "ignore", "ipc"] });
-  try {
-    const ready = once(child, "message", { signal: AbortSignal.timeout(5000) });
-    const exited = once(child, "exit", { signal: AbortSignal.timeout(5000) });
-    // The invalid scheme refuses before any socket or runtime operation is possible.
-    child.send({ valkeyUrl: "invalid://tracking", host: "mini1", id: "gh-1" });
-    assert.deepEqual((await ready)[0], { ready: false });
-    assert.equal((await exited)[0], 0);
-  } finally { child.kill(); }
-});

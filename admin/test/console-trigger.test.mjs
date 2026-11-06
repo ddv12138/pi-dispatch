@@ -38,9 +38,9 @@ test("trigger run and scheduler copy localize fixed phrases while retaining live
  const fire = String(triggerKinds({ locale: "en", query: { index: 0 }, role: "operator", data: { triggerDetail: { trigger: { type: "cron", id: "daily", pattern: "0 2 * * *" }, cron: {} }, triggerFireCheck: { plan: { summary: "Fire this schedule once.", reserve: { slots: 1, tokens: 50 } } } } }));
  assert.match(fire, /Fire this schedule once/); assert.match(fire, /Fire now/); assert.match(fire, /50 tokens/);
 });
-test("trigger sandbox and cron health copy translate while preserving host, backend and retention values", () => {
- const run = String(triggerRun({ locale: "zh", role: "viewer", pages: [], data: { triggerDetail: { trigger: { type: "cron", id: "daily", folder: "/srv/project", replicas: 2 }, sandbox: { retentionHours: 36 } }, snapshot: { triggers: { triggers: [{ type: "cron", id: "daily", folder: "/srv/project" }] } } } }));
- assert.match(run, /36/); assert.match(run, /local/); assert.match(run, /run\.folder/);
+test("trigger cron health copy translates, and the run panel keeps host, backend and replica words", () => {
+ const run = String(triggerRun({ locale: "zh", role: "viewer", pages: [], data: { triggerDetail: { trigger: { type: "cron", id: "daily", folder: "/srv/project", replicas: 2 } }, snapshot: { triggers: { triggers: [{ type: "cron", id: "daily", folder: "/srv/project" }] } } } }));
+ assert.match(run, /local/); assert.match(run, /run\.folder/);
  const cron = String(triggerKinds({ locale: "zh", query: { index: 0 }, role: "viewer", data: { triggerDetail: { trigger: { type: "cron", id: "daily", pattern: "0 2 * * *", next: NOW + 1000 }, cron: { next: NOW + 1000, overdueMs: 1, stalls: 2, stallLimit: 5 } } } }));
  assert.match(cron, /逾期/); assert.match(cron, /2/); assert.match(cron, /5/);
 });

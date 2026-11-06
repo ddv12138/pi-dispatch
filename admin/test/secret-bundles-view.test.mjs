@@ -184,11 +184,11 @@ test("recordBundle is the worker's rebuild: names in the env charset, the closed
 
 const ctxOf = (role, data) => ({ query: { id: "gh-1" }, session: { name: role, role }, data: { now: AT, env: {}, ...data }, readOnly: false });
 
-test("the console's run page shows the variables received, the shadowed names, the openshell counts and a skip's sentence, escaped", async () => {
+test("the console's run page shows the variables received, the shadowed names and a skip's sentence, escaped", async () => {
   const page = async (extra, role = "operator") => (await pagePanels("run", ctxOf(role, { run: { record: { jobId: "gh-1", kind: "github", target: "acme/web#1", ...extra }, source: "local" } }))).map((p) => p.html).join("");
   const got = await page({ bundle: { id: "shop", variables: ["B_TOKEN", "A_URL"], shadowed: ["A_URL"], placeholders: 1, plain: 1 } });
   assert.match(got, /<dt>Secret bundle<\/dt><dd>Variables received: B_TOKEN \(from bundle shop\); shadowed by the trigger&#39;s own run\.secrets: A_URL; 1 as a placeholder, 1 as a value<\/dd>/);
-  assert.match(got, /The trigger's value won; the bundle's was not passed: A_URL/);
+  assert.match(got, /The trigger&#39;s value won; the bundle&#39;s was not passed: A_URL/);
   const viewer = await page({ bundle: { id: "shop", variables: ["B_TOKEN", "A_URL"], shadowed: ["A_URL"], placeholders: 1, plain: 1 } }, "viewer");
   assert.doesNotMatch(viewer, /B_TOKEN|A_URL|Secret bundle|Variables received/, "viewer streams omit the secrets panel on the server");
   assert.match(await page({ bundleSkipped: "head-unverified" }), /<dt>Bundle skipped<\/dt><dd>head-unverified: the forge would not say whose pull request this is/);

@@ -5,7 +5,6 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { LEGACY_COMPOSE_FILE, OLDER_VALKEY_IMAGES, VALKEY_CONTAINER, olderStateFindings, olderValkeyContainerFinding, olderValkeyImage, upValkeyContainerImage } from "../src/older-state.mjs";
 import { COMPOSE_FILE, COMPOSE_VALKEY_OVERRIDE, VALKEY_IMAGE } from "../src/valkey-auth.mjs";
-import { quadletDir } from "../src/podman-stack.mjs";
 
 // Issue #761: `state.older` names state an older release left behind, here the floating `valkey/valkey:8` in the three
 // places an upgrade does not rewrite, and fires ONLY on that exact reference: never on an image an operator chose.
@@ -16,7 +15,6 @@ const HOME = "/home/op";
 const COMPOSE = join(CWD, COMPOSE_FILE);
 const LEGACY = join(CWD, LEGACY_COMPOSE_FILE);
 const OVERRIDE = join(CWD, COMPOSE_VALKEY_OVERRIDE);
-const QUADLET = join(quadletDir(HOME), "pi-dispatch-valkey.container");
 
 // An in-memory folder: a path absent from `files` reads as a missing file does (ENOENT).
 const reader = (files) => (path) => {
@@ -189,24 +187,6 @@ test("an earlier setup's copy at the folder's top naming valkey/valkey:8 is its 
 	assert.deepEqual(await findings({ [LEGACY]: composeWith("    image: valkey/valkey:8.1") }), []);
 });
 
-test("an installed Quadlet unit naming valkey:8 is a finding; :8.1 and a comment are not, and the fix is service install --force (#761)", async () => {
-	const unit = (image) => `[Unit]\nDescription=x\n\n[Container]\n${image}\nContainerName=pi-dispatch-valkey\n`;
-	for (const line of ["Image=docker.io/valkey/valkey:8", "Image = valkey/valkey:8 "]) {
-		const got = await findings({ [QUADLET]: unit(line) });
-		assert.equal(got.length, 1, line);
-		assert.equal(got[0].store, "valkey-quadlet");
-		assert.ok(got[0].label.startsWith(`${QUADLET} runs Valkey as `), got[0].label);
-		assert.ok(got[0].label.endsWith(`this release pins docker.io/${VALKEY_IMAGE}`));
-		assert.ok(got[0].fix.startsWith("`pi-dispatch service install --force` in the deployment folder rewrites the unit and restarts pi-dispatch-valkey.service on the same pi-dispatch-valkey-data volume"), got[0].fix);
-	}
-	for (const line of [`Image=docker.io/${VALKEY_IMAGE}`, "#Image=docker.io/valkey/valkey:8", "; Image=docker.io/valkey/valkey:8", "Image=docker.io/library/redis:8"]) {
-		assert.deepEqual(await findings({ [QUADLET]: unit(line) }), [], line);
-	}
-	// The shipped unit is clean, and a unit somewhere else than quadletDir(home) is not read.
-	assert.deepEqual(await findings({ [QUADLET]: readFileSync(join(REPO, "deploy", "pi-dispatch-valkey.container"), "utf8") }), []);
-	assert.deepEqual(await olderStateFindings({ cwd: CWD, home: "/home/other", readFile: reader({ [QUADLET]: unit("Image=docker.io/valkey/valkey:8") }) }), []);
-});
-
 test("the pi-dispatch-valkey container: this deployment's own on valkey:8 is a finding; absent, on another image, or unreadable is none (#761)", async () => {
 	assert.equal(VALKEY_CONTAINER, "pi-dispatch-valkey");
 	for (const answer of ["valkey/valkey:8\n", "docker.io/valkey/valkey:8"]) {
@@ -275,10 +255,10 @@ test("olderStateFindings never throws: an unreadable file, a missing folder or h
 
 test("every finding at once, in a fixed order, and each line plain text naming the old image and the pinned one (#761)", async () => {
 	const got = await findings(
-		{ [COMPOSE]: composeWith("    image: valkey/valkey:8"), [LEGACY]: composeWith("    image: valkey/valkey:8"), [QUADLET]: "[Container]\nImage=docker.io/valkey/valkey:8\n" },
+		{ [COMPOSE]: composeWith("    image: valkey/valkey:8"), [LEGACY]: composeWith("    image: valkey/valkey:8") },
 		() => ours("valkey/valkey:8\n"),
 	);
-	assert.deepEqual(got.map((f) => f.store), ["valkey-compose", "valkey-compose", "valkey-quadlet", "valkey-container"]);
+	assert.deepEqual(got.map((f) => f.store), ["valkey-compose", "valkey-compose", "valkey-container"]);
 	for (const f of got) {
 		assert.deepEqual(Object.keys(f).sort(), ["fix", "label", "store"], "the doctor site adds id, ok and warn; the module never sets an id");
 		assert.match(f.label, /valkey\/valkey:8\b/);

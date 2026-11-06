@@ -4,7 +4,7 @@ import { test } from "node:test";
 import { appendFileSync, existsSync, mkdirSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { inboxAck } from "../src/steer-ack.mjs";
 import { join } from "node:path";
-import { buildDockerRunArgs, buildPodmanRunArgs } from "../src/docker-run.mjs";
+import { buildDockerRunArgs } from "../src/docker-run.mjs";
 import { CONTAINER_INBOX_DIR } from "../src/container-spec.mjs";
 import { makeLiveTranscriptOpener } from "../src/live-transcript.mjs";
 import { steerTargetKey } from "../src/steer-inbox.mjs";
@@ -29,12 +29,10 @@ const skip = mod ? false : `pi-ai not installed (node ${process.version} < 22.19
 const BASE = { image: "pi-job:x", env: { A: "1" }, jobDir: "/host/jobs/j1", workspace: "/host/jobs/j1/ws", name: "pi-job-j1", sessionDir: "/host/jobs/j1/session" };
 const mountsOf = (args) => args.flatMap((a, i) => (args[i - 1] === "-v" ? [a] : []));
 
-test("the inbox is mounted read-only at /inbox only when the spec names it, on both runtimes", () => {
+test("the inbox is mounted read-only at /inbox only when the spec names it", () => {
 	assert.equal(CONTAINER_INBOX_DIR, "/inbox");
 	const armed = buildDockerRunArgs({ ...BASE, steerInboxDir: "/host/jobs/j1.inbox" });
 	assert.ok(mountsOf(armed).includes("/host/jobs/j1.inbox:/inbox:ro"), "docker: read-only");
-	const podman = buildPodmanRunArgs({ ...BASE, user: "1000:1000", steerInboxDir: "/host/jobs/j1.inbox" });
-	assert.ok(mountsOf(podman).includes("/host/jobs/j1.inbox:/inbox:ro"), "podman: read-only");
 	const relabelled = buildDockerRunArgs({ ...BASE, steerInboxDir: "/host/jobs/j1.inbox", relabel: true });
 	assert.ok(mountsOf(relabelled).includes("/host/jobs/j1.inbox:/inbox:ro,Z"), "a per-job directory, relabelled private like the others");
 });
@@ -44,8 +42,6 @@ test("UNARMED: the argv is byte-identical to one built without the field (undefi
 	assert.deepEqual(buildDockerRunArgs({ ...BASE, steerInboxDir: undefined }), before);
 	assert.deepEqual(buildDockerRunArgs({ ...BASE, steerInboxDir: null }), before);
 	assert.ok(!before.some((a) => String(a).includes("/inbox")));
-	const podmanBefore = buildPodmanRunArgs({ ...BASE, user: "1000:1000" });
-	assert.deepEqual(buildPodmanRunArgs({ ...BASE, user: "1000:1000", steerInboxDir: undefined }), podmanBefore);
 });
 
 // --- arming in runContainer ----------------------------------------------------------------------------------------

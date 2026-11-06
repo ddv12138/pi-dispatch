@@ -16,10 +16,9 @@ const FLEET_READ_TIMEOUT_MS = 2_000;
 const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
 
   pi-dispatch init         scaffold .env + triggers.json + pause-windows.json + pi-packages.json + subscriptions.json here
-  pi-dispatch doctor [--json] [--fix] [--live] [--openshell] [--secrets] [--no-publish]
+  pi-dispatch doctor [--json] [--fix] [--live] [--secrets] [--no-publish]
                            preflight Docker, Valkey, the job image, and your provider key; --fix offers to run each fix (y/N per action);
                            --live reads the backend declarations back off short-lived real containers (shown in docker ps while they run);
-                           --openshell says whether this host is ready for the openshell venue (run anyway once PI_BACKENDS names it);
                            --secrets resolves each project secret bundle here and prints its variable names, never values;
                            every run publishes its checks to Valkey for the console and the panel (labels with paths
                            and secret values redacted, kept 7 days), and --no-publish skips that
@@ -42,17 +41,6 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            ./triggers.json here); a second call in the same minute queues nothing.
                            Both run forms take PI_WORKER_NAME (and --trigger PI_TRIGGERS_FILE and
                            PI_MAX_TOKENS) from this shell, else from ./.env here, refusing a disagreement
-  pi-dispatch sandbox <jobId>
-                           re-open a finished run's sandbox as a shell — same image, same workspace,
-                           no credentials  [--publish <port>[:<containerPort>]] [--pin]
-  pi-dispatch sandbox <id> --attach
-                           return to the tracked shell on its original runtime
-  pi-dispatch sandbox --new <repo> --ref <branch|pr:N|sha> --as <trigger-index> [--pin]
-                           prepare a kept workspace without an agent, container, reservation or run slot
-  pi-dispatch opener install --config <approved Fleet export.json>
-                           register pi-dispatch-open for this account; terminal commands wait for Enter
-  pi-dispatch sandbox --list
-                           what is still re-openable, for how long, and what is running now
   pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-tokens <tokens>
                            replay up to three retained recent jobs in disposable workspaces with forge
                            access blocked, under one experiment cap [--count 1..10] [--json]
@@ -109,8 +97,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 
 	if (cmd === "init") {
 		const { runInit } = await import("./init.mjs");
-		// The environment rides along so the next steps match the venue (issue #453): PI_BACKENDS=podman alone gets
-		// the podman ladder.
+		// The environment rides along so the next steps match the deployment (issue #453).
 		return runInit(process.cwd(), { env });
 	}
 	if (cmd === "setup-host") {
@@ -122,7 +109,6 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 	if (cmd === "doctor") {
 		const { runDoctor } = await import("./doctor.mjs");
 		// `fix` and `live` ride in the deps position (runDoctor(env, depsOrOpts)) — one options bag, no third arg.
-		// `--openshell` (issue #683): the openshell venue's lines, before PI_BACKENDS blesses it (issue #684 made it blessable).
 		// `--secrets` (issue #704): resolve each project secret bundle on this host, printing variable names and a count only.
 		// Publishing (issue #712) is ON unless `--no-publish`; `--publish` says it explicitly (the worker's own runs pass it),
 		// and the two together are refused rather than one silently winning.
@@ -148,7 +134,7 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 			}
 			publishBy = { worker: true, every: hours };
 		}
-		return runDoctor(env, { json: flags.includes("--json"), fix: flags.includes("--fix"), live: flags.includes("--live"), openshell: flags.includes("--openshell"), secrets: flags.includes("--secrets"), publish: !flags.includes("--no-publish"), publishBy });
+		return runDoctor(env, { json: flags.includes("--json"), fix: flags.includes("--fix"), live: flags.includes("--live"), secrets: flags.includes("--secrets"), publish: !flags.includes("--no-publish"), publishBy });
 	}
 
 	if (cmd === "up") {
@@ -177,14 +163,6 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 		return runUpdatesCli(argv.slice(1), { env });
 	}
 
-	if (cmd === "sandbox") {
-		const { runSandbox } = await import("./sandbox-cli.mjs");
-		return runSandbox(argv.slice(1), { env });
-	}
-	if (cmd === "opener") {
-		const { runOpener } = await import("./opener-cli.mjs");
-		return runOpener(argv.slice(1), { env });
-	}
 	if (cmd === "canary") {
 		const { runCanary } = await import("./canary-cli.mjs");
 		return runCanary(argv.slice(1), { env, write, deploymentEnv: cliDeploymentEnv });

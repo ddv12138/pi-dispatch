@@ -68,7 +68,7 @@ export function zeroTouchProblems(m, { width, role, readOnly = false, draftAnswe
     if (m.writeControls || /Test command|Rate limit scope|Package manager/.test(m.questionsText ?? "")) out.push("The viewer received question groups or write controls");
   } else if (readOnly && m.writeControls) out.push("The read-only console received write controls");
   if (!m.draft || m.draft.value !== (phone ? `${draftAnswers} ${draftAnswers === 1 ? "run" : "runs"}` : String(draftAnswers)) || m.draft.font < (phone ? 12 : 30) || m.draft.height < 12 || m.draft.color !== m.ink || !m.draft.text?.includes("edited or as drafted") || !m.draft.text?.includes("still counts as a touch")) out.push("The visible draft-answer count, hierarchy or human-touch explanation is wrong");
-  if (m.actions.some((a) => /draft|standing-answer|sandbox/.test(a))) out.push("The read-only draft count exposes an answer or sandbox action");
+  if (m.actions.some((a) => /draft|standing-answer/.test(a))) out.push("The read-only draft count exposes an answer action");
   return out;
 }
 

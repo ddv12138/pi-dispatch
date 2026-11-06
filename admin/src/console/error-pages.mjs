@@ -163,14 +163,11 @@ function refusalTail(sentence, locale = "en") {
       const together = /^do not go together: each says where the page starts\.$/.exec(tail);
       const fixed = {
         "must be one retained run id.": "必须是一个仍保留的运行 ID。",
-        "must be 1 with one valid host and no other fields.": "必须为 1，并且只包含一个有效主机及无其他字段。",
         "must name one run id.": "必须指定一个运行 ID。",
-        "must be a sandbox or run id.": "必须是沙箱 ID 或运行 ID。",
         "must be a repository path.": "必须是仓库路径。",
         "must be a triggers-file index.": "必须是 triggers 文件索引。",
         "must be a worker name.": "必须是 worker 名称。",
         "must be 0 or 1.": "必须为 0 或 1。",
-        "must be a sandbox preparation id.": "必须是沙箱准备任务 ID。",
         "must be a branch, tag, full SHA or pr:number without spaces or control bytes.": "必须是分支、标签、完整 SHA 或 pr:number，且不能包含空格或控制字符。",
         "must be a worker name (letters, digits, '.', '_', '-', at most 64 characters).": "必须是 worker 名称（字母、数字、'.'、'_'、'-'，且最多 64 个字符）。",
       };
@@ -293,7 +290,7 @@ export function errorPage({ status, kind, theme = null, locale = "en", session =
   const code = Number.isInteger(status) && status >= 400 && status <= 599 ? status : KIND_STATUS[kind];
   const said = translateEntry(ERROR_SENTENCES[kind], locale);
   const nav = NAV_KINDS.has(kind) && session !== null && typeof session === "object";
-  const inner = kind === "host" ? hostCard({ status: code, host, port, address, locale, said }) : cardOf(kind, { status, sentence, page, runId, locale, said });
+  const inner = kind === "host" ? hostCard({ status: code, host, port, address, locale, said }) : cardOf(kind, { status: code, sentence, page, runId, locale, said });
   return {
     status: code,
     html: frameHtml({ name: "error", title: said.title, sub: said.sub, theme, locale, session: nav ? session : null, readOnly: nav ? Boolean(readOnly) : false, nav, here: kind === "no-run" ? "runs" : kind === "no-project" ? "config" : null }, inner),

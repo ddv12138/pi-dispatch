@@ -201,7 +201,6 @@ test("console pages: every screen, both roles, byte-identical to the fixtures an
   // #747: the browser-owned transcript is in the main grid and never inside a swapped panel.
   assert.match(first["run.operator"].html, /<div id="transcript" class="run-transcript"><div class="card">/);
   assert.match(first["run.operator"].html, /data-transcript data-job="gh-2f6a"/);
-  assert.match(first["run.operator"].html, /<span>pi-dispatch<\/span> <span>sandbox<\/span> <span>gh-2f6a<\/span>/);
   assert.match(first["run.viewer"].html, /Transcripts are shown to operators only/);
   assert.doesNotMatch(first["run.viewer"].html, /data-transcript data-job/);
   // Issue #644: the active tables carry each job's progress as integers and a tool name, the remote host's job too; the
@@ -291,7 +290,7 @@ test("console pages: hostile values are escaped or refused, and a viewer never s
 test("parsePageQuery: each screen takes only its own parameters, bounded and charset-checked, and refuses without echoing", async () => {
   const { PAGES, QUERY_LIMITS, pageQueryString, parsePageQuery } = await import("../src/console/pages.mjs");
   const q = (name, qs) => parsePageQuery(name, new URLSearchParams(qs));
-  assert.deepEqual(Object.keys(PAGES), ["setup", "models", "overview", "runs", "sandboxes", "zero-touch", "run", "parked", "answer-rules", "insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows", "fleet", "host", "venue", "trigger", "triggers", "trigger-check", "trigger-add", "config", "secrets", "connections", "updates", "project", "watch", "watch-board", "audit"]);
+  assert.deepEqual(Object.keys(PAGES), ["setup", "models", "overview", "runs", "zero-touch", "run", "parked", "answer-rules", "insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows", "fleet", "host", "trigger", "triggers", "trigger-check", "trigger-add", "config", "secrets", "connections", "updates", "project", "watch", "watch-board", "audit"]);
   assert.ok(Object.isFrozen(PAGES) && Object.values(PAGES).every(Object.isFrozen));
   assert.equal(PAGES.audit.auth, "operator");
   assert.ok(Object.values(PAGES).filter((p) => p.auth !== "operator").every((p) => p.auth === "viewer"));
@@ -450,14 +449,14 @@ test("loadPageData reads only what a screen shows, the snapshot at most once, an
       env: { GITLAB_URL: "https://gl.example", GITHUB_TOKEN: "ghp_secret", VALKEY_URL: "redis://x" },
       now: () => 1234,
     };
-    const query = parsePageQuery(name, name === "project" ? "id=billing" : name === "run" ? "id=gh-1" : name === "host" ? "name=build3" : name === "venue" ? "name=local" : name === "trigger" ? "index=0" : "").query;
+    const query = parsePageQuery(name, name === "project" ? "id=billing" : name === "run" ? "id=gh-1" : name === "host" ? "name=build3" : name === "trigger" ? "index=0" : "").query;
     const data = await loadPageData(name, query, deps);
     assert.equal(data.now, 1234, `${name}: the clock is read once, into the data`);
     assert.deepEqual(data.env, { GITLAB_URL: "https://gl.example" }, `${name}: only forge host variables are kept`);
     assert.ok(calls.snapshot <= 1, `${name}: snapshot at most once`);
     // Issue #737: a screen that reads no snapshot reads the navigation's Parked count, once; one that does takes it from
     // the snapshot, so no screen reads both.
-    const expected = name.startsWith("insights") ? ["insights", "parkedCount"] : { setup: ["snapshot", "setup"], models: ["snapshot", "waiting", "models"], sandboxes: ["parkedCount"], "zero-touch": ["zeroTouch", "parkedCount"], overview: ["snapshot", "waiting"], runs: ["runsPage", "subscriptions", "parkedCount"], run: ["runById", "runsPage", "subscriptions", "transcriptMeta", "parkedCount"], parked: ["snapshot"], "answer-rules": ["snapshot", "parkedCount"], insights: ["insights", "parkedCount"], fleet: ["snapshot", "waiting"], host: ["snapshot", "waiting", "runsPage"], venue: ["snapshot"], trigger: ["snapshot", "waiting"], triggers: ["snapshot", "waiting"], "trigger-check": ["parkedCount"], "trigger-add": ["snapshot"], config: ["snapshot"], secrets: ["snapshot"], connections: ["snapshot", "setup"], updates: ["snapshot"], project: ["snapshot", "waiting"], watch: ["parkedCount"], "watch-board": ["parkedCount"], audit: ["audit", "parkedCount"] }[name];
+    const expected = name.startsWith("insights") ? ["insights", "parkedCount"] : { setup: ["snapshot", "setup"], models: ["snapshot", "waiting", "models"], "zero-touch": ["zeroTouch", "parkedCount"], overview: ["snapshot", "waiting"], runs: ["runsPage", "subscriptions", "parkedCount"], run: ["runById", "runsPage", "subscriptions", "transcriptMeta", "parkedCount"], parked: ["snapshot"], "answer-rules": ["snapshot", "parkedCount"], insights: ["insights", "parkedCount"], fleet: ["snapshot", "waiting"], host: ["snapshot", "waiting", "runsPage"], trigger: ["snapshot", "waiting"], triggers: ["snapshot", "waiting"], "trigger-check": ["parkedCount"], "trigger-add": ["snapshot"], config: ["snapshot"], secrets: ["snapshot"], connections: ["snapshot", "setup"], updates: ["snapshot"], project: ["snapshot", "waiting"], watch: ["parkedCount"], "watch-board": ["parkedCount"], audit: ["audit", "parkedCount"] }[name];
     assert.deepEqual(Object.keys(calls).filter((k) => calls[k] > 0).sort(), [...expected].sort(), `${name} reads ${expected.join(", ")}`);
     assert.ok(calls.parkedCount <= 1, `${name}: the count at most once`);
     assert.equal(data.parkedCount, expected.includes("parkedCount") ? 2 : undefined, `${name}: the count is in the data where it was read`);

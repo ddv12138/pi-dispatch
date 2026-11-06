@@ -49,12 +49,13 @@ test("doctor: the budget off says no quota is set; a quota still set while off w
 });
 
 test("doctor: without the parent the line says the proxy and Valkey get a fair share, not a reserve; an unknown budget and every unmanaged venue warn with a named reason", () => {
-	const [noParent] = line([{ plan: plan("podman", null, "podman-cgroupfs", false), read: null, cgroupManager: "cgroupfs" }], 300);
+	// A venue that keeps no parent cgroup: unknown to the backends table (the podman venue's cgroupfs case went with it).
+	const [noParent] = line([{ plan: plan("nope", null, "venue-unmanaged", false), read: null, cgroupManager: "cgroupfs" }], 300);
 	assert.equal(noParent.warn, true);
-	assert.match(noParent.label, /jobs run without the pidispatch\.slice parent cgroup \(Podman uses the cgroupfs cgroup manager here\), so each job's CPU weight is capped at 1024: the egress proxy and Valkey get a fair share of the CPU, not a reserve/);
+	assert.match(noParent.label, /jobs run without the pidispatch\.slice parent cgroup \(the runtime uses the cgroupfs cgroup manager here\), so each job's CPU weight is capped at 1024: the egress proxy and Valkey get a fair share of the CPU, not a reserve/);
 	const [unknown] = line([{ plan: plan("local", "helper"), read: null }], null);
 	assert.match(unknown.label, /no host CPU reserve across jobs yet: the CPU budget is unknown/);
-	const whys = { "cgroup-v1": /cgroup v1/, "remote-daemon": /not observed on this host/, "rootless-docker": /rootless Docker/, "driver-unknown": /did not say which cgroup driver/, "podman-rootful-remote": /rootful or remote/, other: /keeps no quota on this venue/ };
+	const whys = { "cgroup-v1": /cgroup v1/, "remote-daemon": /not observed on this host/, "rootless-docker": /rootless Docker/, "driver-unknown": /did not say which cgroup driver/, other: /keeps no quota on this venue/ };
 	for (const [why, said] of Object.entries(whys)) {
 		const [c] = line([{ plan: plan("local", null, why), read: null }], 300);
 		assert.equal(c.warn, true, why);
@@ -65,24 +66,23 @@ test("doctor: without the parent the line says the proxy and Valkey get a fair s
 	assert.match(line([{ plan: plan("local", null, "remote-daemon"), read: null }], 300)[0].fix, /on the daemon's host, run once as root: `sudo systemctl set-property pidispatch\.slice CPUQuota=300%`/);
 });
 
-test("doctorCpuReserve: reads (never writes) per answered venue, through the worker's own readQuota; the helper only with the job image present", async () => {
+test("doctorCpuReserve: reads (never writes) the local venue, through the worker's own readQuota; the helper only with the job image present", async () => {
 	const calls = [];
 	const run = async (bin, args) => {
 		calls.push([bin, ...args]);
 		return bin === "systemctl" ? { code: 0, stdout: "3s" } : { code: 0, stdout: "1300000 100000" };
 	};
 	const docker = { answered: true, facts: { cgroupDriver: "cgroupfs", cgroupVersion: "v2", rootless: false } };
-	const podman = { answered: true, info: { rootless: true, cgroupManager: "systemd", cgroupVersion: "v2", serviceIsRemote: false } };
-	const reads = await doctorCpuReserve({ daemon: docker, podman, run, image: "pi-job:pinned", imagePresent: true, platform: "darwin" });
-	assert.deepEqual(reads.map((r) => [r.plan.venue, r.plan.method, r.read]), [["local", "helper", { ok: true, cpuCenti: 1300 }], ["podman", "user-systemd", { ok: true, cpuCenti: 300 }]]);
-	assert.deepEqual(calls, [["docker", ...helperArgs({ image: "pi-job:pinned", read: true })], ["systemctl", "--user", "show", "-P", "CPUQuotaPerSecUSec", "pidispatch.slice"]]);
+	const reads = await doctorCpuReserve({ daemon: docker, run, image: "pi-job:pinned", imagePresent: true, platform: "darwin" });
+	assert.deepEqual(reads.map((r) => [r.plan.venue, r.plan.method, r.read]), [["local", "helper", { ok: true, cpuCenti: 1300 }]]);
+	assert.deepEqual(calls, [["docker", ...helperArgs({ image: "pi-job:pinned", read: true })]]);
 	assert.ok(calls.every((c) => !c.includes("set-property") && !c.some((a) => String(a).includes("> /p/cpu.max"))), "doctor never writes");
 	calls.length = 0;
 	const absent = await doctorCpuReserve({ daemon: docker, run, image: "pi-job:pinned", imagePresent: false });
 	assert.deepEqual(absent[0].read, { ok: false, reason: "job-image-absent" });
 	assert.equal(calls.length, 0);
 	// A venue not run, or not answering, adds nothing; one without a method is listed with no read.
-	assert.deepEqual(await doctorCpuReserve({ daemon: undefined, podman: { answered: false }, run }), []);
+	assert.deepEqual(await doctorCpuReserve({ daemon: undefined, run }), []);
 	const unmanaged = await doctorCpuReserve({ daemon: { answered: true, facts: { cgroupDriver: "systemd", cgroupVersion: "v2" } }, endpointLocal: false, run, platform: "linux" });
 	assert.deepEqual(unmanaged.map((r) => [r.plan.why, r.read]), [["remote-daemon", null]]);
 	assert.equal(calls.length, 0);

@@ -2,18 +2,65 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { test } from "node:test";
 import { inboxAck } from "../../image/runner/src/inbox.mjs";
-import { createFrameDecoder, keyOfFrame } from "../../image/runner/src/steer-frames.mjs";
 import { signExitLine } from "../../image/runner/src/exit-line.mjs";
-import { transcriptRecord } from "../../image/runner/src/transcript-mirror.mjs";
 import { makeInboxRelay } from "../src/inbox-relay.mjs";
 import { makeLiveTranscriptOpener } from "../src/live-transcript.mjs";
-import { keyFrame } from "../src/steer-framing.mjs";
+import { keyFrame, frameMac, steerFrame } from "../src/steer-framing.mjs";
+import { transcriptRecordMac } from "../src/stderr-transcript.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
+
+/** The stderr record `\x1epidt <seq> <type> <end> <mac> <base64>\n`, restated from the format stderr-transcript.mjs states (the runner's writer went with the copying venues). */
+const transcriptRecord = (key, run, seq, type, end, payload = Buffer.alloc(0)) =>
+	`\x1epidt ${seq} ${type} ${end} ${transcriptRecordMac(key, run, String(seq), type, String(end), payload)} ${Buffer.from(payload).toString("base64")}\n`;
+
+/** The key frame's payload is the key itself, one JSON field. */
+const keyOfFrame = (buf) => JSON.parse(buf.toString("utf8")).key;
+
+/**
+ * A minimal reader of the frame format steer-framing.mjs defines (4-byte big-endian length, UTF-8 JSON), standing in
+ * for the runner's deleted decoder: it verifies each steer frame's MAC the way steerFrame built it, and hands
+ * `{ seq, id, frame }` to `onFrame`. A frame it cannot verify is dropped and counted, never fatal.
+ */
+function createFrameDecoder({ key, runId, onFrame = () => {} }) {
+	let buf = Buffer.alloc(0);
+	let dropped = 0;
+	return {
+		push(chunk) {
+			buf = Buffer.concat([buf, Buffer.from(chunk)]);
+			for (;;) {
+				if (buf.length < 4) return;
+				const len = buf.readUInt32BE(0);
+				if (buf.length < 4 + len) return;
+				const payload = buf.subarray(4, 4 + len);
+				buf = buf.subarray(4 + len);
+				let parsed;
+				try {
+					parsed = JSON.parse(payload.toString("utf8"));
+				} catch {
+					dropped += 1;
+					continue;
+				}
+				if (parsed.t !== "steer" || !Number.isSafeInteger(parsed.seq) || parsed.seq < 2) {
+					dropped += 1;
+					continue;
+				}
+				const body = JSON.stringify({ v: parsed.v, id: parsed.id, mode: parsed.mode, source: parsed.source, content: parsed.content });
+				if (parsed.mac !== frameMac(key, runId, parsed.seq, body)) {
+					dropped += 1;
+					continue;
+				}
+				onFrame({ seq: parsed.seq, id: parsed.id, frame: parsed, body });
+			}
+		},
+		stats: () => ({ dropped }),
+	};
+}
 
 // Issue #686, part 2: a steer job on a venue that COPIES its files, armed through stdin frames. The arming matrix (each
 // missing part a named skip, or the old `venue-copies`), the env and the stdin it gets, byte-identity of every other
-// attempt, and one run end to end through the real relay, the real publisher and the runner's own frame decoder: the
-// message goes down stdin as a frame, and its ack comes back over the stderr transcript.
+// attempt, and one run end to end through the real relay, the real publisher and a local reader of the frame format
+// steer-framing.mjs defines (the runner's own decoder went with the copying venues): the message goes down stdin as a
+// frame, and its ack comes back over the stderr transcript.
 
 let mod;
 let importError;
@@ -98,16 +145,18 @@ function harness({ relayOpener = "fake", opener = true, child, binds = false, la
 }
 const skipsOf = (seen) => seen.logs.filter(([e]) => e === "steer_skipped").map(([, f]) => f.reason);
 
-test("ARMED on a copying venue: PI_EXIT_AUTH=stdin-frames beside PI_STEER=1, frame 1 written and the pipe left OPEN for the relay, no /inbox (#686)", { skip }, async () => {
+test("ARMED on a copying venue: the key channel armed beside PI_STEER=1, frame 1 written and the pipe left OPEN for the relay, no /inbox (#686)", { skip }, async () => {
 	const rec = { keyed: true };
 	const { seen, go } = harness({ child: cliChild(rec, { stderr: () => [] }) });
 	const running = go();
 	await new Promise((r) => setImmediate(r));
 	rec.close();
 	const result = await running;
-	assert.equal(seen.env.PI_EXIT_AUTH, "stdin-frames");
+	// The env no longer spells the frames channel: PI_EXIT_AUTH keeps the key channel's one spelling, and PI_TRANSCRIPT
+	// went with the venues that copied their files.
+	assert.equal(seen.env.PI_EXIT_AUTH, "stdin");
+	assert.equal("PI_TRANSCRIPT" in seen.env, false);
 	assert.equal(seen.env.PI_STEER, "1");
-	assert.equal(seen.env.PI_TRANSCRIPT, "stderr", "the acks come back over the stderr transcript");
 	assert.equal(seen.buildOpts.steerInboxDir, undefined, "no directory: the messages go down the pipe");
 	assert.deepEqual(rec.writes[0], keyFrame(KEY), "frame 1 is the key, at the spawn");
 	assert.equal(keyOfFrame(rec.writes[0].subarray(4)), KEY);
@@ -138,7 +187,6 @@ test("the arming matrix: each missing part is the named skip, and the attempt is
 		assert.deepEqual(skipsOf(seen), [c.reason], c.name);
 		assert.equal(result.steerSkipped, c.reason, c.name);
 		assert.equal(seen.env.PI_STEER, undefined, c.name);
-		assert.notEqual(seen.env.PI_EXIT_AUTH, "stdin-frames", c.name);
 		if (c.bag.exitAuth !== false) {
 			assert.equal(seen.env.PI_EXIT_AUTH, "stdin", `${c.name}: the key channel of every other attempt`);
 			assert.equal(rec.ended, `${KEY}\n`, `${c.name}: 64 hex, a newline, the pipe closed at once`);

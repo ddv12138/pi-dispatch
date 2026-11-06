@@ -64,8 +64,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** Where tests live, and where the factories they construct are defined. */
-const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test", "gateway/test"];
-const SRC_DIRS = ["worker/src", "receiver/src", "admin/src", "image/runner/src", "gateway/src"];
+const TEST_DIRS = ["image/runner/test", "worker/test", "receiver/test", "admin/test"];
+const SRC_DIRS = ["worker/src", "receiver/src", "admin/src", "image/runner/src"];
 
 /**
  * What starts a test block. Not `/^test\(/`: `test.only(`, `await test(` and a test indented inside a

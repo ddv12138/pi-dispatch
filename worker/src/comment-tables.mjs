@@ -2,7 +2,7 @@
  * The worker's fixed forge-comment sentences, one leaf module (issue #710, `INT-REASON-CATALOG`).
  *
  * WHY THEY LIVE HERE AND NOT BESIDE THEIR CALL SITES. Each table used to sit in the module that posts it (the processor,
- * the wiring in start.mjs, the pickup gate in index.mjs, the OpenShell adapter), and #710's reason catalog
+ * the wiring in start.mjs, the pickup gate in index.mjs), and #710's reason catalog
  * (reason-catalog.mjs) is built FROM them, never from a copy, so it must import them. Importing those modules would pull
  * the whole job path into everything that explains a reason: the operator console and the `/dispatch` panel bundle the
  * catalog, and the processor alone drags in pi-ai's provider tables, index.mjs a BullMQ worker, start.mjs every forge
@@ -18,7 +18,6 @@
  * the catalog's own test holds each derived sentence identical (===) to the entry it came from.
  */
 
-import { OPENSHELL_BIND_LINGERING } from "./backends.mjs";
 import { EXIT_OOM_KILLED } from "./run-history.mjs";
 
 // ── The processor's (worker/src/processor.mjs re-exports every name) ────────────────────────────────────────────────────
@@ -168,76 +167,20 @@ export const ENVELOPE_MISMATCH_COMMENTS = Object.freeze({
 	mismatch: "Refused: this worker's budget envelope differs from the one the current budget split was made for, so no container was started and nothing was spent. Ask the operator to run `pi-dispatch doctor`. Not run.",
 });
 
-/**
- * The `podman-conf-widens-job` refusal's six texts: rootful Podman's service behind the local venue (`rootful-*`), the podman
- * venue's RUNNING rootless network (`live-*`) or its configuration files, each when a widening key was found (`*widens`)
- * or when the source could not be read whole (`*unread`), which is a different sentence.
- */
-export const PODMAN_CONF_COMMENTS = Object.freeze({
-	"rootful-widens": "Refused: the worker host's Podman configuration adds to every job's container what this venue does not allow (variables, the Podman service's groups, looser limits and filters, or the programs that run it), so the operator must change it before local jobs run. Not run.",
-	"rootful-unread": "Refused: the worker host's Podman configuration could not be read in full, or is written in a form the worker does not decode, so whether it adds to a job's container what this venue does not allow is not known, and the operator must fix that before local jobs run. Not run.",
-	"live-widens": "Refused: the worker host's running Podman network still lets a job's container reach the host's own services, with an option from a configuration since changed, so the operator must restart that network before podman jobs run. Not run.",
-	"live-unread": "Refused: the worker host's running Podman network could not be read, so whether it lets a job's container reach more than this venue allows is not known, and the operator must fix that before podman jobs run. Not run.",
-	widens: "Refused: the worker host's Podman configuration lets a job's container reach more than this venue allows (the host's own services, the worker account's groups, or looser limits and filters than the worker sets), so the operator must change it before podman jobs run. Not run.",
-	unread: "Refused: the worker host's Podman configuration could not be read in full, or is written in a form the worker does not decode, so whether it lets a job's container reach more than this venue allows is not known, and the operator must fix that before podman jobs run. Not run.",
-});
-
 /** A venue's own refusal that came with no sentence of its own (`venueRefused` without a comment). */
 export const VENUE_REFUSED_COMMENT = "Refused: this job's venue cannot run it on this host right now. Not run.";
 /** The same, for a venue's refusal of the project's secret bundle. */
 export const VENUE_BUNDLE_REFUSED_COMMENT = "Refused: this job's venue cannot hold its project's secret bundle as declared. Not run.";
 
 /**
- * The reason a job retried for the podman venue's rootless network keeper carries (issue #458, PR #463 round 2): a
+ * The reason a job retried for the egress proxy's rootless network keeper carries (issue #458, PR #463 round 2): a
  * fixed token, as every run-record reason is, and the key the terminal comment is chosen by.
  */
 export const NETNS_KEEPER_NOT_HOLDING = "netns-keeper-not-holding";
 /** Issue #476: a job held on a young keeper that kept restarting, or stayed young past the hold's bound. */
 export const NETNS_KEEPER_CRASH_LOOP = "netns-keeper-crash-loop";
 
-// ── The OpenShell adapter's (worker/src/backend-openshell.mjs re-exports it) ────────────────────────────────────────────
-
-/**
- * The fixed comments of this venue's own refusals, by reason. Fixed text, so nothing the gateway said reaches a forge
- * comment; the evidence goes to the operator's log.
- */
-export const OPENSHELL_REFUSALS = Object.freeze({
-	"openshell-gateway-not-local": "Refused: this job's venue is an OpenShell gateway that is not observed on this host, and the venue holds the job's credentials in that gateway, so it runs only on a gateway this deployment runs itself. Not run.",
-	"openshell-global-policy": "Refused: the OpenShell gateway has a gateway-wide policy in force, which would replace the policy the worker generates for this job. Not run.",
-	"openshell-landlock-missing": "Refused: this host's kernel does not offer Landlock, which the OpenShell venue needs to confine the job's sandbox and to keep its inputs read-only. Not run.",
-	"openshell-recover-unsupported": "Refused: this trigger asks for runs that continue after a lost worker, which the OpenShell venue cannot checkpoint yet. Run it on another venue, or without run.recover. Not run.",
-	"openshell-credential-reads-value": "Refused: this job's model provider reads its credential's value inside the job (to sign requests, pick an auth scheme or decode it), and on the OpenShell venue the job sees only a placeholder for it. Run it on another venue, or with a provider whose key is sent as it is. Not run.",
-	"openshell-gateway-untested": "Refused: the OpenShell gateway runs another release than the one this venue was measured on. Not run.",
-	// Issue #730: the key holders run readable here, so what keeps a job's tools from the key in their memory is three
-	// things: OpenShell's workload seccomp (process_vm_readv, ptrace, pidfd_getfd), Yama for /proc/<pid>/mem, and the
-	// entrypoint's ulimit -c 0 for a core. The setting goes to the operator's log.
-	"openshell-ptrace-scope-unprotected": "Refused: this host's kernel does not stop a process from reading the memory of the process that started it (Yama ptrace_scope is 0, or cannot be read here), and on the OpenShell venue that is what keeps the job's own tools away from the key that signs its result. Set kernel.yama.ptrace_scope to 1 on this host. Not run.",
-	// Issue #730: scope 2 or 3 also denies the broker its read of the workload (ATTACH is admin-only), so a job would reserve and then fail. The setting goes to the operator's log.
-	"openshell-ptrace-scope-too-strict": "Refused: this host's kernel allows a process to read another's memory only for an administrator (Yama ptrace_scope is 2 or 3), which also stops the OpenShell sandbox from observing the job well enough to let it reach the network, so the job would start and then fail. Set kernel.yama.ptrace_scope to exactly 1 on this host. Not run.",
-	"openshell-egress-untranslatable": "Refused: this deployment's egress settings hold an entry the OpenShell venue cannot turn into its network policy without widening it, so the operator must change it before jobs run there. Not run.",
-	// Issue #686 part 3, review round 2 of #714: the bind venue's named result for a sandbox not confirmed gone (backends.mjs).
-	[OPENSHELL_BIND_LINGERING.reason]: OPENSHELL_BIND_LINGERING.comment,
-	// Issue #704 part 3: a project secret bundle this venue cannot hold as declared (`judgeBundle` says why for each), each
-	// refused before the sandbox exists and before spend. The variable's name and the host go to the operator's log
-	// (`refused_openshell_bundle`), never to a forge comment: a bundle's names are its manager's contents.
-	"openshell-bundle-endpoint-not-allowed": "Refused: this job's project has a secret bundle whose endpoints name a host the job's network policy does not admit by that exact name, and a bundle may not widen what the job reaches. Add the host to egress-allowlist.conf (as itself, not under a wildcard entry), or remove it from the bundle's endpoints. Not run.",
-	"openshell-bundle-endpoint-shared": "Refused: this job's project has a secret bundle whose endpoints name a host the job's own forge, model or MCP credentials are sent to, and on the OpenShell venue a host is bound to one credential provider, so the job's own would stop working there. Remove that host from the bundle's endpoints. Not run.",
-	"openshell-bundle-endpoint-unknown": "Refused: this job's project has a secret bundle whose endpoints name a variable the bundle's resolver did not deliver, so a variable meant to be held as a placeholder could be missing or reach the agent as a value. Fix the name in the bundle's endpoints, or add the variable in the manager. Not run.",
-	"openshell-bundle-name-taken": "Refused: this job's project has a secret bundle with a variable the OpenShell sandbox already sets itself, so one of the two would be silently lost. Rename the variable in the manager. Not run.",
-	"openshell-bundle-unpassable": "Refused: this job's project has a secret bundle with a variable the OpenShell venue cannot hold as a placeholder (a value over 8 KiB, or more endpoint variables or hosts than a sandbox's providers hold). Run the project on another venue, or change the bundle's endpoints. Not run.",
-	"openshell-bundle-image-too-old": "Refused: this job's project has a secret bundle whose variables reach the job as values, and on the OpenShell venue they reach it by a file only a newer job image reads, so this image would run the job without them. Rebuild the job image from a version that declares bundleEnvFile. Not run.",
-	// Issue #686 part 3, bind mode only. The setting goes to the operator's log (`openshell_bind_mounts_disabled`).
-	"openshell-bind-mounts-disabled": "Refused: this job's venue mounts its files into an OpenShell sandbox, and the OpenShell gateway is not configured to allow that (its gateway.toml must allow driver config and bind mounts, and turn resource admission off), so the operator must change it before jobs run there. Not run.",
-});
-
 // ── The wiring's terminal failures (worker/src/start.mjs; once locals of its wiring function) ───────────────────────────
-
-/**
- * The reason a local job held for rootful Podman's service restart fails with once the hold runs out (gate round 2 of
- * PR #473). Defined here, beside the comment it keys, and re-exported by runtime-observations.mjs, which owns the hold;
- * an import the other way would pull that module (and the docker CLI wrapper under it) into the reason catalog.
- */
-export const PODMAN_RESTART_HOLD_EXPIRED = "podman-service-restart-hold-expired";
 
 // The infra-terminal sentence (issue #288). FIXED, never err.message: the message classes that reach
 // a failedReason carry host paths and library words (the #310 record), and for a local job this text
@@ -252,8 +195,6 @@ export const FAILED_COMMENT_BY_REASON = Object.freeze({
 	[NETNS_KEEPER_NOT_HOLDING]: "Failed before it started: this worker's rootless Podman egress proxy did not pass its pre-start check (its rootless network keeper, pi-dispatch-netns-keeper), so the job was retried and never run. Nothing was spent. Ask the operator to run `pi-dispatch doctor` on the worker for the exact fix.",
 	// Issue #476: a job held on a young keeper that kept restarting while it waited.
 	[NETNS_KEEPER_CRASH_LOOP]: "Failed before it started: this worker's rootless network keeper (pi-dispatch-netns-keeper), which its Podman egress proxy needs, kept restarting while the job waited for it, so the job was retried and never run. Nothing was spent. Ask the operator to run `pi-dispatch doctor` on the worker and read the keeper's log (`journalctl --user -u pi-dispatch-netns-keeper.service`).",
-	// Issue #448 (gate round 2 of PR #473): the hold's own ending, so the comment names the cause and the fix.
-	[PODMAN_RESTART_HOLD_EXPIRED]: "Failed before it started: rootful Podman's service on this worker kept running with a containers.conf older than its files (or a file's change time stayed ahead of the host's clock) for an hour, so the job was held and never run. Nothing was spent. Ask the operator to restart it while no local job runs (`sudo systemctl restart podman.service`), then run the job again.",
 });
 
 // Issue #645: a recovery that waited past its deadline for the host holding its run's checkpoint, taken back off the

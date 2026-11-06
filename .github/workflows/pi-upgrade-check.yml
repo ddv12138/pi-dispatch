@@ -29,7 +29,6 @@ on:
       - "worker/**"
       - "receiver/**"
       - "admin/**"
-      - "gateway/**"
       - "guardrails/**"
       - "package.json"
       - "pi-packages.example.json"
@@ -47,9 +46,6 @@ on:
       # this workflow without touching anything listed above. The pin file is the browser it measures with.
       - "launch/**"
       - ".github/scripts/console-width-check.mjs"
-      - ".github/scripts/sandbox-gateway-browser.mjs"
-      - ".github/scripts/sandbox-gateway-tls-fixture.mjs"
-      - ".github/scripts/sandbox-gateway-runtime-smoke.mjs"
       - ".github/chrome-for-testing.json"
   # DELIBERATELY UNFILTERED, unlike the push trigger above. Five of the jobs below are REQUIRED status
   # checks on main (issue #105), and a required check that never reports blocks the merge FOREVER -- a
@@ -293,7 +289,7 @@ jobs:
           # grep exits 0 on a match, 1 on none and 2 on an error, a missing path among them. Only 1 is clean: an `if grep`
           # would read a renamed or deleted path in scope as "no match" and pass. worker/test/no-automatic-merge.test.mjs
           # runs this script on a planted tree and on the real one.
-          runtime=(worker/src image/runner receiver/src gateway/src)
+          runtime=(worker/src image/runner receiver/src)
           bump=(.github/workflows/pi-bump.yml .github/scripts)
           found=0
           check() {
@@ -327,7 +323,7 @@ jobs:
           # Every entry point takes an injected `write`, so there is no legitimate reason left to reassign
           # the global and this grep carries no allowlist. stderr is deliberately not matched: it is not the
           # channel the runner reports on.
-          if grep -rnE '^[^/]*process\.stdout\.write *=' worker/test receiver/test admin/test image/runner/test gateway/test; then
+          if grep -rnE '^[^/]*process\.stdout\.write *=' worker/test receiver/test admin/test image/runner/test; then
             echo "::error::A test reassigns process.stdout.write. Inject the code under test's own `write` seam instead (issue #266)."
             exit 1
           fi
@@ -533,11 +529,6 @@ jobs:
           unzip -q "$zip" -d "$RUNNER_TEMP/cft"
           CHROME="$RUNNER_TEMP/cft/chrome-linux64/chrome" node .github/scripts/console-width-check.mjs --require
 
-      - name: "Sandbox controls work in the real browser under the console CSP (#771)"
-        if: (success() || failure()) && steps.install.outcome == 'success'
-        timeout-minutes: 5
-        run: CHROME="$RUNNER_TEMP/cft/chrome-linux64/chrome" node .github/scripts/console-sandboxes-browser.mjs --require
-
       - name: "Agent controls and answer drafts work under the real console CSP (#766, #772)"
         if: (success() || failure()) && steps.install.outcome == 'success'
         timeout-minutes: 5
@@ -571,13 +562,6 @@ jobs:
   image:
     name: the job image holds its contract
     runs-on: ubuntu-latest
-    services:
-      gateway-valkey:
-        image: valkey/valkey:8.1
-        ports:
-          - 16389:6379
-        options: >-
-          --health-cmd "valkey-cli ping" --health-interval 10s --health-timeout 3s --health-retries 5
     # CORE vs RUNNER, and the line matters. CORE is what ANY image must satisfy to be nameable in a
     # trigger's `run.image` -- it lives in image/verify-image.sh, which this job calls, so the portable
     # checklist has ONE definition rather than a copy here and a copy in the docs. RUNNER asserts properties
@@ -599,44 +583,6 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
-
-      - name: Install sandbox SSH measurement dependencies
-        run: |
-          npm ci --no-audit --no-fund
-          sudo apt-get update
-          sudo apt-get install -y openssh-server redis-server
-          sudo mkdir -p /run/sshd
-
-      - name: "Sandbox SSH loads deployment settings and holds detach, attach and End (#771)"
-        run: PI_JOB_IMAGE="$IMAGE_REF" PI_EGRESS=0 node .github/scripts/sandbox-ssh-smoke.mjs
-
-      - name: "Verify and install pinned Chrome for the separate sandbox gateway (#754)"
-        timeout-minutes: 3
-        run: |
-          zip="$RUNNER_TEMP/gateway-chrome-linux64.zip"
-          url="$(node .github/scripts/console-width-check.mjs --check-pin --platform linux64)"
-          curl -fsSL --proto '=https' --proto-redir '=https' --retry 3 -o "$zip" "$url"
-          node .github/scripts/console-width-check.mjs --verify-zip "$zip" --platform linux64
-          unzip -q "$zip" -d "$RUNNER_TEMP/gateway-cft"
-
-      - name: "Browser gateway holds the real Docker shell and both CSPs (#753, #754)"
-        timeout-minutes: 16
-        env:
-          PI_SANDBOX_GATEWAY_VENUE: local
-          PI_SANDBOX_GATEWAY_SOCKET: /var/run/docker.sock
-          VALKEY_TEST_URL: "redis://127.0.0.1:16389"
-        run: PI_JOB_IMAGE="$IMAGE_REF" CHROME="$RUNNER_TEMP/gateway-cft/chrome-linux64/chrome" node .github/scripts/sandbox-gateway-browser.mjs --tls
-
-      - name: "Maintained terminal layout preserves panes, keyboard and both themes (#754, #792)"
-        timeout-minutes: 3
-        run: CHROME="$RUNNER_TEMP/gateway-cft/chrome-linux64/chrome" node gateway/test/browser/workbench-browser.mjs
-
-      - name: "Gateway and native Docker attachments preserve input, detach and sandbox lifecycle (#754)"
-        timeout-minutes: 5
-        env:
-          PI_SANDBOX_GATEWAY_VENUE: local
-          PI_SANDBOX_GATEWAY_SOCKET: /var/run/docker.sock
-        run: PI_JOB_IMAGE="$IMAGE_REF" node .github/scripts/sandbox-gateway-runtime-smoke.mjs
 
       # --- CORE: nothing may make docker fetch an image (INT-CONTAINER-RUNTIME-CONTRACT) ---
       # The argv-side proof is the frozen-intent deepEqual in worker/test/docker-run.test.mjs, which runs in
@@ -716,10 +662,10 @@ jobs:
       # and the supervisor between the init and the runner must survive that (the runner's tree has the top OOM score)
       # and write the signed line itself: `code: 137, reason: "oom-killed"`, `by: "supervisor"`, `oomKills` above 0
       # and `memPeak` at 90% of the limit or more (the worker confirms an OOM only there). That line is the only thing
-      # that tells the worker a 137 was memory and not something a retry could pass, on Docker and Podman alike.
+      # that tells the worker a 137 was memory and not something a retry could pass.
       # A stand-in and not the real runner at 64m (review of issue #596): near the limit with a cold page cache the
-      # kernel reclaims and refaults pi's own files instead of killing anything (measured: rootless Podman on Fedora
-      # still running at 100 s, Docker Desktop stopped at 90 s), so the real runner could hang the job to its timeout.
+      # kernel reclaims and refaults pi's own files instead of killing anything (measured: Docker Desktop stopped
+      # at 90 s), so the real runner could hang the job to its timeout.
       # Filled anonymous memory cannot be reclaimed without swap (`--memory-swap` equals `--memory`), so the kill is
       # prompt and certain.
       - name: "RUNNER: the exit line reports resources, and a runner killed for memory is reported (issue #596)"

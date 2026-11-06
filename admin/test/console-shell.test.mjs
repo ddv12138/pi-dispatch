@@ -301,9 +301,11 @@ test("the sign-in pages: the skip link to sign-in, the sprite, a top bar of the 
     const plain = String(fn());
     const pill = `<a class="brandpill" href="/"><span class="brandpill__m" aria-hidden="true">pi</span>pi-dispatch</a>`;
     const toggle = (label) => `<button class="roundbtn" type="button" data-theme-toggle hidden aria-label="${label}" title="${label}"><svg class="ic" aria-hidden="true"><use href="#i-theme"></use></svg></button>`;
+    // The locale switch (the Chinese console) sits beside the theme button: two round buttons, no navigation.
+    const localeToggle = `<button class="roundbtn" type="button" data-locale-toggle hidden aria-label="Switch language" title="Chinese / English">中</button>`;
     // No title bar: the card's own heading leads the page, and the page's h1 is there for a screen reader.
     // The card opens with what a page without a script says (signin.mjs: the noscript is its first child).
-    assert.ok(plain.includes(`<body data-page="${name}">\n<a class="skip" href="#main">Skip to sign-in</a>\n${String(SPRITE)}\n<div class="page">\n<header class="top">${pill}<div class="top__end">${toggle(THEME_LABELS.system)}</div></header>\n<main id="main" tabindex="-1">\n<h1 class="sr">${title}</h1>\n<section id="${panel}" data-panel><div class="card signin">\n${NO_SCRIPT}\n`), name);
+    assert.ok(plain.includes(`<body data-page="${name}">\n<a class="skip" href="#main">Skip to sign-in</a>\n${String(SPRITE)}\n<div class="page">\n<header class="top">${pill}<div class="top__end">${localeToggle}${toggle(THEME_LABELS.system)}</div></header>\n<main id="main" tabindex="-1">\n<h1 class="sr">${title}</h1>\n<section id="${panel}" data-panel><div class="card signin">\n${NO_SCRIPT}\n`), name);
     assert.ok(plain.includes(`<title>pi-dispatch console: ${title}</title>`), name);
     assert.match(plain, /<html lang="en">\n[^]*<meta name="color-scheme" content="light dark">/);
     // Nobody is signed in: no navigation, no live pill, no who, no sign-out, no wrapper, no slot.

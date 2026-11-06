@@ -166,13 +166,8 @@ test("image entrypoint runs the runner under the exec-only node the Dockerfile i
 	// Issue #596: the entrypoint starts the supervisor, which holds the key too, under the same exec-only node and with
 	// --disable-sigusr1, and it starts the runner the same way in turn (src/supervise.mjs RUNNER_NODE, RUNNER_NODE_FLAGS
 	// and RUNNER_SCRIPT, pinned in supervise.test.mjs).
-	// Issue #730: the entrypoint picks the node from PI_RUNNER_OBSERVABLE, defaulting to the exec-only one; the supervisor
-	// (supervise.mjs runnerNodeFor) picks the runner's from the same variable.
-	assert.match(entrypoint, /\n""\) node=\/opt\/pi-dispatch\/runner-node ;;\n/);
-	assert.match(entrypoint, /\n1\) node=\/opt\/pi-dispatch\/runner-observable ;;\n/);
-	assert.match(entrypoint, /\nexec "\$node" --disable-sigusr1 \/app\/image\/runner\/supervise\.mjs\n/);
+	assert.match(entrypoint, /\nexec \/opt\/pi-dispatch\/runner-node --disable-sigusr1 \/app\/image\/runner\/supervise\.mjs\n/);
 	assert.match(dockerfile, /\nRUN install -o root -g root -m 0711 \/usr\/local\/bin\/node \/opt\/pi-dispatch\/runner-node\n/);
-	assert.match(dockerfile, /\nRUN install -o root -g root -m 0755 \/usr\/local\/bin\/node \/opt\/pi-dispatch\/runner-observable\n/, "issue #730: the readable copy for the OpenShell venues");
 	// Keyed to the chmod RUN line, not the bare string: the skills block's prose (main's baked skills, 66469328)
 	// names the same `chmod -R a-w /opt/pi-dispatch` as a comment, and an indexOf on the bare string reads that
 	// comment -- which sits above the install -- as the read-only layer. The instruction cannot be impersonated.
@@ -263,16 +258,7 @@ test("a large exit line written on SIGTERM and exited on at once arrives whole a
 
 test("run-job.mjs writes the exit line synchronously to fd 1", () => {
 	const src = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
-	// Issue #686: the transcript mirror's final drain runs first (stderr, never fd 1), then the line, synchronously.
-	assert.match(src, /\n\t\twrite: \(line\) => \{\n(?:\t{3}transcriptMirror\?\.[a-z]+\(\);\n)*\t{3}writeAllSync\(1, line\);\n\t\t\},\n/);
-});
-
-test("readExitKey: PI_EXIT_AUTH=stdin-frames takes frame 1's key and how many bytes it took, never draining to EOF (#686)", () => {
-	const got = readExitKey({ PI_EXIT_AUTH: "stdin-frames" }, { drain: () => assert.fail("never drained"), readFrame: () => ({ key: KEY, problem: null, bytes: Buffer.alloc(88) }) });
-	assert.deepEqual(got, { key: KEY, problem: null, frames: true, consumed: 88 });
-	assert.deepEqual(readExitKey({ PI_EXIT_AUTH: "stdin-frames" }, { readFrame: () => ({ key: null, problem: "malformed", bytes: Buffer.alloc(2) }) }), { key: null, problem: "malformed", frames: true, consumed: 2 });
-	assert.deepEqual(readExitKey({ PI_EXIT_AUTH: "stdin-frames" }, { readFrame: () => { throw new Error("x"); } }), { key: null, problem: "unreadable", frames: true, consumed: 0 });
-	assert.deepEqual(readExitKey({ PI_EXIT_AUTH: "stdin-lines" }), { key: null, problem: "unknown-channel" }, "any other value is still unknown");
+	assert.match(src, /\n\t\twrite: \(line\) => \{\n\t\t\twriteAllSync\(1, line\);\n\t\t\},\n/);
 });
 
 test("a noted fact is on the line however the run ends, and a field the line itself sets wins (issue #796)", () => {

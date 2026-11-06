@@ -56,22 +56,23 @@ test("a run record from a newer pi-dispatch is never a canary source", () => {
 	assert.deepEqual(selectCanarySources([original("newer", { v: 3, endedAt: new Date(instant - 10).toISOString() }), current, unversioned], options, { now: instant }).map((r) => r.jobId).sort(), ["current", "unversioned"]);
 });
 
-test("a source sandbox a newer pi-dispatch kept refuses before any of its fields is read, and before Docker", async () => {
-	const root = tempDir("canary-newer-"), retained = join(root, "sandboxes", "one"), logs = join(root, "logs"), jobs = join(root, "jobs");
-	mkdirSync(retained, { recursive: true }); mkdirSync(logs);
+test("a record with no curated source refuses before any Docker operation", async () => {
+	// The retained-sandbox source went with the sandbox prune; a replay source is now a directory an operator curates
+	// under <PI_JOBS_DIR>/canary-sources/<jobId>/. The refusal is determinate and spends nothing, Docker included.
+	const root = tempDir("canary-newer-"), logs = join(root, "logs"), jobs = join(root, "jobs");
+	mkdirSync(logs); mkdirSync(jobs);
 	const model = builtinChatModels("anthropic").find((m) => new URL(m.baseUrl).hostname === "api.anthropic.com").id;
 	const candidate = `anthropic/${model}`;
-	writeFileSync(join(retained, "manifest.json"), JSON.stringify({ version: 2, jobId: "one", backend: "local", baseSha: "a".repeat(40), workspace: join(root, "absent"), createdAt: new Date(instant - 1000).toISOString(), retainUntil: new Date(instant + 86400_000).toISOString() }));
 	writeFileSync(join(logs, "one.json"), JSON.stringify(original("one")));
 	writeFileSync(join(logs, "newer.json"), JSON.stringify(original("newer", { v: 3 })));
 	writeFileSync(join(root, "triggers.json"), JSON.stringify({ triggers: [], modelRoles: { default: { editor: candidate } } }));
 	const counters = new Map(), dockerCalls = [];
 	const redis = { on() {}, async ping() {}, disconnect() {}, async scan() { return ["0", []]; }, async set(k, v) { if (counters.has(k)) return null; counters.set(k, v); return "OK"; }, async eval(script, _n, key, token) { if (counters.get(key) !== token) return 0; if (script.includes("DEL")) counters.delete(key); return 1; }, async get(k) { return counters.get(k) ?? null; }, async expire() {} };
-	const runtime = await createCanaryRuntime({ env: { PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_SANDBOX_DIR: join(root, "sandboxes"), PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_MAX_TOKENS: "5000", ANTHROPIC_API_KEY: "provider-only", PI_AUTH_FROM_PI: "0" }, options: { ...options, model: candidate }, now, execCommand: async (_bin, args) => { dockerCalls.push(args); return { stdout: "", stderr: "" }; }, redisFactory: () => redis, queueFactory: () => ({ async getJobCounts() { return { active: 0 }; }, async isPaused() { return false; }, async close() {} }), imagePreflightFactory: () => async () => ({ ok: true, capabilities: ["tokenBudget", "modelPolicy", "modelRoles", "exitAuth", "anyUid"] }), containerFactory: () => async () => { throw new Error("no container may start"); } });
+	const runtime = await createCanaryRuntime({ env: { PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_MAX_TOKENS: "5000", ANTHROPIC_API_KEY: "provider-only", PI_AUTH_FROM_PI: "0" }, options: { ...options, model: candidate }, now, execCommand: async (_bin, args) => { dockerCalls.push(args); return { stdout: "", stderr: "" }; }, redisFactory: () => redis, queueFactory: () => ({ async getJobCounts() { return { active: 0 }; }, async isPaused() { return false; }, async close() {} }), imagePreflightFactory: () => async () => ({ ok: true, capabilities: ["tokenBudget", "modelPolicy", "modelRoles", "exitAuth", "anyUid"] }), containerFactory: () => async () => { throw new Error("no container may start"); } });
 	try {
-		assert.deepEqual(runtime.records.map((r) => r.jobId), ["one"], "the newer record is not read");
+		assert.deepEqual(runtime.records.map((r) => r.jobId), ["one"], "the record is read as a candidate");
 		const before = dockerCalls.length;
-		await assert.rejects(executeCanary({ ...options, model: candidate }, { ...runtime, now, id: () => "canary-one" }), /kept by a newer pi-dispatch; run the canary with that release/);
+		await assert.rejects(executeCanary({ ...options, model: candidate }, { ...runtime, now, id: () => "canary-one" }), /no canary source is curated for this run/);
 		assert.equal(dockerCalls.length, before, "refused before Docker");
 	} finally { await runtime.close(); }
 });
@@ -169,8 +170,8 @@ test("canary queue discovery takes a queue's meta key only, never a job hash the
 });
 
 test("local runtime restores only base objects, passes only provider credentials and reserves through runJob", async () => {
-	const root = tempDir("canary-runtime-"), workspace = join(root, "original"), retained = join(root, "sandboxes", "one"), logs = join(root, "logs"), jobs = join(root, "jobs");
-	mkdirSync(workspace); mkdirSync(retained, { recursive: true }); mkdirSync(logs);
+	const root = tempDir("canary-runtime-"), workspace = join(root, "original"), logs = join(root, "logs"), jobs = join(root, "jobs"), retained = join(jobs, "canary-sources", "one");
+	mkdirSync(workspace); mkdirSync(logs); mkdirSync(retained, { recursive: true });
 	const git = (args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"], env: { PATH: process.env.PATH, HOME: root, GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null" } }).trim();
 	git(["init", "--template=", workspace]); writeFileSync(join(workspace, "file"), "base"); mkdirSync(join(workspace, ".pi", "skills", "edit"), { recursive: true }); writeFileSync(join(workspace, ".pi", "skills", "edit", "SKILL.md"), "---\nname: edit\ndescription: Fixture editing flow\n---\nEdit the repository.\n"); git(["-C", workspace, "add", "."]); git(["-C", workspace, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-m", "fixture"]);
 	const sha = git(["-C", workspace, "rev-parse", "HEAD"]);
@@ -185,7 +186,7 @@ test("local runtime restores only base objects, passes only provider credentials
 	const counters = new Map(), dockerCalls = [], factoryOptions = [];
 	const redis = { on() {}, async ping() {}, disconnect() {}, async scan() { return ["0", []]; }, async set(k, v) { if (counters.has(k)) return null; counters.set(k, v); return "OK"; }, async eval(script, _n, key, token) { if (counters.get(key) !== token) return 0; if (script.includes("DEL")) counters.delete(key); return 1; }, async get(k) { return counters.get(k) ?? null; }, async incr(k) { return this.incrby(k, 1); }, async incrby(k, n) { const value = Number(counters.get(k) ?? 0) + Number(n); counters.set(k, value); return value; }, async decr(k) { return this.incrby(k, -1); }, async decrby(k, n) { return this.incrby(k, -n); }, async expire() {} };
 	const realExec = promisify(execFile);
-	const runtime = await createCanaryRuntime({ env: { PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_SANDBOX_DIR: join(root, "sandboxes"), PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_MAX_TOKENS: "5000", PI_DAILY_TOKEN_CAP: "100000", ANTHROPIC_API_KEY: "provider-only", GITHUB_TOKEN: "never-pass", PI_AUTH_FROM_PI: "0" }, options: { ...options, model: candidate }, now, execCommand: async (bin, args, opts) => { if (bin === "git") return realExec(bin, args, opts); dockerCalls.push(args); return { stdout: "", stderr: "" }; }, redisFactory: () => redis, queueFactory: () => ({ async getJobCounts() { return { active: 0 }; }, async isPaused() { return false; }, async close() {} }), imagePreflightFactory: () => async () => ({ ok: true, capabilities: ["tokenBudget", "modelPolicy", "modelRoles", "exitAuth", "anyUid"] }), containerFactory: (opts) => { factoryOptions.push(opts); return async (args) => {
+	const runtime = await createCanaryRuntime({ env: { PI_LOGS_DIR: logs, PI_JOBS_DIR: jobs, PI_TRIGGERS_FILE: join(root, "triggers.json"), PI_SETTINGS_FILE: join(root, "settings.json"), PI_MAX_TOKENS: "5000", PI_DAILY_TOKEN_CAP: "100000", ANTHROPIC_API_KEY: "provider-only", GITHUB_TOKEN: "never-pass", PI_AUTH_FROM_PI: "0" }, options: { ...options, model: candidate }, now, execCommand: async (bin, args, opts) => { if (bin === "git") return realExec(bin, args, opts); dockerCalls.push(args); return { stdout: "", stderr: "" }; }, redisFactory: () => redis, queueFactory: () => ({ async getJobCounts() { return { active: 0 }; }, async isPaused() { return false; }, async close() {} }), imagePreflightFactory: () => async () => ({ ok: true, capabilities: ["tokenBudget", "modelPolicy", "modelRoles", "exitAuth", "anyUid"] }), containerFactory: (opts) => { factoryOptions.push(opts); return async (args) => {
 		assert.equal(readFileSync(join(args.prepared.workspace, "file"), "utf8"), "base");
 		assert.throws(() => git(["-C", args.prepared.workspace, "remote", "get-url", "origin"]));
 		assert.ok(!existsSync(join(args.prepared.workspace, ".git", "hooks")));
@@ -204,7 +205,7 @@ test("local runtime restores only base objects, passes only provider credentials
 		assert.equal(JSON.parse(readFileSync(join(logs, "canary-one.json"))).canary.sourceJobId, "one");
 		assert.ok(!dockerCalls.some((args) => args.includes("--privileged")));
 	} finally { await runtime.close(); }
-	assert.deepEqual(readdirSync(jobs), []);
+	assert.deepEqual(readdirSync(jobs), ["canary-sources"]);
 });
 
 

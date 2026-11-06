@@ -283,7 +283,7 @@ export const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
  * `PI_SESSIONS_DIR`. Refusing here what can be answered here keeps the file's own mistakes in the file's
  * own error.
  *
- * Every set is IMPORTED, never retyped, which is the rule `sandbox.test.mjs` keeps for the same reason: a
+ * Every set is IMPORTED, never retyped, which is the rule `backends.test.mjs` keeps for the same reason: a
  * forge added to the table later must not need a second edit here to stay covered.
  */
 export const RESERVED_ENV_NAMES = new Set([...MINTED_TOKEN_VARS, ...FORGE_HOST_VARS, ...RECEIVER_ONLY_VARS, ...WORKER_ONLY_SECRET_VARS, ...EGRESS_ENV_VARS, ...CONTAINER_ENV_NAMES, ...RUNNER_ENV_NAMES, ...IMAGE_ENV_NAMES, ...PROVIDER_STEERING_VARS]);
@@ -582,7 +582,7 @@ function normalizeWatch(entry, index, path, state) {
 	// Every admitted field is projected above; webhook-only authority cannot enter through this path.
 	const local = normalizeCron({ type: "cron", id: on.id, pattern: "0 0 * * *" }, { ...raw, packages: false, github: false }, index, path, { seenCronIds: new Set() });
 	if (local.run.model?.startsWith("role:")) throw configError("watch: investigate requires an explicit chat model or the deployment default");
-	if (local.run.backend && !["local", "podman"].includes(local.run.backend)) throw configError("watch: investigate requires a venue with read-only local bind mounts");
+	if (local.run.backend && local.run.backend !== "local") throw configError("watch: investigate requires a venue with read-only local bind mounts");
 	const excludeTools = [...new Set([...(local.run.excludeTools ?? []), "edit", "write", "bash", "powershell"])];
 	return { on, run: { ...local.run, mode, excludeTools, ...(issue ? { issue } : {}), ...(raw.queryLogs !== undefined ? { queryLogs: normalizeWatchQueries(raw.queryLogs) } : {}) }, ...(entry.decide !== undefined ? { decide: normalizeWatchDecisionConfig(entry.decide, issue) } : {}) };
 }
@@ -1497,7 +1497,7 @@ function validateSecretsProfile(run, at, path) {
  * The most variables one bundle may carry (issue #704), and so the most `endpoints` it may name. Sixty-four, four
  * times `SECRETS_MAX`, and the justification is the one that cap gives, re-measured for one call: a bundle is ONE
  * resolver call with ONE timeout, so the count multiplies no slot time; what it multiplies is the host argv
- * (`-e NAME=VALUE` per variable on local and podman, OQ-028) and the redaction set, and 64 x 64 KiB is bounded
+ * (`-e NAME=VALUE` per variable on local, OQ-028) and the redaction set, and 64 x 64 KiB is bounded
  * anyway by the 256 KiB total the resolver's output may have (`secret-bundles.mjs`). A project with more than 64
  * variables in one environment is one whose blast radius this feature should not make one grant.
  */
@@ -1536,7 +1536,7 @@ const BUNDLE_FIELDS = new Set(["profile", "ref", "project", "forkReviews", "endp
  * What this cannot check, because it is pure and fs-free: whether `profile` is declared (PI_SECRET_BUNDLES and
  * the overlay are host state, refused per job as `secret-bundle-profile-unknown`), whether `project` exists in
  * projects.json (doctor fails on it), and whether an `endpoints` name is a variable the bundle actually holds
- * (only knowable once it is read; the openshell venue refuses that at use).
+ * (only knowable once it is read; a venue's own bundle gate refuses that at use).
  */
 function validateSecretBundles(value, path) {
 	if (value === undefined) return Object.freeze({});
@@ -1598,9 +1598,9 @@ function validateSecretBundles(value, path) {
 }
 
 /**
- * A bundle's `endpoints` (issue #704): `{ NAME: { host, auth } }`, the variables the openshell venue may hold as a
- * per-job provider key bound to that one host. Shape-checked here on every venue so the file is one file; USED
- * only on openshell, and on every other venue a named variable goes in plain like the rest, which is what it
+ * A bundle's `endpoints` (issue #704): `{ NAME: { host, auth } }`, the variables a venue that holds a per-job
+ * provider key bound to one host may keep as placeholders. Shape-checked here on every venue so the file is one file;
+ * on every other venue a named variable goes in plain like the rest, which is what it
  * would be without the field (OQ-028 says so).
  */
 function validateBundleEndpoints(endpoints, at, path) {
@@ -1705,8 +1705,8 @@ function validateSecretBundleFlag(on, run, at, path) {
  * physics. A test pins that every entry declares it, so both halves have to fail together.
  */
 export function refusesLocalWorkspace(entry, localWorkspace) {
-	// Issue #683: a venue that is on this host and still cannot edit a folder in place, because it COPIES the job's files
-	// (`openshell`): it declares `localFolders` absent, and is refused for the same physics in different words.
+	// A venue that is on this host and still cannot edit a folder in place, because it COPIES the job's files: it
+	// declares `localFolders` absent, and is refused for the same physics in different words.
 	return Boolean(localWorkspace) && (entry?.remote !== false || entry?.declares?.localFolders === "absent");
 }
 
@@ -1795,12 +1795,12 @@ function validateBackend(on, run, at, path, { localWorkspace }) {
 	// world imposes, and discovering it per job would burn a pickup for an answer the file already had.
 	// The decision itself is `refusesLocalWorkspace` above, so it can be driven; see its comment.
 	if (refusesLocalWorkspace(entry, localWorkspace)) {
-		const why = entry?.remote !== false ? "is remote" : "copies a job's files into its sandbox instead of mounting them (DES-OPENSHELL-VENUE)";
+		const why = entry?.remote !== false ? "is remote" : "copies a job's files into its sandbox instead of mounting them";
 		throw configError(`${at}: run.backend ${JSON.stringify(backend)} ${why}, and this trigger runs against a folder on THIS machine that has to be bind-mounted and edited in place -- there is no volume to hide behind (DES-WORKER-ON-HOST): ${path}`);
 	}
 
-	// Issue #712: `run.recover` on a venue that does not serve recovery (`serves.recovery: "no"`, the `openshell` copy
-	// mode) is refused before spend on EVERY delivery (`openshell-recover-unsupported`), so the file already knows the
+	// Issue #712: `run.recover` on a venue that does not serve recovery (`serves.recovery: "no"`) is refused before
+	// spend on EVERY delivery, so the file already knows the
 	// answer and is refused at load and write, refusesLocalWorkspace's reasoning. Only for an EXPLICIT venue: a trigger
 	// that names none runs on PI_BACKENDS[0], which is the deployment's and not the file's, so that pairing stays the
 	// processor's pre-spend refusal (the admin's trigger tools also judge it against PI_BACKENDS[0] before the confirm).

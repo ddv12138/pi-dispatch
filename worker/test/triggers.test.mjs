@@ -1734,8 +1734,11 @@ test("run.recover is refused beside run.command on every forge type: a recovery 
 test("run.recover is refused on an explicit venue that does not serve recovery, on every forge type (#712)", async () => {
 	const { BACKEND_NAMES, servesOf } = await import("../src/backends.mjs");
 	const { recoverVenueProblem } = await import("../src/triggers.mjs");
+	// `local` is the only venue left, and it serves recovery; the refusing copy-mode venues left with the sandbox
+	// prune. What stays pinned is that the loader asks the table (a venue that answers "no" is refused at load,
+	// through recoverVenueProblem) and that the one venue's explicit carry works on every forge type.
 	const refusing = BACKEND_NAMES.filter((n) => servesOf(n).recovery === "no");
-	assert.ok(refusing.includes("openshell"), "the copy mode is the venue this exists for");
+	assert.deepEqual(refusing, [], "no venue this build holds refuses recovery");
 	for (const venue of BACKEND_NAMES) {
 		for (const entry of [
 			{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "github", flow: "fix", backend: venue, recover: true } },
@@ -1753,8 +1756,7 @@ test("run.recover is refused on an explicit venue that does not serve recovery, 
 		assert.equal(parse([{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "github", flow: "fix", backend: venue, recover: false } }])[0].run.recover, false, venue);
 	}
 	assert.equal(parse([{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "github", flow: "fix", recover: true } }])[0].run.recover, true);
-	// The sentence names the venues that DO serve it, from the table.
-	assert.match(recoverVenueProblem("openshell"), /local, podman, openshell-bind\)$/);
+	// A venue this build does not hold says nothing here: the loader's unknown-venue refusal says that instead.
 	assert.equal(recoverVenueProblem("local"), null);
 	assert.equal(recoverVenueProblem("no-such-venue"), null, "the loader's unknown-venue refusal says that");
 });

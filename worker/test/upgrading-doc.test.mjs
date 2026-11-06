@@ -100,8 +100,9 @@ const WORKFLOWS = [".github/workflows/release.yml", ".github/workflows/repo-rele
 
 test("every release note links the upgrade guide at its own tag, on both paths and on a first release", () => {
 	const all = WORKFLOWS.flatMap(notesSteps);
-	// Not vacuous: release.yml cuts a release per package and repo-release.yml the whole tool's.
-	assert.ok(all.length >= 5, `found ${all.length} release notes steps, expected one per package and one for the tool`);
+	// Not vacuous: release.yml cuts a release per package (worker, receiver, admin) and repo-release.yml the whole
+	// tool's. The gateway's step left with the sandbox prune, which also removed its gateway-v* tag prefix.
+	assert.ok(all.length >= 4, `found ${all.length} release notes steps, expected one per package and one for the tool`);
 	for (const step of all) {
 		const where = `${step.file}, step "${step.name}"`;
 		assert.ok(step.prefix !== undefined && step.notesFile && step.version, `${where}: its tag prefix, notes file and version are found`);

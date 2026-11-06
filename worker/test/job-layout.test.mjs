@@ -1,19 +1,21 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { LAYOUTS as RUNNER_LAYOUTS, DEFAULT_LAYOUT as RUNNER_DEFAULT } from "../../image/runner/src/layout.mjs";
+import { LAYOUT as RUNNER_LAYOUT } from "../../image/runner/src/layout.mjs";
 import { CONTAINER_GLOBAL_PI_DIR, CONTAINER_INBOX_DIR, CONTAINER_SESSION_DIR, containerSpec } from "../src/container-spec.mjs";
 import { DEFAULT_LAYOUT, LAYOUTS, layoutFor } from "../src/job-layout.mjs";
 
 /**
  * Issue #683: the worker's copy of the container's file layouts is the runner's, byte for byte, and its `mounts` row is
  * exactly the mount targets the argv builder has always emitted. The two tables live on different hosts at run time,
- * so the copy is forced; this is the bolt that keeps it a copy.
+ * so the copy is forced; this is the bolt that keeps it a copy. The runner collapsed to the one binding layout when the
+ * copying venues went, so it now names the worker's `mounts` row; the spec's two-layout table stands against the
+ * worker's own `sandbox` row below.
  */
 
 test("the worker's layout table is the runner's, row for row and path for path", () => {
-	assert.deepEqual(LAYOUTS, RUNNER_LAYOUTS);
-	assert.equal(DEFAULT_LAYOUT, RUNNER_DEFAULT);
+	assert.deepEqual(RUNNER_LAYOUT, LAYOUTS.mounts);
+	assert.equal(DEFAULT_LAYOUT, "mounts");
 });
 
 test("the mounts row is the container paths containerSpec mounts, so a binding venue's argv did not move", () => {

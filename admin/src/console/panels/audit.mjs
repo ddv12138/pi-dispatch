@@ -26,7 +26,7 @@
  * filter's lists stay this console's own, so such a row is found unfiltered and under who, role and the search.
  */
 import { CONSOLE_AUDIT_ACTION_RE, CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_OUTCOME_RE, CONSOLE_AUDIT_OUTCOMES } from "@edgehero/pi-dispatch/console-audit";
-import { AUDIT_ACTOR_ROLES, AUDIT_EXAMINE_MAX, AUDIT_OUTCOME_WORDS, AUDIT_Q_MAX, auditDriver, auditFiltered, auditQueryString, isAuditRow } from "../audit-view.mjs";
+import { AUDIT_ACTOR_ROLES, AUDIT_EXAMINE_MAX, AUDIT_OUTCOME_WORDS, AUDIT_Q_MAX, auditFiltered, auditQueryString, isAuditRow } from "../audit-view.mjs";
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
@@ -175,8 +175,7 @@ function rowOf({ entry, pos, state }, chain, used, locale = "en") {
   }
   const none = state === "damaged" ? NONE_ON_TINT : NONE;
   const actor = entry.actor && typeof entry.actor === "object" ? entry.actor : null;
-  const driver = auditDriver(entry);
-  const who = actor ? html`<span class="au-who">${actor.name ?? "-"}<small>${uiText(actor.role ?? "-", locale)}</small>${driver ? html`<small>${uiText("driver:", locale)} ${driver.name}</small>` : null}</span>` : none;
+  const who = actor ? html`<span class="au-who">${actor.name ?? "-"}<small>${uiText(actor.role ?? "-", locale)}</small></span>` : none;
   // The cells beside the reason are bounded (`page-css.mjs` `AUDIT_LAYOUT`): a long name, write kind or target wraps
   // inside its own width instead of taking the reason's.
   const action = html`<span class="code">${entry.action ?? "-"}</span>${typeof entry.kind === "string" ? html`<span class="reason au-kind">${entry.kind}</span>` : null}`;

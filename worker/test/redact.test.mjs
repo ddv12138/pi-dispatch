@@ -100,7 +100,7 @@ test("no sweep logs a raw error message (#339)", () => {
 	// Reads the SOURCE rather than behaviour, and says so: it sees the call SHAPE, never the truth. The
 	// behavioural tests beside each site are the oracle. This exists because the treatment spans twelve
 	// near-identical catches and the thirteenth will be written by copying one of them.
-	const files = ["backend-local.mjs", "backend-registry.mjs", "sandbox-store.mjs", "retention-sweep.mjs", "start.mjs", "index.mjs", "run-history.mjs", "session-store.mjs"];
+	const files = ["backend-local.mjs", "backend-registry.mjs", "retention-sweep.mjs", "start.mjs", "index.mjs", "run-history.mjs", "session-store.mjs"];
 	for (const f of files) {
 		const src = readFileSync(new URL(`../src/${f}`, import.meta.url), "utf8");
 		for (const [, line] of src.split("\n").entries()) {

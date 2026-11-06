@@ -1766,9 +1766,10 @@ test("the workflow: the width step is in the required contract-tests job, after 
 test("the actual agent-controls and answer-draft browser runs after verified Chrome under the required context", () => {
 	const job = jobLines(WORKFLOW, "contract-tests");
 	const width = step(job, line => line === `      - name: ${STEP_NAME}`);
-	const sandbox = step(job, line => line.includes('Sandbox controls work in the real browser'));
+	// The sandboxes browser step went with the sandbox prune; what stays pinned is that the answer-draft browser
+	// runs after the width lane, so the artifact it drives through is the one the width lane verified.
 	const answerer = step(job, line => line.includes('Agent controls and answer drafts work under the real console CSP'));
-	assert.ok(answerer.index > sandbox.index && sandbox.index > width.index, "the actual HTTP/session browser uses the pinned artifact verified by the width lane");
+	assert.ok(answerer.index > width.index, "the actual HTTP/session browser uses the pinned artifact verified by the width lane");
 	assert.equal(answerer.key("if"), "(success() || failure()) && steps.install.outcome == 'success'");
 	assert.equal(answerer.key("timeout-minutes"), "5");
 	assert.equal(answerer.key("run"), 'CHROME="$RUNNER_TEMP/cft/chrome-linux64/chrome" node .github/scripts/console-answerer-browser.mjs --require');

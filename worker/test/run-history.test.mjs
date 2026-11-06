@@ -1788,7 +1788,6 @@ test("every RUNNER_POLICY_REASONS member is a literal the runner itself writes (
 	assert.ok(runnerSrc.includes('reason: "provider-auth-refused"'), "the runner's issue #437 literal moved");
 });
 
-// Issue #686 part 3: the openshell venues' own refusal reasons reach the record as `reason`, so each is in its enum.
 // Issue #507: a cost-cap stop said only `cost-cap` with $0, because which rule of the guard refused reached the job log
 // alone (`cost_refused`), never the record.
 test("parseExitWhy is retired with the meter: null for every line, and never a throw", () => {

@@ -6,11 +6,11 @@ import { makeWaitChecker } from "../src/wait-check.mjs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
-import { tokenChecks, overlayTokenProblem, scopedTokenRowChecks, startAdvice, CANARY_LINES, CANARY_PROBE_SLUGS, DOCTOR_SHELL_KEYS, EGRESS_CANARY_RUNNER_MODULE, EGRESS_CANARY_STALE_RUNNER, ENV_FILE_READABLE_KEYS, RECEIVER_SERVICE_KEYS, RUN_TIMEOUTS, SERVICE_ENV_KEYS, STEERING_SERVICE_KEYS, WORKER_SERVICE_KEYS, backendChecks, countRetained, defaultPromptFn, dockerRunVia, egressCanaryPlainScript, egressCanaryProbeArgs, forgeUrlEgressChecks, egressCanaryScript, envFileKeys, githubProtectionPreflight, jobUserChecks, liveChecks, liveRunVia, podmanLiveChecks, render, sandboxTombstoneChecks, serviceEnvKeys, serviceEnvLoader, sweepStaleCanaryNetworks, urlShown, resolveDoctorEnv, jobImageOf, CLI_SERVICE_KEYS, cliNotHandedLines, fileConfigures, triggersPath, valkeyPasswordUpgradeStep, undeclaredPortNear, ENDPOINT_PROBE_SLUGS, allowlistHostAliases, egressEndpointScript, lanIPv4Addresses, overlayLoopbackModels } from "../src/doctor.mjs";
+import { tokenChecks, overlayTokenProblem, scopedTokenRowChecks, startAdvice, CANARY_LINES, CANARY_PROBE_SLUGS, DOCTOR_SHELL_KEYS, EGRESS_CANARY_RUNNER_MODULE, EGRESS_CANARY_STALE_RUNNER, ENV_FILE_READABLE_KEYS, RECEIVER_SERVICE_KEYS, RUN_TIMEOUTS, SERVICE_ENV_KEYS, STEERING_SERVICE_KEYS, WORKER_SERVICE_KEYS, backendChecks, defaultPromptFn, dockerRunVia, egressCanaryPlainScript, egressCanaryProbeArgs, forgeUrlEgressChecks, egressCanaryScript, envFileKeys, githubProtectionPreflight, jobUserChecks, liveChecks, liveRunVia, render, serviceEnvKeys, serviceEnvLoader, sweepStaleCanaryNetworks, urlShown, resolveDoctorEnv, jobImageOf, CLI_SERVICE_KEYS, cliNotHandedLines, fileConfigures, triggersPath, valkeyPasswordUpgradeStep, undeclaredPortNear, ENDPOINT_PROBE_SLUGS, allowlistHostAliases, egressEndpointScript, lanIPv4Addresses, overlayLoopbackModels } from "../src/doctor.mjs";
 import { collectChecks, runDoctor } from "./helpers/doctor.mjs";
 import { valkeyPasswordFor } from "../src/valkey-endpoint.mjs";
 import { serviceEnvFileOf } from "../src/service-env.mjs";
-import { VALKEY_SHARED_KEY as VALKEY_SHARED_NAME } from "../src/podman-stack.mjs";
+import { VALKEY_SHARED_KEY as VALKEY_SHARED_NAME } from "../src/stack.mjs";
 import { EMPTY_PAUSE_WINDOWS, EMPTY_SCOPED_LIMITS, runInit } from "../src/init.mjs";
 import { ignoredOutputCapModels } from "../src/output-cap.mjs";
 import { EMPTY_MODEL_ENDPOINTS, MODEL_ENDPOINT_ID_RE, loadModelEndpoints, parseModelEndpoints, renderEndpointsInclude, unreportedUsageModels } from "../src/model-endpoints.mjs";
@@ -18,7 +18,6 @@ import { EGRESS_CANARY_NET_PREFIX, egressCanaryProbe, egressEndpointProbe } from
 import { LIVE_PREFIX, egressVerdict } from "../src/live-probes.mjs";
 import { JOB_USER_FIX, parseDaemonFacts } from "../src/job-user.mjs";
 import { OBSERVATION_FIX } from "../src/backends.mjs";
-import { PODMAN_JOB_USER_FIX } from "../src/backend-podman.mjs";
 import { loadConfig, underOsTempDir } from "../src/config.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { tokenFingerprint } from "../src/token-fingerprint.mjs";
@@ -727,7 +726,10 @@ test("doctor: an overlay that declares the old azure id as a provider of its own
 	const custom = overlay({ models: JSON.stringify({ providers: { "azure-openai-responses": { baseUrl: "https://x.openai.azure.com/openai/v1", api: "azure-openai-responses", apiKey: "$AZURE_OPENAI_API_KEY", models: [{ id: "my-deployment" }] } } }) });
 	const declared = capture();
 	await runDoctor(overlayEnv(custom, { PI_PROVIDER: "azure-openai-responses" }), overlayDeps(declared.out));
-	assert.match(declared.text(), /PI_PROVIDER is "azure-openai-responses", which is not a provider pi has/);
+	// Since custom provider keys, the overlay's own $VAR is the credential the key line names, so the verdict
+	// rides that line rather than the not-a-provider one. The intent is unchanged: the id is the operator's
+	// own declared provider, so nothing guesses "azure".
+	assert.match(declared.text(), /✗ Provider key missing \(azure-openai-responses: AZURE_OPENAI_API_KEY\)/);
 	assert.doesNotMatch(declared.text(), /did you mean/, "the overlay declares it: no hint");
 	const unrelated = capture();
 	await runDoctor(overlayEnv(overlay({ models: JSON.stringify({ providers: { ollama: { baseUrl: "http://gpu.lan:11434/v1", api: "openai-completions", models: [{ id: "q" }] } } }) }), { PI_PROVIDER: "azure-openai-responses" }), overlayDeps(unrelated.out));
@@ -758,10 +760,13 @@ test("doctor: a keyless custom provider is ✓ exactly when the worker's gate pa
 	const provider = (extra = {}) => ({ providers: { "local-ollama": { api: "openai-completions", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "$PI_DISPATCH_KEYLESS", models: [{ id: "qwen" }], ...extra } } });
 	const cases = [
 		{ name: "keyless", endpoints: [MAC], models: provider(), keyless: true },
-		{ name: "endpoint not keyless", endpoints: [{ ...MAC, keyless: false }], models: provider(), keyless: false, why: /the endpoint mac-ollama serving its model "qwen" is not "keyless": true/ },
-		{ name: "one model off-endpoint", endpoints: [MAC], models: provider({ models: [{ id: "qwen" }, { id: "big", baseUrl: "https://api.example.com/v1" }] }), keyless: false, why: /its model "big" is not served by a declared model endpoint/ },
-		{ name: "literal key", endpoints: [MAC], models: provider({ apiKey: "ollama" }), keyless: false, why: /its models\.json "apiKey" is not "\$PI_DISPATCH_KEYLESS"/ },
-		{ name: "nothing declared", endpoints: [], models: provider(), keyless: false },
+		// Since custom provider keys, an apiKey naming the worker's own keyless variable is a configuration
+		// problem said before the keyless verdict's why: the worker refuses the same declaration with the same
+		// reason, so the agreement bolt holds on the new lines.
+		{ name: "endpoint not keyless", endpoints: [{ ...MAC, keyless: false }], models: provider(), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/, fix: /models\.json apiKey names reserved worker variable PI_DISPATCH_KEYLESS/ },
+		{ name: "one model off-endpoint", endpoints: [MAC], models: provider({ models: [{ id: "qwen" }, { id: "big", baseUrl: "https://api.example.com/v1" }] }), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/ },
+		{ name: "literal key", endpoints: [MAC], models: provider({ apiKey: "ollama" }), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/, fix: /models\.json apiKey must be a \$ENV_NAME or \$\{ENV_NAME\} reference/ },
+		{ name: "nothing declared", endpoints: [], models: provider(), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/ },
 	];
 	for (const c of cases) {
 		const overlay = tempDir("pi-overlay-keyless-");
@@ -779,9 +784,8 @@ test("doctor: a keyless custom provider is ✓ exactly when the worker's gate pa
 		if (c.keyless) {
 			assert.match(text(), /✓ Provider key: none needed \(local-ollama is keyless: served by declared endpoint mac-ollama\)/, c.name);
 		} else {
-			assert.match(text(), /✗ PI_PROVIDER is "local-ollama", which is not a provider pi has/, c.name);
-			assert.match(text(), /declare that server in model-endpoints\.json with "keyless": true and set "apiKey": "\$PI_DISPATCH_KEYLESS"/, `${c.name}: the fix names the keyless way in`);
-			if (c.why) assert.match(text(), c.why, `${c.name}: and why this one is not`);
+			assert.match(text(), c.line, c.name);
+			if (c.fix) assert.match(text(), c.fix, `${c.name}: the fix names the one fact to change`);
 		}
 	}
 });
@@ -1219,11 +1223,6 @@ test("doctor: an in-image probe that could not run (exit 126 or 127) names the m
 		assert.match(text(), new RegExp(`⚠ gh could not be run inside the job image \\(pi-job:latest\\): it has no sh or no gh \\(exit ${code}\\)\n {4}→ rebuild or pull the job image: every image built FROM this repo's image/Dockerfile has both`));
 		assert.doesNotMatch(text(), /gh cannot authenticate|check network egress from containers/);
 	}
-	// Podman's label carries the venue, as the other two do.
-	const { docker: _d, ...podmanOnly } = podmanPlan();
-	const failed = capture();
-	await runDoctor(podmanEnv({ GITHUB_AUTH_SOURCE: "gh" }), podmanDeps(failed.out, { ...podmanOnly, ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "podman run": 127 }, []));
-	assert.match(failed.text(), /⚠ podman: gh could not be run inside the job image \(pi-job:latest\): it has no sh or no gh \(exit 127\)/);
 });
 
 test("doctor: no in-image probe when docker is not green (gating)", async () => {
@@ -3397,16 +3396,6 @@ test("doctor --fix: a missing .env is delegated to init's create-only scaffolds,
 	assert.equal(code, 0);
 });
 
-test("doctor --fix: init's next steps follow doctor's venue: PI_BACKENDS=podman gets the podman ladder (#453 gate)", async () => {
-	const cwd = tempDir("pi-fix-init-podman-");
-	const { out, text } = capture();
-	await runDoctor(podmanEnv(), { ...podmanDeps(out, podmanPlan(), []), cwd, fileExists: existsSync, platform: "linux", fix: true, promptFn: async () => false });
-	assert.ok(existsSync(join(cwd, ".env")), "init created the .env");
-	assert.match(text(), /\nNext \(the podman venue; run these as the worker's own account\. First set the account up as the Podman guide's "Setup"\n/);
-	assert.match(text(), / {2}6\. pi-dispatch doctor --live {26}# read the bounds, egress and job user back off real containers\n/);
-	assert.doesNotMatch(text(), /docker compose -f deploy\/docker-compose\.yml up -d {2}# the durable queue/);
-});
-
 test("doctor --fix: accepting the overlay auth.json offer deletes the file and converges credential-free", async () => {
 	const dir = overlay({ auth: true });
 	const cwd = tempDir("pi-fix-auth-");
@@ -4356,63 +4345,6 @@ test("the port-exact probe asks for the nearest port no declaration for that hos
 	assert.doesNotMatch(text, /srv\.lan:18080\): the route from the proxy is not measured here/);
 });
 
-test("doctor on the podman venue judges the route by the helper Podman names, and says so plainly when it names none (#503)", async () => {
-	const HCI = { id: "hci", host: "host.containers.internal", port: 11434, slots: 1 };
-	const rules = (p) => {
-		if (p === `${PODMAN_HOME}/.config/pi-dispatch/egress-proxy.conf`) return INCLUDE_503_RULES;
-		throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-	};
-	const run = async (info) => {
-		const { out, text } = capture();
-		await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(out, { "podman exec pi-dispatch-egress-proxy cat": { code: 0, output: declaredInclude([HCI]) }, ...podmanPlan({ proxy: "running", info }) }, [], { platform: "linux", readProxyConf: rules, declaredEndpoints: () => [HCI], hostAddresses: () => undefined }));
-		return text();
-	};
-	assert.match(await run(PODMAN_INFO({ rootlessNetworkCmd: "pasta" })), /✓ podman: Model endpoint hci \(host\.containers\.internal:11434\): host\.containers\.internal works from the proxy \(measured 2026-09-30, Podman 5\.8\.1 rootless, pasta, Fedora\)/);
-	const unnamed = await run(PODMAN_INFO());
-	assert.match(unnamed, /✓ podman: Model endpoint hci \(host\.containers\.internal:11434\): the rootless network helper was not reported by this Podman, so the route is not judged here\. `pi-dispatch doctor --live` probes it, which is the proof\.\n/);
-	assert.doesNotMatch(unnamed, /missing or invalid/, "never worded as a fault");
-});
-
-test("a podman endpoint that does not answer gets the podman venue's advice, not docker's (#503)", async () => {
-	const HCI = { id: "hci", host: "host.containers.internal", port: 11434, slots: 1 };
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const probe = (slug, answer) => ({ [`podman run --name=pi-dispatch-egress-probe-endpoint-${slug}-hci-`]: answer });
-	const held = await podmanLiveChecks(env, podmanEgressSeams({ ...probe("models", { code: 3, output: "tunnel 503\n" }), ...probe("nextport", { code: 3, output: "tunnel 403\n" }), ...probe("plain", { code: 3, output: "blocked 403 ERR_ACCESS_DENIED 0\n" }), [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3 }), podmanEgressFacts({ endpoints: [HCI] }));
-	const down = held.find((c) => c.endpointProbe?.probe === "models");
-	assert.equal(down.label, "podman: Model endpoint hci does NOT answer: the proxy allowed the tunnel to host.containers.internal:11434 and answered 503, so nothing answered there");
-	assert.match(down.fix, /bound to this host's LAN address or 0\.0\.0\.0 \(never 127\.0\.0\.1 alone\), and declare a server on this host as host\.containers\.internal/);
-	assert.doesNotMatch(down.fix, /Docker Engine|172\.17\.0\.1/);
-});
-
-test("podman: an endpoint only an overlay MCP server uses is carried to --live and probed for its route alone", async () => {
-	const HCI = { id: "hci", host: "host.containers.internal", port: 11434, slots: 1 };
-	const rules = (p) => {
-		if (p === `${PODMAN_HOME}/.config/pi-dispatch/egress-proxy.conf`) return INCLUDE_503_RULES;
-		throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-	};
-	const overlay = tempDir("pi-doctor-mcp-podman-");
-	writeFileSync(join(overlay, "mcp.json"), JSON.stringify({ mcpServers: { docs: { url: "http://host.containers.internal:11434/mcp", description: "d" } } }));
-	const facts = {};
-	await collectChecks(podmanEnv({ PI_EGRESS: "1", PI_GLOBAL_PI_DIR: overlay }), {
-		...podmanDeps(() => {}, { "podman exec pi-dispatch-egress-proxy cat": { code: 0, output: declaredInclude([HCI]) }, ...podmanPlan({ proxy: "running", info: PODMAN_INFO({ rootlessNetworkCmd: "pasta" }) }) }, [], { platform: "linux", readProxyConf: rules, declaredEndpoints: () => [HCI], hostAddresses: () => undefined }),
-		cwd: tempDir("pi-doctor-mcp-podman-cwd-"),
-		agentDir: NO_AGENT_DIR,
-		runTimeouts: FAST_TIMEOUTS,
-		facts,
-	});
-	assert.deepEqual(Object.fromEntries(facts.podman.egress.mcpOnly), { hci: { tls: false } }, "the collection decides it, from the overlay the worker reads");
-	const probe = (slug, answer) => ({ [`podman run --name=pi-dispatch-egress-probe-endpoint-${slug}-hci-`]: answer });
-	const canary = { ...probe("models", { code: 0, output: "reached 405\n" }), ...probe("nextport", { code: 3, output: "tunnel 403\n" }), ...probe("plain", { code: 3, output: "blocked 403 ERR_ACCESS_DENIED 0\n" }), [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3 };
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const held = await podmanLiveChecks(env, podmanEgressSeams(canary), podmanEgressFacts({ endpoints: [HCI], mcpOnly: facts.podman.egress.mcpOnly }));
-	const models = held.find((c) => c.endpointProbe?.probe === "models");
-	assert.equal(models.ok, true, models.label);
-	assert.equal(models.label, "podman: MCP server endpoint hci: the route through the proxy works (the tunnel to host.containers.internal:11434 opened and the server answered 405); no overlay model uses it, so it is not probed as a model server");
-	// Facts from a collection that predates the field read as none: probed as a model server, as before.
-	const before = await podmanLiveChecks(env, podmanEgressSeams(canary), podmanEgressFacts({ endpoints: [HCI] }));
-	assert.equal(before.find((c) => c.endpointProbe?.probe === "models").ok, false);
-});
-
 test("doctor: the leftover sweep removes a dead run's endpoint probes by their exact shape, and only those (#503)", async () => {
 	const calls = [];
 	const members = ["pi-dispatch-egress-probe-endpoint-models-mac-ollama-4242", "pi-dispatch-egress-probe-endpoint-plain-a-1-4242", `pi-dispatch-egress-probe-endpoint-models-${"a".repeat(33)}-4242`, "pi-dispatch-egress-probe-endpoint-models-mac-ollama-42420", "pi-dispatch-egress-probe-endpoint-other-mac-4242", "pi-dispatch-egress-probe-endpoint-models-MAC-4242", "pi-dispatch-egress-probe-endpoint-nextport-x.y-4242"];
@@ -4507,57 +4439,6 @@ test("the endpoint probe script reports the proxy's status for a refused tunnel,
 		model.closeAllConnections();
 		await new Promise((r) => model.close(r));
 	}
-});
-
-test("doctor on the podman venue reads the include inside its proxy, and --live probes each endpoint beside the canary (#503)", async () => {
-	const HCI = { id: "hci", host: "host.containers.internal", port: 11434, slots: 1 };
-	const rules = (p) => {
-		if (p === `${PODMAN_HOME}/.config/pi-dispatch/egress-proxy.conf`) return INCLUDE_503_RULES;
-		throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-	};
-	const run = async (inside, mounts) => {
-		const { out, text } = capture();
-		const calls = [];
-		const code = await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(out, { "podman exec pi-dispatch-egress-proxy cat": { code: 0, output: inside }, ...(mounts ? { "podman inspect --format {{json .Mounts}} pi-dispatch-egress-proxy": { code: 0, output: `${JSON.stringify(mounts)}\n` } } : {}), ...podmanPlan({ proxy: "running" }) }, calls, { platform: "linux", readProxyConf: rules, declaredEndpoints: () => [HCI], hostAddresses: () => undefined }));
-		return { code, text: text(), calls };
-	};
-	const same = await run(declaredInclude([HCI]));
-	assert.match(same.text, /✓ podman: Model endpoint hci \(host\.containers\.internal:11434\): .*`pi-dispatch doctor --live` probes it, which is the proof\.\n/);
-	assert.match(same.text, /✓ podman: Model endpoints: the include inside the running proxy matches model-endpoints\.json \(hci\)\n/);
-	assert.ok(same.calls.some((c) => c.cmd === "podman" && c.args.join(" ") === "exec pi-dispatch-egress-proxy cat /etc/pi-dispatch/model-endpoints.conf"));
-	// Gate round 2: the replaced-file compare reads the bind source the proxy mounts, from `podman inspect`, wherever doctor
-	// runs: the Quadlet unit mounts the deployment folder's file, which need not be this one.
-	const deployed = join(tempDir("pi-doctor-503-quadlet-"), "model-endpoints.conf");
-	writeFileSync(deployed, declaredInclude([HCI]));
-	const bind = [{ Type: "bind", Source: deployed, Destination: "/etc/pi-dispatch/model-endpoints.conf" }];
-	const current = await run(declaredInclude([HCI]), bind);
-	assert.match(current.text, /✓ podman: Model endpoints: the include inside the running proxy matches/);
-	assert.ok(current.calls.some((c) => c.args.join(" ") === "inspect --format {{json .Mounts}} pi-dispatch-egress-proxy"));
-	writeFileSync(deployed, "# replaced under the proxy\n");
-	assert.match((await run(declaredInclude([HCI]), bind)).text, /✗ podman: Model endpoints: the proxy is mounted on a replaced file: the file it mounts \(\S+pi-doctor-503-quadlet-\S+\)/);
-	assert.doesNotMatch((await run(declaredInclude([HCI]), [{ Type: "volume", Source: deployed, Destination: "/etc/pi-dispatch/model-endpoints.conf" }])).text, /replaced file/, "no bind there, no compare");
-	const stale = await run(declaredInclude([]));
-	assert.match(stale.text, /✗ podman: Model endpoints: the include inside the running proxy \([^)]+\) does not match model-endpoints\.json \(hci\)[^\n]*\n {4}→ `pi-dispatch egress render` in the deployment folder, then `podman exec pi-dispatch-egress-proxy squid -k reconfigure`\..*`systemctl --user restart pi-dispatch-egress-proxy\.service`/);
-
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const calls = [];
-	const lines = [];
-	const probe = (slug, answer) => ({ [`podman run --name=pi-dispatch-egress-probe-endpoint-${slug}-hci-`]: answer });
-	const held = await podmanLiveChecks(
-		env,
-		{ ...podmanEgressSeams({ ...probe("models", { code: 0, output: "reached 200\n" }), ...probe("nextport", { code: 3, output: "tunnel 403\n" }), ...probe("plain", { code: 3, output: "blocked 403 ERR_ACCESS_DENIED 0\n" }), [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3 }, calls), out: (s) => lines.push(s) },
-		podmanEgressFacts({ endpoints: [HCI] }),
-	);
-	const named = calls.filter((c) => c.args[0] === "run" && String(c.args[1]).startsWith("--name=pi-dispatch-egress-probe-")).map((c) => c.args[1]);
-	assert.deepEqual(named, [...CANARY_PROBE_SLUGS.map((s) => `--name=${egressCanaryProbe(s, 1)}`), ...ENDPOINT_PROBE_SLUGS.map((s) => `--name=${egressEndpointProbe(s, "hci", 1)}`)]);
-	const models = calls.find((c) => c.args[1] === `--name=${egressEndpointProbe("models", "hci", 1)}`).args;
-	assert.deepEqual(models, [...podmanProbeArgv("models", "http://host.containers.internal:11434/v1/models").slice(0, -1).map((a) => a.replace("--name=pi-dispatch-egress-probe-models-1", `--name=${egressEndpointProbe("models", "hci", 1)}`)), egressEndpointScript("http://host.containers.internal:11434/v1/models")], "a podman job's argv, with its own name and the tunnelled GET");
-	assert.ok(held.some((c) => c.ok && c.label === "podman: Model endpoint hci answers through the proxy (GET http://host.containers.internal:11434/v1/models through a CONNECT tunnel: 200)"));
-	assert.ok(held.some((c) => c.ok && c.label.startsWith("podman: Model endpoint hci's rule is port-exact")));
-	assert.ok(held.some((c) => c.ok && c.label.startsWith("podman: Model endpoint hci admits no plain forward request")));
-	assert.deepEqual(held.filter((c) => c.readBack).map((c) => c.readBack.probe), ["provider", "unlisted", "plainhttp"]);
-	assert.ok(held.some((c) => c.ok && c.label.startsWith("read back on podman: egress holds")), "the verdict reads the canary's three alone");
-	assert.match(lines.join(""), /all three are removed when the canary ends; then three per declared model endpoint \(hci\), named pi-dispatch-egress-probe-endpoint-<probe>-<id>-1, removed the same way\n/);
 });
 
 test("doctor: a proxy that exists but is STOPPED says so, because the fix is a different one", async () => {
@@ -4931,7 +4812,7 @@ test("doctor: a LOCAL trigger binding secrets warns that /workspace is the opera
 	// nothing clears it but unbinding, so what the operator must know is in the label, which is all a ✓ prints.
 	assert.equal(
 		rendered([hit]),
-		"✓ 1 local trigger(s) bind secrets and run IN the operator's own folder: /srv/site -- a credential the agent writes to .env, .netrc or .git-credentials there lands in your real repository (and in a retained sandbox). Nothing scans for that: keep those folders out of anything you push\n",
+		"✓ 1 local trigger(s) bind secrets and run IN the operator's own folder: /srv/site -- a credential the agent writes to .env, .netrc or .git-credentials there lands in your real repository. Nothing scans for that: keep those folders out of anything you push\n",
 	);
 	assert.equal(render([hit], () => {}), false);
 });
@@ -6208,17 +6089,6 @@ test("issue #596, phase 2: doctor --live reads the probe's parent cgroup and its
 	assert.match(text(), /✓ read back on local: cgroup parent holds \(the container's cgroup is under \/pidispatch\.slice, which has a quota of 4 CPUs \(400000 100000\), the host's CPU budget, so all jobs together keep the reserve\)/);
 });
 
-test("issue #596, phase 2: doctor --live on podman builds its probe as the venue's jobs are, without the parent where Podman's cgroup manager is not systemd", async () => {
-	for (const [manager, parented] of [["systemd", true], ["cgroupfs", false]]) {
-		const calls = [];
-		await podmanLiveChecks(liveEnv({ PI_EGRESS: "0", PI_BACKENDS: "podman" }), podmanEgressSeams({}, calls), podmanEgressFacts({ armed: false }, { info: { rootless: true, serviceIsRemote: false, selinux: false, cgroupManager: manager } }));
-		const probe = calls.find((c) => c.args[0] === "run" && String(c.args[1]).startsWith("--name=pi-dispatch-live-probe"));
-		assert.ok(probe, manager);
-		assert.equal(probe.args.includes("--cgroup-parent=pidispatch.slice"), parented, manager);
-		assert.equal(probe.args.includes("--cpu-shares=2048"), parented, `${manager}: a parentless job's weight is capped`);
-	}
-});
-
 test("doctor --live renders a failed read-back as a hard failure with the declared word beside the observed", async () => {
 	const { out, text } = capture();
 	const code = await runDoctor(liveEnv(), { ...ghDeps(out, { ...liveOk({ uid: "0" }), ...green }), live: true, ...instantClock(), liveFs: liveFsAs(1001), jobUserIdentity: LINUX_1001, isAlive: () => false, pid: 7, nonce: "n" });
@@ -6891,11 +6761,10 @@ test("doctor --live gives each ephemeral failure its own fix: a survivor, a held
 		fixes.add(failed.fix);
 		if (cause === "name-held") {
 			assert.match(failed.fix, /removed whatever held the name/, "the fix does not send the operator to inspect a container the read-back already removed");
-			// The Podman half, unpinned until issue #352: `podman ps -a --external` is the only listing that
-			// shows a storage container another tool made, and a name reservation left by one is exactly what
-			// this cause means on that runtime. Checked on Podman 5.8.2. Without it the line sends an
-			// operator to `ps -a`, which shows nothing, and the reservation looks like a daemon bug.
-			assert.match(failed.fix, /podman ps -a --external/, "the Podman listing that actually shows the holder");
+			// Runtime-neutral since the podman venue went: the line names `docker ps -a` first, and the `--external`-style
+			// storage listing a daemon that keeps reservations beside its containers shows (Podman's `podman ps -a
+			// --external` was the measured one, unpinned until issue #352; checked on Podman 5.8.2).
+			assert.match(failed.fix, /`docker ps -a --external`-style storage listings another tool made/, "the listing that actually shows the holder");
 		}
 	}
 	assert.equal(fixes.size, 4, "four causes, four fixes, none falling back to a generic one");
@@ -6905,7 +6774,6 @@ test("doctor --live gives each ephemeral failure its own fix: a survivor, a held
 
 const PODMAN_COMPAT_INFO = JSON.stringify({ ServerVersion: "5.8.2", OperatingSystem: "fedora", SecurityOptions: ["name=seccomp,profile=default"], PidsLimit: true, MemoryLimit: true, CpuCfsQuota: false, ProductLicense: "Apache-2.0" });
 const DESKTOP_INFO = JSON.stringify({ ServerVersion: "27.4.0", OperatingSystem: "Docker Desktop", SecurityOptions: ["name=seccomp,profile=unconfined"], PidsLimit: true, MemoryLimit: true });
-const SHIM_INFO = JSON.stringify({ host: { os: "linux", security: { rootless: false }, serviceIsRemote: true, remoteSocket: { path: "unix:///run/podman/podman.sock", exists: true } }, version: { Version: "5.8.2" } });
 const noHostFiles = (() => {
 	const missing = (p) => {
 		throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
@@ -6925,9 +6793,11 @@ test("doctor says isolation and mountSet are ASSERTED where the runtime is not o
 	assert.match(bounds.fix, /doctor --live` reads pids\.max and memory\.max/);
 	assert.match(bounds.fix, /worker_started\.daemonAppliesBounds/);
 	const mounts = find(podman, "mountSet");
-	assert.match(mounts.label, /mountSet is ASSERTED by the container runtime's configuration, not enforced: \/etc\/containers\/mounts\.conf does not exist/);
-	assert.match(mounts.fix, /create an empty \/etc\/containers\/mounts\.conf/);
-	assert.equal(find(backendChecks({}, { endpoint, daemon: read(PODMAN_COMPAT_INFO), fs: withOverride }), "mountSet"), undefined, "the documented override earns mountSet");
+	// The mounts.conf file-chain read went with the podman venue: a Podman daemon behind the docker CLI is not a runtime
+	// this build measures, so its word stays ASSERTED and says so, and no /etc/containers/mounts.conf read earns it back.
+	assert.match(mounts.label, /mountSet is ASSERTED by the container runtime's configuration, not enforced: the daemon is Podman, which mounts what its mounts\.conf lists and this build does not read/);
+	assert.match(mounts.fix, /docker CLI plugin or wrapper that rewrites `docker run`/);
+	assert.ok(find(backendChecks({}, { endpoint, daemon: read(PODMAN_COMPAT_INFO), fs: withOverride }), "mountSet"), "the override is not read any more: still ASSERTED");
 	const docker = backendChecks({}, { endpoint: { local: true, endpoint: "unix:///var/run/docker.sock" }, daemon: read(ROOTFUL_INFO), fs: noHostFiles });
 	assert.equal(find(docker, "isolation") ?? find(docker, "mountSet"), undefined, "a rootful Docker Engine reporting both bounds stays quiet");
 	const unread = backendChecks({}, { endpoint, daemon: { answered: false, reason: "timeout", transient: true }, fs: noHostFiles });
@@ -6948,8 +6818,13 @@ test("doctor names each floor miss with the observation it needed and that obser
 	assert.match(floor.fix, /doctor --live` reads pids\.max/);
 	assert.match(floor.fix, /create an empty \/etc\/containers\/mounts\.conf/);
 	assert.doesNotMatch(floor.fix, /Point the docker CLI back/);
-	const held = backendChecks({ PI_BACKEND_FLOOR: "mountSet=enforced" }, { endpoint, daemon, fs: withOverride });
-	assert.ok(held.some((c) => c.ok && /PI_BACKEND_FLOOR holds \(mountSet=enforced\)/.test(c.label)));
+	// The hold path on a daemon the build measures: a rootful Docker Engine reporting both bounds satisfies both
+	// properties, and the floor holds with no observation line of its own.
+	const held = backendChecks({ PI_BACKEND_FLOOR: "isolation=enforced,mountSet=enforced" }, { endpoint: { local: true, endpoint: "unix:///var/run/docker.sock" }, daemon: { answered: true, facts: parseDaemonFacts(ROOTFUL_INFO).facts }, fs: noHostFiles });
+	assert.ok(held.some((c) => c.ok && /PI_BACKEND_FLOOR holds \(isolation=enforced, mountSet=enforced\)/.test(c.label)));
+	// The override is NOT read any more, so a Podman daemon's mountSet floor still misses: fail closed.
+	const podmanFloor = backendChecks({ PI_BACKEND_FLOOR: "mountSet=enforced" }, { endpoint, daemon, fs: withOverride });
+	assert.match(podmanFloor.find((c) => /PI_BACKEND_FLOOR asks for/.test(c.label)).label, /mountSet=enforced/, "the mountSet floor still misses with the file present: this build does not read it");
 	// True on the failure path: nothing answered means the worker retries, and the remedy is an answer, not a new host.
 	const unread = backendChecks({ PI_BACKEND_FLOOR: "isolation=enforced" }, { endpoint, daemon: { answered: false, reason: "timeout", transient: true }, fs: noHostFiles });
 	const retried = unread.find((c) => /PI_BACKEND_FLOOR asks for/.test(c.label));
@@ -6964,12 +6839,10 @@ test("doctor names each floor miss with the observation it needed and that obser
 	assert.equal(noDocker.find((c) => /local: (isolation|mountSet) is ASSERTED/.test(c.label)), undefined);
 });
 
-test("doctor names the runtime that answered, and warns on podman-docker, where the docker CLI resolves no context (#345)", async () => {
+test("doctor names the runtime that answered (#345)", async () => {
 	for (const [label, body, ids, pattern, warn] of [
 		["Docker Engine", ROOTFUL_INFO, LINUX_ID(1001), /✓ local: the daemon is Docker Engine 27\.5\.1\n/, false],
 		["Docker Desktop", DESKTOP_INFO, { platform: "darwin", release: "24.6.0", euid: 501, egid: 20 }, /✓ local: the daemon is Docker Desktop \(engine 27\.4\.0\)/, false],
-		["Podman's Docker API", PODMAN_COMPAT_INFO, LINUX_ID(1001), /✓ local: the daemon is Podman 5\.8\.2, through its Docker API/, false],
-		["podman-docker", SHIM_INFO, LINUX_ID(1001), /⚠ local: the daemon is Podman 5\.8\.2, reached through podman-docker/, true],
 	]) {
 		const { out, text } = capture();
 		await runDoctor(ghEnv(), { ...ghDeps(out, { ...infoPlan(body), ...green }), jobUserIdentity: ids, stat: socketStat, observationFs: noHostFiles });
@@ -8298,26 +8171,15 @@ test("doctor's two docker runners spawn the bin they are given, and docker when 
 	const live = await liveRunVia(spawn, { bin: "podman" })(["ps"], { timeoutMs: 1000 });
 	assert.deepEqual([live.code, live.stdout, live.ended], [0, "podman\n", "close"]);
 	assert.deepEqual(spawned, [["docker", "version"], ["docker", "version"], ["podman", "version"], ["docker", "ps"], ["podman", "ps"]]);
-	// Issue #354 part 2: the call sites that name a bin are the podman venue's three (its info read in the section and
-	// again before --live, and --live's runner), and each names podman; every other spawn doctor makes through them is
-	// docker's, as before. Issue #431 added no site: the podman egress canary and its sweep run on --live's runner, the
-	// third, so the list is exactly what it was and a canary given a runner of its own would land here.
+	// The podman venue's spawn sites went with it, so every spawn doctor makes through these runners is docker's,
+	// and the scans pin that emptiness rather than a list: a NEW spawn naming a bin (or a docker one turned into a
+	// variable) lands here as a diff rather than going unseen.
 	const doctorSource = readFileSync(new URL("../src/doctor.mjs", import.meta.url), "utf8");
 	const named = [...doctorSource.matchAll(/(?<!function )(?:docker|live)RunVia\(spawn[^)\n]*\{ bin: ([^ }]+)/g)].map((m) => m[1]);
-	// Issue #448 added one, ahead of them in the file: the local section's `systemctl show podman.service`, read only where a
-	// local job runs on rootful Podman's Docker API on this host.
-	assert.deepEqual(named, ['"systemctl"', '"podman"', '"podman"', '"podman"'], "only the podman venue's reads and the rootful unit read name a bin");
-	// Issue #433: and the spawns that name `podman` directly, by their first two arguments: the trigger-named image and its
-	// entrypoint, `--fix`'s pull and tag of the default image, and the egress proxy's state. One more site picks its
-	// runtime from a variable, the in-image gh probe, which is docker's with `local` and podman's without it. A new podman
-	// spawn, or a docker one turned into a variable, lands here as a diff rather than going unseen.
+	assert.deepEqual(named, [], "no call site names a bin any more");
 	const direct = [...doctorSource.matchAll(/runCmd(?:Capture)?\(\w*[sS]pawn, "podman", \[("[^"]*", "[^"]*")/g)].map((m) => m[1]);
-	// Issue #503 added one (PR #519 gate round 2): the proxy's mounts, read for the include's bind source. Its `exec ... cat`
-	// of the include names the proxy by a variable, so the matcher above cannot see it.
-	assert.deepEqual(direct, ['"image", "inspect"', '"image", "inspect"', '"pull", "docker.io/ddv12138/pi-job:latest"', '"tag", "docker.io/ddv12138/pi-job:latest"', '"inspect", "--format={{.State.Status}}"', '"inspect", "--format"', '"network", "inspect"']);
-	// Issue #458 added the last (PR #463 round 3): the keeper network's options. And the rootless network keeper's read, whose format is the shared constant (podman-stack.mjs), so the
-	// literal matcher above cannot see it; it is pinned by its own shape, exactly once.
-	assert.equal([...doctorSource.matchAll(/runCmd(?:Capture)?\(\w*[sS]pawn, "podman", \["inspect", NETNS_KEEPER_FORMAT, NETNS_KEEPER\]/g)].length, 1);
+	assert.deepEqual(direct, [], "no spawn names podman directly any more");
+	// The one variable-bin spawn that survives: the in-image gh probe, docker's with `local` and none without it.
 	const chosen = [...doctorSource.matchAll(/runCmd(?:Capture)?\(\w*[sS]pawn, ([a-z]\w*Bin)\b/g)].map((m) => m[1]);
 	assert.deepEqual(chosen, ["ghProbeBin"]);
 });
@@ -8336,13 +8198,6 @@ const podmanFs = {
 	statSync: (p) => (p === `${PODMAN_HOME}/.config/containers/mounts.conf` ? { size: 0 } : noHostFiles.statSync(p)),
 	readFileSync: (p) => (p === PODMAN_USER_MANAGER ? "cpuset cpu io memory pids\n" : noHostFiles.readFileSync(p)),
 };
-// The same host with the user manager's controllers given (null: no user manager running for the account).
-// `self` is this process's /proc/self/cgroup (null: unread), which decides the bounds only when Podman does not use the
-// systemd cgroup manager (issue #453, gate round 1).
-const podmanFsWith = (controllers, self = null) => ({
-	...podmanFs,
-	readFileSync: (p) => (p === PODMAN_USER_MANAGER && controllers !== null ? controllers : p === "/proc/self/cgroup" && self !== null ? self : noHostFiles.readFileSync(p)),
-});
 // A podman host that answers everything, docker absent altogether. "docker" LAST, so it catches every docker call.
 // Issue #458 (PR #463 round 2): when the keeper and the proxy started, epoch ms. The keeper long before the proxy, both
 // long before any clock a test runs on, so the age and order rules hold unless a test moves them (with its own `now`).
@@ -8364,370 +8219,6 @@ const podmanPlan = ({ info = PODMAN_INFO(), capabilities = "anyUid", image = tru
 const podmanEnv = (extra = {}) => ({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", PI_BACKENDS: "podman", PI_EGRESS: "0", ...extra });
 const podmanDeps = (out, plan, calls, extra = {}) => ({ ...ghDeps(out, plan, calls), home: PODMAN_HOME, observationFs: podmanFs, jobUserIdentity: LINUX_ID(1234), ...extra });
 
-// Issue #433: a deployment that blesses BOTH venues keeps doctor's output byte for byte. Captured from main at 98f2857,
-// before the podman-only change, in four shapes: every docker read green (with a trigger-named image, the gh probe, the
-// egress canary and a peer to compare digests with), docker absent under --fix with every offer declined, a docker
-// daemon that answered with the job image missing, and (review round 1) the podman store without the job image under
-// --fix with every offer ACCEPTED, where main offers and runs nothing. The temp paths a run makes are the only thing replaced.
-const mixedPinRun = async (scenario) => {
-	const triggers = triggersFile(undefined, "my-python:1.2.0");
-	const cwd = tempDir("pi-mixed-pin-cwd-");
-	const jobs = tempDir("pi-mixed-pin-jobs-");
-	const env = podmanEnv({ PI_BACKENDS: "local,podman", PI_WORKER_NAME: "mini1", PI_TRIGGERS_FILE: triggers, PI_JOBS_DIR: jobs, ...(scenario === "green" ? { PI_EGRESS: "1", GITHUB_AUTH_SOURCE: "gh" } : {}) });
-	// Issue #596, gate round 2: the Podman 5.8.1 this pin models answers with its CPU count (`host.cpus`), as every one
-	// does, so the pin prints the ceiling a healthy host prints rather than a cpu_ceiling_unknown none does. The local
-	// count stays unknown on purpose: docker is absent ("absent") or answers with no body (below).
-	// Issue #596, phase 2: and with its memory (`host.memTotal`, an illustrative 7937.5 MiB), so the host budget line is a
-	// healthy host's too.
-	const info = PODMAN_INFO({ cpus: 4, memTotal: 8_323_072_000 });
-	const { docker: _absent, ...podmanOnly } = podmanPlan({ info, image: scenario !== "podmanMissing" });
-	const plan =
-		scenario === "absent"
-			? podmanPlan({ info })
-			: {
-					...EGRESS_OK,
-					...podmanOnly,
-					"gh auth status": { code: 0, output: ghStatusOutput },
-					"gh auth token": { code: 0, output: "gho_x\n" },
-					// The facts read answers with no body, as it did when this pin was captured (issue #452 keeps it so). So its CPU
-					// count is genuinely unknown, as its job user and observations are (`unparseable` on each line), and the
-					// local cpu_ceiling_unknown warning below is the honest output for this daemon (issue #596, gate round 2).
-					"docker info --format={{json .}}": { code: 0, output: "" },
-					"docker info": 0,
-					"docker image inspect --format={{json": RUNNER_ENTRYPOINT,
-					"docker image inspect --format={{.Id}}": { code: 0, output: "sha256:aaaa\n" },
-					"docker image inspect pi-job:latest": scenario === "missing" ? 1 : 0,
-					"docker image": 0,
-					"docker run": 0,
-				};
-	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	const { out, text } = capture();
-	const calls = [];
-	const code = await runDoctor(env, podmanDeps(out, plan, calls, { cwd, agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [{ name: "mini2", tz, imageDigest: "sha256:bbbb" }] }), ...(scenario === "absent" ? { fix: true, promptFn: async () => false } : {}), ...(scenario === "podmanMissing" ? { fix: true, promptFn: async () => true } : {}) }));
-	return { code, calls, text: text().replaceAll(triggers, "<triggers>").replaceAll(cwd, "<cwd>").replaceAll(jobs, "<jobs>").replaceAll(tz, "<tz>") };
-};
-// The em dashes some of these lines carry are the output's own (labels older than this change), written as escapes.
-const MIXED_PIN = {
-	green: {
-		code: 0,
-		text: [
-			"✓ Node ≥ 22.19 (have 22.19.0)",
-			"✓ .env present",
-			"✓ Docker daemon reachable",
-			"✓ Job image present (pi-job:latest)",
-			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
-			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
-			"✓ Trigger job image present (my-python:1.2.0)",
-			"✓ Egress proxy running (pi-dispatch-egress-proxy)",
-			"✓ Egress proxy health: healthy",
-			// Issue #452 (gate round 3): this plan's `docker info` answers with no body, so the detach gate cannot say which
-			// runtime it is and no keeper holds: the canary, whose teardown detaches the running proxy, is not run.
-			"⚠ Egress policy: not proved, and no egress canary was run, because this shell's docker CLI could not say which container runtime it reaches and the rootless network keeper pi-dispatch-netns-keeper does not hold, and on a rootless Podman 4.x detaching the running egress proxy from a network cuts its route out (issue #458)",
-			"    → fix what stops `docker info` answering (which runtime it is decides whether a keeper is needed at all), or start it as the worker's account where its Quadlet unit is installed: systemctl --user reset-failed pi-dispatch-netns-keeper-network.service pi-dispatch-netns-keeper.service; systemctl --user restart pi-dispatch-netns-keeper-network.service pi-dispatch-netns-keeper.service (else `pi-dispatch service install` or `pi-dispatch up` installs it, or start it by hand, docs/podman.md step 6; a container of its name that is not the shipped keeper must be removed first), then re-run doctor",
-			"✓ Jobs run on: local, podman (a trigger that names none runs on local; run.backend selects)",
-			"⚠ local: isolation is ASSERTED by the daemon, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → the pid and memory bounds in the job argv are the daemon's to apply, and it is not observed applying them: `pi-dispatch doctor --live` reads pids.max and memory.max off a real container on this daemon. The worker logs its own answer at boot (worker_started.daemonAppliesBounds)",
-			"⚠ local: mountSet is ASSERTED by the container runtime's configuration, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → Podman mounts what its mounts.conf and containers.conf list into every job container, invisible to docker inspect: create an empty /etc/containers/mounts.conf and remove any volumes or mounts key. The worker logs its own answer at boot (worker_started.runtimeAddsNoMounts)",
-			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
-			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
-			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
-			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
-			"⚠ local: `docker info` gave no answer that says its CPU count (unparseable), so the CPU ceiling is unknown and a job that runs gets no --cpus: it may use every core of the host (cpu_ceiling_unknown)",
-			"    → make `docker info` answer for the worker's account with its CPU count, then re-run doctor; the worker reads it with every job's user",
-			"✓ podman: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
-			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
-			"✓ The budget counts each job's cpus as CPU reserved for it, although the runtime uses them as a weight (a busy job may use idle cores beyond them): so a job's cpus must fit the CPU budget beside what runs, even on an idle host",
-			"✓ The host budget binds first: it holds 1 job of the default size (4g, 2 CPUs) at once, fewer than PI_CONCURRENCY (3); bigger sizes fit fewer",
-			// Issue #596, phase 2: the aggregate CPU reserve, read with this fixture's systemctl, which answers nothing.
-			"⚠ podman: no host CPU reserve across jobs could be confirmed: the quota of pidispatch.slice was not readable (unparseable)",
-			"    → the worker sets it when it starts; start or restart it, or run as the worker's account: `systemctl --user set-property pidispatch.slice CPUQuota=300%`",
-			"⚠ local: which uid a job runs as could not be read from the daemon's answer (runtime-unreadable) -- every local job is refused",
-			"    → the docker CLI answered `docker info` with something no rule can read, so which uid a job may run as is unknown; point the real docker CLI at a Docker or Podman daemon",
-			"✓ podman: `podman info` answered as this account (Podman 5.8.1, rootless, this host's own)",
-			"✓ podman: cgroup v2 controllers are delegated to this account (cpuset, cpu, io, memory, pids), so a job's pid, memory and cpu bounds are applied",
-			"✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled",
-			"✓ podman: job image present in this account's Podman store (pi-job:latest)",
-			"✓ podman: jobs run as uid:gid 1234:1234 (passed as --user, with --userns=keep-id) with HOME=/home/pi",
-			"✓ podman: egress proxy running under this account's Podman (pi-dispatch-egress-proxy)",
-			// Issue #431: the one line that moved, and on purpose: the podman venue's allowlist is now read back by --live.
-			"⚠ podman: the egress allowlist is read back by `pi-dispatch doctor --live` on this venue, not by this run",
-			"    → run `pi-dispatch doctor --live`: its egress canary runs three containers built like a podman job's (the job user, --userns=keep-id, the venue's pinned flags) on a job-shaped --internal network under this account's Podman, one that must reach the provider through the proxy, one that must not reach an unlisted host, and one that must not get plain HTTP through to a listed host off port 80",
-			// Issue #458: the one line added, with egress armed on this venue.
-			"✓ podman: rootless network keeper running under this account's Podman on its own bridge network (pi-dispatch-netns-keeper), so a job's network teardown cannot cut the proxy's route out",
-			// PR #463 round 3: the keeper network's options, read as they are.
-			"✓ podman: the keeper's network pi-dispatch-netns-keeper is internal with DNS off, so the keeper reaches nothing",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
-			"✓ gh authenticates inside the job image (pi-job:latest)",
-			"✓ Valkey reachable (redis://127.0.0.1:6379)",
-			"✓ Fleet: 2 workers (mini1, mini2)",
-			"⚠ Job image digest differs from the other host",
-			"    → rebuild or re-pull so every host runs the same image; digests are identical only when both hosts pulled one tag from one registry, so two local builds differ legitimately",
-			// Issue #599, phase 2: the capacity line per live host; the peer's row does not route, so it writes no run mirror.
-			"✓ Host mini2: last 7d no history here; no source here holds its runs (a worker without PI_WORKER_NAME writes no run mirror)",
-			"✓ Jobs only: a machine busy with other work reads as idle",
-			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
-			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
-			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
-			"",
-			"doctor: ready. Start the worker with `pi-dispatch worker`.",
-			"",
-		].join("\n"),
-	},
-	absent: {
-		code: 1,
-		text: [
-			"✓ Node ≥ 22.19 (have 22.19.0)",
-			"✓ .env present",
-			"✗ Docker daemon reachable",
-			"    → install Docker \u2014 `docker` was not found on PATH",
-			"✗ Job image present (pi-job:latest)",
-			"    → docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
-			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
-			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
-			"✓ Jobs run on: local, podman (a trigger that names none runs on local; run.backend selects)",
-			"⚠ local: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ local: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
-			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
-			"⚠ local: credentialTransit is ASSERTED by the operator, not enforced: this shell's docker CLI did not say which endpoint it resolves (spawn-failed)",
-			"    → nothing shows where job containers (and the credentials they carry) would go; fix what stops the docker CLI answering, then re-run doctor. The worker logs its own answer at boot (worker_started.dockerEndpointLocal)",
-			"⚠ podman: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ podman: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
-			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
-			"⚠ local: `docker info` gave no answer that says its CPU count (docker-not-found), so the CPU ceiling is unknown and a job that runs gets no --cpus: it may use every core of the host (cpu_ceiling_unknown)",
-			"    → make `docker info` answer for the worker's account with its CPU count, then re-run doctor; the worker reads it with every job's user",
-			"✓ podman: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
-			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
-			"✓ The budget counts each job's cpus as CPU reserved for it, although the runtime uses them as a weight (a busy job may use idle cores beyond them): so a job's cpus must fit the CPU budget beside what runs, even on an idle host",
-			"✓ The host budget binds first: it holds 1 job of the default size (4g, 2 CPUs) at once, fewer than PI_CONCURRENCY (3); bigger sizes fit fewer",
-			// Issue #596, phase 2: the aggregate CPU reserve, read with this fixture's systemctl, which answers nothing.
-			"⚠ podman: no host CPU reserve across jobs could be confirmed: the quota of pidispatch.slice was not readable (unparseable)",
-			"    → the worker sets it when it starts; start or restart it, or run as the worker's account: `systemctl --user set-property pidispatch.slice CPUQuota=300%`",
-			"✓ podman: `podman info` answered as this account (Podman 5.8.1, rootless, this host's own)",
-			"✓ podman: cgroup v2 controllers are delegated to this account (cpuset, cpu, io, memory, pids), so a job's pid, memory and cpu bounds are applied",
-			"✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled",
-			"✓ podman: job image present in this account's Podman store (pi-job:latest)",
-			"✓ podman: jobs run as uid:gid 1234:1234 (passed as --user, with --userns=keep-id) with HOME=/home/pi",
-			"✓ Valkey reachable (redis://127.0.0.1:6379)",
-			"✓ Fleet: 2 workers (mini1, mini2)",
-			"✓ Host mini2: last 7d no history here; no source here holds its runs (a worker without PI_WORKER_NAME writes no run mirror)",
-			"✓ Jobs only: a machine busy with other work reads as idle",
-			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
-			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
-			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
-			"",
-			"fix available: Job image present (pi-job:latest)",
-			"    $ docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest",
-			"skipped: Job image present (pi-job:latest)",
-			"",
-			"doctor: some checks failed: fix the above, then re-run.",
-			"",
-		].join("\n"),
-	},
-	missing: {
-		code: 1,
-		text: [
-			"✓ Node ≥ 22.19 (have 22.19.0)",
-			"✓ .env present",
-			"✓ Docker daemon reachable",
-			"✗ Job image present (pi-job:latest)",
-			"    → docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest  (or build image/Dockerfile)",
-			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
-			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
-			"✓ Trigger job image present (my-python:1.2.0)",
-			"✓ Jobs run on: local, podman (a trigger that names none runs on local; run.backend selects)",
-			"⚠ local: isolation is ASSERTED by the daemon, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → the pid and memory bounds in the job argv are the daemon's to apply, and it is not observed applying them: `pi-dispatch doctor --live` reads pids.max and memory.max off a real container on this daemon. The worker logs its own answer at boot (worker_started.daemonAppliesBounds)",
-			"⚠ local: mountSet is ASSERTED by the container runtime's configuration, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → Podman mounts what its mounts.conf and containers.conf list into every job container, invisible to docker inspect: create an empty /etc/containers/mounts.conf and remove any volumes or mounts key. The worker logs its own answer at boot (worker_started.runtimeAddsNoMounts)",
-			"⚠ local: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ local: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
-			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
-			"⚠ podman: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ podman: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
-			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
-			"⚠ local: `docker info` gave no answer that says its CPU count (unparseable), so the CPU ceiling is unknown and a job that runs gets no --cpus: it may use every core of the host (cpu_ceiling_unknown)",
-			"    → make `docker info` answer for the worker's account with its CPU count, then re-run doctor; the worker reads it with every job's user",
-			"✓ podman: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
-			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
-			"✓ The budget counts each job's cpus as CPU reserved for it, although the runtime uses them as a weight (a busy job may use idle cores beyond them): so a job's cpus must fit the CPU budget beside what runs, even on an idle host",
-			"✓ The host budget binds first: it holds 1 job of the default size (4g, 2 CPUs) at once, fewer than PI_CONCURRENCY (3); bigger sizes fit fewer",
-			// Issue #596, phase 2: the aggregate CPU reserve, read with this fixture's systemctl, which answers nothing.
-			"⚠ podman: no host CPU reserve across jobs could be confirmed: the quota of pidispatch.slice was not readable (unparseable)",
-			"    → the worker sets it when it starts; start or restart it, or run as the worker's account: `systemctl --user set-property pidispatch.slice CPUQuota=300%`",
-			"⚠ local: which uid a job runs as could not be read from the daemon's answer (runtime-unreadable) -- every local job is refused",
-			"    → the docker CLI answered `docker info` with something no rule can read, so which uid a job may run as is unknown; point the real docker CLI at a Docker or Podman daemon",
-			"✓ podman: `podman info` answered as this account (Podman 5.8.1, rootless, this host's own)",
-			"✓ podman: cgroup v2 controllers are delegated to this account (cpuset, cpu, io, memory, pids), so a job's pid, memory and cpu bounds are applied",
-			"✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled",
-			"✓ podman: job image present in this account's Podman store (pi-job:latest)",
-			"✓ podman: jobs run as uid:gid 1234:1234 (passed as --user, with --userns=keep-id) with HOME=/home/pi",
-			"✓ Valkey reachable (redis://127.0.0.1:6379)",
-			"✓ Fleet: 2 workers (mini1, mini2)",
-			"✓ Host mini2: last 7d no history here; no source here holds its runs (a worker without PI_WORKER_NAME writes no run mirror)",
-			"✓ Jobs only: a machine busy with other work reads as idle",
-			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
-			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
-			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
-			"",
-			"doctor: some checks failed: fix the above, then re-run.",
-			"",
-		].join("\n"),
-	},
-	podmanMissing: {
-		code: 1,
-		text: [
-			"✓ Node ≥ 22.19 (have 22.19.0)",
-			"✓ .env present",
-			"✓ Docker daemon reachable",
-			"✓ Job image present (pi-job:latest)",
-			"⚠ Trigger flow \"review\" resolves in NO tier visible here (cron \"nightly\")",
-			"    → checked: staged packages; not checkable here: repo (/srv/repo is not readable as a git repo here) -- commit .pi/skills/review/SKILL.md, add the skill to run.skillsDir or the overlay skills/, or stage a package shipping it; a job of this trigger runs without the flow it names (the runner logs flow_not_loaded) and still exits 0",
-			"✓ Trigger job image present (my-python:1.2.0)",
-			"✓ Jobs run on: local, podman (a trigger that names none runs on local; run.backend selects)",
-			"⚠ local: isolation is ASSERTED by the daemon, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → the pid and memory bounds in the job argv are the daemon's to apply, and it is not observed applying them: `pi-dispatch doctor --live` reads pids.max and memory.max off a real container on this daemon. The worker logs its own answer at boot (worker_started.daemonAppliesBounds)",
-			"⚠ local: mountSet is ASSERTED by the container runtime's configuration, not enforced: the daemon answered in a shape nothing here reads (unparseable)",
-			"    → Podman mounts what its mounts.conf and containers.conf list into every job container, invisible to docker inspect: create an empty /etc/containers/mounts.conf and remove any volumes or mounts key. The worker logs its own answer at boot (worker_started.runtimeAddsNoMounts)",
-			"⚠ local: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ local: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"⚠ local: nonRoot is ASSERTED by the job image's USER directive (this repo's builds `USER pi`; an operator-built image may not), or, on a daemon that enforces bind-mount ownership with a worker uid other than 1001, the worker's own non-zero uid passed as `--user`, not enforced by it",
-			"    → not verifiable from here, so treat it as a claim rather than a control: the agent runs as a non-root user",
-			"⚠ podman: egress CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (the job reaches only what the allowlist proxy permits (CONST-EGRESS-POLICY-IN-THE-ARGV))",
-			"⚠ podman: jobToJobIsolation CAN be enforced here, but PI_EGRESS is off, so this deployment is not getting it",
-			"    → arm PI_EGRESS to get it (two jobs cannot reach each other, structurally rather than by policy)",
-			"✓ PI_BACKEND_FLOOR is not set, so no minimum is required of any backend",
-			"✓ Job size: 4g of memory with no swap beyond it, and the CPU weight of 2 CPUs, per job (the built-in default; a project row's memory and cpus override it, docs/scoped-limits.md); codemode workers: 8 (PI_CODEMODE_MAX_WORKERS, half the memory reserved for pi, tools and worker overhead; a sizing heuristic, not an RSS guarantee)",
-			// Issue #596 (gate round 1): the CPU ceiling unknown is a warning per venue, since such a job runs with no --cpus.
-			"⚠ local: `docker info` gave no answer that says its CPU count (unparseable), so the CPU ceiling is unknown and a job that runs gets no --cpus: it may use every core of the host (cpu_ceiling_unknown)",
-			"    → make `docker info` answer for the worker's account with its CPU count, then re-run doctor; the worker reads it with every job's user",
-			"✓ podman: any one job may use at most 3 of this runtime's 4 CPUs (--cpus); under contention a larger size gets more CPU than a smaller one (--cpu-shares)",
-			"✓ Host budget: memory 6913m (auto: 7937m here, 1g kept for the host), CPUs 3 (auto: 4 here, 1 kept for the host); a job starts only when its size fits beside what already runs on this host",
-			"✓ The budget counts each job's cpus as CPU reserved for it, although the runtime uses them as a weight (a busy job may use idle cores beyond them): so a job's cpus must fit the CPU budget beside what runs, even on an idle host",
-			"✓ The host budget binds first: it holds 1 job of the default size (4g, 2 CPUs) at once, fewer than PI_CONCURRENCY (3); bigger sizes fit fewer",
-			// Issue #596, phase 2: the aggregate CPU reserve, read with this fixture's systemctl, which answers nothing.
-			"⚠ podman: no host CPU reserve across jobs could be confirmed: the quota of pidispatch.slice was not readable (unparseable)",
-			"    → the worker sets it when it starts; start or restart it, or run as the worker's account: `systemctl --user set-property pidispatch.slice CPUQuota=300%`",
-			"⚠ local: which uid a job runs as could not be read from the daemon's answer (runtime-unreadable) -- every local job is refused",
-			"    → the docker CLI answered `docker info` with something no rule can read, so which uid a job may run as is unknown; point the real docker CLI at a Docker or Podman daemon",
-			"✓ podman: `podman info` answered as this account (Podman 5.8.1, rootless, this host's own)",
-			"✓ podman: cgroup v2 controllers are delegated to this account (cpuset, cpu, io, memory, pids), so a job's pid, memory and cpu bounds are applied",
-			"✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled",
-			"✗ podman: job image is not in this account's Podman store (pi-job:latest)",
-			"    → pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest -- jobs run with --pull=never, so the worker never fetches it",
-			"✓ podman: jobs run as uid:gid 1234:1234 (passed as --user, with --userns=keep-id) with HOME=/home/pi, once the job image is in this account's store and declares anyUid",
-			// Issue #481: the fixture now carries the PAT its source needs (the ✗ for a missing one is new), so the in-image
-			// probe runs here as it does on the green path. Nothing about the #433 output this pins moved.
-			"✓ gh authenticates inside the job image (pi-job:latest)",
-			"✓ Valkey reachable (redis://127.0.0.1:6379)",
-			"✓ Fleet: 2 workers (mini1, mini2)",
-			"⚠ Job image digest differs from the other host",
-			"    → rebuild or re-pull so every host runs the same image; digests are identical only when both hosts pulled one tag from one registry, so two local builds differ legitimately",
-			// Issue #599, phase 2: the capacity line per live host; the peer's row does not route, so it writes no run mirror.
-			"✓ Host mini2: last 7d no history here; no source here holds its runs (a worker without PI_WORKER_NAME writes no run mirror)",
-			"✓ Jobs only: a machine busy with other work reads as idle",
-			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
-			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
-			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
-			"",
-			"doctor: some checks failed: fix the above, then re-run.",
-			"",
-		].join("\n"),
-	},
-};
-test("a deployment that blesses local and podman prints exactly what it printed before issue #433 (#433)", async () => {
-	for (const [scenario, want] of Object.entries(MIXED_PIN)) {
-		const got = await mixedPinRun(scenario);
-		assert.equal(got.text, want.text, `${scenario}: the mixed deployment's output moved`);
-		assert.equal(got.code, want.code, `${scenario}: exit code`);
-		// Round 1 (D1): with local listed, a podman store without the image gets no `--fix` pull, even when every offer
-		// would be accepted; the output above already shows no offer, and nothing was run either.
-		assert.deepEqual(got.calls.filter((c) => c.args[0] === "pull"), [], `${scenario}: no pull ran`);
-	}
-});
-
-test("PI_BACKENDS=podman: docker is never spawned, one neutral line says so, and the podman section reads this account's Podman (#354, #433)", async () => {
-	const { out, text } = capture();
-	const calls = [];
-	const code = await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), calls));
-	assert.equal(code, 0, text());
-	// Issue #433: not asked at all, so the plan's `docker: "enoent"` is never consulted, and nothing about docker is judged.
-	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), [], "a podman-only deployment makes no docker spawn");
-	assert.ok(text().includes("✓ Docker: not checked -- PI_BACKENDS lists no docker venue (local), so no job here runs on Docker\n"), text());
-	assert.doesNotMatch(text(), /Docker daemon reachable|Job image present \(|not used by any job|install Docker/, "no docker verdict from a command that never ran");
-	assert.match(text(), /✓ podman: `podman info` answered as this account \(Podman 5\.8\.1, rootless, this host's own\)/);
-	assert.match(text(), /✓ podman: cgroup v2 controllers are delegated to this account \(cpuset, cpu, io, memory, pids\)/);
-	assert.match(text(), /✓ podman: SELinux does not confine containers here, so nothing a job mounts is relabelled/);
-	assert.match(text(), /✓ podman: job image present in this account's Podman store \(pi-job:latest\)/);
-	assert.match(text(), /✓ podman: jobs run as uid:gid 1234:1234 \(passed as --user, with --userns=keep-id\) with HOME=\/home\/pi/);
-	assert.doesNotMatch(text(), /podman: \w+ is ASSERTED/, "every observation holds, so the backend section says nothing of them");
-	assert.doesNotMatch(text(), /^. local: /m, "no local line of any kind on a deployment that runs no local job");
-	assert.equal(calls.filter((c) => c.cmd === "podman" && c.args[0] === "info").length, 1, "one podman info, shared by the decision, the observations and the line");
-	// --fix with the image present offers nothing, and never a pull into docker's store.
-	const asked = [];
-	const fixing = capture();
-	const fixCalls = [];
-	await runDoctor(podmanEnv(), { ...podmanDeps(fixing.out, podmanPlan(), fixCalls), fix: true, promptFn: async (question) => (asked.push(question), false) });
-	assert.doesNotMatch(fixing.text(), /fix available|docker pull/, "no pull offered");
-	assert.deepEqual(asked, []);
-	assert.deepEqual(fixCalls.filter((c) => c.cmd === "docker"), []);
-});
-
 test("a deployment that does not bless podman spawns no podman and prints no podman line (#354)", async () => {
 	for (const PI_BACKENDS of [undefined, "local", "nonsense"]) {
 		const { out, text } = capture();
@@ -8736,165 +8227,6 @@ test("a deployment that does not bless podman spawns no podman and prints no pod
 		assert.ok(!calls.some((c) => c.cmd === "podman"), `${PI_BACKENDS}: no podman spawn`);
 		assert.doesNotMatch(text(), /podman:|not used by any job/, `${PI_BACKENDS}: the docker lines are what they were`);
 	}
-});
-
-test("a podman venue refusal is ✗ where podman is the default venue and ⚠ where it is not, with its own fix (#354)", async () => {
-	for (const [label, plan, ids, cause] of [
-		["rootful", podmanPlan({ info: PODMAN_INFO({}, { rootless: false }) }), LINUX_ID(1234), "podman-rootful"],
-		["remote", podmanPlan({ info: PODMAN_INFO({ serviceIsRemote: true }) }), LINUX_ID(1234), "podman-remote"],
-		["root worker", podmanPlan(), LINUX_ID(0), "worker-is-root"],
-		["no podman", "no podman", LINUX_ID(1234), "podman-not-found"],
-		["macOS", podmanPlan(), { platform: "darwin", euid: 501, egid: 20 }, "podman-platform"],
-	]) {
-		for (const PI_BACKENDS of ["podman", "local,podman"]) {
-			const { out, text } = capture();
-			const calls = [];
-			const deps = podmanDeps(out, plan === "no podman" ? { docker: "enoent" } : plan, calls, { jobUserIdentity: ids });
-			// No podman on PATH is what node's spawn says: an error with code ENOENT, which the fake's "enoent" does not carry.
-			if (plan === "no podman") {
-				const base = deps.spawn;
-				deps.spawn = (cmd, ...rest) => {
-					if (cmd === "podman") throw Object.assign(new Error("spawn podman ENOENT"), { code: "ENOENT" });
-					return base(cmd, ...rest);
-				};
-			}
-			const code = await runDoctor(podmanEnv({ PI_BACKENDS }), deps);
-			const boot = PI_BACKENDS === "podman";
-			const mark = boot ? "✗" : "⚠";
-			const tail = boot ? "a worker running as this account refuses to boot" : "every podman job is refused";
-			assert.ok(text().includes(`${mark} podman: no job can run on this venue (${cause}) -- ${tail}\n    → ${PODMAN_JOB_USER_FIX[cause]}\n`), `${label} ${PI_BACKENDS}:\n${text()}`);
-			if (boot) assert.equal(code, 1, `${label}: a boot refusal fails doctor`);
-			assert.doesNotMatch(text(), /podman: jobs run as|podman: job image/, `${label}: nothing past the refusal is read`);
-			if (label === "macOS") assert.ok(!calls.some((c) => c.cmd === "podman"), "off Linux podman is not even asked");
-		}
-	}
-});
-
-test("a widening containers.conf is a podman venue refusal: ✗ where podman is the default, ⚠ where not, naming the file and key, with no extra spawn (#428)", async () => {
-	const confPath = `${PODMAN_HOME}/.config/containers/containers.conf`;
-	const withConf = (text) => ({ ...podmanFs, readFileSync: (p) => (p === confPath ? text : podmanFs.readFileSync(p)) });
-	for (const [key, text] of [
-		["pasta_options", '[network]\npasta_options = ["--map-gw"]\n'],
-		["network_cmd_options", '[engine]\nnetwork_cmd_options = ["allow_host_loopback=true"]\n'],
-		["annotations", '[containers]\nannotations = ["run.oci.keep_original_groups=1"]\n'],
-	]) {
-		for (const PI_BACKENDS of ["podman", "local,podman"]) {
-			const { out, text: said } = capture();
-			const calls = [];
-			const code = await runDoctor(podmanEnv({ PI_BACKENDS }), podmanDeps(out, podmanPlan(), calls, { observationFs: withConf(text) }));
-			const boot = PI_BACKENDS === "podman";
-			const line = `${boot ? "✗" : "⚠"} podman: no job can run on this venue (podman-conf-widens-job): ${confPath} sets ${key}, which `;
-			assert.ok(said().includes(line), `${key} ${PI_BACKENDS}:\n${said()}`);
-			// Gate round 1 of PR #473: a per-container key needs no network reset; a network-helper key does.
-			assert.match(said(), new RegExp(`${boot ? "a worker running as this account refuses to boot" : "every podman job is refused"}\n {4}→ ${key === "annotations" ? "remove that key from that file; the next podman job runs once it is gone" : "remove that key from that file, then stop every running container of this account that is on a bridge network, all of them at once"}`));
-			if (boot) assert.equal(code, 1, `${key}: a boot refusal fails doctor`);
-			assert.doesNotMatch(said(), /podman: jobs run as|podman: job image/, `${key}: nothing past the refusal is read`);
-			assert.deepEqual(calls.filter((c) => c.cmd === "podman").map((c) => c.args[0]), ["info"], "the files are read, podman is asked nothing more");
-		}
-	}
-	// The ⚠ is not a failure: with podman merely blessed and local's own lines green, doctor exits 0 (review round 2
-	// saw exit 1 in the loop above; that came from the fixture's absent docker, local's two ✗ lines, not from this one).
-	const blessed = capture();
-	const blessedCode = await runDoctor(podmanEnv({ PI_BACKENDS: "local,podman" }), podmanDeps(blessed.out, { ...green, ...podmanPlan() }, [], { observationFs: withConf("pasta_options = []\n") }));
-	assert.ok(blessed.text().includes("⚠ podman: no job can run on this venue (podman-conf-widens-job)"), blessed.text());
-	assert.deepEqual(blessed.text().split("\n").filter((l) => l.startsWith("✗")), [], blessed.text());
-	assert.equal(blessedCode, 0, "a ⚠ line does not fail doctor");
-	// A clean conf says nothing of it.
-	const { out, text: said } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { observationFs: withConf("[network]\n# pasta_options = []\n") }));
-	assert.doesNotMatch(said(), /podman-conf-widens-job/);
-	// With a podman info that has not answered, the conf is still judged and said: the worker refuses on the files
-	// alone, so doctor must not wait on the job-user decision to say so.
-	const slow = capture();
-	await runDoctor(podmanEnv(), podmanDeps(slow.out, { ...podmanPlan(), "podman info": { code: 125, output: "Error: cannot connect\n" } }, [], { observationFs: withConf("pasta_options = []\n") }));
-	assert.ok(slow.text().includes(`✗ podman: no job can run on this venue (podman-conf-widens-job): ${confPath} sets pasta_options, which `), slow.text());
-	assert.doesNotMatch(slow.text(), /which uid a job runs as could not be decided/, "the conf line, not the undecided one");
-	// A conf read that failed for a moment is ⚠ and says it is retried, never the ✗ refusal.
-	const busy = capture();
-	const busyCode = await runDoctor(podmanEnv(), podmanDeps(busy.out, podmanPlan(), [], { observationFs: { ...podmanFs, readFileSync: (p) => (p === confPath ? (() => { throw Object.assign(new Error("EMFILE"), { code: "EMFILE" }); })() : podmanFs.readFileSync(p)) } }));
-	assert.match(busy.text(), /⚠ podman: whether this account's containers.conf or running rootless network widens a job could not be read just now: [^\n]*could not be read \(EMFILE\)\n {4}→ the read failed for a moment/);
-	assert.equal(busyCode, 0);
-	// `--live` names the conf line as the one to fix, not the job-user line (the reviewer's R3).
-	const live = capture();
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(live.out, { ...podmanLiveOk(), ...podmanPlan() }, [], { observationFs: withConf("annotations = []\n") }), live: true, ...instantClock(), liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n" });
-	assert.match(live.text(), /⚠ read back on podman: not run -- a podman job is refused here \(podman-conf-widens-job\)[^\n]*\n {4}→ fix the podman containers\.conf line above first/);
-});
-
-// Issue #450: this account's rootless network still running with an option a removed key gave it (Podman 5.8.1's pasta,
-// measured with --map-host-loopback after the key was removed), read from /proc by the worker's own function.
-test("a rootless network still carrying a removed key's option is the same podman venue refusal, with the reset to run (#450)", async () => {
-	const argv = ["/usr/sbin/pasta", "--config-net", "--map-host-loopback", "169.254.1.2", "--pid", "/run/user/1234/containers/networks/rootless-netns/rootless-netns-conn.pid", "--dns-forward", "169.254.1.1", "-t", "none", "-u", "none", "-T", "none", "-U", "none", "--no-map-gw", "--quiet", "--netns", "/run/user/1234/containers/networks/rootless-netns/rootless-netns", "--map-guest-addr", "169.254.1.2"];
-	const withLive = (args) => {
-		// 5.8.1's pasta: PID 1 of a pid namespace of its own, found through the pid file Podman keeps under runRoot.
-		// It started 10 s after boot (stat field 22, in ticks), and wrote the pid file a minute after boot.
-		const conn = "/run/user/1234/containers/networks/rootless-netns/rootless-netns-conn.pid";
-		const proc = { "/proc/4887/status": "Name:\tpasta\nUid:\t1234\t1234\t1234\t1234\nNSpid:\t4887\t1\n", "/proc/4887/cmdline": `${args.join("\0")}\0`, "/proc/4887/stat": "4887 (pasta) S 1 4887 4887 0 -1 4194560 1 0 0 0 0 0 0 0 20 0 1 0 1000 1 1\n", "/proc/stat": "btime 1790000000\n", [conn]: "4887\n" };
-		return { ...podmanFs, readFileSync: (p) => (Object.hasOwn(proc, p) ? proc[p] : podmanFs.readFileSync(p)), readdirSync: (p) => (p === "/proc" ? ["self", "4887"] : podmanFs.readdirSync(p)), statSync: (p) => (p === conn ? { size: 5, mtimeMs: 1_790_000_060_000 } : podmanFs.statSync(p)) };
-	};
-	for (const PI_BACKENDS of ["podman", "local,podman"]) {
-		const { out, text: said } = capture();
-		const calls = [];
-		const code = await runDoctor(podmanEnv({ PI_BACKENDS }), podmanDeps(out, podmanPlan(), calls, { observationFs: withLive(argv) }));
-		const boot = PI_BACKENDS === "podman";
-		const line = `${boot ? "✗" : "⚠"} podman: no job can run on this venue (podman-conf-widens-job): this account's running rootless network (pasta, pid 4887), which every container on a bridge network shares, the egress proxy's among them, still carries --map-host-loopback`;
-		assert.ok(said().includes(line), `${PI_BACKENDS}:\n${said()}`);
-		assert.match(said(), /\n {4}→ stop every running container of this account that is on a bridge network, all of them at once, [^\n]*systemctl --user stop pi-dispatch-worker\.service pi-dispatch-egress-proxy\.service pi-dispatch-netns-keeper\.service pi-dispatch-valkey\.service[^\n]*admits the next once it no longer carries the option\n/);
-		assert.doesNotMatch(said(), /remove that key/);
-		if (boot) assert.equal(code, 1, "a boot refusal fails doctor");
-		assert.deepEqual(calls.filter((c) => c.cmd === "podman").map((c) => c.args[0]), ["info"], "/proc is read, podman is asked nothing more");
-	}
-	// The same helper narrow says nothing of it.
-	const { out, text: said } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { observationFs: withLive(argv.filter((t, i) => i !== 2 && i !== 3)) }));
-	assert.doesNotMatch(said(), /podman-conf-widens-job/);
-	// `--live` points at the network's reset, never at a containers.conf line there is none of.
-	const live = capture();
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(live.out, { ...podmanLiveOk(), ...podmanPlan() }, [], { observationFs: withLive(argv) }), live: true, ...instantClock(), liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n" });
-	assert.match(live.text(), /⚠ read back on podman: not run -- a podman job is refused here \(podman-conf-widens-job\)[^\n]*\n {4}→ reset this account's rootless network as the podman line above says first, then re-run `pi-dispatch doctor --live`/);
-	assert.doesNotMatch(live.text(), /containers\.conf line above/);
-	// And a helper whose argv could not be read points at that line, not at a reset.
-	const denied = { ...withLive(argv), readFileSync: (p) => (p === "/proc/4887/cmdline" ? (() => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); })() : withLive(argv).readFileSync(p)) };
-	const unread = capture();
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(unread.out, { ...podmanLiveOk(), ...podmanPlan() }, [], { observationFs: denied }), live: true, ...instantClock(), liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n" });
-	assert.match(unread.text(), /\/proc\/4887\/cmdline could not be read \(EACCES\)/);
-	assert.match(unread.text(), /\n {4}→ fix the podman rootless network line above first, then re-run `pi-dispatch doctor --live`/);
-});
-
-test("doctor names a host file read that failed for a moment as that, not as a runtime that did not answer, on both venues (#428)", async () => {
-	// podman: the account's own mounts.conf stat fails with EMFILE; podman info answered.
-	const mountsPath = `${PODMAN_HOME}/.config/containers/mounts.conf`;
-	const emfile = (p) => {
-		throw Object.assign(new Error(`EMFILE: ${p}`), { code: "EMFILE" });
-	};
-	const { out, text } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { observationFs: { ...podmanFs, statSync: (p) => (p === mountsPath ? emfile(p) : podmanFs.statSync(p)) } }));
-	assert.match(text(), new RegExp(`⚠ podman: mountSet is ASSERTED by this account's Podman setup, not enforced: ${mountsPath.replaceAll(".", "\\.")} could not be read \\(EMFILE\\)\\n {4}→ nothing shows whether [^\\n]*because the file named above could not be read just now \\(the runtime itself answered\\); a job the floor needs it for is retried`));
-	assert.doesNotMatch(text(), /fix what stops `podman info` answering/);
-	// local, on a rootful Podman's Docker API: the hooks directory read fails with EMFILE; the daemon answered.
-	const endpoint = { local: true, context: "podman", endpoint: "unix:///run/podman/podman.sock" };
-	const daemon = { answered: true, facts: parseDaemonFacts(PODMAN_COMPAT_INFO).facts };
-	const fs = { ...withOverride, readdirSync: (p) => (p === "/etc/containers/oci/hooks.d" ? emfile(p) : withOverride.readdirSync(p)) };
-	const line = backendChecks({}, { endpoint, daemon, fs }).find((c) => c.label.startsWith("local: mountSet is ASSERTED"));
-	assert.match(line.label, /not enforced: \/etc\/containers\/oci\/hooks\.d could not be read \(EMFILE\)/);
-	assert.match(line.fix, /because the file named above could not be read just now \(the runtime itself answered\); a job the floor needs it for is retried/);
-	assert.doesNotMatch(line.fix, /fix what stops the daemon answering/);
-});
-
-test("the podman job image is read from THIS account's store, and its anyUid rule is the podman venue's (#354)", async () => {
-	const run = async (plan, ids = LINUX_ID(1234)) => {
-		const { out, text } = capture();
-		const code = await runDoctor(podmanEnv(), podmanDeps(out, plan, [], { jobUserIdentity: ids }));
-		return { code, text: text() };
-	};
-	const absent = await run(podmanPlan({ image: false }));
-	assert.equal(absent.code, 1);
-	assert.match(absent.text, /✗ podman: job image is not in this account's Podman store \(pi-job:latest\)\n {4}→ pull or load it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull docker\.io\/ddv12138\/pi-job:latest && podman tag/);
-	assert.match(absent.text, /✓ podman: jobs run as uid:gid 1234:1234 \(passed as --user, with --userns=keep-id\) with HOME=\/home\/pi, once the job image is in this account's store and declares anyUid/);
-	const noAnyUid = await run(podmanPlan({ capabilities: "replicas" }));
-	assert.match(noAnyUid.text, /⚠ podman: every job on pi-job:latest is refused as this uid \(job-image-any-uid-unsupported\)\n {4}→ the job image does not declare `anyUid`[^\n]*which the podman venue always uses/);
-	assert.equal(noAnyUid.code, 0, "a per-job refusal warns, as the worker boots and refuses each job");
-	const imageUid = await run(podmanPlan({ capabilities: "replicas" }), LINUX_ID(1001));
-	assert.match(imageUid.text, /✓ podman: jobs run as uid:gid 1001:1001 \(passed as --user, with --userns=keep-id\)/, "uid 1001 is the image's own, anyUid or not");
 });
 
 test("doctor's missing-job-image fix follows up's rule: the default pull and tag, a qualified name's own pull, a short name never pulled (#523)", async () => {
@@ -8908,509 +8240,8 @@ test("doctor's missing-job-image fix follows up's rule: the default pull and tag
 		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_JOB_IMAGE: image }, { out, cwd: tmpdir(), spawn: fakeSpawn({ ...EGRESS_OK, "docker info": 0, "docker image": 1 }), probeValkey: async () => false, fileExists: () => true, nodeVersion: "22.19.0" });
 		assert.ok(text().includes(`✗ Job image present (${image})\n    → ${fix}\n`), `${image}: ${text()}`);
 	}
-	// podman: the same helper inside the account-store sentence.
-	// Round 2: the lead-in never suggests a pull for a name no pull is offered for (short, or localhost/).
-	for (const [image, lead, fix] of [
-		["ghcr.io/edgehero/pi-job:2.1.0", "pull or load", "podman pull ghcr.io/edgehero/pi-job:2.1.0"],
-		["pi-job:2.1.0", "build or load", "pi-job:2.1.0 names no registry host, so a pull would fetch whatever a public registry holds under that name: build it on this host, `podman tag` an image you have as pi-job:2.1.0"],
-		["localhost/my-job:dev", "build or load", "localhost/my-job:dev is a locally built name (localhost/ is no registry to pull from): build it on this host, or `podman tag` an image you have as localhost/my-job:dev"],
-	]) {
-		const { out, text } = capture();
-		await runDoctor(podmanEnv({ PI_JOB_IMAGE: image }), podmanDeps(out, podmanPlan({ image: false })));
-		assert.ok(text().includes(`→ ${lead} it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: ${fix}`), `${image}: ${text()}`);
-		// Never the DEFAULT image's pull-and-tag in place of the named one, and never a pull at all of a name no
-		// pull is offered for (issue #523): the lead-in above says which of the two this row is.
-		if (lead === "pull or load") assert.doesNotMatch(text(), /podman pull docker\.io\/ddv12138\/pi-job:latest/, image);
-		else assert.doesNotMatch(text(), new RegExp(`podman pull ${image.replace(/[./]/g, "\\$&")}`), image);
-	}
 });
 
-test("with egress armed the podman proxy is read under podman, and the docker egress checks do not run for a podman-only deployment (#354)", async () => {
-	const run = async (proxy) => {
-		const { out, text } = capture();
-		const calls = [];
-		const code = await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(out, podmanPlan({ proxy }), calls));
-		return { code, text: text(), calls };
-	};
-	const up = await run("running");
-	assert.match(up.text, /✓ podman: egress proxy running under this account's Podman \(pi-dispatch-egress-proxy\)/);
-	// Issue #431: a plain run points at --live, where this venue's canary runs; it starts no canary container itself.
-	assert.match(up.text, /⚠ podman: the egress allowlist is read back by `pi-dispatch doctor --live` on this venue, not by this run/);
-	assert.ok(!up.calls.some((c) => c.args.some((a) => /pi-dispatch-egress-(doctor|probe)-/.test(String(a)))), "no canary object is touched by a plain run");
-	assert.doesNotMatch(up.text, /Egress (policy|proxy)/, "docker's egress lines are about a proxy no job here is wired to");
-	assert.deepEqual(up.calls.find((c) => c.cmd === "podman" && c.args[0] === "inspect")?.args, ["inspect", "--format={{.State.Status}}", "pi-dispatch-egress-proxy"]);
-	const down = await run(null);
-	assert.equal(down.code, 1);
-	assert.match(down.text, /✗ podman: egress proxy is not under this account's Podman \(pi-dispatch-egress-proxy\)\n {4}→ start it as the worker's account, under the same rootless Podman, on a named bridge network/);
-	const stopped = await run("exited");
-	// The raw word (gate round 1), so an exited proxy and a crash-looping `stopped` one read apart.
-	assert.match(stopped.text, /✗ podman: egress proxy is exited under this account's Podman \(pi-dispatch-egress-proxy\)\n {4}→ start it as the worker's account/);
-	assert.doesNotMatch(stopped.text, /allowlist is read back by/, "only said beside a running proxy");
-	// PR #456's final check: Podman reads a proxy crash-looping under a restart policy as `stopped` between restarts, and
-	// every job fails (one retry, then failed), so it is ✗ like docker's `restarting`, never the ⚠ that says jobs wait.
-	for (const status of ["stopped", "restarting"]) {
-		const looping = await run(status);
-		assert.equal(looping.code, 1, status);
-		assert.match(
-			looping.text,
-			new RegExp(`✗ podman: egress proxy is ${status} under this account's Podman \\(pi-dispatch-egress-proxy\\)\\n {4}→ if a restart policy keeps bringing it back, its squid keeps exiting \\(Podman reads such a crash loop as ${status}\\) and every podman job is retried once, then failed; \`podman logs pi-dispatch-egress-proxy\` says why\\n`),
-		);
-	}
-	// A transient word stays the ⚠ that says a job waits, and never fails doctor.
-	const transient = await run("stopping");
-	assert.match(transient.text, /⚠ podman: egress proxy is stopping under this account's Podman \(pi-dispatch-egress-proxy\)\n {4}→ a podman job meanwhile is retried once, then failed \(the worker does not refuse it outright on this state\); if it stays stopping, `podman logs pi-dispatch-egress-proxy` says why\n/);
-	assert.doesNotMatch(transient.text, /✗ podman: egress proxy/);
-});
-
-// Issue #458: on Podman 4.x a job's network teardown cuts the proxy's route out unless another bridge container runs,
-// and the proxy line above stays ✓ while every later egress job gets 503. So the keeper is read beside the proxy, and
-// its absence is ✗ exactly where it breaks egress: 4.x, or a version podman info did not give.
-test("with egress armed the rootless network keeper is read, and a missing one is ✗ on Podman 4.x only (#458)", async () => {
-	const run = async ({ version = "4.9.3", keeper = "running", env = { PI_EGRESS: "1" } } = {}) => {
-		const { out, text } = capture();
-		const calls = [];
-		const info = JSON.stringify({ ...JSON.parse(PODMAN_INFO()), version: { Version: version } });
-		const code = await runDoctor(podmanEnv(env), podmanDeps(out, podmanPlan({ info, keeper }), calls));
-		return { code, text: text(), calls };
-	};
-	const held = await run();
-	assert.equal(held.code, 0);
-	assert.match(held.text, /✓ podman: rootless network keeper running under this account's Podman on its own bridge network \(pi-dispatch-netns-keeper\), so a job's network teardown cannot cut the proxy's route out\n/);
-	assert.deepEqual(held.calls.filter((c) => c.cmd === "podman" && c.args[0] === "inspect").map((c) => c.args), [
-		["inspect", "--format={{.State.Status}}", "pi-dispatch-egress-proxy"],
-		["inspect", "--format={{.State.Status}}|{{.HostConfig.NetworkMode}}|{{range $k, $v := .NetworkSettings.Networks}}{{$k}},{{end}}|{{.State.StartedAt.UnixMilli}}", "pi-dispatch-netns-keeper"],
-		["inspect", "--format={{.State.StartedAt.UnixMilli}}", "pi-dispatch-egress-proxy"],
-	]);
-	const absent = await run({ keeper: null });
-	assert.equal(absent.code, 1, "a missing keeper on 4.x fails doctor");
-	assert.match(absent.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman: on Podman 4\.9\.3, the first egress job's network teardown then cuts the proxy's route out, and every egress job after it gets 503 from the proxy\n {4}→ start it as the worker's account where its Quadlet unit is installed: systemctl --user reset-failed pi-dispatch-netns-keeper-network\.service pi-dispatch-netns-keeper\.service; systemctl --user restart pi-dispatch-netns-keeper-network\.service pi-dispatch-netns-keeper\.service \(else `pi-dispatch service install` or `pi-dispatch up` installs it/);
-	const exited = await run({ keeper: "exited" });
-	assert.equal(exited.code, 1);
-	assert.match(exited.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is exited under this account's Podman: on Podman 4\.9\.3/);
-	// Issue #463's gate: RUNNING is not holding. What 4.9.3 printed for a keeper of this name on each other network mode
-	// (measured), and one on another bridge only: each runs, protects nothing here, and is ✗ saying which.
-	for (const [shape, words] of [
-		["running|none|none,", /is running on the none network mode, not on its pi-dispatch-netns-keeper bridge network, so it holds nothing open/],
-		["running|slirp4netns|", /is running on the slirp4netns network mode/],
-		["running|pasta|", /is running on the pasta network mode/],
-		["running|host|host,", /is running on the host network mode/],
-		["running|bridge|pdn-other,", /is running but not attached to its pi-dispatch-netns-keeper bridge network \(it is on pdn-other\)/],
-		["paused|bridge|pi-dispatch-netns-keeper,", /is paused under this account's Podman/],
-	]) {
-		const off = await run({ keeper: shape });
-		assert.equal(off.code, 1, shape);
-		assert.match(off.text, new RegExp(`✗ podman: rootless network keeper pi-dispatch-netns-keeper ${words.source}`), shape);
-	}
-	const twoNets = await run({ keeper: `running|bridge|pdn-other,pi-dispatch-netns-keeper,|${KEEPER_STARTED}` });
-	assert.equal(twoNets.code, 0, "on its own network, whatever else it is on, it is a bridge member and holds");
-	// PR #463 round 2, on an injected clock: a keeper up for under 3 s is not yet counted (a crash loop reads as running
-	// for moments), and one that started more than 15 s after the proxy asks for a PROXY restart, since a teardown
-	// while it was down may already have cut the proxy's route out and nothing outside shows it.
-	const at = async (keeper, now, proxyStarted = PROXY_STARTED) => {
-		const { out, text } = capture();
-		const info = JSON.stringify({ ...JSON.parse(PODMAN_INFO()), version: { Version: "4.9.3" } });
-		const code = await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(out, podmanPlan({ info, keeper, proxyStarted }), [], { wallClock: () => now }));
-		return { code, text: text() };
-	};
-	const young = await at(`running|bridge|pi-dispatch-netns-keeper,|${PROXY_STARTED + 15_000}`, PROXY_STARTED + 17_500);
-	assert.equal(young.code, 1);
-	assert.match(young.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper has been running for only 2\.5 s, and a keeper that keeps dying reads as running for a moment at a time; it counts once it has run for 3 s: on Podman 4\.9\.3/);
-	const settled = await at(`running|bridge|pi-dispatch-netns-keeper,|${PROXY_STARTED + 15_000}`, PROXY_STARTED + 18_000);
-	assert.equal(settled.code, 0, "3 s up, and within 15 s of the proxy: holds");
-	const late = await at(`running|bridge|pi-dispatch-netns-keeper,|${PROXY_STARTED + 15_001}`, PROXY_STARTED + 600_000);
-	assert.equal(late.code, 1);
-	assert.match(late.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper started 15 s after the egress proxy did, so it was down while the proxy ran, and a job teardown in that gap would have cut the proxy's route out for good, which nothing can see from outside: on Podman 4\.9\.3, so every egress job may get 503 from the proxy until the proxy restarts, and the worker retries each one rather than start it\n {4}→ restart the egress proxy once no job is running: systemctl --user restart pi-dispatch-egress-proxy\.service/);
-	// PR #463 round 3: a STOPPED keeper under a proxy up longer than the grace needs two steps, and the fix says both.
-	const stoppedLate = await at(`exited|bridge|pi-dispatch-netns-keeper,|${KEEPER_STARTED}`, PROXY_STARTED + 600_000);
-	assert.match(stoppedLate.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is exited under this account's Podman[^\n]*\n {4}→ start it as the worker's account where its Quadlet unit is installed: systemctl --user reset-failed [^\n]*, then restart the egress proxy once no job is running: systemctl --user restart pi-dispatch-egress-proxy\.service \(podman restart pi-dispatch-egress-proxy for one started by hand\), since the proxy has been up since before it\./);
-	const stoppedFresh = await at(`exited|bridge|pi-dispatch-netns-keeper,|${KEEPER_STARTED}`, PROXY_STARTED + 10_000);
-	assert.doesNotMatch(stoppedFresh.text, /then restart the egress proxy/, "a proxy up under the grace: the keeper's start is enough");
-	// PR #463 round 3: the keeper's network is read as it IS; a widened one (its units' --ignore keeps it) is ✗.
-	const netAt = async (keeperNet) => {
-		const { out, text } = capture();
-		const calls = [];
-		const code = await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(out, podmanPlan({ keeperNet }), calls));
-		return { code, text: text(), calls };
-	};
-	const shipped = await netAt("true false");
-	assert.equal(shipped.code, 0);
-	assert.match(shipped.text, /✓ podman: the keeper's network pi-dispatch-netns-keeper is internal with DNS off, so the keeper reaches nothing\n/);
-	assert.ok(shipped.calls.some((c) => c.cmd === "podman" && c.args.join(" ") === "network inspect --format {{.Internal}} {{.DNSEnabled}} pi-dispatch-netns-keeper"));
-	for (const [answer, words] of [["false false", "not internal \\(it has a route out\\)"], ["true true", "DNS on"], ["false true", "not internal \\(it has a route out\\) and DNS on"]]) {
-		const widened = await netAt(answer);
-		assert.equal(widened.code, 1, answer);
-		assert.match(widened.text, new RegExp(`✗ podman: the keeper's network pi-dispatch-netns-keeper is ${words}, which is not the network this project ships[^\\n]*\\n {4}→ remove the network and restart the keeper units, which recreate it as shipped: systemctl --user stop pi-dispatch-netns-keeper\\.service; podman network rm pi-dispatch-netns-keeper; systemctl --user reset-failed`), answer);
-	}
-	const odd = await netAt("<no value>");
-	assert.match(odd.text, /⚠ podman: whether the keeper's network pi-dispatch-netns-keeper is internal with DNS off could not be read/);
-	const absentNet = await netAt(null);
-	assert.doesNotMatch(absentNet.text, /keeper's network/, "no network: the keeper line already says what is missing");
-	// Pinned as a READ that exited 125, not a read never made (PR #463 final review): the inspect ran, and said nothing.
-	assert.ok(absentNet.calls.some((c) => c.cmd === "podman" && c.args.join(" ") === "network inspect --format {{.Internal}} {{.DNSEnabled}} pi-dispatch-netns-keeper"));
-	assert.equal(absentNet.code, 0, "and nothing failed for it");
-	const unreadStart = await at("running|bridge|pi-dispatch-netns-keeper,|", PROXY_STARTED);
-	assert.match(unreadStart.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is running, but when it started could not be read/);
-	// The proxy's start not readable: the order cannot be judged, and is not held against the keeper.
-	const noProxyStart = await at(`running|bridge|pi-dispatch-netns-keeper,|${PROXY_STARTED + 600_000}`, PROXY_STARTED + 700_000, null);
-	assert.equal(noProxyStart.code, 0);
-	// On 5.x neither rule is asked, and the proxy's start is not even read.
-	const { out: o5, text: t5 } = capture();
-	const calls5 = [];
-	const info5 = JSON.stringify({ ...JSON.parse(PODMAN_INFO()), version: { Version: "5.8.1" } });
-	assert.equal(await runDoctor(podmanEnv({ PI_EGRESS: "1" }), podmanDeps(o5, podmanPlan({ info: info5, keeper: `running|bridge|pi-dispatch-netns-keeper,|${PROXY_STARTED + 600_000}` }), calls5, { wallClock: () => PROXY_STARTED + 600_500 })), 0, t5());
-	assert.ok(!calls5.some((c) => c.args.includes("--format={{.State.StartedAt.UnixMilli}}")));
-	const unread = await run({ version: "", keeper: "exited" });
-	assert.equal(unread.code, 1, "an unreported version is no evidence of 5.x");
-	assert.match(unread.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is exited [^\n]*: on Podman of an unreported version, the first egress job's/);
-	for (const version of ["5.0.0", "5.8.1"]) {
-		const five = await run({ version, keeper: null });
-		assert.equal(five.code, 0, `Podman ${version} does not need it`);
-		assert.match(five.text, new RegExp(`✓ podman: rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman, which Podman ${version.replaceAll(".", "\\.")} does not need`));
-	}
-	// Egress off: no proxy is ever disconnected, so neither is read.
-	const off = await run({ keeper: null, env: { PI_EGRESS: "0" } });
-	assert.equal(off.code, 0);
-	assert.doesNotMatch(off.text, /network keeper/);
-	assert.ok(!off.calls.some((c) => c.cmd === "podman" && c.args[0] === "inspect"), "no inspect with egress off");
-	// Whatever the proxy's name: the worker disconnects an operator's own proxy just the same.
-	const own = await run({ keeper: null, env: { PI_EGRESS: "1", PI_EGRESS_PROXY: "my-squid" } });
-	assert.match(own.text, /✗ podman: rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman/);
-});
-
-test("the backend section judges the podman venue's words on its own observations, never the docker daemon's (#354)", () => {
-	const observed = (observations, read = { answered: true }) => ({
-		observations: { podmanBoundsDelegated: true, podmanAddsNoMounts: true, podmanServiceLocal: true, ...observations },
-		evidence: { podmanBoundsDelegated: "the pids cgroup controller is not delegated", podmanAddsNoMounts: "mounts evidence", podmanServiceLocal: "podman info reports serviceIsRemote true" },
-		read,
-	});
-	const env = { PI_BACKENDS: "podman" };
-	const find = (checks, property) => checks.find((c) => c.label.startsWith(`podman: ${property} is ASSERTED`));
-	// A docker daemon that reads as Podman-compat is given too: its answer must not speak for the podman venue.
-	const daemon = { answered: true, facts: parseDaemonFacts(PODMAN_COMPAT_INFO).facts };
-	const bounds = backendChecks(env, { daemon, fs: noHostFiles, podman: observed({ podmanBoundsDelegated: false }) });
-	assert.deepEqual([find(bounds, "isolation").ok, find(bounds, "isolation").warn], [false, true]);
-	assert.equal(find(bounds, "isolation").label, "podman: isolation is ASSERTED by this account's Podman setup, not enforced: the pids cgroup controller is not delegated");
-	assert.equal(find(bounds, "isolation").fix, OBSERVATION_FIX.podmanBoundsDelegated);
-	assert.equal(find(bounds, "mountSet"), undefined, "mounts observed, so quiet, whatever the docker daemon's files say");
-	const remote = backendChecks(env, { fs: noHostFiles, podman: observed({ podmanServiceLocal: false }) });
-	assert.match(find(remote, "credentialTransit").label, /credentialTransit is ASSERTED by the operator, not enforced: podman info reports serviceIsRemote true/);
-	const unread = backendChecks(env, { fs: noHostFiles, podman: observed({ podmanBoundsDelegated: null }, { answered: false, reason: "timeout", transient: true }) });
-	assert.match(find(unread, "isolation").fix, /fix what stops `podman info` answering for the worker's account/);
-	for (const read of [{ answered: false, reason: "podman-not-found", transient: false }, null]) {
-		const quiet = backendChecks(env, { daemon, fs: noHostFiles, podman: observed({ podmanBoundsDelegated: false, podmanAddsNoMounts: false, podmanServiceLocal: false }, read) });
-		assert.equal(quiet.find((c) => /is ASSERTED/.test(c.label)), undefined, `${read?.reason ?? "never read"}: the podman section's refusal line is the whole story`);
-	}
-	// The floor judges the same observations, and names the podman remedy only.
-	const floor = backendChecks({ ...env, PI_BACKEND_FLOOR: "isolation=enforced" }, { fs: noHostFiles, podman: observed({ podmanBoundsDelegated: false }) }).find((c) => /PI_BACKEND_FLOOR/.test(c.label));
-	assert.deepEqual([floor.ok, floor.warn], [false, undefined]);
-	assert.match(floor.label, /isolation=enforced \(podman provides it only while this worker's rootless Podman runs on cgroup v2/);
-	assert.ok(floor.fix.startsWith(OBSERVATION_FIX.podmanBoundsDelegated), floor.fix);
-	const held = backendChecks({ ...env, PI_BACKEND_FLOOR: "isolation=enforced,credentialTransit=enforced" }, { fs: noHostFiles, podman: observed({}) });
-	assert.ok(held.some((c) => c.ok && /PI_BACKEND_FLOOR holds/.test(c.label)));
-});
-
-// The --live answers for the podman venue: local's, spoken by `podman`, with the probe running as the worker's uid.
-const podmanLiveOk = () => Object.fromEntries(Object.entries(liveOk({ uid: "1234" })).map(([k, v]) => [k.replace(/^docker /, "podman "), v]));
-
-test("doctor --live on podman reads the eight back through podman, as the worker's uid, with keep-id (#354)", async () => {
-	const env = liveEnv({ PI_BACKENDS: "podman" });
-	const { out, text } = capture();
-	const calls = [];
-	const code = await runDoctor(env, { ...podmanDeps(out, { ...podmanLiveOk(), ...podmanPlan() }, calls), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-	assert.equal(code, 0, text());
-	const probe = calls.find((c) => c.args[0] === "run" && c.args.includes("sleep"));
-	assert.equal(probe.cmd, "podman", "the probe runs under podman");
-	assert.ok(probe.args.includes("--user=1234:1234") && probe.args.includes("--userns=keep-id"), `the podman builder's argv: ${probe.args.join(" ")}`);
-	assert.ok(!calls.some((c) => c.cmd === "docker" && c.args.some((a) => String(a).includes("pi-dispatch-live"))), "nothing of the read-back touches docker");
-	assert.equal(calls.filter((c) => c.cmd === "podman" && c.args[0] === "info").length, 2, "podman info is read by the collection AND again right before the probe");
-	for (const property of ["isolation", "ephemeral", "mountSet", "imagePinning", "nonRoot", "localFolders"]) {
-		assert.match(text(), new RegExp(`✓ read back on podman: ${property} holds`));
-	}
-	assert.match(text(), /✓ read back on podman: mountSet holds \([^)]*in podman inspect and in \/proc\/self\/mountinfo\)/);
-	assert.match(text(), /✓ read back on podman: the probe ran as uid 1234, the job user this host decides \(1234:1234\)/);
-	assert.match(text(), /⚠ read back on podman: jobToJobIsolation not read back: PI_EGRESS is off, so jobs share podman's default network by design/);
-	assert.match(text(), /✓ read back on podman: limits of this read-back -- /);
-	assert.doesNotMatch(text(), /read back on local|DOCKER_CONTENT_TRUST/);
-	assert.deepEqual(readdirSync(env.PI_JOBS_DIR), [], "the fixture is removed");
-});
-
-test("doctor --live on podman runs nothing when podman is re-read as remote, or a podman job would be refused (#354)", async () => {
-	let reads = 0;
-	const flips = { ...podmanLiveOk(), ...podmanPlan(), "podman info": () => ({ code: 0, output: `${PODMAN_INFO(++reads > 1 ? { serviceIsRemote: true } : {})}\n` }) };
-	const { out, text } = capture();
-	const calls = [];
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(out, flips, calls), live: true, ...instantClock(), liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n" });
-	assert.ok(!calls.some((c) => c.args.some((a) => String(a).includes("pi-dispatch-live"))), "no probe after the re-read");
-	assert.match(text(), /⚠ read back on podman: not run -- this shell's podman CLI is not observed to point at this host/);
-	const refused = capture();
-	const refusedCalls = [];
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(refused.out, { ...podmanLiveOk(), ...podmanPlan({ capabilities: "" }) }, refusedCalls), live: true, ...instantClock(), liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n" });
-	assert.match(refused.text(), /⚠ read back on podman: not run -- a podman job is refused as this uid \(any-uid-unsupported\), so a probe would read back a container no job gets\n {4}→ fix the podman job-user line above first/);
-	assert.ok(!refusedCalls.some((c) => c.args.some((a) => String(a).includes("pi-dispatch-live"))));
-});
-
-test("doctor --live with both venues blessed reads back each on its own runtime, local's lines unchanged (#354)", async () => {
-	const env = liveEnv({ PI_BACKENDS: "local,podman" });
-	const { out, text } = capture();
-	const calls = [];
-	// uid 1001: the image's own, so both venues' probes run as it and one fake container answers both.
-	const liveBoth = { ...liveOk(), ...Object.fromEntries(Object.entries(liveOk()).map(([k, v]) => [k.replace(/^docker /, "podman "), v])) };
-	const { docker: _everyDocker, ...podmanOnly } = podmanPlan();
-	const code = await runDoctor(env, { ...podmanDeps(out, { ...liveBoth, ...podmanOnly, ...infoPlan(ROOTFUL_INFO), ...green }, calls), live: true, liveFs: liveFsAs(1001), jobUserIdentity: LINUX_1001, isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-	assert.equal(code, 0, text());
-	assert.match(text(), /✓ read back on local: mountSet holds \([^)]*in docker inspect and in \/proc\/self\/mountinfo\)/);
-	assert.match(text(), /✓ read back on podman: mountSet holds \([^)]*in podman inspect and in \/proc\/self\/mountinfo\)/);
-	assert.match(text(), /⚠ read back on local: jobToJobIsolation not read back: PI_EGRESS is off, so jobs share docker's default bridge by design/);
-	assert.ok(text().indexOf("read back on local: limits") < text().indexOf("read back on podman: starting"), "local's read-back first, then podman's");
-	assert.ok(calls.some((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("sleep")) && calls.some((c) => c.cmd === "podman" && c.args[0] === "run" && c.args.includes("sleep")));
-});
-
-test("a failed read-back on podman names podman's commands and the podman venue's declared word (#354)", async () => {
-	const { out, text } = capture();
-	// The pinning probe STARTED (a pull or a wrapper), and PID 1 ran as the image's uid rather than the worker's.
-	const plan = { ...podmanLiveOk(), "podman run --name=pi-dispatch-live-pin-": { code: 0, output: `${"e".repeat(64)}\n` }, [`podman exec ${LIVE_ID} sh -c cat /proc/1/status`]: { code: 0, output: LIVE_STATUS("1001") }, ...podmanPlan() };
-	const code = await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(out, plan, []), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-	assert.equal(code, 1);
-	assert.match(text(), /✗ read back on podman: imagePinning does NOT hold -- declared enforced, observed: a container started from an image this host does not have\n {4}→ the daemon ran or pulled an image this host does not have -- check for a podman CLI plugin or wrapper that rewrites `podman run`\n/);
-	assert.match(text(), /✗ read back on podman: the probe ran as uid 1001, not the decided job user 1234:1234\n {4}→ podman did not apply --user with --userns=keep-id as the worker passes it/);
-});
-
-test("the podman SELinux line follows the relabel rule, and an unreported SELinux warns (#354)", async () => {
-	const run = async (security) => {
-		const { out, text } = capture();
-		const calls = [];
-		await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan({ info: PODMAN_INFO({}, security) }), calls));
-		return { text: text(), calls };
-	};
-	const on = await run({ selinuxEnabled: true });
-	assert.match(on.text, /✓ podman: SELinux confines containers here, so a job's own directories are relabelled \(:Z\) and your local folders are not: the SELinux label lines below read those/);
-	assert.match(on.text, /✓ SELinux: jobs' own directories are relabelled for SELinux \(:Z\)/, "and the label lines it names are there");
-	const unreported = await run({ selinuxEnabled: "yes" });
-	assert.doesNotMatch(unreported.text, /✓ SELinux: jobs' own directories/, "no relabel, so no label lines");
-	assert.match(unreported.text, /⚠ podman: whether SELinux confines containers here was not reported, so nothing a job mounts is relabelled\n {4}→ on an SELinux host an unlabelled job directory is unreadable/);
-});
-
-test("a podman-only deployment on a host that also has docker: docker is not asked, and the in-image gh probe runs on podman (#354, #433)", async () => {
-	const { out, text } = capture();
-	const calls = [];
-	const { docker: _everyDocker, ...podmanOnly } = podmanPlan();
-	const plan = { ...podmanOnly, ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "podman run": 0 };
-	const code = await runDoctor(podmanEnv({ PI_EGRESS: "1", GITHUB_AUTH_SOURCE: "gh" }), podmanDeps(out, plan, calls));
-	assert.equal(code, 0, text());
-	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), [], "a docker that would answer is still not asked");
-	assert.doesNotMatch(text(), /Docker daemon reachable|Job image present \(|Egress (policy|proxy)|^. local: /m);
-	// The probe runs where this deployment's jobs start, with docker's argv, the token only in the spawn env.
-	const probes = calls.filter((c) => c.cmd === "podman" && c.args[0] === "run");
-	assert.equal(probes.length, 1, "one probe");
-	// Review round 1: with the podman venue's pins, written out rather than imported, so a probe that drops one fails here.
-	// Without `--env-host=false` an account's `env_host = true` would copy doctor's whole environment into the container.
-	assert.deepEqual(probes[0].args, ["run", "--rm", "-i", "--pull=never", "--pid=private", "--ipc=private", "--uts=private", "--cgroupns=private", "--env-host=false", "--http-proxy=false", "--entrypoint", "sh", "pi-job:latest", "-c", probes[0].args[probes[0].args.indexOf("-c") + 1], "sh", "gh", "auth", "status"]);
-	// Issue #521: on stdin here too, and in no environment (the pins keep doctor's own out; the token is not in it).
-	assert.equal(probes[0].stdin, "gho_x\n");
-	assert.equal(probes[0].opts?.env?.GH_TOKEN, undefined);
-	assert.ok(!probes[0].args.some((a) => a.includes("gho_x")), "never in argv");
-	assert.match(text(), /⚠ GITHUB_AUTH_SOURCE=gh forwards[^\n]*\n[^\n]*\n✓ podman: gh authenticates inside the job image \(pi-job:latest\)\n/);
-	// A failing probe says so, with podman named.
-	const failed = capture();
-	await runDoctor(podmanEnv({ GITHUB_AUTH_SOURCE: "gh" }), podmanDeps(failed.out, { ...plan, "podman run": 1 }, []));
-	assert.match(failed.text(), /⚠ podman: gh cannot authenticate inside the job image \(pi-job:latest\)\n {4}→ check network egress from containers/);
-	// Not run where the podman section did not read the image in this account's store, nor where it refused every podman
-	// job (a remote service among them, which is where the token would otherwise ride to another machine).
-	for (const [label, over] of [
-		["image absent", podmanPlan({ image: false })],
-		["remote service", podmanPlan({ info: PODMAN_INFO({ serviceIsRemote: true }) })],
-		["rootful", podmanPlan({ info: PODMAN_INFO({}, { rootless: false }) })],
-	]) {
-		const { docker: _d, ...only } = over;
-		const seen = [];
-		const said = capture();
-		await runDoctor(podmanEnv({ GITHUB_AUTH_SOURCE: "gh" }), podmanDeps(said.out, { ...only, ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "podman run": 0 }, seen));
-		assert.ok(!seen.some((c) => c.args[0] === "run"), `${label}: no probe`);
-		assert.doesNotMatch(said.text(), /gh (authenticates|cannot authenticate) inside/, label);
-		assert.deepEqual(seen.filter((c) => c.cmd === "docker"), [], `${label}: no docker`);
-	}
-	// App mode says it was skipped, as it does on docker.
-	const app = capture();
-	await runDoctor(podmanEnv({ GITHUB_AUTH_SOURCE: "app" }), podmanDeps(app.out, plan, []));
-	assert.match(app.text(), /✓ in-image gh auth: skipped \(GITHUB_AUTH_SOURCE=app mints per-job\)/);
-});
-
-test("podman-only: the podman image line is THE image check, and --fix pulls into this account's store through podman (#433)", async () => {
-	const pullPlan = (pull = 0) => ({ ...podmanPlan({ image: false }), "podman pull": pull, "podman tag": 0 });
-	const { out, text } = capture();
-	const calls = [];
-	const code = await runDoctor(podmanEnv(), { ...podmanDeps(out, pullPlan(), calls), fix: true, promptFn: async () => true });
-	assert.equal(code, 1, "the image is still absent on the re-check, since the fake store never changes");
-	assert.match(text(), /✗ podman: job image is not in this account's Podman store \(pi-job:latest\)\n {4}→ pull or load it AS THE WORKER'S ACCOUNT/);
-	assert.ok(text().includes("fix available: podman: job image is not in this account's Podman store (pi-job:latest)\n    $ podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest\n"), text());
-	const fixes = calls.filter((c) => c.args[0] === "pull" || c.args[0] === "tag").map((c) => [c.cmd, ...c.args]);
-	assert.deepEqual(fixes, [
-		["podman", "pull", "docker.io/ddv12138/pi-job:latest"],
-		["podman", "tag", "docker.io/ddv12138/pi-job:latest", "pi-job:latest"],
-	]);
-	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), [], "no docker pull, no docker anything");
-	// A failed pull is reported as podman's.
-	const failing = capture();
-	await runDoctor(podmanEnv(), { ...podmanDeps(failing.out, pullPlan(1), []), fix: true, promptFn: async () => true });
-	assert.match(failing.text(), /podman pull failed/);
-	// An overridden PI_JOB_IMAGE is the operator's trust choice: named in the fix line, never pulled for them.
-	const custom = capture();
-	const customAsked = [];
-	await runDoctor(podmanEnv({ PI_JOB_IMAGE: "registry.example/mine:1" }), { ...podmanDeps(custom.out, pullPlan(), []), fix: true, promptFn: async (q) => (customAsked.push(q), true) });
-	assert.match(custom.text(), /✗ podman: job image is not in this account's Podman store \(registry\.example\/mine:1\)\n {4}→ [^\n]*podman pull registry\.example\/mine:1/);
-	assert.deepEqual(customAsked, [], "no offer for an image the operator chose");
-	// A store that did not answer is not a miss, and gets no offer either: the second `podman info` of the image
-	// preflight's disambiguation fails, while the first (the section's own read) answered.
-	let infos = 0;
-	const unanswered = capture();
-	const unansweredAsked = [];
-	await runDoctor(podmanEnv(), {
-		...podmanDeps(unanswered.out, { ...pullPlan(), "podman info": () => (++infos === 1 ? { code: 0, output: `${PODMAN_INFO()}\n` } : { code: 125, output: "" }) }, []),
-		fix: true,
-		promptFn: async (q) => (unansweredAsked.push(q), true),
-	});
-	assert.match(unanswered.text(), /⚠ podman: whether the job image is in this account's Podman store could not be read \(pi-job:latest\)/);
-	assert.deepEqual(unansweredAsked, []);
-});
-
-test("podman-only: a trigger-named image is asked of this account's Podman store, never docker's (#433)", async () => {
-	const run = async (plan, env = {}, image = "my-python:1.2.0", extra = {}) => {
-		const { out, text } = capture();
-		const calls = [];
-		const code = await runDoctor(podmanEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, image, extra), ...env }), podmanDeps(out, plan, calls));
-		return { code, text: text(), calls };
-	};
-	const absent = await run({ "podman image inspect my-python:1.2.0": 1, ...podmanPlan() });
-	assert.equal(absent.code, 1, "a trigger that can never run fails, as on docker");
-	assert.match(absent.text, /✗ podman: trigger job image present in this account's Podman store \(my-python:1\.2\.0\)\n {4}→ pull, load or build it AS THE WORKER'S ACCOUNT[^\n]*podman pull my-python:1\.2\.0[^\n]*--pull=never/);
-	// The whole fix line (issue #453): `docker save ... | podman load` was offered as an alternative, and a podman-only
-	// host has no docker to save from.
-	assert.ok(absent.text.includes("\n    → pull, load or build it AS THE WORKER'S ACCOUNT, since rootless Podman keeps one image store per account: podman pull my-python:1.2.0 -- a trigger names it in run.image, and jobs run with --pull=never, so the worker never fetches it at job time\n"), absent.text);
-	assert.deepEqual(absent.calls.filter((c) => c.cmd === "docker"), [], "no docker image inspect");
-	assert.deepEqual(absent.calls.filter((c) => c.args.includes("my-python:1.2.0")).map((c) => [c.cmd, ...c.args]), [["podman", "image", "inspect", "my-python:1.2.0"]]);
-	const wrapped = await run({ "podman image inspect --format={{json": { code: 0, output: '["/bin/sh"]\n' }, "podman image inspect my-python:1.2.0": 0, ...podmanPlan() });
-	assert.match(wrapped.text, /✓ podman: trigger job image present in this account's Podman store \(my-python:1\.2\.0\)\n⚠ podman: my-python:1\.2\.0 does not appear to carry the pi-dispatch runner entrypoint\n {4}→ build your job image FROM this repo's image\/Dockerfile/);
-	assert.equal(wrapped.code, 0, "warn, never fail");
-	const conformant = await run({ "podman image inspect --format={{json": RUNNER_ENTRYPOINT, "podman image inspect my-python:1.2.0": 0, ...podmanPlan() });
-	assert.doesNotMatch(conformant.text, /does not appear to carry/);
-	// Not asked on top of a store the section could not read: off Linux podman is not asked at all.
-	const { out, text } = capture();
-	const offLinux = [];
-	await runDoctor(podmanEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, "my-python:1.2.0") }), podmanDeps(out, podmanPlan(), offLinux, { jobUserIdentity: { platform: "darwin", euid: 501, egid: 20 } }));
-	assert.ok(!offLinux.some((c) => c.args.includes("my-python:1.2.0")), text());
-	// With both venues, each image is asked of the runtime its trigger's jobs start on: run.backend, else the default.
-	const both = { "podman image inspect my-python:1.2.0": 0, "podman image inspect --format={{json": RUNNER_ENTRYPOINT, ...green, "docker image inspect --format={{json": RUNNER_ENTRYPOINT, ...podmanPlan() };
-	for (const [PI_BACKENDS, backend, cli] of [
-		["local,podman", "podman", "podman"],
-		["local,podman", undefined, "docker"],
-		["podman,local", undefined, "podman"],
-		["podman,local", "local", "docker"],
-	]) {
-		const r = await run(both, { PI_BACKENDS }, "my-python:1.2.0", backend === undefined ? {} : { backend });
-		const asked = [...new Set(r.calls.filter((c) => c.args.includes("my-python:1.2.0")).map((c) => c.cmd))];
-		assert.deepEqual(asked, [cli], `${PI_BACKENDS} run.backend=${backend}: ${r.text}`);
-		assert.match(r.text, cli === "podman" ? /✓ podman: trigger job image present in this account's Podman store \(my-python:1\.2\.0\)/ : /✓ Trigger job image present \(my-python:1\.2\.0\)/);
-	}
-});
-
-test("podman-only: trigger images are not asked of a Podman store that did not answer for the default image (#433)", async () => {
-	// The section's own `podman info` answers; the image preflight's disambiguating second one does not, so the store's
-	// answer about the default image is "unavailable", and asking it about a trigger's image would be noise on top.
-	let infos = 0;
-	const calls = [];
-	const { out, text } = capture();
-	await runDoctor(
-		podmanEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, "my-python:1.2.0") }),
-		podmanDeps(out, { "podman image inspect my-python:1.2.0": 0, ...podmanPlan({ image: false }), "podman info": () => (++infos === 1 ? { code: 0, output: `${PODMAN_INFO()}\n` } : { code: 125, output: "" }) }, calls),
-	);
-	assert.match(text(), /⚠ podman: whether the job image is in this account's Podman store could not be read \(pi-job:latest\)/);
-	assert.ok(!calls.some((c) => c.args.includes("my-python:1.2.0")), "no trigger image asked of a store that did not answer");
-	assert.doesNotMatch(text(), /trigger job image/);
-});
-
-test("podman-only: the `--fix` podman pull runs under the LONG bound, not the default one (#433)", async () => {
-	// docker's pull pin, for the podman pull: by the clock, since the bound is not in the argv.
-	const checks = await collectChecks(podmanEnv(), { ...podmanDeps(() => {}, podmanPlan({ image: false }), []), cwd: tempDir("pi-433-bound-"), readHosts: async () => ({ hosts: [] }), agentDir: NO_AGENT_DIR, runTimeouts: FAST_TIMEOUTS });
-	const image = checks.find((c) => c.label === "podman: job image is not in this account's Podman store (pi-job:latest)");
-	assert.ok(image?.fixAction, "the podman image line offers the pull");
-	const began = Date.now();
-	const res = await image.fixAction.run({ spawn: fakeSpawn({ "podman pull": "hang", podman: 0 }) });
-	const took = Date.now() - began;
-	assert.equal(res.ok, false);
-	assert.match(res.note, /podman pull did not finish within/);
-	assert.ok(took >= FAST_TIMEOUTS.pull - 5, `waited ${took}ms, which is the PULL bound (${FAST_TIMEOUTS.pull}) and not the default (${FAST_TIMEOUTS.cmd})`);
-});
-
-test("a trigger whose run.backend names a venue PI_BACKENDS does not list fails doctor, in both directions (#433)", async () => {
-	const run = async (env, plan, backend) => {
-		const { out, text } = capture();
-		const code = await runDoctor({ ...env, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend }) }, podmanDeps(out, plan, []));
-		return { code, text: text() };
-	};
-	const onPodman = await run(podmanEnv(), podmanPlan(), "local");
-	assert.equal(onPodman.code, 1);
-	assert.ok(onPodman.text.includes('✗ run.backend "local" is not in PI_BACKENDS (podman), so every job of cron "nightly" is refused (backend-unblessed)\n    → add local to PI_BACKENDS, or change run.backend on that trigger to a venue PI_BACKENDS lists -- the worker refuses each such job before it spends\n'), onPodman.text);
-	const onLocal = await run({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0" }, { ...green }, "podman");
-	assert.ok(onLocal.text.includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of cron "nightly" is refused (backend-unblessed)'), onLocal.text);
-	// A blessed venue says nothing, on either kind of deployment.
-	for (const [env, plan, backend] of [
-		[podmanEnv(), podmanPlan(), "podman"],
-		[podmanEnv({ PI_BACKENDS: "local,podman" }), { ...green, ...podmanPlan() }, "local"],
-		[podmanEnv({ PI_BACKENDS: "local,podman" }), { ...green, ...podmanPlan() }, "podman"],
-	]) {
-		assert.doesNotMatch((await run(env, plan, backend)).text, /backend-unblessed/, `${env.PI_BACKENDS} ${backend}`);
-	}
-	// An unparseable PI_BACKENDS is the backend section's failure, not a verdict on every trigger: doctor otherwise reads
-	// it as the unset default (local alone), against which "podman" would be judged unblessed by a guessed list.
-	const unparsed = await run(podmanEnv({ PI_BACKENDS: "local,nonsense" }), { ...green, ...podmanPlan() }, "podman");
-	assert.match(unparsed.text, /✗ backend configuration does not parse/);
-	assert.doesNotMatch(unparsed.text, /backend-unblessed/);
-});
-
-test("on a fleet the unblessed-venue line judges only triggers this host serves, and says what this host does (#433)", async () => {
-	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0", PI_WORKER_NAME: "mini1" };
-	const deps = (out, calls, extra = {}) => ({ ...ghDeps(out, { ...green }, calls), agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [] }), ...extra });
-	// A cron trigger whose folder is another machine's: not scheduled here (the worker's own `folder-absent`), so this
-	// host's PI_BACKENDS says nothing about it, and doctor says nothing either.
-	const elsewhere = capture();
-	const code = await runDoctor({ ...env, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman", folder: "/srv/only-on-mini2" }) }, deps(elsewhere.out, [], { fileExists: (p) => p !== "/srv/only-on-mini2" }));
-	assert.doesNotMatch(elsewhere.text(), /backend-unblessed/, elsewhere.text());
-	assert.equal(code, 0, elsewhere.text());
-	// The same trigger with its folder HERE is served, and still fails, in the fleet's words.
-	const here = capture();
-	const hereCode = await runDoctor({ ...env, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman" }) }, deps(here.out, []));
-	assert.equal(hereCode, 1);
-	assert.ok(here.text().includes('✗ run.backend "podman" is not in this host\'s PI_BACKENDS (local), so a job of cron "nightly" that this host picks up is refused (backend-unblessed)\n    → add podman to this host\'s PI_BACKENDS, or change run.backend on that trigger to a venue PI_BACKENDS lists -- this host\'s worker refuses each such job it picks up before it spends\n'), here.text());
-	// Without a declared name there is no fleet: an absent folder is the worker's boot refusal, not placement, so the
-	// trigger is still judged, in the single host's words.
-	const single = capture();
-	const { PI_WORKER_NAME: _n, ...singleEnv } = env;
-	await runDoctor({ ...singleEnv, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman", folder: "/srv/only-on-mini2" }) }, deps(single.out, [], { fileExists: (p) => p !== "/srv/only-on-mini2" }));
-	assert.ok(single.text().includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of cron "nightly" is refused (backend-unblessed)'), single.text());
-});
-
-// Issue #464 (gate round 1, coordinator follow-up): PI_WORKER_NAME is resolved ONCE, this shell's value else the .env's
-// by the service's reader, and the fleet wording and which cron triggers are scheduled here both use it. Read from the
-// shell alone, a deployment whose .env names its worker was judged as a single host.
-test("a worker name in .env makes this host a fleet member for the unblessed-venue line and the cron placement, as the shell's did (#464)", async () => {
-	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0" };
-	const cwd = tempDir("pi-464-name-cwd-");
-	writeFileSync(join(cwd, ".env"), "PI_WORKER_NAME=mini1\n");
-	const deps = (out, extra = {}) => ({ ...ghDeps(out, { ...green }, []), agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [] }), cwd, readEnvFile: (path) => readFileSync(path, "utf8"), ...extra });
-	// Another machine's folder: not scheduled here, so not judged (was: judged in the single host's words).
-	const elsewhere = capture();
-	const code = await runDoctor({ ...env, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman", folder: "/srv/only-on-mini2" }) }, deps(elsewhere.out, { fileExists: (p) => p !== "/srv/only-on-mini2" }));
-	assert.doesNotMatch(elsewhere.text(), /backend-unblessed/, elsewhere.text());
-	assert.equal(code, 0, elsewhere.text());
-	// Its folder here: judged, in the fleet's words.
-	const here = capture();
-	await runDoctor({ ...env, PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman" }) }, deps(here.out));
-	assert.ok(here.text().includes('✗ run.backend "podman" is not in this host\'s PI_BACKENDS (local), so a job of cron "nightly" that this host picks up is refused (backend-unblessed)'), here.text());
-	// A shell that sets the name empty overrides the file, as for every service key: a single host again.
-	const blank = capture();
-	await runDoctor({ ...env, PI_WORKER_NAME: "", PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { backend: "podman", folder: "/srv/only-on-mini2" }) }, deps(blank.out, { fileExists: (p) => p !== "/srv/only-on-mini2" }));
-	assert.ok(blank.text().includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of cron "nightly" is refused (backend-unblessed)'), blank.text());
-});
 
 // Issue #471, generalising #464's PI_WORKER_NAME bolt from one key to the rule: doctor reads no service key from its
 // environment outside the resolver. Three halves, each failing on a different way back to the shell: (1) the shell's
@@ -9479,14 +8310,9 @@ test("doctor.mjs reads no service key from this shell outside the resolver: ever
 	const cfg = await import("../src/config.mjs");
 	const egress = await import("../src/egress.mjs");
 	const backends = await import("../src/backends.mjs");
-	const podman = await import("../src/backend-podman.mjs");
 	const enoent = () => {
 		throw Object.assign(new Error("absent"), { code: "ENOENT" });
 	};
-	const noFs = { statSync: enoent, readFileSync: enoent, readdirSync: enoent, lstatSync: enoent };
-	const runtimeObs = await import("../src/runtime-observations.mjs");
-	const rootfulEndpoint = { local: true, endpoint: "unix:///run/podman/podman.sock" };
-	const rootfulDaemon = { answered: true, facts: { shape: "podman", podman: true, rootless: false, remoteSocketPath: "unix:///run/podman/podman.sock" } };
 	const probes = {
 		// The shallow call scanner attributes deploymentSettingsOf(env, ...) to its new outer helper too.
 		// cooldownModelRefs receives parsed deployment facts, never env; this is deliberately not a service-key relation.
@@ -9519,15 +8345,8 @@ test("doctor.mjs reads no service key from this shell outside the resolver: ever
 		egressArmed: (e) => egress.egressArmed(e),
 		egressProxyName: (e) => egress.egressProxyName(e),
 		venuesOf: (e) => backends.venuesOf(e),
-		// Issue #707: the openshell venues' setup rule, which reads the two venue keys.
-		openshellSetupOf: (e) => backends.openshellSetupOf({ openshellUsed: true }, e),
-		// Its only reads of `env` are containers.conf's own variables, through the lister `podmanConfWidening` reaches.
-		observePodman: (e) => podman.podmanConfWidening({ fs: noFs, home: "/h", env: e, euid: 1 }),
-		podmanConfWidening: (e) => podman.podmanConfWidening({ fs: noFs, home: "/h", env: e, euid: 1 }),
 		// Reached as `spec.resolve(env)` through BOOT_FILES, a member call the scan does not attribute, so probed by name.
-		// #448 (PR #473): both read the environment only through `rootfulConfChain`, on a rootful Podman on this host.
-		observeHost: (e) => runtimeObs.observeHost({ endpoint: rootfulEndpoint, daemon: rootfulDaemon, fs: noFs, unit: null, env: e }),
-		observeRootfulConf: (e) => runtimeObs.observeRootfulConf({ endpoint: rootfulEndpoint, daemon: rootfulDaemon, fs: noFs, readService: async () => ({ code: 1, stdout: "" }), env: e, unit: { read: false, reason: "probe" } }),
+		// The #448 conf-chain probes went with the podman venue: observeHost no longer reads the environment at all.
 		pauseWindowsFilePath: (e) => cfg.pauseWindowsFilePath(e),
 		// Issue #596: the default job size, as the worker's config reads it.
 		jobSizeDefaults: async (e) => (await import("../src/job-size.mjs")).jobSizeDefaults(e),
@@ -9554,11 +8373,9 @@ test("doctor.mjs reads no service key from this shell outside the resolver: ever
 		probedReads[name] = [...read];
 		for (const k of read) assert.ok(SERVICE_ENV_KEYS.includes(k) || Object.hasOwn(DOCTOR_SHELL_KEYS, k), `${name} reads ${k}, which doctor neither resolves nor declares shell-only`);
 	}
-	// The probes of #448's two readers must reach the chain, or they prove nothing: they read the service's conf variables.
-	for (const name of ["observeHost", "observeRootfulConf"]) assert.deepEqual([...probedReads[name]].sort(), ["CONTAINERS_CONF", "CONTAINERS_CONF_OVERRIDE", "HOME", "XDG_CONFIG_HOME"], name);
-	// And doctor hands them the RESOLVED environment (`env`, never this shell's), so they judge the service's chain.
-	assert.match(code, /const observed = observeHost\(\{ endpoint, daemon, fs, unit, env \}\);/);
-	assert.match(code, /const rootful = await observeRootfulConf\(\{ endpoint, daemon, fs: observationFs, readService: readPodmanService, env, unit \}\);/);
+	// And doctor hands the runtime observations the RESOLVED environment's daemon read, never this shell's:
+	// `observeHost({ endpoint, daemon })` reads no environment since the conf chain went with the podman venue.
+	assert.match(code, /const observed = observeHost\(\{ endpoint, daemon \}\);/);
 	assert.match(code, /doctorModelProposalChecks\(env, \{ cwd, credentials: service\.extra\(\["ANTHROPIC_API_KEY", "OPENAI_API_KEY"\]\)\.env,/, "proposal credentials use the same by-name service resolution as provider checks");
 	// underOsTempDir reaches doctor as the `underTemp` seam rather than by name, and reads TMPDIR and TEMP.
 	const read = new Set();
@@ -9653,24 +8470,23 @@ test("a .env straight from init: the settings line names no key init left empty 
 test("an empty venue key is not named as read from .env: the worker reads it as unset (#481)", async () => {
 	const cwd = scaffoldedCwd();
 	const envPath = join(cwd, ".env");
-	const { PI_BACKENDS: _b, PI_EGRESS: _e, ...shell } = podmanEnv();
-	writeFileSync(envPath, "PI_BACKENDS=podman\nPI_EGRESS=\nPI_EGRESS_PROXY=\n");
+	const { PI_BACKENDS: _b, PI_EGRESS: _e, PI_EGRESS_PROXY: _p, ...shell } = ghEnv();
+	writeFileSync(envPath, "PI_BACKENDS=local\nPI_EGRESS=\nPI_EGRESS_PROXY=\n");
 	const mixed = capture();
-	await runDoctor(shell, { ...podmanDeps(mixed.out, podmanPlan(), []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
-	assert.ok(mixed.text().includes(`✓ venue keys read from ${envPath} (PI_BACKENDS="podman"), as the service reads them: this shell does not set them\n`), mixed.text());
+	await runDoctor(shell, { ...ghDeps(mixed.out, green, []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
+	assert.ok(mixed.text().includes(`✓ venue keys read from ${envPath} (PI_BACKENDS="local"), as the service reads them: this shell does not set them\n`), mixed.text());
 	writeFileSync(envPath, "PI_EGRESS=\n");
 	const blank = capture();
-	await runDoctor({ ...shell, PI_BACKENDS: "podman" }, { ...podmanDeps(blank.out, podmanPlan(), []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
+	await runDoctor({ ...shell, PI_BACKENDS: "local" }, { ...ghDeps(blank.out, green, []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
 	assert.doesNotMatch(blank.text(), /venue keys read from/);
-	assert.match(blank.text(), /✓ Jobs run on: podman/);
+	assert.match(blank.text(), /✓ Jobs run on: local/);
 });
 
 test("a CLI variable left empty in .env is warned about unless its tool reads empty as unset (#481)", () => {
-	const fromFile = { DOCKER_HOST: "", GH_TOKEN: "", CONTAINERS_CONF: "", CONTAINER_HOST: "", CONTAINER_CONNECTION: "", CONTAINERS_STORAGE_CONF: "", XDG_CONFIG_HOME: "", HOME: "" };
+	const fromFile = { DOCKER_HOST: "", DOCKER_CONTEXT: "", GH_TOKEN: "", XDG_CONFIG_HOME: "", HOME: "" };
 	const lines = cliNotHandedLines({ fromFile }, "/d/.env");
-	// podman takes CONTAINER_HOST and CONTAINER_CONNECTION by os.LookupEnv (an empty one switches it to remote), and the
-	// storage conf, XDG_CONFIG_HOME and HOME are read as values by at least one of their readers.
-	assert.deepEqual(lines.map((l) => l.label.split(" ")[0]).sort(), ["CONTAINERS_STORAGE_CONF", "CONTAINER_CONNECTION", "CONTAINER_HOST", "HOME", "XDG_CONFIG_HOME"]);
+	// An empty HOME and XDG_CONFIG_HOME are values to their readers, so they are warned; the rest are read as unset.
+	assert.deepEqual(lines.map((l) => l.label.split(" ")[0]).sort(), ["HOME", "XDG_CONFIG_HOME"]);
 	assert.ok(lines.some((l) => /^HOME is set in \/d\/\.env \(""\), and doctor hands nothing/.test(l.label)));
 	assert.equal(cliNotHandedLines({ fromFile: { DOCKER_HOST: "tcp://x:2375" } }, "/d/.env").length, 1, "a value is still warned about");
 });
@@ -9679,12 +8495,12 @@ test("doctor's ready line counts an empty .env key as the file deciding somethin
 	const cwd = scaffoldedCwd();
 	writeFileSync(join(cwd, ".env"), "PI_JOB_IMAGE=\nWEBHOOK_SECRET=\nPI_EGRESS_PROXY=\nDOCKER_HOST=\n");
 	const quiet = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(quiet.out, podmanPlan(), [], { cwd, platform: "linux" })), 0, quiet.text());
+	assert.equal(await runDoctor(ghEnv(), ghDeps(quiet.out, green, [], { cwd, platform: "linux" })), 0, quiet.text());
 	assert.ok(quiet.text().endsWith("\ndoctor: ready. Start the worker with `pi-dispatch worker`.\n"), quiet.text());
 	// GITLAB_URL= is a value to both processes (the API base becomes ""), so the file decided something.
 	writeFileSync(join(cwd, ".env"), "GITLAB_URL=\n");
 	const said = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(said.out, podmanPlan(), [], { cwd, platform: "linux" })), 0, said.text());
+	assert.equal(await runDoctor(ghEnv(), ghDeps(said.out, green, [], { cwd, platform: "linux" })), 0, said.text());
 	assert.match(said.text(), /doctor: ready\. Start the worker as the service/);
 });
 
@@ -9772,64 +8588,58 @@ test("doctor --fix: a session store named only in .env is offered at the prompt 
 	assert.deepEqual(made, [], "declined, so nothing was created");
 });
 
-test("a webhook trigger is named by its position in the file, in the unblessed-venue line and the flow line alike (#433)", async () => {
+test("a webhook trigger is named by its position in the file, in the flow line (#433)", async () => {
 	const path = join(tempDir("pi-433-label-"), "triggers.json");
 	writeFileSync(
 		path,
 		JSON.stringify({
 			triggers: [
 				{ on: { type: "cron", id: "nightly", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/srv/repo", flow: "review", task: "t" } },
-				{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "gitlab", flow: "fix", backend: "podman" } },
+				{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "gitlab", flow: "fix" } },
 			],
 		}),
 	);
 	const { out, text } = capture();
 	await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0", PI_TRIGGERS_FILE: path }, { ...ghDeps(out, { ...green }, []), agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [] }) });
-	assert.ok(text().includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of label trigger #1 is refused (backend-unblessed)'), text());
+	// The unblessed-venue line this once sat beside is gone with the second venue; the position naming survives here.
 	assert.match(text(), /⚠ Trigger flow "fix" resolves in NO tier visible here \(label trigger #1\)/);
 });
 
-test("the unblessed-venue line judges only cron triggers this host's worker schedules: a sibling's bad skillsDir changes nothing (#433)", async () => {
-	// Review round 3, D1: on a fleet, one SERVED trigger with a skillsDir that is not there must not make doctor judge
-	// another machine's trigger. The skills-dir failure is still reported, by its own line.
+test("a served trigger's own skills dir is judged even beside a sibling this host does not serve (#433)", async () => {
+	// Review round 3, D1, with the venue judgement gone: the skills-dir failure is still reported, by its own line,
+	// and a sibling whose folder is another machine's changes nothing about it.
 	const path = join(tempDir("pi-433-r3-"), "triggers.json");
 	writeFileSync(
 		path,
 		JSON.stringify({
 			triggers: [
 				{ on: { type: "cron", id: "mine", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/srv/here", flow: "review", task: "t", skillsDir: "/srv/skills-missing" } },
-				{ on: { type: "cron", id: "theirs", pattern: "0 4 * * *" }, run: { kind: "local", folder: "/srv/only-on-mini2", flow: "review", task: "t", backend: "podman" } },
+				{ on: { type: "cron", id: "theirs", pattern: "0 4 * * *" }, run: { kind: "local", folder: "/srv/only-on-mini2", flow: "review", task: "t" } },
 			],
 		}),
 	);
 	const { out, text } = capture();
 	const fileExists = (p) => !["/srv/only-on-mini2", "/srv/skills-missing"].includes(p);
 	await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0", PI_WORKER_NAME: "mini1", PI_TRIGGERS_FILE: path }, { ...ghDeps(out, { ...green }, [], { fileExists }), agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [] }) });
-	assert.doesNotMatch(text(), /backend-unblessed/, text());
 	assert.match(text(), /✗ Trigger skills dir present \(\/srv\/skills-missing\)/);
 });
 
-test("without PI_TRIGGERS_FILE the worker schedules no cron, so no cron trigger is judged for its venue; a forge trigger still is (#433)", async () => {
-	// Review round 3, D2: doctor reads ./triggers.json by default (the receiver's default), but the worker schedules
-	// cron only from a PI_TRIGGERS_FILE it was given.
+test("without PI_TRIGGERS_FILE doctor still reads ./triggers.json and judges its flows (#433)", async () => {
+	// Review round 3, D2: doctor reads ./triggers.json by default (the receiver's default), and judges what it can of
+	// every trigger in it. The per-trigger venue judgement is gone with the second venue.
 	const cwd = tempDir("pi-433-r3-cwd-");
-	const triggers = [{ on: { type: "cron", id: "nightly", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/srv/repo", flow: "review", task: "t", backend: "podman" } }];
+	const triggers = [{ on: { type: "cron", id: "nightly", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/srv/repo", flow: "review", task: "t" } }];
 	writeFileSync(join(cwd, "triggers.json"), JSON.stringify({ triggers }));
 	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0" };
 	const deps = (out) => ({ ...ghDeps(out, { ...green }, []), cwd, agentDir: NO_AGENT_DIR, readHosts: async () => ({ hosts: [] }) });
 	const unset = capture();
 	await runDoctor(env, deps(unset.out));
 	assert.match(unset.text(), /Trigger flow "review"/, "the file was read");
-	assert.doesNotMatch(unset.text(), /backend-unblessed/, unset.text());
-	// The same file named in PI_TRIGGERS_FILE is scheduled, so the same trigger is judged.
-	const named = capture();
-	await runDoctor({ ...env, PI_TRIGGERS_FILE: join(cwd, "triggers.json") }, deps(named.out));
-	assert.ok(named.text().includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of cron "nightly" is refused (backend-unblessed)'), named.text());
-	// A forge trigger in the default file keeps its judgement: the receiver reads that file and enqueues its jobs.
-	writeFileSync(join(cwd, "triggers.json"), JSON.stringify({ triggers: [...triggers, { on: { type: "label", any: ["pi:fix"] }, run: { kind: "gitlab", flow: "fix", backend: "podman" } }] }));
+	// A forge trigger in the default file is judged the same way: the receiver reads that file and enqueues its jobs.
+	writeFileSync(join(cwd, "triggers.json"), JSON.stringify({ triggers: [...triggers, { on: { type: "label", any: ["pi:fix"] }, run: { kind: "gitlab", flow: "fix" } }] }));
 	const forge = capture();
 	await runDoctor(env, deps(forge.out));
-	assert.ok(forge.text().includes('✗ run.backend "podman" is not in PI_BACKENDS (local), so every job of label trigger #1 is refused (backend-unblessed)'), forge.text());
+	assert.match(forge.text(), /Trigger flow "fix" resolves in NO tier visible here \(label trigger #1\)/);
 });
 
 test("doctor places a cron trigger by the worker's own predicate, not a copy (#433)", () => {
@@ -9841,257 +8651,8 @@ test("doctor places a cron trigger by the worker's own predicate, not a copy (#4
 	assert.doesNotMatch(doctorSource, /existsSync\(run\.folder\)|fileExists\(t\.run\.folder\)/, "and doctor keeps no folder rule of its own");
 });
 
-test("podman-only: Valkey's fix points at the podman route, and --fix never runs docker for it (#433)", async () => {
-	const { out, text } = capture();
-	const calls = [];
-	const asked = [];
-	await runDoctor(podmanEnv(), { ...podmanDeps(out, podmanPlan(), calls, { probeValkey: async () => false }), fix: true, promptFn: async (q) => (asked.push(q), true) });
-	assert.match(text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n {4}→ run `pi-dispatch up` \(or `pi-dispatch service install`\) as this account: on the podman venue both start Valkey as a Quadlet unit under its Podman \(docs\/podman\.md, setup step 6\); a Valkey you run yourself, a distribution package say, works too\n/);
-	assert.doesNotMatch(text(), /docker compose|docker run|fix available: Valkey/);
-	assert.deepEqual(asked, []);
-	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), []);
-	// With local blessed, the docker route is named (issue #468 over #471: `pi-dispatch up`, never an offer doctor runs).
-	const mixed = capture();
-	await runDoctor(podmanEnv({ PI_BACKENDS: "local,podman" }), { ...podmanDeps(mixed.out, { ...green, ...podmanPlan() }, [], { probeValkey: async () => false }), fix: true, promptFn: async () => false });
-	assert.match(mixed.text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n {4}→ run `pi-dispatch up` in the deployment folder/);
-	assert.doesNotMatch(mixed.text(), /fix available: Valkey reachable/);
-});
-
-test("podman-only: the fleet digest is the podman store's own id, read with no docker spawn (#433)", async () => {
-	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	for (const [peerDigest, differs] of [
-		["abc", false],
-		["sha256:other", true],
-	]) {
-		const { out, text } = capture();
-		const calls = [];
-		await runDoctor(podmanEnv({ PI_WORKER_NAME: "mini1" }), podmanDeps(out, podmanPlan(), calls, { readHosts: async () => ({ hosts: [{ name: "mini2", tz, imageDigest: peerDigest }] }) }));
-		assert.match(text(), /✓ Fleet: 2 workers \(mini1, mini2\)/);
-		assert.equal(/Job image digest differs/.test(text()), differs, text());
-		assert.deepEqual(calls.filter((c) => c.cmd === "docker"), []);
-		assert.equal(calls.filter((c) => c.cmd === "podman" && c.args[0] === "image").length, 1, "the section's own image read, not a second one");
-	}
-});
-
-test("doctor --fix doctrine on a podman-only deployment: only the default image's podman pull is offered (#433)", async () => {
-	const checks = await collectChecks(podmanEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, "custom-img:1") }), {
-		...podmanDeps(() => {}, { "podman image inspect custom-img:1": 1, ...podmanPlan({ image: false }) }, []),
-		cwd: tempDir("pi-podman-doctrine-"),
-		probeValkey: async () => false,
-		readHosts: async () => ({ hosts: [] }),
-		agentDir: NO_AGENT_DIR,
-	});
-	const carried = assertFixActionDoctrine(checks);
-	assert.ok(carried.includes("podman: job image is not in this account's Podman store (pi-job:latest)"), carried.join("\n"));
-	const trigger = checks.find((c) => c.label === "podman: trigger job image present in this account's Podman store (custom-img:1)");
-	assert.ok(trigger && !trigger.ok, "the fixture reaches the podman trigger-image check");
-	assert.equal(trigger.fixAction, undefined, "a trigger-named image is a per-flow trust posture, never pulled for the operator");
-	const valkey = checks.find((c) => c.label.startsWith("Valkey reachable"));
-	assert.ok(!valkey.ok);
-	assert.equal(valkey.fixAction, undefined, "no docker run for Valkey without local");
-});
-
-// Issue #431: the podman venue's --live with egress armed, driven straight through `podmanLiveChecks` on the facts the
-// podman section hands it. Every podman answer by prefix; `docker` LAST and "enoent", and every docker spawn is asserted
-// absent besides, so a podman path that reached for docker cannot pass on a lucky answer.
-const toPodman = (plan) => Object.fromEntries(Object.entries(plan).map(([k, v]) => [k.replace(/^docker /, "podman "), v]));
-const podmanEgressFacts = (egress = {}, over = {}) => ({
-	jobImage: "pi-job:latest",
-	triggerImages: [],
-	podman: { run: true, user: "1234:1234", relabel: false, info: { rootless: true, serviceIsRemote: false, selinux: false }, imagePresent: true, egress: { armed: true, proxy: "pi-dispatch-egress-proxy", proxyRunning: true, ...egress }, ...over },
-});
-const podmanEgressSeams = (canary = {}, calls = [], plan = {}) => ({
-	// `canary` FIRST, for its keys' place in the prefix match, and LAST, for their values: a spread keeps the first place a
-	// key had and the last value it was given, so spreading it once would lose an override of a key the rest also carry.
-	// The plain HTTP probe (issue #508) refused by default, as a current proxy does; a test that reads it names it.
-	spawn: fakeSpawn({ [`${PODMAN_PROBE}plainhttp`]: 3, ...canary, ...toPodman(liveOk({ uid: "1234" })), ...toPodman(livePeersOk(plan)), ...podmanPlan(), "podman network": 0, ...canary }, calls),
-	liveFs: liveFsAs(1234),
-	isAlive: () => false,
-	pid: 1,
-	nonce: "n",
-	jobUserIdentity: LINUX_ID(1234),
-	...instantClock(),
-});
-const PODMAN_PROBE = "podman run --name=pi-dispatch-egress-probe-";
-// The podman canary's probe argv, WRITTEN OUT rather than built by the builder under test: a job's own argv (the
-// builder's isolation flags and bounds, the job user, keep-id and the venue's pinned flags, a job's HOME and its four
-// egress variables), on the canary network, with no mount, running the runner's route to the network.
-const podmanProbeArgv = (slug, url, script = egressCanaryScript(url)) => [
-	"run",
-	`--name=pi-dispatch-egress-probe-${slug}-1`,
-	"--pull=never",
-	"--rm",
-	"--init",
-	"--cap-drop=ALL",
-	"--security-opt",
-	"no-new-privileges",
-	"--pids-limit=512",
-	"--memory=4g",
-	"--memory-swap=4g",
-	"--cpu-shares=2048",
-	"--shm-size=1g",
-	"--cgroup-parent=pidispatch.slice",
-	"--label=pi.dispatch.mem=4096",
-	"--label=pi.dispatch.cpu=200",
-	"--network=pi-dispatch-egress-doctor-1",
-	"--user=1234:1234",
-	"--userns=keep-id",
-	"--pid=private",
-	"--ipc=private",
-	"--uts=private",
-	"--cgroupns=private",
-	"--env-host=false",
-	"--http-proxy=false",
-	"--entrypoint",
-	"node",
-	"-e",
-	"HOME=/home/pi",
-	"-e",
-	"HTTPS_PROXY=http://pi-dispatch-egress-proxy:3128",
-	"-e",
-	"HTTP_PROXY=http://pi-dispatch-egress-proxy:3128",
-	"-e",
-	"NO_PROXY=localhost,127.0.0.1",
-	"-e",
-	"NODE_USE_ENV_PROXY=1",
-	"--workdir=/workspace",
-	"pi-job:latest",
-	"-e",
-	script,
-];
-
-test("doctor --live on podman reads egress back through a canary under podman, built as a podman job is (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const calls = [];
-	const held = await podmanLiveChecks(env, podmanEgressSeams({ [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3 }, calls), podmanEgressFacts());
-	const labels = held.map((c) => c.label);
-	assert.deepEqual(calls.filter((c) => c.cmd !== "podman"), [], "the podman path never spawns docker, or anything else");
-	// The canary's own steps, in order, all under podman: the sweep's listing, the network, the two probes, the teardown.
-	const canarySteps = calls.filter((c) => c.args.some((a) => /pi-dispatch-egress-(doctor|probe)-/.test(String(a)))).map((c) => c.args.slice(0, 3).join(" "));
-	assert.deepEqual(canarySteps, [
-		"network ls --filter",
-		"network create --internal",
-		"network connect pi-dispatch-egress-doctor-1",
-		"run --name=pi-dispatch-egress-probe-provider-1 --pull=never",
-		"run --name=pi-dispatch-egress-probe-unlisted-1 --pull=never",
-		"run --name=pi-dispatch-egress-probe-plainhttp-1 --pull=never",
-		"network disconnect -f",
-		"network rm pi-dispatch-egress-doctor-1",
-	]);
-	// The probes' argv, exactly: the venue's pins and the job user, never a weaker hand-rolled one.
-	const probes = calls.filter((c) => String(c.args[1]).startsWith("--name=pi-dispatch-egress-probe-"));
-	assert.deepEqual(probes[0].args, podmanProbeArgv("provider", "https://api.anthropic.com/v1/messages"));
-	assert.deepEqual(probes[1].args, podmanProbeArgv("unlisted", "https://example.com/"));
-	// Issue #508: the plain HTTP probe is a job's argv too, running the raw forward request at the job's own proxy.
-	assert.deepEqual(probes[2].args, podmanProbeArgv("plainhttp", "http://api.anthropic.com:443/", egressCanaryPlainScript("http://api.anthropic.com:443/", { proxyUrl: "http://pi-dispatch-egress-proxy:3128" })));
-	// want and reached per probe, carried where the verdict reads them, and the lines say podman.
-	assert.deepEqual(held.filter((c) => c.readBack).map((c) => c.readBack), [
-		{ property: "egress", want: true, reached: true, probe: "provider" },
-		{ property: "egress", want: false, reached: false, probe: "unlisted" },
-		{ property: "egress", want: false, reached: false, probe: "plainhttp" },
-	]);
-	assert.ok(labels.includes("podman: Egress policy reaches the provider (api.anthropic.com answered, so the whole path works and no key was spent)"), labels.join("\n"));
-	assert.ok(labels.includes("podman: Egress policy denies an unlisted host (the deny direction is the half an allowlist can silently lose)"));
-	assert.ok(labels.includes("podman: Egress policy refuses plain HTTP to a listed host off port 80 (api.anthropic.com:443 without a tunnel; only a CONNECT reaches 443)"));
-	assert.ok(held.some((c) => c.ok && c.label === "read back on podman: egress holds (the provider was reached, an unlisted host was not, and plain HTTP off port 80 was refused)"), labels.join("\n"));
-	assert.ok(labels.indexOf("podman: Egress policy reaches the provider (api.anthropic.com answered, so the whole path works and no key was spent)") < labels.findIndex((l) => l.startsWith("read back on podman: egress")), "the canary's lines come first, so the verdict's 'above' is true");
-	assert.equal(calls.filter((c) => c.args[0] === "info").length, 2, "podman info asked again before the canary, and again before the probes");
-	assert.ok(held.some((c) => c.ok && /^read back on podman: jobToJobIsolation holds \(peer1 reached the proxy/.test(c.label)), labels.join("\n"));
-	assert.match(held.at(-1).label, /jobToJobIsolation tried one pair of peers on this account's Podman job networks/);
-	const noAddress = await podmanLiveChecks(env, { ...podmanEgressSeams({ [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3, "podman inspect --format={{json .NetworkSettings.Networks}}": { code: 1, output: "" } }) }, podmanEgressFacts());
-	assert.ok(noAddress.some((c) => c.warn && /jobToJobIsolation not read back: podman inspect gave peer2 no address/.test(c.label)), noAddress.map((c) => c.label).join("\n"));
-});
-
-test("a podman canary that reaches an unlisted host, or not the provider, fails egress on podman, and an unrun probe is not a reading (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const run = (canary) => podmanLiveChecks(env, podmanEgressSeams(canary), podmanEgressFacts());
-	const open = await run({ [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 0 });
-	assert.ok(open.some((c) => c.warn && !c.ok && c.label === "podman: Egress policy ALLOWS an unlisted host that is not on your allowlist"));
-	const verdict = open.find((c) => c.label.startsWith("read back on podman: egress"));
-	assert.deepEqual([verdict.ok, verdict.warn, verdict.label], [false, undefined, "read back on podman: egress does NOT hold -- declared enforced, observed: an unlisted host was reached"]);
-	const shut = await run({ [`${PODMAN_PROBE}provider`]: 3, [`${PODMAN_PROBE}unlisted`]: 3 });
-	assert.ok(shut.some((c) => c.label === "podman: Egress policy does NOT reach the provider (api.anthropic.com)"));
-	assert.match(shut.find((c) => c.label.startsWith("read back on podman: egress")).label, /egress does NOT hold -- declared enforced, observed: the provider was not reached$/);
-	const stale = await run({ [`${PODMAN_PROBE}provider`]: EGRESS_CANARY_STALE_RUNNER });
-	assert.ok(stale.some((c) => c.warn && c.label.startsWith(`podman: Egress policy: not proved, because the job image could not find ${EGRESS_CANARY_RUNNER_MODULE}`)));
-	assert.match(stale.find((c) => c.label.startsWith("read back on podman: egress")).label, /egress not read back: the egress canary did not run all three probes \(see the egress lines above\)/);
-	const refused = await run({ [`${PODMAN_PROBE}provider`]: 125, [`${PODMAN_PROBE}unlisted`]: 3 });
-	assert.ok(refused.some((c) => c.label === "podman: Egress policy probe for the provider did not run (podman run exited 125)"));
-	assert.match(refused.find((c) => c.label.startsWith("read back on podman: egress")).label, /egress not read back: an egress probe did not run to an answer/);
-	// Issue #508: a proxy on rules from before it lets plain HTTP through, and podman's verdict says which probe.
-	const plain = await run({ [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3, [`${PODMAN_PROBE}plainhttp`]: 0 });
-	assert.ok(plain.some((c) => c.warn && !c.ok && c.label === "podman: Egress policy lets plain HTTP through to api.anthropic.com on port 443, so a client that does not tunnel reaches every port of a listed host"));
-	assert.equal(plain.find((c) => c.label.startsWith("read back on podman: egress")).label, "read back on podman: egress does NOT hold -- declared enforced, observed: plain HTTP to a listed host off port 80 was let through");
-});
-
-test("the podman canary is stopped by the venue's refusals, a service no longer this host's own, the policy off, and a proxy that is down (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const canaryObjects = (calls) => calls.filter((c) => c.args.some((a) => /pi-dispatch-egress-(doctor|probe)-/.test(String(a))));
-	// A refusal (the conf refusal of #428, a job-user refusal): nothing at all is spawned, the canary included.
-	for (const reason of ["a podman job is refused here (podman-conf-widens-job), so a probe would read back a container no job gets", "a podman job is refused as this uid (any-uid-unsupported), so a probe would read back a container no job gets"]) {
-		const calls = [];
-		const checks = await podmanLiveChecks(env, podmanEgressSeams({}, calls), podmanEgressFacts({}, { run: false, reason }));
-		assert.deepEqual(calls, [], reason);
-		assert.equal(checks.length, 1);
-	}
-	// A service re-read as remote: no canary object, one line saying why, and the verdict unread.
-	const remoteCalls = [];
-	const remote = await podmanLiveChecks(env, podmanEgressSeams({ "podman info": { code: 0, output: `${PODMAN_INFO({ serviceIsRemote: true })}\n` } }, remoteCalls), podmanEgressFacts());
-	assert.deepEqual(canaryObjects(remoteCalls), []);
-	assert.ok(remote.some((c) => c.warn && c.label === "podman: Egress policy: not proved, because this shell's podman CLI is not observed to point at this host, so no canary container was started"));
-	// The policy off: no sweep, no canary, and not even the re-ask.
-	const offCalls = [];
-	const off = await podmanLiveChecks(liveEnv({ PI_BACKENDS: "podman" }), podmanEgressSeams({}, offCalls), podmanEgressFacts({ armed: false, proxyRunning: null }));
-	assert.deepEqual(canaryObjects(offCalls), []);
-	assert.equal(offCalls.filter((c) => c.args[0] === "info").length, 1, "only runLiveProbes' own re-ask");
-	assert.ok(off.some((c) => c.label === "read back on podman: egress not read back: PI_EGRESS is off, so there is no policy to read back"));
-	// A proxy seen stopped, or an image not in the store: the SWEEP still runs, the canary does not.
-	for (const facts of [podmanEgressFacts({ proxyRunning: false }), podmanEgressFacts({}, { imagePresent: false })]) {
-		const calls = [];
-		await podmanLiveChecks(env, podmanEgressSeams({}, calls), facts);
-		assert.deepEqual(canaryObjects(calls).map((c) => c.args.slice(0, 2).join(" ")), ["network ls"], "swept, and nothing created");
-	}
-});
-
-test("the stale canary sweep works on podman: a dead run's leftover in this account's Podman is removed through podman, in podman's words (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const leftover = "pi-dispatch-egress-doctor-4242";
-	const sweep = {
-		[`podman network ls --filter name=${EGRESS_CANARY_NET_PREFIX} --format {{.Name}}`]: { code: 0, output: `${leftover}\npi-dispatch-egress-doctor-4242-extra\n` },
-		// Podman's member read (issue #452): every member with its state, as 4.9.3 and 5.8.1 both render it.
-		[`podman ps -a --filter network=${leftover} --format {{.Names}}\t{{.State}}`]: { code: 0, output: "pi-dispatch-egress-probe-unlisted-4242\trunning\npi-dispatch-egress-proxy\trunning\n" },
-		[`podman network exists ${leftover}`]: { code: 0, output: "" },
-		[`${PODMAN_PROBE}provider`]: 0,
-		[`${PODMAN_PROBE}unlisted`]: 3,
-	};
-	const calls = [];
-	const checks = await podmanLiveChecks(env, podmanEgressSeams(sweep, calls), podmanEgressFacts({ proxyRunning: false }));
-	const touched = calls.filter((c) => c.args.some((a) => String(a).includes("4242"))).map((c) => [c.cmd, ...c.args].join(" "));
-	assert.deepEqual(touched, [
-		`podman ps -a --filter network=${leftover} --format {{.Names}}\t{{.State}}`,
-		`podman network exists ${leftover}`,
-		// `--time=0` (review F1): podman's `rm -f` otherwise waits the probe's 10 s stop timeout, the step bound itself.
-		"podman rm -f --time=0 pi-dispatch-egress-probe-unlisted-4242",
-		`podman network disconnect -f ${leftover} pi-dispatch-egress-proxy`,
-		`podman network rm ${leftover}`,
-	], "the name filter is unchanged and anchored, and the proxy is detached, never removed");
-	const line = checks.find((c) => c.canary);
-	assert.equal(line.label, `podman: Egress canary: removed ${leftover} (after removing pi-dispatch-egress-probe-unlisted-4242 and detaching pi-dispatch-egress-proxy), left by an EARLIER doctor run`);
-	assert.equal(line.label, `podman: Egress canary: ${CANARY_LINES[line.canary.shape].label(line.canary.params)}`, "built from the table, with podman's CLI in its params");
-	// The table's command-carrying lines name podman on this venue, and their fixes too.
-	const unlisted = await podmanLiveChecks(env, podmanEgressSeams({ [`podman network ls --filter name=${EGRESS_CANARY_NET_PREFIX}`]: { code: 125, output: "" } }), podmanEgressFacts({ proxyRunning: false }));
-	assert.ok(unlisted.some((c) => c.warn && c.label === `podman: Egress canary: leftovers from an EARLIER doctor run could not be listed: podman network ls --filter name=${EGRESS_CANARY_NET_PREFIX}`), unlisted.map((c) => c.label).join("\n"));
-	const kept = await podmanLiveChecks(env, podmanEgressSeams({ ...sweep, "podman rm -f --time=0 pi-dispatch-egress-probe-unlisted-4242": 1 }), podmanEgressFacts({ proxyRunning: false }));
-	const keptLine = kept.find((c) => c.canary?.shape === "kept");
-	assert.equal(keptLine.label, `podman: Egress canary: ${leftover} is kept, because the probe pi-dispatch-egress-probe-unlisted-4242 could not be removed and the network is the only way left to find it: podman rm -f pi-dispatch-egress-probe-unlisted-4242`);
-	const unproved = await podmanLiveChecks(env, podmanEgressSeams({ "podman network create": 1 }), podmanEgressFacts());
-	assert.match(unproved.find((c) => /could not be created/.test(c.label)).fix, /`podman network ls --filter name=pi-dispatch-egress-doctor-`/);
-	assert.doesNotMatch(unproved.find((c) => /could not be created/.test(c.label)).fix, /\bdocker\b/);
-});
-
-// --- issue #452: the canary sweep on Podman 4.9, which renders no `.Containers` --------------------------------------
-
-/** A Podman answering the canary sweep: `network ls`, the member `ps -a` rows per network, `network exists`, removals. */
+// The sweep stays parameterised on the venue bin, and the docker CLI can be pointed at Podman's socket: these fakes
+// stand in for that runtime's own answers (`network ls`, `ps --filter`, `network exists`, the detach gate's info read).
 function podmanCanaryDaemon({ nets = {}, exists = () => 0, rm = () => 0, version = "5.8.1", keeper = { code: 125, stdout: "", stderr: "no such container" } } = {}) {
 	const calls = [];
 	const run = async (args) => {
@@ -10167,194 +8728,6 @@ test("on podman the canary sweep says `unreadable` only when Podman cannot answe
 	assert.ok(!stuck.calls.some((c) => c.startsWith("network rm")));
 });
 
-test("doctor --live on a podman-only deployment with egress armed: the canary's lines, then the read-back, and no docker (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const { out, text } = capture();
-	const calls = [];
-	const plan = { [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3, [`${PODMAN_PROBE}plainhttp`]: 3, ...toPodman(liveOk({ uid: "1234" })), ...toPodman(livePeersOk({})), "podman network": 0, ...podmanPlan() };
-	const code = await runDoctor(env, { ...podmanDeps(out, plan, calls), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-	assert.equal(code, 0, text());
-	assert.deepEqual(calls.filter((c) => c.cmd === "docker"), []);
-	assert.doesNotMatch(text(), /allowlist is read back by `pi-dispatch doctor --live`/, "a --live run does not point at itself");
-	assert.match(text(), /\nread back on podman: starting pi-dispatch-egress-probe-provider-7, pi-dispatch-egress-probe-unlisted-7 and pi-dispatch-egress-probe-plainhttp-7 from pi-job:latest \(as the job user 1234:1234\) on the --internal network pi-dispatch-egress-doctor-7, with pi-dispatch-egress-proxy attached, to read the egress allowlist back; all three are removed when the canary ends\n/);
-	assert.match(text(), /✓ podman: Egress policy reaches the provider[^\n]*\n✓ podman: Egress policy denies an unlisted host[^\n]*\n✓ podman: Egress policy refuses plain HTTP to a listed host off port 80[^\n]*\n/);
-	assert.ok(text().indexOf("✓ podman: Egress policy refuses plain HTTP to a listed host off port 80") < text().indexOf("✓ read back on podman: egress holds"));
-	assert.equal(calls.filter((c) => c.cmd === "podman" && c.args[0] === "info").length, 3, "the section's read, the canary's re-ask, and the read-back's");
-});
-
-// Issue #458: on Podman 4.x (or an unreported version) with the keeper not running, every network teardown under the
-// proxy is the trigger, and `--live` makes three kinds of them: the canary's network, the stale sweeps' detaches, and
-// the jobToJobIsolation peers' networks. None may run there; each property says why it was not read back. With the
-// keeper running, or on 5.x, the same run reads everything back as before.
-test("doctor --live on Podman 4.x without the keeper runs no canary and no peer networks, and says why (#458)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	// `stale`: a peer network a dead run (pid 99) left with the proxy still on it, for the live sweep to meet.
-	const STALE = "pi-dispatch-live-peer1-99-abc-net";
-	const staleKeys = {
-		[`podman network ls --filter name=${LIVE_PREFIX}`]: { code: 0, output: `${STALE}\n` },
-		// Podman's member read since #452 (4.9 renders no `.Containers`): the proxy as a running member, and the network there.
-		[`podman ps -a --filter network=${STALE} --format {{.Names}}\t{{.State}}`]: { code: 0, output: "pi-dispatch-egress-proxy\trunning\n" },
-		[`podman network exists ${STALE}`]: { code: 0, output: "" },
-	};
-	const run = async ({ version, keeper, stale = false }) => {
-		const { out, text } = capture();
-		const calls = [];
-		const info = JSON.stringify({ ...JSON.parse(PODMAN_INFO()), version: { Version: version } });
-		const plan = { ...(stale ? staleKeys : {}), [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3, [`${PODMAN_PROBE}plainhttp`]: 3, ...toPodman(liveOk({ uid: "1234" })), ...toPodman(livePeersOk({})), "podman network": 0, ...podmanPlan({ info, keeper }) };
-		const code = await runDoctor(env, { ...podmanDeps(out, plan, calls), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-		const lines = calls.map((c) => [c.cmd, ...c.args].join(" "));
-		return { code, text: text(), lines };
-	};
-	const touchesProxyNetworks = (lines) => lines.filter((l) => /pi-dispatch-egress-(doctor|probe)-|pi-dispatch-live-peer|network (connect|disconnect)/.test(l));
-	for (const version of ["4.9.3", ""]) {
-		const blocked = await run({ version, keeper: null });
-		assert.equal(blocked.code, 1, `${version || "unreported"}: fails`);
-		assert.deepEqual(touchesProxyNetworks(blocked.lines), [], `${version || "unreported"}: no canary, no sweep listing of canary networks, no peer network, no connect or disconnect`);
-		assert.match(blocked.text, /✗ podman: Egress policy: not proved, and no egress canary was run \(nor a stale canary network swept\), because the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman on Podman [^\n]*, where tearing down a network the proxy is on would cut the proxy's route out \(issue #458\)\n {4}→ start it as the worker's account where its Quadlet unit is installed: systemctl --user reset-failed /);
-		assert.match(blocked.text, /⚠ read back on podman: egress not read back: the egress canary was not run, because the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman/);
-		assert.match(blocked.text, /⚠ read back on podman: jobToJobIsolation not read back: no peer networks were built, because the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman/);
-		assert.doesNotMatch(blocked.text, /read back on podman: starting [^\n]*peer1/, "the announcement names no peers");
-		assert.match(blocked.text, /✓ read back on podman: isolation holds/, "what does not touch the proxy is still read back");
-	}
-	for (const [version, keeper] of [["4.9.3", "running"], ["5.8.1", null], ["5.8.1", "exited"]]) {
-		const held = await run({ version, keeper });
-		assert.equal(held.code, 0, `${version} keeper ${keeper}: ${held.text}`);
-		const touched = touchesProxyNetworks(held.lines);
-		assert.ok(touched.some((l) => l.startsWith("podman network create --internal pi-dispatch-egress-doctor-7")), `${version} keeper ${keeper}: the canary ran`);
-		assert.ok(touched.some((l) => l.startsWith("podman network disconnect -f pi-dispatch-live-peer1-7-n-net")), `${version} keeper ${keeper}: the peers ran`);
-		assert.match(held.text, /✓ read back on podman: egress holds/);
-		assert.match(held.text, /✓ read back on podman: jobToJobIsolation holds/);
-	}
-	// Issue #463's gate: a keeper RUNNING off its bridge network blocks exactly like a missing one.
-	const offBridge = await run({ version: "4.9.3", keeper: "running|none|none," });
-	assert.equal(offBridge.code, 1);
-	assert.deepEqual(touchesProxyNetworks(offBridge.lines), [], "a keeper on --network none holds nothing: no canary, no peers");
-	assert.match(offBridge.text, /no egress canary was run [^\n]*because the rootless network keeper pi-dispatch-netns-keeper is running on the none network mode/);
-	// The live sweep's side, end to end: a dead run's peer network with the proxy on it is LEFT, and said, while blocked
-	// (its detach is the trigger); swept, proxy detached, once the keeper holds.
-	const staleBlocked = await run({ version: "4.9.3", keeper: null, stale: true });
-	assert.deepEqual(staleBlocked.lines.filter((l) => / network (connect|disconnect|rm|create) /.test(` ${l.replace(/^podman /, "")} `) || /^podman network (connect|disconnect|rm|create)/.test(l)), [], "nothing connected, detached, removed or created");
-	assert.match(staleBlocked.text, new RegExp(`the stale network ${STALE} was left with pi-dispatch-egress-proxy attached, because the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman`));
-	const staleHeld = await run({ version: "4.9.3", keeper: "running", stale: true });
-	assert.ok(staleHeld.lines.includes(`podman network disconnect -f ${STALE} pi-dispatch-egress-proxy`), staleHeld.lines.join("\n"));
-	assert.ok(staleHeld.lines.includes(`podman network rm ${STALE}`));
-	assert.doesNotMatch(staleHeld.text, /was left with/);
-});
-
-test("a podman canary probe gets the first-start bound, and one the bound cut short is removed without podman's stop wait (#431)", async (t) => {
-	// The probe's bound is PODMAN_FIRST_START_TIMEOUT_MS, pinned as a NUMBER: a cold keep-id first start measured 27 to
-	// 32 s (29.4 s on the review VM), so docker's 30 s would read a healthy first run as a probe that did not run.
-	t.mock.timers.enable({ apis: ["setTimeout"] });
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman" });
-	const calls = [];
-	const pending = podmanLiveChecks(env, podmanEgressSeams({ [`${PODMAN_PROBE}provider`]: "hang", [`${PODMAN_PROBE}unlisted`]: 3 }, calls), podmanEgressFacts());
-	const probe = () => calls.find((c) => c.args[1] === "--name=pi-dispatch-egress-probe-provider-1");
-	for (let i = 0; i < 200 && !probe(); i++) await new Promise((r) => setImmediate(r));
-	assert.ok(probe(), "the provider probe started");
-	t.mock.timers.tick(119_999);
-	assert.deepEqual(probe().kills, [], "no kill short of 120 s");
-	t.mock.timers.tick(1);
-	assert.deepEqual(probe().kills, ["SIGKILL"], "at 120 s exactly, by the step runner's SIGKILL");
-	const checks = await pending;
-	assert.ok(checks.some((c) => c.label === "podman: Egress policy probe for the provider did not run (podman run did not finish)"), checks.map((c) => c.label).join("\n"));
-	// The teardown removes the probe the bound left behind, with podman's stop wait turned off (review F1), then the network.
-	const teardown = calls.filter((c) => (c.args[0] === "rm" && c.args.includes("pi-dispatch-egress-probe-provider-1")) || (c.args[0] === "network" && c.args[1] === "rm" && c.args[2] === "pi-dispatch-egress-doctor-1"));
-	assert.deepEqual(teardown.map((c) => [c.cmd, ...c.args].join(" ")), ["podman rm -f --time=0 pi-dispatch-egress-probe-provider-1", "podman network rm pi-dispatch-egress-doctor-1"]);
-});
-
-test("the podman canary runs PI_JOB_IMAGE, whatever it names (#431)", async () => {
-	const env = liveEnv({ PI_EGRESS: "1", PI_BACKENDS: "podman", PI_JOB_IMAGE: "registry.example.invalid/team/pi-job:7" });
-	const calls = [];
-	await podmanLiveChecks(env, podmanEgressSeams({ [`${PODMAN_PROBE}provider`]: 0, [`${PODMAN_PROBE}unlisted`]: 3 }, calls), { ...podmanEgressFacts(), jobImage: "registry.example.invalid/team/pi-job:7" });
-	const probes = calls.filter((c) => String(c.args[1]).startsWith("--name=pi-dispatch-egress-probe-"));
-	assert.equal(probes.length, 3);
-	for (const p of probes) {
-		assert.equal(p.args.at(-3), "registry.example.invalid/team/pi-job:7", p.args.join(" "));
-		assert.equal(p.args.includes("pi-job:latest"), false);
-	}
-});
-
-test("the podman canary's argv cannot be built weaker than a job's: no job user, no argv (#431)", () => {
-	assert.throws(() => egressCanaryProbeArgs({ bin: "podman", slug: "provider", pid: 1, network: "n", proxy: "p", image: "i", url: "https://example.com/", user: null }), /refusing a keep-id spec with no job user/);
-	const args = egressCanaryProbeArgs({ bin: "podman", slug: "provider", pid: 1, network: "n", proxy: "p", image: "i", url: "https://example.com/", user: "1:1" });
-	assert.equal(args.includes("-v"), false, "the canary mounts nothing: a mount only adds reach");
-	assert.equal(args.some((a) => a.includes("pi-dispatch-egress-canary-mounts-nothing")), false);
-});
-
-test("the podman bounds line is said only when the controllers are delegated (#354)", async () => {
-	const { out, text } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { observationFs: podmanFsWith("cpu memory\n") }));
-	assert.doesNotMatch(text(), /podman: cgroup v2 controllers are delegated/);
-	assert.match(text(), /⚠ podman: isolation is ASSERTED by this account's Podman setup, not enforced: the pids cgroup controller is not delegated to this account's systemd user manager \(user@1234\.service\)/);
-});
-
-test("an account with no systemd user manager running, or one Podman cannot reach: doctor names the cause once, as --live's isolation failure does (#453)", async () => {
-	// Measured (round-446 M0-e E1, gate 456 L1-L3): linger off and a `sudo -iu` shell, or a manager Podman reaches no bus
-	// to, podman info still listing every controller.
-	const noManager = { observationFs: podmanFsWith(null) };
-	const EVIDENCE = "no systemd user manager is running for this account (/sys/fs/cgroup/user.slice/user-1234.slice/user@1234.service/cgroup.controllers does not exist), so Podman leaves a job's pids, memory and cpu bounds unapplied, whichever cgroup manager it uses: with linger off the manager runs only while the account has a login session, and a `sudo -iu` shell starts none (measured). On a host without systemd managing cgroups under user.slice this path never exists, and the venue gives no credit there";
-	const FIX = "    → turn on linger for the worker's account: `sudo loginctl enable-linger <account>` starts its systemd user manager and keeps it running with no one logged in, and `pi-dispatch service install` runs the worker as a systemd user service inside it. A hand-written system unit with `User=` also needs `Wants=user@<uid>.service` and `After=user@<uid>.service` (docs/podman.md); `pi-dispatch doctor --live` reads pids.max and memory.max back off a real container\n";
-	const ISOLATION = `⚠ podman: isolation is ASSERTED by this account's Podman setup, not enforced: ${EVIDENCE}\n${FIX}`;
-	// No floor: jobs still run, so one ⚠, the backend section's, carrying the cause and its fix; podman info's controller
-	// list no longer earns the ✓ line, and the podman section does not repeat the ⚠.
-	const plain = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(plain.out, podmanPlan(), [], noManager)), 0);
-	assert.ok(plain.text().includes(ISOLATION), plain.text());
-	assert.equal(plain.text().match(/no systemd user manager is running/g).length, 1, "said once");
-	assert.doesNotMatch(plain.text(), /podman: cgroup v2 controllers are delegated/);
-	// A floor that needs the bounds: the same one line, and the floor line is the ✗ that fails doctor, saying the worker
-	// refuses to boot on this answer.
-	const floored = capture();
-	assert.equal(await runDoctor(podmanEnv({ PI_BACKEND_FLOOR: "isolation=enforced" }), podmanDeps(floored.out, podmanPlan(), [], noManager)), 1);
-	assert.ok(floored.text().includes(ISOLATION), floored.text());
-	assert.equal(floored.text().match(/no systemd user manager is running/g).length, 1, "said once");
-	assert.match(floored.text(), /✗ PI_BACKEND_FLOOR asks for isolation=enforced \(podman provides it only while this worker's rootless Podman runs on cgroup v2 with a systemd user manager running for its account, the pids, memory and cpu controllers delegated to that manager, and Podman putting containers under it, and no containers\.conf it reads sets `cgroups`, and that is not observed\)\n {4}→ Turn on linger for the worker account[^\n]* The worker refuses to boot, and refuses each job, on the same answer\.\n/);
-	// A manager Podman cannot reach (gate L1: no user bus, so podman info reports cgroupfs) from a shell outside it: its
-	// own cause, and its own fix, which leads with running inside the manager.
-	const unreachable = capture();
-	await runDoctor(podmanEnv(), podmanDeps(unreachable.out, podmanPlan({ info: PODMAN_INFO({ cgroupManager: "cgroupfs" }) }), [], { observationFs: podmanFsWith("cpuset cpu io memory pids\n", "0::/user.slice/user-501.slice/session-5.scope\n") }));
-	assert.ok(unreachable.text().includes("⚠ podman: isolation is ASSERTED by this account's Podman setup, not enforced: Podman is using the cgroupfs cgroup manager, not systemd, and this worker is not running inside the account's user manager (user@1234.service), so whether a job's pids, memory and cpu bounds are applied is not observed from here. Measured: where a configured systemd manager fell back to cgroupfs because Podman could not reach the user manager over D-Bus (no user bus socket, a DBUS_SESSION_BUS_ADDRESS pointing nowhere), the container landed in the worker's own cgroup unbounded; an explicit cgroupfs with the bus reachable had its bounds applied, and nothing read here tells the two apart\n    → run the worker inside the account's user manager, as a systemd user service (`pi-dispatch service install`, with linger on), where a job's container lands under the manager whichever cgroup manager Podman uses; or let Podman reach the manager over the account's user bus, /run/user/<uid>/bus (on Debian and Ubuntu the dbus-user-session package provides it), with no DBUS_SESSION_BUS_ADDRESS pointing elsewhere and no `cgroup_manager = \"cgroupfs\"` in its containers.conf; `pi-dispatch doctor --live` reads pids.max and memory.max back off a real container\n"), unreachable.text());
-	// The same cgroupfs from inside the manager (measured E3a, E3b) is credited.
-	const inside = capture();
-	await runDoctor(podmanEnv(), podmanDeps(inside.out, podmanPlan({ info: PODMAN_INFO({ cgroupManager: "cgroupfs" }) }), [], { observationFs: podmanFsWith("cpuset cpu io memory pids\n", "0::/user.slice/user-1234.slice/user@1234.service/app.slice/pi-dispatch-worker.service\n") }));
-	assert.match(inside.text(), /✓ podman: cgroup v2 controllers are delegated to this account/);
-	// Another cause keeps OBSERVATION_FIX: the cause fixes are tied to their causes, not to the observation.
-	const undelegated = capture();
-	await runDoctor(podmanEnv(), podmanDeps(undelegated.out, podmanPlan(), [], { observationFs: podmanFsWith("cpu memory\n") }));
-	assert.match(undelegated.text(), /⚠ podman: isolation is ASSERTED by this account's Podman setup, not enforced: the pids cgroup controller is not delegated to this account's systemd user manager \(user@1234\.service\), so a job cannot have that bound: measured for cpu, Podman 5\.8\.1 refuses to start a container carrying --cpus \(exit 126, "controller `cpu` is not available"\)\n {4}→ Turn on linger for the worker account/);
-	// A running manager with the controllers: the ✓ line, listing the MANAGER's controllers, whatever podman info's
-	// caller-cgroup list says (measured E2a: `memory pids` inside a user unit, cpu applied anyway).
-	const session = capture();
-	await runDoctor(podmanEnv(), podmanDeps(session.out, podmanPlan({ info: PODMAN_INFO({ cgroupControllers: ["memory", "pids"] }) }), []));
-	assert.doesNotMatch(session.text(), /user manager/);
-	assert.match(session.text(), /✓ podman: cgroup v2 controllers are delegated to this account \(cpuset, cpu, io, memory, pids\), so a job's pid, memory and cpu bounds are applied\n/);
-	// --live: pids.max and memory.max read back `max` (measured E1), and the failure's fix names the cause, not docker's
-	// delegation, opening its own sentence with a capital.
-	const live = capture();
-	const unbounded = LIVE_STATUS("1234").replace("pids.max:512", "pids.max:max").replace("memory.max:4294967296", "memory.max:max");
-	const plan = { ...podmanLiveOk(), [`podman exec ${LIVE_ID} sh -c cat /proc/1/status`]: { code: 0, output: unbounded }, ...podmanPlan() };
-	assert.equal(await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(live.out, plan, [], noManager), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() }), 1);
-	assert.match(live.text(), /✗ read back on podman: isolation does NOT hold -- declared enforced, observed: [^\n]*\n {4}→ the runtime did not apply a bound the worker passes: on rootless Podman that is the account's systemd user manager not running, Podman not reaching it, or a controller not delegated to it \(the "isolation is ASSERTED" line above names which, when the static read sees it\) -- jobs on this host do not have the boundary the table declares\. Turn on linger for the worker's account: `sudo loginctl enable-linger <account>`/);
-	assert.doesNotMatch(live.text(), /on rootless podman, cgroup delegation/, "not docker's words with the name swapped");
-});
-
-test("with linger off, doctor's ✓ for the bounds says it lasts only as long as a login session does (#453 gate)", async () => {
-	// Measured (gate 456, extra-login-session-sudo-doctor.txt): linger off, another login session of the account open, a
-	// `sudo -iu` doctor saw the manager running and gave ✓; the manager stops with the last session.
-	const run = async (linger) => {
-		const { out, text } = capture();
-		const calls = [];
-		const plan = { ...podmanPlan(), ...(linger === null ? {} : { "loginctl show-user op -p Linger": { code: 0, output: `Linger=${linger}\n` } }) };
-		await runDoctor(podmanEnv(), podmanDeps(out, plan, calls, { userName: () => "op" }));
-		return { text: text(), calls };
-	};
-	const off = await run("no");
-	assert.match(off.text, /✓ podman: cgroup v2 controllers are delegated to this account \(cpuset, cpu, io, memory, pids\), so a job's pid, memory and cpu bounds are applied\n⚠ podman: linger is off for op, so the user manager above runs only while a login session of the account is open: when the last one ends, a worker run as a user service stops with it, and one run as a system unit with User= runs on with no bounds \(refused per job under an isolation floor\)\n {4}→ sudo loginctl enable-linger op -- it keeps the manager running with no one logged in, which is what a service needs\n/);
-	assert.ok(off.calls.some((c) => c.cmd === "loginctl" && c.args.join(" ") === "show-user op -p Linger"), "asked as up asks it");
-	assert.doesNotMatch((await run("yes")).text, /linger is off/);
-	assert.doesNotMatch((await run(null)).text, /linger is off/, "an unanswered loginctl says nothing");
-});
-
 test("the ladder's doctor step judges the service's .env: the provider key's presence (never its value) and VALKEY_URL, with the source said (#453 gate 2)", async () => {
 	// The exec's ladder-4.txt: step 2 put the key and the Valkey URL in .env, and doctor's shell has neither.
 	const cwd = scaffoldedCwd();
@@ -10420,9 +8793,8 @@ test("doctor's .env reads pass ONE allowlist and ONE loader mapping (#453 gate 3
 	// PR #466 gate round 2 added the GitHub auth source and App keys; issue #464 the jobs and sandbox dirs, and in its gate
 	// round 1 the Valkey opt-in, the TMPDIR the default jobs root lives under, and the worker's name.
 	// Issue #471: and every other key the service reads that doctor judges, the worker's and the receiver's.
-	// Issue #707: the openshell venues' two keys are venue keys too, so each key is named once, where it first appears.
-	assert.deepEqual([...SERVICE_ENV_KEYS], [...new Set(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY", "PI_OPENSHELL_ENGINE", "PI_OPENSHELL_GATEWAY", "VALKEY_URL", "PI_VALKEY_SHARED", "VALKEY_PASSWORD", "PI_VALKEY_PORT", "PI_PROVIDER", "PI_MODEL", "GITHUB_AUTH_SOURCE", "GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_PRIVATE_KEY", "PI_JOBS_DIR", "PI_SANDBOX_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...new Set(Object.values(CLI_SERVICE_KEYS).flat())])]);
-	for (const key of ["PI_JOB_IMAGE", "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_SANDBOX_RETENTION_HOURS", "PI_ALLOWED_MODELS", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "AZURE_ORG_URL", "AZURE_WEBHOOK_MODE", "WEBHOOK_SECRET", "RECEIVER_PORT", "GITHUB_PAT_VAR"]) {
+	assert.deepEqual([...SERVICE_ENV_KEYS], [...new Set(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY", "VALKEY_URL", "PI_VALKEY_SHARED", "VALKEY_PASSWORD", "PI_VALKEY_PORT", "PI_PROVIDER", "PI_MODEL", "GITHUB_AUTH_SOURCE", "GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_PRIVATE_KEY", "PI_JOBS_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...new Set(Object.values(CLI_SERVICE_KEYS).flat())])]);
+	for (const key of ["PI_JOB_IMAGE", "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_ALLOWED_MODELS", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "AZURE_ORG_URL", "AZURE_WEBHOOK_MODE", "WEBHOOK_SECRET", "RECEIVER_PORT", "GITHUB_PAT_VAR"]) {
 		assert.ok(SERVICE_ENV_KEYS.includes(key), `${key}, which issue #471 lists, is a service key`);
 	}
 	// Every key whose value steers a spawn, a connection or a write says how it is judged, and is a service key.
@@ -10431,13 +8803,13 @@ test("doctor's .env reads pass ONE allowlist and ONE loader mapping (#453 gate 3
 	for (const key of ["PI_ENV_SETUP", "XDG_DATA_HOME", "DOCKER_CONTENT_TRUST"]) assert.ok(!SERVICE_ENV_KEYS.includes(key) && Object.hasOwn(DOCTOR_SHELL_KEYS, key), key);
 	assert.deepEqual(serviceEnvKeys(["PI_JOB_IMAGE", "PI_ENV_SETUP", "VALKEY_URL", "OPENAI_API_KEY", "ANTHROPIC_API_KEY"], ["ANTHROPIC_API_KEY"]), ["PI_JOB_IMAGE", "VALKEY_URL", "ANTHROPIC_API_KEY"]);
 	assert.deepEqual(["linux", "win32", "darwin", "freebsd"].map(serviceEnvLoader), ["systemd", "cmd", "shell", "shell"]);
-	// The venue read uses that mapping too: on freebsd a sourcing shell reads `export PI_BACKENDS=podman` as an assignment.
+	// The venue read uses that mapping too: on freebsd a sourcing shell reads `export PI_BACKENDS=local` as an assignment.
 	const cwd = scaffoldedCwd();
-	writeFileSync(join(cwd, ".env"), "export PI_BACKENDS=podman\n");
+	writeFileSync(join(cwd, ".env"), "export PI_BACKENDS=local\n");
 	const { out, text } = capture();
-	const { PI_BACKENDS: _b, ...shell } = podmanEnv();
-	await runDoctor(shell, { ...podmanDeps(out, podmanPlan(), []), cwd, platform: "freebsd", readEnvFile: (path) => readFileSync(path, "utf8") });
-	assert.match(text(), /✓ venue keys read from [^\n]* \(PI_BACKENDS="podman"\)/);
+	const { PI_BACKENDS: _b, ...shell } = ghEnv();
+	await runDoctor(shell, { ...ghDeps(out, green, []), cwd, platform: "freebsd", readEnvFile: (path) => readFileSync(path, "utf8") });
+	assert.match(text(), /✓ venue keys read from [^\n]* \(PI_BACKENDS="local"\)/);
 });
 
 test("fleet host names and zones doctor prints from Valkey have their control bytes blanked (#453 gate 3)", async () => {
@@ -10454,46 +8826,40 @@ test("fleet host names and zones doctor prints from Valkey have their control by
 });
 
 test("doctor reads the venue keys from the deployment's .env as up does, says so, reads the file once, and refuses a disagreement (#453 gate)", async () => {
-	// The exec's ladder step 4 (gate 456, case6-step4-doctor.txt): PI_BACKENDS=podman in .env, nothing in the shell, and
-	// doctor judged docker.
+	// The exec's ladder step 4 (gate 456, case6-step4-doctor.txt), with the one venue: PI_EGRESS=0 in .env, nothing in
+	// the shell, and doctor judged the file's values.
 	const cwd = scaffoldedCwd();
-	writeFileSync(join(cwd, ".env"), "PI_BACKENDS=podman\nPI_EGRESS=0\n");
+	writeFileSync(join(cwd, ".env"), "PI_BACKENDS=local\nPI_EGRESS=0\n");
 	const asked = [];
 	const { out, text } = capture();
-	const { PI_BACKENDS: _b, PI_EGRESS: _e, ...shell } = podmanEnv();
-	await runDoctor(shell, { ...podmanDeps(out, podmanPlan(), []), cwd, platform: "linux", envFs: countingEnvFs(asked), readEnvFile: (path) => assert.fail(`a second read of ${path}`) });
-	assert.match(text(), new RegExp(`✓ venue keys read from ${join(cwd, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(PI_BACKENDS="podman", PI_EGRESS="0"\\), as the service reads them: this shell does not set them\\n`));
-	assert.match(text(), /✓ Jobs run on: podman/);
-	assert.doesNotMatch(text(), /Docker daemon reachable/);
+	const { PI_BACKENDS: _b, PI_EGRESS: _e, ...shell } = ghEnv();
+	await runDoctor(shell, { ...ghDeps(out, green, []), cwd, platform: "linux", envFs: countingEnvFs(asked), readEnvFile: (path) => assert.fail(`a second read of ${path}`) });
+	assert.match(text(), new RegExp(`✓ venue keys read from ${join(cwd, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} \\(PI_BACKENDS="local", PI_EGRESS="0"\\), as the service reads them: this shell does not set them\\n`));
+	assert.match(text(), /✓ Jobs run on: local/);
 	assert.deepEqual(asked, [realpathSync(join(cwd, ".env"))], "one file, opened once");
-	// This shell set differently: ✗, and doctor judges the shell's values.
+	// This shell set differently: ✗, and doctor judges the shell's values. PI_BACKENDS has one value now, so the
+	// disagreement is PI_EGRESS's: shell "0", file "1".
+	writeFileSync(join(cwd, ".env"), "PI_EGRESS=1\n");
 	const conflict = capture();
-	assert.equal(await runDoctor({ ...shell, PI_BACKENDS: "local" }, { ...ghDeps(conflict.out, green), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") }), 1);
-	assert.match(conflict.text(), new RegExp(`✗ which venue this deployment runs is unknown: PI_BACKENDS is "local" in this shell and "podman" in ${join(cwd, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\. doctor would judge the shell's venue while the service runs the file's\\.`));
+	assert.equal(await runDoctor({ ...shell, PI_EGRESS: "0" }, { ...ghDeps(conflict.out, green), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") }), 1);
+	assert.match(conflict.text(), new RegExp(`✗ which venue this deployment runs is unknown: PI_EGRESS is "0" in this shell and "1" in ${join(cwd, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\. doctor would judge the shell's venue while the service runs the file's\\.`));
 	// A .env that is there and cannot be read is said, as up says it (gate round 2); an absent one is not.
 	const dirEnv = tempDir("pi-venue-dir-env-");
 	mkdirSync(join(dirEnv, ".env"));
 	const unread = capture();
-	await runDoctor(shell, { ...podmanDeps(unread.out, podmanPlan(), []), cwd: dirEnv, fileExists: existsSync, platform: "linux" });
+	await runDoctor(shell, { ...ghDeps(unread.out, green, []), cwd: dirEnv, fileExists: existsSync, platform: "linux" });
 	assert.match(unread.text(), new RegExp(`⚠ ${join(dirEnv, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")} could not be read \\(not a regular file\\), so PI_BACKENDS, PI_EGRESS and PI_EGRESS_PROXY come from this shell alone, as does every other service setting doctor judges \\(issue #471\\)\n`));
 	const absent = capture();
-	await runDoctor(shell, { ...podmanDeps(absent.out, podmanPlan(), []), cwd: tempDir("pi-venue-no-env-"), fileExists: existsSync, platform: "linux" });
+	await runDoctor(shell, { ...ghDeps(absent.out, green, []), cwd: tempDir("pi-venue-no-env-"), fileExists: existsSync, platform: "linux" });
 	assert.doesNotMatch(absent.text(), /come from this shell alone/);
-	// A shell that agrees in meaning is no disagreement, and no source line is needed for keys the shell set.
+	// A shell that sets the key itself needs no source line for it, and an exact match is no disagreement.
 	const agree = capture();
-	await runDoctor({ ...shell, PI_BACKENDS: " podman", PI_EGRESS: "0" }, { ...podmanDeps(agree.out, podmanPlan(), []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
+	await runDoctor({ ...shell, PI_EGRESS: "1" }, { ...ghDeps(agree.out, green, []), cwd, platform: "linux", readEnvFile: (path) => readFileSync(path, "utf8") });
 	assert.doesNotMatch(agree.text(), /which venue this deployment runs is unknown|venue keys read from/);
 });
 
 
 
-test("the pinning and ephemeral read-backs on podman name podman in what they could not read (#354)", async () => {
-	const { out, text } = capture();
-	const plan = { ...podmanLiveOk(), "podman run --name=pi-dispatch-live-pin-": { code: 125, output: "Error: something new\n" }, "podman ps -a --no-trunc --filter id=": { code: 125, output: "" }, ...podmanPlan() };
-	await runDoctor(liveEnv({ PI_BACKENDS: "podman" }), { ...podmanDeps(out, plan, []), live: true, liveFs: liveFsAs(1234), isAlive: () => false, pid: 7, nonce: "n", ...instantClock() });
-	assert.match(text(), /⚠ read back on podman: imagePinning not read back: podman refused the run with a message this check does not recognise/);
-	assert.match(text(), /⚠ read back on podman: ephemeral not read back: podman ps did not answer while the first run was being waited on/);
-});
 
 // --- issue #431: docker's egress canary, pinned before it was parameterised on the venue -------------------------------
 
@@ -10624,7 +8990,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
 			"read back on local: starting pi-dispatch-live-probe-7-n, pi-dispatch-live-pin-7-n and pi-dispatch-live-ephemeral-7-n (twice) from pi-job:latest (no environment, as the image's own user), and pi-dispatch-live-peer1-7-n and pi-dispatch-live-peer2-7-n on their own --internal networks pi-dispatch-live-peer1-7-n-net and pi-dispatch-live-peer2-7-n-net, with pi-dispatch-egress-proxy attached to both, with a fixture under <jobs>; all of them are removed when the read-back ends, as is anything an interrupted earlier run left",
@@ -10707,7 +9072,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
 			"read back on local: starting pi-dispatch-live-probe-7-n, pi-dispatch-live-pin-7-n and pi-dispatch-live-ephemeral-7-n (twice) from pi-job:latest (no environment, as the image's own user), and pi-dispatch-live-peer1-7-n and pi-dispatch-live-peer2-7-n on their own --internal networks pi-dispatch-live-peer1-7-n-net and pi-dispatch-live-peer2-7-n-net, with pi-dispatch-egress-proxy attached to both, with a fixture under <jobs>; all of them are removed when the read-back ends, as is anything an interrupted earlier run left",
@@ -10796,7 +9160,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
 			"read back on local: starting pi-dispatch-live-probe-7-n, pi-dispatch-live-pin-7-n and pi-dispatch-live-ephemeral-7-n (twice) from pi-job:latest (no environment, as the image's own user), and pi-dispatch-live-peer1-7-n and pi-dispatch-live-peer2-7-n on their own --internal networks pi-dispatch-live-peer1-7-n-net and pi-dispatch-live-peer2-7-n-net, with pi-dispatch-egress-proxy attached to both, with a fixture under <jobs>; all of them are removed when the read-back ends, as is anything an interrupted earlier run left",
@@ -10889,7 +9252,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
 			"read back on local: starting pi-dispatch-live-probe-7-n, pi-dispatch-live-pin-7-n and pi-dispatch-live-ephemeral-7-n (twice) from pi-job:latest (no environment, as the image's own user), and pi-dispatch-live-peer1-7-n and pi-dispatch-live-peer2-7-n on their own --internal networks pi-dispatch-live-peer1-7-n-net and pi-dispatch-live-peer2-7-n-net, with pi-dispatch-egress-proxy attached to both, with a fixture under <jobs>; all of them are removed when the read-back ends, as is anything an interrupted earlier run left",
@@ -10982,7 +9344,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
-			"✓ 0 retained workspace(s) in <jobs>/sandboxes, swept after 24h, re-open one with `pi-dispatch sandbox <jobId>`",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
 			"read back on local: starting pi-dispatch-live-probe-7-n, pi-dispatch-live-pin-7-n and pi-dispatch-live-ephemeral-7-n (twice) from pi-job:latest (no environment, as the image's own user), and pi-dispatch-live-peer1-7-n and pi-dispatch-live-peer2-7-n on their own --internal networks pi-dispatch-live-peer1-7-n-net and pi-dispatch-live-peer2-7-n-net, with pi-dispatch-egress-proxy attached to both, with a fixture under <jobs>; all of them are removed when the read-back ends, as is anything an interrupted earlier run left",
@@ -11027,49 +9388,6 @@ const rendered = (checks) => {
 	return lines.join("");
 };
 
-test("doctor counts tombstones apart from retained workspaces, and tells a PINNED one from every other, never by pid (#446)", () => {
-	const at = 10_000_000;
-	const names = ["gh-1", "gh-2", ".reap-1-1000-0", `.reap-1-${at - 60_000}-1`, ".reap-by-hand", ".reap-7-2000-0", `.reap-1-${at + 60_000}-2`, ".reap-1-3000-0"];
-	// `.reap-1-3000-0` holds a pin that has not run out; `.reap-1-1000-0` held one that has.
-	const readFile = (p) => {
-		if (p === "/sbx/.reap-1-3000-0/manifest.json") return JSON.stringify({ jobId: "p", keepUntil: new Date(at + 3600000).toISOString() });
-		if (p === "/sbx/.reap-1-1000-0/manifest.json") return JSON.stringify({ jobId: "q", keepUntil: new Date(at - 1).toISOString() });
-		throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
-	};
-	const kept = countRetained("/sbx", () => true, { readdir: () => names, now: () => at, readFile });
-	// A delete in progress (a minute old) is neither. Gate round 3: the pid in a name decides NOTHING here (after a
-	// restart every stuck tombstone's pid is dead, and a pid means nothing across namespaces), so `.reap-7-...` is an
-	// ordinary one with its removal, not a "crash leftover" without one.
-	assert.deepEqual(kept, { count: 2, tombstones: 6, stuck: [".reap-1-1000-0", ".reap-by-hand", ".reap-7-2000-0", `.reap-1-${at + 60_000}-2`], pinned: [".reap-1-3000-0"] });
-	const lines = sandboxTombstoneChecks("/sbx", kept);
-	assert.deepEqual(lines.map((c) => [c.ok, c.warn]), [[false, true], [false, true]], "the WARNING shape: a ⚠ that never fails doctor");
-	assert.deepEqual(sandboxTombstoneChecks("/sbx", { count: 1, tombstones: 1, stuck: [], pinned: [] }), [], "none old, no line");
-	assert.deepEqual(countRetained("/nope", () => false), { count: 0, tombstones: 0, stuck: [], pinned: [] });
-	// RENDERED: a ⚠ with its fix line, each unpinned one by its exact path, and never a claim that nothing failed.
-	assert.equal(
-		rendered(lines),
-		[
-			"⚠ 1 pinned workspace(s) in /sbx are held aside by the retention sweep (.reap-1-3000-0) because their run's name was taken when they were put back",
-			"    → do NOT remove them: each holds a pinned run, and the sweep puts it back under its run's name as soon as that name is free (move away whatever now holds the name, if it is not a run you want)",
-			`⚠ 4 deleted workspace(s) in /sbx are still on disk (.reap-1-1000-0, .reap-by-hand, .reap-7-2000-0, ...) -- the sweep could not remove them; if the worker is running it retries each pass`,
-			`    → the usual cause is files the worker's account cannot delete (root-owned files a job left in its clone); remove each as their owner: \`sudo rm -rf /sbx/.reap-1-1000-0\`, \`sudo rm -rf /sbx/.reap-by-hand\`, \`sudo rm -rf /sbx/.reap-7-2000-0\`, \`sudo rm -rf /sbx/.reap-1-${at + 60_000}-2\`. They are no longer re-openable either way`,
-			"",
-		].join("\n"),
-	);
-});
-
-test("a stuck tombstone reaches doctor's RENDERED output as a warning with its fix, retention on or off (#446)", async () => {
-	const sandboxDir = tempDir("pi-doctor-tomb-");
-	mkdirSync(join(sandboxDir, "gh-1"));
-	// pid 1 is always alive, so this is a delete that keeps failing rather than a crash leftover.
-	mkdirSync(join(sandboxDir, ".reap-1-1000-0"));
-	for (const env of [{}, { PI_SANDBOX_RETENTION_HOURS: "0" }]) {
-		const out = rendered(await collectChecks({ PI_PROVIDER: "google", PI_SANDBOX_DIR: sandboxDir, ...env }, collectSeams(green, { providerOracle: async () => null })));
-		assert.match(out, new RegExp(`⚠ 1 deleted workspace\\(s\\) in ${sandboxDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} are still on disk \\(\\.reap-1-1000-0\\)[^\\n]*\\n    → the usual cause`), JSON.stringify(env));
-		if (env.PI_SANDBOX_RETENTION_HOURS === "0") assert.match(out, /Workspace retention off/);
-		else assert.match(out, new RegExp(`1 retained workspace\\(s\\) in`), "the tombstone is not a workspace");
-	}
-});
 
 // -- issue #462: every advisory renders as what it means ---------------------------------------------------------
 // `render` reads `ok` first, so a check returned as `ok: true, warn: true` printed a green ✓ and dropped its fix. Each
@@ -11172,18 +9490,6 @@ test("replicas are a FACT LINE carrying the budget and concurrency arithmetic in
 	assert.equal(replicas.failed, false);
 });
 
-test("retained workspaces are a FACT LINE that says what each holds only when there is one (#462)", async () => {
-	const sandboxDir = tempDir("pi-doctor-kept-462-");
-	const zero = renderedOne(await collectChecks({ PI_PROVIDER: "google", PI_SANDBOX_DIR: sandboxDir }, collectSeams(green, { providerOracle: async () => null })), /retained workspace\(s\)/);
-	assert.equal(zero.text, `✓ 0 retained workspace(s) in ${sandboxDir}, swept after 24h, re-open one with \`pi-dispatch sandbox <jobId>\`\n`);
-	mkdirSync(join(sandboxDir, "gh-1"));
-	const one = renderedOne(await collectChecks({ PI_PROVIDER: "google", PI_SANDBOX_DIR: sandboxDir }, collectSeams(green, { providerOracle: async () => null })), /retained workspace\(s\)/);
-	assert.equal(
-		one.text,
-		`✓ 1 retained workspace(s) in ${sandboxDir}, swept after 24h, re-open one with \`pi-dispatch sandbox <jobId>\`; each holds the run's clone plus its prompt.md/event.json (issue text), and PI_SANDBOX_RETENTION_HOURS=0 turns retention off\n`,
-	);
-	assert.equal(one.failed, false);
-});
 
 test("a plain doctor on `local` reaching a rootless Podman 4.9 runs no canary while the keeper does not hold, through the API or podman-docker (#452 gate round 3, L205)", async () => {
 	// MEASURED (gate round 3, c9-doctor-*): the canary's teardown detached the running proxy and cut its route out, through
@@ -11303,25 +9609,6 @@ test("jobsDirChecks: an explicit PI_JOBS_DIR another account owns, one this acco
 	assert.deepEqual(jobsDirChecks(env, { uid: 501, fs: jobsFs({ "/srv/jobs": { uid: 501 } }) }), [{ ok: true, label: "Jobs dir /srv/jobs is this account's and writable" }], "the account root is not judged for a dir outside it");
 });
 
-test("jobsDirChecks: this account's retained workspaces left under the OLD shared default are a ⚠ naming them and the move; another account's are not counted (#464)", async () => {
-	const { jobsDirChecks } = await import("../src/doctor.mjs");
-	const files = { "/t": { uid: 0 }, "/t/pi-dispatch/jobs/sandboxes": { uid: 1270 }, "/t/pi-dispatch/jobs/sandboxes/gh-1": { uid: 501 }, "/t/pi-dispatch/jobs/sandboxes/gh-2": { uid: 501 }, "/t/pi-dispatch/jobs/sandboxes/gh-3": { uid: 1270 } };
-	const checks = jobsDirChecks(JOBS_ENV, { uid: 501, fs: jobsFs(files) });
-	assert.deepEqual(checks[1], {
-		ok: false,
-		warn: true,
-		label: "2 retained workspace(s) of this account are in /t/pi-dispatch/jobs/sandboxes, the shared default before issue #464: this version keeps them in /t/pi-dispatch-501/jobs/sandboxes, so `pi-dispatch sandbox` cannot re-open them and the retention sweep no longer removes them",
-		// Gate round 1: the root named in the mkdir, since `mkdir -m` sets only the directories it names (measured: the plain
-		// `mkdir -p` this said before left the root 755 or 775 until the worker's next boot).
-		fix: "move the ones worth keeping (the same filesystem, so a rename): mkdir -m 700 -p /t/pi-dispatch-501 /t/pi-dispatch-501/jobs/sandboxes && mv /t/pi-dispatch/jobs/sandboxes/<name> /t/pi-dispatch-501/jobs/sandboxes/, and delete the rest: rm -rf /t/pi-dispatch/jobs/sandboxes/<name>. Naming /t/pi-dispatch-501 makes it 0700 too (`mkdir -m` sets only the directories named, and a plain `mkdir -p` leaves /t/pi-dispatch-501 755); the worker also tightens it to 0700 at its next boot",
-	});
-	assert.equal(jobsDirChecks(JOBS_ENV, { uid: 1234, fs: jobsFs(files) }).length, 1, "none of them is this account's");
-	assert.equal(jobsDirChecks({ ...JOBS_ENV, PI_SANDBOX_DIR: "/s" }, { uid: 501, fs: jobsFs(files) }).length, 1, "an explicit PI_SANDBOX_DIR did not move");
-	const explicit = jobsDirChecks({ ...JOBS_ENV, PI_JOBS_DIR: "/t/pi-dispatch/jobs" }, { uid: 501, fs: jobsFs({ ...files, "/t/pi-dispatch/jobs": { uid: 501 } }) });
-	assert.ok(!explicit.some((c) => c.warn), "an explicit PI_JOBS_DIR did not move either");
-	// Its sandboxes/ is another account's here, which the worker refuses at boot (gate round 1): said as that, a ✗.
-	assert.match(explicit[1].label, /^the sandbox dir \/t\/pi-dispatch\/jobs\/sandboxes is owned by uid 1270, not by this account \(uid 501\)/);
-});
 
 test("doctor reads PI_JOBS_DIR as the service does, from the deployment .env, and a jobs dir another account owns fails doctor (#464)", async () => {
 	const cwd = tempDir("pi-jobs-464-cwd-");
@@ -11332,37 +9619,9 @@ test("doctor reads PI_JOBS_DIR as the service does, from the deployment .env, an
 	assert.ok(text().includes(`✗ the jobs dir /srv/pd-jobs is owned by op (uid 1270), not by this account (uid 501), which could replace a job's inputs; the worker refuses it at boot -- every job fails before it starts -- PI_JOBS_DIR read from ${join(cwd, ".env")}, as the service reads it; this shell does not set it\n    → point PI_JOBS_DIR at a directory this account owns, or chown /srv/pd-jobs to this account\n`), text());
 });
 
-// Gate round 1: an explicit PI_SANDBOX_DIR another account owns (seen: a 0777 directory of another account's) is the
-// directory that account can swap a retained workspace in; the worker refuses it at boot and doctor says so.
-test("jobsDirChecks: a sandbox dir another account owns is ✗ naming the owner and the fix; this account's, or one not made yet, says nothing (#464)", async () => {
-	const { jobsDirChecks } = await import("../src/doctor.mjs");
-	const env = { ...JOBS_ENV, PI_SANDBOX_DIR: "/tmp/shared-sb" };
-	const base = { "/t": { uid: 0 }, "/t/pi-dispatch-501": { uid: 501 }, "/t/pi-dispatch-501/jobs": { uid: 501 } };
-	const other = jobsDirChecks(env, { uid: 501, fs: jobsFs({ ...base, "/tmp/shared-sb": { uid: 1270 } }), ownerName: passwdNames, note: " -- PI_SANDBOX_DIR read from /d/.env" });
-	assert.deepEqual(other, [
-		{ ok: true, label: "Jobs dir /t/pi-dispatch-501/jobs is this account's and writable -- PI_SANDBOX_DIR read from /d/.env" },
-		{
-			ok: false,
-			label: "the sandbox dir /tmp/shared-sb is owned by op (uid 1270), not by this account (uid 501), which could swap a retained workspace for one of its own; the worker refuses it at boot -- every job fails before it starts -- PI_SANDBOX_DIR read from /d/.env",
-			fix: "point PI_SANDBOX_DIR at a directory this account owns (or remove the line for the default), or chown /tmp/shared-sb to this account",
-		},
-	]);
-	assert.equal(jobsDirChecks(env, { uid: 501, fs: jobsFs({ ...base, "/tmp/shared-sb": { uid: 501, dir: false } }) })[1].label.startsWith("the sandbox dir /tmp/shared-sb is not a directory"), true);
-	assert.equal(jobsDirChecks(env, { uid: 501, fs: jobsFs({ ...base, "/tmp/shared-sb": { uid: 501 } }) }).length, 1, "this account's: nothing more");
-	assert.equal(jobsDirChecks(env, { uid: 501, fs: jobsFs(base) }).length, 1, "not made yet: the retention step makes it 0700");
-});
-
-test("doctor judges the sandbox dir and the jobs root the SERVICE uses (PI_SANDBOX_DIR and TMPDIR from .env), and prints no retained ✓ after a ✗ on them (#464)", async () => {
-	// The retained count reads the .env's PI_SANDBOX_DIR (gate round 1: it counted the default instead).
-	const cwd = tempDir("pi-464-sbenv-cwd-");
-	const sandboxDir = tempDir("pi-464-sbenv-");
-	mkdirSync(join(sandboxDir, "gh-1"));
-	writeFileSync(join(cwd, ".env"), `PI_SANDBOX_DIR=${sandboxDir}\n`);
-	const kept = capture();
-	await runDoctor(ghEnv(), ghDeps(kept.out, green, [], { cwd }));
-	assert.match(kept.text(), new RegExp(`✓ 1 retained workspace\\(s\\) in ${sandboxDir.replaceAll(".", "\\.")}, swept after 24h`));
+test("doctor judges the jobs root the SERVICE uses (TMPDIR from .env), and a squat there is the worker's own ✗ (#464)", async () => {
 	// TMPDIR in .env (the documented way out of a squatted default root) moves the root doctor judges, as it moves the
-	// service's; a squat there is ✗, and then no ✓ counts what sits in the squatted directory.
+	// service's; a squat there is ✗. The retained-workspace count this once sat beside went with the sandbox dir.
 	const uid = process.geteuid();
 	const squatCwd = tempDir("pi-464-tmpenv-cwd-");
 	writeFileSync(join(squatCwd, ".env"), "TMPDIR=/t\n");
@@ -11371,13 +9630,12 @@ test("doctor judges the sandbox dir and the jobs root the SERVICE uses (PI_SANDB
 	const code = await runDoctor(shell, ghDeps(squat.out, green, [], { cwd: squatCwd, jobsDirUid: uid, jobsDirFs: jobsFs({ "/t": { uid: 0 }, [`/t/pi-dispatch-${uid}`]: { uid: 1270 } }), passwd: () => "op:x:1270:1270::/home/op:/bin/bash\n" }));
 	assert.equal(code, 1, squat.text());
 	assert.ok(squat.text().includes(`✗ /t/pi-dispatch-${uid}, where this account's jobs dir lives, is owned by op (uid 1270), not by this account (uid ${uid}); the worker refuses it at boot -- every job fails before it starts -- TMPDIR read from ${join(squatCwd, ".env")}, as the service reads it; this shell does not set it\n`), squat.text());
-	assert.doesNotMatch(squat.text(), /retained workspace\(s\) in/, "no ✓ over a directory another account made");
 });
 
 // Gate round 1 (D7): doctor said ✓ Valkey reachable on another account's Valkey, and the worker drained its queue. The
 // owner is judged by the SAME function `service install` and `up` use.
-test("doctor on podman: a VALKEY_URL whose listener is not this account's is ✗ by the worker's own rule, with no PING and no fleet read; this account's is ✓ and talked to at the pinned address; docker's is not judged (#464)", async () => {
-	const { judgeValkeyListeners } = await import("../src/podman-stack.mjs");
+test("doctor: a VALKEY_URL whose listener is not this account's is ✗ by the worker's own rule, with no PING and no fleet read; this account's is ✓ and talked to at the pinned address (#464)", async () => {
+	const { judgeValkeyListeners } = await import("../src/stack.mjs");
 	const TCP_HEAD = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
 	const hostAt = (uid) => ({
 		"/proc/net/tcp": `${TCP_HEAD}   3: 0100007F:18EB 00000000:0000 0A 00000000:00000000 00:00000000 00000000  ${uid}        0 1 1 0 100 0 0 10 0\n`,
@@ -11425,26 +9683,15 @@ test("doctor on podman: a VALKEY_URL whose listener is not this account's is ✗
 		assert.match(shell.text(), /⚠ PI_VALKEY_SHARED is "1" in this shell: ignored, since only [^\n]*\.env may say a Valkey is shared on purpose/);
 		assert.doesNotMatch(shell.text(), /shared on purpose as PI_VALKEY_SHARED=1/);
 	}
-	// Gate round 3's simpler rule: judged on every venue. Where `local` is blessed, root's listener (docker-proxy) is
-	// docker's Valkey and taken; another account's is refused there too (item 7).
+	// Gate round 3's simpler rule: judged on every venue. Root's listener (docker-proxy) is docker's Valkey
+	// and taken; another account's is refused too (item 7). The podman venue's root refusal and the openshell
+	// engine's exception went with those venues.
 	asked.length = 0;
 	const docker = capture();
 	await runDoctor(podmanEnv({ PI_BACKENDS: "local,podman" }), podmanDeps(docker.out, { ...green, ...podmanPlan() }, [], { userName: () => "op", valkeyOwner: owner(0) }));
 	assert.equal(asked[0].rootOk, true, "root is not refused where local is blessed");
 	assert.match(docker.text(), /✓ Valkey \(redis:\/\/127\.0\.0\.1:6379\) answers from a listener of root/);
 	assert.doesNotMatch(docker.text(), /is not this account's/);
-	const podmanRoot = capture();
-	asked.length = 0;
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(podmanRoot.out, podmanPlan(), [], { userName: () => "op", valkeyOwner: owner(0) })), 1);
-	assert.equal(asked[0].rootOk, false, "root refused on the podman venue alone");
-	// Issue #707 (review round 1 of #715): an openshell venue on Podman is the queue's engine, so root's is refused there
-	// as `up` and the worker refuse it; on the docker engine docker-proxy's root is the queue.
-	for (const [engine, rootOk] of [["podman", false], ["docker", true]]) {
-		asked.length = 0;
-		await runDoctor(podmanEnv({ PI_BACKENDS: "openshell", PI_OPENSHELL_ENGINE: engine }), podmanDeps(capture().out, { ...green, ...podmanPlan() }, [], { userName: () => "op", valkeyOwner: owner(0), openshellRun: async () => ({ code: null, stdout: "", stderr: "" }) }));
-		assert.equal(asked[0].rootOk, rootOk, `openshell on ${engine}`);
-	}
-	assert.match(podmanRoot.text(), /✗ Valkey \(redis:\/\/127\.0\.0\.1:6379\) is not this account's: 127\.0\.0\.1:6379 is held by root/);
 	const dockerForeign = capture();
 	talked.length = 0;
 	assert.equal(await runDoctor(podmanEnv({ PI_BACKENDS: "local,podman" }), podmanDeps(dockerForeign.out, { ...green, ...podmanPlan() }, [], { userName: () => "op", valkeyOwner: owner(1235), ...talk })), 1);
@@ -11474,14 +9721,15 @@ test("doctor names a hazard in the service .env and reads none of the service's 
 // Gate round 2: another account publishing ::1 beside this account's 127.0.0.1 (the localhost squat after install) is a
 // ⚠, since the worker pins 127.0.0.1 and never dials ::1; refusing would let any account stop another's worker.
 test("doctor names another account's listener on another address of the name as a ⚠, while ✓ on the address the worker pins (#464)", async () => {
-	const { judgeValkeyListeners } = await import("../src/podman-stack.mjs");
+	const { judgeValkeyListeners } = await import("../src/stack.mjs");
 	const TCP_HEAD = "  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n";
 	const files = {
 		"/proc/net/tcp": `${TCP_HEAD}   3: 0100007F:4063 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1234        0 1 1 0 100 0 0 10 0\n`,
 		"/proc/net/tcp6": `${TCP_HEAD}   1: 00000000000000000000000001000000:4063 00000000000000000000000000000000:0000 0A 00000000:00000000 00:00000000 00000000  1235        0 1 1 0 100 0 0 10 0\n`,
 	};
+	// The rule is venue-independent since the podman venue went: judged here on the plain docker venue.
 	const { out, text } = capture();
-	const code = await runDoctor(podmanEnv({ VALKEY_URL: "redis://localhost:16483" }), podmanDeps(out, podmanPlan(), [], { userName: () => "op", valkeyOwner: async (url, opts) => judgeValkeyListeners({ url, probeTcp: async () => true, lookup: async () => [{ address: "::1", family: 6 }, { address: "127.0.0.1", family: 4 }], fs: { readFileSync: (p) => files[p] ?? "" }, euid: 1234, ownerName: (u) => ({ 1235: "op2" })[u] ?? null, ...opts }) }));
+	const code = await runDoctor(ghEnv({ VALKEY_URL: "redis://localhost:16483" }), ghDeps(out, green, [], { userName: () => "op", valkeyOwner: async (url, opts) => judgeValkeyListeners({ url, probeTcp: async () => true, lookup: async () => [{ address: "::1", family: 6 }, { address: "127.0.0.1", family: 4 }], fs: { readFileSync: (p) => files[p] ?? "" }, euid: 1234, ownerName: (u) => ({ 1235: "op2" })[u] ?? null, ...opts }) }));
 	assert.match(text(), /✓ Valkey \(redis:\/\/localhost:16483\) answers from a listener of this account; the worker connects to 127\.0\.0\.1 only\n/);
 	assert.match(text(), /⚠ another account also listens on an address VALKEY_URL's host resolves to: \[::1\]:16483 \(held by op2 \(uid 1235\)\)\. The worker connects only to the address judged this account's/);
 	assert.equal(code, 0, text());
@@ -11551,35 +9799,6 @@ test("doctor reads PI_WORKER_NAME from .env as the service does: no routing warn
 	assert.match(shell.text(), /✓ Fleet: 2 workers \(mini2, mini3\)/);
 });
 
-// Issue #464: Podman after linger was switched off, measured on Fedora 44 (5.8.1) and Ubuntu 24.04 (4.9.3).
-test("podmanRunDirGone: an exit-status read with /run/user/<uid> absent and Podman's database recording a run root there, and nothing else (#464)", async () => {
-	const { podmanRunDirGone } = await import("../src/doctor.mjs");
-	const enoent = () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); };
-	// Podman's database as bytes around the measured string (a Lima account's db.sql held `/run/user/501/containers`).
-	const db = (uid) => Buffer.concat([Buffer.from([0x53, 0x51, 0x4c, 0, 0xff]), Buffer.from(`/run/user/${uid}/containers`), Buffer.from([0, 1])]);
-	const withDb = (files) => ({ statSync: enoent, readFileSync: (p) => files[p] ?? enoent() });
-	const gone = withDb({ "/home/op/.local/share/containers/storage/db.sql": db(1240) });
-	const there = { ...gone, statSync: () => ({}) };
-	const denied = { ...gone, statSync: () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); } };
-	const read = (reason) => ({ answered: false, reason, transient: true });
-	const home = "/home/op";
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: gone, home }), "/run/user/1240");
-	assert.equal(podmanRunDirGone({ read: read("exit-1"), euid: 1240, fs: gone, home }), "/run/user/1240", "5.8.1 with XDG_RUNTIME_DIR set exits 1");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: withDb({ "/home/op/.local/share/containers/storage/libpod/bolt_state.db": db(1240) }), home }), "/run/user/1240", "an older BoltDB store");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: withDb({ "/x/containers/storage/db.sql": db(1240) }), home, env: { XDG_DATA_HOME: "/x" } }), "/run/user/1240", "XDG_DATA_HOME moves it");
-	// Gate round 1: no evidence that Podman ever ran under /run/user (an account that never had a session), so nothing
-	// is claimed about linger; the generic line says what failed.
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: withDb({}), home }), null, "no database");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: withDb({ "/home/op/.local/share/containers/storage/db.sql": Buffer.from("/tmp/podman-run-1240/containers") }), home }), null, "a database whose run root is elsewhere");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: withDb({ "/home/op/.local/share/containers/storage/db.sql": db(12400) }), home }), null, "another uid's /run/user is not this one's");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: gone, home: null }), null, "no home, no storage root to look in");
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: there, home }), null);
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 1240, fs: denied, home }), null, "only ENOENT counts");
-	for (const reason of ["timeout", "signal-sigkill", "spawn-failed", "podman-not-found"]) assert.equal(podmanRunDirGone({ read: read(reason), euid: 1240, fs: gone, home }), null, reason);
-	assert.equal(podmanRunDirGone({ read: { answered: true, info: {} }, euid: 1240, fs: gone, home }), null);
-	assert.equal(podmanRunDirGone({ read: read("exit-125"), euid: 0, fs: gone, home }), null, "root has no /run/user run root here");
-});
-
 test("readLingerOrFlag: loginctl's answer, else logind's flag file, as Ubuntu 24.04's loginctl fails for a non-lingering account (#464)", async () => {
 	const { readLingerOrFlag } = await import("../src/doctor.mjs");
 	const flags = (present) => ({ statSync: (p) => { if (present.includes(p)) return {}; throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); } });
@@ -11588,30 +9807,6 @@ test("readLingerOrFlag: loginctl's answer, else logind's flag file, as Ubuntu 24
 	assert.equal(await readLingerOrFlag("op", { spawn: failing, fs: flags(["/var/lib/systemd/linger"]) }), false);
 	assert.equal(await readLingerOrFlag("op", { spawn: failing, fs: flags(["/var/lib/systemd/linger", "/var/lib/systemd/linger/op"]) }), true);
 	assert.equal(await readLingerOrFlag("op", { spawn: failing, fs: flags([]) }), null, "no logind flag directory: unknown");
-});
-
-test("doctor names Podman's missing run directory after linger went off, with the measured fix, in place of the undecided line (#464)", async () => {
-	const DB = `${PODMAN_HOME}/.local/share/containers/storage/db.sql`;
-	const runDirGone = { ...podmanFs, statSync: (p) => (p === "/run/user/1234" ? (() => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); })() : podmanFs.statSync(p)), readFileSync: (p) => (p === DB ? Buffer.from("\0/run/user/1234/containers\0") : podmanFs.readFileSync(p)) };
-	for (const [linger, said] of [["no", ", because linger is off for op"], [null, " (linger could not be read)"]]) {
-		const { out, text } = capture();
-		const plan = { ...podmanPlan(), "podman info": { code: 125, output: "" }, ...(linger ? { "loginctl show-user op -p Linger": { code: 0, output: `Linger=${linger}\n` } } : { "loginctl show-user": { code: 1, output: "" } }) };
-		const code = await runDoctor(podmanEnv(), podmanDeps(out, plan, [], { userName: () => "op", observationFs: runDirGone }));
-		assert.equal(code, 1, text());
-		assert.ok(text().includes(`✗ podman: every podman command fails as this account (exit-125): its run directory /run/user/1234 does not exist${said}. Podman keeps the run root it first used, under that directory, and cannot start a container or answer \`podman info\` without it -- no podman job can run\n    → sudo loginctl enable-linger op -- it starts the account's user manager, which recreates /run/user/1234, and keeps it with no one logged in (measured, Podman 5.8.1 and 4.9.3). \`podman system migrate\` does not get past this (measured: it fails the same way), and a login session of the account (ssh, \`machinectl shell op@\`) recreates the directory only while that session lasts. Then re-run doctor\n`), text());
-		assert.doesNotMatch(text(), /which uid a job runs as could not be decided/);
-	}
-	// With the directory there, an exit status is still the undecided line it always was.
-	const { out, text } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, { ...podmanPlan(), "podman info": { code: 125, output: "" } }, [], { userName: () => "op", observationFs: { ...podmanFs, statSync: (p) => (p === "/run/user/1234" ? {} : podmanFs.statSync(p)) } }));
-	assert.match(text(), /⚠ podman: which uid a job runs as could not be decided \(exit-125\)/);
-	assert.doesNotMatch(text(), /its run directory/);
-	// Gate round 1: the directory gone but no database of Podman's recording it (an account that never had a session):
-	// the undecided line, never "linger is off".
-	const fresh = capture();
-	await runDoctor(podmanEnv(), podmanDeps(fresh.out, { ...podmanPlan(), "podman info": { code: 125, output: "" } }, [], { userName: () => "op", observationFs: { ...runDirGone, readFileSync: podmanFs.readFileSync } }));
-	assert.match(fresh.text(), /⚠ podman: which uid a job runs as could not be decided \(exit-125\)/);
-	assert.doesNotMatch(fresh.text(), /its run directory|linger/);
 });
 
 test("doctor with no home: the durable stores' per-account root owned by another account is ✗, said once beside the jobs dir line (#464)", async () => {
@@ -11653,79 +9848,11 @@ const rootfulDoctor = async (env, { fs, readPodmanService = IDLE_UNIT, body = PO
 	return text();
 };
 
-test("doctor: a rootful Podman containers.conf key that reaches a local job is ✗ where it stops a boot, ⚠ where it refuses each job (#448)", async () => {
-	for (const key of ["annotations", "env", "helper_binaries_dir"]) {
-		const fs = rootfulHostFs({ "/etc/containers/containers.conf": `${key} = []\n` });
-		const boot = await rootfulDoctor({}, { fs });
-		assert.match(boot, new RegExp(`✗ local: no job can run on this venue \\(podman-conf-widens-job\\): /etc/containers/containers\\.conf sets ${key}, which [^\\n]* -- a worker running as this account refuses to boot\\n {4}→ remove that key from that file, then sudo systemctl restart podman\\.service`), key);
-		assert.doesNotMatch(boot, /✓ local: no containers\.conf rootful Podman's service reads here/);
-	}
-	const perJob = await rootfulDoctor({ PI_BACKENDS: "podman,local" }, { fs: rootfulHostFs({ "/etc/containers/containers.conf": "env = []\n" }) });
-	assert.match(perJob, /⚠ local: no job can run on this venue \(podman-conf-widens-job\): \/etc\/containers\/containers\.conf sets env, which [^\n]* -- every local job is refused/);
-	// Measured inert on this route: no line refuses them, and the clean line is said.
-	for (const key of ["pasta_options", "network_cmd_options", "network_cmd_path"]) {
-		const clean = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/containers.conf": `${key} = []\n` }) });
-		assert.match(clean, /✓ local: no containers\.conf rootful Podman's service reads here sets any of the 24 keys the local venue refuses \(docs\/podman\.md\), and none of them changed since podman\.service started \(a file deleted while it runs is not seen here: only a running worker remembers what it saw\)/, key);
-		assert.doesNotMatch(clean, /podman-conf-widens-job/, key);
-	}
-});
-
-test("doctor: a running podman.service older than its containers.conf is ⚠, the worker's retry, with the restart; so is a moment's failure (#448)", async () => {
-	const running = async () => UNIT_OF({ running: true, startedAtMs: 5_000 });
-	const stale = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/containers.conf": "[containers]\n" }, { "/etc/containers/containers.conf": 6_000 }), readPodmanService: running });
-	// Gate round 1 of PR #473: it heals by itself, so the worker retries (boot exit 1): ⚠, never ✗.
-	assert.match(stale, /⚠ local: every local job is held, not refused, until rootful Podman's service restarts: \/etc\/containers\/containers\.conf changed after the running podman\.service started[^\n]*\n {4}→ sudo systemctl restart podman\.service while no local job runs/);
-	assert.doesNotMatch(stale, /✗ local: no job can run/);
-	const fresh = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/containers.conf": "[containers]\n" }, { "/etc/containers/containers.conf": 4_000 }), readPodmanService: running });
-	assert.match(fresh, /✓ local: no containers\.conf rootful Podman's service reads here/);
-	const busy = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/containers.conf": { error: "EMFILE" } }) });
-	assert.match(busy, /⚠ local: whether rootful Podman's containers\.conf widens a job could not be read just now: \/etc\/containers\/containers\.conf could not be read \(EMFILE\)/);
-});
-
-test("doctor: what this shell cannot read of rootful Podman's chain is its own ⚠, naming each path, never a refusal (#448)", async () => {
-	const text = await rootfulDoctor({}, { fs: rootfulHostFs({ "/root/.config/containers/containers.conf": { error: "EACCES" }, "/root/.config/containers/containers.conf.d": { error: "EACCES" } }) });
-	assert.match(text, /⚠ local: part of rootful Podman's configuration is not judged here: \/root\/\.config\/containers\/containers\.conf \(EACCES\), \/root\/\.config\/containers\/containers\.conf\.d \(EACCES\)\n {4}→ rootful Podman's service may also read /);
-	assert.match(text, /✓ local: no containers\.conf rootful Podman's service reads here sets any of the 24 keys the local venue refuses \(docs\/podman\.md\), among those this account can read, and none of them changed since podman\.service started \(a file deleted while it runs is not seen here: only a running worker remembers what it saw\)\n/, "the readable chain is still judged, and clean, and the line says only that");
-	assert.doesNotMatch(text, /podman-conf-widens-job/);
-	const noSystemd = await rootfulDoctor({}, { fs: rootfulHostFs(), readPodmanService: async () => ({ read: false, reason: "systemctl-not-found" }) });
-	assert.match(noSystemd, /⚠ local: part of rootful Podman's configuration is not judged here: podman\.service \(systemctl-not-found\)/);
-	assert.match(noSystemd, /✓ local: no containers\.conf rootful Podman's service reads here sets any of the 24 keys the local venue refuses \(docs\/podman\.md\)\n/, "nothing said of a service that was not read");
-});
-
 test("doctor: Docker reads no rootful file and never asks systemctl, and says nothing new (#448)", async () => {
 	let asked = 0;
 	const text = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/containers.conf": "env = []\n" }), body: ROOTFUL_INFO, readPodmanService: async () => (asked++, IDLE_UNIT()) });
 	assert.equal(asked, 0);
 	assert.doesNotMatch(text, /rootful Podman|podman-conf-widens-job/);
-});
-
-test("doctor --live runs no local probe where a local job is refused on rootful Podman's containers.conf (#448)", async () => {
-	const { out, text } = capture();
-	const facts = {};
-	await collectChecks(ghEnv(), { ...collectSeams({ ...infoPlan(PODMAN_COMPAT_INFO), ...green }, { home: "/nowhere", platform: "linux", jobUserIdentity: LINUX_ID(1234), stat: socketStat, observationFs: rootfulHostFs({ "/etc/containers/containers.conf": "env = []\n" }), readPodmanService: IDLE_UNIT, facts }), out });
-	assert.deepEqual(facts.jobUser, { run: false, reason: "a local job is refused here (podman-conf-widens-job), so a probe would read back a container no job gets" });
-	void text;
-});
-
-test("doctor: the backend section's mountSet judges the same podman.service answer, so a stale service withholds it (#448)", async () => {
-	let asked = 0;
-	const running = async () => (asked++, UNIT_OF({ running: true, startedAtMs: 5_000 }));
-	const text = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/mounts.conf": "", "/etc/containers/containers.conf": "[containers]\n" }, { "/etc/containers/containers.conf": 6_000 }), readPodmanService: running });
-	assert.equal(asked, 1, "one read, for both lines");
-	assert.match(text, /local: mountSet is ASSERTED[^\n]*\/etc\/containers\/containers\.conf changed after the running podman\.service started, and a running Podman service keeps the containers\.conf it started with, so what it mounts/);
-	const fresh = await rootfulDoctor({}, { fs: rootfulHostFs({ "/etc/containers/mounts.conf": "", "/etc/containers/containers.conf": "[containers]\n" }), readPodmanService: running });
-	assert.doesNotMatch(fresh, /local: mountSet is ASSERTED/);
-});
-
-test("doctor: an unreadable drop-in in /etc is ✗, not a residual; another rootful service's socket is named, not trusted (#448)", async () => {
-	// Gate round 1 of PR #473 (raw 70): a 0600 root drop-in the service applied while doctor said ✓.
-	const hidden = { ...rootfulHostFs({ "/etc/containers/containers.conf.d/zz.conf": { error: "EACCES" } }), readdirSync: (p) => (p === "/etc/containers/containers.conf.d" ? ["zz.conf"] : (() => { throw Object.assign(new Error(p), { code: "ENOENT" }); })()) };
-	const text = await rootfulDoctor({}, { fs: hidden });
-	assert.match(text, /✗ local: no job can run on this venue \(podman-conf-widens-job\): \/etc\/containers\/containers\.conf\.d\/zz\.conf could not be read \(EACCES\)[^\n]*\n {4}→ make that file readable by the worker's account/);
-	assert.doesNotMatch(text, /✓ local: no containers\.conf rootful Podman's service reads here/);
-	// A socket podman.socket does not listen on (raw 72): podman.service's environment is not that service's.
-	const other = await rootfulDoctor({}, { fs: rootfulHostFs(), readPodmanService: async () => UNIT_OF({ listen: ["/run/podman/podman.sock"] }) });
-	assert.match(other, /⚠ local: part of rootful Podman's configuration is not judged here: podman\.service \(the worker's socket \/Users\/x\/\.docker\/run\/docker\.sock is not the one podman\.socket listens on \(\/run\/podman\/podman\.sock\)/);
 });
 
 // ---- issue #471, follow-up: the five items the first pass named ----
@@ -11771,27 +9898,6 @@ test("the overlay comparison reads THIS shell's pi setup, the one import-pi stag
 	const { agentDirFrom } = await import("../src/host-pi.mjs");
 	assert.deepEqual(seen, [agentDirFrom(overlayEnv(dir))], "this shell's (here the default), not /from/env/agent");
 });
-
-
-test("a .env CONTAINERS_CONF is judged in-process by the conf-chain check and never handed to doctor's podman (#471)", async () => {
-	// Gate round 1 (c6): a CONTAINERS_CONF naming a containers.conf with conmon_path made doctor's own `podman info` run it.
-	// Since PR #474's round cap no `.env` value reaches a spawn at all; the chain check reads it, in-process, as the worker.
-	const cwd = scaffoldedCwd();
-	writeFileSync(join(cwd, ".env"), "CONTAINERS_CONF=/srv/deploy/containers.conf\n");
-	const calls = [];
-	const { out, text } = capture();
-	await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), calls, { cwd, readEnvFile: (path) => readFileSync(path) }));
-	assert.ok(calls.some((c) => c.cmd === "podman"));
-	assert.ok(!calls.some((c) => c.opts?.env?.CONTAINERS_CONF), "no spawn is handed the refused chain");
-	assert.match(text(), /CONTAINERS_CONF is set, so which containers\.conf Podman reads is not the list this check reads/, "the conf-chain check judges the service's chain");
-	assert.ok(text().includes(`⚠ CONTAINERS_CONF is set in ${join(cwd, ".env")} (/srv/deploy/containers.conf), and doctor hands nothing from that file to a program it starts, so its podman probes ran without it and describe this shell's view, not the service's; the containers.conf check below read it as the worker does`), text());
-	assert.match(text(), /✗ podman: no job can run on this venue \(podman-conf-widens-job\): CONTAINERS_CONF is set/, "the refused chain, judged in-process from .env, is still a ✗");
-	// Set differently in this shell: a disagreement like any other key.
-	const two = capture();
-	await runDoctor(podmanEnv({ CONTAINERS_CONF: "/home/me/c.conf" }), podmanDeps(two.out, podmanPlan(), [], { cwd, readEnvFile: (path) => readFileSync(path) }));
-	assert.ok(two.text().includes(`CONTAINERS_CONF is "/home/me/c.conf" in this shell and "/srv/deploy/containers.conf" in ${join(cwd, ".env")}`), two.text());
-});
-
 
 
 test("from a .env another account can write, or its group can, doctor takes no value at all and says so (#471)", async () => {
@@ -11969,37 +10075,31 @@ test("a shell GITHUB_PAT_VAR naming a venue key only .env sets hands the probe n
 	assert.equal(own.calls.find((c) => c.args[0] === "run" && c.args.includes("gh"))?.stdin, "shell-token\n");
 });
 
-test("cliNotHandedLines: one ⚠ per CLI variable the file sets, the value only for a path, and the chain check named for its three (#471 round cap)", () => {
-	const service = { fromFile: { CONTAINER_HOST: "ssh://u:p@h/s", DOCKER_CONFIG: "/srv/d\u001b[2J", GH_TOKEN: "ghp_x", PI_LOGS_DIR: "/srv/logs" } };
+test("cliNotHandedLines: one ⚠ per CLI variable the file sets, the value only for a path (#471 round cap)", () => {
+	// The podman and openshell CLI groups went with those venues: what remains is docker's and gh's keys.
+	const service = { fromFile: { DOCKER_HOST: "tcp://u:p@h/s", DOCKER_CONFIG: "/srv/d\u001b[2J", GH_TOKEN: "ghp_x", PI_LOGS_DIR: "/srv/logs" } };
 	const lines = cliNotHandedLines(service, "/d/.env");
-	assert.deepEqual(lines.map((l) => l.label.split(" ")[0]), ["CONTAINER_HOST", "DOCKER_CONFIG", "GH_TOKEN"], "the CLI variables alone");
+	assert.deepEqual(lines.map((l) => l.label.split(" ")[0]), ["DOCKER_HOST", "DOCKER_CONFIG", "GH_TOKEN"], "the CLI variables alone");
 	assert.ok(lines.every((l) => l.ok === false && l.warn === true), "warnings, never a failure: the service's own settings are not a fault");
-	assert.equal(lines[0].label, "CONTAINER_HOST is set in /d/.env, and doctor hands nothing from that file to a program it starts, so its podman probes ran without it and describe this shell's view, not the service's");
+	assert.equal(lines[0].label, "DOCKER_HOST is set in /d/.env, and doctor hands nothing from that file to a program it starts, so its docker probes ran without it and describe this shell's view, not the service's");
 	assert.ok(lines[1].label.startsWith('DOCKER_CONFIG is set in /d/.env ("/srv/d\\u001b[2J"), and'), "a path shown, escaped");
 	assert.doesNotMatch(lines.map((l) => l.label).join("\n"), /u:p|ghp_x/);
-	const chain = cliNotHandedLines({ fromFile: { XDG_CONFIG_HOME: "/x" } }, "/d/.env")[0].label;
-	assert.match(chain, /its podman and gh probes ran without it[^\n]*; the containers.conf check below read it as the worker does$/);
-	assert.match(lines[0].fix, /^the service's own podman uses it: check what CONTAINER_HOST names and who can change it, then/, "never plain advice to export a value nobody checked");
+	assert.match(lines[0].fix, /^the service's own docker uses it: check what DOCKER_HOST names and who can change it, then/, "never plain advice to export a value nobody checked");
 	const home = cliNotHandedLines({ fromFile: { HOME: "/h" } }, "/d/.env")[0];
-	assert.match(home.label, /so its podman, docker and gh probes ran without it/);
-	assert.match(home.fix, /^the service's own podman, docker and gh use it: /, "the verb agrees with the count (D2)");
-	// Issue #707 (review round 1 of #715): the openshell CLI joins the list only where an openshell venue is blessed.
-	assert.match(cliNotHandedLines({ fromFile: { HOME: "/h" } }, "/d/.env", { openshellUsed: true })[0].label, /so its podman, docker, gh and openshell probes ran without it/);
+	assert.match(home.label, /so its docker and gh probes ran without it/);
+	assert.match(home.fix, /^the service's own docker and gh use it: /, "the verb agrees with the count (D2)");
 });
 
 test("this account's own unix socket in .env is no failure: named as not handed on, nothing more (#471 round cap)", async () => {
 	const cwd = scaffoldedCwd();
-	const run = tempDir("pi-471-r3-sock-");
-	writeFileSync(join(run, "podman.sock"), "");
-	chmodSync(join(run, "podman.sock"), 0o660);
-	writeFileSync(join(cwd, ".env"), `CONTAINER_HOST=unix://${run}/podman.sock\nDOCKER_HOST=unix:///var/run/docker.sock\n`);
+	// CONTAINER_HOST went with the podman venue; docker's socket line carries the same case alone now.
+	writeFileSync(join(cwd, ".env"), "DOCKER_HOST=unix:///var/run/docker.sock\n");
 	const calls = [];
 	const r = capture();
-	await runDoctor(podmanEnv({ PI_BACKENDS: "local,podman" }), podmanDeps(r.out, { ...podmanPlan(), ...green }, calls, { cwd }));
-	assert.doesNotMatch(r.text(), /^✗ (CONTAINER_HOST|DOCKER_HOST)/m);
-	assert.match(r.text(), /^⚠ CONTAINER_HOST is set in /m);
+	await runDoctor(ghEnv(), ghDeps(r.out, green, calls, { cwd }));
+	assert.doesNotMatch(r.text(), /^✗ DOCKER_HOST/m);
 	assert.match(r.text(), /^⚠ DOCKER_HOST is set in /m);
-	assert.ok(!calls.some((c) => c.opts?.env?.CONTAINER_HOST || c.opts?.env?.DOCKER_HOST));
+	assert.ok(!calls.some((c) => c.opts?.env?.DOCKER_HOST));
 });
 
 // PR #475's review, round 3: PI_VALKEY_PORT is where compose publishes its Valkey; one that disagrees with VALKEY_URL's
@@ -12070,9 +10170,9 @@ test("doctor (#468): a loopback Valkey that answers a client sending NO password
 	const remote = await doctorAuth({ auth: "ok", open: "ok", env: { VALKEY_URL: "redis://queue.lan:6379" } });
 	assert.doesNotMatch(remote.text, /has no password|answers a client that sends no password/);
 	assert.equal(remote.asked.length, 1, "no second probe for a remote Valkey");
-	// The upgrade step names the command that restarts THIS venue's Valkey.
-	assert.match(valkeyPasswordUpgradeStep({ localUsed: false, podmanUsed: true }), /^run `pi-dispatch service install --force` as this account: it writes a VALKEY_PASSWORD into \.env, restarts the Quadlet Valkey with it \(the queue in its volume is kept\) and then the worker and the receiver$/);
-	assert.match(valkeyPasswordUpgradeStep({ localUsed: true, podmanUsed: false }), /docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d/);
+	// The upgrade step is one string since the podman venue went: `up` writes the password and restarts the
+	// compose Valkey; the Quadlet branch (and the venue argument) went with it.
+	assert.match(valkeyPasswordUpgradeStep(), /^run `pi-dispatch up`: it writes a VALKEY_PASSWORD into \.env and restarts pi-dispatch-valkey with it \(its volume, and the queue, is kept\); a compose-started Valkey is recreated with `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`\. Then restart the worker and the receiver so they send it$/);
 });
 
 test("doctor (#468): a .env holding VALKEY_PASSWORD that others can read is a warning, and a value Valkey could not take is a ✗", async () => {
@@ -12112,22 +10212,23 @@ test("doctor (#468 over #471): the AUTH check's context carries the resolved pas
 
 test("doctor reads the documented unquoted PI_BACKEND_FLOOR from .env and judges it (#477)", async () => {
 	// Round-446 final verification (pd-fedora, raw/52): `PI_BACKEND_FLOOR=isolation=enforced` in .env, the form
-	// docs/podman.md shows, drew a false ✗ ("in a form the service's loader may read differently") and then "✓
-	// PI_BACKEND_FLOOR is not set", so the floor the service refuses to boot on was never judged.
+	// docs used to show for podman, drew a false ✗ ("in a form the service's loader may read differently") and then "✓
+	// PI_BACKEND_FLOOR is not set", so the floor the service refuses to boot on was never judged. Judged here on the
+	// local venue now, where the word is earned only by a daemon observed applying the bounds.
 	const cwd = scaffoldedCwd();
 	writeFileSync(join(cwd, ".env"), "PI_BACKEND_FLOOR=isolation=enforced\n");
 	const { out, text } = capture();
-	const code = await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { cwd, platform: "linux", observationFs: podmanFsWith(null) }));
+	const code = await runDoctor(ghEnv(), ghDeps(out, {}, [], { cwd, platform: "linux" }));
 	assert.equal(code, 1, text());
 	assert.doesNotMatch(text(), /assigns PI_BACKEND_FLOOR/);
 	assert.doesNotMatch(text(), /PI_BACKEND_FLOOR is not set/);
 	assert.match(text(), /✓ service settings read from [^\n]*\.env, as the service reads them \(this shell does not set them\): [^\n]*PI_BACKEND_FLOOR/);
-	assert.match(text(), /✗ PI_BACKEND_FLOOR asks for isolation=enforced \(podman provides it only while/);
+	assert.match(text(), /✗ PI_BACKEND_FLOOR asks for isolation=enforced \(local provides it only while/);
 	// Quoted, the same value reads the same.
 	writeFileSync(join(cwd, ".env"), "PI_BACKEND_FLOOR='isolation=enforced'\n");
 	const quoted = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(quoted.out, podmanPlan(), [], { cwd, platform: "linux", observationFs: podmanFsWith(null) })), 1);
-	assert.match(quoted.text(), /✗ PI_BACKEND_FLOOR asks for isolation=enforced \(podman provides it only while/);
+	assert.equal(await runDoctor(ghEnv(), ghDeps(quoted.out, {}, [], { cwd, platform: "linux" })), 1);
+	assert.match(quoted.text(), /✗ PI_BACKEND_FLOOR asks for isolation=enforced \(local provides it only while/);
 });
 
 test("doctor's ready line names a worker that reads the .env it judged, and keeps `pi-dispatch worker` where it judged none (#477)", async () => {
@@ -12137,7 +10238,7 @@ test("doctor's ready line names a worker that reads the .env it judged, and keep
 	const envPath = join(cwd, ".env");
 	writeFileSync(envPath, "PI_JOB_IMAGE=pi-job:latest\n");
 	const { out, text } = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(out, podmanPlan(), [], { cwd, platform: "linux" })), 0, text());
+	assert.equal(await runDoctor(ghEnv(), ghDeps(out, green, [], { cwd, platform: "linux" })), 0, text());
 	assert.match(text(), /✓ service settings read from [^\n]*\.env[^\n]*: PI_JOB_IMAGE\n/);
 	assert.ok(text().endsWith(`\ndoctor: ready. Start the worker as the service, whose loader reads ${envPath} as doctor did: \`pi-dispatch service install\`. A worker started by hand (\`pi-dispatch worker\`) reads this shell's environment and not that file, so it runs without the settings doctor read from the file above unless this shell exports them.\n`), text());
 	assert.doesNotMatch(text(), /Start the worker with `pi-dispatch worker`/);
@@ -12146,7 +10247,7 @@ test("doctor's ready line names a worker that reads the .env it judged, and keep
 	const esc = (x) => x.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 	const withUnit = async (unitPath) => {
 		const c = capture();
-		await runDoctor(podmanEnv(), podmanDeps(c.out, podmanPlan(), [], { cwd, platform: "linux", fileExists: (p) => p === unitPath || existsSync(p), readUnit: (p) => (p === unitPath ? `[Service]\nWorkingDirectory=${cwd}\nEnvironmentFile=${envPath}\n` : (() => { throw new Error("ENOENT"); })()) }));
+		await runDoctor(ghEnv(), ghDeps(c.out, green, [], { cwd, platform: "linux", home: PODMAN_HOME, fileExists: (p) => p === unitPath || existsSync(p), readUnit: (p) => (p === unitPath ? `[Service]\nWorkingDirectory=${cwd}\nEnvironmentFile=${envPath}\n` : (() => { throw new Error("ENOENT"); })()) }));
 		return c.text();
 	};
 	for (const [unitPath, command] of [
@@ -12166,26 +10267,26 @@ test("doctor's ready line names a worker that reads the .env it judged, and keep
 	assert.match(advice("win32", null), /: `pi-dispatch service install`, or `pi-dispatch service restart` when its nssm service is already installed\. A worker/);
 	assert.equal(startAdvice({ tookFromFile: false, envPath: "/d/.env", platform: "win32", unit: null }), "Start the worker with `pi-dispatch worker`.");
 	// Taken from the file only through a provider key (`extra`), the line still names the service.
-	const { ANTHROPIC_API_KEY: _k, ...noKey } = podmanEnv();
+	const { ANTHROPIC_API_KEY: _k, ...noKey } = ghEnv();
 	writeFileSync(envPath, "ANTHROPIC_API_KEY=sk-file\n");
 	const keyed = capture();
-	assert.equal(await runDoctor(noKey, podmanDeps(keyed.out, podmanPlan(), [], { cwd, platform: "linux" })), 0, keyed.text());
+	assert.equal(await runDoctor(noKey, ghDeps(keyed.out, green, [], { cwd, platform: "linux" })), 0, keyed.text());
 	assert.doesNotMatch(keyed.text(), /service settings read from/);
 	assert.match(keyed.text(), /\ndoctor: ready\. Start the worker as the service/);
 	// This shell sets what the file does (it wins, so doctor judged the shell's): the worker started from it runs that.
 	writeFileSync(envPath, "PI_JOB_IMAGE=pi-job:latest\n");
 	const shellWins = capture();
-	assert.equal(await runDoctor(podmanEnv({ PI_JOB_IMAGE: "pi-job:latest" }), podmanDeps(shellWins.out, podmanPlan(), [], { cwd, platform: "linux" })), 0, shellWins.text());
+	assert.equal(await runDoctor(ghEnv({ PI_JOB_IMAGE: "pi-job:latest" }), ghDeps(shellWins.out, green, [], { cwd, platform: "linux" })), 0, shellWins.text());
 	assert.ok(shellWins.text().endsWith("\ndoctor: ready. Start the worker with `pi-dispatch worker`.\n"), shellWins.text());
 	// And with no .env at all.
 	const bare = capture();
-	assert.equal(await runDoctor(podmanEnv(), podmanDeps(bare.out, podmanPlan(), [], { cwd: scaffoldedCwd(), platform: "linux" })), 0, bare.text());
+	assert.equal(await runDoctor(ghEnv(), ghDeps(bare.out, green, [], { cwd: scaffoldedCwd(), platform: "linux" })), 0, bare.text());
 	assert.ok(bare.text().endsWith("\ndoctor: ready. Start the worker with `pi-dispatch worker`.\n"), bare.text());
 	// The venue keys, which `deploymentVenueEnv` decides apart from the rest, count too.
-	writeFileSync(envPath, "PI_BACKENDS=podman\nPI_EGRESS=0\n");
-	const { PI_BACKENDS: _b, PI_EGRESS: _e, ...noVenue } = podmanEnv();
+	writeFileSync(envPath, "PI_BACKENDS=local\nPI_EGRESS=0\n");
+	const { PI_BACKENDS: _b, PI_EGRESS: _e, ...noVenue } = ghEnv();
 	const venue = capture();
-	assert.equal(await runDoctor(noVenue, podmanDeps(venue.out, podmanPlan(), [], { cwd, platform: "linux" })), 0, venue.text());
+	assert.equal(await runDoctor(noVenue, ghDeps(venue.out, green, [], { cwd, platform: "linux" })), 0, venue.text());
 	assert.match(venue.text(), /✓ venue keys read from/);
 	assert.match(venue.text(), /\ndoctor: ready\. Start the worker as the service/);
 });
@@ -12262,29 +10363,6 @@ test("doctor warns when this folder's deploy/egress-proxy.conf differs from the 
 	const { out, text } = capture();
 	await runDoctor(ghEnv({ PI_EGRESS: "1" }), { ...ghDeps(out, egressPlan({ [PROXY_KEY]: proxyAnswer("healthy", "running"), "gh auth status": { code: 0, output: ghStatusOutput } })), cwd: empty, readPackagedProxyConf: () => "other\n" });
 	assert.doesNotMatch(text(), /egress-proxy\.conf in this folder (differs|could not)/);
-});
-
-test("doctor on the podman venue warns when the account's rules copy differs from the package's, naming service install --force (#484)", async () => {
-	const COPY = `${PODMAN_HOME}/.config/pi-dispatch/egress-proxy.conf`;
-	const run = async ({ copy, packaged = "new rules\n", env = {} }) => {
-		const { out, text } = capture();
-		const readProxyConf = (p) => {
-			if (p === COPY && copy !== null) return copy;
-			throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-		};
-		const code = await runDoctor(podmanEnv({ PI_EGRESS: "1", ...env }), podmanDeps(out, podmanPlan({ proxy: "running" }), [], { readProxyConf, readPackagedProxyConf: () => packaged }));
-		return { code, text: text() };
-	};
-	const stale = await run({ copy: "old rules\n" });
-	assert.match(stale.text, /⚠ podman: the egress proxy's rules copy \/home\/op\/\.config\/pi-dispatch\/egress-proxy\.conf differs from the package's copy \([^)]+\) \(1 line of it not in the package's copy, 1 line of the package's not in it\), so the egress proxy runs rules this version did not ship\n/);
-	assert.match(stale.text, /To take this version's, `pi-dispatch service install` lists it among what differs and `pi-dispatch service install --force` replaces it and restarts the proxy \(squid reads its rules only at start\)/);
-	const same = await run({ copy: "new rules\n" });
-	assert.doesNotMatch(same.text, /rules copy .* (differs|could not)/);
-	assert.equal(same.code, stale.code, "a warning moves no exit code");
-	const absent = await run({ copy: null });
-	assert.doesNotMatch(absent.text, /rules copy/);
-	const custom = await run({ copy: "old rules\n", env: { PI_EGRESS_PROXY: "my-squid" } });
-	assert.doesNotMatch(custom.text, /rules copy/, "a proxy PI_EGRESS_PROXY names mounts no copy of ours");
 });
 
 // ---- the token settings (issue #501) ----
@@ -12562,21 +10640,17 @@ test("doctor names the default job size, the --cpus ceiling this runtime gives e
 	assert.match(jobSizeChecks({ PI_JOB_MEMORY: "1536m", PI_JOB_CPUS: "0.5" })[0].label, /^Job size: 1536m of memory .* weight of 0\.5 CPUs, per job \(PI_JOB_MEMORY and PI_JOB_CPUS;/);
 	assert.match(jobSizeChecks({}, { daemon: facts({ hostCpus: 2 }) })[1].label, /at most 2 of this runtime's 2 CPUs/, "a host under four CPUs keeps none back");
 	assert.equal(jobSizeChecks({}, {}).length, 1, "no venue named, no ceiling line");
-	// The ceiling UNKNOWN is a warning, per venue: a job then runs with no --cpus at all.
+	// The ceiling UNKNOWN is a warning, per venue: a job then runs with no --cpus at all. (The podman venue's
+	// rows went with that venue; local is the only one whose `info` is read now.)
 	for (const [label, opts, want] of [
 		["docker not read", { daemon: null }, /^local: `docker info` gave no answer that says its CPU count \(not read\), so the CPU ceiling is unknown and a job that runs gets no --cpus/],
 		["docker unreadable", { daemon: { answered: false, reason: "unparseable", transient: false } }, /^local: `docker info` gave no answer that says its CPU count \(unparseable\)/],
 		["docker gave no count", { daemon: facts({ hostCpus: null }) }, /^local: `docker info` gave no CPU count, so the CPU ceiling is unknown/],
-		["podman gave no count", { podman: { answered: true, info: { hostCpus: null } } }, /^podman: `podman info` gave no CPU count, so the CPU ceiling is unknown .*cpu_ceiling_unknown/],
-		["podman did not answer", { podman: { answered: false, reason: "timeout" } }, /^podman: `podman info` gave no answer that says its CPU count \(timeout\)/],
 	]) {
 		const lines = jobSizeChecks({}, opts);
 		assert.deepEqual([lines.length, lines[1].ok, lines[1].warn], [2, false, true], label);
 		assert.match(lines[1].label, want, label);
 	}
-	// A podman-only deployment's ceiling comes from `podman info`; both venues say their own.
-	const both = jobSizeChecks({}, { daemon: facts({ hostCpus: 14 }), podman: { answered: true, info: { hostCpus: 4 } } });
-	assert.deepEqual(both.slice(1).map((c) => c.label.match(/^(\w+): any one job may use at most (\d+) of this runtime's (\d+)/).slice(1)), [["local", "13", "14"], ["podman", "3", "4"]]);
 	const shares = jobSizeChecks({}, { daemon: facts({ cpuShares: false }) }).at(-1);
 	assert.deepEqual([shares.ok, shares.warn], [false, true]);
 	assert.match(shares.label, /CPUShares false, so it drops --cpu-shares .*size_bound_unenforced/);
@@ -12585,21 +10659,20 @@ test("doctor names the default job size, the --cpus ceiling this runtime gives e
 	assert.equal(swap.ok, false);
 	assert.equal(swap.warn, true);
 	assert.match(swap.label, /SwapLimit false, so it drops --memory-swap and a job may swap beyond its memory \(size_bound_unenforced\)/);
-	assert.equal(jobSizeChecks({}, { daemon: facts({ swapLimit: null }) }).some((c) => /SwapLimit/.test(c.label)), false, "Podman's compat answer is not read, so nothing is said");
+	assert.equal(jobSizeChecks({}, { daemon: facts({ swapLimit: null }) }).some((c) => /SwapLimit/.test(c.label)), false, "no answer on the flag, nothing said");
 	// A setting the worker refuses at boot is a FAILURE, never a warning.
 	const bad = jobSizeChecks({ PI_JOB_MEMORY: "4GB" });
 	assert.deepEqual([bad.length, bad[0].ok, bad[0].warn === true], [1, false, false]);
 	assert.match(bad[0].label, /^job size does not parse: PI_JOB_MEMORY: a memory size is a whole number .* REFUSES TO START$/);
 });
 
-test("doctor's read-backs and the podman canary are built at the deployment's default size (#596)", () => {
+test("doctor's read-backs are built at the deployment's default size (#596)", () => {
 	assert.deepEqual(doctorJobSize({}), { memMiB: 4096, cpuCenti: 200, source: "default" });
 	assert.deepEqual(doctorJobSize({ PI_JOB_MEMORY: "2g" }), { memMiB: 2048, cpuCenti: 200, source: "env" });
 	assert.deepEqual(doctorJobSize({ PI_JOB_MEMORY: "nope" }), { memMiB: 4096, cpuCenti: 200, source: "default" }, "a refused value is reported by jobSizeChecks; the probes take the default");
-	const args = egressCanaryProbeArgs({ bin: "podman", slug: "provider", pid: 1, network: "n", proxy: "p", image: "pi-job:latest", url: "https://x", user: "1234:1234", size: { memMiB: 1024, cpuCenti: 50 }, hostCpus: 4 });
-	assert.deepEqual(args.filter((a) => /^--(?:memory|memory-swap|cpus|cpu-shares|shm-size)=/.test(a)), ["--memory=1g", "--memory-swap=1g", "--cpus=3", "--cpu-shares=512", "--shm-size=512m"]);
-	// docker's canary is a plain `docker run` with no bounds at all, pinned byte for byte, and stays so.
-	assert.equal(egressCanaryProbeArgs({ slug: "provider", pid: 1, network: "n", proxy: "p", image: "pi-job:latest", url: "https://x", size: { memMiB: 1024, cpuCenti: 50 } }).some((a) => a.startsWith("--memory")), false);
+	// The canary that carried a job-size argv was the podman venue's and went with it: docker's canary is a
+	// plain `docker run` with no bounds at all, pinned byte for byte, and stays so.
+	assert.equal(egressCanaryProbeArgs({ slug: "provider", pid: 1, network: "n", proxy: "p", image: "pi-job:latest", url: "https://x" }).some((a) => a.startsWith("--memory")), false);
 });
 
 test("doctor names each peer that predates job sizes once this host's file is version 3, and nothing otherwise (#596)", () => {
@@ -12705,14 +10778,15 @@ test("issue #596, a worker whose boot listing of left-over job containers is unr
 	const line = unread.find((c) => /host_budget_seed_unread/.test(c.label));
 	assert.ok(line && line.ok === false && line.warn === true, "a warning");
 	assert.match(line.label, /^this host's worker admits NO job: it could not list the job containers left from before it started/);
-	// per venue. The row names the unread venues; doctor names them and says the others' jobs still run.
+	// per venue. The row names the unread venues; doctor names them and says the others' jobs still run. The
+	// fix names the one runtime left, whatever venue the row names: `podman ps -a` went with that venue.
 	const podmanOnly = (await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1" }, seams({ budgetSeed: "unlisted:podman" }))).find((c) => /host_budget_seed_unread/.test(c.label));
 	assert.match(podmanOnly.label, /^this host's worker admits NO job on the podman venue \(the other venues' jobs still run\): it could not list/);
-	assert.match(podmanOnly.fix, /`podman ps -a`/);
-	assert.doesNotMatch(podmanOnly.fix, /docker/);
+	assert.match(podmanOnly.fix, /`docker ps -a`/);
 	const both = (await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1" }, seams({ budgetSeed: "unlisted:local,podman" }))).find((c) => /host_budget_seed_unread/.test(c.label));
 	assert.match(both.label, /admits NO job on the local and podman venues /);
-	assert.match(both.fix, /`docker ps -a`, `podman ps -a`/);
+	assert.match(both.fix, /`docker ps -a`/);
+	assert.doesNotMatch(both.fix, /podman ps -a/, "one runtime left, named once");
 	for (const seed of ["listed", "", undefined, "unlistedx"]) {
 		const quiet = await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1" }, seams({ budgetSeed: seed }));
 		assert.ok(!quiet.some((c) => /host_budget_seed_unread/.test(c.label)), `budgetSeed ${seed}: nothing said`);
@@ -12729,29 +10803,6 @@ test("issue #599, phase 2: runDoctor hands its readCapacity seam to the checks, 
 	assert.equal(asked.length, 1, "the seam runDoctor was given is the one doctor read through");
 	// Dropping the seam reaches the default, which this helper has forbidden: the run fails rather than read this machine.
 	await assert.rejects(() => runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_EGRESS: "0" }, { ...ghDeps(() => {}, { ...green }, []), agentDir: NO_AGENT_DIR, readCapacity: undefined }), /real capacity read in a test/);
-});
-
-test("doctor says the worker's boot refusal for a layer venue with PI_EGRESS=0, in the worker's own words (#684 review)", () => {
-	const off = backendChecks({ PI_BACKENDS: "local,openshell", PI_EGRESS: "0" }, {});
-	const line = off.find((c) => /^PI_EGRESS=0 cannot run openshell/.test(c.label));
-	assert.ok(line && line.ok === false && /refuses to boot/.test(line.fix));
-	assert.equal(backendChecks({ PI_BACKENDS: "local,openshell" }, {}).some((c) => /^PI_EGRESS=0 cannot run/.test(c.label)), false);
-	assert.equal(backendChecks({ PI_EGRESS: "0" }, {}).some((c) => /^PI_EGRESS=0 cannot run/.test(c.label)), false, "no layer venue, no line");
-	assert.ok(WORKER_SERVICE_KEYS.includes("PI_OPENSHELL_ENGINE") && WORKER_SERVICE_KEYS.includes("PI_OPENSHELL_GATEWAY"));
-});
-
-test("an ABSENT declaration is a warning, first, ahead of the gate; only a floor naming it fails doctor (#707)", () => {
-	const lines = backendChecks({ PI_BACKENDS: "openshell" }, {});
-	for (const property of ["localFolders", "pausable"]) {
-		const line = lines.find((c) => c.label.startsWith(`openshell: ${property} is ABSENT -- `));
-		assert.ok(line, property);
-		assert.equal(line.ok, false);
-		assert.equal(line.warn, true, "told apart by its word, never a ✗ on its own");
-		assert.match(line.fix, new RegExp(`a PI_BACKEND_FLOOR naming ${property} refuses the boot while openshell is blessed`));
-	}
-	assert.ok(!lines.some((c) => c.ok === false && !c.warn), "a blessed venue's declared absences fail nothing");
-	const floored = backendChecks({ PI_BACKENDS: "openshell", PI_BACKEND_FLOOR: "pausable=asserted" }, {});
-	assert.ok(floored.some((c) => c.ok === false && !c.warn && /PI_BACKEND_FLOOR is not met/.test(c.label)), "the floor's refusal stays the ✗");
 });
 
 // Issue #704: the bundle lines reach doctor's run, and `--secrets` resolves through the real wiring, names only.

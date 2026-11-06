@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { buildRecord } from "../src/run-history.mjs";
 import { NETNS_KEEPER_AFTER_PROXY_GRACE_MS, NETNS_KEEPER_MIN_AGE_MS, NETNS_KEEPER_YOUNG_HOLD_MAX_MS, NETNS_KEEPER_YOUNG_MARGIN_MS, judgeNetnsKeeper, netnsKeeperCrashLoopSentence, netnsKeeperLoopAgainSentence, netnsKeeperYoungWaitMs } from "../src/netns-keeper.mjs";
 import { NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, TERMINAL_COMMENTS } from "../src/processor.mjs";
-import { sandboxKeeperCheck } from "../src/sandbox.mjs";
 
 // Issue #476: a keeper that is merely young is not a keeper that does not hold. When the podman stack starts together,
 // the worker read the keeper under a second after it started (measured 0.5 to 0.8 s on 4.9.3) and the 3 s age rule
@@ -654,31 +653,6 @@ test("a cancel acknowledged before a pre-spend refusal returned is recorded as t
 	// And with no cancel, the refusal is recorded as itself.
 	const plain = runWorld({ egress: { proxyMissing: "pi-dispatch-egress-proxy" } });
 	assert.equal((await plain.processor(plain.job, "tok", plain.controller.signal)).reason, "egress-proxy-missing");
-});
-
-test("the sandbox opener waits a young keeper out once, bounded, rather than refusing it (#476)", async () => {
-	const info = async () => ({ answered: true, info: { version: "4.9.3" } });
-	const run = async (answers, clock, proxyRead = { code: 0, stdout: `${clock - 700}\n` }) => {
-		const slept = [];
-		let i = 0;
-		let t = clock;
-		const readKeeper = async (args) => (args.at(-1) === "pi-dispatch-netns-keeper" ? answers[Math.min(i++, answers.length - 1)] : proxyRead);
-		const answer = await sandboxKeeperCheck({ proxy: "pi-dispatch-egress-proxy", info, readKeeper, now: () => t, sleep: async (ms) => (slept.push(ms), (t += ms)) });
-		return { answer, slept, reads: i };
-	};
-	// A keeper 0.6 s old: one wait of 3.4 s, then it holds.
-	const held = await run([read(NOW - 600), read(NOW - 600)], NOW);
-	assert.deepEqual([held.answer, held.slept, held.reads], [null, [3_400], 2]);
-	// Restarted during the wait: refused, as a young keeper was before.
-	const looped = await run([read(NOW - 600), read(NOW + 3_000)], NOW);
-	assert.deepEqual([looped.answer?.refused, looped.slept, looped.reads], ["netns-keeper-not-holding", [3_400], 2]);
-	assert.match(looped.answer.message, /has been running for only 0\.4 s/);
-	// Absent: refused at once, no wait.
-	const absent = await run([{ code: 125, stdout: "" }], NOW);
-	assert.deepEqual([absent.answer?.refused, absent.slept, absent.reads], ["netns-keeper-not-holding", [], 1]);
-	// The wait is the judge's, so capped at the minimum age plus the margin (a start read in the future, the proxy's start unread).
-	const future = await run([read(NOW + 60_000), read(NOW - 60_000)], NOW, { code: 125, stdout: "" });
-	assert.deepEqual(future.slept, [4_000]);
 });
 
 // --- why the job waits, and its retry's backoff (issue #737) ------------------------------------------------------

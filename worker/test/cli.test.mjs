@@ -25,8 +25,8 @@ test("`doctor --live` reaches runDoctor as live: true, and the usage names the f
 	// deps bag, where runDoctor reads it strictly as `=== true`.
 	const { readFileSync } = await import("node:fs");
 	const src = readFileSync(new URL("../src/cli.mjs", import.meta.url), "utf8");
-	assert.match(src, /runDoctor\(env, \{ json: flags\.includes\("--json"\), fix: flags\.includes\("--fix"\), live: flags\.includes\("--live"\), openshell: flags\.includes\("--openshell"\), secrets: flags\.includes\("--secrets"\), publish: !flags\.includes\("--no-publish"\), publishBy \}\)/);
-	assert.match(src, /pi-dispatch doctor \[--json\] \[--fix\] \[--live\] \[--openshell\] \[--secrets\]/, "issue #683 adds --openshell, issue #704 --secrets");
+	assert.match(src, /runDoctor\(env, \{ json: flags\.includes\("--json"\), fix: flags\.includes\("--fix"\), live: flags\.includes\("--live"\), secrets: flags\.includes\("--secrets"\), publish: !flags\.includes\("--no-publish"\), publishBy \}\)/);
+	assert.match(src, /pi-dispatch doctor \[--json\] \[--fix\] \[--live\] \[--secrets\]/, "issue #704 adds --secrets; --openshell went with the venue");
 });
 
 test("doctor publishes unless --no-publish, and --publish beside --no-publish is refused before doctor runs (#712)", async () => {
@@ -36,7 +36,7 @@ test("doctor publishes unless --no-publish, and --publish beside --no-publish is
 	const { readFileSync } = await import("node:fs");
 	const src = readFileSync(new URL("../src/cli.mjs", import.meta.url), "utf8");
 	assert.match(src, /const flags = argv\.slice\(1\);/);
-	assert.match(src, /pi-dispatch doctor \[--json\] \[--fix\] \[--live\] \[--openshell\] \[--secrets\] \[--no-publish\]/);
+	assert.match(src, /pi-dispatch doctor \[--json\] \[--fix\] \[--live\] \[--secrets\] \[--no-publish\]/);
 });
 
 test("--by-worker takes the worker's interval, 1 to 168 hours, and anything else is refused before doctor runs (#712)", async () => {
@@ -341,20 +341,12 @@ test("run fails FAST (does not hang) when Valkey is unreachable", { skip: needsD
 	assert.ok(Date.now() - start < 15000, "must fail fast, well under any CI timeout");
 });
 
-test("`pi-dispatch init` hands the CLI's environment to init: PI_BACKENDS=podman in the shell gets the podman ladder (#453 gate)", { skip: process.platform !== "linux" ? "the podman ladder is Linux's; off Linux init says the venue refuses the host, pinned in init.test.mjs" : false }, () => {
-	const dir = tempDir("pi-cli-init-");
+test("`pi-dispatch init` hands the CLI's environment to init: PI_BACKENDS=local in the shell gets the docker ladder (#453 gate)", () => {
+	// The podman venue and its ladder left with the sandbox prune; what stays pinned is that the CLI's own
+	// environment decides the pass init prints.
 	const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
-	const printed = execFileSync(process.execPath, [cli, "init"], { cwd: dir, env: { ...process.env, PI_BACKENDS: "podman" }, encoding: "utf8" });
-	assert.match(printed, /\nNext \(the podman venue; run these as the worker's own account\./);
 	const docker = execFileSync(process.execPath, [cli, "init"], { cwd: tempDir("pi-cli-init-"), env: { ...process.env, PI_BACKENDS: "local" }, encoding: "utf8" });
 	assert.match(docker, /\nNext:\n {2}1\. docker pull/);
-});
-
-test("`pi-dispatch init` off Linux with PI_BACKENDS=podman in the shell says the venue refuses the host (#453 gate)", { skip: process.platform === "linux" ? "covered on Linux by the ladder test beside this one" : false }, () => {
-	const dir = tempDir("pi-cli-init-");
-	const cli = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
-	const printed = execFileSync(process.execPath, [cli, "init"], { cwd: dir, env: { ...process.env, PI_BACKENDS: "podman" }, encoding: "utf8" });
-	assert.match(printed, /\nNext: PI_BACKENDS lists only the podman venue, which runs on Linux alone/);
 });
 
 // Issue #503, gate round 1: a reader that closes early (`pi-dispatch egress render | head -1`) left an uncaught EPIPE
@@ -366,7 +358,10 @@ test("a pi-dispatch verb whose stdout reader has gone ends quietly, with no unca
 	writeFileSync(join(cwd, "model-endpoints.json"), '{"version":1,"endpoints":[]}\n');
 	writeFileSync(join(cwd, "model-endpoints.conf"), "");
 	const bin = fileURLToPath(new URL("../src/cli.mjs", import.meta.url));
-	const { PI_MODEL_ENDPOINTS_FILE: _f, ...env } = process.env;
+	const { PI_MODEL_ENDPOINTS_FILE: _f, NODE_USE_ENV_PROXY: _p, ...env } = process.env;
+	// A host that exports NODE_USE_ENV_PROXY makes every node child print undici's experimental-agent warning on
+	// startup, stderr this test reads for EPIPE evidence only. The proxy itself is irrelevant here, so the child starts
+	// without it.
 	for (let i = 0; i < 3; i++) {
 		const result = await new Promise((resolve) => {
 			const child = spawn(process.execPath, [bin, "egress", "render"], { cwd, env, stdio: ["ignore", "pipe", "pipe"] });
@@ -402,9 +397,11 @@ test("installStdoutPipeGuard keeps the exit code an unhandled EPIPE gives, or th
 	assert.deepEqual(run(undefined, Object.assign(new Error("no space"), { code: "ENOSPC" })), { exits: [1], lines: ["error: writing to stdout failed: ENOSPC\n"] });
 	const { spawn } = await import("node:child_process");
 	const guard = fileURLToPath(new URL("../src/exit-code.mjs", import.meta.url));
+	// Same NODE_USE_ENV_PROXY hygiene as the EPIPE gate above: the warning is host noise, not the guard's output.
+	const { NODE_USE_ENV_PROXY: _p2, ...guardEnv } = process.env;
 	const script = `import(${JSON.stringify(guard)}).then((m)=>{m.installStdoutPipeGuard();setInterval(()=>process.stdout.write("tick\\n"),5)})`;
 	const result = await new Promise((resolve) => {
-		const child = spawn(process.execPath, ["--input-type=module", "-e", script], { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(process.execPath, ["--input-type=module", "-e", script], { env: guardEnv, stdio: ["ignore", "pipe", "pipe"] });
 		child.stdout.destroy();
 		let stderr = "";
 		child.stderr.on("data", (d) => (stderr += d));

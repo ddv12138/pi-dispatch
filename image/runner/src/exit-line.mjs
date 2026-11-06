@@ -1,6 +1,5 @@
 import { createHmac } from "node:crypto";
 import { readSync, writeSync } from "node:fs";
-import { readKeyFrame } from "./steer-frames.mjs";
 
 /**
  * The runner's exit line, and the key that authenticates it (issue #545, INT-RUNNER-EXIT-CODE-PROTOCOL).
@@ -8,7 +7,7 @@ import { readKeyFrame } from "./steer-frames.mjs";
  * The worker reads the job's outcome telemetry (tokens, usage, turns, session, context, and through them the
  * token-window settlement) off the LAST `{"event":"exit",...}` line on the container's stdout. That stream is not the runner's
  * alone: a job's own tool can write to it (a child opens `/proc/<pid>/fd/1` of the runner or of the init process,
- * measured on Docker Desktop, rootful Docker 29 and rootless Podman 4.9 and 5.8). No reader policy can tell the
+ * measured on Docker Desktop, rootful Docker 29). No reader policy can tell the
  * runner's bytes from an imitation of them, so the line now carries a MAC the job's tools cannot compute.
  *
  * The key is per job, random, minted by the worker and handed over on the container's STDIN, which the runner reads
@@ -39,14 +38,8 @@ import { readKeyFrame } from "./steer-frames.mjs";
 
 /** The variable that tells the runner a key is waiting on stdin. Its value is the channel's name, never a secret. */
 export const EXIT_AUTH_ENV = "PI_EXIT_AUTH";
-/** The key alone on stdin, then EOF: every attempt but a stdin-steered one. */
+/** The key alone on stdin, then EOF. */
 export const EXIT_AUTH_STDIN = "stdin";
-/**
- * Issue #686: the key as frame 1 of the steer frame channel (steer-frames.mjs), the pipe then left OPEN for message
- * frames. Written by the worker only beside PI_STEER=1, on a copying venue, to an image declaring `steerStdin`. Any
- * value but these two is a worker the runner does not understand, said on the log (`unknown-channel`).
- */
-export const EXIT_AUTH_STDIN_FRAMES = "stdin-frames";
 /** The key's shape: 32 random bytes as lowercase hex, exactly what the worker writes. */
 export const EXIT_KEY_PATTERN = /^[0-9a-f]{64}$/;
 /** The exit code of a runner stopped by SIGTERM, the code a signal-killed node would have had (128 + 15). */
@@ -101,21 +94,10 @@ export function drainStdin({ fd = 0, max = 4096, read = readSync, sleep = (ms) =
  * that asked for a key and did not deliver a usable one is a `problem` the runner logs, and the run goes on unsigned,
  * which the worker then settles at the floor: failing open on the telemetry, closed on the money, and said.
  */
-export function readExitKey(env, { drain = drainStdin, readFrame = readKeyFrame } = {}) {
+export function readExitKey(env, { drain = drainStdin } = {}) {
 	// env-internal PI_EXIT_AUTH: written by the worker into the job's closed env map (buildContainerEnv), never an operator key.
 	const channel = env.PI_EXIT_AUTH;
 	if (channel === undefined) return { key: null, problem: null };
-	// Issue #686: EXACTLY frame 1, never a byte past it, and the pipe left open: what follows is message frames, read by
-	// the inbox (src/inbox.mjs) once pi has loaded. `consumed` is how many bytes of the attempt's budget the key took.
-	if (channel === EXIT_AUTH_STDIN_FRAMES) {
-		let read;
-		try {
-			read = readFrame();
-		} catch {
-			return { key: null, problem: "unreadable", frames: true, consumed: 0 };
-		}
-		return { key: read.key ?? null, problem: read.problem ?? (read.key ? null : "malformed"), frames: true, consumed: read.bytes?.length ?? 0 };
-	}
 	if (channel !== EXIT_AUTH_STDIN) return { key: null, problem: "unknown-channel" };
 	let raw;
 	try {

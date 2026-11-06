@@ -99,8 +99,12 @@ log("minted", { ok: (await minted.mintToken({ repo: "o/r" })) === "ghs_minted" }
 `;
 
 function runChild() {
+	// A host that exports NODE_USE_ENV_PROXY makes every node child print undici's experimental-agent warning on
+	// startup, stderr this test reads for evidence that Octokit's console was never reached. The child starts
+	// without it.
+	const { NODE_USE_ENV_PROXY: _p, ...childEnv } = process.env;
 	return new Promise((resolve) => {
-		const child = spawn(process.execPath, ["--input-type=module", "-e", CHILD], { stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(process.execPath, ["--input-type=module", "-e", CHILD], { env: childEnv, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (d) => (stdout += d));

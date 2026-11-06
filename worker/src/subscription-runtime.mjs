@@ -41,7 +41,9 @@ export function makeSubscriptionRuntime({ auth, quota, now = Date.now, lookup = 
 			// subscription job could otherwise switch to an unadmitted provider after this free gate.
 			if (!Array.isArray(job.models) || job.models.length === 0) return { ok: false, managed: true, reason: "auth-route-unbounded" };
 			if (ref.provider === "openai" && (job.watchDecisionModel?.provider === "openai" || job.questionGroupModel?.provider === "openai" || job.answerDecisionModel?.provider === "openai")) return { ok: false, managed: true, reason: "auth-capability-unsupported" };
-			if (["openshell", "openshell-bind"].includes(job.backend ?? defaultBackend) || job.canary === true) return { ok: false, managed: true, reason: "auth-venue-unsupported" };
+			// The openshell venue words this refusal also named left with the sandbox backends; the canary replay is the
+			// one remaining route this adapter does not manage, and the reason string stays for the record's vocabulary.
+			if (job.canary === true) return { ok: false, managed: true, reason: "auth-venue-unsupported" };
 			if (ref.provider === "anthropic") {
 				if (job.packages === false) return { ok: false, managed: true, reason: "auth-adapter-disabled" };
 				const staged = packageRootFor(row.adapter);

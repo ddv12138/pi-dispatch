@@ -19,8 +19,8 @@
  *     (from the pickup and from the runner), `secret-name-reserved` (for `run.secrets` and for a bundle),
  *     `operator-cancel` (cancelled while running, or before it started: index.mjs posts CANCELLED_BEFORE_START_COMMENT),
  *     `awaiting-input` (the issue's reply line, the pull request's comment-phrase one, or the held reply already taken),
- *     `job-user-unmappable` (JOB_USER_COMMENTS' cause rows), `envelope-mismatch` (ENVELOPE_MISMATCH_COMMENTS' cause
- *     rows) and `podman-conf-widens-job` (PODMAN_CONF_COMMENTS' source and finding rows).
+ *     `job-user-unmappable` (JOB_USER_COMMENTS' cause rows) and `envelope-mismatch` (ENVELOPE_MISMATCH_COMMENTS' cause
+ *     rows).
  * `next` is always written here: no table had a "what to do" line.
  *
  * EVERY STRING IS FIXED. No sentence and no next step takes a record value, and none holds a control byte, so a surface
@@ -36,7 +36,6 @@ import {
 	MODEL_AGENTS_INVALID_COMMENT, APPROVAL_COMMENTS,	BUNDLE_COMMENTS,
 	MODEL_NOT_ALLOWED_COMMENTS,
 	FAILED_COMMENT_BY_REASON,
-	OPENSHELL_REFUSALS,
 	RECOVERY_COMMENTS,
 	RECOVERY_HOST_LOST_COMMENT,
 	REFUSAL_COMMENTS,
@@ -187,19 +186,14 @@ const ROWS = [
 	["job-image-progress-unsupported", imageRefusal("support for reporting progress", "its runner would ignore `run.progress`"), REBUILD],
 	["job-image-recover-unsupported", imageRefusal("support for continuing a lost run", "its runner would ignore `run.recover`"), REBUILD],
 	["job-image-steer-unsupported", imageRefusal("support for receiving messages while it runs", "its runner would ignore `run.steer`"), REBUILD],
-	["job-image-sandbox-layout-unsupported", imageRefusal("support for a venue that copies the job's files into its sandbox", "its runner would not find them"), REBUILD],
-	["job-image-observable-runner-unsupported", imageRefusal("support for a venue whose sandbox must observe the runner", "the job could reach neither its model nor anything else"), REBUILD],
 	// ── The venue and the host ──────────────────────────────────────────────────────────────────────────────────────
 	["backend-unblessed", "Refused: the trigger asks for a venue this deployment does not bless (`PI_BACKENDS`). Not run.", "Add the venue to `PI_BACKENDS` on the worker, or change the trigger's `run.backend`."],
 	["backend-floor-unobserved", "Refused: this deployment's `PI_BACKEND_FLOOR` requires a guarantee this host is not observed to provide right now, so the job was not run. Not run.", "Run `pi-dispatch doctor` on the worker to see which observation failed, then fix the runtime or lower the floor."],
-	["venue-local-folders-unsupported", "Refused: this job runs against a folder on this machine, and its venue copies a job's files instead of editing a folder in place. Not run.", "Run it on a venue that mounts folders (local or podman) with the trigger's `run.backend`."],
 	["job-user-unmappable", "Refused: the worker host's container runtime cannot give this job a non-root user that can read and write its own files, or answered in a form the worker cannot read, so the job had no user it could safely run as. Not run.", "Run `pi-dispatch doctor` on the worker: it names the cause (for example a rootless daemon, userns-remap, a worker running as root, a worker whose primary group is root or the Docker socket's, or a runtime answer it cannot read)."],
-	["podman-conf-widens-job", "Refused: the worker host's Podman configuration (rootful Podman's, the podman venue's files, or its running rootless network) lets a job's container reach more than the venue allows, or could not be read in full. Not run.", "Run `pi-dispatch doctor` on the worker: it names the file and key to change, or the network to restart."],
-	["podman-service-restart-hold-expired", FAILED_COMMENT_BY_REASON["podman-service-restart-hold-expired"], "Restart rootful Podman's service while no local job runs, then run the job again."],
 	["netns-keeper-not-holding", FAILED_COMMENT_BY_REASON["netns-keeper-not-holding"], "Run `pi-dispatch doctor` on the worker for the exact fix, then run the job again."],
 	["netns-keeper-crash-loop", FAILED_COMMENT_BY_REASON["netns-keeper-crash-loop"], "Read the keeper's log (`journalctl --user -u pi-dispatch-netns-keeper.service`) and run `pi-dispatch doctor`."],
-	["egress-proxy-missing", "Refused: this deployment runs jobs behind an egress policy, and its allowlist proxy is not on this host, so the job could not have reached its provider. Not run.", "Start the proxy (`pi-dispatch up` from the deployment folder, or as `docs/podman.md` says for the podman venue), or set `PI_EGRESS=0`."],
-	["egress-proxy-stopped", "Refused: this deployment runs jobs behind an egress policy, and its allowlist proxy is not running, so the job could not have reached its provider. Not run.", "Start the proxy (`pi-dispatch up` from the deployment folder, or as `docs/podman.md` says for the podman venue), or set `PI_EGRESS=0`."],
+	["egress-proxy-missing", "Refused: this deployment runs jobs behind an egress policy, and its allowlist proxy is not on this host, so the job could not have reached its provider. Not run.", "Start the proxy (`pi-dispatch up` from the deployment folder), or set `PI_EGRESS=0`."],
+	["egress-proxy-stopped", "Refused: this deployment runs jobs behind an egress policy, and its allowlist proxy is not running, so the job could not have reached its provider. Not run.", "Start the proxy (`pi-dispatch up` from the deployment folder), or set `PI_EGRESS=0`."],
 	["container-never-started", "Failed: the container runtime never handed control to the job (it could not create or start the container, or a check before it could not run), so nothing was spent. The job was retried and did not start.", "Run `pi-dispatch doctor` on the worker and check the container runtime, then run the job again."],
 	["container-detached", "Failed: the job's container outlived the command that started it (a lost connection to the runtime), so the worker could not see how it ended. The job was retried.", "Check the worker's connection to its container runtime, and stop any job container left running."],
 	["container-infra-exit", "Failed: the job's container ended with the runner's infrastructure exit (an AI provider error or rate limit, a lost network, or a crash inside the container), so the worker counted it as an infrastructure fault and retried it while attempts were left. Partial work may exist.", "Read the `exit` line in the job log for what the runner met, then run the job again if every attempt was used."],
@@ -207,28 +201,9 @@ const ROWS = [
 	["worker-error", "Failed: the worker met an error it has no reason for (a forge or Valkey call that failed, or a fault in the worker itself). The record keeps none of the error's own words, which can name an API path or a repository.", "Read the worker log's `job_failed` line for this job, then run the job again."],
 	["config-refused", REFUSAL_COMMENTS["config-refused"], "Run `pi-dispatch doctor` on the worker: it names the setting or file to fix."],
 	["settings-overlay-invalid", "Refused: the deployment's settings file (the overlay `/dispatch set` writes) is present but invalid, so every job is refused rather than run on settings nobody chose. Not run.", "Fix the key `pi-dispatch doctor` names, or delete the settings file to start from an empty overlay."],
-	// ── The OpenShell venues ────────────────────────────────────────────────────────────────────────────────────────
-	["openshell-gateway-not-local", OPENSHELL_REFUSALS["openshell-gateway-not-local"], "Run the OpenShell gateway on this host, or run the job on another venue."],
-	["openshell-global-policy", OPENSHELL_REFUSALS["openshell-global-policy"], "Remove the gateway-wide policy from the OpenShell gateway, or run the job on another venue."],
-	["openshell-landlock-missing", OPENSHELL_REFUSALS["openshell-landlock-missing"], "Run OpenShell jobs on a host whose kernel offers Landlock, or run the job on another venue."],
-	["openshell-recover-unsupported", OPENSHELL_REFUSALS["openshell-recover-unsupported"], "Run the job on another venue, or drop `run.recover` from the trigger."],
-	["openshell-credential-reads-value", OPENSHELL_REFUSALS["openshell-credential-reads-value"], "Run the job on another venue, or with a provider whose key is sent as it is."],
-	["openshell-gateway-untested", OPENSHELL_REFUSALS["openshell-gateway-untested"], "Run the OpenShell release this pi-dispatch release names (`pi-dispatch doctor` says which)."],
-	["openshell-egress-untranslatable", OPENSHELL_REFUSALS["openshell-egress-untranslatable"], "Change the egress allowlist entry `pi-dispatch doctor` names, or run the job on another venue."],
-	["openshell-bind-mounts-disabled", OPENSHELL_REFUSALS["openshell-bind-mounts-disabled"], "Allow driver config and bind mounts in the gateway's `gateway.toml`, turn resource admission off, and restart the gateway."],
-	["openshell-ptrace-scope-unprotected", OPENSHELL_REFUSALS["openshell-ptrace-scope-unprotected"], "Set `kernel.yama.ptrace_scope` to 1 on the worker host."],
-	["openshell-ptrace-scope-too-strict", OPENSHELL_REFUSALS["openshell-ptrace-scope-too-strict"], "Set `kernel.yama.ptrace_scope` to exactly 1 on the worker host."],
-	["openshell-bind-sandbox-lingering", OPENSHELL_REFUSALS["openshell-bind-sandbox-lingering"], "Check the sandbox on the OpenShell gateway and remove it, then check the folder's files before running the job again."],
-	["openshell-bundle-endpoint-not-allowed", OPENSHELL_REFUSALS["openshell-bundle-endpoint-not-allowed"], "Add the host to `egress-allowlist.conf` as itself, or remove it from the bundle's endpoints."],
-	["openshell-bundle-endpoint-shared", OPENSHELL_REFUSALS["openshell-bundle-endpoint-shared"], "Remove that host from the bundle's endpoints."],
-	["openshell-bundle-endpoint-unknown", OPENSHELL_REFUSALS["openshell-bundle-endpoint-unknown"], "Fix the name in the bundle's endpoints, or add the variable in the secrets manager."],
-	["openshell-bundle-name-taken", OPENSHELL_REFUSALS["openshell-bundle-name-taken"], "Rename the variable in the secrets manager."],
-	["openshell-bundle-unpassable", OPENSHELL_REFUSALS["openshell-bundle-unpassable"], "Run the project on another venue, or change the bundle's endpoints."],
-	["openshell-bundle-image-too-old", OPENSHELL_REFUSALS["openshell-bundle-image-too-old"], "Rebuild the job image from a release that declares `bundleEnvFile`."],
 	// ── The repository or folder ────────────────────────────────────────────────────────────────────────────────────
 	["unprotected-branch", REFUSAL_COMMENTS["unprotected-branch"], "Protect the repository's default branch, then run the job again."],
 	["sha-gone", "Refused: the commit this job was resolved to is no longer on the forge (the default branch moved past it), so it could not be fetched. Not run.", "Run the job again: it resolves the default branch afresh."],
-	["local-folder-is-sandbox", "Refused: this folder is a kept sandbox workspace for a person, so it cannot become an agent job workspace. Not run.", "Choose the original repository outside the sandbox retention directory."],
 	["local-folder-not-a-repo", "Refused: this job's folder is not a git repository (it has no `.git` at its root). Not run.", "Run `git init` in the folder and commit once, or point the job at a repository."],
 	["local-folder-no-commit", "Refused: this job's folder is a git repository with no commit yet. Not run.", "Commit once in the folder, then run the job again."],
 	["local-folder-unreadable-repo", "Refused: git could not read this job's repository (its HEAD, a ref or an object could not be resolved). Not run.", "Run `git status` in the folder to see what is wrong, and repair the repository."],

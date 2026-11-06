@@ -39,7 +39,8 @@ test("shared console labels translate in Chinese and unknown page content stays 
 });
 
 test("every browser-generated fixed message is projected from the shared Chinese catalogue", () => {
-  assert.ok(Object.keys(CLIENT_ZH_TEXT).length >= 50, "the browser message inventory is explicit and covered");
+  // 39 since the sandbox prune: the gateway attachment and browser-terminal copy and its 19 keys left with the venues.
+  assert.ok(Object.keys(CLIENT_ZH_TEXT).length >= 39, "the browser message inventory is explicit and covered");
   for (const [source, translated] of Object.entries(CLIENT_ZH_TEXT)) {
     assert.equal(uiText(source, "zh"), translated, `${source}: browser and server share one translation`);
     assert.notEqual(translated, source, `${source}: fixed browser copy must not fall back to English`);
@@ -125,11 +126,11 @@ test("every literal server-side uiText call has a Chinese catalogue entry", () =
 
 test("every registered console screen renders in Chinese with its localized page title", async () => {
   const panelTitles = {
-    setup: "准备就绪", models: "模型角色", overview: "需要你", runs: "运行记录", sandboxes: "从运行记录进入",
+    setup: "准备就绪", models: "模型角色", overview: "需要你", runs: "运行记录",
     "zero-touch": "人工介入率，", run: "实时转录", parked: "回答方式", "answer-rules": "回答规则",
     insights: "本周已支出", "insights-budget-split": "预算范围", "insights-capacity": "主机群忙碌度",
     "insights-breakdown": "窗口支出", "insights-flows": "流程映射", fleet: "主机与队列", host: "主机已离线",
-    venue: "运行环境", trigger: "触发条件", triggers: "设置", "trigger-check": "哪些规则会运行？",
+    trigger: "触发条件", triggers: "设置", "trigger-check": "哪些规则会运行？",
     "trigger-add": "添加触发器", config: "设置覆盖项", secrets: "密钥配置", connections: "提供商 API 密钥",
     updates: "作业运行内容", project: "项目不可用", watch: "监控不可用", "watch-board": "面板不可用", audit: "审计日志",
   };

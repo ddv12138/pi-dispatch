@@ -150,7 +150,8 @@ test("archive run facts keep the named fail-open reason without accepting raw er
 
 
 test("a detached or aborted container never publishes an immutable completed source", async () => {
-	for (const flags of [{ detached: true }, { aborted: true }, { lingering: true }]) {
+	// The lingering box (#714's openshell-bind) left with the venue; detached and aborted are the daemon's own answers.
+	for (const flags of [{ detached: true }, { aborted: true }]) {
 		const f = fixture();
 		let published = 0;
 		f.deps.forkStore.publish = () => { published++; return { ok: true }; };

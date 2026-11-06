@@ -348,7 +348,9 @@ test("the recovery's data drops every per-attempt hold key, and every key index.
 		const read = [...src.matchAll(/updateData\(\{\s*\.\.\.job\.data,/g)].length;
 		assert.equal(calls, read, `${name}: every updateData call spreads job.data first, so its keys can be read here`);
 	}
-	assert.ok(written.size >= 6, [...written].join(","));
+	// Four keys since the podman venue left: its restart hold wrote the two podmanRestartHold* keys, which only
+	// RECOVERY_STRIPPED_KEYS still names, for a job data an older release wrote.
+	assert.ok(written.size >= 4, [...written].join(","));
 	for (const key of written) assert.ok(RECOVERY_STRIPPED_KEYS.includes(key) || RECOVERY_KEPT_HOLD_KEYS.includes(key), `${key} is written per attempt and neither stripped nor deliberately kept`);
 });
 

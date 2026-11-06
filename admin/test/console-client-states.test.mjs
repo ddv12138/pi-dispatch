@@ -1588,7 +1588,7 @@ test("the script's closed lists are written in from their one source each, never
   assert.deepEqual(named("mark"), Object.keys(LIVE_STATES).filter((k) => k !== "start").sort());
   // The sign-in page goes where a reason is the console's own, and nowhere else.
   // Sign-out's only one is its 200's (issue #737): an unconfirmed sign-out stays on the page.
-  assert.deepEqual(CONSOLE_SCRIPT.match(/location\.assign\(.*?\);/g), ['location.assign(isReason(r) ? "/login?ended=" + r : "/login");', 'location.assign("/");', 'location.assign("/login");', 'location.assign("/runs/sandboxes?request=" + encodeURIComponent(b.requestId) + "&host=" + encodeURIComponent(b.host));']);
+  assert.deepEqual(CONSOLE_SCRIPT.match(/location\.assign\(.*?\);/g), ['location.assign(isReason(r) ? "/login?ended=" + r : "/login");', 'location.assign("/");', 'location.assign("/login");']);
   assert.match(CONSOLE_SCRIPT, /if \(r\.status === 200\) location\.assign\("\/login"\);\n\s+else unconfirmed\(\);\n\s+\}, unconfirmed\);/);
   // The signed-out sentence is said as text, in the slot's message line (slotSays), never as markup.
   assert.match(CONSOLE_SCRIPT, /function signedOut\(r\) \{[^]*?slotSays\(CONFIRM_SIGNED_OUT\);/);

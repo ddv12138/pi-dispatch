@@ -45,7 +45,7 @@ test("the worker's eligibility list is closed, and the wire vocabulary and coold
 	assert.equal(MODEL_COOLDOWN_MAX_MS, MAX_RESET_MS, "worker TTL and measured runner reset use the same bound");
 });
 
-test("overlay token defaults agree with the pinned composer, and explicit default OpenShell requires egress", async () => {
+test("overlay token defaults agree with the pinned composer, and the egress switch alone decides failover's egress", async () => {
 	const entry = fileURLToPath(import.meta.resolve("@earendil-works/pi-coding-agent"));
 	const source = readFileSync(join(dirname(entry), "core/provider-composer.js"), "utf8");
 	const contextWindow = Number(source.match(/contextWindow: definition\.contextWindow \?\? (\d+)/)[1]);
@@ -54,10 +54,10 @@ test("overlay token defaults agree with the pinned composer, and explicit defaul
 	const view = failoverModelView("custom/m", { models });
 	assert.equal(view.contextWindow, contextWindow);
 	assert.equal(view.maxTokens, maxTokens);
-	assert.equal(failoverEgressRequired({}, { defaultBackend: "openshell", egress: false }), true);
-	assert.equal(failoverEgressRequired({}, { defaultBackend: "openshell-bind", egress: false }), true);
-	assert.equal(failoverEgressRequired({ backend: "local" }, { defaultBackend: "openshell", egress: false }), false);
-	assert.equal(failoverEgressRequired({}, { defaultBackend: "local", egress: true }), true);
+	// The venue words that used to widen this (openshell copied job files, so failover re-read its own egress) left
+	// with the sandbox backends: the only backend binds the job's directories, so the egress switch alone decides.
+	assert.equal(failoverEgressRequired({}, { egress: false }), false);
+	assert.equal(failoverEgressRequired({}, { egress: true }), true);
 });
 
 test("cooldowns cap resets, keep the longest concurrent reset, expire by the injected clock and expose only closed facts", async () => {

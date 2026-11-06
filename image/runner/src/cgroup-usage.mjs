@@ -7,7 +7,7 @@ import * as nodeFs from "node:fs";
  * gone by the time `docker run` returns. The runner is the last process that can see it, which is why these numbers
  * ride the signed exit line and are read as late as possible, just before that line is written.
  *
- * Measured inside a job (Docker Desktop, rootful Docker 29 and rootless Podman 4.9, `--cgroupns=private`): the
+ * Measured inside a job (Docker Desktop, rootful Docker 29, `--cgroupns=private`): the
  * container's own cgroup is the root of the view (`/proc/self/cgroup` is `0::/`), mounted read-only, with every file
  * read below present. The path is still taken from `/proc/self/cgroup` rather than assumed to be the mount's root,
  * because under a host cgroup namespace the root of `/sys/fs/cgroup` is the HOST's cgroup, and its `cpu.stat` and
@@ -18,9 +18,9 @@ import * as nodeFs from "node:fs";
  * "not measured" (null), never zero. cgroup v1 is read for the cheap half only (peak memory, OOM kills, CPU time and
  * throttling); every other key, the swap peak included, is null there.
  *
- * From `memory.events` only `oom_kill` is read, never `oom` or `max`: under crun (rootless and rootful Podman) the limit
- * sits on the parent `libpod-<id>.scope` and the namespace root is a `container` leaf below it, so the OOM is counted on
- * the parent and the leaf the job can see shows `oom 0` with `oom_kill 1` (measured on Podman 4.9 and 5.8). Only the kill
+ * From `memory.events` only `oom_kill` is read, never `oom` or `max`: a runtime that counts the limit on a parent
+ * scope (crun, measured) leaves the namespace root a `container` leaf below it, so the OOM is counted on
+ * the parent and the leaf the job can see shows `oom 0` with `oom_kill 1`. Only the kill
  * is charged to the job's own cgroup on every venue.
  *
  * Every value is a non-negative SAFE integer: bytes, microseconds or counts. The worker re-checks each one

@@ -782,8 +782,7 @@ function binRecorder({ runCode, fs, psState = "running" }) {
 	return { spawnFn, calls };
 }
 
-test("bin names EVERY job-path spawn: the run, the job network both ways and the detached check, and buildArgs builds the argv (#354)", { skip }, async () => {
-	const { buildPodmanRunArgs } = await import("../src/docker-run.mjs");
+test("every job-path spawn names bin: the run, the job network both ways and the detached check (#354)", { skip }, async () => {
 	const { CONTAINER_HOME } = await import("../src/container-spec.mjs");
 	const drive = async (seam) => {
 		const fs = cidFs();
@@ -792,17 +791,14 @@ test("bin names EVERY job-path spawn: the run, the job network both ways and the
 		const result = await runContainer({ job: JOB, prepared: PREPARED, name: "pi-job-j1", signal: new AbortController().signal, user: "1234:1234", home: CONTAINER_HOME });
 		return { result, calls: rec.calls };
 	};
-	const podman = await drive({ bin: "podman", buildArgs: buildPodmanRunArgs });
-	assert.equal(podman.result.detached, true, "the check ran to its end: ps listed it running, so it was stopped");
-	const verbs = podman.calls.map((c) => `${c.args[0]} ${c.args[1] ?? ""}`.trim());
-	for (const verb of ["network create", "network connect", "ps -a", "stop", "rm -f", "network disconnect", "network rm"]) {
-		assert.ok(verbs.some((v) => v.startsWith(verb)), `the ${verb} step ran, so its binary is pinned below`);
-	}
-	assert.deepEqual([...new Set(podman.calls.map((c) => c.cmd))], ["podman"], "no step fell back to docker");
-	const run = podman.calls.find((c) => c.args[0] === "run").args;
-	assert.equal(run[run.indexOf("--user=1234:1234") + 1], "--userns=keep-id", "the injected builder made the argv");
-	// The defaults are the local venue's, unchanged.
+	// The podman venue (the reason `bin` and `buildArgs` existed) went with the sandbox backends; the seam stays,
+	// and the default drives docker through every step below.
 	const local = await drive({});
+	assert.equal(local.result.detached, true, "the check ran to its end: ps listed it running, so it was stopped");
+	const verbs = local.calls.map((c) => `${c.args[0]} ${c.args[1] ?? ""}`.trim());
+	for (const verb of ["network create", "network connect", "ps -a", "stop", "rm -f", "network disconnect", "network rm"]) {
+		assert.ok(verbs.some((v) => v.startsWith(verb)), `the ${verb} step ran, so its binary is pinned above`);
+	}
 	assert.deepEqual([...new Set(local.calls.map((c) => c.cmd))], ["docker"]);
 	assert.ok(!local.calls.find((c) => c.args[0] === "run").args.some((a) => a.startsWith("--userns")));
 });
@@ -1029,17 +1025,6 @@ test("exitAuth: the default key is 32 random bytes of hex, fresh per run", { ski
 	for (let i = 0; i < 2; i++) await runContainer({ job: JOB, prepared: PREPARED, name: "j1", signal: new AbortController().signal, exitAuth: true });
 	assert.match(keys[0], /^[0-9a-f]{64}$/);
 	assert.notEqual(keys[0], keys[1]);
-});
-
-test("exitAuth on a podman venue: the same key, -i on the podman argv", { skip }, async () => {
-	const { buildPodmanRunArgs } = await import("../src/docker-run.mjs");
-	const rec = {};
-	const runContainer = mod.makeRunContainer({ image: "pi-job:x", hostEnv: HOST, spawnFn: fakeSpawnStdin(rec), bin: "podman", buildArgs: buildPodmanRunArgs, mintExitKey: () => MINTED });
-	await runContainer({ job: JOB, prepared: PREPARED, name: "j1", signal: new AbortController().signal, exitAuth: true, user: "1000:1000", home: "/home/pi" });
-	assert.equal(rec.cmd, "podman");
-	assert.ok(rec.args.includes("-i"));
-	assert.ok(rec.args.includes("--userns=keep-id"));
-	assert.equal(rec.stdin, `${MINTED}\n`);
 });
 
 // ---- issue #596: what the container used, and the supervisor's out-of-memory report ----

@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { test } from "node:test";
 import { REASONS, SESSION_REASON_TEXT, PLAN_REASON_TEXT } from "@edgehero/pi-dispatch/reason-catalog";
 import { CHAT_REFUSALS } from "@edgehero/pi-dispatch/chat-mode";
 import { loadPageData, pagePanels, panelIds, renderPage } from "../src/console/pages.mjs";
 import { refusedBeforeStart, runOutcome } from "../src/console/panels.mjs";
-import { rerunCheckOf, sandboxCheckOf } from "../src/console/run-api.mjs";
+import { rerunCheckOf } from "../src/console/run-api.mjs";
 import { makeLiveHub } from "../src/console/live.mjs";
 import { createFleetReader, fleetQueuesOn, readFleetQueues, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, RUN_RECORD_UNREAD } from "../src/read-model.mjs";
 import { runUnreadText, runUntoldText } from "../src/console/panels/run.mjs";
-import { sandboxRetentionOf } from "../src/sandbox-verdict.mjs";
 import { parkedAnswerRefusalOf, RERUN_DATA_KEPT_MS, RERUN_DATA_KEPT_TEXT, RERUN_KEPT_SLACK_MS, rerunRefusalOf } from "../src/job-actions.mjs";
 import { FORGE_JOB_RETENTION_MS, LOCAL_JOB_KEPT_FAILED_S } from "@edgehero/pi-dispatch/retention";
 import { DOCS_ROOT } from "../src/words.mjs";
@@ -19,8 +16,8 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 
 // The run page leads with its outcome and offers only what can work (issue #710, PR 3; REQ-OPERATOR-CONSOLE-SCREENS (c),
 // REQ-OPERATOR-CONSOLE-ACTIONS): the outcome banner first, the absent record said once, the panels a refused run never
-// had drawn empty, the detail tokens with their catalog sentences, and the sandbox and re-run actions hidden with one
-// line where they cannot work.
+// had drawn empty, the detail tokens with their catalog sentences, and the re-run action hidden with one
+// line where it cannot work.
 
 const NOW = Date.UTC(2026, 9, 8, 15, 39, 8);
 const iso = (ms) => new Date(ms).toISOString();
@@ -36,8 +33,8 @@ const panelsOf = async (role, data, id) => pagePanels("run", ctxOf(role, data, i
 const joined = (panels) => panels.map((p) => p.html).join("");
 const count = (text, needle) => text.split(needle).length - 1;
 
-test("the viewer disclosure precedes the outcome and Workspace, then the run's progress", () => {
-  assert.deepEqual(panelIds("run").slice(0, 4), ["p-viewer", "p-outcome", "p-workspace", "p-progress"]);
+test("the viewer disclosure precedes the outcome and the run's progress", () => {
+  assert.deepEqual(panelIds("run").slice(0, 3), ["p-viewer", "p-outcome", "p-progress"]);
 });
 
 test("a refused run: the banner says the outcome word, the catalog's sentence for its why, the next step and the docs link; Progress and Chat draw nothing", async () => {
@@ -207,24 +204,6 @@ test("SECURITY: the banner is the same for a viewer and an operator, and never c
 // ---- the actions ---------------------------------------------------------------------------------------------------------
 
 const summaryOf = async (record, data = {}, { role = "operator", readOnly = false } = {}) => (await pagePanels("run", ctxOf(role, { run: { record, source: "local" }, ...data }, record.jobId, readOnly))).find((p) => p.id === "p-actions").html.replace(/<\/?span[^>]*>/g, "");
-const workspaceOf = async (record, data = {}, { role = "operator", readOnly = false } = {}) => (await pagePanels("run", ctxOf(role, { run: { record, source: "local" }, ...data }, record.jobId, readOnly))).find((p) => p.id === "p-workspace").html.replace(/<\/?span[^>]*>/g, "");
-
-test("the sandbox action: hidden with a reason for a venue with no shell, a run refused before it started, and a manifest this host refuses; kept otherwise", async () => {
-  const cmd = (id) => `<code>pi-dispatch sandbox ${id}</code>`;
-  assert.ok((await workspaceOf(COMPLETED)).includes(cmd(COMPLETED.jobId)), "no check read: the selectable command still lets its host decide");
-  const os = await workspaceOf({ ...COMPLETED, backend: "openshell" });
-  assert.ok(!os.includes("pi-dispatch sandbox") && os.includes("Its openshell venue cannot reopen a sandbox.") && os.includes("fromRun=gh-c1"));
-  const refused = await workspaceOf(REFUSED, { sandboxCheck: { retained: true, why: null } });
-  assert.ok(!refused.includes("pi-dispatch sandbox") && refused.includes("The run was refused before it started."));
-  const by = async (check) => workspaceOf(COMPLETED, { sandboxCheck: check });
-  for (const why of ["swept", "workspace-gone", "past-window"]) {
-    const noLongerOpen = await by({ retained: false, why });
-    assert.ok(noLongerOpen.includes("fromRun=gh-c1") && noLongerOpen.includes("Prepare from this run"), why);
-    assert.ok(!noLongerOpen.includes("pi-dispatch sandbox"), `${why}: no impossible open is offered`);
-  }
-  assert.ok((await by({ retained: false, why: "retention-off", reason: "retention off" })).includes("Workspace retention is off on its host."));
-  for (const keep of [{ retained: true, why: null }, { elsewhere: true }, { unreachable: true }, { retained: false, why: "policy-unreadable", reason: "x" }]) assert.ok((await by(keep)).includes(cmd(COMPLETED.jobId)), JSON.stringify(keep));
-});
 
 test("the re-run action: the form only where rerunRefusalOf (the planner's first step) does not refuse; the reason in its place", async () => {
   const form = 'data-action="rerun"';
@@ -297,7 +276,7 @@ test("the re-run windows and the sentences that state them are the queue's own r
 function readerOn({ jobs = {}, paths = {}, env = {}, getJob } = {}) {
   const queue = { name: "pi-jobs", getJob: getJob ?? (async (id) => (Object.hasOwn(jobs, id) ? { id, data: jobs[id] } : null)), close: async () => {} };
   const redis = { on() {}, disconnect() {}, quit: async () => {} };
-  return createFleetReader({ valkeyUrl: "redis://unused", logsDir: tempDir("pd-710-logs-"), ...paths }, { makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis, readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => ({ names: [], incomplete: null }), nowFn: () => NOW, budgetEnvFn: () => env, sandboxRetentionFn: sandboxRetentionOf });
+  return createFleetReader({ valkeyUrl: "redis://unused", logsDir: tempDir("pd-710-logs-"), ...paths }, { makeQueueFn: () => queue, parseConnectionFn: () => ({}), redisFn: () => redis, readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => ({ names: [], incomplete: null }), nowFn: () => NOW, budgetEnvFn: () => env });
 }
 
 test("the fleet reader's rerunCheck is rerunRefusalOf over the retained data; the data never leaves it", async () => {
@@ -309,30 +288,6 @@ test("the fleet reader's rerunCheck is rerunRefusalOf over the retained data; th
   assert.deepEqual(await reader.rerunCheck("gh <x>", null), { refusal: "a run id is letters, digits and . _ : -, at most 200 characters" });
   const broken = readerOn({ getJob: async () => { throw new Error("ECONNREFUSED"); } });
   assert.deepEqual(await broken.rerunCheck("gh-1", { jobId: "gh-1" }), { unreachable: true });
-});
-
-/** A retention root holding one run, written the way `retainJobDir` writes it (sandbox-session.test.mjs's). */
-function retainedRoot(jobId, extra = {}) {
-  const sandboxDir = tempDir("pd-710-sbx-");
-  const workspace = join(sandboxDir, jobId, "workspace");
-  mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(sandboxDir, jobId, "manifest.json"), JSON.stringify({ jobId, kind: "github", image: "pi-job:latest", workspace, createdAt: iso(NOW - 3_600_000), keepUntil: null, backend: "local", ...extra }));
-  return sandboxDir;
-}
-
-test("the fleet reader's sandboxCheck is the panel's manifest verdict, read only for a run of this host", async () => {
-  const sandboxDir = retainedRoot("gh-1");
-  const reader = readerOn({ paths: { sandboxDir, sandboxRetentionHours: 24 }, env: { PI_WORKER_NAME: "mini1" } });
-  assert.deepEqual(await reader.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini1" }), { retained: true, why: null, until: NOW + 23 * 3_600_000 });
-  assert.deepEqual(await reader.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini2" }), { elsewhere: true }, "another host's manifest is not here");
-  assert.equal((await reader.sandboxCheck("gh-9", { jobId: "gh-9", host: "mini1" })).why, "swept");
-  const off = readerOn({ paths: { sandboxDir, sandboxRetentionHours: 0 }, env: { PI_WORKER_NAME: "mini1" } });
-  assert.equal((await off.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini1" })).why, "retention-off");
-  const unwired = createFleetReader({ valkeyUrl: "redis://unused", sandboxDir, sandboxRetentionHours: 24 }, { makeQueueFn: () => ({ name: "pi-jobs" }), parseConnectionFn: () => ({}), redisFn: () => ({ on() {} }), budgetEnvFn: () => ({ PI_WORKER_NAME: "mini1" }) });
-  assert.deepEqual(await unwired.sandboxCheck("gh-1", { jobId: "gh-1", host: "mini1" }), { elsewhere: true }, "no verdict wired: cannot tell, the command stays");
-  // The verdict is the panel's: the same `reason` readSandboxInfo shows (sandbox-session.test.mjs holds those words).
-  const past = sandboxRetentionOf({ sandboxDir, sandboxRetentionHours: 1 }, "gh-1", { now: () => NOW + 3_600_000 });
-  assert.deepEqual([past.retained, past.why, past.reason], [false, "past-window", "past its window: open it with the CLI's --pin"]);
 });
 
 /** A Valkey stand-in for the registry and the keyspace scan: `members` the registry's set, `metas` the queue meta keys. */
@@ -395,29 +350,9 @@ test("a degraded queue list makes not-found unreadable, never a refusal, kept fo
   assert.equal((await fleetQueuesOn(fleetRedis(), { discoverFn: async () => ["pi-jobs@a"] })).incomplete, null);
 });
 
-test("the console never hides the sandbox command on a venue policy it cannot see: a podman run with no PI_BACKENDS (review round 1)", async () => {
-  const sandboxDir = retainedRoot("gh-p1", { backend: "podman" });
-  // The console's env as it really is: no PI_BACKENDS (not a key it takes from the deployment's .env, OQ-038).
-  const reader = readerOn({ paths: { sandboxDir, sandboxRetentionHours: 24 }, env: { PI_WORKER_NAME: "mini1" } });
-  const check = await reader.sandboxCheck("gh-p1", { jobId: "gh-p1", host: "mini1", backend: "podman" });
-  assert.deepEqual(check, { retained: true, why: null, until: NOW + 23 * 3_600_000 });
-  const page = await workspaceOf({ ...COMPLETED, jobId: "gh-p1", backend: "podman" }, { sandboxCheck: check });
-  assert.ok(page.includes('<code>pi-dispatch sandbox gh-p1</code>'), "the command, for the opener's shell to decide");
-  // The panel's own verdict, with this process's env, still refuses it there: only the console asks with the policy unknown.
-  assert.equal(sandboxRetentionOf({ sandboxDir, sandboxRetentionHours: 24 }, "gh-p1", { now: () => NOW, env: {} }).why, "unblessed");
-  // Even a venue-policy word that reached the page keeps the command (the backstop).
-  for (const why of ["unblessed", "policy-unreadable", "a-word-added-later"]) {
-    assert.ok((await workspaceOf({ ...COMPLETED, jobId: "gh-p1", backend: "podman" }, { sandboxCheck: { retained: false, why, reason: "not reopenable here (PI_BACKENDS lacks podman)" } })).includes('<code>pi-dispatch sandbox gh-p1</code>'), why);
-  }
-  // What is certain still hides it: a venue with no sandbox shell, whatever any shell blesses.
-  const shellless = retainedRoot("gh-o1", { backend: "openshell" });
-  const o = await readerOn({ paths: { sandboxDir: shellless, sandboxRetentionHours: 24 }, env: { PI_WORKER_NAME: "mini1" } }).sandboxCheck("gh-o1", { jobId: "gh-o1", host: "mini1" });
-  assert.equal(o.why, "venue");
-});
-
 test("complete action answers are reused for 15 s while a request retries unreadable queue answers", async () => {
   let reads = 0;
-  const fleet = { rerunCheck: async () => ((reads += 1), reads === 1 ? { unreachable: true } : { ok: true }), sandboxCheck: async () => ({ retained: true, why: null }) };
+  const fleet = { rerunCheck: async () => ((reads += 1), reads === 1 ? { unreachable: true } : { ok: true }) };
   const record = { jobId: "gh-1", endedAt: iso(NOW) };
   assert.deepEqual(await rerunCheckOf(fleet, "gh-1", record, { now: () => NOW }), { unreachable: true });
   assert.deepEqual(await rerunCheckOf(fleet, "gh-1", record, { now: () => NOW + 1 }), { ok: true }, "a request retries an unreadable queue check");
@@ -428,23 +363,20 @@ test("complete action answers are reused for 15 s while a request retries unread
   await rerunCheckOf(fleet, "gh-1", record, { now: () => NOW + 31_000 });
   assert.equal(reads, 3, "the latest complete answer is still within its window");
   assert.equal(await rerunCheckOf({}, "gh-1", record), null, "no reader: null");
-  assert.deepEqual(await sandboxCheckOf(fleet, "gh-1", record, { now: () => NOW }), { retained: true, why: null });
 });
 
-test("loadPageData reads the action checks for a run with a record, and skips the sandbox check for a run refused before it started", async () => {
+test("loadPageData reads the action check for a run with a record, and skips it for a run refused before it started", async () => {
   const asked = [];
   const fleet = (record) => ({
     runById: async () => ({ record, source: "local" }),
     runsPage: async () => ({ runs: [], next: null }),
     rerunCheck: async (id) => (asked.push(["rerun", id]), { ok: true }),
-    sandboxCheck: async (id) => (asked.push(["sandbox", id]), { retained: true, why: null }),
   });
   const done = await loadPageData("run", { id: "gh-c7" }, { fleet: fleet({ ...COMPLETED, jobId: "gh-c7" }), now: NOW });
-  assert.deepEqual([done.rerunCheck, done.sandboxCheck], [{ ok: true }, { retained: true, why: null }]);
+  assert.deepEqual(done.rerunCheck, { ok: true });
   const refused = await loadPageData("run", { id: "gh-r7" }, { fleet: fleet({ ...REFUSED, jobId: "gh-r7" }), now: NOW });
   assert.deepEqual(refused.rerunCheck, { ok: true });
-  assert.equal(refused.sandboxCheck, undefined);
-  assert.deepEqual(asked, [["rerun", "gh-c7"], ["sandbox", "gh-c7"], ["rerun", "gh-r7"]]);
+  assert.deepEqual(asked, [["rerun", "gh-c7"], ["rerun", "gh-r7"]]);
 });
 
 test("live: a panel that becomes empty is swapped in as empty (its section then hidden), and one that fills is swapped back", async () => {

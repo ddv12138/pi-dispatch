@@ -112,7 +112,7 @@ import { agentReadProjection, agentReasonToken } from "../agent-read.mjs";
  * most once per 15 s, so it is held to 5 s. Between loads the last data is rendered again (cheap), so a new view of the
  * same page and query is drawn at once from it.
  */
-export const LIVE_DEFAULTS = Object.freeze({ intervalMs: 1000, pingMs: 15_000, maxBufferBytes: 2 * 1024 * 1024, pageMinMs: Object.freeze({ setup: 2000, sandboxes: 5000, runs: 5000, run: 2000, parked: 5000 }), transcriptPagesPerTick: 4 });
+export const LIVE_DEFAULTS = Object.freeze({ intervalMs: 1000, pingMs: 15_000, maxBufferBytes: 2 * 1024 * 1024, pageMinMs: Object.freeze({ setup: 2000, runs: 5000, run: 2000, parked: 5000 }), transcriptPagesPerTick: 4 });
 
 const digestOf = (text) => createHash("sha256").update(text).digest("hex");
 
@@ -623,7 +623,7 @@ export function makeLiveHub({
       // `degraded`: what it was last drawn from a failed load, while it holds nothing (see the header).
       // `dquery`/`dkey`: the part of the query the page's data depends on and its canonical text (`dataQueryOf`,
       // `dataKeyOf`), which the load is shared by; `qkey` keys the view.
-      const refresh = ["sandboxes", "setup"].includes(page) && typeof lastEventId !== "string";
+      const refresh = page === "setup" && typeof lastEventId !== "string";
       const sub = { kind: "page", res, sessionId, session: { name: String(session?.name ?? ""), role: String(session?.role ?? "") }, page, query, locale: locale === "zh" ? "zh" : "en", qkey: String(queryKeyOf(page, query)), dquery: dataQueryOf(page, query), dkey: String(dataKeyOf(page, query)), needsFull: true, holds: refresh || typeof lastEventId === "string", refresh, said: null, degraded: null, cursor: page === "run" && typeof lastEventId === "string" && TRANSCRIPT_ID_RE.test(lastEventId) ? lastEventId : null, format: "html", jobId: null, transcriptDone: false, recordWord: null };
       subs.add(sub);
       startTimer();

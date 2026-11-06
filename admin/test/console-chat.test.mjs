@@ -79,7 +79,7 @@ test("Chat panel, live: the steer and follow-up forms MOVE here from the Inbox p
   assert.equal(count(runInbox(view("operator", data, { readOnly: true })), /data-action="steer"/g), 0);
   const viewer = String(runChat(view("viewer", data)));
   assert.match(viewer, /This run is running\./);
-  assert.match(viewer, /a viewer sees the run's status only/);
+  assert.match(viewer, /a viewer sees the run&#39;s status only/);
   assert.ok(!viewer.includes("data-action") && !viewer.includes("pi-dispatch chat") && !viewer.includes("#transcript"), "status only");
 });
 
@@ -410,7 +410,7 @@ test("end to end: token sign-in, /api/run, the JSON transcript with a Last-Event
   assert.match(opPage.text, /<section id="p-chat" data-panel><div class="card"><div class="card__head"><h2>Chat<\/h2>/);
   assert.equal(count(opPage.text, /data-action="steer"/g), 2, "one steer form per mode on the whole page");
   const vPage = await c.send({ path: "/run?id=gh-live", headers: { cookie: vcookie } });
-  assert.match(vPage.text, /a viewer sees the run's status only/);
+  assert.match(vPage.text, /a viewer sees the run&#39;s status only/);
   assert.ok(!vPage.text.includes('data-action="steer"'));
 });
 

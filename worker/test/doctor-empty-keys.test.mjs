@@ -68,7 +68,7 @@ const readByLoaders = (key) =>
 const CLI_KEYS = new Set(Object.values(CLI_SERVICE_KEYS).flat());
 // The CLI keys whose tool reads an empty value as unset, each cited in doctor.mjs beside the list. Pinned here so an
 // addition is a reviewed claim about a tool's source, not an edit to one table.
-const CITED_CLI_KEYS = ["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR", "CONTAINERS_CONF", "CONTAINERS_CONF_OVERRIDE"];
+const CITED_CLI_KEYS = ["DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG", "GH_TOKEN", "GITHUB_TOKEN", "GH_HOST", "GH_CONFIG_DIR"];
 // Read by more than one program, at least one of which takes empty (or a set variable) as a value.
 const NEVER_LISTED = ["CONTAINER_HOST", "CONTAINER_CONNECTION", "CONTAINERS_STORAGE_CONF", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "HOME", "TMPDIR", "TEMP"];
 

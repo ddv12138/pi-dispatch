@@ -35,9 +35,6 @@ export const KEYLESS_ENV_NAME = "PI_DISPATCH_KEYLESS";
  * a variable added to the closed map and not to this list fails there rather than becoming a hole here.
  */
 export const CONTAINER_ENV_NAMES = new Set([
-	// Issue #730: the worker's choice of the readable runner node on the OpenShell venues (image/entrypoint.sh). Reserved,
-	// so neither `run.secrets` nor `PI_FORWARD_ENV` can make a job's key holders readable on any venue.
-	"PI_RUNNER_OBSERVABLE",
 	// Issue #693: derived from the resolved job memory, never chosen by a trigger or forwarded host value.
 	"PI_CODEMODE_MAX_WORKERS",
 	"PI_PROVIDER",
@@ -64,9 +61,6 @@ export const CONTAINER_ENV_NAMES = new Set([
 	// Issue #646: a trigger binding it through run.secrets would tell the runner to watch an inbox the operator did not
 	// arm, on a run the worker never opened one for.
 	"PI_STEER",
-	// Issue #683: which file layout the runner reads. A trigger binding it through run.secrets would point the runner at
-	// a tree the worker never wrote, or, on a copying venue, back at /job, where nothing was uploaded.
-	"PI_JOB_LAYOUT",
 	"PI_MCP_SERVERS",
 	// Issues #501, #502: the per-job dollar cap (written by the worker since #501, from the trigger's and the
 	// deployment's caps) and the allowed-model list (reserved until #502 writes it). Neither can be bound through
@@ -77,12 +71,6 @@ export const CONTAINER_ENV_NAMES = new Set([
 	// Issue #545: tells the runner the exit line's key waits on stdin. A trigger setting it would block its own runner
 	// on a stdin no one writes, or turn the signed line off.
 	"PI_EXIT_AUTH",
-	// Issue #686: tells the runner to mirror its session file over stderr. A trigger setting it would send records no
-	// worker reads into the job log, or, with the image's key, stream a transcript the operator did not arm.
-	"PI_TRANSCRIPT",
-	// Issue #704 part 3: tells the runner to read a project secret bundle's plain variables from the job directory's
-	// bundle-env.json. A trigger setting it would make a runner refuse on a file nobody wrote, or read one it should not.
-	"PI_BUNDLE_ENV",
 	"PI_OFFLINE",
 	// Issue #796: names a canary's candidate. A trigger setting it would make a run report on a path nobody installed.
 	"PI_PACKAGE_CANARY",

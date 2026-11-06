@@ -34,7 +34,7 @@ export function selectCanarySources(records, options, { now, windowMs = 7 * 8640
  */
 export async function executeCanary(options, { records, now = Date.now, inspectSource, execute, deploymentCapTokens = null, id = () => `canary-${randomUUID()}` }) {
 	const originals = selectCanarySources(records, options, { now: now() });
-	if (originals.length === 0) throw new Error("no completed jobs of this flow in the last seven days; run the flow with sandbox retention enabled first");
+	if (originals.length === 0) throw new Error("no completed jobs of this flow in the last seven days; run the flow again, then curate its canary source");
 	const sources = [];
 	for (const original of originals) sources.push(await inspectSource(original));
 	const share = Math.floor(options.capTokens / sources.length);
