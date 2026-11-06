@@ -99,6 +99,10 @@ services:
     command: ["node", "/opt/pi-dispatch/worker/src/cli.mjs", "worker"]
     volumes:
       - "../:${PWD}"
+      # Flow skills live in the deployment tree, mounted at a FIXED container path: the
+      # host checkout may sit anywhere, while run.skillsDir is a worker-container path.
+      # The worker copies this read-only directory into each job's /job/trigger-skills.
+      - "./skills:/opt/pi-skills:ro"
       - /var/run/docker.sock:/var/run/docker.sock
       - ${DOCKER_CLI_BIN:-/usr/bin/docker}:/usr/local/bin/docker:ro
     depends_on:

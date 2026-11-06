@@ -1,0 +1,37 @@
+{
+  "triggers": [
+    {
+      "on": { "type": "label", "any": ["afk-spec"] },
+      "run": {
+        "kind": "gitlab",
+        "flow": "spec-run",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "statusComment": true,
+        "maxTurns": 300
+      }
+    },
+    {
+      "on": { "type": "label", "any": ["ready-for-agent"] },
+      "run": {
+        "kind": "gitlab",
+        "flow": "ticket-run",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "resume": true,
+        "statusComment": true,
+        "maxTurns": 120,
+        "skillsDir": "/opt/pi-skills"
+      }
+    },
+    {
+      "on": { "type": "pull_request", "action": ["open"] },
+      "run": {
+        "kind": "gitlab",
+        "flow": "ticket-merge",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "statusComment": true,
+        "maxTurns": 120,
+        "skillsDir": "/opt/pi-skills"
+      }
+    }
+  ]
+}
