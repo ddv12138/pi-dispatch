@@ -2,16 +2,16 @@
  * Every pi package this repository installs is the ONE release the runner pins (CONST-PI-VERSION-PINNED, issue #587).
  *
  * THE FAILURE THIS EXISTS FOR is new at pi 1.0.1. Up to pi 0.99.1 pi-coding-agent shipped an npm-shrinkwrap.json, so
- * its own pi-ai, pi-agent-core, pi-tui and the rest were locked by pi itself. 1.0.1 dropped the shrinkwrap, and
+ * its own pi-ai, pi-agent-core and the rest were locked by pi itself. 1.0.1 dropped the shrinkwrap, and
  * pi-coding-agent depends on its siblings by a RANGE (`^1.0.3`). A lockfile regenerated on another day can then
  * resolve a sibling to a newer release than the one every pinned assumption was checked against, with every pin in
  * every package.json still exact. So the root package.json carries an `overrides` block that pins each pi package to
  * the runner's pin, and this checks both halves:
- *   - the overrides name every pi package the lockfile holds, each at the pin;
- *   - every pi package entry in package-lock.json (at any depth) is at the pin;
- *   - the places the pin is written by hand agree with it: the runner's pi-mcp and pi-agent-core, the worker's pi-ai
- *     and pi-tui, image/Dockerfile's PI_VERSION
- *     and the durable-install commands in README.md and docs/console.md.
+ *   - the overrides name every pi package a workspace of this repository installs directly, each at the pin;
+ *   - every pi package entry in package-lock.json (at any depth) is at the pin, which also holds the ones only pi's
+ *     own tree installs (pi-coding-agent's pi-tui): they ride pi's own pin and need no override;
+ *   - the places the pin is written by hand agree with it: the runner's pi-mcp and pi-agent-core, the worker's pi-ai,
+ *     image/Dockerfile's PI_VERSION and the durable-install commands in README.md and docs/console.md.
  *
  * `piPinProblems` is pure (the files are handed in) so its test pins the rule on constructed input as well as on this
  * repository's own files. Run as a script it reads the repository and exits 1 on any problem.
@@ -39,9 +39,6 @@ export function piPinProblems({ root, lock, runner, worker, dockerfile, document
 	// not re-export it; the runner's copy must be the one pi-coding-agent loads, whose hooks and tools it is handed.
 	want("image/runner/package.json's @earendil-works/pi-agent-core", runner?.dependencies?.[`${SCOPE}pi-agent-core`]);
 	want("worker/package.json's @earendil-works/pi-ai", worker?.dependencies?.[`${SCOPE}pi-ai`]);
-	// The terminal chat draws with pi-tui (issue #647, chat-view.mjs), the renderer pi itself uses: one copy at the pin,
-	// so the screen it draws and the escapes it can emit are the ones the pinned pi was checked against.
-	want("worker/package.json's @earendil-works/pi-tui", worker?.dependencies?.[`${SCOPE}pi-tui`]);
 	want("image/Dockerfile's PI_VERSION", /^ARG PI_VERSION=(\S*)$/m.exec(dockerfile ?? "")?.[1]);
 	for (const path of PI_DOC_SITES) {
 		const copies = [...String(documents?.[path] ?? "").matchAll(new RegExp(PI_DOC_VERSION_RE.source, "g"))];
@@ -50,7 +47,17 @@ export function piPinProblems({ root, lock, runner, worker, dockerfile, document
 	}
 	const overrides = root?.overrides ?? {};
 	const locked = new Map();
+	// The pi packages THIS repository installs directly, read off the root and the workspace entries. Only these need an
+	// override; a pi package only pi's own tree installs (pi-coding-agent's pi-tui) rides pi's own pin, which the
+	// lockfile check below holds at the pin all the same.
+	const declared = new Set();
 	for (const [path, entry] of Object.entries(lock?.packages ?? {})) {
+		if (!path.includes("node_modules/")) {
+			for (const field of ["dependencies", "devDependencies", "optionalDependencies", "peerDependencies"]) {
+				for (const name of Object.keys(entry?.[field] ?? {})) if (name.startsWith(SCOPE) && name.split("/").length === 2) declared.add(name);
+			}
+			continue;
+		}
 		const at = path.lastIndexOf(`node_modules/${SCOPE}`);
 		if (at < 0) continue;
 		const name = path.slice(at + "node_modules/".length);
@@ -59,7 +66,7 @@ export function piPinProblems({ root, lock, runner, worker, dockerfile, document
 	}
 	if (locked.size === 0) problems.push("package-lock.json holds no pi package at all");
 	for (const [path, { name, version }] of locked) want(`package-lock.json's ${path}`, version);
-	const named = new Set([...[...locked.values()].map(({ name }) => name), ...Object.keys(overrides).filter((name) => name.startsWith(SCOPE))]);
+	const named = new Set([...[...locked.values()].filter(({ name }) => declared.has(name)).map(({ name }) => name), ...Object.keys(overrides).filter((name) => name.startsWith(SCOPE))]);
 	for (const name of named) want(`package.json's overrides["${name}"]`, overrides[name]);
 	return problems;
 }
