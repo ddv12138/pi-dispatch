@@ -95,9 +95,9 @@ trigger form has no image field):
 All three rules in `runtime/triggers.json` — `spec-run`, `ticket-run` and `ticket-merge` — name that Java image by
 hand. The merger needs Maven to test the candidate, even though it writes no code.
 
-The job images on the host are the two 4.3.3 images above, plus the previous `4.3.2-5d10c5d2` pair kept for
-rollback. The bare `4.3.2` and `latest` tags of `pi-job` and `pi-job-java21`, `ghcr.io/edgehero/pi-job:4.3.1` and
-the `pi-job:java21` alias have been deleted.
+The job images on the host are the two 4.3.3 images above. The bare `4.3.2` and `latest` tags of `pi-job` and
+`pi-job-java21`, `ghcr.io/edgehero/pi-job:4.3.1`, the `pi-job:java21` alias and the previous `4.3.2-5d10c5d2` pair
+have been deleted.
 
 A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
 Maven settings are baked at build time, not passed by the job:
