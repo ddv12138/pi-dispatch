@@ -133,7 +133,7 @@ test("every release note links the upgrade guide at its own tag, on both paths a
 
 // A guide whose upgrade note says to move some parts "together" without an upgrade heading of its own. The heading
 // rule below finds the rest; these are pinned because their note is a sentence inside a section about something else.
-const PINNED_GUIDES = ["secrets.md", "mcp.md", "sessions.md", "wait-for.md", "multi-host.md", "durable-runs.md", "canary.md", "zero-touch.md", "console.md"];
+const PINNED_GUIDES = ["secrets.md", "mcp.md", "sessions.md", "multi-host.md", "console.md"];
 
 /** The guides that keep an upgrade note: an upgrade heading or bold lead, or the pinned list. */
 function guidesWithUpgradeNotes() {
@@ -149,7 +149,7 @@ function guidesWithUpgradeNotes() {
 test("every guide with upgrade notes links the upgrade guide, and the upgrade guide links it back", () => {
 	const guides = guidesWithUpgradeNotes();
 	// Not vacuous: the heading rule alone finds these, so a rule that matched nothing would fail here.
-	for (const name of ["costs.md", "egress.md", "global-pi-overlay.md", "job-image.md", "pause-windows.md", "podman.md", "replicas.md", "scoped-limits.md", "sizing.md", "triggers.md"]) {
+	for (const name of ["costs.md", "egress.md", "global-pi-overlay.md", "job-image.md", "podman.md", "scoped-limits.md", "sizing.md", "triggers.md"]) {
 		assert.ok(guides.includes(name), `the upgrade heading rule finds docs/${name}`);
 	}
 	const upgrading = read("docs/upgrading.md");

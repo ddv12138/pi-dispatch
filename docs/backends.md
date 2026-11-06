@@ -715,8 +715,7 @@ that chooses it), or the job is refused before it spends (`job-image-observable-
   `live_transcript_skipped` (`no-capability` or `no-exit-key`). A record that does not verify is dropped and counted
   (`transcript_record_unverified`), never published.
 - **Steering is served** (issue #686): with no mount a later file could reach, the worker writes each message as a
-  frame on the exec's stdin, signed with the job's exit key, and the delivery ack comes back over the stderr transcript
-  ([steering.md](steering.md#on-a-venue-that-copies-files-openshell)). The job image must declare `steerStdin` (beside
+  frame on the exec's stdin, signed with the job's exit key, and the delivery ack comes back over the stderr transcript. The job image must declare `steerStdin` (beside
   `steer`, `exitAuth` and `transcriptStderr`); without it a steered job runs unsteered, `steerSkipped: "venue-copies"`.
   This channel is weaker than the read-only `/inbox` mount the binding venues keep: the agent cannot plant a message,
   but it can intercept one, which then settles `late`.

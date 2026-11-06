@@ -1,6 +1,6 @@
 # Triggers: the full reference
 
-For an operator-reviewed next-attempt model fallback list, see [Model failover](model-failover.md).
+For an operator-reviewed next-attempt model fallback list, see Model failover.
 
 This page is the detail behind the [Triggers](../README.md#triggers) section of the README. A trigger is
 one entry in `triggers.json`. It says what starts a job and what that job runs.
@@ -17,8 +17,8 @@ one entry in `triggers.json`. It says what starts a job and what that job runs.
 ```
 
 Watch is the additional collector trigger, configured by hand with `watchSources` and `on.type: "watch"`.
-Its signed finding schema, limits, read-only investigation and issue modes are described in [Watch findings](watch.md);
-optional shadow/active decisions and board proposals are in [Watch decisions](watch-decisions.md).
+Its signed finding schema, limits, read-only investigation and issue modes are described in Watch findings;
+optional shadow/active decisions and board proposals are in Watch decisions.
 The forge and cron reference below keeps their existing behavior.
 
 ## Editing and firing from the console
@@ -247,7 +247,7 @@ changes what code runs or what it costs.
   misspelled name is refused when the file loads. Pi would otherwise ignore it silently. The job image
   must declare the `excludeTools` capability. The shipped image does. A job carrying exclusions on an
   older image is refused before it costs anything. That image's runner would run the job with every tool
-  you removed ([`docs/exclude-tools.md`](exclude-tools.md)).
+  you removed.
 
 - `"mcp": ["docs", "files"]` names MCP servers from the overlay's `mcp.json` for that trigger's jobs to
   connect ([`docs/mcp.md`](mcp.md)). Names only: the servers themselves, and the credentials they take, are the
@@ -270,8 +270,7 @@ changes what code runs or what it costs.
   history ([`docs/global-pi-overlay.md`](global-pi-overlay.md)).
 
 - `"replicas": 2` races independent sandboxes on one event and opens one review request per replica, on
-  any forge. Webhook triggers only: the poller does not fan out. Each replica spends its own budget slot
-  ([`docs/replicas.md`](replicas.md)).
+  any forge. Webhook triggers only: the poller does not fan out. Each replica spends its own budget slot.
 
 - `"instructions"` attaches one line of standing text to that trigger (forge triggers only, up to 2000
   characters). It reaches the job's prompt above the issue or PR text, labelled as coming from you and
@@ -292,8 +291,7 @@ changes what code runs or what it costs.
 
 - `"waitFor": [{ "after": "2026-09-01T09:00:00Z" }, { "profile": "jira" }]` holds this trigger's job in
   the queue, unstarted and unbilled, until every condition clears. An instant costs nothing. A profile
-  names one of your own check scripts. The worker runs it on the host and reads the exit code
-  ([`docs/wait-for.md`](wait-for.md)).
+  names one of your own check scripts. The worker runs it on the host and reads the exit code.
 
 - `"resume": true` continues the session that opened the PR ([`docs/sessions.md`](sessions.md)).
 
@@ -352,7 +350,7 @@ would replay over changes the lost run already made. It is also refused beside `
 command job would dispatch the command a second time. It must be `true` or `false`, the AI tools that add and edit
 a trigger can set it behind the operator's confirm, and like `models`, adding it refuses the trigger's jobs that
 were already queued (`trigger-skew`). How a run is checkpointed and continued is in
-[`docs/durable-runs.md`](durable-runs.md).
+`docs/durable runs`.
 
 `"steer": true` opts a trigger into steering: while one of its jobs runs, operators (from the command line) and the
 people your comment trigger accepts (with its phrase, on the job's issue or pull request) can send it messages, which
@@ -363,7 +361,7 @@ the comment trigger has `"resume": true`, or gets one fixed reply. It is off by 
 anything (`job-image-steer-unsupported`), and a venue that bind-mounts. Every trigger type may set it, cron
 included; it is refused beside `"command"`. It must be `true` or `false`, the AI tools that add and edit a trigger
 can set it behind the operator's confirm, and like `models`, adding it refuses the trigger's jobs that were already
-queued (`trigger-skew`). How messages reach a running job is in [`docs/steering.md`](steering.md).
+queued (`trigger-skew`). How messages reach a running job is in `docs/steering`.
 
 ## Firing a cron trigger by hand
 
@@ -801,16 +799,16 @@ everything that runs in every job.
 Read where a workflow's own state lives before you build on it. It differs between
 a cron job and a forge job. See [`docs/workflows.md`](workflows.md).
 
-Resumable forge flows may declare typed approval gates with `run.gates`, an optional `run.gateTimeout`, and a bounded `run.gateBudgetRaiseUsd` for budget raises. See [approval gates](approval-gates.md) for configuration, decision surfaces and enforcement limits.
+Resumable forge flows may declare typed approval gates with `run.gates`, an optional `run.gateTimeout`, and a bounded `run.gateBudgetRaiseUsd` for budget raises. See approval gates for configuration, decision surfaces and enforcement limits.
 
 ## Reviewed model roles
 
-Use `run.model: "role:editor"` with an operator-reviewed `modelRoles` block to move all jobs of a role with one edit. See [model-roles.md](model-roles.md) for deployment/project precedence, agent inheritance and policy checks, [model-proposals.md](model-proposals.md) for catalog and retirement notices, and [canary.md](canary.md) for capped replay comparisons before adopting a candidate.
+Use `run.model: "role:editor"` with an operator-reviewed `modelRoles` block to move all jobs of a role with one edit. See model roles for deployment/project precedence, agent inheritance and policy checks, model proposals for catalog and retirement notices, and canary for capped replay comparisons before adopting a candidate.
 
 
 ## Zero touch grouping configuration
 
 The optional top-level `zeroTouch` section enables bounded private question capture and declares the classifier,
 cap, confidence threshold and human-written group names. It never sends an answer. Grouping is an operator-confirmed
-job through every normal budget/model/credential gate. See [Zero touch](zero-touch.md#group-repeated-questions) for
+job through every normal budget/model/credential gate. See Zero touch for
 the schema, limits and privacy boundaries. It is separate from answer rules (#772).

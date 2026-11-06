@@ -655,7 +655,7 @@ readers ([Live updates](#live-updates)).
 | `/runs/zero-touch` | How often workload runs needed a person over 7, 30 or 90 days, by project and by cause ([Zero touch](#zero-touch)). |
 | `/run?id=<job id>` | One run in the Pulse main/side grid: a job id, status, project/target/host headline and state panels for live, ended, refused, parked or recovering runs. Progress and the transcript update on one connection, attaching without reload. Chat, Inbox, Sandbox, Secrets, cost/model usage, resources, sessions and chain appear where relevant. Operators get eligible Cancel, answer, re-run and terminal actions through previews; viewers see status and numbers with a banner explaining what is hidden. |
 | `/parked` | A card for each run waiting for an answer: who asked (the run, linked to its page), how long it has waited, its project, a link to where the question was asked, its forge and how many times the session was resumed, and where to read the question (on its issue or pull request, or on its run page while the live transcript is kept); the card never shows the question itself. Then how it can be answered: being answered by a run (linked), not known, an answer box, or why it cannot be answered here ([A parked run](#outcomes-and-reasons)). |
-| `/parked/rules` | Operators only: the answer rules, read only, as `triggers.json` declares them ([Answer rules](answer-rules.md)). |
+| `/parked/rules` | Operators only: the answer rules, read only, as `triggers.json` declares them (Answer rules). |
 | `/insights?range=30d` | Spend's five linked views: Spend, Budget split (`/insights/budget-split`), Capacity (`/insights/capacity`), Breakdown (`/insights/breakdown`) and Flows map (`/insights/flows`, also `view=list`). All are viewer-readable, drawn once per load, with supported range/project/path choices preserved. Budget split actions and plan reasons are operator-only. See [Spend views](insights.md). |
 | `/fleet` | Pulse fleet state and queue switches, active and orphaned jobs, held conditions, failed jobs and bulk actions, all waiting jobs within the bounded read, schedules, hosts, doctor and a short venue comparison. Part paused names which queues still start jobs. Differing console and deployment Valkeys are disclosed on page load. |
 | `/fleet/host?name=build3` | One host's heartbeat, running and waiting jobs, orphan cleanup guidance, retained workspaces, slots and budgets, seven-day capacity, registry and doctor. The host facts update live; capacity is read when the page opens. |
@@ -664,12 +664,12 @@ readers ([Live updates](#live-updates)).
 | `/triggers/check` | Which rule a hypothetical event would start, read only. |
 | `/config/trigger?index=2` | One trigger: what starts it, what it runs, its runs and spend, and for an operator its editor, Fire now and Delete. |
 | `/config/trigger-add` | Operators only: add a trigger, with the forge words and venue capabilities beside the form. |
-| `/watch?rule=<rule>` | Watch sources, rules and the retained findings for a rule, read fresh with Reload ([Watch](watch.md)). |
-| `/watch/board?rule=<rule>&finding=<finding>` | A finding's board, its evidence and each decision ([Watch decisions](watch-decisions.md)). |
+| `/watch?rule=<rule>` | Watch sources, rules and the retained findings for a rule, read fresh with Reload (Watch). |
+| `/watch/board?rule=<rule>&finding=<finding>` | A finding's board, its evidence and each decision (Watch decisions). |
 | `/config` | The triggers, the settings overlay, the pause windows, the scoped limits, the projects, the envelope and allocation, the MCP servers, the staged packages, the secret profiles (their names only, never where a secret comes from or its value; those `PI_SECRET_PROFILES` declares are listed beside the overlay's, and a name in both is marked ambiguous; a "Secret profiles in use" table gives each profile's source, where its resolver stands against `PI_SECRET_RESOLVER_ROOTS`, the triggers and projects that use it, the last resolve a run recorded and the live hosts that advertise it, still with no path: [`secrets.md`](secrets.md#from-the-panel)), and the secret bundles: each project bundle in `triggers.json` with its project, its profile and whether this deployment declares it, fork reviews, its endpoint names and hosts, the triggers that opt out and the variable names the newest run received, plus the bundle resolvers by name and format ([`secrets.md`](secrets.md#from-the-panel)). Never a bundle's reference or a value. |
 | `/config/secrets` | Secret profiles and bundles by name, never a value ([Secrets](secrets.md)). |
 | `/config/connections` | Forges, the receiver, model endpoints, provider keys, MCP servers and the egress rules. |
-| `/config/project?id=<project>` | One project: its members, limits, spend and share of a budget split ([Projects](projects.md)). |
+| `/config/project?id=<project>` | One project: its members, limits, spend and share of a budget split (Projects). |
 | `/config/updates` | Which pi and which extensions jobs run, what is newer, a canary and Adopt ([Updates](#updates)). |
 | `/models` | Scoped model roles and ordered fallbacks, actionable policy banners, observed cooldowns and model windows, published proposals and retained canary comparisons. Not live; Reload reads again. Operators review role-map changes through preview, diff and confirm. No page action starts a run. |
 | `/audit` | The console's audit log, newest first. Operator only, under More in the navigation. How far its hash chain is verified, which rows it does not vouch for, filters and a search ([The audit log](#the-audit-log)). A line that is not a valid row is shown as damaged in its place, never skipped. |
@@ -824,7 +824,7 @@ Four cards come first, in a row:
   hours: no failed or refused run among the runs read, but the run history read does not reach back a day."), since
   it is why the card is not All clear. A durable run that was lost and could not be continued (`recovery-cap`,
   `recovery-checkpoint-absent`, `recovery-unsafe-extensions`) counts as failed, as the console calls it, though its
-  record says `policy` ([durable-runs.md](durable-runs.md)).
+  record says `policy`.
 
   A number is a whole count, and 0 means none, only when everything behind it was read: the questions need the parked
   runs, and "to fix" the failed jobs, the doctor results and the host registry. When one could not be read, the card
@@ -841,7 +841,7 @@ Four cards come first, in a row:
   slot, another run, a time or a check, and a retry's backoff always, and a pause window, a host getting ready, a
   paused queue, a job past its due that no worker has taken, a reason this console does not know, or no reason
   recorded when a job does. Each reason is the one the worker recorded as it put the job back in line
-  ([wait-for.md](wait-for.md), trap 4); [Waitlists](#waitlists) lists the jobs. When the console's read of the waiting
+  (wait for, trap 4); [Waitlists](#waitlists) lists the jobs. When the console's read of the waiting
   jobs stopped short (a queue holds more than it reads, there are more than 64 queues, or a queue holds a job whose id
   is not one the console shows), every number on the card is a floor: "5 or more jobs waiting to start", each reason's
   count "2 or more" (or "-" where it found none of that reason), and "longest 40m or more", since the job that has
@@ -1052,7 +1052,7 @@ group for each reason that has jobs, in this order:
 |---|---|
 | Waiting for a free slot | a job slot on its host or room in its host's budget, a host where its size fits, its folder, repository, project or model endpoint to be free, or a host that serves its secret bundle's profile; and every job waiting its turn in a queue that is not paused |
 | Waiting for another run to finish | the run a chained job follows, or the run a recovery continues while that run's attempt still runs |
-| Waiting on a time or a check | its [`run.waitFor`](wait-for.md): the `after` time, or its wait check |
+| Waiting on a time or a check | its `run.waitFor`: the `after` time, or its wait check |
 | Retry backoff | the next attempt after a failed one |
 | In a pause window | the end of a pause window |
 | Waiting for its host to get ready | rootful Podman's service to restart, the network keeper to settle, or its host's upgrade: a newer pi-dispatch queued the job, wrote the settings, triggers or pause windows file it reads, or wrote the run record a retry must choose its model from ("Queued or configured by a newer pi-dispatch: waits for this host's upgrade", asked again every ten minutes) |
@@ -1234,7 +1234,7 @@ The console and the `/dispatch` panel use the same words for how a run ended. Th
 `policy` or `failed`; both surfaces say completed, refused (for `policy`) and failed. Some reasons change the word: a
 completed run with `awaiting-input` is **awaiting input**, a run with `operator-cancel` is **cancelled**, and a durable
 run that was lost and could not be continued (`recovery-cap`, `recovery-checkpoint-absent`,
-`recovery-unsafe-extensions`, recorded as `policy`) is **failed** ([durable-runs.md](durable-runs.md)). The record's
+`recovery-unsafe-extensions`, recorded as `policy`) is **failed**. The record's
 `backend` is the **Venue**, the spend page is **Spend** (its insights are the page's content, still at `/insights`), and
 the jobs held on a wait are **Held**. The runs page filters and counts by those words: `outcome=` takes `completed`,
 `refused`, `failed`, `awaiting-input`, `awaiting-approval` and `cancelled`, so `outcome=failed` finds the lost durable runs too and
@@ -1582,7 +1582,7 @@ posts one comment as the deployment:
 >
 > > your answer, quoted
 
-The name is your token's name. An answer from pi's [`/dispatch chat`](chat.md#in-pi-dispatch-chat) reads "Answered
+The name is your token's name. An answer from pi's `/dispatch chat` reads "Answered
 from an operator's /dispatch panel" instead, so a token named `panel` is refused here: give it another name. Any
 `@name` in your answer is changed so it does not notify anyone. That comment is
 the record of what the agent was told, for anyone who reads the issue later.
@@ -1627,7 +1627,7 @@ and position fields. Confirmation is single-use and audited before enqueue. Mess
 row and run record. The preview fixes the selected provider/model and positive cost ceiling. If a zero-cost
 preview becomes paid or the paid reservation would grow before pickup, the worker refuses with
 `fork-reservation-changed`; preview again to authorize the new amount. The run's optional `forkSource` record
-explains a failed archive or skipped workspace point. The terminal's [`--fork-as-job`](chat.md#fork-as-a-managed-job) uses these same routes.
+explains a failed archive or skipped workspace point. The terminal's `--fork-as-job` uses these same routes.
 
 ### Re-running a run
 
@@ -1667,7 +1667,7 @@ After a re-run is queued, the banner's **Undo** offers to cancel the new run bef
 ### Cancelling a queued job
 
 The console can take a job out of its queue before it starts: waiting, delayed, waiting by priority or in a paused
-queue, held on a [`run.waitFor`](wait-for.md) condition or not. The ways to it are Cancel on a job in the overview's
+queue, held on a `run.waitFor` condition or not. The ways to it are Cancel on a job in the overview's
 [Waitlists](#waitlists), which shows it only for a job this would take, and the Undo on a re-run's banner. It takes
 only a job that has never started, and refuses, with nothing changed:
 
@@ -1682,7 +1682,7 @@ only a job that has never started, and refuses, with nothing changed:
 
 The preview names the job and says why it waits, in the worker's own words ("Its folder is busy with another run",
 "Held until <time>"), from the reason the worker recorded when it put the job back in line
-([wait-for.md](wait-for.md), trap 4). A delayed job more than 10 seconds past the time it was due, which no worker has
+(wait for, trap 4). A delayed job more than 10 seconds past the time it was due, which no worker has
 taken, says "Due since <time>; no worker has taken it", whatever it recorded. A reason this console does not know
 (from a newer worker) is shown as its word with "no explanation yet". With no record, a delayed job says "No reason
 was recorded" and a held one "Waiting on a time or a check"; a job ready to run (waiting, or waiting by priority) says
@@ -1730,15 +1730,15 @@ or above 8 KiB), and a confirm after the run finished is refused with nothing se
 queued message and best effort for a written one, and its preview says which. Once the agent read a written message, there is no undo. The audit log records the job, the
 message id and a hash of the message, never the text. In the `/dispatch` panel the same is `t` (steer) and `T` (follow-up) on the
 ACTIVE row, offered only while the run's inbox takes a message (a steer-armed run whose loop has not started, has
-ended, or whose venue or image cannot deliver says so instead). All of it is in [`steering.md`](steering.md#from-the-console-and-the-panel).
+ended, or whose venue or image cannot deliver says so instead). All of it is in `steering`.
 
 ### The Chat panel
 
 A run's page has a **Chat** panel, that says what the run is (running, queued, parked,
 answered by a later run, being answered, finished or unknown) and offers the chat it can have now, by the same rule
-`pi-dispatch chat` uses ([`chat.md`](chat.md)):
+`pi-dispatch chat` uses:
 
-- **A running run** (or one going on as a [recovery](durable-runs.md) job, which the panel links): a link to its live
+- **A running run** (or one going on as a recovery job, which the panel links): a link to its live
   transcript, and the **Steer** and **Follow-up** forms while the run takes messages. The forms then move here from
   the Inbox panel, so the page never holds two of either; the Inbox panel keeps the list and the Withdraw buttons.
   A run that is not steer-armed, or whose inbox is closed, says so instead, and when the run's inbox could not be
@@ -1752,7 +1752,7 @@ answered by a later run, being answered, finished or unknown) and offers the cha
   store, which opens the run's stored conversation in your own pi as a fork. When the run's trigger kept no session,
   or the run was a pull request (whose session the record cannot name), the panel says why instead. If a later run continued that target's session, the panel links it and warns that its turns are in the session too.
 - **Queued, unknown, answered or being answered**: one sentence saying why there is nothing to chat with. A park
-  being answered links the run taking the answer, and a run whose [recovery](durable-runs.md) job is queued links
+  being answered links the run taking the answer, and a run whose recovery job is queued links
   that job.
 
 The running and parked modes show `pi-dispatch chat <job id>` too, which opens the same chat in a terminal. A viewer sees the run's
@@ -2004,7 +2004,7 @@ path, which the page does not show.
 
 `GET /api/state` returns the deployment's live snapshot as JSON, so a script never has to read a page. It needs a
 session like every page; both roles may read it, and a viewer's copy leaves out the failed jobs' reasons. The fields
-are described in `INT-CONSOLE-STATE-API` ([`specs/interfaces.md`](../specs/interfaces.md)): within its `version`,
+are described in `INT-CONSOLE-STATE-API` (the project history): within its `version`,
 fields are only ever added. Each running job in `active` carries a `progress` object of numbers and the running
 tool's name (never a phase name or note), or null when it has none, and `steer` (whether its trigger arms steering)
 with `inbox`, that job's messages as `{id, mode, source, state, at, bytes}` and never their text (null when the job is
@@ -2117,11 +2117,11 @@ transcripts and the run progress come from Valkey; whether a worker publishes th
 
 `pi-dispatch chat`, the terminal client, reads two more variables, from your own shell only and never from the
 deployment's `.env`: `PI_CONSOLE_TOKEN` (your token, else it asks) and `PI_CONSOLE_URL` (which console to dial, else
-`PI_CONSOLE_LISTEN`). See [`chat.md`](chat.md#reference).
+`PI_CONSOLE_LISTEN`).
 
-The design and its rejected alternatives are `DES-OPERATOR-CONSOLE` in [`specs/design.md`](../specs/design.md); the
+The design and its rejected alternatives are `DES-OPERATOR-CONSOLE` in the project history; the
 testable rules are `REQ-CONSOLE-SECURITY`, `REQ-OPERATOR-CONSOLE-SCREENS`, `REQ-OPERATOR-CONSOLE-ACTIONS`,
-`REQ-LIVE-TRANSCRIPT` and `REQ-RUN-PROGRESS` in [`specs/requirements.md`](../specs/requirements.md); the threat model and
+`REQ-LIVE-TRANSCRIPT` and `REQ-RUN-PROGRESS` in the project history; the threat model and
 what it does not defend are in [`SECURITY.md`](../SECURITY.md#the-operator-console).
 
 ### Approval requests
@@ -2130,7 +2130,7 @@ A run with declared gates can end as `awaiting-approval`. It leaves no container
 
 `budget-raise` is worker-enforced and uses the cap declared by the trigger, within deployment and scoped limits. Other declared external actions are advisory. Push-to-default-branch and PR-open gates are refused until they can be enforced. Summary and reason text stay in the transcript and forge comment, never the run record.
 
-Model-role runs show the reviewed role beside the physical provider/model in run detail and the run API. Agent refusal counts contain bounded hashes and fixed reasons; the requested name stays in tool output. The model-callable tools cannot edit the reviewed `modelRoles` block. See [model-roles.md](model-roles.md).
+Model-role runs show the reviewed role beside the physical provider/model in run detail and the run API. Agent refusal counts contain bounded hashes and fixed reasons; the requested name stays in tool output. The model-callable tools cannot edit the reviewed `modelRoles` block.
 
 Connections and Models also display explicitly configured [subscription authentication](subscription-auth.md).
 Connections names the selected profile, owning host, compatibility, credential state and expiry. Models shows
@@ -2159,7 +2159,7 @@ and numeric board data. Agent-authored strings are escaped, and no agent HTML is
 Board proposals wait for operator adoption. `board-adopt`, `board-freeze`, `board-unfreeze`, `board-revert` and
 `board-clear` use the existing preview, Confirm and audit-before-write pipeline. Freeze, clear and revert are
 destructive actions. A frozen board refuses adoption; stale expected versions refuse any conflicting mutation.
-See [Watch findings](watch.md) and [Watch decisions and boards](watch-decisions.md).
+See Watch findings and Watch decisions and boards.
 
 ## Configuration and trigger pages
 
@@ -2345,7 +2345,7 @@ no button and a reason. This section moves from Capacity; Capacity keeps host ut
 The side column shows allocation weight/floor/share/current split, scoped limits, bundle facts and trigger
 activity. A viewer sees the chart and facts with no copy call, member form, size preview or Delete.
 `dispatch_projects` includes safe spend/share, size suggestions/calls and edit/delete refusal facts; project
-and sizing writes still require a person. See [Projects](projects.md).
+and sizing writes still require a person. See Projects.
 
 
 ## Zero touch
@@ -2353,7 +2353,7 @@ and sizing writes still require a person. See [Projects](projects.md).
 Runs has a second tab, **Zero touch**, with 7, 30 and 90 day workload touch rates, project/repository breakdowns,
 streaks, waits, causes and linked fixes. Longer or incomplete history is explicitly partial. Question groups and
 all writes are for operators only; the page never quotes questions. Grouping is an explicitly confirmed capped job,
-not a page-load model call. Read [Zero touch](zero-touch.md) for counting rules, opt-in private capture, retention,
+not a page-load model call. Read Zero touch for counting rules, opt-in private capture, retention,
 source-linked instruction/configuration fixes and incomplete-accounting repair.
 
 The touched-run view uses `touched=1` with `days=7`, `30` or `90` and optional opaque `scope`; these page controls
@@ -2398,7 +2398,7 @@ counts as a human intervention for Zero touch.
 
 ## Cited answer drafts
 
-[Answer rules](answer-rules.md) start an isolated, capped draft job when an eligible run parks. The Parked list shows
+Answer rules start an isolated, capped draft job when an eligible run parks. The Parked list shows
 an operator its verdict and source names. The question and draft stay on operator run pages, where the draft fills
 the existing answer form. Preview and Confirm send it as the signed-in person’s answer, naming its draft run.
 Editing it is allowed. Dropping it changes no question. “Don’t draft these” opens a narrower rule proposal for a
@@ -2428,5 +2428,5 @@ The host policy's `quotaWindows` preference chooses the Models monitoring focus 
 The Subscription quota card shows account and application-bucket observations separately from dollar caps: their freshness, five-hour and seven-day windows, utilization, reset times, extra usage and explicit paid-overage policy. Unknown utilization and resets remain unknown; stale observations do not promise remaining capacity. Retained exhaustion still matters after its observation becomes stale. A resetless exhaustion offers a host trial command only to a writable operator, and a trial does not clear exhaustion or bypass other pickup gates. Jobs using the same connection and application bucket share its quota. Quota observations cannot prove that separately linked connections belong to the same vendor account.
 
 The model tool `dispatch_models` shares the reader but receives only bounded machine facts, not doctor prose,
-commands, paths, diffs or repository-agent definitions. See [Model roles](model-roles.md),
-[Model failover](model-failover.md), [Proposals](model-proposals.md) and [Canaries](canary.md).
+commands, paths, diffs or repository-agent definitions. See Model roles,
+Model failover, Proposals and Canaries.

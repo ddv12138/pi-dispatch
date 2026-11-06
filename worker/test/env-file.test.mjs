@@ -2347,7 +2347,7 @@ test("an edit never leaves a hazard the file did not have; a CRLF comment line i
 	writeFileSync(path, 'X=a"b\n');
 	assert.equal(updateEnvFile(path, "WEBHOOK_SECRET", "new", { platform: "win32" }).changed, true);
 	assert.equal(readFileSync(path, "utf8"), 'X=a"b\nWEBHOOK_SECRET=new\n');
-	// Nor when the edit replaces the first of two such lines, leaving the second first (docs/wait-for.md's snippet).
+	// Nor when the edit replaces the first of two such lines, leaving the second first.
 	writeFileSync(path, 'ticket="a"\nout="b"\n');
 	assert.equal(updateEnvFile(path, "ticket", "podman", { platform: "win32", overwrite: true }).changed, true);
 	assert.equal(readFileSync(path, "utf8"), 'ticket=podman\nout="b"\n');

@@ -357,7 +357,7 @@ its own merge request titled `[r1/2] …`. Two caveats specific to this arm. It 
 no GitLab poller, so nothing fans out on a poll. And GitLab's `update` action is a firehose: a merge request
 edit, a label change, a description tweak and a push all arrive as `update`, and unlike GitHub's `labeled`
 there is no positive-selector requirement to narrow it, so `replicas: 2` on `action: ["update"]` multiplies
-every edit rather than every push. See [`docs/replicas.md`](replicas.md) for the budget arithmetic.
+every edit rather than every push. See `docs/replicas` for the budget arithmetic.
 
 ## What is not supported
 
@@ -370,5 +370,5 @@ every edit rather than every push. See [`docs/replicas.md`](replicas.md) for the
 - **Per-job token minting.** GitLab can mint project tokens by API, but only from a personal access token
   and only with a date-granular expiry. Not shipped; see `CONST-TOKEN-SCOPED-PER-JOB`.
 
-`OQ-013` in [`specs/open-questions.md`](../specs/open-questions.md) is the honest statement of where this
+`OQ-013` in the project history is the honest statement of where this
 arm is weaker than the GitHub one, and what would close the gap.

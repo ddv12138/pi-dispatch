@@ -11,7 +11,7 @@ const RELEASE = "if redis.call('GET',KEYS[1])==ARGV[1] then return redis.call('D
 const CHECKPOINT = "if redis.call('GET',KEYS[1])~=ARGV[1] then return 0 end redis.call('SET',KEYS[2],ARGV[2],'PX',ARGV[3]); return 1";
 /**
  * How long a pull source's cursor is kept, in MILLISECONDS (the checkpoint's `PX`), renewed by every checkpoint: 35 days
- * (docs/watch.md), so a collector stopped for weeks resumes where it left off. It is a resume point, NOT a dedup window,
+ * so a collector stopped for weeks resumes where it left off. It is a resume point, NOT a dedup window,
  * and deliberately not derived from the forge job retention (`FORGE_JOB_RETENTION_S`, the time a forge redelivery is
  * refused): no forge job id stands behind it. Watch deliveries are deduplicated by the watch store's replay keys and
  * the watch queue's job ids, both kept seven days, and a cursor that expires only costs a re-read (a file from its

@@ -901,7 +901,7 @@ test("the pinned built-in tool set matches the loader's constant and the runner'
 	assert.deepEqual(
 		[...excludableToolNames()].sort(),
 		[...canonical.allToolNames].sort(),
-		"the pinned pi's built-in tool set moved: grow tools.mjs's factory list, EXCLUDABLE_TOOL_NAMES, docs/exclude-tools.md and triggers.example.json together, then re-verify unknown names are still ignored silently",
+		"the pinned pi's built-in tool set moved: grow tools.mjs's factory list, EXCLUDABLE_TOOL_NAMES and triggers.example.json together, then re-verify unknown names are still ignored silently",
 	);
 });
 

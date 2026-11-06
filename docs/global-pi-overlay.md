@@ -316,7 +316,7 @@ Every package is printed by name with where it came from, because that list is t
 | A package installed **project-locally** (`pi install -l`) | Not discovered in this release. The path sits one character from a *serviced* repo's `.pi/`, and confusing those two would be a security bug rather than a feature gap |
 
 What discovery does not reach, and why each case was left rather than dropped, is tracked as `OQ-019` in
-[`specs/open-questions.md`](../specs/open-questions.md).
+the project history.
 
 Discovery follows pi's own lookup order: the managed path (`<agentDir>/npm/node_modules/<name>`) first, and
 your global npm or pnpm root **only** when the managed one is absent, which is exactly when pi itself falls
@@ -355,8 +355,8 @@ file.
 `.pi/skills` at HEAD, an injected `run.skillsDir`, the overlay's `skills/`, or a staged package -- and warns
 (never fails) when it resolves in no tier this host can see: such a job runs without the flow it names, logs
 `flow_not_loaded` in the container, and still exits 0. A flow that resolves only in a staged package is a
-plain checkmark naming the package. The insights topology tells the same story visually
-([`graph.md`](graph.md)): overlay and staged-package skills render as their own node groups when the
+plain checkmark naming the package. The insights topology tells the same story visually:
+overlay and staged-package skills render as their own node groups when the
 session can see `PI_GLOBAL_PI_DIR`, and a trigger whose flow lives in one gets its edge drawn there
 instead of a false "missing" claim.
 
@@ -402,7 +402,7 @@ package source can never become a network install from inside a container.
 
 ## Reference
 
-`REQ-GLOBAL-PI-OVERLAY` ([requirements](../specs/requirements.md)),
-`DES-OPERATOR-GLOBAL-OVERLAY` ([design](../specs/design.md)),
+`REQ-GLOBAL-PI-OVERLAY` (requirements),
+`DES-OPERATOR-GLOBAL-OVERLAY` (design),
 `INT-CONTAINER-RUNTIME-CONTRACT` / `INT-SDK-SESSION-OPTIONS` / `INT-PI-PACKAGES-FILE-CONTRACT` /
-`INT-TRIGGERS-FILE-CONTRACT` ([interfaces](../specs/interfaces.md)).
+`INT-TRIGGERS-FILE-CONTRACT` (interfaces).

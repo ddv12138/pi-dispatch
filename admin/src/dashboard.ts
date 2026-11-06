@@ -3810,7 +3810,7 @@ function renderTriggerDetail(raw: any, inner: number, styler: any, sched: any = 
     bullet(`bundle ${cellOf(bundleAt.id)}: every variable its resolver prints, read once per job start; each run records the names`, "warning");
     bullet("a variable added in the manager reaches the next job with no edit here", "warning");
   }
-  // Stated beside the trust model rather than only in docs/replicas.md, because the multiplier is the whole
+  // Stated beside the trust model, because the multiplier is the whole
   // of what an operator needs to weigh: N replicas is N HONEST budget reservations, not a bypass, so the
   // daily/weekly/monthly caps stay the ceiling and simply divide by N (CONST-BUDGET-BEFORE-TOKENS).
   if (t.replicas > 1) {

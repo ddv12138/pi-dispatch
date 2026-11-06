@@ -857,8 +857,7 @@ export function planEnvEdit(raw, path, key, value, { overwrite = false, platform
  */
 function newHazard(text, next, loader) {
 	// The cmd wrapper's one hazard, a `"` in a value (`quoteSpans`), belongs to its own line, so it is compared as a SET of
-	// lines: overwriting the first of two such lines leaves the second first, and that is not new (the corpus's
-	// docs/wait-for.md snippet). The line the writer renders never holds a `"` (`renderEnvValue` refuses it there).
+	// lines: overwriting the first of two such lines leaves the second first, and that is not new (the corpus example). The line the writer renders never holds a `"` (`renderEnvValue` refuses it there).
 	if (loader === "cmd") {
 		const quoted = (l) => (ASSIGNMENT.exec(l.replace(/\r$/, ""))?.[3] ?? "").includes('"');
 		const had = new Set(text.split("\n").filter(quoted).map((l) => l.replace(/\r$/, "")));

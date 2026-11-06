@@ -79,7 +79,7 @@ as advisory: a job can inflate them or report less.
 ## 2. Set a size per project
 
 A size lives on a project's row in the scoped-limits file, so first group the repos and folders into projects
-([projects](projects.md)). Then give the row a `memory`, a `cpus`, or both:
+(projects). Then give the row a `memory`, a `cpus`, or both:
 
 ```json
 {

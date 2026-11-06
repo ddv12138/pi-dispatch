@@ -598,7 +598,7 @@ grants the project's environment **once**:
   } }
 ```
 
-`project` is an id from `projects.json` ([projects](projects.md)). Every job whose project is `shop` gets the
+`project` is an id from `projects.json` (projects). Every job whose project is `shop` gets the
 bundle, whichever trigger made it: a new trigger or a new repository in the project needs no secrets edit. You
 declare the bundle resolver once, with the **format** it prints (or from the panel, [above](#from-the-panel)):
 
@@ -715,7 +715,7 @@ human approval per connection, and its access expires after a TTL, after which t
 until someone approves again. The local `.env` named pipe and the CLI's desktop-app sign-in are interactive in
 the same way. None of those suits a service that starts jobs at 3 a.m. Whether a later OpenShell-side route
 (an operator-owned provider, or the gateway's credential driver) can serve unattended jobs is an open question,
-recorded with what it would need (`OQ-048` in `specs/open-questions.md`); the resolver seam above already covers the
+recorded with what it would need (`OQ-048` in the project history); the resolver seam above already covers the
 service-account route, and on an OpenShell venue its values can still be placeholders (below).
 
 ### Who gets the bundle, and who does not

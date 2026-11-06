@@ -125,7 +125,7 @@ job when:
 | `mcp-secret-unmapped` | the server references a variable the job will not have: not in `run.secrets`, and not a `PI_FORWARD_ENV` name the worker holds a value for |
 | `mcp-egress-unreachable` | with the egress policy on, the proxy would not let the job reach the server (an `http://` url on port 443 included), or `egress-allowlist.conf` cannot be read; for `forge`, its API host is not allowlisted |
 | `mcp-package-runner` | with the egress policy on, the registry a package runner fetches from is not allowlisted |
-| `mcp-excluded` | the trigger's `run.excludeTools` leaves the server no way in ([exclude-tools.md](exclude-tools.md)) |
+| `mcp-excluded` | the trigger's `run.excludeTools` leaves the server no way in |
 | `job-image-mcp-unsupported` | the job image does not declare the `mcp` capability |
 | `job-image-forge-mcp-unsupported` | the trigger names `forge` and the job image does not declare the `forgeMcp` capability |
 | `trigger-skew` | the trigger names servers but the job arrived without them: the trigger changed after the job was queued, or the receiver is older than the worker |

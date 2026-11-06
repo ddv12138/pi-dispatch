@@ -25,7 +25,7 @@ served by two forges is two rows. The `repo` filter of `dispatch_costs` takes ei
 that repo on every forge, `github:acme/web` one forge.
 
 The **by-project** breakdown groups spend by the `project` id each run record carries
-([projects](projects.md)). The worker writes that id when it picks the job up, so the fold never looks at
+(projects). The worker writes that id when it picks the job up, so the fold never looks at
 `projects.json` as it is today:
 
 - A run outside every project is `(no project)`.
@@ -214,7 +214,7 @@ parser the worker uses before they ask, and write version 1 until a row needs ve
 3. **Settle.** After the run, each window is charged what the job really cost, and the rest of the hold is given
    back. A model window is charged that model's own share, from the run's per-model usage.
 4. **Record.** The run record says how it settled, under `dollars`
-   ([run record](../specs/interfaces.md#int-run-history-file-contract)).
+   (run record).
 
 ### How a run settles
 
@@ -263,7 +263,7 @@ input and cache rates and 1.5 times the output rate. The runner counts such call
 them at that tier during the run. pi meters them at base rates, so the metered cost is too low; a run with
 `longContext` above 0 therefore settles at the floor. Because the tier follows the API, a gateway model or a
 non-Anthropic Bedrock model on one of those APIs can floor this way too
-([DES](../specs/design.md#des-dollar-reserve-and-settle)).
+(DES).
 
 ### A call that reports no usage
 
@@ -428,7 +428,7 @@ until its window ends.
 
 ### What the caps do not cover
 
-These are known gaps. Most are named in the specs ([DES](../specs/design.md#des-dollar-reserve-and-settle)); #544
+These are known gaps. Most are named in the specs (DES); #544
 is an open issue.
 
 - **A `pi` child process that hides from the meter** is not counted. A child that keeps the job's environment is
@@ -538,16 +538,6 @@ is an open issue.
 - **Hosts with different caps.** On a fleet, doctor names a host whose dollar caps differ from this one's
   (the bullet above, and [multi-host](multi-host.md)).
 
-Specs: [`REQ-SPEND-CAPS-MULTI-WINDOW`](../specs/requirements.md#req-spend-caps-multi-window),
-[`REQ-TOKEN-ACCOUNTING-AND-CAPS`](../specs/requirements.md#req-token-accounting-and-caps),
-[`REQ-MODEL-POLICY`](../specs/requirements.md#req-model-policy),
-[`REQ-ADMIN-VIA-PI-EXTENSION`](../specs/requirements.md#req-admin-via-pi-extension),
-[`DES-DOLLAR-RESERVE-AND-SETTLE`](../specs/design.md#des-dollar-reserve-and-settle),
-[`INT-RUN-HISTORY-FILE-CONTRACT`](../specs/interfaces.md#int-run-history-file-contract),
-[`INT-SCOPED-LIMITS-FILE-CONTRACT`](../specs/interfaces.md#int-scoped-limits-file-contract),
-[`INT-CONFIG-OVERLAY-CONTRACT`](../specs/interfaces.md#int-config-overlay-contract),
-[`OQ-010`](../specs/open-questions.md#oq-010--does-pinned-pi-0807-emit-per-turn-token-usage-on-the-subscribe-stream),
-[`OQ-011`](../specs/open-questions.md#oq-011--a-package-that-spawns-a-pi-subprocess-is-unmetered).
 
 ## pi child processes
 

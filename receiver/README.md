@@ -27,11 +27,11 @@ npx @edgehero/pi-dispatch-receiver watch   # watch: pulls findings from your own
 
 - **`watch`** pulls findings from the sources in `triggers.json`. `serve` takes them pushed to `/watch/<source>` as well. A finding starts a
   read only investigation or files an issue, and cannot choose a job's permissions
-  ([watch](https://github.com/edgehero/pi-dispatch/blob/main/docs/watch.md)).
+  (watch).
 
 **Steering from a comment.** While a job of a steer armed trigger runs on an issue or pull request, a comment with your comment trigger's
 phrase goes to that running job instead of starting a second one, once the comment trigger has `"steer": true` as well
-([steering](https://github.com/edgehero/pi-dispatch/blob/main/docs/steering.md#steering-from-a-comment)).
+(steering).
 
 The receiver checks each delivery's signature, the bot loop guard, the forge's own permission check and
 dedup. The worker then applies quiet hours, the image preflight, branch protection and the spend caps.
@@ -48,4 +48,4 @@ Setup guides: [GitHub](https://github.com/edgehero/pi-dispatch/blob/main/docs/gi
 [GitLab](https://github.com/edgehero/pi-dispatch/blob/main/docs/gitlab.md),
 [Forgejo](https://github.com/edgehero/pi-dispatch/blob/main/docs/forgejo.md),
 [Azure DevOps](https://github.com/edgehero/pi-dispatch/blob/main/docs/azure-devops.md),
-[polling](https://github.com/edgehero/pi-dispatch/blob/main/docs/polling.md). MIT licensed.
+polling. MIT licensed.

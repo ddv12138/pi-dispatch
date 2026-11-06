@@ -69,7 +69,7 @@ of work at a time, and it never asks you to trust more than you have seen.
 
 You start a job and follow it live: what it is doing, which step of its plan it is on, what it said. If it heads the
 wrong way you tell it, and it reads your message before its next step. You do not have to start over and pay for the
-same work twice. ([Steering](docs/steering.md), [chat](docs/chat.md))
+same work twice. (Steering, chat)
 
 ![A running job in the console: its progress through the phases of its plan, the agent's note that three of ten tables are migrated, a box for sending it a message, the message it already received, and its live transcript](docs/images/console/console-run-live.png?v=2026-11-03)
 
@@ -79,8 +79,8 @@ Now it works alone, and you hear from it only when it has a question or needs pe
 and waits. Nothing runs and no model is paid for while it waits, and your answer picks the work up where it stopped. A
 gate can make it ask before a named action, and a rule you write can have an answer drafted for you to read and send. A
 question is the agent's own words, so your instructions decide how it asks: what it found, your options, what it recommends.
-([Parked questions](docs/sessions.md#parked-jobs-the-agent-asks-then-waits), [approval gates](docs/approval-gates.md),
-[answer rules](docs/answer-rules.md))
+([Parked questions](docs/sessions.md#parked-jobs-the-agent-asks-then-waits), approval gates,
+answer rules)
 
 ![A run that stopped to ask: what it found, three options with what each costs, what it recommends, and a box for your answer](docs/images/console/console-question.png?v=2026-11-03)
 
@@ -89,7 +89,7 @@ question is the agent's own words, so your instructions decide how it asks: what
 Now the work starts without you: on a schedule, when someone labels an issue or comments on it, or (as a read only
 investigation) when an alert comes in. You read the results when it suits you. **Zero touch** tells you how far you have
 come: how often runs needed a person, per project, over the last 7, 30 or 90 days.
-([Triggers](docs/triggers.md), [watching alerts](docs/watch.md), [Zero touch](docs/zero-touch.md))
+([Triggers](docs/triggers.md), watching alerts, Zero touch)
 
 ![The Zero touch page: how often runs needed a person, what the cause was, and which projects run without help](docs/images/console/console-zero-touch.png?v=2026-11-03)
 
@@ -132,7 +132,7 @@ GitLab token. That is why the provider limit above matters, and why a narrow tok
 
 **What if the machine restarts or a job dies?** The queue is kept on disk, so waiting jobs are still there. A job that
 was running is lost or started over, unless its trigger opts into continuing from its last checkpoint
-([durable runs](docs/durable-runs.md)).
+(durable runs).
 
 **What does it cost?** pi-dispatch is free, under the MIT license. You pay your AI provider and for the machine it runs on.
 There is no typical figure, because a job's cost depends on your model and on the work, so start with a low daily limit and
@@ -146,7 +146,7 @@ allow this is theirs to say, not ours ([subscriptions](docs/subscription-auth.md
 
 **What if my AI provider is down, or I hit its limit?** You can list fallback models in the order you prefer. A job that
 is rate limited, out of quota or hitting an overloaded provider tries the next model on its next attempt, and that model
-rests for a while before it is tried again ([fallback models](docs/model-failover.md)). With no fallback, the job waits or
+rests for a while before it is tried again (fallback models). With no fallback, the job waits or
 fails with a reason you can read, and nothing is spent on it in the meantime.
 
 ## What else it does
@@ -163,7 +163,7 @@ fails with a reason you can read, and nothing is spent on it in the meantime.
 
 **Models and fallbacks:** name a job for what it needs (a planner, an editor) and choose the model per project, with fallbacks in
 order. The page shows which model is resting and why, and suggests a cheaper model with the numbers to compare
-([model roles](docs/model-roles.md), [fallback models](docs/model-failover.md), [canaries](docs/canary.md)).
+(model roles, fallback models, canaries).
 
 ![The Models page: each role with its model and its fallbacks in order, a model cooling down after a rate limit, which models are in use, and proposals with their comparisons](docs/images/console/console-models.png?v=2026-11-03)
 
@@ -173,17 +173,17 @@ order. The page shows which model is resting and why, and suggests a cheaper mod
 ![A subscription on the Models page: the account windows, how much of each is used and when it resets, and that jobs wait rather than spend beyond it](docs/images/console/console-subscription.png?v=2026-11-03)
 
 **Approvals:** a job can ask permission before a named action, such as spending more. It stops and costs nothing until you decide
-([approval gates](docs/approval-gates.md)).
+(approval gates).
 
 ![An approval on the Parked page: what the job asks to do, with buttons to approve or decline with a reason, and a box to ask a question back](docs/images/console/console-approval.png?v=2026-11-03)
 
 **Drafted answers:** a rule you write can have the agent draft an answer to a question from sources it read. You read it, and only
-you send it ([answer rules](docs/answer-rules.md)).
+you send it (answer rules).
 
 ![A drafted answer on the Parked page, with the sources it cites and why it was allowed to draft, beside the rule that started it](docs/images/console/console-draft.png?v=2026-11-03)
 
 **Picking up where it stopped:** if a machine restarts or a job's box dies, a job that opted in continues from its last checkpoint
-instead of paying for everything again ([durable runs](docs/durable-runs.md)).
+instead of paying for everything again (durable runs).
 
 ![A run that lost its first attempt and continues as a recovery job, with what it had done and what carries over](docs/images/console/console-recovery.png?v=2026-11-03)
 
@@ -198,7 +198,7 @@ updates by itself ([updates](docs/console.md#updates)).
 ![The Updates page: what jobs run now, what is newer, a button to run a canary, and which version each host holds](docs/images/console/console-updates.png?v=2026-11-03)
 
 **Projects:** group your repositories into a project, with its own limits, share of the budget and history
-([projects](docs/projects.md), [budget split](docs/allocation.md)).
+(projects, [budget split](docs/allocation.md)).
 
 ![One project: its members, its limits, what it has spent and its recent runs](docs/images/console/console-project.png?v=2026-11-03)
 
@@ -314,7 +314,7 @@ newer beside a container runtime, on the same host.
 | A Docker or Podman daemon on another machine (`DOCKER_HOST=ssh://...`) | **No.** Job files are mounted from the worker's own disk, which that machine does not have, and it would receive every job's provider key and forge token. |
 
 Only the receiver needs to be reachable from the internet, and only for webhooks. Behind a firewall, use the receiver's
-`poll` mode instead, which needs no public URL ([`docs/polling.md`](docs/polling.md)).
+`poll` mode instead, which needs no public URL.
 
 - **`local`**, the default: the Docker daemon, or rootful Podman through its Docker API. Easiest to set up, and the only
   choice on macOS and Windows. The worker needs the daemon's socket, and that access is equivalent to root on the host.
@@ -412,7 +412,7 @@ jobs until its reset, and the Models page shows each window. Subscription jobs n
 ### Roles and fallback models
 
 A **role** is a name a trigger selects (`planner`, `editor`), which you map to a model per project in `triggers.json`, so moving a project to another
-model is one reviewed edit ([`docs/model-roles.md`](docs/model-roles.md)).
+model is one reviewed edit.
 
 ```json
 { "run": { "kind": "github", "flow": "fix", "provider": "anthropic", "model": "claude-sonnet-5-5",
@@ -423,11 +423,11 @@ model is one reviewed edit ([`docs/model-roles.md`](docs/model-roles.md)).
 **Fallbacks** are tried in order on the job's next attempt when a provider is rate limited, out of quota or overloaded. Each is chosen at pickup,
 before a credential is minted, a repository cloned or budget reserved, and must pass the same checks as the primary: on `run.models`, in the pinned
 catalog with a cost bound and a credential, allowed by egress, with endpoint room. A failed model cools down for a while. An attempt may call only
-its selected model, so a flow that means to use several keeps its own setup ([`docs/model-failover.md`](docs/model-failover.md)).
+its selected model, so a flow that means to use several keeps its own setup.
 
 **Proposals and canaries.** Doctor suggests a change, `pi-dispatch canary` replays up to three retained jobs on the candidate in disposable workspaces
-under one cap, and the Models page shows the comparison. A person adopts it, and no model can ([`docs/model-proposals.md`](docs/model-proposals.md),
-[`docs/canary.md`](docs/canary.md)).
+under one cap, and the Models page shows the comparison. A person adopts it, and no model can (`docs/model proposals`,
+`docs/canary`).
 
 ## Triggers
 
@@ -457,22 +457,22 @@ live, and which the console and the panel can edit. Each entry is an `{ on, run 
 `run` names a `flow` or a registered pi `command`. **Who may fire a trigger is decided by your forge, not by pi-dispatch**:
 [`SECURITY.md`](SECURITY.md) states each forge's rule. Each optional `run` field, in a line:
 
-- `steer`: a running job takes messages ([steering](docs/steering.md)).
+- `steer`: a running job takes messages (steering).
 - `resume`, `awaitInput`: follow up jobs continue the session, and the agent can ask and wait ([sessions](docs/sessions.md)).
-- `recover`: a lost run continues from its last checkpoint ([durable runs](docs/durable-runs.md)).
+- `recover`: a lost run continues from its last checkpoint (durable runs).
 - `progress`, `statusComment`: the agent names its phase, and one comment on the issue keeps the numbers ([triggers](docs/triggers.md#optional-run-fields)).
 - `image`: this trigger's own job image ([job image](docs/job-image.md)).
 - `secrets`, `secretsProfile`, `secretBundle`: vault references, and a project's one shared environment ([secrets](docs/secrets.md#recipe-d-one-environment-for-a-whole-project)).
 - `mcp`, `forge`: MCP servers for its jobs ([MCP](docs/mcp.md)).
-- `excludeTools`: removes named built in tools ([excluded tools](docs/exclude-tools.md)).
+- `excludeTools`: removes named built in tools (excluded tools).
 - `packages`: opts out of the staged pi packages ([workflows](docs/workflows.md)).
 - `models`, `maxCostUsd`: the models a job may call, and its own dollar cap ([triggers](docs/triggers.md#optional-run-fields)).
-- `replicas`: races independent sandboxes on one event ([replicas](docs/replicas.md)).
-- `waitFor`: holds a job, unstarted and unbilled, until a time or your own check ([waiting](docs/wait-for.md)).
+- `replicas`: races independent sandboxes on one event (replicas).
+- `waitFor`: holds a job, unstarted and unbilled, until a time or your own check (waiting).
 - `instructions`, `skillsDir`, `github`, `portfolio`: the rest are in [`docs/triggers.md`](docs/triggers.md#optional-run-fields).
 
 A whole project can get one environment from your secrets manager, granted once and read fresh at each job start. Quiet
-hours pause a repo or folder by weekday and timezone ([`docs/pause-windows.md`](docs/pause-windows.md)). The
+hours pause a repo or folder by weekday and timezone. The
 portfolio manager example plans a budget split for the week and reports what it asked for
 ([`docs/portfolio-manager.md`](docs/portfolio-manager.md)).
 
@@ -541,7 +541,7 @@ comment text, with a usage ledger per model that the insights page prices ([`doc
 
 **Projects and split.** Group repos and folders into projects and cap each as one. Set a dollar total with a floor per project, and a
 flow can move money between projects inside it, never above the total or below a floor. Every move is logged and can be reverted
-([`docs/projects.md`](docs/projects.md), [`docs/allocation.md`](docs/allocation.md)).
+(`docs/projects`, [`docs/allocation.md`](docs/allocation.md)).
 
 ![The budget split page: the weekly total, each project's floor, weight, share and spend, and the history of moves](docs/images/console/console-budget-split.png?v=2026-11-03)
 
@@ -551,11 +551,11 @@ reads as idle ([`docs/sizing.md`](docs/sizing.md), [`docs/insights.md`](docs/ins
 
 ![The Capacity page: each host's busy share, jobs at once against its slots, waits and the projects that used it most](docs/images/console/console-capacity.png?v=2026-11-03)
 
-**Flows map.** Which triggers start which flows, what chained to what, and what each cost ([`docs/graph.md`](docs/graph.md)).
+**Flows map.** Which triggers start which flows, what chained to what, and what each cost.
 
 ![The flows map: triggers wired to the flows they start, grouped by repository, with how often each ran](docs/images/console/console-flows.png?v=2026-11-03)
 
-The console also has [Models](docs/console.md#the-screens), [Watch](docs/watch.md), an [audit log](docs/console.md#the-audit-log)
+The console also has [Models](docs/console.md#the-screens), Watch, an [audit log](docs/console.md#the-audit-log)
 of every write, and Configuration. Each write is a preview and a confirm, and paid and destructive ones look different.
 
 ![The two step preview of a steer: what will be sent, what it costs, how to undo it, and Confirm](docs/images/console/console-steer-confirm.png?v=2026-11-03)
@@ -613,7 +613,7 @@ your deployment from any directory.
 ![The /dispatch panel: live queue state, job meters, the dollar windows, triggers, pause windows, scoped limits, and the runs list, in one framed terminal view](docs/images/dispatch-dashboard.svg?v=2026-11-03)
 
 Its keys, its plain commands and the `operate-pi-dispatch` skill, which lets you ask your assistant in plain words with every change
-confirmed by you in a prompt the model cannot answer, are in [`docs/panel.md`](docs/panel.md).
+confirmed by you in a prompt the model cannot answer, are in `docs/panel`.
 
 ## GitHub automation
 
@@ -631,7 +631,7 @@ Label an issue, and a container works on a fresh clone, opens a PR and comments 
 
 `pi-dispatch setup github` creates a GitHub App in one browser click, shows every `.env` line before you agree, and never prints a secret.
 Run the part that takes in forge events as a webhook receiver on the host or in a container, or in `poll` mode with no public URL
-([`docs/github.md`](docs/github.md), [`docs/polling.md`](docs/polling.md)).
+([`docs/github.md`](docs/github.md), `docs/polling`).
 
 ## Other forges
 
@@ -645,26 +645,26 @@ These forges have one auth source each, a token you create, so setting theirs to
 
 ## Docs
 
-**Getting started and running it:** [console](docs/console.md), [panel](docs/panel.md), [service](docs/service.md),
+**Getting started and running it:** [console](docs/console.md), panel, [service](docs/service.md),
 [upgrading](docs/upgrading.md), [253 server deployment](docs/253-deployment.md),
-[multi host](docs/multi-host.md), [polling](docs/polling.md),
+[multi host](docs/multi-host.md), polling,
 [notifications](docs/notifications.md).
 
-**Watching and steering:** [steering](docs/steering.md), [chat](docs/chat.md), [sessions](docs/sessions.md),
-[durable runs](docs/durable-runs.md), [approval gates](docs/approval-gates.md), [answer rules](docs/answer-rules.md),
-[Zero touch](docs/zero-touch.md), [watch](docs/watch.md), [watch decisions](docs/watch-decisions.md),
+**Watching and steering:** steering, chat, [sessions](docs/sessions.md),
+durable runs, approval gates, answer rules,
+Zero touch, watch, watch decisions,
 [reasons](docs/reasons.md).
 
-**Triggers and flows:** [triggers](docs/triggers.md), [workflows](docs/workflows.md), [wait for](docs/wait-for.md),
-[pause windows](docs/pause-windows.md), [replicas](docs/replicas.md), [canary](docs/canary.md),
-[excluded tools](docs/exclude-tools.md), [MCP](docs/mcp.md), [global pi overlay](docs/global-pi-overlay.md).
+**Triggers and flows:** [triggers](docs/triggers.md), [workflows](docs/workflows.md), wait for,
+pause windows, replicas, canary,
+excluded tools, [MCP](docs/mcp.md), [global pi overlay](docs/global-pi-overlay.md).
 
-**Money and machines:** [costs](docs/costs.md), [insights](docs/insights.md), [graph](docs/graph.md),
-[scoped limits](docs/scoped-limits.md), [projects](docs/projects.md), [allocation](docs/allocation.md),
+**Money and machines:** [costs](docs/costs.md), [insights](docs/insights.md),
+[scoped limits](docs/scoped-limits.md), projects, [allocation](docs/allocation.md),
 [portfolio manager](docs/portfolio-manager.md), [sizing](docs/sizing.md).
 
 **Models and keys:** [provider keys](docs/provider-keys.md), [subscription auth](docs/subscription-auth.md),
-[model roles](docs/model-roles.md), [model failover](docs/model-failover.md), [model proposals](docs/model-proposals.md),
+model roles, model failover, model proposals,
 [secrets](docs/secrets.md).
 
 **Isolation:** [backends](docs/backends.md), [Podman](docs/podman.md), [egress](docs/egress.md),
@@ -688,10 +688,6 @@ check how it renders.
 
 Everything on this page is built and running, on all four forges and on Docker and Podman.
 
-The design lives in [`specs/`](specs/), and the specs are the source of truth, not a summary of the code. Start with
-[`specs/constitution.md`](specs/constitution.md) for the rules that never bend, [`specs/design.md`](specs/design.md) for the decisions and
-what was rejected, and [`specs/interfaces.md`](specs/interfaces.md) for the file and container contracts. Every spec file ends with a
-revision history, corrections included.
 
 ## For developers
 
@@ -718,18 +714,14 @@ Jobs start with `--pull=never`, so build or pull every image first ([job image](
 | `gateway/` | the optional browser terminal for a sandbox |
 | `image/` | the job image, and the runner inside it |
 | `deploy/` | service units, wrappers and the compose file |
-| `specs/` | constitution, requirements, design and interfaces: the source of truth |
 | `docs/` | the operator's reference, one file per feature or forge |
-| `design/` | the console's design system: `system/` the cards and tokens, `tools/` the generators that build them |
 | `launch/` | the recipes that render every image here |
 
-**What a change needs.** The specs change in the same pull request as the code, with a revision row. A pull request that breaks a `CONST-*` entry is
-asked to justify changing the rule first, not the code. pi and its packages stay on exact pins. Nothing in this project merges anything, and CI greps
-for it. Sign off your commits with `git commit -s`: this project uses the [DCO](https://developercertificate.org/), not a CLA.
+Keep pi and its packages on exact pins. Nothing in this project merges anything. Sign off commits with
+`git commit -s`: this project uses the [DCO](https://developercertificate.org/), not a CLA.
 
-**The look.** A change to the console lands in `design/` first and is pasted into the console by hash. `python3 design/tools/build.py` rebuilds and checks
-the cards, and `node launch/render-images.mjs --console --only <golden>` draws any state of any page, so you can look at it. [`AGENTS.md`](AGENTS.md) is the
-short version of what matters here.
+Console styles live in `admin/src/console/`. Use `node launch/render-images.mjs --console --only <golden>`
+to inspect a page. See [`AGENTS.md`](AGENTS.md) for the agent skills and deployment notes.
 
 ## License
 

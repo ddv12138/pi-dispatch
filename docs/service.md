@@ -37,7 +37,7 @@ From any terminal:
 - `pi-dispatch cancel <jobId>` stops one job in any state. A queued or held job is removed. A running job is stopped on whichever host runs
   it, and its run record says `operator-cancel`. If no reachable worker owns the job (its host is down, or its worker is older than this
   command), the command says so and changes nothing. Like `pause`, it reads only `VALKEY_URL`, so a broken forge setting cannot stand
-  between you and the stop ([held jobs and retries](wait-for.md)).
+  between you and the stop (held jobs and retries).
 - `pi-dispatch run --trigger <id>` runs one cron trigger from the triggers file now, once, as its schedule would
   ([firing a cron trigger by hand](triggers.md#firing-a-cron-trigger-by-hand)).
 - `pi-dispatch capacity` says how busy each host was over the last day, week or thirty days: busy and idle time, jobs at once, memory and CPU

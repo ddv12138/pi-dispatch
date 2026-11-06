@@ -31,7 +31,7 @@ What still holds: the author gate runs on every delivery, so holding the secret 
 name themselves a project member; and every money gate — budget cap, pause windows, branch policies —
 applies to a forged delivery exactly as to a real one.
 
-The full reasoning is `OQ-015` in [`specs/open-questions.md`](../specs/open-questions.md). If you are not
+The full reasoning is `OQ-015` in the project history. If you are not
 comfortable with it, this is the arm not to enable.
 
 ## Set it up

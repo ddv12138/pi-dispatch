@@ -138,8 +138,7 @@ One command puts a live terminal view over the whole deployment:
 - **A run's chat.** `/dispatch chat <run-id | issue-or-PR-url | session-key>` opens the run the way it can be talked
   to now: a running job opens on its live transcript, and `Esc` lands on its row, where `t` and `T` steer it; a
   parked run shows its question and asks for your answer, then queues it after a confirm; a finished run opens in
-  your own pi as a fork, on this host, with its tools off. It is a command you type, never a model callable tool
-  ([`docs/chat.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/chat.md#in-pi-dispatch-chat)).
+  your own pi as a fork, on this host, with its tools off. It is a command you type, never a model callable tool.
 - **Insights, the one analytics page.** It is `/insights` in the web console (below); press `i` (or type
   `/dispatch insights`) and the panel shows its address. It shows the budget dials, plan verdicts against API rates, daily,
   cumulative and per flow spend charts, five breakdowns (by flow, trigger, model, repo and project), the
@@ -179,8 +178,7 @@ One command puts a live terminal view over the whole deployment:
   and what the run records settled ([`docs/costs.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/costs.md)).
 - **Projects.** `j` shows each project with its members and this month's spend, and `Enter` on one filters
   the runs list. `dispatch_projects` lists them, and `dispatch_project_add`, `dispatch_project_edit` and
-  `dispatch_project_delete` change `projects.json` behind your confirm
-  ([`docs/projects.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/projects.md)).
+  `dispatch_project_delete` change `projects.json` behind your confirm.
 - **Hosts.** `u` shows each worker host: its slots in use of its limit, what its budget has promised its jobs,
   how many jobs wait for its budget, and its running jobs with project, size and age, then how busy it was over the last 7 days (busy
   share, jobs at once, time full, the wait and the top projects), labelled with when they were read. The 7 days
@@ -213,8 +211,7 @@ One command puts a live terminal view over the whole deployment:
 - **Held and failed jobs.** A trigger with `run.waitFor` holds its job in the queue, unstarted and
   unbilled, until a time passes or your check script exits 0. The panel shows a **held** section while
   anything waits (the target, the condition and how long), and a **failed** section for jobs the queue
-  marked failed after their last attempt. `dispatch_waits` lists held jobs and `dispatch_wait_cancel` stops one behind your confirm
-  ([`docs/wait-for.md`](https://github.com/edgehero/pi-dispatch/blob/main/docs/wait-for.md)).
+  marked failed after their last attempt. `dispatch_waits` lists held jobs and `dispatch_wait_cancel` stops one behind your confirm.
 - **AI operable, with explicit authority.** Every model write uses the same action policy as the browser.
   Interactive sessions confirm every change, including pause, priorities and paid starts. Headless sessions
   need `PI_DISPATCH_AGENT_WRITES=1` in the actual pi process before it starts, and can use only unattended

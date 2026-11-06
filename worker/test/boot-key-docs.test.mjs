@@ -12,7 +12,7 @@ import { EMPTY_PAUSE_WINDOWS, EMPTY_PROJECTS, EMPTY_SCOPED_LIMITS } from "../src
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // FROM THIS FILE, not from the cwd. `npm test -w worker` runs the suite from `worker/`, where a bare
-// `docs/pause-windows.md` is ENOENT -- so the bolt that exists to stop these pages drifting would have
+// a relative docs path is ENOENT -- so the bolt that exists to stop these pages drifting would have
 // failed for everyone who runs the workspace on its own. The two existing spec-reading tests resolve the
 // same way (`session-reasons`, `triggers`).
 const REPO = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -21,7 +21,7 @@ const repoFile = (rel) => readFileSync(join(REPO, rel), "utf8");
 // TWO OPERATOR PAGES AND THREE SPEC ENTRIES SAY THE SAME TWO FACTS, and nothing read any of them. Both were
 // inverted during review -- "An EMPTY value IS an unset one", "doctor stays silent", "reads this key with
 // `||`", "the worker starts normally" -- and the whole suite stayed green, because no test in this repo
-// opens `docs/pause-windows.md`, `docs/scoped-limits.md`, `REQ-DEPLOYMENT-BOOTSTRAP`,
+// opens `docs/scoped-limits.md`, `REQ-DEPLOYMENT-BOOTSTRAP`,
 // `INT-PAUSE-WINDOWS-FILE-CONTRACT` or `INT-SCOPED-LIMITS-FILE-CONTRACT`. That is AGENTS.md's own rule
 // ("a hand-written table that restates a derivable source is either derived or pinned, never trusted")
 // unapplied to five documents that restate a behaviour two modules decide.
@@ -41,9 +41,7 @@ const repoFile = (rel) => readFileSync(join(REPO, rel), "utf8");
 // test at all. It pins the two claims a reader acts on.
 
 const PAGES = [
-	{ path: "docs/pause-windows.md", key: "PI_PAUSE_WINDOWS_FILE" },
 	{ path: "docs/scoped-limits.md", key: "PI_SCOPED_LIMITS_FILE" },
-	{ path: "docs/projects.md", key: "PI_PROJECTS_FILE" },
 	{ path: "docs/allocation.md", key: "PI_ENVELOPE_FILE" },
 ];
 

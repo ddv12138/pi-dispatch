@@ -70,5 +70,4 @@ credentials step:
    gates, same
    queue, about 60 seconds of latency, zero public surface. Pair with `setup github --no-webhook`. A
    fresh poller starts from now and never replays old labels. Name the repositories in `POLL_REPOS`. Or
-   run under `GITHUB_AUTH_SOURCE=app` and let the App installation name them
-   ([`docs/polling.md`](polling.md)).
+   run under `GITHUB_AUTH_SOURCE=app` and let the App installation name them.

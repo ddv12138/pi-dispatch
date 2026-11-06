@@ -92,7 +92,7 @@ deployment is your own repos, or your team's, the people who could be handed a t
 can already push code the agent will run — and refusing them a transcript would be a lock on the wrong
 door. If you run pi-dispatch for repositories belonging to others, `run.resume` is not for you, in the
 same way context discovery is not (`SECURITY.md`). Nothing enforces this: no code here can tell the two
-situations apart, which is exactly why it is written down in three places. `specs/open-questions.md`
+situations apart, which is exactly why it is written down in three places. the project history
 records the full reasoning as `OQ-014`.
 
 **A fork pull request never resumes.** No key is resolved, no mount is created, and the job is identical
@@ -276,7 +276,7 @@ Rules:
 
 An operator can also answer from the console's parked page or a run's **Chat** panel
 ([`console.md`](console.md#answering-a-parked-run)), or from a terminal with `pi-dispatch chat <job id>`, which shows
-the question and sends the same answer ([`chat.md`](chat.md#reply-answer-a-parked-run)).
+the question and sends the same answer.
 
 ## Reading a stored session in your own pi
 
@@ -284,11 +284,11 @@ the question and sends the same answer ([`chat.md`](chat.md#reply-answer-a-parke
 run's stored conversation in your own pi as a fork: it copies the transcript to `~/.pi-dispatch/chat/<key>/` (deleted
 again when the command ends; pi's own fork stays in pi's sessions folder), never writes the store, and starts pi with
 its tools off. The stored transcript is unredacted, so it asks before your pi
-sends it to your provider ([`chat.md`](chat.md#fork-continue-a-finished-run-in-your-own-pi)).
+sends it to your provider.
 
 ## Durable runs are not sessions
 
-`"recover": true` ([`durable-runs.md`](durable-runs.md)) also keeps a transcript on disk, and by default in this
+`"recover": true` also keeps a transcript on disk, and by default in this
 store's `.checkpoints` folder, but it is a different thing. A checkpoint belongs to ONE run: it lets that run continue
 after the worker or its container is lost, and it is never handed to the next job. `resume` hands a finished run's
 transcript to the next job on the same key. The two combine: a recovered run of a `resume` trigger continues on its
@@ -334,7 +334,7 @@ Deleting the whole directory is always safe: every key degrades to a cold start 
 ## Managed fork lineages
 
 An operator can select a retained issue run in the console or with
-[`pi-dispatch chat --fork-as-job`](chat.md#fork-as-a-managed-job). The new job gets a separate
+`pi-dispatch chat --fork-as-job`. The new job gets a separate
 `pi/issue-<number>-fork-<id>` branch and pull request. Its session lives under the original key's
 `forks/<id>/` directory, with independent locks, sidecars and canonical transcript. The original session continues
 as before. A same-repository pull request on that fork branch resolves its fork lineage, and another fork records

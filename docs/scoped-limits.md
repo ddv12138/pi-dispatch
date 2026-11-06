@@ -56,7 +56,7 @@ about exactly this state, and the wizard's deployment pointer carries the path s
 worker agree. `pi-dispatch up` sets the variable for you in a deployment folder, and doctor reads
 the `.env` in its own cwd for this key: where that file configures the service, the line says so rather than
 reporting the shell's view of it, and where that file would stop the service starting, doctor fails. The same
-rule `docs/pause-windows.md` describes, for the same reason.
+rule `docs/pause windows` describes, for the same reason.
 
 ## The limit schema
 
@@ -143,7 +143,7 @@ Version 2 adds dollar caps (issues #501 and #502). Set `"version": 2` to use the
 ### Project rows
 
 A `project:<id>` row caps every repo and folder of one project as one. The id is a project in
-[`projects.json`](projects.md).
+`projects.json`.
 
 ```json
 {
@@ -375,12 +375,12 @@ Three doors, same as quiet hours:
   own (UTC), and the counters expire from redis like the global ones.
 - In the panel, a scope deferral is visible only as the queue's delayed count (its status line shows it when
   nonzero). That count also includes cron next-occurrences, retry backoff, quiet-hours deferrals and jobs
-  held on [`run.waitFor`](wait-for.md), so a nonzero value is normal on any deployment with schedules.
+  held on `run.waitFor`, so a nonzero value is normal on any deployment with schedules.
   Only the last of those has a section of its own, because a wait is a per-trigger condition an operator
   wrote and a scope deferral is a ceiling that clears in seconds without anyone acting; a row per scope
   deferral would be a panel that redraws itself every few seconds saying nothing has gone wrong. Since issue #737 the
   worker also records why it deferred each job (`scope-folder`, `scope-repo`, `scope-project`, or `chained` for a
-  chained job, with the parent job it follows; see [wait-for.md](wait-for.md), trap 4), which the console's overview
+  chained job, with the parent job it follows; see wait for, trap 4), which the console's overview
   counts and lists by reason (In line and Waitlists, [console.md](console.md#waitlists)) and its preview of a queued
   job's cancel says; the panel's count is unchanged.
 - The counters live under hashed keys (`budget:s:<16 hex>`) so scopes containing `:` or `/` cannot
@@ -400,6 +400,6 @@ Three doors, same as quiet hours:
 | Deferral | delayed set, fixed re-check, never dropped |
 | Panel key | `m` |
 | Tools | `dispatch_limits`, `dispatch_limit_add`, `dispatch_limit_edit`, `dispatch_limit_delete` |
-| Projects | `PI_PROJECTS_FILE` groups repos and folders into a project, recorded per run and capped by a `project:<id>` row. It is wired like this key. See [projects.md](projects.md) |
+| Projects | `PI_PROJECTS_FILE` groups repos and folders into a project, recorded per run and capped by a `project:<id>` row. It is wired like this key. See projects |
 | Allocation envelope | `PI_ENVELOPE_FILE`: a dollar total and a floor per project, split between projects by a priorities plan. See [allocation.md](allocation.md) |
 | The folder mutex | always on for local jobs, max 1 per folder, no configuration anywhere |

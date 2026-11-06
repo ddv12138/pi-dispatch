@@ -53,7 +53,7 @@ settings, add webhooks and collaborators, and change or delete branch protection
 transferring the repository needs the owner). Forgejo has no per-job mint, so every forgejo job would carry
 it, held by an agent that reads issue text anyone can write, and branch protection is what stands between
 that agent and your default branch (`REQ-BRANCH-PROTECTION-PRECONDITION`). It works, and `pi-dispatch
-doctor` warns for as long as it is set up that way (`OQ-043` in [`specs/open-questions.md`](../specs/open-questions.md)).
+doctor` warns for as long as it is set up that way (`OQ-043` in the project history).
 
 **2. Tell the harness who it is.** A repository-scoped token **cannot call `GET /user`**, because
 `read:user` is not among the four permissions such a token may carry. So set the harness account's numeric
@@ -236,4 +236,4 @@ that this step is a request rather than a filter here.
   fire.
 
 The residual risk this arm shares with GitLab's — a gate that depends on a lookup that can fail — is
-`OQ-013` in [`specs/open-questions.md`](../specs/open-questions.md).
+`OQ-013` in the project history.

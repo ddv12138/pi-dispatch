@@ -116,13 +116,12 @@ new used (a key, a field, a role) until every part runs the new release.
   does not know. The worker catches that for the fields that narrow a job, when it can read the triggers file
   ([triggers.md](triggers.md#limiting-which-models-a-job-may-call), [mcp.md](mcp.md#naming-servers-in-a-trigger),
   [sessions.md](sessions.md#parked-jobs-the-agent-asks-then-waits),
-  [wait-for.md](wait-for.md#1-a-receiver-below-the-floor-drops-the-field-and-the-job-runs)). For `run.secrets` it
+  wait for). For `run.secrets` it
   cannot, and a job a stale receiver queued runs with the variable unset
   ([secrets.md](secrets.md#six-things-worth-knowing-before-you-wire-one)).
 - **The console and every `/dispatch` in the same window**, because they write the files the others read. A `/dispatch`
   from 4.3.1 or earlier drops every settings key it does not know when it writes the file
-  and an older admin bundles an older trigger validator, so it can refuse every trigger edit
-  ([replicas.md](replicas.md#upgrading-and-rolling-back)). Upgrade every panel and console before anyone writes
+  and an older admin bundles an older trigger validator, so it can refuse every trigger edit. Upgrade every panel and console before anyone writes
   something only the new release knows.
 - **The job image before the worker**, because a worker reads the counters an older image does not write as missing,
   and settles every capped job at the floor until the image moves ([costs.md](costs.md#a-call-that-reports-no-usage)).
@@ -130,7 +129,7 @@ new used (a key, a field, a role) until every part runs the new release.
 
 **If you cannot pause.** Upgrade in the same order without step 1, and restart each worker only while it runs no
 job. A worker restarted while it runs a job stops that job as a worker abort, which is not recovered, not even for a
-durable run ([durable-runs.md](durable-runs.md#what-is-not-covered)). Expect `trigger-skew` and `wait-skew` refusals
+durable run. Expect `trigger-skew` and `wait-skew` refusals
 for what an older receiver queued, and run those jobs again.
 
 ## Mixed versions: what is safe
@@ -150,8 +149,8 @@ for what an older receiver queued, and run those jobs again.
 | Workers of different releases on one Valkey | Doctor warns: `fleet.versions` names each version the workers with a live row report ("pi-dispatch versions differ", or "pi-dispatch versions cannot all be read" when the only other group is a worker whose version is unknown), and says "this doctor X, this host's worker row reports Y" when the doctor you ran is not the release this host's worker row reports (a worker not restarted since its `npm install`, a doctor from another install, or, for up to 90 seconds, the row a killed worker left) | Finish the window: the same version on every host, each worker restarted while it runs no job, then `pi-dispatch resume` ([multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you)) |
 | Workers with different `PI_RUN_MIRROR_MAX_RUNS` | Each trims the shared run mirror to its own cap, so the lowest wins. A 4.x worker trims at 5000 | Set the same value on every host |
 | Workers sharing `PI_LOGS_DIR` with different `PI_CONSOLE_AUDIT_RETENTION_DAYS` | Each host's sweep prunes the one `console-audit/` folder, so the shortest wins. A 4.x worker never touches that folder | Set the same value on every host ([console.md](console.md#the-audit-log)) |
-| A recovery on a worker older than its checkpoint | The recovery waits for a worker that reads the checkpoint, for up to seven days. Each release reads two checkpoint versions | Let durable runs finish before you skip a release ([durable-runs.md](durable-runs.md#across-versions)) |
-| A model role canary on a fleet with older workers | An older worker does not check the canary's exclusive lease | Upgrade every queue consumer before a canary ([canary.md](canary.md#enforced-execution-boundary)) |
+| A recovery on a worker older than its checkpoint | The recovery waits for a worker that reads the checkpoint, for up to seven days. Each release reads two checkpoint versions | Let durable runs finish before you skip a release |
+| A model role canary on a fleet with older workers | An older worker does not check the canary's exclusive lease | Upgrade every queue consumer before a canary |
 
 Doctor reads only workers. A receiver publishes its version for the console's Connections page instead (from 5.0.0
 on; an older receiver publishes nothing), so check the receivers there ([multi-host.md](multi-host.md#receiver-observations)).
@@ -256,13 +255,13 @@ Release numbers come from the git tags. The next release is 5.0.0.
 | Store | What changed, and what an older release does with it | Guide |
 |---|---|---|
 | Settings file (`PI_SETTINGS_FILE`) | Every writer keeps a key it does not know. An optional top-level `version`, written only when a key needs it (none does yet). A `version` you added by hand is now read. A 4.x `/dispatch` drops every key it does not know when it writes, and a 4.x worker ignores `version` | — |
-| `pause-windows.json` | An optional `version`, as above. The writer keeps top-level keys it does not own. A 4.x writer drops them and `version`; a 4.x worker reads a newer file and drops what it does not know | [pause-windows.md](pause-windows.md#the-files-version) |
+| `pause-windows.json` | An optional `version`, as above. The writer keeps top-level keys it does not own. A 4.x writer drops them and `version`; a 4.x worker reads a newer file and drops what it does not know | pause windows |
 | `triggers.json` | An optional `version`, as above. A cron `on.id` longer than 176 characters is refused. A 4.x writer (the panel, and the worker's one-shot disarm) writes `triggers` alone, dropping `version` and every other top-level block, `secretBundles` among them; a 4.x worker or receiver reads a newer file and drops what it does not know | [triggers.md](triggers.md#the-files-version) |
 | Queued jobs and the sandbox manifest | An optional version. A canary from the Updates page queues job data version 2 (issue #796), which a 4.x worker would run as the trigger's ordinary job, without the candidate package: every worker on 5.0.0 before anyone runs one. A worker defers a job or a file a newer release wrote as `newer-release`; a 4.x worker runs a job by the fields it knows | [console.md](console.md#updates), [sandbox.md](sandbox.md) |
 | Run records (`PI_LOGS_DIR`) | Written to a temporary file and renamed into place, with `"v": 1`. A record that reserved in the deployment's dollar windows says which ones (`dollars.reservedIn`: dates and a hash of the Valkey's address, never the address). Doctor's `dollars.window-reset` counts only such records, so it sees nothing of the runs before 5.0.0. A 4.x reader ignores fields it does not know, and its sweep leaves a crash leftover `<job id>.json.<pid>.<12 hex>.tmp`, which is harmless | [costs.md](costs.md#when-a-counter-resets) |
 | The web console | New: `console-tokens.json`, `console-login-codes/` and `<PI_LOGS_DIR>/console-audit/`. A token of a role a console does not know is kept and signs in nowhere. An audit row with an action or outcome a console does not know reads as unknown, not as damage. `PI_CONSOLE_AUDIT_RETENTION_DAYS` keeps the audit for its own number of days. 4.x has no console and leaves these files alone | [console.md](console.md#managing-tokens), [console.md](console.md#the-audit-log) |
-| Durable runs, steering, approvals, live transcripts, watch, zero-touch, Updates, the sandbox gateway, model failover | New Valkey keys and new files. A 4.x worker knows none of them, so a run held for an approval or waiting for its recovery is not continued | [durable-runs.md](durable-runs.md#across-versions) |
-| Workspace checkpoints | The boot sweep keeps the job folder of a checkpoint pointer of any version. A recovery whose checkpoint a newer release wrote waits for an upgraded worker instead of being refused | [durable-runs.md](durable-runs.md#across-versions) |
+| Durable runs, steering, approvals, live transcripts, watch, zero-touch, Updates, the sandbox gateway, model failover | New Valkey keys and new files. A 4.x worker knows none of them, so a run held for an approval or waiting for its recovery is not continued | durable runs |
+| Workspace checkpoints | The boot sweep keeps the job folder of a checkpoint pointer of any version. A recovery whose checkpoint a newer release wrote waits for an upgraded worker instead of being refused | durable runs |
 | Run mirror (`runs:*`) | `PI_RUN_MIRROR_MAX_RUNS` (5000 by default, 1000 to 20000) caps it; the lowest setting in a fleet wins. A 4.x worker trims at 5000 | [multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you) |
 | Valkey image | Pinned to `valkey/valkey:8.1`. Doctor's `state.older` names each of these still on `valkey/valkey:8`: a compose file's `valkey` service, a Quadlet, and a container this deployment's `up` started and still runs. `up`'s summary names that container too | [Valkey and BullMQ](#valkey-and-bullmq) |
 | Cron run ids | One reader for `repeat:<id>:<time>` and `manual:<id>:<time>` everywhere. A run record's cron id is read whatever its length, and the console and `/dispatch` name a schedule whose id is 177 to 200 characters long, which an earlier release made and showed with no id, so you can find and remove it. An id no release makes (a time with a leading 0, a `:` in the id) no longer counts as a cron run | [triggers.md](triggers.md#trigger-types-what-fires-each-one-and-what-it-runs) |
@@ -278,7 +277,7 @@ Release numbers come from the git tags. The next release is 5.0.0.
 | 4.3.0 | `triggers.json`, the session store (`PI_SESSIONS_DIR`) | Parked runs (issue #625): a trigger's `run.awaitInput`, and a `parked` mark in a session key's folder while its last run waits for an answer. A 4.2 worker drops `awaitInput` and runs the job without the tool that asks, and never reads or clears a `parked` mark; a 4.3 worker refuses a job a 4.2 receiver queued without the field (`trigger-skew`), and a 4.2 receiver does not route a reply that lacks the comment trigger's phrase | [sessions.md](sessions.md#parked-jobs-the-agent-asks-then-waits) |
 | 4.0.0 | `scoped-limits.json`, run records | Job sizes per project need version 3 (issue #596), and each record keeps the run's memory and CPU use. A 3.x worker refuses a version 3 file at start, and one already running keeps its last good file | [sizing.md](sizing.md#2-set-a-size-per-project), [scoped-limits.md](scoped-limits.md#job-sizes-version-3) |
 | 3.1.0 | `triggers.json`, `PI_PROVIDER`, `PI_ALLOWED_MODELS`, scoped limits, `subscriptions.json`, the overlay `models.json` | pi 1.0.3 (issue #587): the provider `azure-openai-responses` is now `azure`. A job on the old id is refused before it spends | [triggers.md](triggers.md#choosing-the-model-and-the-turn-limit) |
-| 3.0.0 | `scoped-limits.json`, `pause-windows.json`, `projects.json` | Forge-qualified scopes and counters keyed by their row (issue #498), and projects (issue #499). A qualified row needs version 2, which a 2.x worker refuses; a 2.x worker reads a qualified pause window as a name no job has | [scoped-limits.md](scoped-limits.md#the-limit-schema), [multi-host.md](multi-host.md#two-bounds-that-used-to-multiply), [projects.md](projects.md) |
+| 3.0.0 | `scoped-limits.json`, `pause-windows.json`, `projects.json` | Forge-qualified scopes and counters keyed by their row (issue #498), and projects (issue #499). A qualified row needs version 2, which a 2.x worker refuses; a 2.x worker reads a qualified pause window as a name no job has | [scoped-limits.md](scoped-limits.md#the-limit-schema), [multi-host.md](multi-host.md#two-bounds-that-used-to-multiply), projects |
 | 3.0.0 | Settings file, `scoped-limits.json`, Valkey `budget:usd:*` | Dollar caps and windows (issue #501). A settings file with a key written twice is refused, and so is a misspelled dollar key | [costs.md](costs.md#dollar-caps) |
 | 3.0.0 | The overlay's `models.json` and `extensions/` | Models are checked before a job spends, a `models.json` link is refused and `PI_GLOBAL_PI_DIR` must be absolute (issue #502). Loose files in `extensions/` load, and some package layouts there now load nothing (issue #544) | [global-pi-overlay.md](global-pi-overlay.md#custom-providers) |
 | 3.0.0 | `model-endpoints.json`, the egress rules | Declared model servers; the proxy mounts `model-endpoints.conf` (issue #503) | [egress.md](egress.md#upgrading-a-deployment-from-before-503) |
@@ -297,7 +296,7 @@ Release numbers come from the git tags. The next release is 5.0.0.
    - `scoped-limits.json` with a size (version 3) is refused before 4.0.0, and one with qualified or dollar rows
      (version 2) before 3.0.0;
    - a triggers file with `replicas` on a trigger that is not GitHub is refused before 1.1.0, and only a hand edit
-     removes the field ([replicas.md](replicas.md#upgrading-and-rolling-back));
+     removes the field;
    - a `version` above 1 in the settings file, `pause-windows.json` or `triggers.json` makes a 5.0.0 or later worker
      wait; a 4.x worker ignores it and drops what it does not know. No release writes one yet;
    - a console token of a role the older console does not know is kept and signs in nowhere (5.0.0 and later).
@@ -322,7 +321,7 @@ Release numbers come from the git tags. The next release is 5.0.0.
 - [global-pi-overlay.md](global-pi-overlay.md#custom-providers): models the worker can see, links refused, model ids,
   and the [extensions layout](global-pi-overlay.md#extensions-the-sharp-edge--staged-and-loaded-by-default).
 - [job-image.md](job-image.md#pi-150-upgrade-issue-796): pi 1.5.0, and [pi 1.4.0](job-image.md#pi-140-upgrade-issue-693).
-- [replicas.md](replicas.md#upgrading-and-rolling-back): the admin's bundled validator, and rolling back.
+- replicas: the admin's bundled validator, and rolling back.
 - [secrets.md](secrets.md): workers before the receiver and the console, and the
   [floor for `run.secrets`](secrets.md#six-things-worth-knowing-before-you-wire-one).
 - [scoped-limits.md](scoped-limits.md#job-sizes-version-3) and [sizing.md](sizing.md#2-set-a-size-per-project): every
@@ -331,18 +330,18 @@ Release numbers come from the git tags. The next release is 5.0.0.
   `fleet.versions`, and [the forge-qualified scopes](multi-host.md#two-bounds-that-used-to-multiply).
 - [triggers.md](triggers.md#the-files-version): the file's version, and the receiver for
   [`models`](triggers.md#limiting-which-models-a-job-may-call) and [`maxCostUsd`](triggers.md#a-dollar-cap-per-job).
-- [wait-for.md](wait-for.md#1-a-receiver-below-the-floor-drops-the-field-and-the-job-runs): a receiver below the floor.
+- wait for: a receiver below the floor.
 - [mcp.md](mcp.md#naming-servers-in-a-trigger) and [sessions.md](sessions.md#parked-jobs-the-agent-asks-then-waits):
   the receiver with the worker.
 - [sessions.md](sessions.md#when-it-silently-doesnt-resume): each new job image starts every session key cold once.
-- [durable-runs.md](durable-runs.md#across-versions): checkpoints across versions.
-- [pause-windows.md](pause-windows.md#the-files-version): the file's version.
+- durable runs: checkpoints across versions.
+- pause windows: the file's version.
 - [podman.md](podman.md#setup): the keeper, the Valkey password and the Valkey image on the rootless venue.
 - [sandbox.md](sandbox.md#read-this-before-you-leave-it-on): workspaces kept under the old shared path.
-- [canary.md](canary.md#enforced-execution-boundary): every queue consumer before a canary.
+- canary: every queue consumer before a canary.
 - [console.md](console.md#managing-tokens): tokens of an unknown role, the [audit log](console.md#the-audit-log), and
   [Updates](console.md#updates).
-- [zero-touch.md](zero-touch.md#what-the-numbers-can-prove): tracking starts with the release that records it.
+- zero touch: tracking starts with the release that records it.
 - [notifications.md](notifications.md): what changes with nothing configured.
 
 ## For maintainers

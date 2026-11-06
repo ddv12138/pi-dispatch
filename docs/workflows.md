@@ -90,7 +90,7 @@ working-tree race by construction, since each one gets its own clone.
 **The delivery decides when the job is enqueued; `run.waitFor` decides when it starts.** The one thing the
 chain above cannot express is a *dependency*: stage 1 needs the Jira parent accepted, or the deploy window
 open, or last night's pipeline green, and none of those is an event a forge will send you.
-[`run.waitFor`](wait-for.md) holds the whole job in the delayed set, unstarted and unbilled, until an
+`run.waitFor` holds the whole job in the delayed set, unstarted and unbilled, until an
 instant passes or a check script you wrote exits 0. It is deliberately not a stage inside the container:
 a stage that waits burns the turn budget, holds a concurrency slot, and pays for a container to sleep,
 while a job held at the gate costs nothing and survives a restart. So the ordering to reach for is a wait
@@ -241,7 +241,7 @@ The job's whole prompt is that `/wf …` line. The runner verifies the command i
 prompt is sent and refuses with `command-unregistered` (exit 2, never retried) when it is not, so a typo
 costs nothing beyond what the job's extensions spend while they load. The job image must declare the `commands` capability, and the worker refuses pre-spend when it
 does not ([`job-image.md`](job-image.md)). On the graph, a command trigger renders as `/wf` with no flow
-edge ([`graph.md`](graph.md)).
+edge.
 
 ## What the loader does with a staged package
 
@@ -293,7 +293,7 @@ Two supported ways to continue work **across** jobs:
   (a forge parent gets no `/outbox` mount), depth-bounded, and gated on the target flow carrying
   `ai-trigger: allow`; a request naming a `command` is refused outright, with no opt-in.
   The console's insights page ([`insights.md`](insights.md)) shows the whole picture: configured trigger edges, observed
-  chain edges from the run records, and potential ones a skill's text names ([`graph.md`](graph.md)).
+  chain edges from the run records, and potential ones a skill's text names.
 
 ## What is not supported
 

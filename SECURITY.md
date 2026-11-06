@@ -136,8 +136,7 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   trigger also declines the staged packages (`"packages": false`). It is file-only like every
   capability field, no panel key and no AI tool, a chained child inherits its parent's exclusions, and
   a job carrying exclusions is refused pre-spend on an image too old to honour them
-  (`job-image-exclude-tools-unsupported`) rather than allowed to fail open
-  ([`docs/exclude-tools.md`](docs/exclude-tools.md)).
+  (`job-image-exclude-tools-unsupported`) rather than allowed to fail open.
 - **Webhook authenticity, and what "authenticity" means per arm.** What holds **universally is the
   ordering**: the body is read as **raw** bytes, the delivery's credential is checked timing-safe, and only
   then is anything parsed. Without that ordering every other gate collapses, because the label and author
@@ -729,7 +728,7 @@ Stated openly rather than discovered later:
   editing `triggers.json` can name an image (no tool parameter, no panel key, no settings-overlay key), and
   jobs run with `--pull=never` behind a pre-spend presence check, so the only images that can run are ones
   you built or pulled onto that host yourself. `docs/job-image.md` is the conformance checklist; `OQ-012` in
-  `specs/open-questions.md` is the honest statement of what nothing here can check.
+  the project history is the honest statement of what nothing here can check.
 - **`pi-job-*` is a name, not a claim, so a boot reaper will clear your object that happens to use it.**
   The namespace is the string, and nothing checks whether this deployment made the thing. On start, the
   worker removes every **running** container whose name begins `pi-job-` (it lists with `docker ps`, so a
@@ -913,7 +912,7 @@ Stated openly rather than discovered later:
 - **Durable runs keep transcripts and whole workspaces on disk, and a crash loop costs real money.** Since #645 a
   forge trigger with `run.recover: true` has its running jobs checkpointed, so a run the worker loses (a crash, a kill,
   a lost host, a container that dies on an infrastructure fault) continues from its last checkpoint instead of
-  starting over ([`docs/durable-runs.md`](docs/durable-runs.md)).
+  starting over.
   - **The checkpoint store is the session store's PII class.** Each checkpoint holds the job's transcript (issue
     text, tool output, the agent's own text) and its whole workspace tree, for up to 7 days after its last checkpoint
     (removed earlier when the run ends). It lives in `PI_CHECKPOINTS_DIR`, by default `.checkpoints` inside
@@ -949,7 +948,7 @@ Stated openly rather than discovered later:
     builtin file tools on its own. It is checkpointed, not exactly once.
     Any value but `0`, `1` or empty refuses to boot.
 - **Steering is a second way to put text in front of a running agent** (issue #646). With `run.steer` on a
-  trigger, whoever can send a message can add words to a run while it works ([`docs/steering.md`](docs/steering.md)).
+  trigger, whoever can send a message can add words to a run while it works.
   - **Who can send.** An operator, from the command line on a host that reaches the deployment's Valkey
     (`pi-dispatch steer`), and, on a comment trigger that set `run.steer`, anyone that trigger's author gate admits,
     by commenting with its phrase on the issue or pull request a steer-armed job is running on. **Arming a comment

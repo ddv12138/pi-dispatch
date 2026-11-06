@@ -174,7 +174,7 @@ What to do: wait for the window to roll over, or raise that row in `scoped-limit
 A project's run cap for the window was already reached. Nothing was spent.
 
 What to do: wait for the window to roll over, or raise the project's row in `scoped-limits.json`. See
-[projects.md](projects.md).
+projects.
 
 ### job-size-exceeds-host
 
@@ -213,7 +213,7 @@ old file. See [triggers.md](triggers.md).
 The trigger declares wait conditions, but the job reached the worker without them, so it would have run at once. The
 causes are the same as for `trigger-skew`.
 
-What to do: update the old service, or restart the one reading the old triggers file. See [wait-for.md](wait-for.md).
+What to do: update the old service, or restart the one reading the old triggers file.
 
 ### wait-unreadable
 
@@ -221,14 +221,14 @@ The job carries wait conditions this worker cannot read, or its target cannot be
 honour them, so it does not guess.
 
 What to do: run the worker at the release of the service that queued the job, or fix the condition. See
-[wait-for.md](wait-for.md).
+wait for.
 
 ### wait-profile-unknown
 
 The job waits on a check that no wait profile on this deployment declares.
 
 What to do: declare the wait profile on the worker, or fix its name in the trigger's `waitFor`. See
-[wait-for.md](wait-for.md).
+wait for.
 
 ### wait-superseded
 
@@ -241,27 +241,27 @@ What to do: nothing to fix. The other delivery carries the work.
 
 The trigger's `after` time is further out than this deployment lets a job wait.
 
-What to do: move the `after` time closer, or raise the maximum wait. See [wait-for.md](wait-for.md).
+What to do: move the `after` time closer, or raise the maximum wait.
 
 ### wait-refused
 
 The wait check answered that its condition will never clear.
 
 What to do: read the check's answer in the worker log, then fix the condition or the check. See
-[wait-for.md](wait-for.md).
+wait for.
 
 ### wait-unanswerable
 
 The wait check could not answer several times in a row.
 
-What to do: run the wait profile's check by hand on the worker to see why it fails. See [wait-for.md](wait-for.md).
+What to do: run the wait profile's check by hand on the worker to see why it fails.
 
 ### wait-expired
 
 The job gave up waiting: its condition did not clear within the maximum wait or the maximum number of checks, or the
 worker could not run the check often enough.
 
-What to do: run the job again once the condition holds, or allow a longer wait. See [wait-for.md](wait-for.md).
+What to do: run the job again once the condition holds, or allow a longer wait.
 
 ## Models and providers
 
@@ -288,7 +288,7 @@ cooldowns, full model windows and busy endpoints defer instead; this refusal nam
 problem that waiting cannot resolve.
 
 What to do: check `run.fallbackModels`, the effective allowed list, provider credentials, pricing and egress. The
-worker log names each skipped configured model and its fixed reason. See [model-failover.md](model-failover.md).
+worker log names each skipped configured model and its fixed reason.
 
 ## The job image
 
@@ -313,7 +313,7 @@ What to do: set the trigger's `run.image` to an image that declares this forge.
 ### job-image-replicas-unsupported
 
 The image does not declare replica support, so its guardrails would name the wrong branch. See
-[replicas.md](replicas.md).
+replicas.
 
 ### job-image-commands-unsupported
 
@@ -322,7 +322,6 @@ The image does not declare command support, so its runner would not dispatch `ru
 ### job-image-exclude-tools-unsupported
 
 The image does not declare exclude tools support, so its runner would ignore `run.excludeTools` and keep every tool.
-See [exclude-tools.md](exclude-tools.md).
 
 ### job-image-model-policy-unsupported
 
@@ -332,7 +331,7 @@ The image does not declare allowed model support, so its runner could not hold t
 
 The image does not declare `modelFailover`, so its runner cannot report the signed failure and replay-safety evidence
 needed for a reviewed next-attempt fallback. Rebuild the image before enabling `run.fallbackModels`. See
-[model-failover.md](model-failover.md).
+model failover.
 
 ### job-image-token-budget-unsupported
 
@@ -365,12 +364,12 @@ The image cannot report progress, so its runner would ignore `run.progress`.
 ### job-image-recover-unsupported
 
 The image cannot continue a lost run from a checkpoint, so its runner would ignore `run.recover`. See
-[durable-runs.md](durable-runs.md).
+durable runs.
 
 ### job-image-steer-unsupported
 
 The image cannot receive messages while it runs, so its runner would ignore `run.steer`. See
-[steering.md](steering.md).
+steering.
 
 ### job-image-sandbox-layout-unsupported
 
@@ -488,7 +487,7 @@ left. The container ran, so its spend is counted and partial work may exist. A r
 that has a checkpoint continues from it instead, and that attempt's record says `recovery-enqueued`.
 
 What to do: read the `exit` line in the job log for what the runner met, then run the job again if every attempt was
-used. See [durable-runs.md](durable-runs.md).
+used.
 
 ### container-exit-unknown
 
@@ -717,7 +716,7 @@ See [subscription-auth.md](subscription-auth.md).
 The folder now leads, through a link, into another project's folder than the one the job was billed to.
 
 What to do: check the links inside the run root, and list the folder under the project it really belongs to. See
-[projects.md](projects.md).
+projects.
 
 ### pi-too-many-files
 
@@ -944,7 +943,7 @@ What to do: give the server's credential a variable of its own.
 ### mcp-excluded
 
 The trigger's `run.excludeTools` removes every way the job could reach the server. See
-[exclude-tools.md](exclude-tools.md).
+exclude tools.
 
 What to do: remove the server from `run.mcp`, or keep a tool that reaches it.
 
@@ -1017,18 +1016,18 @@ What to do: remove that extension, or the trigger's `run.progress`. See [trigger
 The run may receive messages while it works, but could not read where they arrive. This is a worker and job image of
 different releases.
 
-What to do: run a worker and a job image of the same release. See [steering.md](steering.md).
+What to do: run a worker and a job image of the same release.
 
 ### steer-no-exit-key
 
 The run may receive messages, but had no key to confirm their delivery with. The cause is the same.
 
-What to do: run a worker and a job image of the same release. See [steering.md](steering.md).
+What to do: run a worker and a job image of the same release.
 
 ## Durable runs
 
 These are the reasons of `run.recover`, which continues a run from its last checkpoint when a worker or container is
-lost. See [durable-runs.md](durable-runs.md).
+lost.
 
 ### recover-store-unset
 
@@ -1111,7 +1110,7 @@ Most values are a cold start: the job ran from the start, and that is a correct 
 ## Recovery skipped reasons
 
 A record's `recoverSkipped` says why a job whose trigger sets `run.recover` ran without recovery. The job still ran,
-exactly as it would without the setting. See [durable-runs.md](durable-runs.md).
+exactly as it would without the setting.
 
 | Reason | What happened | What to do |
 |---|---|---|
@@ -1159,7 +1158,6 @@ A record's `bundleSkipped` says why a job ran without its project's secret bundl
 ## Steering skipped reasons
 
 A record's `steerSkipped` says why a job whose trigger sets `run.steer` could not receive messages. The job still ran.
-See [steering.md](steering.md).
 
 | Reason | What happened |
 |---|---|
@@ -1613,7 +1611,7 @@ An absent, unsafe, oversized or invalid UTF-8 flow also refuses; the worker does
 flow. A known credential in source/flow/draft text is refused before it can become a cited proposal.
 
 What to do: check the hand-written answer rule, committed flow and source run. The parked question still needs a
-person. See [answer-rules.md](answer-rules.md).
+person.
 
 ### answer-draft-config-changed
 

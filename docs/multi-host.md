@@ -99,7 +99,7 @@ and a machine without the checkpoint refuses it (`recovery-checkpoint-absent`); 
 `recover` on an unnamed worker with peers. A recovery not taken within six hours is checked against the host
 registry: while its machine still reports in (or the queue is paused) the wait is extended, up to seven days; once
 the machine is gone it is taken off the queue by any worker and reported as `recovery-host-lost`. Continuing a
-run on another machine is not supported yet; see [`durable-runs.md`](durable-runs.md).
+run on another machine is not supported yet; see `durable runs`.
 
 **The run history is merged.** Each worker writes its record to its own disk as it always has, and also
 mirrors it into Valkey, so every panel lists the whole deployment's runs and labels each one with the host
@@ -195,10 +195,10 @@ pauses nothing, without saying so.
 `projects.json` is per host too. Each host decides which project a job belongs to from its own copy and writes that
 id into the run record, so give every host the same file, or one repo is recorded under two projects depending on
 which host ran it. Each host publishes a fingerprint of its projects (ids and member hashes, never a name), and
-`pi-dispatch doctor` names a host whose projects differ. See [`docs/projects.md`](projects.md).
+`pi-dispatch doctor` names a host whose projects differ.
 
 If you were relying on that accidental multiplication, raise the knob deliberately. The published
-arithmetic in [`docs/wait-for.md`](wait-for.md) is now what it says: about one check every ten seconds
+arithmetic in `docs/wait for` is now what it says: about one check every ten seconds
 for the whole deployment, not per host.
 
 ## The host budget
@@ -550,7 +550,7 @@ shorter retention cut inside the history that is still there can read as idle ti
 publish itself, so the others cannot see it, and it will not route its own work. Above the floor, upgrade every host
 in one window, in [the order](upgrading.md#the-order) the upgrade guide gives.
 
-See also [`scoped-limits.md`](scoped-limits.md), [`wait-for.md`](wait-for.md) and
+See also [`scoped-limits.md`](scoped-limits.md), `wait for` and
 [`secrets.md`](secrets.md), each of which has a per-host consequence noted in it.
 
 ## Inspecting a host in the console

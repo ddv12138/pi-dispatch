@@ -2033,7 +2033,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// inside a run root that leads into ANOTHER project's member would bill that work to the named project's share.
 		// Refused here, after prepare and before the token-cap read and every reserve: free, determinate, never retried. A
 		// resolved folder in no project is not refused, because the named spelling is the operator's own membership
-		// (a symlinked member is listed by the path the triggers use, docs/projects.md).
+		// (a symlinked member is listed by the path the triggers use).
 		if (job.kind === "local" && !job.questionGrouping && typeof folderProject === "function" && typeof prepared?.workspace === "string") {
 			const resolvedProject = folderProject(prepared.workspace);
 			if (resolvedProject !== null && resolvedProject !== pickupProject) {

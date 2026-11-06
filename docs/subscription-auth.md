@@ -249,7 +249,7 @@ Deployment and scoped dollar windows still apply. Authorization never silently c
 Provider `used_credits` and `monthly_limit` retain their own currency and decimal scale; missing units are
 unknown. Quota percentages, vendor credit counters, API-equivalent model costs and flat subscription prices
 are separate observations. `subscriptions.json` remains analytics-only and changes no authentication or
-routing. See [Spend accounting](costs.md) and [model failover](model-failover.md).
+routing. See [Spend accounting](costs.md) and model failover.
 
 ## Supported jobs and visibility
 

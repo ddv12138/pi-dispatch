@@ -122,7 +122,7 @@ then its provider needs no key at all ("A provider with no key" below).
    `id` names the endpoint in every line about it. `host` is the name or address the proxy dials: never
    `localhost` or `127.0.0.1`, which inside the proxy is the proxy itself. `slots` is how many requests the server
    runs at once. `keyless` says the server takes no key (default `false`). The file's full rules are in
-   `INT-MODEL-ENDPOINTS-FILE-CONTRACT` (specs/interfaces.md).
+   `INT-MODEL-ENDPOINTS-FILE-CONTRACT` (the project history).
 
 2. **Render** the proxy's rules for it, from the deployment folder:
 

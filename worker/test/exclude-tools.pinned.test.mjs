@@ -32,7 +32,7 @@ if (skip && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") {
 const PROTOCOL =
 	"the pinned pi's built-in tool set moved. Do NOT relax this assertion. Grow (or shrink) these together, in one commit: " +
 	"EXCLUDABLE_TOOL_NAMES in worker/src/triggers.mjs, the factory list in image/runner/src/tools.mjs, the sdk.d.ts and " +
-	"allToolNames pins in image/runner/test/pinned-api.test.mjs, docs/exclude-tools.md's set, and the triggers.example.json " +
+	"allToolNames pins in image/runner/test/pinned-api.test.mjs, and the triggers.example.json " +
 	"entry -- then re-verify pi still IGNORES unknown excludeTools names silently (that fact is why the loader validates at all).";
 
 test("EXCLUDABLE_TOOL_NAMES is exactly the pinned pi's allToolNames", { skip }, async () => {
