@@ -424,7 +424,7 @@ What can hide a reset, though never invent one (each of these only lowers the su
   count against it.
 
 Doctor staying quiet is therefore no proof that nothing was reset. A counter you lowered on purpose keeps the warning
-until its window ends. [backup.md](backup.md#what-the-valkey-volume-holds) lists every counter a reset takes.
+until its window ends.
 
 ### What the caps do not cover
 

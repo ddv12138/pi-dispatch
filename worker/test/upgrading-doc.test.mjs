@@ -149,7 +149,7 @@ function guidesWithUpgradeNotes() {
 test("every guide with upgrade notes links the upgrade guide, and the upgrade guide links it back", () => {
 	const guides = guidesWithUpgradeNotes();
 	// Not vacuous: the heading rule alone finds these, so a rule that matched nothing would fail here.
-	for (const name of ["backup.md", "costs.md", "egress.md", "global-pi-overlay.md", "job-image.md", "pause-windows.md", "podman.md", "replicas.md", "scoped-limits.md", "sizing.md", "triggers.md"]) {
+	for (const name of ["costs.md", "egress.md", "global-pi-overlay.md", "job-image.md", "pause-windows.md", "podman.md", "replicas.md", "scoped-limits.md", "sizing.md", "triggers.md"]) {
 		assert.ok(guides.includes(name), `the upgrade heading rule finds docs/${name}`);
 	}
 	const upgrading = read("docs/upgrading.md");

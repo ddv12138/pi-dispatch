@@ -13,7 +13,7 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
 1. **Read what changed** between your release and the target: the rows below for each release in between
    ([What each release changed in stored state](#what-each-release-changed-in-stored-state)), and their release notes.
    From 5.0.0 on, every release note links this page.
-2. **Back up**, with everything stopped ([backup.md](backup.md)). A copy from before the upgrade is the way back for a
+2. **Back up**, with everything stopped. A copy from before the upgrade is the way back for a
    file a newer release has written.
 3. **Run `pi-dispatch doctor` on every host** and clear what it fails on, so that a failure afterwards is the
    upgrade's and not one that was already there.
@@ -28,7 +28,7 @@ Each guide keeps the notes about its own feature. [The last sections](#notes-kep
      one, and the worker and the receiver do not start on it. Earlier releases accepted any length. A renamed id is a
      new schedule.
    - Remove a top-level `version` you added by hand to the settings file, `pause-windows.json` or `triggers.json`:
-     5.0.0 reads it ([backup.md](backup.md#a-key-or-a-file-from-a-newer-release)).
+     5.0.0 reads it.
 
 ## The order
 
@@ -121,10 +121,9 @@ new used (a key, a field, a role) until every part runs the new release.
   ([secrets.md](secrets.md#six-things-worth-knowing-before-you-wire-one)).
 - **The console and every `/dispatch` in the same window**, because they write the files the others read. A `/dispatch`
   from 4.3.1 or earlier drops every settings key it does not know when it writes the file
-  ([backup.md](backup.md#a-key-or-a-file-from-a-newer-release)), and an older admin bundles an older trigger
-  validator, so it can refuse every trigger edit ([replicas.md](replicas.md#upgrading-and-rolling-back)). When
-  backup.md says to upgrade every panel and console first, it means before anyone writes something only the new
-  release knows.
+  and an older admin bundles an older trigger validator, so it can refuse every trigger edit
+  ([replicas.md](replicas.md#upgrading-and-rolling-back)). Upgrade every panel and console before anyone writes
+  something only the new release knows.
 - **The job image before the worker**, because a worker reads the counters an older image does not write as missing,
   and settles every capped job at the floor until the image moves ([costs.md](costs.md#a-call-that-reports-no-usage)).
   That overcharges and never undercharges.
@@ -240,7 +239,7 @@ so an `image:` line on `valkey/valkey:8` on either side is a finding, and one in
 written, through the AOF and through the RDB file alone, with every key, every TTL and the last writes intact. So the
 queue survives a move between 8.0 and 8.1 in either direction. That says nothing about a later minor, whose files need
 not load in an older one, which is one of the reasons for the pin: before you move Valkey back across a minor nobody
-measured, take a copy of its volume ([backup.md](backup.md#stop-copy-start)).
+measured, take a copy of its volume.
 
 **BullMQ** keeps the queue in Valkey in its own format. pi-dispatch pins it exactly, and 5.0.0 stays on 5.80.4, the
 version 4.3.1 runs. From 5.0.0 every BullMQ fact pi-dispatch reads past BullMQ's public API (key names, job fields, the
@@ -256,13 +255,13 @@ Release numbers come from the git tags. The next release is 5.0.0.
 
 | Store | What changed, and what an older release does with it | Guide |
 |---|---|---|
-| Settings file (`PI_SETTINGS_FILE`) | Every writer keeps a key it does not know. An optional top-level `version`, written only when a key needs it (none does yet). A `version` you added by hand is now read. A 4.x `/dispatch` drops every key it does not know when it writes, and a 4.x worker ignores `version` | [backup.md](backup.md#a-key-or-a-file-from-a-newer-release) |
+| Settings file (`PI_SETTINGS_FILE`) | Every writer keeps a key it does not know. An optional top-level `version`, written only when a key needs it (none does yet). A `version` you added by hand is now read. A 4.x `/dispatch` drops every key it does not know when it writes, and a 4.x worker ignores `version` | — |
 | `pause-windows.json` | An optional `version`, as above. The writer keeps top-level keys it does not own. A 4.x writer drops them and `version`; a 4.x worker reads a newer file and drops what it does not know | [pause-windows.md](pause-windows.md#the-files-version) |
 | `triggers.json` | An optional `version`, as above. A cron `on.id` longer than 176 characters is refused. A 4.x writer (the panel, and the worker's one-shot disarm) writes `triggers` alone, dropping `version` and every other top-level block, `secretBundles` among them; a 4.x worker or receiver reads a newer file and drops what it does not know | [triggers.md](triggers.md#the-files-version) |
 | Queued jobs and the sandbox manifest | An optional version. A canary from the Updates page queues job data version 2 (issue #796), which a 4.x worker would run as the trigger's ordinary job, without the candidate package: every worker on 5.0.0 before anyone runs one. A worker defers a job or a file a newer release wrote as `newer-release`; a 4.x worker runs a job by the fields it knows | [console.md](console.md#updates), [sandbox.md](sandbox.md) |
-| Run records (`PI_LOGS_DIR`) | Written to a temporary file and renamed into place, with `"v": 1`. A record that reserved in the deployment's dollar windows says which ones (`dollars.reservedIn`: dates and a hash of the Valkey's address, never the address). Doctor's `dollars.window-reset` counts only such records, so it sees nothing of the runs before 5.0.0. A 4.x reader ignores fields it does not know, and its sweep leaves a crash leftover `<job id>.json.<pid>.<12 hex>.tmp`, which is harmless | [backup.md](backup.md#stop-copy-start), [costs.md](costs.md#when-a-counter-resets) |
+| Run records (`PI_LOGS_DIR`) | Written to a temporary file and renamed into place, with `"v": 1`. A record that reserved in the deployment's dollar windows says which ones (`dollars.reservedIn`: dates and a hash of the Valkey's address, never the address). Doctor's `dollars.window-reset` counts only such records, so it sees nothing of the runs before 5.0.0. A 4.x reader ignores fields it does not know, and its sweep leaves a crash leftover `<job id>.json.<pid>.<12 hex>.tmp`, which is harmless | [costs.md](costs.md#when-a-counter-resets) |
 | The web console | New: `console-tokens.json`, `console-login-codes/` and `<PI_LOGS_DIR>/console-audit/`. A token of a role a console does not know is kept and signs in nowhere. An audit row with an action or outcome a console does not know reads as unknown, not as damage. `PI_CONSOLE_AUDIT_RETENTION_DAYS` keeps the audit for its own number of days. 4.x has no console and leaves these files alone | [console.md](console.md#managing-tokens), [console.md](console.md#the-audit-log) |
-| Durable runs, steering, approvals, live transcripts, watch, zero-touch, Updates, the sandbox gateway, model failover | New Valkey keys and new files, listed in [backup.md](backup.md#what-the-valkey-volume-holds). A 4.x worker knows none of them, so a run held for an approval or waiting for its recovery is not continued | [durable-runs.md](durable-runs.md#across-versions) |
+| Durable runs, steering, approvals, live transcripts, watch, zero-touch, Updates, the sandbox gateway, model failover | New Valkey keys and new files. A 4.x worker knows none of them, so a run held for an approval or waiting for its recovery is not continued | [durable-runs.md](durable-runs.md#across-versions) |
 | Workspace checkpoints | The boot sweep keeps the job folder of a checkpoint pointer of any version. A recovery whose checkpoint a newer release wrote waits for an upgraded worker instead of being refused | [durable-runs.md](durable-runs.md#across-versions) |
 | Run mirror (`runs:*`) | `PI_RUN_MIRROR_MAX_RUNS` (5000 by default, 1000 to 20000) caps it; the lowest setting in a fleet wins. A 4.x worker trims at 5000 | [multi-host.md](multi-host.md#what-the-panel-and-doctor-show-you) |
 | Valkey image | Pinned to `valkey/valkey:8.1`. Doctor's `state.older` names each of these still on `valkey/valkey:8`: a compose file's `valkey` service, a Quadlet, and a container this deployment's `up` started and still runs. `up`'s summary names that container too | [Valkey and BullMQ](#valkey-and-bullmq) |
@@ -280,10 +279,10 @@ Release numbers come from the git tags. The next release is 5.0.0.
 | 4.0.0 | `scoped-limits.json`, run records | Job sizes per project need version 3 (issue #596), and each record keeps the run's memory and CPU use. A 3.x worker refuses a version 3 file at start, and one already running keeps its last good file | [sizing.md](sizing.md#2-set-a-size-per-project), [scoped-limits.md](scoped-limits.md#job-sizes-version-3) |
 | 3.1.0 | `triggers.json`, `PI_PROVIDER`, `PI_ALLOWED_MODELS`, scoped limits, `subscriptions.json`, the overlay `models.json` | pi 1.0.3 (issue #587): the provider `azure-openai-responses` is now `azure`. A job on the old id is refused before it spends | [triggers.md](triggers.md#choosing-the-model-and-the-turn-limit) |
 | 3.0.0 | `scoped-limits.json`, `pause-windows.json`, `projects.json` | Forge-qualified scopes and counters keyed by their row (issue #498), and projects (issue #499). A qualified row needs version 2, which a 2.x worker refuses; a 2.x worker reads a qualified pause window as a name no job has | [scoped-limits.md](scoped-limits.md#the-limit-schema), [multi-host.md](multi-host.md#two-bounds-that-used-to-multiply), [projects.md](projects.md) |
-| 3.0.0 | Settings file, `scoped-limits.json`, Valkey `budget:usd:*` | Dollar caps and windows (issue #501). A settings file with a key written twice is refused, and so is a misspelled dollar key | [costs.md](costs.md#dollar-caps), [backup.md](backup.md#an-overlay-that-does-not-load-stops-every-job) |
+| 3.0.0 | Settings file, `scoped-limits.json`, Valkey `budget:usd:*` | Dollar caps and windows (issue #501). A settings file with a key written twice is refused, and so is a misspelled dollar key | [costs.md](costs.md#dollar-caps) |
 | 3.0.0 | The overlay's `models.json` and `extensions/` | Models are checked before a job spends, a `models.json` link is refused and `PI_GLOBAL_PI_DIR` must be absolute (issue #502). Loose files in `extensions/` load, and some package layouts there now load nothing (issue #544) | [global-pi-overlay.md](global-pi-overlay.md#custom-providers) |
 | 3.0.0 | `model-endpoints.json`, the egress rules | Declared model servers; the proxy mounts `model-endpoints.conf` (issue #503) | [egress.md](egress.md#upgrading-a-deployment-from-before-503) |
-| 2.0.0 | Run history, settings file | The defaults moved from the OS temp directory to `~/.pi-dispatch` (issue #290). Doctor names records still at the old place | [backup.md](backup.md#upgrading-from-a-version-that-kept-state-in-the-os-temp-directory) |
+| 2.0.0 | Run history, settings file | The defaults moved from the OS temp directory to `~/.pi-dispatch` (issue #290). Doctor names records still at the old place | — |
 | 2.0.0 | Jobs and kept workspaces | One temp root per account, `<OS temp dir>/pi-dispatch-<uid>` (issue #464). Workspaces kept under the old shared path are no longer opened or swept, and doctor names them | [sandbox.md](sandbox.md#read-this-before-you-leave-it-on) |
 | 2.0.0 | Valkey, `.env` | A password per deployment, `VALKEY_PASSWORD` (issue #468) | [podman.md](podman.md#setup), [secrets.md](secrets.md) |
 | 2.0.0 | `egress-proxy.conf` copies | Doctor names a copy that differs from the package's, and `up` refreshes it (issue #484) | [egress.md](egress.md#lines-about-leftovers) |
@@ -303,7 +302,7 @@ Release numbers come from the git tags. The next release is 5.0.0.
      wait; a 4.x worker ignores it and drops what it does not know. No release writes one yet;
    - a console token of a role the older console does not know is kept and signs in nowhere (5.0.0 and later).
    Fix those by hand, or restore the copy you took before the upgrade. Restoring `triggers.json` re-arms the one-shots
-   that fired since: keep the newer `on.disarmed` marks ([backup.md](backup.md#restoring)).
+   that fired since: keep the newer `on.disarmed` marks.
 4. **What stays harmless.** An older release ignores the run record fields it does not know. A 4.x worker leaves crash
    leftovers `<job id>.json.<pid>.<12 hex>.tmp` in the logs folder: delete them by hand. Every earlier release leaves
    `console-audit/` alone: a 4.x worker's sweep reads only the top of the logs folder
@@ -316,8 +315,6 @@ Release numbers come from the git tags. The next release is 5.0.0.
 
 ## Notes kept in each guide
 
-- [backup.md](backup.md#a-key-or-a-file-from-a-newer-release): keys and files a newer release wrote, the `version` you
-  may have added by hand, and [state from before #290](backup.md#upgrading-from-a-version-that-kept-state-in-the-os-temp-directory).
 - [costs.md](costs.md#a-call-that-reports-no-usage): the image before the worker, and
   [when a counter resets](costs.md#when-a-counter-resets).
 - [egress.md](egress.md): turning the proxy on, [the #503 rules](egress.md#upgrading-a-deployment-from-before-503) and

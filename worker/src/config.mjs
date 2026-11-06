@@ -1041,7 +1041,7 @@ function homeOrEmpty(home) {
  * Support, LOCALAPPDATA), for four reasons. This project has exactly ONE home-dir pattern and it is
  * this shape (`PI_CODING_AGENT_DIR || ~/.pi/agent`). docs/sessions.md already teaches
  * `~/.pi-dispatch/sessions` as the place to put the session store, so these two land beside a
- * directory the docs already tell an operator to create, and docs/backup.md can name one target.
+ * directory the docs already tell an operator to create.
  * `~/Library/Application Support` contains a space, and doctor prints copy-pasteable fix lines. And a
  * per-platform trio would be three new ENV reads needing their own env-internal markers, where
  * `homedir()` is a node:os call that the env-docs scan does not see at all.

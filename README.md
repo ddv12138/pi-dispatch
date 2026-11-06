@@ -363,7 +363,7 @@ have a [setup page each](#other-forges).
 - On a shared server, prefer `PI_BACKENDS=podman`: access to the Docker socket is equivalent to root ([Podman](docs/podman.md)).
 - List the hosts jobs may reach, since everything else is denied ([egress](docs/egress.md)).
 - Use the GitHub App rather than the default `gh` source, which forwards your whole login ([GitHub](docs/github.md)).
-- Take the [backup](docs/backup.md) seriously, and read [`SECURITY.md`](SECURITY.md).
+- Read [`SECURITY.md`](SECURITY.md).
 
 **Add a second machine.** Point it at the same Valkey and give every worker a name with `PI_WORKER_NAME`. Each host keeps its own logs, jobs and
 sandbox folders ([several machines](docs/multi-host.md)). Run one worker per container daemon.
@@ -646,7 +646,7 @@ These forges have one auth source each, a token you create, so setting theirs to
 ## Docs
 
 **Getting started and running it:** [console](docs/console.md), [panel](docs/panel.md), [service](docs/service.md),
-[backup](docs/backup.md), [upgrading](docs/upgrading.md), [253 server deployment](docs/253-deployment.md),
+[upgrading](docs/upgrading.md), [253 server deployment](docs/253-deployment.md),
 [multi host](docs/multi-host.md), [polling](docs/polling.md),
 [notifications](docs/notifications.md).
 

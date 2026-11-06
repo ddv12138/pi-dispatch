@@ -909,13 +909,13 @@ test("a garbled PI_WAIT_PROFILES refuses to BOOT, on its sibling's reasoning (#2
 test("the durable defaults compose one state root under the home dir, in the slash alphabet", () => {
 	// The SHAPE pin. `.pi-dispatch` is the whole point: these two
 	// are the run history and the operator's caps, and the OS is entitled to sweep what they used to
-	// default into. See docs/backup.md.
+	// default into.
 	assert.equal(defaultLogsDir({}, "/home/u"), "/home/u/.pi-dispatch/logs");
 	assert.equal(defaultSettingsFile({}, "/home/u"), "/home/u/.pi-dispatch/settings.json");
 	assert.equal(defaultLogsDir({}, "C:\\Users\\u"), "C:/Users/u/.pi-dispatch/logs", "backslashes normalise like the sibling defaults");
 	assert.equal(defaultLogsDir({}, "/home/u/"), "/home/u/.pi-dispatch/logs", "a trailing separator on the home dir is stripped");
 
-	// ONE root, which is the claim docs/backup.md makes to an operator: back up one directory.
+	// ONE root keeps the durable defaults together.
 	const dir = (p) => p.slice(0, p.lastIndexOf("/"));
 	assert.equal(dir(defaultSettingsFile({}, "/home/u")), dir(defaultLogsDir({}, "/home/u")));
 

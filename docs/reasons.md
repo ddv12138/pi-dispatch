@@ -525,7 +525,7 @@ than run with settings nobody chose.
 
 What to do: fix the key `pi-dispatch doctor` names, or delete the file to start from an empty overlay. A top-level
 `version` that is not a whole number of 1 or more is one such key: earlier releases ignored it, and since issue #761 it
-is read, so remove a `version` you added yourself. See [backup.md](backup.md).
+is read, so remove a `version` you added yourself.
 
 ## The OpenShell venues
 

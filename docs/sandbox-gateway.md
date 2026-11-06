@@ -70,7 +70,7 @@ console use too; a relative value resolves against the deployment folder. Run th
 as its unit file does: the audit folder is that account's alone, so another account cannot append to it. Where the
 worker's, the console's and the gateway's homes differ, set an absolute `PI_LOGS_DIR` in the deployment `.env`, which
 the worker reads as well, so all three use one folder. Otherwise the gateway's rows land in a folder that the worker
-does not prune, the console's Audit page does not show and [a backup](backup.md) does not copy. The gateway writes
+does not prune, the console's Audit page does not show and a backup does not copy. The gateway writes
 nothing to the deployment's `logs/` folder, where the service manager keeps the worker's own output, unless
 `PI_LOGS_DIR` names it.
 

@@ -4551,7 +4551,7 @@ export async function collectChecks(shellVars, seams) {
 		const noHome = homeless.length > 0 && !fileExists(home);
 
 		if (swept.length === 0 && !noHome) {
-			checks.push({ ok: true, label: `Durable state: run history ${logsDir}, settings ${settingsFile} — both survive a reboot (docs/backup.md)` });
+			checks.push({ ok: true, label: `Durable state: run history ${logsDir}, settings ${settingsFile} — both survive a reboot` });
 		} else if (swept.length > 0) {
 			// ok:false + warn:true is the tier that renders a ⚠ WITHOUT failing doctor and still prints its
 			// fix line; an ok:true check's fix is never rendered (see render() above). No fixAction, which
