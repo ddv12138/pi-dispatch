@@ -25,11 +25,9 @@
 .git
 .github
 
-# Docs, specs, planning, editor/agent tooling -- prose and provenance, not runtime.
+# Docs, planning, editor/agent tooling -- prose and provenance, not runtime.
 docs
-design
 launch
-specs
 examples
 .plan-artifacts
 .pi

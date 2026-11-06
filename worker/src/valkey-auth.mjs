@@ -44,7 +44,7 @@ export const VALKEY_PASSWORD_KEY = "VALKEY_PASSWORD";
  * `deploy/docker-compose.yml`, the Quadlet unit (as `docker.io/` and this), CI's services and its smoke script, each
  * held to this value by `worker/test/valkey-image.test.mjs`. A minor, where an older release shipped the floating
  * major `:8` on the reasoning that a bad pull breaks loudly and spends nothing. That is not enough:
- *   - the specs state measured facts about this Valkey (`HEXPIRE` answers `ERR unknown command`, `/bin/sh` is dash),
+ *   - measured facts about this Valkey (`HEXPIRE` answers `ERR unknown command`, `/bin/sh` is dash),
  *     and a floating tag makes each a claim about whatever was pulled last;
  *   - the hosts of one fleet must not cross a minor at different times, each on its own next pull;
  *   - a newer minor's data files need not load in an older one, so a pull nobody chose could rule out a rollback;

@@ -138,8 +138,7 @@ export function isDeclaration(word) {
  * property name is the un-actionable amber this project's design rejects elsewhere.
  *
  * A CLOSED LIST, because a backend that simply omits one would otherwise be admitted for it. That rule is
- * only sound if the list is COMPLETE, so it is derived from what the specs say the container boundary
- * provides rather than from what the local implementation happens to have flags for. The five properties
+ * only sound if the list is COMPLETE, so it covers the container boundary rather than only the local implementation’s flags. The five properties
  * after `localFolders` exist because without them a backend could declare every other word `enforced`,
  * be fully conformant, and still bind-mount the docker socket, reuse one container across mutually
  * untrusting issue authors, or have no way to stop a runaway job.
@@ -423,7 +422,7 @@ export const PODMAN_CONF_WIDENS_JOB = "podman-conf-widens-job";
 /**
  * The containers.conf keys that refusal refuses on presence (issues #428, #450 and #448), in the order every text names
  * them. The ONE list for the podman venue: backend-podman.mjs builds `WIDENING_KEY` and its refusal texts from it, and
- * `podman-doc.test.mjs` requires every list of these keys in the specs, the docs and the source to be exactly this one,
+ * `podman-doc.test.mjs` requires every list of these keys in the docs and the source to be exactly this one,
  * since three copies drifted when #450 added two. The rule for a key issue #448 measured: REFUSED when the job saw its
  * value cross a boundary the worker's argv sets (what the job may reach, run, read or be limited by), or when it could
  * not be measured; documented as INERT when the argv's own pins overrode it; documented as HARMLESS

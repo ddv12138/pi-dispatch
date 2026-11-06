@@ -112,7 +112,7 @@ export const EXIT_BY_SUPERVISOR = "supervisor";
 
 /**
  * THE exit line every `parseExit*` scanner reads (issue #596), parsed, or null when `text` holds none: "the decisive
- * exit line" everywhere in this file and in the specs means this function's pick, never simply the last line. One
+ * exit line" throughout this file means this function's pick, never simply the last line. One
  * picker, so the scanners cannot disagree about which line decided the run.
  *
  * Normally the LAST `exit` event, found from the end with `parseTailLine`'s glue repair. One exception: a line the

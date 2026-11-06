@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { findConflictMarkers, scan } from "../../.github/scripts/conflict-marker-check.mjs";
 
-// PR #457's gate: a rebase committed conflict markers into specs/requirements.md and every guard stayed green. The
+// PR #457's gate: a rebase committed conflict markers into a revision table and every guard stayed green. The
 // markers are BUILT here, never written literally, so this file cannot trip the check it tests.
 const OPEN = "<".repeat(7);
 const MID = "=".repeat(7);

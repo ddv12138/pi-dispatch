@@ -1,12 +1,10 @@
-# Local research artifact; its content lives in specs/.
-# The leading slash is required: unanchored, and with core.ignorecase=true, this
-# pattern also matches specs/design.md.
+# Local research artifact.
 /DESIGN.md
 
 # Working plans. Provenance, not product.
 plans/
 
-# Local agent/editor tooling. specs/ is the source of truth for this project.
+# Local agent/editor tooling.
 .claude/
 
 # Job artifacts. Container stdout is streamed to logs/<JOB_ID>.log and job dirs
@@ -122,8 +120,6 @@ venv/
 Thumbs.db
 desktop.ini
 
-# The design tools' screenshots and harness pages (design/tools/shoot.py). Rebuilt on every run.
-design/.shots/
 
 # Planning notes and review evidence belong in pull requests.
 .plan-artifacts/

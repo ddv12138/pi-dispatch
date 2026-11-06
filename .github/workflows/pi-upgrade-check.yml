@@ -46,8 +46,6 @@ on:
       # admin/test/render-images.test.mjs runs launch/render-images.mjs, so a launch/ change can break
       # this workflow without touching anything listed above. The pin file is the browser it measures with.
       - "launch/**"
-      # Issue #737: admin/test/design-folder.test.mjs reads design/system, so a design change can turn it red.
-      - "design/**"
       - ".github/scripts/console-width-check.mjs"
       - ".github/scripts/sandbox-gateway-browser.mjs"
       - ".github/scripts/sandbox-gateway-tls-fixture.mjs"
@@ -148,7 +146,7 @@ jobs:
           # Valkey was the counter-example here: valkey/valkey:8, a floating major, called fine for a queue
           # because a bad pull breaks loudly and spends nothing. Issue #761 reversed that and pins the minor,
           # valkey/valkey:8.1 (VALKEY_IMAGE in worker/src/valkey-auth.mjs, held to deploy/, the services
-          # below and the smoke script by worker/test/valkey-image.test.mjs): the specs state measured facts
+          # below and the smoke script by worker/test/valkey-image.test.mjs): measured facts
           # about the pinned Valkey, a fleet's hosts must not cross a minor at different times, a newer
           # minor's data files need not load in an older one (a pull nobody chose could rule out a rollback),
           # and an upgrade guide needs a known starting point. A minor, not a digest: it still takes patches.

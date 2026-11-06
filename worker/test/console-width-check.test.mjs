@@ -1776,7 +1776,7 @@ test("the actual agent-controls and answer-draft browser runs after verified Chr
 	assert.ok(!answerer.keys.includes("continue-on-error"));
 });
 
-test("what the workflow's comment, the docs and the specs say the check does is what it does: its widths and each control's count", async () => {
+test("what the workflow's comment, the docs say the check does is what it does: its widths and each control's count", async () => {
 	const { states, retry } = await shellLive();
 	const [desk, phone] = [controlDoc(states, retry).expected.length, phoneControlDoc(states).expected.length];
 	const prose = (text) => text.replace(/\s+/g, " ");

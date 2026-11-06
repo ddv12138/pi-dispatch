@@ -9,7 +9,7 @@ import { RUN_FILTER_FIELDS, RUN_OUTCOME_VALUES } from "../src/run-filter.mjs";
 import { planTriggerAdd, TRIGGER_ADD_FIELDS } from "../src/write-plans.mjs";
 
 /**
- * The console's hand-written lists in the docs and the specs, each held to the code it restates (AGENTS.md: a table
+ * The console's hand-written lists in the docs, each held to the code it restates (AGENTS.md: a table
  * that restates a derivable source is derived or pinned, never trusted). Each is read as the file has it, so a row
  * added, dropped or reworded on one side fails here until the other says the same.
  */

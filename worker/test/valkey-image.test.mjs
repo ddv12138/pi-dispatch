@@ -8,7 +8,7 @@ import { OLDER_VALKEY_IMAGES, olderValkeyImage } from "../src/older-state.mjs";
 import { TEMPLATE_PINS } from "../src/service.mjs";
 
 // Issue #761: every Valkey this project starts or ships runs ONE pinned minor, `VALKEY_IMAGE`. A copy that moved alone
-// would put the fleet's hosts, CI and the specs' measurements on different Valkeys, and the smoke script's
+// would put the fleet's hosts, CI and the measurements on different Valkeys, and the smoke script's
 // `--pull=never` would fail on an image the workflow never pulled.
 
 const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");

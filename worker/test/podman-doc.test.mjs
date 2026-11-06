@@ -552,7 +552,7 @@ test("the compose row's argv word is what the compose file's config mounts carry
 	}
 });
 
-// Issue #450, gate round 2 of PR #469: the refused containers.conf keys were restated by hand in the specs, the docs and
+// Issue #450, gate round 2 of PR #469: the refused containers.conf keys were restated by hand in the docs and
 // the source, and three of those lists missed the two #450 added. So every LIST of them (three or more of the keys
 // joined by commas, "or" or "and", backticked or not, across line breaks and comment stars) must be exactly
 // `PODMAN_WIDENING_KEYS`, in its order. A revision-history row is a record of what was true then, and is not read.
