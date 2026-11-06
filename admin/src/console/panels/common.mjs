@@ -404,12 +404,12 @@ function bannerCut(token) {
   return chars.length > BANNER_TOKEN_MAX ? `${chars.slice(0, BANNER_TOKEN_MAX).join("")}…` : String(token);
 }
 
-// ---- the parked answer form (the parked inbox's and the run page's Chat panel) ---------------------------------------
+// ---- the parked answer form (the parked inbox's) ----------------------------------------------------------------------
 
 /**
  * One parked run's answer form (issue #642): the `parked-answer` action, whose preview shows the answer and the reserve
- * and whose server refuses a pull request's park, expired job data and a trigger without `resume`. The parked inbox and
- * the run page's Chat panel (issue #647) draw this one form.
+ * and whose server refuses a pull request's park, expired job data and a trigger without `resume`. The parked inbox
+ * draws this one form.
  */
 function parkedAnswerForm(jobId) {
   return actForm("parked-answer", { hidden: [["jobId", jobId]], fields: area("text", "Your answer, as the reply on the issue", { rows: 4, required: true, max: 8192 }), label: "Preview the answer" });

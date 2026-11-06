@@ -785,8 +785,8 @@ function longQueuesSnapshot(paused) {
  * closed list: a file under `panels/` that is not one of these fails `console-panel-goldens.test.mjs`.
  */
 /** The run cards' states, rendered through the production panel table without transcript text. */
-async function runCard({ role = "operator", rec = record({ jobId: "gh-pulse", maxTurns: 40, turns: 14, triggerIndex: 0, triggerType: "comment" }), chat = { state: "finished", mode: "fork", jobState: "completed" }, transcript = { exists: false }, id = null, ...extra } = {}) {
-  const data = { now: NOW, env: {}, run: rec ? { record: rec, source: "local" } : { missing: true }, chat, transcript, children: [], childrenSearched: 50, ...extra };
+async function runCard({ role = "operator", rec = record({ jobId: "gh-pulse", maxTurns: 40, turns: 14, triggerIndex: 0, triggerType: "comment" }), queueState = { found: false, jobState: "completed", activeJobId: null, queuedJobId: null }, transcript = { exists: false }, id = null, ...extra } = {}) {
+  const data = { now: NOW, env: {}, run: rec ? { record: rec, source: "local" } : { missing: true }, queueState, transcript, children: [], childrenSearched: 50, ...extra };
   const result = await renderPage("run", { query: { id: id ?? rec?.jobId ?? "gh-pulse" }, session: role === "operator" ? OPERATOR : VIEWER, data });
   return String(result.html);
 }
@@ -800,7 +800,7 @@ const STEER_TEXT = "Leave the payments reader for a later pull request, and say 
 const LIVE_ARMED = Object.freeze({
   id: "gh-b3d7",
   rec: null,
-  chat: { state: "active", mode: "live", jobState: "active" },
+  queueState: { found: true, jobState: "active", activeJobId: null, queuedJobId: null },
   transcript: { exists: true },
   activeRun: { target: "acme/billing#259", kind: "github", host: "mini1", project: "billing", backend: "podman", flow: "migrate", provider: "anthropic", model: "claude-sonnet-5-5", maxTurns: 40, queue: "pi-jobs@mini1", startedAt: new Date(NOW - 12 * MIN).toISOString() },
   inbox: { found: true, steer: true, state: "active", open: true, entries: [{ id: "a1b2c3d4", mode: "steer", source: "console", state: "delivered", at: NOW - 70_000, by: "ops", bytes: Buffer.byteLength(STEER_TEXT) }] },
@@ -808,23 +808,16 @@ const LIVE_ARMED = Object.freeze({
 });
 const RUN_CARD_STATES = {
   "run-live-armed.operator": () => runCard(LIVE_ARMED),
-  // Issue #692: a run that stopped to ask, the page the READMEs open their second stage with. The question is the
-  // transcript's last assistant entry, so it arrives over the stream as on any parked run (`launch/console-render.mjs`).
-  "run-parked-question.operator": () => runCard({ id: "gh-2f6a", rec: record({ jobId: "gh-2f6a", target: "acme/api#131", project: "api", flow: "triage", reason: "awaiting-input", session: { resumed: false, reason: "absent", bytes: 4096 }, startedAt: new Date(NOW - 52 * MIN).toISOString(), endedAt: new Date(NOW - 26 * MIN).toISOString() }), chat: { state: "parked", mode: "reply", jobState: "completed" }, transcript: { exists: true, ended: true, outcome: "completed" } }),
   "run-steer-confirm.operator": async () => {
     const planSteer = async ({ jobId, text, mode }) => ({ plan: { jobId, id: "e5f6a7b8", mode, text, bytes: Buffer.byteLength(text), digest: "c".repeat(64) } });
     const answer = await actionWorld({ rm: { planSteer } }).preview("steer", { jobId: "gh-b3d7", mode: "steer", text: STEER_TEXT });
-    return openSlotAfter(await runCard(LIVE_ARMED), "p-chat", { inner: answerHtml(answer, 200, "steer") });
+    // The steer and follow-up forms are the Inbox panel's alone now (the chat panel is gone), so the slot opens after it.
+    return openSlotAfter(await runCard(LIVE_ARMED), "p-inbox", { inner: answerHtml(answer, 200, "steer") });
   },
-  "run-chat-live.operator": () => runCard({ rec: null, chat: { state: "active", mode: "live", jobState: "active" }, transcript: { exists: false }, activeRun: { target: "acme/web#42", kind: "github", host: "mini1", project: "web", backend: "podman", flow: "fix", provider: "anthropic", model: "claude-sonnet-5-5", maxTurns: 40, queue: "pi-jobs@mini1", startedAt: new Date(NOW - 2 * MIN).toISOString() }, inbox: { found: true, steer: true, state: "active", open: true, entries: [] } }),
-  "run-chat-reply.operator": () => runCard({ rec: record({ jobId: "gh-pulse", reason: "awaiting-input", session: { resumed: false, reason: "absent", bytes: 4096 } }), chat: { state: "parked", mode: "reply", jobState: "completed" }, transcript: { exists: true, ended: true, outcome: "completed" } }),
-  "run-chat-approval.operator": () => runCard({ rec: record({ jobId: "gh-pulse", reason: "awaiting-approval", approval: { requestId: "a".repeat(64), action: "budget-raise" }, session: { resumed: false, reason: "absent", bytes: 4096 } }), chat: { state: "awaiting-approval", mode: "reply", jobState: "completed" }, chatAnswer: { ok: true }, transcript: { exists: true, ended: true, outcome: "completed" } }),
-  "run-chat-expired.operator": () => runCard({ rec: record({ jobId: "gh-pulse", reason: "awaiting-input" }), chat: { state: "parked", mode: "reply", jobState: "completed" } }),
-  "run-chat-fork.operator": () => runCard({ rec: record({ jobId: "gh-pulse", session: { resumed: false, reason: "absent", bytes: 4096 } }), forkPoints: { ok: true, entries: [{ id: "1a2b3c4d", parentId: null, type: "message", role: "user", positions: ["before"] }, { id: "2b3c4d5e", parentId: "1a2b3c4d", type: "message", role: "assistant", positions: ["at"] }] } }),
-  "run-chat-none.operator": () => runCard({ chat: { state: "finished", mode: "none", says: "This run's trigger keeps no session (no run.resume), so there is no transcript to fork." } }),
+  "run-fork.operator": () => runCard({ rec: record({ jobId: "gh-pulse", session: { resumed: false, reason: "absent", bytes: 4096 } }), forkPoints: { ok: true, entries: [{ id: "1a2b3c4d", parentId: null, type: "message", role: "user", positions: ["before"] }, { id: "2b3c4d5e", parentId: "1a2b3c4d", type: "message", role: "assistant", positions: ["at"] }] } }),
   "run-refused.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "policy", reason: "job-image-missing", tokens: null, dollars: null, budgetReserved: false, exitCode: null }) }),
   "run-cancelled-before-start.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "policy", reason: "operator-cancel", tokens: null, dollars: null, budgetReserved: false, exitCode: null }) }),
-  "run-recovering.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "failed", reason: "recovery-enqueued", checkpoints: { written: 4, failed: 1, skipped: 2 }, recovered: { from: "gh-before", n: 1, fromAttempt: 1, checkpointSeq: 4, replayed: 2, interrupted: 1, notStarted: 1 } }), chat: { state: "active", mode: "live", activeJobId: "gh-pulse.r1", jobState: "failed" } }),
+  "run-recovering.operator": () => runCard({ rec: record({ jobId: "gh-pulse", outcome: "failed", reason: "recovery-enqueued", checkpoints: { written: 4, failed: 1, skipped: 2 }, recovered: { from: "gh-before", n: 1, fromAttempt: 1, checkpointSeq: 4, replayed: 2, interrupted: 1, notStarted: 1 } }), queueState: { found: false, jobState: "failed", activeJobId: "gh-pulse.r1", queuedJobId: null } }),
   // Issue #761: a record a newer pi-dispatch wrote, as every admin read hands it to the page: its stable core and `v`.
   "run-newer-record.operator": () => runCard({ rec: RM.coreRecordOf({ ...record({ jobId: "gh-pulse", attempt: 2 }), lane: { name: "batch" }, v: 2 }) }),
   "run-replica.operator": () => runCard({ rec: record({ jobId: "gh-pulse-r2", replica: 2, replicas: 3 }), siblings: [record({ jobId: "gh-pulse-r1", outcome: "failed" }), record({ jobId: "gh-pulse-r3" })] }),

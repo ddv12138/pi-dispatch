@@ -47,8 +47,8 @@ const TRIGGER_INDEX_RE = /^\d{1,4}$/;
 const TRIGGER_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 
 /**
- * A run record's `model`: the bare host-effective model id (no provider prefix), as the runs filter and `/api/run`
- * both check it (issue #668). One optional leading `@` or `~` (the priced catalog's `@cf/...` and `~anthropic/...`
+ * A run record's `model`: the bare host-effective model id (no provider prefix), as the runs filter checks it
+ * (issue #668). One optional leading `@` or `~` (the priced catalog's `@cf/...` and `~anthropic/...`
  * ids carry one; the usage ledger's allowlist, `MODEL_REF_PATTERN`, admits it too), then a letter or digit, then
  * letters, digits and . _ : / @ + -, at most 128 characters in all. A lone `@` or `~`, a `~` past the first character
  * and a first character of `.`, `/` or `:` are refused.
@@ -56,7 +56,7 @@ const TRIGGER_ID_RE = /^[A-Za-z0-9._-]{1,128}$/;
 export const RUN_MODEL_RE = /^(?=.{1,128}$)[~@]?[A-Za-z0-9][A-Za-z0-9._:/@+-]*$/;
 
 /**
- * A run record's `provider`, as `/api/run` checks it (console/run-api.mjs): a letter or digit, then letters, digits and
+ * A run record's `provider`, as the runs filter checks it: a letter or digit, then letters, digits and
  * . _ -, at most 64 characters, case allowed. Every source of a run's provider (a trigger's run.provider, PI_PROVIDER,
  * the settings overlay's `provider`) is held by the worker to `providerIdProblem` (worker/src/model-ref.mjs), and every id
  * that accepts, in the case the worker keeps, passes this: held by admin/test/run-model-bolt.test.mjs (issue #673).

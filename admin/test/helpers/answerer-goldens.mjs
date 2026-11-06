@@ -56,7 +56,7 @@ export async function renderAnswererState(state = "populated", role = "operator"
   if (state === "long-names") parked[1].jobId = answererLongNames(model);
   const data = { now, env: {}, answerer: model, snapshot: { parked, queue: { counts: {} }, hostBudgets: [] }, parkedChecks: Object.fromEntries(parked.map(p => [p.jobId, { ok: true }])) };
   const query = page === "run" ? { id: model.rows[0].runId } : {};
-  if (page === "run") Object.assign(data, { run: { record: { jobId: model.rows[0].runId, project: "web", host: "mini2", backend: "local", kind: "github", target: "acme/web#512", reason: "awaiting-input", outcome: "completed", startedAt: new Date(now - 600000).toISOString(), endedAt: new Date(now - 240000).toISOString() } }, chat: { state: "parked", mode: "reply", jobState: "completed" }, chatAnswer: { ok: true }, transcript: { exists: true, ended: true } });
+  if (page === "run") Object.assign(data, { run: { record: { jobId: model.rows[0].runId, project: "web", host: "mini2", backend: "local", kind: "github", target: "acme/web#512", reason: "awaiting-input", outcome: "completed", startedAt: new Date(now - 600000).toISOString(), endedAt: new Date(now - 240000).toISOString() } }, queueState: { found: true, jobState: "completed", activeJobId: null, queuedJobId: null }, transcript: { exists: true, ended: true } });
   return String((await renderPage(page, { session: { name: role === "operator" ? "ops" : "watcher", role }, data, query, readOnly })).html);
 }
 

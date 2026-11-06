@@ -1,10 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { REASONS, SESSION_REASON_TEXT, PLAN_REASON_TEXT } from "@edgehero/pi-dispatch/reason-catalog";
-import { CHAT_REFUSALS } from "@edgehero/pi-dispatch/chat-mode";
-import { loadPageData, pagePanels, panelIds, renderPage } from "../src/console/pages.mjs";
+import { loadPageData, pagePanels, panelIds, renderPage, rerunCheckOf } from "../src/console/pages.mjs";
 import { refusedBeforeStart, runOutcome } from "../src/console/panels.mjs";
-import { rerunCheckOf } from "../src/console/run-api.mjs";
 import { makeLiveHub } from "../src/console/live.mjs";
 import { createFleetReader, fleetQueuesOn, readFleetQueues, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, RUN_RECORD_UNREAD } from "../src/read-model.mjs";
 import { runUnreadText, runUntoldText } from "../src/console/panels/run.mjs";
@@ -37,10 +35,10 @@ test("the viewer disclosure precedes the outcome and the run's progress", () => 
   assert.deepEqual(panelIds("run").slice(0, 3), ["p-viewer", "p-outcome", "p-progress"]);
 });
 
-test("a refused run: the banner says the outcome word, the catalog's sentence for its why, the next step and the docs link; Progress and Chat draw nothing", async () => {
-  const chat = { found: false, jobState: null, state: "finished", mode: "fork", says: null };
+test("a refused run: the banner says the outcome word, the catalog's sentence for its why, the next step and the docs link; Progress and the answer draft draw nothing", async () => {
+  const queueState = { found: false, jobState: null, activeJobId: null, queuedJobId: null };
   for (const role of ["operator", "viewer"]) {
-    const panels = await panelsOf(role, { run: { record: REFUSED, source: "local" }, chat, progress: { absent: true }, transcript: { exists: false } }, REFUSED.jobId);
+    const panels = await panelsOf(role, { run: { record: REFUSED, source: "local" }, queueState, progress: { absent: true }, transcript: { exists: false } }, REFUSED.jobId);
     assert.equal(panels.find((p) => p.id === "p-outcome").id, "p-outcome");
     const banner = panels.find((p) => p.id === "p-outcome").html;
     assert.match(banner, /tone-refused[\s\S]*Refused before it started/, role);
@@ -52,14 +50,14 @@ test("a refused run: the banner says the outcome word, the catalog's sentence fo
     assert.ok(banner.includes(`href="${DOCS_ROOT}docs/reasons.md#model-unknown" rel="noreferrer noopener" target="_blank"`), `${role}: the docs link`);
     const byId = Object.fromEntries(panels.map((p) => [p.id, p.html]));
     assert.equal(byId["p-progress"], "", `${role}: no progress for a run that never started`);
-    assert.equal(byId["p-chat"], "", `${role}: no chat either`);
+    assert.equal(byId["p-answer-draft"], "", `${role}: no answer draft either`);
     assert.notEqual(byId["p-run"], "", "the record panels stay");
   }
   assert.equal(refusedBeforeStart(REFUSED), true);
   assert.equal(refusedBeforeStart({ ...REFUSED, budgetReserved: true }), false, "a refusal that kept its slot is not one the fold can tell from a spend");
   assert.equal(refusedBeforeStart({ ...REFUSED, outcome: "failed" }), false, "a failure may be retried under the same id");
   // The page has no transcript section for it either, and the banner comes before every other section.
-  const page = (await renderPage("run", ctxOf("operator", { run: { record: REFUSED, source: "local" }, chat, transcript: { exists: false } }, REFUSED.jobId))).html;
+  const page = (await renderPage("run", ctxOf("operator", { run: { record: REFUSED, source: "local" }, queueState, transcript: { exists: false } }, REFUSED.jobId))).html;
   assert.match(String(page), /id="p-transcript" data-panel><\/section>/, "unused transcript state is empty; the static box is hidden");
   assert.ok(String(page).indexOf('id="p-outcome"') < String(page).indexOf('id="p-progress"'));
 });
@@ -67,9 +65,9 @@ test("a refused run: the banner says the outcome word, the catalog's sentence fo
 test("a run with no record says why ONCE: not a run id, unknown, queued, running; the record panels are empty", async () => {
   const cases = [
     ["bad id", { run: { invalid: "x" } }, "That is not a run id."],
-    ["unknown", { run: { missing: true }, chat: { found: false, jobState: null, state: "unknown", mode: null, says: CHAT_REFUSALS.unknown }, progress: { absent: true }, transcript: { exists: false } }, "No run with that id is in this host&#39;s history or the fleet&#39;s run mirror."],
-    ["queued", { run: { missing: true }, chat: { found: true, jobState: "waiting", state: "queued", mode: null, says: CHAT_REFUSALS.queued }, progress: { absent: true }, transcript: { exists: false } }, "This job is queued and has not started yet: a run&#39;s record is written when it ends, and its live transcript attaches on this page once it runs."],
-    ["running", { run: { missing: true }, chat: { found: true, jobState: "active", state: "active", mode: "live", says: null, activeJobId: "gh-x" }, progress: { absent: true }, transcript: { exists: true } }, "This run has no record yet: a run&#39;s record is written when it ends."],
+    ["unknown", { run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, progress: { absent: true }, transcript: { exists: false } }, "No run with that id is in this host&#39;s history or the fleet&#39;s run mirror."],
+    ["queued", { run: { missing: true }, queueState: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null }, progress: { absent: true }, transcript: { exists: false } }, "This job is queued and has not started yet: a run&#39;s record is written when it ends, and its live transcript attaches on this page once it runs."],
+    ["running", { run: { missing: true }, queueState: { found: true, jobState: "active", activeJobId: "gh-x", queuedJobId: null }, progress: { absent: true }, transcript: { exists: true } }, "This run has no record yet: a run&#39;s record is written when it ends."],
   ];
   for (const [name, data, sentence] of cases) {
     for (const role of ["operator", "viewer"]) {
@@ -126,7 +124,7 @@ test("a record that could not be read is said so on the banner, which sentence f
 });
 
 test("a run with no record says what it could not read whenever a place is unread: a record read that gave no answer is unread, and only a record both sides said they do not hold, with every place read, is no such run (#737)", async () => {
-  const read = { chat: { found: false, jobState: null, state: "unknown", mode: null, says: CHAT_REFUSALS.unknown }, transcript: { exists: false }, progress: { absent: true } };
+  const read = { queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { exists: false }, progress: { absent: true } };
   const banner = async (data) => (await panelsOf("viewer", data, "gh-x")).find((p) => p.id === "p-outcome").html;
   for (const run of [null, {}, { unreadable: 7 }]) {
     const html = await banner({ ...read, run });
@@ -134,7 +132,7 @@ test("a run with no record says what it could not read whenever a place is unrea
     assert.ok(!/No run with that id/.test(html), `${JSON.stringify(run)}: never no such run`);
   }
   for (const [what, over, unread] of [
-    ["the queues not all read", { chat: { unreachable: true } }, [RUN_PLACES.queues]],
+    ["the queues not all read", { queueState: { unreachable: true } }, [RUN_PLACES.queues]],
     ["the transcript and the progress unread", { transcript: { unreachable: true, exists: false }, progress: { unreachable: true } }, [RUN_PLACES.transcript, RUN_PLACES.progress]],
   ]) {
     const html = await banner({ ...read, run: { missing: true }, ...over });
@@ -156,28 +154,30 @@ test("a completed run: its word in the success tone, no reason sentence repeated
   assert.match(odd.find((p) => p.id === "p-outcome").html, /tone-failed[\s\S]*Failed[\s\S]*brand-new-reason, no explanation yet/);
 });
 
-test("a parked run: the banner's next step offers the console only where the Chat panel takes the answer (review)", async () => {
+test("a parked run: the banner's next step always offers the Parked page, for both roles and whatever the queue read said (the run page takes no answer)", async () => {
   const PARKED = { ...COMPLETED, jobId: "gh-p9", reason: "awaiting-input" };
-  const consolePath = "or answer from the console&#39;s run page";
-  const reply = { found: true, jobState: "completed", state: "finished", mode: "reply", says: null };
-  const page = async (data) => joined(await panelsOf("operator", { run: { record: PARKED, source: "local" }, ...data }, PARKED.jobId));
-  const bannerOf = async (data) => (await panelsOf("operator", { run: { record: PARKED, source: "local" }, ...data }, PARKED.jobId)).find((p) => p.id === "p-outcome").html;
-  // The answer can be taken here: the catalog's line, and the form beside it.
-  for (const chatAnswer of [{ ok: true }, { unreachable: true }, undefined]) {
-    assert.ok((await bannerOf({ chat: reply, chatAnswer })).includes(consolePath), JSON.stringify(chatAnswer));
+  const parkedPage = "or answer the run from the console&#39;s Parked page.";
+  const catalogPath = "or answer from the console&#39;s parked page";
+  const oldRunPath = "or answer from the console&#39;s run page";
+  const states = [
+    { queueState: { found: true, jobState: "completed", activeJobId: null, queuedJobId: null } },
+    { queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null } },
+    { queueState: { unreachable: true } },
+    { queueState: null },
+    {},
+  ];
+  for (const data of states) {
+    for (const role of ["operator", "viewer"]) {
+      const banner = (await panelsOf(role, { run: { record: PARKED, source: "local" }, ...data }, PARKED.jobId)).find((p) => p.id === "p-outcome").html;
+      assert.ok(banner.includes(parkedPage), `${role} ${JSON.stringify(data)}: the Parked page is the console's way to answer`);
+      assert.ok(!banner.includes(catalogPath) && !banner.includes(oldRunPath), `${role} ${JSON.stringify(data)}: never a run-page answer the page no longer takes`);
+    }
   }
-  // The planner refuses it here (the queue no longer holds the job's data): the Chat panel says so, and the banner agrees.
-  const gone = { refusal: "the queue no longer holds gh-p9's data (a forge job's data is kept 31 days)" };
-  const refused = await page({ chat: reply, chatAnswer: gone });
-  assert.ok(refused.includes("This question cannot be answered here"), "the Chat attention banner replaces the refusal note");
-  assert.ok(!refused.includes(consolePath), "the banner no longer offers the console");
-  assert.ok(refused.includes("This console cannot take the answer for this run."));
-  // A run no longer waiting for a reply (a later run took the answer): no form, so no console path either.
-  assert.ok(!(await bannerOf({ chat: { ...reply, mode: "fork" } })).includes(consolePath));
   // Both roles still see the same banner.
-  const viewer = (await panelsOf("viewer", { run: { record: PARKED, source: "local" }, chat: reply, chatAnswer: gone }, PARKED.jobId)).find((p) => p.id === "p-outcome").html;
   const bodyText = (h) => parseDocument(`<html><body>${h}</body></html>`).querySelector(".banner__s").textContent;
-  assert.equal(bodyText(viewer), bodyText(await bannerOf({ chat: reply, chatAnswer: gone })));
+  const operator = (await panelsOf("operator", { run: { record: PARKED, source: "local" }, ...states[0] }, PARKED.jobId)).find((p) => p.id === "p-outcome").html;
+  const viewer = (await panelsOf("viewer", { run: { record: PARKED, source: "local" }, ...states[0] }, PARKED.jobId)).find((p) => p.id === "p-outcome").html;
+  assert.equal(bodyText(viewer), bodyText(operator));
 });
 
 test("SECURITY: the banner is the same for a viewer and an operator, and never carries a job's free-text failedReason", async () => {
@@ -381,7 +381,7 @@ test("loadPageData reads the action check for a run with a record, and skips it 
 
 test("live: a panel that becomes empty is swapped in as empty (its section then hidden), and one that fills is swapped back", async () => {
   // The real panels through the hub: a running job with no record, then its record arrives as a refusal before start.
-  let data = { page: "run", now: NOW, env: {}, run: { missing: true }, transcript: { exists: true }, progress: { absent: true }, chat: { found: true, jobState: "active", state: "active", mode: "live", says: null, activeJobId: "gh-r1" } };
+  let data = { page: "run", now: NOW, env: {}, run: { missing: true }, transcript: { exists: true }, progress: { absent: true }, queueState: { found: true, jobState: "active", activeJobId: "gh-r1", queuedJobId: null } };
   const chunks = [];
   const res = { writableLength: 0, write: (t) => (chunks.push(t), true), end() {}, destroy() {} };
   const FILE = { version: 1, generation: 0, tokens: [] };
@@ -402,11 +402,11 @@ test("live: a panel that becomes empty is swapped in as empty (its section then 
   const first = Object.fromEntries(events().map((e) => [e.id, e.html]));
   assert.equal(first["p-run"], "", "no record yet: the record panel is empty");
   assert.match(first["p-progress"], /<h2>Progress<\/h2>/);
-  data = { ...data, run: { record: REFUSED, source: "local" }, transcript: { exists: false }, chat: { found: false, jobState: null, state: "finished", mode: "fork", says: null } };
+  data = { ...data, run: { record: REFUSED, source: "local" }, transcript: { exists: false }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null } };
   await hub.tick();
   const next = Object.fromEntries(events().map((e) => [e.id, e.html]));
   assert.equal(next["p-progress"], "", "the progress panel is swapped to empty");
-  assert.equal(next["p-chat"], "", "and so is the chat");
+  assert.equal(next["p-transcript"], "", "and so is the transcript state panel");
   assert.match(next["p-run"], /<h2>Run<\/h2>/, "the record panel fills");
   assert.match(next["p-outcome"], /refused/);
   hub.close?.();

@@ -3,7 +3,8 @@
 // record of a version no release has written yet, `synthetic-v3.json`). Each shape is copied into a logs directory of
 // its own, every file dated by its record's `endedAt`, and every instant below is read from the fixtures, never the wall
 // clock. Lists, pages and tools read every record back with its id, outcome, kind and times; folds read every released
-// shape and leave the newer record out, saying how many; the run page and the API show the newer one's core alone.
+// shape and leave the newer record out, saying how many; every run read, the run page's included, shows the newer one's
+// core alone.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { copyFileSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
@@ -18,7 +19,6 @@ import { foldCosts, whatIfFlow } from "../src/costs.mjs";
 import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
 import { dayKey } from "@edgehero/pi-dispatch/budget";
 import { foldWindowRecords, runTokenWindows } from "../src/token-windows.mjs";
-import { safeRunOf } from "../src/console/run-api.mjs";
 import { renderPage } from "../src/console/pages.mjs";
 import { rerunRefusalOf } from "../src/job-actions.mjs";
 import { whatIfAnswer } from "../src/console/whatif.mjs";
@@ -132,20 +132,18 @@ test("the next shape's tokens are the cases' own: 412.5k, 61k, 150k and 228k set
   assert.deepEqual([web.records.runs, web.records.settledTokens, web.records.newerSkipped], [1, 412_500, undefined]);
 });
 
-test("the run API, the model's run read and the re-run check read the newer record's core alone and say so once (#761)", () => {
+test("every record read hands a released record back whole and a newer record's core alone, and the re-run check tells them apart (#761)", () => {
   for (const shape of manifest.shapes) {
     const { records, nowMs } = deployment(shape);
     for (const record of records) {
-      const api = safeRunOf(record.jobId, record);
       const at = `${shape.id} ${record.jobId}`;
-      assert.deepEqual([api.jobId, api.outcome, api.kind, api.startedAt, api.finishedAt, api.newer], [record.jobId, record.outcome, record.kind, record.startedAt, record.endedAt, undefined], at);
+      assert.deepEqual(shownRecord(record), record, `${at}: a released record is handed out as it was written`);
       assert.notEqual(rerunRefusalOf(record, nowMs), rerunRefusalOf(SYNTHETIC, nowMs), at);
     }
   }
   for (const given of [SYNTHETIC, CORE]) {
-    const api = safeRunOf(SYNTHETIC.jobId, given);
-    assert.deepEqual([api.jobId, api.outcome, api.kind, api.host, api.project, api.attempt, api.startedAt, api.finishedAt], [SYNTHETIC.jobId, "completed", "github", "mini-3", "api", 2, SYNTHETIC.startedAt, SYNTHETIC.endedAt]);
-    assert.deepEqual([api.target, api.flow, api.repo, api.newer, api.note], [null, null, null, true, NEWER_RECORD_SENTENCE], "nothing past the core, and the sentence");
+    assert.deepEqual(shownRecord(given), CORE, "a newer record reaches every read as its stable core alone");
+    assert.equal(fromNewerRelease(given), true, "and the page says so once, from the core it read");
     assert.deepEqual(modelRunRecord(given), { ...CORE, newer: true, note: NEWER_RECORD_MODEL_NOTE });
     assert.equal(rerunRefusalOf(given, Date.parse(SYNTHETIC.endedAt)), `${SYNTHETIC.jobId} was recorded by a newer pi-dispatch, whose run this console cannot rebuild, so it cannot be re-run from here; re-run it from a console of that release`);
   }

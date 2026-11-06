@@ -30,9 +30,10 @@ test("every pick names a golden that exists, with a name of its own", () => {
   const plan = picksPlan();
   assert.equal(plan.length, CONSOLE_PICKS.length);
   assert.equal(new Set(plan.map((shot) => shot.file)).size, plan.length);
-  // The sandbox removal retired the sandboxes panel state; launch/ keeps its pick (launch copy is edited in its own
-  // pull request), so the retired golden is tolerated by name and every other pick still names a golden that exists.
-  const retired = new Set(["panels/sandboxes-populated.operator"]);
+  // The sandbox removal retired the sandboxes panel state and the terminal-chat removal retired the parked question's
+  // run-page panel; launch/ keeps both picks (launch copy is edited in its own pull request), so the retired goldens are
+  // tolerated by name and every other pick still names a golden that exists.
+  const retired = new Set(["panels/sandboxes-populated.operator", "panels/run-parked-question.operator"]);
   for (const shot of plan) {
     assert.ok(KEYS.includes(shot.key) || retired.has(shot.key), `${shot.file}: no golden ${shot.key}`);
     assert.ok(CONSOLE_WIDTHS.includes(shot.width), `${shot.file}: a width the console is checked at`);

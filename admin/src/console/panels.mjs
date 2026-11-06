@@ -45,8 +45,8 @@ export {
 } from "./panels/overview.mjs";
 export { runsFilters, runsSummary, runsTable, RUNS_UNREADABLE, RUNS_HOST_UNREADABLE, RUNS_MIRROR_OFF, RUNS_MIRROR_DEGRADED, RUNS_EMPTY, RUNS_WINDOW_TEXT, runsTruncatedText, runsSourceText } from "./panels/runs.mjs";
 export {
-  refusedBeforeStart, runOutcome, PROGRESS_ABSENT, runProgress, INBOX_NOT_OPEN, runInbox, runChat, runSummary,
-  runCostPanel, runResources, runSession, runChain, runHeadline, runRecord, runRest, runTranscriptState, runActionsPanel, runSecrets, runModels, runTail, runRecovery, runWhy, runHost, runViewer
+  refusedBeforeStart, runOutcome, PROGRESS_ABSENT, runProgress, INBOX_NOT_OPEN, runInbox, runSummary,
+  runCostPanel, runResources, runSession, runChain, runHeadline, runRecord, runRest, runTranscriptState, runActionsPanel, runSecrets, runModels, runRecovery, runWhy, runHost, runViewer
 } from "./panels/run.mjs";
 export {
   PARKED_QUESTION_WHERE, PARKED_ELSEWHERE_TITLE, PARKED_HOW, PARKED_EMPTY, PARKED_ANSWER_HINT, PARKED_ANSWERING,

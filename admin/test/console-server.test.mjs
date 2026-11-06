@@ -1312,7 +1312,7 @@ test("a page acts only as the person it was drawn for (issue #737): a stream tha
   // The page's own person: the stream opens, and the hub is given the page's query without the parameter.
   assert.equal((await open("/api/events?page=runs&repo=a%2Fb&as=alice.operator", { cookie })).status, 200);
   assert.deepEqual([subscribed.at(-1).page, subscribed.at(-1).query.filter.repo], ["runs", "a/b"]);
-  assert.equal((await open("/api/transcript?id=gh-1&format=json&as=alice.operator", { cookie })).status, 200, "the transcript's own parameter check never sees it");
+  assert.equal((await open("/api/transcript?id=gh-1&as=alice.operator", { cookie })).status, 200, "the transcript's own parameter check never sees it");
   assert.equal(subscribed.at(-1).jobId, "gh-1");
   // Saying none: not checked (the terminal chat, curl).
   assert.equal((await open("/api/events?page=overview", { cookie })).status, 200);

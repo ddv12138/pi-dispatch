@@ -304,8 +304,8 @@ test("Needs you: questions, failed jobs and failing doctors, each with its proje
   assert.match(op, /<h2>Needs you<\/h2>/);
   assert.match(op, /<span class="big__n">1<\/span><span class="big__l">question<\/span>/);
   assert.match(op, /<span class="big__n">2<\/span><span class="big__l">to fix<\/span>/);
-  // The question: its project from its record, its id, Answer on its run page.
-  assert.match(op, /<li class="rowpill tone-parked">.*?<span class="ptag">api<\/span><span class="code">gh-2f6a<\/span><a class="rowpill__act" href="\/run\?id=gh-2f6a">Answer<\/a><\/li>/);
+  // The question: its project from its record, its id, Answer on the parked page (the answer form is the parked page's).
+  assert.match(op, /<li class="rowpill tone-parked">.*?<span class="ptag">api<\/span><span class="code">gh-2f6a<\/span><a class="rowpill__act" href="\/parked">Answer<\/a><\/li>/);
   // The failed job: Retry, a paid write, with the fields the action reads; never BullMQ's text.
   assert.match(op, /<form class="act" data-action="retry-failed" autocomplete="off"><input type="hidden" name="jobId" value="gh-5d10"><input type="hidden" name="queue" value="pi-jobs"><button class="btn btn--sm btn--paid" type="submit">Retry<\/button><\/form>/);
   assert.ok(!op.includes("REASON-TEXT"));
@@ -318,8 +318,8 @@ test("Needs you: questions, failed jobs and failing doctors, each with its proje
   assert.ok(!viewer.includes("data-action") && !viewer.includes(">Answer<"));
   assert.match(viewer, /<a class="rowpill__act" href="\/run\?id=gh-2f6a">Open<\/a>/);
   assert.match(viewer, /<a class="rowpill__act" href="\/run\?id=gh-5d10">Open<\/a>/);
-  // A read-only console: an operator reads, and writes nothing; a question is Open there, since its run page's Chat
-  // panel takes no answer on a console that takes no change.
+  // A read-only console: an operator reads, and writes nothing; a question is Open there, since a console that takes no
+  // change draws no answer form on the parked page either.
   const ro = draw(overviewNeeds, snapshot(), { readOnly: true });
   assert.ok(!ro.includes("data-action") && !ro.includes(">Answer<"));
   assert.match(ro, /<a class="rowpill__act" href="\/run\?id=gh-2f6a">Open<\/a>/);

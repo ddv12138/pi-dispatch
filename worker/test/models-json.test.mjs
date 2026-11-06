@@ -175,7 +175,7 @@ function corpus() {
  */
 // Re-verified at 1.4.0: model-config/model-schema add descriptions and defaults without
 // changing acceptance; compat adds System One image fields. provider-composer now merges
-// classifier compat, which changes no chat-model existence verdict in overlayProviderProblem.
+// classifier compat, which changes no chat model existence verdict in overlayProviderProblem.
 const MIRRORED_PI_FILES = Object.freeze({
 	"dist/core/model-config.js": "f03200776dbefa9171da850724e2e2eb20d865768feb0cb3f5b9e5f3260d13fe",
 	// Since 1.5.0 model-config.js reads its schemas through this file, so it is part of what the mirror transcribes.

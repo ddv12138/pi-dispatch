@@ -40,7 +40,6 @@ import { MODEL_ATTEMPT_FINISHED_TTL_MS } from "@edgehero/pi-dispatch/retention";
 import { closeInbox, listInboxPublic, markState, readInbox, registerLive } from "@edgehero/pi-dispatch/steer-inbox";
 import { makeRedisClient, parseConnection } from "@edgehero/pi-dispatch/connection";
 import { makeQueue, enqueueForgeJob, enqueueLateForgeJob, forgeDeliveryJobId, manualTriggerJobId } from "@edgehero/pi-dispatch/queue";
-import { CHAT_REFUSALS } from "@edgehero/pi-dispatch/chat-mode";
 import { sanitizeJobId } from "@edgehero/pi-dispatch/run-history";
 import { filter } from "../../receiver/src/filter.mjs";
 import { filterGitLab } from "../../receiver/src/filter-gitlab.mjs";
@@ -60,6 +59,9 @@ const URL12 = BASE
     })()
   : null;
 const live = { skip: URL12 ? false : "needs VALKEY_TEST_URL", timeout: 60_000 };
+
+/** parked-facts's own sentence for a scan past its budget (CHAT_REFUSALS is private there): pinned word for word, as worker/test/parked-facts.test.mjs pins it. */
+const PARKED_TOO_MANY = "This run asked a question, but the queue holds too many jobs to check whether an answer is already on its way; answer it on the forge, or wait until the queue is shorter.";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 async function until(fn, timeoutMs = 10_000) {
@@ -874,10 +876,11 @@ test("a park behind a paused queue of 1,200 forge jobs stays answerable: the pen
     assert.deepEqual(await read({ dataMax: 0 }), { jobId: null }, "no job's data is parsed: forge jobs by their dedup id, cron jobs skipped by name");
     assert.deepEqual(await readPendingAnswer({ queues: [shared], kind: "github", target: "org/repo#8", runId: null }), { jobId: forgeDeliveryJobId("github", "deep-0") }, "the oldest job, listed last, is found");
     assert.ok((await planParkedAnswer({ url: URL12, logsDir, jobId, text: "ok", by: "alice", triggersPath, runsFn: async () => [], now })).plan, "the park is answerable");
-    // A budget below the queue's depth: the scan cannot tell, the planner refuses with chat-mode's honest sentence.
+    // A budget below the queue's depth: the scan cannot tell, the planner refuses with parked-facts's honest sentence
+    // (CHAT_REFUSALS stays private there, so its sentence is pinned as a literal, as worker/test/parked-facts.test.mjs pins it).
     assert.deepEqual(await read({ budget: 1000 }), { unknown: true, tooMany: true });
     const deep = await planParkedAnswer({ url: URL12, logsDir, jobId, text: "ok", by: "alice", triggersPath, runsFn: async () => [], now, pendingBudget: 1000 });
-    assert.equal(deep.refusal, `${CHAT_REFUSALS.parkedTooMany} Nothing was queued.`);
+    assert.equal(deep.refusal, `${PARKED_TOO_MANY} Nothing was queued.`);
     // A job with no dedup id (a late message's, a recovery's) is read through its data: the park's own recovery is not
     // its answer, a late message's job on its target is.
     await shared.add("github", { ...base, kind: "github", recoveryOf: jobId }, { jobId: `${jobId}.r1` });

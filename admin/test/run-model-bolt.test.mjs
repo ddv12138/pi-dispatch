@@ -3,8 +3,8 @@
  *
  * Every source of a run's model is held by the worker to one rule, `modelIdProblem` (`MODEL_REF_PATTERN` on the
  * lowercased value, worker/src/model-ref.mjs): a trigger's `run.model`, `PI_MODEL`, the settings overlay's `model` and
- * `pi-dispatch run --model`. The run record writes whichever won, in its ORIGINAL case. The console's runs filter and
- * `/api/run` judge that field with `RUN_MODEL_RE` (admin/src/run-filter.mjs), and a refusal there hides a run that
+ * `pi-dispatch run --model`. The run record writes whichever won, in its ORIGINAL case. The console's runs filter
+ * judges that field with `RUN_MODEL_RE` (admin/src/run-filter.mjs), and a refusal there hides a run that
  * exists. So every id the worker rule accepts, in the case the worker keeps, must pass `RUN_MODEL_RE`. These tests
  * hold that over the pinned catalog and over ids GENERATED from the worker rule itself, so a change to either side
  * that breaks the relation fails here rather than in an operator's filter.
@@ -14,8 +14,8 @@
  * (allowing `+`) is therefore one this bolt rightly leaves green.
  *
  * The run record's `provider` is bolted the same way (review round 1): every source of it (a trigger's run.provider,
- * `PI_PROVIDER`, the overlay's `provider`) is held to `providerIdProblem`, and `/api/run` judges the field with
- * `RUN_PROVIDER_RE`, so every provider id the worker accepts must pass it.
+ * `PI_PROVIDER`, the overlay's `provider`) is held to `providerIdProblem`, and the console's runs filter judges the
+ * field with `RUN_PROVIDER_RE`, so every provider id the worker accepts must pass it.
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";

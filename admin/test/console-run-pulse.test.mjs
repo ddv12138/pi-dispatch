@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { phases, noProgress } from "../src/console/kit.mjs";
-import { runChat, runSummary, runTranscriptState, runHeadline, runRest, runTail, runSecrets, runModels, runResources, runCostPanel } from "../src/console/panels/run.mjs";
+import { runSummary, runTranscriptState, runHeadline, runRest, runSecrets, runModels, runResources, runCostPanel } from "../src/console/panels/run.mjs";
 import { pagePanels, renderPage, loadPageData } from "../src/console/pages.mjs";
 
 const AT = Date.UTC(2026, 9, 28, 10);
@@ -19,31 +19,23 @@ test("phase chapters bound ticks and escape names; no-progress stripes have a te
   assert.match(String(noProgress()), /role="img" aria-label="The worker reports no progress/);
 });
 
-test("#739 running without stream and parked expired transcript use truthful location words", () => {
-  const live = view({ run: { missing: true }, chat: { state: "active", mode: "live", jobState: "active" }, transcript: { exists: false }, inbox: { found: false } });
+test("#739 running without a stream and an ended run's expired one use truthful location words", () => {
+  const live = view({ run: { missing: true }, queueState: { found: true, jobState: "active", activeJobId: null, queuedJobId: null }, transcript: { exists: false }, inbox: { found: false } });
   assert.match(String(runTranscriptState(live)), /Waiting for the run/);
-  const parked = view({ run: { record: record({ reason: "awaiting-input" }) }, chat: { state: "parked", mode: "reply" }, transcript: { exists: false } });
-  const text = String(runChat(parked));
-  assert.match(text, /Read the question on the forge thread/);
-  assert.doesNotMatch(text, /below|data-run-question/);
-  const kept = String(runChat(view({ ...parked.data, transcript: { exists: true } })));
-  assert.match(kept, /<div data-run-question><\/div>/);
-  assert.doesNotMatch(kept, /agent question text/);
-  assert.match(String(runTail(view({ ...parked.data, transcript: { exists: true } }))), /<div data-run-tail><\/div>/);
+  const parked = view({ run: { record: record({ reason: "awaiting-input" }) }, queueState: { found: true, jobState: "completed", activeJobId: null, queuedJobId: null }, transcript: { exists: false } });
+  const text = String(runTranscriptState(parked));
+  assert.match(text, /No live transcript/);
+  assert.doesNotMatch(text, /below|data-run-question/, "an expired stream is not pointed at a place that holds nothing");
 });
 
-test("#739 cancelled before start collapses unused panels; saved sessions alone offer a fork", () => {
+test("#739 cancelled before start collapses unused panels", () => {
   const refused = view({ run: { record: record({ outcome: "policy", reason: "operator-cancel", budgetReserved: false, exitCode: null, tokens: null }) } });
   assert.match(String(runRest(refused)), /Nothing ran/);
-  for (const render of [runCostPanel, runResources, runTail]) assert.equal(String(render(refused)), "");
-  const fork = (session) => String(runChat(view({ run: { record: record({ session }) }, chat: { state: "finished", mode: "fork" } })));
-  assert.match(fork({ resumed: false, reason: "promote-failed", bytes: 22 }), /no saved transcript to fork/);
-  assert.doesNotMatch(fork(null), /data-copy/);
-  assert.match(fork({ resumed: true, bytes: 2000 }), /data-copy/);
+  for (const render of [runCostPanel, runResources]) assert.equal(String(render(refused)), "");
 });
 
 test("title cancel guard, trigger numbering and turn budget use the shared state and record facts", () => {
-  const v = view({ activeRun: { target: "acme/web#42", host: "mini1", maxTurns: 40 }, chat: { state: "active", jobState: "active", mode: "live" }, run: { missing: true } });
+  const v = view({ activeRun: { target: "acme/web#42", host: "mini1", maxTurns: 40 }, queueState: { found: true, jobState: "active", activeJobId: null, queuedJobId: null }, run: { missing: true } });
   assert.match(String(runHeadline(v)), /data-action="cancel-active"/);
   assert.doesNotMatch(String(runHeadline({ ...v, role: "viewer" })), /data-action/);
   assert.doesNotMatch(String(runHeadline({ ...v, readOnly: true })), /data-action/);
@@ -60,7 +52,7 @@ test("run detail uses the selected locale for panel titles and record fact label
 
 test("run page has one fixed panel set and static transcript inside the page grid, with long cron IDs", async () => {
   const id = `repeat:${"long-trigger".repeat(10)}:1793181600000`;
-  const data = { now: AT, run: { record: record({ jobId: id }) }, chat: { state: "finished", mode: "fork" }, transcript: { exists: false } };
+  const data = { now: AT, run: { record: record({ jobId: id }) }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { exists: false } };
   const ctx = { query: { id }, session: { name: "ops", role: "operator" }, data };
   const got = await renderPage("run", ctx);
   assert.doesNotMatch(String(got.html), /class="legacy"/);
@@ -86,7 +78,7 @@ test("running facts are loaded only without a record and no extra queue field is
 test("the viewer page and panel stream render only the viewer card's panels and never private words or actions", async () => {
   const { RUN_VIEWER_PANELS } = await import("../src/console/pages.mjs");
   const progress = { v: 1, turn: 3, steps: 4, failed: 1, interrupted: 0, running: [{ tool: "bash", since: AT - 2000 }], recent: [], phase: { index: 0, done: 1, total: 3 }, phases: ["PRIVATE-PHASE-747"], note: "PRIVATE-NOTE-747", prior: null, startedAt: AT - 60_000, updatedAt: AT, ended: false, outcome: null };
-  const data = { now: AT, run: { record: record({ session: { resumed: true }, secretsProfile: "PRIVATE-PROFILE-747", startedAt: new Date(AT - 180_000).toISOString(), endedAt: new Date(AT - 120_000).toISOString(), tokens: { input: 1, output: 2, total: 3, cost: 1 }, resources: { memPeak: 100 } }) }, progress, chat: { state: "active", mode: "live", jobState: "active" }, transcript: { exists: true }, inbox: { found: true, steer: true, state: "active", open: true, entries: [] } };
+  const data = { now: AT, run: { record: record({ session: { resumed: true }, secretsProfile: "PRIVATE-PROFILE-747", startedAt: new Date(AT - 180_000).toISOString(), endedAt: new Date(AT - 120_000).toISOString(), tokens: { input: 1, output: 2, total: 3, cost: 1 }, resources: { memPeak: 100 } }) }, progress, queueState: { found: true, jobState: "active", activeJobId: null, queuedJobId: null }, transcript: { exists: true }, inbox: { found: true, steer: true, state: "active", open: true, entries: [] } };
   const ctx = { query: { id: "gh-pulse" }, session: { name: "view", role: "viewer" }, data };
   const panels = await pagePanels("run", ctx);
   for (const panel of panels) if (!RUN_VIEWER_PANELS.includes(panel.id) && !["p-nav-parked", "p-headline"].includes(panel.id)) assert.equal(panel.html, "", panel.id);
@@ -115,11 +107,10 @@ test("run outcome actions get a full wrapping row so a refused re-run explanatio
   assert.match(RUN_CSS, /\.banner__act \.card__sub \{ flex-basis: 100%; overflow-wrap: anywhere; \}/);
 });
 
-test("the parked question leads the main column while live steering stays in the side column", async () => {
-  const ctx = (mode) => ({ session: { role: "operator" }, query: { id: "gh-pulse" }, data: { now: AT, run: { record: record({ reason: mode === "reply" ? "awaiting-input" : null }) }, chat: { state: mode === "reply" ? "parked" : "active", mode, jobState: "active" }, transcript: { exists: true } } });
-  const parked = String((await renderPage("run", ctx("reply"))).html);
-  assert.match(parked, /class="stack run-main"><section id="p-chat" data-panel>/);
-  assert.equal((parked.match(/id="p-chat"/g) ?? []).length, 1);
-  const live = String((await renderPage("run", ctx("live"))).html);
-  assert.match(live, /class="stack run-side"><section id="p-chat" data-panel>/);
+test("the run layout is fixed: the side column leads with the answer draft and the inbox, and the steer forms live in the inbox alone", async () => {
+  const ctx = { session: { role: "operator" }, query: { id: "gh-pulse" }, data: { now: AT, run: { record: record({ reason: "awaiting-input" }) }, queueState: { found: true, jobState: "completed", activeJobId: null, queuedJobId: null }, transcript: { exists: true }, inbox: { found: true, steer: true, state: "active", open: true, entries: [] } } };
+  const page = String((await renderPage("run", ctx)).html);
+  assert.match(page, /class="stack run-side"><section id="p-answer-draft" data-panel>/);
+  assert.match(page, /<section id="p-inbox" data-panel>/);
+  assert.equal((page.match(/data-action="steer"/g) ?? []).length, 2, "one steer and one follow-up form, never two copies of the action");
 });

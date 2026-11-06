@@ -21,7 +21,7 @@
  * was recorded", which would be false. A wait check's profile names are the operator's own configuration, so a viewer
  * never reads them. Never a failure's text, a form, a command or a reader's own error message (every read that fails
  * is said in a fixed sentence). An operator on a console that takes changes also gets the writes (`canAct`): Retry,
- * Cancel, a host's pause, Pause fleet, a question's Answer (its run page's Chat panel takes the answer only there; a
+ * Cancel, a host's pause, Pause fleet, a question's Answer (the answer form is the parked page's; a
  * question is Open otherwise), and the waitlists' links; on a read-only console an operator still reads the commands,
  * which run in a shell, not here.
  *
@@ -418,8 +418,10 @@ export const overviewNeeds = overviewPanel("Needs you", (s, view) => {
   for (const p of need.questions) {
     const href = runHref(view, p.jobId);
     const project = projectId(p.project) ?? projects.get(p.jobId) ?? null;
-    // Answer where this page can take the answer (an operator on a console that takes changes); else the run's page.
-    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: href === null ? null : { label: tr(act ? "Answer" : "Open", view), href } }), tagless: project === null });
+    // The run page took a parked answer through its Chat panel; with the terminal chat gone the manual answer form
+    // lives on the parked page alone (the run page keeps only a draft's card), so an operator's Answer opens /parked
+    // and a viewer's Open still opens the run's page.
+    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: act ? { label: tr("Answer", view), href: "/parked" } : href === null ? null : { label: tr("Open", view), href } }), tagless: project === null });
   }
   for (const j of need.failedRows) {
     const id = typeof j?.jobId === "string" ? j.jobId : null;

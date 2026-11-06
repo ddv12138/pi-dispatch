@@ -2364,46 +2364,16 @@ ${FIT_JS}
   }
   // Agent-written text is copied only from the server-escaped entries. Setting textContent keeps a question that
   // contains markup as text; panels themselves carry empty slots, including after a live swap.
-  // A parked question is the hero, ahead of the main column's other cards. Move the existing panel node, never
-  // clone it: its form, held input, and the independent transcript box survive the next state change.
-  function placeRunChat() {
-    var chat = document.getElementById("p-chat");
-    var main = document.querySelector(".run-main");
-    var side = document.querySelector(".run-side");
-    if (!chat || !main || !side || typeof chat.querySelector !== "function") return;
-    var target = chat.querySelector(".qcard") ? main : side;
-    if (chat.parentNode !== target && typeof target.insertBefore === "function") target.insertBefore(chat, target.firstChild);
-  }
   function fillRunSlots() {
-    placeRunChat();
     if (!tbox) return;
     var entries = transcriptEntries();
-    var question = document.querySelector("[data-run-question]");
-    var tail = document.querySelector("[data-run-tail]");
     var tools = document.querySelector("[data-recovery-tools]");
-    if (question) {
-      var answer = "";
-      for (var i = 0; i < entries.length; i++) {
-        var kind = entries[i].getAttribute("data-kind");
-        if (kind === "reset") answer = "";
-        if (kind === "assistant") {
-          var text = entries[i].querySelector("pre");
-          if (text) answer = text.textContent;
-        }
-      }
-      question.textContent = answer;
-    }
-    if (tail) {
-      tail.textContent = "";
-      entries.slice(-3).forEach(function (entry) { var clone = entry.cloneNode(true); clone.hidden = false; tail.appendChild(clone); });
-    }
     if (tools) {
       tools.textContent = "";
       entries.filter(function (entry) { return entry.getAttribute("data-kind") === "tool-call" || entry.getAttribute("data-kind") === "tool-result"; }).slice(-3).forEach(function (entry) { var clone = entry.cloneNode(true); clone.hidden = false; tools.appendChild(clone); });
     }
     if (tstate && tmark) tmark(tstate.text, tstate.cls);
   }
-  placeRunChat();
   function transcriptFollowing() {
     if (!tbox) return true;
     return tbox.scrollHeight - tbox.scrollTop - tbox.clientHeight < 24;
