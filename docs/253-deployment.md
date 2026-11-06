@@ -63,9 +63,12 @@ trigger form has no image field):
 ```json
 { "on": { "type": "label", "any": ["afk-spec"] },
   "run": { "kind": "gitlab", "flow": "spec-run",
-           "image": "docker.io/ddv12138/pi-job-java21:4.3.2",
+           "image": "docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2",
            "statusComment": true, "maxTurns": 300 } }
 ```
+
+`ticket-run` and `ticket-merge` name the same Java image in their rules; the merger needs Maven to test the
+candidate, even though it writes no code.
 
 A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
 Maven settings are baked at build time, not passed by the job:
@@ -76,12 +79,32 @@ Maven settings are baked at build time, not passed by the job:
 
 ## Triggers
 
-`runtime/triggers.json`, pointed at by `PI_TRIGGERS_FILE`. It holds one rule: an issue label change that adds
-`afk-spec` runs `spec-run`. `maxTurns` on the rule (300) overrides the deployment's `PI_MAX_TURNS` (30), and
-`PI_DAILY_CAP` (25) bounds the number of containers a day.
+`runtime/triggers.json`, pointed at by `PI_TRIGGERS_FILE`, holds three rules:
+
+| `on` | flow | `maxTurns` | notes |
+|---|---|---|---|
+| issue label adds `afk-spec` | `spec-run` | 300 | unchanged |
+| issue label adds `ready-for-agent` | `ticket-run` | 120 | `resume: true` |
+| MR `open` | `ticket-merge` | 120 | only `open`, never `update` |
+
+`ticket-run` implements one ticket on `pi/issue-<ticket>`, runs `mvn -q test`, and opens a MR to
+`pi/issue-<spec>`; it never merges or pushes the spec branch. `ticket-merge` drains the open ticket -> spec MRs,
+serializes them per spec with the lock branch `pi/spec-lock-<n>`, and merges only after testing the merged ticket
+branch. It never merges spec -> master; that remains a human step. Ticket jobs stay parallel; only merges queue.
+`PI_CONCURRENCY` (3) and `PI_DAILY_CAP` (25) still bound the deployment, and no `concurrent: 1` is used.
 
 The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
-different: see below.
+different: see below. An edited `triggers.json` still needs the receiver force-recreate described there.
+
+## Session store
+
+`ticket-run` arms `run.resume`, so `PI_SESSIONS_DIR` is required; it has no default. This host uses
+`/root/pi-dispatch/runtime/sessions`, mode `0700`, owner `10001:10001`, with
+`PI_SESSION_MAX_RESUME_CHAIN=20`. A `.env` edit is read at container creation, so the worker must be recreated
+(not just restarted) after changing it. The store is PII-bearing and host-only: keep it outside every git repo.
+If the resume rule is removed later, keep the directory until no `run.resume` trigger remains. To roll the
+ticket flow back, restore the `.env` and `triggers.json` backups, force-recreate the receiver and worker, and
+leave the session store in place while any resume trigger remains.
 
 ## The receiver (GitLab)
 
@@ -113,9 +136,14 @@ harness's own output**:
 - no close rules on items the agent closes itself.
 
 A label rule keyed to a label a person applies is the safe shape ([gitlab.md](gitlab.md), "One identity").
+The deliberate exception here is the `ticket-merge` rule on MR **`open`**: it fires once per MR, and the merger
+only merges — it never opens a MR — so it does not create a loop. Do not widen it to `update`, and do not copy
+the shape to a flow that can create MRs or comment before it exits.
 
-**Who can trigger a job**: not the account the token belongs to (its events are its own). Use a second account with
-Developer access on the serviced projects.
+**Who can trigger a job**: the author gate still requires Developer or above. On this single-identity host
+`PI_RECEIVER_ALLOW_SELF=1` also lets the token's own account trigger, which is why the rules stay clear of
+`update`, comment phrases and close events and why `PI_DAILY_CAP` matters. A second identity would let the guard
+be re-armed.
 
 ## This GitLab is 13.2.10
 
