@@ -274,17 +274,8 @@ Rules:
   without the tool. Adding
   `awaitInput` to a trigger does the same to its jobs that were already queued: re-run them.
 
-An operator can also answer from the console's parked page or a run's **Chat** panel
-([`console.md`](console.md#answering-a-parked-run)), or from a terminal with `pi-dispatch chat <job id>`, which shows
-the question and sends the same answer.
-
-## Reading a stored session in your own pi
-
-`pi-dispatch chat <job id>` (or the session's 32-hex key) on the host that keeps `PI_SESSIONS_DIR` opens a finished
-run's stored conversation in your own pi as a fork: it copies the transcript to `~/.pi-dispatch/chat/<key>/` (deleted
-again when the command ends; pi's own fork stays in pi's sessions folder), never writes the store, and starts pi with
-its tools off. The stored transcript is unredacted, so it asks before your pi
-sends it to your provider.
+An operator can also answer from the console's parked page
+([`console.md`](console.md#answering-a-parked-run)).
 
 ## Durable runs are not sessions
 
@@ -333,8 +324,7 @@ Deleting the whole directory is always safe: every key degrades to a cold start 
 
 ## Managed fork lineages
 
-An operator can select a retained issue run in the console or with
-`pi-dispatch chat --fork-as-job`. The new job gets a separate
+An operator can select a retained issue run on the console's run page. The new job gets a separate
 `pi/issue-<number>-fork-<id>` branch and pull request. Its session lives under the original key's
 `forks/<id>/` directory, with independent locks, sidecars and canonical transcript. The original session continues
 as before. A same-repository pull request on that fork branch resolves its fork lineage, and another fork records

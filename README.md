@@ -69,7 +69,7 @@ of work at a time, and it never asks you to trust more than you have seen.
 
 You start a job and follow it live: what it is doing, which step of its plan it is on, what it said. If it heads the
 wrong way you tell it, and it reads your message before its next step. You do not have to start over and pay for the
-same work twice. (Steering, chat)
+same work twice. (Steering)
 
 ![A running job in the console: its progress through the phases of its plan, the agent's note that three of ten tables are migrated, a box for sending it a message, the message it already received, and its live transcript](docs/images/console/console-run-live.png?v=2026-11-03)
 
@@ -650,7 +650,7 @@ These forges have one auth source each, a token you create, so setting theirs to
 [multi host](docs/multi-host.md), polling,
 [notifications](docs/notifications.md).
 
-**Watching and steering:** steering, chat, [sessions](docs/sessions.md),
+**Watching and steering:** steering, [sessions](docs/sessions.md),
 durable runs, approval gates, answer rules,
 Zero touch, watch, watch decisions,
 [reasons](docs/reasons.md).

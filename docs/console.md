@@ -291,8 +291,7 @@ signed in as someone else. An open page then cannot change anything as the other
 live: its preview or confirm is refused with "this browser is now signed in as someone else, so nothing was
 changed; sign in again", with Look again, which goes to the sign-in page saying this browser is now signed in as
 someone else (it never reloads the page into the other person's console), and its live updates stop and send it to
-the same sign-in page. The terminal chat and scripts do not
-say a person and are not checked.
+the same sign-in page. Scripts do not say a person and are not checked.
 
 **Sign out** goes to the sign-in page only once the console confirms it. If the console does not answer within 10
 seconds, or answers anything else, the page stays and says "Sign-out not confirmed" (once, however often you press
@@ -653,7 +652,7 @@ readers ([Live updates](#live-updates)).
 | `/runs` | Every run this host and the fleet's run mirror know of, newest first, grouped by the day they ended (UTC), each run's Ended cell the time alone under its day's heading, with paging. Above them the filters (one search for a repository, a target or a job id, a chip per project, a list per field, and the filters you applied as chips you can remove) and the last 24 hours counted by outcome, each count a link to those runs, with the spend they settled and an **Only problems** switch ([Finding runs](#finding-runs)). The Outcome column says completed, refused, failed, awaiting input or cancelled on a badge with its icon; every outcome but completed and the two words that say why (awaiting input, cancelled) is followed by its reason as a short sentence ([Outcomes and reasons](#outcomes-and-reasons)). On a phone each run is a block of its own, and the filters fold behind a Filters button. In a window narrower than 1440 pixels, as on a phone, the table leaves out the flow, venue, model, tokens and job cap (the run's own page shows them), so it fits without scrolling sideways; a long job id (past 22 characters, so a forge delivery's id takes two lines), host, flow or model (past 20) breaks inside its own box rather than widen its column. |
 | `/runs/sandboxes` | Operators only: kept workspaces and registered shells across hosts, terminal handoff and copy commands, confirmed preparation/pin/End requests. See [Opening a sandbox](#opening-a-sandbox). |
 | `/runs/zero-touch` | How often workload runs needed a person over 7, 30 or 90 days, by project and by cause ([Zero touch](#zero-touch)). |
-| `/run?id=<job id>` | One run in the Pulse main/side grid: a job id, status, project/target/host headline and state panels for live, ended, refused, parked or recovering runs. Progress and the transcript update on one connection, attaching without reload. Chat, Inbox, Sandbox, Secrets, cost/model usage, resources, sessions and chain appear where relevant. Operators get eligible Cancel, answer, re-run and terminal actions through previews; viewers see status and numbers with a banner explaining what is hidden. |
+| `/run?id=<job id>` | One run in the Pulse main/side grid: a job id, status, project/target/host headline and state panels for live, ended, refused, parked or recovering runs. Progress and the transcript update on one connection, attaching without reload. Inbox, Sandbox, Secrets, cost/model usage, resources, sessions and chain appear where relevant. Operators get eligible Cancel, re-run and terminal actions through previews; viewers see status and numbers with a banner explaining what is hidden. |
 | `/parked` | A card for each run waiting for an answer: who asked (the run, linked to its page), how long it has waited, its project, a link to where the question was asked, its forge and how many times the session was resumed, and where to read the question (on its issue or pull request, or on its run page while the live transcript is kept); the card never shows the question itself. Then how it can be answered: being answered by a run (linked), not known, an answer box, or why it cannot be answered here ([A parked run](#outcomes-and-reasons)). |
 | `/parked/rules` | Operators only: the answer rules, read only, as `triggers.json` declares them (Answer rules). |
 | `/insights?range=30d` | Spend's five linked views: Spend, Budget split (`/insights/budget-split`), Capacity (`/insights/capacity`), Breakdown (`/insights/breakdown`) and Flows map (`/insights/flows`, also `view=list`). All are viewer-readable, drawn once per load, with supported range/project/path choices preserved. Budget split actions and plan reasons are operator-only. See [Spend views](insights.md). |
@@ -813,8 +812,8 @@ Four cards come first, in a row:
   queue still keeps, and hosts in the registry whose last doctor run has a failing check; a host gone from the
   registry is not counted, since its doctor result outlives it by days), then up to four of them, each with its
   project (where a run record the console read names one; a line says so once when a row has none) and id and one way
-  on: on a console that takes changes a question's **Answer** opens its run's page, whose Chat panel takes the answer
-  ([The Chat panel](#the-chat-panel)), and a failed job's **Retry** puts it back in the queue and can cost money
+  on: on a console that takes changes a question's **Answer** opens the answer form on the parked page
+  ([Answering a parked run](#answering-a-parked-run)), and a failed job's **Retry** puts it back in the queue and can cost money
   ([Actions](#actions)); elsewhere (for a viewer, and on a read-only console) each is **Open**, its run's page; a
   failing host's **Open** goes to Fleet. Past four it says how many more, with links to Parked and Fleet (the two
   numbers link there too). A question that a queued or running job is already answering is not counted: a line says
@@ -1286,7 +1285,7 @@ of the repository path and leading zeros in the number. Until that later run end
 looks in the queue: a park with a run queued or running on its issue is **being answered**, its card links that run, and
 it gets no answer form. The console reads the queue for this at most every 15 seconds while something is parked, up to
 10,000 queued and running jobs in all (it reads each job's kind and issue, never its text). When that look cannot see
-everything, the card says so and the park gets no answer form, as the run page's Chat panel draws none: a queue too deep
+everything, the card says so and the park gets no answer form: a queue too deep
 to check says so ("answer it on the forge, or wait until the queue is shorter"), because on such a queue an answer
 already sent can wait longer than the ten minutes in which a second one would be dropped as a duplicate. The overview's
 Needs you leaves the parks being answered out of its questions and says how many more are being answered now. The count
@@ -1327,12 +1326,12 @@ about a job it did not find. A
 queued or running job's sentence is a grey note (nothing is wrong, the record comes at its end); the others are
 amber. A queued job's page shows the waiting transcript state. When its worker starts publishing, the transcript attaches without a reload.
 
-For a run waiting for an answer, **What to do** names answering from the console only where the page's Chat panel can
+For a run waiting for an answer, **What to do** names answering on the parked page, where the console can
 take the answer; when it cannot (for example, the queue no longer holds the job's data), it says to reply on the issue
 or pull request instead.
 
 A run **refused before it started** (refused, with no tokens, no exit code and no budget slot held, which is what most
-refusals before any spend write) never had a container, so its page has no Progress, Chat or live transcript section.
+refusals before any spend write) never had a container, so its page has no Progress or live transcript section.
 
 A run whose record a **newer pi-dispatch** wrote (issue #761), or whose record carries a version no release writes,
 shows only what keeps its meaning in every release: the Outcome panel with the outcome word, how long it took and on
@@ -1567,10 +1566,10 @@ the fleet at most 10 seconds, as a held job's cancel does, then says the fleet d
 
 On the parked page, an operator can type an answer under a run that is waiting on an issue and send it. The page offers
 the answer box only where the console has checked, as it will before it queues anything, that it can build the answer
-(for the first 20 parked runs on the page, each check kept 15 seconds; the run page checks the rest): a park it cannot
+(for the first 20 parked runs on the page, each check kept 15 seconds): a park it cannot
 answer from here (a pull request, expired data, a comment trigger that would not route a reply) says why under "This
-question cannot be answered here", and one whose check could not be read sends you to its run page, whose Chat panel
-takes the answer too. A viewer, and a read-only console, see the cards without a box. The console does not comment on
+question cannot be answered here", and one whose check could not be read says so instead of offering a box. A viewer,
+and a read-only console, see the cards without a box. The console does not comment on
 the issue itself: it queues the same job a reply on the issue would have queued, through your comment trigger, with your
 answer as the reply text. The run resumes from where it stopped, and reads your answer as data, exactly as it reads a
 comment.
@@ -1582,8 +1581,8 @@ posts one comment as the deployment:
 >
 > > your answer, quoted
 
-The name is your token's name. An answer from pi's `/dispatch chat` reads "Answered
-from an operator's /dispatch panel" instead, so a token named `panel` is refused here: give it another name. Any
+The name is your token's name. A token named `panel` is refused here: that name is the one an answer sent from the pi
+extension's panel is signed with, so the forge would say the panel answered; give it another name. Any
 `@name` in your answer is changed so it does not notify anyone. That comment is
 the record of what the agent was told, for anyone who reads the issue later.
 
@@ -1596,7 +1595,7 @@ another run on the same issue is queued or running), a run for which that could 
 read, try again; or it holds more than 10,000 queued and running jobs, answer on the forge or wait), a run that parked
 on a pull request (answer it on the forge, with your trigger phrase),
 a run whose queue data has expired (31 days), a run whose job a newer pi-dispatch queued ("the reply cannot be built
-here; answer it from a console of that release", and the Chat panel shows that sentence in place of the form), a
+here; answer it from a console of that release"), a
 deployment whose comment trigger would not route a reply (none for
 that forge, a command, or no `run.resume`), and a run whose record could not be read (it says which, and that nothing
 was queued: try again). The audit log records the run and a hash of your answer, never the text.
@@ -1627,7 +1626,7 @@ and position fields. Confirmation is single-use and audited before enqueue. Mess
 row and run record. The preview fixes the selected provider/model and positive cost ceiling. If a zero-cost
 preview becomes paid or the paid reservation would grow before pickup, the worker refuses with
 `fork-reservation-changed`; preview again to authorize the new amount. The run's optional `forkSource` record
-explains a failed archive or skipped workspace point. The terminal's `--fork-as-job` uses these same routes.
+explains a failed archive or skipped workspace point.
 
 ### Re-running a run
 
@@ -1731,33 +1730,6 @@ queued message and best effort for a written one, and its preview says which. On
 message id and a hash of the message, never the text. In the `/dispatch` panel the same is `t` (steer) and `T` (follow-up) on the
 ACTIVE row, offered only while the run's inbox takes a message (a steer-armed run whose loop has not started, has
 ended, or whose venue or image cannot deliver says so instead). All of it is in `steering`.
-
-### The Chat panel
-
-A run's page has a **Chat** panel, that says what the run is (running, queued, parked,
-answered by a later run, being answered, finished or unknown) and offers the chat it can have now, by the same rule
-`pi-dispatch chat` uses:
-
-- **A running run** (or one going on as a recovery job, which the panel links): a link to its live
-  transcript, and the **Steer** and **Follow-up** forms while the run takes messages. The forms then move here from
-  the Inbox panel, so the page never holds two of either; the Inbox panel keeps the list and the Withdraw buttons.
-  A run that is not steer-armed, or whose inbox is closed, says so instead, and when the run's inbox could not be
-  read at all the panel warns that it cannot tell (rather than saying "not steer-armed").
-- **A parked run**: the answer form, the very one the parked page draws ([Answering a parked run](#answering-a-parked-run)),
-  and the question from its last assistant transcript entry while that transcript is kept. After expiry, read it on the forge thread. The form is drawn only where the console would accept the answer: for a pull
-  request's park, job data that has expired, or a comment trigger that would not route a reply, the panel shows the
-  sentence the console would refuse with instead of the form (and no terminal command). When that check could not be
-  read, the form stays and the panel says the preview will check again.
-- **A finished run**: the command `pi-dispatch chat <job id>`, to copy and run on the host that keeps the session
-  store, which opens the run's stored conversation in your own pi as a fork. When the run's trigger kept no session,
-  or the run was a pull request (whose session the record cannot name), the panel says why instead. If a later run continued that target's session, the panel links it and warns that its turns are in the session too.
-- **Queued, unknown, answered or being answered**: one sentence saying why there is nothing to chat with. A park
-  being answered links the run taking the answer, and a run whose recovery job is queued links
-  that job.
-
-The running and parked modes show `pi-dispatch chat <job id>` too, which opens the same chat in a terminal. A viewer sees the run's
-state only, never a form or a command, and a read-only console draws no form for anyone. When the queue cannot be
-read the panel says so rather than guess.
 
 ### Updates
 
@@ -1946,7 +1918,7 @@ the line under the overview's title included.
 A live page holds one connection open. Each token may hold `PI_CONSOLE_MAX_STREAMS` of them (default 4) across all
 its sign-ins, and the console 32 in all, of which 8 are kept for operators. A page opened past either limit still loads, but stays still until you reload it after closing
 another tab; its pill then says Not live, and its note says how many live tabs one token may hold, with Reload. A
-run page with its transcript open counts as one, so two run tabs leave two slots spare at the default limit. The terminal chat's separate `/api/transcript` connection also counts as one.
+run page with its transcript open counts as one, so two run tabs leave two slots spare at the default limit.
 
 **An open page does not keep you signed in.** Only a page load or a request counts as activity. A page left open
 signs out after `PI_CONSOLE_IDLE_MINUTES`, and its updates stop and send you to the sign-in page when:
@@ -1963,8 +1935,8 @@ updates it has not read) is cut off and reconnects to a fresh copy of the page.
 ## Error pages
 
 When the console refuses or fails a page your browser opens, it answers with a page of its own instead of a line of
-JSON: the same top bar, the same theme, a status, a sentence, and a way back. A script, the live streams, every write
-and the terminal chat still get the JSON they always got, and so does anything under `/api/` or `/static/`: the page
+JSON: the same top bar, the same theme, a status, a sentence, and a way back. A script, the live streams and every
+write still get the JSON they always got, and so does anything under `/api/` or `/static/`: the page
 is only for a browser's own navigation (a GET whose `Accept` asks for HTML). Every error page carries the same
 security headers as every other response, and says only fixed sentences: it never repeats the address you asked for
 or a value you sent.
@@ -2051,26 +2023,12 @@ it judges neither way. `lastBeatAgeMs` is the age the card judges by: when Valke
 the console read it, so a host whose clock runs behind reads as beating to a script as it does to the card. A
 scheduler's `name` in `schedulers` is its cron trigger's id, or null for a schedule whose id the console does not take
 (never its job name).
-Whether a park is being answered is not in `/api/state`; `/api/run` says it per run (`pendingRunOnTarget`).
+Whether a park is being answered is not in `/api/state`.
 
-`GET /api/run?id=<job id>` (or `?url=<issue or pull request link>`, which finds the newest run on that target) returns
-one run and the chat it can have now: its state, `mode` (`live`, `reply`, `fork`, or null with a fixed `says`
-sentence), the running job it goes on as, whether it takes messages, whether a live transcript exists, its progress
-numbers, its forge link, whether a newer run on its target exists, and for a parked run the job queued or running on
-its target that takes its answer (`pendingRunOnTarget`). `steer.armed` is null when the run's inbox could not be read
-(unknown, not "off"). A link finds the same run whatever the case of the repository path or leading zeros in the
-number, among the newest 2000 runs it searches. Both roles may read it: it carries ids, fixed
-words, times and numbers only, never a record's free text, a job's data, transcript text or a session key. This is what
-`pi-dispatch chat` asks. The fields are `INT-CONSOLE-STATE-API`'s. A run id is a `404` only when everywhere a run is
-kept was read and holds none of it, the run page's run-not-found rule; when one of those could not be read, the answer
-is a `503` whose sentence names what the console could not read ("whether a run with that id exists could not be
-told: this console could not read every queue; try again"), so a script should ask again rather than read it as no
-such run. A run the console does find, but whose queue it could not read, is a `503` too: "the queue could not be
-read, so this run's chat cannot be judged; try again". For a run whose record a newer pi-dispatch wrote, `run` holds
-only its ids, kind, outcome, times, host, project and attempt (every other field null), plus `newer: true` and a
-`note` with the run page's sentence. The `dispatch_runs` tool answers such a record the same way, with a note of its
-own that names the fields it gives and says the others are left out. Every role, the agent included, gets both times,
-`startedAt` and `finishedAt`, for every run (before issue #761's release an agent's copy had no `finishedAt`).
+For a run whose record a newer pi-dispatch wrote, the `dispatch_runs` tool gives only its ids, kind, outcome, times,
+host, project and attempt (every other field null), plus `newer: true` and a `note` with the run page's sentence, and
+it names the fields it gives and says the others are left out. The tool gives both times, `startedAt` and
+`finishedAt`, for every run (before issue #761's release an agent's copy had no `finishedAt`).
 
 Without a session, `/api/state` answers 401 with a JSON error, never a redirect to the sign-in page:
 `{"error": "sign in first", "ended": "idle"}`, where `ended` says why the session behind your cookie ended (one of the
@@ -2115,10 +2073,6 @@ parked runs' resume counts) and `GITLAB_URL`, `FORGEJO_URL` and `AZURE_ORG_URL` 
 transcripts and the run progress come from Valkey; whether a worker publishes them is that worker's
 `PI_LIVE_TRANSCRIPTS` and `PI_RUN_PROGRESS`.
 
-`pi-dispatch chat`, the terminal client, reads two more variables, from your own shell only and never from the
-deployment's `.env`: `PI_CONSOLE_TOKEN` (your token, else it asks) and `PI_CONSOLE_URL` (which console to dial, else
-`PI_CONSOLE_LISTEN`).
-
 The design and its rejected alternatives are `DES-OPERATOR-CONSOLE` in the project history; the
 testable rules are `REQ-CONSOLE-SECURITY`, `REQ-OPERATOR-CONSOLE-SCREENS`, `REQ-OPERATOR-CONSOLE-ACTIONS`,
 `REQ-LIVE-TRANSCRIPT` and `REQ-RUN-PROGRESS` in the project history; the threat model and
@@ -2126,7 +2080,7 @@ what it does not defend are in [`SECURITY.md`](../SECURITY.md#the-operator-conso
 
 ### Approval requests
 
-A run with declared gates can end as `awaiting-approval`. It leaves no container waiting. The Parked page and run chat show the named action, whether the worker enforces it, and operator controls to approve, decline with an optional reason, or ask a question. Every choice previews and confirms through the existing audited parked-answer action. A question resumes the agent without granting approval. Viewers and read-only consoles have no decision controls. The terminal chat uses `/approve`, `/decline [reason]`, or ordinary question text through the same API.
+A run with declared gates can end as `awaiting-approval`. It leaves no container waiting. The Parked page shows the named action, whether the worker enforces it, and operator controls to approve, decline with an optional reason, or ask a question. Every choice previews and confirms through the existing audited parked-answer action. A question resumes the agent without granting approval. Viewers and read-only consoles have no decision controls.
 
 `budget-raise` is worker-enforced and uses the cap declared by the trigger, within deployment and scoped limits. Other declared external actions are advisory. Push-to-default-branch and PR-open gates are refused until they can be enforced. Summary and reason text stay in the transcript and forge comment, never the run record.
 

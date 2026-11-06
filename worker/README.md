@@ -57,7 +57,6 @@ with at least one commit, and `run` refuses any other folder before it queues an
 | `updates` | which pi and which extensions jobs run, what is newer, and adopting it |
 | `opener install` | register `pi-dispatch-open`, so the console can open a sandbox in your own terminal |
 | `import-pi` | stage your own pi setup (models, skills, persona) for every job, without credentials |
-| `chat <jobId \| url \| key>` | follow and steer a running job, answer a parked one, or fork a finished one into your own pi (`--fork-as-job` to run it as a job), through the operator console |
 | `sandbox <jobId>` | reopen a finished run's workspace in a fresh container with no credentials; `--list`, `--attach` and `--new` to see, return to or prepare one |
 | `egress render` | write `model-endpoints.conf` from `model-endpoints.json`, then print the command that reloads the egress proxy |
 

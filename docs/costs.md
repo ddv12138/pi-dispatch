@@ -281,7 +281,7 @@ The meter counts a call on a model that costs money when its answer has:
 - content but an output count of 0. On the Anthropic API an output count of 1 counts too: pi keeps the first
   event's count when a proxy drops the final one.
 
-So a genuine one-token answer on the Anthropic API floors its run too, and so does a chat call there capped at
+So a genuine one-token answer on the Anthropic API floors its run too, and so does an ordinary call there capped at
 one output token (`maxTokens: 1`). Under a dollar cap such a call is also charged its bound during the run, so a
 capped job of genuine one-token answers reaches its cap far sooner than its real cost would. That is the safe side:
 the meter cannot tell such an answer from one whose count was dropped. A classify call has no answer content, so
