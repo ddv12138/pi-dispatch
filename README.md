@@ -20,7 +20,7 @@ provider or a subscription. Steps 1 and 2 are for someone comfortable in a termi
 
 ```bash
 mkdir my-dispatch && cd my-dispatch
-npm install --save-exact @edgehero/pi-dispatch@4.3.2 @edgehero/pi-dispatch-admin@4.3.2 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+npm install --save-exact @edgehero/pi-dispatch@4.3.3 @edgehero/pi-dispatch-admin@4.3.3 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
 ./node_modules/.bin/pi-dispatch up --console
 ```
 

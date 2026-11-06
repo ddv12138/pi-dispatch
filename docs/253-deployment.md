@@ -44,24 +44,17 @@ The job image is published from a checkout, not by CI: on the maintainer's machi
 Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
 Maven.
 
-This host runs the `…-5d10c5d2` tags: the images built from commit `5d10c5d2`, which postdates the released
-`4.3.2` and drops the sandbox backends that release's image still carries. That pin is fragile, because
-`PI_JOB_IMAGE` from `deploy/docker-compose.yml` **wins over the same key in `.env`** (`environment:` beats
-`env_file:`), so the pin is a hand edit of the shipped file and staging a new snapshot reverts it to
-`docker.io/ddv12138/pi-job:4.3.2`. That image is in the local store, so nothing fails and jobs silently run the
-older one. After every staging, re-apply the pin:
+What this host runs is `PI_JOB_IMAGE` from `deploy/docker-compose.yml`, which **wins over the same key in `.env`**
+(`environment:` beats `env_file:`): `.env` repeats it so nothing reads two answers, but the shipped line is the one
+the worker gets. Both name `4.3.3`, the release whose job image these bytes are.
 
-```bash
-sed -i 's#^      PI_JOB_IMAGE: .*#      PI_JOB_IMAGE: docker.io/ddv12138/pi-job:4.3.2-5d10c5d2#' deploy/docker-compose.yml
-```
-
-The durable fix is the release, not the edit: bump `package.json`, run `./image/publish.sh` (it tags
-`:<version>`), and the shipped default follows the number again. Until then the alternative is
-`deploy/docker-compose.override.yml`, whose `environment:` map merges over the shipped one and which a staging
-does not touch — set `PI_JOB_IMAGE` there and drop the hand edit.
+That line is a derived value, never a hand edit: `image/publish.sh` tags what it pushes with the root
+`package.json` version, and a test holds the compose file to it. A deployment that hand-edits it loses the edit at
+the next staging — and the tag it reverts to is in the local store, so a forgotten pin fails silently instead of
+failing to pull. A release is a version bump plus `./image/publish.sh`; a host pins nothing by hand.
 
 Jobs launch with `--pull=never`, so nothing is fetched at job time: pull the image here first, and verify it here
-(`./image/verify-image.sh docker.io/ddv12138/pi-job:<version>`). Docker Hub itself is not reachable directly from
+(`./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.3`). Docker Hub itself is not reachable directly from
 this host (`registry-1.docker.io` refuses); the pull works through the registry mirror configured in
 `/etc/docker/daemon.json`.
 
@@ -78,7 +71,7 @@ trigger form has no image field):
 ```json
 { "on": { "type": "label", "any": ["afk-spec"] },
   "run": { "kind": "gitlab", "flow": "spec-run",
-           "image": "docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2",
+           "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
            "statusComment": true, "maxTurns": 300 } }
 ```
 

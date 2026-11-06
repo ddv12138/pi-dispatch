@@ -1266,7 +1266,7 @@ test("up makes the proxy's network at RUN time when it was removed while the que
 // 4.3.1 through a release that moved everything else, which is how a deployment keeps running last release's image
 // without a single red check: the compose file names an image that exists, so no pull fails. Both copies, since a
 // deployment may be run from either.
-test("deploy/docker-compose.yml's PI_JOB_IMAGE is this release's job image, on the default's own repository (4.3.2)", () => {
+test("deploy/docker-compose.yml's PI_JOB_IMAGE is this release's job image, on the default's own repository (4.3.3)", () => {
 	const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
 	// The repository half comes from the one place that names the default's upstream (`jobImageFix`), so a later move
 	// to another registry fails here as well as in the literals above.
