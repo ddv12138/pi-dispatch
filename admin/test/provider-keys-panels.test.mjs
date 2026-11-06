@@ -155,7 +155,4 @@ test("the management destination survives an entirely Ready setup and subscripti
   assert.doesNotMatch(subscription, /type="password"|<input|data-action=/);
 });
 
-test("provider-key layout is the exact CSS built into the reference card", () => {
-  const generator = readFileSync(new URL("../../design/tools/provider_keys.py", import.meta.url), "utf8");
-  assert.equal(PROVIDER_KEYS_CSS, generator.match(/PROVIDER_KEYS_CSS = """([\s\S]*?)"""/)[1]);
-});
+

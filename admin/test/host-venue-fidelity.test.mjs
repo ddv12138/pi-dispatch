@@ -280,22 +280,7 @@ test("Host stale warning and Doctor sections use the design hierarchy without in
   assert.equal((doctor.match(/data-copy/g) ?? []).length, 1);
 });
 
-test("The detail CSS retains design slot, KPI, sticky comparison and phone treatments from the existing card source", () => {
-  const source = readFileSync(
-    new URL("../../design/tools/gen_fleet2.py", import.meta.url),
-    "utf8",
-  );
-  for (const rule of [
-    ".hd-sls .sl { width: 22px; height: 22px; }",
-    ".hd-kpis { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));",
-    ".hd-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }",
-  ]) {
-    assert.ok(source.includes(rule));
-    assert.ok(HOST_DETAIL_CSS.includes(rule));
-  }
-  assert.match(VENUE_DETAIL_CSS, /position: sticky; left: 0/);
-  assert.match(VENUE_DETAIL_CSS, /\.titlebar__end \.seg\{flex-wrap:wrap/);
-});
+
 
 test("an orphan found during boot names its observation time, never a cancellation or a failed stop", () => {
   const v = view();

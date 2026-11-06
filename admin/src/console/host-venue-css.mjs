@@ -1,4 +1,4 @@
-/** Published detail-card rules copied intact from design/tools/gen_fleet2.py, followed by runtime-data adaptations. */
+/** Host and venue details styles. */
 
 export const HOST_DETAIL_CSS = `
 .fl-bar { display: grid; gap: var(--space-4); }

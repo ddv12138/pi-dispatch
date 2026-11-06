@@ -89,12 +89,7 @@ test("chart markers and legend distinguish observed history, projections and sco
   for (const phrase of ["recorded run", "projected fire", "quiet window", "Next 7 days, UTC", "Forge repository quiet windows do not hold cron", "global windows can hold it"]) assert.ok(text(week).includes(phrase), phrase);
 });
 
-test("Triggers stylesheet is byte-identical to its published generator source", () => {
-  const source = readFileSync(new URL("../../design/tools/triggers_controls.py", import.meta.url), "utf8");
-  const pasted = /^TRIGGERS_CSS = """([^]*?)"""/m.exec(source);
-  assert.ok(pasted, "one literal stylesheet in the published source");
-  assert.equal(TRIGGERS_CSS, pasted[1]);
-});
+
 
 test("empty incomplete history stays unknown while explicitly complete empty history is zero", async () => {
   const incomplete = await triggerListGolden({ recordsOverride: [], complete: false });

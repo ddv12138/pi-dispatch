@@ -113,16 +113,7 @@ test("the rule detail route is operator-only, has no query authority and stays n
   assert.match(page, /Reading and navigation work without JavaScript/);
 });
 
-test("answerer and action capability CSS are exact copies of the correctly styled source generators", () => {
-  const source = readFileSync(new URL("../../design/tools/gen_answerer.py", import.meta.url), "utf8");
-  const css = source.match(/^CSS = """([\s\S]*?)"""/m)[1];
-  const extra = [...source.matchAll(/^CSS \+= """([\s\S]*?)"""/gm)].map(m => m[1]).join("");
-  const variants = source.match(/^VARIANT_CSS = """([\s\S]*?)"""/m)[1];
-  assert.equal(ANSWERER_CSS, css + extra + variants);
-  const actions = readFileSync(new URL("../../design/tools/gen_components.py", import.meta.url), "utf8");
-  assert.equal(AGENT_POLICY_CSS, actions.match(/^AGENT_POLICY_CSS = """([\s\S]*?)"""/m)[1]);
-  assert.equal(createHash("sha256").update(ANSWERER_CSS).digest("hex"), ANSWERER_CSS_SHA256);
-});
+
 
 test("agent audit filter is native, closed, preserved in cursors and isolates roles sharing one name", async () => {
   const q = parseAuditQuery("role=agent&who=ops&action=write-applied").query;

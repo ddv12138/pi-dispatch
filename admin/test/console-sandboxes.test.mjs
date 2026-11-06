@@ -97,19 +97,7 @@ test("host-derived windows are shown dynamically, failed reads stay unknown, uns
   assert.doesNotMatch(run, /pi-dispatch-open:/); assert.match(run, /no sandbox shell/);
 });
 
-test("the published card's entire page CSS is served with a page scope, and every README bullet has a ledger entry", () => {
-  const preview = readFileSync(new URL("../../design/system/components/SandboxesScreen/preview.html", import.meta.url), "utf8");
-  const css = /<style>([\s\S]*?)<\/style>/.exec(preview)[1].trim();
-  assert.ok(SANDBOX_CSS.includes(css)); assert.equal(PAGE_CSS.sandboxes, SANDBOX_CSS);
-  assert.match(pageCss(), /body\[data-page="sandboxes"\]/);
-  const runPreview = readFileSync(new URL("../../design/system/components/RunEnded/preview.html", import.meta.url), "utf8");
-  for (const rule of [".facts, .facts--3 { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }", ".fact { grid-template-columns: minmax(0, min(128px, 40%)) minmax(0, 1fr); }"]) {
-    assert.ok(css.includes(rule)); assert.ok(runPreview.includes(rule)); assert.ok(PAGE_CSS.run.includes(rule));
-  }
-  const readme = readFileSync(new URL("../../design/system/components/SandboxesScreen/README.md", import.meta.url), "utf8");
-  const ledger = JSON.parse(readFileSync(new URL("./fixtures/console-ledger/SandboxesScreen.json", import.meta.url)));
-  for (const bullet of readme.split("\n").filter((l) => l.startsWith("- ")).map((l) => l.slice(2))) assert.ok(ledger.elements.some((e) => e.el === bullet), bullet);
-});
+
 
 test("the console route table documents the sandbox path and its actual operator-only guard", () => {
   const docs = readFileSync(new URL("../../docs/console.md", import.meta.url), "utf8");

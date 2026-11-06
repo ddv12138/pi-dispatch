@@ -1,4 +1,4 @@
-/** ModelsScreen's page rules, from design/tools/gen_spend.py (#773), adapted to the shared responsive table kit. */
+/** Models styles. */
 export const MODELS_CSS = `
 .models-layout { grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); }
 .models-layout > *, .models-layout .stack, #p-roles .tbl-wrap { min-width: 0; }

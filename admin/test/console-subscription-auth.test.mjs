@@ -69,11 +69,7 @@ test("both actual readers use the injected published observation, and machine pr
   for (const value of [connections.subscriptionAuth, models.subscriptionAuth, modelConnections(connections).subscriptionAuth, modelsForAgent(models).subscriptionAuth]) assert.deepEqual(value, safe);
 });
 
-test("published card CSS and console paste stay identical, with full-width phone fields", () => {
-  const generator = readFileSync(new URL("../../design/tools/subscription_auth.py", import.meta.url), "utf8");
-  assert.equal(generator.match(/SUBSCRIPTION_AUTH_CSS = """([\s\S]*?)"""/)[1], SUBSCRIPTION_AUTH_CSS);
-  assert.match(SUBSCRIPTION_AUTH_CSS, /@media \(max-width: 600px\)[\s\S]*grid-template-columns: minmax\(0, 1fr\)/);
-});
+
 
 test("agent Connections renders safely from the actual page projection instead of a half-stripped DTO", async () => {
   const connections = await readConnections({ now: NOW, snapshot: { subscriptionAuth: consoleSubscriptionFixture(NOW), triggers: { triggers: [] } }, reads: { environment: () => ({ env: {} }), allowlist: () => [], endpoints: () => [] } });

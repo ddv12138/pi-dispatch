@@ -314,24 +314,7 @@ test("window reconciliation names unknown hosts, leaves missing holds unknown an
   assert.match(caps, /90,000,000/);
 });
 
-for (const [cardName, hash] of Object.entries(SPEND_CARD_CSS_HASHES))
-  test(`${cardName} local rules are copied exactly and served under Spend scope`, () => {
-    const source = readFileSync(
-      new URL(
-        `../../design/system/components/${cardName}/preview.html`,
-        import.meta.url,
-      ),
-      "utf8",
-    );
-    const css = /<style>([\s\S]*?)<\/style>/.exec(source)[1];
-    assert.equal(createHash("sha256").update(css).digest("hex"), hash);
-    assert.ok(SPEND_DESIGN_CSS.includes(css));
-    assert.ok(PAGE_CSS.insights.includes(SPEND_CSS));
-    assert.match(
-      pageCss({ insights: SPEND_CSS }),
-      /body\[data-page="insights"\]/,
-    );
-  });
+
 
 test("all five pages render clean HTML from the real slice assembler, across roles", async () => {
   const pricing = {

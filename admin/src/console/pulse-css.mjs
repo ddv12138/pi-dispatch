@@ -1,19 +1,7 @@
-/**
- * The Pulse design system's one stylesheet (issue #737): `design/system/components/bundle.css`, pasted VERBATIM.
- * Not one byte is edited here, so the console and the design it was drawn from cannot drift apart unnoticed: the
- * stylesheet test pins the string's sha256 to the file's. A change to the look lands in the design first and is pasted
- * again, or goes in a rule after this one (`page-css.mjs` for the shell and a page), never here. The design may run ahead of this paste by one recorded version
- * (`admin/test/design-folder.test.mjs`, `DESIGN_CSS_WAITING_SHA256`), and never by more.
- *
- * A string module for `style.mjs`'s reason: `dist/console.mjs` ships as one file. The file holds no backtick, `${`,
- * backslash, `<`, `url(` or `@import` (checked when it was pasted, and by the stylesheet test on the whole served
- * stylesheet), so the template literal below is the file's text exactly and the stylesheet fetches nothing.
- */
-
-/** The sha256 of `PULSE_CSS` as UTF-8, which is the sha256 of `components/bundle.css` itself. */
+/** Shared console stylesheet, embedded so the console ships as one file. */
 export const PULSE_CSS_SHA256 = "acd9426272c7960005ae17e7fdcbf636b8d7dd758f300b92841997ab9db10134";
 
-/** `components/bundle.css`, every byte. */
+/** Shared console styles. */
 export const PULSE_CSS = `/* pi-dispatch console, Pulse. One stylesheet for every page.
    Every value is a token. No style attributes anywhere: levels and positions are SVG attributes,
    tones are classes that set --tone*, phone layouts are media queries. */

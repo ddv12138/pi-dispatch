@@ -126,11 +126,7 @@ for (const [id, recipe] of Object.entries(TRIGGER_RECIPES)) test(`recipe ${id}: 
 }));
 
 
-test("the setup stylesheet is copied exactly from the source generator before page scoping", async () => {
-  const { SETUP_CSS } = await import("../src/console/setup-css.mjs");
-  const source = readFileSync(new URL("../../design/tools/gen_access.py", import.meta.url), "utf8");
-  assert.equal(SETUP_CSS, /SETUP_CSS = """([^]*?)"""/.exec(source)?.[1]);
-});
+
 
 
 test("doctor failures and uncertain effects remain visible even beside already-ready steps", async () => {

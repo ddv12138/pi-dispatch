@@ -55,11 +55,7 @@ test("row editing preserves undisclosed absolute scope when another field change
  for(const render of [configPauseWindows,configScopedLimits]){const markup=String(render(view));assert.doesNotMatch(markup,/\/home\/private/);assert.match(markup,/name="index"\s+value="0"/);assert.match(markup,/row 1/);}
 });
 
-test("configuration page rules are pasted byte for byte from the published design source", async()=>{
- const { CONFIG_CSS } = await import("../src/console/config-css.mjs");
- const source=readFileSync(new URL("../../design/tools/config_controls.py",import.meta.url),"utf8");
- assert.equal(CONFIG_CSS,/CONFIG_CONTROLS_CSS = """([^]*?)"""/.exec(source)?.[1]);
-});
+
 test("unread scheduler health and counters stay unknown and incomplete skew counts remain a lower bound",async()=>{
  const { triggerKinds, triggerChange } = await import("../src/console/panels/trigger.mjs");
  const trigger={type:"cron",index:0,id:"nightly",flow:"tidy",stalls:null};

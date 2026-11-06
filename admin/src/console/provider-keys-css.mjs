@@ -1,4 +1,4 @@
-/** Pasted from design/tools/provider_keys.py; the rendering test pins this exact source. */
+/** Provider keys styles. */
 export const PROVIDER_KEYS_CSS = `
 .pk-intro,.pk-note { font-size: 12px; line-height: 19px; color: var(--ink-muted); }
 .pk-intro { margin-bottom: 14px; }

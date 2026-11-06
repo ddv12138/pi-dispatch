@@ -2,15 +2,7 @@
  * The Pulse design tokens (issue #737): every colour in both themes, the two font stacks, spacing, radius and layout,
  * and the custom properties the console stylesheet reads them through (`tokenCss`, first in `CONSOLE_CSS`).
  *
- * A VERBATIM COPY, PINNED BY ITS CONTENT HASH. `PULSE_TOKENS` is the design system's `tokens.json` as an object
- * literal: the same keys in the same order, the same values, the same `usage` sentences, generated from the file
- * rather than typed. The design folder is in this repository (`design/system/tokens.json`), but the console never
- * reads it (`dist/console.mjs` ships as one file), so the copy stays, pinned by that file's content hash as AGENTS.md
- * asks of a copy, and `admin/test/design-folder.test.mjs` holds the design's file to the same hash.
- * `PULSE_TOKENS_SHA256` is the hash of `tokens.json`, and `JSON.stringify(PULSE_TOKENS, null, 1)` reproduces the file
- * byte for byte, so `admin/test/console-contrast.test.mjs` holds the two together: a value edited here alone turns
- * it red, and a new `tokens.json` is pasted whole with its hash moved in the same commit. The `usage` sentences stay
- * because that test reads them: a token's backticked grounds and stated ratio are its contrast contract.
+ * The contrast test checks the token values and their usage descriptions.
  *
  * LIGHT, DARK AND THE SYSTEM. `tokenCss()` writes three rules. `:root` carries the light colours and every token that
  * is not a colour, so a browser that understands nothing more still draws a complete light page. The
@@ -24,10 +16,10 @@
  * with it every colour on the page. The three rules above degrade to the light theme instead.
  */
 
-/** The sha256 of `tokens.json`, which `JSON.stringify(PULSE_TOKENS, null, 1)` reproduces (see the header). */
+/** Hash of the serialized token values, checked by the contrast test. */
 export const PULSE_TOKENS_SHA256 = "23a272327010840ed86e4138c3d2c904831b7a33a24d7a9dcb67a58cb1c1c868";
 
-/** `tokens.json`, verbatim and deep-frozen. Generated from the file; never edit a value by hand. */
+/** Console tokens, deep-frozen. */
 export const PULSE_TOKENS = deepFreeze({
   name: "pi-dispatch console",
   version: 2,

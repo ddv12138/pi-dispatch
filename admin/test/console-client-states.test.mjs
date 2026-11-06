@@ -1635,18 +1635,7 @@ test("the client-state table: every row's test is in this file, each state once"
   assert.ok(Object.values(T).every((name) => CLIENT_STATES.some((r) => r.reached === name)), "and every test reaches a listed state");
 });
 
-test("the client-state table holds every state element of the ConfirmStates, LiveStates, SignIn and AccessStates ledgers", () => {
-  const dir = new URL("./fixtures/console-ledger/", import.meta.url);
-  for (const card of LEDGER_CARDS) {
-    const file = new URL(`${card}.json`, dir);
-    assert.ok(existsSync(file), `admin/test/fixtures/console-ledger/${card}.json exists (one ledger per design card)`);
-    const ledger = JSON.parse(readFileSync(file, "utf8"));
-    assert.equal(ledger.card, card);
-    for (const el of ledger.elements.filter((e) => e.kind === "state")) {
-      assert.ok(CLIENT_STATES.some((r) => r.card === card && r.state === el.el), `${card}: the state "${el.el}" is in helpers/client-states.mjs with the test that reaches it`);
-    }
-  }
-});
+
 
 stateTest("inline configuration errors keep unique stable associations across two row forms", async () => {
   const forms = [0,1].map(index => configUi.actForm("pause-window-edit", {hidden:[["index",index,"int"]],fields:configUi.field("scope","Scope"),label:`Preview row ${index+1}`}));

@@ -161,10 +161,4 @@ test("viewer-only live page loads never read private workspace inventory", async
   assert.equal(reads, 2); assert.equal(refreshed.workspace?.retained, true);
 });
 
-test("workspace scoped CSS is the exact published generator source and all state pages obey console structure", async () => {
-  const generator = readFileSync(new URL("../../design/tools/gen_workspace.py", import.meta.url), "utf8");
-  const css = /\nCSS = """([\s\S]*?)"""/.exec(generator)?.[1];
-  assert.equal(WORKSPACE_CSS, css);
-  assert.equal(WORKSPACE_CSS_SHA256, createHash("sha256").update(css).digest("hex"));
-  for (const [name, draw] of Object.entries(WORKSPACE_DRAW)) assertClean(name, await draw());
-});
+

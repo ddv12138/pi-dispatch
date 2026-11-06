@@ -1,19 +1,4 @@
-/**
- * Every state the browser script can put a page in that a card names (issue #737, PR 2), and the test that reaches it
- * (`console-client-states.test.mjs`, which runs the real script over the server's own markup). `card` is the design
- * card's ledger (`admin/test/fixtures/console-ledger/<card>.json`), `state` the ledger element's `el`, `reached` the
- * name of the test that drives the script into that state and checks what the page shows.
- *
- * Held both ways by the test: each `reached` names a test in that file, and every element of kind "state" in the
- * ConfirmStates, LiveStates, SignIn and AccessStates ledgers has a row here. A row whose state is not a ledger element
- * (the kept-still note, the stale dimming, the link page's states) is a state the script switches that the ledgers file
- * under another kind; it is listed so the table is the whole of what the script can show.
- *
- * The width check is the other half only for the states a panel golden draws (`helpers/panel-goldens.mjs`
- * `PANEL_STATES`), each loaded in Chrome at 375 px under the CSP (`.github/scripts/console-width-check.mjs`). A state
- * here with no golden of its own (the Valkey, audit, failed, setup and preview-failed refusals, the countdown at 0:00,
- * a sign-out not confirmed) is held by this table alone, never measured at a width.
- */
+/** Browser client states and the tests that exercise them. */
 
 /** The ledgers whose "state" elements must each be reached here. */
 export const LEDGER_CARDS = Object.freeze(["ConfirmStates", "LiveStates", "SignIn", "AccessStates"]);

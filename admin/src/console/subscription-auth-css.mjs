@@ -1,4 +1,4 @@
-/** Pasted local card rules from design/tools/subscription_auth.py (#781). */
+/** Subscription authentication styles. */
 export const SUBSCRIPTION_AUTH_CSS = `
 .sa-accounts { display: grid; gap: var(--space-5); }
 .sa-account { min-width: 0; }
