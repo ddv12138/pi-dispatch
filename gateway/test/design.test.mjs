@@ -29,10 +29,3 @@ test("generic arrival markup has only its expected own-origin resources and an e
 	assert.doesNotMatch(text, /data-session-key|connectionId|PRIVATE|data-sandbox-id/);
 	assert.doesNotMatch(text, /terminal\.js|<iframe|<form|type="password"|sessionStorage|handoff|connectionId/);
 });
-
-
-
-
-
-
-

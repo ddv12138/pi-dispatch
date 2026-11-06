@@ -31,4 +31,3 @@ test("layoutFor refuses a name the table does not hold, rather than guess a tree
 	assert.equal(layoutFor("sandbox"), LAYOUTS.sandbox);
 	for (const bad of ["", "Sandbox", "toString", "__proto__", null, 1]) assert.throws(() => layoutFor(bad), /unknown job layout/, String(bad));
 });
-

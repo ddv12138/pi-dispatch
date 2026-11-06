@@ -164,4 +164,3 @@ test("the forbidden HOME roots are exactly the four job mounts", () => {
 	assert.deepEqual([...HOME_FORBIDDEN_ROOTS], ["/workspace", "/job", "/outbox", "/session"]);
 	assert.ok(Object.isFrozen(HOME_FORBIDDEN_ROOTS));
 });
-

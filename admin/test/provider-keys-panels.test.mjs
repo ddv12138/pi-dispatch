@@ -154,5 +154,3 @@ test("the management destination survives an entirely Ready setup and subscripti
   }
   assert.doesNotMatch(subscription, /type="password"|<input|data-action=/);
 });
-
-

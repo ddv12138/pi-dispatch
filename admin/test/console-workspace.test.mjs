@@ -160,5 +160,3 @@ test("viewer-only live page loads never read private workspace inventory", async
   const refreshed = await loadPageData("run", { id: record.jobId }, deps, { live: true });
   assert.equal(reads, 2); assert.equal(refreshed.workspace?.retained, true);
 });
-
-
