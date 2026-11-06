@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { EXEC_ONE_MAX, EXEC_TOTAL_MAX, SYSTEMD_HAZARD_SHAPES, WRAPPER_INTERNAL_KEYS, decodeEnvFile, envFileEditCheck, envFileEditRefusal, envFileValueLines, envFileHazard, envFileWrapperInternal, envFileLoadHazard, envFileSystemdHazard, firstInvalidUtf8, systemdReading, systemdUtf8, envKeyIsBlank, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue, setEnvKey, setEnvKeyIfEmpty, updateEnvFile, ENV_VALUE_UNWRITABLE, ENV_WRITER_FS, groupNameOf, groupRefusal } from "../src/env-file.mjs";
 import { UP_FS } from "../src/up.mjs";
-import { SERVICE_FS } from "../src/service.mjs";
 import { SETUP_GITHUB_FS } from "../src/github-app-setup.mjs";
 import { SYSTEMD_259_ENV_BYTES, SYSTEMD_259_ENV_FILES } from "./helpers/systemd-env-259.mjs";
 
@@ -1266,7 +1265,7 @@ test("every production fs seam handed to updateEnvFile carries the descriptor ca
 	// fail: the writer goes back to chowning and chmodding the tmp by path, which a swapped tmp redirects, and every
 	// other test still passes. The realpathSync story (#357) is the same shape. So each default is read here.
 	const needed = ["openSync", "writeFileSync", "fstatSync", "fchownSync", "fchmodSync", "fsyncSync", "closeSync", "unlinkSync", "renameSync", "statSync", "realpathSync", "readFileSync"];
-	for (const [name, seam] of Object.entries({ ENV_WRITER_FS, UP_FS, SERVICE_FS, SETUP_GITHUB_FS })) {
+	for (const [name, seam] of Object.entries({ ENV_WRITER_FS, UP_FS, SETUP_GITHUB_FS })) {
 		for (const call of needed) assert.equal(typeof seam[call], "function", `${name}.${call}`);
 	}
 });
@@ -2551,28 +2550,6 @@ function wrapperVariables(text, kind) {
 	return found;
 }
 
-test("#470: WRAPPER_INTERNAL_KEYS is every variable each wrapper assigns or reads for itself, read off the wrappers' text", () => {
-	const root = join(import.meta.dirname, "..", "..");
-	const sh = readFileSync(join(root, "deploy", "worker-env-wrapper.sh"), "utf8");
-	const cmd = readFileSync(join(root, "deploy", "worker-env-wrapper.cmd"), "utf8");
-	// The ONE exception each, and why it is not the wrapper's own: PWD (sh) and CD (cmd) are read only on the branch
-	// where there is no .env at all, so no line of one can reach them.
-	const shNames = wrapperVariables(sh, "sh");
-	shNames.delete("PWD");
-	assert.deepEqual([...shNames].sort(), [...WRAPPER_INTERNAL_KEYS.shell].sort(), "the sh wrapper's own variables");
-	const cmdNames = wrapperVariables(cmd, "cmd");
-	cmdNames.delete("CD");
-	assert.deepEqual([...cmdNames].sort(), [...WRAPPER_INTERNAL_KEYS.cmd].sort(), "the cmd wrapper's own variables");
-	// The scanner sees every form it claims to, so a later wrapper line in one of them cannot slip past it.
-	for (const [line, name] of [["x=1", "x"], ["read -r y", "y"], [': "${z:=d}"', "z"], ['echo "$w"', "w"], ["echo ${v#a}", "v"], ["export u", "u"], ["a=1; t=2", "t"], [': $((retries + 1)) "${#tag}"', "retries"], [': $((retries + 1)) "${#tag}"', "tag"], ["n=$((a*b))", "b"]]) {
-		assert.ok(wrapperVariables(`${line}\n`, "sh").has(name), `sh: ${line}`);
-	}
-	assert.equal(wrapperVariables("# q=1 $q\n", "sh").size, 0, "an sh comment names nothing");
-	for (const [line, name] of [["set q=1", "Q"], ['set "q=1"', "Q"], ["set /a q=1", "Q"], ["set /p q=prompt", "Q"], ["echo %q%", "Q"], ["echo !q!", "Q"], ["echo %q:~1%", "Q"], ["if defined q echo", "Q"], ["if not defined q echo", "Q"]]) {
-		assert.ok(wrapperVariables(`${line}\r\n`, "cmd").has(name), `cmd: ${line}`);
-	}
-	assert.equal(wrapperVariables("REM set q=1 %q%\n:: %r%\nfor %%A in (x) do set \"%%A=%%B\"\n%*\n%~1\n", "cmd").size, 0, "a comment, a FOR variable and the arguments name nothing");
-});
 
 test("#470: the reader names a line assigning a wrapper's own variable, for the loader that has that wrapper", () => {
 	const shell = (t) => envFileWrapperInternal(t, { loader: "shell" });

@@ -152,7 +152,6 @@ function harness({ plan = {}, listening = true, answers = [], files = {}, doctor
 		},
 		// Issue #708: no console tokens unless a test says so; the default reads the real deployment folder.
 		consoleOperators: () => 0,
-		consoleUnitInstalled: () => false,
 		...extra,
 	};
 	return { run: () => runUp(argv, deps), deps, calls, promptCalls, initCalls, initOpts, doctorCalls, doctorOpts, store, text: () => buf.join("") };
@@ -1261,19 +1260,23 @@ test("up makes the proxy's network at RUN time when it was removed while the que
 	assert.doesNotMatch(kept.text(), /was removed while the question waited/);
 });
 
-// The deployment file's PI_JOB_IMAGE is a hand-written copy of a value this repo derives: the job image THIS release
-// publishes, which is the root version (image/publish.sh tags what it pushes with it). Nothing held it, and it sat on
-// 4.3.1 through a release that moved everything else, which is how a deployment keeps running last release's image
-// without a single red check: the compose file names an image that exists, so no pull fails. Both copies, since a
-// deployment may be run from either.
-test("deploy/docker-compose.yml's PI_JOB_IMAGE is this release's job image, on the default's own repository (4.3.3)", () => {
-	const { version } = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+// The deployment file's PI_JOB_IMAGE is a hand-written copy of a value this repo derives: the job image the deployment
+// runs. Nothing held it, and it sat on 4.3.1 through a release that moved everything else, which is how a deployment
+// keeps running last release's image without a single red check: the compose file names an image that exists, so no
+// pull fails. Both copies, since a deployment may be run from either.
+//
+// The line is also .env-OVERRIDABLE (`${PI_JOB_IMAGE:-<default>}`, compose interpolation reads `--env-file .env`): the
+// concrete tag is the fallback only, a value in the deployment's .env wins, and the fallback is never `latest` -- a
+// deployment that pins no version would silently run whatever the registry moved last.
+test("deploy/docker-compose.yml's PI_JOB_IMAGE is a concrete, .env-overridable job image on the default's own repository", () => {
 	// The repository half comes from the one place that names the default's upstream (`jobImageFix`), so a later move
 	// to another registry fails here as well as in the literals above.
 	assert.equal(jobImageFix("docker", "pi-job:latest").split(" ")[2], "docker.io/ddv12138/pi-job:latest");
+	const line = "      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}";
 	for (const path of ["../../deploy/docker-compose.yml", "../deploy/docker-compose.yml"]) {
 		const compose = readFileSync(new URL(path, import.meta.url), "utf8");
-		assert.match(compose, new RegExp(`^ {6}PI_JOB_IMAGE: docker.io/ddv12138/pi-job:${version.replace(/\./g, "\\.")}$`, "m"), `${path}: the pin follows the root package.json version`);
+		assert.ok(compose.split("\n").includes(line), `${path}: the concrete default, overridable from .env`);
+		assert.ok(!/PI_JOB_IMAGE:.*:latest/.test(compose), `${path}: never latest`);
 	}
 });
 
@@ -2192,11 +2195,11 @@ test("up's proxy removal takes its anonymous volumes with it (#503 review)", () 
 	assert.deepEqual(EGRESS_RM, ["rm", "-f", "-v", "pi-dispatch-egress-proxy"]);
 });
 
-test("up's closing Next: offers the console as a service only where an operator token exists (#708)", async () => {
-	const line = "  pi-dispatch service install --console\n      keep the operator console running as a service (open it with /dispatch console)\n";
+test("up's closing Next: offers the console profile only where an operator token exists (#708)", async () => {
+	const line = "  docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d\n      start the operator console container (open it with /dispatch console)\n";
 	const without = harness({ plan: green, argv: ["--yes"] });
 	await without.run();
-	assert.ok(!without.text().includes("service install --console"), "no token, so the install would refuse: no line");
+	assert.ok(!without.text().includes("--profile console"), "no token, so serve would refuse: no line");
 	const asked = [];
 	const withToken = harness({ plan: green, argv: ["--yes"], extra: { consoleOperators: (dir) => (asked.push(dir), 1) } });
 	await withToken.run();
@@ -2204,12 +2207,9 @@ test("up's closing Next: offers the console as a service only where an operator 
 	assert.ok(text.includes(line), text);
 	assert.ok(text.indexOf(line) > text.indexOf("Next:"), "among up's own next steps");
 	assert.deepEqual(asked, ["/deploy"], "asked about this deployment's folder");
-	const installed = harness({ plan: green, argv: ["--yes"], extra: { consoleOperators: () => 1, consoleUnitInstalled: (dir) => dir === "/deploy" } });
-	await installed.run();
-	assert.ok(!installed.text().includes("service install --console"), "a console unit is already installed for this folder: not offered again");
 	const broken = harness({ plan: green, argv: ["--yes"], extra: { consoleOperators: () => { throw new Error("EACCES"); } } });
 	await broken.run();
-	assert.ok(!broken.text().includes("service install --console"), "a tokens read that fails offers nothing and stops nothing");
+	assert.ok(!broken.text().includes("--profile console"), "a tokens read that fails offers nothing and stops nothing");
 });
 
 test("up's default console read: the deployment folder's tokens file, judged as serve judges it (#708)", { skip: process.platform === "win32" }, async () => {
@@ -2218,17 +2218,17 @@ test("up's default console read: the deployment folder's tokens file, judged as 
 		// undefined puts runUp's own default back (a destructuring default applies to undefined).
 		const h = harness({ plan: green, argv: ["--yes"], cwd: dir, env, extra: { consoleOperators: undefined } });
 		await h.run();
-		return h.text().includes("service install --console");
+		return h.text().includes("--profile console");
 	};
 	assert.equal(await run(), false, "no tokens file");
 	addToken({ path: join(dir, "console-tokens.json"), name: "view", role: "viewer" });
 	assert.equal(await run(), false, "a viewer alone cannot start the console");
 	addToken({ path: join(dir, "console-tokens.json"), name: "rob", role: "operator" });
 	assert.equal(await run(), true);
-	// The file the SERVICE reads, as `service install --console` judges it: this shell's export is not the unit's.
-	assert.equal(await run({ PI_PROVIDER: "anthropic", PI_CONSOLE_TOKENS_FILE: join(dir, "elsewhere.json") }), true, "this shell's PI_CONSOLE_TOKENS_FILE is not what the service reads");
+	// The file the CONSOLE (and its compose container) reads: this shell's export is not the deployment's.
+	assert.equal(await run({ PI_PROVIDER: "anthropic", PI_CONSOLE_TOKENS_FILE: join(dir, "elsewhere.json") }), true, "this shell's PI_CONSOLE_TOKENS_FILE is not what the deployment reads");
 	writeFileSync(join(dir, ".env"), "PI_CONSOLE_TOKENS_FILE=elsewhere.json\n", { mode: 0o600 });
-	assert.equal(await run(), false, "the deployment .env's PI_CONSOLE_TOKENS_FILE names the file the service reads");
+	assert.equal(await run(), false, "the deployment .env's PI_CONSOLE_TOKENS_FILE names the file the console reads");
 });
 
 test("explicit setup grants adopt a volume and refresh/restart busy proxy without answering a terminal (#766)", async () => {

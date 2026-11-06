@@ -151,13 +151,14 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   prefer (its own bullet below states the consequences). One implementation detail, recorded because the code
   records it: Azure's constant-time compare returns early on a length mismatch, so the secret's **length**
   leaks even though its content does not.
-  The receiver may run **containerised** (`docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up`,
-  issue #82; the `-f` is load-bearing, because that file's relative paths resolve against `deploy/` and not
-  your cwd). That changes none of the
-  verification above: it is the same code, the container mounts `triggers.json` read-only and **no docker
-  socket**, and the worker stays a host process either way. It does change **where your secrets live**: the
+  The receiver runs **containerised** (`docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up`,
+  issue #82, from the deployment folder; the `-f` is load-bearing, because that file's relative paths resolve
+  against `deploy/` and not your cwd). That changes none of the verification above: it is the same code, the
+  container mounts `triggers.json` read-only and **no docker socket**, and its image is built from this snapshot
+  rather than pulled from a registry. It does change **where your secrets live**: the
   profile declares `env_file: ../.env`, so the operator's *whole* `.env` (every forge token and
-  `WEBHOOK_SECRET`) is injected into that container.
+  `WEBHOOK_SECRET`) is injected into that container. The worker and console containers read the same file, and the
+  egress proxy gets none of it.
   **Polling mode has no webhook surface at all** (`pi-dispatch-receiver poll`, issue #81): GitHub
   events are *fetched* over TLS with your own credential rather than delivered to a public port, so
   there is no signature to verify and nothing to forge against — the HMAC gate defends the webhook
@@ -227,12 +228,12 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 - **Spend.** A daily cap checked *before* tokens are spent, a per-job turn budget enforced by our runner
   (pi has no turn limit of its own), and a 30-minute container wall-clock timeout. An agent that concluded
   "I can't fix this" is a success and is never blind-retried.
-- **A policy refusal is never restarted into a second bill.** `pi-dispatch service` installs the worker as a
-  user-level unit, and on all three platforms exit 2 (a determinate config or budget refusal) is excluded
-  from restart: systemd's `RestartPreventExitStatus=2`, nssm's `AppExit 2 Exit`, and, because launchd's
-  `KeepAlive` cannot exclude a single exit code, a wrapper that converts exit 2 into a clean exit so the unit
-  stays stopped. Only infra failures are worth retrying; paying again for the same broken config is not. The
-  `--system` scope **prints** a unit for you to install yourself: the command never executes a privileged one.
+- **A policy refusal is never a paid attempt.** A determinate config refusal ends the process with exit code 2
+  before any job starts, and a job refused by a cap is never started at all. Every Compose service runs
+  `restart: unless-stopped`, and Docker's restart policy cannot tell a policy refusal from a crash: a container
+  that exits 2 is restarted, reads the same configuration and refuses again. It can loop; it cannot spend. Only
+  infrastructure failures are worth retrying, and the worker's own attempt accounting — never the restart
+  policy — decides whether a job is paid for twice.
 - **A message into a running job is data, one way, and bounded** (issue #646, `run.steer`). A trigger must opt in,
   and only an attempt the worker could fully arm listens: a venue that binds mounts, an image declaring `steer` (a job
   on an image without it is refused before it spends) and `exitAuth`, and a Valkey client.
@@ -712,8 +713,8 @@ Stated openly rather than discovered later:
   there. Running a job as the worker's uid has a price, recorded in `OQ-036`: a container escape that
   keeps its uid lands as the worker's own account, files the job creates (setuid and setgid included) carry the
   worker's uid and primary group, and the worker's `0600` files inside a mounted local folder are readable to
-  the job (as they already are on Docker Desktop); run the worker as a dedicated service account, as
-  `deploy/worker.service` does. On rootful Podman without an empty `/etc/containers/mounts.conf`, every job
+  the job (as they already are on Docker Desktop); run the worker as a dedicated account: the shipped Compose file
+  runs the worker container as uid 10001. On rootful Podman without an empty `/etc/containers/mounts.conf`, every job
   container also gets a `/run/secrets` mount carrying the host's subscription files where they exist, so the
   worker does not credit `mountSet` there: doctor says it is asserted, a `PI_BACKEND_FLOOR` asking for it refuses,
   and `doctor --live` fails it by reading the container's own mount table (issue #345). Where the image provides non-root:
@@ -824,8 +825,9 @@ Stated openly rather than discovered later:
   agent holds a placeholder, so neither the sandbox nor any argv carries it; see the venue's row under Trust
   boundaries.)
   And a container's output is teed to the worker's stdout unconditionally, independent of
-  `PI_CAPTURE_JOB_LOGS`, so under systemd a value the agent echoes reaches journald. Set
-  `StandardOutput=null` on the unit if that matters more to you than watching jobs run.
+  `PI_CAPTURE_JOB_LOGS`, so a value the agent echoes reaches the worker container's log on the Docker host
+  (Docker's default `json-file` driver keeps it there). Treat that log directory as a secret store; a
+  `logging: driver: none` on the worker service suppresses it at the cost of watching jobs run.
 - **The provider API key is broad.** Unlike the GitHub token it cannot be meaningfully scoped per job —
   the agent needs it to function. It is the one broad secret inside the container. **Set a spend limit
   on it.**
@@ -1141,27 +1143,16 @@ Stated openly rather than discovered later:
   the worker's environment, its own credential belongs on the host and never in `PI_FORWARD_ENV`: a token
   that can read every secret in your project is a worse thing to hand an agent than the two credentials a
   job already carries.
-- **An `--env-setup` script is a boot-time exec as the account that holds every credential this
-  deployment has.** `pi-dispatch service render|install --env-setup <path>` records a file the service
-  manager **sources at every boot**, as the service user, with the deployment's environment — so
-  whoever can write that file, or the directory holding it, owns the worker. Keep it writable by
-  nobody but the account the unit runs as, and keep it out of any repository you push: it holds no
-  secret by design, but it holds the commands that fetch them, which is a map to all of them.
-  `pi-dispatch doctor` warns on all three (gone; group- or world-writable; in a work tree that does
-  not ignore it) and offers no `--fix` for any of them — it will not `chmod` your file and will not
-  move it. The path can only ever be named by an operator typing the flag: never `.env`, never a
-  trigger file, never the panel. **That sentence is about the `--env-setup` script
-  specifically**, and a second, narrower exec now exists: see the next bullet.
-- **A secret resolver is a host exec of the same trust class, reached two ways this document once
-  reserved for the flag alone.** `PI_SECRET_PROFILES` names resolver scripts in `.env`, and
-  `/dispatch secrets add` can name one from the panel. Both run as the account the worker runs as, and
-  that account holds every credential this deployment has, so the blast radius is the `--env-setup`
-  script's and not a smaller one. Boot-time versus job-time is a difference in timing, not in power.
-  What bounds it instead: the panel path is fail-CLOSED (`PI_SECRET_RESOLVER_ROOTS` is empty by default,
+- **A secret resolver is an exec inside the worker's own environment, which holds every credential this
+  deployment has.** `PI_SECRET_PROFILES` names resolver scripts in `.env`, and
+  `/dispatch secrets add` can name one from the panel. Both run as the account the worker runs as — uid 10001 in
+  the shipped Compose file, with the deployment's whole `.env` in its environment — so the blast radius is that
+  environment, not a smaller one.
+  What bounds it: the panel path is fail-CLOSED (`PI_SECRET_RESOLVER_ROOTS` is empty by default,
   so the panel can declare nothing at all until an operator names the directory), the worker re-checks
   every panel-declared path against those roots on the realpath rather than trusting the settings file,
   and a trigger names only a profile NAME, never a path. A deployment that never sets
-  `PI_SECRET_RESOLVER_ROOTS` keeps the guarantee above intact, byte for byte.
+  `PI_SECRET_RESOLVER_ROOTS` gives the panel no way to declare a resolver at all.
 - **With `GITHUB_AUTH_SOURCE=gh` (the default), your entire gh login reaches every token-carrying job.**
   The minted value is your own full-scope `gh auth token`, and `pi-dispatch doctor` warns and names the
   scopes it carries (calling out broad ones like `admin:org`, `delete_repo`, `workflow`). Prefer a
@@ -1271,7 +1262,7 @@ Stated openly rather than discovered later:
   output, and the extension never routes them into model context.
   **It does, however, install and execute host software.** `/dispatch setup` is the guided path and it is not
   read-only: it runs `npm install @edgehero/pi-dispatch@<pinned version> --ignore-scripts --omit=dev` into a
-  directory you name, then spawns that runtime's own CLI (`up`, `service install`, `setup github`) attached to
+  directory you name, then spawns that runtime's own CLI (`up`, `doctor`, `setup github`) attached to
   your terminal. Each of those sits behind a confirm showing the exact command and directory first, nothing
   is auto-accepted (the child's own y/N prompts still run), and the install is followed by a hard-stop
   assertion on the installed version, because npm has reported success over a wrong or absent install before.
@@ -1341,9 +1332,9 @@ Stated openly rather than discovered later:
   money. The App path does not close that. Set a spend limit on the provider key, rotate any key or secret
   you suspect, and treat that folder as a secret store. Outside jobs, the same log gets the Valkey password
   (`pi-dispatch up`, and the `docker run` doctor's Valkey fix shows, pass `-e VALKEY_PASSWORD`; the compose
-  file's Valkey sets it in `environment:`) and, on a compose deployment, the receiver's whole `.env`
-  (`env_file: ../.env`: webhook secrets and forge credentials). doctor's in-image `gh` check passes your
-  token on stdin, so doctor itself adds no copy.
+  file's Valkey sets it in `environment:`) and, in the Compose deployment, the whole `.env` of the worker, the
+  console and the receiver (`env_file: ../.env`: webhook secrets and forge credentials). doctor's in-image `gh`
+  check passes your token on stdin, so doctor itself adds no copy.
 - **`PI_SESSIONS_DIR` is a PII store, and it has no default.** Unset means the feature is unavailable and
   a trigger that asked for it is refused before it costs anything — deliberately, because a default would
   turn that refusal into a silent success, writing the most PII-bearing thing this system holds to a path

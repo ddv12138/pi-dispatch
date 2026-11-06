@@ -23,7 +23,7 @@ export function validSetupResult(value) {
 	if (value.effects !== undefined && !effects(value.effects)) return false;
 	if (value.plan !== undefined) {
 		const p = value.plan;
-		if (!keys(p, ["digest", "component", "manager", "host", "workerName", "account", "effects", "key", "provider", "mode", "aliases", "source"]) || !/^[a-f0-9]{64}$/.test(p.digest ?? "") || !["worker", "receiver", "egress", "doctor", "provider"].includes(p.component) || !["systemd", "launchd"].includes(p.manager) || !short(p.host, 64) || !short(p.account, 64) || !effects(p.effects)) return false;
+		if (!keys(p, ["digest", "component", "manager", "host", "workerName", "account", "effects", "key", "provider", "mode", "aliases", "source"]) || !/^[a-f0-9]{64}$/.test(p.digest ?? "") || !["worker", "receiver", "egress", "doctor", "provider"].includes(p.component) || !["compose", "systemd", "launchd"].includes(p.manager) || !short(p.host, 64) || !short(p.account, 64) || !effects(p.effects)) return false;
 		const component = value.operation.startsWith("setup-provider-key") ? "provider" : value.operation === "setup-doctor" ? "doctor" : value.operation.split("-")[1];
 		if (p.component !== component) return false;
 		if (p.workerName !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(p.workerName)) return false;

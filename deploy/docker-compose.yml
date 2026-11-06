@@ -1,12 +1,13 @@
-# The default deployment starts Valkey only; run the worker on the host for cross-platform path
-# translation, or opt into the Linux-only `worker` profile below. The containerized worker mounts the
-# local Docker socket and the deployment tree at the same absolute path the daemon sees. The socket is
-# root-equivalent; only trusted worker code receives it, never a job container.
+# Linux-container-only deployment. A plain `up` starts Valkey only; the worker, receiver, console and
+# egress proxy are the opt-in profiles below. The worker mounts the local Docker socket and the
+# deployment tree at the same absolute path the daemon sees. The socket is root-equivalent; only trusted
+# worker code receives it, never a job container.
 #
-# The RECEIVER may run either way. It is the one internet-facing process and needs no Docker access at
-# all, so a container suits it -- but the host mode (`pi-dispatch-receiver`, deploy/receiver.service)
-# stays first-class. The `receiver` profile keeps the container OPT-IN: a plain `up` stays Valkey-only,
-# so worker-on-host deployments that already run the receiver on the host gain no second copy.
+# The RECEIVER is a container too. It is the one internet-facing process and needs no Docker access, so
+# it has no host service unit any more: its image is built from this snapshot, and the address it
+# publishes comes from the deployment's .env through PI_RECEIVER_PUBLISH (the 253 deployment sets
+# PI_RECEIVER_PUBLISH=192.168.99.253). No override file exists: every value this file reads is a compose
+# variable or an .env key. The `receiver` profile stays OPT-IN: a plain `up` remains Valkey-only.
 #
 #   docker compose --env-file .env -f deploy/docker-compose.yml up -d                     # start Valkey (default)
 #   docker compose --env-file .env -f deploy/docker-compose.yml --profile worker up -d   # Valkey + Linux container worker
@@ -80,7 +81,10 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       DOCKER_CONTEXT: default
       VALKEY_URL: redis://valkey:6379
-      PI_JOB_IMAGE: docker.io/ddv12138/pi-job:4.3.3
+      # Compose interpolation reads `--env-file .env`: a value there wins, the default is only a
+      # fallback. The default is the job image built from commit 5d10c5d2 (what the 253 deployment runs
+      # today); a version bump/release moves it.
+      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}
       PI_JOBS_DIR: ${PWD}/runtime/jobs
       PI_LOGS_DIR: ${PWD}/runtime/logs
       PI_SETTINGS_FILE: ${PWD}/runtime/settings.json
@@ -149,18 +153,23 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # The containerized receiver (issue #82): the always-on webhook edge, prebuilt for amd64+arm64.
-  # Build locally instead with:  docker build -f receiver/Dockerfile -t pi-dispatch-receiver .
+  # The receiver (issue #82): the always-on webhook edge. It is built from this snapshot, so an edit to
+  # receiver/ takes effect on the next `up --build` and no prebuilt registry image can drift from the
+  # code beside it.
   #
   # Relative paths below resolve against THIS FILE's directory (deploy/), not the caller's cwd --
   # that is the Compose spec for both env_file and bind mounts -- so `../` reaches the repo root
   # regardless of where `docker compose -f deploy/docker-compose.yml ...` is run from.
   receiver:
     profiles: ["receiver"]
-    image: ghcr.io/edgehero/pi-dispatch-receiver:latest
-    # The operator's .env at the repo root, same file the host services read (WEBHOOK_SECRET, github
-    # auth, forge blocks, and VALKEY_PASSWORD, which the receiver sends to the Valkey above). Compose refuses to start the profile when it is missing -- correctly: a
-    # receiver without WEBHOOK_SECRET refuses to boot anyway, so fail at the clearer message.
+    image: deploy-receiver
+    build:
+      context: ..
+      dockerfile: receiver/Dockerfile
+    # The operator's .env at the repo root, same file the worker and console read (WEBHOOK_SECRET,
+    # github auth, forge blocks, and VALKEY_PASSWORD, which the receiver sends to the Valkey above).
+    # Compose refuses to start the profile when it is missing -- correctly: a receiver without
+    # WEBHOOK_SECRET refuses to boot anyway, so fail at the clearer message.
     env_file: ../.env
     # `environment` OVERRIDES env_file, deliberately: a host .env says redis://127.0.0.1:6379, which
     # inside a container is the container itself. Service DNS is the container-side truth.
@@ -168,9 +177,9 @@ services:
       VALKEY_URL: redis://valkey:6379
       PI_TRIGGERS_FILE: /config/triggers.json
     # The triggers file (`pi-dispatch init` scaffolds it -- run that first: mounting a path that does
-    # not exist makes Docker create it as a DIRECTORY and the boot fails confusingly). Host-worker
-    # deployments default to the repo root. Container-worker deployments set PI_TRIGGERS_FILE to the
-    # absolute runtime path so receiver and worker share the same file.
+    # not exist makes Docker create it as a DIRECTORY and the boot fails confusingly). The default is
+    # the repo root; a deployment whose receiver and worker share a different file sets PI_TRIGGERS_FILE
+    # to its absolute path so both containers read the same one.
     # Read-only: the receiver live-reloads this file on change; it never writes it. One consequence of
     # a single-FILE bind mount (issue #231): every write to this file is an atomic tmp+rename that
     # SWAPS THE INODE, and the mount stays pinned to the old one -- so the worker's one-shot disarm is
@@ -179,11 +188,13 @@ services:
     volumes:
       # `z` for the SELinux reason at the top of this file: unlabelled, the receiver cannot read it on an enforcing host.
       - ${PI_TRIGGERS_FILE:-../triggers.json}:/config/triggers.json:ro,z
-    # Loopback only, like Valkey's port above: the operator's reverse proxy or tunnel (TLS, public
-    # hostname) is what faces the internet -- never this port raw. Assumes the in-container default
-    # RECEIVER_PORT=3000; if your .env overrides it, adjust the right-hand side to match.
+    # The publish address comes from .env: PI_RECEIVER_PUBLISH defaults to loopback, like Valkey's port
+    # above, so the operator's reverse proxy or tunnel (TLS, public hostname) is what faces the
+    # internet. The 253 deployment sets PI_RECEIVER_PUBLISH=192.168.99.253 to serve the LAN directly.
+    # Assumes the in-container default RECEIVER_PORT=3000; if your .env overrides it, adjust the
+    # right-hand side to match.
     ports:
-      - "127.0.0.1:3000:3000"
+      - "${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000:3000"
     depends_on:
       valkey:
         condition: service_healthy

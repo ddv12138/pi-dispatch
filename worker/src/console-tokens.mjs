@@ -3,7 +3,7 @@
  *
  * One JSON file, `{version: 1, generation, tokens: [{name, role, sha256, createdAt}]}`, at PI_CONSOLE_TOKENS_FILE
  * (default `console-tokens.json` in the deployment directory). The console reads it to sign a browser in; its writers
- * are the CLI (`pi-dispatch-console token ...`), `pi-dispatch console bootstrap` (`console-bootstrap.mjs`, the first
+ * are the CLI (`pi-dispatch-console token ...`), the console's own `link`/`serve` commands (the first
  * operator) and the console's setup page (`admin/src/setup-actions.mjs`, a viewer and its undo), all through the
  * writers below, and doctor judges it. Only the SHA-256 of each token is kept, so a copy of the file signs nobody in.
  *

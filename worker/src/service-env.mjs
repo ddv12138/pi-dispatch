@@ -26,7 +26,7 @@ import { userInfo } from "node:os";
 import { dirname, join } from "node:path";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, readEnvAssignments } from "./env-file.mjs";
 
-/** The loader of the deployment's `.env` on this platform, as `service.mjs` renders it: systemd, the cmd wrapper, or a
+/** The loader of the deployment's `.env` on this platform: systemd's grammar, the cmd grammar, or a sourcing shell.
  * sourcing shell everywhere else. ONE mapping for every `.env` read. */
 export function serviceEnvLoader(platform) {
 	return platform === "linux" ? "systemd" : platform === "win32" ? "cmd" : "shell";

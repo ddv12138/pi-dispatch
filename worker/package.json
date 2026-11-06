@@ -2,7 +2,7 @@
   "name": "@edgehero/pi-dispatch",
   "version": "4.3.3",
   "type": "module",
-  "description": "The pi-dispatch worker and CLI: runs the pi coding agent as a self-hosted service, one locked down Docker or Podman container per job, with spend caps checked before anything is spent, plus init, up, doctor and service install.",
+  "description": "The pi-dispatch worker and CLI: runs the pi coding agent as a self-hosted service, one locked down Docker or Podman container per job, with spend caps checked before anything is spent, plus init, up and doctor.",
   "keywords": [
     "pi",
     "pi-coding-agent",

@@ -19,9 +19,9 @@ npx @edgehero/pi-dispatch-receiver watch   # watch: pulls findings from your own
 
 - **`serve`** verifies GitHub, GitLab, Forgejo and Azure DevOps webhooks (at `/`, `/gitlab`, `/forgejo`
   and `/azure`). It listens on all interfaces by default (`RECEIVER_BIND=0.0.0.0`); set
-  `RECEIVER_BIND=127.0.0.1` when a local reverse proxy or tunnel does the public exposure. `pi-dispatch
-  service install --receiver`
-  runs it as a service, and a container image is published as `ghcr.io/edgehero/pi-dispatch-receiver`.
+  `RECEIVER_BIND=127.0.0.1` when a local reverse proxy or tunnel does the public exposure. The receiver runs
+  as the `receiver` compose profile, built from this snapshot (`docker compose --env-file .env -f
+  deploy/docker-compose.yml --profile receiver up -d`), publishing `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`.
 - **`poll`** fetches GitHub issue events, comments and pull requests about once a minute, over TLS, with
   the same gates and the same queue. A new poller starts from now and never replays old labels.
 

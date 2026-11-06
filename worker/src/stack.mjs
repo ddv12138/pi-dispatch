@@ -392,7 +392,7 @@ export async function judgeValkeyListeners({ url, probeTcp, lookup, fs, euid, us
 		const foreign = answered.filter((a) => a.cls === "foreign");
 		return { ...base, chosen: rootFirst.address, refusal: null, heldBy: rootFirst.why ? "an owner /proc does not name (root's NAT, as docker without its proxy)" : "root", own: false, elsewhere: foreign.length > 0 ? [describe(foreign)] : [] };
 	}
-	const ways = `Give this account a Valkey of its own on another port, VALKEY_URL=redis://127.0.0.1:<port> in ${envPath} (\`service install\` and \`up\` then publish the Quadlet Valkey there); or, if that Valkey is shared on purpose, say so with ${VALKEY_SHARED_KEY}=1 in ${envPath}`;
+	const ways = `Give this account a Valkey of its own on another port, VALKEY_URL=redis://127.0.0.1:<port> in ${envPath} (\`pi-dispatch up\` starts this account's own Valkey there); or, if that Valkey is shared on purpose, say so with ${VALKEY_SHARED_KEY}=1 in ${envPath}`;
 	const own = `this account (uid ${euid}) or its containers (subordinate uids read from ${source})`;
 	const unknown = others.filter((a) => a.why);
 	if (unknown.length === others.length) {

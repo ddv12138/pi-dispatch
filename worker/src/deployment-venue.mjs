@@ -26,7 +26,7 @@ const COMMAND_SAYS = Object.freeze({
 export function deploymentVenueEnv({ env, fs, envPath, platform, command = "up", loader: loaderGiven = null, keys: keysWanted = STACK_KEYS }) {
 	let keys = {};
 	const notes = [];
-	// The loader of the file on THIS platform, as service.mjs reads it (round 2, E6): systemd's EnvironmentFile= on
+	// The loader of the file on THIS platform (round 2, E6): systemd's EnvironmentFile= on
 	// Linux, the sh wrapper on macOS, the cmd wrapper on Windows. Off Linux the venue refuses the host anyway, so a
 	// line that platform's loader reads differently is noted and never stops `up`.
 	const linux = platform === "linux";

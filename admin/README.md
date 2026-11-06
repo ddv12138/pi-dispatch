@@ -194,16 +194,16 @@ the run records (jobs only: a machine busy with other work reads as idle).
 ## Install
 
 ```bash
-mkdir my-dispatch && cd my-dispatch
-npm install --save-exact @edgehero/pi-dispatch@<version> @edgehero/pi-dispatch-admin@<version> @earendil-works/pi-coding-agent@<version> --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
-./node_modules/.bin/pi-dispatch up --console
+git clone https://github.com/ddv12138/pi-dispatch.git my-dispatch && cd my-dispatch
+cp .env.example .env
+docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --profile console up -d
 ```
 
-**This is the way to set up pi-dispatch.** `up --console` checks the installed console, the exact pi peer, the
-supported user manager, the deployment, the token file and the service paths before changing anything, then runs the
-consented pass: the job image, Valkey, the egress proxy, `init` and the console's service. It preserves existing
-tokens, or creates an operator hash and discards its durable plaintext, starts only the console service and prints a
-one-use `/setup` sign-in link after that console answers. The checklist uses actual heartbeat and doctor evidence,
+**This is the way to set up pi-dispatch.** Deployment is Linux Docker Compose; the `console` profile runs the
+console beside the worker and Valkey. It needs an operator token in the deployment's
+`runtime/console-tokens.json` before it starts (`pi-dispatch-console token add --name <name> --role operator`), and
+`pi-dispatch-console link` prints a one-use `/setup` sign-in link once the console answers. The checklist uses
+actual heartbeat and doctor evidence,
 keeps Starting distinct from Ready, and offers individually previewed and confirmed service actions, a create-only
 provider key field and editable first-trigger recipes. First run explains the
 explicit local host grant, read-only/viewer/agent views, key and invitation privacy, and terminal recovery.

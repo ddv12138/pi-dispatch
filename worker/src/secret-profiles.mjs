@@ -81,7 +81,7 @@ function defineProfile(table, name, path) {
 	Object.defineProperty(table, name, { value: path, enumerable: true, writable: true, configurable: true });
 }
 
-/** Absolute on this platform, accepting a Windows drive letter or UNC root as `service.mjs` does. */
+/** Absolute on this platform, accepting a Windows drive letter or UNC root. */
 function isAbsolutePath(path) {
 	return isAbsolute(path) || /^([A-Za-z]:[\\/]|\\\\)/.test(path);
 }

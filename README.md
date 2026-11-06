@@ -235,13 +235,14 @@ compare with the one you use: it is the queue, the budget and the box around the
 
 ## Where it can run
 
-pi-dispatch is a long running worker that starts containers, so it runs on a machine where it can do both: Node 22.19 or
-newer beside a container runtime, on the same host.
+pi-dispatch is a long running worker that starts containers, so it needs Node 22.19 or newer beside a container
+runtime, on the same host. In a deployment the worker runs in a container and reaches the host's Docker socket
+([Run it with Compose](#run-it-with-compose)); on your own machine it runs on the host.
 
 | Where | Works? |
 |---|---|
-| A Linux server or VM you control (a VPS, a cloud VM, a home server) | **Yes.** The main target. Run the worker as a service ([Run as a service](#run-as-a-service)). |
-| Your own Mac or Windows machine with Docker Desktop | **Yes**, while you are logged in, because Docker Desktop is. |
+| A Linux server or VM you control (a VPS, a cloud VM, a home server) | **Yes.** The main target. Run it with Docker Compose ([Run it with Compose](#run-it-with-compose)). |
+| Your own Mac or Windows machine with Docker Desktop | **Yes** for local jobs, while you are logged in, because Docker Desktop is. Not a deployment target. |
 | Several machines sharing one queue | **Yes**. |
 | Serverless and app platforms (Vercel functions, Netlify, Cloudflare Workers, a PaaS without a container runtime) | **No.** There is no container runtime to start jobs in, and nowhere for a worker that never stops. |
 | Hosted sandbox services as the place jobs run (Vercel Sandbox, E2B, Modal, Daytona and similar) | **Not yet.** A new venue needs an adapter. |
@@ -253,13 +254,13 @@ Only the receiver needs to be reachable from the internet, and only for webhooks
 - **`local`**, the default: the Docker daemon, or rootful Podman through its Docker API. Easiest to set up, and the only
   choice on macOS and Windows. The worker needs the daemon's socket, and that access is equivalent to root on the host.
 - **`podman`**: rootless Podman as the worker's own account, on Linux. No daemon runs as root, each job runs as the
-  worker's own uid, and Valkey, the egress proxy and the worker run as systemd user units. Pick it for a shared or security
+  worker's own uid, and Valkey, the egress proxy and the worker run in containers. Pick it for a shared or security
   sensitive server.
 - **`openshell`**: one NVIDIA OpenShell sandbox per job on a gateway on this host, in copy mode, so nothing of the job is
   mounted into the sandbox. The gateway's policy is the egress control, so no egress proxy starts. A provider made for each job
   holds its secrets, one per endpoint, so the agent sees placeholders rather than the values, with no secrets manager
-  needed. `openshell-bind` runs the same policy with the job's folders bind mounted. `pi-dispatch doctor --openshell` checks the gateway first, and both
-  `up` and `service install` set it up. Pinned to OpenShell 0.1.4, since its
+  needed. `openshell-bind` runs the same policy with the job's folders bind mounted. `pi-dispatch doctor --openshell` checks the gateway first, and
+  `up` sets it up. Pinned to OpenShell 0.1.4, since its
   interfaces are marked experimental.
 
 Each job gets the memory and CPUs its project's row sets (4 GB and 2 CPUs by default), and starts only when its size fits
@@ -267,27 +268,34 @@ beside what already runs on that machine.
 
 ## Set up a host
 
-A machine that runs jobs for good, rather than while you watch. For the host worker, use an ordinary account, not root, with Docker or rootless Podman and Node 22.19 or newer. On a Linux server, you can instead run the worker in Compose; that mode puts the host Docker socket in the worker container, so it has authority equivalent to root. Read Linux Compose worker before choosing it. Install into a folder that stays ([step 2 of Install](#install-in-four-steps)), then:
+A machine that runs jobs for good, rather than while you watch. **Linux with Docker Compose is the only supported
+deployment.** The host needs Docker Engine with the Compose plugin and a copy of this repository at the release you
+want: the compose file builds the worker and the receiver from the source beside it, so an npm install is the local
+path, not this one. The worker container holds the host Docker socket, which is authority equivalent to root; run it
+on a host you control, and read [`SECURITY.md`](SECURITY.md) before it faces anyone.
+
+1. Put the checkout where it will stay. Your `.env` and `runtime/` sit beside it and are the deployment's state; an
+   update replaces the source and keeps both.
+2. Copy `.env.example` to `.env` and fill it in: the provider key, the forge token, `PI_SESSIONS_DIR`, and the hosts
+   jobs may reach.
+3. Start it with [Run it with Compose](#run-it-with-compose), then check it:
 
 ```bash
-./node_modules/.bin/pi-dispatch up --console     # asks before each action: job image, Valkey, egress proxy, config, the console's service
-./node_modules/.bin/pi-dispatch doctor --live    # checks the setup and reads its isolation back from real containers
-./node_modules/.bin/pi-dispatch service install  # keeps the worker running, restarted at boot
-sudo loginctl enable-linger "$USER"              # on Linux: user services start with no one logged in
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs doctor --live
 ```
 
-**Reach the console from your own machine.** By default it listens on all IPv4 interfaces at port `4790`; open
-`http://<host-address>:4790/` and sign in with your token. The connection is plain HTTP. For a private SSH tunnel,
-set `PI_CONSOLE_LISTEN=127.0.0.1:4790`, forward the port, and make a sign-in link for that port on the host:
+**Reach the console from your own machine.** The compose file publishes port `4790` on all host interfaces; add that
+address to `PI_CONSOLE_ALLOWED_HOSTS` in `.env`, open `http://<host-address>:4790/` and sign in with your token. The
+connection is plain HTTP. For a private SSH tunnel, forward the port and make a sign-in link in the console container:
 
 ```bash
 ssh -L 4790:127.0.0.1:4790 yourhost              # on your own machine; then, on the host:
-./node_modules/.bin/pi-dispatch-console link --name you --port 4790
+docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs link --name you --port 4790
 ```
 
 **Connect a forge.** `pi-dispatch setup github --webhook-url '<receiver URL>'` creates a GitHub App in one browser click, or `--no-webhook`
-if the host has no public address, and `pi-dispatch service install --receiver` keeps the receiver running. GitLab, Forgejo and Azure DevOps
-have a [setup page each](#other-forges).
+if the host has no public address; the `receiver` profile keeps the receiver running, and `PI_RECEIVER_PUBLISH` in `.env` is the
+address it answers on. GitLab, Forgejo and Azure DevOps have a [setup page each](#other-forges).
 
 **Before it runs unattended:**
 
@@ -301,8 +309,8 @@ have a [setup page each](#other-forges).
 **Add a second machine.** Point it at the same Valkey and give every worker a name with `PI_WORKER_NAME`. Each host keeps its own logs, jobs and
 sandbox folders. Run one worker per container daemon.
 
-**Keep it working.** `pi-dispatch service restart --drain` restarts after running jobs finish, and `/config/updates` in the console shows what is
-newer.
+**Keep it working.** To restart after running jobs finish, pause the queue, wait until `status` reports no active job,
+recreate the worker, then resume; `/config/updates` in the console shows what is newer.
 
 ## Providers and models
 
@@ -492,23 +500,44 @@ instructions.
 - **MCP servers are yours, not the repo's.** A repo's `.pi/mcp.json` is never read for a job, and a trigger names the servers its jobs connect.
 - **Sessions save the full transcript to disk**, which is a real disclosure: read the session notes before you turn them on.
 
-## Run as a service
+## Run it with Compose
+
+Deployment is Linux with Docker Compose, from a checkout of this repository. Run every command from the deployment
+folder, with one `-f` and `--env-file .env`:
 
 ```bash
-pi-dispatch service render    # show the unit it would install, with the real paths
-pi-dispatch service install   # LaunchAgent (macOS), systemctl --user (Linux), nssm (Windows, a machine service)
-pi-dispatch service status    # which unit exists, where, and whether it runs
-pi-dispatch service restart --drain   # pause, wait for running jobs, restart, resume
+cd /path/to/pi-dispatch
+C="docker compose --env-file .env -f deploy/docker-compose.yml"
+$C --profile worker --profile console up -d     # Valkey, the worker and the console
+$C --profile receiver up -d                     # the webhook receiver
+$C --profile egress up -d                       # the allowlist proxy, when egress is on
+$C ps                                           # what is running
 ```
 
-`install` renders the [`deploy/`](deploy/) templates without sudo (`--system` on Linux prints the sudo commands instead, for a manual
-`sudo cp`). `--receiver` and `--console` install those units instead, and `--env-setup <path>` wraps the worker in your secrets
-manager's setup script. Run one worker per container daemon.
+- **`--env-file .env` is not optional.** Compose reads the Valkey password, `PI_JOB_IMAGE` and `PI_RECEIVER_PUBLISH`
+  from it; without it Valkey starts with no password.
+- **There is no override file.** Every setting is a key in `.env`.
+- **Both built images come from this checkout.** `deploy-worker` runs the worker and the console, `deploy-receiver`
+  the receiver; an update builds them again (`$C --profile worker --profile console build worker`,
+  `$C --profile receiver build receiver`) and recreates the containers.
+- **The job image is pulled on the host, never at job time** (jobs run `--pull=never`). Its default is
+  `${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}`; a value in `.env` wins over it.
+- **The receiver answers on `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`.** Set it in `.env` when the host has a LAN
+  address or a reverse proxy in front.
+- **The worker keeps the host Docker socket.** That is authority equivalent to root, so the console and the
+  receiver get none.
 
 ### Control the worker
 
-From any terminal: `pi-dispatch pause` stops taking new jobs and survives restarts, `resume` takes them again, `status` prints counts,
-`cancel <jobId>` stops one job in any state, `run --trigger <id>` runs one cron trigger now, and `capacity` says how busy each host was.
+The CLI talks to the queue, so it needs no worker process of its own. In a container deployment, run it in the worker
+container; `pause` stops taking new jobs and survives restarts, `resume` takes them again, `status` prints counts,
+`cancel <jobId>` stops one job in any state, `run --trigger <id>` runs one cron trigger now, and `capacity` says how
+busy each host was:
+
+```bash
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs pause
+```
+
 These read only what they need, so a broken forge setting cannot stand between you and the stop.
 
 Upgrading to a new release follows one order (pause, the job image, every worker, the receivers, the console, then resume), and the release notes say what each release changed in what it stores
@@ -529,7 +558,7 @@ Label an issue, and a container works on a fresh clone, opens a PR and comments 
   code in a job. Issue and comment text never can; it stays data.
 
 `pi-dispatch setup github` creates a GitHub App in one browser click, shows every `.env` line before you agree, and never prints a secret.
-Run the part that takes in forge events as a webhook receiver on the host or in a container, or in `poll` mode with no public URL.
+Run the part that takes in forge events as a container beside the worker, or in `poll` mode with no public URL.
 
 ## Other forges
 
@@ -574,12 +603,12 @@ Jobs start with `--pull=never`, so build or pull every image first.
 
 | Path | What it is |
 |---|---|
-| `worker/` | the queue consumer, the CLI (`pi-dispatch`), the forge hosts, doctor, the service installer |
+| `worker/` | the queue consumer, the CLI (`pi-dispatch`), the forge hosts, doctor |
 | `receiver/` | the always on trigger edge (`pi-dispatch-receiver`): webhook routes and the poller |
 | `admin/` | the web console (`pi-dispatch-console`) |
 | `gateway/` | the optional browser terminal for a sandbox |
 | `image/` | the job image, and the runner inside it |
-| `deploy/` | service units, wrappers and the compose file |
+| `deploy/` | the Compose file, the worker image and the egress proxy's config |
 | `docs/` | the 253 deployment runbook and the agent skills' notes |
 | `launch/` | the canned deployment and browser plumbing the console tests share |
 

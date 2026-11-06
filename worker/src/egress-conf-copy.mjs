@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 
 /**
  * The proxy's RULES (INT-EGRESS-POLICY-CONTRACT), the package's own copy: `../deploy/` from this module, the layout
- * service.mjs resolves its templates by, which is worker/deploy in a checkout (byte-identical to the root deploy/,
+ * the packaged copies resolve by, which is worker/deploy in a checkout (byte-identical to the root deploy/,
  * pinned by worker/test/publish.test.mjs) and the shipped deploy/ under npm. Issue #480: the docker proxy mounts
  * `./deploy/egress-proxy.conf` from the deployment folder, and a folder made by `npx @edgehero/pi-dispatch up` had
  * none, so `up` declined to start the proxy the policy is on by default for and every job was refused before it spent.

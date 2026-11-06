@@ -22,7 +22,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            --secrets resolves each project secret bundle here and prints its variable names, never values;
                            every run publishes its checks to Valkey for the console and the panel (labels with paths
                            and secret values redacted, kept 7 days), and --no-publish skips that
-  pi-dispatch up [--console] [--yes] [--adopt-volume] [--restart-proxy] [--refresh-proxy-rules]
+  pi-dispatch up [--yes] [--adopt-volume] [--restart-proxy] [--refresh-proxy-rules]
                            one consented pass: pull+tag the job image, start Valkey, init, doctor
   pi-dispatch setup github mint GitHub App credentials in one browser click (App Manifest flow);
                            every write shown first and individually consented — no --yes here
@@ -45,12 +45,8 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            replay up to three retained recent jobs in disposable workspaces with forge
                            access blocked, under one experiment cap [--count 1..10] [--json]
 
-  pi-dispatch worker       drain the queue (run this in another terminal, or as a service)
+  pi-dispatch worker       drain the queue (run this in another terminal)
   pi-dispatch-receiver     webhook receiver for forge triggers, its own bin
-  pi-dispatch service <render|install|uninstall|status|start|stop|restart> [--receiver|--console] [--user|--system] [--force]
-                           run the worker (or --receiver, or --console) as an OS service — the deploy/ templates
-                           rendered with this host's real paths, installed user-level;
-                           \`service restart --drain\` lets the in-flight job finish first
   pi-dispatch egress render
                            write model-endpoints.conf here from model-endpoints.json (in place), then print
                            the command that reloads the egress proxy; it never reloads the proxy itself
@@ -71,7 +67,7 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            take a message back: guaranteed while it is queued, best effort once written
 
 Config comes from the environment (see .env.example); flags override it per run.
-For the web console, install the matching admin package and run: pi-dispatch up --console`;
+For the web console, run the console compose profile (see deploy/docker-compose.yml).`;
 
 	// Where this command's output goes. Defaults to the real stdout, so the CLI is byte-identical; a test
 	// injects a collector instead of reassigning `process.stdout.write`. That matters because `node --test`
@@ -163,11 +159,6 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 		const { startWorker } = await import("./start.mjs");
 		await startWorker(env);
 		return 0; // the worker keeps the process alive until SIGTERM
-	}
-
-	if (cmd === "service") {
-		const { runService } = await import("./service.mjs");
-		return runService(argv.slice(1), { env });
 	}
 
 	if (cmd === "egress") {

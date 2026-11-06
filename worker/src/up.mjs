@@ -17,8 +17,8 @@
  *   - no secrets printed: the generated WEBHOOK_SECRET is announced, never echoed.
  *
  * The venue keys (PI_BACKENDS, PI_EGRESS, PI_EGRESS_PROXY) come from this shell when it sets them and otherwise from
- * the deployment's `.env`, the file `service install` reads, so the two entry points decide the venue from the same
- * place (`deploymentVenueEnv`). Only the `local` venue remains, so `venuesOf` answers `localUsed` alone and
+ * the deployment's `.env`, the file the worker's container reads, so the two entry points decide the venue from the
+ * same place (`deploymentVenueEnv`). Only the `local` venue remains, so `venuesOf` answers `localUsed` alone and
  * everything below is the docker pass. The Quadlet stack path went with the venues that drove it: no backend this
  * file's vocabulary admits installs units, and a PI_BACKENDS naming one that did fails the parse (the deployment
  * refuses it as the unresolvable disagreement with the shell's venue, or `venuesOf` falls back to `local`).
@@ -32,7 +32,6 @@ import { randomBytes } from "node:crypto";
 import { spawn as nodeSpawn } from "node:child_process";
 import { existsSync, lstatSync, realpathSync } from "node:fs";
 import { connect as netConnect } from "node:net";
-import { homedir } from "node:os";
 import { join, posix, win32 } from "node:path";
 import { venuesOf } from "./backends.mjs";
 import { jobImageFrom, logsDirPath, settingsFilePath } from "./config.mjs";
@@ -44,7 +43,7 @@ import { olderValkeyContainerFinding } from "./older-state.mjs";
 import { deploymentValkeyEnv, deploymentVenueEnv } from "./deployment-venue.mjs";
 import { resolveServiceEnv, serviceEnvFileOf, serviceEnvLoader } from "./service-env.mjs";
 import { operatorCount, readTokensFile } from "./console-tokens.mjs";
-import { consoleTokensPathFor, installedConsoleUnitPath } from "./service.mjs";
+import { consoleTokensPathFor } from "./console-paths.mjs";
 import { PACKAGED_EGRESS_PROXY_CONF, judgeProxyConfCopy, packageCopyName, readPackagedProxyConf, replaceProxyConfCopy } from "./egress-conf-copy.mjs";
 import { EGRESS_PROXY_IMAGE, MODEL_ENDPOINTS_TARGET, PROXY_STATE_FORMAT, jobNetworksOf, parseProxyState, rulesIncludeEndpoints, shippedProxyDrift } from "./egress-proxy-state.mjs";
 import { endpointsDeclaredIn, rulesFileIncludes, rulesPredateEndpointsLine } from "./egress-cli.mjs";
@@ -134,10 +133,10 @@ export const EGRESS_RUN_ARGS = [
 function underFolder(p, folder, platform) {
 	const norm = (x) => {
 		const slashed = String(x).replace(/\\/g, "/").replace(/\/+$/, "");
-		// Windows paths are case-insensitive and accept either separator, and `nssm-install.cmd` is a
-		// supported deployment: a byte compare there misses `c:\pi\deploy\logs` against `C:/pi/deploy`
-		// and writes exactly the value this guard exists to refuse. POSIX is case-SENSITIVE, so folding
-		// there would refuse a different directory that merely looks alike.
+		// Windows paths are case-insensitive and accept either separator: a byte compare there misses
+		// `c:\pi\deploy\logs` against `C:/pi/deploy` and writes exactly the value this guard exists to
+		// refuse. POSIX is case-SENSITIVE, so folding there would refuse a different directory that merely
+		// looks alike.
 		return platform === "win32" ? slashed.toLowerCase() : slashed;
 	};
 	const a = norm(p);
@@ -146,10 +145,11 @@ function underFolder(p, folder, platform) {
 }
 
 /**
- * The operator tokens the console SERVICE of the deployment in `dir` would find (issue #708): the file
- * `service install --console` judges (`consoleTokensPathFor`: the deployment `.env`'s PI_CONSOLE_TOKENS_FILE, else
- * console-tokens.json in `dir`), read and judged as `serve` reads it. 0 for a file the console could not use, which is
- * also no reason to offer the service. One helper with the install, so the line never offers an install that refuses.
+ * The operator tokens the console of the deployment in `dir` would find (issue #708): the file the console reads
+ * (`consoleTokensPathFor`: the deployment `.env`'s PI_CONSOLE_TOKENS_FILE, else console-tokens.json in `dir`), read
+ * and judged as `serve` reads it. 0 for a file the console could not use, which is also no reason to offer the
+ * console profile: without an operator token `serve` refuses, and a "Next:" line that leads to a refusal is not a
+ * next step.
  */
 function defaultConsoleOperators(dir, platform) {
 	const read = readTokensFile({ path: consoleTokensPathFor(dir, platform) });
@@ -158,8 +158,10 @@ function defaultConsoleOperators(dir, platform) {
 
 export async function runUp(argv = [], deps = {}) {
 	if (argv.includes("--console")) {
-		const { runConsoleUp } = await import("./console-bootstrap.mjs");
-		return runConsoleUp(argv, { ...deps, runUpFn: deps.runUpFn ?? runUp });
+		// Host services are gone, and with them the terminal console bootstrap: the console is its own compose profile.
+		const out = deps.out ?? ((s) => process.stdout.write(s));
+		out("up --console: the terminal console bootstrap is gone. Run `pi-dispatch up`, then start the console container with\n  docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d\n");
+		return 2;
 	}
 	const {
 		env = process.env,
@@ -199,19 +201,13 @@ export async function runUp(argv = [], deps = {}) {
 		// assert whichever account ran it.
 		logsDirPathFn = logsDirPath,
 		settingsFilePathFn = settingsFilePath,
-		// The account's home, for the console unit lookup below (`installedConsoleUnitPath`).
-		home = homedir(),
 		// Issue #484: the installed package's rules, which a differing folder copy is compared with and refreshed from, and
 		// the clock the backup's name is stamped with.
 		readPackagedConf = readPackagedProxyConf,
 		now = Date.now,
 		// Issue #708: how many operator tokens the console's tokens file holds (0 when it cannot be used), for the closing
-		// "Next:" line that offers the console as a service. A seam so a test need not make an owner-only file.
+		// "Next:" line that offers the console profile. A seam so a test need not make an owner-only file.
 		consoleOperators = (dir) => defaultConsoleOperators(dir, platform),
-		// Issue #708 (round 1 review): whether a console unit is already installed for this folder (service.mjs' own
-		// lookup), so the line is not offered twice. On win32 the service is nssm's and is not asked here (no spawn for a
-		// hint), so the line follows the tokens alone there.
-		consoleUnitInstalled = (dir) => platform !== "win32" && installedConsoleUnitPath({ platform, home, cwd: dir }) !== null,
 	} = deps;
 	let { runInitFn, runDoctorFn } = deps;
 	const yes = argv.includes("--yes");
@@ -220,12 +216,12 @@ export async function runUp(argv = [], deps = {}) {
 	const refreshProxyRules = argv.includes("--refresh-proxy-rules");
 	const summary = [];
 
-	// The venue keys, from the same place `service install` reads them (issue #430 review, D2). Nothing loads `.env`
+	// The venue keys, read as the worker reads them (issue #430 review, D2). Nothing loads `.env`
 	// into a process, so `up` decides the venue keys from this shell alone until it reads the file: a key the shell
 	// sets and the file does not is taken from the shell (what the wizard relies on when it runs `up` before init has
 	// written `.env`); `.env` fills the keys the shell leaves unset; a key BOTH set differently stops `up` (round 2,
 	// E5), because the service will run the file's value. A `.env` line touching one of these keys that the loaders
-	// read differently stops `up` before anything runs, as `service install` refuses.
+	// read differently stops `up` before anything runs.
 	const venue = deploymentVenueEnv({ env, fs, envPath: join(cwd, ".env"), platform, command: "up" });
 	if (venue.error) {
 		out(`✗ ${venue.error}\n\nup: cannot tell which venue this deployment runs: fix the above, then re-run \`pi-dispatch up\`.\n`);
@@ -325,16 +321,13 @@ export async function runUp(argv = [], deps = {}) {
 		}
 	};
 	// Windows takes forward slashes everywhere Node does, and writing them is what keeps these four values
-	// inside the BARE set: `deploy/worker-env-wrapper.cmd` says "Values MUST be UNQUOTED -- cmd's `set`
-	// keeps surrounding quotes as part of the value", so a quoted `C:\pi\deploy\logs` there is a
-	// directory that does not exist, behind a ✓. `config.mjs`'s own defaults are already spelled this way.
+	// bare. `config.mjs`'s own defaults are already spelled this way.
 	const forEnvFile = (value) => (platform === "win32" ? String(value).replace(/\\/g, "/") : value);
 	// What `up` wrote, layered over `env` for its OWN doctor step below. Writing a line into `.env`
-	// configures the SERVICE (through `EnvironmentFile=` and the wrappers) and configures nothing about the
-	// process running right now, because NOTHING in this project loads `.env` into an environment -- see
-	// `docs/secrets.md`, and `worker/test/service.test.mjs` pins that a `PI_ENV_SETUP` line in `./.env` is
-	// deliberately not honoured. Without this layer, `up` would write the two files' paths and then, three
-	// lines later, warn that they are unset (issue #357).
+	// configures the deployment (compose's `env_file`, and the worker's own readers) and configures nothing
+	// about the process running right now, because NOTHING in this project loads `.env` into an environment.
+	// Without this layer, `up` would write the two files' paths and then, three lines later, warn that they
+	// are unset (issue #357).
 	const wrote = {};
 	if (fs.existsSync(envPath)) {
 		// Wrapped like the four below it, and for the same reasons: a read-only deployment directory, a full
@@ -356,9 +349,8 @@ export async function runUp(argv = [], deps = {}) {
 			summary.push(["WEBHOOK_SECRET", `NOT written: ${err?.message}`]);
 		}
 		// (e1) the four paths four separate files already promise `up` writes, and it never did
-		// (`deploy/worker.service`, `deploy/com.pi-dispatch.worker.plist`, `deploy/nssm-install.cmd`,
-		// `.env.example`). Same never-clobber discipline as WEBHOOK_SECRET, at key granularity: a value the
-		// operator set survives untouched.
+		// (`.env.example`, and the deploy templates that went with host services). Same never-clobber
+		// discipline as WEBHOOK_SECRET, at key granularity: a value the operator set survives untouched.
 		//
 		// THREE get the deployment folder and TWO get the RESOLVED ACCOUNT DEFAULT, and the split is the
 		// sharpest edge in this change rather than an inconsistency. `pause-windows.json`,
@@ -368,8 +360,7 @@ export async function runUp(argv = [], deps = {}) {
 		// `PI_LOGS_DIR` past the window with no name shape and no ownership check, so a deployment folder
 		// there would eat `triggers.json`, `pause-windows.json`, `scoped-limits.json`, `projects.json` and
 		// `subscriptions.json` thirty days in, silently, and the worker would then run nothing while
-		// reporting success. `<deployment>/logs` is no better: `service.mjs` creates exactly that directory
-		// at install time and the plist puts `worker.out.log` in it. So these two get what
+		// reporting success. So these two get what
 		// `logsDirPath`/`settingsFilePath` would have resolved anyway: behaviour byte-unchanged, the value
 		// simply made explicit, which is the whole point -- a worker under another `User=` and the panel
 		// then cannot silently resolve two different directories.
@@ -412,13 +403,12 @@ export async function runUp(argv = [], deps = {}) {
 			// already the right one in production, but a drive-letter path is "relative" to the posix
 			// implementation, so a test running on POSIX would see the absolute check short-circuit and
 			// never reach the folder compare it meant to exercise. Choosing explicitly makes the Windows
-			// half of both rules reachable from a test on any host, which is the only way `nssm-install.cmd`
-			// gets covered at all.
+			// half of both rules reachable from a test on any host.
 			const isAbsoluteOn = platform === "win32" ? win32.isAbsolute : posix.isAbsolute;
-			const why = !durable || !fromShell ? null : !isAbsoluteOn(value) ? "is not an absolute path, and a relative one resolves against the service's WorkingDirectory, which is this folder" : underFolder(value, cwd, platform) ? "is inside this deployment folder" : null;
+			const why = !durable || !fromShell ? null : !isAbsoluteOn(value) ? "is not an absolute path, and a relative one resolves against the deployment folder the worker runs in" : underFolder(value, cwd, platform) ? "is inside this deployment folder" : null;
 			if (why) {
 				out(`✗ ${key} is ${value} in this shell, which ${why} — not written into .env\n`);
-				summary.push([key, `NOT written: ${key} is set to ${value} in the environment you ran up from, and that ${why}. The log retention sweep deletes every .log and .json there past its window, so this would be persisted for the service. Unset it here, or set it by hand to a directory the worker owns`]);
+				summary.push([key, `NOT written: ${key} is set to ${value} in the environment you ran up from, and that ${why}. The log retention sweep deletes every .log and .json there past its window, so this would be persisted for the worker. Unset it here, or set it by hand to a directory the worker owns`]);
 				continue;
 			}
 			// A path this file cannot represent so that BOTH consumers read it back is refused rather than
@@ -666,7 +656,7 @@ export async function runUp(argv = [], deps = {}) {
 				out("✗ docker run failed after pi-dispatch-valkey was removed: no Valkey runs now; its volume is kept. Re-run `pi-dispatch up`\n");
 				summary.push(["valkey", "restart with the password FAILED at docker run: NO Valkey runs now (the volume is kept); re-run `pi-dispatch up`"]);
 			} else if (await ownerMarkerOk(stopRun)) {
-				out(`✓ restarted Valkey with ${VALKEY_PASSWORD_KEY} (container pi-dispatch-valkey, same volume). Restart the worker and the receiver now so they send it: \`pi-dispatch service restart\` (and \`pi-dispatch service restart --receiver\`), or restart them however you run them\n`);
+				out(`✓ restarted Valkey with ${VALKEY_PASSWORD_KEY} (container pi-dispatch-valkey, same volume). Restart the worker and the receiver now so they send it: \`docker compose --env-file .env -f deploy/docker-compose.yml restart worker receiver\`, or restart them however you run them\n`);
 				summary.push(["valkey", `restarted pi-dispatch-valkey with ${VALKEY_PASSWORD_KEY} (volume kept); restart the worker and the receiver`]);
 			}
 		} else if (open) {
@@ -1032,13 +1022,13 @@ Next:
   pi-dispatch run ./my-project --task "add type hints to utils.py"
       queue your first job from another terminal
 `);
-	// Issue #708: the console as a service, offered only where it could start (an operator token exists): without one,
-	// `service install --console` refuses, and a "Next:" line that leads to a refusal is not a next step.
+	// Issue #708: the console profile, offered only where it could start (an operator token exists): without one,
+	// `serve` refuses, and a "Next:" line that leads to a refusal is not a next step.
 	let consoleReady = false;
 	try {
-		consoleReady = consoleOperators(cwd) > 0 && !consoleUnitInstalled(cwd);
+		consoleReady = consoleOperators(cwd) > 0;
 	} catch {}
-	if (consoleReady) out("  pi-dispatch service install --console\n      keep the operator console running as a service (open it with /dispatch console)\n");
+	if (consoleReady) out("  docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d\n      start the operator console container (open it with /dispatch console)\n");
 	// Issue #464: a Valkey this pass refused (another account's, or one no one could name) is a failed `up` whatever doctor
 	// says: a worker started now would take that queue's jobs, and an exit 0 read by a script or the wizard says ready.
 	if (valkeyRefused) {

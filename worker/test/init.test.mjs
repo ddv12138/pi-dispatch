@@ -33,7 +33,7 @@ test("init scaffolds the config files with the empty templates the loaders valid
 	// could silently widen. Empty is inert, and the folder mutex needs no scaffold at all.
 	assert.deepEqual(JSON.parse(readFileSync(join(dir, "scoped-limits.json"), "utf8")), { version: 1, limits: [] });
 	assert.match(text(), /the folder mutex needs no file/, "the scaffold line says what is NOT configuration");
-	assert.match(text(), /pi-dispatch up --console/, "next steps name the web console");
+	assert.match(text(), /Web console \(optional\): the console runs from its own compose profile/, "next steps name the web console");
 	// Issue #503: the declared model endpoints, empty and versioned, which the worker's own loader reads as none, and the
 	// proxy include rendered from them, the header alone (squid starts on it and refuses a missing file).
 	assert.equal(readFileSync(join(dir, "model-endpoints.json"), "utf8"), '{\n  "version": 1,\n  "endpoints": []\n}\n');
@@ -149,7 +149,7 @@ Next:
   4. pi-dispatch doctor                                 # verify Docker, Valkey, image, and key
   5. pi-dispatch worker                                 # drain the queue
 
-Web console (optional): pi-dispatch up --console
+Web console (optional): the console runs from its own compose profile (profile: console)
 `;
 
 function nextFor({ envFile, env, venues, platform = "linux" } = {}) {

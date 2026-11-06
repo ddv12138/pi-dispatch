@@ -440,8 +440,8 @@ test("the CLI's VALKEY_URL is this shell's, else the deployment .env's, a disagr
 	assert.equal(warned.length, 1, "agreeing values say nothing");
 	assert.equal(cliValkeyUrl({}, { cwd: tempDir("valkey-url-none-"), warn: (l) => warned.push(l) }), "redis://127.0.0.1:6379", "no .env: the default");
 	assert.deepEqual(valkeyUrlFor({ envPath: "/d/.env", error: "/d/.env could not be read (EACCES)", url: { environment: null, file: null } }), { url: "redis://127.0.0.1:6379", from: null, note: "/d/.env could not be read (EACCES), so VALKEY_URL is the default, redis://127.0.0.1:6379" });
-	// Every CLI verb and `service restart --drain` go through it: none reads the shell's VALKEY_URL on its own any more.
-	for (const f of ["cli.mjs", "service.mjs"]) {
+	// Every CLI verb goes through it: none reads the shell's VALKEY_URL on its own any more.
+	for (const f of ["cli.mjs"]) {
 		const code = readFileSync(join(REPO, "worker", "src", f), "utf8");
 		assert.doesNotMatch(code, /env\.VALKEY_URL \?\?/, f);
 	}

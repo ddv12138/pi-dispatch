@@ -102,8 +102,7 @@ test("provider selection follows the validated settings overlay and specific sub
 
 test("readiness identity is the configured worker name rather than the machine hostname", async () => {
 	const deps = host("PI_WORKER_NAME=registered-worker\n");
-	deps.servicePlan = async () => ({ effects: ["start-worker"], active: false });
-	const p = await runSetupHost(request("setup-worker-start"), deps);
+	const p = await runSetupHost(request("setup-provider-key"), deps);
 	assert.equal(p.plan.host, "host1");
 	assert.equal(p.plan.workerName, "registered-worker");
 });
@@ -148,31 +147,7 @@ test("the final rename check catches a change made while its temporary file is w
 	assert.equal(fs.existsSync(`${path}.tmp`), false);
 });
 
-test("service confirm rechecks the actual plan and serializes concurrent effects", async () => {
-	const deps = host();
-	let active = false, release, entered;
-	const started = new Promise((done) => { entered = done; });
-	const plan = () => ({ effects: ["start-worker"], before: "unit", active });
-	Object.assign(deps, { servicePlan: async () => plan(), runService: async () => { entered(); await new Promise((done) => { release = done; }); active = true; return 0; } });
-	const p = await runSetupHost(request("setup-worker-start"), deps);
-	const apply = request("setup-worker-start", "apply", { expected: p.plan.digest });
-	const pending = runSetupHost(apply, deps);
-	await started;
-	assert.equal((await runSetupHost(apply, deps)).reason, "setup-busy");
-	release();
-	assert.equal((await pending).state, "applied");
-	assert.equal((await runSetupHost(apply, deps)).reason, "plan-stale");
-});
 
-test("lost service readback reports uncertainty instead of a false no-change/success", async () => {
-	const deps = host();
-	let dispatched = false;
-	Object.assign(deps, { servicePlan: async () => dispatched ? { refusal: "unavailable" } : { effects: ["start-worker"], before: "unit", active: false }, runService: async () => { dispatched = true; return 1; } });
-	const p = await runSetupHost(request("setup-worker-start"), deps);
-	const got = await runSetupHost(request("setup-worker-start", "apply", { expected: p.plan.digest }), deps);
-	assert.equal(got.state, "unknown");
-	assert.equal(got.reason, "process-failed");
-});
 
 test("fixed stdin CLI rejects excess input and unknown fields, emits typed JSON only", async () => {
 	const deps = host();

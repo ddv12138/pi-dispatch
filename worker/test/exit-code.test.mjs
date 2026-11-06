@@ -32,10 +32,8 @@ test("an unknown exit code is retried-then-visible, not silently accepted as don
 // literal `2` and each was pinned only by tests asserting the literal too -- so every one of them would
 // have stayed green if `EXIT_POLICY` moved. These assert against the CONSTANT instead.
 //
-// Pins, never derives, and the reason differs per family: `image/runner` ships inside the container with a
-// two-package dependency list and no path to the worker, and the deploy artifacts are systemd units, an
-// nssm script and two shell wrappers. Only the ROOT `deploy/` is read here -- worker/test/publish.test.mjs
-// already pins `worker/deploy/*` byte-identical to it, so covering root covers both.
+// Pins, never derives: `image/runner` ships inside the container with a two-package dependency list and no path to
+// the worker, so it retypes the literal. (The service units and the wrappers that also did went with host services.)
 const repoFile = (rel) => readFileSync(fileURLToPath(new URL(`../../${rel}`, import.meta.url)), "utf8");
 
 test("the runner's retyped EXIT_POLICY is the same integer -- the container cannot import ours", () => {
@@ -47,20 +45,4 @@ test("the runner's retyped EXIT_POLICY is the same integer -- the container cann
 		EXIT_POLICY,
 		"image/runner/src/outcome.mjs must retype worker/src/exit-code.mjs's value because the runner ships in the container with no worker dependency. worker/src/exit-code.mjs is canonical -- change the runner to follow it.",
 	);
-});
-
-test("every service unit refuses to restart EXIT_POLICY, by its own spelling of the number", () => {
-	for (const unit of ["deploy/worker.service", "deploy/receiver.service"]) {
-		// Anchored to the start of a line: unanchored, a COMMENTED-OUT directive satisfies the match, and
-		// both of these files carry prose mentioning the setting a few lines above the setting itself.
-		assert.match(repoFile(unit), new RegExp(`^RestartPreventExitStatus=${EXIT_POLICY}$`, "m"), `${unit} must not restart a determinate refusal`);
-	}
-	assert.match(repoFile("deploy/nssm-install.cmd"), new RegExp(`^nssm set %SERVICE% AppExit ${EXIT_POLICY} Exit$`, "m"), "nssm must not restart a determinate refusal");
-});
-
-test("both wrappers convert EXIT_POLICY to a clean exit, keyed on the constant's value", () => {
-	// The wrappers are what a service manager WITHOUT an exit-code exclusion depends on, so these two are
-	// the last line rather than a convenience.
-	assert.match(repoFile("deploy/worker-env-wrapper.sh"), new RegExp(`\\[ "\\$rc" -eq ${EXIT_POLICY} \\]`), "the sh wrapper keys on EXIT_POLICY");
-	assert.match(repoFile("deploy/worker-env-wrapper.cmd"), new RegExp(`if "%RC%"=="${EXIT_POLICY}"`), "the cmd wrapper keys on EXIT_POLICY");
 });

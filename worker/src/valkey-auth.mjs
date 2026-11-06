@@ -81,7 +81,7 @@ export function valkeyPasswordProblem(value) {
 }
 
 /** The sentence that tells an operator how to make a good one. */
-export const VALKEY_PASSWORD_HOWTO = "`openssl rand -hex 32` makes one, or remove the line and let `pi-dispatch up` or `service install` generate it";
+export const VALKEY_PASSWORD_HOWTO = "`openssl rand -hex 32` makes one, or remove the line and let `pi-dispatch up` generate it";
 
 /**
  * The container command that starts Valkey with the password from its environment, as configuration on stdin (see the
@@ -148,7 +148,7 @@ export function valkeyDockerRunArgs({ port = 6379, deployment = null } = {}) {
  * use for). Empty value for a deployment with no password, which the start script reads as "start without one".
  */
 export function valkeyEnvFileText(password) {
-	return `# Written by pi-dispatch (service install / up) from VALKEY_PASSWORD in the deployment's .env; mode 0600.\n${VALKEY_PASSWORD_KEY}=${password ?? ""}\n`;
+	return `# Written by pi-dispatch (pi-dispatch up) from VALKEY_PASSWORD in the deployment's .env; mode 0600.\n${VALKEY_PASSWORD_KEY}=${password ?? ""}\n`;
 }
 
 /**
@@ -205,7 +205,7 @@ export function valkeyAuthRefusal(err, { passwordSet, from = null, envPath = "th
 	}
 	if (/\bWRONGPASS\b|invalid password|\bNOAUTH\b/i.test(text)) {
 		const source = from === "VALKEY_URL" ? "the password in VALKEY_URL" : `${VALKEY_PASSWORD_KEY} from ${from ?? envPath}`;
-		return `the Valkey VALKEY_URL reaches refused ${source} (${/\bNOAUTH\b/.test(text) ? "NOAUTH" : "WRONGPASS"}): it is not that Valkey's password. After changing ${VALKEY_PASSWORD_KEY}, restart Valkey with it (\`pi-dispatch up\`, or \`pi-dispatch service install --force\` on the podman venue), then the worker and the receiver`;
+		return `the Valkey VALKEY_URL reaches refused ${source} (${/\bNOAUTH\b/.test(text) ? "NOAUTH" : "WRONGPASS"}): it is not that Valkey's password. After changing ${VALKEY_PASSWORD_KEY}, restart Valkey with it (\`pi-dispatch up\`), then the worker and the receiver`;
 	}
 	return null;
 }

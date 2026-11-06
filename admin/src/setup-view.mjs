@@ -13,7 +13,7 @@ export const SETUP_PROGRESS_STAGES = Object.freeze({
   "unit-written": "Wrote the service unit.", "start-accepted": "The service manager accepted the start.",
   "waiting-heartbeat": "Waiting for a fresh heartbeat.", complete: "The host operation finished. Published evidence decides readiness.",
 });
-export const SETUP_UNAVAILABLE = "Host setup is not granted to this console. Run pi-dispatch service install --console --host-setup on the deployment host, or use the terminal commands below.";
+export const SETUP_UNAVAILABLE = "Host setup is not granted to this console. Start it with --host-setup on the deployment host, or use the terminal commands below.";
 export const SETUP_REASON_TEXT = Object.freeze(Object.fromEntries(SETUP_REASONS.map(reason => [reason, ({
   unsupported: "This platform or service manager does not support browser setup. Use the host terminal.",
   "manager-unavailable": "The local user service manager is unavailable. Check the host user session, then use the terminal command.",

@@ -90,7 +90,7 @@ test("no file constructs a Valkey client except through connection.mjs' judged c
 	// (admin/src/dashboard.ts was on this list until issue #641 moved the panel's reader, and its clients, into
 	// read-model.mjs's `createFleetReader`; gateway/src/cli.mjs went with the gateway.)
 	const users = files.filter((f) => /\b(parseConnection|makeRedisClient)\b/.test(f.code)).map((f) => f.path);
-	for (const expected of ["worker/src/start.mjs", "worker/src/cli.mjs", "worker/src/cancel-cli.mjs", "worker/src/doctor.mjs", "worker/src/service.mjs", "receiver/src/start.mjs", "receiver/src/route.mjs", "receiver/src/poller.mjs", "admin/src/read-model.mjs"]) {
+	for (const expected of ["worker/src/start.mjs", "worker/src/cli.mjs", "worker/src/cancel-cli.mjs", "worker/src/doctor.mjs", "receiver/src/start.mjs", "receiver/src/route.mjs", "receiver/src/poller.mjs", "admin/src/read-model.mjs"]) {
 		assert.ok(users.includes(expected), `${expected} opens its Valkey clients through connection.mjs`);
 	}
 	for (const rule of RULES) assert.equal(rule.re.test(""), false);

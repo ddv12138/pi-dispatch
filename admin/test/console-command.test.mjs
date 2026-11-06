@@ -92,7 +92,7 @@ test("the address and the state: running, not running (with how to start it), un
 
   const stopped = harness({ state: "not-running" });
   await consoleCommand(["gh-1"], stopped.deps);
-  assert.match(text(stopped), /^http:\/\/<this host>:4790\/run\?id=gh-1\nthe console: not running: start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console/);
+  assert.match(text(stopped), /^http:\/\/<this host>:4790\/run\?id=gh-1\nthe console: not running: start it with pi-dispatch-console serve/);
   assert.equal(stopped.notes[0][1], "warning");
   assert.deepEqual(stopped.opened, [], "a console that is not running is not opened");
 
@@ -312,7 +312,7 @@ test("the probe is the worker's one rule: through its request seam only loopback
 
 test("probeLine: running, not running with the reason and both ways to start it, unknown with why", () => {
   assert.equal(probeLine({ state: "running" }), "running");
-  assert.equal(probeLine({ state: "not-running", reason: "nothing listens there" }), "not running (nothing listens there): start it with pi-dispatch-console serve, or keep it running with pi-dispatch service install --console");
+  assert.equal(probeLine({ state: "not-running", reason: "nothing listens there" }), "not running (nothing listens there): start it with pi-dispatch-console serve, or run the console compose profile (docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d)");
   assert.match(probeLine({ state: "unknown", reason: "port 0" }), /not known: port 0/);
 });
 

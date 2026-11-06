@@ -23,39 +23,29 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const WORKER_DIR = join(REPO_ROOT, "worker");
 const RECEIVER_DIR = join(REPO_ROOT, "receiver");
 
-// The deploy templates `pi-dispatch service` renders (see TEMPLATE_PINS in src/service.mjs), the
-// wrapper scripts the rendered units invoke, and the compose file the docs point every deployment at
-// (an npm install has no repo checkout to read deploy/docker-compose.yml from) — the full set
-// worker/deploy must mirror and ship.
+// The files worker/deploy must mirror and ship: the compose file every deployment is run from (an npm
+// install has no repo checkout to read deploy/docker-compose.yml from), the egress policy's RULES, and
+// the container images' build inputs. Nothing renders them; they ship because the compose file and the
+// image builds name them.
 const MIRRORED_DEPLOY = [
-	"com.pi-dispatch.worker.plist",
-	// The operator console's systemd unit (issue #708), rendered by `service install --console`.
-	"console.service",
+	// The shipped compose topology the docs point every deployment at.
 	"docker-compose.yml",
 	// The egress policy's RULES (REQ-EGRESS-ALLOWLIST). A deployment artifact, not operator config, and
 	// the distinction this file's own comment asks to be decided: it ships unedited, the compose service
 	// mounts it, and the operator's own list lives in the deployment folder where `init` scaffolds it.
 	"egress-proxy.conf",
-	"nssm-install.cmd",
-	// The podman venue's Quadlet units and the sandbox gateway's systemd unit left with the sandbox prune:
-	// the compose file and `up` are the only carriers of the stack this package ships.
-	"receiver.service",
-	// The containerized worker and console images' build inputs (e9d67831): the compose file builds the
-	// worker from the Dockerfile it sits beside, so an npm install needs both exactly as a checkout has
-	// them. They render nothing; they ship because the compose file names them.
-	"worker-env-wrapper.cmd",
-	"worker-env-wrapper.sh",
+	// The worker and console images' build inputs (e9d67831): the compose file builds the worker from
+	// the Dockerfile it sits beside, so an npm install needs both exactly as a checkout has them.
 	"worker.Dockerfile",
 	"worker.Dockerfile.dockerignore",
-	"worker.service",
-];
+].sort();
 
 // Everything the ROOT deploy/ holds: the mirrored set above, plus the one example triggers file that
-// stays behind because the receiver's tests read it and the docs point at it. Nothing else belongs here.
-// A config file dropped in among the service templates reads as a deployment artifact and is not one --
-// the worker resolves triggers.json, pause-windows.json and friends from the DEPLOYMENT folder or an
-// explicit env path, never from this directory (issue #104, which is where deploy/pause-windows.json
-// sat unread since the day it was added).
+// stays behind because the receiver's tests read it and the docs point at it. Nothing else belongs here:
+// a config file dropped in among these reads as a deployment artifact and is not one -- the worker
+// resolves triggers.json, pause-windows.json and friends from the DEPLOYMENT folder or an explicit env
+// path, never from this directory (issue #104, which is where deploy/pause-windows.json sat unread since
+// the day it was added).
 const ROOT_DEPLOY = [...MIRRORED_DEPLOY, "triggers.json"].sort();
 
 // npm pack forks a whole npm; generous headroom so a cold cache on CI never flakes the suite.
@@ -73,11 +63,11 @@ test("sync: worker/.env.example is byte-identical to the root .env.example", () 
 	);
 });
 
-test("sync: every worker/deploy template is byte-identical to its root deploy/ twin", () => {
+test("sync: every worker/deploy file is byte-identical to its root deploy/ twin", () => {
 	assert.deepEqual(
 		readdirSync(join(WORKER_DIR, "deploy")).sort(),
 		MIRRORED_DEPLOY,
-		"worker/deploy must hold exactly the templates the service renderer reads plus the shipped compose file — nothing missing, no strays",
+		"worker/deploy must hold exactly the four files the compose file and the image builds need — nothing missing, no strays",
 	);
 	for (const name of MIRRORED_DEPLOY) {
 		assert.equal(
@@ -88,11 +78,11 @@ test("sync: every worker/deploy template is byte-identical to its root deploy/ t
 	}
 });
 
-test("sync: the root deploy/ holds the mirrored templates and the example triggers file, nothing else", () => {
+test("sync: the root deploy/ holds the mirrored files and the example triggers file, nothing else", () => {
 	// The mirror test above enumerates worker/deploy and only INDEXES root deploy/ by name, so a stray
 	// under deploy/ is invisible to it — which is how a dead pause-windows.json lived there unread. This
-	// is the other direction: a new file here is either a service artifact that belongs in the mirror and
-	// the npm tarball, or operator config that belongs in the deployment folder. Adding it to this list
+	// is the other direction: a new file here is either a deployment artifact that belongs in the mirror
+	// and the npm tarball, or operator config that belongs in the deployment folder. Adding it to this list
 	// is the moment to decide which.
 	assert.deepEqual(
 		readdirSync(join(REPO_ROOT, "deploy")).sort(),
@@ -223,16 +213,16 @@ function npmPack(cwd) {
 	});
 }
 
-test("npm pack (worker): ships src, .env.example and every deploy template — and never test/", PACK_TIMEOUT, async () => {
+test("npm pack (worker): ships src, .env.example and every deploy file — and never test/", PACK_TIMEOUT, async () => {
 	const report = await npmPack(WORKER_DIR);
 	assert.equal(report.name, "@edgehero/pi-dispatch");
 	const paths = report.files.map((f) => f.path);
 	assert.ok(paths.includes("src/cli.mjs"), "the bin target ships");
-	assert.ok(paths.includes("src/service.mjs"), "the service renderer ships");
+	assert.ok(paths.includes("src/console-paths.mjs"), "the console path helpers ship");
 	assert.ok(paths.includes(".env.example"), "init's packaged fallback ships");
 	assert.ok(paths.includes("README.md"), "the npm page is this README; without it the package page is blank");
 	for (const name of MIRRORED_DEPLOY) {
-		assert.ok(paths.includes(`deploy/${name}`), `deploy/${name} must ship — the service renderer reads it from the package`);
+		assert.ok(paths.includes(`deploy/${name}`), `deploy/${name} must ship — the compose file and the image builds read it from the package`);
 	}
 	assert.ok(paths.includes("package.json"));
 	assert.deepEqual(paths.filter((p) => p.startsWith("test/")), [], "test/ stays out of the tarball");

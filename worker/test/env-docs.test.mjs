@@ -571,7 +571,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_MONTHLY_COST_USD, whose token replacements the file already declared), and the sandbox prune removes
 	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
 	// with the podman, OpenShell and sandbox stack, so the pin follows the file down.
-	assert.equal(scanned, 128, "the scan must actually reach every assignment in the file");
+	assert.equal(scanned, 129, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM
@@ -584,21 +584,23 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	);
 });
 
-test("the header states the `$` disagreement, because no reader covers every key (#394)", () => {
-	// PINNED, and the reason is that this paragraph is the WHOLE fix for one half of issue #394. The reader
-	// declines to vouch for a `$` value on both POSIX loaders, so doctor names the line -- but only for the
-	// two boot keys it reads. Every other key in this file (the jobs dir, the sandbox dir, a folder path) is
-	// covered by nothing but these lines, and a mutation deleting them left the whole suite green.
+test("the header states the `$` rule, because no reader expands it (#394)", () => {
+	// PINNED, and the reason is that this paragraph is the WHOLE fix for one half of issue #394. Deployment is
+	// Linux containers: compose's `env_file` is the one loader, it expands nothing, and the worker's own readers
+	// take every value literally too. So a `$HOME` in a path is those six characters, and doctor/up cannot
+	// repair it -- every other key in this file (the jobs dir, a folder path) is covered by nothing but these
+	// lines, and a mutation deleting them left the whole suite green.
 	//
-	// The claim, not the wording: it must name the variable expansion, say systemd reads it literally, and
-	// tell the operator what to do instead. Asserted on the mirror as well, because they are byte-identical
-	// by a separate pin and this one would otherwise pass on a file nobody ships.
+	// The claim, not the wording: it must name the variable expansion, say the value is read literally, name
+	// compose as the reader that does not expand it, and tell the operator what to do instead. Asserted on the
+	// mirror as well, because they are byte-identical by a separate pin and this one would otherwise pass on a
+	// file nobody ships.
 	for (const rel of ["../../.env.example", "../.env.example"]) {
 		const text = readFileSync(new URL(rel, import.meta.url), "utf8");
 		const header = text.slice(0, text.indexOf("# --- "));
 		assert.match(header, /\$HOME/, `${rel}: the header names the shape an operator would write`);
-		assert.match(header, /literal/i, `${rel}: and says systemd reads it literally`);
-		assert.match(header, /systemd/, `${rel}: naming the loader that differs`);
-		assert.match(header, /Write the path out in full/, `${rel}: and what to do instead`);
+		assert.match(header, /literal/i, `${rel}: and says the value is read literally`);
+		assert.match(header, /compose/, `${rel}: naming the reader that does not expand it`);
+		assert.match(header, /Write path values out in full/, `${rel}: and what to do instead`);
 	}
 });

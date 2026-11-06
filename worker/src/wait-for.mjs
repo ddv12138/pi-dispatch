@@ -219,7 +219,7 @@ export function parseWaitProfiles(raw) {
 	return profiles;
 }
 
-/** Absolute on this platform, accepting a Windows drive letter or UNC root as `service.mjs` does. */
+/** Absolute on this platform, accepting a Windows drive letter or UNC root. */
 function isAbsolutePath(path) {
 	return isAbsolute(path) || /^([A-Za-z]:[\\/]|\\\\)/.test(path);
 }

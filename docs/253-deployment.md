@@ -7,29 +7,40 @@ record of past rollouts: it says what is true now.
 
 - Deployment directory `/root/pi-dispatch`. The directory has **no Git metadata**: source updates are staged from a
   committed snapshot of this repository, and `.env` and `runtime/` stay on the server across an update.
-- Compose project `deploy`; the shipped file is `deploy/docker-compose.yml`, plus this host's
-  `deploy/docker-compose.override.yml` (the receiver, below).
+- Compose project `deploy`, from the one shipped file `deploy/docker-compose.yml`. **There is no override file**:
+  every value the file reads is a compose variable or a key in `.env`. `deploy/` holds only that file,
+  `worker.Dockerfile`, `worker.Dockerfile.dockerignore`, `egress-proxy.conf` and `triggers.json` — no host service
+  definitions and no environment wrappers.
 - The `worker` and `console` profiles run the locally built `deploy-worker` image (application under
   `/opt/pi-dispatch`), with the deployment directory mounted at the same absolute path so job paths resolve on the
-  daemon host. The worker uses the host Docker socket.
+  daemon host. The worker uses the host Docker socket; the console runs the same image and gets no socket.
+- The `receiver` profile **builds** `deploy-receiver` from `receiver/Dockerfile` at this snapshot; nothing is pulled
+  from a registry. It publishes `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`, and this host sets
+  `PI_RECEIVER_PUBLISH=192.168.99.253` in `.env`.
 - Ports: console `4790` on all host interfaces, plain HTTP; Valkey `127.0.0.1:6379`; receiver
-  `192.168.99.253:3000` (the shipped file publishes `127.0.0.1:3000`, the override adds the LAN address).
+  `192.168.99.253:3000` (its loopback default is overridden by `PI_RECEIVER_PUBLISH` in `.env`).
 - Egress is armed (`PI_EGRESS` unset) with a `pi-dispatch-egress-proxy` container in front of the jobs.
 - Runtime state is under `/root/pi-dispatch/runtime`: `jobs/`, `logs/`, `sandboxes/`, `tmp/`, `home/`, the trigger and
   settings files, and the read-only job overlay `pi-global/`.
+- Five containers run: `valkey`, `worker`, `console`, `receiver` and `egress-proxy`.
+- Linux with Docker Compose is the only supported deployment. `pi-dispatch up` and a foreground `pi-dispatch worker`
+  remain for local development; neither is a way to run this server.
 
 ## Compose commands
 
-**Both files must be named.** `docker compose -f deploy/docker-compose.yml …` does not pick up
-`docker-compose.override.yml` beside it, so:
+**One `-f`, run from the deployment folder.** `--env-file .env` is the file beside it, and the compose file's
+relative paths resolve from `deploy/`:
 
 ```bash
 cd /root/pi-dispatch
-C="docker compose --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.override.yml"
+C="docker compose --env-file .env -f deploy/docker-compose.yml"
 $C --profile worker --profile console up -d              # worker and console
 $C --profile receiver up -d                              # receiver
 $C --profile receiver logs --tail 30 receiver
 ```
+
+`--env-file .env` is load-bearing for more than the Valkey password: `PI_JOB_IMAGE` and `PI_RECEIVER_PUBLISH`
+are read from there too, and a value in `.env` wins over the compose file's default.
 
 ## The job image
 
@@ -38,30 +49,36 @@ The job image is published from a checkout, not by CI: on the maintainer's machi
 
 | Repository | What runs it |
 |---|---|
-| `docker.io/ddv12138/pi-job:<version>` | every job without its own `run.image` |
-| `docker.io/ddv12138/pi-job-java21:<version>` | a Java flow, through that trigger's `run.image` |
+| `docker.io/ddv12138/pi-job` | every job without its own `run.image` |
+| `docker.io/ddv12138/pi-job-java21` | a Java flow, through that trigger's `run.image` |
 
 Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
-Maven.
+Maven. The tag this host runs for both is `4.3.2-5d10c5d2`, the image built from commit `5d10c5d2`.
 
-What this host runs is `PI_JOB_IMAGE` from `deploy/docker-compose.yml`, which **wins over the same key in `.env`**
-(`environment:` beats `env_file:`): `.env` repeats it so nothing reads two answers, but the shipped line is the one
-the worker gets. Both name `4.3.3`, the release whose job image these bytes are.
+The worker service declares the default job image as a compose interpolation default:
 
-That line is a derived value, never a hand edit: `image/publish.sh` tags what it pushes with the root
-`package.json` version, and a test holds the compose file to it. A deployment that hand-edits it loses the edit at
-the next staging — and the tag it reverts to is in the local store, so a forgotten pin fails silently instead of
-failing to pull. A release is a version bump plus `./image/publish.sh`; a host pins nothing by hand.
+```yaml
+PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.2-5d10c5d2}
+```
+
+Because compose interpolation reads `--env-file .env`, **a value in `.env` wins** and the shipped default applies
+only when the key is absent from `.env`. The default is the image built from commit `5d10c5d2`, the one this
+deployment runs; a release bump moves it. There is no hand-edited `PI_JOB_IMAGE` line and no override file to keep
+in step: setting `PI_JOB_IMAGE` in `.env` is the supported way to point the whole deployment at another tag, and
+removing the key from `.env` returns it to the default.
 
 Jobs launch with `--pull=never`, so nothing is fetched at job time: pull the image here first, and verify it here
-(`./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.3`). Docker Hub itself is not reachable directly from
-this host (`registry-1.docker.io` refuses); the pull works through the registry mirror configured in
+(`./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.2-5d10c5d2`). Docker Hub itself is not reachable directly
+from this host (`registry-1.docker.io` refuses); the pull works through the registry mirror configured in
 `/etc/docker/daemon.json`.
 
-Roll back by re-running the previous tag: keep the old `deploy-worker` image tag and the old job image tag in the
-local store before an update. A `deploy-worker` image built before the build-context fix below carries the
-deployment's `.env` backups in its layers, so it is not rollback material — rebuild that tag from the old snapshot
-instead of keeping the image.
+A `PI_JOB_IMAGE` edit is read at container creation, so the worker must be recreated (not just restarted) after
+changing it.
+
+Roll back by re-running the previous tags: keep the old `deploy-worker` image and the old job image tag in the local
+store before an update. A `deploy-worker` image built before `deploy/worker.Dockerfile.dockerignore` existed
+carries the deployment's `.env` backups in its layers, so it is not rollback material — rebuild that tag from the
+old snapshot instead of keeping the image.
 
 ## The Java trigger
 
@@ -71,12 +88,15 @@ trigger form has no image field):
 ```json
 { "on": { "type": "label", "any": ["afk-spec"] },
   "run": { "kind": "gitlab", "flow": "spec-run",
-           "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+           "image": "docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2",
            "statusComment": true, "maxTurns": 300 } }
 ```
 
-`ticket-run` and `ticket-merge` name the same Java image in their rules; the merger needs Maven to test the
-candidate, even though it writes no code.
+All three rules in `runtime/triggers.json` — `spec-run`, `ticket-run` and `ticket-merge` — name that Java image by
+hand. The merger needs Maven to test the candidate, even though it writes no code.
+
+The only job images on the host are the two commit-pinned ones above. The bare `4.3.2` and `latest` tags of
+`pi-job` and `pi-job-java21`, `ghcr.io/edgehero/pi-job:4.3.1` and the `pi-job:java21` alias have been deleted.
 
 A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
 Maven settings are baked at build time, not passed by the job:
@@ -113,13 +133,22 @@ different: see below. An edited `triggers.json` still needs the receiver force-r
 `PI_SESSION_MAX_RESUME_CHAIN=20`. A `.env` edit is read at container creation, so the worker must be recreated
 (not just restarted) after changing it. The store is PII-bearing and host-only: keep it outside every git repo.
 If the resume rule is removed later, keep the directory until no `run.resume` trigger remains. To roll the
-ticket flow back, restore the `.env` and `triggers.json` backups, force-recreate the receiver and worker, and
-leave the session store in place while any resume trigger remains.
+ticket flow back, restore the previous `.env` and `triggers.json` from the staging snapshot (no `.bak` copy is kept
+on the host any more), force-recreate the receiver and worker, and leave the session store in place while any
+resume trigger remains.
 
 ## The receiver (GitLab)
 
-`deploy/docker-compose.override.yml` builds `deploy-receiver` from `receiver/Dockerfile` at this snapshot instead of
-pulling `:latest`, and publishes the LAN address. Settings live in `.env`: `GITLAB_URL=https://git.133ec.com`,
+The `receiver` profile **builds** `deploy-receiver` from `receiver/Dockerfile` at this snapshot — there is no
+`ghcr.io/edgehero/pi-dispatch-receiver:latest` pull — and publishes `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`. This
+host sets `PI_RECEIVER_PUBLISH=192.168.99.253` in `.env`, so the LAN address is served. Compose builds the image
+only when it is missing, so an update builds it explicitly:
+
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver build receiver
+```
+
+Settings live in `.env`: `GITLAB_URL=https://git.133ec.com`,
 `GITLAB_TOKEN` (a personal PAT of `liukang`, id 340), `GITLAB_WEBHOOK_MODE=token`, `GITLAB_WEBHOOK_SECRET`.
 `GITHUB_AUTH_SOURCE=gh` is commented out, so this deployment serves GitLab only; re-enable it only together with
 `WEBHOOK_SECRET` and a resolvable `gh` identity.
@@ -130,7 +159,7 @@ the process keeps its boot-time rules. Writing by rename instead leaves the moun
 then:
 
 ```bash
-$C --profile receiver up -d --no-deps --force-recreate receiver
+docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d --no-deps --force-recreate receiver
 ```
 
 **The bot-loop guard is disarmed here**: `PI_RECEIVER_ALLOW_SELF=1`, because this GitLab has a single identity, so
@@ -193,18 +222,20 @@ adaptation while staging, so re-stage the package instead of hand-patching the s
 
 ## Updating
 
-Stage a committed snapshot over the source (keeping `.env` and `runtime/`) and rebuild the worker image, because the
-worker code decides the container env, the image defaults and the trigger validation.
+Stage a committed snapshot over the source (keeping `.env` and `runtime/`) and rebuild **both** built images: the
+worker image carries the code that decides the container env, the image defaults and the trigger validation, and
+the receiver is built from this snapshot as well.
 
 The staging **overlays** the tree and never deletes: a file a commit dropped stays where it was, so the folder stops
 matching a commit — and this folder is the Docker build context, so every leftover is copied into the next image.
-Clear what the current snapshot no longer ships before building:
-
-```bash
-rm -rf 253-deployment.md design gateway specs .pi .agents node_modules projects
-rm -f .env.bak-* .env.pre-* egress-allowlist.conf.bak-* deploy/docker-compose.yml.pre-* \
-      deploy/pi-dispatch-*.container deploy/pi-dispatch-*.network deploy/sandbox-gateway.service
-```
+This host has already been cleared once, so there is nothing to delete today: the `.env` backups
+(`.env.bak-*`, `.env.pre-image-4.3.2`), the compose backup (`deploy/docker-compose.yml.pre-image-4.3.2`), the
+allowlist backups (`egress-allowlist.conf.bak-*`), the old rootless leftovers (`deploy/pi-dispatch-*.container`,
+`deploy/pi-dispatch-*.network`, `deploy/sandbox-gateway.service`) and the removed units and wrappers are gone. Before
+a future build, check the same things instead of re-running a delete list: `deploy/` holds only
+`docker-compose.yml`, `worker.Dockerfile`, `worker.Dockerfile.dockerignore`, `egress-proxy.conf` and `triggers.json`,
+no `.env` backup or `pre-*` file sits beside them, and no directory the current snapshot no longer ships remains in
+the build context.
 
 Keep `.env` and `runtime/` — the session store and the job logs are state, not snapshot. The image's ignore file is
 `deploy/worker.Dockerfile.dockerignore`, not the shipped `.dockerignore`, so it alone decides what leaves this folder
@@ -212,21 +243,24 @@ for `/opt/pi-dispatch`; it keeps `runtime`, `.git`, `node_modules` and the `.env
 
 ```bash
 cd /root/pi-dispatch
+C="docker compose --env-file .env -f deploy/docker-compose.yml"
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs pause
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status   # repeat until active is 0
 $C --profile worker --profile console build worker
-docker pull docker.io/ddv12138/pi-job:<version>
-docker pull docker.io/ddv12138/pi-job-java21:<version>
-./image/verify-image.sh docker.io/ddv12138/pi-job:<version>
+$C --profile receiver build receiver
+docker pull docker.io/ddv12138/pi-job:4.3.2-5d10c5d2
+docker pull docker.io/ddv12138/pi-job-java21:4.3.2-5d10c5d2
+./image/verify-image.sh docker.io/ddv12138/pi-job:4.3.2-5d10c5d2
 $C --profile worker --profile console up -d --no-deps --force-recreate worker console
+$C --profile receiver up -d --no-deps --force-recreate receiver
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:4790/healthz
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs status
 docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs resume
 ```
 
-Resume only after both containers run and the console health check answers. If the build or the rollout fails, leave
-the queue paused.
+Resume only after the worker and console run, the receiver is back up and the console health check answers. If the
+build or the rollout fails, leave the queue paused.
 
 There is no `PI_WORKER_NAME` here, so the shared queue pause covers this worker. Never `docker rm -f` the Valkey
 container: the normal stop is what makes it write the AOF out.

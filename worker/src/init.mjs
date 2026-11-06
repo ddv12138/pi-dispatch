@@ -136,8 +136,7 @@ export function runInit(cwd = process.cwd(), deps = {}) {
 		// Issue #480: the proxy's rules, the file beside the allowlist that the docker proxy mounts. Create-only like every
 		// scaffold here, so a clone's own deploy/egress-proxy.conf is reported and kept. The one scaffold whose content is
 		// not this module's: it is the package's file verbatim, read from the package and never through `fs` (the
-		// deployment folder's seam), as `up` reads its Quadlet templates. The podman venue does not read this copy (its unit
-		// mounts an account-owned copy `service install` writes), and it costs nothing there.
+		// deployment folder's seam), as `up` reads the packaged proxy conf.
 		//
 		// Only into a deploy/ that is a real directory of this folder (PR #488's review): a symlinked deploy/ would put the
 		// file wherever the link points, so init refuses there and writes nothing, and says so. Asked again after the mkdir,
@@ -241,15 +240,11 @@ function lstatOrNull(fs, path) {
 }
 
 /**
- * The docker text is the same for every set that includes `local`. Its step 2 was a compose command naming
- * deploy/docker-compose.yml, a file a folder made by init alone does not have (issue #480), and it started no egress
- * proxy either; it is now `pi-dispatch up`, which starts Valkey and the proxy itself. A podman-only deployment (issue
- * #453) gets the podman ladder instead, the Podman setup steps in the order a fresh folder needs them:
- * the job image into this account's own store, the venue key and provider key in `.env` (what `up` and `service
- * install` read), the stack as Quadlet units, doctor, and the worker as a user service.
+ * The docker text is the same for every deployment: `local` is the only venue left. Its step 2 is `pi-dispatch up`
+ * rather than a compose command naming deploy/docker-compose.yml, a file a folder made by init alone does not have
+ * (issue #480), and `up` starts Valkey and the egress proxy itself. The console runs from its own compose profile.
  */
-export function nextSteps(venues = { localUsed: true, podmanUsed: false }, { platform = "linux" } = {}) {
-	if (venues.podmanUsed && !venues.localUsed) return platform === "linux" ? PODMAN_NEXT_STEPS : PODMAN_OFF_LINUX;
+export function nextSteps() {
 	return `
 Next:
   1. docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest
@@ -259,28 +254,6 @@ Next:
   4. pi-dispatch doctor                                 # verify Docker, Valkey, image, and key
   5. pi-dispatch worker                                 # drain the queue
 
-Web console (optional): pi-dispatch up --console
+Web console (optional): the console runs from its own compose profile (profile: console)
 `;
 }
-
-// Off Linux the podman venue refuses the host (`podman-platform`: Podman machine on macOS and Windows was never
-// measured), so its ladder would walk an operator into Quadlet steps that cannot work here.
-const PODMAN_OFF_LINUX = `
-Next: PI_BACKENDS lists only the podman venue, which runs on Linux alone: on this host the worker refuses it
-(podman-platform), so there are no podman steps to run here. Run this deployment on a Linux host, or add \`local\` to
-PI_BACKENDS to run jobs on Docker here (then run \`pi-dispatch init\` again for those steps).
-`;
-
-const PODMAN_NEXT_STEPS = `
-Next (the podman venue; run these as the worker's own account, with linger enabled
-(sudo loginctl enable-linger <account>, without which a job gets no bounds)):
-  1. podman pull docker.io/ddv12138/pi-job:latest && podman tag docker.io/ddv12138/pi-job:latest pi-job:latest
-                                                        # the prebuilt job image, in this account's own store
-  2. edit .env                                          # PI_BACKENDS=podman, and ANTHROPIC_API_KEY (or your provider's key)
-  3. pi-dispatch up                                     # Valkey and the egress proxy as Quadlet units in your user manager
-  4. pi-dispatch doctor                                 # verify Podman, Valkey, image, and key
-  5. pi-dispatch service install                        # the worker as a user service, after those units (also installs them)
-  6. pi-dispatch doctor --live                          # read the bounds, egress and job user back off real containers
-
-Web console (optional): pi-dispatch up --console
-`;

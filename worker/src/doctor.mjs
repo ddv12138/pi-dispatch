@@ -56,7 +56,7 @@ import { homedir, networkInterfaces, release as osRelease, tmpdir, userInfo } fr
 import { BlockList, isIPv4, isIPv6 } from "node:net";
 import * as nodeFs from "node:fs";
 import { NETNS_KEEPER, NETNS_KEEPER_START, STACK_KEYS, VALKEY_SHARED_KEY, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, probeTcpAddress, proxyRestartAdvice, readLinger, readSubuidRanges, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./stack.mjs";
-import { basename, dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
+import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -98,7 +98,6 @@ import { detachBlockedSentence, makeDetachGate, runtimeFromFacts } from "./netns
 import { runLiveProbes } from "./live-probes.mjs";
 import { COMPOSE_VALKEY_OVERRIDE, VALKEY_PASSWORD_KEY, VALKEY_PASSWORD_HOWTO, VALKEY_PORT_KEY, isLoopbackHost, valkeyContainerOwner, valkeyPasswordProblem, valkeyPortConflict } from "./valkey-auth.mjs";
 import { urlShown, valkeyContextFromResolution, valkeyPasswordFor, valkeyUrlProblem } from "./valkey-endpoint.mjs";
-import { installedConsoleUnitPath, installedUnitPaths, readUnitSeam, readUnitUser } from "./service.mjs";
 import { CONTAINER_HOME, SHIPPED_IMAGE_UID, SIZE_LABEL_CPU, SIZE_LABEL_MEM } from "./container-spec.mjs";
 import { DEFAULT_JOB_SIZE, codemodeWorkersOf, cpuCeilingCenti, formatCpus, formatMemory, jobSizeDefaults, resolveJobSize } from "./job-size.mjs";
 import { SUGGEST_WINDOW_DAYS, cpusText, hostCap, refusalWords, sizeRefusal, suggestSize, suggestionCall, suggestionEvidence } from "./size-suggest.mjs";
@@ -264,7 +263,6 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		jobUserIdentity = { platform, release: osRelease(), euid: process.geteuid?.(), egid: process.getegid?.() },
 		stat = statSync,
 		passwd = () => readFileSync("/etc/passwd", "utf8"),
-		readUnit = (path) => readFileSync(path, "utf8"),
 		// The deployment's own `.env`, read for exactly the keys two checks below NAME (issue #357), and
 		// since issue #384 also the read behind the two boot-file loaders, which open the path that `.env`
 		// gives them through this same seam. See `envFileKeys` for why any of this is allowed to exist.
@@ -415,7 +413,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 						return { ...(await valkeyAuthState(url, { context, withoutPassword })), passwordSet: Boolean(sent.password), from: sent.from };
 					}
 				: null;
-	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readUnit, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
+	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
 	// Issue #471: every other service key, resolved ONCE for the whole run (the fix pass's re-collect and `--live` judge the
 	// same resolution). THE RULE (PR #474's round cap, after three rounds of trust patches): no program doctor starts is
 	// handed anything from `.env`. Every child gets this shell's own environment, the one it had before #471; a `.env`
@@ -480,10 +478,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 	// Issue #481: by `fileConfigures`, so a file whose only lines are empty ones (the service reads them as unset) is not
 	// "the file decided something", and the line does not send the operator to the service for nothing.
 	const tookFromFile = fromFile.some((taken) => Object.entries(taken ?? {}).some(([key, value]) => fileConfigures(key, value)));
-	// Issue #481 (review round 3): and whether doctor accepted a credential only because an env-setup script may export it.
-	const expected = seams.expectedFromSetup ?? [];
-	const fromSetup = expected.length > 0 && seams.envSetupSeen ? { script: seams.envSetupSeen.script, names: [...new Set(expected)] } : null;
-	out(failed ? "\ndoctor: some checks failed: fix the above, then re-run.\n" : `\ndoctor: ready. ${startAdvice({ tookFromFile, envPath, platform, fromSetup, unit: tookFromFile || fromSetup ? installedWorkerUnit(seams, cwd) : null })}\n`);
+	out(failed ? "\ndoctor: some checks failed: fix the above, then re-run.\n" : `\ndoctor: ready. ${startAdvice({ tookFromFile, envPath })}\n`);
 	return failed ? 1 : 0;
 }
 
@@ -533,37 +528,14 @@ export async function defaultPublishDoctor(url, name, record) {
 
 /**
  * Issue #477: how to start a worker that runs with what doctor judged. `pi-dispatch worker` started by hand reads this
- * shell's environment and no `.env` (the worker parses no `.env` file), so where doctor took any value
- * from the deployment's `.env`, the worker that sees it is the service, whose loader reads the file; the line names that
- * command (restart for a service installed for this folder), and what a hand-started worker needs. Where doctor took
- * nothing from the file, what it judged is this shell's, and a worker started from it runs with the same.
+ * shell's environment and no `.env` (the worker parses no `.env` file). Deployment is Linux containers: the `worker`
+ * compose profile reads the deployment `.env` through compose's `env_file`, so where doctor took any value from that
+ * file, the worker that sees it is that container; the line names its command and what a hand-started worker needs.
+ * Where doctor took nothing from the file, what it judged is this shell's, and `pi-dispatch worker` runs with the same.
  */
-export function startAdvice({ tookFromFile, envPath, unit, platform = process.platform, fromSetup = null }) {
-	// Issue #481 (PR #485 review round 3): what doctor accepted only because an --env-setup script may export it
-	// (`fromSetup`: `{ script, names }`) reaches the service alone, which runs that script; a worker started by hand runs
-	// none, so the line never sends the operator there, whether or not anything came from the file.
-	const setupSaid = fromSetup
-		? ` The service ${tookFromFile ? "also " : ""}runs the env-setup script ${envValueShown(fromSetup.script)} first, which doctor expects to export ${fromSetup.names.join(", ")}; a worker started by hand (\`pi-dispatch worker\`) runs no env-setup script, so it starts without ${fromSetup.names.length === 1 ? "that" : "those"} unless this shell exports ${fromSetup.names.length === 1 ? "it" : "them"}.`
-		: "";
-	if (!tookFromFile && !fromSetup) return "Start the worker with `pi-dispatch worker`.";
-	if (!tookFromFile) return `Start the worker as the service: ${restartAdvice(unit, platform)}.${setupSaid}`;
-	return `Start the worker as the service, whose loader reads ${envPath} as doctor did: ${restartAdvice(unit, platform)}. A worker started by hand (\`pi-dispatch worker\`) reads this shell's environment and not that file, so it runs without the settings doctor read from the file above unless this shell exports them.${setupSaid}`;
-}
-
-/**
- * The command that (re)starts the worker service for this folder (issue #477, PR #478's gate): `pi-dispatch service
- * restart` drives only a USER unit (`systemctl --user`, launchctl's `gui/<uid>` domain) or the nssm service, and says
- * `--system is print-only` of a system one, so a system-scope unit gets the root command itself. Windows has no unit
- * file doctor can read (the service is registered with nssm), so there both commands are named.
- */
-function restartAdvice(unit, platform) {
-	if (platform === "win32") return "`pi-dispatch service install`, or `pi-dispatch service restart` when its nssm service is already installed";
-	if (!unit) return "`pi-dispatch service install`";
-	const name = basename(unit.path);
-	const at = ` (the service installed for this folder, ${unit.path})`;
-	if (unit.scope !== "system") return `\`pi-dispatch service restart\`${at}`;
-	if (platform === "darwin") return `\`sudo launchctl kickstart -k system/${name.replace(/\.plist$/, "")}\`${at}`;
-	return `\`sudo systemctl restart ${name}\`${at}`;
+export function startAdvice({ tookFromFile, envPath }) {
+	if (!tookFromFile) return "Start the worker with `pi-dispatch worker`.";
+	return `Start the worker as the compose service, whose env_file reads ${envPath} as doctor did: \`docker compose --env-file .env -f deploy/docker-compose.yml --profile worker up -d\`. A worker started by hand (\`pi-dispatch worker\`) reads this shell's environment and not that file, so it runs without the settings doctor read from the file above unless this shell exports them.`;
 }
 
 /** The ✓/⚠/✗ lines plus each failure's fix, exactly as doctor has always printed them. Returns whether
@@ -708,30 +680,6 @@ const CLI_KEY_NAMES = [...new Set(Object.values(CLI_SERVICE_KEYS).flat())];
 // Each key once, in the order it is first named.
 export const SERVICE_ENV_KEYS = Object.freeze([...new Set([...STACK_KEYS, "VALKEY_URL", VALKEY_SHARED_KEY, VALKEY_PASSWORD_KEY, VALKEY_PORT_KEY, "PI_PROVIDER", "PI_MODEL", ...GITHUB_SERVICE_KEYS, "PI_JOBS_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...CLI_KEY_NAMES])]);
 
-/** Issue #471 (gate round 1): what a service manager gives every service itself, so a `.env` need not carry it. */
-const AMBIENT_SERVICE_KEYS = Object.freeze(["TMPDIR", "TEMP", "XDG_RUNTIME_DIR", "HOME"]);
-
-/**
- * The worker unit installed for the deployment in `cwd` (its WorkingDirectory), as the path doctor read, else null.
- * Read as the job-user check reads units (`installedUnitPaths`, `readUnitSeam`), for the shell-only line.
- */
-function serviceUnitFor(seams, cwd) {
-	return installedWorkerUnit(seams, cwd)?.path ?? null;
-}
-
-/** `serviceUnitFor` with the unit's scope (issue #477): `{ path, scope }`, `scope` "user" or "system", else null. */
-function installedWorkerUnit(seams, cwd) {
-	const { platform, home, fileExists, readUnit = (path) => readFileSync(path, "utf8") } = seams;
-	for (const { path, which, scope } of installedUnitPaths(platform, home)) {
-		if (which !== "worker" || !fileExists(path)) continue;
-		try {
-			if (readUnitSeam(readUnit(path), platform).deployDir === cwd) return { path, scope };
-		} catch {}
-	}
-	return null;
-}
-
-
 /** The CLI variables that name a path, whose value a ⚠ may show; the rest (endpoints, names, tokens) it never shows. */
 const CLI_PATH_KEYS = Object.freeze(["XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "DOCKER_CONFIG", "GH_CONFIG_DIR", "HOME"]);
 
@@ -797,7 +745,6 @@ export const CONSOLE_ENV_KEYS = Object.freeze(["PI_CONSOLE_LISTEN", "PI_CONSOLE_
  * `SERVICE_ENV_KEYS` or here, never neither.
  */
 export const DOCTOR_SHELL_KEYS = Object.freeze({
-	PI_ENV_SETUP: "the --env-setup script this shell was started under; the service's comes from its unit, which doctor reads back (envSetupChecks)",
 	XDG_DATA_HOME: "where THIS account's Podman keeps its store, which doctor inspects as this account",
 	DOCKER_CONTENT_TRUST: "a docker CLI setting of this shell, named for the --live probes this shell's CLI runs",
 	PI_PAUSE_WINDOWS_FILE: "read from .env by its own two-subject rule (ENV_FILE_READABLE_KEYS): the service judged from the file, this shell judged as itself",
@@ -999,11 +946,10 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 	try {
 		const serviceLoader = serviceEnvLoader(platform);
 		const { text, loadHazard } = decodeEnvFile(readEnvFile(path), { loader: serviceLoader });
-		// THE SERVICE'S OWN LOADER FIRST, because this file has three and they disagree (issue #384).
-		// `service.mjs` renders exactly one per platform: systemd's `EnvironmentFile=` on linux,
-		// `worker-env-wrapper.sh` (a sourcing shell) on darwin, `worker-env-wrapper.cmd` on win32. Reporting a
-		// reading from a loader this deployment does not use is how doctor told half its operators the wrong
-		// file under the previous shape, which asked systemd's grammar on every platform.
+		// THE DEPLOYMENT'S OWN LOADER FIRST, because this file has three and they disagree (issue #384). Which one is
+		// the deployment's comes from `serviceEnvLoader`, the same one-loader-per-platform mapping `up`, the worker's
+		// own readers and the CLI use. Reporting a reading from a loader this deployment does not use is how doctor
+		// told half its operators the wrong file under the previous shape, which asked systemd's grammar everywhere.
 		const service = readEnvAssignments(text, allowed, { loader: serviceLoader });
 		// The shell reading stays beside it on POSIX, because a `.env` is also sourced by hand
 		// (`set -a; . ./.env`) and because the two disagree about an `export` line, which is the third state
@@ -1591,64 +1537,16 @@ export async function collectChecks(shellVars, seams) {
 
 	// Right after `.env present`, because it answers the same question that check raises: where DOES this
 	// deployment's environment come from. [] unless a seam is configured (issue #216).
-	const services = await installedServices(seams);
-	checks.push(...(await envSetupChecks(env, seams, envSetupSources(env, services))));
-	// Issue #481 (PR #485's final review): WHICH script may supply a value, by one strict rule. A value missing from this
-	// shell and the `.env` is one an --env-setup script may export, invisible to doctor by design, so
-	// its refusal is softened to a ⚠ naming the script, but ONLY where every installed service of this folder that READS
-	// the value names a USABLE script, and the worker's service is installed wherever the worker reads it (every such
-	// value here does). Usable is a regular file, after symlinks, that this account can read: a script the service
-	// manager cannot source supplies nothing, and its own ⚠ above says so. This shell's PI_ENV_SETUP never softens
-	// anything: the service does not run what this shell names, so the round-2 rule, which fell back to it, turned a boot
-	// refusal into a ⚠ and exit 0 on a deployment whose unit names no script. A receiver's script is not the worker's.
-	const usableScript = (path) => {
-		try {
-			if (!statSync(path).isFile()) return false;
-			accessSync(path, fsConstants.R_OK);
-			return true;
-		} catch {
-			return false;
-		}
-	};
-	/** `readers` (the services that read the value) -> `[{ script, source }]` supplying it, or null where none may. */
-	const setupSupplies = (readers) => {
-		if (readers.includes("worker") && !services.some((s) => s.which === "worker")) return null;
-		const reading = services.filter((s) => readers.includes(s.which));
-		if (reading.length === 0 || !reading.every((s) => s.setup && usableScript(s.setup))) return null;
-		return [...new Map(reading.map((s) => [s.setup, { script: s.setup, source: s.source }])).values()];
-	};
-	// What doctor ACCEPTED only because a worker service's script may supply it, for the closing ready line (review
-	// round 3): a worker started by hand runs no env-setup script. Reset per collection (`--fix` re-collects).
-	seams.expectedFromSetup = [];
-	const workerScript = setupSupplies(["worker"])?.find((s) => services.some((u) => u.which === "worker" && u.setup === s.script)) ?? null;
-	seams.envSetupSeen = workerScript;
-	// Where no downgrade applies, what the fix line owes the operator: that this shell's PI_ENV_SETUP is not what the
-	// service runs, or, where doctor found no service of this folder at all, that it cannot tell.
-	const shellSetup = typeof env.PI_ENV_SETUP === "string" && env.PI_ENV_SETUP !== "" ? env.PI_ENV_SETUP : null;
-	const notSupplied = (names, readers) => {
-		const reading = services.filter((s) => readers.includes(s.which));
-		if (shellSetup !== null && !reading.some((s) => s.setup)) return `. PI_ENV_SETUP in this shell is not what the service runs: install with \`pi-dispatch service install --env-setup ${shellSetup}\``;
-		if (!services.some((s) => s.which === "worker")) return `. A deployment whose service gets ${names} from an --env-setup script can ignore this line; doctor found no service installed for this folder to read`;
-		return "";
-	};
 	/**
-	 * A credential presence refusal, by whether an env-setup script can supply it: `subject` is what is missing
-	 * ("GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset"), `names` the variables the script would export, `readers` the
-	 * services that read them, `refusal` what happens without them, `sep` how the refusal's label joins the two (each
-	 * check keeps its own), `fix` the usual fix.
+	 * A credential presence refusal: `subject` is what is missing ("GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset"),
+	 * `refusal` what happens without it, `sep` how the refusal's label joins the two (each check keeps its own), and
+	 * `fix` the usual fix.
+	 *
+	 * One shape, always a ✗: deployment is Linux containers, where compose's `env_file` IS the environment. There is no
+	 * env-setup script any more to soften a missing credential into a ⚠, so a value absent from this shell and the
+	 * deployment's `.env` is absent, full stop.
 	 */
-	const credentialAbsent = ({ subject, names, readers = ["worker", "receiver"], refusal, sep = " -- ", fix }) => {
-		const supply = setupSupplies(readers);
-		if (supply === null) return { ok: false, label: `${subject}${sep}${refusal}`, fix: `${fix}${notSupplied(names, readers)}` };
-		seams.expectedFromSetup.push(names);
-		const from = supply.map((s) => `${envValueShown(s.script)} (named by ${s.source})`).join(" and ");
-		return {
-			ok: false,
-			warn: true,
-			label: `${subject}: not visible to doctor in this shell or .env, and expected from the env-setup script ${from}, which the service runs after .env`,
-			fix: `if that script does not export ${names}, ${refusal}: ${fix}`,
-		};
-	};
+	const credentialAbsent = ({ subject, refusal, sep = " -- ", fix }) => ({ ok: false, label: `${subject}${sep}${refusal}`, fix });
 	// Where the venue keys came from (issue #453), beside the other answers to "where does this deployment's environment
 	// come from". Empty unless the file supplied a key, or the two disagree.
 	checks.push(...(seams.venueChecks ?? []));
@@ -2400,7 +2298,6 @@ export async function collectChecks(shellVars, seams) {
 			const note = patVar === "" ? fromFileNote(fileSays("GITHUB_PAT_VAR")) : patValue !== undefined && Object.hasOwn(service.extraFromFile, patVar) ? fromFileNote([patVar]) : "";
 			const patCheck = credentialAbsent({
 				subject: `GITHUB_AUTH_SOURCE=pat but ${what}`,
-				names: patVar === "" ? "GITHUB_PAT_VAR and the PAT it names" : patVar,
 				refusal: "the worker and the receiver refuse to start (exit 2)",
 				sep: ": ",
 				fix: patVar === "" ? "delete the GITHUB_PAT_VAR line to use GITHUB_PAT, or name the variable that holds the PAT" : `set ${patVar} to a fine-grained PAT in .env, or switch GITHUB_AUTH_SOURCE`,
@@ -2454,7 +2351,7 @@ export async function collectChecks(shellVars, seams) {
 			// Unset and empty alike (`loadGitHubAuth`'s `!appId`), so the words say both (PR #485 review round 2); and a
 			// missing id is one an env-setup script may export (`credentialAbsent`).
 			if (!ids[name]) {
-				checks.push(credentialAbsent({ subject: `GITHUB_AUTH_SOURCE=app but ${name} is unset or empty`, names: name, refusal: "the worker will refuse to boot", fix: setupFix }));
+				checks.push(credentialAbsent({ subject: `GITHUB_AUTH_SOURCE=app but ${name} is unset or empty`, refusal: "the worker will refuse to boot", fix: setupFix }));
 				continue;
 			}
 			checks.push({
@@ -2496,7 +2393,7 @@ export async function collectChecks(shellVars, seams) {
 				});
 			}
 		} else if (!keyPathSet) {
-			checks.push(credentialAbsent({ subject: "GITHUB_AUTH_SOURCE=app but neither GITHUB_APP_PRIVATE_KEY_PATH nor GITHUB_APP_PRIVATE_KEY is set", names: "GITHUB_APP_PRIVATE_KEY_PATH or GITHUB_APP_PRIVATE_KEY", refusal: "the worker will refuse to boot", fix: setupFix }));
+			checks.push(credentialAbsent({ subject: "GITHUB_AUTH_SOURCE=app but neither GITHUB_APP_PRIVATE_KEY_PATH nor GITHUB_APP_PRIVATE_KEY is set", refusal: "the worker will refuse to boot", fix: setupFix }));
 		} else if (!fileExists(keyPath)) {
 			checks.push({ ok: false, label: `GITHUB_APP_PRIVATE_KEY_PATH does not exist (${keyPath}) -- the worker will refuse to boot`, fix: setupFix });
 		} else {
@@ -3008,15 +2905,10 @@ export async function collectChecks(shellVars, seams) {
 	const subscriptionDefault = await subscriptionCredentials.check(provider);
 	const keyCheck = subscriptionDefault.managed ? subscriptionCredentialCheck(provider, subscriptionDefault) : providerKeyCheck({ provider, env: { ...env, ...credentialFromFile }, agentDir: keyAgentDir, oracle, nodeOk: checks[0]?.ok, keyless: { endpoints: keylessEndpoints, models: keylessModels, unreadable: keylessUnreadable, hintModels, hintUnread } });
 	const keyNamed = Object.keys(credentialFromFile).filter((name) => keyCheck.label?.includes(`: ${name})`));
-	// Issue #481 (PR #485 review round 2): a key found nowhere doctor can look is one an env-setup script may export, which
-	// is the documented home for a provider key fetched from a secrets manager.
-	const { absent: keyAbsent, ...keyShown } = keyCheck;
-	const keyNames = keyAbsent ? `one of ${keyAbsent.join(" or ")}` : null;
-	const keyLine = !keyAbsent
-		? keyShown
-		: setupSupplies(["worker"])
-			? credentialAbsent({ subject: `Provider key (${provider}: ${keyAbsent.join(" or ")}) not set`, names: keyNames, readers: ["worker"], refusal: "jobs cannot authenticate to the provider", fix: keyShown.fix })
-			: { ...keyShown, fix: `${keyShown.fix}${notSupplied(keyNames, ["worker"])}` };
+	// The line keeps the label `providerKeyCheck` gave it, `absent` signal or not: that label is where a key found in
+	// pi auth.json but unusable (not a string, a command reference, whitespace) is named, and deployment is Linux
+	// containers, where compose's `env_file` is the only other place a key can come from.
+	const { absent: _keyAbsent, ...keyLine } = keyCheck;
 	// Not for a malformed PI_PROVIDER: its shape row below is the one line (issue #673, review round 1).
 	// Issue #737: the console reads whether the key is found by this id (`NAMED_CHECK_IDS`).
 	if (envShapeProblem.PI_PROVIDER === null) checks.push({ ...keyLine, id: "provider.key", label: `${keyLine.label}${fromFileNote([...fileSays("PI_PROVIDER"), ...keyNamed, ...(keyAgentDir !== agentDir ? ["PI_CODING_AGENT_DIR"] : [])])}` });
@@ -4013,9 +3905,9 @@ export async function collectChecks(shellVars, seams) {
 	//   - The blank branch's fix line still said "unset means the worker loads no windows at all", which is
 	//     advice for a different deployment than the one being described.
 	//
-	// TWO SUBJECTS, judged separately, because a `.env` and a shell are read by different things. The SERVICE
-	// reads the file: `deploy/worker.service` hands it to systemd, the wrappers source it, and the shell this
-	// command runs in never reaches it. A FOREGROUND `pi-dispatch worker` reads this shell and not the file.
+	// TWO SUBJECTS, judged separately, because a `.env` and a shell are read by different things. The DEPLOYMENT
+	// reads the file: compose's `env_file` and the worker's own readers take it, and the shell this command runs in
+	// never reaches it. A FOREGROUND `pi-dispatch worker` reads this shell and not the file.
 	// Judging only the shell is what let scenario G pass: a good path here, a blank line there, and a service
 	// that cannot start.
 	// The IO the load verdict uses, injected like everything else this file touches: `statFile` for the
@@ -4067,20 +3959,6 @@ export async function collectChecks(shellVars, seams) {
 		// The OTHER POSIX loader, named for what it is rather than as "a shell that sources the file": on darwin
 		// the service IS the sourcing shell, and the reading it disagrees with is systemd's.
 		const otherName = envFile.serviceLoader === "shell" ? "systemd's EnvironmentFile=" : "a shell that sources the file";
-		// A setup script runs AFTER the file on every platform (`service.mjs`, `worker-env-wrapper.sh`,
-		// `.cmd`), so it can supply or replace what the file says. Where one is configured, a refusal this
-		// check would otherwise report is a WARNING naming the script: doctor cannot run it, and failing a
-		// working `--env-setup` deployment is the crying wolf this file refuses elsewhere.
-		//
-		// WHICH script, by the one strict rule the credential checks use (issue #481, PR #485's final review;
-		// `setupSupplies`): the script the worker's installed service for this folder names, when every such unit names
-		// one this account can read as a regular file. This used to read PI_ENV_SETUP from this shell alone, so a unit's
-		// script went unseen and a script the service never runs softened a boot refusal; the shell's PI_ENV_SETUP now
-		// softens nothing. A script that is missing or unreadable cannot replace anything, so downgrading on it would print
-		// two contradicting lines in one run: one saying the unit restart-loops until the script is back, the next saying
-		// a blank key is only a warning because that same script may replace it.
-		const envSetup = setupSupplies(["worker"])?.[0]?.script ?? null;
-
 		// A FILE THIS COMMAND CANNOT READ IS ANSWERED ONCE, and then nothing else is said about the key.
 		// Three adversarial passes found what the alternative costs: with a verdict computed beside the
 		// warning, doctor printed "line 1 reaches into the line below it" and "✓ and loads" about the same key
@@ -4097,11 +3975,8 @@ export async function collectChecks(shellVars, seams) {
 		if (envFile.hazard == null && blankInFile) {
 			checks.push({
 				ok: false,
-				warn: envSetup !== null,
 				label: `${spec.key} is assigned an EMPTY value in ${join(cwd, ".env")}, which is not unset: ${loaderName} keeps it, the worker tries to load "" and ${spec.fails}${alsoExported === undefined ? "" : `, while ${otherName} would take ${envValueShown(alsoExported)}, so two deployments of this one file disagree`}`,
-				fix: envSetup !== null
-					? `${envSetup} runs after that file and may replace it, which is why this is a warning: if it does not, delete the ${spec.key} line, or give it the absolute path (${scaffolded})`
-					: `delete the ${spec.key} line from that .env, or give it a path: ${fixLineFor(spec.key, scaffolded)}. Deleting it ${spec.whenDeleted}; an empty value ${spec.whenEmpty}`,
+				fix: `delete the ${spec.key} line from that .env, or give it a path: ${fixLineFor(spec.key, scaffolded)}. Deleting it ${spec.whenDeleted}; an empty value ${spec.whenEmpty}`,
 			});
 		} else if (envFile.hazard == null && notPlainLine !== undefined) {
 			// NAMED, NEVER QUOTED. The value is outside the grammar every loader reads the same way, so this
@@ -4151,15 +4026,10 @@ export async function collectChecks(shellVars, seams) {
 					: {
 							id: bootFileId(spec),
 							ok: false,
-							warn: envSetup !== null,
-							label: `${spec.key} is set in ${join(cwd, ".env")} (${envValueShown(fileRaw)}) to a file the worker cannot load, so a service started from it ${spec.fails}: ${verdict.reason}`,
+							label: `${spec.key} is set in ${join(cwd, ".env")} (${envValueShown(fileRaw)}) to a file the worker cannot load, so the worker ${spec.fails}: ${verdict.reason}`,
 							fix: verdict.newer
-								? envSetup !== null
-									? `${envSetup} runs after that file and may replace it; if it does not, ${newerFileFix("this host's worker")}`
-									: newerFileFix("this host's worker")
-								: envSetup !== null
-									? `${envSetup} runs after that file and may replace it; if it does not, fix ${envValueShown(fileRaw)} or point the key at a file that loads`
-									: `fix ${envValueShown(fileRaw)}, or point ${spec.key} at a file that loads`,
+								? newerFileFix("this host's worker")
+								: `fix ${envValueShown(fileRaw)}, or point ${spec.key} at a file that loads`,
 						},
 			);
 		}
@@ -4380,8 +4250,7 @@ export async function collectChecks(shellVars, seams) {
 		// The failure mode the MOVE introduces, which the temp default did not have: under <OS temp> the
 		// mkdir always succeeded, under <home> it can fail. makeRecordWriter and makeLogSink both swallow
 		// that into a `logs_dir_error` line and keep running, so the worker drains jobs perfectly and
-		// records nothing. A systemd system unit whose User= has /nonexistent as its passwd home is the
-		// concrete case, and deploy/worker.service ships User=pi.
+		// records nothing. A container whose account has /nonexistent as its passwd home is the concrete case.
 		//
 		// Asked for BOTH stores, not just the run history: a settings overlay that cannot be written is the
 		// quieter half of the same fault, since readOverlay treats an absent file as an empty overlay and
@@ -4534,24 +4403,6 @@ export async function collectChecks(shellVars, seams) {
 	section("env");
 	// Issue #471: what a key resolved above this point (the provider's variables, the PAT) added to the record.
 	checks.push(...serviceEnvLines({ fromFile: {}, disagreements: service.disagreements.slice(saidAtTop.disagreements), unread: service.unread.slice(saidAtTop.unread) }, envPathShown));
-	// Issue #471 (gate round 1): a key only this shell sets was taken in silence. Where a service for this folder is
-	// installed, it runs without that value (its unit loads the file, not this shell), so the keys are named, never their
-	// values. Not the ones a service manager gives every service itself (a temp dir, the runtime dir), which the file need
-	// not repeat. Advisory: the unit's --env-setup script may supply them, which doctor cannot run to find out.
-	// env-internal XDG_CONFIG_HOME: the XDG base directory the CLIs doctor starts read, compared here with its default only.
-	// Nor XDG_CONFIG_HOME at its own default (`~/.config`, which a login shell often exports): unset, every CLI that
-	// reads it falls back to that same directory, so the service runs with the same value (measured on pd-fedora: the
-	// named line otherwise flagged the default).
-	const shellOnly = service.shellOnly.filter((k) => !AMBIENT_SERVICE_KEYS.includes(k) && !(k === "XDG_CONFIG_HOME" && typeof home === "string" && env.XDG_CONFIG_HOME === join(home, ".config")));
-	const unit = shellOnly.length > 0 ? serviceUnitFor(seams, cwd) : null;
-	if (unit) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `${shellOnly.join(", ")} ${shellOnly.length === 1 ? "is" : "are"} set in this shell only: the service installed for this folder (${unit}) loads ${serviceEnvFile?.path ?? join(cwd, ".env")}, not this shell, so it runs without ${shellOnly.length === 1 ? "that value unless its --env-setup script sets it" : "those values unless its --env-setup script sets them"}, while doctor judged this shell's`,
-			fix: `put ${shellOnly.length === 1 ? "it" : "them"} in ${serviceEnvFile?.path ?? join(cwd, ".env")} if the service needs ${shellOnly.length === 1 ? "it" : "them"}, or unset ${shellOnly.length === 1 ? "it" : "them"} in this shell to judge what the service runs`,
-		});
-	}
 	if (service.hazardSkipped.length > 0) {
 		const { hazard } = serviceEnvFile;
 		checks.push({ ok: false, label: `${serviceEnvFile.path} line ${hazard.line} ${hazard.what}, so doctor read none of ${service.hazardSkipped.join(", ")} from it and judged this shell's values (or the defaults) instead: the service's own are unknown`, fix: hazard.fix });
@@ -5251,44 +5102,22 @@ export function consoleChecks(env, { cwd = process.cwd(), fs = nodeFs, uid = pro
 	return checks;
 }
 
-/** The console's service name on Windows, where nssm keeps one machine-scoped service per name (service.mjs). */
-const CONSOLE_NSSM_SERVICE = "pi-dispatch-console";
-
 /**
- * The console service unit installed for the deployment in `cwd` (issue #708): `{ path }` (the unit file, or the nssm
- * service's name on win32), else null. Read as the worker's unit is (`installedWorkerUnit`): a unit FILE whose
- * WorkingDirectory is this folder (`readUnitSeam`), in either scope; on win32 the nssm service by name, since nssm
- * keeps the folder apart (AppDirectory) and there is one such service per machine.
- */
-async function installedConsoleUnit({ platform, home, cwd, fileExists, readUnit = (path) => readFileSync(path, "utf8"), spawn }) {
-	if (platform === "win32") {
-		if (typeof spawn !== "function") return null;
-		const got = await runCmdCapture(spawn, "nssm", ["status", CONSOLE_NSSM_SERVICE]);
-		return got.code === 0 ? { path: CONSOLE_NSSM_SERVICE } : null;
-	}
-	const path = installedConsoleUnitPath({ platform, home, cwd, fileExists, readUnit });
-	return path === null ? null : { path };
-}
-
-/**
- * The console's service lines (issue #708): whether a service unit keeps the console of this deployment running, and
- * whether the console answers (`probeConsole`: one GET /healthz to the loopback address or the socket it binds, 1 s).
- *   - a unit installed and the console answering: ✓;
- *   - a unit installed and nothing answering: ✗, since the service exists to keep it answering (`serve` exits 2 on a
- *     refusal and the unit then stays stopped, so the unit's log says which);
- *   - no unit and nothing answering: ⚠, with the install command;
- *   - no unit and the console answering: ✓, saying it was started by hand and stops with its terminal;
- *   - an address the probe may not or cannot ask (port 0, a non-loopback bind): the unit line alone, and why the
- *     answer is not known.
+ * The console's line (issue #708; revised for the container-only deployment): whether the console of this deployment
+ * answers (`probeConsole`: one GET /healthz to the loopback address or the socket it binds, 1 s). Host service units are
+ * gone — the console is its own compose profile — so the line reports what the probe found and, when nothing answers,
+ * the command that starts it.
+ *   - answering: ✓, naming where it is reached;
+ *   - not answering: ⚠, with the compose command and where its log is;
+ *   - an address the probe may not or cannot ask (port 0, a non-loopback bind): the answer is not known, and why.
  * NOTHING when the console could not start on its listen address at all: `consoleChecks` already fails that line, and a
  * second line saying it does not answer would be the same fact twice. `env` carries the console keys resolved as
- * `collectChecks` resolves them; no other key is read. Seams: `consoleProbe(env)`, `fileExists`, `readUnit`, `spawn`.
+ * `collectChecks` resolves them; no other key is read. Seams: `consoleProbe(env)`.
  */
 export async function consoleServiceChecks(env, seams = {}) {
 	const { platform = process.platform, cwd = process.cwd() } = seams;
 	const listen = consoleListenOf(env.PI_CONSOLE_LISTEN, platform);
 	if (listen.refusal || (!listen.loopback && env.PI_CONSOLE_BIND_PUBLIC !== "1" && !listen.defaulted)) return [];
-	const unit = await installedConsoleUnit({ ...seams, platform, cwd, fileExists: seams.fileExists ?? existsSync });
 	const probe = seams.consoleProbe ?? (async (e) => (await import("./console-probe.mjs")).probeConsole(e));
 	let answer;
 	try {
@@ -5298,18 +5127,11 @@ export async function consoleServiceChecks(env, seams = {}) {
 	}
 	const at = answer.target ? ` on ${escapeControls(answer.target)}` : "";
 	const why = answer.reason ? ` (${escapeControls(answer.reason)})` : "";
-	const unitShown = unit ? quotedShown(unit.path) : null;
-	const logs = platform === "linux" ? "`journalctl --user -u pi-dispatch-console` (or without --user for a system unit)" : platform === "darwin" ? `${join(cwd, "logs", "console.err.log")}` : `${join(cwd, "logs", "console.err.log")} and \`nssm status ${CONSOLE_NSSM_SERVICE}\``;
-	if (answer.state === "unknown") {
-		return [{ ok: true, label: `console: ${unit ? `the service ${unitShown} serves this deployment; ` : "no service unit keeps it running; "}whether it answers is not checked${why}` }];
-	}
-	if (unit && answer.state === "running") return [{ ok: true, label: `console: the service ${unitShown} keeps it running, and it answers${at}` }];
-	if (unit) {
-		const lock = join(logsDirPath(env, seams.home), "console-audit", ".console.lock");
-		return [{ ok: false, label: `console: the service ${unitShown} is installed for this deployment, but nothing answers${at}${why}`, fix: `\`pi-dispatch service status --console\` says whether it runs, and ${logs} says why it stopped: \`pi-dispatch-console serve\` exits 2 on a refusal (no operator token, the lock held by another console, an address in use), and the unit then stays stopped until it is started again (\`pi-dispatch service start --console\`). After a crash the lock ${escapeControls(lock)} can name a pid another process has since taken, which keeps every start refusing: when that pid is not a console, remove the lock, then start the unit` }];
-	}
-	if (answer.state === "running") return [{ ok: true, label: `console: answers${at}, started by hand (no service unit for this deployment, so it stops with the terminal that runs it)` }];
-	return [{ ok: false, warn: true, label: `console: not running${at}${why}, and no service unit keeps it running`, fix: "`pi-dispatch service install --console` keeps it running (it needs an operator token); or start it in a terminal with `pi-dispatch-console serve`" }];
+	const start = "`docker compose --env-file .env -f deploy/docker-compose.yml --profile console up -d`";
+	const logs = platform === "win32" ? `${join(cwd, "logs", "console.err.log")}` : "`docker compose --env-file .env -f deploy/docker-compose.yml logs console`";
+	if (answer.state === "unknown") return [{ ok: true, label: `console: whether it answers is not checked${why}` }];
+	if (answer.state === "running") return [{ ok: true, label: `console: answers${at}` }];
+	return [{ ok: false, warn: true, label: `console: not running${at}${why}`, fix: `${start} starts it (it needs an operator token); its log is ${logs}` }];
 }
 
 /**
@@ -6885,9 +6707,8 @@ function proxyConfCopyCheck({ path, name, seams, skip = () => false, refresh }) 
  * REQ-EGRESS-ALLOWLIST. What the shipped egress policy actually is on this host, read back from docker
  * rather than assumed from the compose file that was supposed to create it.
  *
- * Returns [] when `PI_EGRESS=0`, so a deployment that declined the policy gets byte-identical output --
- * the same convention envSetupChecks follows one feature over. Armed is the DEFAULT, so most deployments
- * see these lines.
+ * Returns [] when `PI_EGRESS=0`, so a deployment that declined the policy gets byte-identical output.
+ * Armed is the DEFAULT, so most deployments see these lines.
  *
  * TIERING, and it is the whole editorial judgement here. The proxy's PRESENCE is a hard failure when the
  * policy is armed: the worker refuses every job pre-spend without it, so a ✓ would be a lie and a ⚠ would
@@ -7897,155 +7718,6 @@ export function allowlistHostAliases(text) {
 	return HOST_ALIASES.filter((a) => found.has(a)).map((alias) => ({ alias, entry: found.get(alias) }));
 }
 
-/**
- * The services installed for THIS folder (the worker, the receiver and, since issue #708, the console), as
- * `[{ which, source, setup }]` (`setup` null for a unit
- * rendered without `--env-setup`): an installed unit whose WorkingDirectory is this folder (systemd, launchd), or the
- * nssm service by name on win32, where nssm keeps the folder in a separate AppDirectory property and there is exactly
- * one machine-scoped service per name. Read ONCE (issue #481, PR #485's final review) and shared by the env-setup lines
- * and every check that asks whether a service's script may supply a value, so no second `nssm get` is spent.
- */
-async function installedServices(seams) {
-	const { cwd, spawn, fileExists, platform, home } = seams;
-	const found = [];
-	if (platform === "win32") {
-		for (const which of ["worker", "receiver", "console"]) {
-			const service = `pi-dispatch-${which}`;
-			const got = await runCmdCapture(spawn, "nssm", ["get", service, "AppEnvironmentExtra"]);
-			// Not installed, or nssm not on PATH: silence. Same doctrine as check-ignore below -- a check
-			// nobody can silence must never cry wolf, and "could not ask" is not "misconfigured".
-			if (got.code !== 0) continue;
-			found.push({ which, source: `${service}'s AppEnvironmentExtra`, setup: readUnitSeam(got.output, "win32").setup });
-		}
-	} else {
-		for (const { path, which } of installedUnitPaths(platform, home)) {
-			if (!fileExists(path)) continue;
-			let seam;
-			try {
-				seam = readUnitSeam(readFileSync(path, "utf8"), platform);
-			} catch {
-				continue; // a system-scope unit this user may not read: which deployment it serves is unknowable
-			}
-			if (seam.deployDir !== cwd) continue;
-			found.push({ which, source: path, setup: seam.setup });
-		}
-	}
-	return found;
-}
-
-/**
- * Where this deployment's service sources an `--env-setup` script from, as `Map<path, how doctor learned it>`, for the
- * env-setup lines: the installed services for this folder, else PI_ENV_SETUP in doctor's own environment. The
- * fallback is for REPORTING only (it answers for a doctor run through the environment launchd or nssm give the service);
- * nothing a service may or may not be given is judged from it (`setupSupplies`).
- */
-function envSetupSources(env, services) {
-	const sources = new Map(); // setup path -> how doctor learned it; the first source to name it wins
-	for (const { setup, source } of services) if (setup && !sources.has(setup)) sources.set(setup, source);
-	// env-internal PI_ENV_SETUP: unit configuration, deliberately never an .env key. The wrappers capture
-	// it BEFORE they source ./.env so that nothing able to write that file can name a script they run
-	// (REQ-DEPLOYMENT-BOOTSTRAP). doctor reads it here only to answer for a host whose unit names none.
-	// NOT trimmed, because `worker-env-wrapper.sh` does not trim: it tests `[ -n "$env_setup" ]` and then
-	// `[ ! -f "$env_setup" ]`, so `PI_ENV_SETUP="   "` is a CONFIGURED script that does not exist and the
-	// wrapper refuses to start on it. Trimming here read that as unset, so the one deployment shape where
-	// the worker cannot boot got no line anywhere in the report (issue #384).
-	const fromEnv = env.PI_ENV_SETUP ?? "";
-	if (sources.size === 0 && fromEnv !== "") sources.set(fromEnv, "PI_ENV_SETUP in this environment");
-	return sources;
-}
-
-/**
- * The `--env-setup` script (issue #216). `pi-dispatch service render|install --env-setup <path>` names a
- * script the service manager SOURCES at every boot, as the service user, with the deployment's
- * environment -- and after that nothing ever looks at it again. resolveEnvSetup checked it existed once,
- * at render time, on a host that may not be this one.
- *
- * doctor has to DISCOVER the path before it can check it, because --env-setup is a render-time flag and
- * the rendered unit is the only place it lives. Two sources, in this order:
- *
- *   1. The installed units for THIS deployment -- the file that actually boots, and so the honest
- *      answer. A unit whose WorkingDirectory names some other folder belongs to some other deployment on
- *      the same host and is deliberately skipped: doctor is this deployment's preflight, and warning
- *      about a neighbour's unit would fire forever on a host that runs two.
- *   2. PI_ENV_SETUP in doctor's OWN environment, and only when (1) found nothing. That is what launchd
- *      and nssm put in front of the wrapper, so it is the right answer for a doctor run through the same
- *      environment the service gets. It is a different question from (1), which is why every line below
- *      names the source it came from rather than blurring the two.
- *
- * Everything here is warn-tier and nothing carries a `fixAction` -- the never tier
- * (REQ-DEPLOYMENT-BOOTSTRAP): doctor does not chmod an operator's file and does not move it. Nor does it
- * ever OPEN the script. The script holds no secret by design, but what it holds is the commands that
- * fetch them, and a preflight that echoed those would be publishing the map instead of the treasure.
- *
- * Returns [] when no seam is configured, so a deployment that does not use one gets byte-identical
- * output.
- */
-async function envSetupChecks(env, seams, sources) {
-	const { spawn, fileExists, platform, runTimeouts = RUN_TIMEOUTS } = seams;
-
-	const checks = [];
-	for (const [setup, source] of sources) {
-		if (!fileExists(setup)) {
-			checks.push({
-				ok: false,
-				warn: true,
-				label: `the env-setup script at ${envValueShown(setup)} does not exist (named by ${source})`,
-				fix: "restore it, or re-render without --env-setup -- the service manager sources it at every boot, so until it is back the unit exits 1 in a restart loop and the worker never starts",
-			});
-			continue;
-		}
-		checks.push({ ok: true, label: `env-setup script present (${setup}, named by ${source})` });
-
-		// WRITABILITY, not readability -- deliberately `& 0o022` and not the App key's `& 0o077`. This file
-		// is EXECUTED (sourced) by the account that holds the provider key and the forge token, so anyone
-		// who can edit it owns the worker. That it is READABLE is fine: it holds no secret by design.
-		// POSIX only, for the same reason the App key's mode check skips win32 -- stat modes are synthetic
-		// there, so this would warn on every healthy Windows deployment and teach operators to scroll past.
-		if (platform !== "win32") {
-			try {
-				if ((statSync(setup).mode & 0o022) !== 0) {
-					checks.push({
-						ok: false,
-						warn: true,
-						label: `the env-setup script at ${setup} is group/world-writable`,
-						fix: `chmod go-w ${setup} -- the service manager sources it at every boot as the account that holds the provider key and the forge token, so whoever can edit it owns the worker`,
-					});
-				}
-			} catch {
-				// stat raced a deletion or an exotic fs: the presence line above already covered existence.
-			}
-			const dir = dirname(setup);
-			try {
-				const mode = statSync(dir).mode;
-				// Sticky (0o1000) is exempt and must stay exempt: in a sticky directory a non-owner cannot
-				// rename or delete someone else's file, so "anyone can replace it" would simply be false there.
-				if ((mode & 0o022) !== 0 && (mode & 0o1000) === 0) {
-					checks.push({
-						ok: false,
-						warn: true,
-						label: `the directory holding the env-setup script (${dir}) is group/world-writable`,
-						fix: `chmod go-w ${dir} -- the script's own mode does not help when anyone can replace the file, and the manager sources whatever is there at the next boot`,
-					});
-				}
-			} catch {
-				// an unreadable parent directory: nothing to claim either way.
-			}
-		}
-
-		// The #211 question, asked of a different file. Exit 1 is again the ONLY case that speaks: 0 means
-		// ignored, 128 means no work tree, null means git could not be launched, and all three are silence.
-		const ignoreCode = (await runCmd(spawn, "git", [...GIT_READ_FLAGS, "-C", dirname(setup), "check-ignore", "-q", setup], runTimeouts.cmd)).code;
-		if (ignoreCode === 1) {
-			checks.push({
-				ok: false,
-				warn: true,
-				label: `the env-setup script at ${setup} is inside a git work tree that does not ignore it`,
-				fix: "move it outside that repo, or ignore it there -- it holds no secret by design, but it holds the commands that FETCH them (client and project ids, a manager address, sometimes a path to a credential file), which is a map to every secret this deployment uses",
-			});
-		}
-	}
-	return checks;
-}
 
 /**
  * READ-ONLY branch-protection preflight for the github repos the triggers file names (issue #80,
@@ -9470,7 +9142,7 @@ export function backendChecks(env, { endpoint = null, daemon = null } = {}) {
  * above already failed.
  */
 export async function jobUserChecks(env, seams, { endpoint, dockerCode, imageCode, jobImage }) {
-	const { spawn, cwd, home, fileExists, jobUserIdentity: ids = {}, stat, passwd, readUnit = (path) => readFileSync(path, "utf8") } = seams;
+	const { spawn, cwd, home, fileExists, jobUserIdentity: ids = {}, stat, passwd } = seams;
 	if (dockerCode !== 0) return { checks: [], forLive: { run: true, user: null }, daemon: null };
 	const platform = ids.platform ?? seams.platform;
 	// The worker's bound, not the endpoint read's 5 s: `docker info` is the slow read on a busy host, and a doctor that
@@ -9530,72 +9202,6 @@ export async function jobUserChecks(env, seams, { endpoint, dockerCode, imageCod
 			const forwarded = (env.PI_FORWARD_ENV ?? "").split(",").map((s) => s.trim());
 			if (forwarded.includes("HOME")) {
 				checks.push({ ok: false, warn: true, label: "PI_FORWARD_ENV names HOME, which a job run as --user never receives", fix: `the worker sets HOME=${CONTAINER_HOME} after the forwarded names, so the forwarded value is dropped; remove HOME from PI_FORWARD_ENV` });
-			}
-		}
-	}
-	// This answer is THIS SHELL's. A system unit that runs the WORKER as another account decides for that account (the
-	// receiver runs no job, so its unit is not compared). Drop-ins (`*.service.d/*.conf`) are not read.
-	if (platform === "linux" && typeof ids.euid === "number") {
-		for (const { path, scope, which } of installedUnitPaths(platform, home)) {
-			if (which !== "worker" || scope !== "system" || !fileExists(path)) continue;
-			let text;
-			try {
-				text = readUnit(path);
-			} catch {
-				continue;
-			}
-			if (readUnitSeam(text, platform).deployDir !== cwd) continue;
-			// ONLY an explicit User= is compared, and nothing is inferred from its absence: a unit with none (root, or a
-			// DynamicUser= uid) is not guessed at here, because guessing produced wrong texts for every case the guess
-			// missed. What covers the gap is not universal and the comment used to say it was: a root worker refuses to
-			// BOOT only while `local` is the default venue (`BOOT_REFUSING_JOB_USER_CAUSES`); otherwise it boots and
-			// refuses each local job with `worker-is-root`. An explicit `User=` IS compared, and for uid 0 the fix
-			// below states the refusal instead of sending the operator to find it.
-			const user = readUnitUser(text, platform);
-			if (user === null) continue;
-			const uid = /^\d+$/.test(user) ? Number(user) : uidOf(user, passwd);
-			if (uid !== null && uid !== ids.euid) {
-				// UID 0 gets the ANSWER instead of the instruction (issue #348), and doctor names it only where it is
-				// CERTAIN. The certainty is narrow and is the whole rule: when THIS SHELL's decision is `worker`, the
-				// daemon maps uids fine and the only thing separating this shell from the unit's account is rootness,
-				// so that account gets `worker-is-root`. The facts have to be the same facts, and they are read from
-				// THIS process: a unit pointing the service at another daemon through `Environment=` would not be
-				// seen, because `readUnitSeam` reads `ExecStart`'s `--env-setup` and `WorkingDirectory` and nothing
-				// else. Every other decision keeps the instruction, and for two different reasons rather than one.
-				// A host-level refusal (a userns-remapped daemon, Docker Desktop on Linux, an unreadable answer, an
-				// endpoint that is not here) is already stated by the `local:` line above and this line would only
-				// repeat it. A refusal inferred from THIS SHELL's own socket is the opposite case: that row is
-				// narrowed to `socket.uid === euid`, so it says nothing about another account, and the instruction
-				// is the only honest answer there. Both keep it; neither wants a per-account refusal invented.
-				//
-				// TWO WRONG VERSIONS were caught in review and both belong here, because each looks right. Printing
-				// `worker-is-root` for any explicit uid 0 tells an operator on a rootless daemon to run the worker as
-				// an unprivileged account, which the line above has just refused. Re-asking `decideJobUser` with
-				// `euid: 0` looks like the careful repair and is worse: its socket-owner rootless row is guarded
-				// `euid !== 0`, so forcing uid 0 DISCARDS the one row that detects a rootless Podman older than
-				// 4.9.3, and the answer comes back `worker-is-root` on exactly the host where that is most wrong.
-				const rootFix = uid === 0 && decision.mode === "worker" ? JOB_USER_FIX["worker-is-root"] : null;
-				// sudo reads a bare number as a user NAME, not a uid: `man sudo` wants `#4242`, and the `#` has to be
-				// quoted or an interactive shell swallows the rest of the line as a comment. Reachable for 0 only
-				// since this line stopped always answering for root, and wrong for every numeric unit before that.
-				// The NAME branch is quoted on the same rule, which #368 closed for the numeric half and left
-				// open here (issue #370, item 3): an `/etc/passwd` entry whose name carries a space or a shell
-				// metacharacter renders a line that does not do what it appears to when pasted. Anything
-				// outside `[A-Za-z0-9._-]` is single-quoted, and an embedded single quote is closed, escaped
-				// and reopened, which is the only form `sh`, `bash` and `zsh` all read back exactly. Effectively
-				// unreachable, and closed with the half beside it rather than left as the odd one out.
-				const asAccount = /^\d+$/.test(user) ? `'#${user}'` : /^[A-Za-z0-9._-]+$/.test(user) ? user : `'${user.replace(/'/g, `'\\''`)}'`;
-				checks.push({
-					ok: false,
-					warn: true,
-					// "MAY NOT BE", not "is not" (issue #370, item 2). Under `userns-remap`, `desktop-linux-userns`,
-					// `runtime-unreadable` and a daemon reporting `name=rootless`, the refusal is host-level: every
-					// account on this host gets the identical verdict, so the line above IS the service's answer too
-					// and re-running as that account changes nothing. "may not be" is true in every mode, and this is
-					// the mirror image of a correction #368 made to the comment beside it.
-					label: `this shell is uid ${ids.euid}, but ${path} runs the worker as ${user} (uid ${uid}), so the job-user line above is this shell's answer and may not be the service's`,
-					fix: rootFix ?? `re-run doctor as that account (sudo -u ${asAccount} pi-dispatch doctor) to see what its jobs run as`,
-				});
 			}
 		}
 	}
@@ -9743,20 +9349,6 @@ function runtimeLine(daemon) {
 	return { ok: true, label: `local: the daemon is Docker Engine${version}${facts.rootless ? ", rootless" : ""}` };
 }
 
-/** A user name's uid from passwd text, or `null`. Never throws: an unreadable file is simply no answer. */
-function uidOf(name, passwd) {
-	let text;
-	try {
-		text = passwd();
-	} catch {
-		return null;
-	}
-	for (const line of String(text ?? "").split("\n")) {
-		const [user, , uid] = line.split(":");
-		if (user === name && /^\d+$/.test(uid ?? "")) return Number(uid);
-	}
-	return null;
-}
 
 /**
  * The endpoint resolver's `run` seam over doctor's own spawn (#278), so the tests' fake spawn answers it. Bounded

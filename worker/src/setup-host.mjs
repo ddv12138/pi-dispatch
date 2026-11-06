@@ -3,10 +3,8 @@ import * as nodeFs from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir, hostname, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { deploymentServiceEnv } from "./service-env.mjs";
 import { ENV_WRITER_FS, planEnvEdit, readEnvAssignments, updateEnvFile } from "./env-file.mjs";
-import { planServiceSetup, runService } from "./service.mjs";
 import { apiKeyVariable, needsHostAuthentication, nonApiKeyKind } from "./provider-key.mjs";
 import { resolveSetupWorkerEntry } from "./setup-host-entry.mjs";
 import { SETUP_LIMITS, SETUP_VERSION, validSetupRequest } from "./setup-contract.mjs";
@@ -15,7 +13,6 @@ import { providerFrom, settingsFilePath, workerName } from "./config.mjs";
 import { readOverlay } from "./runtime-settings.mjs";
 
 const hash = (value) => createHash("sha256").update(typeof value === "string" || Buffer.isBuffer(value) ? value : JSON.stringify(value)).digest("hex");
-const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 function failure(reason) { return { refusal: reason }; }
 
 function sourceSnapshot(path, ctx) {
@@ -62,7 +59,7 @@ async function providerPlan(request, ctx, envRead) {
 	const declared = deploymentServiceEnv({ env: {}, dir: ctx.dir, keys, fs: ctx.fs, uid: ctx.uid, platform: ctx.platform });
 	if (declared.untrusted || declared.unreadable || declared.hazardSkipped?.length || declared.unread?.length) return failure("env-unsafe");
 	const configured = { ...Object.fromEntries(keys.filter((key) => typeof ctx.env[key] === "string").map((key) => [key, ctx.env[key]])), ...declared.env };
-	const settingsPath = resolve(ctx.dir, settingsFilePath(configured, ctx.serviceDeps.home));
+	const settingsPath = resolve(ctx.dir, settingsFilePath(configured, ctx.home));
 	const settings = sourceSnapshot(settingsPath, ctx);
 	if (settings.refusal) return settings;
 	const loaded = readOverlay(settingsPath, { fs: { readFileSync: () => { if (settings.bytes === null) throw Object.assign(new Error(), { code: "ENOENT" }); return String(settings.bytes); } } });
@@ -106,7 +103,7 @@ async function providerPlan(request, ctx, envRead) {
 	if (!assigned && configured.PI_AUTH_FROM_PI !== "0") {
 		// Only identify the declaration being superseded. Its value never leaves this child,
 		// and this does not claim the provider has accepted or can spend with that credential.
-		const agentDir = resolve(ctx.dir, configured.PI_CODING_AGENT_DIR || join(ctx.serviceDeps.home, ".pi", "agent"));
+		const agentDir = resolve(ctx.dir, configured.PI_CODING_AGENT_DIR || join(ctx.home, ".pi", "agent"));
 		const login = sourceSnapshot(join(agentDir, "auth.json"), ctx);
 		if (login.refusal) return login;
 		if (login.bytes !== null) {
@@ -136,13 +133,11 @@ async function makePlan(request, ctx) {
 		return got.refusal ? got : { ...got, component: "egress", inputs: { ...got.inputs, env: envRead.digest } };
 	}
 	if (request.operation === "setup-doctor") return { component: "doctor", effects: ["publish-doctor"], inputs: { env: envRead.digest } };
-	const [, component, operation] = /^setup-(worker|receiver)-(install|start|stop|restart)$/.exec(request.operation) ?? [];
-	if (!component) return failure("invalid-request");
-	const argv = [operation, ...(component === "receiver" ? ["--receiver"] : [])];
-	const planned = await ctx.servicePlan(argv, ctx.serviceDeps);
-	if (!planned || typeof planned !== "object") return failure("unavailable");
-	if (planned.refusal) return planned;
-	return { component, effects: planned.effects, inputs: { env: envRead.digest, unit: planned }, service: { argv, planned } };
+	// Host services are gone: deployment is Linux containers, and the worker, receiver and console are compose
+	// profiles. The contract still names these operations (the console's action list is generated from it), so they
+	// are refused with a reason rather than dropped from the vocabulary.
+	if (/^setup-(worker|receiver)-(install|start|stop|restart)$/.test(request.operation)) return failure("unavailable");
+	return failure("invalid-request");
 }
 
 /** Injectable worker boundary; production callers enter through the fixed CLI's stdin only. */
@@ -163,8 +158,7 @@ export async function runSetupHost(request, deps = {}) {
 	if (!["linux", "darwin"].includes(platform) || (platform === "darwin" && uid === 0)) return answer("refused", "unsupported");
 	const entry = (deps.resolveEntry ?? resolveSetupWorkerEntry)();
 	if (!entry?.entry) return answer("refused", "unsafe-entry");
-	const serviceDeps = { env, cwd: dir, platform, euid: uid, fs, home: deps.home ?? homedir(), moduleDir: dirname(entry.entry), ...(deps.serviceDeps ?? {}) };
-	const ctx = { dir, fs, uid, platform, env, serviceDeps, servicePlan: deps.servicePlan ?? planServiceSetup, runService: deps.runService ?? runService, ...(deps.egressDeps ?? {}), providerCandidates: deps.providerCandidates ?? (async (provider) => (await import("./env-allowlist.mjs")).providerKeyCandidates(provider)), providerNames: deps.providerNames ?? (async () => (await import("./env-allowlist.mjs")).piProviders()) };
+	const ctx = { dir, fs, uid, platform, env, home: deps.home ?? homedir(), ...(deps.egressDeps ?? {}), providerCandidates: deps.providerCandidates ?? (async (provider) => (await import("./env-allowlist.mjs")).providerKeyCandidates(provider)), providerNames: deps.providerNames ?? (async () => (await import("./env-allowlist.mjs")).piProviders()) };
 	let lock;
 	try {
 		if (request.phase === "apply") {
@@ -177,9 +171,9 @@ export async function runSetupHost(request, deps = {}) {
 		if (workerRead.untrusted || workerRead.unreadable || workerRead.unread?.length || workerRead.hazardSkipped?.length) return answer("refused", "unsafe-deployment");
 		const registeredName = workerName({ ...env, ...workerRead.env });
 		const digest = hash({ operation: request.operation, entry: entry.entry, uid, dir, registeredName, inputs: plan.inputs });
-		const publicPlan = { digest, component: plan.component, manager: platform === "linux" ? "systemd" : "launchd", host: String((deps.hostname ?? hostname)()).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64), workerName: registeredName, account: String(deps.account ?? userInfo().username).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64), effects: plan.effects, ...(plan.key ? { key: plan.key, provider: plan.provider, mode: plan.mode, aliases: plan.aliases, source: plan.source } : {}) };
+		const publicPlan = { digest, component: plan.component, manager: "compose", host: String((deps.hostname ?? hostname)()).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64), workerName: registeredName, account: String(deps.account ?? userInfo().username).replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 64), effects: plan.effects, ...(plan.key ? { key: plan.key, provider: plan.provider, mode: plan.mode, aliases: plan.aliases, source: plan.source } : {}) };
 		if (request.phase === "plan") return answer("planned", "ready", { plan: publicPlan });
-		if (request.phase === "status") return answer(plan.service?.planned.active ? "applied" : "unchanged", "ready", { plan: publicPlan });
+		if (request.phase === "status") return answer("unchanged", "ready", { plan: publicPlan });
 		if (request.expected !== digest) return answer("refused", "plan-stale");
 		if (plan.component === "provider") {
 			const value = request.input?.value;
@@ -219,11 +213,7 @@ export async function runSetupHost(request, deps = {}) {
 			const result = await applySetupEgress(plan, ctx);
 			return answer(result.state, result.reason, { effects: result.effects ?? [] });
 		}
-		const code = await ctx.runService(plan.service.argv, { ...serviceDeps, setupExpected: plan.service.planned, out: () => {}, err: () => {} });
-		const readback = await ctx.servicePlan(["start", ...(plan.component === "receiver" ? ["--receiver"] : [])], serviceDeps);
-		const wanted = plan.service.argv[0] !== "stop";
-		if (!readback?.refusal && Boolean(readback.active) === wanted) return answer(code === 0 ? "applied" : "partial", code === 0 ? "ready" : "process-failed", { effects: plan.effects });
-		return answer("unknown", code === 0 ? "readback-unavailable" : "process-failed", { effects: plan.effects });
+		return answer("refused", "unavailable");
 	} catch { return answer(request.phase === "apply" ? "unknown" : "refused", "unavailable"); }
 	finally { lock?.release?.(); }
 }
