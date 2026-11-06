@@ -42,9 +42,23 @@ The job image is published from a checkout, not by CI: on the maintainer's machi
 | `docker.io/ddv12138/pi-job-java21:<version>` | a Java flow, through that trigger's `run.image` |
 
 Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
-Maven. What this host runs is `PI_JOB_IMAGE` from `deploy/docker-compose.yml`, which wins over the same key in
-`.env` (`environment:` beats `env_file:`). Keep the `.env` line pointing at the same image so nothing reads two
-answers.
+Maven.
+
+This host runs the `…-5d10c5d2` tags: the images built from commit `5d10c5d2`, which postdates the released
+`4.3.2` and drops the sandbox backends that release's image still carries. That pin is fragile, because
+`PI_JOB_IMAGE` from `deploy/docker-compose.yml` **wins over the same key in `.env`** (`environment:` beats
+`env_file:`), so the pin is a hand edit of the shipped file and staging a new snapshot reverts it to
+`docker.io/ddv12138/pi-job:4.3.2`. That image is in the local store, so nothing fails and jobs silently run the
+older one. After every staging, re-apply the pin:
+
+```bash
+sed -i 's#^      PI_JOB_IMAGE: .*#      PI_JOB_IMAGE: docker.io/ddv12138/pi-job:4.3.2-5d10c5d2#' deploy/docker-compose.yml
+```
+
+The durable fix is the release, not the edit: bump `package.json`, run `./image/publish.sh` (it tags
+`:<version>`), and the shipped default follows the number again. Until then the alternative is
+`deploy/docker-compose.override.yml`, whose `environment:` map merges over the shipped one and which a staging
+does not touch — set `PI_JOB_IMAGE` there and drop the hand edit.
 
 Jobs launch with `--pull=never`, so nothing is fetched at job time: pull the image here first, and verify it here
 (`./image/verify-image.sh docker.io/ddv12138/pi-job:<version>`). Docker Hub itself is not reachable directly from
@@ -52,7 +66,9 @@ this host (`registry-1.docker.io` refuses); the pull works through the registry 
 `/etc/docker/daemon.json`.
 
 Roll back by re-running the previous tag: keep the old `deploy-worker` image tag and the old job image tag in the
-local store before an update.
+local store before an update. A `deploy-worker` image built before the build-context fix below carries the
+deployment's `.env` backups in its layers, so it is not rollback material — rebuild that tag from the old snapshot
+instead of keeping the image.
 
 ## The Java trigger
 
@@ -90,7 +106,9 @@ Maven settings are baked at build time, not passed by the job:
 `pi/issue-<spec>`; it never merges or pushes the spec branch. `ticket-merge` drains the open ticket -> spec MRs,
 serializes them per spec with the lock branch `pi/spec-lock-<n>`, and merges only after testing the merged ticket
 branch. It never merges spec -> master; that remains a human step. Ticket jobs stay parallel; only merges queue.
-`PI_CONCURRENCY` (3) and `PI_DAILY_CAP` (25) still bound the deployment, and no `concurrent: 1` is used.
+`PI_CONCURRENCY` (6) and `PI_DAILY_CAP` (25) still bound the deployment, and no `concurrent: 1` is used. Six is
+what the rest of `.env` holds beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
+`PI_HOST_MEMORY_BUDGET` of 12g and a `PI_HOST_CPU_BUDGET` of 6.
 
 The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
 different: see below. An edited `triggers.json` still needs the receiver force-recreate described there.
@@ -159,8 +177,11 @@ be re-armed.
 
 ## Egress
 
-`egress-allowlist.conf` holds one host per line: `git.133ec.com` (a job's clone and push) and `maven.aliyun.com`
-(the Java image's Maven mirror). Reload after an edit:
+`egress-allowlist.conf` holds one host per line, six of them today: `api.anthropic.com` (doctor's provider probe;
+`PI_PROVIDER` here is `tencentmaas`, but the probe still asks it), `.github.com` (the leading dot takes the
+subdomains), `registry.npmjs.org` (a serviced repo's own dependencies), `tokenhub.tencentmaas.com` (the model
+provider), `git.133ec.com` (a job's clone and push) and `maven.aliyun.com` (the Java image's Maven mirror). Reload
+after an edit:
 
 ```bash
 docker exec pi-dispatch-egress-proxy squid -k reconfigure
@@ -181,6 +202,20 @@ adaptation while staging, so re-stage the package instead of hand-patching the s
 
 Stage a committed snapshot over the source (keeping `.env` and `runtime/`) and rebuild the worker image, because the
 worker code decides the container env, the image defaults and the trigger validation.
+
+The staging **overlays** the tree and never deletes: a file a commit dropped stays where it was, so the folder stops
+matching a commit — and this folder is the Docker build context, so every leftover is copied into the next image.
+Clear what the current snapshot no longer ships before building:
+
+```bash
+rm -rf 253-deployment.md design gateway specs .pi .agents node_modules projects
+rm -f .env.bak-* .env.pre-* egress-allowlist.conf.bak-* deploy/docker-compose.yml.pre-* \
+      deploy/pi-dispatch-*.container deploy/pi-dispatch-*.network deploy/sandbox-gateway.service
+```
+
+Keep `.env` and `runtime/` — the session store and the job logs are state, not snapshot. The image's ignore file is
+`deploy/worker.Dockerfile.dockerignore`, not the shipped `.dockerignore`, so it alone decides what leaves this folder
+for `/opt/pi-dispatch`; it keeps `runtime`, `.git`, `node_modules` and the `.env` variants out.
 
 ```bash
 cd /root/pi-dispatch
