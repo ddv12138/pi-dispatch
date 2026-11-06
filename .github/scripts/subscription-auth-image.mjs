@@ -68,9 +68,12 @@ globalThis.fetch = async (input, init) => {
   if (process.env.PI_AUTH_SMOKE_MODE === "token") {
     // A small 200 with real usage: the settle-time token cap (PI_MAX_TOKENS=1) fires on it, so the job ends
     // token_budget after ONE metered dispatch, the lagging backstop OQ-010 keeps describing.
-    const usage = provider === "openai" ? {input:5,output:5,total_tokens:10} : {input_tokens:5,output_tokens:5};
-    const body = provider === "openai" ? {id:"resp_smoke",object:"response",status:"completed",model:process.env.PI_MODEL,output:[],usage} : {id:"msg_smoke",type:"message",role:"assistant",model:process.env.PI_MODEL,content:[],stop_reason:"end_turn",usage:{...usage,cache_creation_input_tokens:0,cache_read_input_tokens:0}};
-    return new Response(JSON.stringify(body), {status:200,headers:{"content-type":"application/json"}});
+    const usage = {input_tokens:5,output_tokens:5};
+    const events = provider === "openai"
+      ? [{type:"response.completed",response:{id:"resp_smoke",object:"response",status:"completed",model:process.env.PI_MODEL,output:[],usage:{...usage,total_tokens:10}}}]
+      : [{type:"message_start",message:{id:"msg_smoke",type:"message",role:"assistant",model:process.env.PI_MODEL,content:[],usage}}, {type:"message_delta",delta:{stop_reason:"end_turn"},usage}, {type:"message_stop"}];
+    const stream = events.map(event => "event: " + event.type + "\\ndata: " + JSON.stringify(event) + "\\n\\n").join("");
+    return new Response(stream, {status:200,headers:{"content-type":"text/event-stream"}});
   }
   if (process.env.PI_AUTH_SMOKE_MODE !== "provider") throw new Error("subscription smoke unexpected dispatch");
   return new Response(JSON.stringify({error:provider === "openai" ? {code:"usage_limit_reached",type:"usage_limit_reached",message:"synthetic quota refusal"} : {type:"rate_limit_error",message:"synthetic throttle"}}), {status:429,headers:{"content-type":"application/json","retry-after":"600"}});

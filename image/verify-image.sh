@@ -33,6 +33,14 @@ fail() {
 }
 ok() { echo "  ok   $1"; }
 
+# An offline container cannot receive an HTTP 401 from the provider. Supply that response
+# at the transport seam so the real SDK and runner still exercise their refusal path.
+auth_fixture() {
+	cat >"$1/auth-refusal.mjs" <<'EOF'
+globalThis.fetch = async () => new Response(JSON.stringify({ type: "error", error: { type: "authentication_error", message: "invalid api key" } }), { status: 401, headers: { "content-type": "application/json" } });
+EOF
+}
+
 echo "Verifying $IMAGE_REF against the job-image conformance checklist"
 echo
 
@@ -203,7 +211,7 @@ else
 	for capability in $(echo "$capabilities" | tr ',' ' '); do
 		case "$capability" in
 			tokenBudget)
-				docker run --rm --entrypoint grep "$IMAGE_REF" -q "PI_MAX_TOKENS" /opt/pi-dispatch/runner/usage-meter.mjs 2>/dev/null \
+				docker run --rm --entrypoint grep "$IMAGE_REF" -q "PI_MAX_TOKENS" /app/image/runner/src/config.mjs 2>/dev/null \
 					|| fail "the image declares 'tokenBudget' but its baked runner never reads PI_MAX_TOKENS -- the settle-time budget would not exist"
 				;;
 			replicas)
@@ -314,6 +322,7 @@ AGENTS
 				# mcp_servers_ready and then exit 2 with provider-auth-refused. A runner that ignored the file would exit
 				# without the log line; one that leaked the key, or never connected, would exit mcp-unavailable or hang.
 				mcp_job=$(mktemp -d)
+				auth_fixture "$mcp_job"
 				echo "Reply with the single word ok." >"$mcp_job/prompt.md"
 				cat >"$mcp_job/stub.mjs" <<'STUB'
 import { createInterface } from "node:readline";
@@ -337,7 +346,7 @@ DOC
 				mcp_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$mcp_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
 					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 \
-					-e PI_MCP_SERVERS=stub -e STUB_TOKEN=named \
+					-e PI_MCP_SERVERS=stub -e STUB_TOKEN=named -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && mcp_code=0 || mcp_code=$?
 				mcp_took=$(($(date +%s) - mcp_started))
 				rm -rf "$mcp_job"
@@ -434,7 +443,7 @@ PROBE
 				auth_want=$(printf '%s' "$auth_body" | openssl dgst -sha256 -hmac "$auth_key" | awk '{print $NF}')
 				[ -n "$auth_mac" ] && [ "$auth_mac" = "$auth_want" ] \
 					|| fail "the image declares 'exitAuth' but a job handed a key on stdin did not end on an exit line signed with it ($auth_exit)"
-				docker run --rm --init --cap-drop=ALL --security-opt no-new-privileges --entrypoint grep "$IMAGE_REF" -q '^"") node=/opt/pi-dispatch/runner-node ;;$' /entrypoint.sh 2>/dev/null \
+				docker run --rm --init --cap-drop=ALL --security-opt no-new-privileges --entrypoint grep "$IMAGE_REF" -q '^exec /opt/pi-dispatch/runner-node --disable-sigusr1 /app/image/runner/supervise.mjs$' /entrypoint.sh 2>/dev/null \
 					|| fail "the image declares 'exitAuth' but its entrypoint does not run the runner under /opt/pi-dispatch/runner-node by default"
 				docker run --rm --init --cap-drop=ALL --security-opt no-new-privileges --entrypoint /opt/pi-dispatch/runner-node "$IMAGE_REF" \
 					-e 'const r = require("node:child_process").spawnSync("sh", ["-c", "cat /proc/$PPID/environ"], { stdio: "ignore" }); process.exit(r.status === 0 ? 1 : 0)' >/dev/null 2>&1 \
@@ -609,6 +618,7 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				# A token cap, a fake key and no network make this a real runner proof that cannot spend provider tokens.
 				qg_dir=$(mktemp -d)
 				mkdir -p "$qg_dir/job" "$qg_dir/ws/.pi/extensions" "$qg_dir/outbox"
+				auth_fixture "$qg_dir/job"
 				printf '' >"$qg_dir/job/prompt.md"
 				cat >"$qg_dir/job/question-grouping.json" <<'QUESTIONGROUP'
 {"version":1,"model":{"provider":"openrouter","id":"typesafe/jev-1.13"},"source":"Which test command should I use?","candidates":[],"confidence":0.9}
@@ -620,7 +630,7 @@ QUESTIONGROUP
 				qg_out=$(printf '%s\n' "$qg_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$qg_dir/job:/job:ro" -v "$qg_dir/ws:/workspace:ro" -v "$qg_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && qg_code=0 || qg_code=$?
 				qg_exit=$(echo "$qg_out" | grep '"event":"exit"' | tail -1)
 				qg_mac=$(echo "$qg_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -630,7 +640,7 @@ QUESTIONGROUP
 				[ ! -f "$qg_dir/outbox/question-group.json" ] || qg_written=yes
 				rm -rf "$qg_dir"
 				[ "$qg_code" = 2 ] && [ -n "$qg_mac" ] && [ "$qg_mac" = "$qg_want" ] \
-					&& echo "$qg_exit" | grep -q '"reason":"provider-auth-refused"' \
+					&& echo "$qg_exit" | grep -q '"reason":"question-group-unanswered"' \
 					&& echo "$qg_exit" | grep -Eq '"toolsStarted":0[,}]' \
 					&& ! echo "$qg_out" | grep -q 'QUESTION-GROUP-EXTENSION-EXECUTED' \
 					&& [ "$qg_written" = no ] \
@@ -641,6 +651,7 @@ QUESTIONGROUP
 				# The token cap, the fake key and --network none make both probes deterministic and provider-free.
 				watch_dir=$(mktemp -d)
 				mkdir -p "$watch_dir/job" "$watch_dir/ws/.pi/extensions" "$watch_dir/outbox"
+				auth_fixture "$watch_dir/job"
 				echo 'Investigate the finding using read-only tools.' >"$watch_dir/job/prompt.md"
 				echo '{"version":1,"mode":"investigate"}' >"$watch_dir/job/watch.json"
 				echo 'console.log("WATCH-EXTENSION-EXECUTED"); export default function () {}' >"$watch_dir/ws/.pi/extensions/index.js"
@@ -649,7 +660,7 @@ QUESTIONGROUP
 				watch_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && watch_code=0 || watch_code=$?
 				watch_exit=$(echo "$watch_out" | grep '"event":"exit"' | tail -1)
 				watch_active=$(echo "$watch_out" | grep '"event":"tools_excluded"' | tail -1)
@@ -665,7 +676,7 @@ WATCHDECIDE
 				watch_gate=$(printf '%s\n' "$watch_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && watch_gate_code=0 || watch_gate_code=$?
 				watch_gate_exit=$(echo "$watch_gate" | grep '"event":"exit"' | tail -1)
 				watch_mac=$(echo "$watch_gate_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -673,8 +684,10 @@ WATCHDECIDE
 				watch_want=$(printf '%s' "$watch_body" | openssl dgst -sha256 -hmac "$watch_key" | awk '{print $NF}')
 				watch_decision=$(cat "$watch_dir/outbox/decision.json" 2>/dev/null || true)
 				rm -rf "$watch_dir"
-				[ "$watch_gate_code" = 2 ] && [ -n "$watch_mac" ] && [ "$watch_mac" = "$watch_want" ] && echo "$watch_gate_exit" | grep -q '"reason":"provider-auth-refused"' && [ -z "$watch_decision" ] \
-					|| fail "the image declares watch but its deterministic classifier ran a model call the fake key could not answer, or wrote a decision it did not decide"
+				[ "$watch_gate_code" = 0 ] && [ -n "$watch_mac" ] && [ "$watch_mac" = "$watch_want" ] \
+					&& echo "$watch_gate_exit" | grep -Eq '"toolsStarted":0[,}]' \
+					&& [ "$watch_decision" = '{"version":1,"stopReason":"error","answers":{}}' ] \
+					|| fail "the image declares watch but its classifier did not report the provider refusal as an empty error decision without running tools"
 				;;
 			*) fail "dev.pi-dispatch.capabilities names an unknown capability '$capability'" ;;
 		esac
