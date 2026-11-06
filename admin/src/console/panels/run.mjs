@@ -1,8 +1,8 @@
-import { answererRun, standingAnswerEditor, offeredAnswerDraft } from "./answerer.mjs";
+import { answererRun } from "./answerer.mjs";
 import { modelRolesTelemetryOf } from "@edgehero/pi-dispatch/run-history";
 import { modelChoiceSentence, providerFailureSentence } from "../../model-words.mjs";
 /**
- * The run page's panels (the outcome banner, progress, inbox, chat and the record's panels), split out of
+ * The run page's panels (the outcome banner, progress, inbox and the record's panels), split out of
  * `../panels.mjs` (issue #737), which re-exports what this module exports. The rules every panel keeps (one pure,
  * deterministic renderer per region, every value through `html`, the role and run-text rule, the action controls and
  * the PATHS rule) are stated once, in `../panels.mjs`'s header.
@@ -12,23 +12,21 @@ import { refusedBeforeSpend } from "../../costs.mjs";
 import { FORK_THINKING_LEVELS } from "../../run-fork.mjs";
 import { forkArchiveFact } from "@edgehero/pi-dispatch/fork-job";
 import { modelIdProblem } from "@edgehero/pi-dispatch/model-ref";
-import { recordedProgress } from "@edgehero/pi-dispatch/run-history";
 import { UNATTRIBUTED_BACKEND, declarationOf } from "@edgehero/pi-dispatch/backends";
+import { SESSION_NOT_SAVED } from "@edgehero/pi-dispatch/record-reason";
 import { BUNDLE_SKIPPED_TEXT, LIVE_SKIPPED_TEXT, STEER_SKIPPED_TEXT, VENUE_MAY_NOT_STREAM, liveAbsentCause, progressAbsentText, recordSkips, bundleCountsText, bundleReceivedText, checkpointsText, isProgressSnapshot, progressStaleFor, recordBundle, recordRecovery, recoveredText, recordSecretsProfile, RUN_RECORD_UNREAD, RUN_FILE_UNREADABLE, RUN_MIRROR_UNREAD, RUN_PLACES, runPlaces, runPlacesText, transcriptAbsentText, forgeLinkOf } from "../../read-model.mjs";
 import { CHAIN_MAX_PER_JOB_DEFAULT } from "@edgehero/pi-dispatch/config";
 import { RECOVERY_CAP, RECOVERY_TTL_MS, RECOVERY_MAX_WAIT_MS } from "@edgehero/pi-dispatch/recovery-queue";
 import { recordedEarlier } from "@edgehero/pi-dispatch/run-history";
 import { beatAgeOf, doctorHostsOf, doctorProblems, doctorCountsText } from "../../doctor-view.mjs";
 import { PROPERTY_LABEL, DECLARATION_TEXT } from "../../read-model.mjs";
-import { PARKED_ELSEWHERE_TITLE } from "./parked.mjs";
-import { sessionSavedOf } from "../run-api.mjs";
+import { recordedProgress } from "@edgehero/pi-dispatch/run-history";
 import { coresText } from "@edgehero/pi-dispatch/size-suggest";
 import { NO_EXPLANATION, VENUE_LABEL, capitalised, docsHref, outcomeWord, recordReason } from "../../words.mjs";
 import { explainReason } from "@edgehero/pi-dispatch/reason-catalog";
-import { QUEUED_STATES } from "@edgehero/pi-dispatch/chat-mode";
+import { QUEUED_STATES } from "@edgehero/pi-dispatch/parked-facts";
 import { rerunRefusalOf } from "../../job-actions.mjs";
 import { fromNewerRelease, NEWER_RECORD_SENTENCE } from "../../newer-release.mjs";
-import { sessionKeyOfRecord } from "@edgehero/pi-dispatch/session-key";
 import { isForgeKind } from "@edgehero/pi-dispatch/forges";
 import { isSchedulerJobId } from "@edgehero/pi-dispatch/bullmq-internals";
 import { html } from "../html.mjs";
@@ -50,7 +48,6 @@ const recordOf = (view) => view.data?.run?.record ?? null;
  */
 const kindLabel = (kind) => (isForgeKind(kind) ? "Forge" : "Kind");
 const hiddenRecord = (view) => !recordOf(view) || refusedBeforeStart(recordOf(view));
-const command = (jobId, host = null, locale = "en") => ui.cmd(["pi-dispatch", "chat", jobId], { host: locale === "zh" ? host ? `请在主机 ${host} 上运行，或在可访问会话存储（PI_SESSIONS_DIR）的主机上运行。` : "请在可访问会话存储（PI_SESSIONS_DIR）的主机上运行。" : host ? `Run it on ${host}, or a host that holds the session store (PI_SESSIONS_DIR).` : "Run it on a host that holds the session store (PI_SESSIONS_DIR)." });
 
 // ---- run detail ------------------------------------------------------------------------------------------------------
 
@@ -60,14 +57,14 @@ const command = (jobId, host = null, locale = "en") => ui.cmd(["pi-dispatch", "c
  */
 function runningWithoutRecord(view) {
   if (view.data?.run?.record) return false;
-  return (view.data?.transcript?.exists === true && view.data.transcript.ended !== true) || (isProgressSnapshot(view.data?.progress) && !view.data.progress.ended) || view.data?.chat?.jobState === "active";
+  return (view.data?.transcript?.exists === true && view.data.transcript.ended !== true) || (isProgressSnapshot(view.data?.progress) && !view.data.progress.ended) || view.data?.queueState?.jobState === "active";
 }
 
 /**
  * Whether the record is a run REFUSED BEFORE IT STARTED (issue #710): a policy outcome (never retried,
  * CONST-RETRY-INFRA-ONLY, so no later attempt of the same id can start) whose record says no spend at all, the cost
  * fold's own `refusedBeforeSpend` (no tokens, no exit code, `budgetReserved: false`). Such a run made no container and
- * no workspace, so its page draws no Progress, no Chat and no transcript section. A refusal the fold
+ * no workspace, so its page draws no Progress and no transcript section. A refusal the fold
  * cannot tell from a spend (one that kept its count slot, `over-budget`) keeps those panels, and says what they say.
  */
 export function refusedBeforeStart(record) {
@@ -115,24 +112,12 @@ const NO_REASON_TEXT = Object.freeze({
 });
 
 /**
- * The `awaiting-input` next step where THIS page cannot take the answer (review of issue #710): the catalog's line
- * without its console path. The catalog's own next step ends "or answer from the console's run page", which the Chat
- * panel beside it contradicts when the planner refuses the answer here (the queue no longer holds the job's data, a pull
- * request's park, a forge with no reply route) or when the run is no longer waiting for one. Fixed text, as the
- * catalog's is, and the same for both roles (an operator's Chat panel says why; a viewer's shows no chat).
+ * The `awaiting-input` next step where THIS page cannot take the answer: the catalog's line without its console path.
+ * The catalog's own next step ends "or answer from the console's run page", which this page no longer offers (the
+ * answer forms are the parked inbox's); whether a reply was already taken is the record's. Fixed text, as the
+ * catalog's is, and the same for both roles.
  */
-const AWAITING_INPUT_ELSEWHERE = "If no reply was taken yet, answer the question: reply on the issue or pull request (on a pull request, start the reply with this repository's pi-dispatch comment phrase). This console cannot take the answer for this run.";
-
-/**
- * Whether the page's own Chat panel offers no answer for a parked record: the planner's check refused it
- * (`data.chatAnswer`, the very value that panel reads), or the chat facts say the run takes no reply now. Unknown
- * facts (no reader, an unreadable check) are not a contradiction: the catalog's line stays.
- */
-function answerRefusedHere(view) {
-  const chat = view.data?.chat ?? null;
-  if (typeof view.data?.chatAnswer?.refusal === "string") return true;
-  return chat !== null && typeof chat === "object" && !chat.unreachable && typeof chat.mode === "string" && chat.mode !== "reply";
-}
+const AWAITING_INPUT_ELSEWHERE = "If no reply was taken yet, answer the question: reply on the issue or pull request (on a pull request, start the reply with this repository's pi-dispatch comment phrase), or answer the run from the console's Parked page.";
 
 /** The banner for a run whose record could not be read (`readRunById`'s `unreadable`, what could not be read). */
 export function runUnreadText(why, locale = "en") {
@@ -178,12 +163,12 @@ function absentOutcome(view) {
     const stale = isProgressSnapshot(view.data?.progress) ? progressStaleFor(view.data.progress, view.now) : null;
     return { cls: "note", text: view.locale === "zh" ? `此运行尚无记录：记录会在运行结束时写入。${stale !== null ? `进度已 ${t(staleText(stale), view)}。` : ""}` : `This run has no record yet: a run's record is written when it ends.${stale !== null ? ` Its progress has had ${staleText(stale)}.` : ""}` };
   }
-  const state = view.data?.chat?.jobState ?? null;
+  const state = view.data?.queueState?.jobState ?? null;
   if (typeof state === "string" && QUEUED_STATES.includes(state)) return { cls: "note", text: t("This job is queued and has not started yet: a run's record is written when it ends, and its live transcript attaches on this page once it runs.", view) };
   // A record neither side said it does not hold (`missing`) is one this page could not read, whatever it was handed.
   if (got?.missing !== true) return { cls: "warn", text: runUnreadText(typeof got?.unreadable === "string" ? got.unreadable : RUN_RECORD_UNREAD, view.locale) };
   if (state === "completed" || state === "failed") return { cls: "warn", text: t("This job has ended, but its record is not in this host's history or the fleet's run mirror (another host's run, with the mirror off?).", view) };
-  const places = runPlaces({ run: got, lookup: view.data?.chat, transcript: view.data?.transcript, progress: view.data?.progress });
+  const places = runPlaces({ run: got, lookup: view.data?.queueState, transcript: view.data?.transcript, progress: view.data?.progress });
   if (!places.shown && places.unread.length > 0) return { cls: "warn", text: runUntoldText(places.unread, view.locale) };
   if (typeof state === "string") return { cls: "warn", text: view.locale === "zh" ? `队列中此作业的状态尚未被此控制台识别（${state}）；此处无法读取运行记录。` : `The queue holds this job in a state this console does not name yet (${state}); its run record is not readable here.` };
   return { cls: "warn", text: t("No run with that id is in this host's history or the fleet's run mirror.", view) };
@@ -208,16 +193,16 @@ export function runOutcome(view) {
   if (fromNewerRelease(r)) return newerOutcome(r, view.locale);
   const token = recordReason(r);
   const w = outcomeWord(r.outcome, token);
-  const recovering = token === "recovery-enqueued" && [view.data?.chat?.activeJobId, view.data?.chat?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
+  const recovering = token === "recovery-enqueued" && [view.data?.queueState?.activeJobId, view.data?.queueState?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
   const word = view.locale === "zh" ? recovering ? "失败，正在继续" : refusedBeforeStart(r) ? w.word === "cancelled" ? "启动前已取消" : "启动前已拒绝" : t(capitalised(w.known ? w.word : bannerCut(r.outcome)), view) : recovering ? "Failed, continuing" : refusedBeforeStart(r) ? w.word === "cancelled" ? "Cancelled before it started" : "Refused before it started" : capitalised(w.known ? w.word : bannerCut(r.outcome));
   const started = msOf(r.startedAt), ended = msOf(r.endedAt);
   const where = view.locale === "zh" ? r.host ? `，主机：${r.host}` : "" : r.host ? ` on ${r.host}` : "";
   const duration = Number.isFinite(started) && Number.isFinite(ended) ? view.locale === "zh" ? `，耗时 ${ageText(ended - started)}${where}` : `: finished in ${ageText(ended - started)}${where}` : where;
   const said = token ? explainReason(token, { why: r.why }) : null;
   const reason = said?.known ? ui.withCode(t(said.sentence, view)) : token ? html`${bannerCut(token)}, ${t(NO_EXPLANATION, view)}.` : html`${t(NO_REASON_TEXT[w.word] ?? NO_REASON_TEXT.failed, view)}${w.word === "failed" ? t(view.role === "operator" ? " The Fleet page's failed list may say more." : " Failure reasons are shown to operators only.", view) : ""}`;
-  const next = said?.known ? html`<p><strong>${t("What to do:", view)}</strong> ${ui.withCode(t(token === "awaiting-input" && answerRefusedHere(view) ? AWAITING_INPUT_ELSEWHERE : said.next, view))}</p>${docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read more in the reasons docs", view) }) : null}` : null;
+  const next = said?.known ? html`<p><strong>${t("What to do:", view)}</strong> ${ui.withCode(t(token === "awaiting-input" ? AWAITING_INPUT_ELSEWHERE : said.next, view))}</p>${docsHref(said.anchor) ? ui.outLink({ href: docsHref(said.anchor), label: t("Read more in the reasons docs", view) }) : null}` : null;
   const href = forgeLinkOf(r, view.env);
-  const recoveryId = view.data?.chat?.activeJobId ?? view.data?.chat?.queuedJobId;
+  const recoveryId = view.data?.queueState?.activeJobId ?? view.data?.queueState?.queuedJobId;
   const recoveryActions = recovering ? html`${typeof recoveryId === "string" && RUN_ID_RE.test(recoveryId) ? ui.btn({ href: `/run?id=${encodeURIComponent(recoveryId)}`, label: t("Open recovery run", view), kind: "primary", icon: "running" }) : null}${view.data?.siblings?.map((s) => ui.btn({ href: `/run?id=${encodeURIComponent(s.jobId)}`, label: t("Open sibling replica", view), kind: "sm", icon: "runs" }))}` : null;
   const fixLink = r.outcome === "policy" && !["awaiting-input", "awaiting-approval"].includes(token) && /^[a-f0-9]{64}$/.test(r.touchScopeId ?? "") ? ui.btn({ href: `/config?becauseRun=${encodeURIComponent(r.jobId)}`, label: t("Fix configuration", view), kind: "sm", icon: "config" }) : null;
   const actions = view.role !== "operator" ? null : recovering ? recoveryActions : html`${refusedBeforeStart(r) ? ui.btn({ href: "/fleet", label: t("Open Fleet", view), kind: "primary", icon: "fleet" }) : href ? ui.outLink({ href, label: t("Open target on the forge", view), btn: "primary" }) : null}${rerunLine(r, view)}${fixLink}`;
@@ -468,124 +453,18 @@ export function runInbox(view) {
             end: ui.chip(e.state, { icon: e.state === "delivered" ? "done" : e.state === "withdrawn" ? "cancel" : "clock" }),
             action: withdraw(e),
           }))}</ul>`;
-  // Issue #647: when the Chat panel draws the message forms (a live run an operator can steer), they are drawn THERE and
-  // not here, so the page holds one steer form per mode, never two copies of the same action.
-  const forms = act && takes && !chatDrawsSteer(view) ? steerForms(jobId, view.locale) : null;
+  const forms = act && takes ? steerForms(jobId, view.locale) : null;
   const cont = next !== null ? html`<p class="note">${t("This job is", view)} ${cell(t(box.state, view))}${view.locale === "zh" ? "；" : "; "}${t("its run continues as", view)} ${runLink(next)}${view.locale === "zh" ? "，" : ", "}${t("and a message sent here goes to that job.", view)}</p>` : null;
   return titled(title, html`${cont}<p class="note">${status}</p>${entries ? ui.meter({ value: entries.length, max: STEER_MAX_MESSAGES, label: t("Messages", view) }) : null}${entries ? ui.meter({ value: entries.reduce((n, e) => n + (e.bytes ?? 0), 0), max: STEER_TOTAL_MAX_BYTES, label: t("Bytes", view) }) : null}${entries?.some((e) => e.state === "late") ? html`<p>${t("Late: the run ended before the message arrived, so the agent never saw it.", view)}</p>` : null}${list}${forms}<p class="note">${t("A message's text is never listed: the run reads it, and the audit log keeps its sha256.", view)}</p>`, view.locale);
 }
 
-// ---- run chat (issue #647) -------------------------------------------------------------------------------------------
-
-/** What each run state is called in the Chat panel's status line (`RUN_STATES`, chat-mode.mjs). */
-const CHAT_STATE_WORD = Object.freeze({ active: "running", queued: "queued", parked: "parked, waiting for an answer", answered: "answered by a later run", finished: "finished", unknown: "unknown" });
-
-/** The Chat panel's line for a run that cannot chat because another job holds it: a link to that job, or null. */
-function chatHeldBy(chat) {
-  if (typeof chat.answeringJobId === "string" && RUN_ID_RE.test(chat.answeringJobId)) return html`<p class="note">The run taking the answer is ${runLink(chat.answeringJobId)}.</p>`;
-  if (typeof chat.queuedJobId === "string" && RUN_ID_RE.test(chat.queuedJobId)) return html`<p class="note">The queued recovery job is ${runLink(chat.queuedJobId)}.</p>`;
-  return null;
-}
-
-/**
- * The run page's "Chat" panel (issue #647, REQ-TERMINAL-CHAT): the chat this run can have now (`data.chat`, from
- * `chatModeOf` through `run-api.mjs`'s `chatFactsOf`, the rule `/api/run` and `pi-dispatch chat` share), composed of what
- * the console already has, never a second copy of an action:
- *
- *   - live: the live transcript section below (issue #643, an operator's) and the steer and follow-up forms, which move
- *     here from the Inbox panel while this panel shows them (`chatDrawsSteer`);
- *   - reply: the parked answer form, the very one the parked inbox draws (`parkedAnswerForm`);
- *   - fork: the exact `pi-dispatch chat <id>` command to fork the run's session on a host that holds the session store
- *     (shown to copy, never run), or why its session cannot be found from the record.
- *
- * A VIEWER SEES STATUS ONLY (REQ-CONSOLE-SECURITY clause l): the state, the mode and a refusal's sentence, never a form
- * or a command; a read-only console draws no form for anyone. Nothing here is free text: the state words are this
- * module's, `says` is one of `chatModeOf`'s fixed sentences, and the id is charset-checked. A page whose fleet has no
- * job-state reader draws nothing (the empty section is hidden), so an older reader's page reads as it did.
- */
-export function runChat(view) {
-  const chat = view.data?.chat ?? null;
-  if (chat === null || typeof chat !== "object") return html``;
-  // Issue #710: nothing to chat with in a run refused before it started; and a job with no record that is itself queued,
-  // or that nothing knows, is the outcome banner's to say, once. Every other state keeps its sentence.
-  const record = view.data?.run?.record ?? null;
-  if (refusedBeforeStart(record)) return html``;
-
-  const title = "Chat";
-  if (record?.purpose === "answer-draft") return titled(title, html`<p>${t("This draft helper takes no replies. Review and send the answer from the parked source run", view)} ${runLink(record.answerDraft?.sourceRunId)}.</p>`, view.locale);
-  if (chat.unreachable) return titled(title, html`<p class="warn">${t("The queue could not be read (is Valkey reachable?), so whether this run can chat is unknown. The next refresh tries again.", view)}</p>`, view.locale);
-  const jobId = typeof view.query?.id === "string" && RUN_ID_RE.test(view.query.id) ? view.query.id : null;
-  const answering = chat.state === "answered" && typeof chat.answeringJobId === "string";
-  const status = html`<p>${t("This run is", view)} ${answering ? t("being answered", view) : Object.hasOwn(CHAT_STATE_WORD, chat.state) ? t(CHAT_STATE_WORD[chat.state], view) : t("unknown", view)}.</p>`;
-  if (!record && view.data?.run?.missing !== true && chat.state === "unknown") return titled(title, html`<p>${t("The run's chat state is unknown while its record could not be read.", view)}</p>`, view.locale);
-  if (view.role !== "operator") return titled(title, html`${status}<p class="note">${t("Chat is for operators; a viewer sees the run's status only.", view)}</p>`, view.locale);
-  if (chat.mode !== "live" && chat.mode !== "reply" && chat.mode !== "fork") return titled(title, html`${status}<p class="note">${typeof chat.says === "string" ? t(chat.says, view) : t("This run has no chat.", view)}</p>${chatHeldBy(chat)}`, view.locale);
-  if (jobId === null) return titled(title, html`${status}<p class="note">${t("Chat is for operators; a viewer sees the run's status only.", view)}</p>`, view.locale);
-  const terminal = (id) => command(id, record?.host, view.locale);
-  const readOnly = view.readOnly ? html`<p class="note">${t("This console is read-only, so it sends nothing.", view)}</p>` : null;
-  if (chat.mode === "live") {
-    const active = typeof chat.activeJobId === "string" && RUN_ID_RE.test(chat.activeJobId) ? chat.activeJobId : jobId;
-    const via = active !== jobId ? html`<p class="note">${t("The run goes on as", view)} ${runLink(active)}; ${t("its transcript is on that job's page, and a message sent here reaches it.", view)}</p>` : html`<p class="note">${t("Its live transcript is", view)} <a href="#transcript">${t("below", view)}</a>.</p>`;
-    const box = view.data?.inbox ?? null;
-    // An inbox that could not be read says so: "not steer-armed" about a run whose inbox was never read would be a guess.
-    const boxRead = box !== null && typeof box === "object" && !box.unreachable && !box.invalid;
-    const armed = boxRead && box.found === true && box.steer === true;
-    const send = chatDrawsSteer(view)
-      ? steerForms(jobId, view.locale)
-      : canAct(view)
-        ? !boxRead
-          ? html`<p class="warn">${t("The run's inbox could not be read (is Valkey reachable?), so whether it takes a message is unknown. The next refresh tries again.", view)}</p>`
-          : html`<p class="note">${!armed ? t("This run is not steer-armed (its trigger sets no run.steer), so it takes no message; watch it instead.", view) : t("The run takes no message right now; the Inbox panel says why.", view)}</p>`
-        : null;
-    return titled(title, html`${status}${via}${send}${readOnly}`, view.locale);
-  }
-  if (chat.mode === "reply") {
-    const offered = view.query?.id === view.data?.answerer?.privateDraft?.meta?.runId ? offeredAnswerDraft(view) : null;
-    const link = view.data?.run?.record ? targetLink(view.data.run.record, view.env) : "-";
-    // Issue #647: the form only where the planner would plan the answer (`parkedAnswerCheck`, its own predicate): a pull
-    // request's park, a forge without a reply route or expired job data shows the planner's sentence instead. A check that
-    // could not be read keeps the form and says so (the planner checks again before anything is queued).
-    const check = view.data?.chatAnswer ?? null;
-    const refusal = typeof check?.refusal === "string" ? check.refusal : null;
-    const why = check?.unreachable ? html`<p class="warn">${t("Whether it can be answered from here could not be read; the preview checks again.", view)}</p>` : null;
-    const keptTranscript = view.data?.transcript?.exists === true;
-    const question = keptTranscript ? html`<div data-run-question></div><p class="card__sub">${t("The question is the last assistant entry of the transcript", view)} <a href="#transcript">${t("below", view)}</a>.</p>` : html`<p>${t("Read the question on the forge thread:", view)} ${link}. ${t("The live transcript is no longer kept.", view)}</p>`;
-    const answer = refusal !== null ? ui.banner({ status: "attention", sm: true, title: t(PARKED_ELSEWHERE_TITLE, view), body: t(refusal, view), actions: forgeLinkOf(record, view.env) ? ui.outLink({ href: forgeLinkOf(record, view.env), label: t("Answer on the forge", view), btn: "primary" }) : null }) : canAct(view) ? record?.reason === "awaiting-approval" ? ui.approvalForms({ jobId, id: "run-approval", locale: view.locale }) : ui.answerForm({ jobId, id: "run-answer", hint: t("Preview the answer before posting it and resuming the run.", view), guarded: Boolean(view.data?.answerer?.rules?.length), value: offered?.draft ?? "", draft: offered ? { draftRunId: offered.meta.draftRunId, digest: offered.digest } : null, keepStanding: Boolean(view.data?.answerer?.rules?.length && record?.project), locale: view.locale }) : readOnly;
-    const gate = record?.reason === "awaiting-approval" ? html`<p>${t("Awaiting approval for", view)} <span class="code">${record.approval?.action ?? t("unknown action", view)}</span>.</p><p>${t(record.approval?.action === "budget-raise" ? "Worker-enforced: the declared cap remains subject to deployment and scoped budgets." : "Advisory: the worker does not enforce this external action.", view)}</p>` : null;
-    return ui.questionCard({ jobId, waited: Number.isFinite(msOf(record?.endedAt)) ? ageText(view.now - msOf(record.endedAt)) : null, project: record?.project, target: link, body: html`${gate}${question}${why}`, answer: html`${answer}${view.data?.answerer?.rules?.length && record?.project && canAct(view) && record?.reason !== "awaiting-approval" ? standingAnswerEditor({ id: "standing-from-answer", projects: [record.project], runId: jobId, repo: `${record.kind}:${String(record.target ?? "").split("#")[0]}` }) : null}`, locale: view.locale });
-  }
-  // fork: whether the record names a session the host-local fork can find, said before the command is offered.
-  const kept = sessionSavedOf(record);
-  const why = !kept ? record?.session?.reason ? `${nestedText("session.reason", record.session.reason)} There is no saved transcript to fork.` : "This run's trigger keeps no session (no run.resume), so there is no transcript to fork." : sessionKeyOfRecord(record) === null ? "This run's session cannot be found from its record (a pull or merge request's session is keyed by its head branch, which the record does not carry), so a fork would refuse." : null;
-  if (why !== null) return titled(title, html`${status}<p class="note">${t(why, view)}</p>`, view.locale);
-  return titled(title, html`${status}<p class="note">${t("Continue it in your own pi, as a fork of its session: run this on a host that holds the session store (PI_SESSIONS_DIR). The session's transcript is not redacted and goes to your pi's provider; the run's own transcript is never written.", view)}</p>${chat.newer?.jobId ? html`<p class="warn">${t("The session holds a later run's turns too:", view)} ${runLink(chat.newer.jobId)} ${t("continued it on", view)} ${record.target} ${t("after this run.", view)}</p>` : null}${terminal(jobId)}`, view.locale);
-}
-
 /**
  * The two message forms of a steer-armed run that takes messages (issue #646): a steer and a follow-up, both the `steer`
- * action with a `mode`. Drawn by the Inbox panel, or by the Chat panel when it shows a live run (issue #647), never by
- * both (`chatDrawsSteer`).
+ * action with a `mode`, drawn by the Inbox panel while the job is active and its run takes messages.
  */
 function steerForms(jobId, locale = "en") {
   const text = (label) => area("text", uiText(label, locale), { rows: 3, required: true, max: 8192 });
   return html`<h3>${uiText("Send a message", locale)}</h3>${actForm("steer", { hidden: [["jobId", jobId], ["mode", "steer"]], fields: text("Steer: read after the agent's current tool calls"), label: uiText("Preview the steer", locale) })}${actForm("steer", { hidden: [["jobId", jobId], ["mode", "followUp"]], fields: text("Follow-up: read once the agent would otherwise stop"), label: uiText("Preview the follow-up", locale) })}`;
-}
-
-/**
- * Whether the run's inbox takes a message now and this view may send one: the Inbox panel's own rule (an operator on a
- * writable console, a steer-armed job that is active or continues as an active recovery, and an open inbox).
- */
-function inboxTakes(view) {
-  const box = view.data?.inbox ?? null;
-  if (box === null || typeof box !== "object" || box.found !== true || box.steer !== true || box.unreachable) return false;
-  const next = typeof box.continuesAs === "string" && RUN_ID_RE.test(box.continuesAs) ? box.continuesAs : null;
-  return (box.state === "active" || next !== null) && box.open === true;
-}
-
-/** Whether the Chat panel draws the message forms (so the Inbox panel does not): a live run an operator can steer now. */
-function chatDrawsSteer(view) {
-  const jobId = view.query?.id;
-  return view.data?.chat?.mode === "live" && canAct(view) && typeof jobId === "string" && RUN_ID_RE.test(jobId) && inboxTakes(view);
 }
 
 /** Codes the fork reader returns, in words a person can act on. Anything else it says is already a sentence. */
@@ -755,6 +634,11 @@ export const runResources = withRun("Resources", (r, view) => {
   ], view.locale)}`;
 });
 
+/** A session object is kept unless its reason explicitly records a failed save; `absent` is a fresh start. */
+function sessionSavedOf(record) {
+  return record?.session !== null && typeof record?.session === "object" && !Array.isArray(record.session) && !SESSION_NOT_SAVED.includes(record.session.reason);
+}
+
 export const runSession = withRun("Session and plan", (r, view) => {
   const s = r.session ?? null;
   const p = r.plan ?? null;
@@ -786,12 +670,12 @@ export function timecode(ms) {
 /** The title's changing line also carries its status and the active run's destructive preview. */
 export function runHeadline(view) {
   const r = recordOf(view), a = view.data?.activeRun;
-  const chat = view.data?.chat;
-  const recovering = r?.reason === "recovery-enqueued" && (chat?.activeJobId || chat?.queuedJobId);
-  const active = chat?.jobState === "active" || runningWithoutRecord(view);
-  const badge = recovering ? ui.badge("running", t("Recovering", view)) : r ? ui.badge(outcomeWord(r.outcome, recordReason(r)).status, t(capitalised(outcomeWord(r.outcome, recordReason(r)).word), view)) : ui.badge(active ? "running" : "idle", t(active ? "Running" : QUEUED_STATES.includes(chat?.jobState) ? "Queued" : "Unknown", view));
+  const state = view.data?.queueState;
+  const recovering = r?.reason === "recovery-enqueued" && (state?.activeJobId || state?.queuedJobId);
+  const active = state?.jobState === "active" || runningWithoutRecord(view);
+  const badge = recovering ? ui.badge("running", t("Recovering", view)) : r ? ui.badge(outcomeWord(r.outcome, recordReason(r)).status, t(capitalised(outcomeWord(r.outcome, recordReason(r)).word), view)) : ui.badge(active ? "running" : "idle", t(active ? "Running" : QUEUED_STATES.includes(state?.jobState) ? "Queued" : "Unknown", view));
   const facts = r ?? a ?? {};
-  const cancel = canAct(view) && chat?.jobState === "active" && RUN_ID_RE.test(view.query?.id ?? "") ? ui.actForm({ action: "cancel-active", hidden: [["jobId", view.query.id]], label: t("Cancel run", view), kind: ["sm", "danger"], icon: "cancel" }) : null;
+  const cancel = canAct(view) && state?.jobState === "active" && RUN_ID_RE.test(view.query?.id ?? "") ? ui.actForm({ action: "cancel-active", hidden: [["jobId", view.query.id]], label: t("Cancel run", view), kind: ["sm", "danger"], icon: "cancel" }) : null;
   return html`${badge} ${facts.project ? ui.ptag(facts.project) : null} ${facts.target ? targetLink(facts, view.env) : null} ${facts.flow ?? ""} ${facts.host ? `${t("on", view)} ${facts.host}` : ""} ${facts.endedAt ? timeHtml(msOf(facts.endedAt)) : facts.startedAt ? timeHtml(msOf(facts.startedAt)) : null}${cancel}`;
 }
 
@@ -826,7 +710,7 @@ export function runTranscriptState(view) {
 export function runActionsPanel(view) {
   const r = recordOf(view);
   if (!r || view.role !== "operator" || !RUN_ID_RE.test(r.jobId ?? "")) return html``;
-  const continuing = r.reason === "recovery-enqueued" && [view.data?.chat?.activeJobId, view.data?.chat?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
+  const continuing = r.reason === "recovery-enqueued" && [view.data?.queueState?.activeJobId, view.data?.queueState?.queuedJobId].some((id) => typeof id === "string" && id !== r.jobId);
   if (continuing) return html``;
   return titled("Actions", html`${rerunLine(r, view)}${forkLine(r, view)}${isSchedulerJobId(r.jobId) ? html`<p>${t("A cron run is fired again by hand from its trigger as the triggers file says now.", view)}</p>` : null}`, view.locale);
 }
@@ -847,10 +731,6 @@ export function runModels(view) {
   return titled("Model usage", html`${localizedTable("Model usage", ["Provider", "Model", "Calls", "Input", "Output", "Cost"], models.map((m) => html`<tr><td>${m.provider}</td><td>${m.model}</td><td>${count(m.calls)}</td><td>${count(m.input)}</td><td>${count(m.output)}</td><td>${tokensText(Number.isFinite(m.cost) ? Math.round(m.cost * 1e6) : null)}</td></tr>`), "No per-model usage was recorded.", view.locale)}${facts([["Cache reads", models.reduce((n, m) => n + (m.cacheRead ?? 0), 0)], ["Cache writes", models.reduce((n, m) => n + (m.cacheWrite ?? 0) + (m.cacheWrite1h ?? 0), 0)], ["Unpriced calls", r.tokens?.unpriced], ["No model resolved", r.tokens?.unresolved]], view.locale)}<p>${t("Priced by pi-ai", view)} ${u.piAi ?? "unknown"} ${t("at stream time.", view)}</p>`, view.locale);
 }
 
-export function runTail(view) {
-  return view.role === "operator" && view.data?.chat?.mode === "reply" && view.data?.transcript?.exists ? titled("Last transcript entries", html`<div data-run-tail></div><a href="#transcript">${t("Read the whole transcript", view)}</a>`, view.locale) : html``;
-}
-
 /** Counts are positioned evenly: a record has no checkpoint timestamps, so the track invents none. */
 function recoveryTrack(record, next, view) {
   const c = recordRecovery(record)?.checkpoints;
@@ -860,19 +740,19 @@ function recoveryTrack(record, next, view) {
     const kind = i < (c?.written ?? 0) ? "written" : i < (c?.written ?? 0) + (c?.failed ?? 0) ? "failed" : "skipped";
     return html`<g class="run-cp run-cp--${kind}"><title>${uiText(kind, view.locale)} ${uiText("checkpoint", view.locale)} ${i + 1}; ${uiText("its time was not recorded", view.locale)}</title><circle cx="${40 + (visible <= 1 ? 0 : i * 270 / (visible - 1))}" cy="20" r="4"></circle></g>`;
   });
-  return html`<div class="run-track"><svg viewBox="0 0 640 110" role="img" aria-label="${uiText("Attempt and recovery; checkpoint positions are evenly spaced, not timestamps", view.locale)}"><line class="run-track__line" x1="20" y1="70" x2="620" y2="70"></line><rect class="run-track__attempt" x="20" y="42" width="300" height="28" rx="14"></rect><text x="34" y="61">${uiText("Attempt", view.locale)} ${record.attempt ?? 1}: ${uiText(outcomeWord(record.outcome, recordReason(record)).word ?? record.outcome, view.locale)}</text>${marks}${next ? html`<line class="run-track__wait" x1="325" y1="56" x2="390" y2="56"></line><rect class="run-track__next" x="395" y="42" width="225" height="28" rx="14"></rect><text x="408" y="61">${uiText(view.data?.chat?.activeJobId === next ? "Recovery running" : "Recovery queued", view.locale)}</text>` : null}</svg></div><p class="card__sub">${uiText("Checkpoint positions are evenly spaced; their times and kinds were not recorded.", view.locale)}${total > visible ? ` ${total - visible} ${uiText("more checkpoints are counted below.", view.locale)}` : ""}</p>`;
+  return html`<div class="run-track"><svg viewBox="0 0 640 110" role="img" aria-label="${uiText("Attempt and recovery; checkpoint positions are evenly spaced, not timestamps", view.locale)}"><line class="run-track__line" x1="20" y1="70" x2="620" y2="70"></line><rect class="run-track__attempt" x="20" y="42" width="300" height="28" rx="14"></rect><text x="34" y="61">${uiText("Attempt", view.locale)} ${record.attempt ?? 1}: ${uiText(outcomeWord(record.outcome, recordReason(record)).word ?? record.outcome, view.locale)}</text>${marks}${next ? html`<line class="run-track__wait" x1="325" y1="56" x2="390" y2="56"></line><rect class="run-track__next" x="395" y="42" width="225" height="28" rx="14"></rect><text x="408" y="61">${uiText(view.data?.queueState?.activeJobId === next ? "Recovery running" : "Recovery queued", view.locale)}</text>` : null}</svg></div><p class="card__sub">${uiText("Checkpoint positions are evenly spaced; their times and kinds were not recorded.", view.locale)}${total > visible ? ` ${total - visible} ${uiText("more checkpoints are counted below.", view.locale)}` : ""}</p>`;
 }
 
 export function runRecovery(view) {
   const r = recordOf(view), rec = r ? recordRecovery(r) : null;
   if ((!rec && !view.data?.trigger?.recover && !String(r?.reason ?? "").startsWith("recovery-")) || refusedBeforeStart(r)) return html``;
-  const next = view.data?.chat?.activeJobId ?? view.data?.chat?.queuedJobId;
+  const next = view.data?.queueState?.activeJobId ?? view.data?.queueState?.queuedJobId;
   const continuation = typeof next === "string" && next !== r.jobId ? next : null;
   const recovered = rec?.recovered ?? [...(view.data?.recoveryRuns ?? [])].reverse().map((record) => recordRecovery(record)?.recovered).find(Boolean);
   const earlier = recordedEarlier(r.earlier) ?? [];
   const queuedAt = msOf(view.data?.recoveryLive?.queuedAt), startedAt = msOf(view.data?.recoveryLive?.startedAt);
   const recTitle = `${uiText("Recovery", view.locale)}${Number.isInteger(r.triggerIndex) ? `: run.recover ${uiText("is armed on trigger row", view.locale)} ${r.triggerIndex + 1}` : ""}`;
-  return titled(recTitle, html`${continuation || rec?.checkpoints ? recoveryTrack(r, continuation, view) : null}${facts(recoveryRows(r, view.locale), view.locale)}${!rec && !continuation ? html`<p>${t("None needed: this run finished on its first attempt.", view)}</p>` : null}${continuation ? html`<p>${ui.badge(view.data.chat.activeJobId === continuation ? "running" : "idle", t(view.data.chat.activeJobId === continuation ? "Recovery running" : "Recovery queued", view))} ${runLink(continuation)}.</p>` : null}${recovered ? facts([["Restored from", `${recovered.from} ${t("checkpoint", view)} ${recovered.checkpointSeq ?? `(${t("sequence not recorded", view)})`}`], ["Recovery", `${recovered.n} ${t("of at most", view)} ${RECOVERY_CAP}`], ["Calls replayed", recovered.replayed], ["Calls interrupted (may or may not have happened)", recovered.interrupted], ["Calls not started", recovered.notStarted]], view.locale) : null}${recovered?.checkpointSeq ? html`<p>${t("The agent was told it restarts from checkpoint", view)} ${recovered.checkpointSeq}. ${t("Its workspace was restored, with .pi/, .agents/ and the root context files reset to the base commit. It checks before repeating anything with outside effects.", view)}</p>` : null}${Number.isFinite(queuedAt) ? html`<p>${t("Wait for a slot:", view)} ${ageText((Number.isFinite(startedAt) ? startedAt : view.now) - queuedAt)} ${t("on", view)} ${view.data.recoveryLive.host ?? r.host}.</p>` : null}${earlier.map((a) => html`<p>${t("Retried: an earlier attempt ran on", view)} ${a.host}, ${timeHtml(msOf(a.startedAt))} ${t("to", view)} ${timeHtml(msOf(a.endedAt))}.</p>`)}${r.stalledRepick ? html`<p>${t("Re-picked: its worker stopped answering and this pickup ran it again.", view)}</p>` : null}${view.role === "operator" ? html`<div data-recovery-tools></div>` : null}<p class="card__sub">${t("Recovery queued waits for the checkpoint's host:", view)} ${RECOVERY_TTL_MS / 3_600_000} ${t("hours, longer while that host is alive, at most", view)} ${RECOVERY_MAX_WAIT_MS / 86_400_000} ${t("days.", view)}</p>`, view.locale);
+  return titled(recTitle, html`${continuation || rec?.checkpoints ? recoveryTrack(r, continuation, view) : null}${facts(recoveryRows(r, view.locale), view.locale)}${!rec && !continuation ? html`<p>${t("None needed: this run finished on its first attempt.", view)}</p>` : null}${continuation ? html`<p>${ui.badge(view.data.queueState.activeJobId === continuation ? "running" : "idle", t(view.data.queueState.activeJobId === continuation ? "Recovery running" : "Recovery queued", view))} ${runLink(continuation)}.</p>` : null}${recovered ? facts([["Restored from", `${recovered.from} ${t("checkpoint", view)} ${recovered.checkpointSeq ?? `(${t("sequence not recorded", view)})`}`], ["Recovery", `${recovered.n} ${t("of at most", view)} ${RECOVERY_CAP}`], ["Calls replayed", recovered.replayed], ["Calls interrupted (may or may not have happened)", recovered.interrupted], ["Calls not started", recovered.notStarted]], view.locale) : null}${recovered?.checkpointSeq ? html`<p>${t("The agent was told it restarts from checkpoint", view)} ${recovered.checkpointSeq}. ${t("Its workspace was restored, with .pi/, .agents/ and the root context files reset to the base commit. It checks before repeating anything with outside effects.", view)}</p>` : null}${Number.isFinite(queuedAt) ? html`<p>${t("Wait for a slot:", view)} ${ageText((Number.isFinite(startedAt) ? startedAt : view.now) - queuedAt)} ${t("on", view)} ${view.data.recoveryLive.host ?? r.host}.</p>` : null}${earlier.map((a) => html`<p>${t("Retried: an earlier attempt ran on", view)} ${a.host}, ${timeHtml(msOf(a.startedAt))} ${t("to", view)} ${timeHtml(msOf(a.endedAt))}.</p>`)}${r.stalledRepick ? html`<p>${t("Re-picked: its worker stopped answering and this pickup ran it again.", view)}</p>` : null}${view.role === "operator" ? html`<div data-recovery-tools></div>` : null}<p class="card__sub">${t("Recovery queued waits for the checkpoint's host:", view)} ${RECOVERY_TTL_MS / 3_600_000} ${t("hours, longer while that host is alive, at most", view)} ${RECOVERY_MAX_WAIT_MS / 86_400_000} ${t("days.", view)}</p>`, view.locale);
 }
 
 function hostFacts(view, name) {
@@ -903,7 +783,7 @@ export function runHost(view) {
 }
 
 export function runViewer(view) {
-  return view.role !== "operator" ? ui.banner({ status: "idle", sm: true, icon: "shield", title: t("Signed in as a viewer", view), body: t("Transcripts, chat, phase names, the run's note, failure reasons and every action are shown to operators only.", view) }) : html``;
+  return view.role !== "operator" ? ui.banner({ status: "idle", sm: true, icon: "shield", title: t("Signed in as a viewer", view), body: t("Transcripts, phase names, the run's note, failure reasons and every action are shown to operators only.", view) }) : html``;
 }
 
 /** Only exact retained points are selectable; ids carry no transcript text into the page. */

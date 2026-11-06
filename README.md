@@ -27,13 +27,7 @@ It is free and open source. You pay your AI provider for what the agent uses, or
 [Docker](https://www.docker.com/products/docker-desktop/) and [Node.js](https://nodejs.org) 22.19 or newer, and a key from an AI
 provider or a [subscription](docs/subscription-auth.md). Steps 1 and 2 are for someone comfortable in a terminal.
 
-**2. Install it.** If you already use pi, run this, type `/dispatch` inside pi, and choose **Finish setup in browser**:
-
-```bash
-pi install npm:@edgehero/pi-dispatch-admin
-```
-
-Without pi, install into a folder that will stay there:
+**2. Install it.** Into a folder that will stay there:
 
 ```bash
 mkdir my-dispatch && cd my-dispatch
@@ -69,7 +63,7 @@ of work at a time, and it never asks you to trust more than you have seen.
 
 You start a job and follow it live: what it is doing, which step of its plan it is on, what it said. If it heads the
 wrong way you tell it, and it reads your message before its next step. You do not have to start over and pay for the
-same work twice. (Steering, chat)
+same work twice. (Steering)
 
 ![A running job in the console: its progress through the phases of its plan, the agent's note that three of ten tables are migrated, a box for sending it a message, the message it already received, and its live transcript](docs/images/console/console-run-live.png?v=2026-11-03)
 
@@ -230,7 +224,7 @@ PI_GLOBAL_PI_DIR=/absolute/path/to/my-dispatch/pi-global
 |---|---|
 | Your custom models, as definitions only | `auth.json`, and any key written into a file (the import refuses it) |
 | Your skills and persona | Your sessions, themes and settings |
-| Your extensions, each listed by name as it copies them | The `/dispatch` extension itself, and any extension you have turned off in pi |
+| Your extensions, each listed by name as it copies them | Any extension you have turned off in pi |
 | The packages you installed with `pi install`, pinned at the version you have | Anything a project asks to install: only you choose what gets installed |
 | Your MCP servers, with credentials as references only | Secrets of any kind: the copy is read by jobs, so it holds none |
 
@@ -263,9 +257,9 @@ add `resume` and `awaitInput` to the rule in `triggers.json`, which is a job for
 **3. Step back when the numbers say you can.** Read **Zero touch** under Runs. When a kind of work rarely needs you, let
 it run and review what comes back. You are out of the loop for that work, and still in charge of what ships.
 
-To open the console again later, type `/dispatch console` in pi. A sign in lasts up to 12 hours, and an hour with nothing
-happening ends it sooner. After that, you need your token or a new link, which `/dispatch console --link` or
-`pi-dispatch-console link --name <you>` makes ([everything about the console](docs/console.md)).
+To open the console again later, go to its address, or make a new sign in link with `pi-dispatch-console link --name <you>`
+([everything about the console](docs/console.md)). A sign in lasts up to 12 hours, and an hour with nothing
+happening ends it sooner. After that, you need your token or a new link.
 
 ## Words used here
 
@@ -286,7 +280,6 @@ happening ends it sooner. After that, you need your token or a new link, which `
 | **Terminal** | The window where a developer types commands |
 | **Provider key** | The password-like key your AI provider gives you, which pays for what the agent uses |
 | **Console** | The web page shown here |
-| **Panel** | The same information inside pi, as `/dispatch` |
 
 ## For engineers
 
@@ -373,7 +366,7 @@ newer ([service](docs/service.md)).
 
 ## Providers and models
 
-**pi-dispatch itself needs no AI key.** The queue, the caps, the containers, the console and the panel run no model. The key
+**pi-dispatch itself needs no AI key.** The queue, the caps, the containers, the console and the CLI run no model. The key
 is for pi, inside each job. pi-dispatch works with most providers pi supports. Pick the default in `.env`:
 
 ```bash
@@ -432,7 +425,7 @@ under one cap, and the Models page shows the comparison. A person adopts it, and
 ## Triggers
 
 **A trigger is what starts a job.** All standing triggers live in one `triggers.json`, which the worker and the receiver read
-live, and which the console and the panel can edit. Each entry is an `{ on, run }` pair: **`on` says what fires it**, and
+live, and which the console can edit. Each entry is an `{ on, run }` pair: **`on` says what fires it**, and
 **`run` says what it runs**.
 
 ```jsonc
@@ -486,7 +479,7 @@ is the prompt. A trigger only names the flow, so each repo can define the same f
 ---
 name: tidy
 description: Format, fix lint, and tighten types across the repo.
-ai-trigger: allow        # opt-in for AI-INITIATED runs only (the dispatch_run tool, job chaining). Default deny.
+ai-trigger: allow        # opt-in for AI-INITIATED runs only (job chaining). Default deny.
 ---
 
 Run the formatter and linter and fix what they report; tighten obvious type holes.
@@ -513,7 +506,7 @@ flowchart LR
   PI --> OUT[("your folder, or a pull request")]
   PI -->|"checkpoints, when recover is on"| DISK[("disk, up to 7 days")]
   PI -->|"progress and live transcript"| Q
-  Q --> CON["console and /dispatch panel<br/>watch, steer, answer, approve"]
+  Q --> CON["the console<br/>watch, steer, answer, approve"]
   CON -->|"a person's message"| PI
 ```
 
@@ -600,20 +593,9 @@ From any terminal: `pi-dispatch pause` stops taking new jobs and survives restar
 These read only what they need, so a broken forge setting cannot stand between you and the stop
 ([`docs/service.md`](docs/service.md#control-the-worker)).
 
-Upgrading to a new release follows one order (pause, the job image, every worker, the receivers, the console and
-`/dispatch`, then resume), and [`docs/upgrading.md`](docs/upgrading.md) gives it, with what each release changed in
+Upgrading to a new release follows one order (pause, the job image, every worker, the receivers, the console, then resume),
+and [`docs/upgrading.md`](docs/upgrading.md) gives it, with what each release changed in
 what it stores and how to roll back.
-
-## The pi panel
-
-`/dispatch` is the same information inside your own pi session, as a **pi extension**: no daemon, no network port. Install it with
-`pi install npm:@edgehero/pi-dispatch-admin`. It writes a small pointer file, paths only and never credentials, so the panel finds
-your deployment from any directory.
-
-![The /dispatch panel: live queue state, job meters, the dollar windows, triggers, pause windows, scoped limits, and the runs list, in one framed terminal view](docs/images/dispatch-dashboard.svg?v=2026-11-03)
-
-Its keys, its plain commands and the `operate-pi-dispatch` skill, which lets you ask your assistant in plain words with every change
-confirmed by you in a prompt the model cannot answer, are in `docs/panel`.
 
 ## GitHub automation
 
@@ -645,12 +627,12 @@ These forges have one auth source each, a token you create, so setting theirs to
 
 ## Docs
 
-**Getting started and running it:** [console](docs/console.md), panel, [service](docs/service.md),
+**Getting started and running it:** [console](docs/console.md), [service](docs/service.md),
 [upgrading](docs/upgrading.md), [253 server deployment](docs/253-deployment.md),
 [multi host](docs/multi-host.md), polling,
 [notifications](docs/notifications.md).
 
-**Watching and steering:** steering, chat, [sessions](docs/sessions.md),
+**Watching and steering:** steering, [sessions](docs/sessions.md),
 durable runs, approval gates, answer rules,
 Zero touch, watch, watch decisions,
 [reasons](docs/reasons.md).
@@ -696,7 +678,7 @@ To work on pi-dispatch itself, or to build a custom job image:
 ```bash
 git clone https://github.com/edgehero/pi-dispatch && cd pi-dispatch
 npm ci
-node admin/build.mjs                                # the panel and console bundle, gitignored
+node admin/build.mjs                                # the console bundle, gitignored
 valkey-server --port 6379 --save '' --daemonize yes
 VALKEY_TEST_URL=redis://127.0.0.1:6379 PI_DISPATCH_REQUIRE_LOADER_TESTS=1 PI_DISPATCH_REQUIRE_WORKER_TESTS=1 \
   PI_DISPATCH_REQUIRE_RECEIVER_TESTS=1 npm test
@@ -710,7 +692,7 @@ Jobs start with `--pull=never`, so build or pull every image first ([job image](
 |---|---|
 | `worker/` | the queue consumer, the CLI (`pi-dispatch`), the forge hosts, doctor, the service installer |
 | `receiver/` | the always on trigger edge (`pi-dispatch-receiver`): webhook routes and the poller |
-| `admin/` | the `/dispatch` panel and the web console (`pi-dispatch-console`) |
+| `admin/` | the web console (`pi-dispatch-console`) |
 | `gateway/` | the optional browser terminal for a sandbox |
 | `image/` | the job image, and the runner inside it |
 | `deploy/` | service units, wrappers and the compose file |
@@ -731,4 +713,4 @@ MIT. See [LICENSE](LICENSE). Built on [pi](https://github.com/earendil-works/pi)
 > different thing. This project publishes scoped packages only:
 > [`@edgehero/pi-dispatch`](https://www.npmjs.com/package/@edgehero/pi-dispatch) (worker and CLI),
 > [`@edgehero/pi-dispatch-receiver`](https://www.npmjs.com/package/@edgehero/pi-dispatch-receiver), and
-> [`@edgehero/pi-dispatch-admin`](https://www.npmjs.com/package/@edgehero/pi-dispatch-admin) (the console and the panel). The bare name is theirs.
+> [`@edgehero/pi-dispatch-admin`](https://www.npmjs.com/package/@edgehero/pi-dispatch-admin) (the console). The bare name is theirs.

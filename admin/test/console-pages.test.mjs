@@ -11,7 +11,7 @@ import { runUntoldText } from "../src/console/panels/run.mjs";
 import { ESC, FIXTURES, ROLES, SHOTS, STATIC_SHOTS, assertClean, assertPanelsMatch, renderAll, skip } from "./helpers/console-pages-harness.mjs";
 
 /**
- * The console's screens rendered over the canned deployment (issue #641), in `render-images.test.mjs`'s style: the
+ * The console's screens rendered over the canned deployment (issue #641): the
  * fixture (`launch/fixture-deployment.mjs`) is written and seeded through the project's own writers, the page data is
  * read through the REAL `createFleetReader`, `readConsoleAudit` and `assembleInsights`, and every screen is rendered for
  * both roles at the fixture's frozen instant. Each page must be byte-identical to its committed fixture in
@@ -603,7 +603,7 @@ test("the audit page's Older rows link carries readConsoleAudit's own cursor, wh
 test("a run id in no history, no queue, no transcript and no progress is the run-not-found page, with the runs search holding the id", async () => {
   const { renderPage } = await import("../src/console/pages.mjs");
   // Every source's own explicit none: the record read on both sides, the whole queue lookup, the stream, the key.
-  const none = { run: { missing: true }, chat: { found: false }, transcript: { exists: false, ended: false, outcome: null, length: 0 }, progress: { absent: true } };
+  const none = { run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { exists: false, ended: false, outcome: null, length: 0 }, progress: { absent: true } };
   const ctx = (data, id = "gh-nope") => ({ query: { id }, session: { name: "a", role: "operator" }, data: { now: 0, env: {}, ...none, ...data }, readOnly: false });
   const page = await renderPage("run", ctx({}));
   assert.equal(page.status, 404);
@@ -619,10 +619,10 @@ test("a run id in no history, no queue, no transcript and no progress is the run
     { readFailed: true },
     { run: { unreadable: "the fleet's run mirror could not be read" } },
     { run: { record: { jobId: "gh-nope" } } },
-    { chat: { unreachable: true } },
-    { chat: null },
-    { chat: { found: null } },
-    { chat: { found: true, jobState: "waiting" } },
+    { queueState: { unreachable: true } },
+    { queueState: null },
+    { queueState: { found: null, jobState: null, activeJobId: null, queuedJobId: null } },
+    { queueState: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null } },
     { transcript: { exists: true } },
     { transcript: { unreachable: true, exists: false } },
     { transcript: undefined },
@@ -640,7 +640,7 @@ test("a run id in no history, no queue, no transcript and no progress is the run
 
 test("the run-not-found page is not answered while the live transcript and the progress could not be read: the run page keeps them, 503", async () => {
   const { renderPage } = await import("../src/console/pages.mjs");
-  const data = { run: { missing: true }, chat: { found: false }, transcript: { unreachable: true, exists: false }, progress: { unreachable: true }, subscriptions: [] };
+  const data = { run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { unreachable: true, exists: false }, progress: { unreachable: true }, subscriptions: [] };
   const got = await renderPage("run", { query: { id: "gh-9" }, session: { name: "ops", role: "operator" }, data, readOnly: false, theme: null });
   assert.equal(got.status, 503);
   assert.ok(String(got.html).includes('<body data-page="run"'));
@@ -650,7 +650,7 @@ test("the run-not-found page is not answered while the live transcript and the p
 test("a run with no record and no queued job but a progress snapshot is a running job's page, never the run-not-found page", async () => {
   const { renderPage } = await import("../src/console/pages.mjs");
   const progress = { v: 1, turn: 1, steps: 0, failed: 0, interrupted: 0, running: [], recent: [], phase: null, phases: [], note: null, prior: null, startedAt: 2, updatedAt: 3, ended: false, outcome: null };
-  const ctx = { query: { id: "gh-live" }, session: { name: "a", role: "operator" }, data: { now: 0, env: {}, run: { missing: true }, chat: { found: false }, transcript: { exists: false }, progress }, readOnly: false };
+  const ctx = { query: { id: "gh-live" }, session: { name: "a", role: "operator" }, data: { now: 0, env: {}, run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { exists: false }, progress }, readOnly: false };
   const page = await renderPage("run", ctx);
   assert.equal(page.status, 200);
   assert.ok(String(page.html).includes('<body data-page="run"'), "the run page");
@@ -685,7 +685,7 @@ test("loadPageData hands the run-not-found rule each source's own answer: a stre
 
 test("one status rule for the run page: 404 only for the run-not-found page, 503 for a page kept because a place could not be read, 200 for every run a place shows, a queued job's included (#737)", async () => {
   const { renderPage } = await import("../src/console/pages.mjs");
-  const none = { run: { missing: true }, chat: { found: false, activeJobId: null, queuedJobId: null }, transcript: { exists: false, ended: false, outcome: null, length: 0 }, progress: { absent: true } };
+  const none = { run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null }, transcript: { exists: false, ended: false, outcome: null, length: 0 }, progress: { absent: true } };
   const snapshot = { v: 1, turn: 1, steps: 0, failed: 0, interrupted: 0, running: [], recent: [], phase: null, phases: [], note: null, prior: null, startedAt: 2, updatedAt: 3, ended: false, outcome: null };
   const statusOf = async (data) => {
     const got = await renderPage("run", { query: { id: "gh-9" }, session: { name: "ops", role: "operator" }, data: { now: 0, env: {}, ...none, ...data }, readOnly: false });
@@ -696,9 +696,9 @@ test("one status rule for the run page: 404 only for the run-not-found page, 503
   for (const data of [
     { readFailed: true },
     { run: { unreadable: "the fleet's run mirror could not be read" } },
-    { chat: { unreachable: true } },
-    { chat: null },
-    { chat: { found: null } },
+    { queueState: { unreachable: true } },
+    { queueState: null },
+    { queueState: { found: null, jobState: null, activeJobId: null, queuedJobId: null } },
     { transcript: { unreachable: true, exists: false } },
     { transcript: undefined },
     { progress: { unreachable: true } },
@@ -709,21 +709,20 @@ test("one status rule for the run page: 404 only for the run-not-found page, 503
   }
   for (const data of [
     { run: { record: { jobId: "gh-9", outcome: "completed" }, source: "local" } },
-    { chat: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null } },
-    { chat: { found: false, jobState: null, activeJobId: "gh-9.r1", queuedJobId: null } },
-    { chat: { found: false, jobState: null, activeJobId: null, queuedJobId: "gh-9.r1" } },
+    { queueState: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null } },
+    { queueState: { found: false, jobState: null, activeJobId: "gh-9.r1", queuedJobId: null } },
+    { queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: "gh-9.r1" } },
     { transcript: { exists: true, ended: false, outcome: null, length: 2 } },
     { progress: snapshot },
     // A place that shows the run is a run, whatever another could not read.
-    { chat: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null }, transcript: { unreachable: true, exists: false } },
+    { queueState: { found: true, jobState: "waiting", activeJobId: null, queuedJobId: null }, transcript: { unreachable: true, exists: false } },
   ]) {
     assert.deepEqual(await statusOf(data), [200, "run"], JSON.stringify(data));
   }
 });
 
-test("a base run whose job the queue no longer holds while its recovery runs or waits is the run page, as /api/run says: the lookup's whole answer, never its found alone (#737)", async () => {
+test("a base run whose job the queue no longer holds while its recovery runs or waits is the run page: the lookup's whole answer, never its found alone (#737)", async () => {
   const { loadPageData, renderPage } = await import("../src/console/pages.mjs");
-  const { runDocument } = await import("../src/console/run-api.mjs");
   const { readJobStatus } = await import("../src/read-model.mjs");
   for (const state of ["active", "waiting"]) {
     // The base job "gh-base" is gone; its recovery "gh-base.r1" is in the queue (readJobStatus's own walk).
@@ -739,9 +738,9 @@ test("a base run whose job the queue no longer holds while its recovery runs or 
       inbox: async () => ({ found: false }),
       runsPage: async () => ({ runs: [], next: null }),
     };
-    const api = await runDocument(fleet, "gh-base");
-    assert.equal(api.status, undefined, `${state}: /api/run answers the run (${api.error})`);
     const data = await loadPageData("run", { id: "gh-base" }, { fleet, now: 0, env: {} }, { role: "operator", readOnly: false });
+    assert.equal(data.queueState?.found, false, `${state}: the page's queue read says the base job is in no queue`);
+    assert.equal(data.queueState?.activeJobId ?? data.queueState?.queuedJobId, "gh-base.r1", `${state}: and names the recovery it goes on as`);
     const page = await renderPage("run", { query: { id: "gh-base" }, session: { name: "a", role: "operator" }, data, readOnly: false });
     assert.equal(page.status, 200, state);
     assert.ok(String(page.html).includes('<body data-page="run"'), `${state}: the run page`);

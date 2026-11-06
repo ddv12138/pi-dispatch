@@ -43,7 +43,7 @@ with at least one commit, and `run` refuses any other folder before it queues an
 |---|---|
 | `init` | write `.env` and the config files into this folder (never overwrites) |
 | `up` | one pass that asks before each container action: image, Valkey, egress proxy, `init`, `doctor` |
-| `doctor [--fix] [--live] [--openshell] [--secrets] [--no-publish]` | check the whole setup; `--live` reads the isolation guarantees back from real containers; each run publishes its checks (paths, URLs and secret values cut out) for the console and the panel, unless `--no-publish` |
+| `doctor [--fix] [--live] [--openshell] [--secrets] [--no-publish]` | check the whole setup; `--live` reads the isolation guarantees back from real containers; each run publishes its checks (paths, URLs and secret values cut out) for the console, unless `--no-publish` |
 | `worker` | run jobs from the queue |
 | `run <folder> --task "..."` | queue one job against a local folder |
 | `run --trigger <id>` | fire one cron trigger from the triggers file now, once, as its schedule would |
@@ -57,7 +57,6 @@ with at least one commit, and `run` refuses any other folder before it queues an
 | `updates` | which pi and which extensions jobs run, what is newer, and adopting it |
 | `opener install` | register `pi-dispatch-open`, so the console can open a sandbox in your own terminal |
 | `import-pi` | stage your own pi setup (models, skills, persona) for every job, without credentials |
-| `chat <jobId \| url \| key>` | follow and steer a running job, answer a parked one, or fork a finished one into your own pi (`--fork-as-job` to run it as a job), through the operator console |
 | `sandbox <jobId>` | reopen a finished run's workspace in a fresh container with no credentials; `--list`, `--attach` and `--new` to see, return to or prepare one |
 | `egress render` | write `model-endpoints.conf` from `model-endpoints.json`, then print the command that reloads the egress proxy |
 
@@ -67,5 +66,5 @@ guardrails that tell it not to leak them are prompt text. The default GitHub sou
 whole login, full scope and never expiring. pi-dispatch never merges anything, but the job's token can,
 so branch protection on your default branch is the real control.
 
-The full guide, with the console, triggers, providers, the panel and every forge, is the
+The full guide, with the console, triggers, providers and every forge, is the
 [main README](https://github.com/edgehero/pi-dispatch#readme). MIT licensed.

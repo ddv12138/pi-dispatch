@@ -137,8 +137,8 @@ export function keyParts(job, resolved = {}) {
  * text, and the record holds none, INT-RUN-HISTORY-FILE-CONTRACT).
  *
  * It lives HERE, beside `sessionKeyFor`, and not in the admin's read model where it started (issue #647): the admin's
- * parked-chain counter and the terminal `pi-dispatch chat` fork both need it, and two copies of a key rule are two
- * places for a cross-issue transcript mix-up to start. Still derived, never looked up: there is no index to consult.
+ * parked-chain counter needs it, and two copies of a key rule are two places for a cross-issue transcript mix-up to
+ * start. Still derived, never looked up: there is no index to consult.
  *
  * @param {object} record - A run record (`kind`, `target`, `jobId`, `triggerType`).
  * @returns {string|null} The 32-hex key, or null.

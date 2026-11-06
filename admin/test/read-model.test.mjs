@@ -461,7 +461,7 @@ test("readQueueState counts cron next-occurrences from their own source, and deg
     async getWorkers() { return []; },
     async close() {},
   });
-  assert.equal((await readQueueState({ url: "redis://x", makeQueueFn: without, parseConnectionFn: () => ({}) })).cronNext, null, "an unreadable part is null, and renderStatus then does not name it");
+  assert.equal((await readQueueState({ url: "redis://x", makeQueueFn: without, parseConnectionFn: () => ({}) })).cronNext, null, "an unreadable part is null, and the queue line then does not name it");
 });
 
 test("readQueueState returns { unreachable } and still closes when the queue is down", async () => {
@@ -2705,8 +2705,8 @@ test("a local read that FAILED is never papered over by the mirror", async () =>
 });
 
 test("the one-shot wrapper closes its own client; the core never closes a borrowed one", async () => {
-  // The panel holds its clients for the life of the overlay, so a reader that disconnected the client it
-  // was handed would tear down the whole dashboard's Valkey connection on its first tick.
+  // The overlay held its clients for its whole life, so a reader that disconnected the client it
+  // was handed would tear down the caller's other reads on its first tick.
   const dir = tempDir("merged-runs-");
   let disconnects = 0;
   const client = { ...mirrorRedis([]), disconnect() { disconnects++; } };

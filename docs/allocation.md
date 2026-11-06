@@ -5,7 +5,7 @@ priorities plan moves headroom between projects with no keypress. The plan holds
 pi-dispatch does the arithmetic. A job over its project's share is refused before anything is spent.
 
 This page covers the file, how the worker applies and enforces the split, what it refuses, and the operator's
-surfaces: the tools, `/dispatch priorities`, the panel's `b` view, and the guard on pi's own file tools.
+surfaces: the console's budget split page and the tools.
 
 ## Enable it
 
@@ -128,7 +128,7 @@ A portfolio job runs a flow that reads the budget and proposes a split, with no 
   after the container completes and applies it under the same rules: the step, the interval, the floors.
 - **When it writes nothing.** A portfolio job that completes without a `/outbox/priorities.json` is recorded as
   refused, `plan-absent`, and the applied split stays as it was. It is a line in the audit file and in `alloc:log`
-  like the refusals below, so the panel and the next snapshot's `lastAttempt` show that the run wrote no plan. A run
+  like the refusals below, so the next snapshot's `lastAttempt` shows that the run wrote no plan. A run
   that stops before it completes (a policy exit, a timeout, a cancel, an infrastructure failure, a refusal before
   start) records nothing, and `lastAttempt` still shows the earlier attempt. A job that is not a portfolio job (or
   whose flag was removed while it ran) and writes no plan records only `plan: null`.
@@ -140,9 +140,9 @@ A portfolio job runs a flow that reads the budget and proposes a split, with no 
   also a line in the audit file and in `alloc:log`, and the next snapshot shows it as `lastAttempt`, except
   `plan-collect-error` (below), which is only in the run record and the worker log. A file left by a
   job that was never a portfolio job (a manual run, a chained child, an unflagged cron job) is refused in its run
-  record and the worker log only, so stray files cannot push the panel's history out of `alloc:log`.
+  record and the worker log only, so stray files cannot push the history out of `alloc:log`.
   `plan-collect-error` means the worker could not tell what happened (the plan may have applied), so it writes no
-  row of its own: look at the panel's current plan and the audit file.
+  row of its own: look at the budget split page's current plan and the audit file.
 - **The job log** shows `plan_precheck` from inside the container (what the plan is likely to meet, a hint only) and
   `plan_collected` from the worker (what happened).
 - **The manager pays from a share too.** Its own job is governed like any other: its folder's project, or `_other`
@@ -181,8 +181,8 @@ not its own. So after the first start, a stale copy or a hand edit on one host i
 
 An envelope edit re-bases the fleet only when its digest matches `alloc:envelope:expected`, which the admin's envelope
 tool writes before it writes the file. A hand edit on one host does not move the fleet: that host refuses jobs with
-`envelope-mismatch`, its log and the audit file say `envelope-changed-externally`, and the panel's `b` view shows
-a notice that a host reported another envelope. Change the envelope with `dispatch_envelope_set` (below) and none of this
+`envelope-mismatch`, its log and the audit file say `envelope-changed-externally`, and the budget split page shows
+a notice that a host reported another envelope. Change the envelope with the page's envelope form (below) and none of this
 happens. To accept a hand edit:
 
 1. Install the new file on every host. Until a host has it, and until step 2, the hosts that differ refuse their jobs
@@ -198,15 +198,8 @@ The next job on each host re-bases the split.
 
 ## Set a plan
 
-A plan is weights, an integer from 0 to 1000 per project. From the console:
-
-```text
-/dispatch priorities set shop=3 platform=1
-```
-
-or from a model, `dispatch_priorities_set`. The typed command is the person’s instruction. An interactive model
-proposal always confirms; a headless model tool additionally needs `PI_DISPATCH_AGENT_WRITES=1` in its own process
-and an unattended policy transition. A plan can only move money inside the envelope. The writer is `operator-session`, so
+A plan is weights, an integer from 0 to 1000 per project. Set it on the budget split page's priorities form
+([below](#the-other-surfaces)). A plan can only move money inside the envelope. The writer is `operator-session`, so
 `delegation.writers` must list it. The plan's `basis` is filled in from the applied plan. A plan that leaves `_other`
 out keeps `_other`'s current weight; any other project left out is refused as `plan-incomplete`.
 
@@ -223,17 +216,16 @@ within the step, so give it a floor if they matter.
 
 The result names the outcome (`applied`, `duplicate`, `refused`, `apply-failed`), the refusal's reason, the plan id,
 whether the step clamped it, and each project's micro-dollars before and after. It never carries a plan's reason
-text: that is agent text, shown only in the panel.
+text: that is agent text, shown only on the budget split page (to an operator, escaped) and in the audit file.
 
-`/dispatch priorities` shows the envelope, each project's floor, weight, share and spend this window, the applied
-plan and the last outcomes, with no reasons. `dispatch_allocations` returns the same to a model, plus each spend
-key's name.
+The budget split page shows the envelope, each project's floor, weight, share and spend this window, the applied
+plan and the last outcomes, with no reasons.
 
 ## Change the envelope
 
-`dispatch_envelope_set` changes any of `window`, `totalUsd`, `floorsUsd` (merged per id), `defaultWeights` (merged),
+The budget split page's envelope form changes any of `window`, `totalUsd`, `floorsUsd` (merged per id), `defaultWeights` (merged),
 `enabled`, `writers`, `maxStepPct`, `minIntervalHours` and `maxPlanDays`. The worker's own parser judges the result
-before the confirm, which shows each field before and after. It is refused with no operator present. After the
+before the confirm, which shows each field before and after. After the
 confirm it stores the new digest as `alloc:envelope:expected` in Valkey, then writes the file (tmp and rename, its
 mode and owner kept), so every host re-bases onto it instead of refusing it as a hand edit. If the file cannot be
 written, the key is put back. If Valkey cannot be reached, nothing is written.
@@ -242,16 +234,9 @@ The other admin writers check the envelope too. A project delete that removes a 
 row below a project's floor, and a `maxCostUsd` change that removes the per-job cap are refused before the confirm,
 naming the conflict. An envelope that already does not load does not block them.
 
-## The panel
+## Reverting a history row
 
-Press `b` in the panel list (`p` and `r` are pause and resume there). The view shows the envelope, each project's
-floor, weight, share and spend this window with the Valkey key it counts under, the applied plan with the reason it
-gave per project, and the newest 20 outcomes from `alloc:log`. Reasons are shown escaped: an invisible or
-direction-changing character prints as `\u{...}`. A history row reads the instant (`MM-DD HH:MM`, UTC), the
-host when the rows name more than one, the writer, the first 8 digits of the plan id, then the outcome and its
-reason. The headroom line names the unallocated amount and the deployment's spend `of` the envelope total.
-
-`r` on a history row asks, in the panel, whether to revert to it. `y` applies that row's weights as
+Revert on a history row of the budget split page applies that row's weights as
 `operator-revert`: an operator act, so it skips the interval and the step, but it is still refused while delegation
 is off, while this host's envelope is not the applied one, or while another apply runs. A refused row has no split
 to go back to. A row with no plan (a neutral, default or expired row) restores the current neutral split: today's
@@ -262,8 +247,8 @@ split again. With `minIntervalHours` 0, the next run of the trigger can undo a r
 delegation off or remove the trigger's `run.portfolio` flag.
 
 While the newest `envelope-changed-externally` outcome reports an envelope other than the one the applied split was
-made for, the view, `/dispatch priorities` and the insights page show "a host reported envelope <digest> at <time>,
-not the one the split was made for (<digest>); a host still on it refuses governed jobs as envelope-mismatch". It is
+made for, the budget split page shows "a host reported envelope <digest> at <time>, not the one the split was made
+for (<digest>); a host still on it refuses governed jobs as envelope-mismatch". It is
 history, not a live check: a host logs each digest once per process, so the log cannot say whether that host still
 runs the edited file, and it cannot see a hand edit put back. Check the host's log or restart it to be sure.
 
@@ -272,34 +257,8 @@ runs the edited file, and it cannot see a hand edit put back. Check the host's l
 - **Budget split** (`/insights/budget-split`) shows the envelope's totals, per-project weights, allocations, spend including holds, floors, the current plan and newest 20 history rows. Refusal counts use the envelope window. Rows start at 1; a host column appears when history names several hosts. Live host digests show which envelopes differ or are unknown. Operators see escaped plan reasons and structured priorities/envelope forms, plus Revert with a preview and five-minute confirmation ticket; viewers see the numbers and history. The allocation forms live here rather than Configuration's Projects panel. Spend retains a linked split summary. [Spend views](insights.md) explains the confirmation and undo semantics.
 - **A run's detail** shows a `plan` line for a run that left one (the outcome, its reason, `clamped`, the plan
   id) and a `dollars` line (what the run settled, and on what basis).
-- **A portfolio trigger** carries `[portfolio]` in the panel's trigger list and in `/dispatch triggers`. Its
+- **A portfolio trigger** is marked "writes the budget split" in the console's trigger list. Its
   drill-in and its tip on the insights page's topology say that its jobs write the budget split.
-- **`/dispatch priorities`** shows the same split as text, with the history, but not the reasons a plan gave.
-
-## The guard on pi's file tools
-
-In your pi session the admin extension blocks pi's own `write` and `edit` tools when the file they would write is the
-envelope, `projects.json`, `scoped-limits.json`, `triggers.json`, the settings file, the deployment's `.env` (which
-names those files) or the deployment pointer. Which files those are:
-
-- with a pointer (`/dispatch setup` writes one), the paths it and its folder's `.env` set;
-- with no pointer, the paths your environment sets, every one of those files the `.env` in the folder you started pi
-  in names (that `.env` is guarded too, and it is never read for anything else), and, when that folder is an `init`
-  folder (its `.env`, `triggers.json`, `pause-windows.json` and `subscriptions.json` are all there), its
-  `triggers.json`, `scoped-limits.json` and `projects.json`;
-- in any other folder, a repository's own `triggers.json` or `projects.json` is left alone.
-
-A deployment the panel cannot see at all (no pointer, no key set, and not the folder pi started in) is not guarded.
-The set only grows within a session: pointing `.env` at another file does not unguard the one guarded before.
-
-The path is resolved the way pi resolves it (`~`, an `@` prefix, Unicode spaces, `file://`, relative to the session's
-folder) and compared by file identity, so a symlink, a hard link or a case variant counts (a not yet existing name is
-compared fully case-folded, so a long s or a Kelvin sign does not slip past). A call made from inside another tool (a
-codemode script) is blocked too. A `powershell` command that names one of the files is blocked.
-
-What it cannot see, named in [`SECURITY.md`](../SECURITY.md): `bash`, a `powershell` command that builds the name
-at run time or uses an 8.3 short name (`PROJEC~1.JSO`), your own `!` commands, a later extension that rewrites a tool's path after the guard ran, and a link
-planted by `bash` in the same message as the write. An envelope edit made that way is still detected by its digest.
 
 ## Audit
 
@@ -321,9 +280,7 @@ planted by `bash` in the same message as the write. An envelope edit made that w
 | Plan reasons (run record `plan`) | `plan-absent`, `plan-not-portfolio`, `plan-oversize`, `plan-not-regular-file`, `plan-unreadable`, `plan-parse-error`, `plan-collect-error`, `plan-invalid`, and the apply ladder |
 | Job files | `/job/portfolio.json` (in), `/outbox/priorities.json` (out) |
 | Valkey | `alloc:plan`, `alloc:lock`, `alloc:log`, `alloc:envelope:expected` |
-| Tools | `dispatch_allocations` (read), `dispatch_priorities_set` (interactive Confirm, headless process grant), `dispatch_envelope_set` (confirm) |
-| Commands | `/dispatch priorities`, `/dispatch priorities set <id>=<weight> ...` |
-| Panel | `b` in the list; `r` on a history row reverts |
+| Revert | Revert on a history row of the budget split page, as `operator-revert` |
 | Audit file | `PI_LOGS_DIR/allocations/YYYY-MM.jsonl` |
 | Host registry | `fpEnvelope`: the envelope digest, or `none`; doctor fails for a host whose digest is not the applied split's |
 | Spec | `REQ-DELEGATED-ALLOCATION`, `DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE`, `INT-ENVELOPE-FILE-CONTRACT`, `INT-PRIORITIES-PLAN-CONTRACT`, `INT-OUTBOX-CONTRACT`, `INT-CONTAINER-JOB-INPUTS` |

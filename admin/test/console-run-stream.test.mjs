@@ -22,7 +22,7 @@ function rig() {
   const hub = makeLiveHub({ now: () => AT, pageMinMs: {}, timers: { setInterval: () => 1, clearInterval() {} },
     log: (line) => logs.push(line),
     loadPageData: async () => data,
-    pagePanels: async () => [{ id: "p-chat", html: "safe panel" }],
+    pagePanels: async () => [{ id: "p-inbox", html: "safe panel" }],
     readTokens: () => ({ file: tokens ? { tokens: [] } : null }), peekSession: () => ({}),
     transcriptSince: async (job, after) => {
       reads.push([job, after]);
@@ -105,12 +105,12 @@ test("two run tabs share transcript reads but keep separate cursors and connecti
   r.hub.close(); assert.equal(a.res.ended, true);
 });
 
-const markup = `<html><body data-live="run" data-query="id=gh-747"><main id="main"><section id="p-chat" data-panel><div data-run-question></div></section><section id="p-tail" data-panel><div data-run-tail></div></section><section id="p-transcript" data-panel><p data-transcript-status></p></section><div data-transcript data-job="gh-747"></div><button data-transcript-filter="all"></button><button data-transcript-filter="messages"></button><button data-transcript-filter="tools"></button><span data-transcript-following></span><button data-transcript-newest></button></main></body></html>`;
+const markup = `<html><body data-live="run" data-query="id=gh-747"><main id="main"><section id="p-inbox" data-panel><p>Inbox</p></section><section id="p-recovery" data-panel><div data-recovery-tools></div></section><section id="p-transcript" data-panel><p data-transcript-status></p></section><div data-transcript data-job="gh-747"></div><button data-transcript-filter="all"></button><button data-transcript-filter="messages"></button><button data-transcript-filter="tools"></button><span data-transcript-following></span><button data-transcript-newest></button></main></body></html>`;
 function browserEntry(kind, text, tool = "", ts = AT) {
   return `<article class="tx__entry" data-kind="${kind}" data-tool="${tool}" data-ts="${ts}"><header></header><div class="tx__body"><pre>${text}</pre></div></article>`;
 }
 
-test("browser uses only the page stream, safely fills question/tail after swaps and leaves it open after tdone", () => {
+test("browser uses only the page stream, agent text lands as text, swaps refill the recovery tools and it stays open after tdone", () => {
   const d = runConsoleScript(CONSOLE_SCRIPT, markup);
   assert.equal(d.streams.length, 1); assert.match(d.streams[0].url, /api\/events/);
   const s = d.streams[0];
@@ -118,23 +118,27 @@ test("browser uses only the page stream, safely fills question/tail after swaps 
   s.emit("entry", questionEntry, "1-0");
   s.emit("entry", questionEntry, "1-0");
   assert.equal(d.document.querySelectorAll("[data-transcript] article").length, 1, "replayed cursor is not duplicated");
-  assert.equal(d.document.querySelector("[data-run-question]").textContent, "<img src=x onerror=bad>What now?");
-  assert.equal(d.document.querySelector("[data-run-question]").querySelector("img"), null);
-  s.emit("panel", { id: "p-chat", html: "<div data-run-question></div>" });
-  assert.match(d.document.querySelector("[data-run-question]").textContent, /What now/);
-  s.emit("panel", { id: "p-tail", html: "<div data-run-tail></div>" });
-  assert.equal(d.document.querySelectorAll("[data-run-tail] article").length, 1);
+  // Agent-written text is copied only from the server-escaped entries: the img is text, never an element.
+  const pre = d.document.querySelector("[data-transcript] article pre");
+  assert.equal(pre.textContent, "<img src=x onerror=bad>What now?");
+  assert.equal(d.document.querySelector("[data-transcript] article img"), null);
+  s.emit("panel", { id: "p-recovery", html: "<div data-recovery-tools></div>" });
+  assert.equal(d.document.querySelectorAll("[data-recovery-tools] article").length, 0, "a swap re-fills the tools from transcript entries, an assistant entry is no tool");
+  s.emit("entry", { html: String(transcriptEntryHtml({ id: "2-0", kind: "tool-call", text: "args", tool: "bash", ts: AT - 1000 })) }, "2-0");
+  s.emit("panel", { id: "p-recovery", html: "<div data-recovery-tools></div>" });
+  assert.equal(d.document.querySelectorAll("[data-recovery-tools] article").length, 1, "the tool call is cloned in");
+  assert.equal(d.document.querySelectorAll("[data-transcript] article").length, 2, "and the whole transcript keeps both entries");
   s.emit("tdone", { outcome: "cancelled" });
   assert.equal(s.closed, false);
   assert.equal(d.document.querySelector("[data-transcript-status]").textContent, "ended (cancelled)");
   s.emit("panel", { id: "p-transcript", html: "<p data-transcript-status>Ended (cancelled); kept 24 hours after the end.</p>" });
   assert.equal(d.document.querySelector("[data-transcript-status]").textContent, "Ended (cancelled); kept 24 hours after the end.");
   s.emit("panel", { id: "p-transcript", html: "<p data-transcript-status>No longer kept: its transcript expired.</p>" });
-  s.emit("panel", { id: "p-tail", html: "<div data-run-tail></div>" });
+  s.emit("panel", { id: "p-recovery", html: "<div data-recovery-tools></div>" });
   assert.equal(d.document.querySelector("[data-transcript-status]").textContent, "No longer kept: its transcript expired.", "an older entry status cannot erase the server's not-kept reason");
 });
 
-test("browser filters and running-call timer update on result; reset clears the parked question", () => {
+test("browser filters and running-call timer update on result", () => {
   const d = runConsoleScript(CONSOLE_SCRIPT, markup);
   const s = d.streams[0];
   s.emit("entry", { html: browserEntry("assistant", "question") });
@@ -142,11 +146,8 @@ test("browser filters and running-call timer update on result; reset clears the 
   assert.ok(d.document.querySelector("[data-call-elapsed]"));
   d.document.querySelector('[data-transcript-filter="messages"]').click();
   assert.equal(d.document.querySelector('[data-transcript] [data-kind="tool-call"]').hidden, true);
-  assert.equal(d.document.querySelector('[data-run-tail] [data-kind="assistant"]').hidden, false, "tail entries are independent of the whole transcript's filter");
   s.emit("entry", { html: browserEntry("tool-result", "result", "bash") });
   assert.equal(d.document.querySelector("[data-call-elapsed]"), null);
-  s.emit("entry", { html: browserEntry("reset", "") });
-  assert.equal(d.document.querySelector("[data-run-question]").textContent, "");
 });
 
 
@@ -200,20 +201,19 @@ test("a replacement transcript already ended between page loads is caught up too
   r.hub.close();
 });
 
-test("a live swap promotes the parked question to the hero and returns live chat without duplicating transcript entries", () => {
-  const layout = `<html><body data-live="run" data-query="id=gh-747"><main id="main"><div class="cols"><div class="stack run-main"><section id="p-outcome" data-panel></section><div data-transcript data-job="gh-747"></div></div><div class="stack run-side"><section id="p-chat" data-panel><p>Live</p></section></div></div></main></body></html>`;
+test("a live panel swap in the run layout leaves the transcript box, its entries and its cursor alone", () => {
+  const layout = `<html><body data-live="run" data-query="id=gh-747"><main id="main"><div class="cols"><div class="stack run-main"><section id="p-outcome" data-panel></section><div data-transcript data-job="gh-747"></div></div><div class="stack run-side"><section id="p-inbox" data-panel><p>Live</p></section></div></div></main></body></html>`;
   const d = runConsoleScript(CONSOLE_SCRIPT, layout);
-  const s = d.streams[0], chat = d.document.getElementById("p-chat"), transcript = d.document.querySelector("[data-transcript]");
+  const s = d.streams[0], inbox = d.document.getElementById("p-inbox"), transcript = d.document.querySelector("[data-transcript]");
   s.emit("entry", { html: String(transcriptEntryHtml({ id: "1-0", kind: "assistant", text: "What now?", ts: AT })) }, "1-0");
-  s.emit("panel", { id: "p-chat", html: '<article class="qcard"><div data-run-question></div><form><textarea name="text"></textarea></form></article>' });
-  assert.equal(chat.parentNode, d.document.querySelector(".run-main"));
-  assert.equal(chat.parentNode.firstChild, chat);
-  assert.equal(d.document.querySelector("[data-run-question]").textContent, "What now?");
-  assert.equal(d.document.querySelectorAll('#p-chat').length, 1);
-  assert.equal(d.document.querySelector("[data-transcript]"), transcript);
-  s.emit("panel", { id: "p-chat", html: '<p>Live again</p>' });
-  assert.equal(chat.parentNode, d.document.querySelector(".run-side"));
-  assert.equal(d.document.querySelectorAll('[data-transcript] article').length, 1);
+  s.emit("panel", { id: "p-inbox", html: "<p>Message forms</p>" });
+  assert.equal(inbox.textContent, "Message forms", "the swapped panel's html is set");
+  assert.equal(d.document.querySelectorAll("#p-inbox").length, 1, "the node is moved, never cloned");
+  assert.equal(d.document.querySelector("[data-transcript]"), transcript, "the transcript box survives the swap");
+  assert.equal(d.document.querySelectorAll("[data-transcript] article").length, 1, "and no entry is duplicated by it");
+  s.emit("panel", { id: "p-inbox", html: "<p>Live again</p>" });
+  assert.equal(inbox.textContent, "Live again");
+  assert.equal(d.document.querySelectorAll("[data-transcript] article").length, 1);
 });
 
 

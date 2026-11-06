@@ -1,6 +1,6 @@
 # Running on more than one machine
 
-Two Mac minis, one queue, one budget, one panel. Sandboxes run on whichever host has capacity, and the
+Two Mac minis, one queue, one budget, one console. Sandboxes run on whichever host has capacity, and the
 work that can only happen on one machine goes to that machine.
 
 This is a deployment shape, not a feature you switch on per trigger. Most of it is already true: the
@@ -20,7 +20,7 @@ inferred from "a second host appeared": which queue a job goes to is a routing d
 decision must not flip underneath a deployment that is already running.
 
 A worker without a declared name still has an identity (its hostname, lowercased and reduced to
-`[A-Za-z0-9._-]`), still publishes itself, and still shows up in `doctor` and the panel. What it does
+`[A-Za-z0-9._-]`), still publishes itself, and still shows up in `doctor` and the console. What it does
 not do is route. `pi-dispatch doctor` warns when it can see peers and nobody has declared a name,
 because in that state the routing that makes a fleet safe is simply off.
 
@@ -37,7 +37,7 @@ table. See trap 4 below.
 The queue itself. The day, week and month spend windows and the daily token counter, which are atomic
 increments on one key. The pause kill switch. The scheduler stall counters, one key per scheduler. Job deduplication and the
 semantic window. Everything the `wait:` keyspace holds for `run.waitFor`: the hold clock, the per-job
-check and fault counts, the supersede lease, and the panel's held-jobs list.
+check and fault counts, the supersede lease, and the console's held-jobs list.
 
 Pause windows are shared correctly too, and for a reason worth knowing: every window carries an explicit
 `tz`, so `22:00` means one instant everywhere. Cron patterns do not, which is the next section.
@@ -54,8 +54,8 @@ Profile **names** only, never the resolver paths or check scripts behind them. A
 everywhere and carries the account name on Windows, and a reader only ever needs to know which host, not
 what it runs to get there.
 
-Four things read it. `doctor` and the panel, to tell you what your fleet looks like. The cron reconcile,
-to refuse to act while hosts disagree. The pause switch and the panel, to find every queue. And the
+Four things read it. `doctor` and the console, to tell you what your fleet looks like. The cron reconcile,
+to refuse to act while hosts disagree. The pause switch and the console, to find every queue. And the
 receiver, to decide which queue a forge delivery belongs on.
 
 The pause switch does not trust it alone. A registry row is a lease that expires ninety seconds after a
@@ -75,22 +75,17 @@ nothing was changed.
 
 A job's raw log (`PI_CAPTURE_JOB_LOGS`) stays on the host that wrote it. It holds everything the container
 printed, with no structure to clean it by, and mirroring it would move that off the machine the operator
-chose to keep it on.
-
-`/dispatch logs <id>` for a job that ran elsewhere now says so by name, rather than reporting no captured
-log as though none had been taken. The bytes are on that machine and this panel deliberately cannot reach
-them.
+chose to keep it on. The bytes are on that machine, and no console page reaches them.
 
 **The live transcript is shared, and that is a choice you can undo.** Since #643 each worker publishes a
 running job's transcript (what the agent said, the tools it called, and what they returned) to Valkey,
-so the console's run page and the panel's live tail (`l`) show a run on any host while it runs. It is not
+so the console's run page shows a run on any host while it runs. It is not
 the raw log: the worker reads pi's own transcript file, takes out the job's secrets and known token
 shapes, keeps at most 2,000 entries per job, and Valkey removes it 24 hours after the run ends (7 days if
 the worker died mid-run). It still holds issue text and tool output, so anyone who can read your Valkey
 can read it; on the console only the operator role sees it. Set `PI_LIVE_TRANSCRIPTS=0` on every worker to
 keep transcripts on their host, as before. What is and is not redacted is in
-[`SECURITY.md`](../SECURITY.md). When a run has no transcript in Valkey, the panel falls back to this
-host's raw log, or says which host ran it.
+[`SECURITY.md`](../SECURITY.md).
 
 **Checkpoints stay on the machine that took them.** A trigger with `"recover": true` has its running jobs
 checkpointed into that host's own store, and a lost run's recovery is sent to that host's queue
@@ -102,7 +97,7 @@ the machine is gone it is taken off the queue by any worker and reported as `rec
 run on another machine is not supported yet; see `durable runs`.
 
 **The run history is merged.** Each worker writes its record to its own disk as it always has, and also
-mirrors it into Valkey, so every panel lists the whole deployment's runs and labels each one with the host
+mirrors it into Valkey, so the console lists the whole deployment's runs and labels each one with the host
 that produced it. The files stay the record; the mirror is a view of them, and it is never allowed to
 outlive them: its retention is the shorter of your `PI_LOG_RETENTION_DAYS` and ninety-two days, so it can
 never show a run whose file has already been reaped.
@@ -110,12 +105,12 @@ never show a run whose file has already been reaped.
 The mirror also holds at most `PI_RUN_MIRROR_MAX_RUNS` runs (5,000 unless set, 1,000 to 20,000). Every worker trims
 the one shared index to its own setting, so in a fleet the lowest one wins, and a worker from before this setting
 trims at 5,000: set the same value on every host. Each trim is recorded, so `pi-dispatch capacity` and doctor read the
-time before it as missing history, never as idle time. The panel and the console read the setting from the
-deployment's `.env` too, so their runs lists reach as far back as the mirror does.
+time before it as missing history, never as idle time. The console reads the setting from the
+deployment's `.env` too, so its runs list reaches as far back as the mirror does.
 
-If Valkey is unreachable the panel shows this host's runs and says `RUNS · this host only` rather than
+If Valkey is unreachable the console shows this host's runs and says so, rather than
 quietly presenting a third of your deployment as all of it. A worker below the version floor mirrors
-nothing, so its runs are visible only on its own panel.
+nothing, so its runs are visible only on its own host.
 
 Local folders. That is the whole point of routing.
 
@@ -134,7 +129,6 @@ whoever enqueues it. Everything else stays on the shared queue and any host can 
 | A chained child | the host that ran its parent | it continues that working tree |
 | `pi-dispatch run <folder>` | the host you ran the command on | it checked that folder against its own disk |
 | `pi-dispatch run --trigger <id>` | the host you ran the command on, which must have the trigger's `run.folder` | the same placement as the trigger's schedule |
-| `/dispatch run` from the panel | the host the panel is running beside | its `PI_DISPATCH_RUN_ROOTS` resolved the folder |
 | A forge delivery | the shared queue | its workspace is a fresh clone, so any host can build it |
 | A forge delivery binding a secret or wait profile | a host that declares that profile | the resolver or check script is on one machine's disk |
 
@@ -158,7 +152,7 @@ It **abstains** in four cases, and every one of them lands on exactly what happe
 
 A host has to be *beating* to attract routed work, not merely unexpired. The ninety second TTL answers
 "has this host definitely gone" and is deliberately six missed beats so a blip cannot evict a working host
-from the panel. Routing needs the opposite: a job sent to a stopped host's queue waits there for it to come
+from the console's view. Routing needs the opposite: a job sent to a stopped host's queue waits there for it to come
 back, so a host stops attracting work after three missed beats, long before its row expires.
 
 **Why routing at enqueue rather than a check at pickup.** The obvious alternative is to let any host take
@@ -227,7 +221,7 @@ the smaller of the two when a worker runs both venues, and on rootless Podman al
 systemd user service (`memory.max`, `cpu.max`). It takes the reserve off, and never goes below one job of the default
 size (`PI_JOB_MEMORY`, `PI_JOB_CPUS`). An amount is the budget itself: the reserve is not taken from it. A value
 below one default job, or one that does not parse, stops the worker at boot with the reason. The four settings are
-read from `.env` only, not from the panel's settings.
+read from `.env` only, not from the console's settings.
 
 **On a small machine the budget may run fewer jobs than before.** A 4 CPU machine has a CPU budget of 3, which holds
 one job of the default 2 CPUs at a time. Lower `PI_JOB_CPUS` or a project's `cpus`, or set `PI_HOST_CPU_BUDGET`, if
@@ -342,10 +336,10 @@ something rather than merely confusing something, which is why it gets a trap of
 If `PI_LOGS_DIR` is a shared mount, the run history is merged with no further machinery, and it is merged
 more deeply than the Valkey mirror manages: the mirror holds at most ninety-two days and `PI_RUN_MIRROR_MAX_RUNS`
 runs (5,000 unless set), while a shared directory holds whatever your retention keeps. You also get every host's raw logs
-readable from every panel, which the mirror deliberately never does.
+readable from the console, which the mirror deliberately never does.
 
 What it costs: the raw job logs, which hold issue and comment text, then live on that mount too, and a
-mount outage becomes a *lost record* rather than a missing panel row. Retention also becomes fleet-wide by
+mount outage becomes a *lost record* rather than a missing runs row. Retention also becomes fleet-wide by
 accident, because each host prunes by its own `PI_LOG_RETENTION_DAYS` and the shortest setting wins for
 everybody. The console's audit log lives there too (`console-audit/`), and every host's worker prunes it by its own
 `PI_CONSOLE_AUDIT_RETENTION_DAYS` (the run history's retention when unset), so the shortest of those wins for the
@@ -355,7 +349,7 @@ audit log: set it the same on every host. A worker from before this setting that
 **You can now arrive here without choosing it.** `PI_LOGS_DIR` and `PI_SETTINGS_FILE` default under the
 home directory, so on a fleet whose home directories are one NFS or SMB mount, every host shares one run
 history and one settings overlay by default, with all the costs above and none of the deliberation. The
-settings overlay is the sharper half: it is read per job and written by whichever panel saved last, so a
+settings overlay is the sharper half: it is read per job and written by whichever console saved last, so a
 cap set on one host silently becomes the cap everywhere. Set both variables per host, or decide to share
 them on purpose.
 
@@ -379,7 +373,7 @@ Multi-host means one worker per machine. Two workers sharing one docker daemon r
 still refused when installing a service unit: the boot reaper would treat the other's containers as
 strays and kill a running job.
 
-## What the panel and doctor show you
+## What the console and doctor show you
 
 `pi-dispatch doctor` names the fleet, warns when peers exist and nobody declared a name, reports a job
 image whose digest differs from the others, explains a timezone disagreement, flags a host row that
@@ -410,8 +404,8 @@ deferred with "Queued or configured by a newer pi-dispatch: waits for this host'
 ten minutes, so it runs on an upgraded host or after this one is upgraded. Doctor warns
 (`fleet.store-versions`) when this host's own file needs a version above 1 and a peer reads only a lower one, or
 publishes none at all (a worker from before these fields, which would read the file without its version and drop
-what it does not know). Its fix names who to upgrade: "upgrade and restart the workers named, and every panel and
-console that writes the triggers file (one from before issue #761 drops a key it does not know when it writes), to a
+what it does not know). Its fix names who to upgrade: "upgrade and restart the workers named, and every console
+that writes the triggers file (one from before issue #761 drops a key it does not know when it writes), to a
 release that reads version 2", or, for the jobs, "every receiver and every console that queues these jobs (a receiver
 publishes no registry row, so doctor cannot see which receivers are older)". Upgrade them before you use what needs
 it. Today no file needs more than version 1, so the line never shows. A run record written by a newer worker is shown
@@ -447,29 +441,16 @@ p50 40s p95 6m, most busy: web`. It is a fact, never a warning, and it shows on 
 what it cannot see: jobs running now that are not counted (or not known, while this host's row is not there),
 history that starts later than the window (the run mirror holds nothing older), or that only this host's files were
 read. A host without `PI_WORKER_NAME` writes no run mirror, so another host's doctor says it has no history there.
-`pi-dispatch capacity` prints the same report in full, and `dispatch_capacity` returns it in pi
+`pi-dispatch capacity` prints the same report in full
 ([the capacity report](insights.md#pi-dispatch-capacity)). It counts this deployment's jobs only, so a machine busy
 with other work reads as idle.
 
-**The panel's HOSTS view.** Press `u` in `/dispatch` (the runs divider names it) for one block per host. The first
-lines are live, from the registry rows the panel already reads every second: the slots in use of the host's
-`PI_CONCURRENCY`, the memory and CPU its budget has promised its jobs against the budget (`no memory budget` for a
-dimension switched off, `budget not known yet` while a starting worker has not read it, `budget unreadable` for a value
-no worker writes), how many jobs wait for the budget, `stale` with its beat's age when it has not beaten for 30 seconds
-(the age the console takes: how long ago Valkey last refreshed its row, where the panel could ask, else its own beat
-time, so a host whose clock runs behind is not called stale), and up to four running jobs with their id, project, size
-and age (an orphan, a container whose stop did not take, is marked and holds no slot; the rest are
-counted, running and orphaned apart). Under them comes the host's last 7 days from the same report as doctor, labelled
-with the minute it was read (`last 7d to 12:00 UTC`): busy share, slots on average and at peak, time with every slot
-taken, the wait p95 and the top projects, then the same caveats `pi-dispatch capacity` prints (how the slot count was
-judged, retries and stalls that under-count, refusals, inferred records), where that history comes from, and, when it
-starts inside the 7 days, from when. Time before a host's history starts is counted as neither busy nor idle, but a
-host that is new, or was down, inside history that is here reads as idle for that time: the records cannot tell a
-machine that ran nothing from one that was not there. The 7 days are read when the view opens and again when you press `u` in it, never on the
-panel's tick, and only one read runs at a time. A read that has not answered after 30 seconds is given up: the view
-says the history did not answer in time, and the next `u` reads again. A host whose history is not here says why, in the words
-`pi-dispatch capacity` uses, and shows no busy share. A host whose job list cannot be read, or whose row carries no beat
-age at all (no evidence it runs), shows `?` slots in use, never 0.
+**The console's Hosts card.** The overview's Hosts card (and the fleet page's hosts table) gives one row per host:
+how long ago it beat, its venues, the slots in use, `stale` with its beat's age when it has not beaten for 30 seconds
+(the age Valkey's last refresh of the row gives, so a host whose clock runs behind is not called stale), its last
+doctor result in one line, and its own queue's waiting and running counts
+([console.md](console.md#the-overview)). The 7 days of busy share, slots, waits and top projects are
+`pi-dispatch capacity`'s report, above, and the insights Capacity page draws it.
 
 To count the jobs running now, each worker's registry row carries three more fields: `jobs` (each running job's id,
 project id, size and start, and an `o` flag on a container whose stop did not take, at most 32, oldest first),
@@ -490,8 +471,8 @@ unknown. The console's overview says two of them on its Hosts card: a host whose
 how much, and a host whose row has no expiry ([console.md](console.md#the-overview)). And it takes the first as a
 host's check-in age: every beat sets the row's expiry again, so how long ago that was is how long ago the host beat,
 whatever its clock says. Whether a worker is online, the slots the overview draws as free, each host's row and age on
-its Hosts card, its first-run checklist, the fleet page's hosts table, the `lastBeatAgeMs` of
-[`/api/state`](console.md#the-state-api) and the `/dispatch` panel's hosts view all go by that age, so a host whose
+its Hosts card, its first-run checklist, the fleet page's hosts table and the `lastBeatAgeMs` of
+[`/api/state`](console.md#the-state-api) all go by that age, so a host whose
 clock runs behind still checks in on time there (and its line says its clock is behind); where the reader could not
 ask, the age is the console's clock against the host's beat time, as before. Nothing else decides on them: the
 worker's own readers (routing, the cron gate, capacity, doctor) do not read them.
@@ -502,7 +483,7 @@ on you.
 A cron trigger's `previousRunAt` needs no merging: cron jobs are routed to the host holding their folder,
 so a scheduler's fires all land on one machine and its own files are the complete answer.
 
-The panel's status line names the workers when it can. `RUN_DETAIL` names the host that ran a job.
+The console's run page names the host that ran a job.
 
 A deployment where some queues are paused and some are not reads as `PART PAUSED` rather than being
 rounded to one side, and `pi-dispatch status` names the paused queues. A pause or resume that fails partway
@@ -580,7 +561,7 @@ a receiver stopped; the page says what was reported and preserves unknown reads.
 
 ## Failure hook history
 
-Each firing worker publishes safe results under `hook:h:<name>`, indexed by `hook:hosts`, using the worker's resolved name even without a declared fleet. Connections and `dispatch_connections` read this display history across hosts: up to 20 entries per host, with seven days of inactivity expiry. Counts describe retained hook details, not delivered notifications. Publication is background best effort; missing or unreadable records never mean healthy. Deleting this keyspace changes no hook, job, routing or admission decision.
+Each firing worker publishes safe results under `hook:h:<name>`, indexed by `hook:hosts`, using the worker's resolved name even without a declared fleet. Connections reads this display history across hosts: up to 20 entries per host, with seven days of inactivity expiry. Counts describe retained hook details, not delivered notifications. Publication is background best effort; missing or unreadable records never mean healthy. Deleting this keyspace changes no hook, job, routing or admission decision.
 
 ## Endpoint occupancy
 

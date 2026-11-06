@@ -61,8 +61,7 @@
     "./capacity": "./src/capacity.mjs",
     "./capacity-cli": "./src/capacity-cli.mjs",
     "./capacity-records": "./src/capacity-records.mjs",
-    "./chat-fork": "./src/chat-fork.mjs",
-    "./chat-mode": "./src/chat-mode.mjs",
+    "./parked-facts": "./src/parked-facts.mjs",
     "./config": "./src/config.mjs",
     "./connection": "./src/connection.mjs",
     "./console-answer": "./src/console-answer.mjs",
@@ -189,7 +188,6 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.5.0",
-    "@earendil-works/pi-tui": "1.5.0",
     "@octokit/auth-app": "8.2.0",
     "@octokit/rest": "22.0.1",
     "bullmq": "5.80.4",

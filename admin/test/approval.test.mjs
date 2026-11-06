@@ -3,8 +3,6 @@ import { test } from "node:test";
 import { ACTIONS } from "../src/console/actions.mjs";
 import { PAGES } from "../src/console/pages.mjs";
 import { parkedQuestions } from "../src/console/panels/parked.mjs";
-import { runChat } from "../src/console/panels/run.mjs";
-import { safeRunOf } from "../src/console/run-api.mjs";
 import { readParkedRuns } from "../src/read-model.mjs";
 import { outcomeWord, outcomeKey } from "../src/words.mjs";
 
@@ -51,15 +49,10 @@ test("typed console decisions canonicalize into the existing answer planner and 
   assert.equal(seen.length, count, "invalid decisions fail before reading or queueing");
 });
 
-test("the terminal API exposes only validated approval metadata", () => {
-  assert.deepEqual(safeRunOf("gh-approval", approval).approval, { requestId: "a".repeat(64), action: "budget-raise" });
-  assert.equal(safeRunOf("gh-approval", { ...approval, approval: { requestId: "bad", action: "PRIVATE-SUMMARY" } }).approval, undefined);
-});
-
-test("the run chat names the approval gate and its enforcement boundary above the decision controls", () => {
-  const draw = (action) => String(runChat({ role: "operator", readOnly: false, now: AT, env: {}, query: { id: approval.jobId }, data: { chat: { mode: "reply", state: "awaiting-approval" }, chatAnswer: { ok: true }, run: { record: { ...approval, approval: { ...approval.approval, action } } } } }));
-  assert.match(draw("budget-raise"), /Awaiting approval for <span class="code">budget-raise/);
-  assert.match(draw("budget-raise"), /Worker-enforced/);
-  assert.match(draw("deploy:staging"), /Advisory: the worker does not enforce/);
-  assert.match(draw("budget-raise"), /name="decision" value="approve"/);
+test("a parked approval reaches the inbox as the validated pair alone, and an invalid one is dropped", () => {
+  const [row] = readParkedRuns({ runs: [approval], now: () => AT });
+  assert.deepEqual(row.approval, { requestId: "a".repeat(64), action: "budget-raise" });
+  const [bad] = readParkedRuns({ runs: [{ ...approval, approval: { requestId: "bad", action: "PRIVATE-SUMMARY" } }], now: () => AT });
+  assert.equal(bad.approval, null, "an approval outside the record's shape is nothing, never its text");
+  assert.ok(!JSON.stringify([row, bad]).includes("PRIVATE-SUMMARY"));
 });

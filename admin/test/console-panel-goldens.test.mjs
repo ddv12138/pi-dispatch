@@ -229,8 +229,8 @@ test("the overview's states: all clear, the first run for each role, each kind o
     const page = pages[`overview-all-clear.${role}`];
     assert.equal(headlineOf(page), "All clear. 4 jobs running, nothing needs you.", role);
     assert.ok(panelOf(page, "p-needs").includes(`<b>All clear</b><span>${NEEDS_EMPTY.body}</span>`), `${role}: Needs you's empty state`);
-    // The same panels as the problem state, so nothing jumps; the first run's three are empty.
-    for (const id of ["p-setup", "p-setup-pi", "p-setup-empty"]) assert.equal(panelOf(page, id), "", `${role}: ${id} is empty`);
+    // The same panels as the problem state, so nothing jumps; the first run's two are empty.
+    for (const id of ["p-setup", "p-setup-empty"]) assert.equal(panelOf(page, id), "", `${role}: ${id} is empty`);
     assert.ok(panelOf(page, "p-waitlists").includes(esc(WAITLISTS_CALM)), `${role}: the calm line`);
     assert.ok(!page.includes("data-action=") || role === "operator", `${role}: a viewer has no form`);
   }

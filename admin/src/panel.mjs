@@ -1,17 +1,16 @@
 /**
- * Pure text primitives for the admin dashboard: box-drawing frames, meters, and width-safe clipping.
- * No I/O, no clock, no process.env, no console, no pi API -- every input is a value the caller already
- * has, so these are testable with plain fixtures (asserted pure by panel.test.mjs).
+ * The console's shared text primitives: scrubbing, escaping, width-safe clipping, box-drawing frames and
+ * the token/cost formatters. No I/O, no clock, no process.env, no console, no pi API -- every input is a
+ * value the caller already has, so these are testable with plain fixtures (asserted pure by panel.test.mjs).
  *
- * PII discipline (no-pii-in-logs, INT-RUN-HISTORY-FILE-CONTRACT): `clipData` is the width gate through
- * which dashboard.ts funnels untrusted, PII-bearing `.log` bytes before framing -- SUBSTITUTE, then clip,
- * so an escape sequence or a stray byte can neither crash the layout nor mis-size a row. `clip` itself
- * DELETES and is not that gate (issue #382); `scrubKeepingStyle` is its twin for a line that already
- * carries the styler's colour.
+ * PII discipline (no-pii-in-logs, INT-RUN-HISTORY-FILE-CONTRACT): `clipData` is the width gate for
+ * untrusted, PII-bearing bytes before framing -- SUBSTITUTE, then clip, so an escape sequence or a stray
+ * byte can neither crash the layout nor mis-size a row. `clip` itself DELETES and is not that gate
+ * (issue #382); `scrubKeepingStyle` is its twin for a line that already carries the styler's colour.
  */
 
-// Custom: no box-drawing/meter primitive exists in deps -- ink/blessed/boxen are full TUI frameworks and
-// this dashboard is a handful of monochrome frames, so a thin pure module is the right size (library-first).
+// Custom: no box-drawing primitive exists in deps -- ink/blessed/boxen are full TUI frameworks and the
+// console's text needs a handful of monochrome frames, so a thin pure module is the right size (library-first).
 
 /** Box-drawing + block glyphs. Swap to ASCII via `setGlyphs(true)` for glyph-width-hostile terminals. */
 export const GLYPHS = {
@@ -273,16 +272,16 @@ export function stripControls(s) {
  * THE CLASS IS WRITTEN ONCE, HERE, and every data path substitutes through this (issue #382, item 1).
  *
  * There were five copies of `[\u0000-\u001f\u007f-\u009f]` across four modules, and they did not agree
- * about what to DO with a match. `cell` in render.mjs and `cellOf` in the dashboard both map it to a SPACE,
- * deliberately, so a framed pane and a plain one clip identically -- and `cell`'s own docblock says that
- * deleting instead "would make the panes clip differently". The unframed degrade composed with `clip`,
- * which DELETES, so it did. One record with a control byte in two fields rendered three ways:
+ * about what to DO with a match. `cell` in render.mjs maps it to a SPACE, deliberately, so a framed pane
+ * and a plain one clip identically -- and `cell`'s own docblock says that deleting instead "would make
+ * the panes clip differently". The unframed degrade composed with `clip`, which DELETES, so it did. One
+ * record with a control byte in two fields rendered three ways:
  *
  *   FRAMED    "a b . c d"     substituted
  *   DEGRADED  "ab . cd"       deleted
  *   PLAIN     "a b     c d"   substituted
  *
- * Two mutants flipping `cell` and `cellOf` to deletion were both killed by the suite; nothing noticed that a
+ * Two mutants flipping `cell` and its framed twin to deletion were both killed by the suite; nothing noticed that a
  * third renderer already deleted.
  *
  * C1 is in the class as well as C0 and DEL, because U+009B is a CSI introducer that needs no ESC in front.
@@ -933,35 +932,6 @@ export function box({ title = "", sections = [], footer, width = 40 } = {}) {
 }
 
 /**
- * A block-char progress bar `[####....] reserved/cap` fitted to `width`. When `cap` is not a positive
- * integer the true cap is unknown to this process, so it renders `reserved / ? (worker env cap)` with no bar
- * rather than a bar against a guessed denominator. The words say where the cap lives (issue #507): the panel reads
- * a job-count cap from the settings overlay only, and with none there the worker's own env (or its default)
- * decides it. A bare "cap unknown" read as a fault on a deployment that set PI_DAILY_CAP in its `.env`.
- *
- * `state` ("ok" | "soft-hold" | "over") appends a textual marker to the label: the panel is monochrome and
- * `clip` strips ANSI, so the amber/red of a soft-hold or over-budget window is carried as a word, not a
- * color. "ok" (the default) adds nothing, so a plain call renders exactly as before.
- *
- * ITS LABEL IS MEASURED BY `.length` AND THAT IS CORRECT HERE, which is worth saying in a file whose whole
- * subject is that `.length` is not a column count (issue #401). Every character of the label comes from two
- * integers and a word out of a closed set, so it is digits and ASCII by construction and no caller can put
- * anything else in it. `styler.meter`'s label is built the same way and is exempt for the same reason.
- */
-export function meter(reserved, cap, width = 24, state = "ok") {
-  const r = Number.isFinite(reserved) ? Math.max(0, Math.trunc(reserved)) : 0;
-  if (!Number.isInteger(cap) || cap <= 0) {
-    return clip(`${r} / ? (worker env cap)`, width);
-  }
-  const tag = state === "soft-hold" ? " soft-hold" : state === "over" ? " over" : "";
-  const label = ` ${r}/${cap}${tag}`;
-  const barCells = Math.max(0, Math.trunc(width) - label.length - 2); // "[" + cells + "]" + label
-  const filled = Math.min(barCells, Math.round((Math.min(r, cap) / cap) * barCells));
-  const bar = `[${active.full.repeat(filled)}${active.empty.repeat(barCells - filled)}]`;
-  return clip(bar + label, width);
-}
-
-/**
  * A one-line cost history: `values` (oldest -> newest, number|null) quantized onto the ramp glyphs and
  * fitted to `width` columns. Negatives clamp to 0 (a cost cannot be negative); null/non-finite entries
  * render the gap glyph. Returns a plain string of at most `width` columns: cells repeat
@@ -1088,7 +1058,7 @@ function charAfter(s, at) {
 
 /**
  * A pure single-line text-input state machine. No key decoding lives here -- the caller decodes raw
- * input (keys.mjs) and calls the edit methods, which keeps this module free of the pi-tui resolver and
+ * input and calls the edit methods, which keeps this module free of the pi-tui resolver and
  * keeps every transition a plain value-in/value-out step a test can drive directly.
  *
  * `render(width, { focused })` windows the value around the cursor when it outgrows `width - 1` (the

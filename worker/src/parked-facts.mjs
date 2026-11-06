@@ -1,48 +1,21 @@
 /**
- * chat-mode.mjs -- which kind of chat a run can have right now (issue #647, terminal chat).
+ * parked-facts.mjs -- the parked-run "being answered" fact rule.
  *
- * ONE RULE, SHARED. `pi-dispatch chat`, the console's `/api/run` and its run page's Chat panel, and the admin's
- * `/dispatch chat` all ask the same question of the same facts, and each would otherwise grow its own table. Three of
- * them drifting apart is how an operator gets offered a reply box for a run that is still running, or a fork of a run
- * whose answer another run already took. So the table lives here, once:
+ * ONE RULE, SHARED. The console's read model (its parked inbox rows and its queued-recovery reader) and its answer
+ * actions all ask the same question of a parked run: is an answer already on its way to it, or can it still be
+ * answered? Each would otherwise grow its own table, and two of them drifting apart is how an operator gets an answer
+ * form for a park whose answer another run already took, or an answer action that refuses what the inbox offered. So
+ * the rule lives here, once (issue #647), and these are the three exports the console uses --
+ * `QUEUED_STATES` (how a job that has not started reads), `pendingFactsOf` (what a pending-answer scan's every shape
+ * means) and `parkedVerdictOf` (the verdict on a park no later record answered).
  *
- *   | the run                                              | mode    |
- *   |------------------------------------------------------|---------|
- *   | its job is active, or its run goes on as an active   | live    |
- *   |   #645 recovery job (`activeJobId`)                  |         |
- *   | its job is queued, or its run goes on as a queued    | refused |
- *   |   #645 recovery job (`queuedJobId`)                  |         |
- *   | parked: completed, awaiting-input, no later run on   | reply   |
- *   |   its target took the answer, and none is queued or  |         |
- *   |   running on it now                                  |         |
- *   | finished (any other record, job no longer queued)    | fork    |
- *   | unknown, answered, or being answered (a queue too    | refused |
- *   |   deep to check counts as unknown: `pendingTooMany`) |         |
+ * The pieces those three run on (`RUN_ID_RE`, `CHAT_REFUSALS`, `isParkedRecord`, `judge`) live in this leaf with them.
+ * `judge` is the refusal table whole; through `parkedVerdictOf` only its parked branch is reached, because the record
+ * handed in is always the awaiting-input one, but the rest of the table stays.
  *
- * A refusal is `{ mode: null, says }`, with a sentence an operator can act on, never a bare null (the project's fail
- * loudly rule). PURE and TOTAL: no I/O, no clock, no throw; the caller reads the queue, the record and the parked fold,
- * and hands the facts in. Nothing here looks at free text: the record fields read are the worker's own closed words.
- *
- * WHY ACTIVE WINS OVER A RECORD. An infra retry keeps the job id, so attempt 1's record can exist while attempt 2 runs;
- * the run is live, and a fork of attempt 1's session would race the job that is writing it. And WHY QUEUED WINS too: a
- * retry waiting to start is about to become that writer, and so is a #645 recovery job waiting to start (its base
- * attempt's record says `recovery-enqueued`, which on its own would read as finished and offer a fork).
- *
- * WHY A RUN ON THE TARGET THAT HAS NO RECORD YET ANSWERS A PARK. The answered rule (`readParkedRuns`) looks for a later
- * RECORD, and a record is written at a run's end, so the answer's own resume run, queued or running, would leave the
- * park offering a second reply that resumes the same transcript twice. The caller looks for a job on the same target in
- * the queue (`parked.pending`), and a park with one is being answered.
- *
- * The fork mode is the run's MODE, not a promise that a fork will work: whether a session exists on this host, whether
- * the run was a pull request, and the pi-version stamp are the fork's own checks (`chat-fork.mjs`), made where the
- * session store is.
+ * PURE and TOTAL: no I/O, no clock, no throw; the caller reads the queue and the parked fold, and hands the facts in.
+ * Nothing here looks at free text: the fields read are the worker's own closed words.
  */
-
-/** The chat modes, in the table's order. */
-export const CHAT_MODES = Object.freeze(["live", "reply", "fork"]);
-
-/** The run states `runStateOf` answers, which `/api/run` carries as `state`. */
-export const RUN_STATES = Object.freeze(["active", "queued", "parked", "answered", "finished", "unknown"]);
 
 /**
  * BullMQ's words for a job that has not started (or is waiting to start again). `paused` is an older BullMQ's word for
@@ -54,8 +27,11 @@ export const QUEUED_STATES = Object.freeze(["waiting", "delayed", "prioritized",
 /** A run id as the worker mints them (the console's `RUN_ID_RE`); anything else is no active job. */
 const RUN_ID_RE = /^[A-Za-z0-9._:-]{1,200}$/;
 
-/** The sentences a refusal says, by why. Exported so a surface can test for one without restating it. */
-export const CHAT_REFUSALS = Object.freeze({
+/**
+ * The sentences a refusal says, by why. Private here: the console reaches them only through `parkedVerdictOf`, so no
+ * surface imports them from this leaf.
+ */
+const CHAT_REFUSALS = Object.freeze({
 	queued: "This run has not started yet (its job is queued), so there is nothing to chat with until it runs.",
 	recoveryQueued: "This run goes on as a recovery job that is queued and has not started yet, so there is nothing to chat with until it runs.",
 	answered: "This run asked a question and a later run on the same target took the answer; open that run's chat instead.",
@@ -72,7 +48,7 @@ function isParkedRecord(record) {
 }
 
 /**
- * The run's state and its chat, from the facts the caller read:
+ * The run's state and its verdict, from the facts the caller read:
  *
  * @param {object} facts
  * @param {string|null} facts.state - The BullMQ state of the job named (`job.getState()`), or null when the queue no
@@ -119,9 +95,9 @@ function judge({ state = null, record = null, activeJobId = null, queuedJobId = 
 
 /**
  * A pending-answer scan's result (the console's `readPendingAnswer`: `{ jobId }` with an id or null, `{ unknown: true,
- * tooMany? }` or `{ unreachable: true }`) as the `parked` facts `chatModeOf` reads: `{ pending, pendingTooMany,
- * pendingJobId }`. ONE mapping, so the run page's Chat panel, `/api/run`, the parked inbox and the planner cannot
- * disagree about what a scan that could not tell means (review round 2: the inbox drew a form where the panel refused).
+ * tooMany? }` or `{ unreachable: true }`) as the `parked` facts `parkedVerdictOf` judges: `{ pending, pendingTooMany,
+ * pendingJobId }`. ONE mapping, so the parked inbox and the answer actions cannot disagree about what a scan that could
+ * not tell means (review round 2: the inbox drew a form where the panel refused).
  */
 export function pendingFactsOf(scan) {
 	const id = typeof scan?.jobId === "string" && RUN_ID_RE.test(scan.jobId) ? scan.jobId : null;
@@ -132,25 +108,11 @@ export function pendingFactsOf(scan) {
 
 /**
  * The verdict on a park no later RECORD answered, from its pending-answer scan alone (`pendingFactsOf`, then this
- * module's table): `{ mode: "reply" | null, says, answeringJobId }`. The parked inbox asks this per row, the Chat panel
- * asks `chatModeOf` with the same facts, so the two screens draw a form for exactly the same parks.
+ * module's table): `{ mode: "reply" | null, says, answeringJobId }`. The parked inbox asks this per row and the answer
+ * actions ask it before queueing a reply, so the screens and the actions agree on exactly the same parks.
  */
 export function parkedVerdictOf(scan) {
 	const facts = pendingFactsOf(scan);
 	const { mode, says } = judge({ record: { outcome: "completed", reason: "awaiting-input" }, parked: { answered: false, ...facts } });
 	return { mode, says, answeringJobId: facts.pendingJobId };
-}
-
-/** The run's state word (one of `RUN_STATES`), from the same facts `chatModeOf` takes. */
-export function runStateOf(facts) {
-	return judge(facts).state;
-}
-
-/**
- * The chat this run can have: `{ mode: "live" | "reply" | "fork", says: null }`, or `{ mode: null, says }` with the
- * sentence that says why not. Facts as `runStateOf`'s.
- */
-export function chatModeOf(facts) {
-	const { mode, says } = judge(facts);
-	return { mode, says };
 }

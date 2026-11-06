@@ -6,7 +6,6 @@ import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { modelRunRecord } from "../src/read-model.mjs";
-import { runDocument, safeRunOf } from "../src/console/run-api.mjs";
 import { stateOf } from "../src/console/live.mjs";
 import { agentReadProjection } from "../src/agent-read.mjs";
 import { NEWER_RECORD_MODEL_NOTE } from "../src/newer-release.mjs";
@@ -14,7 +13,7 @@ import { RECORD_CORE_FIELDS, sanitizeJobId } from "@edgehero/pi-dispatch/run-his
 
 /**
  * A run record's `reason` leaves the admin only as a token (issue #737): every reader that hands a record's reason out of
- * this process (the model-callable `dispatch_runs`, `/api/run`, `/api/state`) goes through words.mjs `recordReason`, so
+ * this process (the model-callable `dispatch_runs`, `/api/state`) goes through words.mjs `recordReason`, so
  * an older worker's free text (a forge's API path, an internal address, a bidi override) reaches no model, no script and
  * no terminal. A token is handed out as it is, and a record whose reason is a token or none is the record as it was.
  * The same projection lets through this build's own sentences beside a record a newer pi-dispatch wrote (issue #761),
@@ -49,19 +48,7 @@ test("modelRunRecord hands a model a record's reason only when it is a token, an
 
 
 
-test("/api/run and /api/state hand out a record's reason only when it is a token", async () => {
-  for (const reason of FREE) {
-    assert.equal(safeRunOf("gh-1", record("gh-1", reason)).reason, null, JSON.stringify(reason));
-    const fleet = {
-      runById: async () => ({ record: record("gh-1", reason), source: "local" }),
-      jobStatus: async () => ({ found: false, state: null, continuesAs: null, queuedAs: null }),
-      runsPage: async () => ({ runs: [], next: null, mirror: "ok" }),
-    };
-    const { doc } = await runDocument(fleet, "gh-1");
-    assert.deepEqual(leaks(JSON.stringify(doc)), [], `/api/run: ${JSON.stringify(reason)}`);
-    assert.equal(doc.run.reason, null);
-  }
-  assert.equal(safeRunOf("gh-1", record("gh-1", "container-lost")).reason, "container-lost");
+test("the day's refusals handed out with /api/state carry reason tokens only", async () => {
   // The day's refusals, the one list of reasons the state document carries.
   const top = [...FREE.map((reason) => ({ reason, count: 2 })), { reason: "scope-cap", count: 1 }];
   for (const role of ["operator", "viewer"]) {

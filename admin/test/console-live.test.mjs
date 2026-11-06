@@ -3,7 +3,6 @@ import { createHash } from "node:crypto";
 import { request } from "node:http";
 import { after, test } from "node:test";
 import { page, html } from "../src/console/html.mjs";
-import { STREAM_SHUTDOWN as CLIENT_STREAM_SHUTDOWN } from "@edgehero/pi-dispatch/console-client";
 import { LIVE_DEFAULTS, makeLiveHub, queryKey, stateOf, TOKENS_BACK_LINE, TOKENS_HELD_LINE } from "../src/console/live.mjs";
 import * as realPages from "../src/console/pages.mjs";
 import { createConsoleServer } from "../src/console/server.mjs";
@@ -481,10 +480,9 @@ test("a session that fails peek gets event: end whose data names why (never empt
   }
 });
 
-test("the end's data: every STREAM_ENDS word as given, anything else null, and a shutdown word the terminal client shares", async () => {
-  // The terminal chat (worker/src/console-client.mjs) cannot import the admin package, so it writes the word out; this
-  // pin is what keeps the two from drifting (the client treats it as a dropped connection, not a sign-out).
-  assert.equal(CLIENT_STREAM_SHUTDOWN, STREAM_SHUTDOWN);
+test("the end's data: every STREAM_ENDS word as given, anything else null, and the shutdown word on the list", async () => {
+  // The shutdown word is the console's own (session-ends.mjs); the terminal client that shared it is gone (issue #647's
+  // chat retired), and the word stays a stream end a person's browser is told, not a sign-out.
   assert.ok(STREAM_ENDS.includes(STREAM_SHUTDOWN) && !STREAM_ENDS.includes("restart"));
   for (const reason of [...STREAM_ENDS, "restart", "Revoked", " idle", "", null, undefined, 7, { ended: "idle" }]) {
     const h = hubOn();

@@ -1,8 +1,5 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
-import { stripAnsi, visibleLen } from "../src/style.mjs";
 import {
   PROFILE_ROOTS_TEXT,
   PROFILE_SOURCE_TEXT,
@@ -26,15 +23,9 @@ import { secretsView } from "../src/secrets-view.mjs";
 import { secretsProfiles } from "../src/console/panels/secrets.mjs";
 
 // Issue #712, PR D: a run's OpenShell policy facts and secrets profile on the run views, and the secret profiles view
-// (source, roots, triggers, projects, last resolve, the hosts that advertise each) on the console, the panel and
-// `/dispatch secrets list`.
+// (source, roots, triggers, projects, last resolve, the hosts that advertise each) on the console and the secrets
+// page. The retired panel's RUN_DETAIL and list rows drew the same facts framed; they went with the panel (58ef2369).
 
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-
-const flush = () => new Promise((resolve) => setImmediate(resolve));
 const AT = Date.UTC(2026, 9, 21, 12, 0, 0);
 const PATH = "/opt/secret-resolvers/prod.sh";
 
@@ -216,60 +207,6 @@ test("the console's Secrets page: each profile's use in a table, words and names
   assert.match(row.textContent, /refused \(secret-unresolved\).*mini1/);
   assert.doesNotMatch(one, /mini&lt;hostile&gt;|mini<hostile>/, "invalid host names are not published as host identities");
   assert.ok(!one.includes("/opt/secret-resolvers") && !one.includes("/tmp/elsewhere"), "no resolver path, not even its real one");
-});
-
-// ---- the panel -------------------------------------------------------------------------------------------------------------
-
-const BASE = {
-  queue: { pausedState: false, counts: { waiting: 0, active: 0, paused: 0, delayed: 0, failed: 0 }, workers: 1 },
-  budget: { day: 0, week: 0, month: 0 },
-  settings: { path: "/s", overlay: {} },
-  runs: [],
-  stagedPackages: { stagedAt: null, packages: [] },
-};
-
-async function render(snap, width, keys = []) {
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: { fetchSnapshot: async () => snap, pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => AT } });
-  await flush();
-  for (const k of keys) {
-    comp.handleInput(k);
-    await flush();
-  }
-  const lines = comp.render(width);
-  await comp.dispose();
-  return lines;
-}
-
-test("the panel's RUN_DETAIL: the policy, the rule hosts wrapped and counted, the profile; a record without them renders as before", async () => {
-  const run = { jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", startedAt: "2026-10-21T10:00:00Z", endedAt: "2026-10-21T10:05:00Z", flow: "fix", backend: "openshell" };
-  const open = async (extra, width = 80) => (await render({ ...BASE, triggers: { triggers: [] }, runs: [{ ...run, ...extra }] }, width, ["\r"])).map(stripAnsi);
-  const hosts = Array.from({ length: 32 }, (_, i) => `host-${String(i).padStart(2, "0")}.example.com`);
-  const got = (await open({ openshell: { mode: "copy", ruleHosts: hosts, ruleHostCount: 50, providers: 2, placeholders: 5 }, secretsProfile: "prod" })).join("\n");
-  assert.match(got, /policy\s+copy mode, 2 credential providers, 5 placeholders/);
-  assert.match(got, /rule hosts\s+50 rule hosts: host-00\.example\.com,\s+│\n.*│\s+host-01\.example\.com/, "wrapped under the label");
-  assert.match(got, /more line\(s\) in the run record/, "a long list is counted, never cut silently");
-  assert.match(got, /secrets via\s+prod/);
-  const older = await open({});
-  for (const hostile of [{ openshell: { mode: "copy\u001b[31m", ruleHosts: [], providers: 0, placeholders: 0 } }, { secretsProfile: "p\u001b[31m" }]) assert.deepEqual(await open(hostile), older, JSON.stringify(hostile));
-  for (const width of [30, 40, 60, 80, 120]) {
-    for (const l of await render({ ...BASE, triggers: { triggers: [] }, runs: [{ ...run, openshell: { mode: "copy", ruleHosts: hosts, providers: 32, placeholders: 1024 }, secretsProfile: "p".repeat(128) }] }, width, ["\r"])) assert.ok(visibleLen(l) <= width, `width ${width}: ${JSON.stringify(stripAnsi(l))}`);
-  }
-});
-
-test("the panel's list: a secret profiles section under the triggers, every row in the frame; none without a profile", async () => {
-  const profiles = secretProfilesView({ triggers: TRIGGERS, settings: { overlay: { secretProfiles: { prod: PATH } } }, env: {}, projects: PROJECTS, hosts: [{ name: "mini1", caps: ["s:prod"] }] });
-  const lines = (await render({ ...BASE, triggers: TRIGGERS, secretProfiles: profiles }, 120)).map(stripAnsi);
-  const all = lines.join("\n");
-  // The facts wrap inside the frame: read them with the frame and the wrap taken out.
-  const flat = lines.map((l) => l.replace(/^│\s?|\s*│$/g, "").trim()).join(" ");
-  assert.match(all, /SECRET PROFILES .* 3 · names only · doctor --secrets resolves/);
-  assert.match(all, /│ prod +│/);
-  assert.match(flat, /declared in the settings overlay · PI_SECRET_RESOLVER_ROOTS is not visible here/);
-  assert.match(flat, /served by: mini1/);
-  assert.ok(!all.includes(PATH), "no resolver path");
-  const before = (await render({ ...BASE, triggers: { triggers: [] } }, 120)).map(stripAnsi).join("\n");
-  assert.ok(!before.includes("SECRET PROFILES"));
-  for (const width of [40, 60, 80, 120]) for (const l of await render({ ...BASE, triggers: TRIGGERS, secretProfiles: profiles }, width)) assert.ok(visibleLen(l) <= width, `width ${width}: ${JSON.stringify(stripAnsi(l))}`);
 });
 
 test("round 1: hosts that publish no capability list are counted by capsSeen; a refusal on a bundled run is said as either read's", () => {

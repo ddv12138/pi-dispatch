@@ -8,10 +8,10 @@
  * THE PANELS, each `(view) -> SafeHtml`:
  *   - the headline (`overviewHeadline`), the shell's `#p-headline` under the title: what needs the person, or "All
  *     clear", or on a first run how many steps stand before the first job;
- *   - the first run's three (`overviewSetup`, `overviewSetupPi`, `overviewSetupEmpty`), drawn only while
+ *   - the first run's two (`overviewSetup`, `overviewSetupEmpty`), drawn only while
  *     `firstRunState(...).applies`, and the overview's eight (`overviewNeeds`, `overviewWaiting`, `overviewActive`,
  *     `overviewSpend`, `overviewTimeline`, `overviewCaps`, `overviewWaitlists`, `overviewHosts`), drawn only while it does
- *     not. Every one of the eleven is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
+ *     not. Every one of the ten is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
  *     the live stream moves a deployment from the checklist to the overview by swapping panels, with no reload.
  *
  * THE ROLE RULE. A viewer reads counts, ids, hosts and why each job waits, in the worker's closed vocabulary: a
@@ -21,7 +21,7 @@
  * was recorded", which would be false. A wait check's profile names are the operator's own configuration, so a viewer
  * never reads them. Never a failure's text, a form, a command or a reader's own error message (every read that fails
  * is said in a fixed sentence). An operator on a console that takes changes also gets the writes (`canAct`): Retry,
- * Cancel, a host's pause, Pause fleet, a question's Answer (its run page's Chat panel takes the answer only there; a
+ * Cancel, a host's pause, Pause fleet, a question's Answer (the answer form is the parked page's; a
  * question is Open otherwise), and the waitlists' links; on a read-only console an operator still reads the commands,
  * which run in a shell, not here.
  *
@@ -45,7 +45,7 @@
  */
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
 import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
-import { FIRST_RUN_COMMANDS, FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
+import { FIRST_RUN_STATES, doctorHostsOf, doctorProblems, doctorStale, firstRunCommandHint, firstRunState } from "../../doctor-view.mjs";
 import { NO_EXPLANATION, docsHref } from "../../words.mjs";
 import { fmtTokens } from "../../panel.mjs";
 import { html } from "../html.mjs";
@@ -418,8 +418,10 @@ export const overviewNeeds = overviewPanel("Needs you", (s, view) => {
   for (const p of need.questions) {
     const href = runHref(view, p.jobId);
     const project = projectId(p.project) ?? projects.get(p.jobId) ?? null;
-    // Answer where this page can take the answer (an operator on a console that takes changes); else the run's page.
-    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: href === null ? null : { label: tr(act ? "Answer" : "Open", view), href } }), tagless: project === null });
+    // The run page took a parked answer through its Chat panel; with the terminal chat gone the manual answer form
+    // lives on the parked page alone (the run page keeps only a draft's card), so an operator's Answer opens /parked
+    // and a viewer's Open still opens the run's page.
+    rows.push({ pill: ui.rowPill({ icon: "parked", status: "parked", items: idItems(project, String(p.jobId ?? "-")), action: act ? { label: tr("Answer", view), href: "/parked" } : href === null ? null : { label: tr("Open", view), href } }), tagless: project === null });
   }
   for (const j of need.failedRows) {
     const id = typeof j?.jobId === "string" ? j.jobId : null;
@@ -1203,12 +1205,6 @@ export function overviewSetup(view) {
   const from = st.doctor === null ? null : `from doctor on ${st.doctor.host}${Number.isSafeInteger(st.doctor.ageMs) ? `, ${ageWords(st.doctor.ageMs)} ago` : ""}`;
   const prog = html`<div class="su-prog"><p><b class="su-big">${count(st.ready)}</b> ${uiText(`of ${count(st.total)} ready`, view.locale)}</p>${progressBar(st.steps, view.locale)}<p class="muted">${uiText(st.sub, view.locale)}</p></div>`;
   return ui.card({ title: uiText("Getting ready", view.locale), sub: uiText(from, view.locale), body: html`${prog}<p class="su-p"><a class="btn" href="/setup">${uiText("Open setup", view.locale)}</a></p><ol class="su-steps">${st.steps.map((x, i) => stepHtml(x, i, view))}</ol>` });
-}
-
-/** "Do it from pi": the guided setup, `/dispatch setup`, its command an operator's. */
-export function overviewSetupPi(view) {
-  if (!setupOf(view).applies) return html``;
-  return ui.card({ title: uiText("Do it from pi", view.locale), body: html`<p class="muted su-p">${uiText("The guided setup in pi walks through every step and asks before each one. It never asks for the provider key.", view.locale)}</p>${view.role === "operator" ? ui.cmd([...FIRST_RUN_COMMANDS.pi]) : null}` });
 }
 
 /**

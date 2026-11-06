@@ -3,20 +3,17 @@ import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
-import { stripAnsi } from "../src/style.mjs";
 import { DOCS_ROOT, capitalised, HELD_LABEL, NO_EXPLANATION, NO_REASON_FAILED, OUTCOME_KEYS, OUTCOME_KEY_WORDS, RECORD_REASON_RE, docsHref, fieldNamed, OUTCOME_WORDS, OUTCOME_WORD_OF, REASON_WORDS, rowNumber, SHORT_MAX, SPEND_TITLE, STATUS_KINDS, UNNAMED_FIELD, VENUE_LABEL, outcomeKey, outcomeWord, reasonWords, recordReason, shortSentence } from "../src/words.mjs";
-import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { NESTED_REASONS, REASONS, explainReason } from "../../worker/src/reason-catalog.mjs";
 import { RECOVERY_COMMENTS } from "../../worker/src/comment-tables.mjs";
 import { RECORD_REASON_RE as LEAF_REASON_RE } from "../../worker/src/record-reason.mjs";
 import { RUNNER_COMPLETED_REASONS } from "../../worker/src/run-history.mjs";
 import { RUN_OUTCOMES } from "../../worker/src/portfolio-snapshot.mjs";
 import { LIVE_OUTCOMES } from "../../worker/src/live-transcript.mjs";
-import { loadVisibleWidth } from "./helpers/renderer.mjs";
 
-// Issue #710, PR 2: the console and the `/dispatch` panel say one vocabulary, read from admin/src/words.mjs. Each table
-// there is bolted to its source here (AGENTS.md, "derived or pinned"), both surfaces are held to importing it, and the
-// panel's run detail is rendered with the catalog's sentence and next step.
+// Issue #710, PR 2: the console reads one vocabulary from admin/src/words.mjs. Each table there is bolted to its
+// source here (AGENTS.md, "derived or pinned") and the console is held to importing it. The retired `/dispatch`
+// panel shared these tables too; it was removed with the panel (58ef2369).
 
 /** The endings a cut may not have: a dangling word (a negation, a modal and an auxiliary among them), a comma, a pronoun after a conjunction. */
 const DANGLING_END = /(?:\s(?:the|a|an|so|no|not|never|of|to|and|or|in|on|for|with|by|its|this|that|is|was|from|as|at|but|which|whose|than|be|if|when|their|any|every|each|into|after|before|because|while|until|nor|whether|are|were|has|have|had|could|can|does|would|will|may|must|should|did|do)|\s(?:so|and|but|or|while) it|[,;:])…$/i;
@@ -304,27 +301,23 @@ test("a cut never ends on a negation alone, and never splits a character (#710 r
   assert.equal(shortSentence(`Refused: ${"\u{1F600}".repeat(SHORT_MAX)}.`), "\u{1F600}".repeat(SHORT_MAX), "a row of exactly SHORT_MAX characters is not cut");
 });
 
-// ---- both surfaces read this module --------------------------------------------------------------------------------------
+// ---- the console reads this module ---------------------------------------------------------------------------------------
 
-test("the panel and the console both import words.mjs, and neither keeps its own copy of a word", () => {
-  const panel = SRC("dashboard.ts");
+test("the console imports words.mjs, and keeps no copy of a word of its own", () => {
   // Issue #737: the console's panels are one module per screen under console/panels/, which console/panels.mjs
   // re-exports. Every one is read, the barrel too, so a module added later is held to the same rule.
   const panelModules = readdirSync(fileURLToPath(new URL("../src/console/panels/", import.meta.url))).filter((f) => f.endsWith(".mjs")).sort();
   assert.ok(panelModules.includes("common.mjs") && panelModules.includes("insights.mjs"), "the panels' modules were found");
   const panels = [SRC("console/panels.mjs"), ...panelModules.map((f) => SRC(`console/panels/${f}`))].join("\n");
   const pages = SRC("console/pages.mjs");
-  assert.match(panel, /^import \{[^}]*\boutcomeWord\b[^}]*\} from "\.\/words\.mjs";$/m);
   assert.match(panels, /^import \{[^}]*\boutcomeWord\b[^}]*\} from "\.\.\/\.\.\/words\.mjs";$/m);
   assert.match(pages, /^import \{[^}]*\bSPEND_TITLE\b[^}]*\} from "\.\.\/words\.mjs";$/m);
-  assert.match(SRC("render.mjs"), /^import \{[^}]*\boutcomeWord\b[^}]*\} from "\.\/words\.mjs";$/m, "the /dispatch runs table too");
   // Round 2: every place a stream's end or a chip's last run is said (#710 round 2).
   assert.match(SRC("console/transcript.mjs"), /^import \{[^}]*\boutcomeWord\b[^}]*\} from "\.\.\/words\.mjs";$/m, "the live transcript's end");
   assert.match(SRC("console/live.mjs"), /^import \{[^}]*\boutcomeWord\b[^}]*\} from "\.\.\/words\.mjs";$/m, "the page stream resolves reason-aware words before the browser sees them");
   assert.match(panels, /^import \{[^}]*\bOUTCOME_WORD_OF\b[^}]*\} from "\.\.\/\.\.\/words\.mjs";$/m);
   assert.match(panels, /buildGraphScene\(p\.graph, \{[^}]*outcomeWords: OUTCOME_WORD_OF[^}]*\}\)/, "the topology, which loads no module, is handed the words");
-  assert.match(panel, /\(run ended: \$\{scrubControl\(outcomeWord\(tail\.ended\)\.word \?\? tail\.ended\)\}\)/, "the panel's tail");
-  for (const [name, src] of [["dashboard.ts", panel], ["panels.mjs", panels], ["pages.mjs", pages]]) {
+  for (const [name, src] of [["panels.mjs", panels], ["pages.mjs", pages]]) {
     for (const copy of ['"✔ done"', '"Held on a wait"', '"Spend and insights"', 'title: "SPEND"', 'title: "HELD"', '"spend & limits"', 'head: ["held"', 'outcome === "policy" ? "⚠"', '"Venue"', 'kv("backend", show(r.backend))']) {
       assert.ok(!src.includes(copy), `${name} keeps its own ${copy}`);
     }
@@ -341,125 +334,6 @@ test("the browser displays the run stream's reason-aware outcome without remappi
     d.streams[0].emit("tdone", { outcome });
     assert.equal(d.document.querySelector("[data-transcript-status]").textContent, `ended (${outcome})`);
   }
-});
-
-// ---- the panel's run detail ---------------------------------------------------------------------------------------------
-
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { makeDashboard } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
-
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-const AT = Date.UTC(2026, 9, 22, 12, 0, 0);
-const BASE = {
-  queue: { pausedState: false, counts: { waiting: 0, active: 0, paused: 0, delayed: 0, failed: 0 }, workers: 1 },
-  budget: { day: 0, week: 0, month: 0 },
-  settings: { path: "/s", overlay: {} },
-  triggers: { triggers: [] },
-  stagedPackages: { stagedAt: null, packages: [] },
-};
-const RUN = { jobId: "gh-w1", kind: "github", target: "acme/web#1", flow: "fix", outcome: "policy", reason: "scope-cap", exitCode: null, turns: 0, backend: "local", startedAt: "2026-10-22T10:00:00.000Z", endedAt: "2026-10-22T10:00:01.000Z" };
-
-async function render(runs, width, keys = []) {
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: { fetchSnapshot: async () => ({ ...BASE, runs }), pause: async () => {}, resume: async () => {}, dispose: async () => {}, now: () => AT, sandboxInfo: () => null } });
-  await flush();
-  for (const k of keys) {
-    comp.handleInput(k);
-    await flush();
-  }
-  const lines = comp.render(width);
-  await comp.dispose();
-  return lines;
-}
-/** The pane's text with the frame and the wrap undone: label columns and borders folded into single spaces. */
-const prose = (lines) => lines.map((l) => stripAnsi(l).replace(/^\s*│\s?|\s?│\s*$/g, "").trim()).join(" ").replace(/\s+/g, " ");
-
-test("the panel's run detail prints the reason's sentence and next step under it, wrapped inside the frame", async () => {
-  const visibleWidth = await loadVisibleWidth();
-  const lines = await render([RUN], 80, ["\r"]);
-  const text = prose(lines);
-  const flat = (s) => s.replace(/\s+/g, " ");
-  assert.match(text, /⚠ refused · scope-cap/);
-  assert.ok(text.includes(`what ${flat(REASONS["scope-cap"].sentence)}`), text);
-  assert.ok(text.includes(`next ${flat(REASONS["scope-cap"].next)}`), text);
-  for (const width of [30, 40, 60, 80, 120]) {
-    for (const l of await render([RUN], width, ["\r"])) assert.ok((visibleWidth ?? ((x) => stripAnsi(x).length))(l) <= width, `width ${width}: ${JSON.stringify(stripAnsi(l))}`);
-  }
-  // An unknown token: the token, then one dim line that says there is no explanation; never a guess.
-  const unknown = prose(await render([{ ...RUN, reason: "brand-new-reason" }], 80, ["\r"]));
-  assert.match(unknown, /⚠ refused · brand-new-reason what no explanation yet/);
-  // A clean completion has no reason and no explanation lines.
-  const done = prose(await render([{ ...RUN, outcome: "completed", reason: null }], 80, ["\r"]));
-  assert.match(done, /✔ completed/);
-  assert.ok(!/ what | next /.test(done), done);
-});
-
-test("the panel's list row and sections say the console's words", async () => {
-  const rows = [RUN, { ...RUN, jobId: "gh-w2", outcome: "completed", reason: "awaiting-input" }, { ...RUN, jobId: "gh-w3", outcome: "policy", reason: "operator-cancel" }, { ...RUN, jobId: "gh-w4", outcome: "failed", reason: null }, { ...RUN, jobId: "gh-w5", outcome: "policy", reason: "recovery-cap" }];
-  const lines = (await render(rows, 140)).map(stripAnsi);
-  const row = (id) => lines.find((l) => l.includes(`${id} · `)) ?? "";
-  // The word in the outcome cell, and a reason the word does not say as the row's LAST cell (#710 round 1).
-  assert.match(row("gh-w1"), /· ⚠ refused · 0t · - · scope-cap\s*│$/);
-  assert.match(row("gh-w2"), /· ✔ awaiting input · 0t · -\s*│$/);
-  assert.match(row("gh-w3"), /· ⚠ cancelled · 0t · -\s*│$/);
-  assert.match(row("gh-w4"), /· ✘ failed · 0t · -\s*│$/);
-  // A recovery end is a failure (issue #737), and "failed" does not say why, so its token stays the row's last cell.
-  assert.match(row("gh-w5"), /· ✘ failed · 0t · - · recovery-cap\s*│$/);
-  assert.ok(lines.some((l) => /│ SPEND & LIMITS ─/.test(l)), "the spend section's divider, upper-case by the divider's style");
-});
-
-test("the panel's list row keeps the turns and tokens on an 80-column row for the longest reason token, and clips the token first (#710 round 1)", async () => {
-  const longest = Object.keys(REASONS).reduce((a, b) => (b.length > a.length ? b : a));
-  assert.equal(longest, "job-image-question-grouping-unsupported", "the longest token the catalog has");
-  const run = { ...RUN, outcome: "failed", reason: longest, turns: 3, tokens: { total: 12345, cost: 0.1 } };
-  const rowAt = async (width) => (await render([run], width)).map(stripAnsi).find((l) => l.includes("gh-w1 · ")) ?? "";
-  for (const width of [60, 80]) assert.match(await rowAt(width), /· fix · ✘ failed · 3t · 12\.3k · jo/, `width ${width}`);
-  assert.match(await rowAt(80), /· job-image-question-gro…/, "the token, clipped, after the counts");
-  assert.match(await rowAt(140), new RegExp(`· ✘ failed · 3t · 12\\.3k · ${longest}\\s*│$`), "and whole where it fits");
-  assert.match(await rowAt(40), /· fix · ✘ fail…/, "at 40 the word is what is left, never the token");
-  for (const width of [40, 60, 80]) for (const l of await render([run], width)) assert.ok(stripAnsi(l).length <= width, `width ${width}`);
-});
-
-test("the panel's plain run list (the degraded render) says the console's words (#710 round 1)", async () => {
-  // Its rows are cut to a fixed 24-column pane, so one-letter ids leave room for the word.
-  const tiny = (o) => ({ ...RUN, jobId: "a", target: "b", flow: "c", ...o });
-  const lines = (await render([tiny({ outcome: "policy", reason: "scope-cap" }), tiny({ jobId: "d", outcome: "policy", reason: "operator-cancel" }), tiny({ jobId: "e", outcome: "vapour", reason: null })], Number.NaN)).map(stripAnsi);
-  assert.ok(lines.some((l) => /^. a · b · c · refused ·/.test(l)), lines.join("\n"));
-  assert.ok(lines.some((l) => /^. d · b · c · cancelled/.test(l)));
-  assert.ok(lines.some((l) => /^. e · b · c · vapour ·/.test(l)), "an outcome this release does not know prints as itself");
-  assert.ok(!lines.some((l) => /policy/.test(l)), "never the raw policy");
-});
-
-test("the panel's run detail says cancelled for an operator's cancel, and a why variant changes its sentence (#710 round 1)", async () => {
-  const cancel = prose(await render([{ ...RUN, outcome: "policy", reason: "operator-cancel" }], 80, ["\r"]));
-  assert.match(cancel, /⚠ cancelled · operator-cancel what /);
-  assert.doesNotMatch(cancel, /refused/);
-  const flat = (s) => s.replace(/\s+/g, " ");
-  for (const [reason, why] of [["model-unknown", "overlay-link"], ["model-not-allowed", "fallback-unlisted"]]) {
-    const plain = explainReason(reason).sentence;
-    const variant = explainReason(reason, { why }).sentence;
-    assert.notEqual(variant, plain, `${reason}/${why} has a variant`);
-    const text = prose(await render([{ ...RUN, reason, why }], 80, ["\r"]));
-    assert.ok(text.includes(`what ${flat(variant)}`), `${reason}/${why}: ${text}`);
-    assert.ok(!text.includes(flat(plain)), `${reason}/${why}: not the plain sentence`);
-  }
-});
-
-test("/dispatch runs says the console's words in its OUTCOME column and keeps the record's token under REASON (#710 round 1)", async () => {
-  const { renderRuns } = await import("../src/render.mjs");
-  const run = (jobId, outcome, reason) => ({ jobId, target: "acme/web#1", flow: "fix", outcome, reason, turns: 1, endedAt: "2026-10-22T10:00:01.000Z" });
-  const table = renderRuns([run("gh-1", "policy", "scope-cap"), run("gh-2", "completed", "awaiting-input"), run("gh-3", "policy", "operator-cancel"), run("gh-4", "failed", null), run("gh-5", "vapour", null), run("gh-6", "completed", null)]);
-  const lines = table.split("\n");
-  const cells = (id) => (lines.find((l) => l.startsWith(`${id} `)) ?? "").split(/ {2,}/);
-  assert.deepEqual(lines[0].split(/ {2,}/).slice(3, 5), ["OUTCOME", "REASON"]);
-  assert.deepEqual(cells("gh-1").slice(3, 5), ["refused", "scope-cap"]);
-  assert.deepEqual(cells("gh-2").slice(3, 5), ["awaiting input", "awaiting-input"]);
-  assert.deepEqual(cells("gh-3").slice(3, 5), ["cancelled", "operator-cancel"]);
-  assert.deepEqual(cells("gh-4").slice(3, 5), ["failed", "-"]);
-  assert.deepEqual(cells("gh-5").slice(3, 5), ["vapour", "-"], "an outcome this release does not know prints as itself");
-  assert.deepEqual(cells("gh-6").slice(3, 5), ["completed", "-"]);
-  assert.doesNotMatch(table, /policy/);
 });
 
 test("capitalised: a sentence that opens with a word starts with a capital; one that opens with an id keeps the id as written", () => {

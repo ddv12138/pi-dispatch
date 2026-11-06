@@ -94,15 +94,13 @@ import {
   overviewNeeds,
   overviewSetup,
   overviewSetupEmpty,
-  overviewSetupPi,
   overviewSpend,
   overviewTimeline,
   overviewWaiting,
   overviewWaitlists,
   parkedCheckRows,
   parkedQuestions,
-  runChain, runHeadline, runRecord, runRest, runTranscriptState, runActionsPanel, runSecrets, runModels, runTail, runRecovery, runWhy, runHost, runViewer,
-  runChat,
+  runChain, runHeadline, runRecord, runRest, runTranscriptState, runActionsPanel, runSecrets, runModels, runRecovery, runWhy, runHost, runViewer,
   runCostPanel,
   runInbox,
   runOutcome,
@@ -116,7 +114,6 @@ import {
   RUN_ID_RE,
   refusedBeforeStart,
 } from "./panels.mjs";
-import { chatFactsOf, parkedAnswerCheckOf, rerunCheckOf } from "./run-api.mjs";
 import { runTranscriptSection } from "./transcript.mjs";
 import { WHATIF_MODEL_RE } from "./whatif.mjs";
 import { SPEND_TITLE, recordReason } from "../words.mjs";
@@ -183,9 +180,9 @@ const PAGE_PANELS = Object.freeze({
   // what runs and what it costs, the timeline and the caps, then the waitlists and the hosts. Every one of the eleven is
   // on the page in both states (`panels/overview.mjs`'s header), so the stream moves a first run to the overview by
   // swapping panels; on a phone, where the layout is one column, Needs you comes first once the checklist is gone.
-  overview: [["p-setup", overviewSetup], ["p-setup-pi", overviewSetupPi], ["p-setup-empty", overviewSetupEmpty], ["p-needs", overviewNeeds], ["p-waiting", overviewWaiting], ["p-active", overviewActive], ["p-spend", overviewSpend], ["p-agent-writes", overviewAgentWrites], ["p-timeline", overviewTimeline], ["p-caps", overviewCaps], ["p-waitlists", overviewWaitlists], ["p-hosts", overviewHosts]],
+  overview: [["p-setup", overviewSetup], ["p-setup-empty", overviewSetupEmpty], ["p-needs", overviewNeeds], ["p-waiting", overviewWaiting], ["p-active", overviewActive], ["p-spend", overviewSpend], ["p-agent-writes", overviewAgentWrites], ["p-timeline", overviewTimeline], ["p-caps", overviewCaps], ["p-waitlists", overviewWaitlists], ["p-hosts", overviewHosts]],
   runs: [["p-filters", runsFilters], ["p-summary", runsSummary], ["p-runs", runsTable]],
-  run: [["p-viewer", runViewer], ["p-outcome", runOutcome], ["p-progress", runProgress], ["p-recovery", runRecovery], ["p-transcript", runTranscriptState], ["p-record", runRecord], ["p-rest", runRest], ["p-chat", runChat], ["p-answer-draft", runAnswerDraft], ["p-inbox", runInbox], ["p-run", runSummary], ["p-secrets", runSecrets], ["p-actions", runActionsPanel], ["p-why", runWhy], ["p-host", runHost], ["p-cost", runCostPanel], ["p-models", runModels], ["p-resources", runResources], ["p-session", runSession], ["p-chain", runChain], ["p-tail", runTail]],
+  run: [["p-viewer", runViewer], ["p-outcome", runOutcome], ["p-progress", runProgress], ["p-recovery", runRecovery], ["p-transcript", runTranscriptState], ["p-record", runRecord], ["p-rest", runRest], ["p-answer-draft", runAnswerDraft], ["p-inbox", runInbox], ["p-run", runSummary], ["p-secrets", runSecrets], ["p-actions", runActionsPanel], ["p-why", runWhy], ["p-host", runHost], ["p-cost", runCostPanel], ["p-models", runModels], ["p-resources", runResources], ["p-session", runSession], ["p-chain", runChain]],
   parked: [["p-questions", parkedQuestions]],
   "answer-rules": [["p-questions", parkedQuestions]],
   ...SPEND_PANELS,
@@ -244,9 +241,9 @@ const PAGE_LAYOUT = Object.freeze({
   "trigger-add": [{ cls: "cols cols--wide-side config-layout", items: [{ cls: "stack", items: ["p-trigger-add"] }, { cls: "stack", items: ["p-kinds", "p-forge-words", "p-refusals"] }] }],
   fleet: [{ cls: "stack", items: ["p-fleetbar", "p-active"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-queues", "p-held", "p-failed", "p-delayed", "p-schedules"] }, { cls: "stack", items: ["p-hosts", "p-doctor"] }] }, { cls: "stack", items: ["p-venues"] }],
   host: [{ cls: "stack", items: ["p-hoststate"] }, { cls: "cols cols--wide-side", items: [{ cls: "stack", items: ["p-hostjobs", "p-hostbudget", "p-hostcap"] }, { cls: "stack", items: ["p-hostrow", "p-hostdoctor"] }] }],
-  run: [{ cls: "stack", items: ["p-viewer"] }, { cls: "cols", items: [{ cls: "stack run-main", items: ["p-outcome", "p-run", "p-progress", "p-recovery", "p-transcript", "p-record", "p-rest", "p-secrets", "p-actions", "p-why", "p-host"] }, { cls: "stack run-side", items: ["p-chat", "p-answer-draft", "p-inbox", "p-cost", "p-models", "p-resources", "p-session", "p-chain", "p-tail"] }] }],
+  run: [{ cls: "stack", items: ["p-viewer"] }, { cls: "cols", items: [{ cls: "stack run-main", items: ["p-outcome", "p-run", "p-progress", "p-recovery", "p-transcript", "p-record", "p-rest", "p-secrets", "p-actions", "p-why", "p-host"] }, { cls: "stack run-side", items: ["p-answer-draft", "p-inbox", "p-cost", "p-models", "p-resources", "p-session", "p-chain"] }] }],
   overview: Object.freeze([
-    Object.freeze({ cls: "cols", items: Object.freeze(["p-setup", Object.freeze({ cls: "stack", items: Object.freeze(["p-setup-pi", "p-setup-empty"]) })]) }),
+    Object.freeze({ cls: "cols", items: Object.freeze(["p-setup", Object.freeze({ cls: "stack", items: Object.freeze(["p-setup-empty"]) })]) }),
     Object.freeze({ cls: "cards-4", slotAfter: true, items: Object.freeze(["p-needs", "p-waiting", "p-active", "p-spend"]) }),
     Object.freeze({ cls: "cols", items: Object.freeze([Object.freeze({ cls: "stack", items: Object.freeze(["p-agent-writes", "p-timeline", "p-caps"]) }), Object.freeze({ cls: "stack", items: Object.freeze(["p-waitlists", "p-hosts"]) })]) }),
   ]),
@@ -580,7 +577,7 @@ const PAGE_READS = Object.freeze({
   "zero-touch": ["parkedCount"],
   overview: ["snapshot", "waiting"],
   runs: ["runsPage", "subscriptions", "runsWindow", "parkedCount"],
-  run: ["run", "subscriptions", "transcriptMeta", "progress", "inbox", "chat", "actions", "parkedCount"],
+  run: ["run", "subscriptions", "transcriptMeta", "progress", "inbox", "jobState", "actions", "parkedCount"],
   parked: ["snapshot", "parkedChecks"],
   "answer-rules": ["snapshot", "parkedCount"],
   insights: ["insights", "parkedCount"],
@@ -686,6 +683,84 @@ function formsDrawn(who) {
   return who?.role === undefined || who?.role === null || who.role === "operator";
 }
 
+// The run page's and Parked page's planner checks, per fleet reader, then per run id: `{ at, recordKey, got }`.
+const answerCheckCache = new WeakMap();
+const rerunCheckCache = new WeakMap();
+
+/** The identity a per-run cache entry is kept for: the record's id, end and target, so a new record reads afresh. */
+const recordKeyOf = (record) => `${record?.jobId}\u0000${record?.endedAt}\u0000${record?.target}`;
+
+/**
+ * How long a page's live loop reuses a park's pending-answer check and the re-run check (a job read and the triggers
+ * file) per run id (review round 2: both ran on every 2 s tick).
+ */
+export const PARK_CHECK_CACHE_MS = 15_000;
+
+/**
+ * `read()`, reused for `PARK_CHECK_CACHE_MS` while the record is the same one. EVERY answer is kept for the window, an
+ * unreadable one as long as a good one (issue #737): one that was read again on every tick sent a Valkey that was
+ * already failing a queue lookup per run per tick, and the Parked page has twenty runs. The live page says the check
+ * could not be read until the window ends. A request retries an unreadable answer: the live load may have asked an
+ * incomplete set of queues (#747).
+ */
+async function parkCheckCached(cache, fleet, id, record, now, read, { reuseUnreachable = true } = {}) {
+  const at = typeof now === "function" ? now() : Date.now();
+  const recordKey = recordKeyOf(record);
+  let byId = cache.get(fleet);
+  if (!byId) cache.set(fleet, (byId = new Map()));
+  const hit = byId.get(id);
+  if (hit && (reuseUnreachable || hit.got?.unreachable !== true) && hit.recordKey === recordKey && at >= hit.at && at - hit.at < PARK_CHECK_CACHE_MS) return hit.got;
+  const got = await read();
+  if (!hit && byId.size >= 256) byId.delete(byId.keys().next().value);
+  byId.set(id, { at, recordKey, got });
+  return got;
+}
+
+/** The run page's re-run check through the shared park-check cache, never throwing (an error reads as unreachable). */
+async function actionCheckOf(cache, fleet, method, id, record, now, lookup = {}) {
+  if (typeof fleet?.[method] !== "function") return null;
+  const read = async () => {
+    try {
+      return await fleet[method](id, record, lookup);
+    } catch {
+      return { unreachable: true };
+    }
+  };
+  return parkCheckCached(cache, fleet, id, record, now, read, { reuseUnreachable: lookup.live === true });
+}
+
+/**
+ * The planner's own check on whether parked run `id` can take a console answer (`fleet.parkedAnswerCheck`: `{ refusal }`,
+ * `{ ok: true }` or `{ unreachable: true }`), reused by the Parked page and the run page's live loop for
+ * `PARK_CHECK_CACHE_MS` per run id while `record` is the same one (`now` the clock), an unreadable answer as long as a
+ * good one. `lookup` is the load's question for the reader's by-id lookup (`{ live }` or `{ asked }`, `loadPageData`).
+ * Null without the reader. The reader takes no record (`parkedAnswerCheck(jobId, lookup)`), unlike `rerunCheck`, so
+ * this keeps its own call: a record passed in its `lookup` slot would read as a non-live question and scan the
+ * keyspace once per check past the cache window instead of never.
+ */
+export async function parkedAnswerCheckOf(fleet, id, record, { now = Date.now, lookup = {} } = {}) {
+  if (typeof fleet?.parkedAnswerCheck !== "function") return null;
+  const read = async () => {
+    try {
+      return await fleet.parkedAnswerCheck(id, lookup);
+    } catch {
+      return { unreachable: true };
+    }
+  };
+  return parkCheckCached(answerCheckCache, fleet, id, record, now, read, { reuseUnreachable: lookup.live === true });
+}
+
+/**
+ * Whether run `id` (with `record`) can be offered a re-run (issue #710): `fleet.rerunCheck`, the planner's own cheap
+ * refusals over the record and the job's retained data (`rerunRefusalOf`), reused by the run page's live loop for
+ * `PARK_CHECK_CACHE_MS` per run id while `record` is the same one, as `parkedAnswerCheckOf` is (an unreadable answer
+ * too), and asked with the load's `lookup` as it is. `{ refusal }`, `{ ok: true }`, `{ unreachable: true }`, or null
+ * without the reader.
+ */
+export async function rerunCheckOf(fleet, id, record, { now = Date.now, lookup = {} } = {}) {
+  return actionCheckOf(rerunCheckCache, fleet, "rerunCheck", id, record, now, lookup);
+}
+
 /**
  * Read what screen `name` shows for `query` (a `parsePageQuery` result's `query`). `deps`:
  *
@@ -710,7 +785,7 @@ function formsDrawn(who) {
  * paths, is not live).
  *
  * A KEYSPACE SCAN FOR AN ABSENCE IS A REQUEST'S, NEVER THE LIVE HUB'S (issue #737). The by-id lookups of one load (the
- * chat facts, the re-run check, the parked answer checks: the run and Parked pages) ask one question: a request's
+ * job's queue state, the re-run check, the parked answer checks: the run and Parked pages) ask one question: a request's
  * (`fleet.lookupQuestion`, read once here) costs at most one keyspace scan however many of them miss, and they run
  * together, so a load waits for that scan once; a live load's (`who.live`) costs none, and keeps what the request was
  * told of an absence (the reader's `lookUp`).
@@ -876,21 +951,22 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
       data.inbox = { unreachable: true };
     }
   }
-  // The chat facts with their answer check, and the actions' checks, run together (see above).
-  const chatRead = async () => {
-    // Issue #647: the chat this run can have (`chatFactsOf`: the job's queue state, its active recovery, and for a parked
-    // record whether a later run took the answer), for the Chat panel. Null without a job-state reader. The newer-run
-    // search is a runs-page read, so the live loop pays it only for a parked record, whose mode depends on it.
-    try {
-      data.chat = await chatFactsOf(deps.fleet, q.id, data.run?.record ?? null, { searchNewer: "saved", now: () => now, lookup });
-    } catch {
-      data.chat = { unreachable: true };
+  // The job's queue state, and the actions' checks, run together (see above).
+  const jobStateRead = async () => {
+    // The job's queue state (the fleet's by-id lookup, issue #737), for the panels that name a run by its job: the
+    // outcome banner's queued and recovering sentences, the headline's badge and cancel, the recovery panel's running or
+    // queued recovery, the inbox's and `runPlaces`' queues place. Null without a job-state reader (an older fleet
+    // double). `tellAbsent` (issue #737's rule, kept by every by-id lookup): only a run with no record asks the lookup
+    // to tell an absence, since a record shows the run whatever the queue says.
+    if (typeof deps.fleet?.jobStatus !== "function") {
+      data.queueState = null;
+      return;
     }
-    // A reply the Chat panel offers is one the planner would plan (issue #647): the planner's own predicate over the
-    // parked run's retained job and the triggers file (`parkedAnswerCheck`, a sentence or ok, never the job's data),
-    // reused for PARK_CHECK_CACHE_MS per run id (`parkedAnswerCheckOf`), so the 2 s loop does not read it every tick.
-    if (data.chat?.mode === "reply" && typeof deps.fleet?.parkedAnswerCheck === "function") {
-      data.chatAnswer = await parkedAnswerCheckOf(deps.fleet, q.id, data.run?.record ?? null, { now: () => now, lookup });
+    try {
+      const status = await deps.fleet.jobStatus(q.id, { ...lookup, tellAbsent: !data.run?.record });
+      data.queueState = status && !status.unreachable && !status.invalid ? { found: status.found === true ? true : status.found === false ? false : null, jobState: typeof status.state === "string" ? status.state : null, activeJobId: typeof status.continuesAs === "string" ? status.continuesAs : null, queuedJobId: typeof status.queuedAs === "string" ? status.queuedAs : null } : { unreachable: true };
+    } catch {
+      data.queueState = { unreachable: true };
     }
   };
   const actionsRead = async () => {
@@ -903,7 +979,7 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
     data.forkPoints = forkPoints.ok ? { ok: true, entries: forkPoints.entries } : { refusal: forkPoints.refusal };
     data.rerunCheck = await rerunCheckOf(deps.fleet, q.id, record, { now: () => now, lookup });
   };
-  await Promise.all([reads.includes("chat") ? chatRead() : null, reads.includes("actions") && data.run?.record ? actionsRead() : null]);
+  await Promise.all([reads.includes("jobState") ? jobStateRead() : null, reads.includes("actions") && data.run?.record ? actionsRead() : null]);
   if (name === "run" && data.run?.record) {
     const record = data.run.record;
     // These lookups are bounded by the worker's own replica/recovery caps, never a history scan. A related record
@@ -930,7 +1006,7 @@ export async function loadPageData(name, query, deps = {}, who = {}) {
     data.recoveryRuns = [record, ...recoveryRecords.filter(Boolean)].sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt));
     data.trigger = trigger;
     data.runHolds = holds;
-    const continuation = data.chat?.activeJobId ?? data.chat?.queuedJobId;
+    const continuation = data.queueState?.activeJobId ?? data.queueState?.queuedJobId;
     if (continuation && continuation !== q.id && RUN_ID_RE.test(continuation)) {
       try { data.recoveryLive = await deps.fleet.runLiveFacts?.(continuation, lookup) ?? null; } catch { data.recoveryLive = null; }
       try { data.recoveryProgress = await deps.fleet.progressOfRun?.(continuation, recoveryRecords.find((r) => r?.jobId === continuation) ?? null) ?? null; } catch { data.recoveryProgress = null; }
@@ -999,11 +1075,11 @@ function viewOf(name, ctx) {
 }
 
 /** The viewer card's fixed visible panels. The other ids remain empty for live state swaps. */
-export const RUN_VIEWER_PANELS = Object.freeze(["p-viewer", "p-outcome", "p-progress", "p-transcript", "p-chat", "p-inbox", "p-run"]);
+export const RUN_VIEWER_PANELS = Object.freeze(["p-viewer", "p-outcome", "p-progress", "p-transcript", "p-inbox", "p-run"]);
 
 /**
  * The run page's panels for a record a NEWER pi-dispatch wrote (issue #761), for both roles: the outcome banner and the
- * run's stable core, nothing else. Every other panel reads fields past that core (progress, chat, the
+ * run's stable core, nothing else. Every other panel reads fields past that core (progress, the
  * money), whose meaning that release may have changed, and the record reaches this page cut to its core, so they would
  * say what the record does not ("no session", "not armed"). The other ids stay empty for live state swaps.
  */
@@ -1036,29 +1112,21 @@ function headlineOf(name, ctx) {
   return Object.hasOwn(PAGE_HEADLINES, name) ? PAGE_HEADLINES[name](viewOf(name, ctx)) : null;
 }
 
-/** A parked question leads the main column, with the same one panel id used in every state. */
-function runLayoutOf(data) {
-  const layout = PAGE_LAYOUT.run;
-  if (data?.chat?.mode !== "reply") return layout;
-  const columns = layout[1];
-  return [layout[0], { ...columns, items: columns.items.map((column, i) => ({ ...column, items: i === 0 ? ["p-chat", ...column.items] : column.items.filter((id) => id !== "p-chat") })) }];
-}
-
 /** A layout's markup (`PAGE_LAYOUT`): its wrappers in order, each panel's section where the layout names it. */
 function layoutHtml(items, sections) {
   return html`${items.map((it) => (typeof it === "string" ? sections.get(it) : html`<div class="${it.cls}"${it.slotAfter ? html` data-slot-after` : null}>${layoutHtml(it.items, sections)}</div>`))}`;
 }
 
 /**
- * What each place a run is kept answered of a run page's id (issue #737), as `runPlaces` and `runAbsent` take them (the
- * rule `/api/run` keeps too): the history (this host's file and the fleet's run mirror), the queue lookup's whole answer
+ * What each place a run is kept answered of a run page's id (issue #737), as `runPlaces` and `runAbsent` take them: the
+ * history (this host's file and the fleet's run mirror), the queue lookup's whole answer
  * (the job, or its run's active or queued recovery, over every queue the kill switch flips), the live transcript and the
  * progress key. A load whose primary read failed (`readFailed`) and holds no record could not read one, whatever else
  * `run` says.
  */
 function runPlacesOf(data) {
   const run = data?.readFailed === true && !data?.run?.record ? { unreadable: RUN_RECORD_UNREAD } : data?.run;
-  return { run, lookup: data?.chat, transcript: data?.transcript, progress: data?.progress };
+  return { run, lookup: data?.queueState, transcript: data?.transcript, progress: data?.progress };
 }
 
 /**
@@ -1096,7 +1164,7 @@ export async function renderPage(name, ctx) {
   const extra = name === "run" && !ctx?.data?.run?.invalid && !fromNewerRelease(ctx?.data?.run?.record) ? html`<div id="transcript" class="run-transcript">${runTranscriptSection(viewOf(name, ctx))}</div>` : null;
   const sections = new Map(panels.map(({ id, fragment }) => [id, html`<section id="${id}" data-panel>${fragment}</section>`]));
   if (name === "run" && extra !== null) sections.set("p-transcript", html`${sections.get("p-transcript")}${extra}`);
-  const inner = Object.hasOwn(PAGE_LAYOUT, name) ? layoutHtml(name === "run" ? runLayoutOf(ctx?.data) : name === "zero-touch" ? zeroTouchLayout(role) : PAGE_LAYOUT[name], sections) : html`${[...sections.values()]}`;
+  const inner = Object.hasOwn(PAGE_LAYOUT, name) ? layoutHtml(name === "zero-touch" ? zeroTouchLayout(role) : PAGE_LAYOUT[name], sections) : html`${[...sections.values()]}`;
   const headline = headlineOf(name, ctx);
   const triggerListOptions = name === "triggers" ? { description: triggersDescription(viewOf(name, ctx)), end: role === "operator" && !ctx?.readOnly ? html`<a class="btn btn--primary" href="${PAGES["trigger-add"].path}">${uiText("Add a trigger", ctx?.locale)}</a>` : null } : name === "trigger-check" ? { description: "Describe a hypothetical event. Nothing is sent or spent.", end: html`<a class="btn" href="${PAGES.triggers.path}">${uiText("Back to Triggers", ctx?.locale)}</a>` } : null;
   const configOptions = name === "connections" ? { description: connectionsDescription(ctx?.locale) } : name === "updates" ? { description: updatesDescription(ctx?.locale) } : name === "project" ? { title: projectTitle(ctx?.data?.projectView, ctx?.locale), description: projectDescription(ctx?.data?.projectView, ctx?.locale), end: html`<a class="btn" href="${`/runs?project=${encodeURIComponent(ctx?.query?.id ?? "")}`}">${uiText("Open in Runs", ctx?.locale)}</a>` } : null;

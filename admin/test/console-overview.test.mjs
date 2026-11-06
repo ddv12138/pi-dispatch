@@ -8,7 +8,7 @@ import {
   REGISTRY_UNREAD_TEXT, RUNNING_EMPTY, SOFT_HOLD_REFUSED_TEXT, SOFT_HOLD_TEXT, SPEND_EMPTY, SPEND_HOURS_TEXT,
   STALE_BEATS_TEXT, WAITING_EMPTY, WAITING_MAIN_BUCKETS, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, WAITLIST_ROWS_MAX,
   hostSkewText, overviewActive, overviewCaps, overviewHeadline, overviewHosts, overviewNeeds, overviewSetup,
-  overviewSetupEmpty, overviewSetupPi, overviewSpend, overviewTimeline, overviewWaiting, overviewWaitlists,
+  overviewSetupEmpty, overviewSpend, overviewTimeline, overviewWaiting, overviewWaitlists,
   JOBS_UNREAD_TEXT, JOBS_UNREAD_WORDS, NOT_BEATING_WORDS, SPEND_SUM_TEXT, WAITING_CUT_TEXT, waitingSentence,
   CAPS_EMPTY_TEXT, LAST_SEEN_WORDS, BEAT_NOT_READ_WORDS,
 } from "../src/console/panels/overview.mjs";
@@ -117,7 +117,7 @@ const draw = (render, snap, opts) => String(render(viewOf(snap, opts)));
 const esc = (text) => text.replace(/&/g, "&amp;").replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
 const EIGHT = [overviewNeeds, overviewWaiting, overviewActive, overviewSpend, overviewTimeline, overviewCaps, overviewWaitlists, overviewHosts];
-const SETUP = [overviewSetup, overviewSetupPi, overviewSetupEmpty];
+const SETUP = [overviewSetup, overviewSetupEmpty];
 
 // ---- the frame of the rules -------------------------------------------------------------------------------------------
 
@@ -304,8 +304,8 @@ test("Needs you: questions, failed jobs and failing doctors, each with its proje
   assert.match(op, /<h2>Needs you<\/h2>/);
   assert.match(op, /<span class="big__n">1<\/span><span class="big__l">question<\/span>/);
   assert.match(op, /<span class="big__n">2<\/span><span class="big__l">to fix<\/span>/);
-  // The question: its project from its record, its id, Answer on its run page.
-  assert.match(op, /<li class="rowpill tone-parked">.*?<span class="ptag">api<\/span><span class="code">gh-2f6a<\/span><a class="rowpill__act" href="\/run\?id=gh-2f6a">Answer<\/a><\/li>/);
+  // The question: its project from its record, its id, Answer on the parked page (the answer form is the parked page's).
+  assert.match(op, /<li class="rowpill tone-parked">.*?<span class="ptag">api<\/span><span class="code">gh-2f6a<\/span><a class="rowpill__act" href="\/parked">Answer<\/a><\/li>/);
   // The failed job: Retry, a paid write, with the fields the action reads; never BullMQ's text.
   assert.match(op, /<form class="act" data-action="retry-failed" autocomplete="off"><input type="hidden" name="jobId" value="gh-5d10"><input type="hidden" name="queue" value="pi-jobs"><button class="btn btn--sm btn--paid" type="submit">Retry<\/button><\/form>/);
   assert.ok(!op.includes("REASON-TEXT"));
@@ -318,8 +318,8 @@ test("Needs you: questions, failed jobs and failing doctors, each with its proje
   assert.ok(!viewer.includes("data-action") && !viewer.includes(">Answer<"));
   assert.match(viewer, /<a class="rowpill__act" href="\/run\?id=gh-2f6a">Open<\/a>/);
   assert.match(viewer, /<a class="rowpill__act" href="\/run\?id=gh-5d10">Open<\/a>/);
-  // A read-only console: an operator reads, and writes nothing; a question is Open there, since its run page's Chat
-  // panel takes no answer on a console that takes no change.
+  // A read-only console: an operator reads, and writes nothing; a question is Open there, since a console that takes no
+  // change draws no answer form on the parked page either.
   const ro = draw(overviewNeeds, snapshot(), { readOnly: true });
   assert.ok(!ro.includes("data-action") && !ro.includes(">Answer<"));
   assert.match(ro, /<a class="rowpill__act" href="\/run\?id=gh-2f6a">Open<\/a>/);
@@ -1177,14 +1177,11 @@ test("first run for a viewer: the same steps and states, without a command or th
   assert.ok(!viewer.includes('class="cmd"') && !viewer.includes("Add a trigger") && !viewer.includes("su-alt"));
   assert.match(viewer, /You are signed in as <b>a viewer<\/b>\./);
   assert.match(viewer, /aria-label="3 of 8 ready/);
-  assert.ok(!draw(overviewSetupPi, fresh(), { role: "viewer" }).includes('class="cmd"'));
   const ro = draw(overviewSetup, fresh(), { readOnly: true });
   assert.ok(ro.includes('class="cmd"') && !ro.includes("Add a trigger"));
 });
 
-test("first run: Do it from pi, and the overview's panels as they will read, in the panels' own words", () => {
-  const pi = draw(overviewSetupPi, fresh());
-  assert.match(pi, /<h2>Do it from pi<\/h2><\/div><p class="muted su-p">The guided setup in pi walks through every step and asks before each one\. It never asks for the provider key\.<\/p><div class="cmd"><code><span>\/dispatch<\/span> <span>setup<\/span><\/code>/);
+test("first run: the overview's panels as they will read, in the panels' own words", () => {
   const empty = draw(overviewSetupEmpty, fresh({ waiting: waitingOf([]) }));
   assert.match(empty, /<h2>The Overview, once it runs<\/h2><span class="card__sub">each panel says what it is waiting for<\/span>/);
   for (const [title, words] of [["Needs you", NEEDS_EMPTY.title], ["In line", WAITING_EMPTY.title], ["Running", RUNNING_EMPTY.title], ["Spend today", SPEND_EMPTY.title], ["Hosts", HOSTS_EMPTY.title]]) assert.ok(empty.includes(`<b>${title}</b> ${words}</p>`), title);

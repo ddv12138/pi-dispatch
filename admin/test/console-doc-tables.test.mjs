@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
-import { ACTIONS } from "../src/console/actions.mjs";
+import { ACTIONS, TRIGGER_FORM } from "../src/console/actions.mjs";
 import { PAGES } from "../src/console/pages.mjs";
 import { ERROR_KINDS, errorPage } from "../src/console/error-pages.mjs";
 import { ENDED_REASONS, endedNotices } from "../src/console/session-ends.mjs";
@@ -59,11 +59,11 @@ test("docs/console.md's table of runs filters: one row per RUN_FILTER_FIELDS mem
   assert.deepEqual([...outcome.matchAll(/`([^`]+)`/g)].map((m) => m[1]), [...RUN_OUTCOME_VALUES]);
 });
 
-test("docs/triggers.md's example refusal for a pull_request trigger is the trigger add's own sentence, its field list TRIGGER_ADD_FIELDS.pull_request", () => {
-  const said = /for example: "(dispatch_trigger_add does not take repository for a pull_request trigger; it takes ([^"]*)\. Nothing was changed)"/.exec(flat(read("docs/triggers.md")));
+test("docs/triggers.md's example refusal for a pull_request trigger is the console add form's own sentence, its field list TRIGGER_ADD_FIELDS.pull_request", () => {
+  const said = /for example: "(this form does not take repository for a pull_request trigger; it takes ([^"]*)\. Nothing was changed)"/.exec(flat(read("docs/triggers.md")));
   assert.ok(said, "the doc quotes the refusal");
   assert.deepEqual(said[2].split(", "), [...TRIGGER_ADD_FIELDS.pull_request]);
-  const planned = planTriggerAdd({ params: { kind: "pull_request", repository: "acme/web", flow: "review" }, paths: { triggersPath: "/deploy/triggers.json" }, env: {} });
+  const planned = planTriggerAdd({ params: { kind: "pull_request", repository: "acme/web", flow: "review" }, paths: { triggersPath: "/deploy/triggers.json" }, env: {}, tool: TRIGGER_FORM, surface: "console" });
   assert.equal(planned.refusal, said[1]);
 });
 

@@ -21,7 +21,7 @@ topology uses). Runs no trigger claims stay visible as their own rows, never ble
 spend folds the same way — dispatching a workflow extension is not cheaper by classification. The
 **by-repo** breakdown groups spend by the target repository (issue and MR numbers stripped), with
 `local:<folder>` targets as their own rows. A forge row is named with its forge, `github:acme/web`, so one repo
-served by two forges is two rows. The `repo` filter of `dispatch_costs` takes either form: `acme/web` selects
+served by two forges is two rows. The page's `repo` filter takes either form: `acme/web` selects
 that repo on every forge, `github:acme/web` one forge.
 
 The **by-project** breakdown groups spend by the `project` id each run record carries
@@ -32,7 +32,7 @@ The **by-project** breakdown groups spend by the `project` id each run record ca
 - A run recorded before projects existed is `(no project)` too, even if its repo is a member now. Records are
   never moved into a project after the fact.
 - The page's bars carry the id. A project's display name sits under the list, escaped and isolated.
-- The `project` filter of `dispatch_costs` takes an id (`shop`) and scopes every part of the fold to the runs
+- The page's `project` filter takes an id (`shop`) and scopes every part of the fold to the runs
   recorded under it.
 
 ## How to read the numbers
@@ -66,8 +66,8 @@ the floor, because a run that did start can lack the other two. So some refusals
 and the soft hold keep the budget slot they took, so does any refusal whose job-count give-back failed, and a
 container the runtime failed to start (often exit 125) carries that exit code.
 
-A bucket (a trigger, flow, repo or day) whose every run one declared plan covers reads `plan:<id>`, and
-`dispatch_costs` returns its typed value as class `"plan"` with that `planId`. A bucket that mixes plan
+A bucket (a trigger, flow, repo or day) whose every run one declared plan covers reads `plan:<id>`, typed
+as class `"plan"` with that `planId`. A bucket that mixes plan
 and billed runs, that two plans cover (an id may hold any character, so no separator could name both),
 or that holds a floor reads as the estimate it is, `~$4.12 est.` or `~≥$0 est.`, with its coverage.
 
@@ -79,7 +79,7 @@ plan's share of the month, and verdicts do not read SAVING just because the depl
 
 A run record written by a newer pi-dispatch (one whose `v` is above what this release reads, or is not a version at
 all, issue #761) is left out of every number here: its tokens, usage and dollars may mean something else in that
-release, and a misread one would be a wrong dollar on every total. The page and `dispatch_costs` say how many were left
+release, and a misread one would be a wrong dollar on every total. The page says how many were left
 out ("2 records from a newer pi-dispatch not read: the totals leave them out", `newerSkipped`), so a total is never
 silently short. Upgrade the console to count them.
 
@@ -101,8 +101,7 @@ price can only come from you: declare each plan in
 `subscriptions.example.json`). Three routes point the admin at that file: the working-directory default,
 an explicit `PI_SUBSCRIPTIONS_FILE`, and the deployment pointer at
 `~/.pi/agent/pi-dispatch-deployment.json`, whose env allowlist includes `PI_SUBSCRIPTIONS_FILE` so a
-deployment built in some other folder is found from any cwd. `/dispatch setup` takes the third route for
-you: it scaffolds the file and writes that pointer entry (a variable you exported yourself always wins
+deployment built in some other folder is found from any cwd (a variable you exported yourself always wins
 over the pointer). The file feeds arithmetic only — it never touches execution, routing, or auth
 (`DES-SUBSCRIPTIONS-ARE-COUNTERFACTUAL-ONLY`).
 
@@ -114,7 +113,7 @@ over the pointer). The file feeds arithmetic only — it never touches execution
   computed against what those runs actually cost you today.
 - Editing the file re-classifies history retroactively — classification happens when the screen folds,
   not when the run was recorded.
-- A write from the panel or a tool needs a file it can read whole (issue #761). Only a missing file is started from
+- A write from the console or a tool needs a file it can read whole (issue #761). Only a missing file is started from
   empty. A file that cannot be read or parsed, does not validate, or was written by a newer pi-dispatch is refused,
   saying which of these it is without quoting the file, and left as it is: rebuilding it, as writes used to, dropped
   every plan you had declared. Fix the file (or upgrade, for a newer one) and write again. With
@@ -141,10 +140,8 @@ labeled `unmeasured (OQ-002)`.
 
 - Spend (`/insights`) shows caps, actual running-job holds, settled charts and an estimate of the same ledgered runs on another model, for 24 hours or this week.
 - Breakdown (`/insights/breakdown?range=7d|30d|mtd`) shows the classified cost fold and plan comparisons. Its per-flow what-if uses the median ledger profile, multiplied by the flow's runs in the selected window. Unknown models offer nearby priced ids; a flow without ledgered history has a seeded band.
-- `/dispatch insights [7d|30d|mtd]` prints Spend's URL. `/dispatch insights whatif <provider>/<model> --flow <flow>` prints Breakdown's answer URL. Saved flow what-if links at `/insights` redirect there.
-- The `dispatch_costs` tool returns the fold as JSON in which **every monetary value carries its
-  `class`** — a model reading it can no more launder an estimate into a fact than the page can.
-  Beside the fold, `dollars` holds the dollar caps' enforcement amounts (below): integer micro-dollars from the
+- Saved flow what-if links at `/insights` redirect there.
+- Beside the fold, `dollars` holds the dollar caps' enforcement amounts (below): integer micro-dollars from the
   window counters and the run records, which are facts rather than classified estimates, so they carry
   no `class`. The key is present when a dollar window is set, a dollar setting cannot be read, or a run
   in the window carries `dollars`; its amounts are integer micro-dollars.
@@ -180,8 +177,8 @@ section follows one dollar from the setting to the run record.
 
 Write each as a plain decimal string (`"2.50"`): above 0, at most 1000000, at most 6 decimals, no exponent. A JSON
 number in the overlay is also accepted, read by its value (`1e2` is $100). Set them in `.env`, in the settings
-overlay (`/dispatch set`), or with `dispatch_set`, which shows the effective value and its source, checks the
-value, and asks you to confirm. A dollar window needs a per-job cap, because the window reserves that cap for
+overlay on the console's Configuration page, which previews the effective value and its source before the
+confirm. A dollar window needs a per-job cap, because the window reserves that cap for
 every job:
 
 - a window in the overlay with no `maxCostUsd` anywhere: every job is refused `settings-overlay-invalid`;
@@ -189,16 +186,16 @@ every job:
 - a scoped-limits dollar row with no per-job cap: each job it applies to is refused `config-refused`, unless its
   trigger sets `run.maxCostUsd`.
 
-`dispatch_set` warns before the first two; `pi-dispatch doctor` names all three.
+`pi-dispatch doctor` names all three.
 
 A trigger may narrow the per-job cap with `run.maxCostUsd`, and limit its models with `run.models`
-([triggers](triggers.md#a-dollar-cap-per-job)). No tool sets either: they are written by hand in the triggers
-file. The trigger tools refuse a call that carries them, and an edit keeps the values the entry has.
+([triggers](triggers.md#a-dollar-cap-per-job)). No form sets either: they are written by hand in the triggers
+file, and an edit of the entry keeps the values it has.
 
 `scoped-limits.json` version 2 adds the same windows per repo or folder (`dayUsd`, `weekUsd`, `monthUsd`) and per
 model (`model:<provider>/<model>` rows) ([scoped limits](scoped-limits.md#dollar-windows-and-model-rows-version-2)).
-`dispatch_limit_add` and `dispatch_limit_edit` take those fields behind their confirm, check them with the same
-parser the worker uses before they ask, and write version 1 until a row needs version 2.
+The console's limit editor takes those fields behind its confirm, checks them with the same
+parser the worker uses before the preview, and writes version 1 until a row needs version 2.
 
 ### One run, end to end
 
@@ -281,7 +278,7 @@ The meter counts a call on a model that costs money when its answer has:
 - content but an output count of 0. On the Anthropic API an output count of 1 counts too: pi keeps the first
   event's count when a proxy drops the final one.
 
-So a genuine one-token answer on the Anthropic API floors its run too, and so does a chat call there capped at
+So a genuine one-token answer on the Anthropic API floors its run too, and so does an ordinary call there capped at
 one output token (`maxTokens: 1`). Under a dollar cap such a call is also charged its bound during the run, so a
 capped job of genuine one-token answers reaches its cap far sooner than its real cost would. That is the safe side:
 the meter cannot tell such an answer from one whose count was dropped. A classify call has no answer content, so
@@ -311,29 +308,13 @@ change what the windows are charged.
 
 ### Where to look
 
-- **The panel** (`/dispatch`) shows a DOLLAR WINDOWS section when any window is set: one row per window, the
-  deployment's first, then each scoped-limits row. Each row shows `spent+held / cap`, read from the window's
-  counter in Valkey. That counter is what the next job is admitted against, and it includes the holds of jobs
-  still running. The row turns amber and says `full` when a job at the deployment's per-job cap would no longer
-  fit. Beside it, from the run records: what settled and how many runs settled each way (`13 metered, 1 floor`).
-  A `boundExceeded` count shows, amber, only when it is above zero. The SCOPED LIMITS section shows each row's
-  dollar windows the same way (`week $6.340917/$45.00`), and so does the insights page's budget panel. A folder
-  or model row says `records n/a`: a record names a folder by its basename only, and does not say which model
-  windows its job reserved in. A `project:<id>` row folds the records whose `project` is that id,
-  local runs included. The records side counts only the records this host can read
-  (`PI_LOGS_DIR`), so on a fleet without shared logs it is this host's share. The panel reads the deployment's
-  caps from the settings overlay and the deployment's `.env`, so a cap set only in the worker's service unit
-  shows no deployment row.
-- **`dispatch_costs`** returns the same windows under `dollars.windows`, and each run's `dollars` under
-  `dollars.runs`. Amounts are integer micro-dollars (1 USD is 1000000). `dollars.windows` lists the operator's
-  caps only. With no dollar cap set it is empty, even while a budget split governs the jobs. `dollars.newerSkipped`,
-  present only above 0, counts the records a newer pi-dispatch wrote, which `dollars.runs` leaves out. The `project`
-  filter narrows it, since a record's project is one of the fields every release reads the same way; the `flow` and
-  `repo` filters do not, since such a record's flow and target are not read, so under either it counts the window's
-  newer records (the project's, when one is given). It counts records up to now only. `fold.newerSkipped` is the same
-  count.
-- **`dispatch_limits`** gives each scoped-limits row its caps in words and, for a dollar row, each window's cap
-  and counter.
+- **The Spend page's Caps card** shows a row per dollar window when any is set: the
+  deployment's first, then each scoped-limits row. Each row shows `spent and held` against the cap, read from the
+  window's counter in Valkey. That counter is what the next job is admitted against, and it includes the holds of
+  jobs still running. The row says `Full` when a job at the deployment's per-job cap would no longer fit. The
+  console reads the deployment's caps from the settings overlay and the deployment's `.env`, so a cap set only in
+  the worker's service unit shows no deployment row.
+- **`pi-dispatch doctor`** prints each window's cap and its counter beside the caps it names.
 
 A non-zero `boundExceeded` anywhere means a call cost more than the bound said it could. The bound assumes one
 token is at least one byte for every tokenizer pi prices; that count is the evidence that would reopen it.
@@ -562,9 +543,9 @@ support off in the child (`--no-mcp`), so a child does not connect the MCP serve
 
 **Where it shows.** The run record's `tokens` gains three numbers. `childTotal` is the children's tokens, already
 inside `total`. `childProcesses` is how many children reported, plus any found without a report.
-`unmeteredChildren` is how many could not be counted. The run detail in `/dispatch` shows "of which other
-sessions" (subagents in the same process, and compaction) and "of which subprocesses" (`childTotal`), and names
-any unmetered children. Their per-model spend is in the run's model rows like the parent's.
+`unmeteredChildren` is how many could not be counted. The run page's Token split row says "other sessions"
+(subagents in the same process, and compaction) and "subprocesses" (`childTotal`), and an Unmetered children row
+names any unmetered children. Their per-model spend is in the run's model rows like the parent's.
 
 **The floor.** On Linux the runner also looks through the running processes for a `pi` that writes no ledger,
 for example one started with an empty environment. Such a child counts in `unmeteredChildren`. Then:

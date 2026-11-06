@@ -41,7 +41,7 @@ import { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 import { boundAnswerText, consoleAnswerBy, PANEL_ANSWER_BY } from "@edgehero/pi-dispatch/console-answer";
 import { runIdOf } from "@edgehero/pi-dispatch/recovery-queue";
 import * as steerInbox from "@edgehero/pi-dispatch/steer-inbox";
-import { parkedVerdictOf } from "@edgehero/pi-dispatch/chat-mode";
+import { parkedVerdictOf } from "@edgehero/pi-dispatch/parked-facts";
 import { removeQueuedJob } from "@edgehero/pi-dispatch/cancel-state";
 import { keepModelAttempt, modelAttemptIdOf } from "@edgehero/pi-dispatch/model-attempts";
 import { jobKey } from "@edgehero/pi-dispatch/wait-state";
@@ -1286,9 +1286,9 @@ function commentTriggerFor(triggersPath, kind, fs) {
  * rule }` or `{ refusal }`. The planner's refusals that the job's data and the triggers file decide, in its order: the
  * data expired (`data` null), data a newer pi-dispatch queued (`jobDataNewer`, issue #761), not a forge issue's run, a
  * pull request's park, and a comment trigger the receiver would not route a reply through (absent, a command, without
- * `run.resume`, without a flow). ONE predicate, so the run page's Chat panel offers the reply form exactly where
+ * `run.resume`, without a flow). ONE predicate, so the console's parked inbox offers the reply form exactly where
  * `planParkedAnswer` would plan it, and shows this sentence where it would not; whether the run is parked and still
- * unanswered is the caller's (the record and `chatModeOf`).
+ * unanswered is the caller's (the record and `parkedVerdictOf`).
  */
 export function parkedAnswerRefusalOf({ jobId, data, triggersPath, approval = false, fs = nodeFs }) {
   if (data === null || data === undefined) return { refusal: `the queue no longer holds ${jobId}'s data (${RERUN_DATA_KEPT_TEXT.forge}), so the reply cannot be built; answer on the forge instead` };
@@ -1334,15 +1334,15 @@ export function parkedAnswerRefusalOf({ jobId, data, triggersPath, approval = fa
  * scrubbed, newlines kept, at most 8 KiB, never cut); no record; a run that is not parked (not `completed` with
  * `awaiting-input`); already answered (a later run on the same target, `targetKeyOf`'s comparison); being answered (a
  * job on its target queued or running, which has no record yet: `readPendingAnswer`, issue #647), or that queue scan
- * unreadable or unable to tell (a queue deeper than its budget: `parkedVerdictOf`'s sentence, the Chat panel's); and `parkedAnswerRefusalOf`'s: expired job data, a job a newer pi-dispatch queued, a pull request's park (its reply needs the
+ * unreadable or unable to tell (a queue deeper than its budget: `parkedVerdictOf`'s sentence, the parked inbox's); and `parkedAnswerRefusalOf`'s: expired job data, a job a newer pi-dispatch queued, a pull request's park (its reply needs the
  * head branch, so it keeps the phrase, the receiver's rule), and a comment trigger the receiver would not route a reply
  * through (absent, a command, or without `run.resume`).
  *
  * `plan`: `{ kind: "parked-answer", jobId (the parked run), forge, deliveryId, queue, job, runFields, reserve }`, the
  * reserve over the same inputs as `planRerun`'s (`overlay`, `env`, `modelEndpoints`, `builtinModel`).
  *
- * `from` is who answers: `"console"` (a token, `by` its name) or `"panel"` (the panel's `/dispatch chat`, issue #647
- * part 2, which has no token: `by` is then the reserved `PANEL_ANSWER_BY` whatever is passed, and the worker's trail says
+ * `from` is who answers: `"console"` (a token, `by` its name) or `"panel"` (an answer signed with no token, issue #647
+ * part 2: `by` is then the reserved `PANEL_ANSWER_BY` whatever is passed, and the worker's trail says
  * the answer came from the panel). A console token NAMED `panel` is refused, so no token can sign as the panel.
  */
 export async function planParkedAnswer({
@@ -1420,9 +1420,9 @@ export async function planParkedAnswer({
     // Issue #647: an answer already queued or running has no record yet, so the later-run check above cannot see it.
     const pending = await readPendingAnswer({ queues: fleet.names.map((n) => fleet.queueOf(n)), kind: record.kind, target: record.target, runId: jobId, budget: pendingBudget, timeoutMs });
     if (pending.jobId) return { refusal: `${jobId} is being answered: ${pending.jobId} is queued or running on ${String(record.target)}` };
-    // A scan that could not tell refuses (chat-mode's FAIL LOUDLY rule for `pendingTooMany`: on a queue too deep to
+    // A scan that could not tell refuses (parked-facts's FAIL LOUDLY rule for `pendingTooMany`: on a queue too deep to
     // check, a queued answer can outlast the ten-minute semantic window that would swallow a second one), with the
-    // sentence the Chat panel and the parked inbox show for the same scan.
+    // sentence the parked inbox shows for the same scan.
     if (pending.jobId !== null) {
       const verdict = parkedVerdictOf(pending);
       return { refusal: verdict.mode === null && pending.tooMany === true ? `${verdict.says} Nothing was queued.` : `whether an answer to ${jobId} is already queued or running could not be told (the queue could not be read); nothing was queued, try again` };

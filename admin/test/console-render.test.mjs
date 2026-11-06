@@ -30,9 +30,10 @@ test("every pick names a golden that exists, with a name of its own", () => {
   const plan = picksPlan();
   assert.equal(plan.length, CONSOLE_PICKS.length);
   assert.equal(new Set(plan.map((shot) => shot.file)).size, plan.length);
-  // The sandbox removal retired the sandboxes panel state; launch/ keeps its pick (launch copy is edited in its own
-  // pull request), so the retired golden is tolerated by name and every other pick still names a golden that exists.
-  const retired = new Set(["panels/sandboxes-populated.operator"]);
+  // The sandbox removal retired the sandboxes panel state and the terminal-chat removal retired the parked question's
+  // run-page panel; launch/ keeps both picks (launch copy is edited in its own pull request), so the retired goldens are
+  // tolerated by name and every other pick still names a golden that exists.
+  const retired = new Set(["panels/sandboxes-populated.operator", "panels/run-parked-question.operator"]);
   for (const shot of plan) {
     assert.ok(KEYS.includes(shot.key) || retired.has(shot.key), `${shot.file}: no golden ${shot.key}`);
     assert.ok(CONSOLE_WIDTHS.includes(shot.width), `${shot.file}: a width the console is checked at`);
@@ -60,8 +61,8 @@ test("the flags refuse what makes no sense, in a sentence, before anything start
     [["--all"], /--all and --only go with --console/],
     [["--only", "overview.operator"], /--all and --only go with --console/],
     [["--console", "--all", "--only", "overview.operator"], /pick one/],
-    [["--console", "--png"], /--console takes neither --png nor --url/],
-    [["--console", "--url", "redis://127.0.0.1:6379/9"], /--console takes neither --png nor --url/],
+    [["--png"], /unexpected argument: --png/],
+    [["--console", "--url", "redis://127.0.0.1:6379/9"], /--console takes no --url/],
   ]) {
     const got = run(args);
     assert.equal(got.status, 2, args.join(" "));
@@ -72,6 +73,6 @@ test("the flags refuse what makes no sense, in a sentence, before anything start
 test("--console needs Chrome and says so, and needs no server", () => {
   const got = run(["--console", "--out", tempDir("console-render-")], { CHROME: "/nonexistent/chrome", PATH: "/nonexistent" });
   assert.equal(got.status, 2);
-  assert.match(got.stderr, /--console needs Google Chrome/);
+  assert.match(got.stderr, /needs Google Chrome/);
   assert.doesNotMatch(got.stderr, /valkey-server/, "it never asks for a server");
 });

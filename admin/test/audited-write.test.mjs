@@ -2,21 +2,14 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { makeConsoleAudit, verifyConsoleAudit } from "@edgehero/pi-dispatch/console-audit";
 import { AUDIT_REFUSAL, auditedWrite, defaultFailure, panelActor, panelWrite, writeTicket } from "../src/audited-write.mjs";
-import { stripAnsi } from "../src/style.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
-// One audit chain for the panel's writes (issue #642): `auditedWrite` appends `ok` BEFORE the write, a compensating
-// `failed` after one that did not land, and refuses the write when the first append fails. The TUI, the tools and the
-// commands wire it; the second half of this file drives those wirings through the real extension.
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-
-const { makeDashboard, withAuditedWrites } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
+// One audit chain for the writes (issue #642): `auditedWrite` appends `ok` BEFORE the write, a compensating
+// `failed` after one that did not land, and refuses the write when the first append fails. The console's tools and
+// commands wire it; this file drives those wirings through the real modules. The retired `/dispatch` panel's TUI
+// wiring (`withAuditedWrites`) went with the panel (58ef2369).
 
 const ACTOR = { name: "rob", role: "panel", session: null };
 /** Every row in `logsDir`'s audit chain, oldest first (the month follows the wall clock here, so every file is read). */
@@ -179,86 +172,6 @@ async function withDeployment(logsDir, fn) {
 
 
 
-
-test("the TUI's writes: pause, resume and both cancels go through the injected writer; a refusal is the footer note", async () => {
-  const calls = [];
-  const write = (opts, fn) => {
-    calls.push(opts.kind);
-    return opts.kind === "fleet-resume" ? { ok: false, invalid: AUDIT_REFUSAL, refused: AUDIT_REFUSAL } : fn();
-  };
-  const ran = [];
-  const base = {
-    fetchSnapshot: async () => ({ queue: { pausedState: false, counts: {}, workers: 0 }, runs: [] }),
-    pause: async () => { ran.push("pause"); },
-    resume: async () => { ran.push("resume"); },
-    cancelActive: async ({ jobId }) => { ran.push(`active:${jobId}`); return { timeout: true }; },
-    cancelHeld: async ({ jobId }) => { ran.push(`held:${jobId}`); return { ok: true, jobId }; },
-    dispose: async () => {},
-    now: () => Date.UTC(2026, 9, 15),
-  };
-  const deps = withAuditedWrites(base, write);
-  await deps.cancelActive({ jobId: "a1" });
-  await deps.cancelHeld({ jobId: "h1" });
-  assert.deepEqual(calls, ["cancel-active", "cancel-held"]);
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps });
-  await new Promise((r) => setImmediate(r));
-  comp.handleInput("p");
-  await new Promise((r) => setTimeout(r, 20));
-  comp.handleInput("r");
-  await new Promise((r) => setTimeout(r, 20));
-  assert.deepEqual(ran, ["active:a1", "held:h1", "pause"], "the refused resume never reached the reader");
-  const out = comp.render(100).map(stripAnsi).join("\n");
-  await comp.dispose();
-  assert.match(out, /resume refused: the audit log could not be written, so nothing was changed; check PI_LOGS_DIR/);
-});
-
-test("the TUI's pause note renders a kill-switch refusal the reader returns, and stays silent on a plain resolve", async () => {
-  const base = {
-    fetchSnapshot: async () => ({ queue: { pausedState: false, counts: {}, workers: 0 }, runs: [] }),
-    pause: async () => ({ refused: "VALKEY_URL and the deployment .env name different Valkeys; resume both from a shell" }),
-    resume: async () => undefined,
-    dispose: async () => {},
-    now: () => Date.UTC(2026, 9, 15),
-  };
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: base });
-  await new Promise((r) => setImmediate(r));
-  comp.handleInput("p");
-  await new Promise((r) => setTimeout(r, 20));
-  assert.match(comp.render(120).map(stripAnsi).join("\n"), /pause refused: VALKEY_URL and the deployment \.env name different Valkeys/);
-  comp.handleInput("r");
-  await new Promise((r) => setTimeout(r, 20));
-  assert.doesNotMatch(comp.render(120).map(stripAnsi).join("\n"), /refused/);
-  await comp.dispose();
-});
-
-
-
-test("the TUI's switch note reads killSwitchSet's results shape: a half switch and an unreachable Valkey fail loudly, a disagreement is said", async () => {
-  const shapes = {
-    p: { results: [{ shown: "redis://a:6379", res: { unreachable: "x", partial: { done: ["q1"], failed: "q2", error: "e" } } }] },
-    r: { results: [{ shown: "redis://b:6379", res: { unreachable: "ECONNREFUSED" } }] },
-  };
-  let next = "p";
-  const base = {
-    fetchSnapshot: async () => ({ queue: { pausedState: false, counts: {}, workers: 0 }, runs: [] }),
-    pause: async () => (next === "both" ? { disagreement: "VALKEY_URL differs from the deployment .env", results: [{ shown: "a", res: { queues: ["q"] } }, { shown: "b", res: { queues: ["q"] } }] } : shapes.p),
-    resume: async () => shapes.r,
-    dispose: async () => {},
-    now: () => Date.UTC(2026, 9, 15),
-  };
-  const comp = makeDashboard({ paths: {}, done() {}, tui: { requestRender() {} }, intervalMs: 100000, deps: base });
-  await new Promise((r) => setImmediate(r));
-  const said = async (key) => {
-    comp.handleInput(key);
-    await new Promise((r) => setTimeout(r, 20));
-    return comp.render(140).map(stripAnsi).join("\n");
-  };
-  assert.match(await said("p"), /pause failed: FAILED at q2 on redis:\/\/a:6379, so the deployment is half switched/);
-  assert.match(await said("r"), /resume failed: could not reach the queue at redis:\/\/b:6379/);
-  next = "both";
-  assert.match(await said("p"), /VALKEY_URL differs from the deployment \.env: paused both/);
-  await comp.dispose();
-});
 
 // The scrub's charset, pinned character by character: the plain login-name set (letters, digits, dot, underscore, at,
 // dash) is kept as it is, and everything else, a space first, becomes one underscore each.

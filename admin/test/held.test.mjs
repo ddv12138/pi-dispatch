@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { renderHeldJobs } from "../src/render.mjs";
 import { DEFER_TIME_MAX_MS } from "@edgehero/pi-dispatch/defer-reasons";
 
 /**
@@ -135,25 +134,6 @@ test("a hold with no clock reads as unknown, never as a fabricated zero", async 
 	});
 	const held = await readHeldJobs({ url: "redis://x", redisFn: () => redis, now: () => NOW });
 	for (const row of held.rows) assert.equal(row.waitedMs, null, `${row.jobId} has no honest duration to show`);
-});
-
-// --- the plain (no-color / non-TTY) twin ---------------------------------------------------------------
-
-test("the plain renderer tells the same facts as the framed one, and nothing when nothing is held", () => {
-	assert.equal(renderHeldJobs({ held: null }), null);
-	assert.equal(renderHeldJobs({ held: { rows: [] } }), null, "no section at all, so a deployment that never waits is unchanged");
-	assert.equal(renderHeldJobs({ held: { unreachable: "timed out" } }), "unreadable (timed out)");
-
-	const text = renderHeldJobs({ held: { rows: [{ jobId: "gh-1", target: "acme/web#7", label: "jira", waitedMs: 7_200_000 }], more: 4 } });
-	assert.ok(text.includes("acme/web#7"));
-	assert.ok(text.includes("jira"));
-	assert.ok(text.includes("waited 2h0m"), "a duration a human reads, not a millisecond count");
-	assert.ok(text.includes("4 more"), "and the truncation, so the plain path is not quietly shorter");
-});
-
-test("a missing hold clock renders `?` in the plain path too", () => {
-	const text = renderHeldJobs({ held: { rows: [{ jobId: "gh-1", target: "o/r#1", label: "jira", waitedMs: null }] } });
-	assert.ok(text.includes("waited ?"), "the framed twin's rule: never invent a number the worker did not record");
 });
 
 test("cancelHeldJob refuses anything that is not actually HELD", async () => {
@@ -662,11 +642,11 @@ test("cancelHeldJob refuses a job that has already left the queue", async () => 
 // --- the panel's own reader, which nothing had ever executed ------------------------------------------
 
 test("the panel's held reader and the tool's cannot diverge on the four things that matter", async () => {
-	// `createDashboardDeps` had no test at all before this slice: every dashboard test injects a canned
-	// snapshot, so the code that actually talks to redis on the 1s refresh was never executed by the suite.
-	// That is exactly where a sort-after-slice and an unbounded keyspace walk lived unnoticed. The panel copy
-	// exists for a real reason (it reuses a client the panel already holds) so it cannot simply be deleted --
-	// which makes the two copies agreeing the property to pin.
+	// This pin was born because the panel's redis-talking reader had no test: its suite injected canned
+	// snapshots, so the code that actually talks to redis on the 1s refresh was never executed by the tests.
+	// That is exactly where a sort-after-slice and an unbounded keyspace walk lived unnoticed. The copy moved
+	// with the fleet reader into read-model.mjs (issue #641) and the overlay around it is retired (58ef2369),
+	// but the reader is the live held path's twin, so the two copies agreeing stays the property to pin.
 	const { readFileSync } = await import("node:fs");
 	// The panel's copy moved with the fleet reader into read-model.mjs (issue #641); it is still the twin this pins.
 	const panel = readFileSync(new URL("../src/read-model.mjs", import.meta.url), "utf8");

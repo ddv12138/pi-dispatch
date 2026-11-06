@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LINE_INPUT_CURSOR, box, clip, columnsOf, makeLineInput, pad, sliceColumns } from "../src/panel.mjs";
 import { frame, makeStyler, PLAIN_THEME, visibleLen } from "../src/style.mjs";
-import { renderRuns } from "../src/render.mjs";
 import { loadVisibleWidth } from "./helpers/renderer.mjs";
 
 // EVERY WIDTH PROMISE IN THIS PANEL WAS A UTF-16 COUNT (issue #401), and this file is where the repair is
@@ -315,30 +314,6 @@ test("a cut drops a lone surrogate rather than passing it on (#401)", () => {
       assert.doesNotMatch(clip(s, w), lone, `clip(${JSON.stringify(s)}, ${w})`);
     }
   }
-});
-
-test("the model-visible runs table lines its columns up in columns (#401)", () => {
-  // THE CHANNEL THE PANE GATES DO NOT REACH. `renderRuns` answers `/dispatch runs`, so its output goes to
-  // the model and to the operator's scrollback rather than through a frame, and it sized its columns with
-  // `.length`. A `target` is `local:<basename>` for a local run, so an operator's own folder name lands in
-  // it, and one CJK character there shifted every later column of that row against the rows around it.
-  const at = "2026-07-21T00:00:00.000Z";
-  const base = { flow: "review", outcome: "completed", turns: 3, tokens: { total: 10 }, endedAt: at };
-  const rows = renderRuns([
-    { ...base, jobId: "gh-aaaa1", target: "local:プロジェクト" },
-    { ...base, jobId: "gh-aaaa2", target: "local:project" },
-    { ...base, jobId: "gh-aaaa3", target: "local:한글" },
-  ]).split("\n");
-  // Every row starts its FLOW cell at the same column, which is the only thing a reader of this table
-  // needs and the only thing `.length` got wrong.
-  const flowAt = rows.slice(1).map((r) => columnsOf(r.slice(0, r.indexOf("review"))));
-  assert.equal(new Set(flowAt).size, 1, `the flow column starts at ${[...new Set(flowAt)].join(", ")}`);
-  // AND THE CELL IS NOT CUT TO REACH THAT, which alignment alone does not say. A width computed by
-  // `.length` is too SMALL for a wide cell, and `pad` then clips every target to it: the columns line up
-  // beautifully and the operator's folder name has lost its tail. Both halves are needed or the mutant
-  // satisfies the test by truncating.
-  assert.match(rows[1], /local:プロジェクト/u, "the CJK target survives whole");
-  assert.match(rows[3], /local:한글/u, "and so does the Hangul one");
 });
 
 test("the graph's hostile-string caps never leave half a character (#401)", async () => {

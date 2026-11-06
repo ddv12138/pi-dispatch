@@ -5018,7 +5018,7 @@ test("doctor: the dead-scope advisory flags folder-only shapes not in the canoni
 		rendered([c]),
 		[
 			"⚠ 3 scoped limit(s) name a folder no trigger runs in (./relative-nowhere, sitealone, C:\\srv\\site) -- no trigger runs there, so unless a CLI or local job does, the cap guards nothing; scopes match exactly (no globs, folders by resolved ABSOLUTE path), so check the spelling against triggers.json run.folder or delete the entry",
-			`    → edit ${limitsPath} by hand or via dispatch_limit_edit/_delete -- repo-shaped scopes are never flagged here, because a webhook job's repo comes from the delivery, which triggers.json cannot enumerate`,
+			`    → edit ${limitsPath} on the console's scoped-limits editor or by hand -- repo-shaped scopes are never flagged here, because a webhook job's repo comes from the delivery, which triggers.json cannot enumerate`,
 			"",
 		].join("\n"),
 	);
@@ -10767,7 +10767,7 @@ test("issue #596, phase 3: runDoctor hands its readRunRecords seam on, and print
 	const oom = { project: "web", reason: "oom-killed", startedAt: "2026-10-01T11:00:00.000Z", endedAt: "2026-10-01T11:10:00.000Z", resources: { memPeak: 4096 * 1024 * 1024 }, size: { memMiB: 4096, cpuCenti: 200, source: "default" } };
 	const { out, text } = capture();
 	await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(), PI_PROJECTS_FILE: projectsFile, PI_HOST_MEMORY_BUDGET: "8g" }), { ...imgDeps(out, green), wallClock: () => at, readRunRecords: () => [oom] });
-	assert.match(text(), /⚠ project web: size 4g, 2 CPUs; its runs in the last 30 days suggest memory 6g \(oom-killed: 1 run ended oom-killed \(the largest size killed 4g\)\)\n {4}→ apply it in the admin panel with dispatch_limit_add \{"scope":"project:web","memory":"6g"\}/);
+	assert.match(text(), /⚠ project web: size 4g, 2 CPUs; its runs in the last 30 days suggest memory 6g \(oom-killed: 1 run ended oom-killed \(the largest size killed 4g\)\)\n {4}→ apply it on the console's project page with Preview this size: dispatch_limit_add \{"scope":"project:web","memory":"6g"\}/);
 });
 
 test("issue #596, a worker whose boot listing of left-over job containers is unread admits no job, and doctor warns so", async () => {

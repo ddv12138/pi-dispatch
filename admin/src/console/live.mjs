@@ -13,7 +13,7 @@
  *      the request that should end it the ordinary way), held to `STREAM_ENDS` by `streamEndOf`, so a stream never
  *      ends with `restart` (this process opened it) nor with a word the page does not know; anything else is `null`,
  *      which the page reads as "signed out, reason unknown". `close()` ends every stream with `shutdown`, the console
- *      stopping, which the page and the terminal chat treat as a connection to wait for, not a sign-out.
+ *      stopping, which the page treats as a connection to wait for, not a sign-out.
  *
  *      A TOKENS FILE THAT CANNOT BE READ JUDGES NOBODY. Ending every stream then would sign every tab out over a
  *      chmod mistake, and drawing panels would send data to sessions nobody judged. So for that tick nothing is ended
@@ -78,11 +78,10 @@
  *
  *   5. `transcriptSince` runs ONCE per distinct job per tick, from the OLDEST cursor among that job's streams, and the
  *      page is fanned out to each stream from its own cursor (`id: <stream id>`, `event: entry`, `data: {"html"}`, the
- *      html server-rendered by `transcript.mjs`, or, for a `format=json` stream (issue #647), the structured entry
- *      `transcriptEntryJson` rebuilds). Streams at the tip, however many, cost one read; a stream that came
+ *      html server-rendered by `transcript.mjs`). Streams at the tip, however many, cost one read; a stream that came
  *      in behind (a reconnect with an old `Last-Event-ID`, or none) is caught up a few pages per tick
  *      (`transcriptPagesPerTick`), the others waiting at most those ticks. A stream whose cursor reaches the `end`
- *      entry gets `event: done` with `{"outcome"}` and is closed (the terminal client stops reconnecting). A read that is unreachable skips that job this tick, logged once, as a failing page is.
+ *      entry gets `event: done` with `{"outcome"}` and is closed (a client that ended does not reconnect). A read that is unreachable skips that job this tick, logged once, as a failing page is.
  *
  * Transcript text never enters a view, a panel or `/api/state`: it goes from the read to the one stream that asked.
  *
@@ -98,7 +97,7 @@ import { compareTranscriptIds, TRANSCRIPT_ID_RE, TRANSCRIPT_PAGE_MAX } from "../
 import { outcomeWord, recordReason } from "../words.mjs";
 import { RUN_ID_RE } from "./panels.mjs";
 import { STREAM_SHUTDOWN, streamEndOf } from "./session-ends.mjs";
-import { transcriptEntryHtml, transcriptEntryJson } from "./transcript.mjs";
+import { transcriptEntryHtml } from "./transcript.mjs";
 import { agentReadProjection, agentReasonToken } from "../agent-read.mjs";
 
 /**
@@ -140,7 +139,7 @@ export const TOKENS_BACK_LINE = "console: the tokens file is read again; live st
  * `{ readOnly, live: true }`, and `role: "viewer"` when no operator's stream shows it, never an operator's role, since
  * one load serves every role watching it (so the Parked page reads no planner check that no form is drawn from). `live`
  * marks the load as the hub's: its by-id job lookups start no keyspace scan, however many pages and ids are open
- * (pages.mjs, the reader's `lookUp`); only a request's lookups (a page GET's, `/api/run`'s) scan for an absence. A load
+ * (pages.mjs, the reader's `lookUp`); only a request's lookups (a page GET's) scan for an absence. A load
  * made for viewers alone is not reused once an operator's stream shows the page. `pagePanels(page, ctx)` resolves `[{id, html}]` with
  * `ctx = {query, session: {name, role}, data, readOnly}`, `query` the view's whole query; `peekSession(id, file)` and
  * `readTokens()` are the session store's `peek` and the server's token reader. `endedReason(id, file)` says why a
@@ -513,12 +512,12 @@ export function makeLiveHub({
     await transcriptTick();
   }
 
-  // The `data` per format (issue #647): `{"html"}` for the run page, the structured entry for the terminal chat. Both
-  // are JSON.stringify'd, so no newline in the text can end an event early.
+  // The `data` per entry event: `{"html"}` for the run page. It is JSON.stringify'd, so no newline in the text can
+  // end an event early.
   const entryEvent = (id, data) => `id: ${id}\nevent: entry\ndata: ${JSON.stringify(data)}\n\n`;
-  const ENTRY_DATA = Object.freeze({ html: (entry) => ({ html: String(transcriptEntryHtml(entry)) }), json: (entry) => transcriptEntryJson(entry) });
+  const ENTRY_DATA = Object.freeze({ html: (entry) => ({ html: String(transcriptEntryHtml(entry)) }) });
 
-  /** A page ends only its transcript (tdone); the terminal endpoint completes (done) and closes its connection. */
+  /** A page ends only its transcript (tdone) and stays; a transcript stream completes (done) and closes. */
   function done(sub, outcome) {
     if (isPage(sub)) {
       sub.transcriptDone = true;
@@ -563,17 +562,18 @@ export function makeLiveHub({
           break;
         }
         recovered(`transcript\n${jobId}`, "console: a live transcript is read again");
-        // Rendered once per entry and format, whichever streams it goes to, and only in the formats a stream asked for.
+        // Rendered once per entry and outcome word, whichever streams it goes to: the run page's stream names the
+        // record's word, a transcript stream's entries go without one.
         const rendered = new Map();
-        const eventsIn = (format, word = null) => {
-          const key = `${format}:${word ?? ""}`;
+        const eventsIn = (word = null) => {
+          const key = word ?? "";
           if (!rendered.has(key)) rendered.set(key, read.entries.map((entry) => ({ id: entry.id, event: entryEvent(entry.id,
-            format === "html" && word !== null ? { html: String(transcriptEntryHtml(entry, { outcomeWord: word })) } : ENTRY_DATA[format](entry)) })));
+            word !== null ? { html: String(transcriptEntryHtml(entry, { outcomeWord: word })) } : ENTRY_DATA.html(entry)) })));
           return rendered.get(key);
         };
         for (const sub of live) {
           if (!subs.has(sub)) continue;
-          for (const r of eventsIn(sub.format, isPage(sub) ? sub.recordWord : null)) {
+          for (const r of eventsIn(isPage(sub) ? sub.recordWord : null)) {
             if (compareTranscriptIds(r.id, sub.cursor) <= 0) continue;
             if (!send(sub, r.event)) break;
             sub.cursor = r.id;
@@ -651,10 +651,9 @@ export function makeLiveHub({
 
     /**
      * One run's live transcript (issue #643): entries after `lastEventId` (a stream id the caller validated, else null
-     * for the beginning), as `format` (`html`, the default, or `json`, issue #647; anything else is `html`). The first
-     * entries are read now rather than a tick later.
+     * for the beginning), as each `event: entry`'s `{html}`. The first entries are read now rather than a tick later.
      */
-    subscribeTranscript({ res, sessionId, session, jobId, lastEventId = null, format = "html" }) {
+    subscribeTranscript({ res, sessionId, session, jobId, lastEventId = null }) {
       if (closed) {
         try {
           res.end();
@@ -663,7 +662,7 @@ export function makeLiveHub({
         }
         return () => {};
       }
-      const sub = { kind: "transcript", res, sessionId, session: { name: String(session?.name ?? ""), role: String(session?.role ?? "") }, jobId: String(jobId), cursor: typeof lastEventId === "string" ? lastEventId : null, format: Object.hasOwn(ENTRY_DATA, format) ? format : "html" };
+      const sub = { kind: "transcript", res, sessionId, session: { name: String(session?.name ?? ""), role: String(session?.role ?? "") }, jobId: String(jobId), cursor: typeof lastEventId === "string" ? lastEventId : null };
       subs.add(sub);
       startTimer();
       void tick();
@@ -839,8 +838,8 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
         full: Boolean(r?.full),
       })),
     },
-    // Issue #647: with the parked run's `jobId` (a worker-minted run id, the run-id charset or null), so a script or the
-    // terminal chat can open the run, or answer it through the `parked-answer` action, without a second lookup.
+    // Issue #647: with the parked run's `jobId` (a worker-minted run id, the run-id charset or null), so a script can
+    // open the run, or answer it through the `parked-answer` action, without a second lookup.
     parked: (Array.isArray(s.parked) ? s.parked : []).map((p) => ({ target: str(p?.target), kind: str(p?.kind), jobId: typeof p?.jobId === "string" && RUN_ID_RE.test(p.jobId) ? p.jobId : null, ageMs: num(p?.ageMs), chainCount: num(p?.chainCount) })),
     // True when the parked list could not be read: `parked: []` then means "unknown", never "nobody is waiting".
     parkedUnknown: Boolean(s.parkedUnreachable),

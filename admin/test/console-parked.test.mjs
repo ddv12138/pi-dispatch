@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { CHAT_REFUSALS, parkedVerdictOf } from "@edgehero/pi-dispatch/chat-mode";
+import { parkedVerdictOf } from "@edgehero/pi-dispatch/parked-facts";
 import { ACTIONS } from "../src/console/actions.mjs";
 import { PAGES } from "../src/console/pages.mjs";
 import { OVERVIEW_UNREAD_TEXT } from "../src/console/panels/overview.mjs";
@@ -32,6 +32,8 @@ const cards = (out) => out.match(/<article class="[^"]*\bqcard[ "][^]*?<\/articl
 const forms = (out) => out.match(/<form class="act[^"]*" data-action="parked-answer"[^]*?<\/form>/g) ?? [];
 const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 const OK = { ok: true };
+/** parked-facts's own sentence for a scan past its budget (CHAT_REFUSALS is private there): pinned word for word, as worker/test/parked-facts.test.mjs pins it. */
+const PARKED_TOO_MANY = "This run asked a question, but the queue holds too many jobs to check whether an answer is already on its way; answer it on the forge, or wait until the queue is shorter.";
 
 test("the sentences, word for word: where the question is read, the banner's title, how answers work, the empty state", () => {
   assert.equal(PARKED_QUESTION_WHERE, "The question is the run's last message: read it on its issue or pull request, or on its run page while its live transcript is kept (24 hours after the run).");
@@ -131,7 +133,7 @@ test("the refusal banner capitalises a sentence that opens with a word, ends it 
   assert.equal(banner("  answer on the forge instead  "), "Answer on the forge instead.");
 });
 
-test("every verdict over the pending-answer scan, the Chat panel's own (parkedVerdictOf): being answered links that run, an unknown says why, and neither draws a form", () => {
+test("every verdict over the pending-answer scan, parked-facts's own rule (parkedVerdictOf): being answered links that run, an unknown says why, and neither draws a form", () => {
   const scans = [
     [{ jobId: "gh-77" }, "answering"],
     [{ jobId: null }, "reply"],
@@ -147,7 +149,7 @@ test("every verdict over the pending-answer scan, the Chat panel's own (parkedVe
     assert.equal(forms(out).length, kind === "reply" ? 1 : 0, `${said}: a form only for a reply`);
     if (kind === "answering") assert.ok(out.includes(`<p class="muted">${PARKED_ANSWERING} <a class="link code" href="/run?id=gh-77">gh-77</a>.</p>`), out);
     if (kind === "unknown" || kind === "tooMany") assert.ok(out.includes(`<p class="muted">${esc(v.says)}</p>`), `${said}: the shared verdict's sentence`);
-    if (kind === "tooMany") assert.equal(v.says, CHAT_REFUSALS.parkedTooMany);
+    if (kind === "tooMany") assert.equal(v.says, PARKED_TOO_MANY, "the queue-too-deep sentence, pinned as the leaf's own words are (CHAT_REFUSALS stays private)");
     // The facts are a viewer's too: being answered and not known are what the old table's column said to both roles.
     const viewer = draw("viewer", { parked: [row("gh-1", { pendingScan: scan })] }, { parkedChecks: { "gh-1": OK } });
     if (kind === "answering") assert.ok(viewer.includes(PARKED_ANSWERING) && viewer.includes('href="/run?id=gh-77"'));

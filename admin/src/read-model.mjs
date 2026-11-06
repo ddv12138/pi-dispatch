@@ -30,7 +30,7 @@ import { settingsFilePath, readOverlay, readOverlayDocument, writeOverlay, KNOWN
 import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, checkTokenInvariant } from "@edgehero/pi-dispatch/budget-rule";
 import { fmtTokens } from "./panel.mjs";
 import { modelRolesTelemetryOf, approvalRecordOf, BUNDLE_SKIPPED_REASONS, LIVE_SKIPPED_REASONS, OPENSHELL_RULE_HOSTS_MAX, RECOVER_SKIPPED_REASONS, STEER_SKIPPED_REASONS, recordedBundle, recordedCheckpoints, recordedOpenshell, recordedSecretsProfile, recordedRecovered, makeReadRecord, recordedRecoveryOf, sanitizeJobId, targetFor, queuedAtOf, UNREADABLE_RECORD } from "@edgehero/pi-dispatch/run-history";
-import { pendingFactsOf, QUEUED_STATES } from "@edgehero/pi-dispatch/chat-mode";
+import { pendingFactsOf, QUEUED_STATES } from "@edgehero/pi-dispatch/parked-facts";
 import { FORGE_MCP_SERVER_NAME, MCP_SERVER_NAME_RE, mcpServerWhere, readOverlayMcp } from "@edgehero/pi-dispatch/mcp-config";
 import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
 import { parsePauseWindows, pauseWindowsText } from "@edgehero/pi-dispatch/pause-windows";
@@ -215,7 +215,7 @@ const TOKEN_ENV_NAMES = Object.freeze({ maxTokens: "PI_MAX_TOKENS", ...WORKER_TO
 export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_CAPTURE_JOB_LOGS", "PI_SCHEDULER_STALL_MAX", "PI_CHAIN_DEPTH_MAX", "PI_CHAIN_MAX_PER_JOB", "PI_RUN_MIRROR_MAX_RUNS", "PI_WORKER_NAME", "PI_CONSOLE_LISTEN", "PI_CONSOLE_BIND_PUBLIC", "PI_SESSIONS_DIR", "PI_SECRET_BUNDLES", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "TMPDIR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
 // The console's address (the insights move to the console): `/dispatch insights` and the `i` key print the spend
 // screen's URL from the PI_CONSOLE_LISTEN the console itself reads from this `.env` (`console/link.mjs`).
-// The session store (issue #647, part 2): `/dispatch chat` forks a finished run from the PI_SESSIONS_DIR the worker
+// The session store (issue #647, part 2): a finished run's session is forked from the PI_SESSIONS_DIR the worker
 // writes, which in a pointer deployment is set in this `.env`, so it is a path key below too.
 // The bundle resolvers (issue #704, PI_SECRET_BUNDLES, and PI_SECRET_RESOLVER_ROOTS, which bounds the overlay's): the
 // bundles view says whether this deployment declares the profile a bundle names and whether an overlay one sits inside
@@ -2682,8 +2682,8 @@ export async function scanFleetRunRecords({ redis = null, logsDir, sinceMs, nowM
 }
 
 /**
- * The size suggestions of the given projects (issue #596, phase 3, DES-SIZE-SUGGESTIONS), for the PROJECTS view, the
- * `dispatch_limit_edit` preview and the insights page: per project id, the worker's own `suggestSize` over this host's
+ * The size suggestions of the given projects (issue #596, phase 3, DES-SIZE-SUGGESTIONS), for the console's project
+ * page and the insights page: per project id, the worker's own `suggestSize` over this host's
  * run records, with the exact call that applies it (`suggestionCall`) and its evidence in words. The records are read
  * ONCE for every project, by the worker's own bounded reader (`readSizingRecords`: an mtime prefilter, a 256 KiB cap
  * per file, the newest 50 measured runs per project), the one doctor uses. `limits` are the parsed scoped-limits rows
@@ -4535,14 +4535,14 @@ export function createFleetReader(
   // and `found(answer)` reads the answer: true (a queue holds the job), false (absent: none does, the set whole), null
   // (none of the queues asked does, and they may not be all of them) or anything else (the read failed).
   //
-  // A REQUEST'S LOOKUP (`live` false: a page GET, `/api/run`). A JOB IS ABSENT ONLY FROM A SET READ AFTER THE QUESTION
+  // A REQUEST'S LOOKUP (`live` false: a page GET). A JOB IS ABSENT ONLY FROM A SET READ AFTER THE QUESTION
   // WAS ASKED (`asked`, the load's `lookupQuestion`, else now). The kept discovery serves every hit at once; a miss
   // over one whose scan started before the question is asked again over a scan that started after it (`scanSince`,
   // beside the registry already read), since a queue made after that scan (a local run onto a new or a stopped host's own
   // queue) is in no set it settled into, and an idle console's set may be hours old. So a question costs at most one
   // scan, which every question asked before it started shares: one page load's lookups, which pass one `asked`, cost
   // one in all. `tellAbsent` false answers such a miss as it stands, not whole, for a caller to which an absence makes no
-  // difference (`chatFactsOf` for a run with a record). The scan is waited for at most twice its budget (the one in
+  // difference (the run page's queue-state read for a run with a record). The scan is waited for at most twice its budget (the one in
   // flight, then its own); one that does not settle in it leaves the first answer. A set that could not be built is not
   // whole. What the answer says of the job is kept for a live load's lookups (`tell`).
   //
@@ -4811,10 +4811,10 @@ export function createFleetReader(
       }
 
       // Issue #647: whether each waiting park is being answered now (a job queued or running on its target, which has no
-      // record yet: `readPendingOnTargets`, the rule the Chat panel and the planner use). Read only while something is
+      // record yet: `readPendingOnTargets`, the rule the planner uses). Read only while something is
       // parked, and at most once per TOKEN_RECORDS_TTL_MS for the same parks, so a park left for days does not list the
       // queues on every tick. `pendingScan` per row is the scan's answer for its target (`pendingScanFor`, the shape the
-      // shared verdict `parkedVerdictOf` reads, so the inbox and the Chat panel decide alike), and `answering` the same
+      // shared verdict `parkedVerdictOf` reads, so the inbox and the answer planner decide alike), and `answering` the same
       // read as the job's id, false (the scan saw everything and found none), or null (unknown: partial or unreadable).
       if (fold.parked.length > 0) {
         const parkKey = fold.parked.map((p) => `${p.kind}\u0000${p.target}\u0000${p.jobId}`).join("\n");
@@ -5017,7 +5017,7 @@ export function createFleetReader(
       const queues = await fleetQueues().catch(() => lastNames.map((n) => pool.get(n)));
       return readJobInbox({ redis, queues, jobId, timeoutMs: FLEET_READ_TIMEOUT_MS });
     },
-    // The terminal chat's mode (issue #647): the job's queue state and its active recovery, for every job
+    // The job's queue state and its active recovery (issue #647), for every job
     // (`readJobStatus`), across the by-id lookup's queues (`lookUp`, issue #737: the registry's and the queues that
     // exist), so a job on a stopped host's queue is found, and `found` is null rather than false where that set is not
     // whole or was read before the question. `tellAbsent` false: a miss is not asked again over a new scan (`lookUp`).
@@ -5098,7 +5098,7 @@ export function createFleetReader(
       return readPendingAnswer({ queues, kind, target, runId, timeoutMs: FLEET_READ_TIMEOUT_MS });
     },
     // Whether a parked run's retained job can take a console answer (issue #647): the planner's own predicate
-    // (`parkedAnswerRefusalOf`) over the job's data and the triggers file, so the Chat panel offers the reply form
+    // (`parkedAnswerRefusalOf`) over the job's data and the triggers file, so the parked inbox offers the reply form
     // exactly where `planParkedAnswer` would plan it. `{ refusal }` (a sentence), `{ ok: true }` or `{ unreachable: true }`.
     // `lookup` is the question's (`{ live }` or `{ asked }`, `lookUp`). The job's `.data` never leaves this method. Never
     // throws.
@@ -5972,8 +5972,8 @@ const RUNS_PAGE_BATCH = 200;
  * offset would shift every later page by one and show one run twice. A page never ends inside a group of runs that share
  * one instant (it takes the whole group), because `(before` would otherwise skip the rest of it.
  *
- * `match` (issue #647) is a caller's predicate applied beside `filter`, never parsed from a URL: `/api/run` passes the
- * exact-target comparison (`targetKeyOf`), so `limit` counts runs on THAT target, where the filter's substring `q` let
+ * `match` (issue #647) is a caller's predicate applied beside `filter`, never parsed from a URL: the parked fold passes
+ * the exact-target comparison (`targetKeyOf`), so `limit` counts runs on THAT target, where the filter's substring `q` let
  * `#120`, `#121`... fill the page and crowd out `#12`.
  *
  * FILTERED AFTER FETCHING, so it fetches in batches (`RUNS_PAGE_BATCH` from each source) until `limit` runs match or
@@ -6117,12 +6117,12 @@ export function runPlacesText(unread) {
  * could not be read (`readRunById`'s `unreadable`, by its sentence), a queue lookup that was not whole, failed or was
  * not made, a stream or progress read that did not answer or answered something else, and a place with no reader at
  * all. `run` is `readRunById`'s answer (`missing`: this host's file and the fleet's mirror both read, neither holds
- * one); `lookup` the queue lookup's WHOLE answer, `chatFactsOf`'s (`found: false`, no queue holds the job with every
+ * one); `lookup` the queue lookup's WHOLE answer (`found: false`, no queue holds the job with every
  * queue asked over a scan made after the question, and no `activeJobId` or `queuedJobId`, no recovery of its run
  * either); `transcript` the live stream's (`readTranscriptMeta`, `exists: false` read); `progress` the progress key's
  * (`readProgress`, `absent`).
  *
- * THE ONE RULE for the run page's status and `/api/run`'s answer: a run that a place shows is a run (200); one that none
+ * THE ONE RULE for the run page's status: a run that a place shows is a run (200); one that none
  * shows while a place is unread could not be told (503, naming the places); and only one that none shows with every
  * place read, each saying its own none, is absent (`runAbsent`: the run-not-found page, 404).
  */
@@ -7468,8 +7468,8 @@ const FORGE_NUMBER_RE = /^\d{1,12}$/;
 /**
  * A run target's comparison key (issue #647): `<kind>\0<target>`, with a forge target's repository path lowercased and
  * its number's leading zeros dropped, or null for a kind or target that is not a string. ONE rule for "the same target",
- * shared by the parked fold's answered rule (`readParkedRuns`), the parked answer's planner, `/api/run`'s URL lookup and
- * newer-run search, and the pending-answer scan (`readPendingOnTargets`), so none of them can call a run answered that
+ * shared by the parked fold's answered rule (`readParkedRuns`), the parked answer's planner and the pending-answer scan
+ * (`readPendingOnTargets`), so none of them can call a run answered that
  * another offers a reply for. Case-insensitive because every forge this project speaks looks a repository up that way
  * (GitHub, Forgejo and GitLab paths, an Azure project and repository): `Acme/Web#12` and `acme/web#12` are one issue,
  * and an exact comparison would let a renamed-case repository's later run leave its park offering a second reply. A
@@ -7492,8 +7492,8 @@ function forgeRepoOf(kind, segments) {
 }
 
 /**
- * The run target a forge URL names (issue #647): the INVERSE of `forgeLinkOf`, held to it by a round-trip test, so a
- * link the console draws is a link `pi-dispatch chat <url>` and `/api/run?url=` read back to the same target. Answers
+ * The run target a forge URL names (issue #647): the INVERSE of `forgeLinkOf`, held to it by a round-trip test, so the
+ * link the console draws names the target `forgeTargetOf` reads back. Answers
  * `{ kind, target }`; for an Azure WORK ITEM `{ kind: "azure", project, number, ambiguous: true }`, because its URL names
  * the project and never the repository, so the target (`<project>/<repo>#<n>`) is whichever run records say (the caller
  * looks, and answers 409 with the candidates when there are several); or null.
@@ -7617,7 +7617,7 @@ export async function activeJobOfRun(getJob, runId, exceptId = null) {
 /**
  * The ACTIVE and the QUEUED job of run `runId` other than `exceptId` (issue #647): `{ active, queued }`, each `{ job,
  * queue }` or null, over the same candidates and order as `activeJobOfRun` (the recovery ids newest first, then the base).
- * `queued` is the newest candidate in one of chat-mode's `QUEUED_STATES` (a #645 recovery enqueued and not started yet):
+ * `queued` is the newest candidate in one of parked-facts's `QUEUED_STATES` (a #645 recovery enqueued and not started yet):
  * the base attempt's record then says `recovery-enqueued`, which alone reads as a finished run, and a fork of it would
  * race the recovery that is about to write the same session. Stops at the first active one. Reads only.
  */
@@ -7704,7 +7704,7 @@ export async function readRunProgress({ redis, queues, jobId, record = null, tim
 }
 
 /**
- * One job's queue state for the terminal chat's mode (issue #647, `chatModeOf`): `{ found, state, continuesAs,
+ * One job's queue state for the parked-facts verdict (issue #647): `{ found, state, continuesAs,
  * queuedAs }`, the job found by id in `queues` (the first that knows it), its BullMQ state word (null when no queue holds
  * it), the id of its run's ACTIVE #645 recovery job when the job itself is not active, and, when none is active, the id
  * of its run's QUEUED recovery job (`liveJobsOfRun`; each null otherwise). For
@@ -7762,7 +7762,7 @@ export const PENDING_SCAN_PAGE = 500;
 export const PENDING_DATA_MAX = 500;
 
 /**
- * The states a job on a park's target counts as taking its answer in: running, or about to (chat-mode's own list), in
+ * The states a job on a park's target counts as taking its answer in: running, or about to (parked-facts's own list), in
  * the order a job moves through them, so a job that moves while the scan pages (delayed to waiting, waiting to active)
  * is met again in a state read later rather than slipping between two reads.
  */
@@ -7924,7 +7924,7 @@ export async function readPendingOnTargets({ queues, targets, budget = PENDING_S
 /**
  * One target's answer off a `readPendingOnTargets` result: `{ jobId }` (the job on its target, or null when the scan saw
  * everything and found none), `{ unknown: true, tooMany }` (a partial scan with no match; `tooMany` when the queues were
- * deeper than its budget) or `{ unreachable: true }`. The shape chat-mode's `pendingFactsOf` reads, for the parked
+ * deeper than its budget) or `{ unreachable: true }`. The shape parked-facts's `pendingFactsOf` reads, for the parked
  * inbox's rows and the single-park reader alike.
  */
 export function pendingScanFor(got, key) {

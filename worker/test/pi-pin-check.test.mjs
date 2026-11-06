@@ -9,10 +9,21 @@ import { piPinProblems, repositoryPins } from "../../.github/scripts/pi-pin-chec
 function pins(pin = "1.0.3") {
 	const entry = { version: pin };
 	return {
-		root: { overrides: { "@earendil-works/pi-ai": pin, "@earendil-works/pi-coding-agent": pin, "@earendil-works/pi-tui": pin } },
-		lock: { packages: { "": {}, "node_modules/@earendil-works/pi-ai": entry, "node_modules/@earendil-works/pi-coding-agent": entry, "node_modules/@earendil-works/pi-tui": entry, "node_modules/undici": { version: "8.10.2" } } },
+		root: { overrides: { "@earendil-works/pi-agent-core": pin, "@earendil-works/pi-ai": pin, "@earendil-works/pi-coding-agent": pin, "@earendil-works/pi-mcp": pin } },
+		lock: { packages: {
+			"": {},
+			"image/runner": { dependencies: { "@earendil-works/pi-agent-core": pin, "@earendil-works/pi-coding-agent": pin, "@earendil-works/pi-mcp": pin } },
+			"worker": { dependencies: { "@earendil-works/pi-ai": pin } },
+			"node_modules/@earendil-works/pi-agent-core": entry,
+			"node_modules/@earendil-works/pi-ai": entry,
+			"node_modules/@earendil-works/pi-coding-agent": entry,
+			// pi-tui is pi-coding-agent's own dependency (issue #647's terminal chat is gone): no workspace installs it,
+			// so it carries no override, and the lockfile check alone holds it to the pin.
+			"node_modules/@earendil-works/pi-tui": entry,
+			"node_modules/undici": { version: "8.10.2" },
+		} },
 		runner: { dependencies: { "@earendil-works/pi-agent-core": pin, "@earendil-works/pi-coding-agent": pin, "@earendil-works/pi-mcp": pin } },
-		worker: { dependencies: { "@earendil-works/pi-ai": pin, "@earendil-works/pi-tui": pin } },
+		worker: { dependencies: { "@earendil-works/pi-ai": pin } },
 		dockerfile: `FROM x\nARG PI_VERSION=${pin}\n`,
 		documents: Object.fromEntries(["README.md", "docs/console.md"].map((path) => [path, `npm install --save-exact @earendil-works/pi-coding-agent@${pin}\n`])),
 	};
@@ -32,10 +43,10 @@ test("a sibling the lockfile resolved elsewhere, at any depth, is named", () => 
 	]);
 });
 
-test("a pi package the overrides do not pin, or pin elsewhere, is named", () => {
+test("a pi package a workspace installs the overrides do not pin, or pin elsewhere, is named", () => {
 	const missing = pins();
-	delete missing.root.overrides["@earendil-works/pi-tui"];
-	assert.deepEqual(piPinProblems(missing), ['package.json\'s overrides["@earendil-works/pi-tui"] is undefined, not the pin 1.0.3']);
+	delete missing.root.overrides["@earendil-works/pi-ai"];
+	assert.deepEqual(piPinProblems(missing), ['package.json\'s overrides["@earendil-works/pi-ai"] is undefined, not the pin 1.0.3']);
 	const ranged = pins();
 	ranged.root.overrides["@earendil-works/pi-ai"] = "^1.0.3";
 	assert.deepEqual(piPinProblems(ranged), ['package.json\'s overrides["@earendil-works/pi-ai"] is "^1.0.3", not the pin 1.0.3']);
@@ -49,8 +60,6 @@ test("each hand-written pin is held to the runner's", () => {
 		["image/runner/package.json's @earendil-works/pi-mcp", (p) => (p.runner.dependencies["@earendil-works/pi-mcp"] = "1.0.2")],
 		["image/runner/package.json's @earendil-works/pi-agent-core", (p) => (p.runner.dependencies["@earendil-works/pi-agent-core"] = "1.0.2")],
 		["worker/package.json's @earendil-works/pi-ai", (p) => (p.worker.dependencies["@earendil-works/pi-ai"] = "1.0.2")],
-		// Issue #647: the terminal chat's renderer, pinned with the rest.
-		["worker/package.json's @earendil-works/pi-tui", (p) => (p.worker.dependencies["@earendil-works/pi-tui"] = "1.0.2")],
 		["image/Dockerfile's PI_VERSION", (p) => (p.dockerfile = "ARG PI_VERSION=1.0.2")],
 		["README.md's documented pi installation pin", (p) => (p.documents["README.md"] = "npm install --save-exact @earendil-works/pi-coding-agent@1.0.2")],
 		["docs/console.md's documented pi installation pin", (p) => (p.documents["docs/console.md"] = "npm install --save-exact @earendil-works/pi-coding-agent@1.0.2")],

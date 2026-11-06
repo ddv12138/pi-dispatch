@@ -175,8 +175,8 @@ the loader flags carry the posture you expect. Running a container can observe b
 If the image is missing when a job is picked up, the job is refused **before** it costs anything — no
 credential minted, no repo cloned, no budget slot burned — and the refusal names the tag.
 
-Naming an image is an edit to the reviewed `triggers.json`. Neither the `/dispatch` panel nor any
-model-callable tool will make that edit for you; the panel shows which image a trigger runs and nothing
+Naming an image is an edit to the reviewed `triggers.json`. No
+model-callable tool will make that edit for you; the console's trigger page shows which image a trigger runs and nothing
 more.
 
 ## What this project does not check for you

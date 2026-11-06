@@ -48,7 +48,8 @@ const RULES = [
 	{ what: "the ioredis driver", re: LIB("ioredis"), allowed: ["worker/src/connection.mjs"] },
 	{ what: "the bullmq library", re: LIB("bullmq"), allowed: ["worker/src/queue.mjs", "worker/src/index.mjs"] },
 	// The two that load pi's own packages (undici, pi-coding-agent's keys) by pi's install path; neither names a Valkey library.
-	{ what: "createRequire", re: /\bcreateRequire\b/, allowed: ["admin/src/keys.mjs", "image/runner/src/env-proxy.mjs", "image/runner/src/loader.mjs"] },
+	// (The admin's third, the retired panel's pi-tui key resolver admin/src/keys.mjs, went with the panel, 58ef2369.)
+	{ what: "createRequire", re: /\bcreateRequire\b/, allowed: ["image/runner/src/env-proxy.mjs", "image/runner/src/loader.mjs"] },
 	{ what: "a computed dynamic import", re: /\bimport\(\s*(?:[^"'`\s)]|`[^`]*\$\{)/, allowed: ["image/runner/src/env-proxy.mjs", "image/runner/src/usage-meter.mjs", "image/runner/src/outcome.mjs", "image/runner/src/child-preload.mjs", "image/runner/src/child-meter.ts", "image/runner/src/child-route.mjs", "image/runner/src/model-runtime.mjs", "worker/src/doctor.mjs", "worker/src/pi-model-loader.mjs"] },
 	// (issue #500: the child preload and the child meter import usage-meter.mjs by its own file URL, nothing else; the
 	// nested runner's child-route.mjs imports pi's dist/cli.js by the URL it resolves; issue #587: model-runtime.mjs

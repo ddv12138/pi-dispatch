@@ -1,8 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createRequire } from "node:module";
-import { fileURLToPath } from "node:url";
 import { mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import * as nodeFs from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -27,11 +26,6 @@ const live = URL_ ? false : "needs VALKEY_TEST_URL";
 const AT = Date.parse("2026-10-14T12:00:00.000Z");
 const MIN = 60_000;
 const iso = (ms) => new Date(ms).toISOString();
-
-const piRequire = createRequire(import.meta.resolve("@earendil-works/pi-coding-agent"));
-const { createJiti } = piRequire("jiti");
-const jiti = createJiti(import.meta.url);
-const { targetUrl } = await jiti.import(fileURLToPath(new URL("../src/dashboard.ts", import.meta.url)));
 
 /** A key-prefixed live client; `cleanup` deletes every key under its prefix and quits. */
 async function prefixed(tag) {
@@ -598,10 +592,13 @@ test("secretProfileNames: names only, sorted, never a path; anything else is no 
   for (const v of [null, {}, { overlay: {} }, { overlay: { secretProfiles: ["a"] } }, { invalid: "x" }]) assert.deepEqual(secretProfileNames(v), []);
 });
 
-test("forgeLinkOf: GitHub as targetUrl builds it; GitLab, Forgejo and Azure from the deployment's own host", () => {
+test("forgeLinkOf: GitHub as the retired panel's targetUrl built it; GitLab, Forgejo and Azure from the deployment's own host", () => {
   const env = { GITLAB_URL: "https://git.example.com/", FORGEJO_URL: "https://forge.example.org/sub", AZURE_ORG_URL: "https://dev.azure.com/acme" };
   const link = (kind, target, e = env) => forgeLinkOf({ kind, target }, e);
-  for (const target of ["acme/web#12", "a.b/c-d_e#1"]) assert.equal(link("github", target), targetUrl({ kind: "github", target }), target);
+  // The shape the retired panel's targetUrl drew, pinned as literals now that the module is gone (58ef2369):
+  // `owner/repo#n` under /issues/.
+  assert.equal(link("github", "acme/web#12"), "https://github.com/acme/web/issues/12");
+  assert.equal(link("github", "a.b/c-d_e#1"), "https://github.com/a.b/c-d_e/issues/1");
   assert.equal(link("github", "acme/web#12", {}), "https://github.com/acme/web/issues/12", "GitHub needs no variable");
   assert.equal(link("gitlab", "grp/sub/proj#3"), "https://git.example.com/grp/sub/proj/-/issues/3");
   assert.equal(link("gitlab", "grp/proj!4"), "https://git.example.com/grp/proj/-/merge_requests/4");
@@ -1508,7 +1505,6 @@ test("createFleetReader: a page's planner checks share one queue discovery and o
 
 test("a job on a queue made after the kept discovery is found, never called absent: a miss is asked again over a scan started after the question (#737)", async () => {
   const { loadPageData, renderPage } = await import("../src/console/pages.mjs");
-  const { runDocument } = await import("../src/console/run-api.mjs");
   const clock = { now: AT };
   const counts = {};
   const held = { "pi-jobs": {} };
@@ -1536,14 +1532,16 @@ test("a job on a queue made after the kept discovery is found, never called abse
     const got = await page("gh-local-1");
     assert.equal(got.status, 200, "a queued job's page");
     assert.match(String(got.html), /This job is queued and has not started yet/);
-    assert.equal((await runDocument(reader, "gh-local-1")).doc?.state, "queued", "and /api/run");
+    const again = await loadPageData("run", { id: "gh-local-1" }, { fleet: reader, now: clock.now }, { role: "operator", readOnly: false });
+    assert.equal(again.queueState?.jobState, "waiting", "and the run page's own queue read");
     const check = await reader.parkedAnswerCheck("gh-local-1");
     assert.ok(!check.unreachable && !/no longer holds/.test(check.refusal ?? ""), JSON.stringify(check));
     assert.equal(counts.scan, 2, "a hit over the kept set scans nothing");
     // Hours later, with nobody watching, a host takes a local job onto its queue and stops: the first load finds it.
     clock.now = AT + 3 * 60 * MIN;
     held["pi-jobs@night1"] = { "gh-night-1": "waiting" };
-    assert.equal((await runDocument(reader, "gh-night-1")).doc?.state, "queued", "the first /api/run after the idle hours");
+    const nightLoad = await loadPageData("run", { id: "gh-night-1" }, { fleet: reader, now: clock.now }, { role: "operator", readOnly: false });
+    assert.equal(nightLoad.queueState?.jobState, "waiting", "the first page load after the idle hours finds it");
     const night = await reader.rerunCheck("gh-night-1", { jobId: "gh-night-1", kind: "local", endedAt: iso(clock.now - MIN) });
     assert.ok(!night.unreachable, "and the planner checks read the job");
     assert.equal((await page("gh-night-1")).status, 200);
@@ -1574,7 +1572,7 @@ test("a run page's live loop scans nothing: past the checks' 15 s window, its lo
     const before = counts.scan;
     const first = await load({});
     assert.equal(first.run.record?.jobId, "gh-old");
-    assert.equal(first.chat.found, null, "a run with a record asks its chat lookup for no absence");
+    assert.equal(first.queueState.found, null, "a run with a record asks its queue lookup for no absence");
     assert.match(first.rerunCheck?.refusal ?? "", /no longer holds/, "the re-run check's absence");
     assert.equal(counts.scan, before + 1, "the request's one scan, made after its question");
     const after = counts.scan;
@@ -1796,7 +1794,7 @@ test("a live load's lookup scans nothing and makes no absence of its own: it kee
   }
 });
 
-test("one request load of a parked run's page whose job is gone asks one question: its chat, answer and re-run lookups run together and wait for one keyspace scan in all (#737)", async () => {
+test("one request load of a parked run's page whose job is gone asks one question: its queue-state and re-run lookups run together and wait for one keyspace scan in all (#737)", async () => {
   const { loadPageData } = await import("../src/console/pages.mjs");
   const counts = {};
   let release = null;
@@ -1808,11 +1806,11 @@ test("one request load of a parked run's page whose job is gone asks one questio
     },
   });
   writeFileSync(join(logsDir, "gh-p.json"), JSON.stringify({ jobId: "gh-p", kind: "github", target: "acme/web#1", outcome: "completed", reason: "awaiting-input", startedAt: iso(AT - 10 * MIN), endedAt: iso(AT - 5 * MIN) }));
-  // The load's two checks, seen as they start.
+  // The load's two reads, seen as they start.
   const started = new Set();
   const fleet = {
     ...reader,
-    parkedAnswerCheck: (...args) => (started.add("answer"), reader.parkedAnswerCheck(...args)),
+    jobStatus: (...args) => (started.add("queue"), reader.jobStatus(...args)),
     rerunCheck: (...args) => (started.add("rerun"), reader.rerunCheck(...args)),
   };
   const keep = setInterval(() => {}, 1000);
@@ -1821,16 +1819,15 @@ test("one request load of a parked run's page whose job is gone asks one questio
     const before = counts.scan;
     release = () => {};
     const loading = loadPageData("run", { id: "gh-p" }, { fleet, now: AT }, { role: "operator", readOnly: false });
-    // The scan the load's first miss started is held open, and both checks start while it runs: they run together, not
+    // The scan the load's first miss started is held open, and both reads start while it runs: they run together, not
     // one after the other.
     const until = Date.now() + 5_000;
     while ((counts.scan === before || started.size < 2) && Date.now() < until) await new Promise((r) => setTimeout(r, 5));
-    assert.deepEqual([counts.scan, [...started].sort()], [before + 1, ["answer", "rerun"]], "both checks started while the one scan ran");
+    assert.deepEqual([counts.scan, [...started].sort()], [before + 1, ["queue", "rerun"]], "both reads started while the one scan ran");
     release();
     release = null;
     const data = await loading;
-    assert.equal(data.chat?.mode, "reply");
-    assert.match(data.chatAnswer?.refusal ?? "", /no longer holds/);
+    assert.ok(data.queueState && data.queueState.unreachable === undefined, `${JSON.stringify(data.queueState)}: the queue read answered`);
     assert.match(data.rerunCheck?.refusal ?? "", /no longer holds/);
     assert.equal(counts.scan, before + 1, "one scan for the load");
   } finally {
@@ -1843,7 +1840,7 @@ test("one request load of a parked run's page whose job is gone asks one questio
 test("a page's live stream scans nothing for a job no queue holds: the hub's loads of a kept page, an id no place holds, a parked run's page and the Parked page keep what their request was told (#737)", async () => {
   const pages = await import("../src/console/pages.mjs");
   const { makeLiveHub } = await import("../src/console/live.mjs");
-  const said = (d) => ({ found: d?.chat?.found, mode: d?.chat?.mode, rerun: d?.rerunCheck, answer: d?.chatAnswer, parked: d?.parkedChecks });
+  const said = (d) => ({ found: d?.queueState?.found ?? null, rerun: d?.rerunCheck, parked: d?.parkedChecks });
   const down = async () => { throw new Error("ECONNRESET"); };
   for (const [what, page, query, role, setup, redis] of [
     ["a kept page: no record, the live transcript unreadable", "run", { id: "gh-kept" }, "viewer", () => {}, { xlen: down }],
@@ -1883,7 +1880,7 @@ test("a page's live stream scans nothing for a job no queue holds: the hub's loa
       const told = said(got);
       const kept = said(last);
       if (told.found !== null) assert.equal(kept.found, told.found, `${what}: the lookup's answer`);
-      assert.deepEqual([kept.mode, kept.rerun, kept.answer, kept.parked], [told.mode, told.rerun, told.answer, told.parked], `${what}: the checks' answers`);
+      assert.deepEqual([kept.rerun, kept.parked], [told.rerun, told.parked], `${what}: the checks' answers`);
     } finally {
       hub.close();
       await reader.dispose();

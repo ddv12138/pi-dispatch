@@ -64,9 +64,6 @@ export const RUN_CSS = `${QCARD_CSS}
 .tx__k { flex-wrap: wrap; }
 .tx__k .code { white-space: nowrap; overflow-wrap: normal; }
 .tx__e pre { white-space: pre-wrap; }
-[data-run-question] { white-space: pre-wrap; overflow-wrap: anywhere; font-size: 18px; line-height: 1.5; }
-[data-run-tail] .tx__e { grid-template-columns: minmax(0, 1fr); margin-bottom: 8px; }
-[data-run-tail] .tx__t { text-align: left; }
 .run-track { overflow-x: auto; max-width: 100%; }
 .run-track svg { display: block; min-width: 500px; width: 100%; }
 .run-track text { fill: var(--ink); font-size: 13px; font-family: var(--font-mono); }

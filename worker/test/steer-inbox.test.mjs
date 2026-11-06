@@ -190,8 +190,7 @@ const valkeyUrl = process.env.VALKEY_TEST_URL;
 if (!valkeyUrl && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") throw new Error("steer-inbox tests REQUIRE VALKEY_TEST_URL when PI_DISPATCH_REQUIRE_WORKER_TESTS=1");
 const live = valkeyUrl ? false : "VALKEY_TEST_URL not set; the scripts need a real Valkey";
 
-// Database 1: no other test file selects it. Not 7: `launch/render-images.mjs` (run by admin/test/render-images.test.mjs)
-// needs database 7 empty, and a run that left keys there failed that test in CI.
+// Database 1: no other test file selects it, and this file's cases share one database on purpose.
 const clients = [];
 let flushed = false;
 async function client() {

@@ -184,7 +184,7 @@ server counts as answered once pi has listed its tools. It ends before its promp
 | `mcp-secret-missing` | 2 | a variable the server references is not set in the job |
 | `mcp-config-mismatch`, `mcp-config-invalid` | 2 | `/job/mcp.json` is not what the worker writes for this job (a hand-run container, or a worker and image at different versions) |
 
-Each reason with code 2 is the run's reason in its record and in the panel, and pages `PI_ON_FAILURE` as any paid
+Each reason with code 2 is the run's reason in its record and on the console's run page, and pages `PI_ON_FAILURE` as any paid
 stop does. The comment on the issue says which rule stopped the job in a fixed sentence that names no server, host or
 variable; the worker's log has the server and the cause, on the job's `exit` line. `mcp-config-invalid` is also the
 pickup's reason for an overlay file it cannot read; that refusal spends nothing (`budgetReserved: false` in the

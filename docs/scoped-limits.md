@@ -13,8 +13,8 @@ Three mechanisms, and they behave differently on purpose:
   to the queue's delayed set and re-checks every few seconds — never dropped, never refused, no budget
   spent while waiting.
 - **The folder mutex needs no file.** Local jobs bind-mount your real directory read-write, so the worker
-  holds at most **one local job per folder** in flight — always on, no configuration, no tool, no panel
-  key, no off switch. The guard lives inside the worker process; one worker per docker daemon is the
+  holds at most **one local job per folder** in flight — always on, no configuration, no tool, no
+  off switch. The guard lives inside the worker process; one worker per docker daemon is the
   supported shape, so that is the whole deployment. Two agents editing one working tree race each other
   with no gate and no undo; an off switch's only use would be re-opening that race. A `concurrent` value
   on a folder scope is inert — it can never raise the mutex's one-at-a-time, and a resolved folder scope
@@ -47,13 +47,12 @@ The same trap quiet hours documents, scoped-limits edition:
 |---|---|
 | **The worker**, the only thing that enforces | nothing: **no scoped caps or concurrency are loaded** |
 | `pi-dispatch init` | **scaffolds** `./scoped-limits.json` and leaves the variable **commented out** in `.env` |
-| **The `/dispatch` panel** (and the `dispatch_limit_*` tools) | defaults to `./scoped-limits.json` in **the panel's own cwd** |
+| **The console** | defaults to `./scoped-limits.json` in the deployment folder |
 | `pi-dispatch up` | **sets the variable** in `.env` to the `scoped-limits.json` in the folder it runs in, if `.env` does not already give it a value |
 
-Run `init`, manage limits through the panel, and you are editing a file the worker never reads — the
-panel answers `scoped limit added (live)` while the worker enforces nothing. `pi-dispatch doctor` warns
-about exactly this state, and the wizard's deployment pointer carries the path so a pointed panel and the
-worker agree. `pi-dispatch up` sets the variable for you in a deployment folder, and doctor reads
+Run `init` and edit the file without setting the variable, and you are editing a file the worker never reads, so it
+enforces nothing. `pi-dispatch doctor` warns
+about exactly this state. `pi-dispatch up` sets the variable for you in a deployment folder, and doctor reads
 the `.env` in its own cwd for this key: where that file configures the service, the line says so rather than
 reporting the shell's view of it, and where that file would stop the service starting, doctor fails. The same
 rule `docs/pause windows` describes, for the same reason.
@@ -84,7 +83,7 @@ scaffolds the empty form.
   qualified row for the same repo: keep one form. The repo after the prefix is written as the forge shows it:
   `owner/name`, `group/sub/project` on GitLab or `project/repo` on Azure DevOps, with no trailing `/`, no `#12` and
   no space at the start or end of a part (a space inside one, as Azure allows, is fine). A qualified row needs
-  `"version": 2`, which the panel and the tools write for you; an older worker then refuses the file instead of
+  `"version": 2`, which the console and the tools write for you; an older worker then refuses the file instead of
   silently ignoring the row. A bare row keeps the count it had before qualified scopes existed. Rewriting a row's
   scope (bare to qualified, or any rename) starts a new count; the old one expires on its own. Jobs already running
   keep their slot under the old scope until they finish, and the new row counts from zero, so with `concurrent: N`
@@ -120,7 +119,7 @@ Version 2 adds dollar caps (issues #501 and #502). Set `"version": 2` to use the
 - A version 1 file that uses either is refused, and the error names version 2. A version 1 file without them
   works as before, with one exception: a row whose scope starts with `model:` in any spelling (`Models:x`,
   `model :x`) is refused at load, so the worker will not start. Such a row never matched any job, so fix it or
-  remove it. The panel and the tools write version 1 until a row needs version 2.
+  remove it. The console's editor writes version 1 until a row needs version 2.
 - Each job reserves its per-job cost cap (`maxCostUsd`) in every window that applies, together with the
   deployment's dollar windows. If any window has no room, the job is refused (`dollar-cap`) and everything it
   reserved is given back. Under an allocation envelope the job's project share, its repo share or the envelope
@@ -157,7 +156,7 @@ A `project:<id>` row caps every repo and folder of one project as one. The id is
 
 - `day` / `week` / `month` count every member's jobs together. Over the cap, the job is refused before any
   spend with reason `project-cap`. A project row needs `"version": 2`, even with counts only, because the
-  previous release would read it as a repo name and ignore it. The panel and the tools write version 2 for you.
+  previous release would read it as a repo name and ignore it. The console's editor writes version 2 for you.
 - `concurrent` bounds how many of the project's jobs run at once, across every member and every host. The
   excess is deferred, like a repo's.
 - `dayUsd` / `weekUsd` / `monthUsd` cap what the project's jobs spend. A job that does not fit is refused `dollar-cap`, and the comment says "this project".
@@ -171,17 +170,18 @@ A `project:<id>` row caps every repo and folder of one project as one. The id is
   fails naming it. A live edit that would create one is kept out (the worker keeps the last good file and logs
   it, naming the row and both files). The worker judges the two files together, so you can save them in either
   order: adding a project with its row, or renaming a project in both files, applies once both are saved. The
-  panel and the tools refuse to write such a row. They check the projects file the worker reads, so with
-  `PI_PROJECTS_FILE` unset there are no projects. If a row already dangles, they still let you delete it or edit
+  console's editor refuses to write such a row. It checks the projects file the worker reads, so with
+  `PI_PROJECTS_FILE` unset there are no projects. If a row already dangles, it still lets you delete it or edit
   other rows, and say the worker applies the change once its live projects define that id. The worker's live
   projects usually still do, because it kept out the projects edit that dropped it. Run `pi-dispatch doctor`.
 - The counters live under the same hashed keys as every other row, built from `project:<id>`. Renaming a
   project starts a new count.
-- The panel's limits view shows a project row with its counters and how many members it caps, or
-  `not in projects.json` when its project is missing. The DOLLAR WINDOWS section folds a project row's records by
+- The console's limits section shows a project row with its counters and how many members it caps, or
+  `not in projects.json` when its project is missing. It folds a project row's records by
   the `project` id each record carries.
-- `dispatch_project_delete` refuses while a row names the project. Delete or change the row first.
-- The panel and the tools refuse to write this file when it is a symlink (edit the real file, or set
+- A project delete is refused while a row names the project; the console's project page names the blocker.
+  Delete or change the row first.
+- Every writer refuses to write this file when it is a symlink (edit the real file, or set
   `PI_SCOPED_LIMITS_FILE` to its path), keep its mode, owner and group (or refuse when they cannot), refuse a file
   they cannot read, and refuse a write when this file or `projects.json` changed after the change was built from
   them, the confirm dialog included.
@@ -254,7 +254,7 @@ measuring, setting sizes and the host budget, with a worked example.
   not be above its `concurrent`.
 - Whether a host's budget can hold a project's `minJobs` times its size inside its `hostShare`, and every project's
   minimum together, depends on that host, so the file accepts it and `pi-dispatch doctor` warns where it cannot.
-- A size needs `"version": 3`. The panel and the tools write it for you, and only when a row has a size. A
+- A size needs `"version": 3`. The console's editor writes it for you, and only when a row has a size. A
   version 3 row refuses a key it does not know (a misspelled `Memory` or `cpu`), so a typo cannot silently drop a
   size.
 - **Upgrade and restart every worker before you write a size** ([the order](upgrading.md#the-order)). An older
@@ -275,16 +275,16 @@ What a size does not cover: disk I/O, disk space and the network are not limited
 pi-dispatch suggests a size for each project from what its recent runs used. It never applies one: you do, with the
 call it names.
 
-- **Where you see it.** `pi-dispatch doctor` prints one line per project. The panel's PROJECTS view (`j`) shows each
-  project's size, the p95 of its runs' memory peaks and cores used, the suggestion, and the exact call that applies it
+- **Where you see it.** `pi-dispatch doctor` prints one line per project. The console's project page shows the
+  project's size, the suggestion, and the exact call that applies it
   (wrapped onto as many lines as it needs, never cut and never broken inside a quoted value; join the lines before
-  running it, as the line under it says). When you edit a project row's `memory` or `cpus` with `dispatch_limit_edit`,
-  its confirm shows the project's peaks and what they suggest. The [insights
+  running it, as the line under it says). Confirming an edit of a project row's `memory` or `cpus` shows the
+  project's peaks and what they suggest. The [insights
   page](insights.md#what-each-run-records-about-resources) draws each run's peak against its size.
 - **What it reads.** The project's runs of the last 30 days, at most the newest 50, that recorded both what they used
   (`resources`) and what they were given (`size`). Runs from before those fields are ignored, and so are refusals (a
   job refused before its container started records neither, and never pushes a measured run out of the 50), and so is
-  a record file larger than 256 KiB (doctor and the panel say how many they skipped). In each of memory and CPUs, the
+  a record file larger than 256 KiB (doctor says how many it skipped). In each of memory and CPUs, the
   runs given at least the current size decide, so a raise you just made is not asked for again by the run that caused
   it.
 - **Memory is raised only after an OOM kill.** A run that ended `oom-killed` at the current size or larger suggests
@@ -314,23 +314,21 @@ call it names.
   Where the runs ask for more, the suggestion is that cap and says "this project's runs need more than this host
   offers". Where the size already is the cap, doctor warns "already at the largest size this host offers" (or "already
   above" it, naming the cap, when the size was set larger) and offers no call. Where nothing about the host is known,
-  a raise offers no call at all; the panel says whether no host budget was read as a number, no live host's budget holds the project's
-  size, or every live host's budget is off. Nothing ever suggests growing the host's budget: that budget is what the
-  host promised every other project. The panel and the insights page cap per live host, each judged on its own pair of
+  a raise offers no call at all. Nothing ever suggests growing the host's budget: that budget is what the
+  host promised every other project. The insights page caps per live host, each judged on its own pair of
   budgets (a host with lots of memory and too few CPUs for the project does not count), and the edit's confirm reads
   no budget and says so.
 - **One rule decides whether a call is offered: exactly when the worker would admit the suggested job.** The job is
   the size the call would leave (the suggested memory and CPUs, or the current ones where nothing is suggested).
   Doctor offers no call when this host's budget is a number and the job is above it, or above the project's
   `hostShare` of it; with the budget `off` or unknown the worker refuses nothing, so the call is offered, and a size
-  above the host's own memory is noted beside it. The panel and the insights page offer no call only when every live
+  above the host's own memory is noted beside it. The insights page offers no call only when every live
   host that publishes a numeric budget would refuse the job. Where no call is offered, the line names what does not
   fit, for example "its 4 CPUs are above its hostShare (40%) of this host's budget (3.2 CPUs)".
 - **When the scoped-limits file does not load,** doctor prints no size lines, only "size suggestions: off until the
   scoped-limits file loads": a size read without the file would be the default, not the project's.
-- **The call.** `dispatch_limit_edit {"index":1,"memory":"6g"}` changes the project's row (the index is its place in
-  this file); a project with no row gets `dispatch_limit_add {"scope":"project:shop","memory":"6g"}`. Either one asks
-  you to confirm before it writes.
+- **The call.** The project page's Job size card shows the exact call a suggestion needs and offers **Preview this
+  size**, which changes the project's row, or adds one for a project with no row, through the existing confirm.
 - **Why it is only a suggestion.** The numbers are measured inside the job's container, which runs code the job
   controls, so a job can make them up. Values that cannot be real are clamped or ignored, a raise needs a kill the
   worker confirmed, and no suggestion passes what the host offers. You decide.
@@ -352,39 +350,34 @@ version on a bad edit (`scoped_limits_reload_invalid` in the log).
 
 Three doors, same as quiet hours:
 
-- **The panel**: press `m` in `/dispatch` to add, edit or delete a limit through dialogs. The section
+- **The console's Configuration page**: add, edit or delete a limit through a preview and a confirm. The section
   shows each row's used/cap per window; `≤N at once` is configuration (per-scope in-flight lives inside
-  the worker process and is not displayed anywhere).
-- **The tools**: `dispatch_limits` lists rows with their indexes and used counts, and for a dollar row each
-  window's cap and its counter (spent and held, in micro-dollars);
-  `dispatch_limit_add` / `dispatch_limit_edit` / `dispatch_limit_delete` change them behind the same
-  operator confirm dialog as every config write. The add and edit tools take `dayUsd`, `weekUsd` and
-  `monthUsd` as decimal strings (`"2.50"`) and check them before they ask, with the worker's own rules. They
+  the worker process and is not displayed anywhere). The add and edit forms take `dayUsd`, `weekUsd` and
+  `monthUsd` as decimal strings (`"2.50"`) and check them with the worker's own rules before the preview. They
   write version 1 until a row needs version 2, and drop back to version 1 when the last dollar row goes. On a
   project row they also take `memory`, `cpus`, `hostShare` and `minJobs`, checked the same way and shown in the
   spelling the file will hold, and write version 3 only while a row has one. An edit keeps every field it is not
-  sent. The panel's SCOPED LIMITS section shows a row's size beside its caps.
-- **The dollar windows** of every row, with the deployment's, are in the panel's DOLLAR WINDOWS section and in
-  `dispatch_costs` ([costs](costs.md#where-to-look)). A row's own dollar windows also show on its line in the
-  panel's SCOPED LIMITS section and in the budget panel of the insights page, as spent and held over the cap.
+  sent.
+- **The dollar windows** of every row, with the deployment's, are on the Spend page's Caps card
+  ([costs](costs.md#where-to-look)) and in the budget panel of the insights page, as spent and held over the cap.
 - **By hand**: edit the file; the worker hot-reloads it.
 
 ## Caveats
 
 - A `scope-cap` or `project-cap` refusal is final for that window. No tool resets a counter; the window rolls over on its
   own (UTC), and the counters expire from redis like the global ones.
-- In the panel, a scope deferral is visible only as the queue's delayed count (its status line shows it when
+- In the console, a scope deferral is visible only as the queue's delayed count (the overview's In line shows it when
   nonzero). That count also includes cron next-occurrences, retry backoff, quiet-hours deferrals and jobs
   held on `run.waitFor`, so a nonzero value is normal on any deployment with schedules.
   Only the last of those has a section of its own, because a wait is a per-trigger condition an operator
   wrote and a scope deferral is a ceiling that clears in seconds without anyone acting; a row per scope
-  deferral would be a panel that redraws itself every few seconds saying nothing has gone wrong. Since issue #737 the
+  deferral would be a view that redraws itself every few seconds saying nothing has gone wrong. Since issue #737 the
   worker also records why it deferred each job (`scope-folder`, `scope-repo`, `scope-project`, or `chained` for a
   chained job, with the parent job it follows; see wait for, trap 4), which the console's overview
   counts and lists by reason (In line and Waitlists, [console.md](console.md#waitlists)) and its preview of a queued
-  job's cancel says; the panel's count is unchanged.
+  job's cancel says.
 - The counters live under hashed keys (`budget:s:<16 hex>`) so scopes containing `:` or `/` cannot
-  collide with the global key namespace; the panel and `dispatch_limits` recompute the hash from the
+  collide with the global key namespace; the console recomputes the hash from the
   configured scope to display used counts.
 - Symlinked spellings of one folder, and case variants on a case-insensitive filesystem, are distinct
   scopes — the matcher resolves paths but does not consult the filesystem.
@@ -399,7 +392,7 @@ Three doors, same as quiet hours:
 | Refusal reason | `scope-cap` (pre-spend, never retried); `project-cap` for a project row; `dollar-cap` for a dollar window; `allocation-cap` when an allocation envelope's split bound the window |
 | Deferral | delayed set, fixed re-check, never dropped |
 | Panel key | `m` |
-| Tools | `dispatch_limits`, `dispatch_limit_add`, `dispatch_limit_edit`, `dispatch_limit_delete` |
+| Editor | the console's Configuration page: add, edit or delete a row through a preview and a confirm |
 | Projects | `PI_PROJECTS_FILE` groups repos and folders into a project, recorded per run and capped by a `project:<id>` row. It is wired like this key. See projects |
 | Allocation envelope | `PI_ENVELOPE_FILE`: a dollar total and a floor per project, split between projects by a priorities plan. See [allocation.md](allocation.md) |
 | The folder mutex | always on for local jobs, max 1 per folder, no configuration anywhere |

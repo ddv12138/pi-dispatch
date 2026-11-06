@@ -813,7 +813,7 @@ export function textarea({ id, name = null, value = "", placeholder = null, rows
 
 /**
  * A command in a copy box, with the line under it that says where it must run (`host`). `argv` is the command as an
- * argument list (`["pi-dispatch", "chat", id]`), written as a POSIX shell and zsh read it back (`shellWord`): a plain
+ * argument list (`["pi-dispatch", "capacity", "--host", name]`), written as a POSIX shell and zsh read it back (`shellWord`): a plain
  * argument as it is, any other in single quotes, so a run id or a target holding `;`, `|`, `$(...)`, a backtick, a
  * quote, a space, a leading `=` or a `~` is pasted as the one argument it is (the kit test runs each line through a
  * real sh, bash and zsh). A whole command line as one string is refused: the kit cannot tell its words from its data.

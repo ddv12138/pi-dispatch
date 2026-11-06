@@ -457,13 +457,9 @@ test("the workflow comments once per version, with the bump token, and pushes on
 	assert.deepEqual(inputs.split("\n").filter((line) => /^ {6}\S/.test(line)), ["      version:"], "a manual run has no input that overrides the hold");
 });
 
-// Issue #647: the terminal chat's renderer is an exact worker dependency, so a bump moves it with pi-ai, one row each.
-test("the worker's pi-tui pin is its own row of the table, rewritten without touching pi-ai", () => {
+// Issue #647's terminal chat is gone, so its pi-tui pin left worker/package.json, the table and pi-pin-check's
+// hand-written sites; pi-coding-agent's own pi-tui stays held by the lockfile-at-pin check.
+test("the worker's only row of the table is pi-ai; the removed terminal chat's pi-tui is no longer a pin site", () => {
 	const rows = PI_PIN_SITES.filter((site) => site.path === "worker/package.json").map((site) => site.json.join("."));
-	assert.deepEqual(rows, ["dependencies.@earendil-works/pi-ai", "dependencies.@earendil-works/pi-tui"]);
-	const tui = PI_PIN_SITES.find((site) => site.json?.at(-1) === "@earendil-works/pi-tui");
-	const text = read("worker/package.json");
-	const next = JSON.parse(rewriteSite(tui, text, "9.9.9"));
-	assert.equal(next.dependencies["@earendil-works/pi-tui"], "9.9.9");
-	assert.equal(next.dependencies["@earendil-works/pi-ai"], PIN, "the sibling row is left for its own rewrite");
+	assert.deepEqual(rows, ["dependencies.@earendil-works/pi-ai"]);
 });

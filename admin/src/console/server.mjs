@@ -69,8 +69,8 @@
  * "switched"`, anything else 409 with `PERSON_CHANGED` and the same `ended` (and, for a write, the confirm bar's
  * refusal, whose Look again the script sends to `/login?ended=switched`, never a reload into the other person's
  * console), before the role or the body is judged and before any slot or ticket is touched. Only a stream's query is
- * read for the person: on any other route `as` is a query parameter like any other. A request that says no person (the
- * terminal chat, curl) is not checked: the cookie is all it ever had.
+ * read for the person: on any other route `as` is a query parameter like any other. A request that says no person
+ * (curl, any other non-browser client) is not checked: the cookie is all it ever had.
  *
  * THE 401 OF AN API OR A WRITE CLEARS NO COOKIE (issue #737). A page learns that its session ended from a stream the
  * browser closed, and then asks `/api/whoami` with the same cookie for the reason; a stream 401 that cleared the cookie
@@ -96,7 +96,6 @@ import { isLoopbackAddress } from "./listen.mjs";
 import { STATE_VERSION, stateOf as defaultStateOf } from "./live.mjs";
 import { RUN_ID_RE } from "./panels.mjs";
 import { getWatchTrace } from "./watch.mjs";
-import { getRun } from "./run-api.mjs";
 import { getForkPoints } from "./fork-api.mjs";
 import * as realPages from "./pages.mjs";
 import { CONSOLE_SCRIPT } from "./script.mjs";
@@ -105,7 +104,6 @@ import { loginCodePage, loginPage } from "./shell.mjs";
 import { CONSOLE_CSS } from "./style.mjs";
 import { themeOf } from "./theme.mjs";
 import { localeOf } from "./locale.mjs";
-import { TRANSCRIPT_FORMATS } from "./transcript.mjs";
 
 /** The largest request body a write may send. A pause-windows file is a few hundred bytes; 64 KiB is generous. */
 export const BODY_LIMIT = 64 * 1024;
@@ -585,27 +583,21 @@ function openStream(ctx, subscribe) {
 
 /**
  * One run's live transcript (issue #643, `/api/transcript?id=<jobId>`), operator only (the route table refuses a viewer
- * 403 before this runs): `id`, exactly once, in the run-id charset, and (issue #647) `format`, at most once, `html` (the
- * default, the run page's) or `json` (the structured entry, for the terminal chat); no other parameter (400).
+ * 403 before this runs): `id`, exactly once, in the run-id charset; no other parameter (400).
  * `Last-Event-ID` is honoured only in the stream's own shape (`TRANSCRIPT_ID_RE`, `<ms>-<seq>`); anything else, a panel
  * stream's id included, is no id at all, and the stream starts from the beginning. The slots are `/api/events`'s,
  * shared, whichever format a stream asked for.
  */
 async function getTranscript(ctx) {
   const { deps, req, res, session } = ctx;
-  for (const key of new Set(ctx.searchParams.keys())) if (key !== "id" && key !== "format") return sendError(res, 400, "the transcript stream takes only id and format");
+  for (const key of new Set(ctx.searchParams.keys())) if (key !== "id") return sendError(res, 400, "the transcript stream takes only id");
   const ids = ctx.searchParams.getAll("id");
   if (ids.length !== 1) return sendError(res, 400, ids.length === 0 ? "the transcript stream needs ?id= with a run's job id" : "id is given more than once");
   const jobId = ids[0];
   if (!RUN_ID_RE.test(jobId)) return sendError(res, 400, "id must be a run id (letters, digits and . _ : -, at most 200 characters)");
-  const formats = ctx.searchParams.getAll("format");
-  if (formats.length > 1) return sendError(res, 400, "format is given more than once");
-  // The refusal names the rule, never the value, as every query refusal here does.
-  if (formats.length === 1 && !TRANSCRIPT_FORMATS.includes(formats[0])) return sendError(res, 400, `format must be ${TRANSCRIPT_FORMATS.join(" or ")}`);
-  const format = formats[0] ?? "html";
   const presented = req.headers["last-event-id"];
   const lastEventId = typeof presented === "string" && TRANSCRIPT_ID_RE.test(presented) ? presented : null;
-  return openStream(ctx, () => deps.hub.subscribeTranscript({ res, sessionId: session.id, session: { name: session.name, role: session.role }, jobId, lastEventId, format }));
+  return openStream(ctx, () => deps.hub.subscribeTranscript({ res, sessionId: session.id, session: { name: session.name, role: session.role }, jobId, lastEventId }));
 }
 
 /** One GET route per screen, from the pages' own table, so a screen cannot exist without its auth. */
@@ -679,10 +671,8 @@ export const ROUTES = Object.freeze([
   } },
   { method: "GET", path: "/api/state", auth: "viewer", write: false, handler: getState },
   { method: "POST", path: "/api/trigger-check", auth: "viewer", write: false, readJson: true, handler: postTriggerCheck },
-  // Issue #647: one run and the chat it can have (`run-api.mjs`); a viewer's, since the answer carries no text at all.
   { method: "GET", path: "/api/fork-points", auth: "operator", write: false, handler: getForkPoints },
   { method: "GET", path: "/api/watch-trace", auth: "operator", write: false, handler: getWatchTrace },
-  { method: "GET", path: "/api/run", auth: "viewer", write: false, handler: getRun },
   // `noHead`: a HEAD would take a stream slot and hold it with no body ever sent, so it is 405 before anything runs.
   // `stream`: an event stream, which says its page's person in the query (`PERSON_PARAM`, see the header).
   { method: "GET", path: "/api/events", auth: "viewer", write: false, noHead: true, stream: true, handler: getEvents },

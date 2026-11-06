@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { LINE_INPUT_CURSOR, box, clip, columnsOf, makeLineInput, pad, sliceColumns } from "../src/panel.mjs";
 import { frame, makeStyler, PLAIN_THEME, visibleLen } from "../src/style.mjs";
-import { renderRuns } from "../src/render.mjs";
 import { loadRenderer, loadVisibleWidth } from "./helpers/renderer.mjs";
 
 // Issue #417's arms, split out of `width.test.mjs` so that no one file runs past the per-file cap the
@@ -266,33 +265,6 @@ test("the line editor's window draws exactly its width after the prompt, whole a
       ed.right();
     }
   }
-});
-
-test("the runs table measures a cell where it is drawn, after a space (#417)", async () => {
-  const visibleWidth = await loadVisibleWidth();
-  assert.equal(typeof visibleWidth, "function");
-  // NO CELL OF THIS TABLE IS AT COLUMN 0: pi draws the message in a box with a column of padding, and the
-  // cells are joined by two spaces. Under pi-tui 0.99.1 `\u093e\uff9e` is 1 column at the start of a
-  // string (the spacing mark leads the cluster and draws nothing) and 2 after a space (it joins the
-  // space's cluster and draws its own column), so the first id draws ten columns where it stands and
-  // counts nine at column 0. Under 0.80.7 the fixture was `\u0301\uff9e`, 2 at the start and 1 after a
-  // space, the other direction; 0.99.1 draws that one 1 in both places, so it is kept as a control.
-  const at = "2026-07-21T00:00:00.000Z";
-  const base = { flow: "review", outcome: "completed", turns: 3, tokens: { total: 10 }, endedAt: at, target: "t" };
-  const ids = ["\u093e\uff9egh-aaaa1", "\u0301\uff9egh-aaaa2", "gh-aaaa3"];
-  assert.deepEqual(ids.map((id) => visibleWidth(" " + id) - 1), [10, 9, 8], "the fixture draws these widths after a space");
-  assert.deepEqual(ids.map((id) => visibleWidth(id)), [9, 9, 8], "and these at column 0, the first narrower");
-  const rows = renderRuns(ids.map((jobId) => ({ ...base, jobId }))).split("\n");
-  // Measured at column 0 the first id counted nine, the column was nine wide, and its row drew one column
-  // past it, so its flow cell started one column right of the others.
-  const flowAt = rows.slice(1).map((r) => visibleWidth(" " + r.slice(0, r.indexOf("review"))) - 1);
-  assert.equal(new Set(flowAt).size, 1, `the flow column starts at ${flowAt.join(", ")}`);
-  // AND THE COLUMN IS NO WIDER THAN ITS WIDEST CELL DRAWS: the widest id is followed by exactly the
-  // two-space gap, and every narrower one by the gap plus what it lacks of the widest.
-  ids.forEach((id, i) => {
-    const gap = 2 + 10 - (visibleWidth(" " + id) - 1);
-    assert.ok(rows[i + 1].startsWith(id + " ".repeat(gap)) && !rows[i + 1].startsWith(id + " ".repeat(gap + 1)), `row ${i + 1}: ${JSON.stringify(rows[i + 1])}`);
-  });
 });
 
 test("a styled line keeps its right border through the renderer's own cut (#417)", async () => {

@@ -96,10 +96,9 @@ export { DIFF_LINES_MAX, diffHtmlOf, lineDiff, textHtml } from "./confirm-view.m
 export const BULK_MAX = 100;
 
 /**
- * REQ-OPERATOR-JOB-CANCEL's named refusal for a cancel no worker acknowledged: the exact sentence the `/dispatch` TUI's
- * `cancelNote` shows (`dashboard.ts`), pinned equal to it by a test that reads that file, so the two surfaces say one
- * thing. (It stays a copy rather than a shared import because `dashboard.ts` is the pi extension's TypeScript and this
- * module is the pi-free console; the pin is the bolt.)
+ * REQ-OPERATOR-JOB-CANCEL's named refusal for a cancel no worker acknowledged. It was word-for-word the retired
+ * `/dispatch` TUI's `cancelNote` too (dashboard.ts, removed 58ef2369), pinned equal to it by a test that read that
+ * file; the pin went with the panel and the sentence stays as the console's own.
  */
 export const CANCEL_TIMEOUT_SENTENCE = "no worker acknowledged: the job may have just finished, gone back to the queue (cancel it again to remove it), or its host is unreachable; nothing was changed";
 

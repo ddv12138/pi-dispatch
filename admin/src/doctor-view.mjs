@@ -116,10 +116,11 @@ export const FIRST_RUN_STATES = Object.freeze({
 
 /**
  * The commands the first run offers, as argument lists (`kit.mjs` `cmd` quotes each for a shell): a viewer token,
- * the worker as a service or in a terminal, `up` (the egress proxy among what it starts), doctor, the GitHub App
- * setup, and the guided setup in pi. Each is pinned against its CLI's usage by a test. `setup github` is refused
- * without `--webhook-url` or `--no-webhook`, so it is offered whole, its URL a placeholder the copy box quotes and
- * `FIRST_RUN_COMMAND_HINTS` says what to put there.
+ * the worker as a service or in a terminal, `up` (the egress proxy among what it starts), doctor, and the GitHub App
+ * setup. Each is pinned against its CLI's usage by a test. `setup github` is refused without `--webhook-url` or
+ * `--no-webhook`, so it is offered whole, its URL a placeholder the copy box quotes and `FIRST_RUN_COMMAND_HINTS`
+ * says what to put there. The retired panel's guided setup (`/dispatch setup`) is gone with the panel (58ef2369);
+ * hosts still on the previous release run it from their own copy of the extension.
  */
 export const FIRST_RUN_COMMANDS = Object.freeze({
   token: Object.freeze(["pi-dispatch-console", "token", "add", "--name", "<name>", "--role", "viewer"]),
@@ -128,7 +129,6 @@ export const FIRST_RUN_COMMANDS = Object.freeze({
   up: Object.freeze(["pi-dispatch", "up"]),
   doctor: Object.freeze(["pi-dispatch", "doctor"]),
   github: Object.freeze(["pi-dispatch", "setup", "github", "--webhook-url", "<receiver URL>"]),
-  pi: Object.freeze(["/dispatch", "setup"]),
 });
 
 /**

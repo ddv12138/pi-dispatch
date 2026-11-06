@@ -24,13 +24,13 @@ every host remains the right shape: it needs no routing at all, and it lets any 
 
 A trigger that binds `run.secrets` without naming a profile uses the profile called `default`, and it is
 routed the same way, to a host that has one. A host offers the profiles it would actually use: every one in
-`PI_SECRET_PROFILES`, and each one declared through the panel whose resolver is an executable file inside
-`PI_SECRET_RESOLVER_ROOTS`. A panel edit reaches the routing within one heartbeat, about 15 seconds. A host
+`PI_SECRET_PROFILES`, and each one declared through the console whose resolver is an executable file inside
+`PI_SECRET_RESOLVER_ROOTS`. A console edit reaches the routing within one heartbeat, about 15 seconds. A host
 where one name is declared in both places offers no profile at all, because it refuses every job that binds
 secrets until one of the two is removed, and `pi-dispatch doctor` names that name.
 
 When you upgrade a deployment that runs on several machines, upgrade every worker before the receiver and the
-console ([the order](upgrading.md#the-order)). An older worker does not offer a profile declared through the panel, so a newer receiver can stop
+console ([the order](upgrading.md#the-order)). An older worker does not offer a profile declared through the console, so a newer receiver can stop
 routing a job that binds `run.secrets` without naming a profile and also waits on a `run.waitFor` profile to the
 one host that serves both, and the job can land on a host that refuses it.
 
@@ -98,7 +98,7 @@ The narrowing is the whole of the licence, and each half is load-bearing:
 
 **A second reader judges the service's own settings** (issues #453, #464 and #471). The service reads every
 setting from this file, so a doctor that took them from its own shell judged a deployment that was not running.
-doctor now resolves every service key it judges ONCE, by one rule it shares with the `/dispatch` panel
+doctor now resolves every service key it judges ONCE, by one rule it shares with the console
 (`worker/src/service-env.mjs`):
 
 - this shell's value where it sets one, because a worker started by hand from this shell runs with it;
@@ -115,9 +115,7 @@ judges it: `PI_JOB_IMAGE` by the worker's own default and its `run.image` refusa
 dash-leading value is named and never handed to docker), `VALKEY_URL` by the owner rule, and a session store
 named only in `.env` is offered by `doctor --fix` at the prompt tier instead of created silently. A relative
 `PI_TRIGGERS_FILE` is the deployment folder's, as the worker reads it. `PI_ENV_SETUP`, `XDG_DATA_HOME` and
-`DOCKER_CONTENT_TRUST` stay this shell's on purpose. The panel reads the same way, from the pointer's deployment
-folder only, never from a `.env` in the folder pi was started in (a repository can ship one), and says a
-disagreement once as a warning.
+`DOCKER_CONTENT_TRUST` stay this shell's on purpose.
 
 **Nothing from `.env` reaches a program doctor starts.** Its podman, docker, gh and every other child run with
 the environment of the shell you started doctor in, exactly as before this reader existed. The service's own
@@ -138,8 +136,7 @@ open file: it must belong to you or root and be writable by nobody else, and its
 every directory above them likewise (a root-owned sticky directory such as `/tmp` is the one exception, since
 there only an entry's owner can move it). Otherwise doctor fails naming the file or directory, its owner, mode
 and, for a group-writable one, its group (said as your own group when it has your name, which a umask 002 login
-makes: doctor still trusts only a file no group can write), and judges this shell's values alone; the panel says
-the same, with the owner's name, and reads none of it. Where a service unit is installed for the folder, doctor
+makes: doctor still trusts only a file no group can write), and judges this shell's values alone. Where a service unit is installed for the folder, doctor
 names the service keys only its own shell sets, since the service runs without them.
 
 **What remains is by design: a deployment folder is trusted exactly as far as the service trusts it.** The job
@@ -361,7 +358,7 @@ trigger to hold a deploy key and no other job to hold it, name the secret in the
            "secrets": { "STRIPE_KEY": "op://ci-vault/stripe/api-key" } } }
 ```
 
-You declare the resolver once, either in the environment or from the panel:
+You declare the resolver once, either in the environment or in the console:
 
 ```sh
 # /etc/pi-dispatch/pi-dispatch.env, beside your forge token and your provider key.
@@ -480,7 +477,7 @@ failed, and never the reference, the resolver's path, or a byte of what it print
    while the file holds a `run.secrets` entry. Upgrade the receiver in the same `npm install` as the
    worker, before you bind the first secret ([the order](upgrading.md#the-order)).
 
-### From the panel
+### From the console
 
 The browser's dedicated `/config/secrets` page shows profile sources, resolver-root state, linked trigger rows,
 projects, last resolve and serving hosts, then both sources of bundle resolvers and each project's received
@@ -489,83 +486,74 @@ form and removals use the existing preview/confirm; removing an env/overlay dupl
 while removing an overlay-only declaration refuses jobs still naming it. The script stays on disk. Every
 preview/refusal abbreviates resolver/root paths by their last folder. Viewers have tables/help without writes.
 
-The agent read `dispatch_secrets` returns names, source/problem words and variable counts only. It omits even
-variable names, as well as paths, roots, references and values. Declaring/removing a resolver remains a person-only
-operation. [Console pages](console.md#secrets) explain the profiles, bundle limits and five exclusions together.
+Declaring or removing a resolver remains a person-only operation. [Console pages](console.md#secrets) explain the
+profiles, bundle limits and five exclusions together.
 
+Declaring a profile means naming a path the worker executes, so it stays a person-only operation: there is no
+model-callable tool for it. The console's form writes the overlay entry through a preview and a confirm.
 
-`/dispatch secrets add` asks two questions (a name and the path to the script) and shows you the exact bytes
-before writing them. It is operator-typed only: there is no model-callable tool for it, because declaring a
-profile means naming a path the worker executes.
-
-For the panel to declare anything at all you must first name the directory those scripts live in:
+For a declaration to be accepted at all you must first name the directory those scripts live in:
 
 ```sh
 PI_SECRET_RESOLVER_ROOTS=/opt/pi
 ```
 
-Unset is the default and it is fail-closed: the panel can declare nothing, and only `PI_SECRET_PROFILES`
+Unset is the default and it is fail-closed: nothing can declare an overlay resolver, and only `PI_SECRET_PROFILES`
 is honoured. The worker re-checks that bound itself, on the real path, every time it resolves. That is not
-belt-and-braces: `PI_SETTINGS_FILE` can put the file the panel writes anywhere, so a check that lived only
-in the panel would prove nothing on a shared host.
+belt-and-braces: `PI_SETTINGS_FILE` can put the file the console writes anywhere, so a check that lived only
+in the console would prove nothing on a shared host.
 
-Before it asks you to confirm, `add` (and the console's form) refuses two things the worker would refuse later: a
+Before it asks you to confirm, the console's form refuses two things the worker would refuse later: a
 name `PI_SECRET_PROFILES` already declares on this deployment (the worker reads a name declared in both places as
-ambiguous and then refuses every secrets job), and, when the panel can see `PI_SECRET_RESOLVER_ROOTS` (it reads it
-from the deployment's `.env`), a resolver whose real path (symlinks followed) is outside it as written. The roots are compared as you wrote them, as the worker compares them, so on macOS a root written `/tmp/pi` holds nothing under `/private/tmp/pi`; the refusal then says to write the root as its real path. The panel judges this on its own host, which may not be the worker's: a path it cannot resolve there is not refused, and the confirm says the worker checks it where it runs. Set and empty, the
-variable refuses every overlay resolver, so `add` says that too. `/dispatch secrets list` and the console's
-configuration screen list the profiles `PI_SECRET_PROFILES` declares beside the overlay's, and mark a name in both
+ambiguous and then refuses every secrets job), and, when the console can see `PI_SECRET_RESOLVER_ROOTS` (it reads it
+from the deployment's `.env`), a resolver whose real path (symlinks followed) is outside it as written. The roots are compared as you wrote them, as the worker compares them, so on macOS a root written `/tmp/pi` holds nothing under `/private/tmp/pi`; the refusal then says to write the root as its real path. The console judges this on its own host, which may not be the worker's: a path it cannot resolve there is not refused, and the confirm says the worker checks it where it runs. Set and empty, the
+variable refuses every overlay resolver, so the form says that too. The console's configuration screen lists the
+profiles `PI_SECRET_PROFILES` declares beside the overlay's, and marks a name in both
 as ambiguous.
 
-**Binding a secret to a trigger stays a file edit.** The panel declares managers; `triggers.json` says which
-job reaches one. No `dispatch_*` tool has a `secrets` parameter.
+**Binding a secret to a trigger stays a file edit.** A declaration names a manager; `triggers.json` says which
+job reaches one.
 
-**Bundle resolvers** ([Recipe D](#recipe-d-one-environment-for-a-whole-project)) take the same door with
-`--bundle`. `/dispatch secrets add --bundle` asks three questions (a name, the path to the script, and the format it
-prints, `dotenv` or `json`) and shows you the exact bytes it writes to the overlay's `secretBundles`
+**Bundle resolvers** ([Recipe D](#recipe-d-one-environment-for-a-whole-project)) take the same door. The
+console's bundle form asks for a name, the path to the script, and the format it
+prints, `dotenv` or `json`, and previews the exact bytes it writes to the overlay's `secretBundles`
 (`{ "<name>": { "path": "...", "format": "..." } }`). It refuses a name `PI_SECRET_BUNDLES` already declares on this
 deployment: the worker reads a name declared in both places as ambiguous and then refuses every bundled job. It
-refuses a resolver outside a visible `PI_SECRET_RESOLVER_ROOTS` too, as `add` does for a profile.
-`/dispatch secrets remove --bundle <name>` says what the removal does: nothing when no bundle in `triggers.json` names
+refuses a resolver outside a visible `PI_SECRET_RESOLVER_ROOTS` too, as the profile form does.
+Removing a bundle says what the removal does: nothing when no bundle in `triggers.json` names
 it; it resolves the ambiguity when `PI_SECRET_BUNDLES` declares the same name (unless another name is in both places, which keeps every bundled job refused, and it says so); otherwise it names the bundles whose
 jobs are refused before they spend once it is gone (or, on a multi-host worker's shared queue, held for a host that
-declares it). Any flag but `--bundle` (`--bundles`, `-b`) is refused with the usage line. The console's configuration screen has the same two forms. As
-for profiles, there is no model-callable tool for either, and `dispatch_set` refuses the key.
+declares it).
 
-**What the panel and the console show.** Nothing is resolved to draw any of it (`pi-dispatch doctor --secrets` does
+**What the console shows.** Nothing is resolved to draw any of it (`pi-dispatch doctor --secrets` does
 that, on the host that runs the jobs), and no reference or value is ever shown:
 
-- `/dispatch secrets list` prints the resolver profiles, the bundle resolvers, and each bundle `triggers.json` binds:
-  its project (and whether `projects.json` has it), its profile and whether this deployment declares it (in
-  `PI_SECRET_BUNDLES`, in the overlay, in both, which is ambiguous, or not at all). An overlay resolver whose path is
-  outside `PI_SECRET_RESOLVER_ROOTS` is shown as one the worker will not run; one inside is shown with
-  "doctor --secrets checks it runs", because only the worker's host can follow the real path. When the panel cannot
-  see `PI_SECRET_RESOLVER_ROOTS` (it reads it from the deployment's `.env`), it says the roots are not visible rather
-  than calling the resolver outside them. When the panel
-  cannot see `PI_SECRET_BUNDLES` at all (no deployment pointer, or no such line), it says so rather than "missing".
-  Then whether fork reviews get it, its `endpoints` (names and hosts) and the triggers that opt out (a cron trigger
-  counts only when its folder is in the bundle's project). `/dispatch triggers` adds the same lines under the
-  triggers.
-- A trigger's detail in the `/dispatch` panel says where its `run.secrets` values end up, by its venue (its
+- The secrets page's tables show the resolver profiles, the bundle resolvers, and each bundle `triggers.json`
+  binds: its project (and whether `projects.json` has it), its resolver and whether this deployment declares it
+  (in `PI_SECRET_BUNDLES`, in the settings overlay, in both, which is ambiguous, or not at all). An overlay
+  resolver whose path is outside `PI_SECRET_RESOLVER_ROOTS` is shown as one the worker will not run; one inside is
+  shown with "doctor --secrets checks it runs", because only the worker's host can follow the real path. When the
+  console cannot see `PI_SECRET_RESOLVER_ROOTS` (it reads it from the deployment's `.env`), it says the roots are
+  not visible rather than calling the resolver outside them. Then whether fork reviews get it, its `endpoints`
+  (names and hosts) and the triggers that opt out (a cron trigger counts only when its folder is in the bundle's
+  project).
+- A trigger's page says where its `run.secrets` values end up, by its venue (its
   `run.backend`, else the first venue in `PI_BACKENDS`): on `local` and `podman` the agent can read them; on the
   OpenShell venues the values with an endpoint are placeholders in the agent and `run.secrets` go to the job's provider.
-- The `/dispatch` panel has a **secret bundles** section under the triggers with the same facts and the variable
-  names the newest run in view received. A cron trigger whose folder is in a bundled project carries `[bundle <id>]`
-  beside `[secrets]`, and a trigger that opts out carries `[no bundle]`; its detail says which bundle its jobs hold.
-- The console's configuration screen has a **Secret bundles** panel with the same facts, and its trigger table
-  names the bundle (or the opt-out) in the notes.
-- A run's detail, in the panel and on the console's run page, says "Variables received: A, B, C (from bundle
+- The secrets page has a **Secret bundles** section with the same facts and the variable
+  names the newest run in view received. The console's trigger table names the bundle (or the opt-out) in the
+  notes.
+- A run's page says "Variables received: A, B, C (from bundle
   shop)", the names the trigger's own `run.secrets` shadowed, and on an OpenShell venue how many were placeholders
   and how many values; or, for a run that went without its project's bundle, why, in a sentence.
 - A project edit the project tools refuse because a bundle names the project shows that sentence in the console's
-  project form and in the tool's answer in the panel.
-- **Each profile's use** (issue #712). `/dispatch secrets list` (under the tables with the paths), the `/dispatch`
-  panel's **secret profiles** section and the console's "Secret profiles in use" table say, for every profile a
+  project form and in the tool's answer.
+- **Each profile's use** (issue #712). The console's "Secret profiles in use" table says, for every profile a
   source declares or a trigger names:
   - where it is declared: `PI_SECRET_PROFILES`, the overlay, both (ambiguous: the worker refuses every secrets job),
-    or neither the panel can see;
-  - for an overlay resolver, where its real path on the panel's host stands against `PI_SECRET_RESOLVER_ROOTS` as
-    written (the same check `add` makes before the confirm): inside, outside (the worker refuses every job naming it),
+    or neither the console can see;
+  - for an overlay resolver, where its real path on the console's host stands against `PI_SECRET_RESOLVER_ROOTS` as
+    written (the same check the declaration form makes before the confirm): inside, outside (the worker refuses every job naming it),
     not resolvable here (only the worker can judge it, `doctor --secrets`), or the roots not visible;
   - the triggers whose jobs resolve through it (a trigger with `run.secrets` and no `run.secretsProfile` uses
     `default`) and the projects of the cron ones; a webhook trigger's jobs may land in any project and are said so;
@@ -574,14 +562,8 @@ that, on the host that runs the jobs), and no reference or value is ever shown:
     and the rest; on a run whose project has a bundle, `secret-unresolved`, `secret-name-reserved` and
     `secret-resolver-unreachable` are said as "the profile's or the project bundle's read", since both reads give them), resolved (a container ran, which
     only a passed resolve allows), or not reached (the run ended before a container, so the record cannot say);
-  - which live hosts advertise it (their registry row's `s:<name>`). The list reads no registry and says so.
-  The console and the panel show no resolver path, not even its real one; the list keeps printing the paths it always
-  printed, in your own terminal.
-- **No model-callable tool sees a variable name.** `dispatch_runs` returns a record's `bundle` as counts
-  (`{ id, received, shadowed, placeholders, plain }`), and `dispatch_status` leaves out `secretProfiles` and
-  `secretBundles`. The names stay in your own views above. A record's `secretsProfile` (a profile name, which
-  `dispatch_triggers` already shows) and an OpenShell run's `openshell` (its counts, and its rule hosts when one run
-  is read by its id) do reach `dispatch_runs`; a resolver path reaches no tool.
+  - which live hosts advertise it (their registry row's `s:<name>`).
+  The console shows no resolver path, not even its real one.
 
 ## Recipe D: one environment for a whole project
 
@@ -600,7 +582,7 @@ grants the project's environment **once**:
 
 `project` is an id from `projects.json` (projects). Every job whose project is `shop` gets the
 bundle, whichever trigger made it: a new trigger or a new repository in the project needs no secrets edit. You
-declare the bundle resolver once, with the **format** it prints (or from the panel, [above](#from-the-panel)):
+declare the bundle resolver once, with the **format** it prints (or in the console, [above](#from-the-console)):
 
 ```sh
 # /etc/pi-dispatch/pi-dispatch.env
@@ -611,7 +593,7 @@ The worker runs it **once per job start**, on the host, before the container sta
 as its only argument. It prints the whole environment on stdout, and its exit code means what Recipe C's does:
 0 for the environment, 2 for a wrong reference (refused, never retried), anything else for a manager it could
 not reach (retried). A variable you add, change or remove at the source reaches the **next** job of the project
-with no edit to `triggers.json`, no panel step and no restart.
+with no edit to `triggers.json` and no restart.
 
 ### The two formats, declared, never guessed
 
@@ -722,8 +704,7 @@ service-account route, and on an OpenShell venue its values can still be placeho
 
 - **Every trigger-made job of the project**: its cron jobs (and `pi-dispatch run --trigger`, which fires a cron
   trigger as its schedule would) and its forge jobs, including a console re-run of a trigger's run.
-- **Not a chained `/outbox` child, and not a manual run** (`pi-dispatch run <folder>`, `/dispatch run`,
-  `dispatch_run`). Your grant was to the triggers you reviewed, not to what a job queues next or what a model
+- **Not a chained `/outbox` child, and not a manual run** (`pi-dispatch run <folder>`). Your grant was to the triggers you reviewed, not to what a job queues next or what a model
   asks for. The run record says `bundleSkipped: "chained"` or `"manual"`.
 - **Not a trigger that opts out** with `"run": { "secretBundle": false }` (`bundleSkipped: "opted-out"`). The
   worker reads that flag from its own triggers file, so no receiver needs to carry it.
@@ -735,10 +716,10 @@ service-account route, and on an OpenShell venue its values can still be placeho
   (`bundleSkipped: "head-unverified"`); any other failure retries.
 - **Not a `run.resume` trigger.** A job of such a trigger is refused (`secret-bundle-resume`), for the reason
   `run.secrets` cannot sit beside `run.resume`; opt the trigger out instead.
-- **Not a trigger a tool wrote.** `dispatch_trigger_add` always writes `"secretBundle": false` on the entry it adds,
-  because its task or flow is the model's choice, and no tool can remove the flag or set it. When you mean that
-  trigger's jobs to hold the bundle, delete the line by hand in `triggers.json`. For the same reason the project tools
-  refuse to change the members of a project a bundle names (or to create one under a bundled id): change the bundle
+- **Not a trigger the console's add editor wrote.** A trigger added there always carries `"secretBundle": false`,
+  because its task or flow was not reviewed for secrets, and no form can remove the flag or set it. When you mean that
+  trigger's jobs to hold the bundle, delete the line by hand in `triggers.json`. For the same reason the console
+  refuses to change the members of a project a bundle names (or to create one under a bundled id): change the bundle
   first, or edit `projects.json` by hand.
 
 A trigger's own `run.secrets` **win** over a bundle variable of the same name, and the run record names the

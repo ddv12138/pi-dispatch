@@ -164,7 +164,7 @@ test("size call conversion preserves exact edit/add fields and refuses counterex
   for (const call of ['dispatch_limit_add {"scope":"project:other","memory":"4g"}', 'dispatch_limit_edit {"index":2,"scope":"project:other","memory":"4g"}', 'dispatch_limit_edit {"index":-1,"memory":"4g"}', 'dispatch_limit_edit {"index":2}', 'dispatch_limit_edit {"index":2,"cpus":"2"}', 'dispatch_project_delete {"id":"billing"}']) assert.equal(projectSizeAction(call, "billing"), null, call);
 });
 
-test("fleet history is bounded, continues past dashboard rows and states a truncated read", async () => {
+test("fleet history is bounded, continues past the listed rows and states a truncated read", async () => {
   let calls = 0;
   const fleet = { runsPage: async ({ before, limit }) => { calls++; assert.equal(limit, 100); return before === null ? { runs: [record("gh-first")], next: NOW - DAY } : { runs: [record("gh-older")], next: null }; } };
   const got = await readProjectFleetRuns(fleet, { sinceMs: NOW - 30 * DAY });

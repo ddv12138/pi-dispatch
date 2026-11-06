@@ -71,7 +71,6 @@ export const PI_PIN_SITES = Object.freeze([
 	{ path: "image/runner/package.json", json: ["dependencies", `${SCOPE}pi-mcp`] },
 	{ path: "image/runner/package.json", json: ["dependencies", `${SCOPE}pi-agent-core`] },
 	{ path: "worker/package.json", json: ["dependencies", `${SCOPE}pi-ai`] },
-	{ path: "worker/package.json", json: ["dependencies", `${SCOPE}pi-tui`] },
 	{ path: "image/Dockerfile", line: /^ARG PI_VERSION=(\S*)$/m },
 	...PI_DOC_SITES.map((path) => ({ path, line: PI_DOC_VERSION_RE })),
 ]);
@@ -425,7 +424,7 @@ export function renderPullRequest({ from, to, versions, modelReport = "Model cat
 		].map((item) => `- [ ] ${item}`),
 		"",
 	].join("\n");
-	const commit = [titleFor(to), "", `Moves every pi pin from ${from} to ${to} (the runner, the worker's pi-ai and pi-tui, the`, "image's PI_VERSION, the root overrides and", "documented durable-install commands) and resolves pi's tree in package-lock.json again.", "", "Prepared by .github/workflows/pi-bump.yml. CONST-PI-VERSION-PINNED, REQ-UPSTREAM-CONTRACT-TESTS.", ""].join("\n");
+	const commit = [titleFor(to), "", `Moves every pi pin from ${from} to ${to} (the runner, the worker's pi-ai, the`, "image's PI_VERSION, the root overrides and", "documented durable-install commands) and resolves pi's tree in package-lock.json again.", "", "Prepared by .github/workflows/pi-bump.yml. CONST-PI-VERSION-PINNED, REQ-UPSTREAM-CONTRACT-TESTS.", ""].join("\n");
 	return { title: titleFor(to), body, commit };
 }
 
@@ -460,8 +459,10 @@ export function bump({ repo, version, npm = "npm", run = defaultRun, log = (line
 	log(`pi-bump: ${from} -> ${version}: resolving the lockfile (metadata only, no package code runs)`);
 	lockOnly();
 	// A pi package the new release brings in is pinned too, then resolved again: once is enough, since an override adds
-	// no package of its own.
-	const unpinned = lockedPiNames(JSON.parse(read(LOCKFILE))).filter((name) => !JSON.parse(read(ROOT_PACKAGE)).overrides?.[name]);
+	// no package of its own. One the base tree already carried without an override (pi-coding-agent's pi-tui) is left
+	// as it is: it rides pi's own pin, which pi-pin-check holds the resolved lockfile to.
+	const base = new Set(lockedPiNames(JSON.parse(before[LOCKFILE])));
+	const unpinned = lockedPiNames(JSON.parse(read(LOCKFILE))).filter((name) => !JSON.parse(read(ROOT_PACKAGE)).overrides?.[name] && !base.has(name));
 	if (unpinned.length > 0) {
 		log(`pi-bump: pinning ${unpinned.join(", ")} in the overrides, then resolving again`);
 		write(ROOT_PACKAGE, rewriteOverrides(read(ROOT_PACKAGE), version, unpinned));

@@ -1,7 +1,7 @@
 /**
  * A size suggestion for one project (issue #596, phase 3, DES-SIZE-SUGGESTIONS): what memory and CPUs its jobs
- * should be given, read from what its recent runs used. ONE pure function, `suggestSize`, which doctor, the panel's
- * PROJECTS view, the `dispatch_limit_edit` preview and the insights page all call, so the four can never disagree.
+ * should be given, read from what its recent runs used. ONE pure function, `suggestSize`, which doctor, the console's
+ * project page and the insights page all call, so the three can never disagree.
  *
  * A LEAF beside `job-size.mjs`, importing nothing else of this project's: the admin bundle inlines it, and the insights
  * page builder refuses every worker import, so its caller computes the suggestion and hands the page the result.

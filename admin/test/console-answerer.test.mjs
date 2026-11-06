@@ -51,7 +51,7 @@ test("viewer and agent rendering removes classification, sources, standing text,
   }
 });
 
-test("run answer prefill binds the exact retained source and refuses source-free, low-confidence or mismatched drafts", async () => {
+test("the run page's draft card binds the exact retained source and refuses source-free, low-confidence or mismatched drafts", async () => {
   const fixture = answererFixture(AT);
   const view = { role: "operator", query: { id: fixture.privateDraft.meta.runId }, data: { answerer: fixture } };
   assert.equal(offeredAnswerDraft(view).draft, fixture.privateDraft.draft);
@@ -61,10 +61,12 @@ test("run answer prefill binds the exact retained source and refuses source-free
   }
   const page = await renderAnswererState("run", "operator", { now: AT });
   assert.match(page, /name="draftRunId" value="gh-a07c"/);
-  assert.match(page, /name="draftDigest" value="[a-f0-9]{64}"/);
-  assert.match(page, /name="text"[^>]*>Run npm test/);
-  assert.match(page, /data-keep-standing/);
-  assert.match(page, /name="repo" value="github:acme\/web"/);
+  assert.match(page, /name="runId" value="gh-6e1d"/);
+  assert.match(page, /name="digest" value="[a-f0-9]{64}"/, "the drop form carries the draft's digest");
+  assert.match(page, /<pre class="pa-private">Run npm test/);
+  assert.match(page, /docs\/CONTRIBUTING\.md/, "the draft's exact retained sources are named");
+  assert.match(page, /data-action="answer-draft-drop"/);
+  assert.ok(!page.includes('data-action="parked-answer"'), "the run page draws no manual answer form; the parked page's is the one");
   const stale = await renderAnswererState("stale", "operator", { now: AT });
   assert.match(stale, /This draft cannot be offered/);
   assert.match(stale, /the reviewed answer configuration changed/);
@@ -73,11 +75,11 @@ test("run answer prefill binds the exact retained source and refuses source-free
 
 test("a helper run shows its private draft to an operator and can never prefill or attribute a helper reply", async () => {
   const fixture = answererFixture(AT), id = fixture.privateDraft.meta.draftRunId;
-  const data = { now: AT, answerer: fixture, run: { record: { jobId: id, purpose: "answer-draft", answerDraft: { sourceRunId: fixture.privateDraft.meta.runId, ruleId: fixture.rules[0].id }, project: "web", kind: "github", target: "acme/web#512", reason: "awaiting-input", outcome: "completed", endedAt: new Date(AT - 60000).toISOString() } }, chat: { mode: "reply", state: "parked", jobState: "completed" }, chatAnswer: { ok: true }, transcript: { exists: false, ended: true } };
+  const data = { now: AT, answerer: fixture, run: { record: { jobId: id, purpose: "answer-draft", answerDraft: { sourceRunId: fixture.privateDraft.meta.runId, ruleId: fixture.rules[0].id }, project: "web", kind: "github", target: "acme/web#512", reason: "awaiting-input", outcome: "completed", endedAt: new Date(AT - 60000).toISOString() } }, queueState: { found: true, jobState: "completed", activeJobId: null, queuedJobId: null }, transcript: { exists: false, ended: true } };
   const operator = String((await renderPage("run", { session: { name: "ops", role: "operator" }, query: { id }, data })).html);
   assert.ok(operator.includes(fixture.privateDraft.question)); assert.ok(operator.includes(fixture.privateDraft.draft));
   assert.ok(!operator.includes('data-action="parked-answer"'));
-  assert.ok(operator.includes('the parked source run'));
+  assert.ok(operator.includes("Answer draft"), "the draft card, the run page's one answer surface");
   for (const role of ["viewer", "agent"]) {
     const page = String((await renderPage("run", { session: { name: role, role }, query: { id }, data })).html);
     for (const canary of [fixture.privateDraft.question, fixture.privateDraft.draft, "CONTRIBUTING", "Answer draft"]) assert.ok(!page.includes(canary), role);

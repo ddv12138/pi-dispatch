@@ -4,7 +4,7 @@
  */
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { piVersionOf, resolvePiBinary } from "./chat-fork.mjs";
+import { piVersionOf, resolvePiBinary } from "./pi-bin.mjs";
 import { piAiVersion } from "./pricing.mjs";
 import { workerName } from "./config.mjs";
 import { boundedJson, buildLook, hostPiFacts } from "./updates-look.mjs";

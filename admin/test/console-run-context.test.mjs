@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { loadPageData } from "../src/console/pages.mjs";
 import { runRecovery, runHost, runWhy, runCostPanel, runSummary, runOutcome, runSession, runChain } from "../src/console/panels/run.mjs";
-import { runHeadline, runChat, runResources, runModels, runSecrets, runProgress, runActionsPanel } from "../src/console/panels/run.mjs";
+import { runHeadline, runResources, runModels, runSecrets, runProgress, runActionsPanel } from "../src/console/panels/run.mjs";
 import { RECOVERY_CAP } from "@edgehero/pi-dispatch/recovery-queue";
 import { REPLICAS_MAX } from "@edgehero/pi-dispatch/triggers";
 
@@ -63,7 +63,7 @@ test("refusal context uses published host floor, newest doctor and queue facts, 
 
 test("recovery track uses counts without invented checkpoint times, shows restored call judgments and costs per hold", () => {
   const own = record({ recovered: { n: 1, from: "live", fromAttempt: 1, checkpointSeq: 3, replayed: 1, interrupted: 2, notStarted: 1 }, earlier: [{ host: "mini1", startedAt: iso(AT - 240_000), endedAt: iso(AT - 200_000), memMiB: 1024, cpuCenti: 100 }], stalledRepick: true });
-  const data = { run: { record: own }, chat: { activeJobId: "gh-747-r2.r1" }, runHolds: [{ seq: 1, amountTokens: 2_000_000, state: "settled-crashed" }, { seq: 2, amountTokens: 2_000_000, state: "held" }], recoveryRuns: [own] };
+  const data = { run: { record: own }, queueState: { found: false, jobState: "failed", activeJobId: "gh-747-r2.r1", queuedJobId: null }, runHolds: [{ seq: 1, amountTokens: 2_000_000, state: "settled-crashed" }, { seq: 2, amountTokens: 2_000_000, state: "held" }], recoveryRuns: [own] };
   const recovery = String(runRecovery(view(data)));
   assert.match(recovery, /<svg/); assert.match(recovery, /evenly spaced/); assert.match(recovery, /their times and kinds were not recorded/);
   assert.equal((recovery.match(/<circle/g) ?? []).length, 5);
@@ -81,18 +81,22 @@ test("cancelled-before-start keeps its word, viewer banner has no actions, sessi
   const session = String(runSession(view(data)));
   assert.match(session, /fresh:/); assert.match(session, /2 KB/); assert.doesNotMatch(session, /\(absent\)|\(plan-stale\)/);
   assert.match(String(runChain(view(data))), /Refused chain requests/);
-  const unknown = String(runHeadline(view({ run: { missing: true }, chat: { found: false, jobState: null } })));
+  const unknown = String(runHeadline(view({ run: { missing: true }, queueState: { found: false, jobState: null, activeJobId: null, queuedJobId: null } })));
   assert.doesNotMatch(unknown, /Cancel run/);
 });
 
 
-test("a finished saved session warns about later turns; failed saves use the catalog's actual reason", () => {
+test("a finished saved session is kept for its target; a failed save is not (sessionSavedOf over SESSION_NOT_SAVED)", () => {
   const own = record({ outcome: "completed", reason: null, session: { resumed: false, reason: "absent", bytes: 10 } });
-  const data = { run: { record: own }, chat: { mode: "fork", state: "finished", newer: { known: true, jobId: "gh-later" } } };
-  const fork = String(runChat(view(data)));
-  assert.match(fork, /session holds a later run/); assert.match(fork, /gh-later/); assert.match(fork, /acme\/api#747/);
-  const failed = String(runChat(view({ ...data, run: { record: { ...own, session: { reason: "promote-failed" } } } })));
-  assert.match(failed, /no saved transcript to fork/); assert.doesNotMatch(failed, /no run.resume|data-copy/);
+  const kept = String(runSession(view({ run: { record: own } })));
+  assert.match(kept, /<dt>Kept<\/dt>/);
+  assert.match(kept, /for the next run on/);
+  assert.match(kept, /acme\/api#747/);
+  const failed = String(runSession(view({ run: { record: { ...own, session: { resumed: false, reason: "promote-failed", bytes: 10 } } } })));
+  assert.doesNotMatch(failed, /<dt>Kept<\/dt>/, "a save that failed is not offered as kept");
+  assert.match(failed, /Saving the conversation failed/, "the failed save's catalog sentence is said");
+  const none = String(runSession(view({ run: { record: { ...own, session: null } } })));
+  assert.doesNotMatch(none, /<dt>Kept<\/dt>/);
 });
 
 test("resources include physical host CPU count alongside its admission CPU budget", () => {
@@ -126,7 +130,7 @@ test("continuation progress pairs the lost attempt summary with live recovery nu
 
 
 test("a lost attempt that is continuing offers its recovery and sibling, without a paid re-run", () => {
-  const data = { run: { record: record() }, chat: { activeJobId: "gh-747-r2.r1" }, siblings: [record({ jobId: "gh-747-r1" })] };
+  const data = { run: { record: record() }, queueState: { found: false, jobState: "failed", activeJobId: "gh-747-r2.r1", queuedJobId: null }, siblings: [record({ jobId: "gh-747-r1" })] };
   const out = String(runOutcome(view(data)));
   assert.match(out, /Open recovery run/); assert.match(out, /Open sibling replica/); assert.doesNotMatch(out, /data-action="rerun"|Open target on the forge/);
   assert.equal(String(runActionsPanel(view(data))), "");

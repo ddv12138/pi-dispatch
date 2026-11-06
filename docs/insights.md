@@ -8,7 +8,7 @@ Settled amounts come from run records; holds are live workers' reservations. Inc
 
 ## What-if estimates
 
-Choose a model on Spend to reprice eligible runs, or use Breakdown to estimate one flow. Estimates name their coverage and exclusions; a different model may need more turns or fail more often. `/dispatch insights [7d|30d|mtd]` and `/dispatch insights whatif <provider>/<model> --flow <flow>` print the corresponding console links.
+Choose a model on Spend to reprice eligible runs, or use Breakdown to estimate one flow. Estimates name their coverage and exclusions; a different model may need more turns or fail more often.
 
 ## Budget split actions
 
