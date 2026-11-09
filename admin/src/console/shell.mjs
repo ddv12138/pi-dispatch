@@ -37,7 +37,7 @@
  * each hidden; the write flow's one slot (`#confirm-slot`) is drawn for an operator who can write, and the note a panel
  * kept still carries (`<template id="held-note">`) on every live page, for every role: a viewer's runs filters, and a
  * read-only console's, hold their panel too, and a page that is not live is never updated, so it never holds one. The
- * script reveals, fills in text and moves the slot; it never writes their markup, so each can be pinned by a golden. A
+ * script reveals, fills in text and moves the slot; it never writes their markup, so each can be pinned by a test. A
  * page drawn once (not live) says when, beside a Reload, in its title bar: nothing on it moves, and the reader should
  * know how old it is.
  *
@@ -382,7 +382,7 @@ export const LINK_PAGE_TITLE = "One-time sign-in link";
 /**
  * The one-time link's landing page (the AccessStates card): the script reads the code from the fragment, drops it from
  * history and posts it, switching the card to `used` or `nocode` as the answer says. `state` is the card's first state;
- * `notice` a notice to draw shown, for a panel golden (`signin.mjs` `linkContent`; the server passes neither).
+ * `notice` a notice to draw shown, for a test (`signin.mjs` `linkContent`; the server passes neither).
  */
 export function loginCodePage({ theme = null, locale = "en", state = "wait", notice = null } = {}) {
   return frameHtml({ name: "login-code", title: uiText(LINK_PAGE_TITLE, locale), theme, locale, skip: uiText("Skip to sign-in", locale), titleShown: false }, linkContent({ state, notice, locale }));

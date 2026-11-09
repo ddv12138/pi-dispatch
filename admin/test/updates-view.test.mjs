@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CANNOT_ADOPT_REASONS, CHECK_STATES, HOST_PI_STATES, UPDATES_OVERDUE_MS } from "@edgehero/pi-dispatch/updates";
 import { CANNOT_ADOPT_WORDS, HOST_STATES_DRAWN, PI_STATES_DRAWN, updatesProblems } from "../src/console/panels/updates.mjs";
 import { scanFleetRunRecords } from "../src/read-model.mjs";
 import { HOST_ADOPT_STATES, PI_ROW_STATES, UPDATE_ROW_STATES, canaryResultOf, hostStandings, packageRow, piRow, readDeploymentUpdates, readStaged, readTriggersDocument, readUpdates } from "../src/updates-view.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { UPDATES_CANARY_RECORD, UPDATES_CONFIRM_STATES, UPDATES_DRAW, updatesFacts } from "./helpers/updates-goldens.mjs";
+import { UPDATES_CANARY_RECORD, UPDATES_DRAW, updatesFacts } from "./helpers/updates-fixtures.mjs";
 
 const NOW = 1_800_000_000_000;
 /** A Valkey holding these rows. */
@@ -104,18 +104,16 @@ test("every state has its words, each held to the list it comes from, both ways"
 	assert.deepEqual([...HOST_ADOPT_STATES].sort(), ["adopted", "cannot-adopt", "no-change", "overdue", "pending", "undone"]);
 });
 
-test("each row state and each pi state is actually drawn by a golden, so none is unreviewed", async () => {
+test("each row state and each pi state is drawn, so none is unreviewed", async () => {
 	for (const key of Object.keys(UPDATES_DRAW)) assert.match(key, /^updates-[a-z-]+\.(operator|viewer)$/);
-	const golden = new Set(readdirSync(new URL("./fixtures/console/panels/", import.meta.url)).filter((f) => f.startsWith("updates-")).map((f) => f.replace(/\.html$/, "")));
-	assert.deepEqual([...golden].sort(), [...Object.keys(UPDATES_DRAW), ...UPDATES_CONFIRM_STATES].sort(), "a golden per drawn state");
-	const text = [...golden].map((name) => readFileSync(new URL(`./fixtures/console/panels/${name}.html`, import.meta.url), "utf8")).join("\n");
+	const text = (await Promise.all(Object.values(UPDATES_DRAW).map((draw) => draw()))).join("\n");
 	// One sentence for each state on each list, so a state nobody draws, or a word that went missing from one, fails here.
 	const ROW = { current: "The newest version.", newer: "Not tried yet.", "canary-completed": "Canary completed, read the run", "canary-failed": "Canary failed: this version did not load", adopting: "Adopting 1.4.3", adopted: "on every host", partial: "mini2 cannot adopt: its overlay is read-only here", undoing: "Going back to 1.4.2", "not-looking": "Not looking.", stale: "the last look is too old to go by", unknown: "Not known: the registry could not be read" };
 	assert.deepEqual(Object.keys(ROW).sort(), [...UPDATE_ROW_STATES].sort());
 	const PI = { current: "The newest version.", "checks-passing": "checks pass on 1.6.0", "checks-failing": "Checks fail. Jobs stay on 1.5.0", "checks-pending": "still running on it", "checks-unknown": "Whether pi-dispatch", "not-looking": "Not looking.", stale: "the last look is too old to go by", unknown: "Not known: the registry could not be read" };
 	assert.deepEqual(Object.keys(PI).sort(), [...PI_ROW_STATES].sort());
 	for (const sentence of [...Object.values(ROW), ...Object.values(PI), "Canary failed: the run did not complete", "Newer than pi-dispatch is tested with", "Older than pi-dispatch is tested with", "No pi on this host", "pi could not be read", "is not the tree the canary ran", "has not answered in a day", "Not known: Valkey did not answer", "The staged extensions could not be read", "reviewed subscription adapter"]) {
-		assert.ok(text.includes(sentence), `a golden draws: ${sentence}`);
+		assert.ok(text.includes(sentence), `a page draws: ${sentence}`);
 	}
 	assert.doesNotMatch(text, /\bpassed\b/i, "a canary never reads passed: a job that completed does not prove the extension is good");
 });

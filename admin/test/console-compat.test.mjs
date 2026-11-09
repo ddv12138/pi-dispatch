@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { test } from "node:test";
 import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { PAGES, renderPage } from "../src/console/pages.mjs";
@@ -11,10 +11,5 @@ test("all console pages use Pulse without the compatibility adapter", async () =
   for (const name of Object.keys(PAGES)) {
     const out = await renderPage(name, { query: {}, session: { name: "operator", role: "operator" }, data: { now: 0, snapshot: {} } });
     assert.doesNotMatch(String(out.html), /class="legacy"|--pd-/);
-  }
-  for (const dir of ["./fixtures/console/", "./fixtures/console/panels/"]) {
-    for (const name of readdirSync(new URL(dir, import.meta.url)).filter((n) => n.endsWith(".html"))) {
-      assert.doesNotMatch(readFileSync(new URL(`${dir}${name}`, import.meta.url), "utf8"), /class="legacy"|--pd-/, `${dir}${name}`);
-    }
   }
 });

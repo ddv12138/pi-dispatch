@@ -3,8 +3,8 @@ import { test } from "node:test";
 import { zeroTouchView } from "../src/zero-touch-view.mjs";
 import { loadPageData, parsePageQuery, pageQueryString, renderPage, panelIds } from "../src/console/pages.mjs";
 import { ZERO_TOUCH_CAUSES, ZERO_TOUCH_WORDS, zeroTouchHandled, zeroTouchRate, zeroTouchStreak } from "../src/console/panels/zero-touch.mjs";
-import { zeroTouchFixture, ZERO_TOUCH_DRAW } from "./helpers/zero-touch-goldens.mjs";
-import { assertClean } from "./helpers/console-pages-harness.mjs";
+import { zeroTouchFixture, ZERO_TOUCH_DRAW } from "./helpers/zero-touch-fixtures.mjs";
+import { assertClean } from "./helpers/page-rules.mjs";
 import { computeZeroTouch } from "@edgehero/pi-dispatch/zero-touch";
 const NOW = 1800000000000;
 

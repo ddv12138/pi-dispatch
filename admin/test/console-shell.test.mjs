@@ -12,13 +12,13 @@ import { LINK_NOTICES, LINK_STATES, LISTEN_FOOTERS, NO_SCRIPT_TEXT, linkContent,
 import { HEADLINE_ID, LINK_PAGE_TITLE, LIVE_GLYPHS, LIVE_NOTES, LIVE_STATES, LIVE_STREAMS_TOTAL, NAV, NAV_MORE, NAV_PARKED_ID, READ_ONLY_TITLE, SEARCH_HREF, SHELL_PANEL_IDS, frameHtml, liveNoteHtml, loginCodePage, loginPage, navParkedCount, navParkedHtml, shellHtml } from "../src/console/shell.mjs";
 import { RESERVED_IDS, SEARCH_ID } from "../src/console/kit.mjs";
 import { SYSTEM_SCHEME, THEME_COOKIE, THEME_COOKIE_MAX_AGE_SEC, THEME_COOKIE_SAME_SITE, THEME_LABELS, THEMES } from "../src/console/theme.mjs";
-import { assertClean } from "./helpers/console-pages-harness.mjs";
+import { assertClean } from "./helpers/page-rules.mjs";
 
 /** What both sign-in pages say first without a script: the sentence, as one of the card's notices. */
 const NO_SCRIPT = `<noscript><div class="banner banner--sm tone-attention" role="status"><span class="tile"><svg class="ic" aria-hidden="true"><use href="#i-info"></use></svg></span><div><p class="banner__t">${NO_SCRIPT_TEXT}</p></div></div></noscript>`;
 
 // The Pulse shell (issue #737, `shell.mjs`): the top bar, the navigation, the live pill, the theme button and the title
-// bar every page is drawn in, and the browser script's side of them. Pure renders over hand-made page data; the goldens
+// bar every page is drawn in, and the browser script's side of them. Pure renders over hand-made page data; the page tests
 // (`console-pages.test.mjs`) hold the same frame over the canned deployment.
 
 // Control bytes are built, never typed.
@@ -399,7 +399,7 @@ test("the one-time link's card: each state drawn, only the chosen one for the sc
   assert.deepEqual([...text.matchAll(/<div data-notice="([a-z-]+)" hidden>/g)].map((m) => m[1]), [...LINK_NOTICES]);
   for (const k of LINK_NOTICES) assert.ok(Object.hasOwn(SIGN_IN_NOTICES, k), k);
   assert.ok(text.startsWith(`<section id="p-link" data-panel><div class="card signin">\n${NO_SCRIPT}\n`), "what a page without a script says, first");
-  // A golden's notice (the server draws none): one of the link page's own, shown; anything else, none.
+  // A page's notice (the server draws none): one of the link page's own, shown; anything else, none.
   const shownNotices = (t) => [...t.matchAll(/<div data-notice="([a-z-]+)">/g)].map((m) => m[1]);
   for (const k of LINK_NOTICES) assert.deepEqual(shownNotices(String(linkContent({ state: "used", notice: k }))), [k], k);
   for (const odd of ["wrong", "ended-idle", HOSTILE, "__proto__"]) assert.deepEqual(shownNotices(String(linkContent({ notice: odd }))), [], String(odd));

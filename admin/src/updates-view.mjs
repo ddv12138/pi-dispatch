@@ -13,7 +13,7 @@ import { compareVersions, readApplied, readCanaryFacts, readDesired, readLooks, 
 import { parsePackageCanary } from "@edgehero/pi-dispatch/package-canary-record";
 import { isSubscriptionAdapter } from "@edgehero/pi-dispatch/updates-subscription-adapters";
 
-/** Every state a staged package's row can be in. Each has a golden, and a test holds the panel's sentences to this list. */
+/** Every state a staged package's row can be in. Each is drawn by the updates panel, and a test holds its sentences to this list. */
 export const UPDATE_ROW_STATES = Object.freeze(["current", "newer", "canary-completed", "canary-failed", "adopting", "adopted", "partial", "undoing", "not-looking", "stale", "unknown"]);
 /** Every state pi's own row can be in. */
 export const PI_ROW_STATES = Object.freeze(["current", "checks-passing", "checks-failing", "checks-pending", "checks-unknown", "not-looking", "stale", "unknown"]);

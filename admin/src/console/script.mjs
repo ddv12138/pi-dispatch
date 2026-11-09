@@ -8,8 +8,7 @@
  * confirm slot's previewing skeleton and the kept-still note is drawn by the server, hidden but the one it chose; the
  * preview, no-change, refusal and bulk-result bars come as `html` in the JSON answer. This script only says which shows
  * (`hidden`), writes text through `textContent`, sets attributes, and moves the one confirm slot. So every state can be
- * pinned as a golden and measured by the width check, and `console-client-states.test.mjs` holds that the script shows
- * the right one. The closed lists it switches on are written in as JSON from their one source (`session-ends.mjs`,
+ * drawn whole by a test, and `console-client-states.test.mjs` holds that the script shows the right one. The closed lists it switches on are written in as JSON from their one source (`session-ends.mjs`,
  * `confirm-view.mjs`, `shell.mjs` `LIVE_NOTES`), never copied. Three sentences are this script's own, exported from
  * this module and written in the same way (issue #737): the sign-in's `gaveup` notice (a copy of the
  * server's `unreachable` notice with `SIGN_IN_GAVE_UP` as its text), the sign-out that was not confirmed
@@ -54,7 +53,7 @@
  *     Referer. A fragment `#<code>&next=<path>` (issue #708) also names the page to land on: it is posted beside the
  *     code, the server answers the page it accepts (`returnPathOf`, one of this console's own pages, else `/`), and
  *     the script navigates there only if the answer is also one of `PAGES`' paths (`ownPage`), never anywhere else.
- *     The card's states (`[data-link-state]`): the state the server drew (`wait`; a panel golden draws the others) is
+ *     The card's states (`[data-link-state]`): the state the server drew (`wait`; a test draws the others) is
  *     the one `data-reveal` shows, and the script moves off it only for a reason: `nocode` for a fragment with no code,
  *     `used` for a refusal that spent or refused the code (a 401 is the link's own; a 503 or 500 comes after the
  *     server took it, so a new link is the way on, and the notice above says why). A 429 is the sign-in limiter's,
@@ -119,7 +118,7 @@
  *     stale gave), its sentence the server's or, for the tokens file, `STALE_TOKENS_BODY`; `event: fresh` undoes both,
  *     and nothing else does: the hub tells every page stream its state first (`live.mjs`), so a stream that opens again
  *     says whether its page is current before it sends a panel, and opening is no sign either way (issue #737). The
- *     script only takes back what it showed, so a state the server drew (a panel golden's) stays as drawn.
+ *     script only takes back what it showed, so a state the server drew (a test's) stays as drawn.
  *   - the SPEND SCREEN (`insights`): what the offline insights page's own script did, under this CSP. The insights
  *     renderers mark each bar with `data-tip="<n>"` and the page lists the texts in `#insights-tips` (escaped by the
  *     server); hovering a bar shows its text in the topology's `#tip` box through `textContent`. The topology pans
@@ -464,8 +463,7 @@ export const CONSOLE_SCRIPT = `"use strict";
       for (var i = 0; i < all.length; i++) all[i].hidden = all[i].getAttribute("data-link-state") !== state;
     };
     // The state the server drew stands (revealScripted() showed it): the script moves off it only for a reason, a
-    // fragment with no code or an answer (forcing "wait" here drew every link golden as "wait" in the width check, which
-    // measured none of the others).
+    // fragment with no code or an answer (forcing "wait" here drew every link page as "wait", hiding the others).
     var stopLink = function () {
       code = null;
       next = null;
@@ -2048,7 +2046,7 @@ ${FIT_JS}
     }
   }
   // One of the server's live notes at a time (#live-note), or none. noteShown is the one THIS script showed: it only
-  // ever takes back its own, so a note the server drew (a panel golden's) stays as drawn.
+  // ever takes back its own, so a note the server drew (a test's) stays as drawn.
   var liveNote = document.getElementById("live-note");
   var noteShown = null;
   function note(state) {

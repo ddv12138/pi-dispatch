@@ -8,7 +8,7 @@ import { answererParked, answererProbabilities, offeredAnswerDraft } from "../sr
 import { ANSWERER_CSS, ANSWERER_CSS_SHA256 } from "../src/console/answerer-css.mjs";
 import { AGENT_POLICY_CSS } from "../src/console/agent-policy-css.mjs";
 import { parseAuditQuery, auditQueryString, readAuditView } from "../src/console/audit-view.mjs";
-import { answererFixture, answererParkedRows, renderAnswererState } from "./helpers/answerer-goldens.mjs";
+import { answererFixture, answererParkedRows, renderAnswererState } from "./helpers/answerer-fixtures.mjs";
 
 const AT = Date.parse("2026-10-31T12:00:00Z");
 

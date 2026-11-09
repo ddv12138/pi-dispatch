@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { parseDocument } from "./helpers/script-dom.mjs";
 import * as panels from "../src/console/panels/connections.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
-import { consoleConnectionsFixture } from "./helpers/configuration-goldens.mjs";
+import { consoleConnectionsFixture } from "./helpers/configuration-fixtures.mjs";
 
 const AT = Date.UTC(2026, 9, 30, 12);
 const draw = (name, value, options = {}) => String(panels[name]({ role: "operator", data: { connections: value }, ...options }));

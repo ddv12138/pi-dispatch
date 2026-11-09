@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { openChrome } from "../../launch/chrome-pipe.mjs";
-import { findChrome, chromeLaunchArgs, measureSource, widthVerdict, EDGE_SLACK } from "./console-width-check.mjs";
+import { findChrome, chromeLaunchArgs, measureSource, widthVerdict, EDGE_SLACK } from "./chrome-browser.mjs";
 import { startConnectionsBrowserFixture, CONNECTIONS_BROWSER_TOKENS, CONNECTIONS_SLICES } from "../../admin/test/helpers/connections-browser.mjs";
 import { SECURITY_HEADERS } from "../../admin/src/console/headers.mjs";
 

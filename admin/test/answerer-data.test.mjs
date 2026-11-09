@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { makeAnswererService, answererStats } from "../src/answerer-data.mjs";
 import { planStandingAnswerAdd, applyStandingAnswerAdd, planAnswerDraftDrop } from "../src/answerer-actions.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { answererFixture } from "./helpers/answerer-goldens.mjs";
+import { answererFixture } from "./helpers/answerer-fixtures.mjs";
 
 const AT = Date.parse("2026-10-31T12:00:00Z");
 const fixture = answererFixture(AT);

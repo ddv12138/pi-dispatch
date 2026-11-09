@@ -14,7 +14,7 @@ import { createConsoleServer } from "../../src/console/server.mjs";
 import { makeSetupActions } from "../../src/setup-actions.mjs";
 import * as rm from "../../src/read-model.mjs";
 import * as plans from "../../src/write-plans.mjs";
-import { setupFixture, SETUP_AT } from "./setup-goldens.mjs";
+import { setupFixture, SETUP_AT } from "./setup-fixtures.mjs";
 import { readConnections } from "../../src/connections-view.mjs";
 import { providerCanonicalKey, PROVIDER_SLOT_ALIASES } from "../../src/provider-inventory.mjs";
 import { updateEnvFile } from "@edgehero/pi-dispatch/env-file";

@@ -65,7 +65,7 @@ test("unread scheduler health and counters stay unknown and incomplete skew coun
  assert.match(change,/At least 1 jobs/);assert.match(change,/incomplete/);assert.match(change,/\/run\?id=gh-1/);assert.match(change,/recover/);
 });
 test("unloaded trigger files show the newest named doctor result and never fabricate empty queue or skew facts",async()=>{
- const { triggerGolden } = await import("./helpers/trigger-goldens.mjs");
+ const { triggerGolden } = await import("./helpers/trigger-fixtures.mjs");
  const page=String(await triggerGolden({invalid:true}));
  assert.match(page,/trigger 5: once needs number/);assert.match(page,/build3/);assert.match(page,/2m ago/);
  assert.doesNotMatch(page,/0 jobs in view would be refused|Jobs in line now:\s*none in view/);
@@ -73,7 +73,7 @@ test("unloaded trigger files show the newest named doctor result and never fabri
 });
 test("editor refusal examples are the shared planner's exact sentences and the refusal golden marks the actual field",async()=>{
  const { triggerRefusalExamples }=await import("../src/console/panels/trigger.mjs");
- const { TRIGGER_DRAW }=await import("./helpers/trigger-goldens.mjs");
+ const { TRIGGER_DRAW }=await import("./helpers/trigger-fixtures.mjs");
  const examples=triggerRefusalExamples();assert.equal(examples.length,4);assert.ok(examples.every(e=>typeof e.sentence==="string"&&e.sentence.includes(e.field)));
  const page=String(await TRIGGER_DRAW["trigger-editor-refusals.operator"]());
  assert.match(page,/aria-invalid="true" aria-describedby="trigger-turns-error"/);assert.match(page,/id="trigger-turns-error"/);assert.ok(page.includes(examples.find(e=>e.field==="maxTurns").sentence));

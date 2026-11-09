@@ -12,8 +12,8 @@ import { errorPage } from "../src/console/error-pages.mjs";
 import * as ui from "../src/console/kit.mjs";
 import { runTranscriptSection } from "../src/console/transcript.mjs";
 import * as configUi from "../src/console/panels/config-ui.mjs";
-import { setupGolden } from "./helpers/setup-goldens.mjs";
-import { CONFIGURATION_DRAW } from "./helpers/configuration-goldens.mjs";
+import { setupGolden } from "./helpers/setup-fixtures.mjs";
+import { CONFIGURATION_DRAW } from "./helpers/configuration-fixtures.mjs";
 import { CLIENT_STATES, LEDGER_CARDS, T } from "./helpers/client-states.mjs";
 import { Event, fakeTimers, parseDocument, runConsoleScript, shown, trapGlobalFetch } from "./helpers/script-dom.mjs";
 
@@ -1106,7 +1106,7 @@ stateTest(T.stale, async () => {
     es.emit("stale", odd);
     assert.equal(text(body), LIVE_NOTES.stale.body, JSON.stringify(odd));
   }
-  // A stale the server drew (a golden's) is not this script's to take back: neither an open nor a fresh takes it.
+  // A stale the server drew (a test's) is not this script's to take back: neither an open nor a fresh takes it.
   const drawn = boot(fleetPage().replace('<main id="main"', '<main id="main" class="stale"'));
   drawn.streams[0].emit("open");
   drawn.streams[0].emit("fresh", {});
@@ -1390,7 +1390,7 @@ stateTest(T.link, async () => {
   await far.fetch.open("/login/code").answer(200, { ok: true, next: "/runs" });
   assert.deepEqual(far.location.replaced, ["/runs"]);
   // The state the server drew stands: data-reveal shows it, and the script moves off it only
-  // for a missing code or an answer, never by forcing "wait". So each link golden, loaded with a code and its post held
+  // for a missing code or an answer, never by forcing "wait". So each link page, loaded with a code and its post held
   // (the width check's way), is measured in the state it draws; with no code it says so.
   for (const state of ["wait", "used", "nocode"]) {
     const markup = String(loginCodePage({ state }));

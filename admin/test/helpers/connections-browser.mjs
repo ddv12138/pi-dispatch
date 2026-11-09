@@ -10,7 +10,7 @@ import { makeHostRegistry } from "@edgehero/pi-dispatch/host-registry";
 import { makeFleetLease, endpointSlotKey, hash16 } from "@edgehero/pi-dispatch/fleet-lease";
 import { makeInFlight } from "@edgehero/pi-dispatch/scoped-limits";
 import { startSetupBrowserFixture, SETUP_BROWSER_TOKENS } from "./setup-browser.mjs";
-import { SETUP_AT } from "./setup-goldens.mjs";
+import { SETUP_AT } from "./setup-fixtures.mjs";
 
 export const CONNECTIONS_BROWSER_TOKENS = SETUP_BROWSER_TOKENS;
 export const CONNECTIONS_SLICES = Object.freeze(["receiver", "hooks", "endpoints", "all", "baseline"]);

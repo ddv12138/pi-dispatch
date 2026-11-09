@@ -2,7 +2,7 @@
  * The browser script's world, without a browser (issue #737): a small DOM that parses the console's own markup, a CSS
  * selector matcher for the selectors the script uses, events that bubble, focus, and stubs for `EventSource`, `fetch`,
  * the timers, `Date`, `location` and `history`. `runConsoleScript` runs the real `CONSOLE_SCRIPT` over a page the
- * server drew (`page()` output, a golden), so a test can drive it (a stream event, a fetch answered, a click, two
+ * server drew (`page()` output), so a test can drive it (a stream event, a fetch answered, a click, two
  * seconds passing) and read what the page shows.
  *
  * WHY EVERY GLOBAL IS A PARAMETER. The script is run with `new Function(...GLOBALS, CONSOLE_SCRIPT)`, and each name the
@@ -628,7 +628,7 @@ function serialize(n) {
   return `<${n.localName}${attrs}>${kids}</${n.localName}>`;
 }
 
-/** A whole page (`page()`'s output, a golden) as a document. */
+/** A whole page (`page()`'s output) as a document. */
 export function parseDocument(markup) {
   const doc = new Document();
   parseInto(doc, doc, String(markup));

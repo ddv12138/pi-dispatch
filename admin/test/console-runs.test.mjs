@@ -28,7 +28,7 @@ import { NO_EXPLANATION, NO_REASON_FAILED, OUTCOME_KEYS, OUTCOME_KEY_WORDS, shor
 
 // Issue #737: the runs screen's three panels (the RunsScreen, RunsPhone and DataTable cards) and the outcome cell the
 // runs table and the run page's chain share. Each panel is a pure model (the arguments it hands the kit) and its
-// drawing, so these tests read the models; the pages' goldens hold the markup they draw.
+// drawing, so these tests read the models; the page tests hold the markup they draw.
 
 const NOW = Date.UTC(2026, 9, 8, 15, 39, 8);
 

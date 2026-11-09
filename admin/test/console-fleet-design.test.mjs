@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FLEET_CARD_SNAPSHOT } from "./helpers/fleet-goldens.mjs";
+import { FLEET_CARD_SNAPSHOT } from "./helpers/fleet-fixtures.mjs";
 import { NOW } from "../../launch/fixture-deployment.mjs";
 import {
   fleetBar,

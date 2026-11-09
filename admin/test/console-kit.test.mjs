@@ -20,7 +20,7 @@ import { ACTIONS } from "../src/console/actions.mjs";
 import { HEADLINE_ID, SHELL_PANEL_IDS, loginCodePage, loginPage, shellHtml } from "../src/console/shell.mjs";
 import { forgeLinkOf } from "../src/read-model.mjs";
 import { OUTCOME_WORDS, REASON_WORDS, STATUS_KINDS, outcomeWord } from "../src/words.mjs";
-import { assertOwnReferences } from "./helpers/console-pages-harness.mjs";
+import { assertOwnReferences } from "./helpers/page-rules.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // Compare the rendered kit against the expected markup below.
@@ -1160,12 +1160,7 @@ test("RESERVED_ID_FAMILIES is every ordinal family the spend topology mints, eac
   const minted = [...new Set(Array.from(src.matchAll(/\bid: `([a-z]+)\$\{/g), (m) => m[1]))].sort();
   assert.deepEqual(minted, ["g", "n", "sg", "w"], "the families graph-html.mjs mints");
   assert.deepEqual([...ui.RESERVED_ID_FAMILIES].sort(), minted);
-  // Every topology id the spend golden draws (its chips and wires), by graph-html's own families, is refused.
-  const golden = readFileSync(new URL("./fixtures/console/insights-flows.operator.html", import.meta.url), "utf8");
-  const family = new RegExp(`^(?:${minted.join("|")})\\d+$`);
-  const drawn = Array.from(golden.matchAll(/\sid="([^"]+)"/g), (m) => m[1]).filter((id) => family.test(id));
-  assert.ok(drawn.includes("n0") && drawn.includes("w0") && drawn.length >= 10, drawn.join(" "));
-  for (const id of drawn) refused(id);
+  // Every id a topology mints, by graph-html's own families, is refused.
   for (const f of minted) for (const id of [`${f}0`, `${f}7`, `${f}123456`]) refused(id);
   // A family is the letters and a number, nothing more: a word that starts or ends like one is the page's own.
   for (const id of ["n", "g", "sg", "nav", "n1x", "n-1", "run1", "log2", "wsg1", "s1", "gn1", "w1-hint", "sg1a"]) allowed(id);

@@ -1,8 +1,8 @@
 /**
  * A headless Chrome driven over `--remote-debugging-pipe` (the DevTools protocol on fds 3 and 4, NUL-terminated JSON):
- * no browser library, no port, and nothing it loads can reach the network (`--host-resolver-rules`). Lifted out of
- * `.github/scripts/console-width-check.mjs` (issue #737), so the width check drives Chrome the way the console
- * once did for its README images.
+ * no browser library, no port, and nothing it loads can reach the network (`--host-resolver-rules`). Shared by the
+ * console browser checks (setup, models, answerer, connections), which drive Chrome the way the console once did for
+ * its README images.
  *
  * The caller owns the lifetime: `work` is a directory it removes, `children` the set of processes its own cleanup kills
  * whatever ends the run (a crash, a signal), and `Refusal` the error class it reports as an operator-actionable line.

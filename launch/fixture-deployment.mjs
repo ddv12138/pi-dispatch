@@ -467,7 +467,7 @@ export function doctorRuns(version) {
  */
 /**
  * `venue` (issue #712): the venue the records name, `local` by default, so the README's panel images and the console's
- * golden pages show a normal local run (the sandbox command, the plain absent sentences). It was `"docker"`, which is no
+ * fixture pages show a normal local run (the sandbox command, the plain absent sentences). It was `"docker"`, which is no
  * venue the backend table holds, while that kept the images byte-stable; the Venues view regenerated them on purpose,
  * and a run list naming an unknown venue on every row would have drawn a venue column the README has no use for.
  */

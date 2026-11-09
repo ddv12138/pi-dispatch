@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { TRIGGERS_CSS } from "../src/console/triggers-css.mjs";
 import test from "node:test";
 import assert from "node:assert/strict";
-import { triggerListGolden } from "./helpers/trigger-list-goldens.mjs";
+import { triggerListGolden } from "./helpers/trigger-list-fixtures.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
 
 const text = markup => cardText(markup);

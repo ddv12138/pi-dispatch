@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cardDocument } from "./helpers/card-structure.mjs";
-import { drawSpend, spendFixture } from "./helpers/spend-goldens.mjs";
+import { drawSpend, spendFixture } from "./helpers/spend-fixtures.mjs";
 import { spendTabs, spendControls, capacityHosts, capacityKey, capacityCoverage, spendToday } from "../src/console/panels/spend.mjs";
 
 // Read the rendered controls, rather than accepting a panel heading as evidence

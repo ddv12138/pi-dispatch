@@ -4,9 +4,9 @@ import { test } from "node:test";
 import { PAGES, loadPageData, parsePageQuery, renderPage, panelIds } from "../src/console/pages.mjs";
 import { modelsViewOf, modelsForAgent } from "../src/models-view.mjs";
 import { modelRoleForm, modelProposalSentence, MODELS_WORDS } from "../src/console/panels/models.mjs";
-import { consoleModelsFixture, MODELS_DRAW, MODELS_PANEL_STATES } from "./helpers/models-goldens.mjs";
+import { consoleModelsFixture, MODELS_DRAW, MODELS_PANEL_STATES } from "./helpers/models-fixtures.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
-import { assertClean } from "./helpers/console-pages-harness.mjs";
+import { assertClean } from "./helpers/page-rules.mjs";
 const AT = Date.UTC(2026, 9, 31, 12);
 const render = async (m, { role = "operator", readOnly = false } = {}) => String((await renderPage("models", { session: { name: "test", role }, query: {}, data: { now: AT, models: m }, readOnly })).html);
 

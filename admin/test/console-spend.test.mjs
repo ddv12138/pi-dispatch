@@ -32,8 +32,8 @@ import {
   spendChartsOf,
 } from "../src/insights-assembly.mjs";
 import { PAGE_CSS, pageCss } from "../src/console/page-css.mjs";
-import { SPEND_DRAW, spendFixture } from "./helpers/spend-goldens.mjs";
-import { assertClean } from "./helpers/console-pages-harness.mjs";
+import { SPEND_DRAW, spendFixture } from "./helpers/spend-fixtures.mjs";
+import { assertClean } from "./helpers/page-rules.mjs";
 
 const NOW = Date.parse("2026-10-29T12:00:00Z");
 const graph = {

@@ -6,7 +6,6 @@ import * as nodeFs from "node:fs";
 import { request } from "node:http";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { fileURLToPath } from "node:url";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { makeConsoleAudit, verifyConsoleAudit } from "@edgehero/pi-dispatch/console-audit";
 import { makeRedisClient, parseConnection } from "@edgehero/pi-dispatch/connection";
@@ -592,36 +591,6 @@ test("every action's fields are exactly the body keys its preview reads, through
   }
 });
 
-/** Every page and panel golden: the forms an operator submits, each with the control names it sends. */
-function goldenForms() {
-  const root = fileURLToPath(new URL("./fixtures/console/", import.meta.url));
-  const files = readdirSync(root, { recursive: true }).filter((f) => String(f).endsWith(".html"));
-  const forms = [];
-  for (const f of files) {
-    const text = readFileSync(join(root, String(f)), "utf8");
-    for (const m of text.matchAll(/<form\b[^>]*\sdata-action="([^"]+)"[^>]*>([^]*?)<\/form>/g)) {
-      forms.push({ structured: /data-structured="(priorities|envelope|trigger|resolver)"/.exec(m[0])?.[1] ?? null, file: String(f), action: m[1], names: [...m[2].matchAll(/<(?:input|select|textarea|button)\b[^>]*\sname="([^"]+)"/g)].map((n) => n[1]) });
-    }
-  }
-  return forms;
-}
-
-test("every form a golden draws names a known action and sends only fields that action takes", () => {
-  const forms = goldenForms();
-  assert.ok(forms.length >= 20, `the goldens hold the console's forms (${forms.length})`);
-  for (const { file, action, names, structured } of forms) {
-    const a = ACTIONS.find((x) => x.name === action);
-    assert.ok(a, `${file}: form[data-action="${action}"] is an action`);
-    const sent = structured === "trigger" ? ["trigger"] : structured === "priorities" ? ["projects", "validDays"] : structured === "envelope" ? ["envelope"] : structured === "resolver" ? names.filter((n) => n !== "kind" && (action === "secret-bundle-add" || n !== "format")) : names;
-    if (structured) {
-      if (structured === "resolver") assert.ok(["secret-profile-add", "secret-bundle-add"].includes(action), `${file}: the resolver picker uses an existing declaration action`);
-      else assert.equal(action, structured === "trigger" ? "trigger-add" : structured === "priorities" ? "priorities-set" : "envelope-set");
-      for (const name of names) assert.ok(structured === "resolver" ? ["kind", "name", "path", "format"].includes(name) : structured === "trigger" ? Object.values(WP.TRIGGER_ADD_FIELDS).some(fields=>fields.includes(name)) : structured === "priorities" ? name === "validDays" || /^weight:(?:_other|[a-z0-9-]+)$/.test(name) : ["window", "totalTokens", "enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"].includes(name) || /^(?:floor|weight):(?:_other|[a-z0-9-]+)$/.test(name), `${file}: structured ${name} is packed by bodyOf`);
-    }
-    for (const n of sent) assert.ok(a.fields.includes(n), `${file}: ${action} sends ${n}, which it does not take`);
-  }
-});
-
 // ---- the dry run and the diff ------------------------------------------------------------------------------------------
 
 test("dryRunFs keeps every write in memory: the real file and its directory are untouched", () => {
@@ -694,7 +663,7 @@ function settled(value) {
   return Object.fromEntries(Object.entries(value).filter(([, v]) => v !== null && !(typeof v === "object" && !Array.isArray(v) && Object.keys(v).length === 0)).map(([k, v]) => [k, settled(v)]));
 }
 
-/** The machine's own paths a page must never name (`console-pages-harness.mjs` `HOST_PATH_RE`). */
+/** The machine's own paths a page must never name (`page-rules.mjs` `HOST_PATH_RE`). */
 const HOST_PATH_RE = /\/Users\/|\/home\/|\/private\/|\/tmp\/|\/var\/folders\//;
 
 for (const [name, body, field, holds] of FILE_CASES) {

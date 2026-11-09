@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { FLEET_DRAW } from "./helpers/fleet-goldens.mjs";
+import { FLEET_DRAW } from "./helpers/fleet-fixtures.mjs";
 import { cardDocument } from "./helpers/card-structure.mjs";
 
 // Read production-rendered HTML, not PAGE_LAYOUT source. A panel can exist and still be in the wrong column.

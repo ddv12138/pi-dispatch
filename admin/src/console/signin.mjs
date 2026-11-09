@@ -7,8 +7,8 @@
  * EVERY STATE IS SERVER MARKUP. The browser script switches between states and never writes markup here: each notice
  * the page can show (why a session ended, why a sign-in was refused, the console being out of reach) and each state of
  * the link page is drawn by the server, hidden but the one it chose, and the script reveals one (`hidden`) and sets the
- * server's own refusal sentence through `textContent` (`[data-notice-text]`). So every state is a fragment a golden can
- * pin, and a query string can only select one of these sentences, never put its own bytes on the page
+ * server's own refusal sentence through `textContent` (`[data-notice-text]`). So every state is a fragment a test can
+ * draw, and a query string can only select one of these sentences, never put its own bytes on the page
  * (`session-ends.mjs` `endedReasonOf`).
  *
  * THE THREE IDS THE SCRIPT FINDS (`#login-form`, `#token`, `#notice`) are drawn here by hand, with the kit's class names:
@@ -79,7 +79,7 @@ const limitOf = (n) => (Number.isSafeInteger(n) && n > 0 ? n : undefined);
 
 /**
  * The notice a page opens with: `"ended-<reason>"` for a reason in `ENDED_REASONS`, a `SIGN_IN_NOTICES` kind as itself
- * (a panel golden draws a refusal this way; the server sends only an ended reason), else none. The two lists share no
+ * (a test draws a refusal this way; the server sends only an ended reason), else none. The two lists share no
  * name, so a value can only mean one of them.
  */
 function noticeKey(notice) {
@@ -145,7 +145,7 @@ function linkState(state, shown, { status, icon, title, body }, locale = "en") {
 /**
  * The one-time link's page, in `state` (`LINK_STATES`; the server draws `wait`, and the script switches to `used` or
  * `nocode`): what is happening, the command for a new link where one is needed, and the token form's link. `notice` is
- * one of `LINK_NOTICES` to draw shown, for a panel golden alone (as `signInContent`'s refusals): the server draws none,
+ * one of `LINK_NOTICES` to draw shown, for a test alone (as `signInContent`'s refusals): the server draws none,
  * and the script shows the one an answer selects.
  */
 export function linkContent({ state = "wait", notice = null, locale = "en" } = {}) {

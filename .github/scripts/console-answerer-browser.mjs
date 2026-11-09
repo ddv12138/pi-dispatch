@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { pathToFileURL } from "node:url";
 import { openChrome } from "../../launch/chrome-pipe.mjs";
-import { findChrome, chromeLaunchArgs } from "./console-width-check.mjs";
+import { findChrome, chromeLaunchArgs } from "./chrome-browser.mjs";
 import { startAnswererBrowserFixture, ANSWERER_BROWSER_TOKENS } from "../../admin/test/helpers/answerer-browser.mjs";
 import { SECURITY_HEADERS } from "../../admin/src/console/headers.mjs";
 import { checkModelsBrowser } from "./console-models-browser.mjs";

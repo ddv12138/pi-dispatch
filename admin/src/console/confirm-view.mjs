@@ -6,7 +6,7 @@
  * EVERY STATE IS SERVER MARKUP. The browser script only moves the slot, toggles `hidden`, sets `textContent` and puts an
  * answer's `html` into the slot (`slot.innerHTML`, the one markup write it makes for a write). So the skeleton it shows
  * while it waits, the preview, the no-change bar, each refusal and the bulk results are all drawn here, escaped by `html`
- * like any panel, and each can be pinned by a panel golden. A preview answer without `html` (a proxy's error page, a
+ * like any panel, and each can be pinned by a test. A preview answer without `html` (a proxy's error page, a
  * dropped connection) is said through `[data-slot-message]` as text, never as markup.
  *
  * The buttons the script wires are named by data attributes, a closed set (`ACT_ATTRS`): `data-confirm` (send the
@@ -103,7 +103,7 @@ function skeletonHtml() {
 
 /**
  * The one confirm slot of a page (`#confirm-slot`): a polite live region, hidden until a form asks for a preview,
- * holding the previewing skeleton (or `inner`, for a golden of another state). The shell draws it once, after the
+ * holding the previewing skeleton (or `inner`, for another state's page). The shell draws it once, after the
  * page's content, for an operator on a console that is not read-only; a viewer never gets one.
  */
 export function confirmSlotHtml({ open = false, inner = null } = {}) {

@@ -26,7 +26,7 @@ import { uiText } from "./locale.mjs";
  *     cards draw it: SVG geometry attributes (`width="62.5%"`, `stroke-dasharray`), every number through `svgNum`, the
  *     one clamping formatter, so a NaN or a runaway value can never reach an attribute.
  *   - A link goes only where a console link may: a console path (`pageHref` builds one, with its query) or an in-page
- *     `#id`, the two forms `console-pages-harness.mjs` `assertOwnReferences` accepts; anything else, `javascript:`, a
+ *     `#id`, the two forms `page-rules.mjs` `assertOwnReferences` accepts; anything else, `javascript:`, a
  *     bare `?query` and an `https:` URL included, throws. A link OUT of the console (a run's issue, a reasons docs page)
  *     is `outLink`'s alone, which stamps the `rel` and `target` that rule asks of one. The kit test holds every link
  *     form the kit writes to that rule, so the two cannot drift apart.
@@ -979,7 +979,7 @@ export function approvalForms({ jobId, id, locale = "en" }) {
  * A link out of the console (a run's issue on its forge): `href` an http(s) URL in its own
  * canonical form with no user name (`outHrefOf`; every link `forgeLinkOf` builds is one), drawn as the
  * design's link (`code` sets it in the code face), opening in a new tab that gets no handle on this window and no
- * Referer. The attributes are written in exactly the order `console-pages-harness.mjs`'s outbound-link rule reads
+ * Referer. The attributes are written in exactly the order `page-rules.mjs`'s outbound-link rule reads
  * (`href`, then `rel="noreferrer noopener"`, then `target="_blank"`, last), the one shape of reference to another host
  * a page may carry. `btn` (a `btn` kind or a list of them, as `btn` takes) draws the link as that button instead, as
  * the SetupScreen card draws "What triggers can do" beside its primary: a ghost button, the same link otherwise.
