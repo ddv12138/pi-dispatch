@@ -5,7 +5,7 @@
       "run": {
         "kind": "gitlab",
         "flow": "spec-run",
-        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.4",
         "statusComment": true,
         "maxTurns": 300
       }
@@ -15,7 +15,7 @@
       "run": {
         "kind": "gitlab",
         "flow": "ticket-run",
-        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.4",
         "resume": true,
         "statusComment": true,
         "maxTurns": 120,
@@ -27,7 +27,7 @@
       "run": {
         "kind": "gitlab",
         "flow": "ticket-merge",
-        "image": "docker.io/ddv12138/pi-job-java21:4.3.3",
+        "image": "docker.io/ddv12138/pi-job-java21:4.3.4",
         "statusComment": true,
         "maxTurns": 120,
         "skillsDir": "/opt/pi-skills"
