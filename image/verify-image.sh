@@ -210,10 +210,6 @@ if [ -z "$capabilities" ] || [ "$capabilities" = "<no value>" ]; then
 else
 	for capability in $(echo "$capabilities" | tr ',' ' '); do
 		case "$capability" in
-			tokenBudget)
-				docker run --rm --entrypoint grep "$IMAGE_REF" -q "PI_MAX_TOKENS" /app/image/runner/src/config.mjs 2>/dev/null \
-					|| fail "the image declares 'tokenBudget' but its baked runner never reads PI_MAX_TOKENS -- the settle-time budget would not exist"
-				;;
 			replicas)
 				docker run --rm --entrypoint grep "$IMAGE_REF" -q "the branch your prompt names" /opt/pi-dispatch/HARD_RULES.md 2>/dev/null \
 					|| fail "the image declares 'replicas' but its baked HARD_RULES.md still hard-codes a single branch name -- the system prompt would contradict the replica prompt and both replicas would push to one branch"
@@ -345,7 +341,7 @@ DOC
 				mcp_started=$(date +%s)
 				mcp_out=$(docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$mcp_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key \
 					-e PI_MCP_SERVERS=stub -e STUB_TOKEN=named -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && mcp_code=0 || mcp_code=$?
 				mcp_took=$(($(date +%s) - mcp_started))
@@ -434,7 +430,7 @@ PROBE
 				auth_key=$(od -An -N32 -tx1 /dev/urandom | tr -d ' \n')
 				auth_out=$(printf '%s\n' "$auth_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges -v "$auth_job:/job:ro" \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_EXIT_AUTH=stdin \
 					"$IMAGE_REF" 2>&1) || true
 				rm -rf "$auth_job"
 				auth_exit=$(echo "$auth_out" | grep '"event":"exit"' | tail -1)
@@ -574,7 +570,7 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				ad_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$ad_dir/job:/job:ro" -v "$ad_dir/ws:/workspace:ro" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 "$IMAGE_REF" 2>&1) && ad_code=0 || ad_code=$?
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key "$IMAGE_REF" 2>&1) && ad_code=0 || ad_code=$?
 				rm -rf "$ad_dir"
 				[ "$ad_code" = 2 ] && echo "$ad_out" | grep -q '"reason":"answer-draft-refused"' \
 					&& ! echo "$ad_out" | grep -q 'ANSWER-DRAFT-EXTENSION-EXECUTED' \
@@ -596,7 +592,7 @@ assert.throws(() => assertThinkingLevel({ reasoning: false }, "high"));
 				pc_run() {
 					docker run --rm --network none --cap-drop=ALL --security-opt no-new-privileges -v "$pc_dir/job:/job:ro" \
 						-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-						-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 "$@" "$IMAGE_REF" 2>&1 | grep '"event":"exit"' | tail -1
+						-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key "$@" "$IMAGE_REF" 2>&1 | grep '"event":"exit"' | tail -1
 				}
 				pc_as() { pc_run -e "PI_PACKAGES=/job/canary/$1" -e "PI_PACKAGE_CANARY=/job/canary/$1"; }
 				pc_good=$(pc_as good--1.0.0--aaaaaaaa)
@@ -630,7 +626,7 @@ QUESTIONGROUP
 				qg_out=$(printf '%s\n' "$qg_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$qg_dir/job:/job:ro" -v "$qg_dir/ws:/workspace:ro" -v "$qg_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && qg_code=0 || qg_code=$?
 				qg_exit=$(echo "$qg_out" | grep '"event":"exit"' | tail -1)
 				qg_mac=$(echo "$qg_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -660,7 +656,7 @@ QUESTIONGROUP
 				watch_out=$(docker run --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_EXCLUDE_TOOLS=bash,edit,write,powershell -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && watch_code=0 || watch_code=$?
 				watch_exit=$(echo "$watch_out" | grep '"event":"exit"' | tail -1)
 				watch_active=$(echo "$watch_out" | grep '"event":"tools_excluded"' | tail -1)
@@ -676,7 +672,7 @@ WATCHDECIDE
 				watch_gate=$(printf '%s\n' "$watch_key" | docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
 					-v "$watch_dir/job:/job:ro" -v "$watch_dir/ws:/workspace:ro" -v "$watch_dir/outbox:/outbox" --workdir /workspace \
 					-e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
+					-e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e OPENROUTER_API_KEY=not-a-real-key -e PI_EXIT_AUTH=stdin -e NODE_OPTIONS=--import=/job/auth-refusal.mjs \
 					"$IMAGE_REF" 2>&1) && watch_gate_code=0 || watch_gate_code=$?
 				watch_gate_exit=$(echo "$watch_gate" | grep '"event":"exit"' | tail -1)
 				watch_mac=$(echo "$watch_gate_exit" | sed -nE 's/.*,"auth":"([0-9a-f]{64})"\}$/\1/p')
@@ -750,13 +746,11 @@ docker run --rm --entrypoint grep "$IMAGE_REF" -q "pi-dispatch-guardrails-v1" /o
 	|| fail "the guardrails sentinel is missing from /opt/pi-dispatch/HARD_RULES.md -- the runner reads its safety floor from there."
 ok "guardrails are baked where the runner reads them"
 
-# The two gated personas (issue #505): the loader composes each only when its mount or file is there, and reads it from
-# here. A missing file is no error, just a prompt without the protocol, so the image check is what notices.
+# The gated persona (issue #505): the loader composes it only when /outbox is there, and reads it from here. A missing
+# file is no error, just a prompt without the protocol, so the image check is what notices.
 docker run --rm --entrypoint grep "$IMAGE_REF" -q "pi-dispatch-outbox-v1" /opt/pi-dispatch/OUTBOX_PROTOCOL.md 2>/dev/null \
 	|| fail "the outbox sentinel is missing from /opt/pi-dispatch/OUTBOX_PROTOCOL.md -- a local job would run without the outbox protocol."
-docker run --rm --entrypoint grep "$IMAGE_REF" -q "pi-dispatch-portfolio-v1" /opt/pi-dispatch/PORTFOLIO_PROTOCOL.md 2>/dev/null \
-	|| fail "the portfolio sentinel is missing from /opt/pi-dispatch/PORTFOLIO_PROTOCOL.md -- a portfolio job would run without the plan protocol."
-ok "the outbox and portfolio protocols are baked where the runner reads them"
+ok "the outbox protocol is baked where the runner reads it"
 
 # Root-owned and NOT writable by the runtime user, or the floor is advisory.
 if docker run --rm --entrypoint sh "$IMAGE_REF" -c 'echo x >> /opt/pi-dispatch/HARD_RULES.md' 2>/dev/null; then

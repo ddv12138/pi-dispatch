@@ -24,22 +24,20 @@ test("every module that names a container path follows the layout table", () => 
 	const src = fileURLToPath(new URL("../src/", import.meta.url));
 	const script = `
 		const packages = await import(${JSON.stringify(`${src}packages.mjs`)});
-		const plan = await import(${JSON.stringify(`${src}plan-check.mjs`)});
 		const inbox = await import(${JSON.stringify(`${src}inbox.mjs`)});
 		const config = await import(${JSON.stringify(`${src}config.mjs`)});
 		const loader = await import(${JSON.stringify(`${src}loader.mjs`)});
 		const mcp = await import(${JSON.stringify(`${src}mcp.mjs`)});
-		console.log(JSON.stringify({ skills: packages.PROTECTED_SKILL_ROOTS, outbox: plan.OUTBOX_DIR, snapshot: plan.SNAPSHOT_PATH, inbox: inbox.INBOX_DIR, home: config.HOME_FORBIDDEN_ROOTS,
-			loader: [loader.OUTBOX_MOUNT, loader.PORTFOLIO_SNAPSHOT_PATH, loader.JOB_PI_DIR, loader.TRIGGER_SKILLS_DIR, loader.GLOBAL_PI_DIR, loader.WORKSPACE], mcp: mcp.JOB_MCP_PATH }));
+		console.log(JSON.stringify({ skills: packages.PROTECTED_SKILL_ROOTS, outbox: loader.OUTBOX_MOUNT, inbox: inbox.INBOX_DIR, home: config.HOME_FORBIDDEN_ROOTS,
+			loader: [loader.OUTBOX_MOUNT, loader.JOB_PI_DIR, loader.TRIGGER_SKILLS_DIR, loader.GLOBAL_PI_DIR, loader.WORKSPACE], mcp: mcp.JOB_MCP_PATH }));
 	`;
 	const read = () => JSON.parse(execFileSync(process.execPath, ["--input-type=module", "-e", script], { env: process.env, encoding: "utf8" }));
 	assert.deepEqual(read(), {
 		skills: ["/job/pi/skills", "/job/trigger-skills", "/opt/pi-global/skills"],
 		outbox: "/outbox",
-		snapshot: "/job/portfolio.json",
 		inbox: "/inbox",
 		home: ["/workspace", "/job", "/outbox", "/session"],
-		loader: ["/outbox", "/job/portfolio.json", "/job/pi", "/job/trigger-skills", "/opt/pi-global", "/workspace"],
+		loader: ["/outbox", "/job/pi", "/job/trigger-skills", "/opt/pi-global", "/workspace"],
 		mcp: "/job/mcp.json",
 	});
 });

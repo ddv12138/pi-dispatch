@@ -15,15 +15,6 @@ export const OUTBOX_PROTOCOL_PATH = "/opt/pi-dispatch/OUTBOX_PROTOCOL.md";
 /** Read-write mount a local job receives; its presence is what makes the outbox protocol relevant. */
 export const OUTBOX_MOUNT = LAYOUT.outbox;
 
-/** Where the image bakes the portfolio protocol (issue #505). Documentation for the plan a portfolio job may write. */
-export const PORTFOLIO_PROTOCOL_PATH = "/opt/pi-dispatch/PORTFOLIO_PROTOCOL.md";
-
-/**
- * The snapshot the worker writes for a portfolio job only (INT-CONTAINER-JOB-INPUTS, issue #505); its presence is what
- * makes the portfolio protocol relevant. On the /job:ro bind that already exists, so no mount says it.
- */
-export const PORTFOLIO_SNAPSHOT_PATH = `${LAYOUT.job}/portfolio.json`;
-
 /** Read-only mount the worker materialises the project's .pi/ into, from the default-branch SHA. */
 export const JOB_PI_DIR = `${LAYOUT.job}/pi`;
 
@@ -569,8 +560,6 @@ export function buildResourceLoader({
 	triggerSkillsDir = TRIGGER_SKILLS_DIR,
 	outboxMount = OUTBOX_MOUNT,
 	outboxProtocolPath = OUTBOX_PROTOCOL_PATH,
-	portfolioPath = PORTFOLIO_SNAPSHOT_PATH,
-	portfolioProtocolPath = PORTFOLIO_PROTOCOL_PATH,
 	// ON, matching the runtime posture (REQ-GLOBAL-PI-OVERLAY): the operator staged that dir themselves,
 	// so loading it is the default and PI_GLOBAL_ALLOW_EXTENSIONS=0 is the opt-out. run-job.mjs always
 	// passes an explicit value, so this default is only ever seen by a directly-constructed loader --
@@ -621,10 +610,6 @@ export function buildResourceLoader({
 	// pays for the protocol. Evaluated ONCE here at loader build, not per message, so the
 	// assembled prompt is byte-identical across turns (CONST-PERSONA-IN-CACHED-PREFIX).
 	const outboxProtocol = existsSync(outboxMount) ? readIfExists(outboxProtocolPath) : undefined;
-	// The portfolio protocol (issue #505) the same way: only when the worker wrote /job/portfolio.json, which it does for a
-	// job whose cron trigger the operator flagged `run.portfolio`, and read ONCE here so the prompt stays byte-identical
-	// across turns. After the outbox protocol, whose channel it uses, and before the operator's and the repo's personas.
-	const portfolioProtocol = existsSync(portfolioPath) ? readIfExists(portfolioProtocolPath) : undefined;
 	// The roots a staged package may never take a skill name from. Both are listed unconditionally: a
 	// root that is not mounted contributes no skill to protect, so gating it would only add a way to
 	// forget one. The baked tier joins them for the same reason a package must not shadow the floor the
@@ -742,7 +727,7 @@ export function buildResourceLoader({
 				packageRoots: loadedPackagePaths,
 				protectedPrompts,
 			}),
-		appendSystemPromptOverride: () => [guardrails, outboxProtocol, portfolioProtocol, globalPersona, projectPersona].filter(Boolean),
+		appendSystemPromptOverride: () => [guardrails, outboxProtocol, globalPersona, projectPersona].filter(Boolean),
 	});
 }
 

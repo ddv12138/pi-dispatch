@@ -11,7 +11,6 @@ const read = (rel) => readFileSync(new URL(rel, import.meta.url), "utf8");
 
 const PERSONAS = [
 	{ file: "OUTBOX_PROTOCOL.md", marker: "OUTBOX-SENTINEL", sentinel: "pi-dispatch-outbox-v1" },
-	{ file: "PORTFOLIO_PROTOCOL.md", marker: "PORTFOLIO-SENTINEL", sentinel: "pi-dispatch-portfolio-v1" },
 ];
 
 for (const { file, marker, sentinel } of PERSONAS) {
@@ -25,18 +24,8 @@ for (const { file, marker, sentinel } of PERSONAS) {
 	});
 }
 
-test("the loader reads the protocols from the paths the Dockerfile copies them to", () => {
+test("the loader reads the outbox protocol from the path the Dockerfile copies it to", () => {
 	const loader = read("../src/loader.mjs");
 	assert.match(loader, /export const OUTBOX_PROTOCOL_PATH = "\/opt\/pi-dispatch\/OUTBOX_PROTOCOL\.md";/);
-	assert.match(loader, /export const PORTFOLIO_PROTOCOL_PATH = "\/opt\/pi-dispatch\/PORTFOLIO_PROTOCOL\.md";/);
-	// Issue #683: the snapshot sits in the job dir of the container's layout, `/job` on a binding venue (layout.test.mjs).
-	assert.match(loader, /export const PORTFOLIO_SNAPSHOT_PATH = `\$\{LAYOUT\.job\}\/portfolio\.json`;/);
-	assert.match(loader, /\[guardrails, outboxProtocol, portfolioProtocol, globalPersona, projectPersona\]/, "the order is the contract");
-});
-
-test("the portfolio persona has no dashes as punctuation and names no tool of the operator", () => {
-	const text = read("../../../guardrails/PORTFOLIO_PROTOCOL.md");
-	// The en and em dash by code point (8211, 8212), so this line carries neither character itself.
-	assert.ok(![...text].some((c) => c.codePointAt(0) === 8211 || c.codePointAt(0) === 8212));
-	assert.doesNotMatch(text, /dispatch_/, "a job never sees an admin tool, so the persona must not name one");
+	assert.match(loader, /\[guardrails, outboxProtocol, globalPersona, projectPersona\]/, "the order is the contract");
 });

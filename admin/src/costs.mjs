@@ -170,9 +170,10 @@ function floorCounted(tokens) {
  * container killed before its exit line may have no exit code, and an old record has no `budgetReserved`. A record
  * that does not SAY `false` (null, or absent on an old record) keeps the floor below.
  *
- * `budgetReserved` is HISTORY now: token budgets, windows and allocation are gone (C2), so a new record never carries
- * it. The field stays readable because an old record's `false` is still the exact statement that it refused before any
- * spend -- the one place a settled total may honestly read 0 instead of a floor.
+ * `budgetReserved` is HISTORY now: token budgets, windows and allocation are gone (C2), so the budget it once named
+ * no longer exists. The marker itself still rides NEW records, written by `worker/src/processor.mjs`: `false` on a
+ * refusal before a container ran, `true` once one did (or may have spent). Its `false` is still the exact statement
+ * that the run refused before any spend -- the one place a settled total may honestly read 0 instead of a floor.
  *
  * Not every refusal before spend matches, and those stay floors, on purpose (a residual, DES-COST-FOLD-BY-SCAN): a
  * refusal that kept the budget slot it reserved (`budgetReserved: true`) does. A container the runtime

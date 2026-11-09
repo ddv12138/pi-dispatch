@@ -52,7 +52,6 @@ import { createJobModelRuntime, installDefaultModelsPath, loadPiAuthStorage } fr
 import { countPackageResources, findShadowedSkills, isFlowLoaded, owningRoot } from "./src/packages.mjs";
 import { isNestedRunner, runAsPiCli } from "./src/child-route.mjs";
 import { createChildWatch } from "./src/child-watch.mjs";
-import { precheckAtExit } from "./src/plan-check.mjs";
 import { openSessionManager } from "./src/session.mjs";
 import { assertThinkingLevel, openForkSessionManager, recordForkSettings } from "./src/fork.mjs";
 import { attachSessionMeter } from "./src/token-budget.mjs";
@@ -769,12 +768,6 @@ async function main() {
 	const providerFailure = outcome.code === EXIT_INFRA && outcome.reason === "error" ? failureObserver.failure(terminal) : null;
 	// A root event bus cannot prove that a child or another session ran no tools. Unknown is never replay-safe.
 	const replaySafe = providerReplaySafe({ toolsStarted: toolStarts.toolsStarted, observer: failureObserver, tokens });
-	// Issue #505: a read-only look at /outbox/priorities.json, logged as enum tokens so the job's log says what the host
-	// is likely to make of the plan. Its result is DISCARDED and it never throws: the host decides after exit, and nothing
-	// a plan file holds may change this exit code or this exit line.
-	try {
-		precheckAtExit({ log });
-	} catch {}
 	// capExitMessage: a provider's error body is unbounded, and the worker reads this line from a bounded
 	// tail, so an uncapped message can push `code` and `reason` out of what the host ever sees.
 	exitWriter.writeExit({ ...capExitMessage(outcome), turns: budget.state.turns, retryTurns: budget.state.retryTurns, ...roleExitFields(), tokens, ...(usage ? { usage } : {}), ...(context ? { context } : {}), session: { resumed: sessionResumed, reason: sessionReason }, ...(outcome.reason === "awaiting-approval" ? { approval } : {}), ...(outcome.reason === "awaiting-input" && awaitInput?.state.questionRefDigest ? { questionRefDigest: awaitInput.state.questionRefDigest } : {}), replaySafe, toolsStarted: toolStarts.toolsStarted, ...(providerFailure ? { providerFailure } : {}), ...(answerTools?.state.receipt ? { answerDraftDigest: answerTools.state.receipt } : {}), ...recoveryField(), ...steerField() });

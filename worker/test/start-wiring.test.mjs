@@ -1621,7 +1621,7 @@ test("issue #499 part B: a live reload of EITHER file is judged as a pair: a dan
 		// 1. The limits file gains a row for a project not defined anywhere: kept out, last-good stays, both files named.
 		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", concurrent: 2 }] }));
 		const lastLimits = limits.current;
-		mod.reloadScopedLimits(config, limits, log, null, pair);
+		mod.reloadScopedLimits(config, limits, log, pair);
 		assert.equal(limits.current, lastLimits, "the SAME array object: last-good untouched");
 		assert.equal(logs.at(-1).event, "scoped_limits_reload_invalid");
 		assert.match(logs.at(-1).fields.reason, /index 0 \("project:tools"\)/);
@@ -1646,14 +1646,14 @@ test("issue #499 part B: a live reload of EITHER file is judged as a pair: a dan
 
 		// 4. The row is removed: the limits reload sees projects.json on disk agree, and takes both.
 		writeFileSync(limitsFile, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 4 }] }));
-		mod.reloadScopedLimits(config, limits, log, null, pair);
+		mod.reloadScopedLimits(config, limits, log, pair);
 		assert.deepEqual(limits.current.map((l) => l.scope), ["acme/web"]);
 		assert.deepEqual(projects.current.map((p) => p.id), ["shop"], "the projects edit kept out in step 3 applied with the row's removal");
 
 		// 5. With the other file mid-edit (not loading), a side that agrees with the other's LIVE list still applies.
 		writeFileSync(projectsFile, "{ broken");
 		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", concurrent: 1 }] }));
-		mod.reloadScopedLimits(config, limits, log, null, pair);
+		mod.reloadScopedLimits(config, limits, log, pair);
 		assert.deepEqual(limits.current.map((l) => l.scope), ["project:shop"]);
 		assert.deepEqual(projects.current.map((p) => p.id), ["shop"]);
 	} finally {
@@ -1685,7 +1685,7 @@ for (const variant of ["projects.json drops shop", "projects.json missing", "pro
 			assert.equal(logs.at(-1).event, "projects_reload_invalid");
 			assert.deepEqual(projects.current.map((p) => p.id), ["shop"], "the live projects keep shop");
 			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 4 }, { scope: "project:shop", concurrent: 2 }] }));
-			mod.reloadScopedLimits(config, limits, log, null, pair);
+			mod.reloadScopedLimits(config, limits, log, pair);
 			assert.equal(logs.at(-1).event, "scoped_limits_reloaded");
 			assert.equal(limits.current.find((r) => r.scope === "acme/web").concurrent, 4, "the edit is live");
 		} finally {
@@ -1722,7 +1722,7 @@ test("C2: reloadScopedLimits refuses a token or model row, keeping the last good
 		for (const row of [{ scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }]) {
 			logs.length = 0;
 			writeFileSync(file, JSON.stringify({ version: 2, limits: [row] }));
-			mod.reloadScopedLimits(config, ref, log, null);
+			mod.reloadScopedLimits(config, ref, log);
 			assert.equal(ref.current, good, "the last good list stands, the SAME object");
 			assert.equal(logs.at(-1).event, "scoped_limits_reload_invalid");
 			assert.match(logs.at(-1).fields.reason, /retired with the token budgets/);

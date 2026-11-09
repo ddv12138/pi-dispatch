@@ -268,7 +268,6 @@ RUN mkdir -p /workspace && chmod 0755 /workspace
 # would delete the floor from the prompt with no error. The runner reads this path explicitly.
 COPY guardrails/HARD_RULES.md /opt/pi-dispatch/HARD_RULES.md
 COPY guardrails/OUTBOX_PROTOCOL.md /opt/pi-dispatch/OUTBOX_PROTOCOL.md
-COPY guardrails/PORTFOLIO_PROTOCOL.md /opt/pi-dispatch/PORTFOLIO_PROTOCOL.md
 
 # The skills every job carries, baked rather than deployed (same trust class as the floor above: root-owned, and
 # `chmod -R a-w /opt/pi-dispatch` below takes their write bit, so an agent cannot rewrite the instructions it is
@@ -423,7 +422,7 @@ LABEL dev.pi-dispatch.forges="github,gitlab,forgejo"
 # subscriptionAuth (#781) verifies access lifetime and exact community receipts before loading code,
 # then holds final shaped requests to the admitted model/account and existing cost ticket.
 # verify-image.sh exercises receipt rejection, deadline checks and final-payload cost refusal offline.
-LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,tokenBudget,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
+LABEL dev.pi-dispatch.capabilities="replicas,commands,excludeTools,anyUid,modelPolicy,modelRoles,modelFailover,exitAuth,mcp,forgeMcp,awaitInput,approvalGates,reportProgress,recover,steer,fork,watch,questionGrouping,answerDraft,subscriptionAuth,packageCanary"
 
 USER pi
 WORKDIR /workspace

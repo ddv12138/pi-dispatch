@@ -468,11 +468,20 @@ const RETIRED_CAP_ENV_NAMES = Object.freeze(["PI_DAILY_CAP", "PI_WEEKLY_CAP", "P
 const RETIRED_TOKEN_ENV_NAMES = Object.freeze(["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]);
 
 /**
+ * The delegation envelope was removed with the allocation it declared: there is no envelope file, no
+ * env key naming one and no delegated allocation anywhere in the system. Refused in the same posture as
+ * the caps and the token budgets: a deployment that believes it is running under an envelope must not
+ * silently run without one.
+ */
+const RETIRED_ENVELOPE_ENV_NAMES = Object.freeze(["PI_ENVELOPE_FILE"]);
+
+/**
  * Parse the worker's config from `env` (default process.env). `PI_MAX_TURNS` and the concurrency bound
  * are what remain of the spend controls: the token budgets are gone, and every token and dollar knob an
  * older deployment may still carry is refused outright with the removal named. The retired job-start
  * count caps (`PI_DAILY_CAP`, `PI_WEEKLY_CAP`, `PI_MONTHLY_CAP`) and the soft-hold band
- * (`PI_SOFT_HOLD_PCT`) are refused the same way.
+ * (`PI_SOFT_HOLD_PCT`) are refused the same way, as is `PI_ENVELOPE_FILE` (the envelope and the
+ * delegated allocation it declared are gone).
  *
  * The operator's OWN staged setup is the deliberate exception: `allowGlobalExtensions` defaults to ON
  * (REQ-GLOBAL-PI-OVERLAY). Staging is itself the vetting step, so the overlay an operator built is the
@@ -486,6 +495,9 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 	}
 	for (const name of RETIRED_TOKEN_ENV_NAMES) {
 		if (env[name] !== undefined && env[name] !== "") throw configError(`${name} was retired with the token budgets; remove it (the deployment no longer has a token budget)`);
+	}
+	for (const name of RETIRED_ENVELOPE_ENV_NAMES) {
+		if (env[name] !== undefined && env[name] !== "") throw configError(`${name} was retired with the allocation envelope; remove it (the deployment no longer has an envelope or a delegated allocation)`);
 	}
 	const model = modelFrom(env); // an exact model version, not a moving alias; deterministic per CONST-PI-VERSION-PINNED. Shape-checked (#673)
 	// #227. Hoisted above the object because `defaultBackend` INDEXES `backends`, and a property cannot read

@@ -110,10 +110,18 @@ test("readOverlay: every token budget key is refused by name with the removal, n
 	assert.ok(readObj({ maxTokens: 5, concurrency: 3 }).invalid);
 });
 
-test("readOverlay: a token key near miss (env name, snake case, look-alikes) is refused by name, never dropped", () => {
-	for (const [key, meant] of [["PI_MAX_TOKENS", "maxTokens"], ["tokensTotal", "maxTokens"], ["TOTAL_TOKENS", "maxTokens"], ["PI_DAILY_TOKEN_CAP", "dailyTokenCap"], ["pi.daily.token.cap", "dailyTokenCap"], ["PI_WEEKLY_TOKEN_CAP", "weeklyTokenCap"], ["PI_MONTHLY_TOKEN_CAP", "monthlyTokenCap"]]) {
+test("readOverlay: a token or cap key near miss (env name, snake case, look-alikes) is refused by name, never dropped", () => {
+	for (const [key, meant, removal] of [
+		["PI_MAX_TOKENS", "maxTokens", "token budgets"], ["tokensTotal", "maxTokens", "token budgets"], ["TOTAL_TOKENS", "maxTokens", "token budgets"],
+		["PI_DAILY_TOKEN_CAP", "dailyTokenCap", "token budgets"], ["pi.daily.token.cap", "dailyTokenCap", "token budgets"],
+		["PI_WEEKLY_TOKEN_CAP", "weeklyTokenCap", "token budgets"], ["PI_MONTHLY_TOKEN_CAP", "monthlyTokenCap", "token budgets"],
+		["PI_DAILY_CAP", "dailyCap", "job-start caps"], ["pi_daily_cap", "dailyCap", "job-start caps"], ["daily_cap", "dailyCap", "job-start caps"],
+		["PI_WEEKLY_CAP", "weeklyCap", "job-start caps"], ["weekly_cap", "weeklyCap", "job-start caps"],
+		["PI_MONTHLY_CAP", "monthlyCap", "job-start caps"], ["monthly_cap", "monthlyCap", "job-start caps"],
+		["PI_SOFT_HOLD_PCT", "softHoldPct", "job-start caps"], ["soft_hold_pct", "softHoldPct", "job-start caps"],
+	]) {
 		const res = readObj({ [key]: 2 });
-		assert.equal(res.invalid, `${key} is not a settings key: ${meant} was retired with the token budgets; delete it from the settings file`, key);
+		assert.equal(res.invalid, `${key} is not a settings key: ${meant} was retired with the ${removal}; delete it from the settings file`, key);
 	}
 	// An unknown key that is not an exact shape match is still dropped and logged.
 	const logged = [];

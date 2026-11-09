@@ -986,7 +986,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		const recordAfterGate = (args) => recordRun({ ...args, project, size, capacity, earlier, maxTurns: pickupMaxTurns });
 
 		// The MATCHED ROW's scope keys both the in-process slot and the fleet lease (issue #498), the same string
-		// `tokenCapsFor` hashes below and the boot sweeper hashes from the file: a qualified `github:acme/web` row holds
+		// the fleet lease hashes below and the boot sweeper hashes from the file: a qualified `github:acme/web` row holds
 		// GitHub jobs only, a bare `acme/web` row holds every forge's under the key it always had. With no row it is the
 		// job's canonical scope, so the folder mutex is keyed exactly as before.
 		const scope = rowScopeFor(job.data, limits);
@@ -1094,7 +1094,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		const modelAttemptId = modelAttemptIdOf(job.queueName ?? QUEUE, job.id);
 		if (!settingsThrew && !settings?.invalid) {
 			try {
-				let effective = resolveModelRoles(effectiveJobOf(job.data, settings, deps?.allowedModels ?? null, (event, fields) => deps?.log?.(event, { jobId: job.id, ...fields })), job.data.watch || job.data.answerDraft ? {} : await readModelRoles(), project, { authoredProvider: job.data.provider });
+				let effective = resolveModelRoles(effectiveJobOf(job.data, settings, deps?.allowedModels ?? null), job.data.watch || job.data.answerDraft ? {} : await readModelRoles(), project, { authoredProvider: job.data.provider });
 				selectedEffective = effective;
 				if (effective.fallbackModels !== undefined || (effective.recover === true && effective.recoveryOf)) {
 					const endpoints = modelEndpoints?.() ?? [];

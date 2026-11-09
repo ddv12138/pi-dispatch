@@ -120,16 +120,17 @@ Maven settings are baked at build time, not passed by the job:
 `pi/issue-<spec>`; it never merges or pushes the spec branch. `ticket-merge` drains the open ticket -> spec MRs,
 serializes them per spec with the lock branch `pi/spec-lock-<n>`, and merges only after testing the merged ticket
 branch. It never merges spec -> master; that remains a human step. Ticket jobs stay parallel; only merges queue.
-`PI_CONCURRENCY` (6) still bounds the deployment, and no `concurrent: 1` is used; the job-start and token
-caps were removed, so spend is bounded by the turn cap, concurrency, the host budget and the flow. Six is what the rest of `.env` holds
-beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
+`PI_CONCURRENCY` (6) still bounds the deployment, and no `concurrent: 1` is used. The job-start and
+token caps were removed, so spend is bounded by the turn cap, concurrency, the host budget and the flow.
+Six is what the rest of `.env` holds beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
 `PI_HOST_MEMORY_BUDGET` of 12g and a `PI_HOST_CPU_BUDGET` of 6.
 
-**Migration note:** the remote `.env` must drop the retired `PI_MAX_TOKENS`, `PI_DAILY_TOKEN_CAP`,
-`PI_WEEKLY_TOKEN_CAP`, `PI_MONTHLY_TOKEN_CAP` and `PI_ENVELOPE_FILE` lines, as well as the earlier
-`PI_DAILY_CAP`, `PI_WEEKLY_CAP`, `PI_MONTHLY_CAP` and `PI_SOFT_HOLD_PCT` lines; the worker refuses to start
-while one is set. A settings overlay carrying `maxTokens`, `dailyTokenCap`, `weeklyTokenCap` or
-`monthlyTokenCap` is refused too.
+**Migration note:** the remote `.env` must not carry any retired key: `PI_DAILY_CAP`, `PI_WEEKLY_CAP`,
+`PI_MONTHLY_CAP`, `PI_SOFT_HOLD_PCT`, `PI_MAX_TOKENS`, `PI_DAILY_TOKEN_CAP`, `PI_WEEKLY_TOKEN_CAP`,
+`PI_MONTHLY_TOKEN_CAP` or `PI_ENVELOPE_FILE`. The worker refuses to boot while any one of them is set.
+Delete the line, or comment it out (a commented line is harmless); an empty value also reads as unset. A
+settings overlay carrying `maxTokens`, `dailyTokenCap`, `weeklyTokenCap` or `monthlyTokenCap` is refused
+too.
 
 The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
 different: see below. An edited `triggers.json` still needs the receiver force-recreate described there.
@@ -176,8 +177,8 @@ gate, resolution and verification are unchanged, and the receiver says so at boo
 (`bot_loop_guard_disabled`) while `pi-dispatch doctor` warns by name.
 
 What bounds the spend is therefore the turn cap (`PI_MAX_TURNS`), `PI_CONCURRENCY`, the host memory/CPU
-budget and the flow itself — the job-start and token caps were removed — so **no trigger may be shaped like the
-harness's own output**:
+budget and the flow itself. The job-start and token caps were removed, and this bound is why **no trigger
+may be shaped like the harness's own output**:
 
 - no `on: {type:"pull_request", action:["update"]}`: every push the agent makes to its own merge request is one;
 - no `on: {type:"comment", phrase:"@pi"}` where a flow's output can contain `@pi`: a status comment is a comment;
@@ -190,8 +191,8 @@ the shape to a flow that can create MRs or comment before it exits.
 
 **Who can trigger a job**: the author gate still requires Developer or above. On this single-identity host
 `PI_RECEIVER_ALLOW_SELF=1` also lets the token's own account trigger, which is why the rules stay clear of
-`update`, comment phrases and close events and why the turn cap, concurrency and host budget matter. A second identity would let the guard
-be re-armed.
+`update`, comment phrases and close events, and why the turn cap, concurrency and host budget matter. A
+second identity would let the guard be re-armed.
 
 ## This GitLab is 13.2.10
 

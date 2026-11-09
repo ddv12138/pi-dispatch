@@ -130,9 +130,25 @@ const RETIRED_TOKEN_NEAR_MISSES = Object.freeze({
 	pimonthlytokencap: "monthlyTokenCap", monthly_token_cap: "monthlyTokenCap",
 });
 
+// The RETIRED job-start cap keys' near-misses, the token table's shape: the ENV names pasted into the settings file
+// (the all-caps form is the likeliest slip of all) and a snake_case spelling, all as `overlayKeyShape` output. Each is
+// REFUSED with the retirement named, never dropped: a cap key the worker drops would not apply while the file reads as
+// setting one.
+const RETIRED_CAP_NEAR_MISSES = Object.freeze({
+	pidailycap: "dailyCap", dailycap: "dailyCap",
+	piweeklycap: "weeklyCap", weeklycap: "weeklyCap",
+	pimonthlycap: "monthlyCap", monthlycap: "monthlyCap",
+	pisoftholdpct: "softHoldPct", softholdpct: "softHoldPct",
+});
+
 /** One refusal sentence for a retired token key, shared by the exact-key and near-miss doors. */
 function retiredTokenMessage(key) {
 	return `${key} was retired with the token budgets; delete it from the settings file`;
+}
+
+/** One refusal sentence for a retired job-start cap key, shared by the exact-key and near-miss doors. */
+function retiredCapMessage(key) {
+	return `${key} was retired with the job-start caps; delete it from the settings file`;
 }
 
 // A small FIXED look-alike table, to ASCII: Cyrillic а е о р с у х к м т н в і and Greek ο α ε ρ ν τ κ ι (lowercase
@@ -143,7 +159,7 @@ const LOOK_ALIKES = new Map(Object.entries({
 }));
 
 /**
- * An overlay key's shape for the retired-key near-miss checks (issue #501, and the token half in C2): fullwidth forms to ASCII, lowercased, the fixed
+ * An overlay key's shape for the retired-key near-miss checks (issue #501, and the token and cap halves in C2): fullwidth forms to ASCII, lowercased, the fixed
  * look-alike table applied, and the separators `_`, `-`, `.` and space dropped. Nothing else is removed, so a key with
  * any other character (`host_ü`, `notés`) keeps it and can never EQUAL a target. That is the whole rule: the overlay
  * refuses only an exact match after this, never a subsequence or a distance, because a refusal here stops every job
@@ -221,7 +237,7 @@ function validateKeys(candidate, log) {
 		const value = candidate[key];
 		// The retired job-start caps fail loud BEFORE the generic switch: an old overlay must be refused with the
 		// removal named, never silently dropped as a key this build does not know.
-		if (RETIRED_CAP_KEYS.includes(key)) return { invalid: `${key} was retired with the job-start caps; delete it from the settings file` };
+		if (RETIRED_CAP_KEYS.includes(key)) return { invalid: retiredCapMessage(key) };
 		// The token budgets are retired too (C2): same door, same reason -- an overlay that reads as capping a
 		// deployment must not run with no cap at all.
 		if (RETIRED_TOKEN_KEYS.includes(key)) return { invalid: retiredTokenMessage(key) };
@@ -325,6 +341,8 @@ function validateKeys(candidate, log) {
 				if (dollarMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${dollarMeant}? ${retiredDollarMessage(dollarMeant)}` };
 				const tokenMeant = Object.hasOwn(RETIRED_TOKEN_NEAR_MISSES, shape) ? RETIRED_TOKEN_NEAR_MISSES[shape] : undefined;
 				if (tokenMeant !== undefined) return { invalid: `${key} is not a settings key: ${retiredTokenMessage(tokenMeant)}` };
+				const capMeant = Object.hasOwn(RETIRED_CAP_NEAR_MISSES, shape) ? RETIRED_CAP_NEAR_MISSES[shape] : undefined;
+				if (capMeant !== undefined) return { invalid: `${key} is not a settings key: ${retiredCapMessage(capMeant)}` };
 				log("settings_overlay_unknown_key", { key });
 				// Issue #761: the ONE place that decides a key is unknown, so the list a writer carries cannot drift from
 				// this switch. A near miss never gets here (refused above), so it is never carried either.

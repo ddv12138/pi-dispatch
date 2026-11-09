@@ -440,7 +440,7 @@ test("the real run-job, recovering: the interrupted batch is answered, the model
 	try {
 		for (const dir of ["job/pi/skills", "workspace", "session", "outbox", "opt/pi-global", "opt/pi-dispatch", "home", "tmp"]) mkdirSync(join(root, dir), { recursive: true });
 		writeFileSync(join(root, "job", "prompt.md"), `${TASK_PROMPT}\n`);
-		for (const name of ["HARD_RULES.md", "OUTBOX_PROTOCOL.md", "PORTFOLIO_PROTOCOL.md"]) writeFileSync(join(root, "opt", "pi-dispatch", name), `## ${name}\n`);
+		for (const name of ["HARD_RULES.md", "OUTBOX_PROTOCOL.md"]) writeFileSync(join(root, "opt", "pi-dispatch", name), `## ${name}\n`);
 		writeFileSync(join(root, "workspace", "notes.txt"), "the restored notes\n");
 		const model = { id: "m1", name: "m1", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000, compat: { maxTokensField: "max_tokens" } };
 		writeFileSync(join(root, "opt", "pi-global", "models.json"), `${JSON.stringify({ providers: { "recover-fake": { baseUrl: server.base, apiKey: "recover-fake-key", api: "openai-completions", models: [model] } } })}\n`);

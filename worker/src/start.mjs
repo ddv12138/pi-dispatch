@@ -412,7 +412,7 @@ function watchPauseWindowsFile(config, ref, log, atBoot, watchFn = watch) {
  * last-good property carries its own test). A bad edit keeps `ref.current` untouched and logs
  * `scoped_limits_reload_invalid` -- the pause-windows posture, INT-SCOPED-LIMITS-FILE-CONTRACT.
  */
-export function reloadScopedLimits(config, ref, log, _retiredDeploymentCap = null, pair = null) {
+export function reloadScopedLimits(config, ref, log, pair = null) {
 	try {
 		const next = loadScopedLimits(config);
 		// Issue #499 part B: the new limits are checked against projects.json (`pair`, null only on a bare test wiring);
@@ -473,7 +473,7 @@ function pairWith(config, next, pair, side) {
  * for atomic tmp+rename robustness, filtered to the one basename, debounced. Best-effort; the FSWatcher is
  * unref'd and the returned closer stops the watch with the worker (issue #295).
  */
-function watchScopedLimitsFile(config, ref, log, atBoot, _retiredDeploymentCap = null, pair = null) {
+function watchScopedLimitsFile(config, ref, log, atBoot, pair = null) {
 	const path = config.scopedLimitsFile;
 	const dir = dirname(path) || ".";
 	const file = basename(path);
@@ -486,7 +486,7 @@ function watchScopedLimitsFile(config, ref, log, atBoot, _retiredDeploymentCap =
 			if (handles.closed) return; // see makeWatchCloser: by construction, not by a delivery rule
 			if (changed && changed !== file) return;
 			clearTimeout(handles.timer);
-			handles.timer = setTimeout(() => reloadScopedLimits(config, ref, closer.reloadLog, _retiredDeploymentCap, pair), WATCH_DEBOUNCE_MS);
+			handles.timer = setTimeout(() => reloadScopedLimits(config, ref, closer.reloadLog, pair), WATCH_DEBOUNCE_MS);
 		});
 		handles.watcher.unref?.();
 		log("scoped_limits_watching", { path });
@@ -495,7 +495,7 @@ function watchScopedLimitsFile(config, ref, log, atBoot, _retiredDeploymentCap =
 	}
 	if (changedWhileArming(handles, readFile)) {
 		log("scoped_limits_reread_after_arming", { path });
-		reloadScopedLimits(config, ref, closer.reloadLog, _retiredDeploymentCap, pair);
+		reloadScopedLimits(config, ref, closer.reloadLog, pair);
 	}
 	return closer;
 }
@@ -747,8 +747,8 @@ export async function startWorker(
 		// `fs.watch` for the triggers and pause-windows watchers, so a test can deliver a change itself: macOS can lose a
 		// real event outright (the rebuilt FSEvents stream, watch-closer.mjs), which is not what those tests are about.
 		watchFs = watch,
-		// The scoped-limits watcher, injectable so a test can see what it is armed with (PR #549's review: the cap
-		// thunk the reload warning reads). Production passes nothing and gets the real watcher.
+		// The scoped-limits watcher, injectable so a test can see what it is armed with.
+		// Production passes nothing and gets the real watcher.
 		watchScopedLimits: watchScopedLimitsFn = watchScopedLimitsFile,
 		// The projects watcher (issue #499), injectable for the same reason: a test sees it armed and closed.
 		watchProjects: watchProjectsFn = watchProjectsFile,
@@ -3037,7 +3037,7 @@ export async function startWorker(
 		const projectPair = makeProjectPair(scopedLimits, projects);
 		// Issue #242 live edit: hot-swap the scoped limits on file change, keeping last-good on a bad edit.
 		if (config.scopedLimitsFile) {
-			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, null, projectPair));
+			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, projectPair));
 		}
 
 		// Issue #499 live edit: the projects file, keep-last-good on a bad edit.

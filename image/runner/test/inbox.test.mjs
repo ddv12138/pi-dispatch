@@ -850,7 +850,7 @@ async function steerServer(root, messageId, { onFirst = () => writeEntry(join(ro
 function jobTree(root, { inbox = true, base = "http://127.0.0.1:1/v1" } = {}) {
 	for (const dir of ["job/pi/skills", "workspace", "session", "outbox", "opt/pi-global", "opt/pi-dispatch", "home", "tmp", ...(inbox ? ["inbox"] : [])]) mkdirSync(join(root, dir), { recursive: true });
 	writeFileSync(join(root, "job", "prompt.md"), "do the task\n");
-	for (const name of ["HARD_RULES.md", "OUTBOX_PROTOCOL.md", "PORTFOLIO_PROTOCOL.md"]) writeFileSync(join(root, "opt", "pi-dispatch", name), `## ${name}\n`);
+	for (const name of ["HARD_RULES.md", "OUTBOX_PROTOCOL.md"]) writeFileSync(join(root, "opt", "pi-dispatch", name), `## ${name}\n`);
 	writeFileSync(join(root, "workspace", "README.md"), "readme\n");
 	writeFileSync(join(root, "session", "current.jsonl"), "");
 	const model = { id: "m1", name: "m1", api: "openai-completions", reasoning: false, input: ["text"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 100000, maxTokens: 1000, compat: { maxTokensField: "max_tokens" } };

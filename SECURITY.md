@@ -254,8 +254,8 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
     messages count as late. And it hands a message over only while pi says a run is actually in progress, so an
     aborted run cannot record a delivery the model never saw.
   - **Caps.** At most 16 messages, 64 KiB of text and 8 KiB per message per run, refused rather than cut, withdrawn
-    messages still counted. Every turn a message causes counts against the job's turn budget and its cost and token
-    caps, and the job reserves nothing extra.
+    messages still counted. Every turn a message causes counts against the job's turn budget, and the job
+    reserves nothing extra.
   - **No text in logs or the record.** The CLI prints the message id and its state, never the text; logs carry ids,
     modes and counts; the run record gains only `steered` (three integers) and `steerSkipped` (an enum).
   - **A comment steers only through the author gate** (issue #646 part 2). A phrase comment is routed into a running

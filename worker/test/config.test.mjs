@@ -290,6 +290,20 @@ test("the retired token budgets are refused at boot, naming the variable and the
 	}
 });
 
+test("the retired allocation envelope is refused at boot, naming the variable and the removal", () => {
+	// The envelope went with the delegated allocation: a deployment that believes it runs under one must not
+	// silently run without one, the same posture as the caps and the token budgets.
+	for (const value of ["/etc/pi/envelope.json", "/root/pi-dispatch/runtime/envelope.json"]) {
+		assert.throws(
+			() => loadConfig({ PI_ENVELOPE_FILE: value }),
+			(e) => e.piDispatchConfig === true && e.message === "PI_ENVELOPE_FILE was retired with the allocation envelope; remove it (the deployment no longer has an envelope or a delegated allocation)",
+			`PI_ENVELOPE_FILE=${value}`,
+		);
+	}
+	// An empty value is the env's normal "unset", so it names no envelope and does not refuse.
+	assert.doesNotThrow(() => loadConfig({ PI_ENVELOPE_FILE: "" }), 'PI_ENVELOPE_FILE="" is unset');
+});
+
 test("a retired token env is refused even beside a retired job-start cap, without parsing either value", () => {
 	// The refusal runs before ANY parsing, so the removal is what the operator reads, not a range error.
 	assert.throws(() => loadConfig({ PI_DAILY_CAP: "1", PI_MAX_TOKENS: "0" }), (e) => e.message.startsWith("PI_DAILY_CAP was retired"));

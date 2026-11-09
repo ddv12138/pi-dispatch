@@ -1,7 +1,7 @@
 import { parseArgs } from "node:util";
 import { canaryOptions, canaryText, executeCanary } from "./canary.mjs";
 
-export const CANARY_ENV_KEYS = Object.freeze(["PI_WORKER_NAME", "PI_LOGS_DIR", "PI_JOBS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_BACKENDS", "PI_JOB_IMAGE", "PI_MAX_TURNS", "PI_MODEL", "PI_PROVIDER", "PI_SCOPED_LIMITS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_ENVELOPE_FILE", "PI_HOST_MEMORY_BUDGET", "PI_HOST_CPU_BUDGET", "PI_HOST_RESERVE_MEMORY", "PI_HOST_RESERVE_CPUS", "PI_MODEL_ENDPOINTS_FILE", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE"]);
+export const CANARY_ENV_KEYS = Object.freeze(["PI_WORKER_NAME", "PI_LOGS_DIR", "PI_JOBS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_BACKENDS", "PI_JOB_IMAGE", "PI_MAX_TURNS", "PI_MODEL", "PI_PROVIDER", "PI_SCOPED_LIMITS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_HOST_MEMORY_BUDGET", "PI_HOST_CPU_BUDGET", "PI_HOST_RESERVE_MEMORY", "PI_HOST_RESERVE_CPUS", "PI_MODEL_ENDPOINTS_FILE", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE"]);
 const PRIVATE_ENV_KEYS = Object.freeze(["VALKEY_URL", "ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "OPENAI_API_KEY"]);
 
 export async function runCanary(args, { env = process.env, write = (s) => process.stdout.write(s), errWrite = (s) => process.stderr.write(s), deploymentEnv = (e) => ({ env: e }), runtimeFactory, now = Date.now } = {}) {
