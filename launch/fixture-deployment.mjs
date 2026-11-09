@@ -110,7 +110,7 @@ export function writeDeployment(dir, { git = false } = {}) {
 	if (git) for (const folder of [paths.site, paths.pm]) gitInit(folder, dir);
 
 	const json = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
-	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, maxTokens: 2_000_000, dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8_000_000, weeklyTokenCap: 120_000_000, concurrency: 4, softHoldPct: 80 });
+	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, maxTokens: 2_000_000, dailyTokenCap: 8_000_000, weeklyTokenCap: 120_000_000, concurrency: 4 });
 	json(paths.projects, {
 		version: 1,
 		projects: [
@@ -123,7 +123,7 @@ export function writeDeployment(dir, { git = false } = {}) {
 	json(paths.limits, {
 		version: 3,
 		limits: [
-			{ scope: "github:acme/web", day: 20, week: 80, concurrent: WEB_AT_ONCE },
+			{ scope: "github:acme/web", concurrent: WEB_AT_ONCE },
 			{ scope: "project:billing", memory: "8g", cpus: 4 },
 			{ scope: "project:api", memory: "2g", cpus: 1 },
 			{ scope: "project:ops", memory: "2g", cpus: 1 },

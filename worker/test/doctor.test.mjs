@@ -3133,7 +3133,7 @@ test("doctor --fix doctrine: from a fully-broken env, no check outside the allow
 	// A scoped-limits file wrong in the boot-blocking way (issue #242), plus a dead-folder row route:
 	// without one, none of the three new scoped checks enters this walk and the never-tier pin hollows.
 	const scopedLimitsDir = tempDir("pi-doctrine-sl-");
-	writeFileSync(join(scopedLimitsDir, "scoped-limits.json"), JSON.stringify({ version: 1, limits: [{ scope: "/srv/never-runs", day: 1 }] }));
+	writeFileSync(join(scopedLimitsDir, "scoped-limits.json"), JSON.stringify({ version: 1, limits: [{ scope: "/srv/never-runs", concurrent: 1 }] }));
 	const env = {
 		PI_PROVIDER: "anthropic",
 		PI_AUTH_FROM_PI: "0",
@@ -4526,11 +4526,11 @@ test("doctor: the dead-scope advisory flags folder-only shapes not in the canoni
 	// caveated: a webhook job's repo comes from the delivery, which triggers.json cannot enumerate, so a
 	// line on every legitimate repo cap would be standing noise.
 	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [
-		{ scope: folder, day: 3 },
-		{ scope: "./relative-nowhere", day: 1 },
-		{ scope: "sitealone", day: 1 },
-		{ scope: "C:\\srv\\site", day: 1 },
-		{ scope: "acme/web", day: 9 },
+		{ scope: folder, concurrent: 3 },
+		{ scope: "./relative-nowhere", concurrent: 1 },
+		{ scope: "sitealone", concurrent: 1 },
+		{ scope: "C:\\srv\\site", concurrent: 1 },
+		{ scope: "acme/web", concurrent: 9 },
 	] }));
 	const env = imgEnv({ PI_TRIGGERS_FILE: join(dir, "triggers.json"), PI_SCOPED_LIMITS_FILE: limitsPath });
 	const checks = await collectChecks(env, collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true }));
@@ -4556,7 +4556,7 @@ test("doctor: the dead-scope advisory flags folder-only shapes not in the canoni
 	assert.ok(!c.label.includes("acme/web"), "a repo shape is never flagged -- doctor cannot enumerate webhook repos");
 	assert.match(c.label, /resolved ABSOLUTE path/, "the actionable content is in the label as well as the fix");
 	// All judgeable scopes referenced: silent (the repo row alone must not keep the line alive).
-	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: folder, day: 3 }, { scope: "acme/web", day: 9 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: folder, concurrent: 3 }, { scope: "acme/web", concurrent: 9 }] }));
 	const quiet = await collectChecks(env, collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true }));
 	assert.ok(!quiet.find((x) => /name a folder no trigger runs in/.test(x.label)), "nothing dead: no line");
 });
@@ -4566,7 +4566,7 @@ test("doctor: a project row whose id is not in projects.json is a FAILURE naming
 	writeFileSync(join(dir, "triggers.json"), JSON.stringify({ triggers: [{ on: { type: "cron", id: "t1", pattern: "0 3 * * *" }, run: { kind: "local", folder: "/srv/shop-a", flow: "tidy", task: "t" } }] }));
 	const limitsPath = join(dir, "scoped-limits.json");
 	const projectsPath = join(dir, "projects.json");
-	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "/srv/shop-a", day: 3 }, { scope: "project:shop", day: 2 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "/srv/shop-a", concurrent: 3 }, { scope: "project:shop", concurrent: 2 }] }));
 	const seams = () => collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true });
 	const dangling = (checks) => checks.find((x) => /name a project that is not in the projects file/.test(x.label));
 	// No projects file: the row dangles, and the worker would refuse to start.
@@ -4596,7 +4596,7 @@ test("doctor: a project row whose id is not in projects.json is a FAILURE naming
 test("doctor: the dead-scope advisory stays SILENT when the triggers facts are unreadable -- zeroed counts make no claims", async () => {
 	const dir = tempDir("pi-sl-noclaim-");
 	const limitsPath = join(dir, "scoped-limits.json");
-	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: "/srv/never", day: 1 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: "/srv/never", concurrent: 1 }] }));
 	// Unparseable triggers file: doctor already says the file does not parse; asserting "no trigger
 	// references this scope" on top would be a positive claim over counts it just said it cannot read.
 	writeFileSync(join(dir, "triggers.json"), "{broken");
@@ -4605,7 +4605,7 @@ test("doctor: the dead-scope advisory stays SILENT when the triggers facts are u
 	// Absent triggers file entirely: same rule.
 	const bare = tempDir("pi-sl-bare-");
 	const limits2 = join(bare, "scoped-limits.json");
-	writeFileSync(limits2, JSON.stringify({ version: 1, limits: [{ scope: "/srv/never", day: 1 }] }));
+	writeFileSync(limits2, JSON.stringify({ version: 1, limits: [{ scope: "/srv/never", concurrent: 1 }] }));
 	const absent = await collectChecks(imgEnv({ PI_SCOPED_LIMITS_FILE: limits2 }), collectSeams(green, { cwd: bare, nodeVersion: "22.19.0", probeValkey: async () => true }));
 	assert.ok(!absent.find((x) => /name a folder no trigger runs in/.test(x.label)), "no triggers file: no advisory");
 });
@@ -4621,7 +4621,7 @@ test("doctor: a bare repo row or bare pause window warns when triggers name two 
 	const limitsPath = join(dir, "scoped-limits.json");
 	// A bare row (flagged), a qualified row (never flagged, by this line or by the dead-folder one), and two relative
 	// folder rows: the dead-folder line names those, and the bare-repo line must not also call them repos.
-	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", day: 9 }, { scope: "github:acme/api", day: 2 }, { scope: "site", day: 1 }, { scope: "./site", day: 1 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 9 }, { scope: "github:acme/api", concurrent: 2 }, { scope: "site", concurrent: 1 }, { scope: "./site", concurrent: 1 }] }));
 	const pausePath = join(dir, "pause-windows.json");
 	writeFileSync(pausePath, JSON.stringify({ windows: [{ scope: "acme/docs", from: "22:00", to: "06:00" }, { scope: "*", from: "01:00", to: "02:00" }, { scope: "forgejo:acme/web", from: "09:00", to: "10:00" }] }));
 	const seams = () => collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true });
@@ -4645,7 +4645,7 @@ test("doctor: a bare repo row or bare pause window warns when triggers name two 
 	assert.ok(!one.find((x) => /name a bare repo/.test(x.label)), "one forge: no line");
 	// Two forges and only qualified scopes: silent.
 	writeFileSync(triggersPath, JSON.stringify({ triggers: twoForges }));
-	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/web", day: 9 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/web", concurrent: 9 }] }));
 	writeFileSync(pausePath, JSON.stringify({ windows: [{ scope: "*", from: "01:00", to: "02:00" }] }));
 	const qualified = await collectChecks(env, seams());
 	assert.ok(!qualified.find((x) => /name a bare repo/.test(x.label)), "qualified only: no line");
@@ -4659,13 +4659,13 @@ test("doctor: every forge-qualified spelling the bare-repo warning suggests pars
 		{ on: { type: "label", any: ["pi:fix"] }, run: { kind: "azure", flow: "fix", repository: "webapp" } },
 	] }));
 	const limitsPath = join(dir, "scoped-limits.json");
-	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: "Fabrikam Fiber/Web App", day: 3 }] }));
+	writeFileSync(limitsPath, JSON.stringify({ version: 1, limits: [{ scope: "Fabrikam Fiber/Web App", concurrent: 3 }] }));
 	const checks = await collectChecks(imgEnv({ PI_TRIGGERS_FILE: triggersPath, PI_SCOPED_LIMITS_FILE: limitsPath }), collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true }));
 	const c = checks.find((x) => /name a bare repo/.test(x.label));
 	assert.ok(c, "the warning is present");
 	for (const spelling of ["azure:Fabrikam Fiber/Web App", "github:Fabrikam Fiber/Web App"]) {
 		assert.ok(c.fix.includes(spelling), spelling);
-		assert.equal(parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: spelling, day: 3 }] }), "sl.json")[0].scope, spelling, "the worker accepts the spelling doctor recommends");
+		assert.equal(parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: spelling, concurrent: 3 }] }), "sl.json")[0].scope, spelling, "the worker accepts the spelling doctor recommends");
 	}
 });
 
@@ -5109,7 +5109,7 @@ test("issue #596 (gate round 1): doctor names a peer that predates job sizes, fr
 	const sized = join(dir, "sized.json");
 	writeFileSync(sized, JSON.stringify({ version: 3, limits: [{ scope: "project:shop", memory: "1g" }] }));
 	const plain = join(dir, "plain.json");
-	writeFileSync(plain, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", day: 5 }] }));
+	writeFileSync(plain, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", concurrent: 5 }] }));
 	const env = (file) => ({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_PROJECTS_FILE: projects, PI_SCOPED_LIMITS_FILE: file, PI_SETTINGS_FILE: noOverlay() });
 	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
 	const old = await collectChecks(env(sized), fleetSeams([{ name: "mini2", tz }, { name: "mini3", tz, limitsVersion: "3" }]));
@@ -5121,7 +5121,7 @@ test("issue #596 (gate round 1): doctor names a peer that predates job sizes, fr
 	assert.ok(!unsized.some((c) => /predate/.test(c.label)), "no size written: nothing at risk yet");
 	// Gate round 2: an older worker refuses by the DECLARED version, so a hand-written version 3 with no size warns too.
 	const declared = join(dir, "declared.json");
-	writeFileSync(declared, JSON.stringify({ version: 3, limits: [{ scope: "project:shop", day: 5 }] }));
+	writeFileSync(declared, JSON.stringify({ version: 3, limits: [{ scope: "project:shop", concurrent: 5 }] }));
 	const bare = await collectChecks(env(declared), fleetSeams([{ name: "mini2", tz }]));
 	assert.ok(bare.some((c) => c.warn === true && /^mini2 predates job sizes/.test(c.label)), "a declared version 3 without a size is named");
 });
@@ -5367,13 +5367,13 @@ test("the migration hint fires ONLY while the old path holds records and the new
 test("a world-writable legacy dir gets no one-line adopt command, because that file may not be yours", { skip: process.platform === "win32" }, async () => {
 	// The legacy state root is <OS temp>/pi-dispatch, and POSIX temp is mode 1777, so on a shared host any
 	// local account can create files there. An overlay OUTRANKS .env for every spend cap, so a copy-paste
-	// `mv` would let a stranger install their dailyCap on this deployment. The records half is softened the
+	// `mv` would let a stranger install their maxTurns on this deployment. The records half is softened the
 	// same way, because adopting them corrupts the history the panel and dispatch_costs fold over.
 	const tmp = tempDir("pi-shared-legacy-");
 	const home = tempDir("pi-shared-home-");
 	mkdirSync(join(tmp, "pi-dispatch", "logs"), { recursive: true });
 	writeFileSync(join(tmp, "pi-dispatch", "logs", "gh-1.json"), "{}");
-	writeFileSync(join(tmp, "pi-dispatch", "settings.json"), JSON.stringify({ dailyCap: 100000 }));
+	writeFileSync(join(tmp, "pi-dispatch", "settings.json"), JSON.stringify({ maxTurns: 100000 }));
 	chmodSync(join(tmp, "pi-dispatch"), 0o777);
 	chmodSync(join(tmp, "pi-dispatch", "logs"), 0o777);
 
@@ -9748,9 +9748,9 @@ test("doctor: an invalid settings overlay FAILS with the reader's reason, keys o
 
 test("doctor: scoped-limits token rows WARN with no per-job cap, and a row window below the per-job cap (PR #549's review)", async () => {
 	const rows = [
-		{ scope: "/srv/secret", day: 3, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null },
-		{ scope: "acme/web", day: null, week: null, month: null, concurrent: null, dayTokens: 1, weekTokens: 10, monthTokens: null },
-		{ scope: "model:openai/gpt-x", day: null, week: null, month: null, concurrent: null, dayTokens: 3, weekTokens: null, monthTokens: null },
+		{ scope: "/srv/secret", concurrent: 3, dayTokens: null, weekTokens: null, monthTokens: null },
+		{ scope: "acme/web", concurrent: null, dayTokens: 1, weekTokens: 10, monthTokens: null },
+		{ scope: "model:openai/gpt-x", concurrent: null, dayTokens: 3, weekTokens: null, monthTokens: null },
 	];
 	const none = scopedTokenRowChecks(rows, undefined, "sl.json");
 	assert.equal(none.length, 1);

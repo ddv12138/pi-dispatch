@@ -77,8 +77,8 @@ const WINDOW = Object.freeze({
     { project: null, count: 6, byOutcome: { completed: 4, refused: 0, failed: 1, "awaiting-input": 1, cancelled: 0, other: 0 }, spentTokens: 130_000, unpriced: 0 },
   ],
   projectsMore: 0,
-  byReason: { "scope-cap": 1, "container-never-started": 1, "recovery-cap": 1, "operator-cancel": 1, "awaiting-input": 1 },
-  values: { kind: ["github", "gitlab"], flow: ["fix", "triage"], trigger: ["0", "2", "nightly"], host: ["build3", "mini1"], backend: ["local", "podman"], model: ["claude-sonnet-5-5"], reason: ["awaiting-input", "container-never-started", "operator-cancel", "recovery-cap", "scope-cap"] },
+  byReason: { "allocation-cap": 1, "container-never-started": 1, "recovery-cap": 1, "operator-cancel": 1, "awaiting-input": 1 },
+  values: { kind: ["github", "gitlab"], flow: ["fix", "triage"], trigger: ["0", "2", "nightly"], host: ["build3", "mini1"], backend: ["local", "podman"], model: ["claude-sonnet-5-5"], reason: ["awaiting-input", "container-never-started", "operator-cancel", "recovery-cap", "allocation-cap"] },
   spentTokens: 6_130_000,
   unpriced: 2,
 });
@@ -110,8 +110,8 @@ test("outcomeCell: a completed run is quiet, a word that says why stands alone, 
   assert.equal(cell({ outcome: "completed", reason: "brand-new" }), cell({ outcome: "completed" }), "a completed run's token says nothing more either");
   assert.equal(cell({ outcome: "completed", reason: "awaiting-input" }), String(ui.outcomeBadge("completed", "awaiting-input")), "awaiting input says it all");
   assert.equal(cell({ outcome: "policy", reason: "operator-cancel" }), String(ui.outcomeBadge("policy", "operator-cancel")), "cancelled says it all");
-  const scope = shortSentence(REASONS["scope-cap"].sentence);
-  assert.equal(cell({ outcome: "policy", reason: "scope-cap" }), `${ui.outcomeBadge("policy", "scope-cap")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=scope-cap" title="scope-cap">${String(ui.withCode(scope.replace(/`/g, "")))}</a></span>`);
+  const scope = shortSentence(REASONS["allocation-cap"].sentence);
+  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap">${String(ui.withCode(scope.replace(/`/g, "")))}</a></span>`);
   // A recovery end reads failed, and its link finds it by the word: outcome=failed.
   const cap = cell({ outcome: "policy", reason: "recovery-cap" });
   assert.match(cap, /^<span class="badge tone-failed">.*Failed<\/span><span class="reason"><a href="\/runs\?outcome=failed&amp;reason=recovery-cap" title="recovery-cap">/);
@@ -124,11 +124,11 @@ test("outcomeCell: a completed run is quiet, a word that says why stands alone, 
   // A token the catalog does not know: itself, in the code face, with no explanation yet, still linked.
   assert.equal(cell({ outcome: "failed", reason: "brand-new-reason" }), `${ui.outcomeBadge("failed")}<span class="reason"><a href="/runs?outcome=failed&amp;reason=brand-new-reason" title="brand-new-reason"><span class="code">brand-new-reason</span>, ${NO_EXPLANATION}</a></span>`);
   // An outcome this release does not know: itself as a failure, and a link by the reason alone.
-  assert.match(cell({ outcome: "vapour", reason: "scope-cap" }), /tone-failed.*vapour<\/span><span class="reason"><a href="\/runs\?reason=scope-cap" title="scope-cap">/);
+  assert.match(cell({ outcome: "vapour", reason: "allocation-cap" }), /tone-failed.*vapour<\/span><span class="reason"><a href="\/runs\?reason=allocation-cap" title="allocation-cap">/);
   // `link: false` draws the sentence as text.
-  assert.equal(cell({ outcome: "policy", reason: "scope-cap" }, { link: false }), `${ui.outcomeBadge("policy", "scope-cap")}<span class="reason">${String(ui.withCode(scope.replace(/`/g, "")))}</span>`);
+  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }, { link: false }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason">${String(ui.withCode(scope.replace(/`/g, "")))}</span>`);
   // Every link it draws is one the runs page takes.
-  for (const r of [{ outcome: "policy", reason: "scope-cap" }, { outcome: "policy", reason: "recovery-checkpoint-absent" }, { outcome: "failed", reason: "x".repeat(64) }, { outcome: "vapour", reason: "a" }]) {
+  for (const r of [{ outcome: "policy", reason: "allocation-cap" }, { outcome: "policy", reason: "recovery-checkpoint-absent" }, { outcome: "failed", reason: "x".repeat(64) }, { outcome: "vapour", reason: "a" }]) {
     for (const m of cell(r).matchAll(/<a href="([^"]*)"/g)) runsLink(m[1].replace(/&amp;/g, "&"));
   }
 });
@@ -278,7 +278,7 @@ const pageOf = (runs, extra = {}) => ({ runs, next: null, mirror: "ok", truncate
 test("the runs table: its columns, flow, venue, model, tokens and job cap off a phone, stacked rows naming only the host and the cost", () => {
   const runs = [
     { ...base, jobId: "gh-1", project: "web", flow: "fix", backend: "podman", model: "claude-sonnet-5-5", outcome: "completed", tokensWindows: { reservedTokens: 2_000_000 } },
-    { ...base, jobId: "gh-2", project: "Not A Project", outcome: "policy", reason: "scope-cap" },
+    { ...base, jobId: "gh-2", project: "Not A Project", outcome: "policy", reason: "allocation-cap" },
   ];
   const m = runsTableModel(viewOf({ data: { runsPage: pageOf(runs) } }));
   assert.deepEqual(m.card, { title: "Runs", sub: "newest first", flush: true });

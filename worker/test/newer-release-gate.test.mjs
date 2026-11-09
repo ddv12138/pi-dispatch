@@ -37,7 +37,7 @@ function harness(extra = {}, depsExtra = {}) {
 		redis,
 		getSettings: () => {
 			seen.calls.push("getSettings");
-			return { provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null };
+			return { provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 };
 		},
 		pauseUntil: () => {
 			seen.calls.push("pauseUntil");
@@ -194,7 +194,7 @@ function failoverRetry({ prior, attempt = null, job: jobFields = {}, data = FAIL
 		{
 			redis,
 			inFlight,
-			getSettings: () => ({ provider: "openai", model: "primary", maxTurns: 5, dailyCap: 10, concurrency: 3, softHoldPct: null }),
+			getSettings: () => ({ provider: "openai", model: "primary", maxTurns: 5, concurrency: 3 }),
 			projects: () => PROJECTS,
 			previousRecord,
 			modelEndpoints: () => [],

@@ -12,11 +12,9 @@ const fork = { id: "b".repeat(32), rootKey: sessionKeyFor(base), fromJob: "gh-or
 function fixture(overrides = {}) {
 	const calls = [];
 	const job = { ...base, fork, forkReserveTokens: null };
-	let reserved = 0;
 	const source = { ok: true, point: { seq: 1 }, manifest: { sessionKey: fork.rootKey, baseSha, piVersion: "1.2.0", venue: "local", host: "worker" }, transcriptPath: "/private/transcript.jsonl" };
 	const deps = {
-		redis: { incr: async () => (calls.push("reserve"), ++reserved), expire: async () => {}, decr: async () => --reserved },
-		caps: { day: 10, week: null, month: null }, now: new Date("2026-07-16T10:00:00Z"), sessionsDir: "/sessions", hostName: "worker",
+		redis: { expire: async () => {} }, now: new Date("2026-07-16T10:00:00Z"), sessionsDir: "/sessions", hostName: "worker",
 		imagePreflight: async () => ({ ok: true, piVersion: "1.2.0" }),
 		checkForkPolicy: async () => ({ ok: true }),
 		forkStore: { readPoint: async () => source, restorePoint: async () => (calls.push("restore"), { ok: true, written: 1 }), baseSourceUrl: () => "/private/base.git", primeBase: async () => ({ ok: true }), publish: () => ({ ok: true }) },
@@ -31,11 +29,11 @@ function fixture(overrides = {}) {
 	return { job, deps, calls };
 }
 
-test("fork restores its exact source and trust paths before budget and starts an isolated session", async () => {
+test("fork restores its exact source and trust paths before the container and starts an isolated session", async () => {
 	const { job, deps, calls } = fixture();
 	const result = await runJob(job, deps);
 	assert.equal(result.outcome, "completed");
-	assert.deepEqual(calls, ["mint", "clone", "restore", "trust-reset", "stage", "reserve", "container", `promote:${fork.rootKey}.${fork.id}`]);
+	assert.deepEqual(calls, ["mint", "clone", "restore", "trust-reset", "stage", "container", `promote:${fork.rootKey}.${fork.id}`]);
 });
 
 test("every known fork refusal stops before token mint, clone, token-cap read and reservation", async () => {

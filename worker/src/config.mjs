@@ -91,8 +91,8 @@ function nonNegativeInt(env, name, fallback, max = undefined) {
 
 // An OPTIONAL bounded int: an unset or empty var is `null` (the feature it gates is disabled), a present
 // one is validated in `[min, max]` (max undefined = no upper bound) and otherwise a config error. Unlike
-// `boundedInt`, absence is a first-class "off", not a fallback default -- used by the optional week/month
-// spend ceilings and the soft-hold band, which default to disabled rather than to a number.
+// `boundedInt`, absence is a first-class "off", not a fallback default -- used by optional bounds such as
+// the resume context percentage, which default to disabled rather than to a number.
 /** The token knobs' parser (issue #25, D7a): a whole number of tokens, digits only, echoed never. The
  * wording matches budget-rule.mjs's shared check, so doctor and the boot say the same thing. */
 function optionalTokenCount(env, name) {
@@ -469,18 +469,28 @@ export function runProgressEnabled(env) {
 }
 
 /**
+ * The job-start caps were removed (no daily/weekly/monthly count cap, no soft-hold band). A legacy env
+ * that still names one is REFUSED, never ignored: a deployment that believes it is capped must not
+ * silently run uncapped, and a half-finished migration is exactly when that belief exists.
+ */
+const RETIRED_CAP_ENV_NAMES = Object.freeze(["PI_DAILY_CAP", "PI_WEEKLY_CAP", "PI_MONTHLY_CAP", "PI_SOFT_HOLD_PCT"]);
+
+/**
  * Parse the worker's config from `env` (default process.env). Every MONEY default is conservative:
- * spend controls (`PI_DAILY_CAP`, `PI_MAX_TURNS`) exist to bound money, so they default low, and a
- * cap of 0 would fail closed (budget.mjs refuses every job) rather than mean "unlimited". The optional
- * week/month ceilings and the soft-hold band default to disabled (`null`) -- the mandatory daily cap is
- * always the primary money bound; the others are additive ceilings an operator opts into.
+ * `PI_MAX_TURNS` and the token budgets exist to bound money, so they default low. The retired job-start
+ * count caps (`PI_DAILY_CAP`, `PI_WEEKLY_CAP`, `PI_MONTHLY_CAP`) and the soft-hold band
+ * (`PI_SOFT_HOLD_PCT`) are refused outright with the removal named.
  *
  * The operator's OWN staged setup is the deliberate exception: `allowGlobalExtensions` defaults to ON
  * (REQ-GLOBAL-PI-OVERLAY). Staging is itself the vetting step, so the overlay an operator built is the
  * overlay their jobs get, and the knob is an opt-out. That relaxation stops there -- it never touches the
- * spend caps above, the per-job token scoping, or the admin-extension recursion block.
+ * token budgets, the per-job token scoping, or the admin-extension recursion block.
  */
 export function loadConfig(env = process.env, { fileExists = existsSync } = {}) {
+	// Before ANY parsing, so even a malformed value is refused with the removal, not with a range error.
+	for (const name of RETIRED_CAP_ENV_NAMES) {
+		if (env[name] !== undefined && env[name] !== "") throw configError(`${name} was retired with the job-start caps; remove it (the deployment no longer has a job-start cap)`);
+	}
 	const model = modelFrom(env); // an exact model version, not a moving alias; deterministic per CONST-PI-VERSION-PINNED. Shape-checked (#673)
 	// #227. Hoisted above the object because `defaultBackend` INDEXES `backends`, and a property cannot read
 	// a sibling of the literal it is in. (Calling the parser twice would be harmless -- `egressEnabled` is
@@ -500,10 +510,6 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		workerName: workerName(env),
 		workerNameDeclared: Boolean(env.PI_WORKER_NAME),
 		concurrency: positiveInt(env, "PI_CONCURRENCY", 3), // DES-CONCURRENCY-3
-		dailyCap: positiveInt(env, "PI_DAILY_CAP", 25), // bounds container STARTS per day (money)
-		weeklyCap: optionalBoundedInt(env, "PI_WEEKLY_CAP", 1), // REQ-SPEND-CAPS-MULTI-WINDOW; null = weekly window disabled
-		monthlyCap: optionalBoundedInt(env, "PI_MONTHLY_CAP", 1), // null = monthly window disabled
-		softHoldPct: optionalBoundedInt(env, "PI_SOFT_HOLD_PCT", 1, 99), // null = soft-hold band disabled
 		provider: providerFrom(env),
 		model,
 		maxTurns: positiveInt(env, "PI_MAX_TURNS", 30), // pi has no turn limit; we impose one
@@ -607,7 +613,7 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		// lineage actually needs: age and size both grow slowly while a chain grows once per run.
 		sessionMaxResumeChain: nonNegativeInt(env, "PI_SESSION_MAX_RESUME_CHAIN", 0), // 0 = no chain bound
 		// How full the saved context may be before a resume is refused, as a percentage of the model's own
-		// window. A PERCENTAGE, so `optionalBoundedInt` on softHoldPct's precedent rather than the 0 = off
+		// window. A PERCENTAGE, so `optionalBoundedInt` (the optional-bounds parser) rather than the 0 = off
 		// sentinel its two neighbours use: 0% would mean "never resume anything", which is a different
 		// request from "no bound", and 101 is a typo rather than a ceiling.
 		sessionMaxContextPct: optionalBoundedInt(env, "PI_SESSION_MAX_CONTEXT_PCT", 1, 100), // null = no context bound

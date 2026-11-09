@@ -28,7 +28,7 @@ async function pickup(allocation, comments = []) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { incr: async () => 1, decr: async () => 0, incrby: async () => 1, decrby: async () => 0, eval: async () => [0, 0], expire: async () => {}, get: async () => null },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 1 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3, maxTokens: 1 }),
 		applyConcurrency: () => {},
 		scopedLimits: () => [],
 		projects: () => parseProjects(JSON.stringify({ version: 1, projects: PROJECTS }), "p.json"),

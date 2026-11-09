@@ -28,7 +28,7 @@ import { EXIT_OOM_KILLED } from "./run-history.mjs";
 // failure comment" -- held only below the spend line). Keyed by the reason token so a new abort
 // classification adds a ROW here, never a re-plumb; sentences are FIXED and path-free, because for a
 // local job the adapter logs the full text into a persistent service log (the "this folder" discipline
-// at the scope-cap refusal). The completed path stays silent on purpose: exit 0 is where the AGENT'S own
+// at the token-budget refusal). The completed path stays silent on purpose: exit 0 is where the AGENT'S own
 // status comment lives (the prompt contract instructs it, including for "I cannot fix this"), and exit 2
 // by construction means the agent was cut off before that step.
 // EXPORTED only so a test can hold every RUNNER_POLICY_REASONS member to a row here (issue #437 review).

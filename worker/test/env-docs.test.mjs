@@ -569,8 +569,9 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// The token-only accounting removed the retired dollar keys (the last two, PI_WEEKLY_COST_USD and
 	// PI_MONTHLY_COST_USD, whose token replacements the file already declared), and the sandbox prune removes
 	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
-	// with the podman, OpenShell and sandbox stack, so the pin follows the file down.
-	assert.equal(scanned, 129, "the scan must actually reach every assignment in the file");
+	// with the podman, OpenShell and sandbox stack, so the pin follows the file down. The job-start caps
+	// removal (C1) then dropped the last four (PI_DAILY_CAP, PI_WEEKLY_CAP, PI_MONTHLY_CAP, PI_SOFT_HOLD_PCT).
+	assert.equal(scanned, 125, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

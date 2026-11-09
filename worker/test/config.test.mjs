@@ -12,10 +12,6 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 test("loads conservative defaults with an empty-ish env", () => {
 	const c = loadConfig({});
 	assert.equal(c.concurrency, 3);
-	assert.equal(c.dailyCap, 25);
-	assert.equal(c.weeklyCap, null, "the weekly ceiling defaults to disabled");
-	assert.equal(c.monthlyCap, null, "the monthly ceiling defaults to disabled");
-	assert.equal(c.softHoldPct, null, "the soft-hold band defaults to disabled");
 	assert.equal(c.maxTokens, null, "the per-job token budget defaults to disabled");
 	assert.equal(c.dailyTokenCap, null, "the daily token cap defaults to disabled");
 	assert.equal(c.provider, "anthropic");
@@ -264,34 +260,17 @@ test("runMirrorMaxRuns is 5000 unless set, takes 1000 to 20000, and refuses anyt
 	for (const bad of ["999", "20001", "abc", "1.5", "-1", "0"]) assert.throws(() => loadConfig({ PI_RUN_MIRROR_MAX_RUNS: bad }), (e) => e.piDispatchConfig === true && e.message === `invalid PI_RUN_MIRROR_MAX_RUNS: ${JSON.stringify(bad)} (want an integer 1000-20000)`, bad);
 });
 
-test("positiveInt is unchanged: a spend var of 0 still throws", () => {
-	assert.throws(() => loadConfig({ PI_DAILY_CAP: "0" }), (e) => e.piDispatchConfig === true);
-});
-
-test("weekly/monthly ceilings take explicit positive values, and absence is disabled (null)", () => {
-	const c = loadConfig({ PI_WEEKLY_CAP: "100", PI_MONTHLY_CAP: "400" });
-	assert.equal(c.weeklyCap, 100);
-	assert.equal(c.monthlyCap, 400);
-	// empty string is also "disabled", not a parse error
-	assert.equal(loadConfig({ PI_WEEKLY_CAP: "" }).weeklyCap, null);
-});
-
-test("weekly/monthly ceilings reject 0, negatives, and non-integers as config errors", () => {
-	for (const name of ["PI_WEEKLY_CAP", "PI_MONTHLY_CAP"]) {
-		for (const bad of ["0", "-1", "abc", "1.5"]) {
-			assert.throws(() => loadConfig({ [name]: bad }), (e) => e.piDispatchConfig === true, `${name}=${bad}`);
+test("the retired job-start caps are refused at boot, naming the variable and the removal", () => {
+	for (const name of ["PI_DAILY_CAP", "PI_WEEKLY_CAP", "PI_MONTHLY_CAP", "PI_SOFT_HOLD_PCT"]) {
+		for (const value of ["25", "0", "abc"]) {
+			assert.throws(
+				() => loadConfig({ [name]: value }),
+				(e) => e.piDispatchConfig === true && e.message === `${name} was retired with the job-start caps; remove it (the deployment no longer has a job-start cap)`,
+				`${name}=${value}`,
+			);
 		}
-	}
-});
-
-test("soft-hold pct takes 1-99, defaults to disabled, and rejects out-of-range or non-integer", () => {
-	assert.equal(loadConfig({ PI_SOFT_HOLD_PCT: "80" }).softHoldPct, 80);
-	assert.equal(loadConfig({ PI_SOFT_HOLD_PCT: "1" }).softHoldPct, 1);
-	assert.equal(loadConfig({ PI_SOFT_HOLD_PCT: "99" }).softHoldPct, 99);
-	assert.equal(loadConfig({}).softHoldPct, null);
-	assert.equal(loadConfig({ PI_SOFT_HOLD_PCT: "" }).softHoldPct, null);
-	for (const bad of ["0", "100", "-5", "abc", "50.5"]) {
-		assert.throws(() => loadConfig({ PI_SOFT_HOLD_PCT: bad }), (e) => e.piDispatchConfig === true, `PI_SOFT_HOLD_PCT=${bad}`);
+		// An empty value is the env's normal "unset", so it is not a legacy cap and does not refuse.
+		assert.doesNotThrow(() => loadConfig({ [name]: "" }), `${name}="" is unset`);
 	}
 });
 
@@ -350,7 +329,6 @@ test("env overrides every field", () => {
 	const c = loadConfig({
 		VALKEY_URL: "redis://valkey:6379",
 		PI_CONCURRENCY: "6",
-		PI_DAILY_CAP: "100",
 		PI_PROVIDER: "openai",
 		PI_MODEL: "gpt-x",
 		PI_MAX_TURNS: "50",
@@ -358,7 +336,6 @@ test("env overrides every field", () => {
 		PI_JOBS_DIR: "/srv/jobs",
 	});
 	assert.equal(c.concurrency, 6);
-	assert.equal(c.dailyCap, 100);
 	assert.equal(c.provider, "openai");
 	assert.equal(c.model, "gpt-x");
 	assert.equal(c.jobsDir, "/srv/jobs");
@@ -391,10 +368,6 @@ test("a malformed integer is a config error, not a silent NaN", () => {
 	for (const bad of ["0", "-1", "3.5", "abc", "3x"]) {
 		assert.throws(() => loadConfig({ PI_CONCURRENCY: bad }), (e) => e.piDispatchConfig === true, `PI_CONCURRENCY=${bad}`);
 	}
-});
-
-test("cap 0 is rejected -- it would fail closed, and is more likely a typo than intent", () => {
-	assert.throws(() => loadConfig({ PI_DAILY_CAP: "0" }), (e) => e.piDispatchConfig === true);
 });
 
 test("scheduler stall max 0 is rejected -- a 0 threshold would fail closed", () => {

@@ -198,7 +198,6 @@ test("local runtime restores only base objects, passes only provider credentials
 		const report = await executeCanary({ ...options, model: candidate }, { ...runtime, now, id: () => "canary-one" });
 		assert.equal(report.rows[0].candidate.outcome, "completed");
 		assert.ok([...counters.keys()].some((k) => k.startsWith("budget:tok:")), "real token reservation executed");
-		assert.ok([...counters.keys()].some((k) => /^budget:\d/.test(k)), "real count reservation executed");
 		assert.ok([...counters.keys()].some((k) => k.startsWith("budget:tok:")), "real token ledger executed");
 		assert.deepEqual(factoryOptions[0].hostEnv, { ANTHROPIC_API_KEY: "provider-only" }); assert.equal(factoryOptions[0].globalPiDir, undefined); assert.equal(factoryOptions[0].egress, true);
 		assert.equal(readFileSync(join(workspace, "file"), "utf8"), "original edits");

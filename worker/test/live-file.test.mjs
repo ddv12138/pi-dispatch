@@ -268,7 +268,6 @@ test("the transcript's last lines are published BEFORE the processor's cleanup r
 	const result = await proc.runJob(JOB, {
 		redis: { incr: async () => 1, decr: async () => 0, expire: async () => {}, get: async () => null },
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
 		prepareWorkspace,
@@ -292,7 +291,6 @@ test("a non-resume job's run result is byte-identical with the live file: its se
 	const base = {
 		redis: { incr: async () => 1, decr: async () => 0, expire: async () => {}, get: async () => null },
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
 		collectChain: async () => ({ enqueued: 0, refused: 0 }),
@@ -375,7 +373,6 @@ test("mergeSession maps only the live file's {resumed:false, reason:\"absent\"}:
 	const base = {
 		redis: { incr: async () => 1, decr: async () => 0, expire: async () => {}, get: async () => null },
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
 		collectChain: async () => ({ enqueued: 0, refused: 0 }),

@@ -90,7 +90,6 @@ test("a Valkey fault returns { error } with the code and never throws, from ever
 	for (const mode of ["sync", "async"]) {
 		const logs = [];
 		const l = makeRunBudgetLedger({ redis: failing(mode), now: clock, log: (e, f) => logs.push([e, f]) });
-		assert.deepEqual(await l.claimSlot("r"), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.recordHold("r", 1, HOLD), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.settle("r", 1), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.release("r", 1), { error: "ECONNREFUSED" }, mode);
@@ -98,7 +97,7 @@ test("a Valkey fault returns { error } with the code and never throws, from ever
 		assert.deepEqual(await l.nextSeq("r"), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.read("r"), { error: "ECONNREFUSED" }, mode);
 		assert.deepEqual(await l.remove("r"), { error: "ECONNREFUSED" }, mode);
-		assert.deepEqual(logs, ["claimSlot", "recordHold", "settle", "release", "settleCrashed", "nextSeq", "read", "remove"].map((op) => ["run_budget_ledger_error", { op, code: "ECONNREFUSED" }]), "exactly { op, code }, nothing more");
+		assert.deepEqual(logs, ["recordHold", "settle", "release", "settleCrashed", "nextSeq", "read", "remove"].map((op) => ["run_budget_ledger_error", { op, code: "ECONNREFUSED" }]), "exactly { op, code }, nothing more");
 		assert.ok(!JSON.stringify(logs).includes("run:budget") && !JSON.stringify(logs).includes("budget:tok"), "no key and no value in a log line");
 	}
 	const noCode = makeRunBudgetLedger({ redis: { eval: () => Promise.reject(new Error("x")) }, now: clock });
@@ -148,23 +147,6 @@ test.after(async () => {
 let runs = 0;
 const runId = (name) => `${name}:${++runs}`;
 
-test("claimSlot is new once, then carried for every later call of the same run", { skip: live }, async () => {
-	const l = makeRunBudgetLedger({ redis: await client(), now: clock });
-	const id = runId("claim");
-	assert.equal(await l.claimSlot(id), "new");
-	assert.equal(await l.claimSlot(id), "carried");
-	assert.equal(await l.claimSlot(id), "carried");
-	assert.equal(await l.claimSlot(runId("claim-other")), "new", "another run's slot is its own");
-	assert.deepEqual(await l.read(id), { slot: "held", seq: 0, at: AT_MS, holds: [] });
-});
-
-test("two recoveries claiming at once: exactly one reserves the job-count slots", { skip: live }, async () => {
-	const [a, b] = [await client(), await client()];
-	const id = runId("claim-race");
-	const got = await Promise.all([makeRunBudgetLedger({ redis: a, now: clock }).claimSlot(id), makeRunBudgetLedger({ redis: b, now: clock }).claimSlot(id)]);
-	assert.deepEqual(got.sort(), ["carried", "new"]);
-});
-
 test("recordHold writes once per seq, refuses a second write and a bad shape, and a real reserveTokens hold round-trips", { skip: live }, async () => {
 	const r = await client();
 	const l = makeRunBudgetLedger({ redis: r, now: clock });
@@ -209,7 +191,6 @@ test("settleCrashed settles only the holds still held below the seq, once", { sk
 	const r = await client();
 	const l = makeRunBudgetLedger({ redis: r, now: clock });
 	const id = runId("crashed");
-	assert.equal(await l.claimSlot(id), "new");
 	for (let seq = 1; seq <= 5; seq++) assert.deepEqual(await l.recordHold(id, seq, HOLD), { ok: true });
 	assert.equal(await l.release(id, 2), "moved");
 	assert.deepEqual(await l.settleCrashed(id, 4), { settled: [1, 3] }, "2 is released, 4 and 5 are not below");
@@ -217,7 +198,7 @@ test("settleCrashed settles only the holds still held below the seq, once", { sk
 	assert.deepEqual((await l.read(id)).holds.map((h) => [h.seq, h.state]), [[1, "settled-crashed"], [2, "released"], [3, "settled-crashed"], [4, "held"], [5, "held"]]);
 	assert.equal(await l.settle(id, 1), "not-held", "a crash-settled hold is never settled again");
 	assert.equal(await l.release(id, 3), "not-held", "nor released");
-	assert.equal((await l.read(id)).slot, "held", "slot and seq are not holds, though they start with s");
+	// `seq` and `at` are not holds, though `s` is a prefix of both `slot` and `seq` in an old hash.
 	// An absent (never written, or expired) ledger stays absent: no `at`, no TTL, no key. The same id is used for the
 	// call and the checks (runId() hands out a new id on every call).
 	const none = runId("crashed-none");
@@ -281,11 +262,10 @@ test("every write sets the TTL and refreshes it; a refused write does not revive
 		assert.ok(pttl > ttlMs - 5_000 && pttl <= ttlMs, `${why}: pttl ${pttl}`);
 	};
 	const shorten = () => r.pexpire(key, 1_000);
-	assert.equal(await l.claimSlot(id), "new");
-	await fresh("claimSlot");
+	assert.equal(await l.nextSeq(id), 1);
+	await fresh("nextSeq");
 	for (const [why, write] of [
-		["claimSlot carried", () => l.claimSlot(id)],
-		["nextSeq", () => l.nextSeq(id)],
+		["nextSeq again", () => l.nextSeq(id)],
 		["recordHold", () => l.recordHold(id, 1, HOLD)],
 		["settle", () => l.settle(id, 1)],
 		["recordHold 2", () => l.recordHold(id, 2, HOLD)],
@@ -304,7 +284,7 @@ test("every write sets the TTL and refreshes it; a refused write does not revive
 	assert.equal(await r.exists(runBudgetKeyFor(absent)), 0);
 	const def = makeRunBudgetLedger({ redis: r, now: clock });
 	const other = runId("ttl-default");
-	await def.claimSlot(other);
+	await def.recordHold(other, 1, HOLD);
 	const pttl = await r.pttl(runBudgetKeyFor(other));
 	assert.ok(pttl > RUN_BUDGET_TTL_MS - 5_000 && pttl <= RUN_BUDGET_TTL_MS, `the default is 35 days: ${pttl}`);
 });
@@ -312,7 +292,7 @@ test("every write sets the TTL and refreshes it; a refused write does not revive
 test("remove deletes the ledger at the run's end", { skip: live }, async () => {
 	const l = makeRunBudgetLedger({ redis: await client(), now: clock });
 	const id = runId("remove");
-	await l.claimSlot(id);
+	await l.nextSeq(id);
 	await l.recordHold(id, 1, HOLD);
 	assert.deepEqual(await l.remove(id), { ok: true });
 	assert.deepEqual(await l.read(id), { absent: true });
@@ -324,7 +304,7 @@ test("read reports an unparseable hold record as an unknown amount rather than g
 	const l = makeRunBudgetLedger({ redis: r, now: clock });
 	const id = runId("read-bad");
 	await r.hset(runBudgetKeyFor(id), "s1", "held", "h1", "{not json");
-	assert.deepEqual(await l.read(id), { slot: null, seq: 0, at: null, holds: [{ seq: 1, state: "held", amountTokens: null }] });
+	assert.deepEqual(await l.read(id), { seq: 0, at: null, holds: [{ seq: 1, state: "held", amountTokens: null }] });
 });
 
 /** mulberry32: a seeded generator, so a failing interleaving is reproducible from the seed in the message. */

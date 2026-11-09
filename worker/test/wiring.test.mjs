@@ -51,7 +51,7 @@ test("the processor declares arity 3 -- the silent trap that would disable the t
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: {},
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		deps: {},
 		recordRun: () => {},
 	});
@@ -75,7 +75,7 @@ test("the timeout fires cancelJob after timeoutMs", { skip }, async () => {
 		},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 20,
 		deps: {
 			mintToken: async () => "t",
@@ -108,7 +108,7 @@ test("an abort stops the container", { skip }, async () => {
 		cancelJob: () => {},
 		stopContainer: (name, forJob) => (stopped = { name, forJob }),
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			mintToken: async () => "t",
@@ -160,7 +160,7 @@ function cancelPollProcessor({ store, gets, mod: m, cancelled, records, hostName
 				return 1;
 			},
 		},
-		getSettings: getSettings ?? (() => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 })),
+		getSettings: getSettings ?? (() => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 })),
 		timeoutMs: 100000,
 		cancelPollMs: 5,
 		hostName,
@@ -234,7 +234,7 @@ test("the cancel poll with no pending request never cancels, and a redis without
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		cancelPollMs: 5,
 		deps: {
@@ -276,7 +276,7 @@ test("shutdown closes each extraCloser after the worker drains", { skip }, async
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: {},
 			deps: {},
 			// #227. `createWorker` REFUSES a wiring without it: `stopContainer` is the only thing that
@@ -316,7 +316,7 @@ test("shutdown releases the shared redis client AFTER every closer, by disconnec
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: {
 				disconnect: () => order.push("redis.disconnect"),
 				quit: () => order.push("redis.quit"),
@@ -362,7 +362,7 @@ test("createWorker exposes stop(): the shutdown minus the exit, for a boot that 
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: { disconnect: () => order.push("redis") },
 			deps: {},
 			stopContainer: async () => {},
@@ -404,7 +404,7 @@ test("a closer pushed AFTER createWorker returns is still closed by the shutdown
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: {},
 			deps: {},
 			stopContainer: async () => {},
@@ -446,7 +446,7 @@ test("a closer that throws SYNCHRONOUSLY, and an absent one, never strand the cl
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: {},
 			deps: {},
 			stopContainer: async () => {},
@@ -482,7 +482,7 @@ test("createWorker NAMES the BullMQ Worker when given one, and omits the option 
 	const base = {
 		connection: parseConnection("redis://127.0.0.1:1"),
 		concurrency: 1,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		redis: {},
 		deps: {},
 		stopContainer: async () => {}, // required: see the note at the first createWorker above
@@ -519,7 +519,7 @@ test("recordRun fires once on the SUCCESS (return) path with { job, result, star
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		recordRun: (rec) => calls.push(rec),
 		deps: {
@@ -552,7 +552,7 @@ test("recordRun fires with { job, error } BEFORE an UnrecoverableError propagate
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		recordRun: (rec) => calls.push(rec),
 		deps: {
@@ -585,7 +585,7 @@ test("recordRun fires and the InfraRetry still propagates (retryable, not Unreco
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {}, async decr() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		recordRun: (rec) => calls.push(rec),
 		deps: {
@@ -619,7 +619,7 @@ test("collectChain receives the REAL BullMQ job (id + data), not runJob's effect
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			mintToken: async () => "t",
@@ -652,7 +652,7 @@ test("runContainer receives the real BullMQ job id as jobId, which names the liv
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			mintToken: async () => "t",
@@ -683,7 +683,7 @@ test("prepareWorkspace receives (effectiveJob, token, { queueJobId: <real BullMQ
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			mintToken: async () => "t",
@@ -731,7 +731,7 @@ test("checkOnceSpent receives (effectiveJob, { queueJobId: <real BullMQ job id> 
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			checkOnceSpent: async (j, opts) => {
@@ -811,7 +811,7 @@ function realRecordProcessor(recordRun, { runContainer, redis, containerName } =
 		stopContainer: () => {},
 		...(containerName ? { containerName } : {}),
 		redis: redis ?? { async incr() { return 1; }, async expire() {}, async decr() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		recordRun,
 		deps: {
@@ -840,7 +840,7 @@ test("(a) completed run: real writer serialises a PII-free record to <jobId>.jso
 	assert.equal(rec.target, "o/r#1", "GitHub target is repo#issue, never the payload text");
 	assert.equal(rec.exitCode, 0);
 	assert.equal(rec.turns, 3);
-	assert.equal(rec.budgetReserved, true);
+	assert.equal(rec.budgetReserved, true, "the container ran, so the record marks possible spend");
 	// The usage-ledger trio (INT-RUN-HISTORY-FILE-CONTRACT) rides the serialized bytes end-to-end:
 	// provider/model are the HOST-effective values the overlay fill resolved (here the settings, since
 	// the job data names none), and usage is null-defaulted -- this container reported no ledger, and
@@ -959,7 +959,7 @@ test("(c) try-path writer failure NEVER converts a completed run into a failure/
 	assert.equal(result.outcome, "completed");
 	assert.equal(result.exitCode, 0);
 	assert.equal(result.turns, 3);
-	assert.equal(result.budgetReserved, true);
+	assert.equal(result.budgetReserved, true, "the container ran, so the record marks possible spend");
 	assert.equal(writes.length, 0, "the throwing writer recorded nothing");
 });
 
@@ -1057,7 +1057,7 @@ test("giving up on a container whose stop did not take finishes its live publish
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		abortGraceMs: 0,
 		timeoutMs: 100000,
 		recordRun: () => order.push("record"),
@@ -1111,7 +1111,7 @@ test("the abort resolves the venue from job.DATA, not the BullMQ wrapper (#227)"
 		stopContainer: (name, forJob) => (seen = { name, backend: forJob?.backend }),
 		containerName: (forJob) => `pi-job-${forJob?.id}-${forJob?.backend ?? "default"}`,
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			log: () => {},
@@ -1154,7 +1154,7 @@ test("the prepareWorkspace wrapper EXTENDS runJob's options instead of replacing
 		cancelJob: () => {},
 		stopContainer: async () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			log: () => {},
@@ -1185,7 +1185,7 @@ test("issue #596, phase 2: createWorker builds ONE host budget, ticks it off the
 		worker = mod.createWorker({
 			connection: parseConnection("redis://127.0.0.1:1"),
 			concurrency: 1,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis: {},
 			deps: {},
 			stopContainer: async () => {},
@@ -1247,7 +1247,7 @@ test("createWorker's settled record carries reservedIn.valkey, the tag of the co
 			connection,
 			concurrency: 1,
 			// A daily token budget and a per-job cap: the job reserves in the deployment's day window.
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3, dailyTokenCap: 10, maxTokens: 2 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3, dailyTokenCap: 10, maxTokens: 2 }),
 			redis,
 			deps: { mintToken: async () => "t", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({}), runContainer: async () => ({ code: 0, aborted: false, turns: 3 }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 			recordRun,

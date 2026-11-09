@@ -25,7 +25,8 @@ const PRIVATE = "PRIVATE question and exemplar text must stay out of references 
 /** Prefix every ledger key, including Lua KEYS, so this file can run beside every other real-queue test. */
 function isolatedLedger(redis, prefix, events) {
 	const one = (method) => async (key, ...args) => {
-		if (method === "incr") events.push("job-reserve");
+		// The pre-spend reservation is the token window's INCRBY; the job-count INCR was removed with the caps.
+		if (method === "incrby" && key.includes("budget:tok")) events.push("token-reserve");
 		return redis[method](`${prefix}${key}`, ...args);
 	};
 	return {
@@ -61,7 +62,7 @@ async function fixture(t) {
 	const meta = await store.readMeta("source");
 	const id = await enqueueQuestionGroupJob(queue, { runId: "source", digest: meta.digest, configDigest: questionGroupConfigDigest(config) }, { nonce: () => "fixed" });
 	const job = await queue.getJob(id);
-	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyCap: 10, dailyTokenCap: 1000000, maxTokens: 50000 };
+	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyTokenCap: 1000000, maxTokens: 50000 };
 	const runtime = makeQuestionGroupRuntime({ store, triggersPath, getSettings: () => settings, resolveClassifier: () => MODEL });
 	return { root, jobsDir, name, redis, queue, store, job, runtime, settings, document, triggersPath, scopeId };
 }
@@ -90,7 +91,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 				assert.equal(prepared.workspaceReadOnly, true);
 				assert.equal(statSync(join(prepared.jobDir, "question-grouping.json")).mode & 0o777, 0o444);
 				assert.equal(readFileSync(join(prepared.jobDir, "prompt.md"), "utf8"), "");
-				assert.ok(events.includes("job-reserve"));
+				assert.ok(events.includes("token-reserve"));
 				const tokenKeys = await f.redis.keys(`${f.name}:ledger:budget:tok:*`);
 				assert.ok(tokenKeys.length > 0, "ordinary token windows were reserved before any classifier call");
 				assert.ok((await f.redis.mget(...tokenKeys)).some((value) => Number(value) === 50000), "the real window holds the configured cap");
@@ -115,7 +116,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 	assert.equal(result.outcome, "completed");
 	assert.equal(calls, 1);
 	assert.deepEqual(credentials, ["anthropic", "openrouter"], "both credentials pass the free gate");
-	assert.ok(events.indexOf("job-reserve") < events.indexOf("container"));
+	assert.ok(events.indexOf("token-reserve") < events.indexOf("container"));
 	assert.ok(events.indexOf("token-ledger") < events.indexOf("classify"));
 	const assigned = await f.store.readMeta("source");
 	assert.equal(assigned.status, "assigned", "processor finalization imports the classifier result");
@@ -143,23 +144,21 @@ test("a persisted admission deferral reconstructs private context and overrides 
 	assert.doesNotMatch(JSON.stringify(restored), /PRIVATE|EXFILTRATE|attacker/);
 });
 
-test("missing secondary credentials and exhausted windows never dispatch a classifier", { skip }, async (t) => {
-	for (const refusal of ["credential", "budget"]) {
-		const f = await fixture(t);
-		const events = [];
-		const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.name}:ledger:`, events), now: () => CLOCK, getSettings: () => ({ ...f.settings, ...(refusal === "budget" ? { dailyCap: 0 } : {}) }),
-			projects: () => [{ id: "api", members: ["github:acme/api"] }], cancelJob() {}, stopContainer() {},
-			deps: { questionGroupRuntime: f.runtime,
-				checkProviderCredential: (job) => job.provider === "openrouter" && refusal === "credential" ? { ok: false } : { ok: true },
-				prepareWorkspace: makePrepareWorkspace({ jobsDir: f.jobsDir }),
-				runContainer: () => assert.fail("a free or budget refusal cannot dispatch"), cleanup: async () => {}, comment: async () => {},
-			},
-		});
-		const result = await process(f.job, "token", new AbortController().signal);
-		assert.equal(result.outcome, "policy");
-		assert.equal(result.reason, refusal === "credential" ? "provider-unconfigured" : "over-budget");
-		if (refusal === "credential") assert.ok(!events.includes("job-reserve"), "credential refusal runs before reserve");
-	}
+test("missing secondary credentials never dispatch a classifier", { skip }, async (t) => {
+	const f = await fixture(t);
+	const events = [];
+	const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.name}:ledger:`, events), now: () => CLOCK, getSettings: () => f.settings,
+		projects: () => [{ id: "api", members: ["github:acme/api"] }], cancelJob() {}, stopContainer() {},
+		deps: { questionGroupRuntime: f.runtime,
+			checkProviderCredential: (job) => (job.provider === "openrouter" ? { ok: false } : { ok: true }),
+			prepareWorkspace: makePrepareWorkspace({ jobsDir: f.jobsDir }),
+			runContainer: () => assert.fail("a free refusal cannot dispatch"), cleanup: async () => {}, comment: async () => {},
+		},
+	});
+	const result = await process(f.job, "token", new AbortController().signal);
+	assert.equal(result.outcome, "policy");
+	assert.equal(result.reason, "provider-unconfigured");
+	assert.ok(!events.includes("token-reserve"), "credential refusal runs before reserve");
 });
 
 test("expired private context is a recorded policy refusal before credentials, preparation or reservations", { skip }, async (t) => {

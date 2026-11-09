@@ -41,7 +41,7 @@ test("a project with too few runs, and one whose runs fit, are fact lines", () =
 });
 
 test("a RAISE is a warning whose fix is the exact dispatch_limit_edit call; a lowering is a fact line carrying it", () => {
-	const limits = limitsOf([{ scope: "acme/web", day: 5 }, { scope: "project:web", memory: "4g" }, { scope: "project:api", memory: "8g", cpus: 4 }]);
+	const limits = limitsOf([{ scope: "acme/web", concurrent: 5 }, { scope: "project:web", memory: "4g" }, { scope: "project:api", memory: "8g", cpus: 4 }]);
 	const records = [rec({ project: "web", reason: "oom-killed", peakMiB: 4096 }), ...runs(12, { project: "api", memMiB: 8192, cpuCenti: 400, peakMiB: 2000, cores: 0.5 })];
 	assert.deepEqual(labels(sizeSuggestionChecks({ projects: projects("web", "api"), limits, env: {}, budget: ROOMY, records, nowMs: NOW })), [
 		'warn: project web: size 4g, 2 CPUs; its runs in the last 30 days suggest memory 6g (oom-killed: 1 run ended oom-killed (the largest size killed 4g)) -> apply it on the console\'s project page with Preview this size: dispatch_limit_edit {"index":1,"memory":"6g"} (an operator confirms it; nothing applies a size by itself)',

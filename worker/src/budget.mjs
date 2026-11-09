@@ -1,24 +1,12 @@
 /**
- * CONST-BUDGET-BEFORE-TOKENS. The ordering IS the mechanism.
+ * The UTC budget window vocabulary: the day/week/month KEYS and TTLS every windowed counter uses.
  *
- * Reserve a slot against the spend caps BEFORE a container starts. Check-after-spend means fifty
- * junk triggers cost fifty jobs of real money before the cap engages -- the exact scenario the cap
- * exists for. So: atomically INCR each active window's counter, and only start the container if every
- * window is within its cap and outside its soft-hold band.
- *
- * INCR is atomic -- verified against a real Valkey under 20 parallel increments yielding exactly
- * 20, no lost updates -- so this needs no lock even at concurrency 3. Three jobs racing at count 9
- * with cap 10 reserve 10, 11, 12; exactly one proceeds, the others are refused, and no container
- * starts over budget.
- *
- * Three windows bound spend on different horizons: a mandatory DAY cap, plus OPTIONAL WEEK and MONTH
- * ceilings (REQ-SPEND-CAPS-MULTI-WINDOW). A window whose cap is null/absent is disabled -- not counted,
- * not evaluated. On top of the hard caps a single SOFT-HOLD percentage refuses new starts once any
- * window enters its band (e.g. >= 80% of that window's cap), a distinct operator-visible brake before
- * the hard wall; in-flight containers are untouched because the reservation happens pre-container.
- *
- * `redis` is any ioredis-compatible client (BullMQ bundles ioredis). Injected so the logic is
- * testable without a running server.
+ * Job-count caps were removed, so this module no longer reserves or releases a slot: `reserveBudget`,
+ * `releaseBudget`, `reserveLedgers` and `releaseLedgers` are gone with the global and scoped count windows.
+ * What remains is the key vocabulary: `token-budget.mjs` composes `budget:tok:` with `dayKey`/`weekKey`/
+ * `monthKey` and expires them on `DAY/WEEK/MONTH_TTL_SECONDS`, and doctor, model-failover,
+ * portfolio-snapshot and the admin read the same keys. The key/TTL exports are kept byte-compatible for
+ * those readers; changing one would orphan live counters and break the admin's display.
  */
 
 /** UTC day key: `budget:YYYY-MM-DD`. */
@@ -46,125 +34,8 @@ export function monthKey(now = new Date(), prefix = "budget") {
 
 // Each window's TTL outlives its bucket with slack, so a stale counter is reclaimed shortly after the
 // window rolls over. Set once, on first reservation only (reserved === 1), so a busy window cannot push
-// its own expiry forward indefinitely. EXPORTED for the token windows (token-budget.mjs), so a
-// dollar counter and a job-count counter for the same window live and expire on the same terms.
+// its own expiry forward indefinitely. EXPORTED for the token windows (token-budget.mjs), so a token
+// counter and any other counter for the same window live and expire on the same terms.
 export const DAY_TTL_SECONDS = 2 * 24 * 60 * 60; // outlives the UTC day
 export const WEEK_TTL_SECONDS = 9 * 24 * 60 * 60; // outlives the Mon-Sun week
 export const MONTH_TTL_SECONDS = 40 * 24 * 60 * 60; // outlives the longest month
-
-/**
- * Classify one window's reserved count against its cap and the soft-hold band. PURE, and exported so the
- * worker's `reserveBudget` and the admin panel compute the same state from the same inputs and cannot
- * drift on where the band and the wall begin (the read-model already imports `dayKey` for the same reason).
- *
- *   reserved > cap                      -> "over"       (hard cap exceeded; also fails closed for cap <= 0)
- *   reserved > floor(cap * pct / 100)   -> "soft-hold"  (inside the band; only when pct is set)
- *   otherwise                           -> "ok"
- *
- * `softHoldPct` null/absent disables the band. Callers only classify ACTIVE windows (cap is a real number);
- * a disabled window (cap null) is never passed here.
- */
-export function windowState(reserved, cap, softHoldPct = null) {
-	if (reserved > cap) return "over";
-	if (Number.isInteger(softHoldPct) && reserved > Math.floor((cap * softHoldPct) / 100)) return "soft-hold";
-	return "ok";
-}
-
-/** The active windows for a `caps` set: day plus week/month only when their cap is set (not null/undefined). */
-function activeWindows(caps, now, keyPrefix) {
-	return [
-		{ name: "day", key: dayKey(now, keyPrefix), cap: caps?.day, ttl: DAY_TTL_SECONDS },
-		{ name: "week", key: weekKey(now, keyPrefix), cap: caps?.week, ttl: WEEK_TTL_SECONDS },
-		{ name: "month", key: monthKey(now, keyPrefix), cap: caps?.month, ttl: MONTH_TTL_SECONDS },
-	].filter((w) => w.cap !== null && w.cap !== undefined);
-}
-
-/**
- * Atomically reserve one slot across every ACTIVE window. Returns
- * `{ allowed, reason, blockedWindow, windows }` where `windows[name]` is `{ reserved, cap, state }` for an
- * active window or `null` for a disabled one, and `reason` is the worst window state:
- *   any "over"       -> "over-budget"
- *   else any "soft-hold" -> "soft-hold"
- *   else                 -> "ok"  (allowed)
- * `blockedWindow` names the day>week>month-first window carrying that worst state, so the caller can say
- * WHICH ceiling blocked. Both refusals are pre-container, so a refused job spends nothing; a soft-hold is
- * refused exactly like over-budget, only under a distinct reason and an amber panel state.
- *
- * Every active window is INCR'd UNCONDITIONALLY -- the same "a refused reservation still counts, no
- * give-back" invariant the daily cap has always had, now per window. This is deliberate: conditional
- * increments would reintroduce the read-then-write race the atomic INCR design exists to avoid, and
- * unconditional INCR keeps `releaseBudget` a clean symmetric DECR of the same windows. It fails closed --
- * a burst that exhausts one window counts against the others too -- which is the money-safe direction.
- *
- * A cap of 0/negative on an ACTIVE window fails closed (every job "over") rather than meaning "unlimited";
- * a DISABLED window (cap null/absent) is not counted or evaluated at all.
- */
-export async function reserveBudget(redis, { caps, softHoldPct = null, now = new Date(), keyPrefix = "budget" } = {}) {
-	const windows = { day: null, week: null, month: null };
-	for (const w of activeWindows(caps, now, keyPrefix)) {
-		const reserved = Number(await redis.incr(w.key));
-		// Set the TTL only when the key is first created, so a long window cannot push its expiry forward.
-		if (reserved === 1) await redis.expire(w.key, w.ttl);
-		windows[w.name] = { reserved, cap: w.cap, state: windowState(reserved, w.cap, softHoldPct) };
-	}
-
-	const order = ["day", "week", "month"];
-	for (const [state, reason] of [
-		["over", "over-budget"],
-		["soft-hold", "soft-hold"],
-	]) {
-		const hit = order.find((name) => windows[name]?.state === state);
-		if (hit) return { allowed: false, reason, blockedWindow: hit, windows };
-	}
-	return { allowed: true, reason: "ok", blockedWindow: null, windows };
-}
-
-/**
- * Give a reservation back in every window `reserveBudget` would have reserved. Used ONLY when the container
- * never started because of an INFRA fault AFTER reserving (e.g. the docker daemon was unreachable) -- an
- * infra failure that spent nothing should not permanently consume a slot. DECRs exactly the ACTIVE windows,
- * mirroring `reserveBudget` so the refund cannot drift from the reservation. NOT used for a completed run
- * (which really consumed its slot), an exit-1 infra retry (the container ran and spent), or an
- * over-budget/soft-hold refusal (which never gives back its slot, deliberately).
- */
-export async function releaseBudget(redis, { caps, now = new Date(), keyPrefix = "budget" } = {}) {
-	for (const w of activeWindows(caps, now, keyPrefix)) {
-		await redis.decr(w.key);
-	}
-}
-
-/**
- * Reserve one slot in each job-count LEDGER, in order (issue #499 part B, DES-SCOPED-LIMITS-AND-FOLDER-MUTEX). A ledger
- * is `{ scope, keyPrefix, caps, softHoldPct?, reason }`: the repo or folder row's, the project row's, then the global
- * one (`scope` null, the default key prefix, the soft-hold band), as `scopedLedgers` and the processor build them.
- *
- * Each ledger that ADMITS is pushed onto `held`, the caller's list of reservations still standing, the moment its
- * reservation lands. The first ledger that refuses stops the walk and is returned as `refusedBy` with its result; it is
- * NOT pushed, because a refused reservation still counts (`reserveBudget`) and is never given back. The ledgers before it
- * are in `held`, and the caller gives them back with `releaseLedgers`: a ledger that did not issue the refusal gives
- * back, the rule the scoped ledger has followed since issue #242. A Valkey fault mid-walk throws with `held` exact.
- */
-export async function reserveLedgers(redis, ledgers, held, { now = new Date() } = {}) {
-	for (const ledger of ledgers ?? []) {
-		const result = await reserveBudget(redis, { caps: ledger.caps, softHoldPct: ledger.softHoldPct ?? null, now, ...(ledger.keyPrefix ? { keyPrefix: ledger.keyPrefix } : {}) });
-		if (!result.allowed) return { allowed: false, refusedBy: ledger, result };
-		held.push(ledger);
-	}
-	return { allowed: true, refusedBy: null, result: null };
-}
-
-/**
- * Give back every reservation in `held`, LAST FIRST (the reverse of `reserveLedgers`), removing each from `held` once
- * its release has landed. THE one release of job-count slots: every refund path in the processor calls this with the
- * same list, so no path can give back one ledger and forget another, and none can give one back twice (a second call
- * finds `held` empty; `releaseBudget` is a floorless DECR). A Valkey fault throws with the unreleased ledgers still in
- * `held`, so the caller's record of what stays reserved is exact.
- */
-export async function releaseLedgers(redis, held, { now = new Date() } = {}) {
-	while (held.length > 0) {
-		const ledger = held[held.length - 1];
-		await releaseBudget(redis, { caps: ledger.caps, now, ...(ledger.keyPrefix ? { keyPrefix: ledger.keyPrefix } : {}) });
-		held.pop();
-	}
-}
-

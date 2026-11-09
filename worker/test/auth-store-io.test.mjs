@@ -76,7 +76,7 @@ test("actual pickup retries a credential read fault before quota, API-key fallba
 	const runtime = makeSubscriptionRuntime({ auth: f.service, quota: { admit: async () => { calls.push("quota"); throw new Error("not reached"); } }, now, lookup: () => ({ api: "openai-responses", baseUrl: "https://api.openai.com/v1" }) });
 	const records = [];
 	const redis = { get: async () => null, set: async () => "OK", expire: async () => 1, incr: async () => { calls.push("reserve"); return 1; }, decr: async () => 0, eval: async () => { calls.push("reserve"); throw new Error("not reached"); } };
-	const processJob = makeProcessor({ redis, now, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "openai", model: "gpt-4.1", maxTurns: 5, dailyCap: 10, concurrency: 1, softHoldPct: null }), recordRun: record => records.push(record), deps: {
+	const processJob = makeProcessor({ redis, now, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "openai", model: "gpt-4.1", maxTurns: 5, concurrency: 1 }), recordRun: record => records.push(record), deps: {
 		subscriptionRuntime: runtime, now: new Date(AT),
 		checkProviderCredential: () => { calls.push("api-key"); return { ok: true }; },
 		mintToken: async () => { calls.push("mint"); return "token"; },

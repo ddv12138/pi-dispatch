@@ -23,7 +23,7 @@ import { endpointsForModel } from "./model-endpoints.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
 import { effectiveTokenCap } from "./budget-rule.mjs";
 import { tokenWindowCaps, valkeyEndpointTag } from "./token-budget.mjs";
-import { concurrencyFor, tokenCapsFor, makeInFlight, modelTokenRows, projectTokenCapsFor, projectRowFor, rowScopeFor, scopedLedgers } from "./scoped-limits.mjs";
+import { concurrencyFor, tokenCapsFor, makeInFlight, modelTokenRows, projectTokenCapsFor, projectRowFor, rowScopeFor } from "./scoped-limits.mjs";
 import { memberScopeOf, projectOf } from "./projects.mjs";
 import { resolveJobSize } from "./job-size.mjs";
 import { BUDGET_RECHECK_MS, HOST_BUDGET_TICK_MS, NEVER_FITS_RECHECK_MS, makeHostBudget } from "./host-budget.mjs";
@@ -180,10 +180,10 @@ function boundAfterAbort(run, signal, job, log, graceMs = ABORT_GRACE_MS, onStop
  * Once per job, before runJob, it resolves the runtime-settings overlay via `getSettings`
  * (INT-CONFIG-OVERLAY-CONTRACT). A present-but-invalid overlay resolves to a POLICY refusal RETURNED
  * (never thrown), so BullMQ marks the job completed without a retry (CONST-RETRY-INFRA-ONLY). A valid
- * overlay fills the effective `provider`/`model`/`maxTurns`/`dailyCap`/`weeklyCap`/`monthlyCap`/`softHoldPct`
+ * overlay fills the effective `provider`/`model`/`maxTurns`/`maxTokens`/`concurrency` settings
  * under `job.data > overlay > env` precedence and re-binds the worker slot count via `applyConcurrency`.
- * The overlay changes which values the spend caps take, never when they are checked -- reserveBudget still
- * runs inside runJob against the freshly passed caps (CONST-BUDGET-BEFORE-TOKENS).
+ * The overlay changes which values a job runs with, never when the token reserve is checked -- that still
+ * runs inside runJob against the freshly passed token windows (CONST-BUDGET-BEFORE-TOKENS).
  *
  * The read happens once per pickup, right after the scope gate and before the model endpoint gate (issue #503),
  * because that gate needs the effective provider and model, which the overlay can supply. One more read sits at the
@@ -880,7 +880,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// exactly as the pause gate's does (inside the try it would become a permanent failure plus a failure
 		// record for what was a transient blip). `deferTo` rethrows a move's rejection unchanged after
 		// removing the reason it wrote for it, so that holds through it. The limits snapshot is read ONCE here and
-		// shared with `scopedLedgers` below, so the gate and the money ledger cannot disagree mid-job.
+		// shared with the token windows below, so the gate and the token ledgers cannot disagree mid-job.
 		// tryAcquire is a synchronous check-and-increment -- no await between read and take, so Node's
 		// single thread makes it atomic at any concurrency -- and the local-folder limit is a structural 1
 		// (concurrencyFor) with no file and no off-switch: the scheduler mints a cron trigger's next
@@ -999,7 +999,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		const recordAfterGate = (args) => recordRun({ ...args, project, size, capacity, earlier, maxTurns: pickupMaxTurns });
 
 		// The MATCHED ROW's scope keys both the in-process slot and the fleet lease (issue #498), the same string
-		// `budgetCapsFor` hashes below and the boot sweeper hashes from the file: a qualified `github:acme/web` row holds
+		// `tokenCapsFor` hashes below and the boot sweeper hashes from the file: a qualified `github:acme/web` row holds
 		// GitHub jobs only, a bare `acme/web` row holds every forge's under the key it always had. With no row it is the
 		// job's canonical scope, so the folder mutex is keyed exactly as before.
 		const scope = rowScopeFor(job.data, limits);
@@ -1603,8 +1603,8 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			// field wins; an omitted one takes the overlay value, else env, resolved at this job's start
 			// (INT-CONFIG-OVERLAY-CONTRACT). A forge job carries provider/model/maxTurns only when its trigger
 			// named them (#502), so for most jobs this fill supplies the provider the container env allowlist
-			// requires -- absent it, the allowlist refuses a job only after its budget slot is reserved. The `caps`/`softHoldPct` passed to runJob change which
-			// values reserveBudget checks, never when it runs.
+			// requires -- absent it, the allowlist refuses a job only after its token hold is reserved. The token
+			// windows passed to runJob change which values the reserve checks, never when it runs.
 			// The one call that logs a malformed queued cap (#501): the endpoint gate above computes the same job and
 			// stays quiet, so it is reported once per pickup.
 			const effectiveJob = selectedEffective ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null, (event, fields) => deps?.log?.(event, { jobId: job.id, ...fields }));
@@ -1642,17 +1642,8 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				redis,
 				// Issue #761: the tag of the Valkey the token counters are in, for the record's `tokensWindows.reservedIn`.
 				valkeyTag,
-				// The three spend windows (week/month null when disabled) and the soft-hold band, resolved this
-				// job-start under overlay > env. reserveBudget checks them before the container.
-				caps: { day: settings.dailyCap, week: settings.weeklyCap, month: settings.monthlyCap },
-				softHoldPct: settings.softHoldPct,
-				// This job's scoped job-count ledgers in reserve order (issues #242 and #499 part B): its repo or folder
-				// row's, then its project row's, from the SAME limits snapshot and the SAME pickup project the gate above
-				// read -- one read per pickup, so gate, ledger and record agree for this attempt. Empty when no row carries
-				// a job-count window for this job.
-				scopedLedgers: scopedLedgers(job.data, limits, project),
-				// The deployment's token windows, resolved this job-start under overlay > env
-				// like the caps above, or null when none is set (then nothing is reserved and no token key is written).
+				// The deployment's token windows, resolved this job-start under overlay > env, or null when none
+				// is set (then nothing is reserved and no token key is written).
 				tokenCaps: tokenInputs.tokenCaps,
 				// This job's repo or folder token windows and the model token windows it
 				// reserves in, from the SAME limits snapshot. The model rows follow the job's EFFECTIVE list (the trigger's,

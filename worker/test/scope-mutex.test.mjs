@@ -18,10 +18,10 @@ if (!mod && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") {
 const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.19.0); CI runs these`;
 
 const NOW = Date.UTC(2026, 7, 29, 12, 0);
-const SETTINGS = () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 5000, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null });
+const SETTINGS = () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3, maxTokens: 5000, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null });
 const limitsOf = (rows) => parseScopedLimits(JSON.stringify({ version: 1, limits: rows }), "sl.json");
 
-// A redis whose incr spies reserveBudget: incrCalls MUST stay 0 on every defer path.
+// A redis whose incr spies a (now removed) count reserve: incrCalls MUST stay 0 everywhere.
 function fakeRedis() {
 	const redis = { incrCalls: 0 };
 	redis.incr = async () => (redis.incrCalls++, 1);
@@ -101,7 +101,7 @@ test("the folder mutex: a second same-folder local job defers while the first ho
 	assert.equal(b.moves[0].ts, NOW + mod.SCOPE_BUSY_RECHECK_MS, "deferred to the fixed re-check instant");
 	assert.equal(b.moves[0].tok, "tok-b", "with the worker's token");
 	assert.equal(h.seen.started, 1, "the second container NEVER started while the first held the folder");
-	assert.equal(h.redis.incrCalls, 1, "only the first job reserved budget -- the defer path spends nothing");
+	assert.equal(h.redis.incrCalls, 0, "no job-count reserve exists -- the defer path and the run both spend nothing there");
 	assert.equal(h.seen.records.length, 0, "a deferral writes NO record (and the held job has not completed yet)");
 	const deferred = h.seen.logs.find((l) => l.event === "scope_busy_deferred");
 	assert.deepEqual(deferred.fields, { jobId: "j-2", kind: "local", delayMs: mod.SCOPE_BUSY_RECHECK_MS });
@@ -142,7 +142,7 @@ test("the mutex is unconditional: no limits wired at all (makeProcessor defaults
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		recordRun: () => {},
 		timeoutMs: 100000,
 		now: () => NOW,
@@ -227,7 +227,7 @@ test("release-exactly-once: completion, infra throw, overlay-invalid return and 
 		const inFlight = makeInFlight();
 		const processor = mod.makeProcessor({
 			cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			inFlight, now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 			deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 125, aborted: false }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 		});
@@ -253,7 +253,7 @@ test("release-exactly-once: completion, infra throw, overlay-invalid return and 
 		const inFlight = makeInFlight();
 		const processor = mod.makeProcessor({
 			cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			inFlight, now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 			deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 0, aborted: true }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 		});
@@ -268,7 +268,7 @@ test("a log-less wiring (deps: {}) defers without a TypeError -- the log call is
 	inFlight.tryAcquire("/f", 1); // pre-hold the folder so the gate defers immediately
 	const processor = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		inFlight, now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		deps: {},
 	});
@@ -296,7 +296,7 @@ test("a throw between the acquire and the main try releases the hold (the setup 
 	const inFlight = makeInFlight();
 	const processor = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		inFlight, now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		deps: { log: () => {} },
 	});
@@ -333,11 +333,10 @@ test("a completed default-wired run's record keeps the pre-#242 shape -- no new 
 	);
 });
 
-test("the limits snapshot is read ONCE per pickup, shared by gate and ledger -- a mid-job reload cannot split them", { skip }, async () => {
-	// A reload landing between two reads would let the gate charge a scope the ledger never bills (or
-	// vice versa). The stub returns the rows exactly once, then []: if the wiring re-read, budgetCapsFor
-	// would see [] and the scoped budget key would silently never land.
-	const limits = limitsOf([{ scope: "acme/web", day: 5 }]);
+test("the limits snapshot is read ONCE per pickup -- a mid-job reload cannot split the gate from itself", { skip }, async () => {
+	// A reload landing between two reads would let the gate and the run disagree. The stub returns the rows
+	// exactly once, then []: a second read would see no row at all.
+	const limits = limitsOf([{ scope: "acme/web", concurrent: 2 }]);
 	let reads = 0;
 	const keys = new Set();
 	const redis = {
@@ -348,7 +347,7 @@ test("the limits snapshot is read ONCE per pickup, shared by gate and ledger -- 
 	};
 	const processor = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		scopedLimits: () => (reads++ === 0 ? limits : []),
 		now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 0, aborted: false, turns: 1 }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
@@ -356,7 +355,7 @@ test("the limits snapshot is read ONCE per pickup, shared by gate and ledger -- 
 	const r = await processor(ghJob("g-1", "acme/web").job, "tok", new AbortController().signal);
 	assert.equal(r.outcome, "completed");
 	assert.equal(reads, 1, "one snapshot per pickup");
-	assert.ok([...keys].some((k) => k.startsWith("budget:s:")), "the scoped budget key landed from the SAME snapshot the gate used");
+	assert.deepEqual([...keys], [], "no job-count key exists to land");
 });
 
 // --- the host-wide bound (issue #57) -------------------------------------------------------------------

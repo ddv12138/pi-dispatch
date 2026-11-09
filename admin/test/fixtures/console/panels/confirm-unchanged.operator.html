@@ -78,7 +78,7 @@
 <div class="titlebar"><div class="titlebar__lead"><h1>Configuration</h1><p class="titlebar__sub">Settings: settings overlay unavailable. Triggers: triggers file unavailable.</p></div><div class="titlebar__end"><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
 <div class="stack"><section id="cf-navigation" data-panel><nav class="config-sections" aria-label="Configuration sections">
 <a class="fpill" href="#cf-settings">Settings <b>2</b></a><a class="fpill" href="#cf-triggers">Triggers <b>1</b></a><a class="fpill" href="#cf-pause-windows">Pause windows <b>1</b></a><a class="fpill" href="#cf-scoped-limits">Scoped limits <b>1</b></a><a class="fpill" href="#cf-projects">Projects <b>1</b></a><a class="fpill" href="#cf-files">Files <b>2</b></a><a class="fpill" href="#cf-unset">Unset <b>0</b></a><a class="fpill" href="#cf-mcp-servers">MCP servers <b>0</b></a><span class="config-divider" aria-hidden="true"></span><a class="btn btn--sm" href="/config/secrets">Secrets</a><a class="btn btn--sm" href="/config/connections">Connections</a>
-</nav></section></div><div class="cols cols--wide-side config-layout"><div class="stack"><section id="cf-settings" data-panel><div class="card"><div class="card__head"><h2>Settings overlay</h2></div><dl class="facts"><div class="fact"><dt>model</dt><dd>deployment default</dd></div><div class="fact"><dt>provider</dt><dd>deployment default</dd></div><div class="fact"><dt>maxTurns</dt><dd>30</dd></div><div class="fact"><dt>dailyCap</dt><dd>deployment default</dd></div><div class="fact"><dt>weeklyCap</dt><dd>deployment default</dd></div><div class="fact"><dt>monthlyCap</dt><dd>deployment default</dd></div><div class="fact"><dt>maxTokens</dt><dd>2000000</dd></div><div class="fact"><dt>dailyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>weeklyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>monthlyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>concurrency</dt><dd>deployment default</dd></div><div class="fact"><dt>softHoldPct</dt><dd>deployment default</dd></div></dl><details class="config-editor">
+</nav></section></div><div class="cols cols--wide-side config-layout"><div class="stack"><section id="cf-settings" data-panel><div class="card"><div class="card__head"><h2>Settings overlay</h2></div><dl class="facts"><div class="fact"><dt>model</dt><dd>deployment default</dd></div><div class="fact"><dt>provider</dt><dd>deployment default</dd></div><div class="fact"><dt>maxTurns</dt><dd>30</dd></div><div class="fact"><dt>maxTokens</dt><dd>2000000</dd></div><div class="fact"><dt>dailyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>weeklyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>monthlyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>concurrency</dt><dd>deployment default</dd></div></dl><details class="config-editor">
 <summary>Change a setting</summary>
 <div class="stack"><form
 class="act config-form stack"
@@ -111,21 +111,6 @@ value="maxTurns"
 >
 maxTurns
 </option><option
-value="dailyCap"
-
->
-dailyCap
-</option><option
-value="weeklyCap"
-
->
-weeklyCap
-</option><option
-value="monthlyCap"
-
->
-monthlyCap
-</option><option
 value="maxTokens"
 
 >
@@ -150,11 +135,6 @@ value="concurrency"
 
 >
 concurrency
-</option><option
-value="softHoldPct"
-
->
-softHoldPct
 </option>
 </select></label
 >
@@ -208,21 +188,6 @@ value="maxTurns"
 >
 maxTurns
 </option><option
-value="dailyCap"
-
->
-dailyCap
-</option><option
-value="weeklyCap"
-
->
-weeklyCap
-</option><option
-value="monthlyCap"
-
->
-monthlyCap
-</option><option
 value="maxTokens"
 
 >
@@ -247,11 +212,6 @@ value="concurrency"
 
 >
 concurrency
-</option><option
-value="softHoldPct"
-
->
-softHoldPct
 </option>
 </select></label
 >
@@ -622,7 +582,7 @@ Actions
 <td>1</td>
 <td class="code">acme/web</td>
 <td>
-10 jobs a day
+-
 </td>
 <td>
 <details class="config-editor">
@@ -693,7 +653,7 @@ autocomplete="off"
 class="textarea"
 name="limit"
 rows="4"
- data-type="json" required placeholder="{&quot;scope&quot;: &quot;acme/web&quot;, &quot;day&quot;: 10, &quot;concurrent&quot;: 2}"
+ data-type="json" required placeholder="{&quot;scope&quot;: &quot;acme/web&quot;, &quot;concurrent&quot;: 2}"
 maxlength="16384"
 >
 </textarea
@@ -890,21 +850,6 @@ value="maxTurns"
 >
 maxTurns
 </option><option
-value="dailyCap"
-
->
-dailyCap
-</option><option
-value="weeklyCap"
-
->
-weeklyCap
-</option><option
-value="monthlyCap"
-
->
-monthlyCap
-</option><option
 value="maxTokens"
 
 >
@@ -929,11 +874,6 @@ value="concurrency"
 
 >
 concurrency
-</option><option
-value="softHoldPct"
-
->
-softHoldPct
 </option>
 </select></label
 >

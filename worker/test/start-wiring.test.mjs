@@ -954,11 +954,11 @@ test("runtime settings: getSettings is a top-level createWorker arg resolving ef
 	const { captured, logs } = await runStart({ env: { PI_SETTINGS_FILE: settingsFile }, makeAuth, makeHost: () => fakeHost() });
 
 	assert.equal(typeof captured.getSettings, "function", "getSettings must be a top-level createWorker arg");
-	assert.equal(captured.cap, undefined, "no static cap arg survives -- the overlay replaces the frozen daily cap");
+	assert.equal(captured.cap, undefined, "no static cap arg survives -- the job-start caps were removed");
 
-	// Calling it with an empty overlay yields the fourteen effective keys from env/default config (env {} here);
-	// the optional week/month ceilings, token controls, and the soft-hold band default to disabled (null).
-	// `secretProfiles` (issue #225) rides ALONGSIDE those fourteen rather than inside effectiveSettings, which is
+	// Calling it with an empty overlay yields the eight effective keys from env/default config (env {} here);
+	// the token controls default to disabled (null).
+	// `secretProfiles` (issue #225) rides ALONGSIDE those eight rather than inside effectiveSettings, which is
 	// why it appears here and not in that function's own pins: it carries no `overlay > env` precedence, so
 	// putting it there would have claimed one it deliberately does not have.
 	assert.deepEqual(
@@ -967,23 +967,16 @@ test("runtime settings: getSettings is a top-level createWorker arg resolving ef
 			provider: "anthropic",
 			model: "claude-sonnet-5-5",
 			maxTurns: 30,
-			dailyCap: 25,
-			weeklyCap: null,
-			monthlyCap: null,
-			maxTokens: null,
-			dailyTokenCap: null,
-			secretProfiles: {},
-			// Issue #704: the bundle profiles ride beside secretProfiles, for its reason.
-			secretBundles: {},
-			concurrency: 3,
-			softHoldPct: null,
-			// Issue #501: the four token keys, all unset by default.
 			maxTokens: null,
 			dailyTokenCap: null,
 			weeklyTokenCap: null,
 			monthlyTokenCap: null,
+			secretProfiles: {},
+			// Issue #704: the bundle profiles ride beside secretProfiles, for its reason.
+			secretBundles: {},
+			concurrency: 3,
 		},
-		"getSettings resolves the fourteen effective keys from env/default config when the overlay is empty",
+		"getSettings resolves the eight effective keys from env/default config when the overlay is empty",
 	);
 
 	const started = logs.find((l) => l.event === "worker_started");
@@ -1479,12 +1472,12 @@ test("scoped limits: a valid file boot-loads into a top-level closure, arms the 
 	const dir = tempDir("pi-sl-");
 	try {
 		const file = join(dir, "scoped-limits.json");
-		writeFileSync(file, `${JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3, concurrent: 1 }] })}\n`);
+		writeFileSync(file, `${JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] })}\n`);
 		const { captured, logs } = await runStart({ env: { PI_SCOPED_LIMITS_FILE: file } });
 		assert.equal(typeof captured.scopedLimits, "function", "a closure, beside pauseUntil, at the TOP level (not in deps)");
 		const rows = captured.scopedLimits();
 		assert.equal(rows.length, 1);
-		assert.equal(rows[0].day, 3);
+		assert.equal(rows[0].concurrent, 3);
 		assert.ok(logs.some((l) => l.event === "scoped_limits_watching" && l.path === file), "the live-edit watcher armed");
 		const started = logs.find((l) => l.event === "worker_started");
 		assert.equal(started.scopedLimitsFile, file);
@@ -1507,10 +1500,10 @@ test("scoped limits: an invalid file refuses BOOT fail-loud (configError), with 
 	const dir = tempDir("pi-sl-");
 	try {
 		const file = join(dir, "scoped-limits.json");
-		writeFileSync(file, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 0 }] }));
+		writeFileSync(file, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 0 }] }));
 		await assert.rejects(
 			() => runStart({ env: { PI_SCOPED_LIMITS_FILE: file } }),
-			(e) => e.piDispatchConfig === true && /day must be an integer >= 1/.test(e.message),
+			(e) => e.piDispatchConfig === true && /concurrent must be an integer >= 1/.test(e.message),
 		);
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -1746,7 +1739,7 @@ test("issue #499 part B: a project row whose id is not in projects.json refuses 
 	try {
 		const limits = join(dir, "scoped-limits.json");
 		const projects = join(dir, "projects.json");
-		writeFileSync(limits, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", day: 1 }, { scope: "project:shop", day: 2 }] }));
+		writeFileSync(limits, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 1 }, { scope: "project:shop", concurrent: 2 }] }));
 		// No projects file at all: every project row dangles.
 		await assert.rejects(
 			() => runStart({ env: { PI_SCOPED_LIMITS_FILE: limits } }),
@@ -1771,16 +1764,16 @@ test("issue #499 part B: a live reload of EITHER file is judged as a pair: a dan
 		const limitsFile = join(dir, "scoped-limits.json");
 		const projectsFile = join(dir, "projects.json");
 		const config = { scopedLimitsFile: limitsFile, projectsFile };
-		writeFileSync(limitsFile, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] }));
+		writeFileSync(limitsFile, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] }));
 		writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-		const limits = { current: [{ scope: "acme/web", day: 3, week: null, month: null, concurrent: null }] };
+		const limits = { current: [{ scope: "acme/web", concurrent: 3 }] };
 		const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
 		const pair = mod.makeProjectPair(limits, projects);
 		const logs = [];
 		const log = (event, fields) => logs.push({ event, fields });
 
 		// 1. The limits file gains a row for a project not defined anywhere: kept out, last-good stays, both files named.
-		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", day: 2 }] }));
+		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", concurrent: 2 }] }));
 		const lastLimits = limits.current;
 		mod.reloadScopedLimits(config, limits, log, null, pair);
 		assert.equal(limits.current, lastLimits, "the SAME array object: last-good untouched");
@@ -1806,14 +1799,14 @@ test("issue #499 part B: a live reload of EITHER file is judged as a pair: a dan
 		assert.ok(logs.at(-1).fields.reason.includes(limitsFile));
 
 		// 4. The row is removed: the limits reload sees projects.json on disk agree, and takes both.
-		writeFileSync(limitsFile, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 4 }] }));
+		writeFileSync(limitsFile, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 4 }] }));
 		mod.reloadScopedLimits(config, limits, log, null, pair);
 		assert.deepEqual(limits.current.map((l) => l.scope), ["acme/web"]);
 		assert.deepEqual(projects.current.map((p) => p.id), ["shop"], "the projects edit kept out in step 3 applied with the row's removal");
 
 		// 5. With the other file mid-edit (not loading), a side that agrees with the other's LIVE list still applies.
 		writeFileSync(projectsFile, "{ broken");
-		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", day: 1 }] }));
+		writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", concurrent: 1 }] }));
 		mod.reloadScopedLimits(config, limits, log, null, pair);
 		assert.deepEqual(limits.current.map((l) => l.scope), ["project:shop"]);
 		assert.deepEqual(projects.current.map((p) => p.id), ["shop"]);
@@ -1832,9 +1825,9 @@ for (const variant of ["projects.json drops shop", "projects.json missing", "pro
 			const limitsFile = join(dir, "scoped-limits.json");
 			const projectsFile = join(dir, "projects.json");
 			const config = { scopedLimitsFile: limitsFile, projectsFile };
-			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", day: 3 }, { scope: "project:shop", day: 2 }] }));
+			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 3 }, { scope: "project:shop", concurrent: 2 }] }));
 			writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-			const limits = { current: [{ scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null }, { scope: "project:shop", day: 2, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null }] };
+			const limits = { current: [{ scope: "acme/web", concurrent: 3 }, { scope: "project:shop", concurrent: 2 }] };
 			const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
 			const pair = mod.makeProjectPair(limits, projects);
 			const logs = [];
@@ -1845,10 +1838,10 @@ for (const variant of ["projects.json drops shop", "projects.json missing", "pro
 			mod.reloadProjects(config, projects, log, pair);
 			assert.equal(logs.at(-1).event, "projects_reload_invalid");
 			assert.deepEqual(projects.current.map((p) => p.id), ["shop"], "the live projects keep shop");
-			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", day: 4 }, { scope: "project:shop", day: 2 }] }));
+			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 4 }, { scope: "project:shop", concurrent: 2 }] }));
 			mod.reloadScopedLimits(config, limits, log, null, pair);
 			assert.equal(logs.at(-1).event, "scoped_limits_reloaded");
-			assert.equal(limits.current.find((r) => r.scope === "acme/web").day, 4, "the edit is live");
+			assert.equal(limits.current.find((r) => r.scope === "acme/web").concurrent, 4, "the edit is live");
 		} finally {
 			rmSync(dir, { recursive: true, force: true });
 		}
@@ -1895,15 +1888,15 @@ for (const order of ["limits first", "projects first"]) {
 			const limitsFile = join(dir, "scoped-limits.json");
 			const projectsFile = join(dir, "projects.json");
 			const config = { scopedLimitsFile: limitsFile, projectsFile };
-			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", day: 2 }] }));
+			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", concurrent: 2 }] }));
 			writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-			const limits = { current: [{ scope: "project:shop", day: 2, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null }] };
+			const limits = { current: [{ scope: "project:shop", concurrent: 2 }] };
 			const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
 			const pair = mod.makeProjectPair(limits, projects);
 			const logs = [];
 			const log = (event, fields) => logs.push({ event, fields });
 			const saveLimits = () => {
-				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:store", day: 2 }] }));
+				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:store", concurrent: 2 }] }));
 				mod.reloadScopedLimits(config, limits, log, null, pair);
 			};
 			const saveProjects = () => {
@@ -1932,7 +1925,7 @@ test("reloadScopedLimits keeps LAST-GOOD on a bad edit and hot-swaps on a good o
 	try {
 		const file = join(dir, "scoped-limits.json");
 		const config = { scopedLimitsFile: file };
-		const good = [{ scope: "acme/web", day: 3, week: null, month: null, concurrent: null }];
+		const good = [{ scope: "acme/web", concurrent: 3 }];
 		const ref = { current: good };
 		const logs = [];
 		const log = (event, fields) => logs.push({ event, fields });
@@ -1942,9 +1935,9 @@ test("reloadScopedLimits keeps LAST-GOOD on a bad edit and hot-swaps on a good o
 		assert.equal(ref.current, good, "the SAME array object -- last-good untouched, not merely equal");
 		assert.equal(logs[0].event, "scoped_limits_reload_invalid");
 
-		writeFileSync(file, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 9 }] }));
+		writeFileSync(file, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 9 }] }));
 		mod.reloadScopedLimits(config, ref, log);
-		assert.equal(ref.current[0].day, 9, "a good edit swaps the ref");
+		assert.equal(ref.current[0].concurrent, 9, "a good edit swaps the ref");
 		assert.deepEqual(logs[1], { event: "scoped_limits_reloaded", fields: { count: 1 } });
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
@@ -1988,7 +1981,7 @@ test("reloadScopedLimits WARNS (never refuses) on a token row when the deploymen
 		const ref = { current: [] };
 		const logs = [];
 		const log = (event, fields) => logs.push({ event, fields });
-		writeFileSync(file, JSON.stringify({ version: 2, limits: [{ scope: "/srv/secret-path", day: 2 }, { scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }] }));
+		writeFileSync(file, JSON.stringify({ version: 2, limits: [{ scope: "/srv/secret-path", concurrent: 2 }, { scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }] }));
 		mod.reloadScopedLimits(config, ref, log, () => null);
 		assert.equal(ref.current.length, 3, "loaded, not refused");
 		assert.deepEqual(logs[1], { event: "scoped_limits_token_rows_without_budget", fields: { rows: [{ index: 1, kind: "scope" }, { index: 2, kind: "model" }] } });
@@ -2139,7 +2132,7 @@ test("the live-edit watchers are CLOSED with the worker that armed them", { skip
 		const before = bootLines.length;
 		writeFileSync(triggersPath, `${JSON.stringify({ triggers: [] })}\n`);
 		writeFileSync(pausePath, `${JSON.stringify({ windows: [{ scope: "acme/web", from: "01:00", to: "02:00" }] })}\n`);
-		writeFileSync(limitsPath, `${JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] })}\n`);
+		writeFileSync(limitsPath, `${JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] })}\n`);
 		writeFileSync(projectsPath, `${JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] })}\n`);
 		await new Promise((resolve) => setTimeout(resolve, 600));
 
@@ -3173,7 +3166,7 @@ test("LIVE: a job whose lock is lost while its processor runs is run once, neith
 			cancelJob: () => {},
 			stopContainer: () => {},
 			redis,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 100, concurrency: 1 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 1 }),
 			recordRun: captured.recordRun,
 			settledRecord: captured.settledRecord,
 			deps: {
@@ -4942,7 +4935,7 @@ test("issue #645: with a store, the boot builds every durable dep and hands it t
 	assert.equal(ck.redis, captured.redis, "the pointer goes through the shared client");
 	assert.equal(ck.hostName, started.host, "the host the manifest and the pointer name is this worker's");
 	assert.equal(ck.hostQueue, null, "no declared name, no host queue: a recovery goes to the shared queue");
-	assert.equal(typeof deps.runBudgetLedger?.claimSlot, "function", "the per-run ledger");
+	assert.equal(typeof deps.runBudgetLedger?.recordHold, "function", "the per-run ledger");
 	assert.deepEqual(await deps.readCheckpointPointer({ runId: "gh-1" }), { v: 1, host: "h" });
 	assert.deepEqual(t.pointerReads, ["gh-1"]);
 	assert.equal(t.enqueuerArgs.length, 1);

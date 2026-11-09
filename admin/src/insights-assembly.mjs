@@ -54,7 +54,6 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "@edgehero/pi-dispatch/config";
 import { parseLiveJobs, parseJobsMore } from "@edgehero/pi-dispatch/live-jobs";
 import { deploymentTokenCaps } from "./token-windows.mjs";
 import { fromNewerRelease, readableRecords } from "./newer-release.mjs";
-import { windowState } from "@edgehero/pi-dispatch/budget";
 
 /** The environment a caller that names none reads: this process's own. */
 export function processEnv() {
@@ -181,14 +180,14 @@ function posIntOrNull(v) {
 }
 
 /**
- * The budget slice of the insights payload (issue #181): reserved-vs-cap FACTS for the three job-slot
- * windows and the daily token counter, with the per-window state computed HERE by the worker's own
- * `windowState` (tokens have no soft hold: equality with their cap is already over). States ride
- * the payload as WORDS the page never derives: the artifact builder cannot load the worker
- * (its import allowlist is the two pure siblings), and duplicating threshold arithmetic behind a
- * parity test would put policy in two places. Caps come from the settings overlay ALONE -- a cap the
- * overlay does not set is null unless the console passes its deployment environment; then the worker
- * precedence applies. The static export keeps its former overlay-only contract.
+ * The budget slice of the insights payload (issue #181): the daily token counter and the token caps, with the token
+ * state computed HERE by the worker's own "over at the cap" rule. Job-count windows (day/week/month) and the soft-hold
+ * band are gone with the job-start caps (C1): this slice now carries `tokens` only -- `{ spent, cap, state, maxTokens }`
+ * -- plus the scoped rows' token windows. States ride the payload as WORDS the page never derives: the artifact builder
+ * cannot load the worker (its import allowlist is the two pure siblings), and duplicating threshold arithmetic behind a
+ * parity test would put policy in two places. Caps come from the settings overlay ALONE -- a cap the overlay does not
+ * set is null unless the console passes its deployment environment; then the worker precedence applies. The static
+ * export keeps its former overlay-only contract.
  * `readBudget` is GET-only (CONST-BUDGET-BEFORE-TOKENS: observing the budget spends nothing). Exported with a Valkey
  * client seam (`redisFn`) for its tests, as `assembleAllocationView` is.
  */
@@ -197,17 +196,10 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
   const view = readSettingsView({ settingsFile: paths.settingsFile });
   const overlay = view && !view.invalid && view.overlay ? { ...view.overlay } : {};
   if (env) {
-    const keys = { dailyCap: "PI_DAILY_CAP", weeklyCap: "PI_WEEKLY_CAP", monthlyCap: "PI_MONTHLY_CAP", dailyTokenCap: "PI_DAILY_TOKEN_CAP", maxTokens: "PI_MAX_TOKENS", softHoldPct: "PI_SOFT_HOLD_PCT" };
+    const keys = { dailyTokenCap: "PI_DAILY_TOKEN_CAP", maxTokens: "PI_MAX_TOKENS" };
     for (const [key, variable] of Object.entries(keys)) if (overlay[key] === undefined && /^\d+$/.test(env[variable] ?? "")) overlay[key] = Number(env[variable]);
   }
-  const pct = Number.isInteger(overlay.softHoldPct) ? overlay.softHoldPct : null;
   const unreachable = raw?.unreachable ? String(raw.unreachable) : null;
-  const slotWindow = (key, capKey) => {
-    const cap = posIntOrNull(overlay[capKey]);
-    const reserved = unreachable === null ? Number(raw[key] ?? 0) : null;
-    const state = cap !== null && reserved !== null ? windowState(reserved, cap, pct) : "ok";
-    return { reserved, cap, state };
-  };
   const tokensSpent = unreachable === null ? Number(raw.tokensToday ?? 0) : null;
   const tokenCap = posIntOrNull(overlay.dailyTokenCap);
   const tokenState =
@@ -216,24 +208,19 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
         ? "over"
         : "ok"
       : "ok";
-  // The scoped rows (issue #242): the configured limits joined to their live counters, states computed
-  // ASSEMBLER-side with the worker's own windowState so they ride the payload as words (the insights
-  // page's import allowlist forbids the worker import). Concurrency is CONFIG-only here -- per-scope
-  // in-flight is worker-process state no redis read can see, and the panel never invents a number.
+  // The scoped rows (issue #242): the configured limits joined to their live counters. Concurrency is
+  // CONFIG-only here -- per-scope in-flight is worker-process state no redis read can see, and the panel
+  // never invents a number. The job-count windows are gone with the job-start caps (C1); a row's token
+  // caps are compared inline below (tokens have no soft hold: equality with the cap is already over).
   const limitsView = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath });
   const limits = Array.isArray(limitsView?.limits) ? limitsView.limits : [];
   const scopedCounters = limits.length > 0 ? await readScopedBudget({ url: paths.valkeyUrl, limits, redisFn, now: new Date(nowMs) }) : { rows: [] };
   const scoped = limits.map((l, i) => {
     const used = scopedCounters?.rows?.[i] ?? null;
-    const win = (cap, key) => {
-      if (cap === null) return null;
-      const u = used && Number.isFinite(used[key]) ? used[key] : null;
-      return { used: u, cap, state: u !== null ? windowState(u, cap, null) : "ok" };
-    };
     // The row's token windows (issue #507), from the `tokensUsed` the same read already returned: a `model:` row, or a
-    // `project:` row with only `weekTokens`, has no job-count window, and the page drew its scope with no number beside
+    // `project:` row with only `weekTokens`, has no other window, and the page drew its scope with no number beside
     // it. Whole tokens both ways (the cap through the worker's own parser, which reads the file's integer as it is), so
-    // the page formats them exactly.
+    // the page formats them exactly. A row's job-count windows are gone with the job-start caps (C1).
     const usdWin = (field, key) => {
       let cap = null;
       try {
@@ -247,9 +234,6 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
     };
     return {
       scope: l.scope,
-      day: win(l.day, "day"),
-      week: win(l.week, "week"),
-      month: win(l.month, "month"),
       concurrent: l.concurrent,
       usd: { day: usdWin("dayTokens", "day"), week: usdWin("weekTokens", "week"), month: usdWin("monthTokens", "month") },
       // A project row's size (issue #596) in the words the panel and `/dispatch budget` use (`sizeBits`): a size-only
@@ -260,10 +244,6 @@ export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now
   return {
     unreachable,
     ...(env ? { windows: await readTokenWindows({ paths, env, now: new Date(nowMs), redisFn }), settingsInvalid: Boolean(view?.invalid), settings: overlay } : {}),
-    softHoldPct: pct,
-    day: slotWindow("day", "dailyCap"),
-    week: slotWindow("week", "weeklyCap"),
-    month: slotWindow("month", "monthlyCap"),
     tokens: { spent: tokensSpent, cap: tokenCap, state: tokenState, maxTokens: posIntOrNull(overlay.maxTokens) },
     scoped,
     scopedInvalid: limitsView?.invalid ? String(limitsView.invalid) : null,
@@ -776,5 +756,5 @@ export function spendChartsOf({ records, sinceMs, nowMs, jobCapTokens, subscript
   const histogram = safeAmount(jobCapTokens) && jobCapTokens > 0 ? Array.from({ length: 10 }, (_, i) => ({ fromTokens: i * jobCapTokens / 10, toTokens: (i + 1) * jobCapTokens / 10, runs: 0 })) : [];
   for (const cost of costs) if (histogram.length) histogram[Math.min(histogram.length - 1, Math.floor(cost * histogram.length / jobCapTokens))].runs++;
   for (const day of days.values()) finishSpend(day);
-  return { daily: [...days.values()], histogram, largestRangeTokens: costs.length ? Math.max(...costs) : null, meteredRangeRuns: costs.length, overJobCapRuns: safeAmount(jobCapTokens) ? costs.filter((n) => n > jobCapTokens).length : null };
+  return { daily: [...days.values()], histogram, largestRangeTokens: costs.length ? Math.max(...costs) : null, meteredRangeRuns: costs.length };
 }

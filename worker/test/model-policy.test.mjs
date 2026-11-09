@@ -39,7 +39,6 @@ function deps(overrides = {}) {
 	const base = {
 		redis,
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		imagePreflight: async () => (calls.push("image"), { ok: true }),
 		egressPreflight: async () => (calls.push("egress"), { ok: true }),
 		checkProviderCredential: () => (calls.push("credential"), { ok: true }),
@@ -146,7 +145,7 @@ test("model-unknown is decided before model-not-allowed, and both before the cre
 
 // --- the effective job and the endpoint set (index.mjs) ---
 
-const SETTINGS = (extra = {}) => () => ({ provider: "openai", model: "gpt-x", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, ...extra });
+const SETTINGS = (extra = {}) => () => ({ provider: "openai", model: "gpt-x", maxTurns: 30, concurrency: 3, ...extra });
 
 function harness({ getSettings = SETTINGS(), allowedModels, extra = {}, extraDeps = {} } = {}) {
 	const seen = { ctx: [], records: [], logs: [], comments: [] };

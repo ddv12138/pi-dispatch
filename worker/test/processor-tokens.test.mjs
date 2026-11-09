@@ -3,22 +3,18 @@ import { test } from "node:test";
 import { configError } from "../src/config.mjs";
 import { InfraRetry, isNeverStartedExit, runJob } from "../src/processor.mjs";
 import { buildRecord } from "../src/run-history.mjs";
-import { scopeKeyPrefix } from "../src/scoped-limits.mjs";
 import { DOCKER_NEVER_STARTED_EXITS } from "../src/backends.mjs";
 
-// The job-count ledger list the processor takes (issue #499 part B), from a `budgetCapsFor`-shaped object.
-const asLedgers = (c) => (c ? [{ scope: c.scope, keyPrefix: scopeKeyPrefix(c.scope), caps: c.caps, reason: "scope-cap" }] : []);
-
 // Issue #501, parts 3 and 4 (DES-DOLLAR-RESERVE-AND-SETTLE, the worker half), and #503 part 7: the processor reserves
-// a job's per-job cap in the token windows after both job-count reserves and before the container, settles it once
-// for every exit where the container ran, and refunds it whole where none did.
+// a job's per-job cap in the token windows before the container, settles it once for every exit where the container
+// ran, and refunds it whole where none did. The job-count reserves this file once expected are gone with the caps.
 
 
 const NOW = new Date("2026-10-07T12:00:00Z");
 const DAY = "budget:tok:2026-10-07";
 const WEEK = "budget:tok:w:2026-10-05";
 
-/** A keyed fake: the job-count INCR/DECR and the token INCRBY/DECRBY on one store, every command logged in order. */
+/** A keyed fake: the token INCRBY/DECRBY/settle on one store, every command logged in order. */
 function keyedRedis(preset = {}) {
 	const store = new Map(Object.entries(preset));
 	const ops = [];
@@ -75,8 +71,6 @@ function deps(overrides = {}) {
 	const redis = overrides.redis ?? keyedRedis();
 	const base = {
 		redis,
-		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		tokenCaps: { day: 10 * 1, week: 50 * 1, month: null },
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
@@ -106,16 +100,14 @@ test("no token setting: nothing reserved or settled, no budget:tok key, the cont
 	assert.equal(buildRecord({ job: { id: "j", data: {} }, result: r }).tokensWindows, null);
 });
 
-test("ORDER: the scoped and global job-count reserves, then the token reserve, then the container, then one settle", async () => {
-	const { deps: d, redis } = deps({ scopedLedgers: asLedgers({ scope: "org/repo", caps: { day: 5, week: null, month: null } }) });
+test("ORDER: the token reserve, then the container, then one settle", async () => {
+	const { deps: d, redis } = deps();
 	const marks = [];
 	const run = d.runContainer;
 	d.runContainer = async (ctx) => (marks.push(redis.ops.length), run(ctx));
 	const r = await runJob(job, d);
 	const before = redis.ops.slice(0, marks[0]).map((o) => o.slice(0, 2));
 	assert.deepEqual(before, [
-		["incr", `${scopeKeyPrefix("org/repo")}:2026-10-07`],
-		["incr", "budget:2026-10-07"],
 		["incrby", DAY],
 		["incrby", WEEK],
 	]);
@@ -125,18 +117,15 @@ test("ORDER: the scoped and global job-count reserves, then the token reserve, t
 	assert.deepEqual(r.tokensWindows, { reservedTokens: 2, settledTokens: 15, basis: "metered", modelBasis: null });
 });
 
-test("a full token window refuses token-cap, gives back BOTH job-count slots and its own tokensWindows, and starts nothing", async () => {
-	const scope = { scope: "org/repo", caps: { day: 5, week: null, month: null } };
-	const { deps: d, calls, logs, redis } = deps({ redis: keyedRedis({ [DAY]: 9 * 1 }), scopedLedgers: asLedgers(scope) });
+test("a full token window refuses token-cap, gives every token key back, and starts nothing", async () => {
+	const { deps: d, calls, logs, redis } = deps({ redis: keyedRedis({ [DAY]: 9 * 1 }) });
 	const r = await runJob(job, d);
 	assert.deepEqual(r, { outcome: "policy", reason: "token-cap", exitCode: null, turns: null, tokens: null, provider: "anthropic", model: "m", budgetReserved: false, tokensWindows: { reservedTokens: 2, settledTokens: 0, basis: "refunded", modelBasis: null } });
 	assert.ok(!calls.some((c) => c[0] === "run-container"), "no container");
-	assert.equal(redis.store.get("budget:2026-10-07"), 0, "the global job-count slot is back");
-	assert.equal(redis.store.get(`${scopeKeyPrefix("org/repo")}:2026-10-07`), 0, "the scoped slot is back");
 	assert.equal(redis.store.get(DAY), 9 * 1, "the refused tokensWindows are back");
 	assert.match(calls.find((c) => c[0] === "comment")[1], /^Refused: today's token budget/);
 	assert.doesNotMatch(calls.find((c) => c[0] === "comment")[1], /\d/, "no amount in the comment");
-	assert.deepEqual(logs.find((l) => l[0] === "over_token_budget")[1], { ledger: "deployment", window: "day", reservedTokens: 11 * 1, capTokens: 10 * 1, amountTokens: 2, refunded: true });
+	assert.deepEqual(logs.find((l) => l[0] === "over_token_budget")[1], { ledger: "deployment", window: "day", reservedTokens: 11 * 1, capTokens: 10 * 1, amountTokens: 2 });
 	assert.equal(buildRecord({ job: { id: "j", data: {} }, result: r }).reason, "token-cap");
 });
 
@@ -176,7 +165,7 @@ test("tokens: null (no exit line) settles at the floor: the whole reservation st
 	assert.equal(redis.store.get(DAY), 2);
 });
 
-test("a never-started exit is NOT settled: the catch refunds the tokensWindows and the job-count slot together", async () => {
+test("a never-started exit is NOT settled: the catch refunds the tokensWindows", async () => {
 	for (const code of DOCKER_NEVER_STARTED_EXITS) {
 		const { deps: d, redis, logs } = deps({ runContainer: async () => ({ code, aborted: false, tokens: null }) });
 		let err;
@@ -185,7 +174,6 @@ test("a never-started exit is NOT settled: the catch refunds the tokensWindows a
 		assert.deepEqual(err.tokensWindows, { reservedTokens: 2, settledTokens: 0, basis: "refunded", modelBasis: null }, String(code));
 		assert.equal(err.budgetReserved, false);
 		assert.equal(redis.store.get(DAY), 0, "tokensWindows back");
-		assert.equal(redis.store.get("budget:2026-10-07"), 0, "job-count slot back");
 		assert.ok(!logs.some((l) => l[0] === "token_settled"), "never settled");
 	}
 });
@@ -215,7 +203,6 @@ test("a spawn fault (runContainer throws never-started) and a config refusal fro
 		assert.deepEqual(r.tokensWindows, { reservedTokens: 2, settledTokens: 0, basis: "refunded", modelBasis: null });
 		assert.equal(redis.store.get(DAY), 0);
 		assert.equal(redis.store.get(WEEK), 0);
-		assert.equal(redis.store.get("budget:2026-10-07"), 0);
 	}
 });
 
@@ -229,7 +216,7 @@ test("an unexpected throw after the reservation LEAVES the hold (the floor) and 
 	assert.equal(buildRecord({ job: { id: "j", data: {} }, error: err }).tokensWindows.basis, "floor");
 });
 
-test("a Valkey fault in the token reserve is a never-started retry: the job-count slot is refunded and nothing is held", async () => {
+test("a Valkey fault in the token reserve is a never-started retry: nothing is held", async () => {
 	const redis = keyedRedis();
 	redis.incrby = async () => {
 		throw Object.assign(new Error("down"), { code: "ECONNREFUSED" });
@@ -239,17 +226,15 @@ test("a Valkey fault in the token reserve is a never-started retry: the job-coun
 	await assert.rejects(runJob(job, d), (e) => (err = e) instanceof InfraRetry);
 	assert.equal(err.reason, "container-never-started");
 	assert.equal(err.budgetReserved, false);
-	assert.equal(redis.store.get("budget:2026-10-07"), 0);
 	assert.ok(!calls.some((c) => c[0] === "run-container"));
 	assert.deepEqual(logs.find((l) => l[0] === "token_reserve_error")[1], { code: "ECONNREFUSED" });
 });
 
-test("a token window with no per-job cap on the job is refused as configuration, both job-count slots refunded", async () => {
+test("a token window with no per-job cap on the job is refused as configuration", async () => {
 	const { deps: d, redis, calls } = deps();
 	const r = await runJob({ ...job, maxTokens: null }, d);
 	assert.equal(r.reason, "config-refused");
 	assert.equal(r.budgetReserved, false);
-	assert.equal(redis.store.get("budget:2026-10-07"), 0);
 	assert.deepEqual(usdKeys(redis), []);
 	assert.ok(!calls.some((c) => c[0] === "run-container"));
 });
@@ -318,18 +303,6 @@ test("an InfraRetry that is NOT never-started, thrown by runContainer, keeps the
 	assert.equal(redis.store.get(DAY), 2);
 	assert.deepEqual(err.tokensWindows, { reservedTokens: 2, settledTokens: 2, basis: "floor", modelBasis: null });
 	assert.deepEqual(logs.find((l) => l[0] === "token_hold_unsettled")[1], { reservedTokens: 2, error: "infra-retry" });
-});
-
-test("a token refusal whose job-count refund FAILED says budgetReserved: true", async () => {
-	const redis = keyedRedis({ [DAY]: 9 * 1 });
-	redis.decr = async () => {
-		throw Object.assign(new Error("down"), { code: "ECONNRESET" });
-	};
-	const { deps: d, logs } = deps({ redis });
-	const r = await runJob(job, d);
-	assert.equal(r.reason, "token-cap");
-	assert.equal(r.budgetReserved, true, "the slot is still out there");
-	assert.equal(logs.find((l) => l[0] === "over_token_budget")[1].refunded, false);
 });
 
 test("a token refusal whose token give-back failed for a key records the floor, not refunded", async () => {
@@ -505,7 +478,7 @@ function harness(settings, redis) {
 	return { processor, seen };
 }
 
-const settingsOf = (over = {}) => ({ provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, ...over });
+const settingsOf = (over = {}) => ({ provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, concurrency: 3, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, ...over });
 const bullJob = (data = {}) => ({ id: "d-1", attemptsMade: 0, name: "github", data: { kind: "github", repo: "o/r", flow: "fix", ...data } });
 
 test("makeProcessor: windows in the settings reserve and settle the per-job cap; the record carries tokensWindows", { skip }, async () => {

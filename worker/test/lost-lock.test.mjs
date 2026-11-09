@@ -62,7 +62,7 @@ function harness({ record = completedRecord(), settledRecord } = {}) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { incr: async () => (seen.incr++, 1), decr: async () => 0, expire: async () => {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		recordRun: (rec) => seen.records.push(rec),
 		settledRecord: lookup,
 		timeoutMs: 100000,

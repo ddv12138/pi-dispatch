@@ -364,9 +364,9 @@ test("readLogTail drops blank lines so newline-delimited runner events do not ea
   assert.deepEqual(rec.lines, ['{"event":"a"}', '{"event":"b"}', '{"event":"exit"}']);
 });
 
-test("readBudget GETs the day/week/month/token keys and never mutates", async () => {
+test("readBudget GETs the token day key only and never mutates (the job-count windows are gone)", async () => {
   const commands = [];
-  const values = { [dayKey()]: "7", [weekKey()]: "20", [monthKey()]: "55", [dayKey(new Date(), TOKEN_KEY_PREFIX)]: "123456" };
+  const values = { [dayKey(new Date(), TOKEN_KEY_PREFIX)]: "123456" };
   const redis = {
     async get(key) {
       commands.push(["get", key]);
@@ -377,13 +377,13 @@ test("readBudget GETs the day/week/month/token keys and never mutates", async ()
     },
   };
   const res = await readBudget({ url: "redis://x", redisFn: () => redis });
-  assert.deepEqual(res, { day: 7, week: 20, month: 55, tokensToday: 123456 });
+  assert.deepEqual(res, { tokensToday: 123456 });
   const ops = commands.filter((c) => c[0] !== "disconnect");
   assert.deepEqual(new Set(ops.map((c) => c[0])), new Set(["get"]), "only GET -- never INCR/EXPIRE");
   assert.deepEqual(
     new Set(ops.map((c) => c[1])),
-    new Set([dayKey(), weekKey(), monthKey(), dayKey(new Date(), TOKEN_KEY_PREFIX)]),
-    "GETs the worker's own day/week/month/token keys",
+    new Set([dayKey(new Date(), TOKEN_KEY_PREFIX)]),
+    "GETs the token day, never the retired budget:<date>/w:/m: job-count keys",
   );
 });
 
@@ -1013,14 +1013,14 @@ test("readStagedPackages never throws when the manifest reader does", () => {
 });
 
 test("readSettingsView returns the validated overlay via the worker's own reader", () => {
-  const files = { "settings.json": JSON.stringify({ model: "m", dailyCap: 5 }) };
+  const files = { "settings.json": JSON.stringify({ model: "m", dailyTokenCap: 5 }) };
   const res = readSettingsView({ settingsFile: "/x/settings.json", fs: fakeFs(files) });
   assert.equal(res.path, "/x/settings.json");
-  assert.deepEqual(res.overlay, { model: "m", dailyCap: 5 });
+  assert.deepEqual(res.overlay, { model: "m", dailyTokenCap: 5 });
 });
 
 test("readSettingsView surfaces an invalid overlay without throwing (fail closed)", () => {
-  const files = { "settings.json": JSON.stringify({ dailyCap: 0 }) };
+  const files = { "settings.json": JSON.stringify({ dailyTokenCap: 0 }) };
   const res = readSettingsView({ settingsFile: "/x/settings.json", fs: fakeFs(files) });
   assert.ok(res.invalid, "an out-of-bounds key makes the whole overlay invalid");
 });
@@ -1118,10 +1118,10 @@ function memFs(initial = {}) {
 
 test("writeSettings merges into the existing overlay, preserving prior keys", () => {
   const path = "/s/settings.json";
-  const fs = memFs({ [path]: JSON.stringify({ model: "m1", dailyCap: 5 }) });
+  const fs = memFs({ [path]: JSON.stringify({ model: "m1", dailyTokenCap: 5 }) });
   const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, maxTurns: 12 }), fs });
-  assert.deepEqual(res, { ok: true, overlay: { model: "m1", dailyCap: 5, maxTurns: 12 } });
-  assert.deepEqual(JSON.parse(fs.files.get(path)), { model: "m1", dailyCap: 5, maxTurns: 12 });
+  assert.deepEqual(res, { ok: true, overlay: { model: "m1", dailyTokenCap: 5, maxTurns: 12 } });
+  assert.deepEqual(JSON.parse(fs.files.get(path)), { model: "m1", dailyTokenCap: 5, maxTurns: 12 });
 });
 
 test("writeSettings REFUSES over an invalid file instead of rebuilding it, so nothing in it is erased (#501)", () => {
@@ -1137,12 +1137,12 @@ test("writeSettings REFUSES over an invalid file instead of rebuilding it, so no
   }
   // A MISSING file is the normal empty overlay and still writes.
   const fs = memFs({});
-  assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyCap: 7 }), fs }), { ok: true, overlay: { dailyCap: 7 } });
+  assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 7 }), fs }), { ok: true, overlay: { dailyTokenCap: 7 } });
   // A BLANK file (whitespace or a byte-order mark only) holds nothing to lose, so it is written over like a missing one.
   for (const text of ["", "  \n\t", "\uFEFF", "\uFEFF \n"]) {
     const blank = memFs({ [path]: text });
-    assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyCap: 7 }), fs: blank }), { ok: true, overlay: { dailyCap: 7 } }, JSON.stringify(text));
-    assert.deepEqual(JSON.parse(blank.files.get(path)), { dailyCap: 7 });
+    assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 7 }), fs: blank }), { ok: true, overlay: { dailyTokenCap: 7 } }, JSON.stringify(text));
+    assert.deepEqual(JSON.parse(blank.files.get(path)), { dailyTokenCap: 7 });
   }
   // A text that is not blank but not valid either stays refused.
   assert.ok(writeSettings({ settingsFile: path, mutate: (o) => o, fs: memFs({ [path]: "\uFEFF x" }) }).invalid);
@@ -1161,7 +1161,7 @@ test("a settings file that cannot be READ is not blank, so writeSettings refuses
       throw e;
     };
     assert.equal(blankSettingsFile(path, fs), false, code);
-    const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyCap: 7 }), fs });
+    const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 7 }), fs });
     assert.equal(res.ok, undefined, code);
     assert.match(res.invalid, new RegExp(`^the settings file is invalid \\(settings file unreadable \\(${code}\\)\\), so nothing was written`), code);
     assert.equal(fs.files.get(path), held, `${code}: the file still holds its cap`);
@@ -1175,9 +1175,9 @@ test("a settings file that cannot be READ is not blank, so writeSettings refuses
 test("writeSettings passes through writeOverlay's { invalid } and leaves the file untouched", () => {
   const path = "/s/settings.json";
   const fs = memFs({ [path]: JSON.stringify({ model: "m1" }) });
-  const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyCap: 0 }), fs });
+  const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 0 }), fs });
   assert.ok(res.invalid);
-  assert.ok(res.invalid.includes("dailyCap"));
+  assert.ok(res.invalid.includes("dailyTokenCap"));
   assert.deepEqual(JSON.parse(fs.files.get(path)), { model: "m1" }, "original overlay untouched (validate-before-write)");
 });
 
@@ -2272,13 +2272,16 @@ test("readFolderSkills attaches the prose-loop hints from the SKILL.md body", ()
 
 // ── scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT) ──────────────────────────────────────
 
-import { modelTokenKeyPrefix, scopeTokenKeyPrefix, scopeKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
+import { modelTokenKeyPrefix, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 test("readScopedLimits: valid file, missing file, invalid file (incl. a NEWER version, fail-loud)", () => {
-  const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] }) });
+  const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] }) });
   const ok = readScopedLimits({ scopedLimitsPath: "sl.json", fs });
-  assert.equal(ok.limits[0].day, 3);
+  assert.equal(ok.limits[0].concurrent, 3);
+  // A row carrying a retired job-count field is refused loudly (the job-start caps were removed, C1).
+  const retired = readScopedLimits({ scopedLimitsPath: "old.json", fs: memFs({ "old.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] }) }) });
+  assert.match(retired.invalid, /day was retired with the job-count scoped caps/);
   assert.deepEqual(readScopedLimits({ scopedLimitsPath: "absent.json", fs }), { missing: true });
   // One past the newest this build reads (4 since issue #596).
   const newer = readScopedLimits({ scopedLimitsPath: "v5.json", fs: memFs({ "v5.json": JSON.stringify({ version: 5, limits: [] }) }) });
@@ -2287,11 +2290,11 @@ test("readScopedLimits: valid file, missing file, invalid file (incl. a NEWER ve
 
 test("writeScopedLimits: a MISSING file starts from the empty v1 shape and the write creates it", () => {
   const fs = memFs({});
-  const res = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/web", day: 3 }] });
+  const res = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/web", concurrent: 3 }] });
   assert.equal(res.ok, true);
   const written = JSON.parse(fs.files.get("sl.json"));
   assert.equal(written.version, 1);
-  assert.deepEqual(written.limits, [{ scope: "acme/web", day: 3 }]);
+  assert.deepEqual(written.limits, [{ scope: "acme/web", concurrent: 3 }]);
   assert.ok(!fs.files.get("sl.json").includes("null"), "absent windows are omitted, never null-padded");
 });
 
@@ -2328,40 +2331,40 @@ test("writeScopedLimits stamps version 3 only when a row carries a size, and a s
 });
 
 test("writeScopedLimits refuses to add or change a project:<id> row whose id is not in projects.json (issue #499 part B)", () => {
-  const before = JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] });
+  const before = JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] });
   const projects = JSON.stringify({ version: 1, projects: [{ id: "shop", name: "Private Name", members: ["github:acme/web"] }] });
   const fs = memFs({ "sl.json": before, "projects.json": projects });
   // An id projects.json does not define: refused, the bytes untouched, no project name quoted, the file named.
-  const missing = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => [...l, { scope: "project:tools", day: 2 }] });
+  const missing = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => [...l, { scope: "project:tools", concurrent: 2 }] });
   assert.match(missing.invalid, /project:tools names a project that is not in the projects file projects\.json/);
   assert.ok(!missing.invalid.includes("Private Name"));
   assert.equal(fs.files.get("sl.json"), before);
   // PI_PROJECTS_FILE unset (projectsPath null): no projects, the worker's reading, whatever a cwd projects.json holds.
-  const unset = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: null, fs, mutate: (l) => [...l, { scope: "project:shop", day: 2 }] });
+  const unset = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: null, fs, mutate: (l) => [...l, { scope: "project:shop", concurrent: 2 }] });
   assert.match(unset.invalid, /project:shop names a project that is not in the projects file \(PI_PROJECTS_FILE is unset/);
   // Set but unreadable: named as unreadable, never as a missing project.
-  const absent = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "absent.json", fs, mutate: (l) => [...l, { scope: "project:shop", day: 2 }] });
+  const absent = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "absent.json", fs, mutate: (l) => [...l, { scope: "project:shop", concurrent: 2 }] });
   assert.match(absent.invalid, /the projects file absent\.json could not be read \(ENOENT\)/);
   assert.doesNotMatch(absent.invalid, /names a project/);
   // A projects file that does not load: the row cannot be checked, so it is refused.
   const broken = memFs({ "sl.json": before, "projects.json": "{broken" });
-  assert.match(writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs: broken, mutate: (l) => [...l, { scope: "project:shop", day: 2 }] }).invalid, /projects file does not load/);
-  // A defined id is written live, and a project row stamps version 2 (issue #499 part B), counts only or not.
-  const ok = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => [...l, { scope: "project:shop", day: 2, concurrent: 1 }] });
+  assert.match(writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs: broken, mutate: (l) => [...l, { scope: "project:shop", concurrent: 2 }] }).invalid, /projects file does not load/);
+  // A defined id is written live, and a project row stamps version 2 (issue #499 part B).
+  const ok = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => [...l, { scope: "project:shop", concurrent: 1 }] });
   assert.deepEqual(ok, { ok: true });
-  assert.deepEqual(JSON.parse(fs.files.get("sl.json")), { version: 2, limits: [{ scope: "acme/web", day: 3 }, { scope: "project:shop", day: 2, concurrent: 1 }] });
+  assert.deepEqual(JSON.parse(fs.files.get("sl.json")), { version: 2, limits: [{ scope: "acme/web", concurrent: 3 }, { scope: "project:shop", concurrent: 1 }] });
   // projects.json then loses the project: other rows may still be edited, but the write says it is not live...
   fs.files.set("projects.json", JSON.stringify({ version: 1, projects: [] }));
-  const other = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r, i) => (i === 0 ? { ...r, day: 4 } : r)) });
+  const other = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r, i) => (i === 0 ? { ...r, concurrent: 4 } : r)) });
   assert.equal(other.ok, true, "an unchanged dangling row is not re-judged");
   assert.match(other.pending, /^project:shop names a project that is not in the projects file projects\.json; the worker applies this once its live projects define shop; if they do not, it keeps its last good limits/, "only what the admin can know");
   // ...the dangling row itself cannot be edited into a new state...
-  const edit = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r) => (r.scope === "project:shop" ? { ...r, day: 9 } : r)) });
+  const edit = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r) => (r.scope === "project:shop" ? { ...r, concurrent: 9 } : r)) });
   assert.match(edit.invalid, /project:shop names a project/);
   // ...and deleting it is always allowed, and live again.
   const del = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.filter((r) => r.scope !== "project:shop") });
   assert.deepEqual(del, { ok: true }, "deleting the dangling row is always allowed");
-  assert.deepEqual(JSON.parse(fs.files.get("sl.json")).limits, [{ scope: "acme/web", day: 4 }]);
+  assert.deepEqual(JSON.parse(fs.files.get("sl.json")).limits, [{ scope: "acme/web", concurrent: 4 }]);
 });
 
 // The three ways an unchanged project row can dangle on disk (the round-2 review's cases). The worker takes such a write
@@ -2369,12 +2372,12 @@ test("writeScopedLimits refuses to add or change a project:<id> row whose id is 
 // says only that the worker applies the write once they define the id, never that it keeps its last good limits.
 for (const variant of ["projects.json drops shop", "projects.json missing", "projects.json mid-edit"]) {
   test(`writeScopedLimits, an unchanged dangling project row (${variant}): written, and pending says only what the admin can know`, () => {
-    const fs = memFs({ "sl.json": JSON.stringify({ version: 2, limits: [{ scope: "acme/web", day: 3 }, { scope: "project:shop", day: 2 }] }) });
+    const fs = memFs({ "sl.json": JSON.stringify({ version: 2, limits: [{ scope: "acme/web", concurrent: 3 }, { scope: "project:shop", concurrent: 2 }] }) });
     if (variant === "projects.json drops shop") fs.files.set("projects.json", JSON.stringify({ version: 1, projects: [] }));
     if (variant === "projects.json mid-edit") fs.files.set("projects.json", '{ "version": 1, "proj');
-    const res = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r) => (r.scope === "acme/web" ? { ...r, day: 4 } : r)) });
+    const res = writeScopedLimits({ scopedLimitsPath: "sl.json", projectsPath: "projects.json", fs, mutate: (l) => l.map((r) => (r.scope === "acme/web" ? { ...r, concurrent: 4 } : r)) });
     assert.equal(res.ok, true);
-    assert.equal(JSON.parse(fs.files.get("sl.json")).limits[0].day, 4, "the edit is written");
+    assert.equal(JSON.parse(fs.files.get("sl.json")).limits[0].concurrent, 4, "the edit is written");
     assert.match(res.pending, /the worker applies this once its live projects define shop; if they do not, it keeps its last good limits\. Run pi-dispatch doctor$/);
     assert.doesNotMatch(res.pending, /keeps its last good limits until/, "no claim that the write is not live");
   });
@@ -2387,26 +2390,26 @@ test("resolvePaths: projectsFile is the worker's reading of PI_PROJECTS_FILE (nu
 });
 
 test("writeScopedLimits validates the RESULT through the shared parser and leaves bytes untouched on reject", () => {
-  const before = JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] });
+  const before = JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] });
   const fs = memFs({ "sl.json": before });
-  const res = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/web", week: 9 }] });
+  const res = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/web", concurrent: 9 }] });
   assert.match(res.invalid, /duplicate scope/);
   assert.equal(fs.files.get("sl.json"), before);
-  const glob = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/*", day: 1 }] });
+  const glob = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "acme/*", concurrent: 1 }] });
   assert.match(glob.invalid, /scopes match exactly/);
   // Issue #498: a qualified row beside the bare row for the same repo is refused through the same parser, naming both.
-  const mixed = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "forgejo:acme/web", day: 1 }] });
+  const mixed = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "forgejo:acme/web", concurrent: 1 }] });
   assert.match(mixed.invalid, /index 1.*at index 0/);
   assert.equal(fs.files.get("sl.json"), before);
 });
 
-test("readScopedBudget GETs only the windows a row caps; absent keys are honest zeros; dead queue degrades", async () => {
+test("readScopedBudget GETs only the token windows a row caps; absent keys are honest zeros; dead queue degrades", async () => {
   const limits = [
-    { scope: "acme/web", day: 3, week: 40, month: null, concurrent: 1 },
-    { scope: "/srv/site", day: null, week: null, month: null, concurrent: 2 }, // concurrent-only: zero GETs
+    { scope: "acme/web", dayTokens: 3, weekTokens: 40, monthTokens: null, concurrent: 1 },
+    { scope: "/srv/site", dayTokens: null, weekTokens: null, monthTokens: null, concurrent: 2 }, // concurrent-only: zero GETs
   ];
   const commands = [];
-  const prefix = scopeKeyPrefix("acme/web");
+  const prefix = scopeTokenKeyPrefix("acme/web");
   const redis = {
     async get(key) {
       commands.push(key);
@@ -2415,38 +2418,38 @@ test("readScopedBudget GETs only the windows a row caps; absent keys are honest 
     disconnect() {},
   };
   const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ day: 2, week: 0 }, {}]);
-  assert.equal(commands.length, 2, "one GET per capped window, none for the concurrent-only row");
-  assert.ok(commands.every((k) => k.startsWith(`${prefix}:`)), "keys recomputed through the shared scopeKeyPrefix");
+  assert.deepEqual(res.rows, [{ tokensUsed: { day: 2, week: 0 } }, {}]);
+  assert.equal(commands.length, 2, "one GET per capped token window, none for the concurrent-only row");
+  assert.ok(commands.every((k) => k.startsWith(`${prefix}:`)), "keys recomputed through the shared tokenKeyPrefixFor");
   const dead = await readScopedBudget({ url: "not-a-url", limits });
   assert.ok(dead.unreachable, "junk URL degrades synchronously, never a timeout burn");
   assert.deepEqual(await readScopedBudget({ url: "redis://x", limits: [] }), { rows: [] });
 });
 
-test("issue #498: readScopedBudget reads a bare row's PRE-UPGRADE key, and a qualified row its own", async () => {
-  // The literal is the key a bare "acme/web" row had before qualified scopes existed (sha256 of the bare string, 16 hex):
-  // the worker reserves under it for every forge's job, so the counts an operator saw yesterday are the counts shown.
+test("issue #498: readScopedBudget reads a bare row's token key and a qualified row its own", async () => {
+  // A bare "acme/web" row's token key hashes the bare string; the qualified row hashes its forge-qualified scope, so a
+  // forge's jobs count on the row that names that forge.
   const limits = [
-    { scope: "acme/web", day: 3, week: null, month: null, concurrent: null },
-    { scope: "github:acme/api", day: 5, week: null, month: null, concurrent: null },
+    { scope: "acme/web", dayTokens: 3, concurrent: null },
+    { scope: "github:acme/api", dayTokens: 5, concurrent: null },
   ];
   const now = new Date();
   const redis = {
     async get(key) {
-      if (key === dayKey(now, "budget:s:86f279ce9c29f106")) return "2";
-      if (key === dayKey(now, scopeKeyPrefix("github:acme/api"))) return "4";
+      if (key === dayKey(now, scopeTokenKeyPrefix("acme/web"))) return "2";
+      if (key === dayKey(now, scopeTokenKeyPrefix("github:acme/api"))) return "4";
       return null;
     },
     disconnect() {},
   };
   const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ day: 2 }, { day: 4 }]);
+  assert.deepEqual(res.rows, [{ tokensUsed: { day: 2 } }, { tokensUsed: { day: 4 } }]);
 });
 
 test("writeScopedLimits writes the LOWEST version that expresses the file: v1 stays v1, a token or model row makes v2 (#501 p5, #502 p6)", () => {
-  const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 3 }] }) });
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/api", week: 9 }] }).ok, true);
-  assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1, "count rows only: still version 1, readable by an older worker");
+  const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] }) });
+  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/api", concurrent: 9 }] }).ok, true);
+  assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1, "concurrency-only rows: still version 1, readable by an older worker");
   assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/ops", dayTokens: 5000 }] }).ok, true);
   const v2 = JSON.parse(fs.files.get("sl.json"));
   assert.equal(v2.version, 2);
@@ -2465,9 +2468,9 @@ test("writeScopedLimits writes the LOWEST version that expresses the file: v1 st
 
 test("readScopedBudget also reads the TOKEN keys a row caps, scope and model, under the worker's own prefixes", async () => {
   const limits = [
-    { scope: "acme/web", day: 3, week: null, month: null, concurrent: null, dayTokens: 50_000, weekTokens: null, monthTokens: null },
-    { scope: "model:OpenAI/gpt-x", day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: 25_000, monthTokens: null },
-    { scope: "acme/count", day: 1 }, // a version 1 row: no token GET at all
+    { scope: "acme/web", concurrent: null, dayTokens: 50_000, weekTokens: null, monthTokens: null },
+    { scope: "model:OpenAI/gpt-x", concurrent: null, dayTokens: null, weekTokens: 25_000, monthTokens: null },
+    { scope: "acme/count", concurrent: 1 }, // no token window: no GET at all
   ];
   const now = new Date();
   const values = new Map([
@@ -2483,8 +2486,8 @@ test("readScopedBudget also reads the TOKEN keys a row caps, scope and model, un
     disconnect() {},
   };
   const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ day: 0, tokensUsed: { day: 12_000 } }, { tokensUsed: { week: 4_000 } }, { day: 0 }]);
-  assert.equal(commands.length, 4, "one GET per capped window; a model row has no job-count GET");
+  assert.deepEqual(res.rows, [{ tokensUsed: { day: 12_000 } }, { tokensUsed: { week: 4_000 } }, {}]);
+  assert.equal(commands.length, 2, "one GET per capped token window; a concurrent-only row reads nothing");
   assert.ok(commands.some((k) => k.startsWith(`${modelTokenKeyPrefix("openai/gpt-x")}:`)), "the model key hashes the LOWERCASED ref");
 });
 
@@ -2801,8 +2804,8 @@ test("panelEnv + settingShown: a pointer deployment's .env token budget is what 
   assert.equal(settingShown("maxTokens", {}, { HOME: "/h" }), "(not in the overlay; the worker's environment is not visible here)");
   assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "" }), "(not in the overlay; the worker's environment is not visible here)");
   assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "3" }), "3 (env PI_MAX_TOKENS)", "pi's own export is still shown");
-  assert.equal(settingShown("dailyCap", { dailyCap: 5 }, env), "5", "non-token keys keep the overlay value");
-  assert.equal(settingShown("dailyCap", {}, env), "(unset)");
+  assert.equal(settingShown("maxTurns", { maxTurns: 5 }, env), "5", "non-token keys keep the overlay value");
+  assert.equal(settingShown("maxTurns", {}, env), "(unset)");
   for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) assert.ok(PANEL_SERVICE_KEYS.includes(name), name);
 });
 
@@ -2995,7 +2998,7 @@ test("writeSettings: with the env passed, a write that breaks the merged invaria
   // A non-merged problem is still refused by writeSettings' own validation.
   assert.match(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, weeklyTokenCap: "1e3" }), budgetEnv: {}, deploymentDir: dir }).invalid, /weeklyTokenCap must be an integer >= 1/);
   // Without the env (every non-token key), no judgement at all.
-  assert.deepEqual(Object.keys(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, dailyCap: 5 }) })), ["ok", "overlay"]);
+  assert.deepEqual(Object.keys(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, maxTurns: 5 }) })), ["ok", "overlay"]);
 });
 
 test("readOverlayMcpView: names, where each runs, its exposure and the NAMES it references; never a value; never throws", async () => {

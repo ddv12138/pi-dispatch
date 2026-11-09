@@ -45,7 +45,7 @@ function harness({ pauseUntil, redis = fakeRedis() }) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		applyConcurrency: () => {},
 		pauseUntil,
 		now: () => NOW, // fixed clock so the defer guard shares the predicate's clock (else it rots past NOW)
@@ -99,7 +99,7 @@ test("the default pauseUntil is a no-op, so an unwired processor never defers", 
 	const { job, moves } = spyJob({ kind: "local", folder: "/srv/site", flow: "tidy", task: "t" });
 	const processor = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		recordRun: () => {}, timeoutMs: 100000,
 		deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 0, aborted: false, turns: 3 }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 	});
@@ -119,7 +119,7 @@ test("a paused job records why it waits (issue #737): the pause window, until it
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		pauseUntil: (j) => windows(pw, j, NOW),
 		projects: () => (reads++, shop),
 		hostName: "mini1",
@@ -148,7 +148,7 @@ test("the processor's deferral writer logs through deps.log: a write that keeps 
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		pauseUntil: (j) => windows(pw, j, NOW),
 		now: () => NOW,
 		recordRun: () => {},

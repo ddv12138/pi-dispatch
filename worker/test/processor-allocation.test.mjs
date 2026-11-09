@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { governedTokens } from "../src/allocation.mjs";
 import { parseEnvelope } from "../src/envelope.mjs";
 import { runJob } from "../src/processor.mjs";
-import { parseScopedLimits, projectTokenCapsFor, scopeTokenKeyPrefix, scopeKeyPrefix } from "../src/scoped-limits.mjs";
+import { parseScopedLimits, projectTokenCapsFor, scopeTokenKeyPrefix } from "../src/scoped-limits.mjs";
 
 // Issue #504 part B (DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE, DES-DOLLAR-RESERVE-AND-SETTLE): under an envelope a
 // job's token ledgers are the operator's narrowed by the applied split. A full window whose binding cap came from
@@ -80,9 +80,6 @@ function deps(job, inputs, overrides = {}) {
 	const calls = [];
 	const base = {
 		redis: keyedRedis(),
-		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
-		scopedLedgers: [],
 		mintToken: async () => (calls.push("mint"), "tok"),
 		isDefaultBranchProtected: async () => true,
 		prepareWorkspace: async () => (calls.push("prepare"), { workspaceDir: "/w", jobDir: "/j" }),
@@ -99,17 +96,15 @@ function deps(job, inputs, overrides = {}) {
 
 const governed = (job, st, operator = {}) => governedTokens({ envelope, state: st, member: job === web ? { id: "shop", member: "github:acme/web" } : null, operator });
 
-test("a full project share refuses allocation-cap before the container, gives every ledger back like scope-cap, and never says raise the budget (#504)", async () => {
+test("a full project share refuses allocation-cap before the container, gives every token key back, and never says raise the budget (#504)", async () => {
 	// No operator row for shop: the synthetic ledger alone. 2 spent of a 3 share; a 2 hold would make 4.
 	const redis = keyedRedis({ [SHOP_WEEK]: 2 });
-	const d = deps(web, governed(web, state(3)), { redis, scopedLedgers: [{ scope: "github:acme/web", keyPrefix: scopeKeyPrefix("github:acme/web"), caps: { day: 5, week: null, month: null }, reason: "scope-cap" }] });
+	const d = deps(web, governed(web, state(3)), { redis });
 	const r = await runJob(web, d.deps);
 	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "allocation-cap", false]);
 	assert.ok(!d.calls.includes("run-container"));
 	assert.equal(redis.store.get(SHOP_WEEK), 2, "the refusing window was given back");
 	assert.equal(redis.store.get(D_WEEK), 0, "the deployment window (the envelope total) too");
-	assert.equal(redis.store.get(`${scopeKeyPrefix("github:acme/web")}:2026-07-16`), 0, "the repo job-count slot went back, the scope-cap way");
-	assert.equal(redis.store.get(G_DAY), 0, "and the global one");
 	assert.match(d.comments[0], /^Refused: this week's share of the budget split for/);
 	assert.doesNotMatch(d.comments.join(" "), /raise/i);
 	const logged = d.logs.find((l) => l.e === "over_token_budget").f;

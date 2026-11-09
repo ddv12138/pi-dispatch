@@ -15,8 +15,8 @@ if (!mod && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") {
 }
 const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.19.0); CI runs these`;
 
-// A fake redis whose counter starts at `start`. `incrCalls` spies reserveBudget so a test can prove the
-// budget slot was (or was NOT) reserved. Mirrors processor.test.mjs's fakeRedis.
+// A fake redis. `incrCalls`/`decrCalls` remain as spies so a test can prove no counter was touched before any
+// spend. Mirrors processor.test.mjs's fakeRedis.
 function fakeRedis(start = 0) {
 	let n = start;
 	const redis = { incrCalls: 0, decrCalls: 0 };
@@ -70,53 +70,42 @@ const effective = (over = {}) => ({
 	provider: "anthropic",
 	model: "claude-sonnet-4-5",
 	maxTurns: 30,
-	dailyCap: 10,
-	weeklyCap: null,
-	monthlyCap: null,
+	maxTokens: null,
+	dailyTokenCap: null,
+	weeklyTokenCap: null,
+	monthlyTokenCap: null,
 	concurrency: 3,
-	softHoldPct: null,
 	...over,
 });
 
-test("(a) P0: a receiver GitHub job with no provider/model/maxTurns reaches the container with effective values; slot reserved once", { skip }, async () => {
+test("(a) P0: a receiver GitHub job with no provider/model/maxTurns reaches the container with effective values", { skip }, async () => {
 	const { processor, seen, redis } = harness({ getSettings: () => effective() });
 
 	const result = await processor(receiverGhJob(), "tok", new AbortController().signal);
 
 	assert.equal(result.outcome, "completed", "the job runs to completion -- no throw at the container env allowlist");
-	assert.ok(seen.container, "runContainer was reached (pre-fix this threw after reserveBudget)");
+	assert.ok(seen.container, "runContainer was reached (pre-fix this threw after the settings read)");
 	assert.equal(seen.container.provider, "anthropic", "provider filled from the overlay");
 	assert.equal(seen.container.model, "claude-sonnet-4-5", "model filled from the overlay");
 	assert.equal(seen.container.maxTurns, 30, "maxTurns filled from the overlay");
-	assert.equal(redis.incrCalls, 1, "the budget slot is reserved exactly once (the container ran)");
-	assert.equal(redis.decrCalls, 0, "a completed run never releases its slot");
+	assert.equal(redis.incrCalls, 0, "no token window is set, so no counter is touched");
+	assert.equal(redis.decrCalls, 0);
 });
 
-test("(b) an invalid overlay refuses before any spend: no budget reserved, no container, recordRun carries settings-overlay-invalid", { skip }, async () => {
-	const { processor, seen, redis } = harness({ getSettings: () => ({ invalid: "dailyCap must be an integer >= 1" }) });
+test("(b) an invalid overlay refuses before any spend: no counter reserved, no container, recordRun carries settings-overlay-invalid", { skip }, async () => {
+	const { processor, seen, redis } = harness({ getSettings: () => ({ invalid: "maxTurns must be an integer >= 1" }) });
 
 	const result = await processor(receiverGhJob(), "tok", new AbortController().signal);
 
 	assert.equal(result.outcome, "policy");
 	assert.equal(result.reason, "settings-overlay-invalid");
-	assert.equal(result.budgetReserved, false, "no slot reserved on the refusal path");
+	assert.equal(result.budgetReserved, false, "nothing reserved on the refusal path");
 	assert.equal(result.exitCode, null);
 	assert.equal(result.turns, null);
-	assert.equal(redis.incrCalls, 0, "reserveBudget never runs -- the refusal precedes the budget gate");
+	assert.equal(redis.incrCalls, 0, "no reserve runs -- the refusal precedes every counter");
 	assert.equal(seen.containerCalls, 0, "no container started");
 	assert.equal(seen.records.length, 1, "exactly one run record is written on the refusal path");
 	assert.equal(seen.records[0].result, result, "recordRun receives the policy result (returned, never thrown)");
-});
-
-test("(c) dailyCap lowered below today's reserved count refuses over-budget before the container", { skip }, async () => {
-	// The counter already sits at 5 reserved; an overlay dailyCap of 3 makes the next reservation land over-cap.
-	const { processor, seen } = harness({ getSettings: () => effective({ dailyCap: 3 }), redis: fakeRedis(5) });
-
-	const result = await processor(receiverGhJob(), "tok", new AbortController().signal);
-
-	assert.equal(result.outcome, "policy");
-	assert.equal(result.reason, "over-budget", "the overlay's lower cap is what reserveBudget checks against");
-	assert.equal(seen.containerCalls, 0, "over budget => no container, no provider spend");
 });
 
 test("(d) explicit job.data values win over the overlay", { skip }, async () => {
@@ -133,19 +122,6 @@ test("(d) explicit job.data values win over the overlay", { skip }, async () => 
 	assert.equal(seen.container.provider, "explicit-provider", "job.data.provider wins over the overlay");
 	assert.equal(seen.container.model, "explicit-model", "job.data.model wins over the overlay");
 	assert.equal(seen.container.maxTurns, 7, "job.data.maxTurns wins over the overlay");
-});
-
-test("(f) a soft-hold percentage set live in the overlay refuses the next in-band job before the container", { skip }, async () => {
-	// The counter sits at 4; an overlay dailyCap of 5 with softHoldPct 80 (threshold floor(4)=4) makes the
-	// next reservation land at 5 -- inside the band -- so the job is soft-held. Proves a live overlay knob
-	// takes effect at the very next job start with no restart (INT-CONFIG-OVERLAY-CONTRACT).
-	const { processor, seen } = harness({ getSettings: () => effective({ dailyCap: 5, softHoldPct: 80 }), redis: fakeRedis(4) });
-
-	const result = await processor(receiverGhJob(), "tok", new AbortController().signal);
-
-	assert.equal(result.outcome, "policy");
-	assert.equal(result.reason, "soft-hold", "the live soft-hold band is what reserveBudget checks against");
-	assert.equal(seen.containerCalls, 0, "soft-hold => new start paused, no provider spend");
 });
 
 test("(e) applyConcurrency runs with the effective concurrency on the happy path, never when the overlay is invalid", { skip }, async () => {

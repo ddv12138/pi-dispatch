@@ -48,10 +48,10 @@ test("row editing preserves undisclosed absolute scope when another field change
  const dir=tempDir("trigger-row-preserve-"); const paths={pauseWindowsPath:join(dir,"windows.json"),scopedLimitsPath:join(dir,"limits.json"),projectsFile:join(dir,"projects.json")};
  const scope="/home/private/service";
  writeFileSync(paths.pauseWindowsPath,JSON.stringify({version:1,windows:[{scope,from:"22:00",to:"06:00",tz:"UTC"}]}));
- writeFileSync(paths.scopedLimitsPath,JSON.stringify({version:1,limits:[{scope,day:3}]}));
+ writeFileSync(paths.scopedLimitsPath,JSON.stringify({version:1,limits:[{scope,concurrent:3}]}));
  const pause=planPauseWindowEdit({index:0,fields:{from:"23:00"},paths});assert.equal(pause.plan.entry.scope,scope);assert.equal(pause.plan.entry.from,"23:00");
- const limit=planLimitEdit({params:{index:0,day:4},paths,env:{}});assert.equal(limit.plan.entry.scope,scope);assert.equal(limit.plan.entry.day,4);
- const view={role:"operator",data:{snapshot:{pauseWindows:{windows:[{scope,from:"22:00",to:"06:00",tz:"UTC"}]},scopedLimits:{limits:[{scope,day:3}]}}}};
+ const limit=planLimitEdit({params:{index:0,concurrent:4},paths,env:{}});assert.equal(limit.plan.entry.scope,scope);assert.equal(limit.plan.entry.concurrent,4);
+ const view={role:"operator",data:{snapshot:{pauseWindows:{windows:[{scope,from:"22:00",to:"06:00",tz:"UTC"}]},scopedLimits:{limits:[{scope,concurrent:3}]}}}};
  for(const render of [configPauseWindows,configScopedLimits]){const markup=String(render(view));assert.doesNotMatch(markup,/\/home\/private/);assert.match(markup,/name="index"\s+value="0"/);assert.match(markup,/row 1/);}
 });
 

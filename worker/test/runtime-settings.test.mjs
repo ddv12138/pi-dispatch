@@ -81,8 +81,17 @@ test("readOverlay: a non-object root (array, string, null) is invalid", () => {
 // ---- readOverlay: each known key ----
 
 test("readOverlay: valid known keys are accepted and returned as the overlay", () => {
-	const obj = { model: "claude-x", provider: "anthropic", maxTurns: 12, dailyCap: 40, weeklyCap: 200, monthlyCap: 800, maxTokens: 500000, dailyTokenCap: 2000000, concurrency: 5, softHoldPct: 80 };
+	const obj = { model: "claude-x", provider: "anthropic", maxTurns: 12, maxTokens: 500000, dailyTokenCap: 2000000, concurrency: 5 };
 	assert.deepEqual(readObj(obj), { overlay: obj });
+});
+
+test("readOverlay: the retired job-start caps are refused by name, never dropped as unknown", () => {
+	for (const key of ["dailyCap", "weeklyCap", "monthlyCap", "softHoldPct"]) {
+		for (const value of [5, 0, 100, "80", null]) {
+			const res = readObj({ [key]: value });
+			assert.deepEqual(res, { invalid: `${key} was retired with the job-start caps; delete it from the settings file` }, `${key}=${JSON.stringify(value)}`);
+		}
+	}
 });
 
 // ---- the token keys (issue #501) ----
@@ -94,7 +103,7 @@ test("readOverlay: maxTokens is accepted as a JSON number and kept AS WRITTEN (D
 
 test("readOverlay: a malformed maxTokens fails the WHOLE overlay, naming the key and never the value", () => {
 	for (const bad of [0, "0", -1, "2.50", 2.5, "1e3", "abc", true, null, [], 1000001.5]) {
-		const res = readObj({ maxTokens: bad, dailyCap: 5 });
+		const res = readObj({ maxTokens: bad, concurrency: 5 });
 		assert.ok(res.invalid, `${JSON.stringify(bad)} must be invalid`);
 		assert.match(res.invalid, /^maxTokens must be an integer >= 1/);
 		assert.equal(res.overlay, undefined, "no partial overlay");
@@ -124,7 +133,7 @@ test("readOverlay: a near miss of a token key (case, separator, look-alike lette
 	// never refuse the file: a false refusal here would stop every job.
 	for (const key of ["temperature", "host_\u00FC", "not\u00E9s", "maxCostCents", "maxTokensx", "max\u00FCCostUsd", "\u00FCmaxTokens"]) {
 		const logged = [];
-		assert.deepEqual(readObj({ [key]: 1, dailyCap: 3 }, (event, f) => logged.push([event, f])), { overlay: { dailyCap: 3 } }, key);
+		assert.deepEqual(readObj({ [key]: 1, concurrency: 3 }, (event, f) => logged.push([event, f])), { overlay: { concurrency: 3 } }, key);
 		assert.deepEqual(logged, [["settings_overlay_unknown_key", { key }]], key);
 	}
 });
@@ -133,12 +142,12 @@ test("readOverlay: a duplicate key is refused, naming the key and never a value 
 	const res = readRaw('{"maxTokens":"1","maxTokens":"999"}');
 	assert.match(res.invalid, /^settings file has a duplicate key "maxTokens"/);
 	assert.equal(res.invalid.includes("999"), false);
-	assert.match(readRaw('{"dailyCap":1,"dailyCap":2}').invalid, /duplicate key "dailyCap"/);
+	assert.match(readRaw('{"concurrency":1,"concurrency":2}').invalid, /duplicate key "concurrency"/);
 	// A file writeOverlay wrote never has one: it serialises an object.
 	const fs = makeFakeFs();
-	writeOverlay("/s/settings.json", { maxTokens: 1, dailyCap: 2 }, { fs });
+	writeOverlay("/s/settings.json", { maxTokens: 1, concurrency: 2 }, { fs });
 	const written = fs.ops.find((o) => o.op === "write").data;
-	assert.deepEqual(readRaw(written), { overlay: { maxTokens: 1, dailyCap: 2 } });
+	assert.deepEqual(readRaw(written), { overlay: { maxTokens: 1, concurrency: 2 } });
 });
 
 test("writeOverlay: a token window is written like any other key, and a malformed one is refused at the WRITE (issue #501)", () => {
@@ -151,7 +160,7 @@ test("writeOverlay: a token window is written like any other key, and a malforme
 });
 
 test("resolveSettings: the token invariant runs on MERGED values, never on the overlay alone", () => {
-	const config = { provider: "p", model: "m", maxTurns: 30, dailyCap: 25, weeklyCap: null, monthlyCap: null, maxTokens: null, dailyTokenCap: null, concurrency: 3, softHoldPct: null, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null };
+	const config = { provider: "p", model: "m", maxTurns: 30, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 3 };
 	// The inputs are passed as already validated. The windows are enforced (issue #501), so a window reaches here
 	// from either source, and the cross-key rule must not be a per-key check.
 	for (const window of ["dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) {
@@ -168,17 +177,12 @@ test("resolveSettings: the token invariant runs on MERGED values, never on the o
 });
 
 test("resolveSettings: an invalid read passes through; a valid one is the effective settings plus secretProfiles", () => {
-	const config = { provider: "p", model: "m", maxTurns: 30, dailyCap: 25, weeklyCap: null, monthlyCap: null, maxTokens: null, dailyTokenCap: null, concurrency: 3, softHoldPct: null, maxTokens: "5", dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null };
+	const config = { provider: "p", model: "m", maxTurns: 30, maxTokens: "5", dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 3 };
 	assert.deepEqual(resolveSettings(config, { invalid: "settings file is not valid JSON" }), { invalid: "settings file is not valid JSON" });
 	assert.deepEqual(resolveSettings(config, { overlay: {} }), { ...config, secretProfiles: {}, secretBundles: {} });
 	assert.deepEqual(resolveSettings(config, { overlay: { maxTokens: "1", secretProfiles: { a: "/x" } } }), { ...config, maxTokens: "1", secretProfiles: { a: "/x" }, secretBundles: {} });
 	// Issue #704: the bundle profiles ride beside them, under the same no-precedence rule.
 	assert.deepEqual(resolveSettings(config, { overlay: { secretBundles: { b: { path: "/y", format: "json" } } } }).secretBundles, { b: { path: "/y", format: "json" } });
-});
-
-test("readOverlay: softHoldPct boundaries 1 and 99 are accepted", () => {
-	assert.deepEqual(readObj({ softHoldPct: 1 }), { overlay: { softHoldPct: 1 } });
-	assert.deepEqual(readObj({ softHoldPct: 99 }), { overlay: { softHoldPct: 99 } });
 });
 
 test("readOverlay: concurrency boundaries 1 and 10 are accepted", () => {
@@ -196,18 +200,10 @@ test("readOverlay: an invalid known key makes the whole file invalid; the reason
 		{ obj: { maxTurns: -3 }, key: "maxTurns", value: "-3" },
 		{ obj: { maxTurns: 3.5 }, key: "maxTurns", value: "3.5" },
 		{ obj: { maxTurns: "5" }, key: "maxTurns", value: "5" },
-		{ obj: { dailyCap: 0 }, key: "dailyCap", value: null },
-		{ obj: { dailyCap: -8 }, key: "dailyCap", value: "-8" },
-		{ obj: { weeklyCap: 0 }, key: "weeklyCap", value: null },
-			{ obj: { weeklyCap: 2.5 }, key: "weeklyCap", value: "2.5" },
-			{ obj: { monthlyCap: -1 }, key: "monthlyCap", value: "-1" },
 			{ obj: { maxTokens: 0 }, key: "maxTokens", value: null },
 			{ obj: { maxTokens: -5 }, key: "maxTokens", value: "-5" },
 			{ obj: { dailyTokenCap: 0 }, key: "dailyTokenCap", value: null },
 			{ obj: { dailyTokenCap: 2.5 }, key: "dailyTokenCap", value: "2.5" },
-			{ obj: { softHoldPct: 0 }, key: "softHoldPct", value: null },
-			{ obj: { softHoldPct: 100 }, key: "softHoldPct", value: "100" },
-			{ obj: { softHoldPct: 50.5 }, key: "softHoldPct", value: "50.5" },
 			{ obj: { concurrency: 0 }, key: "concurrency", value: null },
 		{ obj: { concurrency: 99 }, key: "concurrency", value: "99" },
 		{ obj: { concurrency: 4.2 }, key: "concurrency", value: "4.2" },
@@ -279,32 +275,25 @@ test("readOverlay never throws across the nasty corpus", () => {
 
 // ---- effectiveSettings ----
 
-// FOURTEEN since issue #501 (was ten): the four token keys resolve overlay > env like every other key. The
-// pins below moved with the reason, not around it: the key set is still exact, and an empty overlay still
-// returns the config verbatim.
-// FOURTEEN since issue #501 (was ten): the four token keys resolve overlay > env like every other key. The
-// pins below moved with the reason, not around it: the key set is still exact, and an empty overlay still
-// returns the config verbatim.
-test("effectiveSettings: overlay wins where set, config fills the rest, result has exactly fourteen keys", () => {
-	const config = { provider: "anthropic", model: "cfg-model", maxTurns: 30, dailyCap: 25, weeklyCap: null, monthlyCap: null, maxTokens: null, dailyTokenCap: null, concurrency: 3, softHoldPct: null, weeklyTokenCap: null, monthlyTokenCap: null, valkeyUrl: "x", jobImage: "y" };
-	const res = effectiveSettings(config, { model: "ovl-model", dailyCap: 5, weeklyCap: 100, softHoldPct: 80, maxTokens: 2_000_000, dailyTokenCap: 2_000_000, weeklyTokenCap: 5_000_000 });
+// EIGHT since the job-start caps were removed (was twelve): the four token keys resolve overlay > env like every
+// other key. The pins below moved with the reason, not around it: the key set is still exact, and an empty overlay
+// still returns the config verbatim.
+test("effectiveSettings: overlay wins where set, config fills the rest, result has exactly eight keys", () => {
+	const config = { provider: "anthropic", model: "cfg-model", maxTurns: 30, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 3, valkeyUrl: "x", jobImage: "y" };
+	const res = effectiveSettings(config, { model: "ovl-model", maxTokens: 2_000_000, dailyTokenCap: 2_000_000, weeklyTokenCap: 5_000_000 });
 	assert.equal(res.weeklyTokenCap, 5_000_000, "the overlay's token window wins over env's, as written");
 	assert.equal(res.monthlyTokenCap, null, "an absent token window falls to config's null");
 	assert.equal(res.model, "ovl-model", "overlay wins");
-	assert.equal(res.dailyCap, 5, "overlay wins");
-	assert.equal(res.weeklyCap, 100, "overlay sets an otherwise-disabled window");
-	assert.equal(res.softHoldPct, 80, "overlay sets the soft-hold band");
 	assert.equal(res.maxTokens, 2_000_000, "overlay sets the otherwise-disabled per-job token budget");
 	assert.equal(res.dailyTokenCap, 2_000_000, "overlay sets the otherwise-disabled daily token cap");
 	assert.equal(res.provider, "anthropic", "absent overlay key falls to config");
 	assert.equal(res.maxTurns, 30, "absent overlay key falls to config");
-	assert.equal(res.monthlyCap, null, "absent overlay key falls to config's null (disabled)");
 	assert.equal(res.concurrency, 3, "absent overlay key falls to config");
-	assert.deepEqual(Object.keys(res).sort(), ["concurrency", "dailyCap", "dailyTokenCap", "maxTokens", "maxTurns", "model", "monthlyCap", "monthlyTokenCap", "provider", "softHoldPct", "weeklyCap", "weeklyTokenCap"]);
+	assert.deepEqual(Object.keys(res).sort(), ["concurrency", "dailyTokenCap", "maxTokens", "maxTurns", "model", "monthlyTokenCap", "provider", "weeklyTokenCap"]);
 });
 
-test("effectiveSettings: an empty overlay yields the config values verbatim for all twelve keys", () => {
-	const config = { provider: "anthropic", model: "cfg-model", maxTurns: 30, dailyCap: 25, weeklyCap: null, monthlyCap: null, maxTokens: null, dailyTokenCap: null, concurrency: 3, softHoldPct: null, weeklyTokenCap: null, monthlyTokenCap: null };
+test("effectiveSettings: an empty overlay yields the config values verbatim for all eight keys", () => {
+	const config = { provider: "anthropic", model: "cfg-model", maxTurns: 30, maxTokens: null, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 3 };
 	assert.deepEqual(effectiveSettings(config, {}), config);
 });
 
@@ -391,10 +380,10 @@ test("writeOverlay never throws when mkdir or write fails", () => {
 
 // ---- KNOWN_KEYS ----
 
-test("KNOWN_KEYS is exported and lists exactly the twelve overlay keys (the four token keys since issue #501, the four dollar keys retired)", () => {
+test("KNOWN_KEYS is exported and lists exactly the eight overlay keys (the four token keys since issue #501; the dollar keys and job-start caps retired)", () => {
 	assert.deepEqual(
 		[...KNOWN_KEYS].sort(),
-		["concurrency", "dailyCap", "dailyTokenCap", "maxTokens", "maxTurns", "model", "monthlyCap", "monthlyTokenCap", "provider", "softHoldPct", "weeklyCap", "weeklyTokenCap"],
+		["concurrency", "dailyTokenCap", "maxTokens", "maxTurns", "model", "monthlyTokenCap", "provider", "weeklyTokenCap"],
 	);
 });
 

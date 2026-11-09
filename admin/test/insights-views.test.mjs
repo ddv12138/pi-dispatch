@@ -150,7 +150,7 @@ test("job and token counter keys use the supplied instant, even when the wall cl
   writeFileSync(settingsFile, "{}");
   const keys = [];
   await assembleBudgetView({ valkeyUrl: "redis://localhost:6379", settingsFile }, { nowMs: NOW, redisFn: () => ({ get: async (key) => (keys.push(key), "0"), disconnect() {} }) });
-  assert.deepEqual(keys.sort(), ["budget:2026-10-29", "budget:m:2026-10", "budget:tok:2026-10-29", "budget:w:2026-10-26"].sort());
+  assert.deepEqual(keys.sort(), ["budget:tok:2026-10-29"]);
 });
 
 test("Spend daily bars are settled facts, today's live holds are separate, and cost bins use metered runs only", () => {

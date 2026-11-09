@@ -1,17 +1,17 @@
 /**
- * Scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT): per-scope run caps and per-scope
- * concurrency, where a scope is what `scopeOf` already answers -- the folder for a local job, the repo
- * for a forge one. One `scoped-limits.json` of `{ scope, day?, week?, month?, concurrent? }` entries:
- * the day/week/month caps refuse a job pre-spend (reason `scope-cap`, a policy refusal), `concurrent`
- * defers the excess through the delayed set (never a refusal -- a busy scope is transient state).
+ * Scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT): per-scope concurrency, token windows and job
+ * size, where a scope is what `scopeOf` already answers -- the folder for a local job, the repo for a forge
+ * one. One `scoped-limits.json` of `{ scope, concurrent?, dayTokens?, weekTokens?, monthTokens?, ... }`
+ * entries: `concurrent` defers the excess through the delayed set (never a refusal -- a busy scope is
+ * transient state), and the token windows and size fields are consumed by token-budget.mjs, job-size.mjs and
+ * host-budget.mjs. The job-count windows (`day`, `week`, `month`) were REMOVED; a row carrying one is refused
+ * with that removal named, never read as an unknown key.
  *
  * This module is pure and fs-injectable (mirrors pause-windows.mjs in every respect): `parseScopedLimits`
  * validates the file TEXT fail-loud, `loadScopedLimits` layers the one fs read on top, and the small
  * helpers below are what the processor gate and the budget wiring consume. It also owns the in-process
  * in-flight counter (`makeInFlight`) so the counter is unit-testable without a bullmq import, the same
- * reason job-id.mjs is queue-free. The wiring that consumes all of this (the gate, the budget calls,
- * the admin surfaces) lands in this issue's later slices; the module ships first so the contract has
- * one implementation to bind to -- sentences below describing enforcement describe THOSE slices.
+ * reason job-id.mjs is queue-free.
  *
  * The file is a SIBLING of pause-windows.json, not part of the settings overlay, deliberately: the
  * deferral gate runs before the per-job overlay read, so gate-read config must come from a watched
@@ -26,19 +26,19 @@
  * Version 2 (issues #501 part 5, #502 part 6) was that case made real with dollar windows; THIS release replaces
  * them with token windows (`dayTokens`, `weekTokens`, `monthTokens`) on a scope row, and `model:<provider>/<model>`
  * rows carrying those alone. They are TOKEN ledgers (token-budget.mjs, built here by `tokenCapsFor` and
- * `modelTokenRows`), never job-count ones, so `budgetCapsFor`, `concurrencyFor` and the mutex never see them. The
- * dollar fields are retired: a file carrying `dayUsd`/`weekUsd`/`monthUsd` is refused with the upgrade named.
+ * `modelTokenRows`), never job-count ones. The dollar fields are retired: a file carrying
+ * `dayUsd`/`weekUsd`/`monthUsd` is refused with the upgrade named. The job-count fields `day`/`week`/`month` are
+ * retired too, refused with the cap removal named.
  *
  * Issue #498 adds the forge-qualified scope (`github:acme/web`), which names one forge's repo where a bare
  * `acme/web` names that repo on every forge. A job matches its qualified row first, then its bare row, and a file
- * holding both for one repo is refused. EVERY key (the job-count windows, the dollar windows, the in-process slot and
- * the fleet lease) is built from the MATCHED ROW's scope, never from the job's, so a bare row keeps exactly the key
- * it always had and a qualified row counts on its own.
+ * holding both for one repo is refused. EVERY key (the token windows, the in-process slot and the fleet lease) is
+ * built from the MATCHED ROW's scope, never from the job's, so a bare row keeps exactly the key it always had and
+ * a qualified row counts on its own.
  *
- * Issue #499 part B adds the project row (`project:<id>`, the id from projects.json; version 2). It carries the job-count windows,
- * `concurrent` and the dollar windows, and it caps every member of the project as one: a job reserves in
- * its repo or folder row, then its project's row, then the global windows (`scopedLedgers`), and its keys are built from
- * the project ROW's scope like every other row's, so a project needs no keyspace of its own.
+ * Issue #499 part B adds the project row (`project:<id>`, the id from projects.json; version 2). It carries
+ * `concurrent`, the token windows and the size fields, and it caps every member of the project as one. Its keys are
+ * built from the project ROW's scope like every other row's, so a project needs no keyspace of its own.
  *
  * Issue #596 (phase 1) adds version 3: a project row may carry its jobs' size (`memory`, `cpus`) and the host budget's
  * two knobs (`hostShare`, `minJobs`), see `SIZE_LIMIT_FIELDS`. This module only parses them; `job-size.mjs` resolves the
@@ -93,8 +93,10 @@ export const SCOPED_LIMITS_VERSION = 4;
  */
 export const SIZE_LIMIT_FIELDS = Object.freeze(["memory", "cpus", "hostShare", "minJobs"]);
 
-/** The four job-count limit fields a row may carry, in display order. */
-const LIMIT_FIELDS = ["day", "week", "month", "concurrent"];
+/** The one non-token limit field a row may carry, in display order: concurrency. The job-count windows are gone. */
+const LIMIT_FIELDS = ["concurrent"];
+/** The retired job-count fields: refused on sight, naming the removal (never dropped as unknown keys). */
+export const RETIRED_COUNT_FIELDS = Object.freeze(["day", "week", "month"]);
 
 /** The three token window fields (version 4, the retired dollar fields' successor), in display order. Each maps to a token window: day, week, month. */
 export const TOKEN_LIMIT_FIELDS = Object.freeze(["dayTokens", "weekTokens", "monthTokens"]);
@@ -186,11 +188,12 @@ export function canonicalScope(job) {
 
 /**
  * Parse, validate, and normalize the scoped-limits file TEXT. Returns the normalized `limits` array
- * (every row rebuilt as an explicit `{ scope, day, week, month, concurrent }` literal in a version 1 file,
- * `{ scope, day, week, month, concurrent, dayTokens, weekTokens, monthTokens }` in a version 2+ one, and that plus `memory,
+ * (every row rebuilt as an explicit `{ scope, concurrent }` literal in a version 1 file,
+ * `{ scope, concurrent, dayTokens, weekTokens, monthTokens }` in a version 2+ one, and that plus `memory,
  * cpus, hostShare, minJobs` in a version 3 one, `null` for absent fields, unknown fields dropped in a version 1 or 2
- * file -- the operator-file policy -- and refused in a version 3 one). Throws `configError` (fail-loud) on any
- * malformed entry. `path` is for error messages only -- this function touches no filesystem.
+ * file -- the operator-file policy -- and refused in a version 3 one). The retired job-count fields are refused in
+ * every version. Throws `configError` (fail-loud) on any malformed entry. `path` is for error messages only -- this
+ * function touches no filesystem.
  */
 export function parseScopedLimits(text, path) {
 	let parsed;
@@ -264,9 +267,9 @@ function tokenField(value, field, at, path) {
 
 /**
  * A per-model row (version 2+): `{ scope: "model:<provider>/<model>", dayTokens?, weekTokens?, monthTokens? }`. The ref follows
- * the allowed-model list's rule (`splitModelEntry`: split at the first `/`, each half a valid id). `day`, `week`,
- * `month` and `concurrent` are refused here: a model is not a scope a job runs IN, so a job-count cap or a
- * concurrency limit on it would read as enforced while nothing counts it.
+ * the allowed-model list's rule (`splitModelEntry`: split at the first `/`, each half a valid id). A job-count field
+ * (`day`, `week`, `month`), `concurrent` or a size field is refused here: a model is not a scope a job runs IN, so a
+ * job-count cap or a concurrency limit on it would read as enforced while nothing counts it.
  */
 function normalizeModelLimit(row, trimmed, at, path, version) {
 	if (version < 2) throw configError(`${at}: a "model:" row needs "version": 2 (this file says ${version}): ${path}`);
@@ -281,7 +284,7 @@ function normalizeModelLimit(row, trimmed, at, path, version) {
 	for (const field of RETIRED_DOLLAR_FIELDS) {
 		if (row[field] !== undefined && row[field] !== null) retiredDollarField(field, at, path);
 	}
-	const norm = { scope: `${MODEL_SCOPE_PREFIX}${ref.provider}/${ref.model}`, day: null, week: null, month: null, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null, ...(version >= 3 ? sizeNulls() : {}) };
+	const norm = { scope: `${MODEL_SCOPE_PREFIX}${ref.provider}/${ref.model}`, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null, ...(version >= 3 ? sizeNulls() : {}) };
 	let any = false;
 	for (const field of TOKEN_LIMIT_FIELDS) {
 		if (row[field] === undefined || row[field] === null) continue;
@@ -299,6 +302,13 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 		throw configError(`${at}: must be an object: ${path}`);
 	}
 	if (!isNonEmptyString(row.scope)) throw configError(`${at}: scope must be a non-empty string: ${path}`);
+	// The job-count scoped caps were removed. An old row carrying one is REFUSED here, naming the field(s) and the
+	// removal: a version 1 or 2 file drops unknown keys, so letting `day` fall through would silently UNCAP the scope
+	// while the file still reads as capping it. Null is the normalizer's own "unset", so only a value is refused.
+	const retired = RETIRED_COUNT_FIELDS.filter((field) => row[field] !== undefined && row[field] !== null);
+	if (retired.length > 0) {
+		throw configError(`${at}: ${retired.join(", ")} ${retired.length === 1 ? "was" : "were"} retired with the job-count scoped caps; remove ${retired.length === 1 ? "it" : "them"} (only concurrent, token windows and size fields remain): ${path}`);
+	}
 	// Version 3 refuses a key it does not know (issue #596): a misspelled `Memory`, `cpu` or `mem` beside a field that
 	// keeps the row valid was dropped, and the project's jobs ran at the default size while the file read as sized.
 	// Versions 1 and 2 keep dropping unknown keys, so a file an older build wrote and reads still loads unchanged.
@@ -355,9 +365,6 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 		// the doctor's unreferenced-scope advisory names it. Resolving it instead would "work" only by
 		// both sides mangling into the same cwd-prefixed string -- a match by accident, not by contract.
 		scope: isProjectScope(trimmed) ? trimmed : form.type === "qualified" ? `${form.kind}:${form.repo}` : isAbsolute(trimmed) ? resolve(trimmed) : trimmed,
-		day: null,
-		week: null,
-		month: null,
 		concurrent: null,
 		// The token windows (version 2's dollar windows' successor), each the integer the parser accepts, so the
 		// admin's read-modify-write writes back exactly what the parser accepts. `tokenCapsFor` reads them as caps.
@@ -394,7 +401,7 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 	// Issue #596: a project row may carry a size and nothing else, so the size fields count as limiting something.
 	if (sizeFields(row, norm, { at, path, version, project: isProjectScope(trimmed) })) any = true;
 	if (!any) {
-		throw configError(`${at}: at least one of day, week, month, concurrent${version >= 2 ? ", dayTokens, weekTokens, monthTokens" : ""}${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
+		throw configError(`${at}: at least one of concurrent${version >= 2 ? ", dayTokens, weekTokens, monthTokens" : ""}${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
 	}
 	return norm;
 }
@@ -473,32 +480,20 @@ export function limitFor(limits, job) {
 
 /**
  * The scope every per-scope KEY of this job is built from (issue #498): the matched row's scope, or the job's
- * canonical scope when no row matches. The in-process slot, the fleet lease (`slot:s:<hash16>`), and through
- * `budgetCapsFor`/`tokenCapsFor` the job-count and token windows all hash this one string. Keyed by the ROW, never
- * the job: a bare `acme/web` row then keeps the exact key it had before qualified scopes existed (its counts carry
- * over, and the admin, which recomputes keys from rows, keeps reading them), and it stays ONE shared cap across
- * forges as written. The boot sweeper already hashes row scopes, so the gate and the sweeper are one rule.
+ * canonical scope when no row matches. The in-process slot, the fleet lease (`slot:s:<hash16>`) and, through
+ * `tokenCapsFor`, the token windows all hash this one string. Keyed by the ROW, never the job: a bare `acme/web`
+ * row then keeps the exact key it had before qualified scopes existed (its counts carry over, and the admin,
+ * which recomputes keys from rows, keeps reading them), and it stays ONE shared limit across forges as written.
+ * The boot sweeper already hashes row scopes, so the gate and the sweeper are one rule.
  */
 export function rowScopeFor(job, limits) {
 	return limitFor(limits, job)?.scope ?? canonicalScope(job);
 }
 
 /**
- * The scoped budget windows this job reserves against, or null when nothing applies (no row for the
- * scope, or the row is concurrency-only). The returned `scope` is the MATCHED ROW's (issue #498), so the redis
- * counters are spelling-stable and a bare row keeps its key. Shaped like the global `caps` object so
- * `reserveBudget` consumes it unchanged.
- */
-export function budgetCapsFor(job, limits) {
-	const row = limitFor(limits, job);
-	if (!row || (row.day === null && row.week === null && row.month === null)) return null;
-	return { scope: row.scope, caps: { day: row.day, week: row.week, month: row.month } };
-}
-
-/**
  * The project row of this project id, or null (no id, or no row for it). A job's project is resolved ONCE at pickup
- * (`projectOf`, projects.mjs), and every project-row consumer below takes that id, never the job: the gate, the ledgers
- * and the record then agree for the attempt whatever an operator does to projects.json mid-run.
+ * (`projectOf`, projects.mjs), and every project-row consumer below takes that id, never the job: the gate, the token
+ * ledgers and the record then agree for the attempt whatever an operator does to projects.json mid-run.
  */
 export function projectRowFor(limits, projectId) {
 	if (!Array.isArray(limits) || !isProjectId(projectId)) return null;
@@ -537,34 +532,6 @@ export function checkProjectRows(limits, projects, limitsPath, projectsPath = nu
 	throw configError(`scoped-limits row(s) at ${rows} in ${limitsPath} name a project that is not in ${where}; add the project there first, or remove the row`);
 }
 
-/** The refusal reason of a full repo or folder job-count window. */
-export const SCOPE_CAP_REASON = "scope-cap";
-/** The refusal reason of a full project job-count window (issue #499 part B). */
-export const PROJECT_CAP_REASON = "project-cap";
-
-/**
- * THE ordered job-count ledgers of one job's scoped rows (issue #499 part B), as `[{ scope, keyPrefix, caps, reason }]`:
- * its repo or folder row, then its project's row. The processor appends the global ledger last and reserves them in
- * this order through ONE helper (budget.mjs `reserveLedgers`), and gives them back in reverse (`releaseLedgers`).
- *
- * Narrowest first, for the reason the scoped ledger always reserved before the global one: a refusal by a narrow
- * ledger never consumes a slot in a wider one, so a noisy repo cannot drain its project's day, and a full project
- * cannot drain the deployment's. A row with no day, week or month (concurrency or dollars only) is no ledger here.
- *
- * `projectId` is the id resolved at pickup (`projectOf`), or null. One list instead of one hand-built pair per
- * call site: every release site in the processor walks this list, so a ledger added here cannot be forgotten there.
- */
-export function scopedLedgers(job, limits, projectId) {
-	const out = [];
-	const scoped = budgetCapsFor(job, limits);
-	if (scoped) out.push({ scope: scoped.scope, keyPrefix: scopeKeyPrefix(scoped.scope), caps: scoped.caps, reason: SCOPE_CAP_REASON });
-	const row = projectRowFor(limits, projectId);
-	if (row && (row.day !== null || row.week !== null || row.month !== null)) {
-		out.push({ scope: row.scope, keyPrefix: scopeKeyPrefix(row.scope), caps: { day: row.day, week: row.week, month: row.month }, reason: PROJECT_CAP_REASON });
-	}
-	return out;
-}
-
 /** A row's token windows as integers `{ day, week, month }`, each null when unset, or null when none is. */
 function tokenCaps(row) {
 	const caps = {};
@@ -575,10 +542,9 @@ function tokenCaps(row) {
 }
 
 /**
- * The repo or folder token windows this job reserves in, or null when its scope's row has none
- * (or there is no row). Ledger-shaped for `reserveTokens`: `{ scope, keyPrefix, caps }`, the caps in integer
- * tokens and `keyPrefix` `budget:tok:s:<hash16>` of the same MATCHED ROW scope the job-count windows hash
- * (issue #498). A sibling of `budgetCapsFor`: the job-count and token windows of one row are separate ledgers.
+ * The token windows this job reserves in, or null when its scope's row has none (or there is no row). Ledger-shaped
+ * for `reserveTokens`: `{ scope, keyPrefix, caps }`, the caps in integer tokens and `keyPrefix`
+ * `budget:tok:s:<hash16>` of the same MATCHED ROW scope the concurrency slot and fleet lease hash (issue #498).
  */
 export function tokenCapsFor(job, limits) {
 	const row = limitFor(limits, job);
@@ -664,10 +630,10 @@ export function tokenRowsBelowJobCap(limits, deploymentMaxTokens) {
 
 /**
  * The lowest file version that expresses `rows` (normalized or as the admin builds them): 3 when any row carries a size
- * field (issue #596), else 2 when any row carries a dollar field, is a model row, is a project row (issue #499 part B)
- * or has a forge-qualified scope (issue #498), else 1.
- * The admin writes this, so a file
- * with bare and folder job-count rows only stays a version 1 file that an older worker still reads.
+ * field (issue #596), else 2 when any row is a model row, is a project row (issue #499 part B) or has a
+ * forge-qualified scope (issue #498), else 1. The retired job-count fields (`day`/`week`/`month`) no longer count:
+ * they are refused by the parser in every version. The admin writes this, so a file with bare and folder
+ * concurrency-only rows stays a version 1 file that an older worker still reads.
  */
 export function scopedLimitsVersionFor(rows) {
 	// Issue #596: a size field on any row needs version 3 (the parser refuses it off a project row, and says so).
@@ -712,15 +678,14 @@ export function concurrencyFor(job, limits) {
 }
 
 /**
- * The redis key prefix for a scope's budget windows: `budget:s:<16 hex>`. Handed to
- * `reserveBudget`/`releaseBudget` as `keyPrefix`, so `dayKey`/`weekKey`/`monthKey` compose
- * `budget:s:<h>:YYYY-MM-DD` / `:w:...` / `:m:...` with zero new key-shape logic. A hash (the localJobId
- * idiom: sha256, first 16 hex) rather than an escape: a scope legally contains `:` and `/` (folder
- * paths, gitlab group/subgroup/project), which would collide with budget.mjs's own `w:`/`m:`/`t:`
- * sub-namespaces, and a bijective escape grammar is a new thing to get wrong with unbounded key lengths.
- * The one consumer that must map keys BACK to scopes is the admin's counter display, and it knows the
- * configured scopes -- it recomputes keys through this same export, so unreadability in redis-cli is the
- * accepted cost.
+ * The redis key prefix the removed job-count windows used: `budget:s:<16 hex>`. Kept exported because the admin's
+ * read-model still recomputes legacy count-window keys through it (`scopeKeyPrefix` is that one export and N
+ * consumers), and because it is the same hash the token prefix uses. A hash (the localJobId idiom: sha256, first
+ * 16 hex) rather than an escape: a scope legally contains `:` and `/` (folder paths, gitlab
+ * group/subgroup/project), which would collide with budget.mjs's own `w:`/`m:`/`t:` sub-namespaces, and a
+ * bijective escape grammar is a new thing to get wrong with unbounded key lengths. The one consumer that must map
+ * keys BACK to scopes is the admin's counter display, and it knows the configured scopes -- it recomputes keys
+ * through this same export, so unreadability in redis-cli is the accepted cost.
  */
 export function scopeKeyPrefix(scope) {
 	return `budget:s:${hash16(scope)}`;

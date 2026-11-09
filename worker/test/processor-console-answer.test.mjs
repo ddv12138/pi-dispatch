@@ -58,7 +58,6 @@ function deps(overrides = {}) {
 	const base = {
 		redis,
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		isParked: () => true,
 		parkedLabel: async () => {},
 		sessionsDir: "/srv/pi-sessions",

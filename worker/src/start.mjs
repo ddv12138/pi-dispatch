@@ -2963,7 +2963,7 @@ export async function startWorker(
 		// comment and the signal for CONST-PI-VERSION-PINNED's silent-no-op mode -- a missing line is
 		// what tells a human a run did nothing. The container's own output already streams via
 		// runContainer's onOutput during the run.
-		// `reason` is a fixed enum (worker-abort | over-budget | dollar-cap | allocation-cap | envelope-mismatch | portfolio-no-envelope | portfolio-snapshot-oversize | unprotected-branch | runner-policy |
+		// `reason` is a fixed enum (worker-abort | token-cap | dollar-cap | allocation-cap | envelope-mismatch | portfolio-no-envelope | portfolio-snapshot-oversize | unprotected-branch | runner-policy |
 		// provider-auth-refused | job-image-missing), never
 		// user content. Included only when present so success lines stay clean; a shutdown-aborted job logs
 		// { outcome: "policy", reason: "worker-abort" }, making a restart-dropped job visible.
@@ -3367,11 +3367,7 @@ export async function startWorker(
 			concurrency: bootConcurrency, // the slot count the Worker is actually constructed with (overlay may raise/lower it)
 			sweepIntervalHours: config.sweepIntervalHours, // 0 = boot-only sweeps, this version's pre-#292 behaviour
 			doctorIntervalHours: config.doctorIntervalHours, // issue #712: 0 = the worker runs no doctor of its own
-			dailyCap: config.dailyCap,
-			weeklyCap: config.weeklyCap, // null when the weekly window is disabled
-			monthlyCap: config.monthlyCap, // null when the monthly window is disabled
-			softHoldPct: config.softHoldPct, // null when the soft-hold band is disabled
-			scopedLimitsFile: config.scopedLimitsFile, // null = no scoped caps/concurrency (the folder mutex holds regardless)
+			scopedLimitsFile: config.scopedLimitsFile, // null = no scoped concurrency/token windows (the folder mutex holds regardless)
 			scopedLimits: scopedLimits.current.length, // row count -- money config deserves boot visibility; the watcher logs only changes
 			projectsFile: config.projectsFile, // issue #499: null = no projects
 			projects: projects.current.length, // project count, never a name

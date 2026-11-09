@@ -37,7 +37,6 @@ function setup(overrides = {}) {
 		approvalRuntime: runtime,
 		queueJobId: "gh-reply-649",
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		sessionsDir: "/sessions",
 		isParked: () => true,
 		imagePreflight: async () => ({ ok: true, piVersion: "1.2.0", capabilities: ["exitAuth", "approvalGates"] }),

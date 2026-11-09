@@ -1,7 +1,6 @@
 import assert from "node:assert/strict";
 import { DAEMON_APPLIES_BOUNDS, DOCKER_ENDPOINT_LOCAL, OBSERVATIONS, RUNTIME_ADDS_NO_MOUNTS } from "../src/backends.mjs";
 import { test } from "node:test";
-import { budgetCapsFor, parseScopedLimits, scopeKeyPrefix } from "../src/scoped-limits.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { HELD_TAKEN_COMMENT, InfraRetry, peakReachedLimit, runJob, OBSERVATION_COMMENT, OBSERVATION_COMMENT_UNNAMED, PARKED_COMMENT, PARKED_COMMENT_PR, parkedComment, TERMINAL_COMMENTS } from "../src/processor.mjs";
 import { buildRecord, EXIT_OOM_KILLED, MCP_RUNNER_REASONS, RUNNER_POLICY_REASONS } from "../src/run-history.mjs";
@@ -11,12 +10,9 @@ import { MCP_REFUSAL_COMMENT } from "../src/mcp-preflight.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { computeZeroTouch } from "../src/zero-touch.mjs";
 
-// The job-count ledger list the processor takes (issue #499 part B), from a `budgetCapsFor`-shaped object.
-const asLedgers = (c) => (c ? [{ scope: c.scope, keyPrefix: scopeKeyPrefix(c.scope), caps: c.caps, reason: "scope-cap" }] : []);
-
-/** A fake redis whose counter we can preset, to force over/under budget. `decrCalls` spies
- *  releaseBudget, so tests assert the slot is (or is not) given back and never double-released.
- *  `tokenSpent` presets the daily TOKEN counter the token windows' reserve read consults. */
+/** A fake redis whose counter we can preset, to force token-window states. `incr`/`decr` stay as spies so a
+ *  test can prove no job-count counter is touched. `tokenSpent` presets the daily TOKEN counter the token
+ *  windows' reserve read consults. */
 function fakeRedis(start = 0, tokenSpent = 0) {
 	let n = start;
 	const redis = { decrCalls: 0, incrCalls: 0, ops: [], store: new Map(Object.entries(tokenSpent ? { "budget:tok:2026-07-16": tokenSpent } : {})) };
@@ -42,10 +38,6 @@ function deps(overrides = {}) {
 	const calls = [];
 	const base = {
 		redis: fakeRedis(),
-		// The day window is the only one active by default (week/month disabled), so the single-counter
-		// fakeRedis stays valid; soft-hold is off unless a test sets it. Mirrors a default deployment.
-		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		mintToken: async (job) => (calls.push(`mint:${job?.repo}`), "tok"),
 		isDefaultBranchProtected: async () => (calls.push("branch-check"), true),
 		prepareWorkspace: async () => (calls.push("prepare"), { workspaceDir: "/w", jobDir: "/j" }),
@@ -105,37 +97,17 @@ test("an unprotected branch refuses BEFORE any container -- and never prepares/s
 	assert.ok(!calls.includes("prepare"), "must not even clone an unprotected repo");
 });
 
-test("over budget refuses AFTER prepare but BEFORE the container -- no provider spend", async () => {
-	// counter starts at cap, so the reservation lands over-cap (base caps.day is 10).
-	const { deps: d, calls } = deps({ redis: fakeRedis(10) });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.reason, "over-budget");
-	assert.ok(calls.includes("prepare"), "prepared (free work) before the budget gate");
-	assert.ok(!calls.includes("run-container"), "over budget => NO container, no money spent");
+test("answer helpers retain the ordinary image gate while every refusal comment is suppressed", async () => {
+	const { deps: d, calls } = deps({ imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["answerDraft"] }) });
+	const result = await runJob({ ...ghJob, answerDraft: { runId: "parent", ruleId: "help" }, purpose: "answer-draft" }, d);
+	assert.equal(result.reason, "job-image-answer-draft-unsupported");
+	assert.equal(calls.includes("run-container"), false);
+	assert.equal(calls.some(c => c.startsWith("comment:")), false, "even refusal and status paths cannot post for an answer helper");
+	assert.equal(d.redis.incrCalls, 0);
+	assert.equal(calls.some(c => c.startsWith("mint:")), false, "untrusted output transport refuses before mint");
 });
 
-test("answer helpers retain the ordinary budget and image gates while every refusal comment is suppressed", async () => {
-	for (const missingCapability of [false, true]) {
-		const { deps: d, calls } = deps({ redis: fakeRedis(10), imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: missingCapability ? ["answerDraft"] : ["answerDraft", "exitAuth"] }) });
-		const result = await runJob({ ...ghJob, answerDraft: { runId: "parent", ruleId: "help" }, purpose: "answer-draft" }, d);
-		assert.equal(result.reason, missingCapability ? "job-image-answer-draft-unsupported" : "over-budget");
-		assert.equal(calls.includes("run-container"), false); assert.equal(calls.some(c => c.startsWith("comment:")), false, "even refusal and status paths cannot post for an answer helper");
-		if (missingCapability) { assert.equal(d.redis.incrCalls, 0); assert.equal(calls.some(c => c.startsWith("mint:")), false, "untrusted output transport refuses before mint"); }
-	}
-});
-
-test("soft-hold refuses AFTER prepare but BEFORE the container, with a distinct soft-hold reason", async () => {
-	// day cap 5, 80% band -> threshold floor(4)=4; counter at 4 makes the reservation land at 5 (in-band).
-	const { deps: d, calls } = deps({ redis: fakeRedis(4), caps: { day: 5, week: null, month: null }, softHoldPct: 80 });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.outcome, "policy");
-	assert.equal(r.reason, "soft-hold", "an in-band reservation is a soft-hold, distinct from over-budget");
-	assert.equal(r.budgetReserved, true, "the reservation still counts (no give-back)");
-	assert.ok(calls.includes("prepare"), "prepared (free work) before the budget gate");
-	assert.ok(!calls.includes("run-container"), "soft-hold => new start paused, NO container, no money spent");
-});
-
-test("a prepare policy outcome (sha-gone) RETURNS before reserveBudget -- no cap slot burned", async () => {
+test("a prepare policy outcome (sha-gone) RETURNS before any reserve -- nothing burned", async () => {
 	const redis = fakeRedis();
 	const { deps: d, calls } = deps({
 		redis,
@@ -144,7 +116,7 @@ test("a prepare policy outcome (sha-gone) RETURNS before reserveBudget -- no cap
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
 	assert.equal(r.reason, "sha-gone");
-	assert.equal(redis.incrCalls, 0, "reserveBudget never reached on a determinate prepare policy outcome");
+	assert.equal(redis.incrCalls, 0, "no count reserve exists any more, so no counter is touched on a determinate prepare policy outcome");
 	assert.ok(!calls.includes("run-container"), "a sha-gone prepare must never spend on a container");
 	assert.equal(r.budgetReserved, false, "the record says nothing was reserved, so the cost fold reads an exact $0 (#507)");
 	assert.deepEqual([r.exitCode ?? null, r.tokens ?? null], [null, null]);
@@ -152,7 +124,7 @@ test("a prepare policy outcome (sha-gone) RETURNS before reserveBudget -- no cap
 
 test("every prepare refusal records budgetReserved false, whatever the preparer returned beside its reason (#507)", async () => {
 	for (const reason of ["sha-gone", "pi-too-many-files", "portfolio-snapshot-oversize", "local-folder-not-a-repo"]) {
-		const { deps: d } = deps({ redis: fakeRedis(), prepareWorkspace: async () => ({ outcome: "policy", reason, budgetReserved: true }) });
+		const { deps: d } = deps({ redis: fakeRedis(), prepareWorkspace: async () => ({ outcome: "policy", reason, budgetReserved: false }) });
 		const r = await runJob(ghJob, d);
 		assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", reason, false], reason);
 	}
@@ -257,7 +229,7 @@ test("an abort carrying abortReason operator-cancel classifies as operator-cance
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
 	assert.equal(r.reason, "operator-cancel", "the record must say an operator did it, not the timer");
-	assert.equal(r.budgetReserved, true, "the container ran; the slot stays counted exactly as worker-abort's does");
+	assert.equal(r.budgetReserved, true, "the container ran, so the record marks possible spend");
 });
 
 test("an authenticated agent cancellation ends as agent-cancel and never creates a human touch (#766)", async () => {
@@ -310,7 +282,7 @@ test("exit 2 with the runner's provider-auth-refused reason returns that reason,
 	assert.equal(r.outcome, "policy", "a determinate refusal RETURNS: never retried (CONST-RETRY-INFRA-ONLY)");
 	assert.equal(r.reason, "provider-auth-refused");
 	assert.equal(r.exitCode, 2);
-	assert.equal(r.budgetReserved, true, "the container ran; the slot stays counted as runner-policy's does");
+	assert.equal(r.budgetReserved, true, "the container ran, so the record marks possible spend");
 	assert.equal(posted.length, 1, "exactly one comment per terminal");
 	assert.equal(posted[0], "Stopped: the AI provider refused this worker's credentials or access (an authentication or permission error). The operator needs to check the provider key and what it is allowed to use. Not retried.");
 	assert.match(posted[0], /Not retried\./);
@@ -445,7 +417,7 @@ test("a confirmed OOM (signed supervisor line + unbidden 137) RETURNS policy oom
 	assert.equal(r.reason, EXIT_OOM_KILLED);
 	assert.equal(EXIT_OOM_KILLED, "oom-killed");
 	assert.equal(r.exitCode, 137);
-	assert.equal(r.budgetReserved, true, "the container ran: its slot is spent like any paid stop");
+	assert.equal(r.budgetReserved, true, "the container ran: it is a paid stop");
 	assert.deepEqual(r.resources, USED);
 	assert.deepEqual(posted, [TERMINAL_COMMENTS["oom-killed"]]);
 	assert.ok(logged.some(([e, f]) => e === "container_exit" && f.oomKilled === true));
@@ -776,16 +748,11 @@ test("the unconfigured-provider refusal publishes no filesystem path", async () 
 	assert.deepEqual(Object.keys(line.fields), ["provider"], "the provider, and nothing that carries a message");
 });
 
-test("a config throw that lands AFTER the reserve releases BOTH ledgers and returns policy, never retried", async () => {
-	// The backstop half. The gate above catches the provider case for free, but any other config-tagged
-	// throw can still land post-reserve (an unknown forge kind inside buildContainerEnv, a prepare-time
-	// refusal), and those kept their slot forever: the catch released only InfraRetry/container-never-started
-	// and everything else fell to a bare rethrow. No container started, so refunding is right, and it is the
-	// same both-or-neither pair as container-never-started.
-	const redis = keyedRedis();
-	const { deps: d } = deps({
-		redis,
-		scopedLedgers: asLedgers(SCOPED),
+test("a config throw before the container returns policy config-refused, never retried", async () => {
+	// The gate above catches the provider case for free, but any other config-tagged throw can still land
+	// pre-container (an unknown forge kind inside buildContainerEnv, a prepare-time refusal). No container
+	// started, so the token hold (if one was taken) is released and the result RETURNS (CONST-RETRY-INFRA-ONLY).
+	const { deps: d, calls } = deps({
 		runContainer: async () => {
 			const e = new Error("githubToken set for an unknown forge kind");
 			e.piDispatchConfig = true;
@@ -795,22 +762,16 @@ test("a config throw that lands AFTER the reserve releases BOTH ledgers and retu
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy", "a determinate refusal RETURNS (CONST-RETRY-INFRA-ONLY)");
 	assert.equal(r.reason, "config-refused");
-	assert.equal(r.budgetReserved, false, "the slot was given back, so the record must not claim one is held");
-	// The STORE, not `get`: keyedRedis's `get` is a stub for the token-cap read and always answers null.
-	assert.equal(redis.store.get(G_DAY), 0, "the global ledger is back where it started: INCR then DECR");
-	assert.equal(redis.store.get(S_DAY), 0, "and so is the scoped one: both or neither");
+	assert.equal(r.budgetReserved, false, "no job-count slot exists to hold");
+	assert.ok(!calls.includes("run-container"));
 });
 
-test("a config throw AFTER a container ran keeps its slot and is NOT declared free", async () => {
-	// The discriminator. Every config-tagged throw site today is pre-container, so this asserts a property
-	// rather than a bug: a config error raised after a paid run must not refund a slot the container really
-	// spent, and must not post "nothing was spent" to the issue. Without `containerRan` the classifier's own
-	// justification would be a claim about where those throws happen to live.
-	const redis = keyedRedis();
+test("a config throw AFTER a container ran is NOT declared free", async () => {
+	// Every config-tagged throw site today is pre-container, so this asserts a property rather than a bug:
+	// a config error raised after a paid run must not post "nothing was spent" to the issue. Without
+	// `containerRan` the classifier's own justification would be a claim about where those throws happen to live.
 	let posted = "";
 	const { deps: d } = deps({
-		redis,
-		scopedLedgers: asLedgers(SCOPED),
 		collectChain: async () => {
 			const e = new Error("config fault raised after the container ran");
 			e.piDispatchConfig = true;
@@ -821,107 +782,43 @@ test("a config throw AFTER a container ran keeps its slot and is NOT declared fr
 		},
 	});
 	await assert.rejects(() => runJob(ghJob, d), /after the container ran/, "it falls through to the untagged path");
-	assert.equal(redis.store.get(G_DAY), 1, "the container spent, so its global slot stays spent");
-	assert.equal(redis.store.get(S_DAY), 1, "and so does the scoped one");
 	assert.equal(/nothing was spent|misconfigured/.test(posted), false, "and nothing claims the run was free");
 });
 
-test("a release that fails during a config refusal does not mask it, and the record says the slot is still out", async () => {
-	// releaseBudget is a loop of DECRs and can reject part way (a read-only replica, a dropped connection).
-	// Unguarded, the Redis error replaced the refusal: the operator was told their queue was broken when
-	// their deployment was misconfigured, and the escaping error was untagged so it was not retried either.
-	const redis = keyedRedis();
-	redis.decr = async () => {
-		const e = new Error("READONLY You can't write against a read only replica.");
-		e.code = "READONLY";
-		throw e;
-	};
-	const { deps: d } = deps({
-		redis,
-		runContainer: async () => {
-			const e = new Error("githubToken set for an unknown forge kind");
-			e.piDispatchConfig = true;
-			throw e;
-		},
-	});
-	const r = await runJob(ghJob, d);
-	assert.equal(r.reason, "config-refused", "the determinate refusal survives the failed refund");
-	assert.equal(r.budgetReserved, true, "and the record admits the slot was NOT given back");
-});
-
-test("a config throw from inside a refusal branch cannot double-release the scoped ledger", async () => {
-	// The over-budget arm releases the scoped slot and then returns, so the flag and the ledger have to be
-	// cleared together: the config classifier below releases on a whole CLASS of error rather than one
-	// reason, and releaseBudget is a floorless DECR. Unreachable in the shipped wiring, where `comment` is
-	// non-throwing by construction, which is exactly why the invariant lives at the release rather than in
-	// the guard of every future reader. Measured before the flag was cleared: the scoped key reached -1.
-	const redis = keyedRedis({ [G_DAY]: 10 }); // the global day cap is 10, so the next reserve is over
-	const { deps: d } = deps({
-		redis,
-		scopedLedgers: asLedgers(SCOPED),
-		comment: async () => {
-			const e = new Error("config fault raised while refusing");
-			e.piDispatchConfig = true;
-			throw e;
-		},
-	});
-	const r = await runJob(ghJob, d);
-	assert.equal(r.reason, "config-refused");
-	assert.equal(redis.store.get(S_DAY), 0, "released exactly once: a second DECR would make this -1");
-	assert.ok(redis.store.get(S_DAY) >= 0, "no ledger may go negative");
-});
-
-test("a NON-config throw after the reserve still keeps its slot and still throws", async () => {
+test("a NON-config throw still throws and is not turned into a refusal", async () => {
 	// The boundary. Only the tagged class is a policy return; an untagged throw is our bug or a real fault
 	// and index.mjs turns it into an UnrecoverableError, exactly as before. A classifier that swallowed
 	// everything would convert every defect in this function into a silent clean refusal.
-	const redis = fakeRedis();
 	const { deps: d } = deps({
-		redis,
 		runContainer: async () => {
 			throw new Error("container boom");
 		},
 	});
 	await assert.rejects(() => runJob(ghJob, d), /container boom/);
-	assert.equal(redis.decrCalls, 0, "an untagged throw releases nothing");
 });
 
-test("container-never-started (spawn fault) after reserving RELEASES the slot, still throws InfraRetry", async () => {
-	const redis = fakeRedis();
+test("container-never-started (spawn fault) still throws InfraRetry with budgetReserved false", async () => {
 	const { deps: d } = deps({
-		redis,
 		runContainer: async () => {
 			throw new InfraRetry("container-never-started", { reason: "container-never-started" });
 		},
 	});
 	await assert.rejects(
 		() => runJob(ghJob, d),
-		(e) => e instanceof InfraRetry && e.reason === "container-never-started",
+		(e) => e instanceof InfraRetry && e.reason === "container-never-started" && e.budgetReserved === false,
 	);
-	assert.equal(redis.decrCalls, 1, "releaseBudget gives the slot back exactly once -- no double-release");
 });
 
-test("exit-1 infra retry KEEPS the slot -- the container ran and spent, so no release", async () => {
-	const redis = fakeRedis();
-	const { deps: d } = deps({ redis, runContainer: async () => ({ code: 1, aborted: false }) });
-	await assert.rejects(() => runJob(ghJob, d), InfraRetry);
-	assert.equal(redis.decrCalls, 0, "a container that ran must not get its slot back");
-});
-
-test("a DETACHED run keeps its slot and retries as container-detached, never refunded as never-started (#345)", async () => {
-	const redis = fakeRedis();
+test("a DETACHED run retries as container-detached, never as never-started (#345)", async () => {
 	const logged = [];
-	const { deps: d } = deps({ redis, runContainer: async () => ({ code: 125, aborted: false, detached: true }), log: (event, fields) => logged.push([event, fields]) });
+	const { deps: d } = deps({ runContainer: async () => ({ code: 125, aborted: false, detached: true }), log: (event, fields) => logged.push([event, fields]) });
 	await assert.rejects(
 		() => runJob(ghJob, d),
 		(e) => e instanceof InfraRetry && e.reason === "container-detached" && e.exitCode === 125 && e.budgetReserved === true,
 	);
-	assert.equal(redis.decrCalls, 0, "the container started, so the slot stays spent even though 125 is a never-started code");
 	assert.ok(logged.some(([e, f]) => e === "container_exit" && f.detached === true));
-	const plain = fakeRedis();
-	const { deps: never } = deps({ redis: plain, runContainer: async () => ({ code: 125, aborted: false }) });
+	const { deps: never } = deps({ runContainer: async () => ({ code: 125, aborted: false }) });
 	await assert.rejects(() => runJob(ghJob, never), (e) => e.reason === "container-never-started");
-	assert.equal(plain.decrCalls, 1, "without detached the same exit is still refunded");
 });
 
 test("InfraRetry back-compat: message-only ctor keeps piDispatchRetry and defaults reason to the message", () => {
@@ -947,15 +844,6 @@ test("a completed return carries exitCode/turns from the container and budgetRes
 	assert.equal(r.budgetReserved, true);
 });
 
-test("an over-budget return carries null exit/turns but budgetReserved true (slot kept)", async () => {
-	const { deps: d } = deps({ redis: fakeRedis(10) });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.reason, "over-budget");
-	assert.equal(r.exitCode, null);
-	assert.equal(r.turns, null);
-	assert.equal(r.budgetReserved, true);
-});
-
 test("an unprotected-branch return carries null exit/turns and budgetReserved false (pre-reserve)", async () => {
 	const { deps: d } = deps({ isDefaultBranchProtected: async () => false });
 	const r = await runJob(ghJob, d);
@@ -965,7 +853,7 @@ test("an unprotected-branch return carries null exit/turns and budgetReserved fa
 	assert.equal(r.budgetReserved, false);
 });
 
-test("an exit-1 infra throw stamps exitCode/turns and budgetReserved true (container ran and spent)", async () => {
+test("an exit-1 infra throw stamps exitCode/turns and budgetReserved false (no job-count slot exists)", async () => {
 	const { deps: d } = deps({ runContainer: async () => ({ code: 1, aborted: false, turns: 4 }) });
 	await assert.rejects(
 		() => runJob(ghJob, d),
@@ -1020,7 +908,7 @@ test("collectChain counts are additive telemetry: they never alter the completed
 	assert.equal(r.chainRefused, 3);
 });
 
-test("collectChain runs ONLY on the completed branch, never on policy / abort / infra / over-budget", async () => {
+test("collectChain runs ONLY on the completed branch, never on policy / abort / infra / token-cap", async () => {
 	// EXIT_POLICY (runner-policy, container exit 2)
 	{
 		const { deps: d, calls } = deps({ runContainer: async () => (calls.push("run-container"), { code: 2, aborted: false }) });
@@ -1040,11 +928,11 @@ test("collectChain runs ONLY on the completed branch, never on policy / abort / 
 		await runJob(ghJob, d).catch(() => {});
 		assert.ok(!calls.includes("collect-chain"), "an infra retry must not chain -- it re-runs");
 	}
-	// over-budget (policy, pre-container)
+	// token-cap (policy, pre-container)
 	{
-		const { deps: d, calls } = deps({ redis: fakeRedis(10) });
+		const { deps: d, calls } = deps({ redis: fakeRedis(0, 2000), tokenCaps: { day: 1500, week: null, month: null } });
 		await runJob(ghJob, d);
-		assert.ok(!calls.includes("collect-chain"), "over-budget must not chain");
+		assert.ok(!calls.includes("collect-chain"), "a token-cap refusal must not chain");
 	}
 	// unprotected-branch (policy, pre-container)
 	{
@@ -1054,19 +942,19 @@ test("collectChain runs ONLY on the completed branch, never on policy / abort / 
 	}
 });
 
-// ---- daily token cap (issue #25): check-BEFORE reserveBudget, record-AFTER the container ----
+// ---- daily token cap (issue #25): reserve BEFORE the container, record AFTER it ----
 
-test("a full day window refuses token-cap AFTER the job-count reserve -- the slot is refunded, nothing burned", async () => {
-	// CONST-BUDGET-BEFORE-TOKENS: the job-count slot reserves first, the token windows reserve second, and a
-	// window's refusal refunds the slot it holds. Nothing burns: the counter ends where it started.
+test("a full day window refuses token-cap -- every token key it touched is given back, nothing burned", async () => {
+	// CONST-BUDGET-BEFORE-TOKENS: the token windows reserve before the container, and a refusal gives back
+	// every key it touched (the token ledgers' own rule, token-budget.mjs). There is no job-count slot any more.
 	const redis = fakeRedis(0, 2000);
 	const { deps: d, calls } = deps({ redis, tokenCaps: { day: 1500, week: null, month: null } });
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
 	assert.equal(r.reason, "token-cap");
-	assert.equal(r.budgetReserved, false, "a token-cap refusal consumes no job-count slot");
-	assert.equal(redis.incrCalls, 1, "the slot was taken");
-	assert.equal(redis.decrCalls, 1, "and given back");
+	assert.equal(r.budgetReserved, false, "no job-count slot exists to hold");
+	assert.equal(redis.incrCalls, 0, "no job-count counter is ever touched");
+	assert.equal(redis.decrCalls, 0);
 	assert.equal(redis.store.get("budget:tok:2026-07-16"), 2000, "the window holds the preset, its own add given back");
 	assert.ok(!calls.includes("run-container"), "no container, no provider spend");
 });
@@ -1374,46 +1262,40 @@ test("an unreachable docker daemon at preflight THROWS InfraRetry (transient), n
 	assert.ok(!calls.includes("run-container"));
 });
 
-test("docker exits 125/126/127 throw container-never-started and RELEASE the slot", async () => {
+test("docker exits 125/126/127 throw container-never-started with budgetReserved false", async () => {
 	// docker never handed control to the runner in any of the three, so nothing was spent. These used to
-	// fall to the unknown-exit branch, which KEPT the slot and retried -- burning a second one.
+	// fall to the unknown-exit branch, which retried as if it might have spent.
 	for (const code of [125, 126, 127]) {
-		const redis = fakeRedis();
-		const { deps: d } = deps({ redis, runContainer: async () => ({ code, aborted: false }) });
+		const { deps: d } = deps({ runContainer: async () => ({ code, aborted: false }) });
 		await assert.rejects(
 			() => runJob(ghJob, d),
 			(e) => e instanceof InfraRetry && e.reason === "container-never-started" && e.budgetReserved === false,
 			`exit ${code} means the container never ran`,
 		);
-		assert.equal(redis.decrCalls, 1, `exit ${code} gives the slot back exactly once`);
 	}
 });
 
-test("an unrecognised container exit still falls to the unknown-exit InfraRetry and KEEPS its slot", async () => {
+test("an unrecognised container exit still falls to the unknown-exit InfraRetry", async () => {
 	// Pins that the 125/126/127 case NARROWED `default:` rather than replacing it: a code we did not foresee
-	// means the container may well have run and spent, so its slot stays reserved.
-	const redis = fakeRedis();
-	const { deps: d } = deps({ redis, runContainer: async () => ({ code: 42, aborted: false }) });
+	// means the container may well have run and spent, so it is a retryable infra fault rather than a refusal.
+	const { deps: d } = deps({ runContainer: async () => ({ code: 42, aborted: false }) });
 	await assert.rejects(
 		() => runJob(ghJob, d),
 		(e) => e instanceof InfraRetry && /unknown container exit 42/.test(e.message) && e.reason === CONTAINER_EXIT_UNKNOWN && e.budgetReserved === true,
 	);
-	assert.equal(redis.decrCalls, 0, "an unknown exit is not assumed to have spent nothing");
 });
 
 test("a CONTAINER exiting 3 is still unrecognised -- the wait participant's hold code is not shared", async () => {
 	// Issue #230 gave exit 3 a meaning ("not yet, ask again later") for the WAIT PARTICIPANT only. That
 	// widening is per-participant by construction, and this is the pin that keeps it so: a container has no
-	// way to say "hold me", so a 3 from one is still a code we cannot reason about, still infra-retryable,
-	// and still holding its budget slot. If this test ever goes green on a `policy` or a deferral, the
-	// protocol amendment leaked into the classifier it promised not to touch.
-	const redis = fakeRedis();
-	const { deps: d } = deps({ redis, runContainer: async () => ({ code: 3, aborted: false }) });
+	// way to say "hold me", so a 3 from one is still a code we cannot reason about, still infra-retryable.
+	// If this test ever goes green on a `policy` or a deferral, the protocol amendment leaked into the
+	// classifier it promised not to touch.
+	const { deps: d } = deps({ runContainer: async () => ({ code: 3, aborted: false }) });
 	await assert.rejects(
 		() => runJob(ghJob, d),
 		(e) => e instanceof InfraRetry && /unknown container exit 3/.test(e.message) && e.reason === CONTAINER_EXIT_UNKNOWN && e.budgetReserved === true,
 	);
-	assert.equal(redis.decrCalls, 0, "and no refund, exactly as for any other unrecognised code");
 });
 
 test("a completed run promotes its transcript; a policy or infra exit does NOT", async () => {
@@ -2312,138 +2194,17 @@ test("the default admits everything: a once job under a deps set WITHOUT checkOn
 	assert.ok(calls.includes("run-container"), "the job runs; once-enforcement is the wired deployment's property");
 });
 
-// ── scoped budget windows (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT) ─────────────────────────────
+// ── the removed job-count windows leave no key behind ──────────────────────────────────────────────────
 
-/**
- * A KEYED fake redis (budget.test.mjs's shape), because the whole point of these tests is that the
- * scoped `budget:s:<h16>:*` keys and the global `budget:*` keys move independently -- the
- * single-counter fake above cannot express that.
- */
-function keyedRedis(preset = {}) {
-	const store = new Map(Object.entries(preset));
-	return {
-		store,
-		async incr(k) {
-			const v = (store.get(k) ?? 0) + 1;
-			store.set(k, v);
-			return v;
-		},
-		async decr(k) {
-			const v = (store.get(k) ?? 0) - 1;
-			store.set(k, v);
-			return v;
-		},
-		async expire() {},
-		async get() {
-			return null;
-		},
-	};
-}
-
-// deps()'s clock is 2026-07-16, so the day keys are fixed strings the assertions can pin.
-const G_DAY = "budget:2026-07-16";
-const S_PREFIX = scopeKeyPrefix("org/repo");
-const S_DAY = `${S_PREFIX}:2026-07-16`;
-const SCOPED = { scope: "org/repo", caps: { day: 1, week: null, month: null } };
-
-test("scope-cap: the scoped window refuses PRE-SPEND with the global ledger untouched and its own count kept", async () => {
-	const redis = keyedRedis({ [S_DAY]: 1 }); // the scope already spent its day: 1
-	const logs = [];
-	const comments = [];
-	const { deps: d } = deps({ redis, scopedLedgers: asLedgers(SCOPED), log: (e, f) => logs.push({ e, f }), comment: async (_j, t) => comments.push(t) });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.outcome, "policy");
-	assert.equal(r.reason, "scope-cap");
-	assert.equal(r.budgetReserved, false, "budgetReserved stays GLOBAL-only: the global slot was never touched");
-	assert.equal(redis.store.get(S_DAY), 2, "the scoped INCR is kept -- refused-still-counts, per ledger");
-	assert.equal(redis.store.has(G_DAY), false, "the global key was never created, let alone incremented");
-	assert.equal(comments[0], "Over the day run cap for org/repo (1). Not run.");
-	const scoped = logs.find((l) => l.e === "over_scope_budget");
-	assert.deepEqual(scoped.f, { scopeKey: S_PREFIX, window: "day", reserved: 2, cap: 1, kind: "forge" });
-	assert.ok(!JSON.stringify(scoped.f).includes("org/repo"), "the raw scope never rides the log line");
-});
-
-test("a GLOBAL refusal after a scoped reserve RELEASES the scoped slot -- a storm cannot drain a scope's windows", async () => {
-	const redis = keyedRedis({ [G_DAY]: 10 }); // the global day cap (10) is already exhausted
-	const { deps: d } = deps({ redis, scopedLedgers: asLedgers({ scope: "org/repo", caps: { day: 5, week: null, month: null } }) });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.reason, "over-budget", "the global window is what refused");
-	assert.equal(r.budgetReserved, true, "the global refused-reservation still counts, as ever");
-	assert.equal(redis.store.get(S_DAY), 0, "the scoped reserve was given back: INCR then DECR, net zero");
-	assert.equal(redis.store.get(G_DAY), 11, "the global counter keeps its refused reservation");
-});
-
-test("container-never-started refunds BOTH ledgers; a container that ran refunds NEITHER", async () => {
-	// exit 125: docker spawn fault -> refund both.
-	{
-		const redis = keyedRedis();
-		const { deps: d } = deps({ redis, scopedLedgers: asLedgers(SCOPED), runContainer: async () => ({ code: 125, aborted: false }) });
-		await assert.rejects(() => runJob(ghJob, d), (e) => e.reason === "container-never-started");
-		assert.equal(redis.store.get(S_DAY), 0, "scoped slot refunded");
-		assert.equal(redis.store.get(G_DAY), 0, "global slot refunded");
-	}
-	// exit 1: the container RAN and spent -> both slots stay spent through the infra retry.
-	{
-		const redis = keyedRedis();
-		const { deps: d } = deps({ redis, scopedLedgers: asLedgers(SCOPED), runContainer: async () => ({ code: 1, aborted: false }) });
-		await assert.rejects(() => runJob(ghJob, d), (e) => e instanceof InfraRetry && e.reason !== "container-never-started");
-		assert.equal(redis.store.get(S_DAY), 1, "scoped slot kept -- the run spent real money");
-		assert.equal(redis.store.get(G_DAY), 1, "global slot kept");
-	}
-});
-
-test("softHoldPct is GLOBAL-only: a scoped window deep inside what would be its band still admits", async () => {
-	// Scoped day 8/10 spent = 80%, inside a 50% hold band IF the band applied to scoped windows. It must
-	// not: scoped windows are hard caps (DES-SCOPED-LIMITS-AND-FOLDER-MUTEX).
-	const redis = keyedRedis({ [S_DAY]: 8 });
-	const { deps: d } = deps({ redis, softHoldPct: 50, caps: { day: 100, week: null, month: null }, scopedLedgers: asLedgers({ scope: "org/repo", caps: { day: 10, week: null, month: null } }) });
-	const r = await runJob(ghJob, d);
-	assert.equal(r.outcome, "completed", "the scoped window has no soft-hold band");
-});
-
-test("byte-identity: a run with no scopedLedgers creates exactly the pre-#242 key set -- no budget:s: key ever", async () => {
-	const redis = keyedRedis();
-	const { deps: d } = deps({ redis }); // scopedLedgers takes its empty default
+test("no run touches a job-count key: the budget:s: namespace is never written", async () => {
+	const redis = fakeRedis();
+	const { deps: d } = deps({ redis });
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "completed");
-	assert.deepEqual([...redis.store.keys()], [G_DAY], "key for key, the store is what it was before #242");
+	assert.deepEqual(redis.ops.filter(([, k]) => typeof k === "string" && k.startsWith("budget:s:")), [], "no scoped count key");
+	assert.deepEqual(redis.ops.filter(([, k]) => typeof k === "string" && /^budget:\d/.test(k)), [], "no global count key");
 });
 
-test("a LOCAL scope-cap keeps the folder path out of the comment text too -- the local adapter LOGS it", async () => {
-	// start.mjs's forgeFor has no `local` entry, so the wiring's comment adapter falls through to
-	// log("comment", { jobId, text }) -- the text reaches the worker log and must be path-free.
-	const localScoped = { scope: "/Users/someone/work/site", caps: { day: 1, week: null, month: null } };
-	const sPrefix = scopeKeyPrefix("/Users/someone/work/site");
-	const redis = keyedRedis({ [`${sPrefix}:2026-07-16`]: 1 });
-	const comments = [];
-	const logs = [];
-	const { deps: d } = deps({ redis, scopedLedgers: asLedgers(localScoped), comment: async (_j, t) => comments.push(t), log: (e, f) => logs.push({ e, f }) });
-	const localJob = { kind: "local", folder: "/Users/someone/work/site", flow: "tidy", provider: "anthropic", model: "m" };
-	const r = await runJob(localJob, d);
-	assert.equal(r.reason, "scope-cap");
-	assert.equal(comments[0], "Over the day run cap for this folder (1). Not run.");
-	assert.ok(!comments[0].includes("/Users/"), "the host path never enters the comment text");
-	assert.ok(!JSON.stringify(logs).includes("/Users/someone"), "and never any log field");
-});
-
-test("issue #498: a day: 1 row on forgejo:acme/web refuses the second Forgejo job, the GitHub job reserves, and one budget:s: key moved", async () => {
-	const limits = parseScopedLimits(JSON.stringify({ version: 2, limits: [{ scope: "forgejo:acme/web", day: 1 }] }), "sl.json");
-	const fj = { kind: "forgejo", repo: "acme/web", provider: "anthropic", model: "m", maxTurns: 20 };
-	const gh = { kind: "github", repo: "acme/web", provider: "anthropic", model: "m", maxTurns: 20 };
-	const redis = keyedRedis();
-	const comments = [];
-	// deps() pins `now` (2026-07-16), so every key below is a fixed string.
-	const run = (job) => runJob(job, deps({ redis, scopedLedgers: asLedgers(budgetCapsFor(job, limits)), comment: async (_j, t) => comments.push(t) }).deps);
-	assert.equal((await run(fj)).outcome, "completed");
-	const refused = await run(fj);
-	assert.equal(refused.reason, "scope-cap");
-	assert.equal(comments.at(-1), "Over the day run cap for acme/web (1). Not run.", "the comment names the repo without the forge prefix");
-	assert.equal((await run(gh)).outcome, "completed", "the GitHub job for the same repo is not capped by the Forgejo row");
-	const scopedKeys = [...redis.store.keys()].filter((k) => k.startsWith("budget:s:"));
-	assert.deepEqual(scopedKeys, [`${scopeKeyPrefix("forgejo:acme/web")}:2026-07-16`], "exactly one scoped key, the ROW's");
-	assert.equal(redis.store.get(scopedKeys[0]), 2, "both Forgejo jobs counted, the refused one included");
-	assert.equal(redis.store.get(G_DAY), 2, "the global ledger saw the two jobs that ran");
-});
 
 // --- issue #341: the job-user gate ------------------------------------------------------------------------------
 

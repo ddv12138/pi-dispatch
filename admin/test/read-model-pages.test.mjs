@@ -1087,7 +1087,7 @@ test("createFleetReader: a readOnly snapshot issues no Valkey write, where the T
 
 // --- the overview's day and the registry's clock fields (issue #737) ---------------------------------------------------
 
-test("createFleetReader: the day's runs, today's settled spend per UTC hour and today's soft-hold refusals, off the wide window, each value re-checked (#737)", async () => {
+test("createFleetReader: the day's runs and today's settled spend per UTC hour, off the wide window, each value re-checked (#737)", async () => {
   const logsDir = tempDir("pd-737-day-");
   const HOUR = 60 * MIN;
   const settled = (settledTokens) => ({ reservedTokens: settledTokens, settledTokens, basis: "metered", modelBasis: null });
@@ -1112,13 +1112,12 @@ test("createFleetReader: the day's runs, today's settled spend per UTC hour and 
   hours[11] = 1_500_000;
   hours[10] = 250_000;
   assert.deepEqual(snap.spendByHour, { hours, unpriced: 3, floor: false, partial: false }, "hour 12 is now (0 so far), the hours after it null; three of today's runs carry no settled amount");
-  assert.deepEqual(snap.softHoldToday, { count: 1, floor: false, partial: false }, "today's soft hold up to now, not yesterday's, nor one dated ahead of the clock");
   // A wide window that cannot be read is not an empty day.
   const fs = { ...nodeFs, readdirSync: (p, ...rest) => (p === logsDir ? { [Symbol.iterator]() { throw new Error("index walk failed"); } } : nodeFs.readdirSync(p, ...rest)) };
   const down = await fleetOf(logsDir, emptyRedis(), { seams: { fs } }).snapshot();
-  assert.deepEqual([down.runsDay, down.spendByHour, down.softHoldToday], [null, null, null]);
+  assert.deepEqual([down.runsDay, down.spendByHour], [null, null]);
   const blind = await fleetOf(logsDir, emptyRedis({ mirrorDown: true })).snapshot();
-  assert.deepEqual([blind.runsDay.partial, blind.spendByHour.partial, blind.softHoldToday.partial], [true, true, true], "the mirror unread: partial");
+  assert.deepEqual([blind.runsDay.partial, blind.spendByHour.partial], [true, true], "the mirror unread: partial");
 });
 
 test("createFleetReader: a full wide window that ends inside a span makes that span's fold a floor (#737)", async () => {
@@ -1128,11 +1127,11 @@ test("createFleetReader: a full wide window that ends inside a span makes that s
   for (let i = 0; i < 1000; i += 1) writeLocal(logsDir, rec(`r${i}`, AT - i * MIN));
   const snap = await fleetOf(logsDir, emptyRedis()).snapshot();
   assert.equal(snap.runsDay.runs.length, 1000);
-  assert.deepEqual([snap.runsDay.floor, snap.spendByHour.floor, snap.softHoldToday.floor], [true, false, false]);
+  assert.deepEqual([snap.runsDay.floor, snap.spendByHour.floor], [true, false]);
   const today = tempDir("pd-737-day-floor-today-");
   for (let i = 0; i < 1000; i += 1) writeLocal(today, rec(`t${i}`, AT - i * 30_000));
   const full = await fleetOf(today, emptyRedis()).snapshot();
-  assert.deepEqual([full.runsDay.floor, full.spendByHour.floor, full.softHoldToday.floor], [true, true, true], "all 1000 inside today: every fold a floor");
+  assert.deepEqual([full.runsDay.floor, full.spendByHour.floor], [true, true], "all 1000 inside today: every fold a floor");
 });
 
 test("createFleetReader: each host row carries the registry's ttlAgeMs, skewMs and noExpiry, re-checked; hostsReadAt is the last good read (#737)", async () => {

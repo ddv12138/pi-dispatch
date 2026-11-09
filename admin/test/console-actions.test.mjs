@@ -173,7 +173,7 @@ function deployment(valkeyUrl = "redis://127.0.0.1:1/0") {
   json(paths.triggersPath, { triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "triage", secrets: { TOKEN: "op://vault/secret-ref-canary" } } }] });
   json(paths.settingsFile, { maxTurns: 30, maxTokens: 2000000 });
   json(paths.pauseWindowsPath, { windows: [{ scope: "*", from: "01:00", to: "02:00" }] });
-  json(paths.scopedLimitsPath, { version: 1, limits: [{ scope: "acme/web", day: 10 }] });
+  json(paths.scopedLimitsPath, { version: 1, limits: [{ scope: "acme/web", concurrent: 10 }] });
   json(paths.projectsFile, { version: 1, projects: [{ id: "web", members: ["github:acme/web"] }] });
   return { dir, paths };
 }
@@ -521,7 +521,7 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
     // An empty `run.secrets {}` names no reference, so the diff hides nothing and the plain delete sentence holds.
     ["trigger-delete", { beforeText: json({ triggers: [{ run: { flow: "triage", secrets: {} } }] }), plan: { index: 0 } }, DEL, null, "Delete trigger row 1", "Deleted trigger row 1"],
     ["setting-set", { beforeText: json({ maxTurns: 30 }), plan: { key: "maxTurns", value: 40 } }, twice("Set maxTurns back to 30"), { action: "setting-set", body: { key: "maxTurns", value: "30" } }, "Confirm", "Changed maxTurns from 30 to 40"],
-    ["setting-set", { beforeText: json({}), plan: { key: "dailyCap", value: 5 } }, twice("Unset dailyCap again"), { action: "setting-unset", body: { key: "dailyCap" } }, "Confirm", "Set dailyCap to 5"],
+    ["setting-set", { beforeText: json({}), plan: { key: "dailyTokenCap", value: 5 } }, twice("Unset dailyTokenCap again"), { action: "setting-unset", body: { key: "dailyTokenCap" } }, "Confirm", "Set dailyTokenCap to 5"],
     // An old value this form cannot send back (an empty string, an object): no inverse, so no Undo that refuses itself.
     ["setting-set", { beforeText: json({ model: "" }), plan: { key: "model", value: "m2" } }, twice("Set model back by hand: its old value is not one this form can send."), null, "Confirm", "Changed model to m2"],
     ["setting-set", { beforeText: json({ maxTurns: { n: 1 } }), plan: { key: "maxTurns", value: 40 } }, twice("Set maxTurns back by hand: its old value is not one this form can send."), null, "Confirm", "Changed maxTurns to 40"],
@@ -538,7 +538,7 @@ test("each action's Undo, inverse, confirm label and banner title, as literals o
     ["pause-window-edit", { plan: { index: 0, before: null, entry: windows } }, ["Edit pause window row 1 back by hand: this preview's diff shows what it said.", "Edit pause window row 1 back by hand: the console kept no copy of what it said."], null, "Confirm", "Edited pause window row 1"],
     ["pause-window-delete", { plan: { index: 0 } }, DEL, null, "Delete pause window row 1", "Deleted pause window row 1"],
     ["limit-add", { beforeText: json({ limits: [{ scope: "a" }] }) }, twice("Delete scoped limit row 2"), { action: "limit-delete", body: { index: 1 } }, "Confirm", "Added scoped limit row 2"],
-    ["limit-edit", { plan: { index: 0, before: { scope: "a", day: 1 }, entry: { scope: "a", day: 2 } } }, twice("Edit scoped limit row 1 back to what it said"), { action: "limit-edit", body: { index: 0, limit: { scope: "a", day: 1 } } }, "Confirm", "Edited scoped limit row 1"],
+    ["limit-edit", { plan: { index: 0, before: { scope: "a", concurrent: 1 }, entry: { scope: "a", concurrent: 2 } } }, twice("Edit scoped limit row 1 back to what it said"), { action: "limit-edit", body: { index: 0, limit: { scope: "a", concurrent: 1 } } }, "Confirm", "Edited scoped limit row 1"],
     ["limit-delete", { plan: { index: 0 } }, DEL, null, "Delete scoped limit row 1", "Deleted scoped limit row 1"],
     ["project-add", { plan: { added: { id: "api" } } }, twice("Delete project api"), { action: "project-delete", body: { id: "api" } }, "Confirm", "Added project api"],
     ["project-edit", { plan: { before: { id: "web", members: ["github:acme/web"] } } }, twice("Edit project web back to what it said"), { action: "project-edit", body: { id: "web", name: "", members: ["github:acme/web"] } }, "Confirm", "Edited project web"],
@@ -693,8 +693,8 @@ const FILE_CASES = [
   ["pause-window-add", { scope: "acme/web", from: "22:00", to: "23:00", days: ["sat"] }, "pauseWindowsPath", (j) => j.windows.length === 2 && j.windows[1].days[0] === "sat"],
   ["pause-window-edit", { index: 0, to: "03:00" }, "pauseWindowsPath", (j) => j.windows[0].to === "03:00" && j.windows[0].from === "01:00"],
   ["pause-window-delete", { index: 0 }, "pauseWindowsPath", (j) => j.windows.length === 0],
-  ["limit-add", { limit: { scope: "acme/api", day: 5 } }, "scopedLimitsPath", (j) => j.limits.length === 2 && j.limits[1].day === 5],
-  ["limit-edit", { index: 0, limit: { day: 20 } }, "scopedLimitsPath", (j) => j.limits[0].day === 20],
+  ["limit-add", { limit: { scope: "acme/api", concurrent: 5 } }, "scopedLimitsPath", (j) => j.limits.length === 2 && j.limits[1].concurrent === 5],
+  ["limit-edit", { index: 0, limit: { concurrent: 20 } }, "scopedLimitsPath", (j) => j.limits[0].concurrent === 20],
   ["limit-delete", { index: 0 }, "scopedLimitsPath", (j) => j.limits.length === 0],
   ["project-add", { id: "api", members: "github:acme/api" }, "projectsFile", (j) => j.projects.some((p) => p.id === "api")],
   ["project-edit", { id: "web", name: "Web shop" }, "projectsFile", (j) => j.projects[0].name === "Web shop"],
@@ -872,7 +872,7 @@ test("the console's Configuration sentences count rows from one, the change in w
   assert.deepEqual(pw.slice(0, 2), ["Edit pause window row 1", "pause window row 1:"]);
   assert.match(pw[3], /^to \{"scope":"\*","from":"01:00","to":"03:00"/, "words, never an arrow");
   assert.equal((await c.act("pause-window-delete", { index: 0 })).json().summary[0], "Delete pause window row 1");
-  assert.equal((await c.act("limit-edit", { index: 0, limit: { day: 20 } })).json().summary[0], "Edit scoped limit row 1");
+  assert.equal((await c.act("limit-edit", { index: 0, limit: { concurrent: 20 } })).json().summary[0], "Edit scoped limit row 1");
   assert.equal((await c.act("limit-delete", { index: 0 })).json().summary[0], "Delete scoped limit row 1");
   // The pi tools' own planners, unchanged: the number a person counts by.
   assert.equal(WP.planTriggerDelete({ index: 0, paths }).plan.title, "Delete trigger #1");
@@ -1386,9 +1386,9 @@ test("the confirm button says what it does: a paid act's most, a destructive act
   // What the file already says, by key and value, the key as code; the answer's summary says it in words.
   assert.equal(same.html, '<div class="confirm confirm--none"><p class="confirm__h"><svg class="ic" aria-hidden="true"><use href="#i-done"></use></svg>No change</p><p class="confirm__note">The file already says this: <span class="code">maxTurns</span> is 40.</p><div class="confirm__act"><button class="btn" type="button" data-close>Close</button></div></div>');
   assert.deepEqual(same.summary, ["the file already says this: maxTurns is 40"]);
-  const unsetSame = await label("setting-unset", { key: "dailyCap" });
-  assert.deepEqual([unsetSame.unchanged, unsetSame.summary], [true, ["the file already says this: dailyCap is not set"]]);
-  assert.ok(unsetSame.html.includes('<p class="confirm__note">The file already says this: <span class="code">dailyCap</span> is not set.</p>'), unsetSame.html);
+  const unsetSame = await label("setting-unset", { key: "dailyTokenCap" });
+  assert.deepEqual([unsetSame.unchanged, unsetSame.summary], [true, ["the file already says this: dailyTokenCap is not set"]]);
+  assert.ok(unsetSame.html.includes('<p class="confirm__note">The file already says this: <span class="code">dailyTokenCap</span> is not set.</p>'), unsetSame.html);
   // Any other file says the general sentence, capitalised with its full stop under the title that says "No change".
   const pausedSame = await label("pause-windows", { windows: [{ scope: "*", from: "01:00", to: "02:00" }] });
   assert.ok(pausedSame.html.includes('<p class="confirm__note">The file already says this.</p>'), pausedSame.html);
@@ -1405,10 +1405,10 @@ test("an Undo is the way back as it was: a key that had no value is unset again,
     return done.change;
   };
   // A key the overlay did not hold: its way back is an unset; a key it held: the value it had.
-  const first = await undoOf("setting-set", { key: "dailyCap", value: "5" });
-  assert.deepEqual([first.undo, first.inverse], ["Unset dailyCap again", { action: "setting-unset", body: { key: "dailyCap" } }]);
-  const second = await undoOf("setting-set", { key: "dailyCap", value: "6" });
-  assert.deepEqual([second.undo, second.inverse], ["Set dailyCap back to 5", { action: "setting-set", body: { key: "dailyCap", value: "5" } }]);
+  const first = await undoOf("setting-set", { key: "dailyTokenCap", value: "5" });
+  assert.deepEqual([first.undo, first.inverse], ["Unset dailyTokenCap again", { action: "setting-unset", body: { key: "dailyTokenCap" } }]);
+  const second = await undoOf("setting-set", { key: "dailyTokenCap", value: "6" });
+  assert.deepEqual([second.undo, second.inverse], ["Set dailyTokenCap back to 5", { action: "setting-set", body: { key: "dailyTokenCap", value: "5" } }]);
   const unset = await undoOf("setting-unset", { key: "maxTokens" });
   assert.deepEqual([unset.undo, unset.inverse], ["Set maxTokens back to 2000000", { action: "setting-set", body: { key: "maxTokens", value: "2000000" } }], "the key's text as it was written");
   const fresh = deployment().paths;
@@ -2589,7 +2589,7 @@ test("retry-failed on Valkey: the preview shows the worker's reserve from the jo
     const p = (await c.act("retry-failed", { jobId: "gh-f1", queue: "pi-jobs" })).json();
     assert.deepEqual(p.reserve, RM.estimateReserve({ kind: "github", repo: "o/r", maxTokens: "1500000", target: { type: "issue", number: 1 } }, { overlay: { maxTurns: 30, maxTokens: 2000000 }, env: {} }));
     assert.equal(p.reserve.tokens, 1_500_000);
-    assert.match(p.html, /1,500,000 tokens \(the per-job cap\)/);
+    assert.match(p.html, /1,500,000 tokens \(the per-job budget\)/);
     const res = await c.confirm("retry-failed", p.ticket);
     assert.equal(res.status, 200, res.text);
     assert.equal(await (await shared.getJob("gh-f1")).getState(), "waiting");
@@ -2701,8 +2701,8 @@ test("rerun on Valkey: the preview shows the reserve; the confirm queues the reb
     const c = await start({ paths });
     const p = (await c.act("rerun", { jobId })).json();
     assert.equal(p.reserve.tokens, 1_250_000);
-    assert.match(p.html, /<p class="confirm__note">It holds 1 job slot and \$1\.25 \(the per-job cap\)/);
-    assert.match(p.html, /It runs as its trigger says now: flow fix; model the deployment&#39;s default; per-job cap \$1\.25/, "the run fields the plan took from the trigger, not the retained job's $9");
+    assert.match(p.html, /<p class="confirm__note">It holds 1 job slot and 1,250,000 tokens \(the per-job budget\)/);
+    assert.match(p.html, /It runs as its trigger says now: flow fix; model the deployment&#39;s default; per-job cap 1250000 tokens/, "the run fields the plan took from the trigger, not the retained job's $9");
     const swallowed = await c.confirm("rerun", p.ticket);
     assert.equal(swallowed.status, 409);
     assert.match(swallowed.json().error, /semantic window/);
@@ -2724,7 +2724,7 @@ test("parked-answer on Valkey: the queued job is the plan's, by the session's to
   const v = await freshValkey();
   try {
     const { paths } = deployment(URL13);
-    writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", resume: true, awaitInput: true } }, { on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", resume: true, awaitInput: true, maxCostUsd: "1.25" } }] }));
+    writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["pi"] }, run: { kind: "github", flow: "fix", resume: true, awaitInput: true } }, { on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", resume: true, awaitInput: true, maxTokens: "1250000" } }] }));
     const shared = await v.q("pi-jobs");
     const parked = { repo: "org/repo", target: { type: "issue", number: 7, title: "Flaky", body: "B" }, flow: "fix", resume: true, awaitInput: true, trigger: { event: "issues", action: "labeled", deliveryId: "p-1", sender: { id: 5 }, matched: { index: 0, type: "label", label: "pi" } } };
     const { jobId } = await enqueueForgeJob(shared, "github", parked);
@@ -3062,7 +3062,7 @@ test("Zero touch real actions bind private-source references, exact instructions
   try {
     const { paths } = deployment(URL13);
     const document = JSON.parse(read(paths.triggersPath));
-    document.zeroTouch = { capture: true, model: "classifier/small", maxCostUsd: "0.01", names: {} };
+    document.zeroTouch = { capture: true, model: "classifier/small", maxTokens: 10000, names: {} };
     writeFileSync(paths.triggersPath, `${JSON.stringify(document, null, 2)}\n`);
     const now = () => T0;
     const scope = "a".repeat(64);
@@ -3208,7 +3208,7 @@ test("agent mutation previews, refusals and receipts do not disclose job labels 
 
 test("agent HTTP limit and trigger transitions enforce narrowing and reject mixed or deferred widening", async () => {
   const { paths } = deployment();
-  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 3, limits: [{ scope: "acme/web", day: 10, week: 30 }, { scope: "project:web", concurrent: 3, hostShare: 70 }] }));
+  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 3, limits: [{ scope: "acme/web", concurrent: 10, dayTokens: 30 }, { scope: "project:web", concurrent: 3, hostShare: 70 }] }));
   writeFileSync(paths.projectsFile, JSON.stringify({ version: 1, projects: [{ id: "web", members: ["github:acme/web"] }, { id: "spare", members: ["github:acme/spare"] }, { id: "sized", members: ["github:acme/sized"] }] }));
   const triggers = JSON.parse(read(paths.triggersPath));
   triggers.triggers[0].run.progress = true;
@@ -3220,14 +3220,14 @@ test("agent HTTP limit and trigger transitions enforce narrowing and reject mixe
     const done = await c.confirm(action, p.json().ticket, agent);
     assert.equal(done.status, 200, done.text);
   };
-  await apply("limit-edit", { index: 0, limit: { day: 8 } });
+  await apply("limit-edit", { index: 0, limit: { concurrent: 8 } });
   await apply("limit-edit", { index: 1, limit: { hostShare: 60 } });
-  await apply("limit-add", { limit: { scope: "acme/api", day: 4 } });
+  await apply("limit-add", { limit: { scope: "acme/api", concurrent: 4 } });
   await apply("trigger-edit", { index: 0, progress: false });
   const limitsBefore = read(paths.scopedLimitsPath), triggersBefore = read(paths.triggersPath);
   for (const [action, body] of [
-    ["limit-edit", { index: 0, limit: { day: 7, week: 31 } }],
-    ["limit-edit", { index: 0, limit: { scope: "acme/elsewhere", day: 7 } }],
+    ["limit-edit", { index: 0, limit: { concurrent: 7, dayTokens: 31 } }],
+    ["limit-edit", { index: 0, limit: { scope: "acme/elsewhere", concurrent: 7 } }],
     ["limit-add", { limit: { scope: "project:spare", concurrent: 2, memory: "1g", minJobs: 1 } }],
     ["limit-add", { limit: { scope: "project:sized", memory: "1g" } }],
     ["trigger-edit", { index: 0, maxTurns: 5 }],
@@ -3243,7 +3243,7 @@ test("agent HTTP limit and trigger transitions enforce narrowing and reject mixe
   assert.equal(read(paths.scopedLimitsPath), limitsBefore);
   assert.equal(read(paths.triggersPath), triggersBefore);
   const rows = JSON.parse(limitsBefore).limits;
-  assert.deepEqual([rows[0].day, rows[0].week, rows[1].hostShare, rows[2].day], [8, 30, 60, 4]);
+  assert.deepEqual([rows[0].concurrent, rows[0].dayTokens, rows[1].hostShare, rows[2].concurrent], [8, 30, 60, 4]);
   assert.equal(JSON.parse(triggersBefore).triggers[0].run.progress, false);
   assert.equal(c.audit.rows.filter(row => row.action === "write-applied" && row.actor.role === "agent").length, 4);
 });
@@ -3311,15 +3311,15 @@ test("agent HTTP re-run revalidates the current cron execution fields before spe
 test("an agent's limit Undo contains only changed caps, never the private scope or unrelated file fields", async () => {
   const { paths } = deployment();
   const scope = "/private/operator-only/project";
-  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 1, limits: [{ scope, day: 10, week: 30 }] }));
+  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 1, limits: [{ scope, concurrent: 10 }] }));
   const c = await start({ paths }); const agent = await c.cookieFor(AGENT_TOKEN);
-  const p = await c.act("limit-edit", { index: 0, limit: { day: 5 } }, agent);
+  const p = await c.act("limit-edit", { index: 0, limit: { concurrent: 5 } }, agent);
   assert.equal(p.status, 200, p.text); assert.ok(!p.text.includes(scope));
   const done = await c.confirm("limit-edit", p.json().ticket, agent);
   assert.equal(done.status, 200, done.text); assert.ok(!done.text.includes(scope));
-  assert.deepEqual(done.json().change.inverse, { action: "limit-edit", body: { index: 0, limit: { day: 10 } } });
+  assert.deepEqual(done.json().change.inverse, { action: "limit-edit", body: { index: 0, limit: { concurrent: 10 } } });
   const row = JSON.parse(read(paths.scopedLimitsPath)).limits[0];
-  assert.deepEqual([row.scope, row.day, row.week], [scope, 5, 30]);
+  assert.deepEqual([row.scope, row.concurrent], [scope, 5]);
   const inverse = done.json().change.inverse;
   assert.equal((await c.act(inverse.action, inverse.body, agent)).status, 403, "a private-safe Undo still cannot raise the bound without a person");
 });

@@ -21,8 +21,8 @@ never write bare `npx pi-dispatch` in launch copy; always the scoped form, and l
 
 pi is a minimal coding agent with no queue, no concurrency control, no spend limit, and — by its own README —
 no permission system. pi-dispatch is exactly that missing operational layer: every job runs in an ephemeral
-`--cap-drop=ALL` non-root container (pi's missing permissions, enforced by Docker), spend is bounded *before*
-a container starts (per-job turn budget + a daily cap), and the same job runs whether you trigger it from the
+`--cap-drop=ALL` non-root container (pi's missing permissions, enforced by Docker), spend is bounded
+by a per-job turn budget and token budgets, and the same job runs whether you trigger it from the
 CLI, a cron schedule, or a label, `@pi` comment or PR event on GitHub, GitLab, Forgejo or Azure DevOps. You
 bake your own toolchain into the image (it ships Playwright + Chromium, so a flow can build a frontend,
 screenshot it, and iterate on the render), a live `/dispatch` admin panel shows the queue, spend meters,
@@ -59,8 +59,8 @@ pi-dispatch is the operational layer that closes them, and nothing else:
 - The container is the boundary. Every job runs in an ephemeral --cap-drop=ALL, non-root,
   no-new-privileges container; the agent's instructions are mounted read-only. That's pi's
   missing permission system, enforced by Docker.
-- Spend is bounded BEFORE a container starts — a per-job turn budget and a daily cap (plus
-  week/month ceilings and a soft-hold band) checked before a single token is spent.
+- Spend is bounded BEFORE a container starts — the day/week/month token windows are reserved
+  ahead, and a per-job turn budget and per-job token budget bound each job.
 - One job, many ways in: a CLI command, a cron schedule, or a label, @pi comment or PR event on
   GitHub, GitLab, Forgejo or Azure DevOps. Same queue, same box, same budget. Cron is the
   unattended one. A trigger can also dispatch a staged workflow extension's slash command
@@ -192,9 +192,9 @@ label, comment or PR in GitHub, GitLab, Forgejo or Azure DevOps. 🧵
 Every job → an ephemeral --cap-drop=ALL, non-root container, instructions mounted read-only.
 That's pi's missing permission system, enforced by Docker.
 
-3/ Spend is bounded BEFORE a container starts.
-A per-job turn budget + a daily cap (plus week/month + a soft-hold band), checked before a single
-token is spent. A runaway costs you a refusal, not a bill.
+3/ Spend is bounded by token budgets, not a surprise bill.
+A per-job turn cap + token budgets (per job and per day/week/month), with the day/week/month windows
+reserved before a container starts. A runaway is stopped by the turn cap and its token budget.
 
 4/ Your image, your tools.
 Bake the toolchain into the Dockerfile — it ships Playwright + Chromium, so a flow can build a
@@ -225,7 +225,7 @@ that makes that safe-ish and boring:
   outside its declared mounts (/job read-only and /workspace always, plus /outbox on local
   jobs, /session when you arm resumable sessions, and a read-only global pi overlay if you
   configure one).
-- Spend capped before a container even starts (per-job + daily/weekly/monthly).
+- Spend capped by token budgets (per job + daily/weekly/monthly) and a per-job turn cap.
 - Durable queue (Valkey + BullMQ) so a burst or a reboot doesn't drop jobs.
 - Bring your own Docker image (Playwright/Chromium included for frontend work).
 - A TUI admin panel for queue/spend/runs/triggers, per-repo scheduled pause windows, and a
@@ -251,7 +251,7 @@ Working title: **"Giving a coding agent an off-switch: containers, spend caps, a
    permission system," and why per-*job* (not per-session) isolation matters against mutually-untrusting issue
    authors. (Screenshot: the security section.)
 3. **Spend before tokens.** The one ordering that makes a cap real: check-and-increment *before* the container,
-   not after the bill. Day/week/month windows + a soft-hold band.
+   not after the bill. Token windows for day/week/month plus the per-job turn cap (`PI_MAX_TURNS`).
 4. **Quiet hours without dropping work.** The scoped pause-window design: defer a repo's runs with BullMQ's
    `moveToDelayed` *before* the budget reservation, so a paused job costs nothing and auto-resumes — vs.
    dropping it (which loses a GitHub job that has no re-trigger). Timezone-correct via built-in `Intl`.

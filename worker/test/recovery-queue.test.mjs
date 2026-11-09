@@ -602,7 +602,7 @@ test("a `.rN` job's container is handed the RUN id, so its stream, progress key 
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis: { async incr() { return 1; }, async expire() {} },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, concurrency: 3 }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		timeoutMs: 100000,
 		deps: {
 			log: () => {},

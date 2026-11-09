@@ -62,7 +62,6 @@ function deps(overrides = {}) {
 	const base = {
 		redis,
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		tokenCaps: { day: 10 * TOKENS, week: 50 * TOKENS, month: null },
 		valkeyTag: TAG,
 		mintToken: async () => "tok",
@@ -191,7 +190,7 @@ const skip = mod ? false : "bullmq not installed; CI runs these";
 
 test("makeProcessor hands its tag to every job: the record's reservedIn names the Valkey it was given", { skip }, async () => {
 	const records = [];
-	const settings = { provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: "2", dailyTokenCap: "10", weeklyTokenCap: null, monthlyTokenCap: null };
+	const settings = { provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, concurrency: 3, maxTokens: "2", dailyTokenCap: "10", weeklyTokenCap: null, monthlyTokenCap: null };
 	const make = (valkeyTag) =>
 		mod.makeProcessor({
 			cancelJob: () => {},

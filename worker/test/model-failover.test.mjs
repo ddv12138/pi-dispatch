@@ -315,7 +315,7 @@ function pickupFixture({ redis = fakeRedis(), container, endpoints = [], endpoin
 	const records = [];
 	const processor = makeProcessor({
 		redis, cancelJob: () => {}, stopContainer: () => {}, now: () => NOW,
-		getSettings: () => ({ provider: "openai", model: "primary", maxTurns: 5, dailyCap: 10, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "openai", model: "primary", maxTurns: 5, concurrency: 3 }),
 		modelEndpoints: () => endpoints, overlayModels: () => null, endpointSlots,
 		recordRun: (record) => records.push(record),
 		deps: { imagePreflight: async () => ({ ok: true, capabilities: ["exitAuth", "modelPolicy", "modelFailover"] }), now: new Date(NOW), checkFailoverCandidate: checkCandidate, mintToken: async () => (seen.push("mint"), "token"), isDefaultBranchProtected: async () => true, prepareWorkspace: async () => (seen.push("clone"), { workspaceDir: "/w", jobDir: "/j" }), cleanup: async () => {}, comment: async () => {}, log: () => {}, runContainer: async (ctx) => { seen.push(ctx.job); return container ? container(ctx) : { code: 0, aborted: false }; }, ...extraDeps },

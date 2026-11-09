@@ -85,7 +85,7 @@ function deployment(env = {}) {
   };
   writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [{ on: { type: "label", any: ["bug"] }, run: { kind: "github", flow: "fix" } }] }));
   writeFileSync(paths.pauseWindowsPath, JSON.stringify({ windows: [{ scope: "acme/web", from: "22:00", to: "06:00" }] }));
-  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 5 }] }));
+  writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 5 }] }));
   const saved = {};
   const set = { PI_TRIGGERS_FILE: paths.triggersPath, PI_SETTINGS_FILE: paths.settingsFile, PI_PAUSE_WINDOWS_FILE: paths.pauseWindowsPath, PI_SCOPED_LIMITS_FILE: paths.scopedLimitsPath, PI_PROJECTS_FILE: paths.projectsFile, ...env };
   for (const [k, v] of Object.entries(set)) {
@@ -443,7 +443,7 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["command envelope break", plans.planSettingUnset({ key: "maxTokens", paths: alloc, env: {}, surface: "command" }).refusal, { prefix: "unset: this change would leave the allocation envelope invalid" }],
       ["pause window index", plans.planPauseWindowEdit({ index: 4, fields: {}, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["pause window delete index", plans.planPauseWindowDelete({ index: 4, paths }).refusal, "no pause window at index 4 (have 1)"],
-      ["scoped limit index", plans.planLimitEdit({ params: { index: 2, day: 1 }, paths, env }).refusal, "no scoped limit at index 2 (have 1)"],
+      ["scoped limit index", plans.planLimitEdit({ params: { index: 2, concurrent: 1 }, paths, env }).refusal, "no scoped limit at index 2 (have 1)"],
       ["projects unset", plans.projectAt({ ...paths, projectsFile: null }, "shop").refusal, "PI_PROJECTS_FILE is unset, so the worker reads no projects; set it in the deployment's .env (pi-dispatch up does) and restart the worker"],
       ["projects invalid", plans.projectAt({ ...paths, projectsFile: badProjects }, "shop").refusal, { prefix: "the projects file does not load: " }],
       ["projects unreadable", plans.projectAt({ ...paths, projectsFile: dir }, "shop").refusal, { prefix: `the projects file ${dir} could not be read (` }],
@@ -638,8 +638,8 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
       planPauseWindowAdd: () => [plans.planPauseWindowAdd({ fields: { scope: "*", from: "01:00", to: "02:00" }, paths })],
       planPauseWindowEdit: () => both((surface) => plans.planPauseWindowEdit({ index: 0, fields: { to: "07:00" }, paths, surface })),
       planPauseWindowDelete: () => both((surface) => plans.planPauseWindowDelete({ index: 0, paths, surface })),
-      planLimitAdd: () => [plans.planLimitAdd({ params: { scope: "acme/api", day: 3 }, paths, env })],
-      planLimitEdit: () => both((surface) => plans.planLimitEdit({ params: { index: 0, week: 9, scope: "github:acme/web" }, paths, env, surface })),
+      planLimitAdd: () => [plans.planLimitAdd({ params: { scope: "acme/api", concurrent: 3 }, paths, env })],
+      planLimitEdit: () => both((surface) => plans.planLimitEdit({ params: { index: 0, concurrent: 9, scope: "github:acme/web" }, paths, env, surface })),
       planLimitDelete: () => both((surface) => plans.planLimitDelete({ index: 0, paths, env, surface })),
       planProjectAdd: () => [plans.planProjectAdd({ params: { id: "web", members: ["github:acme/api"] }, paths, env })],
       planProjectEdit: () => [plans.planProjectEdit({ params: { id: "shop", name: "Shop" }, paths, env })],

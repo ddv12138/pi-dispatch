@@ -1868,7 +1868,7 @@ function resumeBack(out) {
 }
 
 /**
- * What a setting set did, in the past tense: "Changed maxTurns from 30 to 40", "Set dailyCap to 5" for a key the file
+ * What a setting set did, in the past tense: "Changed maxTurns from 30 to 40", "Set dailyTokenCap to 5" for a key the file
  * did not hold, and "Changed maxTurns to 40" when its old value is not one a sentence can say (an empty string, an
  * object: the Undo then goes by hand too).
  */

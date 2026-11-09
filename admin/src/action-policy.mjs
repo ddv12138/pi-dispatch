@@ -77,7 +77,7 @@ export function actionAgentPolicy(name) {
 const object = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const keysChanged = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !same(a[k], b[k]));
-const SETTINGS_CAPS = new Set(["dailyCap", "weeklyCap", "monthlyCap", "maxTurns", "maxTokens", "concurrency", "softHoldPct", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
+const SETTINGS_CAPS = new Set(["maxTurns", "maxTokens", "concurrency", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
 const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayTokens", "weekTokens", "monthTokens", "hostShare"]);
 const FLAGS = new Set(["recover", "steer", "progress", "statusComment"]);
 /** A cap is a whole number of tokens or a whole count; anything else (a string, a fraction, a float) cannot prove a decrease. */

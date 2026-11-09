@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { InfraRetry, runJob } from "../src/processor.mjs";
 import { buildRecord } from "../src/run-history.mjs";
-import { tokenCapsFor, modelTokenRows, parseScopedLimits, scopeKeyPrefix } from "../src/scoped-limits.mjs";
-
-// The job-count ledger list the processor takes (issue #499 part B), from a `budgetCapsFor`-shaped object.
-const asLedgers = (c) => (c ? [{ scope: c.scope, keyPrefix: scopeKeyPrefix(c.scope), caps: c.caps, reason: "scope-cap" }] : []);
+import { tokenCapsFor, modelTokenRows, parseScopedLimits } from "../src/scoped-limits.mjs";
 
 // Issues #501 part 5 and #502 part 6 (scoped-limits.json version 2; DES-DOLLAR-RESERVE-AND-SETTLE, the worker half):
 // a job reserves its per-job cap in the deployment's token windows, its repo or folder row's, and every model row it
@@ -16,7 +13,7 @@ const TOKENS = 1; // amounts are token counts now; the name keeps the N * TOKENS
 const NOW = new Date("2026-10-07T12:00:00Z");
 const DAY = "budget:tok:2026-10-07";
 
-/** The keyed fake of processor-tokens.test.mjs: job-count INCR/DECR and token INCRBY/DECRBY/settle on one store. */
+/** The keyed fake of processor-tokens.test.mjs: token INCRBY/DECRBY/settle on one store. */
 function keyedRedis(preset = {}) {
 	const store = new Map(Object.entries(preset));
 	const ops = [];
@@ -88,8 +85,6 @@ function deps(overrides = {}) {
 	const redis = overrides.redis ?? keyedRedis();
 	const base = {
 		redis,
-		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		tokenCaps: { day: 50, week: null, month: null },
 		mintToken: async () => "tok",
 		isDefaultBranchProtected: async () => true,
@@ -123,7 +118,7 @@ test("a per-model window refuses the SECOND job with token-cap, names the model,
 	await new Promise((r) => setImmediate(r));
 	assert.equal(redis.store.get(gptDay), 4, "the held job's reservation stands");
 	const second = deps({ redis, scopedTokens: SCOPE, modelTokens: modelTokenRows(LIMITS, ["openai/gpt-x"]) });
-	const before = { deployment: redis.store.get(DAY), scope: redis.store.get(scopeDay), global: redis.store.get("budget:2026-10-07") };
+	const before = { deployment: redis.store.get(DAY), scope: redis.store.get(scopeDay) };
 	const r2 = await runJob({ ...job, models: ["openai/gpt-x"] }, second.deps);
 	assert.equal(r2.reason, "token-cap");
 	assert.equal(r2.budgetReserved, false);
@@ -132,9 +127,8 @@ test("a per-model window refuses the SECOND job with token-cap, names the model,
 	assert.equal(redis.store.get(DAY), before.deployment, "the deployment reservation was given back");
 	assert.equal(redis.store.get(scopeDay), before.scope, "the scope reservation was given back");
 	assert.equal(redis.store.get(gptDay), 4, "the refusing window was given back too");
-	assert.equal(redis.store.get("budget:2026-10-07"), before.global, "the job-count slot went back");
 	const logged = second.logs.find((l) => l[0] === "over_token_budget")[1];
-	assert.deepEqual(logged, { ledger: "model", key: GPT.keyPrefix, model: "openai/gpt-x", window: "day", reservedTokens: 6, capTokens: 3, amountTokens: 2, refunded: true });
+	assert.deepEqual(logged, { ledger: "model", key: GPT.keyPrefix, model: "openai/gpt-x", window: "day", reservedTokens: 6, capTokens: 3, amountTokens: 2 });
 	assert.match(second.calls.find((c) => c[0] === "comment")[1], /^Refused: today's token budget for the model openai\/gpt-x has no room left/);
 	release();
 	await running;
@@ -142,7 +136,7 @@ test("a per-model window refuses the SECOND job with token-cap, names the model,
 
 test("a FULL scope window refuses the job and gives back the deployment reservation it had already taken", async () => {
 	const redis = keyedRedis({ [scopeDay]: 9 });
-	const { deps: d, calls, logs } = deps({ redis, scopedTokens: SCOPE, modelTokens: [], scopedLedgers: asLedgers({ scope: "org/repo", caps: { day: 5, week: null, month: null } }) });
+	const { deps: d, calls, logs } = deps({ redis, scopedTokens: SCOPE, modelTokens: [] });
 	const r = await runJob(job, d);
 	assert.equal(r.reason, "token-cap");
 	assert.deepEqual(r.tokensWindows, { reservedTokens: 2, settledTokens: 0, basis: "refunded", modelBasis: null });
@@ -150,7 +144,6 @@ test("a FULL scope window refuses the job and gives back the deployment reservat
 	assert.deepEqual(redis.ops.filter((o) => o[0] === "incrby" || o[0] === "decrby"), [["incrby", DAY, 2], ["incrby", scopeDay, 2], ["decrby", DAY, 2], ["decrby", scopeDay, 2]]);
 	assert.equal(redis.store.get(DAY), 0);
 	assert.equal(redis.store.get(scopeDay), 9);
-	assert.equal(redis.store.get(`${scopeKeyPrefix("org/repo")}:2026-10-07`), 0, "the scoped job-count slot went back");
 	assert.ok(!calls.includes("run-container"));
 	const logged = logs.find((l) => l[0] === "over_token_budget")[1];
 	assert.equal(logged.ledger, "scope");
@@ -284,7 +277,7 @@ function wired({ allowedModels = null, redis = keyedRedis() } = {}) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 2, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null }),
+		getSettings: () => ({ provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 30, concurrency: 3, maxTokens: 2, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null }),
 		scopedLimits: () => WIRED_LIMITS,
 		recordRun: () => {},
 		timeoutMs: 100000,

@@ -13,14 +13,15 @@ import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, v
 /**
  * Runtime-settings overlay: the shared, durable truth between the admin extension and the worker
  * (INT-CONFIG-OVERLAY-CONTRACT, DES-RUNTIME-SETTINGS-FILE-OVERLAY). A flat `settings.json` of optional keys:
- * the twelve settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns`, `dailyCap`,
- * `weeklyCap`, `monthlyCap`, `maxTokens`, `dailyTokenCap`, `weeklyTokenCap`, `monthlyTokenCap` (int >= 1),
- * `concurrency` (int 1-10), `softHoldPct` (int 1-99) -- the two operator-only resolver tables in
- * `OPERATOR_ONLY_KEYS` (`secretProfiles`, `secretBundles`), and an optional `version` that describes the file
- * rather than setting anything (issue #761, `SETTINGS_VERSION`). Read by the worker at each job start and written
- * atomically by the admin extension (tmp + rename). The token keys are the budget controls
- * (DES-TOKEN-RESERVE-AND-SETTLE): a window needs `maxTokens`, checked on the merged values by `resolveSettings`.
- * The dollar keys are RETIRED: an overlay carrying one is refused with the upgrade named.
+ * the eight settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns`, `maxTokens`,
+ * `dailyTokenCap`, `weeklyTokenCap`, `monthlyTokenCap` (int >= 1), `concurrency` (int 1-10) -- the two
+ * operator-only resolver tables in `OPERATOR_ONLY_KEYS` (`secretProfiles`, `secretBundles`), and an optional
+ * `version` that describes the file rather than setting anything (issue #761, `SETTINGS_VERSION`). Read by the
+ * worker at each job start and written atomically by the admin extension (tmp + rename). The token keys are the
+ * budget controls (DES-TOKEN-RESERVE-AND-SETTLE): a window needs `maxTokens`, checked on the merged values by
+ * `resolveSettings`. The dollar keys are RETIRED: an overlay carrying one is refused with the upgrade named.
+ * The job-start count caps (`dailyCap`, `weeklyCap`, `monthlyCap`, `softHoldPct`) are RETIRED too, and refused
+ * on sight rather than dropped: an operator who believes their deployment is capped must not run uncapped.
  *
  * A key this build does not know is dropped from the overlay it hands out and logged, and a writer given the
  * `carry` its read returned writes that key back exactly as it found it, in its place (issue #761): the file is shared
@@ -31,7 +32,8 @@ import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, v
  * exception, so the processor RETURNS a policy refusal (`settings-overlay-invalid`) instead of letting
  * its catch classify the file as retryable infra and pay to retry a job that can never succeed
  * (CONST-RETRY-INFRA-ONLY). A present-but-unreadable file fails closed -- it never degrades to an empty
- * overlay that would silently restore env's higher `dailyCap` (DES-RUNTIME-SETTINGS-FILE-OVERLAY).
+ * overlay that would silently restore an env value the operator meant to override
+ * (DES-RUNTIME-SETTINGS-FILE-OVERLAY).
  *
  * Precedence resolved here is overlay > env > default only; `config` already encodes env > default. The
  * `job.data` precedence layer belongs to the processor, not here.
@@ -42,7 +44,9 @@ import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, v
  * Custom: overlay validated inline per config.mjs precedent; zod not in deps
  */
 
-export const KNOWN_KEYS = ["model", "provider", "maxTurns", "dailyCap", "weeklyCap", "monthlyCap", "maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap", "concurrency", "softHoldPct"];
+export const KNOWN_KEYS = ["model", "provider", "maxTurns", "maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap", "concurrency"];
+/** The job-start count caps an older overlay may carry: REFUSED with the removal named, never dropped as unknown. */
+export const RETIRED_CAP_KEYS = Object.freeze(["dailyCap", "weeklyCap", "monthlyCap", "softHoldPct"]);
 /** The dollar keys an older overlay may carry: REFUSED with a named reason, never dropped. */
 export const RETIRED_DOLLAR_KEYS = Object.freeze(["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
 
@@ -208,6 +212,9 @@ function validateKeys(candidate, log) {
 	const unknownKeys = [];
 	for (const key of Object.keys(candidate)) {
 		const value = candidate[key];
+		// The retired job-start caps fail loud BEFORE the generic switch: an old overlay must be refused with the
+		// removal named, never silently dropped as a key this build does not know.
+		if (RETIRED_CAP_KEYS.includes(key)) return { invalid: `${key} was retired with the job-start caps; delete it from the settings file` };
 		switch (key) {
 			case "version":
 				break;
@@ -225,14 +232,11 @@ function validateKeys(candidate, log) {
 				break;
 			}
 			case "maxTurns":
-			case "dailyCap":
-			case "weeklyCap":
-			case "monthlyCap":
 			case "maxTokens":
 			case "dailyTokenCap":
 			case "weeklyTokenCap":
 			case "monthlyTokenCap":
-				// Overlay caps are positive ints. A window/cap is DISABLED by absence, not by a 0 -- `unset weeklyCap`
+				// Overlay caps are positive ints. A window/cap is DISABLED by absence, not by a 0 -- `unset weeklyTokenCap`
 				// drops the key so it falls through to env, which unset means the window is off (config.mjs). The
 				// token knobs follow the same "absent = disabled" shape (issue #25).
 				if (!isIntAtLeast(value, 1)) return { invalid: `${key} must be an integer >= 1` };
@@ -305,12 +309,6 @@ function validateKeys(candidate, log) {
 			case "monthlyCostUsd":
 				// RETIRED, fail loud: these were real caps, and dropping them would silently widen every budget they set.
 				return { invalid: retiredDollarMessage(key) };
-			case "softHoldPct":
-				// A percentage of each active cap; 100 would equal the hard wall (no band) and 0 has no meaning,
-				// so the enforced band is 1-99. Absence disables the soft-hold entirely.
-				if (!isIntInRange(value, 1, 99)) return { invalid: "softHoldPct must be an integer 1-99" };
-				overlay[key] = value;
-				break;
 			default: {
 				// Issue #501's near-miss table, carried over: a near miss of a RETIRED dollar key is refused when its
 				// shape (`overlayKeyShape`: case, the separators, a fixed look-alike table) EXACTLY equals a known
@@ -340,9 +338,9 @@ function validateKeys(candidate, log) {
  *
  * A missing file (ENOENT) is the normal empty overlay, `{ overlay: {}, carry: null, text: null }` (`null` is
  * `fileSnapshot`'s encoding of a missing file). Any OTHER read error (EACCES, EISDIR, ...) is `{ invalid }`: a
- * present-but-unreadable file must fail closed, not silently become an empty overlay that restores env's higher
- * `dailyCap`. Unparseable JSON, a duplicate key, a non-object root, a broken `version` or an invalid known key is
- * `{ invalid }`.
+ * present-but-unreadable file must fail closed, not silently become an empty overlay that restores an env
+ * value the operator meant to override. Unparseable JSON, a duplicate key, a non-object root, a broken
+ * `version` or an invalid known key is `{ invalid }`.
  *
  * `supported`, `table` and `valueTable` default to this build's and are injectable so a test can run the version
  * machinery while the shipped tables are empty.
@@ -398,11 +396,11 @@ export function readOverlay(path, { fs = nodeFs, log = () => {} } = {}) {
 }
 
 /**
- * Resolve the fourteen effective settings from `config` and a validated `overlay`: overlay value where the
+ * Resolve the eight effective settings from `config` and a validated `overlay`: overlay value where the
  * overlay sets it, else the config value. Precedence is overlay > env > default only -- `config`
- * already carries env > default. `weeklyCap`/`monthlyCap`/`maxTokens`/`dailyTokenCap`/`softHoldPct` and the
- * four dollar keys may resolve to `null` (their config value when unset), meaning that window / cap / band is
- * disabled. `job.data` is NOT merged here; that layer is the processor's.
+ * already carries env > default. `maxTokens` and the three token windows may resolve to `null` (their
+ * config value when unset), meaning that window is disabled. `job.data` is NOT merged here; that layer is
+ * the processor's.
  */
 export function effectiveSettings(config, overlay) {
 	const o = overlay ?? {};
@@ -410,15 +408,11 @@ export function effectiveSettings(config, overlay) {
 		provider: o.provider ?? config.provider,
 		model: o.model ?? config.model,
 		maxTurns: o.maxTurns ?? config.maxTurns,
-		dailyCap: o.dailyCap ?? config.dailyCap,
-		weeklyCap: o.weeklyCap ?? config.weeklyCap,
-		monthlyCap: o.monthlyCap ?? config.monthlyCap,
 		maxTokens: o.maxTokens ?? config.maxTokens,
 		dailyTokenCap: o.dailyTokenCap ?? config.dailyTokenCap,
 		weeklyTokenCap: o.weeklyTokenCap ?? config.weeklyTokenCap,
 		monthlyTokenCap: o.monthlyTokenCap ?? config.monthlyTokenCap,
 		concurrency: o.concurrency ?? config.concurrency,
-		softHoldPct: o.softHoldPct ?? config.softHoldPct,
 	};
 }
 

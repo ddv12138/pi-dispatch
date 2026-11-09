@@ -518,11 +518,10 @@ test("legacy chart viewBoxes preserve complete geometry when a card shrinks", ()
   assert.equal(responsiveInsightsSvg(ready), ready);
 });
 
-test("count cap observer thresholds match the next start and scoped counters have no soft-hold tick", () => {
-  for (const [reserved, word] of [
+test("the token budget row is full at its cap and draws no soft-hold tick", () => {
+  for (const [spent, word] of [
     [10, "Full"],
-    [8, "Soft hold"],
-    [7, "Open"],
+    [9, "Open"],
     [null, "unknown"],
   ]) {
     const text = String(
@@ -532,40 +531,23 @@ test("count cap observer thresholds match the next start and scoped counters hav
         data: {
           insights: {
             budget: {
-              day: { reserved, cap: 10, state: "ok" },
-              softHoldPct: 80,
-              scoped: [
-                {
-                  scope: "project:web",
-                  day: { used: 8, cap: 10, state: "ok" },
-                },
-              ],
+              tokens: { spent, cap: 10 },
+              windows: { rows: [] },
             },
           },
         },
       }),
     );
-    assert.ok(
-      text.includes(`Jobs this day: ${word}`),
-      `${reserved} is ${word}`,
-    );
-    assert.ok(
-      text.includes("project:web jobs day: Open"),
-      "the same count is open under a scoped hard cap",
-    );
-    assert.equal(
-      (text.match(/<line\b/g) ?? []).length,
-      1,
-      "only the global count has a soft-hold tick",
-    );
+    assert.ok(text.includes(`Tokens today: ${word}`), `${spent} is ${word}`);
+    assert.equal((text.match(/<line\b/g) ?? []).length, 0, "token rows have no soft-hold tick");
   }
 });
 
-test("Caps names failed token/scoped reads instead of silently omitting their rows", () => {
+test("Caps names failed token window reads instead of silently omitting their rows", () => {
   for (const budget of [
     { windows: { invalid: ["private-error-marker"] } },
     { windows: { countersUnreachable: "private-error-marker" } },
-    { scopedInvalid: "private-error-marker" },
+    { windows: { limits: { invalid: "private-error-marker" } } },
   ]) {
     const text = String(
       spendCaps({ role: "viewer", query: {}, data: { insights: { budget } } }),

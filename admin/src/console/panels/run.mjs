@@ -65,7 +65,7 @@ function runningWithoutRecord(view) {
  * CONST-RETRY-INFRA-ONLY, so no later attempt of the same id can start) whose record says no spend at all, the cost
  * fold's own `refusedBeforeSpend` (no tokens, no exit code, `budgetReserved: false`). Such a run made no container and
  * no workspace, so its page draws no Progress and no transcript section. A refusal the fold
- * cannot tell from a spend (one that kept its count slot, `over-budget`) keeps those panels, and says what they say.
+ * cannot tell from a spend (one that kept its count slot, `token-cap`) keeps those panels, and says what they say.
  */
 export function refusedBeforeStart(record) {
   return record !== null && typeof record === "object" && record.outcome === "policy" && refusedBeforeSpend(record);

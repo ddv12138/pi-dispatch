@@ -19,7 +19,7 @@ if (!mod && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") {
 const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.19.0); CI runs these`;
 
 const NOW = Date.UTC(2026, 9, 3, 12, 0);
-const SETTINGS = () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null });
+const SETTINGS = () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 });
 const projectsOf = (projects) => parseProjects(JSON.stringify({ version: 1, projects }), "projects.json");
 const SHOP = projectsOf([{ id: "shop", name: "Webshop", members: ["github:acme/web", "/srv/shop-tools"] }]);
 const OPS = projectsOf([{ id: "ops", members: ["github:acme/web"] }]);

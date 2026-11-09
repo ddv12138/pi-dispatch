@@ -73,9 +73,10 @@ export function identityRetryWindowMs(env = process.env) {
  *
  * An operator turns it off for the one reason that is not a mistake: their forge has a SINGLE identity, so
  * their own comments and labels arrive as ours and every rule they write is dead on arrival. What still
- * bounds the spend then is the deployment's own caps (`PI_DAILY_CAP`, `PI_MAX_TURNS`), never this file, so
- * the rules written with the switch on must be ones the harness's own output cannot match: a bare comment
- * phrase and a merge-request update rule both can, and both turn the guard into a 25-runs-a-day budget.
+ * bounds the spend then is the deployment's turn cap (`PI_MAX_TURNS`) and token budgets (`PI_MAX_TOKENS` and
+ * the token windows), never this file, so the rules written with the switch on must be ones the harness's
+ * own output cannot match: a bare comment phrase and a merge-request update rule both can, and both turn
+ * the guard into a job chain that only those budgets bound.
  *
  * Strict, like every other security-shaped key: `"1"` is on, unset and `"0"` are off, and anything else is a
  * boot refusal rather than a guess. A silently ignored value would leave an operator believing the guard is

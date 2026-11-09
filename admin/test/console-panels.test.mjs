@@ -60,8 +60,8 @@ function snapshot() {
     queue: { pausedState: false, pausedPartial: true, counts: { waiting: 1, active: 2, delayed: 0, failed: 1 }, workers: 2, queues: 2, fleetDegraded: "registry unreadable" },
     queueCounts: [{ queue: "pi-jobs", paused: true, counts: { waiting: 1 } }],
     hostBudgets: [{ name: "h1", concurrency: "2", jobs: [{ id: "gh-1", at: NOW - 60_000, o: false }], staleMs: 4000, budgetMemMiB: "off", budgetCpuCenti: "off" }],
-    budget: { day: 3, week: 4, month: 5, tokensToday: 1000 },
-    settings: { overlay: { dailyCap: 10, secretProfiles: { vault: { resolver: "/opt/secret" } } } },
+    budget: { tokensToday: 3 },
+    settings: { overlay: { dailyTokenCap: 10, secretProfiles: { vault: { resolver: "/opt/secret" } } } },
     dollars: null,
     parked: [{ target: "acme/api#1", kind: "github", jobId: "gh-p", parkedAt: NOW - 600_000, ageMs: 600_000, chainCount: null }],
     failures24h: 7,
@@ -1648,7 +1648,7 @@ test("the runs table: the outcome as the panel's word on a badge, quiet when com
   const runs = [
     { ...base, jobId: "gh-c", outcome: "completed" },
     { ...base, jobId: "gh-a", outcome: "completed", reason: "awaiting-input" },
-    { ...base, jobId: "gh-r", outcome: "policy", reason: "scope-cap" },
+    { ...base, jobId: "gh-r", outcome: "policy", reason: "allocation-cap" },
     { ...base, jobId: "gh-x", outcome: "policy", reason: "operator-cancel" },
     { ...base, jobId: "gh-f", outcome: "failed", reason: "container-never-started", failedReason: "FREE-TEXT <b>" },
     { ...base, jobId: "gh-k", outcome: "policy", reason: "recovery-cap" },
@@ -1670,8 +1670,8 @@ test("the runs table: the outcome as the panel's word on a badge, quiet when com
   assert.equal(cellOf("gh-c"), badge("idle", "Completed"));
   assert.equal(cellOf("gh-a"), badge("parked", "Awaiting input"), "the word says it all: no reason part");
   assert.equal(cellOf("gh-x"), badge("idle", "Cancelled"));
-  const scope = shortSentence(REASONS["scope-cap"].sentence);
-  assert.equal(cellOf("gh-r"), `${badge("refused", "Refused")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=scope-cap" title="scope-cap">${scope.replace(/'/g, "&#39;")}</a></span>`);
+  const scope = shortSentence(REASONS["allocation-cap"].sentence);
+  assert.equal(cellOf("gh-r"), `${badge("refused", "Refused")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap">${scope.replace(/'/g, "&#39;")}</a></span>`);
   assert.match(cellOf("gh-f"), /^<span class="badge tone-failed">Failed<\/span><span class="reason"><a href="\/runs\?outcome=failed&amp;reason=container-never-started" title="container-never-started">/);
   // A recovery end the worker records as policy reads failed, its link by the word, its sentence kept.
   assert.equal(cellOf("gh-k"), `${badge("failed", "Failed")}<span class="reason"><a href="/runs?outcome=failed&amp;reason=recovery-cap" title="recovery-cap">${shortSentence(REASONS["recovery-cap"].sentence).replace(/'/g, "&#39;")}</a></span>`);
@@ -1720,12 +1720,12 @@ test("the chain's children carry their reason through loadPageData, so a waiting
   const runs = [
     kid("gh-2", "completed", "awaiting-input", "2026-10-08T14:10:00Z"),
     kid("gh-3", "policy", "operator-cancel", "2026-10-08T14:20:00Z"),
-    kid("gh-4", "policy", "scope-cap", "2026-10-08T14:30:00Z"),
+    kid("gh-4", "policy", "allocation-cap", "2026-10-08T14:30:00Z"),
     { ...kid("gh-5", "failed", null, "2026-10-08T14:40:00Z"), reason: 7 },
   ];
   const fleet = { runById: async () => ({ record, source: "local" }), runsPage: async () => ({ runs, next: null }), inbox: async () => ({ found: false }) };
   const data = await loadPageData("run", { id: "gh-1" }, { fleet, now: NOW });
-  assert.deepEqual(data.children.map((c) => c.reason), ["awaiting-input", "operator-cancel", "scope-cap", null], "the reason is kept, a non-string one is null");
+  assert.deepEqual(data.children.map((c) => c.reason), ["awaiting-input", "operator-cancel", "allocation-cap", null], "the reason is kept, a non-string one is null");
   const run = (await pagePanels("run", ctxOf("operator", data, parsePageQuery("run", "id=gh-1").query))).map((p) => p.html).join("");
   assert.match(run, /href="\/run\?id=gh-2">gh-2<\/a> awaiting input<\/li>/);
   assert.match(run, /href="\/run\?id=gh-3">gh-3<\/a> cancelled<\/li>/);
@@ -1745,7 +1745,7 @@ test("the overview: the first run's two, then what needs a person, what waits, w
 
 test("the day's failed and refused runs are Needs you's foot line, linked, a floor said once, cancels not counted (#710, #737)", async () => {
   const needs = async (over) => new Map(await overviewOf({ ...snapshot(), ...over })).get("p-needs");
-  const html = await needs({ failures24h: 2, failures24hFloor: false, refusals24h: { count: 9, top: [{ reason: "scope-cap", count: 5 }] } });
+  const html = await needs({ failures24h: 2, failures24hFloor: false, refusals24h: { count: 9, top: [{ reason: "allocation-cap", count: 5 }] } });
   assert.match(html, /Last 24 hours: <a href="\/runs\?outcome=failed">2 failed<\/a> and <a href="\/runs\?outcome=refused">9 refused<\/a>, not counting runs an operator cancelled\./);
   const floor = await needs({ failures24h: 3, failures24hFloor: true, refusals24h: { count: 0, top: [] } });
   assert.match(floor, /Last 24 hours: <a href="\/runs\?outcome=failed">at least 3 failed<\/a>\./);
@@ -1828,8 +1828,8 @@ test("readable numbers: money in one fixed form with the exact amount on hover, 
   assert.match(panels.get("p-spend"), /<b><data value="1234567" title="1,234,567">1\.23M<\/data><\/b><span>of <span title="50,000,000">50\.00M<\/span><\/span>/);
   // Caps: jobs started against their caps, a capsule per window with a cap; the windows are UTC, and say so.
   const caps = panels.get("p-caps");
-  assert.match(caps, /title="Jobs today: 30%"/, "3 started of 10");
-  assert.ok(!caps.includes("Jobs week"), "no cap, no capsule");
+  assert.match(caps, /title="Tokens today: 30%"/, "3 tokens of 10");
+  assert.ok(!caps.includes("Jobs today") && !caps.includes("Jobs week"), "no job window, no capsule");
   assert.match(caps, /title="Deploy tokens month: 99%"/, "a window short of its cap never reads as the cap");
   assert.ok(caps.includes(COUNT_WINDOWS_UTC_TEXT), "the windows are UTC, and say so");
   assert.match(COUNT_WINDOWS_UTC_TEXT, /UTC/);

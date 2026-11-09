@@ -33,7 +33,7 @@ async function fixture(t) {
   const root = tempDir("zero-touch-review-");
   const paths = { logsDir: join(root, "logs"), triggersPath: join(root, "triggers.json"), valkeyUrl: base };
   fs.mkdirSync(paths.logsDir);
-  const doc = { triggers: [{ on: { type: "label", any: ["fix"] }, run: { kind: "github", flow: "fix" } }], zeroTouch: { capture: true, model: "test/classifier", maxCostUsd: "0.05", names: {} } };
+  const doc = { triggers: [{ on: { type: "label", any: ["fix"] }, run: { kind: "github", flow: "fix" } }], zeroTouch: { capture: true, model: "test/classifier", maxTokens: 50_000, names: {} } };
   fs.writeFileSync(paths.triggersPath, JSON.stringify(doc));
   let clock = NOW - 100 * DAY;
   const now = () => clock;

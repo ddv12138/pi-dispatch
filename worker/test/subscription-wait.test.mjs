@@ -17,7 +17,7 @@ function fixture(wait) {
 	};
 	let prepared = { ok: false, wait, until: NOW + 30_000 };
 	let atPrepare = () => {};
-	const process = makeProcessor({ redis, concurrency: 1, now: () => NOW, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "openai", model: "model", maxTurns: 5, dailyCap: 10, concurrency: 1, softHoldPct: null }), recordRun: value => records.push(value), deps: {
+	const process = makeProcessor({ redis, concurrency: 1, now: () => NOW, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "openai", model: "model", maxTurns: 5, concurrency: 1 }), recordRun: value => records.push(value), deps: {
 		now: new Date(NOW), imagePreflight: async () => ({ ok: true, capabilities: ["subscriptionAuth", "modelPolicy"] }), subscriptionAuthRequired: async () => true,
 		prepareSubscriptionAuth: async () => { atPrepare(); return prepared; },
 		mintToken: async () => { seen.push("mint"); return "token"; }, isDefaultBranchProtected: async () => true,

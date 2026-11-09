@@ -17,7 +17,7 @@ const BASE = "b".repeat(40);
 const PI = "1.2.0";
 const HOST = "h1";
 
-/** A keyed fake: the job-count INCR/DECR and the token INCRBY/DECRBY on one store (processor-tokens.test.mjs's). */
+/** A keyed fake: the token INCRBY/DECRBY/settle on one store (processor-tokens.test.mjs's). */
 function keyedRedis() {
 	const store = new Map();
 	const ops = [];
@@ -69,7 +69,7 @@ function fakeLedger({ fail = {} } = {}) {
 	const runs = new Map();
 	const calls = [];
 	const run = (id) => {
-		if (!runs.has(id)) runs.set(id, { slot: null, seq: 0, holds: new Map() });
+		if (!runs.has(id)) runs.set(id, { seq: 0, holds: new Map() });
 		return runs.get(id);
 	};
 	const move = (op, id, seq, to) => {
@@ -83,14 +83,6 @@ function fakeLedger({ fail = {} } = {}) {
 	return {
 		runs,
 		calls,
-		async claimSlot(id) {
-			calls.push(["claimSlot", id]);
-			if (fail.claimSlot) return { error: "valkey" };
-			const r = run(id);
-			if (r.slot) return "carried";
-			r.slot = "held";
-			return "new";
-		},
 		async nextSeq(id) {
 			calls.push(["nextSeq", id]);
 			if (fail.nextSeq) return { error: "valkey" };
@@ -159,8 +151,6 @@ function deps(overrides = {}) {
 	const pointers = new Map([[RUN, { v: 1, host: HOST, hostQueue: null, seq: 4, attempt: 1, at: 1, jobDir: "job-abc" }]]);
 	const base = {
 		redis,
-		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		imagePreflight: async () => ({ ok: true, piVersion: PI, capabilities: ["recover"], imageDigest: "sha256:" + "d".repeat(64) }),
 		mintToken: async () => (calls.push(["mint"]), "tok"),
 		isDefaultBranchProtected: async () => true,
@@ -304,7 +294,6 @@ test("a recovery job clones from the store (pin), then restore, trust reset and 
 test("settleCrashed is called once, at recovery start, with this container's number, and settles the crashed hold", async () => {
 	const ledger = fakeLedger();
 	// The base: seq 1, a recorded hold the crash left `held`.
-	await ledger.claimSlot(RUN);
 	await ledger.nextSeq(RUN);
 	await ledger.recordHold(RUN, 1, { amountTokens: 2, keys: [DAY] });
 	ledger.calls.length = 0;
@@ -356,26 +345,6 @@ test("a base the store could not take: the run goes on, recoverSkipped base-unpr
 	assert.equal(r.outcome, "completed");
 	assert.equal(r.recoverSkipped, "base-unprimed");
 	assert.equal(buildRecord({ job: { id: RUN, data: job }, result: r }).recoverSkipped, "base-unprimed");
-});
-
-test("claimSlot 'carried' skips reserveLedgers; 'new' reserves exactly as before", async () => {
-	const ledger = fakeLedger();
-	await ledger.claimSlot(RUN);
-	const carried = deps({ runBudgetLedger: ledger });
-	const r = await runJob(job, carried.deps);
-	assert.equal(r.outcome, "completed");
-	assert.equal(carried.redis.ops.filter((o) => o[0] === "incr").length, 0, "no job-count INCR for a carried slot");
-	assert.equal(r.budgetReserved, true, "the carried slot is still held, by the run");
-	const fresh = deps();
-	await runJob(job, fresh.deps);
-	assert.deepEqual(fresh.redis.ops.filter((o) => o[0] === "incr").map((o) => o[1]), ["budget:2026-10-07"]);
-});
-
-test("a claim the ledger could not answer reserves nothing and is a never-started retry", async () => {
-	const { deps: d, redis, calls } = deps({ runBudgetLedger: fakeLedger({ fail: { claimSlot: true } }) });
-	await assert.rejects(runJob(job, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started");
-	assert.equal(redis.ops.length, 0);
-	assert.ok(!names(calls).includes("run-container"));
 });
 
 test("a recordHold failure releases the hold and throws a never-started InfraRetry before any container", async () => {
@@ -717,7 +686,6 @@ test("a recovery of a base with .pi/extensions is refused as recovery-unsafe-ext
 test("every never-started fault of a RECOVERY job becomes a 60 s wait hold, never a spent attempt", async () => {
 	const cases = {
 		"pointer read throws": { readCheckpointPointer: async () => Promise.reject(new Error("x")) },
-		"claimSlot error": { runBudgetLedger: fakeLedger({ fail: { claimSlot: true } }) },
 		"nextSeq error, no token windows": { runBudgetLedger: fakeLedger({ fail: { nextSeq: true } }) },
 		"recordHold error": { runBudgetLedger: fakeLedger({ fail: { recordHold: true } }), tokenCaps: { day: 10, week: null, month: null } },
 		"restore skipped": { workspaceCheckpointer: fakeCheckpointer([], { restore: { skipped: "locked" } }) },
@@ -822,12 +790,10 @@ test("recovered.from is the manifest's kind: exit and salvage", async () => {
 	}
 });
 
-test("a refusal after a carried slot reports budgetReserved true", async () => {
-	const ledger = fakeLedger();
-	await ledger.claimSlot(RUN);
-	const { deps: d } = deps({ runBudgetLedger: ledger, tokenCaps: { day: 1, week: null, month: null } });
+test("a token-cap refusal of an armed run reports budgetReserved false", async () => {
+	const { deps: d } = deps({ tokenCaps: { day: 1, week: null, month: null } });
 	const r = await runJob({ ...job, maxTokens: 2 }, d);
-	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "token-cap", true]);
+	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "token-cap", false]);
 });
 
 

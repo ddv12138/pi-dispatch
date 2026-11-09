@@ -137,7 +137,7 @@ export function projectLimits(v) {
   const words = {
     memory: (value) => `${sizeText(parseMemory(value))} memory`,
     cpus: (value) => `${value} CPUs`,
-    day: (value) => `${value} jobs a day`, week: (value) => `${value} jobs a week`, month: (value) => `${value} jobs a month`, concurrent: (value) => `${value} at once`,
+    concurrent: (value) => `${value} at once`,
     dayTokens: (value) => html`${money(parseTokenCount(value))} a day`, weekTokens: (value) => html`${money(parseTokenCount(value))} a week`, monthTokens: (value) => html`${money(parseTokenCount(value))} a month`,
     hostShare: (value) => `${value}% of each host's budget`, minJobs: (value) => `space for at least ${value} jobs on an admitting host`,
   };
@@ -145,7 +145,7 @@ export function projectLimits(v) {
     const fields = Object.entries(words).filter(([key]) => l[key] !== null && l[key] !== undefined).map(([key, render]) => render(l[key]));
     return [`Row ${l.index + 1}`, html`<span class="code">${l.scope}</span>${fields.length ? html`: ${fields.map((value, index) => html`${index ? ", " : null}${value}`)}` : ": no caps or size fields set"}`];
   });
-  return card(tr(v, "Limits"), html`${rows.length ? facts(rows) : note(tr(v, "No scoped-limits row names this project."))}${facts([[tr(v, "Jobs a day"), p.limits[0]?.day ?? tr(v, "not set")], [tr(v, "At once"), p.limits[0]?.concurrent ?? tr(v, "not set; a local folder still runs one job at a time")]])}${p.limitsUnreadable ? note(tr(v, "The scoped-limits file could not be read.")) : null}<p><a class="link" href="/config#cf-scoped-limits">${tr(v, "Open scoped limits")}</a></p>`);
+  return card(tr(v, "Limits"), html`${rows.length ? facts(rows) : note(tr(v, "No scoped-limits row names this project."))}${facts([[tr(v, "At once"), p.limits[0]?.concurrent ?? tr(v, "not set; a local folder still runs one job at a time")]])}${p.limitsUnreadable ? note(tr(v, "The scoped-limits file could not be read.")) : null}<p><a class="link" href="/config#cf-scoped-limits">${tr(v, "Open scoped limits")}</a></p>`);
 }
 
 export function projectBundle(v) {

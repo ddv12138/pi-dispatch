@@ -30,7 +30,7 @@ function harness(runContainer, { cancelReq = undefined } = {}) {
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => Date.UTC(2026, 9, 6, 12, 0),
 		recordRun: (r) => records.push(r),
 		timeoutMs: 100000,

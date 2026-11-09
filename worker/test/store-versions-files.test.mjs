@@ -49,23 +49,23 @@ test("settings: the shipped tables hold the rule, and version is never a settabl
 });
 
 test("settings: with an injected key table the writer stamps the lowest version, a lower build calls it newer, and an unset drops the stamp", () => {
-	const versions = { table: Object.freeze({ softHoldPct: 2 }), supported: 2 };
+	const versions = { table: Object.freeze({ maxTokens: 2 }), supported: 2 };
 	const path = join(tempDir("store-versions-"), "settings.json");
-	assert.deepEqual(writeOverlay(path, { dailyCap: 1, softHoldPct: 50 }, versions), { ok: true });
-	assert.equal(readFileSync(path, "utf8"), '{\n  "version": 2,\n  "dailyCap": 1,\n  "softHoldPct": 50\n}\n');
+	assert.deepEqual(writeOverlay(path, { maxTurns: 1, maxTokens: 50 }, versions), { ok: true });
+	assert.equal(readFileSync(path, "utf8"), '{\n  "version": 2,\n  "maxTurns": 1,\n  "maxTokens": 50\n}\n');
 	const read = readOverlayDocument(path, versions);
-	assert.deepEqual(read.overlay, { dailyCap: 1, softHoldPct: 50 }, "the same build reads it");
+	assert.deepEqual(read.overlay, { maxTurns: 1, maxTokens: 50 }, "the same build reads it");
 	assert.deepEqual(readOverlayDocument(path, { table: versions.table }), { invalid: "settings file written by a newer pi-dispatch (version 2; this build understands 1)", newer: true });
 	// Unset the key that needed it, carrying the file: the stamp goes with it.
-	const { softHoldPct: _unset, ...rest } = read.overlay;
+	const { maxTokens: _unset, ...rest } = read.overlay;
 	assert.deepEqual(writeOverlay(path, rest, { ...versions, carry: read.carry }), { ok: true });
-	assert.equal(readFileSync(path, "utf8"), '{\n  "dailyCap": 1\n}\n');
+	assert.equal(readFileSync(path, "utf8"), '{\n  "maxTurns": 1\n}\n');
 	// A key that needs a version the file does not declare: written by hand, refused by name.
-	writeFileSync(path, '{ "softHoldPct": 50 }');
-	assert.deepEqual(readOverlayDocument(path, versions), { invalid: "softHoldPct needs settings version 2, and the file declares 1" });
+	writeFileSync(path, '{ "maxTokens": 50 }');
+	assert.deepEqual(readOverlayDocument(path, versions), { invalid: "maxTokens needs settings version 2, and the file declares 1" });
 	// A writer whose build cannot read what it would stamp refuses rather than leave a file it cannot read.
-	assert.match(writeOverlay(path, { softHoldPct: 50 }, { table: versions.table }).invalid, /written by a newer pi-dispatch \(version 2; this build understands 1\)/);
-	assert.equal(readFileSync(path, "utf8"), '{ "softHoldPct": 50 }');
+	assert.match(writeOverlay(path, { maxTokens: 50 }, { table: versions.table }).invalid, /written by a newer pi-dispatch \(version 2; this build understands 1\)/);
+	assert.equal(readFileSync(path, "utf8"), '{ "maxTokens": 50 }');
 });
 
 test("settings: a value rule stamps exactly the values that need it (a range a later release widened)", () => {

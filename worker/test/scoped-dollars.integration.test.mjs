@@ -36,7 +36,6 @@ test("a per-model window refuses the second job with token-cap, and every other 
 	const deps = (runContainer) => ({
 		redis,
 		caps: { day: 1000, week: null, month: null },
-		softHoldPct: null,
 		tokenCaps: null,
 		scopedTokens: scope,
 		modelTokens: models,

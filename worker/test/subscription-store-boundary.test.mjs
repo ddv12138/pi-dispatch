@@ -29,7 +29,6 @@ function redisFixture(calls = []) {
 	return {
 		get: async key => values.get(key) ?? null,
 		set: async (key, value) => { values.set(key, value); return "OK"; },
-		incr: async key => { calls.push("reserve"); const n = Number(values.get(key) ?? 0) + 1; values.set(key, n); return n; },
 		decr: async key => { const n = Number(values.get(key) ?? 0) - 1; values.set(key, n); return n; },
 		expire: async () => 1,
 		eval: async () => { throw new Error("no quota or money script should run for these unbound jobs"); },
@@ -45,7 +44,7 @@ function configured(storeDir, redis = redisFixture(), overrides = {}) {
 
 function execution(jobsDir, storeDir, calls) {
 	return {
-		redis: redisFixture(calls), caps: { day: 10, week: null, month: null }, softHoldPct: null, now: new Date(NOW),
+		redis: redisFixture(calls), caps: { day: 10, week: null, month: null }, now: new Date(NOW),
 		mintToken: async () => { calls.push("mint"); return "token"; },
 		isDefaultBranchProtected: async () => true,
 		prepareWorkspace: makePrepareWorkspace({ jobsDir, localPlacement: { authStoreDir: storeDir }, stageLive: null }),
@@ -70,7 +69,7 @@ test("every local mount containing the refresh store refuses before mint, prepar
 	const subscriptions = configured(storeDir, redis);
 	assert.equal(subscriptions.storeDir, storeDir, "the path is available only to the host wiring");
 	const records = [];
-	const processJob = makeProcessor({ redis, now: () => NOW, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "unmanaged", model: "test-model", maxTurns: 5, dailyCap: 10, concurrency: 1, softHoldPct: null }), recordRun: record => records.push(record), deps: {
+	const processJob = makeProcessor({ redis, now: () => NOW, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider: "unmanaged", model: "test-model", maxTurns: 5, concurrency: 1 }), recordRun: record => records.push(record), deps: {
 		subscriptionRuntime: subscriptions.runtime, now: new Date(NOW),
 		mintToken: async () => { calls.push("mint"); return "token"; }, isDefaultBranchProtected: async () => true,
 		prepareWorkspace: async () => { calls.push("prepare"); throw new Error("must refuse before preparing"); },
@@ -126,7 +125,7 @@ test("an outside store permits an ordinary local job and never becomes a job inp
 	assert.equal((await configured(storeDir).runtime.check({ kind: "local", folder, provider: "unmanaged", model: "test-model" })).ok, true);
 	const result = await runJob({ kind: "local", folder, provider: "unmanaged", model: "test-model", task: "work" }, execution(jobsDir, storeDir, calls));
 	assert.equal(result.outcome, "completed");
-	assert.deepEqual(calls, ["reserve", "container"]);
+	assert.deepEqual(calls, ["container"]);
 	for (const job of fs.readdirSync(jobsDir)) {
 		const jobDir = join(jobsDir, job);
 		assert.equal(fs.existsSync(join(jobDir, "connection.credential")), false);

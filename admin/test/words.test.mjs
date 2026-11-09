@@ -230,7 +230,7 @@ test("shortSentence backs a cut off past a dangling word and an open parenthesis
   assert.equal(shortSentence(REASONS["token-cap"].sentence), "A token budget had no room left for this run's token budget…");
   assert.equal(shortSentence(REASONS["job-image-forge-unsupported"].sentence), "The job image does not support this job's forge", "its aside dropped, it fits");
   // An aside that opens below the floor is dropped whole, and the sentence cut again.
-  assert.equal(shortSentence(REASONS["scope-cap"].sentence), "This repository's or folder's run cap for the window was already…");
+  assert.equal(shortSentence(REASONS["model-unknown"].sentence), "This job names an AI model that this deployment does not know…");
   // Never below the floor: a sentence whose only back-off would leave a stub keeps its cut.
   assert.equal(shortSentence(`Refused: ${"x".repeat(20)} the ${"y".repeat(60)}.`), `X${"x".repeat(19)} the…`, "a back-off below the floor is not taken");
   const stub = shortSentence(`Refused: ab (${"x ".repeat(40)}`);

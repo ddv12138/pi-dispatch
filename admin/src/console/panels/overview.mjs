@@ -110,12 +110,6 @@ export const HOSTS_EMPTY = Object.freeze({ title: "no host is registered yet", b
 /** Waitlists' line when nothing waits on a slot, another run or a check (a retry or a pause may still wait). */
 export const WAITLISTS_CALM = "No job waits for a slot, another run, or a time or check.";
 
-/** The caps' word for the soft hold: what the worker does from it (budget.mjs), not what the design drew. */
-export const SOFT_HOLD_TEXT = "From the soft hold new starts are refused; nothing is spent.";
-
-/** Waitlists' line beside today's soft-hold refusals: none of them waits in line. */
-export const SOFT_HOLD_REFUSED_TEXT = "The soft hold refuses rather than holds.";
-
 /** A slot held by a job that is gone: the console cannot free it (no action reaches another host's runtime). */
 export const FREE_SLOT_TEXT = "The slot frees when that job's container is gone; nothing in the console reaches another host's runtime.";
 
@@ -165,7 +159,7 @@ const UNREAD = Object.freeze({
   waitingCut: WAITING_CUT_TEXT,
   settings: "The settings overlay could not be read, so its caps are not drawn.",
   dollars: "The token counters could not be read.",
-  counts: "The job or token counters could not be read, so their windows are not drawn.",
+  counts: "The token counter could not be read, so its window is not drawn.",
   spend: "The run records could not be read, so the spend per hour is not drawn.",
   spendShort: "Not every run record of today was read, so these hours may be missing spend.",
   runs: "The run history could not be read, so only what runs and waits is drawn.",
@@ -717,12 +711,9 @@ export const overviewTimeline = overviewPanel("Runs by project", (s, view) => {
 
 // ---- Caps ------------------------------------------------------------------------------------------------------------------
 
-/** The job and token windows: `[name, window, counter key, overlay cap key, takes the soft hold]`. */
+/** The token window: `[name, window, counter key, overlay cap key]`. */
 const COUNT_CAPS = Object.freeze([
-  ["Jobs", "today", "day", "dailyCap", true],
-  ["Jobs", "week", "week", "weeklyCap", true],
-  ["Jobs", "month", "month", "monthlyCap", true],
-  ["Tokens", "today", "tokensToday", "dailyTokenCap", false],
+  ["Tokens", "today", "tokensToday", "dailyTokenCap"],
 ]);
 
 const WINDOW_WORD = Object.freeze({ day: "today", week: "week", month: "month" });
@@ -751,33 +742,31 @@ function windowName(row) {
 }
 
 /**
- * A count window's status by the budget's own band (budget.mjs `windowState`): failed once the next start would pass the
- * cap, attention once it would pass the soft hold, else ok.
+ * A count window's status by the token budget's own band ("over at the cap", tokens have no soft hold): failed once
+ * the counter reaches its cap, else ok.
  */
-export function countStatus(used, cap, hold) {
-  if (used >= cap) return "failed";
-  return Number.isInteger(hold) && used >= Math.floor((cap * hold) / 100) ? "attention" : "ok";
+export function countStatus(used, cap) {
+  return used >= cap ? "failed" : "ok";
 }
 
 /**
- * Caps: a capsule for every window with a cap whose counter was read. The job and token caps and the soft hold are the
- * settings overlay's, so they are drawn only from a settings read made whole (the reader's `{ path, overlay }`, an
- * object; never its `{ path, invalid }`, on which the worker refuses every job): any other read is said in a line of its
- * own (`UNREAD.settings`) and draws none of them. A window with a cap whose counter was not read (a job or token counter
- * that is not a number, the token counters' read failed, or a token window's counter null) is said in a line too. The
+ * Caps: a capsule for every window with a cap whose counter was read. The token caps are the settings overlay's, so
+ * they are drawn only from a settings read made whole (the reader's `{ path, overlay }`, an object; never its
+ * `{ path, invalid }`, on which the worker refuses every job): any other read is said in a line of its own
+ * (`UNREAD.settings`) and draws none of them. A window with a cap whose counter was not read (the token counter that
+ * is not a number, the token counters' read failed, or a token window's counter null) is said in a line too. The
  * empty sentence, `CAPS_EMPTY_TEXT`, is drawn only where no window has a cap and nothing went unread, and it names its
- * source: the worker's own caps from its environment (`PI_DAILY_CAP` and the rest) are in no read this console makes, so
- * "No cap is set." would be false of a worker that caps at its default.
+ * source: the worker's own caps from its environment (`PI_DAILY_TOKEN_CAP` and the rest) are in no read this console
+ * makes, so "No cap is set." would be false of a worker that caps at its default.
  */
 export const overviewCaps = overviewPanel("Caps", (s, view) => {
   const read = s.settings;
   const settingsRead = read !== null && typeof read === "object" && !read.invalid && read.overlay !== null && typeof read.overlay === "object" && !Array.isArray(read.overlay);
   const overlay = settingsRead ? read.overlay : {};
   const b = s.budget !== null && typeof s.budget === "object" ? s.budget : null;
-  const hold = Number.isInteger(overlay.softHoldPct) && overlay.softHoldPct >= 1 && overlay.softHoldPct <= 99 ? overlay.softHoldPct : null;
   const caps = [];
   let countsUnread = false;
-  for (const [name, window, key, capKey, holds] of COUNT_CAPS) {
+  for (const [name, window, key, capKey] of COUNT_CAPS) {
     const cap = overlay[capKey];
     if (!Number.isSafeInteger(cap) || cap <= 0) continue;
     const used = b === null ? NaN : Number(b[key] ?? 0);
@@ -785,7 +774,7 @@ export const overviewCaps = overviewPanel("Caps", (s, view) => {
       countsUnread = true;
       continue;
     }
-    caps.push(ui.capsule({ name, window, pct: pctOf(used, cap), hold: holds ? hold : null, status: holds ? countStatus(used, cap, hold) : used >= cap ? "failed" : "ok" }));
+    caps.push(ui.capsule({ name, window, pct: pctOf(used, cap), status: countStatus(used, cap) }));
   }
   const keys = [];
   let dollarsUnread = Boolean(s.windows?.unreachable);
@@ -802,8 +791,8 @@ export const overviewCaps = overviewPanel("Caps", (s, view) => {
   const unread = [settingsRead ? null : UNREAD.settings, countsUnread ? UNREAD.counts : null, dollarsUnread ? UNREAD.dollars : null].filter(Boolean).map((t) => html`<p class="card__sub">${t}</p>`);
   const spend = ui.btn({ kind: "sm", label: "Spend", href: hrefTo(view, "insights") });
   if (caps.length === 0) return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`${unread.length > 0 ? unread : html`<p class="muted">${uiText(CAPS_EMPTY_TEXT, view.locale)}</p>`}<p class="card__sub">${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
-  const legend = html`<p class="keyrow"><span><i class="k tone-ok"></i>Open</span>${hold !== null ? html`<span><i class="k tone-attention"></i>Soft hold</span>` : null}<span><i class="k tone-failed"></i>Full</span>${hold !== null ? html`<span><i class="k k--hold"></i>Soft hold line (${count(hold)}%)</span>` : null}${keys.length > 0 ? html`<span>${keys.join("; ")}</span>` : null}</p>`;
-  return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`<div class="capbars">${caps}</div>${legend}${unread}<p class="card__sub">${hold !== null ? `${uiText(SOFT_HOLD_TEXT, view.locale)} ` : ""}${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
+  const legend = html`<p class="keyrow"><span><i class="k tone-ok"></i>Open</span><span><i class="k tone-failed"></i>Full</span>${keys.length > 0 ? html`<span>${keys.join("; ")}</span>` : null}</p>`;
+  return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`<div class="capbars">${caps}</div>${legend}${unread}<p class="card__sub">${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
 });
 
 // ---- Waitlists -------------------------------------------------------------------------------------------------------------
@@ -966,15 +955,6 @@ function scheduledLine(s, view) {
   return html`<p class="card__sub">${ui.icon("clock", { size: "sm" })} ${tr("Scheduled:", view)} ${shown}${list.length > 3 ? tr(`, and ${count(list.length - 3)} more`, view) : ""}</p>`;
 }
 
-/** Today's soft-hold refusals, linked to those runs: none of them waits in line. */
-function softHoldLine(s, view) {
-  const t = s?.softHoldToday;
-  const hold = Number.isInteger(s?.settings?.overlay?.softHoldPct);
-  if (!t || !Number.isSafeInteger(t.count) || (t.count === 0 && !hold)) return null;
-  const n = html`${t.floor ? tr("at least ", view) : ""}${count(t.count)} ${tr("today", view)}`;
-  return html`<p class="card__sub">${tr(SOFT_HOLD_REFUSED_TEXT, view)} ${t.count > 0 ? html`<a href="${hrefTo(view, "runs", { outcome: "refused", reason: "soft-hold" })}">${n}</a>` : n}.</p>`;
-}
-
 /**
  * Why the waiting counts are a floor, in one line for every role, or null when they are not: the read stopped at its
  * bound on queues (it read the first `byQueue.length` and counts the rest, `queuesCut`), or a queue holds more waiting
@@ -994,14 +974,14 @@ function floorText(w, view) {
  * `FREE_SLOT_TEXT`; Chain, the run it waits for; Edit, the trigger whose wait check holds it, where the job's defer
  * record names one, or the cron trigger of a scheduler's next run, which the queue will not remove; else Cancel, for a
  * job `cancel-queued` would remove), a line when the read was cut (`floorText`), every queue's counts, what is
- * scheduled next, and today's soft-hold refusals.
+ * scheduled next.
  */
 export const overviewWaitlists = overviewPanel("Waitlists", (s, view) => {
   const w = waitingOf(s);
   const operator = view.role === "operator";
   const act = canAct(view);
   const orphans = orphansByHost(s);
-  const foot = html`${queueRow(s, w, view)}${scheduledLine(s, view)}${softHoldLine(s, view)}`;
+  const foot = html`${queueRow(s, w, view)}${scheduledLine(s, view)}`;
   if (w === null) return ui.card({ title: uiText("Waitlists", view.locale), body: html`<div class="wl"><p class="muted">${uiText(UNREAD.waiting, view.locale)}</p>${foot}</div>` });
   const by = bucketCounts(w);
   const bar = ui.waitBar(DEFER_BUCKETS.map((b) => ({ icon: bucketIcon(b), count: by[b] })), { label: tr("In line by reason", view) });

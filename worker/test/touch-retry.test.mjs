@@ -9,7 +9,7 @@ import { enqueueForgeJob } from "../src/queue.mjs";
 
 const DAY = 86400_000;
 const NOW = Date.UTC(2026, 9, 30, 12);
-const settings = () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null });
+const settings = () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 });
 
 test("same-ID retries retain the prior attempt's answer evidence and gap through every terminal replacement", async () => {
 	for (const bound of [false, true]) for (const terminal of ["completed", "settings", "wait", "failed"]) {

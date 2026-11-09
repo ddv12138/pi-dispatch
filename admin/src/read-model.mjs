@@ -39,7 +39,7 @@ import { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_S
 export { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, newerSkippedSentence, pauseWindowsNewerRefusal, readableRecords, shownRecord };
 // The scoped-limits validator is shared for the anti-drift reason the pause/subscriptions ones are: the
 // write goes through the exact parser the worker boot-loads, so the sides cannot disagree on the schema.
-import { danglingProjectRows, tokenKeyPrefixFor, isModelScope, isProjectScope, parseScopedLimits, scopeTokenKeyPrefix, scopedLimitsVersionFor, scopeKeyPrefix, TOKEN_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { danglingProjectRows, tokenKeyPrefixFor, isProjectScope, parseScopedLimits, scopeTokenKeyPrefix, scopedLimitsVersionFor, TOKEN_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
 // The projects parser, for the same anti-drift reason: a `project:<id>` row is written only when the id is a project the
 // worker would load (issue #499 part B).
 import { PROJECT_ID_RE, parseProjects, projectOf, projectsVersionFor } from "@edgehero/pi-dispatch/projects";
@@ -694,7 +694,7 @@ export async function checkDispatchRun({
  *     plus the dirty-tree refusal.
  *   - `false` (the operator's `/dispatch run`): the dirty-tree refusal ONLY -- typing the command IS the
  *     approval, so the allowlist, gate, and rate limit are the AI path's compensating controls and are skipped.
- * Validation runs cheapest/most-definitive first. No spend-knob param (model/maxTurns/dailyCap/concurrency)
+ * Validation runs cheapest/most-definitive first. No spend-knob param (model/maxTurns/dailyTokenCap/concurrency)
  * exists here; those resolve worker-side from the overlay/env. Refusal reasons carry folder/flow (operator
  * config) but NEVER task text, and nothing here logs.
  */
@@ -1065,9 +1065,9 @@ export function writeScopedLimits({ scopedLimitsPath, projectsPath = null, mutat
   }
   const next = mutate(current.map((l) => ({ ...l })));
   const rows = next.map((l) => Object.fromEntries(Object.entries(l).filter(([, v]) => v !== null && v !== undefined)));
-  // The LOWEST version that expresses the file (issues #501 part 5, #502 part 6, #498): 1 unless a row carries a
-  // dollar window, is a model row or has a forge-qualified scope, so a file of bare and folder job-count rows stays
-  // readable by a worker that predates version 2.
+  // The LOWEST version that expresses the file (issues #501 part 5, #502 part 6, #498, #596): 1 unless a row carries a
+  // token window, is a model or project row, has a forge-qualified scope, or sets a size -- so a file of bare and folder
+  // concurrency-only rows stays readable by a worker that predates version 2.
   const text = `${JSON.stringify({ version: scopedLimitsVersionFor(rows), limits: rows }, null, 2)}\n`;
   let written;
   try {
@@ -1884,9 +1884,10 @@ export async function revertAllocation({ url, envelope, digest = envelopeDigest(
 }
 
 /**
- * The used counts behind each scoped limit row (issue #242): GET only the windows a row actually caps
+ * The used counts behind each scoped limit row (issue #242): GET only the TOKEN windows a row actually caps -- job-count
+ * windows (day/week/month) are gone with the job-start caps (C1), so only `tokensUsed` is read here.
  * (a concurrent-only row touches redis zero times -- in-flight is worker-process state this reader
- * cannot see), under the keys the worker's own builders compose from the shared `scopeKeyPrefix`, so
+ * cannot see), under the keys the worker's own builders compose from the shared `tokenKeyPrefixFor`, so
  * the two sides cannot drift on the key shape. `rows[i]` matches `limits[i]`; an absent key reads as an
  * honest 0 (a scope that never ran). One client, one timeout, `{ unreachable }` on a dead queue --
  * `readBudget`'s posture exactly.
@@ -1902,13 +1903,6 @@ export async function readScopedBudget({ url, limits, redisFn = makeRedisClient,
       limits.map(async (l) => {
         const cell = async (key) => Number((await redis.get(key)) ?? 0);
         const row = {};
-        // A model row has no job-count windows (issue #502 part 6), and its scope is not a job's scope.
-        if (!isModelScope(l.scope)) {
-          const prefix = scopeKeyPrefix(l.scope);
-          if (l.day !== null && l.day !== undefined) row.day = await cell(dayKey(now, prefix));
-          if (l.week !== null && l.week !== undefined) row.week = await cell(weekKey(now, prefix));
-          if (l.month !== null && l.month !== undefined) row.month = await cell(monthKey(now, prefix));
-        }
         // The token windows (version 2), in integer tokens held or settled so far, under the keys the
         // worker composes from the same shared export (`tokenKeyPrefixFor`). Only the windows the row caps.
         if (TOKEN_LIMIT_FIELDS.some((f) => l[f] !== null && l[f] !== undefined)) {
@@ -2483,12 +2477,11 @@ export function mapSchedulers(list, nowMs) {
 }
 
 /**
- * Read the reserved counts for all three spend windows, plus the daily token counter, with plain,
- * side-effect-free GETs of the worker's own job-count keys (`dayKey()` / `weekKey()` / `monthKey()`) and
- * the token day under `TOKEN_KEY_PREFIX` (`budget:tok:`) --
- * NEVER an INCR/EXPIRE, so observing the budget cannot consume a slot or a token. Returns
- * `{ day, week, month, tokensToday }` (the caps live in the settings overlay, resolved by the
- * renderer). `makeRedisClient` has no failFast option and would otherwise buffer the GETs forever while
+ * Read the daily token counter with a plain, side-effect-free GET of the token day under `TOKEN_KEY_PREFIX`
+ * (`budget:tok:<date>`) -- NEVER an INCR/EXPIRE, so observing the budget cannot consume a token. Returns
+ * `{ tokensToday }` (the cap lives in the settings overlay, resolved by the renderer). The job-count windows
+ * are gone (C1: job-start caps removed), so no `budget:<date>` / `budget:w:*` / `budget:m:*` key is read.
+ * `makeRedisClient` has no failFast option and would otherwise buffer the GETs forever while
  * disconnected, so the read is bounded by a timeout that degrades to `{ unreachable }` -- and a junk URL
  * degrades SYNCHRONOUSLY through the same parse `readSchedulers` fails fast on, because burning the full
  * timeout on an unparseable URL is how a canned "not-a-url" test fixture turns into 2.5 wasted seconds
@@ -2499,8 +2492,8 @@ export async function readBudget({ url, redisFn = makeRedisClient, timeoutMs = 2
   try {
     parseConnection(url, { failFast: true }); // throws on junk before any client exists
     redis = redisFn(url);
-    const settled = Promise.all([redis.get(dayKey(now)), redis.get(weekKey(now)), redis.get(monthKey(now)), redis.get(dayKey(now, TOKEN_KEY_PREFIX))]).then(
-      ([day, week, month, tokens]) => ({ day: Number(day ?? 0), week: Number(week ?? 0), month: Number(month ?? 0), tokensToday: Number(tokens ?? 0) }),
+    const settled = redis.get(dayKey(now, TOKEN_KEY_PREFIX)).then(
+      (tokens) => ({ tokensToday: Number(tokens ?? 0) }),
       (err) => ({ unreachable: err?.message ?? String(err) }),
     );
     return await withTimeout(settled, timeoutMs, { unreachable: "timed out reaching the queue" });
@@ -4649,13 +4642,10 @@ export function createFleetReader(
       // Issue #737: the waiting jobs, started now beside the queue reads and awaited at the end (cached, so at most one
       // read per WAITING_TTL_MS). Null when this call did not ask for them.
       const waitingRead = waiting === true ? waitingOf(queues, Array.isArray(projectsView?.projects) ? projectsView.projects : null, Array.isArray(triggersView?.triggers) ? triggersView.triggers : null, opts?.freshWaiting === true) : null;
-      const [pausedStates, countsPer, workerList, dayRaw, weekRaw, monthRaw, tokenRaw, schedulerLists, activeLists, stallCounts] = await Promise.all([
+      const [pausedStates, countsPer, workerList, tokenRaw, schedulerLists, activeLists, stallCounts] = await Promise.all([
         Promise.all(queues.map((q) => q.isPaused())),
         Promise.all(queues.map((q) => q.getJobCounts("waiting", "active", "paused", "delayed", "failed"))),
         queue.getWorkers().catch(() => []),
-        redis.get(dayKey()),
-        redis.get(weekKey()),
-        redis.get(monthKey()),
         redis.get(dayKey(new Date(nowFn()), TOKEN_KEY_PREFIX)), // the token windows' day counter (budget:tok:YYYY-MM-DD)
         // The shared queue's failure is UNCAUGHT (the panel must not draw a scheduler list it could not read), a host
         // queue's is caught: one unreachable host degrades one host's triggers, never the view.
@@ -4722,26 +4712,12 @@ export function createFleetReader(
       // enter it. ONE MGET for the first PROGRESS_BATCH_MAX ids, started now and awaited at the end, so it rides beside
       // the reads below rather than adding a round trip to the tick. Unreadable: every row's progress is null.
       const progressRead = readProgressMany(redis, runIds, { timeoutMs: FLEET_READ_TIMEOUT_MS });
-      // The scoped limits + their live counters (issue #242): GET only the windows a row caps, each cell caught
-      // individually so one bad read degrades one cell, never the snapshot. Keys recomputed from the shared
-      // scopeKeyPrefix, so this reader and the worker's writer cannot drift.
+      // The scoped limits (issue #242): configured rows only. Job-count windows (`day/week/month`) are gone with the
+      // job-start caps (C1); the token windows and concurrency stay, and the page gets their counters from
+      // `readScopedBudget` on demand (the budget panel's token half).
       const scopedLimits = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath });
       const limitRows = Array.isArray(scopedLimits?.limits) ? scopedLimits.limits : [];
-      const scopedNow = new Date();
-      const scopedBudget = {
-        rows: await Promise.all(
-          limitRows.map(async (l) => {
-            const prefix = scopeKeyPrefix(l.scope);
-            const cell = (key) => redis.get(key).then((v) => Number(v ?? 0), () => null);
-            const row = {};
-            if (Number.isInteger(l.day)) row.day = await cell(dayKey(scopedNow, prefix));
-            if (Number.isInteger(l.week)) row.week = await cell(weekKey(scopedNow, prefix));
-            if (Number.isInteger(l.month)) row.month = await cell(monthKey(scopedNow, prefix));
-            return row;
-          }),
-        ),
-      };
-      // Jobs the worker is holding on run.waitFor (issue #230). Caught individually like the scoped cells above, so a
+      // Jobs the worker is holding on run.waitFor (issue #230). Caught individually like the dollar windows below, so a
       // dead key or a slow SCAN degrades one section rather than the whole snapshot. Reads the worker's own
       // `wait:job:*` hashes and never a delayed Job: a delayed job's `.data` holds the issue title and body.
       const held = await heldJobs(redis, { prune }).catch((err) => ({ unreachable: err?.message ?? String(err) }));
@@ -4792,14 +4768,14 @@ export function createFleetReader(
           parkedUnreachable: w.partial ? scrubReason(w.partial) : null,
           recordReasons: newestReasonsOf(w.runs),
           recordDetails: new Map(w.runs.map((r) => [r.jobId, r]).reverse()),
-          // Issue #737: the overview's day of runs, its spend per hour and its soft-hold refusals, off the same window.
+          // Issue #737: the overview's day of runs and its spend per hour, off the same window. The soft-hold count is
+          // gone with the job-start caps (C1); old records carrying `soft-hold` still parse as unknown reasons.
           runsDay: runsDayOf(w, nowMs),
           spendByHour: spendByHourOf(w, nowMs),
-          softHoldToday: softHoldTodayOf(w, nowMs),
         }),
         // An empty `parked` alone would read as "nobody is waiting"; `parkedUnreachable` says the list is not known. The
-        // three day folds are null for the same reason: not known, never an empty day.
-        (err) => ({ parked: [], failures24h: null, refusals24h: null, failures24hFloor: false, parkedUnreachable: scrubReason(err?.message ?? String(err)) || "the runs could not be read", recordReasons: new Map(), runsDay: null, spendByHour: null, softHoldToday: null }),
+        // two day folds are null for the same reason: not known, never an empty day.
+        (err) => ({ parked: [], failures24h: null, refusals24h: null, failures24hFloor: false, parkedUnreachable: scrubReason(err?.message ?? String(err)) || "the runs could not be read", recordReasons: new Map(), runsDay: null, spendByHour: null }),
       );
       // Issue #710: each failed job's record reason (its newest record in the wide window), the closed enum alone, so the
       // fleet page can say why in the row. BullMQ's own `failedReason` stays the operator's free text, never in a row.
@@ -4857,7 +4833,6 @@ export function createFleetReader(
         held,
         failed,
         scopedLimits,
-        scopedBudget,
         windows: dollars,
         queue: { pausedState, pausedPartial, counts, workers, queues: queues.length, fleetDegraded },
         // Issue #641: each queue's own counts beside the summed ones, so a surface can say which host's queue is deep.
@@ -4874,7 +4849,8 @@ export function createFleetReader(
         // sentence quotes this host's doctor before another's (each host has its own copy of the files). Null when the
         // declared name is one the worker refuses.
         doctorSelf: doctorSelfName(budgetEnvFn() ?? {}),
-        budget: { day: Number(dayRaw ?? 0), week: Number(weekRaw ?? 0), month: Number(monthRaw ?? 0), tokensToday: Number(tokenRaw ?? 0) },
+        // Today's token counter only: the job-count windows (day/week/month) went with the job-start caps (C1).
+        budget: { tokensToday: Number(tokenRaw ?? 0) },
         schedulers: mapSchedulers(schedulerList, nowMs).map((scheduler) => {
           const trigger = triggersView?.triggers?.find((t) => t.type === "cron" && t.id === scheduler.key);
           const project = typeof trigger?.folder === "string" ? projectOf({ kind: "local", folder: trigger.folder }, projectsView?.projects ?? []) : null;
@@ -4928,11 +4904,10 @@ export function createFleetReader(
         failures24h: fold.failures24h,
         refusals24h: fold.refusals24h,
         failures24hFloor: fold.failures24hFloor,
-        // Issue #737, off the wide window (each null when it could not be read): the last 24 hours' runs (`runsDayOf`),
-        // today's settled spend per UTC hour (`spendByHourOf`) and today's soft-hold refusals (`softHoldTodayOf`).
+        // Issue #737, off the wide window (each null when it could not be read): the last 24 hours' runs (`runsDayOf`)
+        // and today's settled spend per UTC hour (`spendByHourOf`).
         runsDay: fold.runsDay,
         spendByHour: fold.spendByHour,
-        softHoldToday: fold.softHoldToday,
         // Issue #737: when the registry rows in `hostBudgets` were read (the reader's clock), null before any read.
         hostsReadAt: lastHostsAt,
         // Issue #737: the waiting jobs (`readWaiting`'s shape, or `{ unreachable: true }`), only on a call that asked.
@@ -5250,7 +5225,7 @@ function msOf(iso) {
   return Number.isFinite(t) ? t : null;
 }
 
-/** The first instant of `ms`'s UTC day: the count windows' day (`COUNT_WINDOWS_UTC_TEXT`), so "today" is theirs. */
+/** The first instant of `ms`'s UTC day, so "today" is the UTC day the spend fold buckets by. */
 function utcDayStart(ms) {
   return Math.floor(ms / DAY_MS) * DAY_MS;
 }
@@ -5425,21 +5400,6 @@ function runsWindowOf(w, nowMs) {
     spentTokens: safe(spentTokens),
     unpriced,
   });
-}
-
-/**
- * Today's soft-hold refusals (issue #737), `{ count, floor, partial }`: the records of this UTC day up to `nowMs` whose
- * reason is `soft-hold`, the budget band that refuses new starts below a count window's cap (budget.mjs). Today, not
- * the last 24 hours, because the band belongs to the count windows and they are UTC days.
- */
-function softHoldTodayOf(w, nowMs) {
-  const dayStart = utcDayStart(nowMs);
-  let count = 0;
-  for (const r of w.runs) {
-    const at = runAt(r);
-    if (at >= dayStart && at <= nowMs && r?.reason === "soft-hold") count += 1;
-  }
-  return { count, floor: windowFloor(w.runs, dayStart), partial: Boolean(w.partial) };
 }
 
 // ---------------------------------------------------------------------------------------------------------------------

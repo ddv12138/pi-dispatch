@@ -18,7 +18,7 @@ test("every action has an explicit policy with a reason and non-person actions h
 });
 
 test("only actual explicit decreases authorize settings, including exact tokens", () => {
-  for (const [key, old, next] of [["dailyCap", 10, 9], ["maxTokens", 200, 100], ["concurrency", 3, 2], ["maxTurns", 30, 20], ["softHoldPct", 90, 80], ["dailyTokenCap", 2_000_002, 2_000_001], ["weeklyTokenCap", 20_000_000, 19_999_999], ["monthlyTokenCap", 3, 2]]) {
+  for (const [key, old, next] of [["maxTokens", 200, 100], ["concurrency", 3, 2], ["maxTurns", 30, 20], ["dailyTokenCap", 2_000_002, 2_000_001], ["weeklyTokenCap", 20_000_000, 19_999_999], ["monthlyTokenCap", 3, 2]]) {
     const transition = { before: { [key]: old, provider: "fixed" }, after: { [key]: next, provider: "fixed" } };
     assert.equal(mode("setting-set", transition), "unattended", key);
     assert.equal(mode("setting-set", { before: transition.after, after: transition.before }), "confirm", `${key} raise`);
@@ -26,7 +26,7 @@ test("only actual explicit decreases authorize settings, including exact tokens"
     assert.equal(mode("setting-set", { before: transition.before, after: {} }), "confirm", `${key} unset`);
     assert.equal(mode("setting-set", { ...transition, after: { ...transition.after, provider: "changed" } }), "confirm", `${key} mixed`);
   }
-  for (const value of [null, NaN, Infinity, "10", {}, -1]) assert.equal(mode("setting-set", { before: { dailyCap: value }, after: { dailyCap: 1 } }), "confirm");
+  for (const value of [null, NaN, Infinity, "10", {}, -1]) assert.equal(mode("setting-set", { before: { maxTokens: value }, after: { maxTokens: 1 } }), "confirm");
   // A token cap is a whole number: a value that is not one cannot prove a decrease, so the operator confirms.
   assert.equal(mode("setting-set", { before: { dailyTokenCap: 2000 }, after: { dailyTokenCap: "1000" } }), "confirm", "a string cannot prove a decrease");
   for (const value of [NaN, Infinity, 0.5, "1000", null, -1]) assert.equal(mode("setting-set", { before: { dailyTokenCap: 2000 }, after: { dailyTokenCap: value } }), "confirm", String(value));

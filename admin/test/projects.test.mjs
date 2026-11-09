@@ -114,7 +114,7 @@ test("writeProjects refuses what the worker would refuse, and writes nothing", (
 });
 
 test("the pair rule: a write that removes a project a scoped-limits row names is refused, naming the row, and writes nothing", () => {
-  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", members: ["github:acme/web"] }, { id: "ops", members: ["/srv/ops"] }]), "sl.json": LIMITS([{ scope: "acme/api", day: 3 }, { scope: "project:shop", day: 2 }]) });
+  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", members: ["github:acme/web"] }, { id: "ops", members: ["/srv/ops"] }]), "sl.json": LIMITS([{ scope: "acme/api", concurrent: 3 }, { scope: "project:shop", concurrent: 2 }]) });
   const before = fs.files.get("p.json");
   const del = writeProjects({ projectsPath: "p.json", scopedLimitsPath: "sl.json", fs, mutate: (l) => l.filter((p) => p.id !== "shop") });
   assert.match(del.invalid, /^project:shop \(index 1\) in sl\.json names this project.*delete or change that row first.*Nothing was written$/);
@@ -129,7 +129,7 @@ test("the pair rule: a write that removes a project a scoped-limits row names is
 });
 
 test("the pair rule's honest half: a row that ALREADY dangles does not block an unrelated write, which says pending", () => {
-  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", members: ["/srv/a"] }]), "sl.json": LIMITS([{ scope: "project:gone", day: 2 }]) });
+  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", members: ["/srv/a"] }]), "sl.json": LIMITS([{ scope: "project:gone", concurrent: 2 }]) });
   const res = writeProjects({ projectsPath: "p.json", scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { id: "ops", members: ["/srv/b"] }] });
   assert.equal(res.ok, true);
   assert.match(res.pending, /^project:gone in sl\.json names a project that is not in this file; the worker applies this once its live scoped limits no longer name gone; if they do, it keeps its last good projects/);
@@ -138,7 +138,7 @@ test("the pair rule's honest half: a row that ALREADY dangles does not block an 
 });
 
 test("planProjectsWrite never writes; no refusal quotes a project's name", () => {
-  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", name: "Secret Label", members: ["github:acme/web"] }]), "sl.json": LIMITS([{ scope: "project:shop", day: 1 }]) });
+  const fs = memFs({ "p.json": PROJECTS([{ id: "shop", name: "Secret Label", members: ["github:acme/web"] }]), "sl.json": LIMITS([{ scope: "project:shop", concurrent: 1 }]) });
   const plan = planProjectsWrite({ projectsPath: "p.json", scopedLimitsPath: "sl.json", fs, mutate: () => [] });
   assert.ok(plan.invalid);
   assert.ok(!plan.invalid.includes("Secret Label"));
@@ -210,7 +210,7 @@ test("only ENOENT is missing: an UNREADABLE projects.json refuses the write and 
 });
 
 test("only ENOENT is missing: an UNREADABLE scoped-limits file cannot rule a row out, so a removal is refused", { skip: asRoot }, () => {
-  const d = deployment({ projects: [{ id: "shop", members: ["/srv/a"] }], limits: [{ scope: "project:shop", day: 1 }] });
+  const d = deployment({ projects: [{ id: "shop", members: ["/srv/a"] }], limits: [{ scope: "project:shop", concurrent: 1 }] });
   chmodSync(d.sl, 0o200);
   let res;
   try {
@@ -223,11 +223,11 @@ test("only ENOENT is missing: an UNREADABLE scoped-limits file cannot rule a row
 });
 
 test("writeScopedLimits: an UNREADABLE limits file refuses rather than starting from no rows", { skip: asRoot }, () => {
-  const d = deployment({ projects: [], limits: [{ scope: "acme/web", day: 3 }] });
+  const d = deployment({ projects: [], limits: [{ scope: "acme/web", concurrent: 3 }] });
   chmodSync(d.sl, 0o200);
   let res;
   try {
-    res = writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: d.p, mutate: (l) => [...l, { scope: "acme/api", day: 1 }] });
+    res = writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: d.p, mutate: (l) => [...l, { scope: "acme/api", concurrent: 1 }] });
   } finally {
     chmodSync(d.sl, 0o644);
   }
@@ -281,7 +281,7 @@ test("across the two files: a project delete judged before a row add lands is re
       const out = realFs.readFileSync(p, e);
       if (!fired && p === d.sl) {
         fired = true;
-        assert.equal(writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: d.p, mutate: (l) => [...l, { scope: "project:shop", day: 1 }] }).ok, true);
+        assert.equal(writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: d.p, mutate: (l) => [...l, { scope: "project:shop", concurrent: 1 }] }).ok, true);
       }
       return out;
     },
@@ -301,9 +301,9 @@ test("both writers REFUSE a symlinked file, with a plain message, and touch neit
   assert.equal(lstatSync(d.p).isSymbolicLink(), true);
   assert.equal(readFileSync(target, "utf8"), before);
   const slTarget = join(d.p, "..", "shared-limits.json");
-  writeFileSync(slTarget, LIMITS([{ scope: "acme/web", day: 1 }]));
+  writeFileSync(slTarget, LIMITS([{ scope: "acme/web", concurrent: 1 }]));
   symlinkSync(slTarget, d.sl);
-  const sl = writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: null, mutate: (l) => [...l, { scope: "acme/api", day: 2 }] });
+  const sl = writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: null, mutate: (l) => [...l, { scope: "acme/api", concurrent: 2 }] });
   assert.match(sl.invalid, /point PI_SCOPED_LIMITS_FILE at the real path/);
   assert.equal(parseScopedLimits(readFileSync(slTarget, "utf8"), slTarget).length, 1);
   // A dangling link is a link too: refused, never replaced by a regular file.
@@ -334,7 +334,7 @@ test("the mode is kept, and so are the owner and group: a file the worker owns s
   assert.equal(readFileSync(d.p, "utf8"), before);
   assert.ok(!readdirSync(join(d.p, "..")).some((f) => f.endsWith(".tmp")), "the tmp file is dropped");
   // The same rule in the scoped-limits writer.
-  writeFileSync(d.sl, LIMITS([{ scope: "acme/web", day: 1 }]));
+  writeFileSync(d.sl, LIMITS([{ scope: "acme/web", concurrent: 1 }]));
   const fsDeniedSl = { ...realFs, statSync: (p) => (p === d.sl ? asWorker(realFs.statSync(p)) : realFs.statSync(p)), chownSync: fsDenied.chownSync };
   assert.match(writeScopedLimits({ scopedLimitsPath: d.sl, projectsPath: null, fs: fsDeniedSl, mutate: (l) => l }).invalid, /could not be given that owner/);
 });

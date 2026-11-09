@@ -21,7 +21,7 @@ if (!mod && process.env.PI_DISPATCH_REQUIRE_WORKER_TESTS === "1") {
 const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.19.0); CI runs these`;
 
 const NOW = Date.UTC(2026, 10, 2, 9, 0);
-const SETTINGS = { provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null };
+const SETTINGS = { provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 };
 const NEWER_SETTINGS = { invalid: "settings file written by a newer pi-dispatch (version 2; this build understands 1)", newer: true };
 
 /**

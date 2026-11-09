@@ -78,7 +78,7 @@ function harness({ redis = fakeRedis(), deps = {}, afterMaxMs, waitState, checkS
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW,
 		recordRun: (r) => seen.records.push(r),
 		timeoutMs: 100000,
@@ -380,7 +380,7 @@ test("pause outranks wait: a paused job defers to the window, not to its instant
 	const { processor } = harness();
 	const paused = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		pauseUntil: () => windowEnd, now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		deps: { mintToken: async () => "tok", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 0, aborted: false }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 	});
@@ -403,7 +403,7 @@ test("a job with no waitFor takes a byte-identical path, and `deps: {}` does not
 	// a `deps: {}` wiring from throwing on the log and comment seams.
 	const bare = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis: fakeRedis(),
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		recordRun: () => {}, timeoutMs: 100000, now: () => NOW, deps: {},
 	});
 	const held = spyJob(forge([{ profile: "jira" }]), { id: "gh-bare" });
@@ -530,7 +530,7 @@ function tier2(overrides = {}) {
 	const seen = { containerCalls: 0, records: [], logs: [], comments: [], asked: [] };
 	const processor = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW, recordRun: (r) => seen.records.push(r), timeoutMs: 100000,
 		waitState: state,
 		random: () => 0, // no jitter, so a delay assertion is exact
@@ -686,7 +686,7 @@ test("the maximum hold is tested AFTER the check, so a condition that clears on 
 	// The processor is built against the aged state directly.
 	const aged = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		waitState: makeWaitState({ redis, now: () => NOW }), random: () => 0,
 		maxWaitMs: () => 24 * 3600 * 1000, maxChecks: () => 96, maxFaults: () => 5, intervalMs: () => 60_000,
@@ -711,7 +711,7 @@ test("a job past the maximum hold whose check still says not-yet expires, naming
 	const seen = { comments: [] };
 	const aged = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW, recordRun: () => {}, timeoutMs: 100000,
 		waitState: makeWaitState({ redis, now: () => NOW }), random: () => 0,
 		maxWaitMs: () => 24 * 3600 * 1000, maxChecks: () => 96, maxFaults: () => 5, intervalMs: () => 60_000,
@@ -779,7 +779,7 @@ test("`wait_cleared` fires only for a job that actually held", { skip }, async (
 	const held = spyJob(forge([{ after: iso(NOW - 1000) }]), { id: "gh-held" });
 	const withState = mod.makeProcessor({
 		cancelJob: () => {}, stopContainer: () => {}, redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW, recordRun: () => {}, timeoutMs: 100000, waitState: makeWaitState({ redis, now: () => NOW }),
 		deps: { mintToken: async () => "t", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }), runContainer: async () => ({ code: 0, aborted: false }), cleanup: async () => {}, comment: async () => {}, log: (e, f) => ran.seen.logs.push({ e, f }), isJobLive: async () => true },
 	});
@@ -878,7 +878,7 @@ test("the REAL checker composed with the REAL gate: every exit code reaches its 
 		const checkWait = makeWaitChecker({ profiles: { jira: "/opt/pi/wait.sh" }, spawnFn, realExecutablePath: (p) => p, log: () => {} });
 		const processor = mod.makeProcessor({
 			cancelJob: () => {}, stopContainer: () => {}, redis,
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			now: () => NOW, recordRun: () => {}, timeoutMs: 100000, random: () => 0,
 			waitState: makeWaitState({ redis, now: () => NOW }),
 			maxFaults: () => 5, maxChecks: () => 96, maxWaitMs: () => 24 * 3600 * 1000, intervalMs: () => 60_000,

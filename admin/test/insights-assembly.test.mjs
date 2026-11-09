@@ -210,26 +210,28 @@ test("the page carries the budget panel: unreachable canned queue stated as a ba
   const page = await assembledPage(cannedPaths(), "30d");
   assert.ok(page.includes("<h2>budget</h2>"), "the budget panel renders even with the canned dead queue");
   assert.ok(page.includes("budget unreachable:"), "the absence is a banner, not a silent gap");
-  assert.ok(page.includes("adjust: /dispatch set dailyCap"), "the lever is named -- the panel exists to point at it");
+  assert.ok(page.includes("adjust: /dispatch set dailyTokenCap"), "the lever is named -- the panel exists to point at it");
 });
 
 test("the budget slice carries the scoped rows from the limits file; a dead queue leaves used as ? not 0", async () => {
   const dir = tempDir("admin-insights-sl-");
   const slPath = join(dir, "scoped-limits.json");
-  writeFileSync(slPath, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", day: 10, concurrent: 2 }] }));
+  writeFileSync(slPath, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 10_000, concurrent: 2 }] }));
   const page = await assembledPage({ ...cannedPaths(), scopedLimitsPath: slPath }, "30d");
   assert.ok(page.includes("scoped limits (scoped-limits.json)"), "the configured limits reach the page");
-  assert.ok(page.includes("day used ? / cap 10"), "the dead queue leaves used unknown, never an invented zero");
   assert.ok(page.includes("concurrent ≤2 (config; in-flight not shown)"), "concurrency stays config-only");
+  // The dead queue leaves the token counter UNKNOWN, never an invented zero (the slice's own shape).
+  const view = await ia.assembleBudgetView({ ...cannedPaths(), scopedLimitsPath: slPath }, {});
+  assert.deepEqual(view.scoped[0].usd.day, { usedTokens: null, capTokens: 10_000 });
 });
 
-test("the budget slice carries a scoped row's dollar windows, so a dollar-only row is not drawn bare (#507)", async () => {
-  // A `model:` row, or a `project:` row with only `weekUsd`, has no job-count window; the page drew its scope and no
-  // number. The counters come from the one scoped read the slice already makes (`usdMicros`), the caps from the file.
+test("the budget slice carries a scoped row's token windows, so a token-only row is not drawn bare (#507)", async () => {
+  // A `model:` row, or a `project:` row with only `weekTokens`, has no other window; the page drew its scope and no
+  // number. The counters come from the one scoped read the slice already makes (`tokensUsed`), the caps from the file.
   const dir = tempDir("admin-insights-usd-");
   const slPath = join(dir, "scoped-limits.json");
   writeFileSync(slPath, JSON.stringify({ version: 2, limits: [
-    { scope: "acme/web", day: 10 },
+    { scope: "acme/web", concurrent: 2 },
     { scope: "project:shop", weekTokens: 45000000 },
     { scope: "model:anthropic/claude-sonnet-4-5", weekTokens: 80000000, monthTokens: 300500000 },
   ] }));

@@ -3,7 +3,6 @@ import { PLAN_REASON_TEXT } from "@edgehero/pi-dispatch/reason-catalog";
 import { html, trustedRenderer as raw } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { countStatus } from "./overview.mjs";
 import * as capacityPulse from "./capacity-pulse.mjs";
 import { fmtAmount, fmtTokens, escapeInterpreted } from "../../panel.mjs";
 import { buildGraphScene, bannersHtml } from "../../graph-html.mjs";
@@ -227,17 +226,15 @@ export function spendControls(v) {
 function kpi(title, amount, text) {
   return card(title, html`${ui.kpi(amount)}${note(text)}`);
 }
-function capLine(label, used, cap, money = true, soft = null, locale = "en", stateWord = null) {
-  const state = stateWord ?? /: (Full|Soft hold|Open|unknown)$/.exec(label)?.[1];
+function capLine(label, used, cap, money = true, locale = "en", stateWord = null) {
+  const state = stateWord ?? /: (Full|Open|unknown)$/.exec(label)?.[1];
   const status =
     state === "Full"
       ? "failed"
-      : state === "Soft hold"
-        ? "attention"
-        : number(used) === null
-          ? "idle"
-          : "ok";
-  return html`<div class="meterrow"><span class="meterrow__l">${label}</span>${number(used) !== null && number(cap) > 0 ? ui.meter({ value: used, max: cap, label, status, hold: soft, height: 10 }) : html`<svg class="pbar tone-idle" height="10" role="img" aria-label="${label}: ${uiText("usage unknown", locale)}"><rect class="pbar__bed" width="100%" height="10" rx="5"></rect>${number(soft) !== null ? html`<line class="pbar__hold" x1="${soft}%" x2="${soft}%" y1="-3" y2="13"></line>` : null}</svg>`}<span class="meterrow__v">${money ? usd(used) : compactNumber(used)} <span>/ ${money ? usd(cap) : compactNumber(cap)}</span></span></div>`;
+      : number(used) === null
+        ? "idle"
+        : "ok";
+  return html`<div class="meterrow"><span class="meterrow__l">${label}</span>${number(used) !== null && number(cap) > 0 ? ui.meter({ value: used, max: cap, label, status, height: 10 }) : html`<svg class="pbar tone-idle" height="10" role="img" aria-label="${label}: ${uiText("usage unknown", locale)}"><rect class="pbar__bed" width="100%" height="10" rx="5"></rect></svg>`}<span class="meterrow__v">${money ? usd(used) : compactNumber(used)} <span>/ ${money ? usd(cap) : compactNumber(cap)}</span></span></div>`;
 }
 
 export function spendWeek(v) {
@@ -330,7 +327,7 @@ export function spendTokens(v) {
   const s = payload(v).spend?.tokens;
   return card(
     t(v, "Tokens today"),
-    html`${ui.kpi(compactNumber(s?.used, v.locale), html`${t(v, "of")} ${compactNumber(s?.cap, v.locale)}`)}${progress(s?.used, s?.cap, t(v, "Tokens today against the daily token cap"))}<p class="sp-kf">${number(s?.used) === null ? t(v, "unknown") : s.used.toLocaleString("en-US")} ${t(v, "tokens")}, ${pct(s?.used, s?.cap, v.locale)} ${t(v, "of the daily token cap. No soft hold.")}</p>`,
+    html`${ui.kpi(compactNumber(s?.used, v.locale), html`${t(v, "of")} ${compactNumber(s?.cap, v.locale)}`)}${progress(s?.used, s?.cap, t(v, "Tokens today against the daily token cap"))}<p class="sp-kf">${number(s?.used) === null ? t(v, "unknown") : s.used.toLocaleString("en-US")} ${t(v, "tokens")}, ${pct(s?.used, s?.cap, v.locale)} ${t(v, "of the daily token cap.")}</p>`,
     null,
     null,
     "sp-kpi",
@@ -455,10 +452,10 @@ export function spendSizes(v) {
             },
           )}<line class="sp-capline" x1="99%" x2="99%" y1="22" y2="142"></line><text class="sp-ll" x="98%" y="15" text-anchor="end">${t(v, "job cap")}</text>${[0, 1, 2, 3, 4].map((i) => html`<text class="sp-d" x="${i * 24.5}%" y="166" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${markedMoneyText((cap * i) / 4, null, v.locale)}</text>`)}</svg>${note(`${t(v, "Axis from zero to")} ${fmtTokens(cap)} ${t(v, "tokens")}; ${t(v, "equal bins; metered runs:")} ${s?.meteredRangeRuns ?? 0}.`)}`
         : note(t(v, "The per-job token budget could not be read."))
-    }${note(t(v, "While a token window is set, every job reserves its per-job budget before it starts."))}<p class="sp-note">${t(v, "The largest run used")} <b>${usd(s?.largestRangeTokens, v.locale)}</b>; ${t(v, "a lower maxTokens would hold less headroom while jobs run.")}</p>${s?.overJobCapRuns ? note(`${s.overJobCapRuns} ${t(v, s.overJobCapRuns === 1 ? "historical run exceeded today's job cap and is included in the final bin." : "historical runs exceeded today's job cap and are included in the final bin.")}`) : null}`,
+    }${note(t(v, "While a token window is set, every job reserves its per-job budget before it starts."))}<p class="sp-note">${t(v, "The largest run used")} <b>${usd(s?.largestRangeTokens, v.locale)}</b>; ${t(v, "a lower maxTokens would hold less headroom while jobs run.")}</p>`,
     v.role === "operator"
       ? ui.btn({
-          label: t(v, "Change the job cap"),
+          label: t(v, "Change the per-job budget"),
           href: "/config#p-settings",
           icon: "config",
           kind: "sm",
@@ -468,12 +465,6 @@ export function spendSizes(v) {
   );
 }
 
-function countWord(used, cap, hold = null) {
-  if (number(used) === null || number(cap) === null) return "unknown";
-  return { failed: "Full", attention: "Soft hold", ok: "Open" }[
-    countStatus(used, cap, hold)
-  ];
-}
 export function spendCaps(v) {
   const p = payload(v);
   const b = p.budget;
@@ -494,32 +485,18 @@ export function spendCaps(v) {
       b.windows?.settingsInvalid ||
       b.windows?.countersUnreachable ||
       b.windows?.invalid?.length ||
-      b.windows?.limits?.invalid ||
-      b.scopedInvalid
+      b.windows?.limits?.invalid
         ? note(
             t(v, "The settings file or counters could not be read; amounts marked unknown are not zero."),
           )
         : null
-    }${["day", "week", "month"].map((key) =>
-      b[key]?.cap
-        ? capLine(
-          `${t(v, "Jobs this")} ${t(v, key)}: ${t(v, countWord(b[key].reserved ?? b[key].spent ?? b[key].used, b[key].cap, b.softHoldPct))}`,
-            b[key].reserved ?? b[key].spent ?? b[key].used,
-            b[key].cap,
-            false,
-            b.softHoldPct,
-            v.locale,
-            countWord(b[key].reserved ?? b[key].spent ?? b[key].used, b[key].cap, b.softHoldPct),
-          )
-        : null,
-    )}${
+    }${
       b.tokens?.cap
         ? capLine(
             `${t(v, "Tokens today")}: ${t(v, number(b.tokens.spent) === null ? "unknown" : b.tokens.spent >= b.tokens.cap ? "Full" : "Open")}`,
             b.tokens.spent,
             b.tokens.cap,
             false,
-            null,
             v.locale,
             number(b.tokens.spent) === null ? "unknown" : b.tokens.spent >= b.tokens.cap ? "Full" : "Open",
           )
@@ -530,25 +507,10 @@ export function spendCaps(v) {
         d.counterTokens,
         d.capTokens,
         true,
-        null,
         v.locale,
         number(d.counterTokens) === null ? "unknown" : d.full ? "Full" : "Open",
       ),
-    )}${(b.scoped ?? []).map((r) =>
-      ["day", "week", "month"].map((key) =>
-        r[key]?.cap
-          ? capLine(
-              `${pathLabel(v, r.scope)} ${t(v, "jobs")} ${t(v, key)}: ${t(v, countWord(r[key].used, r[key].cap))}`,
-              r[key].used,
-              r[key].cap,
-              false,
-              null,
-              v.locale,
-              countWord(r[key].used, r[key].cap),
-            )
-          : null,
-      ),
-    )}</div><p class="keyrow sp-cap-key"><span><i class="k tone-ok"></i>${t(v, "Open")}</span><span><i class="k tone-attention"></i>${t(v, "From the job soft hold new starts are refused; nothing is spent.")}</span><span><i class="k tone-failed"></i>${t(v, "Full")}: ${t(v, "another job at its per-job cap would not fit.")}</span></p>${note(t(v, "The soft-hold tick applies to global job windows only. Scoped job windows and token windows have hard caps."))}`,
+    )}</div><p class="keyrow sp-cap-key"><span><i class="k tone-ok"></i>${t(v, "Open")}</span><span><i class="k tone-failed"></i>${t(v, "Full")}</span></p>`,
     v.role === "operator"
       ? ui.btn({
           label: t(v, "Edit caps"),
@@ -557,7 +519,7 @@ export function spendCaps(v) {
           kind: "sm",
         })
       : null,
-    t(v, "job soft-hold ticks only"),
+    t(v, "percent used"),
   );
 }
 
@@ -748,7 +710,7 @@ export function spendSplit(v) {
                     ? t(v, "All published weights are zero; there are no proportional shares.")
                     : t(v, "The split's weights were not published; shares are unknown."),
                 )
-          }${note(`${t(v, "Weights only: it never changes a cap. Written by")} ${p?.state?.triggerId ?? a.state?.writer ?? t(v, "not known")}, ${t(v, "writer")} ${a.state?.writer ?? t(v, "unknown")}, ${t(v, "on")} ${p?.state?.model ?? t(v, "a model not recorded")}.`)}${when(a.state?.appliedAt)}<div class="sp-rows">${a.rows.filter((r) => !v.query?.project || v.query.project === r.id).map((r) => { const share = shares.get(r.id); const label = share == null ? weights.length && total === 0 ? t(v, "no proportional") : t(v, "unknown") : `${Math.round(share)}% ${t(v, "share")}`; return capLine(`${r.id}, ${label}`, r.spent, r.allocation, true, null, v.locale); })}</div>`
+          }${note(`${t(v, "Weights only: it never changes a cap. Written by")} ${p?.state?.triggerId ?? a.state?.writer ?? t(v, "not known")}, ${t(v, "writer")} ${a.state?.writer ?? t(v, "unknown")}, ${t(v, "on")} ${p?.state?.model ?? t(v, "a model not recorded")}.`)}${when(a.state?.appliedAt)}<div class="sp-rows">${a.rows.filter((r) => !v.query?.project || v.query.project === r.id).map((r) => { const share = shares.get(r.id); const label = share == null ? weights.length && total === 0 ? t(v, "no proportional") : t(v, "unknown") : `${Math.round(share)}% ${t(v, "share")}`; return capLine(`${r.id}, ${label}`, r.spent, r.allocation, true, v.locale); })}</div>`
         : note(t(v, "No budget split is available."))
     }<a class="btn btn--sm" href="${link(v, "/insights/budget-split")}">${t(v, "Open Budget split")}</a>`,
     null,

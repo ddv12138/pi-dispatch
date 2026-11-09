@@ -12,13 +12,12 @@ function fixture({ roles = { default: { editor: "openai/first", explorer: "opena
 	const redis = {
 		get: async (key) => store.get(key) ?? null,
 		set: async (key, value) => { store.set(key, value); return "OK"; },
-		incr: async (key) => { events.push("reserve"); const n = Number(store.get(key) ?? 0) + 1; store.set(key, String(n)); return n; },
 		decr: async (key) => { const n = Number(store.get(key) ?? 0) - 1; store.set(key, String(n)); return n; },
 		expire: async () => 1,
 	};
 	let map = roles;
 	const processor = makeProcessor({ redis, cancelJob: () => {}, stopContainer: () => {}, now: () => NOW,
-		getSettings: () => ({ provider: "openai", model: "default", maxTurns: 5, dailyCap: 10, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "openai", model: "default", maxTurns: 5, concurrency: 3 }),
 		readModelRoles: readRoles ?? (() => map), recordRun: (row) => records.push(row),
 		deps: { canaryBusy, now: new Date(NOW), imagePreflight, mintToken: async () => { events.push("mint"); return "token"; }, isDefaultBranchProtected: async () => true,
 			prepareWorkspace: async () => { events.push("clone"); return { workspace: "/w", jobDir: "/j" }; }, stageModelRoleInputs: async (job, prepared) => { events.push({ stage: job }); return stage(job, prepared); },
@@ -46,7 +45,7 @@ test("next pickup rereads the map, snapshots the resolved list and records role 
 	assert.deepEqual(runs[1].models, ["openai/second", "openai/small"]);
 	assert.equal(f.records[0].result.modelRole, "editor");
 	assert.equal(f.records[1].result.model, "second");
-	assert.ok(f.events.findIndex((event) => event.stage) < f.events.indexOf("reserve"));
+	assert.ok(f.events.findIndex((event) => event.stage) >= 0 && f.events.findIndex((event) => event.stage) < f.events.findIndex((event) => event.run), "the roles are staged before the container");
 });
 
 test("unsupported role image refuses before token mint and clone", async () => {

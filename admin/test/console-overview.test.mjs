@@ -5,7 +5,7 @@ import { HOST_SKEW_CLAIM_MS } from "@edgehero/pi-dispatch/host-registry";
 import {
   COUNT_WINDOWS_UTC_TEXT, DAY_FLOOR_TEXT, FREE_SLOT_TEXT, HOSTS_EMPTY, HOST_NO_EXPIRY_TEXT, NEEDS_DEFINITION, NEEDS_EMPTY,
   NEEDS_ROWS_MAX, NEEDS_UNKNOWN_PROJECT_TEXT, NO_DOCTOR_TEXT, NO_WORKER_TEXT, OVERVIEW_LINKS, OVERVIEW_UNREAD_TEXT,
-  REGISTRY_UNREAD_TEXT, RUNNING_EMPTY, SOFT_HOLD_REFUSED_TEXT, SOFT_HOLD_TEXT, SPEND_EMPTY, SPEND_HOURS_TEXT,
+  REGISTRY_UNREAD_TEXT, RUNNING_EMPTY, SPEND_EMPTY, SPEND_HOURS_TEXT,
   STALE_BEATS_TEXT, WAITING_EMPTY, WAITING_MAIN_BUCKETS, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, WAITLIST_ROWS_MAX,
   hostSkewText, overviewActive, overviewCaps, overviewHeadline, overviewHosts, overviewNeeds, overviewSetup,
   overviewSetupEmpty, overviewSpend, overviewTimeline, overviewWaiting, overviewWaitlists,
@@ -82,19 +82,18 @@ function snapshot(over = {}) {
       { jobId: "gh-b3d7", queue: "pi-jobs@mini1", startedAt: at(15, 27), host: "mini1" },
       { jobId: "local-9e20", queue: "pi-jobs@mini2", startedAt: at(15, 33), host: "mini2" },
     ],
-    budget: { day: 25, week: 165, month: 168, tokensToday: 3_120_000 },
-    settings: { overlay: { dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8_000_000, softHoldPct: 80 } },
+    budget: { tokensToday: 3_120_000 },
+    settings: { overlay: { dailyTokenCap: 8_000_000 } },
     windows: { rows: [
       { ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: 15_040_000, full: false },
       { ledger: "scope", name: "project:web", window: "week", capTokens: 40_000_000, counterTokens: 10_400_000, full: false },
       { ledger: "model", name: "claude-sonnet-5-5", window: "week", capTokens: 60_000_000, counterTokens: 24_600_000, full: false },
     ] },
     spendByHour: { hours: Array.from({ length: 24 }, (_, i) => (i > 15 ? null : i >= 9 ? 400_000 * (i - 8) : 0)), unpriced: 1, floor: false, partial: false },
-    softHoldToday: { count: 3, floor: false, partial: false },
     parked: [{ target: "acme/api#12", kind: "github", jobId: "gh-2f6a", parkedAt: at(15, 13), ageMs: NOW - at(15, 13), answered: false, chainCount: null, answering: false }],
     parkedUnreachable: null,
     failures24h: 2,
-    refusals24h: { count: 1, top: [{ reason: "scope-cap", count: 1 }] },
+    refusals24h: { count: 1, top: [{ reason: "allocation-cap", count: 1 }] },
     failures24hFloor: false,
     failed: { rows: [{ jobId: "gh-5d10", attemptsMade: 3, failedReason: "REASON-TEXT <b>", queue: "pi-jobs", endedAt: NOW - 50 * M, reason: null }], more: 0 },
     doctor: { hosts: [
@@ -126,7 +125,7 @@ test("the overview links to its pages by PAGES' names: the copy of their paths i
 });
 
 test("every sentence is plain: no em dash, no emoji, no control byte", () => {
-  const all = [COUNT_WINDOWS_UTC_TEXT, DAY_FLOOR_TEXT, FREE_SLOT_TEXT, HOST_NO_EXPIRY_TEXT, NEEDS_DEFINITION, NEEDS_UNKNOWN_PROJECT_TEXT, NO_DOCTOR_TEXT, NO_WORKER_TEXT, OVERVIEW_UNREAD_TEXT, REGISTRY_UNREAD_TEXT, SOFT_HOLD_REFUSED_TEXT, SOFT_HOLD_TEXT, SPEND_HOURS_TEXT, SPEND_SUM_TEXT, STALE_BEATS_TEXT, WAITING_CUT_TEXT, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, JOBS_UNREAD_TEXT, JOBS_UNREAD_WORDS, NOT_BEATING_WORDS, CAPS_EMPTY_TEXT, LAST_SEEN_WORDS, ...[NEEDS_EMPTY, WAITING_EMPTY, RUNNING_EMPTY, SPEND_EMPTY, HOSTS_EMPTY].flatMap((e) => [e.title, e.body])];
+  const all = [COUNT_WINDOWS_UTC_TEXT, DAY_FLOOR_TEXT, FREE_SLOT_TEXT, HOST_NO_EXPIRY_TEXT, NEEDS_DEFINITION, NEEDS_UNKNOWN_PROJECT_TEXT, NO_DOCTOR_TEXT, NO_WORKER_TEXT, OVERVIEW_UNREAD_TEXT, REGISTRY_UNREAD_TEXT, SPEND_HOURS_TEXT, SPEND_SUM_TEXT, STALE_BEATS_TEXT, WAITING_CUT_TEXT, WAITING_UNKNOWN_PROJECT_TEXT, WAITLISTS_CALM, JOBS_UNREAD_TEXT, JOBS_UNREAD_WORDS, NOT_BEATING_WORDS, CAPS_EMPTY_TEXT, LAST_SEEN_WORDS, ...[NEEDS_EMPTY, WAITING_EMPTY, RUNNING_EMPTY, SPEND_EMPTY, HOSTS_EMPTY].flatMap((e) => [e.title, e.body])];
   for (const s of all) assert.match(s, /^[\x20-\x7e]+$/, s);
 });
 
@@ -678,13 +677,12 @@ test("the timeline shows every role a reason this console has no words for as re
 
 // ---- Caps ------------------------------------------------------------------------------------------------------------
 
-test("Caps: a capsule per window with a cap, the soft hold on the job windows alone, its words the worker's", () => {
+test("Caps: a capsule per token window with a cap, its words the worker's", () => {
   const out = draw(overviewCaps, snapshot());
   assert.match(out, /<a class="btn btn--sm" href="\/insights">Spend<\/a>/);
-  assert.equal((out.match(/<div class="cap"/g) ?? []).length, 7, "three job windows, the token budget, three token windows");
-  assert.equal((out.match(/class="cap__hold"/g) ?? []).length, 3, "the soft hold on the job windows only (budget.mjs)");
-  assert.match(out, /title="Jobs week: 82%">[^]*?tone-attention[^]*?<\/div>/, "past the soft hold: attention; a share below the cap is rounded down");
-  assert.match(out, /title="Jobs today: 62%">[^]*?tone-ok[^]*?<\/div>/);
+  assert.equal((out.match(/<div class="cap"/g) ?? []).length, 4, "the token budget and three token windows");
+  assert.equal((out.match(/class="cap__hold"/g) ?? []).length, 0, "token windows have no soft hold");
+  assert.match(out, /title="Tokens today: 39%">[^]*?tone-ok[^]*?<\/div>/);
   // A window's unit is joined to its name by a no-break space, so a long name never leaves it alone on a line.
   assert.match(out, /<b>Deploy&nbsp;tokens<\/b>today/);
   assert.match(out, /title="Deploy tokens today: \d+%"/, "the title and the image's name keep a plain space");
@@ -692,27 +690,20 @@ test("Caps: a capsule per window with a cap, the soft hold on the job windows al
   const provider = draw(overviewCaps, snapshot({ windows: { rows: [{ ledger: "model", name: "anthropic/claude-sonnet-5-5", window: "week", capTokens: 10, counterTokens: 1, full: false }] } }));
   assert.match(provider, /<b>claude-sonnet-5-5&nbsp;tokens<\/b>week/);
   assert.match(provider, /claude-sonnet-5-5 tokens is model anthropic\/claude-sonnet-5-5/);
-  assert.match(out, /Soft hold line \(80%\)/);
-  assert.ok(out.includes(SOFT_HOLD_TEXT) && out.includes(COUNT_WINDOWS_UTC_TEXT));
+  assert.ok(out.includes(COUNT_WINDOWS_UTC_TEXT) && !out.includes("Soft hold"));
   assert.ok(!out.includes("new jobs wait"), "the design's words, which the worker does not do, are not drawn");
-  const noHold = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: null }));
-  assert.ok(!noHold.includes(SOFT_HOLD_TEXT) && !noHold.includes("cap__hold") && noHold.includes(COUNT_WINDOWS_UTC_TEXT));
+  const noCap = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: null }));
+  assert.ok(!noCap.includes("cap__hold") && noCap.includes(COUNT_WINDOWS_UTC_TEXT));
   assert.ok(draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: null })).includes(CAPS_EMPTY_TEXT));
 });
 
-/** A capsule's tone, by its title's name and window ("Jobs today"). */
+/** A capsule's tone, by its title's name and window ("Tokens today"). */
 const capTone = (out, what) => new RegExp(`title="${what}: \\d+%"><svg class="tone-([a-z]+)"`).exec(out)?.[1] ?? null;
 
-test("Caps: a window's tone is the budget's own band (budget.mjs windowState): amber from the soft hold, full at the cap", () => {
+test("Caps: a token window is open below its cap and full at it, and a window row where its counter says full", () => {
   const caps = (budget, overlay, windows = { rows: [] }) => draw(overviewCaps, snapshot({ budget, settings: { overlay }, windows }));
-  // The soft hold turns a job window amber where the next start would pass it, floor(cap * pct / 100), and no sooner.
-  assert.equal(capTone(caps({ day: 32 }, { dailyCap: 40, softHoldPct: 80 }), "Jobs today"), "attention");
-  assert.equal(capTone(caps({ day: 31 }, { dailyCap: 40, softHoldPct: 80 }), "Jobs today"), "ok");
-  assert.equal(capTone(caps({ day: 40 }, { dailyCap: 40, softHoldPct: 80 }), "Jobs today"), "failed", "at the cap: full");
-  assert.equal(capTone(caps({ day: 39 }, { dailyCap: 40 }), "Jobs today"), "ok", "no soft hold: ok up to the cap");
-  // The token window takes no soft hold: past the hold's percent it is still open, and full at its cap.
-  assert.equal(capTone(caps({ tokensToday: 90 }, { dailyTokenCap: 100, softHoldPct: 80 }), "Tokens today"), "ok");
-  assert.equal(capTone(caps({ tokensToday: 100 }, { dailyTokenCap: 100, softHoldPct: 80 }), "Tokens today"), "failed");
+  assert.equal(capTone(caps({ tokensToday: 99 }, { dailyTokenCap: 100 }), "Tokens today"), "ok");
+  assert.equal(capTone(caps({ tokensToday: 100 }, { dailyTokenCap: 100 }), "Tokens today"), "failed", "at the cap: full");
   // A token window is full where its counter says so (the worker's own `full`), even short of 100%.
   const windowRow = (full) => caps({}, {}, { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 100, counterTokens: 99, full }] });
   assert.equal(capTone(windowRow(true), "Deploy tokens today"), "failed");
@@ -738,20 +729,20 @@ test("Caps: a folder scope is named by its last folder for every role, and no li
 });
 
 test("Caps with each read behind it failed: a counter not read is said, and the empty sentence only where no window has a cap", () => {
-  const counts = "The job or token counters could not be read, so their windows are not drawn.";
-  // The token counters' read failed, with no count cap: the line, never the empty sentence, never the reader's message.
+  const counts = "The token counter could not be read, so its window is not drawn.";
+  // The token counters' read failed, with no token cap: the line, never the empty sentence, never the reader's message.
   const lost = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [], unreachable: "connect build3.lan" } }));
   assert.ok(lost.includes("The token counters could not be read.") && !lost.includes(CAPS_EMPTY_TEXT) && !lost.includes("build3.lan"));
-  // Beside a count window: its capsule, and the line.
-  const beside = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: { rows: [], unreachable: "x" } }));
-  assert.ok(beside.includes('title="Jobs today: ') && beside.includes("The token counters could not be read."));
+  // Beside the token budget: the counter line and the window line.
+  const beside = draw(overviewCaps, snapshot({ budget: null, settings: { overlay: { dailyTokenCap: 40 } }, windows: { rows: [], unreachable: "x" } }));
+  assert.ok(beside.includes(counts) && beside.includes("The token counters could not be read."));
   // A token window whose counter came back null (the counters' one read failed): not drawn, said.
   const nul = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [{ ledger: "deployment", name: null, window: "day", capTokens: 25_000_000, counterTokens: null, full: false }] } }));
   assert.ok(nul.includes("The token counters could not be read.") && !nul.includes(CAPS_EMPTY_TEXT) && !nul.includes("Deploy"));
-  // A job counter that is no number, or no budget read at all.
-  for (const budget of [{ day: "junk" }, null, undefined]) {
-    const out = draw(overviewCaps, snapshot({ settings: { overlay: { dailyCap: 40 } }, windows: { rows: [] }, budget }));
-    assert.ok(out.includes(counts) && !out.includes(CAPS_EMPTY_TEXT) && !out.includes("Jobs today"), JSON.stringify(budget));
+  // A token counter that is no number, or no budget read at all.
+  for (const budget of [{ tokensToday: "junk" }, null, undefined]) {
+    const out = draw(overviewCaps, snapshot({ settings: { overlay: { dailyTokenCap: 40 } }, windows: { rows: [] }, budget }));
+    assert.ok(out.includes(counts) && !out.includes(CAPS_EMPTY_TEXT) && !out.includes('title="Tokens today'), JSON.stringify(budget));
   }
   // Every read made and no window with a cap: the empty sentence, naming the overlay it read, and no line of a read.
   const none = draw(overviewCaps, snapshot({ settings: { overlay: {} }, windows: { rows: [] } }));
@@ -772,10 +763,8 @@ test("Caps draws the overlay's caps only from a settings read made whole: an inv
     assert.ok(!out.includes("must be a positive") && !out.includes("/srv/pi"), `${what}: never the reader's message or path`);
     // Beside the dollar windows, read on their own: those are drawn, and the overlay's are not.
     const beside = draw(overviewCaps, snapshot({ settings }));
-    assert.ok(beside.includes(settingsUnread) && beside.includes('title="Deploy tokens today: ') && !beside.includes('title="Jobs ') && !beside.includes("Soft hold"), `${what}: the token windows alone`);
+    assert.ok(beside.includes(settingsUnread) && beside.includes('title="Deploy tokens today: ') && !beside.includes('title="Tokens today') && !beside.includes("Soft hold"), `${what}: the token windows alone`);
   }
-  // An invalid read that still carries an overlay's keys draws none of them.
-  assert.ok(!draw(overviewCaps, snapshot({ settings: { invalid: "x", overlay: { dailyCap: 40, softHoldPct: 80 } } })).includes('title="Jobs today'));
   // Read whole: its caps, and no such line.
   assert.ok(!draw(overviewCaps, snapshot()).includes(settingsUnread));
 });
@@ -823,7 +812,6 @@ test("Waitlists: every reason's jobs in the worker's order, each with its projec
   // A scheduler whose key the reader refused is left out, never named by BullMQ's job name ("local").
   const refused = draw(overviewWaitlists, snapshot({ schedulers: [{ key: null, name: "local", pattern: "0 3 * * *", next: Date.UTC(2026, 9, 9, 3, 0), overdueMs: 0 }] }));
   assert.ok(!refused.includes('<span class="code">local</span>'), "never local");
-  assert.match(out, new RegExp(`${SOFT_HOLD_REFUSED_TEXT} <a href="/runs\\?outcome=refused&amp;reason=soft-hold">3 today</a>\\.`));
   assert.ok(out.includes(WAITING_UNKNOWN_PROJECT_TEXT));
 });
 
@@ -917,16 +905,11 @@ test("Waitlists on a read-only console: an operator reads every row and its sent
   assert.ok(out.includes("still holds one of its slots") && out.includes(esc(FREE_SLOT_TEXT)), "an operator still reads the held slot's sentences");
 });
 
-test("Waitlists' foot: a hold stamped after now says no held time; a fire already past is not scheduled; a floor says at least", () => {
+test("Waitlists' foot: a hold stamped after now says no held time; a fire already past is not scheduled", () => {
   const future = row({ jobId: "gh-h", bucket: "check", why: "wait-throttled", known: true, held: { since: NOW + 5 * M, label: null, checks: 1, after: null, answers: [] } });
   assert.ok(!draw(overviewWaitlists, snapshot({ waiting: waitingOf([future]) })).includes(". Held"));
   const past = draw(overviewWaitlists, snapshot({ schedulers: [{ key: "old", name: "old", next: NOW - H }, { key: "soon", name: "soon", next: NOW + H }] }));
   assert.ok(past.includes('<span class="code">soon</span>') && !past.includes('<span class="code">old</span>'));
-  assert.match(draw(overviewWaitlists, snapshot({ softHoldToday: { count: 2, floor: true } })), />at least 2 today</);
-  assert.match(draw(overviewWaitlists, snapshot({ softHoldToday: { count: 2, floor: false } })), />2 today</);
-  // With a soft hold set, a day with none says so; with none set and none refused, no line.
-  assert.ok(draw(overviewWaitlists, snapshot({ softHoldToday: { count: 0, floor: false } })).includes(`${SOFT_HOLD_REFUSED_TEXT} 0 today.`));
-  assert.ok(!draw(overviewWaitlists, snapshot({ softHoldToday: { count: 0, floor: false }, settings: { overlay: { dailyCap: 40 } } })).includes(SOFT_HOLD_REFUSED_TEXT));
   // The next fires, soonest first.
   const order = draw(overviewWaitlists, snapshot({ schedulers: [{ key: "late", name: "late", next: NOW + 2 * H }, { key: "soon", name: "soon", next: NOW + H }] }));
   assert.ok(order.indexOf('<span class="code">soon</span>') < order.indexOf('<span class="code">late</span>'));

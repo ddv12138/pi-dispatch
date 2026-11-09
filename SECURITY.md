@@ -225,9 +225,9 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   never the system prompt, whatever a repository's files say.
 - **We never merge.** No code path in this project calls a merge API; grep is the test. Note carefully
   what that does and does not mean — see below.
-- **Spend.** A daily cap checked *before* tokens are spent, a per-job turn budget enforced by our runner
-  (pi has no turn limit of its own), and a 30-minute container wall-clock timeout. An agent that concluded
-  "I can't fix this" is a success and is never blind-retried.
+- **Spend.** Token budgets, per job and for the day/week/month windows (reserved before a job starts), a
+  per-job turn budget enforced by our runner (pi has no turn limit of its own), and a 30-minute container
+  wall-clock timeout. An agent that concluded "I can't fix this" is a success and is never blind-retried.
 - **A policy refusal is never a paid attempt.** A determinate config refusal ends the process with exit code 2
   before any job starts, and a job refused by a cap is never started at all. Every Compose service runs
   `restart: unless-stopped`, and Docker's restart policy cannot tell a policy refusal from a crash: a container
@@ -1020,7 +1020,7 @@ Stated openly rather than discovered later:
   (realpath + containment, judged again at prepare on the resolved folder, which is what is mounted:
   `local-folder-escaped`); the committed per-flow opt-in (default deny, read at a pre-agent SHA); the
   dirty-tree refusal (no force option); no spend-knob parameters on the tool; a per-hour rate limit; and
-  the daily cap (`CONST-BUDGET-BEFORE-TOKENS`).
+  the token budgets (`CONST-BUDGET-BEFORE-TOKENS`).
   One supporting fact about that allowlist, because `/dispatch setup` writes a file that could otherwise
   widen it: the **deployment pointer** resolves paths only, through an allowlist of exactly six path/URL
   keys. `PI_DISPATCH_RUN_ROOTS` is excluded **by construction**, as is every credential-shaped key, because a
@@ -1130,7 +1130,7 @@ Stated openly rather than discovered later:
 - **Protect your default branch.** Require a pull-request review, forbid force-pushes. This is not a
   suggestion — it is the only technical control standing between an injected agent and your `main`. The
   worker refuses to run without it, and you should not work around that.
-- Set a provider spend limit and a daily job cap.
+- Set a provider spend limit and the deployment's token budgets.
 - Do not blanket-forward host environment into job containers. Pass only the variables the configured
   provider needs. In particular `ANTHROPIC_OAUTH_TOKEN`, and at the pinned pi `ANTHROPIC_AUTH_TOKEN` ahead
   of it, silently take precedence over `ANTHROPIC_API_KEY`, so a stray variable in the host environment can quietly redirect which credential
@@ -1250,8 +1250,8 @@ Stated openly rather than discovered later:
   ledger (on Linux) stops a capped job and makes an uncapped one's record a floor. The agent holds the provider
   key and runs as the runner's user, so a child that hides from both, a client that is not pi, or a direct API
   call is still absent from the run record and the daily token counter (`OQ-011`). `PI_MAX_TURNS` likewise bounds
-  only the root session's turns. The backstops there are the 30-minute container timeout, the job-count caps, and
-  your provider-side spend limit, not the meter.
+  only the root session's turns. The backstops there are the 30-minute container timeout, concurrency and the
+  host budget, and your provider-side spend limit, not the meter.
 - **The admin surface is not a network service.** It is a pi extension in your own terminal session plus
   a `settings.json` file, and it binds no port. The operator console is the exception you start yourself: a separate
   process that listens on loopback or a private socket, under the rules in [The operator console](#the-operator-console). Whoever can run pi with the extension loaded, or write

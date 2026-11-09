@@ -160,11 +160,8 @@ const CANNED_FOLD = () => ({
 
 const CANNED_BUDGET = () => ({
   unreachable: null,
-  softHoldPct: 20,
-  day: { reserved: 3, cap: 25, state: "ok" },
-  week: { reserved: 4, cap: null, state: "ok" }, // cap in the worker's env, unknown to the admin
-  month: { reserved: 9, cap: 40, state: "soft-hold" },
-  tokens: { spent: 5400000, cap: 8000000, state: "ok", maxTokens: 200000 },
+  // The job-slot windows and soft-hold band are gone (C1): the budget slice is token facts only.
+  tokens: { spent: 5400000, cap: 8000000, state: "over", maxTokens: 200000 },
 });
 
 const CANNED_PAYLOAD = () => ({
@@ -526,40 +523,35 @@ test("null payload, unreachable costs, missing joins and junk all degrade to a s
 
 // ---- 13. the budget panel (issue #181): facts only, states as words, the lever named ----
 
-test("budget rows render used-vs-cap FACTS: known caps get a bar, unknown caps get words and nothing else", () => {
+test("budget rows render used-vs-cap FACTS: a known token cap gets a bar, unknown caps get words and nothing else", () => {
   const out = cannedHtml();
-  assert.ok(out.includes("reserved 3 / cap 25 (overlay)"), "the day window's facts, byte for byte");
-  assert.ok(out.includes("reserved 4 / cap unknown (worker env/default)"), "an overlay-unset cap is UNKNOWN, never guessed");
-  assert.ok(out.includes("reserved 9 / cap 40 (overlay)"), "the month window's facts");
-  assert.ok(out.includes(">soft hold</span>"), "the state is a WORD; color only reinforces it");
   assert.ok(out.includes("5400000 / cap 8000000 tok"), "the token counter vs its overlay cap -- counts, never dollars");
+  assert.ok(out.includes(">over cap</span>"), "the state is a WORD; color only reinforces it");
   assert.ok(out.includes("per-job maxTokens 200000"), "the per-job budget rides the token row");
-  assert.ok(out.includes("soft-hold band: 20% of each cap"), "the band caption renders only because pct is set");
-  assert.ok(out.includes("adjust: /dispatch set dailyCap|weeklyCap|monthlyCap|dailyTokenCap|softHoldPct"), "the lever is named -- the panel exists to point at it");
+  assert.ok(out.includes("adjust: /dispatch set dailyTokenCap"), "the lever is named -- the panel exists to point at it");
   assert.ok(!/remaining/i.test(out), "used-vs-cap facts only; room-left arithmetic is the burn-down lie");
+  assert.ok(!/reserved 3|weeklyCap|soft-hold band/.test(out), "no job-slot window, no soft-hold band");
 
-  // The unknown-cap row draws NO bar: count meter tracks (aria-hidden 220-wide svgs) -- one per
-  // known-cap row (day, month, tokens), none for the week row.
+  // One known cap, one meter track: the token row's.
   const meters = (out.match(/<svg width="220" height="12" aria-hidden="true">/g) ?? []).length;
-  assert.equal(meters, 3, "three known caps, three meter tracks; the unknown-cap week row draws none");
+  assert.equal(meters, 1, "the token row draws the only meter; there are no job-slot rows left to draw");
 });
 
-test("budget degrades: off windows, an unreachable queue, junk states, and a missing slice", () => {
+test("budget degrades: a token cap off, an unreachable queue, junk states, and a missing slice", () => {
   const offPayload = CANNED_PAYLOAD();
-  offPayload.budget.week = { reserved: 0, cap: null, state: "ok" };
+  offPayload.budget.tokens = { spent: 0, cap: null, state: "ok", maxTokens: null };
   const off = insightsHtml(offPayload, { now: NOW });
-  assert.ok(off.includes("off · no cap set"), "week/month with no cap and nothing reserved is OFF, not zero");
+  assert.ok(off.includes("0 tok · daily cap off"), "a token window with no cap is OFF, not zero");
 
   const downPayload = CANNED_PAYLOAD();
   downPayload.budget.unreachable = "timed out reaching the queue";
-  downPayload.budget.day = { reserved: null, cap: 25, state: "ok" };
   downPayload.budget.tokens = { spent: null, cap: 8000000, state: "ok", maxTokens: null };
   const down = insightsHtml(downPayload, { now: NOW });
   assert.ok(down.includes("budget unreachable: timed out reaching the queue"), "the banner states the absence");
-  assert.ok(down.includes("cap 25 (overlay) · reserved unavailable (queue unreachable)"), "caps stay facts; reserved does not invent a zero");
+  assert.ok(down.includes("cap 8000000 tok (overlay) · spent unavailable (queue unreachable)"), "the cap stays a fact; spent does not invent a zero");
 
   const junkPayload = CANNED_PAYLOAD();
-  junkPayload.budget.day.state = "critical!!";
+  junkPayload.budget.tokens.state = "critical!!";
   const junk = insightsHtml(junkPayload, { now: NOW });
   assert.ok(!junk.includes("critical"), "a junk state degrades toward SILENCE -- it can hide an alarm, never invent one");
 
@@ -640,23 +632,25 @@ test("a hostile flow name in the series stays entity-escaped in panel titles and
 
 // ---- scoped limits in the budget panel (issue #242) ----
 
-test("scoped rows render facts with the assembler's state words; config-only concurrency; junk state falls to ok", () => {
+test("scoped rows render their token facts; config-only concurrency; a retired job-count window draws nothing", () => {
   const p = CANNED_PAYLOAD();
   p.budget = {
     ...CANNED_BUDGET(),
     scoped: [
-      { scope: "acme/web", day: { used: 3, cap: 10, state: "ok" }, week: { used: 12, cap: 40, state: "over" }, month: null, concurrent: 1 },
-      { scope: "/srv/site", day: { used: null, cap: 4, state: "junk-word" }, week: null, month: null, concurrent: null },
+      { scope: "acme/web", concurrent: 1, tokens: { day: { usedTokens: 3, capTokens: 10 }, week: { usedTokens: 12, capTokens: 40 }, month: null } },
+      { scope: "/srv/site", concurrent: null, tokens: { day: { usedTokens: null, capTokens: 4 }, week: null, month: null } },
+      // A pre-C1 payload row: its job-count windows are dropped by the allowlist, never obeyed or rendered.
+      { scope: "old/window", day: { used: 9, cap: 10, state: "over" }, week: null, month: null, concurrent: null },
     ],
     scopedInvalid: null,
   };
   const page = insightsHtml(p, { now: NOW });
   assert.ok(page.includes("scoped limits (scoped-limits.json)"), "the scoped block is labeled");
-  assert.ok(page.includes("day used 3 / cap 10"), "used/cap as words");
-  assert.ok(page.includes("week used 12 / cap 40"), "every capped window rides");
+  assert.ok(page.includes("day reserved+held 3 / cap 10"), "the token counters as exact counts");
+  assert.ok(page.includes("week reserved+held 12 / cap 40"), "every capped token window rides");
   assert.ok(page.includes("concurrent ≤1 (config; in-flight not shown)"), "concurrency is config-only, said so");
-  assert.ok(page.includes("day used ? / cap 4"), "an unreadable counter cell renders as ?, never an invented zero");
-  assert.ok(!page.includes("junk-word"), "a junk state falls to ok and never reaches the page");
+  assert.ok(page.includes("day reserved+held ? / cap 4"), "an unreadable counter cell renders as ?, never an invented zero");
+  assert.ok(!page.includes("day used 9 / cap 10"), "a retired job-count window is never rendered");
   assert.ok(page.includes("dispatch_limit_add/edit/delete"), "the scoped lever is named");
 });
 
@@ -665,9 +659,9 @@ test("a scoped row's token windows render as exact counts; junk and an old paylo
   p.budget = {
     ...CANNED_BUDGET(),
     scoped: [
-      { scope: "project:shop", day: null, week: null, month: null, concurrent: null, tokens: { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null } },
-      { scope: "model:anthropic/claude-sonnet-4-5", day: null, week: null, month: null, concurrent: null, tokens: { day: { usedTokens: null, capTokens: 5_000_000 }, week: { usedTokens: 1, capTokens: 0 }, month: "junk" } },
-      { scope: "acme/web", day: { used: 2, cap: 10, state: "ok" }, week: null, month: null, concurrent: 1 },
+      { scope: "project:shop", concurrent: null, tokens: { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null } },
+      { scope: "model:anthropic/claude-sonnet-4-5", concurrent: null, tokens: { day: { usedTokens: null, capTokens: 5_000_000 }, week: { usedTokens: 1, capTokens: 0 }, month: "junk" } },
+      { scope: "acme/web", concurrent: 1 },
     ],
     scopedInvalid: null,
   };
@@ -675,7 +669,7 @@ test("a scoped row's token windows render as exact counts; junk and an old paylo
   const row = (scope) => page.match(new RegExp(`<div class="row"><span class="wl">${scope.replace(/[/:]/g, "\\$&")}</span><span>([^<]*)</span>`))?.[1] ?? null;
   assert.equal(row("project:shop"), "week reserved+held 6,340,917 / cap 45,000,000");
   assert.equal(row("model:anthropic/claude-sonnet-4-5"), "day reserved+held ? / cap 5,000,000", "an unread counter is ?, a zero cap and junk draw nothing");
-  assert.equal(row("acme/web"), "day used 2 / cap 10 · concurrent ≤1 (config; in-flight not shown)", "a payload row without the key draws what it always did");
+  assert.equal(row("acme/web"), "concurrent ≤1 (config; in-flight not shown)", "a token-less row draws its concurrency only");
 });
 
 test("a project row's size rides beside its scope, so a size-only row is never a bare label (#599)", () => {

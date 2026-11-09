@@ -71,7 +71,7 @@ async function pickup(service, transient, { provider = "anthropic", model = "cla
 	const calls = [], records = [];
 	const runtime = makeSubscriptionRuntime({ auth: service, quota: { admit: async () => { calls.push("quota"); throw new Error("not reached"); } }, now, lookup: () => ({ api: provider === "openai" ? "openai-responses" : "anthropic-messages", baseUrl: provider === "openai" ? "https://api.openai.com/v1" : "https://api.anthropic.com" }) });
 	const redis = { get: async () => null, set: async () => "OK", expire: async () => 1, incr: async () => { calls.push("reserve"); return 1; }, decr: async () => 0 };
-	const processJob = makeProcessor({ redis, now, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider, model, maxTurns: 5, dailyCap: 10, concurrency: 1, softHoldPct: null }), recordRun: record => records.push(record), deps: {
+	const processJob = makeProcessor({ redis, now, cancelJob() {}, stopContainer() {}, getSettings: () => ({ provider, model, maxTurns: 5, concurrency: 1 }), recordRun: record => records.push(record), deps: {
 		subscriptionRuntime: runtime, now: new Date(AT), checkProviderCredential: () => { calls.push("api-key"); return { ok: true }; },
 		mintToken: async () => { calls.push("mint"); return "token"; }, prepareWorkspace: async () => { calls.push("prepare"); }, runContainer: async () => { calls.push("container"); }, cleanup: async () => {}, comment: async () => {}, log: () => {},
 	} });

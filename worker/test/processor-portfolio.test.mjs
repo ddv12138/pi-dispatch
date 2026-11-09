@@ -27,7 +27,6 @@ function deps(overrides = {}) {
 	const base = {
 		redis: { incr: async () => 1, decr: async () => 0, incrby: async () => 1, decrby: async () => 0, eval: async () => [0, 0], expire: async () => {}, get: async () => null },
 		caps: { day: 10, week: null, month: null },
-		softHoldPct: null,
 		scopedLedgers: [],
 		mintToken: async () => (calls.push("mint"), "tok"),
 		isDefaultBranchProtected: async () => true,
@@ -158,7 +157,7 @@ test("the pickup hands the processor this host's envelope delegation, so the gat
 			cancelJob: () => {},
 			stopContainer: () => {},
 			redis: { incr: async () => 1, decr: async () => 0, incrby: async () => 1, decrby: async () => 0, eval: async () => [0, 0], expire: async () => {}, get: async () => null },
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null, maxTokens: 1 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3, maxTokens: 1 }),
 			scopedLimits: () => [],
 			projects: () => parseProjects(JSON.stringify({ version: 1, projects: PROJECTS }), "p.json"),
 			allocation,

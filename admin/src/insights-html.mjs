@@ -92,9 +92,10 @@ const SPLIT_LABEL_W = 110;
 const SPLIT_TRACK_W = 380;
 const SPLIT_ROW_H = 22;
 
-// The states the worker's own windowState emits; junk degrades to "ok" -- toward SILENCE, the
-// NO_BASELINE direction: a malformed payload may hide an alarm but can never invent one.
-const BUDGET_STATES = Object.freeze(["ok", "soft-hold", "over"]);
+// The budget states a payload may carry; junk degrades to "ok" -- toward SILENCE, the NO_BASELINE
+// direction: a malformed payload may hide an alarm but can never invent one. The soft-hold band went
+// with the job-start caps (C1), so an old payload's "soft-hold" falls to "ok" rather than being drawn.
+const BUDGET_STATES = Object.freeze(["ok", "over"]);
 
 function finOr(v, fallback) {
   return Number.isFinite(v) ? v : fallback;
@@ -372,30 +373,16 @@ function normFlowSeries(v) {
   return rows;
 }
 
-/** One budget window's allowlist: reserved a non-negative integer or null (never an invented zero --
- * an unreachable queue rides as null), cap a positive integer or null (an overlay-unset cap is
- * UNKNOWN, the no-invented-denominator rule), state one of the worker's own words else "ok". */
-function normBudgetWindow(v) {
-  const o = v !== null && v !== undefined && typeof v === "object" ? v : {};
-  return {
-    reserved: Number.isInteger(o.reserved) && o.reserved >= 0 ? o.reserved : null,
-    cap: Number.isInteger(o.cap) && o.cap > 0 ? o.cap : null,
-    state: BUDGET_STATES.includes(o.state) ? o.state : "ok",
-  };
-}
-
 /** The budget slice's allowlist. Null payload -> null section ("no budget data in this payload"),
  * the stated-absence idiom every other missing slice uses. States arrive as WORDS the assembler
- * computed with the worker's own classifier; this page never re-derives a threshold. */
+ * computed with the worker's own classifier; this page never re-derives a threshold. The job-slot
+ * windows (day/week/month) and `softHoldPct` are gone with the job-start caps (C1): a payload that
+ * still carries them has them dropped, and only the token facts survive. */
 export function normBudget(v) {
   if (v === null || v === undefined || typeof v !== "object") return null;
   const t = v.tokens !== null && v.tokens !== undefined && typeof v.tokens === "object" ? v.tokens : {};
   return {
     unreachable: typeof v.unreachable === "string" && v.unreachable !== "" ? clip(v.unreachable, 160) : null,
-    softHoldPct: Number.isInteger(v.softHoldPct) && v.softHoldPct >= 1 && v.softHoldPct <= 100 ? v.softHoldPct : null,
-    day: normBudgetWindow(v.day),
-    week: normBudgetWindow(v.week),
-    month: normBudgetWindow(v.month),
     tokens: {
       spent: Number.isInteger(t.spent) && t.spent >= 0 ? t.spent : null,
       cap: Number.isInteger(t.cap) && t.cap > 0 ? t.cap : null,
@@ -408,20 +395,11 @@ export function normBudget(v) {
   };
 }
 
-/** One scoped-limit row's allowlist: scope a non-empty string (clipped), each window `{ used, cap,
- * state }` with used a non-negative integer or null (an unreadable counter cell, never an invented
- * zero), concurrent a positive integer or null. Config-only concurrency: no in-flight count exists
- * here to display, and the page never invents one. */
+/** One scoped-limit row's allowlist: scope a non-empty string (clipped), concurrent a positive integer or null, and
+ * the row's token windows. Config-only concurrency: no in-flight count exists here to display, and the page never
+ * invents one. The job-count windows (`day/week/month` used/cap/state) are gone with the job-start caps (C1). */
 function normScopedRow(v) {
   if (v === null || typeof v !== "object" || typeof v.scope !== "string" || v.scope === "") return null;
-  const win = (w) => {
-    if (w === null || w === undefined || typeof w !== "object") return null;
-    return {
-      used: Number.isInteger(w.used) && w.used >= 0 ? w.used : null,
-      cap: Number.isInteger(w.cap) && w.cap > 0 ? w.cap : null,
-      state: BUDGET_STATES.includes(w.state) ? w.state : "ok",
-    };
-  };
   // A token window (issue #507): whole tokens, the cap above 0 or the window is not drawn; the counter null when
   // it could not be read, never an invented 0. A payload from before the key lacks `tokens` and draws no window.
   const usdWin = (w) => {
@@ -432,9 +410,6 @@ function normScopedRow(v) {
   const windows = v.tokens !== null && v.tokens !== undefined && typeof v.tokens === "object" ? v.tokens : {};
   return {
     scope: clip(v.scope, 60),
-    day: win(v.day),
-    week: win(v.week),
-    month: win(v.month),
     concurrent: Number.isInteger(v.concurrent) && v.concurrent > 0 ? v.concurrent : null,
     tokens: { day: usdWin(windows.day), week: usdWin(windows.week), month: usdWin(windows.month) },
     // A project row's size, as the assembler words it (render.mjs `sizeBits`): at most four short strings.
@@ -988,62 +963,35 @@ export function flowLinesHtml(nf, tips, translate = (message) => message) {
 }
 
 /** The decorative used-vs-cap bar beside a budget row's text facts: drawn ONLY when both numbers are
- * known, fill clamped inside the track (overflow is the WORD's job), the soft-hold band as an amber
- * tick. aria-hidden -- the text row beside it carries every fact. */
-function budgetBarSvg(reserved, cap, state, pct) {
+ * known, fill clamped inside the track (overflow is the WORD's job). aria-hidden -- the text row
+ * beside it carries every fact. */
+function budgetBarSvg(reserved, cap, state) {
   const fillW = reserved > 0 ? Math.max(1, Math.round((Math.min(reserved, cap) / cap) * METER_W)) : 0;
-  const fill = state === "over" ? PAGE_THEME.danger : state === "soft-hold" ? PAGE_THEME.amber : PAGE_THEME.accent;
+  const fill = state === "over" ? PAGE_THEME.danger : PAGE_THEME.accent;
   const parts = [`<svg width="${fmt(METER_W)}" height="12" aria-hidden="true">`];
   parts.push(`<rect x="0" y="2" width="${fmt(METER_W)}" height="8" rx="2" fill="none" stroke="${PAGE_THEME.border}"/>`);
   if (fillW > 0) parts.push(`<rect x="0" y="2" width="${fmt(fillW)}" height="8" rx="2" fill="${fill}"/>`);
-  if (pct !== null) {
-    const tx = Math.round((Math.floor((cap * pct) / 100) / cap) * METER_W);
-    parts.push(`<rect x="${fmt(tx)}" y="0" width="1" height="12" fill="${PAGE_THEME.amber}"/>`);
-  }
   parts.push("</svg>");
   return parts.join("");
 }
 
-/** A budget state as a WORD (omitted when "ok"): monochrome must still say soft-hold or over. */
+/** A budget state as a WORD (omitted when "ok"): monochrome must still say over cap. */
 function stateWord(state, translate = (message) => message) {
   if (state === "ok") return "";
-  const label = state === "soft-hold" ? "soft hold" : state === "over" ? "over cap" : state;
+  const label = state === "over" ? "over cap" : state;
   return ` <span class="state${state === "over" ? " over" : ""}">${escapeHtml(translate(label))}</span>`;
 }
 
 /**
- * The budget panel (issue #181): the caps are the operator's ONE real lever on cost, so the page
- * that prices everything shows the dial beside the spend and names how to turn it. FACTS ONLY, the
- * meter doctrine throughout: an overlay-unset cap is unknown (day) or off (week/month with nothing
- * reserved) -- no bar, no percentage, no derived room; an unreachable queue leaves the caps as facts
- * and states the absence; slots and tokens are counts, never amounts, so nothing here touches
- * fmtAmount. Renders even when the cost fold is null: the lever does not depend on the spend scan.
+ * The budget panel (issue #181): the token caps are what the page prices everything against, and it names how to turn
+ * them. FACTS ONLY, the meter doctrine throughout: an overlay-unset cap is unknown -- no bar, no percentage, no derived
+ * room; an unreachable queue leaves the cap as a fact and states the absence; tokens are counts, never amounts, so
+ * nothing here touches fmtAmount. Job-count windows and the soft-hold band are gone with the job-start caps (C1): the
+ * panel draws the token row only. Renders even when the cost fold is null: the lever does not depend on the spend scan.
  */
 export function budgetSectionHtml(nb, translate = (message) => message) {
   if (nb === null) return `<div class="dim">${escapeHtml(translate("no budget data in this payload"))}</div>`;
   const rows = [];
-  const slotRow = (label, wdw) => {
-    if (wdw.cap === null && (wdw.reserved === null || wdw.reserved === 0) && label !== "day") {
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span class="dim">${escapeHtml(translate("off · no cap set"))}</span></div>`);
-      return;
-    }
-    if (nb.unreachable !== null) {
-      const capText = wdw.cap !== null ? `${translate("cap")} ${fmt(wdw.cap)} (${translate("overlay")})` : translate("cap unknown (worker env/default)");
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span class="dim">${escapeHtml(capText)} · ${escapeHtml(translate("reserved unavailable (queue unreachable)"))}</span></div>`);
-      return;
-    }
-    const reserved = wdw.reserved ?? 0;
-    if (wdw.cap === null) {
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span>${escapeHtml(`${translate("reserved")} ${fmt(reserved)} / ${translate("cap unknown (worker env/default)")}`)}</span></div>`);
-      return;
-    }
-    rows.push(
-      `<div class="row"><span class="wl">${escapeHtml(translate(label))}</span><span>${escapeHtml(`${translate("reserved")} ${fmt(reserved)} / ${translate("cap")} ${fmt(wdw.cap)} (${translate("overlay")})`)}</span>${stateWord(wdw.state, translate)}${budgetBarSvg(reserved, wdw.cap, wdw.state, nb.softHoldPct)}</div>`,
-    );
-  };
-  slotRow("day", nb.day);
-  slotRow("week", nb.week);
-  slotRow("month", nb.month);
 
   const t = nb.tokens;
   const perJob = t.maxTokens !== null ? ` · ${translate("per-job maxTokens")} ${fmt(t.maxTokens)}` : ` · ${translate("per-job budget off")}`;
@@ -1054,28 +1002,18 @@ export function budgetSectionHtml(nb, translate = (message) => message) {
     rows.push(`<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} ${translate("tok")} · ${translate("daily cap off")}${perJob}`)}</span></div>`);
   } else {
     rows.push(
-      `<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} / ${translate("cap")} ${fmt(t.cap)} ${translate("tok")}`)}</span>${stateWord(t.state, translate)}${budgetBarSvg(t.spent ?? 0, t.cap, t.state, nb.softHoldPct)}<span class="dim small">${escapeHtml(perJob)}</span></div>`,
+      `<div class="row"><span class="wl">${escapeHtml(translate("tokens today"))}</span><span>${escapeHtml(`${fmt(t.spent ?? 0)} / ${translate("cap")} ${fmt(t.cap)} ${translate("tok")}`)}</span>${stateWord(t.state, translate)}${budgetBarSvg(t.spent ?? 0, t.cap, t.state)}<span class="dim small">${escapeHtml(perJob)}</span></div>`,
     );
   }
 
-  if (nb.softHoldPct !== null) {
-    rows.push(`<div class="dim small">${escapeHtml(translate("soft-hold band"))}: ${fmt(nb.softHoldPct)}% ${escapeHtml(translate("of each cap (the amber tick)"))}</div>`);
-  }
-  // The scoped rows (issue #242): configured limits with their used counts, states as the assembler's
-  // words. Concurrency renders as config only -- in-flight is worker state no payload carries.
+  // The scoped rows (issue #242): configured limits with their token windows. Concurrency renders as config only --
+  // in-flight is worker state no payload carries.
   if (nb.scopedInvalid !== null) {
     rows.push(`<div class="dim small">${escapeHtml(translate("scoped limits: file invalid"))} (${escapeHtml(nb.scopedInvalid)})</div>`);
   } else if (nb.scoped.length > 0) {
     rows.push(`<div class="dim small">${escapeHtml(translate("scoped limits"))} (scoped-limits.json)</div>`);
     for (const s of nb.scoped) {
       const bits = [];
-      let worst = "ok";
-      for (const key of ["day", "week", "month"]) {
-        const w = s[key];
-        if (w === null || w.cap === null) continue;
-        bits.push(`${translate(key)} ${translate("used")} ${w.used !== null ? fmt(w.used) : "?"} / ${translate("cap")} ${fmt(w.cap)}`);
-        if (w.state !== "ok") worst = w.state;
-      }
       if (s.concurrent !== null) bits.push(`${translate("concurrent")} ≤${fmt(s.concurrent)} (${translate("config; in-flight not shown")})`);
       // The token windows (issue #507), exact counts like the panel's: the counter is reserved and held, what the
       // worker admits the next job against. No state word: a token window is full before its counter reaches the cap
@@ -1086,12 +1024,12 @@ export function budgetSectionHtml(nb, translate = (message) => message) {
         bits.push(`${translate(key)} ${translate("reserved+held")} ${w.usedTokens !== null ? tokensText(w.usedTokens) : "?"} / ${translate("cap")} ${tokensText(w.capTokens)}`);
       }
       bits.push(...s.size);
-      rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span>${worst !== "ok" ? stateWord(worst, translate) : ""}</div>`);
+      rows.push(`<div class="row"><span class="wl">${escapeHtml(s.scope)}</span><span>${escapeHtml(bits.join(" · "))}</span></div>`);
     }
     rows.push(`<div class="lever">${escapeHtml(translate("scoped: dispatch_limit_add/edit/delete · or press m in the /dispatch panel"))}</div>`);
   }
   // The lever, named: what the whole panel exists to point at.
-  rows.push(`<div class="lever">${escapeHtml(translate("adjust: /dispatch set dailyCap|weeklyCap|monthlyCap|dailyTokenCap|softHoldPct <n> · or press s in the /dispatch panel"))}</div>`);
+  rows.push(`<div class="lever">${escapeHtml(translate("adjust: /dispatch set dailyTokenCap <n> · or press s in the /dispatch panel"))}</div>`);
   return `<div id="budget">${rows.join("")}</div>`;
 }
 

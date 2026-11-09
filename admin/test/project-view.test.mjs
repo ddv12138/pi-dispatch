@@ -192,7 +192,7 @@ function realDeployment({ bundled = false, limited = false, floor = false } = {}
   const dir = tempDir("pd-751-project-");
   const paths = { projectsFile: join(dir, "projects.json"), scopedLimitsPath: join(dir, "scoped-limits.json"), triggersPath: join(dir, "triggers.json"), settingsFile: join(dir, "settings.json") };
   fs.writeFileSync(paths.projectsFile, JSON.stringify({ version: 1, projects: [project] }));
-  fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: limited ? 2 : 1, limits: limited ? [{ scope: "project:billing", day: 5 }] : [] }));
+  fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: limited ? 2 : 1, limits: limited ? [{ scope: "project:billing", concurrent: 5 }] : [] }));
   fs.writeFileSync(paths.triggersPath, JSON.stringify({ version: 1, triggers: [], ...(bundled ? { secretBundles: { billing: { project: "billing", profile: "vault", ref: "TOP_SECRET_REFERENCE" } } } : {}) }));
   fs.writeFileSync(paths.settingsFile, JSON.stringify({ version: 1, overlay: {} }));
   if (floor) {
@@ -270,7 +270,7 @@ test("typed preflights name the actual bundle, scoped row or envelope floor with
   for (const kind of ["bundle", "limits", "envelope-floor"]) {
     const paths = realDeployment({ bundled: kind === "bundle", limited: kind === "limits", floor: kind === "envelope-floor" });
     if (kind === "bundle") fs.writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [], secretBundles: { payments: { project: "billing", profile: "vault", ref: "PRIVATE_REFERENCE" } } }));
-    if (kind === "limits") fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/other", day: 1 }, { scope: "project:billing", day: 5 }] }));
+    if (kind === "limits") fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/other", concurrent: 1 }, { scope: "project:billing", dayTokens: 5_000_000 }] }));
     const env = { PI_MAX_TOKENS: "2000000" };
     const raw = planProjectDelete({ id: "billing", paths, env });
     assert.equal(raw.blocker.kind, kind);

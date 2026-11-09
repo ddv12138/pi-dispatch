@@ -11,8 +11,6 @@
  *
  * One hash per run, `run:budget:<sanitized run id>` (the run mirror's `sanitizeJobId`, so every per-run key of the
  * deployment spells a run the same way), with fields:
- *   - `slot`: "held" once the run's job-count slots are reserved (`claimSlot`), so a recovery carries them instead of
- *     reserving them a second time;
  *   - `seq`: the last container number handed out (`nextSeq`): attempt 1 is 1, attempt 2 is 2, a recovery's first
  *     container the next one. A container number is never reused, so a hold is addressed by it unambiguously;
  *   - `h<seq>`: the hold container `seq` ran under, as JSON, validated before it is written (`validHold`);
@@ -21,8 +19,11 @@
  *     only FROM `held` (a compare-and-set, the idiom of token-budget.mjs's SETTLE_SCRIPT), so two racing callers
  *     cannot both move it, and nothing can move it back;
  *   - `at`: the injected clock at the last write, for doctor (how stale a ledger is), never for a decision.
- * The hash is PEXPIREd `ttlMs` (35 days by default, past the longest dollar window a hold can sit in: a month) on
+ * The hash is PEXPIREd `ttlMs` (35 days by default, past the longest token window a hold can sit in: a month) on
  * every write, so a run that never reaches `remove` cannot leave it behind for ever.
+ *
+ * The job-count slot this ledger used to carry (`claimSlot`) is gone with the job-start caps; an old hash with a
+ * `slot` field is harmless and is simply never read again (its TTL removes it).
  *
  * `settled-crashed` is the one state that needs a word. A crashed attempt's real spend is UNKNOWN: its transcript's
  * usage is agent-writable, so it cannot be trusted to settle down from. Its hold is therefore settled AT THE FLOOR:
@@ -59,13 +60,6 @@ export function runBudgetKeyFor(runId) {
 	return `${RUN_BUDGET_KEY_PREFIX}${sanitizeJobId(runId)}`;
 }
 
-// claimSlot: set `slot` only when absent. Returns 1 when this call set it, 0 when it already existed. The TTL is
-// refreshed either way: a recovery claiming a carried slot is activity on the run.
-const CLAIM_SCRIPT = `local set = redis.call('HSETNX', KEYS[1], 'slot', 'held')
-redis.call('HSET', KEYS[1], 'at', ARGV[2])
-redis.call('PEXPIRE', KEYS[1], ARGV[1])
-return set`;
-
 // recordHold: write `h<seq>` and `s<seq>` = held only when `s<seq>` is absent. A seq that already has a state (held or
 // terminal) is never overwritten: overwriting a terminal state with `held` would let it be settled a second time.
 const RECORD_SCRIPT = `if redis.call('HEXISTS', KEYS[1], 's' .. ARGV[1]) == 1 then return 0 end
@@ -81,8 +75,8 @@ return 1`;
 
 // settleCrashed: every `s<k>` == held with k < ARGV[1] becomes settled-crashed, in ONE script, so two recoveries that
 // race see the holds once between them: the second runs after the first has moved them all and finds none. Returns
-// the seqs it moved. The pattern is anchored and digits-only, so `slot` and `seq` (which also start with "s") never
-// match. Nothing is written, and the TTL is not touched, when no hold moved: a ledger that has expired is not revived.
+// the seqs it moved. The pattern is anchored and digits-only, so `seq` (which also starts with "s") never match.
+// Nothing is written, and the TTL is not touched, when no hold moved: a ledger that has expired is not revived.
 const CRASHED_SCRIPT = `local flat = redis.call('HGETALL', KEYS[1])
 local below = tonumber(ARGV[1])
 local moved = {}
@@ -160,18 +154,6 @@ export function makeRunBudgetLedger({ redis, now = Date.now, ttlMs = RUN_BUDGET_
 
 	return {
 		/**
-		 * Claim the run's job-count slot: "new" when this call claimed it (the caller reserves the job-count ledgers, as
-		 * every job did before #645), "carried" when an earlier attempt already had (a recovery skips reserveLedgers:
-		 * the slot it would take is the one the crashed attempt is still counted in). `{ error }` on a Valkey fault: the
-		 * caller cannot know which, so it reserves nothing and throws a never-started InfraRetry.
-		 */
-		async claimSlot(runId) {
-			const r = await attempt("claimSlot", () => redis.eval(CLAIM_SCRIPT, 1, runBudgetKeyFor(runId), ttl, at()));
-			if (r.error) return { error: r.error };
-			return Number(r.value) === 1 ? "new" : "carried";
-		},
-
-		/**
 		 * Record the hold container `seq` runs under, as `held`, only when that seq has no record yet.
 		 *
 		 * THE CONTRACT: a run.recover job never runs a container without a durable hold record. The caller reserves the
@@ -238,8 +220,8 @@ export function makeRunBudgetLedger({ redis, now = Date.now, ttlMs = RUN_BUDGET_
 		},
 
 		/**
-		 * The ledger as `{ slot, seq, at, holds: [{ seq, state, amountTokens }] }` (holds ascending; `slot` null when not
-		 * claimed; `amountTokens` null for a hold record that does not parse), `{ absent: true }` when there is none, or
+		 * The ledger as `{ seq, at, holds: [{ seq, state, amountTokens }] }` (holds ascending;
+		 * `amountTokens` null for a hold record that does not parse), `{ absent: true }` when there is none, or
 		 * `{ error }`. For doctor and tests; no decision reads it, because a read followed by a write is exactly the race
 		 * the scripts exist to avoid.
 		 */
@@ -264,7 +246,7 @@ export function makeRunBudgetLedger({ redis, now = Date.now, ttlMs = RUN_BUDGET_
 			}
 			holds.sort((a, b) => a.seq - b.seq);
 			const stamp = Number(h.at);
-			return { slot: h.slot ?? null, seq: Number(h.seq) || 0, at: Number.isFinite(stamp) ? stamp : null, holds };
+			return { seq: Number(h.seq) || 0, at: Number.isFinite(stamp) ? stamp : null, holds };
 		},
 
 		/** Delete the ledger at the run's final outcome: `{ ok: true }` or `{ error }` (the TTL removes it anyway). */

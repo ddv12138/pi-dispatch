@@ -821,12 +821,8 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
       capacity: { memMiB: intOf(h?.budgetMemMiB), cpuCenti: intOf(h?.budgetCpuCenti), concurrency: intOf(h?.concurrency) },
       running: Array.isArray(h?.jobs) ? h.jobs.length + (num(h?.jobsMore) ?? 0) : intOf(h?.budgetRunning),
     })),
-    budget: {
-      day: num(s.budget?.day),
-      week: num(s.budget?.week),
-      month: num(s.budget?.month),
-      tokensToday: num(s.budget?.tokensToday),
-    },
+    // Today's token counter only: the job-count windows went with the job-start caps (C1).
+    budget: { tokensToday: num(s.budget?.tokensToday) },
     dollars: {
       unreachable: Boolean(s.windows?.unreachable),
       windows: dollarRows.map((r) => ({

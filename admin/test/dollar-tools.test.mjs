@@ -18,7 +18,7 @@ test("the add builder never carries maxTokens or models, whatever it is handed",
 test("readScopedBudget swallows ioredis error events too", async () => {
   const events = [];
   const fake = { on: (ev) => events.push(ev), async get() { return "1"; }, disconnect() {} };
-  const out = await readScopedBudget({ url: "redis://127.0.0.1:1", limits: [{ scope: "acme/web", day: 3 }], redisFn: () => fake });
-  assert.deepEqual(out, { rows: [{ day: 1 }] });
+  const out = await readScopedBudget({ url: "redis://127.0.0.1:1", limits: [{ scope: "acme/web", dayTokens: 3 }], redisFn: () => fake });
+  assert.deepEqual(out, { rows: [{ tokensUsed: { day: 1 } }] });
   assert.deepEqual(events, ["error"]);
 });

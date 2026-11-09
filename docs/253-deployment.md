@@ -120,9 +120,13 @@ Maven settings are baked at build time, not passed by the job:
 `pi/issue-<spec>`; it never merges or pushes the spec branch. `ticket-merge` drains the open ticket -> spec MRs,
 serializes them per spec with the lock branch `pi/spec-lock-<n>`, and merges only after testing the merged ticket
 branch. It never merges spec -> master; that remains a human step. Ticket jobs stay parallel; only merges queue.
-`PI_CONCURRENCY` (6) and `PI_DAILY_CAP` (25) still bound the deployment, and no `concurrent: 1` is used. Six is
-what the rest of `.env` holds beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
+`PI_CONCURRENCY` (6) still bounds the deployment, and no `concurrent: 1` is used; the job-start cap was
+removed, so spend is bounded by the token budgets and the flow. Six is what the rest of `.env` holds
+beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
 `PI_HOST_MEMORY_BUDGET` of 12g and a `PI_HOST_CPU_BUDGET` of 6.
+
+**Migration note:** the remote `.env` must drop the retired `PI_DAILY_CAP`, `PI_WEEKLY_CAP`,
+`PI_MONTHLY_CAP` and `PI_SOFT_HOLD_PCT` lines; the worker refuses to start while one is set.
 
 The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
 different: see below. An edited `triggers.json` still needs the receiver force-recreate described there.
@@ -168,7 +172,8 @@ docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver u
 gate, resolution and verification are unchanged, and the receiver says so at boot
 (`bot_loop_guard_disabled`) while `pi-dispatch doctor` warns by name.
 
-What bounds the spend is therefore `PI_DAILY_CAP` and the flow itself, so **no trigger may be shaped like the
+What bounds the spend is therefore the token budgets (`PI_MAX_TOKENS`, the daily/weekly/monthly token caps)
+and the flow itself — the job-start cap was removed — so **no trigger may be shaped like the
 harness's own output**:
 
 - no `on: {type:"pull_request", action:["update"]}`: every push the agent makes to its own merge request is one;
@@ -182,7 +187,7 @@ the shape to a flow that can create MRs or comment before it exits.
 
 **Who can trigger a job**: the author gate still requires Developer or above. On this single-identity host
 `PI_RECEIVER_ALLOW_SELF=1` also lets the token's own account trigger, which is why the rules stay clear of
-`update`, comment phrases and close events and why `PI_DAILY_CAP` matters. A second identity would let the guard
+`update`, comment phrases and close events and why the token budgets and turn cap matter. A second identity would let the guard
 be re-armed.
 
 ## This GitLab is 13.2.10

@@ -114,7 +114,7 @@ function harness({ now = () => NOW, egress, cancelReq = undefined, exitCode = 0,
 		cancelJob: () => {},
 		stopContainer: () => {},
 		redis,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now,
 		recordRun: (r) => seen.records.push(r),
 		timeoutMs: 100000,
@@ -322,7 +322,7 @@ function raceWorld({ updateData, get: slowGet, cancelJob, egressDelayMs = 0, onP
 		now: () => NOW,
 		recordRun: (r) => records.push(r),
 		timeoutMs: 100000,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		deps: { egressPreflight: async () => (egressDelayMs ? await new Promise((r) => setTimeout(r, egressDelayMs)) : null, (onPreflight?.(keys), young(NOW - 600))), prepareWorkspace: async () => ({}), runContainer: async () => ({ code: 0 }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 	});
 	return { processor, job, keys, ops, moves, records };
@@ -399,7 +399,7 @@ test("the cancel record keeps the run's session, as the aborted-container path d
 		cancelJob: () => true,
 		stopContainer: () => {},
 		redis: { incr: async () => 1, decr: async () => 0, expire: async () => {}, get: async (k) => (k === "cancel:req:local-keeper" ? "1" : null), set: async () => "OK", del: async () => 1 },
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		now: () => NOW,
 		recordRun: (r) => h.seen.records.push(r),
 		timeoutMs: 100000,
@@ -445,7 +445,7 @@ function bugWorld({ get, cancelJob, runDelayMs = 0, cancelPollMs = 2_000 } = {})
 		now: () => NOW,
 		recordRun: (r) => records.push(r),
 		timeoutMs: 100000,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		deps: {
 			egressPreflight: async () => ({ ok: true }),
 			prepareWorkspace: async () => ({}),
@@ -536,7 +536,7 @@ test("a poll read hung on an unreachable Valkey does not hold a finished job's o
 		now: () => NOW,
 		recordRun: (r) => records.push(r),
 		timeoutMs: 100000,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		deps: {
 			egressPreflight: async () => ({ ok: true }),
 			prepareWorkspace: async () => ({ workspaceDir: "/w", jobDir: "/j" }),
@@ -575,7 +575,7 @@ function runWorld({ get, runDelayMs = 10, code = 0, egress = { ok: true }, egres
 		now: () => NOW,
 		recordRun: (r) => w.records.push(r),
 		timeoutMs: 100000,
-		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, dailyCap: 10, weeklyCap: null, monthlyCap: null, concurrency: 3, softHoldPct: null }),
+		getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 		deps: {
 			egressPreflight: async () => (egressDelayMs ? await new Promise((r) => setTimeout(r, egressDelayMs)) : null, egress),
 			...(collectChain ? { collectChain } : {}),

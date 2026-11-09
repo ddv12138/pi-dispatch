@@ -212,12 +212,6 @@ const SETTINGS_SHOWN = Object.freeze([
   "maxTurns",
   "maxTokens",
   "concurrency",
-  "dailyCap",
-  "weeklyCap",
-  "monthlyCap",
-  "dailyTokenCap",
-  "softHoldPct",
-  "maxTokens",
   "dailyTokenCap",
   "weeklyTokenCap",
   "monthlyTokenCap",
@@ -362,9 +356,6 @@ export const configPauseWindows = fromSnapshot("Pause windows", (s, view) => {
 
 /** The scoped-limit fields a row may set, in the file's order, with how each reads. */
 const LIMIT_FIELDS = Object.freeze([
-  ["day", "jobs a day"],
-  ["week", "jobs a week"],
-  ["month", "jobs a month"],
   ["concurrent", "at once"],
   ["dayTokens", "a day"],
   ["weekTokens", "a week"],
@@ -382,7 +373,7 @@ function limitsEditor(view) {
     type: "json",
     rows: 4,
     required: true,
-    placeholder: '{"scope": "acme/web", "day": 10, "concurrent": 2}',
+    placeholder: '{"scope": "acme/web", "concurrent": 2}',
     locale: view.locale,
   });
   return editor(
