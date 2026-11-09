@@ -606,7 +606,10 @@ test("issue #596, phase 2: only the job builder and the reserve's helper spell -
 	const { valkeyDockerRunArgs, valkeyOwnerCheckArgs } = await import("../src/valkey-auth.mjs");
 	for (const args of [valkeyDockerRunArgs({}), valkeyOwnerCheckArgs("/srv/d")]) assert.equal(args.some((a) => String(a).includes("cgroup")), false);
 	const deploy = new URL("../../deploy/", import.meta.url);
-	for (const f of readdirSync(deploy)) assert.equal(/cgroup.?parent|pidispatch\.slice/i.test(readFileSync(new URL(f, deploy), "utf8")), false, f);
+	// RECURSIVE, because the tree carries skills/ now and a directory is not a file to read. Every file under
+	// deploy/ is still scanned, so a unit dropped into a subdirectory cannot slip past this contract.
+	const deployFiles = (at) => readdirSync(at, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? deployFiles(new URL(`${entry.name}/`, at)) : [new URL(entry.name, at)]));
+	for (const f of deployFiles(deploy)) assert.equal(/cgroup.?parent|pidispatch\.slice/i.test(readFileSync(f, "utf8")), false, String(f));
 	// up.mjs runs the proxy from a literal argv; it names no parent.
 	assert.equal(readFileSync(new URL("up.mjs", dir), "utf8").includes("cgroup"), false);
 });

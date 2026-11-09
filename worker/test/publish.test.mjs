@@ -13,7 +13,7 @@
  */
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -23,10 +23,10 @@ const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const WORKER_DIR = join(REPO_ROOT, "worker");
 const RECEIVER_DIR = join(REPO_ROOT, "receiver");
 
-// The files worker/deploy must mirror and ship: the compose file every deployment is run from (an npm
-// install has no repo checkout to read deploy/docker-compose.yml from), the egress policy's RULES, and
-// the container images' build inputs. Nothing renders them; they ship because the compose file and the
-// image builds name them.
+// The entries worker/deploy must mirror and ship: the compose file every deployment is run from (an npm
+// install has no repo checkout to read deploy/docker-compose.yml from), the egress policy's RULES, the
+// container images' build inputs, and the flow skills the compose service mounts. Nothing renders them;
+// they ship because the compose file and the image builds name them.
 const MIRRORED_DEPLOY = [
 	// The shipped compose topology the docs point every deployment at.
 	"docker-compose.yml",
@@ -34,19 +34,34 @@ const MIRRORED_DEPLOY = [
 	// the distinction this file's own comment asks to be decided: it ships unedited, the compose service
 	// mounts it, and the operator's own list lives in the deployment folder where `init` scaffolds it.
 	"egress-proxy.conf",
+	// The ticket flows' skills (4ac16f08): a DIRECTORY, mounted whole at /opt/pi-skills by the compose
+	// service. A package that ships the compose file and not this tree mounts an empty directory, and a
+	// job naming the flow then loads no SKILL.md and exits 0 without doing the work.
+	"skills",
 	// The worker and console images' build inputs (e9d67831): the compose file builds the worker from
 	// the Dockerfile it sits beside, so an npm install needs both exactly as a checkout has them.
 	"worker.Dockerfile",
 	"worker.Dockerfile.dockerignore",
 ].sort();
 
-// Everything the ROOT deploy/ holds: the mirrored set above, plus the one example triggers file that
-// stays behind because the receiver's tests read it and the docs point at it. Nothing else belongs here:
-// a config file dropped in among these reads as a deployment artifact and is not one -- the worker
-// resolves triggers.json, pause-windows.json and friends from the DEPLOYMENT folder or an explicit env
-// path, never from this directory (issue #104, which is where deploy/pause-windows.json sat unread since
-// the day it was added).
-const ROOT_DEPLOY = [...MIRRORED_DEPLOY, "triggers.json"].sort();
+// Everything the ROOT deploy/ holds: the mirrored set above, plus the operator-facing example triggers files
+// that stay behind (`triggers.json` is read by the receiver's tests and pointed at by the docs; the ticket
+// flows' example is the reference for a deployment that runs them). Nothing else belongs here: a config file
+// dropped in among these reads as a deployment artifact and is not one -- the worker resolves triggers.json,
+// pause-windows.json and friends from the DEPLOYMENT folder or an explicit env path, never from this
+// directory (issue #104, which is where deploy/pause-windows.json sat unread since the day it was added).
+const ROOT_DEPLOY = [...MIRRORED_DEPLOY, "triggers.json", "triggers.ticket.example.json"].sort();
+
+/** Every file under `dir`, as a `/`-joined path relative to it, sorted: a mirrored DIRECTORY compared as a tree. */
+function filesUnder(dir, prefix = "") {
+	const out = [];
+	for (const entry of readdirSync(dir, { withFileTypes: true })) {
+		const rel = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
+		if (entry.isDirectory()) out.push(...filesUnder(join(dir, entry.name), rel));
+		else out.push(rel);
+	}
+	return out.sort();
+}
 
 // npm pack forks a whole npm; generous headroom so a cold cache on CI never flakes the suite.
 const PACK_TIMEOUT = { timeout: 120_000 };
@@ -67,12 +82,27 @@ test("sync: every worker/deploy file is byte-identical to its root deploy/ twin"
 	assert.deepEqual(
 		readdirSync(join(WORKER_DIR, "deploy")).sort(),
 		MIRRORED_DEPLOY,
-		"worker/deploy must hold exactly the four files the compose file and the image builds need — nothing missing, no strays",
+		"worker/deploy must hold exactly the entries the compose file and the image builds need — nothing missing, no strays",
 	);
 	for (const name of MIRRORED_DEPLOY) {
+		const root = join(REPO_ROOT, "deploy", name);
+		const mirror = join(WORKER_DIR, "deploy", name);
+		if (statSync(root).isDirectory()) {
+			// A tree, not a file: the compose service mounts deploy/skills whole, so the package must carry it whole.
+			const files = filesUnder(root);
+			assert.deepEqual(filesUnder(mirror), files, `worker/deploy/${name} must hold exactly deploy/${name}'s files`);
+			for (const rel of files) {
+				assert.equal(
+					readFileSync(join(mirror, rel), "utf8"),
+					readFileSync(join(root, rel), "utf8"),
+					`worker/deploy/${name}/${rel} drifted from deploy/${name}/${rel} — the ROOT deploy/ is the documented source; edit both (copy root over the mirror)`,
+				);
+			}
+			continue;
+		}
 		assert.equal(
-			readFileSync(join(WORKER_DIR, "deploy", name), "utf8"),
-			readFileSync(join(REPO_ROOT, "deploy", name), "utf8"),
+			readFileSync(mirror, "utf8"),
+			readFileSync(root, "utf8"),
 			`worker/deploy/${name} drifted from deploy/${name} — the ROOT deploy/ is the documented source; edit both (copy root over the mirror)`,
 		);
 	}
@@ -222,6 +252,11 @@ test("npm pack (worker): ships src, .env.example and every deploy file — and n
 	assert.ok(paths.includes(".env.example"), "init's packaged fallback ships");
 	assert.ok(paths.includes("README.md"), "the npm page is this README; without it the package page is blank");
 	for (const name of MIRRORED_DEPLOY) {
+		const root = join(REPO_ROOT, "deploy", name);
+		if (statSync(root).isDirectory()) {
+			for (const rel of filesUnder(root)) assert.ok(paths.includes(`deploy/${name}/${rel}`), `deploy/${name}/${rel} must ship — the compose service mounts that tree from the package`);
+			continue;
+		}
 		assert.ok(paths.includes(`deploy/${name}`), `deploy/${name} must ship — the compose file and the image builds read it from the package`);
 	}
 	assert.ok(paths.includes("package.json"));
