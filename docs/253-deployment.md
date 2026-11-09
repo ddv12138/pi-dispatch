@@ -125,12 +125,16 @@ token caps were removed, so spend is bounded by the turn cap, concurrency, the h
 Six is what the rest of `.env` holds beside it: `PI_JOB_CPUS` 1 and `PI_JOB_MEMORY` 2g under a
 `PI_HOST_MEMORY_BUDGET` of 12g and a `PI_HOST_CPU_BUDGET` of 6.
 
-**Migration note:** the remote `.env` must not carry any retired key: `PI_DAILY_CAP`, `PI_WEEKLY_CAP`,
+**Cap removal (2026-11-09):** the deployment runs without job-start or token caps. The worker, console
+and receiver were rebuilt from `2aae44c7`; `.env` carries none of the retired keys (`PI_DAILY_CAP` was
+the last one, and the commented examples below it are inert), and `runtime/` was not touched. The worker
+still refuses to boot if one of those keys is set again: `PI_DAILY_CAP`, `PI_WEEKLY_CAP`,
 `PI_MONTHLY_CAP`, `PI_SOFT_HOLD_PCT`, `PI_MAX_TOKENS`, `PI_DAILY_TOKEN_CAP`, `PI_WEEKLY_TOKEN_CAP`,
-`PI_MONTHLY_TOKEN_CAP` or `PI_ENVELOPE_FILE`. The worker refuses to boot while any one of them is set.
-Delete the line, or comment it out (a commented line is harmless); an empty value also reads as unset. A
-settings overlay carrying `maxTokens`, `dailyTokenCap`, `weeklyTokenCap` or `monthlyTokenCap` is refused
-too.
+`PI_MONTHLY_TOKEN_CAP` or `PI_ENVELOPE_FILE`. A settings overlay carrying `maxTokens`,
+`dailyTokenCap`, `weeklyTokenCap` or `monthlyTokenCap` is refused too. Rollback images are tagged
+`deploy-worker:pre-cap-removal-20261109-143818` and `deploy-receiver:pre-cap-removal-20261109-143818`.
+The job image stays `pi-job:4.3.3`: the new worker never passes `PI_MAX_TOKENS`, so its token stop is
+inert until the next job-image release.
 
 The worker mounts the whole deployment directory, so an edit is seen and the rules reload. The **receiver** is
 different: see below. An edited `triggers.json` still needs the receiver force-recreate described there.
@@ -238,14 +242,15 @@ the receiver is built from this snapshot as well.
 
 The staging **overlays** the tree and never deletes: a file a commit dropped stays where it was, so the folder stops
 matching a commit — and this folder is the Docker build context, so every leftover is copied into the next image.
-This host has already been cleared once, so there is nothing to delete today: the `.env` backups
-(`.env.bak-*`, `.env.pre-image-4.3.2`), the compose backup (`deploy/docker-compose.yml.pre-image-4.3.2`), the
-allowlist backups (`egress-allowlist.conf.bak-*`), the old rootless leftovers (`deploy/pi-dispatch-*.container`,
-`deploy/pi-dispatch-*.network`, `deploy/sandbox-gateway.service`) and the removed units and wrappers are gone. Before
-a future build, check the same things instead of re-running a delete list: `deploy/` holds only
-`docker-compose.yml`, `worker.Dockerfile`, `worker.Dockerfile.dockerignore`, `egress-proxy.conf` and `triggers.json`,
-no `.env` backup or `pre-*` file sits beside them, and no directory the current snapshot no longer ships remains in
-the build context.
+The cap-removal update therefore deleted the 57 files its commits dropped, from a `git diff --diff-filter=D` list,
+before rebuilding; the overlay alone would have left them in the image. This host has already been cleared once, so
+there is nothing else to delete today: the `.env` backups (`.env.bak-*`, `.env.pre-image-4.3.2`), the compose backup
+(`deploy/docker-compose.yml.pre-image-4.3.2`), the allowlist backups (`egress-allowlist.conf.bak-*`), the old rootless
+leftovers (`deploy/pi-dispatch-*.container`, `deploy/pi-dispatch-*.network`, `deploy/sandbox-gateway.service`) and the
+removed units and wrappers are gone. Before a future build, check the same things instead of re-running a delete list:
+`deploy/` holds only `docker-compose.yml`, `worker.Dockerfile`, `worker.Dockerfile.dockerignore`, `egress-proxy.conf`
+and `triggers.json`, no `.env` backup or `pre-*` file sits beside them, and no directory the current snapshot no
+longer ships remains in the build context.
 
 Keep `.env` and `runtime/` — the session store and the job logs are state, not snapshot. The image's ignore file is
 `deploy/worker.Dockerfile.dockerignore`, not the shipped `.dockerignore`, so it alone decides what leaves this folder
@@ -271,6 +276,12 @@ docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs resume
 
 Resume only after the worker and console run, the receiver is back up and the console health check answers. If the
 build or the rollout fails, leave the queue paused.
+
+**A receiver build can fail on its pinned base digest.** The digest is deliberate, but the aliyun mirror may not carry
+it (`load metadata ... 403 Forbidden`) while the local store already holds the same digest under a mirror name. Then
+build with a one-line `FROM` override that resolves the SAME digest locally (`docker.m.daocloud.io/library/node@sha256:<digest>`),
+tag the result `deploy-receiver:latest`, and leave the Dockerfile pin alone; this host needed that on the cap-removal
+update (2026-11-09). Do not replace the pin with a floating tag.
 
 There is no `PI_WORKER_NAME` here, so the shared queue pause covers this worker. Never `docker rm -f` the Valkey
 container: the normal stop is what makes it write the AOF out.
