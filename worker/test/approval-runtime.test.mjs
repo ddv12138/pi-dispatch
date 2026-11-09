@@ -12,8 +12,8 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 
 const AT = Date.parse("2026-10-28T10:00:00Z");
 const clock = () => AT;
-const job = (extra = {}) => ({ id: "job-1", approvalRequestId: "request-1", kind: "github", resume: true, repo: "org/repo", maxTokens: 1000, target: { type: "issue", number: 649 }, gates: ["deploy:staging", "budget-raise"], gateTimeout: 1, gateBudgetRaiseTokens: 3000, trigger: { sender: { id: 123 }, deliveryId: "delivery-1", comment: { body: "/approve" } }, ...extra });
-const request = (extra = {}) => ({ requestId: "request-1", runId: "parked-1", kind: "github", repo: "org/repo", target: { type: "issue", number: 649 }, host: "host-1", configDigest: "digest", action: "budget-raise", toolCallId: "call-1", sessionKey: "session-1", state: "pending", createdAt: AT, resumeJob: job(), ...extra });
+const job = (extra = {}) => ({ id: "job-1", approvalRequestId: "request-1", kind: "github", resume: true, repo: "org/repo", target: { type: "issue", number: 649 }, gates: ["deploy:staging"], gateTimeout: 1, trigger: { sender: { id: 123 }, deliveryId: "delivery-1", comment: { body: "/approve" } }, ...extra });
+const request = (extra = {}) => ({ requestId: "request-1", runId: "parked-1", kind: "github", repo: "org/repo", target: { type: "issue", number: 649 }, host: "host-1", configDigest: "digest", action: "deploy:staging", toolCallId: "call-1", sessionKey: "session-1", state: "pending", createdAt: AT, resumeJob: job(), ...extra });
 const accepted = (extra = {}) => request({ state: "decided", decision: { decisionId: "job-1", decision: "approved", text: "private reason", actor: { kind: "forge", id: "123" }, at: AT }, ...extra });
 
 function setup({ pending = request(), checkPolicy = () => ({ ok: true, digest: "digest" }), hooks = {}, methods = {} } = {}) {
@@ -32,7 +32,7 @@ function setup({ pending = request(), checkPolicy = () => ({ ok: true, digest: "
 
 test("no active request leaves ordinary parked behavior alone, but explicit stale IDs refuse", async () => {
 	const { runtime } = setup({ pending: null });
-	assert.deepEqual(await runtime.before(job({ approvalRequestId: undefined, parkedReply: true, gates: undefined, gateTimeout: undefined, gateBudgetRaiseTokens: undefined })), { ok: true });
+	assert.deepEqual(await runtime.before(job({ approvalRequestId: undefined, parkedReply: true, gates: undefined, gateTimeout: undefined, gates: undefined })), { ok: true });
 	assert.deepEqual(await runtime.before(job({ approvalRequestId: "stale" })), { refused: "approval-request-stale" });
 });
 
@@ -41,7 +41,7 @@ test("initial gated runs validate queued configuration and the current policy be
 	assert.deepEqual(await changed.runtime.before(job({ approvalRequestId: undefined })), { refused: "approval-policy-changed" });
 	const valid = setup({ pending: null });
 	assert.equal((await valid.runtime.before(job({ approvalRequestId: undefined }))).ok, true);
-	for (const extra of [{ gates: ["push"] }, { resume: false }, { gates: ["budget-raise"], gateBudgetRaiseTokens: 10 }, { gateTimeout: 0 }, { recover: true }]) {
+	for (const extra of [{ gates: ["push"] }, { resume: false }, { gateBudgetRaiseTokens: 10 }, { gateTimeout: 0 }, { recover: true }]) {
 		const { runtime, calls } = setup({ pending: null });
 		assert.deepEqual(await runtime.before(job({ ...extra, approvalRequestId: undefined })), { refused: "approval-config-invalid" });
 		assert.deepEqual(calls, ["find"]);
@@ -65,12 +65,12 @@ test("free host, policy, identity and noncomment refusals never decide or claim"
 	}
 });
 
-test("approved budget decision uses the private canonical result and an audit without text", async () => {
+test("approved decision uses the private canonical result and an audit without text", async () => {
 	const { runtime, calls } = setup();
 	const out = await runtime.before(job());
 	assert.equal(out.ok, true);
-	assert.equal(out.budgetCapTokens, 3000);
-	assert.deepEqual(out.decision, { requestId: "request-1", action: "budget-raise", toolCallId: "call-1", decision: "approved", text: "private reason" });
+	assert.equal("budgetCapTokens" in out, false, "C2: an approval never raises a token budget");
+	assert.deepEqual(out.decision, { requestId: "request-1", action: "deploy:staging", toolCallId: "call-1", decision: "approved", text: "private reason" });
 	assert.deepEqual(out.audit, approvalAudit(accepted()));
 	assert.equal(JSON.stringify(out.audit).includes("private reason"), false);
 	assert.equal(calls[1][1].decision, "approved");
@@ -83,7 +83,7 @@ test("forge replies with the configured trigger phrase still parse typed decisio
 	assert.equal(calls.find((call) => call[0] === "decide")[1].decision, "approved");
 });
 
-test("declines and questions cannot elevate the cap, and a failed claim never grants a decision", async () => {
+test("declines and questions never grant a decision, and a failed claim never grants one", async () => {
 	for (const decision of ["declined", "question"]) {
 		const { runtime } = setup({ methods: { async claim() { return { ok: true, request: accepted({ decision: { ...accepted().decision, decision } }) }; } } });
 		const out = await runtime.before(job());
@@ -113,13 +113,13 @@ test("the human losing the deadline race cannot consume the system decline", asy
 
 test("parking publishes bound metadata without the model summary and strips effective-only fields", async () => {
 	const { runtime, calls } = setup();
-	const out = await runtime.afterPark({ job: job({ maxTokens: 123 }), session: { key: "session-1" }, metadata: { action: "budget-raise", toolCallId: "call-1", summary: "private summary" } });
+	const out = await runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "deploy:staging", toolCallId: "call-1", summary: "private summary" } });
 	const value = calls.find((call) => call[0] === "publish")[1];
 	assert.equal(value.requestId, approvalRequestId("job-1", "call-1"));
 	assert.equal(value.expiresAt, AT + 86400_000);
 	assert.equal(value.sessionKey, "session-1");
 	assert.equal(value.resumeJob.id, undefined);
-	assert.equal(value.resumeJob.maxTokens, 123, "the declared budget stays on the resumeJob: the digest the decision is judged by reads it");
+	assert.deepEqual(value.resumeJob.gates, ["deploy:staging"], "the declared gates stay on the resumeJob: the digest the decision is judged by reads them");
 	assert.equal(JSON.stringify(value).includes("private summary"), false);
 	assert.equal(out.audit.requestId, value.requestId);
 });
@@ -127,7 +127,7 @@ test("parking publishes bound metadata without the model summary and strips effe
 test("parking retry reuses the durable request instead of moving its deadline", async () => {
 	const prior = request({ requestId: approvalRequestId("job-1", "call-1"), runId: "job-1" });
 	const { runtime, calls } = setup({ methods: { async read() { return { ok: true, request: prior }; } } });
-	const out = await runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "budget-raise", toolCallId: "call-1" } });
+	const out = await runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "deploy:staging", toolCallId: "call-1" } });
 	assert.deepEqual(out.request, prior);
 	assert.equal(calls.length, 0);
 });
@@ -169,16 +169,15 @@ test("durable park, restart, approved resume and another park reject replies bou
 		await redis.quit();
 	});
 	const runtime = () => makeApprovalRuntime({ store: makeApprovalStore({ redis, now: clock }), now: clock, host: "host-1", checkPolicy: (j) => ({ ok: true, digest: approvalConfigDigest(j) }) });
-	const parked = await runtime().afterPark({ job: root, session: { key: "saved-session" }, metadata: { action: "budget-raise", toolCallId: "gate-1" } });
+	const parked = await runtime().afterPark({ job: root, session: { key: "saved-session" }, metadata: { action: "deploy:staging", toolCallId: "gate-1" } });
 	assert.equal(parked.ok, true);
 	requestIds.push(parked.request.requestId);
 	const reply = { ...root, id: `${root.id}-reply`, approvalRequestId: parked.request.requestId };
 	const approved = await runtime().before(reply);
 	assert.equal(approved.ok, true);
-	assert.equal(approved.budgetCapTokens, 3000);
 	assert.equal(approved.decision.toolCallId, "gate-1");
 	assert.deepEqual(await runtime().before(reply), approved, "a retry after process restart sees the canonical decision");
-	assert.equal((await runtime().before({ ...reply, gateBudgetRaiseTokens: 9000 })).refused, "approval-policy-changed");
+	assert.equal((await runtime().before({ ...reply, gateTimeout: 9 })).refused, "approval-policy-changed");
 	assert.equal((await runtime().finish({ requestId: parked.request.requestId, jobId: reply.id })).ok, true);
 	const next = await runtime().afterPark({ job: reply, session: { key: "saved-session" }, metadata: { action: "deploy:staging", toolCallId: "gate-2" } });
 	assert.equal(next.ok, true);
@@ -192,7 +191,7 @@ test("durable park, restart, approved resume and another park reject replies bou
 test("parking carries the configured host queue while a single-host deployment leaves routing absent", async () => {
 	for (const hostQueue of [null, "pi-jobs@host-1"]) {
 		const { runtime, calls } = setup({ hooks: { hostQueue } });
-		const out = await runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "budget-raise", toolCallId: "call-1" } });
+		const out = await runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "deploy:staging", toolCallId: "call-1" } });
 		assert.ok(out.audit);
 		const published = calls.find((call) => Array.isArray(call) && call[0] === "publish")[1];
 		assert.equal(published.hostQueue, hostQueue ?? undefined);
@@ -203,9 +202,9 @@ test("the wired runtime requires transcript generation binding both when publish
 	const missing = setup({ hooks: { requireSessionDigest: true } });
 	assert.deepEqual(await missing.runtime.before(job()), { refused: "approval-session-unavailable" });
 	assert.equal(missing.calls.some((call) => call[0] === "decide"), false);
-	assert.deepEqual(await missing.runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "budget-raise", toolCallId: "call-1" } }), { refused: "approval-session-unavailable" });
+	assert.deepEqual(await missing.runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "deploy:staging", toolCallId: "call-1" } }), { refused: "approval-session-unavailable" });
 	const present = setup({ hooks: { requireSessionDigest: true } });
-	const out = await present.runtime.afterPark({ job: job(), session: { key: "session-1", digest: "a".repeat(64) }, metadata: { action: "budget-raise", toolCallId: "call-1" } });
+	const out = await present.runtime.afterPark({ job: job(), session: { key: "session-1", digest: "a".repeat(64) }, metadata: { action: "deploy:staging", toolCallId: "call-1" } });
 	assert.equal(out.ok, true);
 	assert.equal(present.calls.find((call) => call[0] === "publish")[1].sessionDigest, "a".repeat(64));
 });
@@ -217,7 +216,6 @@ test("a bound reply retires revoked policy without returning a runnable decision
 	assert.equal(out.request.state, "finished");
 	assert.equal(out.audit.actorId, "revocation");
 	assert.equal(out.decision, undefined);
-	assert.equal(out.budgetCapTokens, undefined);
 	assert.deepEqual(changed.calls, ["find", ["cancel", { requestId: "request-1", jobId: "job-1" }]]);
 	const unknown = setup({ checkPolicy: () => ({ refused: "approval-policy-unavailable" }) });
 	assert.deepEqual(await unknown.runtime.before(job()), { refused: "approval-policy-unavailable" });
@@ -262,7 +260,7 @@ test("a newer triggers file passes through as { newer: true } and moves no reque
 	assert.deepEqual(await bound.runtime.before(job()), { newer: true }, "a bound reply is neither decided nor claimed, and its request not cancelled");
 	assert.deepEqual(bound.calls, ["find"]);
 	const parked = setup({ checkPolicy: newer });
-	assert.deepEqual(await parked.runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "budget-raise", toolCallId: "call-1" } }), { newer: true });
+	assert.deepEqual(await parked.runtime.afterPark({ job: job(), session: { key: "session-1" }, metadata: { action: "deploy:staging", toolCallId: "call-1" } }), { newer: true });
 	assert.deepEqual(parked.calls, [], "nothing published");
 	let touched = 0;
 	const { runtime } = setup({
@@ -399,7 +397,7 @@ test("real approval transitions publish nonhuman wait ends, and outbox repair ne
 		for (const name of ["expire", "cancel", "decide", "claim"]) store[name] = async (...args) => { moves[name]++; return actualStore[name](...args); };
 		let revoked = false;
 		const runtime = makeApprovalRuntime({ store, now: () => at, host, touchOutbox: outbox, checkPolicy: () => revoked ? { refused: "approval-policy-changed" } : { ok: true, digest: "digest" }, enqueueExpiry: async () => { moves.enqueue++; return { ok: true }; } });
-		const parked = await runtime.afterPark({ job: original, session: { key: "saved-session" }, metadata: { action: "budget-raise", toolCallId: "call" } });
+		const parked = await runtime.afterPark({ job: original, session: { key: "saved-session" }, metadata: { action: "deploy:staging", toolCallId: "call" } });
 		assert.equal(parked.ok, true);
 		retained.push(parked.request);
 		at += 2 * 86400_000;

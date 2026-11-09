@@ -270,10 +270,9 @@ function percentOf(value, max) {
   return Number.isFinite(value) && Number.isFinite(max) && max > 0 ? (value / max) * 100 : 0;
 }
 
-/** A level's status when none is given: the cap (100%) is failed, the soft hold attention, below it ok (the meter rule). */
-function levelStatus(pct, hold) {
-  if (pct >= 100) return "failed";
-  return Number.isFinite(hold) && pct >= hold ? "attention" : "ok";
+/** A level's status when none is given: the cap (100%) is failed, below it ok (the meter rule). */
+function levelStatus(pct) {
+  return pct >= 100 ? "failed" : "ok";
 }
 
 // ---- marks -------------------------------------------------------------------------------------------------------------
@@ -526,80 +525,15 @@ export function pager({ newer = null, older = null, newerLabel = "Newer", olderL
 // ---- levels ----------------------------------------------------------------------------------------------------------------
 
 /**
- * A meter against a cap: a bar of `value` out of `max`, with the soft-hold tick at `hold` percent where one is given.
- * Its status, unless given, is the meter rule: red at the cap, yellow from the hold, else ok. `role="meter"`, its value
- * in percent, named by `label` ("Jobs today: 25 of 40").
+ * A meter against a cap: a bar of `value` out of `max`. Its status, unless given, is red at the cap, else ok.
+ * `role="meter"`, its value in percent, named by `label` ("Jobs today: 25 of 40").
  */
-export function meter({ value, max, label, status = null, hold = null, height = 10 }) {
+export function meter({ value, max, label, status = null, height = 10 }) {
   const pct = percentOf(value, max);
-  const tone = `tone-${statusOf(status ?? levelStatus(pct, hold), "meter").tone}`;
+  const tone = `tone-${statusOf(status ?? levelStatus(pct), "meter").tone}`;
   const h = Number(svgNum(height, 4, 24, 0));
   const rx = svgNum(h / 2, 2, 12, 1);
-  const tick = Number.isFinite(hold) ? html`<line class="pbar__hold" x1="${svgNum(hold, 0, 100, 1)}%" x2="${svgNum(hold, 0, 100, 1)}%" y1="-3" y2="${svgNum(h + 3, 7, 27, 0)}"/>` : null;
-  return html`<svg class="pbar ${tone}" height="${h}" role="meter" aria-valuenow="${svgNum(pct, 0, 100, 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="${label}"><rect class="pbar__bed" width="100%" height="${h}" rx="${rx}"/><rect class="pbar__fill" width="${svgNum(pct, 0, 100, 1)}%" height="${h}" rx="${rx}"/>${tick}</svg>`;
-}
-
-/**
- * A ring: `value` of `max` as an arc from the top, clockwise, over its track, with the hold tick at `hold` percent
- * where one is given. The status follows the meter rule unless given. `role="meter"`, named by `label`.
- */
-export function ring({ value, max, label, status = null, hold = null, size = 96, stroke = 9 }) {
-  const pct = percentOf(value, max);
-  const tone = `tone-${statusOf(status ?? levelStatus(pct, hold), "ring").tone}`;
-  const s = Number(svgNum(size, 24, 480, 0));
-  const sw = Number(svgNum(stroke, 1, s / 4, 0));
-  const c = svgNum(s / 2, 0, s, 1);
-  const r = s / 2 - sw / 2;
-  const geo = html`cx="${c}" cy="${c}" r="${svgNum(r, 0, s, 1)}" stroke-width="${sw}"`;
-  let tick = null;
-  if (Number.isFinite(hold)) {
-    const a = (Math.min(100, Math.max(0, hold)) / 100) * 2 * Math.PI;
-    const at = (rad) => [svgNum(s / 2 + rad * Math.sin(a), -sw, s + sw, 1), svgNum(s / 2 - rad * Math.cos(a), -sw, s + sw, 1)];
-    const [x1, y1] = at(r - sw / 2 - 1);
-    const [x2, y2] = at(r + sw / 2 + 1);
-    tick = html`<line class="ring__hold" x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}"/>`;
-  }
-  return html`<svg class="ring ${tone}" width="${s}" height="${s}" viewBox="0 0 ${s} ${s}" role="meter" aria-valuenow="${svgNum(pct, 0, 100, 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="${label}"><circle class="ring__track" ${geo}/><circle class="ring__arc" ${geo} pathLength="100" stroke-dasharray="${svgNum(pct, 0, 100, 1)} 100" transform="rotate(-90 ${c} ${c})"/>${tick}</svg>`;
-}
-
-/**
- * A capsule's drawing, the FactsAndLevels card's: 40 by 150, the pill 32 wide and never lower than 32 (so it is a
- * round-ended pill at 0%, as the card draws a small level), its value 21 below the pill's top, which centres it in the
- * pill's round top (and in the whole pill at the minimum).
- */
-const CAP = Object.freeze({ w: 40, h: 150, pillMin: 32, valueDy: 21 });
-
-/** Text a helper writes into an attribute as well as the page, or a throw: a fragment's markup would show in a title. */
-function plainOf(text, what, who) {
-  if (typeof text !== "string") throw new TypeError(`kit.${who}: ${what} is text, not ${JSON.stringify(text)}`);
-  return text;
-}
-
-/**
- * A cap's level as a capsule (the FactsAndLevels card's, the overview's Caps): a rail, the soft-hold line as a ring at
- * `hold` percent from the bottom (none where `hold` is null: a dollar window has no soft hold), the level as a pill
- * rising from the bottom, at least 32 high, its percent printed in it, and the window's name under it (`name` in bold,
- * then `window`). Its status follows the meter rule unless given (ok, attention from the hold, failed at the cap), and
- * its tone class is on the `<svg>`, not on the pill as the card writes it: bundle.css paints the pill `--tone` and the
- * printed percent `--on-tone`, and the percent is the pill's sibling, so on the card it inherited no tone and was drawn
- * in SVG's default black, 4.16:1 on the light theme's `ok` and 4.42:1 on its `failed`. On the `<svg>` both read it, and
- * the percent is the `on-<status>` on `<status>` pair (4.5:1 in both themes, `console-contrast.test.mjs`). The
- * capsule's `title` and its image's name (`label`, by default "Jobs today: 63 percent of cap") say the percent, whole;
- * the pill stops at the top, the printed percent does not (a window past its cap says so). `pct` is a finite number, or
- * a throw: a level that is not known is not drawn. A `unit` ("$") follows the name joined by a no-break space, written
- * here because `html` turns one in a value into a plain space (a blank a reader cannot tell from a space is scrubbed):
- * the label is a quarter of a phone's card, where a long model name wraps, and a unit alone on a line names nothing.
- */
-export function capsule({ name, window, pct, hold = null, status = null, label = null, unit = null }) {
-  if (!Number.isFinite(pct)) throw new TypeError(`kit.capsule: a level is a finite percentage, not ${JSON.stringify(pct)}`);
-  const named = unit === null ? plainOf(name, "a name", "capsule") : `${plainOf(name, "a name", "capsule")} ${plainOf(unit, "a unit", "capsule")}`;
-  const what = `${named} ${plainOf(window, "a window", "capsule")}`;
-  const tone = `tone-${statusOf(status ?? levelStatus(pct, hold), "capsule").tone}`;
-  const shown = String(Math.max(0, Math.round(pct)));
-  const pill = Math.max(CAP.pillMin, Math.round((CAP.h * Math.min(100, Math.max(0, pct))) / 100));
-  const top = CAP.h - pill;
-  const ring = Number.isFinite(hold) ? html`<circle class="cap__hold" cx="20" cy="${svgNum(CAP.h * (1 - hold / 100), 0, CAP.h, 0)}" r="4"/>` : null;
-  return html`<div class="cap" title="${`${what}: ${shown}%`}"><svg class="${tone}" width="${CAP.w}" height="${CAP.h}" viewBox="0 0 ${CAP.w} ${CAP.h}" role="img" aria-label="${given(label) ? label : `${what}: ${shown} percent of cap`}"><line class="cap__rail" x1="20" x2="20" y1="0" y2="${CAP.h}"/>${ring}<rect class="cap__pill" x="4" y="${svgNum(top, 0, CAP.h, 0)}" width="32" height="${svgNum(pill, 0, CAP.h, 0)}" rx="16"/><text class="cap__v" x="20" y="${svgNum(top + CAP.valueDy, 0, CAP.h, 0)}" text-anchor="middle">${shown}</text></svg><p class="cap__l"><b>${name}${unit === null ? null : html`&nbsp;${unit}`}</b>${window}</p></div>`;
+  return html`<svg class="pbar ${tone}" height="${h}" role="meter" aria-valuenow="${svgNum(pct, 0, 100, 0)}" aria-valuemin="0" aria-valuemax="100" aria-label="${label}"><rect class="pbar__bed" width="100%" height="${h}" rx="${rx}"/><rect class="pbar__fill" width="${svgNum(pct, 0, 100, 1)}%" height="${h}" rx="${rx}"/></svg>`;
 }
 
 /** How many dots a spend column has, the CardsAndBanners card's: one hour's spend is drawn as 0 to 7 of them lit. */
@@ -880,6 +814,12 @@ export function searchPill({ id, name, value = null, label = "Search runs", plac
 export function filterToggle({ count = null, label = "Filters" } = {}) {
   const n = count === null ? 0 : wholeOf(count, "count", "filterToggle");
   return html`<button class="fpill filterbar__toggle" type="button" data-filter-toggle aria-expanded="false" hidden data-reveal>${icon("config", { size: "sm" })}${label}${n === 0 ? null : html` <b>(${grouped(n, "filterToggle")})</b>`}</button>`;
+}
+
+/** Text a helper writes into an attribute as well as the page, or a throw: a fragment's markup would show in a title. */
+function plainOf(text, what, who) {
+  if (typeof text !== "string") throw new TypeError(`kit.${who}: ${what} is text, not ${JSON.stringify(text)}`);
+  return text;
 }
 
 /**

@@ -3,9 +3,9 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { readProjectView, projectHolds, projectWindowStart, projectSizeAction, projectViewForAgent, readProjectFleetRuns } from "../src/project-view.mjs";
+import { readProjectView, projectSizeAction, projectViewForAgent, readProjectFleetRuns } from "../src/project-view.mjs";
 import { planProjectEdit, planProjectDelete, planLimitEdit } from "../src/write-plans.mjs";
-import { writeProjects, envelopeRefusal } from "../src/read-model.mjs";
+import { writeProjects } from "../src/read-model.mjs";
 import { projectMembers, projectDelete, projectBundle } from "../src/console/panels/project.mjs";
 
 const NOW = Date.parse("2026-10-30T12:00:00Z");
@@ -22,54 +22,17 @@ function input(extra = {}) {
   return { id: "billing", paths: { projectsFile: "/private/operator/projects.json", scopedLimitsPath: "/private/operator/limits.json" }, now: NOW, snapshot: { hostBudgets: [host([])], waiting: { rows: [] } }, ...extra, reads };
 }
 
-test("project holds use exact UTC enforcement windows, not today's holds for a weekly or monthly envelope", () => {
-  const hosts = [host([
-    { id: "gh-mon", p: "billing", at: NOW - 4 * DAY, h: 2_000_000, ha: NOW - 4 * DAY },
-    { id: "gh-yesterday", p: "billing", at: NOW - DAY, h: 1_000_000, ha: NOW - DAY },
-    { id: "gh-now", p: "billing", at: NOW - 1_000, h: 500_000, ha: NOW - 1_000 },
-    { id: "gh-old", p: "billing", at: NOW - 10 * DAY, h: 4_000_000, ha: NOW - 10 * DAY },
-    { id: "gh-other", p: "other", at: NOW - 1_000, h: 9_000_000, ha: NOW - 1_000 },
-    { id: "gh-future", p: "billing", at: NOW + 1_000, h: 9_000_000, ha: NOW + 1_000 },
-  ])];
-  assert.equal(projectHolds(hosts, { id: "billing", window: "day", now: NOW }).tokens, 500_000);
-  assert.equal(projectHolds(hosts, { id: "billing", window: "week", now: NOW }).tokens, 3_500_000);
-  assert.equal(projectHolds(hosts, { id: "billing", window: "month", now: NOW }).tokens, 7_500_000);
-  assert.equal(projectWindowStart("week", NOW), Date.parse("2026-10-26T00:00:00Z"));
-  assert.equal(projectWindowStart("month", NOW), Date.parse("2026-10-01T00:00:00Z"));
-});
-
-test("hold incompleteness and old hosts preserve unknown rather than zero; duplicate live ids count once", () => {
-  const job = { id: "gh-one", p: "billing", at: NOW - 1, h: 700, ha: NOW - 1 };
-  assert.deepEqual(projectHolds([host([job]), host([job])], { id: "billing", now: NOW }), { tokens: 700, knownTokens: 700, incomplete: false });
-  for (const rows of [[host([job], { jobsMore: "1" })], [host([job]), { name: "old" }], [host([{ id: "gh-no-hold", p: "billing", at: NOW - 1 }])]]) {
-    const got = projectHolds(rows, { id: "billing", now: NOW });
-    assert.equal(got.tokens, null);
-    assert.equal(got.incomplete, true);
-  }
-  assert.equal(projectHolds(null, { id: "billing", now: NOW }).tokens, null);
-});
-
-test("spend splits the allocation ledger's held-inclusive amount exactly once", async () => {
-  const view = await readProjectView(input({ paths: { envelopeFile: "/op/envelope.json" }, snapshot: { hostBudgets: [host([{ id: "gh-held", p: "billing", at: NOW - DAY, h: 2_000_000, ha: NOW - DAY }])] }, reads: { allocation: () => ({ window: "week", spend: { projects: { billing: 8_100_000 } }, state: { allocations: { billing: 25_000_000 }, weights: { billing: 3, other: 4 } }, floors: { billing: 10_000_000 }, totalTokens: 100_000_000 }) } }));
-  assert.equal(view.spend.usedTokens, 8_100_000);
-  assert.equal(view.spend.settledTokens, 6_100_000);
-  assert.equal(view.spend.heldTokens, 2_000_000);
-  assert.deepEqual([view.allocation.weight, view.allocation.totalWeight], [3, 7]);
-  assert.equal(view.spend.shareTokens, 25_000_000);
-});
-
-test("allocation counters remain known when host holds are partial, settled is then unknown", async () => {
-  const view = await readProjectView(input({ paths: { envelopeFile: "/op/envelope.json" }, snapshot: { hostBudgets: [{ name: "old" }] }, reads: { allocation: () => ({ window: "month", spend: { projects: { billing: 9_000_000 } } }) } }));
-  assert.equal(view.spend.usedTokens, 9_000_000);
-  assert.equal(view.spend.settledTokens, null);
-  assert.equal(view.spend.heldTokens, null);
-});
-
-test("without envelope spend uses the meter's recorded totals and states that no share exists", async () => {
+test("spend is the run records' own total: no allocation ledger, hold or share", async () => {
   const view = await readProjectView(input({ reads: { scan: () => [record("gh-one"), record("gh-other", { project: "other", tokens: { total: 99 } })] } }));
-  assert.equal(view.spend.envelope, false);
+  assert.equal(view.spend.usedTokens, 250_000);
   assert.equal(view.spend.settledTokens, 250_000);
-  assert.equal(view.spend.shareTokens, null);
+  assert.equal(view.spend.heldTokens, null);
+  assert.equal(view.spend.shareTokens, undefined);
+  assert.equal(view.spend.envelope, undefined);
+  assert.equal(view.allocation, undefined);
+  // No readable record total: unknown, never zero.
+  const blind = await readProjectView(input({ reads: { scan: () => null } }));
+  assert.equal(blind.spend.usedTokens, null);
 });
 
 test("history stays with the recorded project while a current member's own activity stays a separate count", async () => {
@@ -255,30 +218,18 @@ test("real delete planner refuses a project limit and confirms membership join/l
   assert.deepEqual(JSON.parse(fs.readFileSync(paths.projectsFile)).projects[0].members, ["gitlab:acme/new"]);
 });
 
-test("an envelope floor refuses delete through the actual planner before a form is offered", async () => {
-  const paths = realDeployment({ floor: true });
-  const env = { PI_MAX_TOKENS: "2000000" };
-  const refused = planProjectDelete({ id: "billing", paths, env });
-  assert.match(refused.refusal, /floor|floorsTokens/);
-  assert.ok(!refused.plan);
-  const actual = await readProjectView({ id: "billing", paths, env, now: NOW, snapshot: { hostBudgets: [host([])] }, reads: { scan: () => [], allocation: () => ({ window: "week", floors: { billing: 10_000_000 } }), sizing: () => ({ projects: {} }), fleetRuns: () => ({ runs: [], incomplete: false }) } });
-  assert.match(actual.deleteRefusal, /floor|floorsTokens/);
-  assert.ok(!actual.deleteRefusal.includes(paths.envelopeFile));
-});
-
 test("typed preflights name the actual bundle, scoped row or envelope floor without copying parser diagnostics", async () => {
-  for (const kind of ["bundle", "limits", "envelope-floor"]) {
-    const paths = realDeployment({ bundled: kind === "bundle", limited: kind === "limits", floor: kind === "envelope-floor" });
+  for (const kind of ["bundle", "limits"]) {
+    const paths = realDeployment({ bundled: kind === "bundle", limited: kind === "limits" });
     if (kind === "bundle") fs.writeFileSync(paths.triggersPath, JSON.stringify({ triggers: [], secretBundles: { payments: { project: "billing", profile: "vault", ref: "PRIVATE_REFERENCE" } } }));
-    if (kind === "limits") fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/other", concurrent: 1 }, { scope: "project:billing", dayTokens: 5_000_000 }] }));
+    if (kind === "limits") fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 2, limits: [{ scope: "github:acme/other", concurrent: 1 }, { scope: "project:billing", concurrent: 2 }] }));
     const env = { PI_MAX_TOKENS: "2000000" };
     const raw = planProjectDelete({ id: "billing", paths, env });
     assert.equal(raw.blocker.kind, kind);
     if (kind === "bundle") assert.deepEqual(raw.blocker.bindings, [{ project: "billing", bundle: "payments" }]);
     if (kind === "limits") assert.deepEqual(raw.blocker.rows, [{ project: "billing", index: 1 }]);
-    if (kind === "envelope-floor") assert.deepEqual(raw.blocker.projects, ["billing"]);
-    const actual = await readProjectView({ id: "billing", paths, env, now: NOW, snapshot: { hostBudgets: [host([])] }, reads: { scan: () => [], allocation: () => ({ unset: true }), sizing: () => ({ projects: {} }), fleetRuns: () => ({ runs: [], incomplete: false }) } });
-    assert.match(actual.deleteRefusal, kind === "bundle" ? /secret bundle payments names it/ : kind === "limits" ? /scoped limits row 2 \(project:billing\)/ : /an envelope floor names it/);
+    const actual = await readProjectView({ id: "billing", paths, env, now: NOW, snapshot: { hostBudgets: [host([])] }, reads: { scan: () => [], sizing: () => ({ projects: {} }), fleetRuns: () => ({ runs: [], incomplete: false }) } });
+    assert.match(actual.deleteRefusal, kind === "bundle" ? /secret bundle payments names it/ : /scoped limits row 2 \(project:billing\)/);
     assert.doesNotMatch(actual.deleteRefusal, /rejected:|dispatch_|floorsTokens|Nothing was written|PRIVATE_REFERENCE|\/private\/|\/tmp\//);
     const ctx = { role: "operator", readOnly: false, data: { projectView: actual } };
     const blocked = String(projectDelete(ctx));
@@ -312,13 +263,7 @@ test("invalid preflight sources and an untyped hostile refusal get fixed actiona
   assert.doesNotMatch(JSON.stringify(projectViewForAgent(fallback)), /PRIVATE_DIAGNOSTIC|private-root|dispatch_tool|rejected:/);
 });
 
-test("unrelated envelope callers retain their refusal string and a members-only edit keeps the project name", () => {
-  const paths = realDeployment({ floor: true });
-  assert.match(envelopeRefusal({ envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens: 2_000_000, next: { maxTokens: null } }), /envelope invalid/);
-  fs.writeFileSync(paths.scopedLimitsPath, JSON.stringify({ version: 3, limits: [{ scope: "project:billing", weekTokens: 20_000_000 }] }));
-  const lowered = planLimitEdit({ params: { index: 0, weekTokens: "1000000" }, paths, env: { PI_MAX_TOKENS: "2000000" } });
-  assert.match(lowered.refusal, /allocation envelope invalid/);
-  assert.equal(lowered.blocker, undefined, "other planners' result shapes remain unchanged");
+test("a members-only edit keeps the project name and writes a valid file", () => {
   const unbound = realDeployment();
   const result = planProjectEdit({ params: { id: "billing", members: ["github:acme/next"] }, paths: unbound, env: {} });
   assert.equal(result.plan.after.name, "Billing");
@@ -363,17 +308,13 @@ test("a production degraded registry string makes retained healthy host holds un
   fs.writeFileSync(file, JSON.stringify(oom));
   fs.utimesSync(file, NOW / 1000, NOW / 1000);
   const retained = [host([{ id: "gh-held", p: "billing", at: NOW - 1, h: 2_000_000, ha: NOW - 1 }])];
-  const args = { id: "billing", paths, now: NOW, reads: { allocation: () => ({ unset: true }), fleetRuns: () => ({ runs: [], incomplete: false }) } };
+  const args = { id: "billing", paths, now: NOW, reads: { fleetRuns: () => ({ runs: [], incomplete: false }) } };
   const healthy = await readProjectView({ ...args, snapshot: { hostBudgets: retained, queue: { fleetDegraded: null } } });
-  assert.equal(healthy.spend.heldTokens, 2_000_000);
   assert.equal(healthy.sizing.memory.suggested, 12288);
   assert.equal(healthy.sizing.call, 'dispatch_limit_edit {"index":0,"memory":"12g"}');
   assert.equal(healthy.sizingUnreadable, false);
   for (const state of [{ queue: { fleetDegraded: "registry unreadable" } }, { fleetDegraded: "registry unreadable" }, { fleetDegraded: true }]) {
     const degraded = await readProjectView({ ...args, snapshot: { hostBudgets: retained, ...state } });
-    assert.equal(degraded.spend.heldTokens, null);
-    assert.equal(degraded.spend.heldIncomplete, true);
-    assert.equal(degraded.spend.heldKnownTokens, 0, "stale holds are not relabeled as currently known");
     assert.equal(degraded.sizing.memory.reason, "oom-killed");
     assert.equal(degraded.sizing.memory.held, "no-cap");
     assert.equal(degraded.sizing.memory.suggested, null);
@@ -386,7 +327,6 @@ test("a production degraded registry string makes retained healthy host holds un
 test("month spend history includes the first day of a long month, beyond the 30-day sizing range", async () => {
   const now = Date.parse("2026-10-31T23:00:00Z");
   let readSince;
-  const got = await readProjectView(input({ now, paths: { envelopeFile: "/op/envelope.json" }, reads: { allocation: () => ({ window: "month", spend: { projects: { billing: 1_000_000 } } }), scan: ({ sinceMs }) => { readSince = sinceMs; return [record("gh-month-first", { endedAt: "2026-10-01T01:00:00Z", reason: "allocation-cap", outcome: "policy" })]; } } }));
+  const got = await readProjectView(input({ now, reads: { scan: ({ sinceMs }) => { readSince = sinceMs; return [record("gh-month-first", { endedAt: "2026-10-01T01:00:00Z", outcome: "policy", reason: "model-unknown" })]; } } }));
   assert.equal(readSince, Date.parse("2026-10-01T00:00:00Z"));
-  assert.equal(got.allocation.refused, 1);
 });

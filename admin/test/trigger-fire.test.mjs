@@ -12,7 +12,7 @@ function fixture() {
   const folder = join(root, "repo");
   mkdirSync(folder);
   const triggersPath = join(root, "triggers.json");
-  const raw = { on: { type: "cron", id: "daily", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "operator task never in display", provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 7, progress: true, steer: true, backend: "local", maxTokens: "1000000", excludeTools: ["bash"], secrets: { TOKEN: "vault/private" }, secretsProfile: "work" } };
+  const raw = { on: { type: "cron", id: "daily", pattern: "0 6 * * *" }, run: { kind: "local", folder, flow: "fix", task: "operator task never in display", provider: "anthropic", model: "claude-sonnet-4-5", maxTurns: 7, progress: true, steer: true, backend: "local", excludeTools: ["bash"], secrets: { TOKEN: "vault/private" }, secretsProfile: "work" } };
   const save = () => writeFileSync(triggersPath, JSON.stringify({ triggers: [raw] }));
   save();
   const jobs = new Map(), latches = new Set(), admissions = [], queues = [], adds = [];
@@ -42,7 +42,7 @@ test("Fire now previews without rate writes, executes the worker's entire cron t
   const { plan } = await planTriggerFire(f.options);
   assert.ok(plan);
   assert.equal(plan.queue, "pi-jobs@host1");
-  assert.equal(plan.reserve.tokens, 1_000_000);
+  assert.equal(plan.reserve, undefined, "no token reserve rides Fire now");
   assert.equal(f.adds.length, 0);
   assert.equal(f.admissions.length, 1);
   assert.equal(f.admissions[0].consumeRate, false);
@@ -82,11 +82,11 @@ test("a canary is the same template with one more field, under an identity of it
   assert.equal(f.adds.length, 2);
 });
 
-test("Fire now refuses non-cron, command, portfolio, absent index, unserved and undeclared schedules", async () => {
+test("Fire now refuses non-cron, command, a retired portfolio run, absent index, unserved and undeclared schedules", async () => {
   for (const [change, expected] of [
     [(f) => { f.raw.on = { type: "label", any: ["fix"] }; f.raw.run = { kind: "github", flow: "fix" }; }, /Only a cron/],
     [(f) => { delete f.raw.run.flow; delete f.raw.run.task; delete f.raw.run.progress; delete f.raw.run.steer; f.raw.run.command = "wf"; }, /run.command/],
-    [(f) => { f.raw.run.portfolio = true; }, /portfolio/],
+    [(f) => { f.raw.run.portfolio = true; }, /triggers file does not load/, "a retired portfolio run is an invalid file, refused before any plan"],
     [(f) => { f.options.index = 1; }, /no trigger at row 2/],
     [(f) => { f.setServed(false); }, /not in this deployment's queue/],
     [(f) => { f.raw.run.folder = join(f.root, "elsewhere"); }, /another host/],

@@ -2,7 +2,6 @@ import { GIT_READ_FLAGS } from "./git-hardening.mjs";
 import { execFile } from "node:child_process";
 import * as realFs from "node:fs";
 import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
-import { envelopeProtectedIdentities, fileIdentity } from "./envelope.mjs";
 import { promisify } from "node:util";
 import { materializePiDir } from "./materialize.mjs";
 import { InfraRetry } from "./processor.mjs";
@@ -25,8 +24,6 @@ export const LOCAL_FOLDER_UNREADABLE_REPO = "local-folder-unreadable-repo";
  * refused rather than mounted wherever the link now points.
  */
 export const LOCAL_FOLDER_ESCAPED = "local-folder-escaped";
-/** The run-record reason for a local job whose resolved folder is the envelope's folder or a directory above it (issue #504 part B). */
-export const LOCAL_FOLDER_HOLDS_ENVELOPE = "local-folder-holds-envelope";
 
 /**
  * Prepare a LOCAL-FOLDER job. This is the zero-GitHub path: no token, no clone, no PR. The folder
@@ -46,7 +43,7 @@ export const LOCAL_FOLDER_HOLDS_ENVELOPE = "local-folder-holds-envelope";
  * default keeps a directly-constructed call (tests, older wiring) honest: a job with no derived
  * context is a manual run.
  */
-export async function prepareLocalWorkspace({ folder: named, task, jobDir, git = defaultGit, event = { source: "manual" }, fs = realFs, jobPaths = null, envelopeFile = null, authStoreDir = null, portfolio = null, watch = null, watchDecisionModel = null, watchSecrets = null }) {
+export async function prepareLocalWorkspace({ folder: named, task, jobDir, git = defaultGit, event = { source: "manual" }, fs = realFs, jobPaths = null, authStoreDir = null, watch = null, watchDecisionModel = null, watchSecrets = null }) {
 	requirePath(fs, named, `local folder does not exist: ${named}`, "the local folder");
 	// Issue #504 part B: the folder is RESOLVED here, once, and the resolved path is the one everything below reads and the
 	// one the container mounts (`workspace`). The raw string was mounted before, so a link below a job path swapped after
@@ -61,7 +58,7 @@ export async function prepareLocalWorkspace({ folder: named, task, jobDir, git =
 		if (error?.transient === false) return { outcome: "policy", reason: "auth-store-unavailable" };
 		throw new InfraRetry("the private subscription store boundary could not be read");
 	}
-	const placement = judgePlacement(fs, named, folder, { jobPaths: typeof jobPaths === "function" ? jobPaths() : jobPaths, envelopeFile });
+	const placement = judgePlacement(fs, named, folder, { jobPaths: typeof jobPaths === "function" ? jobPaths() : jobPaths });
 	if (placement) return { outcome: "policy", reason: placement };
 	// Issue #524: a folder that is not a repository is its own determinate refusal, RETURNED with its own reason
 	// (CONST-RETRY-INFRA-ONLY), not a config throw. As a throw it reached the processor's config arm, which can only
@@ -97,16 +94,6 @@ export async function prepareLocalWorkspace({ folder: named, task, jobDir, git =
 		assertGitFilesReadable(fs, folder);
 		if (error.code === 1 && (await unbornHead(git, folder))) return { outcome: "policy", reason: LOCAL_FOLDER_NO_COMMIT };
 		return { outcome: "policy", reason: LOCAL_FOLDER_UNREADABLE_REPO };
-	}
-
-	// Issue #505: a confirmed portfolio job's snapshot, built BEFORE anything is written, so a refusal
-	// (`portfolio-snapshot-oversize`) or an InfraRetry (Valkey) leaves nothing behind but the directory prepare.mjs removes.
-	// Null from the builder means the live file no longer flags the job (or this host lost its envelope): no snapshot, and
-	// the job runs as an ordinary cron job.
-	let snapshot = null;
-	if (typeof portfolio === "function") {
-		snapshot = await portfolio();
-		if (snapshot?.outcome === "policy") return snapshot;
 	}
 
 	fs.mkdirSync(jobDir, { recursive: true });
@@ -154,14 +141,9 @@ export async function prepareLocalWorkspace({ folder: named, task, jobDir, git =
 		...(event.source === "watch" ? { fingerprint: event.fingerprint, severity: event.severity, count: event.count, firstSeen: event.firstSeen, lastSeen: event.lastSeen } : {}),
 	};
 	fs.writeFileSync(join(jobDir, "event.json"), JSON.stringify(eventBody, null, 2), { mode: 0o444 });
-	// /job/portfolio.json (INT-CONTAINER-JOB-INPUTS), 0o444 beside event.json, so it reaches the container on the existing
-	// read-only /job mount with no new mount. Its presence is also what composes the portfolio persona in the runner.
-	if (typeof snapshot?.body === "string") fs.writeFileSync(join(jobDir, "portfolio.json"), snapshot.body, { mode: 0o444 });
 
 	// The folder itself is /workspace (rw). No clone: local jobs edit in place.
-	// `portfolio: true` only when the snapshot was written (issue #505): the plan collector requires prepare to have
-	// agreed, beside the pickup and the live file at collection, so a job that ran without the facts writes no plan.
-	return { workspace: folder, jobDir, outboxDir, sha, materialised: written, ...(typeof snapshot?.body === "string" ? { portfolio: true } : {}) };
+	return { workspace: folder, jobDir, outboxDir, sha, materialised: written };
 }
 
 /**
@@ -186,6 +168,11 @@ function insideOrEqual(p, root) {
 	return p === root || p.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
 
+/** A file's identity: its device and inode, as `stat` with `bigint` reports them. Two names of one file share it. */
+function fileIdentity(stat) {
+	return `${stat.dev}:${stat.ino}`;
+}
+
 /** The identity of a path (`dev:ino`, links followed), or null when it cannot be read. */
 function identityAt(fs, path) {
 	try {
@@ -202,12 +189,10 @@ function identityAt(fs, path) {
  *     resolved path lies inside none of those job paths, judged
  *     by identity up the resolved path, so a firmlink or a case variant is the directory it names. A job path is a
  *     place a job can write; a link a job planted there must not carry another job's folder out of it. A folder named
- *     outside every job path (an operator's own `pi-dispatch run`) is not held to them, since nothing there is a job's;
- *   - `local-folder-holds-envelope`: the resolved folder is the envelope file's folder or a directory above it
- *     (`envelopeProtectedIdentities`), so the job could write its own bounds.
- * `jobPaths` is `{ runRoots, cronFolders }` (schedules.mjs `envelopeJobPaths`), or null for none.
+ *     outside every job path (an operator's own `pi-dispatch run`) is not held to them, since nothing there is a job's.
+ * `jobPaths` is `{ runRoots, cronFolders }`, or null for none.
  */
-function judgePlacement(fs, named, folder, { jobPaths, envelopeFile }) {
+function judgePlacement(fs, named, folder, { jobPaths }) {
 	const real = (p) => {
 		try {
 			return (fs.realpathSync?.native ?? fs.realpathSync)(p);
@@ -244,11 +229,6 @@ function judgePlacement(fs, named, folder, { jobPaths, envelopeFile }) {
 			if (dirname(p) === p) break;
 		}
 		if (!inside) return LOCAL_FOLDER_ESCAPED;
-	}
-	if (envelopeFile !== null && envelopeFile !== undefined) {
-		const protectedIds = envelopeProtectedIdentities(envelopeFile, { realpathSync: fs.realpathSync?.native ?? fs.realpathSync, statSync: fs.statSync });
-		const id = identityAt(fs, folder);
-		if (id !== null && protectedIds.has(id)) return LOCAL_FOLDER_HOLDS_ENVELOPE;
 	}
 	return null;
 }

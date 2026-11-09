@@ -33,7 +33,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { STEER_MAX_MESSAGES, STEER_TOTAL_MAX_BYTES } from "@edgehero/pi-dispatch/steer-inbox";
-import { SEC, MIN, cell, ageText, timeHtml, msOf, tokensText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, capTokensOf, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
+import { SEC, MIN, cell, ageText, timeHtml, msOf, tokensText, count, RUN_ID_RE, runLink, targetLink, canAct, actForm, area, table, runCost, costText, staleText, outcomeText, bannerCut, parkedAnswerForm } from "./common.mjs";
 
 const titled = (title, body, locale = "en") => ui.card({ title: uiText(title, locale), body });
 const t = (message, view) => uiText(message, view?.locale);
@@ -63,9 +63,8 @@ function runningWithoutRecord(view) {
 /**
  * Whether the record is a run REFUSED BEFORE IT STARTED (issue #710): a policy outcome (never retried,
  * CONST-RETRY-INFRA-ONLY, so no later attempt of the same id can start) whose record says no spend at all, the cost
- * fold's own `refusedBeforeSpend` (no tokens, no exit code, `budgetReserved: false`). Such a run made no container and
- * no workspace, so its page draws no Progress and no transcript section. A refusal the fold
- * cannot tell from a spend (one that kept its count slot, `token-cap`) keeps those panels, and says what they say.
+ * fold's own `refusedBeforeSpend` (no tokens, no exit code). Such a run made no container and
+ * no workspace, so its page draws no Progress and no transcript section.
  */
 export function refusedBeforeStart(record) {
   return record !== null && typeof record === "object" && record.outcome === "policy" && refusedBeforeSpend(record);
@@ -585,32 +584,20 @@ const recordSummary = withRun("Run", (r, view, source) => {
   ], view.locale)}`;
 });
 
-/** Token windows have no soft hold; these are settlement facts, never a promise to spend again. */
-export function settlementText(basis, locale = "en") {
-  return uiText(({ metered: "settled from the run's metered tokens", floor: "the window keeps the whole reservation because the full token count was not known", refunded: "the reservation was released before the run started", unreserved: "no token reservation was made" })[basis] ?? "no settlement explanation was recorded", locale);
-}
-
 export const runCostPanel = withRun("Tokens", (r, view) => {
   const tokens = r.tokens ?? null;
-  const d = r.tokensWindows ?? null;
   const amount = runCost(r);
   const attempts = view.data?.recoveryRuns ?? [];
-  const holds = Array.isArray(view.data?.runHolds) ? view.data.runHolds : [];
-  return html`${attempts.length > 1 || holds.length ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a))}${a.tokensWindows ? `; ${tokensText(a.tokensWindows.settledTokens)} ${t("settled", view)}` : ""}.</p>`)}${holds.map((h) => html`<p>${t("Container attempt", view)} ${h.seq}: ${tokensText(h.amountTokens)} ${t(h.state === "held" ? "held while it runs" : h.state === "settled-crashed" ? "settled at the whole reservation after it was lost" : h.state, view)}.</p>`)}<p>${t("A durable run can hold up to", view)} ${(2 + RECOVERY_CAP)} ${t("per-job budgets: two queue attempts and", view)} ${RECOVERY_CAP} ${t("recoveries. Each settles on its own.", view)}</p>` : null}${capTokensOf(r) > 0 && amount ? ui.meter({ value: amount.tokens, max: capTokensOf(r), label: t("Job budget (tokens)", view) }) : null}${facts([
+  return html`${attempts.length > 1 ? html`<h3>${t("Each attempt", view)}</h3>${attempts.map((a) => html`<p>${runLink(a.jobId)}: ${costText(runCost(a))}.</p>`)}` : null}${facts([
     ["Tokens", t(costText(amount), view)],
     ["Measurement", amount ? `${t(amount.class, view)}${amount.floor ? ` (${t("a floor: the meter could not see all of it", view)})` : ""}` : t("not metered", view)],
     ["Input tokens", tokens ? count(tokens.input) : "-"],
     ["Output tokens", tokens ? count(tokens.output) : "-"],
     ["Total tokens", tokens ? count(tokens.total) : "-"],
     ["Model calls", tokens ? cell(tokens.calls) : "-"],
-    ["Job budget", tokensText(capTokensOf(r))],
-    ["Reserved", d ? tokensText(d.reservedTokens) : t("no token window applied", view)],
-    ["Settled", d && d.settledTokens !== null && d.settledTokens !== undefined ? `${tokensText(d.settledTokens)}: ${settlementText(d.basis, view.locale)}` : null],
-    ["Released at the end", d && Number.isFinite(d.reservedTokens) && Number.isFinite(d.settledTokens) ? tokensText(Math.max(0, d.reservedTokens - d.settledTokens)) : null],
     ["Token split", tokens && (tokens.rootTotal != null || tokens.otherTotal != null || tokens.childTotal != null) ? `${count(tokens.rootTotal ?? 0)} this run, ${count(tokens.otherTotal ?? 0)} other sessions, ${count(tokens.childTotal ?? 0)} subprocesses` : null],
     ["Unmetered children", tokens?.unmeteredChildren],
     ["Usage unreported", tokens?.usageUnreported],
-    ["Model window", d?.modelBasis ? settlementText(d.modelBasis) : null],
   ], view.locale)}`;
 });
 

@@ -4,7 +4,6 @@ import { EventEmitter } from "node:events";
 import { join } from "node:path";
 import { test } from "node:test";
 import { addToken, readTokensFile, rotateToken, revokeToken, endAllSessions } from "@edgehero/pi-dispatch/console-tokens";
-import { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { makeSetupActions, SETUP_ACTION_NAMES, isSetupKeyAction } from "../src/setup-actions.mjs";
 import { PROVIDER_KEY_NAMES } from "../src/provider-key-names.mjs";
@@ -385,25 +384,25 @@ test("readiness timeout, partial host outcomes and grant loss are never represen
   assert.equal(broken.audit.at(-1).outcome, "failed");
 });
 
-test("complete exposure uses real trigger validation and reserve estimates; partial queues and unreadable job data refuse", async () => {
+test("complete exposure uses real trigger validation, states that no token reservation exists, and partial queues refuse", async () => {
   const dir = tempDir("pd-setup-exposure-");
   const path = join(dir, "triggers.json");
-  fs.writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 2 * * *" }, run: { kind: "local", flow: "tidy", folder: "/repo", task: "Tidy the repository", maxTokens: 2 } }] }));
+  fs.writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 2 * * *" }, run: { kind: "local", flow: "tidy", folder: "/repo" , task: "Tidy the repository" } }] }));
   let snapshot = { queue: {}, queueCounts: [{ name: "pi-jobs", counts: { waiting: 1, paused: 0, delayed: 0, active: 0 } }], waiting: { rows: [{ jobId: "local-job", queue: "pi-jobs" }], scheduled: [], truncated: false } };
-  const a = { fleet: { snapshot: async opts => { assert.equal(opts.switchQueues, true); assert.equal(opts.waiting, true); assert.equal(opts.freshWaiting, true); return snapshot; } }, paths: { triggersPath: path }, env: {}, rm: { estimateReserve }, readJobsData: async () => new Map([["local-job", { maxTokens: 3 }]]) };
+  const a = { fleet: { snapshot: async opts => { assert.equal(opts.switchQueues, true); assert.equal(opts.waiting, true); assert.equal(opts.freshWaiting, true); return snapshot; } }, paths: { triggersPath: path }, env: {}, rm: {} };
   const ctx = { a, fs, now: () => T0 };
   const got = await readSetupExposure(ctx);
   assert.equal(got.complete, true);
-  assert.match(got.lines.join(" "), /\b3 tokens across current jobs.*\b2 tokens across the configured cron triggers/);
-  assert.match(got.lines.join(" "), /local-job.*nightly/);
+  assert.match(got.lines.join(" "), /No token reservation is taken or reported/);
+  assert.match(got.lines.join(" "), /local-job/);
+  assert.match(got.lines.join(" "), /nightly/);
   const whole = snapshot;
   snapshot = { ...snapshot, waiting: { ...snapshot.waiting, rows: [...snapshot.waiting.rows, { jobId: "local-job", queue: "pi-jobs@other" }] } };
   assert.equal((await readSetupExposure(ctx)).complete, false, "queue data keyed only by ID cannot safely price duplicate IDs across queues");
   snapshot = { ...whole, switchIncomplete: "unreadable" };
   assert.equal((await readSetupExposure(ctx)).complete, false);
   snapshot = { ...snapshot, switchIncomplete: null };
-  a.readJobsData = async () => new Map();
-  assert.equal((await readSetupExposure(ctx)).complete, false);
+  assert.equal((await readSetupExposure(ctx)).complete, true, "job data is not priced any more, so nothing extra is required");
 });
 
 test("revocation aborts an in-flight child without inventing rollback, and concurrent confirms never submit a second operation", async t => {

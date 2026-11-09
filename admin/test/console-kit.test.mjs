@@ -356,67 +356,25 @@ test("facts: the FactsAndLevels card's grid, and its one- and three-column forms
   assert.equal(out(ui.facts([["a", "b"]], { cols: 3 })), `<dl class="facts facts--3"><div class="fact"><dt>a</dt><dd>b</dd></div></dl>`);
 });
 
-test("meter: the FactsAndLevels card's three meters against caps, the hold tick at 80%, the tone by the meter rule", () => {
-  const card = [
-    `<svg class="pbar tone-ok" height="10" role="meter" aria-valuenow="63" aria-valuemax="100" aria-label="Jobs today: 25 of 40"><rect class="pbar__bed" width="100%" height="10" rx="5"/><rect class="pbar__fill" width="62.5%" height="10" rx="5"/><line class="pbar__hold" x1="80%" x2="80%" y1="-3" y2="13"/></svg>`,
-    `<svg class="pbar tone-attention" height="10" role="meter" aria-valuenow="86" aria-valuemax="100" aria-label="Dollars deployment today: $21.50 of $25.00"><rect class="pbar__bed" width="100%" height="10" rx="5"/><rect class="pbar__fill" width="86.0%" height="10" rx="5"/><line class="pbar__hold" x1="80%" x2="80%" y1="-3" y2="13"/></svg>`,
-    `<svg class="pbar tone-failed" height="10" role="meter" aria-valuenow="100" aria-valuemax="100" aria-label="Tokens today: 8.00M of 8.00M"><rect class="pbar__bed" width="100%" height="10" rx="5"/><rect class="pbar__fill" width="100.0%" height="10" rx="5"/><line class="pbar__hold" x1="80%" x2="80%" y1="-3" y2="13"/></svg>`,
-  ];
-  // What the kit adds: the meter's minimum, and every number through the one formatter (`rx="5.0"`, `80.0%`).
-  const kitOf = (s) => s.replace(" aria-valuemax", ` aria-valuemin="0" aria-valuemax`).replace(/rx="5"/g, `rx="5.0"`).replace(/"80%"/g, `"80.0%"`);
-  assert.equal(out(ui.meter({ value: 25, max: 40, hold: 80, label: "Jobs today: 25 of 40" })), kitOf(card[0]));
-  assert.equal(out(ui.meter({ value: 21.5, max: 25, hold: 80, label: "Dollars deployment today: $21.50 of $25.00" })), kitOf(card[1]));
-  assert.equal(out(ui.meter({ value: 8e6, max: 8e6, hold: 80, label: "Tokens today: 8.00M of 8.00M" })), kitOf(card[2]));
-  // Without a hold there is no tick; a given status wins; a runaway or missing value is clamped, never written raw.
+test("meter: a bar against a cap, the tone by the meter rule, never a hold tick or a ring", () => {
+  assert.equal(out(ui.meter({ value: 25, max: 40, label: "Jobs today: 25 of 40" })), `<svg class="pbar tone-ok" height="10" role="meter" aria-valuenow="63" aria-valuemin="0" aria-valuemax="100" aria-label="Jobs today: 25 of 40"><rect class="pbar__bed" width="100%" height="10" rx="5.0"/><rect class="pbar__fill" width="62.5%" height="10" rx="5.0"/></svg>`);
+  assert.match(out(ui.meter({ value: 21.5, max: 25, label: "Dollars deployment today: $21.50 of $25.00" })), /class="pbar tone-ok".*aria-valuenow="86"/, "no soft hold: below the cap is ok");
+  assert.match(out(ui.meter({ value: 8e6, max: 8e6, label: "Tokens today: 8.00M of 8.00M" })), /class="pbar tone-failed".*aria-valuenow="100".*width="100\.0%"/);
+  // A given status wins; a runaway or missing value is clamped, never written raw.
   assert.equal(out(ui.meter({ value: 3, max: 4, label: "x", status: "running", height: 8 })), `<svg class="pbar tone-running" height="8" role="meter" aria-valuenow="75" aria-valuemin="0" aria-valuemax="100" aria-label="x"><rect class="pbar__bed" width="100%" height="8" rx="4.0"/><rect class="pbar__fill" width="75.0%" height="8" rx="4.0"/></svg>`);
   assert.match(out(ui.meter({ value: 90, max: 40, label: "over" })), /tone-failed.*aria-valuenow="100".*class="pbar__fill" width="100\.0%"/);
   assert.match(out(ui.meter({ value: Number.NaN, max: 0, label: "unknown", height: Infinity })), /tone-ok" height="4".*aria-valuenow="0".*rx="2\.0".*width="0\.0%"/);
-});
-
-test("meter and ring at their edges: exactly at the hold, a zero cap, a hold, a stroke and a height out of range (review mutants K1-K4, K8, K14)", () => {
-  const toneOf = (s) => /class="(?:pbar|ring) tone-([a-z]+)"/.exec(s)[1];
-  // Exactly at the hold is attention, just under it ok, exactly at the cap failed: the meter rule's `>=`, both sides.
-  assert.equal(toneOf(out(ui.meter({ value: 80, max: 100, hold: 80, label: "x" }))), "attention");
-  assert.equal(toneOf(out(ui.meter({ value: 79.9, max: 100, hold: 80, label: "x" }))), "ok");
-  assert.equal(toneOf(out(ui.ring({ value: 80, max: 100, hold: 80, label: "x" }))), "attention");
-  assert.equal(toneOf(out(ui.meter({ value: 40, max: 40, label: "x" }))), "failed");
-  // A zero (or negative) cap draws nothing used and is not a breach: 0%, ok, never 100% failed.
+  // Exactly at the cap is failed; a zero (or negative) cap draws nothing used and is not a breach.
+  assert.equal(/class="pbar tone-([a-z]+)"/.exec(out(ui.meter({ value: 40, max: 40, label: "x" })))[1], "failed");
   for (const max of [0, -5]) {
-    const m = out(ui.meter({ value: 5, max, hold: 80, label: "no cap" }));
-    assert.equal(toneOf(m), "ok", `max ${max}`);
+    const m = out(ui.meter({ value: 5, max, label: "no cap" }));
+    assert.equal(/class="pbar tone-([a-z]+)"/.exec(m)[1], "ok", `max ${max}`);
     assert.match(m, /aria-valuenow="0".*class="pbar__fill" width="0\.0%"/, `max ${max}`);
-    const r = out(ui.ring({ value: 5, max, label: "no cap" }));
-    assert.equal(toneOf(r), "ok", `ring max ${max}`);
-    assert.match(r, /stroke-dasharray="0\.0 100"/, `ring max ${max}`);
   }
-  // A hold outside 0-100 is drawn at the nearer end, on the bar and on the ring.
-  const tickX = (s) => /class="pbar__hold" x1="([^"]+)" x2="([^"]+)"/.exec(s).slice(1);
-  assert.deepEqual(tickX(out(ui.meter({ value: 1, max: 2, hold: 150, label: "x" }))), ["100.0%", "100.0%"]);
-  assert.deepEqual(tickX(out(ui.meter({ value: 1, max: 2, hold: -20, label: "x" }))), ["0.0%", "0.0%"]);
-  const ringTick = (hold) => /<line class="ring__hold"[^>]*\/>/.exec(out(ui.ring({ value: 1, max: 2, hold, label: "x" })))[0];
-  assert.equal(ringTick(150), ringTick(100), "a hold past 100 is the tick at 100");
-  assert.equal(ringTick(-50), ringTick(0), "a hold under 0 is the tick at 0");
-  assert.equal(ringTick(100), `<line class="ring__hold" x1="48.0" y1="10.0" x2="48.0" y2="-1.0"/>`, "both at the top, where the arc starts");
-  // A stroke wider than a quarter of the ring is a quarter; a height past 24 is 24.
-  const thick = out(ui.ring({ value: 1, max: 2, size: 96, stroke: 60, label: "x" }));
-  assert.match(thick, /<circle class="ring__track" cx="48\.0" cy="48\.0" r="36\.0" stroke-width="24"\/>/);
-  assert.match(out(ui.ring({ value: 1, max: 2, size: 96, stroke: 0, label: "x" })), /r="47\.5" stroke-width="1"/, "and at least 1");
-  const tall = out(ui.meter({ value: 1, max: 2, height: 100, hold: 60, label: "x" }));
-  assert.match(tall, /<svg class="pbar tone-ok" height="24" [^>]*><rect class="pbar__bed" width="100%" height="24" rx="12\.0"\/><rect class="pbar__fill" width="50\.0%" height="24" rx="12\.0"\/><line class="pbar__hold" x1="60\.0%" x2="60\.0%" y1="-3" y2="27"\/><\/svg>/);
-});
-
-test("ring: the FactsAndLevels card's three rings, as meters", () => {
-  const card = [
-    `<svg class="ring tone-ok" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="60%"><circle class="ring__track" cx="48.0" cy="48.0" r="43.5" stroke-width="9"/><circle class="ring__arc" cx="48.0" cy="48.0" r="43.5" stroke-width="9" pathLength="100" stroke-dasharray="60.0 100" transform="rotate(-90 48.0 48.0)"/><line class="ring__hold" x1="11.9" y1="36.3" x2="1.4" y2="32.9"/></svg>`,
-    `<svg class="ring tone-attention" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="86%"><circle class="ring__track" cx="48.0" cy="48.0" r="43.5" stroke-width="9"/><circle class="ring__arc" cx="48.0" cy="48.0" r="43.5" stroke-width="9" pathLength="100" stroke-dasharray="86.0 100" transform="rotate(-90 48.0 48.0)"/><line class="ring__hold" x1="11.9" y1="36.3" x2="1.4" y2="32.9"/></svg>`,
-    `<svg class="ring tone-failed" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="100%"><circle class="ring__track" cx="48.0" cy="48.0" r="43.5" stroke-width="9"/><circle class="ring__arc" cx="48.0" cy="48.0" r="43.5" stroke-width="9" pathLength="100" stroke-dasharray="100.0 100" transform="rotate(-90 48.0 48.0)"/><line class="ring__hold" x1="11.9" y1="36.3" x2="1.4" y2="32.9"/></svg>`,
-  ];
-  // The card's rings are images with a percentage for a name; the kit's are meters, with the value and its range.
-  const kitOf = (s, v) => s.replace(`role="img"`, `role="meter" aria-valuenow="${v}" aria-valuemin="0" aria-valuemax="100"`);
-  assert.equal(out(ui.ring({ value: 60, max: 100, hold: 80, label: "60%" })), kitOf(card[0], 60));
-  assert.equal(out(ui.ring({ value: 86, max: 100, hold: 80, label: "86%" })), kitOf(card[1], 86));
-  assert.equal(out(ui.ring({ value: 100, max: 100, hold: 80, label: "100%" })), kitOf(card[2], 100));
-  assert.equal(out(ui.ring({ value: 1, max: 4, label: "a quarter", size: 88, stroke: 8 })), `<svg class="ring tone-ok" width="88" height="88" viewBox="0 0 88 88" role="meter" aria-valuenow="25" aria-valuemin="0" aria-valuemax="100" aria-label="a quarter"><circle class="ring__track" cx="44.0" cy="44.0" r="40.0" stroke-width="8"/><circle class="ring__arc" cx="44.0" cy="44.0" r="40.0" stroke-width="8" pathLength="100" stroke-dasharray="25.0 100" transform="rotate(-90 44.0 44.0)"/></svg>`);
+  // A height past 24 is 24, and there is no hold tick in the markup.
+  const tall = out(ui.meter({ value: 1, max: 2, height: 100, label: "x" }));
+  assert.match(tall, /<svg class="pbar tone-ok" height="24" [^>]*><rect class="pbar__bed" width="100%" height="24" rx="12\.0"\/><rect class="pbar__fill" width="50\.0%" height="24" rx="12\.0"\/><\/svg>/);
+  assert.ok(!tall.includes("pbar__hold"));
 });
 
 test("svgNum: finite, clamped, fixed decimals, and never a negative zero", () => {
@@ -770,88 +728,6 @@ test("rowPill: CardsAndBanners' Needs you and In line rows, OverviewScreen's Run
   assert.throws(() => ui.rowPill({ items: [], icon: "nope" }), RangeError);
 });
 
-test("capsule: the overview's Caps (FactsAndLevels' capsules), its tone where the printed percent reads it", () => {
-  // OverviewScreen's eight. The card prints whole percents of levels it does not give; these are levels that give its
-  // heights (a pill is round(150 * level / 100) high, its percent 21 below its top).
-  const card = `<div class="capbars"><div class="cap" title="Jobs today: 63%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Jobs today: 63 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="56" width="32" height="94" rx="16"/>
-    <text class="cap__v" x="20" y="77" text-anchor="middle">63</text></svg>
-  <p class="cap__l"><b>Jobs</b>today</p></div><div class="cap" title="Jobs week: 50%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Jobs week: 50 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="76" width="32" height="74" rx="16"/>
-    <text class="cap__v" x="20" y="97" text-anchor="middle">50</text></svg>
-  <p class="cap__l"><b>Jobs</b>week</p></div><div class="cap" title="Jobs month: 28%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Jobs month: 28 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="108" width="32" height="42" rx="16"/>
-    <text class="cap__v" x="20" y="130" text-anchor="middle">28</text></svg>
-  <p class="cap__l"><b>Jobs</b>month</p></div><div class="cap" title="Tokens today: 39%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Tokens today: 39 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="92" width="32" height="58" rx="16"/>
-    <text class="cap__v" x="20" y="113" text-anchor="middle">39</text></svg>
-  <p class="cap__l"><b>Tokens</b>today</p></div><div class="cap" title="Deploy $ today: 60%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Deploy $ today: 60 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="60" width="32" height="90" rx="16"/>
-    <text class="cap__v" x="20" y="81" text-anchor="middle">60</text></svg>
-  <p class="cap__l"><b>Deploy $</b>today</p></div><div class="cap" title="Deploy $ week: 28%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="Deploy $ week: 28 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="109" width="32" height="41" rx="16"/>
-    <text class="cap__v" x="20" y="130" text-anchor="middle">28</text></svg>
-  <p class="cap__l"><b>Deploy $</b>week</p></div><div class="cap" title="web $ week: 26%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="web $ week: 26 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="111" width="32" height="39" rx="16"/>
-    <text class="cap__v" x="20" y="132" text-anchor="middle">26</text></svg>
-  <p class="cap__l"><b>web $</b>week</p></div><div class="cap" title="sonnet $ week: 41%">
-  <svg width="40" height="150" viewBox="0 0 40 150" role="img" aria-label="sonnet $ week: 41 percent of cap">
-    <line class="cap__rail" x1="20" x2="20" y1="0" y2="150"/><circle class="cap__hold" cx="20" cy="30" r="4"/>
-    <rect class="cap__pill tone-ok" x="4" y="89" width="32" height="61" rx="16"/>
-    <text class="cap__v" x="20" y="110" text-anchor="middle">41</text></svg>
-  <p class="cap__l"><b>sonnet $</b>week</p></div></div>`;
-  // The kit's changes to the card, each on purpose:
-  //   - the tone is on the <svg>, not on the pill: bundle.css paints the pill `--tone` and the percent `--on-tone`, and
-  //     the percent is the pill's sibling, so on the card it read no tone and was drawn in SVG's default black;
-  //   - the card prints the one capsule at 28% of the month 22 below its pill's top; the kit keeps every one at 21.
-  const kitOf = (s) => {
-    const t = tight(s);
-    const tone = /class="cap__pill (tone-[a-z]+)"/.exec(t)[1];
-    return t.replace(` ${tone}"`, `"`).replace("<svg width", `<svg class="${tone}" width`);
-  };
-  const caps = /<div class="capbars">([^]*)<\/div>$/.exec(card)[1].split(/(?=<div class="cap")/);
-  assert.equal(caps.length, 8);
-  const levels = [["Jobs", "today", 62.5], ["Jobs", "week", 49.5], ["Jobs", "month", 28], ["Tokens", "today", 38.8], ["Deploy $", "today", 60], ["Deploy $", "week", 27.5], ["web $", "week", 26], ["sonnet $", "week", 40.8]];
-  for (const [i, [name, window, pct]] of levels.entries()) {
-    const want = kitOf(caps[i]).replace(`y="130" text-anchor="middle">28</text></svg><p class="cap__l"><b>Jobs</b>month`, `y="129" text-anchor="middle">28</text></svg><p class="cap__l"><b>Jobs</b>month`);
-    assert.equal(out(ui.capsule({ name, window, pct, hold: 80 })), want, `${name} ${window}`);
-  }
-  // The card draws the soft-hold ring on every capsule; a dollar window has no soft hold, so the console passes none
-  // and none is drawn.
-  assert.doesNotMatch(out(ui.capsule({ name: "Deploy $", window: "today", pct: 60 })), /cap__hold/);
-  assert.match(out(ui.capsule({ name: "Jobs", window: "today", pct: 10, hold: 75 })), /<circle class="cap__hold" cx="20" cy="38" r="4"\/>/, "the ring at 150 * (1 - 75/100), whole");
-  // The meter rule: ok under the hold, attention from it, failed at the cap; a given status wins.
-  const toneOf = (s) => /<svg class="tone-([a-z]+)"/.exec(s)[1];
-  assert.equal(toneOf(out(ui.capsule({ name: "Jobs", window: "today", pct: 79.9, hold: 80 }))), "ok");
-  assert.equal(toneOf(out(ui.capsule({ name: "Jobs", window: "today", pct: 80, hold: 80 }))), "attention");
-  assert.equal(toneOf(out(ui.capsule({ name: "Jobs", window: "today", pct: 100, hold: 80 }))), "failed");
-  assert.equal(toneOf(out(ui.capsule({ name: "Deploy $", window: "today", pct: 99 }))), "ok", "no hold: ok up to the cap");
-  assert.equal(toneOf(out(ui.capsule({ name: "Jobs", window: "today", pct: 10, status: "attention" }))), "attention");
-  // The pill is at least 32 high and stops at the top; the printed percent is whole and says a window past its cap.
-  assert.match(out(ui.capsule({ name: "ops $", window: "month", pct: 2 })), /<rect class="cap__pill" x="4" y="118" width="32" height="32" rx="16"\/><text class="cap__v" x="20" y="139" text-anchor="middle">2<\/text>/);
-  assert.match(out(ui.capsule({ name: "api $", window: "week", pct: 112.4 })), /title="api \$ week: 112%".*aria-label="api \$ week: 112 percent of cap".*<rect class="cap__pill" x="4" y="0" width="32" height="150" rx="16"\/><text class="cap__v" x="20" y="21" text-anchor="middle">112<\/text>/);
-  assert.match(out(ui.capsule({ name: "Jobs", window: "today", pct: -3 })), /height="32" rx="16"\/><text class="cap__v" x="20" y="139" text-anchor="middle">0<\/text>/);
-  assert.match(out(ui.capsule({ name: "Jobs", window: "today", pct: 50, label: "Jobs started today: 20 of 40" })), /role="img" aria-label="Jobs started today: 20 of 40"/);
-  for (const bad of [Number.NaN, Infinity, "50", null, undefined]) assert.throws(() => ui.capsule({ name: "Jobs", window: "today", pct: bad }), TypeError, String(bad));
-  assert.throws(() => ui.capsule({ name: html`<b>x</b>`, window: "today", pct: 1 }), TypeError, "a name is text: it is written into the title too");
-  assert.throws(() => ui.capsule({ name: "Jobs", window: 7, pct: 1 }), TypeError);
-  assert.throws(() => ui.capsule({ name: "Jobs", window: "today", pct: 1, status: "warning" }), RangeError);
-});
-
 test("spendDots: CardsAndBanners' Spend today, one column of 7 dots per hour, lit from the bottom, and its axis", () => {
   const card = `<div class="sd" role="img" aria-label="Metered spend by hour today"><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i></span><span class="sd__c"><i class="on"></i><i class="on"></i><i class="on"></i><i class=""></i><i class=""></i><i class=""></i><i class=""></i></span></div><p class="axis"><span>00:00</span><span>08:00</span><span>15:00</span></p>`;
   // The kit writes an unlit dot without the card's empty class attribute.
@@ -1144,14 +1020,14 @@ test("hostile text is escaped and its control bytes scrubbed in every helper tha
     ui.card({ title: H, sub: H, end: H, body: H }), ui.kpi(H, H), ui.big({ n: H, label: H }), ui.facts([[H, H]]),
     ui.tbl({ label: H, caption: H, heads: [H, { label: H }], rows: [[H, { id: true, html: H }]], stack: true }), ui.tbl({ label: "t", heads: ["a"], rows: [], empty: H }),
     ui.tblFoot(H, ui.pager({ newer: "/runs?q=\"><script>", newerLabel: H, olderLabel: H })),
-    ui.meter({ value: 1, max: 2, label: H }), ui.ring({ value: 1, max: 2, label: H }),
+    ui.meter({ value: 1, max: 2, label: H }),
     ui.banner({ status: "failed", title: H, body: H, actions: H }), ui.empty({ status: "ok", title: H, body: H }), ui.collapsed({ icon: "runs", title: H, body: H }),
     ui.field({ label: H, id: "f", control: ui.input({ id: "f", name: H, value: H, placeholder: H, autocomplete: H }), hint: H, error: H }),
     ui.select({ id: "s", name: H, options: [H, { value: H, label: H }], value: H }), ui.textarea({ id: "t", name: H, value: H, placeholder: H }),
     ui.cmd(["pi-dispatch", H], { host: H }), ui.outLink({ href: "https://x.example/", label: H }), ui.tabs([{ href: "/?x=\"'<>", label: H, current: true }], { label: H }), ui.seg([{ label: H, on: true }, { label: H, href: "/?q=<a>" }], { label: H }),
     ui.btn({ label: H, href: "/runs?q=<x>" }), ui.btn({ kind: "round", icon: "pause", label: H }), ui.btn({ label: H, name: H, value: H }),
     // PR 3's marks.
-    ui.slots({ run: 1, label: H }), ui.capsule({ name: H, window: H, pct: 50, hold: 80 }), ui.capsule({ name: "x", window: "y", pct: 50, label: H }),
+    ui.slots({ run: 1, label: H }),
     ui.spendDots({ hours: [1], label: H }), ui.waitBar([{ icon: "slot", count: 1 }], { label: H }),
     ui.rowPill({ items: [H], end: { text: H, status: "attention" }, action: { label: H, href: "/run?id=\"><script>" } }), ui.rowPill({ items: [], end: H }), ui.rowPill({ items: [], end: { text: H, faint: true } }),
     ui.actForm({ action: "x", hidden: [["n", H]], label: H }),

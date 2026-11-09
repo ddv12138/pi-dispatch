@@ -25,14 +25,12 @@ export function parseRunnerEnv(env) {
 	const provider = requireEnv(env, "PI_PROVIDER");
 	const model = requireEnv(env, "PI_MODEL");
 	const maxTurns = parsePositiveInt(env, "PI_MAX_TURNS");
-	const maxTokens = parseOptionalPositiveInt(env, "PI_MAX_TOKENS");
 
 	return {
 		...parseForkEnv(env),
 		provider,
 		model,
 		maxTurns,
-		maxTokens,
 		// Issue #502: the models this job may call, as `{ provider, model }` pairs, or null (unrestricted).
 		allowedModels: parseAllowedModels(env, "PI_ALLOWED_MODELS"),
 		// REQ-GLOBAL-PI-OVERLAY: does the global overlay's `extensions/` dir load? ON by default -- the
@@ -96,22 +94,6 @@ function parsePositiveInt(env, name, fallback) {
 		if (fallback !== undefined) return fallback;
 		throw configError(`missing required env: ${name}`);
 	}
-	const n = Number.parseInt(raw, 10);
-	if (!Number.isInteger(n) || n < 1 || String(n) !== String(raw).trim()) {
-		throw configError(`invalid ${name}: ${JSON.stringify(raw)} (want a positive integer)`);
-	}
-	return n;
-}
-
-/**
- * An OPTIONAL positive-int knob: an absent or empty var is `null` (the cap is disabled), not an
- * error. A present value is validated identically to parsePositiveInt -- a malformed cap is a
- * config error (exit 2), never a silently-ignored knob. This is the "unset means off" shape
- * parsePositiveInt cannot express, used by the optional PI_MAX_TOKENS budget.
- */
-function parseOptionalPositiveInt(env, name) {
-	const raw = env[name];
-	if (raw === undefined || raw === "") return null;
 	const n = Number.parseInt(raw, 10);
 	if (!Number.isInteger(n) || n < 1 || String(n) !== String(raw).trim()) {
 		throw configError(`invalid ${name}: ${JSON.stringify(raw)} (want a positive integer)`);
@@ -618,7 +600,7 @@ export function enforceTelemetryOff(env = process.env) {
  *   are 2 s and 4 s and the cap never binds; it binds only once base * 2^(n-1) passes 60 s. Placed BEFORE
  *   the spread so a future PI_RETRY_* knob for it would win.
  * - `cacheWarming: "off"`: pi 0.86.0 made "streaming" the default, which re-sends the cached prefix with
- *   maxTokens 1 during long tool runs, for up to an hour, as extra PAID requests the turn budget never
+ *   a one-token request during long tool runs, for up to an hour, as extra PAID requests the turn budget never
  *   sees. A job pays for its turns, not for keeping a cache warm between them.
  * - `enableInstallTelemetry: false`: see enforceTelemetryOff, which closes the env override of it.
  *

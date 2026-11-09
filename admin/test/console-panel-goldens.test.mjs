@@ -139,10 +139,10 @@ test("the confirm states: the slot open right after the wrapper of the card that
   // attempts, so the cancel of a queued job never takes it back: the ConfirmStates ledger names the design's "Cancel
   // the new run" as absent for a retry, and a re-run's banner offers it.
   const paid = pages["confirm-preview-paid.operator"];
-  assert.ok(paid.includes(">Retry for up to 2,000,000 tokens</button>") && paid.includes("It holds 1 job slot and 2,000,000 tokens (the per-job budget)"), "the paid label and the reserve");
+  assert.ok(paid.includes(">Retry</button>") && paid.includes("It goes back to waiting and runs again through every pre-spend gate."), "the paid label, and no token reserve on it");
   assert.ok(paid.includes(`<span>No undo: ${UNDO_SENTENCES.retried}</span>`), "retry's Undo is the retried sentence, muted after No undo");
   assert.ok(pages["confirm-preview-danger.operator"].includes(">Pause the fleet</button>"), "the danger label");
-  assert.ok(pages["confirm-bulk-preview.operator"].includes(">Retry 3, at least 4,000,000 tokens</button>") && pages["confirm-bulk-preview.operator"].includes("2 more match and are <b>not in this action</b>"), "the bulk label, each reserve, how many more");
+  assert.ok(pages["confirm-bulk-preview.operator"].includes(">Retry 3</button>") && pages["confirm-bulk-preview.operator"].includes("2 more match and are <b>not in this action</b>"), "the bulk label, and how many more");
   assert.ok(pages["confirm-bulk-results.operator"].includes(">3 audit rows, from row 44</a>") && pages["confirm-bulk-results.operator"].includes("data-reload>Reload</button>"), "the rows the confirm wrote, and Reload");
   assert.ok(pages["confirm-preview.operator"].includes('<span class="ticket">Preview expires in <b data-expires="300000">5:00</b></span>'), "the expiry");
   // The partial refusal says some of it may have been done, never that nothing was; the person refusal names the
@@ -234,11 +234,11 @@ test("the overview's states: all clear, the first run for each role, each kind o
     assert.ok(panelOf(page, "p-waitlists").includes(esc(WAITLISTS_CALM)), `${role}: the calm line`);
     assert.ok(!page.includes("data-action=") || role === "operator", `${role}: a viewer has no form`);
   }
-  // The first run: the checklist, and the eight empty; a viewer reads the steps without a command or Add.
+  // The first run: the checklist, and the seven empty; a viewer reads the steps without a command or Add.
   for (const state of ["setup-nothing-ready.operator", "setup-partial.operator", "setup-partial.viewer"]) {
     const page = pages[state];
     assert.match(panelOf(page, "p-setup"), /<h2>Getting ready<\/h2>/, state);
-    for (const id of ["p-needs", "p-waiting", "p-active", "p-spend", "p-timeline", "p-caps", "p-waitlists", "p-hosts"]) assert.equal(panelOf(page, id), "", `${state}: ${id} is empty`);
+    for (const id of ["p-needs", "p-waiting", "p-active", "p-spend", "p-timeline", "p-waitlists", "p-hosts"]) assert.equal(panelOf(page, id), "", `${state}: ${id} is empty`);
     assert.match(headlineOf(page), /^The console is up\. /, state);
   }
   assert.match(panelOf(pages["setup-partial.operator"], "p-setup"), /<b class="su-big">3<\/b> of 8 ready/);

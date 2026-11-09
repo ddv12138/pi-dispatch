@@ -683,7 +683,7 @@ jobs:
             printf '%s\n' "$key" | timeout 300 docker run -i --rm --init --network none --cap-drop=ALL --security-opt no-new-privileges \
               --pids-limit=512 "$@" -v "$JOB:/job:ro" \
               -e PI_PROVIDER=anthropic -e PI_MODEL=claude-sonnet-4-5-20250929 -e PI_MAX_TURNS=1 \
-              -e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_MAX_TOKENS=1 -e PI_EXIT_AUTH=stdin -e PI_JOB_ID=r596 \
+              -e ANTHROPIC_API_KEY=sk-ant-not-a-real-key -e PI_EXIT_AUTH=stdin -e PI_JOB_ID=r596 \
               "$IMAGE_REF" 2>&1
           }
           signed_last() {
@@ -735,8 +735,6 @@ jobs:
         run: |
           docker pull "$(node --input-type=module -e 'import {CANARY_PROXY_IMAGE} from "./worker/src/canary-runtime.mjs"; console.log(CANARY_PROXY_IMAGE)')"
           node .github/scripts/canary-network-smoke.mjs "$IMAGE_REF"
-          docker pull "$(node --input-type=module -e 'import {VALKEY_IMAGE} from "./worker/src/valkey-auth.mjs"; console.log(VALKEY_IMAGE)')"
-          node .github/scripts/canary-runtime-smoke.mjs "$IMAGE_REF"
 
       - name: "RUNNER: every job mount works for a worker that is not uid 1001 (issue #341)"
         run: |

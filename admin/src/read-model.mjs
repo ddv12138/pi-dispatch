@@ -1,19 +1,19 @@
 import { readSubscriptionStatus } from "@edgehero/pi-dispatch/subscription-status";
 /**
- * The admin extension's whole data-access surface: reads the queue, the budget counter, the durable
- * run-history files (INT-RUN-HISTORY-FILE-CONTRACT, admin is the named consumer), the settings overlay
- * (INT-CONFIG-OVERLAY-CONTRACT), and the unified `triggers.json` for display.
+ * The admin extension's whole data-access surface: reads the queue, the durable run-history files
+ * (INT-RUN-HISTORY-FILE-CONTRACT, admin is the named consumer), the settings overlay
+ * (INT-CONFIG-OVERLAY-CONTRACT), and the unified `triggers.json` for display. Token budgets, windows and
+ * allocation are gone (C2): actual token usage and cost come from the run records alone.
  *
  * Every function takes injected dependencies (`fs`, `makeQueueFn`, `redisFn`, ...) with real defaults, so
  * the tests run fully offline against fakes and production uses the worker's own helpers unchanged. The
  * key derivations and validators are IMPORTED from the worker, never re-implemented, so the admin and the
- * worker cannot drift on the budget key, the settings contract, or the id sanitiser.
+ * worker cannot drift on the settings contract or the id sanitiser.
  *
- * Reads plus a small set of explicit writes: most functions are side-effect-free (the budget read is a
- * plain GET, never reserveBudget / INCR / EXPIRE; the settings read never writes), and the writes are
- * few and named -- `setQueuePaused`, `writeSettings`, and the one gated `enqueueDispatchRun`. A viewer
- * degrades: an unreachable queue or an absent file returns a discriminated `{ unreachable }` /
- * `{ missing }` rather than throwing to the command handler.
+ * Reads plus a small set of explicit writes: most functions are side-effect-free (the settings read never
+ * writes), and the writes are few and named -- `setQueuePaused`, `writeSettings`, and the one gated
+ * `enqueueDispatchRun`. A viewer degrades: an unreachable queue or an absent file returns a discriminated
+ * `{ unreachable }` / `{ missing }` rather than throwing to the command handler.
  */
 
 import { watchDurationMs, WATCH_ID_RE as WATCH_RULE_ID_RE } from "@edgehero/pi-dispatch/watch-contract";
@@ -27,19 +27,17 @@ import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { logsDirPath, delimitedList, workerName, CHAIN_DEPTH_MAX_DEFAULT, CHAIN_MAX_PER_JOB_DEFAULT, WORKER_NAME_RE } from "@edgehero/pi-dispatch/config";
 import { settingsFilePath, readOverlay, readOverlayDocument, writeOverlay, KNOWN_KEYS, OPERATOR_ONLY_KEYS } from "@edgehero/pi-dispatch/runtime-settings";
-import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, checkTokenInvariant } from "@edgehero/pi-dispatch/budget-rule";
 import { fmtTokens } from "./panel.mjs";
 import { modelRolesTelemetryOf, approvalRecordOf, BUNDLE_SKIPPED_REASONS, LIVE_SKIPPED_REASONS, OPENSHELL_RULE_HOSTS_MAX, RECOVER_SKIPPED_REASONS, STEER_SKIPPED_REASONS, recordedBundle, recordedCheckpoints, recordedOpenshell, recordedSecretsProfile, recordedRecovered, makeReadRecord, recordedRecoveryOf, sanitizeJobId, targetFor, queuedAtOf, UNREADABLE_RECORD } from "@edgehero/pi-dispatch/run-history";
 import { pendingFactsOf, QUEUED_STATES } from "@edgehero/pi-dispatch/parked-facts";
 import { FORGE_MCP_SERVER_NAME, MCP_SERVER_NAME_RE, mcpServerWhere, readOverlayMcp } from "@edgehero/pi-dispatch/mcp-config";
-import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
 import { parsePauseWindows, pauseWindowsText } from "@edgehero/pi-dispatch/pause-windows";
 // What this console says and skips for state a newer pi-dispatch wrote (issue #761): one leaf, shared with the console.
 import { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, newerSkippedSentence, pauseWindowsNewerRefusal, readableRecords, shownRecord } from "./newer-release.mjs";
 export { coreRecordOf, fromNewerRelease, NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, newerSkippedSentence, pauseWindowsNewerRefusal, readableRecords, shownRecord };
 // The scoped-limits validator is shared for the anti-drift reason the pause/subscriptions ones are: the
 // write goes through the exact parser the worker boot-loads, so the sides cannot disagree on the schema.
-import { danglingProjectRows, tokenKeyPrefixFor, isProjectScope, parseScopedLimits, scopeTokenKeyPrefix, scopedLimitsVersionFor, TOKEN_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { danglingProjectRows, isProjectScope, parseScopedLimits, scopedLimitsVersionFor } from "@edgehero/pi-dispatch/scoped-limits";
 // The projects parser, for the same anti-drift reason: a `project:<id>` row is written only when the id is a project the
 // worker would load (issue #499 part B).
 import { PROJECT_ID_RE, parseProjects, projectOf, projectsVersionFor } from "@edgehero/pi-dispatch/projects";
@@ -49,15 +47,7 @@ import { ABSENT, BACKEND_NAMES, BACKENDS, CREDENTIAL_CUSTODY, OBSERVATIONS, PROP
 // may still name one, so the openshell-only reads here keep the names by hand instead of the export that is gone.
 const OPENSHELL_BACKENDS = Object.freeze(["openshell", "openshell-bind"]);
 import { parseTriggersDocument, triggersFileNewer, triggersFileVersionProblem } from "@edgehero/pi-dispatch/triggers";
-// The allocation envelope, the plan module and the applied split (issue #504 part C), the worker's own: the admin judges an
-// envelope with the parser the worker boots with, and applies or reverts a plan through the worker's `applyPlan` and
-// `revert`, so the ladder, the step and the compare-and-set are one implementation.
-import { ENVELOPE_VERSION, envelopeDigest, parseEnvelope } from "@edgehero/pi-dispatch/envelope";
-import { OTHER, PLAN_VERSION, envelopeEntries, scopeRef } from "@edgehero/pi-dispatch/priorities";
-import { ALLOC_EXPECTED_KEY, ALLOC_LOG_KEY, ALLOC_PLAN_KEY, makeAllocationAudit, makeAllocationState, parseState } from "@edgehero/pi-dispatch/allocation";
-import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
 import { removeHeldJob, requestCancel } from "@edgehero/pi-dispatch/cancel-state";
-import { makeRunBudgetLedger } from "@edgehero/pi-dispatch/run-budget-ledger";
 import { RECOVERY_CAP, recoveryJobId, runIdOf } from "@edgehero/pi-dispatch/recovery-queue";
 import { STEER_ID_RE, STEER_MODES, STEER_SOURCES, STEER_STATES, isOpen as steerIsOpen, listInboxPublic } from "@edgehero/pi-dispatch/steer-inbox";
 import { HELD_SET, jobKey, WAIT_ANSWER_PREFIX, WAIT_ANSWERS, WAIT_PROFILE_FIELD_RE } from "@edgehero/pi-dispatch/wait-state";
@@ -109,7 +99,6 @@ import { RUN_MODEL_RE, RUN_PROVIDER_RE, parseRunFilter, runMatches, runVenueOf, 
 // supplies them bytes, never the other way around -- the dependency points read-model -> graph-model.
 import { parseSkillMeta, findSiblingMentions, findLoopHints, triggerMatchLabel } from "./graph-model.mjs";
 import { meteredRunTokens, repoOfTarget } from "./costs.mjs";
-import { deploymentTokenCaps, tokenWindowRows, tokenWindowSpecs, tokenWindowsSinceMs } from "./token-windows.mjs";
 // Issue #471: the ONE resolver of a deployment's service keys, shared with `doctor` (the package boundary allows it: the
 // admin already takes its config helpers from the worker the same way).
 import { deploymentServiceEnv } from "@edgehero/pi-dispatch/service-env";
@@ -155,10 +144,6 @@ export function resolvePaths(env = process.env) {
     // when the key is unset, which the worker reads as no projects. Not the panel's cwd default above, which would let
     // the panel accept a row against a file the worker never loads.
     projectsFile: env.PI_PROJECTS_FILE ?? null,
-    // Issue #504 part C: the allocation envelope AS THE WORKER READS IT, `projectsFile`'s rule: null when the key is
-    // unset, which the worker reads as no envelope and no delegation. No cwd default: an envelope the worker never
-    // loads is not one the panel may show or write.
-    envelopeFile: env.PI_ENVELOPE_FILE ?? null,
     subscriptionsPath: env.PI_SUBSCRIPTIONS_FILE ?? "./subscriptions.json",
     // The operator's global pi overlay dir (REQ-GLOBAL-PI-OVERLAY), where the staged third-party pi
     // packages live under `packages/`. `|| null` so unset AND empty both read as "no overlay" -- the
@@ -211,8 +196,7 @@ export const DEPLOYMENT_SCAFFOLD_FILES = Object.freeze([".env", "triggers.json",
  * PI_BACKENDS, PI_BACKEND_FLOOR, PI_EGRESS, PI_EGRESS_PROXY, DOCKER_HOST and PI_DISPATCH_RUN_ROOTS stay this process's
  * own on purpose (`OQ-038`, `INT-DEPLOYMENT-POINTER-CONTRACT`), and so do the panel's own settings (PI_DISPATCH_*).
  */
-const TOKEN_ENV_NAMES = Object.freeze({ maxTokens: "PI_MAX_TOKENS", ...WORKER_TOKEN_ENV_NAMES });
-export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_CAPTURE_JOB_LOGS", "PI_SCHEDULER_STALL_MAX", "PI_CHAIN_DEPTH_MAX", "PI_CHAIN_MAX_PER_JOB", "PI_RUN_MIRROR_MAX_RUNS", "PI_WORKER_NAME", "PI_CONSOLE_LISTEN", "PI_CONSOLE_BIND_PUBLIC", "PI_SESSIONS_DIR", "PI_SECRET_BUNDLES", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "TMPDIR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
+export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_CAPTURE_JOB_LOGS", "PI_SCHEDULER_STALL_MAX", "PI_CHAIN_DEPTH_MAX", "PI_CHAIN_MAX_PER_JOB", "PI_RUN_MIRROR_MAX_RUNS", "PI_WORKER_NAME", "PI_CONSOLE_LISTEN", "PI_CONSOLE_BIND_PUBLIC", "PI_SESSIONS_DIR", "PI_SECRET_BUNDLES", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "TMPDIR", "TEMP"]);
 // The console's address (the insights move to the console): `/dispatch insights` and the `i` key print the spend
 // screen's URL from the PI_CONSOLE_LISTEN the console itself reads from this `.env` (`console/link.mjs`).
 // The session store (issue #647, part 2): a finished run's session is forked from the PI_SESSIONS_DIR the worker
@@ -225,10 +209,7 @@ export const PANEL_SERVICE_KEYS = Object.freeze(["VALKEY_URL", "PI_LOGS_DIR", "P
 // profiles beside the overlay's, and a profile add refuses a name the env already declares (the worker reads a name in
 // both sources as ambiguous). DISPLAY ONLY too, and still not a capability key in OQ-038's sense: the panel never runs
 // the resolver it names.
-// The dollar settings (issue #501) are among them: `dispatch_set`'s confirm states a dollar key's effective value, and
-// in a pointer deployment the cap the worker runs under lives in the deployment's `.env`, not in pi's environment.
-// Of those, the paths: a relative one in `.env` is relative to the service's working directory, the deployment folder.
-const PANEL_PATH_KEYS = new Set(["PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_ENVELOPE_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_SESSIONS_DIR", "TMPDIR", "TEMP"]);
+const PANEL_PATH_KEYS = new Set(["PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_TRIGGERS_FILE", "PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_CONSOLE_TOKENS_FILE", "PI_GLOBAL_PI_DIR", "PI_SESSIONS_DIR", "TMPDIR", "TEMP"]);
 
 /**
  * Issue #471: the environment `resolvePaths` should see, by the rule `doctor` judges the service by
@@ -787,11 +768,12 @@ function hourKey(nowMs) {
  *
  * A present-but-INVALID current file is REFUSED, never rebuilt (issue #501). It used to be rebuilt from `{}` with a
  * loud notice, which turned any later `set` into an eraser: a hand-edited file that is invalid only for a duplicate
- * key still carries its `maxTokens` and `secretProfiles`, and the rebuild dropped both, so jobs went from refused
- * (fail closed) to running at the env cap or with none. The refusal names the read reason (key names, never values)
- * and the two ways out: fix the file, or delete it to start from an empty overlay. A MISSING file is still the
+ * key still carries its `secretProfiles`, and the rebuild dropped it. The refusal names the read reason (key names, never
+ * values) and the two ways out: fix the file, or delete it to start from an empty overlay. A MISSING file is still the
  * normal empty overlay and writes as before, and so does a BLANK one (whitespace or a byte-order mark only), which
- * holds nothing that could be lost.
+ * holds nothing that could be lost. The worker's own `writeOverlay` refuses every retired token-budget key (C2), so a
+ * `set maxTokens`/`dailyTokenCap`/`weeklyTokenCap`/`monthlyTokenCap` comes back as `{ invalid }` from here, exactly as
+ * the worker judges it.
  *
  * `expect` (issue #642), as for `writePauseWindows`: the `writeInputs` snapshots the change was built from (the console's
  * preview). `writeOverlay` re-reads them right before its rename and refuses, with nothing written, when one changed.
@@ -800,7 +782,7 @@ function hourKey(nowMs) {
  * refusal rather than a lost update. That matters more now that the write carries what it read: a carried key is
  * written back as it was at the read, so a write landing in between would otherwise be rolled back silently.
  */
-export function writeSettings({ settingsFile, mutate, expect = null, fs = nodeFs, budgetEnv = undefined, deploymentDir = null }) {
+export function writeSettings({ settingsFile, mutate, expect = null, fs = nodeFs }) {
   const res = readOverlayDocument(settingsFile, { fs });
   // The text this call judged, for the default re-check: the read's own for a readable or missing file, and the file's
   // snapshot for a blank one (its read is invalid, and a blank file is written over like a missing one).
@@ -810,13 +792,10 @@ export function writeSettings({ settingsFile, mutate, expect = null, fs = nodeFs
     if (!blankSettingsText(read)) return { invalid: overlayInvalidRefusal(res.invalid, { newer: res.newer === true }) };
   }
   const next = mutate({ ...(res.overlay ?? {}) });
-  // Issue #501 (PR #542's review): a write that touches a dollar key is judged on the MERGED values when the caller
-  // passes the env, and the answer is a WARNING returned beside the result, never a refusal: the worker's cap may come
-  // from a source not visible here (`mergedTokenProblem`). Other keys are not judged.
-  const warning = budgetEnv === undefined ? undefined : mergedTokenProblem(next, budgetEnv, { deploymentDir })?.warning;
+  // The worker's validator judges the result: a retired token-budget key is refused there, with its own words.
   const w = writeOverlay(settingsFile, next, { fs, expect: Array.isArray(expect) ? expect : [{ path: settingsFile, text: read }], carry: res.carry ?? null });
   if (w.invalid) return { invalid: w.invalid };
-  return { ok: true, overlay: next, ...(warning ? { warning } : {}) };
+  return { ok: true, overlay: next };
 }
 
 /**
@@ -851,56 +830,14 @@ export function overlayInvalidRefusal(reason, { newer = false } = {}) {
 }
 
 /**
- * The value a `dispatch_set` confirm shows for a key (issue #501), before or after the change. For a token key it is
- * the EFFECTIVE value and where it comes from, because the overlay alone misleads exactly there: with
- * `PI_MAX_TOKENS=2000000` in the deployment's env and no overlay key, "maxTokens: (unset) -> 1000000" reads as adding a
- * cap while it halves one, and unsetting an overlay key falls back to the env cap, not to none. `env` is
- * `deploymentEnv()`, whose `panelEnv` reads the token variables from the deployment's `.env` (`PANEL_SERVICE_KEYS`).
- * Every other key keeps the overlay value, because its env default lives in the worker's config and a second copy of
- * those defaults here would drift.
- *
- * `deploymentDir` says whether the worker's environment is visible here at all. With a deployment pointer the panel
- * reads the deployment's `.env` (the file the worker reads), so a variable absent from it really is unset. With no
- * pointer the panel sees only pi's own environment, which is not the worker's (a service unit, another shell), so an
- * absent variable proves nothing and the confirm says so rather than claiming "no cap". An empty value is unset, the
- * worker's own reading.
+ * The value a `dispatch_set` confirm shows for a key (issue #501), before or after the change: the overlay's own value,
+ * or "(unset)". Token budgets are retired (C2), so there is no merged env value to show and no default cap: a retired
+ * key cannot be set at all (`writeSettings`' `writeOverlay` refuses it). Callers may still pass their old extra
+ * arguments; this reads the overlay alone.
  */
-export function settingShown(key, overlay, env, { deploymentDir = null } = {}) {
+export function settingShown(key, overlay) {
   const own = overlay?.[key];
-  if (!TOKEN_SETTING_KEYS.includes(key)) return own === undefined ? "(unset)" : String(own);
-  if (own !== undefined) return `${own} (overlay)`;
-  const name = TOKEN_ENV_NAMES[key];
-  const fromEnv = env?.[name];
-  if (typeof fromEnv === "string" && fromEnv !== "") return `${fromEnv} (env ${name})`;
-  return deploymentDir === null ? "(not in the overlay; the worker's environment is not visible here)" : "(unset: no budget)";
-}
-
-/**
- * Would this overlay, merged over the env the admin can see, break the token invariant (a window with no
- * `maxTokens`, issue #501)? The worker checks it per job (`resolveSettings`) and refuses EVERY job as
- * `settings-overlay-invalid` when it breaks, so the operator should hear about it before a `set dailyTokenCap` or an
- * `unset maxTokens` lands.
- *
- * Returns null when the merged values hold, else `{ warning }`, and NEVER a refusal (PR #542's review, round 2). The
- * admin cannot see every source of the worker's env: a service unit's `Environment=` line or a `--env-setup` script
- * can set `PI_MAX_TOKENS` with nothing in `.env`, so a refusal here would block a valid change (and could make
- * `unset maxTokens` impossible). The worker still fails closed per job, and `doctor` on the worker reads its real
- * env. The warning names what was seen: the overlay plus the deployment's `.env` with a pointer, else this session's
- * environment, which is not the worker's. An empty env value is unset, the worker's own reading.
- */
-export function mergedTokenProblem(overlay, env, { deploymentDir = null } = {}) {
-  const merged = {};
-  for (const key of TOKEN_SETTING_KEYS) {
-    if (overlay?.[key] !== undefined) merged[key] = overlay[key];
-    else {
-      const fromEnv = env?.[TOKEN_ENV_NAMES[key]];
-      if (typeof fromEnv === "string" && fromEnv !== "") merged[key] = fromEnv;
-    }
-  }
-  const broken = checkTokenInvariant(merged);
-  if (broken === null) return null;
-  const seen = deploymentDir === null ? "the settings overlay nor this session's environment (not the worker's)" : "the settings overlay nor the deployment's .env";
-  return { warning: `${broken.invalid}. Neither ${seen} sets maxTokens (PI_MAX_TOKENS). A budget set elsewhere, such as the worker's service unit or its --env-setup script, is not visible here; if the worker has none, it refuses every job as settings-overlay-invalid (or, when the window is in the worker's own environment, will not start). Run \`pi-dispatch doctor\` on the worker to check` };
+  return own === undefined ? "(unset)" : String(own);
 }
 
 /**
@@ -926,7 +863,6 @@ export { writeTriggers } from "@edgehero/pi-dispatch/triggers-file";
 import { boundedText, heldClearedAnswer, heldRefused, heldRemovalUnanswered, parkedAnswerRefusalOf, rerunRefusalOf, RERUN_BAD_ID } from "./job-actions.mjs";
 export { planTriggerFire, enqueueTriggerFire } from "./trigger-fire.mjs";
 export { BULK_MAX, cancelQueuedJob, cancelQueuedRefusal, enqueueParkedAnswer, enqueueRerun, enqueueSteer, parkedAnswerRefusalOf, planCancelQueued, planFailedBulk, planParkedAnswer, planRerun, rerunRefusalOf, planSteer, planSteerWithdraw, removeFailedJob, removeFailedJobs, retryFailedJob, retryFailedJobs, steerAuditTarget, steerWithdrawSentence, withdrawSteerMessage } from "./job-actions.mjs";
-export { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 
 /**
  * Read + validate the pause-windows file for display (REQ-SCOPED-PAUSE-WINDOWS). Returns `{ windows }` of
@@ -1043,11 +979,10 @@ export function readScopedLimits({ scopedLimitsPath, fs = nodeFs }) {
  * edited, while doctor names it; such a write returns `pending`, which says the worker applies it once its LIVE projects
  * define the id (the admin cannot see those, so it claims neither way).
  *
- * Issue #504 part C: with `envelope` (`{ file, maxTokens }`, the allocation envelope the worker reads and the merged
- * per-job cap), a write that would leave that envelope invalid is refused and names the conflict (`envelopeRefusal`):
- * a row lowered below a floor. `dryRun` judges everything and writes nothing, so a tool can refuse BEFORE its confirm.
+ * `dryRun` judges everything and writes nothing, so a tool can refuse BEFORE its confirm. There is no envelope check:
+ * allocation is gone (C2), so the shared parser's refusal of a token field is the only budget rule left.
  */
-export function writeScopedLimits({ scopedLimitsPath, projectsPath = null, mutate, expect = null, envelope = null, dryRun = false, fs = nodeFs }) {
+export function writeScopedLimits({ scopedLimitsPath, projectsPath = null, mutate, expect = null, dryRun = false, fs = nodeFs }) {
   const link = symlinkRefusal(fs, scopedLimitsPath, "PI_SCOPED_LIMITS_FILE");
   if (link) return { invalid: link };
   let current = [];
@@ -1078,8 +1013,6 @@ export function writeScopedLimits({ scopedLimitsPath, projectsPath = null, mutat
   const pairText = projectsPath === null || projectsPath === undefined ? null : fileSnapshot(fs, projectsPath);
   const judged = judgeProjectRows(current, written, projectsPath, fs);
   if (judged.refusal) return { invalid: judged.refusal };
-  const broken = envelope ? envelopeRefusal({ envelopeFile: envelope.file, projectsPath, scopedLimitsPath, maxTokens: envelope.maxTokens, next: { limits: written }, fs }) : null;
-  if (broken) return { invalid: broken };
   if (dryRun) return judged.pending ? { ok: true, dryRun: true, pending: judged.pending } : { ok: true, dryRun: true };
   const inputs = [{ path: scopedLimitsPath, text: existing }];
   if (projectsPath !== null && projectsPath !== undefined) inputs.push({ path: projectsPath, text: pairText });
@@ -1312,7 +1245,7 @@ export function readProjects({ projectsPath, fs = nodeFs }) {
  * name the actual bundle, row, floor or unread source without parsing or repeating the tool's diagnostic. No message
  * quotes a `name`.
  */
-export function planProjectsWrite({ projectsPath, scopedLimitsPath = null, triggersPath = null, mutate, envelope = null, fs = nodeFs }) {
+export function planProjectsWrite({ projectsPath, scopedLimitsPath = null, triggersPath = null, mutate, fs = nodeFs }) {
   if (projectsPath === null || projectsPath === undefined) return { invalid: PROJECTS_UNSET };
   const link = symlinkRefusal(fs, projectsPath, "PI_PROJECTS_FILE");
   if (link) return { invalid: link };
@@ -1403,10 +1336,7 @@ export function planProjectsWrite({ projectsPath, scopedLimitsPath = null, trigg
     }
   }
   // Issue #504 part C: a project removed or renamed that the allocation envelope floors would leave the envelope
-  // invalid (`envelopeRefusal`), so it is refused here, before the confirm and again after it, naming the conflict.
-  let envelopeBlocker = null;
-  const broken = envelope ? envelopeRefusal({ envelopeFile: envelope.file, projectsPath, scopedLimitsPath, maxTokens: envelope.maxTokens, next: { projects: written }, fs, onRefusal: (facts) => { envelopeBlocker = facts; } }) : null;
-  if (broken) return { invalid: broken, ...(envelopeBlocker ? { blocker: envelopeBlocker } : {}) };
+  // invalid; that check is gone with allocation (C2), so the scoped-limits rule below is the only pairing left.
   const dangling = danglingProjectRows(limits, written);
   const blocking = dangling.filter((d) => removed.includes(d.id));
   if (blocking.length > 0) {
@@ -1426,569 +1356,12 @@ export function planProjectsWrite({ projectsPath, scopedLimitsPath = null, trigg
  * tool's pre-confirm plan's `inputs`), so the worker's live-reload watcher never reads half a file. Reached only from
  * the confirm-gated `dispatch_project_*` tools. Returns `{ ok, pending? }` or `{ invalid }`.
  */
-export function writeProjects({ projectsPath, scopedLimitsPath = null, triggersPath = null, mutate, expect = null, envelope = null, fs = nodeFs }) {
-  const plan = planProjectsWrite({ projectsPath, scopedLimitsPath, triggersPath, mutate, envelope, fs });
+export function writeProjects({ projectsPath, scopedLimitsPath = null, triggersPath = null, mutate, expect = null, fs = nodeFs }) {
+  const plan = planProjectsWrite({ projectsPath, scopedLimitsPath, triggersPath, mutate, fs });
   if (plan.invalid) return { invalid: plan.invalid };
   const replaced = replaceFile({ path: projectsPath, text: plan.text, inputs: plan.inputs, expect, envName: "PI_PROJECTS_FILE", fs });
   if (replaced.invalid) return replaced;
   return plan.pending ? { ok: true, pending: plan.pending } : { ok: true };
-}
-
-// ── the allocation envelope and the applied split (issue #504 part C) ───────────────────────────────────────────────
-//
-// The admin's half of delegated allocation (`REQ-DELEGATED-ALLOCATION`, `DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE`).
-// Every rule is the WORKER's: the envelope goes through its `parseEnvelope`, a plan through its `applyPlan` (the ladder,
-// the step, the compare-and-set, the audit row first), a revert through its `revert`. This module only finds the files
-// and the Valkey, and never re-derives a number.
-
-/** Why an envelope write cannot happen with PI_ENVELOPE_FILE unset: the worker reads no envelope then. */
-const ENVELOPE_UNSET = "PI_ENVELOPE_FILE is unset, so the worker reads no envelope and delegation is off; set it in the deployment's .env and restart the worker. Nothing was written";
-
-/** The Valkey keys of the applied split; `prefix` exists for the live tests alone, as in `makeAllocationState`. */
-function allocKeys(prefix) {
-  return prefix ? { plan: `${prefix}:plan`, log: `${prefix}:log`, expected: `${prefix}:envelope:expected` } : { plan: ALLOC_PLAN_KEY, log: ALLOC_LOG_KEY, expected: ALLOC_EXPECTED_KEY };
-}
-
-/**
- * The per-job token cap the worker judges the envelope against (its `envelopeCap`): the settings overlay's `maxTokens`
- * over `PI_MAX_TOKENS`, in integer tokens, or null. `overlay` overrides the file's, for a write being judged.
- */
-export function envelopeJobCap({ settingsFile, env = {}, overlay = undefined, fs = nodeFs }) {
-  const ov = overlay !== undefined ? overlay : readSettingsView({ settingsFile, fs })?.overlay;
-  return deploymentTokenCaps(ov ?? {}, env).jobCapTokens;
-}
-
-/**
- * The projects and scoped limits an envelope is judged against, read the way the worker reads them: a file that is
- * missing, unreadable or invalid counts as empty (its own reader says why; the envelope parse then names the floor it
- * can no longer place).
- */
-function envelopeContext({ projectsPath, scopedLimitsPath, fs }) {
-  const parsed = (path, parse) => {
-    if (path === null || path === undefined) return [];
-    const text = fileSnapshot(fs, path);
-    if (text === null || isUnreadable(text)) return [];
-    try {
-      return parse(text, path);
-    } catch {
-      return [];
-    }
-  };
-  return { projects: parsed(projectsPath, parseProjects), limits: parsed(scopedLimitsPath, parseScopedLimits) };
-}
-
-/**
- * Read + validate the envelope file (INT-ENVELOPE-FILE-CONTRACT) through the worker's own `parseEnvelope`, judged
- * against the projects and scoped limits on disk and the merged per-job cap. `{ unset }` when PI_ENVELOPE_FILE is
- * unset (no delegation anywhere), `{ missing }`, `{ unreadable }`, `{ invalid }` (the parser's message, which names the
- * field and never a value), else `{ envelope, digest, projects }`.
- */
-export function readEnvelope({ envelopeFile, projectsPath = null, scopedLimitsPath = null, maxTokens = null, fs = nodeFs }) {
-  if (envelopeFile === null || envelopeFile === undefined) return { unset: true };
-  const text = fileSnapshot(fs, envelopeFile);
-  if (text === null) return { missing: true };
-  if (isUnreadable(text)) return { unreadable: unreadableCode(text) };
-  const ctx = envelopeContext({ projectsPath, scopedLimitsPath, fs });
-  try {
-    const envelope = parseEnvelope(text, envelopeFile, { ...ctx, maxTokens });
-    return { envelope, digest: envelopeDigest(envelope), projects: ctx.projects };
-  } catch (e) {
-    return { invalid: e?.message ?? String(e) };
-  }
-}
-
-/**
- * The admin writers' cross-check of the envelope (issue #504 part C): would `next` (`{ projects?, limits?,
- * maxTokens? }`, the parsed result of a projects, scoped-limits or per-job cap write) leave the LIVE envelope
- * invalid? A floored project removed, an id the floors name gone, a project row lowered below its floor, the per-job cap
- * removed: each makes the worker keep its last good envelope, doctor fail and the next start refuse. Returns the
- * refusal, naming the conflict in the parser's words, or null.
- *
- * Only a write that BREAKS a loading envelope is refused. With no envelope, or one that does not load from the files as
- * they are, null: that envelope is broken already, doctor names it, and refusing every unrelated edit would only keep
- * the operator from the edit that fixes it.
- */
-export function envelopeRefusal({ envelopeFile, projectsPath = null, scopedLimitsPath = null, maxTokens = null, next = {}, fs = nodeFs, onRefusal = null }) {
-  if (envelopeFile === null || envelopeFile === undefined) return null;
-  const text = fileSnapshot(fs, envelopeFile);
-  if (text === null || isUnreadable(text)) return null;
-  const cur = envelopeContext({ projectsPath, scopedLimitsPath, fs });
-  let loaded;
-  try {
-    loaded = parseEnvelope(text, envelopeFile, { ...cur, maxTokens });
-  } catch {
-    return null;
-  }
-  const after = {
-    projects: next.projects ?? cur.projects,
-    limits: next.limits ?? cur.limits,
-    maxTokens: next.maxTokens !== undefined ? next.maxTokens : maxTokens,
-  };
-  try {
-    parseEnvelope(text, envelopeFile, after);
-    return null;
-  } catch (e) {
-    // The parser's message is for existing tool callers. A person page gets only verified semantic blockers.
-    if (typeof onRefusal === "function" && Array.isArray(after.projects) && loaded?.floors && typeof loaded.floors === "object") {
-      const kept = new Set(after.projects.map((p) => p.id));
-      const projects = Object.keys(loaded.floors).filter((id) => !kept.has(id) && id !== "_other");
-      if (projects.length) onRefusal({ kind: "envelope-floor", projects });
-    }
-    return `this change would leave the allocation envelope invalid (${e?.message ?? String(e)}), and the worker would keep its last good envelope and refuse to start on it; change the envelope first (dispatch_envelope_set) or in the same edit. Nothing was written`;
-  }
-}
-
-/** A plain JSON object (not an array, not null). */
-function isPlainObject(v) {
-  return v !== null && typeof v === "object" && !Array.isArray(v);
-}
-
-/** The envelope's raw keys a write may set, in the file's own order (INT-ENVELOPE-FILE-CONTRACT). */
-const ENVELOPE_DELEGATION_FIELDS = Object.freeze(["enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"]);
-
-/**
- * `raw` (the envelope file's JSON) with `change` applied: `window` and `totalTokens` replace; `floorsTokens` and
- * `defaultWeights` merge per id (null removes the id); each delegation field replaces its own. Nothing else is touched,
- * so the file keeps every key and its order. The parser judges the result; this function judges nothing.
- */
-function applyEnvelopeChange(raw, change) {
-  const next = { ...raw };
-  if (change.window !== undefined) next.window = change.window;
-  if (change.totalTokens !== undefined) next.totalTokens = change.totalTokens;
-  for (const field of ["floorsTokens", "defaultWeights"]) {
-    if (change[field] === undefined) continue;
-    const merged = isPlainObject(raw[field]) ? { ...raw[field] } : {};
-    for (const [id, value] of Object.entries(change[field] ?? {})) {
-      if (value === null) delete merged[id];
-      else merged[id] = value;
-    }
-    next[field] = merged;
-  }
-  const delegation = isPlainObject(change.delegation) ? change.delegation : {};
-  if (ENVELOPE_DELEGATION_FIELDS.some((f) => delegation[f] !== undefined)) {
-    const merged = isPlainObject(raw.delegation) ? { ...raw.delegation } : {};
-    for (const f of ENVELOPE_DELEGATION_FIELDS) if (delegation[f] !== undefined) merged[f] = delegation[f];
-    next.delegation = merged;
-  }
-  return next;
-}
-
-/**
- * The lines a confirm shows for an envelope change: each normalized field that differs, before and after, in tokens
- * and plain numbers. Every value is the PARSER's (ids that matched the id charset, integer token counts), so no text
- * an editor typed reaches the dialog.
- */
-export function envelopeChangeLines(before, after) {
-  const tok = (m) => (Number.isSafeInteger(m) ? fmtTokens(m) : "-");
-  const lines = [];
-  const say = (label, a, b) => {
-    if (a !== b) lines.push(`${label}: ${a} to ${b}`);
-  };
-  say("window", before?.window ?? "-", after.window);
-  say("total", before ? tok(before.totalTokens) : "-", tok(after.totalTokens));
-  const ids = [...new Set([...Object.keys(before?.floors ?? {}), ...Object.keys(after.floors)])].sort();
-  for (const id of ids) say(`floor ${id}`, before?.floors?.[id] === undefined ? "-" : tok(before.floors[id]), after.floors[id] === undefined ? "-" : tok(after.floors[id]));
-  for (const id of ids) say(`default weight ${id}`, String(before?.defaultWeights?.[id] ?? "-"), String(after.defaultWeights[id] ?? "-"));
-  const d0 = before?.delegation ?? {};
-  const d1 = after.delegation;
-  say("delegation", d0.enabled === undefined ? "-" : d0.enabled ? "on" : "off", d1.enabled ? "on" : "off");
-  say("writers", (d0.writers ?? []).join(", ") || "-", (d1.writers ?? []).join(", ") || "-");
-  for (const f of ["maxStepPct", "minIntervalHours", "maxPlanDays"]) say(f, String(d0[f] ?? "-"), String(d1[f] ?? "-"));
-  return lines;
-}
-
-/**
- * Plan an envelope write without writing (issue #504 part C, `dispatch_envelope_set`): the file's JSON with `change`
- * applied, judged by the worker's `parseEnvelope` against the projects and scoped limits on disk and `maxTokens`.
- * A missing file starts from `{ "version": 1 }`; a file that is there but does not parse as JSON, or is not an object,
- * refuses (a money file is never rebuilt from a guess). Returns `{ text, envelope, digest, before, beforeDigest, lines,
- * inputs }` or `{ invalid }`. `inputs` are the files as judged, for the re-check before the rename.
- */
-export function planEnvelopeWrite({ envelopeFile, projectsPath = null, scopedLimitsPath = null, maxTokens = null, change = {}, fs = nodeFs }) {
-  if (envelopeFile === null || envelopeFile === undefined) return { invalid: ENVELOPE_UNSET };
-  const link = symlinkRefusal(fs, envelopeFile, "PI_ENVELOPE_FILE");
-  if (link) return { invalid: link };
-  const existing = fileSnapshot(fs, envelopeFile);
-  if (isUnreadable(existing)) return { invalid: `the envelope file ${envelopeFile} could not be read (${unreadableCode(existing)}); nothing was written` };
-  let raw = { version: ENVELOPE_VERSION };
-  if (existing !== null) {
-    try {
-      raw = JSON.parse(existing);
-    } catch {
-      return { invalid: `the envelope file ${envelopeFile} is not valid JSON; fix it by hand first. Nothing was written` };
-    }
-    if (!isPlainObject(raw)) return { invalid: `the envelope file ${envelopeFile} is not a JSON object; fix it by hand first. Nothing was written` };
-  }
-  const ctx = envelopeContext({ projectsPath, scopedLimitsPath, fs });
-  const text = `${JSON.stringify(applyEnvelopeChange(raw, change), null, 2)}\n`;
-  let envelope;
-  try {
-    envelope = parseEnvelope(text, envelopeFile, { ...ctx, maxTokens });
-  } catch (e) {
-    return { invalid: `${e?.message ?? String(e)}. Nothing was written` };
-  }
-  let before = null;
-  if (existing !== null) {
-    try {
-      before = parseEnvelope(existing, envelopeFile, { ...ctx, maxTokens });
-    } catch {
-      // A file that does not load now: the confirm shows every field as new.
-    }
-  }
-  const inputs = [{ path: envelopeFile, text: existing }];
-  for (const p of [projectsPath, scopedLimitsPath]) if (p !== null && p !== undefined) inputs.push({ path: p, text: fileSnapshot(fs, p) });
-  const digest = envelopeDigest(envelope);
-  return { text, envelope, digest, before, beforeDigest: before ? envelopeDigest(before) : null, lines: envelopeChangeLines(before, envelope), inputs };
-}
-
-/**
- * Write the envelope (issue #504 part C), after the operator's confirm. The order is the point:
- *
- *   1. plan again (the files as they are now);
- *   2. `alloc:envelope:expected` := the new digest, in Valkey, BEFORE the file. A host re-bases the fleet's split onto a
- *      changed envelope only when its digest equals that key (`reconcile`), so a file written first would be read by
- *      the hosts as a hand edit: `envelope-mismatch` and an `envelope-changed-externally` row on every host;
- *   3. the file, by `replaceFile` (tmp of its own, mode and owner kept, a symlink refused, the judged files re-checked
- *      against `expect`, the pre-confirm plan's inputs);
- *   4. if the file was not written, the key is put back as it was, so the hosts keep enforcing the old envelope as
- *      their own, by a compare-and-set (`RESTORE_EXPECTED_SCRIPT`): only while the key still holds this write's digest,
- *      so a second confirmed write that landed meanwhile keeps its own.
- *
- * A Valkey that cannot be reached refuses before the file is touched: an envelope the fleet would refuse is worse than
- * no change. Returns `{ ok, digest, previousDigest, unchanged? }` or `{ invalid }`.
- */
-export async function writeEnvelope({ envelopeFile, projectsPath = null, scopedLimitsPath = null, maxTokens = null, change = {}, expect = null, url, redisFn = makeRedisClient, prefix = null, fs = nodeFs, afterExpected = null }) {
-  const plan = planEnvelopeWrite({ envelopeFile, projectsPath, scopedLimitsPath, maxTokens, change, fs });
-  if (plan.invalid) return plan;
-  if (plan.digest === plan.beforeDigest) return { ok: true, unchanged: true, digest: plan.digest, previousDigest: plan.beforeDigest };
-  const keys = allocKeys(prefix);
-  const key = keys.expected;
-  let redis;
-  try {
-    redis = await writeClient(url, redisFn);
-  } catch (err) {
-    return { invalid: `could not reach Valkey to record the new envelope's digest in ${key} (${boundedText(err?.message ?? String(err))}), so the file was not written: the fleet would read it as a hand edit and refuse its jobs` };
-  }
-  try {
-    // SET with GET: the value this write REPLACED, read in the same step, so a rollback puts back what was there when
-    // this writer took the key, never a value another writer has since replaced.
-    let previous;
-    try {
-      previous = await redis.set(key, plan.digest, "GET");
-    } catch (err) {
-      // A SET that failed on the client side may still have been applied by the server (a timeout after the write).
-      return { invalid: `could not record the new envelope's digest in ${key} (${boundedText(err?.message ?? String(err))}), so the file was not written; ${key} may already hold the new digest ${plan.digest}, in which case set it back to the envelope digest the hosts run (doctor prints it) by hand` };
-    }
-    await afterExpected?.(); // a test seam: the window between the key and the file, where a second writer can land
-    let replaced;
-    try {
-      replaced = replaceFile({ path: envelopeFile, text: plan.text, inputs: plan.inputs, expect, envName: "PI_ENVELOPE_FILE", fs });
-    } catch (e) {
-      replaced = { invalid: `${envelopeFile} could not be replaced (${typeof e?.code === "string" ? e.code : "error"}); nothing was written` };
-    }
-    if (replaced.invalid) {
-      // Put the key back ONLY while it still holds THIS write's digest (a compare-and-set): a second confirmed write
-      // that set its own digest meanwhile, and wrote its file, must keep its key, or the fleet would refuse that file
-      // as a hand edit. A key another writer moved is left as it is, and said.
-      let restored;
-      try {
-        restored = Number(await redis.eval(RESTORE_EXPECTED_SCRIPT, 1, key, plan.digest, previous ?? ""));
-      } catch (err) {
-        return { invalid: `${replaced.invalid}; and ${key} could not be put back to ${previous ?? "absent"} (${boundedText(err?.message ?? String(err))}): it may hold ${plan.digest}, a digest no file has; set it by hand` };
-      }
-      return restored === 1 ? replaced : { invalid: `${replaced.invalid}; ${key} was not put back, because another write changed it meanwhile` };
-    }
-    return { ok: true, digest: plan.digest, previousDigest: plan.beforeDigest };
-  } finally {
-    try {
-      redis?.disconnect();
-    } catch {
-      // already closed
-    }
-  }
-}
-
-/**
- * The rollback of `alloc:envelope:expected` (`writeEnvelope`): KEYS[1] the key, ARGV[1] the digest this writer set,
- * ARGV[2] what it held before (`""` for absent: a digest is never empty). Restores only while the key still holds
- * ARGV[1]; returns 1 when it did, else 0.
- */
-export const RESTORE_EXPECTED_SCRIPT = `if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
-if ARGV[2] == '' then redis.call('DEL', KEYS[1]) else redis.call('SET', KEYS[1], ARGV[2]) end
-return 1`;
-
-/**
- * A client for an allocation WRITE, connected before the first command: fail-fast (an unreachable Valkey refuses
- * rather than queueing the write behind reconnects) AND connected first, because a fail-fast client has no offline
- * queue, so a command sent before its socket is up fails with "Stream isn't writeable" (measured in the lab against a
- * live Valkey, where every write refused that way while the fake answered).
- */
-async function writeClient(url, redisFn) {
-  parseConnection(url, { failFast: true });
-  const redis = redisFn(url, { failFast: true, lazyConnect: true });
-  redis.on?.("error", () => {});
-  if (typeof redis.connect === "function" && redis.status === "wait") await redis.connect();
-  return redis;
-}
-
-/** The fields of an applied state a reader may see. An ALLOWLIST, so a field added later is not shown by accident. */
-const STATE_FIELDS = Object.freeze(["planId", "basis", "writer", "jobId", "triggerId", "appliedAt", "lastPlanAt", "validUntil", "envelopeDigest", "weights", "repoWeights", "allocations", "unallocated", "repos", "clamped"]);
-/** The fields of an `alloc:log` row a reader may see. `reasons` is not one: agent text never reaches a tool result. */
-const LOG_FIELDS = Object.freeze(["at", "host", "writer", "jobId", "triggerId", "outcome", "reason", "field", "rule", "planId", "basis", "weights", "repoWeights", "before", "after", "clamped", "envelopeDigest"]);
-
-function pick(obj, fields) {
-  const out = {};
-  for (const f of fields) if (obj?.[f] !== undefined) out[f] = obj[f];
-  return out;
-}
-
-/**
- * The applied split, its history and the spend, from Valkey (issue #504 part C). Reads only: GETs, one LRANGE, one
- * MGET. `{ state, stateProblem?, expected, log, spend? }` or `{ unreachable }`:
- *   - `state`: `alloc:plan` through the worker's `parseState`, shown through an allowlist of fields; null when absent
- *     (no host has looked yet), with `stateProblem` `newer` or `unreadable` when it is there but not this build's;
- *   - `reasons` (the plan's per-project reason text, agent-authored) ONLY with `withReasons`, which the panel alone
- *     passes, so it is drawn through the control-byte gate and never reaches a tool result or a message;
- *   - `expected`: `alloc:envelope:expected`, the digest the fleet re-bases onto;
- *   - `log`: the newest `limit` rows of `alloc:log`, newest first, through an allowlist (no `reasons`);
- *   - `spend` (with an `envelope`): the envelope window's counters, spent and held, under the worker's own keys:
- *     the deployment, each envelope entry (`project:<id>`, `_other` included) and each project member's repo ledger,
- *     with each key's NAME, so an operator can find it in `valkey-cli`.
- */
-export async function readAllocations({ url, envelope = null, projects = [], now = new Date(), withReasons = false, limit = 20, redisFn = makeRedisClient, timeoutMs = 2500, prefix = null } = {}) {
-  let redis;
-  try {
-    parseConnection(url, { failFast: true });
-    redis = redisFn(url);
-    redis.on?.("error", () => {});
-    const keys = allocKeys(prefix);
-    const work = (async () => {
-      const [planText, expected, logRaw] = await Promise.all([redis.get(keys.plan), redis.get(keys.expected), redis.lrange(keys.log, 0, Math.max(0, limit - 1))]);
-      const parsed = parseState(planText);
-      const out = { state: null, expected: expected ?? null, log: [] };
-      if (parsed?.newer) out.stateProblem = "newer";
-      else if (parsed && parsed.corrupt !== undefined) out.stateProblem = "unreadable";
-      else if (parsed) out.state = { ...pick(parsed, STATE_FIELDS), ...(withReasons ? { reasons: isPlainObject(parsed.reasons) ? { ...parsed.reasons } : {} } : {}) };
-      for (const text of Array.isArray(logRaw) ? logRaw : []) {
-        try {
-          const row = JSON.parse(text);
-          if (isPlainObject(row)) out.log.push(pick(row, LOG_FIELDS));
-        } catch {
-          // a row that does not decode is skipped; the audit file holds the record
-        }
-      }
-      if (envelope) out.spend = await envelopeSpend(redis, envelope, projects, now);
-      return out;
-    })().catch((err) => ({ unreachable: err?.message ?? String(err) }));
-    return await withTimeout(work, timeoutMs, { unreachable: "timed out reaching the queue" });
-  } catch (err) {
-    return { unreachable: err?.message ?? String(err) };
-  } finally {
-    if (redis) {
-      try {
-        redis.disconnect();
-      } catch {
-        // already closed
-      }
-    }
-  }
-}
-
-/** The window key builder of an envelope window, the worker's own (budget.mjs). */
-const WINDOW_KEY = Object.freeze({ day: dayKey, week: weekKey, month: monthKey });
-
-/**
- * The envelope window's dollar counters (micro-dollars spent and held), under the keys the worker reserves in
- * (`governedDollars`): the deployment's, each entry's `project:<id>` ledger (a row's and the allocation's are one key)
- * and each member's repo ledger, by `scopeRef`. One MGET; an absent key is an honest 0.
- */
-async function envelopeSpend(redis, envelope, projects, now) {
-  const keyOf = WINDOW_KEY[envelope.window];
-  const deployment = keyOf(now, TOKEN_KEY_PREFIX);
-  const entries = envelopeEntries(envelope);
-  const projectKeys = Object.fromEntries(entries.map((id) => [id, keyOf(now, scopeTokenKeyPrefix(`project:${id}`))]));
-  const repoKeys = {};
-  for (const p of Array.isArray(projects) ? projects : []) {
-    if (!entries.includes(p?.id) || p.id === OTHER) continue;
-    repoKeys[p.id] = Object.fromEntries((Array.isArray(p.members) ? p.members : []).map((m) => [scopeRef(m), keyOf(now, scopeTokenKeyPrefix(m))]));
-  }
-  const all = [deployment, ...Object.values(projectKeys), ...Object.values(repoKeys).flatMap((r) => Object.values(r))];
-  const values = await redis.mget(...all);
-  const at = new Map(all.map((k, i) => [k, Number(values?.[i] ?? 0) || 0]));
-  return {
-    window: envelope.window,
-    deployment: { key: deployment, tokens: at.get(deployment) },
-    projects: Object.fromEntries(Object.entries(projectKeys).map(([id, key]) => [id, { key, tokens: at.get(key) }])),
-    repos: Object.fromEntries(Object.entries(repoKeys).map(([id, refs]) => [id, Object.fromEntries(Object.entries(refs).map(([ref, key]) => [ref, { key, tokens: at.get(key) }]))])),
-  };
-}
-
-/** The micro-dollars of a state, for a result's before and after: amounts only, never a reason. */
-function amountsShown(state) {
-  return state ? { allocations: { ...(state.allocations ?? {}) }, unallocated: state.unallocated ?? 0, repos: state.repos ?? {} } : null;
-}
-
-/**
- * Apply a priorities plan as the operator's session (issue #504 part C, `dispatch_priorities_set` and `/dispatch
- * priorities set`): the worker's `applyPlan`, unchanged, with writer `operator-session`. `plan` is the plan WITHOUT its
- * basis (`{ projects, validUntil? }`): the basis is filled in here from the applied state this call reconciled to, so
- * a caller never has to read it first and a model cannot name a stale one. The audit row goes to this host's
- * `PI_LOGS_DIR/allocations/`, the file the worker's own rows use.
- *
- * Returns `{ outcome, reason, planId?, field?, rule?, clamped?, basis, kept?, before, after }`: the ladder's enum and the
- * micro-dollars before and after, never a reason text. Throws on infrastructure (Valkey, the audit file), as the
- * worker does: such a plan has not applied.
- */
-export async function applyPriorities({ url, envelope, digest = envelopeDigest(envelope), projects = [], plan, keepOther = false, host, logsDir, now = new Date(), writer = { kind: "operator-session" }, redisFn = makeRedisClient, prefix = null, fs = nodeFs }) {
-  const redis = await writeClient(url, redisFn);
-  try {
-    const state = makeAllocationState({ redis, host, audit: makeAllocationAudit({ logsDir, fs }), prefix });
-    const seen = await state.reconcile({ envelope, digest, now });
-    const basis = seen?.state?.planId ?? null;
-    // `keepOther`: a plan that leaves `_other` out keeps its CURRENT weight (the applied state's, else the envelope's
-    // default), so an operator typing `shop=3 platform=1` is not refused for the pseudo-project they did not think of.
-    // Any other project left out is still `plan-incomplete`: which project to starve is a decision, `_other` a default.
-    const given = Array.isArray(plan?.projects) ? plan.projects : [];
-    const kept = keepOther && !given.some((p) => p?.id === OTHER) ? [{ id: OTHER, weight: seen?.state?.weights?.[OTHER] ?? envelope?.defaultWeights?.[OTHER] ?? 0 }] : [];
-    const text = JSON.stringify({ version: PLAN_VERSION, basis, ...plan, projects: [...given, ...kept] });
-    const result = await state.applyPlan({ envelope, digest, projects, text, writer, now });
-    const after = parseState(await redis.get(allocKeys(prefix).plan));
-    const afterState = after && after.corrupt === undefined && !after.newer ? after : null;
-    return { ...result, basis, ...(kept.length > 0 ? { kept: [OTHER] } : {}), before: amountsShown(seen?.state ?? null), after: amountsShown(afterState) };
-  } finally {
-    try {
-      redis.disconnect();
-    } catch {
-      // already closed
-    }
-  }
-}
-
-/**
- * The operator's revert to an `alloc:log` row (issue #504 part C, the panel's `r`): the worker's `revert`, writer
- * `operator-revert`, which skips the interval and the step rules but is still a compare-and-set and still refused while
- * delegation is off, the envelope differs or another apply holds the lock. Returns its `{ outcome, reason, planId? }`.
- */
-export async function revertAllocation({ url, envelope, digest = envelopeDigest(envelope), target, host, logsDir, now = new Date(), redisFn = makeRedisClient, prefix = null, fs = nodeFs }) {
-  const redis = await writeClient(url, redisFn);
-  try {
-    const state = makeAllocationState({ redis, host, audit: makeAllocationAudit({ logsDir, fs }), prefix });
-    return await state.revert({ envelope, digest, target, now });
-  } finally {
-    try {
-      redis.disconnect();
-    } catch {
-      // already closed
-    }
-  }
-}
-
-/**
- * The used counts behind each scoped limit row (issue #242): GET only the TOKEN windows a row actually caps -- job-count
- * windows (day/week/month) are gone with the job-start caps (C1), so only `tokensUsed` is read here.
- * (a concurrent-only row touches redis zero times -- in-flight is worker-process state this reader
- * cannot see), under the keys the worker's own builders compose from the shared `tokenKeyPrefixFor`, so
- * the two sides cannot drift on the key shape. `rows[i]` matches `limits[i]`; an absent key reads as an
- * honest 0 (a scope that never ran). One client, one timeout, `{ unreachable }` on a dead queue --
- * `readBudget`'s posture exactly.
- */
-export async function readScopedBudget({ url, limits, redisFn = makeRedisClient, timeoutMs = 2500, now = new Date() } = {}) {
-  if (!Array.isArray(limits) || limits.length === 0) return { rows: [] };
-  let redis;
-  try {
-    parseConnection(url, { failFast: true }); // throws on junk before any client exists
-    redis = redisFn(url);
-    redis.on?.("error", () => {}); // a down Valkey is `{ unreachable }`, never ioredis stack traces (PR #550's review)
-    const settled = Promise.all(
-      limits.map(async (l) => {
-        const cell = async (key) => Number((await redis.get(key)) ?? 0);
-        const row = {};
-        // The token windows (version 2), in integer tokens held or settled so far, under the keys the
-        // worker composes from the same shared export (`tokenKeyPrefixFor`). Only the windows the row caps.
-        if (TOKEN_LIMIT_FIELDS.some((f) => l[f] !== null && l[f] !== undefined)) {
-          const prefix = tokenKeyPrefixFor(l);
-          const tokensUsed = {};
-          if (l.dayTokens !== null && l.dayTokens !== undefined) tokensUsed.day = Number(await cell(dayKey(now, prefix))) || 0;
-          if (l.weekTokens !== null && l.weekTokens !== undefined) tokensUsed.week = Number(await cell(weekKey(now, prefix))) || 0;
-          if (l.monthTokens !== null && l.monthTokens !== undefined) tokensUsed.month = Number(await cell(monthKey(now, prefix))) || 0;
-          row.tokensUsed = tokensUsed;
-        }
-        return row;
-      }),
-    ).then(
-      (rows) => ({ rows }),
-      (err) => ({ unreachable: err?.message ?? String(err) }),
-    );
-    return await withTimeout(settled, timeoutMs, { unreachable: "timed out reaching the queue" });
-  } catch (err) {
-    return { unreachable: err?.message ?? String(err) };
-  } finally {
-    if (redis) {
-      try {
-        redis.disconnect();
-      } catch {
-        // already closed
-      }
-    }
-  }
-}
-
-/**
- * The token windows' counters (issue #501, part 7): ONE MGET of `keys`, the window keys `tokenWindowSpecs` composed
- * with the worker's own key functions. Returns `{ [key]: value }` (an absent key is absent from the map, an honest 0
- * to the caller), or `{ unreachable }`. A plain GET, never an INCR, so looking at a window cannot hold anything in it.
- * One client, one timeout, `readBudget`'s posture exactly.
- */
-export async function readTokenCounters({ url, keys, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
-  if (!Array.isArray(keys) || keys.length === 0) return {};
-  let redis;
-  try {
-    parseConnection(url, { failFast: true }); // throws on junk before any client exists
-    redis = redisFn(url);
-    // A down Valkey must degrade to `{ unreachable }`, not print ioredis' "Unhandled error event" stack on every
-    // reconnect attempt (readFleetQueues' rule): dispatch_costs touched no Valkey at all before the dollar windows.
-    redis.on?.("error", () => {});
-    const settled = redis.mget(...keys).then(
-      (values) => Object.fromEntries(keys.flatMap((k, i) => (values?.[i] === null || values?.[i] === undefined ? [] : [[k, Number(values[i])]]))),
-      (err) => ({ unreachable: err?.message ?? String(err) }),
-    );
-    return await withTimeout(settled, timeoutMs, { unreachable: "timed out reaching the queue" });
-  } catch (err) {
-    return { unreachable: err?.message ?? String(err) };
-  } finally {
-    if (redis) {
-      try {
-        redis.disconnect();
-      } catch {
-        // already closed
-      }
-    }
-  }
-}
-
-/**
- * Every active dollar window as rows (`dollar-windows.mjs`): the deployment's caps from the overlay and `env` merged
- * the worker's way, then the scoped-limits file's dollar rows; each with its counter (spent and held, fleet-wide)
- * and the records' side (settled, basis counts, boundExceeded) from the run records this host can read since the
- * oldest window began. `{ windows, invalid?, limits? }`: `invalid` names a dollar setting that does not parse (shown,
- * never guessed), `limits` carries the scoped-limits file's own `{ missing }` or `{ invalid }`.
- */
-export async function readTokenWindows({ paths, env = {}, now = new Date(), fs = nodeFs, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
-  const view = readSettingsView({ settingsFile: paths.settingsFile, fs });
-  const { caps, jobCapTokens, invalid } = deploymentTokenCaps(view?.overlay ?? {}, env);
-  const sl = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath, fs });
-  const specs = tokenWindowSpecs({ caps, limits: Array.isArray(sl?.limits) ? sl.limits : [], now });
-  const out = { rows: [] };
-  if (invalid.length > 0) out.invalid = invalid;
-  if (view?.invalid) out.settingsInvalid = true;
-  if (!Array.isArray(sl?.limits) && sl?.invalid) out.limits = { invalid: sl.invalid };
-  if (specs.length === 0) return out;
-  const counters = await readTokenCounters({ url: paths.valkeyUrl, keys: specs.map((s) => s.key), redisFn, timeoutMs });
-  const records = scanRunRecords({ logsDir: paths.logsDir, sinceMs: tokenWindowsSinceMs(specs, now), nowMs: now.getTime(), fs });
-  out.rows = tokenWindowRows({ specs, counters, records: Array.isArray(records) ? records : [], jobCapTokens });
-  if (counters?.unreachable) out.countersUnreachable = counters.unreachable;
-  if (!Array.isArray(records)) out.recordsUnreachable = records?.unreachable ?? "unreadable";
-  return out;
 }
 
 /**
@@ -2476,40 +1849,6 @@ export function mapSchedulers(list, nowMs) {
   });
 }
 
-/**
- * Read the daily token counter with a plain, side-effect-free GET of the token day under `TOKEN_KEY_PREFIX`
- * (`budget:tok:<date>`) -- NEVER an INCR/EXPIRE, so observing the budget cannot consume a token. Returns
- * `{ tokensToday }` (the cap lives in the settings overlay, resolved by the renderer). The job-count windows
- * are gone (C1: job-start caps removed), so no `budget:<date>` / `budget:w:*` / `budget:m:*` key is read.
- * `makeRedisClient` has no failFast option and would otherwise buffer the GETs forever while
- * disconnected, so the read is bounded by a timeout that degrades to `{ unreachable }` -- and a junk URL
- * degrades SYNCHRONOUSLY through the same parse `readSchedulers` fails fast on, because burning the full
- * timeout on an unparseable URL is how a canned "not-a-url" test fixture turns into 2.5 wasted seconds
- * per invocation. The client is force-disconnected in `finally`.
- */
-export async function readBudget({ url, redisFn = makeRedisClient, timeoutMs = 2500, now = new Date() } = {}) {
-  let redis;
-  try {
-    parseConnection(url, { failFast: true }); // throws on junk before any client exists
-    redis = redisFn(url);
-    const settled = redis.get(dayKey(now, TOKEN_KEY_PREFIX)).then(
-      (tokens) => ({ tokensToday: Number(tokens ?? 0) }),
-      (err) => ({ unreachable: err?.message ?? String(err) }),
-    );
-    return await withTimeout(settled, timeoutMs, { unreachable: "timed out reaching the queue" });
-  } catch (err) {
-    return { unreachable: err?.message ?? String(err) };
-  } finally {
-    if (redis) {
-      try {
-        redis.disconnect();
-      } catch {
-        // already closed
-      }
-    }
-  }
-}
-
 function withTimeout(promise, ms, fallback) {
   let timer;
   const timeout = new Promise((resolve) => {
@@ -2569,9 +1908,8 @@ export async function mergedRunsOn(redis, { logsDir, limit = 10, fs = nodeFs, ti
  *
  * Split from the core deliberately, and it is not stylistic. The panel holds its clients for the life of
  * the overlay, so a reader that disconnected the client it was handed would tear down the whole dashboard's
- * Valkey connection on its first tick. `readBudget` makes the same split for the same reason; this one
- * improves on the `readHeldJobs` precedent, whose connection-first shape forced `dashboard.ts` to keep an
- * inline copy that a source-text parity test then had to police.
+ * Valkey connection on its first tick. `readHeldJobs` sets the same precedent, whose connection-first shape forced
+ * `dashboard.ts` to keep an inline copy that a source-text parity test then had to police.
  */
 export async function listRunsMerged({ logsDir, limit = 10, url, fs = nodeFs, redisFn = makeRedisClient, timeoutMs = 2500 } = {}) {
   let redis;
@@ -2868,7 +2206,7 @@ export function readTriggerEditor({ paths, env = {}, folder = null, deploymentDi
   const overlay = settings.overlay ?? {};
   // These are display facts only. In particular, this never resolves PI_BACKENDS or paid-start grants from .env.
   // Credentials are read only to decide endpoint presence and are projected to forge names before leaving here.
-  const metadata = deploymentDir === null ? null : deploymentServiceEnv({ env, dir: deploymentDir, keys: ["WEBHOOK_SECRET", "GITLAB_WEBHOOK_SECRET", "FORGEJO_WEBHOOK_SECRET", "AZURE_WEBHOOK_SECRET", "PI_MODEL", "PI_PROVIDER", "PI_MAX_TURNS", "PI_RUN_PROGRESS", "PI_JOB_IMAGE", "PI_ALLOWED_MODELS", "PI_MAX_TOKENS"], platform, fs, uid });
+  const metadata = deploymentDir === null ? null : deploymentServiceEnv({ env, dir: deploymentDir, keys: ["WEBHOOK_SECRET", "GITLAB_WEBHOOK_SECRET", "FORGEJO_WEBHOOK_SECRET", "AZURE_WEBHOOK_SECRET", "PI_MODEL", "PI_PROVIDER", "PI_MAX_TURNS", "PI_RUN_PROGRESS", "PI_JOB_IMAGE", "PI_ALLOWED_MODELS"], platform, fs, uid });
   const hints = metadata?.env ?? env;
   let backends = [];
   let venueProblem = null;
@@ -2896,7 +2234,7 @@ export function readTriggerEditor({ paths, env = {}, folder = null, deploymentDi
   let models = null;
   try { provider = overlay.provider ?? providerFrom(hints); model = overlay.model ?? modelFrom(hints); image = jobImageFrom(hints); models = allowedModelsFrom(hints); } catch {}
   return {
-    defaults: { flow: "required by the trigger", kind: "selected by the trigger kind", folder: "required for cron", task: "required for cron", repository: "forge routing", backend: backends[0]?.name ?? null, provider, model, image, models: models ?? "unrestricted", maxTokens: overlay.maxTokens ?? hints.PI_MAX_TOKENS ?? "no per-job token cap", packages: true, github: false, replicas: 1, resume: false, awaitInput: false, secrets: "none", secretsProfile: "none", secretBundle: "project default", waitFor: "none", skillsDir: "none", instructions: "none", command: "none", portfolio: false, fallbackModels: "none", excludeTools: "none", mcp: "none unless named by the trigger", gates: "none", gateTimeout: "no trigger expiry override", gateBudgetRaiseTokens: "none", maxTurns: overlay.maxTurns ?? parseNonNegInt(hints.PI_MAX_TURNS, 30), progress: false, statusComment: false, recover: false, steer: false },
+    defaults: { flow: "required by the trigger", kind: "selected by the trigger kind", folder: "required for cron", task: "required for cron", repository: "forge routing", backend: backends[0]?.name ?? null, provider, model, image, models: models ?? "unrestricted", packages: true, github: false, replicas: 1, resume: false, awaitInput: false, secrets: "none", secretsProfile: "none", secretBundle: "project default", waitFor: "none", skillsDir: "none", instructions: "none", command: "none", fallbackModels: "none", excludeTools: "none", mcp: "none unless named by the trigger", gates: "none", gateTimeout: "no trigger expiry override", maxTurns: overlay.maxTurns ?? parseNonNegInt(hints.PI_MAX_TURNS, 30), progress: false, statusComment: false, recover: false, steer: false },
     backends, venueProblem, forges, settingsProblem: settings.invalid ?? null, progressAvailable: hints.PI_RUN_PROGRESS !== "0", forgeProblem: metadata && (metadata.unreadable || metadata.untrusted || metadata.hazardSkipped.length || metadata.unread.length) ? "The deployment metadata could not be read completely; configured webhook endpoints may be missing." : null,
     flows: tiers.flatMap((t) => (t.skills ?? []).filter((s) => !s.isSub).map((s) => ({ name: s.name, tier: t.tier }))),
     flowProblems: tiers.filter((t) => t.unreachable || t.truncated).map((t) => ({ tier: t.tier, unavailable: Boolean(t.unreachable), truncated: Boolean(t.truncated) })),
@@ -3179,10 +2517,6 @@ export function normalizeTriggerForDisplay(entry) {
         resume,
         secrets,
         secretsProfile,
-        // The portfolio flag (issue #505): this trigger's jobs write the budget split for every project, so the row and
-        // the drill-in say so (issue #507). Cron only, as the loader allows it. Spread only when true, so every other cron
-        // record keeps exactly its keys, and `dispatch_triggers` shows the boolean only on the trigger that carries it.
-        ...(run.portfolio === true && { portfolio: true }),
       };
     case "label":
       return { type: "label", any: normalizeSelector(on.any), all: normalizeSelector(on.all), none: normalizeSelector(on.none), flow, command, ...modelRef, packages, image, backend, excludeTools, skillsDir, instructions, resume, secrets, secretsProfile, replicas, forge };
@@ -4041,10 +3375,9 @@ async function heldJobs(redis, { prune = true } = {}) {
 }
 
 /**
- * How long the reader keeps one scan of the run records for the dollar windows (issue #501, part 7). A month window
- * folds up to a month of records, which is a directory walk, and the reader refreshes every second: the counters are
- * read every tick (they are what the next job is admitted against), the records' side at most this often. The local
- * run index below (issue #641) is cached for the same span and the same reason.
+ * How long the reader keeps one scan of the run records (the local index, the wide window, the parked rows). A window
+ * folds up to a month of records, which is a directory walk, and the reader refreshes every second, so the records'
+ * side is cached at most this often. The name survives from the retired token windows; the cache is the run records'.
  */
 const TOKEN_RECORDS_TTL_MS = 15_000;
 
@@ -4173,11 +3506,10 @@ export function createFleetReader(
     redisFn = makeRedisClient,
     readLiveHostsFn = readLiveHosts,
     discoverHostQueuesFn = discoverHostQueuesReporting,
-    // The env the deployment's dollar caps are read from (issue #501, part 7): the console's `deploymentEnv()`, whose
-    // pointer reads the deployment's `.env`. Empty by default, so a test or a caller that passes none sees the
-    // overlay's caps alone.
+    // The deployment's environment (the console's `deploymentEnv()`, whose pointer reads the deployment's `.env`): job
+    // sizes, secret profiles and the doctor name read it. Empty by default, so a test or a caller that passes none sees
+    // this process's environment alone.
     budgetEnvFn = () => ({}),
-    scanRecordsFn = scanRunRecords,
     nowFn = () => Date.now(),
     fs = nodeFs,
     readOnly = false,
@@ -4340,27 +3672,7 @@ export function createFleetReader(
     return killSwitchSet({ paused, plan, setFn: (args) => (args.url === paths.valkeyUrl ? poolSet(paused) : setQueuePaused(args)) });
   };
 
-  // The last records scan for the token windows, `{ at, sinceMs, records }`, reused for TOKEN_RECORDS_TTL_MS.
-  let tokenRecords = null;
-  const dollarWindows = async (overlay, limits) => {
-    const now = new Date(nowFn());
-    const { caps, jobCapTokens, invalid } = deploymentTokenCaps(overlay ?? {}, budgetEnvFn() ?? {});
-    const specs = tokenWindowSpecs({ caps, limits, now });
-    if (specs.length === 0) return invalid.length > 0 ? { rows: [], invalid } : null;
-    // The COUNTERS every tick, in ONE MGET on the held client: spent and held, what the worker admits against.
-    const counters = await redis.mget(...specs.map((s) => s.key)).then(
-      (values) => Object.fromEntries(specs.flatMap((s, i) => (values?.[i] === null || values?.[i] === undefined ? [] : [[s.key, Number(values[i])]]))),
-      (err) => ({ unreachable: err?.message ?? String(err) }),
-    );
-    const sinceMs = tokenWindowsSinceMs(specs, now);
-    if (!tokenRecords || tokenRecords.sinceMs !== sinceMs || now.getTime() - tokenRecords.at >= TOKEN_RECORDS_TTL_MS) {
-      const scanned = scanRecordsFn({ logsDir: paths.logsDir, sinceMs, nowMs: now.getTime() });
-      tokenRecords = { at: now.getTime(), sinceMs, records: Array.isArray(scanned) ? scanned : [] };
-    }
-    return { rows: tokenWindowRows({ specs, counters, records: tokenRecords.records, jobCapTokens }), ...(invalid.length > 0 && { invalid }) };
-  };
-
-  // Issue #641: this host's run records, indexed once per TOKEN_RECORDS_TTL_MS (the dollar records' rhythm), for the
+  // Issue #641: this host's run records, indexed once per TOKEN_RECORDS_TTL_MS (the run records' rhythm), for the
   // wide window here and for `runsPage` below, so neither walks the logs directory on every tick or every request. Held
   // to the deployment's mirror cap (issue #761, `resolvePaths`), the built-in one for paths that name none.
   const localIndex = makeLocalRunIndex({ logsDir: paths.logsDir, fs, now: nowFn, ...(Number.isSafeInteger(paths.runMirrorMaxRuns) ? { max: paths.runMirrorMaxRuns } : {}) });
@@ -4642,20 +3954,18 @@ export function createFleetReader(
       // Issue #737: the waiting jobs, started now beside the queue reads and awaited at the end (cached, so at most one
       // read per WAITING_TTL_MS). Null when this call did not ask for them.
       const waitingRead = waiting === true ? waitingOf(queues, Array.isArray(projectsView?.projects) ? projectsView.projects : null, Array.isArray(triggersView?.triggers) ? triggersView.triggers : null, opts?.freshWaiting === true) : null;
-      const [pausedStates, countsPer, workerList, tokenRaw, schedulerLists, activeLists, stallCounts] = await Promise.all([
+      const [pausedStates, countsPer, workerList, schedulerLists, activeLists, stallCounts] = await Promise.all([
         Promise.all(queues.map((q) => q.isPaused())),
         Promise.all(queues.map((q) => q.getJobCounts("waiting", "active", "paused", "delayed", "failed"))),
         queue.getWorkers().catch(() => []),
-        redis.get(dayKey(new Date(nowFn()), TOKEN_KEY_PREFIX)), // the token windows' day counter (budget:tok:YYYY-MM-DD)
         // The shared queue's failure is UNCAUGHT (the panel must not draw a scheduler list it could not read), a host
         // queue's is caught: one unreachable host degrades one host's triggers, never the view.
         Promise.all(queues.map((q, i) => (i === 0 ? q.getJobSchedulers(0, -1, true) : q.getJobSchedulers(0, -1, true).catch(() => [])))),
         // The active jobs, `activePerQueue` per queue (issue #641): one for the TUI, the console's bound for the console.
         Promise.all(queues.map((q) => q.getActive(0, activePerQueue - 1).catch(() => []))),
-        // Per-scheduler stall counts (money backstop) for the cron drill-in; reuses the held client like the budget
-        // GETs. ONE MGET for every declared cron id, so this stays one round trip however many schedulers exist. An
-        // absent key reads as an honest 0 -- a scheduler that has never stalled -- which is the same posture
-        // `readScopedBudget` takes for a scope that has never run.
+        // Per-scheduler stall counts (money backstop) for the cron drill-in; reuses the held client. ONE MGET for every
+        // declared cron id, so this stays one round trip however many schedulers exist. An absent key reads as an honest
+        // 0 -- a scheduler that has never stalled.
         cronIds.length > 0 ? redis.mget(...cronIds.map((id) => stallKey(id))).catch(() => null) : Promise.resolve([]),
       ]);
       const workers = Array.isArray(workerList) && workerList.length > 0 ? workerList.length : "unknown";
@@ -4712,13 +4022,12 @@ export function createFleetReader(
       // enter it. ONE MGET for the first PROGRESS_BATCH_MAX ids, started now and awaited at the end, so it rides beside
       // the reads below rather than adding a round trip to the tick. Unreadable: every row's progress is null.
       const progressRead = readProgressMany(redis, runIds, { timeoutMs: FLEET_READ_TIMEOUT_MS });
-      // The scoped limits (issue #242): configured rows only. Job-count windows (`day/week/month`) are gone with the
-      // job-start caps (C1); the token windows and concurrency stay, and the page gets their counters from
-      // `readScopedBudget` on demand (the budget panel's token half).
+      // The scoped limits (issue #242): configured rows only, concurrency and size (token rows are refused by the shared
+      // parser now). The page gets no live counter: a scope's actual usage comes from the run records.
       const scopedLimits = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath });
       const limitRows = Array.isArray(scopedLimits?.limits) ? scopedLimits.limits : [];
-      // Jobs the worker is holding on run.waitFor (issue #230). Caught individually like the dollar windows below, so a
-      // dead key or a slow SCAN degrades one section rather than the whole snapshot. Reads the worker's own
+      // Jobs the worker is holding on run.waitFor (issue #230). Caught individually, so a dead key or a slow SCAN
+      // degrades one section rather than the whole snapshot. Reads the worker's own
       // `wait:job:*` hashes and never a delayed Job: a delayed job's `.data` holds the issue title and body.
       const held = await heldJobs(redis, { prune }).catch((err) => ({ unreachable: err?.message ?? String(err) }));
 
@@ -4745,10 +4054,9 @@ export function createFleetReader(
         return { rows, more: Math.max(0, Number(total) - rows.length) };
       })().catch((err) => ({ unreachable: err?.message ?? String(err) }));
 
-      // The dollar windows (issue #501, part 7): null when no dollar window is set, so a deployment without one renders
-      // exactly the panel it always did. Caught as a unit, like `held`.
+      // The settings overlay as the worker reads it (the invalid/newer read included, so the console shows the worker's
+      // own refusal rather than inventing a default).
       const settings = readSettingsView({ settingsFile: paths.settingsFile });
-      const dollars = await dollarWindows(settings?.overlay, limitRows).catch((err) => ({ rows: [], unreachable: err?.message ?? String(err) }));
 
       // Issue #641: the parked runs and the day's failures, off the wide window (cached, so at most one read of it per
       // TOKEN_RECORDS_TTL_MS). Caught as a unit: a failure here costs these two fields, never the snapshot.
@@ -4833,7 +4141,6 @@ export function createFleetReader(
         held,
         failed,
         scopedLimits,
-        windows: dollars,
         queue: { pausedState, pausedPartial, counts, workers, queues: queues.length, fleetDegraded },
         // Issue #641: each queue's own counts beside the summed ones, so a surface can say which host's queue is deep.
         queueCounts: queues.map((q, i) => ({ queue: q?.name ?? "-", paused: Boolean(pausedStates[i]), counts: Object.fromEntries(Object.entries(countsPer[i] ?? {}).map(([k, v]) => [k, Number(v ?? 0)])) })),
@@ -4849,8 +4156,6 @@ export function createFleetReader(
         // sentence quotes this host's doctor before another's (each host has its own copy of the files). Null when the
         // declared name is one the worker refuses.
         doctorSelf: doctorSelfName(budgetEnvFn() ?? {}),
-        // Today's token counter only: the job-count windows (day/week/month) went with the job-start caps (C1).
-        budget: { tokensToday: Number(tokenRaw ?? 0) },
         schedulers: mapSchedulers(schedulerList, nowMs).map((scheduler) => {
           const trigger = triggersView?.triggers?.find((t) => t.type === "cron" && t.id === scheduler.key);
           const project = typeof trigger?.folder === "string" ? projectOf({ kind: "local", folder: trigger.folder }, projectsView?.projects ?? []) : null;
@@ -4888,8 +4193,6 @@ export function createFleetReader(
         // Issue #712: the venue a trigger naming none runs in (`PI_BACKENDS[0]`, read as the trigger tools read it), for the
         // secrets disclosure's custody; null when the list does not parse.
         defaultBackend: triggerVenue(undefined, budgetEnvFn() ?? {}),
-        // Issue #504 part C: whether the deployment names an allocation envelope, for the `b split` hint alone.
-        envelopeSet: typeof paths.envelopeFile === "string" && paths.envelopeFile !== "",
         // The operator's staged third-party pi packages (REQ-GLOBAL-PI-OVERLAY), for the armed triggers' trust model.
         // A plain file read that degrades to a safe empty shape rather than throwing.
         stagedPackages: readStagedPackages({ globalPiDir: paths.globalPiDir }),
@@ -5015,19 +4318,6 @@ export function createFleetReader(
       return { index, type: row.type, phrase: text(row.phrase), label: text(row.label ?? (row.type === "label" ? [...(row.any ?? []), ...(row.all ?? [])].join(", ") : null)), pattern: text(row.pattern),
         mcp: Array.isArray(row.mcp) ? row.mcp.slice(0, 64).filter((n) => typeof n === "string" && MCP_SERVER_NAME_RE.test(n)) : [],
         resume: row.resume === true, recover: raw?.run?.recover === true };
-    },
-    // A durable run's active dollar holds, read-only and numbers only; ledger keys and arbitrary hash fields stay here.
-    async runHolds(jobId, record = null) {
-      const base = recordedRecoveryOf(record?.recoveryOf) ?? jobId;
-      if (typeof base !== "string" || !RUN_ID_RE.test(base)) return null;
-      try {
-        const got = await withTimeout(makeRunBudgetLedger({ redis, now: nowFn }).read(base), FLEET_READ_TIMEOUT_MS, null);
-        if (!Array.isArray(got?.holds)) return null;
-        return got.holds.filter((h) => Number.isSafeInteger(h.seq) && h.seq >= 1 && ["held", "settled", "released", "settled-crashed"].includes(h.state))
-          .slice(0, 2 + RECOVERY_CAP).map((h) => ({ seq: h.seq, state: h.state, amountTokens: Number.isSafeInteger(h.amountTokens) && h.amountTokens >= 0 ? h.amountTokens : null }));
-      } catch {
-        return null;
-      }
     },
     // The live run's facts, rebuilt by name before queue data leaves this reader (#747). The target is derived by
     // the record writer, so a local folder contributes its basename only; payload text has no route through here.
@@ -5881,7 +5171,7 @@ export async function readWaitingRow(redis, { q, jobId, state, now = () => Date.
 }
 
 /**
- * This host's run records, newest first, read at most once per `ttlMs` (issue #641; the dollar records' 15 s rhythm).
+ * This host's run records, newest first, read at most once per `ttlMs` (issue #641; the run records' 15 s rhythm).
  * `records()` returns `{ records, capped }` or `{ unreachable }` (an unreadable directory, never a throw; a missing one
  * is an empty history). At most `max` records are kept, the mirror's own cap (`RUNS_INDEX_MAX` by default; the fleet
  * reader passes the deployment's PI_RUN_MIRROR_MAX_RUNS), so the index costs what the fleet view already does; `capped`
@@ -6305,6 +5595,7 @@ export const PROGRESS_BATCH_MAX = 50;
 const PROGRESS_FIELDS = Object.freeze(["v", "turn", "steps", "failed", "interrupted", "running", "recent", "phase", "phases", "note", "prior", "startedAt", "updatedAt", "ended", "outcome", "commentId", "replayed"]);
 const PROGRESS_STATUSES = Object.freeze(["ok", "error", "interrupted"]);
 
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
 const isProgressCount = (v) => Number.isSafeInteger(v) && v >= 0;
 const onlyKeys = (o, keys) => Object.keys(o).every((k) => keys.includes(k)) && keys.every((k) => Object.hasOwn(o, k));
 const codePoints = (s) => [...s].length;

@@ -119,12 +119,12 @@ test("a trigger that opted out of session persistence creates no unredacted fork
 });
 
 
-test("queued fork reservation cannot become paid or grow after its preview", async () => {
+test("stale forkReserveTokens and maxTokens on a queued fork are inert: the fork runs (C2 removed the reservation)", async () => {
 	for (const [forkReserveTokens, maxTokens] of [[0, 1_000_000], [1_000_000, 2_000_000], [1_000_000, null]]) {
 		const f = fixture();
 		const result = await runJob({ ...f.job, forkReserveTokens, maxTokens }, f.deps);
-		assert.equal(result.reason, "fork-reservation-changed");
-		assert.deepEqual(f.calls, []);
+		assert.equal(result.outcome, "completed", JSON.stringify({ forkReserveTokens, maxTokens }));
+		assert.ok(f.calls.includes("container"), "the fork reaches its container");
 	}
 });
 

@@ -61,7 +61,7 @@ async function stubServer() {
 }
 
 /** The runner's model runtime on a models.json that points openrouter at the stub, and the meter as the runner installs it. */
-async function job({ base, allowedModels = null, maxTokens = null }) {
+async function job({ base, allowedModels = null }) {
 	const root = tempDir("pi-dispatch-codemode-");
 	const modelsPath = join(root, "models.json");
 	writeFileSync(modelsPath, JSON.stringify({ providers: { openrouter: { baseUrl: base, apiKey: "stub-key" } } }));
@@ -70,7 +70,7 @@ async function job({ base, allowedModels = null, maxTokens = null }) {
 	const logged = [];
 	const log = (event, fields) => logged.push({ event, fields });
 	const sessionManager = pi.SessionManager.inMemory(root);
-	const meter = createUsageMeter({ maxTokens, allowedModels, rootSessionId: sessionManager.getSessionId(), onStop: (reason) => stops.push(reason) });
+	const meter = createUsageMeter({ allowedModels, rootSessionId: sessionManager.getSessionId(), onStop: (reason) => stops.push(reason) });
 	const guard = createPolicyGuard({ allowedModels, log });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, ...(guard && { guard }), log });
 	assert.equal(installed.ok, true, JSON.stringify(logged));
@@ -162,16 +162,16 @@ test("a script's own model object cannot redirect a call: the model is resolved 
 
 test("watch trusted decide tool uses the real pinned classifier through the process meter", { skip }, async () => {
 	const stub = await stubServer();
-	const j = await job({ base: stub.base, maxTokens: 1 });
+	const j = await job({ base: stub.base });
 	const traces = [];
 	try {
 		const watch = createWatchTools({ config: { version: 1, decisionModel: CLASSIFIER }, runtime: j.runtime, fs: { appendFileSync(_path, line) { traces.push(JSON.parse(line)); }, writeFileSync() {} } });
 		const result = await watch.tools.find((tool) => tool.name === "decide").execute("watch-1", { state: { count: 37 }, questions: { ok: { type: "bool", instructions: "Investigate?", criteria: { true: "yes", false: "no" } } } });
-		// The token cap has no pre-call form (OQ-010): the classify dispatches once and its answer comes back; its
-		// settle crosses a cap of one token, so the meter stops and every later call is braked.
+		// The classify dispatches once, its answer comes back, and metering records it. There is no token cap:
+		// the meter never stops the job for a total.
 		assert.equal(result.isError, undefined);
-		assert.equal(stub.seen.classify, 1, "exactly the one dispatch the settle-time stop allows");
-		assert.equal(j.meter.state.stopReason, "token_budget");
+		assert.equal(stub.seen.classify, 1, "exactly the one classify dispatch");
+		assert.equal(j.meter.state.stopReason, null);
 		assert.equal(traces.at(-1).status, "completed");
 	} finally { j.close(); await stub.close(); }
 });

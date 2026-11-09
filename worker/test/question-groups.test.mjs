@@ -6,7 +6,7 @@ import { makeQuestionGroupRuntime, questionGroupConfigDigest, prepareQuestionGro
 import { enqueueQuestionGroupJob } from "../src/queue.mjs";
 import { compareZeroTouchFixes } from "../src/zero-touch-fixes.mjs";
 const nowMs = 1900000000000;
-const config = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
+const config = { capture: true, model: "test/classifier", confidence: 0.9, names: {} };
 const scopeId = "a".repeat(64), digest = "b".repeat(64), groupId = "c".repeat(32);
 
 test("grouping config is opt-in and human names are bounded; malformed settings cannot silently disable capture", () => {

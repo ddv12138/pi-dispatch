@@ -209,7 +209,7 @@ test("envNamedFiles reads every way a loader might take a value: comment, quotes
   for (const v of ["~/dep/projects.json", "$HOME/dep/projects.json", "${HOME}/dep/projects.json"]) assert.ok(at(`PI_PROJECTS_FILE=${v}`).includes("/home/op/dep/projects.json"), v);
   assert.ok(!at("PI_PROJECTS_FILE=$HOMEDIR/x.json").includes("/home/op/x.json"), "$HOMEDIR is not $HOME");
   assert.deepEqual(at("PI_PROJECTS_FILE=/a/projects.json\nPI_PROJECTS_FILE=/b/projects.json"), ["/b/projects.json"], "the last assignment, as the loaders take it");
-  assert.deepEqual(at("\uFEFFexport PI_ENVELOPE_FILE=/dep/envelope.json\r\n"), ["/dep/envelope.json"], "a BOM, export and CRLF");
+  assert.deepEqual(at("\uFEFFexport PI_PROJECTS_FILE=/dep/projects.json\r\n"), ["/dep/projects.json"], "a BOM, export and CRLF");
   assert.deepEqual(at("# PI_PROJECTS_FILE=/dep/projects.json\nPI_OTHER_FILE=/x"), [], "a comment and an unguarded key name nothing");
   // Issue #640: a console tokens file moved by the deployment's .env is guarded where it really is, not only at its default.
   // Issue #708: and the login-codes directory beside it, wherever the key puts the file.

@@ -553,7 +553,8 @@ test("no assignment in .env.example carries an inline comment, live or commented
 		"an inline comment is part of the value to systemd and to compose: put the comment on its own line above the key",
 	);
 	// NON-VACUITY, the discipline this file already keeps for its other scans: a regex that matches nothing
-	// passes every assertion above it. 125 is the count both mirrors carry today (VALKEY_PASSWORD and PI_VALKEY_PORT joined in issue #468,
+	// passes every assertion above it. 120 is the count both mirrors carry today: C2 removed PI_MAX_TOKENS, the three token caps and
+	// PI_ENVELOPE_FILE. (VALKEY_PASSWORD and PI_VALKEY_PORT joined in issue #468,
 	// PI_MODEL_ENDPOINTS_FILE in issue #503, PI_ALLOWED_MODELS in issue #502, the four PI_*_COST_TOKENS token settings in issue #501,
 	// PI_PROJECTS_FILE in issue #499, PI_ENVELOPE_FILE in issue #504, PI_JOB_MEMORY and PI_JOB_CPUS in issue #596, and the four
 	// PI_HOST_* budget settings in its phase 2, FORGEJO_PERMISSION_TOKEN for OQ-043, the eight PI_CONSOLE_* keys of
@@ -571,7 +572,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
 	// with the podman, OpenShell and sandbox stack, so the pin follows the file down. The job-start caps
 	// removal (C1) then dropped the last four (PI_DAILY_CAP, PI_WEEKLY_CAP, PI_MONTHLY_CAP, PI_SOFT_HOLD_PCT).
-	assert.equal(scanned, 125, "the scan must actually reach every assignment in the file");
+	assert.equal(scanned, 120, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

@@ -82,7 +82,6 @@ export const DOCTOR_SECTIONS = Object.freeze([
 	"image",
 	"docker",
 	"triggers",
-	"tokens",
 	"venues",
 	"images",
 	"egress",
@@ -103,7 +102,6 @@ export const DOCTOR_SECTIONS = Object.freeze([
 	"sessions",
 	"files",
 	"limits",
-	"envelope",
 	"console",
 	"dirs",
 	"state",
@@ -124,8 +122,7 @@ export const DOCTOR_SECTIONS = Object.freeze([
  * one per store and kind of peer, so a run may publish `-2` and on). And for the upgrade path: `fleet.versions`, the
  * pi-dispatch versions the live workers report and this doctor's own against this host's worker row (a warning when
  * they differ or cannot all be read, an ok line when peers agree, absent on a single host that matches);
- * `tokens.window-reset`, a deployment token window counter below what this host's own runs settled into it (a
- * warning, absent otherwise); and `state.older`,
+ * and `state.older`,
  * a store an older release left in a shape this build no longer writes (a warning per finding, so a run may publish
  * `state.older-2` and on). Each is written at one site.
  * No id names a forge's credentials, because no one check holds them: the `github` section alone prints about twenty
@@ -143,14 +140,10 @@ export const NAMED_CHECK_IDS = Object.freeze([
 	"projects.file-shell",
 	"model-endpoints.file",
 	"model-endpoints.file-shell",
-	"envelope.file",
-	"envelope.file-shell",
 	"settings.overlay",
-	"settings.overlay-tokens",
 	"settings.unknown-keys",
 	"fleet.store-versions",
 	"fleet.versions",
-	"tokens.window-reset",
 	"state.older",
 	"egress.proxy",
 	"provider.key",

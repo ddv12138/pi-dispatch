@@ -77,8 +77,8 @@
 <main id="main" tabindex="-1">
 <div class="titlebar"><div class="titlebar__lead"><h1>Configuration</h1><p class="titlebar__sub">Settings: .../deployment/settings.json. Triggers: .../deployment/triggers.json.</p></div><div class="titlebar__end"><span class="drawn"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-clock"></use></svg><span>Drawn at <time datetime="2026-10-08T15:39:08.000Z">15:39 UTC</time> · not live</span></span><a class="btn btn--sm btn--ghost" href="/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-rerun"></use></svg>Reload</a></div></div>
 <div class="stack"><section id="cf-navigation" data-panel><nav class="config-sections" aria-label="Configuration sections">
-<a class="fpill" href="#cf-settings">Settings <b>7</b></a><a class="fpill" href="#cf-triggers">Triggers <b>7</b></a><a class="fpill" href="#cf-pause-windows">Pause windows <b>1</b></a><a class="fpill" href="#cf-scoped-limits">Scoped limits <b>6</b></a><a class="fpill" href="#cf-projects">Projects <b>4</b></a><a class="fpill" href="#cf-files">Files <b>2</b></a><a class="fpill" href="#cf-unset">Unset <b>0</b></a><a class="fpill" href="#cf-mcp-servers">MCP servers <b>1</b></a><span class="config-divider" aria-hidden="true"></span><a class="btn btn--sm" href="/config/secrets">Secrets</a><a class="btn btn--sm" href="/config/connections">Connections</a>
-</nav></section></div><div class="cols cols--wide-side config-layout"><div class="stack"><section id="cf-settings" data-panel><div class="card"><div class="card__head"><h2>Settings overlay</h2></div><dl class="facts"><div class="fact"><dt>model</dt><dd>claude-sonnet-5-5</dd></div><div class="fact"><dt>provider</dt><dd>anthropic</dd></div><div class="fact"><dt>maxTurns</dt><dd>30</dd></div><div class="fact"><dt>maxTokens</dt><dd>2000000</dd></div><div class="fact"><dt>dailyTokenCap</dt><dd>8000000</dd></div><div class="fact"><dt>weeklyTokenCap</dt><dd>120000000</dd></div><div class="fact"><dt>monthlyTokenCap</dt><dd>deployment default</dd></div><div class="fact"><dt>concurrency</dt><dd>4</dd></div></dl><details class="config-editor">
+<a class="fpill" href="#cf-settings">Settings <b>4</b></a><a class="fpill" href="#cf-triggers">Triggers <b>6</b></a><a class="fpill" href="#cf-pause-windows">Pause windows <b>1</b></a><a class="fpill" href="#cf-scoped-limits">Scoped limits <b>4</b></a><a class="fpill" href="#cf-projects">Projects <b>4</b></a><a class="fpill" href="#cf-files">Files <b>2</b></a><a class="fpill" href="#cf-unset">Unset <b>0</b></a><a class="fpill" href="#cf-mcp-servers">MCP servers <b>1</b></a><span class="config-divider" aria-hidden="true"></span><a class="btn btn--sm" href="/config/secrets">Secrets</a><a class="btn btn--sm" href="/config/connections">Connections</a>
+</nav></section></div><div class="cols cols--wide-side config-layout"><div class="stack"><section id="cf-settings" data-panel><div class="card"><div class="card__head"><h2>Settings overlay</h2></div><dl class="facts"><div class="fact"><dt>model</dt><dd>claude-sonnet-5-5</dd></div><div class="fact"><dt>provider</dt><dd>anthropic</dd></div><div class="fact"><dt>maxTurns</dt><dd>30</dd></div><div class="fact"><dt>concurrency</dt><dd>4</dd></div></dl><details class="config-editor">
 <summary>Change a setting</summary>
 <div class="stack"><form
 class="act config-form stack"
@@ -110,26 +110,6 @@ value="maxTurns"
 
 >
 maxTurns
-</option><option
-value="maxTokens"
-
->
-maxTokens
-</option><option
-value="dailyTokenCap"
-
->
-dailyTokenCap
-</option><option
-value="weeklyTokenCap"
-
->
-weeklyTokenCap
-</option><option
-value="monthlyTokenCap"
-
->
-monthlyTokenCap
 </option><option
 value="concurrency"
 
@@ -187,26 +167,6 @@ value="maxTurns"
 
 >
 maxTurns
-</option><option
-value="maxTokens"
-
->
-maxTokens
-</option><option
-value="dailyTokenCap"
-
->
-dailyTokenCap
-</option><option
-value="weeklyTokenCap"
-
->
-weeklyTokenCap
-</option><option
-value="monthlyTokenCap"
-
->
-monthlyTokenCap
 </option><option
 value="concurrency"
 
@@ -400,12 +360,12 @@ value="4"
 <td class="num">6</td>
 <td>
 <a href="/config/trigger?index=5"
->cron pm-weekly 0 6 * * 1</a
+>label; any pi:triage</a
 >
 </td>
-<td>flow portfolio-manager in .../pm</td>
-<td>claude-haiku-5-5</td>
-<td>writes the budget split</td>
+<td>flow triage on github</td>
+<td>deployment default</td>
+<td>keeps a session; mcp linear</td>
 <td>
 <div class="acts">
 <a class="btn btn--sm" href="/config/trigger?index=5#p-trigger-edit">Edit row 6</a><form
@@ -421,37 +381,6 @@ name="index"
 value="5"
  data-type="int"
 /><button class="btn btn--danger btn--sm" type="submit">Delete row 6</button>
-</fieldset>
-<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
-<p class="field__err" data-form-error hidden role="alert"></p>
-</form>
-</div>
-</td>
-</tr><tr>
-<td class="num">7</td>
-<td>
-<a href="/config/trigger?index=6"
->label; any pi:triage</a
->
-</td>
-<td>flow triage on github</td>
-<td>deployment default</td>
-<td>keeps a session; mcp linear</td>
-<td>
-<div class="acts">
-<a class="btn btn--sm" href="/config/trigger?index=6#p-trigger-edit">Edit row 7</a><form
-class="act config-form stack"
-data-action="trigger-delete"
-
-autocomplete="off"
->
-<fieldset data-config-controls disabled>
-<input
-type="hidden"
-name="index"
-value="6"
- data-type="int"
-/><button class="btn btn--danger btn--sm" type="submit">Delete row 7</button>
 </fieldset>
 <noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
 <p class="field__err" data-form-error hidden role="alert"></p>
@@ -794,7 +723,7 @@ rows="4"
  data-type="json"
 maxlength="16384"
 >
-{   &quot;scope&quot;: &quot;github:acme/web&quot;,   &quot;concurrent&quot;: 6,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+{   &quot;scope&quot;: &quot;github:acme/web&quot;,   &quot;concurrent&quot;: 6,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
 >
 </label>
 <p class="field__err" data-field-error="limit" hidden></p>
@@ -851,7 +780,7 @@ rows="4"
  data-type="json"
 maxlength="16384"
 >
-{   &quot;scope&quot;: &quot;project:billing&quot;,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;8g&quot;,   &quot;cpus&quot;: 4,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+{   &quot;scope&quot;: &quot;project:billing&quot;,   &quot;concurrent&quot;: null,   &quot;memory&quot;: &quot;8g&quot;,   &quot;cpus&quot;: 4,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
 >
 </label>
 <p class="field__err" data-field-error="limit" hidden></p>
@@ -908,7 +837,7 @@ rows="4"
  data-type="json"
 maxlength="16384"
 >
-{   &quot;scope&quot;: &quot;project:api&quot;,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+{   &quot;scope&quot;: &quot;project:api&quot;,   &quot;concurrent&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
 >
 </label>
 <p class="field__err" data-field-error="limit" hidden></p>
@@ -965,7 +894,7 @@ rows="4"
  data-type="json"
 maxlength="16384"
 >
-{   &quot;scope&quot;: &quot;project:ops&quot;,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: null,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
+{   &quot;scope&quot;: &quot;project:ops&quot;,   &quot;concurrent&quot;: null,   &quot;memory&quot;: &quot;2g&quot;,   &quot;cpus&quot;: 1,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
 >
 </label>
 <p class="field__err" data-field-error="limit" hidden></p>
@@ -987,120 +916,6 @@ name="index"
 value="3"
  data-type="int"
 /><button class="btn btn--danger btn--sm" type="submit">Delete row 4</button>
-</fieldset>
-<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
-<p class="field__err" data-form-error hidden role="alert"></p>
-</form>
-</td>
-</tr><tr>
-<td>5</td>
-<td class="code">project:web</td>
-<td>
-45000000 a week
-</td>
-<td>
-<details class="config-editor">
-<summary>Edit row 5</summary>
-<div class="stack"><form
-class="act config-form stack"
-data-action="limit-edit"
-
-autocomplete="off"
->
-<fieldset data-config-controls disabled>
-<input
-type="hidden"
-name="index"
-value="4"
- data-type="int"
-/><div class="field">
-<label
->Fields to change (JSON; omitted fields keep their values)<textarea
-class="textarea"
-name="limit"
-rows="4"
- data-type="json"
-maxlength="16384"
->
-{   &quot;scope&quot;: &quot;project:web&quot;,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: 45000000,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
->
-</label>
-<p class="field__err" data-field-error="limit" hidden></p>
-</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 5</button>
-</fieldset>
-<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
-<p class="field__err" data-form-error hidden role="alert"></p>
-</form></div>
-</details><form
-class="act config-form stack"
-data-action="limit-delete"
-
-autocomplete="off"
->
-<fieldset data-config-controls disabled>
-<input
-type="hidden"
-name="index"
-value="4"
- data-type="int"
-/><button class="btn btn--danger btn--sm" type="submit">Delete row 5</button>
-</fieldset>
-<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
-<p class="field__err" data-form-error hidden role="alert"></p>
-</form>
-</td>
-</tr><tr>
-<td>6</td>
-<td class="code">model:anthropic/claude-sonnet-5-5</td>
-<td>
-80000000 a week
-</td>
-<td>
-<details class="config-editor">
-<summary>Edit row 6</summary>
-<div class="stack"><form
-class="act config-form stack"
-data-action="limit-edit"
-
-autocomplete="off"
->
-<fieldset data-config-controls disabled>
-<input
-type="hidden"
-name="index"
-value="5"
- data-type="int"
-/><div class="field">
-<label
->Fields to change (JSON; omitted fields keep their values)<textarea
-class="textarea"
-name="limit"
-rows="4"
- data-type="json"
-maxlength="16384"
->
-{   &quot;scope&quot;: &quot;model:anthropic/claude-sonnet-5-5&quot;,   &quot;concurrent&quot;: null,   &quot;dayTokens&quot;: null,   &quot;weekTokens&quot;: 80000000,   &quot;monthTokens&quot;: null,   &quot;memory&quot;: null,   &quot;cpus&quot;: null,   &quot;hostShare&quot;: null,   &quot;minJobs&quot;: null }</textarea
->
-</label>
-<p class="field__err" data-field-error="limit" hidden></p>
-</div><button class="btn btn--primary btn--sm" type="submit">Preview edit of row 6</button>
-</fieldset>
-<noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
-<p class="field__err" data-form-error hidden role="alert"></p>
-</form></div>
-</details><form
-class="act config-form stack"
-data-action="limit-delete"
-
-autocomplete="off"
->
-<fieldset data-config-controls disabled>
-<input
-type="hidden"
-name="index"
-value="5"
- data-type="int"
-/><button class="btn btn--danger btn--sm" type="submit">Delete row 6</button>
 </fieldset>
 <noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
 <p class="field__err" data-form-error hidden role="alert"></p>
@@ -1375,7 +1190,7 @@ value="billing"
 <td class="code"><a href="/config/project?id=ops">ops</a></td>
 <td>-</td>
 <td class="mono">
-.../site, .../pm
+.../site
 </td>
 <td>
 <details class="config-editor">
@@ -1445,7 +1260,7 @@ value="ops"
 </tr>
 </tbody>
 </table>
-</div><dl class="facts"><div class="fact"><dt>Allocation envelope</dt><dd>set</dd></div></dl><details class="config-editor">
+</div><details class="config-editor">
 <summary>Change the projects</summary>
 <div class="stack"><form
 class="act config-form stack"
@@ -1499,13 +1314,7 @@ maxlength="16384"
 </fieldset>
 <noscript><p class="muted">Enable JavaScript to preview and confirm a change. Reading and navigation work without it.</p></noscript>
 <p class="field__err" data-form-error hidden role="alert"></p>
-</form>
-<p class="note">
-<a href="/insights/budget-split"
->Edit the envelope, priorities and allocation history in Budget split
-</a
->.
-</p></div>
+</form></div>
 </details></div></section><section id="cf-files" data-panel><div class="card"><div class="card__head"><h2>Files</h2></div><p>Settings: .../deployment/settings.json. Triggers: .../deployment/triggers.json.</p></div></section></div><div class="stack"><section id="cf-unset" data-panel><div class="card"><div class="card__head"><h2>Unset a setting</h2></div><form
 class="act config-form stack"
 data-action="setting-unset"
@@ -1536,26 +1345,6 @@ value="maxTurns"
 
 >
 maxTurns
-</option><option
-value="maxTokens"
-
->
-maxTokens
-</option><option
-value="dailyTokenCap"
-
->
-dailyTokenCap
-</option><option
-value="weeklyTokenCap"
-
->
-weeklyTokenCap
-</option><option
-value="monthlyTokenCap"
-
->
-monthlyTokenCap
 </option><option
 value="concurrency"
 

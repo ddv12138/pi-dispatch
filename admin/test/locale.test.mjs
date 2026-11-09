@@ -128,7 +128,7 @@ test("every registered console screen renders in Chinese with its localized page
   const panelTitles = {
     setup: "准备就绪", models: "模型角色", overview: "需要你", runs: "运行记录",
     "zero-touch": "人工介入率，", run: "实时转录", parked: "回答方式", "answer-rules": "回答规则",
-    insights: "本周已支出", "insights-budget-split": "预算范围", "insights-capacity": "主机群忙碌度",
+    insights: "今天", "insights-capacity": "主机群忙碌度",
     "insights-breakdown": "窗口支出", "insights-flows": "流程映射", fleet: "主机与队列", host: "主机已离线",
     trigger: "触发条件", triggers: "设置", "trigger-check": "哪些规则会运行？",
     "trigger-add": "添加触发器", config: "设置覆盖项", secrets: "密钥配置", connections: "提供商 API 密钥",

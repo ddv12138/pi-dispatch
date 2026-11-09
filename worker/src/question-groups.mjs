@@ -16,15 +16,14 @@ export const questionDigest = (value) => sha(JSON.stringify(value));
 /** No model-owned names or prompts live here. Names are operator-owned and never sent as classification criteria. */
 export function validateZeroTouchConfig(value) {
 	if (value === undefined || value === null) return null;
-	if (!own(value, ["capture", "model", "maxTokens", "confidence", "names"]) || typeof value.capture !== "boolean") throw new Error("zeroTouch requires capture and only declared grouping settings");
+	if (!own(value, ["capture", "model", "confidence", "names"]) || typeof value.capture !== "boolean") throw new Error("zeroTouch requires capture and only declared grouping settings");
 	if (typeof value.model !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./:@~+-]{1,128}$/.test(value.model)) throw new Error("zeroTouch.model requires an explicit provider/model");
-	if (!Number.isSafeInteger(value.maxTokens) || value.maxTokens < 1) throw new Error("zeroTouch.maxTokens must be a whole number of tokens of 1 or more");
 	const confidence = value.confidence ?? 0.9;
 	if (typeof confidence !== "number" || confidence <= 0.5 || confidence > 1) throw new Error("zeroTouch.confidence must be above 0.5 and at most 1");
 	const names = value.names ?? {};
 	if (!object(names) || Object.keys(names).length > 1000) throw new Error("zeroTouch.names must hold at most 1000 human names");
 	for (const [id, name] of Object.entries(names)) if (!GROUP_ID_RE.test(id) || typeof name !== "string" || !name.trim() || [...name].length > 120 || /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/u.test(name)) throw new Error("zeroTouch group names must be human text of 1 to 120 characters without controls");
-	return { capture: value.capture, model: value.model, maxTokens: value.maxTokens, confidence, names: { ...names } };
+	return { capture: value.capture, model: value.model, confidence, names: { ...names } };
 }
 
 /** Redact before bounding; silently cutting before redaction can expose the head of a secret. */

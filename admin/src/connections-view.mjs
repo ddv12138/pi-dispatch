@@ -20,13 +20,11 @@ import { makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { FORGES } from "@edgehero/pi-dispatch/forges";
 import { doctorHostsOf, doctorStale } from "./doctor-view.mjs";
 import { PANEL_SERVICE_KEYS } from "./read-model.mjs";
-import { TOKEN_ENV_NAMES as WORKER_TOKEN_ENV_NAMES } from "@edgehero/pi-dispatch/budget-rule";
 import { readHookRuns, hookRunsView } from "@edgehero/pi-dispatch/hook-runs";
 
 /** A closed display vocabulary: arbitrary strings, even numeric-looking secrets, are never printed. */
-const TOKEN_ENV_NAMES = Object.freeze({ maxTokens: "PI_MAX_TOKENS", ...WORKER_TOKEN_ENV_NAMES });
 export const CONNECTION_ENV_TYPES = Object.freeze({
-  ...Object.fromEntries(PANEL_SERVICE_KEYS.map((key) => [key, /(?:_FILE|_DIR)$|^(?:TMPDIR|TEMP)$/.test(key) ? "path" : Object.values(TOKEN_ENV_NAMES).includes(key) ? "decimal" : "present"])),
+  ...Object.fromEntries(PANEL_SERVICE_KEYS.map((key) => [key, /(?:_FILE|_DIR)$|^(?:TMPDIR|TEMP)$/.test(key) ? "path" : "present"])),
   RECEIVER_PORT: "port", RECEIVER_BIND: "present", GITHUB_AUTH_SOURCE: ["app", "pat", "gh"],
   WEBHOOK_SECRET: "present", GITHUB_PAT: "present", GITHUB_APP_ID: "present", GITHUB_APP_PRIVATE_KEY_PATH: "path", GITHUB_APP_INSTALLATION_ID: "present",
   GITLAB_WEBHOOK_MODE: ["signature", "token"], GITLAB_WEBHOOK_SECRET: "present", GITLAB_TOKEN: "present", GITLAB_URL: "present",
@@ -37,8 +35,8 @@ export const CONNECTION_ENV_TYPES = Object.freeze({
   // Credential-store and auth-policy locations remain presence-only, including their basenames.
   PI_AUTH_CONNECTIONS_FILE: "present", PI_AUTH_STORE_DIR: "present",
   PI_ON_FAILURE: "path", PI_ON_FAILURE_TIMEOUT_MS: "integer", PI_FORWARD_ENV: "present", PI_SECRET_PROFILES: "present", PI_SECRET_BUNDLES: "present", PI_SECRET_RESOLVER_ROOTS: "present",
-  PI_CONCURRENCY: "integer", PI_JOB_MEMORY: "memory", PI_JOB_CPUS: "decimal", PI_MAX_TURNS: "integer", PI_MAX_TOKENS: "integer", PI_MAX_COST_USD: "decimal",
-  PI_MAX_JOBS_PER_DAY: "integer", PI_MAX_JOBS_PER_WEEK: "integer", PI_MAX_JOBS_PER_MONTH: "integer", PI_MAX_TOKENS_PER_DAY: "integer",
+  PI_CONCURRENCY: "integer", PI_JOB_MEMORY: "memory", PI_JOB_CPUS: "decimal", PI_MAX_TURNS: "integer", PI_MAX_COST_USD: "decimal",
+  PI_MAX_JOBS_PER_DAY: "integer", PI_MAX_JOBS_PER_WEEK: "integer", PI_MAX_JOBS_PER_MONTH: "integer",
   PI_MAX_USD_PER_DAY: "decimal", PI_MAX_USD_PER_WEEK: "decimal", PI_MAX_USD_PER_MONTH: "decimal", VALKEY_URL: "present",
 });
 export const FORGE_ACTIVATION_KEYS = Object.freeze({
@@ -64,7 +62,7 @@ function endpointFleetDeclaration(env, unknown) {
 }
 
 export function connectionEnvValue(key, raw, type = CONNECTION_ENV_TYPES[key]) {
-  if (typeof raw !== "string") return (CAP_KEY.test(key) || Object.values(TOKEN_ENV_NAMES).includes(key)) ? "unknown (worker env or default)" : "not set";
+  if (typeof raw !== "string") return CAP_KEY.test(key) ? "unknown (worker env or default)" : "not set";
   if (type === "path") return raw === "" ? "not set" : basename(raw);
   if (key === "PI_EGRESS" && raw === "") return "empty (on by default)";
   if (Array.isArray(type)) return type.includes(raw) ? raw : "set (invalid option)";

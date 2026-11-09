@@ -66,7 +66,6 @@ export const DEFER_WHYS = Object.freeze({
 	"subscription-owner": Object.freeze({ bucket: "ready", sentence: "Waits for the host that owns its subscription connection" }),
 	"subscription-auth": Object.freeze({ bucket: "check", sentence: "Waits until the subscription credential can be renewed at {until}" }),
 	"model-cooldown": Object.freeze({ bucket: "check", sentence: "No reviewed model is available; a model is cooling down. Asks again at {until}" }),
-	"model-window": Object.freeze({ bucket: "check", sentence: "No reviewed model is available; a model's dollar window is full. Asks again at {until}" }),
 	"host-budget": Object.freeze({ bucket: "slot", sentence: "{host}'s budget has no room for it yet" }),
 	"bundle-profile": Object.freeze({ bucket: "slot", sentence: "Waits for a host that serves its secret bundle profile" }),
 	chained: Object.freeze({ bucket: "run", sentence: "Chained after {holder}; starts when its folder is free" }),

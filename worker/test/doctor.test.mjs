@@ -6,7 +6,7 @@ import { makeWaitChecker } from "../src/wait-check.mjs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
-import { tokenChecks, overlayTokenProblem, scopedTokenRowChecks, startAdvice, CANARY_LINES, CANARY_PROBE_SLUGS, DOCTOR_SHELL_KEYS, EGRESS_CANARY_RUNNER_MODULE, EGRESS_CANARY_STALE_RUNNER, ENV_FILE_READABLE_KEYS, RECEIVER_SERVICE_KEYS, RUN_TIMEOUTS, SERVICE_ENV_KEYS, STEERING_SERVICE_KEYS, WORKER_SERVICE_KEYS, backendChecks, defaultPromptFn, dockerRunVia, egressCanaryPlainScript, egressCanaryProbeArgs, forgeUrlEgressChecks, egressCanaryScript, envFileKeys, githubProtectionPreflight, jobUserChecks, liveChecks, liveRunVia, render, serviceEnvKeys, serviceEnvLoader, sweepStaleCanaryNetworks, urlShown, resolveDoctorEnv, jobImageOf, CLI_SERVICE_KEYS, cliNotHandedLines, fileConfigures, triggersPath, valkeyPasswordUpgradeStep, undeclaredPortNear, ENDPOINT_PROBE_SLUGS, allowlistHostAliases, egressEndpointScript, lanIPv4Addresses, overlayLoopbackModels } from "../src/doctor.mjs";
+import { startAdvice, CANARY_LINES, CANARY_PROBE_SLUGS, DOCTOR_SHELL_KEYS, EGRESS_CANARY_RUNNER_MODULE, EGRESS_CANARY_STALE_RUNNER, ENV_FILE_READABLE_KEYS, RECEIVER_SERVICE_KEYS, RUN_TIMEOUTS, SERVICE_ENV_KEYS, STEERING_SERVICE_KEYS, WORKER_SERVICE_KEYS, backendChecks, defaultPromptFn, dockerRunVia, egressCanaryPlainScript, egressCanaryProbeArgs, forgeUrlEgressChecks, egressCanaryScript, envFileKeys, githubProtectionPreflight, jobUserChecks, liveChecks, liveRunVia, render, serviceEnvKeys, serviceEnvLoader, sweepStaleCanaryNetworks, urlShown, resolveDoctorEnv, jobImageOf, CLI_SERVICE_KEYS, cliNotHandedLines, fileConfigures, triggersPath, valkeyPasswordUpgradeStep, undeclaredPortNear, ENDPOINT_PROBE_SLUGS, allowlistHostAliases, egressEndpointScript, lanIPv4Addresses, overlayLoopbackModels } from "../src/doctor.mjs";
 import { collectChecks, runDoctor } from "./helpers/doctor.mjs";
 import { valkeyPasswordFor } from "../src/valkey-endpoint.mjs";
 import { serviceEnvFileOf } from "../src/service-env.mjs";
@@ -20,14 +20,11 @@ import { JOB_USER_FIX, parseDaemonFacts } from "../src/job-user.mjs";
 import { OBSERVATION_FIX } from "../src/backends.mjs";
 import { loadConfig, underOsTempDir } from "../src/config.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { tokenFingerprint } from "../src/token-fingerprint.mjs";
 import { projectsFingerprint } from "../src/projects.mjs";
-import { appliedSplitChecks, envelopeChecks, fleetEnvelopeChecks, loadEnvelopeAsTheWorker } from "../src/doctor.mjs";
 import { doctorJobSize, fleetSizeChecks, jobSizeChecks } from "../src/doctor.mjs";
 import { mcpOnlyEndpoints } from "../src/doctor.mjs";
 import { newerFileFix } from "../src/doctor.mjs";
 import { egressRefusalFor } from "../src/egress-allowlist.mjs";
-import { envelopeDigest, parseEnvelope } from "../src/envelope.mjs";
 import { parseScopedLimits } from "../src/scoped-limits.mjs";
 import { quotedShown } from "../src/backend-local.mjs";
 
@@ -1559,12 +1556,11 @@ function replicaTriggersFile(replicas) {
 
 test("doctor: a replicating trigger states the budget arithmetic, and never fails", async () => {
 	// An opt-in an operator chose in a reviewed file, so the harness is doing exactly what was asked. What
-	// is worth saying is that each replica reserves its OWN slot before its own tokens, so the daily cap
-	// simply divides -- the caps stay the ceiling and that IS the feature.
+	// is worth saying is that each replica runs its OWN job, and PI_CONCURRENCY bounds how many race.
 	const { out, text } = capture();
 	const code = await runDoctor(imgEnv({ PI_TRIGGERS_FILE: replicaTriggersFile(2) }), imgDeps(out, green));
 	assert.match(text(), /1 trigger\(s\) set run\.replicas/);
-	assert.match(text(), /budget slot PER replica/);
+	assert.match(text(), /one job PER replica/);
 	// In the LABEL, not the fix: an `ok: true` check never prints its fix line, and "they queue instead of
 	// racing" is the half an operator most often has wrong.
 	assert.match(text(), /PI_CONCURRENCY bounds how many actually race/);
@@ -3818,19 +3814,13 @@ test("doctor: a priced model on a declared endpoint whose output cap travels as 
 	assert.doesNotMatch(await run(), /maxTokensField|max_completion_tokens/, "the documented fix silences it");
 	write({ id: "qwen2.5:3b", cost: free, contextWindow: 32768, maxTokens: 256 });
 	assert.doesNotMatch(await run(), /max_completion_tokens/, "a zero-rated model is bounded at 0 and needs no output cap");
-	// A capped job that may use it (review of #507): the model is named by cappedModelNames, so the overlay line
-	// leaves it out and no second line exists (the cost-cap fit advisory died with the guard).
-	write({ id: "qwen2.5:3b", cost: priced, contextWindow: 32768, maxTokens: 256 });
-	const capped = capture();
-	await runDoctor(ghEnv({ PI_EGRESS: "0", PI_GLOBAL_PI_DIR: overlay, PI_PROVIDER: "ollama", PI_MODEL: "qwen2.5:3b", PI_MAX_TOKENS: "2" }), { ...ghDeps(capped.out, { ...green, "gh auth status": { code: 0, output: ghStatusOutput } }), fileExists: existsSync, declaredEndpoints: () => endpoints });
-	assert.doesNotMatch(capped.text(), /Overlay models\.json sends the output cap/, "the job's own list admits it: the overlay line leaves it out");
 	// A model the overlay adds to a builtin provider with no api of its own (final review of #507): pi takes the api of
 	// An overlay model added to a builtin provider: pi composes it, and the overlay line judges it by its own row
 	// (a cost-bound advisory no longer exists to name it twice).
 	writeFileSync(join(overlay, "models.json"), JSON.stringify({ providers: { groq: { baseUrl: "http://proxy.lan:8080/openai/v1", models: [{ id: "new-groq", cost: priced }] } } }));
 	const added = capture();
-	await runDoctor(ghEnv({ PI_EGRESS: "0", PI_GLOBAL_PI_DIR: overlay, PI_PROVIDER: "groq", PI_MODEL: "new-groq", PI_MAX_TOKENS: "2" }), { ...ghDeps(added.out, { ...green, "gh auth status": { code: 0, output: ghStatusOutput } }), fileExists: existsSync, declaredEndpoints: () => endpoints });
-	assert.doesNotMatch(added.text(), /refuses it under the cap/, "no cost-bound advisory on any provider");
+	await runDoctor(ghEnv({ PI_EGRESS: "0", PI_GLOBAL_PI_DIR: overlay, PI_PROVIDER: "groq", PI_MODEL: "new-groq" }), { ...ghDeps(added.out, { ...green, "gh auth status": { code: 0, output: ghStatusOutput } }), fileExists: existsSync, declaredEndpoints: () => endpoints });
+	assert.equal(added.text().includes("PI_MAX_TOKENS"), false, "C2: no per-job token cap is read anywhere");
 });
 
 test("doctor: an allowlist naming a host alias is ⚠, pointing at model-endpoints.json (#503)", async () => {
@@ -4056,7 +4046,7 @@ test("doctor: a wedged proxy WARNS rather than fails -- health can flap, and the
 	assert.match(text(), /⚠ Egress proxy health: unhealthy/);
 });
 
-test("doctor: a policy that cannot reach the provider warns, and names the budget cost of leaving it", async () => {
+test("doctor: a policy that cannot reach the provider warns, and names the cost of leaving it", async () => {
 	const { out, text } = capture();
 	// The provider probe is blocked -- that is the outage. The unlisted one is blocked too, which is right.
 	const code = await runDoctor(
@@ -4065,7 +4055,7 @@ test("doctor: a policy that cannot reach the provider warns, and names the budge
 	);
 	assert.equal(code, 0, "warn tier: a custom base URL or a provider blip must not make this a certainty");
 	assert.match(text(), /⚠ Egress policy does NOT reach the provider/);
-	assert.match(text(), /spends two budget slots proving it/);
+	assert.match(text(), /add api\.anthropic\.com to egress-allowlist\.conf/);
 	assert.match(text(), /✓ Egress policy denies an unlisted host/);
 });
 
@@ -4757,29 +4747,6 @@ test("doctor: run.models states its version floor once, naming trigger-skew, and
 	assert.equal(quiet.some((c) => /name run\.models/.test(c.label)), false);
 });
 
-function tokenBudgetTriggersFile(caps) {
-	const path = join(tempDir("pi-triggers-cost-"), "triggers.json");
-	writeFileSync(path, JSON.stringify({ triggers: caps.map((maxTokens, i) => ({ on: { type: "label", any: [`pi:go${i}`] }, run: { kind: "github", flow: "fix", maxTokens } })) }));
-	return path;
-}
-
-test("doctor: run.maxTokens states its version floor once, naming trigger-skew, and only when a trigger sets one (#540)", async () => {
-	const capping = await collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_TRIGGERS_FILE: tokenBudgetTriggersFile([2_500, 1, null]) }, secretsSeams());
-	const floor = capping.filter((c) => /set run\.maxTokens, which needs a worker and a receiver/.test(c.label));
-	assert.equal(floor.length, 1, "once, not once per trigger");
-	assert.equal(floor[0].ok, true, "a fact, not a defect: doctor cannot see the receiver's version");
-	assert.match(floor[0].label, /^2 trigger\(s\) set run\.maxTokens/, "a null cap is absent and not counted");
-	assert.match(floor[0].label, /issue #501/);
-	assert.match(floor[0].label, /trigger-skew/);
-	// Exactly one cap, beside a null one: still said, and counted as one.
-	const one = await collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_TRIGGERS_FILE: tokenBudgetTriggersFile([null, 10]) }, secretsSeams());
-	const single = one.filter((c) => /set run\.maxTokens, which needs a worker and a receiver/.test(c.label));
-	assert.equal(single.length, 1, "one trigger with a cap is enough");
-	assert.match(single[0].label, /^1 trigger\(s\) set run\.maxTokens/);
-	const quiet = await collectChecks({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_TRIGGERS_FILE: modelsTriggersFile() }, secretsSeams());
-	assert.equal(quiet.some((c) => /run\.maxTokens, which needs/.test(c.label)), false, "no trigger sets a cap: nothing to say");
-});
-
 test("doctor: PI_ALLOWED_MODELS is judged by the worker's own rule, a spaced value included (#502)", async () => {
 	const base = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_TRIGGERS_FILE: waitTriggersFile() };
 	const good = await collectChecks({ ...base, PI_ALLOWED_MODELS: "anthropic/claude-haiku-4-5,openai/gpt-x" }, secretsSeams());
@@ -5063,26 +5030,6 @@ test("an unreadable registry is SAID, never silently absent", async () => {
 // A settings file that does not exist, so no test reads the developer's own overlay.
 const noOverlay = () => join(tempDir("pi-fp-usd-"), "settings.json");
 
-test("doctor names a peer whose token budgets differ from this host's, and is silent when they agree", async () => {
-	const env = { VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "20", PI_SETTINGS_FILE: noOverlay() };
-	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	const same = tokenFingerprint({ maxTokens: 2, dailyTokenCap: 20 }, []);
-	const other = tokenFingerprint({ maxTokens: 5, dailyTokenCap: 20 }, []);
-	const differ = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpTok: other }]));
-	const c = differ.find((x) => /^Hosts disagree about the token budgets/.test(x.label));
-	assert.ok(c, "the disagreement is named");
-	assert.equal(c.warn, true);
-	assert.ok(c.label.includes("mini2"));
-	const agree = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpTok: same }]));
-	assert.ok(!agree.some((x) => /token budgets/.test(x.label)), "agreement is silent: doctor computes this host's fingerprint as the worker does");
-	const old = await collectChecks(env, fleetSeams([{ name: "mini2", tz }]));
-	assert.ok(old.some((x) => /^mini2 publishes no fingerprint of its token budgets/.test(x.label)), "a peer from before fpTok is named while tokens are in use");
-	const quiet = await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_SETTINGS_FILE: noOverlay() }, fleetSeams([{ name: "mini2", tz }]));
-	assert.ok(!quiet.some((x) => /token budgets/.test(x.label)), "no token setting anywhere: nothing new on upgrade");
-	const counters = await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_SETTINGS_FILE: noOverlay() }, fleetSeams([{ name: "mini2", tz }], { tokenKeysExist: async () => true }));
-	assert.ok(counters.some((x) => /^mini2 publishes no fingerprint of its token budgets.*token counters exist on this Valkey/.test(x.label)), "an old capped host beside an uncapped one: its counters show it");
-});
-
 test("issue #499 part C: doctor names a peer whose projects differ, from the service's own projects.json", async () => {
 	const dir = tempDir("pi-fp-projects-");
 	const file = join(dir, "projects.json");
@@ -5134,31 +5081,6 @@ test("PR #569's review: with THIS host's projects.json not loading, doctor fails
 	const checks = await collectChecks({ VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_PROJECTS_FILE: file, PI_SETTINGS_FILE: noOverlay() }, fleetSeams([{ name: "mini2", tz, fpProjects: peer }]));
 	assert.ok(checks.some((c) => c.ok === false && !c.warn && /PI_PROJECTS_FILE/.test(c.label)), "the load failure is named");
 	assert.ok(!checks.some((c) => /about the projects|fingerprint of its projects/.test(c.label)), "no peer comparison against a file that does not load");
-});
-
-test("doctor's fingerprint covers the scoped-limits token rows and the overlay, as the worker resolves them", async () => {
-	const dir = tempDir("pi-fp-usd-rows-");
-	const limits = join(dir, "scoped-limits.json");
-	writeFileSync(limits, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }] }));
-	const settings = join(dir, "settings.json");
-	writeFileSync(settings, JSON.stringify({ weeklyTokenCap: 40 }));
-	const env = { VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1", PI_MAX_TOKENS: "2", PI_SCOPED_LIMITS_FILE: limits, PI_SETTINGS_FILE: settings };
-	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	const rows = parseScopedLimits(readFileSync(limits, "utf8"), limits);
-	const worker = tokenFingerprint({ maxTokens: 2, weeklyTokenCap: 40 }, rows);
-	const agree = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpTok: worker }]));
-	assert.ok(!agree.some((x) => /token budgets/.test(x.label)), "the same rows and overlay: one fingerprint");
-	const noRows = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpTok: tokenFingerprint({ maxTokens: 2, weeklyTokenCap: 40 }, []) }]));
-	assert.ok(noRows.some((x) => /^Hosts disagree about the token budgets/.test(x.label)), "a peer without the row disagrees");
-	// PR #551's review: the env list picks the model rows a job without its own list reserves in.
-	const modelRows = join(dir, "model-limits.json");
-	writeFileSync(modelRows, JSON.stringify({ version: 2, limits: [{ scope: "model:openai/gpt-4o", dayTokens: 5 }] }));
-	const mRows = parseScopedLimits(readFileSync(modelRows, "utf8"), modelRows);
-	const listed = { ...env, PI_SCOPED_LIMITS_FILE: modelRows, PI_ALLOWED_MODELS: "anthropic/claude-sonnet-4-5-20250929" };
-	const sameList = await collectChecks(listed, fleetSeams([{ name: "mini2", tz, fpTok: tokenFingerprint({ maxTokens: 2, weeklyTokenCap: 40 }, mRows, ["anthropic/claude-sonnet-4-5-20250929"]) }]));
-	assert.ok(!sameList.some((x) => /^Hosts disagree about the token budgets/.test(x.label)), "the same env list agrees");
-	const noList = await collectChecks(listed, fleetSeams([{ name: "mini2", tz, fpTok: tokenFingerprint({ maxTokens: 2, weeklyTokenCap: 40 }, mRows, null) }]));
-	assert.ok(noList.some((x) => /^Hosts disagree about the token budgets/.test(x.label)), "a peer with no list reserves in the model row, this host does not");
 });
 
 test("doctor names, end to end: a cron trigger's unknown model, a trigger cap over the deployment's, a listed provider with no key", async () => {
@@ -5423,8 +5345,8 @@ test("the settings hint names the CONSEQUENCE, not just the path", async () => {
 	assert.ok(hint);
 	assert.equal(hint.ok, false);
 	assert.equal(hint.warn, true);
-	assert.match(hint.label, /may be wider/, "an operator who RAISED a cap gets a narrower fallback, so the claim is hedged rather than wrong");
-	assert.match(hint.label, /the model and any secret profiles/, "the overlay is not only caps");
+	assert.match(hint.label, /provider, the model and any secret profiles fall back to \.env and the built-in defaults/, "the consequence is said, not just the path");
+	assert.match(hint.label, /may differ from what you last set/, "hedged, because the fallback can be narrower or wider");
 	assert.match(hint.fix, /mv /);
 });
 
@@ -7232,7 +7154,7 @@ test("doctor: a line systemd reads differently is named with its shape, once, an
 		const code = await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform: "linux" });
 		const lines = text().split("\n").filter((l) => /cannot be read off/.test(l));
 		assert.equal(lines.length, 1, `one line for the file: ${JSON.stringify(hazard)}\n${text()}`);
-		assert.ok(lines[0].startsWith(`⚠ whether PI_PAUSE_WINDOWS_FILE or PI_SCOPED_LIMITS_FILE or PI_PROJECTS_FILE or PI_MODEL_ENDPOINTS_FILE or PI_ENVELOPE_FILE reaches the service cannot be read off ${join(cwd, ".env")}: line ${line} `), lines[0]);
+		assert.ok(lines[0].startsWith(`⚠ whether PI_PAUSE_WINDOWS_FILE or PI_SCOPED_LIMITS_FILE or PI_PROJECTS_FILE or PI_MODEL_ENDPOINTS_FILE reaches the service cannot be read off ${join(cwd, ".env")}: line ${line} `), lines[0]);
 		assert.match(lines[0], what);
 		assert.match(text(), new RegExp(`on line ${line} of that file, ${fix.source}`), "the fix names the line and what to change");
 		assert.doesNotMatch(text(), /PI_PAUSE_WINDOWS_FILE is set in .* and loads/, "and no reading of a file systemd splits differently");
@@ -7259,7 +7181,7 @@ test("doctor: a .env systemd will not LOAD fails on Linux, naming the line and t
 		writeFileSync(join(cwd, ".env"), Buffer.concat([Buffer.from(`PI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json")}\n`), tail]));
 		const { out, text } = capture();
 		const code = await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), platform: "linux" });
-		assert.match(text(), new RegExp(`✗ whether PI_PAUSE_WINDOWS_FILE or PI_SCOPED_LIMITS_FILE or PI_PROJECTS_FILE or PI_MODEL_ENDPOINTS_FILE or PI_ENVELOPE_FILE reaches the service cannot be read off .*: ${what.source}`));
+		assert.match(text(), new RegExp(`✗ whether PI_PAUSE_WINDOWS_FILE or PI_SCOPED_LIMITS_FILE or PI_PROJECTS_FILE or PI_MODEL_ENDPOINTS_FILE reaches the service cannot be read off .*: ${what.source}`));
 		assert.match(text(), fix);
 		assert.doesNotMatch(text(), /PI_PAUSE_WINDOWS_FILE is set in .* and loads/);
 		assert.equal(code, 1, "a service that cannot start fails doctor");
@@ -8352,8 +8274,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
@@ -8433,8 +8353,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
@@ -8521,8 +8439,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
@@ -8614,8 +8530,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
 			"",
@@ -8705,8 +8619,6 @@ const DOCKER_CANARY_PIN = {
 			"⚠ PI_SCOPED_LIMITS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped limits cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"⚠ PI_PROJECTS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for projects cannot be answered here",
-			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
-			"⚠ PI_ENVELOPE_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for the allocation envelope cannot be answered here",
 			"    → make <cwd>/.env a readable regular file, or run doctor from the deployment folder",
 			"✓ Jobs dir <jobs> is this account's and writable",
 			"✓ Durable state: run history /home/op/.pi-dispatch/logs, settings /home/op/.pi-dispatch/settings.json \u2014 both survive a reboot",
@@ -8845,12 +8757,12 @@ test("persisted transcripts and a context bound that may be inert are FACT LINES
 	assert.equal(bound.failed, false, "a bound that may be inert is never a refusal");
 });
 
-test("replicas are a FACT LINE carrying the budget and concurrency arithmetic in the label (#462)", async () => {
+test("replicas are a FACT LINE carrying the concurrency arithmetic in the label (#462)", async () => {
 	const checks = await collectChecks(imgEnv({ PI_TRIGGERS_FILE: replicaTriggersFile(2) }), adviceSeams());
 	const replicas = renderedOne(checks, /set run\.replicas/);
 	assert.equal(
 		replicas.text,
-		"✓ 1 trigger(s) set run.replicas -- one delivery reserves one budget slot PER replica, so the daily/weekly/monthly caps divide by it; PI_CONCURRENCY bounds how many actually race, so keep it at least the largest run.replicas\n",
+		"✓ 1 trigger(s) set run.replicas -- one delivery runs one job PER replica, and PI_CONCURRENCY bounds how many actually race, so keep it at least the largest run.replicas\n",
 	);
 	assert.equal(replicas.failed, false);
 });
@@ -9661,266 +9573,24 @@ test("doctor warns when this folder's deploy/egress-proxy.conf differs from the 
 	assert.doesNotMatch(text(), /egress-proxy\.conf in this folder (differs|could not)/);
 });
 
-// ---- the token settings (issue #501) ----
+// ---- the settings overlay's retired token keys (C2) ----
 
-test("doctor: tokenChecks is silent with nothing set, and names each env refusal the worker's boot makes", () => {
-	assert.deepEqual(tokenChecks({}, [], true), [], "nothing set: no line at all");
-	assert.deepEqual(tokenChecks({ PI_MAX_TOKENS: "2500" }, [], true), [], "a valid cap alone: nothing to say");
-	const bad = tokenChecks({ PI_MAX_TOKENS: "2.50" }, [], true);
-	assert.equal(bad.length, 1);
-	assert.equal(bad[0].ok, false);
-	assert.match(bad[0].label, /^PI_MAX_TOKENS must be a whole number of tokens.* the worker refuses to start$/);
-	assert.doesNotMatch(bad[0].label, /2\.50/, "never the value");
-	const noCap = tokenChecks({ PI_WEEKLY_TOKEN_CAP: "50" }, [], true);
-	assert.ok(noCap.some((c) => c.ok === false && /^PI_WEEKLY_TOKEN_CAP is set without PI_MAX_TOKENS/.test(c.label)), "the invariant");
-	assert.equal(noCap.length, 1, "the invariant is the one refusal: the windows are enforced (issue #501)");
-	assert.deepEqual(tokenChecks({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "25", PI_WEEKLY_TOKEN_CAP: "100", PI_MONTHLY_TOKEN_CAP: "300" }, [], true), [], "windows with the per-job cap: nothing to say");
-});
-
-test("doctor: a trigger cap above PI_MAX_TOKENS FAILS when the worker loads the file and warns when it does not", () => {
-	const caps = [{ label: 'cron "nightly"', maxTokens: 5 }, { label: "label trigger #1", maxTokens: 9 }, { label: "comment trigger #2", maxTokens: 5_000_001 }];
-	const loaded = tokenChecks({ PI_MAX_TOKENS: "5" }, caps, true);
-	assert.deepEqual(loaded.map((c) => c.label.split(":")[0]), ["label trigger #1", "comment trigger #2"], "equal is fine; above is named");
-	for (const c of loaded) {
-		assert.equal(c.ok, false);
-		assert.equal(c.warn, undefined, "a failure: the worker refuses to start on it");
-		assert.match(c.label, /refuses to start/);
-	}
-	const unloaded = tokenChecks({ PI_MAX_TOKENS: "5" }, caps, false);
-	assert.ok(unloaded.every((c) => c.ok === false && c.warn === true && /run under PI_MAX_TOKENS anyway/.test(c.label)));
-	assert.deepEqual(tokenChecks({}, caps, true), [], "no deployment cap: a trigger's cap applies alone");
-});
-
-test("doctor: the trigger-cap line comes from the real triggers file it reads", async () => {
-	const { out, text } = capture();
-	await runDoctor(imgEnv({ PI_TRIGGERS_FILE: triggersFile(undefined, undefined, { maxTokens: "7" }), PI_MAX_TOKENS: "5" }), imgDeps(out, green));
-	assert.match(text(), /cron "nightly": run\.maxTokens is above PI_MAX_TOKENS -- the worker refuses to start/);
-});
-
-test("doctor: the token settings are read from the deployment's .env, as the worker reads them (#501)", async () => {
-	// The worker reads PI_*_COST_TOKENS from its .env; a doctor reading only this shell would stay silent while the worker
-	// refuses to start.
-	const r = await envDoctor("PI_WEEKLY_TOKEN_CAP=50\n", {});
-	assert.match(r.text, /PI_WEEKLY_TOKEN_CAP is set without PI_MAX_TOKENS -- the worker refuses to start/);
-	assert.doesNotMatch(r.text, /not supported yet/, "the windows are enforced (issue #501): the invariant is the only refusal");
-	for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) assert.ok(WORKER_SERVICE_KEYS.includes(name), name);
-});
-
-test("doctor: a VALID overlay whose merge with .env leaves a window with no maxTokens FAILS, naming the window (#501, PR #542)", async () => {
-	const dir = tempDir("pi-542-overlay-");
+test("doctor: a settings overlay with a retired token key FAILS with the retirement, naming the key and no value", async () => {
+	const dir = tempDir("pi-c2-overlay-");
 	const file = join(dir, "settings.json");
-	writeFileSync(file, '{"dailyTokenCap":10}');
+	writeFileSync(file, '{"maxTokens":2500}');
 	const bad = await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {});
-	assert.ok(bad.text.includes(`settings overlay ${file}: dailyTokenCap needs maxTokens`), bad.text);
+	assert.ok(bad.text.includes(`settings overlay ${file} is invalid (maxTokens was retired with the token budgets; delete it from the settings file)`), bad.text);
 	assert.match(bad.text, /the worker refuses every job as settings-overlay-invalid/);
 	assert.equal(bad.code, 1);
-	assert.doesNotMatch((await envDoctor(`PI_SETTINGS_FILE=${file}\nPI_MAX_TOKENS=2\n`, {})).text, /dailyTokenCap needs maxTokens/, "the cap in .env");
-	writeFileSync(file, '{"maxTokens":2}');
-	assert.doesNotMatch((await envDoctor(`PI_SETTINGS_FILE=${file}\nPI_WEEKLY_TOKEN_CAP=50\n`, {})).text, /needs maxTokens/, "the window in .env, the cap in the overlay");
-	assert.equal(overlayTokenProblem({}, { PI_WEEKLY_TOKEN_CAP: "50" }), null, "env alone broken is tokenChecks' line, not repeated");
-	assert.match(overlayTokenProblem({ dailyTokenCap: 10 }, { PI_MAX_TOKENS: "" }), /^dailyTokenCap needs maxTokens/, "an EMPTY PI_MAX_TOKENS is unset, the worker's own reading");
-	assert.equal(overlayTokenProblem({ dailyTokenCap: 10 }, { PI_MAX_TOKENS: 2 }), null);
-	assert.equal(overlayTokenProblem({ monthlyTokenCap: 5 }, {}), "monthlyTokenCap needs maxTokens: a token window reserves each job's per-job token budget before it starts, so it cannot be set without one");
-});
-
-test("doctor: an invalid settings overlay FAILS with the reader's reason, keys only, and a missing one says nothing (#501)", async () => {
-	const dir = tempDir("pi-501-overlay-");
-	const file = join(dir, "settings.json");
-	writeFileSync(file, '{"maxTokens":"1","maxTokens":"999"}');
-	const bad = await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {});
-	assert.ok(bad.text.includes(`settings overlay ${file} is invalid (settings file has a duplicate key "maxTokens"`), bad.text);
-	assert.match(bad.text, /a duplicate key is refused since issue #501; it used to take the last value/);
-	assert.equal(bad.text.includes("\"999\""), false, "never a value");
-	assert.equal(bad.code, 1);
-	// A second kind: the fix follows the reason, and only a duplicate key carries the upgrade note.
-	writeFileSync(file, '{"maxTokens":0.5}');
-	const kind2 = await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {});
-	assert.ok(kind2.text.includes(`settings overlay ${file} is invalid (maxTokens must be an integer >= 1`), kind2.text);
-	assert.match(kind2.text, /fix what the reason names in that file, or delete the file/);
-	assert.doesNotMatch(kind2.text, /duplicate key/);
-	assert.equal(kind2.text.includes("0.1234567"), false, "never a value");
-	writeFileSync(file, "{ not json");
-	assert.match((await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {})).text, /is invalid \(settings file is not valid JSON\)/);
-	writeFileSync(file, '{"maxTokens":1}');
+	assert.equal(bad.text.includes("2500"), false, "never a value");
+	writeFileSync(file, '{"dailyTokenCap":10}');
+	assert.match((await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {})).text, /is invalid \(dailyTokenCap was retired with the token budgets/);
+	// A clean overlay and a missing one say nothing.
+	writeFileSync(file, '{"maxTurns":5}');
 	assert.doesNotMatch((await envDoctor(`PI_SETTINGS_FILE=${file}\n`, {})).text, /settings overlay .* is invalid/);
 	assert.doesNotMatch((await envDoctor(`PI_SETTINGS_FILE=${join(dir, "absent.json")}\n`, {})).text, /settings overlay .* is invalid/);
 });
-
-test("doctor: scoped-limits token rows WARN with no per-job cap, and a row window below the per-job cap (PR #549's review)", async () => {
-	const rows = [
-		{ scope: "/srv/secret", concurrent: 3, dayTokens: null, weekTokens: null, monthTokens: null },
-		{ scope: "acme/web", concurrent: null, dayTokens: 1, weekTokens: 10, monthTokens: null },
-		{ scope: "model:openai/gpt-x", concurrent: null, dayTokens: 3, weekTokens: null, monthTokens: null },
-	];
-	const none = scopedTokenRowChecks(rows, undefined, "sl.json");
-	assert.equal(none.length, 1);
-	assert.equal(none[0].warn, true);
-	assert.match(none[0].label, /#1 \(a repo or folder row\), #2 \(a model row\) in sl\.json set a token window, but the deployment has no per-job token budget/);
-	const below = scopedTokenRowChecks(rows, 2, "sl.json");
-	assert.equal(below.length, 1);
-	assert.match(below[0].label, /#1 \(a repo or folder row\) day in sl\.json are below the per-job token budget/);
-	assert.ok(!below[0].label.includes("week"), "a window at or above the cap is fine");
-	assert.deepEqual(scopedTokenRowChecks(rows, 1, "sl.json"), []);
-	assert.ok(!JSON.stringify(none).includes("/srv/secret"), "never a scope string");
-	// Wired: the overlay's maxTokens counts, merged over env.
-	const dir = tempDir("pi-sl-usd-");
-	const path = join(dir, "scoped-limits.json");
-	writeFileSync(path, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }] }));
-	const settings = join(dir, "settings.json");
-	const seams = collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true });
-	const bare = await collectChecks(imgEnv({ PI_SCOPED_LIMITS_FILE: path, PI_SETTINGS_FILE: settings }), seams);
-	assert.ok(bare.some((c) => c.warn === true && /set a token window, but the deployment has no per-job token budget/.test(c.label)));
-	writeFileSync(settings, JSON.stringify({ maxTokens: 2 }));
-	const capped = await collectChecks(imgEnv({ PI_SCOPED_LIMITS_FILE: path, PI_SETTINGS_FILE: settings }), seams);
-	assert.ok(!capped.some((c) => /no per-job token budget \(maxTokens\) --/.test(c.label)), "the overlay's cap is seen");
-});
-
-// ── PI_ENVELOPE_FILE, the fifth boot file (issue #504 part B) ─────────────────────────────────────────────
-
-/** A canonical deployment folder (realpath: a macOS temp dir is a /var symlink) with projects.json and an envelope. */
-function envelopeDeployment({ floors = { shop: 10 }, cap = "2", extra = {} } = {}) {
-	const dir = realpathSync.native(tempDir("pi-envelope-doc-"));
-	const projects = join(dir, "projects.json");
-	writeFileSync(projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "tools", members: ["github:acme/tools"] }] }));
-	const envelope = join(dir, "envelope.json");
-	writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: floors }));
-	return { dir, envelope, env: imgEnv({ PI_PROJECTS_FILE: projects, PI_ENVELOPE_FILE: envelope, PI_MAX_TOKENS: cap, PI_SETTINGS_FILE: noOverlay(), ...extra }) };
-}
-
-test("doctor: an EMPTY PI_ENVELOPE_FILE fails as a refused boot, and a good one loads as the worker loads it (#504)", async () => {
-	const dir = tempDir("pi-envelope-empty-");
-	const empty = capture();
-	const code = await runDoctor(imgEnv({ PI_ENVELOPE_FILE: "" }), scaffoldDeps(empty.out, dir));
-	assert.match(empty.text(), /✗ PI_ENVELOPE_FILE is set to an EMPTY value in this shell, which is not unset: the worker keeps it, tries to load "" and REFUSES TO START/);
-	assert.notEqual(code, 0);
-	const ok = envelopeDeployment();
-	const checks = await collectChecks(ok.env, collectSeams(green, { cwd: ok.dir, nodeVersion: "22.19.0", probeValkey: async () => true }));
-	assert.ok(!checks.some((c) => c.ok === false && !c.warn && /PI_ENVELOPE_FILE/.test(c.label)), "a loadable envelope fails nothing: " + JSON.stringify(checks.filter((c) => c.ok === false && !c.warn).map((c) => c.label.slice(0, 140))));
-	const facts = checks.find((c) => /^Allocation envelope [0-9a-f]{16}: 100 tokens a week/.test(c.label));
-	assert.ok(facts, "one line of facts, with the digest an operator copies into alloc:envelope:expected");
-	assert.ok(facts.label.includes(envelopeDigest(loadEnvelopeAsTheWorker(ok.envelope, {}, ok.env))));
-});
-
-test("doctor: an envelope the worker would refuse fails: no per-job cap, a floor naming no project, a path inside a job path (#504)", async () => {
-	const seams = (dir) => collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true });
-	const failing = (checks) => checks.find((c) => c.ok === false && !c.warn && /PI_ENVELOPE_FILE is set in this shell to a file the worker cannot load/.test(c.label));
-	const noCap = envelopeDeployment({ cap: undefined });
-	delete noCap.env.PI_MAX_TOKENS;
-	assert.match(failing(await collectChecks(noCap.env, seams(noCap.dir))).label, /needs a per-job token budget: set PI_MAX_TOKENS/);
-	const unknown = envelopeDeployment({ floors: { nope: 1 } });
-	assert.match(failing(await collectChecks(unknown.env, seams(unknown.dir))).label, /floorsTokens\.nope names a project that is not in the projects file/);
-	// The envelope inside a run root: the worker's boot refusal, through the worker's own function.
-	const inside = envelopeDeployment({ extra: {} });
-	inside.env.PI_DISPATCH_RUN_ROOTS = inside.dir;
-	const c = failing(await collectChecks(inside.env, seams(inside.dir)));
-	assert.match(c.label, /lies inside a job path \(run-root /);
-	assert.match(c.label, /REFUSES TO START/);
-});
-
-test("envelopeChecks: a floor below the per-job cap admits no job, and a project outside the envelope joins _other; both WARN (#504)", () => {
-	const projects = [{ id: "shop", members: ["github:acme/web"] }, { id: "tools", members: ["github:acme/tools"] }];
-	const envelope = parseEnvelope(JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 1, _other: 0 } }), "/e", { projects, maxTokens: 2_000_000 });
-	const checks = envelopeChecks(envelope, projects, 2_000_000);
-	const low = checks.find((c) => /below the per-job token budget/.test(c.label));
-	assert.ok(low && low.warn === true);
-	assert.match(low.label, /shop \(1\)/);
-	assert.doesNotMatch(low.label, /_other/, "a floor of 0 is no guaranteed share, never a warning");
-	const absent = checks.find((c) => /not in the envelope/.test(c.label));
-	assert.ok(absent && absent.warn === true);
-	assert.match(absent.label, /project\(s\) tools are in projects\.json and not in the envelope, so their jobs count in _other's share/);
-	assert.equal(envelopeChecks(envelope, [projects[0]], 1).filter((c) => c.ok === false).length, 0, "a floor at or above the cap, every project named: facts only");
-});
-
-test("fleetEnvelopeChecks names the hosts whose envelope differs, and an old worker only while an envelope is in use (#504)", () => {
-	const mine = "0123456789abcdef";
-	assert.deepEqual(fleetEnvelopeChecks(mine, [{ name: "mini2", fpEnvelope: mine }]), [], "one envelope: nothing");
-	const differ = fleetEnvelopeChecks(mine, [{ name: "mini2", fpEnvelope: "fedcba9876543210" }, { name: "mini3", fpEnvelope: "none" }, { name: "mini4", fpEnvelope: mine }]);
-	assert.equal(differ.length, 1);
-	assert.equal(differ[0].warn, true);
-	assert.match(differ[0].label, /^Hosts disagree about the allocation envelope: mini2, mini3 have/);
-	assert.match(differ[0].label, /envelope-mismatch/);
-	assert.ok(!differ[0].label.includes("mini4"));
-	const old = fleetEnvelopeChecks(mine, [{ name: "mini2" }]);
-	assert.match(old[0].label, /^mini2 publishes no envelope digest/);
-	assert.deepEqual(fleetEnvelopeChecks("none", [{ name: "mini2" }, { name: "mini3", fpEnvelope: "none" }]), [], "no envelope anywhere: nothing new on upgrade");
-	assert.match(fleetEnvelopeChecks("none", [{ name: "mini2", fpEnvelope: mine }])[0].label, /and this host has none/);
-	assert.match(differ[0].fix, /SET alloc:envelope:expected/, "the fix names the key, not a panel that does not exist yet");
-});
-
-test("issue #504 part B: doctor compares this host's envelope digest with its peers', from the service's own file", async () => {
-	const ok = envelopeDeployment();
-	const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-	const env = { ...ok.env, VALKEY_URL: "redis://x", PI_WORKER_NAME: "mini1" };
-	const digest = envelopeDigest(loadEnvelopeAsTheWorker(ok.envelope, {}, ok.env));
-	const agree = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpEnvelope: digest }]));
-	assert.ok(!agree.some((c) => /allocation envelope:|no envelope digest/.test(c.label)));
-	const differ = await collectChecks(env, fleetSeams([{ name: "mini2", tz, fpEnvelope: "none" }]));
-	assert.ok(differ.some((c) => c.warn === true && /^Hosts disagree about the allocation envelope: mini2/.test(c.label)));
-});
-
-test("appliedSplitChecks: the applied split's digest and the hosts matching it; every host that differs FAILS, a host with no envelope too (#504)", () => {
-	const d = "0123456789abcdef";
-	const ok = appliedSplitChecks({ digest: d }, d, "mini1", [{ name: "mini2", fpEnvelope: d }]);
-	assert.deepEqual(ok.map((c) => c.ok), [true]);
-	assert.match(ok[0].label, /made for envelope 0123456789abcdef: mini1, mini2 match it/);
-	const bad = appliedSplitChecks({ digest: d }, "fedcba9876543210", "mini1", [{ name: "mini2", fpEnvelope: d }, { name: "mini3", fpEnvelope: "none" }, { name: "old" }]);
-	assert.match(bad[0].label, /mini2 matches it/);
-	assert.equal(bad[1].ok, false);
-	assert.equal(bad[1].label, "this host (mini1) carries envelope fedcba9876543210, not the one the applied budget split was made for (0123456789abcdef), so it refuses every governed job as envelope-mismatch", "the host is named, as a peer is (#507)");
-	assert.notEqual(bad[1].warn, true, "a failure: this host refuses its governed jobs");
-	assert.match(bad[1].fix, /SET alloc:envelope:expected fedcba9876543210/);
-	assert.match(bad[2].label, /^mini3 carries no envelope, not the one the applied budget split was made for/);
-	const none = appliedSplitChecks({ digest: d }, "none", "mini1", []);
-	assert.match(none[1].label, /^this host \(mini1\) has no envelope while the fleet has an applied budget split/);
-	assert.match(appliedSplitChecks({ digest: d }, "none", "", [])[1].label, /^this host has no envelope/, "no name to give: the bare words");
-	assert.match(none[1].fix, /DEL alloc:plan/);
-});
-
-test("doctor reads the applied split when this host has an envelope, and fails a host whose envelope is not it (#504)", async () => {
-	const ok = envelopeDeployment();
-	const digest = envelopeDigest(loadEnvelopeAsTheWorker(ok.envelope, {}, ok.env));
-	const asked = [];
-	const read = async (url) => (asked.push(url), { digest: "fedcba9876543210" });
-	const checks = await collectChecks(ok.env, collectSeams(green, { cwd: ok.dir, nodeVersion: "22.19.0", probeValkey: async () => true, readAppliedSplit: read }));
-	assert.equal(asked.length, 1);
-	const fail = checks.find((c) => /^this host \([^)]+\) carries envelope [0-9a-f]{16}, not the one the applied budget split was made for/.test(c.label));
-	assert.ok(fail && fail.ok === false && fail.warn !== true);
-	assert.ok(fail.label.includes(digest));
-});
-
-test("doctor reads the applied split on a single host with NO envelope too, and fails it; a key that does not decode is governed; no match is not green (#504)", async () => {
-	const dir = tempDir("pi-no-envelope-");
-	const seams = (read) => collectSeams(green, { cwd: dir, nodeVersion: "22.19.0", probeValkey: async () => true, readAppliedSplit: read });
-	const bare = imgEnv({ PI_SETTINGS_FILE: noOverlay() });
-	const governed = await collectChecks(bare, seams(async () => ({ digest: "0123456789abcdef" })));
-	const fail = governed.find((c) => /this host \([^)]+\) has no envelope while the fleet has an applied budget split/.test(c.label));
-	assert.ok(fail && fail.ok === false && fail.warn !== true, "a host that refuses every job is a failure");
-	assert.match(fail.fix, /DEL alloc:plan alloc:envelope:expected/);
-	const summary = governed.find((c) => /^Applied budget split/.test(c.label));
-	assert.equal(summary.ok, false, "no host matches the split, so the summary is no green tick");
-	assert.equal(summary.warn, true);
-	const garbled = await collectChecks(bare, seams(async () => ({ undecodable: true })));
-	assert.ok(garbled.some((c) => /alloc:plan exists but is not a budget split/.test(c.label) && c.warn === true));
-	assert.ok(garbled.some((c) => /this host \([^)]+\) has no envelope/.test(c.label)), "the worker's EXISTS counts it as governed");
-	const never = await collectChecks(bare, seams(async () => null));
-	assert.ok(!never.some((c) => /alloc:plan|budget split/.test(c.label)), "a deployment that never delegated hears nothing");
-});
-
-test("no doctor test reaches a real Valkey for the applied split: every runDoctor and collectChecks comes from the test helper (#504)", () => {
-	// The rule, not the site: the helper defaults `readAppliedSplit` to no split. A test file importing either entry point
-	// from the source module would read the developer's real `alloc:plan` on 127.0.0.1:6379 again.
-	const dir = new URL("./", import.meta.url);
-	const offenders = readdirSync(dir)
-		.filter((f) => f.endsWith(".test.mjs"))
-		.filter((f) => {
-			const src = readFileSync(new URL(f, dir), "utf8");
-			return [...src.matchAll(/import\s*\{([^}]*)\}\s*from\s*"\.\.\/src\/doctor\.mjs"/g)].some((m) => /\b(runDoctor|collectChecks)\b/.test(m[1]));
-		});
-	assert.deepEqual(offenders, []);
-});
-
-// --- issue #596: job sizes ---------------------------------------------------------------------------------------------
-
 
 test("doctor names the default job size, the --cpus ceiling this runtime gives every job, and warns where SwapLimit is false (#596)", () => {
 	const facts = (over) => ({ answered: true, facts: { shape: "docker", podman: false, hostCpus: 14, swapLimit: true, ...over } });
@@ -9975,7 +9645,7 @@ test("doctor names each peer that predates job sizes once this host's file is ve
 	const peers = [{ name: "a", limitsVersion: "3" }, { name: "b" }, { name: "c", limitsVersion: "2" }, { name: "d", limitsVersion: "4" }];
 	const [line, ...rest] = fleetSizeChecks(3, peers);
 	assert.deepEqual([rest.length, line.ok, line.warn], [0, false, true]);
-	assert.equal(line.label, "b, c predate job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (job counts, concurrent, token budgets) applies on it until it is upgraded and restarted, and it refuses the file at its next start");
+	assert.equal(line.label, "b, c predate job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (sizes, concurrent) applies on it until it is upgraded and restarted, and it refuses the file at its next start");
 	assert.match(line.fix, /upgrade and restart every worker/);
 	assert.match(fleetSizeChecks(3, [{ name: "b" }])[0].label, /^b predates job sizes/);
 	assert.deepEqual(fleetSizeChecks(2, peers), [], "no size in the file: nothing at risk yet");

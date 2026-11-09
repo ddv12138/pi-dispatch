@@ -80,7 +80,7 @@
  * The bound this keeps: retries per error streak are capped at PI_RETRY_MAX (pi's maxRetries, pinned by
  * the runner), and a streak can only be reset by a completed reply, which makes the next retry in that
  * turn a counted one. So at most maxTurns * PI_RETRY_MAX retry calls go uncounted BY THIS EXEMPTION, every one
- * of them metered by the token budget. (Calls this module never counted, before or after #449, stay
+ * of them metered. (Calls this module never counted, before or after #449, stay
  * uncounted: compaction and branch summarisation calls, and a subagent session's turns, see SCOPE above.)
  *
  * Auto-COMPACTION continuations still count, deliberately, including the one that is a re-run: an overflow

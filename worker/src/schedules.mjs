@@ -15,7 +15,6 @@
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { configError } from "./config.mjs";
-import { triggerCapAboveDeployment } from "./budget-rule.mjs";
 import { parseTriggers } from "./triggers.mjs";
 import { withJobDataVersion } from "./job-data-version.mjs";
 import { LOCAL_JOB_KEPT_COMPLETED_S, LOCAL_JOB_KEPT_FAILED_S } from "./retention.mjs";
@@ -35,16 +34,8 @@ export function loadSchedules(config, { readFileSync = fsReadFileSync, existsSyn
 	}
 
 	const triggers = parseTriggers(readFileSync(path, "utf8"), path);
-	// A trigger's run.maxTokens above this deployment's PI_MAX_TOKENS refuses the file, at boot
-	// (an operator is present) and on a live reload (the running schedules are kept). Every kind is checked,
-	// not only cron: the worker runs the forge jobs too, and this is the one load it does of the file. Here and
-	// not in parseTriggers, which is pure and shared with the receiver, which never sees the worker's env. The
-	// job itself runs under the smaller of the two whatever this finds (effectiveJobOf), so this is the loud
-	// half, never the only one. Env only: an overlay cap can change between jobs and is applied per job.
-	const above = triggerCapAboveDeployment(triggers, config.maxTokens);
-	if (above !== -1) {
-		throw configError(`trigger at index ${above}: run.maxTokens is above this deployment's PI_MAX_TOKENS. A trigger can only narrow the per-job token budget, so lower it or remove it (${path})`);
-	}
+	// C2: `run.maxTokens` is retired, and `parseTriggers` refuses it by name. There is no longer a trigger-vs-
+	// deployment budget comparison to make here.
 
 	return triggers.filter((t) => t.on.type === "cron").map((t) => normalizeCronSchedule(t, path, existsSync, fleet, dataVersions));
 }
@@ -75,23 +66,6 @@ export function authoredCron(config, { readFileSync = fsReadFileSync, existsSync
 		// with every peer.
 		return null;
 	}
-}
-
-/**
- * The host paths a job container can see (issue #504 part B), for `envelopeInsideJobPaths`: every cron trigger's
- * `run.folder` and every trigger's `run.skillsDir` in the triggers file, the `PI_DISPATCH_RUN_ROOTS` roots and
- * `PI_GLOBAL_PI_DIR`. Read from the FILE, not from this host's served schedules: a folder another host serves today may
- * be this host's after an edit, and the check costs nothing to be wide. Throws when the triggers file does not parse.
- */
-export function envelopeJobPaths(config, { readFileSync = fsReadFileSync, existsSync = fsExistsSync } = {}) {
-	const out = { cronFolders: [], runRoots: [...(config.dispatchRunRoots ?? [])], skillsDirs: [], globalPiDir: config.globalPiDir ?? null };
-	const path = config.triggersFile;
-	if (path === null || path === undefined || !existsSync(path)) return out;
-	for (const t of parseTriggers(readFileSync(path, "utf8"), path)) {
-		if (t?.on?.type === "cron" && typeof t.run?.folder === "string") out.cronFolders.push(t.run.folder);
-		if (typeof t?.run?.skillsDir === "string") out.skillsDirs.push(t.run.skillsDir);
-	}
-	return out;
 }
 
 /**
@@ -181,10 +155,6 @@ function normalizeCronSchedule({ on, run }, path, existsSync, fleet, dataVersion
 	// keys hold undefined here and drop at JSON serialization -- the command schedule's data is exactly
 	// kind/folder/command plus the shared fields.
 	//
-	// `portfolio` (issue #505) is conditional like `command`, so an unflagged schedule grows no key, and it rides at JOB
-	// level, never inside `trigger`: `trigger` is copied verbatim into `/job/event.json`, and whether a job may send a
-	// budget plan is the worker's decision to re-check against the live file, not a fact for the agent to read.
-	//
 	// `progress` (issue #644) only when armed, as on a forge job, so an unflagged schedule grows no key. A cron job never
 	// carries `statusComment`: the loader refuses `true` there, with no issue or pull request to post on. Nor `recover`
 	// (issue #645), for the same posture: the loader refuses `true` on cron, so there is no armed value to carry.
@@ -194,7 +164,7 @@ function normalizeCronSchedule({ on, run }, path, existsSync, fleet, dataVersion
 	// Stamped like every builder's (issue #761, `withJobDataVersion`): the template is what every tick of this schedule
 	// stores, so a field that needs a version above 1 says so on every job, and nothing is added while none does.
 	// `dataVersions` is the version rule, injectable for tests.
-	const data = withJobDataVersion({ kind: "local", folder: run.folder, flow: run.flow, task: run.task, ...(run.command !== undefined && { command: run.command }), provider: run.provider, model: run.model, maxTurns: run.maxTurns, github: run.github, packages: run.packages, image: run.image, ...(run.backend !== undefined && { backend: run.backend }), ...(run.excludeTools !== undefined && { excludeTools: run.excludeTools }), ...(run.mcp !== undefined && { mcp: run.mcp }), ...(run.models !== undefined && { models: run.models }), ...(run.fallbackModels !== undefined && { fallbackModels: run.fallbackModels }), ...(run.maxTokens !== undefined && { maxTokens: run.maxTokens }), ...(run.skillsDir !== undefined && { skillsDir: run.skillsDir }), ...(run.secrets !== undefined && { secrets: run.secrets }), ...(run.secretsProfile !== undefined && { secretsProfile: run.secretsProfile }), resume: run.resume, ...(run.portfolio !== undefined && { portfolio: run.portfolio }), ...(run.progress === true && { progress: true }), ...(run.steer === true && { steer: true }), trigger: { id: on.id, pattern: on.pattern } }, dataVersions);
+	const data = withJobDataVersion({ kind: "local", folder: run.folder, flow: run.flow, task: run.task, ...(run.command !== undefined && { command: run.command }), provider: run.provider, model: run.model, maxTurns: run.maxTurns, github: run.github, packages: run.packages, image: run.image, ...(run.backend !== undefined && { backend: run.backend }), ...(run.excludeTools !== undefined && { excludeTools: run.excludeTools }), ...(run.mcp !== undefined && { mcp: run.mcp }), ...(run.models !== undefined && { models: run.models }), ...(run.fallbackModels !== undefined && { fallbackModels: run.fallbackModels }), ...(run.skillsDir !== undefined && { skillsDir: run.skillsDir }), ...(run.secrets !== undefined && { secrets: run.secrets }), ...(run.secretsProfile !== undefined && { secretsProfile: run.secretsProfile }), resume: run.resume, ...(run.progress === true && { progress: true }), ...(run.steer === true && { steer: true }), trigger: { id: on.id, pattern: on.pattern } }, dataVersions);
 	// Retention only; the deterministic repeat:<id>:<millis> jobId supplies dedup, so no jobId here, and
 	// scheduler jobs are not retried (DES-CRON-VIA-BULLMQ-SCHEDULER) so no attempts/backoff. A local job's retention, in
 	// SECONDS (BullMQ's `age`), from the one place the console's re-run reads it too (retention.mjs).

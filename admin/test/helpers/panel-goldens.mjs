@@ -104,7 +104,7 @@ const SNAPSHOT = Object.freeze({
   schedulerStallMax: 3,
   doctor: { hosts: [], more: 0 },
   parked: [],
-  settings: { overlay: { maxTurns: 30, maxTokens: 2000000 } },
+  settings: { overlay: { maxTurns: 30 } },
   triggers: { triggers: [{ type: "label", any: ["pi"], forge: "github", repository: "acme/web", flow: "triage" }] },
   pauseWindows: { windows: [{ scope: "*", from: "01:00", to: "02:00" }] },
   scopedLimits: { limits: [{ scope: "acme/web", day: 10 }] },
@@ -116,7 +116,7 @@ const SNAPSHOT = Object.freeze({
 });
 
 /** The settings file the snapshot's overlay was read from, which the setting actions plan against. */
-const SETTINGS = Object.freeze({ maxTurns: 30, maxTokens: 2000000 });
+const SETTINGS = Object.freeze({ maxTurns: 30 });
 
 /**
  * The failed jobs as the bulk planner lists them (`planFailedBulk`), and each one's queued data as `readJobsData` reads
@@ -578,7 +578,7 @@ const doctorRow = (name, ageMs, { ok = 40, checks = [] } = {}) => ({ name, ageMs
 
 /**
  * The overview's canned snapshot (issue #737), the OverviewScreen card's deployment in the fixture's names: three hosts
- * (build3 with the slot the cancelled gh-4a7e still holds), four running jobs, caps with the soft hold at 80%, the day's
+ * (build3 with the slot the cancelled gh-4a7e still holds), four running jobs, the day's
  * spend by hour, a parked question, a failed job and build3's failing doctor. `over` replaces whole fields.
  */
 function overviewSnapshot(over = {}) {
@@ -602,7 +602,7 @@ function overviewSnapshot(over = {}) {
       { jobId: "local-9e20", queue: "pi-jobs@mini2", startedAt: at(15, 33), host: "mini2" },
     ],
     budget: { day: 25, week: 100, month: 168, tokensToday: 3_120_000 },
-    settings: { overlay: { dailyCap: 40, weeklyCap: 200, monthlyCap: 600, dailyTokenCap: 8_000_000, softHoldPct: 80 } },
+    settings: { overlay: { maxTurns: 30 } },
     dollars: { rows: [
       { ledger: "deployment", name: null, window: "day", capMicros: 25_000_000, counterMicros: 15_040_000, full: false },
       { ledger: "deployment", name: null, window: "week", capMicros: 100_000_000, counterMicros: 28_400_000, full: false },

@@ -6,23 +6,19 @@
 import * as nodeFs from "node:fs";
 import { basename } from "node:path";
 import { resolveJobSize } from "@edgehero/pi-dispatch/job-size";
-import { parseLiveJobs, parseJobsMore } from "@edgehero/pi-dispatch/live-jobs";
-import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
 import { PROJECT_ID_RE } from "@edgehero/pi-dispatch/projects";
 import { deploymentServiceEnv } from "@edgehero/pi-dispatch/service-env";
 import { costsSinceMs, recordInProject, recordInRepo } from "./costs.mjs";
-import { assembleAllocationView, recordSpendOf } from "./insights-assembly.mjs";
-import { readProjects, readScopedLimits, readTriggers, readSettingsView, readSubscriptions, scanRunRecords, readSizeSuggestions, hostBudgetsOf, secretBundlesView, attributeRunsToTriggers } from "./read-model.mjs";
+import { recordSpendOf } from "./insights-assembly.mjs";
+import { readProjects, readScopedLimits, readTriggers, readSettingsView, scanRunRecords, readSizeSuggestions, hostBudgetsOf, secretBundlesView, attributeRunsToTriggers } from "./read-model.mjs";
 import { planProjectEdit, planProjectDelete } from "./write-plans.mjs";
 import { outcomeKey, recordReason, reasonWords } from "./words.mjs";
 import { fromNewerRelease, readableRecords } from "./newer-release.mjs";
 
 const DAY = 86_400_000;
 const instant = (r) => Date.parse(r?.endedAt ?? r?.startedAt ?? "");
-const amount = (n) => Number.isSafeInteger(n) && n >= 0 ? n : null;
 const folder = (s) => String(s).split(/[\\/]/).filter(Boolean).at(-1) ?? "folder";
 const memberLabel = (s) => /^(?:\/|[A-Za-z]:[\\/])/.test(s) ? `.../${folder(s)}` : s;
-const WINDOW_KEYS = Object.freeze({ day: dayKey, week: weekKey, month: monthKey });
 const WORST = Object.freeze({ failed: 6, "awaiting-approval": 5, "awaiting-input": 4, refused: 3, cancelled: 2, completed: 1 });
 
 /** Four bounded pages across the fleet; the page says when that cap leaves older records outside its view. */
@@ -41,36 +37,6 @@ export async function readProjectFleetRuns(fleet, { sinceMs } = {}) {
     before = got.next;
   }
   return { runs, incomplete: true };
-}
-
-/** UTC windows are the enforcement's own buckets, including holds placed before today in a week/month window. */
-export function projectWindowStart(window, now) {
-  if (window === "day") return Math.floor(now / DAY) * DAY;
-  return costsSinceMs(window === "week" ? "week" : "mtd", now);
-}
-
-/** Known holds and their completeness. A missing old-host field is unknown, never an invented zero. */
-export function projectHolds(hosts, { id, window = "week", now, unreadable = false } = {}) {
-  if (unreadable || !Array.isArray(hosts)) return { tokens: null, knownTokens: 0, incomplete: true };
-  const key = WINDOW_KEYS[window] ?? weekKey;
-  const bucket = key(new Date(now));
-  let knownTokens = 0;
-  let incomplete = false;
-  const seen = new Set();
-  for (const h of hosts) {
-    const parsed = parseLiveJobs(h?.jobs);
-    const more = parseJobsMore(h?.jobsMore);
-    if (parsed.jobs === null || parsed.dropped > 0 || more === null || more > 0) incomplete = true;
-    for (const job of parsed.jobs ?? []) {
-      if (job.p !== id || seen.has(job.id)) continue;
-      seen.add(job.id);
-      if (amount(job.h) === null || !Number.isSafeInteger(job.ha)) { incomplete = true; continue; }
-      if (job.ha > now || key(new Date(job.ha)) !== bucket) continue;
-      knownTokens += job.h;
-    }
-  }
-  if (!Number.isSafeInteger(knownTokens)) return { tokens: null, knownTokens: null, incomplete: true };
-  return { tokens: incomplete ? null : knownTokens, knownTokens, incomplete };
 }
 
 /** Only the two calls the worker emits can become a size preview. No arbitrary call is translated into a write. */
@@ -108,14 +74,13 @@ function projectRefusal(result, id, operation) {
     const rows = (blocker.rows ?? []).filter((r) => r.project === id && Number.isSafeInteger(r.index) && r.index >= 0).map((r) => r.index + 1);
     if (rows.length) return `${prefix} scoped limits ${rows.length === 1 ? "row" : "rows"} ${rows.join(", ")} (project:${id}) ${rows.length === 1 ? "names" : "name"} it. Remove ${rows.length === 1 ? "that row" : "those rows"} first.`;
   }
-  if (blocker?.kind === "envelope-floor" && blocker.projects?.includes(id)) return `${prefix} an envelope floor names it. Remove that floor first.`;
   if (blocker?.kind === "source" && ["triggers", "projects", "scoped-limits"].includes(blocker.source)) return `The ${blocker.source} file could not be loaded, so this project's change cannot be checked. Run pi-dispatch doctor and correct that file.`;
   return "The project configuration could not be checked. Run pi-dispatch doctor, then preview again.";
 }
 
-function runView(r, subscriptions, pricing) {
+function runView(r) {
   const reason = recordReason(r);
-  const cost = recordSpendOf(r, { subscriptions, pricing });
+  const cost = recordSpendOf(r);
   return { jobId: r.jobId ?? null, target: r.kind === "local" ? memberLabel(r.target ?? "local folder") : r.target ?? null, kind: r.kind ?? null, at: Number.isFinite(instant(r)) ? instant(r) : null, outcome: outcomeKey(r.outcome, reason) ?? "unknown", reason, reasonSentence: reason ? reasonWords(reason).sentence ?? reason : null, host: r.host ?? null, tokens: cost.tokens, costFloor: cost.floor };
 }
 
@@ -123,9 +88,9 @@ function runView(r, subscriptions, pricing) {
  * Page-specific I/O: `reads` replaces individual readers in tests; `snapshot` is the fleet's existing safe snapshot.
  * No method is added to the global snapshot, so these joins cost the overview and state API nothing.
  */
-export async function readProjectView({ id, paths = {}, env = {}, deploymentDir = null, platform = process.platform, uid = process.geteuid?.(), now = Date.now(), pricing, snapshot = null, fleet = null, reads = {}, fs = nodeFs } = {}) {
+export async function readProjectView({ id, paths = {}, env = {}, deploymentDir = null, platform = process.platform, uid = process.geteuid?.(), now = Date.now(), snapshot = null, fleet = null, reads = {}, fs = nodeFs } = {}) {
   if (typeof id !== "string" || !PROJECT_ID_RE.test(id)) return { id: null, state: "missing" };
-  const io = { projects: readProjects, limits: readScopedLimits, triggers: readTriggers, settings: readSettingsView, subscriptions: readSubscriptions, scan: scanRunRecords, allocation: assembleAllocationView, sizing: readSizeSuggestions, edit: planProjectEdit, delete: planProjectDelete, fleetRuns: (opts) => readProjectFleetRuns(fleet, opts), ...reads };
+  const io = { projects: readProjects, limits: readScopedLimits, triggers: readTriggers, settings: readSettingsView, scan: scanRunRecords, sizing: readSizeSuggestions, edit: planProjectEdit, delete: planProjectDelete, fleetRuns: (opts) => readProjectFleetRuns(fleet, opts), ...reads };
   let pv;
   try { pv = await io.projects({ projectsPath: paths.projectsFile, fs }); } catch { pv = null; }
   if (!pv || pv.invalid || pv.unreadable || !Array.isArray(pv.projects)) return { id, state: "unreadable", problem: "The projects file could not be read. Run pi-dispatch doctor for the reason." };
@@ -145,17 +110,14 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
   const guarded = async (fn, fallback) => { try { return await fn(); } catch { return fallback; } };
   // A 31-day month may start before the sizing window. Spend must still include its first day.
   const historySince = Math.min(now - 30 * DAY, costsSinceMs("mtd", now));
-  const [sl, triggers, settings, subs, scanned, allocation, fleetHistory] = await Promise.all([
+  const [sl, triggers, settings, scanned, fleetHistory] = await Promise.all([
     guarded(() => io.limits({ scopedLimitsPath: paths.scopedLimitsPath, fs }), null),
     guarded(() => io.triggers({ triggersPath: paths.triggersPath, fs }), null),
     guarded(() => io.settings({ settingsFile: paths.settingsFile, fs }), null),
-    guarded(() => io.subscriptions({ subscriptionsPath: paths.subscriptionsPath, fs }), null),
     guarded(() => io.scan({ logsDir: paths.logsDir, sinceMs: historySince, nowMs: now, fs }), null),
-    guarded(() => io.allocation(paths, null, { consoleView: true, role: "viewer", nowMs: now, envFn: () => env }), { problem: "The allocation could not be read." }),
     guarded(() => io.fleetRuns({ sinceMs: historySince, nowMs: now }), { runs: [], incomplete: true }),
   ]);
   const limits = Array.isArray(sl?.limits) ? sl.limits : [];
-  const subscriptions = Array.isArray(subs?.subscriptions) ? subs.subscriptions : [];
   const historyReadable = Array.isArray(scanned);
   // The local file is authoritative over a mirrored record with the same id, as it is in the fleet reader.
   const records = new Map([...(Array.isArray(snapshot?.runs) ? snapshot.runs : []), ...(Array.isArray(fleetHistory?.runs) ? fleetHistory.runs : [])].map((r) => [r.jobId, r]));
@@ -167,24 +129,21 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
   const history = readableRecords([...records.values()]).records.filter(inWindow).sort((a, b) => instant(b) - instant(a));
   const recorded = history.filter((r) => recordInProject(r, id));
   const day = recorded.filter((r) => instant(r) >= now - DAY);
-  const window = ["day", "week", "month"].includes(allocation?.window) ? allocation.window : "week";
-  const since = projectWindowStart(window, now);
+  // The week is the window this page has always summarized; there is no envelope to take it from (C2).
+  const window = "week";
+  const since = costsSinceMs(window, now);
   const selected = recorded.filter((r) => instant(r) >= since);
   const hostRows = snapshot?.hostBudgets;
-  // A failed registry tick retains its last rows. Those rows are useful context, not evidence of current holds or room.
+  // A failed registry tick retains its last rows. Those rows are useful context, not evidence of current room.
   const registryUnreadable = Boolean(snapshot?.queue?.fleetDegraded || snapshot?.fleetDegraded);
-  const holds = projectHolds(hostRows, { id, window, now, unreadable: registryUnreadable });
   let historySpent = historyReadable ? 0 : null;
   let historyFloor = !historyReadable;
   for (const r of selected) {
-    const cost = recordSpendOf(r, { subscriptions, pricing });
+    const cost = recordSpendOf(r);
     if (cost.tokens === null) historyFloor = true;
     else if (historySpent !== null) historySpent += cost.tokens;
     historyFloor ||= cost.floor;
   }
-  const envelope = allocation?.unset !== true && Boolean(paths.envelopeFile);
-  const usedTokens = envelope ? amount(allocation?.spend?.projects?.[id]) : historySpent !== null && holds.tokens !== null ? historySpent + holds.tokens : null;
-  const settledTokens = envelope ? usedTokens !== null && holds.tokens !== null && usedTokens >= holds.tokens ? usedTokens - holds.tokens : null : historySpent;
   const limitRows = limits.flatMap((l, index) => l.scope === `project:${id}` ? [{ index, ...l }] : []);
   let size = null;
   try {
@@ -231,19 +190,17 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
     const ambiguous = local && current.members.filter((other) => /^(?:\/|[A-Za-z]:[\\/])/.test(other) && folder(other) === folder(m)).length > 1;
     const memberRuns = history.filter((r) => m.startsWith("/") ? r.kind === "local" && r.project === id && r.target === `local:${folder(m)}` : recordInRepo(r, m));
     const weekly = memberRuns.filter((r) => instant(r) >= costsSinceMs("week", now));
-    return { label: memberLabel(m), local, count: ambiguous ? null : weekly.length, last: !ambiguous && memberRuns[0] ? runView(memberRuns[0], subscriptions, pricing) : null, ...(ambiguous ? { caveat: "Local run records carry only the last folder name, so these members' runs cannot be told apart." } : {}) };
+    return { label: memberLabel(m), local, count: ambiguous ? null : weekly.length, last: !ambiguous && memberRuns[0] ? runView(memberRuns[0]) : null, ...(ambiguous ? { caveat: "Local run records carry only the last folder name, so these members' runs cannot be told apart." } : {}) };
   });
-  const weights = allocation?.state?.weights ?? {};
-  const totalWeight = Object.values(weights).filter((v) => typeof v === "number" && Number.isFinite(v) && v >= 0).reduce((n, v) => n + v, 0);
   return {
     id, state: "ready", project: { id, name: current.name ?? null }, file: basename(paths.projectsFile ?? "projects.json"), now,
     members, memberInput: current.members.some((m) => /^(?:\/|[A-Za-z]:[\\/])/.test(m)) ? "" : current.members.join("\n"),
     historyIncomplete: !historyReadable || fleetHistory?.incomplete !== false || typeof snapshot?.runMirror === "string" && snapshot.runMirror.startsWith("unreachable") || newerSkipped > 0,
     ...(newerSkipped > 0 ? { newerSkipped } : {}),
-    runs24h: { total: day.length, counts, inLine: snapshot?.waiting && !snapshot.waiting.unreachable ? queued.length : null, inLineIncomplete: snapshot?.waiting?.truncated === true, worst: worst ? runView(worst, subscriptions, pricing) : null },
-    recent: recorded.slice(0, 5).map((r) => runView(r, subscriptions, pricing)), totalRuns: recorded.length,
-    spend: { window, since, envelope, usedTokens, settledTokens, heldTokens: holds.tokens, heldKnownTokens: holds.knownTokens, heldIncomplete: holds.incomplete, floor: envelope ? false : historyFloor, shareTokens: amount(allocation?.state?.allocations?.[id]), problem: allocation?.problem ? "The allocation file could not be read. Run pi-dispatch doctor for the reason." : allocation?.unreachable ? "The allocation could not be read from Valkey." : null },
-    allocation: { window, shareTokens: amount(allocation?.state?.allocations?.[id]), totalTokens: amount(allocation?.totalTokens), floorTokens: amount(allocation?.floors?.[id]), weight: amount(weights[id]), totalWeight: amount(totalWeight), split: allocation?.state ? { id: allocation.state.planId ?? null, writer: allocation.state.writer ?? null, appliedAt: allocation.state.appliedAt ?? null, validUntil: allocation.state.validUntil ?? null } : null, refused: selected.filter((r) => recordReason(r) === "allocation-cap").length, unset: !envelope, problem: allocation?.problem || allocation?.unreachable ? "The allocation could not be read." : null },
+    runs24h: { total: day.length, counts, inLine: snapshot?.waiting && !snapshot.waiting.unreachable ? queued.length : null, inLineIncomplete: snapshot?.waiting?.truncated === true, worst: worst ? runView(worst) : null },
+    recent: recorded.slice(0, 5).map((r) => runView(r)), totalRuns: recorded.length,
+    // Spend is the run records' own (C2: no envelope, allocation, share or counter to read it from).
+    spend: { window, since, usedTokens: historySpent, settledTokens: historySpent, heldTokens: null, heldKnownTokens: null, heldIncomplete: false, floor: historyFloor, problem: null },
     size, sizing: sizingView, sizingUnreadable: registryUnreadable || !sizing || Boolean(sizing.unreachable) || !sl || Boolean(sl.invalid || sl.unreadable), limits: limitRows, limitsUnreadable: !sl || Boolean(sl.invalid || sl.unreadable), bundle, bundleKnown,
     triggers: [...triggerCounts.values()].sort((a, b) => a.index - b.index), editRefusal: projectRefusal(edit, id, "edit"), deleteRefusal: projectRefusal(deletion, id, "delete"),
   };
@@ -253,5 +210,5 @@ export async function readProjectView({ id, paths = {}, env = {}, deploymentDir 
 export function projectViewForAgent(view) {
   if (view?.state !== "ready") return { id: view?.id ?? null, state: view?.state ?? "unreadable" };
   const b = view.bundle;
-  return { id: view.id, state: "ready", spend: { window: view.spend.window, usedTokens: view.spend.usedTokens, settledTokens: view.spend.settledTokens, heldTokens: view.spend.heldTokens, shareTokens: view.spend.shareTokens, incomplete: view.spend.heldIncomplete || view.historyIncomplete }, size: view.size ? { memMiB: view.size.memMiB, cpuCenti: view.size.cpuCenti, source: view.size.source, memorySource: view.size.memorySource, cpuSource: view.size.cpuSource } : null, suggestion: view.sizing ? { memory: { reason: view.sizing.memory?.reason ?? null, current: view.sizing.memory?.current ?? null, suggested: view.sizing.memory?.suggested ?? null }, cpu: { reason: view.sizing.cpu?.reason ?? null, current: view.sizing.cpu?.current ?? null, suggested: view.sizing.cpu?.suggested ?? null }, call: view.sizing.call ?? null, action: projectSizeAction(view.sizing.call, view.id) } : null, bundleKnown: view.bundleKnown !== false, bundle: b ? { id: b.id, profile: b.profile, declared: b.declared, variables: b.last?.variables?.length ?? 0, forkReviews: b.forkReviews === true } : null, editRefusal: view.editRefusal, deleteRefusal: view.deleteRefusal, editRefused: Boolean(view.editRefusal), deleteRefused: Boolean(view.deleteRefusal) };
+  return { id: view.id, state: "ready", spend: { window: view.spend.window, usedTokens: view.spend.usedTokens, settledTokens: view.spend.settledTokens, incomplete: view.historyIncomplete }, size: view.size ? { memMiB: view.size.memMiB, cpuCenti: view.size.cpuCenti, source: view.size.source, memorySource: view.size.memorySource, cpuSource: view.size.cpuSource } : null, suggestion: view.sizing ? { memory: { reason: view.sizing.memory?.reason ?? null, current: view.sizing.memory?.current ?? null, suggested: view.sizing.memory?.suggested ?? null }, cpu: { reason: view.sizing.cpu?.reason ?? null, current: view.sizing.cpu?.current ?? null, suggested: view.sizing.cpu?.suggested ?? null }, call: view.sizing.call ?? null, action: projectSizeAction(view.sizing.call, view.id) } : null, bundleKnown: view.bundleKnown !== false, bundle: b ? { id: b.id, profile: b.profile, declared: b.declared, variables: b.last?.variables?.length ?? 0, forkReviews: b.forkReviews === true } : null, editRefusal: view.editRefusal, deleteRefusal: view.deleteRefusal, editRefused: Boolean(view.editRefusal), deleteRefused: Boolean(view.deleteRefusal) };
 }

@@ -38,7 +38,6 @@ const AMBIGUOUS = new Map([
 	["operator-cancel", { posts: [tables.TERMINAL_COMMENTS["operator-cancel"], tables.CANCELLED_BEFORE_START_COMMENT], because: "index.mjs records operator-cancel for a cancel before the start too, and posts the before-start comment there" }],
 	["awaiting-input", { posts: [tables.PARKED_COMMENT, tables.PARKED_COMMENT_PR, tables.HELD_TAKEN_COMMENT], because: "an issue's park, a pull request's (the reply keeps the comment phrase), and a held reply already taken" }],
 	["job-user-unmappable", { posts: Object.values(tables.JOB_USER_COMMENTS), because: "JOB_USER_COMMENTS is keyed by the cause, which the record does not carry" }],
-	["envelope-mismatch", { posts: Object.values(tables.ENVELOPE_MISMATCH_COMMENTS), because: "ENVELOPE_MISMATCH_COMMENTS is keyed by the cause (no envelope, or a different one), which the record does not carry" }],
 ]);
 
 /** Is this export a plain table (an object literal, frozen or not), as opposed to a string, a function or a class? */
@@ -54,7 +53,6 @@ const isPlainTable = (value) => value !== null && typeof value === "object" && O
 const CAUSE_KEYED = new Map([
 	["JOB_USER_COMMENTS", { reason: "job-user-unmappable", keys: "the cause (default, runtime-unreadable)" }],
 	["MODEL_NOT_ALLOWED_COMMENTS", { reason: "model-not-allowed", keys: "the pre-start path: main (no why) or the why fallback-unlisted", whyKeys: ["fallback-unlisted"] }],
-	["ENVELOPE_MISMATCH_COMMENTS", { reason: "envelope-mismatch", keys: "the cause (no-envelope, mismatch)" }],
 ]);
 
 /**
@@ -120,7 +118,7 @@ test("the three skip clauses moved from the admin are their enums, both ways", (
 
 test("every plain-object export of comment-tables.mjs is classified: keyed by reasons, by a cause, or excluded with a reason", () => {
 	const plain = Object.entries(tables).filter(([, value]) => isPlainTable(value));
-	assert.ok(plain.length >= 10, `${plain.length} tables`);
+	assert.ok(plain.length >= 9, `${plain.length} tables`);
 	for (const [name, table] of plain) {
 		const keys = Object.keys(table);
 		const reasons = keys.filter((key) => ENUM.includes(key));
@@ -198,7 +196,7 @@ test("each ambiguous reason really has two or more different comments, and the c
 		assert.ok(posts.length + (templated ? 1 : 0) >= 2, `${reason} (${because}): two or more paths, or it is not ambiguous and must be derived`);
 		for (const post of posts) assert.notEqual(REASONS[reason].sentence, post, `${reason}: ${because}, so the catalog's sentence is general`);
 	}
-	assert.equal(AMBIGUOUS.size, 7, "the list stays tight: a new entry is a reviewed decision");
+	assert.equal(AMBIGUOUS.size, 6, "the list stays tight: a new entry is a reviewed decision");
 });
 
 test("why picks the comment that was posted, where the table is keyed by it", () => {

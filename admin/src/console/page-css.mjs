@@ -746,7 +746,7 @@ const FLEET_CSS = `${FLEET_DESIGN_CSS}
 .vw--absent>.chip{background:transparent;color:var(--ink-muted);box-shadow:none;border:1px dashed var(--line)}
 `;
 /** Each page's own rules, by page name, unscoped as written; `pageCss()` confines them. */
-export const PAGE_CSS = Object.freeze({ setup: SETUP_CSS, "zero-touch": ZERO_TOUCH_CSS, insights: SPEND_CSS, "insights-budget-split": SPEND_CSS, "insights-capacity": SPEND_CSS, "insights-breakdown": SPEND_CSS, "insights-flows": SPEND_CSS, login: SIGN_IN_CSS, "login-code": SIGN_IN_CSS, error: ERROR_CSS, audit: `${AUDIT_CSS}${ERROR_CSS}`, overview: OVERVIEW_CSS, run: `${RUN_CSS}${ANSWERER_CSS}`, runs: RUNS_CSS, parked: `${PARKED_CSS}${ANSWERER_CSS}`, "answer-rules": ANSWERER_CSS, fleet: FLEET_CSS, host: FLEET_CSS });
+export const PAGE_CSS = Object.freeze({ setup: SETUP_CSS, "zero-touch": ZERO_TOUCH_CSS, insights: SPEND_CSS, "insights-capacity": SPEND_CSS, "insights-breakdown": SPEND_CSS, "insights-flows": SPEND_CSS, login: SIGN_IN_CSS, "login-code": SIGN_IN_CSS, error: ERROR_CSS, audit: `${AUDIT_CSS}${ERROR_CSS}`, overview: OVERVIEW_CSS, run: `${RUN_CSS}${ANSWERER_CSS}`, runs: RUNS_CSS, parked: `${PARKED_CSS}${ANSWERER_CSS}`, "answer-rules": ANSWERER_CSS, fleet: FLEET_CSS, host: FLEET_CSS });
 
 /**
  * Every page's rules, each confined to `body[data-page="<page>"]`, in the table's order. `table` is `PAGE_CSS`; a test

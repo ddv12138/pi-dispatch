@@ -12,8 +12,10 @@ import { tempDir } from "./helpers/temp-dir.mjs";
 test("loads conservative defaults with an empty-ish env", () => {
 	const c = loadConfig({});
 	assert.equal(c.concurrency, 3);
-	assert.equal(c.maxTokens, null, "the per-job token budget defaults to disabled");
-	assert.equal(c.dailyTokenCap, null, "the daily token cap defaults to disabled");
+	assert.equal("maxTokens" in c, false, "C2: there is no per-job token budget on the config");
+	assert.equal("dailyTokenCap" in c, false, "C2: there is no daily token cap on the config");
+	assert.equal("weeklyTokenCap" in c, false);
+	assert.equal("monthlyTokenCap" in c, false);
 	assert.equal(c.provider, "anthropic");
 	assert.equal(c.model, "claude-sonnet-5-5"); // an exact model version, deterministic
 	assert.equal(c.maxTurns, 30);
@@ -274,55 +276,24 @@ test("the retired job-start caps are refused at boot, naming the variable and th
 	}
 });
 
-test("token controls take explicit positive values, default to disabled, and reject bad values", () => {
-	const c = loadConfig({ PI_MAX_TOKENS: "500000", PI_DAILY_TOKEN_CAP: "20000000" });
-	assert.equal(c.maxTokens, 500000, "per-job token budget from env");
-	assert.equal(c.dailyTokenCap, 20000000, "daily token cap from env");
-	assert.equal(loadConfig({}).maxTokens, null, "absence disables the per-job token budget");
-	assert.equal(loadConfig({ PI_DAILY_TOKEN_CAP: "" }).dailyTokenCap, null, "empty string is disabled, not an error");
-	for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP"]) {
-		for (const bad of ["0", "-1", "abc", "1.5"]) {
-			assert.throws(() => loadConfig({ [name]: bad }), (e) => e.piDispatchConfig === true, `${name}=${bad}`);
-		}
-	}
-});
-
-test("the token budget (issue #501): PI_MAX_TOKENS is a whole number of tokens when it parses, unset or empty is null (D7a)", () => {
-	assert.equal(loadConfig({ PI_MAX_TOKENS: "2500" }).maxTokens, 2500);
-	assert.equal(loadConfig({ PI_MAX_TOKENS: 1000000 }).maxTokens, 1000000);
-	assert.equal(loadConfig({}).maxTokens, null, "absent: no per-job token budget");
-	assert.equal(loadConfig({ PI_MAX_TOKENS: "" }).maxTokens, null, "empty is unset, like every optional knob here");
-	for (const key of ["dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) assert.equal(loadConfig({})[key], null, `${key} is off by default`);
-});
-
-test("the token settings refuse a malformed value at boot, naming the variable and never the value", () => {
+test("the retired token budgets are refused at boot, naming the variable and the removal", () => {
 	for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) {
-		for (const bad of ["0", "-1", "abc", "2.50", "1e3"]) {
+		for (const value of ["2500", "0", "abc", "2.50"]) {
 			assert.throws(
-				() => loadConfig({ PI_MAX_TOKENS: "5", [name]: bad }),
-				(e) => e.piDispatchConfig === true && e.message.startsWith(`${name} must be a whole number of tokens`) && !e.message.includes(JSON.stringify(bad)),
-				`${name}=${bad}`,
+				() => loadConfig({ [name]: value }),
+				(e) => e.piDispatchConfig === true && e.message === `${name} was retired with the token budgets; remove it (the deployment no longer has a token budget)` && !e.message.includes(JSON.stringify(value)),
+				`${name}=${value}`,
 			);
 		}
+		// An empty value is the env's normal "unset", so it is not a legacy budget and does not refuse.
+		assert.doesNotThrow(() => loadConfig({ [name]: "" }), `${name}="" is unset`);
 	}
 });
 
-test("a token window without PI_MAX_TOKENS refuses boot (the invariant), naming the window", () => {
-	for (const name of ["PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) {
-		assert.throws(() => loadConfig({ [name]: "25" }), (e) => e.piDispatchConfig === true && e.message.includes(`${name} needs PI_MAX_TOKENS`), name);
-	}
-});
-
-test("a token window with PI_MAX_TOKENS set loads as numbers (the windows are enforced)", () => {
-	const keys = { PI_DAILY_TOKEN_CAP: "dailyTokenCap", PI_WEEKLY_TOKEN_CAP: "weeklyTokenCap", PI_MONTHLY_TOKEN_CAP: "monthlyTokenCap" };
-	for (const [name, key] of Object.entries(keys)) {
-		const c = loadConfig({ PI_MAX_TOKENS: "2", [name]: "2500" });
-		assert.equal(c[key], 2500, name);
-	}
-	const all = loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "10", PI_WEEKLY_TOKEN_CAP: "50", PI_MONTHLY_TOKEN_CAP: "150" });
-	assert.deepEqual([all.maxTokens, all.dailyTokenCap, all.weeklyTokenCap, all.monthlyTokenCap], [2, 10, 50, 150]);
-	assert.equal(loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "" }).dailyTokenCap, null, "an empty window is unset");
-	assert.throws(() => loadConfig({ PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "2.5" }), (e) => e.piDispatchConfig === true && e.message.startsWith("PI_DAILY_TOKEN_CAP must be a whole number of tokens"), "a fractional window is refused by name");
+test("a retired token env is refused even beside a retired job-start cap, without parsing either value", () => {
+	// The refusal runs before ANY parsing, so the removal is what the operator reads, not a range error.
+	assert.throws(() => loadConfig({ PI_DAILY_CAP: "1", PI_MAX_TOKENS: "0" }), (e) => e.message.startsWith("PI_DAILY_CAP was retired"));
+	assert.throws(() => loadConfig({ PI_MAX_TOKENS: "not-a-number" }), (e) => e.piDispatchConfig === true && e.message === "PI_MAX_TOKENS was retired with the token budgets; remove it (the deployment no longer has a token budget)");
 });
 
 test("env overrides every field", () => {

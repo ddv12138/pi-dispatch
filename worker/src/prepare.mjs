@@ -51,15 +51,11 @@ export function makePrepareWorkspace({
 	// construction -- prepares exactly what it always did: no /session mount, nothing on disk.
 	resolveSession = () => null,
 	prepareLocal = prepareLocalWorkspace,
-	// Issue #504 part B: where a local job's resolved folder may lie. `{ jobPaths, envelopeFile, authStoreDir }`: `jobPaths()` gives the
-	// run roots and cron folders a folder named inside must stay inside, and `envelopeFile` the file whose folder no job
-	// may mount. The host-only authStoreDir also protects the refresh store for every local job (#781).
-	// Null (a bare dispatcher) passes none, and prepareLocal then judges nothing but the folder itself.
+	// Issue #504 part B: where a local job's resolved folder may lie. `{ jobPaths, authStoreDir }`: `jobPaths()` gives the
+	// run roots and cron folders a folder named inside must stay inside. The host-only authStoreDir also protects the
+	// refresh store for every local job (#781). Null (a bare dispatcher) passes none, and prepareLocal then judges nothing
+	// but the folder itself.
 	localPlacement = null,
-	// Issue #505: `(job) => null | { body } | { outcome: "policy", reason }`, the portfolio snapshot builder
-	// (portfolio-snapshot.mjs `makePortfolioSnapshot`). Asked only for a local job the processor confirmed as a portfolio
-	// job (`portfolio: true` below); null (a bare dispatcher) writes no snapshot for any job.
-	portfolioSnapshot = null,
 	// Keyed by `job.kind`, so a new forge is one entry rather than a new `if`. A kind with no entry falls
 	// through to the throw below, which is what makes an unrouted job loud instead of a silent no-op.
 	preparers = { github: prepareGithubWorkspace },
@@ -81,7 +77,7 @@ export function makePrepareWorkspace({
 	ensureDir(jobsDir);
 	// `pin` (issue #645) is a recovery job's `{ sha, from }`: clone from the checkpoint store at the checkpoint's base
 	// commit (prepare-github.mjs). Forge jobs only; a local job works on its folder in place and has no clone to pin.
-	return async function prepareWorkspace(job, token, { queueJobId, piVersion = null, jobUser = null, portfolio = false, size = null, mcp = null, pin = null, watchSecrets = null } = {}) {
+	return async function prepareWorkspace(job, token, { queueJobId, piVersion = null, jobUser = null, size = null, mcp = null, pin = null, watchSecrets = null } = {}) {
 		ensureDir(jobsDir);
 		const jobDir = mkdtempSync(join(jobsDir, "job-"));
 		// Issue #524: a THROW out of anything below leaves `jobDir` to nobody. The processor tears down only what
@@ -91,7 +87,7 @@ export function makePrepareWorkspace({
 		// covers the thrown ones, in one place for every kind, rather than in each preparer that can throw.
 		// A retry makes a fresh directory, so nothing is lost by removing this one.
 		try {
-			return await prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, portfolio, size, mcp, pin, watchSecrets });
+			return await prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, size, mcp, pin, watchSecrets });
 		} catch (error) {
 			// GUARDED: a removal that fails (a busy mount, a permission flipped mid-job) must never replace the error
 			// that is the job's actual outcome. The directory is then left, which is what happened before this catch.
@@ -102,7 +98,7 @@ export function makePrepareWorkspace({
 		}
 	};
 
-	async function prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, portfolio, size, mcp, pin, watchSecrets }) {
+	async function prepareInto(job, token, jobDir, { queueJobId, piVersion, jobUser, size, mcp, pin, watchSecrets }) {
 		if (job.questionGrouping) return prepareQuestionGrouping(job, { jobDir });
 		// The trigger's injected skills (REQ-PER-TRIGGER-SKILLS, issue #60), COPIED here rather than
 		// mounted, and copied ONCE for every job kind because this is where local and forge converge.
@@ -150,10 +146,7 @@ export function makePrepareWorkspace({
 					? `Use the "${job.flow}" skill for this task.\n\n${pointer}${job.task ?? ""}`
 					: `${pointer}${job.task ?? ""}`;
 			const event = localEventContext(job, queueJobId, findPreviousRun);
-			// The snapshot only for a confirmed portfolio job, and never for a chained child or a manual run, whatever its data
-			// says (the processor's gate already holds both; this keeps a direct caller to the same rule).
-			const snapshot = portfolio === true && typeof portfolioSnapshot === "function" && event.source === "cron" ? { portfolio: () => portfolioSnapshot(job) } : {};
-			return withLiveFile(discardOnPolicy(await prepareLocal({ folder: job.folder, task, jobDir, event, ...(job.watch ? { watch: job.watch, watchDecisionModel: job.watchDecisionModel, watchSecrets } : {}), ...(localPlacement ? { jobPaths: localPlacement.jobPaths, envelopeFile: localPlacement.envelopeFile ?? null, authStoreDir: localPlacement.authStoreDir ?? null } : {}), ...snapshot }), jobDir));
+			return withLiveFile(discardOnPolicy(await prepareLocal({ folder: job.folder, task, jobDir, event, ...(job.watch ? { watch: job.watch, watchDecisionModel: job.watchDecisionModel, watchSecrets } : {}), ...(localPlacement ? { jobPaths: localPlacement.jobPaths, authStoreDir: localPlacement.authStoreDir ?? null } : {}) }), jobDir));
 		}
 		const prepare = preparers[job.kind];
 		if (prepare) {

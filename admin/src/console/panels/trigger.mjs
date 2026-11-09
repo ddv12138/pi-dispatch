@@ -4,7 +4,6 @@ import { triggerWhoMayFire } from "../../trigger-policy.mjs";
 import { outcomeWord, reasonWords, recordReason } from "../../words.mjs";
 import { planTriggerAdd } from "../../write-plans.mjs";
 import { triggerBundleOf } from "../../read-model.mjs";
-import { reserveText } from "../actions.mjs";
 import { PR_ACTIONS } from "@edgehero/pi-dispatch/triggers";
 import { fileTrouble } from "./config.mjs";
 import { html as escapedHtml } from "../html.mjs";
@@ -121,7 +120,6 @@ export const EDIT_FIELDS = Object.freeze([
   "recover",
 ]);
 export const HAND_FIELDS = Object.freeze([
-  "maxTokens",
   "models",
   "mcp",
   "secrets",
@@ -139,13 +137,11 @@ export const HAND_FIELDS = Object.freeze([
   "folder",
   "repository",
   "command",
-  "portfolio",
   "github",
   "fallbackModels",
   "secretsProfile",
   "gates",
   "gateTimeout",
-  "gateBudgetRaiseTokens",
   "excludeTools",
 ]);
 export function triggerRun(v) {
@@ -290,7 +286,6 @@ export function triggerKinds(v) {
               : v.data?.triggerFireCheck?.plan
                 ? html`<p>
                       ${v.data.triggerFireCheck.plan.summary ? uiText(v.data.triggerFireCheck.plan.summary, v.locale) : uiText("Fire this schedule once.", v.locale)}
-                      ${uiText("Paid:", v.locale)} ${reserveText(v.data.triggerFireCheck.plan.reserve)}
                     </p>
                     ${actForm("trigger-fire", {
                       hidden: [["index", v.query.index, "int"]],

@@ -22,7 +22,7 @@ const facts = (rows, view) => html`<dl class="sa-facts">${rows.map(([label, valu
 const selected = (value, view) => tr(view, value === true ? "selected" : value === false ? "not selected" : "selection unknown");
 const owner = (row, view) => row.ownerHost ? html`<a href="${`/fleet/host?name=${encodeURIComponent(row.ownerHost)}`}">${row.ownerHost}</a>` : tr(view, "Owner not published");
 const extra = (row, view) => tr(view, row.quota.extraUsage.enabled === true ? "Enabled" : row.quota.extraUsage.enabled === false ? "Disabled" : row.extraUsage === "enabled" ? "Enabled" : row.extraUsage === "disabled" ? "Disabled" : "Unknown");
-const credit = (row, view) => row.extraUsageCreditTokens === null ? tr(view, "Not authorized for paid overage") : `${row.extraUsageCreditTokens} ${tr(view, "extra-usage tokens per job (conservative model-cost bound); deployment token caps still apply")}`;
+const credit = (row, view) => row.extraUsageCreditTokens === null ? tr(view, "Not authorized for paid overage") : `${row.extraUsageCreditTokens} ${tr(view, "extra-usage tokens per job (conservative model-cost bound)")}`;
 const allowed = view => view.role === "operator" && !view.readOnly;
 const source = (view, page) => subscriptionAuthView(view.data?.[page]?.subscriptionAuth ?? view.data?.subscriptionAuth, { now: view.now ?? view.data?.now ?? 0 });
 const title = (row, status, view) => html`<div class="sa-title"><h3>${code(row.id)}</h3>${ui.badge(status[0], tr(view, status[1]))}</div>`;
@@ -84,7 +84,7 @@ function quotaState(quota) {
 
 export function modelsSubscriptionQuota(view) {
   const data = source(view, "models");
-  return ui.card({ title: tr(view, "Subscription quota"), sub: tr(view, "account windows, separate from deployment token caps"), body: html`${partial(data, view)}<div class="sa-accounts">${data.connections.map(row => html`<article class="sa-account">${title(row, quotaState(row.quota), view)}${facts([
+  return ui.card({ title: tr(view, "Subscription quota"), sub: tr(view, "account windows, separate from this console"), body: html`${partial(data, view)}<div class="sa-accounts">${data.connections.map(row => html`<article class="sa-account">${title(row, quotaState(row.quota), view)}${facts([
     ["Provider", row.provider ?? tr(view, "Unknown")], ["Owner host", owner(row, view)], ["Monitoring focus", monitoringFocus(row, view)],
     ["Observation", row.quota.observedAt === null ? tr(view, "Not published") : `${tr(view, row.quota.fresh ? "Fresh" : "Stale or freshness unknown")}, ${tr(view, "observed")} ${utc(row.quota.observedAt, view)}`],
     ["Pickup", row.quota.blockedUnknownReset ? row.quota.trialAvailable ? tr(view, "Exhausted; reset unknown. One trial is authorized; other pickup gates still apply.") : tr(view, "Exhausted; reset unknown. A fresh observation or explicit host trial is needed.") : row.quota.state === "exhausted" ? row.quota.until === null ? tr(view, "Exhausted; reset not published") : `${tr(view, "Waiting until")} ${utc(row.quota.until, view)}` : row.quota.fresh && row.quota.state === "available" ? tr(view, "Quota observation permits checking other pickup gates") : tr(view, "Quota availability is not known")],

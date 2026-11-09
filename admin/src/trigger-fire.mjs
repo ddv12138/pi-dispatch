@@ -8,7 +8,6 @@ import { createHash } from "node:crypto";
 import { makeQueue, QUEUE, hostQueueName, manualCanaryJobId, manualTriggerJobId, enqueueTriggerRunReporting, swallowedRunSentence } from "@edgehero/pi-dispatch/queue";
 import { parseConnection, makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { loadSchedules } from "@edgehero/pi-dispatch/schedules";
-import { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 import { withJobDataVersion } from "@edgehero/pi-dispatch/job-data-version";
 import { checkDispatchRun } from "./read-model.mjs";
 
@@ -17,8 +16,8 @@ const changed = "The triggers file changed since the preview. Preview Fire now a
 
 /** `{ plan } | { refusal } | { unreachable }`; no hourly counter is changed by this read. */
 export async function planTriggerFire({
-  index, triggersPath, url, env = {}, grantsEnv = process.env, overlay = {}, modelEndpoints = null,
-  builtinModel = () => null, fs = nodeFs, queueFn = makeQueue, parseConnectionFn = parseConnection,
+  index, triggersPath, url, env = {}, grantsEnv = process.env,
+  fs = nodeFs, queueFn = makeQueue, parseConnectionFn = parseConnection,
   loadSchedulesFn = loadSchedules, admissionFn = checkDispatchRun, now = Date.now,
 } = {}) {
   if (!Number.isSafeInteger(index) || index < 0) return { refusal: "index must be a non-negative trigger index. Nothing was queued." };
@@ -29,7 +28,7 @@ export async function planTriggerFire({
     raw = JSON.parse(source)?.triggers?.[index];
     // Validate the WHOLE file before selecting its raw index. A malformed sibling must not turn an
     // invalid deployment into a partial list of runnable schedules.
-    const schedules = loadSchedulesFn({ triggersFile: triggersPath, maxTokens: env.PI_MAX_TOKENS || null }, { readFileSync: () => source, existsSync: (p) => fs.existsSync(p), fleet: Boolean(env.PI_WORKER_NAME) });
+    const schedules = loadSchedulesFn({ triggersFile: triggersPath }, { readFileSync: () => source, existsSync: (p) => fs.existsSync(p), fleet: Boolean(env.PI_WORKER_NAME) });
     if (!raw) return { refusal: `There is no trigger at row ${index + 1}. Nothing was queued.` };
     if (raw.on?.type !== "cron") return { refusal: "Only a cron trigger can be fired now. Nothing was queued." };
     schedule = schedules.find((s) => s.schedulerId === raw.on.id);
@@ -40,7 +39,6 @@ export async function planTriggerFire({
   }
   if (!schedule || schedule.unserved) return { refusal: "This cron trigger is served on another host. Fire it from that host's console. Nothing was queued." };
   if (schedule.data?.command !== undefined) return { refusal: "A run.command trigger cannot be fired from the console or a tool. Nothing was queued." };
-  if (schedule.data?.portfolio === true) return { refusal: "A portfolio trigger can only be fired by a person with pi-dispatch run --trigger. Nothing was queued." };
   const queueName = env.PI_WORKER_NAME ? hostQueueName(env.PI_WORKER_NAME) : QUEUE;
   let queue;
   try {
@@ -56,9 +54,8 @@ export async function planTriggerFire({
   const admission = await admissionFn({ folder: schedule.data.folder, flow: schedule.data.flow, aiInvoked: true, consumeRate: false, env: { ...grantsEnv, VALKEY_URL: url }, now });
   if (admission.refused) return { refusal: admission.refused };
   if (admission.unreachable) return { unreachable: "The dispatch_run hourly allowance could not be read. Nothing was queued." };
-  const reserve = estimateReserve(schedule.data, { overlay, env, modelEndpoints, builtinModel });
   const summary = [`Fire cron trigger row ${index + 1} (${schedule.schedulerId}) now, once`, `Flow ${schedule.data.flow}, on queue ${queueName}; its schedule stays unchanged`];
-  return { plan: { index, schedulerId: schedule.schedulerId, queue: queueName, schedule, reserve, fileDigest: digest(source), title: "Fire cron trigger now", summary, message: summary.join("\n") } };
+  return { plan: { index, schedulerId: schedule.schedulerId, queue: queueName, schedule, fileDigest: digest(source), title: "Fire cron trigger now", summary, message: summary.join("\n") } };
 }
 
 /** Revalidate rather than enqueue a stale ticket's template. The queue's minute ID arbitrates concurrent fires. */

@@ -8,8 +8,6 @@ import { InfraRetry } from "../src/processor.mjs";
 // run-history.mjs pulls in only node:fs/node:path -- safe below the node floor alongside processor.mjs.
 import { buildRecord, makeRecordWriter } from "../src/run-history.mjs";
 import { makeBackendRegistry } from "../src/backend-registry.mjs";
-// token-budget.mjs pulls in node:crypto and two leaf modules, no bullmq.
-import { valkeyEndpointTag } from "../src/token-budget.mjs";
 
 // index.mjs imports bullmq, so this skips below the node floor / without deps and runs in CI,
 // where PI_DISPATCH_REQUIRE_WORKER_TESTS=1 turns a skip into a hard failure.
@@ -1215,41 +1213,23 @@ test("issue #596, phase 2: createWorker builds ONE host budget, ticks it off the
 	}
 });
 
-// Issue #761: the settled record's `tokensWindows.reservedIn.valkey` is the tag of the Valkey createWorker's own connection
-// dials (`valkeyEndpointTag(connection)`), the value doctor's `tokens.window-reset` computes from the same URL. Without
-// it no record says where it was charged, and the check never fires. Driven through the processor createWorker hands
-// BullMQ's Worker (read back as the Worker keeps it), with the real record writer. The window is the real clock's day; only
-// the tag is asserted, which no instant changes.
-test("createWorker's settled record carries reservedIn.valkey, the tag of the connection it was built with", { skip }, async () => {
-	const store = new Map();
-	const held = (k) => store.get(k) ?? 0;
-	const redis = {
-		async incr(k) { store.set(k, held(k) + 1); return held(k); },
-		async decr(k) { store.set(k, held(k) - 1); return held(k); },
-		async incrby(k, n) { store.set(k, held(k) + n); return held(k); },
-		async decrby(k, n) { store.set(k, held(k) - n); return held(k); },
-		async eval(_script, _n, k, delta) {
-			if (!store.has(k)) return [1, 0];
-			store.set(k, Math.max(0, held(k) + Number(delta)));
-			return [0, held(k)];
-		},
-		async expire() {},
-		async get() { return null; },
-	};
+// C2: a settled record keeps the usage/cost ledger it always carried, and carries NO token reservation: the
+// budgets are gone, so `tokensWindows` is null and no `budget` object is written. Driven through the processor
+// createWorker hands BullMQ's Worker, with the real record writer.
+test("createWorker's settled record keeps usage/cost and writes no token reservation", { skip }, async () => {
+	const redis = { async incr() { return 1; }, async expire() {}, async decr() {} };
 	const { recordRun, writes } = makeRealRecordRun();
-	// A database other than 0, so the tag is this connection's and not the default address's.
-	const connection = parseConnection("redis://127.0.0.1:1/3");
 	const beforeTerm = new Set(process.listeners("SIGTERM"));
 	const beforeInt = new Set(process.listeners("SIGINT"));
+	const usage = { input: 10, output: 5, total: 15, cost: 0.25 };
 	let worker;
 	try {
 		worker = mod.createWorker({
-			connection,
+			connection: parseConnection("redis://127.0.0.1:1/3"),
 			concurrency: 1,
-			// A daily token budget and a per-job cap: the job reserves in the deployment's day window.
-			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3, dailyTokenCap: 10, maxTokens: 2 }),
+			getSettings: () => ({ provider: "anthropic", model: "m", maxTurns: 30, concurrency: 3 }),
 			redis,
-			deps: { mintToken: async () => "t", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({}), runContainer: async () => ({ code: 0, aborted: false, turns: 3 }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
+			deps: { mintToken: async () => "t", isDefaultBranchProtected: async () => true, prepareWorkspace: async () => ({}), runContainer: async () => ({ code: 0, aborted: false, turns: 3, tokens: { input: 10, output: 5, total: 15 }, usage }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 			recordRun,
 			stopContainer: async () => {},
 		});
@@ -1257,11 +1237,13 @@ test("createWorker's settled record carries reservedIn.valkey, the tag of the co
 		assert.equal(typeof worker.processFn, "function", "the processor createWorker handed BullMQ's Worker");
 		await worker.processFn(secretJob("j-tag"), "tok", new AbortController().signal);
 		assert.equal(writes.length, 1);
-		const { tokensWindows } = JSON.parse(writes[0].data);
-		assert.equal(tokensWindows.settledTokens, 2, "the floor: no meter, so the reservation is charged");
-		assert.equal(tokensWindows.reservedIn.valkey, valkeyEndpointTag(connection));
-		assert.match(tokensWindows.reservedIn.valkey, /^[0-9a-f]{16}$/);
-		assert.notEqual(tokensWindows.reservedIn.valkey, valkeyEndpointTag(parseConnection("redis://127.0.0.1:1")), "database 3's tag, not database 0's");
+		const rec = JSON.parse(writes[0].data);
+		assert.deepEqual(rec.usage, usage, "actual usage and cost stay");
+		assert.deepEqual(rec.tokens, { input: 10, output: 5, total: 15 }, "actual token usage stays");
+		assert.equal(rec.tokensWindows, null, "C2: no token window reservation is written");
+		assert.equal(rec.budgetReserved, true, "the container ran, so the record still marks possible spend");
+		assert.equal("budget" in rec, false, "C2: no budget object is written");
+		assert.equal(rec.plan, null, "C2: no portfolio plan is written");
 	} finally {
 		for (const l of process.listeners("SIGTERM")) if (!beforeTerm.has(l)) process.removeListener("SIGTERM", l);
 		for (const l of process.listeners("SIGINT")) if (!beforeInt.has(l)) process.removeListener("SIGINT", l);

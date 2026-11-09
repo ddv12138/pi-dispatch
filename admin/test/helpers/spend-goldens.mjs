@@ -25,12 +25,19 @@ const graph = () => buildGraphModel({
 export function spendFixture() {
   const rs = records();
   const fold = foldCosts({ records: rs, nowMs: NOW, piAiPin: "fixture", sinceMs: NOW - 7 * DAY });
-  const hosts = [{ name: "build3", fpEnvelope: "fixture-digest", jobsMore: "0", jobs: [{ id: "gh-live", p: "web", at: NOW - HOUR, h: 2000000, ha: NOW - HOUR }] }];
-  const budget = { day: { reserved: 3, cap: 10, state: "ok" }, week: { reserved: 7, cap: 30, state: "ok" }, month: { reserved: 12, cap: 100, state: "ok" }, softHoldPct: 80, tokens: { spent: 360, cap: 10000 }, scoped: [], windows: { rows: [{ ledger: "deployment", name: "Deployment", window: "day", counterTokens: 2_600_000, capTokens: 10_000_000 }, { ledger: "deployment", name: "Deployment", window: "week", counterTokens: 2_600_000, capTokens: 50_000_000 }] } };
-  const envelope = { window: "week", totalTokens: 50_000_000, floors: { web: 5_000_000, ops: 0 }, defaultWeights: { web: 3, ops: 1 }, delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 7 } };
-  const state = { planId: "0123456789abcdef", writer: "portfolio-job", jobId: "gh-portfolio", triggerId: "pm-weekly", model: "acme/model-1", appliedAt: iso(NOW - DAY), validUntil: iso(NOW + DAY), clamped: true, allocations: { web: 35_000_000, ops: 15_000_000 }, weights: { web: 3, ops: 1 }, unallocated: 0, reasons: { web: SPEND_HOSTILE_REASON, ops: "Keep capacity for maintenance." } };
-  const allocation = { window: "week", totalTokens: 50_000_000, floors: envelope.floors, delegation: true, digest: "fixture-digest", envelope, hosts, state, spend: { deployment: 2_600_000, projects: { web: 2_300_000, ops: 300_000 } }, counts: { refusals: { "allocation-cap": 2, "envelope-mismatch": 1, "portfolio-no-envelope": 0, "portfolio-snapshot-oversize": 0 }, plans: { applied: 1 } }, log: [{ at: iso(NOW - DAY), writer: "portfolio-job", outcome: "applied", host: "build3", planId: "0123456789abcdef", weights: state.weights }, { at: iso(NOW - 2 * DAY), writer: "operator-session", outcome: "applied", host: "mini1", planId: "fedcba9876543210", weights: { web: 1, ops: 1 } }, { at: iso(NOW - 3 * DAY), writer: "operator-session", outcome: "duplicate", host: "build3", planId: "fedcba9876543210", weights: { web: 1, ops: 1 } }, { at: iso(NOW - 4 * DAY), writer: "default", outcome: "refused", host: "build3", planId: null, weights: null }] };
-  return { nowMs: NOW, window: "7d", projects: [{ id: "web", name: "Web" }, { id: "ops", name: "Operations" }], fold, recent24h: fold, graph: graph(), budget, hosts, spend: { ...spendSummaryOf({ records: rs, hosts, budget, nowMs: NOW, jobCapTokens: 2_000_000 }), ...spendChartsOf({ records: rs, sinceMs: NOW - 7 * DAY, nowMs: NOW, jobCapTokens: 2_000_000, heldTokens: 2_000_000 }) }, allocation, capacity: capacityViewOf(computeCapacity({ records: rs, windowStartMs: NOW - DAY, nowMs: NOW, bucketMs: HOUR })), sizing: null };
+  const hosts = [{ name: "build3", jobsMore: "0", jobs: [{ id: "gh-live", p: "web", at: NOW - HOUR }] }];
+  return {
+    nowMs: NOW,
+    window: "7d",
+    projects: [{ id: "web", name: "Web" }, { id: "ops", name: "Operations" }],
+    fold,
+    recent24h: fold,
+    graph: graph(),
+    hosts,
+    spend: { ...spendSummaryOf({ records: rs, nowMs: NOW }), ...spendChartsOf({ records: rs, sinceMs: NOW - 7 * DAY, nowMs: NOW }) },
+    capacity: capacityViewOf(computeCapacity({ records: rs, windowStartMs: NOW - DAY, nowMs: NOW, bucketMs: HOUR })),
+    sizing: null,
+  };
 }
 
 export async function drawSpend(page = "insights", { role = "operator", query = "range=7d", payload = spendFixture(), whatIf = null } = {}) {
@@ -43,16 +50,14 @@ export async function drawSpend(page = "insights", { role = "operator", query = 
   for (const { id, html } of await pagePanels(page, ctx)) assert.ok(String(out.html).includes(`id="${id}" data-panel>${html}</`), `${page}: panel ${id} matches its renderer`);
   return String(out.html);
 }
-const allocationState = (over) => { const p = spendFixture(); return { ...p, allocation: { ...p.allocation, ...over } }; };
 function recordMoneyState(kind) {
   const p = spendFixture();
   const base = records()[0];
   const paid = { ...base, endedAt: iso(NOW - 1000), tokensWindows: { basis: "unreserved", reservedTokens: 0, settledTokens: 0 }, tokens: { ...base.tokens, total: 7_000, metered: true }, usage: { models: [{ ...base.usage.models[0], total: 7_000 }] } };
   const unknown = { ...base, jobId: "gh-unknown-cost", endedAt: iso(NOW - 1000), tokensWindows: { basis: "unreserved", reservedTokens: 0, settledTokens: 0 }, tokens: null, usage: null };
   const rs = kind === "unknown" ? [unknown] : kind === "partial" ? [paid, unknown] : [paid];
-  const budget = kind === "partial" ? p.budget : {};
   const currentFold = foldCosts({ records: rs, nowMs: NOW, piAiPin: "fixture", sinceMs: NOW - 7 * DAY });
-  return { ...p, budget, fold: currentFold, recent24h: currentFold, spend: { ...spendSummaryOf({ records: rs, hosts: [], budget, nowMs: NOW, jobCapTokens: 2_000_000 }), ...spendChartsOf({ records: rs, sinceMs: NOW - 7 * DAY, nowMs: NOW, jobCapTokens: 2_000_000, heldTokens: 0 }) } };
+  return { ...p, fold: currentFold, recent24h: currentFold, spend: { ...spendSummaryOf({ records: rs, nowMs: NOW }), ...spendChartsOf({ records: rs, sinceMs: NOW - 7 * DAY, nowMs: NOW }) } };
 }
 const states = {
   "spend-no-dollar-window.viewer": () => drawSpend("insights", { role: "viewer", payload: recordMoneyState("paid") }),
@@ -64,17 +69,6 @@ const states = {
   "spend-populated.operator": () => drawSpend(),
   "spend-populated.viewer": () => drawSpend("insights", { role: "viewer", query: "range=7d&paths=full" }),
   "spend-costs-unreadable.viewer": () => drawSpend("insights", { role: "viewer", payload: { ...spendFixture(), fold: null, spend: { ...spendFixture().spend, daily: null } } }),
-  "spend-unknown-holds.operator": () => { const p = spendFixture(); p.spend.today.unknownHosts = ["old-worker"]; return drawSpend("insights", { payload: p }); },
-  "spend-counters-unreadable.operator": () => drawSpend("insights", { payload: { ...spendFixture(), budget: { unreachable: "unavailable", settingsInvalid: true } } }),
-  "spend-split.operator": () => drawSpend("insights-budget-split"),
-  "spend-split.viewer": () => drawSpend("insights-budget-split", { role: "viewer" }),
-  "spend-split-no-envelope.viewer": () => drawSpend("insights-budget-split", { role: "viewer", payload: allocationState({ unset: true }) }),
-  "spend-split-invalid.operator": () => drawSpend("insights-budget-split", { payload: allocationState({ problem: "invalid envelope fields" }) }),
-  "spend-split-no-plan.viewer": () => drawSpend("insights-budget-split", { role: "viewer", payload: allocationState({ state: null }) }),
-  "spend-split-mismatch.operator": () => drawSpend("insights-budget-split", { payload: allocationState({ mismatch: true }) }),
-  "spend-split-unreachable.viewer": () => drawSpend("insights-budget-split", { role: "viewer", payload: allocationState({ unreachable: "unavailable" }) }),
-  "spend-split-newer.viewer": () => drawSpend("insights-budget-split", { role: "viewer", payload: allocationState({ stateProblem: "newer" }) }),
-  "spend-split-outside-edit.operator": () => drawSpend("insights-budget-split", { payload: allocationState({ outsideEdit: { at: "10-08 15:00", digest: "01234567", split: "89abcdef" } }) }),
   "spend-capacity.viewer": () => drawSpend("insights-capacity", { role: "viewer", query: "range=24h" }),
   "spend-capacity-no-time.viewer": () => drawSpend("insights-capacity", { role: "viewer", query: "range=mtd", payload: { ...spendFixture(), capacity: { noTime: true, fromMs: NOW } } }),
   "spend-capacity-unreadable.viewer": () => drawSpend("insights-capacity", { role: "viewer", payload: { ...spendFixture(), capacity: { unreachable: "unavailable" } } }),

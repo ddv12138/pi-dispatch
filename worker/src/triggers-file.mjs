@@ -538,10 +538,6 @@ export const AUTHORED_NARROWING_FIELDS = Object.freeze([
 	Object.freeze({ key: "models", authored: (v) => Array.isArray(v) && v.length > 0 }),
 	// A stale receiver dropping the reviewed retry order must not silently disable failover.
 	Object.freeze({ key: "fallbackModels", authored: (v) => Array.isArray(v) && v.length > 0 }),
-	// Issue #501: a trigger's per-job dollar cap. Dropped by a receiver from before #501 (which tolerated the key as
-	// unknown), the job would run under the deployment's wider cap, or with none, on a clean record. Any present
-	// value counts as authored; whether it is a valid amount is the loader's question, not this one.
-	Object.freeze({ key: "maxTokens", authored: (v) => v !== undefined && v !== null }),
 	// REQ-MCP-OPERATOR-SERVERS: the MCP servers a trigger's jobs connect. Not a widening when dropped but the same
 	// silent outcome: the job runs its flow without the servers it was written against, on a clean record.
 	Object.freeze({ key: "mcp", authored: (v) => Array.isArray(v) && v.length > 0 }),
@@ -640,37 +636,8 @@ export function makeCheckWaitSkew({ triggersPath, fs = nodeFs }) {
 }
 
 /**
- * Issue #505: `(job) => boolean`, whether the LIVE triggers file still flags the job's cron trigger
- * `run.portfolio: true`. A portfolio job is queued with the flag on its data (a scheduler tick, or
- * `pi-dispatch run --trigger`), and the flag is budget authority, so the data alone is never trusted: the operator
- * removing the flag from the reviewed file must take effect for a job already queued.
- *
- * The same file the one-shot checks read (`PI_TRIGGERS_FILE`, else `./triggers.json` in the worker's working
- * directory), parsed by the shared validator rather than read raw, because the answer gives authority and an entry
- * the loader would refuse grants none. Found by the cron id, which the loader keeps unique, never by an index, and then
- * held to the job: the entry's `folder`, `flow`, `command` and `task` must equal the job's. An id is a name, and a
- * name can be reused: a job queued from an old entry must not borrow the flag of a different entry that took its id
- * later (review of PR #575). Every doubt (no path, no file, a file that does not parse, no cron entry with that id, an
- * entry that is not the one the job came from) answers false: the job then runs as an ordinary cron job, the direction
- * that grants nothing. Never throws.
- */
-export function makeCheckPortfolioFlag({ triggersPath, fs = nodeFs }) {
-	return function checkPortfolioFlag(job) {
-		const id = job?.trigger?.id;
-		if (typeof triggersPath !== "string" || triggersPath === "" || typeof id !== "string") return false;
-		try {
-			const entry = parseTriggers(fs.readFileSync(triggersPath, "utf8"), triggersPath).find((t) => t.on.type === "cron" && t.on.id === id);
-			if (entry?.run?.portfolio !== true) return false;
-			return ["folder", "flow", "command", "task"].every((k) => entry.run[k] === job[k]);
-		} catch {
-			return false;
-		}
-	};
-}
-
-/**
  * The worker's read of the project secret bundles (issue #704, INT-TRIGGERS-FILE-CONTRACT `secretBundles`):
- * `(job, { project }) => answer`, from the SAME file the one-shot, skew and portfolio checks read
+ * `(job, { project }) => answer`, from the SAME file the one-shot and skew checks read
  * (`PI_TRIGGERS_FILE`, else `./triggers.json` in the worker's working directory).
  *
  * THE WORKER READS THE BINDING ITSELF, never the receiver, and that is the design rather than a shortcut. A
@@ -713,8 +680,8 @@ export function makeCheckPortfolioFlag({ triggersPath, fs = nodeFs }) {
  *
  * The identity of the job's entry is checked on the RAW entries, never the normalized ones, because the loader
  * collapses a DISARMED one-shot to a sentinel and a retry of the very job that spent it would otherwise read as a
- * changed trigger. A cron job is found by its id and must agree on folder, flow, command and task
- * (`makeCheckPortfolioFlag`'s rule); a forge job by its matched index, agreeing on kind, `on.type`, command, and
+ * changed trigger. A cron job is found by its id and must agree on folder, flow, command and task;
+ * a forge job by its matched index, agreeing on kind, `on.type`, command, and
  * flow except on a comment trigger, whose phrase may name another flow (`<phrase> <flow>`) without changing
  * which entry authorized it.
  */

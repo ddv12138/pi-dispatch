@@ -6,8 +6,8 @@ import { crc32, deflateSync } from "node:zlib";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 // Pure: no static pi import in their module graph, so they load unconditionally and the gate below applies to pi only.
-import { CHILD_LEDGER_NAME, foldChildLedgers, parseChildLedger, resolvePiAiCompat, STOP_MESSAGES, stopFile, writeFileAtomic } from "../src/usage-meter.mjs";
-import { TOKEN_BUDGET } from "../src/outcome.mjs";
+import { CHILD_LEDGER_NAME, foldChildLedgers, METER_FAILED, parseChildLedger, resolvePiAiCompat, STOP_MESSAGES, stopFile, writeFileAtomic } from "../src/usage-meter.mjs";
+import { MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 /**
@@ -261,12 +261,12 @@ test("a pi child started from the rpc entry (dist/rpc-entry.js) leaves a ledger 
 
 test("a STOP the parent writes brakes the child's NEXT call, in the bundle's rpc entry (issue #500)", { skip }, async () => {
 	const w = world();
-	const drive = rpcDriver(["one", "two"], { between: () => writeFileAtomic({ dir: w.ledger, name: "STOP", text: JSON.stringify(stopFile(TOKEN_BUDGET)) }) });
+	const drive = rpcDriver(["one", "two"], { between: () => writeFileAtomic({ dir: w.ledger, name: "STOP", text: JSON.stringify(stopFile(MODEL_NOT_ALLOWED)) }) });
 	const result = await run([entry("dist/bundle/rpc-entry.js"), "--no-session", "-e", w.provider, "--model", "fake/m1"], { env: w.env, cwd: w.root, drive });
 	assert.equal(result.code, 0, result.stderr);
 	// The first call reached the provider; the second was answered by the brake and never did.
 	assert.equal(w.callCount(), 1);
-	assert.match(result.stdout, new RegExp(STOP_MESSAGES[TOKEN_BUDGET]));
+	assert.match(result.stdout, new RegExp(STOP_MESSAGES[MODEL_NOT_ALLOWED]));
 	assertMetered(w.ledger, { calls: 1 });
 });
 
@@ -361,16 +361,15 @@ test("an SDK child gets the overlay default and remains metered and subject to m
 	assert.equal(blocked.code, 0, blocked.stderr);
 	assert.equal(denied.callCount(), 0, blocked.stderr);
 	assert.notEqual(JSON.parse(blocked.stdout).stopReason, "stop");
-	// The spend backstop reaches the SDK child the way it reaches a CLI child, through the parent's STOP control file
-	// (child-watch.mjs writes it when the meter stops; the token cap is the settle-time backstop since the cost guard
-	// went). The dollar shape this block replaced wrote SPENT beside PI_MAX_COST_MICROS and refused pre-call on the
-	// child's own worst-case math; that guard is gone, and the api switch went with it -- the meter is api-agnostic
-	// now, so the default fake api covers the claim.
+	// A policy stop reaches the SDK child the way it reaches a CLI child, through the parent's STOP control file
+	// (child-watch.mjs writes it when the meter stops). The dollar shape this block replaced wrote SPENT beside
+	// PI_MAX_COST_MICROS and refused pre-call on the child's own worst-case math; that guard is gone, and the api
+	// switch went with it -- the meter is api-agnostic now, so the default fake api covers the claim.
 	const tight = world();
 	const tightScript = libraryScript(tight, { implicitModelsPath: true });
 	const tightShim = join(tight.root, "overlay-preload.mjs");
 	writeFileSync(tightShim, `const ledger = process.env.PI_DISPATCH_CHILD_LEDGER;\ndelete process.env.PI_DISPATCH_CHILD_LEDGER;\nconst { preload } = await import(${JSON.stringify(PRELOAD_URL)});\nprocess.env.PI_DISPATCH_CHILD_LEDGER = ledger;\nawait preload({ globalModelsPath: ${JSON.stringify(join(tight.root, "models.json"))} });\n`);
-	writeFileAtomic({ dir: tight.ledger, name: "STOP", text: JSON.stringify(stopFile(TOKEN_BUDGET)) });
+	writeFileAtomic({ dir: tight.ledger, name: "STOP", text: JSON.stringify(stopFile(MODEL_NOT_ALLOWED)) });
 	const capped = await run([tightScript], { env: { ...tight.env, NODE_OPTIONS: `--import=${pathToFileURL(tightShim).href}` }, cwd: tight.root });
 	assert.equal(tight.callCount(), 0, capped.stderr);
 	// The brake's own answer: the hard stop's aborted result (defaultHardStopResult), not a completed turn.
@@ -480,7 +479,7 @@ test("three children whose ledger dir turns unwritable mid-run: every call that 
 			chmodSync(w.ledger, 0o700);
 		}
 		assert.equal(result.code, 0, result.stderr);
-		assert.match(result.stdout, new RegExp(STOP_MESSAGES[TOKEN_BUDGET]));
+		assert.match(result.stdout, new RegExp(STOP_MESSAGES[METER_FAILED]));
 	}
 	const { parsed, fold } = ledgers(w.ledger);
 	assert.equal(parsed.length, 3);

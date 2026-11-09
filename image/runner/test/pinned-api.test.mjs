@@ -14,7 +14,6 @@ import * as catalogModels from "./helpers/catalog-models.mjs";
 import { captureTerminal, classifyPromptRejection, classifyStopReason, decideExit, loadRetryPredicate, STOP_REASONS } from "../src/outcome.mjs";
 import { jobSettings, THINKING_LEVELS } from "../src/config.mjs";
 import { createJobModelRuntime, jobModelRuntimeOptions, loadPiAuthStorage } from "../src/model-runtime.mjs";
-import { attachTokenBudget } from "../src/token-budget.mjs";
 import { attachTurnBudget } from "../src/turn-budget.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 // Importing the child preload runs nothing without a ledger directory.
@@ -435,8 +434,8 @@ test("STOP_REASONS is exactly the pinned pi-ai's StopReason union, in order", { 
 });
 
 test("pi still refuses to auto-retry the hard stop -- a non-error stopReason is NOT retryable", { skip }, async () => {
-	// The fact that makes the token cap a spend CONTROL rather than a spend AMPLIFIER, and until now the
-	// only one in this module asserted purely in prose. When the cap is breached the meter answers the
+	// The fact that makes a policy stop a spend CONTROL rather than a spend AMPLIFIER, and until now the
+	// only one in this module asserted purely in prose. When the model list refuses a call the meter answers it
 	// next call with a synthetic terminal assistant message carrying stopReason "aborted"
 	// (makeHardStopStream in src/usage-meter.mjs); pi's AgentSession then asks isRetryableAssistantError
 	// whether to restart that turn. The predicate's first line returns false for anything whose
@@ -466,10 +465,10 @@ test("pi still refuses to auto-retry the hard stop -- a non-error stopReason is 
 
 	// The message makeHardStopStream actually emits, reduced to the fields the predicate can read.
 	assert.equal(
-		isRetryableAssistantError({ role: "assistant", stopReason: "aborted", errorMessage: "pi-dispatch: token cap exceeded" }),
+		isRetryableAssistantError({ role: "assistant", stopReason: "aborted", errorMessage: "pi-dispatch: model not allowed" }),
 		false,
 		"pi now treats a stopReason:\"aborted\" message as RETRYABLE -- the meter's hard stop has become a trigger " +
-			"for pi's paid auto-retry loop. Do not bump the pin until makeHardStopStream ends capped calls by a route " +
+			"for pi's paid auto-retry loop. Do not bump the pin until makeHardStopStream ends refused calls by a route " +
 			"pi will not restart (and re-verify the new route here).",
 	);
 
@@ -492,12 +491,12 @@ test("pi still refuses to auto-retry the hard stop -- a non-error stopReason is 
 		meterSrc,
 		/stopReason:\s*"aborted"/,
 		"makeHardStopStream no longer emits stopReason \"aborted\" -- whatever it emits now must be a value " +
-			"isRetryableAssistantError rejects, or the token cap drives pi's paid retry loop.",
+			"isRetryableAssistantError rejects, or a policy stop drives pi's paid retry loop.",
 	);
 	assert.ok(
 		!/stopReason:\s*"error"/.test(meterSrc),
 		"usage-meter.mjs now builds a stopReason:\"error\" message -- that is the ONE value pi will auto-retry, " +
-			"so a hard stop shaped like it turns the cap into a spend amplifier.",
+			"so a hard stop shaped like it turns the policy stop into a spend amplifier.",
 	);
 });
 
@@ -1225,7 +1224,7 @@ const STUB_ANSWERS = (() => {
 	};
 })();
 
-async function runLoopbackSession({ plan, maxTurns = 1, tokenCap = null, onSession, probeTerminates = false }) {
+async function runLoopbackSession({ plan, maxTurns = 1, onSession, probeTerminates = false }) {
 	const requests = [];
 	const server = createServer((req, res) => {
 		req.resume();
@@ -1286,9 +1285,8 @@ async function runLoopbackSession({ plan, maxTurns = 1, tokenCap = null, onSessi
 			if (event.type === "auto_retry_end") retryInFlight = false;
 		});
 		onSession?.(session);
-		// The runner's own order: the terminal subscription, then the turn budget, then the fallback token budget.
+		// The runner's own order: the terminal subscription, then the turn budget.
 		const budget = attachTurnBudget(session, maxTurns);
-		const tokenBudget = tokenCap === null ? null : attachTokenBudget(session, tokenCap);
 		let rejection = null;
 		let rejected = null;
 		try {
@@ -1300,7 +1298,6 @@ async function runLoopbackSession({ plan, maxTurns = 1, tokenCap = null, onSessi
 		const last = session.messages.at(-1);
 		return {
 			budget: { ...budget.state },
-			tokenBudget: tokenBudget && { ...tokenBudget.state },
 			requests,
 			toolRuns: toolRuns.length,
 			order: order.filter((type) => !/^(message_update|queue_update|tool_execution_update)$/.test(type)),
@@ -1310,7 +1307,7 @@ async function runLoopbackSession({ plan, maxTurns = 1, tokenCap = null, onSessi
 			terminal,
 			// The exit the runner takes, when the rejection is one it classifies; an unclassified rejection is
 			// run-job's rethrow to classifyThrow, reported here as `rejection` with `exit` null.
-			exit: rejection && !rejected ? null : decideExit({ budgetAborted: budget.state.aborted, budgetTurns: budget.state.turns, tokenAborted: tokenBudget?.state.aborted ?? false, terminal: last, rejected }),
+			exit: rejection && !rejected ? null : decideExit({ budgetAborted: budget.state.aborted, budgetTurns: budget.state.turns, terminal: last, rejected }),
 		};
 	} finally {
 		session?.dispose();
@@ -1327,7 +1324,7 @@ test("a tool that returns terminate ends pi's loop after its round, and the runn
 	assert.equal(toolRuns, 1);
 	assert.equal(terminal?.role, "toolResult", "agent_end's last message is no longer the tool result: re-read captureTerminal and classifyStopReason");
 	assert.deepEqual(
-		decideExit({ budgetAborted: budget.aborted, budgetTurns: budget.turns, tokenAborted: false, terminal }),
+		decideExit({ budgetAborted: budget.aborted, budgetTurns: budget.turns, terminal }),
 		{ code: 0, reason: "tool-terminated" },
 	);
 	// The control: the same tool WITHOUT terminate goes on to the next request and ends on the assistant's text.
@@ -1448,22 +1445,6 @@ test("a retry-shaped throw after a COMPLETED reply is not exempt: a queued follo
 	assert.ok(order.includes("auto_retry_start"), `pi no longer retries a retry-shaped throw after a clean reply: ${order.join(",")}`);
 	assert.deepEqual(budget, { turns: 2, retryTurns: 0, aborted: true }, "the follow-up's turn is the second real turn and trips the budget");
 	assert.deepEqual(requests, ["text"], "the aborted follow-up turn never reaches the provider");
-});
-
-test("the fallback token budget stops pi's retry of the breaching turn (loopback, no key)", { skip }, async () => {
-	// Issue #455 gate round 1, A11. The per-session token budget (the fallback when the process-wide meter
-	// cannot install) aborts on the breaching turn's turn_end. At 0.80.7, when that turn FAILED with a
-	// retryable error, pi's retry started with a fresh signal and the one abort never reached it; the re-abort
-	// on the retry's turn_start did. The turn budget is set high so only the token budget can stop anything.
-	const { tokenBudget, requests, order, exit } = await runLoopbackSession({ plan: ["errusage", "text"], maxTurns: 100, tokenCap: 100 });
-	assert.equal(tokenBudget.aborted, true, "the failed call's usage breaches a cap of 100");
-	// The premise at 0.99.1 (issue #509): the abort at turn_end now reaches pi before it decides to retry, so
-	// no retry starts at all, and the failed run's agent_end says so. If pi retries again, the re-abort on the
-	// retry's turn_start is what stops it, and the outcome below must still hold.
-	assert.ok(!order.includes("auto_retry_start"), `pi retries the breaching turn again despite the abort, as 0.80.7 did: the re-abort path is live once more: ${order.join(",")}`);
-	assert.ok(order.includes("agent_end:false"), `the failed run ends with willRetry:false: ${order.join(",")}`);
-	assert.deepEqual(requests, ["errusage"], "no retried request reaches the provider");
-	assert.deepEqual(exit, { code: 2, reason: "token_budget" });
 });
 
 test("google-vertex ADC: the pinned auth library's OAuth refusals keep their shapes and stay a retried residual (loopback, no key)", { skip }, async () => {

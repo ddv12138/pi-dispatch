@@ -60,13 +60,12 @@ import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, envelopeFilePath, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
+import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
 import { SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileHazard, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue } from "./env-file.mjs";
-import { canonicalScope, danglingProjectRows, tokenRowsBelowJobCap, tokenRowsWithoutCap, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
+import { canonicalScope, danglingProjectRows, isModelScope, isProjectScope, loadScopedLimits, parseScopedLimits, scopedLimitsVersionFor } from "./scoped-limits.mjs";
 import { EMPTY_PROJECTS_FINGERPRINT, escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
 import { parseModelsJson, stripBom, stripJsonComments } from "./models-json.mjs";
 import { isTransientOverlayRead, overlayProviderProblem } from "./model-catalog.mjs";
-import { EMPTY_TOKEN_FINGERPRINT, tokenFingerprint } from "./token-fingerprint.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
 import { resolveConfiguredModelRuns as resolveDoctorModelRuns, cooldownModelRefs } from "./model-observation.mjs";
 import { ignoredOutputCapModels, outputCapView, outputUnboundable } from "./output-cap.mjs";
@@ -125,17 +124,10 @@ import { doctorModelProposalChecks } from "./doctor-model-proposals.mjs";
  */
 const BUNDLE_DOCTOR_TIMEOUT_MS = 30_000;
 import { readOverlay, readOverlayDocument, resolveSettings, settingsVersionFor } from "./runtime-settings.mjs";
-import { DEPLOYMENT_WINDOWS, TOKEN_KEY_PREFIX, deploymentWindowsAt, tokenWindowCaps, tokenWindowFloors, valkeyEndpointTag } from "./token-budget.mjs";
-import { dayKey, monthKey, weekKey } from "./budget.mjs";
-import { TOKEN_ENV_NAMES, TOKEN_SETTING_KEYS, TOKEN_WINDOW_KEYS, checkTokenInvariant, effectiveTokenCap, retiredDollarMessage, optionalTokenCount, RETIRED_DOLLAR_ENV_NAMES } from "./budget-rule.mjs";
-import { RETIRED_DOLLAR_KEY_PREFIX } from "./token-budget.mjs";
-import { cronPlacement, envelopeJobPaths } from "./schedules.mjs";
-import { envelopeDigest, envelopeInsideJobPaths, loadEnvelopeChecked } from "./envelope.mjs";
+import { cronPlacement } from "./schedules.mjs";
 import { keptTokens, operatorCount, readTokensFile, tokensFilePath } from "./console-tokens.mjs";
 import { RUN_MIRROR_MAX_RUNS_DEFAULT, RUN_MIRROR_MAX_RUNS_MAX, RUN_MIRROR_MAX_RUNS_MIN, runMirrorMaxRunsOf } from "./retention.mjs";
 import { verifyConsoleAudit } from "./console-audit.mjs";
-import { OTHER } from "./priorities.mjs";
-import { ALLOC_PLAN_KEY, NO_ENVELOPE_FINGERPRINT } from "./allocation.mjs";
 import { assignCheckIds, buildDoctorRecord, doctorIntervalHours, secretValuesIn } from "./doctor-results.mjs";
 import { olderStateFindings as olderStateFindingsReal, VALKEY_CONTAINER } from "./older-state.mjs";
 import { DOCTOR_PUBLISH_SKIPPED_PREFIX } from "./doctor-spawner.mjs";
@@ -218,17 +210,11 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 		modelCatalog,
 		piModelLoader,
 		modelProposals,
-		dollarKeysExist,
-		// Issue #504 part B: the applied split's envelope digest (`alloc:plan`), read once. Undefined means the default.
-		readAppliedSplit,
 		// Issue #599, phase 2: the capacity line's read of the run history (the run mirror and the logs directory).
 		// Undefined means the default, which reads the deployment's real Valkey and files.
 		readCapacity,
-		// Issue #761: the token window check's two reads, this host's records and then the counters (`doctorTokenWindows`),
-		// and the stores an older release left behind (`olderStateFindings`, older-state.mjs). Undefined means the defaults,
-		// which read the deployment's real files, Valkey and Docker.
-		readTokenRecords,
-		readTokenCounters,
+		// Issue #761: the stores an older release left behind (`olderStateFindings`, older-state.mjs). Undefined means the
+		// default, which reads the deployment's real files, Valkey and Docker.
 		olderStateFindings,
 		// Issue #708: whether the operator console answers (`probeConsole`, console-probe.mjs). Undefined means the default,
 		// which sends one GET /healthz to a loopback address or the socket, so a test passes its own.
@@ -413,7 +399,7 @@ export async function runDoctor(shellVars = process.env, deps = {}) {
 						return { ...(await valkeyAuthState(url, { context, withoutPassword })), passwordSet: Boolean(sent.password), from: sent.from };
 					}
 				: null;
-	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(dollarKeysExist ? { dollarKeysExist } : {}), ...(readAppliedSplit ? { readAppliedSplit } : {}), ...(readCapacity ? { readCapacity } : {}), ...(readTokenRecords ? { readTokenRecords } : {}), ...(readTokenCounters ? { readTokenCounters } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
+	const seams = { setupReadOnly: setupReadOnly === true, ...(subscriptionFactory ? { subscriptionFactory } : {}), ...(modelProposals ? { modelProposals } : {}), secrets: secrets === true, ...(bundleSpawn ? { bundleSpawn } : {}), cwd, out, spawn, probeValkey, valkeyAuth: valkeyAuthSeam, readHosts, ...(modelCatalog ? { modelCatalog } : {}), ...(piModelLoader ? { piModelLoader } : {}), ...(readCapacity ? { readCapacity } : {}), ...(olderStateFindings ? { olderStateFindings } : {}), ...(consoleProbe ? { consoleProbe } : {}), fileExists, nodeVersion, mkdir, chmod, rm, agentDir, platform, home, providerOracle, facts, jobUserIdentity, stat, passwd, readEnvFile: readEnvFileShared, observationFs, jobsDirFs, jobsDirUid, valkeyOwner: valkeyOwnerSeam, isAlive, pid, runTimeouts, live: live === true, wallClock, ...(readRunRecords ? { readRunRecords } : {}), venueChecks, userName, proxyFilesExist, proxyFileIsDirectory, ...(includeNeeds ? { includeNeeds } : {}), ...(declaredEndpoints ? { declaredEndpoints } : {}), ...(readOverlayFile ? { readOverlayFile } : {}), ...(lstatOverlayFile ? { lstatOverlayFile } : {}), ...(hostAddresses ? { hostAddresses } : {}), ...(readProxyConf ? { readProxyConf } : {}), ...(readPackagedConf ? { readPackagedProxyConf: readPackagedConf } : {}), serviceEnvFile: envValues === null ? null : serviceEnvFileOf(envValues, envPath, serviceEnvLoader(platform)) };
 	// Issue #471: every other service key, resolved ONCE for the whole run (the fix pass's re-collect and `--live` judge the
 	// same resolution). THE RULE (PR #474's round cap, after three rounds of trust patches): no program doctor starts is
 	// handed anything from `.env`. Every child gets this shell's own environment, the one it had before #471; a `.env`
@@ -634,7 +620,7 @@ function asText(content, enc) {
  * set is a key the other reads back the same way -- and it is asked for THIS PLATFORM's loader, because
  * the three loaders of this file disagree and a blended reading is wrong for every deployment at once.
  */
-export const ENV_FILE_READABLE_KEYS = Object.freeze(["PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_MODEL_ENDPOINTS_FILE", "PI_ENVELOPE_FILE"]);
+export const ENV_FILE_READABLE_KEYS = Object.freeze(["PI_PAUSE_WINDOWS_FILE", "PI_SCOPED_LIMITS_FILE", "PI_PROJECTS_FILE", "PI_MODEL_ENDPOINTS_FILE"]);
 
 /**
  * The keys doctor takes from the deployment's `.env` as the SERVICE's values (issue #453, and since issue #471 every key
@@ -658,7 +644,7 @@ export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_AUTH_SOURCE", "GITHUB_
  *  `.env`. TEMP is TMPDIR's twin in the worker's temp root; PI_CODING_AGENT_DIR is where the worker reads auth.json.
  *  Issue #761: PI_CONSOLE_AUDIT_RETENTION_DAYS is here and not in `CONSOLE_ENV_KEYS` although it is named for the
  *  console: the worker reads it (it runs the audit reaper), and a console key set alone makes doctor judge a console. */
-export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", "PI_MAX_TOKENS", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP", ...Object.values(TOKEN_ENV_NAMES)]);
+export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP"]);
 /** Issue #471: the receiver's keys doctor judges its boot by (the receiver's unit reads the same `.env`). */
 export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "PI_RECEIVER_ALLOW_SELF", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
 /**
@@ -751,7 +737,6 @@ export const DOCTOR_SHELL_KEYS = Object.freeze({
 	PI_SCOPED_LIMITS_FILE: "read from .env by its own two-subject rule (ENV_FILE_READABLE_KEYS)",
 	PI_PROJECTS_FILE: "read from .env by its own two-subject rule (ENV_FILE_READABLE_KEYS), #499",
 	PI_MODEL_ENDPOINTS_FILE: "read from .env by its own two-subject rule (ENV_FILE_READABLE_KEYS), #503",
-	PI_ENVELOPE_FILE: "read from .env by its own two-subject rule (ENV_FILE_READABLE_KEYS), #504",
 	[VALKEY_SHARED_KEY]: "read from .env ONLY (#464); a value in this shell is named as ignored",
 	...Object.fromEntries(CONSOLE_ENV_KEYS.map((k) => [k, "the operator console's, not a service's: resolved by the console's own rule (this shell, else the deployment .env) apart from the service record, #640"])),
 });
@@ -1023,7 +1008,7 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 
 /**
  * The files a worker LOADS at boot, and the one place that knows what each is and how to ask. The model endpoints file
- * (issue #503) defaults to the deployment folder's copy where the other three are off when unset.
+ * (issue #503) defaults to the deployment folder's copy where the others are off when unset.
  *
  * `load` calls the worker's own loader (issue #384). Doctor used to carry its own parse for scoped limits
  * and nothing at all for pause windows, so "will the worker start" had two answers and one silence. The
@@ -1105,75 +1090,15 @@ export const BOOT_FILES = Object.freeze([
 		// The worker's own default when VALKEY_URL is unset, so both refuse an endpoint on 6379 alike.
 		load: (path, io, env) => loadModelEndpoints({ modelEndpointsFile: path, valkeyUrl: env?.VALKEY_URL ?? DEFAULT_VALKEY_URL }, io),
 	}),
-	// Issue #504 part B. Off when unset: no envelope and no delegation, and every cap is what the operator's rows and
-	// windows set. The worker loads it at boot (start.mjs, `loadEnvelopeChecked`) against the projects and scoped limits
-	// it loaded, with the merged per-job cap, and refuses the start when it lies inside a job path, so this load asks the
-	// same three questions through the same function (`loadEnvelopeAsTheWorker`).
-	Object.freeze({
-		key: "PI_ENVELOPE_FILE",
-		noun: "the allocation envelope",
-		scaffold: "envelope.json",
-		off: "delegated allocation is OFF (every dollar cap is the operator's own)",
-		unsetMeans: "no envelope governs any job and no priorities plan applies",
-		unit: "envelope",
-		nothing: "allocation envelope",
-		// The admin writes this file (`dispatch_envelope_set`, issue #504 part C), but only at the path the key names: it
-		// has no default path, so the fix line's "the admin panel defaults to this same file" sentence does not apply.
-		panelWrites: false,
-		fails: "REFUSES TO START",
-		whenDeleted: "turns delegated allocation off",
-		whenEmpty: "turns the worker off",
-		emptyCost: "refuses the boot",
-		resolve: envelopeFilePath,
-		load: (path, io, env) => loadEnvelopeAsTheWorker(path, io, env),
-	}),
 ]);
 
 /**
  * A boot file's published check id (issue #712, `NAMED_CHECK_IDS`): `<scaffold name>.file` for the SERVICE's verdict on
- * the file it reads, `<scaffold name>.file-shell` for this shell's. Derived from the scaffold name so a sixth boot file
+ * the file it reads, `<scaffold name>.file-shell` for this shell's. Derived from the scaffold name so the next boot file
  * names itself, and the test holding `NAMED_CHECK_IDS` to the source fails until it is listed.
  */
 export function bootFileId(spec, subject = "service") {
 	return `${spec.scaffold.replace(/\.json$/, "")}.file${subject === "shell" ? "-shell" : ""}`;
-}
-
-/** A key's value when it is a non-empty string, else null: the boot reads an unset key as off. */
-function nonEmpty(value) {
-	return typeof value === "string" && value.trim() !== "" ? value : null;
-}
-
-/**
- * The envelope as the WORKER would load it (issue #504 part B): against the projects and scoped limits the service
- * names (each loaded by its own loader; one that does not load is its own BOOT_FILES line, so here it counts as none),
- * with the merged per-job cap, and with the containment check against the triggers file's cron folders and skills
- * dirs, the run roots and the global pi dir. Throws what the worker's boot would throw.
- */
-export function loadEnvelopeAsTheWorker(path, io = {}, env = {}) {
-	return loadEnvelopeChecked({ envelopeFile: path }, { ...envelopeContextOf(env, io), jobPaths: envelopeJobPaths({ triggersFile: nonEmpty(env.PI_TRIGGERS_FILE), dispatchRunRoots: delimitedList(env.PI_DISPATCH_RUN_ROOTS), globalPiDir: nonEmpty(env.PI_GLOBAL_PI_DIR) }, io) }, { io });
-}
-
-/** The projects, the scoped limits and the merged per-job cap (micro-dollars, or null) the envelope is judged against. */
-function envelopeContextOf(env, io = {}) {
-	const quiet = (load) => {
-		try {
-			return load();
-		} catch {
-			return [];
-		}
-	};
-	const projects = quiet(() => loadProjects({ projectsFile: nonEmpty(env.PI_PROJECTS_FILE) }, io));
-	const limits = quiet(() => loadScopedLimits({ scopedLimitsFile: nonEmpty(env.PI_SCOPED_LIMITS_FILE) }, io));
-	let maxTokens = null;
-	try {
-		const settings = deploymentSettingsOf(env, settingsFilePath(env), (p) => (io.existsSync ?? existsSync)(p));
-		// env values are AS WRITTEN (strings); the envelope's whole-tokens guard wants the number, and a
-		// malformed one is its own line -- the envelope then reads as having none, which it refuses.
-		maxTokens = settings.maxTokens === null || settings.maxTokens === undefined ? null : optionalTokenCount(settings.maxTokens, "maxTokens");
-	} catch {
-		// A malformed budget is its own line; the envelope then reads as having none, which it refuses.
-	}
-	return { projects, limits, maxTokens };
 }
 
 /**
@@ -1603,7 +1528,7 @@ export async function collectChecks(shellVars, seams) {
 	// runTable, blockTable }, jobData: { table } }`, each part the store module's own when absent. Every table is empty in
 	// this release, so this seam is how a test drives a need above 1 through the real collection before a table has a row.
 	const versionTables = seams.versionTables ?? {};
-	const { watchSources: triggerWatchSources, watchRules: triggerWatchRules, modelRoles: triggerModelRoles, secretBundles: triggerBundles, requiring, waiting, listing, waitProfiles, waitAfters, optingOut, resuming, recovering, replicating, instructing, commands, secreting, onceArmed, onceSpent, secretProfiles, localSecretFolders, secretNames, folders, images, imageRoutes, namedBackends, skillsDirs, forges, repositories, flows, tokenCaps, modelRuns, triggersVersionNeed, jobDataVersionNeed, parseError, parseNewer: triggersFileIsNewer, path: triggersFilePath } = readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables);
+	const { watchSources: triggerWatchSources, watchRules: triggerWatchRules, modelRoles: triggerModelRoles, secretBundles: triggerBundles, requiring, waiting, listing, waitProfiles, waitAfters, optingOut, resuming, recovering, replicating, instructing, commands, secreting, onceArmed, onceSpent, secretProfiles, localSecretFolders, secretNames, folders, images, imageRoutes, namedBackends, skillsDirs, forges, repositories, flows, modelRuns, triggersVersionNeed, jobDataVersionNeed, parseError, parseNewer: triggersFileIsNewer, path: triggersFilePath } = readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables);
 	const modelRoleProjects = readProjectFacts(env, fileExists).projects;
 	const scopedLimitFacts = readScopedLimitFacts(env, fileExists);
 	const pauseWindowFacts = readPauseWindowFacts(env, fileExists, versionTables.pauseWindows);
@@ -1645,9 +1570,6 @@ export async function collectChecks(shellVars, seams) {
 				: `fix ${triggersFilePath} so it loads (the message above names the entry and the reason), then re-run doctor -- every trigger-derived check below is skipped until it loads`,
 		});
 	}
-	section("tokens");
-	checks.push(...tokenChecks(env, tokenCaps, triggersSet !== undefined));
-
 	section("image");
 	// Only meaningful if docker itself responds; otherwise the image check is noise on top of a down daemon. Issue #433:
 	// and never without `local`, where the podman section's line (the image in THIS ACCOUNT'S store) is the image check.
@@ -2091,13 +2013,13 @@ export async function collectChecks(shellVars, seams) {
 	// The bot-loop guard, disarmed on purpose or by accident. WARNS, never fails: the switch exists for a
 	// deployment whose forge has ONE identity, where the operator's own comments and labels arrive as ours
 	// and every rule they write is dead without it. What nobody should have to learn from a bill is that the
-	// guard is off, because from that moment the only bound on a runaway loop is this deployment's own caps.
+	// guard is off, because from that moment nothing but PI_CONCURRENCY and the pause windows bounds a runaway loop.
 	const allowSelf = env.PI_RECEIVER_ALLOW_SELF;
 	if (allowSelf === "1") {
 		checks.push({
 			ok: false,
 			warn: true,
-			label: "PI_RECEIVER_ALLOW_SELF=1 -- the bot-loop guard is OFF, so the harness's own comments, labels and pushes can start jobs and only the daily caps bound the spend",
+			label: "PI_RECEIVER_ALLOW_SELF=1 -- the bot-loop guard is OFF, so the harness's own comments, labels and pushes can start jobs with nothing but PI_CONCURRENCY and the pause windows bounding them",
 			fix: "set it to 0 (or drop the line) as soon as a second forge identity exists; until then keep every trigger clear of what the harness produces itself -- a bare comment phrase and a merge-request `update` rule are both matched by our own output",
 		});
 	} else if (allowSelf !== undefined && allowSelf !== "" && allowSelf !== "0") {
@@ -2670,9 +2592,6 @@ export async function collectChecks(shellVars, seams) {
 		}
 		if (listedAll) checks.push(...budgetLedgerChecks({ ...selfRow }, listed));
 	}
-	// The applied split (issue #504 part B): one GET whenever this command may talk to the Valkey, so a single host with
-	// no envelope that refuses every job is told why. `{ digest }`, `{ undecodable: true }` for a key that exists and does
-	// not decode (the worker's EXISTS still counts it as governed), or null (no split, or no answer: nothing is said).
 	const valkeyUsable = !(unreadValkey || valkeyRefused || valkeyDbProblem || valkeyAuthVerdict?.state === "dbrange");
 	// Issue #712: where this run's results are published, by the rule every read above obeys: the Valkey doctor may talk
 	// to, at the address the worker pins, or none. Named for this host as the worker names it, so a record and its
@@ -2685,7 +2604,6 @@ export async function collectChecks(shellVars, seams) {
 		publishName = null;
 	}
 	seams.publishTo = !valkeyUsable ? null : publishName === null ? { refused: "PI_WORKER_NAME is a name the worker refuses at boot" } : { url: valkeyTalkUrl, name: publishName, every: doctorIntervalHours(env) };
-	const appliedSplit = valkeyUsable ? await (seams.readAppliedSplit ?? defaultReadAppliedSplit)(valkeyTalkUrl) : null;
 	// Read only when there is a peer to compare against. Every line below is gated on a peer existing, and
 	// the SUBPROCESS has to be too: otherwise every `doctor` run on every single-host deployment spawns an
 	// extra docker call whose answer nothing reads.
@@ -2752,8 +2670,7 @@ export async function collectChecks(shellVars, seams) {
 		}
 
 		// Clocks. The registry's own heartbeats are the measurement, and skew matters here beyond tidiness:
-		// every hold clock, every TTL and the UTC day boundary the budget windows key on are read against
-		// whichever host is looking.
+		// every hold clock and every TTL is read against whichever host is looking.
 		const skewed = peers.filter((h) => Number.isFinite(h.staleMs) && h.staleMs > 5 * 60_000);
 		if (skewed.length > 0) {
 			checks.push({
@@ -2764,19 +2681,6 @@ export async function collectChecks(shellVars, seams) {
 			});
 		}
 
-		// Issue #501 part 6: the dollar counters are shared, the caps they are judged against are per host. This host's
-		// fingerprint is computed here from the service's own settings, by the worker's function, never read back from
-		// its registry row: doctor answers for the configuration, which a worker that has not restarted may not run yet.
-		// The scoped-limits rows are the parsed file's, or none when it does not load (the worker refuses to boot then).
-		const tokensHere = deploymentSettingsOf(env, settingsFilePath(env, home), fileExists);
-		let envListHere = null;
-		try {
-			envListHere = allowedModelsFrom(env);
-		} catch {
-			// A malformed list is its own line below; the worker refuses to boot on it.
-		}
-		const fpTokHere = tokenFingerprint(tokensHere, scopedLimitFacts.parseError === null ? scopedLimitFacts.limits : [], envListHere);
-		checks.push(...(await fleetTokenChecks(fpTokHere, peers, { retiredTokenKeysExist: () => (seams.tokenKeysExist ?? seams.dollarKeysExist ?? defaultDollarKeysExist)(valkeyTalkUrl) })));
 		// Issue #499 part C: each host resolves its jobs' project from its OWN projects.json, while the project rows' counters
 		// are shared. This host's `fpProjects` from the file the service names, against every peer's published one. SKIPPED
 		// when this host's file does not load (PR #569's review): the BOOT_FILES line already fails on it, and comparing
@@ -2794,11 +2698,6 @@ export async function collectChecks(shellVars, seams) {
 		// Issue #596, phase 2: each host's budget and use, and which hosts each project's size fits on, from every row that
 		// publishes a budget (this host's own included). SKIPPED when this host's scoped-limits file does not load.
 		if (scopedLimitFacts.parseError === null) checks.push(...fleetBudgetChecks((fleet.hosts ?? []).map((h) => ({ ...h, name: printable(h.name) })), { limits: scopedLimitFacts.limits, env }));
-		// Issue #504 part B: one applied split, judged on every host against its own envelope. A host whose envelope digest
-		// differs refuses every governed job as `envelope-mismatch`. SKIPPED when this host's file does not load, for the
-		// projects check's reason above.
-		const envelopeHere = readEnvelopeFacts(env);
-		if (envelopeHere.parseError === null && appliedSplit === null) checks.push(...fleetEnvelopeChecks(envelopeHere.envelope ? envelopeDigest(envelopeHere.envelope) : NO_ENVELOPE_FINGERPRINT, peers));
 	} else if (fleet.unreachable) {
 		// Said, rather than silently absent: "no peers" and "could not ask" are different facts.
 		checks.push({ ok: true, label: `Fleet: could not read the host registry (${printable(fleet.unreachable)})` });
@@ -2807,25 +2706,12 @@ export async function collectChecks(shellVars, seams) {
 	// worker, after the peers block so the second is said on a single host too. Workers only: a receiver's status row is
 	// never a doctor input (INT-RECEIVER-STATUS-KEY).
 	checks.push(...fleetVersionChecks({ installed: PACKAGE_VERSION, self: selfRow, selfName: workerNameOf(declaredWorkerName), peers }));
-	// Issue #761: a token window counter below what this host's own records settled into it (`doctorTokenWindows`).
-	// Re-opened here, where whether this command may talk to Valkey is known, from the same Valkey at the address the
-	// worker pins.
-	section("tokens");
-	checks.push(...(await doctorTokenWindows({ seams, env, home, url: valkeyUsable ? valkeyTalkUrl : null, localHost: workerNameOf(declaredWorkerName), fileExists })));
 	section("capacity");
 	// Issue #599, phase 2: how busy each host was over the last 7 days, one fact line per host, never a warning (nothing
 	// decides on it). On every deployment, a single host too: its own files are read when the run mirror is not. Read from
 	// the same Valkey the fleet was, with the registry rows just read (their running jobs count up to now), every Valkey
 	// call bounded and the whole read under `CAPACITY_DOCTOR_TIMEOUT_MS`, so a slow mirror costs this line, not the run.
 	checks.push(...(await doctorCapacity({ seams, env, home, url: valkeyUsable ? valkeyTalkUrl : null, hosts: fleet.hosts ?? [], localHost: workerNameOf(declaredWorkerName) })));
-	// Issue #504 part B: the APPLIED split names the envelope it was made for, and every host
-	// whose envelope differs refuses its governed jobs. Read whenever this command may talk to the Valkey (above), from
-	// the same Valkey the fleet was read from; with no split there, or no answer, nothing is said.
-	if (appliedSplit !== null) {
-		const envelopeHere = readEnvelopeFacts(env);
-		if (envelopeHere.parseError === null) checks.push(...appliedSplitChecks(appliedSplit, envelopeHere.envelope ? envelopeDigest(envelopeHere.envelope) : NO_ENVELOPE_FINGERPRINT, workerNameOf(declaredWorkerName), peers));
-	}
-
 	section("provider");
 	const subscriptionCredentials = await doctorSubscriptionCredentials(env, { cwd, home, now: seams.wallClock ?? Date.now, configure: seams.subscriptionFactory });
 	// Which variable holds a provider's key is PI'S fact, asked of pi rather than copied (issue #286).
@@ -3106,13 +2992,10 @@ export async function collectChecks(shellVars, seams) {
 					});
 				}
 				// Issue #507: a priced model on a declared endpoint whose output cap would travel as max_completion_tokens,
-				// which Ollama ignores. The runner's cost guard counts every such call unboundable, so a job under a dollar
-				// cap is refused at its first call. The endpoints as the service reads them, through the keyless line's io.
-				// A model a budgeted job may use is named by the model list's own checks above, which run on the
-				// same catalog seam, so this line names only the rest: one line per model.
+				// which Ollama ignores. The runner's cost guard counts every such call unboundable. The endpoints as the
+				// service reads them, through the keyless line's io.
 				const capEndpoints = (seams.declaredEndpoints ?? ((a) => declaredEndpointsIn({ ...a, fs: keylessIo })))({ env, cwd: seams.cwd, platform: seams.platform ?? process.platform, valkeyUrl: keylessValkey });
-				const capped = usageCatalog ? cappedModelNames(env, { runs: parseError ? [] : modelRuns, deployment: deploymentSettingsOf(env, settingsFilePath(env, home), fileExists), modelRoles: triggerModelRoles, projects: modelRoleProjects }) : new Set();
-				const uncapped = ignoredOutputCapModels({ models: overlayModels, endpoints: capEndpoints, builtinModel: usageCatalog?.builtinModel, builtinChatModels: usageCatalog?.builtinChatModels }).filter((m) => !capped.has(`${m.provider}/${m.modelId}`));
+				const uncapped = ignoredOutputCapModels({ models: overlayModels, endpoints: capEndpoints, builtinModel: usageCatalog?.builtinModel, builtinChatModels: usageCatalog?.builtinChatModels });
 				if (uncapped.length > 0) {
 					const SHOWN = 5;
 					const named = uncapped.slice(0, SHOWN).map((m) => `${quotedShown(m.provider)}/${quotedShown(m.modelId)}`).join(", ");
@@ -3422,14 +3305,6 @@ export async function collectChecks(shellVars, seams) {
 		checks.push({
 			ok: true,
 			label: `${listing} trigger(s) name run.models, which needs a worker and a receiver that carry issue #502 (a service below that drops the list silently; the worker refuses such a job as trigger-skew rather than running it unrestricted, and only when it can read the triggers file itself)`,
-		});
-	}
-	if (tokenCaps.length > 0) {
-		// Issue #540: the run.models line's twin for run.maxCostUsd (#501), for its reason. A service below the floor
-		// tolerated the key as unknown and dropped it, so the job would run under the deployment's cap, or none.
-		checks.push({
-			ok: true,
-			label: `${tokenCaps.length} trigger(s) set run.maxTokens, which needs a worker and a receiver that carry issue #501 (a service below that drops the budget silently; the worker refuses such a job as trigger-skew rather than running it under the deployment's budget or none, and only when it can read the triggers file itself)`,
 		});
 	}
 
@@ -3786,9 +3661,8 @@ export async function collectChecks(shellVars, seams) {
 
 	// REQ-REPLICA-RUNS. A fact line, never a failure -- replicas are an opt-in an operator chose in a reviewed file,
 	// and the harness is doing exactly what was asked (issue #462: so not a warning either, which no change clears).
-	// What is worth saying is the arithmetic: each replica reserves its OWN budget slot before its own tokens
-	// (CONST-BUDGET-BEFORE-TOKENS), so a delivery on a `replicas: 2` trigger consumes two, and the daily cap divides
-	// accordingly. Only reported when a trigger actually asked for it.
+	// What is worth saying is the arithmetic: a delivery on a `replicas: 2` trigger runs two jobs, and PI_CONCURRENCY
+	// bounds how many of them actually race. Only reported when a trigger actually asked for it.
 	if (replicating > 0) {
 		checks.push({
 			ok: true,
@@ -3796,7 +3670,7 @@ export async function collectChecks(shellVars, seams) {
 			// concurrency half is the one an operator most often has wrong: replicas above PI_CONCURRENCY queue instead
 			// of racing, which looks like the feature silently not working. PI_CONCURRENCY is not judged here, since the
 			// panel's settings overlay can change it after doctor reads the env.
-			label: `${replicating} trigger(s) set run.replicas -- one delivery reserves one budget slot PER replica, so the daily/weekly/monthly caps divide by it; PI_CONCURRENCY bounds how many actually race, so keep it at least the largest run.replicas`,
+			label: `${replicating} trigger(s) set run.replicas -- one delivery runs one job PER replica, and PI_CONCURRENCY bounds how many actually race, so keep it at least the largest run.replicas`,
 		});
 	}
 
@@ -4112,12 +3986,6 @@ export async function collectChecks(shellVars, seams) {
 		if (projectFacts.parseError === null) checks.push(...projectRowChecks(scopedLimitFacts.limits, projectFacts.projects, scopedLimitFacts.path));
 	}
 
-	section("envelope");
-	// Issue #504 part B: the envelope's advisories, on the file the service names, when it loads (a file that does not is
-	// the BOOT_FILES line's). Warnings only: the worker boots on both.
-	const envelopeFactsHere = readEnvelopeFacts(env);
-	if (envelopeFactsHere.envelope) checks.push(...envelopeChecks(envelopeFactsHere.envelope, envelopeFactsHere.projects, envelopeFactsHere.maxTokens));
-
 	section("console");
 	// Issue #640: the operator console, judged with its keys resolved by the console's own rule (this shell's value, else
 	// the deployment `.env`'s; DOCTOR_SHELL_KEYS). This shell's values are the ones `env` already carries (the resolution
@@ -4125,7 +3993,7 @@ export async function collectChecks(shellVars, seams) {
 	// service record, so a console key is never reported as a service's.
 	const consoleShell = Object.fromEntries(CONSOLE_ENV_KEYS.filter((k) => Object.hasOwn(env, k)).map((k) => [k, env[k]]));
 	const consoleEnv = { ...env, ...resolveServiceEnv({ env: consoleShell, file: serviceEnvFile, keys: CONSOLE_ENV_KEYS }).env };
-	const consoleLines = consoleChecks(consoleEnv, { cwd, home, platform, folders, skillsDirs });
+	const consoleLines = consoleChecks(consoleEnv, { cwd, home, platform });
 	checks.push(...consoleLines);
 	// Issue #708: whether a service keeps the console running, and whether it answers. Only for a deployment that has a
 	// console at all (the lines above), so a deployment that never set one up meets no probe.
@@ -4208,7 +4076,7 @@ export async function collectChecks(shellVars, seams) {
 				checks.push({
 					ok: false,
 					warn: true,
-					label: `${explicit.map((st) => `${st.key} (${st.path})`).join(" and ")} ${plural ? "point" : "points"} into the OS temp dir, which the OS may sweep — a reboot can take your run history and your caps with it`,
+					label: `${explicit.map((st) => `${st.key} (${st.path})`).join(" and ")} ${plural ? "point" : "points"} into the OS temp dir, which the OS may sweep — a reboot can take your run history and your settings overlay with it`,
 					fix: `point ${plural ? "them" : "it"} at a durable path and move the existing files there; unsetting ${plural ? "them" : "it"} falls back to ${explicit.map((st) => (st.key === "PI_LOGS_DIR" ? defaultLogsDir(env, home) : defaultSettingsFile(env, home))).join(" and ")}`,
 				});
 			}
@@ -4220,7 +4088,7 @@ export async function collectChecks(shellVars, seams) {
 				checks.push({
 					ok: false,
 					warn: true,
-					label: `durable state defaults under the OS temp dir on this host (${defaulted.map((st) => st.path).join(", ")}), because this account's home directory is there or cannot be resolved — the OS may sweep it, and a reboot can take your run history and your caps with it`,
+					label: `durable state defaults under the OS temp dir on this host (${defaulted.map((st) => st.path).join(", ")}), because this account's home directory is there or cannot be resolved — the OS may sweep it, and a reboot can take your run history and your settings overlay with it`,
 					fix: `set ${defaulted.map((st) => st.key).join(" and ")} to a path outside the temp dir that this account can write`,
 				});
 			}
@@ -4233,7 +4101,7 @@ export async function collectChecks(shellVars, seams) {
 		//
 		// Asked for BOTH stores, not just the run history: a settings overlay that cannot be written is the
 		// quieter half of the same fault, since readOverlay treats an absent file as an empty overlay and
-		// every cap silently widens to the env default.
+		// every setting silently falls back to the env default.
 		// Issue #464: with no home, the two stores default into the per-account temp root, which the worker (and the panel,
 		// for the overlay) refuses when it is not this account's. Said once: a root the jobs dir line already refused is not
 		// repeated here.
@@ -4290,27 +4158,14 @@ export async function collectChecks(shellVars, seams) {
 						fix: "a key from a newer release is ignored here and kept by every panel and console from issue #761's release on, but an earlier one (4.3.1 included) drops every key it does not know when it writes this file, secretBundles included, so upgrade every panel and console first; a misspelt key is kept too, so remove it if it is a typo",
 					});
 				}
-				// Issue #501 (PR #542's review): a VALID overlay can still break the dollar invariant once merged over env
-				// (a window in one, no maxCostUsd in either), which the worker checks per job and answers by refusing every
-				// job. The env-only half is `tokenChecks`; this is the merged half, said only when env alone is fine.
-				const merged = overlayTokenProblem(overlay.overlay, env);
-				if (merged) checks.push({ id: "settings.overlay-tokens", ok: false, label: `settings overlay ${settingsFile}: ${merged} -- the worker refuses every job as settings-overlay-invalid`, fix: "set the token keys in the overlay (or PI_MAX_TOKENS in .env), or remove the token window" });
 			}
-		}
-		// PR #549's review: the scoped-limits dollar rows against the deployment's per-job cap, env and overlay merged
-		// the worker's way (an overlay value wins; an invalid overlay leaves env).
-		if (scopedLimitFacts.parseError === null && scopedLimitFacts.limits.length > 0) {
-			const overlay = fileExists(settingsFile) ? readOverlay(settingsFile) : { overlay: {} };
-			const fromOverlay = overlay.invalid ? undefined : overlay.overlay?.maxTokens;
-			const envCap = env.PI_MAX_TOKENS === undefined || env.PI_MAX_TOKENS === "" ? undefined : env.PI_MAX_TOKENS;
-			checks.push(...scopedTokenRowChecks(scopedLimitFacts.limits, fromOverlay ?? envCap, scopedLimitFacts.path));
 		}
 		if (noHome) {
 			checks.push({
 				ok: false,
 				warn: true,
 				label: `this account has no home directory on disk (${home}), so ${homeless.map((st) => st.path).join(" and ")} cannot be created`,
-				fix: `set ${homeless.map((st) => st.key).join(" and ")} to a path this account can write; without it the worker logs logs_dir_error at boot, drops every run record, and reads an empty settings overlay, which widens every cap to the .env default`,
+				fix: `set ${homeless.map((st) => st.key).join(" and ")} to a path this account can write; without it the worker logs logs_dir_error at boot, drops every run record, and reads an empty settings overlay, so every setting falls back to the .env default`,
 			});
 		}
 
@@ -4342,15 +4197,15 @@ export async function collectChecks(shellVars, seams) {
 			}
 		}
 		if (!env.PI_SETTINGS_FILE && !underTemp(settingsFile, env) && fileExists(`${legacy}/settings.json`) && !fileExists(settingsFile)) {
-			// The overlay outranks .env, so adopting one is handing it your caps, your model and your
+			// The overlay outranks .env, so adopting one is handing it your provider, your model and your
 			// secret-profile declarations. On a world-writable legacy directory that file may not be yours
 			// at all, and doctor must not hand an operator a one-line command that installs a stranger's
-			// spend limits. There, the remedy is to READ it first and no command is offered.
+			// model and secrets. There, the remedy is to READ it first and no command is offered.
 			const shared = sharedDirectory(legacy);
 			checks.push({
 				ok: false,
 				warn: true,
-				label: `a settings overlay is still at ${legacy}/settings.json while ${settingsFile} does not exist — until it moves, every cap, the model and any secret profiles fall back to .env and the built-in defaults, which may be wider than what you last set`,
+				label: `a settings overlay is still at ${legacy}/settings.json while ${settingsFile} does not exist — until it moves, the provider, the model and any secret profiles fall back to .env and the built-in defaults, which may differ from what you last set`,
 				fix: shared
 					? `${legacy} is writable by every local account, so that file is not necessarily yours: read it before adopting it (an overlay outranks .env), then copy it to ${settingsFile} yourself`
 					: `mkdir -p ${dirname(settingsFile)} && mv ${legacy}/settings.json ${settingsFile}`,
@@ -4881,7 +4736,7 @@ function statPath(path) {
 
 /**
  * `parseSecretProfiles`, but doctor never throws, for `parseWaitProfilesSafe`'s reason and returning the
- * same envelope. The `error`-is-a-legal-profile-name defect was found in the wait copy and fixed in both:
+ * same shape. The `error`-is-a-legal-profile-name defect was found in the wait copy and fixed in both:
  * the flat shape let one declared profile's PATH read as a parse failure and hide every check below it.
  */
 function parseSecretProfilesSafe(raw) {
@@ -5003,10 +4858,6 @@ export function workerIntSettingChecks(env, note = () => "") {
  * tokens file at the resolved path (nothing at all there, by lstat) and no PI_CONSOLE_* key set. Otherwise:
  *   - the tokens file as the console reads it (`readTokensFile`: owner-only regular file, valid), ✗ with its own fix;
  *   - at least one operator token, ✗ (with none, nobody can change anything from the console);
- *   - the tokens file outside every path a job container can see, ✗: a local trigger's run.folder is bind-mounted
- *     read-write, so a job there could read the file or add a token of its own. Judged by `envelopeInsideJobPaths`, the
- *     envelope's identity-based containment check (a firmlink or bind alias of a folder is caught), on the file's real
- *     path, with the local folders, skills dirs, absolute run roots and the overlay;
  *   - entries kept for a role this release does not know (issue #761, `keptTokens`), ⚠: a newer release writes such
  *     entries, and a console of this release signs them in nowhere;
  *   - PI_CONSOLE_LISTEN parseable (✗, the console refuses to start) and PI_CONSOLE_BIND_PUBLIC=1 (⚠, plain HTTP);
@@ -5016,7 +4867,7 @@ export function workerIntSettingChecks(env, note = () => "") {
  * `env` must already carry the console keys resolved (`collectChecks` does it). Seams: `cwd` (the deployment folder),
  * `fs`, `uid`, `home`, `platform`, `folders` (canonical local run.folders), `skillsDirs`, `realpath`.
  */
-export function consoleChecks(env, { cwd = process.cwd(), fs = nodeFs, uid = process.geteuid?.(), home, platform = process.platform, folders = [], skillsDirs = [], realpath = realpathSync.native } = {}) {
+export function consoleChecks(env, { cwd = process.cwd(), fs = nodeFs, uid = process.geteuid?.(), home, platform = process.platform } = {}) {
 	const path = tokensFilePath({ PI_CONSOLE_TOKENS_FILE: env.PI_CONSOLE_TOKENS_FILE }, cwd);
 	let present = true;
 	try {
@@ -5037,11 +4888,8 @@ export function consoleChecks(env, { cwd = process.cwd(), fs = nodeFs, uid = pro
 		if (operators === 0) {
 			checks.push({ ok: false, label: `console: the tokens file ${shownPath} holds no operator token, so nobody can make a change from the console`, fix: "run `pi-dispatch-console token add --name <you> --role operator`" });
 		}
-		const inside = consoleTokensInsideJobPaths(path, env, { cwd, fs, folders, skillsDirs, realpath });
-		if (inside.problem) {
-			checks.push({ ok: false, label: `console: the tokens file ${shownPath} ${inside.problem}`, fix: inside.fix });
-		} else if (operators > 0) {
-			checks.push({ ok: true, label: `console: tokens file ${shownPath} is owner-only and outside every job folder (${operators} operator${operators === 1 ? "" : "s"}, ${viewers} viewer${viewers === 1 ? "" : "s"})` });
+		if (operators > 0) {
+			checks.push({ ok: true, label: `console: tokens file ${shownPath} is owner-only (${operators} operator${operators === 1 ? "" : "s"}, ${viewers} viewer${viewers === 1 ? "" : "s"})` });
 		}
 		const kept = keptTokens(read.file).length;
 		if (kept > 0) {
@@ -5111,180 +4959,6 @@ export async function consoleServiceChecks(env, seams = {}) {
 	if (answer.state === "unknown") return [{ ok: true, label: `console: whether it answers is not checked${why}` }];
 	if (answer.state === "running") return [{ ok: true, label: `console: answers${at}` }];
 	return [{ ok: false, warn: true, label: `console: not running${at}${why}`, fix: `${start} starts it (it needs an operator token); its log is ${logs}` }];
-}
-
-/**
- * Whether a job container can see the console tokens file: `{}` or `{ problem, fix }`. The file's REAL path is judged
- * (the containment check requires a canonical path, and the console reads whatever the configured one resolves to). A
- * second hard link is refused as the envelope's is: another name of the file could sit in a job folder unseen. A
- * relative run root is skipped here (the envelope refuses one; the console has no such rule to borrow), and a path
- * that cannot be judged is said, not passed.
- */
-function consoleTokensInsideJobPaths(path, env, { cwd, fs, folders, skillsDirs, realpath }) {
-	const fix = "move the tokens file out of every local trigger's run.folder and run.skillsDir, every PI_DISPATCH_RUN_ROOTS root and PI_GLOBAL_PI_DIR, and point PI_CONSOLE_TOKENS_FILE at its new path";
-	try {
-		const st = fs.statSync(path);
-		if (st.nlink > 1) return { problem: `has ${st.nlink} hard links: another name of the file could sit inside a folder a job can see, so keep exactly one`, fix: `remove the other names (\`find / -samefile ${path}\` lists them)` };
-		const real = realpath(path);
-		const runRoots = delimitedList(env.PI_DISPATCH_RUN_ROOTS).filter((r) => isAbsolute(r));
-		const globalPiDir = typeof env.PI_GLOBAL_PI_DIR === "string" && env.PI_GLOBAL_PI_DIR !== "" ? env.PI_GLOBAL_PI_DIR : null;
-		// PWD comes from the process environment inside the check, as on doctor's envelope load (`loadEnvelopeChecked`).
-		const inside = envelopeInsideJobPaths(real, { cronFolders: folders, runRoots, skillsDirs, globalPiDir }, { cwd });
-		if (inside === null) return {};
-		const what = { "cron-folder": "a local trigger's run.folder", "run-root": "a PI_DISPATCH_RUN_ROOTS root", "skills-dir": "a trigger's run.skillsDir", "global-pi-dir": "PI_GLOBAL_PI_DIR" }[inside.kind] ?? inside.kind;
-		return { problem: `lies inside ${what} (${quotedShown(inside.path)}), which a job container can see: a job there could read the token hashes or add a token of its own`, fix };
-	} catch (err) {
-		return { problem: `could not be judged against the folders a job can see (${escapeControls(err?.code ?? "the path could not be resolved")})`, fix: `make ${path} and the trigger folders readable here, then run doctor again` };
-	}
-}
-
-/**
- * The envelope facts (issue #504 part B): the envelope as the worker would load it, the projects and the per-job cap it
- * was judged against, or a parse error when `PI_ENVELOPE_FILE` is set and does not load (the BOOT_FILES line's).
- * `envelope` is null when the key is unset.
- */
-function readEnvelopeFacts(env) {
-	const path = nonEmpty(env.PI_ENVELOPE_FILE);
-	if (path === null) return { envelope: null, projects: [], maxTokens: null, parseError: null };
-	const io = { readFileSync, existsSync };
-	try {
-		const context = envelopeContextOf(env, io);
-		return { envelope: loadEnvelopeAsTheWorker(path, io, env), projects: context.projects, maxTokens: context.maxTokens, parseError: null };
-	} catch (e) {
-		return { envelope: null, projects: [], maxTokens: null, parseError: e?.message ?? String(e) };
-	}
-}
-
-/**
- * The envelope's advisories (issue #504 part B, INT-ENVELOPE-FILE-CONTRACT), WARNINGS the worker boots on:
- *   - a floor above 0 and below the per-job cost cap: every governed job reserves its per-job cap against its share, so a
- *     floor that small admits no job of its own (it still counts toward the total);
- *   - a project in projects.json that the envelope does not name: its jobs count in `_other`'s share.
- * Plus one line of facts: the digest (what `fpEnvelope` and `alloc:envelope:expected` hold), the window, the total and
- * whether delegation is on. Ids and amounts only.
- */
-export function envelopeChecks(envelope, projects, maxTokens) {
-	const checks = [{ ok: true, label: `Allocation envelope ${envelopeDigest(envelope)}: ${envelope.totalTokens} tokens a ${envelope.window}, ${Object.keys(envelope.floors).length} entries, delegation ${envelope.delegation?.enabled ? `ON (writers ${envelope.delegation.writers.join(", ")}, step ${envelope.delegation.maxStepPct}%, interval ${envelope.delegation.minIntervalHours}h)` : "OFF"}` }];
-	const low = Object.entries(envelope.floors).filter(([, floor]) => floor > 0 && Number.isSafeInteger(maxTokens) && floor < maxTokens);
-	if (low.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `envelope floor(s) ${low.map(([id, floor]) => `${id} (${floor})`).join(", ")} are below the per-job token budget (${maxTokens}): each governed job reserves its whole budget against its share, so a floor that small admits no job of its own`,
-			fix: "raise the floor to at least the per-job budget (PI_MAX_TOKENS), lower the budget, or set the floor to 0 if the project needs no guaranteed share",
-		});
-	}
-	const absent = (Array.isArray(projects) ? projects : []).map((p) => p?.id).filter((id) => typeof id === "string" && id !== OTHER && envelope.floors[id] === undefined);
-	if (absent.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `project(s) ${absent.join(", ")} are in projects.json and not in the envelope, so their jobs count in ${OTHER}'s share of the split`,
-			fix: "add each to the envelope's floorsUsd (0 is a floor) if it should have a share of its own; leave it out if counting it with the work in no project is what you meant",
-		});
-	}
-	return checks;
-}
-
-/**
- * Issue #504 part B: do this host's envelope and its peers' agree? `mine` is this host's `fpEnvelope` as doctor computes
- * it from the service's envelope file (`envelopeDigest`, or `none`), `peers` the registry rows of every OTHER host.
- * WARNINGS only, the fleet block's rule, but the consequence is named: a host whose digest is not the applied split's
- * refuses every governed job as `envelope-mismatch`.
- *
- *   - A peer whose `fpEnvelope` differs: the hosts judge one shared split against two envelopes, so one side refuses.
- *   - A peer with no `fpEnvelope`: a worker from before the envelope, which enforces no split at all. Said only when an
- *     envelope is in use somewhere, so a fleet without one hears nothing new on upgrade.
- * Hosts are named, never a value: the registry carries a digest.
- */
-export function fleetEnvelopeChecks(mine, peers) {
-	const checks = [];
-	const opinions = peers.filter((h) => typeof h.fpEnvelope === "string" && h.fpEnvelope !== "");
-	const differing = opinions.filter((h) => h.fpEnvelope !== mine);
-	if (differing.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `Hosts disagree about the allocation envelope: ${differing.map((h) => h.name).join(", ")} ${differing.length === 1 ? "has" : "have"} ${differing.every((h) => h.fpEnvelope === NO_ENVELOPE_FINGERPRINT) ? "no envelope" : "an envelope with other numbers"}, and this host ${mine === NO_ENVELOPE_FINGERPRINT ? "has none" : `has ${mine}`}, so the hosts whose envelope is not the applied split's refuse every governed job as envelope-mismatch`,
-			fix: "copy the same envelope.json to every host (PI_ENVELOPE_FILE), or unset it on every host and DEL alloc:plan alloc:envelope:expected; to make a hand edit the fleet's, copy it to every host and SET alloc:envelope:expected to its digest (doctor prints it)",
-		});
-	}
-	const silent = peers.filter((h) => typeof h.fpEnvelope !== "string" || h.fpEnvelope === "");
-	const inUse = mine !== NO_ENVELOPE_FINGERPRINT || opinions.some((h) => h.fpEnvelope !== NO_ENVELOPE_FINGERPRINT);
-	if (silent.length > 0 && inUse) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `${silent.map((h) => h.name).join(", ")} ${silent.length === 1 ? "publishes" : "publish"} no envelope digest, so ${silent.length === 1 ? "it enforces" : "they enforce"} no allocation split while the rest of the fleet does`,
-			fix: "upgrade every worker on this Valkey to the same release: a worker from before the envelope reserves against the operator's caps alone",
-		});
-	}
-	return checks;
-}
-
-/**
- * The applied split against every host (issue #504 part B). `applied` is `{ digest }`, the
- * envelope digest `alloc:plan` was made for; `mine` this host's (`none` without an envelope); `peers` the registry rows.
- * One line of facts naming the hosts that match it, and a FAILURE for this host and for each peer that does not: such a
- * host refuses every governed job as `envelope-mismatch` (a host with no envelope in a governed fleet included).
- */
-export function appliedSplitChecks(applied, mine, myName, peers) {
-	const TURN_OFF = "remove PI_ENVELOPE_FILE from every host, then `valkey-cli DEL alloc:plan alloc:envelope:expected`";
-	// Named as the peer lines name theirs (issue #507): on a fleet each host's doctor says "this host", and the line read
-	// beside another host's output did not say which host refuses.
-	const me = typeof myName === "string" && myName !== "" ? `this host (${myName})` : "this host";
-	const noEnvelopeHere = { ok: false, label: `${me} has no envelope while the fleet has an applied budget split (alloc:plan), so it refuses every job as envelope-mismatch`, fix: `install the fleet's envelope here (PI_ENVELOPE_FILE), or turn delegation off for the whole fleet: ${TURN_OFF}` };
-	if (applied.undecodable) {
-		// The key exists and is no split this build can read: a host with an envelope replaces it with the neutral split at
-		// its next job, while a host without one counts it as governed and refuses.
-		const checks = [{ ok: false, warn: true, label: "alloc:plan exists but is not a budget split this build can read; a host with an envelope replaces it with the neutral split at its next job", fix: `if delegation is meant to be off: ${TURN_OFF}` }];
-		if (mine === NO_ENVELOPE_FINGERPRINT) checks.push(noEnvelopeHere);
-		return checks;
-	}
-	const d = applied.digest;
-	const matching = [...(mine === d ? [myName] : []), ...peers.filter((h) => h.fpEnvelope === d).map((h) => h.name)].sort();
-	// Green only while some host matches: a split no host carries the envelope of refuses every governed job everywhere.
-	const checks = [
-		matching.length > 0
-			? { ok: true, label: `Applied budget split (alloc:plan) was made for envelope ${d}: ${matching.join(", ")} ${matching.length === 1 ? "matches" : "match"} it` }
-			: { ok: false, warn: true, label: `Applied budget split (alloc:plan) was made for envelope ${d}, and no host matches it`, fix: `copy that envelope to the hosts, or make another one the fleet's (copy it to every host, then \`valkey-cli SET alloc:envelope:expected <its digest>\`), or turn delegation off: ${TURN_OFF}` },
-	];
-	if (mine !== d) {
-		checks.push(
-			mine === NO_ENVELOPE_FINGERPRINT
-				? noEnvelopeHere
-				: { ok: false, label: `${me} carries envelope ${mine}, not the one the applied budget split was made for (${d}), so it refuses every governed job as envelope-mismatch`, fix: `copy the fleet's envelope here; or, to make this one the fleet's, copy it to every host and run \`valkey-cli SET alloc:envelope:expected ${mine}\`` },
-		);
-	}
-	const off = peers.filter((h) => typeof h.fpEnvelope === "string" && h.fpEnvelope !== "" && h.fpEnvelope !== d);
-	if (off.length > 0) {
-		checks.push({
-			ok: false,
-			label: `${off.map((h) => h.name).join(", ")} ${off.length === 1 ? "carries" : "carry"} ${off.every((h) => h.fpEnvelope === NO_ENVELOPE_FINGERPRINT) ? "no envelope" : "another envelope"}, not the one the applied budget split was made for (${d}), so ${off.length === 1 ? "it refuses" : "they refuse"} every governed job as envelope-mismatch`,
-			fix: `copy the fleet's envelope to those hosts (PI_ENVELOPE_FILE), or turn delegation off for the whole fleet: ${TURN_OFF}`,
-		});
-	}
-	return checks;
-}
-
-/**
- * The applied split from Valkey (`alloc:plan`): `{ digest }`, `{ undecodable: true }` when the key exists and holds no
- * readable split, or null with no key or no answer.
- */
-export async function defaultReadAppliedSplit(url) {
-	try {
-		return await withDoctorClient(url, async (client) => {
-			const text = await boundedOp(client.get(ALLOC_PLAN_KEY), DOCTOR_VALKEY_OP_TIMEOUT_MS);
-			if (text === null || text === undefined) return null;
-			let digest = null;
-			try {
-				digest = JSON.parse(text)?.envelopeDigest;
-			} catch {}
-			return typeof digest === "string" && /^[0-9a-f]{16}$/.test(digest) ? { digest } : { undecodable: true };
-		});
-	} catch {
-		return null;
-	}
 }
 
 export { cooldownModelRefs } from "./model-observation.mjs";
@@ -5362,161 +5036,6 @@ function scopeFormOf(scope) {
 }
 
 /**
- * The dollar settings (issue #501), read from env with the worker's own parser (`money.mjs`), so doctor and
- * the boot refusal cannot disagree. Silent when nothing is set. Each setting that does not parse, a window
- * without the per-job cap, and every trigger
- * whose `run.maxCostUsd` is above `PI_MAX_COST_USD`: a FAILURE when the worker loads the triggers file
- * (`workerReadsTriggers`, it refuses to start on it), a warning otherwise (the job still runs under the
- * smaller cap, so the higher one is a value that reads as allowed and is not).
- */
-/**
- * The merged-values half of the dollar invariant (issue #501, PR #542's review): `overlay` over `env`, the worker's
- * own merge, checked by the worker's own rule. Returns the reason, or null when it holds, or when env ALONE already
- * breaks it (that is `tokenChecks`' line, and the worker refuses to start on it).
- */
-export function overlayTokenProblem(overlay, env) {
-	const fromEnv = {};
-	for (const key of TOKEN_SETTING_KEYS) {
-		// maxTokens' env name is its own (PI_MAX_TOKENS), not a window's: the same resolution config.mjs does.
-		const raw = key === "maxTokens" ? env?.PI_MAX_TOKENS : env?.[TOKEN_ENV_NAMES[key]];
-		if (raw !== undefined && raw !== "") fromEnv[key] = raw;
-	}
-	if (checkTokenInvariant(fromEnv) !== null) return null;
-	const merged = { ...fromEnv };
-	for (const key of TOKEN_SETTING_KEYS) if (overlay?.[key] !== undefined && overlay[key] !== null) merged[key] = overlay[key];
-	// The retired dollar keys: a merged overlay carrying one is the problem, named with the upgrade.
-	for (const key of Object.keys(RETIRED_DOLLAR_ENV_NAMES)) {
-		if (overlay?.[key] !== undefined && overlay[key] !== null) return retiredDollarMessage(key);
-	}
-	return checkTokenInvariant(merged)?.invalid ?? null;
-}
-
-/**
- * The scoped-limits dollar rows (issues #501 part 5, #502 part 6) against the deployment's per-job cap, WARNINGS only
- * (PR #549's review). With no per-job cap, a dollar row refuses every job it applies to as `config-refused` unless the
- * job's trigger sets `run.maxCostUsd`. With one, a row window BELOW it refuses every job it applies to, every time
- * (a job reserves its whole cap), until one of the two changes. Rows are named by index and kind, and only the caps
- * are compared, never a scope string (a folder scope is a host path). `maxCostUsd` is the merged value or undefined;
- * one that does not parse is `tokenChecks`' line, so this says nothing more.
- */
-export function scopedTokenRowChecks(limits, maxTokens, path) {
-	const checks = [];
-	const label = (r) => `#${r.index} (${r.kind === "model" ? "a model row" : r.kind === "project" ? "a project row" : "a repo or folder row"})`;
-	const missing = tokenRowsWithoutCap(limits, maxTokens);
-	if (missing.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `scoped limit(s) ${missing.map(label).join(", ")} in ${path} set a token window, but the deployment has no per-job token budget (maxTokens) -- every job such a row applies to is refused as config-refused unless its trigger sets run.maxTokens`,
-			fix: "set PI_MAX_TOKENS in .env (or maxTokens in the overlay), or give each trigger that reaches the row a run.maxTokens",
-		});
-	}
-	let below = [];
-	try {
-		below = tokenRowsBelowJobCap(limits, maxTokens);
-	} catch {
-		return checks;
-	}
-	if (below.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `scoped limit window(s) ${below.map((r) => `${label(r)} ${r.window}`).join(", ")} in ${path} are below the per-job token budget (maxTokens) -- a job reserves its whole budget, so every job that reaches such a window is refused token-cap, every time`,
-			fix: "raise the window to at least maxTokens, or lower maxTokens (a trigger's smaller run.maxTokens also fits)",
-		});
-	}
-	return checks;
-}
-
-export function tokenChecks(env, tokenCaps, workerReadsTriggers) {
-	const envName = { ...TOKEN_ENV_NAMES, maxTokens: "PI_MAX_TOKENS", ...RETIRED_DOLLAR_ENV_NAMES };
-	const checks = [];
-	const values = {};
-	for (const key of ["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]) {
-		if (env[envName[key]] !== undefined && env[envName[key]] !== "") {
-			checks.push({ ok: false, label: `${envName[key]} is set: ${retiredDollarMessage(key)} -- the worker refuses to start`, fix: `remove ${envName[key]} and set the token knobs instead` });
-		}
-	}
-	for (const key of TOKEN_SETTING_KEYS) {
-		const raw = env[TOKEN_ENV_NAMES[key]] ?? (key === "maxTokens" ? env.PI_MAX_TOKENS : undefined);
-		if (raw === undefined || raw === "") continue;
-		try {
-			optionalTokenCount(raw, envName[key] ?? key);
-			values[key] = Number(raw);
-		} catch (error) {
-			checks.push({ ok: false, label: `${envName[key] ?? key} ${error.message.slice(error.message.indexOf("must"))} -- the worker refuses to start`, fix: `set ${envName[key] ?? key} to a whole number of tokens, or remove it` });
-		}
-	}
-	const broken = checkTokenInvariant(values);
-	if (broken) {
-		const window = TOKEN_WINDOW_KEYS.find((key) => values[key] !== undefined);
-		checks.push({ ok: false, label: `${TOKEN_ENV_NAMES[window]} is set without PI_MAX_TOKENS -- the worker refuses to start`, fix: "a token window reserves each job's per-job budget, so set PI_MAX_TOKENS too" });
-	}
-	if (values.maxTokens !== undefined) {
-		const deployment = values.maxTokens;
-		for (const cap of tokenCaps.filter((c) => optionalTokenCount(c.maxTokens, "run.maxTokens") !== null && optionalTokenCount(c.maxTokens, "run.maxTokens") > deployment)) {
-			checks.push({
-				ok: false,
-				...(workerReadsTriggers ? {} : { warn: true }),
-				label: workerReadsTriggers
-					? `${cap.label}: run.maxTokens is above PI_MAX_TOKENS -- the worker refuses to start (a trigger can only narrow the per-job token budget)`
-					: `${cap.label}: run.maxTokens is above PI_MAX_TOKENS -- its jobs run under PI_MAX_TOKENS anyway (a trigger can only narrow the per-job token budget)`,
-				fix: "lower that trigger's run.maxTokens to PI_MAX_TOKENS or below, or remove it",
-			});
-		}
-	}
-	return checks;
-}
-
-/**
- * Do this host's token budgets match its peers'? `mine` is this host's `fpTok` as doctor computes it
- * from the service's settings (`deploymentSettingsOf`, `tokenFingerprint`), `peers` the registry rows of every OTHER
- * host. WARNINGS only, never a failure, the fleet block's rule: this command runs on one machine and must not refuse
- * a deployment for a condition that machine cannot fix.
- *
- *   - A peer whose `fpTok` differs: the token counters are shared, so the host with the larger budget admits a job the
- *     other would refuse, and each host's view of "full" is its own.
- *   - A peer with no `fpTok` (or an empty one): it runs a worker from before hosts published one, so whether it holds
- *     the same budgets is unknown. Said only when token budgets are in use somewhere: this host's fingerprint, or any
- *     peer's, is not the empty one, or else a token counter (`budget:tok:*`) exists on this Valkey
- *     (`retiredTokenKeysExist`, asked only then). The counters are the one trace a capped host that publishes nothing
- *     leaves (PR #551's review: an old capped host beside a new uncapped one was silent). A fleet that never set a
- *     token budget hears nothing new on upgrade.
- *
- * Hosts are named, never their caps: the registry carries a digest, so "different" is all a reader can know.
- */
-export async function fleetTokenChecks(mine, peers, { retiredTokenKeysExist = async () => false } = {}) {
-	const checks = [];
-	const opinions = peers.filter((h) => typeof h.fpTok === "string" && h.fpTok !== "");
-	const differing = opinions.filter((h) => h.fpTok !== mine);
-	if (differing.length > 0) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `Hosts disagree about the token budgets: ${differing.map((h) => h.name).join(", ")} ${differing.length === 1 ? "judges" : "judge"} the shared token counters against a different per-job budget, token windows, scoped-limits token rows or PI_ALLOWED_MODELS than this host's settings`,
-			fix: "set PI_MAX_TOKENS, PI_DAILY_TOKEN_CAP, PI_WEEKLY_TOKEN_CAP, PI_MONTHLY_TOKEN_CAP, the overlay's token keys, the scoped-limits file's token rows and PI_ALLOWED_MODELS (it picks the model rows a job without its own list reserves in) alike on every host: the counters are shared, so a host with a larger budget admits a job another would refuse. An env change needs a restart; an overlay or scoped-limits edit shows within one beat",
-		});
-	}
-	const silent = peers.filter((h) => typeof h.fpTok !== "string" || h.fpTok === "");
-	if (silent.length === 0) return checks;
-	let inUse = mine !== EMPTY_TOKEN_FINGERPRINT || opinions.some((h) => h.fpTok !== EMPTY_TOKEN_FINGERPRINT);
-	let byCounters = false;
-	if (!inUse) {
-		byCounters = (await Promise.resolve().then(retiredTokenKeysExist).catch(() => false)) === true;
-		inUse = byCounters;
-	}
-	if (inUse) {
-		checks.push({
-			ok: false,
-			warn: true,
-			label: `${silent.map((h) => h.name).join(", ")} ${silent.length === 1 ? "publishes no fingerprint of its" : "publish no fingerprint of their"} token budgets, so whether ${silent.length === 1 ? "it holds" : "they hold"} the same budgets as this host is unknown${byCounters ? " (no host that publishes one sets a token cap, but token counters exist on this Valkey, so some host reserved tokens recently)" : ""}`,
-			fix: "upgrade every worker on this Valkey to the same release: a worker from before hosts compared their token budgets may judge the shared token counters against other caps, or reserve no tokens at all",
-		});
-	}
-	return checks;
-}
-
-/**
  * Issue #499 part C: do this host's projects match its peers'? `mine` is this host's `fpProjects` as doctor computes it
  * from the service's projects file (`projectsFingerprint`), `peers` the registry rows of every OTHER host. WARNINGS
  * only, the fleet block's rule.
@@ -5535,8 +5054,8 @@ export async function fleetTokenChecks(mine, peers, { retiredTokenKeysExist = as
  * The fleet's job sizes (issue #596): WARNS when this host's scoped-limits file is version 3 (it declares 3, or a row
  * carries a size) and a peer publishes no `limitsVersion` of 3 or more. Such a worker refuses the file only when it
  * LOADS it, at boot; a running one keeps its LAST GOOD file on reload (`scoped_limits_reload_invalid`), so the size and
- * every later edit to the file (job counts, `concurrent`, dollar caps) do not apply on it until it is upgraded and
- * restarted, with nothing on its jobs saying so. Nothing is said while the file is version 1 or 2.
+ * every later edit to the file (sizes, `concurrent`) do not apply on it until it is upgraded and restarted, with
+ * nothing on its jobs saying so. Nothing is said while the file is version 1 or 2.
  */
 export function fleetSizeChecks(fileVersion, peers) {
 	if (fileVersion < 3) return [];
@@ -5545,7 +5064,7 @@ export function fleetSizeChecks(fileVersion, peers) {
 	return [{
 		ok: false,
 		warn: true,
-		label: `${old.map((h) => h.name).join(", ")} ${old.length === 1 ? "predates" : "predate"} job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (job counts, concurrent, token budgets) applies on it until it is upgraded and restarted, and it refuses the file at its next start`,
+		label: `${old.map((h) => h.name).join(", ")} ${old.length === 1 ? "predates" : "predate"} job sizes (scoped-limits version 3), while this host's file is version 3: a running worker from before keeps its last good file, so neither the size nor any later edit to the file (sizes, concurrent) applies on it until it is upgraded and restarted, and it refuses the file at its next start`,
 		fix: "upgrade and restart every worker on this Valkey before scoped-limits.json is written as version 3",
 	}];
 }
@@ -5666,55 +5185,25 @@ export function boundModelOf({ provider, id }, { builtinModel, overlay = null })
 export { resolveConfiguredModelRuns as resolveDoctorModelRuns } from "./model-observation.mjs";
 
 /**
- * Who runs on which models under which cap (issues #501 and #502), as the worker resolves a job: the deployment's own
- * default, then every trigger. `deployment` is `{ provider, model, maxCostUsd }` (overlay over env,
- * `deploymentSettingsOf`); `runs` the trigger facts; `envList` the parsed `PI_ALLOWED_MODELS`, or null. Each subject
- * is `{ label, main, list, cap, secretNames, named }`: `main` and `list` are `{ provider, id }`, `list` is the
- * trigger's `run.models` or else the env list, `cap` the effective per-job cap in micro-dollars (the smaller of the
- * trigger's and the deployment's, `effectiveTokenCap`) or null, and `named` says the trigger names a provider, a
- * model or a list of its own.
+ * Who runs on which models (issues #501 and #502), as the worker resolves a job: the deployment's own default, then
+ * every trigger. `deployment` is `{ provider, model }` (overlay over env, `deploymentSettingsOf`); `runs` the trigger
+ * facts; `envList` the parsed `PI_ALLOWED_MODELS`, or null. Each subject is `{ label, main, list, secretNames, named }`:
+ * `main` and `list` are `{ provider, id }`, `list` is the trigger's `run.models` or else the env list, and `named` says
+ * the trigger names a provider, a model or a list of its own.
  */
 export function modelSubjects({ runs = [], deployment, envList = null, modelRoles = {}, projects = [] }) {
 	const listOf = (list) => (Array.isArray(list) ? list.map(splitModelEntry).filter((ref) => ref !== null).map((ref) => ({ provider: ref.provider, id: ref.model })) : []);
-	const capOf = (triggerValue) => {
-		try {
-			return effectiveTokenCap(triggerValue, deployment.maxTokens);
-		} catch {
-			return null; // a deployment budget that does not parse is `tokenChecks`' line
-		}
-	};
-	const subjects = [{ label: "the deployment default", main: { provider: deployment.provider, id: deployment.model }, list: listOf(envList), cap: capOf(undefined), secretNames: [], named: false, deployment: true }];
+	const subjects = [{ label: "the deployment default", main: { provider: deployment.provider, id: deployment.model }, list: listOf(envList), secretNames: [], named: false, deployment: true }];
 	for (const run of resolveDoctorModelRuns({ runs, deployment, envList, modelRoles, projects }).runs) {
 		subjects.push({
 			label: run.label,
 			main: { provider: run.provider ?? deployment.provider, id: run.model ?? deployment.model },
 			list: listOf(run.models ?? envList),
-			cap: capOf(run.maxTokens),
 			secretNames: run.secretNames ?? [],
 			named: run.provider !== undefined || run.model !== undefined || run.models !== undefined,
 		});
 	}
 	return subjects;
-}
-
-/**
- * The `provider/id` of every model a job under a per-job dollar cap may use (the main model and the list, as
- * `modelSubjects` resolves them), for the overlay's output-cap line, which no longer feeds a cost bound. Empty
- * when the settings cannot be read.
- */
-export function cappedModelNames(env, { runs, deployment, modelRoles = {}, projects = [] }) {
-	let envList = null;
-	try {
-		envList = allowedModelsFrom(env);
-	} catch {
-		// A malformed PI_ALLOWED_MODELS is its own line.
-	}
-	const names = new Set();
-	for (const s of modelSubjects({ runs, deployment, envList, modelRoles, projects })) {
-		if (s.cap === null || s.cap === undefined) continue;
-		for (const ref of [s.main, ...s.list]) names.add(`${ref.provider}/${ref.id}`);
-	}
-	return names;
 }
 
 /**
@@ -5816,17 +5305,12 @@ export function listedProviderCredentialChecks(subjects, { candidatesOf, forward
 }
 
 /**
- * The deployment's provider, model and token settings as the worker resolves them for a job: the overlay over env
- * (`resolveSettings`), falling back to env when the overlay is invalid or the merged token values break the
- * invariant, which is the fallback `start.mjs` takes for its slot count and its `fpTok`. Values as written; nothing
- * here throws.
+ * The deployment's provider and model as the worker resolves them for a job: the overlay over env (`resolveSettings`),
+ * falling back to env when the overlay is invalid, which is the fallback `start.mjs` takes. Values as written;
+ * nothing here throws.
  */
 export function deploymentSettingsOf(env, settingsFile, fileExists) {
 	const fromEnv = { provider: env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: env.PI_MODEL ?? DEFAULT_MODEL };
-	for (const key of TOKEN_SETTING_KEYS) {
-		const raw = env[TOKEN_ENV_NAMES[key]] ?? (key === "maxTokens" ? env.PI_MAX_TOKENS : undefined);
-		fromEnv[key] = raw === undefined || raw === "" ? null : raw;
-	}
 	let read;
 	try {
 		read = fileExists(settingsFile) ? readOverlay(settingsFile) : { overlay: {} };
@@ -5835,7 +5319,7 @@ export function deploymentSettingsOf(env, settingsFile, fileExists) {
 	}
 	const resolved = resolveSettings(fromEnv, read);
 	if (resolved.invalid) return fromEnv;
-	return Object.fromEntries(Object.keys(fromEnv).map((key) => [key, resolved[key] ?? null]));
+	return { provider: resolved.provider ?? null, model: resolved.model ?? null };
 }
 
 /** Subscription diagnostics use only local credential metadata, independently of forge validity or Valkey. */
@@ -5975,7 +5459,7 @@ function triggerLabel(t, index) {
 }
 
 function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTables = {}) {
-	const none = { watchSources: {}, watchRules: 0, modelRoles: {}, secretBundles: {}, requiring: 0, waiting: 0, listing: 0, waitProfiles: [], waitAfters: [], optingOut: 0, resuming: 0, recovering: 0, replicating: 0, instructing: 0, commands: 0, secreting: 0, onceArmed: 0, onceSpent: 0, secretProfiles: [], localSecretFolders: [], secretNames: [], folders: [], images: [], imageRoutes: [], namedBackends: [], skillsDirs: [], forges: [], repositories: [], flows: [], tokenCaps: [], modelRuns: [], triggersVersionNeed: 1, jobDataVersionNeed: 1, parseError: null, parseNewer: false, path: null };
+	const none = { watchSources: {}, watchRules: 0, modelRoles: {}, secretBundles: {}, requiring: 0, waiting: 0, listing: 0, waitProfiles: [], waitAfters: [], optingOut: 0, resuming: 0, recovering: 0, replicating: 0, instructing: 0, commands: 0, secreting: 0, onceArmed: 0, onceSpent: 0, secretProfiles: [], localSecretFolders: [], secretNames: [], folders: [], images: [], imageRoutes: [], namedBackends: [], skillsDirs: [], forges: [], repositories: [], flows: [], modelRuns: [], triggersVersionNeed: 1, jobDataVersionNeed: 1, parseError: null, parseNewer: false, path: null };
 	try {
 		// Unset falls back to ./triggers.json in cwd, MIRRORING the receiver's own default
 		// (receiver/src/config.mjs) -- the two must read the same file, or doctor preflights a deployment
@@ -6113,11 +5597,8 @@ function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTable
 					packages: t.run.packages !== false,
 				}))
 				.filter((f) => typeof f.flow === "string"),
-			// Issue #501: every trigger that sets run.maxCostUsd, with the label the cap check names it by. The value
-			// already parsed (the loader validated it), so the check below only compares.
-			tokenCaps: triggers.map((t, index) => ({ label: triggerLabel(t, index), maxTokens: t.run.maxTokens })).filter((r) => r.maxTokens !== undefined && r.maxTokens !== null),
-			// Issues #501 and #502 (PR 9 of that round): every trigger's model choice, list, cap and bound secret NAMES, for the
-			// unknown-model, cap-fit and listed-provider credential lines. Every kind, cron included, whatever host serves it:
+			// Issues #501 and #502 (PR 9 of that round): every trigger's model choice, list and bound secret NAMES, for the
+			// unknown-model and listed-provider credential lines. Every kind, cron included, whatever host serves it:
 			// a model the worker does not know is refused wherever the job runs.
 			modelRuns: triggers.map((t, index) => ({
 				label: triggerLabel(t, index),
@@ -6128,7 +5609,6 @@ function readTriggerFacts(env, fileExists, cwd, declaredWorkerName, versionTable
 				model: typeof t.run.model === "string" ? t.run.model : undefined,
 				models: Array.isArray(t.run.models) ? t.run.models : undefined,
 				fallbackModels: Array.isArray(t.run.fallbackModels) ? t.run.fallbackModels : undefined,
-				maxTokens: t.run.maxTokens ?? undefined,
 				secretNames: t.run.secrets !== undefined && t.run.secrets !== null ? Object.keys(t.run.secrets) : [],
 			})),
 			// Explicit on the success path too (issue #242): the dead-scope advisory distinguishes
@@ -6910,10 +6390,10 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 		}
 	}
 
-	// Advisory on purpose, and deliberately NOT what the money gate reads. A healthcheck can flap, and a
-	// pre-spend gate that refuses on a flapping signal drops real work while one that retries on it burns
-	// the second budget slot this whole requirement exists to save. Here a human is reading, so it is worth
-	// saying: a squid that parsed its config and then wedged looks identical to a healthy one from outside.
+	// Advisory on purpose, and deliberately NOT what admission reads. A healthcheck can flap, and a gate
+	// that refuses on a flapping signal drops real work while one that retries on it starts a job whose
+	// first call is about to fail. Here a human is reading, so it is worth saying: a squid that parsed its
+	// config and then wedged looks identical to a healthy one from outside.
 	if (health && health !== "none") {
 		checks.push({
 			ok: health === "healthy",
@@ -7173,7 +6653,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 							: `Egress policy ALLOWS ${host} that is not on your allowlist`
 				}`,
 				fix: want
-					? `add api.anthropic.com to egress-allowlist.conf and restart the proxy -- until then every job starts, fails at its first turn, and spends two budget slots proving it`
+					? `add api.anthropic.com to egress-allowlist.conf and restart the proxy -- until then every job starts and fails at its first turn`
 					: `check egress-allowlist.conf: a rule wider than you meant (a bare domain where you wanted a subdomain) lets a job reach hosts you did not list`,
 			});
 		}
@@ -7999,57 +7479,6 @@ async function defaultReadHosts(url) {
 	}
 }
 
-/**
- * Has any host reserved tokens on this Valkey recently? For `fleetTokenChecks`, asked only when a peer publishes no
- * `fpTok` and nothing else says token caps are in use. BEST EFFORT, and it says so wherever it is described:
- *   1. EXISTS on the deployment's current day, week and month keys (`budget:usd:YYYY-MM-DD`, `:w:<Monday>`,
- *      `:m:YYYY-MM`, `budget.mjs`'s key functions at `now`), the counters any host with a dollar window writes;
- *   2. else a bounded SCAN for `budget:usd:*` (at most ten passes of COUNT 1000), for scope and model windows.
- * The whole read is bounded by `deadlineMs`, so a large keyspace or a hung server answers "not seen". Any fault is
- * false: the answer can add a warning, never remove one. A host whose only dollar setting is the per-job cap writes no
- * counter at all, so it is not found this way (PR #551's review, round 2).
- */
-export async function dollarKeysExistWith(client, { now = () => new Date(), deadlineMs = 2000 } = {}) {
-	let timer;
-	const deadline = new Promise((resolve) => {
-		// NOT unref'd, `host-registry.mjs`'s reason: an unref'd timer does not fire when the hung call is the last thing
-		// holding the loop, which is the case it is for. It is cleared as soon as the answer is in.
-		timer = setTimeout(() => resolve(false), deadlineMs);
-	});
-	const ask = (async () => {
-		const at = now();
-		// The RETIRED dollar keys: a leftover counter means an older capped host still runs beside this one.
-		const current = [dayKey(at, RETIRED_DOLLAR_KEY_PREFIX), weekKey(at, RETIRED_DOLLAR_KEY_PREFIX), monthKey(at, RETIRED_DOLLAR_KEY_PREFIX)];
-		if (Number(await client.exists(...current)) > 0) return true;
-		let cursor = "0";
-		for (let pass = 0; pass < 10; pass++) {
-			const [next, keys] = await client.scan(cursor, "MATCH", `${RETIRED_DOLLAR_KEY_PREFIX}:*`, "COUNT", 1000);
-			if (Array.isArray(keys) && keys.length > 0) return true;
-			cursor = String(next);
-			if (cursor === "0") return false;
-		}
-		return false;
-	})();
-	ask.catch(() => {});
-	try {
-		return (await Promise.race([ask, deadline])) === true;
-	} catch {
-		return false;
-	} finally {
-		clearTimeout(timer);
-	}
-}
-
-/** `dollarKeysExistWith` over a fail-fast client on `url`, always disconnected. */
-export async function defaultDollarKeysExist(url) {
-	try {
-		// dollarKeysExistWith bounds its whole read.
-		return await withDoctorClient(url, (client) => dollarKeysExistWith(client));
-	} catch {
-		return false;
-	}
-}
-
 async function defaultProbeValkey(url) {
 	try {
 		return await withDoctorClient(url, async (client) => (await boundedOp(client.ping(), DOCTOR_VALKEY_OP_TIMEOUT_MS), true));
@@ -8533,139 +7962,6 @@ export function fleetVersionChecks({ installed, self = null, selfName = null, pe
 	const one = rows.length === 1;
 	const ok = `Fleet versions: the ${rows.length} ${one ? "worker with a live row reports" : "workers with a live row report"} ${[...groups.keys()][0]}`;
 	return [{ id: "fleet.versions", ok: !warn, ...(warn ? { warn: true } : {}), label: warn ? `pi-dispatch versions ${differ ? "differ" : "cannot all be read"}: ${parts.join("; ")}` : ok, ...(warn ? { fix } : {}) }];
-}
-
-/** The most the token window check may take, its records read and its counter read together. */
-export const TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS = 5_000;
-
-const WINDOW_WORDS = Object.freeze({ day: { its: "today's", cap: "daily" }, week: { its: "this week's", cap: "weekly" }, month: { its: "this month's", cap: "monthly" } });
-/** A counter value as a signed token count: `-200` for a counter a give-back took below 0. */
-const tokensSigned = (count) => (count < 0 ? `-${-count}` : `${count}`);
-const utcMinute = (ms) => `${new Date(ms).toISOString().slice(0, 16).replace("T", " ")} UTC`;
-
-/**
- * The token window reset check (issue #761, DES-TOKEN-RESERVE-AND-SETTLE): whether a deployment token window's
- * counter holds less than this host's own run records settled into it, which only lost history explains (a flushed,
- * replaced or restored Valkey, an evicted key, a hand edit): the cap then counts from less than was used and can let
- * at least the difference more be used. One warning for every such window, or nothing.
- *
- *   1. The deployment's day, week and month caps, overlay over env (`deploymentSettingsOf`, `tokenWindowCaps`). None
- *      set, or no Valkey this command may talk to (`url` null): nothing is read.
- *   2. This host's records FIRST (`seams.readTokenRecords`; default: `readLocalWindow` from the start of the earliest
- *      active window, a file at a time until the bound passes), summed per window by `tokenWindowFloors` over this
- *      host's name and the endpoint tag of `url` (`valkeyEndpointTag`, the worker's).
- *   3. THEN the counters of the windows whose sum is above 0 (`seams.readTokenCounters`; default: one MGET). In this
- *      order every record read was settled before its counter was read, so a counter read after it cannot be
- *      legitimately below it.
- *   4. A counter that is absent, or an integer below the sum (a negative one included), is a finding; one that is not
- *      an integer is skipped.
- * Both default reads share one bound (`TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS`) and are refused in tests
- * (`forbidDefaultTokenWindowRead`). A read that fails or runs out of time says nothing: this check claims a reset only
- * where it sees one, and its silence is never a claim that nothing was lost. It sees this host's share only (another
- * host's records are not here) and only the deployment windows (a scoped, project or model key is a hash per ledger),
- * from the records written since issue #761 (`tokensWindows.reservedIn`).
- */
-export async function doctorTokenWindows({ seams = {}, env = {}, home, url, localHost, fileExists = existsSync }) {
-	// Resolved first, then judged: `deploymentSettingsOf` never throws and hands back values as written, which
-	// `tokenWindowCaps` judges whole numbers only.
-	const settings = deploymentSettingsOf(env, settingsFilePath(env, home), fileExists);
-	// The worker refuses to boot on a broken invariant (a window without PI_MAX_TOKENS), so its windows are
-	// never enforced here: say nothing, like the pre-token check's parse-refusal branch did.
-	if (checkTokenInvariant({ ...settings, maxTokens: settings.maxTokens }) !== null) return [];
-	const caps = tokenWindowCaps(settings);
-	const valkey = url ? valkeyEndpointTag(url) : null;
-	if (caps === null || valkey === null) return [];
-	try {
-		const nowMs = (typeof seams.wallClock === "function" ? seams.wallClock : Date.now)();
-		const at = deploymentWindowsAt(nowMs);
-		const active = DEPLOYMENT_WINDOWS.filter((w) => caps[w] !== null && caps[w] !== undefined && at[w].bucket !== null).map((w) => ({ window: w, cap: caps[w], ...at[w] }));
-		if (active.length === 0) return [];
-		// The bound runs on the real clock, never the injected one a test fixes: it measures how long this read takes.
-		const clock = typeof seams.tokenWindowsClock === "function" ? seams.tokenWindowsClock : Date.now;
-		const deadlineAt = clock() + (seams.tokenWindowsTimeoutMs ?? TOKEN_WINDOWS_DOCTOR_TIMEOUT_MS);
-		const read = await (seams.readTokenRecords ?? defaultReadTokenRecords)({ logsDir: logsDirPath(env, home), sinceMs: Math.min(...active.map((w) => w.startMs)), deadlineAt, clock });
-		const floors = tokenWindowFloors(read?.records, { host: localHost, valkey, buckets: Object.fromEntries(active.map((w) => [w.window, w.bucket])) });
-		const due = active.filter((w) => floors[w.window] > 0);
-		if (due.length === 0) return [];
-		const counters = await (seams.readTokenCounters ?? defaultReadTokenCounters)({ url, keys: due.map((w) => w.key), deadlineAt, clock });
-		if (!Array.isArray(counters) || counters.length !== due.length) return [];
-		const found = [];
-		due.forEach((w, i) => {
-			const raw = counters[i];
-			if (raw === null || raw === undefined) return void found.push({ ...w, floor: floors[w.window], counter: null });
-			const text = typeof raw === "number" ? String(raw) : raw;
-			if (typeof text !== "string" || !/^-?\d{1,16}$/.test(text) || !Number.isSafeInteger(Number(text))) return;
-			if (Number(text) < floors[w.window]) found.push({ ...w, floor: floors[w.window], counter: Number(text) });
-		});
-		return tokenWindowResetChecks(found);
-	} catch (err) {
-		if (err?.[FORBIDDEN_READ]) throw err;
-		return [];
-	}
-}
-
-/**
- * The one `tokens.window-reset` warning for `found` (`doctorTokenWindows`), each `{ window, key, cap, floor, counter,
- * ttlSeconds, endMs }` (`counter` null for an absent key), or none for an empty list. PURE. It says "at least" and
- * "this host's" wherever it gives an amount: the other hosts' records are not here, so the real shortfall can only be
- * larger. The fix puts the shortfall back (`INCRBY`, then `EXPIRE` with the window's own TTL, printed, and without
- * `NX`, which an operator's older Valkey may not take), lowers the cap, or pauses until the window ends. On a fleet
- * the amount is the sum of every host's settled share less what the counter holds, never the sum of each host's
- * shortfall: each shortfall subtracts the counter, so adding them subtracts it once per host and puts back too little.
- * The sum is in tokens, as `INCRBY` takes it.
- */
-export function tokenWindowResetChecks(found) {
-	if (!Array.isArray(found) || found.length === 0) return [];
-	const parts = found.map((f) => {
-		const short = f.floor - (f.counter ?? 0);
-		const holds = f.counter === null ? "is missing" : `holds ${tokensSigned(f.counter)}`;
-		return `${WINDOW_WORDS[f.window].its} (${f.key}) ${holds} while this host's own run records settled ${f.floor} tokens into it, so the ${f.cap} ${WINDOW_WORDS[f.window].cap} token cap counts at least ${short} tokens too little`;
-	});
-	const put = found.map((f) => `\`valkey-cli INCRBY ${f.key} ${f.floor - (f.counter ?? 0)}\` then \`valkey-cli EXPIRE ${f.key} ${f.ttlSeconds}\``);
-	const ends = found.map((f) => `${WINDOW_WORDS[f.window].its} at ${utcMinute(f.endMs)}`);
-	const one = found.length === 1;
-	return [
-		{
-			id: "tokens.window-reset",
-			ok: false,
-			warn: true,
-			label: `${one ? "A dollar window counter is" : "Dollar window counters are"} below what this host's own runs settled into ${one ? "it" : "them"}, so ${one ? "its" : "their"} history was lost (a flushed, replaced or restored Valkey, an evicted key, or a hand edit) and the cap can let at least that much more be spent: ${parts.join("; ")}. Other hosts' runs are not counted here`,
-			fix: `put back at least this host's share for the rest of the window: ${put.join("; ")} (on a fleet, run doctor on every host first, then \`INCRBY\` the sum, in micro-dollars, of what each says its records settled, less what the counter holds now), or lower the cap by what was already spent, or run \`pi-dispatch pause\` and resume once the window ends (${ends.join("; ")}). A counter lowered on purpose is named here until its window ends`,
-		},
-	];
-}
-
-/**
- * Set by the test helper (test/helpers/doctor.mjs), as `forbidDefaultCapacityRead` is: from then on the dollar window
- * check's DEFAULT reads throw an error doctor does not swallow, so a test that reaches the developer's real logs
- * directory and Valkey fails loudly instead of judging whatever that machine holds.
- */
-let defaultTokenWindowReadForbidden = false;
-export function forbidDefaultTokenWindowRead() {
-	defaultTokenWindowReadForbidden = true;
-}
-const forbiddenTokenRead = () => Object.assign(new Error("doctor reached its real token window read in a test: pass readTokenRecords and readTokenCounters"), { [FORBIDDEN_READ]: true });
-
-/** The default records read: this host's files, a file at a time until `deadlineAt` (`readLocalWindow`). */
-async function defaultReadTokenRecords({ logsDir, sinceMs, deadlineAt, clock }) {
-	if (defaultTokenWindowReadForbidden) throw forbiddenTokenRead();
-	const { readLocalWindow } = await import("./capacity-records.mjs");
-	return readLocalWindow(logsDir, { sinceMs, deadlineAt, clock });
-}
-
-/**
- * The default counters read: one MGET through a fail-fast client, its connection and its command each bounded by what
- * is left before `deadlineAt`, so the whole check stays inside its bound. Null when it could not be read.
- */
-async function defaultReadTokenCounters({ url, keys, deadlineAt, clock }) {
-	if (defaultTokenWindowReadForbidden) throw forbiddenTokenRead();
-	const left = () => Math.max(0, deadlineAt - clock());
-	if (left() === 0) return null;
-	try {
-		return await withDoctorClient(url, (client) => boundedOp(client.mget(...keys), left()), { connectTimeoutMs: left() });
-	} catch {
-		return null;
-	}
 }
 
 /**
@@ -9765,7 +9061,7 @@ export function liveRunVia(spawn, { bin = "docker" } = {}) {
 export function watchDoctorChecks({ sources = {}, rules = 0, env = {} } = {}) {
 	const entries = Object.entries(sources);
 	if (!entries.length) return [];
-	const checks = [{ id: "watch.sources", ok: true, label: `${entries.length} watch source(s), ${rules} watch rule(s); daily caps are required at load` }];
+	const checks = [{ id: "watch.sources", ok: true, label: `${entries.length} watch source(s), ${rules} watch rule(s)` }];
 	for (const [source, declaration] of entries) {
 		const identity = createHash("sha256").update(source).digest("hex").slice(0, 16);
 		const present = typeof env[declaration.secretEnv] === "string" && env[declaration.secretEnv].length > 0;

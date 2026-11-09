@@ -3,8 +3,6 @@ import assert from "node:assert/strict";
 import { chmodSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { dayKey, weekKey, monthKey } from "@edgehero/pi-dispatch/budget";
-import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
 import { RUN_MIRROR_MAX_RUNS_DEFAULT } from "@edgehero/pi-dispatch/retention";
 import {
   resolvePaths,
@@ -16,7 +14,6 @@ import {
   readSchedulers,
   mapSchedulers,
   SCHEDULER_NAME_MAX,
-  readBudget,
   listRuns,
   scanRunRecords,
   readRun,
@@ -31,13 +28,11 @@ import {
   panelValkeyContext,
   writeSettings,
   blankSettingsFile,
-  mergedTokenProblem,
   writeTriggers,
   readPauseWindows,
   writePauseWindows,
   readScopedLimits,
   writeScopedLimits,
-  readScopedBudget,
   readSubscriptions,
   writeSubscriptions,
   enqueueDispatchRun,
@@ -229,7 +224,6 @@ test("resolvePaths reads env with safe defaults and never calls loadConfig", () 
     scopedLimitsPath: "./scoped-limits.json",
     projectsPath: "./projects.json",
     projectsFile: null,
-    envelopeFile: null,
     subscriptionsPath: "/subs.json",
   });
 });
@@ -362,52 +356,6 @@ test("readLogTail drops blank lines so newline-delimited runner events do not ea
   const content = '\n{"event":"a"}\n\n{"event":"b"}\n\n{"event":"exit"}\n';
   const rec = readLogTail({ logsDir: "/logs", jobId: "x", lines: 3, fs: fakeFs({ "x.log": content }) });
   assert.deepEqual(rec.lines, ['{"event":"a"}', '{"event":"b"}', '{"event":"exit"}']);
-});
-
-test("readBudget GETs the token day key only and never mutates (the job-count windows are gone)", async () => {
-  const commands = [];
-  const values = { [dayKey(new Date(), TOKEN_KEY_PREFIX)]: "123456" };
-  const redis = {
-    async get(key) {
-      commands.push(["get", key]);
-      return values[key] ?? null;
-    },
-    disconnect() {
-      commands.push(["disconnect"]);
-    },
-  };
-  const res = await readBudget({ url: "redis://x", redisFn: () => redis });
-  assert.deepEqual(res, { tokensToday: 123456 });
-  const ops = commands.filter((c) => c[0] !== "disconnect");
-  assert.deepEqual(new Set(ops.map((c) => c[0])), new Set(["get"]), "only GET -- never INCR/EXPIRE");
-  assert.deepEqual(
-    new Set(ops.map((c) => c[1])),
-    new Set([dayKey(new Date(), TOKEN_KEY_PREFIX)]),
-    "GETs the token day, never the retired budget:<date>/w:/m: job-count keys",
-  );
-});
-
-test("readBudget degrades SYNCHRONOUSLY on a junk URL -- the client is never even constructed", async () => {
-  // Without the parse guard, "not-a-url" buffers the GETs until the 2.5s timeout on EVERY canned
-  // command-test invocation, plus stray ioredis error events landing on whichever test runs next.
-  const res = await readBudget({
-    url: "not-a-url",
-    redisFn: () => {
-      throw new Error("must not construct a client for a junk URL");
-    },
-  });
-  assert.ok(typeof res.unreachable === "string" && res.unreachable !== "", "degrades to a stated absence");
-});
-
-test("readBudget returns { unreachable } when the client errors", async () => {
-  const redis = {
-    async get() {
-      throw new Error("ECONNREFUSED");
-    },
-    disconnect() {},
-  };
-  const res = await readBudget({ url: "redis://x", redisFn: () => redis });
-  assert.match(res.unreachable, /ECONNREFUSED/);
 });
 
 test("readQueueState reports paused state, counts, and worker count", async () => {
@@ -749,7 +697,7 @@ test("readTriggers normalizes each on.type into its discriminated display record
   ]);
 });
 
-test("a cron trigger's portfolio flag reaches the display record only when true, and nothing else changes (#507)", () => {
+test("a cron trigger's retired portfolio flag is not carried in the display record (#507, C2)", () => {
   const files = {
     "triggers.json": JSON.stringify({
       triggers: [
@@ -761,9 +709,10 @@ test("a cron trigger's portfolio flag reaches the display record only when true,
   };
   const [on, off, junk] = readTriggers({ triggersPath: "/x/triggers.json", fs: fakeFs(files) }).triggers;
   const base = { type: "cron", pattern: "0 6 * * 1", folder: "/srv/p", flow: "plan-week", command: null, model: null, task: true, packages: true, image: null, backend: null, excludeTools: null, skillsDir: null, instructions: false, resume: false, secrets: 0, secretsProfile: null };
-  assert.deepEqual(on, { ...base, id: "plan", portfolio: true, index: 0 });
-  assert.deepEqual(off, { ...base, id: "off", index: 1 }, "false is the ordinary cron record, key for key");
-  assert.deepEqual(junk, { ...base, id: "junk", index: 2 }, "a non-boolean is no flag: the loader refuses it, the display never claims it");
+  for (const [row, id, index] of [[on, "plan", 0], [off, "off", 1], [junk, "junk", 2]]) {
+    assert.deepEqual(row, { ...base, id, index });
+    assert.ok(!Object.hasOwn(row, "portfolio"), "the retired flag never reaches the display record");
+  }
 });
 
 test("normalizeTriggerForDisplay renders an issue trigger: action + number + the one-shot fields (#231)", () => {
@@ -1013,14 +962,14 @@ test("readStagedPackages never throws when the manifest reader does", () => {
 });
 
 test("readSettingsView returns the validated overlay via the worker's own reader", () => {
-  const files = { "settings.json": JSON.stringify({ model: "m", dailyTokenCap: 5 }) };
+  const files = { "settings.json": JSON.stringify({ model: "m", maxTurns: 30 }) };
   const res = readSettingsView({ settingsFile: "/x/settings.json", fs: fakeFs(files) });
   assert.equal(res.path, "/x/settings.json");
-  assert.deepEqual(res.overlay, { model: "m", dailyTokenCap: 5 });
+  assert.deepEqual(res.overlay, { model: "m", maxTurns: 30 });
 });
 
 test("readSettingsView surfaces an invalid overlay without throwing (fail closed)", () => {
-  const files = { "settings.json": JSON.stringify({ dailyTokenCap: 0 }) };
+  const files = { "settings.json": JSON.stringify({ maxTurns: 0 }) };
   const res = readSettingsView({ settingsFile: "/x/settings.json", fs: fakeFs(files) });
   assert.ok(res.invalid, "an out-of-bounds key makes the whole overlay invalid");
 });
@@ -1118,10 +1067,10 @@ function memFs(initial = {}) {
 
 test("writeSettings merges into the existing overlay, preserving prior keys", () => {
   const path = "/s/settings.json";
-  const fs = memFs({ [path]: JSON.stringify({ model: "m1", dailyTokenCap: 5 }) });
+  const fs = memFs({ [path]: JSON.stringify({ model: "m1", concurrency: 3 }) });
   const res = writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, maxTurns: 12 }), fs });
-  assert.deepEqual(res, { ok: true, overlay: { model: "m1", dailyTokenCap: 5, maxTurns: 12 } });
-  assert.deepEqual(JSON.parse(fs.files.get(path)), { model: "m1", dailyTokenCap: 5, maxTurns: 12 });
+  assert.deepEqual(res, { ok: true, overlay: { model: "m1", concurrency: 3, maxTurns: 12 } });
+  assert.deepEqual(JSON.parse(fs.files.get(path)), { model: "m1", concurrency: 3, maxTurns: 12 });
 });
 
 test("writeSettings REFUSES over an invalid file instead of rebuilding it, so nothing in it is erased (#501)", () => {
@@ -1137,12 +1086,12 @@ test("writeSettings REFUSES over an invalid file instead of rebuilding it, so no
   }
   // A MISSING file is the normal empty overlay and still writes.
   const fs = memFs({});
-  assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 7 }), fs }), { ok: true, overlay: { dailyTokenCap: 7 } });
+  assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, concurrency: 2 }), fs }), { ok: true, overlay: { concurrency: 2 } });
   // A BLANK file (whitespace or a byte-order mark only) holds nothing to lose, so it is written over like a missing one.
   for (const text of ["", "  \n\t", "\uFEFF", "\uFEFF \n"]) {
     const blank = memFs({ [path]: text });
-    assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, dailyTokenCap: 7 }), fs: blank }), { ok: true, overlay: { dailyTokenCap: 7 } }, JSON.stringify(text));
-    assert.deepEqual(JSON.parse(blank.files.get(path)), { dailyTokenCap: 7 });
+    assert.deepEqual(writeSettings({ settingsFile: path, mutate: (o) => ({ ...o, concurrency: 2 }), fs: blank }), { ok: true, overlay: { concurrency: 2 } }, JSON.stringify(text));
+    assert.deepEqual(JSON.parse(blank.files.get(path)), { concurrency: 2 });
   }
   // A text that is not blank but not valid either stays refused.
   assert.ok(writeSettings({ settingsFile: path, mutate: (o) => o, fs: memFs({ [path]: "\uFEFF x" }) }).invalid);
@@ -2272,7 +2221,6 @@ test("readFolderSkills attaches the prose-loop hints from the SKILL.md body", ()
 
 // ── scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT) ──────────────────────────────────────
 
-import { modelTokenKeyPrefix, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 test("readScopedLimits: valid file, missing file, invalid file (incl. a NEWER version, fail-loud)", () => {
@@ -2401,94 +2349,6 @@ test("writeScopedLimits validates the RESULT through the shared parser and leave
   const mixed = writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (list) => [...list, { scope: "forgejo:acme/web", concurrent: 1 }] });
   assert.match(mixed.invalid, /index 1.*at index 0/);
   assert.equal(fs.files.get("sl.json"), before);
-});
-
-test("readScopedBudget GETs only the token windows a row caps; absent keys are honest zeros; dead queue degrades", async () => {
-  const limits = [
-    { scope: "acme/web", dayTokens: 3, weekTokens: 40, monthTokens: null, concurrent: 1 },
-    { scope: "/srv/site", dayTokens: null, weekTokens: null, monthTokens: null, concurrent: 2 }, // concurrent-only: zero GETs
-  ];
-  const commands = [];
-  const prefix = scopeTokenKeyPrefix("acme/web");
-  const redis = {
-    async get(key) {
-      commands.push(key);
-      return key === dayKey(new Date(), prefix) ? "2" : null;
-    },
-    disconnect() {},
-  };
-  const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ tokensUsed: { day: 2, week: 0 } }, {}]);
-  assert.equal(commands.length, 2, "one GET per capped token window, none for the concurrent-only row");
-  assert.ok(commands.every((k) => k.startsWith(`${prefix}:`)), "keys recomputed through the shared tokenKeyPrefixFor");
-  const dead = await readScopedBudget({ url: "not-a-url", limits });
-  assert.ok(dead.unreachable, "junk URL degrades synchronously, never a timeout burn");
-  assert.deepEqual(await readScopedBudget({ url: "redis://x", limits: [] }), { rows: [] });
-});
-
-test("issue #498: readScopedBudget reads a bare row's token key and a qualified row its own", async () => {
-  // A bare "acme/web" row's token key hashes the bare string; the qualified row hashes its forge-qualified scope, so a
-  // forge's jobs count on the row that names that forge.
-  const limits = [
-    { scope: "acme/web", dayTokens: 3, concurrent: null },
-    { scope: "github:acme/api", dayTokens: 5, concurrent: null },
-  ];
-  const now = new Date();
-  const redis = {
-    async get(key) {
-      if (key === dayKey(now, scopeTokenKeyPrefix("acme/web"))) return "2";
-      if (key === dayKey(now, scopeTokenKeyPrefix("github:acme/api"))) return "4";
-      return null;
-    },
-    disconnect() {},
-  };
-  const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ tokensUsed: { day: 2 } }, { tokensUsed: { day: 4 } }]);
-});
-
-test("writeScopedLimits writes the LOWEST version that expresses the file: v1 stays v1, a token or model row makes v2 (#501 p5, #502 p6)", () => {
-  const fs = memFs({ "sl.json": JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 3 }] }) });
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/api", concurrent: 9 }] }).ok, true);
-  assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1, "concurrency-only rows: still version 1, readable by an older worker");
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "acme/ops", dayTokens: 5000 }] }).ok, true);
-  const v2 = JSON.parse(fs.files.get("sl.json"));
-  assert.equal(v2.version, 2);
-  assert.deepEqual(v2.limits[2], { scope: "acme/ops", dayTokens: 5000 }, "nulls omitted");
-  // Deleting the last token row steps back down to version 1.
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => l.filter((r) => r.scope !== "acme/ops") }).ok, true);
-  assert.equal(JSON.parse(fs.files.get("sl.json")).version, 1);
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => [...l, { scope: "model:openai/gpt-x", monthTokens: 40_000 }] }).ok, true);
-  const m = JSON.parse(fs.files.get("sl.json"));
-  assert.equal(m.version, 2, "a model row needs version 2");
-  assert.deepEqual(m.limits.at(-1), { scope: "model:openai/gpt-x", monthTokens: 40_000 });
-  // An edit of the count fields keeps a token field the row already had (read-modify-write through the parser).
-  assert.equal(writeScopedLimits({ scopedLimitsPath: "sl.json", fs, mutate: (l) => l.map((r) => (r.scope === "model:openai/gpt-x" ? { ...r, dayTokens: 1000 } : r)) }).ok, true);
-  assert.deepEqual(JSON.parse(fs.files.get("sl.json")).limits.at(-1), { scope: "model:openai/gpt-x", dayTokens: 1000, monthTokens: 40_000 });
-});
-
-test("readScopedBudget also reads the TOKEN keys a row caps, scope and model, under the worker's own prefixes", async () => {
-  const limits = [
-    { scope: "acme/web", concurrent: null, dayTokens: 50_000, weekTokens: null, monthTokens: null },
-    { scope: "model:OpenAI/gpt-x", concurrent: null, dayTokens: null, weekTokens: 25_000, monthTokens: null },
-    { scope: "acme/count", concurrent: 1 }, // no token window: no GET at all
-  ];
-  const now = new Date();
-  const values = new Map([
-    [dayKey(now, scopeTokenKeyPrefix("acme/web")), "12000"],
-    [weekKey(now, modelTokenKeyPrefix("openai/gpt-x")), "4000"],
-  ]);
-  const commands = [];
-  const redis = {
-    async get(key) {
-      commands.push(key);
-      return values.get(key) ?? null;
-    },
-    disconnect() {},
-  };
-  const res = await readScopedBudget({ url: "redis://x", limits, redisFn: () => redis });
-  assert.deepEqual(res.rows, [{ tokensUsed: { day: 12_000 } }, { tokensUsed: { week: 4_000 } }, {}]);
-  assert.equal(commands.length, 2, "one GET per capped token window; a concurrent-only row reads nothing");
-  assert.ok(commands.some((k) => k.startsWith(`${modelTokenKeyPrefix("openai/gpt-x")}:`)), "the model key hashes the LOWERCASED ref");
 });
 
 // --- the fleet (issue #57) ------------------------------------------------------------------------------
@@ -2787,26 +2647,14 @@ test("panelEnv: the deployment's PI_SESSIONS_DIR is a panel path key, relative t
   assert.equal(panelEnv({ env: { HOME: "/h" }, pointerDir: null }).env.PI_SESSIONS_DIR, undefined, "no pointer, no .env read");
 });
 
-test("panelEnv + settingShown: a pointer deployment's .env token budget is what the dispatch_set confirm states (#501)", () => {
-  // The worker reads PI_MAX_TOKENS from the deployment's .env; pi's own environment does not carry it. Before the
-  // token names joined PANEL_SERVICE_KEYS the confirm said "(unset: no cap)" while the worker ran at 2000.
+test("panelEnv + settingShown: a retired token key is never shown, and the surviving keys still are (#501, C2)", () => {
   const dir = scaffoldedDeployment("PI_MAX_TOKENS=2000\n");
   const { env } = panelEnv({ env: { HOME: "/h" }, pointerDir: dir, platform: "linux" });
-  assert.equal(env.PI_MAX_TOKENS, "2000");
-  assert.equal(settingShown("maxTokens", {}, env, { deploymentDir: dir }), "2000 (env PI_MAX_TOKENS)");
-  assert.equal(settingShown("maxTokens", { maxTokens: 1500 }, env, { deploymentDir: dir }), "1500 (overlay)");
-  // With a deployment the worker's .env IS visible, so absent (or empty, the worker's own reading) is no budget.
-  assert.equal(settingShown("maxTokens", {}, { HOME: "/h" }, { deploymentDir: dir }), "(unset: no budget)");
-  const emptyDir = scaffoldedDeployment("PI_MAX_TOKENS=\n", "pi-501-empty-");
-  const empty = panelEnv({ env: { HOME: "/h" }, pointerDir: emptyDir, platform: "linux" }).env;
-  assert.equal(settingShown("maxTokens", {}, empty, { deploymentDir: emptyDir }), "(unset: no budget)");
-  // With no deployment, pi's environment is not the worker's: absence proves nothing, and the confirm says so.
-  assert.equal(settingShown("maxTokens", {}, { HOME: "/h" }), "(not in the overlay; the worker's environment is not visible here)");
-  assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "" }), "(not in the overlay; the worker's environment is not visible here)");
-  assert.equal(settingShown("maxTokens", {}, { PI_MAX_TOKENS: "3" }), "3 (env PI_MAX_TOKENS)", "pi's own export is still shown");
-  assert.equal(settingShown("maxTurns", { maxTurns: 5 }, env), "5", "non-token keys keep the overlay value");
+  // The token names left PANEL_SERVICE_KEYS with the budgets: the confirm has no cap to state.
+  for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) assert.ok(!PANEL_SERVICE_KEYS.includes(name), name);
+  assert.equal(settingShown("maxTurns", { maxTurns: 5 }, env), "5");
   assert.equal(settingShown("maxTurns", {}, env), "(unset)");
-  for (const name of ["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]) assert.ok(PANEL_SERVICE_KEYS.includes(name), name);
+  assert.equal(settingShown("maxTokens", {}, env), "(unset)", "a retired key has no cap to state");
 });
 
 test("panelEnv: with no pointer no .env is read, not even from a cwd carrying init's whole scaffold (#471, gate round 1)", () => {
@@ -2967,38 +2815,6 @@ test("the panel's Valkey reads fail open, naming it, on a database that Valkey d
   const said = /names database 999999, which that Valkey does not have/;
   assert.match((await rm.readFleetQueues({ url })).blind, said);
   for (const r of [await rm.readQueueState({ url }), await rm.readHeldJobs({ url }), await rm.readHosts({ url })]) assert.match(r.unreachable, said);
-});
-
-test("mergedTokenProblem: a window with no maxTokens in the MERGED overlay and env is a WARNING naming what was seen, never a refusal (#501, PR #542)", () => {
-  const dir = "/deploy";
-  assert.equal(mergedTokenProblem({ dailyTokenCap: 10_000 }, { PI_MAX_TOKENS: "2000" }, { deploymentDir: dir }), null, "the budget in env");
-  assert.equal(mergedTokenProblem({ dailyTokenCap: 10_000, maxTokens: 2000 }, {}, { deploymentDir: dir }), null, "the budget in the overlay");
-  assert.equal(mergedTokenProblem({ maxTokens: 2000 }, { PI_WEEKLY_TOKEN_CAP: "50000" }, { deploymentDir: dir }), null, "the window in env");
-  assert.equal(mergedTokenProblem({}, {}, { deploymentDir: dir }), null, "nothing set");
-  const pointed = mergedTokenProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: dir });
-  assert.equal(pointed.invalid, undefined, "the worker's unit or --env-setup script may hold the budget: never a refusal");
-  assert.match(pointed.warning, /^dailyTokenCap needs maxTokens.*Neither the settings overlay nor the deployment's \.env sets maxTokens/);
-  assert.match(pointed.warning, /service unit or its --env-setup script, is not visible here/);
-  assert.match(mergedTokenProblem({}, { PI_WEEKLY_TOKEN_CAP: "50000", PI_MAX_TOKENS: "" }, { deploymentDir: dir }).warning, /^weeklyTokenCap needs maxTokens/, "an empty variable is unset");
-  const blind = mergedTokenProblem({ dailyTokenCap: 10_000 }, {}, { deploymentDir: null });
-  assert.equal(blind.invalid, undefined);
-  assert.match(blind.warning, /this session's environment \(not the worker's\)/);
-});
-
-test("writeSettings: with the env passed, a write that breaks the merged invariant is WRITTEN and returns a warning (#501, PR #542)", () => {
-  const dir = tempDir("pi-merged-");
-  const file = join(dir, "settings.json");
-  writeFileSync(file, JSON.stringify({ maxTokens: 2000, dailyTokenCap: 10_000 }));
-  const unsetCap = writeSettings({ settingsFile: file, mutate: (o) => { delete o.maxTokens; return o; }, budgetEnv: {}, deploymentDir: dir });
-  assert.equal(unsetCap.ok, true);
-  assert.match(unsetCap.warning, /^dailyTokenCap needs maxTokens/);
-  assert.deepEqual(JSON.parse(readFileSync(file, "utf8")), { dailyTokenCap: 10_000 }, "written");
-  const fine = writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, maxTokens: 3000 }), budgetEnv: {}, deploymentDir: dir });
-  assert.deepEqual([fine.ok, fine.warning], [true, undefined]);
-  // A non-merged problem is still refused by writeSettings' own validation.
-  assert.match(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, weeklyTokenCap: "1e3" }), budgetEnv: {}, deploymentDir: dir }).invalid, /weeklyTokenCap must be an integer >= 1/);
-  // Without the env (every non-token key), no judgement at all.
-  assert.deepEqual(Object.keys(writeSettings({ settingsFile: file, mutate: (o) => ({ ...o, maxTurns: 5 }) })), ["ok", "overlay"]);
 });
 
 test("readOverlayMcpView: names, where each runs, its exposure and the NAMES it references; never a value; never throws", async () => {

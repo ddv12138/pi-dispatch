@@ -1679,19 +1679,6 @@ test("a one-shot trigger carries [once] armed and [spent] fired on its chip, a s
   assert.ok(pageOf(buildGraphModel(SHOT())).includes("one-shot (armed)"), "and the tooltip still says it in words");
 });
 
-test("a portfolio trigger's tip says what it writes, the chip is unchanged, and the flag is a strict boolean (#507)", () => {
-  const model = buildGraphModel(CANNED());
-  const plain = pageOf(model);
-  model.nodes.find((n) => n.id === "trigger:0").portfolio = true;
-  const page = pageOf(model);
-  const tips = Object.values(nodeTips(page)).filter((t) => t.includes("portfolio"));
-  assert.equal(tips.length, 1, "one tip, the flagged trigger's");
-  assert.ok(tips[0].split("\n").includes("portfolio: its jobs write the budget split"), tips[0]);
-  const svgOf = (p) => /<g id="root">([\s\S]*?)<\/g><g id="spend">/.exec(p)[1];
-  assert.equal(svgOf(page), svgOf(plain), "no chip, glyph or badge changes on the scene");
-  model.nodes.find((n) => n.id === "trigger:0").portfolio = "yes";
-  assert.ok(!pageOf(model).includes("portfolio: its jobs write the budget split"), "a non-boolean is no flag at the allowlist");
-});
 
 test("escapeHtml turns control and bidi characters into spaces, so a hostile repo name cannot reorder or hide a label (issue #641)", () => {
   const hostile = "acme/\u001b[31mweb\u0007\u009b2J‮gnp.exe⁦x⁩\u007f";

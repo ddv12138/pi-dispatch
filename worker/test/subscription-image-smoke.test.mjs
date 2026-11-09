@@ -4,7 +4,6 @@ import { test } from "node:test";
 import { subscriptionSmokeProblems } from "../../.github/scripts/subscription-auth-image.mjs";
 
 const key = "ab".repeat(32);
-const tokenExit = { event: "exit", code: 2, reason: "token_budget", tokens: { calls: 1, metered: true, modelRefused: 0 } };
 const providerExit = { event: "exit", code: 1, reason: "error", tokens: { calls: 2, metered: true, modelRefused: 0 }, toolsStarted: false, replaySafe: true, providerFailure: { kind: "quota-exhausted", subscriptionProvider: "openai", subscriptionCode: "usage_limit_reached" } };
 const signed = exit => {
 	const body = JSON.stringify(exit);
@@ -12,21 +11,8 @@ const signed = exit => {
 };
 const request = calls => ({ event: "subscription_smoke_fetch", calls, provider: "openai", authOk: true, urlOk: true, modelOk: true });
 const retry = { event: "pi_auto_retry", attempt: 1, maxAttempts: 1 };
-const check = (exit, { mode = "token", rows = [], status = exit.code, signatureKey = key } = {}) => subscriptionSmokeProblems({ output: [...rows.map(row => JSON.stringify(row)), signed(exit)].join("\n"), status, key: signatureKey, provider: "openai", mode });
+const check = (exit, { mode = "provider", rows = [], status = exit.code, signatureKey = key } = {}) => subscriptionSmokeProblems({ output: [...rows.map(row => JSON.stringify(row)), signed(exit)].join("\n"), status, key: signatureKey, provider: "openai", mode });
 
-test("image conformance accepts a signed settle-time token-cap stop, and rejects config, model and wire failures instead of treating any exit 2 as proof", () => {
-	assert.deepEqual(check(tokenExit, { mode: "token", rows: [request(1)] }), []);
-	for (const exit of [
-		{ event: "exit", code: 2, reason: "config", message: "adapter unavailable" },
-		{ ...tokenExit, reason: "model-not-allowed" },
-		{ ...tokenExit, tokens: { calls: 2, metered: true, modelRefused: 0 } },
-		{ ...tokenExit, tokens: { calls: 1, metered: false, modelRefused: 0 } },
-	]) assert.ok(check(exit, { mode: "token" }).length > 0);
-	assert.ok(check(tokenExit, { mode: "token", status: 0 }).length > 0);
-	assert.ok(check(tokenExit, { mode: "token" }).length > 0, "no dispatch row: the cap was never reached through the wire");
-	assert.ok(check(tokenExit, { mode: "token", signatureKey: "cd".repeat(32) }).length > 0, "plausible log text cannot replace authenticated evidence");
-	assert.deepEqual(subscriptionSmokeProblems({ output: `${signed(tokenExit)}\n${signed(tokenExit)}`, status: 2, key, provider: "openai", mode: "token" }), ["expected one decisive exit line"]);
-});
 
 test("image conformance requires exact bounded retry, auth, endpoint, model and meter evidence for synthetic provider calls", () => {
 	const rows = [request(1), retry, request(2)];

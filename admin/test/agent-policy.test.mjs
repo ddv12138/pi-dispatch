@@ -17,8 +17,8 @@ test("every action has an explicit policy with a reason and non-person actions h
   assert.throws(() => actionAgentPolicy("new-action-without-review"), /no explicit/);
 });
 
-test("only actual explicit decreases authorize settings, including exact tokens", () => {
-  for (const [key, old, next] of [["maxTokens", 200, 100], ["concurrency", 3, 2], ["maxTurns", 30, 20], ["dailyTokenCap", 2_000_002, 2_000_001], ["weeklyTokenCap", 20_000_000, 19_999_999], ["monthlyTokenCap", 3, 2]]) {
+test("only actual explicit decreases of the surviving settings authorize a setting write", () => {
+  for (const [key, old, next] of [["concurrency", 3, 2], ["maxTurns", 30, 20]]) {
     const transition = { before: { [key]: old, provider: "fixed" }, after: { [key]: next, provider: "fixed" } };
     assert.equal(mode("setting-set", transition), "unattended", key);
     assert.equal(mode("setting-set", { before: transition.after, after: transition.before }), "confirm", `${key} raise`);
@@ -26,25 +26,30 @@ test("only actual explicit decreases authorize settings, including exact tokens"
     assert.equal(mode("setting-set", { before: transition.before, after: {} }), "confirm", `${key} unset`);
     assert.equal(mode("setting-set", { ...transition, after: { ...transition.after, provider: "changed" } }), "confirm", `${key} mixed`);
   }
-  for (const value of [null, NaN, Infinity, "10", {}, -1]) assert.equal(mode("setting-set", { before: { maxTokens: value }, after: { maxTokens: 1 } }), "confirm");
-  // A token cap is a whole number: a value that is not one cannot prove a decrease, so the operator confirms.
-  assert.equal(mode("setting-set", { before: { dailyTokenCap: 2000 }, after: { dailyTokenCap: "1000" } }), "confirm", "a string cannot prove a decrease");
-  for (const value of [NaN, Infinity, 0.5, "1000", null, -1]) assert.equal(mode("setting-set", { before: { dailyTokenCap: 2000 }, after: { dailyTokenCap: value } }), "confirm", String(value));
+  for (const value of [null, NaN, Infinity, "10", {}, -1]) assert.equal(mode("setting-set", { before: { maxTurns: value }, after: { maxTurns: 1 } }), "confirm");
+  // A count is a whole number: a value that is not one cannot prove a decrease, so the operator confirms.
+  assert.equal(mode("setting-set", { before: { maxTurns: 30 }, after: { maxTurns: "20" } }), "confirm", "a string cannot prove a decrease");
+  for (const value of [NaN, Infinity, 0.5, "20", null, -1]) assert.equal(mode("setting-set", { before: { maxTurns: 30 }, after: { maxTurns: value } }), "confirm", String(value));
+  // The retired token caps are no writer's business: a delete is not a decrease, every direction confirms.
+  for (const key of ["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) {
+    for (const [a, b] of [[{ [key]: 200 }, { [key]: 100 }], [{ [key]: 200 }, {}], [{}, { [key]: 100 }]]) assert.equal(mode("setting-set", { before: a, after: b }), "confirm", key);
+  }
 });
 
 test("scoped edits preserve scope, size, minima and every unedited row", () => {
-  const before = { version: 3, limits: [{ scope: "project:alpha", day: 10, hostShare: 50, memory: "2g", minJobs: 1 }, { scope: "project:beta", day: 20 }] };
-  const edited = { ...before, limits: [{ ...before.limits[0], day: 9, hostShare: 40 }, before.limits[1]] };
+  const before = { version: 3, limits: [{ scope: "project:alpha", concurrent: 3, hostShare: 50, memory: "2g", minJobs: 1 }, { scope: "project:beta", concurrent: 2 }] };
+  const edited = { ...before, limits: [{ ...before.limits[0], concurrent: 2, hostShare: 40 }, before.limits[1]] };
   assert.equal(mode("limit-edit", { before, after: edited, plan: { index: 0 } }), "unattended");
-  assert.equal(mode("limit-edit", { before: { version: 2, limits: [{ scope: "acme/web", dayTokens: 2_000_000 }] }, after: { version: 2, limits: [{ scope: "acme/web", dayTokens: 1_999_999 }] }, plan: { index: 0 } }), "unattended");
-  for (const change of [{ scope: "project:other" }, { memory: "4g" }, { minJobs: 2 }, { day: undefined }, { week: 5 }]) {
+  // A retired token limit is not a decrease this policy can authorize.
+  assert.equal(mode("limit-edit", { before: { version: 2, limits: [{ scope: "acme/web", dayTokens: 2_000_000 }] }, after: { version: 2, limits: [{ scope: "acme/web", dayTokens: 1_999_999 }] }, plan: { index: 0 } }), "confirm");
+  for (const change of [{ scope: "project:other" }, { memory: "4g" }, { minJobs: 2 }, { day: 1 }, { week: 5 }, { dayTokens: 1 }]) {
     const after = { ...edited, limits: [{ ...edited.limits[0], ...change }, edited.limits[1]] };
     assert.equal(mode("limit-edit", { before, after, plan: { index: 0 } }), "confirm");
   }
-  assert.equal(mode("limit-edit", { before, after: { ...edited, limits: [edited.limits[0], { ...edited.limits[1], day: 19 }] }, plan: { index: 0 } }), "confirm");
+  assert.equal(mode("limit-edit", { before, after: { ...edited, limits: [edited.limits[0], { ...edited.limits[1], concurrent: 1 }] }, plan: { index: 0 } }), "confirm");
   const base = { version: 3, limits: [] };
-  assert.equal(mode("limit-add", { before: base, after: { ...base, limits: [{ scope: "project:alpha", day: 1 }] } }), "unattended");
-  for (const extra of [{ minJobs: 1 }, { memory: "2g" }, { cpus: "1" }, { unknown: true }]) assert.equal(mode("limit-add", { before: base, after: { ...base, limits: [{ scope: "project:alpha", day: 1, ...extra }] } }), "confirm");
+  assert.equal(mode("limit-add", { before: base, after: { ...base, limits: [{ scope: "project:alpha", concurrent: 1 }] } }), "unattended");
+  for (const extra of [{ minJobs: 1 }, { memory: "2g" }, { cpus: "1" }, { unknown: true }, { dayTokens: 1 }]) assert.equal(mode("limit-add", { before: base, after: { ...base, limits: [{ scope: "project:alpha", concurrent: 1, ...extra }] } }), "confirm");
 });
 
 test("flag-only edits do not carry a hidden flow, model, turn, scope or rule change", () => {
@@ -71,8 +76,8 @@ test("agent API and headless tools share refusal semantics; persona cannot grant
 
 test("agent reads rebuild counts and identifiers while unknown prose and private context are withheld", () => {
   const privateText = "PRIVATE_CONTEXT_CANARY_42";
-  const projected = agentReadProjection({ run: { jobId: "gh-1", turns: 2, reason: "token-cap", note: privateText, task: privateText, futureProse: privateText }, bundle: { id: "shared", variables: [privateText], placeholderNames: [privateText] }, privateDraft: { draft: privateText }, answerRules: [{ id: privateText }], progress: { note: privateText } });
-  assert.deepEqual(projected, { run: { jobId: "gh-1", turns: 2, reason: "token-cap" }, bundle: { id: "shared", variablesCount: 1, placeholderNamesCount: 1 } });
+  const projected = agentReadProjection({ run: { jobId: "gh-1", turns: 2, reason: "model-unknown", note: privateText, task: privateText, futureProse: privateText }, bundle: { id: "shared", variables: [privateText], placeholderNames: [privateText] }, privateDraft: { draft: privateText }, answerRules: [{ id: privateText }], progress: { note: privateText } });
+  assert.deepEqual(projected, { run: { jobId: "gh-1", turns: 2, reason: "model-unknown" }, bundle: { id: "shared", variablesCount: 1, placeholderNamesCount: 1 } });
   assert.ok(!JSON.stringify(projected).includes(privateText));
 });
 

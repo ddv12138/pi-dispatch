@@ -525,7 +525,9 @@ test("the running-jobs entry exists exactly while an admitted job runs, and is g
 		const run = h.processor(ghJob("ran").job, "tok", signal());
 		await h.untilStarted(1);
 		const [entry] = runningJobs.list();
-		assert.deepEqual({ ...entry, at: typeof entry.at, holdAt: typeof entry.holdAt }, { id: "ran", project: "shop", memMiB: 8192, cpuCenti: 200, at: "number", holdTokens: 0, holdAt: "number" });
+		// C2 removed the token hold, so the entry carries no holdTokens/holdAt any more.
+		assert.deepEqual({ ...entry, at: typeof entry.at }, { id: "ran", project: "shop", memMiB: 8192, cpuCenti: 200, at: "number" });
+		assert.equal("holdTokens" in entry, false, "no token hold on the running-jobs entry");
 		h.releaseNext();
 		assert.equal((await run).outcome, "completed");
 		assert.equal(entry.at, Date.parse(h.seen.records.at(-1).startedAt), "admitted at the record's startedAt");

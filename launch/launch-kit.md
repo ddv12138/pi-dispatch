@@ -15,14 +15,14 @@ never write bare `npx pi-dispatch` in launch copy; always the scoped form, and l
 
 > Run the [pi](https://github.com/earendil-works/pi) coding agent as a service: on demand, on a cron, or on a
 > label, comment or PR in GitHub, GitLab, Forgejo or Azure DevOps, in a container you control, with a durable
-> queue and a spend cap.
+> queue and spend you can bound at your provider.
 
 ## The elevator pitch (3 sentences)
 
 pi is a minimal coding agent with no queue, no concurrency control, no spend limit, and — by its own README —
 no permission system. pi-dispatch is exactly that missing operational layer: every job runs in an ephemeral
 `--cap-drop=ALL` non-root container (pi's missing permissions, enforced by Docker), spend is bounded
-by a per-job turn budget and token budgets, and the same job runs whether you trigger it from the
+by a per-job turn cap, concurrency and the host's memory/CPU budget (with your provider's spend limit as the backstop), and the same job runs whether you trigger it from the
 CLI, a cron schedule, or a label, `@pi` comment or PR event on GitHub, GitLab, Forgejo or Azure DevOps. You
 bake your own toolchain into the image (it ships Playwright + Chromium, so a flow can build a frontend,
 screenshot it, and iterate on the render), a live `/dispatch` admin panel shows the queue, spend meters,
@@ -59,10 +59,11 @@ pi-dispatch is the operational layer that closes them, and nothing else:
 - The container is the boundary. Every job runs in an ephemeral --cap-drop=ALL, non-root,
   no-new-privileges container; the agent's instructions are mounted read-only. That's pi's
   missing permission system, enforced by Docker.
-- Spend is bounded BEFORE a container starts — the day/week/month token windows are reserved
-  ahead, and a per-job turn budget and per-job token budget bound each job.
+- Spend is bounded: a per-job turn cap, a concurrency limit and the host's memory/CPU budget
+  bind every job, and your provider's spend limit is the backstop. Token usage and cost are
+  still metered per run.
 - One job, many ways in: a CLI command, a cron schedule, or a label, @pi comment or PR event on
-  GitHub, GitLab, Forgejo or Azure DevOps. Same queue, same box, same budget. Cron is the
+  GitHub, GitLab, Forgejo or Azure DevOps. Same queue, same box, same bounds. Cron is the
   unattended one. A trigger can also dispatch a staged workflow extension's slash command
   headlessly (run.command) — third-party multi-stage workflows with no glue code. A confirm-free
   tool in the operator's own pi session and a finished job's outbox can each enqueue one more,
@@ -113,8 +114,8 @@ If those channels exist, they are the warmest, highest-intent audience: start th
 Built a thing on top of pi some of you might want: pi-dispatch — a harness to run pi as a
 *service* (on-demand / cron / a label, comment or PR on GitHub, GitLab, Forgejo or Azure
 DevOps) with the operational bits pi deliberately leaves out: a durable Valkey+BullMQ queue,
-a container-per-job boundary (--cap-drop=ALL, non-root), and a spend cap checked before any
-container starts.
+a container-per-job boundary (--cap-drop=ALL, non-root), and a bound on every job (turn cap,
+concurrency, host memory/CPU) with your provider's spend limit as the backstop.
 
 The admin side is itself a pi extension: a /dispatch command + overlay (queue, spend meters,
 run history, editable triggers) and confirm-gated tools so an agent can operate the deployment
@@ -192,9 +193,9 @@ label, comment or PR in GitHub, GitLab, Forgejo or Azure DevOps. 🧵
 Every job → an ephemeral --cap-drop=ALL, non-root container, instructions mounted read-only.
 That's pi's missing permission system, enforced by Docker.
 
-3/ Spend is bounded by token budgets, not a surprise bill.
-A per-job turn cap + token budgets (per job and per day/week/month), with the day/week/month windows
-reserved before a container starts. A runaway is stopped by the turn cap and its token budget.
+3/ Spend is bounded, not a surprise bill.
+A per-job turn cap, concurrency and the host's memory/CPU budget bound every job; your provider's
+spend limit is the backstop. Token usage and cost are still metered per run.
 
 4/ Your image, your tools.
 Bake the toolchain into the Dockerfile — it ships Playwright + Chromium, so a flow can build a
@@ -213,7 +214,7 @@ https://github.com/edgehero/pi-dispatch
 
 ## Reddit (r/selfhosted, r/LocalLLaMA)
 
-**Title:** `pi-dispatch: run a coding agent unattended on your own hardware, with a spend cap and container isolation`
+**Title:** `pi-dispatch: run a coding agent unattended on your own hardware, with bounded spend and container isolation`
 
 **Body:**
 ```
@@ -225,7 +226,8 @@ that makes that safe-ish and boring:
   outside its declared mounts (/job read-only and /workspace always, plus /outbox on local
   jobs, /session when you arm resumable sessions, and a read-only global pi overlay if you
   configure one).
-- Spend capped by token budgets (per job + daily/weekly/monthly) and a per-job turn cap.
+- Spend bounded by a per-job turn cap, concurrency and the host's memory/CPU budget, with your
+  provider's spend limit as the backstop.
 - Durable queue (Valkey + BullMQ) so a burst or a reboot doesn't drop jobs.
 - Bring your own Docker image (Playwright/Chromium included for frontend work).
 - A TUI admin panel for queue/spend/runs/triggers, per-repo scheduled pause windows, and a
@@ -243,17 +245,18 @@ and engage in comments.*
 
 ## Blog post outline (dev.to / personal blog)
 
-Working title: **"Giving a coding agent an off-switch: containers, spend caps, and quiet hours"**
+Working title: **"Giving a coding agent an off-switch: containers, bounded spend, and quiet hours"**
 
 1. **The gap.** pi (and most agent CLIs) assume a human is watching. No queue, no spend limit, no permission
    system. What breaks when you try to run one unattended.
 2. **The container is the boundary.** Why `--cap-drop=ALL` + non-root + ephemeral is the honest answer to "no
    permission system," and why per-*job* (not per-session) isolation matters against mutually-untrusting issue
    authors. (Screenshot: the security section.)
-3. **Spend before tokens.** The one ordering that makes a cap real: check-and-increment *before* the container,
-   not after the bill. Token windows for day/week/month plus the per-job turn cap (`PI_MAX_TURNS`).
+3. **Bounds that bind before the bill.** The per-job turn cap (`PI_MAX_TURNS`), concurrency and the
+   host's memory/CPU budget limit what one run can do, and your provider's spend limit is the backstop
+   across runs. Token usage is metered per run, not capped.
 4. **Quiet hours without dropping work.** The scoped pause-window design: defer a repo's runs with BullMQ's
-   `moveToDelayed` *before* the budget reservation, so a paused job costs nothing and auto-resumes — vs.
+   `moveToDelayed` *before* it takes a host slot, so a paused job costs nothing and auto-resumes — vs.
    dropping it (which loses a GitHub job that has no re-trigger). Timezone-correct via built-in `Intl`.
 5. **An agent that can operate itself, safely.** Confirm-gated tools: the model proposes a *config* change
    (raise a cap, add a trigger), a human approves a dialog it can't answer, and it's fail-closed without a
@@ -286,8 +289,8 @@ writing: root 1.0.0, and 1.0.0 for all three packages (@edgehero/pi-dispatch, -r
 The operational layer, filled in.
 
 Admin
-- A theme-colored /dispatch TUI panel (a pi extension): live queue, day/week/month spend meters +
-  a daily token counter, run history with per-job token & cost, and a unified triggers pane.
+- A theme-colored /dispatch TUI panel (a pi extension): live queue, spend meters, run history
+  with per-job token & cost, and a unified triggers pane.
 - Trigger CRUD (cron / label / comment / pull_request) from the overlay, applied live (no restart).
 
 AI-operable, safely

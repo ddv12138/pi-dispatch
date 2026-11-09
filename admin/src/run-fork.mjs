@@ -4,10 +4,19 @@ import { createHash, randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { modelIdProblem, providerIdProblem, modelOnList } from "@edgehero/pi-dispatch/model-ref";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "@edgehero/pi-dispatch/config";
-import { canonicalJson } from "@edgehero/pi-dispatch/priorities";
-import { fmtTokens } from "./panel.mjs";
-import { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 import { planRerun, enqueueRerun } from "./job-actions.mjs";
+
+/**
+ * A value's canonical JSON: object keys sorted at every level, `undefined` members left out. Local because the module
+ * that carried it (`priorities.mjs`) went with the allocation it served (C2); the digest it feeds is compared only
+ * between this module's preview and pickup, in one process.
+ */
+function canonicalJson(value) {
+  if (value === null || typeof value !== "object") return JSON.stringify(value ?? null);
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  const keys = Object.keys(value).filter((k) => value[k] !== undefined).sort();
+  return `{${keys.map((k) => `${JSON.stringify(k)}:${canonicalJson(value[k])}`).join(",")}}`;
+}
 
 const JOB_RE = /^[A-Za-z0-9._:-]{1,200}$/;
 const ENTRY_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -27,7 +36,7 @@ export async function readForkPoints({ jobId, env = {}, now = Date.now, store = 
 }
 
 /** Preview and pickup validate separately: a ticket must not freeze privileges the trigger has since withdrawn. */
-export async function planRunFork({ jobId, entry, position = "before", provider, model, thinking, message, forkId, sourceDigest, maxTokens, ...deps } = {}) {
+export async function planRunFork({ jobId, entry, position = "before", provider, model, thinking, message, forkId, sourceDigest, ...deps } = {}) {
   if (typeof entry !== "string" || !ENTRY_RE.test(entry)) return { refusal: "fork-entry-invalid" };
   if (position !== "before" && position !== "at") return { refusal: "fork-position-invalid" };
   if (provider != null && provider !== "" && providerIdProblem(provider)) return { refusal: "fork-provider-invalid" };
@@ -48,27 +57,21 @@ export async function planRunFork({ jobId, entry, position = "before", provider,
   // settings change cannot substitute another model between the preview, confirm and worker pickup.
   const effectiveProvider = provider || p.job.provider || deps.overlay?.provider || deps.env?.PI_PROVIDER || DEFAULT_PROVIDER;
   const effectiveModel = model || p.job.model || deps.overlay?.model || deps.env?.PI_MODEL || DEFAULT_MODEL;
-  const job = { ...p.job, provider: effectiveProvider, model: effectiveModel, ...(maxTokens !== undefined ? { maxTokens } : {}), ...(thinking ? { thinkingLevel: thinking } : {}), fork: { id, fromJob: jobId, fromEntry: entry, position, sourceDigest: source.manifest.sourceDigest, rootKey: source.manifest.sessionKey, ...(message ? { message } : {}) } };
+  const job = { ...p.job, provider: effectiveProvider, model: effectiveModel, ...(thinking ? { thinkingLevel: thinking } : {}), fork: { id, fromJob: jobId, fromEntry: entry, position, sourceDigest: source.manifest.sourceDigest, rootKey: source.manifest.sessionKey, ...(message ? { message } : {}) } };
   const checkPolicy = deps.policyDigestFn ?? (await import("@edgehero/pi-dispatch/fork-policy")).forkPolicyDigest;
   const policy = await checkPolicy({ triggersPath: deps.triggersPath, job: { ...job, kind: p.forge }, fs: deps.fs });
   if (!policy.ok) return { refusal: policy.refused ?? "fork-policy-unavailable" };
   job.forkPolicy = policy.digest;
   const allowed = job.models ?? (deps.env?.PI_ALLOWED_MODELS ? deps.env.PI_ALLOWED_MODELS.split(",") : null);
   if (!modelOnList(allowed, effectiveProvider, effectiveModel)) return { refusal: "model-not-allowed" };
-  const reserve = estimateReserve(job, deps);
-  if (reserve.invalid) return { refusal: reserve.invalid };
-  job.forkReserveTokens = reserve.tokens;
-  // The hold shown at preview is also a per-job ceiling. Deployment defaults may narrow it later,
-  // but a wider default must never widen what this confirmation authorized.
-  if (Number.isSafeInteger(reserve.maxTokens) && reserve.maxTokens > 0) job.maxTokens = reserve.maxTokens;
   const queue = source.manifest.hostQueue ?? p.queue;
-  const request = { jobId, entry, position, provider: effectiveProvider, model: effectiveModel, ...(job.maxTokens !== undefined ? { maxTokens: job.maxTokens } : {}), ...(thinking ? { thinking } : {}), ...(message ? { message } : {}), forkId: id, sourceDigest: source.manifest.sourceDigest };
-  return { plan: { ...p, queue, branch: forkBranch(job), job, request, sourceDigest: source.manifest.sourceDigest, policyDigest: policyDigest(job, reserve), reserve, runFields: { ...p.runFields, maxTokens: job.maxTokens ?? null, model: effectiveProvider && effectiveModel ? `${effectiveProvider}/${effectiveModel}` : effectiveModel } } };
+  const request = { jobId, entry, position, provider: effectiveProvider, model: effectiveModel, ...(thinking ? { thinking } : {}), ...(message ? { message } : {}), forkId: id, sourceDigest: source.manifest.sourceDigest };
+  return { plan: { ...p, queue, branch: forkBranch(job), job, request, sourceDigest: source.manifest.sourceDigest, policyDigest: policyDigest(job), runFields: { ...p.runFields, model: effectiveProvider && effectiveModel ? `${effectiveProvider}/${effectiveModel}` : effectiveModel } } };
 }
 
-function policyDigest(job, reserve) {
+function policyDigest(job) {
   const { fork, trigger, ...policy } = job;
-  return createHash("sha256").update(canonicalJson({ ...policy, trigger: { ...trigger, deliveryId: null }, reserve })).digest("hex");
+  return createHash("sha256").update(canonicalJson({ ...policy, trigger: { ...trigger, deliveryId: null } })).digest("hex");
 }
 
 export async function enqueueRunFork(plan, deps = {}) {

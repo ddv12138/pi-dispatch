@@ -45,7 +45,7 @@ export function resolveJobImage(job, defaultImage) {
  *   { forgeUnsupported }  -- present, but declares it cannot serve this job's forge => POLICY, refuse
  *   { <gate.result>, declared } -- present, but does not declare a capability this job needs, one key per
  *                            CAPABILITY_GATES row (replicaUnsupported, commandUnsupported,
- *                            excludeToolsUnsupported, modelPolicyUnsupported, tokenBudgetUnsupported, mcpUnsupported,
+ *                            excludeToolsUnsupported, modelPolicyUnsupported, mcpUnsupported,
  *                            forgeMcpUnsupported, awaitInputUnsupported, progressUnsupported, recoverUnsupported,
  *                            steerUnsupported)
  *                            => POLICY
@@ -182,18 +182,6 @@ export const CAPABILITY_GATES = Object.freeze([	// REQ-REPLICA-RUNS: an image bu
 		reason: "job-image-model-policy-unsupported",
 		event: "refused_image_model_policy_unsupported",
 		comment: (image, declared) => `Refused: the job image "${image}" does not declare allowed-model support (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner cannot hold this job to the models it may use. Rebuild the image from a version that has this feature. Not run.`,
-	}),
-	// The per-job token budget rides the container env, and an image whose runner predates it reads no
-	// PI_MAX_TOKENS, so a budgeted job would run with none and record a clean exit. Needed whenever the job
-	// carries a budget, 0 included (`!== null`, buildContainerEnv's rule: 0 is the tightest budget, not none).
-	// The refusal is pre-spend like every row: nothing minted, nothing cloned, nothing reserved (`budgetReserved: false`).
-	Object.freeze({
-		token: "tokenBudget",
-		needed: (job) => job?.maxTokens !== null && job?.maxTokens !== undefined,
-		result: "tokenBudgetUnsupported",
-		reason: "job-image-token-budget-unsupported",
-		event: "refused_image_token_budget_unsupported",
-		comment: (image, declared) => `Refused: the job image "${image}" does not declare tokenBudget support (\`dev.pi-dispatch.capabilities\` ${declared}), so its runner would ignore the per-job token budget and run this job with none. Rebuild the image from a version that has this feature. Not run.`,
 	}),
 	// REQ-MCP-OPERATOR-SERVERS: a runner that predates run.mcp reads no /job/mcp.json, so the job would run without
 	// the servers its flow was written against and record a clean exit while the file reads as though it named them.

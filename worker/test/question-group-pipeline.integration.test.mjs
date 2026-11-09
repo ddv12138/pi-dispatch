@@ -52,7 +52,7 @@ async function fixture(t) {
 		if (keys.length) await redis.del(...keys);
 		redis.disconnect();
 	});
-	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, maxTokens: 50000, confidence: 0.9, names: {} };
+	const config = { capture: true, model: `${MODEL.provider}/${MODEL.id}`, confidence: 0.9, names: {} };
 	const triggersPath = join(root, "triggers.json");
 	const document = { triggers: [], zeroTouch: config };
 	writeFileSync(triggersPath, JSON.stringify(document));
@@ -62,7 +62,7 @@ async function fixture(t) {
 	const meta = await store.readMeta("source");
 	const id = await enqueueQuestionGroupJob(queue, { runId: "source", digest: meta.digest, configDigest: questionGroupConfigDigest(config) }, { nonce: () => "fixed" });
 	const job = await queue.getJob(id);
-	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3, dailyTokenCap: 1000000, maxTokens: 50000 };
+	const settings = { provider: "anthropic", model: "claude-sonnet-4-5-20250929", maxTurns: 10, concurrency: 3 };
 	const runtime = makeQuestionGroupRuntime({ store, triggersPath, getSettings: () => settings, resolveClassifier: () => MODEL });
 	return { root, jobsDir, name, redis, queue, store, job, runtime, settings, document, triggersPath, scopeId };
 }
@@ -91,10 +91,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 				assert.equal(prepared.workspaceReadOnly, true);
 				assert.equal(statSync(join(prepared.jobDir, "question-grouping.json")).mode & 0o777, 0o444);
 				assert.equal(readFileSync(join(prepared.jobDir, "prompt.md"), "utf8"), "");
-				assert.ok(events.includes("token-reserve"));
-				const tokenKeys = await f.redis.keys(`${f.name}:ledger:budget:tok:*`);
-				assert.ok(tokenKeys.length > 0, "ordinary token windows were reserved before any classifier call");
-				assert.ok((await f.redis.mget(...tokenKeys)).some((value) => Number(value) === 50000), "the real window holds the configured cap");
+				assert.ok(!events.includes("token-reserve"), "C2: no token window is reserved before the classifier");
 				const input = readQuestionGrouping({ path: join(prepared.jobDir, "question-grouping.json") });
 				const done = await executeQuestionGrouping({ input, outbox: prepared.outboxDir, runtime: {
 					getModelsOfType: (type, provider) => { assert.equal(type, "classifier"); assert.equal(provider, MODEL.provider); return [MODEL]; },
@@ -116,8 +113,7 @@ test("real references, corpus and admission reserve before the isolated classifi
 	assert.equal(result.outcome, "completed");
 	assert.equal(calls, 1);
 	assert.deepEqual(credentials, ["anthropic", "openrouter"], "both credentials pass the free gate");
-	assert.ok(events.indexOf("token-reserve") < events.indexOf("container"));
-	assert.ok(events.indexOf("token-ledger") < events.indexOf("classify"));
+	assert.ok(!events.includes("token-reserve"), "C2: nothing reserves a token window");
 	const assigned = await f.store.readMeta("source");
 	assert.equal(assigned.status, "assigned", "processor finalization imports the classifier result");
 	assert.match(assigned.groupId, /^[a-f0-9]{32}$/);
@@ -158,7 +154,7 @@ test("missing secondary credentials never dispatch a classifier", { skip }, asyn
 	const result = await process(f.job, "token", new AbortController().signal);
 	assert.equal(result.outcome, "policy");
 	assert.equal(result.reason, "provider-unconfigured");
-	assert.ok(!events.includes("token-reserve"), "credential refusal runs before reserve");
+	assert.ok(!events.includes("token-reserve"), "no token reserve exists to run before or after");
 });
 
 test("expired private context is a recorded policy refusal before credentials, preparation or reservations", { skip }, async (t) => {

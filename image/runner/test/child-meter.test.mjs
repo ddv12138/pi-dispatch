@@ -17,7 +17,8 @@ import {
 	writeFileAtomic,
 } from "../src/usage-meter.mjs";
 import * as usageMeter from "../src/usage-meter.mjs";
-import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
+import { METER_FAILED } from "../src/usage-meter.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // Importing the preload runs its top level, which does nothing without PI_DISPATCH_CHILD_LEDGER in this environment.
@@ -184,11 +185,10 @@ test("startChildMeter: installs on the class it is given with brake, isStopped a
 	assert.equal(given.compat, FAKE_COMPAT);
 	assert.equal(given.brake, true);
 	assert.deepEqual([...given.guard.enforces], [], "no policy: a guard that enforces nothing, there only for the pre-dispatch write");
-	assert.equal(given.meter.cap, null, "the token cap is the parent's, judged through STOP");
 	assert.equal(typeof given.isStopped, "function");
 	assert.equal(given.isStopped(), null);
-	writeFileAtomic({ dir, name: "STOP", text: JSON.stringify(stopFile(TOKEN_BUDGET)) });
-	assert.equal(given.isStopped(), TOKEN_BUDGET, "the install's isStopped reads the directory's STOP");
+	writeFileAtomic({ dir, name: "STOP", text: JSON.stringify(stopFile(MODEL_NOT_ALLOWED)) });
+	assert.equal(given.isStopped(), MODEL_NOT_ALLOWED, "the install's isStopped reads the directory's STOP");
 	assert.equal(child.ok, true);
 	assert.deepEqual({ state: read().state, metered: read().metered }, { state: "running", metered: true });
 	assert.ok(parseChildLedger(readFileSync(join(dir, "99.0123456789abcdef.json"), "utf8")), "a ledger the parent's parser accepts");
@@ -300,10 +300,10 @@ test("startChildMeter: every call is on disk, in flight, before it is dispatched
 	assert.deepEqual({ calls: read().totals.calls, unresolved: read().totals.unresolved, total: read().totals.total }, { calls: 1, unresolved: 0, total: 10 }, "settled");
 	assert.equal(isStopped(), null, "a healthy ledger: go");
 	failing = true;
-	assert.equal(guard.admit(call), TOKEN_BUDGET, "the write failed: this call is refused, so it never goes out unrecorded");
+	assert.equal(guard.admit(call), METER_FAILED, "the write failed: this call is refused, so it never goes out unrecorded");
 	failing = false;
-	assert.equal(isStopped(), TOKEN_BUDGET, "and every later call is stopped");
-	assert.equal(guard.admit(call), TOKEN_BUDGET);
+	assert.equal(isStopped(), METER_FAILED, "and every later call is stopped");
+	assert.equal(guard.admit(call), METER_FAILED);
 	meter.record(usage, { provider: "fake", model: "m1", sessionId: "s" });
 	assert.equal(read().metered, false, "the next write that succeeds says unmetered");
 });
@@ -315,7 +315,7 @@ test("startChildMeter: an admitted call that is never observed stays counted, un
 	guard.admit({ method: "streamSimple", model: { provider: "fake", id: "m1" }, args: [] });
 	assert.deepEqual({ calls: read().totals.calls, unresolved: read().totals.unresolved }, { calls: 1, unresolved: 1 });
 	// The dispatch threw before the meter saw it; the next change (a stop, say) must not lower the count.
-	meter.stop(TOKEN_BUDGET);
+	meter.stop(METER_FAILED);
 	assert.deepEqual({ calls: read().totals.calls, unresolved: read().totals.unresolved }, { calls: 1, unresolved: 1 });
 	assert.ok(parseChildLedger(JSON.stringify(read())), "and the ledger stays one the parent's parser accepts");
 });

@@ -86,7 +86,7 @@ function fakeRedis({ fail = false, hang = false } = {}) {
 }
 
 test("the sections are pinned, and every section doctor.mjs opens is one of them (and none is unused)", () => {
-	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "tokens", "venues", "images", "egress", "backends", "sizing", "job-user", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "envelope", "console", "dirs", "state", "live"]);
+	assert.deepEqual(DOCTOR_SECTIONS, ["node", "env", "image", "docker", "triggers", "venues", "images", "egress", "backends", "sizing", "job-user", "selinux", "forges", "github", "valkey", "fleet", "capacity", "provider", "overlay", "waits", "models", "secrets", "sessions", "files", "limits", "console", "dirs", "state", "live"]);
 	const opened = new Set([...DOCTOR_SRC.matchAll(/\bsection\("([a-z-]+)"\)/g)].map((m) => m[1]));
 	opened.add("sizing"); // the fleet's re-said budget lines are tagged by `tagSection(again, "sizing")`
 	opened.add("live"); // the --live read-backs, tagged by `publishResults`

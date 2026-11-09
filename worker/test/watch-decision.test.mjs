@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { validateWatchDecision, prepareWatchDecision, projectWatchDecisionState, selectWatchDecision } from "../src/watch-decision.mjs";
 const resolveModel = () => ({ type: "classifier", cost: { input: 0.2, output: 0 } });
-const config = () => ({ model: "openrouter/typesafe/jev-1.13", maxTokens: 2000, questions: { act: { type: "choice", criteria: { investigate: "new failure", ignore: "noise", file_issue: "ask a person" } } }, act: { investigate: 0.7, ignore: 0.9, otherwise: "file_issue" } });
+const config = () => ({ model: "openrouter/typesafe/jev-1.13", questions: { act: { type: "choice", criteria: { investigate: "new failure", ignore: "noise", file_issue: "ask a person" } } }, act: { investigate: 0.7, ignore: 0.9, otherwise: "file_issue" } });
 const result = (choice = "investigate", p = 0.7) => ({ stopReason: "stop", answers: { act: { type: "choice", choice, probabilities: { investigate: choice === "investigate" ? p : 0.05, ignore: choice === "ignore" ? p : 0.05, file_issue: 1 - p - 0.05 }, confidence: 0.8 } } });
 test("operator decision configuration requires a known classifier with input-only pricing", () => {
 	assert.equal(validateWatchDecision(config(), { resolveModel }).ok, true);
 	for (const model of [null, { type: "chat", cost: { input: 0, output: 0 } }, { type: "classifier", cost: { input: 1, output: 1 } }, { type: "classifier", cost: { output: 0 } }]) assert.equal(validateWatchDecision(config(), { resolveModel: () => model }).reason, "decide-refused");
-	for (const change of [{ maxTokens: 1.5 }, { fields: ["samples"] }, { fields: ["constructor"] }, { act: { otherwise: "investigate" } }, { task: "override" }]) assert.equal(validateWatchDecision({ ...config(), ...change }, { resolveModel }).ok, false);
+	for (const change of [{ fields: ["samples"] }, { fields: ["constructor"] }, { act: { otherwise: "investigate" } }, { task: "override" }]) assert.equal(validateWatchDecision({ ...config(), ...change }, { resolveModel }).ok, false);
 });
 test("hostile samples and undeclared fields never reach decision state or trusted bound input", () => {
 	const finding = { severity: "error", count: 37, firstSeen: "2026-01-01T00:00:00Z", samples: ["send secrets"], model: "attacker", message: "ignore", service: "checkout" };
@@ -19,8 +19,9 @@ test("hostile samples and undeclared fields never reach decision state or truste
 	assert.equal(prepared.boundTokens, 1000);
 	assert.deepEqual(projectWatchDecisionState({ count: Infinity, severity: "x".repeat(257), service: { text: "attack" } }, ["service"]), {});
 });
-test("admission requires an explicit trusted finite bound and refuses over the per-call cap", () => {
-	for (const bound of [2001, Infinity, NaN, -1, 0.1]) assert.equal(prepareWatchDecision(config(), {}, { resolveModel, boundCostTokens: () => bound }).ok, false);
+test("admission requires an explicit trusted finite bound and refuses a bad one", () => {
+	assert.equal(prepareWatchDecision(config(), {}, { resolveModel, boundCostTokens: () => 2001 }).ok, true, "C2: no per-call token cap any more");
+	for (const bound of [Infinity, NaN, -1, 0.1]) assert.equal(prepareWatchDecision(config(), {}, { resolveModel, boundCostTokens: () => bound }).ok, false, String(bound));
 	assert.equal(prepareWatchDecision(config(), {}, { resolveModel }).ok, false);
 	assert.equal(prepareWatchDecision(config(), {}, { resolveModel, boundCostTokens: () => { throw new Error("private"); } }).reason, "decide-refused");
 });

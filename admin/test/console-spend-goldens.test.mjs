@@ -7,26 +7,15 @@ import { SPEND_PANELS } from "../src/console/panels/spend.mjs";
 
 const rendered = Promise.all(Object.entries(SPEND_DRAW).map(async ([key, draw]) => [key, await draw()])).then(Object.fromEntries);
 const expected = {
-  "spend-no-dollar-window.viewer": ["No daily token cap is configured", "7,000"],
+  "spend-no-dollar-window.viewer": ["settled from run records", "7,000"],
   "spend-partial-money.viewer": ["unknown cost", "≥"],
   "spend-unknown-money.viewer": ["unknown cost", "unknown"],
   "spend-model-triggers.viewer": ["plan-provider", "plan-model", "row 2"],
   "spend-whatif-runs.viewer": ["Token totals do not depend on the model", "would use about", "30,000"],
   "spend-whatif-flow.viewer": ["Per run", "Window estimate", "Context window"],
-  "spend-populated.operator": ["Today", "Held for 1 running job"],
+  "spend-populated.operator": ["Today"],
   "spend-populated.viewer": ["Full local paths are shown to operators only", "Metered and plan"],
   "spend-costs-unreadable.viewer": ["Costs could not be read. The other Spend views still work."],
-  "spend-unknown-holds.operator": ["Holds not published by: old-worker", "Those jobs are not counted as zero"],
-  "spend-counters-unreadable.operator": ["The settings file or counters could not be read"],
-  "spend-split.operator": ["Why the plan says so", "Preview the plan", "Revert row 2", "Same as row 2", "No split to go back to"],
-  "spend-split.viewer": ["Budget split", "History", "0123456789abcdef"],
-  "spend-split-no-envelope.viewer": ["No envelope: set an envelope"],
-  "spend-split-invalid.operator": ["The envelope does not load"],
-  "spend-split-no-plan.viewer": ["No split yet"],
-  "spend-split-mismatch.operator": ["Another envelope is in force"],
-  "spend-split-unreachable.viewer": ["The queue is not answering"],
-  "spend-split-newer.viewer": ["Split not usable: newer"],
-  "spend-split-outside-edit.operator": ["The split was edited outside the plan writer"],
   "spend-capacity.viewer": ["Fleet busy", "build3", "mini1", "mini2", "Jobs only: a machine busy with other work reads as idle"],
   "spend-capacity-no-time.viewer": ["No time in this window yet"],
   "spend-capacity-unreadable.viewer": ["Capacity not read", "The other Spend views still work."],
@@ -56,23 +45,6 @@ test("every Spend state has an explicit nonempty visible assertion and a real wh
   }
 });
 
-test("Budget split exposes escaped plan text and structured writes only to operators", async () => {
-  const pages = await rendered;
-  const operator = pages["spend-split.operator"];
-  const viewer = pages["spend-split.viewer"];
-  assert.ok(SPEND_HOSTILE_REASON.includes("\u202e"), "the counterexample really contains a directional control");
-  assert.ok(operator.includes("&lt;img src=x onerror=alert(1)&gt;"));
-  assert.ok(operator.includes("\\u{202E}") && operator.includes("\\u{0001}"), "invisible controls are drawn as escaped code points");
-  assert.ok(!operator.includes("<img src=x"));
-  assert.ok(!viewer.includes("Needs") && !viewer.includes("onerror=alert") && !viewer.includes("Why the plan says so"), "viewer markup holds none of the operator reason text");
-  for (const action of ["priorities-set", "envelope-set", "allocation-revert"]) {
-    assert.ok(operator.includes(`data-action="${action}"`), action);
-    assert.ok(!viewer.includes(`data-action="${action}"`), `viewer cannot submit ${action}`);
-  }
-  assert.ok(!operator.includes("<textarea"), "the budget forms are fields, not a JSON editor");
-  assert.ok(cardDocument(operator).nodes.some((node) => node.tag === "input" && node.attrs.name === "index" && node.attrs["data-type"] === "int" && node.attrs.value === "1"), "Revert row 2 carries machine index1");
-});
-
 test("flows list has no graph node payload and server selections render real details without executing script", async () => {
   const pages = await rendered;
   const list = pages["spend-flows-list.viewer"];
@@ -91,22 +63,20 @@ test("flows list has no graph node payload and server selections render real det
   assert.ok(modelMarkup.includes("row 2"), "the by-model row names the trigger that ran it");
 });
 
-test("the fixture supplies nonzero folds, holds and per-host capacity instead of empty placeholders", () => {
+test("the fixture supplies nonzero folds, record spend and per-host capacity instead of empty placeholders", () => {
   const p = spendFixture();
   assert.equal(p.fold.provenance.runsTotal, 3);
-  assert.equal(p.spend.today.heldTokens, 2_000_000);
+  assert.ok(p.spend.today.settledTokens > 0 && p.spend.today.heldTokens === undefined, "record spend, no hold");
   assert.equal(p.capacity.hosts.length, 3);
   assert.ok(p.capacity.fleet.peak > 0);
   for (const [page, panels] of Object.entries(SPEND_PANELS)) assert.ok(panels.length >= 4, page);
 });
 
 
-test("all five Spend views enforce the local-path boundary even when a viewer asks for full paths", async () => {
+test("all four Spend views enforce the local-path boundary even when a viewer asks for full paths", async () => {
   const secret = "/srv/private-operator/work/customer-site";
-  for (const page of ["insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows"]) {
+  for (const page of ["insights", "insights-capacity", "insights-breakdown", "insights-flows"]) {
     const payload = spendFixture();
-    payload.budget.windows.rows.push({ ledger: "scope", name: secret, window: "day", counterTokens: 100, capTokens: 200 });
-    payload.budget.scoped.push({ scope: secret, tokens: { day: { usedTokens: 100, capTokens: 200 } } });
     payload.fold.byRepo.push({ key: `local:${secret}`, label: `local:${secret}`, kind: "local", runs: 1, tokens: 100, amount: { tokens: 100, class: "metered", floor: false } });
     const folder = payload.graph.folders.find((f) => f.kind === "local");
     folder.path = secret;
@@ -115,9 +85,9 @@ test("all five Spend views enforce the local-path boundary even when a viewer as
       const doc = await drawSpend(page, { role: "viewer", query, payload });
       assert.ok(!doc.includes("private-operator"), `${page} ${query}: no parent path in visible or hidden markup`);
       assertClean(`${page}/hostile-path`, doc);
-      if (["insights", "insights-breakdown", "insights-flows"].includes(page)) assert.ok(doc.includes("customer-site"), `${page}: the folder is actually drawn by basename`);
+      if (["insights-breakdown", "insights-flows"].includes(page)) assert.ok(doc.includes("customer-site"), `${page}: the folder is actually drawn by basename`);
     }
-    if (["insights", "insights-breakdown", "insights-flows"].includes(page)) {
+    if (["insights-breakdown", "insights-flows"].includes(page)) {
       const ordinary = await drawSpend(page, { role: "operator", query: "range=7d", payload });
       assert.ok(!ordinary.includes("private-operator"), `${page}: operators also opt in to full paths`);
       const full = await drawSpend(page, { role: "operator", query: "range=7d&paths=full", payload });
@@ -127,21 +97,8 @@ test("all five Spend views enforce the local-path boundary even when a viewer as
 });
 
 
-test("Budget split headlines expose floors, permitted writers and remaining plan validity", async () => {
-  const page = (await rendered)["spend-split.operator"];
-  const text = cardText(page);
-  for (const sentence of ["Writers: operator-session, portfolio-job"]) assert.ok(text.includes(sentence), sentence);
-  const doc = cardDocument(page);
-  const plan = doc.within(doc.byId.get("p-plan-kpi"));
-  assert.match(cardText(plan), /24 hours left/);
-  assert.match(cardText(plan), /Applied .* until/);
-  assert.match(plan, /datetime="2026-10-09/);
-});
-
-
-test("zero allocation refusals are named as zero and scheduled next fires are times", async () => {
+test("scheduled next fires are times", async () => {
   const pages = await rendered;
-  for (const reason of ["allocation-cap", "envelope-mismatch", "portfolio-no-envelope", "portfolio-snapshot-oversize"]) assert.ok(cardText(pages["spend-split.viewer"]).includes(reason), reason);
   const selected = cardDocument(pages["spend-flows-selected.viewer"]);
   const panel = selected.byId.get("p-flows-selected");
   assert.ok(selected.descendants(panel).some((node) => node.tag === "time"), "scheduled next fire is a real time element");

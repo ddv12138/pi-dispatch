@@ -65,8 +65,6 @@ import { createWorker, JOB_TIMEOUT_MS, STALLED_FAILED_REASON } from "./index.mjs
 import { BOOT_REFUSING_JOB_USER_CAUSES, DAEMON_FACTS_TIMEOUT_MS, jobUserRefusal, makeDaemonFactsReader, makeJobUserResolver, relabelsPrivateMounts, resolveImageUser } from "./job-user.mjs";
 import { unenforcedSizeFlags } from "./job-size.mjs";
 import { makeCollectChain } from "./outbox.mjs";
-import { makeCollectPlan } from "./outbox-plan.mjs";
-import { makePortfolioSnapshot } from "./portfolio-snapshot.mjs";
 import { containerPackagePaths, readStageManifest } from "./packages.mjs";
 import { cleanup, makeForgePreparers, makePrepareWorkspace } from "./prepare.mjs";
 import { makeRetentionSweep } from "./retention-sweep.mjs";
@@ -81,14 +79,12 @@ const UPDATES_RECONCILE_TIMEOUT_MS = 15 * 60 * 1000;
 import { fileURLToPath } from "node:url";
 import { makeSessionStore } from "./session-store.mjs";
 import { scrubCredentials } from "./redact.mjs";
-import { makeCheckOnceSpent, makeCheckPortfolioFlag, makeCheckWaitSkew, makeDisarmOnce, makeFindSecretBundle } from "./triggers-file.mjs";
+import { makeCheckOnceSpent, makeCheckWaitSkew, makeDisarmOnce, makeFindSecretBundle } from "./triggers-file.mjs";
 import { makeBundleResolver } from "./secret-bundles.mjs";
 import { WATCH_DEBOUNCE_MS, changedWhileArming, makeWatchCloser, readBeforeArming } from "./watch-closer.mjs";
 import { loadPauseWindows, PAUSE_WINDOWS_VERSION, pauseUntilMs } from "./pause-windows.mjs";
-import { checkProjectRows, danglingProjectRows, tokenRowsWithoutCap, makeInFlight, loadScopedLimits, SCOPED_LIMITS_VERSION, scopeClaimRows } from "./scoped-limits.mjs";
+import { checkProjectRows, danglingProjectRows, makeInFlight, loadScopedLimits, SCOPED_LIMITS_VERSION, scopeClaimRows } from "./scoped-limits.mjs";
 import { escapeControls, loadProjects, projectOf, projectsFingerprint } from "./projects.mjs";
-import { envelopeDigest, envelopeInsideJobPaths, loadEnvelopeChecked } from "./envelope.mjs";
-import { NO_ENVELOPE_FINGERPRINT, makeAllocationAudit, makeAllocationLogReaper, makeAllocationState } from "./allocation.mjs";
 import { makeConsoleAuditReaper } from "./console-audit.mjs";
 import { makeOnFailure } from "./on-failure.mjs";
 import { makeHookRunsPublisher } from "./hook-runs.mjs";
@@ -118,11 +114,10 @@ import { readProgressKey } from "./run-progress.mjs";
 import { makeStatusCommenter, makeStatusCommentRegistry, renderStatusText, STATUS_OUTCOMES, STATUS_RETRYING } from "./status-comment.mjs";
 import { readOverlay, resolveSettings, SETTINGS_VERSION } from "./runtime-settings.mjs";
 import { JOB_DATA_VERSION } from "./job-data-version.mjs";
-import { tokenFingerprint } from "./token-fingerprint.mjs";
-import { authoredCron, envelopeJobPaths, loadSchedules, servedSchedules } from "./schedules.mjs";
+import { authoredCron, loadSchedules, servedSchedules } from "./schedules.mjs";
 import { makeStallGuard } from "./scheduler-stall-guard.mjs";
 import { makeWorkspaceCheckpointer } from "./workspace-checkpoint.mjs";
-import { makeRunBudgetLedger } from "./run-budget-ledger.mjs";
+import { makeRunAttempts } from "./run-attempt.mjs";
 import { normalizeHost } from "./run-checkpoint.mjs";
 import { isRecoveryArmed, makeHostLostSweep, makeRecoveryEnqueuer, makeSalvager, pointedJobDirs, runIdOf, sweepOrphanJobDirs } from "./recovery-queue.mjs";
 import { finishModelAttempt, modelAttemptIdOf } from "./model-attempts.mjs";
@@ -332,8 +327,6 @@ function watchTriggersFile(config, queue, log, ref, registry, tz, fleet, atBoot,
 			if (handles.closed) return; // see makeWatchCloser: by construction, not by a delivery rule
 			if (changed && changed !== file) return; // only our file (a null name -> reload to be safe)
 			clearTimeout(handles.timer);
-			// Issue #504 part B: a cron folder or a skills dir an edit adds is a new job path, so the envelope's place is
-			// judged again after every triggers reload.
 			handles.timer = setTimeout(() => void reloadTriggersFile(config, queue, state, { log: closer.reloadLog, ref, registry, tz, fleet }).then(() => afterReload(closer.reloadLog)), WATCH_DEBOUNCE_MS);
 		});
 		handles.watcher.unref?.();
@@ -419,7 +412,7 @@ function watchPauseWindowsFile(config, ref, log, atBoot, watchFn = watch) {
  * last-good property carries its own test). A bad edit keeps `ref.current` untouched and logs
  * `scoped_limits_reload_invalid` -- the pause-windows posture, INT-SCOPED-LIMITS-FILE-CONTRACT.
  */
-export function reloadScopedLimits(config, ref, log, deploymentCap = null, pair = null) {
+export function reloadScopedLimits(config, ref, log, _retiredDeploymentCap = null, pair = null) {
 	try {
 		const next = loadScopedLimits(config);
 		// Issue #499 part B: the new limits are checked against projects.json (`pair`, null only on a bare test wiring);
@@ -427,7 +420,6 @@ export function reloadScopedLimits(config, ref, log, deploymentCap = null, pair 
 		const other = pair ? pairWith(config, next, pair, "limits") : null;
 		ref.current = next;
 		log("scoped_limits_reloaded", { count: ref.current.length });
-		if (deploymentCap) warnTokenRowsWithoutCap(ref.current, deploymentCap(), log);
 		if (other) {
 			pair.projects.current = other;
 			log("projects_reloaded", { count: other.length, with: "scoped-limits" });
@@ -436,18 +428,15 @@ export function reloadScopedLimits(config, ref, log, deploymentCap = null, pair 
 		log("scoped_limits_reload_invalid", { reason: err?.message });
 		return;
 	}
-	// Issue #504 part B: the envelope's floors are judged against both files, so a committed edit re-judges it.
-	pair?.afterCommit?.();
 }
 
 /**
  * The two files a project row joins (issue #499 part B): scoped-limits.json names `project:<id>`, projects.json defines
- * the id. `{ limits, projects }` are the two live refs, and `deploymentCap` the merged per-job cap thunk the
- * dollar-rows-without-cap warning reads (null on a bare wiring). A reload of either file is judged as a PAIR (`pairWith`), so the
+ * the id. `{ limits, projects }` are the two live refs. A reload of either file is judged as a PAIR (`pairWith`), so the
  * two live lists never disagree and a correct pair applies whatever order its files were saved in.
  */
-export function makeProjectPair(limits, projects, deploymentCap = null) {
-	return { limits, projects, deploymentCap };
+export function makeProjectPair(limits, projects) {
+	return { limits, projects };
 }
 
 /**
@@ -480,21 +469,11 @@ function pairWith(config, next, pair, side) {
 }
 
 /**
- * PR #549's review: a `scoped-limits.json` token row on a deployment with no per-job budget (env and overlay merged)
- * refuses every job it applies to as `config-refused`, unless that job's trigger sets `run.maxTokens`. So it is a
- * WARNING at load and at each reload, never a refusal: the rows by index and kind, never a scope string.
- */
-export function warnTokenRowsWithoutCap(limits, deploymentMaxTokens, log) {
-	const rows = tokenRowsWithoutCap(limits, deploymentMaxTokens);
-	if (rows.length > 0) log("scoped_limits_token_rows_without_budget", { rows });
-}
-
-/**
  * Watch the scoped-limits file (issue #242) the way the pause-windows watcher above does: the DIRECTORY,
  * for atomic tmp+rename robustness, filtered to the one basename, debounced. Best-effort; the FSWatcher is
  * unref'd and the returned closer stops the watch with the worker (issue #295).
  */
-function watchScopedLimitsFile(config, ref, log, atBoot, deploymentCap = null, pair = null) {
+function watchScopedLimitsFile(config, ref, log, atBoot, _retiredDeploymentCap = null, pair = null) {
 	const path = config.scopedLimitsFile;
 	const dir = dirname(path) || ".";
 	const file = basename(path);
@@ -507,7 +486,7 @@ function watchScopedLimitsFile(config, ref, log, atBoot, deploymentCap = null, p
 			if (handles.closed) return; // see makeWatchCloser: by construction, not by a delivery rule
 			if (changed && changed !== file) return;
 			clearTimeout(handles.timer);
-			handles.timer = setTimeout(() => reloadScopedLimits(config, ref, closer.reloadLog, deploymentCap, pair), WATCH_DEBOUNCE_MS);
+			handles.timer = setTimeout(() => reloadScopedLimits(config, ref, closer.reloadLog, _retiredDeploymentCap, pair), WATCH_DEBOUNCE_MS);
 		});
 		handles.watcher.unref?.();
 		log("scoped_limits_watching", { path });
@@ -516,7 +495,7 @@ function watchScopedLimitsFile(config, ref, log, atBoot, deploymentCap = null, p
 	}
 	if (changedWhileArming(handles, readFile)) {
 		log("scoped_limits_reread_after_arming", { path });
-		reloadScopedLimits(config, ref, closer.reloadLog, deploymentCap, pair);
+		reloadScopedLimits(config, ref, closer.reloadLog, _retiredDeploymentCap, pair);
 	}
 	return closer;
 }
@@ -538,16 +517,12 @@ export function reloadProjects(config, ref, log, pair = null) {
 		if (other) {
 			pair.limits.current = other;
 			log("scoped_limits_reloaded", { count: other.length, with: "projects" });
-			// Every limits list that goes live is warned on, whichever file's reload committed it.
-			if (pair.deploymentCap) warnTokenRowsWithoutCap(other, pair.deploymentCap(), log);
 		}
 	} catch (err) {
 		// Escaped (PR #569's review): the parser's own refusals already are, and an fs error quoting the path is too.
 		log("projects_reload_invalid", { reason: escapeControls(err?.message) });
 		return;
 	}
-	// Issue #504 part B: as `reloadScopedLimits` does, so the envelope follows a projects edit in either save order.
-	pair?.afterCommit?.();
 }
 
 /**
@@ -578,80 +553,6 @@ function watchProjectsFile(config, ref, log, atBoot, pair = null) {
 	if (changedWhileArming(handles, readFile)) {
 		log("projects_reread_after_arming", { path });
 		reloadProjects(config, ref, closer.reloadLog, pair);
-	}
-	return closer;
-}
-
-/**
- * `envelopeJobPaths` as a thunk that keeps its last good answer (issue #504 part B): a triggers file caught mid-edit
- * must not turn a containment check into a failure of its own, and the last parse that succeeded is what the running
- * schedulers were built from. The first call has no last good answer and throws, which at boot refuses.
- */
-export function makeEnvelopeJobPaths(config, io = {}) {
-	let lastGood = null;
-	return () => {
-		try {
-			lastGood = envelopeJobPaths(config, io);
-		} catch (err) {
-			if (lastGood === null) throw err;
-		}
-		return lastGood;
-	};
-}
-
-/**
- * The envelope reload (issue #504 part B), exported apart from its watcher for `reloadScopedLimits`' reason. `ref` is
- * `{ current, digest }`. The file is judged against the LIVE projects and scoped limits (its floors name projects and
- * sit under project rows) and the job paths of the moment, so a reload is paired with both files: their own reloads
- * call this again once they commit (`pair.afterCommit`), and an envelope edit that needs a projects edit applies in
- * either save order. A bad edit, or one that puts the file inside a job path, keeps the last good envelope and logs
- * `envelope_reload_invalid`; the last good copy can never be one a job wrote, because every reload re-runs the
- * containment check. A changed digest logs `envelope_reloaded` and calls `onChange` (the re-base, or the mismatch).
- */
-export function reloadEnvelope(config, ref, log, { projects, limits, maxTokens = () => null, jobPaths, onChange = () => {} }) {
-	let next;
-	try {
-		next = loadEnvelopeChecked(config, { projects: projects?.current ?? [], limits: limits?.current ?? [], maxTokens: maxTokens(), jobPaths: jobPaths() });
-	} catch (err) {
-		log("envelope_reload_invalid", { reason: escapeControls(err?.message) });
-		return;
-	}
-	const digest = next === null ? null : envelopeDigest(next);
-	const changed = digest !== ref.digest;
-	ref.current = next;
-	ref.digest = digest;
-	if (!changed) return;
-	log("envelope_reloaded", { digest });
-	onChange();
-}
-
-/**
- * Watch the envelope file (issue #504 part B) as the projects watcher does: the directory, filtered to the one
- * basename, debounced, the boot read as the arming baseline, the closer joining `extraClosers`.
- */
-function watchEnvelopeFile(config, ref, log, atBoot, ctx) {
-	const path = config.envelopeFile;
-	const dir = dirname(path) || ".";
-	const file = basename(path);
-	const handles = { watcher: null, timer: null, closed: false };
-	const closer = makeWatchCloser(handles, log);
-	const readFile = () => readFileSync(path, "utf8");
-	readBeforeArming(handles, readFile, atBoot);
-	try {
-		handles.watcher = watch(dir, (_event, changed) => {
-			if (handles.closed) return;
-			if (changed && changed !== file) return;
-			clearTimeout(handles.timer);
-			handles.timer = setTimeout(() => reloadEnvelope(config, ref, closer.reloadLog, ctx), WATCH_DEBOUNCE_MS);
-		});
-		handles.watcher.unref?.();
-		log("envelope_watching", { path });
-	} catch (err) {
-		log("envelope_watch_unavailable", { reason: err?.message });
-	}
-	if (changedWhileArming(handles, readFile)) {
-		log("envelope_reread_after_arming", { path });
-		reloadEnvelope(config, ref, closer.reloadLog, ctx);
 	}
 	return closer;
 }
@@ -777,8 +678,6 @@ export async function startWorker(
 		makeLogSink: makeLogSinkFn = makeLogSink,
 		makeRecordWriter: makeRecordWriterFn = makeRecordWriter,
 		makeRunMirror: makeRunMirrorFn = makeRunMirror,
-		// Issue #761: the portfolio snapshot's factory, a seam so a wiring test sees the run index cap it is handed.
-		makePortfolioSnapshot: makePortfolioSnapshotFn = makePortfolioSnapshot,
 		// The fleet copy's by-id read, seamed so a wiring test can answer it without a live mirror.
 		readMirroredRecord: readMirroredRecordFn = readMirroredRecord,
 		makeLogReaper: makeLogReaperFn = makeLogReaper,
@@ -853,14 +752,11 @@ export async function startWorker(
 		watchScopedLimits: watchScopedLimitsFn = watchScopedLimitsFile,
 		// The projects watcher (issue #499), injectable for the same reason: a test sees it armed and closed.
 		watchProjects: watchProjectsFn = watchProjectsFile,
-		// The envelope watcher (issue #504 part B), injectable for the same reason.
-		watchEnvelope: watchEnvelopeFn = watchEnvelopeFile,
 		// Issue #645 (durable runs): the checkpoint collaborators, seams so a wiring test sees what the boot hands each and
 		// what the processor and the opener are given. `loadRunCheckpoint` is the module holding the run checkpointer and
 		// the pointer reads (run-checkpoint.mjs), imported at boot rather than statically, so a test can hand in a double.
 		makeWorkspaceCheckpointer: makeWorkspaceCheckpointerFn = makeWorkspaceCheckpointer,
 		loadRunCheckpoint = () => import("./run-checkpoint.mjs"),
-		makeRunBudgetLedger: makeRunBudgetLedgerFn = makeRunBudgetLedger,
 		makeRecoveryEnqueuer: makeRecoveryEnqueuerFn = makeRecoveryEnqueuer,
 		// The host-lost sweep's factory: a wiring test reaches its `onLost` (the comment, the page, the record) without a
 		// live queue, since the harness's clients are closed by the time a test could drive a sweep.
@@ -937,7 +833,7 @@ export async function startWorker(
 	// this race lives in is between these lines and the arming a thousand lines below -- the endpoint probe,
 	// forge auth, the reaper, Valkey -- not the microseconds around the arming itself, which is what a first
 	// attempt measured. `null` where a file is not configured, which reads as "nothing to compare".
-	const atBoot = { triggers: null, pauseWindows: null, scopedLimits: null, projects: null, modelEndpoints: null, envelope: null };
+	const atBoot = { triggers: null, pauseWindows: null, scopedLimits: null, projects: null, modelEndpoints: null };
 	const recording = (into, path) => ({
 		readFileSync: (file, enc) => {
 			const text = readFileSync(file, enc);
@@ -968,40 +864,6 @@ export async function startWorker(
 	// Issue #499 part B: a `project:<id>` row whose id is not a project refuses BOOT, naming the row and the id: it would
 	// read as a cap on a group that no job can belong to. The live reloads of either file hold the same rule (`pair`).
 	checkProjectRows(scopedLimits.current, projects.current, config.scopedLimitsFile, config.projectsFile ?? null);
-
-	// Issue #504 part B: the allocation envelope (INT-ENVELOPE-FILE-CONTRACT), same posture: a bad file refuses boot with
-	// the operator present, before any Valkey contact. It is judged against the projects and scoped limits just loaded
-	// (its floors name projects and sit under project rows), needs the merged per-job cost cap (each governed job
-	// reserves it against its share), and must lie outside every host path a job container can see, which is checked
-	// with this load and again with every reload. A mutable ref `{ current, digest }`; null when PI_ENVELOPE_FILE is
-	// unset, and then nothing below governs anything.
-	const envelopeBudget = () => {
-		try {
-			const s = resolveSettings(config, readOverlay(config.settingsFile));
-			return s.invalid ? config.maxTokens : s.maxTokens;
-		} catch {
-			return null;
-		}
-	};
-	const envelopeJobPathsNow = makeEnvelopeJobPaths(config);
-	const envelope = { current: null, digest: null };
-	if (config.envelopeFile !== null && config.envelopeFile !== undefined) {
-		envelope.current = loadEnvelopeChecked(config, { projects: projects.current, limits: scopedLimits.current, maxTokens: envelopeBudget(), jobPaths: envelopeJobPathsNow() }, { io: recording("envelope", config.envelopeFile) });
-		envelope.digest = envelope.current === null ? null : envelopeDigest(envelope.current);
-		log("envelope_loaded", { digest: envelope.digest, window: envelope.current?.window ?? null, delegation: envelope.current?.delegation?.enabled === true });
-	}
-	// After a triggers reload (a cron folder or a skills dir is a job path): the envelope's place judged again. The live
-	// copy is kept either way, since every envelope reload re-runs the check and so never adopts a file a job could have
-	// written; this line is what tells the operator that a job can now reach the file.
-	const checkEnvelopePlace = (say = log) => {
-		if (!envelope.current) return;
-		try {
-			const inside = envelopeInsideJobPaths(config.envelopeFile, envelopeJobPathsNow());
-			if (inside) say("envelope_inside_job_path", { kind: inside.kind });
-		} catch (err) {
-			say("envelope_inside_job_path", { reason: escapeControls(err?.message) });
-		}
-	};
 
 	// Issue #503: the declared model endpoints, same posture (INT-MODEL-ENDPOINTS-FILE-CONTRACT): a bad file refuses
 	// boot with the operator present, a mutable ref for the live reload, [] when there is no file. Read per pickup
@@ -1123,7 +985,7 @@ export async function startWorker(
 	// WHAT CHANGED (issue #316): best-effort used to mean best-effort ONCE. Any throw left `auth` null for
 	// the lifetime of the process, so a forge that was merely unreachable during the seconds this loop ran
 	// stayed credential-less until somebody restarted the worker, and every job of that kind then hit the
-	// `configError` fallback below -- which, since #310, refunds the reserve and posts a public comment
+	// `configError` fallback below -- which, since #310, is classified as config-refused and posts a public comment
 	// telling the issue author that the operator's deployment is misconfigured. A deployment that
 	// `doctor` reports as healthy. The boot posture is unchanged for a DETERMINATE failure, which is what
 	// the local-only case is (no `gh` on PATH is `ENOENT`); a TRANSIENT one now leaves a re-resolver
@@ -1328,10 +1190,6 @@ export async function startWorker(
 	} catch (err) {
 		log("log_reaper_skipped", { reason: scrubCredentials(err?.message) });
 	}
-	// Issue #504 part B: the allocation audit files (`allocations/YYYY-MM.jsonl`) on the same retention, which the log
-	// reaper above never reaches (it reaps the top-level `.log` and `.json` only). Never throws, so no double wrap.
-	const reapAllocationLogs = makeAllocationLogReaper({ logsDir: config.logsDir, retentionDays: config.logRetentionDays, log });
-	reapAllocationLogs();
 	// Issue #640: the operator console's audit files (`console-audit/YYYY-MM.jsonl`). The worker runs it, not the console,
 	// because the worker always runs and the console may never; it never reaps the newest file (the chain's head). Never
 	// throws. Issue #761: on its OWN retention (`PI_CONSOLE_AUDIT_RETENTION_DAYS`, which inherits the run history's when
@@ -1354,22 +1212,6 @@ export async function startWorker(
 	if (!touchInitialized.ok) log("touch_tracking_unavailable", { reason: touchInitialized.error });
 	await touchOutbox.repair();
 	const questionGroupStore = makeQuestionGroupStoreFn({ redis, now, retentionDays: config.logRetentionDays });
-
-	// Issue #504 part B: the applied split lives in Valkey (`alloc:plan`), shared by every host. Only with an envelope.
-	// The boot reconcile seeds the neutral split when there is none, expires a plan past its life and re-bases on an
-	// envelope this host changed while it was down; a fault is logged and the first pickup tries again, because the
-	// pickup reconciles too and refuses nothing it cannot judge (it throws, and the job is retried).
-	// Built on EVERY host, with an envelope or without: a host with none still asks, at each pickup, whether the fleet is
-	// governed (an applied split exists), and refuses its jobs as envelope-mismatch when it is.
-	const allocationState = makeAllocationState({ redis, host: config.workerName, audit: makeAllocationAudit({ logsDir: config.logsDir }), log });
-	const reconcileAllocation = (why) => {
-		if (!envelope.current) return Promise.resolve();
-		return allocationState
-			.reconcile({ envelope: envelope.current, digest: envelope.digest, now: new Date() })
-			.then((r) => log("allocation_reconciled", { why, mismatch: r.mismatch, digest: envelope.digest, applied: r.state?.envelopeDigest ?? null }))
-			.catch((err) => log("allocation_reconcile_failed", { why, reason: scrubCredentials(err?.message) }));
-	};
-	await reconcileAllocation("boot");
 
 	// This host's own stale scope claims, gated on the reaper having having enumerated: the
 	// reaper is what establishes that this machine holds no `pi-job-*` containers, so a claim naming this
@@ -1441,9 +1283,9 @@ export async function startWorker(
 		workspaceCheckpointer && typeof runCheckpointModule?.makeRunCheckpointer === "function"
 			? runCheckpointModule.makeRunCheckpointer({ forkStore, checkpointer: workspaceCheckpointer, redis, hostName: durableHost, hostQueue, now, log })
 			: null;
-	// The per-run dollar ledger (run-budget-ledger.mjs): on every host, since a recovery settles the crashed attempt's hold
-	// wherever it runs, and an unarmed job never calls it.
-	const runBudgetLedger = makeRunBudgetLedgerFn({ redis, now, log });
+	// The per-run container sequence (run-attempt.mjs): on every host, since a recovery takes the next number wherever it
+	// runs, and an unarmed job never calls it. It holds no budget or token hold, only the run's last container number.
+	const runAttempts = makeRunAttempts({ redis });
 	const readCheckpointPointer = async ({ runId }) => {
 		if (typeof runCheckpointModule?.readCheckpointPointer !== "function") return null;
 		try {
@@ -1771,13 +1613,6 @@ export async function startWorker(
 	// the per-job path enforce the refusal (getSettings already logged the invalid reason).
 	const bootSettings = getSettings();
 	const bootConcurrency = bootSettings.invalid ? config.concurrency : bootSettings.concurrency;
-	// PR #549's review: the merged per-job budget, for the scoped-limits token-row warning at boot and at each reload.
-	// An invalid overlay falls back to the env value, the same fallback as the slot count above.
-	const deploymentMaxTokens = () => {
-		const s = getSettings();
-		return s.invalid ? config.maxTokens : s.maxTokens;
-	};
-	warnTokenRowsWithoutCap(scopedLimits.current, bootSettings.invalid ? config.maxTokens : bootSettings.maxTokens, log);
 
 	// INT-OUTBOX-CONTRACT chain collector: the host-side reader of a completed local parent's /outbox. It
 	// enqueues chained children onto the CRON queue via enqueueLocalJob -- this host's own when one is
@@ -1832,18 +1667,6 @@ export async function startWorker(
 		},
 	});
 
-	// Issue #505. One live-file check, shared by the pickup gate, the snapshot and the plan collector, so the three ask one
-	// file by one rule: the same file and rule as the one-shot checks below (`onceTriggersFile`). `pi-dispatch run
-	// --trigger` reads it there too, so the command that fires a trigger and the check that confirms its flag see one file.
-	const checkPortfolioFlag = makeCheckPortfolioFlag({ triggersPath: onceTriggersFile });
-	const governingNow = () => (envelope.current ? { envelope: envelope.current, digest: envelope.digest } : null);
-	// The plan collector: a completed portfolio job's /outbox/priorities.json, applied under the envelope by the same
-	// allocation state every pickup reconciles. Never throws, like collectChain beside it.
-	const collectPlan = makeCollectPlan({ allocation: allocationState, governing: governingNow, projects: () => projects.current, checkPortfolioFlag, log });
-	// The snapshot a confirmed portfolio job reads as /job/portfolio.json, built at prepare. The run counts are complete
-	// only with the run mirror, which a declared worker name arms (the `runMirror` rule below).
-	// `indexMax` (issue #761): the snapshot reads the whole index, which this host's own trim keeps at or under its cap.
-	const portfolioSnapshot = makePortfolioSnapshotFn({ checkPortfolioFlag, governing: governingNow, projects: () => projects.current, limits: () => scopedLimits.current, allocation: allocationState, redis, logsDir: config.logsDir, mirror: config.workerNameDeclared === true, indexMax: config.runMirrorMaxRuns, log });
 
 	// REQ-GLOBAL-PI-OVERLAY staged packages: read the operator's stage manifest at EACH job start, like
 	// getSettings above and the pause-window ref below.
@@ -1854,9 +1677,8 @@ export async function startWorker(
 	// pi, which makes `pi install X` then re-stage a ROUTINE act rather than a rare one. Under the boot read
 	// the jobs after such a re-stage keep the old set until someone restarts the worker, and when the re-stage
 	// DROPS a package the symptom is worse than staleness: the runner refuses a missing staged dir at
-	// container start (exit 2), and budget is reserved before the container, so every job burns a daily-cap
-	// slot until the restart. A free filesystem read that prevents a reserved-and-wasted slot is exactly what
-	// CONST-BUDGET-BEFORE-TOKENS asks for.
+	// container start (exit 2), so every job pays for a container that dies at startup until the restart. A free
+	// filesystem read that prevents a paid-and-wasted run is exactly what CONST-BUDGET-BEFORE-TOKENS asks for.
 	//
 	// Last-known-good on a failed read, never []: an empty set emits no PI_PACKAGES at all, so the runner's
 	// assertPackagePathsExist has nothing to refuse and the job would run WITHOUT its tools and still exit 0.
@@ -1990,7 +1812,7 @@ export async function startWorker(
 		// profile on restart must start attracting that work within one beat, and one that loses it must stop.
 		//
 		// Issue #704: the secret half is the profiles this host would RESOLVE, not only the env-declared ones. The
-		// overlay is read here each beat (without a log, `fpTok`'s reason), so a profile declared in the panel is
+		// overlay is read here each beat (without a log), so a profile declared in the panel is
 		// advertised within one beat of the write when its resolver sits inside PI_SECRET_RESOLVER_ROOTS, and
 		// never when it does not. A name declared in both sources makes this host refuse every secrets job, so it
 		// then advertises no secret profile at all. An overlay the job path refuses advertises the env profiles,
@@ -2012,24 +1834,10 @@ export async function startWorker(
 		// here is no opinion at all, and such a host must never be able to disagree with one that has one.
 		fpCron: () => cronFingerprint(authoredCron(config), { tz: hostTz }) ?? "",
 		cronCount: () => schedules.current.length,
-		// A fingerprint of the token caps this host judges the SHARED token counters against (the window caps and the
-		// per-job budget as a job resolves them, and the scoped-limits token rows), so doctor can name two hosts that
-		// would admit different jobs against one counter. A thunk for `fpCron`'s reason: the overlay and the
-		// scoped-limits file change without a restart. Read without a log, so an invalid overlay is not logged on every
-		// beat (each job logs it already). With an invalid overlay it hashes the env values, the slot count's fallback
-		// above; such a host refuses every job (settings-overlay-invalid) until the file is fixed. The env list rides
-		// along: it decides which model rows a job without its own list reserves in.
-		fpTok: () => {
-			const settings = resolveSettings(config, readOverlay(settingsFile));
-			return tokenFingerprint(settings.invalid ? config : settings, scopedLimits.current, config.allowedModels);
-		},
 		// Issue #499 part C: a fingerprint of the LIVE projects (ids and member hashes, never a name), so doctor can name a
 		// host whose projects.json differs. Each host resolves its own jobs' project from its own copy, while the project
 		// rows' counters are shared, so two copies put one repo in two projects. A thunk, so a live edit shows in one beat.
 		fpProjects: () => projectsFingerprint(projects.current),
-		// Issue #504 part B: the digest of this host's live envelope (`envelopeDigest`, 16 hex, never a value), so doctor can
-		// name a host whose envelope differs; such a host refuses governed jobs as `envelope-mismatch`. `none` without one.
-		fpEnvelope: () => envelope.digest ?? NO_ENVELOPE_FINGERPRINT,
 		// Issue #596: the highest scoped-limits version this build reads, so doctor can name a worker that would keep its
 		// last good file (so no size and no later edit to the file applies on it) once the file is version 3. An integer.
 		limitsVersion: SCOPED_LIMITS_VERSION,
@@ -2205,7 +2013,7 @@ export async function startWorker(
 					// Issue #681: the host budget's leftover listing rides on the bundle, so the boot seed asks each venue its own.
 					listJobContainers: listJobContainersFn("docker"),
 					// One deployment default, two consumers, adjacent by construction: the preflight that refuses a missing
-					// image BEFORE the budget slot, and the factory that puts it in the argv. Both resolve a trigger's own
+					// image BEFORE the container starts, and the factory that puts it in the argv. Both resolve a trigger's own
 					// `run.image` through the same resolveJobImage, so the image that was checked is the image that runs.
 					// Nothing is memoised (see its construction above): `docker image inspect` costs ~tens of ms against a
 					// container run of minutes, and a cache would be wrong in both directions -- an operator who builds the
@@ -2587,10 +2395,6 @@ export async function startWorker(
 		// Issue #596: the deployment's default job size, the two settings `loadConfig` already refused at boot if bad. ENV
 		// ONLY, never the settings overlay, so a size cannot change under a running worker.
 		jobSizeEnv: { PI_JOB_MEMORY: env.PI_JOB_MEMORY, PI_JOB_CPUS: env.PI_JOB_CPUS },
-		// Issue #504 part B: the live envelope and its digest, and the reconcile the pickup runs before it narrows a job's
-		// dollar ledgers by the applied split. Without an envelope `current()` is null, and `fleetGoverned` asks whether an
-		// applied split exists: if it does, this host's jobs refuse as envelope-mismatch rather than run ungoverned.
-		allocation: { current: () => (envelope.current ? { envelope: envelope.current, digest: envelope.digest } : null), reconcile: allocationState.reconcile, fleetGoverned: allocationState.fleetGoverned },
 		// Issue #230. The `after` ceiling is read per pickup from config rather than frozen into the
 		// processor, so it is one value with one home; the wait state shares the budget's redis client
 		// because it describes the same delayed jobs that client already reasons about.
@@ -2639,7 +2443,6 @@ export async function startWorker(
 		maxFaults: () => config.waitMaxFaults,
 		deps: {
 			collectChain,
-			collectPlan,
 			// Issue #646: the late-message branches at the processor's settle (index.mjs `settleSteer`).
 			onLateForge: lateForge,
 			watchRuntime,
@@ -2724,8 +2527,8 @@ export async function startWorker(
 					},
 				});
 			},
-			// Issue #503 part 7: the builtin catalog's model object, for the zero-rated check that lets a job on local
-			// zero-rated models reserve nothing in the dollar windows (processor.mjs, `zeroRatedVerdict`).
+			// Issue #503 part 7: the builtin catalog's model object, used to compose a model's baseUrl for the egress
+			// credential-host set.
 			builtinModel,
 			// Issue #502. The deployment's allowed-model list (PI_ALLOWED_MODELS), null = unrestricted. Env only, and
 			// handed to the processor here rather than through the settings overlay, which a model-callable tool writes.
@@ -2737,9 +2540,6 @@ export async function startWorker(
 			// one. In the compose topology the worker's read is the live inode while the receiver's is dead
 			// until restart, which is exactly the deployment where the skew happens.
 			checkWaitSkew: makeCheckWaitSkew({ triggersPath: onceTriggersFile }),
-			// Issue #505. Whether the live file still flags a portfolio job's cron trigger, read when such a job is picked
-			// up, from the same file and by the same rule as the two checks above (built once, beside collectPlan).
-			checkPortfolioFlag,
 			// Issue #230. Whether a job the supersede lease names is still in the queue. Without it a holder
 			// that vanished by any route except the clean one leaves a key that refuses every later delivery
 			// for that target until it expires -- and a refused forge delivery is gone, since no webhook
@@ -2800,8 +2600,8 @@ export async function startWorker(
 			// injected env they were not, which is the divergence this file already calls out by name for
 			// sessionsDir. One deployment value, one place, same rule as the profiles below it.
 			resolveSecrets: makeSecretsResolverFn({ envProfiles: config.secretProfiles, roots: config.secretResolverRoots, timeoutMs: config.secretResolveTimeoutMs, forwardEnv: config.forwardEnv, hostEnv: env, log }),
-			// Issue #704, project secret bundles. The binding is read from the SAME triggers file the one-shot, skew and
-			// portfolio checks read (`onceTriggersFile`), by the worker, never carried by the receiver, and answered from
+			// Issue #704, project secret bundles. The binding is read from the SAME triggers file the one-shot and skew
+			// checks read (`onceTriggersFile`), by the worker, never carried by the receiver, and answered from
 			// the last good read while the file is broken (triggers-file.mjs says why). The resolver is the run.secrets
 			// seam's sibling, with the same roots, timeout, forwarded names and host env.
 			// `bundlesDeclared`: whether this host declares any bundle profile, env or panel. On such a host a MISSING
@@ -2859,8 +2659,8 @@ export async function startWorker(
 			// #227. Resolved through the registry like every other per-job backend fact, so the integers the
 			// processor treats as "never started" are the ones the venue that ran the job actually uses.
 			// NOT `?? []`. An empty list means "this venue never reports a never-started exit", which sends a
-			// 125 to the unknown-exit branch -- no `reason`, so the budget slot is KEPT and BullMQ retries,
-			// burning a second one per never-started job. That is the bug the explicit case group was added
+			// 125 to the unknown-exit branch -- no `reason`, so the attempt is NOT counted as never started and
+			// BullMQ retries, burning a second attempt per never-started job. That is the bug the explicit case group was added
 			// to fix. A bundle that omits the field is a wiring defect, so it fails loudly here rather than
 			// silently in the money direction; `backends.mjs` requires it of every bundle.
 			// Off the REGISTRY's surface, like every other per-job backend fact. Rebuilding it at the call site
@@ -2876,11 +2676,8 @@ export async function startWorker(
 				// Issue #464: the boot's own check, asked again before every job against the same env.
 				ensureDir: (dir) => ensureJobsDirFn(dir, { env }),
 				forgeFor,
-				// Issue #504 part B: a local job's folder is resolved at prepare and mounted resolved; one named inside a run
-				// root or a cron folder must still resolve inside it, and none may be the envelope's folder or above it.
-				localPlacement: { jobPaths: envelopeJobPathsNow, envelopeFile: config.envelopeFile ?? null, authStoreDir: subscriptions?.storeDir ?? null },
-				// Issue #505: /job/portfolio.json for a confirmed portfolio job.
-				portfolioSnapshot,
+				// A local job's folder is resolved at prepare and mounted resolved.
+				localPlacement: { authStoreDir: subscriptions?.storeDir ?? null },
 				preparers: makeForgePreparers({ gitlabApiUrl: config.gitlab?.apiUrl ?? null, forgejoApiUrl: config.forgejo?.apiUrl ?? null, azureOrgUrl: config.azure?.orgUrl ?? null }),
 				// The cron event.json's previousRunAt (INT-CONTAINER-JOB-INPUTS): read back from the same
 				// per-job run-history sidecars recordRun writes above -- no new store, no new query surface.
@@ -2933,13 +2730,13 @@ export async function startWorker(
 				return await host.isDefaultBranchProtected(job, token);
 			},
 			// Issue #645 (durable runs), built above. Null where this host has no store (`recover-store-unset` refuses an
-			// armed job before it spends); the ledger, the pointer read and the enqueue exist on every host.
+			// armed job before it spends); the container sequence, the pointer read and the enqueue exist on every host.
 			workspaceCheckpointer,
 			forkStore,
 			checkForkPolicy: makeCheckForkPolicy({ triggersPath: onceTriggersFile }),
 			checkThinking: (job) => thinkingLevelAllowed(job, { models: readOverlayModels(config.globalPiDir), builtinModel }),
 			runCheckpointer,
-			runBudgetLedger,
+			runAttempts,
 			readCheckpointPointer,
 			enqueueRecovery,
 			// A recovery landing on the host that crashed takes one more checkpoint from the crashed attempt's job directory
@@ -2963,8 +2760,8 @@ export async function startWorker(
 		// comment and the signal for CONST-PI-VERSION-PINNED's silent-no-op mode -- a missing line is
 		// what tells a human a run did nothing. The container's own output already streams via
 		// runContainer's onOutput during the run.
-		// `reason` is a fixed enum (worker-abort | token-cap | dollar-cap | allocation-cap | envelope-mismatch | portfolio-no-envelope | portfolio-snapshot-oversize | unprotected-branch | runner-policy |
-		// provider-auth-refused | job-image-missing), never
+		// `reason` is a fixed enum (worker-abort | unprotected-branch | runner-policy | provider-auth-refused |
+		// job-image-missing), never
 		// user content. Included only when present so success lines stay clean; a shutdown-aborted job logs
 		// { outcome: "policy", reason: "worker-abort" }, making a restart-dropped job visible.
 		// BOTH workers, or a cron job on the host queue produces no `job_completed` line at all -- and
@@ -3227,7 +3024,7 @@ export async function startWorker(
 		// Only when a triggers file is configured; best-effort; a bad edit keeps the running schedulers. The
 		// closer each of the three returns joins `extraClosers`, so the watch stops with the worker (issue #295).
 		if (config.triggersFile) {
-			extraClosers.push(watchTriggersFile(config, cronQueue, log, schedules, registry, hostTz, config.workerNameDeclared, atBoot.triggers, checkEnvelopePlace, triggersState, watchFs));
+			extraClosers.push(watchTriggersFile(config, cronQueue, log, schedules, registry, hostTz, config.workerNameDeclared, atBoot.triggers, undefined, triggersState, watchFs));
 		}
 
 		// REQ-SCOPED-PAUSE-WINDOWS live edit: watch the pause-windows file and hot-swap the in-memory windows, so
@@ -3236,19 +3033,11 @@ export async function startWorker(
 			extraClosers.push(watchPauseWindowsFile(config, pauseWindows, log, atBoot.pauseWindows, watchFs));
 		}
 
-		// Issue #499 part B: the two files a project row joins reload as a pair; the deployment cap rides along so a limits
-		// list either reload commits gets the dollar-rows-without-cap warning.
-		const projectPair = makeProjectPair(scopedLimits, projects, deploymentMaxTokens);
-		// Issue #504 part B: the envelope reloads with the pair, since its floors are judged against both files: a committed
-		// limits or projects edit re-judges it from disk, and its own edits are judged against the live pair.
-		const envelopeCtx = { projects, limits: scopedLimits, maxTokens: envelopeBudget, jobPaths: envelopeJobPathsNow, onChange: () => void reconcileAllocation("reload") };
-		if (config.envelopeFile) {
-			projectPair.afterCommit = () => reloadEnvelope(config, envelope, log, envelopeCtx);
-			extraClosers.push(watchEnvelopeFn(config, envelope, log, atBoot.envelope, envelopeCtx));
-		}
+		// Issue #499 part B: the two files a project row joins reload as a pair.
+		const projectPair = makeProjectPair(scopedLimits, projects);
 		// Issue #242 live edit: hot-swap the scoped limits on file change, keeping last-good on a bad edit.
 		if (config.scopedLimitsFile) {
-			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, deploymentMaxTokens, projectPair));
+			extraClosers.push(watchScopedLimitsFn(config, scopedLimits, log, atBoot.scopedLimits, null, projectPair));
 		}
 
 		// Issue #499 live edit: the projects file, keep-last-good on a bad edit.
@@ -3304,8 +3093,6 @@ export async function startWorker(
 			const sweep = makeRetentionSweepFn({
 				reapers: [
 					{ name: "log", reap: reapLogs },
-					// Issue #504 part B: where boot runs it, right after the run history it sits beside.
-					{ name: "allocation_log", reap: reapAllocationLogs },
 					{ name: "console_audit", reap: reapConsoleAudit },
 					{ name: "touch_outbox", reap: () => touchOutbox.repair() },
 					{ name: "session", reap: () => sessionStore.reapSessions() },
@@ -3367,12 +3154,10 @@ export async function startWorker(
 			concurrency: bootConcurrency, // the slot count the Worker is actually constructed with (overlay may raise/lower it)
 			sweepIntervalHours: config.sweepIntervalHours, // 0 = boot-only sweeps, this version's pre-#292 behaviour
 			doctorIntervalHours: config.doctorIntervalHours, // issue #712: 0 = the worker runs no doctor of its own
-			scopedLimitsFile: config.scopedLimitsFile, // null = no scoped concurrency/token windows (the folder mutex holds regardless)
+			scopedLimitsFile: config.scopedLimitsFile, // null = no scoped concurrency limits (the folder mutex holds regardless)
 			scopedLimits: scopedLimits.current.length, // row count -- money config deserves boot visibility; the watcher logs only changes
 			projectsFile: config.projectsFile, // issue #499: null = no projects
 			projects: projects.current.length, // project count, never a name
-			envelopeFile: config.envelopeFile, // issue #504: null = no envelope and no delegation
-			envelopeDigest: envelope.digest, // the envelope's 16-hex digest, the host row's fpEnvelope; null without one
 			modelEndpoints: modelEndpoints.current.length, // issue #503: declared model endpoints, each a slot lease at pickup
 			image: config.jobImage,
 			valkey: config.valkeyUrl,

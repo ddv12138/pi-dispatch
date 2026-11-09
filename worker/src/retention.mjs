@@ -42,7 +42,7 @@ export const LOCAL_JOB_KEPT_FAILED_S = 7 * 24 * 3600;
  * The shared run index's member cap (`PI_RUN_MIRROR_MAX_RUNS`). Every writer trims the index to its OWN cap, so in a
  * fleet the lowest setting wins, and each trim raises the horizon, so a reader sees a cut rather than idle time.
  * The floor is the console's widest read (1,000 runs): a smaller index would cut that read short. The ceiling bounds the
- * portfolio snapshot's single read of the whole index.
+ * the run index's single read.
  */
 export const RUN_MIRROR_MAX_RUNS_DEFAULT = 5_000;
 export const RUN_MIRROR_MAX_RUNS_MIN = 1_000;

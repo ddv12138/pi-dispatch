@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "no
 import { join } from "node:path";
 import { test } from "node:test";
 import { CMDLINE_BYTES, createChildWatch, ENVIRON_BYTES, isPiProcess, linuxProc, NO_LEDGER_FINAL_MS, NO_LEDGER_TICKS, PF_FORKNOEXEC, PRELOAD_FLAG, STARTING_CPU_MS, STARTING_FINAL_MS, STARTING_WALL_MS } from "../src/child-watch.mjs";
-import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
 import { childLedger, CHILD_LEDGER_MAX_FILES, createPolicyGuard, createUsageMeter, foldChildLedgers, writeFileAtomic } from "../src/usage-meter.mjs";
 import { parseExitTokens } from "../../../worker/src/run-history.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -64,8 +64,8 @@ const stopOf = (dir) => JSON.parse(readFileSync(join(dir, "STOP"), "utf8"));
 const usage = (total) => ({ input: total, output: 0, totalTokens: total, cost: { total: 0.001 } });
 
 test("with no children the exit line is the one it was, plus the three child keys at zero, after the flat totals (issue #500)", () => {
-	const plain = createUsageMeter({ maxTokens: 10_000, rootSessionId: "root" });
-	const watched = createUsageMeter({ maxTokens: 10_000, rootSessionId: "root" });
+	const plain = createUsageMeter({ rootSessionId: "root" });
+	const watched = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter: watched });
 	for (const meter of [plain, watched]) {
 		meter.record(usage(120), { sessionId: "root", provider: "fake", modelId: "m1" });
@@ -84,16 +84,16 @@ test("with no children the exit line is the one it was, plus the three child key
 	delete parsed.tokens.unmeteredChildren;
 	assert.equal(JSON.stringify(parsed), line(plain, false), "everything else byte-identical");
 	// The keys are there before the first tick too: the hook hands over an empty fold when it is made.
-	const early = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const early = createUsageMeter({ rootSessionId: "root" });
 	createChildWatch({ dir, meter: early, proc: null });
 	assert.deepEqual(Object.keys(early.snapshot()).slice(-4), ["childTotal", "childProcesses", "unmeteredChildren", "usageUnreported"]);
 	assert.deepEqual(hook.teardown(), { distinct: null, peak: null, unmetered: 0 }, "no detector off Linux");
 	assert.equal(watched.state.stopReason, null);
-	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET }, "the directory and its STOP stay: the container ends right after");
+	assert.equal(existsSync(join(dir, "STOP")), false, "a clean end has no policy reason, so no STOP is written");
 });
 
 test("each tick folds the ledgers into the meter: totals, rows and the three keys (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	meter.record(usage(50), { sessionId: "root", provider: "fake", modelId: "m1" });
 	writeLedger(dir, 41, ledger({ calls: 2, each: 100 }));
@@ -104,26 +104,28 @@ test("each tick folds the ledgers into the meter: totals, rows and the three key
 	assert.deepEqual(meter.usageSnapshot().models.map((m) => [m.provider, m.model, m.calls, m.total]), [["fake", "m1", 3, 250]]);
 });
 
-test("parent plus children past maxTokens stops token_budget and writes STOP; a deleted STOP and a deleted directory come back (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1000, rootSessionId: "root" });
+test("a policy stop writes STOP; a deleted STOP and a deleted directory come back (issue #500)", () => {
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const { dir, hook, logged } = watch({ meter });
 	meter.record(usage(400), { sessionId: "root", provider: "fake", modelId: "m1" });
 	writeLedger(dir, 7, ledger({ calls: 1, each: 500 }));
 	hook.sample();
-	assert.equal(meter.state.stopReason, null, "900 is under the cap");
+	assert.equal(meter.state.stopReason, null, "metering a large total is not a policy stop");
 	assert.equal(existsSync(join(dir, "STOP")), false, "no STOP before a stop");
 	writeLedger(dir, 7, ledger({ calls: 2, each: 500 }));
 	hook.sample();
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
-	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET });
+	meter.stop(MODEL_NOT_ALLOWED);
+	hook.sample();
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
+	assert.deepEqual(stopOf(dir), { v: 1, reason: MODEL_NOT_ALLOWED });
 	// The agent deletes STOP: the next tick writes it again.
 	rmSync(join(dir, "STOP"));
 	hook.sample();
-	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET }, "STOP is rewritten on every tick once stopped");
+	assert.deepEqual(stopOf(dir), { v: 1, reason: MODEL_NOT_ALLOWED }, "STOP is rewritten on every tick once stopped");
 	// The agent deletes the whole directory: it is made again, STOP is back, and the loss is counted unmetered.
 	rmSync(dir, { recursive: true });
 	hook.sample();
-	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET });
+	assert.deepEqual(stopOf(dir), { v: 1, reason: MODEL_NOT_ALLOWED });
 	assert.ok(meter.snapshot().unmeteredChildren >= 1, "a lost directory is a breach");
 	assert.equal(meter.snapshot().childTotal, 1000, "the high-water mark keeps what the lost file had reached");
 	assert.equal(logged.filter((line) => line.event === "unmetered_child").length, 1);
@@ -137,7 +139,7 @@ test("under a model list: a named child row off the PARENT's list, or a child's 
 		["the same id under another provider", ledger({ provider: "other", model: "m1" }), MODEL_NOT_ALLOWED],
 		["a refusal in the child", ledger({ calls: 0, modelRefused: 1 }), MODEL_NOT_ALLOWED],
 	]) {
-		const meter = createUsageMeter({ maxTokens: null, allowedModels: listed, rootSessionId: "root" });
+		const meter = createUsageMeter({ allowedModels: listed, rootSessionId: "root" });
 		const { dir, hook } = watch({ meter });
 		writeLedger(dir, 5, body);
 		hook.sample();
@@ -146,7 +148,7 @@ test("under a model list: a named child row off the PARENT's list, or a child's 
 	}
 	// A model-less row: an allowed model whose id the row rule refuses (a long ARN) lands there, so it is not judged by
 	// the parent. The child's own guard judged the call against the list it inherited.
-	const meter = createUsageMeter({ maxTokens: null, allowedModels: listed, rootSessionId: "root" });
+	const meter = createUsageMeter({ allowedModels: listed, rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	const modelless = ledger({ calls: 0 });
 	modelless.totals = { ...modelless.totals, input: 10, total: 10, calls: 1 };
@@ -157,7 +159,7 @@ test("under a model list: a named child row off the PARENT's list, or a child's 
 });
 
 test("a child's modelRefused with no list on the parent stops nothing: that list was the spawner's, for that child (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	writeLedger(dir, 5, ledger({ calls: 0, modelRefused: 2 }));
 	hook.sample();
@@ -165,7 +167,7 @@ test("a child's modelRefused with no list on the parent stops nothing: that list
 });
 
 test("the worker keeps the child keys: a runner's exit line round-trips byte-identically, and an unmetered child floors the settlement (issue #500 part F)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const guard = createPolicyGuard({ allowedModels: [{ provider: "fake", model: "m1" }], env: {} });
 	const { dir, hook } = watch({ meter, guard: () => guard });
 	meter.record(usage(120), { sessionId: "root", provider: "fake", modelId: "m1" });
@@ -187,7 +189,7 @@ test("the worker keeps the child keys: a runner's exit line round-trips byte-ide
 });
 
 test("a version 3 ledger (the money shape, retired) counts as unmetered and floors the job", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	const old = ledger({ state: "done" });
 	writeLedger(dir, 41, { ...old, v: 3 });
@@ -196,7 +198,7 @@ test("a version 3 ledger (the money shape, retired) counts as unmetered and floo
 });
 
 test("the detector: a registered child is metered however long it lives; a pi process with no ledger is unmetered after two ticks (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const proc = fakeProc({ live: [31, 32] });
 	const { dir, hook, logged } = watch({ meter, proc });
 	writeLedger(dir, 31, ledger());
@@ -205,26 +207,25 @@ test("the detector: a registered child is metered however long it lives; a pi pr
 	hook.sample();
 	assert.equal(meter.snapshot().unmeteredChildren, 1, "pid 32 has no ledger two ticks on; pid 31 has one");
 	assert.equal(meter.snapshot().childProcesses, 2, "both are child processes");
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET, "under a token cap an unmetered child is a breach");
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, "under a model list an unmetered child is a breach");
 	assert.deepEqual(logged.filter((line) => line.event === "unmetered_child"), [{ event: "unmetered_child", fields: { why: "no-ledger", pid: 32, unmetered: 1 } }]);
 	hook.sample();
 	assert.equal(meter.snapshot().unmeteredChildren, 1, "counted once");
 	assert.deepEqual(hook.teardown(), { distinct: 2, peak: 2, unmetered: 1 });
 });
 
-test("the unmetered stop carries its cause, so run-job's handler does not log token_budget_exceeded for it (issue #500)", () => {
+test("the unmetered stop carries its cause (issue #500)", () => {
 	const stops = [];
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root", onStop: (reason, detail) => stops.push([reason, detail]) });
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }], onStop: (reason, detail) => stops.push([reason, detail]) });
 	const { hook } = watch({ meter, proc: fakeProc({ live: [44] }) });
 	for (let tick = 0; tick <= NO_LEDGER_TICKS; tick += 1) hook.sample();
-	assert.deepEqual(stops, [[TOKEN_BUDGET, { cause: "unmetered-child", unmetered: 1 }]]);
+	assert.deepEqual(stops, [[MODEL_NOT_ALLOWED, { cause: "unmetered-child", unmetered: 1 }]]);
 });
 
-test("an unmetered child's stop: token_budget under a token cap, else model-not-allowed under a list; uncapped, a floor only (issue #500)", () => {
+test("an unmetered child's stop: model-not-allowed under a list, a floor only with no policy (issue #500)", () => {
 	for (const [options, want] of [
-		[{ maxTokens: 1_000_000, allowedModels: [{ provider: "fake", model: "m1" }] }, TOKEN_BUDGET],
-		[{ maxTokens: null, allowedModels: [{ provider: "fake", model: "m1" }] }, MODEL_NOT_ALLOWED],
-		[{ maxTokens: null }, null],
+		[{ allowedModels: [{ provider: "fake", model: "m1" }] }, MODEL_NOT_ALLOWED],
+		[{}, null],
 	]) {
 		const meter = createUsageMeter({ ...options, rootSessionId: "root" });
 		const { hook, logged } = watch({ meter, proc: fakeProc({ live: [44] }) });
@@ -240,7 +241,7 @@ test("at teardown a pi process with no ledger counts only when first seen 2 s or
 	/** A pi process with no ledger, first seen by a tick `age` ms before teardown (null: first seen by teardown itself). */
 	function endAfter(age) {
 		let clock = 0;
-		const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+		const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 		const proc = fakeProc({ live: [] });
 		const { hook } = watch({ meter, proc, now: () => clock });
 		hook.sample();
@@ -257,16 +258,16 @@ test("at teardown a pi process with no ledger counts only when first seen 2 s or
 		assert.equal(torn.unmetered, 0, `first seen ${age ?? "at teardown"}`);
 		assert.equal(meter.state.stopReason, null, "the job's exit is its own");
 	}
-	// Seen a tick before teardown and younger than 2 s: not counted. Seen 3 s before: counted, and the capped job stops.
+	// Seen a tick before teardown and younger than 2 s: not counted. Seen 3 s before: counted, and a listed job stops.
 	const old = endAfter(3_000);
 	assert.equal(old.torn.unmetered, 1);
-	assert.equal(old.meter.state.stopReason, TOKEN_BUDGET);
+	assert.equal(old.meter.state.stopReason, MODEL_NOT_ALLOWED);
 	assert.equal(endAfter(2_000).torn.unmetered, 1, "2 s exactly");
 });
 
 test("a pi process seen alive whose ledger never appeared counts at teardown, even when it lived less than two ticks (issue #500)", () => {
 	let clock = 0;
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ live: [50] });
 	const { hook } = watch({ meter, proc, now: () => clock });
 	hook.sample();
@@ -283,7 +284,7 @@ test("a pi process seen alive whose ledger never appeared counts at teardown, ev
 });
 
 test("a pi process that stops looking like one (its title changed after the fact) is still judged at two ticks while it lives (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const proc = fakeProc({ live: [51] });
 	const { hook } = watch({ meter, proc });
 	hook.sample();
@@ -292,7 +293,7 @@ test("a pi process that stops looking like one (its title changed after the fact
 	assert.equal(meter.snapshot().unmeteredChildren, 0);
 	hook.sample();
 	assert.equal(meter.snapshot().unmeteredChildren, 1, "no longer in the scan, still alive, no ledger");
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 });
 
 /** A start environment as linuxProc reads it: the job's ledger entry and the preload in NODE_OPTIONS unless left out. */
@@ -302,7 +303,7 @@ const envOf = (dir, { ledger: withLedger = true, preload = true, extra = [], com
 });
 
 test("a pi process whose environment lacks this job's ledger directory OR the preload is unmetered, whatever ledger names its pid; an unreadable environment keeps the ledger rule (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const proc = fakeProc({ live: [60, 61, 62, 63] });
 	const { dir, hook, logged } = watch({ meter, proc });
 	proc.table.environ = {
@@ -323,11 +324,11 @@ test("a pi process whose environment lacks this job's ledger directory OR the pr
 	assert.equal(meter.snapshot().unmeteredChildren, 2, "pids 60 and 62");
 	assert.equal(meter.snapshot().childProcesses, 4, "no process counted twice");
 	assert.deepEqual(logged.find((line) => line.event === "unmetered_child").fields, { why: "environ", pid: 60, unmetered: 2 });
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 });
 
 test("an environment read that filled ENVIRON_BYTES without both entries is unknown, not unmetered; the exact entries are matched; it is read once (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ live: [70, 71, 72] });
 	let reads = 0;
 	const environ = proc.environ;
@@ -352,7 +353,7 @@ test("an environment read that filled ENVIRON_BYTES without both entries is unkn
 
 test("a live `starting` ledger is stuck past 3 s of its CPU or 60 s since first sight; un-counted once it runs (issue #500)", () => {
 	let clock = 0;
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ live: [61, 62, 64], cpu: { 61: 0, 62: 0, 64: 0 } });
 	const { dir, hook } = watch({ meter, proc, now: () => clock });
 	writeLedger(dir, 61, ledger({ state: "starting", calls: 0 }), "bbbbbbbbbbbbbbbb");
@@ -374,7 +375,7 @@ test("a live `starting` ledger is stuck past 3 s of its CPU or 60 s since first 
 
 test("a dead process's `starting` ledger is done only when it was seen under 60 s, used under 3 s of CPU and holds no spend; judged once (issue #500)", () => {
 	let clock = 0;
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ live: [80, 81, 82], cpu: { 80: 300, 81: 900, 82: 300 } });
 	const { dir, hook } = watch({ meter, proc, now: () => clock });
 	writeLedger(dir, 80, ledger({ state: "starting", calls: 0 }), "a".repeat(16));
@@ -408,7 +409,7 @@ test("a dead process's `starting` ledger is done only when it was seen under 60 
 test("a meterless child whose ledger stays `starting` while it makes calls is caught, live, at teardown, or past the CPU grace (issue #500)", () => {
 	// The lab shape: 31 calls in about 37 s at 720 ms of CPU, its stub never leaving `starting`, alive at teardown.
 	let clock = 0;
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const proc = fakeProc({ live: [91], cpu: { 91: 250 } });
 	const { dir, hook, logged } = watch({ meter, proc, now: () => clock });
 	writeLedger(dir, 91, ledger({ state: "starting", calls: 0 }));
@@ -419,17 +420,17 @@ test("a meterless child whose ledger stays `starting` while it makes calls is ca
 	}
 	assert.equal(meter.snapshot().unmeteredChildren, 0, "under both graces while it runs");
 	assert.equal(hook.teardown().unmetered, 1, "a live `starting` ledger first seen 36 s before teardown is unmetered at teardown");
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 	assert.equal(logged.filter((line) => line.event === "unmetered_child").length, 1);
 	// The unit shape of the same review, past the CPU grace (4 s of CPU and climbing): caught live, at the first tick.
-	const heavy = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const heavy = createUsageMeter({ rootSessionId: "root" });
 	const busy = fakeProc({ live: [92], cpu: { 92: 4000 } });
 	const second = watch({ meter: heavy, proc: busy });
 	writeLedger(second.dir, 92, ledger({ state: "starting", calls: 0 }));
 	second.hook.sample();
 	assert.equal(heavy.snapshot().unmeteredChildren, 1);
 	// An honest child that starts in the job's last tick is not: it was first seen less than 10 s before teardown.
-	const late = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const late = createUsageMeter({ rootSessionId: "root" });
 	const third = watch({ meter: late, proc: fakeProc({ live: [93], cpu: { 93: 100 } }) });
 	third.hook.sample();
 	writeLedger(third.dir, 93, ledger({ state: "starting", calls: 0 }));
@@ -441,7 +442,7 @@ test("at teardown a live `starting` ledger counts only when first seen 10 s or m
 	/** A job whose child's stub stays `starting` from first sight until teardown `seenFor` ms later, one tick a second. */
 	function endAfter(seenFor) {
 		let clock = 0;
-		const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+		const meter = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 		const proc = fakeProc({ live: [95], cpu: { 95: 200 } });
 		const { dir, hook } = watch({ meter, proc, now: () => clock });
 		writeLedger(dir, 95, ledger({ state: "starting", calls: 0 }));
@@ -455,12 +456,12 @@ test("at teardown a live `starting` ledger counts only when first seen 10 s or m
 	assert.equal(fresh.meter.state.stopReason, null, "the job's exit is its own");
 	const stale = endAfter(10_000);
 	assert.equal(stale.torn.unmetered, 1, "10 s exactly");
-	assert.equal(stale.meter.state.stopReason, TOKEN_BUDGET);
+	assert.equal(stale.meter.state.stopReason, MODEL_NOT_ALLOWED);
 });
 
 test("the `starting` CPU grace is 3 s: an honest child slow to install under load is not stuck, a busier one is (issue #500)", () => {
 	assert.equal(STARTING_CPU_MS, 3_000);
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	// An honest child reached 0.67 s under load on arm64; 2 s is past the old 1 s grace and well inside this one.
 	const proc = fakeProc({ live: [96, 97], cpu: { 96: 2_000, 97: 3_001 } });
 	const { dir, hook } = watch({ meter, proc });
@@ -477,7 +478,7 @@ test("the `starting` CPU grace is 3 s: an honest child slow to install under loa
 
 test("off Linux (a proc with no cpuMs), the `starting` grace is 60 s of wall time on a monotonic clock (issue #500)", () => {
 	let clock = 0;
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { cpuMs, ...proc } = fakeProc({ live: [61] });
 	assert.equal(typeof cpuMs, "function");
 	const { dir, hook } = watch({ meter, proc, now: () => clock });
@@ -492,7 +493,7 @@ test("off Linux (a proc with no cpuMs), the `starting` grace is 60 s of wall tim
 });
 
 test("520 SIGKILLed children's ledgers (`running` with a call in flight, or `starting`) do not flood: a dead pid's file is retired as it stands (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc();
 	const { dir, hook } = watch({ meter, proc });
 	for (let child = 0; child < 520; child += 1) {
@@ -510,7 +511,7 @@ test("520 SIGKILLed children's ledgers (`running` with a call in flight, or `sta
 });
 
 test("a child killed mid-call leaves `running` with unresolved: counted unresolved, not unmetered (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ live: [70] });
 	const { dir, hook } = watch({ meter, proc });
 	writeLedger(dir, 70, ledger({ calls: 1, unresolved: 1 }));
@@ -524,7 +525,7 @@ test("a child killed mid-call leaves `running` with unresolved: counted unresolv
 });
 
 test("520 short pi children over a job's life (`pi --version`, `pi list`) do not flood: a dead child's `done` ledger is retired (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc();
 	const { dir, hook, logged } = watch({ meter, proc });
 	for (let child = 0; child < 520; child += 1) {
@@ -544,7 +545,7 @@ test("520 short pi children over a job's life (`pi --version`, `pi list`) do not
 });
 
 test("with no retirement (no detector, off Linux) `done` files still do not count against the open-file cap (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	for (let child = 0; child < CHILD_LEDGER_MAX_FILES + 8; child += 1) writeLedger(dir, 7000 + child, childLedger({ state: "done" }), child.toString(16).padStart(16, "0"));
 	writeLedger(dir, 9999, ledger({ calls: 1 }));
@@ -554,7 +555,7 @@ test("with no retirement (no detector, off Linux) `done` files still do not coun
 });
 
 test("the open-file cap still floods: more than CHILD_LEDGER_MAX_FILES live ledgers at once are unmetered (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const proc = fakeProc({ alive: Array.from({ length: CHILD_LEDGER_MAX_FILES + 3 }, (_, index) => 5000 + index) });
 	const { dir, hook } = watch({ meter, proc });
 	for (let child = 0; child < CHILD_LEDGER_MAX_FILES + 3; child += 1) writeLedger(dir, 5000 + child, ledger({ calls: 0 }), child.toString(16).padStart(16, "0"));
@@ -567,18 +568,18 @@ test("the parent's own failure to write STOP is a breach (issue #500)", () => {
 		throw Object.assign(new Error("denied"), { code: "EACCES" });
 	} };
 	const writeFs = new Proxy(failing, { get: (target, key) => target[key] ?? (key === "constants" ? { O_WRONLY: 1, O_CREAT: 64, O_EXCL: 128 } : () => {}) });
-	// The meter stopped on its own; the STOP that cannot be written is counted unmetered, and logged.
-	const stopped = createUsageMeter({ maxTokens: 10, rootSessionId: "root" });
+	// The meter stopped on a policy; the STOP that cannot be written is counted unmetered, and logged.
+	const stopped = createUsageMeter({ rootSessionId: "root", allowedModels: [{ provider: "fake", model: "m1" }] });
 	const a = watch({ meter: stopped, writeFs });
-	stopped.record(usage(20), { sessionId: "root" });
+	stopped.stop(MODEL_NOT_ALLOWED);
 	a.hook.sample();
-	assert.equal(stopped.state.stopReason, TOKEN_BUDGET);
+	assert.equal(stopped.state.stopReason, MODEL_NOT_ALLOWED);
 	assert.equal(stopped.snapshot().unmeteredChildren, 1);
 	assert.deepEqual(a.logged.filter((line) => line.event === "unmetered_child").map((line) => line.fields.why), ["control-write"]);
 });
 
 test("a ledger path the agent replaced with a file is not made over; it is counted lost (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const made = [];
 	const { dir, hook } = watch({ meter, mkdir: (path) => made.push(path) });
 	rmSync(dir, { recursive: true });
@@ -590,7 +591,7 @@ test("a ledger path the agent replaced with a file is not made over; it is count
 });
 
 test("teardown writes STOP FIRST, then folds once more (a child's last write counts); the directory and its STOP stay (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const order = [];
 	let dir;
 	const fold = (args) => {
@@ -601,13 +602,14 @@ test("teardown writes STOP FIRST, then folds once more (a child's last write cou
 	dir = made.dir;
 	made.hook.sample();
 	writeLedger(dir, 80, ledger({ calls: 3, each: 10, unresolved: 1 }));
+	meter.stop(MODEL_NOT_ALLOWED);
 	const torn = made.hook.teardown();
 	assert.deepEqual(order, ["fold before STOP", "fold after STOP"]);
 	assert.equal(meter.snapshot().childTotal, 30, "the final fold read the write after the last tick");
 	assert.equal(meter.snapshot().unresolved, 1, "a call in flight at the STOP stays unresolved");
 	assert.equal(torn.unmetered, 0);
-	assert.equal(meter.state.stopReason, null, "the teardown STOP brakes the children, not the job's outcome");
-	assert.deepEqual(stopOf(dir), { v: 1, reason: TOKEN_BUDGET }, "STOP stays for any child still alive");
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, "a real stop is what the teardown STOP carries");
+	assert.deepEqual(stopOf(dir), { v: 1, reason: MODEL_NOT_ALLOWED }, "STOP stays for any child still alive");
 	// After teardown nothing more is written, and a second teardown is the first one's answer.
 	rmSync(join(dir, "STOP"));
 	made.hook.stopped(MODEL_NOT_ALLOWED);
@@ -617,7 +619,7 @@ test("teardown writes STOP FIRST, then folds once more (a child's last write cou
 });
 
 test("stopped() writes STOP the moment the meter stops (run-job calls it from onStop) (issue #500)", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const { dir, hook } = watch({ meter });
 	hook.stopped(MODEL_NOT_ALLOWED);
 	assert.deepEqual(stopOf(dir), { v: 1, reason: MODEL_NOT_ALLOWED });

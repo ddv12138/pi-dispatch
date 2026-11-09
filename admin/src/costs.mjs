@@ -165,14 +165,17 @@ function floorCounted(tokens) {
 
 /**
  * Whether a record is a refusal before any spend (issue #507): no tokens, no container exit, and the worker's own word
- * that no global budget slot is held (`budgetReserved: false`). Most pre-spend refusals write exactly that. All three,
+ * that no budget slot is held (`budgetReserved: false`). Most pre-spend refusals write exactly that. All three,
  * because each alone is also true of a run that spent: a pre-meter record (before issue #25) has no tokens, a
  * container killed before its exit line may have no exit code, and an old record has no `budgetReserved`. A record
  * that does not SAY `false` (null, or absent on an old record) keeps the floor below.
  *
+ * `budgetReserved` is HISTORY now: token budgets, windows and allocation are gone (C2), so a new record never carries
+ * it. The field stays readable because an old record's `false` is still the exact statement that it refused before any
+ * spend -- the one place a settled total may honestly read 0 instead of a floor.
+ *
  * Not every refusal before spend matches, and those stay floors, on purpose (a residual, DES-COST-FOLD-BY-SCAN): a
- * refusal by the global count ledger (`over-budget`, the soft hold) keeps the global slot it reserved
- * (`budgetReserved: true`), and so does any other refusal whose job-count give-back failed. A container the runtime
+ * refusal that kept the budget slot it reserved (`budgetReserved: true`) does. A container the runtime
  * failed to start (`container-never-started` with an exit code, often 125) carries that code, so it stays a floor too. Telling those
  * apart would mean keying on the reason, a list every new gate would have to join; a fact the record states itself
  * would be the way to count them as 0.
@@ -200,7 +203,7 @@ function runContribution(record) {
   // floor, and floors are sticky -- any aggregate containing one is a floor.
   const floor = tokens.metered === false || floorCounted(tokens);
   const cls = floor ? "estimated" : "metered";
-  const rows = attributionRows(record).map((row) => ({ ...row, class: cls, planId: null, floor }));
+  const rows = attributionRows(record).map((row) => ({ ...row, class: cls, floor }));
   const total = rows.reduce((sum, row) => sum + row.total, 0);
   return { rows, tokens: total, classes: [cls], floor };
 }

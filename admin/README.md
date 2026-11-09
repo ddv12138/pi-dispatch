@@ -16,7 +16,7 @@ explains all of it.
 
 ## How it works
 
-Every trigger produces the same job, through the same path: one queue, one container, one budget.
+Every trigger produces the same job, through the same path: one queue, one container, one set of bounds.
 
 ```
    CLI · cron · label / comment / PR on GitHub, GitLab, Forgejo or Azure DevOps
@@ -25,11 +25,10 @@ Every trigger produces the same job, through the same path: one queue, one conta
         Valkey + BullMQ            durable queue: survives reboots, absorbs bursts
                 │
                 ▼
-     under the day, week and       if not: refused here, before any spend
-     month caps (jobs, tokens,
-     dollars), the scoped limits,
-     the project's share of the
-     envelope and the turn budget?
+     admitted?                     if not: refused here, before any spend
+     under the turn cap, concurrency,
+     scoped limits and pause windows,
+     and the host's memory/CPU budget?
                 │  yes
                 ▼
      one container per job         Docker or Podman, removed after the job: all
@@ -101,8 +100,8 @@ Four things to know before you build on it:
 
 - A trigger names a **flow or a command, never a workflow**. That entry point decides which stages run.
 - A job is **not an interactive session**. The container hands pi one prompt and reads the exit line.
-- One trigger is **one job, one budget slot and one turn budget**. Ten stages share the same
-  `PI_MAX_TURNS` and token budget, and running out ends the job as a policy refusal that is never retried.
+- One trigger is **one job, one concurrency slot and one turn cap**. Ten stages share the same
+  `PI_MAX_TURNS`, and the run's tokens are metered as one. Running out ends the job as a policy refusal that is never retried.
 - **State survives only on local jobs.** A cron or CLI job has your folder mounted read-write, so state
   persists. A forge job gets a fresh clone that is thrown away with the container.
 
@@ -130,27 +129,23 @@ on its run page for operators. Nothing listens unless you start it.
   trigger. Drill-ins show what fires each one, what it runs and who may fire it. A one-shot shows armed or spent. A
   spent entry stays in the list, matches nothing, and is re-armed when you delete its `on.disarmed` mark from the
   file. Triggers that run third party code or a custom image carry a badge. Turning either on or off stays an
-  edit to the reviewed `triggers.json`, which no form makes for you.
-  A portfolio manager's cron trigger is marked "writes the budget split". The console's editor can turn on
+  edit to the reviewed `triggers.json`, which no form makes for you. The console's editor can turn on
   `progress` (the job gets a `report_progress` tool to name its phases) and `statusComment` (one forge comment
   the worker edits as the run goes, numbers only), and `recover` (a run the worker loses continues from its last
   checkpoint), behind your confirm.
 - **MCP servers, read-only.** The Connections page shows each overlay MCP server as the overlay offers it now:
   where it runs, how its tools are reached, the variable names it is handed, and any server the worker refuses,
   with why. No form and no key changes them; they are rewritten by `pi-dispatch import-pi`.
-- **Insights, the one analytics page.** `/insights` shows the budget dials, plan verdicts against API rates, daily,
-  cumulative and per flow spend charts, five breakdowns (by flow, trigger, model, repo and project), the
-  budget split with each project's share, spend and floor and the split's history, how busy each host was
+- **Insights, the one analytics page.** `/insights` shows plan verdicts against API rates, daily, cumulative and
+  per flow spend charts, five breakdowns (by flow, trigger, model, repo and project), how busy each host was
   (jobs only), and the trigger and flow topology with spend on each trigger, plus a what if form that re-prices a
   flow on another model. A plan covered run never shows as $0.00, and an estimate is
   always marked as one.
 
 - **Quiet hours.** Pause windows per folder or repo, timezone aware, edited on the Configuration page. A paused job
   waits, never drops, and costs nothing.
-- **Scoped limits.** Job caps per repo, folder or project (day, week, month), refused before any spend, plus a
-  ceiling on how many run at once, enforced by making jobs wait. Dollar caps per day, week or month for a
-  repo, a folder, a model (`model:<provider>/<id>`) or a project (`project:<id>`). Write a repo with its
-  forge (`github:acme/web`) to limit it on that forge only. Local jobs also have a fixed guard with
+- **Scoped limits.** A ceiling on how many jobs of a repo, folder or project run at once, enforced by making
+  them wait. Write a repo with its forge (`github:acme/web`) to limit it on that forge only. Local jobs also have a fixed guard with
   no switch: one job per folder at a time (it lives in the worker process, and one worker per container
   daemon is the supported shape), because two agents editing one working tree race each other with no
   gate and no undo.
@@ -158,8 +153,6 @@ on its run page for operators. Nothing listens unless you start it.
   (`hostShare`) or keep room for (`minJobs`). The project page shows each project's measured size, the runs' peaks
   against it and a suggestion, with the exact call behind a **Preview this size** confirm; nothing applies a
   size by itself.
-- **Dollar windows.** With dollar caps set, the Spend page's Caps card shows each window's spend and holds against
-  its cap, and what the run records settled.
 - **Projects.** The project page shows each project with its members and this month's spend, and links to its
   runs. Member edits, adds and deletes go through the console's preview and confirm.
 - **Hosts.** The fleet page shows each worker host: how long ago it beat, its slots in use, what its budget has
@@ -169,14 +162,6 @@ on its run page for operators. Nothing listens unless you start it.
   prints the same report.
   It counts jobs only: a machine busy with other work reads as idle.
 
-- **The budget split.** With an allocation envelope (a dollar total per window and a floor per project), the Spend
-  page's budget split shows each project's share and spend, the applied plan with the reasons it gave, and the history.
-  Revert on a history row goes back to it after a preview and a confirm. The page's priorities and envelope forms set a
-  plan of weights and change the envelope inside the same checks the worker applies.
-  A run's detail names the plan a portfolio run wrote and the dollars it settled.
-
-- **The portfolio manager.** A weekly flow you own reads the budget and writes a plan of weights. The
-  worker applies it inside the envelope, bounds each move and logs it, so you can revert it.
 - **Held and failed jobs.** A trigger with `run.waitFor` holds its job in the queue, unstarted and
   unbilled, until a time passes or your check script exits 0. The fleet page shows a **held** section while
   anything waits (the target, the condition and how long), and a **failed** section for jobs the queue

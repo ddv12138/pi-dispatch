@@ -157,7 +157,7 @@ export const CONSOLE_ACTIVE_LIMIT = 50;
 
 // The path fields `resolvePaths` hands back that a deployment's `.env` (or its default) may leave relative: relative to
 // the deployment folder, the service's working directory, never to wherever this command was started.
-const RELATIVE_PATH_FIELDS = Object.freeze(["logsDir", "settingsFile", "triggersPath", "pauseWindowsPath", "scopedLimitsPath", "projectsPath", "projectsFile", "envelopeFile", "subscriptionsPath", "globalPiDir"]);
+const RELATIVE_PATH_FIELDS = Object.freeze(["logsDir", "settingsFile", "triggersPath", "pauseWindowsPath", "scopedLimitsPath", "projectsPath", "projectsFile", "subscriptionsPath", "globalPiDir"]);
 
 /** The env keys a reserve estimate reads beyond the panel's own (issue #642): `estimateReserve`'s and the endpoint loader's. */
 export const RESERVE_ENV_KEYS = Object.freeze(["PI_ALLOWED_MODELS", "PI_PROVIDER", "PI_MODEL", "PI_MAX_COST_USD", "PI_MODEL_ENDPOINTS_FILE"]);
@@ -664,7 +664,6 @@ async function serve({ io, m, config, audit, fs, now, uid, random }) {
     fleet,
     killSwitchPlanFn,
     urlShown: m.connection?.urlShown,
-    envelopeProblem: m.insights?.envelopeProblem,
     host: hostname(),
     // A retry's reserve reads the failed job's queue data (read-only); only the reserve reaches a page.
     readJobsData: m.jobData?.readJobsData,

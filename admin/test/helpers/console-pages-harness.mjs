@@ -75,7 +75,6 @@ export const SHOTS = Object.freeze([
   // The what-if (the insights move to the console): a priced model over the fixture's ledgered fix runs, at the scan's
   // own ceiling, with the canned pricing below so a pi bump moves no byte of it.
   ["insights-whatif", "insights-breakdown", "whatif=acme%2Fmodel-1&flow=fix"],
-  ["insights-budget-split", "insights-budget-split", "range=7d"],
   ["insights-capacity", "insights-capacity", "range=24h"],
   ["insights-breakdown", "insights-breakdown", "range=7d"],
   ["insights-flows", "insights-flows", "range=7d"],
@@ -306,11 +305,8 @@ async function renderInChild() {
     hostRegistry: await import("../../../worker/src/host-registry.mjs"),
     liveJobs: await import("../../../worker/src/live-jobs.mjs"),
     backends: await import("../../../worker/src/backends.mjs"),
-    budget: await import("../../../worker/src/budget.mjs"),
     scopedLimits: await import("../../../worker/src/scoped-limits.mjs"),
-    allocation: await import("../../../worker/src/allocation.mjs"),
     waitState: await import("../../../worker/src/wait-state.mjs"),
-    tokenBudget: await import("../../../worker/src/token-budget.mjs"),
     doctorResults: await import("../../../worker/src/doctor-results.mjs"),
   };
   const RM = await import("../../src/read-model.mjs");
@@ -318,7 +314,6 @@ async function renderInChild() {
   const { secretsView } = await import("../../src/secrets-view.mjs");
   const { readConnections } = await import("../../src/connections-view.mjs");
   const { readProjectView } = await import("../../src/project-view.mjs");
-  const DW = await import("../../src/token-windows.mjs");
   const { assembleInsightsView } = await import("../../src/insights-assembly.mjs");
   const { makeWhatIfReader } = await import("../../src/console/whatif.mjs");
   const pricing = await import("../../../worker/src/pricing.mjs");
@@ -348,13 +343,12 @@ async function renderInChild() {
       PI_PAUSE_WINDOWS_FILE: paths.pause,
       PI_SCOPED_LIMITS_FILE: paths.limits,
       PI_PROJECTS_FILE: paths.projects,
-      PI_ENVELOPE_FILE: paths.envelope,
       PI_SUBSCRIPTIONS_FILE: paths.subs,
       PI_GLOBAL_PI_DIR: paths.overlay,
     };
     Object.assign(process.env, env);
     // Issue #712: records naming a real venue, so the goldens are a normal local run's pages.
-    await seedDeployment({ url, paths, mods: { W, RM, DW, version }, venue: "local" });
+    await seedDeployment({ url, paths, mods: { W, RM, version }, venue: "local" });
     // Issue #737: the jobs in line, through BullMQ and the worker's own deferral.
     await seedWaiting({ url, W, NOW });
 

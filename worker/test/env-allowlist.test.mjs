@@ -320,34 +320,24 @@ test("a forwarded GH_TOKEN can never override the mint -- the token assignment s
 	assert.equal(env.GITHUB_TOKEN, "minted-token");
 });
 
-test("PI_MAX_TOKENS is forwarded only when the per-job budget is set", { skip }, () => {
-	const withCap = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens: 500000, jobId: "j", hostEnv: HOST });
-	assert.equal(withCap.PI_MAX_TOKENS, "500000", "a set cap is forwarded as a string, like PI_MAX_TURNS");
-
-	// null/absent => undefined, which docker-run.mjs skips -> the runner attaches a pure meter, no cap.
-	const noCap = buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens: null, jobId: "j", hostEnv: HOST });
-	assert.equal(noCap.PI_MAX_TOKENS, undefined, "an unset cap is omitted, never an empty string");
-});
-
-test("PI_MAX_TOKENS (issue #501) carries the per-job token budget whenever one is set, 0 included, and is absent otherwise", { skip }, () => {
+test("PI_MAX_TOKENS is never emitted, for any maxTokens value: C2 removed the token budget", { skip }, () => {
 	const env = (maxTokens) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens, jobId: "j", hostEnv: HOST });
-	assert.equal(env(2_500_000).PI_MAX_TOKENS, "2500000", "integer tokens as a string");
-	// 0 is the tightest cap (no priced call at all), never "no cap": a truthiness test here would send a job
-	// that asked for 0 out with no cap whatsoever.
-	assert.equal(env(0).PI_MAX_TOKENS, "0");
-	assert.equal(env(1_000_000_000_000).PI_MAX_TOKENS, "1000000000000");
-	assert.equal(env(null).PI_MAX_TOKENS, undefined, "no cap: omitted, never an empty string (the runner refuses an empty one)");
+	assert.equal(env(500_000).PI_MAX_TOKENS, undefined, "a set cap is no longer forwarded");
+	assert.equal(env(2_500_000).PI_MAX_TOKENS, undefined);
+	assert.equal(env(0).PI_MAX_TOKENS, undefined, "0 was the tightest cap; no cap remains to carry it");
+	assert.equal(env(null).PI_MAX_TOKENS, undefined);
 	assert.equal(env(undefined).PI_MAX_TOKENS, undefined);
 	assert.equal(buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, jobId: "j", hostEnv: HOST }).PI_MAX_TOKENS, undefined, "a caller that says nothing sends nothing");
 });
 
-test("PI_MAX_TOKENS is the worker's alone: a forwarded or secret value neither replaces the cap nor adds one (#501)", { skip }, () => {
+test("PI_MAX_TOKENS has no worker-computed value left: only an explicit forward or secret carries it", { skip }, () => {
 	const hostEnv = { ...HOST, PI_MAX_TOKENS: "1000000000000" };
 	const env = (maxTokens, extra = {}) => buildContainerEnv({ provider: "anthropic", model: "m", maxTurns: 5, maxTokens, jobId: "j", hostEnv, ...extra });
-	assert.equal(env(500_000, { forwardEnv: ["PI_MAX_TOKENS"] }).PI_MAX_TOKENS, "500000", "PI_FORWARD_ENV cannot raise the computed cap");
-	assert.equal(env(0, { secrets: { PI_MAX_TOKENS: "999" } }).PI_MAX_TOKENS, "0", "nor can a secret");
-	assert.equal(env(null, { forwardEnv: ["PI_MAX_TOKENS"] }).PI_MAX_TOKENS, undefined, "an uncapped job carries none, whatever was forwarded");
-	assert.equal(env(undefined, { secrets: { PI_MAX_TOKENS: "5" } }).PI_MAX_TOKENS, undefined);
+	assert.equal(env(500_000).PI_MAX_TOKENS, undefined, "no cap is computed from the job any more");
+	assert.equal(env(500_000, { forwardEnv: ["PI_MAX_TOKENS"] }).PI_MAX_TOKENS, "1000000000000", "a generic forward passes the operator's variable through; there is no cap to override");
+	assert.equal(env(0, { secrets: { PI_MAX_TOKENS: "999" } }).PI_MAX_TOKENS, "999", "a secret likewise");
+	assert.equal(env(null).PI_MAX_TOKENS, undefined);
+	assert.equal(env(undefined).PI_MAX_TOKENS, undefined);
 });
 
 test("an unconfigured provider throws a config-tagged error (=> pre-spend refusal)", { skip }, () => {

@@ -1,13 +1,12 @@
 /**
  * The one canned deployment the console tests render over: config files, a month of
- * run records across three hosts, and a Valkey seeded with the registry rows, the run mirror, the counters, a held
- * job, the cron schedulers and the budget split's history, all dated around one frozen instant (`NOW`).
+ * run records across three hosts, and a Valkey seeded with the registry rows, the run mirror, a held job and the
+ * cron schedulers, all dated around one frozen instant (`NOW`).
  *
  * EVERY VALUE IS WRITTEN THROUGH THE PROJECT'S OWN CODE, never as a hand-made key or a hand-made record: the records
  * are `buildRecord`'s, written by `makeRecordWriter` and mirrored by `makeRunMirror`; the host rows are
- * `makeHostRegistry`'s beat, their running jobs `liveJobsFields`'; the counters use the budget's key builders; the held
- * job is `makeWaitState().hold`; the schedulers are BullMQ's own `upsertJobScheduler`; the split's history is
- * `applyPriorities` and `revertAllocation`. So an image cannot show a shape the shipped code would never write.
+ * `makeHostRegistry`'s beat, their running jobs `liveJobsFields`'; the held job is `makeWaitState().hold`; the
+ * schedulers are BullMQ's own `upsertJobScheduler`. So an image cannot show a shape the shipped code would never write.
  *
  * SYNTHETIC BY CONSTRUCTION. Hosts `mini1`, `mini2` and `build3`; projects `web`, `api`, `billing` and `ops`; repos
  * under the placeholder owner `acme`; job ids from a seeded generator. No person, machine, account or address of the
@@ -73,13 +72,12 @@ function generator(seed) {
 const skill = (name, desc, body) => `---\nname: ${name}\ndescription: ${desc}\n---\n\n${body}\n`;
 
 /**
- * Write the deployment's files under `dir` and return their paths. With `git`, the two job folders are made git
- * repositories (the insights page's topology reads a local folder's flow gate from git); the panel never needs it.
+ * Write the deployment's files under `dir` and return their paths. With `git`, the job folder is made a git
+ * repository (the insights page's topology reads a local folder's flow gate from git); the panel never needs it.
  */
 export function writeDeployment(dir, { git = false } = {}) {
 	const paths = {
 		site: join(dir, "work", "site"),
-		pm: join(dir, "work", "pm"),
 		skills: join(dir, "pi-skills"),
 		logs: join(dir, "logs"),
 		settings: join(dir, "settings.json"),
@@ -87,7 +85,6 @@ export function writeDeployment(dir, { git = false } = {}) {
 		pause: join(dir, "pause-windows.json"),
 		limits: join(dir, "scoped-limits.json"),
 		projects: join(dir, "projects.json"),
-		envelope: join(dir, "envelope.json"),
 		subs: join(dir, "subscriptions.json"),
 		overlay: join(dir, "pi-global"),
 	};
@@ -102,22 +99,18 @@ export function writeDeployment(dir, { git = false } = {}) {
 		".pi/skills/tidy/SKILL.md": skill("tidy", "Format, fix lint, and tighten types.", "Run the formatter and linter and fix what they report. Then build the report with build-report."),
 		".pi/skills/build-report/SKILL.md": skill("build-report", "Build the weekly site report.", "Build the report and check how it renders."),
 	});
-	files(paths.pm, {
-		".pi/skills/portfolio-manager/SKILL.md": skill("portfolio-manager", "Plan the week's budget split and report it.", "Read /job/portfolio.json and priorities.md, write /outbox/priorities.json, then report."),
-		"priorities.md": "# Priorities\n\n- web: checkout launch\n- billing: invoice rework\n- ops: maintenance\n",
-	});
 	files(paths.skills, { "frontend-fix/SKILL.md": skill("frontend-fix", "Fix a frontend issue and screenshot it.", "Reproduce, fix, screenshot.") });
-	if (git) for (const folder of [paths.site, paths.pm]) gitInit(folder, dir);
+	if (git) gitInit(paths.site, dir);
 
 	const json = (p, v) => writeFileSync(p, `${JSON.stringify(v, null, 2)}\n`);
-	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, maxTokens: 2_000_000, dailyTokenCap: 8_000_000, weeklyTokenCap: 120_000_000, concurrency: 4 });
+	json(paths.settings, { model: "claude-sonnet-5-5", provider: "anthropic", maxTurns: 30, concurrency: 4 });
 	json(paths.projects, {
 		version: 1,
 		projects: [
 			{ id: "web", members: ["github:acme/web"] },
 			{ id: "api", members: ["github:acme/api"] },
 			{ id: "billing", members: ["github:acme/billing", "gitlab:acme/billing-ui"] },
-			{ id: "ops", members: [paths.site, paths.pm] },
+			{ id: "ops", members: [paths.site] },
 		],
 	});
 	json(paths.limits, {
@@ -127,17 +120,7 @@ export function writeDeployment(dir, { git = false } = {}) {
 			{ scope: "project:billing", memory: "8g", cpus: 4 },
 			{ scope: "project:api", memory: "2g", cpus: 1 },
 			{ scope: "project:ops", memory: "2g", cpus: 1 },
-			{ scope: "project:web", weekTokens: 45_000_000 },
-			{ scope: "model:anthropic/claude-sonnet-5-5", weekTokens: 80_000_000 },
 		],
-	});
-	json(paths.envelope, {
-		version: 1,
-		window: "week",
-		totalTokens: 120_000_000,
-		floorsTokens: { web: 12_000_000, api: 12_000_000, billing: 12_000_000, ops: 6_000_000, _other: 0 },
-		defaultWeights: { web: 1, api: 1, billing: 1, ops: 1, _other: 1 },
-		delegation: { enabled: true, writers: ["operator-session", "portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 },
 	});
 	// The overlay's one MCP server, which the triage trigger's jobs connect (`run.mcp`): its key is a reference the
 	// deployment's PI_FORWARD_ENV fills in, never a value (worker/src/mcp-config.mjs).
@@ -153,7 +136,6 @@ export function writeDeployment(dir, { git = false } = {}) {
 			{ on: { type: "comment", phrase: "@pi" }, run: { kind: "github", flow: "fix", packages: false, resume: true, instructions: "the tests run with pnpm here" } },
 			{ on: { type: "pull_request", action: ["open", "update"] }, run: { kind: "gitlab", flow: "review", packages: false } },
 			{ on: { type: "issue", action: ["closed"], number: 40, once: true }, run: { kind: "github", flow: "deploy", packages: false } },
-			{ on: { type: "cron", id: "pm-weekly", pattern: "0 6 * * 1" }, run: { kind: "local", folder: paths.pm, flow: "portfolio-manager", packages: false, task: "Plan this week's budget split and report it.", portfolio: true, model: "claude-haiku-5-5", maxTurns: 15 } },
 			// Triage that may stop and ask (run.awaitInput needs run.resume), with the overlay's Linear server: PARKED's.
 			{ on: { type: "label", any: ["pi:triage"] }, run: { kind: "github", flow: "triage", packages: false, resume: true, awaitInput: true, mcp: ["linear"] } },
 		],
@@ -301,24 +283,8 @@ function bullJob(j) {
 	return { id: j.id, name: j.kind, data, attemptsMade: (j.attempt ?? 1) - 1, stalledCounter: 0, timestamp: j.queuedMs, opts: { delay: 0 } };
 }
 
-/** The one model the deployment caps by itself (its `model:` scoped row), so the one whose window a job reserves in. */
-const CAPPED_MODEL = "anthropic/claude-sonnet-5-5";
-
-/**
- * A run's `tokensWindows` as the processor settles it, through the worker's own `token-budget.mjs` (`D`): the job
- * reserved its per-job budget, and settles metered from a trusted exit line, at the floor (the whole reservation)
- * without one; its model window, where the deployment caps that model, settles by the same rule.
- */
-function dollarsOf(D, { tokens, usage, provider, model, trusted }) {
-	const reservedTokens = 2_000_000;
-	const { settledTokens, basis } = D.tokenSettlement({ tokens, usage, reservedTokens, trusted });
-	const ref = `${provider}/${model}`.toLowerCase();
-	const modelBasis = ref === CAPPED_MODEL ? D.modelTokenSettlement({ ref, basis, tokens, usage, reservedTokens, trusted }).basis : null;
-	return D.tokensWindowsRecord({ reservedTokens, settledTokens, basis, modelBasis });
-}
-
 /** The triggers whose jobs keep a session (`run.resume`), by their index in `triggers.json`: the comment and the triage. */
-const RESUME_TRIGGERS = new Set([2, 6]);
+const RESUME_TRIGGERS = new Set([2, 5]);
 
 /**
  * A resumable run's `session` as the processor merges it (`mergeSession`): the first run on its issue finds no
@@ -329,7 +295,7 @@ function sessionOf(j, input, output) {
 }
 
 /** The runner's outcome for a completed run: tokens, the usage ledger, dollars and what the container used. */
-function outcomeOf(g, j, D) {
+function outcomeOf(g, j) {
 	const model = j.model ?? "claude-sonnet-5-5";
 	const provider = j.provider ?? "anthropic";
 	const scale = j.scale ?? 1;
@@ -341,7 +307,7 @@ function outcomeOf(g, j, D) {
 	const cost = Math.round(input * ri + output * ro + cacheRead * rc) / 1e6;
 	const total = input + output + cacheRead;
 	const wallUsec = (j.endMs - j.startMs) * 1000;
-	const tokens = { input, output, total, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: j.turns, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0, childTotal: 0, childProcesses: 0, tokenBudgetTokens: 2_000_000 };
+	const tokens = { input, output, total, metered: true, rootTotal: total, otherTotal: 0, looseTotal: 0, sessions: 1, calls: j.turns, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0, childTotal: 0, childProcesses: 0 };
 	const usage = { v: 1, piAi: "0.99.1", truncated: 0, models: [{ provider, model, calls: j.turns, input, output, cacheRead, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total, cost, unpriced: 0 }] };
 	return {
 		outcome: "completed",
@@ -354,7 +320,6 @@ function outcomeOf(g, j, D) {
 		model,
 		session: sessionOf(j, input, output),
 		budgetReserved: true,
-		tokensWindows: dollarsOf(D, { tokens, usage, provider, model, trusted: true }),
 		resources: {
 			memPeak: Math.round(j.size.memMiB * (0.35 + g.next() * 0.4)) * 1024 * 1024,
 			swapPeak: 0,
@@ -384,65 +349,45 @@ const CANCELLED = { host: "build3", id: "gh-4a7e", kind: "github", repo: "acme/b
  * ended, completed with reason `awaiting-input`, its transcript promoted for the reply to resume. The run-detail
  * image shows it.
  */
-export const PARKED = { host: "mini1", id: "gh-2f6a", kind: "github", repo: "acme/api", number: 131, flow: "triage", queuedMs: NOW - 47 * MIN, startMs: NOW - 47 * MIN + 3_000, endMs: NOW - 26 * MIN, project: "api", turns: 11, size: SIZES.small, triggerIndex: 6, triggerType: "label" };
+export const PARKED = { host: "mini1", id: "gh-2f6a", kind: "github", repo: "acme/api", number: 131, flow: "triage", queuedMs: NOW - 47 * MIN, startMs: NOW - 47 * MIN + 3_000, endMs: NOW - 26 * MIN, project: "api", turns: 11, size: SIZES.small, triggerIndex: 5, triggerType: "label" };
 
 /**
  * What the processor returns for the cancelled job (processor.mjs, the aborted branch): the stop did not take, so
  * `boundAfterAbort` (index.mjs) answered for the container with `{ code: 137, aborted: true }` and no exit line, so no
- * turns, tokens, usage or resources, and the dollars settle at the floor, the whole reservation.
+ * turns, tokens, usage or resources are recorded.
  */
-function cancelledOutcome(D) {
+function cancelledOutcome() {
 	const provider = "anthropic";
 	const model = "claude-sonnet-5-5";
 	// The trigger keeps sessions, so the host's read stands with no runner line beside it (`mergeSession`): nothing was
 	// promoted, so no bytes.
-	return { outcome: "policy", reason: "operator-cancel", exitCode: 137, turns: null, tokens: null, provider, model, session: { resumed: false, reason: "absent", bytes: null }, budgetReserved: true, tokensWindows: dollarsOf(D, { tokens: null, usage: null, provider, model, trusted: false }) };
+	return { outcome: "policy", reason: "operator-cancel", exitCode: 137, turns: null, tokens: null, provider, model, session: { resumed: false, reason: "absent", bytes: null }, budgetReserved: true };
 }
 
 /** What is placed before the month is scheduled: the runs now, the retry's attempts, the cancelled job and its hold, the parked run. */
 function placedFirst() {
 	const live = Object.entries(RUNNING).flatMap(([host, list]) => list.map((e) => ({ host, id: e.id, repo: e.repo, startMs: e.at, endMs: NOW, size: { memMiB: e.memMiB, cpuCenti: e.cpuCenti } })));
 	const orphanHold = { host: CANCELLED.host, id: CANCELLED.id, repo: CANCELLED.repo, startMs: CANCELLED.endMs, endMs: NOW, size: CANCELLED.size, slot: false };
-	const pm = PM_RUNS.map((run) => pmJob(run));
-	return [...live, RETRY, RETRY_2, CANCELLED, orphanHold, PARKED, ...pm];
+	return [...live, RETRY, RETRY_2, CANCELLED, orphanHold, PARKED];
 }
 
 /**
  * Every run record of the month, through `buildRecord`: the scheduled runs, the retry (its second attempt's record,
- * carrying the first in `earlier` the way the processor carries it), the cancelled job and the parked run. The portfolio manager's
- * runs are `pmRecord`'s.
+ * carrying the first in `earlier` the way the processor carries it), the cancelled job and the parked run.
  */
-export function buildRecords({ buildRecord, earlierFrom, tokenBudget: D, venue = "local" }) {
+export function buildRecords({ buildRecord, earlierFrom, venue = "local" }) {
 	const g = generator(599);
 	const taken = new Set(["gh-5d10", "gh-77c1", RETRY.id, CANCELLED.id, PARKED.id, ...Object.values(RUNNING).flat().map((e) => e.id)]);
 	const runs = scheduled(plannedJobs(g, taken), placedFirst());
 	const record = (j, result, { earlier = null } = {}) => buildRecord({ job: bullJob(j), result, startedAt: iso(j.startMs), endedAt: iso(j.endMs), host: j.host, defaultBackend: venue, project: j.project, size: j.size, capacity: HOSTS[j.host], earlier });
-	const records = runs.map((j) => record(j, outcomeOf(g, j, D)));
+	const records = runs.map((j) => record(j, outcomeOf(g, j)));
 	// An infrastructure exit promotes nothing, so its session is the cold read alone.
-	const failed = record(RETRY, { ...outcomeOf(g, RETRY, D), outcome: "failed", reason: "container-lost", exitCode: null, session: { resumed: false, reason: "absent", bytes: null } });
-	records.push(record(RETRY_2, outcomeOf(g, RETRY_2, D), { earlier: earlierFrom(failed) }));
-	records.push(record(CANCELLED, cancelledOutcome(D)));
+	const failed = record(RETRY, { ...outcomeOf(g, RETRY), outcome: "failed", reason: "container-lost", exitCode: null, session: { resumed: false, reason: "absent", bytes: null } });
+	records.push(record(RETRY_2, outcomeOf(g, RETRY_2), { earlier: earlierFrom(failed) }));
+	records.push(record(CANCELLED, cancelledOutcome()));
 	// Last, so the generator's sequence for every run before it is what it was before the parked run existed.
-	records.push(record(PARKED, { ...outcomeOf(g, PARKED, D), reason: "awaiting-input" }));
+	records.push(record(PARKED, { ...outcomeOf(g, PARKED), reason: "awaiting-input" }));
 	return records;
-}
-
-/** The portfolio manager's runs (Mondays, and one by hand an hour after the last), which write the split's plans. */
-export const PM_RUNS = [Date.UTC(2026, 8, 21, 6), Date.UTC(2026, 8, 28, 6), Date.UTC(2026, 9, 5, 6), Date.UTC(2026, 9, 5, 7, 4)].map((at, i) => ({
-	at,
-	id: i === 3 ? `manual:pm-weekly:${Math.floor(at / MIN)}` : `repeat:pm-weekly:${at}`,
-}));
-
-/** A portfolio manager run as a planned job, for `buildRecords`' shape. */
-export function pmJob(run) {
-	return { host: "mini1", id: run.id, kind: "local", folder: "pm", flow: "portfolio-manager", queuedMs: run.at, startMs: run.at + 2_000, endMs: run.at + 2_000 + 2 * MIN, mins: 2, model: "claude-haiku-5-5", project: "ops", turns: 7, scale: 0.6, size: SIZES.small };
-}
-
-/** A pm run's record with the plan it wrote. */
-export function pmRecord({ buildRecord, tokenBudget: D, venue = "local" }, run, plan) {
-	const g = generator(run.at % 100_000);
-	const j = pmJob(run);
-	return buildRecord({ job: bullJob(j), result: { ...outcomeOf(g, j, D), plan }, startedAt: iso(j.startMs), endedAt: iso(j.endMs), host: j.host, defaultBackend: venue, project: j.project, size: j.size, capacity: HOSTS[j.host] });
 }
 
 // ---- the live fleet --------------------------------------------------------------------------------------------
@@ -516,8 +461,6 @@ export function doctorRuns(version) {
 }
 
 // ---- Valkey -------------------------------------------------------------------------------------------------------
-const PLAN_REASONS = { web: "checkout launch is done; keep a floor for bug reports", billing: "the invoice rework starts this week", ops: "the weekly plan and report" };
-
 /**
  * Seed the Valkey at `url` and write the run records under `paths.logs`. `mods` are the project's modules, imported
  * by the caller after it froze the clock and emptied the environment.
@@ -529,42 +472,10 @@ const PLAN_REASONS = { web: "checkout launch is done; keep a floor for bug repor
  * and a run list naming an unknown venue on every row would have drawn a venue column the README has no use for.
  */
 export async function seedDeployment({ url, paths, mods, venue = "local" }) {
-	const { RM, DW } = mods;
-	// The settlement rules are the worker's own (a caller that predates the key gets them imported here).
-	const W = { ...mods.W, tokenBudget: mods.W.tokenBudget ?? (await import("../worker/src/token-budget.mjs")) };
+	const W = mods.W;
 	const redis = W.connection.makeRedisClient(url);
 	try {
-		// The split's history, through the console's own writers, before the records (the pm runs carry the plans).
-		const read = RM.readEnvelope({ envelopeFile: paths.envelope, projectsPath: paths.projects, scopedLimitsPath: paths.limits, maxTokens: 2_000_000 });
-		if (!read.envelope) throw new Error(`the fixture's envelope does not read: ${JSON.stringify(read)}`);
-		const audit = W.allocation.makeAllocationAudit({ logsDir: paths.logs });
-		let lock = 0;
-		const state = W.allocation.makeAllocationState({ redis, host: "mini1", audit, token: () => `seed-${++lock}` });
-		await state.reconcile({ envelope: read.envelope, digest: read.digest, now: new Date(Date.UTC(2026, 8, 21, 5, 0, 2)) });
-		const apply = (at, weights, run, host) =>
-			RM.applyPriorities({
-				url,
-				envelope: read.envelope,
-				digest: read.digest,
-				projects: read.projects,
-				plan: { projects: Object.entries(weights).map(([id, weight]) => ({ id, weight, ...(PLAN_REASONS[id] ? { reason: PLAN_REASONS[id] } : {}) })) },
-				host,
-				logsDir: paths.logs,
-				now: new Date(at),
-				writer: { kind: "portfolio-job", jobId: run.id, triggerId: "pm-weekly" },
-			});
-		const plans = [];
-		plans.push(await apply(PM_RUNS[0].at + 2 * MIN + 11_000, { web: 3, api: 2, billing: 1, ops: 1, _other: 0 }, PM_RUNS[0], "mini1"));
-		const log = await RM.readAllocations({ url, envelope: read.envelope, projects: read.projects });
-		const neutral = log.log.find((r) => r.outcome === "neutral");
-		await RM.revertAllocation({ url, envelope: read.envelope, digest: read.digest, target: neutral, host: "mini2", logsDir: paths.logs, now: new Date(Date.UTC(2026, 8, 23, 10, 12, 40)) });
-		plans.push(await apply(PM_RUNS[1].at + 2 * MIN + 5_000, { web: 4, api: 1, billing: 3, ops: 1, _other: 0 }, PM_RUNS[1], "mini1"));
-		plans.push(await apply(PM_RUNS[2].at + 2 * MIN + 9_000, { web: 4, api: 1, billing: 5, ops: 1, _other: 0 }, PM_RUNS[2], "mini1"));
-		plans.push(await apply(PM_RUNS[3].at + 2 * MIN + 30_000, { web: 4, api: 1, billing: 7, ops: 1, _other: 0 }, PM_RUNS[3], "mini1"));
-		const planOf = (res) => ({ outcome: res.outcome, reason: res.reason ?? null, planId: res.planId ?? null, clamped: res.clamped === true });
-
-		const records = buildRecords({ buildRecord: W.runHistory.buildRecord, earlierFrom: W.runHistory.earlierFrom, tokenBudget: W.tokenBudget, venue });
-		PM_RUNS.forEach((run, i) => records.push(pmRecord({ buildRecord: W.runHistory.buildRecord, tokenBudget: W.tokenBudget, venue }, run, planOf(plans[i]))));
+		const records = buildRecords({ buildRecord: W.runHistory.buildRecord, earlierFrom: W.runHistory.earlierFrom, venue });
 		records.sort((a, b) => Date.parse(a.endedAt) - Date.parse(b.endedAt) || (a.jobId < b.jobId ? -1 : 1));
 		// mini1 and mini2 share one PI_LOGS_DIR (this one) and keep 30 days; build3 keeps its own logs directory for 7
 		// days (BUILD3_RETENTION_DAYS), so its runs reach the others only through the run mirror every named worker
@@ -592,46 +503,6 @@ export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 			await reg.start(row.fields, { intervalMs: 2 ** 31 - 1 });
 		}
 
-		// The counters, from the records, through the budget's own key builders. The running jobs hold their slots and
-		// their per-job dollar caps.
-		const now = new Date(NOW);
-		const dayStart = Date.UTC(2026, 9, 8);
-		const weekStart = Date.UTC(2026, 9, 5);
-		const monthStart = Date.UTC(2026, 9, 1);
-		const running = Object.values(RUNNING).flat();
-		const since = (r, from) => Date.parse(r.startedAt) >= from;
-		const slots = (from) => records.filter((r) => r.budgetReserved && since(r, from)).length + running.length;
-		await redis.set(W.budget.dayKey(now), slots(dayStart));
-		await redis.set(W.budget.weekKey(now), slots(weekStart));
-		await redis.set(W.budget.monthKey(now), slots(monthStart));
-		await redis.set(W.budget.dayKey(now, W.tokenBudget.TOKEN_KEY_PREFIX), records.filter((r) => since(r, dayStart)).reduce((s, r) => s + (r.tokens?.total ?? 0), 0));
-		const web = (r) => r.kind === "github" && r.target?.startsWith("acme/web#");
-		const webScope = W.scopedLimits.scopeKeyPrefix("github:acme/web");
-		await redis.set(W.budget.dayKey(now, webScope), records.filter((r) => web(r) && r.budgetReserved && since(r, dayStart)).length + 1);
-		await redis.set(W.budget.weekKey(now, webScope), records.filter((r) => web(r) && r.budgetReserved && since(r, weekStart)).length + 1);
-		const settled = (pred, from) => records.filter((r) => pred(r) && r.tokensWindows && since(r, from)).reduce((s, r) => s + r.tokensWindows.settledTokens, 0);
-		const held = (pred) => running.filter(pred).length * 2_000_000;
-		const settings = RM.readSettingsView({ settingsFile: paths.settings });
-		const limits = RM.readScopedLimits({ scopedLimitsPath: paths.limits }).limits;
-		const { caps } = DW.deploymentTokenCaps(settings.overlay, {});
-		for (const spec of DW.tokenWindowSpecs({ caps, limits, now })) {
-			const from = spec.window === "day" ? dayStart : spec.window === "week" ? weekStart : monthStart;
-			let pred = () => true;
-			let livePred = () => true;
-			if (spec.ledger === "scope" && spec.name === "project:web") {
-				pred = (r) => r.project === "web";
-				livePred = (e) => e.project === "web";
-			}
-			if (spec.ledger === "model") pred = (r) => r.model === "claude-sonnet-5-5";
-			await redis.set(spec.key, settled(pred, from) + held(livePred));
-		}
-		// The envelope's own counters (each project's week), the same rule.
-		const spend = await RM.readAllocations({ url, envelope: read.envelope, projects: read.projects, now });
-		for (const [id, v] of Object.entries(spend.spend.projects)) {
-			const mine = (p) => (id === "_other" ? p === null || p === undefined : p === id);
-			await redis.set(v.key, settled((r) => mine(r.project), weekStart) + held((e) => mine(e.project)));
-		}
-
 		// The job held on run.waitFor, as the wait gate writes it.
 		const wait = W.waitState.makeWaitState({ redis, now: () => NOW - (2 * 3600 + 14 * 60) * 1000 });
 		await wait.hold("gh-77c1", { dedupId: "github:acme/web#415", target: "acme/web#415", label: "after 2026-10-09T07:00Z + ci-green", untilMs: Date.UTC(2026, 9, 9, 7) });
@@ -646,7 +517,6 @@ export async function seedDeployment({ url, paths, mods, venue = "local" }) {
 		const q = W.queue.makeQueue(W.connection.parseConnection(url));
 		try {
 			await q.upsertJobScheduler("nightly-tidy", { pattern: "0 3 * * *" }, { name: "nightly-tidy", data: {} });
-			await q.upsertJobScheduler("pm-weekly", { pattern: "0 6 * * 1" }, { name: "pm-weekly", data: {} });
 		} finally {
 			await q.close();
 		}

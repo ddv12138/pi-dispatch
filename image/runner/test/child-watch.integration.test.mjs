@@ -6,7 +6,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 // Pure: no static pi import in their module graph, so they load unconditionally and the gate below applies to pi only.
 import { createChildWatch, linuxProc } from "../src/child-watch.mjs";
-import { TOKEN_BUDGET } from "../src/outcome.mjs";
+import { MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
 import { CHILD_LEDGER_NAME, childLedger, createUsageMeter, STOP_MESSAGES, writeFileAtomic } from "../src/usage-meter.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
@@ -121,18 +121,22 @@ function rpcChild(w, { env = w.env, prompts, between = async () => {}, onSpawn =
 const stopOf = (dir) => JSON.parse(readFileSync(join(dir, "STOP"), "utf8"));
 const settle = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-test("a parent plus a pi child pushed over maxTokens: STOP is written and the child's next call is braked (issue #500)", { skip }, async () => {
+test("a parent plus a pi child stopped on a policy: STOP is written and the child's next call is braked (issue #500)", { skip }, async () => {
 	const w = world();
-	const meter = createUsageMeter({ maxTokens: 1000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const hook = createChildWatch({ dir: w.ledger, meter, proc: null });
-	// The parent's own 300 tokens; the child's first call (777) takes the job past 1000.
+	// The parent records the child's first call, then a policy stop, before the child's second prompt.
 	meter.record({ input: 300, output: 0, totalTokens: 300, cost: { total: 0.0003 } }, { sessionId: "root", provider: "fake", modelId: "m1" });
-	const result = await rpcChild(w, { prompts: ["one", "two"], between: () => hook.sample() });
+	const result = await rpcChild(w, { prompts: ["one", "two"], between: () => {
+		hook.sample();
+		meter.stop(MODEL_NOT_ALLOWED);
+		hook.sample();
+	} });
 	assert.equal(result.code, 0, result.stderr);
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
-	assert.deepEqual(stopOf(w.ledger), { v: 1, reason: TOKEN_BUDGET });
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
+	assert.deepEqual(stopOf(w.ledger), { v: 1, reason: MODEL_NOT_ALLOWED });
 	assert.equal(w.callCount(), 1, "the second call never reached the provider");
-	assert.match(result.stdout, new RegExp(STOP_MESSAGES[TOKEN_BUDGET]), "the child answered it with the brake");
+	assert.match(result.stdout, new RegExp(STOP_MESSAGES[MODEL_NOT_ALLOWED]), "the child answered it with the brake");
 	hook.teardown();
 	const snap = meter.snapshot();
 	assert.deepEqual([snap.total, snap.childTotal, snap.childProcesses, snap.unmeteredChildren], [1077, 777, 1, 0]);
@@ -152,10 +156,10 @@ function ownProc(pids) {
  * A pi child that reports through no ledger: its spawner cleared the environment (no preload, no ledger variable).
  * With `forge`, the spawner also writes a `done` ledger with zeros under the child's pid, the moment it has the pid.
  */
-async function unmeteredChild({ maxTokens, forge = false }) {
+async function unmeteredChild({ allowed = false, forge = false }) {
 	const w = world();
 	const pids = new Set();
-	const meter = createUsageMeter({ maxTokens, rootSessionId: "root" });
+	const meter = createUsageMeter({ allowedModels: allowed ? [{ provider: "fake", model: "m1" }] : null, rootSessionId: "root" });
 	const logged = [];
 	const hook = createChildWatch({ dir: w.ledger, meter, proc: ownProc(pids), log: (event, fields) => logged.push({ event, fields }) });
 	const env = { HOME: w.root, TMPDIR: w.root, PI_CODING_AGENT_DIR: w.env.PI_CODING_AGENT_DIR, PI_OFFLINE: "1", FAKE_API: w.env.FAKE_API, FAKE_CALLS: w.env.FAKE_CALLS };
@@ -177,9 +181,9 @@ async function unmeteredChild({ maxTokens, forge = false }) {
 	return { meter, logged, teardown: hook.teardown(), pid: result.pid };
 }
 
-test("a pi child whose spawner cleared the environment (`env: {}`) is unmetered, and under a token cap it is a breach (issue #500)", { skip: linuxOnly }, async () => {
-	const { meter, logged, teardown, pid } = await unmeteredChild({ maxTokens: 1_000_000 });
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
+test("a pi child whose spawner cleared the environment (`env: {}`) is unmetered, and under a model list it is a breach (issue #500)", { skip: linuxOnly }, async () => {
+	const { meter, logged, teardown, pid } = await unmeteredChild({ allowed: true });
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 	assert.equal(meter.snapshot().unmeteredChildren, 1);
 	// Its environment, read at the first tick, already says it is not this job's child.
 	assert.deepEqual(logged.filter((line) => line.event === "unmetered_child"), [{ event: "unmetered_child", fields: { why: "environ", pid, unmetered: 1 } }]);
@@ -187,15 +191,15 @@ test("a pi child whose spawner cleared the environment (`env: {}`) is unmetered,
 });
 
 test("a forged `done` ledger named after an env-scrubbed pi child does not hide it: its environment lacks this job's directory (issue #500)", { skip: linuxOnly }, async () => {
-	const { meter, logged, teardown, pid } = await unmeteredChild({ maxTokens: 1_000_000, forge: true });
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET);
+	const { meter, logged, teardown, pid } = await unmeteredChild({ allowed: true, forge: true });
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 	assert.equal(meter.snapshot().unmeteredChildren, 1);
 	assert.deepEqual(logged.filter((line) => line.event === "unmetered_child").map((line) => line.fields), [{ why: "environ", pid, unmetered: 1 }]);
 	assert.equal(teardown.unmetered, 1);
 });
 
-test("an uncapped job does not stop on an unmetered pi child, and records it as a floor (issue #500)", { skip: linuxOnly }, async () => {
-	const { meter, teardown } = await unmeteredChild({ maxTokens: null });
+test("an unlisted job does not stop on an unmetered pi child, and records it as a floor (issue #500)", { skip: linuxOnly }, async () => {
+	const { meter, teardown } = await unmeteredChild({ allowed: false });
 	assert.equal(meter.state.stopReason, null);
 	assert.equal(meter.snapshot().unmeteredChildren, 1);
 	assert.equal(teardown.unmetered, 1);
@@ -204,7 +208,7 @@ test("an uncapped job does not stop on an unmetered pi child, and records it as 
 test("a metered pi child seen on every tick is never counted unmetered (issue #500)", { skip: linuxOnly }, async () => {
 	const w = world();
 	const pids = new Set();
-	const meter = createUsageMeter({ maxTokens: 1_000_000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const hook = createChildWatch({ dir: w.ledger, meter, proc: ownProc(pids) });
 	const result = await rpcChild(w, {
 		prompts: ["one", "two"],

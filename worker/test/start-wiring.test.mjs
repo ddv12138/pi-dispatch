@@ -956,9 +956,8 @@ test("runtime settings: getSettings is a top-level createWorker arg resolving ef
 	assert.equal(typeof captured.getSettings, "function", "getSettings must be a top-level createWorker arg");
 	assert.equal(captured.cap, undefined, "no static cap arg survives -- the job-start caps were removed");
 
-	// Calling it with an empty overlay yields the eight effective keys from env/default config (env {} here);
-	// the token controls default to disabled (null).
-	// `secretProfiles` (issue #225) rides ALONGSIDE those eight rather than inside effectiveSettings, which is
+	// Calling it with an empty overlay yields the four effective keys from env/default config (env {} here).
+	// `secretProfiles` (issue #225) rides ALONGSIDE those four rather than inside effectiveSettings, which is
 	// why it appears here and not in that function's own pins: it carries no `overlay > env` precedence, so
 	// putting it there would have claimed one it deliberately does not have.
 	assert.deepEqual(
@@ -967,17 +966,14 @@ test("runtime settings: getSettings is a top-level createWorker arg resolving ef
 			provider: "anthropic",
 			model: "claude-sonnet-5-5",
 			maxTurns: 30,
-			maxTokens: null,
-			dailyTokenCap: null,
-			weeklyTokenCap: null,
-			monthlyTokenCap: null,
 			secretProfiles: {},
 			// Issue #704: the bundle profiles ride beside secretProfiles, for its reason.
 			secretBundles: {},
 			concurrency: 3,
 		},
-		"getSettings resolves the eight effective keys from env/default config when the overlay is empty",
+		"getSettings resolves the four effective keys from env/default config when the overlay is empty",
 	);
+	for (const key of ["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) assert.equal(key in captured.getSettings(), false, `C2: ${key} is not resolved`);
 
 	const started = logs.find((l) => l.event === "worker_started");
 	assert.ok(started, "a worker_started log must be emitted");
@@ -1355,35 +1351,16 @@ test("once wiring: deps.checkOnceSpent reads PI_TRIGGERS_FILE when set, and excu
 	}
 });
 
-test("portfolio wiring: deps.checkPortfolioFlag reads the live PI_TRIGGERS_FILE by cron id, so removing the flag takes effect (#505)", { skip }, async () => {
-	const dir = tempDir("pi-portfolio-path-");
-	try {
-		const triggersPath = join(dir, "triggers.json");
-		const entry = (run) => ({ on: { type: "cron", id: "pm-weekly", pattern: "0 6 * * 1" }, run: { kind: "local", folder: dir, flow: "pm", task: "plan", ...run } });
-		writeFileSync(triggersPath, JSON.stringify({ triggers: [entry({ portfolio: true })] }));
-		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
-		const { deps } = await runStart({ env: { PI_TRIGGERS_FILE: triggersPath }, makeAuth, makeHost: () => fakeHost() });
-		const job = { kind: "local", folder: dir, flow: "pm", task: "plan", portfolio: true, trigger: { id: "pm-weekly", pattern: "0 6 * * 1" } };
-		assert.equal(typeof deps.checkPortfolioFlag, "function", "the live-flag check must be wired into deps");
-		assert.equal(await deps.checkPortfolioFlag(job), true);
-		writeFileSync(triggersPath, JSON.stringify({ triggers: [entry({})] }));
-		assert.equal(await deps.checkPortfolioFlag(job), false, "read live, never from the boot copy");
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-test("portfolio wiring: the plan collector is wired into deps beside collectChain, and a job with no plan file collects nothing (#505)", { skip }, async () => {
+test("C2: no portfolio wiring survives -- no flag check, no plan collector, no snapshot", { skip }, async () => {
 	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
-	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() });
-	assert.equal(typeof deps.collectPlan, "function", "the plan collector must be wired into deps.collectPlan");
-	const jobDir = tempDir("pi-portfolio-collect-");
-	assert.equal(await deps.collectPlan({ job: { id: "j", data: { kind: "local" } }, prepared: { jobDir }, portfolio: false }), null);
+	const { deps, captured } = await runStart({ makeAuth, makeHost: () => fakeHost() });
+	assert.equal(deps.checkPortfolioFlag, undefined);
+	assert.equal(deps.collectPlan, undefined);
+	assert.equal(captured.portfolioSnapshot, undefined);
+	assert.equal(captured.allocation, undefined);
 	const start = readFileSync(new URL("../src/start.mjs", import.meta.url), "utf8");
-	assert.match(start, /checkPortfolioFlag,\n/, "the gate's check is the one the collector and the snapshot share");
-	assert.match(start, /\n\t\t\t\tportfolioSnapshot,\n/, "prepare is handed the snapshot builder");
-	const index = readFileSync(new URL("../src/index.mjs", import.meta.url), "utf8");
-	assert.match(index, /collectPlan: \(ctx\) => deps\.collectPlan\(\{ \.\.\.ctx, job \}\)/, "the collector gets the REAL job, for its id and its data as queued");
+	assert.equal(/portfolio/i.test(start), false, "start.mjs names no portfolio module or field");
+	assert.equal(/envelope/i.test(start), false, "and no allocation envelope");
 });
 
 test("once wiring: with PI_TRIGGERS_FILE unset the fallback is <cwd>/triggers.json -- doctor's own default", { skip }, async () => {
@@ -1579,137 +1556,6 @@ test("projects: an invalid file refuses BOOT fail-loud (configError), and an emp
 	}
 });
 
-// ── the allocation envelope (issue #504 part B) ──────────────────────────────────────────────────────────
-
-/** Clear the default `alloc:*` keys of the test Valkey around a boot that reconciles against them. */
-async function withCleanAlloc(fn) {
-	const { makeRedisClient } = await import("../src/connection.mjs");
-	const redis = makeRedisClient(VALKEY_URL);
-	const clear = async () => {
-		const keys = await redis.keys("alloc:*");
-		if (keys.length > 0) await redis.del(...keys);
-	};
-	try {
-		await clear();
-		return await fn(redis);
-	} finally {
-		await clear();
-		redis.disconnect();
-	}
-}
-
-function envelopeBoot() {
-	const { realpathSync } = process.getBuiltinModule("node:fs");
-	const dir = realpathSync.native(tempDir("pi-envelope-boot-"));
-	const projects = join(dir, "projects.json");
-	writeFileSync(projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-	const envelope = join(dir, "conf", "envelope.json");
-	mkdirSync(join(dir, "conf"));
-	writeFileSync(envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-	const logsDir = join(dir, "logs");
-	// VALKEY_URL named: the worker's own default is 6379, which is not the test Valkey, and this boot writes `alloc:*`.
-	return { dir, envelope, logsDir, env: { VALKEY_URL, PI_PROJECTS_FILE: projects, PI_ENVELOPE_FILE: envelope, PI_MAX_TOKENS: "2", PI_LOGS_DIR: logsDir } };
-}
-
-test("envelope: a valid file boot-loads with its containment check, seeds the neutral split, arms the watcher and the host row field", { skip }, async () => {
-	await withCleanAlloc(async (redis) => {
-		const b = envelopeBoot();
-		const { captured, logs } = await runStart({ env: b.env });
-		const loaded = logs.find((l) => l.event === "envelope_loaded");
-		assert.match(loaded.digest, /^[0-9a-f]{16}$/);
-		assert.equal(loaded.delegation, true);
-		assert.ok(logs.some((l) => l.event === "envelope_watching" && l.path === b.envelope), "the live-edit watcher armed");
-		assert.equal(logs.find((l) => l.event === "worker_started").envelopeDigest, loaded.digest);
-		assert.deepEqual(logs.find((l) => l.event === "allocation_reconciled"), { event: "allocation_reconciled", why: "boot", mismatch: false, digest: loaded.digest, applied: loaded.digest, host: logs[0].host });
-		assert.equal(JSON.parse(await redis.get("alloc:plan")).writer, "default", "the neutral split is persisted");
-		assert.equal(typeof captured.allocation.reconcile, "function");
-		assert.equal(captured.allocation.current().digest, loaded.digest);
-		const { readdirSync } = process.getBuiltinModule("node:fs");
-		assert.equal(readdirSync(join(b.logsDir, "allocations")).length, 1, "the seed's row is in the audit file");
-	});
-});
-
-test("envelope: unset means no envelope to narrow by, no watcher and no Valkey key; inside a job path refuses BOOT (#504)", { skip }, async () => {
-	await withCleanAlloc(async (redis) => {
-		const { captured, logs } = await runStart({ env: { VALKEY_URL } });
-		assert.equal(captured.allocation.current(), null, "no envelope, nothing to narrow");
-		assert.equal(typeof captured.allocation.fleetGoverned, "function", "each pickup still asks whether the fleet is governed");
-		assert.ok(!logs.some((l) => l.event === "envelope_absent_fleet_governed"));
-		assert.ok(!logs.some((l) => l.event === "envelope_watching"));
-		assert.equal(logs.find((l) => l.event === "worker_started").envelopeDigest, null);
-		assert.equal(await redis.exists("alloc:plan"), 0);
-		const b = envelopeBoot();
-		await assert.rejects(
-			() => runStart({ env: { ...b.env, PI_DISPATCH_RUN_ROOTS: b.dir } }),
-			(e) => e.piDispatchConfig === true && /lies inside a job path \(run-root /.test(e.message),
-		);
-		await assert.rejects(() => runStart({ env: { VALKEY_URL, PI_ENVELOPE_FILE: "" } }), (e) => e.piDispatchConfig === true && /envelope file does not exist/.test(e.message));
-	});
-});
-
-test("reloadEnvelope keeps LAST-GOOD on a bad edit, swaps on a good one and says so once, and re-runs the containment check every time (#504)", { skip }, async () => {
-	const b = envelopeBoot();
-	const config = { envelopeFile: b.envelope, projectsFile: b.env.PI_PROJECTS_FILE };
-	const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
-	const limits = { current: [] };
-	const { envelopeDigest, loadEnvelope } = await import("../src/envelope.mjs");
-	const first = loadEnvelope(config, { projects: projects.current, maxTokens: 2_000_000 });
-	const ref = { current: first, digest: envelopeDigest(first) };
-	const logs = [];
-	const log = (event, fields) => logs.push({ event, fields });
-	let changes = 0;
-	let jobPaths = { cronFolders: [], runRoots: [], skillsDirs: [], globalPiDir: null };
-	const ctx = { projects, limits, maxTokens: () => 2_000_000, jobPaths: () => jobPaths, onChange: () => changes++ };
-	// A bad edit: the last good envelope stands, the reason is logged.
-	writeFileSync(b.envelope, "{ broken");
-	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(ref.current, first, "the SAME object: last-good untouched");
-	assert.equal(logs.at(-1).event, "envelope_reload_invalid");
-	// A good edit swaps, logs the digest and asks for the re-base once.
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 80, floorsTokens: { shop: 10 } }));
-	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(ref.current.totalTokens, 80);
-	assert.equal(logs.at(-1).event, "envelope_reloaded");
-	assert.equal(logs.at(-1).fields.digest, ref.digest);
-	assert.equal(changes, 1);
-	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(changes, 1, "the same file again changes nothing and asks nothing");
-	// The containment check runs WITH every reload: a job path that now holds the file keeps the last good envelope,
-	// even though the edit itself parses.
-	const before = ref.current;
-	jobPaths = { cronFolders: [b.dir], runRoots: [], skillsDirs: [], globalPiDir: null };
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 999, floorsTokens: { shop: 10 } }));
-	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(ref.current, before, "a file a job could have written is never adopted");
-	assert.equal(logs.at(-1).event, "envelope_reload_invalid");
-	assert.match(logs.at(-1).fields.reason, /lies inside a job path \(cron-folder /);
-	assert.equal(changes, 1);
-});
-
-test("the envelope reloads with the projects pair: a projects edit that commits re-judges it from disk, in either save order (#504)", { skip }, async () => {
-	const b = envelopeBoot();
-	const config = { envelopeFile: b.envelope, projectsFile: b.env.PI_PROJECTS_FILE, scopedLimitsFile: null };
-	const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
-	const limits = { current: [] };
-	const { envelopeDigest, loadEnvelope } = await import("../src/envelope.mjs");
-	const first = loadEnvelope(config, { projects: projects.current, maxTokens: 2_000_000 });
-	const ref = { current: first, digest: envelopeDigest(first) };
-	const logs = [];
-	const log = (event, fields) => logs.push({ event, fields });
-	const ctx = { projects, limits, maxTokens: () => 2_000_000, jobPaths: () => ({ cronFolders: [], runRoots: [], skillsDirs: [], globalPiDir: null }) };
-	const pair = mod.makeProjectPair(limits, projects);
-	pair.afterCommit = () => mod.reloadEnvelope(config, ref, log, ctx);
-	// The envelope saved FIRST with a floor for a project projects.json does not have yet: kept out.
-	writeFileSync(b.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, tools: 5 } }));
-	mod.reloadEnvelope(config, ref, log, ctx);
-	assert.equal(ref.current, first);
-	// Then projects.json gains the project: its commit re-judges the envelope from disk, which now applies.
-	writeFileSync(b.env.PI_PROJECTS_FILE, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "tools", members: ["github:acme/tools"] }] }));
-	mod.reloadProjects(config, projects, log, pair);
-	assert.deepEqual(Object.keys(ref.current.floors).sort(), ["_other", "shop", "tools"]);
-	assert.ok(logs.some((l) => l.event === "envelope_reloaded"));
-});
-
 test("reloadProjects keeps LAST-GOOD on a bad edit and hot-swaps on a good one, naming no project name", { skip }, async () => {
 	const dir = tempDir("pi-projects-");
 	try {
@@ -1848,80 +1694,24 @@ for (const variant of ["projects.json drops shop", "projects.json missing", "pro
 	});
 }
 
-for (const order of ["limits first", "projects first"]) {
-	test(`issue #499 part B: a token row committed by EITHER file's reload is warned on when there is no per-job cap (${order})`, { skip }, async () => {
-		const dir = tempDir("pi-projects-");
-		try {
-			const limitsFile = join(dir, "scoped-limits.json");
-			const projectsFile = join(dir, "projects.json");
-			const config = { scopedLimitsFile: limitsFile, projectsFile };
-			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [] }));
-			writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-			const limits = { current: [] };
-			const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
-			const noCap = () => null;
-			const pair = mod.makeProjectPair(limits, projects, noCap);
-			const logs = [];
-			const log = (event, fields) => logs.push({ event, fields });
-			const saveLimits = () => {
-				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:tools", dayTokens: 5 }] }));
-				mod.reloadScopedLimits(config, limits, log, noCap, pair);
-			};
-			const saveProjects = () => {
-				writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "tools", members: ["/srv/tools"] }] }));
-				mod.reloadProjects(config, projects, log, pair);
-			};
-			if (order === "limits first") (saveLimits(), saveProjects());
-			else (saveProjects(), saveLimits());
-			assert.deepEqual(limits.current.map((l) => l.scope), ["project:tools"]);
-			assert.deepEqual(logs.find((l) => l.event === "scoped_limits_token_rows_without_budget")?.fields, { rows: [{ index: 0, kind: "project" }] });
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
+test("C2: a scoped token row refuses the boot, naming the retirement and never the scope", { skip }, async () => {
+	const dir = tempDir("pi-sl-token-boot-");
+	try {
+		const file = join(dir, "scoped-limits.json");
+		for (const row of [{ scope: "/srv/secret-path", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }]) {
+			writeFileSync(file, JSON.stringify({ version: 2, limits: [row] }));
+			await assert.rejects(
+				() => runStart({ env: { PI_SCOPED_LIMITS_FILE: file } }),
+				(e) => e.piDispatchConfig === true && /retired with the token budgets/.test(e.message) && !e.message.includes("secret-path"),
+			);
 		}
-	});
-}
+	} finally {
+		rmSync(dir, { recursive: true, force: true });
+	}
+});
 
-for (const order of ["limits first", "projects first"]) {
-	test(`issue #499 part B: renaming a project in both files (shop to store) ends on the new pair, ${order}`, { skip }, async () => {
-		const dir = tempDir("pi-projects-");
-		try {
-			const limitsFile = join(dir, "scoped-limits.json");
-			const projectsFile = join(dir, "projects.json");
-			const config = { scopedLimitsFile: limitsFile, projectsFile };
-			writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:shop", concurrent: 2 }] }));
-			writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-			const limits = { current: [{ scope: "project:shop", concurrent: 2 }] };
-			const projects = { current: [{ id: "shop", name: null, members: ["github:acme/web"] }] };
-			const pair = mod.makeProjectPair(limits, projects);
-			const logs = [];
-			const log = (event, fields) => logs.push({ event, fields });
-			const saveLimits = () => {
-				writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "project:store", concurrent: 2 }] }));
-				mod.reloadScopedLimits(config, limits, log, null, pair);
-			};
-			const saveProjects = () => {
-				writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "store", members: ["github:acme/web"] }] }));
-				mod.reloadProjects(config, projects, log, pair);
-			};
-			if (order === "limits first") {
-				saveLimits();
-				assert.deepEqual(limits.current.map((l) => l.scope), ["project:shop"], "half a rename is kept out");
-				saveProjects();
-			} else {
-				saveProjects();
-				assert.deepEqual(projects.current.map((p) => p.id), ["shop"], "half a rename is kept out");
-				saveLimits();
-			}
-			assert.deepEqual(projects.current.map((p) => p.id), ["store"]);
-			assert.deepEqual(limits.current.map((l) => l.scope), ["project:store"]);
-		} finally {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	});
-}
-
-test("reloadScopedLimits keeps LAST-GOOD on a bad edit and hot-swaps on a good one", { skip }, async () => {
-	const dir = tempDir("pi-sl-");
+test("C2: reloadScopedLimits refuses a token or model row, keeping the last good rows and naming the retirement", { skip }, async () => {
+	const dir = tempDir("pi-sl-token-reload-");
 	try {
 		const file = join(dir, "scoped-limits.json");
 		const config = { scopedLimitsFile: file };
@@ -1929,69 +1719,15 @@ test("reloadScopedLimits keeps LAST-GOOD on a bad edit and hot-swaps on a good o
 		const ref = { current: good };
 		const logs = [];
 		const log = (event, fields) => logs.push({ event, fields });
-
-		writeFileSync(file, "{ not json");
-		mod.reloadScopedLimits(config, ref, log);
-		assert.equal(ref.current, good, "the SAME array object -- last-good untouched, not merely equal");
-		assert.equal(logs[0].event, "scoped_limits_reload_invalid");
-
-		writeFileSync(file, JSON.stringify({ version: 1, limits: [{ scope: "acme/web", concurrent: 9 }] }));
-		mod.reloadScopedLimits(config, ref, log);
-		assert.equal(ref.current[0].concurrent, 9, "a good edit swaps the ref");
-		assert.deepEqual(logs[1], { event: "scoped_limits_reloaded", fields: { count: 1 } });
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-test("boot: a token row with no per-job cap WARNS, and an overlay-only maxTokens silences it; the watcher gets the merged cap thunk (PR #549's review)", { skip }, async () => {
-	const dir = tempDir("pi-sl-usd-");
-	try {
-		const file = join(dir, "scoped-limits.json");
-		const settingsFile = join(dir, "settings.json");
-		writeFileSync(file, `${JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }] })}\n`);
-		const armed = [];
-		const watchScopedLimits = (...args) => (armed.push(args), { close() {} });
-		const bare = await runStart({ env: { PI_SCOPED_LIMITS_FILE: file, PI_SETTINGS_FILE: settingsFile }, watchScopedLimits });
-		assert.deepEqual(bare.logs.find((l) => l.event === "scoped_limits_token_rows_without_budget")?.rows, [{ index: 0, kind: "scope" }], "no cap anywhere: the boot warning");
-		const thunk = armed[0][4];
-		assert.equal(typeof thunk, "function", "the watcher receives the cap thunk");
-		assert.equal(thunk(), null, "no cap yet");
-		// The reload path the watcher drives: a no-cap token row warns.
-		const reloadLogs = [];
-		mod.reloadScopedLimits({ scopedLimitsFile: file }, { current: [] }, (event, fields) => reloadLogs.push({ event, fields }), thunk);
-		assert.ok(reloadLogs.some((l) => l.event === "scoped_limits_token_rows_without_budget"), "the reload warns");
-		// An OVERLAY-only cap: the thunk reads it (merged, not env only), and the boot warning is silent.
-		writeFileSync(settingsFile, JSON.stringify({ maxTokens: 2 }));
-		assert.equal(thunk(), 2, "the thunk re-reads the merged settings");
-		armed.length = 0;
-		const capped = await runStart({ env: { PI_SCOPED_LIMITS_FILE: file, PI_SETTINGS_FILE: settingsFile }, watchScopedLimits });
-		assert.ok(!capped.logs.some((l) => l.event === "scoped_limits_token_rows_without_budget"), "the overlay's cap silences the boot warning");
-		assert.equal(armed[0][4](), 2);
-	} finally {
-		rmSync(dir, { recursive: true, force: true });
-	}
-});
-
-test("reloadScopedLimits WARNS (never refuses) on a token row when the deployment has no per-job cap (PR #549's review)", { skip }, async () => {
-	const dir = tempDir("pi-sl-");
-	try {
-		const file = join(dir, "scoped-limits.json");
-		const config = { scopedLimitsFile: file };
-		const ref = { current: [] };
-		const logs = [];
-		const log = (event, fields) => logs.push({ event, fields });
-		writeFileSync(file, JSON.stringify({ version: 2, limits: [{ scope: "/srv/secret-path", concurrent: 2 }, { scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }] }));
-		mod.reloadScopedLimits(config, ref, log, () => null);
-		assert.equal(ref.current.length, 3, "loaded, not refused");
-		assert.deepEqual(logs[1], { event: "scoped_limits_token_rows_without_budget", fields: { rows: [{ index: 1, kind: "scope" }, { index: 2, kind: "model" }] } });
-		assert.ok(!JSON.stringify(logs).includes("secret-path"), "never a scope string");
-		logs.length = 0;
-		mod.reloadScopedLimits(config, ref, log, () => "2");
-		assert.deepEqual(logs.map((l) => l.event), ["scoped_limits_reloaded"], "a per-job cap: no warning");
-		logs.length = 0;
-		mod.warnTokenRowsWithoutCap(ref.current, undefined, log);
-		assert.equal(logs[0].event, "scoped_limits_token_rows_without_budget", "the boot call, same rule");
+		for (const row of [{ scope: "/srv/secret-path2", dayTokens: 5 }, { scope: "model:openai/gpt-x", weekTokens: 9 }]) {
+			logs.length = 0;
+			writeFileSync(file, JSON.stringify({ version: 2, limits: [row] }));
+			mod.reloadScopedLimits(config, ref, log, null);
+			assert.equal(ref.current, good, "the last good list stands, the SAME object");
+			assert.equal(logs.at(-1).event, "scoped_limits_reload_invalid");
+			assert.match(logs.at(-1).fields.reason, /retired with the token budgets/);
+			assert.ok(!JSON.stringify(logs).includes("secret-path"), "never a scope string");
+		}
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
@@ -2574,10 +2310,9 @@ test("the default arms one daily sweep and registers it as a closer", { skip }, 
 	assert.equal(constructions.length, 1);
 	assert.equal(starts.length, 1, "constructed AND started");
 	assert.equal(constructions[0].intervalMs, 24 * 3600000, "24h by default, in ms");
-	// The allocation audit files (issue #504 part B) second: boot reaps them right after the logs, and a tick re-runs that
-	// same closure in the same place.
+	// The console audit second, then the outbox repair and sessions (C2 removed the allocation audit reaper).
 	// Issue #645: the host-lost sweep on every host, last; the checkpoint store's retention only where there is a store.
-	assert.deepEqual(constructions[0].reapers.map((r) => r.name), ["log", "allocation_log", "console_audit", "touch_outbox", "session", "recovery_host_lost"], "boot's own order");
+	assert.deepEqual(constructions[0].reapers.map((r) => r.name), ["log", "console_audit", "touch_outbox", "session", "recovery_host_lost"], "boot's own order");
 	assert.equal(captured.extraClosers.length, 7, "runtimeQueue + registry + watch recovery drainer + answer draft drainer + the updates reconcile + the sweep + the doctor runs (no watch files in this env)");
 	assert.equal(logs.find((l) => l.event === "worker_started").sweepIntervalHours, 24);
 });
@@ -2666,7 +2401,7 @@ test("the sweep re-runs the SAME closures boot already built, so one config read
 	assert.equal(logReaperCalls.length, before, "a sweep constructs nothing");
 });
 
-test("boot itself reaps the allocation and console audit month files past retention, keeping the console chain's head", { skip }, async () => {
+test("boot itself reaps the console audit month files past retention, keeping the console chain's head", { skip }, async () => {
 	// The sweep is held inert so only boot's own calls can reap. The old mtime is fixed far in the past and the files are
 	// judged against the subject's real clock: that only grows MORE true as the clock moves, so it is no fuse.
 	const logsDir = tempDir("pi-boot-reap-");
@@ -2679,24 +2414,22 @@ test("boot itself reaps the allocation and console audit month files past retent
 		}
 	};
 	seed("console-audit", ["2024-01.jsonl", "2024-02.jsonl"]);
-	seed("allocations", ["2024-01.jsonl"]);
 	const { logs } = await runStart({
 		env: { PI_LOGS_DIR: logsDir, PI_LOG_RETENTION_DAYS: "30" },
 		makeRetentionSweep: () => ({ start() {}, sweepOnce: async () => {}, close: async () => {} }),
 	});
 	assert.deepEqual(readdirSync(join(logsDir, "console-audit")), ["2024-02.jsonl"], "the old month goes; the newest holds the chain's head and stays, however old");
-	assert.deepEqual(readdirSync(join(logsDir, "allocations")), []);
 	assert.ok(logs.some((l) => l.event === "reaped_console_audit" && l.file === "2024-01.jsonl"));
 });
 
 test("the console audit trail is reaped on PI_CONSOLE_AUDIT_RETENTION_DAYS, not the run history's, in either direction (#761)", { skip }, async () => {
-	// Two crossed deployments, each with an old audit month and an old allocation month (both on the run history's
-	// retention before this), the sweep held inert so only boot's own calls reap. The old mtime is fixed far in the past
-	// and judged against the subject's real clock, which only grows MORE true as the clock moves: no fuse.
+	// Two crossed deployments, each with an old audit month (on the run history's retention before this), the sweep held
+	// inert so only boot's own calls reap. The old mtime is fixed far in the past and judged against the subject's real
+	// clock, which only grows MORE true as the clock moves: no fuse.
 	const old = 1_000_000_000;
 	const seeded = () => {
 		const logsDir = tempDir("pi-boot-audit-reap-");
-		for (const [sub, names] of [["console-audit", ["2024-01.jsonl", "2024-02.jsonl"]], ["allocations", ["2024-01.jsonl"]]]) {
+		for (const [sub, names] of [["console-audit", ["2024-01.jsonl", "2024-02.jsonl"]]]) {
 			mkdirSync(join(logsDir, sub), { recursive: true });
 			for (const name of names) {
 				writeFileSync(join(logsDir, sub, name), "");
@@ -2707,19 +2440,17 @@ test("the console audit trail is reaped on PI_CONSOLE_AUDIT_RETENTION_DAYS, not 
 	};
 	const inert = () => ({ start() {}, sweepOnce: async () => {}, close: async () => {} });
 
-	// The run history kept forever, the audit trail 30 days: the old audit month goes, the allocations stay.
+	// The run history kept forever, the audit trail 30 days: the old audit month goes.
 	const trailShort = seeded();
 	const first = await runStart({ env: { PI_LOGS_DIR: trailShort, PI_LOG_RETENTION_DAYS: "0", PI_CONSOLE_AUDIT_RETENTION_DAYS: "30" }, makeRetentionSweep: inert });
 	assert.deepEqual(readdirSync(join(trailShort, "console-audit")), ["2024-02.jsonl"], "the audit trail's own 30 days reap the old month");
-	assert.deepEqual(readdirSync(join(trailShort, "allocations")), ["2024-01.jsonl"], "the run history's keep-forever still holds the allocations");
 	const started = first.logs.find((l) => l.event === "worker_started");
 	assert.deepEqual([started.logRetentionDays, started.consoleAuditRetentionDays], [0, 30], "worker_started announces both");
 
 	// The reverse: the run history 30 days, the audit trail kept forever.
 	const trailKept = seeded();
 	await runStart({ env: { PI_LOGS_DIR: trailKept, PI_LOG_RETENTION_DAYS: "30", PI_CONSOLE_AUDIT_RETENTION_DAYS: "0" }, makeRetentionSweep: inert });
-	assert.deepEqual(readdirSync(join(trailKept, "console-audit")).sort(), ["2024-01.jsonl", "2024-02.jsonl"], "0 keeps the audit trail forever");
-	assert.deepEqual(readdirSync(join(trailKept, "allocations")), [], "the run history's 30 days reap the allocations");
+	assert.deepEqual(readdirSync(join(trailKept, "console-audit")).sort(), ["2024-01.jsonl", "2024-02.jsonl"], "0 keeps the audit trail forever, whatever the run history's retention says");
 });
 
 test("the sweep re-runs the audit reaper boot built on its own retention: a tick reaps what boot was told to (#761)", { skip }, async () => {
@@ -2742,19 +2473,14 @@ test("the sweep re-runs the audit reaper boot built on its own retention: a tick
 	assert.deepEqual(readdirSync(join(logsDir, "console-audit")), ["2024-02.jsonl"]);
 });
 
-test("the run mirror writer and the portfolio snapshot are handed this host's PI_RUN_MIRROR_MAX_RUNS as indexMax (#761)", { skip }, async () => {
+test("the run mirror writer is handed this host's PI_RUN_MIRROR_MAX_RUNS as indexMax (#761)", { skip }, async () => {
 	const mirrorCalls = [];
-	const snapshotCalls = [];
 	const { logs } = await runStart({
 		env: { PI_WORKER_NAME: "w761-cap", PI_RUN_MIRROR_MAX_RUNS: "1500" },
 		makeRunMirror: (args) => (mirrorCalls.push(args), { mirror: async () => true }),
-		makePortfolioSnapshot: (args) => (snapshotCalls.push(args), async () => null),
 	});
 	assert.equal(mirrorCalls.length, 1);
 	assert.equal(mirrorCalls[0].indexMax, 1500, "the writer trims the shared index to this host's cap");
-	assert.equal(snapshotCalls.length, 1);
-	assert.equal(snapshotCalls[0].indexMax, 1500, "the snapshot reads as many as this host keeps");
-	assert.equal(snapshotCalls[0].mirror, true);
 	assert.equal(logs.find((l) => l.event === "worker_started").runMirrorMaxRuns, 1500);
 
 	// Unset: the default, the cap every writer before this setting trimmed to.
@@ -3730,7 +3456,7 @@ test("one debounce, shared: the 150ms literal is written once (issue #386)", asy
 	}
 });
 
-test("all SEVEN live-edit watches apply the boot-race rule, not just the one with an end-to-end test (#386, #503, #499, #504)", () => {
+test("all SIX live-edit watches apply the boot-race rule, not just the one with an end-to-end test (#386, #503, #499)", () => {
 	// BY SHAPE, and the limit is the point rather than an apology. The rule itself is pinned behaviourally
 	// above, and the receiver's watch is driven end to end through its read seam. The worker's three are
 	// private functions armed from deep inside `startWorker`, so driving each would mean three full worker
@@ -3750,9 +3476,9 @@ test("all SEVEN live-edit watches apply the boot-race rule, not just the one wit
 	// (read again, as the message below asks, and its caller is checked at the end).
 	// Six since issue #499 added the projects watch, read again: it reads before arming and compares after, and its caller
 	// is checked at the end with the scoped-limits one.
-	// Seven since issue #504 part B added the envelope watch, read again: it reads before arming and compares after, its
-	// seam defaults to the real watcher, and its caller hands it the envelope's own boot baseline (checked at the end).
-	assert.deepEqual(armings, [["worker/src/start.mjs", 6], ["receiver/src/start.mjs", 1]], "seven watches, and if that count moves this test must be read again rather than updated");
+	// Six in the worker since C2 removed the envelope watch: triggers, pause windows, scoped limits, projects,
+	// model endpoints and the receiver's one.
+	assert.deepEqual(armings, [["worker/src/start.mjs", 5], ["receiver/src/start.mjs", 1]], "six watches, and if that count moves this test must be read again rather than updated");
 	for (const [name, src] of Object.entries(sources)) {
 		const arms = (src.match(/handles\.watcher = watch(?:Fn)?\(/g) ?? []).length;
 		assert.equal((src.match(/readBeforeArming\(/g) ?? []).length, arms, `${name}: every watch reads before it arms`);
@@ -3780,8 +3506,7 @@ test("all SEVEN live-edit watches apply the boot-race rule, not just the one wit
 	assert.match(worker, /watchFs = watch,/, "the fs.watch seam defaults to the real one");
 	assert.match(worker, /watchScopedLimits: watchScopedLimitsFn = watchScopedLimitsFile,/, "the seam defaults to the real watcher");
 	assert.match(worker, /watchProjects: watchProjectsFn = watchProjectsFile,/, "the projects seam defaults to the real watcher");
-	assert.match(worker, /watchEnvelope: watchEnvelopeFn = watchEnvelopeFile,/, "the envelope seam defaults to the real watcher");
-	for (const [fn, key] of [["watchTriggersFile", "triggers"], ["watchPauseWindowsFile", "pauseWindows"], ["watchScopedLimitsFn", "scopedLimits"], ["watchProjectsFn", "projects"], ["watchEnvelopeFn", "envelope"]]) {
+	for (const [fn, key] of [["watchTriggersFile", "triggers"], ["watchPauseWindowsFile", "pauseWindows"], ["watchScopedLimitsFn", "scopedLimits"], ["watchProjectsFn", "projects"]]) {
 		const call = worker.match(new RegExp(`extraClosers\\.push\\(${fn}\\(([^;]*)\\)\\);`));
 		assert.ok(call, `${fn} is armed from startWorker`);
 		assert.match(call[1], new RegExp(`atBoot\\.${key}\\b`), `${fn} is handed the boot baseline of ITS OWN file, not another's`);
@@ -4259,17 +3984,11 @@ test("the host row's fpProjects follows the LIVE projects ref through a reload (
 	assert.equal(fields.fpProjects(), second, "the reloaded projects, on the next beat's read");
 });
 
-test("the host row's fpTok is the token fingerprint of the live settings and scoped-limits rows, re-read on every beat (#501 part 6)", { skip }, async () => {
+test("C2: the host heartbeat carries no token fingerprint any more", { skip }, async () => {
 	const { makeHostRegistry } = await import("../src/host-registry.mjs");
-	const { tokenFingerprint } = await import("../src/token-fingerprint.mjs");
-	const { parseScopedLimits } = await import("../src/scoped-limits.mjs");
-	const dir = tempDir("pi-fp-usd-wiring-");
-	const settingsFile = join(dir, "settings.json");
-	const limitsFile = join(dir, "scoped-limits.json");
-	writeFileSync(limitsFile, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 5 }, { scope: "model:openai/gpt-4o", weekTokens: 9 }] }));
 	let fields = null;
 	await runStart({
-		env: { VALKEY_URL, PI_WORKER_NAME: "fp-usd-1", PI_MAX_TOKENS: "2", PI_DAILY_TOKEN_CAP: "20", PI_SETTINGS_FILE: settingsFile, PI_SCOPED_LIMITS_FILE: limitsFile, PI_ALLOWED_MODELS: "anthropic/claude-sonnet-5-5" },
+		env: { VALKEY_URL, PI_WORKER_NAME: "fp-c2-1" },
 		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
 		makeHost: () => fakeHost(),
 		makeHostRegistry: (args) => {
@@ -4277,16 +3996,7 @@ test("the host row's fpTok is the token fingerprint of the live settings and sco
 			return { ...real, start: async (f, opts) => ((fields = f), real.start(f, opts)) };
 		},
 	});
-	assert.equal(typeof fields?.fpTok, "function", "a thunk, so a peer compares against what this host believes now");
-	const rows = parseScopedLimits(readFileSync(limitsFile, "utf8"), limitsFile);
-	const LIST = ["anthropic/claude-sonnet-5-5"];
-	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, LIST), "env settings and the token rows");
-	assert.notEqual(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, []), "the rows are in it");
-	assert.notEqual(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, null), "and the env list: with it, a job without its own list reserves in no model row here");
-	writeFileSync(settingsFile, JSON.stringify({ weeklyTokenCap: 40 }));
-	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20", weeklyTokenCap: 40 }, rows, LIST), "an overlay edit shows on the next beat, merged over env");
-	writeFileSync(settingsFile, "{ not json");
-	assert.equal(fields.fpTok(), tokenFingerprint({ maxTokens: "2", dailyTokenCap: "20" }, rows, LIST), "an invalid overlay falls back to env, as the slot count does");
+	assert.equal(fields?.fpTok, undefined, "the token fingerprint went with the token budgets");
 });
 
 test("the per-job gate carries the daemon's CPU count beside the user, from the same facts read, for the --cpus ceiling (issue #596)", { skip }, async () => {
@@ -4935,7 +4645,8 @@ test("issue #645: with a store, the boot builds every durable dep and hands it t
 	assert.equal(ck.redis, captured.redis, "the pointer goes through the shared client");
 	assert.equal(ck.hostName, started.host, "the host the manifest and the pointer name is this worker's");
 	assert.equal(ck.hostQueue, null, "no declared name, no host queue: a recovery goes to the shared queue");
-	assert.equal(typeof deps.runBudgetLedger?.recordHold, "function", "the per-run ledger");
+	assert.equal(deps.runBudgetLedger, undefined, "C2: the run budget ledger is gone");
+	assert.equal(typeof deps.runAttempts?.nextSeq, "function", "the per-run container sequence replaces it");
 	assert.deepEqual(await deps.readCheckpointPointer({ runId: "gh-1" }), { v: 1, host: "h" });
 	assert.deepEqual(t.pointerReads, ["gh-1"]);
 	assert.equal(t.enqueuerArgs.length, 1);
@@ -5746,7 +5457,7 @@ test("terminal approval failure closes only the exhausted job's claim; an interm
 test("Zero touch boot shares tracking and private grouping dependencies, rereads capture opt-in and stamps analysis history", { skip }, async () => {
 	const dir = tempDir("zero-touch-start-");
 	const triggersPath = join(dir, "triggers.json");
-	const grouping = { capture: true, model: "openrouter/typesafe/jev-1.13", maxTokens: 50000, names: {} };
+	const grouping = { capture: true, model: "openrouter/typesafe/jev-1.13", names: {} };
 	writeFileSync(triggersPath, JSON.stringify({ triggers: [], zeroTouch: grouping }));
 	const nowMs = Date.UTC(2026, 9, 30, 12);
 	const calls = [], written = [];

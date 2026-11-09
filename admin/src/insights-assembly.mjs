@@ -10,15 +10,11 @@
  * export), the same injectable shape `costs.mjs`'s pure folds take. The deployment's environment is a parameter too
  * (`envFn`): the extension reads it through the deployment pointer, which is its own process state.
  */
-import { basename } from "node:path";
 import {
   readSchedulers,
-  readBudget,
-  readTokenWindows,
   readSettingsView,
   readTriggers,
   readScopedLimits,
-  readScopedBudget,
   readSizeSuggestions,
   hostBudgetsOf,
   readHosts,
@@ -33,26 +29,14 @@ import {
   observedChainEdges,
   collectGraphInputs,
   forgeRepoTargets,
-  readEnvelope,
-  readAllocations,
-  envelopeJobCap,
 } from "./read-model.mjs";
 import { buildGraphModel } from "./graph-model.mjs";
 import { readGraphTriggers } from "./graph-triggers.mjs";
-import { INSIGHTS_SPLIT_REFUSALS } from "./insights-html.mjs";
 import { costsSinceMs, foldCosts, foldTriggerCosts, recordInProject, recordInRepo, matchesGlob, meteredRunTokens, repoKeyOf, projectKeyOf, refusedBeforeSpend } from "./costs.mjs";
-import { sizeBits, outsideEdit, splitTotalTokens } from "./render.mjs";
-import { escapeInterpreted } from "./panel.mjs";
-
-import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { SUGGEST_WINDOW_DAYS } from "@edgehero/pi-dispatch/size-suggest";
 import { coverageNotes, historyNotes, hostCaveats, hostFacts, noRunText, notSharedWhy } from "@edgehero/pi-dispatch/capacity-cli";
-// The worker's OWN window classifier (the same one reserveBudget enforces), so the budget states the
-// insights payload carries are words the page never derives and the panel and enforcement cannot drift.
 import { parseHostBackends } from "@edgehero/pi-dispatch/backends";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "@edgehero/pi-dispatch/config";
-import { parseLiveJobs, parseJobsMore } from "@edgehero/pi-dispatch/live-jobs";
-import { deploymentTokenCaps } from "./token-windows.mjs";
 import { fromNewerRelease, readableRecords } from "./newer-release.mjs";
 
 /** The environment a caller that names none reads: this process's own. */
@@ -65,29 +49,6 @@ function needPricing(pricing) {
   if (pricing === null || typeof pricing !== "object" || typeof pricing.piAiVersion !== "function") {
     throw new TypeError("the insights assembly needs the pricing façade ({ listPricedModels, getPricedModel, isZeroRated, reprice, piAiVersion })");
   }
-}
-
-// TEST-ONLY seams for the allocation reads (the insights split here, and the extension's allocation tools and commands,
-// which import these two): the Valkey client factory and the clock. Production leaves both unset, so the read-model's
-// real defaults (makeRedisClient, the wall clock) apply.
-let allocSeams = {};
-/** TEST-ONLY: inject the allocation reads' Valkey client factory, clock and key prefix; `{}` restores the defaults. */
-export function _setAllocationSeamsForTests(seams) {
-  allocSeams = seams ?? {};
-}
-export function allocRedis() {
-  return { ...(allocSeams.redisFn ? { redisFn: allocSeams.redisFn } : {}), ...(allocSeams.prefix ? { prefix: allocSeams.prefix } : {}) };
-}
-export function allocNow() {
-  return allocSeams.now ? allocSeams.now() : new Date();
-}
-
-/** Why there is no envelope to work with, in one sentence (the read's own words, escaped). */
-export function envelopeProblem(r) {
-  if (r.unset) return "PI_ENVELOPE_FILE is unset: there is no envelope, so delegation is off";
-  if (r.missing) return "the envelope file (PI_ENVELOPE_FILE) does not exist";
-  if (r.unreadable) return `the envelope file (PI_ENVELOPE_FILE) could not be read (${r.unreadable})`;
-  return `the envelope file does not load: ${escapeInterpreted(String(r.invalid ?? "unknown"))}`;
 }
 
 /**
@@ -172,155 +133,6 @@ export async function assembleGraph(paths, { pricing, project, fullPaths = false
     nowMs,
     triggerCosts: foldTriggerCosts({ records: recs, subscriptions: Array.isArray(subsView?.subscriptions) ? subsView.subscriptions : [], pricing, triggerJoin }),
   });
-}
-
-/** A positive integer or null -- the shape every overlay cap takes on its way into the payload. */
-function posIntOrNull(v) {
-  return Number.isInteger(v) && v > 0 ? v : null;
-}
-
-/**
- * The budget slice of the insights payload (issue #181): the daily token counter and the token caps, with the token
- * state computed HERE by the worker's own "over at the cap" rule. Job-count windows (day/week/month) and the soft-hold
- * band are gone with the job-start caps (C1): this slice now carries `tokens` only -- `{ spent, cap, state, maxTokens }`
- * -- plus the scoped rows' token windows. States ride the payload as WORDS the page never derives: the artifact builder
- * cannot load the worker (its import allowlist is the two pure siblings), and duplicating threshold arithmetic behind a
- * parity test would put policy in two places. Caps come from the settings overlay ALONE -- a cap the overlay does not
- * set is null unless the console passes its deployment environment; then the worker precedence applies. The static
- * export keeps its former overlay-only contract.
- * `readBudget` is GET-only (CONST-BUDGET-BEFORE-TOKENS: observing the budget spends nothing). Exported with a Valkey
- * client seam (`redisFn`) for its tests, as `assembleAllocationView` is.
- */
-export async function assembleBudgetView(paths, { redisFn, env, nowMs = Date.now() } = {}) {
-  const raw = await readBudget({ url: paths.valkeyUrl, redisFn, now: new Date(nowMs) });
-  const view = readSettingsView({ settingsFile: paths.settingsFile });
-  const overlay = view && !view.invalid && view.overlay ? { ...view.overlay } : {};
-  if (env) {
-    const keys = { dailyTokenCap: "PI_DAILY_TOKEN_CAP", maxTokens: "PI_MAX_TOKENS" };
-    for (const [key, variable] of Object.entries(keys)) if (overlay[key] === undefined && /^\d+$/.test(env[variable] ?? "")) overlay[key] = Number(env[variable]);
-  }
-  const unreachable = raw?.unreachable ? String(raw.unreachable) : null;
-  const tokensSpent = unreachable === null ? Number(raw.tokensToday ?? 0) : null;
-  const tokenCap = posIntOrNull(overlay.dailyTokenCap);
-  const tokenState =
-    tokenCap !== null && tokensSpent !== null
-      ? tokensSpent >= tokenCap
-        ? "over"
-        : "ok"
-      : "ok";
-  // The scoped rows (issue #242): the configured limits joined to their live counters. Concurrency is
-  // CONFIG-only here -- per-scope in-flight is worker-process state no redis read can see, and the panel
-  // never invents a number. The job-count windows are gone with the job-start caps (C1); a row's token
-  // caps are compared inline below (tokens have no soft hold: equality with the cap is already over).
-  const limitsView = readScopedLimits({ scopedLimitsPath: paths.scopedLimitsPath });
-  const limits = Array.isArray(limitsView?.limits) ? limitsView.limits : [];
-  const scopedCounters = limits.length > 0 ? await readScopedBudget({ url: paths.valkeyUrl, limits, redisFn, now: new Date(nowMs) }) : { rows: [] };
-  const scoped = limits.map((l, i) => {
-    const used = scopedCounters?.rows?.[i] ?? null;
-    // The row's token windows (issue #507), from the `tokensUsed` the same read already returned: a `model:` row, or a
-    // `project:` row with only `weekTokens`, has no other window, and the page drew its scope with no number beside
-    // it. Whole tokens both ways (the cap through the worker's own parser, which reads the file's integer as it is), so
-    // the page formats them exactly. A row's job-count windows are gone with the job-start caps (C1).
-    const usdWin = (field, key) => {
-      let cap = null;
-      try {
-        cap = parseTokenCount(l[field], field);
-      } catch {
-        cap = null; // the shared parser already refused such a file; a hand-built row is skipped, never guessed
-      }
-      if (cap === null) return null;
-      const u = used?.tokensUsed?.[key];
-      return { usedTokens: Number.isSafeInteger(u) && u >= 0 ? u : null, capTokens: cap };
-    };
-    return {
-      scope: l.scope,
-      concurrent: l.concurrent,
-      usd: { day: usdWin("dayTokens", "day"), week: usdWin("weekTokens", "week"), month: usdWin("monthTokens", "month") },
-      // A project row's size (issue #596) in the words the panel and `/dispatch budget` use (`sizeBits`): a size-only
-      // row has no window, and the page drew its scope with nothing beside it.
-      size: sizeBits(l),
-    };
-  });
-  return {
-    unreachable,
-    ...(env ? { windows: await readTokenWindows({ paths, env, now: new Date(nowMs), redisFn }), settingsInvalid: Boolean(view?.invalid), settings: overlay } : {}),
-    tokens: { spent: tokensSpent, cap: tokenCap, state: tokenState, maxTokens: posIntOrNull(overlay.maxTokens) },
-    scoped,
-    scopedInvalid: limitsView?.invalid ? String(limitsView.invalid) : null,
-  };
-}
-
-/**
- * The run-record refusals that belong to the split (issue #507): the page's own list, so the assembler counts exactly
- * the reasons the page draws. `insights-html.test.mjs` holds it to the worker's constants.
- */
-const SPLIT_REFUSALS = INSIGHTS_SPLIT_REFUSALS;
-
-/**
- * The split's counts over the SPEND window (issue #507), from the records the assembler already scanned: governed
- * jobs refused for a reason of the split, by `record.reason`, and what each portfolio run's plan came to, by
- * `record.plan.reason` (an applied plan has none, so it counts as `applied`). Null when the scan could not be read:
- * the page then says "not counted", because a 0 would claim a count nobody made.
- */
-export function splitCounts(records) {
-  if (!Array.isArray(records)) return null;
-  const refusals = Object.fromEntries(SPLIT_REFUSALS.map((r) => [r, 0]));
-  const plans = {};
-  // A newer release's record is not counted (issue #761): its `reason` is core, its `plan` is not, and half a record is
-  // a count nobody made. `newerSkipped` says how many, only when there were any.
-  const { records: readable, newerSkipped } = readableRecords(records);
-  for (const r of readable) {
-    if (typeof r?.reason === "string" && SPLIT_REFUSALS.includes(r.reason)) refusals[r.reason] += 1;
-    const p = r?.plan;
-    if (p !== null && typeof p === "object" && typeof p.outcome === "string") {
-      const key = typeof p.reason === "string" && p.reason !== "" ? p.reason : p.outcome;
-      plans[key] = (plans[key] ?? 0) + 1;
-    }
-  }
-  return { refusals, plans, ...(newerSkipped > 0 ? { newerSkipped } : {}) };
-}
-
-/**
- * The budget split slice of the insights payload (issue #507): the envelope, the applied split and its spend, and the
- * newest `alloc:log` outcomes, through the same `readAllocations` the panel's `b` view and `/dispatch priorities` use,
- * read WITHOUT reasons (a plan's reasons are agent text, and the panel's view is the one place they are drawn). Valkey
- * is read only when an envelope is set. Each row is cut to its enum fields here, so no host name and no reason text
- * reaches a file meant to be shared. A problem text has the envelope path cut to its basename for the same reason,
- * unless an operator asked for `?paths=full`, the page's one opt-in for host paths. The cut is made on the parser's RAW
- * text, before `envelopeProblem` escapes it: a path holding a character the escape rewrites would no longer match.
- * `outsideEdit` is the panel's notice, by its rule, over the same 20 rows. Exported for its tests, as `splitCounts` is: the
- * rest of the insights assembly dials the real queue. `envFn` is the deployment's environment (`processEnv`).
- */
-export async function assembleAllocationView(paths, counts, { fullPaths = false, envFn = processEnv, consoleView = false, role = "viewer", nowMs } = {}) {
-  if (!paths.envelopeFile) return { unset: true };
-  const read = readEnvelope({ envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env: envFn() }) });
-  if (!read.envelope) {
-    const file = String(paths.envelopeFile);
-    const invalid = read.invalid !== undefined && !fullPaths ? String(read.invalid).split(file).join(basename(file)) : read.invalid;
-    return { problem: envelopeProblem({ ...read, invalid }) };
-  }
-  const e = read.envelope;
-  const head = { window: e.window, totalTokens: e.totalTokens, floors: { ...e.floors }, delegation: e.delegation?.enabled === true, ...(consoleView ? { envelope: e, digest: read.digest, file: fullPaths && role === "operator" ? paths.envelopeFile : basename(paths.envelopeFile) } : {}) };
-  const alloc = await readAllocations({ url: paths.valkeyUrl, envelope: e, projects: read.projects, now: nowMs === undefined ? allocNow() : new Date(nowMs), withReasons: consoleView && role === "operator", ...allocRedis() });
-  if (alloc?.unreachable) return { ...head, unreachable: String(alloc.unreachable) };
-  const st = alloc.state ?? null;
-  return {
-    ...head,
-    // The split's own total beside the split (issue #507, `splitTotalTokens`); the file's rides beside it for the
-    // mismatch line, which says this host's file holds another total.
-    totalTokens: splitTotalTokens(st, e.totalTokens),
-    fileTotalTokens: e.totalTokens,
-    stateProblem: alloc.stateProblem ?? null,
-    state: st && { ...(consoleView ? { weights: { ...(st.weights ?? {}) }, jobId: st.jobId ?? null, triggerId: st.triggerId ?? null, ...(role === "operator" ? { reasons: { ...(st.reasons ?? {}) } } : {}) } : {}), planId: st.planId ?? null, writer: st.writer ?? null, appliedAt: st.appliedAt ?? null, validUntil: st.validUntil ?? null, clamped: st.clamped === true, allocations: { ...(st.allocations ?? {}) }, unallocated: st.unallocated ?? null },
-    mismatch: st !== null && st.envelopeDigest !== read.digest,
-    outsideEdit: outsideEdit(alloc.log, st?.envelopeDigest),
-    spend: {
-      deployment: alloc.spend?.deployment?.tokens ?? null,
-      projects: Object.fromEntries(Object.entries(alloc.spend?.projects ?? {}).map(([id, v]) => [id, v?.tokens ?? null])),
-    },
-    log: (Array.isArray(alloc.log) ? alloc.log : []).slice(0, 20).map((h) => ({ at: h.at, writer: h.writer, outcome: h.outcome, reason: h.reason ?? null, planId: h.planId ?? null, ...(consoleView ? { host: h.host ?? null, weights: h.weights ?? null, jobId: h.jobId ?? null, triggerId: h.triggerId ?? null } : {}) })),
-    counts,
-  };
 }
 
 /**
@@ -408,22 +220,17 @@ export async function assembleCapacityView(paths, window, nowMs, { readCapacityF
  * window -- the artifact states both windows, and a badge whose window differed from the table
  * beside it would be the quiet inconsistency this surface exists to kill.
  * The whole payload the console's spend screen draws, for `window` (a `COSTS_WINDOWS` word) at the instant `nowMs`.
- * `pricing` is the façade (`needPricing`), `fullPaths` the page's opt-in for host paths (the split's problem text),
- * `envFn` the deployment's environment (`processEnv`).
+ * `pricing` is the façade (`needPricing`), `envFn` the deployment's environment (`processEnv`). There is no budget or
+ * allocation slice: token budgets and the split are gone (C2), so the spend is the records' own.
  */
-export async function assembleInsights(paths, window, { pricing, fullPaths = false, nowMs = Date.now(), envFn = processEnv } = {}) {
+export async function assembleInsights(paths, window, { pricing, nowMs = Date.now(), envFn = processEnv } = {}) {
   needPricing(pricing);
   const graph = await assembleGraph(paths, { pricing });
   const costs = assembleCosts(paths, window, { pricing });
-  // The budget slice rides BOTH return shapes: the caps are the operator's one real lever on cost,
-  // and the lever does not depend on the spend scan being readable.
-  const budget = await assembleBudgetView(paths);
   if (costs?.unreachable) {
-    // The split too, for the budget's reason; its counts are the records', so here they were not made.
-    const allocation = await assembleAllocationView(paths, null, { fullPaths, envFn });
     const sizing = await assembleSizingView(paths, nowMs, { envFn });
     const capacity = await assembleCapacityView(paths, window, nowMs, { envFn });
-    return { graph, fold: null, costsUnreachable: String(costs.unreachable), window, costByTrigger: null, budget, allocation, sizing, capacity };
+    return { graph, fold: null, costsUnreachable: String(costs.unreachable), window, costByTrigger: null, sizing, capacity };
   }
   const fold = costs?.fold ?? null;
   // Re-fold the spend map at the requested window so badge and table agree. assembleCosts already
@@ -443,10 +250,9 @@ export async function assembleInsights(paths, window, { pricing, fullPaths = fal
   // name; members are not carried, the page shows spend by id.
   const pv = readProjects({ projectsPath: paths.projectsFile });
   const projects = Array.isArray(pv?.projects) ? pv.projects.map((x) => ({ id: x.id, name: x.name })) : [];
-  const allocation = await assembleAllocationView(paths, splitCounts(records), { fullPaths, envFn });
   const sizing = await assembleSizingView(paths, nowMs, { envFn });
   const capacity = await assembleCapacityView(paths, window, nowMs, { envFn });
-  return { graph, fold, costsUnreachable: null, window, costByTrigger, budget, projects, allocation, sizing, capacity };
+  return { graph, fold, costsUnreachable: null, window, costByTrigger, projects, sizing, capacity };
 }
 
 /**
@@ -487,38 +293,12 @@ function newerInScope(records, { nowMs, project = null }) {
   return records.filter((r) => fromNewerRelease(r) && recordInstant(r) <= nowMs && (!project || recordInProject(r, project))).length;
 }
 
-/** A live row can omit money because it predates the field, not because every job reserved zero. */
-export function heldMoneyOf(hosts, { nowMs, project = null } = {}) {
-  const day = Math.floor(nowMs / INSIGHTS_DAY_MS);
-  let heldTokens = 0;
-  let heldJobs = 0;
-  const unknownHosts = [];
-  for (const host of Array.isArray(hosts) ? hosts : []) {
-    const parsed = parseLiveJobs(host.jobs);
-    const more = parseJobsMore(host.jobsMore);
-    let unknown = parsed.jobs === null || parsed.dropped > 0 || more === null || more > 0;
-    const seen = new Set();
-    for (const job of parsed.jobs ?? []) {
-      if (project && job.p !== project) continue;
-      if (seen.has(job.id)) continue;
-      seen.add(job.id);
-      if (!safeAmount(job.h) || !safeAmount(job.ha)) {
-        unknown = true;
-        continue;
-      }
-      if (Math.floor(job.ha / INSIGHTS_DAY_MS) !== day) continue;
-      heldTokens += job.h;
-      if (job.h > 0) heldJobs++;
-    }
-    if (unknown) unknownHosts.push(host.name);
-  }
-  return { heldTokens: safeAmount(heldTokens) ? heldTokens : null, heldJobs, unknownHosts };
-}
-
 /**
  * One run's settled tokens (DES-TOKEN-FOLD-BY-SCAN): the worker's own settlement when it wrote one
  * (`tokensWindows.settledTokens`, refunds included, `unreserved` excluded as the worker's honest 0),
- * else the meter's recorded total. A run a completeness counter floors is `floor: true`; one the
+ * else the meter's recorded total. `tokensWindows` is an OLD-record input only (C2): token windows and
+ * reservations are gone, so a record written now carries none, and no hold is ever added here.
+ * A run a completeness counter floors is `floor: true`; one the
  * fallback meter wrote is `estimated`. There is no price to fall back to and no plan counterfactual
  * to reprice at: prices died with the cost era (DES-TOKEN-RESERVE-AND-SETTLE).
  */
@@ -557,38 +337,23 @@ function finishSpend(sum) {
   return sum;
 }
 
-/** The named windows stay independent of the chart filter: today's counter is always today's counter. */
-export function spendSummaryOf({ records, hosts, budget, project = null, nowMs, jobCapTokens = null, subscriptions = [], pricing }) {
-  // The budget view's windows are `readTokenWindows`' `{ rows }` (the panel's own reader), so the counters the
-  // deployment configured ride in the same shape the framed rows show; a missing section is simply no windows.
-  const rows = budget?.windows?.rows ?? [];
-  const scoped = project ? rows.filter((r) => r.ledger === "scope" && r.name === `project:${project}`) : [];
-  const deployment = rows.filter((r) => r.ledger === "deployment");
-  const window = (kind) => {
-    const own = scoped.find((r) => r.window === kind);
-    const row = own ?? deployment.find((r) => r.window === kind);
-    return { usedTokens: row?.counterTokens ?? null, capTokens: row?.capTokens ?? null, basis: own ? `project:${project}` : "deployment", projectFallback: Boolean(project && !own) };
-  };
-  // A newer release's record carries no money this build can read (issue #761); `newerSkipped` counts it.
+/**
+ * The day's ACTUAL spend, folded from the run records (C2: token budgets, counters and holds are gone). `records` is
+ * the store scanned for the day, already narrowed to `project` when one is selected; the average is over the day's
+ * metered runs. A newer release's record is left out and counted in `newerSkipped` (issue #761).
+ */
+export function spendSummaryOf({ records, project = null, nowMs, subscriptions = [], pricing }) {
   const { records: all, newerSkipped } = readableRecords(records);
   const dayStart = Math.floor(nowMs / INSIGHTS_DAY_MS) * INSIGHTS_DAY_MS;
   const settled = spendAccumulator(Array.isArray(records));
   for (const r of all) if (recordInstant(r) >= dayStart && recordInstant(r) <= nowMs) addRecordSpend(settled, r, { subscriptions, pricing });
   finishSpend(settled);
-  const held = heldMoneyOf(hosts, { nowMs, project: scoped.some((r) => r.window === "day") ? project : null });
-  const today = window("day");
-  const counterConfigured = rows.some((r) => r.window === "day" && (r.ledger === "deployment" || r.ledger === "scope" && r.name === `project:${project}`));
-  const remainder = today.usedTokens !== null && held.heldTokens !== null && settled.ledgerTokens !== null ? today.usedTokens - settled.ledgerTokens - held.heldTokens : null;
-  if (!counterConfigured) today.usedTokens = settled.settledTokens !== null && held.heldTokens !== null && safeAmount(settled.settledTokens + held.heldTokens) ? settled.settledTokens + held.heldTokens : null;
   const measured = all.filter((r) => recordInstant(r) >= nowMs - INSIGHTS_DAY_MS && recordInstant(r) <= nowMs).map((r) => meteredRunTokens(r)).filter((n) => n !== null);
   return {
-    basis: scoped.length > 0 ? `project:${project}` : "deployment",
-    projectFallback: Boolean(project && scoped.length === 0),
-    week: window("week"),
-    today: { ...today, ...settled, counterConfigured, counterAvailable: counterConfigured && today.usedTokens !== null, usedSource: counterConfigured ? today.usedTokens !== null ? "counter" : "unknown-counter" : "records", usedFloor: !counterConfigured && (settled.settledFloor || held.unknownHosts.length > 0), usedEstimated: !counterConfigured && settled.settledEstimated, ...held, unattributedTokens: remainder, reconciliationMismatch: remainder !== null && remainder < 0 },
-    tokens: { used: budget?.tokens?.spent ?? null, cap: budget?.tokens?.cap ?? null },
+    basis: project ? `project:${project}` : "deployment",
+    // `usedTokens` is the records' own settled total: there is no counter to prefer, and no hold to add back.
+    today: { ...settled, usedTokens: settled.settledTokens, usedSource: "records", usedFloor: settled.settledFloor, usedEstimated: settled.settledEstimated },
     average: { costTokens: measured.length > 0 ? Number((measured.reduce((sum, n) => sum + BigInt(n), 0n) + BigInt(Math.floor(measured.length / 2))) / BigInt(measured.length)) : null, runs: measured.length, largestTokens: measured.length > 0 ? Math.max(...measured) : null },
-    jobCapTokens,
     ...(newerSkipped > 0 ? { newerSkipped } : {}),
   };
 }
@@ -598,10 +363,10 @@ export function spendSummaryOf({ records, hosts, budget, project = null, nowMs, 
  * Breakdown and an operator's plan text is never even read for a viewer. The old static export stays unchanged.
  * `reads` injects the I/O boundaries for tests; every fallback names its failed slice instead of inventing zero.
  */
-export async function assembleInsightsView(paths, window, { view = "spend", project = null, role = "viewer", fullPaths = false, pricing, nowMs = Date.now(), envFn = processEnv, reads = {} } = {}) {
+export async function assembleInsightsView(paths, window, { view = "spend", project = null, pricing, nowMs = Date.now(), envFn = processEnv, reads = {} } = {}) {
   needPricing(pricing);
-  const io = { costs: assembleCosts, graph: assembleGraph, budget: assembleBudgetView, allocation: assembleAllocationView, capacity: assembleCapacityView, sizing: assembleSizingView, hosts: readHosts, projects: readProjects, scan: scanRunRecords, subscriptions: readSubscriptions, settings: readSettingsView, ...reads };
-  const opts = { pricing, project, nowMs, envFn, fullPaths: role === "operator" && fullPaths };
+  const io = { costs: assembleCosts, graph: assembleGraph, capacity: assembleCapacityView, sizing: assembleSizingView, hosts: readHosts, projects: readProjects, scan: scanRunRecords, subscriptions: readSubscriptions, settings: readSettingsView, ...reads };
+  const opts = { pricing, project, nowMs, envFn };
   const out = { window, view, project, nowMs };
   if (view === "capacity") {
     out.capacity = await io.capacity(paths, window, nowMs, { envFn, consoleDetails: true });
@@ -631,20 +396,6 @@ export async function assembleInsightsView(paths, window, { view = "spend", proj
     out.costsUnreachable = costs?.unreachable ? String(costs.unreachable) : null;
     return costs;
   };
-  if (view === "budget-split") {
-    out.allocation = await io.allocation(paths, null, { consoleView: true, role, fullPaths: role === "operator" && fullPaths, envFn, nowMs });
-    const hosts = await io.hosts({ url: paths.valkeyUrl, now: () => nowMs });
-    out.hosts = Array.isArray(hosts?.hosts) ? hosts.hosts : [];
-    if (hosts?.unreachable) out.hostsUnreadable = true;
-    const sinceMs = costsSinceMs(out.allocation.window === "day" ? "24h" : out.allocation.window === "week" ? "week" : "mtd", nowMs);
-    const start = out.allocation.window === "day" ? Math.floor(nowMs / INSIGHTS_DAY_MS) * INSIGHTS_DAY_MS : sinceMs;
-    const records = io.scan({ logsDir: paths.logsDir, sinceMs: start, nowMs });
-    out.allocation.counts = splitCounts(records);
-    const writer = Array.isArray(records) && records.find((r) => r.jobId === out.allocation.state?.jobId);
-    if (writer && out.allocation.state) Object.assign(out.allocation.state, { provider: writer.provider ?? null, model: writer.model ?? null });
-    out.allocation.hosts = out.hosts.map((h) => ({ name: h.name, fpEnvelope: h.fpEnvelope ?? null }));
-    return out;
-  }
   const costs = loadCosts();
   if (view === "flows") {
     out.graph = await io.graph(paths, opts);
@@ -670,38 +421,27 @@ export async function assembleInsightsView(paths, window, { view = "spend", proj
   const env = envFn();
   const subs = io.subscriptions({ subscriptionsPath: paths.subscriptionsPath });
   const subscriptions = subs?.subscriptions ?? [];
-  out.budget = await io.budget(paths, { env, nowMs });
-  const hosts = await io.hosts({ url: paths.valkeyUrl, now: () => nowMs });
-  out.hosts = Array.isArray(hosts?.hosts) ? hosts.hosts : [];
-  if (hosts?.unreachable) out.hostsUnreadable = true;
   const settings = io.settings({ settingsFile: paths.settingsFile });
+  // The worker's own read: `{ invalid }` (including a retired token key) or `{ newer }` is carried, never papered over
+  // with a default cap. There is no maxTokens to show: the setting is refused by the worker (C2).
   const overlay = settings?.overlay ?? {};
-  const { jobCapTokens } = deploymentTokenCaps(overlay, env);
-  out.settings = { ...overlay, provider: overlay.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: overlay.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxTokens: jobCapTokens };
+  out.settings = { ...overlay, provider: overlay.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: overlay.model ?? env.PI_MODEL ?? DEFAULT_MODEL };
+  if (settings?.invalid) out.settingsInvalid = String(settings.invalid);
   const scannedAll = io.scan({ logsDir: paths.logsDir, sinceMs: Math.min(costsSinceMs("week", nowMs), nowMs - INSIGHTS_DAY_MS), nowMs });
   // Without a newer release's records (issue #761): every read below goes past the stable core (money, model, trigger).
   // `spendSummaryOf` would leave them out anyway; leaving them out here keeps the loops below to readable ones too.
   const scanned = Array.isArray(scannedAll) ? readableRecords(scannedAll).records : scannedAll;
-  // A selected project's charts can coexist with deployment caps. For that fallback the KPI records must also be
-  // deployment-wide; otherwise settled and held would describe different populations beside the same counter.
-  const hasProjectWindow = project && (out.budget?.windows?.rows ?? []).some((r) => r.ledger === "scope" && r.name === `project:${project}` && r.window === "day");
-  const all = Array.isArray(scanned) ? inProject(scanned, hasProjectWindow ? project : null) : null;
-  out.spend = spendSummaryOf({ records: all, hosts: out.hosts, budget: out.budget, project, nowMs, jobCapTokens, subscriptions, pricing });
+  // Records are the only population: no token window can scope the headline differently from the charts.
+  const all = Array.isArray(scanned) ? inProject(scanned, project) : null;
+  out.spend = spendSummaryOf({ records: all, project, nowMs, subscriptions, pricing });
   // The selected project's newer records up to now, as `dollars.newerSkipped` counts them, whichever population the
   // headline falls back to: the charts and the recent fold beside it follow the project filter.
   const newerSkipped = Array.isArray(scannedAll) ? newerInScope(scannedAll, { nowMs, project: project || null }) : 0;
   if (newerSkipped > 0) out.spend.newerSkipped = newerSkipped;
-  if (hosts?.unreachable) {
-    out.spend.today.heldTokens = null;
-    out.spend.today.unattributedTokens = null;
-    out.spend.today.reconciliationMismatch = false;
-    out.spend.today.hostsUnreadable = true;
-  }
   const recent = Array.isArray(scanned) ? inProject(scanned.filter((r) => recordInstant(r) >= nowMs - INSIGHTS_DAY_MS && recordInstant(r) <= nowMs), project) : [];
   out.recent24h = Array.isArray(scanned) ? foldCosts({ records: recent, subscriptions: subs?.subscriptions ?? [], pricing, nowMs, piAiPin: pricing.piAiVersion(), sinceMs: nowMs - INSIGHTS_DAY_MS }) : null;
-  // The chart follows the project filter even when the headline falls back to deployment windows.
-  const chartHeld = hosts?.unreachable ? null : heldMoneyOf(out.hosts, { nowMs, project }).heldTokens;
-  Object.assign(out.spend, spendChartsOf({ records: costs?.records, sinceMs: costsSinceMs(window, nowMs), nowMs, jobCapTokens, subscriptions, pricing, heldTokens: chartHeld }));
+  // The chart follows the same project filter the headline does.
+  Object.assign(out.spend, spendChartsOf({ records: costs?.records, sinceMs: costsSinceMs(window, nowMs), nowMs, subscriptions, pricing }));
   const choices = new Map();
   const choice = (provider, model) => {
     if (typeof provider !== "string" || typeof model !== "string") return;
@@ -729,19 +469,17 @@ export async function assembleInsightsView(paths, window, { view = "spend", proj
     const trigger = Number.isInteger(r.triggerIndex) ? `row ${r.triggerIndex + 1}` : r.triggerId ?? null;
     if (trigger && !(out.triggersByModel[key] ?? []).includes(trigger)) (out.triggersByModel[key] ??= []).push(trigger);
   }
-  out.allocation = await io.allocation(paths, null, { consoleView: true, role: "viewer", fullPaths: role === "operator" && fullPaths, envFn, nowMs });
-  const writer = Array.isArray(scanned) && scanned.find((r) => r.jobId === out.allocation.state?.jobId);
-  if (writer && out.allocation.state) Object.assign(out.allocation.state, { provider: writer.provider ?? null, model: writer.model ?? null });
   return out;
 }
 
-/** Daily settled charges and equal cost bins retain their own source, rather than borrowing fold-time plan prices. */
-export function spendChartsOf({ records, sinceMs, nowMs, jobCapTokens, subscriptions = [], pricing, heldTokens = null }) {
+/** Daily settled charges from the records, with the metered run totals behind the range facts. No held series: a hold
+ * was a token reservation, and reservations are gone (C2). */
+export function spendChartsOf({ records, sinceMs, nowMs, subscriptions = [], pricing }) {
   const days = new Map();
   const today = new Date(nowMs).toISOString().slice(0, 10);
   for (let at = Math.floor(sinceMs / INSIGHTS_DAY_MS) * INSIGHTS_DAY_MS; at <= nowMs; at += INSIGHTS_DAY_MS) {
     const date = new Date(at).toISOString().slice(0, 10);
-    days.set(date, { date, ...spendAccumulator(Array.isArray(records)), heldTokens: date === today ? heldTokens : 0, today: date === today });
+    days.set(date, { date, ...spendAccumulator(Array.isArray(records)), today: date === today });
   }
   const costs = [];
   // A newer release's record carries no money this build can read (issue #761): skipped, as `spendSummaryOf` skips it.
@@ -753,8 +491,6 @@ export function spendChartsOf({ records, sinceMs, nowMs, jobCapTokens, subscript
     const cost = meteredRunTokens(r);
     if (cost !== null) costs.push(cost);
   }
-  const histogram = safeAmount(jobCapTokens) && jobCapTokens > 0 ? Array.from({ length: 10 }, (_, i) => ({ fromTokens: i * jobCapTokens / 10, toTokens: (i + 1) * jobCapTokens / 10, runs: 0 })) : [];
-  for (const cost of costs) if (histogram.length) histogram[Math.min(histogram.length - 1, Math.floor(cost * histogram.length / jobCapTokens))].runs++;
   for (const day of days.values()) finishSpend(day);
-  return { daily: [...days.values()], histogram, largestRangeTokens: costs.length ? Math.max(...costs) : null, meteredRangeRuns: costs.length };
+  return { daily: [...days.values()], largestRangeTokens: costs.length ? Math.max(...costs) : null, meteredRangeRuns: costs.length };
 }

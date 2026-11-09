@@ -38,11 +38,11 @@ export function validateAnswerRules(value) {
 	if (!Array.isArray(value) || value.length > 100) fail("answerRules must be an array of at most 100 reviewed rules");
 	const ids = new Set(), claimed = new Set();
 	for (const r of value) {
-		if (!only(r, ["id", "projects", "categories", "confidence", "mode", "flow", "model", "decisionModel", "maxTokens"]) || !ANSWER_ID_RE.test(r.id ?? "") || ids.has(r.id)) fail("answerRules requires unique rule ids and only declared fields");
+		if (!only(r, ["id", "projects", "categories", "confidence", "mode", "flow", "model", "decisionModel"]) || !ANSWER_ID_RE.test(r.id ?? "") || ids.has(r.id)) fail("answerRules requires unique rule ids and only declared fields");
 		if (!projects(r.projects) || r.projects.some(p => claimed.has(p))) fail("answerRules projects must be valid, unique and belong to at most one rule");
 		if (!Array.isArray(r.categories) || !r.categories.length || new Set(r.categories).size !== r.categories.length || r.categories.some(c => !ANSWER_CATEGORIES.includes(c))) fail("answerRules categories are convention, how-to and decided");
 		if (typeof r.confidence !== "number" || !Number.isFinite(r.confidence) || r.confidence <= 0.5 || r.confidence > 1) fail("answerRules confidence must be above 0.5 and at most 1");
-		if (!["classify", "draft"].includes(r.mode) || typeof r.flow !== "string" || !SKILL_NAME_RE.test(r.flow) || !model(r.model) || !model(r.decisionModel) || r.maxTokens === undefined || !Number.isSafeInteger(r.maxTokens) || r.maxTokens < 1) fail("answerRules requires a mode, flow, explicit model and decisionModel, and a whole token budget of 1 or more");
+		if (!["classify", "draft"].includes(r.mode) || typeof r.flow !== "string" || !SKILL_NAME_RE.test(r.flow) || !model(r.model) || !model(r.decisionModel)) fail("answerRules requires a mode, flow, explicit model and decisionModel");
 		ids.add(r.id); for (const p of r.projects) claimed.add(p);
 	}
 	return JSON.parse(JSON.stringify(value));

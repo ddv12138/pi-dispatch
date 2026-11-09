@@ -284,8 +284,7 @@ test("run-job refuses an unenforceable model list after the meter installs and b
 	// Source-guard tactic again. The order is the whole point: the check reads the install's verdict (meter ok,
 	// brake, guard), so it must follow installProcessUsageMeter; and it must precede createAgentSession, because
 	// a session can spend on its own (an extension factory's call, a cache warm) before the first prompt.
-	// The token cap is deliberately not asserted here: it has no pre-call form to enforce (its stop is the meter's
-	// settle-time check), so there is nothing a missing brake would make it enforce early.
+	// There is no token cap to assert: the meter has no budget.
 	const src = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
 	const install = src.indexOf("await installProcessUsageMeter(");
 	const check = src.indexOf("assertPoliciesEnforceable({");
@@ -293,11 +292,11 @@ test("run-job refuses an unenforceable model list after the meter installs and b
 	assert.ok(install > 0 && check > install && session > check, "install, then the policy check, then the session");
 	// The verdict comes from policyEnforcement, whose ok:false and brake rules usage-meter.test.mjs drives.
 	assert.match(src, /assertPoliciesEnforceable\(\{\s*allowedModels: cfg\.allowedModels,\s*\.\.\.policyEnforcement\(usageMeter\),\s*\}\);/, "the fallback bus meter (ok:false) can only see a call after it ran");
-	// The stop handler is the tested one, so a model stop cannot log token_budget_exceeded.
-	assert.match(src, /const stopHandler = meterStopHandler\(\{ onTokenAbort, abort: \(\) => void session\?\.abort\(\) \}\);/, "the meter's stop goes through meterStopHandler");
+	// The stop handler is the tested one: one policy stop, one synchronous abort.
+	assert.match(src, /const stopHandler = meterStopHandler\(\{ abort: \(\) => void session\?\.abort\(\) \}\);/, "the meter's stop goes through meterStopHandler");
 	// And then, issue #500 part E, to the children: STOP is written the moment the meter stops.
 	assert.match(src, /\t\tonStop: \(reason, detail\) => \{\n\t\t\tstopHandler\(reason, detail\);\n\t\t\tchildWatch\?\.stopped\(reason\);\n\t\t\},\n/, "the stop handler first, then STOP for the children");
-	assert.doesNotMatch(src, /reason === TOKEN_BUDGET/, "no second, untested copy of the token-only rule");
+	assert.doesNotMatch(src, /TOKEN_BUDGET|token_budget|maxTokens: cfg\.maxTokens/, "no token budget or token stop is wired");
 	// The policy guard (issue #502): built from the list (null when none is set, its snapshot driven in
 	// model-guard.test.mjs), handed to the install, and its fields spread only when it exists.
 	assert.match(src, /const policyGuard = createPolicyGuard\(\{ allowedModels: cfg\.allowedModels, log, subscriptionAdmission: subscriptionRegistration \? \(provider\) => subscriptionRegistration\.admitted\(provider\) : null \}\);/);
@@ -305,9 +304,9 @@ test("run-job refuses an unenforceable model list after the meter installs and b
 	assert.match(src, /installProcessUsageMeter\(\{ ModelRuntime, runtime: modelRuntime, meter, log, guard: policyGuard, children: childWatch \}\)/);
 	assert.match(src, /\{ \.\.\.meter\.snapshot\(\), \.\.\.\(policyGuard \? childWatch\.guardFields\(policyGuard\.snapshot\(\)\) : \{\}\) \}/, "the policy fields ride the exit line only when a list is set, the children's counters added");
 	assert.doesNotMatch(src, /createCostGuard|createModelGuard/, "no guard built beside the policy guard");
-	assert.match(src, /maxTokens: cfg\.maxTokens,\s*allowedModels: cfg\.allowedModels,\s*rootSessionId/, "the meter carries the token cap and the list, so the brake is armed for them");
+	assert.match(src, /allowedModels: cfg\.allowedModels,\s*rootSessionId,/, "the meter carries the list, so the brake is armed for it");
 	assert.match(src, /meterStop: usageMeter\.ok \? meter\.state\.stopReason : null,/, "the exit decision reads the meter's stop by reason");
-	assert.match(src, /tokenAborted: usageMeter\.ok \? false : tokenBudget\.state\.aborted,/, "the flag is the fallback meter's alone");
+	assert.doesNotMatch(src, /tokenAborted/, "there is no token-abort flag any more");
 });
 
 test("run-job takes PI_EXIT_AUTH out of its environment right after reading the key, and opens the child ledger before the meter and before any extension (issue #500)", () => {

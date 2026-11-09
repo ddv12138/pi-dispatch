@@ -74,7 +74,7 @@ when the same kind of software work keeps coming back and you would rather not s
 - a nightly job that tidies a code base, updates a report or sorts new issues;
 - "label an issue and a proposed fix appears", for small everyday fixes;
 - answering review comments on the changes the agent proposed;
-- several projects sharing one queue, one budget and one page.
+- several projects sharing one queue, one set of bounds and one page.
 
 For a one off task on your own machine, plain pi is enough.
 
@@ -85,9 +85,9 @@ questions, approve, add a schedule and change limits, and you describe a recurri
 you need someone comfortable in a terminal, and now and then for a setting the page does not offer. And what it hands you
 is code, so someone should be able to judge it before it ships.
 
-**Can it run up a bill?** You set limits in dollars and in jobs, per day, week and month, for everything or per project. A
-job over a limit is refused before it starts, and a job with its own cap is stopped before any model call that could
-take it past that cap. Also set a spending limit at your AI provider, as a last line.
+**Can it run up a bill?** The harness bounds each run by a per-job turn cap, concurrency and the host's memory/CPU
+budget, and records every run's token usage and cost. It does not cap tokens or dollars, so **set a spending limit at
+your AI provider** — that is the hard cap on the bill.
 
 **Can it break my project?** On GitHub, GitLab, Forgejo or Azure DevOps a job works on a fresh copy and comes back with a
 pull request for you to review, and on GitHub pi-dispatch refuses a repository whose default branch is not protected. A job
@@ -142,7 +142,7 @@ own terminal or your browser.
 **Updates:** which version of pi and which extensions your jobs run, what is newer, a capped trial on a real job, and Adopt. Nothing
 updates by itself.
 
-**Projects:** group your repositories into a project, with its own limits, share of the budget and history.
+**Projects:** group your repositories into a project, with its own scoped limits and history.
 
 **A trigger:** what starts it, what it runs and what it has cost. A schedule also gets a button that fires it now.
 
@@ -226,7 +226,7 @@ A sign in lasts up to 12 hours, and an hour with nothing happening ends it soone
 
 Everything above in the terms you would run it by. pi has no job queue, no concurrency control, no spend limit and, by its
 own README, no permission system. pi-dispatch adds exactly that layer and nothing else. It is not another agent to
-compare with the one you use: it is the queue, the budget and the box around the pi you already run, steered by the
+compare with the one you use: it is the queue, the bounds and the box around the pi you already run, steered by the
 `.pi/` setup your repo already has.
 
 > **Naming heads up.** The published packages are scoped: `@edgehero/pi-dispatch` (the `pi-dispatch` command). The bare npm
@@ -299,7 +299,7 @@ address it answers on. GitLab, Forgejo and Azure DevOps have a [setup page each]
 
 **Before it runs unattended:**
 
-- Set a spend limit at your provider, and caps here.
+- Set a spend limit at your provider.
 - Protect the default branch of every repository it may touch: the worker refuses a GitHub repository without it.
 - On a shared server, prefer `PI_BACKENDS=podman`: access to the Docker socket is equivalent to root.
 - List the hosts jobs may reach, since everything else is denied.
@@ -314,7 +314,7 @@ recreate the worker, then resume; `/config/updates` in the console shows what is
 
 ## Providers and models
 
-**pi-dispatch itself needs no AI key.** The queue, the caps, the containers, the console and the CLI run no model. The key
+**pi-dispatch itself needs no AI key.** The queue, the bounds, the containers, the console and the CLI run no model. The key
 is for pi, inside each job. pi-dispatch works with most providers pi supports. Pick the default in `.env`:
 
 ```bash
@@ -361,12 +361,12 @@ model is one reviewed edit.
 ```
 
 **Fallbacks** are tried in order on the job's next attempt when a provider is rate limited, out of quota or overloaded. Each is chosen at pickup,
-before a credential is minted, a repository cloned or budget reserved, and must pass the same checks as the primary: on `run.models`, in the pinned
+before a credential is minted or a repository cloned, and must pass the same checks as the primary: on `run.models`, in the pinned
 catalog with a cost bound and a credential, allowed by egress, with endpoint room. A failed model cools down for a while. An attempt may call only
 its selected model, so a flow that means to use several keeps its own setup.
 
-**Proposals and canaries.** Doctor suggests a change, `pi-dispatch canary` replays up to three retained jobs on the candidate in disposable workspaces
-under one cap, and the Models page shows the comparison. A person adopts it, and no model can.
+**Proposals and canaries.** Doctor suggests a change, `pi-dispatch canary` replays up to three retained jobs on the candidate in disposable workspaces,
+and the Models page shows the comparison. A person adopts it, and no model can.
 
 ## Triggers
 
@@ -405,14 +405,13 @@ live, and which the console can edit. Each entry is an `{ on, run }` pair: **`on
 - `mcp`, `forge`: MCP servers for its jobs.
 - `excludeTools`: removes named built in tools.
 - `packages`: opts out of the staged pi packages.
-- `models`, `maxCostUsd`: the models a job may call, and its own dollar cap.
+- `models`: the models a job may call.
 - `replicas`: races independent sandboxes on one event.
 - `waitFor`: holds a job, unstarted and unbilled, until a time or your own check (waiting).
-- `instructions`, `skillsDir`, `github`, `portfolio`: the rest are in `triggers.example.json`'s comments.
+- `instructions`, `skillsDir`, `github`: the rest are in `triggers.example.json`'s comments.
 
 A whole project can get one environment from your secrets manager, granted once and read fresh at each job start. Quiet
-hours pause a repo or folder by weekday and timezone. The
-portfolio manager example plans a budget split for the week and reports what it asked for.
+hours pause a repo or folder by weekday and timezone.
 
 ## Flows: the custom prompt a trigger runs
 
@@ -444,7 +443,7 @@ flowchart LR
   CLI["pi-dispatch run"] -->|enqueue| Q
   CRON["a schedule"] -->|enqueue| Q
   FORGE["GitHub, GitLab, Forgejo, Azure"] --> R["receiver: webhook or poll"] -->|enqueue| Q
-  Q[("Valkey + BullMQ<br/>the queue")] --> B{"under every cap,<br/>the project's share<br/>and the turn budget?"}
+  Q[("Valkey + BullMQ<br/>the queue")] --> B{"under the turn cap,<br/>concurrency, scoped limits<br/>and host budget?"}
   B -->|no| STOP["refused before any spend"]
   B -->|yes| C["one container, removed after the job<br/>all capabilities dropped, non-root, no-new-privileges<br/>/job read-only"]
   C --> PI["pi + git + gh + Playwright<br/>guardrails + your .pi/"]
@@ -455,13 +454,12 @@ flowchart LR
   CON -->|"a person's message"| PI
 ```
 
-Every trigger takes this path: spend is checked before the container starts, and nothing is dropped. Read
+Every trigger takes this path: admission is checked before the container starts, and nothing is dropped. Read
 [`SECURITY.md`](SECURITY.md) before you rely on it.
 
 - **Network egress is denied by default.** Each job gets its own network behind an allowlist proxy, and a job the policy cannot
   serve is refused before it spends. The allowed hosts are yours to list.
-- **Token and cost records cover the whole job**, including subagent sessions and `pi` child processes, and the per job token
-  budget is enforced against that same total.
+- **Token and cost records cover the whole job**, including subagent sessions and `pi` child processes.
 - **The container runtime is a named backend** that declares what it guarantees. `pi-dispatch doctor` prints the declaration, and
   `pi-dispatch doctor --live` reads eight of those properties back from real containers.
 - **Credentials.** On Docker and Podman the provider key and the forge token go in as environment values, and **the agent can read both**. The
@@ -472,12 +470,13 @@ Every trigger takes this path: spend is checked before the container starts, and
 
 ## Costs, projects and capacity
 
-**Costs.** A turn limit per job, job and token caps for the whole deployment, dollar caps per day, week and month, and a dollar
-cap per job. Caps can apply per repo, folder, model or project. Every job writes a durable record with ids only, never issue or
-comment text, with a usage ledger per model that the insights page prices. A zero rate run with no declared plan reads `$0 (unrated)`, never "free".
+**Costs.** A turn cap per job (`PI_MAX_TURNS`), concurrency (`PI_CONCURRENCY`) and each host's memory/CPU budget bound a run,
+with your provider's spend limit as the backstop across runs. There are no token or dollar caps; actual token usage and cost are
+still recorded and shown. Every job writes a durable record with ids only, never issue or comment text, with a usage ledger per
+model that the insights page prices. A zero rate run with no declared plan reads `$0 (unrated)`, never "free".
 
-**Projects and split.** Group repos and folders into projects and cap each as one. Set a dollar total with a floor per project, and a
-flow can move money between projects inside it, never above the total or below a floor. Every move is logged and can be reverted.
+**Projects.** Group repos and folders into projects so each run records its project and a `project:<id>` scoped limit can carry its
+concurrency and job size. A project has no spend share to plan or move.
 
 **Capacity.** Each machine keeps its own memory and CPU budget, and room is kept for a waiting big job so small ones cannot starve it.
 The console, `pi-dispatch capacity` and `doctor` report how busy each host was. They count jobs only: a machine busy with other work

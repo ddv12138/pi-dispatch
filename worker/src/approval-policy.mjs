@@ -10,18 +10,19 @@ const hash = (value) => createHash("sha256").update(value).digest("hex");
 export function validateApprovalConfig(run) {
 	const present = ["gates", "gateTimeout", "gateBudgetRaiseTokens"].some((key) => run[key] !== undefined);
 	if (!present) return {};
+	// The budget-raise gate and its token field went with the token budgets: refused BY NAME, never silently dropped,
+	// because a trigger that still declares one must not read as enforcing a budget this build no longer has.
+	if (run.gateBudgetRaiseTokens !== undefined) throw new TypeError("run.gateBudgetRaiseTokens was retired with the token budgets; remove it (an approval no longer raises a token budget)");
+	if (Array.isArray(run.gates) && run.gates.includes("budget-raise")) throw new TypeError('the "budget-raise" gate was retired with the token budgets; remove it from run.gates');
 	if (!Array.isArray(run.gates) || run.gates.length === 0 || run.gates.length > 32 || run.gates.some((gate) => typeof gate !== "string" || gate.length > 80 || !APPROVAL_ACTION_RE.test(gate) || UNSUPPORTED.has(gate)) || new Set(run.gates).size !== run.gates.length) throw new TypeError("run.gates must contain 1 to 32 distinct action tokens; push, PR opening and merge gates have no supported enforcement boundary");
 	if (run.resume !== true || run.kind === "local" || run.command !== undefined || run.replicas !== undefined || run.recover === true) throw new TypeError("run.gates requires a resumable forge flow without replicas or recovery");
 	if (run.awaitInput === false) throw new TypeError("run.gates cannot disable run.awaitInput");
 	if (run.gateTimeout !== undefined && (!Number.isSafeInteger(run.gateTimeout) || run.gateTimeout < 1 || run.gateTimeout > 365)) throw new TypeError("run.gateTimeout must be an integer number of days from 1 to 365");
-	if (run.gates.includes("budget-raise")) {
-		if (run.maxTokens === undefined || run.gateBudgetRaiseTokens === undefined || run.gateBudgetRaiseTokens <= run.maxTokens) throw new TypeError("budget-raise needs run.gateBudgetRaiseTokens greater than run.maxTokens (the absolute budget for one resumed job)");
-	} else if (run.gateBudgetRaiseTokens !== undefined) throw new TypeError("run.gateBudgetRaiseTokens needs the budget-raise gate");
-	return { gates: [...run.gates], ...(run.gateTimeout !== undefined ? { gateTimeout: run.gateTimeout } : {}), ...(run.gateBudgetRaiseTokens !== undefined ? { gateBudgetRaiseTokens: run.gateBudgetRaiseTokens } : {}) };
+	return { gates: [...run.gates], ...(run.gateTimeout !== undefined ? { gateTimeout: run.gateTimeout } : {}) };
 }
 
 export function approvalConfigDigest(run) {
-	return hash(JSON.stringify({ gates: run.gates, gateTimeout: run.gateTimeout ?? null, gateBudgetRaiseTokens: run.gateBudgetRaiseTokens ?? null, maxTokens: run.maxTokens ?? null }));
+	return hash(JSON.stringify({ gates: run.gates, gateTimeout: run.gateTimeout ?? null }));
 }
 
 /**

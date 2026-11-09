@@ -3,23 +3,24 @@ import { test } from "node:test";
 import { approvalActor, approvalAudit, approvalConfigDigest, approvalReply, approvalRequestId, makeCheckApprovalPolicy, validateApprovalConfig } from "../src/approval-policy.mjs";
 import { parseTriggers } from "../src/triggers.mjs";
 
-const run = (extra = {}) => ({ kind: "github", flow: "fix", resume: true, gates: ["deploy:staging", "budget-raise"], maxTokens: 1000, gateBudgetRaiseTokens: 3000, gateTimeout: 2, ...extra });
+const run = (extra = {}) => ({ kind: "github", flow: "fix", resume: true, gates: ["deploy:staging"], gateTimeout: 2, ...extra });
 const entry = (value = run()) => ({ on: { type: "comment", phrase: "@pi" }, run: value });
 const parse = (value) => parseTriggers(JSON.stringify({ triggers: [value] }), "/triggers.json");
 
 test("gate schema is opt-in and validates action names, bounds and resumable forge prerequisites", () => {
 	assert.deepEqual(validateApprovalConfig({ kind: "github" }), {});
-	assert.deepEqual(validateApprovalConfig(run()), { gates: ["deploy:staging", "budget-raise"], gateBudgetRaiseTokens: 3000, gateTimeout: 2 });
+	assert.deepEqual(validateApprovalConfig(run()), { gates: ["deploy:staging"], gateTimeout: 2 });
 	const bad = [
 		{ gates: [] }, { gates: "deploy:staging" }, { gates: ["deploy:staging", "deploy:staging"] }, { gates: ["Deploy"] },
 		{ gates: ["deploy:staging:extra"] }, { gates: ["x".repeat(81)] }, { gates: Array.from({ length: 33 }, (_, i) => `gate-${i}`) },
 		{ resume: false }, { kind: "local" }, { command: "fix" }, { replicas: 2 }, { recover: true }, { awaitInput: false },
 		{ gateTimeout: 0 }, { gateTimeout: 366 }, { gateTimeout: 1.5 }, { gateTimeout: "2" },
-		{ maxTokens: undefined }, { gateBudgetRaiseTokens: undefined }, { gateBudgetRaiseTokens: 1000 }, { gateBudgetRaiseTokens: 990 },
-		{ gates: ["deploy:staging"], gateBudgetRaiseTokens: 3000 },
 	];
 	for (const extra of bad) assert.throws(() => validateApprovalConfig(run(extra)), undefined, JSON.stringify(extra));
-	for (const gate of ["push", "push-default-branch", "pr-open", "open-pr", "merge", "approve"]) assert.throws(() => validateApprovalConfig(run({ gates: [gate], gateBudgetRaiseTokens: undefined })), /enforcement boundary/);
+	for (const gate of ["push", "push-default-branch", "pr-open", "open-pr", "merge", "approve"]) assert.throws(() => validateApprovalConfig(run({ gates: [gate] })), /enforcement boundary/);
+	// C2: the budget-raise gate and its token field were retired, and are refused BY NAME rather than dropped.
+	assert.throws(() => validateApprovalConfig(run({ gateBudgetRaiseTokens: 3000 })), /run\.gateBudgetRaiseTokens was retired with the token budgets/);
+	assert.throws(() => validateApprovalConfig(run({ gates: ["deploy:staging", "budget-raise"] })), /"budget-raise" gate was retired with the token budgets/);
 });
 
 test("every forge's normalized rules retain gate policy and arm parking", () => {
@@ -32,7 +33,7 @@ test("every forge's normalized rules retain gate policy and arm parking", () => 
 			const normalized = parse(input)[0].run;
 			assert.deepEqual(normalized.gates, input.run.gates, `${kind}/${on.type}`);
 			assert.equal(normalized.gateTimeout, 2);
-			assert.equal(normalized.gateBudgetRaiseTokens, 3000);
+			assert.equal("gateBudgetRaiseTokens" in normalized, false, "C2: no token-budget raise exists");
 			assert.equal(normalized.awaitInput, true);
 		}
 	}
@@ -42,10 +43,10 @@ test("loader rejects invalid gate policy as a named configuration refusal", () =
 	for (const value of [run({ gates: ["push"] }), run({ gateTimeout: 0 }), run({ gateBudgetRaiseTokens: 500 }), run({ recover: true })]) assert.throws(() => parse(entry(value)), (error) => error.piDispatchConfig === true && error.message.includes("/triggers.json"));
 });
 
-test("policy digest binds declared gates, timeout and both monetary caps", () => {
+test("policy digest binds declared gates and the timeout", () => {
 	const original = approvalConfigDigest(run());
-	for (const extra of [{ gates: ["deploy:production"] }, { gateTimeout: 3 }, { gateBudgetRaiseTokens: 4000 }, { maxTokens: 500 }]) assert.notEqual(approvalConfigDigest(run(extra)), original);
-	assert.equal(approvalConfigDigest(run({ model: "other", title: "private" })), original);
+	for (const extra of [{ gates: ["deploy:production"] }, { gateTimeout: 3 }]) assert.notEqual(approvalConfigDigest(run(extra)), original);
+	assert.equal(approvalConfigDigest(run({ model: "other", title: "private" })), original, "non-policy fields do not move it");
 });
 
 test("live policy lookup fails closed on missing, changed or unreadable declarations", () => {

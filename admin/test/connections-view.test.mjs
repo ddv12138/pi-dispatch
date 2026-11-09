@@ -3,7 +3,6 @@ import { test } from "node:test";
 import { readFileSync } from "node:fs";
 import { CONNECTION_ENV_TYPES, FORGE_ACTIVATION_KEYS, connectionEnvValue, connectionsProblems, forgeConnections, modelConnections, readConnections, readEndpointSlots } from "../src/connections-view.mjs";
 import { normalizeTriggerForDisplay, PANEL_SERVICE_KEYS } from "../src/read-model.mjs";
-import { TOKEN_ENV_NAMES } from "@edgehero/pi-dispatch/budget-rule";
 import { FORGES } from "@edgehero/pi-dispatch/forges";
 import { MAX_SLOTS, parseModelEndpoints } from "@edgehero/pi-dispatch/model-endpoints";
 import { isPerMachineHost } from "@edgehero/pi-dispatch/backends";
@@ -35,7 +34,6 @@ test("environment values use the key's closed type, never the shape of a secret 
   assert.equal(connectionEnvValue("PI_SETTINGS_FILE", "C:\\Users\\private-person\\settings.json"), ".../settings.json");
   assert.equal(connectionEnvValue("RECEIVER_PORT", "65536"), "set (invalid number)");
   assert.equal(connectionEnvValue("PI_CONCURRENCY", undefined), "unknown (worker env or default)");
-  for (const key of Object.values(TOKEN_ENV_NAMES)) assert.equal(connectionEnvValue(key, undefined), "unknown (worker env or default)", key);
 });
 
 test("forge activation agrees with the actual receiver loader, including non-activation counterexamples", () => {

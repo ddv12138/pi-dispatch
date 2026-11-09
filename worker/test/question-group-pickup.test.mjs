@@ -4,7 +4,7 @@ import { makeProcessor } from "../src/index.mjs";
 import { makeQuestionGroupRuntime, questionGroupConfigDigest } from "../src/question-group-runtime.mjs";
 
 const NOW = Date.UTC(2026, 9, 30, 12);
-const config = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
+const config = { capture: true, model: "test/classifier", confidence: 0.9, names: {} };
 const digest = "b".repeat(64);
 function fixture(currentProjects) {
 	const ops = [];
@@ -17,7 +17,7 @@ function fixture(currentProjects) {
 	const redis = { get: async () => null, incr: async (key) => { ops.push(["incr", key]); return key.startsWith(scopeKeyPrefix("project:shop")) ? 2 : 1; }, decr: async () => 0, expire: async () => {}, del: async () => 0 };
 	const processor = makeProcessor({
 		redis, now: () => NOW, projects: () => currentProjects, scopedLimits: () => [],
-		getSettings: () => ({ provider: "test", model: "chat", maxTurns: 1, maxTokens: 5000, concurrency: 1 }),
+		getSettings: () => ({ provider: "test", model: "chat", maxTurns: 1, concurrency: 1 }),
 		recordRun: (row) => records.push(row),
 		deps: { questionGroupRuntime: runtime, imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["questionGrouping", "tokenBudget", "modelPolicy"] }), prepareWorkspace: async () => ({ workspace: "/internal-empty-workspace", jobDir: "/job" }), runContainer: async () => ({ code: 0, aborted: false }), cleanup: async () => {}, comment: async () => {}, log: () => {} },
 	});

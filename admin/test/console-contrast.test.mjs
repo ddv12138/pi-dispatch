@@ -5,7 +5,6 @@ import { colorOf, PULSE_TOKENS, PULSE_TOKENS_SHA256, tokenCss } from "../src/con
 import { PULSE_CSS } from "../src/console/pulse-css.mjs";
 import { specificity } from "./helpers/css-specificity.mjs";
 import { CONFIG_CSS } from "../src/console/config-css.mjs";
-import { capsule } from "../src/console/kit.mjs";
 import { PAGE_CSS, SHELL_CSS, cssBlocks, pageCss, splitSelectors } from "../src/console/page-css.mjs";
 import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { PARKED_CSS } from "../src/console/parked-css.mjs";
@@ -479,23 +478,6 @@ test("the runs and parked pages' own colours are pinned pairs: each colour rule 
       }
     }
   }
-});
-
-test("a capsule's percent is the on-status on status pair: its tone is on the svg the percent is drawn in (a placement check)", () => {
-  // bundle.css paints the pill `--tone` and the percent `--on-tone`; the percent is the pill's sibling, not its child.
-  assert.match(PULSE_CSS, /\n\.cap__pill \{ fill: var\(--tone\); \}/);
-  assert.match(PULSE_CSS, /\n\.cap__v \{[^}]*fill: var\(--on-tone\); \}/);
-  for (const [pct, tone] of [[10, "ok"], [85, "attention"], [100, "failed"]]) {
-    const s = String(capsule({ name: "Jobs", window: "today", pct, hold: 80 }));
-    // The tone class is on the <svg>, an ancestor of both the pill and the percent.
-    assert.match(s, new RegExp(`<svg class="tone-${tone}"[^>]*>(?:(?!</svg>).)*<rect class="cap__pill"(?:(?!</svg>).)*<text class="cap__v"`), tone);
-    assert.doesNotMatch(s, /class="cap__pill tone-/, "not on the pill alone, where the percent would not read it");
-    assert.ok(PAIRS.includes(`on-${tone} on ${tone} 4.5`), tone);
-    for (const theme of THEMES) assert.ok(contrast(colorOf(`on-${tone}`, theme), colorOf(tone, theme)) >= 4.5, `${tone} ${theme}`);
-  }
-  // On the pill alone (the card's markup) the percent read no tone and was SVG's default black: under AA in light.
-  assert.equal(contrast("#000000", colorOf("ok", "light")).toFixed(2), "4.16");
-  assert.equal(contrast("#000000", colorOf("failed", "light")).toFixed(2), "4.42");
 });
 
 test("a user transcript timestamp uses muted ink on its running tint, in both themes (#747 placement)", () => {

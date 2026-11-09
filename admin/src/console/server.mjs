@@ -908,7 +908,7 @@ async function dispatch(req, res, deps) {
  *   - `audit.append(row)`: synchronous, throws on failure.
  *   - `writePauseWindows({pauseWindowsPath, mutate, fs, expect})` -> `{ok}` | `{invalid}`.
  *   - issue #642: `actionDeps`, what the action table's entries read and write with (`actions.mjs`): `{rm, plans,
- *     paths, env, fleet, killSwitchPlanFn, urlShown, envelopeProblem, host}`. An action whose needs are missing answers
+ *     paths, env, fleet, killSwitchPlanFn, urlShown, host}`. An action whose needs are missing answers
  *     503 at its preview; the pause-windows write needs none of it.
  *   - `limiter` (default: `makeLoginLimiter({now})`), `log(line)`, `fs`, `now`.
  *   - issue #641: `pages` (default: `pages.mjs`; its `PAGES` builds the routes, the rest renders), `pageDeps` (what

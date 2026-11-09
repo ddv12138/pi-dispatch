@@ -45,8 +45,6 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | **Cron** — a schedule | **Nobody, at the time it runs.** It fires unattended. | As above |
 | **AI tool** — `dispatch_run` (operator session) | Whoever can prompt-inject the operator's model | **Nothing** — it enqueues a paid run that edits a folder in place |
 | **Outbox chain** — a completed job container | A completed local job's agent, after host-side validation | As the folder row above — a same-folder follow-up, no undo |
-| **Priorities plan** (operator session tool or portfolio job) | Whoever can prompt-inject either | Revert in the panel. A plan starts no job: it moves spend between projects inside the operator's envelope, at most `maxStepPct` of the total per interval, never below a floor and never above the total |
-| **Portfolio plan** (`/outbox/priorities.json`) | A completed portfolio cron job's agent: a cron trigger the operator flagged `run.portfolio` in the reviewed file, still flagged at pickup, at prepare and again when the plan is collected. A manual run, a chained child or a forge job is refused | Revert in the panel. The same bounds as the row above, and the same ladder; a refusal is recorded, never a failed job |
 
 ## Trust boundaries
 
@@ -61,11 +59,8 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | A project's `secretBundles` entry and its bundle resolver (issue #704) | **Operator, the same trust as the triggers file, plus a host exec, plus whoever can write the manager the resolver reads** | The binding (project, profile, reference) is in the reviewed file; the variables are NOT. The resolver prints whatever the manager (or file) holds at each job start, so a variable added there reaches the next job of the project with no review of `triggers.json`. The job still receives values and never the manager's credential. Trigger-made jobs only: never a chained child, a manual run or a fork pull request (unless `forkReviews`), and every run record lists the variable NAMES it received. |
 | A trigger's `run.skillsDir` and `run.instructions` | **Operator — the same trust as the triggers file** | Both are instructions, and both come from the reviewed `triggers.json` on the worker host rather than from any payload. Nothing reachable from a webhook, an issue or comment body, or `dispatch_run` can set either, and no panel key or AI tool writes them. The skills are copied per job into `/job` (adding no mount) and are layered UNDER the repo's own `.pi/`, so a serviced repo still wins a name collision; the instruction text lands in the user prompt above the issue text and never in the system prompt |
 | The job image (`PI_JOB_IMAGE`, or a trigger's `run.image`) | **Operator, the same trust as baking it** | It *is* the code every job executes: the pi version, the runner and its exit codes, the guardrail floor, the loader's discovery posture and, where the argv carries no `--user` (Docker Desktop, or a worker running as uid 1001), the non-root user all come from it. Nothing here verifies an image this project did not build. The isolation flags are applied by the worker's argv and hold for **any** image; the **contents** do not. |
-| The allocation envelope (`PI_ENVELOPE_FILE`) | **Operator, the same trust as the scoped-limits file** | It bounds what a priorities plan may move: the total, the floors and the step. The worker refuses to boot when the file lies inside any path a job container can see, and re-checks that at every reload, keeping the last good envelope when it fails; a local job's folder is re-judged at prepare and refused when it resolves to the envelope's folder or above it. The plan itself, which is agent text, gets no trust |
 | The job container | **None** — it is the untrusted side | It runs the agent |
 | A job container's `/outbox` request file | **None** — agent-authored | An agent-initiated signal channel back to the host; validated host-side before anything is enqueued. **Local jobs only** — a github job has no `/outbox` mount at all |
-| A job container's `/outbox/priorities.json` | **None**, agent-authored | A portfolio job's plan. Read host-side on a `completed` exit only, `lstat`-checked, opened with `O_NOFOLLOW` and `fstat`ed, at most 16 KiB, and judged by the same parser and ladder as the operator's own plan. Its `reason` text is never logged and never enters the run record |
-| A portfolio job's `/job/portfolio.json` | **Host-written, read-only** | The facts the manager plans with. Ids, digests, integers, instants, enum tokens and operator labels (project ids and member labels as projects.json names them, a folder by its basename) only: no issue text, title, plan reason or path, because the next run reads it as facts |
 | A job container's `/session` transcript | **None**, agent-authored | The **second** agent-initiated channel, and this row exists because the line above used to say "only". Written by the agent, read back host-side on a `completed` exit, `lstat`-checked and regular-files-only on both edges. Since #643 every job has one unless the worker sets `PI_LIVE_TRANSCRIPTS=0` (a non-resume job's is an empty live file in its own job folder, never promoted), and the worker also tails it during the run to publish a redacted copy to Valkey: parsed as data, redacted, escaped and capped before it leaves, never executed or fed to a model. Since #644 the worker also reads run progress from it (turns, steps, the tool running, and the phases a `report_progress` call names): display only, never trusted, since the agent can write any line into it ([Run progress](#what-is-not-defended-v1)) |
 | The **checkpoint store** (`PI_CHECKPOINTS_DIR`, else `<PI_SESSIONS_DIR>/.checkpoints`) | **None** for its contents (agent-authored trees and transcripts); **Operator** for the directory | Since #645 a trigger with `run.recover` has its running jobs checkpointed into it: the job's whole workspace and its transcript, written by the worker from the host side, never mounted into any container. A recovery writes those bytes back into a new job's workspace, so a restore re-checks every path with the snapshot's own rules and then resets `.pi/`, `.agents/` and the root `AGENTS.md`/`CLAUDE.md` to the run's base commit, so nothing the agent wrote there loads as the repository's own; a repository with `.pi/extensions/` gets no recovery, because an extension's imports cannot be reset ([Durable runs](#what-is-not-defended-v1)) |
 | A steer-armed job's **inbox** (`run.steer`, `pi-dispatch steer`, a phrase comment) | **Operator** for who may send from the host (whoever can run `pi-dispatch steer` against the deployment's Valkey, which is the queue's own trust); **Collaborator** (write access) for a comment, whose author passes the same forge author gate that starting a job takes, on a comment trigger that also set `run.steer`; **None** for the text, which reaches the agent as data | Since #646 a trigger with `run.steer` lets a message reach its running agent. The worker writes it into a per-job directory mounted **read-only** at `/inbox` (the agent can neither plant nor withdraw a message), framed as data with the same fence the issue text gets and with no operator authority, and the agent's receipt is counted only under a MAC keyed by a per-attempt key the agent cannot read. A collaborator's phrase comment on the job's issue or pull request is routed there instead of starting a job; an operator also sends from the console (the operator role, behind its session rules, the text never listed or audited) and from the `/dispatch` panel ([Steering](#what-is-not-defended-v1)) |
@@ -110,8 +105,8 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   code-review service — is a different actor, and such bots frequently hold `author_association: MEMBER`.
   If one reviews on every push while your armed flow pushes, the two form a spend loop **neither guard can
   see**, because each knows only itself. No comparable vector exists on the other triggers: bots do not
-  apply your trigger labels and do not type `@pi`. The spend caps are what bound it; `OQ-020` records the
-  residual and what would close it.
+  apply your trigger labels and do not type `@pi`. The per-job turn cap, concurrency and your provider's
+  spend limit are what bound it; `OQ-020` records the residual and what would close it.
   **A Comment-type review of line comments only starts nothing.** Its remarks ride
   `pull_request_review_comment`, an event this service does not ingest, so the review arrives with an empty
   body and is refused as `no-review-body` rather than buying a container for an empty string. Approve and
@@ -225,9 +220,10 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   never the system prompt, whatever a repository's files say.
 - **We never merge.** No code path in this project calls a merge API; grep is the test. Note carefully
   what that does and does not mean — see below.
-- **Spend.** Token budgets, per job and for the day/week/month windows (reserved before a job starts), a
-  per-job turn budget enforced by our runner (pi has no turn limit of its own), and a 30-minute container
-  wall-clock timeout. An agent that concluded "I can't fix this" is a success and is never blind-retried.
+- **Spend.** A per-job turn cap enforced by our runner (pi has no turn limit of its own), a concurrency
+  limit, the host's memory/CPU budget and a 30-minute container wall-clock timeout, with your provider's own
+  spend limit as the backstop across runs. Token usage and cost are still recorded and shown per run. An agent
+  that concluded "I can't fix this" is a success and is never blind-retried.
 - **A policy refusal is never a paid attempt.** A determinate config refusal ends the process with exit code 2
   before any job starts, and a job refused by a cap is never started at all. Every Compose service runs
   `restart: unless-stopped`, and Docker's restart policy cannot tell a policy refusal from a crash: a container
@@ -1020,7 +1016,7 @@ Stated openly rather than discovered later:
   (realpath + containment, judged again at prepare on the resolved folder, which is what is mounted:
   `local-folder-escaped`); the committed per-flow opt-in (default deny, read at a pre-agent SHA); the
   dirty-tree refusal (no force option); no spend-knob parameters on the tool; a per-hour rate limit; and
-  the token budgets (`CONST-BUDGET-BEFORE-TOKENS`).
+  the per-job turn cap (`PI_MAX_TURNS`), with the operator's provider spend limit as the outer backstop.
   One supporting fact about that allowlist, because `/dispatch setup` writes a file that could otherwise
   widen it: the **deployment pointer** resolves paths only, through an allowlist of exactly six path/URL
   keys. `PI_DISPATCH_RUN_ROOTS` is excluded **by construction**, as is every credential-shaped key, because a
@@ -1033,32 +1029,12 @@ Stated openly rather than discovered later:
   `REQ-ADMIN-VIA-PI-EXTENSION`, not copied here. Every proposal in an interactive pi session requires a
   person’s confirmation of its concrete change. Headless tools require the explicit process grant and an
   unattended transition. These transitions only narrow explicit caps/flags, pause, cancel or remove failed
-  jobs; paid starts have fresh process-granted admission and priorities keep their arithmetic bounds.
+  jobs; paid starts have fresh process-granted admission.
   Raising/inheriting/unsetting a limit, adding triggers, changing scope/size/minima, resuming or retrying
   saved fields requires a person. Secret declarations and messages/answers stay person-only. The residual
   is either an operator approving a misleading proposal or an injected delegated session using its permitted
   disruptive/paid-start authority; both are audited. A detailed planner diagnosis is local operator UI only,
   while the model receives a closed refusal. Arbitrary source text cannot label itself safe.
-
-- **Delegated priorities can move money between projects.** The priorities write
-  (`dispatch_priorities_set`, issue #504) can run headless with the explicit process grant; an interactive
-  proposal always confirms. A
-  portfolio job's plan (issue #505) does the same with no session at all. It cannot change the envelope, a floor,
-  a cap, a trigger or a setting, so it raises no ceiling. What it can do is shift spend between projects, and that
-  is bounded by arithmetic, not by a keypress: no project below its floor, no total above the envelope's, and no
-  project moved by more than `maxStepPct` of the total per `minIntervalHours`. Worked: with $100 a week, floors of
-  $10, a 25% step and a 24-hour interval, a prompt injection can push one project to $90 and the other to $10 in
-  four days, and total spend stays at or under $100. A Valkey flush resets the interval, which buys one extra step.
-  A compromised portfolio flow (a malicious skill in its folder) has the same bound, and it cannot write the
-  envelope: the worker refuses to boot when the envelope lies inside any path a job container can see, re-checks that
-  at every reload (keeping the last good envelope when it fails), and re-judges a local job's folder at prepare, so a
-  link a job planted cannot mount the envelope's folder (`local-folder-holds-envelope`) or carry a folder out of its
-  job path (`local-folder-escaped`). A delegated session may reason from external guidance, which grants no
-  extra authority; prompt injection remains bounded by these arithmetic rules and the action policy. A portfolio
-  job (issue #505) meets the same allocation rules inside its ordinary container. Reasons in a plan are agent text: they show in the panel only, escaped, and never reach
-  a tool result, a record or a log line. Every attempt, applied or refused, is in the audit log, and the panel
-  reverts to any of the newest 20 rows of that history (`REQ-DELEGATED-ALLOCATION`,
-  `DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE`).
 
 - **A resumed session hands one job's transcript to the next job on the same key.** With
   `"resume": true` on a trigger, the agent's full working history — tool output, file contents, its own
@@ -1130,7 +1106,7 @@ Stated openly rather than discovered later:
 - **Protect your default branch.** Require a pull-request review, forbid force-pushes. This is not a
   suggestion — it is the only technical control standing between an injected agent and your `main`. The
   worker refuses to run without it, and you should not work around that.
-- Set a provider spend limit and the deployment's token budgets.
+- Set a provider spend limit. The harness bounds a run with `PI_MAX_TURNS`, `PI_CONCURRENCY` and the host's memory/CPU budget; only the provider's limit bounds the bill across runs.
 - Do not blanket-forward host environment into job containers. Pass only the variables the configured
   provider needs. In particular `ANTHROPIC_OAUTH_TOKEN`, and at the pinned pi `ANTHROPIC_AUTH_TOKEN` ahead
   of it, silently take precedence over `ANTHROPIC_API_KEY`, so a stray variable in the host environment can quietly redirect which credential
@@ -1246,11 +1222,10 @@ Stated openly rather than discovered later:
 - **Token and cost accounting covers `pi` child processes that cooperate, and it is not a wall.** The recorded
   totals cover every session inside the job container's Node process, including subagent sessions an extension
   spawns, and, since issue #500, every **`pi` child process** that keeps the job's environment: each child meters
-  itself into a ledger the runner folds into the job's totals and caps. A pi child the runner finds with no
-  ledger (on Linux) stops a capped job and makes an uncapped one's record a floor. The agent holds the provider
-  key and runs as the runner's user, so a child that hides from both, a client that is not pi, or a direct API
-  call is still absent from the run record and the daily token counter (`OQ-011`). `PI_MAX_TURNS` likewise bounds
-  only the root session's turns. The backstops there are the 30-minute container timeout, concurrency and the
+  itself into a ledger the runner folds into the job's totals. A pi child the runner finds with no ledger (on
+  Linux) makes the job's record a floor, and under a model list stops the job. The agent holds the provider key
+  and runs as the runner's user, so a child that hides from both, a client that is not pi, or a direct API call
+  is still absent from the run record (`OQ-011`). `PI_MAX_TURNS` likewise bounds only the root session's turns. The backstops there are the 30-minute container timeout, concurrency and the
   host budget, and your provider-side spend limit, not the meter.
 - **The admin surface is not a network service.** It is a pi extension in your own terminal session plus
   a `settings.json` file, and it binds no port. The operator console is the exception you start yourself: a separate
@@ -1272,7 +1247,7 @@ Stated openly rather than discovered later:
   access, which is where `/dispatch setup` stops being theoretical.
   **The model in that session has a shell too, and the write guard cannot see it.** The admin extension blocks
   pi's `write` and `edit` tools (a call nested through `ctx.executeTool` or a codemode script included) whose
-  target is the envelope file, `projects.json`, `scoped-limits.json`, `triggers.json`, the settings overlay, the
+  target is `projects.json`, `scoped-limits.json`, `triggers.json`, the settings overlay, the
   deployment's `.env`, the deployment pointer (issue #504), the console tokens file (issue #640) or anything in the
   console's login-codes directory beside it (issue #708). The `.env` and the pointer are guarded because they
   NAME the other files: the panel reads `.env` on every call, and a session that could point it at a decoy could
@@ -1290,8 +1265,7 @@ Stated openly rather than discovered later:
   tool's path after the guard ran can write any file your account can, and none of them can be filtered reliably.
   Nor can a `bash` command in the same message as a `write`: pi runs every `tool_call` hook of a parallel batch
   before it executes any call of it, so an `ln -s` there can repoint a path the guard already judged (this needs
-  `bash`, which is the residual already). That residual is named, not closed: an edit of the envelope outside the
-  panel is detected by its digest and shown as a banner and an `envelope-changed-externally` audit row.
+  `bash`, which is the residual already). That residual is named, not closed.
 - **The graph export writes one static HTML file, on your keystroke, to a temp path it names.** What
   crosses into it: trigger configuration you authored, skill names and frontmatter from the repos you
   service, and the PII-free run-record fields the panel already shows. What never does: raw job log
@@ -1360,7 +1334,7 @@ Stated openly rather than discovered later:
 
 The `agent` console role is a separate capability. Its allowlisted reads remove operator/job prose and bundle
 variable names. Its writes may narrow explicit file limits, pause, cancel, remove failed jobs, turn existing
-execution flags off, and move priorities within the operator’s envelope. It cannot raise or unset a cap, change
+execution flags off. It cannot raise or unset a cap, change
 scope/size/reserved minimums, resume a person’s pause, retry saved job fields or write an answer/standing guidance.
 The same action policy bounds the pi tools; unattended tools additionally need the explicit process grant.
 

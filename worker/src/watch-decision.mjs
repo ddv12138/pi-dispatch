@@ -7,11 +7,8 @@ const finite = (value) => typeof value === "number" && Number.isFinite(value);
 const safeName = (value) => typeof value === "string" && NAME.test(value) && !["constructor", "prototype", "__proto__", "samples", "message", "text"].includes(value);
 
 export function validateWatchDecision(value, { resolveModel = () => null } = {}) {
-	if (!record(value) || Object.keys(value).some((key) => !["model", "maxTokens", "questions", "act", "fields"].includes(key))) return fail();
+	if (!record(value) || Object.keys(value).some((key) => !["model", "questions", "act", "fields"].includes(key))) return fail();
 	if (typeof value.model !== "string" || value.model.length > 256 || !value.model.includes("/")) return fail();
-	if (!Number.isSafeInteger(value.maxTokens) || value.maxTokens < 1) return fail();
-	const maxTokens = value.maxTokens;
-	if (!Number.isSafeInteger(maxTokens)) return fail();
 	let model;
 	try { model = resolveModel(value.model); } catch { return fail(); }
 	if (!model || model.type !== "classifier" || !record(model.cost) || !finite(model.cost.input) || model.cost.input < 0 || model.cost.output !== 0) return fail();
@@ -32,7 +29,7 @@ export function validateWatchDecision(value, { resolveModel = () => null } = {})
 	}
 	if (value.fields !== undefined && (!Array.isArray(value.fields) || value.fields.length > 32 || new Set(value.fields).size !== value.fields.length || !value.fields.every(safeName))) return fail();
 	if (Buffer.byteLength(JSON.stringify(value)) > 16384) return fail();
-	return { ok: true, config: JSON.parse(JSON.stringify(value)), maxTokens };
+	return { ok: true, config: JSON.parse(JSON.stringify(value)) };
 }
 
 /** Arbitrary fingerprint values and sample text are deliberately excluded from the default state. */
@@ -47,14 +44,14 @@ export function projectWatchDecisionState(finding, fields = []) {
 	return state;
 }
 
-/** A trusted pinned-runtime bound is required; input-only pricing alone is no token bound. */
+/** A trusted pinned-runtime bound is required; input-only pricing alone is no bound. */
 export function prepareWatchDecision(config, finding, { resolveModel, boundCostTokens } = {}) {
 	const checked = validateWatchDecision(config, { resolveModel });
 	if (!checked.ok || typeof boundCostTokens !== "function") return fail();
 	const state = projectWatchDecisionState(finding, checked.config.fields);
 	let boundTokens;
 	try { boundTokens = boundCostTokens({ model: checked.config.model, state, questions: checked.config.questions }); } catch { return fail(); }
-	if (!Number.isSafeInteger(boundTokens) || boundTokens < 0 || boundTokens > checked.maxTokens) return fail();
+	if (!Number.isSafeInteger(boundTokens) || boundTokens < 0) return fail();
 	return { ...checked, state, boundTokens };
 }
 

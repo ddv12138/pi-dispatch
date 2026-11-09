@@ -1561,49 +1561,53 @@ test("an issue one-shot is orthogonal to the run vocabulary -- each field surviv
  * bullet names the forge and its words, and this reproduces that string from `PR_ACTIONS` and requires it
  * to be present. It is the vocabulary's fifth copy in the tree and the last one that was unguarded.
  */
-// --- run.portfolio (issue #505): a cron trigger whose job may send a priorities plan back ---
+// --- run.portfolio and the token budgets (C2): all removed, all refused by name ---
 
-test("run.portfolio is accepted on a cron trigger, true and false both carried at run level", () => {
-	assert.equal(parse([withRun(CRON, { portfolio: true })])[0].run.portfolio, true);
-	assert.equal(parse([withRun(CRON, { portfolio: false })])[0].run.portfolio, false, "today's default, stated, is carried (run.resume's rule)");
-});
-
-test("run.portfolio that is not a boolean is refused at load, naming the trigger and the field", () => {
-	for (const bad of ["true", 1, 0, null, {}, []]) {
-		assert.throws(
-			() => parse([withRun(CRON, { portfolio: bad })]),
-			(e) => isConfigError(e) && e.message === `cron trigger "nightly-tidy": run.portfolio must be true or false when present: ${PATH}`,
-			`portfolio ${JSON.stringify(bad)} must refuse`,
-		);
-	}
-});
-
-test("run.portfolio is refused on every webhook kind on every forge, false included", () => {
+test("run.portfolio is refused on every trigger type, true and false included, naming the removal", () => {
 	const ISSUE = { on: { type: "issue", action: ["closed"] }, run: { kind: "github", flow: "deploy" } };
-	const entries = [LABEL, COMMENT, PR_LABELED, PR_AUTO, ISSUE, ...FORGE_ENTRIES.map((f) => f.entry)];
+	const entries = [CRON, LABEL, COMMENT, PR_LABELED, PR_AUTO, ISSUE, ...FORGE_ENTRIES.map((f) => f.entry)];
 	for (const entry of entries) {
-		for (const value of [true, false]) {
+		for (const value of [true, false, null, "true", 1]) {
+			if (value === null) continue; // absent/null is not set, as everywhere in this loader
 			assert.throws(
 				() => parse([withRun(entry, { portfolio: value })]),
-				(e) => isConfigError(e) && e.message.startsWith("trigger at index 0: run.portfolio is only available on a cron trigger") && e.message.endsWith(PATH),
-				`${entry.run.kind} ${entry.on.type} must refuse portfolio ${value}`,
+				(e) => isConfigError(e) && e.message === `trigger at index 0: run.portfolio was removed with the token budget and allocation; remove it (a portfolio job, its snapshot and its plan no longer exist): ${PATH}`,
+				`${entry.run.kind} ${entry.on.type} must refuse portfolio ${JSON.stringify(value)}`,
 			);
 		}
 	}
-});
-
-test("run.portfolio: true beside run.command is refused at load; false beside one loads", () => {
-	assert.throws(
-		() => parse([withRun(withCommand(CRON), { portfolio: true })]),
-		(e) => isConfigError(e) && e.message === `cron trigger "nightly-tidy": run.portfolio cannot be set beside run.command: a budget plan is written by a flow's judgement, and a command has no committed skill to review: ${PATH}`,
-	);
-	assert.equal(parse([withRun(withCommand(CRON), { portfolio: false })])[0].run.portfolio, false);
-});
-
-test("run.portfolio absent stays ABSENT: an unflagged cron entry normalizes byte-identically to before the feature", () => {
+	// An unflagged trigger still normalizes without a portfolio field at all.
 	const [t] = parse([CRON]);
 	assert.equal("portfolio" in t.run, false);
-	assert.equal(JSON.stringify(t.run), JSON.stringify({ kind: "local", folder: "/proj", flow: "tidy", task: "run the tidy pass", provider: undefined, model: undefined, maxTurns: undefined, github: undefined, packages: undefined, image: undefined, resume: undefined }));
+});
+
+test("run.maxTokens and the three token windows are refused on every trigger kind, naming the retirement", () => {
+	for (const field of ["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) {
+		for (const value of [2500, 0, null, "2500"]) {
+			if (value === null) continue; // absent/null is not set
+			assert.throws(
+				() => parse([withRun(CRON, { [field]: value })]),
+				(e) => isConfigError(e) && e.message === `cron trigger "nightly-tidy": run.${field} was retired with the token budgets; remove it (the deployment no longer has a token budget): ${PATH}`,
+				`${field}=${JSON.stringify(value)}`,
+			);
+		}
+	}
+	// The near misses point at the retired field, never at a typo to fix.
+	for (const [field, meant] of [["max_token", "run.maxTokens"], ["maxCostTokens", "run.maxTokens"], ["dailyCostTokens", "run.dailyTokenCap"], ["weeklyCostTokens", "run.weeklyTokenCap"], ["monthlyCostTokens", "run.monthlyTokenCap"]]) {
+		assert.throws(
+			() => parse([withRun(CRON, { [field]: 2 })]),
+			(e) => isConfigError(e) && e.message === `cron trigger "nightly-tidy": run.${field} is not a field; ${meant} was retired with the token budgets; remove it (the deployment no longer has a token budget): ${PATH}`,
+			field,
+		);
+	}
+	// Every kind refuses it: a webhook trigger has no cron name, so the refusal names its index.
+	assert.throws(
+		() => parse([withRun(LABEL, { maxTokens: 2 })]),
+		(e) => isConfigError(e) && e.message === `trigger at index 0: run.maxTokens was retired with the token budgets; remove it (the deployment no longer has a token budget): ${PATH}`,
+	);
+	// Absent stays absent: no token field is normalized onto the run.
+	const [t] = parse([CRON]);
+	for (const field of ["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) assert.equal(field in t.run, false);
 });
 
 // --- run.awaitInput (REQ-AWAIT-INPUT, issue #625) ---

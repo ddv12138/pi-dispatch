@@ -9,7 +9,7 @@ import { basename, dirname, join, resolve as resolvePath } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { readPidNamespace, runnerIdentity } from "./child-route.mjs";
 import { parseAllowedModels } from "./config.mjs";
-import { configError, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "./outcome.mjs";
+import { configError, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE } from "./outcome.mjs";
 
 /**
  * Process-wide usage meter (issue #58; REQ-TOKEN-ACCOUNTING-AND-CAPS, CONST-BUDGET-BEFORE-TOKENS).
@@ -20,7 +20,7 @@ import { configError, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGE
  * `AgentSession._eventListeners` is an array on the instance and `Agent.listeners` a Set on the
  * instance, and no event carries a sessionId. A subagent session an extension spawns through
  * `createAgentSession` therefore emits NOTHING on the parent's bus. A 16-wide fanout shows up on our
- * bus as roughly ONE turn, so both the token cap and the run record understate spend precisely on
+ * bus as roughly ONE turn, so the run record understates spend precisely on
  * the most expensive jobs -- the opposite of what a spend control is for.
  *
  * THE CHOKE POINT, at the 0.99.1 pin (issue #509): `ModelRuntime.prototype`. Every model call an
@@ -90,12 +90,11 @@ import { configError, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGE
  *    scheduled there -- is judged and counted like a call from outside. Before the token, the context alone
  *    decided, and such a call was judged and counted by neither half.
  *
- * The TOKEN cap here is still structurally LAGGING for the same reason token-budget.mjs's is: usage is known
- * only after a call completes, so its hard stop is a runaway backstop, not a before-the-spend cap (OQ-010's
- * reservation for the per-job cap keeps holding on it). There is NO pre-call spend bound in the runner any
- * more: the per-job cost guard (issue #501) is gone, and the only bound that precedes the container is the
- * worker's token-window reservation (DES-TOKEN-RESERVE-AND-SETTLE), settled from this meter's totals after
- * the run.
+ * METERING ONLY: this meter has no per-job token budget. It accumulates totals, the per-model ledger, cost and
+ * the `metered` flag; nothing here stops a job for crossing a token amount. The one stop it still carries is the
+ * model policy (MODEL_NOT_ALLOWED), judged before a call by the guard, and the child meter's fail-closed stop
+ * when its ledger can no longer be written. The only bound that precedes the container is the worker's token
+ * reserve (DES-TOKEN-RESERVE-AND-SETTLE), settled from this meter's totals after the run.
  */
 
 /** Where a runtime call's options carry its dispatch token (trap #5 above): a symbol, so it is never serialised. */
@@ -171,14 +170,18 @@ export const RUNTIME_STREAM_METHODS = Object.freeze(["streamSimple", "stream", "
 export const RUNTIME_RESULT_METHODS = Object.freeze(["classify", "generateImages"]);
 
 /**
- * The one table of the meter's stops (issues #501, #502): each reason the meter can stop a job for, and the
- * `errorMessage` its hard stop carries. One table so every stopped call says WHICH policy stopped it, in the
- * session's own transcript as well as on the exit line, and so a new stop is a row here rather than a new
- * flag beside `breached`. Frozen: the meter refuses a reason that is not a key (meter.stop throws), so a typo
- * cannot become a stop with an `undefined` message.
+ * The one table of the meter's stops (issue #502), and the fail-closed reason a child uses when it can no longer
+ * be metered. Each row is the `errorMessage` its hard stop carries, so every stopped call says WHICH policy
+ * stopped it, in the session's own transcript as well as on the exit line. Frozen: the meter refuses a reason
+ * that is not a key (meter.stop throws), so a typo cannot become a stop with an `undefined` message.
+ *
+ * `meter-failed` is INTERNAL to the child meter: a failed ledger write leaves the child unavoidable-unmetered,
+ * so it refuses its later calls rather than spend unrecorded. It is never produced by run-job's own meter, and
+ * there is no token-budget row: the per-job token budget is gone.
  */
+export const METER_FAILED = "meter-failed";
 export const STOP_MESSAGES = Object.freeze({
-	[TOKEN_BUDGET]: "pi-dispatch: token cap exceeded",
+	[METER_FAILED]: "pi-dispatch: metering failed",
 	[MODEL_NOT_ALLOWED]: "pi-dispatch: model not allowed",
 });
 
@@ -231,21 +234,15 @@ function foldRow(into, row) {
  * The accumulator. Pure: no pi contact, no I/O, no timers -- everything pi-shaped is injected by
  * installProcessUsageMeter, so this is the part that is fully testable and always exercised.
  *
- * `maxTokens` is validated with attachTokenBudget's exact semantics and error text, because both read
- * the same PI_MAX_TOKENS env knob and an operator must not get two different verdicts on one value.
- * null/undefined means uncapped -- the meter is ALWAYS on so totals land in run history either way.
- *
- * `allowedModels` (issue #502) is the other policy the brake must serve. This meter only CARRIES it
- * (as `allowed`) so the installer arms the brake for it and the exit decision can name its stop; the
- * per-call check that acts on it is the guard's (wrapModelRuntime's `guard`). It is null when unset.
- * The per-job cost cap (issue #501) is gone: the only token bound that precedes the container is the
- * worker's window reservation, and this cap stays the settle-time lagging backstop it always was.
+ * METERING ONLY. There is no token amount this meter can stop for: it is ALWAYS on so totals land in run
+ * history, and it never aborts a session. `allowedModels` (issue #502) is the policy the brake must serve. This
+ * meter only CARRIES it (as `allowed`) so the installer arms the brake for it and the exit decision can name
+ * its stop; the per-call check that acts on it is the guard's (wrapModelRuntime's `guard`). It is null when
+ * unset. The per-job cost guard (issue #501) and the per-job token budget are both gone.
  *
  * ONE STOP, FIRST WINS. `state.stopReason` is null until the first stop and is never overwritten: a job that
- * a model refusal stopped and whose late settles then cross the token cap is a model-not-allowed stop, and the
- * exit line must name the cause rather than the last thing to notice. `onStop(reason, detail)` fires once, on
- * that first stop. `state.breached` stays, read-only, as "the stop was the token cap", so every reader of
- * the old flag keeps its meaning.
+ * a model refusal stopped stays a model-not-allowed stop, and the exit line must name the cause rather than
+ * the last thing to notice. `onStop(reason, detail)` fires once, on that first stop.
  *
  * `onChange()` (issue #500) fires after every change a child ledger must carry: when a call is observed (so
  * `calls` and `unresolved` rise before the provider answers, and a child killed mid-call leaves `unresolved`
@@ -255,17 +252,12 @@ function foldRow(into, row) {
  *
  * `setChildren(fold)` (issue #500) hands the meter the children's totals (foldChildLedgers). From then on the
  * snapshot's totals include the children, `rootTotal`, `otherTotal` and `looseTotal` stay the parent's own,
- * and the new `childTotal` closes the partition: root + other + loose + child === total. The token cap is
- * checked against parent plus children, on every record and on every fold.
+ * and the new `childTotal` closes the partition: root + other + loose + child === total.
  */
-export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionId, onStop, onChange = null } = {}) {
-	if (maxTokens !== null && maxTokens !== undefined && (!Number.isInteger(maxTokens) || maxTokens < 1)) {
-		throw new Error(`invalid PI_MAX_TOKENS: ${maxTokens}`);
-	}
+export function createUsageMeter({ allowedModels = null, rootSessionId, onStop, onChange = null } = {}) {
 	if (allowedModels !== null && (!Array.isArray(allowedModels) || allowedModels.length === 0)) {
 		throw new Error("invalid PI_ALLOWED_MODELS: want a non-empty list or null");
 	}
-	const cap = maxTokens ?? null;
 	const allowed = allowedModels === null ? null : Object.freeze(allowedModels.map((entry) => Object.freeze({ ...entry })));
 	// Only a non-empty string can be the root. An undefined rootSessionId must NOT match an undefined
 	// options.sessionId -- that would file every unattributed call as root and hide the fanout.
@@ -275,7 +267,7 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 		input: 0,
 		output: 0,
 		// totalTokens is the BILLED total (input + output + cache read/write), so total >= input + output
-		// -- deliberately, exactly as in token-budget.mjs. The cap keys on billed tokens; do not "fix".
+		// -- deliberately. Metering keys on billed tokens; do not "fix".
 		total: 0,
 		// The attribution split. INVARIANT: rootTotal + otherTotal + looseTotal === total, because every
 		// record() adds its billed tokens to exactly one of the three. otherTotal > 0 is spend the
@@ -292,15 +284,11 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 		unresolved: 0,
 		// Calls whose answer carried no usable usage, or a broken one (issue #571, usageUnreported below):
 		// pi recorded them as zeros or a partial count, or never sent a usage block, so the token total is
-		// short. Counted on every run, capped or not; a forward's outer call is not. This is the meter's ONE
+		// short. Counted on every run; a forward's outer call is not. This is the meter's ONE
 		// completeness counter since the money floor counters died with the cost guard.
 		unreported: 0,
 		// The first stop's reason (a STOP_MESSAGES key), or null. Set once by stop(), never overwritten.
 		stopReason: null,
-		// The pre-#501 flag, kept as a read-only view: true exactly when the stop was the token cap.
-		get breached() {
-			return this.stopReason === TOKEN_BUDGET;
-		},
 		sessionIds: new Set(),
 	};
 
@@ -357,12 +345,9 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 		}
 	}
 
-	/** Parent plus children, the number the token cap is judged on. */
-	const combinedTotal = () => state.total + (children?.total ?? 0);
-
 	/**
-	 * SYNCHRONOUS by design, like attachTokenBudget's listener: the breach flag must be set before the
-	 * caller's next line runs, or the next provider call slips through under the cap.
+	 * SYNCHRONOUS by design, like attachSessionMeter's listener: the totals must land before the caller's
+	 * next line runs, so a child ledger written from the change hook already carries them.
 	 */
 	function record(usage, ctx = {}) {
 		const u = usage ?? {};
@@ -411,9 +396,6 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 			total: billed,
 		});
 
-		if (cap !== null && combinedTotal() > cap) stop(TOKEN_BUDGET, combinedTotal());
-		// Accumulation continues past the breach on purpose: the overshoot is the interesting number
-		// (it is what the lag actually cost), and hiding it would make the cap look tighter than it is.
 		changed();
 		return state;
 	}
@@ -562,8 +544,7 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 	 *     is every row field by pair, so a fold that lost its `prev` (a caught throw, a bug) cannot forget spend.
 	 *     `unresolved` follows the fold: a call that settled is no longer in flight. So does `unmetered`, which the
 	 *     children hook keeps itself (it may un-count a child that was slow to start).
-	 * The token cap is judged on parent plus children here too, because a child's spend reaches the parent only
-	 * through this call.
+	 * There is no cap check here: the fold feeds totals, the ledger and the child counts only.
 	 */
 	function setChildren(fold) {
 		const carry = (value) => (typeof value === "number" && value >= 0 && value <= Number.MAX_SAFE_INTEGER ? value : Number.MAX_SAFE_INTEGER);
@@ -593,7 +574,6 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 			unreported: high("unreported", fold?.usageUnreported ?? 0),
 			rows: [...rows.values()],
 		};
-		if (cap !== null && combinedTotal() > cap) stop(TOKEN_BUDGET, combinedTotal());
 	}
 
 	/**
@@ -667,7 +647,7 @@ export function createUsageMeter({ maxTokens, allowedModels = null, rootSessionI
 		if (typeof version === "string" && version.length > 0) piAiVersion = version;
 	}
 
-	return { state, cap, allowed, stop, record, observe, observeResult, snapshot, usageSnapshot, setPiAiVersion, rows, setChildren };
+	return { state, allowed, stop, record, observe, observeResult, snapshot, usageSnapshot, setPiAiVersion, rows, setChildren };
 }
 
 
@@ -810,19 +790,19 @@ const ADMITTED = Symbol("admitted");
 
 /**
  * What an `isStopped()` answer means (issue #500): null, undefined or false is "go"; a STOP_MESSAGES key is a stop
- * for that reason. Fail closed on everything else: any other truthy answer, or a throw, is a stop as the token cap,
- * the brake's original message. A STOP that cannot be read is still a STOP, and a child that ignored a garbled one
- * would spend past a parent that already stopped.
+ * for that reason. Fail closed on everything else: any other truthy answer, or a throw, is a model-policy stop,
+ * the brake's only policy message now that the token budget is gone. A STOP that cannot be read is still a STOP,
+ * and a child that ignored a garbled one could call a model its parent's list forbids.
  */
 function externalStop(isStopped) {
 	let answer;
 	try {
 		answer = isStopped();
 	} catch {
-		return TOKEN_BUDGET;
+		return MODEL_NOT_ALLOWED;
 	}
 	if (answer === null || answer === undefined || answer === false) return null;
-	return typeof answer === "string" && Object.hasOwn(STOP_MESSAGES, answer) ? answer : TOKEN_BUDGET;
+	return typeof answer === "string" && Object.hasOwn(STOP_MESSAGES, answer) ? answer : MODEL_NOT_ALLOWED;
 }
 
 /**
@@ -880,8 +860,8 @@ function judge({ meter, hardStop, guard, method, model, args, skip, isStopped = 
  *      would have to dispatch the call it just refused; the runner refuses before the first prompt when a
  *      policy is set and the brake is missing (assertPoliciesEnforceable). The guard is createPolicyGuard's
  *      model guard (issue #502, only when a list is set); with no list there is no guard, and every call goes
- *      through exactly as before. The token cap is NOT judged here: it has no pre-call bound (D2/裁决 1), it
- *      stops at the meter's settle-time check on the accumulated total.
+ *      through exactly as before. No token cap is judged here (there is none): the only stop this seam
+ *      enforces is the model list.
  *   4. Everything else is the original method, its stream observed (or its promise, for classify and
  *      generateImages) with the (provider, model) pair read off the Model object dispatched on and the
  *      sessionId off the options -- never parsed back out of a settled message, whose provider/model a
@@ -988,7 +968,7 @@ export function wrapModelRuntime({ ModelRuntime, meter, hardStop = null, hardSto
  * classifierErrorResult/imageErrorResult build (pi-ai 0.99.1, utils/model-operations.js), with zero usage
  * and `stopReason: "aborted"`, for the reason makeHardStopStream gives.
  */
-export function defaultHardStopResult(method, model, message = STOP_MESSAGES[TOKEN_BUDGET]) {
+export function defaultHardStopResult(method, model, message = STOP_MESSAGES[MODEL_NOT_ALLOWED]) {
 	const base = { api: model?.api, provider: model?.provider, model: model?.id, usage: zeroUsage(), stopReason: "aborted", errorMessage: message, timestamp: Date.now() };
 	return method === "generateImages" ? { ...base, output: [] } : { ...base, answers: {} };
 }
@@ -1059,7 +1039,7 @@ export function wrapProviderStreams({ inner, fallbackModels, meter, hardStop, gu
  * inventing usage here would corrupt the very totals this module exists to get right) and
  * `stopReason: "aborted"` rather than `"error"`. That second one matters: pi's
  * `isRetryableAssistantError` returns false whenever stopReason !== "error", so an aborted terminal
- * message will NOT spin pi's auto-retry. An "error" here would make the cap trigger paid retries.
+ * message will NOT spin pi's auto-retry. An "error" here would make a policy stop trigger paid retries.
  *
  * `createStream` is injected -- that is what keeps this function pure and this file free of any static
  * pi import. installProcessUsageMeter passes the real `createAssistantMessageEventStream` it pulled off
@@ -1068,7 +1048,7 @@ export function wrapProviderStreams({ inner, fallbackModels, meter, hardStop, gu
  * The returned function is `(model, message)`: the wrappers pass the stop reason's STOP_MESSAGES row, so one
  * brake serves every stop. `message` given here is only the default for a caller that passes none.
  */
-export function makeHardStopStream({ createStream, message: defaultMessage = STOP_MESSAGES[TOKEN_BUDGET] }) {
+export function makeHardStopStream({ createStream, message: defaultMessage = STOP_MESSAGES[MODEL_NOT_ALLOWED] }) {
 	if (typeof createStream !== "function") throw new Error("makeHardStopStream requires createStream");
 	return (model, message = defaultMessage) => {
 		const stream = createStream();
@@ -1242,7 +1222,7 @@ function reasonOf(error) {
 
 /**
  * Install both halves of the meter. Returns `ok: false` -- and the caller falls back to the per-session
- * token budget -- ONLY when the RUNTIME half cannot meter, because that half is the one every session
+ * token meter -- ONLY when the RUNTIME half cannot meter, because that half is the one every session
  * dispatches through. A compat half that could not install degrades the meter without disabling it, and is
  * named on the `usage_meter` line (`compat: false` with a reason) rather than hidden behind a plain ok:true.
  *
@@ -1255,8 +1235,8 @@ function reasonOf(error) {
  *
  * The compat half. Each candidate from resolvePiAiCompat is loaded and accepted only when it IS, by object identity,
  * the module pi hands an extension for `@earendil-works/pi-ai` (defaultLoadExtensionModules), or a view of it whose
- * PI_AI_REGISTRY_FUNCTIONS are all identical to the candidate's. pi 1.5.0 hands a view, so a capped job is refused
- * unless this holds.
+ * PI_AI_REGISTRY_FUNCTIONS are all identical to the candidate's. pi 1.5.0 hands a view, so a policy-armed job is
+ * refused unless this holds.
  * The accepted module also supplies the brake's stream factory and the ledger's pricing provenance (the
  * `version` in the package.json above its dist/), because it is the copy whose providers priced the calls.
  * Registration goes straight through the accepted compat's own `registerApiProvider` (at 0.99.1 the
@@ -1344,11 +1324,9 @@ export async function installProcessUsageMeter({
 		}
 	}
 
-	// Armed only when a POLICY exists -- a token cap or a model list -- so a job with none of them
-	// can never have a call stopped. The list is enforced BEFORE a call, by the guard, and a refusal needs this
-	// hard stop to answer with; the token cap needs it too, because its settle-time check answers every LATER
-	// call with the stop (the lagging in-run backstop, OQ-010 -- there is no pre-call bound since the cost
-	// guard went).
+	// Armed only when a POLICY exists -- the model list, or `brake: true` for a child that must answer a parent's
+	// STOP -- so a job with none of them can never have a call stopped. The list is enforced BEFORE a call, by the
+	// guard, and a refusal needs this hard stop to answer with. There is no token cap to arm it for.
 	// The stream factory comes from the accepted compat copy, so a compat half that did not install leaves no
 	// brake for either half, and the runner then refuses a list before the first prompt.
 	const createStream = typeof module?.createAssistantMessageEventStream === "function"
@@ -1358,7 +1336,7 @@ export async function installProcessUsageMeter({
 			: null;
 	// `brake: true` (issue #500) arms it with no policy at all: a child meter has none of its own to arm it, and still
 	// needs a hard stop to answer the parent's STOP with.
-	const armed = brake === true || meter.cap !== null || meter.allowed !== null;
+	const armed = brake === true || meter.allowed !== null;
 	const hardStop = armed && createStream ? makeHardStopStream({ createStream }) : null;
 	// A meter that was ASKED for a brake (`brake: true`, or an outside stop to answer, `isStopped`) and cannot build
 	// one is not a meter (issue #500): judge() never asks isStopped without a hard stop, so a parent's STOP would be
@@ -1419,9 +1397,9 @@ export async function installProcessUsageMeter({
 	// The hook runs on a timer, where a throw is an uncaught exception that ends the runner with no exit line. So a
 	// throw is caught and logged, by name only and once, and the hook owns what a failed tick means.
 	// FAIL CLOSED under a policy: in a parent the hook IS the children's fold and detector, and a tick that threw has
-	// folded and detected nothing, so the job would run on with its children uncounted. With any policy the meter
-	// stops, for the stop an unmetered child gets (token_budget under a token cap, else model-not-allowed under a
-	// list). With none there is nothing to enforce, and the failure is only logged.
+	// folded and detected nothing, so the job would run on with its children uncounted. With a model list the meter
+	// stops, for the stop an unmetered child gets (model-not-allowed). With no policy there is nothing to enforce,
+	// and the failure is only logged.
 	// Failures are counted on the teardown line (`childrenFailed`).
 	let hookFailures = 0;
 	function tick(run) {
@@ -1430,7 +1408,7 @@ export async function installProcessUsageMeter({
 		} catch (error) {
 			if (hookFailures === 0) log("usage_meter_children_failed", { reason: reasonOf(error) });
 			hookFailures += 1;
-			const reason = meter.cap !== null ? TOKEN_BUDGET : meter.allowed !== null ? MODEL_NOT_ALLOWED : null;
+			const reason = meter.allowed !== null ? MODEL_NOT_ALLOWED : null;
 			if (reason !== null) meter.stop(reason, { cause: "children-hook" });
 			return null;
 		}
@@ -1487,9 +1465,8 @@ export async function installProcessUsageMeter({
 		// the call went through an entry that is not ours. So under a list a displacement stops the job, fail
 		// closed. Judging in the runtime half alone would not close it: a legacy compat call never enters a
 		// ModelRuntime (header, trap #5's converse). A job with no list keeps today's behaviour: re-wrap and count
-		// the re-arm. The token cap has no displaced-entry stop on purpose: with no pre-call bound anywhere (the
-		// cost guard is gone) a displaced entry costs the run a gap in a LAGGING count, the same gap the cap has
-		// always carried, not a bound that silently passed.
+		// the re-arm. A displaced entry with no list is only a gap in a LAGGING count, not a policy that silently
+		// passed: there is no token cap to enforce, and the gap is a metering hole, not a bound.
 		if (displaced > 0 && meter.allowed !== null && meter.state.stopReason === null) {
 			log("model_guard_displaced", { apis: displaced });
 			meter.stop(MODEL_NOT_ALLOWED);
@@ -1524,11 +1501,9 @@ export async function installProcessUsageMeter({
 	//
 	// `methods` is what the runtime half wrapped. `compat` is the compat half's accepted copy (a tag, or
 	// false with `compatError`), and `fallback` whether its builtin catalog loaded; without it the compat
-	// half sends builtin models to the wrong entry. `brake` is whether a hard-stop stream exists; `capped`
-	// rides along because it is what makes `brake` readable: an uncapped job has no brake BY DESIGN, so
-	// `capped:true` with `brake:false` is the alarm -- a cap that can only be enforced after the fact.
-	// `listed` (issue #502) is the other policy that arms the brake, so the same reading holds for it:
-	// true beside `brake:false` is a policy the runner then refuses.
+	// half sends builtin models to the wrong entry. `brake` is whether a hard-stop stream exists; `listed`
+	// (issue #502) is the policy that arms it, so true beside `brake:false` is a policy the runner then refuses.
+	// There is no `capped` field: the meter has no token budget.
 	// Reporting a plain `ok:true` over any of these would be a degraded meter calling itself healthy.
 	log("usage_meter", {
 		ok: true,
@@ -1538,7 +1513,6 @@ export async function installProcessUsageMeter({
 		apis: handle.apis,
 		...(accepted ? { fallback: fallbackModels !== null } : {}),
 		...(fallbackError ? { fallbackError } : {}),
-		capped: meter.cap !== null,
 		listed: meter.allowed !== null,
 		brake: hardStop !== null,
 	});
@@ -1558,14 +1532,12 @@ export async function installProcessUsageMeter({
  * Refuse, before the first prompt, a model list this runner cannot enforce BEFORE a call
  * (issue #502; INT-RUNNER-EXIT-CODE-PROTOCOL). The list is pre-call by definition: a list
  * checked after a call has already paid the model it forbids. So it needs, together:
- *   - the process-wide meter installed (`meterOk`). The fallback bus meter (run-job's attachTokenBudget) sees a
+ *   - the process-wide meter installed (`meterOk`). The fallback bus meter (run-job's attachSessionMeter) sees a
  *     call only after it settled, which is exactly the after-the-fact enforcement this policy rules out;
  *   - a hard stop to answer a refused call with (`brake`), which needs the compat copy's stream factory;
  *   - a guard that judges each call FOR THAT POLICY (`enforces` lists the stop reasons the installed guard can
  *     refuse for: MODEL_NOT_ALLOWED for the list). The model guard (createModelGuard, issue #502) enforces it;
- *     run-job installs it only for this policy. The per-job token cap is deliberately NOT judged here: it has no
- *     pre-call form to enforce (its stop is the meter's settle-time check, OQ-010), so there is nothing a missing
- *     brake would make it enforce early.
+ *     run-job installs it only for this policy. There is no token cap to assert: the meter has no budget.
  * Missing any one, the job is refused as a tagged configError: exit 2, not retried, before any spend. Names
  * only, never values: the list is not echoed.
  */
@@ -1583,16 +1555,12 @@ export function assertPoliciesEnforceable({ allowedModels = null, meterOk, brake
 }
 
 /**
- * The stop handler run-job.mjs gives the meter (issues #500, #502). Every stop aborts the root session, the same
- * synchronous way, whichever policy it was; only a TOKEN stop logs `token_budget_exceeded`, because that line
- * means "the token cap", and a model stop that wrote it would send an operator to the wrong knob. Pure,
- * so the wiring is tested here rather than only read off run-job's source.
+ * The stop handler run-job.mjs gives the meter (issues #500, #502). A policy stop aborts the root session
+ * synchronously, so no later turn starts under a policy already known to be violated. There is no token budget
+ * and no token-abort log line. Pure, so the wiring is tested here rather than only read off run-job's source.
  */
-export function meterStopHandler({ onTokenAbort, abort }) {
-	return (reason, detail) => {
-		// A stop with a `cause` (issue #500: an unmetered child, a children hook that failed) is not the token cap being
-		// passed, whatever its reason: its own line (`unmetered_child`, `usage_meter_children_failed`) says why.
-		if (reason === TOKEN_BUDGET && typeof detail?.cause !== "string") onTokenAbort(detail);
+export function meterStopHandler({ abort }) {
+	return () => {
 		abort();
 	};
 }
@@ -2057,9 +2025,8 @@ export function createModelGuard({ allowedModels, log = () => {}, env = process.
  * (and then every call goes through exactly as before).
  *
  * The list decides which provider may be called at all, so a call it forbids must be refused as
- * `model-not-allowed` before dispatch. The per-job token cap has NO guard on purpose: its stop is the meter's
- * settle-time check on the accumulated total (the lagging in-run backstop, OQ-010), and there is no pre-call
- * bound anywhere since the cost guard went.
+ * `model-not-allowed` before dispatch. There is no token-cap guard to build: the meter has no token budget and
+ * no pre-call spend bound.
  *
  * `enforces` is the guard's own list, so assertPoliciesEnforceable sees the policy only when its guard is here.
  * `snapshot()` is `modelRefused` (only with a list), the worker's TOKEN_KEYS position unchanged, so with no list
@@ -2486,7 +2453,7 @@ export function childLedger({ state, metered = true, meter = null, guard = null 
 //
 // THE CONTROL FILE. The parent writes one file into the same directory, whole by temp file and rename:
 //   - `STOP`: `{ "v": 1, "reason": <a STOP_MESSAGES key> }` (stopFile). Once it exists, a child's next call is braked
-//     with that reason. Present but not readable as that shape, it is a stop as the token cap: a garbled STOP is still a
+//     with that reason. Present but not readable as that shape, it is a model-policy stop: a garbled STOP is still a
 //     STOP (externalStop). Missing means go.
 // It is read on every call, without blocking and without following a link (readLedger), so a FIFO or a symlink
 // planted under that name refuses rather than hangs. Every file in the directory is written by writeFileAtomic, whose
@@ -2607,7 +2574,7 @@ function readControl(fs, dir, name) {
 /**
  * The child's `isStopped` (issue #500): null while `<dir>/STOP` does not exist, its reason once it does. A STOP that is
  * not `{ v: 1, reason: <a STOP_MESSAGES key> }` answers true, and an unreadable one throws: externalStop turns both into
- * a stop as the token cap.
+ * a model-policy stop.
  */
 export function readStop({ dir, fs = DEFAULT_LEDGER_FS }) {
 	const text = readControl(fs, dir, STOP_FILE);
@@ -2636,9 +2603,10 @@ export function childLedgerName(pid, random = (bytes) => globalThis.crypto.getRa
  *     child started from the bundle runs the bundle's own copy, and wrapping another one counts nothing.
  *   - `compat`: `{ module, fallbackModels }`, the child's own pi-ai compat copy (installProcessUsageMeter `compat`). Its
  *     stream factory is the brake's.
- *   - `env`: the policy comes from it as the runner reads it: PI_ALLOWED_MODELS (the model guard). The token cap is
- *     not the child's: the parent judges it on its own spend plus every child's, and answers through STOP. A policy
- *     that does not parse leaves the child unmetered (`metered: false`), the floor, rather than unguarded.
+ *   - `env`: the policy comes from it as the runner reads it: PI_ALLOWED_MODELS (the model guard). There is no token
+ *     cap to inherit: the meter only accounts for tokens, and the parent brakes a child through STOP when a policy
+ *     stop fires. A policy that does not parse leaves the child unmetered (`metered: false`), the floor, rather
+ *     than unguarded.
  *   - `dir`, `name`: the ledger directory and this child's file in it.
  *   - `lazy`: write nothing until the first call is about to go out (the library route: a process that only imports pi
  *     and never calls leaves no file, so a test suite that imports pi hundreds of times cannot flood the directory).
@@ -2651,7 +2619,7 @@ export function childLedgerName(pid, random = (bytes) => globalThis.crypto.getRa
  * reports, BEFORE every call is dispatched with that call counted in flight (the child's guard, below), and once more
  * as `done` when the process exits. FAIL CLOSED ON A WRITE: the pre-dispatch write that fails refuses its call, so no
  * call goes out that the ledger does not already show; and once any write has failed (a full or unwritable /tmp, a
- * directory the agent removed), the child is unmetered and STOPPED: isStopped answers the token cap for every later
+ * directory the agent removed), the child is unmetered and STOPPED: isStopped answers `meter-failed` for every later
  * call, and every later write that still succeeds says `metered: false`. With the install failed, the ledger says `metered: false` and carries zeros. Returns
  * the state: `{ ok, metered, meter, guard, handles, write, verify }`, where `verify(runtime)` marks the child unmetered
  * unless that runtime dispatches through an install (a session's runtime, checked at session_start).
@@ -2729,7 +2697,7 @@ export async function startChildMeter({
 			return child;
 		}
 		child.metered = true;
-		child.meter = createUsageMeter({ maxTokens: null, allowedModels, onChange: () => child.write("running") });
+		child.meter = createUsageMeter({ allowedModels, onChange: () => child.write("running") });
 		const policy = createPolicyGuard({ allowedModels, env });
 		// THE PRE-DISPATCH WRITE. The guard is the last thing a call passes before it is dispatched (judge), so the child's
 		// guard wraps the policy guard (or stands alone, with no policy): once the policy admits a call, the ledger is
@@ -2747,7 +2715,7 @@ export async function startChildMeter({
 				child.write("running");
 				if (!child.failed) return null;
 				floor = before;
-				return TOKEN_BUDGET;
+				return METER_FAILED;
 			},
 			...(policy ? { prepare: (call) => policy.prepare(call) } : {}),
 			bind: (result) => policy?.bind?.(result),
@@ -2758,7 +2726,7 @@ export async function startChildMeter({
 			}),
 		};
 		// After a failed write, nothing more goes out: the ledger can no longer record it.
-		const isStopped = () => (child.failed ? TOKEN_BUDGET : readStop({ dir, fs }));
+		const isStopped = () => (child.failed ? METER_FAILED : readStop({ dir, fs }));
 		child.installOn = async (Class, copy) => {
 			const handle = await install({
 				ModelRuntime: Class,

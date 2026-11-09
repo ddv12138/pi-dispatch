@@ -19,7 +19,6 @@ import {
 	MODEL_POLICY_UNENFORCEABLE,
 	providerAuthRefused,
 	STOP_REASONS,
-	TOKEN_BUDGET,
 } from "../src/outcome.mjs";
 import { attachTurnBudget } from "../src/turn-budget.mjs";
 import { agentEnd, assistantError, assistantText, promptTurn, retryTurn } from "./helpers/pi-retry-events.mjs";
@@ -97,20 +96,15 @@ test("no terminal message is infra -- absence of evidence is not success", () =>
 
 // decideExit: a cap-abort surfaces as stopReason "aborted"; intercepting it names WHICH cap fired
 // and keeps it a policy outcome (exit 2, not retried) rather than the generic "aborted".
-test("token-budget abort exits 2 with reason token_budget", () => {
-	const outcome = decideExit({ budgetAborted: false, tokenAborted: true, terminal: { stopReason: "aborted" } });
+test("a turn-budget abort exits 2 with reason turn_budget", () => {
+	const outcome = decideExit({ budgetAborted: true, budgetTurns: 31, terminal: {} });
 	assert.equal(outcome.code, EXIT_POLICY);
-	assert.equal(outcome.reason, "token_budget");
-});
-
-test("turn-budget abort wins over token-budget for a stable reason", () => {
-	const outcome = decideExit({ budgetAborted: true, budgetTurns: 31, tokenAborted: true, terminal: {} });
 	assert.equal(outcome.reason, "turn_budget");
 	assert.equal(outcome.turns, 31);
 });
 
 test("no abort defers to the stopReason classification", () => {
-	const outcome = decideExit({ budgetAborted: false, tokenAborted: false, terminal: { stopReason: "stop" } });
+	const outcome = decideExit({ budgetAborted: false, terminal: { stopReason: "stop" } });
 	assert.equal(outcome.code, EXIT_COMPLETED);
 	assert.equal(outcome.reason, "stop");
 });
@@ -132,15 +126,14 @@ test("a run a tool ended exits 0 as tool-terminated, not 1 as unknown-stop-reaso
 		{ type: "agent_end", messages: [assistant, result] },
 	]) terminal = captureTerminal(terminal, event);
 	assert.equal(terminal, result, "agent_end's last message is the tool result");
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
 });
 
 test("a tool-ended run still loses to every budget stop, and keeps its verdict on a command job", () => {
 	const terminal = toolResult();
-	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, tokenAborted: false, terminal }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: false, terminal }).reason, MODEL_NOT_ALLOWED);
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal }).reason, TOKEN_BUDGET);
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, command: { failed: false } }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
+	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, terminal }).reason, "turn_budget");
+	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, terminal }).reason, MODEL_NOT_ALLOWED);
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal, command: { failed: false } }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
 });
 
 test("only the toolResult role is read as tool-terminated: an assistant without a stopReason is still unknown", () => {
@@ -151,14 +144,13 @@ test("only the toolResult role is read as tool-terminated: an assistant without 
 
 test("a parked run exits 0 as awaiting-input, below every budget stop and a classified rejection", () => {
 	const terminal = { role: "toolResult", toolName: "await_human_input", content: [], isError: false };
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, parked: true }), { code: EXIT_COMPLETED, reason: AWAITING_INPUT });
-	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 4, tokenAborted: false, terminal, parked: true }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: false, terminal, parked: true }).reason, MODEL_NOT_ALLOWED);
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal, parked: true }).reason, TOKEN_BUDGET);
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal, parked: true }), { code: EXIT_COMPLETED, reason: AWAITING_INPUT });
+	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 4, terminal, parked: true }).reason, "turn_budget");
+	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, terminal, parked: true }).reason, MODEL_NOT_ALLOWED);
 	const rejected = { code: EXIT_POLICY, reason: "retry-unresumable" };
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal, rejected, parked: true }), rejected);
+	assert.equal(decideExit({ budgetAborted: false, terminal, rejected, parked: true }), rejected);
 	// Unparked, the same terminal is a run a tool ended (issue #623), never a park.
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "tool-terminated" });
 });
 
 // --- decideExit for command jobs (issue #189, run.command) ---
@@ -167,7 +159,7 @@ test("a headless command run exits 0 as command-completed -- not retried as no-t
 	// session.prompt("/name args") dispatches the handler and resolves with NO assistant message.
 	// Before run.command, that shape was the retryable no-terminal branch: a SUCCESSFUL command job
 	// would be re-run and re-billed by the queue until attempts ran out.
-	const outcome = decideExit({ budgetAborted: false, tokenAborted: false, terminal: undefined, command: { failed: false } });
+	const outcome = decideExit({ budgetAborted: false, terminal: undefined, command: { failed: false } });
 	assert.deepEqual(outcome, { code: EXIT_COMPLETED, reason: "command-completed" });
 });
 
@@ -178,36 +170,33 @@ test("a throwing handler exits 1 as command-error, and wins over a success-claim
 	// Exit 1 retryable is the DELIBERATE choice (DES-COMMAND-ENTRY-POINT): pi hands us a message
 	// string, transient-vs-deterministic is undecidable, and the accepted cost is that a
 	// deterministic extension bug retries until the queue's attempts run out.
-	const failed = decideExit({ budgetAborted: false, tokenAborted: false, terminal: undefined, command: { failed: true } });
+	const failed = decideExit({ budgetAborted: false, terminal: undefined, command: { failed: true } });
 	assert.deepEqual(failed, { code: EXIT_INFRA, reason: "command-error" });
-	const failedWithTerminal = decideExit({ budgetAborted: false, tokenAborted: false, terminal: { stopReason: "stop" }, command: { failed: true } });
+	const failedWithTerminal = decideExit({ budgetAborted: false, terminal: { stopReason: "stop" }, command: { failed: true } });
 	assert.deepEqual(failedWithTerminal, { code: EXIT_INFRA, reason: "command-error" });
 });
 
 test("a handler that drove the model gets the terminal's real verdict -- a 429 inside stays retryable", () => {
 	const outcome = decideExit({
 		budgetAborted: false,
-		tokenAborted: false,
 		terminal: { stopReason: "error", errorMessage: "429" },
 		command: { failed: false },
 	});
 	assert.equal(outcome.code, EXIT_INFRA);
 	assert.equal(outcome.reason, "error");
-	const clean = decideExit({ budgetAborted: false, tokenAborted: false, terminal: { stopReason: "stop" }, command: { failed: false } });
+	const clean = decideExit({ budgetAborted: false, terminal: { stopReason: "stop" }, command: { failed: false } });
 	assert.deepEqual(clean, { code: EXIT_COMPLETED, reason: "stop" });
 });
 
-test("budget aborts still win over the command outcome -- a handler-driven fanout is bounded", () => {
-	const turns = decideExit({ budgetAborted: true, budgetTurns: 31, tokenAborted: false, terminal: undefined, command: { failed: false } });
+test("the turn budget still wins over the command outcome -- a handler-driven fanout is bounded", () => {
+	const turns = decideExit({ budgetAborted: true, budgetTurns: 31, terminal: undefined, command: { failed: false } });
 	assert.equal(turns.reason, "turn_budget");
-	const tokens = decideExit({ budgetAborted: false, tokenAborted: true, terminal: undefined, command: { failed: true } });
-	assert.equal(tokens.reason, "token_budget");
 });
 
 test("a prompt job's decision tree is byte-identical with command absent, null, or omitted", () => {
 	for (const command of [undefined, null]) {
 		assert.deepEqual(
-			decideExit({ budgetAborted: false, tokenAborted: false, terminal: undefined, command }),
+			decideExit({ budgetAborted: false, terminal: undefined, command }),
 			{ code: EXIT_INFRA, reason: "no-terminal-message" },
 		);
 	}
@@ -313,14 +302,13 @@ test("only an error stopReason can be a refusal, and budget aborts still win ove
 	const refusal = err("401 invalid x-api-key");
 	const isRetryable = NOT_TRANSIENT;
 	assert.equal(classifyStopReason({ stopReason: "stop", errorMessage: "401 x" }, isRetryable).code, EXIT_COMPLETED);
-	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, tokenAborted: false, terminal: refusal, isRetryable }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal: refusal, isRetryable }).reason, "token_budget");
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal: refusal, isRetryable }).reason, "provider-auth-refused");
+	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, terminal: refusal, isRetryable }).reason, "turn_budget");
+	assert.equal(decideExit({ budgetAborted: false, terminal: refusal, isRetryable }).reason, "provider-auth-refused");
 	// decideExit without the predicate keeps every provider error retryable, as it was before #437.
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal: refusal }).reason, "error");
+	assert.equal(decideExit({ budgetAborted: false, terminal: refusal }).reason, "error");
 	// A handler-driven command turn gets the terminal's real verdict, refusal included; a thrown handler still wins.
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal: refusal, command: { failed: false }, isRetryable }).reason, "provider-auth-refused");
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: false, terminal: refusal, command: { failed: true }, isRetryable }).reason, "command-error");
+	assert.equal(decideExit({ budgetAborted: false, terminal: refusal, command: { failed: false }, isRetryable }).reason, "provider-auth-refused");
+	assert.equal(decideExit({ budgetAborted: false, terminal: refusal, command: { failed: true }, isRetryable }).reason, "command-error");
 	// classifyThrow is unchanged: a thrown 401 string is not the stopReason channel.
 	assert.equal(classifyThrow(new Error("401 invalid x-api-key")).code, EXIT_INFRA);
 });
@@ -570,7 +558,7 @@ test("run-job.mjs logs retry_predicate_unavailable when no pinned retry predicat
 });
 
 test("decideExit ranks a meter stop over everything but the turn budget: the catch path reuses it after a stop (issue #543)", () => {
-	for (const reason of ["model-not-allowed", "token_budget"]) {
+	for (const reason of ["model-not-allowed"]) {
 		assert.deepEqual(decideExit({ budgetAborted: false, meterStop: reason }), { code: EXIT_POLICY, reason });
 	}
 });
@@ -623,7 +611,7 @@ function runOneTurnJob(drive) {
 	});
 	const budget = attachTurnBudget(session, 1);
 	drive(emit);
-	const outcome = decideExit({ budgetAborted: budget.state.aborted, budgetTurns: budget.state.turns, tokenAborted: false, terminal, isRetryable: () => true });
+	const outcome = decideExit({ budgetAborted: budget.state.aborted, budgetTurns: budget.state.turns, terminal, isRetryable: () => true });
 	return { outcome, budget };
 }
 
@@ -684,36 +672,33 @@ test("pi's unresumable retry is policy under its own name, not a queue retry of 
 	assert.equal(classifyPromptRejection(new Error("Cannot continue from message role: toolResult"), { retryInFlight: true })?.reason, "retry-unresumable");
 });
 
-test("decideExit ranks a classified rejection below both budget aborts and above the terminal message", () => {
+test("decideExit ranks a classified rejection below the turn budget and above the terminal message", () => {
 	const rejected = { code: EXIT_POLICY, reason: "retry-unresumable", message: UNRESUMABLE };
 	// The last message a rejected prompt leaves is a toolUse, which alone would read as a clean exit 0.
 	const terminal = { stopReason: "toolUse" };
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, rejected }), rejected);
-	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 2, tokenAborted: false, terminal, rejected }).reason, "turn_budget");
-	assert.equal(decideExit({ budgetAborted: false, tokenAborted: true, terminal, rejected }).reason, "token_budget");
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal, rejected, command: { failed: true } }), rejected, "a command job's rejection is classified the same way");
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal, rejected }), rejected);
+	assert.equal(decideExit({ budgetAborted: true, budgetTurns: 2, terminal, rejected }).reason, "turn_budget");
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal, rejected, command: { failed: true } }), rejected, "a command job's rejection is classified the same way");
 	// Absent, the decision tree is byte-identical to before.
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "toolUse" });
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal }), { code: EXIT_COMPLETED, reason: "toolUse" });
 });
 
 // ── Issue #502: the meter's stop reaches the exit decision by reason ────────────────────────────
 
 test("the policy reasons are exported literals, spelled once", () => {
-	assert.deepEqual([TOKEN_BUDGET, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE], ["token_budget", "model-not-allowed", "model-policy-unenforceable"]);
+	assert.deepEqual([MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE], ["model-not-allowed", "model-policy-unenforceable"]);
 });
 
-test("decideExit: turn_budget > meterStop > tokenAborted > rejected > the terminal message", () => {
+test("decideExit: turn_budget > meterStop > rejected > the terminal message", () => {
 	const ok = { role: "assistant", stopReason: "stop" };
 	const rejected = { code: EXIT_POLICY, reason: "retry-unresumable", message: "x" };
-	for (const stop of [TOKEN_BUDGET, MODEL_NOT_ALLOWED]) {
-		assert.deepEqual(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok }), { code: EXIT_POLICY, reason: stop }, stop);
+	for (const stop of [MODEL_NOT_ALLOWED]) {
+		assert.deepEqual(decideExit({ budgetAborted: false, meterStop: stop, terminal: ok }), { code: EXIT_POLICY, reason: stop }, stop);
 		assert.equal(decideExit({ budgetAborted: true, budgetTurns: 3, meterStop: stop, terminal: ok }).reason, "turn_budget", `turn budget outranks ${stop}`);
-		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok, rejected }).reason, stop, `${stop} outranks a rejected prompt`);
-		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, tokenAborted: false, terminal: ok, command: { failed: true } }).reason, stop, `${stop} outranks a failed command`);
+		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, terminal: ok, rejected }).reason, stop, `${stop} outranks a rejected prompt`);
+		assert.equal(decideExit({ budgetAborted: false, meterStop: stop, terminal: ok, command: { failed: true } }).reason, stop, `${stop} outranks a failed command`);
 	}
-	assert.equal(decideExit({ budgetAborted: false, meterStop: MODEL_NOT_ALLOWED, tokenAborted: true, terminal: ok }).reason, MODEL_NOT_ALLOWED, "the meter's stop outranks the fallback's flag");
-	assert.equal(decideExit({ budgetAborted: false, meterStop: null, tokenAborted: true, terminal: ok, rejected }).reason, TOKEN_BUDGET, "the fallback bus meter still names a token stop");
-	assert.deepEqual(decideExit({ budgetAborted: false, tokenAborted: false, terminal: ok }), { code: EXIT_COMPLETED, reason: "stop" }, "no stop at all: unchanged");
+	assert.deepEqual(decideExit({ budgetAborted: false, terminal: ok }), { code: EXIT_COMPLETED, reason: "stop" }, "no stop at all: unchanged");
 });
 
 test("classifyThrow honours the tag of the unenforceable refusal: exit 2, its own reason", () => {

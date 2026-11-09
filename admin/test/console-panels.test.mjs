@@ -4,7 +4,7 @@ import { parseDocument } from "./helpers/script-dom.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 import { PAGES, pagePanels, parsePageQuery, renderPage } from "../src/console/pages.mjs";
-import { BEAT_FRESH_MS, COUNT_WINDOWS_UTC_TEXT, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, tokensHtml, runCost, shownPath, timeHtml, tokensText, utcText, workersOnline } from "../src/console/panels.mjs";
+import { BEAT_FRESH_MS, NO_WORKER_TEXT, STALE_BEATS_TEXT, ageText, insightsBody, tokensHtml, runCost, shownPath, timeHtml, tokensText, utcText, workersOnline } from "../src/console/panels.mjs";
 import { SHELL_PANEL_IDS } from "../src/console/shell.mjs";
 import { CONSOLE_CSS } from "../src/console/style.mjs";
 import { CONSOLE_AUDIT_ACTIONS, CONSOLE_AUDIT_OUTCOMES, CONSOLE_AUDIT_READ_MAX, makeConsoleAudit, readConsoleAudit, verifyConsoleAudit } from "@edgehero/pi-dispatch/console-audit";
@@ -146,9 +146,9 @@ test("the configuration shows names and basenames, never a parser message or a r
 
 test("panels state degraded reads instead of drawing nothing: no snapshot, a floor, a partly paused fleet", async () => {
   // The shell's Parked count (`p-nav-parked`) is a panel too; with no snapshot it is drawn empty, never "could not be read".
-  // Issue #737: the overview's eight say so; the first run's two draw nothing (no snapshot is never a first run).
+  // Issue #737: the overview's seven say so; the first run's two draw nothing (no snapshot is never a first run).
   const none = (await pagePanels("overview", ctxOf("viewer", { snapshot: null }))).filter((p) => !SHELL_PANEL_IDS.includes(p.id)).map((p) => p.html);
-  assert.equal(none.length, 11);
+  assert.equal(none.length, 10);
   assert.equal(none.filter((h) => h === "").length, 3, "the two setup panels and operator-only agent-write count stay empty for a viewer");
   for (const h of none.filter((x) => x !== "")) assert.match(h, /could not be read/);
   const some = (await pagePanels("overview", ctxOf("viewer", { snapshot: snapshot() }))).map((p) => p.html).join("");
@@ -1670,8 +1670,8 @@ test("the runs table: the outcome as the panel's word on a badge, quiet when com
   assert.equal(cellOf("gh-c"), badge("idle", "Completed"));
   assert.equal(cellOf("gh-a"), badge("parked", "Awaiting input"), "the word says it all: no reason part");
   assert.equal(cellOf("gh-x"), badge("idle", "Cancelled"));
-  const scope = shortSentence(REASONS["allocation-cap"].sentence);
-  assert.equal(cellOf("gh-r"), `${badge("refused", "Refused")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap">${scope.replace(/'/g, "&#39;")}</a></span>`);
+  // A retired reason an old record still names: the token in the code face, no explanation, still linked (C2).
+  assert.equal(cellOf("gh-r"), `${badge("refused", "Refused")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap"><span class="code">allocation-cap</span>, ${NO_EXPLANATION}</a></span>`);
   assert.match(cellOf("gh-f"), /^<span class="badge tone-failed">Failed<\/span><span class="reason"><a href="\/runs\?outcome=failed&amp;reason=container-never-started" title="container-never-started">/);
   // A recovery end the worker records as policy reads failed, its link by the word, its sentence kept.
   assert.equal(cellOf("gh-k"), `${badge("failed", "Failed")}<span class="reason"><a href="/runs?outcome=failed&amp;reason=recovery-cap" title="recovery-cap">${shortSentence(REASONS["recovery-cap"].sentence).replace(/'/g, "&#39;")}</a></span>`);
@@ -1739,7 +1739,7 @@ const overviewOf = async (snap, role = "viewer") => (await pagePanels("overview"
 
 test("the overview: the first run's two, then what needs a person, what waits, what runs and spend, the timeline and caps, waitlists and hosts (#710, #737)", async () => {
   const ids = (await overviewOf(snapshot())).map(([id]) => id);
-  assert.deepEqual(ids.filter((id) => !SHELL_PANEL_IDS.includes(id)), ["p-setup", "p-setup-empty", "p-needs", "p-waiting", "p-active", "p-spend", "p-agent-writes", "p-timeline", "p-caps", "p-waitlists", "p-hosts"]);
+  assert.deepEqual(ids.filter((id) => !SHELL_PANEL_IDS.includes(id)), ["p-setup", "p-setup-empty", "p-needs", "p-waiting", "p-active", "p-spend", "p-agent-writes", "p-timeline", "p-waitlists", "p-hosts"]);
   assert.deepEqual(ids.filter((id) => SHELL_PANEL_IDS.includes(id)).sort(), [...SHELL_PANEL_IDS].sort(), "and the shell's Parked count and headline");
 });
 
@@ -1822,21 +1822,18 @@ test("readable numbers: money in one fixed form with the exact amount on hover, 
   assert.equal(String(tokensHtml(1_500_000_000)), '<span title="1,500,000,000">1.50B</span>', "one fixed form at every magnitude");
   assert.equal(String(tokensHtml(999)), '<span title="999">999</span>', "below the ladder's first rung the count is exact");
   for (const bad of [-1, 1.5, null, "3"]) assert.equal(String(tokensHtml(bad)), "-");
-  const snap = { ...snapshot(), windows: { rows: [{ ledger: "deployment", name: "deployment", window: "day", counterTokens: 1_234_567, capTokens: 50_000_000, full: false }, { ledger: "deployment", name: "deployment", window: "month", counterTokens: 99_999_000, capTokens: 100_000_000, full: false }] } };
+  const snap = { ...snapshot(), spendByHour: { hours: Array.from({ length: 24 }, (_, i) => (i > 3 ? null : i === 0 ? 1_234_567 : 0)), unpriced: 0, floor: false, partial: false } };
   const panels = new Map(await overviewOf(snap));
-  // Spend today: the day window's spent and held, rounded down, the exact amount on hover; the cap beside it.
-  assert.match(panels.get("p-spend"), /<b><data value="1234567" title="1,234,567">1\.23M<\/data><\/b><span>of <span title="50,000,000">50\.00M<\/span><\/span>/);
-  // Caps: jobs started against their caps, a capsule per window with a cap; the windows are UTC, and say so.
-  const caps = panels.get("p-caps");
-  assert.match(caps, /title="Tokens today: 30%"/, "3 tokens of 10");
-  assert.ok(!caps.includes("Jobs today") && !caps.includes("Jobs week"), "no job window, no capsule");
-  assert.match(caps, /title="Deploy tokens month: 99%"/, "a window short of its cap never reads as the cap");
-  assert.ok(caps.includes(COUNT_WINDOWS_UTC_TEXT), "the windows are UTC, and say so");
-  assert.match(COUNT_WINDOWS_UTC_TEXT, /UTC/);
-  // The runs list's Job cap column.
-  const runs = [{ jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: "2026-10-08T15:00:00Z", tokensWindows: { reservedTokens: 2_500_001, settledTokens: 2_000_000, basis: "metered", modelBasis: null } }];
+  // Spend today: the records' settled sum, the exact amount on hover. No cap beside it: token windows are gone.
+  assert.match(panels.get("p-spend"), /<b><data value="1234567" title="1,234,567">1\.23M<\/data><\/b><span>settled today<\/span>/);
+  assert.ok(!panels.get("p-spend").includes("of <span"), "no cap line");
+  assert.ok(!panels.has("p-caps"), "the Caps panel is gone");
+  // The runs list's Tokens column is the record's actual total; no Job cap column.
+  const runs = [{ jobId: "gh-1", kind: "github", target: "acme/web#1", outcome: "completed", endedAt: "2026-10-08T15:00:00Z", usage: { tokens: 2_500_001 }, tokens: { total: 2_500_001 }, tokensWindows: { reservedTokens: 9_999_999, settledTokens: 9_999_999, basis: "metered", modelBasis: null } }];
   const list = (await pagePanels("runs", ctxOf("viewer", { runsPage: { runs, next: null, mirror: "ok" } }, parsePageQuery("runs", "").query))).map((p) => p.html).join("");
-  assert.match(list, /<td class="num hide-phone" data-l="Job cap"><span title="2,500,001">2\.50M<\/span><\/td><\/tr>/);
+  assert.match(list, /data-l="Tokens">2,500,001<\/td>/);
+  assert.ok(!list.includes("Job cap"), "the Job cap column is gone");
+  assert.ok(!list.includes("9.99M"), "the retired tokensWindows reservation is not drawn");
   // Fleet hosts: hundredths as cores; off and unknown as before; a value that is not hundredths shown as it is.
   const hosts = [
     { name: "h1", concurrency: "2", jobs: [], staleMs: 1000, budgetMemMiB: "8192", usedMemMiB: "2048", budgetCpuCenti: "800", usedCpuCenti: "150" },

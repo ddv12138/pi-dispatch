@@ -39,11 +39,11 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            fire one cron trigger now, once, exactly as its schedule would: its folder, flow,
                            task and every other field come from the triggers file (PI_TRIGGERS_FILE, else
                            ./triggers.json here); a second call in the same minute queues nothing.
-                           Both run forms take PI_WORKER_NAME (and --trigger PI_TRIGGERS_FILE and
-                           PI_MAX_TOKENS) from this shell, else from ./.env here, refusing a disagreement
-  pi-dispatch canary --role <role> --model <provider/model> --flow <flow> --cap-tokens <tokens>
+                           Both run forms take PI_WORKER_NAME (and --trigger PI_TRIGGERS_FILE) from
+                           this shell, else from ./.env here, refusing a disagreement
+  pi-dispatch canary --role <role> --model <provider/model> --flow <flow>
                            replay up to three retained recent jobs in disposable workspaces with forge
-                           access blocked, under one experiment cap [--count 1..10] [--json]
+                           access blocked [--count 1..10] [--json]
 
   pi-dispatch worker       drain the queue (run this in another terminal)
   pi-dispatch-receiver     webhook receiver for forge triggers, its own bin
@@ -345,13 +345,11 @@ async function killSwitchUrls(args, env, extraOptions = {}) {
 
 /**
  * `pi-dispatch run --trigger <cron id>` (issue #505): fire one cron trigger now, once, as its schedule would. Typed by
- * an operator only; no tool calls it. It is the way to run a `run.portfolio` job without waiting for its schedule
- * (`pi-dispatch run <folder>` makes a manual job, which never carries the flag).
+ * an operator only; no tool calls it.
  *
  * WHICH FILE: `PI_TRIGGERS_FILE`, else `./triggers.json` in this directory, doctor's rule (`triggersPath`) and the
- * one-shot rule the worker's own live checks read by, so the command and the worker's check of the portfolio flag
- * read one file. Not `config.triggersFile`, whose null means "the worker schedules no cron": a trigger fired by hand
- * does not need the worker's scheduler.
+ * one-shot rule the worker's own live checks read by. Not `config.triggersFile`, whose null means "the worker schedules
+ * no cron": a trigger fired by hand does not need the worker's scheduler.
  *
  * WHAT IS QUEUED: the trigger's own scheduler entry, from `loadSchedules` over that file (so a file the worker would
  * refuse is refused here, with the loader's message), and its data passed through whole. Nothing on the command line
@@ -371,9 +369,7 @@ async function runTrigger(values, positionals, env, { write, valkeyRefusal, now 
 	}
 	// PI_TRIGGERS_FILE and PI_WORKER_NAME by the deployment's rule (review of PR #575), the one VALKEY_URL is read by
 	// below: which file and which host queue are the deployment's facts, and a shell that does not export them must not
-	// read ./triggers.json or queue on the shared queue while the service uses the `.env`'s. PI_MAX_TOKENS too: it is
-	// the one other config value the worker's trigger loader (`loadSchedules`) accepts or refuses a file by (a trigger's
-	// `run.maxCostUsd` above it), so this command refuses exactly the files the worker refuses. `fleet` is the declared
+	// read ./triggers.json or queue on the shared queue while the service uses the `.env`'s. `fleet` is the declared
 	// PI_WORKER_NAME, already here. Keep this list equal to the loader's config inputs.
 	const deployment = cliDeploymentEnv(env, TRIGGER_LOADER_ENV_KEYS);
 	if (deployment.problem) return fail(`${deployment.problem}. Nothing was queued.`);
@@ -425,10 +421,10 @@ async function runTrigger(values, positionals, env, { write, valkeyRefusal, now 
 }
 
 /**
- * The env keys `run --trigger` resolves from the deployment: the file, the host, and every config value the worker's
- * trigger loader (`loadSchedules`: `triggersFile`, `maxCostUsd`, and `fleet` from a declared worker name) judges a file by.
+ * The env keys `run --trigger` resolves from the deployment: the file and the host, the two config values the worker's
+ * trigger loader (`loadSchedules`: `triggersFile`, and `fleet` from a declared worker name) judges a file by.
  */
-export const TRIGGER_LOADER_ENV_KEYS = Object.freeze(["PI_TRIGGERS_FILE", "PI_WORKER_NAME", "PI_MAX_TOKENS"]);
+export const TRIGGER_LOADER_ENV_KEYS = Object.freeze(["PI_TRIGGERS_FILE", "PI_WORKER_NAME"]);
 
 /**
  * Deployment keys for a CLI verb that acts for the deployment (review of PR #575): `keys` resolved by issue #471's rule

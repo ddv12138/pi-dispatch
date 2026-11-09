@@ -281,7 +281,7 @@ test("a directory that cannot be listed is reported, and every file it held is t
 });
 
 test("a child meter's own ledger round-trips through the fold, and the parent's snapshot partitions the total", async () => {
-	const child = createUsageMeter({ maxTokens: null, rootSessionId: "c" });
+	const child = createUsageMeter({ rootSessionId: "c" });
 	const settle = (u) => ({ result: () => Promise.resolve({ usage: u }) });
 	child.observe(settle({ input: 5, output: 1, totalTokens: 6 }), { sessionId: "c", provider: "anthropic", modelId: "claude-x" });
 	child.observe(settle({ input: 2, totalTokens: 2 }), { sessionId: "c" });
@@ -291,7 +291,7 @@ test("a child meter's own ledger round-trips through the fold, and the parent's 
 	const text = json({ v: 4, state: "running", metered, totals, rows: child.rows(), modelRefused: 0 });
 	const result = fold(fakeFs({ [NAME_A]: text }));
 	assert.equal(result.unmetered, 0, "the meter's own snapshot and rows() make a ledger the fold accepts");
-	const parent = createUsageMeter({ maxTokens: null, rootSessionId: "p" });
+	const parent = createUsageMeter({ rootSessionId: "p" });
 	parent.observe(settle({ input: 40, totalTokens: 40 }), { sessionId: "p", provider: "anthropic", modelId: "claude-x" });
 	await new Promise((resolve) => setImmediate(resolve));
 	parent.setChildren(result);
@@ -353,17 +353,17 @@ test("parseChildLedger refuses any amount above MAX_SAFE_INTEGER, and a fraction
 	assert.equal(parseChildLedger(json({ ...ledger(), modelRefused: 0.5 })), null);
 });
 
-test("two forged ledgers whose sum would overflow cannot erase a real child's spend or dodge the cap", () => {
+test("two forged ledgers whose sum would overflow cannot erase a real child's spend", () => {
 	const dir = tempDir("pi-dispatch-ledger-");
 	writeFileSync(join(dir, NAME_A), json(forged({ rows: [row("anthropic", "claude-x", { calls: 1, input: 1000, total: 1000 })] })));
 	writeFileSync(join(dir, FORGED_A), json(forged({ rows: [row("forged", "a", { calls: 1, input: 1e308, total: 1e308 })] })));
 	writeFileSync(join(dir, FORGED_B), json(forged({ rows: [row("forged", "b", { calls: 1, input: 1e308, total: 1e308 })] })));
 	const result = foldChildLedgers({ dir });
 	assert.deepEqual([result.unmetered, result.totals.total], [2, 1000], "the forged files are malformed, so unmetered: a floor");
-	let stopped = null;
-	const meter = createUsageMeter({ maxTokens: 500, onStop: (reason) => (stopped = reason) });
+	const meter = createUsageMeter({});
 	meter.setChildren(result);
-	assert.deepEqual([meter.snapshot().total, stopped], [1000, "token_budget"]);
+	assert.equal(meter.snapshot().total, 1000);
+	assert.equal(meter.state.stopReason, null, "the ledger feeds metering only; there is no cap to stop for");
 });
 
 test("one forged ledger at MAX_SAFE_INTEGER calls cannot hide a real child's unresolved call or its usage block", () => {
@@ -441,17 +441,17 @@ test("a forged done with unchanged numbers cannot freeze a live child's ledger (
 	assert.equal(result.files.get(NAME_A).state, "done", "the premise: the forgery is a good file");
 	put(spend(10_000));
 	result = foldChildLedgers({ dir, prev: result });
-	let stopped = null;
-	const meter = createUsageMeter({ maxTokens: 5000, onStop: (reason) => (stopped = reason) });
+	const meter = createUsageMeter({});
 	meter.setChildren(result);
-	assert.deepEqual([meter.snapshot().total, stopped], [10_000, "token_budget"], "the child's later write is read");
+	assert.equal(meter.snapshot().total, 10_000, "the child's later write is read");
+	assert.equal(meter.state.stopReason, null);
 });
 
 test("childLedger: the writer's object round-trips through the fold; a meter that did not install writes zeros and metered:false", async () => {
 	assert.deepEqual(parseChildLedger(json(childLedger({ state: "starting" }))).totals.total, 0, "the preload's stub");
 	const off = fold(fakeFs({ [NAME_A]: json(childLedger({ state: "running", metered: false })) }));
 	assert.deepEqual([off.unmetered, off.files.get(NAME_A).why], [1, "unmetered"]);
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const guard = createPolicyGuard({ allowedModels: [{ provider: "anthropic", model: "claude-x" }], env: {} });
 	meter.observe({ result: () => Promise.resolve({ usage: { input: 5, totalTokens: 5 } }) }, { provider: "anthropic", modelId: "claude-x", model: { api: "openai-completions" } });
 	await new Promise((resolve) => setImmediate(resolve));
@@ -461,7 +461,7 @@ test("childLedger: the writer's object round-trips through the fold; a meter tha
 });
 
 test("a worst-case ledger written by childLedger() stays under 64 KiB with at least 8 KiB to spare", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const tiny = 1.2345678901234567e-300;
 	const id = (prefix, i) => `${prefix}${String(i).padStart(3, "0")}`.padEnd(64, "x");
 	for (let i = 0; i < CHILD_LEDGER_ROWS + 20; i += 1) {

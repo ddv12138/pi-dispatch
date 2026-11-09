@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { test } from "node:test";
 // Both of these are pure -- no static pi import anywhere in their module graph -- so they load
 // unconditionally and the gate below applies only to pi itself.
-import { attachTokenBudget } from "../src/token-budget.mjs";
+import { attachSessionMeter } from "../src/token-budget.mjs";
 import { createJobModelRuntime } from "../src/model-runtime.mjs";
 import { assertPoliciesEnforceable, createPolicyGuard, createUsageMeter, foldChildLedgers, installProcessUsageMeter, policyEnforcement, resolvePiAiCompat } from "../src/usage-meter.mjs";
 import { decideExit, EXIT_POLICY, MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
@@ -135,7 +135,7 @@ async function fixture(api, modelOverrides = {}, extraModelIds = []) {
  * Through `ModelRuntime.registerProvider`, which is exactly where an extension's `pi.registerProvider`
  * lands at 0.99.1 (agent-session.js, `this._modelRuntime.registerProvider`): the composed provider then
  * calls this streamSimple for the api (provider-composer.js). `calls` records what actually reached the
- * provider, which is how the hard-stop test proves a capped call never got there.
+ * provider, which is how the hard-stop test proves a stopped call never got there.
  */
 function registerFakeProvider({ modelRuntime, compat, api, calls, usage = SENTINEL_USAGE, delayMs = 0 }) {
 	modelRuntime.registerProvider(PROVIDER, {
@@ -241,7 +241,7 @@ test("two concurrent sessions: the process-wide meter sees both, the session bus
 		const rootSessionId = rootManager.getSessionId();
 		assert.notEqual(rootSessionId, otherManager.getSessionId(), "the two sessions must have distinct ids");
 
-		const meter = createUsageMeter({ maxTokens: null, rootSessionId });
+		const meter = createUsageMeter({ rootSessionId });
 		const logged = [];
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log: (event, fields) => logged.push({ event, fields }) });
 		assert.equal(installed.ok, true, `the runtime half must install at the pin; logged ${JSON.stringify(logged)}`);
@@ -263,7 +263,7 @@ test("two concurrent sessions: the process-wide meter sees both, the session bus
 
 		// THE CONTROL: the OLD mechanism, attached to the root session exactly as run-job.mjs used to
 		// attach it. null cap -- it is here to count, not to abort.
-		const sessionBudget = attachTokenBudget(rootSession, null);
+		const sessionBudget = attachSessionMeter(rootSession);
 
 		await Promise.all([rootSession.prompt("root prompt"), otherSession.prompt("other prompt")]);
 		await flush();
@@ -323,13 +323,12 @@ test("two concurrent sessions: the process-wide meter sees both, the session bus
 		assert.equal(
 			sessionBudget.state.total,
 			SENTINEL_TOTAL,
-			"attachTokenBudget must see ONLY the session it subscribed to -- if this grew, pi now forwards child events",
+			"the fallback session meter must see ONLY the session it subscribed to -- if this grew, pi now forwards child events",
 		);
 		assert.ok(
 			sessionBudget.state.total < snapshot.total,
 			"the per-session bus must undercount relative to the process-wide meter",
 		);
-		assert.equal(sessionBudget.state.aborted, false);
 		sessionBudget.unsubscribe();
 	} finally {
 		for (const session of sessions) session.dispose();
@@ -338,12 +337,11 @@ test("two concurrent sessions: the process-wide meter sees both, the session bus
 	}
 });
 
-test("the brake: past the cap, the next call is stopped before it reaches the provider", { skip }, async () => {
-	// The cap is structurally LAGGING (OQ-010): usage is known only after a call settles, so the two
-	// concurrent calls both dispatch before either is counted. What the hard stop guarantees is that the
-	// call AFTER the breach never reaches a provider -- a runaway backstop, not a before-the-spend cap.
-	// Asserted on the fake provider's own call log, because "the meter recorded zero" would also be true
-	// if the request had gone out and simply returned nothing.
+test("the brake: past a policy stop, the next call is stopped before it reaches the provider", { skip }, async () => {
+	// There is no token cap any more. What the hard stop guarantees is that after a policy stop the NEXT
+	// call never reaches a provider, on every ModelRuntime instance in the process. Asserted on the fake
+	// provider's own call log, because "the meter recorded zero" would also be true if the request had
+	// gone out and simply returned nothing.
 	const API = "pi-dispatch-fake-api-brake";
 	const fx = await fixture(API);
 	const sessions = [];
@@ -352,20 +350,15 @@ test("the brake: past the cap, the next call is stopped before it reaches the pr
 		const rootManager = pi.SessionManager.inMemory(fx.root);
 		const otherManager = pi.SessionManager.inMemory(fx.root);
 
-		// One token below what two calls cost, so the SECOND settled call trips it and the third is
-		// refused. Chosen against the sentinel rather than a round number so an off-by-one in the
-		// `> cap` comparison cannot pass.
 		const breaches = [];
-		const meter = createUsageMeter({
-			maxTokens: 2 * SENTINEL_TOTAL - 1,
-			rootSessionId: rootManager.getSessionId(),
-			onStop: (reason, total) => breaches.push([reason, total]),
+		const meter = createUsageMeter({ allowedModels: [{ provider: "pi-dispatch-fake", model: "fake" }], rootSessionId: rootManager.getSessionId(),
+			onStop: (reason, detail) => breaches.push([reason, detail]),
 		});
 		const logged = [];
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log: (event, fields) => logged.push({ event, fields }) });
 		assert.equal(installed.ok, true, `logged ${JSON.stringify(logged)}`);
-		// The brake is the subject: a capped install without one would enforce the cap only after the fact.
-		assert.deepEqual([logged[0]?.fields?.capped, logged[0]?.fields?.brake], [true, true], "a capped meter must have its brake at the pin");
+		// The brake is the subject: a policy install without one could not stop a call before it is sent.
+		assert.deepEqual([logged[0]?.fields?.listed, logged[0]?.fields?.brake], [true, true], "a policy-armed meter must have its brake at the pin");
 
 		const otherRuntime = await fx.runtime();
 		const calls = [];
@@ -379,10 +372,11 @@ test("the brake: past the cap, the next call is stopped before it reaches the pr
 		await Promise.all([rootSession.prompt("root prompt"), otherSession.prompt("other prompt")]);
 		await flush();
 
-		assert.equal(meter.state.breached, true, "two sentinel calls must exceed a cap one token below their sum");
-		assert.equal(meter.state.stopReason, "token_budget", "the token cap is the stop, by reason");
-		assert.deepEqual(breaches, [["token_budget", 2 * SENTINEL_TOTAL]], "onStop fires exactly once, naming the token cap and carrying the running total");
 		assert.equal(calls.length, 2);
+		assert.equal(meter.state.stopReason, null, "metering alone never stops the job");
+		meter.stop(MODEL_NOT_ALLOWED);
+		assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, "the policy stop, by reason");
+		assert.deepEqual(breaches, [[MODEL_NOT_ALLOWED, undefined]], "onStop fires exactly once, naming the stop");
 
 		// The third request. captureTerminal's two event shapes are covered in compose.test.mjs; here the
 		// terminal message is read the same way run-job.mjs reads it.
@@ -394,22 +388,22 @@ test("the brake: past the cap, the next call is stopped before it reaches the pr
 		await rootSession.prompt("this one must not be paid for");
 		unsubscribe();
 
-		assert.equal(calls.length, 2, "the capped call must NOT have reached the provider");
+		assert.equal(calls.length, 2, "the stopped call must NOT have reached the provider");
 		assert.equal(terminal?.stopReason, "aborted", "the hard stop must surface as an abort, not an error");
-		assert.equal(terminal?.errorMessage, "pi-dispatch: token cap exceeded", "the hard stop names the stop it answers for");
+		assert.equal(terminal?.errorMessage, "pi-dispatch: model not allowed", "the hard stop names the stop it answers for");
 		// "aborted" rather than "error" is load-bearing: pi's isRetryableAssistantError returns false
-		// unless stopReason === "error", so an "error" here would make the cap trigger PAID auto-retries.
+		// unless stopReason === "error", so an "error" here would make the stop trigger PAID auto-retries.
 		assert.equal(terminal?.usage?.totalTokens, 0, "nothing was spent, so nothing may be recorded as spent");
 		assert.equal(terminal?.usage?.cost?.total, 0);
 
 		// And the totals did not move: the refused call is not observed at all (the wrapper returns
 		// before meter.observe), so it cannot inflate calls, cost, or the daily token counter.
-		// The OTHER runtime is braked too: the cap is process-wide, not per instance.
+		// The OTHER runtime is braked too: the stop is process-wide, not per instance.
 		await otherSession.prompt("nor this one");
-		assert.equal(calls.length, 2, "a capped call from the other runtime must not reach the provider either");
+		assert.equal(calls.length, 2, "a stopped call from the other runtime must not reach the provider either");
 		const snapshot = meter.snapshot();
 		assert.equal(snapshot.calls, 2, "a refused call must not be counted as a call");
-		assert.equal(snapshot.total, 2 * SENTINEL_TOTAL, "the overshoot is reported as-is; the refusal adds nothing");
+		assert.equal(snapshot.total, 2 * SENTINEL_TOTAL, "the settled total is reported as-is; the refusal adds nothing");
 	} finally {
 		for (const session of sessions) session.dispose();
 		installed?.uninstall();
@@ -429,7 +423,7 @@ test("compaction is metered: each summary call lands in otherTotal under a fresh
 	try {
 		const rootManager = pi.SessionManager.inMemory(fx.root);
 		const rootSessionId = rootManager.getSessionId();
-		const meter = createUsageMeter({ maxTokens: null, rootSessionId });
+		const meter = createUsageMeter({ rootSessionId });
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log: () => {} });
 		assert.equal(installed.ok, true);
 		const calls = [];
@@ -479,7 +473,7 @@ test("a branch summary is metered too: one call in otherTotal under a fresh sess
 	try {
 		const rootManager = pi.SessionManager.inMemory(fx.root);
 		const rootSessionId = rootManager.getSessionId();
-		const meter = createUsageMeter({ maxTokens: null, rootSessionId });
+		const meter = createUsageMeter({ rootSessionId });
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log: () => {} });
 		assert.equal(installed.ok, true);
 		const calls = [];
@@ -520,7 +514,7 @@ test("no cap: an answer with no usage chunk is counted usageUnreported on the ex
 	let installed;
 	try {
 		const logged = [];
-		const meter = createUsageMeter({ maxTokens: null });
+		const meter = createUsageMeter({});
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: lb.modelRuntime, meter, log: (event, fields) => logged.push({ event, fields }) });
 		assert.equal(installed.ok, true, JSON.stringify(logged));
 		meter.setChildren(foldChildLedgers({ dir: lb.root }));
@@ -545,7 +539,7 @@ async function installListed({ fx, rootSessionId }) {
 	const logged = [];
 	const list = [{ provider: PROVIDER, model: MODEL_ID }];
 	const log = (event, fields) => logged.push({ event, fields });
-	const meter = createUsageMeter({ maxTokens: null, allowedModels: list, rootSessionId, onStop: (reason) => stops.push(reason) });
+	const meter = createUsageMeter({ allowedModels: list, rootSessionId, onStop: (reason) => stops.push(reason) });
 	const guard = createPolicyGuard({ allowedModels: list, log });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, guard, log });
 	assert.equal(installed.ok, true, `logged ${JSON.stringify(logged)}`);
@@ -556,7 +550,7 @@ async function installListed({ fx, rootSessionId }) {
 
 /** Exit 2 / model-not-allowed, B never called, and B's ledger row absent (0 calls). */
 function assertStoppedBeforeB({ listed, calls, label }) {
-	const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: listed.meter.state.stopReason, tokenAborted: false, terminal: undefined });
+	const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: listed.meter.state.stopReason, terminal: undefined });
 	assert.deepEqual([outcome.code, outcome.reason], [EXIT_POLICY, MODEL_NOT_ALLOWED], label);
 	assert.deepEqual(listed.stops, [MODEL_NOT_ALLOWED], label);
 	assert.equal(calls.filter((entry) => entry.model === MODEL_B).length, 0, `${label}: B reached the provider`);
@@ -706,7 +700,7 @@ async function loopbackListed() {
 	const stops = [];
 	const logged = [];
 	const log = (event, fields) => logged.push({ event, fields });
-	const meter = createUsageMeter({ maxTokens: null, allowedModels: list, onStop: (reason) => stops.push(reason) });
+	const meter = createUsageMeter({ allowedModels: list, onStop: (reason) => stops.push(reason) });
 	const guard = createPolicyGuard({ allowedModels: list, log });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, guard, log });
 	assert.equal(installed.ok, true);
@@ -927,7 +921,7 @@ test("model list, on the wire: a session's before_provider_request hook that rew
 		await flush();
 		assert.match(terminal?.errorMessage ?? "", /pi-dispatch: model not allowed/);
 		assert.deepEqual([lb.sentModels, lb.meter.state.stopReason], [[], "model-not-allowed"], "the hook's model never reached the server");
-		const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: lb.meter.state.stopReason, tokenAborted: false, terminal });
+		const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: lb.meter.state.stopReason, terminal });
 		assert.deepEqual([outcome.code, outcome.reason], [EXIT_POLICY, MODEL_NOT_ALLOWED]);
 	} finally {
 		session?.dispose();
@@ -1021,7 +1015,7 @@ async function loadTimeCall({ api, modelOverrides = {}, path, allowedModels = nu
 		// the loader.
 		const rootSessionId = pi.SessionManager.inMemory(fx.root).getSessionId();
 		const stops = [];
-		const meter = createUsageMeter({ maxTokens: null, allowedModels, rootSessionId, onStop: (reason) => stops.push(reason) });
+		const meter = createUsageMeter({ allowedModels, rootSessionId, onStop: (reason) => stops.push(reason) });
 		const guard = createPolicyGuard({ allowedModels, log });
 		installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log, guard });
 		assert.deepEqual([installed.ok, installed.module === compat], [true, true], `the install proved the job's runtime and the compat copy extensions get: ${JSON.stringify(logged)}`);
@@ -1151,7 +1145,7 @@ test("issue #543: a legacy extension that only re-registers an api id at load is
 /** What a fallback provider spends answering itself: $2, priced by the provider, as a fetch-based custom api reports it. */
 const OWN_TWO_DOLLARS = { input: 100000, output: 10000, cacheRead: 0, cacheWrite: 0, totalTokens: 110000, cost: { input: 1.5, output: 0.5, cacheRead: 0, cacheWrite: 0, total: 2 } };
 
-async function proxyRun({ maxTokens = null, allowedModels = null, target: targetOverrides = {}, answer: proxyAnswer = "pass", entry = "ok", second = false, registerTarget = false }) {
+async function proxyRun({ allowedModels = null, target: targetOverrides = {}, answer: proxyAnswer = "pass", entry = "ok", second = false, registerTarget = false }) {
 	const fx = await fixture(`pi-dispatch-fake-api-543-proxy-${(loadTimeRuns += 1)}`);
 	const compat = await import(resolvePiAiCompat()[0].url);
 	const servedApi = `pi-dispatch-served-api-${loadTimeRuns}`;
@@ -1173,7 +1167,7 @@ async function proxyRun({ maxTokens = null, allowedModels = null, target: target
 	const stops = [];
 	const logged = [];
 	const log = (event, fields) => logged.push({ event, fields });
-	const meter = createUsageMeter({ maxTokens, allowedModels, rootSessionId: "root", onStop: (reason) => stops.push(reason) });
+	const meter = createUsageMeter({ allowedModels, rootSessionId: "root", onStop: (reason) => stops.push(reason) });
 	const guard = createPolicyGuard({ allowedModels, log });
 	// The providers are registered BEFORE the meter installs (issue #587's review), as the runner's are
 	// before any extension loads.
@@ -1270,7 +1264,7 @@ test("issue #571: a legacy registry entry that answers with a promise of a strea
 		return stream;
 	};
 	compat.registerApiProvider({ api: asyncApi, stream: answer, streamSimple: answer });
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: fx.modelRuntime, meter, log: () => {} });
 	try {
 		const target = { ...fx.model, provider: "pi-dispatch-async", id: "async-1", api: asyncApi };

@@ -1,7 +1,6 @@
 import { isCustomProvider } from "./env-allowlist.mjs";
 import { resolveModelRoles } from "./model-roles.mjs";
 import { SubscriptionWait } from "./subscription-wait.mjs";
-import { zeroRatedFor } from "./reserve-estimate.mjs";
 import { isTransientOverlayRead } from "./model-catalog.mjs";
 import { checkFailoverCandidate, markModelCooldown, readModelAttempt, selectFailoverJob, writeModelAttempt } from "./model-failover.mjs";
 import { modelAttemptIdOf } from "./model-attempts.mjs";
@@ -21,13 +20,10 @@ import { isPerMachineHost } from "./backends.mjs";
 import { hash16 } from "./fleet-lease.mjs";
 import { endpointsForModel } from "./model-endpoints.mjs";
 import { splitModelEntry } from "./model-ref.mjs";
-import { effectiveTokenCap } from "./budget-rule.mjs";
-import { tokenWindowCaps, valkeyEndpointTag } from "./token-budget.mjs";
-import { concurrencyFor, tokenCapsFor, makeInFlight, modelTokenRows, projectTokenCapsFor, projectRowFor, rowScopeFor } from "./scoped-limits.mjs";
-import { memberScopeOf, projectOf } from "./projects.mjs";
+import { concurrencyFor, makeInFlight, projectRowFor, rowScopeFor } from "./scoped-limits.mjs";
+import { projectOf } from "./projects.mjs";
 import { resolveJobSize } from "./job-size.mjs";
 import { BUDGET_RECHECK_MS, HOST_BUDGET_TICK_MS, NEVER_FITS_RECHECK_MS, makeHostBudget } from "./host-budget.mjs";
-import { governedTokens } from "./allocation.mjs";
 import { WAIT_AFTER_MAX_DEFAULT_MS, WAIT_INTERVAL_FLOOR_MS, afterMs, unreadableConditions, waitArmed, waitBackoffMs, waitLabel, waitProfileNames } from "./wait-for.mjs";
 import { answerOf, makeWaitState } from "./wait-state.mjs";
 import { makeDeferTo } from "./defer-write.mjs";
@@ -180,10 +176,9 @@ function boundAfterAbort(run, signal, job, log, graceMs = ABORT_GRACE_MS, onStop
  * Once per job, before runJob, it resolves the runtime-settings overlay via `getSettings`
  * (INT-CONFIG-OVERLAY-CONTRACT). A present-but-invalid overlay resolves to a POLICY refusal RETURNED
  * (never thrown), so BullMQ marks the job completed without a retry (CONST-RETRY-INFRA-ONLY). A valid
- * overlay fills the effective `provider`/`model`/`maxTurns`/`maxTokens`/`concurrency` settings
+ * overlay fills the effective `provider`/`model`/`maxTurns`/`concurrency` settings
  * under `job.data > overlay > env` precedence and re-binds the worker slot count via `applyConcurrency`.
- * The overlay changes which values a job runs with, never when the token reserve is checked -- that still
- * runs inside runJob against the freshly passed token windows (CONST-BUDGET-BEFORE-TOKENS).
+ * The overlay changes which values a job runs with, never the order of the gates inside runJob.
  *
  * The read happens once per pickup, right after the scope gate and before the model endpoint gate (issue #503),
  * because that gate needs the effective provider and model, which the overlay can supply. One more read sits at the
@@ -213,7 +208,7 @@ export function mainModelEndpoints({ models, job, endpoints }) {
  * ONE function for the two readers (the endpoint gate at pickup and the runJob call), so the gate can never lease
  * for a model other than the one the container is started with.
  */
-export function effectiveJobOf(data, settings, allowedModels = null, log = () => {}) {
+export function effectiveJobOf(data, settings, allowedModels = null) {
 	// Issue #502: the allowed-model list is the trigger's, else the deployment's PI_ALLOWED_MODELS, else none. The
 	// env list arrives as its own argument and never through `settings`, which the overlay (and so `dispatch_set`)
 	// writes. Absent stays absent, so an unrestricted job's effective job has no `models` key at all.
@@ -223,15 +218,7 @@ export function effectiveJobOf(data, settings, allowedModels = null, log = () =>
 		provider: data.provider ?? settings.provider,
 		model: data.model ?? settings.model,
 		maxTurns: data.maxTurns ?? settings.maxTurns,
-		maxTokens: data.maxTokens ?? settings.maxTokens, // optional per-job token budget (issue #25); null => runner meter only
 		...(models !== null ? { models } : {}),
-		// Issue #501: the per-job dollar cap in integer micro-dollars, or null for none. NOT `??` like the fields
-		// above: a trigger's `run.maxTokens` may only NARROW, so this is the smaller of the trigger's and the
-		// deployment's, each counted only when set (`effectiveCostCapMicros` says why a trigger-only cap applies
-		// and what a malformed job value reads as). buildContainerEnv sends it as PI_MAX_COST_MICROS, and the
-		// image preflight requires `costCap` of any job that carries one.
-		// A malformed queued value is logged by KEY only (`job_cost_cap_malformed`), never by value.
-		maxTokens: effectiveTokenCap(data.maxTokens, settings.maxTokens, (key) => log("job_token_budget_malformed", { key })),
 	};
 }
 
@@ -288,7 +275,7 @@ function makeBeforePickupRecorder({ projects, settleSteerBeforePickup, recordRun
 	};
 }
 
-export function makeProcessor({ cancelJob, stopContainer, containerName = (job) => jobContainerName(job.id), redis, getSettings, readModelRoles = () => ({}), hostBudget = null, abortGraceMs = ABORT_GRACE_MS, applyConcurrency = () => {}, pauseUntil = () => null, pauseWindowsNewer = () => false, triggersNewer = () => false, scopedLimits = () => [], projects = () => [], jobSizeEnv = {}, allocation = null, inFlight = makeInFlight(), hostBound = null, checkLease = null, scopeLease = null, endpointSlots = makeInFlight(), endpointLease = null, modelEndpoints = null, overlayModels = () => null, endpointSetFor = mainModelEndpoints, deps, recordRun = () => {}, settledRecord = null, previousRecord = null, timeoutMs = JOB_TIMEOUT_MS, cancelPollMs = 2_000, cancelStopBoundMs = CANCEL_STOP_BOUND_MS, hostName = "", multiHost = false, now = () => Date.now(), waitState = makeWaitState({ redis, now }), afterMaxMs = () => WAIT_AFTER_MAX_DEFAULT_MS, checkSlots = makeInFlight(), checkSlotCount = () => 1, checkTimeoutMs = () => 10_000, concurrencyNow = () => 3, intervalMs = () => WAIT_INTERVAL_FLOOR_MS * 2, maxWaitMs = () => 24 * 3600 * 1000, maxChecks = () => 96, maxFaults = () => 5, random = Math.random, cpus = availableParallelism, runningJobs = makeRunningJobs(), valkeyTag = null }) {
+export function makeProcessor({ cancelJob, stopContainer, containerName = (job) => jobContainerName(job.id), redis, getSettings, readModelRoles = () => ({}), hostBudget = null, abortGraceMs = ABORT_GRACE_MS, applyConcurrency = () => {}, pauseUntil = () => null, pauseWindowsNewer = () => false, triggersNewer = () => false, scopedLimits = () => [], projects = () => [], jobSizeEnv = {}, inFlight = makeInFlight(), hostBound = null, checkLease = null, scopeLease = null, endpointSlots = makeInFlight(), endpointLease = null, modelEndpoints = null, overlayModels = () => null, endpointSetFor = mainModelEndpoints, deps, recordRun = () => {}, settledRecord = null, previousRecord = null, timeoutMs = JOB_TIMEOUT_MS, cancelPollMs = 2_000, cancelStopBoundMs = CANCEL_STOP_BOUND_MS, hostName = "", multiHost = false, now = () => Date.now(), waitState = makeWaitState({ redis, now }), afterMaxMs = () => WAIT_AFTER_MAX_DEFAULT_MS, checkSlots = makeInFlight(), checkSlotCount = () => 1, checkTimeoutMs = () => 10_000, concurrencyNow = () => 3, intervalMs = () => WAIT_INTERVAL_FLOOR_MS * 2, maxWaitMs = () => 24 * 3600 * 1000, maxChecks = () => 96, maxFaults = () => 5, random = Math.random, cpus = availableParallelism, runAttempts = null, runningJobs = makeRunningJobs() }) {
 	// The lost-lock gate's rejection lines, said ONCE per job id, stall count and attempt. The gate runs before every
 	// deferral (pause window, wait, scope or endpoint busy), and BullMQ never resets a job's stall count, so a stalled
 	// scheduled job whose record is refused meets the gate again on every deferred pickup: a 30-minute scope-busy hold
@@ -460,8 +447,8 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 
 		// Scoped pause windows (REQ-SCOPED-PAUSE-WINDOWS): if this job's folder/repo is inside an active pause
 		// window, DEFER it to the window end via BullMQ's delayed set -- the job keeps its identity/dedup and
-		// auto-resumes when re-picked. This is FIRST of the deferral gates, before the kill timer, the settings read, and
-		// the budget reservation, so a deferred job arms no timer, reserves no slot, and spends nothing
+		// auto-resumes when re-picked. This is FIRST of the deferral gates, before the kill timer and the settings read,
+		// so a deferred job arms no timer, holds no slot, and spends nothing
 		// (CONST-BUDGET-BEFORE-TOKENS). `deferTo` records the reason, then moves the job with the worker's `token` and
 		// throws the `DelayedError` by which BullMQ learns the job was deferred (worker.js recognises it) rather than
 		// completed or failed; the `> now + 1s` guard keeps a boundary tick from busy-deferring.
@@ -880,7 +867,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// exactly as the pause gate's does (inside the try it would become a permanent failure plus a failure
 		// record for what was a transient blip). `deferTo` rethrows a move's rejection unchanged after
 		// removing the reason it wrote for it, so that holds through it. The limits snapshot is read ONCE here and
-		// shared with the token windows below, so the gate and the token ledgers cannot disagree mid-job.
+		// shared with the size and concurrency checks below, so none of them can disagree mid-job.
 		// tryAcquire is a synchronous check-and-increment -- no await between read and take, so Node's
 		// single thread makes it atomic at any concurrency -- and the local-folder limit is a structural 1
 		// (concurrencyFor) with no file and no off-switch: the scheduler mints a cron trigger's next
@@ -1176,8 +1163,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 						// `exitCode` are outside its stable core. Such a record is no usable prior record, so the retry goes by the
 						// model attempt key alone, locked to the model it names (with no key the job waited above), never started
 						// over from the primary on a record this build cannot vouch for.
-						recoveryModel, retryNeverStarted: recordReadable(priorAttemptRecord) && priorAttemptRecord.reason === "container-never-started" && priorAttemptRecord.budgetReserved === false && priorAttemptRecord.exitCode === null, models, limits, now, log: deps?.log,
-						reservationFor: (candidate) => candidate.maxTokens ?? null,
+						recoveryModel, retryNeverStarted: recordReadable(priorAttemptRecord) && priorAttemptRecord.reason === "container-never-started" && priorAttemptRecord.budgetReserved === false && priorAttemptRecord.exitCode === null, models, now, log: deps?.log,
 						subscriptionCheck: deps?.subscriptionRuntime ? (candidate) => deps.subscriptionRuntime.check(candidate) : null,
 						checkCandidate: (candidate) => deps?.checkFailoverCandidate ? deps.checkFailoverCandidate(candidate, { models, endpoints }) : checkFailoverCandidate(candidate, { models, endpoints, credential: deps?.checkProviderCredential, lookup: deps?.builtinModel }),
 						acquireEndpoints: async (candidate) => {
@@ -1446,7 +1432,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			capacity = capacityNow();
 			// This host runs the job from here on (issue #599, phase 2): its entry, at the same instant as `startedAt`, given
 			// back by `releaseAllHolds` on every exit. `add` is total, so this block still cannot throw.
-			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt), holdTokens: 0, holdAt: Date.parse(startedAt) });
+			runningKey = runningJobs.add({ id: job.id, project, memMiB: size.memMiB, cpuCenti: size.cpuCenti, at: Date.parse(startedAt) });
 			// The producer of the name both boot reapers sweep by substring. Built from the shared prefix
 			// rather than typed here, so a rename cannot land in the producer and not in the sweeps (#227).
 			// From the VENUE that will build the container, not from the local adapter reached for directly:
@@ -1584,7 +1570,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			if (settings.invalid) {
 				// A present-but-invalid overlay is a POLICY refusal, RETURNED (never thrown) so BullMQ marks the
 				// job completed and does not retry a file that can never parse (CONST-RETRY-INFRA-ONLY). Resolved
-				// before runJob, so no budget slot is reserved and no container starts (CONST-BUDGET-BEFORE-TOKENS).
+				// before runJob, so no container starts and nothing is spent.
 				// recordRun leaves the durable settings-overlay-invalid trace for the admin extension.
 				// No provider/model here, as in every result this function returns from ABOVE the try (the wait gate's
 				// refusals are the others): each is decided before or during the settings read, so no honest effective
@@ -1603,57 +1589,17 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			// field wins; an omitted one takes the overlay value, else env, resolved at this job's start
 			// (INT-CONFIG-OVERLAY-CONTRACT). A forge job carries provider/model/maxTurns only when its trigger
 			// named them (#502), so for most jobs this fill supplies the provider the container env allowlist
-			// requires -- absent it, the allowlist refuses a job only after its token hold is reserved. The token
-			// windows passed to runJob change which values the reserve checks, never when it runs.
-			// The one call that logs a malformed queued cap (#501): the endpoint gate above computes the same job and
-			// stays quiet, so it is reported once per pickup.
-			const effectiveJob = selectedEffective ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null, (event, fields) => deps?.log?.(event, { jobId: job.id, ...fields }));
+			// requires -- absent it, the allowlist would refuse the job only after its workspace was prepared.
+			const effectiveJob = selectedEffective ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null);
 			pickupMaxTurns = effectiveJob.maxTurns;
-
-			// THE ENVELOPE (issue #504 part B, DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE). With one loaded, every job is governed:
-			// its project's, or `_other`'s, share of the applied split narrows the dollar ledgers below, read ONCE here
-			// beside the limits snapshot and the pickup project, so the gate and the reservation judge one split. The read
-			// also brings the state in line (the neutral seed, expiry, a re-base) and says when this host's envelope is not
-			// the applied split's, which the processor refuses as `envelope-mismatch` before anything is spent. A Valkey
-			// fault throws here, inside the try, and is retried like any reserve fault: nothing has started.
-			const operatorTokens = { tokenCaps: tokenWindowCaps(settings), scopedTokens: tokenCapsFor(job.data, limits), projectTokens: projectTokenCapsFor(limits, project) };
-			let tokenInputs = { ...operatorTokens };
-			const governing = allocation?.current?.() ?? null;
-			try {
-				if (governing?.envelope) {
-					const { state, mismatch } = await allocation.reconcile({ envelope: governing.envelope, digest: governing.digest, now: new Date(nowMs) });
-					tokenInputs = mismatch ? { ...operatorTokens, envelopeMismatch: true } : governedTokens({ envelope: governing.envelope, state, member: project === null ? null : { id: project, member: memberScopeOf(job.data) }, operator: operatorTokens });
-				} else if (typeof allocation?.fleetGoverned === "function" && (await allocation.fleetGoverned())) {
-					// A host with no envelope in a fleet with an applied split: ungoverned, so refused like a differing envelope.
-					tokenInputs = { ...operatorTokens, envelopeMismatch: "no-envelope" };
-				}
-			} catch (error) {
-				// INFRASTRUCTURE, never a verdict (CONST-RETRY-INFRA-ONLY): Valkey did not answer, replied with an error, or the
-				// audit file could not be written. Nothing has been reserved or started, so the job is retried rather than
-				// dropped as the UnrecoverableError a plain throw would become below.
-				deps?.log?.("allocation_read_failed", { jobId: job.id, code: typeof error?.code === "string" ? error.code : "error" });
-				throw new InfraRetry("the allocation state could not be read", { cause: error, reason: "container-never-started", provider: effectiveJob.provider ?? null, model: effectiveJob.model ?? null, budgetReserved: false });
-			}
 
 			const result = await runJob(effectiveJob, {
 				queueJobId: String(job.id),
-				deploymentMaxTokens: settings.maxTokens,
 				rawApprovalJob: job.data,
 				redis,
-				// Issue #761: the tag of the Valkey the token counters are in, for the record's `tokensWindows.reservedIn`.
-				valkeyTag,
-				// The deployment's token windows, resolved this job-start under overlay > env, or null when none
-				// is set (then nothing is reserved and no token key is written).
-				tokenCaps: tokenInputs.tokenCaps,
-				// This job's repo or folder token windows and the model token windows it
-				// reserves in, from the SAME limits snapshot. The model rows follow the job's EFFECTIVE list (the trigger's,
-				// else PI_ALLOWED_MODELS); a job with none reserves in every model row (`modelTokenRows` says why).
-				scopedTokens: tokenInputs.scopedTokens,
-				// Issue #499 part B: the project row's token windows, keyed by the project row's scope, for the pickup project.
-				projectTokens: tokenInputs.projectTokens,
 				// Issue #504 part B: the project was decided on the folder AS NAMED; prepare mounts the
 				// folder it RESOLVES. The processor asks which project the resolved folder belongs to, from the same projects
-				// snapshot, and refuses before any reserve when it is another project's.
+				// snapshot, and refuses before the container starts when it is another project's.
 				pickupProject: project,
 				// Issue #704 review: a bundle profile this host lacks defers a job on a multi-host worker's SHARED queue
 				// (another host may serve it), the never-fits gate's predicate above; elsewhere it refuses.
@@ -1663,20 +1609,14 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				jobSize: size,
 				// Issue #596, phase 2: the host's CPU budget, every job's `--cpus` while it is a number (off or unknown: null).
 				...(hostBudget && Number.isSafeInteger(hostBudget.current().cpuCenti) ? { cpuBudgetCenti: hostBudget.current().cpuCenti } : {}),
-				// Issue #504 part B: `_other`'s ledger, the deployment cap's source and the envelope verdict, under an envelope;
-				// absent without one, so the processor's defaults keep such a deployment byte-identical.
-				...(tokenInputs.otherTokens ? { otherTokens: tokenInputs.otherTokens } : {}),
-				...(tokenInputs.tokenCapSource ? { tokenCapSource: tokenInputs.tokenCapSource } : {}),
-				...(tokenInputs.envelopeMismatch ? { envelopeMismatch: tokenInputs.envelopeMismatch } : {}),
-				// Issue #505: this host's envelope delegation block, for the `portfolio-no-envelope` gate; absent without an
-				// envelope, where the processor's default (null, no envelope) is the truth.
-				...(governing?.envelope ? { envelopeDelegation: governing.envelope.delegation ?? null } : {}),
-				modelTokens: modelTokenRows(limits, effectiveJob.models ?? null),
 				// The endpoint gate's snapshot (issue #503): the declared endpoints, the overlay models and this job's
 				// derived set, read once at pickup. Absent on a wiring with no endpoint seam, so a bare processor's
 				// runJob context is unchanged.
 				...(endpointSnapshot ? { modelEndpoints: endpointSnapshot } : {}),
 				...deps,
+				// Issue #645: the run's durable container sequence. Preserved through `deps` above, and accepted as a
+				// makeProcessor/createWorker option for a wiring that passes it at the top level.
+				...(runAttempts ? { runAttempts } : {}),
 				...(deps?.subscriptionRuntime ? {
 					prepareSubscriptionAuth: async (j) => {
 						try { return await deps.subscriptionRuntime.prepare(j, { deadlineAt: subscriptionDeadlineAt, signal, attemptId: `${modelAttemptId}:${job.attemptsMade ?? 0}:${job.stalledCounter ?? 0}` }); }
@@ -1687,9 +1627,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// Issue #502: the skew check must see `models` as the job ARRIVED, not as `effectiveJobOf` filled it from
 				// PI_ALLOWED_MODELS, or a trigger list a stale receiver dropped would read as present and the job would run on
 				// the deployment's list. Only when the wiring supplies the check, so a bare processor keeps the default.
-				// The same for `run.maxTokens`: `effectiveJobOf` keeps the arrived value under its own key and writes the
-				// resolved budget as `maxTokens`, but it is read off `job.data` here too, so no later fill can hide a drop.
-				...(deps?.checkWaitSkew ? { checkWaitSkew: (j, ...rest) => deps.checkWaitSkew({ ...j, models: job.data?.models, fallbackModels: job.data?.fallbackModels, maxTokens: job.data?.maxTokens }, ...rest) } : {}),
+				...(deps?.checkWaitSkew ? { checkWaitSkew: (j, ...rest) => deps.checkWaitSkew({ ...j, models: job.data?.models, fallbackModels: job.data?.fallbackModels }, ...rest) } : {}),
 				// #227. BOUNDED AFTER THE ABORT, and this is what makes `abortable` an honest declaration.
 				//
 				// `makeRunContainer`'s promise settles ONLY on the docker child's `close` or `error`. Nothing
@@ -1697,7 +1635,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// the spawn. So `stopContainer` is the sole kill channel, and if it does not take (an
 				// unreachable daemon, a wiring whose stop is a no-op) the container keeps running, `docker
 				// run` never exits, and the processor awaits FOREVER: an active job renewing its lock and
-				// holding its in-flight slot, its host slot, its scope lease and its budget reservation, with
+				// holding its in-flight slot, its host slot and its scope lease, with
 				// nothing in the log and nothing in the record. REQ-JOB-TIMEOUT-30M's Acceptance says "the
 				// slot is freed", and it was not.
 				//
@@ -1762,7 +1700,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// REQ-TRIGGER-SECRETS. The resolver runs INSIDE the 30-minute kill timer armed above, so it has
 				// to be abortable for the same reason runContainer does: a resolver blocking on an unreachable
 				// vault would otherwise hold its slot until its own timeout, and an abort landing mid-resolution
-				// would neither stop it nor keep the job from going on to mint, clone and reserve budget for a
+				// would neither stop it nor keep the job from going on to mint and clone for a
 				// container that runContainer will refuse at entry anyway. Injected here, mirroring runContainer,
 				// because `signal` exists only in this scope. Omitted when unwired so a bare processor keeps
 				// runJob's own fail-closed default.
@@ -1787,9 +1725,6 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// Issue #638: the held replies, taken at the park on the REAL job (its id is the run's, its `queueName` the queue
 				// the resumed job goes to), bound unconditionally like the release; it takes nothing unless wired.
 				takeHeldReplies: () => takeHeldReplies().catch(() => null),
-				// The plan collector (issue #505) the same way and for the same reason: the writer it records is the REAL job's
-				// `.id`, and the authority it checks is `.data` as queued. The pickup's `portfolio` decision rides in `ctx`.
-				...(deps.collectPlan ? { collectPlan: (ctx) => deps.collectPlan({ ...ctx, job }) } : {}),
 				// prepareWorkspace needs the REAL BullMQ job's `.id` to derive a cron job's scheduled-for
 				// instant from the deterministic repeat:<id>:<millis> jobId (DES-CRON-VIA-BULLMQ-SCHEDULER)
 				// for the local /job/event.json. runJob's own `job` is the effectiveJob -- a spread of
@@ -1821,8 +1756,6 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 				// The jobs running on this host (`{ list() }`, ids and admission instants), so a recovery whose base job still runs
 				// HERE is delayed rather than started beside it. The processor's own ledger, unless a wiring hands one in.
 				runningJobs: deps.runningJobs ?? runningJobs,
-				// Observability follows the actual reservation, never the configured cap before admission.
-				onTokenHold: (hold) => runningJobs.update?.(runningKey, { holdTokens: hold?.amountTokens ?? 0, holdAt: hold?.at ?? Date.parse(startedAt) }),
 			});
 			// Gate round 4 of PR #479: stopped again as runJob returns, before anything is recorded (a result with no
 			// container never passed the exit stop above). A cancel that lands after is never acknowledged, and its
@@ -1890,7 +1823,7 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 			const endCancelled = async ({ retryable }) => {
 				const spent = error?.budgetReserved === true;
 				const beforeStart = retryable && !spent;
-				const result = { outcome: "policy", reason: cancellationReason, exitCode: spent ? (error.exitCode ?? null) : null, turns: spent ? (error.turns ?? null) : null, tokens: spent ? (error.tokens ?? null) : null, ...(spent && error.usage ? { usage: error.usage } : {}), provider: error?.provider ?? null, model: error?.model ?? null, session: error?.session ?? null, budgetReserved: retryable ? spent : (error?.budgetReserved ?? null), ...(error?.tokensWindows ? { tokensWindows: error.tokensWindows } : {}), ...(spent && error?.resources ? { resources: error.resources } : {}), ...(spent && error?.progress ? { progress: error.progress } : {}) };
+				const result = { outcome: "policy", reason: cancellationReason, exitCode: spent ? (error.exitCode ?? null) : null, turns: spent ? (error.turns ?? null) : null, tokens: spent ? (error.tokens ?? null) : null, ...(spent && error.usage ? { usage: error.usage } : {}), provider: error?.provider ?? null, model: error?.model ?? null, session: error?.session ?? null, budgetReserved: retryable ? spent : (error?.budgetReserved ?? null), ...(spent && error?.resources ? { resources: error.resources } : {}), ...(spent && error?.progress ? { progress: error.progress } : {}) };
 				deps?.log?.("job_cancelled_instead_of_retry", { jobId: job.id, spent, retryable, ...(retryable ? {} : { failure: scrubCredentials(String(error?.message ?? error)).slice(0, 300) }) });
 				if (deps?.comment) await Promise.resolve(deps.comment(job.data, beforeStart && cancellationReason !== "agent-cancel" ? CANCELLED_BEFORE_START_COMMENT : TERMINAL_COMMENTS[cancellationReason])).catch(() => {});
 				await settleSteer({ result });
@@ -2190,7 +2123,7 @@ export function keeperHoldState(job, at) {
 	return { at, since, startedMs };
 }
 
-export function createWorker({ connection, name, stopContainer, containerName, hostQueue = null, checkLease = null, scopeLease = null, checkTimeoutMs, concurrency, getSettings, readModelRoles, redis, deps, recordRun, settledRecord = null, previousRecord = null, limiter, pauseUntil, pauseWindowsNewer, triggersNewer, scopedLimits, projects, jobSizeEnv = {}, allocation = null, inFlight = makeInFlight(), waitState, afterMaxMs, checkSlots = makeInFlight(), checkSlotCount, concurrencyNow, intervalMs, maxWaitMs, maxChecks, maxFaults, hostSlots = makeInFlight(), endpointSlots = makeInFlight(), endpointLease = null, modelEndpoints = null, overlayModels, extraClosers = [], hostBudget: hostBudgetOptions = null, runningJobs = makeRunningJobs() }) {
+export function createWorker({ connection, name, stopContainer, containerName, hostQueue = null, checkLease = null, scopeLease = null, checkTimeoutMs, concurrency, getSettings, readModelRoles, redis, deps, recordRun, settledRecord = null, previousRecord = null, limiter, pauseUntil, pauseWindowsNewer, triggersNewer, scopedLimits, projects, jobSizeEnv = {}, inFlight = makeInFlight(), waitState, afterMaxMs, checkSlots = makeInFlight(), checkSlotCount, concurrencyNow, intervalMs, maxWaitMs, maxChecks, maxFaults, hostSlots = makeInFlight(), endpointSlots = makeInFlight(), endpointLease = null, modelEndpoints = null, overlayModels, extraClosers = [], hostBudget: hostBudgetOptions = null, runAttempts = null, runningJobs = makeRunningJobs() }) {
 	// One Worker per queue name (issue #57). A host-affine job -- one whose folder, secret resolver or wait
 	// check lives on THIS machine -- is enqueued to `pi-jobs@<name>` rather than filtered for at pickup,
 	// because BullMQ has no selective pop and the put-it-back alternative does not work: promotion out of
@@ -2233,10 +2166,6 @@ export function createWorker({ connection, name, stopContainer, containerName, h
 	for (const queueName of names) {
 		let worker; // referenced by cancelJob/applyConcurrency before assignment; only called later, so the TDZ is fine
 		const processor = makeProcessor({
-			// Issue #761: the endpoint tag of the Valkey this worker's clients dial (`valkeyEndpointTag`), from the judged
-			// connection's own options, the address `parseConnection` read off the pinned URL, so it is the tag doctor computes
-			// from the same URL. Null for a connection with none, which writes no `dollars.reservedIn`.
-			valkeyTag: valkeyEndpointTag(connection),
 			// Bound to THIS worker: a job on the host queue is cancelled by the worker draining that queue,
 			// and the shared handle could not reach it.
 			cancelJob: (id, reason) => worker.cancelJob(id, reason),
@@ -2279,7 +2208,6 @@ export function createWorker({ connection, name, stopContainer, containerName, h
 			projects,
 			// Issue #596: the deployment's default job size settings, read beside the limits snapshot at every pickup.
 			jobSizeEnv,
-			allocation,
 			inFlight,
 			hostBound,
 			scopeLease,
@@ -2314,6 +2242,8 @@ export function createWorker({ connection, name, stopContainer, containerName, h
 			// Issue #599, phase 2: SHARED across both workers for the host slot's reason: the registry row lists what this
 			// HOST runs, and two maps would each list half.
 			runningJobs,
+			// Issue #645: the run's durable container sequence, passed straight through to the processor's deps.
+			runAttempts,
 		});
 
 		// Issue #464: only a connection `parseConnection` built, which judges and pins the Valkey it dials.

@@ -6,22 +6,22 @@ import { ensureUnderAccountRoot } from "./config.mjs";
 import { expectRefusal } from "./file-expect.mjs";
 import { findDuplicateKey } from "./json-duplicates.mjs";
 import { modelIdProblem, providerIdProblem } from "./model-ref.mjs";
-import { checkTokenInvariant } from "./budget-rule.mjs";
 import { BUNDLE_FORMATS } from "./secret-profiles.mjs";
 import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, versionProblem } from "./store-version.mjs";
 
 /**
  * Runtime-settings overlay: the shared, durable truth between the admin extension and the worker
  * (INT-CONFIG-OVERLAY-CONTRACT, DES-RUNTIME-SETTINGS-FILE-OVERLAY). A flat `settings.json` of optional keys:
- * the eight settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns`, `maxTokens`,
- * `dailyTokenCap`, `weeklyTokenCap`, `monthlyTokenCap` (int >= 1), `concurrency` (int 1-10) -- the two
- * operator-only resolver tables in `OPERATOR_ONLY_KEYS` (`secretProfiles`, `secretBundles`), and an optional
- * `version` that describes the file rather than setting anything (issue #761, `SETTINGS_VERSION`). Read by the
- * worker at each job start and written atomically by the admin extension (tmp + rename). The token keys are the
- * budget controls (DES-TOKEN-RESERVE-AND-SETTLE): a window needs `maxTokens`, checked on the merged values by
- * `resolveSettings`. The dollar keys are RETIRED: an overlay carrying one is refused with the upgrade named.
- * The job-start count caps (`dailyCap`, `weeklyCap`, `monthlyCap`, `softHoldPct`) are RETIRED too, and refused
- * on sight rather than dropped: an operator who believes their deployment is capped must not run uncapped.
+ * the four settings in `KNOWN_KEYS` -- `model`, `provider` (non-empty strings), `maxTurns` (int >= 1) and
+ * `concurrency` (int 1-10) -- the two operator-only resolver tables in `OPERATOR_ONLY_KEYS`
+ * (`secretProfiles`, `secretBundles`), and an optional `version` that describes the file rather than setting
+ * anything (issue #761, `SETTINGS_VERSION`). Six settings in total, and NO token budget among them: C2 removed
+ * every token budget and allocation, so `maxTokens` and the three token windows are RETIRED and refused on
+ * sight. Read by the worker at each job start and written atomically by the admin extension (tmp + rename).
+ * The dollar keys are RETIRED too: an overlay carrying one is refused with the upgrade named. The job-start
+ * count caps (`dailyCap`, `weeklyCap`, `monthlyCap`, `softHoldPct`) are RETIRED for the same reason, and
+ * refused on sight rather than dropped: an operator who believes their deployment is capped must not run
+ * uncapped.
  *
  * A key this build does not know is dropped from the overlay it hands out and logged, and a writer given the
  * `carry` its read returned writes that key back exactly as it found it, in its place (issue #761): the file is shared
@@ -44,9 +44,11 @@ import { neededVersion, underDeclared, valueNeededVersion, valueUnderDeclared, v
  * Custom: overlay validated inline per config.mjs precedent; zod not in deps
  */
 
-export const KNOWN_KEYS = ["model", "provider", "maxTurns", "maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap", "concurrency"];
+export const KNOWN_KEYS = ["model", "provider", "maxTurns", "concurrency"];
 /** The job-start count caps an older overlay may carry: REFUSED with the removal named, never dropped as unknown. */
 export const RETIRED_CAP_KEYS = Object.freeze(["dailyCap", "weeklyCap", "monthlyCap", "softHoldPct"]);
+/** The token budgets an older overlay may carry: REFUSED with the removal named, never dropped. */
+export const RETIRED_TOKEN_KEYS = Object.freeze(["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
 /** The dollar keys an older overlay may carry: REFUSED with a named reason, never dropped. */
 export const RETIRED_DOLLAR_KEYS = Object.freeze(["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
 
@@ -118,15 +120,20 @@ const DOLLAR_NEAR_MISSES = Object.freeze({
 	monthlycosttokens: "monthlyCostUsd", monthlycosttoken: "monthlyCostUsd",
 });
 
-// The token keys' own near-misses: the ENV name pasted into the settings file (the likeliest slip of all, since the
-// env names are all-caps), and a snake_case spelling. Refused with the right key named -- these keys are LIVE, so the
-// refusal must not carry the retired-dollar message.
-const TOKEN_NEAR_MISSES = Object.freeze({
+// The RETIRED token keys' near-misses: the ENV name pasted into the settings file (the likeliest slip of all, since the
+// env names are all-caps), and a snake_case spelling. Each is REFUSED with the retirement named, never dropped: a
+// budget key the worker drops would not apply while the file reads as setting one.
+const RETIRED_TOKEN_NEAR_MISSES = Object.freeze({
 	pimaxtokens: "maxTokens", max_tokens: "maxTokens", tokentotal: "maxTokens", tokenstotal: "maxTokens", totaltokens: "maxTokens",
 	pidailytokencap: "dailyTokenCap", daily_token_cap: "dailyTokenCap",
 	piweeklytokencap: "weeklyTokenCap", weekly_token_cap: "weeklyTokenCap",
 	pimonthlytokencap: "monthlyTokenCap", monthly_token_cap: "monthlyTokenCap",
 });
+
+/** One refusal sentence for a retired token key, shared by the exact-key and near-miss doors. */
+function retiredTokenMessage(key) {
+	return `${key} was retired with the token budgets; delete it from the settings file`;
+}
 
 // A small FIXED look-alike table, to ASCII: Cyrillic а е о р с у х к м т н в і and Greek ο α ε ρ ν τ κ ι (lowercase
 // forms; the key is lowercased first, which maps their capitals onto these). Fullwidth forms are mapped by code point.
@@ -136,7 +143,7 @@ const LOOK_ALIKES = new Map(Object.entries({
 }));
 
 /**
- * An overlay key's shape for the dollar near-miss check (issue #501): fullwidth forms to ASCII, lowercased, the fixed
+ * An overlay key's shape for the retired-key near-miss checks (issue #501, and the token half in C2): fullwidth forms to ASCII, lowercased, the fixed
  * look-alike table applied, and the separators `_`, `-`, `.` and space dropped. Nothing else is removed, so a key with
  * any other character (`host_ü`, `notés`) keeps it and can never EQUAL a target. That is the whole rule: the overlay
  * refuses only an exact match after this, never a subsequence or a distance, because a refusal here stops every job
@@ -215,6 +222,9 @@ function validateKeys(candidate, log) {
 		// The retired job-start caps fail loud BEFORE the generic switch: an old overlay must be refused with the
 		// removal named, never silently dropped as a key this build does not know.
 		if (RETIRED_CAP_KEYS.includes(key)) return { invalid: `${key} was retired with the job-start caps; delete it from the settings file` };
+		// The token budgets are retired too (C2): same door, same reason -- an overlay that reads as capping a
+		// deployment must not run with no cap at all.
+		if (RETIRED_TOKEN_KEYS.includes(key)) return { invalid: retiredTokenMessage(key) };
 		switch (key) {
 			case "version":
 				break;
@@ -232,13 +242,8 @@ function validateKeys(candidate, log) {
 				break;
 			}
 			case "maxTurns":
-			case "maxTokens":
-			case "dailyTokenCap":
-			case "weeklyTokenCap":
-			case "monthlyTokenCap":
-				// Overlay caps are positive ints. A window/cap is DISABLED by absence, not by a 0 -- `unset weeklyTokenCap`
-				// drops the key so it falls through to env, which unset means the window is off (config.mjs). The
-				// token knobs follow the same "absent = disabled" shape (issue #25).
+				// `maxTurns` is a positive int. A turn limit is DISABLED by absence, not by a 0 -- `unset maxTurns`
+				// drops the key so it falls through to env, where unset means the deployment default (config.mjs).
 				if (!isIntAtLeast(value, 1)) return { invalid: `${key} must be an integer >= 1` };
 				overlay[key] = value;
 				break;
@@ -318,8 +323,8 @@ function validateKeys(candidate, log) {
 				const shape = overlayKeyShape(key);
 				const dollarMeant = Object.hasOwn(DOLLAR_NEAR_MISSES, shape) ? DOLLAR_NEAR_MISSES[shape] : undefined;
 				if (dollarMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${dollarMeant}? ${retiredDollarMessage(dollarMeant)}` };
-				const tokenMeant = Object.hasOwn(TOKEN_NEAR_MISSES, shape) ? TOKEN_NEAR_MISSES[shape] : undefined;
-				if (tokenMeant !== undefined) return { invalid: `${key} is not a settings key -- did you mean ${tokenMeant}? (the settings file uses the camelCase key; the all-caps spelling is the variable's env name)` };
+				const tokenMeant = Object.hasOwn(RETIRED_TOKEN_NEAR_MISSES, shape) ? RETIRED_TOKEN_NEAR_MISSES[shape] : undefined;
+				if (tokenMeant !== undefined) return { invalid: `${key} is not a settings key: ${retiredTokenMessage(tokenMeant)}` };
 				log("settings_overlay_unknown_key", { key });
 				// Issue #761: the ONE place that decides a key is unknown, so the list a writer carries cannot drift from
 				// this switch. A near miss never gets here (refused above), so it is never carried either.
@@ -396,11 +401,10 @@ export function readOverlay(path, { fs = nodeFs, log = () => {} } = {}) {
 }
 
 /**
- * Resolve the eight effective settings from `config` and a validated `overlay`: overlay value where the
+ * Resolve the four effective settings from `config` and a validated `overlay`: overlay value where the
  * overlay sets it, else the config value. Precedence is overlay > env > default only -- `config`
- * already carries env > default. `maxTokens` and the three token windows may resolve to `null` (their
- * config value when unset), meaning that window is disabled. `job.data` is NOT merged here; that layer is
- * the processor's.
+ * already carries env > default. There is no token budget among them (C2 removed every one).
+ * `job.data` is NOT merged here; that layer is the processor's.
  */
 export function effectiveSettings(config, overlay) {
 	const o = overlay ?? {};
@@ -408,24 +412,17 @@ export function effectiveSettings(config, overlay) {
 		provider: o.provider ?? config.provider,
 		model: o.model ?? config.model,
 		maxTurns: o.maxTurns ?? config.maxTurns,
-		maxTokens: o.maxTokens ?? config.maxTokens,
-		dailyTokenCap: o.dailyTokenCap ?? config.dailyTokenCap,
-		weeklyTokenCap: o.weeklyTokenCap ?? config.weeklyTokenCap,
-		monthlyTokenCap: o.monthlyTokenCap ?? config.monthlyTokenCap,
 		concurrency: o.concurrency ?? config.concurrency,
 	};
 }
 
 /**
  * The per-job settings the worker runs with, from `config` and a `readOverlay` result: `{ invalid }` when the
- * overlay is invalid or the MERGED values break a cross-key rule, else the effective settings plus
- * `secretProfiles`. Pure, so the processor's one settings read (start.mjs `getSettings`) is testable without
- * booting a worker.
+ * overlay is invalid, else the effective settings plus `secretProfiles`/`secretBundles`. Pure, so the
+ * processor's one settings read (start.mjs `getSettings`) is testable without booting a worker.
  *
- * The dollar invariant (issue #501) runs HERE, on merged values, because `validateOverlay` sees one key at a
- * time and the overlay alone: a window in the overlay with the per-job cap in env is valid, and a check of
- * the overlay alone would refuse it. An invalid result becomes the `settings-overlay-invalid` refusal, before
- * any spend.
+ * No cross-key rule is left here: the token invariant (`maxTokens` beside a window) went with the token
+ * budgets in C2, and the retired keys are refused by `validateOverlay` one key at a time.
  *
  * `secretProfiles` (REQ-TRIGGER-SECRETS) rides ALONGSIDE the effective keys rather than inside them:
  * `effectiveSettings` resolves `overlay > env` over a fixed literal whose tests pin its key set, and this key
@@ -438,8 +435,6 @@ export function effectiveSettings(config, overlay) {
 export function resolveSettings(config, read) {
 	if (read.invalid) return read.newer === true ? { invalid: read.invalid, newer: true } : { invalid: read.invalid };
 	const settings = effectiveSettings(config, read.overlay);
-	const broken = checkTokenInvariant(settings);
-	if (broken) return broken;
 	return { ...settings, secretProfiles: read.overlay?.secretProfiles ?? {}, secretBundles: read.overlay?.secretBundles ?? {} };
 }
 

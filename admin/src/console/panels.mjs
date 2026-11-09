@@ -36,12 +36,12 @@ export {
   workersOnline, staleText, progressText
 } from "./panels/common.mjs";
 export {
-  NO_WORKER_TEXT, STALE_BEATS_TEXT, REGISTRY_UNREAD_TEXT, COUNT_WINDOWS_UTC_TEXT, OVERVIEW_UNREAD_TEXT, NEEDS_DEFINITION,
+  NO_WORKER_TEXT, STALE_BEATS_TEXT, REGISTRY_UNREAD_TEXT, OVERVIEW_UNREAD_TEXT, NEEDS_DEFINITION,
   NEEDS_EMPTY, WAITING_EMPTY, RUNNING_EMPTY, SPEND_EMPTY, HOSTS_EMPTY, WAITLISTS_CALM, FREE_SLOT_TEXT,
-  HOST_NO_EXPIRY_TEXT, NO_DOCTOR_TEXT, SPEND_HOURS_TEXT, OVERVIEW_LINKS,
+  HOST_NO_EXPIRY_TEXT, NO_DOCTOR_TEXT, SPEND_SUM_TEXT, OVERVIEW_LINKS,
   NEEDS_ROWS_MAX, WAITING_MAIN_BUCKETS, WAITLIST_ROWS_MAX, hostSkewText, waitingSentence, overviewHeadline,
   overviewSetup, overviewSetupEmpty, overviewNeeds, overviewWaiting, overviewActive, overviewSpend,
-  overviewTimeline, overviewCaps, overviewWaitlists, overviewHosts
+  overviewTimeline, overviewWaitlists, overviewHosts
 } from "./panels/overview.mjs";
 export { runsFilters, runsSummary, runsTable, RUNS_UNREADABLE, RUNS_HOST_UNREADABLE, RUNS_MIRROR_OFF, RUNS_MIRROR_DEGRADED, RUNS_EMPTY, RUNS_WINDOW_TEXT, runsTruncatedText, runsSourceText } from "./panels/runs.mjs";
 export {

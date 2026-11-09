@@ -189,7 +189,7 @@ test("an abort that lands before the backoff does not stop pi's retry: its turn 
 	const session = fakeSession();
 	const emit = (e) => session.emit(e);
 	const budget = attachTurnBudget(session, 1);
-	const aborted = { role: "assistant", content: [], stopReason: "aborted", errorMessage: "pi-dispatch: token cap exceeded" };
+	const aborted = { role: "assistant", content: [], stopReason: "aborted", errorMessage: "pi-dispatch: model not allowed" };
 	promptTurn(emit, assistantError("overloaded_error: Overloaded"));
 	agentEnd(emit, [assistantError("overloaded_error: Overloaded")], true);
 	retryTurn(emit, 1, aborted);

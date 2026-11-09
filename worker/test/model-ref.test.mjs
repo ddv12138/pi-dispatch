@@ -205,7 +205,7 @@ test("errors name the trigger index and the key, never the value", () => {
 });
 
 test("near misses of the model keys refuse under run, on every kind", () => {
-	const misses = ["providerId", "provider_id", "Provider", "PROVIDER", "modelId", "model_id", "Model", "model-id", "allowedModels", "allowed_models", "Models", "max_turns", "maxturns", "MaxTurns", "max-cost-usd", "maxCostTOKENS", "m\u043Edel", "maxTurn", "max_turn", "providers", "providerIds", "model_name", "modelName", "modelNames", "allowedModel", "maxCost"];
+	const misses = ["providerId", "provider_id", "Provider", "PROVIDER", "modelId", "model_id", "Model", "model-id", "allowedModels", "allowed_models", "Models", "max_turns", "maxturns", "MaxTurns", "max-cost-usd", "m\u043Edel", "maxTurn", "max_turn", "providers", "providerIds", "model_name", "modelName", "modelNames", "allowedModel", "maxCost"];
 	for (const [name, entry] of Object.entries(KINDS)) {
 		for (const key of misses) {
 			refused(withRun(entry, { [key]: "x" }), new RegExp(`run\\.${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")} is not a field -- did you mean run\\.`));
@@ -217,7 +217,8 @@ test("near misses of the model keys refuse under run, on every kind", () => {
 	refused(withRun(KINDS.label, { modelId: "x" }), /did you mean run\.model\?/);
 	refused(withRun(KINDS.label, { allowedModels: ["x"] }), /did you mean run\.models\?/);
 	refused(withRun(KINDS.label, { max_turns: 3 }), /did you mean run\.maxTurns\?/);
-	refused(withRun(KINDS.label, { max_cost_usd: 3 }), /did you mean run\.maxTokens\?/);
+	refused(withRun(KINDS.label, { max_cost_usd: 3 }), /did you mean run\.maxCostUsd\? .*retired with the dollar windows/);
+	refused(withRun(KINDS.label, { maxCostTOKENS: 3 }), /run\.maxCostTOKENS is not a field; run\.maxTokens was retired with the token budgets/);
 	refused(withRun(KINDS.label, { maxTurn: 3 }), /did you mean run\.maxTurns\?/);
 	refused(withRun(KINDS.label, { providers: "x" }), /did you mean run\.provider\?/);
 	refused(withRun(KINDS.label, { modelName: "x" }), /did you mean run\.model\?/);
@@ -230,7 +231,7 @@ test("a homoglyph key is pointed at the field its surviving letters actually spe
 	refused(withRun(KINDS.label, { "m\u043Edel": "x" }), /did you mean run\.model\?/);
 	refused(withRun(KINDS.label, { "pr\u043Evider": "x" }), /did you mean run\.provider\?/);
 	refused(withRun(KINDS.label, { "m\u0430xTurns": 3 }), /did you mean run\.maxTurns\?/);
-	refused(withRun(KINDS.label, { "m\u0430xCostUsd": 3 }), /did you mean run\.maxTokens\?/);
+	refused(withRun(KINDS.label, { "m\u0430xCostUsd": 3 }), /did you mean run\.maxCostUsd\? .*retired with the dollar windows/);
 });
 
 test("the model keys refuse under on in EVERY spelling, the correct one included", () => {
@@ -241,10 +242,10 @@ test("the model keys refuse under on in EVERY spelling, the correct one included
 	}
 });
 
-test("run.models and run.maxTokens are fields now, carried into the normalized run (#502, #501)", () => {
-	const [t] = parse([withRun(KINDS.label, { models: ["openai/gpt-5.4"], maxTokens: 2 })]);
+test("run.models is carried into the normalized run, and the retired run.maxTokens is refused by name (#502, C2)", () => {
+	const [t] = parse([withRun(KINDS.label, { models: ["openai/gpt-5.4"] })]);
 	assert.deepEqual(t.run.models, ["openai/gpt-5.4"], "#502 part 3: the list rides the normalized run");
-	assert.equal(t.run.maxTokens, 2, "#501: validated and carried as written");
+	refused(withRun(KINDS.label, { maxTokens: 2 }), /run\.maxTokens was retired with the token budgets; remove it \(the deployment no longer has a token budget\)/);
 	// An unrelated unknown key, ASCII or not, still loads.
 	parse([withRun(KINDS.label, { modelNotes: "x", fl\u00F6w: "x", temperature: 1 })]);
 });
@@ -330,37 +331,20 @@ test("validateModelRef returns only the present fields and leaves the input alon
 	assert.deepEqual(run, { provider: "anthropic", flow: "x" });
 });
 
-// ---- run.maxTokens (issue #501) ----
+// ---- the retired run.maxTokens (C2) ----
 
-test("run.maxTokens is accepted on every kind as a whole number of tokens, and absent (or null) emits no key (D7a)", () => {
+test("run.maxTokens and the retired token windows are REFUSED by name on every kind, never read as an unknown key", () => {
+	const message = /was retired with the token budgets; remove it \(the deployment no longer has a token budget\)/;
 	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const value of [2, "2500", 1000000]) {
-			const [t] = parse([withRun(entry, { maxTokens: value })]);
-			assert.equal(t.run.maxTokens, value, `${name} ${JSON.stringify(value)}`);
-		}
-		const [plain] = parse([entry]);
-		assert.equal("maxTokens" in plain.run, false, `${name}: absent emits no key`);
-		const [nulled] = parse([withRun(entry, { maxTokens: null })]);
-		assert.equal("maxTokens" in nulled.run, false, `${name}: null is absent, the model keys' rule`);
-	}
-});
-
-test("a malformed run.maxTokens refuses the file on every kind, naming the trigger and the key, never the value", () => {
-	for (const [name, entry] of Object.entries(KINDS)) {
-		for (const bad of [0, "0", -2, "2.50", 2.5, "abc", true, [], {}, "1e2"]) {
-			assert.throws(
-				() => parse([withRun(entry, { maxTokens: bad })]),
-				(e) => isConfigError(e) && /run\.maxTokens must be a whole number of tokens/.test(e.message) && e.message.includes(PATH),
-				`${name} ${JSON.stringify(bad)}`,
-			);
+		for (const field of ["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]) {
+			refused(withRun(entry, { [field]: 2 }), message, name);
+			// The three old window fields written null are the normalizer's unset and still re-parse clean.
+			if (field !== "maxTokens") {
+				const [plain] = parse([withRun(entry, { [field]: null })]);
+				assert.equal(field in plain.run, false, `${name}: ${field} null emits no key`);
+			}
 		}
 	}
-	// The value is never echoed (checked on values long enough to be told apart from the message's own digits).
-	for (const bad of ["2.1234567", "sk-ant-wrong-field", "-12.5"]) {
-		assert.throws(() => parse([withRun(KINDS.label, { maxTokens: bad })]), (e) => !e.message.includes(bad), bad);
-	}
-	assert.throws(() => parse([withRun(KINDS.cron, { maxTokens: "x" })]), (e) => /^cron trigger "nightly": run\.maxTokens/.test(e.message));
-	assert.throws(() => parse([KINDS.cron, withRun(KINDS.label, { maxTokens: "x" })]), (e) => /trigger at index 1: run\.maxTokens/.test(e.message));
 });
 
 // #716: all trigger kinds share the same reviewed fallback policy.

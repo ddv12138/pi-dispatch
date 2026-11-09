@@ -129,9 +129,8 @@ test("the trigger add judges, in order, the tool-proof fields, the kind, then an
     const env = process.env;
     const say = (params) => plans.planTriggerAdd({ params, paths, env }).refusal ?? null;
     const label = { kind: "label", flow: "fix", labels: ["bug"] };
-    // The widening sweep stays first: a near miss of a cap is refused as the widening it is (the retired dollar
-    // spelling reads as the token cap it replaced).
-    assert.match(say({ ...label, run: { maxCostUsd: "9" }, colour: "red" }), /^dispatch_trigger_add cannot set run\.maxTokens \(sent as run\.maxCostUsd\)/);
+    // No token cap rides a trigger: a `run` object is not a tool-proof field, so the kind check names it first.
+    assert.match(say({ ...label, run: { maxCostUsd: "9" }, colour: "red" }), /^dispatch_trigger_add does not take run for a label trigger/);
     // The kind before its fields (the fields depend on it).
     // The kinds it takes are named; the kind it was sent never is (issue #737: a caller's bytes stay out of the sentence).
     const kinds = "unknown trigger kind: kind must be one of cron, label, comment, pull_request, issue";
@@ -406,12 +405,9 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
     const dir = tempDir("pd-642-plans-lit-");
     const projectsFile = join(dir, "projects.json");
     writeFileSync(projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-    const envelopeFile = join(dir, "envelope.json");
-    const envelope = { version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } };
-    writeFileSync(envelopeFile, JSON.stringify(envelope));
     const settingsFile = join(dir, "settings.json");
-    writeFileSync(settingsFile, JSON.stringify({ maxTokens: 2000 }));
-    const alloc = { ...paths, projectsFile, envelopeFile, settingsFile, scopedLimitsPath: join(dir, "none.json") };
+    writeFileSync(settingsFile, JSON.stringify({ maxTurns: 30 }));
+    const alloc = { ...paths, projectsFile, settingsFile, scopedLimitsPath: join(dir, "none.json") };
     const badProjects = join(dir, "bad-projects.json");
     writeFileSync(badProjects, "{ not json");
     const keys = KNOWN_KEYS.join(", ");
@@ -438,9 +434,8 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["command unknown key (set)", plans.planSettingSet({ key: "nope", valueTokens: ["1"], paths, env, surface: "command" }).refusal, `set: unknown key 'nope'. valid keys: ${keys}`],
       ["command unknown key (unset)", plans.planSettingUnset({ key: "nope", paths, env, surface: "command" }).refusal, `unset: unknown key 'nope'. valid keys: ${keys}`],
       ["one value", plans.planSettingSet({ key: "model", valueTokens: ["a", "b"], paths, env, surface: "command" }).refusal, "set: model takes exactly one value"],
+      ["retired token setting", plans.planSettingChange({ key: "maxTokens", value: "1", paths, env }).refusal, "rejected: maxTokens was retired because allocation/token budgets were removed; delete it from the settings file by hand, since the worker refuses a file that carries it"],
       ["a value is needed", plans.planSettingSet({ key: "model", value: " ", paths, env }).refusal, "a value is needed to set a key; unset it instead"],
-      ["tool envelope break", plans.planSettingChange({ key: "maxTokens", paths: alloc, env: {} }).refusal, { prefix: "rejected: this change would leave the allocation envelope invalid" }],
-      ["command envelope break", plans.planSettingUnset({ key: "maxTokens", paths: alloc, env: {}, surface: "command" }).refusal, { prefix: "unset: this change would leave the allocation envelope invalid" }],
       ["pause window index", plans.planPauseWindowEdit({ index: 4, fields: {}, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["pause window delete index", plans.planPauseWindowDelete({ index: 4, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["scoped limit index", plans.planLimitEdit({ params: { index: 2, concurrent: 1 }, paths, env }).refusal, "no scoped limit at index 2 (have 1)"],
@@ -450,9 +445,7 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["no such project", plans.projectAt(alloc, "nope").refusal, "no project with id \"nope\" (dispatch_projects lists them)"],
       ["no such project, thrown", thrown(() => plans.currentProject(alloc, "nope")), "no project with id \"nope\" (dispatch_projects lists them)"],
       ["project add refused", plans.planProjectAdd({ params: { id: "BAD", members: ["github:acme/web"] }, paths, env }).refusal, { prefix: "rejected: " }],
-      ["nothing to change", plans.planEnvelope({ params: {}, paths, env }).refusal, "nothing to change: name at least one of window, totalTokens, floorsTokens, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays"],
-      ["envelope refused", plans.planEnvelope({ params: { totalTokens: "x" }, paths: alloc, env: {} }).refusal, { prefix: "rejected: " }],
-      ["envelope unchanged", plans.planEnvelope({ params: { totalTokens: 100 }, paths: alloc, env: {} }).unchanged, "no change: the envelope already says this"],
+      ["envelope retired", plans.planEnvelope({ params: { totalTokens: 100 }, paths: alloc, env: {} }).refusal, "allocation/token budgets were removed: there is no allocation envelope to change, so nothing was changed"],
       ["no such profile", plans.planSecretProfileRemove({ name: "gone", profiles: {}, settingsFile: "/s" }).refusal, "no such profile. No resolver profiles are declared in the settings overlay."],
       ["no such profile, with some", plans.planSecretProfileRemove({ name: "gone", profiles: { dev: "/d" }, settingsFile: "/s" }).refusal, "no such profile. Resolver profiles (settings overlay):\n  dev: /d"],
       ["profile name", plans.planSecretProfileAdd({ name: "pro d", path: "/x", profiles: {}, settingsFile: "/s" }).refusal, "a profile name may use letters, digits, dot, dash and underscore only \u2014 PI_SECRET_PROFILES is a comma-separated list of name:path pairs"],
@@ -469,7 +462,7 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["roots set and empty", plans.resolverRootsJudgement("/opt/pi/r", { PI_SECRET_RESOLVER_ROOTS: "" }).refusal, "PI_SECRET_RESOLVER_ROOTS is set and empty on this deployment, so the worker refuses every resolver the settings overlay declares; set it to the directory your resolvers live in first"],
       ["no backends", plans.backendRefusal("local", { PI_BACKENDS: "vapour" }), "this deployment blesses no backends, so run.backend cannot be set (see PI_BACKENDS)"],
       ["backend not blessed", plans.backendRefusal("podman", { PI_BACKENDS: "local" }), "backend 'podman' is not blessed by this deployment (PI_BACKENDS: local)"],
-      ["tool-proof token cap", plans.wideningFieldRefusal({ maxCostUsd: "1" }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.maxTokens (sent as maxCostUsd): a trigger's per-job token cap is set by hand in the triggers file, never by a tool"],
+      ["retired token cap", plans.wideningFieldRefusal({ maxTokens: "1" }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.maxTokens (sent as maxTokens): allocation/token budgets were removed, so a trigger no longer carries a per-job token cap; remove it"],
       ["tool-proof model list", plans.wideningFieldRefusal({ run: { models: ["a/b"] } }, "dispatch_trigger_edit"), "dispatch_trigger_edit cannot set run.models (sent as run.models): a trigger's allowed-model list is set by hand in the triggers file, never by a tool"],
       ["tool-proof mcp", plans.wideningFieldRefusal({ mcp: [] }, "dispatch_trigger_add"), "dispatch_trigger_add cannot set run.mcp (sent as mcp): a trigger's list of MCP servers is set by hand in the triggers file, never by a tool"],
       ["memory size", thrown(() => plans.sizeFieldsOf({ memory: "12q" })), { prefix: "memory: " }],
@@ -621,10 +614,8 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
   try {
     const env = process.env;
     const dir = paths.triggersPath.replace(/\/triggers\.json$/, "");
-    paths.envelopeFile = join(dir, "envelope.json");
-    writeFileSync(paths.settingsFile, JSON.stringify({ maxTurns: 30, maxTokens: 2000 }));
+    writeFileSync(paths.settingsFile, JSON.stringify({ maxTurns: 30 }));
     writeFileSync(paths.projectsFile, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }, { id: "spare", members: ["github:acme/spare"] }] }));
-    writeFileSync(paths.envelopeFile, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
     const profiles = { dev: "/opt/d.sh" };
     const bundles = { "op-shop": { path: "/opt/b.mjs", format: "json" } };
     const both = (fn) => ["tool", "console"].map((surface) => fn(surface));
@@ -632,7 +623,7 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
       planTriggerAdd: () => [plans.planTriggerAdd({ params: { kind: "label", flow: "fix", labels: ["bug"], backend: "local" }, paths, env })],
       planTriggerEdit: () => both((surface) => plans.planTriggerEdit({ params: { index: 0, flow: "review", backend: "local", model: "m1", progress: true }, paths, env, surface })),
       planTriggerDelete: () => both((surface) => plans.planTriggerDelete({ index: 0, paths, surface })),
-      planSettingSet: () => [plans.planSettingSet({ key: "maxTurns", value: "40", paths, env }), plans.planSettingSet({ key: "dailyTokenCap", value: "500000", paths, env: {} }), plans.planSettingSet({ key: "maxTurns", valueTokens: ["40"], paths, env, surface: "command" })],
+      planSettingSet: () => [plans.planSettingSet({ key: "maxTurns", value: "40", paths, env }), plans.planSettingSet({ key: "concurrency", value: "2", paths, env }), plans.planSettingSet({ key: "maxTurns", valueTokens: ["40"], paths, env, surface: "command" })],
       planSettingUnset: () => [plans.planSettingUnset({ key: "maxTurns", paths, env }), plans.planSettingUnset({ key: "maxTurns", paths, env, surface: "command" })],
       planSettingChange: () => [plans.planSettingChange({ key: "maxTurns", value: "40", paths, env })],
       planPauseWindowAdd: () => [plans.planPauseWindowAdd({ fields: { scope: "*", from: "01:00", to: "02:00" }, paths })],
@@ -644,15 +635,15 @@ test("no confirm a planner builds says a change or a mapping with an arrow, on t
       planProjectAdd: () => [plans.planProjectAdd({ params: { id: "web", members: ["github:acme/api"] }, paths, env })],
       planProjectEdit: () => [plans.planProjectEdit({ params: { id: "shop", name: "Shop" }, paths, env })],
       planProjectDelete: () => [plans.planProjectDelete({ id: "spare", paths, env })],
-      planEnvelope: () => [plans.planEnvelope({ params: { minIntervalHours: 0, totalTokens: 120 }, paths, env })],
-      // A priorities plan has no confirm: the worker applies it with no keypress (REQ-DELEGATED-ALLOCATION).
-      planPriorities: () => [plans.planPriorities({ projects: [{ id: "shop", weight: 2 }], validDays: 1, now: new Date(Date.UTC(2026, 9, 15)) })],
       planSecretProfileAdd: () => [plans.planSecretProfileAdd({ name: "dev", path: "/opt/d2.sh", profiles, settingsFile: "/s" }), plans.planSecretProfileAdd({ name: "prod", path: "/opt/p.sh", profiles, settingsFile: "/s" })],
       planSecretProfileRemove: () => [plans.planSecretProfileRemove({ name: "dev", profiles, settingsFile: "/s" })],
       planSecretBundleAdd: () => [plans.planSecretBundleAdd({ name: "op-shop", path: "/opt/b2.mjs", format: "dotenv", bundles, settingsFile: "/s" }), plans.planSecretBundleAdd({ name: "op-web", path: "/opt/w.mjs", format: "json", bundles, settingsFile: "/s" })],
       planSecretBundleRemove: () => [plans.planSecretBundleRemove({ name: "op-shop", bundles, bound: ["shop"], settingsFile: "/s" }), plans.planSecretBundleRemove({ name: "op-shop", bundles: { "op-shop": { path: "/b" } }, bound: [], settingsFile: "/s" })],
     };
-    const exported = Object.keys(plans).filter((k) => /^plan[A-Z]/.test(k) && typeof plans[k] === "function").sort();
+    // The retired envelope planner is a tombstone: it always refuses, so it has no confirm to scan.
+    assert.match(plans.planEnvelope().refusal, /allocation\/token budgets were removed/);
+    assert.equal(plans.planEnvelope().plan, undefined);
+    const exported = Object.keys(plans).filter((k) => /^plan[A-Z]/.test(k) && k !== "planEnvelope" && typeof plans[k] === "function").sort();
     assert.deepEqual(Object.keys(CASES).sort(), exported, "every exported planner has its cases, and no case names a planner that is gone");
     for (const [name, cases] of Object.entries(CASES)) {
       const said = cases().flatMap((res) => {

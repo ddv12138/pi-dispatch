@@ -311,7 +311,7 @@ test("BY SHAPE: every reason in the table is written by a site, and every site w
 	// second hand-written list that would pass after a writer stopped using one of them.
 	const failover = strip(readFileSync(join(SRC, "model-failover.mjs"), "utf8"));
 	const modelWhys = [...failover.matchAll(/wait \?\?= "([^"]+)"/g)].map((m) => m[1]);
-	assert.equal(modelWhys.length, 3, "cooldown, model window and endpoint checks assign a wait");
+	assert.equal(modelWhys.length, 2, "cooldown and endpoint checks assign a wait (C2 removed the token window)");
 	assert.match(index, /selectionWait = selection\.wait \? selection : null/);
 	for (const why of modelWhys) literal.add(why);
 	const subscription = strip(readFileSync(join(SRC, "subscription-runtime.mjs"), "utf8"));

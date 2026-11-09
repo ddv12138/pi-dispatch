@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { layoutProjectSizingChart, projectSizing, projectSizingChart, projectSpend, projectRuns, projectSize, projectTriggers, projectMembers, projectDelete, projectBundle, projectRecent, projectLimits, projectAllocation, projectDescription } from "../src/console/panels/project.mjs";
+import { layoutProjectSizingChart, projectSizing, projectSizingChart, projectSpend, projectRuns, projectSize, projectTriggers, projectMembers, projectDelete, projectBundle, projectRecent, projectLimits, projectDescription } from "../src/console/panels/project.mjs";
 import { projectSizeAction } from "../src/project-view.mjs";
 import { reasonWords } from "../src/words.mjs";
 import { parseDocument as parsePage } from "./helpers/script-dom.mjs";
@@ -77,32 +77,17 @@ test("chart units sit outside the scaled SVG and numeric labels center on their 
   assert.ok(chart.ticks.every((t) => t.y >= 15 && t.y <= chart.height - 37), "the larger phone glyphs have space on both sides of the extreme tick centers");
 });
 
-test("spend meter is held-inclusive while headline settles and held are separate", () => {
+test("spend is the recorded token total, with no cap, share or hold", () => {
   const markup = String(projectSpend(view(fixture())));
-  assert.match(markup, /<span title="6,100,000">6\.10M<\/span>/);
-  assert.match(markup, /<span title="2,000,000">2\.00M<\/span>/);
   assert.match(markup, /<span title="8,100,000">8\.10M<\/span>/);
-  assert.match(markup, /aria-valuenow="32"/);
-  assert.match(markup, /width="32\.4%"/);
-});
-
-test("known total spend leads an unknown held split and the numeric meter remains held-inclusive", () => {
+  assert.match(markup, /from the run records/);
+  assert.ok(!markup.includes("held") && !markup.includes("share") && !markup.includes("envelope"), "no hold, no envelope share");
+  assert.ok(!markup.includes("meter") && !markup.includes("%"), "no cap meter");
+  // Unread records: "unknown", never zero.
   const p = fixture();
-  Object.assign(p.spend, { usedTokens: 13_340_000, settledTokens: null, heldTokens: null, heldIncomplete: true, heldKnownTokens: 0, shareTokens: 39_550_000 });
-  const markup = String(projectSpend(view(p)));
-  const doc = parseDocument(markup);
-  assert.equal(doc.querySelector(".proj-kv b").textContent, "13.34M");
-  assert.match(doc.querySelector(".proj-kv").textContent, /spent and held, of a 39\.55M share/);
-  assert.equal(doc.querySelector(".proj-meter-label").textContent, "13.34M / 39.55M");
-  assert.match(markup, /split between spent and held is unknown/);
-  assert.equal(doc.querySelector('[role="meter"]').getAttribute("aria-valuenow"), "34");
-  Object.assign(p.spend, { usedTokens: null, settledTokens: null, shareTokens: null });
-  assert.equal(parseDocument(String(projectSpend(view(p)))).querySelector(".proj-kv b").textContent, "unknown", "an unread total is never invented from incomplete holds");
-  Object.assign(p.spend, { envelope: false, settledTokens: 3_400_000 });
-  const noEnvelope = parseDocument(String(projectSpend(view(p))));
-  assert.equal(noEnvelope.querySelector(".proj-kv b").textContent, "3.40M");
-  assert.equal(noEnvelope.querySelector('[role="meter"]'), null);
-  assert.match(noEnvelope.textContent, /no envelope, so no share/);
+  p.spend.usedTokens = null;
+  p.spend.settledTokens = null;
+  assert.equal(parseDocument(String(projectSpend(view(p)))).querySelector(".proj-kv b").textContent, "unknown");
 });
 
 test("the worst run uses one catalog short reason and never a supplied diagnostic paragraph", () => {
@@ -267,19 +252,17 @@ test("Recent's stacked rows keep each run's target, outcome, instant and exact a
   assert.match(markup, /All 8 in Runs, filtered to billing/);
 });
 
-test("money stays readable at two decimals while each title retains the exact token amount", () => {
+test("money stays readable at two decimals while its title retains the exact token amount, from the records only", () => {
   const p = fixture();
-  p.spend.settledTokens = 6_123_456;
-  p.spend.heldTokens = 2_654_321;
   p.spend.usedTokens = 8_777_777;
-  p.spend.shareTokens = 25_987_654;
   const markup = String(projectSpend(view(p)));
-  assert.match(markup, /<span title="6,123,456">6\.12M<\/span>/);
-  assert.match(markup, /<span title="2,654,321">2\.65M<\/span>/);
-  assert.match(markup, /<span title="25,987,654">25\.98M<\/span>/);
+  assert.match(markup, /<span title="8,777,777">8\.77M<\/span>/);
+  assert.match(markup, /from the run records/);
+  assert.ok(!markup.includes("held") && !markup.includes("envelope"), "no hold, no envelope share: allocation is gone");
   assert.ok(!markup.includes("&lt;span"), "formatted fragments are never stringified into visible markup");
-  p.allocation = { window: "week", floorTokens: 10_123_456, shareTokens: 25_987_654, totalTokens: 100_000_000, refused: 0 };
-  assert.match(String(projectAllocation(view(p))), /<span title="10,123,456">10\.12M<\/span> a week/);
+  // No recorded total: the panel says the spend is unknown rather than drawing zero.
+  p.spend.usedTokens = null;
+  assert.match(String(projectSpend(view(p))), /spend is unknown/);
 });
 
 test("normalized null limit fields are omitted and actual settings read in human words", () => {
@@ -287,7 +270,7 @@ test("normalized null limit fields are omitted and actual settings read in human
   p.limits = [{ index: 2, scope: "project:billing", memory: "8g", cpus: 4, day: null, week: null, month: null, concurrent: null, dayTokens: "2500000", weekTokens: null, monthTokens: null, hostShare: 50, minJobs: null }];
   const markup = String(projectLimits(view(p)));
   assert.match(markup, /8 GiB memory, 4 CPUs/);
-  assert.match(markup, /title="2,500,000">2\.50M<\/span> a day/);
+  assert.ok(!markup.includes("2,500,000") && !markup.includes("a day"), "retired token limits are not drawn");
   assert.match(markup, /50% of each host&#39;s budget/);
   assert.match(markup, /not set; a local folder still runs one job at a time/);
   assert.doesNotMatch(markup, /null|day:|week:|concurrent:|minJobs:/);

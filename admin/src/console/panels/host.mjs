@@ -499,11 +499,9 @@ export const hostRow = card("Registry row", (h, v) =>
           ],
           [
             "Matches the fleet",
-            html`<div class="hd-fp">${["fpCron", "fpTok", "fpProjects", "fpEnvelope"].every((key) => h[key] && (v.data?.snapshot?.hostBudgets ?? []).every((peer) => peer[key] === h[key])) ? ui.chip("all four match", { status: "ok", icon: "done" }) : ui.chip("compare fingerprints", { status: "attention", icon: "attention" })}<span class="muted">triggers, token caps, projects, envelope</span></div><details><summary>Fingerprints</summary>${[
+            html`<div class="hd-fp">${["fpCron", "fpProjects"].every((key) => h[key] && (v.data?.snapshot?.hostBudgets ?? []).every((peer) => peer[key] === h[key])) ? ui.chip("all published fingerprints match", { status: "ok", icon: "done" }) : ui.chip("compare fingerprints", { status: "attention", icon: "attention" })}<span class="muted">triggers, projects</span></div><details><summary>Fingerprints</summary>${[
               ["triggers", "fpCron"],
-              ["token caps", "fpTok"],
               ["projects", "fpProjects"],
-              ["envelope", "fpEnvelope"],
             ].map(
               ([title, key]) =>
                 html`<p>${title}: <span class="code">${h[key] ?? "not published"}</span>${h[key] ? ((v.data?.snapshot?.hostBudgets ?? []).some((peer) => !peer[key]) ? " (comparison not known until every live host publishes it)" : (v.data?.snapshot?.hostBudgets ?? []).every((peer) => peer[key] === h[key]) ? " (matches every live host)" : " (differs across live hosts)") : ""}</p>`,

@@ -180,8 +180,7 @@ export function filter(eventName, subset, cfg, selfId, deliveryId, closerAuthori
 			...(resolved.models !== undefined ? { models: resolved.models } : {}), ...(resolved.fallbackModels !== undefined ? { fallbackModels: resolved.fallbackModels } : {}),
 			// #501. Its own spread, the rule above: a dropped cap runs the job under the deployment's cap, or none,
 			// while the file reads as narrowed.
-			...(resolved.maxTokens !== undefined ? { maxTokens: resolved.maxTokens } : {}),
-			// The trigger's injected skills dir (REQ-PER-TRIGGER-SKILLS), at JOB level beside image/packages and
+						// The trigger's injected skills dir (REQ-PER-TRIGGER-SKILLS), at JOB level beside image/packages and
 			// NEVER inside `trigger`. That placement is sharpest here of all: `trigger` is carried into
 			// /job/event.json, and a worker-host path in an agent-readable file is the leak prepare-local's
 			// basename(folder) restraint already exists to prevent.
@@ -199,7 +198,7 @@ export function filter(eventName, subset, cfg, selfId, deliveryId, closerAuthori
 			// REQ-AWAIT-INPUT (issue #625): whether the job may end awaiting a person's answer. Present only when armed,
 			// resume's rule, so an unflagged job's data stays byte-identical.
 			...(resolved.awaitInput === true ? { awaitInput: true } : {}),
-			...(resolved.gates !== undefined ? { gates: resolved.gates, ...(resolved.gateTimeout !== undefined ? { gateTimeout: resolved.gateTimeout } : {}), ...(resolved.gateBudgetRaiseTokens !== undefined ? { gateBudgetRaiseTokens: resolved.gateBudgetRaiseTokens } : {}) } : {}),
+			...(resolved.gates !== undefined ? { gates: resolved.gates, ...(resolved.gateTimeout !== undefined ? { gateTimeout: resolved.gateTimeout } : {}) } : {}),
 			// Issue #644: the progress tool and the forge status comment, each present only when armed, awaitInput's rule.
 			...(resolved.progress === true ? { progress: true } : {}),
 			...(resolved.statusComment === true ? { statusComment: true } : {}),
@@ -255,14 +254,14 @@ function routeIssueLabel(subset, triggers) {
 		...(rule.command !== undefined ? { command: rule.command } : { flow: rule.flow }),
 		packages: rule.packages, // the MATCHED rule's fields -- rules in one file may differ on them
 		image: rule.image, backend: rule.backend, excludeTools: rule.excludeTools, mcp: rule.mcp,
-		provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels, maxTokens: rule.maxTokens,
+		provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels,
 		skillsDir: rule.skillsDir,
 		secrets: rule.secrets,
 		secretsProfile: rule.secretsProfile,
 		waitFor: rule.waitFor,
 		instructions: rule.instructions,
 		resume: rule.resume,
-		awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout, gateBudgetRaiseTokens: rule.gateBudgetRaiseTokens,
+		awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout,
 		progress: rule.progress,
 		statusComment: rule.statusComment,
 		recover: rule.recover,
@@ -337,14 +336,14 @@ function routeComment(subset, triggers, knownFlows, assumeParked = false) {
 		// <flow>` override changes WHICH flow runs, never which triggers.json entry authorized it.
 		packages: triggers.comment.packages,
 		image: triggers.comment.image, backend: triggers.comment.backend, excludeTools: triggers.comment.excludeTools, mcp: triggers.comment.mcp,
-		provider: triggers.comment.provider, model: triggers.comment.model, maxTurns: triggers.comment.maxTurns, models: triggers.comment.models, fallbackModels: triggers.comment.fallbackModels, maxTokens: triggers.comment.maxTokens,
+		provider: triggers.comment.provider, model: triggers.comment.model, maxTurns: triggers.comment.maxTurns, models: triggers.comment.models, fallbackModels: triggers.comment.fallbackModels,
 		skillsDir: triggers.comment.skillsDir,
 		secrets: triggers.comment.secrets,
 		secretsProfile: triggers.comment.secretsProfile,
 		waitFor: triggers.comment.waitFor,
 		instructions: triggers.comment.instructions,
 		resume: triggers.comment.resume,
-		awaitInput: triggers.comment.awaitInput, gates: triggers.comment.gates, gateTimeout: triggers.comment.gateTimeout, gateBudgetRaiseTokens: triggers.comment.gateBudgetRaiseTokens,
+		awaitInput: triggers.comment.awaitInput, gates: triggers.comment.gates, gateTimeout: triggers.comment.gateTimeout,
 		progress: triggers.comment.progress,
 		statusComment: triggers.comment.statusComment,
 		recover: triggers.comment.recover,
@@ -447,14 +446,14 @@ function routePullRequest(subset, triggers, action) {
 			...(rule.command !== undefined ? { command: rule.command } : { flow: rule.flow }),
 			packages: rule.packages, // the MATCHED rule's fields -- rules in one file may differ on them
 			image: rule.image, backend: rule.backend, excludeTools: rule.excludeTools, mcp: rule.mcp,
-			provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels, maxTokens: rule.maxTokens,
+			provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels,
 			skillsDir: rule.skillsDir,
 			secrets: rule.secrets,
 			secretsProfile: rule.secretsProfile,
 			waitFor: rule.waitFor,
 			instructions: rule.instructions,
 			resume: rule.resume,
-			awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout, gateBudgetRaiseTokens: rule.gateBudgetRaiseTokens,
+			awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout,
 			progress: rule.progress,
 			statusComment: rule.statusComment,
 			recover: rule.recover,
@@ -569,14 +568,14 @@ function routeClose(rules, number, closerAuthorized, matchedFor, targetFor) {
 		...(rule.command !== undefined ? { command: rule.command } : { flow: rule.flow }),
 		packages: rule.packages, // the MATCHED rule's fields -- rules in one file may differ on them
 		image: rule.image, backend: rule.backend, excludeTools: rule.excludeTools, mcp: rule.mcp,
-		provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels, maxTokens: rule.maxTokens,
+		provider: rule.provider, model: rule.model, maxTurns: rule.maxTurns, models: rule.models, fallbackModels: rule.fallbackModels,
 		skillsDir: rule.skillsDir,
 		secrets: rule.secrets,
 		secretsProfile: rule.secretsProfile,
 		waitFor: rule.waitFor,
 		instructions: rule.instructions,
 		resume: rule.resume,
-		awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout, gateBudgetRaiseTokens: rule.gateBudgetRaiseTokens,
+		awaitInput: rule.awaitInput, gates: rule.gates, gateTimeout: rule.gateTimeout,
 		progress: rule.progress,
 		statusComment: rule.statusComment,
 		recover: rule.recover,

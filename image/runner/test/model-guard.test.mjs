@@ -318,7 +318,7 @@ test("a refused call exits 2 / model-not-allowed through decideExit", async () =
 	} finally {
 		layer.restore();
 	}
-	const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: meter.state.stopReason, tokenAborted: false, terminal: { stopReason: "aborted", errorMessage: "pi-dispatch: model not allowed" } });
+	const outcome = decideExit({ budgetAborted: false, budgetTurns: 1, meterStop: meter.state.stopReason, terminal: { stopReason: "aborted", errorMessage: "pi-dispatch: model not allowed" } });
 	assert.deepEqual([outcome.code, outcome.reason], [EXIT_POLICY, MODEL_NOT_ALLOWED]);
 });
 

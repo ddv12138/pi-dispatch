@@ -908,7 +908,7 @@ test("collectChain counts are additive telemetry: they never alter the completed
 	assert.equal(r.chainRefused, 3);
 });
 
-test("collectChain runs ONLY on the completed branch, never on policy / abort / infra / token-cap", async () => {
+test("collectChain runs ONLY on the completed branch, never on policy / abort / infra", async () => {
 	// EXIT_POLICY (runner-policy, container exit 2)
 	{
 		const { deps: d, calls } = deps({ runContainer: async () => (calls.push("run-container"), { code: 2, aborted: false }) });
@@ -928,12 +928,6 @@ test("collectChain runs ONLY on the completed branch, never on policy / abort / 
 		await runJob(ghJob, d).catch(() => {});
 		assert.ok(!calls.includes("collect-chain"), "an infra retry must not chain -- it re-runs");
 	}
-	// token-cap (policy, pre-container)
-	{
-		const { deps: d, calls } = deps({ redis: fakeRedis(0, 2000), tokenCaps: { day: 1500, week: null, month: null } });
-		await runJob(ghJob, d);
-		assert.ok(!calls.includes("collect-chain"), "a token-cap refusal must not chain");
-	}
 	// unprotected-branch (policy, pre-container)
 	{
 		const { deps: d, calls } = deps({ isDefaultBranchProtected: async () => false });
@@ -942,47 +936,45 @@ test("collectChain runs ONLY on the completed branch, never on policy / abort / 
 	}
 });
 
-// ---- daily token cap (issue #25): reserve BEFORE the container, record AFTER it ----
+// ---- token budgets removed (C2): no day window, no reservation, no settle ----
 
-test("a full day window refuses token-cap -- every token key it touched is given back, nothing burned", async () => {
-	// CONST-BUDGET-BEFORE-TOKENS: the token windows reserve before the container, and a refusal gives back
-	// every key it touched (the token ledgers' own rule, token-budget.mjs). There is no job-count slot any more.
-	const redis = fakeRedis(0, 2000);
+test("no daily token window refuses a run: a full-looking day counter is never read or written", async () => {
+	// C2 removed the token windows, so a job that used to be over its day cap simply runs. Nothing reserves, no
+	// key is written, and the counter the old window read is left exactly as the fixture preset it.
+	const redis = fakeRedis(0, 2_000);
 	const { deps: d, calls } = deps({ redis, tokenCaps: { day: 1500, week: null, month: null } });
 	const r = await runJob(ghJob, d);
-	assert.equal(r.outcome, "policy");
-	assert.equal(r.reason, "token-cap");
-	assert.equal(r.budgetReserved, false, "no job-count slot exists to hold");
-	assert.equal(redis.incrCalls, 0, "no job-count counter is ever touched");
+	assert.equal(r.outcome, "completed");
+	assert.equal(r.budgetReserved, true, "a container ran, so it may have spent");
+	assert.equal(redis.incrCalls, 0);
 	assert.equal(redis.decrCalls, 0);
-	assert.equal(redis.store.get("budget:tok:2026-07-16"), 2000, "the window holds the preset, its own add given back");
-	assert.ok(!calls.includes("run-container"), "no container, no provider spend");
+	assert.deepEqual(redis.ops.filter((o) => o[0] === "incrby" || o[0] === "decrby"), [], "no token key is touched");
+	assert.equal(redis.store.get("budget:tok:2026-07-16"), 2000, "the old window key is inert");
+	assert.ok(calls.includes("run-container"), "the run proceeds to the container");
 });
 
-test("under the token cap: the run proceeds and its total settles into the window AFTER the container", async () => {
+test("the container's token total is recorded on the completed result, with no token window settled", async () => {
 	const redis = fakeRedis(0, 500);
-	const { deps: d } = deps({
-		redis,
-		tokenCaps: { day: 1_000_000, week: null, month: null },
-		runContainer: async () => ({ code: 0, aborted: false, turns: 3, tokens: { input: 4000, output: 1000, total: 5000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 } }),
-	});
+	const tokens = { input: 4000, output: 1000, total: 5000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 };
+	const { deps: d } = deps({ redis, tokenCaps: { day: 1_000_000, week: null, month: null }, runContainer: async () => ({ code: 0, aborted: false, turns: 3, tokens }) });
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "completed");
-	assert.equal(r.tokensWindows.settledTokens, 5000, "the job's total tokens are the settled amount");
-	assert.equal(redis.store.get("budget:tok:2026-07-16"), 5500, "settled into the day window: the 500 hold + the settle delta");
+	assert.deepEqual(r.tokens, tokens, "usage telemetry is kept; the money-safety cap is not");
+	assert.equal(Object.hasOwn(r, "tokensWindows"), false, "C2 removed tokensWindows from the result");
+	assert.equal(redis.store.get("budget:tok:2026-07-16"), 500, "nothing settles into the old day window");
 });
 
-test("the token total settles even on a runner-policy exit -- the container still spent", async () => {
-	const redis = fakeRedis(0, 0);
+test("a runner-policy exit that ran a container still records its token spend -- the spend is accounted, not free", async () => {
+	const tokens = { input: 0, output: 0, total: 4000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 };
 	const { deps: d } = deps({
-		redis,
-		tokenCaps: { day: 1_000_000, week: null, month: null },
-		runContainer: async () => ({ code: 2, aborted: false, turns: 9, exitReason: "checkpoint-corrupted", exitLineCode: 2, tokens: { input: 0, output: 0, total: 4000, metered: true, unresolved: 0, usageUnreported: 0, unmeteredChildren: 0 } }),
+		tokenCaps: { day: 1, week: null, month: null },
+		runContainer: async () => ({ code: 2, aborted: false, turns: 9, exitReason: "checkpoint-corrupted", exitLineCode: 2, tokens }),
 	});
 	const r = await runJob(ghJob, d);
 	assert.equal(r.outcome, "policy");
 	assert.equal(r.reason, "runner-policy");
-	assert.equal(r.tokensWindows.settledTokens, 4000, "a policy exit that ran a container is accounted, not free");
+	assert.deepEqual(r.tokens, tokens);
+	assert.equal(Object.hasOwn(r, "tokensWindows"), false);
 });
 
 test("with the token cap disabled (null), the counter is never recorded", async () => {
@@ -1808,10 +1800,9 @@ test("a job carrying exclusions on an image that does not declare exclude-tools 
 	assert.ok(posted[0]?.includes("Rebuild"), "and names the fix, not merely the symptom");
 });
 
-test("a job carrying a token budget on an image without `tokenBudget` refuses pre-spend, pre-reserve, through the REAL preflight table (#501)", async () => {
-	// An image built before the meter reads no PI_MAX_TOKENS: the job would run with NO cap and record
-	// a clean exit. Driven through makeImagePreflight itself (a fake docker printing the labels), so removing
-	// the table row fails here, not only in the table's own test.
+test("a job carrying a token budget no longer needs image `tokenBudget` support: C2 removed the gate (#501)", async () => {
+	// Driven through makeImagePreflight itself (a fake docker printing the labels), so the table is exercised too:
+	// the image declares no `tokenBudget`, and the run still proceeds -- no token cap exists for the label to guard.
 	const { makeImagePreflight, FIELD_SEP } = await import("../src/image-preflight.mjs");
 	const { EventEmitter } = await import("node:events");
 	const docker = (caps) => (_cmd, _args, opts) => {
@@ -1826,22 +1817,16 @@ test("a job carrying a token budget on an image without `tokenBudget` refuses pr
 		return child;
 	};
 	const job = { kind: "local", folder: "/proj", flow: "f", task: "t", provider: "anthropic", model: "m", maxTurns: 5, maxTokens: 0 };
-	const redis = fakeRedis();
 	const posted = [];
-	const { deps: d, calls } = deps({ redis, comment: async (_j, t) => posted.push(t), imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
+	const { deps: d, calls } = deps({ comment: async (_j, t) => posted.push(t), imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
 	const r = await runJob(job, d);
-	assert.equal(r.outcome, "policy", "a policy RETURN, never a throw");
-	assert.equal(r.reason, "job-image-token-budget-unsupported");
-	assert.equal(r.budgetReserved, false);
-	assert.equal(redis.incrCalls, 0, "no budget slot to find out");
-	assert.ok(!calls.includes("prepare"), "no clone");
-	assert.ok(!calls.includes("run-container"), "no container: an uncapped run is exactly what this gate exists to stop");
-	assert.ok(posted[0]?.includes("dev.pi-dispatch.capabilities") && posted[0]?.includes("Rebuild"), "names the label and the fix");
-
-	// The same job with NO cap on the same old image is not this gate's business.
-	const { deps: d2 } = deps({ redis: fakeRedis(), imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
-	const r2 = await runJob({ ...job, maxTokens: null }, d2);
-	assert.notEqual(r2.reason, "job-image-token-budget-unsupported");
+	assert.equal(r.outcome, "completed", "the old capability gate is gone");
+	assert.ok(calls.includes("prepare"), "the clone runs");
+	assert.ok(calls.includes("run-container"), "the container runs: maxTokens is no longer a pre-spend gate");
+	assert.ok(!posted.some((t) => t.includes("token") && t.includes("Rebuild")), "no capability refusal names a token label");
+	// A null maxTokens is the same run: the field is inert, not a gate.
+	const { deps: d2 } = deps({ imagePreflight: makeImagePreflight({ image: "pi-job:stale", spawnFn: docker("replicas,commands,excludeTools,anyUid") }) });
+	assert.equal((await runJob({ ...job, maxTokens: null }, d2)).outcome, "completed");
 });
 
 // ---- REQ-PER-TRIGGER-SKILLS: a trigger that named a skills dir the worker cannot see.

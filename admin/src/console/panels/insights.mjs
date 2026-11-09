@@ -7,7 +7,6 @@
 import { bannersHtml, buildGraphScene } from "../../graph-html.mjs";
 import {
   breakdownHtml,
-  budgetSectionHtml,
   capacitySectionHtml,
   costBannersHtml,
   cumulativeHtml,
@@ -17,8 +16,6 @@ import {
   insightsWindowLabel,
   INSIGHTS_CAPACITY_JOBS_ONLY,
   kpisHtml,
-  normAllocation,
-  normBudget,
   normCapacity,
   normFold,
   normProjectNames,
@@ -26,7 +23,6 @@ import {
   normSpendMap,
   planCardsHtml,
   sizingSectionHtml,
-  splitSectionHtml,
   topologySectionHtml,
   topologySpend,
 } from "../../insights-html.mjs";
@@ -122,8 +118,8 @@ function windowsLineHtml(windowLabel, scene, translate = (message) => message) {
 
 /**
  * The insights sections, in the offline page's order, from the same section renderers and normalizers: the window
- * line, the banners, the KPIs, budget, split, sizes, capacity, plans, the daily charts, the breakdown, the topology and
- * the footer. The topology is INTERACTIVE (pan, zoom, chip tooltips, label fitting, a breakdown row selecting its
+ * line, the banners, the KPIs, sizes, capacity, plans, the daily charts, the breakdown, the topology and
+ * the footer. Token budgets and the budget split are gone (C2), so no budget or allocation section is drawn. The topology is INTERACTIVE (pan, zoom, chip tooltips, label fitting, a breakdown row selecting its
  * chip): console.js does that from `#graph-nodes` and the scene's own markup, never from an inline script. The chart
  * tooltips the renderers push onto `tips` are listed, escaped, in a hidden `#insights-tips` list, which console.js shows
  * in the page's tooltip box. `fullPaths` widens the topology's folder labels (`insightsFullPaths` decides it).
@@ -134,8 +130,6 @@ export function insightsBody(payload, nowMs, { fullPaths = false, locale = "en" 
   const scene = buildGraphScene(p.graph, { now: nowMs, fullPaths: fullPaths === true, outcomeWords: OUTCOME_WORD_OF });
   const nf = guarded(() => normFold(p.fold), null);
   const spend = nf === null ? null : guarded(() => normSpendMap(p.costByTrigger), null);
-  const nb = guarded(() => normBudget(p.budget), null);
-  const na = guarded(() => normAllocation(p.allocation), null);
   const names = guarded(() => normProjectNames(p.projects), new Map());
   const ns = guarded(() => normSizing(p.sizing), null);
   const nc = guarded(() => normCapacity(p.capacity), { unreachable: "the capacity slice is not readable" });
@@ -143,10 +137,8 @@ export function insightsBody(payload, nowMs, { fullPaths = false, locale = "en" 
   const { minted, html: spendHtml } = topologySpend(scene, spend);
   const tips = [];
   const R = trustedRenderer;
-  const parts = [windowsLineHtml(windowLabel, scene, t), R(bannersHtml(scene.norm, t)), R(costBannersHtml(p, nf, nb, na, t))];
+  const parts = [windowsLineHtml(windowLabel, scene, t), R(bannersHtml(scene.norm, t)), R(costBannersHtml(p, nf, null, null, t))];
   if (nf !== null) parts.push(html`<section>${R(kpisHtml(nf, t))}</section>`);
-  parts.push(html`<section><h2>${t("budget")}</h2>${R(budgetSectionHtml(nb, t))}</section>`);
-  if (na !== null) parts.push(html`<section><h2>${t("budget split")}</h2>${R(splitSectionHtml(na, tips, names, windowLabel, t))}</section>`);
   if (ns !== null) parts.push(html`<section><h2>${t("job sizes")}</h2>${R(sizingSectionHtml(ns, tips, scene.nowMs, t))}</section>`);
   if (nc !== null) {
     const capacity = guarded(() => capacitySectionHtml(nc, tips, scene.nowMs, windowLabel, t), null);

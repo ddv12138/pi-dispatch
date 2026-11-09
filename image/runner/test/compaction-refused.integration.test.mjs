@@ -7,7 +7,7 @@ import { test } from "node:test";
 // applies only to pi itself. session.mjs DOES import pi, so it is loaded dynamically with it.
 import { createJobModelRuntime } from "../src/model-runtime.mjs";
 import { createUsageMeter, installProcessUsageMeter, makeHardStopStream, resolvePiAiCompat, STOP_MESSAGES } from "../src/usage-meter.mjs";
-import { decideExit, EXIT_POLICY, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { decideExit, EXIT_POLICY, MODEL_NOT_ALLOWED } from "../src/outcome.mjs";
 import { compactionSummaryIsEmpty, fileListSuffix, hasEmptyCompaction, makeSessionStore, SESSION_FILE_NAME } from "../../../worker/src/session-store.mjs";
 import { sessionKeyFor } from "../../../worker/src/session-key.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
@@ -44,7 +44,7 @@ const skip = pi ? false : `pi not installed (node ${process.version} < 22.19.0);
 const PROVIDER = "pi-dispatch-fake";
 const MODEL_ID = "fake-1";
 const SPLIT = "\n\n---\n\n**Turn Context (split turn):**\n\n";
-/** 4242 billed tokens a call, so a token cap is crossed at a known call. */
+/** 4242 billed tokens a call, so a large total is metered at a known call. */
 const TOKEN_USAGE = { input: 3000, output: 1000, cacheRead: 242, cacheWrite: 0, totalTokens: 4242, cost: { input: 0.003, output: 0.001, cacheRead: 0.0002, cacheWrite: 0, total: 0.0042 } };
 /** $0.40 a call on the priced model below, whose per-call bound is just over $1 (see usage-meter.integration.test.mjs). */
 const FORTY_CENTS = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 1100, cost: { input: 0.001, output: 0.399, cacheRead: 0, cacheWrite: 0, total: 0.4 } };
@@ -53,7 +53,7 @@ const FORTY_CENTS = { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, tot
  * One job's worth of pi: a models.json declaring the offline provider, the runner's ModelRuntime, the meter (with
  * a guard for a cost cap), and a session on a FILE, so what pi persists is what a promotion would copy.
  */
-async function job({ api, priced = false, maxTokens = null, keepRecentTokens }) {
+async function job({ api, priced = false, stopAfter = null, keepRecentTokens }) {
 	const root = tempDir("pi-dispatch-535-");
 	const modelsPath = join(root, "models.json");
 	const cost = priced ? { input: 1, output: 100, cacheRead: 0, cacheWrite: 0 } : { input: 1, output: 1, cacheRead: 0, cacheWrite: 0 };
@@ -66,10 +66,10 @@ async function job({ api, priced = false, maxTokens = null, keepRecentTokens }) 
 	writeFileSync(sessionFile, "");
 	const { sessionManager } = openSessionManager({ sessionFile, cwd: root });
 
-	const meter = createUsageMeter({ maxTokens, rootSessionId: sessionManager.getSessionId() });
-	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, log: () => {} });
+	const meter = createUsageMeter({ rootSessionId: sessionManager.getSessionId() });
+	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, brake: true, log: () => {} });
 	assert.equal(installed.ok, true);
-	assert.equal(installed.brake, true, "the brake is the subject: a cap without one is enforced only after the fact");
+	assert.equal(installed.brake, true, "the brake is the subject: a policy stop needs one to answer the next call");
 
 	const calls = [];
 	modelRuntime.registerProvider(PROVIDER, {
@@ -79,6 +79,9 @@ async function job({ api, priced = false, maxTokens = null, keepRecentTokens }) 
 			const stream = installed.module.createAssistantMessageEventStream();
 			const message = { role: "assistant", content: [{ type: "text", text: `answer ${calls.length}` }], api: m.api, provider: m.provider, model: m.id, usage: priced ? FORTY_CENTS : TOKEN_USAGE, stopReason: "stop", timestamp: Date.now() };
 			stream.push({ type: "done", reason: "stop", message });
+			// The test's trigger: a policy stop after `stopAfter` calls, the lagging shape the token cap had. The
+			// call that triggers it still settles (its usage is metered); every later call is braked.
+			if (stopAfter !== null && calls.length >= stopAfter) meter.stop(MODEL_NOT_ALLOWED);
 			return stream;
 		},
 	});
@@ -133,7 +136,7 @@ function assertRefusedAndRefused({ run, stop, summary, kept }) {
 	assert.deepEqual(resumedContext(run.sessionFile, run.root), [{ role: "system" }, { role: "compactionSummary", summary }, ...kept]);
 
 	// The runner's exit for this run is a policy stop, so the worker never promotes this transcript.
-	const exit = decideExit({ budgetAborted: false, budgetTurns: 0, meterStop: run.meter.state.stopReason, tokenAborted: false, terminal: null });
+	const exit = decideExit({ budgetAborted: false, budgetTurns: 0, meterStop: run.meter.state.stopReason, terminal: null });
 	assert.deepEqual(exit, { code: EXIT_POLICY, reason: stop });
 
 	// And had a completed run left the same transcript in the store, the read path refuses it by name.
@@ -144,52 +147,51 @@ function assertRefusedAndRefused({ run, stop, summary, kept }) {
 	assert.deepEqual(logs.find(([event]) => event === "session_resolved")[1].reason, "compaction-summary-empty");
 }
 
-test("token cap crossed, then session.compact() on a split turn: pi stores the empty split-turn summary, and the host refuses it", { skip }, async () => {
-	// One call of 4242 tokens crosses a 4000 cap; the compaction's call is the next one, so the brake answers it.
-	const run = await job({ api: "pi-dispatch-535-token-split", maxTokens: 4000, keepRecentTokens: 1 });
+test("policy stop crossed, then session.compact() on a split turn: pi stores the empty split-turn summary, and the host refuses it", { skip }, async () => {
+	// One call is metered, then a policy stop; the compaction's call is the next one, so the brake answers it.
+	const run = await job({ api: "pi-dispatch-535-token-split", stopAfter: 1, keepRecentTokens: 1 });
 	try {
 		await run.session.prompt("prompt 0");
-		assert.equal(run.meter.state.stopReason, TOKEN_BUDGET);
+		assert.equal(run.meter.state.stopReason, MODEL_NOT_ALLOWED);
 		await run.session.compact();
 		assert.deepEqual(run.calls, [MODEL_ID], "the compaction's call never reached the provider");
-		assertRefusedAndRefused({ run, stop: TOKEN_BUDGET, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
+		assertRefusedAndRefused({ run, stop: MODEL_NOT_ALLOWED, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
 	} finally {
 		run.done();
 	}
 });
 
-test("token cap crossed after two exchanges, then session.compact(): both calls refused on a split turn, or the one call on a whole turn", { skip }, async () => {
-	// Two calls cross a cap one token below their sum. keepRecentTokens 1 cuts inside the last turn, so pi asks for
+test("policy stop crossed after two exchanges, then session.compact(): both calls refused on a split turn, or the one call on a whole turn", { skip }, async () => {
+	// Two calls settle, then a policy stop. keepRecentTokens 1 cuts inside the last turn, so pi asks for
 	// a history summary AND a turn summary, and the brake answers both. keepRecentTokens 3 keeps the last exchange
 	// whole, so the cut falls on a user message, there is no split turn, and the one summary call is refused.
 	for (const [keepRecentTokens, summary, kept] of [
 		[1, SPLIT, [{ role: "assistant" }]],
 		[3, "", [{ role: "user" }, { role: "assistant" }]],
 	]) {
-		const run = await job({ api: `pi-dispatch-535-token-keep${keepRecentTokens}`, maxTokens: 2 * 4242 - 1, keepRecentTokens });
+		const run = await job({ api: `pi-dispatch-535-token-keep${keepRecentTokens}`, stopAfter: 2, keepRecentTokens });
 		try {
 			await run.session.prompt("prompt 0");
 			await run.session.prompt("prompt 1");
-			assert.equal(run.meter.state.stopReason, TOKEN_BUDGET);
+			assert.equal(run.meter.state.stopReason, MODEL_NOT_ALLOWED);
 			await run.session.compact();
 			assert.equal(run.calls.length, 2, "neither summary call reached the provider");
-			assertRefusedAndRefused({ run, stop: TOKEN_BUDGET, summary, kept });
+			assertRefusedAndRefused({ run, stop: MODEL_NOT_ALLOWED, summary, kept });
 		} finally {
 			run.done();
 		}
 	}
 });
 
-test("token cap: the compaction's answer is the one stopped at the settle-time check, and pi stores the empty split-turn summary the host refuses", { skip }, async () => {
-	// The token cap has no pre-call form (its stop is the meter's settle-time check, OQ-010), so a maxTokens of one
-	// admits the first prompt and stops the run there: the brake answers the compaction's call, which never dispatches.
-	const run = await job({ api: "openai-completions", priced: true, maxTokens: 1, keepRecentTokens: 1 });
+test("policy stop: the compaction's answer is the one the brake refuses, and pi stores the empty split-turn summary the host refuses", { skip }, async () => {
+	// One prompt settles, then a policy stop: the brake answers the compaction's call, which never dispatches.
+	const run = await job({ api: "openai-completions", priced: true, stopAfter: 1, keepRecentTokens: 1 });
 	try {
 		await run.session.prompt("prompt 0");
-		assert.equal(run.meter.state.stopReason, "token_budget", "the first settle crosses a cap of one token");
+		assert.equal(run.meter.state.stopReason, MODEL_NOT_ALLOWED, "the one call settles, then the policy stop");
 		await run.session.compact();
 		assert.deepEqual(run.calls, [MODEL_ID], "the compaction's call never reached the provider");
-		assertRefusedAndRefused({ run, stop: TOKEN_BUDGET, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
+		assertRefusedAndRefused({ run, stop: MODEL_NOT_ALLOWED, summary: `No prior history.${SPLIT}`, kept: [{ role: "assistant" }] });
 	} finally {
 		run.done();
 	}
@@ -222,7 +224,7 @@ test("pi's own compact() appends the file lists after a refused summary, and the
 		settings: { enabled: true, reserveTokens: 20_000, keepRecentTokens: 1 },
 	});
 
-	const refused = await pi.compact(preparation(), model, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[TOKEN_BUDGET]));
+	const refused = await pi.compact(preparation(), model, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[MODEL_NOT_ALLOWED]));
 	assert.equal(refused.summary, "\n\n<read-files>\nsrc/a.mjs\n</read-files>\n\n<modified-files>\nsrc/b.mjs\n</modified-files>");
 	assert.equal(compactionSummaryIsEmpty(refused.summary), true, "the file lists are pi's, not a summary");
 	assert.equal(fileListSuffix(refused.details), refused.summary, "the suffix rebuilt from details is exactly what pi appended");
@@ -279,7 +281,7 @@ test("a split turn with no new history and a refused turn summary is empty, what
 			fileOps,
 			settings: { enabled: true, reserveTokens: 20_000, keepRecentTokens: 1 },
 		};
-		const out = await pi.compact(preparation, probeModel, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[TOKEN_BUDGET]));
+		const out = await pi.compact(preparation, probeModel, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[MODEL_NOT_ALLOWED]));
 		assert.ok(out.summary.startsWith(`${previousSummary}${SPLIT}`), "pi reused the previous summary, lists included, as the history");
 		assert.equal(compactionSummaryIsEmpty(out.summary), true, JSON.stringify(out.summary));
 		assert.equal(compactionSummaryIsEmpty(out.summary, out.details), true, "and with pi's details, the exact strip");
@@ -312,7 +314,7 @@ test("pi's own prepareCompaction reaches that shape: a turn that outlives one co
 
 	const preparation = prepareCompaction(manager.getBranch(), { enabled: true, reserveTokens: 20_000, keepRecentTokens: 50 });
 	assert.deepEqual([preparation.isSplitTurn, preparation.messagesToSummarize.length], [true, 0], "a split turn with no new history");
-	const out = await pi.compact(preparation, probeModel, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[TOKEN_BUDGET]));
+	const out = await pi.compact(preparation, probeModel, "key", undefined, undefined, undefined, undefined, (m) => hardStop(m, STOP_MESSAGES[MODEL_NOT_ALLOWED]));
 	manager.appendCompaction(out.summary, out.firstKeptEntryId, out.tokensBefore, out.details, false);
 	assert.ok(out.summary.includes(`</read-files>${SPLIT}`), "the reused summary's list sits right before the marker");
 	assert.equal(compactionSummaryIsEmpty(out.summary), true, JSON.stringify(out.summary));

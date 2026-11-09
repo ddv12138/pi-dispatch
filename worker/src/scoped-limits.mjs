@@ -1,11 +1,11 @@
 /**
- * Scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT): per-scope concurrency, token windows and job
- * size, where a scope is what `scopeOf` already answers -- the folder for a local job, the repo for a forge
- * one. One `scoped-limits.json` of `{ scope, concurrent?, dayTokens?, weekTokens?, monthTokens?, ... }`
- * entries: `concurrent` defers the excess through the delayed set (never a refusal -- a busy scope is
- * transient state), and the token windows and size fields are consumed by token-budget.mjs, job-size.mjs and
- * host-budget.mjs. The job-count windows (`day`, `week`, `month`) were REMOVED; a row carrying one is refused
- * with that removal named, never read as an unknown key.
+ * Scoped limits (issue #242, INT-SCOPED-LIMITS-FILE-CONTRACT): per-scope concurrency and job size, where a scope
+ * is what `scopeOf` already answers -- the folder for a local job, the repo for a forge one. One
+ * `scoped-limits.json` of `{ scope, concurrent?, ... }` entries: `concurrent` defers the excess through the
+ * delayed set (never a refusal -- a busy scope is transient state), and the size fields are consumed by
+ * job-size.mjs and host-budget.mjs. The job-count windows (`day`, `week`, `month`), the token windows
+ * (`dayTokens`, `weekTokens`, `monthTokens`) and the `model:<provider>/<model>` rows that existed only to carry
+ * them were REMOVED; a row carrying one is refused with that removal named, never read as an unknown key.
  *
  * This module is pure and fs-injectable (mirrors pause-windows.mjs in every respect): `parseScopedLimits`
  * validates the file TEXT fail-loud, `loadScopedLimits` layers the one fs read on top, and the small
@@ -23,21 +23,21 @@
  * worker drops would be a silently WIDENED spend limit. Pause-windows shipping without a version is a
  * sunk decision, not a precedent to extend to enforcement config.
  *
- * Version 2 (issues #501 part 5, #502 part 6) was that case made real with dollar windows; THIS release replaces
- * them with token windows (`dayTokens`, `weekTokens`, `monthTokens`) on a scope row, and `model:<provider>/<model>`
- * rows carrying those alone. They are TOKEN ledgers (token-budget.mjs, built here by `tokenCapsFor` and
- * `modelTokenRows`), never job-count ones. The dollar fields are retired: a file carrying
- * `dayUsd`/`weekUsd`/`monthUsd` is refused with the upgrade named. The job-count fields `day`/`week`/`month` are
- * retired too, refused with the cap removal named.
+ * Version 2 (issues #501 part 5, #502 part 6) was that case made real with dollar windows, which a later version
+ * replaced with token windows (`dayTokens`, `weekTokens`, `monthTokens`) on a scope row and
+ * `model:<provider>/<model>` rows carrying those alone. Those token windows and model rows are REMOVED with the
+ * token budgets this build no longer has: a file carrying either is refused with that removal named. The dollar
+ * fields are retired too: a file carrying `dayUsd`/`weekUsd`/`monthUsd` is refused with the upgrade named. The
+ * job-count fields `day`/`week`/`month` are retired too, refused with the cap removal named.
  *
  * Issue #498 adds the forge-qualified scope (`github:acme/web`), which names one forge's repo where a bare
  * `acme/web` names that repo on every forge. A job matches its qualified row first, then its bare row, and a file
- * holding both for one repo is refused. EVERY key (the token windows, the in-process slot and the fleet lease) is
+ * holding both for one repo is refused. EVERY key (the in-process slot and the fleet lease) is
  * built from the MATCHED ROW's scope, never from the job's, so a bare row keeps exactly the key it always had and
  * a qualified row counts on its own.
  *
  * Issue #499 part B adds the project row (`project:<id>`, the id from projects.json; version 2). It carries
- * `concurrent`, the token windows and the size fields, and it caps every member of the project as one. Its keys are
+ * `concurrent` and the size fields, and it caps every member of the project as one. Its keys are
  * built from the project ROW's scope like every other row's, so a project needs no keyspace of its own.
  *
  * Issue #596 (phase 1) adds version 3: a project row may carry its jobs' size (`memory`, `cpus`) and the host budget's
@@ -50,22 +50,19 @@
 import { existsSync as fsExistsSync, readFileSync as fsReadFileSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { configError } from "./config.mjs";
-import { TOKEN_KEY_PREFIX } from "./token-budget.mjs";
 import { hash16 } from "./fleet-lease.mjs";
-import { splitModelEntry } from "./model-ref.mjs";
 import { parseScopeString, qualifiedScopeOf, scopeOf } from "./pause-windows.mjs";
 import { PROJECT_ID_RE, isProjectId } from "./project-id.mjs";
 import { formatCpus, formatMemory, parseCpus, parseMemory } from "./job-size.mjs";
 
 /**
  * The highest schema version this build reads. A file declaring a higher one is refused loudly. The admin writes the
- * LOWEST version that expresses a file (`scopedLimitsVersionFor`), so a file with no dollar or model row stays 1.
+ * LOWEST version that expresses a file (`scopedLimitsVersionFor`), so a file with no project or qualified row stays 1.
  *
- * Version 2 (issues #501 part 5 and #502 part 6) added the dollar windows; this release's version 4 carries the
- * token windows `dayTokens`, `weekTokens` and `monthTokens` on a repo or
- * folder row, and `model:<provider>/<model>` rows that carry those three fields only. A version 1 file that uses
- * either is refused with an error naming version 2: a version 1 worker drops unknown fields, so a file that says 1
- * while it means 2 would read as a narrower cap on one build and no cap on another.
+ * Version 2 (issues #501 part 5 and #502 part 6) added the dollar windows, which a later version replaced with the
+ * token windows `dayTokens`, `weekTokens` and `monthTokens` and `model:<provider>/<model>` rows. Those token surfaces
+ * are REMOVED with the token budgets: the version stays 4 because no field was added, and a file carrying a token
+ * field or a model row is refused with the removal named in every version.
  *
  * A forge-qualified row (`github:acme/web`, issue #498) needs version 2 as well, for the same reason: every released
  * build reads `github:acme/web` as a plain repo string no job ever has, so a version 1 file holding one would be a
@@ -93,29 +90,28 @@ export const SCOPED_LIMITS_VERSION = 4;
  */
 export const SIZE_LIMIT_FIELDS = Object.freeze(["memory", "cpus", "hostShare", "minJobs"]);
 
-/** The one non-token limit field a row may carry, in display order: concurrency. The job-count windows are gone. */
+/** The one remaining limit field a row may carry, in display order: concurrency. The job-count and token windows are gone. */
 const LIMIT_FIELDS = ["concurrent"];
 /** The retired job-count fields: refused on sight, naming the removal (never dropped as unknown keys). */
 export const RETIRED_COUNT_FIELDS = Object.freeze(["day", "week", "month"]);
 
-/** The three token window fields (version 4, the retired dollar fields' successor), in display order. Each maps to a token window: day, week, month. */
-export const TOKEN_LIMIT_FIELDS = Object.freeze(["dayTokens", "weekTokens", "monthTokens"]);
+/** The retired token window fields: refused on sight, naming the token-budget removal (never dropped as unknown keys). */
+export const RETIRED_TOKEN_FIELDS = Object.freeze(["dayTokens", "weekTokens", "monthTokens"]);
 /** The dollar fields version 2 shipped, refused on sight with the upgrade named. */
 export const RETIRED_DOLLAR_FIELDS = Object.freeze(["dayUsd", "weekUsd", "monthUsd"]);
 
-/** Every key a version 3 row may carry (issue #596). Any other key refuses a version 3 file (`normalizeLimit`). */
-const V4_ROW_KEYS = new Set(["scope", ...LIMIT_FIELDS, ...TOKEN_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS]);
+/**
+ * Every key a version 3+ row MAY carry, the retired fields included: a retired field's value is refused above, but
+ * `null` is the normalizer's own "unset", so a file an older build wrote (whose rows carry `dayTokens: null`) still
+ * re-parses instead of being refused as an unknown key. Only a key outside this set is unknown.
+ */
+const V4_ROW_KEYS = new Set(["scope", ...LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS, ...RETIRED_TOKEN_FIELDS, ...RETIRED_COUNT_FIELDS, ...RETIRED_DOLLAR_FIELDS]);
 
 /**
- * The scope prefix of a per-model row (issue #502 part 6): `model:<provider>/<model>`. Reserved in BOTH versions. A
- * version 1 file naming it is refused (naming version 2) rather than read as a folder called `model:...`.
+ * The scope prefix the removed per-model rows used (issue #502 part 6): `model:<provider>/<model>`. Reserved: a file
+ * naming it is refused with the token-budget removal, rather than read as a folder called `model:...`.
  */
 export const MODEL_SCOPE_PREFIX = "model:";
-
-/** The token key prefix of a repo or folder row: `budget:tok:s:<hash16>` (the deployment's is `budget:tok`). */
-export const SCOPE_TOKEN_KEY_PREFIX = `${TOKEN_KEY_PREFIX}:s`;
-/** The token key prefix of a model row: `budget:tok:mdl:<hash16>`. */
-export const MODEL_TOKEN_KEY_PREFIX = `${TOKEN_KEY_PREFIX}:mdl`;
 
 /** A scope that LOOKS like a model row (any case, `models`, spaces before the colon) but is not the exact prefix form. */
 const MODEL_NEAR_MISS = /^models?\s*:/i;
@@ -131,7 +127,7 @@ export const PROJECT_SCOPE_PREFIX = "project:";
 /** A scope that LOOKS like a project row (any case, `projects`, spaces before the colon). Only the exact form parses. */
 const PROJECT_NEAR_MISS = /^projects?\s*:/i;
 
-/** Is this row scope a per-model row? */
+/** Is this row scope written as the removed per-model row? The parser refuses it; `limitFor` never matches one. */
 export function isModelScope(scope) {
 	return typeof scope === "string" && scope.startsWith(MODEL_SCOPE_PREFIX);
 }
@@ -188,12 +184,11 @@ export function canonicalScope(job) {
 
 /**
  * Parse, validate, and normalize the scoped-limits file TEXT. Returns the normalized `limits` array
- * (every row rebuilt as an explicit `{ scope, concurrent }` literal in a version 1 file,
- * `{ scope, concurrent, dayTokens, weekTokens, monthTokens }` in a version 2+ one, and that plus `memory,
+ * (every row rebuilt as an explicit `{ scope, concurrent }` literal in a version 1 file, plus `memory,
  * cpus, hostShare, minJobs` in a version 3 one, `null` for absent fields, unknown fields dropped in a version 1 or 2
- * file -- the operator-file policy -- and refused in a version 3 one). The retired job-count fields are refused in
- * every version. Throws `configError` (fail-loud) on any malformed entry. `path` is for error messages only -- this
- * function touches no filesystem.
+ * file -- the operator-file policy -- and refused in a version 3+ one). The retired job-count, token-window and
+ * dollar fields and the removed model rows are refused in every version. Throws `configError` (fail-loud) on any
+ * malformed entry. `path` is for error messages only -- this function touches no filesystem.
  */
 export function parseScopedLimits(text, path) {
 	let parsed;
@@ -219,9 +214,7 @@ export function parseScopedLimits(text, path) {
 	refuseMixedForms(rows, path);
 	const seen = new Map();
 	rows.forEach((row, index) => {
-		// A model row's identity is its LOWERCASED ref, the one its token key hashes (`modelTokenKeyPrefix`): two rows
-		// differing only in case would be two caps on one counter.
-		const id = isModelScope(row.scope) ? row.scope.toLowerCase() : row.scope;
+		const id = row.scope;
 		if (seen.has(id)) {
 			// Two rows for one scope is a precedence question with no right answer; the admin's
 			// edit-in-place never produces one, so a duplicate is always a hand-edit mistake.
@@ -234,8 +227,8 @@ export function parseScopedLimits(text, path) {
 
 /**
  * A bare row and a qualified row for one repo (`acme/web` beside `github:acme/web`) refuse the file, naming both
- * indexes (issue #498). Whatever fields either carries, count or dollar: one row applies to a job, and with both forms
- * present that rule would need a precedence ladder, which reads as one cap while the other silently stops counting.
+ * indexes (issue #498). Whatever fields either carries: one row applies to a job, and with both forms
+ * present that rule would need a precedence ladder, which reads as one limit while the other silently stops counting.
  * Refusing is the simpler rule, and it is loud. Two qualified rows for one repo on two forges are fine.
  */
 function refuseMixedForms(rows, path) {
@@ -254,46 +247,7 @@ function refuseMixedForms(rows, path) {
 
 /** A retired dollar field's refusal, naming the upgrade (fail loud, never a silent drop). */
 function retiredDollarField(field, at, path) {
-	throw configError(`${at}: ${field} was retired with the dollar windows: budgets are token-denominated now, so write the row's ${field.replace(/Usd$/, "Tokens")} instead: ${path}`);
-}
-
-/** A token field's value, validated: a whole number of tokens from 1 up (0 would read as "never run"). */
-function tokenField(value, field, at, path) {
-	if (!Number.isSafeInteger(value) || value < 1) {
-		throw configError(`${at}: ${field} must be an integer >= 1 (a whole number of tokens): ${path}`);
-	}
-	return value;
-}
-
-/**
- * A per-model row (version 2+): `{ scope: "model:<provider>/<model>", dayTokens?, weekTokens?, monthTokens? }`. The ref follows
- * the allowed-model list's rule (`splitModelEntry`: split at the first `/`, each half a valid id). A job-count field
- * (`day`, `week`, `month`), `concurrent` or a size field is refused here: a model is not a scope a job runs IN, so a
- * job-count cap or a concurrency limit on it would read as enforced while nothing counts it.
- */
-function normalizeModelLimit(row, trimmed, at, path, version) {
-	if (version < 2) throw configError(`${at}: a "model:" row needs "version": 2 (this file says ${version}): ${path}`);
-	const ref = splitModelEntry(trimmed.slice(MODEL_SCOPE_PREFIX.length));
-	if (ref === null) throw configError(`${at}: a model row's scope must be model:<provider>/<model> (each 1 to 64 characters, no spaces): ${path}`);
-	// The runner folds model-less and overflow calls into an `other/other` usage row, so a row naming that pair
-	// could never be told apart from the fold.
-	if (`${ref.provider}/${ref.model}`.toLowerCase() === "other/other") throw configError(`${at}: model:other/other names the usage ledger's fold row, not a model: ${path}`);
-	for (const field of [...LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS]) {
-		if (row[field] !== undefined && row[field] !== null) throw configError(`${at}: a model row carries dayTokens, weekTokens and monthTokens only (${field} is refused): ${path}`);
-	}
-	for (const field of RETIRED_DOLLAR_FIELDS) {
-		if (row[field] !== undefined && row[field] !== null) retiredDollarField(field, at, path);
-	}
-	const norm = { scope: `${MODEL_SCOPE_PREFIX}${ref.provider}/${ref.model}`, concurrent: null, dayTokens: null, weekTokens: null, monthTokens: null, ...(version >= 3 ? sizeNulls() : {}) };
-	let any = false;
-	for (const field of TOKEN_LIMIT_FIELDS) {
-		if (row[field] === undefined || row[field] === null) continue;
-		if (version < 2) throw configError(`${at}: ${field} needs "version": 2 (this file says ${version}): ${path}`);
-		norm[field] = tokenField(row[field], field, at, path);
-		any = true;
-	}
-	if (!any) throw configError(`${at}: a model row needs at least one of dayTokens, weekTokens, monthTokens: ${path}`);
-	return norm;
+	throw configError(`${at}: ${field} was retired with the dollar windows: budgets are no longer denominated in dollars or tokens, so remove the field: ${path}`);
 }
 
 function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
@@ -307,14 +261,21 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 	// while the file still reads as capping it. Null is the normalizer's own "unset", so only a value is refused.
 	const retired = RETIRED_COUNT_FIELDS.filter((field) => row[field] !== undefined && row[field] !== null);
 	if (retired.length > 0) {
-		throw configError(`${at}: ${retired.join(", ")} ${retired.length === 1 ? "was" : "were"} retired with the job-count scoped caps; remove ${retired.length === 1 ? "it" : "them"} (only concurrent, token windows and size fields remain): ${path}`);
+		throw configError(`${at}: ${retired.join(", ")} ${retired.length === 1 ? "was" : "were"} retired with the job-count scoped caps; remove ${retired.length === 1 ? "it" : "them"} (only concurrent and size fields remain): ${path}`);
+	}
+	// The token windows were removed with every token budget and allocation. A row still carrying one is REFUSED here,
+	// naming the removal, for the job-count fields' reason: silently dropping it would leave a row that reads as capped
+	// while nothing enforces it. Null is the normalizer's own "unset", so only a value is refused.
+	const retiredTokens = RETIRED_TOKEN_FIELDS.filter((field) => row[field] !== undefined && row[field] !== null);
+	if (retiredTokens.length > 0) {
+		throw configError(`${at}: ${retiredTokens.join(", ")} ${retiredTokens.length === 1 ? "was" : "were"} retired with the token budgets; remove ${retiredTokens.length === 1 ? "it" : "them"} (only concurrent and size fields remain): ${path}`);
 	}
 	// Version 3 refuses a key it does not know (issue #596): a misspelled `Memory`, `cpu` or `mem` beside a field that
 	// keeps the row valid was dropped, and the project's jobs ran at the default size while the file read as sized.
 	// Versions 1 and 2 keep dropping unknown keys, so a file an older build wrote and reads still loads unchanged.
 	if (version >= 3) {
 		const unknown = Object.keys(row).filter((key) => !V4_ROW_KEYS.has(key));
-		if (unknown.length > 0) throw configError(`${at}: unknown key${unknown.length === 1 ? "" : "s"} ${unknown.map((k) => JSON.stringify(k)).join(", ")} (a version 4 row carries only scope, ${[...LIMIT_FIELDS, ...TOKEN_LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS].join(", ")}; keys are case-sensitive): ${path}`);
+		if (unknown.length > 0) throw configError(`${at}: unknown key${unknown.length === 1 ? "" : "s"} ${unknown.map((k) => JSON.stringify(k)).join(", ")} (a version 3+ row carries only scope, ${[...LIMIT_FIELDS, ...SIZE_LIMIT_FIELDS].join(", ")}; keys are case-sensitive): ${path}`);
 	}
 	// The dollar fields are retired fail-loud, in every version: an old file carried real caps, and reading it as
 	// version 4 without them would silently WIDEN every limit it set.
@@ -322,11 +283,12 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 		if (row[field] !== undefined && row[field] !== null) retiredDollarField(field, at, path);
 	}
 	const trimmed = row.scope.trim().normalize("NFC"); // the same NFC canonicalScope applies job-side
-	if (isModelScope(trimmed)) return normalizeModelLimit(row, trimmed, at, path, version);
-	// A NEAR MISS of a reserved prefix is refused, never read as a repo or folder row (PR #549's review): a
-	// mistyped `Model:openai/x`, `models:...` or `model :...` would otherwise parse as a repo scope no job ever has,
-	// a dollar cap that governs nothing while the file reads as capping a model.
-	if (MODEL_NEAR_MISS.test(trimmed)) throw configError(`${at}: a model row's scope is written exactly model:<provider>/<model> (lowercase "model", no space before the colon): ${path}`);
+	// The per-model rows existed only to carry token windows, so they went with them. Refused rather than read as a repo
+	// string no job ever has (the removed cap would vanish silently).
+	if (isModelScope(trimmed)) throw configError(`${at}: model rows were retired with the token budgets; remove this row (a limit row names a repo, a folder or project:<id>): ${path}`);
+	// A NEAR MISS of the removed model prefix is refused too, never read as a repo or folder row (PR #549's review): a
+	// mistyped `Model:openai/x`, `models:...` or `model :...` would otherwise parse as a repo scope no job ever has.
+	if (MODEL_NEAR_MISS.test(trimmed)) throw configError(`${at}: model rows were retired with the token budgets; remove this row (a limit row names a repo, a folder or project:<id>): ${path}`);
 	// Issue #499 part B: `project:<id>` is a project row. Exactly that form: a near miss (`Project:shop`, `projects:shop`,
 	// `project :shop`) or a malformed id is refused, never read as a repo row no job has, for the model row's reason.
 	if (PROJECT_NEAR_MISS.test(trimmed)) {
@@ -366,22 +328,11 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 		// both sides mangling into the same cwd-prefixed string -- a match by accident, not by contract.
 		scope: isProjectScope(trimmed) ? trimmed : form.type === "qualified" ? `${form.kind}:${form.repo}` : isAbsolute(trimmed) ? resolve(trimmed) : trimmed,
 		concurrent: null,
-		// The token windows (version 2's dollar windows' successor), each the integer the parser accepts, so the
-		// admin's read-modify-write writes back exactly what the parser accepts. `tokenCapsFor` reads them as caps.
-		// Only in a version 2 file's rows: a version 1 file reads into exactly the five-key literal it always did.
-		...(version >= 2 ? { dayTokens: null, weekTokens: null, monthTokens: null } : {}),
 		// Version 3's size fields (issue #596), the same way: only in a version 3 file's rows, null unless a project row
 		// sets them, so a version 1 or 2 file reads into exactly the literal it always did.
 		...(version >= 3 ? sizeNulls() : {}),
 	};
 	let any = false;
-	for (const field of TOKEN_LIMIT_FIELDS) {
-		const value = row[field];
-		if (value === undefined || value === null) continue;
-		if (version < 2) throw configError(`${at}: ${field} needs "version": 2 (this file says ${version}): ${path}`);
-		norm[field] = tokenField(value, field, at, path);
-		any = true;
-	}
 	for (const field of LIMIT_FIELDS) {
 		const value = row[field];
 		// Absent-or-null (subscriptions.mjs's rule): null is the normalizer's OWN output for an unset
@@ -401,7 +352,7 @@ function normalizeLimit(row, index, path, version = SCOPED_LIMITS_VERSION) {
 	// Issue #596: a project row may carry a size and nothing else, so the size fields count as limiting something.
 	if (sizeFields(row, norm, { at, path, version, project: isProjectScope(trimmed) })) any = true;
 	if (!any) {
-		throw configError(`${at}: at least one of concurrent${version >= 2 ? ", dayTokens, weekTokens, monthTokens" : ""}${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
+		throw configError(`${at}: at least one of concurrent${version >= 3 && isProjectScope(trimmed) ? ", memory, cpus, hostShare, minJobs" : ""} is required (a row that limits nothing is a row an operator sets and then trusts): ${path}`);
 	}
 	return norm;
 }
@@ -468,7 +419,7 @@ export function loadScopedLimits(config, { readFileSync = fsReadFileSync, exists
  */
 export function limitFor(limits, job) {
 	if (!Array.isArray(limits)) return null;
-	// A model row is never a job's scope: it caps a model wherever it runs (`modelTokenRows`). Nor is a project row: it
+	// A model row is never a job's scope (the parser refuses one). Nor is a project row: it
 	// applies through the job's project (`projectRowFor`), never because a scope string happens to equal it.
 	const find = (scope) => (isNonEmptyString(scope) ? limits.find((l) => l.scope === scope && !isGroupScope(l.scope)) ?? null : null);
 	if (job?.kind !== "local") {
@@ -480,8 +431,8 @@ export function limitFor(limits, job) {
 
 /**
  * The scope every per-scope KEY of this job is built from (issue #498): the matched row's scope, or the job's
- * canonical scope when no row matches. The in-process slot, the fleet lease (`slot:s:<hash16>`) and, through
- * `tokenCapsFor`, the token windows all hash this one string. Keyed by the ROW, never the job: a bare `acme/web`
+ * canonical scope when no row matches. The in-process slot and the fleet lease (`slot:s:<hash16>`) hash this one
+ * string. Keyed by the ROW, never the job: a bare `acme/web`
  * row then keeps the exact key it had before qualified scopes existed (its counts carry over, and the admin,
  * which recomputes keys from rows, keeps reading them), and it stays ONE shared limit across forges as written.
  * The boot sweeper already hashes row scopes, so the gate and the sweeper are one rule.
@@ -492,8 +443,8 @@ export function rowScopeFor(job, limits) {
 
 /**
  * The project row of this project id, or null (no id, or no row for it). A job's project is resolved ONCE at pickup
- * (`projectOf`, projects.mjs), and every project-row consumer below takes that id, never the job: the gate, the token
- * ledgers and the record then agree for the attempt whatever an operator does to projects.json mid-run.
+ * (`projectOf`, projects.mjs), and every project-row consumer below takes that id, never the job: the gate and the
+ * record then agree for the attempt whatever an operator does to projects.json mid-run.
  */
 export function projectRowFor(limits, projectId) {
 	if (!Array.isArray(limits) || !isProjectId(projectId)) return null;
@@ -532,122 +483,26 @@ export function checkProjectRows(limits, projects, limitsPath, projectsPath = nu
 	throw configError(`scoped-limits row(s) at ${rows} in ${limitsPath} name a project that is not in ${where}; add the project there first, or remove the row`);
 }
 
-/** A row's token windows as integers `{ day, week, month }`, each null when unset, or null when none is. */
-function tokenCaps(row) {
-	const caps = {};
-	for (const [field, name] of [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]]) {
-		caps[name] = row?.[field] === null || row?.[field] === undefined ? null : row[field];
-	}
-	return caps.day === null && caps.week === null && caps.month === null ? null : caps;
-}
-
-/**
- * The token windows this job reserves in, or null when its scope's row has none (or there is no row). Ledger-shaped
- * for `reserveTokens`: `{ scope, keyPrefix, caps }`, the caps in integer tokens and `keyPrefix`
- * `budget:tok:s:<hash16>` of the same MATCHED ROW scope the concurrency slot and fleet lease hash (issue #498).
- */
-export function tokenCapsFor(job, limits) {
-	const row = limitFor(limits, job);
-	const caps = row ? tokenCaps(row) : null;
-	return caps === null ? null : { scope: row.scope, keyPrefix: scopeTokenKeyPrefix(row.scope), caps };
-}
-
-/**
- * The project token windows this job reserves in (issue #499 part B), or null when its project (resolved at pickup) has
- * no row or the row has no token window. Ledger-shaped like `tokenCapsFor`, with `keyPrefix`
- * `scopeTokenKeyPrefix("project:<id>")`: the project row's own scope, the rule every row's key follows, so no second
- * token keyspace exists for projects.
- */
-export function projectTokenCapsFor(limits, projectId) {
-	const row = projectRowFor(limits, projectId);
-	const caps = row ? tokenCaps(row) : null;
-	return caps === null ? null : { scope: row.scope, keyPrefix: scopeTokenKeyPrefix(row.scope), caps };
-}
-
-/**
- * The model token windows this job reserves in (issue #502 part 6), as ledgers `{ ref, keyPrefix, caps }` in file
- * order, where `ref` is the row's lowercased `provider/model`. `models` is the job's EFFECTIVE allowed-model list:
- *   - a list reserves in the rows of its listed models, compared ignoring case (the ledger lowercases ids, so the
- *     row and the usage row it settles from meet in lowercase);
- *   - no list (`null` or `undefined`) reserves in EVERY model row. An unrestricted job may switch to any model
- *     mid-run, so it could spend in any of them; reserving in none would let it run up a model's window unseen.
- *     This fails closed: an unrestricted job is refused when any model window is full, and the remedy is a list.
- * A job that reserves nothing at all (the zero-reservation rule, the processor's) reserves in none of these either.
- */
-export function modelTokenRows(limits, models) {
-	if (!Array.isArray(limits)) return [];
-	const rows = limits.filter((l) => isModelScope(l?.scope));
-	let wanted = null;
-	if (Array.isArray(models)) wanted = new Set(models.filter((m) => typeof m === "string").map((m) => m.toLowerCase()));
-	const out = [];
-	for (const row of rows) {
-		const ref = row.scope.slice(MODEL_SCOPE_PREFIX.length).toLowerCase();
-		if (wanted !== null && !wanted.has(ref)) continue;
-		const caps = tokenCaps(row);
-		if (caps !== null) out.push({ ref, keyPrefix: modelTokenKeyPrefix(ref), caps });
-	}
-	return out;
-}
-
-/** A row's kind for the token advisories: `model`, `project` (issue #499 part B) or `scope` (a repo or folder). */
-function rowKind(scope) {
-	return isModelScope(scope) ? "model" : isProjectScope(scope) ? "project" : "scope";
-}
-
-/**
- * The rows that carry a token window, as `[{ index, kind }]` (`kind` is `scope`, `project` or `model`), when the deployment has
- * NO per-job budget (`deploymentMaxTokens` null or undefined: env and overlay merged by the caller), else `[]` (PR #549's
- * review). Such a row refuses every job it applies to as `config-refused` unless the job's trigger sets its own
- * `run.maxTokens`, so the worker and doctor WARN, never refuse: a trigger may legitimately supply the budget. Index and
- * kind only, never the scope string (a folder scope is a host path).
- */
-export function tokenRowsWithoutCap(limits, deploymentMaxTokens) {
-	if (deploymentMaxTokens !== null && deploymentMaxTokens !== undefined) return [];
-	const out = [];
-	(limits ?? []).forEach((row, index) => {
-		if (TOKEN_LIMIT_FIELDS.some((f) => row?.[f] !== null && row?.[f] !== undefined)) out.push({ index, kind: rowKind(row.scope) });
-	});
-	return out;
-}
-
-/**
- * The windows of dollar rows whose cap is BELOW the deployment's per-job cap, as `[{ index, kind, window }]` (PR
- * #549's review). A job reserves its whole per-job cap, so such a window refuses every job it applies to, every time,
- * until the cap is raised or the per-job cap lowered (a trigger's smaller `run.maxCostUsd` still fits). Doctor names
- * them; `[]` when no deployment cap is set or none is below it.
- */
-export function tokenRowsBelowJobCap(limits, deploymentMaxTokens) {
-	if (deploymentMaxTokens === null || deploymentMaxTokens === undefined) return [];
-	const out = [];
-	(limits ?? []).forEach((row, index) => {
-		for (const [field, window] of [["dayTokens", "day"], ["weekTokens", "week"], ["monthTokens", "month"]]) {
-			if (row?.[field] === null || row?.[field] === undefined) continue;
-			if (row[field] < deploymentMaxTokens) out.push({ index, kind: rowKind(row.scope), window });
-		}
-	});
-	return out;
-}
-
 /**
  * The lowest file version that expresses `rows` (normalized or as the admin builds them): 3 when any row carries a size
- * field (issue #596), else 2 when any row is a model row, is a project row (issue #499 part B) or has a
- * forge-qualified scope (issue #498), else 1. The retired job-count fields (`day`/`week`/`month`) no longer count:
- * they are refused by the parser in every version. The admin writes this, so a file with bare and folder
- * concurrency-only rows stays a version 1 file that an older worker still reads.
+ * field (issue #596), else 2 when any row is a project row (issue #499 part B) or has a forge-qualified scope
+ * (issue #498), else 1. The retired job-count fields (`day`/`week`/`month`) and the removed token windows and model
+ * rows no longer count: they are refused by the parser in every version. The admin writes this, so a file with bare
+ * and folder concurrency-only rows stays a version 1 file that an older worker still reads.
  */
 export function scopedLimitsVersionFor(rows) {
 	// Issue #596: a size field on any row needs version 3 (the parser refuses it off a project row, and says so).
 	if ((rows ?? []).some((l) => SIZE_LIMIT_FIELDS.some((f) => l?.[f] !== null && l?.[f] !== undefined))) return 3;
 	const v2 = (rows ?? []).some((l) => {
 		const scope = typeof l?.scope === "string" ? l.scope.trim() : l?.scope;
-		return isModelScope(scope) || isProjectScope(scope) || isQualifiedScope(scope) || TOKEN_LIMIT_FIELDS.some((f) => l?.[f] !== null && l?.[f] !== undefined);
+		return isProjectScope(scope) || isQualifiedScope(scope);
 	});
 	return v2 ? 2 : 1;
 }
 
 /** Is this written scope forge-qualified? False for anything `parseScopeString` refuses: the parser names that. */
 function isQualifiedScope(scope) {
-	if (typeof scope !== "string" || scope === "" || isModelScope(scope)) return false;
+	if (typeof scope !== "string" || scope === "") return false;
 	try {
 		return parseScopeString(scope).type === "qualified";
 	} catch {
@@ -680,7 +535,7 @@ export function concurrencyFor(job, limits) {
 /**
  * The redis key prefix the removed job-count windows used: `budget:s:<16 hex>`. Kept exported because the admin's
  * read-model still recomputes legacy count-window keys through it (`scopeKeyPrefix` is that one export and N
- * consumers), and because it is the same hash the token prefix uses. A hash (the localJobId idiom: sha256, first
+ * consumers). A hash (the localJobId idiom: sha256, first
  * 16 hex) rather than an escape: a scope legally contains `:` and `/` (folder paths, gitlab
  * group/subgroup/project), which would collide with budget.mjs's own `w:`/`m:`/`t:` sub-namespaces, and a
  * bijective escape grammar is a new thing to get wrong with unbounded key lengths. The one consumer that must map
@@ -689,26 +544,6 @@ export function concurrencyFor(job, limits) {
  */
 export function scopeKeyPrefix(scope) {
 	return `budget:s:${hash16(scope)}`;
-}
-
-/** A repo or folder's TOKEN key prefix: `budget:tok:s:<hash16(scope)>`, the same hash as `scopeKeyPrefix`. */
-export function scopeTokenKeyPrefix(scope) {
-	return `${SCOPE_TOKEN_KEY_PREFIX}:${hash16(scope)}`;
-}
-
-/**
- * A model's TOKEN key prefix: `budget:tok:mdl:<hash16(lowercase provider/model)>`. LOWERCASED before hashing,
- * because the run record's ledger lowercases ids (`parseExitUsage`) and a model row settles from that ledger: one
- * model must be one counter whatever case a row, a list or the runner spells it in. `ref` is `provider/model`,
- * without the `model:` prefix.
- */
-export function modelTokenKeyPrefix(ref) {
-	return `${MODEL_TOKEN_KEY_PREFIX}:${hash16(String(ref).toLowerCase())}`;
-}
-
-/** The token key prefix of one normalized row, scope or model: what the admin reads its counters under. */
-export function tokenKeyPrefixFor(row) {
-	return isModelScope(row?.scope) ? modelTokenKeyPrefix(row.scope.slice(MODEL_SCOPE_PREFIX.length)) : scopeTokenKeyPrefix(row?.scope);
 }
 
 /**

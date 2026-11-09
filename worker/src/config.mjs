@@ -23,7 +23,7 @@ import { hostBudgetSettings } from "./host-budget.mjs";
 import { CONTAINER_ENV_NAMES, IMAGE_ENV_NAMES, KEYLESS_ENV_NAME, RUNNER_ENV_NAMES } from "./reserved-env.mjs";
 import { modelIdProblem, modelListProblem, providerIdProblem } from "./model-ref.mjs";
 import { WORKER_NAME_RE } from "./worker-name.mjs";
-import { checkTokenInvariant, TOKEN_ENV_NAMES, TOKEN_WINDOW_KEYS, RETIRED_DOLLAR_ENV_NAMES, retiredDollarMessage } from "./budget-rule.mjs";
+import { RETIRED_DOLLAR_ENV_NAMES, retiredDollarMessage } from "./budget-rule.mjs";
 
 export { WORKER_NAME_RE };
 
@@ -93,21 +93,6 @@ function nonNegativeInt(env, name, fallback, max = undefined) {
 // one is validated in `[min, max]` (max undefined = no upper bound) and otherwise a config error. Unlike
 // `boundedInt`, absence is a first-class "off", not a fallback default -- used by optional bounds such as
 // the resume context percentage, which default to disabled rather than to a number.
-/** The token knobs' parser (issue #25, D7a): a whole number of tokens, digits only, echoed never. The
- * wording matches budget-rule.mjs's shared check, so doctor and the boot say the same thing. */
-function optionalTokenCount(env, name) {
-	const raw = env[name];
-	if (raw === undefined || raw === "") return null;
-	if (typeof raw !== "number" && !/^\d+$/.test(String(raw).trim())) {
-		throw configError(`${name} must be a whole number of tokens of 1 or more`);
-	}
-	const n = Number(raw);
-	if (!Number.isSafeInteger(n) || n < 1) {
-		throw configError(`${name} must be a whole number of tokens of 1 or more`);
-	}
-	return n;
-}
-
 function optionalBoundedInt(env, name, min, max) {
 	const raw = env[name];
 	if (raw === undefined || raw === "") return null;
@@ -476,20 +461,31 @@ export function runProgressEnabled(env) {
 const RETIRED_CAP_ENV_NAMES = Object.freeze(["PI_DAILY_CAP", "PI_WEEKLY_CAP", "PI_MONTHLY_CAP", "PI_SOFT_HOLD_PCT"]);
 
 /**
- * Parse the worker's config from `env` (default process.env). Every MONEY default is conservative:
- * `PI_MAX_TURNS` and the token budgets exist to bound money, so they default low. The retired job-start
+ * The token budgets were removed too (C2): there is no per-job budget and no daily/weekly/monthly token
+ * window anywhere in the system. An env that still names one is REFUSED with the retirement named, in the
+ * job-start caps' posture: a deployment that believes a cap is in force must not silently run without it.
+ */
+const RETIRED_TOKEN_ENV_NAMES = Object.freeze(["PI_MAX_TOKENS", "PI_DAILY_TOKEN_CAP", "PI_WEEKLY_TOKEN_CAP", "PI_MONTHLY_TOKEN_CAP"]);
+
+/**
+ * Parse the worker's config from `env` (default process.env). `PI_MAX_TURNS` and the concurrency bound
+ * are what remain of the spend controls: the token budgets are gone, and every token and dollar knob an
+ * older deployment may still carry is refused outright with the removal named. The retired job-start
  * count caps (`PI_DAILY_CAP`, `PI_WEEKLY_CAP`, `PI_MONTHLY_CAP`) and the soft-hold band
- * (`PI_SOFT_HOLD_PCT`) are refused outright with the removal named.
+ * (`PI_SOFT_HOLD_PCT`) are refused the same way.
  *
  * The operator's OWN staged setup is the deliberate exception: `allowGlobalExtensions` defaults to ON
  * (REQ-GLOBAL-PI-OVERLAY). Staging is itself the vetting step, so the overlay an operator built is the
  * overlay their jobs get, and the knob is an opt-out. That relaxation stops there -- it never touches the
- * token budgets, the per-job token scoping, or the admin-extension recursion block.
+ * per-job token scoping or the admin-extension recursion block.
  */
 export function loadConfig(env = process.env, { fileExists = existsSync } = {}) {
 	// Before ANY parsing, so even a malformed value is refused with the removal, not with a range error.
 	for (const name of RETIRED_CAP_ENV_NAMES) {
 		if (env[name] !== undefined && env[name] !== "") throw configError(`${name} was retired with the job-start caps; remove it (the deployment no longer has a job-start cap)`);
+	}
+	for (const name of RETIRED_TOKEN_ENV_NAMES) {
+		if (env[name] !== undefined && env[name] !== "") throw configError(`${name} was retired with the token budgets; remove it (the deployment no longer has a token budget)`);
 	}
 	const model = modelFrom(env); // an exact model version, not a moving alias; deterministic per CONST-PI-VERSION-PINNED. Shape-checked (#673)
 	// #227. Hoisted above the object because `defaultBackend` INDEXES `backends`, and a property cannot read
@@ -514,13 +510,6 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		model,
 		maxTurns: positiveInt(env, "PI_MAX_TURNS", 30), // pi has no turn limit; we impose one
 		allowedModels: allowedModelsFrom(env), // issue #502: the deployment's allowed-model list; null = unrestricted. ENV ONLY, never the settings overlay
-		maxTokens: optionalTokenCount(env, "PI_MAX_TOKENS"), // issue #25; null = per-job token budget disabled (lagging in-run backstop)
-		// Issue #25's day cap is the day WINDOW's cap now (DES-TOKEN-RESERVE-AND-SETTLE): reserved pre-container
-		// against `budget:tok:` like the two below it, no longer the lagging check-after counter. Unset or empty is
-		// null: no window. The cross-key rule is below, after the object is built.
-		dailyTokenCap: optionalTokenCount(env, "PI_DAILY_TOKEN_CAP"),
-		weeklyTokenCap: optionalTokenCount(env, "PI_WEEKLY_TOKEN_CAP"),
-		monthlyTokenCap: optionalTokenCount(env, "PI_MONTHLY_TOKEN_CAP"),
 		// Issue #596: the deployment's default job size (`PI_JOB_MEMORY`, `PI_JOB_CPUS`; 4g and 2 when unset), refused here at
 		// boot (exit 2) naming the key, never at a job. A project row's size overrides it (INT-SCOPED-LIMITS-FILE-CONTRACT).
 		// The VALIDATION is this field's job; nothing reads its value. The pickup resolves each job's size from the same two
@@ -554,7 +543,6 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		triggersFile: env.PI_TRIGGERS_FILE ?? null, // DES-CRON-VIA-BULLMQ-SCHEDULER: unified triggers file; null = cron disabled for the worker (it selects on.type:"cron")
 		pauseWindowsFile: pauseWindowsFilePath(env), // REQ-SCOPED-PAUSE-WINDOWS: per-folder/repo timed pause; null = no scoped pauses
 		modelEndpointsFile: modelEndpointsFilePath(env), // issue #503: the declared model endpoints (INT-MODEL-ENDPOINTS-FILE-CONTRACT); null = model-endpoints.json in the deployment folder, and a missing default file declares none
-		envelopeFile: envelopeFilePath(env), // issue #504: the allocation envelope (INT-ENVELOPE-FILE-CONTRACT); null = no envelope and no delegation anywhere
 		projectsFile: projectsFilePath(env), // issue #499: named groups of repos and folders (INT-PROJECTS-FILE-CONTRACT); null = no projects, and every record's project is null
 		scopedLimitsFile: scopedLimitsFilePath(env), // issue #242: per-scope run caps + concurrency (INT-SCOPED-LIMITS-FILE-CONTRACT); null = none. The one-job-per-folder mutex for local jobs is code, not configuration, and holds regardless
 		schedulerStallMax: positiveInt(env, "PI_SCHEDULER_STALL_MAX", 2), // CONST-RETRY-INFRA-ONLY: per-scheduler stall backstop; positiveInt rejects <1 so a 0 threshold fails closed
@@ -599,7 +587,7 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 		checkpointsDir: checkpointsStoreRefusingCollision(env),
 		sessionsTtlDays: nonNegativeInt(env, "PI_SESSIONS_TTL_DAYS", 14), // 0 = keep forever
 		// A bound on how large a transcript may be before it stops being resumed. Not disk hygiene: an
-		// oversized transcript is a prefill an operator never sized PI_MAX_TOKENS for.
+		// oversized transcript is a prefill nobody sized, and it runs on every resume.
 		sessionMaxBytes: nonNegativeInt(env, "PI_SESSION_MAX_BYTES", 8 * 1024 * 1024), // 0 = no cap
 		// How old the CONVERSATION may be, which is a different clock from sessionsTtlDays above and not a
 		// finer setting of it: the TTL reads the transcript's mtime, which the PROMOTE rename refreshes (the
@@ -695,26 +683,20 @@ export function loadConfig(env = process.env, { fileExists = existsSync } = {}) 
 	// #227, and it runs AFTER the object is built rather than inside it: the refusal reads `egress` as well
 	// as the two backend fields, and a check woven between properties would depend on key order.
 	refuseBackendShortfall(config);
-	// Issue #501, after the object for the same reason: both rules read more than one key.
-	refuseTokenSettings(config, env);
+	// Issue #501's dollar refusal, after the object like the backend rule above: a retired dollar env name is
+	// refused at boot with the upgrade named, never ignored.
+	refuseRetiredDollarSettings(env);
 
 	return config;
 }
 
-// The env half of the token rule (DES-TOKEN-RESERVE-AND-SETTLE). The overlay half runs on MERGED values per job
-// (runtime-settings.mjs); this one runs on env alone at boot, where an operator is present to read the refusal: a
-// window without a per-job token budget (`checkTokenInvariant`), because a window reserves each job's budget and
-// without one there is no amount to reserve. The windows themselves are enforced (token-budget.mjs, processor.mjs).
-function refuseTokenSettings(config, env) {
+// The env half of the retired dollar knobs (issue #501). The overlay half is runtime-settings.mjs's, and triggers'
+// is the trigger loader's. Kept on env alone because a dollar knob has no settings key this build still carries.
+function refuseRetiredDollarSettings(env) {
 	for (const [key, name] of Object.entries(RETIRED_DOLLAR_ENV_NAMES)) {
 		if (env[name] !== undefined && env[name] !== "") {
 			throw configError(`${name} is set: ${retiredDollarMessage(key)}`);
 		}
-	}
-	const broken = checkTokenInvariant(config);
-	if (broken) {
-		const window = TOKEN_WINDOW_KEYS.find((key) => config[key] !== null);
-		throw configError(`${TOKEN_ENV_NAMES[window]} needs PI_MAX_TOKENS: a token window reserves each job's per-job token budget before it starts, so it cannot be set without one`);
 	}
 }
 
@@ -1076,12 +1058,6 @@ export function scopedLimitsFilePath(env = process.env) {
  *  as "no projects". */
 export function projectsFilePath(env = process.env) {
 	return env.PI_PROJECTS_FILE ?? null;
-}
-
-/** Issue #504. `??` like the projects key: an empty value is a value, so the boot load refuses it rather than reading
- *  it as "no envelope". Unset turns delegation off everywhere. */
-export function envelopeFilePath(env = process.env) {
-	return env.PI_ENVELOPE_FILE ?? null;
 }
 
 /** Issue #503. `??` like the two above, so an empty value is a value, which the loader refuses rather than reading the

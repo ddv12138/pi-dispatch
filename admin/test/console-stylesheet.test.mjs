@@ -89,7 +89,7 @@ test("the shell and configuration declarations hold no colour literal: every col
 
 test("PAGE_CSS holds the converted pages' rules (PR 2: sign-in, error, audit; PR 3: the overview; PR 4: runs, parked), each served only under its own body", () => {
   assert.ok(Object.isFrozen(PAGE_CSS));
-  assert.deepEqual(Object.keys(PAGE_CSS), ["setup", "zero-touch", "insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows", "login", "login-code", "error", "audit", "overview", "run", "runs", "parked", "answer-rules", "fleet", "host"]);
+  assert.deepEqual(Object.keys(PAGE_CSS), ["setup", "zero-touch", "insights", "insights-capacity", "insights-breakdown", "insights-flows", "login", "login-code", "error", "audit", "overview", "run", "runs", "parked", "answer-rules", "fleet", "host"]);
   assert.equal(PAGE_CSS.runs, RUNS_CSS);
   assert.equal(PAGE_CSS.parked, PARKED_CSS + ANSWERER_CSS);
   assert.equal(PAGE_CSS["answer-rules"], ANSWERER_CSS);

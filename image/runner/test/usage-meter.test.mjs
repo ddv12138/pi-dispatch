@@ -24,7 +24,7 @@ import {
 	dispatchToken,
 	usageUnreported,
 } from "../src/usage-meter.mjs";
-import { EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE, TOKEN_BUDGET } from "../src/outcome.mjs";
+import { EXIT_POLICY, MODEL_NOT_ALLOWED, MODEL_POLICY_UNENFORCEABLE } from "../src/outcome.mjs";
 
 /**
  * These tests are PURE: no pi import, no skip gate, no filesystem. Every pi-shaped dependency of
@@ -108,7 +108,7 @@ const flush = () => new Promise((resolve) => setImmediate(resolve));
 // ---------------------------------------------------------------------------------------------
 
 test("accumulates input/output/billed total across records", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 
 	meter.record(usage({ input: 100, output: 20, total: 500 }));
 	meter.record(usage({ input: 200, output: 30, total: 700 }));
@@ -122,7 +122,7 @@ test("accumulates input/output/billed total across records", () => {
 });
 
 test("splits tokens across root / other / loose and keeps the sum invariant", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root-1" });
+	const meter = createUsageMeter({ rootSessionId: "root-1" });
 
 	meter.record(usage({ total: 100 }), { sessionId: "root-1" });
 	meter.record(usage({ total: 200 }), { sessionId: "child-a" });
@@ -143,7 +143,7 @@ test("splits tokens across root / other / loose and keeps the sum invariant", ()
 });
 
 test("with no rootSessionId every attributed call is other, never root", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	meter.record(usage({ total: 10 }), { sessionId: "s1" });
 	meter.record(usage({ total: 5 }));
 	assert.equal(meter.state.rootTotal, 0, "an absent root must not swallow unattributed calls");
@@ -151,43 +151,26 @@ test("with no rootSessionId every attributed call is other, never root", () => {
 	assert.equal(meter.state.looseTotal, 5);
 });
 
-test("onStop fires exactly once, synchronously, on the first crossing record, naming the token cap", () => {
+test("a large usage total never stops a job: the meter has no cap", () => {
 	const fired = [];
-	const meter = createUsageMeter({ maxTokens: 1000, onStop: (reason, total) => fired.push([reason, total]) });
-
-	meter.record(usage({ total: 500 }));
-	assert.deepEqual(fired, [], "must not fire at or below the cap");
-	assert.equal(meter.state.breached, false);
+	const meter = createUsageMeter({ onStop: (reason, total) => fired.push([reason, total]) });
+	for (let i = 0; i < 10; i++) meter.record(usage({ total: 1_000_000_000 }));
+	assert.equal(meter.state.total, 10_000_000_000);
+	assert.deepEqual(fired, [], "no token amount fires onStop");
 	assert.equal(meter.state.stopReason, null);
-
-	meter.record(usage({ total: 600 })); // 1100 cumulative -> over
-	assert.deepEqual(fired, [["token_budget", 1100]], "fires inside record(), before it returns");
-	assert.equal(meter.state.breached, true);
-	assert.equal(meter.state.stopReason, "token_budget");
-
-	meter.record(usage({ total: 900 }));
-	meter.record(usage({ total: 900 }));
-	assert.deepEqual(fired, [["token_budget", 1100]], "exactly once, however much more arrives");
-	assert.equal(meter.state.total, 2900, "accumulation continues so the overshoot stays visible");
 });
 
-test("a null or absent cap is a pure meter, not an error", () => {
-	assert.doesNotThrow(() => createUsageMeter({ maxTokens: null }));
-	assert.doesNotThrow(() => createUsageMeter({}));
-	const meter = createUsageMeter({ maxTokens: null, onStop: () => assert.fail("no cap, no stop") });
-	meter.record(usage({ total: 10_000_000 }));
-	assert.equal(meter.state.breached, false);
-});
-
-test("rejects a nonsensical cap with attachTokenBudget's exact verdict", () => {
-	// Both read the same PI_MAX_TOKENS knob; two different verdicts on one value would be a trap.
-	for (const bad of [0, -1, 1.5, Number.NaN]) {
-		assert.throws(() => createUsageMeter({ maxTokens: bad }), /invalid PI_MAX_TOKENS/);
-	}
+test("onStop fires exactly once, synchronously, on the first stop and names it", () => {
+	const fired = [];
+	const meter = createUsageMeter({ onStop: (reason) => fired.push(reason) });
+	assert.equal(meter.stop(MODEL_NOT_ALLOWED), true);
+	assert.deepEqual(fired, [MODEL_NOT_ALLOWED], "fires inside stop(), before it returns");
+	assert.equal(meter.stop(MODEL_NOT_ALLOWED), false);
+	assert.deepEqual(fired, [MODEL_NOT_ALLOWED], "exactly once, however many later stops arrive");
 });
 
 test("observe returns the same stream object and does not consume it", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const stream = new FakeStream();
 	stream.push({ type: "text_delta", delta: "a" });
 	stream.push({ type: "text_delta", delta: "b" });
@@ -203,7 +186,7 @@ test("observe returns the same stream object and does not consume it", async () 
 });
 
 test("unresolved rises on observe and falls on settle; a hung stream stays counted", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 
 	const settledStream = new FakeStream();
 	meter.observe(settledStream);
@@ -222,7 +205,7 @@ test("unresolved rises on observe and falls on settle; a hung stream stays count
 });
 
 test("a rejected result() is swallowed, clears unresolved, and counts usageUnreported", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const stream = new FakeStream();
 	meter.observe(stream, { provider: MODEL.provider, modelId: MODEL.id, model: MODEL });
 	stream.fail(new Error("transport died"));
@@ -240,7 +223,7 @@ test("a rejected result() is swallowed, clears unresolved, and counts usageUnrep
 test("observing the same stream twice counts it once", async () => {
 	// ModelRegistry.refresh() re-applies our stored configs as fresh entry objects, so a wrapper chain
 	// can form across a reload and hand the identical stream to every link.
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const stream = streamOf(usage({ total: 60 }));
 	meter.observe(stream);
 	meter.observe(stream);
@@ -250,7 +233,7 @@ test("observing the same stream twice counts it once", async () => {
 });
 
 test("records with no usable usage object count usageUnreported and still count their tokens", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 
 	meter.record(undefined); // a rejected settle, no usage at all
 
@@ -267,7 +250,7 @@ test("records with no usable usage object count usageUnreported and still count 
 // ---------------------------------------------------------------------------------------------
 
 test("lands every call on its (provider, model) row and keeps the rows a partition of the total", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 
 	// Two calls on one pair, carrying the cache split the flat totals collapse; one on a second pair.
 	meter.observe(
@@ -301,7 +284,7 @@ test("lands every call on its (provider, model) row and keeps the rows a partiti
 });
 
 test("caps the ledger at 8 named rows and folds the overflow numerically into other", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	for (let i = 1; i <= 10; i += 1) {
 		meter.observe(streamOf(usage({ input: i, total: i * 10 })), { provider: "prov", modelId: `model-${i}` });
 	}
@@ -332,7 +315,7 @@ test("caps the ledger at 8 named rows and folds the overflow numerically into ot
 });
 
 test("lands a call with a partial usage object on its own row and counts it usageUnreported", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	meter.observe(streamOf(usage({ total: 10, input: 5, output: 5 })), { provider: "anthropic", modelId: "claude-x", model: { api: "openai-completions" } });
 	meter.observe(streamOf({ input: 0, output: 0, totalTokens: 2 }), { provider: "anthropic", modelId: "claude-x", model: { api: "openai-completions" } }); // a zero usage block
 	meter.observe(streamOf(usage({ total: 3, input: 1, output: 2 })), { provider: "openai", modelId: "gpt-y", model: { api: "openai-completions" } });
@@ -346,7 +329,7 @@ test("lands a call with a partial usage object on its own row and counts it usag
 });
 
 test("usageSnapshot is null until a call is observed, and piAi is null until the installer stamps it", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	assert.equal(meter.usageSnapshot(), null, "zero calls -> no usage key on the exit line, not an empty ledger");
 
 	meter.setPiAiVersion("0.80.7"); // a stamp must not conjure a ledger out of zero calls
@@ -372,7 +355,7 @@ test("the worst-case exit line fits the worker's 8 KiB recovery tail with headro
 	// full worst case (this ledger plus `context`, the longest session reason and the 2000-character capped
 	// message a provider-refusal exit carries) is measured against the tail in
 	// worker/test/run-history.test.mjs, which holds it under 6 KiB; that, not this number, is the headroom.
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root-0" });
+	const meter = createUsageMeter({ rootSessionId: "root-0" });
 	const wide = (prefix, i) => `${prefix}-${i}`.padEnd(64, "x");
 	for (let i = 0; i < 9; i += 1) {
 		meter.observe(
@@ -417,7 +400,7 @@ test("the worst-case exit line fits the worker's 8 KiB recovery tail with headro
 // ---------------------------------------------------------------------------------------------
 
 test("observeResult counts a promise-returning call and records its result's usage", async () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	let settle;
 	const promise = new Promise((resolve) => {
 		settle = resolve;
@@ -494,7 +477,7 @@ const VIRTUAL = { api: VIRTUAL_MODEL_API, provider: "router", id: "auto" };
 
 test("the runtime layer counts every model-calling method, with sessionId and the dispatched model, and keeps `this`", async () => {
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter });
 	try {
 		assert.deepEqual(layer.methods, [...RUNTIME_STREAM_METHODS, ...RUNTIME_RESULT_METHODS]);
@@ -523,7 +506,7 @@ test("a virtual model is counted ONCE, as the physical model it routed to", asyn
 	// ModelRuntime.streamSimple routes a pi-virtual model and calls this.streamSimple again with the physical
 	// model; counting both would double every routed request and put a model nobody billed in the ledger.
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter });
 	try {
 		new FakeRuntime().streamSimple(VIRTUAL, [], { sessionId: "s" });
@@ -536,13 +519,13 @@ test("a virtual model is counted ONCE, as the physical model it routed to", asyn
 	}
 });
 
-test("past the cap the runtime layer's brake answers every method without calling the provider", async () => {
+test("past a policy stop the runtime layer's brake answers every method without calling the provider", async () => {
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxTokens: 10 });
+	const meter = createUsageMeter({});
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream(), message: "cap" });
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop });
 	try {
-		meter.record(usage({ total: 99 }));
+		meter.stop(MODEL_NOT_ALLOWED);
 		const runtime = new FakeRuntime();
 		for (const method of RUNTIME_STREAM_METHODS) {
 			const message = await runtime[method](MODEL, [], {}).result();
@@ -555,22 +538,22 @@ test("past the cap the runtime layer's brake answers every method without callin
 		const images = await runtime.generateImages(MODEL, {}, {});
 		assert.deepEqual([images.stopReason, images.usage.cost.total], ["aborted", 0]);
 		assert.deepEqual(images.output, []);
-		// A virtual model is braked too: past the cap nothing is dispatched, routed or not.
+		// A virtual model is braked too: past a policy stop nothing is dispatched, routed or not.
 		await runtime.streamSimple(VIRTUAL, [], {}).result();
-		assert.equal(calls.length, 0, "no provider may be reached once the cap is blown");
+		assert.equal(calls.length, 0, "no provider may be reached once a policy stop exists");
 		assert.equal(meter.state.calls, 0, "a braked call is not a call");
-		assert.equal(meter.state.total, 99);
+		assert.equal(meter.state.total, 0);
 	} finally {
 		layer.restore();
 	}
 });
 
-test("an uncapped runtime layer never brakes, even after a breach", () => {
+test("an unarmed runtime layer never brakes, even after a policy stop", () => {
 	const { FakeRuntime, calls } = fakeRuntimeClass();
-	const meter = createUsageMeter({ maxTokens: 10 });
+	const meter = createUsageMeter({});
 	const layer = wrapModelRuntime({ ModelRuntime: FakeRuntime, meter, hardStop: null });
 	try {
-		meter.record(usage({ total: 99 }));
+		meter.stop(MODEL_NOT_ALLOWED);
 		new FakeRuntime().streamSimple(MODEL, [], {});
 		assert.equal(calls.length, 1, "no hard-stop stream means the call goes through; the session abort is the other half");
 	} finally {
@@ -676,7 +659,7 @@ test("routes a model of a builtin provider to that provider's own stream, as com
 	// the models it would otherwise have sent to its builtin provider (pi-ai 0.99.1 compat.js). The decision is
 	// the PROVIDER's: any model of it on the same api, so an operator's extra model id under a builtin
 	// provider still takes the provider's path.
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const provider = fakeProvider("anthropic", [MODEL]);
 	const catalog = fakeCatalog([provider]);
 	const inner = fakeInner();
@@ -695,7 +678,7 @@ test("routes a model of a builtin provider to that provider's own stream, as com
 });
 
 test("routes a cloudflare model through the catalog collection, whose auth layer substitutes its placeholders", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const model = { api: "openai-completions", provider: "cloudflare-workers-ai", id: "cf-1" };
 	const provider = fakeProvider("cloudflare-workers-ai", [model]);
 	const catalog = fakeCatalog([provider]);
@@ -711,7 +694,7 @@ test("routes a cloudflare model through the catalog collection, whose auth layer
 });
 
 test("routes a non-catalog provider, or a catalog provider with no model on this api, to the registry entry", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const provider = fakeProvider("anthropic", [{ ...MODEL, api: "openai-completions" }]);
 	const catalog = fakeCatalog([provider]);
 	const inner = fakeInner();
@@ -726,7 +709,7 @@ test("routes a non-catalog provider, or a catalog provider with no model on this
 });
 
 test("with no catalog loaded everything falls back to the registry entry, stream and streamSimple alike", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const inner = fakeInner();
 	const wrapper = wrapProviderStreams({ inner, fallbackModels: null, meter });
 	wrapper.streamSimple(MODEL, [], {});
@@ -740,7 +723,7 @@ test("a compat call made inside the same install's runtime dispatch is routed bu
 	// Trap #5: pi composes a provider with no builtin base so that its stream, INSIDE ModelRuntime.streamSimple
 	// and after awaits, resolves the api in the compat registry. The runtime half has already counted that
 	// call; the shared AsyncLocalStorage is how the compat wrapper knows.
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const dispatch = new AsyncLocalStorage();
 	const inner = fakeInner();
 	const compatEntry = wrapProviderStreams({ inner, fallbackModels: null, meter, dispatch });
@@ -775,7 +758,7 @@ test("a compat call made inside the same install's runtime dispatch is routed bu
 });
 
 test("hands the meter the model identity compat dispatched on, so the ledger row is never a guess", async () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const inner = fakeInner();
 	wrapProviderStreams({ inner, fallbackModels: null, meter }).streamSimple(MODEL, [], { sessionId: "s1" });
 	await flush();
@@ -786,21 +769,21 @@ test("hands the meter the model identity compat dispatched on, so the ledger row
 	assert.equal(row.calls, 1);
 });
 
-test("after a breach the compat half's hard stop replaces the call entirely", async () => {
-	const meter = createUsageMeter({ maxTokens: 10 });
+test("after a policy stop the compat half's hard stop replaces the call entirely", async () => {
+	const meter = createUsageMeter({});
 	const provider = fakeProvider("anthropic", [MODEL]);
 	const catalog = fakeCatalog([provider]);
 	const inner = fakeInner();
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream(), message: "cap" });
 	const wrapper = wrapProviderStreams({ inner, fallbackModels: catalog, meter, hardStop });
 
-	meter.record(usage({ total: 99 })); // breach
-	assert.equal(meter.state.breached, true);
+	meter.stop(MODEL_NOT_ALLOWED);
+	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 
 	const stream = wrapper.streamSimple(MODEL, [], { sessionId: "child-1" });
 	const message = await stream.result();
 
-	assert.equal(inner.calls.length + provider.calls.length + catalog.calls.length, 0, "no provider may be reached once the cap is blown");
+	assert.equal(inner.calls.length + provider.calls.length + catalog.calls.length, 0, "no provider may be reached once a policy stop exists");
 	// "aborted", not "error": pi's isRetryableAssistantError returns false unless stopReason is
 	// "error", so this terminal message cannot spin pi's auto-retry into paid retries.
 	assert.equal(message.stopReason, "aborted");
@@ -812,15 +795,15 @@ test("after a breach the compat half's hard stop replaces the call entirely", as
 	assert.equal(message.model, MODEL.id);
 	assert.equal(stream.events[0].type, "error");
 	assert.equal(stream.events[0].reason, "aborted");
-	assert.equal(meter.state.total, 99, "a stopped call must not add usage of its own");
+	assert.equal(meter.state.total, 0, "a stopped call must not add usage of its own");
 });
 
-test("an unarmed hard stop never blocks, even after a breach", async () => {
-	const meter = createUsageMeter({ maxTokens: 10 });
+test("an unarmed hard stop never blocks, even after a policy stop", async () => {
+	const meter = createUsageMeter({});
 	const inner = fakeInner();
-	meter.record(usage({ total: 99 }));
+	meter.stop(MODEL_NOT_ALLOWED);
 	wrapProviderStreams({ inner, fallbackModels: null, meter, hardStop: null }).streamSimple(MODEL, [], {});
-	assert.equal(inner.calls.length, 1, "uncapped jobs must never have a call stopped");
+	assert.equal(inner.calls.length, 1, "no hard stop means no call is ever refused");
 });
 
 test("makeHardStopStream refuses to run without an injected stream factory", () => {
@@ -955,7 +938,7 @@ function installArgs({ copy, extensionCopy = copy, ...rest }) {
 	const { FakeRuntime } = fakeRuntimeClass();
 	return {
 		ModelRuntime: FakeRuntime,
-		meter: createUsageMeter({ maxTokens: null }),
+		meter: createUsageMeter({}),
 		resolve: fakeResolve({
 			"@earendil-works/pi-coding-agent": AGENT_ENTRY,
 			"@earendil-works/pi-ai/compat": HOISTED_COMPAT,
@@ -1001,12 +984,11 @@ test("installs the runtime half and the compat half, and says so on one line", a
 				methods: [...RUNTIME_STREAM_METHODS, ...RUNTIME_RESULT_METHODS],
 				compat: "pi",
 				apis: ["anthropic-messages", "openai-completions"],
-				// This fixture ships no providers/all.js and the meter is uncapped, so BOTH degradations
+				// This fixture ships no providers/all.js and the meter has no policy, so BOTH degradations
 				// are present -- and both are stated. Reporting a bare ok:true here is the exact failure
 				// these fields exist to remove.
 				fallback: false,
 				fallbackError: "ERR_MODULE_NOT_FOUND",
-				capped: false,
 				listed: false,
 				brake: false,
 			},
@@ -1023,7 +1005,7 @@ test("a healthy meter reports its catalog and its brake as present", async () =>
 	const logged = [];
 	const handle = await installProcessUsageMeter({
 		...installArgs({ copy }),
-		meter: createUsageMeter({ maxTokens: 1000 }),
+		meter: createUsageMeter({ allowedModels: [{ provider: MODEL.provider, model: MODEL.id }] }),
 		load: async (url) => {
 			if (url === NESTED_COMPAT) return copy.module;
 			if (url === NESTED_PROVIDERS) return { builtinModels: () => fakeCatalog([]) };
@@ -1039,8 +1021,7 @@ test("a healthy meter reports its catalog and its brake as present", async () =>
 		compat: "pi",
 		apis: ["anthropic-messages"],
 		fallback: true,
-		capped: true,
-		listed: false,
+		listed: true,
 		brake: true,
 	});
 	assert.equal("fallbackError" in logged[0].fields, false, "a healthy load must not report a reason");
@@ -1065,21 +1046,21 @@ test("a sibling that loads but exposes no builtinModels() is reported, not passe
 	assert.equal(logged[0].fields.fallbackError, "no-builtin-models");
 });
 
-test("a cap with no stream factory is logged as capped-but-brakeless", async () => {
+test("a model list with no stream factory is logged as listed-but-brakeless", async () => {
 	// The silent one: the accepted module exposes neither createAssistantMessageEventStream nor
-	// AssistantMessageEventStream, so the pre-dispatch brake vanishes and the cap can only be enforced
-	// after a call has already been paid for. capped:true + brake:false is what says so.
+	// AssistantMessageEventStream, so the pre-dispatch brake vanishes and the list cannot be enforced
+	// before a call. listed:true + brake:false is what says so.
 	const copy = fakeCopy(["anthropic-messages"]);
 	delete copy.module.createAssistantMessageEventStream;
 	const logged = [];
 	const handle = await installProcessUsageMeter({
 		...installArgs({ copy }),
-		meter: createUsageMeter({ maxTokens: 1000 }),
+		meter: createUsageMeter({ allowedModels: [{ provider: MODEL.provider, model: MODEL.id }] }),
 		log: (event, fields) => logged.push({ event, fields }),
 	});
 	handle.uninstall();
 
-	assert.equal(logged[0].fields.capped, true);
+	assert.equal(logged[0].fields.listed, true);
 	assert.equal(logged[0].fields.brake, false);
 });
 
@@ -1105,7 +1086,7 @@ test("the compat copy is accepted by IDENTITY with the one pi hands extensions, 
 	assert.equal(hoisted.registry.get("anthropic-messages").sourceId, `${METER_PROVIDER_PREFIX}:anthropic-messages`);
 });
 
-test("a re-exported extension view shares metering, reset re-arm and the cap brake with its proven compat copy", async () => {
+test("a re-exported extension view shares metering, reset re-arm and the policy brake with its proven compat copy", async () => {
 	const copy = fakeCopy(["anthropic-messages"]);
 	let providerCalls = 0;
 	copy.module.resetApiProviders = () => {
@@ -1119,8 +1100,8 @@ test("a re-exported extension view shares metering, reset re-arm and the cap bra
 	copy.module.resetApiProviders();
 	const view = Object.freeze({ ...copy.module, Type: {}, StringEnum: () => ({}) });
 	assert.notEqual(view, copy.module, "the published 1.5 extension view has a distinct namespace");
-	const meter = createUsageMeter({ maxTokens: 3, rootSessionId: "root" });
-	const handle = await installProcessUsageMeter(installArgs({ copy, extensionCopy: { module: view }, meter }));
+	const meter = createUsageMeter({ rootSessionId: "root" });
+	const handle = await installProcessUsageMeter({ ...installArgs({ copy, extensionCopy: { module: view }, meter }), brake: true });
 	try {
 		assert.equal(handle.module, copy.module, "pricing and provider siblings remain relative to the proven candidate");
 		await view.getApiProvider("anthropic-messages").streamSimple(MODEL, [], { sessionId: "root" }).result();
@@ -1132,11 +1113,11 @@ test("a re-exported extension view shares metering, reset re-arm and the cap bra
 		await flush();
 		assert.equal(meter.state.total, 2, "calls after the view reset still cross the re-armed meter");
 		assert.equal(providerCalls, 2);
-		meter.record(usage({ total: 2 }));
+		meter.stop(MODEL_NOT_ALLOWED);
 		const before = meter.state.total;
 		const stopped = await view.getApiProvider("anthropic-messages").streamSimple(MODEL, [], { sessionId: "root" }).result();
 		assert.equal(stopped.stopReason, "aborted");
-		assert.equal(providerCalls, 2, "the capped facade call reaches no provider");
+		assert.equal(providerCalls, 2, "the stopped facade call reaches no provider");
 		assert.equal(meter.state.total, before);
 	} finally { handle.uninstall(); }
 });
@@ -1171,7 +1152,7 @@ test("no provable compat copy degrades the meter LOUDLY and leaves the runtime h
 	// to the per-session bus meter) and never a silent ok:true either.
 	const blind = fakeCopy(["anthropic-messages"]);
 	const logged = [];
-	const meter = createUsageMeter({ maxTokens: 1000, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	const args = installArgs({ copy: blind, extensionCopy: fakeCopy([]) });
 	const handle = await installProcessUsageMeter({
 		...args,
@@ -1193,10 +1174,9 @@ test("no provable compat copy degrades the meter LOUDLY and leaves the runtime h
 			compatError: "no-candidate-matched",
 			tried: ["pi", "hoisted"],
 			apis: [],
-			capped: true,
 			listed: false,
-			// The brake's stream factory comes from the accepted copy, so without one the cap is
-			// enforced only through session.abort(): capped-but-brakeless, said out loud.
+			// The brake's stream factory comes from the accepted copy, so without one no policy can be
+			// enforced before a call: brakeless, said out loud.
 			brake: false,
 		});
 		assert.equal(JSON.stringify(logged).includes("/"), false, "logs ship: tags only, never a filesystem path");
@@ -1301,7 +1281,7 @@ test("arm() re-wraps the compat half after a simulated resetApiProviders() and c
 
 test("a wrapped compat api routes real calls through the meter", async () => {
 	const copy = fakeCopy(["anthropic-messages"]);
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root-1" });
+	const meter = createUsageMeter({ rootSessionId: "root-1" });
 	const handle = await installProcessUsageMeter(installArgs({ copy, meter }));
 	handle.uninstall();
 
@@ -1319,7 +1299,7 @@ test("a wrapped compat api routes real calls through the meter", async () => {
 
 test("the installer stamps the meter with the accepted copy's package version, via the injected reader", async () => {
 	const copy = fakeCopy(["anthropic-messages"]);
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const reads = [];
 	const args = installArgs({ copy, meter });
 	const handle = await installProcessUsageMeter({
@@ -1347,7 +1327,7 @@ test("a failed version probe is silent -- no extra log line, no path, and the me
 	// The failure path may not log AT ALL: an error message here would carry the resolved package.json
 	// path, and the no-path rule for shipped run logs has no exception for optional extras.
 	const copy = fakeCopy(["anthropic-messages"]);
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const logged = [];
 	const args = installArgs({ copy, meter });
 	const handle = await installProcessUsageMeter({
@@ -1368,33 +1348,31 @@ test("a failed version probe is silent -- no extra log line, no path, and the me
 	assert.deepEqual(logged.map((entry) => entry.event), ["usage_meter", "usage_meter_teardown"]);
 });
 
-// ── Issues #501/#502, PR 1: one stop for every policy ─────────────────────────────────────────────────
+// ── Issue #502: the one stop ──────────────────────────────────────────────────────────────────────────
 //
-// The seams the model list sits on (the token cap is the meter's settle-time check, no guard). No guard ships yet, so these hold the shape: one stop
-// reason, first wins; a brake armed by any of the three policies; a guard hook offered every physical call;
-// and a runner that refuses a policy it cannot enforce before a call.
+// The seams the model list sits on. These hold the shape: one stop reason, first wins; a brake armed by the
+// model list; a guard hook offered every physical call; and a runner that refuses a policy it cannot enforce
+// before a call. There is no token cap and no per-job token budget.
 
 test("the meter's stop is first-wins: a later stop never overwrites the reason, and onStop fires once", () => {
 	const fired = [];
-	const meter = createUsageMeter({ maxTokens: 10, onStop: (reason) => fired.push(reason) });
+	const meter = createUsageMeter({ onStop: (reason) => fired.push(reason) });
 	assert.equal(meter.stop(MODEL_NOT_ALLOWED), true, "the first stop wins");
 	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
-	assert.equal(meter.stop(TOKEN_BUDGET), false, "a second stop is refused");
-	meter.record(usage({ total: 99 })); // crosses the token cap AFTER the list stop
+	assert.equal(meter.stop(MODEL_NOT_ALLOWED), false, "a second stop is refused");
+	meter.record(usage({ total: 99 })); // metering continues after a stop
 	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, "the cause stays the first stop, not the last thing to notice");
-	assert.equal(meter.state.breached, false, "breached means the token cap was the stop, and it was not");
 	assert.deepEqual(fired, [MODEL_NOT_ALLOWED]);
 	assert.throws(() => meter.stop("made-up"), /unknown meter stop/, "a reason with no message is a bug, never a silent stop");
 });
 
-test("STOP_MESSAGES names every meter stop, and breached is a read-only view of the token stop", () => {
-	assert.deepEqual(Object.keys(STOP_MESSAGES).sort(), [MODEL_NOT_ALLOWED, TOKEN_BUDGET].sort());
-	assert.equal(STOP_MESSAGES[TOKEN_BUDGET], "pi-dispatch: token cap exceeded", "the token stop's message is unchanged");
+test("STOP_MESSAGES has no token-budget row; the default hard stop names the model policy", () => {
+	assert.equal("token_budget" in STOP_MESSAGES, false, "the token stop is gone");
+	assert.equal(STOP_MESSAGES[MODEL_NOT_ALLOWED], "pi-dispatch: model not allowed");
 	assert.ok(Object.isFrozen(STOP_MESSAGES));
-	const meter = createUsageMeter({ maxTokens: null });
-	meter.stop(TOKEN_BUDGET);
-	assert.equal(meter.state.breached, true);
-	assert.equal(defaultHardStopResult("classify", MODEL).errorMessage, STOP_MESSAGES[TOKEN_BUDGET]);
+	const meter = createUsageMeter({});
+	meter.stop(MODEL_NOT_ALLOWED);
+	assert.equal(defaultHardStopResult("classify", MODEL).errorMessage, STOP_MESSAGES[MODEL_NOT_ALLOWED]);
 });
 
 test("the meter carries the list and refuses nonsense", () => {
@@ -1486,27 +1464,22 @@ test("the guard is never consulted without a brake, nor by the compat half insid
 	assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED);
 });
 
-test("the brake is armed by ANY policy: a token cap alone, or a list alone, arms it", async () => {
-	for (const [label, meterArgs, capped, listed] of [
-		["token cap", { maxTokens: 1000 }, true, false],
-		["model list", { allowedModels: [{ provider: "anthropic", model: "claude-x" }] }, false, true],
-	]) {
-		const copy = fakeCopy(["anthropic-messages"]);
-		const logged = [];
-		const handle = await installProcessUsageMeter({
-			...installArgs({ copy }),
-			meter: createUsageMeter(meterArgs),
-			log: (event, fields) => logged.push({ event, fields }),
-		});
-		handle.uninstall();
-		assert.equal(handle.brake, true, `${label}: armed`);
-		assert.deepEqual(handle.enforces, [], `${label}: no guard handed to this install`);
-		assert.deepEqual([logged[0].fields.capped, logged[0].fields.listed, logged[0].fields.brake], [capped, listed, true], label);
-	}
-	// And none of them: no brake, which is today's line for an uncapped job.
-	const handle = await installProcessUsageMeter({ ...installArgs({ copy: fakeCopy(["anthropic-messages"]) }) });
+test("the brake is armed by the model list, and by nothing else", async () => {
+	const copy = fakeCopy(["anthropic-messages"]);
+	const logged = [];
+	const handle = await installProcessUsageMeter({
+		...installArgs({ copy }),
+		meter: createUsageMeter({ allowedModels: [{ provider: "anthropic", model: "claude-x" }] }),
+		log: (event, fields) => logged.push({ event, fields }),
+	});
 	handle.uninstall();
-	assert.equal(handle.brake, false);
+	assert.equal(handle.brake, true, "model list: armed");
+	assert.deepEqual(handle.enforces, [], "no guard handed to this install");
+	assert.deepEqual([logged[0].fields.listed, logged[0].fields.brake], [true, true]);
+	// No policy: no brake, which is the line for every job now.
+	const plain = await installProcessUsageMeter({ ...installArgs({ copy: fakeCopy(["anthropic-messages"]) }) });
+	plain.uninstall();
+	assert.equal(plain.brake, false);
 });
 
 test("assertPoliciesEnforceable: a list the runner cannot enforce before a call is refused", () => {
@@ -1515,8 +1488,7 @@ test("assertPoliciesEnforceable: a list the runner cannot enforce before a call 
 	assert.doesNotThrow(() => assertPoliciesEnforceable({ ...healthy, allowedModels: list }));
 	// No policy set: nothing to enforce, whatever the meter's state. This is every job today.
 	assert.doesNotThrow(() => assertPoliciesEnforceable({ meterOk: false, brake: false }));
-	// The token cap is deliberately not asserted here: it has no pre-call form to enforce (its stop is the
-	// meter's settle-time check), so there is nothing a missing brake would make it enforce early.
+	// There is no token cap to assert: the meter has no budget.
 	for (const [label, broken] of [
 		["meter not installed (the fallback bus meter)", { meterOk: false }],
 		["no hard-stop stream", { brake: false }],
@@ -1550,7 +1522,7 @@ const ledgerRow = (provider, model, fields = {}) => ({ provider, model, calls: 0
 
 test("onChange fires when a call is observed and again when it settles, for streams and for promises", async () => {
 	const seen = [];
-	const meter = createUsageMeter({ maxTokens: null, onChange: () => seen.push([meter.state.calls, meter.state.unresolved, meter.state.total]) });
+	const meter = createUsageMeter({ onChange: () => seen.push([meter.state.calls, meter.state.unresolved, meter.state.total]) });
 	const stream = new FakeStream();
 	meter.observe(stream, { sessionId: "s", provider: "p", modelId: "m" });
 	assert.deepEqual(seen, [[1, 1, 0]], "on observe: the call is counted, and unresolved, before any answer");
@@ -1569,7 +1541,7 @@ test("onChange fires when a call is observed and again when it settles, for stre
 });
 
 test("a throwing onChange never reaches the provider call or the settle", async () => {
-	const meter = createUsageMeter({ maxTokens: null, onChange: () => {
+	const meter = createUsageMeter({ onChange: () => {
 		throw new Error("disk full");
 	} });
 	const stream = streamOf(usage({ input: 4 }));
@@ -1579,7 +1551,7 @@ test("a throwing onChange never reaches the provider call or the settle", async 
 });
 
 test("rows(): first-seen order, a model-less row with null ids, copies, and a partition of the settled totals", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	meter.record(usage({ input: 1, total: 1 }), { provider: "p", modelId: "small" });
 	meter.record(usage({ input: 100, total: 100 }), { provider: "p", modelId: "big" });
 	meter.record({ input: 7, totalTokens: 7 }, {}); // no usable usage: counted, tokens on the row
@@ -1596,7 +1568,7 @@ test("rows(): first-seen order, a model-less row with null ids, copies, and a pa
 });
 
 test("rows() keeps at most CHILD_LEDGER_ROWS rows, the overflow folded into the model-less row", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	for (let i = 0; i < CHILD_LEDGER_ROWS + 10; i += 1) meter.record(usage({ input: 1, total: 1 }), { provider: "p", modelId: `m${i}` });
 	const rows = meter.rows();
 	assert.equal(rows.length, CHILD_LEDGER_ROWS);
@@ -1606,7 +1578,7 @@ test("rows() keeps at most CHILD_LEDGER_ROWS rows, the overflow folded into the 
 });
 
 test("with no children the snapshot is the pre-#500 line plus usageUnreported (issue #571): the three child keys appear only after setChildren, before it", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	meter.record(usage({ input: 10, output: 5 }), { sessionId: "root", provider: "p", modelId: "m" });
 	assert.equal(
 		JSON.stringify(meter.snapshot()),
@@ -1618,7 +1590,7 @@ test("with no children the snapshot is the pre-#500 line plus usageUnreported (i
 });
 
 test("setChildren: the totals include the children, root/other/loose stay the parent's, and the four parts sum to total", () => {
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: "root" });
+	const meter = createUsageMeter({ rootSessionId: "root" });
 	meter.record(usage({ input: 10, output: 5 }), { sessionId: "root" });
 	meter.record(usage({ input: 4, output: 0 }), { sessionId: "sub" });
 	meter.record(usage({ input: 1, output: 0 }));
@@ -1644,23 +1616,19 @@ test("setChildren: the totals include the children, root/other/loose stay the pa
 	assert.equal(meter.snapshot().total, before.total + 160);
 });
 
-test("the token cap is judged on parent plus children, on a fold and on a parent record", () => {
+test("a large total on parent plus children never stops a job: there is no cap", () => {
 	const stops = [];
-	const meter = createUsageMeter({ maxTokens: 100, onStop: (reason, detail) => stops.push([reason, detail]) });
-	meter.record(usage({ input: 60 }));
-	meter.setChildren(childFold({ totals: { total: 30 } }));
-	assert.equal(meter.state.stopReason, null, "60 + 30 is under 100");
-	meter.record(usage({ input: 20 }));
-	assert.deepEqual(stops, [[TOKEN_BUDGET, 110]], "the parent's record crosses with the children counted");
-
-	const byFold = createUsageMeter({ maxTokens: 100 });
-	byFold.record(usage({ input: 60 }));
-	byFold.setChildren(childFold({ totals: { total: 41 } }));
-	assert.equal(byFold.state.stopReason, TOKEN_BUDGET, "the fold itself crosses");
+	const meter = createUsageMeter({ onStop: (reason, detail) => stops.push([reason, detail]) });
+	meter.record(usage({ input: 1_000_000_000 }));
+	meter.setChildren(childFold({ totals: { total: 1_000_000_000 } }));
+	meter.record(usage({ input: 1_000_000_000 }));
+	assert.deepEqual(stops, []);
+	assert.equal(meter.state.stopReason, null);
+	assert.equal(meter.snapshot().total, 3_000_000_000);
 });
 
 test("usageSnapshot merges the children's rows before the 8-row cut, and the rows still sum to the total", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	for (let i = 0; i < 8; i += 1) meter.record(usage({ input: 10 + i, cost: 0.01 }), { provider: "p", modelId: `m${i}` });
 	meter.record(usage({ input: 3 }), {});
 	meter.setChildren(childFold({
@@ -1679,7 +1647,7 @@ test("usageSnapshot merges the children's rows before the 8-row cut, and the row
 });
 
 test("usageSnapshot is emitted when only the children made calls", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	assert.equal(meter.usageSnapshot(), null);
 	meter.setChildren(childFold({ totals: { total: 7, calls: 1 }, rows: [ledgerRow("p", "m", { calls: 1, total: 7 })] }));
 	assert.deepEqual(meter.usageSnapshot().models.map((row) => [row.model, row.total]), [["m", 7]]);
@@ -1689,7 +1657,7 @@ test("isStopped is asked before dispatch on every runtime method, and its reason
 	const { FakeRuntime, calls } = fakeRuntimeClass();
 	const order = [];
 	let answer = null;
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const hardStop = makeHardStopStream({ createStream: () => new FakeStream() });
 	const layer = wrapModelRuntime({
 		ModelRuntime: FakeRuntime,
@@ -1717,12 +1685,12 @@ test("isStopped is asked before dispatch on every runtime method, and its reason
 	}
 });
 
-test("isStopped fails closed: a garbled answer or a throw is a token-cap stop; with no brake it is never asked", async () => {
+test("isStopped fails closed: a garbled answer or a throw is a model-policy stop; with no brake it is never asked", async () => {
 	for (const answer of [true, "STOP", 1, () => {
 		throw new Error("EIO");
 	}]) {
 		const { FakeRuntime, calls } = fakeRuntimeClass();
-		const meter = createUsageMeter({ maxTokens: null });
+		const meter = createUsageMeter({});
 		const layer = wrapModelRuntime({
 			ModelRuntime: FakeRuntime,
 			meter,
@@ -1732,7 +1700,7 @@ test("isStopped fails closed: a garbled answer or a throw is a token-cap stop; w
 		try {
 			await new FakeRuntime().streamSimple(MODEL, [], {}).result();
 			assert.equal(calls.length, 0, String(answer));
-			assert.equal(meter.state.stopReason, TOKEN_BUDGET, String(answer));
+			assert.equal(meter.state.stopReason, MODEL_NOT_ALLOWED, String(answer));
 		} finally {
 			layer.restore();
 		}
@@ -1750,7 +1718,7 @@ test("isStopped fails closed: a garbled answer or a throw is a token-cap stop; w
 
 test("isStopped on the compat half: asked before dispatch, and a stop answers with the hard stop", async () => {
 	const inner = fakeInner();
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	let answer = null;
 	const asked = [];
 	const compat = wrapProviderStreams({
@@ -1773,7 +1741,7 @@ test("isStopped on the compat half: asked before dispatch, and a stop answers wi
 
 test("install: an injected compat copy skips resolution, and its catalog and version come with it", async () => {
 	const copy = fakeCopy(["anthropic-messages"]);
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const logged = [];
 	const handle = await installProcessUsageMeter({
 		...installArgs({ copy }),
@@ -1806,18 +1774,18 @@ test("install: an injected compat copy skips resolution, and its catalog and ver
 test("install: brake:true arms the hard stop with no policy, and isStopped then brakes both halves", async () => {
 	const copy = fakeCopy(["anthropic-messages"]);
 	const args = installArgs({ copy });
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	let stop = null;
 	const logged = [];
 	const handle = await installProcessUsageMeter({ ...args, meter, brake: true, isStopped: () => stop, log: (event, fields) => logged.push({ event, fields }) });
 	try {
 		assert.equal(handle.brake, true);
-		assert.deepEqual([logged[0].fields.capped, logged[0].fields.listed, logged[0].fields.brake], [false, false, true]);
+		assert.deepEqual([logged[0].fields.listed, logged[0].fields.brake], [false, true]);
 		const runtime = new args.ModelRuntime();
-		stop = TOKEN_BUDGET;
+		stop = MODEL_NOT_ALLOWED;
 		assert.equal((await runtime.streamSimple(MODEL, [], {}).result()).stopReason, "aborted");
 		const legacy = copy.registry.get("anthropic-messages");
-		assert.equal((await legacy.streamSimple(MODEL, [], {}).result()).errorMessage, STOP_MESSAGES[TOKEN_BUDGET]);
+		assert.equal((await legacy.streamSimple(MODEL, [], {}).result()).errorMessage, STOP_MESSAGES[MODEL_NOT_ALLOWED]);
 		assert.equal(meter.state.calls, 0);
 	} finally {
 		handle.uninstall();
@@ -1855,7 +1823,7 @@ test("install: the children hook replaces the sampler, runs on the tick, and add
 // ---------------------------------------------------------------------------------------------
 
 test("setChildren saturates a number it cannot carry at MAX_SAFE_INTEGER, never at 0", () => {
-	const meter = createUsageMeter({ maxTokens: 500 });
+	const meter = createUsageMeter({});
 	const M = Number.MAX_SAFE_INTEGER;
 	meter.setChildren(childFold({
 		usageUnreported: "3",
@@ -1864,14 +1832,14 @@ test("setChildren saturates a number it cannot carry at MAX_SAFE_INTEGER, never 
 	}));
 	const snap = meter.snapshot();
 	for (const key of ["input", "output", "total", "calls", "unresolved", "usageUnreported", "sessions"]) assert.equal(snap[key], M, key);
-	assert.equal(meter.state.stopReason, TOKEN_BUDGET, "too much to count is over any cap");
+	assert.equal(meter.state.stopReason, null, "too much to count is not a stop: metering only");
 	const [row] = meter.usageSnapshot().models;
 	assert.equal(row.total, M);
 	for (const r of meter.usageSnapshot().models) for (const [key, value] of Object.entries(r)) if (typeof value === "number") assert.ok(Number.isFinite(value), `${key}: no Infinity reaches the exit line as null`);
 });
 
 test("setChildren keeps a high-water mark: a fold with less never lowers the totals or a row, but unresolved and unmetered follow the fold", () => {
-	const meter = createUsageMeter({ maxTokens: 1000 });
+	const meter = createUsageMeter({});
 	meter.setChildren(childFold({ processes: 2, unmetered: 1, totals: { input: 900, total: 900, calls: 3, unresolved: 1, sessions: 1 }, rows: [ledgerRow("p", "m", { calls: 2, input: 900, total: 900 })] }));
 	meter.setChildren(childFold({ processes: 0, unmetered: 0 }));
 	const snap = meter.snapshot();
@@ -1882,7 +1850,7 @@ test("setChildren keeps a high-water mark: a fold with less never lowers the tot
 });
 
 test("record clamps a negative usage field at 0", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	meter.record({ input: -5, output: 3, totalTokens: -2, cacheRead: -1 }, { provider: "p", modelId: "m" });
 	assert.deepEqual([meter.state.input, meter.state.output, meter.state.total], [0, 3, 0]);
 	const [row] = meter.rows();
@@ -1890,7 +1858,7 @@ test("record clamps a negative usage field at 0", () => {
 });
 
 test("rows() folds an id that is not printable ASCII (U+212A KELVIN SIGN lowercases to k) into the model-less row", () => {
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	meter.record(usage({ input: 4 }), { provider: "p", modelId: "\u212Aimi" });
 	meter.record(usage({ input: 1 }), { provider: "p", modelId: "kimi" });
 	assert.deepEqual(meter.rows().map((row) => [row.model, row.total]), [["kimi", 1], [null, 4]]);
@@ -1910,9 +1878,9 @@ test("a stop fires onChange, so a guard refusal reaches the child ledger with it
 		layer.restore();
 	}
 	const stops = [];
-	const plain = createUsageMeter({ maxTokens: null, onChange: () => stops.push(plain.state.stopReason) });
+	const plain = createUsageMeter({ onChange: () => stops.push(plain.state.stopReason) });
 	plain.stop(MODEL_NOT_ALLOWED);
-	plain.stop(TOKEN_BUDGET);
+	plain.stop(MODEL_NOT_ALLOWED);
 	assert.deepEqual(stops, [MODEL_NOT_ALLOWED], "only the stop that wins");
 });
 
@@ -1934,11 +1902,10 @@ test("install: brake:true or isStopped with no hard stop to build is a failed in
 
 test("install: a throwing children hook stops a meter with a policy, by the unmetered-child rule; teardown fields never overwrite the meter's", async () => {
 	const cases = [
-		[{ maxTokens: 10, allowedModels: [{ provider: "p", model: "m" }] }, TOKEN_BUDGET],
 		[{ allowedModels: [{ provider: "p", model: "m" }] }, MODEL_NOT_ALLOWED],
 	];
 	for (const [policy, reason] of cases) {
-		const meter = createUsageMeter({ maxTokens: null, ...policy });
+		const meter = createUsageMeter({ ...policy });
 		const logged = [];
 		const handle = await installProcessUsageMeter({
 			...installArgs({ copy: fakeCopy([]) }),
@@ -1956,12 +1923,12 @@ test("install: a throwing children hook stops a meter with a policy, by the unme
 		assert.deepEqual([teardown.rearms, teardown.apis, teardown.rearmMs, teardown.unmetered], [0, 0, 5, 3], "the hook's colliding keys are dropped, its own kept");
 		assert.ok(teardown.childrenFailed >= 1);
 	}
-	const throwingTeardown = createUsageMeter({ maxTokens: 10 });
+	const throwingTeardown = createUsageMeter({});
 	const handle = await installProcessUsageMeter({ ...installArgs({ copy: fakeCopy([]) }), meter: throwingTeardown, children: { sample: () => {}, teardown: () => {
 		throw new Error("last fold");
 	} } });
 	handle.uninstall();
-	assert.equal(throwingTeardown.state.stopReason, TOKEN_BUDGET, "the last fold failing at teardown fails closed too");
+	assert.equal(throwingTeardown.state.stopReason, null, "no policy: the last fold failing is logged, not a stop");
 });
 
 // ---------------------------------------------------------------------------------------------
@@ -1988,9 +1955,9 @@ test("usageUnreported: a missing usage block, zero input, a started failure, and
 	assert.equal(usageUnreported(answer({ input: 100, output: 20 }), "anthropic-messages"), false, "a whole answer");
 });
 
-test("the meter counts usageUnreported on an uncapped run, before the change hook writes, never for a forward", async () => {
+test("the meter counts usageUnreported on an unmetered-answer run, before the change hook writes, never for a forward", async () => {
 	const seen = [];
-	const meter = createUsageMeter({ maxTokens: null, onChange: () => seen.push(meter.state.unreported) });
+	const meter = createUsageMeter({ onChange: () => seen.push(meter.state.unreported) });
 	const observe = (message, model, extra = {}) => {
 		const stream = new FakeStream();
 		stream.end(message);
@@ -2024,7 +1991,7 @@ test("a router that forwards asynchronously is not counted for its own zero usag
 	const PROXY = { ...PRICED, provider: "router", id: "proxy" };
 	const LONE = { ...PRICED, provider: "router", id: "lone" };
 	const dispatch = new AsyncLocalStorage();
-	const meter = createUsageMeter({ maxTokens: null });
+	const meter = createUsageMeter({});
 	const catalog = fakeCatalog([]);
 	const BROKEN = { ...UPSTREAM, id: "broken" };
 	const compatWrapper = wrapProviderStreams({ inner: { streamSimple: (model) => { if (model.id === "broken") throw new Error("upstream setup failed"); const s = new FakeStream(); s.end(answer({ input: 1000, output: 100, cost: 0.0045 })); return s; }, stream: () => null }, fallbackModels: catalog, meter, dispatch });

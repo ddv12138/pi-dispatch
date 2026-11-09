@@ -8,7 +8,6 @@ import { NESTED_REASONS, REASONS, explainReason } from "../../worker/src/reason-
 import { RECOVERY_COMMENTS } from "../../worker/src/comment-tables.mjs";
 import { RECORD_REASON_RE as LEAF_REASON_RE } from "../../worker/src/record-reason.mjs";
 import { RUNNER_COMPLETED_REASONS } from "../../worker/src/run-history.mjs";
-import { RUN_OUTCOMES } from "../../worker/src/portfolio-snapshot.mjs";
 import { LIVE_OUTCOMES } from "../../worker/src/live-transcript.mjs";
 
 // Issue #710, PR 2: the console reads one vocabulary from admin/src/words.mjs. Each table there is bolted to its
@@ -22,9 +21,9 @@ const SRC = (p) => readFileSync(fileURLToPath(new URL(`../src/${p}`, import.meta
 
 // ---- the bolts -------------------------------------------------------------------------------------------------------
 
-test("OUTCOME_WORDS is keyed by exactly the record's outcome enum, as the spec, the portfolio count and the live stream name it", () => {
+test("OUTCOME_WORDS is keyed by exactly the record's outcome enum, as the live stream names it", () => {
   const keys = Object.keys(OUTCOME_WORDS).sort();
-  assert.deepEqual(keys, [...RUN_OUTCOMES].sort(), "portfolio-snapshot.mjs RUN_OUTCOMES");
+  assert.deepEqual(keys, ["completed", "failed", "policy"], "the record outcomes");
   assert.deepEqual(keys, LIVE_OUTCOMES.filter((o) => o !== "unknown").sort(), "live-transcript.mjs LIVE_OUTCOMES, less its own unknown");
   assert.deepEqual(Object.fromEntries(Object.entries(OUTCOME_WORDS).map(([k, v]) => [k, v.word])), { completed: "completed", policy: "refused", failed: "failed" });
 });
@@ -227,7 +226,6 @@ test("shortSentence backs a cut off past a dangling word and an open parenthesis
   // An object pronoun ends a phrase: it stays.
   assert.equal(shortSentence(REASONS["auth-credit-cap-required"].sentence), "The configured subscription connection cannot authorize this job");
   // The catalog's own cases.
-  assert.equal(shortSentence(REASONS["token-cap"].sentence), "A token budget had no room left for this run's token budget…");
   assert.equal(shortSentence(REASONS["job-image-forge-unsupported"].sentence), "The job image does not support this job's forge", "its aside dropped, it fits");
   // An aside that opens below the floor is dropped whole, and the sentence cut again.
   assert.equal(shortSentence(REASONS["model-unknown"].sentence), "This job names an AI model that this deployment does not know…");

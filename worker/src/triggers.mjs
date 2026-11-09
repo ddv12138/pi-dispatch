@@ -39,7 +39,7 @@ import { findDuplicateKey } from "./json-duplicates.mjs";
 import { FORGE_MCP_KINDS, FORGE_MCP_SERVER_NAME, MCP_SERVER_NAME_RE } from "./mcp-config.mjs";
 import { isModelRolesField, validateModelRoles } from "./model-roles.mjs";
 import { validateModelRef } from "./model-ref.mjs";
-import { optionalTokenCount, retiredDollarMessage } from "./budget-rule.mjs";
+import { RETIRED_DOLLAR_KEYS, retiredDollarMessage } from "./budget-rule.mjs";
 import { validateApprovalConfig } from "./approval-policy.mjs";
 // The project id rule, from its import-free module, so a bundle's `project` is held to the one rule projects.json is.
 import { PROJECT_ID_RE } from "./project-id.mjs";
@@ -520,6 +520,13 @@ function normalizeTrigger(entry, index, path, state) {
 		throw configError(`${at}: run.kind must be one of ${RUN_KINDS.join("|")} (got ${JSON.stringify(run.kind)}): ${path}`);
 	}
 
+	// C2: the token budget and allocation are gone, and `run.portfolio` (issue #505) with them. REFUSED on every
+	// trigger type, never dropped: a file that kept the flag would read as though the job still sent a priorities plan
+	// while nothing would build its snapshot or apply one.
+	if (run.portfolio !== null && run.portfolio !== undefined) {
+		throw configError(`${at}: run.portfolio was removed with the token budget and allocation; remove it (a portfolio job, its snapshot and its plan no longer exist): ${path}`);
+	}
+
 	// The on x run matrix -- the trust boundary, fail-loud (mirrors the old schedules kind:github refusal).
 	if (on.type === "watch") return normalizeWatch(entry, index, path, state);
 	if (on.type === "cron") {
@@ -530,13 +537,6 @@ function normalizeTrigger(entry, index, path, state) {
 	}
 	if (!isForgeKind(run.kind)) {
 		throw configError(`${at}: a ${on.type} trigger is webhook-driven and produces a forge job; run.kind must be one of ${FORGE_KINDS.join("|")} (got ${JSON.stringify(run.kind)}): ${path}`);
-	}
-	// Issue #505: `run.portfolio` is cron-only, refused here for every webhook type at once (and before the disarmed
-	// sentinel below, so a disarmed entry carrying it still refuses the file). A forge job is driven by text an issue or
-	// pull request author chose, and it has no `/outbox`, so a plan channel there would hand budget authority to whoever
-	// can open an issue. Any value is refused, `false` included: on a webhook kind the field has no meaning to state.
-	if (run.portfolio !== undefined) {
-		throw configError(`${at}: run.portfolio is only available on a cron trigger: a ${on.type} trigger runs on text a forge user wrote, and a budget plan must come from a schedule the operator reviewed: ${path}`);
 	}
 	let normalized;
 	if (on.type === "label") normalized = normalizeLabel(on, run, index, path);
@@ -559,7 +559,10 @@ function normalizeWatch(entry, index, path, state) {
 	const raw = entry.run;
 	const mode = raw.mode ?? "investigate";
 	if (!["investigate", "issue"].includes(mode)) throw configError("watch: mode must be investigate or issue; direct fixes need a human approval");
-	const allowed = new Set(["kind", "mode", "folder", "flow", "task", "excludeTools", "maxTokens", "provider", "model", "maxTurns", "models", "image", "backend", "secrets", "secretBundle", "skillsDir", "issue", "queryLogs"]);
+	const allowed = new Set(["kind", "mode", "folder", "flow", "task", "excludeTools", "provider", "model", "maxTurns", "models", "image", "backend", "secrets", "secretBundle", "skillsDir", "issue", "queryLogs"]);
+	// C2: a watch rule no longer has a per-classifier token budget. Named, not dropped: a file carrying one
+	// reads as bounding the watch's spend, and the watch would run without any bound at all.
+	if (Object.hasOwn(raw, "maxTokens")) throw configError("watch: run.maxTokens was retired with the token budgets; remove it (a watch rule no longer has a per-classifier token budget)");
 	for (const key of Object.keys(raw)) if (!allowed.has(key)) throw configError("watch: unsupported run field");
 	if (raw.kind !== "local") throw configError("watch: run.kind must be local");
 	let issue;
@@ -577,7 +580,6 @@ function normalizeWatch(entry, index, path, state) {
 		if (entry.decide !== undefined) throw configError("watch: decide is configured on investigate rules with an issue fallback");
 		return { on, run: { kind: "local", mode, issue } };
 	}
-	if (raw.maxTokens === undefined || optionalTokenCount(raw.maxTokens, "watch: investigate maxTokens") === null) throw configError("watch: investigate requires maxTokens (the retired maxCostUsd was a dollar cap; budgets are token-denominated now)");
 	// Reuse the local execution validators with a synthetic schedule that is never returned or installed.
 	// Every admitted field is projected above; webhook-only authority cannot enter through this path.
 	const local = normalizeCron({ type: "cron", id: on.id, pattern: "0 0 * * *" }, { ...raw, packages: false, github: false }, index, path, { seenCronIds: new Set() });
@@ -602,12 +604,14 @@ function normalizeWatchQueries(value) {
 
 function normalizeWatchDecisionConfig(value, issue) {
 	if (!issue) throw configError("watch: decide requires a reviewed run.issue fallback");
-	if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["model", "maxTokens", "questions", "act", "fields", "shadow"].includes(k))) throw configError("watch: invalid decide block");
-	if (typeof value.model !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./:@~-]+$/.test(value.model) || value.maxTokens === undefined) throw configError("watch: decide requires a model and token budget");
-	optionalTokenCount(value.maxTokens, "watch: decide maxTokens");
+	// C2: the classifier's token budget is gone. Checked BEFORE the field set below, which no longer admits
+	// `maxTokens`, so the file hears the removal rather than a generic "invalid decide block".
+	if (value !== null && typeof value === "object" && !Array.isArray(value) && Object.hasOwn(value, "maxTokens")) throw configError("watch: decide.maxTokens was retired with the token budgets; remove it (a watch decision no longer has a per-classifier token budget)");
+	if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some(k => !["model", "questions", "act", "fields", "shadow"].includes(k))) throw configError("watch: invalid decide block");
+	if (typeof value.model !== "string" || !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_./:@~-]+$/.test(value.model)) throw configError("watch: decide requires a model");
 	if (value.shadow !== undefined && typeof value.shadow !== "boolean") throw configError("watch: decide.shadow must be boolean");
 	const { shadow = true, ...policy } = value;
-	const checked = validateWatchDecision({ ...policy, maxTokens: policy.maxTokens }, { resolveModel: ref => { const i = ref.indexOf("/"); return builtinModel(ref.slice(0, i), ref.slice(i + 1)); } });
+	const checked = validateWatchDecision(policy, { resolveModel: ref => { const i = ref.indexOf("/"); return builtinModel(ref.slice(0, i), ref.slice(i + 1)); } });
 	if (!checked.ok) throw configError("watch: decide-refused; require a known input-only classifier and bounded questions");
 	return { ...checked.config, shadow };
 }
@@ -705,10 +709,6 @@ function normalizeCron(on, run, index, path, state) {
 	const mcp = validateMcp(on, run, `cron trigger "${id}"`, path, { kind: "local" });
 	// Validated since #502; before it these three were copied untouched, so `run.provider: 7` loaded.
 	const ref = validateRunModel(on, run, `cron trigger "${id}"`, path);
-	// Issue #505: the portfolio flag. Strictly boolean, the house rule (`run.github`'s reason: a truthy string must not
-	// quietly arm budget authority). `true` beside `run.command` is refused: a plan is written by a flow's judgement,
-	// and a command has no committed skill to review. `false` is today's default and is carried, `run.resume`'s rule.
-	const portfolio = validatePortfolio(run, command, `cron trigger "${id}"`, path);
 
 	// provider/model/maxTurns stay absent when omitted so the value resolves at job start against the
 	// settings overlay/env, not a default frozen here (INT-CONFIG-OVERLAY-CONTRACT). github/packages/image stay
@@ -717,25 +717,8 @@ function normalizeCron(on, run, index, path, state) {
 	// freeze today's default into every stored repeatable.
 	return {
 		on: { type: "cron", id, pattern },
-		run: { kind: "local", folder: run.folder, flow: run.flow, task: run.task, provider: ref.provider, model: ref.model, maxTurns: ref.maxTurns, github: run.github, packages, image, resume, ...(command !== undefined && { command }), ...(skillsDir !== undefined && { skillsDir }), ...(secrets !== undefined && { secrets }), ...(secretsProfile !== undefined && { secretsProfile }), ...(secretBundle !== undefined && { secretBundle }), ...(backend !== undefined && { backend }), ...(excludeTools !== undefined && { excludeTools }), ...(mcp !== undefined && { mcp }), ...(ref.models !== undefined && { models: ref.models }), ...(ref.fallbackModels !== undefined && { fallbackModels: ref.fallbackModels }), ...(ref.maxTokens !== undefined && { maxTokens: ref.maxTokens }), ...(portfolio !== undefined && { portfolio }), ...(progress !== undefined && { progress }), ...(statusComment !== undefined && { statusComment }), ...(recover !== undefined && { recover }), ...(steer !== undefined && { steer }) },
+		run: { kind: "local", folder: run.folder, flow: run.flow, task: run.task, provider: ref.provider, model: ref.model, maxTurns: ref.maxTurns, github: run.github, packages, image, resume, ...(command !== undefined && { command }), ...(skillsDir !== undefined && { skillsDir }), ...(secrets !== undefined && { secrets }), ...(secretsProfile !== undefined && { secretsProfile }), ...(secretBundle !== undefined && { secretBundle }), ...(backend !== undefined && { backend }), ...(excludeTools !== undefined && { excludeTools }), ...(mcp !== undefined && { mcp }), ...(ref.models !== undefined && { models: ref.models }), ...(ref.fallbackModels !== undefined && { fallbackModels: ref.fallbackModels }), ...(progress !== undefined && { progress }), ...(statusComment !== undefined && { statusComment }), ...(recover !== undefined && { recover }), ...(steer !== undefined && { steer }) },
 	};
-}
-
-/**
- * `run.portfolio` on a cron trigger (issue #505): the job may send a priorities plan back through
- * `/outbox/priorities.json`. Returns the flag, or undefined when absent, so an unflagged entry normalizes
- * byte-identically. Reviewed-file-only, like `run.secrets`: no tool and no panel key writes it.
- */
-function validatePortfolio(run, command, at, path) {
-	const portfolio = run.portfolio;
-	if (portfolio === undefined) return undefined;
-	if (typeof portfolio !== "boolean") {
-		throw configError(`${at}: run.portfolio must be true or false when present: ${path}`);
-	}
-	if (portfolio === true && command !== undefined) {
-		throw configError(`${at}: run.portfolio cannot be set beside run.command: a budget plan is written by a flow's judgement, and a command has no committed skill to review: ${path}`);
-	}
-	return portfolio;
 }
 
 /**
@@ -1825,10 +1808,10 @@ export function recoverVenueProblem(venue) {
 
 /**
  * The `run` field a key spells or nearly spells (`run.provider`, `run.model`, `run.models`, `run.maxTurns`,
- * `run.maxTokens`), or null. The exact field names match too: the CALLER decides whether an exact name is legal
- * where it found it (the loader allows them under `run`, never under `on`; the console's trigger tools refuse
- * `run.models` and `run.maxTokens` in any spelling, issue #501 part 7). One sweep, so the two cannot disagree on
- * what a near miss is.
+ * and the RETIRED `run.maxTokens`), or null. The exact field names match too: the CALLER decides whether an
+ * exact name is legal where it found it (the loader allows them under `run`, never under `on`) and, for a
+ * retired field, refuses it with the removal named. One sweep, so the two cannot disagree on what a near
+ * miss is.
  */
 export function runModelFieldNearMiss(key) {
 	// What the sweep compares against, case and separators removed. `providerid` and `modelid` are what an
@@ -1861,13 +1844,16 @@ const RUN_MODEL_NEAR_MISS_TARGETS = Object.freeze({
 	models: "run.models", modelids: "run.models", modelnames: "run.models", allowedmodels: "run.models", allowedmodel: "run.models",
 	fallbackmodels: "run.fallbackModels", fallbackmodel: "run.fallbackModels", fallbackmodelid: "run.fallbackModels", fallbackmodelids: "run.fallbackModels", fallbackmodelname: "run.fallbackModels", fallbackmodelnames: "run.fallbackModels",
 	maxturns: "run.maxTurns", maxturn: "run.maxTurns",
+	// The retired token budget and its slips (C2): the caller refuses every one of these as a retirement, never
+	// as a typo. `maxcost*` are the retired dollar spellings, pointed at the dollar field they name.
 	maxtokens: "run.maxTokens", maxtoken: "run.maxTokens",
-	// The retired dollar keys and their post-migration slips all point at the token field that replaced them:
-	// the sweep's suggestion must not name a field this build refuses on sight.
-	maxcostusd: "run.maxTokens", maxcost: "run.maxTokens",
+	maxcostusd: "run.maxCostUsd", maxcost: "run.maxCostUsd",
 	maxcosttokens: "run.maxTokens", max_cost_tokens: "run.maxTokens",
 	dailycosttokens: "run.dailyTokenCap", weeklycosttokens: "run.weeklyTokenCap", monthlycosttokens: "run.monthlyTokenCap",
 });
+
+/** The token budget fields a trigger may no longer carry (C2). */
+const RETIRED_TOKEN_RUN_FIELDS = Object.freeze(["maxTokens", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
 
 /**
  * `run.provider`, `run.model` and `run.maxTurns` (issue #502): which model this trigger's job runs on, and
@@ -1879,18 +1865,20 @@ const RUN_MODEL_NEAR_MISS_TARGETS = Object.freeze({
  * absence once a model is policy, and the price difference between two models is the whole point of
  * naming one.
  *
- * `run.maxTokens` (the per-job token budget, DES-TOKEN-RESERVE-AND-SETTLE) is validated here too, since the sweep
- * below already owns its near misses: a whole number of tokens of 1 or more, emitted only when present (`null` is
- * absent, the model keys' rule). It can only NARROW: the worker runs the job under the smaller of it and the
- * deployment's budget, and refuses a file with one above the env budget when it loads it (`loadSchedules`, at boot
- * and on a live reload; this loader stays pure, so it cannot read env). A trigger carrying `run.maxCostUsd` or any
- * other retired dollar key is REFUSED with the upgrade named, never dropped.
+ * `run.maxTokens` (the per-job token budget) was RETIRED with every other token budget in C2. It is REFUSED
+ * here, by name: a budget the loader dropped would read as a cap while the job ran without one. The sweep's
+ * near misses of it and of the retired token windows get the same refusal, never a typo suggestion. A trigger
+ * carrying `run.maxCostUsd` or any other retired dollar key is REFUSED with the upgrade named, never dropped.
  *
  * `run.models` (the allowed-model list) is validated with them since #502's second part, and its misspellings
  * were refused here before it was.
  */
 function validateRunModel(on, run, at, path) {
-	const exact = new Set(["provider", "model", "maxTurns", "models", "fallbackModels", "maxTokens", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
+	const exact = new Set(["provider", "model", "maxTurns", "models", "fallbackModels", "maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]);
+	// C2: an exact retired token field under `run` is a retirement, not an unknown key and not a near miss.
+	for (const field of RETIRED_TOKEN_RUN_FIELDS) {
+		if (run?.[field] !== null && run?.[field] !== undefined) throw configError(`${at}: run.${field} was retired with the token budgets; remove it (the deployment no longer has a token budget): ${path}`);
+	}
 	for (const [label, source, exactIsLegal] of [
 		["run", run, true],
 		["on", on, false],
@@ -1899,26 +1887,31 @@ function validateRunModel(on, run, at, path) {
 			if (exactIsLegal && exact.has(key)) continue;
 			const meant = runModelFieldNearMiss(key);
 			if (meant === null) continue;
+			// A near miss of a RETIRED token field is a retirement, not a typo: the field it would point at does not exist.
+			if (RETIRED_TOKEN_RUN_FIELDS.some((field) => meant === `run.${field}`)) {
+				// A null retired field is the file's own "unset" (the exact-key check above reads it that way):
+				// only a VALUE is a retired setting to remove.
+				if (source?.[key] === null || source?.[key] === undefined) continue;
+				throw configError(`${at}: ${label}.${key} is not a field; ${meant} was retired with the token budgets; remove it (the deployment no longer has a token budget): ${path}`);
+			}
+			// A near miss of a retired dollar field names that field, so the refusal carries the dollar upgrade too.
+			const dollarField = meant.startsWith("run.") ? meant.slice("run.".length) : "";
+			if (RETIRED_DOLLAR_KEYS.includes(dollarField)) {
+				throw configError(`${at}: ${label}.${key} is not a field -- did you mean ${meant}? ${retiredDollarMessage(dollarField)}: ${path}`);
+			}
 			throw configError(`${at}: ${label}.${key} is not a field -- did you mean ${meant}? A model choice the loader drops runs the job on the deployment default while the file reads as though it chose, so a near miss is refused rather than dropped: ${path}`);
 		}
 	}
-	return { ...validateModelRef(run, at, path), ...validateMaxTokens(run, at, path) };
+	refuseRetiredDollarRunKeys(run, at, path);
+	return validateModelRef(run, at, path);
 }
 
-// `run.maxTokens`: `{ maxTokens }` when present and valid, `{}` when absent or null. A retired dollar key
-// under `run` is REFUSED with the upgrade named (`retiredDollarMessage`), and the refusal names the trigger and
-// the key and never a value.
-function validateMaxTokens(run, at, path) {
-	for (const key of ["maxCostUsd", "dailyCostUsd", "weeklyCostUsd", "monthlyCostUsd"]) {
+// A retired dollar key under `run` is REFUSED with the upgrade named (`retiredDollarMessage`), and the refusal
+// names the trigger and the key and never a value.
+function refuseRetiredDollarRunKeys(run, at, path) {
+	for (const key of RETIRED_DOLLAR_KEYS) {
 		if (run?.[key] !== null && run?.[key] !== undefined) throw configError(`${at}: run.${key} is set: ${retiredDollarMessage(key)}: ${path}`);
 	}
-	if (run?.maxTokens === null || run?.maxTokens === undefined) return {};
-	try {
-		optionalTokenCount(run.maxTokens, "run.maxTokens");
-	} catch (error) {
-		throw configError(`${at}: ${error.message}: ${path}`);
-	}
-	return { maxTokens: run.maxTokens };
 }
 
 /**

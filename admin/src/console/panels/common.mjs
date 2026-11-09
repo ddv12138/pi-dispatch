@@ -200,14 +200,6 @@ function costText(amount) {
   return amount ? fmtAmount(amount) : "not metered";
 }
 
-/** The per-job token budget a run was held to: what it reserved, else the budget its exit line names. */
-function capTokensOf(record) {
-  const reserved = record?.tokensWindows?.reservedTokens;
-  if (Number.isSafeInteger(reserved)) return reserved;
-  const cap = record?.tokens?.tokenBudgetTokens;
-  return Number.isSafeInteger(cap) ? cap : null;
-}
-
 // ---- the queue and its hosts (the overview's and the fleet's) --------------------------------------------------------
 
 /**
@@ -421,6 +413,6 @@ const plural = (n, one, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 export {
   plural, SEC, MIN, cell, msOf, count, runLink, targetLink, titled, actForm, field, area, indexField, editor, table, facts,
-  fromSnapshot, costText, capTokensOf, pausedState, beatCell, blessedText, activeTable, outcomeText, bannerCut,
+  fromSnapshot, costText, pausedState, beatCell, blessedText, activeTable, outcomeText, bannerCut,
   parkedAnswerForm
 };

@@ -65,12 +65,12 @@ test("a write keeps every overlay key it does not know (a key from a later relea
 
 test("a changed known key keeps its line, an unset one stays gone, and a new one is appended", () => {
 	const path = settingsFile();
-	writeFileSync(path, `${JSON.stringify({ maxTokens: 80, future: true, maxTurns: 5, model: "claude-x" }, null, 2)}\n`);
-	assert.deepEqual(edit(path, ({ maxTurns: _gone, ...overlay }) => ({ ...overlay, maxTokens: 60, concurrency: 2 })), { ok: true });
-	assert.equal(readFileSync(path, "utf8"), lines("{", '  "maxTokens": 60,', '  "future": true,', '  "model": "claude-x",', '  "concurrency": 2', "}"));
+	writeFileSync(path, `${JSON.stringify({ maxTurns: 80, future: true, concurrency: 5, model: "claude-x" }, null, 2)}\n`);
+	assert.deepEqual(edit(path, ({ concurrency: _gone, ...overlay }) => ({ ...overlay, maxTurns: 60, provider: "anthropic" })), { ok: true });
+	assert.equal(readFileSync(path, "utf8"), lines("{", '  "maxTurns": 60,', '  "future": true,', '  "model": "claude-x",', '  "provider": "anthropic"', "}"));
 	// And the unset key does not come back on a later write: the carry holds only what this build does not know.
 	assert.deepEqual(edit(path, (overlay) => overlay), { ok: true });
-	assert.equal(readFileSync(path, "utf8").includes("maxTurns"), false);
+	assert.equal(readFileSync(path, "utf8").includes("concurrency"), false);
 });
 
 test("a candidate's own unknown key is dropped and logged, never carried: only what came from the file rides along", () => {
@@ -111,7 +111,7 @@ test("a carried __proto__ key stays data: no prototype is set, on the read or on
 
 test("a file of known keys only is rewritten byte for byte, and a write without a carry is today's exact text", () => {
 	const path = settingsFile();
-	const text = lines("{", '  "maxTokens": 2500,', '  "model": "claude-x",', '  "secretProfiles": {', '    "jira": "/srv/jira.sh"', "  },", '  "maxTurns": 4', "}");
+	const text = lines("{", '  "provider": "anthropic",', '  "model": "claude-x",', '  "secretProfiles": {', '    "jira": "/srv/jira.sh"', "  },", '  "maxTurns": 4', "}");
 	writeFileSync(path, text);
 	assert.deepEqual(edit(path, (overlay) => overlay), { ok: true });
 	assert.equal(readFileSync(path, "utf8"), text);
@@ -152,6 +152,15 @@ test("a broken version is an ordinary invalid file, never newer", () => {
 		assert.deepEqual(res, { invalid: 'settings file "version" must be an integer of 1 or more' }, JSON.stringify(version));
 	}
 	assert.deepEqual(validateOverlay({ version: 1, maxTurns: 1, later: 2 }), { overlay: { maxTurns: 1 }, unknownKeys: ["later"] });
+});
+
+test("a retired token key on disk refuses the whole file and is never carried into a write", () => {
+	const path = settingsFile();
+	const text = lines("{", '  "maxTokens": 2500,', '  "maxTurns": 1', "}");
+	writeFileSync(path, text);
+	assert.deepEqual(readOverlayDocument(path), { invalid: "maxTokens was retired with the token budgets; delete it from the settings file" });
+	assert.deepEqual(edit(path, (overlay) => ({ ...overlay, maxTurns: 2 })), { invalid: "maxTokens was retired with the token budgets; delete it from the settings file" });
+	assert.equal(readFileSync(path, "utf8"), text, "untouched");
 });
 
 test("a token near miss is refused on read and is never carried, even by a carry built by hand", () => {

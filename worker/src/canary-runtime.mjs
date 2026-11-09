@@ -13,7 +13,6 @@ import { makeRunContainer } from "./run-container.mjs";
 import { makeLogSink, makeRecordWriter, buildRecord, recordReadable } from "./run-history.mjs";
 import { materializePiDir } from "./materialize.mjs";
 import { runJob } from "./processor.mjs";
-import { tokenWindowCaps } from "./token-budget.mjs";
 import { makeRedisClient, parseConnection } from "./connection.mjs";
 import { makeQueue } from "./queue.mjs";
 import { acquireCanaryLease, canaryQueueNames } from "./canary-lock.mjs";
@@ -112,7 +111,7 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 	if (settings.invalid) fail("canary settings overlay is invalid; run doctor");
 	if (config.backends.length !== 1 || config.defaultBackend !== "local") fail("canary currently requires the local Docker venue");
 	if (!process.getuid?.() || !process.getgid?.()) fail("canary requires a non-root local account");
-	if (config.envelopeFile || config.scopedLimitsFile || config.pauseWindowsFile !== null || env.PI_HOST_MEMORY_BUDGET || env.PI_HOST_CPU_BUDGET || env.PI_HOST_RESERVE_MEMORY || env.PI_HOST_RESERVE_CPUS) fail("canary cannot bypass envelope, scoped, pause-window or host-capacity admission; use a deployment without those policies");
+	if (config.scopedLimitsFile || config.pauseWindowsFile !== null || env.PI_HOST_MEMORY_BUDGET || env.PI_HOST_CPU_BUDGET || env.PI_HOST_RESERVE_MEMORY || env.PI_HOST_RESERVE_CPUS) fail("canary cannot bypass scoped, pause-window or host-capacity admission; use a deployment without those policies");
 	if (env.PI_MODEL_ENDPOINTS_FILE) fail("canary cannot use declared custom endpoints; use a first-party-only deployment");
 	if (!MODEL_ROLE_RE.test(options.role)) fail("canary role is invalid");
 	let declared;
@@ -163,10 +162,10 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 		fs.rmSync(root, { recursive: true, force: true });
 	};
 	try {
-		// Proxy validation and the model/image checks run before the first count or dollar reservation.
+		// Proxy validation and the model/image checks run before the first container or admission lease.
 		await run(["image", "inspect", CANARY_PROXY_IMAGE]);
 		const preflight = imagePreflightFactory({ image: config.jobImage });
-		const checked = await preflight({ kind: "local", models: [options.model], maxTokens: 1 });
+		const checked = await preflight({ kind: "local", models: [options.model] });
 		if (!checked.ok || !["modelPolicy", "modelRoles", "exitAuth", "anyUid"].every((c) => checked.capabilities?.includes(c))) fail("canary job image must declare modelPolicy, modelRoles, exitAuth and anyUid; rebuild the job image");
 		redis = redisFactory(config.valkeyUrl, { failFast: true, lazyConnect: true });
 		redis.on("error", () => {});
@@ -210,7 +209,7 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 			return { ...source, prepared: { jobDir, workspace, sha: source.baseSha } };
 		};
 		return {
-			records, deploymentCapTokens: settings.maxTokens, close,
+			records, close,
 			inspectSource: async (record) => {
 				const source = sourceFor(record, config);
 				for (const entry of Object.values({ ...source.roles, [options.role]: options.model })) {
@@ -219,17 +218,17 @@ export async function createCanaryRuntime({ env, options, now = Date.now, execCo
 				}
 				return prepareSource(source);
 			},
-			execute: async ({ source, original, jobId, maxTokens }) => {
+			execute: async ({ source, original, jobId }) => {
 				await unpaused();
 				await createProxy();
 				const { jobDir, workspace } = source.prepared;
 				const modelRoles = { ...source.roles, [options.role]: options.model };
-				const job = { kind: "local", folder: workspace, flow: options.flow, provider, model, modelRole: options.role, modelRoles, models: [...new Set([options.model, ...Object.values(modelRoles)])], maxTokens, maxTurns: settings.maxTurns, packages: false, canary: { sourceJobId: original.jobId, role: options.role, candidate: options.model } };
+				const job = { kind: "local", folder: workspace, flow: options.flow, provider, model, modelRole: options.role, modelRoles, models: [...new Set([options.model, ...Object.values(modelRoles)])], maxTurns: settings.maxTurns, packages: false, canary: { sourceJobId: original.jobId, role: options.role, candidate: options.model } };
 				const startedAt = new Date(now()).toISOString();
 				let result, error;
 				try {
 					const runContainer = containerFactory({ image: config.jobImage, hostEnv: providerEnv, allowGlobalExtensions: false, packagePaths: [], egress: true, egressProxy: proxy, onOutput: () => {}, openJobLog: sink });
-					result = await runJobFn(job, { redis, tokenCaps: tokenWindowCaps(settings), now: new Date(now()), imagePreflight: async () => checked, checkProviderCredential: () => ({ ok: true }), prepareWorkspace: async () => ({ jobDir, workspace, sha: source.baseSha }), runContainer: async (args) => {
+					result = await runJobFn(job, { redis, now: new Date(now()), imagePreflight: async () => checked, checkProviderCredential: () => ({ ok: true }), prepareWorkspace: async () => ({ jobDir, workspace, sha: source.baseSha }), runContainer: async (args) => {
 						const controller = new AbortController();
 						const stop = () => { interrupted = true; if (!controller.signal.aborted) { controller.abort(); void run(["stop", "-t", "5", jobId]).catch(() => {}); } };
 						stops.add(stop);

@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { GIT_READ_FLAGS } from "../src/git-hardening.mjs";
 import { PI_LIMITS } from "../src/materialize.mjs";
-import { LOCAL_FOLDER_ESCAPED, LOCAL_FOLDER_HOLDS_ENVELOPE, LOCAL_FOLDER_NO_COMMIT, LOCAL_FOLDER_NOT_A_REPO, LOCAL_FOLDER_UNREADABLE_REPO, prepareLocalWorkspace } from "../src/prepare-local.mjs";
+import { LOCAL_FOLDER_ESCAPED, LOCAL_FOLDER_NO_COMMIT, LOCAL_FOLDER_NOT_A_REPO, LOCAL_FOLDER_UNREADABLE_REPO, prepareLocalWorkspace } from "../src/prepare-local.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // Issue #504 part B: prepare resolves the folder (realpathSync.native) before anything else, so a fake `fs` that invents a
@@ -461,19 +461,6 @@ test("a cron folder is a job path too: a link planted below it cannot carry a fo
 	assert.equal(self.workspace, cron);
 });
 
-test("a folder that resolves to the envelope's folder or above it is refused, whatever it was called (#504)", async () => {
-	const dir = realFs.realpathSync.native(committedRepo("pi-envdir-"));
-	const envelopeFile = join(dir, "envelope.json");
-	realFs.writeFileSync(envelopeFile, "{}");
-	const elsewhere = realFs.realpathSync.native(tempDir("pi-elsewhere-"));
-	realFs.symlinkSync(dir, join(elsewhere, "innocent"));
-	assert.deepEqual(await prepareLocalWorkspace({ folder: join(elsewhere, "innocent"), task: "x", jobDir: join(tempDir("j-"), "job"), envelopeFile }), { outcome: "policy", reason: LOCAL_FOLDER_HOLDS_ENVELOPE });
-	// A sibling folder is fine.
-	const sibling = realFs.realpathSync.native(committedRepo("pi-sibling-"));
-	const ok = await prepareLocalWorkspace({ folder: sibling, task: "x", jobDir: join(tempDir("j-"), "job"), envelopeFile });
-	assert.equal(ok.workspace, sibling);
-});
-
 test("'named inside' is judged by identity: a case variant of a run root on a case-insensitive volume is still inside it (#504)", async (t) => {
 	const root = realFs.realpathSync.native(tempDir("pi-caseroot-"));
 	const upper = join(root.slice(0, root.lastIndexOf("/")), basename(root).toUpperCase());
@@ -482,29 +469,4 @@ test("'named inside' is judged by identity: a case variant of a run root on a ca
 	realFs.symlinkSync(outside, join(root, "away"));
 	const result = await prepareLocalWorkspace({ folder: join(upper, "away"), task: "x", jobDir: join(tempDir("j-"), "job"), jobPaths: { runRoots: [root], cronFolders: [] } });
 	assert.deepEqual(result, { outcome: "policy", reason: LOCAL_FOLDER_ESCAPED });
-});
-
-test("a portfolio snapshot lands at /job/portfolio.json read-only beside event.json; a refusal writes nothing; null writes no file (#505)", async () => {
-	const folder = localRepo();
-	const body = '{\n  "version": 1\n}';
-	const jobDir = tempDir("pi-job-");
-	const written = await prepareLocalWorkspace({ folder, task: "plan", jobDir, event: { source: "cron", trigger: { id: "pm" } }, portfolio: async () => ({ body }) });
-	assert.equal(written.portfolio, true, "prepare says it agreed: the collector requires it");
-	const path = join(jobDir, "portfolio.json");
-	assert.equal(readFileSync(path, "utf8"), body);
-	assert.equal(statSync(path).mode & 0o777, 0o444);
-
-	const refusedDir = join(tempDir("pi-job-parent-"), "job");
-	const r = await prepareLocalWorkspace({ folder, task: "plan", jobDir: refusedDir, portfolio: async () => ({ outcome: "policy", reason: "portfolio-snapshot-oversize" }) });
-	assert.deepEqual(r, { outcome: "policy", reason: "portfolio-snapshot-oversize" });
-	assert.equal(existsSync(refusedDir), false, "refused before anything is written");
-
-	const plainDir = tempDir("pi-job-");
-	const plain = await prepareLocalWorkspace({ folder, task: "plan", jobDir: plainDir, portfolio: async () => null });
-	assert.equal("portfolio" in plain, false, "no snapshot, no agreement");
-	assert.equal(existsSync(join(plainDir, "portfolio.json")), false, "the live file no longer flags it: no snapshot");
-	assert.ok(existsSync(join(plainDir, "event.json")));
-	const unwired = tempDir("pi-job-");
-	await prepareLocalWorkspace({ folder, task: "plan", jobDir: unwired });
-	assert.deepEqual(readdirSync(unwired).sort(), readdirSync(plainDir).sort(), "no option, no difference");
 });

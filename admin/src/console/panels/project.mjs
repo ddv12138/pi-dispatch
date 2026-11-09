@@ -2,7 +2,6 @@
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { formatCpus, parseMemory } from "@edgehero/pi-dispatch/job-size";
-import { optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
 import { bundleDeclaredText } from "../../read-model.mjs";
 import { OUTCOME_KEY_WORDS, reasonWords, shortSentence } from "../../words.mjs";
 import { newerSkippedSentence } from "../../newer-release.mjs";
@@ -39,11 +38,9 @@ export const projectDescription = (view, locale = "en") => view?.state === "read
 export function projectSpend(v) {
   if (!ready(v)) return issue(v);
   const s = data(v).spend;
-  const splitKnown = Number.isFinite(s.settledTokens) && Number.isFinite(s.heldTokens);
-  const totalKnown = Number.isFinite(s.usedTokens);
-  const headline = splitKnown ? s.settledTokens : totalKnown ? s.usedTokens : s.settledTokens;
-  const pct = totalKnown && s.shareTokens > 0 ? (s.usedTokens / s.shareTokens) * 100 : null;
-  return card(`${uiText("Spend this", v.locale)} ${uiText(s.window, v.locale)}`, html`<div class="proj-kv"><b>${s.floor ? uiText("at least", v.locale) + " " : ""}${money(headline)}</b><span>${splitKnown ? html`+ ${money(s.heldTokens)} ${uiText("held", v.locale)}` : totalKnown ? uiText("spent and held", v.locale) : uiText("spent; held amount unknown", v.locale)}${s.envelope ? html`, ${uiText("of a", v.locale)} ${money(s.shareTokens)} ${uiText("share", v.locale)}` : `; ${uiText("no envelope, so no share", v.locale)}`}</span></div>${pct === null ? null : html`${ui.meter({ value: s.usedTokens, max: s.shareTokens, label: uiText("Spent and held against the project's allocation share", v.locale) })}<p class="proj-meter-label">${money(s.usedTokens)} / ${money(s.shareTokens)}</p>`}${!splitKnown && totalKnown ? note(uiText("The split between spent and held is unknown.", v.locale)) : null}${s.heldIncomplete && !totalKnown ? note(html`${uiText("Held money is incomplete;", v.locale)} ${money(s.heldKnownTokens)} ${uiText("is known from the hosts that reported it.", v.locale)}`) : null}${s.problem ? note(s.problem) : null}`);
+  const known = Number.isFinite(s.usedTokens);
+  const amount = known ? s.usedTokens : s.settledTokens;
+  return card(`${uiText("Spend this", v.locale)} ${uiText(s.window, v.locale)}`, html`<div class="proj-kv"><b>${s.floor ? uiText("at least", v.locale) + " " : ""}${money(amount)}</b><span>${uiText("from the run records", v.locale)}</span></div>${!known ? note(uiText("The run records could not be read, so the spend is unknown.", v.locale)) : null}${s.problem ? note(s.problem) : null}`);
 }
 
 export function projectRuns(v) {
@@ -125,12 +122,6 @@ export function projectRecent(v) {
   return card(tr(v, "Recent runs"), html`${ui.tbl({ label: tr(v, "Recent runs of this project"), stack: true, heads: [{ label: tr(v, "Run"), l: "" }, { label: tr(v, "Target"), l: "" }, { label: tr(v, "Outcome"), l: "" }, tr(v, "Ended"), { label: tr(v, "Cost"), num: true }], rows, empty: tr(v, "No retained run recorded this project.") })}<p class="tbl-foot"><a class="link" href="${linkRuns(p.id)}">${tr(v, "All")} ${p.totalRuns} ${tr(v, "in Runs, filtered to")} ${p.id}</a></p>${note(tr(v, "The last five runs recorded with this project, within the retained view (30 days or this month, whichever reaches further)."))}`);
 }
 
-export function projectAllocation(v) {
-  if (!ready(v)) return null;
-  const a = data(v).allocation;
-  return card(tr(v, "Allocation"), html`${a.unset ? note(tr(v, "No envelope is configured, so this project has no allocation share.")) : html`${facts([[tr(v, "Weight"), `${unknown(a.weight)} ${tr(v, "of")} ${unknown(a.totalWeight)}`], [tr(v, "Floor"), html`${money(a.floorTokens)} ${tr(v, `a ${a.window}`)}`], [tr(v, "Share"), html`${money(a.shareTokens)} ${tr(v, "of the")} ${money(a.totalTokens)} ${tr(v, a.window)} ${tr(v, "envelope")}`], [tr(v, "Split"), a.split ? html`<span class="code">${a.split.id ?? tr(v, "neutral")}</span> ${tr(v, "by")} ${a.split.writer ?? tr(v, "unknown")}, ${tr(v, "applied")} ${timeHtml(at(a.split.appliedAt))}, ${tr(v, "until")} ${a.split.validUntil ? timeHtml(at(a.split.validUntil)) : tr(v, "no expiry")}` : tr(v, "No split has been published.")], [tr(v, "Refused by the split"), `${a.refused} ${tr(v, "in this")} ${tr(v, a.window)}, ${tr(v, "among retained runs")}`]])}${a.problem ? note(a.problem) : null}`}<p><a class="link" href="/insights/budget-split">${tr(v, "Open the budget split")}</a></p>`);
-}
-
 export function projectLimits(v) {
   if (!ready(v)) return null;
   const p = data(v);
@@ -138,12 +129,11 @@ export function projectLimits(v) {
     memory: (value) => `${sizeText(parseMemory(value))} memory`,
     cpus: (value) => `${value} CPUs`,
     concurrent: (value) => `${value} at once`,
-    dayTokens: (value) => html`${money(parseTokenCount(value))} a day`, weekTokens: (value) => html`${money(parseTokenCount(value))} a week`, monthTokens: (value) => html`${money(parseTokenCount(value))} a month`,
     hostShare: (value) => `${value}% of each host's budget`, minJobs: (value) => `space for at least ${value} jobs on an admitting host`,
   };
   const rows = p.limits.map((l) => {
     const fields = Object.entries(words).filter(([key]) => l[key] !== null && l[key] !== undefined).map(([key, render]) => render(l[key]));
-    return [`Row ${l.index + 1}`, html`<span class="code">${l.scope}</span>${fields.length ? html`: ${fields.map((value, index) => html`${index ? ", " : null}${value}`)}` : ": no caps or size fields set"}`];
+    return [`Row ${l.index + 1}`, html`<span class="code">${l.scope}</span>${fields.length ? html`: ${fields.map((value, index) => html`${index ? ", " : null}${value}`)}` : ": no concurrency or size fields set"}`];
   });
   return card(tr(v, "Limits"), html`${rows.length ? facts(rows) : note(tr(v, "No scoped-limits row names this project."))}${facts([[tr(v, "At once"), p.limits[0]?.concurrent ?? tr(v, "not set; a local folder still runs one job at a time")]])}${p.limitsUnreadable ? note(tr(v, "The scoped-limits file could not be read.")) : null}<p><a class="link" href="/config#cf-scoped-limits">${tr(v, "Open scoped limits")}</a></p>`);
 }
@@ -165,5 +155,5 @@ export function projectTriggers(v) {
 export function projectDelete(v) {
   if (!ready(v) || v.role !== "operator") return null;
   const p = data(v);
-  return card("Delete", p.deleteRefusal ? html`<p class="proj-refusal">${ui.icon("attention", { size: "sm" })}<span>${p.deleteRefusal}</span></p>${canAct(v) ? html`<button class="btn btn--danger btn--sm" type="button" disabled aria-disabled="true">Delete ${p.id}</button>` : null}` : canAct(v) ? html`${note("Removing the project stops future pickups recording this id. Records already written keep it. The preview checks its limits, bundles and envelope floors again.")}${actForm("project-delete", { hidden: [["id", p.id]], label: `Delete ${p.id}` })}` : note("This console is read-only. A writable operator console can preview a delete."));
+  return card("Delete", p.deleteRefusal ? html`<p class="proj-refusal">${ui.icon("attention", { size: "sm" })}<span>${p.deleteRefusal}</span></p>${canAct(v) ? html`<button class="btn btn--danger btn--sm" type="button" disabled aria-disabled="true">Delete ${p.id}</button>` : null}` : canAct(v) ? html`${note("Removing the project stops future pickups recording this id. Records already written keep it. The preview checks its limits and bundles again.")}${actForm("project-delete", { hidden: [["id", p.id]], label: `Delete ${p.id}` })}` : note("This console is read-only. A writable operator console can preview a delete."));
 }

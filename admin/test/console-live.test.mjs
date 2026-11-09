@@ -1158,7 +1158,7 @@ test("stateOf: the day's refusals beside its failures, each listed reason held t
 test("stateOf: the named fields only, numbers as numbers, no error text, no host path, and failedReason for an operator alone", () => {
   const op = stateOf(SNAPSHOT, "operator", { now: T0 });
   const viewer = stateOf(SNAPSHOT, "viewer", { now: T0 });
-  assert.deepEqual(Object.keys(op).sort(), ["active", "at", "budget", "counts", "dollars", "failed", "failures24h", "failures24hFloor", "fleetDegraded", "hosts", "parked", "parkedUnknown", "paused", "queues", "refusals24h", "role", "schedulerStallMax", "schedulers", "version", "workers"]);
+  assert.deepEqual(Object.keys(op).sort(), ["active", "at", "counts", "failed", "failures24h", "failures24hFloor", "fleetDegraded", "hosts", "parked", "parkedUnknown", "paused", "queues", "refusals24h", "role", "schedulerStallMax", "schedulers", "version", "workers"]);
   assert.equal(op.version, 1, "the scripts' interface carries its version");
   assert.deepEqual(op.paused, { state: false, partial: true });
   assert.deepEqual(op.counts, { waiting: 3, active: 1, paused: 0, delayed: 2, failed: 4 });
@@ -1168,7 +1168,8 @@ test("stateOf: the named fields only, numbers as numbers, no error text, no host
   assert.equal(stateOf({ ...SNAPSHOT, hostBudgets: [{ ...SNAPSHOT.hostBudgets[0], staleMs: 120_000, ttlAgeMs: 4_000 }] }, "operator", { now: T0 }).hosts[0].lastBeatAgeMs, 4_000);
   // A scheduler is named by its key, the trigger's id; one whose key was refused is not named by BullMQ's job name.
   assert.equal(stateOf({ ...SNAPSHOT, schedulers: [{ key: null, name: "local", next: T0 + 1000, overdueMs: 0 }] }, "operator", { now: T0 }).schedulers[0].name, null);
-  assert.deepEqual(op.dollars.windows.map((w) => w.scope), [null, "openai/gpt"], "a folder scope's host path is dropped");
+  assert.equal(op.budget, undefined, "no budget in the live state");
+  assert.equal(op.dollars, undefined, "no dollar windows in the live state");
   assert.deepEqual(op.parked, [{ target: "o/r#12", kind: "github", jobId: "j1", ageMs: 3600000, chainCount: 2 }]);
   assert.deepEqual(op.active, [{ jobId: "j9", queue: "pi", startedAt: T0 - 1000, host: "h1", progress: null, steer: false, inbox: null }]);
   assert.deepEqual(op.schedulers, [{ name: "nightly", next: T0 - 5000, overdue: true, overdueMs: 5000, stalls: 1 }]);

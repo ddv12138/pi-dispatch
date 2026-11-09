@@ -8,7 +8,6 @@ import * as nodeFs from "node:fs";
 import { scrubCredentials } from "./redact.mjs";
 import { basename, join } from "node:path";
 import { resolveBackendName } from "./backend-registry.mjs";
-import { reservedInOf } from "./token-budget.mjs";
 import { isForgeKind, targetSeparator } from "./forges.mjs";
 import { MODEL_REF_PATTERN as USAGE_ID_PATTERN } from "./model-ref.mjs";
 import { modelListProblem } from "./model-ref.mjs";
@@ -1148,14 +1147,14 @@ export function buildRecord({ job, result, error, startedAt, endedAt, host = nul
 		// default was passed (a dependency-injection seam; `recordRun` in start.mjs always passes one) or
 		// where the job data carries an explicit null, which no producer writes and the blessed gate refuses.
 		backend,
-		// The token reservation's outcome (DES-TOKEN-RESERVE-AND-SETTLE, INT-RUN-HISTORY-FILE-CONTRACT). REBUILT here
-		// (never the source's object), TAIL position after `backend` on the same contract: field order
+		// A HISTORICAL token reservation's outcome (DES-TOKEN-RESERVE-AND-SETTLE, INT-RUN-HISTORY-FILE-CONTRACT): the token
+		// budgets are gone, so no new record carries one, and this only keeps an old record's field as it was written.
+		// REBUILT here (never the source's object), TAIL position after `backend` on the same contract: field order
 		// is the serialisation order. `{ reservedTokens, settledTokens, basis, modelBasis }`: two integers of tokens,
 		// one fixed token (`metered` | `floor` | `refunded` | `unreserved`), and `modelBasis`, how the per-model windows
-		// settled (`metered` | `floor` | `refunded`, null when the job held none). Null when no token window applied to the job (no token setting, or a
-		// refusal before the reservation step), which is every record of a deployment that sets none. Issue #761: then
-		// `reservedIn`, `{ day?, week?, month?, valkey }`, only where the job's settled amount is in a deployment window
-		// (`deploymentWindowsOf`), for doctor's reset check; absent otherwise.
+		// settled (`metered` | `floor` | `refunded`, null when the job held none). Null for every record of a job that
+		// held no token window. Issue #761: then `reservedIn`, `{ day?, week?, month?, valkey }`, only where the job's
+		// settled amount was in a deployment window (`deploymentWindowsOf`); absent otherwise.
 		tokensWindows: tokensWindowsOf(source.tokensWindows),
 		...(recordedWatchDecision(data.watch?.decision ?? source.decision) ? { decision: recordedWatchDecision(data.watch?.decision ?? source.decision) } : {}),
 		...(approvalRecordOf(source.approval) ? { approval: approvalRecordOf(source.approval) } : {}),
@@ -1435,6 +1434,48 @@ const WHY_RE = /^[a-z][a-z0-9-]{0,63}$/;
 const TOKEN_BASES = new Set(["metered", "floor", "refunded", "unreserved"]);
 // How the job's MODEL windows settled (issue #502 part 6); anything else, null included, records null.
 const MODEL_BASES = new Set(["metered", "floor", "refunded"]);
+
+// The charset of an old record's `reservedIn.valkey`: the deployment's 16-hex endpoint tag.
+const RESERVED_IN_VALKEY_RE = /^[0-9a-f]{16}$/;
+const RESERVED_IN_DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
+const RESERVED_IN_MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
+
+/** `text` as a real UTC calendar date (`2026-02-30` is none), or null. */
+function reservedInDate(text) {
+	if (typeof text !== "string" || !RESERVED_IN_DATE_RE.test(text)) return null;
+	const d = new Date(`${text}T00:00:00.000Z`);
+	return Number.isFinite(d.getTime()) && d.toISOString().slice(0, 10) === text ? d : null;
+}
+
+/**
+ * An OLD record's `tokensWindows.reservedIn` rebuilt from its own keys, or null: `day` a real calendar date, `week` a
+ * real date that is a Monday, `month` a real month, at least one of them, and `valkey` a 16-hex tag. Anything else is
+ * null as a whole. Inlined from the retired token-budget.mjs so old records stay readable; the token budgets are gone
+ * and no new record carries the field.
+ */
+function reservedInOf(value) {
+	if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+	const own = (key) => (Object.hasOwn(value, key) ? value[key] : undefined);
+	const valkey = own("valkey");
+	if (typeof valkey !== "string" || !RESERVED_IN_VALKEY_RE.test(valkey)) return null;
+	const out = {};
+	const day = own("day");
+	if (day !== undefined) {
+		if (reservedInDate(day) === null) return null;
+		out.day = day;
+	}
+	const week = own("week");
+	if (week !== undefined) {
+		if (reservedInDate(week)?.getUTCDay() !== 1) return null;
+		out.week = week;
+	}
+	const month = own("month");
+	if (month !== undefined) {
+		if (typeof month !== "string" || !RESERVED_IN_MONTH_RE.test(month)) return null;
+		out.month = month;
+	}
+	return Object.keys(out).length === 0 ? null : { ...out, valkey };
+}
 
 /**
  * The record's `tokensWindows`, rebuilt from named fields only, or null when the source carries none or a malformed one.

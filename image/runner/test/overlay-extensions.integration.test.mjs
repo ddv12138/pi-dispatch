@@ -69,7 +69,7 @@ test("a loose overlay extensions/foo.js acts in a job, and a broken one beside i
 	const modelRuntime = await createJobModelRuntime({ ModelRuntime: pi.ModelRuntime, agentDir: root, modelsPath });
 	const settingsManager = pi.SettingsManager.inMemory({});
 	const sessionManager = pi.SessionManager.inMemory(workspace);
-	const meter = createUsageMeter({ maxTokens: null, rootSessionId: sessionManager.getSessionId() });
+	const meter = createUsageMeter({ rootSessionId: sessionManager.getSessionId() });
 	const installed = await installProcessUsageMeter({ ModelRuntime: pi.ModelRuntime, runtime: modelRuntime, meter, log: () => {} });
 	assert.equal(installed.ok, true);
 	const calls = [];

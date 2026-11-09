@@ -101,7 +101,6 @@ export function makeWatchRuntime({ store, triggersPath, readFile = nodeFs.readFi
 			Object.defineProperties(watch, { stage: { value: phase }, project: { value: doc.watchSources[rule.on.source].project ?? null }, runId: { value: runId }, finding: { value: finding }, board: { value: { version: 1, blocks: board.blocks } }, queries: { value: rule.run.queryLogs ?? {} } });
 			if (phase === "decision") {
 				Object.defineProperty(watch, "gate", { value: { version: 1, model: modelRef(rule.decide.model), state: projectWatchDecisionState({ ...finding, window: rule.on.window }, rule.decide.fields), questions: rule.decide.questions } });
-				execution.maxTokens = rule.decide.maxTokens;
 				// The read from before the take: a broken overlay is still refused here, as it always was.
 				if (settings.invalid) return { result: refusal("watch-config-changed") };
 				const primary = `${execution.provider ?? settings.provider}/${execution.model ?? settings.model}`;

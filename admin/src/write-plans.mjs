@@ -12,7 +12,6 @@
  * THE SHAPE. Each `plan*` function returns one of:
  *   - `{ refusal }`: the exact sentence the tool throws (or, for `surface: "command"`, the exact line `/dispatch` shows),
  *     with nothing asked and nothing written;
- *   - `{ unchanged }` (the envelope only): the change is already what the file says;
  *   - `{ plan }`: `{ title, message, summary, ... }`, where `title` and `message` are the confirm dialog's (byte for byte
  *     what the tool shows), `summary` is `message` split into lines, and the rest is what the write takes: `mutate` for
  *     the read-model funnel, `target` (the file), and `expect` (the files as the plan was built from them, the
@@ -27,20 +26,15 @@ import { parseBackendList } from "@edgehero/pi-dispatch/backends";
 import { delimitedList } from "@edgehero/pi-dispatch/config";
 import { withinRoots } from "@edgehero/pi-dispatch/secret-profiles";
 import { ISSUE_ACTIONS, isModelRolesField, isMcpNearMiss, recoverVenueProblem, runModelFieldNearMiss, validateModelRef, validateProgressFlags, validateRecoverFlag, validateSteerFlag } from "@edgehero/pi-dispatch/triggers";
-import { TOKEN_SETTING_KEYS, optionalTokenCount as parseTokenCount } from "@edgehero/pi-dispatch/budget-rule";
-import { fmtTokens } from "./panel.mjs";
 import { modelIdProblem, providerIdProblem } from "@edgehero/pi-dispatch/model-ref";
-import { SIZE_LIMIT_FIELDS, TOKEN_LIMIT_FIELDS as TOKEN_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
+import { RETIRED_TOKEN_KEYS } from "@edgehero/pi-dispatch/runtime-settings";
+import { RETIRED_TOKEN_FIELDS, SIZE_LIMIT_FIELDS } from "@edgehero/pi-dispatch/scoped-limits";
 import { formatCpus, formatMemory, parseCpus, parseMemory } from "@edgehero/pi-dispatch/job-size";
 import {
   BUNDLE_FORMATS,
   KNOWN_KEYS,
   blankSettingsFile,
-  envelopeJobCap,
-  envelopeRefusal,
-  mergedTokenProblem,
   overlayInvalidRefusal,
-  planEnvelopeWrite,
   planProjectsWrite,
   readPauseWindows,
   readProjects,
@@ -58,6 +52,9 @@ import {
 import { escapeInterpreted } from "./panel.mjs";
 import { sizeBits } from "./render.mjs";
 import { fieldNamed } from "./words.mjs";
+
+/** The one sentence a write that targets a removed token budget or the allocation hears (C2). */
+const TOKEN_BUDGETS_REMOVED = "allocation/token budgets were removed";
 
 // ---- small field readers, shared by the dialogs and the tools ----
 
@@ -359,8 +356,8 @@ function unknownTriggerField(params, kind) {
 }
 
 /**
- * The trigger fields NO tool may set (issue #501, part 7): `run.maxTokens` (a trigger's per-job token cap),
- * `run.models` (the models its jobs may call), `run.fallbackModels` (their reviewed retry order) and
+ * The trigger fields NO tool may set (issue #501, part 7): `run.maxTokens` (a trigger's per-job token cap, since C2 a
+ * field the loader refuses outright), `run.models` (the models its jobs may call), `run.fallbackModels` (their reviewed retry order) and
  * `run.mcp` (the MCP servers they connect, below). Each one decides
  * what a trigger's jobs can spend or reach, and removing or widening it is a widening, so it is written by hand in the
  * reviewed triggers file and never by a model's call, even behind a confirm. Neither tool's schema names them, and
@@ -414,8 +411,9 @@ export function wideningFieldRefusal(params, tool) {
     for (const key of Object.keys(source)) {
       const meant = runModelFieldNearMiss(key) ?? mcpFieldNearMiss(key);
       if (meant === null || !TOOL_PROOF_FIELDS.has(meant)) continue;
-      const what =
-        meant === "run.fallbackModels" ? "fallback-model list" : meant === "run.models" ? "allowed-model list" : meant === "run.mcp" ? "list of MCP servers" : "per-job token cap";
+      // C2: the per-job token cap is not merely tool-proof, it is GONE. Name the removal, never the old "set it by hand".
+      if (meant === "run.maxTokens") return `${tool} cannot set run.maxTokens (sent as ${label}${key}): ${TOKEN_BUDGETS_REMOVED}, so a trigger no longer carries a per-job token cap; remove it`;
+      const what = meant === "run.fallbackModels" ? "fallback-model list" : meant === "run.models" ? "allowed-model list" : "list of MCP servers";
       return `${tool} cannot set ${meant} (sent as ${label}${key}): a trigger's ${what} is set by hand in the triggers file, never by a tool`;
     }
   }
@@ -626,36 +624,22 @@ export function planTriggerDelete({ index, paths, surface = "tool", fs = nodeFs 
 // ---- settings ----
 
 /**
- * Coerce a raw token to the settings value its key expects: `model`, `provider` and the four token keys keep
- * the raw string; every other overlay key is numeric and parses via `Number` (a non-numeric token becomes `NaN`, which
- * `writeOverlay` then rejects with a key-only reason). Keying off the string exceptions rather than an
- * enumerated numeric list keeps this in lockstep with `KNOWN_KEYS` -- a new numeric knob (weekly/monthly
- * caps, the token caps) is coerced without a second edit here. Bounds and integer-ness stay in
- * `writeOverlay`, the single validator.
+ * Coerce a raw token to the settings value its key expects: `model` and `provider` keep the raw string; every other
+ * overlay key is numeric and parses via `Number` (a non-numeric token becomes `NaN`, which `writeOverlay` then rejects
+ * with a key-only reason). Keying off the string exceptions rather than an enumerated numeric list keeps this in
+ * lockstep with `KNOWN_KEYS`. Bounds and integer-ness stay in `writeOverlay`, the single validator. No token key is
+ * among the numeric ones: the token budgets (and their overlay keys) are gone (C2), and `planSettingTool` refuses one
+ * before this is reached.
  */
 export function coerceSettingValue(key, raw) {
   if (key === "model" || key === "provider") return raw;
-  // Issue #501's token keys: the OVERLAY stores whole tokens as JSON numbers (runtime-settings'
-  // isIntAtLeast), so the operator's digits-only text is coerced here -- the write's own judge
-  // (`writeOverlay`) would refuse a string the worker cannot read. Anything else rides as written
-  // and is refused with the worker's own words.
-  if (TOKEN_SETTING_KEYS.includes(key)) return /^[0-9]+$/.test(raw) ? Number(raw) : raw;
   return Number(raw);
 }
 
-/**
- * A settings write of `key` that would leave the allocation envelope invalid (the per-job cap removed, or set to
- * something the worker cannot read), or null. Only `maxTokens` can: it is the one setting the envelope is judged by.
- */
-export function settingsEnvelopeRefusal(key, beforeOverlay, afterOverlay, paths, env) {
-  if (key !== "maxTokens" || !paths.envelopeFile) return null;
-  return envelopeRefusal({
-    envelopeFile: paths.envelopeFile,
-    projectsPath: paths.projectsFile,
-    scopedLimitsPath: paths.scopedLimitsPath,
-    maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: beforeOverlay }),
-    next: { maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, overlay: afterOverlay }) },
-  });
+/** The refusal for a settings write naming a retired token key (C2), or null: never a silent no-op. */
+function retiredTokenSettingRefusal(key) {
+  if (!RETIRED_TOKEN_KEYS.includes(key)) return null;
+  return `${key} was retired because ${TOKEN_BUDGETS_REMOVED}; delete it from the settings file by hand, since the worker refuses a file that carries it`;
 }
 
 /**
@@ -679,32 +663,24 @@ function idSettingProblem(key, value) {
 
 /**
  * The tool's settings plan (`dispatch_set`): a `value` that is absent or blank unsets `key`. Refused BEFORE the confirm
- * over an invalid file (issue #501; a BLANK file, issue #540, reads as a missing one, `writeSettings`' rule), over a
- * token value the worker's parser refuses, over a model or provider id outside the worker's shape (issue #673), and over a change that would break the allocation envelope (issue #504 part
- * C). A token change that leaves a window uncapped is WARNED in the confirm, never refused (`mergedTokenProblem`).
+ * over a retired token key (C2: `maxTokens` and the three windows are refused, never silently dropped), over an
+ * invalid file (issue #501; a BLANK file, issue #540, reads as a missing one, `writeSettings`' rule) and over a model
+ * or provider id outside the worker's shape (issue #673).
  */
 function planSettingTool({ key, value, paths, env, shown, fs }) {
+  const retired = retiredTokenSettingRefusal(key);
+  if (retired !== null) return { refusal: `rejected: ${retired}` };
   if (!KNOWN_KEYS.includes(key)) return { refusal: `unknown key '${key}'. valid keys: ${KNOWN_KEYS.join(", ")}` };
   const view = readSettingsView({ settingsFile: paths.settingsFile, fs });
   if (view?.invalid && !blankSettingsFile(paths.settingsFile, fs)) return { refusal: `rejected: ${overlayInvalidRefusal(view.invalid, { newer: view.newer === true })}` };
   const unset = value === undefined || value === null || String(value).trim() === "";
   const newVal = unset ? undefined : coerceSettingValue(key, String(value).trim());
-  const isTokenKey = TOKEN_SETTING_KEYS.includes(key);
-  // Issue #501, part 7: a token value is judged by the worker's own parser BEFORE the confirm, so the operator is
-  // never asked to approve a value the write would then refuse (the edit tools' rule). The message names the key.
-  if (!unset && isTokenKey) {
-    const tokenRefusal = refusalOf(() => parseTokenCount(newVal, key));
-    if (tokenRefusal !== null) return { refusal: tokenRefusal };
-  }
-  // Issue #673, review round 1: a model or provider id by the worker's own rule, before the confirm, for the same reason.
+  // Issue #673, review round 1: a model or provider id by the worker's own rule, before the confirm.
   const idProblem = unset ? null : idSettingProblem(key, newVal);
   if (idProblem !== null) return { refusal: `rejected: ${idProblem}` };
   // The AFTER side of an unset is what the key falls back to, by the same rule as the before side.
   const afterOverlay = unset ? Object.fromEntries(Object.entries(view?.overlay ?? {}).filter(([k]) => k !== key)) : { ...(view?.overlay ?? {}), [key]: newVal };
   const after = unset ? settingShown(key, afterOverlay, env, shown) : String(newVal);
-  const problem = isTokenKey ? mergedTokenProblem(afterOverlay, env, shown) : null;
-  const broken = settingsEnvelopeRefusal(key, view?.overlay ?? {}, afterOverlay, paths, env);
-  if (broken) return { refusal: `rejected: ${escapeInterpreted(broken)}` };
   // The change as one `[key, before, after]` pair (`changeText`), which the console draws with the values in bold.
   const changes = [[key, settingShown(key, view?.overlay, env, shown), after]];
   return {
@@ -715,23 +691,22 @@ function planSettingTool({ key, value, paths, env, shown, fs }) {
       changes,
       mutate: unset ? (o) => { delete o[key]; return o; } : (o) => ({ ...o, [key]: newVal }),
       writeArgs: {},
-      warning: problem?.warning ?? null,
       target: paths.settingsFile,
       expect: writeInputs({ paths: [paths.settingsFile], fs }),
-      ...confirmOf(unset ? `Unset ${key}` : `Set ${key}`, `${changeText(changes)}${problem?.warning ? `\n\nWarning: ${problem.warning}` : ""}`),
+      ...confirmOf(unset ? `Unset ${key}` : `Set ${key}`, changeText(changes)),
     },
   };
 }
 
 /**
- * The operator-typed command's settings plan (`/dispatch set|unset`): the key must be known (checked BEFORE the write,
- * since `writeOverlay` silently drops unknown keys and would report ok on a no-op), a set takes exactly one value
- * token (model ids carry no spaces), a model or provider id outside the worker's shape is refused (issue #673), and a
- * change that would break the allocation envelope is refused. Every refusal
- * is the line the command shows, prefixed with its verb. A token key's write carries the deployment's env so
- * `writeSettings` returns a WARNING beside the write, never a refusal (issue #501, PR #542's review).
+ * The operator-typed command's settings plan (`/dispatch set|unset`): a retired token key is refused (C2), the key must
+ * be known (checked BEFORE the write, since `writeOverlay` silently drops unknown keys and would report ok on a
+ * no-op), a set takes exactly one value token (model ids carry no spaces), and a model or provider id outside the
+ * worker's shape is refused (issue #673). Every refusal is the line the command shows, prefixed with its verb.
  */
 function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
+  const retired = retiredTokenSettingRefusal(key);
+  if (retired !== null) return { refusal: `${verb}: ${retired}` };
   if (!KNOWN_KEYS.includes(key)) return { refusal: `${verb}: unknown key '${key}'. valid keys: ${KNOWN_KEYS.join(", ")}` };
   let value;
   let mutate;
@@ -749,20 +724,13 @@ function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
       return o;
     };
   }
-  if (key === "maxTokens") {
-    const before = readSettingsView({ settingsFile: paths.settingsFile, fs })?.overlay ?? {};
-    const broken = settingsEnvelopeRefusal(key, before, mutate({ ...before }), paths, env);
-    if (broken) return { refusal: `${verb}: ${broken}` };
-  }
-  const writeArgs = TOKEN_SETTING_KEYS.includes(key) ? { budgetEnv: env, deploymentDir: shown?.deploymentDir ?? null } : {};
   return {
     plan: {
       key,
       unset: verb === "unset",
       value: verb === "set" ? value : null,
       mutate,
-      writeArgs,
-      warning: null,
+      writeArgs: {},
       target: paths.settingsFile,
       expect: writeInputs({ paths: [paths.settingsFile], fs }),
       ...confirmOf(verb === "set" ? `Set ${key}` : `Unset ${key}`, verb === "set" ? `set ${key} = ${value}` : `unset ${key}`),
@@ -773,9 +741,9 @@ function planSettingCommand({ verb, key, valueTokens, paths, env, shown, fs }) {
 /**
  * Plan setting `key` to `value`. `surface: "tool"` (the default, and the console's) is `dispatch_set`'s plan, with its
  * confirm showing the before and after; `surface: "command"` is `/dispatch set`'s, with `valueTokens` the typed value
- * tokens. `paths` is the deployment's (`settingsFile`, `envelopeFile`, `projectsFile`, `scopedLimitsPath`), `env` its
- * environment (the token settings' source), `shown` `{ deploymentDir }`. The write is `writeSettings({ settingsFile,
- * mutate, ...writeArgs })`. `{ plan }` or `{ refusal }`.
+ * tokens. `paths` is the deployment's (`settingsFile`, `projectsFile`, `scopedLimitsPath`); `env` and `shown` are
+ * accepted for the surfaces' shape and no longer read (the token settings' env source is gone, C2). The write is
+ * `writeSettings({ settingsFile, mutate, ...writeArgs })`. `{ plan }` or `{ refusal }`.
  */
 export function planSettingSet({ key, value, valueTokens, paths, env, shown = { deploymentDir: null }, surface = "tool", fs = nodeFs }) {
   if (surface === "command") return planSettingCommand({ verb: "set", key, valueTokens: valueTokens ?? (value === undefined ? [] : [value]), paths, env, shown, fs });
@@ -895,24 +863,18 @@ export function planPauseWindowDelete({ index, paths, surface = "tool", fs = nod
 
 /**
  * Build one scoped-limit entry from a field bag (shared by dispatch_limit_add/_edit and the operator
- * dialogs). Required scope; day/week/month/concurrent ride only when an integer-shaped value parses, so a
- * blank dialog answer or omitted tool param drops out of the JSON. All value validation (positive safe
- * integers, at-least-one-limit, non-empty scope, no globs) lives in the shared parseScopedLimits, which
- * the write goes through -- a bad value is rejected there, never written.
+ * dialogs). Required scope; concurrency rides only when an integer-shaped value parses, so a blank dialog answer or
+ * omitted tool param drops out of the JSON. The retired job-count windows (day/week/month) are carried the same way so
+ * the shared parser REFUSES them by name, never a silent drop. The token windows are refused before this is reached
+ * (`tokenLimitRefusal`, C2). All value validation (positive safe integers, at-least-one-limit, non-empty scope, no
+ * globs) lives in the shared parseScopedLimits, which the write goes through -- a bad value is rejected there, never
+ * written.
  */
 export function buildScopedLimit(f) {
   const l = { scope: String(f.scope ?? "").trim() };
   for (const k of ["day", "week", "month", "concurrent"]) {
     const v = optInt(f[k]);
     if (v !== undefined) l[k] = v;
-  }
-  // Version 2's token windows ride through: the parsed row carries them as JSON numbers, a dialog's
-  // typed text as a digits-only string -- coerced to the number the shared parser stores (the overlay's
-  // own rule, isIntAtLeast). A value that is neither rides not, and the row drops the window.
-  for (const k of ["dayTokens", "weekTokens", "monthTokens"]) {
-    const v = f[k];
-    if (typeof v === "number" && Number.isSafeInteger(v) && v > 0) l[k] = v;
-    else if (typeof v === "string" && /^[0-9]+$/.test(v.trim())) l[k] = Number(v.trim());
   }
   // Version 3's size fields (issue #596) ride through as given; the shared parser validates them, and refuses them on
   // any row that is not a project row.
@@ -965,29 +927,6 @@ export function sizeFieldsOf(f) {
   return out;
 }
 
-/**
- * The token fields a scoped-limit tool was SENT (issue #501, part 7), each judged by the worker's own
- * `parseTokenCount` and returned as the NUMBER the scoped-limits parser stores, so a confirm shows
- * exactly what the file will hold. A blank or absent field is not sent. A malformed one
- * throws with the parser's message (the key named, never the value) before any confirm is shown.
- */
-export function tokenFieldsOf(f) {
-  const out = {};
-  for (const k of TOKEN_FIELDS) {
-    const raw = f?.[k];
-    if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) continue;
-    // A JSON number cannot be refused here: pi's own argument validation (`validateToolArguments`, `Value.Convert`)
-    // turns it into a string before `execute` runs, and no schema keeps a string-typed field a number there (PR
-    // #550's review measured `Type.String`, `Type.Unsafe`, `allOf`, `anyOf` and `not`; only a schema with no `type`
-    // refused one, and a tool schema without a type is one some providers reject). So a number is read by its VALUE,
-    // the overlay's documented rule (`INT-CONFIG-OVERLAY-CONTRACT`): whole tokens, parsed by the
-    // worker's own `optionalTokenCount` and carried as the NUMBER the scoped-limits parser stores --
-    // a ladder string here would be dropped by buildScopedLimit's digits-only coercion.
-    out[k] = parseTokenCount(typeof raw === "string" ? raw.trim() : raw, k);
-  }
-  return out;
-}
-
 /** One scoped limit as a display summary: `day 10 · week 40 · ≤1 at once` (set fields only). */
 export function limitSummary(l) {
   const bits = [];
@@ -995,11 +934,6 @@ export function limitSummary(l) {
   if (Number.isInteger(l?.week)) bits.push(`week ${l.week}`);
   if (Number.isInteger(l?.month)) bits.push(`month ${l.month}`);
   if (Number.isInteger(l?.concurrent)) bits.push(`≤${l.concurrent} at once`);
-  // Version 2's token windows (issues #501, #502), so a model or token-only row never summarizes as nothing.
-  // A window the row does not cap arrives as null (the parser's unset) and draws nothing.
-  if (l?.dayTokens != null) bits.push(`day ${fmtTokens(l.dayTokens)}`);
-  if (l?.weekTokens != null) bits.push(`week ${fmtTokens(l.weekTokens)}`);
-  if (l?.monthTokens != null) bits.push(`month ${fmtTokens(l.monthTokens)}`);
   // Version 3's size (issue #596), with hostShare and minJobs, which each worker's host budget enforces since phase 2.
   bits.push(...sizeBits(l));
   return bits.join(" · ");
@@ -1024,9 +958,17 @@ export function scopeChangeNote(before, after) {
   return "\nThe scope changes, so this row starts a new count under a new key: the used runs and tokens of the old scope do not carry over. Jobs already running keep their slot under the old scope until they finish, and the new row counts from zero, so with `concurrent: N` up to 2N jobs can run until then.";
 }
 
-/** The envelope cross-check context the scoped-limits and projects writers take (`envelopeRefusal`). */
-export function envelopeGuard(paths, env, fs = nodeFs) {
-  return paths.envelopeFile ? { file: paths.envelopeFile, maxTokens: envelopeJobCap({ settingsFile: paths.settingsFile, env, fs }) } : null;
+/**
+ * The refusal for a scoped-limit write naming a token window (C2): the shared parser refuses one too, but this names
+ * the removal before any confirm. Never a silent drop.
+ */
+function tokenLimitRefusal(params) {
+  for (const k of RETIRED_TOKEN_FIELDS) {
+    const raw = params?.[k];
+    if (raw === undefined || raw === null || (typeof raw === "string" && raw.trim() === "")) continue;
+    return `rejected: ${k} was retired because ${TOKEN_BUDGETS_REMOVED}; a scoped limit carries no token window, so nothing was changed`;
+  }
+  return null;
 }
 
 /** A scoped-limits change judged in full without writing (`dryRun`): the refusal, or null. */
@@ -1044,57 +986,59 @@ function limitAt(paths, index, fs) {
 }
 
 /** The plan's limits fields: the write's arguments and the confirm. */
-function limitPlan({ paths, expect, envelope, mutate, title, message, extra }) {
+function limitPlan({ paths, expect, mutate, title, message, extra }) {
   return {
     plan: {
       ...extra,
       mutate,
-      envelope,
       target: paths.scopedLimitsPath,
       expect,
-      writeArgs: { scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, expect, envelope, mutate },
+      writeArgs: { scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, expect, mutate },
       ...confirmOf(title, message),
     },
   };
 }
 
 /**
- * Plan a scoped-limit add (`dispatch_limit_add`): the token and size fields judged by the worker's parsers, then the
- * whole change judged without writing (the parser, the project pair and the allocation envelope, issue #504 part C), so
- * the operator is never asked to approve a row the write would refuse. `expect` is the files as the change is built
- * from them (PR #569's second review). The write is `writeScopedLimits(plan.writeArgs)`. `{ plan }` or `{ refusal }`.
+ * Plan a scoped-limit add (`dispatch_limit_add`): a token window is refused with the removal named (C2), the size fields
+ * are judged by the worker's parsers, then the whole change is judged without writing (the parser and the project
+ * pair), so the operator is never asked to approve a row the write would refuse. `expect` is the files as the change is
+ * built from them (PR #569's second review). The write is `writeScopedLimits(plan.writeArgs)`. `{ plan }` or
+ * `{ refusal }`.
  */
-export function planLimitAdd({ params, paths, env, fs = nodeFs }) {
+export function planLimitAdd({ params, paths, fs = nodeFs }) {
+  const tokenRefusal = tokenLimitRefusal(params);
+  if (tokenRefusal !== null) return { refusal: tokenRefusal };
   const expect = writeInputs({ paths: [paths.scopedLimitsPath, paths.projectsFile], fs });
   let l;
   const fields = refusalOf(() => {
-    l = buildScopedLimit({ ...params, ...tokenFieldsOf(params), ...sizeFieldsOf(params) });
+    l = buildScopedLimit({ ...params, ...sizeFieldsOf(params) });
   });
   if (fields !== null) return { refusal: fields };
-  const envelope = envelopeGuard(paths, env, fs);
   const mutate = (list) => [...list, l];
-  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, envelope, fs });
+  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, fs });
   if (refused !== null) return { refusal: refused };
-  return limitPlan({ paths, expect, envelope, mutate, title: "Add scoped limit", message: `Add to scoped-limits.json:\n${JSON.stringify(l)}`, extra: { entry: l } });
+  return limitPlan({ paths, expect, mutate, title: "Add scoped limit", message: `Add to scoped-limits.json:\n${JSON.stringify(l)}`, extra: { entry: l } });
 }
 
 /**
- * Plan a scoped-limit edit (`dispatch_limit_edit`): a provided field replaces, an omitted one keeps the current value
- * (the token windows and the size fields are CARRIED, never dropped), rebuilt through the shared builder and judged
- * like an add. `sizingNoteFn(scope)`, when given, adds the project's size evidence to the confirm when a size field
- * changes (index.ts's `sizingNote`). `surface` names the row (`rowName`). `{ plan }` or `{ refusal }`.
+ * Plan a scoped-limit edit (`dispatch_limit_edit`): a token window is refused with the removal named (C2); a provided
+ * field replaces, an omitted one keeps the current value (the size fields are CARRIED, never dropped), rebuilt through
+ * the shared builder and judged like an add. `sizingNoteFn(scope)`, when given, adds the project's size evidence to the
+ * confirm when a size field changes (index.ts's `sizingNote`). `surface` names the row (`rowName`).
+ * `{ plan }` or `{ refusal }`.
  */
-export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface = "tool", fs = nodeFs }) {
+export function planLimitEdit({ params, paths, sizingNoteFn = null, surface = "tool", fs = nodeFs }) {
+  const tokenRefusal = tokenLimitRefusal(params);
+  if (tokenRefusal !== null) return { refusal: tokenRefusal };
   const index = params.index;
   const expect = writeInputs({ paths: [paths.scopedLimitsPath, paths.projectsFile], fs });
   const at = limitAt(paths, index, fs);
   if (at.refusal) return { refusal: at.refusal };
   const cur = at.cur;
-  let tok;
   let size;
   const fields = refusalOf(() => {
-    // Issue #501, part 7: a token field is judged BEFORE the confirm; issue #596: the size fields the same way.
-    tok = tokenFieldsOf(params);
+    // Issue #596: a malformed size field is refused with the parser's words BEFORE the confirm.
     size = sizeFieldsOf(params);
   });
   if (fields !== null) return { refusal: fields };
@@ -1105,23 +1049,16 @@ export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface
     week: params.week ?? cur.week,
     month: params.month ?? cur.month,
     concurrent: params.concurrent ?? cur.concurrent,
-    // The token windows (version 2): a sent one replaces, an omitted one is CARRIED, never dropped, so an edit of
-    // a count field cannot silently remove a token cap.
-    dayTokens: tok.dayTokens ?? cur.dayTokens,
-    weekTokens: tok.weekTokens ?? cur.weekTokens,
-    monthTokens: tok.monthTokens ?? cur.monthTokens,
-    // The size fields (version 3) the same way: a sent one replaces, an omitted one is carried.
+    // The size fields (version 3): a sent one replaces, an omitted one is carried.
     ...sizeFieldsFrom((k) => size[k] ?? cur[k]),
   });
-  const envelope = envelopeGuard(paths, env, fs);
   const mutate = (l) => l.map((w, i) => (i === index ? merged : w));
-  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, envelope, fs });
+  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, fs });
   if (refused !== null) return { refusal: refused };
   const sizing = Object.keys(size).length > 0 && typeof sizingNoteFn === "function" ? sizingNoteFn(merged.scope) : "";
   return limitPlan({
     paths,
     expect,
-    envelope,
     mutate,
     title: `Edit ${rowName("scoped limit", index, surface)}`,
     message: `${rowName("scoped limit", index, surface)}:\n${JSON.stringify(before)}\nto ${JSON.stringify(merged)}${scopeChangeNote(before, merged)}${sizing}`,
@@ -1134,17 +1071,16 @@ export function planLimitEdit({ params, paths, env, sizingNoteFn = null, surface
  * Plan a scoped-limit delete (`dispatch_limit_delete`) by index, judged like an add; `surface` names the row. `{ plan }`
  * or `{ refusal }`.
  */
-export function planLimitDelete({ index, paths, env, surface = "tool", fs = nodeFs }) {
+export function planLimitDelete({ index, paths, surface = "tool", fs = nodeFs }) {
   const expect = writeInputs({ paths: [paths.scopedLimitsPath, paths.projectsFile], fs });
   const at = limitAt(paths, index, fs);
   if (at.refusal) return { refusal: at.refusal };
   const cur = at.cur;
-  const envelope = envelopeGuard(paths, env, fs);
   const mutate = (l) => l.filter((_, i) => i !== index);
-  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, envelope, fs });
+  const refused = limitsWriteRefusal({ scopedLimitsPath: paths.scopedLimitsPath, projectsPath: paths.projectsFile, mutate, fs });
   if (refused !== null) return { refusal: refused };
   const row = rowName("scoped limit", index, surface);
-  return limitPlan({ paths, expect, envelope, mutate, title: `Delete ${row}`, message: `Remove ${row}: ${cur.scope} ${limitSummary(cur)}`, extra: { index } });
+  return limitPlan({ paths, expect, mutate, title: `Delete ${row}`, message: `Remove ${row}: ${cur.scope} ${limitSummary(cur)}`, extra: { index } });
 }
 
 // ---- projects ----
@@ -1183,41 +1119,39 @@ export function currentProject(paths, id, fs = nodeFs) {
 }
 
 /** The plan's projects fields: the write's arguments (`writeProjects(plan.writeArgs)`) and the confirm. */
-function projectPlan({ paths, env, mutate, planned, title, message, extra, fs }) {
+function projectPlan({ paths, mutate, planned, title, message, extra }) {
   return {
     plan: {
       ...extra,
       mutate,
       target: paths.projectsFile,
       expect: planned.inputs,
-      writeArgs: { projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, triggersPath: paths.triggersPath ?? null, mutate, expect: planned.inputs, envelope: envelopeGuard(paths, env, fs) },
+      writeArgs: { projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, triggersPath: paths.triggersPath ?? null, mutate, expect: planned.inputs },
       ...confirmOf(title, message),
     },
   };
 }
 
 /** `planProjectsWrite` for a projects change, judged before the confirm: the plan, or the refusal. */
-function projectsPlanned(paths, env, mutate, fs) {
-  const planned = planProjectsWrite({ projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, triggersPath: paths.triggersPath ?? null, mutate, envelope: envelopeGuard(paths, env, fs), fs });
+function projectsPlanned(paths, mutate, fs) {
+  const planned = planProjectsWrite({ projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, triggersPath: paths.triggersPath ?? null, mutate, fs });
   return planned.invalid ? { refusal: `rejected: ${escapeInterpreted(planned.invalid)}`, ...(planned.blocker ? { blocker: planned.blocker } : {}) } : { planned };
 }
 
 /** Plan a project add (`dispatch_project_add`): `params` `{ id, name?, members }`. `{ plan: { added, ... } }` or `{ refusal }`. */
-export function planProjectAdd({ params, paths, env, fs = nodeFs }) {
+export function planProjectAdd({ params, paths, fs = nodeFs }) {
   const entry = { id: params.id, name: params.name ?? null, members: params.members };
   const mutate = (list) => [...list, entry];
-  const judged = projectsPlanned(paths, env, mutate, fs);
+  const judged = projectsPlanned(paths, mutate, fs);
   if (judged.refusal) return judged;
   const added = judged.planned.projects.find((p) => p.id === params.id);
   return projectPlan({
     paths,
-    env,
     mutate,
     planned: judged.planned,
     title: "Add project",
     message: `Add to projects.json:\n${JSON.stringify(projectShown(added))}\nRuns of these members record project ${added.id} from their next pickup.`,
     extra: { added },
-    fs,
   });
 }
 
@@ -1226,7 +1160,7 @@ export function planProjectAdd({ params, paths, env, fs = nodeFs }) {
  * whole list. A member leaving a capped project is named in the confirm, because it WIDENS what it may spend.
  * `{ plan: { after, ... } }` or `{ refusal }`.
  */
-export function planProjectEdit({ params, paths, env, fs = nodeFs }) {
+export function planProjectEdit({ params, paths, fs = nodeFs }) {
   const at = projectAt(paths, params.id, fs);
   if (at.refusal) return { refusal: at.refusal };
   const cur = at.cur;
@@ -1236,7 +1170,7 @@ export function planProjectEdit({ params, paths, env, fs = nodeFs }) {
     members: params.members ?? cur.members,
   };
   const mutate = (list) => list.map((p) => (p.id === cur.id ? merged : p));
-  const judged = projectsPlanned(paths, env, mutate, fs);
+  const judged = projectsPlanned(paths, mutate, fs);
   if (judged.refusal) return judged;
   const after = judged.planned.projects.find((p) => p.id === cur.id);
   const joining = after.members.filter((m) => !cur.members.includes(m));
@@ -1246,13 +1180,11 @@ export function planProjectEdit({ params, paths, env, fs = nodeFs }) {
   const history = joining.length > 0 || leaving.length > 0 ? "\nRecords already written keep the project id they were written with." : "";
   return projectPlan({
     paths,
-    env,
     mutate,
     planned: judged.planned,
     title: `Edit project ${cur.id}`,
     message: `project ${cur.id}:\n${JSON.stringify(projectShown(cur))}\nto ${JSON.stringify(projectShown(after))}${joined}${note}${history}`,
     extra: { before: cur, after },
-    fs,
   });
 }
 
@@ -1260,90 +1192,33 @@ export function planProjectEdit({ params, paths, env, fs = nodeFs }) {
  * Plan a project delete (`dispatch_project_delete`). Judged BEFORE the confirm: a scoped-limits row naming the project
  * refuses here, so the operator is never asked to approve it. `{ plan: { deleted, ... } }` or `{ refusal }`.
  */
-export function planProjectDelete({ id, paths, env, fs = nodeFs }) {
+export function planProjectDelete({ id, paths, fs = nodeFs }) {
   const at = projectAt(paths, id, fs);
   if (at.refusal) return { refusal: at.refusal };
   const cur = at.cur;
   const mutate = (list) => list.filter((p) => p.id !== cur.id);
-  const judged = projectsPlanned(paths, env, mutate, fs);
+  const judged = projectsPlanned(paths, mutate, fs);
   if (judged.refusal) return judged;
   return projectPlan({
     paths,
-    env,
     mutate,
     planned: judged.planned,
     title: `Delete project ${cur.id}`,
     message: `Remove project ${cur.id} (${cur.members.length} member${cur.members.length === 1 ? "" : "s"}). Its members' runs record no project from their next pickup; records already written keep the id.`,
     extra: { deleted: cur.id },
-    fs,
   });
 }
 
-// ---- the allocation envelope and priorities (issue #504 part C) ----
-
-/** The tool's envelope fields as `planEnvelopeWrite`'s change: only the fields that were sent. */
-export function envelopeChangeOf(p) {
-  const change = {};
-  if (p.window !== undefined) change.window = p.window;
-  if (p.totalTokens !== undefined) change.totalTokens = p.totalTokens;
-  if (p.floorsTokens !== undefined) change.floorsTokens = p.floorsTokens;
-  if (p.defaultWeights !== undefined) change.defaultWeights = p.defaultWeights;
-  const delegation = {};
-  for (const f of ["enabled", "writers", "maxStepPct", "minIntervalHours", "maxPlanDays"]) if (p[f] !== undefined) delegation[f] = p[f];
-  if (Object.keys(delegation).length > 0) change.delegation = delegation;
-  return change;
-}
+// ---- the allocation envelope and its priorities (REMOVED, C2) ----
 
 /**
- * Plan an envelope change (`dispatch_envelope_set`), judged by the worker's own parser BEFORE the confirm, so the
- * operator is never asked to approve an envelope the worker would refuse. `params` are the tool's fields. The per-job
- * cap the worker judges the envelope with is read from the deployment's settings and `env`. The write is
- * `writeEnvelope({ ...plan.files, change: plan.change, expect: plan.expect, url })`. `{ plan }`, `{ unchanged }` or
- * `{ refusal }`.
+ * The allocation envelope and the priorities plan it was split by are GONE with the token budgets (C2): there is no
+ * envelope file to change and no split to apply. This stays as a REFUSAL-ONLY planner so a surface still wired to
+ * `dispatch_envelope_set` hears the removal in words, never a silent no-op; the envelope and priorities writers
+ * (`planEnvelopeWrite`, `applyPriorities`, `revertAllocation`) went with the tools.
  */
-export function planEnvelope({ params, paths, env, fs = nodeFs }) {
-  const change = envelopeChangeOf(params);
-  if (Object.keys(change).length === 0) return { refusal: "nothing to change: name at least one of window, totalTokens, floorsTokens, defaultWeights, enabled, writers, maxStepPct, minIntervalHours, maxPlanDays" };
-  const maxTokens = envelopeJobCap({ settingsFile: paths.settingsFile, env, fs });
-  const files = { envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens };
-  const planned = planEnvelopeWrite({ ...files, change, fs });
-  if (planned.invalid) return { refusal: `rejected: ${escapeInterpreted(planned.invalid)}` };
-  if (planned.digest === planned.beforeDigest) return { unchanged: "no change: the envelope already says this" };
-  return {
-    plan: {
-      change,
-      files,
-      beforeText: planned.inputs.find((input) => input.path === paths.envelopeFile)?.text ?? null,
-      afterText: planned.text,
-      lines: planned.lines,
-      digest: planned.digest,
-      beforeDigest: planned.beforeDigest,
-      target: paths.envelopeFile,
-      expect: planned.inputs,
-      ...confirmOf("Change the allocation envelope", `${planned.lines.join("\n")}\n\nEvery host re-bases the split onto it with no step; a host whose copy differs refuses its jobs until it has it.`),
-    },
-  };
-}
-
-/**
- * A priorities plan as `applyPriorities` takes it, from what was given: each project's id and weight, its reason and
- * repos when sent, and `validUntil` `validDays` after `now` when sent. Every rule is the worker's (`applyPlan`); the
- * basis is filled in by `applyPriorities` from the applied state. `{ plan: { plan } }`.
- */
-export function planPriorities({ projects, validDays, now }) {
-  return {
-    plan: {
-      plan: {
-        ...(validDays !== undefined ? { validUntil: new Date(now.getTime() + validDays * 86400000).toISOString() } : {}),
-        projects: (Array.isArray(projects) ? projects : []).map((p) => ({
-          id: p?.id,
-          weight: p?.weight,
-          ...(p?.reason !== undefined ? { reason: p.reason } : {}),
-          ...(p?.repos !== undefined ? { repos: p.repos } : {}),
-        })),
-      },
-    },
-  };
+export function planEnvelope() {
+  return { refusal: `${TOKEN_BUDGETS_REMOVED}: there is no allocation envelope to change, so nothing was changed` };
 }
 
 // ---- secret-resolver profiles (REQ-TRIGGER-SECRETS) ----

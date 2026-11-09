@@ -33,7 +33,7 @@ import { OUTCOME_KEYS, OUTCOME_KEY_WORDS, VENUE_LABEL, rowNumber } from "../../w
 import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
-import { RUN_ID_RE, capTokensOf, costText, count, tokensHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
+import { RUN_ID_RE, costText, count, tokensHtml, msOf, outcomeCell, runCost, utcText } from "./common.mjs";
 
 // ---- the sentences ---------------------------------------------------------------------------------------------------
 
@@ -307,7 +307,7 @@ function valueCell(v) {
 }
 
 /**
- * The runs table's columns, as `kit.tbl` takes them. Flow, venue, model, tokens and the job cap (`hidePhone`) are the
+ * The runs table's columns, as `kit.tbl` takes them. Flow, venue, model and tokens (`hidePhone`) are the
  * run page's on a phone and on a desktop narrower than the RunsScreen card (`runs-css.mjs` `RUNS_TABLE.allMin`). On
  * a phone a run is stacked as the RunsPhone card stacks it, which names only the host and the cost: the end time, the
  * job, the target and the outcome stand with no label (`l: ""`, which writes none).
@@ -323,7 +323,6 @@ export const RUNS_TABLE_HEADS = Object.freeze([
   Object.freeze({ label: "Model", hidePhone: true }),
   Object.freeze({ label: "Tokens", num: true, hidePhone: true }),
   Object.freeze({ label: "Cost", num: true }),
-  Object.freeze({ label: "Job cap", num: true, hidePhone: true }),
 ]);
 
 /** One run as a row of cells, in `RUNS_TABLE_HEADS`' order. */
@@ -339,14 +338,13 @@ function runCells(r, env, subscriptions) {
     valueCell(r?.model),
     Number.isFinite(r?.tokens?.total) ? count(r.tokens.total) : "-",
     costText(runCost(r, subscriptions)),
-    tokensHtml(capTokensOf(r)),
   ];
 }
 
 /**
  * The runs (the RunsScreen and DataTable cards), as the arguments the panel hands the kit: newest first, 50 a page, a
  * group row per UTC day, each run's when, id, target and project, flow, host, venue, outcome with its reason's sentence
- * (`outcomeCell`), model, tokens, cost and job cap (`table`, stacked on a phone with the host and the cost named, or
+ * (`outcomeCell`), model, tokens and cost (`table`, stacked on a phone with the host and the cost named, or
  * null with no run to show), the foot's sentences (`foot`: what the page shows and where it was read from, or why only
  * part of it, or why nothing), and Newest and Older (`pager`). Pure.
  */

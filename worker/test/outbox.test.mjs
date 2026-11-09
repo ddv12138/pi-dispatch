@@ -508,23 +508,23 @@ test("a parent with no excludeTools chains a child whose data carries none eithe
 	assert.equal(cap.enqueued[0].args.excludeTools, undefined, "byte-identical to a pre-issue chain");
 });
 
-test("a chained child inherits the PARENT'S provider, model, models and maxTokens, never the request file's (#502)", async () => {
+test("a chained child inherits the PARENT'S provider, model and models, never the request file's, and no longer a maxTokens (#502, C2)", async () => {
 	// Once a model is policy, a child on the deployment default escapes it: a listed parent would chain an
 	// unlisted child. The request file is agent-authored, so each key in it must be inert, whether it would
-	// switch the child's model, widen its list, or lift its cost cap.
+	// switch the child's model or widen its list.
 	const fs = makeFakeFs({ files: { "request-1.json": { content: req({ flow: "ok", task: "do it", provider: "MARKER-p", model: "MARKER-m", models: ["MARKER/x"], fallbackModels: ["MARKER/fallback"], maxTokens: 999 }) } } });
 	const cap = makeCapture();
 	const collect = makeCollectChain({ queue: cap.queue, enqueue: cap.enqueue, readFlowGate: makeGate().gate, config: { chainMaxPerJob: 2, chainDepthMax: 1 }, fs });
 
 	const parent = localJob();
-	parent.data = { ...parent.data, provider: "openai", model: "qwen2.5:0.5b", models: ["openai/qwen2.5:0.5b"], fallbackModels: ["openai/qwen2.5:0.5b"], maxTokens: 0.5 };
+	parent.data = { ...parent.data, provider: "openai", model: "qwen2.5:0.5b", models: ["openai/qwen2.5:0.5b"], fallbackModels: ["openai/qwen2.5:0.5b"] };
 	await collect({ job: parent, prepared: PREPARED });
 
 	const { args } = cap.enqueued[0];
 	assert.equal(args.provider, "openai");
 	assert.equal(args.model, "qwen2.5:0.5b");
 	assert.deepEqual(args.models, ["openai/qwen2.5:0.5b"], "the parent's list follows the child");
-	assert.equal(args.maxTokens, 0.5);
+	assert.equal(args.maxTokens, undefined, "C2: the retired cap is not inherited and the request file's is never read");
 	assert.deepEqual(args.fallbackModels, ["openai/qwen2.5:0.5b"]);
 	assert.equal(JSON.stringify(args).includes("MARKER"), false, "the request file's model keys are never read");
 	assert.equal(args.jobId, chainedJobId({ parentJobId: parent.id, flow: "ok", task: "do it" }), "the child's identity is unchanged by the inheritance");

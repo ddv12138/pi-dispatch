@@ -16,15 +16,12 @@ import { readZeroTouch } from "@edgehero/pi-dispatch/zero-touch";
 import { NEWER_RECORD_MODEL_NOTE, NEWER_RECORD_SENTENCE, listRuns, makeLocalRunIndex, readRun, readRunById, readRunsPage, scanRunRecords, modelRunRecord } from "../src/read-model.mjs";
 import { fromNewerRelease, readableRecords, shownRecord } from "../src/newer-release.mjs";
 import { foldCosts, whatIfFlow } from "../src/costs.mjs";
-import { TOKEN_KEY_PREFIX } from "@edgehero/pi-dispatch/token-budget";
-import { dayKey } from "@edgehero/pi-dispatch/budget";
-import { foldWindowRecords, runTokenWindows } from "../src/token-windows.mjs";
 import { renderPage } from "../src/console/pages.mjs";
 import { rerunRefusalOf } from "../src/job-actions.mjs";
 import { whatIfAnswer } from "../src/console/whatif.mjs";
 import { spendWhatif } from "../src/console/panels/spend.mjs";
 import { triggerListOf } from "../src/trigger-list.mjs";
-import { spendChartsOf, spendSummaryOf, splitCounts } from "../src/insights-assembly.mjs";
+import { spendChartsOf, spendSummaryOf } from "../src/insights-assembly.mjs";
 import { readProjectView } from "../src/project-view.mjs";
 import { modelsViewOf } from "../src/models-view.mjs";
 
@@ -103,33 +100,7 @@ test("the cost and token-window folds read every released shape, count the newer
     assert.equal(fold.provenance.runsTotal, records.length, `${shape.id}: every released record is folded`);
     assert.equal(fold.newerSkipped, 1, `${shape.id}: the newer one is counted out`);
     assert.deepEqual(fold.byFlow.map((r) => r.flow).sort(), [...new Set(records.map((r) => r.flow ?? "(no flow)"))].sort(), shape.id);
-    // The day window of the runs' start: every released record that carries a token ledger settles into it, in whole
-    // tokens. A dollar-era shape carries no `tokensWindows`, so it is no window run: the token window opens with the
-    // release that writes one.
-    const spec = { ledger: "deployment", name: null, window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse(records[0].startedAt)), TOKEN_KEY_PREFIX) };
-    const window = foldWindowRecords(scanned, spec);
-    const withWindows = records.filter((r) => r.tokensWindows && typeof r.tokensWindows === "object");
-    assert.equal(window.records.runs, withWindows.length, shape.id);
-    assert.equal(window.records.settledTokens, settledOf(withWindows), shape.id);
-    assert.equal(window.records.newerSkipped, 1, `${shape.id}: the newer record's settled tokens are not in the window's sum`);
-    const runs = runTokenWindows(scanned);
-    assert.deepEqual(runs.runs.map((r) => [r.jobId, r.tokensWindows.settledTokens]).sort(), withWindows.map((r) => [r.jobId, r.tokensWindows.settledTokens ?? null]).sort(), shape.id);
-    assert.equal(runs.newerSkipped, 1, shape.id);
   }
-});
-
-test("the next shape's tokens are the cases' own: 412.5k, 61k, 150k and 228k settled, 851.5k in the day (#761)", () => {
-  const next = manifest.shapes.at(-1);
-  const { logsDir, sinceMs, nowMs } = deployment(next);
-  const scanned = scanRunRecords({ logsDir, sinceMs, nowMs });
-  const spec = { ledger: "deployment", name: null, window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse("2026-09-14T10:00:00.000Z")), TOKEN_KEY_PREFIX) };
-  // The failed run settled at its floor; the refusal before any spend carries `tokensWindows: null` and is no window run.
-  assert.deepEqual(foldWindowRecords(scanned, spec).records, { runs: 4, settledTokens: 851_500, basis: { metered: 3, floor: 1, refunded: 0, unreserved: 0 }, malformed: 0, newerSkipped: 1 });
-  // A project row counts the newer record only when its core says the project: `api` does, `web` does not.
-  const api = foldWindowRecords(scanned, { ...spec, ledger: "scope", name: "project:api" });
-  const web = foldWindowRecords(scanned, { ...spec, ledger: "scope", name: "project:web" });
-  assert.deepEqual([api.records.runs, api.records.settledTokens, api.records.newerSkipped], [2, 378_000, 1]);
-  assert.deepEqual([web.records.runs, web.records.settledTokens, web.records.newerSkipped], [1, 412_500, undefined]);
 });
 
 test("every record read hands a released record back whole and a newer record's core alone, and the re-run check tells them apart (#761)", () => {
@@ -173,11 +144,10 @@ test("the what-if, insights, project, models and zero-touch folds leave the newe
   assert.equal(whatif.result.windowRuns, fixRuns.length);
   const runSet = whatIfAnswer({ model: "anthropic/claude-sonnet-4-5", pricing: PRICING, records: scanned, nowMs, runs: "week" }).runSet;
   assert.equal(runSet.newerSkipped, 1);
-  // Insights: the split's counts, the spend summary and the daily charts.
-  assert.equal(splitCounts(scanned).newerSkipped, 1);
-  const summary = spendSummaryOf({ records: scanned, hosts: [], budget: null, nowMs, pricing: PRICING });
+  // Insights: the spend summary and the daily charts.
+  const summary = spendSummaryOf({ records: scanned, nowMs, pricing: PRICING });
   assert.equal(summary.newerSkipped, 1);
-  const charts = spendChartsOf({ records: scanned, sinceMs, nowMs, jobCapTokens: 10_000_000, pricing: PRICING });
+  const charts = spendChartsOf({ records: scanned, sinceMs, nowMs, pricing: PRICING });
   assert.equal(charts.daily.reduce((n, d) => n + (d.settledTokens ?? 0), 0) > 0, true);
   // The project page: the api project's newer run is counted out and makes the history read as incomplete.
   const dir = tempDir("admin-run-record-project-");
@@ -235,7 +205,7 @@ test("a v no release writes reads as a newer record: cut to its core and left ou
   for (const value of [null, undefined, 7, "x", []]) assert.equal(fromNewerRelease(value), false, JSON.stringify(value));
 });
 
-test("each fold left whole a newer record reaches leaves it out and says so: what-if, trigger list, repo row and split (#761)", () => {
+test("each fold left whole a newer record reaches leaves it out and says so: what-if and trigger list (#761)", () => {
   // The record as a fold would meet it if a read forgot to cut it: whole, past its core, matching every filter below.
   const NEWER = { ...SYNTHETIC, flow: "fix", reason: "allocation-cap", plan: { outcome: "refused", reason: "over-cap" }, triggerIndex: 0, triggerType: "label", usage: { models: [{ provider: "anthropic", model: "x", input: 9_000_000, output: 0, cacheRead: 0, cacheWrite: 0 }] } };
   const released = readJson(`${manifest.shapes.at(-1).id}.forge-completed.json`);
@@ -260,10 +230,4 @@ test("each fold left whole a newer record reaches leaves it out and says so: wha
   const list = triggerListOf({ snapshot, records: [NEWER], coverage: { complete: true }, now: nowMs });
   assert.ok(list.problems.includes(`${NEWER_SAID}: counts and spend leave them out.`), list.problems.join("\n"));
   assert.deepEqual([list.rows[0].stats.runs30d, list.rows[0].lastRun], [0, null]);
-  // A repo row: a newer FORGE run of the window may be the repo's and is counted out; a newer LOCAL run never is.
-  const spec = { ledger: "scope", name: "acme/api", window: "day", capTokens: 10_000_000, keyPrefix: TOKEN_KEY_PREFIX, key: dayKey(new Date(Date.parse(NEWER.startedAt)), TOKEN_KEY_PREFIX) };
-  assert.equal(foldWindowRecords([NEWER], spec).records.newerSkipped, 1);
-  assert.deepEqual(foldWindowRecords([{ ...NEWER, kind: "local" }], spec).records, { runs: 0, settledTokens: 0, basis: { metered: 0, floor: 0, refunded: 0, unreserved: 0 }, malformed: 0 });
-  // The split's counts: its reason and plan are not counted, only how many were left out.
-  assert.deepEqual(splitCounts([NEWER]), { refusals: { "allocation-cap": 0, "envelope-mismatch": 0, "portfolio-no-envelope": 0, "portfolio-snapshot-oversize": 0 }, plans: {}, newerSkipped: 1 });
 });

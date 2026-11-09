@@ -4,7 +4,7 @@ import { answerConfigDigest, answerStandingSource } from "@edgehero/pi-dispatch/
 export function answererFixture(now) {
   const standing = { id: "test-command", title: "Test command", text: "Run npm test for the complete suite.", projects: ["web"], repo: "github:acme/web" };
   const sources = [answerStandingSource(standing), { id: "b".repeat(64), kind: "repository", name: "docs/CONTRIBUTING.md", revision: "1".repeat(40), url: "https://github.com/acme/web/blob/1234567/docs/CONTRIBUTING.md" }];
-  const rule = { id: "known-conventions", projects: ["web", "api"], categories: ["convention", "how-to", "decided"], confidence: 0.8, mode: "draft", flow: "draft-answer", model: "example/drafter", decisionModel: "example/decision", maxTokens: 50000 };
+  const rule = { id: "known-conventions", projects: ["web", "api"], categories: ["convention", "how-to", "decided"], confidence: 0.8, mode: "draft", flow: "draft-answer", model: "example/drafter", decisionModel: "example/decision" };
   const meta = { v: 1, runId: "gh-6e1d", draftRunId: "gh-a07c", ruleId: rule.id, at: now - 120000, status: "drafted", draftExists: true, category: "convention", confidence: 0.86, probabilities: { convention: 0.86, "how-to": 0.03, decided: 0.02, product: 0.04, security: 0.01, money: 0.01, scope: 0.01, approval: 0.01, uncovered: 0.01 }, answerableConfidence: 0.91, sources, tokensTotal: 4200 };
   const question = "Which command runs the whole suite?";
   const draft = "Run npm test for the complete suite. [standing:test-command]";

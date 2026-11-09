@@ -55,7 +55,7 @@ import { createChildWatch } from "./src/child-watch.mjs";
 import { precheckAtExit } from "./src/plan-check.mjs";
 import { openSessionManager } from "./src/session.mjs";
 import { assertThinkingLevel, openForkSessionManager, recordForkSettings } from "./src/fork.mjs";
-import { attachTokenBudget } from "./src/token-budget.mjs";
+import { attachSessionMeter } from "./src/token-budget.mjs";
 import { assertExcludeToolsKnown, excludableToolNames } from "./src/tools.mjs";
 import { createJobMcp, mcpExcludableNames, mcpShadow, readJobMcp } from "./src/mcp.mjs";
 import { applyApprovalDecision, approvalDecisionFromEvent, approvalShadow, approvalTerminal, createRequestApproval } from "./src/request-approval.mjs";
@@ -183,13 +183,13 @@ async function main() {
 	// Diagnose the shared mount boundary before inspecting optional watch or role files.
 	const watchReadOnly = readWatchMode();
 	const answerDraftInput = readAnswerDraft();
-	if (answerDraftInput && (watchReadOnly || cfg.maxTokens === null)) throw configError("answer drafts require their own restricted mode and token cap", "answer-draft-refused");
+	if (answerDraftInput && watchReadOnly) throw configError("answer drafts require their own restricted mode", "answer-draft-refused");
 	if (answerDraftInput) assertWatchCompatible(cfg);
 	const watchDecisionInput = readWatchDecision();
 	const questionGroupingInput = readQuestionGrouping();
-	if (questionGroupingInput && (watchReadOnly || watchDecisionInput || cfg.maxTokens === null)) throw configError("question grouping requires its own mode and a token cap", "question-group-refused");
+	if (questionGroupingInput && (watchReadOnly || watchDecisionInput)) throw configError("question grouping requires its own mode", "question-group-refused");
 	if (questionGroupingInput) assertWatchCompatible(cfg);
-	if (watchDecisionInput && (!watchReadOnly || cfg.maxTokens === null)) throw configError("watch decisions require a read-only marker and a token cap", "watch-config-invalid");
+	if (watchDecisionInput && !watchReadOnly) throw configError("watch decisions require a read-only marker", "watch-config-invalid");
 	const watchToolsConfig = watchReadOnly && !watchDecisionInput ? readWatchTools() : null;
 	const roleInputs = readRoleInputs();
 	if (watchReadOnly || questionGroupingInput || answerDraftInput) assertWatchCompatible(cfg, { roles: roleInputs });
@@ -281,9 +281,6 @@ async function main() {
 	// beside the transcript so the NEXT job on this key can bound what it resumes into.
 	let contextUsage;
 
-	/** One log shape for both meters -- an operator must not have to learn which one fired. */
-	const onTokenAbort = (tokens) => log("token_budget_exceeded", { tokens, maxTokens: cfg.maxTokens });
-
 	// REQ-TOKEN-ACCOUNTING-AND-CAPS / CONST-BUDGET-BEFORE-TOKENS, issue #58.
 	//
 	// The per-session event bus cannot see a subagent session an extension spawns: the bus is per
@@ -305,19 +302,16 @@ async function main() {
 	if (childLedger.error !== undefined) log("child_ledger_unavailable", { reason: childLedger.error });
 	// Declared before the meter so its onStop can write STOP at once (the hook rewrites it on every tick anyway).
 	let childWatch = null;
-	const stopHandler = meterStopHandler({ onTokenAbort, abort: () => void session?.abort() });
+	const stopHandler = meterStopHandler({ abort: () => void session?.abort() });
 
 	const failureObserver = installProviderFailureObserver({ ModelRuntime, rootSessionId });
 	const meter = createUsageMeter({
-		maxTokens: cfg.maxTokens,
 		allowedModels: cfg.allowedModels,
 		rootSessionId,
-		// The meter's stops (issues #500, #502): the token cap, at the settle-time check (the lagging in-run
-		// backstop OQ-010 keeps describing -- there is no pre-call bound since the cost guard went), and the model
-		// list, refused before dispatch. Fires once, for the first stop only, whichever it was; only a token stop
-		// logs token_budget_exceeded (meterStopHandler). Same synchronous-abort discipline as attachTokenBudget's
-		// onAbort: abort() flips the AbortController before its first await, so the signal is set the instant we
-		// call it. Awaiting here would let the next turn start under a cap we already know is blown.
+		// The meter's one stop (issue #502): the model list, refused before dispatch. Fires once, for the first
+		// stop only. Same synchronous-abort discipline it always had: abort() flips the AbortController before its
+		// first await, so the signal is set the instant we call it. There is no token budget and no token-abort
+		// line any more; the meter only accounts for tokens and cost.
 		onStop: (reason, detail) => {
 			stopHandler(reason, detail);
 			childWatch?.stopped(reason);
@@ -346,8 +340,7 @@ async function main() {
 	// install it depends on and before any extension loads, while nothing has been spent
 	// (INT-RUNNER-EXIT-CODE-PROTOCOL): exit 2, `model-policy-unenforceable`. The fallback bus meter below is the
 	// `ok: false` case, and it can only see a call after it ran. The model guard enforces the list; a job carrying
-	// no list passes untouched. The token cap is deliberately not asserted: it has no pre-call form to enforce
-	// (its stop is the meter's settle-time check), so there is nothing a missing brake would make it enforce early.
+	// no list passes untouched. There is no token cap to assert: the meter has no budget.
 	assertPoliciesEnforceable({
 		allowedModels: cfg.allowedModels,
 		...policyEnforcement(usageMeter),
@@ -666,9 +659,9 @@ async function main() {
 
 	// FALLBACK ONLY. The process-wide meter is the single source of truth whenever it installed, so
 	// the per-session accumulator is attached only when it did NOT -- the two are never both counting
-	// and a double count is impossible by construction rather than by arithmetic. Still an always-on
-	// meter that aborts only when cfg.maxTokens is set (lagging backstop, OQ-010).
-	const tokenBudget = usageMeter.ok ? null : attachTokenBudget(session, cfg.maxTokens, { onAbort: onTokenAbort });
+	// and a double count is impossible by construction rather than by arithmetic. Metering only: it
+	// accumulates totals and never stops the job.
+	const fallbackMeter = usageMeter.ok ? null : attachSessionMeter(session);
 
 	// A prompt() rejection is classified HERE only when it is pi's unresumable retry (classifyPromptRejection
 	// says which, and why that must not be retried by the queue); every other rejection is rethrown untouched to
@@ -700,7 +693,7 @@ async function main() {
 		// First: nothing may be handed to a session that is about to be disposed.
 		inbox?.close();
 		budget.unsubscribe();
-		tokenBudget?.unsubscribe();
+		fallbackMeter?.unsubscribe();
 		answerTools?.finish();
 		// Stops the meter's re-arm interval. It is unref'd, so this is hygiene rather than a hang fix
 		// -- but REQ-JOB-TIMEOUT-30M is a backstop, not a teardown plan, and a timer left running past
@@ -739,10 +732,8 @@ async function main() {
 		budgetAborted: budget.state.aborted,
 		budgetTurns: budget.state.turns,
 		// Whichever meter was actually counting, and never both: the process-wide meter reports its first
-		// stop by reason (token_budget, model-not-allowed), the fallback bus meter its token abort
-		// by flag. A token stop maps to the same reason:"token_budget" / exit 2 from either.
+		// stop by reason (model-not-allowed). The fallback bus meter has no stop to report: it only meters.
 		meterStop: usageMeter.ok ? meter.state.stopReason : null,
-		tokenAborted: usageMeter.ok ? false : tokenBudget.state.aborted,
 		terminal,
 		// Null for every prompt job, so their decision tree is byte-identical to before run.command.
 		command: cfg.command ? { failed: commandFailed } : null,
@@ -755,7 +746,7 @@ async function main() {
 	// `metered: true` on the process-wide snapshot is what tells the daily token counter that this
 	// total includes every in-process session, not just the root's turns.
 	// `modelRefused` (issue #502) rides only when a list is set, so every other exit line stays byte-identical.
-	const tokens = usageMeter.ok ? meteredExitFields().tokens : { ...pickTotals(tokenBudget.state), metered: false };
+	const tokens = usageMeter.ok ? meteredExitFields().tokens : { ...pickTotals(fallbackMeter.state), metered: false };
 	// The per-(provider,model) ledger (issue #53, INT-RUN-HISTORY-FILE-CONTRACT) -- a SIBLING of
 	// `tokens`, never a widening of it: `tokens` rides through the worker verbatim because it holds
 	// nothing but numbers, while the ledger carries id STRINGS the host re-validates through its own

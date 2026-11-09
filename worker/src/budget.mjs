@@ -4,9 +4,9 @@
  * Job-count caps were removed, so this module no longer reserves or releases a slot: `reserveBudget`,
  * `releaseBudget`, `reserveLedgers` and `releaseLedgers` are gone with the global and scoped count windows.
  * What remains is the key vocabulary: `token-budget.mjs` composes `budget:tok:` with `dayKey`/`weekKey`/
- * `monthKey` and expires them on `DAY/WEEK/MONTH_TTL_SECONDS`, and doctor, model-failover,
- * portfolio-snapshot and the admin read the same keys. The key/TTL exports are kept byte-compatible for
- * those readers; changing one would orphan live counters and break the admin's display.
+ * `monthKey` and expires them on `DAY/WEEK/MONTH_TTL_SECONDS`. Doctor, model-failover and the admin read the
+ * same keys. The key/TTL exports are kept byte-compatible for those readers; changing one would orphan live
+ * counters and break the admin's display.
  */
 
 /** UTC day key: `budget:YYYY-MM-DD`. */

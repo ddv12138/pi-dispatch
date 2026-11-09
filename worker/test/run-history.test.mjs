@@ -2041,11 +2041,11 @@ test("the record carries a collected plan in tail position after project: enums 
 	for (const bad of [null, "applied", { outcome: "won" }, { outcome: "refused", reason: "Fix the login bug" }, { outcome: "refused", reason: null }, { outcome: "applied", reason: "plan-stale" }]) assert.equal(rec(bad).plan, null, JSON.stringify(bad));
 });
 
-test("PLAN_RECORD_REASONS is the collector's rungs, plan-invalid, envelope-mismatch and the apply ladder, nothing else (#505)", async () => {
-	const { PLAN_COLLECT_REASONS } = await import("../src/outbox-plan.mjs");
-	const { PLAN_LADDER, PLAN_INVALID } = await import("../src/priorities.mjs");
-	const { ENVELOPE_MISMATCH_REASON } = await import("../src/allocation.mjs");
-	assert.deepEqual([...PLAN_RECORD_REASONS].sort(), [...new Set([...PLAN_COLLECT_REASONS, PLAN_INVALID, ENVELOPE_MISMATCH_REASON, ...PLAN_LADDER])].sort());
+test("an old record's retired token/allocation reasons still parse, though no current run emits them (C2)", () => {
+	const job = { id: "repeat:pm:1", name: "local", attemptsMade: 0, data: { kind: "local", folder: "/srv/pm" } };
+	for (const reason of ["token-cap", "allocation-cap", "envelope-mismatch", "portfolio-no-envelope", "portfolio-snapshot-oversize"]) {
+		assert.equal(buildRecord({ job, result: { outcome: "policy", reason } }).reason, reason, reason);
+	}
 });
 
 // ---- the lost-lock check reads a job's own record back (DES-TERMINAL-COMMENTS-AND-FAILURE-HOOK) ------------

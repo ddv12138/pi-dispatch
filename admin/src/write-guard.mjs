@@ -1,15 +1,16 @@
 /**
  * The operator session's write guard (issue #504 part C; `DES-ADMIN-VIA-PI-EXTENSION`, `SECURITY.md`).
  *
- * The admin's confirm-gated tools are the model's door to the deployment's money files. pi's own built-in file tools
- * are a second door: a session that can call `write` or `edit` can rewrite `projects.json` or the allocation envelope
- * with no confirm at all, and with the envelope that is the operator's outer bound itself. So a `tool_call` handler
- * blocks the built-in mutating tools when their target IS one of the guarded files:
+ * The admin's confirm-gated tools are the model's door to the deployment's policy files. pi's own built-in file tools
+ * are a second door: a session that can call `write` or `edit` can rewrite `projects.json` or `scoped-limits.json`
+ * with no confirm at all. So a `tool_call` handler blocks the built-in mutating tools when their target IS one of the
+ * guarded files:
  *
- *   - the allocation envelope (`PI_ENVELOPE_FILE`), `projects.json`, `scoped-limits.json`, `triggers.json` and the
+ *   - `projects.json`, `scoped-limits.json`, `triggers.json` and the
  *     settings overlay, at the paths this deployment resolves (the pointer and the deployment `.env` included), and
  *     the two files that NAME those paths, the deployment's `.env` and the pointer itself (index.ts `guardedFiles`,
- *     whose set only grows within a session);
+ *     whose set only grows within a session). The allocation envelope left this set with the allocation itself (C2):
+ *     no tool writes it now, and the operator edits it, if at all, by hand;
  *   - not the overlay's `models.json`: the admin never writes it, so no tool's confirm is bypassed there;
  *   - and, as a DIRECTORY (`dir: true`: every path under it, and the directory itself), the console's one-time login
  *     codes beside the tokens file (issue #708). The login-codes directory joins the guarded files, as the tokens file
@@ -172,7 +173,6 @@ export function targetIdentity(absPath, { fs = nodeFs } = {}) {
 
 /** The keys of a `.env` that name a guarded file, with the label and the tool a blocked call is pointed at. */
 export const GUARDED_ENV_KEYS = Object.freeze({
-  PI_ENVELOPE_FILE: { label: "the allocation envelope (PI_ENVELOPE_FILE)", tool: "dispatch_envelope_set" },
   PI_PROJECTS_FILE: { label: "projects.json (PI_PROJECTS_FILE)", tool: "dispatch_project_add, _edit or _delete" },
   PI_SCOPED_LIMITS_FILE: { label: "scoped-limits.json (PI_SCOPED_LIMITS_FILE)", tool: "dispatch_limit_add, _edit or _delete" },
   PI_TRIGGERS_FILE: { label: "triggers.json (PI_TRIGGERS_FILE)", tool: "dispatch_trigger_add, _edit or _delete" },

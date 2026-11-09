@@ -158,15 +158,6 @@ export const MODEL_NOT_ALLOWED_COMMENTS = Object.freeze({
 	"fallback-unlisted": "Refused: a model this job is allowed to use declares fallback models that are not on the job's list, so no container was started and nothing was spent. Ask the operator to list those models too, or remove that model. Not run.",
 });
 
-/**
- * The `envelope-mismatch` refusal's two texts, since the fix differs: this host has no envelope while the fleet has a
- * split, or another envelope.
- */
-export const ENVELOPE_MISMATCH_COMMENTS = Object.freeze({
-	"no-envelope": "Refused: this worker has no budget envelope while the other workers share an applied budget split, so no container was started and nothing was spent. Ask the operator to install the envelope on this worker, or to turn delegated allocation off for every worker (`pi-dispatch doctor` says how). Not run.",
-	mismatch: "Refused: this worker's budget envelope differs from the one the current budget split was made for, so no container was started and nothing was spent. Ask the operator to run `pi-dispatch doctor`. Not run.",
-});
-
 /** A venue's own refusal that came with no sentence of its own (`venueRefused` without a comment). */
 export const VENUE_REFUSED_COMMENT = "Refused: this job's venue cannot run it on this host right now. Not run.";
 /** The same, for a venue's refusal of the project's secret bundle. */

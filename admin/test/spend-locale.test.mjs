@@ -4,7 +4,7 @@ import test from "node:test";
 import { SPEND_ZH } from "../src/console/locale-spend.mjs";
 
 test("Spend fixed copy has Chinese translations while retaining the HEAD machine label", () => {
-  assert.ok(Object.keys(SPEND_ZH).length >= 130);
+  assert.ok(Object.keys(SPEND_ZH).length >= 110, "the map shrank with the removed caps copy, never emptied");
   for (const [source, translated] of Object.entries(SPEND_ZH)) {
     assert.ok(translated.trim(), `${source}: translation is present`);
     if (source === "HEAD") {

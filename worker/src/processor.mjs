@@ -2,7 +2,6 @@ import { cleanTouch, touchScopeOf } from "./touch-state.mjs";
 import { SubscriptionWait } from "./subscription-wait.mjs";
 import { readQuestionContext } from "./question-context.mjs";
 import { stageModelRoleInputs } from "./agent-snapshot.mjs";
-import { effectiveTokenCap } from "./budget-rule.mjs";
 import { validateFork, forkBranch, forkArchiveFact, FORK_THINKING_LEVELS } from "./fork-job.mjs";
 import { sessionKeyFor } from "./session-key.mjs";
 import { join } from "node:path";
@@ -10,7 +9,6 @@ import { backendFor, DAEMON_APPLIES_BOUNDS, DEFAULT_BACKEND, DOCKER_ENDPOINT_LOC
 import { resolveBackendName } from "./backend-registry.mjs";
 import { lstatSync } from "node:fs";
 import { configError } from "./config.mjs";
-import { unqualifiedScope } from "./pause-windows.mjs";
 import { DEFAULT_SECRETS_PROFILE, secretsArmed } from "./secrets.mjs";
 import { mergeBundleSecrets } from "./secret-bundles.mjs";
 import { providerKeyCandidates } from "./env-allowlist.mjs";
@@ -24,21 +22,16 @@ import { normalizeHost, removeCheckpointPointer as removePointerDefault } from "
 import { DEFAULT_EGRESS_PROXY } from "./egress.mjs";
 import { CAPABILITY_GATES, EXIT_AUTH_CAPABILITY } from "./image-preflight.mjs";
 import { modelListProblem, modelOnList, splitModelEntry } from "./model-ref.mjs";
-import { ALLOCATION_CAP_REASON, ENVELOPE_MISMATCH_REASON } from "./allocation.mjs";
-
 /** The refusal of a local job whose resolved folder belongs to another project than the one decided at pickup (issue #504 part B). */
 export const LOCAL_FOLDER_PROJECT_CHANGED = "local-folder-project-changed";
-// Issue #505: a portfolio cron job refused before it spends, because this host could not apply the plan it would write.
-export const PORTFOLIO_NO_ENVELOPE = "portfolio-no-envelope";
-import { TOKEN_CAP_REASON, TOKEN_KEY_PREFIX, deploymentWindowsOf, tokenLedgers, tokenSettlement, tokensWindowsRecord, holdPart, meteredTokens, modelTokenSettlement, releaseTokens, reserveTokens, settleTokens } from "./token-budget.mjs";
-import { callableModelRefs, zeroRatedFor } from "./reserve-estimate.mjs";
+import { callableModelRefs } from "./reserve-estimate.mjs";
 import { outputCapView } from "./output-cap.mjs";
 import { answerTrailComment, consoleAnswerBy, consoleDraftOf } from "./console-answer.mjs";
 import { forgeDeliveryJobId } from "./job-id.mjs";
 import { FORGE_JOB_RETENTION_MS } from "./retention.mjs";
 // The forge-comment tables (issue #710): every fixed sentence this file posts, in one leaf the reason catalog can import
 // without the job path. Re-exported below under the names they always had here.
-import { MODEL_AGENTS_INVALID_COMMENT, APPROVAL_COMMENTS, APPROVAL_PARK_NEWER_COMMENT, BUNDLE_COMMENTS, ENVELOPE_MISMATCH_COMMENTS, HELD_TAKEN_COMMENT, JOB_USER_COMMENTS, MODEL_NOT_ALLOWED_COMMENTS, MODEL_UNKNOWN_COMMENT, modelUnknownComment, NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, OVERLAY_REFUSED_COMMENT, PARKED_COMMENT, PARKED_COMMENT_PR, RECOVERY_COMMENTS, REFUSAL_COMMENTS, TERMINAL_COMMENTS, VENUE_BUNDLE_REFUSED_COMMENT, VENUE_REFUSED_COMMENT, parkedComment } from "./comment-tables.mjs";
+import { MODEL_AGENTS_INVALID_COMMENT, APPROVAL_COMMENTS, APPROVAL_PARK_NEWER_COMMENT, BUNDLE_COMMENTS, HELD_TAKEN_COMMENT, JOB_USER_COMMENTS, MODEL_NOT_ALLOWED_COMMENTS, MODEL_UNKNOWN_COMMENT, modelUnknownComment, NETNS_KEEPER_CRASH_LOOP, NETNS_KEEPER_NOT_HOLDING, OVERLAY_REFUSED_COMMENT, PARKED_COMMENT, PARKED_COMMENT_PR, RECOVERY_COMMENTS, REFUSAL_COMMENTS, TERMINAL_COMMENTS, VENUE_BUNDLE_REFUSED_COMMENT, VENUE_REFUSED_COMMENT, parkedComment } from "./comment-tables.mjs";
 
 /**
  * The forge comment's reason for each observation a floor refusal missed (issues #278 and #345), keyed like
@@ -148,10 +141,8 @@ function egressProxyFix(venue, proxy = DEFAULT_EGRESS_PROXY) {
 
 /**
  * Did the runtime never hand control to the runner (issue #227)? ONE answer for the two places that ask it (issue
- * #501): the exit-code switch, which refunds such an exit as `container-never-started`, and the token settlement,
- * which must not settle a container that never ran (the refund in the catch gives its reservation back instead).
- * Two answers could drift: a never-started exit settled at the floor AND refunded would give back twice, and one
- * neither settled nor refunded would leave its hold standing.
+ * #501): the exit-code switch, which refunds such an exit as `container-never-started`. It is one answer for every
+ * reader, so a never-started exit cannot be classified two ways.
  *
  * A detached container (issue #345) DID start, and an aborted one is classified by its flag first, so neither is
  * never-started whatever its code. The runner's own three codes are never the venue's never-started set's to claim.
@@ -160,11 +151,6 @@ export function isNeverStartedExit({ code, aborted, detached }, neverStartedCode
 	if (detached === true || aborted) return false;
 	if (code === EXIT_COMPLETED || code === EXIT_POLICY || code === EXIT_INFRA) return false;
 	return (neverStartedCodes ?? []).includes(code);
-}
-
-/** The key prefixes of a job's model token ledgers (`modelTokenRows`), to tell a model window's keys in a hold apart. */
-function modelPrefixesOf(modelTokens) {
-	return new Set((modelTokens ?? []).map((m) => m.keyPrefix));
 }
 
 /**
@@ -199,8 +185,8 @@ async function claimConsoleTrail(redis, job, log) {
 	}
 }
 
-// `callableModelRefs` (the models a job may call) moved to reserve-estimate.mjs (issue #642) with the zero-rated test
-// it feeds, so the console's reserve estimate and this processor's reserve judge one rule (`zeroRatedFor`).
+// `callableModelRefs` (the models a job may call) lives in reserve-estimate.mjs (issue #642); the processor reads it
+// for its egress credential-host set.
 
 // ── Durable runs (issue #645) ───────────────────────────────────────────────────────────────────────────────────────
 
@@ -273,7 +259,7 @@ function tagDurable(e, d) {
 
 /**
  * The run reached its final outcome (a completed or policy result): remove its checkpoint store entry, its Valkey
- * pointer and its budget ledger. Each best effort and logged by name, never thrown: every one has a TTL or a sweep
+ * pointer. Each best effort and logged by name, never thrown: every one has a TTL or a sweep
  * behind it, and a cleanup fault must not turn a finished run into a failure.
  */
 async function endDurableRun(d, deps) {
@@ -294,7 +280,7 @@ async function endDurableRun(d, deps) {
 		const done = typeof deps.removeCheckpointPointer === "function" ? await deps.removeCheckpointPointer({ runId: d.runId }) : await removePointerDefault({ redis: deps.redis, runId: d.runId });
 		return done === false ? { error: "unanswered" } : null;
 	});
-	if (deps.runBudgetLedger) await quietly("ledger", () => deps.runBudgetLedger.remove(d.runId));
+	if (deps.runAttempts) await quietly("attempts", () => deps.runAttempts.remove(d.runId));
 }
 
 /** A confirmed draft still belongs to the forge/account where it was captured. Check before even a
@@ -347,7 +333,7 @@ function withCanaryLoad(result, facts) {
 }
 
 async function runJobInner(job, deps) {
-	// Queue fields never confer approval authority. Resolve the host-owned decision before the mint or any reserve.
+	// Queue fields never confer approval authority. Resolve the host-owned decision before the mint or the clone.
 	job = { ...job };
 	delete job.approvalDecision;
 	let approval = null;
@@ -357,7 +343,7 @@ async function runJobInner(job, deps) {
 		approval = await deps.approvalRuntime.before({ ...job, id });
 		if (approval.error) throw new InfraRetry("approval state could not be read", { reason: "container-never-started", budgetReserved: false });
 		// Issue #761: the live triggers file was written by a newer pi-dispatch, so this build cannot judge the approval
-		// declaration. Before the mint and every reserve, and before any request is decided or claimed: the job waits for
+		// declaration. Before the mint and the prepare, and before any request is decided or claimed: the job waits for
 		// a worker that reads the file (`newer-release`), never refused, so neither the delivery nor the decision is lost.
 		if (approval.newer === true) throw new NewerReleaseHold("the triggers file");
 		if (!approval.ok) {
@@ -376,7 +362,6 @@ async function runJobInner(job, deps) {
 				}
 			}
 		}
-		if (approval.budgetCapTokens !== undefined) job.maxTokens = effectiveTokenCap(approval.budgetCapTokens, deps.deploymentMaxTokens ?? null);
 		deps = { ...deps, approvalRequest: approval.request ?? null, approvalJobId: id };
 	}
 
@@ -398,11 +383,11 @@ async function runJobInner(job, deps) {
 		tagDurable(e, durable);
 		tagBundle(e, bundleFacts);
 		// A RECOVERY job has one attempt (recovery-queue.mjs), so a never-started retry would fail it for good over a
-		// blip (a pointer read, a ledger write, a restore that met a lock). Every such throw becomes a wait hold instead:
+		// blip (a pointer read, a restore that met a lock). Every such throw becomes a wait hold instead:
 		// `makeProcessor` delays it without spending the attempt, and the run's recovery deadline (`recoverBy`, the
 		// host-lost sweep) bounds how long it can wait. Nothing was started, so nothing is lost by asking again.
 		if (durable.isRecovery && e instanceof InfraRetry && e.reason === "container-never-started" && !(e instanceof RecoveryWaitHold)) {
-			const hold = new RecoveryWaitHold(e.message, { cause: e, reason: e.reason, provider: e.provider, model: e.model, budgetReserved: e.budgetReserved, tokensWindows: e.tokensWindows, resources: e.resources, exitCode: e.exitCode, turns: e.turns, tokens: e.tokens, session: e.session, usage: e.usage, waitMs: RECOVERY_RETRY_WAIT_MS });
+			const hold = new RecoveryWaitHold(e.message, { cause: e, reason: e.reason, provider: e.provider, model: e.model, budgetReserved: e.budgetReserved, resources: e.resources, exitCode: e.exitCode, turns: e.turns, tokens: e.tokens, session: e.session, usage: e.usage, waitMs: RECOVERY_RETRY_WAIT_MS });
 			tagDurable(hold, durable);
 			tagBundle(hold, bundleFacts);
 			deps?.log?.("recovery_retry_held", { delayMs: RECOVERY_RETRY_WAIT_MS });
@@ -607,48 +592,10 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// or a github job with no /outbox -- chains nothing. It NEVER throws (outbox.mjs), so its counts are
 		// additive telemetry that can never flip the parent's completed outcome (CONST-RETRY-INFRA-ONLY).
 		collectChain = async () => ({ enqueued: 0, refused: 0 }),
-		// The plan collector (issue #505, outbox-plan.mjs): a completed portfolio job's `/outbox/priorities.json`, handed to
-		// applyPlan. Called on the completed branch only, after collectChain, with the pickup's `portfolio` decision. It
-		// NEVER throws, so a refused plan is a recorded outcome of a completed job and never a retry. The default collects
-		// nothing (null: no plan), so a wiring that omits it records `plan: null`.
-		collectPlan = async () => null,
 		collectWatch = async () => {},
-		// The deployment's token windows `{ day, week, month }` in tokens (each null when unset), or
-		// null when no window is set. Null is the default and the off switch: nothing is reserved or settled and no
-		// `budget:tok:*` key is written, so a deployment with no token setting is byte-identical.
-		tokenCaps = null,
-		// Issues #501 part 5 and #502 part 6 (scoped-limits.json version 2): this job's repo or folder token windows,
-		// `{ scope, keyPrefix, caps }` from `tokenCapsFor`, or null; and the model token windows it reserves in,
-		// `[{ ref, keyPrefix, caps }]` from `modelTokenRows` over its effective list (every model row when it has
-		// none). Both default to nothing, so an unwired processor reserves exactly what it did before.
-		scopedTokens = null,
-		// Issue #499 part B: this job's project row's token windows, `{ scope, keyPrefix, caps }` from
-		// `projectTokenCapsFor` with the project resolved at pickup, or null. Reserved after the repo or folder row's.
-		projectTokens = null,
-		modelTokens = [],
-		// Issue #504 part B (DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE): under an envelope, `governedTokens` narrows the
-		// ledgers above by the applied split, and these three ride beside them. `otherTokens` is `_other`'s ledger
-		// (`{ scope, keyPrefix, caps, capSource }`), for a job in no envelope project; `tokenCapSource` says, per window,
-		// whether the deployment cap came from the operator or the envelope total (`scopedTokens` and `projectTokens`
-		// carry their own `capSource`). `envelopeMismatch` is the pickup's verdict that this host's envelope is not the
-		// applied split's (true), or that it has none while one is applied ("no-envelope"). All default to nothing, so a deployment with no envelope is byte-identical.
-		otherTokens = null,
-		tokenCapSource = null,
-		envelopeMismatch = false,
-		// Issue #761: the endpoint tag of the Valkey this worker's token counters live in (`valkeyEndpointTag`), which the
-		// record's `tokensWindows.reservedIn` carries so doctor sums only the records of the counter it reads. Null (an unwired
-		// processor) writes no `reservedIn`, so such a record keeps the shape it had.
-		valkeyTag = null,
-		// Issue #505: whether the LIVE triggers file still flags this job's cron trigger `run.portfolio: true`, as
-		// `(job) => boolean`, and this host's envelope `delegation` block (`{ enabled, writers }`), null with no envelope.
-		// The flag on the job data is what the trigger said when the job was queued; the file is what the operator says
-		// now, so removing the flag takes effect for a job already queued. The default answers "not flagged": an unwired
-		// processor treats every job as an ordinary one, which is what a job with no confirmed flag is.
-		checkPortfolioFlag = async () => false,
-		envelopeDelegation = null,
 		// Issue #504 part B: the project decided at pickup on the folder as named, and a function giving the project of a
 		// folder from the same projects snapshot. A local job whose RESOLVED folder belongs to another project is refused
-		// after prepare, before any reserve. Absent on a bare wiring, which checks nothing.
+		// after prepare, before the container. Absent on a bare wiring, which checks nothing.
 		pickupProject = null,
 		folderProject = null,
 		// Issue #596: the job's size `{ memMiB, cpuCenti, source }`, resolved at pickup from the same limits snapshot as
@@ -664,7 +611,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		builtinModel = () => null,
 		// Issue #645, durable runs. Every one defaults to inert, and none is read unless the job armed `run.recover`, so an
 		// unwired processor runs every other job exactly as before. `workspaceCheckpointer` is workspace-checkpoint.mjs's
-		// (null when PI_CHECKPOINTS_DIR is unset), `runBudgetLedger` run-budget-ledger.mjs's, `readCheckpointPointer`
+		// (null when PI_CHECKPOINTS_DIR is unset), `readCheckpointPointer`
 		// `({ runId }) => pointer | null` and `enqueueRecovery` `({ job, cause, pointer }) => { enqueued, jobId, n } |
 		// { enqueued: false, reason }` (recovery-queue.mjs, bound to the real BullMQ job by the wiring). `stageRecovered`
 		// is the session store's (session-store.mjs). `resetTrustPaths` is trust-paths.mjs's. `runningJobs` is the
@@ -674,13 +621,15 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		forkStore = null,
 		checkForkPolicy = async () => ({ refused: "fork-policy-unavailable" }),
 		checkThinking = async () => false,
-		runBudgetLedger = null,
+		// `{ nextSeq(runId), remove(runId) }` (run-attempt.mjs): the run's durable container sequence, which names
+		// every checkpoint's `attempt` and every fork point's capture. Null on a bare wiring; an armed job refuses
+		// as never-started rather than run without a number (below).
+		runAttempts = null,
 		readCheckpointPointer = null,
 		enqueueRecovery = null,
 		stageRecovered = null,
 		resetTrustPaths = resetTrustPathsDefault,
 		runningJobs = null,
-		onTokenHold = () => {},
 		hostName = null,
 		// `({ runId, pointer, attempt }) => { seq } | { skipped }` (start.mjs): a salvage checkpoint from a crashed attempt's
 		// job directory still on this host, asked for a recovery job before its manifest is read. Null takes none.
@@ -707,9 +656,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		return { outcome: "policy", reason, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false };
 	};
 	let transcriptPath = null;
-	// Whether this attempt's token hold has a durable record (`recordHold`): only then do its settle and release go through
-	// the ledger's compare-and-set. A hold that failed to be recorded is given back directly, since no one else can see it.
-	let holdRecorded = false;
 
 	// "Forge-backed" is the negation of local, not an enumeration of forges: a job that is not editing a
 	// folder on this host is working against a remote, and every gate below applies for the same reason
@@ -728,24 +674,14 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 	let watchUsage = null;
 	let watchPolicyRefused = false;
 	// Set once `runContainer` has RESOLVED, which is the only moment a container is known to have run. The
-	// config classifier in the catch releases the token hold, and its whole justification is that nothing was
-	// spent; without a fact to test, that is a claim about where config throws happen to live today rather
-	// than a property of the code. A config-tagged throw raised after a paid run would otherwise release a hold
-	// the container really spent AND tell the operator publicly that nothing was.
+	// config classifier in the catch uses it to separate a determinate pre-container refusal from a paid run;
+	// without a fact to test, that is a claim about where config throws happen to live today rather than a
+	// property of the code.
 	//
 	// AFTER the await and not before, deliberately: `runContainer` resolves the credential and assembles the
 	// env before it spawns anything, so its config throws (an unconfigured provider, an unknown forge kind)
-	// happen with no container started at all -- and those are exactly what the classifier exists to release.
-	// A spawn fault that fails between is an InfraRetry carrying `container-never-started`, handled by the
-	// never-started arm, which has a discriminator of its own.
+	// happen with no container started at all.
 	let containerRan = false;
-	// The token reservation still standing (reserveTokens' hold), null when none was
-	// taken or once it has been settled or given back, so no path can settle or refund it twice. `tokensWindows` is
-	// what the record says about it (INT-RUN-HISTORY-FILE-CONTRACT), null until the reservation step ran.
-	let tokenHold = null;
-	// A reporting failure must never change admission, settlement or the result of a paid run.
-	const publishTokenHold = (hold) => { try { onTokenHold(hold); } catch {} };
-	let tokensWindows = null;
 	// Issue #596: what the container used (`resources` off its exit line), null until a container ran and reported it.
 	let resources = null;
 	// Issue #644: the run's progress summary (run-progress.mjs `summary`), null until a container ran with the reducer on.
@@ -841,7 +777,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// change after boot and every later job's provider key and forge token would follow it. FREE and
 		// pre-spend: a refusal that will recur on every job must not cost each one a slot. Determinate is a
 		// RETURN (CONST-RETRY-INFRA-ONLY); a CLI that could not be asked for a transient reason is a throw,
-		// pre-reserve, so the refund is a no-op.
+		// pre-spend, so there is nothing to refund.
 		//
 		// AHEAD of the image and egress preflights, not beside them, because both of those talk to the daemon
 		// this gate is about: on a redirected CLI an unreachable daemon made the image inspect throw a retry, and
@@ -928,7 +864,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			log("refused_image_missing", { image: img.missing });
 			// The image ref is operator-authored config (PI_JOB_IMAGE), never payload, so naming it is PII-safe
 			// -- the same class as `repo` above.
-			// exitCode/turns/tokens null and budgetReserved false: refused pre-container AND pre-reserve.
+			// exitCode/turns/tokens null and budgetReserved false: refused pre-container and pre-spend.
 			// provider/model ride every terminal result from here down (INT-RUN-HISTORY-FILE-CONTRACT):
 			// runJob's `job` IS the effectiveJob (index.mjs), so these are the HOST-effective,
 			// overlay-resolved dispatch facts -- never anything a container printed -- and even a
@@ -982,7 +918,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		if (img.unavailable) {
 			// docker itself did not answer -- transient infra, NOT a determinate refusal. THROWN so BullMQ
 			// retries (CONST-RETRY-INFRA-ONLY). `container-never-started` is literally true here, and it reuses
-			// the refund path below: a no-op pre-reserve, and still honest if this gate ever moves.
+			// the refund path below: a no-op refund, and still honest if this gate ever moves.
 			// provider/model attribute even this pre-container death; no usage -- nothing ran to emit one.
 			throw new InfraRetry(runtimeUnavailable(resolveBackendName(job, blessedBackends[0]), "image preflight"), { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
 		}
@@ -1010,7 +946,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 
 		// Issue #502, two free gates on the job's models, BEFORE the credential gate so a typo in a model or provider
 		// id is named as itself rather than as a missing key, and so before the egress probe, the secret resolvers,
-		// the mint, the clone, the token-cap read and both reserves (CONST-BUDGET-BEFORE-TOKENS). Both read the
+		// the mint and the clone (CONST-BUDGET-BEFORE-TOKENS). Both read the
 		// EFFECTIVE job (index.mjs `effectiveJobOf`): the main model after the `job.data > overlay > env` fill, and
 		// the list as `job.data.models ?? PI_ALLOWED_MODELS`. Checking `job.data` alone would wave through a model
 		// the overlay or the env supplied, which is the common case: most forge triggers name none.
@@ -1073,7 +1009,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// Is there a credential to run this job with at all? FREE, determinate and I/O-light: a pure function
 		// of the job's provider, the worker env, and (only when the env has no key) one small readFileSync of
 		// pi's auth.json. So it goes here, with the other free gates, which is further than issue #310 asked
-		// for: ahead of the image probe, the mint, the clone, the token-cap read and both reserves. That is
+		// for: ahead of the image probe, the mint and the clone. That is
 		// CONST-BUDGET-BEFORE-TOKENS in its own words, "every gate that costs nothing runs before every gate
 		// that costs something".
 		//
@@ -1082,7 +1018,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// EVERY job of EVERY kind on this host, so it is the fault an operator must fix first either way, and
 		// a missing credential is in exactly that class -- on a host with both, the reported reason should be
 		// the one that was already the rule. Everything the gate is actually FOR is still below it: the egress
-		// probe, the secret resolvers, the mint, the clone, the token-cap read and both reserves.
+		// probe, the secret resolvers, the mint and the clone.
 		//
 		// It used to be discovered inside runContainer, where buildContainerEnv resolves the credential for
 		// real -- AFTER both reserves -- and the throw fell through this function's catch to a bare rethrow.
@@ -1095,50 +1031,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// `modelEndpoints` is the pickup's snapshot (issue #503), handed to the gate and to runContainer alike, so a
 		// keyless provider passes here and gets its PI_DISPATCH_KEYLESS there from ONE read of the declaration. runContainer
 		// is handed it only when an endpoint is declared, so with none its context is byte-identical to before.
-		// THE ENVELOPE GATE (issue #504 part B, DES-DELEGATED-ALLOCATION-INSIDE-ENVELOPE): this host's envelope digest is not
-		// the applied split's, so the split this job would be judged against was computed for another envelope. FREE and
-		// determinate (the pickup read decided it), so it sits with the free gates, before the mint, the clone, the
-		// token-cap read and every reserve (CONST-BUDGET-BEFORE-TOKENS), and it RETURNS: a retry meets the same envelope
-		// until the operator makes the hosts agree (CONST-RETRY-INFRA-ONLY). Refusing is loud and money-safe; judging one
-		// split against two envelopes is neither.
-		// `envelopeMismatch` is true (this host's envelope is another one) or "no-envelope" (it has none while the fleet has
-		// an applied split): one reason, two texts, since the fix differs.
-		if (envelopeMismatch === true || envelopeMismatch === "no-envelope") {
-			const absent = envelopeMismatch === "no-envelope";
-			await comment(
-				job,
-				absent
-					? ENVELOPE_MISMATCH_COMMENTS["no-envelope"]
-					: ENVELOPE_MISMATCH_COMMENTS.mismatch,
-			);
-			log("refused_envelope_mismatch", absent ? { envelope: "none" } : {});
-			return { outcome: "policy", reason: ENVELOPE_MISMATCH_REASON, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
-		}
-
-		// THE PORTFOLIO GATE (issue #505, `portfolio-no-envelope`). A portfolio job exists to write a priorities plan, and a
-		// plan applies only on a host whose envelope has delegation on with `portfolio-job` among its writers. Without
-		// that the plan is refused after the job has paid to write it, so the job is refused here instead: FREE (the
-		// envelope was read at boot or reload, the triggers file is one local read), before the mint, the clone, the
-		// token-cap read and every reserve (CONST-BUDGET-BEFORE-TOKENS), and RETURNED, since a retry meets the same
-		// envelope (CONST-RETRY-INFRA-ONLY). After the envelope gate, which names the host-wide fault first.
-		//
-		// The live flag comes FIRST. The job data says what the trigger said when it was queued; the live file says what
-		// the operator says now. A job whose trigger no longer flags it (or whose file cannot be read) is an ordinary
-		// cron job: it runs unflagged and passes this gate, rather than being refused for a flag nobody holds any more.
-		// Only a job with a cron `trigger` and no chain fields is asked about at all: a manual run and a chained child can
-		// never be a portfolio job, whatever their data says.
-		const portfolio = job.portfolio === true && job.trigger !== undefined && job.parentJobId === undefined && job.chainDepth === undefined && (await Promise.resolve().then(() => checkPortfolioFlag(job)).catch(() => false)) === true;
-		if (portfolio) {
-			const delegation = envelopeDelegation;
-			const why = delegation === null || delegation === undefined ? "no-envelope" : delegation.enabled !== true ? "delegation-off" : !Array.isArray(delegation.writers) || !delegation.writers.includes("portfolio-job") ? "writer-not-allowed" : null;
-			if (why !== null) {
-				// No comment: a portfolio job is always local, and a local job has no issue to comment on. `why` is a
-				// fixed token, so the log says which of the three the operator has to change.
-				log("refused_portfolio_no_envelope", { why });
-				return { outcome: "policy", reason: PORTFOLIO_NO_ENVELOPE, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
-			}
-		}
-
 		const credentialJobs = [job];
 		if (job.watch && job.watchDecisionModel && job.watchDecisionModel.provider !== job.provider) credentialJobs.push({ ...job, provider: job.watchDecisionModel.provider, model: job.watchDecisionModel.id });
 		if (job.questionGrouping && job.questionGroupModel && job.questionGroupModel.provider !== job.provider) credentialJobs.push({ ...job, provider: job.questionGroupModel.provider, model: job.questionGroupModel.id });
@@ -1201,8 +1093,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// PLACEMENT, and it is the same ladder the image preflight sits at the top of. A missing proxy blocks
 		// EVERY job of EVERY kind on this host -- like a missing image -- and unlike a missing image it blocks
 		// them EXPENSIVELY: the container starts, the provider is unreachable, the runner exits 1, exit 1 is
-		// the retryable class, `attempts: 2`, and a retry that never started is the only case that gives its
-		// token hold back -- this container started. So each such job pays for two attempts and buys nothing
+		// the retryable class, `attempts: 2`, and a retry that never started is the only case that gives anything
+		// back -- this container started. So each such job pays for two attempts and buys nothing
 		// with either, and a cron-driven deployment burns that money before anyone reads the first failure.
 		// That cost is what makes this a pre-spend gate rather than a doc: measured at three provider attempts,
 		// `Request timed out.`, exit 1, ~40 seconds, zero tokens (docs/egress.md).
@@ -1224,7 +1116,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				tokens: null,
 				provider: job.provider ?? null,
 				model: job.model ?? null,
-				budgetReserved: false, // refused before any reserve, so nothing was consumed
+				budgetReserved: false, // refused before anything spends, so nothing was consumed
 			};
 		}
 		if (egress.unavailable && egress.keeper) {
@@ -1243,7 +1135,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		if (egress.unavailable) {
 			// The daemon did not answer, so this is indeterminate rather than a refusal -- the same
 			// determinate/indeterminate split the image preflight draws one gate up, and thrown for the same
-			// reason. Pre-reserve, so the refund below is a no-op and still honest if this gate ever moves.
+			// reason. Pre-spend, so the refund below is a no-op and still honest if this gate ever moves.
 			// With a proxy STATE (issue #453, gate round 3): the daemon answered and the proxy is on its way somewhere
 			// (restarting, created, ...), so the words name the proxy and its state rather than blaming the runtime.
 			const said = typeof egress.state === "string" ? `egress proxy "${egress.unavailable}" is ${egress.state}, not running; the job is retried once, then failed` : runtimeUnavailable(resolveBackendName(job, blessedBackends[0]), "egress preflight");
@@ -1263,9 +1155,9 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// values already in hand -- so it belongs among the free policy refusals and strictly before
 		// anything that spends: before the mint (no credential is needed to know the answer, so none is
 		// created only to be discarded), before the branch check's API call, before prepareWorkspace's
-		// clone, before every reserve -- hence `budgetReserved:
-		// false`. It sits AFTER the image preflight for the reporting reason the token-cap comment below
-		// already states: a missing image blocks EVERY job of EVERY kind on this host, so it is the one an
+		// clone, before anything spends -- hence `budgetReserved:
+		// false`. It sits AFTER the image preflight for the reporting reason the comment above already
+		// states: a missing image blocks EVERY job of EVERY kind on this host, so it is the one an
 		// operator must fix first either way, while this blocks only the triggers that armed the flag.
 		//
 		// Strict `=== true`, the same test prepare-github.mjs uses to decide whether to resolve a session at
@@ -1288,9 +1180,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			if (!isRecovery && !forkStore) return await forkRefusal("fork-source-store-unset");
 			const policy = await checkForkPolicy(job);
 			if (policy?.ok !== true) return await forkRefusal(policy?.refused ?? "fork-policy-unavailable");
-			const expected = job.forkReserveTokens;
-			if (expected !== null && (!Number.isSafeInteger(expected) || expected < 0)) return await forkRefusal("fork-request-invalid");
-			if (expected !== null && (expected === 0 || !Number.isSafeInteger(job.maxTokens) || job.maxTokens > expected)) return await forkRefusal("fork-reservation-changed");
 			const sourceKey = sessionKeyFor({ ...job, fork: undefined });
 			if (sourceKey !== job.fork.rootKey) return await forkRefusal("fork-source-target-mismatch");
 			// A recovery continues THIS fork's checkpoint; selecting the parent's original point again loses its work.
@@ -1316,7 +1205,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// and the store's path is the one setting SECURITY.md calls a PII store. `kind` is host-assigned,
 			// the same PII class as the `repo` on the branch refusal below.
 			log("refused_sessions_dir_unset", { kind: job.kind ?? null });
-			// exitCode/turns/tokens null and budgetReserved false: refused pre-container AND pre-reserve,
+			// exitCode/turns/tokens null and budgetReserved false: refused pre-container and pre-spend,
 			// exactly as the image refusals above. RETURNED, not thrown: an unset environment variable is
 			// determinate, and no number of retries sets it (CONST-RETRY-INFRA-ONLY).
 			return { outcome: "policy", reason: "sessions-dir-unset", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
@@ -1324,19 +1213,27 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 
 		// Issue #645, durable runs: `run.recover`'s free refusals, here beside run.resume's and for its reasons. Free (a
 		// value in hand, a Valkey GET, a manifest read off this host's disk), determinate, and strictly before the mint,
-		// the clone, the token-cap read and every reserve (CONST-BUDGET-BEFORE-TOKENS).
+		// the clone (CONST-BUDGET-BEFORE-TOKENS).
 		//
 		// The store's absence is run.resume's one fail-CLOSED case again: without a checkpoint store nothing is kept, a
 		// lost run is retried from scratch, and the job still looks protected. A wiring that has a store but not the
-		// rest of the machinery (a ledger, the pointer read, the enqueuer) is a defect of this build, not of the operator's
-		// settings, so it is a config refusal: refunded, `doctor`-pointed, never run half-armed.
+		// rest of the machinery (the pointer read, the enqueuer) is a defect of this build, not of the operator's
+		// settings, so it is a config refusal: `doctor`-pointed, never run half-armed.
 		if (armed && !workspaceCheckpointer) {
 			await comment(job, RECOVERY_COMMENTS["recover-store-unset"]);
 			log("refused_checkpoints_dir_unset", { kind: job.kind ?? null });
 			return { outcome: "policy", reason: "recover-store-unset", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
 		}
-		if (armed && (!runBudgetLedger || typeof readCheckpointPointer !== "function" || typeof enqueueRecovery !== "function")) {
-			throw configError("run.recover is armed, and this worker was built without the run budget ledger, the checkpoint pointer read or the recovery enqueuer");
+		if (armed && (typeof readCheckpointPointer !== "function" || typeof enqueueRecovery !== "function")) {
+			throw configError("run.recover is armed, and this worker was built without the checkpoint pointer read or the recovery enqueuer");
+		}
+		// Issue #645: an armed run must have its container sequence. Without one no checkpoint can name the
+		// container it came from, so this is a wiring defect refused as never-started (not a config refusal:
+		// the operator's settings are fine, and the job can succeed on a worker wired for durable runs). Before
+		// the mint and the clone, so a bare wiring spends nothing on a run it cannot checkpoint.
+		if (armed && typeof runAttempts?.nextSeq !== "function") {
+			log("run_attempt_seq_failed", { code: "unwired" });
+			throw new InfraRetry("the run's container number could not be taken", { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
 		}
 		if (isRecovery) {
 			const n = durable.recovery;
@@ -1444,7 +1341,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// its flow WITHOUT the skills it was written against, produce a plausible report, and exit 0. Free
 		// and determinate -- one lstat, no credential needed to know the answer -- so it belongs among the
 		// free refusals and strictly before anything that spends: before the mint (no token is created only
-		// to be discarded), before the clone, before the token-cap read and before any reserve
+		// to be discarded), before the clone
 		// (CONST-BUDGET-BEFORE-TOKENS). Last among the free gates because it is the NARROWEST: a missing
 		// image blocks every job on this host, an unset sessions dir blocks every armed trigger, a bad
 		// skillsDir blocks one trigger.
@@ -1493,12 +1390,12 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 
 		// PROJECT SECRET BUNDLES, the free half (issue #704, REQ-TRIGGER-SECRETS, DES-PROJECT-SECRET-BUNDLES). WHICH jobs
-		// get their project's bundle is decided here, before the mint, the clone and every reserve, from one cached read
+		// get their project's bundle is decided here, before the mint and the clone, from one cached read
 		// of the triggers file and the host's declarations: no spawn, no network (CONST-BUDGET-BEFORE-TOKENS). The read
 		// itself comes after the run.secrets resolver and, like it, before the mint, except for a pull request that needs
 		// the fork check: that one needs the forge and the job's token, so its read follows the mint (below).
 		//
-		// TRIGGER-MADE JOBS ONLY, and the predicate is the portfolio gate's: a chained `/outbox` child and every manual
+		// TRIGGER-MADE JOBS ONLY: a chained `/outbox` child and every manual
 		// run (`pi-dispatch run`, `/dispatch run`, `dispatch_run`) hold none, each recorded as `bundleSkipped`. The
 		// operator's grant was to the triggers they reviewed, not to what a job queues next or what a model asks for
 		// (outbox.mjs keeps `run.secrets` off children for the same reason). Chained is asked first: a child may carry
@@ -1567,12 +1464,12 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// flow with those variables UNSET, get a 401 from whatever it was meant to reach, write a plausible
 		// report about why the integration is down, and exit 0.
 		//
-		// PLACEMENT. Strictly before the mint below, the clone in prepareWorkspace, the token-cap read and
-		// the token reserve, so a refusal here costs nothing (CONST-BUDGET-BEFORE-TOKENS). But it is NOT one of the
+		// PLACEMENT. Strictly before the mint below and the clone in prepareWorkspace, so a refusal here costs
+		// nothing (CONST-BUDGET-BEFORE-TOKENS). But it is NOT one of the
 		// "free, determinate, credential-less and I/O-less" gates above, and this comment must not claim it is:
 		// resolving spawns a subprocess per reference against the operator's manager, which is none of those
 		// four things. The precedent it actually follows is one gate LATER -- prepareWorkspace already performs
-		// a full network clone before the budget is reserved. An I/O-bound pre-budget step is established here;
+		// a full network clone before the container is started. An I/O-bound pre-budget step is established here;
 		// a free one it is not. It sits last among the pre-mint gates because it is both the narrowest and the
 		// only one that can block, so every cheaper answer is already in hand when it runs.
 		//
@@ -1713,7 +1610,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// PROJECT SECRET BUNDLES, the read (issue #704). ONE resolver call, then the strict parse, the reserved names and
 		// the merge. BEFORE the mint for every job that needs no fork check (CONST-BUDGET-BEFORE-TOKENS: its determinate
 		// refusals spend nothing, not even a token), and right after the mint for a pull request whose head must be asked
-		// of the forge first; either way before branch protection, the clone, the token-cap read and every reserve.
+		// of the forge first; either way before branch protection, the clone.
 		// Returns null, or the result to return.
 		const readBundle = async () => {
 			if (bundleBinding === null) return null;
@@ -1804,14 +1701,14 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// Defense-in-depth at the DI seam: mintToken is injected, so we cannot assume it routed
 			// through get-token's own empty-token guard. An empty credential here would reach
 			// env-allowlist's `if (githubToken)` as a falsy value -> GITHUB_TOKEN omitted -> an
-			// anonymous paid run. Refuse before any reserve so a bad token spends nothing.
+			// anonymous paid run. Refuse before anything spends so a bad token spends nothing.
 			if (typeof token !== "string" || token.trim() === "") {
 				throw configError("mintToken returned an empty credential");
 			}
 		}
 
 		// PROJECT SECRET BUNDLES, the fork check (issue #704). AFTER the mint, because it needs the job's own token, and
-		// BEFORE branch protection, the clone, the token-cap read and every reserve, so a refusal of the read that follows
+		// BEFORE branch protection, the clone, so a refusal of the read that follows
 		// still spends nothing but the minted token (CONST-BUDGET-BEFORE-TOKENS: every free refusal stays above the mint,
 		// and so does the read of every job that needs no fork check). A refusal past the mint leaves that token to
 		// expire, exactly as the unprotected-branch refusal below does: it is scoped to this job's repository and
@@ -1869,19 +1766,17 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			}
 		}
 
-		// `portfolio` (issue #505) only for a job the gate above confirmed: prepare then writes /job/portfolio.json, after
-		// asking the live file once more. Absent otherwise, so every other job's prepare call is unchanged.
 		// The existing read-only event file carries accepted human text. Environment/exec metadata stays id-only,
 		// including on gateways that log their exec argv. Keep the queued command for the operator's forge trail.
 		const stagedJob = job.approvalDecision ? { ...job, trigger: { ...job.trigger, comment: { ...job.trigger?.comment, body: job.approvalDecision.text ?? "" } } } : job;
-		prepared = await prepareWorkspace(stagedJob, token, { piVersion, jobUser: { user: jobUser?.user ?? null, home: jobUser?.home ?? null }, ...(portfolio ? { portfolio: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(mcpChecked.document ? { mcp: mcpChecked.document } : {}), ...(job.watch ? { watchSecrets: secrets } : {}), ...(isRecovery ? { pin: { sha: manifest.workspace.baseSha, from: workspaceCheckpointer.baseSourceUrl(runId) } } : forkSource ? { pin: { sha: forkSource.manifest.baseSha, from: forkStore.baseSourceUrl(job.fork.fromJob) } } : {}) }); // resolves SHA, clones, materialises .pi/, writes prompt
+		prepared = await prepareWorkspace(stagedJob, token, { piVersion, jobUser: { user: jobUser?.user ?? null, home: jobUser?.home ?? null } , ...(jobSize ? { size: jobSize } : {}), ...(mcpChecked.document ? { mcp: mcpChecked.document } : {}), ...(job.watch ? { watchSecrets: secrets } : {}), ...(isRecovery ? { pin: { sha: manifest.workspace.baseSha, from: workspaceCheckpointer.baseSourceUrl(runId) } } : forkSource ? { pin: { sha: forkSource.manifest.baseSha, from: forkStore.baseSourceUrl(job.fork.fromJob) } } : {}) }); // resolves SHA, clones, materialises .pi/, writes prompt
 
 		// A determinate prepare refusal -- sha-gone (the default branch advanced past the resolved tip),
 		// or a `pi-*` materialiser cap breach (the repo's .pi/ is too large to place in /job, issue #60)
-		// -- is POLICY: return before any reserve so it spends nothing and is never retried.
+		// -- is POLICY: return before anything spends so it spends nothing and is never retried.
 		// Mirrors the branch-protection policy return above. Spread-plus-attribution: the prepare
 		// result keeps its own reason and fields, and the host-effective provider/model land beside
-		// them exactly as on every other terminal result. `budgetReserved: false` like every pre-reserve refusal (issue
+		// them exactly as on every other terminal result. `budgetReserved: false` like every pre-spend refusal (issue
 		// #507): nothing was reserved and no container started, so the record says so and the cost fold counts the run as
 		// an exact $0 rather than a floor (REQ-COST-ANALYTICS (d)). After the spread, so no preparer can say otherwise.
 		if (prepared?.outcome === "policy") {
@@ -1912,7 +1807,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// THE RESOLVED FOLDER'S PROJECT (issue #504 part B). The pickup decided the project, and so the share a job reserves
 		// against, from the folder AS NAMED; the container mounts the folder prepare RESOLVED. A link or a case variant
 		// inside a run root that leads into ANOTHER project's member would bill that work to the named project's share.
-		// Refused here, after prepare and before the token-cap read and every reserve: free, determinate, never retried. A
+		// Refused here, after prepare and before the mint and the clone: free, determinate, never retried. A
 		// resolved folder in no project is not refused, because the named spelling is the operator's own membership
 		// (a symlinked member is listed by the path the triggers use).
 		if (job.kind === "local" && !job.questionGrouping && typeof folderProject === "function" && typeof prepared?.workspace === "string") {
@@ -1957,7 +1852,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 
 		// Issue #645: A RECOVERY JOB'S WORKSPACE. The preparer cloned the checkpoint's base commit from the checkpoint store
 		// (`pin`), so the checkout is exactly the tree the checkpoint is a diff against; the restore applies the crashed
-		// run's work on top. All of it local and free, before the token-cap read and every reserve.
+		// run's work on top. All of it local and free, before the mint and the clone.
 		if (isRecovery) {
 			const baseSha = manifest.workspace.baseSha;
 			// The arm-time rule, again, on the base the store just handed over: a checkpoint of such a base can only exist
@@ -2024,133 +1919,22 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			await comment(job, MODEL_AGENTS_INVALID_COMMENT);
 			return { outcome: "policy", reason: "model-agents-invalid", exitCode: null, turns: null, tokens: null, provider: job.provider, model: job.model, budgetReserved: false };
 		}
-		// Issue #645: THIS CONTAINER'S NUMBER in the run (`nextSeq`: attempt 1 is 1, its retry 2, a recovery's container the
-		// next), which addresses its token hold in the run's ledger and names its checkpoints' attempt. Before the token
-		// reserve, because a hold is recorded under it: without a number there is no record, and without a record there is
-		// no hold. A recovery then settles AT THE FLOOR every hold of the run's earlier containers still `held`: those
-		// containers are dead (the base-still-running gate above holds this job until none of the run's is alive here),
-		// and their real spend is unknown, so the reservation already in every window is what they are charged
-		// (`settleCrashed`, bookkeeping only, no window key moves). A settle that failed is logged and the run goes on: the
-		// holds stay `held` and in the windows at the floor, which is the safe side, and nothing releases an earlier
-		// container's hold but that container itself.
+		// Issue #645: this attempt's number in the run, for its checkpoints' `attempt` and a fork point's capture.
+		// Taken from the run's durable container sequence (`nextSeq`: attempt 1 is 1, its retry 2, a recovery's
+		// container the next), so no two containers of one run ever name the same attempt. A number that cannot
+		// be taken is an infrastructure fault: without it the checkpoint cannot say which container it came from,
+		// so the run refuses before its container starts rather than running unprotected.
 		if (armed) {
-			const seq = await runBudgetLedger.nextSeq(runId);
+			const seq = await runAttempts.nextSeq(runId);
 			if (!Number.isSafeInteger(seq) || seq < 1) {
-				log("run_budget_seq_failed", { code: typeof seq?.error === "string" ? seq.error : "unknown" });
+				log("run_attempt_seq_failed", { code: typeof seq?.error === "string" ? seq.error : "unknown" });
 				throw new InfraRetry("the run's container number could not be taken", { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
 			}
 			durable.seq = seq;
-			if (isRecovery) {
-				const crashed = await runBudgetLedger.settleCrashed(runId, seq);
-				if (Array.isArray(crashed?.settled)) log("run_budget_settled_crashed", { holds: crashed.settled.length });
-				else log("run_budget_settle_crashed_failed", { code: typeof crashed?.error === "string" ? crashed.error : "unknown" });
-			}
-		}
-
-		// TOKEN windows (DES-TOKEN-RESERVE-AND-SETTLE), after every free gate and before the container: the last
-		// gate before the spend line (CONST-BUDGET-BEFORE-TOKENS). Every free gate comes first, so a refusal
-		// anywhere above never touches a token counter. The amount is the job's per-job token budget, which
-		// the runner's meter counts against and whose settle-time stop backs it; the worker needs no prices.
-		let containerJob = job;
-		// Every token ledger this job reserves in: the deployment's windows, its repo or folder row's, and each model
-		// row it may reach (scoped-limits.json version 2+). ONE reservation over all of them, so a refusal in any window
-		// gives back every key, the deployment's included.
-		const ledgers = tokenLedgers(tokenCaps, { scope: scopedTokens, project: projectTokens, other: otherTokens, models: modelTokens });
-		const modelPrefixes = new Map((modelTokens ?? []).map((m) => [m.keyPrefix, m.ref]));
-		// The ledgers that settle to the JOB's total (the deployment's, the repo or folder row's, the project row's), named
-		// rather than derived as "not a model", so a ledger kind added later settles nowhere until it is put on a list.
-		// `_other`'s ledger (issue #504 part B) settles to the job's total too: its counter is what the unassigned work used.
-		const jobCostPrefixes = new Set([TOKEN_KEY_PREFIX, scopedTokens?.keyPrefix, projectTokens?.keyPrefix, otherTokens?.keyPrefix].filter((p) => typeof p === "string"));
-		if (ledgers.length > 0) {
-			// A window needs a per-job token budget (the settings invariant, `checkTokenInvariant`; for a scoped or model
-			// row, the same rule), so a job with none here is a defect, a hand-built queue entry, or a token row in
-			// scoped-limits.json on a deployment with no `maxTokens`: refused as configuration, before anything is
-			// reserved, and the config arm below releases the token hold.
-			if (job.maxTokens === null || job.maxTokens === undefined) throw configError("a token window is set but this job has no per-job token budget to reserve");
-			// A job whose queued token budget reads as 0 (a malformed value, `effectiveTokenCap`) has nothing to
-			// reserve: the meter's first settle would stop it, so there is nothing the windows could be charged.
-			const refs = callableModelRefs(job);
-			const zero = zeroRatedFor(job, { modelEndpoints, builtinModel });
-			if (zero.zeroRated) {
-				containerJob = { ...job, maxTokens: 0 };
-				tokensWindows = tokensWindowsRecord({ reservedTokens: 0, settledTokens: 0, basis: "unreserved" });
-				log("token_unreserved", { models: refs.length });
-			} else {
-				let reservation;
-				try {
-					reservation = await reserveTokens(redis, { ledgers, amountTokens: job.maxTokens, now, log });
-				} catch (error) {
-					// Valkey did not answer. reserveTokens tried to give back what it had added, key by key (a key it could
-					// not is logged, token_giveback_error), so nothing is held by this job, and the job is retried:
-					// nothing started.
-					log("token_reserve_error", { code: typeof error?.code === "string" ? error.code : "error" });
-					throw new InfraRetry("the token windows could not be reserved", { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
-				}
-				if (!reservation.allowed) {
-					// Refused, and every token key it touched given back, best effort per key (the departure from the usual
-					// refused-still-counts rule, see token-budget.mjs; a key that could not be is logged and the record says
-					// floor).
-					// WHOSE NUMBER bound (issue #504 part B): `allocation-cap` when the refusing window's cap came from the applied split
-					// or the envelope total (`capSource`), `token-cap` when it was the operator's own (a tie is the operator's). One
-					// ledger and one window refused, and the reservation names both.
-					const capSourceOf = (prefix) => (prefix === TOKEN_KEY_PREFIX ? tokenCapSource : [scopedTokens, projectTokens, otherTokens].find((l) => l?.keyPrefix === prefix)?.capSource);
-					const byAllocation = capSourceOf(reservation.ledger)?.[reservation.window] === "allocation";
-					const refusalReason = byAllocation ? ALLOCATION_CAP_REASON : TOKEN_CAP_REASON;
-					// The window is named and the amounts are not: the comment's reader may be an issue author, and the
-					// amounts are the operator's, which the log carries. Which ledger refused is named too: the deployment,
-					// the repo (a forge scope IS the repo the comment posts on), "this folder" (a local scope is a host path,
-					// kept out of the comment and the log), or the model (operator configuration, never payload). The log
-					// names a scoped or model ledger by its key prefix, a hash, never the scope string.
-					const period = { day: "today's", week: "this week's", month: "this month's" }[reservation.window] ?? "a";
-					// Two different states, told apart (PR #549's review): a window whose cap is BELOW one job's budget refuses every
-					// such job until the operator changes a setting, which "no room left" would hide behind a wait that never ends.
-					const capBelowJob = reservation.capTokens < job.maxTokens;
-					// A project window (issue #499 part B) is "this project" rather than its scope, like the removed
-					// job-count project refusal did: which repos an operator groups is the operator's business.
-					const refusedBy = reservation.ledger === TOKEN_KEY_PREFIX ? "deployment" : modelPrefixes.has(reservation.ledger) ? "model" : reservation.ledger === projectTokens?.keyPrefix ? "project" : reservation.ledger === otherTokens?.keyPrefix ? "other" : "scope";
-					const whose = refusedBy === "deployment" ? "this deployment" : refusedBy === "model" ? `the model ${modelPrefixes.get(reservation.ledger)}` : refusedBy === "project" ? "this project" : refusedBy === "other" ? "the work outside the budget split's projects" : job.kind === "local" ? "this folder" : unqualifiedScope(scopedTokens.scope);
-					// The allocation's own words (issue #504 part B): the number that bound is the split inside the operator's envelope,
-					// which moves with the next priorities plan or an envelope edit, so this text never tells its reader to raise a budget.
-					const adjective = { day: "daily", week: "weekly", month: "monthly" }[reservation.window] ?? "";
-					const allocationText = capBelowJob
-						? `Refused: the ${adjective} share of the budget split for ${whose} is smaller than this run's token budget, so no container was started and nothing ran. The split changes with the next priorities plan or an envelope change. Not run.`
-						: `Refused: ${period} share of the budget split for ${whose} has no room left for this run's token budget, so no container was started and nothing ran. Not run.`;
-					await comment(
-						job,
-						byAllocation
-							? allocationText
-							: capBelowJob
-							? `Refused: the ${{ day: "daily", week: "weekly", month: "monthly" }[reservation.window] ?? ""} token budget for ${whose} is smaller than this run's token budget, so no run with this budget can start until the operator raises the budget or lowers it. No container was started and nothing ran. Not run.`
-							: `Refused: ${period} token budget for ${whose} has no room left for this run's token budget, so no container was started and nothing ran. Not run.`,
-					);
-					log("over_token_budget", { ledger: refusedBy, ...(refusedBy === "deployment" ? {} : { key: reservation.ledger }), ...(refusedBy === "model" ? { model: modelPrefixes.get(reservation.ledger) } : {}), window: reservation.window, reservedTokens: reservation.reservedTokens, capTokens: reservation.capTokens, amountTokens: job.maxTokens, ...(capBelowJob ? { capBelowJob: true } : {}), ...(byAllocation ? { source: "allocation" } : {}) });
-					const stranded = reservation.stranded > 0;
-					const modelBasis = modelPrefixes.size === 0 ? null : stranded ? "floor" : "refunded";
-					return { outcome: "policy", reason: refusalReason, exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false, tokensWindows: stranded ? tokensWindowsRecord({ reservedTokens: job.maxTokens, settledTokens: job.maxTokens, basis: "floor", modelBasis }) : tokensWindowsRecord({ reservedTokens: job.maxTokens, settledTokens: 0, basis: "refunded", modelBasis }) }; // return => not retried
-				}
-				tokenHold = reservation.hold;
-				publishTokenHold({ amountTokens: tokenHold.amountTokens, at: new Date(now).getTime() });
-				// Issue #761: every key holds the whole reservation until a settle or a release moves it, so every deployment
-				// window the hold reserved in holds what this record states (`deploymentWindowsOf`). Each later path below
-				// replaces `tokensWindows`, with the windows that hold what IT states.
-				tokensWindows = tokensWindowsRecord({ reservedTokens: job.maxTokens, settledTokens: job.maxTokens, basis: "floor", modelBasis: modelPrefixes.size > 0 ? "floor" : null, reservedIn: deploymentWindowsOf(tokenHold, { applied: 0, target: job.maxTokens, recorded: job.maxTokens, valkey: valkeyTag }) });
-				// Issue #645: an armed run never runs a container without a DURABLE record of its hold (run-budget-ledger.mjs's
-				// contract), so a recovery after a crash can see it and settle it exactly once. A record that did not land
-				// throws a never-started retry before any container; the catch gives the hold back directly (`holdRecorded`
-				// false: no one else can see it to settle or release it).
-				if (armed) {
-					const rec = await runBudgetLedger.recordHold(runId, durable.seq, tokenHold);
-					if (rec?.ok !== true) {
-						log("run_budget_hold_unrecorded", { code: typeof rec?.error === "string" ? rec.error : "unknown" });
-						throw new InfraRetry("the run's token hold could not be recorded", { reason: "container-never-started", provider: job.provider ?? null, model: job.model ?? null });
-					}
-					holdRecorded = true;
-				}
-			}
 		}
 
 		// Issue #642: ONE trail comment says who answered from the operator console and quotes what (console-answer.mjs:
-		// mentions neutralised, no control byte). Posted HERE, after every pre-spend gate and every reserve has passed and
+		// mentions neutralised, no control byte). Posted HERE, after every pre-spend gate has passed and
 		// just before the container starts, so the issue never reads "answered" above a refusal that then dropped the
 		// answer (a `not-parked`, a missing session store, a cap); and still before the provider is called, so it spends
 		// nothing (CONST-BUDGET-BEFORE-TOKENS). The `comment` adapter posts as the deployment's own identity, which the
@@ -2176,7 +1960,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// declare it is read as before, under the #542 trust rule below alone.
 		const exitAuth = (img.capabilities ?? []).includes(EXIT_AUTH_CAPABILITY);
 		// Issue #645: a FRESH armed run seeds the checkpoint store from its clone, now, before the container: the one moment
-		// the workspace's `.git` is still the worker's own (workspace-checkpoint.mjs `primeBase`). After every reserve, so a
+		// the workspace's `.git` is still the worker's own (workspace-checkpoint.mjs `primeBase`). After every gate, so a
 		// refused job never writes to the store. A recovery's base is already there. A base that could not be primed means
 		// no checkpoint of this run can ever be restored: the run goes on unprotected and the record says so.
 		let checkpointArgs = null;
@@ -2204,7 +1988,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 		if (job.watch?.stage === "decision") await deps.watchRuntime?.started(job);
 		if (subscriptionAuth.length > 0 && !(await validateSubscriptionAuth(subscriptionAuth))) throw new InfraRetry("subscription binding changed before container start", { reason: "container-never-started", budgetReserved: false });
-		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null } = await runContainer({ job: containerJob, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
+		const { canaryLoad: canaryLoadOfRun = null, code, aborted, abortReason, turns, tokens, session, usage, context, detached, exitReason, approval: approvalMetadata = null, exitLineCode = null, exitAuth: exitAuthResult = null, exitOomKilled = false, memoryLimit = null, resources: ranResources = null, progress: ranProgress = null, checkpoint: ranCheckpoint = null, recovery: ranRecovery = null } = await runContainer({ job, token, prepared, secrets, ...(subscriptionAuth.length ? { subscriptionAuth } : {}), ...(bundleKeys !== null ? { bundleKeys } : {}), user: jobUser?.user ?? null, home: jobUser?.home ?? null, relabel: jobUser?.relabel === true, ...(modelEndpoints ? { modelEndpoints } : {}), ...(exitAuth ? { exitAuth: true } : {}), ...(jobSize ? { size: jobSize } : {}), ...(Number.isSafeInteger(jobUser?.hostCpus) ? { hostCpus: jobUser.hostCpus } : {}), ...(Number.isSafeInteger(cpuBudgetCenti) ? { cpuBudgetCenti } : {}), ...(Array.isArray(jobUser?.unenforced) && jobUser.unenforced.length > 0 ? { unenforced: jobUser.unenforced } : {}), ...(checkpointArgs !== null ? { recover: true, recovering: isRecovery, checkpoint: checkpointArgs } : {}) });
 		const answeredPark = prepared.session?.parkedSource;
 		// A phrase-prefixed comment uses ordinary routing, but resuming this exact parked transcript still
 		// answers its question. A held receipt also identifies an answer whose legacy source cannot be proved.
@@ -2295,11 +2079,11 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// queued (no checkpoint, the cap, a claim already taken, Valkey) -> today's InfraRetry, unchanged.
 		// A RECOVERY job has one attempt, so a throw here would fail it with the generic failure comment and nothing else:
 		// when its container ran, ended infra and no further recovery was queued, it RETURNS `recovery-failed` with its own
-		// comment instead (the run's final outcome, so its checkpoint, pointer and ledger are cleaned up).
+		// comment instead (the run's final outcome, so its checkpoint and pointer are cleaned up).
 		const notQueued = async (err) => {
 			if (!isRecovery) throw err;
 			await comment(job, RECOVERY_COMMENTS["recovery-failed"]);
-			return { outcome: "failed", reason: "recovery-failed", exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
+			return { outcome: "failed", reason: "recovery-failed", exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 		};
 		const recoverOrThrow = async (err) => {
 			if (!recoverable) return notQueued(err);
@@ -2324,7 +2108,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				return notQueued(err);
 			}
 			log("recovery_enqueued_after_exit", { cause: "infra", n: Number.isSafeInteger(queued.n) ? queued.n : null, exitCode: code });
-			return { outcome: "failed", reason: RECOVERY_ENQUEUED, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
+			return { outcome: "failed", reason: RECOVERY_ENQUEUED, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 		};
 		// Numbers only (bytes), never a path or a project: the operator's trace of a kill read as the host's. Never on a run
 		// the worker stopped itself (a timeout, a cancel, a shutdown): that 137 is the worker's own, the abort decides it
@@ -2335,68 +2119,14 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		// at the floor, the same as a container that wrote no exit line at all.
 		log("container_exit", { exitCode: code, aborted, ...(detached === true ? { detached: true } : {}), ...(exitAuthResult !== null ? { exitAuth: exitAuthResult } : {}), ...(oomKilled ? { oomKilled: true } : {}) });
 
-		// SETTLE the token reservation (DES-TOKEN-RESERVE-AND-SETTLE), ONCE, here, for every exit where the container ran:
-		// completed, runner policy, a worker abort or cancel, exit 1, an unknown exit, and a detached container. A
-		// never-started exit is not settled: the catch refunds it whole, and `isNeverStartedExit` is the one answer both
-		// ask. Before any classification below, so every return and every throw carries the same `tokensWindows`.
 		const neverStarted = neverStartedExit;
-		if (tokenHold !== null && !neverStarted) {
-			// The exit line is trusted only when the container exited ON ITS OWN (the worker did not abort, cancel, time
-			// out or detach it, so the runner had the chance to write its genuine last line) AND that line's own `code` is
-			// the container's real exit code (PR #542's review, round 3: a job's tool can forge a $0 line before a stop).
-			const trusted = !aborted && detached !== true && Number.isSafeInteger(exitLineCode) && exitLineCode === code;
-			const reservedTokens = tokenHold.amountTokens;
-			const { settledTokens, basis } = tokenSettlement({ tokens, usage: usage ?? null, reservedTokens, trusted });
-			// The deployment, the repo or folder and the project windows settle to the job's total; each model window to its
-			// own row of the usage ledger (`modelTokenSettlement`), never to the job's total.
-			// Issue #645: a recorded hold is settled through the run's ledger first, `held` -> `settled`, and only the call
-			// that MOVED it adjusts a window key. Anything else ("not-held": someone already finished it; a ledger error)
-			// leaves the reservation in every window, the floor, which is the safe side and what the record then says.
-			let ledgerMoved = true;
-			if (holdRecorded) {
-				const moved = await runBudgetLedger.settle(runId, durable.seq);
-				ledgerMoved = moved === "moved";
-				if (!ledgerMoved) log("run_budget_settle_skipped", { result: typeof moved === "string" ? moved : typeof moved?.error === "string" ? moved.error : "unknown" });
-			}
-			const jobPart = holdPart(tokenHold, (prefix) => jobCostPrefixes.has(prefix));
-			const { applied, of } = ledgerMoved ? await settleTokens(redis, jobPart, settledTokens, { log }) : { applied: 0, of: 1 };
-			let modelBasis = null;
-			for (const part of ledgerMoved ? (tokenHold.ledgers ?? []) : []) {
-				const ref = modelPrefixes.get(part.keyPrefix);
-				if (ref === undefined) continue;
-				const m = modelTokenSettlement({ ref, basis, tokens, usage: usage ?? null, reservedTokens, trusted });
-				const done = await settleTokens(redis, { amountTokens: reservedTokens, keys: part.keys }, m.settledTokens, { log });
-				// The deployment rule below, per model window: a fault that adjusted none of its keys left the reservation.
-				const mBasis = done.applied === 0 && done.of > 0 && m.settledTokens !== reservedTokens ? "floor" : m.basis;
-				modelBasis = modelBasis === "floor" || mBasis === "floor" ? "floor" : "metered";
-				// The model is operator configuration (a scoped-limits row), and the key a hash; no value but the counts.
-				log("token_model_settled", { model: ref, key: part.keyPrefix, settledTokens: m.settledTokens, basis: mBasis });
-			}
-			// A fault that adjusted no key leaves the whole reservation in every window, which is a floor whatever the
-			// basis would have been, and the record says so. A partial one is logged (token_settle_error) and recorded
-			// as computed: the keys that were adjusted hold the settled amount.
-			if (!ledgerMoved && modelPrefixes.size > 0) modelBasis = "floor";
-			const kept = applied === 0 && of > 0 && (settledTokens !== reservedTokens || !ledgerMoved);
-			// Issue #761: the deployment windows whose keys hold what this record states, along the keys the settle walked
-			// (`jobPart`, the deployment's first): a key it moved holds the settled amount, one it did not the reservation.
-			const reservedIn = deploymentWindowsOf(jobPart, { applied, target: settledTokens, recorded: kept ? reservedTokens : settledTokens, valkey: valkeyTag });
-			tokensWindows = kept ? tokensWindowsRecord({ reservedTokens, settledTokens: reservedTokens, basis: "floor", modelBasis, reservedIn }) : tokensWindowsRecord({ reservedTokens, settledTokens, basis, modelBasis, reservedIn });
-			tokenHold = null;
-			publishTokenHold(null);
-			log("token_settled", { reservedTokens: tokensWindows.reservedTokens, settledTokens: tokensWindows.settledTokens, basis: tokensWindows.basis, ...(modelBasis !== null ? { modelBasis } : {}) });
-		} else if (tokensWindows?.basis === "unreserved") {
-			// Nothing was held, so nothing is written. A metered total above 0 here would mean the reservation's 0 let a
-			// metered call through, which it cannot by construction; it is logged so it cannot pass unseen.
-			const spent = meteredTokens(tokens?.total);
-			if (spent !== null && spent > 0) log("token_unreserved_used", { tokens: spent });
-		}
 
 		// Issue #345: `docker run` exited with a never-started code, but THIS attempt's container was found by its cidfile,
 		// still there, and was stopped and removed (run-container.mjs, measured with the daemon's API service killed
 		// mid-job). It DID start, so this is never refunded as never-started: it keeps its slot and retries as infrastructure,
 		// BEFORE the exit-code switch, where the same code would read as a free never-started exit.
 		if (detached === true) {
-			return await recoverOrThrow(new InfraRetry(`the container outlived its docker run, exit ${code}`, { reason: "container-detached", exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), tokensWindows, resources }));
+			return await recoverOrThrow(new InfraRetry(`the container outlived its docker run, exit ${code}`, { reason: "container-detached", exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), resources }));
 		}
 
 		// A WORKER-initiated stop (30-min timeout via cancelJob, graceful-shutdown docker stop, or an
@@ -2416,7 +2146,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// Awaited bare like every determinate refusal above: the adapter never throws by contract, and
 			// the one swallowed comment in this file (the catch's) justifies itself by its position.
 			await comment(job, TERMINAL_COMMENTS[reason]);
-			return { outcome: "policy", reason, exitCode: code, turns, tokens, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
+			return { outcome: "policy", reason, exitCode: code, turns, tokens, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 		}
 
 		// Issue #596: a runner the kernel killed for memory, CONFIRMED (`oomKilled` above). After the abort branch, so a
@@ -2432,7 +2162,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// The project and the size go to the log and the record, never to the comment (the TERMINAL_COMMENTS rule).
 			log("oom_killed", { jobId: job.id ?? null });
 			await comment(job, TERMINAL_COMMENTS[EXIT_OOM_KILLED]);
-			return { outcome: "policy", reason: EXIT_OOM_KILLED, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
+			return { outcome: "policy", reason: EXIT_OOM_KILLED, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 		}
 		switch (code) {
 			case EXIT_COMPLETED: {
@@ -2443,10 +2173,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				// token-cap, infra): an InfraRetry job is retried, so chaining there would double-enqueue.
 				// collectChain never throws; chainEnqueued/chainRefused are additive telemetry only.
 				const chain = job.answerDraft ? { enqueued: 0, refused: 0 } : await collectChain({ job, prepared });
-				// Issue #505: the plan, after the chain and on this branch only, for the reason the chain is here: a policy or
-				// infra exit collects nothing, and a retried job must not apply what its failed attempt wrote. `portfolio` is
-				// the pickup's decision; the collector asks the live file again, and both must agree. Never throws.
-				const plan = job.answerDraft ? null : await collectPlan({ job, prepared, portfolio });
 				// COMPLETED-ONLY PROMOTION, and the exclusivity is the point rather than an optimisation.
 				// A policy or infra exit leaves the canonical transcript byte-identical to what it was
 				// before this run, so a retry starts from exactly what the first attempt did -- promote on
@@ -2535,10 +2261,6 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 					budgetReserved: true,
 					chainEnqueued: chain.enqueued,
 					chainRefused: chain.refused,
-					...(tokensWindows ? { tokensWindows } : {}),
-					// Only when the collector returned a plan (a file, or a confirmed portfolio job with none, `plan-absent`): the
-					// record's `plan` is null otherwise, and every other result is unchanged.
-					...(plan ? { plan } : {}),
 					...(resources ? { resources } : {}),
 					...(progress ? { progress } : {}),
 				};
@@ -2564,7 +2286,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				const reason = RUNNER_POLICY_REASONS.has(exitReason) && code === 2 ? exitReason : "runner-policy";
 				await comment(job, TERMINAL_COMMENTS[reason]);
 				// The cost guard's per-rule `why` died with the guard; the record's `why` is null on this path now.
-				return { outcome: "policy", reason, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(tokensWindows ? { tokensWindows } : {}), ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
+				return { outcome: "policy", reason, exitCode: code, turns, tokens, usage: usage ?? null, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), budgetReserved: true, ...(resources ? { resources } : {}), ...(progress ? { progress } : {}) };
 			}
 			case EXIT_INFRA:
 				// NO comment on any infra throw, here or in the catch: an InfraRetry may be retried and
@@ -2572,7 +2294,7 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				// the whole infra class lives at the terminal seam -- start.mjs's failed listener, guarded on
 				// BullMQ's own finishedOn -- which also catches the stall-kill and wait-gate paths this
 				// function never sees (issue #288).
-				return await recoverOrThrow(new InfraRetry(`infra failure, container exit ${code}`, { reason: CONTAINER_INFRA_EXIT, exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), tokensWindows, resources }));
+				return await recoverOrThrow(new InfraRetry(`infra failure, container exit ${code}`, { reason: CONTAINER_INFRA_EXIT, exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), resources }));
 			default:
 				// THE RUNTIME NEVER HANDED CONTROL TO THE RUNNER, in whatever integers this venue spells that
 				// (issue #227). For docker it is 125 (`docker run` itself failed), 126 (the entrypoint exists
@@ -2587,10 +2309,9 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 				// invisible while there was one runtime. An adapter declares its own set, or declares none
 				// and normalises to this outcome itself.
 				if (neverStarted) {
-					// No `tokensWindows` here: the hold is still standing, and the catch releases it whole.
 					throw new InfraRetry(`the runtime could not start the container, exit ${code}`, { reason: "container-never-started", exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), resources });
 				}
-				return await recoverOrThrow(new InfraRetry(`unknown container exit ${code}`, { reason: CONTAINER_EXIT_UNKNOWN, exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), tokensWindows, resources }));
+				return await recoverOrThrow(new InfraRetry(`unknown container exit ${code}`, { reason: CONTAINER_EXIT_UNKNOWN, exitCode: code, turns, tokens, usage, provider: job.provider ?? null, model: job.model ?? null, session: mergeSession(prepared, session), resources }));
 		}
 	} catch (e) {
 		// A CONFIG-tagged throw is a determinate policy refusal wearing an exception, and issue #310 is the
@@ -2600,60 +2321,17 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		//
 		// What it actually cost, corrected against the issue text: it was NOT retried. `index.mjs` wraps every
 		// non-InfraRetry throw in BullMQ's `UnrecoverableError`, so the job failed once. What it did cost is
-		// the reserve, kept and never given back, on a fault an operator has to fix by hand, and the record
-		// said `outcome: "failed"` with a null reason, which the panel paints red beside real infrastructure
-		// faults and insights buckets as a failure. A determinate refusal that reads as an outage is the
-		// diagnosis this project exists to make legible.
+		// a determinate refusal recorded as `outcome: "failed"` with a null reason, which the panel paints red
+		// beside real infrastructure faults and insights buckets as a failure. A determinate refusal that reads
+		// as an outage is the diagnosis this project exists to make legible.
 		//
-		// Releasing is right BECAUSE no container started: identical to `container-never-started`, and the
-		// token hold is given back whole by the release above, which cannot double-release (it moves the hold
-		// `held` -> `released` in the run's ledger first). The gate above catches the provider case for free,
-		// before the mint and the clone; this is the backstop for every other config throw that can still land
-		// here (an unknown forge kind in `buildContainerEnv`, a prepare-time refusal), which would otherwise
-		// keep the same hold silently. `!containerRan` is the discriminator, and it is what makes the release
-		// and the sentence below TRUE rather than merely true today. Every config-tagged throw site in the
-		// worker is pre-container, so this changes nothing now; the day one is added after a paid run, that run
-		// keeps its hold and falls through to the untagged path instead of being released and publicly declared
-		// free.
-		// A token hold still standing here was neither settled nor released. Two kinds of throw give it back
-		// whole, because no container ran: never-started and config-refused (both detected just above). Any other
-		// throw may have followed a container that ran (runContainer itself throwing, a defect), so the hold STAYS,
-		// the floor, which errs toward overcounting, and `token_hold_unsettled` says so. Released FIRST and never
-		// throwing (releaseTokens), so a Valkey fault cannot replace either arm's classification.
-		if (tokenHold !== null) {
-			const hold = tokenHold;
-			tokenHold = null;
-			if ((e?.piDispatchConfig === true && !containerRan) || isNeverStartedRetry(e)) {
-				// Issue #645: a RECORDED hold is given back only by the call that moves it `held` -> `released` in the run's
-				// ledger; any other answer means someone else finished it or the ledger cannot say, and giving it back again
-				// could refund money twice, so it stays at the floor. An unrecorded hold (its record failed) is given back
-				// directly, as every hold was before: no one else can see it.
-				const releasable = !holdRecorded || (await runBudgetLedger.release(runId, durable.seq)) === "moved";
-				if (!releasable) log("run_budget_release_skipped", { seq: durable.seq });
-				const { applied, of } = releasable ? await releaseTokens(redis, hold, { log }) : { applied: 0, of: 1 };
-				const heldModel = (hold.ledgers ?? []).some((l) => modelPrefixesOf(modelTokens).has(l.keyPrefix));
-				// Issue #761: along the whole hold, which the release walked: a key it gave back holds 0 of this job's usage, so
-				// a release that stopped part-way (the record then states the whole reservation) leaves those windows out.
-				const reservedIn = deploymentWindowsOf(hold, { applied, target: 0, recorded: applied === of ? 0 : hold.amountTokens, valkey: valkeyTag });
-				tokensWindows = tokensWindowsRecord({ reservedTokens: hold.amountTokens, settledTokens: applied === of ? 0 : hold.amountTokens, basis: applied === of ? "refunded" : "floor", modelBasis: heldModel ? (applied === of ? "refunded" : "floor") : null, reservedIn });
-			} else {
-				log("token_hold_unsettled", { reservedTokens: hold.amountTokens, error: e instanceof InfraRetry ? "infra-retry" : (e?.name ?? "error") });
-				const heldModel = (hold.ledgers ?? []).some((l) => modelPrefixesOf(modelTokens).has(l.keyPrefix));
-				// Issue #761: nothing moved a key, so each holds the whole reservation, which is what this record states.
-				tokensWindows = tokensWindowsRecord({ reservedTokens: hold.amountTokens, settledTokens: hold.amountTokens, basis: "floor", modelBasis: heldModel ? "floor" : null, reservedIn: deploymentWindowsOf(hold, { applied: 0, target: hold.amountTokens, recorded: hold.amountTokens, valkey: valkeyTag }) });
-			}
-			// A failed give-back becomes a settled floor, not a running job's reservation.
-			publishTokenHold(null);
-		}
-		// The record reads `tokensWindows` off the error on every throw path (buildRecord), so a retried or failed attempt
-		// says what its windows were charged.
-		if (tokensWindows !== null && e !== null && typeof e === "object") {
-			try {
-				e.tokensWindows = tokensWindows;
-			} catch {
-				// a frozen error keeps its own fields; the log lines above are the record of the hold
-			}
-		}
+		// Classifying it as a determinate refusal is right BECAUSE no container started: identical to
+		// `container-never-started`. The gate above catches the provider case for free, before the mint and the
+		// clone; this is the backstop for every other config throw that can still land here (an unknown forge
+		// kind in `buildContainerEnv`, a prepare-time refusal). `!containerRan` is the discriminator, and it is
+		// what makes the classification and the sentence below TRUE rather than merely true today. Every
+		// config-tagged throw site in the worker is pre-container, so this changes nothing now; the day one is
+		// added after a paid run, it falls through to the untagged path instead of being publicly declared free.
 		// Issue #644: the same for the run's progress, so a retried or failed attempt's record says where it got to.
 		if (progress !== null && e !== null && typeof e === "object" && e.progress === undefined) {
 			try {
@@ -2664,8 +2342,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 		}
 
 		if (e?.piDispatchConfig === true && !containerRan) {
-			// A determinate refusal. The token hold, if any, was released by the arm above, which never throws, so a
-			// Valkey fault cannot replace this classification with a Redis message.
+			// A determinate refusal. Nothing was reserved, so no store fault can replace this classification with a
+			// database message.
 			// A FIXED sentence, and NO message in the log either. Two different reasons, both load-bearing:
 			// `credentialFromPiAuth` puts `auth.json`'s location in its refusals and `prepare-local` puts the
 			// operator's folder in its own, which `buildRecord` reduces to a basename precisely because a host
@@ -2675,8 +2353,8 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			// SWALLOWED, and only here. Every other refusal in this function awaits `comment` bare, which is
 			// right: they are on the happy path of a determinate decision, and a forge that cannot be told is
 			// worth surfacing. This one is inside the catch, so a throw from `comment` would discard the
-			// classification that has ALREADY released the token hold, and the job would escape as whatever the
-			// comment threw, with the record saying something else entirely. The shipped adapter never throws;
+			// classification, and the job would escape as whatever the comment threw, with the record saying
+			// something else entirely. The shipped adapter never throws;
 			// this makes that a property of the arm rather than of the wiring.
 			await comment(job, REFUSAL_COMMENTS["config-refused"]).catch(() => {});
 			// WHERE, not what. The message is withheld below because it can carry a host path (an OS account
@@ -2686,14 +2364,13 @@ async function runAttempt(job, deps, durable, bundleFacts = { bundle: null, bund
 			const frames = typeof e?.stack === "string" ? e.stack.split("\n") : [];
 			const site = (frames.find((line) => line.includes("worker/src/") && !line.includes("at configError ")) ?? frames[1] ?? "").trim().slice(0, 160);
 			log("refused_config", { kind: job.kind ?? null, site });
-			// No job-count slot exists any more, so nothing is reserved for this refusal to hold.
-			return { outcome: "policy", reason: "config-refused", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false, ...(tokensWindows ? { tokensWindows } : {}) }; // return => not retried
+			// Nothing was reserved, so there is nothing to give back.
+			return { outcome: "policy", reason: "config-refused", exitCode: null, turns: null, tokens: null, provider: job.provider ?? null, model: job.model ?? null, budgetReserved: false }; // return => not retried
 		}
 
-		// A spawn fault (docker daemon down / binary missing) started no container, so nothing was spent; its token
-		// hold was released by the arm above. Every other throw here (exit-1 infra, unknown exit) means the
-		// container ran and legitimately spent against its token hold, which stays at the floor. There is no
-		// job-count slot to give back on either path. `budgetReserved` keeps its legacy meaning -- did a container
+		// A spawn fault (docker daemon down / binary missing) started no container, so nothing was spent. Every
+		// other throw here (exit-1 infra, unknown exit) means the container ran and may have spent. There is no
+		// reservation to give back on either path. `budgetReserved` keeps its legacy meaning -- did a container
 		// run and possibly spend -- so it is false for a spawn fault, a pre-start throw or a never-started exit,
 		// and true once a container resolved or the error carries its exit code.
 		if (e instanceof InfraRetry) e.budgetReserved = (containerRan || (e.exitCode !== null && e.exitCode !== undefined)) && !isNeverStartedRetry(e);
@@ -2795,15 +2472,15 @@ const BUNDLE_FAILURES = {
 
 /**
  * Is this throw the "the runner never ran" retry (issue #227), whichever path raised it: a never-started exit
- * (`isNeverStartedExit`), a spawn fault, or a pre-start gate? The catch's token-hold release keys off this
- * one test.
+ * (`isNeverStartedExit`), a spawn fault, or a pre-start gate? The catch's classification keys off this one
+ * test.
  */
 function isNeverStartedRetry(e) {
 	return e instanceof InfraRetry && e.reason === "container-never-started";
 }
 
 export class InfraRetry extends Error {
-	constructor(message, { cause, reason, exitCode, turns, tokens, session, usage, provider, model, budgetReserved, tokensWindows, resources } = {}) {
+	constructor(message, { cause, reason, exitCode, turns, tokens, session, usage, provider, model, budgetReserved, resources } = {}) {
 		super(message, cause ? { cause } : undefined);
 		this.name = "InfraRetry";
 		this.piDispatchRetry = true;
@@ -2825,9 +2502,6 @@ export class InfraRetry extends Error {
 		this.provider = provider ?? null;
 		this.model = model ?? null;
 		this.budgetReserved = budgetReserved ?? null;
-		// Issue #501: the token reservation's outcome (`tokensWindows`), or null when no token window applied. Set by
-		// the processor on a throw after the reservation, so a retried attempt's record says what its window was charged.
-		this.tokensWindows = tokensWindows ?? null;
 		// Issue #596: what the container used, off its exit line, or null; set on a throw after a container ran.
 		this.resources = resources ?? null;
 	}

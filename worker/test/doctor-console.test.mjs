@@ -43,7 +43,7 @@ test("a set-up console with one operator: the public default listen warns about 
 	withToken(d, "viewer", "bob");
 	const checks = consoleChecks(d.env, { cwd: d.cwd });
 	assert.deepEqual(labels(checks), [
-		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only and outside every job folder (1 operator, 1 viewer)`,
+		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only (1 operator, 1 viewer)`,
 		"ok console: listens on 0.0.0.0:4790 (the default)",
 		"warn console: the default 0.0.0.0:4790 listens on every IPv4 interface, where tokens and session cookies cross the network in plain HTTP",
 	]);
@@ -81,39 +81,6 @@ test("a tokens file with no operator fails: nobody could make a change", { skip:
 	assert.equal(c.ok, false);
 	assert.match(c.label, /holds no operator token, so nobody can make a change from the console/);
 	assert.equal(c.fix, "run `pi-dispatch-console token add --name <you> --role operator`");
-});
-
-test("a tokens file inside a local trigger's run.folder fails, naming why a job could reach it", { skip: !posix }, () => {
-	const d = deployment();
-	withToken(d);
-	const checks = consoleChecks(d.env, { cwd: d.cwd, folders: [d.cwd] });
-	const c = checks.find((x) => /lies inside/.test(x.label));
-	assert.ok(c, labels(checks).join("\n"));
-	assert.equal(c.ok, false);
-	assert.match(c.label, /lies inside a local trigger's run\.folder \(.*\), which a job container can see: a job there could read the token hashes or add a token of its own/);
-	assert.match(c.fix, /point PI_CONSOLE_TOKENS_FILE at its new path/);
-	// The folder above counts as well, and so do the overlay and an absolute run root; a sibling does not.
-	assert.ok(consoleChecks(d.env, { cwd: d.cwd, folders: [join(d.cwd, "..")] }).some((x) => /lies inside/.test(x.label)));
-	assert.ok(consoleChecks({ ...d.env, PI_GLOBAL_PI_DIR: d.cwd }, { cwd: d.cwd }).some((x) => /lies inside PI_GLOBAL_PI_DIR/.test(x.label)));
-	assert.ok(consoleChecks({ ...d.env, PI_DISPATCH_RUN_ROOTS: d.cwd }, { cwd: d.cwd }).some((x) => /lies inside a PI_DISPATCH_RUN_ROOTS root/.test(x.label)));
-	const sibling = tempDir("pd-doctor-console-sib-");
-	assert.ok(!consoleChecks(d.env, { cwd: d.cwd, folders: [sibling] }).some((x) => /lies inside/.test(x.label)));
-});
-
-test("a tokens file inside a trigger's run.skillsDir fails, and so does one with a second hard link", { skip: !posix }, () => {
-	const d = deployment();
-	withToken(d);
-	const skills = consoleChecks(d.env, { cwd: d.cwd, skillsDirs: [d.cwd] }).find((x) => /lies inside/.test(x.label));
-	assert.ok(skills);
-	assert.equal(skills.ok, false);
-	assert.match(skills.label, /lies inside a trigger's run\.skillsDir \(/);
-	// Another name of the same file could sit in a job folder where no path check looks.
-	linkSync(d.tokens, join(d.cwd, "other-name.json"));
-	const linked = consoleChecks(d.env, { cwd: d.cwd }).find((x) => /hard links/.test(x.label));
-	assert.ok(linked, labels(consoleChecks(d.env, { cwd: d.cwd })).join("\n"));
-	assert.equal(linked.ok, false);
-	assert.match(linked.label, /has 2 hard links: another name of the file could sit inside a folder a job can see/);
-	assert.match(linked.fix, /find \/ -samefile/);
 });
 
 test("the public default warns; PI_CONSOLE_BIND_PUBLIC=1 allows other public binds; an unparseable one fails", { skip: !posix }, () => {
@@ -230,38 +197,6 @@ test("collectChecks: no console line for a deployment without one, and the conso
 	assert.ok(shell.some((c) => c.label === "console: listens on [::1]:4790"));
 });
 
-test("collectChecks: the console lines judge the tokens file against the triggers file's local run.folder and run.skillsDir", { skip: !posix }, async () => {
-	const d = deployment();
-	withToken(d);
-	const spawn = () => {
-		const handlers = {};
-		const stream = () => ({ on() { return this; } });
-		const child = { stdout: stream(), stderr: stream(), stdin: { on() { return this; }, end() {} }, kill() {}, on(ev, cb) { handlers[ev] = cb; return this; } };
-		queueMicrotask(() => handlers.close?.(1));
-		return child;
-	};
-	const seams = { out: () => {}, cwd: d.cwd, home: d.cwd, spawn, probeValkey: async () => false, nodeVersion: "22.19.0", fileExists: existsSync, readEnvFile: (p) => readFileSync(p, "utf8") };
-	// The triggers file lives elsewhere, so only what it NAMES can put the deployment folder in a job's view.
-	const conf = tempDir("pd-doctor-console-conf-");
-	const elsewhere = tempDir("pd-doctor-console-elsewhere-");
-	const triggers = (run) => {
-		const path = join(conf, `triggers-${Object.keys(run).join("-")}.json`);
-		writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 3 * * *" }, run: { kind: "local", flow: "review", task: "t", ...run } }] }));
-		return path;
-	};
-	const insideLine = async (run) => {
-		const checks = await collectChecks({ ...d.env, PI_PROVIDER: "anthropic", PI_TRIGGERS_FILE: triggers(run) }, seams);
-		return checks.find((c) => c.label.startsWith("console:") && /lies inside/.test(c.label));
-	};
-	const folder = await insideLine({ folder: d.cwd });
-	assert.ok(folder, "a local trigger's run.folder holding the tokens file is reported");
-	assert.equal(folder.ok, false);
-	assert.match(folder.label, /lies inside a local trigger's run\.folder/);
-	const skills = await insideLine({ folder: elsewhere, skillsDir: d.cwd });
-	assert.ok(skills, "a trigger's run.skillsDir holding the tokens file is reported");
-	assert.match(skills.label, /lies inside a trigger's run\.skillsDir/);
-	assert.equal(await insideLine({ folder: elsewhere }), undefined, "a folder elsewhere is fine");
-});
 
 test("CONSOLE_ENV_KEYS is the contract's PI_CONSOLE_* set", () => {
 	// The PI_CONSOLE_* keys the CONSOLE reads. PI_CONSOLE_AUDIT_RETENTION_DAYS (issue #761) is not one, though named for
@@ -334,7 +269,7 @@ test("tokens kept for a role this release does not know: a warning, in the singu
 	};
 	write(kept);
 	assert.deepEqual(labels(consoleChecks(d.env, { cwd: d.cwd })), [
-		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only and outside every job folder (1 operator, 0 viewers)`,
+		`ok console: tokens file ${JSON.stringify(d.tokens)} is owner-only (1 operator, 0 viewers)`,
 		"warn console: 2 tokens carry a role this pi-dispatch does not know, so a console of this release signs them in nowhere",
 		"ok console: listens on 0.0.0.0:4790 (the default)",
 		"warn console: the default 0.0.0.0:4790 listens on every IPv4 interface, where tokens and session cookies cross the network in plain HTTP",

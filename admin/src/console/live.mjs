@@ -88,7 +88,6 @@
  * Every seam is injected (`now`, `timers`, `random`), so the tests drive ticks by hand and never wait 15 seconds.
  */
 import { createHash, randomBytes } from "node:crypto";
-import { isAbsolute } from "node:path";
 import { beatAgeOf } from "../doctor-view.mjs";
 import { scrubControls } from "../panel.mjs";
 import { LIVE_TOOL_RE } from "@edgehero/pi-dispatch/live-transcript";
@@ -777,8 +776,8 @@ export const STATE_VERSION = 1;
 
 /**
  * The JSON `/api/state` answers (the scripts' interface). Only host-chosen fields, by name: never a Job's `.data`,
- * never an error message (a Valkey error can name a host and port), never a host path (a folder scope's name is
- * dropped). `failed[].failedReason`, BullMQ's free text, is the operator's only; a viewer gets the rows without it.
+ * never an error message (a Valkey error can name a host and port), never a host path. `failed[].failedReason`,
+ * BullMQ's free text, is the operator's only; a viewer gets the rows without it.
  * Every `unreachable` is a boolean: whatever the reader caught stays in this process. `version` is `STATE_VERSION`.
  */
 export function stateOf(snapshot, role, { now = Date.now() } = {}) {
@@ -804,7 +803,6 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
         })),
         more: num(s.failed?.more) ?? 0,
       };
-  const dollarRows = Array.isArray(s.windows?.rows) ? s.windows.rows : [];
   return {
     version: STATE_VERSION,
     at: now,
@@ -821,19 +819,6 @@ export function stateOf(snapshot, role, { now = Date.now() } = {}) {
       capacity: { memMiB: intOf(h?.budgetMemMiB), cpuCenti: intOf(h?.budgetCpuCenti), concurrency: intOf(h?.concurrency) },
       running: Array.isArray(h?.jobs) ? h.jobs.length + (num(h?.jobsMore) ?? 0) : intOf(h?.budgetRunning),
     })),
-    // Today's token counter only: the job-count windows went with the job-start caps (C1).
-    budget: { tokensToday: num(s.budget?.tokensToday) },
-    dollars: {
-      unreachable: Boolean(s.windows?.unreachable),
-      windows: dollarRows.map((r) => ({
-        ledger: str(r?.ledger),
-        scope: typeof r?.name === "string" && !isAbsolute(r.name) ? str(r.name) : null,
-        window: str(r?.window),
-        capTokens: num(r?.capTokens),
-        counterTokens: num(r?.counterTokens),
-        full: Boolean(r?.full),
-      })),
-    },
     // Issue #647: with the parked run's `jobId` (a worker-minted run id, the run-id charset or null), so a script can
     // open the run, or answer it through the `parked-answer` action, without a second lookup.
     parked: (Array.isArray(s.parked) ? s.parked : []).map((p) => ({ target: str(p?.target), kind: str(p?.kind), jobId: typeof p?.jobId === "string" && RUN_ID_RE.test(p.jobId) ? p.jobId : null, ageMs: num(p?.ageMs), chainCount: num(p?.chainCount) })),

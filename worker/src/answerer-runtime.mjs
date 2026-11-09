@@ -121,7 +121,7 @@ export function makeAnswerDraftRuntime({ store, triggersPath, enqueue, identity 
 			Object.defineProperty(answerDraft, "configDigest", { value: input.configDigest });
 			Object.defineProperty(answerDraft, "project", { value: input.project });
 			await store.update(ref.runId, { status: "running" });
-			return { data: { kind: input.source.kind, purpose: "answer-draft", repo: input.source.repo, target: { ...input.source.target, title: "", body: "" }, ...(input.source.projectId !== undefined ? { projectId: input.source.projectId } : {}), ...(input.source.azure ? { azure: input.source.azure } : {}), flow: rule.flow, provider: model.provider, model: model.id, models: [...new Set([rule.model, rule.decisionModel])], maxTokens: rule.maxTokens, maxTurns: 8, packages: false, secretBundle: false, resume: false, awaitInput: false, steer: false, progress: false, statusComment: false, recover: false, answerDecisionModel: classifier, answerDraft } };
+			return { data: { kind: input.source.kind, purpose: "answer-draft", repo: input.source.repo, target: { ...input.source.target, title: "", body: "" }, ...(input.source.projectId !== undefined ? { projectId: input.source.projectId } : {}), ...(input.source.azure ? { azure: input.source.azure } : {}), flow: rule.flow, provider: model.provider, model: model.id, models: [...new Set([rule.model, rule.decisionModel])], maxTurns: 8, packages: false, secretBundle: false, resume: false, awaitInput: false, steer: false, progress: false, statusComment: false, recover: false, answerDecisionModel: classifier, answerDraft } };
 		},
 		async collect({ job, prepared, completed, result }) {
 			if (!job?.answerDraft) return null;
@@ -169,7 +169,7 @@ export function makeAnswerDraftRuntime({ store, triggersPath, enqueue, identity 
 export function stageAnswerDraft(job, prepared, { fs = nodeFs } = {}) {
 	if (!job.answerDraft || !prepared?.jobDir || prepared.outcome === "policy") return prepared;
 	const input = job.answerDraft.input;
-	if (!input || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(prepared.sha ?? "") || (job.maxTokens === undefined || !Number.isSafeInteger(job.maxTokens) || job.maxTokens < 1)) return policy("answer-draft-refused");
+	if (!input || !/^(?:[a-f0-9]{40}|[a-f0-9]{64})$/.test(prepared.sha ?? "")) return policy("answer-draft-refused");
 	let flowText, fd;
 	try {
 		if (!SKILL_NAME_RE.test(job.flow ?? "")) return policy("answer-draft-refused");

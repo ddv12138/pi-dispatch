@@ -129,7 +129,7 @@ test("what could not be read is never drawn as a fact", async () => {
 });
 
 test("a paid button says what it costs where it is pressed, and Undo says what it undoes", async () => {
-	assert.match(await UPDATES_DRAW["updates-newer-available.operator"](), /A canary runs one job of trigger 3, up to 20,000 tokens/);
+	assert.match(await UPDATES_DRAW["updates-newer-available.operator"](), /A canary runs one job of trigger 3/);
 	const after = await UPDATES_DRAW["updates-newer-after-adopt.operator"]();
 	assert.match(after, /1\.4\.3 adopted by ops\./);
 	assert.match(after, /Undo 1\.4\.3/);
@@ -157,8 +157,8 @@ test("a viewer sees versions and results and no button; a read-only console show
 });
 
 test("a trigger that resumes its transcript is not offered: its next run would continue the candidate's work", async () => {
-	const read = await readUpdates({ redis: fakeValkey(), staged: { packages: [] }, triggersDocument: { triggers: [{ on: { type: "cron", id: "a" }, run: { resume: true } }, { on: { type: "cron", id: "cmd" }, run: { command: "x" } }, { on: { type: "cron", id: "folio" }, run: { portfolio: true } }, { on: { type: "cron", id: "off" }, run: { packages: false } }, { on: { type: "comment" }, run: {} }, { on: { type: "cron", id: "b" }, run: {} }] }, now: NOW });
-	assert.deepEqual(read.triggers.map((t) => [t.index, t.id]), [[5, "b"]], "and it keeps the file's own index, which is what the preview takes");
+	const read = await readUpdates({ redis: fakeValkey(), staged: { packages: [] }, triggersDocument: { triggers: [{ on: { type: "cron", id: "a" }, run: { resume: true } }, { on: { type: "cron", id: "cmd" }, run: { command: "x" } }, { on: { type: "cron", id: "off" }, run: { packages: false } }, { on: { type: "comment" }, run: {} }, { on: { type: "cron", id: "b" }, run: {} }] }, now: NOW });
+	assert.deepEqual(read.triggers.map((t) => [t.index, t.id]), [[4, "b"]], "and it keeps the file's own index, which is what the preview takes");
 });
 
 test("a reviewed subscription adapter says why it has no button, and an operator gets none either", async () => {
@@ -177,13 +177,13 @@ test("the page's facts come from what a deployment really holds: its manifest an
 	const root = tempDir("updates-real-");
 	mkdirSync(join(root, "pi-global", "packages"), { recursive: true });
 	writeFileSync(join(root, "pi-global", "packages", "packages.json"), JSON.stringify({ stagedAt: "x", packages: [{ name: "pi-lint", version: "1.4.2", dir: "pi-lint--1.4.2--aaaaaaaa", from: "host" }] }));
-	writeFileSync(join(root, "triggers.json"), JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 6 * * *" }, run: { kind: "local", folder: "/f", flow: "fix", task: "t", maxTokens: 2 } }] }));
+	writeFileSync(join(root, "triggers.json"), JSON.stringify({ triggers: [{ on: { type: "cron", id: "nightly", pattern: "0 6 * * *" }, run: { kind: "local", folder: "/f", flow: "fix", task: "t" } }] }));
 	const look = { v: 1, host: "h", at: NOW, everyHours: 24, pi: {}, hostPi: {}, packages: [{ name: "pi-lint", version: "1.4.2", newest: "1.4.3", read: "ok" }] };
 	const read = await readDeploymentUpdates({ redis: fakeValkey({ looks: [look] }), paths: { globalPiDir: join(root, "pi-global"), triggersPath: join(root, "triggers.json") }, pinned: "1.5.0", now: NOW });
 	assert.equal(read.packages[0].name, "pi-lint", "a row has the name the actions look it up by");
 	assert.equal(read.packages[0].version, "1.4.2");
 	assert.equal(read.packages[0].state, "newer");
-	assert.deepEqual(read.triggers, [{ index: 0, id: "nightly", capTokens: 2 }]);
+	assert.deepEqual(read.triggers, [{ index: 0, id: "nightly" }], "no token cap is read from a trigger");
 	assert.deepEqual(readStaged({ globalPiDir: join(root, "nowhere") }), { packages: [], unreadable: false }, "nothing staged is not a fault");
 	writeFileSync(join(root, "pi-global", "packages", "packages.json"), "{ not json");
 	assert.deepEqual(readStaged({ globalPiDir: join(root, "pi-global") }), { packages: [], unreadable: true }, "a manifest that cannot be read is said");

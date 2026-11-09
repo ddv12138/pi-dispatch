@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { cappedModelNames, cooldownModelRefs, modelSubjects, resolveDoctorModelRuns, unknownModelChecks, listedProviderCredentialChecks } from "../src/doctor.mjs";
+import { cooldownModelRefs, modelSubjects, resolveDoctorModelRuns, unknownModelChecks, listedProviderCredentialChecks } from "../src/doctor.mjs";
 const deployment = { provider: "base", model: "default", maxTokens: 10 };
 const modelRoles = { default: { editor: "base/editor", explorer: "other/scout" }, shop: { editor: { model: "fast/project", fallbackModels: ["other/backup"] } } };
 const projects = [{ id: "shop", members: ["github:org/repo", "/srv/shop"] }, { id: "gitlab-only", members: ["gitlab:org/repo"] }];
@@ -42,9 +42,6 @@ test("catalog, credential and deployment-cap checks see physical role models and
 	assert.equal(refs.some((ref) => ref.id.startsWith("role:")), false);
 	assert.ok(refs.some((ref) => ref.provider === "fast" && ref.id === "project"));
 	assert.ok(refs.some((ref) => ref.provider === "other" && ref.id === "scout"));
-	const names = cappedModelNames({}, { runs: [run], deployment, modelRoles, projects });
-	assert.ok(names.has("fast/project"));
-	assert.equal([...names].some((name) => name.includes("role:")), false);
 	const credentials = listedProviderCredentialChecks(subjects, { candidatesOf: (provider) => [`${provider.toUpperCase()}_API_KEY`] });
 	assert.ok(credentials.some((check) => check.label.includes("other")));
 });

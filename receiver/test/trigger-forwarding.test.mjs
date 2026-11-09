@@ -58,7 +58,6 @@ const MAX_RUN = {
 	models: ["openai/gpt-5.4", "anthropic/claude-haiku-4-5"],
 	fallbackModels: ["anthropic/claude-haiku-4-5"],
 	// #501. A STRING, the spelling an operator writes for money; the loader carries it as written.
-	maxTokens: 2500,
 	// Issue #644: the progress tool and the forge status comment. Only `true` rides the job, so `true` here.
 	progress: true,
 	statusComment: true,
@@ -212,7 +211,7 @@ for (const [forge, entries] of Object.entries(ENTRIES)) {
 				assert.deepEqual(r.job[k], normalized.run[k], `${forge} ${entry.route}: the filter dropped run.${k} on the way to the job`);
 			}
 			// And execution knobs stay OUT of `trigger`, which is copied verbatim into /job/event.json.
-			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels", "maxTokens"]) {
+			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels"]) {
 				assert.equal(k in r.job.trigger, false, `${forge} ${entry.route}: ${k} leaked into trigger`);
 			}
 
@@ -227,7 +226,7 @@ for (const [forge, entries] of Object.entries(ENTRIES)) {
 	}
 }
 
-test("absent stays absent: a trigger naming no model or cap enqueues a job with no provider, model, maxTurns, models or maxTokens key", async () => {
+test("absent stays absent: a trigger naming no model or cap enqueues a job with no provider, model, maxTurns, models key", async () => {
 	for (const [forge, entries] of Object.entries(ENTRIES)) {
 		for (const entry of entries) {
 			const raw = { on: entry.on, run: { kind: forge, flow: "work", ...(entry.extra ?? {}) } };
@@ -236,9 +235,9 @@ test("absent stays absent: a trigger naming no model or cap enqueues a job with 
 			reloadTriggers({ PI_TRIGGERS_FILE: "/t.json" }, cfg, { fileExists: () => true, readFile: () => json });
 			const r = drive(forge, entry.route, cfg.triggers);
 			assert.equal(r.enqueue, true, `${forge} ${entry.route}: ${r.reason}`);
-			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels", "maxTokens"]) assert.equal(k in r.job, false, `${forge} ${entry.route}: ${k}`);
+			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels"]) assert.equal(k in r.job, false, `${forge} ${entry.route}: ${k}`);
 			const data = await enqueuedData(forge, r.job);
-			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels", "maxTokens"]) assert.equal(k in data, false, `${forge} ${entry.route}: ${k} in stored data`);
+			for (const k of ["provider", "model", "maxTurns", "models", "fallbackModels"]) assert.equal(k in data, false, `${forge} ${entry.route}: ${k} in stored data`);
 		}
 	}
 });

@@ -4,8 +4,6 @@ import * as fs from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { collectModelPolicies, modelsViewOf, readModelsView, modelsForAgent, readModelsHistory, canaryComparisonLines, MODELS_LIMITS } from "../src/models-view.mjs";
-import { dayKey } from "@edgehero/pi-dispatch/budget";
-import { modelTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 const NOW = Date.UTC(2026, 9, 31, 12);
 const deployment = { provider: "p", model: "main", maxTokens: "2000000" };
@@ -76,13 +74,6 @@ test("a token cap no longer flags locally unboundable APIs: the Radius cost-boun
     assert.deepEqual(got.banners.map(row => row.kind), [], "no banner for a pi-messages model under a cap");
   }
   assert.equal(view({ deployment: { ...deployment, maxTokens: null }, modelRoles: { default: { editor: "radius/model" } } }).banners.length, 0);
-});
-
-test("model windows match refs case-insensitively while unknown counters never become zero", () => {
-  const got = view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "P/MAIN", window: "day", capTokens: 10, counterTokens: 10 }, { ledger: "model", name: "p/main", window: "week", capTokens: 20, counterTokens: null }] });
-  assert.equal(got.models[0].state, "unknown", "an unread window prevents a claim that every admission observation is available");
-  assert.deepEqual(got.models[0].windows.map(row => [row.spentTokens, row.unavailable]), [[10, false], [null, true]]);
-  assert.equal(view({ entries: [entry({ model: "main" })], windows: [{ ledger: "model", name: "p/main", window: "day", capTokens: 10, counterTokens: 10 }] }).models[0].state, "window-full");
 });
 
 test("retained canary comparisons deduplicate mirrored IDs, name unknown metrics and bind exact numbers", () => {
@@ -178,29 +169,15 @@ test("reader touches only configured failover cooldown keys; a simple role perfo
   await readModelsView({ paths: direct, now: NOW, snapshot, reads: { status, records: () => [], cooldowns: () => assert.fail("non-failover job must not read a cooldown") } });
 });
 
-test("reader marks an incomplete MGET and a malformed overlay unknown, with no builtin routing fallback", async () => {
-  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayTokens: 1 }] });
-  const got = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelTokenKeyPrefix("p/main"))]); return []; } } });
-  assert.equal(got.models[0].windows[0].spentTokens, null);
-  assert.equal(got.models[0].windows[0].unavailable, true);
-  assert.equal(got.models[0].state, "unknown");
-  const unknown = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { records: () => [], counters: async () => [null], overlay: async () => { throw new Error("secret catalog payload"); } } });
+test("reader marks a malformed overlay unknown, with no builtin routing fallback", async () => {
+  const paths = files({ triggers: [entry({ model: "main" })] });
+  const unknown = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: { records: () => [], overlay: async () => { throw new Error("secret catalog payload"); } } });
   assert.equal(unknown.models[0].known, null);
   assert.equal(unknown.models[0].priced, null);
   assert.equal(unknown.models[0].state, "unknown");
   assert.equal(modelsForAgent(unknown).models[0].reason, "catalog-unavailable");
   assert.doesNotMatch(JSON.stringify(unknown), /secret catalog payload/);
-});
-
-test("real model token rows retain their scope and spent counter through reader and agent projection", async () => {
-  const paths = files({ triggers: [entry({ model: "main" })] }, { version: 2, limits: [{ scope: "model:p/main", dayTokens: 200000 }] });
-  const got = await readModelsView({ paths, env: { PI_PROVIDER: "p", PI_MODEL: "main" }, now: NOW, snapshot, reads: {
-    status, records: () => [], counters: async keys => { assert.deepEqual(keys, [dayKey(new Date(NOW), modelTokenKeyPrefix("p/main"))]); return ["123456"]; },
-  } });
-  const expected = { scope: "model:p/main", window: "day", capTokens: 200000, spentTokens: 123456, unavailable: false };
-  assert.deepEqual(got.models[0].windows, [expected]);
-  assert.deepEqual(modelsForAgent(got).models[0].windows, [expected]);
-  assert.equal(got.models[0].state, "available");
+  assert.ok(!("windows" in unknown.models[0]), "no token window rides a model: the counters are gone with the budgets");
 });
 
 test("invalid snapshot settings and unknown policy never claim ready routing or availability", async () => {
@@ -237,7 +214,7 @@ test("machine model reasons retain the shared failover verdicts and reject arbit
   const got = modelsViewOf({ now: NOW, overlay, deployment, snapshot, entries: [], modelRoles: { default: { unknown: "custom/unknown", missing: "custom/missing-fallback", unpriced: "custom/unpriced" } } });
   assert.deepEqual(modelsForAgent(got).models.map(row => row.reason), ["model-unknown", "model-not-allowed", "model-unpriced"]);
   const privateText = "PRIVATE_MODEL_DIAGNOSTIC";
-  got.models.push({ ref: "p/main", provider: "p", state: "unknown", reason: privateText, label: privateText, windows: [] });
+  got.models.push({ ref: "p/main", provider: "p", state: "unknown", reason: privateText, label: privateText });
   got.banners = [
     { kind: "role-conflict", reason: privateText, label: privateText, fix: privateText, projectUnknown: privateText },
     { kind: "role-conflict", reason: "cost-cap" },

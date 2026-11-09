@@ -1705,25 +1705,6 @@ ${FIT_JS}
   // Focus leaving a field ends that hold once focus has landed (a tick later: during focusout it has not yet moved). On
   // every page, the slot or none: a viewer's runs filters are held too.
   document.addEventListener("focusout", function () { later(release, 0); });
-  // Shares describe the draft in these fields, not the plan currently in force. Keep them together while editing.
-  document.addEventListener("input", function (event) {
-    var el = event.target;
-    var form = el && typeof el.closest === "function" ? el.closest('form[data-structured="priorities"]') : null;
-    if (!form || !el.name || el.name.indexOf("weight:") !== 0) return;
-    var weights = Object.create(null), sum = 0, valid = true;
-    for (var i = 0; i < form.elements.length; i++) {
-      var field = form.elements[i];
-      if (!field.name || field.name.indexOf("weight:") !== 0) continue;
-      var n = Number(field.value);
-      if (field.value === "" || !isFinite(n) || Math.floor(n) !== n || n < 0 || n > 1000) valid = false;
-      else { weights[field.name.slice(7)] = n; sum += n; }
-    }
-    var outputs = form.querySelectorAll("[data-weight-share]");
-    for (var i = 0; i < outputs.length; i++) {
-      var weight = weights[outputs[i].getAttribute("data-weight-share")];
-      outputs[i].textContent = valid && weight !== undefined ? uiText("about") + " " + (sum > 0 ? Math.round(weight / sum * 100) : 0) + "%" : uiText("Share unknown");
-    }
-  });
   function enableAnswererControls(root) {
     var controls = typeof root.querySelectorAll === "function" ? root.querySelectorAll("[data-answerer-control]") : [];
     for (var ac = 0; ac < controls.length; ac++) controls[ac].disabled = false;
@@ -1920,35 +1901,6 @@ ${FIT_JS}
       }
     }
     var structured = typeof form.getAttribute === "function" ? form.getAttribute("data-structured") : null;
-    if (structured === "priorities" || structured === "envelope") {
-      var weights = Object.create(null);
-      var floors = Object.create(null);
-      for (var key in out) {
-        if (!Object.prototype.hasOwnProperty.call(out, key)) continue;
-        if (key.indexOf("weight:") === 0 || key.indexOf("floor:") === 0) {
-          var id = key.slice(key.indexOf(":") + 1);
-          if (!/^(?:_other|[a-z0-9][a-z0-9-]{0,31})$/.test(id)) throw new Error("Invalid envelope project");
-          var value = Number(out[key]);
-          if (!isFinite(value) || value < 0 || (key.indexOf("weight:") === 0 && (Math.floor(value) !== value || value > 1000))) throw new Error("Weights must be whole numbers from 0 to 1000; floors must be nonnegative numbers");
-          (key.indexOf("weight:") === 0 ? weights : floors)[id] = value;
-          delete out[key];
-        }
-      }
-      if (structured === "priorities") {
-        var projects = [];
-        for (var id in weights) projects.push({ id: id, weight: weights[id] });
-        return { projects: projects, validDays: Number(out.validDays) };
-      }
-      out.floorsTokens = floors;
-      out.defaultWeights = weights;
-      out.enabled = out.enabled === true;
-      for (var key of ["totalTokens", "maxStepPct", "minIntervalHours", "maxPlanDays"]) {
-        out[key] = Number(out[key]);
-        if (!isFinite(out[key]) || out[key] < 0) throw new Error(key + " must be a nonnegative number");
-      }
-      if (!Array.isArray(out.writers)) out.writers = [];
-      return { envelope: out };
-    }
     if (structured === "resolver") { delete out.kind; if (form.getAttribute("data-action") === "secret-profile-add") delete out.format; return out; }
     if (structured === "trigger") { if (out.once === false) delete out.once; return { trigger: out }; }
     return out;

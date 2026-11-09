@@ -56,7 +56,7 @@ test("cooldown sentences distinguish direct jobs, fallback eligibility, wait kin
   const text = cardText(await render(consoleModelsFixture(AT))).replace(/ +([.,])/g, "$1");
   assert.ok(text.includes("No fallback: its jobs start on anthropic/claude-sonnet-4-5."));
   assert.ok(text.includes("First candidate by price and cooldown: openai/gpt-5.")); assert.ok(text.includes(MODELS_WORDS.next));
-  assert.ok(text.includes("2026-10-31 12:13:00 UTC")); assert.ok(text.includes("model token window"));
+  assert.ok(text.includes("2026-10-31 12:13:00 UTC"));
   assert.ok(text.includes("This run used fallback openai/gpt-5 for role planner because the primary model was cooling down."));
   assert.ok(!text.includes("Rate limited at") && !text.includes("429") && !text.includes("13 of"));
 });
@@ -88,10 +88,10 @@ test("Edit fixes existing identity, Adopt requires a chosen scope and carries on
 
 test("viewers, agents and read-only operators see every factual panel and no edit, adopt, removal or command", async () => {
   const m = consoleModelsFixture(AT);
-  const op = await render(m); assert.match(op, /data-action="model-role-edit"/); assert.match(op, /pi-dispatch/); assert.match(op, /&lt;cap-tokens&gt;/); assert.match(op, /deployment lease holds every other start/);
+  const op = await render(m); assert.match(op, /data-action="model-role-edit"/); assert.match(op, /pi-dispatch/); assert.match(op, /--count/); assert.match(op, /deployment lease holds every other start/);
   for (const opts of [{ role: "viewer" }, { role: "agent" }, { role: "operator", readOnly: true }]) {
     const doc = await render(m, opts), text = cardText(doc);
-    for (const fact of ["Model roles", "Cooling down", "324,600 of 800,000", "Proposals and canaries", "131,900"]) assert.ok(text.includes(fact), `${JSON.stringify(opts)} ${fact}`);
+    for (const fact of ["Model roles", "Cooling down", "Proposals and canaries", "131,900"]) assert.ok(text.includes(fact), `${JSON.stringify(opts)} ${fact}`);
     assert.doesNotMatch(doc, /data-action=|data-copy|Adopt for|Preview removing|pi-dispatch canary/);
   }
 });
@@ -123,22 +123,21 @@ test("effective trigger fallback groups replace the role-only forecast and dupli
 });
 
 
-test("unread catalog status is not an unpriced refusal or a green configured state, and absent model windows do not waive other caps", async () => {
-  const m = consoleModelsFixture(AT); m.models[0] = { ref: "openai/gpt-5", provider: "openai", known: null, priced: null, state: "unknown", windows: [] };
+test("unread catalog status is not an unpriced refusal or a green configured state", async () => {
+  const m = consoleModelsFixture(AT); m.models[0] = { ref: "openai/gpt-5", provider: "openai", known: null, priced: null, state: "unknown" };
   m.models = [m.models[0]];
   const d = cardDocument(await render(m)), panel = d.within(d.byId.get("p-models")), text = cardText(panel);
-  assert.ok(text.includes("Price status unavailable")); assert.ok(text.includes("No model-specific token windows are configured; other deployment and scope caps still apply."));
+  assert.ok(text.includes("Price status unavailable"));
+  assert.ok(!text.includes("token window") && !text.includes("windows"), "no token window rides a model any more");
   assert.ok(!text.includes("Unpriced: skipped") && !text.includes("Configured"));
   assert.ok(!panel.includes("tone-ok")); assert.ok(panel.includes("tone-idle"));
 });
 
 
-test("a full primary window makes no admission promise, refused policy models are attention states, and deferred jobs link to Overview", async () => {
+test("refused policy models are attention states, and deferred jobs link to Overview", async () => {
   const m = consoleModelsFixture(AT);
   m.roles[0].next = { kind: "candidate", model: m.roles[0].model };
-  m.models[0].state = "window-full";
-  m.models[0].windows[0].spentTokens = m.models[0].windows[0].capTokens;
-  m.models.push({ ref: "example/refused", provider: "example", known: true, priced: true, state: "policy-refused", windows: [] });
+  m.models.push({ ref: "example/refused", provider: "example", known: true, priced: true, state: "policy-refused" });
   const d = cardDocument(await render(m)), cooldown = d.within(d.byId.get("p-cooldowns")), text = cardText(cooldown);
   assert.ok(text.includes("First candidate by price and cooldown: anthropic/claude-sonnet-4-5"));
   assert.ok(text.includes("a shown candidate may be unable to start"));
@@ -185,8 +184,8 @@ test("typed agent conflicts keep their precise refusal and possible local-projec
 
 test("every model state and skipped fallback has a shared glyph-and-word badge, including neutral unknown", async () => {
   const m = consoleModelsFixture(AT);
-  const expected = [["cooling-down", "Cooling down", "clock", "attention"], ["window-full", "Token window full", "spend", "attention"], ["policy-refused", "Trigger policy refused", "refused", "attention"], ["unknown", "Not known", "info", "idle"], ["available", "Configured", "done", "ok"], ["unpriced", "Unpriced", "attention", "attention"]];
-  m.models = expected.map(([state], index) => ({ ref: `example/model-${index}`, provider: "example", known: true, priced: state !== "unpriced", state, windows: [] }));
+  const expected = [["cooling-down", "Cooling down", "clock", "attention"], ["policy-refused", "Trigger policy refused", "refused", "attention"], ["unknown", "Not known", "info", "idle"], ["available", "Configured", "done", "ok"], ["unpriced", "Unpriced", "attention", "attention"]];
+  m.models = expected.map(([state], index) => ({ ref: `example/model-${index}`, provider: "example", known: true, priced: state !== "unpriced", state }));
   const d = cardDocument(await render(m)), inventory = d.byId.get("p-models");
   const badges = d.descendants(inventory).filter(n => n.classes.includes("badge"));
   assert.equal(badges.length, expected.length);

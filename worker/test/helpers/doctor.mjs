@@ -1,9 +1,7 @@
-// The doctor entry points as every test calls them (issue #504 part B). `doctor` reads the applied budget split
-// (`alloc:plan`) off the deployment's Valkey whenever it may talk to one, and a test that omits the seam would read the
-// DEVELOPER'S real Valkey on 127.0.0.1:6379, so a governed split there turned a hundred unrelated tests red. Here the
-// seam defaults to "no split"; a test that wants one passes its own `readAppliedSplit`. A bolt in doctor.test.mjs
-// refuses a test file that imports `runDoctor` or `collectChecks` from the source module instead of from here.
-import { collectChecks as realCollectChecks, forbidDefaultCapacityRead, forbidDefaultTokenWindowRead, runDoctor as realRunDoctor } from "../../src/doctor.mjs";
+// The doctor entry points as every test calls them. `doctor` reads capacity and the console off the deployment's Valkey
+// whenever it may talk to one, and a test that omits the seam would read the DEVELOPER'S real Valkey on 127.0.0.1:6379.
+// Here the seams default to "nothing there"; a test that wants another answer passes its own.
+import { collectChecks as realCollectChecks, forbidDefaultCapacityRead, runDoctor as realRunDoctor } from "../../src/doctor.mjs";
 
 const NO_SPLIT = async () => null;
 // Issue #596, phase 3: the size suggestions read run records, and the default reader reads the logs directory the
@@ -20,15 +18,10 @@ forbidDefaultCapacityRead();
 // answer passes its own `consoleProbe`.
 export const NO_CONSOLE = async () => ({ state: "not-running", target: "127.0.0.1:4790", reason: "nothing listens there" });
 export const NO_CAPACITY = async () => ({ records: [], coverage: { source: "local", reason: null, localHost: null, localHosts: [], local: null, mirror: null } });
-// Issue #761: the token window check reads this host's run records and then the counters on the deployment's Valkey,
-// and the older-state lines read the folder's compose file, the account's Quadlet units and the Valkey container's image;
-// without the seams those are the DEVELOPER'S real ones. Here they default to "no records" (so no counter is asked
-// either) and "nothing older"; a test that wants either passes its own, and the token reads' defaults are refused.
-forbidDefaultTokenWindowRead();
-export const NO_DOLLAR_RECORDS = async () => ({ records: [] });
-export const NO_DOLLAR_COUNTERS = async () => null;
+// The older-state lines read the folder's compose file, the account's Quadlet units and the Valkey container's image;
+// without the seam those are the DEVELOPER'S real ones. Here it defaults to "nothing older".
 export const NO_OLDER_STATE = async () => [];
-const QUIET = { readTokenRecords: NO_DOLLAR_RECORDS, readTokenCounters: NO_DOLLAR_COUNTERS, olderStateFindings: NO_OLDER_STATE };
+const QUIET = { olderStateFindings: NO_OLDER_STATE };
 
 export function runDoctor(shellVars, deps = {}) {
 	return realRunDoctor(shellVars, { readModelCooldowns: async () => [], readAppliedSplit: NO_SPLIT, readRunRecords: NO_RECORDS, readCapacity: NO_CAPACITY, consoleProbe: NO_CONSOLE, ...QUIET, ...deps });

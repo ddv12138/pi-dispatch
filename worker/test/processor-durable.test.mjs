@@ -7,105 +7,32 @@ import { makeRunningJobs } from "../src/index.mjs";
 import { buildRecord } from "../src/run-history.mjs";
 
 // Issue #645, durable runs (wave 2, part B2a): the processor's half. Every collaborator is a hand-rolled fake: the
-// checkpoint store, the run budget ledger (with the compare-and-set semantics of run-budget-ledger.mjs), the pointer and
-// the enqueuer. The money half runs through the real token-budget.mjs over a keyed fake Valkey.
+// checkpoint store, the run's container sequence (run-attempt.mjs: `nextSeq`/`remove`), the pointer and the enqueuer.
+// C2 removed the run budget ledger and every token hold, so nothing here reserves, settles or gives back tokens: the
+// durable guarantees left are the checkpoint lifecycle, the recovery enqueue, and one container number per attempt.
 
-const TOKENS = 1;
 const NOW = new Date("2026-10-07T12:00:00Z");
-const DAY = "budget:tok:2026-10-07";
 const BASE = "b".repeat(40);
 const PI = "1.2.0";
 const HOST = "h1";
 
-/** A keyed fake: the token INCRBY/DECRBY/settle on one store (processor-tokens.test.mjs's). */
-function keyedRedis() {
-	const store = new Map();
-	const ops = [];
-	const at = (k) => store.get(k) ?? 0;
-	return {
-		store,
-		ops,
-		async incr(k) {
-			ops.push(["incr", k]);
-			store.set(k, at(k) + 1);
-			return at(k);
-		},
-		async decr(k) {
-			ops.push(["decr", k]);
-			store.set(k, at(k) - 1);
-			return at(k);
-		},
-		async incrby(k, n) {
-			ops.push(["incrby", k, n]);
-			store.set(k, at(k) + n);
-			return at(k);
-		},
-		async decrby(k, n) {
-			ops.push(["decrby", k, n]);
-			store.set(k, at(k) - n);
-			return at(k);
-		},
-		async eval(_script, _n, k, arg) {
-			const d = Number(arg);
-			ops.push(["settle", k, d]);
-			if (!store.has(k)) return [1, 0];
-			store.set(k, Math.max(0, at(k) + d));
-			return [0, at(k)];
-		},
-		async expire() {},
-		async get() {
-			return null;
-		},
-		async del(k) {
-			ops.push(["del", k]);
-			store.delete(k);
-			return 1;
-		},
-	};
-}
-
-/** The run budget ledger, in memory, with run-budget-ledger.mjs's transitions: every move only FROM `held`. */
-function fakeLedger({ fail = {} } = {}) {
+/** The run's container sequence, in memory (run-attempt.mjs): numbers only ever grow for a run, `remove` drops it. */
+function fakeAttempts({ fail = {} } = {}) {
 	const runs = new Map();
 	const calls = [];
-	const run = (id) => {
-		if (!runs.has(id)) runs.set(id, { seq: 0, holds: new Map() });
-		return runs.get(id);
-	};
-	const move = (op, id, seq, to) => {
-		calls.push([op, id, seq]);
-		if (fail[op]) return { error: "valkey" };
-		const h = run(id).holds.get(seq);
-		if (!h || h.state !== "held") return "not-held";
-		h.state = to;
-		return "moved";
-	};
 	return {
 		runs,
 		calls,
 		async nextSeq(id) {
 			calls.push(["nextSeq", id]);
 			if (fail.nextSeq) return { error: "valkey" };
-			return ++run(id).seq;
-		},
-		async recordHold(id, seq, hold) {
-			calls.push(["recordHold", id, seq]);
-			if (fail.recordHold) return { error: "valkey" };
-			const r = run(id);
-			if (r.holds.has(seq)) return { error: "exists" };
-			r.holds.set(seq, { state: "held", amountTokens: hold.amountTokens });
-			return { ok: true };
-		},
-		settle: (id, seq) => move("settle", id, seq, "settled"),
-		release: (id, seq) => move("release", id, seq, "released"),
-		async settleCrashed(id, below) {
-			calls.push(["settleCrashed", id, below]);
-			const settled = [];
-			for (const [seq, h] of run(id).holds) if (h.state === "held" && seq < below) (h.state = "settled-crashed"), settled.push(seq);
-			return { settled };
+			const n = (runs.get(id) ?? 0) + 1;
+			runs.set(id, n);
+			return n;
 		},
 		async remove(id) {
 			calls.push(["remove", id]);
+			if (fail.remove) return { error: "valkey" };
 			runs.delete(id);
 			return { ok: true };
 		},
@@ -147,10 +74,9 @@ const recoveryJob = (n = 1) => ({ ...job, recoveryOf: RUN, recovery: n });
 function deps(overrides = {}) {
 	const calls = [];
 	const logs = [];
-	const redis = overrides.redis ?? keyedRedis();
 	const pointers = new Map([[RUN, { v: 1, host: HOST, hostQueue: null, seq: 4, attempt: 1, at: 1, jobDir: "job-abc" }]]);
 	const base = {
-		redis,
+		redis: {},
 		imagePreflight: async () => ({ ok: true, piVersion: PI, capabilities: ["recover"], imageDigest: "sha256:" + "d".repeat(64) }),
 		mintToken: async () => (calls.push(["mint"]), "tok"),
 		isDefaultBranchProtected: async () => true,
@@ -162,7 +88,7 @@ function deps(overrides = {}) {
 		log: (event, fields) => logs.push([event, fields]),
 		now: NOW,
 		hostName: HOST,
-		runBudgetLedger: fakeLedger(),
+		runAttempts: fakeAttempts(),
 		readCheckpointPointer: async ({ runId }) => (calls.push(["readPointer", runId]), pointers.get(runId) ?? null),
 		removeCheckpointPointer: async ({ runId }) => (calls.push(["pointer-remove", runId]), pointers.delete(runId)),
 		enqueueRecovery: async ({ cause }) => (calls.push(["enqueue", cause]), { enqueued: true, jobId: `${RUN}.r1`, n: 1 }),
@@ -170,9 +96,9 @@ function deps(overrides = {}) {
 		resetTrustPaths: async (args) => (calls.push(["resetTrustPaths", args.workspace, args.baseSha]), { deleted: 1, written: 1 }),
 		baseHasExtensions: async (args) => (calls.push(["baseHasExtensions", args.baseSha]), false),
 	};
-	const d = { ...base, ...overrides, redis };
+	const d = { ...base, ...overrides };
 	if (!Object.hasOwn(overrides, "workspaceCheckpointer")) d.workspaceCheckpointer = fakeCheckpointer(calls);
-	return { deps: d, calls, logs, redis, pointers, ledger: d.runBudgetLedger };
+	return { deps: d, calls, logs, pointers, attempts: d.runAttempts };
 }
 
 const names = (calls) => calls.map((c) => c[0]);
@@ -190,19 +116,18 @@ test("every new refusal comes before the mint, the claim and every reserve", asy
 		["recovery-checkpoint-absent", recoveryJob(1), { workspaceCheckpointer: fakeCheckpointer([], { manifest: { ...MANIFEST, host: "elsewhere" } }) }],
 	];
 	for (const [reason, j, over] of cases) {
-		const { deps: d, calls, redis, ledger } = deps(over);
+		const { deps: d, calls, attempts } = deps(over);
 		const r = await runJob(j, d);
 		assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", reason, false], reason);
 		assert.ok(!names(calls).includes("mint"), `${reason}: before the mint`);
 		assert.ok(!names(calls).includes("prepare"), `${reason}: before the clone`);
-		assert.equal(redis.ops.filter((o) => o[0] === "incr" || o[0] === "incrby").length, 0, `${reason}: nothing reserved`);
-		assert.ok(!ledger.calls.some((c) => c[0] === "claimSlot" || c[0] === "nextSeq"), `${reason}: no claim`);
+		assert.ok(!attempts.calls.some((c) => c[0] === "nextSeq"), `${reason}: no container number taken`);
 		assert.ok(calls.some((c) => c[0] === "comment" && c[1] === RECOVERY_COMMENTS[reason]), `${reason}: its fixed comment`);
 	}
 });
 
 test("a superseded recovery (its run's pointer AND store are gone) is refused silently, before the mint, and cleans up nothing", async () => {
-	const { deps: d, calls, pointers } = deps({ workspaceCheckpointer: fakeCheckpointer([], { manifest: null }) });
+	const { deps: d, calls, pointers, attempts } = deps({ workspaceCheckpointer: fakeCheckpointer([], { manifest: null }) });
 	pointers.clear();
 	const r = await runJob(recoveryJob(1), d);
 	assert.deepEqual([r.outcome, r.reason], ["policy", "recovery-superseded"]);
@@ -210,7 +135,7 @@ test("a superseded recovery (its run's pointer AND store are gone) is refused si
 	assert.ok(!names(calls).includes("mint"));
 	assert.ok(!names(calls).includes("store-remove"), "an empty pointer read never deletes a store");
 	assert.ok(!names(calls).includes("pointer-remove"));
-	assert.ok(!d.runBudgetLedger.calls.some((c) => c[0] === "remove"));
+	assert.deepEqual(attempts.calls, [], "the container sequence untouched");
 });
 
 test("a recovery whose base still runs here is HELD (no attempt), before the mint", async () => {
@@ -235,7 +160,7 @@ test("a checkpoint a newer release wrote is waited on, never refused: a NewerRel
 		const label = pointerGone ? "no pointer" : "a pointer";
 		const store = [];
 		const newerStore = { ...fakeCheckpointer(store), readManifest: async (runId) => (store.push(["readManifest", runId]), NEWER) };
-		const { deps: d, calls, pointers, ledger, redis } = deps({ workspaceCheckpointer: newerStore });
+		const { deps: d, calls, pointers, attempts } = deps({ workspaceCheckpointer: newerStore });
 		if (pointerGone) pointers.clear();
 		await assert.rejects(runJob(recoveryJob(1), d), (e) => {
 			assert.ok(e instanceof NewerReleaseHold && e instanceof InfraRetry, `${label}: a hold any path that does not know it still retries`);
@@ -250,8 +175,7 @@ test("a checkpoint a newer release wrote is waited on, never refused: a NewerRel
 		assert.ok(!names(store).includes("store-remove") && !names(store).includes("restore"), `${label}: the store is neither removed nor restored`);
 		assert.ok(!names(calls).includes("pointer-remove"), `${label}: no pointer delete`);
 		assert.equal(pointers.has(RUN), !pointerGone);
-		assert.ok(!ledger.calls.some((c) => ["claimSlot", "nextSeq", "settleCrashed", "remove"].includes(c[0])), `${label}: the run budget ledger untouched`);
-		assert.equal(redis.ops.filter((o) => o[0] === "incr" || o[0] === "incrby").length, 0, `${label}: nothing reserved`);
+		assert.deepEqual(attempts.calls, [], `${label}: no container number taken`);
 	}
 });
 
@@ -260,17 +184,27 @@ test("a pointer read that throws is retried, never read as superseded", async ()
 	await assert.rejects(runJob(recoveryJob(1), d), (e) => e instanceof InfraRetry && e.reason === "container-never-started");
 });
 
-test("an armed job on a wiring with a store but no ledger is config-refused before the mint", async () => {
-	const { deps: d, calls } = deps({ runBudgetLedger: null });
-	const r = await runJob(job, d);
-	assert.deepEqual([r.outcome, r.reason], ["policy", "config-refused"]);
+test("an armed job on a wiring with a store but no pointer read or enqueuer is config-refused before the mint", async () => {
+	for (const over of [{ readCheckpointPointer: null }, { enqueueRecovery: null }]) {
+		const { deps: d, calls, attempts } = deps(over);
+		const r = await runJob(job, d);
+		assert.deepEqual([r.outcome, r.reason], ["policy", "config-refused"]);
+		assert.ok(!names(calls).includes("mint"));
+		assert.ok(!attempts.calls.some((c) => c[0] === "nextSeq"), "no container number taken");
+	}
+});
+
+test("an armed job with no run-attempt sequence retries never-started before the mint, never running unnumbered", async () => {
+	const { deps: d, calls } = deps({ runAttempts: null });
+	await assert.rejects(runJob(job, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started");
 	assert.ok(!names(calls).includes("mint"));
+	assert.ok(!names(calls).includes("prepare"));
 });
 
 // ── recovery job ────────────────────────────────────────────────────────────────────────────────────────────────
 
 test("a recovery job clones from the store (pin), then restore, trust reset and stageRecovered, and runs recovering", async () => {
-	const { deps: d, calls, ledger } = deps();
+	const { deps: d, calls, attempts } = deps();
 	const r = await runJob(recoveryJob(1), d);
 	assert.equal(r.outcome, "completed");
 	const prep = calls.filter((c) => c[0] === "prepare");
@@ -285,32 +219,30 @@ test("a recovery job clones from the store (pin), then restore, trust reset and 
 	assert.equal(run.recovering, true);
 	assert.equal(run.checkpoint.runId, RUN);
 	assert.equal(run.checkpoint.baseSha, BASE);
-	assert.equal(run.checkpoint.attempt, 1, "the container number from the ledger");
+	assert.equal(run.checkpoint.attempt, 1, "the run's first container number, taken from runAttempts.nextSeq");
 	assert.deepEqual(run.checkpoint.secretValues, ["tok"]);
 	assert.deepEqual(r.recovered, { from: "live", n: 1, fromAttempt: 1, checkpointSeq: 4, orphans: null, replayed: null, interrupted: null, notStarted: null });
-	assert.equal(ledger.calls.filter((c) => c[0] === "settleCrashed").length, 1);
+	assert.deepEqual(attempts.calls, [["nextSeq", RUN], ["remove", RUN]], "one number taken, removed at the final outcome");
 });
 
-test("settleCrashed is called once, at recovery start, with this container's number, and settles the crashed hold", async () => {
-	const ledger = fakeLedger();
-	// The base: seq 1, a recorded hold the crash left `held`.
-	await ledger.nextSeq(RUN);
-	await ledger.recordHold(RUN, 1, { amountTokens: 2, keys: [DAY] });
-	ledger.calls.length = 0;
-	const { deps: d } = deps({ runBudgetLedger: ledger });
+test("a recovery takes the container number AFTER the attempt that crashed, and the final outcome removes the sequence", async () => {
+	const attempts = fakeAttempts();
+	// The crashed attempt took 1 before it died; the recovery's container must not reuse it.
+	await attempts.nextSeq(RUN);
+	attempts.calls.length = 0;
+	const { deps: d, calls } = deps({ runAttempts: attempts });
 	await runJob(recoveryJob(1), d);
-	const sc = ledger.calls.filter((c) => c[0] === "settleCrashed");
-	assert.deepEqual(sc, [["settleCrashed", RUN, 2]]);
-	assert.ok(ledger.calls.findIndex((c) => c[0] === "settleCrashed") < ledger.calls.findIndex((c) => c[0] === "remove"));
-	// settled-crashed, never released: the completed recovery then removed the ledger at the run's final outcome.
-	assert.equal(ledger.runs.has(RUN), false);
+	const run = calls.find((c) => c[0] === "run-container")[1];
+	assert.equal(run.checkpoint.attempt, 2, "the next number in the run, never the crashed container's");
+	assert.deepEqual(attempts.calls, [["nextSeq", RUN], ["remove", RUN]]);
+	assert.equal(attempts.runs.has(RUN), false, "the completed run's sequence is removed");
 });
 
-test("a restore the store refuses is recovery-checkpoint-absent, before any reserve; one it skipped is a never-started retry", async () => {
+test("a restore the store refuses is recovery-checkpoint-absent, before any attempt; one it skipped is a never-started retry", async () => {
 	const a = deps({ workspaceCheckpointer: fakeCheckpointer([], { restore: { refused: "tampered" } }) });
 	const r = await runJob(recoveryJob(1), a.deps);
 	assert.deepEqual([r.outcome, r.reason], ["policy", "recovery-checkpoint-absent"]);
-	assert.equal(a.redis.ops.filter((o) => o[0] === "incr").length, 0);
+	assert.ok(!a.attempts.calls.some((c) => c[0] === "nextSeq"), "no container number taken for a refused restore");
 	const b = deps({ workspaceCheckpointer: fakeCheckpointer([], { restore: { skipped: "locked" } }) });
 	await assert.rejects(runJob(recoveryJob(1), b.deps), (e) => e instanceof InfraRetry && e.reason === "container-never-started");
 	assert.ok(!names(b.calls).includes("run-container"));
@@ -347,45 +279,28 @@ test("a base the store could not take: the run goes on, recoverSkipped base-unpr
 	assert.equal(buildRecord({ job: { id: RUN, data: job }, result: r }).recoverSkipped, "base-unprimed");
 });
 
-test("a recordHold failure releases the hold and throws a never-started InfraRetry before any container", async () => {
-	const { deps: d, calls, redis } = deps({ tokenCaps: { day: 10, week: null, month: null }, runBudgetLedger: fakeLedger({ fail: { recordHold: true } }) });
-	await assert.rejects(runJob({ ...job, maxTokens: 2 }, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started" && e.tokensWindows?.basis === "refunded");
-	assert.ok(!names(calls).includes("run-container"));
-	assert.equal(redis.store.get(DAY), 0, "the token hold given back whole");
-	assert.deepEqual(redis.ops.filter((o) => o[1] === DAY).map((o) => o[0]).slice(0, 1), ["incrby"], "reserved once, then given back");
-});
-
-test("a recorded hold is settled through the ledger; a 'not-held' answer leaves the floor", async () => {
+test("a completed armed run records the container's tokens, usage and cost as before, with no token window in the result", async () => {
 	const tokens = { input: 1, output: 1, total: 2, metered: true, rootTotal: 2, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, usageUnreported: 0, modelRefused: 0 };
 	const usage = { v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 2, cost: 0.5, unpriced: 0 }] };
-	const runContainer = async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage });
-	const ok = deps({ tokenCaps: { day: 10, week: null, month: null }, runContainer });
-	const r = await runJob({ ...job, maxTokens: 2 }, ok.deps);
-	assert.equal(r.tokensWindows.basis, "metered");
-	assert.ok(ok.ledger.calls.some((c) => c[0] === "settle"));
-	const ledger = fakeLedger();
-	ledger.settle = async () => "not-held";
-	const floor = deps({ tokenCaps: { day: 10, week: null, month: null }, runContainer, runBudgetLedger: ledger });
-	const f = await runJob({ ...job, maxTokens: 2 }, floor.deps);
-	assert.equal(f.tokensWindows.basis, "floor");
-	assert.equal(floor.redis.store.get(DAY), 2, "no window key moved");
+	const { deps: d } = deps({ runContainer: async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage }) });
+	const r = await runJob({ ...job, maxTokens: 2 }, d);
+	assert.equal(r.outcome, "completed");
+	assert.deepEqual(r.tokens, tokens, "usage and cost are telemetry, not a cap");
+	assert.deepEqual(r.usage, usage);
+	assert.equal(Object.hasOwn(r, "tokensWindows"), false, "C2 removed the token windows from the result");
 });
 
-test("issue #761: a hold the ledger did not move (settle or release) keeps every key at the floor, and reservedIn names them", async () => {
-	const tokens = { input: 1, output: 1, total: 2, metered: true, rootTotal: 2, otherTotal: 0, looseTotal: 0, sessions: 1, calls: 1, unresolved: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, usageUnreported: 0, modelRefused: 0 };
-	const usage = { v: 1, piAi: null, truncated: 0, models: [{ provider: "anthropic", model: "m", calls: 1, input: 1, output: 1, cacheRead: 0, cacheWrite: 0, cacheWrite1h: 0, reasoning: 0, total: 2, cost: 0.5, unpriced: 0 }] };
-	const valkeyTag = "0123456789abcdef";
-	const settled = fakeLedger();
-	settled.settle = async () => "not-held";
-	const s = deps({ tokenCaps: { day: 10, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 0, aborted: false, exitLineCode: 0, tokens, usage }), runBudgetLedger: settled });
-	const r = await runJob({ ...job, maxTokens: 2 }, s.deps);
-	assert.deepEqual(r.tokensWindows, { reservedTokens: 2, settledTokens: 2, basis: "floor", modelBasis: null, reservedIn: { day: "2026-10-07", valkey: valkeyTag } });
-	assert.equal(s.redis.store.get(DAY), 2);
-	const released = fakeLedger();
-	released.release = async () => "not-held";
-	const n = deps({ tokenCaps: { day: 10, week: null, month: null }, valkeyTag, runContainer: async () => ({ code: 125, aborted: false, tokens: null }), runBudgetLedger: released });
-	await assert.rejects(runJob({ ...job, maxTokens: 2 }, n.deps), (e) => e instanceof InfraRetry && e.tokensWindows?.basis === "floor" && e.tokensWindows.reservedIn?.day === "2026-10-07");
-	assert.equal(n.redis.store.get(DAY), 2, "not given back: someone else finished the hold");
+test("a job carrying maxTokens and a full tokenCaps dep still runs: nothing reserves before the container", async () => {
+	const calls = [];
+	const { deps: d, attempts } = deps({
+		tokenCaps: { day: 1, week: 1, month: 1 },
+		runContainer: async () => (calls.push("run-container"), { code: 0, aborted: false }),
+	});
+	const r = await runJob({ ...job, maxTokens: 2 }, d);
+	assert.equal(r.outcome, "completed");
+	assert.equal(r.budgetReserved, true, "a container ran, so it may have spent");
+	assert.deepEqual(calls, ["run-container"]);
+	assert.deepEqual(attempts.calls, [["nextSeq", RUN], ["remove", RUN]], "one number taken, removed at the final outcome");
 });
 
 // ── exits ───────────────────────────────────────────────────────────────────────────────────────────────────────
@@ -400,7 +315,7 @@ function checkpointHandle(calls, { exit = { seq: 5 }, close = { written: 3, fail
 
 test("an infra exit of an armed job takes exit(), then enqueues a recovery, and RETURNS (no InfraRetry), keeping its checkpoint", async () => {
 	const holder = { calls: null };
-	const { deps: d, calls, ledger } = deps({ runContainer: async () => ({ code: 1, aborted: false, checkpoint: checkpointHandle(holder.calls) }) });
+	const { deps: d, calls, attempts } = deps({ runContainer: async () => ({ code: 1, aborted: false, checkpoint: checkpointHandle(holder.calls) }) });
 	holder.calls = calls;
 	const r = await runJob(job, d);
 	assert.deepEqual([r.outcome, r.reason, r.exitCode, r.budgetReserved], ["failed", RECOVERY_ENQUEUED, 1, true]);
@@ -410,7 +325,7 @@ test("an infra exit of an armed job takes exit(), then enqueues a recovery, and 
 	assert.deepEqual(r.checkpoints, { written: 3, failed: 1, skipped: 2 });
 	assert.ok(!names(calls).includes("store-remove"), "the checkpoint stays for the recovery");
 	assert.ok(!names(calls).includes("pointer-remove"));
-	assert.ok(!ledger.calls.some((c) => c[0] === "remove"));
+	assert.deepEqual(attempts.calls, [["nextSeq", RUN]], "the sequence is kept for the recovery, never removed");
 	const rec = buildRecord({ job: { id: RUN, data: job }, result: r });
 	assert.deepEqual([rec.outcome, rec.reason, rec.checkpoints], ["failed", RECOVERY_ENQUEUED, { written: 3, failed: 1, skipped: 2 }]);
 });
@@ -439,10 +354,10 @@ test("an unknown exit and a detached container of an armed job recover too; a ne
 	assert.ok(!names(calls).includes("cp-exit"));
 });
 
-test("completed and policy exits never enqueue, and remove the store entry, the pointer and the ledger", async () => {
+test("completed and policy exits never enqueue, and remove the store entry, the pointer and the run's sequence", async () => {
 	for (const code of [0, 2]) {
 		const holder = [];
-		const { deps: d, calls, ledger, pointers } = deps({ runContainer: async () => ({ code, aborted: false, checkpoint: checkpointHandle(holder) }) });
+		const { deps: d, calls, attempts, pointers } = deps({ runContainer: async () => ({ code, aborted: false, checkpoint: checkpointHandle(holder) }) });
 		const r = await runJob(job, d);
 		assert.equal(r.outcome, code === 0 ? "completed" : "policy");
 		assert.ok(!names(calls).includes("enqueue"));
@@ -451,7 +366,8 @@ test("completed and policy exits never enqueue, and remove the store entry, the 
 		assert.ok(calls.some((c) => c[0] === "store-remove" && c[1] === RUN));
 		assert.ok(calls.some((c) => c[0] === "pointer-remove" && c[1] === RUN));
 		assert.equal(pointers.has(RUN), false);
-		assert.ok(ledger.calls.some((c) => c[0] === "remove" && c[1] === RUN));
+		assert.deepEqual(attempts.calls, [["nextSeq", RUN], ["remove", RUN]]);
+		assert.equal(attempts.runs.has(RUN), false);
 	}
 });
 
@@ -516,21 +432,21 @@ test("the exit line wins over the transcript's counts; a transcript with no mark
 
 // ── local ───────────────────────────────────────────────────────────────────────────────────────────────────────
 
-test("a local job with run.recover is not armed: recoverSkipped local, no ledger, no store, today's run", async () => {
-	const { deps: d, calls, ledger } = deps({ prepareWorkspace: async () => ({ workspace: "/f", jobDir: "/j" }) });
+test("a local job with run.recover is not armed: recoverSkipped local, no sequence, no store, today's run", async () => {
+	const { deps: d, calls, attempts } = deps({ prepareWorkspace: async () => ({ workspace: "/f", jobDir: "/j" }) });
 	const r = await runJob({ kind: "local", folder: "/f", task: "t", provider: "anthropic", model: "m", recover: true }, d);
 	assert.equal(r.outcome, "completed");
 	assert.equal(r.recoverSkipped, "local");
-	assert.deepEqual(ledger.calls, []);
+	assert.deepEqual(attempts.calls, []);
 	assert.ok(!names(calls).includes("primeBase"));
 	assert.deepEqual(calls.find((c) => c[0] === "run-container")[1], { recover: false, recovering: false, checkpoint: null });
 	assert.equal(buildRecord({ job: { id: "local-1", data: { kind: "local", recover: true } }, result: r }).recoverSkipped, "local");
 });
 
 test("a job that never armed run.recover touches none of it and its result has no new key", async () => {
-	const { deps: d, ledger, calls } = deps();
+	const { deps: d, attempts, calls } = deps();
 	const r = await runJob({ ...job, recover: undefined }, d);
-	assert.deepEqual(ledger.calls, []);
+	assert.deepEqual(attempts.calls, []);
 	assert.ok(!names(calls).includes("primeBase"));
 	for (const k of ["recoverSkipped", "recovered", "checkpoints"]) assert.equal(Object.hasOwn(r, k), false, k);
 });
@@ -549,20 +465,26 @@ function prng(seed) {
 	};
 }
 
-test("PROPERTY: over random crash points, the token keys never exceed (containers started) x cap", async () => {
-	const CAP = 2;
-	const steps = ["complete", "policy", "infra", "crash", "recordFail", "seqFail", "neverStarted"];
-	// The property must not pass vacuously: enough trials have to reach a recovery and settle a crashed hold.
+test("PROPERTY: over random crash points, every container gets a distinct number and only a final outcome removes the sequence", async () => {
+	const steps = ["complete", "policy", "infra", "crash", "seqFail", "neverStarted"];
+	// The property must not pass vacuously: enough trials have to reach a recovery and a final cleanup.
 	let recoveries = 0;
-	let crashedSettled = 0;
+	let finalOutcomes = 0;
+	let kept = 0;
 	for (let seed = 1; seed <= 300; seed++) {
 		const rand = prng(seed);
-		const redis = keyedRedis();
-		const ledger = fakeLedger();
+		const attempts = fakeAttempts();
+		const handed = [];
+		const take = attempts.nextSeq;
+		attempts.nextSeq = async (id) => {
+			const r = await take(id);
+			if (Number.isSafeInteger(r)) handed.push(r);
+			return r;
+		};
 		const store = { alive: true };
 		const pointers = new Map();
-		let containers = 0;
-		let next = { j: { ...job, maxTokens: CAP } };
+		const containerAttempts = [];
+		let next = { j: job };
 		const trail = [];
 		while (next) {
 			const current = next;
@@ -570,24 +492,20 @@ test("PROPERTY: over random crash points, the token keys never exceed (container
 			const step = steps[Math.floor(rand() * steps.length)];
 			trail.push(step);
 			const n = current.j.recovery ?? 0;
-			const realRecord = ledger._record ?? (ledger._record = ledger.recordHold);
-			ledger.recordHold = step === "recordFail" ? async () => ({ error: "valkey" }) : realRecord;
-			const realSeq = ledger._seq ?? (ledger._seq = ledger.nextSeq);
-			ledger.nextSeq = step === "seqFail" ? async () => ({ error: "valkey" }) : realSeq;
-			const tokens = { input: 1, output: 1, total: 2, cost: rand() * 2, metered: true, unresolved: 0, unpriced: 0, childTotal: 0, childProcesses: 0, unmeteredChildren: 0, tokenBudgetTokens: CAP, modelRefused: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0, usageUnreported: 0 };
-			const runContainer = async () => {
-				containers++;
-				pointers.set(RUN, { v: 1, host: HOST, hostQueue: null, seq: containers, attempt: containers, at: 1, jobDir: "job-x" });
+			// A number that cannot be taken must stop the run BEFORE its container: failing the take must not run on
+			// unnumbered (the processor raises never-started), and the retry may take the next one.
+			attempts.nextSeq = step === "seqFail" ? async () => ({ error: "valkey" }) : take;
+			const runContainer = async (ctx) => {
+				containerAttempts.push(ctx.checkpoint.attempt);
+				pointers.set(RUN, { v: 1, host: HOST, hostQueue: null, seq: ctx.checkpoint.attempt, attempt: ctx.checkpoint.attempt, at: 1, jobDir: "job-x" });
 				if (step === "crash") throw new Error("the worker died mid-run");
 				if (step === "neverStarted") return { code: 125, aborted: false };
 				const code = step === "complete" ? 0 : step === "policy" ? 2 : 1;
-				return { code, aborted: false, exitLineCode: code, tokens };
+				return { code, aborted: false, exitLineCode: code };
 			};
-			const enqueueRecovery = async () => (n + 1 <= RECOVERY_CAP ? ((next = { j: { ...job, maxTokens: CAP, recoveryOf: RUN, recovery: n + 1 } }), { enqueued: true, jobId: `${RUN}.r${n + 1}`, n: n + 1 }) : { enqueued: false, reason: "cap" });
+			const enqueueRecovery = async () => (n + 1 <= RECOVERY_CAP ? ((next = { j: { ...job, recoveryOf: RUN, recovery: n + 1 } }), { enqueued: true, jobId: `${RUN}.r${n + 1}`, n: n + 1 }) : { enqueued: false, reason: "cap" });
 			const { deps: d } = deps({
-				redis,
-				tokenCaps: { day: 1000, week: null, month: null },
-				runBudgetLedger: ledger,
+				runAttempts: attempts,
 				runContainer,
 				enqueueRecovery,
 				readCheckpointPointer: async ({ runId }) => pointers.get(runId) ?? null,
@@ -595,28 +513,35 @@ test("PROPERTY: over random crash points, the token keys never exceed (container
 				workspaceCheckpointer: { ...fakeCheckpointer([]), readManifest: async () => (store.alive ? { ok: true, manifest: MANIFEST, transcriptPath: "/t" } : { absent: true }), remove: async () => ((store.alive = false), { removed: true }) },
 			});
 			if (current.j.recoveryOf) recoveries++;
-			const settleCrashed = ledger.settleCrashed;
-			ledger.settleCrashed = async (...a) => {
-				const r = await settleCrashed(...a);
-				crashedSettled += r.settled.length;
-				return r;
-			};
+			let result = null;
 			try {
-				await runJob(current.j, d);
+				result = await runJob(current.j, d);
 			} catch {
 				// A crash (the worker died) is continued by the stall path's recovery, as start.mjs would enqueue it; a
-				// never-started or ledger fault is BullMQ's retry of the same attempt.
-				if (step === "crash" && n + 1 <= RECOVERY_CAP && pointers.has(RUN)) next = { j: { ...job, maxTokens: CAP, recoveryOf: RUN, recovery: n + 1 } };
-				else if (["recordFail", "seqFail", "neverStarted"].includes(step) && trail.length < 8) next = current;
+				// never-started or sequence fault is BullMQ's retry of the same attempt.
+				if (step === "crash" && n + 1 <= RECOVERY_CAP && pointers.has(RUN)) next = { j: { ...job, recoveryOf: RUN, recovery: n + 1 } };
+				else if (["seqFail", "neverStarted"].includes(step) && trail.length < 8) next = current;
 			}
-			const total = redis.store.get(DAY) ?? 0;
-			assert.ok(total >= 0, `seed ${seed}: a negative window (${trail.join(",")})`);
-			assert.ok(total <= containers * CAP, `seed ${seed}: ${total} > ${containers} x ${CAP} after ${trail.join(",")}`);
-			ledger.settleCrashed = settleCrashed;
+			const removed = attempts.calls.filter((c) => c[0] === "remove").length;
+			// The same condition endDurableRun uses: a returned, SETTLED outcome cleans up; a queued or superseded
+			// recovery keeps its checkpoint and its sequence for the next container.
+			const final = result !== null && result.reason !== RECOVERY_ENQUEUED && result.reason !== "recovery-superseded";
+			if (final) {
+				finalOutcomes++;
+				assert.equal(removed, 1, `seed ${seed}: a final outcome removes the sequence exactly once (${trail.join(",")})`);
+				assert.equal(attempts.runs.has(RUN), false, `seed ${seed}: the sequence is gone after a final outcome`);
+			} else {
+				kept++;
+				assert.equal(removed, 0, `seed ${seed}: only a final outcome removes the sequence (${trail.join(",")})`);
+				if (handed.length > 0) assert.equal(attempts.runs.has(RUN), true, `seed ${seed}: the sequence is kept for the recovery or retry`);
+			}
 		}
+		assert.equal(new Set(containerAttempts).size, containerAttempts.length, `seed ${seed}: a container number was reused (${containerAttempts.join(",")})`);
+		assert.deepEqual(containerAttempts, Array.from({ length: containerAttempts.length }, (_, i) => i + 1), `seed ${seed}: numbers grow one per container`);
 	}
 	assert.ok(recoveries > 50, `only ${recoveries} recoveries ran`);
-	assert.ok(crashedSettled > 10, `only ${crashedSettled} crashed holds settled`);
+	assert.ok(finalOutcomes > 50, `only ${finalOutcomes} final outcomes ran`);
+	assert.ok(kept > 50, `only ${kept} non-final attempts ran`);
 });
 
 test("a recovery asks for a salvage checkpoint after the pointer read and before the manifest read; a failing one is not fatal", async () => {
@@ -653,12 +578,12 @@ test("the base-running check excludes the recovery's own entry, with the REAL ru
 	assert.equal(await ran(2, [`${RUN}.r2`, "other-job"]), "ran");
 });
 
-test("a fresh run whose base holds .pi/extensions is not armed: no ledger, no prime, no checkpoint args, recoverSkipped workspace-extensions", async () => {
-	const { deps: d, calls, ledger } = deps({ baseHasExtensions: async () => true });
+test("a fresh run whose base holds .pi/extensions is not armed: no sequence, no prime, no checkpoint args, recoverSkipped workspace-extensions", async () => {
+	const { deps: d, calls, attempts } = deps({ baseHasExtensions: async () => true });
 	const r = await runJob(job, d);
 	assert.equal(r.outcome, "completed");
 	assert.equal(r.recoverSkipped, "workspace-extensions");
-	assert.deepEqual(ledger.calls, []);
+	assert.deepEqual(attempts.calls, []);
 	assert.ok(!names(calls).includes("primeBase"));
 	assert.deepEqual(calls.find((c) => c[0] === "run-container")[1], { recover: false, recovering: false, checkpoint: null });
 	assert.ok(!names(calls).includes("store-remove"), "not armed: no durable cleanup either");
@@ -671,23 +596,22 @@ test("a fresh run whose base holds .pi/extensions is not armed: no ledger, no pr
 	const c = deps({ baseHasExtensions: async () => Promise.reject(new Error("x")) });
 	const rc = await runJob(job, c.deps);
 	assert.equal(rc.recoverSkipped, "base-unprimed");
-	assert.deepEqual(c.ledger.calls, []);
+	assert.deepEqual(c.attempts.calls, []);
 });
 
-test("a recovery of a base with .pi/extensions is refused as recovery-unsafe-extensions, before the restore and any reserve", async () => {
-	const { deps: d, calls, redis } = deps({ baseHasExtensions: async () => true });
+test("a recovery of a base with .pi/extensions is refused as recovery-unsafe-extensions, before the restore and any container number", async () => {
+	const { deps: d, calls, attempts } = deps({ baseHasExtensions: async () => true });
 	const r = await runJob(recoveryJob(1), d);
 	assert.deepEqual([r.outcome, r.reason], ["policy", "recovery-unsafe-extensions"]);
 	assert.ok(calls.some((c) => c[0] === "comment" && c[1] === RECOVERY_COMMENTS["recovery-unsafe-extensions"]));
 	assert.ok(!names(calls).includes("restore"));
-	assert.equal(redis.ops.filter((o) => o[0] === "incr").length, 0);
+	assert.ok(!attempts.calls.some((c) => c[0] === "nextSeq"));
 });
 
 test("every never-started fault of a RECOVERY job becomes a 60 s wait hold, never a spent attempt", async () => {
 	const cases = {
 		"pointer read throws": { readCheckpointPointer: async () => Promise.reject(new Error("x")) },
-		"nextSeq error, no token windows": { runBudgetLedger: fakeLedger({ fail: { nextSeq: true } }) },
-		"recordHold error": { runBudgetLedger: fakeLedger({ fail: { recordHold: true } }), tokenCaps: { day: 10, week: null, month: null } },
+		"nextSeq error": { runAttempts: fakeAttempts({ fail: { nextSeq: true } }) },
 		"restore skipped": { workspaceCheckpointer: fakeCheckpointer([], { restore: { skipped: "locked" } }) },
 		"trust reset failed": { resetTrustPaths: async () => Promise.reject(new Error("x")) },
 		"staging failed": { stageRecovered: async () => null },
@@ -704,7 +628,7 @@ test("every never-started fault of a RECOVERY job becomes a 60 s wait hold, neve
 	m.pointers.clear();
 	await assert.rejects(runJob(recoveryJob(1), m.deps), (e) => e instanceof RecoveryWaitHold && e.recoveryWaitMs === RECOVERY_RETRY_WAIT_MS);
 	// A FRESH job's never-started fault stays an ordinary retry: it has its attempts.
-	const f = deps({ runBudgetLedger: fakeLedger({ fail: { nextSeq: true } }) });
+	const f = deps({ runAttempts: fakeAttempts({ fail: { nextSeq: true } }) });
 	await assert.rejects(runJob(job, f.deps), (e) => e instanceof InfraRetry && !(e instanceof RecoveryWaitHold) && e.reason === "container-never-started");
 });
 
@@ -752,23 +676,17 @@ test("a settled base record supersedes a recovery FIRST, before the pointer and 
 	assert.equal((await runJob(recoveryJob(1), other.deps)).outcome, "completed");
 });
 
-test("a fresh or retried armed attempt never calls settleCrashed", async () => {
-	const ledger = fakeLedger();
-	for (let i = 0; i < 2; i++) {
-		const { deps: d } = deps({ runBudgetLedger: ledger });
-		await runJob(job, d).catch(() => {});
-	}
-	assert.ok(ledger.calls.some((c) => c[0] === "nextSeq"));
-	assert.ok(!ledger.calls.some((c) => c[0] === "settleCrashed"));
-});
-
-test("a never-started throw whose ledger release answers 'not-held' gives nothing back: the floor", async () => {
-	const ledger = fakeLedger();
-	ledger.release = async () => "not-held";
-	const { deps: d, redis } = deps({ runBudgetLedger: ledger, tokenCaps: { day: 10, week: null, month: null }, runContainer: async () => ({ code: 125, aborted: false }) });
-	await assert.rejects(runJob({ ...job, maxTokens: 2 }, d), (e) => e instanceof InfraRetry && e.tokensWindows?.basis === "floor");
-	assert.equal(redis.store.get(DAY), 2, "no window key moved back");
-	assert.ok(!redis.ops.some((o) => o[1] === DAY && o[0] !== "incrby"), "no release op on the window key");
+test("a retried armed attempt takes a new container number each time and keeps the sequence until a final outcome", async () => {
+	const attempts = fakeAttempts();
+	const seen = [];
+	const { deps: d } = deps({
+		runAttempts: attempts,
+		runContainer: async (ctx) => (seen.push(ctx.checkpoint.attempt), { code: 125, aborted: false }),
+	});
+	for (let i = 0; i < 2; i++) await assert.rejects(runJob(job, d), (e) => e instanceof InfraRetry && e.reason === "container-never-started");
+	assert.deepEqual(seen, [1, 2], "a retry never reuses the crashed attempt's number");
+	assert.equal(attempts.calls.filter((c) => c[0] === "remove").length, 0, "a non-final attempt removes nothing");
+	assert.equal(attempts.runs.get(RUN), 2, "the sequence survives for the next attempt");
 });
 
 test("an OOM-killed armed exit takes no exit checkpoint and queues nothing", async () => {
@@ -790,19 +708,12 @@ test("recovered.from is the manifest's kind: exit and salvage", async () => {
 	}
 });
 
-test("a token-cap refusal of an armed run reports budgetReserved false", async () => {
-	const { deps: d } = deps({ tokenCaps: { day: 1, week: null, month: null } });
-	const r = await runJob({ ...job, maxTokens: 2 }, d);
-	assert.deepEqual([r.outcome, r.reason, r.budgetReserved], ["policy", "token-cap", false]);
-});
-
-
 test("a recovered managed fork resumes its own checkpoint and namespace without reopening its parent source", async () => {
 	const target = { type: "issue", number: 7 };
 	const rootKey = sessionKeyFor({ ...job, target });
 	const fork = { id: "a".repeat(32), rootKey, fromJob: "gh-parent", fromEntry: "1234abcd", position: "at", sourceDigest: "b".repeat(64) };
 	for (const resume of [true, false, undefined]) {
-		const j = { ...recoveryJob(), target, fork, forkReserveTokens: null, forkPolicy: "c".repeat(64), resume };
+		const j = { ...recoveryJob(), target, fork, forkPolicy: "c".repeat(64), resume };
 		const { deps: d, calls } = deps({
 			sessionsDir: "/sessions", checkForkPolicy: async () => ({ ok: true }),
 			forkStore: { readPoint: async () => { throw new Error("must not reopen original source"); } },

@@ -110,8 +110,8 @@ test("outcomeCell: a completed run is quiet, a word that says why stands alone, 
   assert.equal(cell({ outcome: "completed", reason: "brand-new" }), cell({ outcome: "completed" }), "a completed run's token says nothing more either");
   assert.equal(cell({ outcome: "completed", reason: "awaiting-input" }), String(ui.outcomeBadge("completed", "awaiting-input")), "awaiting input says it all");
   assert.equal(cell({ outcome: "policy", reason: "operator-cancel" }), String(ui.outcomeBadge("policy", "operator-cancel")), "cancelled says it all");
-  const scope = shortSentence(REASONS["allocation-cap"].sentence);
-  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap">${String(ui.withCode(scope.replace(/`/g, "")))}</a></span>`);
+  // A retired reason an old record names: the token in the code face, no explanation, still linked.
+  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason"><a href="/runs?outcome=refused&amp;reason=allocation-cap" title="allocation-cap"><span class="code">allocation-cap</span>, ${NO_EXPLANATION}</a></span>`);
   // A recovery end reads failed, and its link finds it by the word: outcome=failed.
   const cap = cell({ outcome: "policy", reason: "recovery-cap" });
   assert.match(cap, /^<span class="badge tone-failed">.*Failed<\/span><span class="reason"><a href="\/runs\?outcome=failed&amp;reason=recovery-cap" title="recovery-cap">/);
@@ -126,7 +126,7 @@ test("outcomeCell: a completed run is quiet, a word that says why stands alone, 
   // An outcome this release does not know: itself as a failure, and a link by the reason alone.
   assert.match(cell({ outcome: "vapour", reason: "allocation-cap" }), /tone-failed.*vapour<\/span><span class="reason"><a href="\/runs\?reason=allocation-cap" title="allocation-cap">/);
   // `link: false` draws the sentence as text.
-  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }, { link: false }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason">${String(ui.withCode(scope.replace(/`/g, "")))}</span>`);
+  assert.equal(cell({ outcome: "policy", reason: "allocation-cap" }, { link: false }), `${ui.outcomeBadge("policy", "allocation-cap")}<span class="reason"><span class="code">allocation-cap</span>, ${NO_EXPLANATION}</span>`);
   // Every link it draws is one the runs page takes.
   for (const r of [{ outcome: "policy", reason: "allocation-cap" }, { outcome: "policy", reason: "recovery-checkpoint-absent" }, { outcome: "failed", reason: "x".repeat(64) }, { outcome: "vapour", reason: "a" }]) {
     for (const m of cell(r).matchAll(/<a href="([^"]*)"/g)) runsLink(m[1].replace(/&amp;/g, "&"));
@@ -275,9 +275,9 @@ test("the summary keeps the chosen project in its links and counts that project'
 /** A page of runs as `readRunsPage` answers. */
 const pageOf = (runs, extra = {}) => ({ runs, next: null, mirror: "ok", truncated: false, examined: runs.length, ...extra });
 
-test("the runs table: its columns, flow, venue, model, tokens and job cap off a phone, stacked rows naming only the host and the cost", () => {
+test("the runs table: its columns, flow, venue, model and tokens off a phone, stacked rows naming only the host and the cost", () => {
   const runs = [
-    { ...base, jobId: "gh-1", project: "web", flow: "fix", backend: "podman", model: "claude-sonnet-5-5", outcome: "completed", tokensWindows: { reservedTokens: 2_000_000 } },
+    { ...base, jobId: "gh-1", project: "web", flow: "fix", backend: "podman", model: "claude-sonnet-5-5", outcome: "completed", tokens: { ...base.tokens, total: 2_000_000 } },
     { ...base, jobId: "gh-2", project: "Not A Project", outcome: "policy", reason: "allocation-cap" },
   ];
   const m = runsTableModel(viewOf({ data: { runsPage: pageOf(runs) } }));
@@ -285,7 +285,7 @@ test("the runs table: its columns, flow, venue, model, tokens and job cap off a 
   assert.equal(m.table.stack, true);
   assert.equal(m.table.caption, "Runs");
   const heads = m.table.heads.map((h) => (typeof h === "string" ? [h, false, false] : [h.label, h.num === true, h.hidePhone === true]));
-  assert.deepEqual(heads, [["Ended", false, false], ["Job", false, false], ["Target", false, false], ["Flow", false, true], ["Host", false, false], ["Venue", false, true], ["Outcome", false, false], ["Model", false, true], ["Tokens", true, true], ["Cost", true, false], ["Job cap", true, true]]);
+  assert.deepEqual(heads, [["Ended", false, false], ["Job", false, false], ["Target", false, false], ["Flow", false, true], ["Host", false, false], ["Venue", false, true], ["Outcome", false, false], ["Model", false, true], ["Tokens", true, true], ["Cost", true, false]]);
   const rows = m.table.rows.filter((r) => r.cells);
   assert.ok(rows.every((r) => r.cells.length === heads.length));
   // Drawn by the kit (its group rows aside): the five columns the phone leaves to the run page are hidden there, head
@@ -318,7 +318,6 @@ test("the runs table: its columns, flow, venue, model, tokens and job cap off a 
   assert.match(drawn, /<td class="wide"><span class="badge tone-idle">/, "the outcome cell spans the row on a phone");
   assert.match(drawn, /<span class="vtag">podman<\/span>/);
   assert.match(drawn, /<span class="vtag">local<\/span>/, "a record naming no venue is a local run");
-  assert.match(drawn, /data-l="Job cap"><span title="2,000,000">2\.00M<\/span><\/td>/);
   // The target with its project's tag, a project id only.
   assert.match(drawn, /acme\/web#1<\/a> <span class="ptag">web<\/span><\/td>/);
   assert.ok(!drawn.includes("Not A Project"), "a project that is no id is not tagged");

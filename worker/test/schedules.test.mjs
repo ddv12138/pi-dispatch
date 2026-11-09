@@ -208,33 +208,34 @@ test("cronPlacement is the rule loadSchedules places by, row for row (issue #433
 	}
 });
 
-// Issue #501: a trigger's run.maxTokens may only NARROW the deployment's PI_MAX_TOKENS, so the worker's load of
-// the file (boot, and every live reload, which keeps the running schedules on a throw) refuses one above it.
-test("a trigger whose run.maxTokens is above PI_MAX_TOKENS refuses the load, any kind, naming the trigger and never the value", () => {
-	const capped = { ...CONFIG, maxTokens: 5 };
+// C2: run.maxTokens was retired with every other token budget, so the loader REFUSES it by name rather than
+// narrowing anything. Every kind goes through the same validator, so every kind is refused.
+test("a trigger carrying run.maxTokens refuses the load, any kind, naming the trigger and never the value", () => {
 	const over = (entry, maxTokens) => ({ on: entry.on, run: { ...entry.run, maxTokens } });
 	const cron2 = { on: { ...CRON.on, id: "weekly-tidy" }, run: CRON.run };
-	for (const [i, triggers] of [[1, [CRON, over(cron2, 9)]], [1, [LABEL, over(PR, 9)]], [0, [over(LABEL, 6), CRON]]]) {
+	for (const triggers of [[over(CRON, 9)], [CRON, over(cron2, 2)], [over(LABEL, 6)]]) {
 		assert.throws(
-			() => load(triggers, { config: capped }),
-			(e) => isConfigError(e) && e.message.startsWith(`trigger at index ${i}: run.maxTokens is above this deployment's PI_MAX_TOKENS`) && !e.message.includes("9000000") && e.message.includes("/triggers.json"),
+			() => load(triggers),
+			(e) => isConfigError(e) && /: run\.maxTokens was retired with the token budgets; remove it \(the deployment no longer has a token budget\): \/triggers\.json$/.test(e.message),
 		);
 	}
-	// At or below the cap loads, and so does any value when the deployment sets no cap (the trigger's cap applies alone).
-	assert.equal(load([over(CRON, 5), over(LABEL, 1)], { config: capped }).length, 1);
-	assert.equal(load([over(CRON, 500)]).length, 1);
-	assert.equal(load([over(CRON, 500)], { config: { ...CONFIG, maxTokens: null } }).length, 1);
-	// The cron schedule carries the trigger's cap into its job data, as written.
-	assert.equal(load([over(CRON, 3)], { config: capped })[0].data.maxTokens, 3);
+	assert.throws(
+		() => load([over(CRON, 3)]),
+		(e) => isConfigError(e) && e.message.startsWith('cron trigger "nightly-tidy": run.maxTokens was retired'),
+	);
+	assert.equal(load([CRON]).length, 1, "an unflagged trigger still loads");
+	assert.equal("maxTokens" in load([CRON])[0].data, false, "and its job data carries no token budget");
 });
 
-test("run.portfolio rides the scheduler data at JOB level, never inside trigger (issue #505)", () => {
-	const [s] = load([{ ...CRON, run: { ...CRON.run, portfolio: true } }]);
-	assert.equal(s.data.portfolio, true);
-	// `trigger` is copied verbatim into /job/event.json; the flag is the worker's to re-check, not the agent's to read.
-	assert.deepEqual(s.data.trigger, { id: "nightly-tidy", pattern: "0 3 * * *" });
-	const [f] = load([{ ...CRON, run: { ...CRON.run, portfolio: false } }]);
-	assert.equal(f.data.portfolio, false);
+test("run.portfolio is refused before it can reach the scheduler data (C2)", () => {
+	for (const value of [true, false]) {
+		assert.throws(
+			() => load([{ ...CRON, run: { ...CRON.run, portfolio: value } }]),
+			(e) => isConfigError(e) && e.message === `trigger at index 0: run.portfolio was removed with the token budget and allocation; remove it (a portfolio job, its snapshot and its plan no longer exist): /triggers.json`,
+			`portfolio ${value}`,
+		);
+	}
+	assert.equal("portfolio" in load([CRON])[0].data, false);
 });
 
 test("run.progress rides the scheduler data at JOB level only when armed (issue #644)", () => {

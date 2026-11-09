@@ -21,9 +21,6 @@ export const ACTION_AGENT_POLICIES = Object.freeze({
   "project-add": rule("confirm", "Project membership determines which limits apply.", "dispatch_project_add"),
   "project-edit": rule("confirm", "Project membership determines which limits apply.", "dispatch_project_edit"),
   "project-delete": rule("confirm", "Project membership determines which limits apply.", "dispatch_project_delete"),
-  "envelope-set": rule("confirm", "The operator sets the allocation boundary.", "dispatch_envelope_set"),
-  "priorities-set": rule("unattended", "Weights remain inside the current envelope and its delegation bounds.", "dispatch_priorities_set"),
-  "allocation-revert": rule("confirm", "Reverting bypasses a new plan's delegation step and interval.", "dispatch_allocation_revert"),
   "fleet-pause": rule("unattended", "A pause prevents new starts.", "dispatch_pause"),
   "queue-pause": rule("unattended", "A pause prevents new starts.", "dispatch_pause"),
   "fleet-resume": rule("confirm", "A pause has no owner; resuming can release a person's pause.", "dispatch_resume"),
@@ -77,8 +74,10 @@ export function actionAgentPolicy(name) {
 const object = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
 const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 const keysChanged = (a, b) => [...new Set([...Object.keys(a), ...Object.keys(b)])].filter((k) => !same(a[k], b[k]));
-const SETTINGS_CAPS = new Set(["maxTurns", "maxTokens", "concurrency", "dailyTokenCap", "weeklyTokenCap", "monthlyTokenCap"]);
-const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "dayTokens", "weekTokens", "monthTokens", "hostShare"]);
+// No token cap is listed: `maxTokens` and the three token windows were removed with the token budgets (C2), and the
+// setting/limit planners refuse them before a policy is ever asked.
+const SETTINGS_CAPS = new Set(["maxTurns", "concurrency"]);
+const LIMIT_CAPS = new Set(["day", "week", "month", "concurrent", "hostShare"]);
 const FLAGS = new Set(["recover", "steer", "progress", "statusComment"]);
 /** A cap is a whole number of tokens or a whole count; anything else (a string, a fraction, a float) cannot prove a decrease. */
 function amount(value) {

@@ -6,7 +6,6 @@ import { fileURLToPath } from "node:url";
 import { FIXTURE_NAME_RE, NEXT_ID, releaseTags } from "../../.github/scripts/run-record-fixtures.mjs";
 import { computeCapacity } from "../src/capacity.mjs";
 import { readCapacityRecords, readLocalWindow, readMirrorWindow } from "../src/capacity-records.mjs";
-import { readLocalRuns } from "../src/portfolio-snapshot.mjs";
 import { RUN_RECORD_VERSION, buildRecord, earlierFrom, makeFindPreviousRun, makeReadRecord, makeRecordWriter, recordReadable, recordVerdict, recordVersionOf, sanitizeJobId } from "../src/run-history.mjs";
 import { READ_SCRIPT, RUNS_INDEX, TRIM_SCRIPT, makeRunMirror, readMirroredRecord, readMirroredRuns } from "../src/run-mirror.mjs";
 import { readSizingRecords } from "../src/size-records.mjs";
@@ -228,17 +227,6 @@ test("the sizing read takes every shape's measured runs and skips the newer reco
 		}
 		assert.equal(read.newerSkipped, 1, shape.id);
 		assert.equal(read.skipped, 0, shape.id);
-	}
-});
-
-test("the portfolio's local read takes every shape and skips the newer record, saying how many", () => {
-	for (const shape of manifest.shapes) {
-		const { logsDir, cases, sinceMs } = deployment(shape);
-		const read = readLocalRuns({ logsDir, sinceMs });
-		assert.deepEqual(ids(read.records), caseIds(cases), shape.id);
-		assert.deepEqual(read.records.map((r) => [r.jobId, r.outcome]).sort(), cases.map((c) => [c.input.job.id, OUTCOMES[c.name]]).sort(), shape.id);
-		assert.equal(read.complete, true, shape.id);
-		assert.equal(read.newerSkipped, 1, shape.id);
 	}
 });
 

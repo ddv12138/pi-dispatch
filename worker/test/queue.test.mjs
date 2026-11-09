@@ -932,7 +932,7 @@ test("excludeTools rides local and forge job data only when supplied, and never 
 	assert.equal(captured.opts.deduplication.id, dedupFlagged, "the semantic window coalesces flagged and unflagged alike");
 });
 
-test("models and maxTokens ride local and forge job data, as written, only when supplied, and never move a forge dedup key (#502, #501, #544)", async () => {
+test("models ride local and forge job data, as written, only when supplied, and never move a forge dedup key; the retired maxTokens never does (#502, #544, C2)", async () => {
 	const { enqueueLocalJob, enqueueGitHubJob } = await import("../src/queue.mjs");
 	let captured;
 	const fakeQueue = { add: (name, data, opts) => ((captured = { name, data, opts }), { id: opts.jobId }) };
@@ -940,7 +940,7 @@ test("models and maxTokens ride local and forge job data, as written, only when 
 	const localBase = { folder: "/proj", flow: "tidy", task: "t", provider: "anthropic", model: "m", maxTurns: 5, now: new Date("2026-07-16T12:00:00Z") };
 	await enqueueLocalJob(fakeQueue, { ...localBase, models: ["anthropic/m"], maxTokens: 0.25 });
 	assert.deepEqual(captured.data.models, ["anthropic/m"]);
-	assert.equal(captured.data.maxTokens, 0.25, "the outbox child's inherited cap reaches its data");
+	assert.equal("maxTokens" in captured.data, false, "C2: a leftover cap never reaches job data");
 	const flaggedLocalId = captured.opts.jobId;
 	await enqueueLocalJob(fakeQueue, localBase);
 	assert.equal("models" in captured.data, false, "an unflagged job's data keeps exactly the keys it has today");
@@ -957,7 +957,7 @@ test("models and maxTokens ride local and forge job data, as written, only when 
 	};
 	await enqueueGitHubJob(fakeQueue, { ...forgeBase, models: ["openai/gpt-x"], maxTokens: "2.50" });
 	assert.deepEqual(captured.data.models, ["openai/gpt-x"]);
-	assert.equal(captured.data.maxTokens, "2.50", "a trigger's cap rides forge job data as written (#501)");
+	assert.equal("maxTokens" in captured.data, false, "C2: a trigger's retired cap never rides forge job data");
 	assert.equal("models" in captured.data.trigger, false, "an execution knob never rides /job/event.json");
 	assert.equal("maxTokens" in captured.data.trigger, false);
 	const dedupFlagged = captured.opts.deduplication.id;

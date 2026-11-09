@@ -290,7 +290,7 @@ test("console pages: hostile values are escaped or refused, and a viewer never s
 test("parsePageQuery: each screen takes only its own parameters, bounded and charset-checked, and refuses without echoing", async () => {
   const { PAGES, QUERY_LIMITS, pageQueryString, parsePageQuery } = await import("../src/console/pages.mjs");
   const q = (name, qs) => parsePageQuery(name, new URLSearchParams(qs));
-  assert.deepEqual(Object.keys(PAGES), ["setup", "models", "overview", "runs", "zero-touch", "run", "parked", "answer-rules", "insights", "insights-budget-split", "insights-capacity", "insights-breakdown", "insights-flows", "fleet", "host", "trigger", "triggers", "trigger-check", "trigger-add", "config", "secrets", "connections", "updates", "project", "watch", "watch-board", "audit"]);
+  assert.deepEqual(Object.keys(PAGES), ["setup", "models", "overview", "runs", "zero-touch", "run", "parked", "answer-rules", "insights", "insights-capacity", "insights-breakdown", "insights-flows", "fleet", "host", "trigger", "triggers", "trigger-check", "trigger-add", "config", "secrets", "connections", "updates", "project", "watch", "watch-board", "audit"]);
   assert.ok(Object.isFrozen(PAGES) && Object.values(PAGES).every(Object.isFrozen));
   assert.equal(PAGES.audit.auth, "operator");
   assert.ok(Object.values(PAGES).filter((p) => p.auth !== "operator").every((p) => p.auth === "viewer"));

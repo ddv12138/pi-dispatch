@@ -23,7 +23,7 @@ const skip = url ? false : "VALKEY_TEST_URL not set";
 const CLOCK = Date.UTC(2026, 9, 31, 12);
 const SHA = "b".repeat(40);
 const PRIVATE = "PRIVATE question: which test command?";
-const rule = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxTokens: 100000 };
+const rule = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier" };
 const standing = { id: "tests", title: "Test command", text: "Run npm test.", projects: ["web"], repo: "github:acme/web" };
 
 function isolatedLedger(redis, prefix, events) {
@@ -46,19 +46,19 @@ async function fixture(t, { kind = "github" } = {}) {
 	return { root, jobsDir, parentSession, prefix, redis, queue, store, runtime, triggersPath, doc, parent, meta, current, cleanups };
 }
 
-test("real durable park intent becomes an ordinary reserved forge job, then a private cited draft without changing its park", { skip }, async t => {
+test("real durable park intent becomes an ordinary forge job, then a private cited draft without changing its park", { skip }, async t => {
 	const f = await fixture(t), events = [], records = [], credentials = [];
 	const before = readFileSync(join(f.parentSession, "current.jsonl"), "utf8");
 	const job = await f.queue.getJob(f.meta.draftRunId);
 	assert.doesNotMatch(JSON.stringify(job.data), /PRIVATE|npm test|123/);
 	const prepare = makePrepareWorkspace({ jobsDir: f.jobsDir, forgeFor: () => ({ host: {} }), preparers: { github: async (_job, _token, { jobDir }) => { events.push("clone"); const workspace = join(jobDir, "workspace"); mkdirSync(workspace); writeFileSync(join(workspace, "README.md"), "Run npm test."); mkdirSync(join(workspace, ".pi/skills/answer"), { recursive: true }); writeFileSync(join(workspace, ".pi/skills/answer/SKILL.md"), "Cite the command and explain when it runs."); return { jobDir, workspace, sha: SHA, materialised: [] }; } } });
-	const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.prefix}ledger:`, events), now: () => CLOCK, projects: () => [{ id: "web", members: ["github:acme/web"] }], getSettings: () => ({ provider: "test", model: "chat", maxTurns: 10, concurrency: 1, dailyTokenCap: 1000000, maxTokens: 100000 }), cancelJob() {}, stopContainer() {}, cancelPollMs: 60000, recordRun: args => records.push(buildRecord(args)), deps: {
+	const process = makeProcessor({ redis: isolatedLedger(f.redis, `${f.prefix}ledger:`, events), now: () => CLOCK, projects: () => [{ id: "web", members: ["github:acme/web"] }], getSettings: () => ({ provider: "test", model: "chat", maxTurns: 10, concurrency: 1 }), cancelJob() {}, stopContainer() {}, cancelPollMs: 60000, recordRun: args => records.push(buildRecord(args)), deps: {
 		answerDraftRuntime: f.runtime,
 		imagePreflight: async () => ({ ok: true, piVersion: "1.4.0", capabilities: ["answerDraft", "exitAuth", "tokenBudget", "modelPolicy", "modelFailover"] }),
 		checkProviderCredential: async job => { credentials.push(job.provider); return { ok: true }; }, checkModelsKnown: () => ({ ok: true }),
 		mintToken: async () => { events.push("mint"); return "scoped"; }, isDefaultBranchProtected: async () => true, prepareWorkspace: prepare,
 		async runContainer({ job, prepared }) {
-			events.push("container"); assert.ok(events.includes("reserve")); assert.equal(prepared.workspaceReadOnly, true); assert.equal(job.resume, false); assert.equal(job.packages, false); assert.equal(job.mcp, undefined); assert.equal(job.secrets, undefined);
+			events.push("container"); assert.equal(prepared.workspaceReadOnly, true); assert.equal(job.resume, false); assert.equal(job.packages, false); assert.equal(job.mcp, undefined); assert.equal(job.secrets, undefined);
 			const input = readAnswerDraft({ path: join(prepared.jobDir, "answer-draft.json") });
 			assert.equal(input.flow.revision, SHA); assert.equal(input.flow.text, "Cite the command and explain when it runs."); assert.ok(readFileSync(join(prepared.jobDir, "prompt.md"), "utf8").includes(input.flow.text), "the configured reviewed flow actually reaches the model prompt");
 			assert.equal(input.standing.length, 1); assert.equal(input.standing[0].text, standing.text);
@@ -71,7 +71,7 @@ test("real durable park intent becomes an ordinary reserved forge job, then a pr
 		collectChain: async () => assert.fail("a draft result is not a chain channel"), collectPlan: async () => assert.fail("a draft cannot change allocations"), comment: async () => assert.fail("no draft status/refusal comment may post"), cleanup: async () => {},
 	} });
 	const result = await process(job, "token", new AbortController().signal);
-	assert.equal(result.outcome, "completed", JSON.stringify({ result, events })); assert.equal(events.filter(e => e === "classify").length, 2); assert.ok(events.indexOf("mint") < events.indexOf("clone")); assert.ok(events.indexOf("reserve") < events.indexOf("classify"));
+	assert.equal(result.outcome, "completed", JSON.stringify({ result, events })); assert.equal(events.filter(e => e === "classify").length, 2); assert.ok(events.indexOf("mint") < events.indexOf("clone"));
 	const got = await f.store.privateDraft("parent-run"); assert.equal(got.draft, "Run npm test."); assert.equal(got.question, PRIVATE); assert.equal(got.meta.status, "drafted"); assert.equal(got.meta.tokensTotal, 13);
 	assert.equal(records.at(-1).purpose, "answer-draft"); assert.deepEqual(records.at(-1).answerDraft, { sourceRunId: "parent-run", ruleId: "help" }); assert.equal(readFileSync(join(f.parentSession, "current.jsonl"), "utf8"), before);
 	assert.doesNotMatch(JSON.stringify(await f.store.publicSnapshot()), /PRIVATE|Run npm test/);

@@ -47,7 +47,7 @@ test("up's docker run and the owner check run VALKEY_IMAGE (#761)", () => {
 	assert.equal(check.filter((a) => /valkey\/valkey/.test(a)).length, 1);
 });
 
-test("CI's Valkey services name VALKEY_IMAGE, and the smoke script runs the image the workflow pulls by the same constant (#761)", () => {
+test("CI's Valkey services name VALKEY_IMAGE (#761)", () => {
 	const workflows = readdirSync(join(REPO, ".github", "workflows")).filter((f) => /\.ya?ml$/.test(f));
 	const images = [];
 	for (const file of workflows) {
@@ -62,14 +62,6 @@ test("CI's Valkey services name VALKEY_IMAGE, and the smoke script runs the imag
 	}
 	// Non-vacuous: the two services of pi-upgrade-check.yml (the suite's, and the Connections lane's own).
 	assert.deepEqual(images.sort(), ["pi-upgrade-check.yml", "pi-upgrade-check.yml"]);
-	// The image job pulls what the smoke script then runs with --pull=never, both from the constant, in one step.
-	const step = read(".github/workflows/pi-upgrade-check.yml");
-	const pull = `docker pull "$(node --input-type=module -e 'import {VALKEY_IMAGE} from "./worker/src/valkey-auth.mjs"; console.log(VALKEY_IMAGE)')"`;
-	assert.ok(step.includes(`          ${pull}\n          node .github/scripts/canary-runtime-smoke.mjs "$IMAGE_REF"\n`), "the pull sits right before the smoke script");
-	const smoke = read(".github/scripts/canary-runtime-smoke.mjs");
-	assert.match(smoke, /^import \{ VALKEY_IMAGE \} from "\.\.\/\.\.\/worker\/src\/valkey-auth\.mjs";$/m);
-	assert.match(smoke, /"--pull=never", [^\n]*, VALKEY_IMAGE\]\);/);
-	assert.doesNotMatch(smoke, /valkey\/valkey/);
 });
 
 // Code without comments, as valkey-clients.test.mjs strips it: a comment that names an image runs nothing.

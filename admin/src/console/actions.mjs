@@ -13,7 +13,7 @@
  *     this repository refuses). `ticket` is never one: it belongs to the confirm.
  *   - `preview` builds the change through the SAME planner the tool or the TUI uses (`write-plans.mjs`, or
  *     `job-actions.mjs` through the read model), so a refusal is the tool's sentence, and returns `{ refusal }`,
- *     `{ unchanged }`, or `{ summary, diff, expect, payload, target, targets, reserve, beforeDigest, afterDigest }`,
+ *     `{ unchanged }`, or `{ summary, diff, expect, payload, target, targets, beforeDigest, afterDigest }`,
  *     which may also carry `plan` and `beforeText` (the planner's plan, the file as it was) for the three below, and a
  *     fleet resume's `pausedBefore` for its Undo (`resumeBack`); those are never sent to the browser.
  *   - `apply` runs the read model's funnel with the ticket's stored `payload` and `expect`, and answers `{ ok, ... }`,
@@ -38,7 +38,7 @@
  *      server-rendered confirm bar (`html`, `confirm-view.mjs`), never the payload, so it cannot swap what is written
  *      between the two requests. Every refusal carries its bar too, and keeps its `error` sentence byte for byte.
  *   2. confirm: redeem the ticket, then AUDIT, THEN WRITE (`auditedWrite`): the `ok` row first, with `kind`, the
- *      digests, `reserve` and the ticket's digest; a write whose row cannot be appended does not happen (500); a write
+ *      digests and the ticket's digest; a write whose row cannot be appended does not happen (500); a write
  *      that is refused or throws gets a compensating `failed` row with the same ticket. A bulk action writes one row
  *      per job (`count` = the list's size, all sharing the ticket digest), and a job refused at the apply gets its own
  *      `failed` row.
@@ -64,7 +64,6 @@
 import { parsePackageCanary } from "@edgehero/pi-dispatch/package-canary-record";
 import { createHash } from "node:crypto";
 import { DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_WHY_RE, DEFER_WHYS } from "@edgehero/pi-dispatch/defer-reasons";
-import { fmtTokens } from "../panel.mjs";
 import { hostQueueName } from "@edgehero/pi-dispatch/queue";
 import { parseTriggersDocument } from "@edgehero/pi-dispatch/triggers";
 import { PAUSE_WINDOW_FIELDS, parsePauseWindows, pauseWindowsText } from "@edgehero/pi-dispatch/pause-windows";
@@ -284,64 +283,23 @@ function readNow(fs, path) {
   }
 }
 
-// ---- the reserve -------------------------------------------------------------------------------------------------------
-
-/** What a paid action will hold, in words (CONST-BUDGET-BEFORE-TOKENS: the worker reserves at pickup; this says what). */
-export function reserveText(r) {
-  if (!r) return null;
-  if (r.bulk) {
-    const known = r.slots - r.unknown;
-    const reserve = r.reserveTokens > 0 ? ` and ${r.reserveTokens.toLocaleString("en-US")} tokens${r.unknown > 0 ? ` for the ${plural(known, "job whose reserve is", "jobs whose reserve is")} known` : ""} in each token window that applies` : "";
-    // A list of one is "It holds", as a single act's sentence reads; "Together they" is for two or more.
-    return `${r.slots === 1 ? "It holds" : "Together they hold"} ${plural(r.slots, "job slot")}${reserve}${r.unknown > 0 ? `; the reserve of ${plural(r.unknown, "job")} is unknown (${r.unknown === 1 ? "its" : "their"} data could not be read), so the total is at least this` : ""}.`;
-  }
-  if (r.unknown) return "Reserve unknown: the job's data could not be read, so what the worker will hold for it cannot be said.";
-  if (r.invalid) return `The deployment's token setting does not parse (${r.invalid}), so the worker refuses every job until it is fixed.`;
-  if (r.zeroRated) return "It holds 1 job slot and 0 tokens: every model it may call is zero-rated.";
-  if (!Number.isSafeInteger(r.tokens)) return "It holds 1 job slot. No per-job token budget is set, so no token window can hold anything for it.";
-  return `It holds 1 job slot and ${r.tokens.toLocaleString("en-US")} tokens (the per-job budget) in each token window that applies, until it settles.`;
-}
+// ---- the reserve (REMOVED, C2) -----------------------------------------------------------------------------------------
 
 /**
- * The reserve of each listed failed job (issue #642: a retry is paid, the worker reserves again at pickup): the
- * worker's own `estimateReserve` over the job's queue data (`readJobsData`), or `{ unknown: true }` when the data
- * cannot be read. Never 0 for unknown.
+ * No paid action carries a token reserve any more: the token budgets, their counters and the worker's `estimateReserve`
+ * went with them (C2). Kept as a null sentence for the surfaces that still draw the line (`panels/trigger.mjs`), so a
+ * page shows nothing rather than a stale figure.
  */
-async function retryReserves(ctx, jobs) {
-  const { rm, paths, readJobsData } = ctx.a;
-  const data = typeof readJobsData === "function" ? await readJobsData({ url: paths.valkeyUrl, jobs }) : new Map();
-  const opts = reserveInputs(ctx);
-  return new Map(jobs.map((j) => {
-    const d = data.get(j.jobId);
-    if (!d || typeof rm.estimateReserve !== "function") return [j.jobId, { unknown: true }];
-    try {
-      return [j.jobId, rm.estimateReserve(d, opts)];
-    } catch {
-      return [j.jobId, { unknown: true }];
-    }
-  }));
+export function reserveText() {
+  return null;
 }
 
-/**
- * What every reserve estimate is judged against, the worker's own inputs (issue #642): the settings overlay, the
- * deployment's env (PI_ALLOWED_MODELS, PI_PROVIDER, PI_MODEL and the dollar settings, as the worker reads them), and the
- * model-endpoint snapshot `{ endpoints, models }` the worker takes at each pickup (`ctx.a.modelEndpoints()`, read per
- * preview, as the worker reads it per pickup, so an edit to the declaration shows at once) with the builtin catalog's
- * cost lookup. Without the snapshot a job that can only call a free local model would show the full per-job cap while
- * the worker holds $0. A snapshot that cannot be read is null: judged not zero-rated, the larger figure, never a
- * smaller one than the worker holds.
- */
-function reserveInputs(ctx) {
-  let modelEndpoints = null;
-  try {
-    modelEndpoints = typeof ctx.a.modelEndpoints === "function" ? ctx.a.modelEndpoints() ?? null : null;
-  } catch {
-    modelEndpoints = null;
-  }
-  return { overlay: overlayOf(ctx), env: ctx.a.env ?? {}, modelEndpoints, ...(typeof ctx.a.builtinModel === "function" ? { builtinModel: ctx.a.builtinModel } : {}) };
+/** The deployment's environment, the one estimate input that outlived it: a planner reads the per-host queue name from it. */
+function plannerEnv(ctx) {
+  return ctx.a.env ?? {};
 }
 
-/** Complete bounded observations before starting a worker; counts are observations, never reservations (#774). */
+/** Complete bounded observations before starting a worker; counts are observations (#774), never token reservations. */
 export async function readSetupExposure(ctx) {
   const at = typeof ctx.now === "function" ? ctx.now() : Date.now();
   try {
@@ -350,7 +308,7 @@ export async function readSetupExposure(ctx) {
     const waiting = s?.waiting;
     if (!s || switchShortOf(s).length || s.queue?.fleetDegraded || !Array.isArray(s.queueCounts) || !waiting || waiting.unreachable || waiting.truncated || !Array.isArray(waiting.rows) || !Array.isArray(waiting.scheduled)) return { complete: false, at };
     const jobs = [...waiting.rows, ...waiting.scheduled];
-    // Queue-data reads are keyed by job ID. A duplicate across queues cannot be priced independently here.
+    // A duplicate across queues cannot be told apart here; the identity below names each job once.
     if (jobs.length > 100 || new Set(jobs.map(row => row.queue)).size > 32 || new Set(jobs.map(row => row.jobId)).size !== jobs.length) return { complete: false, at };
     if (s.queueCounts.some(row => !row.counts || ["waiting", "paused", "delayed", "active"].some(key => !Number.isSafeInteger(row.counts[key]) || row.counts[key] < 0))) return { complete: false, at };
     const counted = waitingIn(s.queueCounts);
@@ -359,42 +317,14 @@ export async function readSetupExposure(ctx) {
     const document = parseTriggersDocument(text, ctx.a.paths.triggersPath);
     const cron = document.triggers.filter(row => row.on.type === "cron" && row.disarmed !== true);
     if (cron.length > 100) return { complete: false, at };
-    const reserves = await retryReserves(ctx, jobs);
-    if ([...reserves.values()].some(r => !r || r.unknown || r.invalid)) return { complete: false, at };
-    const cronReserves = cron.map(row => ctx.a.rm.estimateReserve(row.run, reserveInputs(ctx)));
-    if (cronReserves.some(r => !r || r.unknown || r.invalid)) return { complete: false, at };
-    const queued = [...reserves.values()];
-    const finiteSum = list => list.every(r => Number.isSafeInteger(r.tokens)) ? list.reduce((sum, r) => sum + r.tokens, 0) : null;
-    const queuedTokens = finiteSum(queued), cronTokens = finiteSum(cronReserves);
-    if (queuedTokens !== null && !Number.isSafeInteger(queuedTokens) || cronTokens !== null && !Number.isSafeInteger(cronTokens)) return { complete: false, at };
     const jobIds = jobs.map(row => row.jobId).sort();
     const cronIds = cron.map(row => row.on.id).sort();
     const lines = [`Observed ${new Date(at).toISOString()}: ${jobs.length} queued/scheduled jobs and ${cron.length} cron triggers; starting permits ongoing consumption and future arrivals.`,
-      `Queued reserves: ${queuedTokens === null ? "one slot per job; no single token bound" : `${fmtTokens(queuedTokens)} tokens across current jobs in each applicable token window`}.`,
-      `Cron reserves per future occurrence: ${cronTokens === null ? "one slot each; no single token bound" : `${fmtTokens(cronTokens)} tokens across the configured cron triggers in each applicable window`}. No setup reservation is taken.`];
+      "No token reservation is taken or reported: this deployment has no token budgets (C2)."];
     if (jobIds.length) lines.push(`Current job IDs: ${jobIds.join(", ")}.`);
     if (cronIds.length) lines.push(`Cron triggers: ${cronIds.join(", ")}.`);
-    return { complete: true, at, queued: jobs.length, cron: cron.length, lines, identity: sha256(JSON.stringify({ jobIds, cronIds, queued, cronReserves })) };
+    return { complete: true, at, queued: jobs.length, cron: cron.length, lines, identity: sha256(JSON.stringify({ jobIds, cronIds })) };
   } catch { return { complete: false, at }; }
-}
-
-/** A bulk list's reserves summed: slots, the known tokens, and how many are unknown. */
-function bulkReserve(reserves) {
-  let reserveTokens = 0;
-  let unknown = 0;
-  for (const r of reserves) {
-    if (!r || r.unknown || r.invalid) unknown += 1;
-    else if (Number.isSafeInteger(r.tokens)) reserveTokens += r.tokens;
-  }
-  return { bulk: true, slots: reserves.length, reserveTokens, unknown };
-}
-
-/** One job's reserve as a summary line's tail. */
-const reserveTail = (r) => (!r || r.unknown || r.invalid ? ", reserve unknown" : r.zeroRated ? ", reserve 0 tokens (zero-rated)" : Number.isSafeInteger(r.tokens) ? `, reserve ${r.tokens.toLocaleString("en-US")} tokens` : ", reserve 1 slot (no token budget)");
-
-/** The reserve's token count for the audit row, or null. */
-function reserveTokensOf(r) {
-  return Number.isSafeInteger(r?.tokens) && r.tokens >= 0 ? r.tokens : null;
 }
 
 // ---- shared steps ------------------------------------------------------------------------------------------------------
@@ -512,31 +442,6 @@ function funnelResult(res, okFields = {}) {
   if (typeof res?.refused === "string") return { invalid: res.refused };
   if (res?.unreachable !== undefined) return { unreachable: true };
   return { invalid: "the write was refused" };
-}
-
-/** The deployment's settings overlay now (for a paid action's reserve), `{}` when it does not load. */
-function overlayOf(ctx) {
-  try {
-    return ctx.a.rm.readSettingsView({ settingsFile: ctx.a.paths.settingsFile, fs: ctx.fs })?.overlay ?? {};
-  } catch {
-    return {};
-  }
-}
-
-/** The allocation envelope as read now: `{ read }` with `read.envelope`, or `{ refusal }`. */
-function envelopeNow(ctx) {
-  const { rm, paths, env } = ctx.a;
-  const maxTokens = rm.envelopeJobCap({ settingsFile: paths.settingsFile, env, fs: ctx.fs });
-  const read = rm.readEnvelope({ envelopeFile: paths.envelopeFile, projectsPath: paths.projectsFile, scopedLimitsPath: paths.scopedLimitsPath, maxTokens, fs: ctx.fs });
-  if (read?.envelope) return { read };
-  const why = typeof ctx.a.envelopeProblem === "function" ? ctx.a.envelopeProblem(read ?? {}) : "there is no allocation envelope to apply against (PI_ENVELOPE_FILE)";
-  return { refusal: why, status: 409 };
-}
-
-/** The host name an allocation audit row of this console carries: the deployment's worker name, else the console's. */
-function allocHost(ctx) {
-  const name = ctx.a.env?.PI_WORKER_NAME;
-  return typeof name === "string" && name !== "" ? name : String(ctx.a.host ?? "console");
 }
 
 // ---- the actions -------------------------------------------------------------------------------------------------------
@@ -739,9 +644,7 @@ const configActions = [
       const p = result.plan;
       const { on, run } = p.entry;
       const starts = on.type === "cron" ? `${on.id} (${on.pattern})` : (on.phrase ?? [Array.isArray(on.action) ? on.action.join(", ") : null, on.any?.length ? `labels ${on.any.join(", ")}` : null, on.reviewState?.length ? `verdict ${on.reviewState.join(", ")}` : null, on.number ? `#${on.number}` : null, on.once ? "once" : null].filter(Boolean).join("; ")) || "its configured event";
-      let reserve;
-      try { reserve = ctx.a.rm.estimateReserve(run, reserveInputs(ctx)); } catch { reserve = { unknown: true }; }
-      return { plan: { ...p, summary: [`${on.type} ${starts} runs flow ${run.flow}${on.type === "cron" ? " locally" : ` on ${run.kind}`}.`, triggerWhoMayFire(p.entry), `Each future run is paid. ${reserveText(reserve) ?? "The per-run reserve could not be estimated here."}`] } };
+      return { plan: { ...p, summary: [`${on.type} ${starts} runs flow ${run.flow}${on.type === "cron" ? " locally" : ` on ${run.kind}`}.`, triggerWhoMayFire(p.entry), "Each future run is paid; the worker takes no token reservation (C2)."] } };
     },
     target: (ctx) => ctx.a.paths.triggersPath,
     write: writeTriggersOf,
@@ -884,119 +787,9 @@ const configActions = [
     target: (ctx) => ctx.a.paths.projectsFile,
     write: writeProjectsOf,
   }),
-  {
-    name: "envelope-set",
-    kind: "envelope-set",
-    paid: false,
-    bulk: false,
-    needs: FILE_NEEDS,
-    async preview(body, ctx) {
-      const got = planned(ctx.a.plans.planEnvelope({ params: { ...obj(body, "envelope") }, paths: ctx.a.paths, env: ctx.a.env, fs: ctx.fs }));
-      if (!got.plan) return got;
-      const p = got.plan;
-      return {
-        target: p.target,
-        expect: p.expect,
-        diff: diffHtmlOf(p.beforeText, p.afterText, { file: p.target }),
-        payload: { files: p.files, change: p.change },
-        summary: [p.title, ...(Array.isArray(p.summary) ? p.summary : []), "This host’s envelope file is written. Every host re-bases the split with no step; a host with another copy refuses governed jobs as envelope-mismatch until it has this envelope."],
-        // The envelope's own digests (the parsed envelope's, the worker's comparison), as the tool's audit row has them.
-        beforeDigest: p.beforeDigest ?? null,
-        afterDigest: p.digest ?? null,
-      };
-    },
-    async apply(entry, ctx) {
-      const res = await ctx.a.rm.writeEnvelope({ ...entry.payload.files, change: entry.payload.change, expect: entry.expect, url: ctx.a.paths.valkeyUrl, fs: ctx.fs });
-      if (res?.invalid) return { invalid: String(res.invalid) };
-      return { ok: true };
-    },
-  },
-  {
-    name: "priorities-set",
-    kind: "priorities-set",
-    paid: false,
-    bulk: false,
-    needs: FILE_NEEDS,
-    async preview(body, ctx) {
-      if (!Array.isArray(body.projects) || body.projects.length === 0) throw new BadRequest("projects must be a list of {id, weight}");
-      const validDays = body.validDays === undefined || body.validDays === null || body.validDays === "" ? undefined : index(body, "validDays");
-      const env = envelopeNow(ctx);
-      if (env.refusal) return env;
-      const plan = ctx.a.plans.planPriorities({ projects: body.projects, validDays, now: new Date(ctx.now()) }).plan.plan;
-      return {
-        target: "allocation",
-        expect: { envelopeDigest: env.read.digest },
-        payload: { plan },
-        summary: ["Set a priorities plan (writer operator-session; the worker's rules bound it, and a refusal changes nothing)", ...plan.projects.map(priorityLine), ...(plan.validUntil ? [`valid until ${plan.validUntil}`] : [])],
-      };
-    },
-    async apply(entry, ctx) {
-      const env = envelopeNow(ctx);
-      if (env.refusal) return { invalid: env.refusal };
-      if (env.read.digest !== entry.expect.envelopeDigest) return { invalid: "the allocation envelope changed since the preview; nothing was applied. Preview again" };
-      const res = await ctx.a.rm.applyPriorities({ url: ctx.a.paths.valkeyUrl, envelope: env.read.envelope, digest: env.read.digest, projects: env.read.projects, plan: entry.payload.plan, keepOther: true, host: allocHost(ctx), logsDir: ctx.a.paths.logsDir, now: new Date(ctx.now()), fs: ctx.fs });
-      if (res?.outcome === "applied" || res?.outcome === "duplicate") return { ...allocationFacts(res), ok: true };
-      // The worker's field and rule, as the TUI's `prioritiesOutcome` shows them (index.ts), so a refusal names what to fix.
-      const field = res?.field ? ` (${String(res.field)}: ${String(res.rule ?? "-")})` : "";
-      return { ...allocationFacts(res), invalid: `${String(res?.outcome ?? "refused")}: ${String(res?.reason ?? "unknown")}${field}` };
-    },
-  },
-  {
-    name: "allocation-revert",
-    kind: "allocation-revert",
-    paid: false,
-    bulk: false,
-    needs: FILE_NEEDS,
-    async preview(body, ctx) {
-      const at = index(body);
-      const env = envelopeNow(ctx);
-      if (env.refusal) return env;
-      const alloc = await ctx.a.rm.readAllocations({ url: ctx.a.paths.valkeyUrl, envelope: env.read.envelope, projects: env.read.projects, now: new Date(ctx.now()), withReasons: false, limit: 20 });
-      if (alloc?.unreachable) return { refusal: "the allocation history could not be read (is Valkey reachable?); nothing was changed", status: 503 };
-      const log = Array.isArray(alloc?.log) ? alloc.log : [];
-      const row = log[at];
-      if (!row) return { refusal: `no allocation ${`row ${at + 1}`} (have ${log.length})` };
-      if (row.weights === null || typeof row.weights !== "object") return { refusal: `${`row ${at + 1}`} carries no split to go back to` };
-      return {
-        target: "allocation",
-        expect: { envelopeDigest: env.read.digest },
-        payload: { row, index: at, previousPlanId: alloc?.state?.planId ?? null },
-        summary: [`Revert the allocation to ${`row ${at + 1}`} (writer operator-revert)`, `${String(row.at ?? "-")}: ${String(row.outcome ?? "-")}${row.planId ? `, plan ${String(row.planId)}` : ", the neutral split"}`, ...Object.entries(row.weights).map(([k, w]) => `${k}: weight ${String(w)}`), "Every host uses this split from its next pickup. The envelope still bounds it; a refusal changes nothing.", "Revert ignores minIntervalHours and maxStepPct. It is refused while delegation is off or this host’s envelope is not the applied one.", "A row without a plan restores today’s neutral split, not that row’s weights. The portfolio job keeps running and its next due plan may change this split."],
-      };
-    },
-    async apply(entry, ctx) {
-      const env = envelopeNow(ctx);
-      if (env.refusal) return { invalid: env.refusal };
-      if (env.read.digest !== entry.expect.envelopeDigest) return { invalid: "the allocation envelope changed since the preview; nothing was reverted. Preview again" };
-      const res = await ctx.a.rm.revertAllocation({ url: ctx.a.paths.valkeyUrl, envelope: env.read.envelope, digest: env.read.digest, target: entry.payload.row, host: allocHost(ctx), logsDir: ctx.a.paths.logsDir, now: new Date(ctx.now()), fs: ctx.fs });
-      if (res?.outcome === "reverted") return { ...allocationFacts(res), ok: true };
-      return { ...allocationFacts(res), invalid: `${String(res?.outcome ?? "refused")}: ${String(res?.reason ?? "unknown")}` };
-    },
-  },
 ];
 
 /** A run field's value as one line of text: a list joined, an object by its keys, anything else as a string. */
-// Allocation writes return closed ladder facts beside the browser's explanatory refusal. Rationale
-// text belongs to the reviewed plan and never enters an agent's write result.
-function allocationFacts(res) {
-  const out = {};
-  for (const key of ["outcome", "reason", "field", "rule", "planId", "basis"]) {
-    if (res?.[key] === null || typeof res?.[key] === "string" && /^[A-Za-z0-9_.:@/-]{1,200}$/.test(res[key])) out[key] = res[key];
-  }
-  if (typeof res?.clamped === "boolean") out.clamped = res.clamped;
-  if (Array.isArray(res?.kept)) out.kept = res.kept.filter((v) => typeof v === "string" && /^[a-z_][a-z0-9_-]{0,31}$/.test(v));
-  for (const key of ["before", "after"]) {
-    const value = res?.[key];
-    if (value === null) out[key] = null;
-    else if (value && typeof value === "object") out[key] = Object.fromEntries(Object.entries(value).flatMap(([field, entry]) => {
-      if (["unallocated", "total"].includes(field) && Number.isSafeInteger(entry) && entry >= 0) return [[field, entry]];
-      if (["allocations", "repos"].includes(field) && entry && typeof entry === "object") return [[field, Object.fromEntries(Object.entries(entry).filter(([id, amount]) => /^[A-Za-z0-9_][A-Za-z0-9_.:/-]{0,299}$/.test(id) && Number.isSafeInteger(amount) && amount >= 0))]];
-      return [];
-    }));
-  }
-  return out;
-}
-
 function fieldText(v) {
   if (Array.isArray(v)) return v.map((x) => (x !== null && typeof x === "object" ? JSON.stringify(x) : String(x))).join(", ");
   if (v !== null && typeof v === "object") return Object.keys(v).join(", ");
@@ -1006,8 +799,8 @@ function fieldText(v) {
 /**
  * A forge plan's run fields (`plan.runFields`, job-actions' `runFieldsSummary`: what the job will run with, taken from
  * the trigger as the file says NOW) as the preview's lines, so the operator sees what a re-run or an answer starts before
- * it spends. Names only: the secret profile by its name, never a secret or a reference. A model or cap the job leaves to
- * the deployment says so; the other fields appear only when set. Every value is escaped by the preview's template.
+ * it spends. Names only: the secret profile by its name, never a secret or a reference. A model the job leaves to the
+ * deployment says so; the other fields appear only when set. Every value is escaped by the preview's template.
  */
 export function runFieldsLines(f, lead) {
   if (f === null || typeof f !== "object") return [];
@@ -1016,7 +809,6 @@ export function runFieldsLines(f, lead) {
     `model ${f.model !== null && f.model !== undefined ? fieldText(f.model) : "the deployment's default"}`,
     ...(f.models !== null && f.models !== undefined ? [`allowed models ${fieldText(f.models)}`] : []),
     ...(Array.isArray(f.fallbackModels) && f.fallbackModels.length > 0 ? [`fallbacks ${fieldText(f.fallbackModels)}`] : []),
-    `per-job cap ${f.maxTokens !== null && f.maxTokens !== undefined ? `${fieldText(f.maxTokens)} tokens` : "the deployment's"}`,
     ...(f.secretsProfile !== null && f.secretsProfile !== undefined ? [`secret profile ${fieldText(f.secretsProfile)}`] : []),
     ...(f.image !== null && f.image !== undefined ? [`image ${fieldText(f.image)}`] : []),
     ...(f.backend !== null && f.backend !== undefined ? [`backend ${fieldText(f.backend)}`] : []),
@@ -1024,12 +816,6 @@ export function runFieldsLines(f, lead) {
     ...(f.mcp !== null && f.mcp !== undefined ? [`MCP ${fieldText(f.mcp)}`] : []),
   ];
   return [`${lead}: ${parts.join("; ")}`];
-}
-
-/** One project of a priorities plan as the preview lists it: its weight, and its repos and reason when it names them. */
-function priorityLine(p) {
-  const repos = Array.isArray(p.repos) ? p.repos.map(String).join(", ") : p.repos !== undefined ? String(p.repos) : "";
-  return `${String(p.id)}: weight ${String(p.weight)}${repos !== "" ? `, repos ${repos}` : ""}${p.reason !== undefined ? `, reason: ${String(p.reason)}` : ""}`;
 }
 
 /** A failed job's row in a bulk list, as the preview shows and the ticket binds it. */
@@ -1066,13 +852,11 @@ function failedOne({ name, kind, verb, fn }) {
       const got = await failedJob(ctx, jobId, queue);
       if (!got.job) return got;
       const j = got.job;
-      const reserve = verb === "Retry" ? (await retryReserves(ctx, [j])).get(jobId) : null;
       return {
         target: jobId,
         expect: { attemptsMade: j.attemptsMade, finishedOn: j.finishedOn },
         payload: { jobId },
-        reserve,
-        summary: [`${verb} failed job ${failedLine(j)}`, verb === "Retry" ? "It goes back to waiting and runs again through every pre-spend gate, and the worker reserves for it again at pickup." : "The queue's copy goes; the run records its attempts wrote stay."],
+        summary: [`${verb} failed job ${failedLine(j)}`, verb === "Retry" ? "It goes back to waiting and runs again through every pre-spend gate." : "The queue's copy goes; the run records its attempts wrote stay."],
       };
     },
     async apply(entry, ctx) {
@@ -1098,18 +882,15 @@ function failedAll({ name, kind, verb, fn }) {
       const jobs = (read?.jobs ?? []).slice(0, BULK_MAX);
       if (jobs.length === 0) return { refusal: `no failed job matches${queue ? ` in ${queue}` : ""}${repo ? ` for ${repo}` : ""}; nothing to do` };
       const more = Number(read.more ?? 0);
-      const reserves = verb === "Retry" ? await retryReserves(ctx, jobs) : null;
-      const reserveOf = (j) => (reserves ? reserves.get(j.jobId) : null);
-      const lines = jobs.map((j) => `${failedLine(j)}${reserves ? reserveTail(reserveOf(j)) : ""}`);
+      const lines = jobs.map((j) => failedLine(j));
       const floor = read.examinedAll === false;
       // A count the scan stopped short of is a floor, "at least 3 more match and are", never "3 or more more".
       const past = more > 0 ? notInThisAction(`${floor ? "at least " : ""}${plural(more, "more matches and is", "more match and are")}`, ` (at most ${BULK_MAX} per action)`) : null;
       return {
         target: queue ?? repo ?? "failed",
-        targets: jobs.map((j) => ({ jobId: j.jobId, queue: j.queue, attemptsMade: j.attemptsMade, finishedOn: j.finishedOn, ...(j.target ? { target: j.target } : {}), ...(reserves ? { reserve: reserveOf(j) } : {}) })),
+        targets: jobs.map((j) => ({ jobId: j.jobId, queue: j.queue, attemptsMade: j.attemptsMade, finishedOn: j.finishedOn, ...(j.target ? { target: j.target } : {}) })),
         // The filter rides the ticket for the banner after the write (`WRITE_RULES` `done`); the apply never reads it.
         payload: { ...(queue ? { queue } : {}), ...(repo ? { repo } : {}) },
-        reserve: reserves ? bulkReserve(jobs.map(reserveOf)) : null,
         summary: [`${verb} ${plural(jobs.length, "failed job")}${queue ? ` in ${queue}` : ""}${repo ? ` for ${repo}` : ""}; each is re-checked and acted on alone`, ...lines, ...(past ? [past.text] : [])],
         barLines: [...lines, ...(past ? [past.bar] : [])],
       };
@@ -1197,7 +978,7 @@ const jobActions = [
       const result = await ctx.a.rm.checkDispatchRun({ folder, flow, env, aiInvoked: true, consumeRate: false, now: ctx.now });
       if (result.refused || result.unreachable) return { refusal: result.refused ?? "The paid-start allowance could not be read." };
       const job = { folder, flow, task };
-      return { target: folder, payload: { job }, afterDigest: sha256(JSON.stringify(job)), reserve: ctx.a.rm.estimateReserve?.(job, reserveInputs(ctx)) ?? null, summary: [`Start local flow ${flow}`, "The folder, committed flow permission, clean tree and hourly limit are checked again before enqueue."] };
+      return { target: folder, payload: { job }, afterDigest: sha256(JSON.stringify(job)), summary: [`Start local flow ${flow}`, "The folder, committed flow permission, clean tree and hourly limit are checked again before enqueue."] };
     },
     async apply(entry, ctx) {
       const env = { ...ctx.a.env, PI_DISPATCH_RUN_ROOTS: ctx.a.grantsEnv?.PI_DISPATCH_RUN_ROOTS ?? "", PI_DISPATCH_RUN_PER_HOUR: ctx.a.grantsEnv?.PI_DISPATCH_RUN_PER_HOUR ?? "3" };
@@ -1326,7 +1107,7 @@ const jobActions = [
       const point = typeof selectedPoint === "string" ? /^([A-Za-z0-9_-]{1,128}):(before|at)$/.exec(selectedPoint) : null;
       if (selectedPoint !== undefined && (!point || entry !== undefined || position !== undefined)) return { refusal: "fork-point-invalid" };
       const request = { jobId, entry: point ? point[1] : entry, position: point ? point[2] : position ?? "before", provider, model, thinking, message };
-      const got = planned(await rm.planRunFork({ ...request, url: paths.valkeyUrl, logsDir: paths.logsDir, triggersPath: paths.triggersPath ?? null, ...reserveInputs(ctx), fs: ctx.fs, now: ctx.now }));
+      const got = planned(await rm.planRunFork({ ...request, url: paths.valkeyUrl, logsDir: paths.logsDir, triggersPath: paths.triggersPath ?? null, env: plannerEnv(ctx), fs: ctx.fs, now: ctx.now }));
       if (!got.plan) return got;
       const p = got.plan;
       return { target: jobId, payload: { plan: p }, reserve: p.reserve ?? null,
@@ -1335,7 +1116,7 @@ const jobActions = [
     },
     async apply(entry, ctx) {
       const { rm, paths } = ctx.a;
-      const res = await rm.enqueueRunFork(entry.payload.plan, { url: paths.valkeyUrl, logsDir: paths.logsDir, triggersPath: paths.triggersPath ?? null, ...reserveInputs(ctx), fs: ctx.fs, now: ctx.now });
+      const res = await rm.enqueueRunFork(entry.payload.plan, { url: paths.valkeyUrl, logsDir: paths.logsDir, triggersPath: paths.triggersPath ?? null, env: plannerEnv(ctx), fs: ctx.fs, now: ctx.now });
       return funnelResult(res, { jobId: res?.jobId ?? null, queue: res?.queue ?? null });
     },
   },
@@ -1350,7 +1131,7 @@ const jobActions = [
         const grants = paidStartEnvironment(ctx.a.env, ctx.a.grantsEnv);
         if (grants.refusal) return grants;
       }
-      const result = await ctx.a.rm.planTriggerFire({ index: index(body), triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, ...reserveInputs(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
+      const result = await ctx.a.rm.planTriggerFire({ index: index(body), triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, env: plannerEnv(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
       if (result.unreachable) return { refusal: "The deployment's queue could not be read, so Fire now could not be previewed. Nothing was changed." };
       const got = planned(result);
       if (!got.plan) return got;
@@ -1362,7 +1143,7 @@ const jobActions = [
         const grants = paidStartEnvironment(ctx.a.env, ctx.a.grantsEnv);
         if (grants.refusal) return { invalid: grants.refusal };
       }
-      const res = await ctx.a.rm.enqueueTriggerFire(entry.payload.plan, { triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, ...reserveInputs(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
+      const res = await ctx.a.rm.enqueueTriggerFire(entry.payload.plan, { triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, env: plannerEnv(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
       return funnelResult(res, { jobId: res?.jobId ?? null, queue: res?.queue ?? null });
     },
   },
@@ -1375,7 +1156,7 @@ const jobActions = [
     async preview(body, ctx) {
       const jobId = jobIdOf(body);
       const { rm, paths } = ctx.a;
-      const got = planned(await rm.planRerun({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId, triggersPath: paths.triggersPath ?? null, ...reserveInputs(ctx), fs: ctx.fs, now: ctx.now }));
+      const got = planned(await rm.planRerun({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId, triggersPath: paths.triggersPath ?? null, env: plannerEnv(ctx), fs: ctx.fs, now: ctx.now }));
       if (!got.plan) return got;
       const p = got.plan;
       if (ctx.session?.role === "agent" || ctx.surface === "tool") {
@@ -1402,7 +1183,7 @@ const jobActions = [
         // read compare the same route; actual host/queue or execution changes must still refuse.
         replay = { random: n => { if (n !== 8) throw new Error("unexpected re-run identity size"); return Buffer.from(id[1], "hex"); } };
       }
-      const fresh = await rm.planRerun({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId: entry.target, triggersPath: paths.triggersPath ?? null, ...reserveInputs(ctx), ...replay, fs: ctx.fs, now: ctx.now });
+      const fresh = await rm.planRerun({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId: entry.target, triggersPath: paths.triggersPath ?? null, env: plannerEnv(ctx), ...replay, fs: ctx.fs, now: ctx.now });
       if (!fresh?.plan || rerunAuthorityDigest(fresh.plan) !== entry.expect?.rerunAuthority) return { invalid: "The re-run source or current trigger changed; preview the run again before enqueueing." };
       if (ctx.session?.role === "agent" || ctx.surface === "tool") {
         const checked = await checkAgentRerun(fresh.plan, { rm: ctx.a.rm, env: ctx.a.env, grantsEnv: ctx.a.grantsEnv, now: ctx.now, consumeRate: true });
@@ -1425,7 +1206,7 @@ const jobActions = [
       const text = body.decision === "approve" ? "/approve" : body.decision === "decline" ? `/decline${answerText.trim() ? ` ${answerText.trim()}` : ""}` : answerText;
       const { rm, paths } = ctx.a;
       // `by` is the session's token name, never anything the body says: the trail comment names who answered.
-      const got = planned(await rm.planParkedAnswer({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId, text, by: ctx.session.name, triggersPath: paths.triggersPath ?? null, ...(body.draftRunId !== undefined ? { draftRunId: str(body, "draftRunId", { required: true, max: 200 }), draftDigest: str(body, "draftDigest", { required: true, max: 64 }) } : {}), ...reserveInputs(ctx), fs: ctx.fs, now: ctx.now }));
+      const got = planned(await rm.planParkedAnswer({ url: paths.valkeyUrl, logsDir: paths.logsDir, jobId, text, by: ctx.session.name, triggersPath: paths.triggersPath ?? null, ...(body.draftRunId !== undefined ? { draftRunId: str(body, "draftRunId", { required: true, max: 200 }), draftDigest: str(body, "draftDigest", { required: true, max: 64 }) } : {}), env: plannerEnv(ctx), fs: ctx.fs, now: ctx.now }));
       if (!got.plan) return got;
       const p = got.plan;
       const answer = String(p.job?.trigger?.comment?.body ?? "");
@@ -1435,7 +1216,7 @@ const jobActions = [
         reserve: p.reserve ?? null,
         // The answer's digest, never its text: the audit row's afterDigest (INT-CONSOLE-AUDIT-LOG).
         afterDigest: sha256(answer),
-        summary: [`${p.approval ? "Decide approval for" : "Answer parked run"} ${jobId} on ${p.forge}, as ${ctx.session.name}`, ...(p.approval ? [`Gate ${p.approval.action}, request ${p.approval.requestId}`, p.approval.action === "budget-raise" ? `Approval permits an absolute resumed-job cap of $${p.approval.cap}, within deployment and scoped budgets; decline or a question grants no increase.` : "This external action is advisory; approval does not grant a new worker permission."] : []), `It resumes the parked transcript on queue ${p.queue}; once the job passes every check and reserve, the worker posts one comment on the issue saying the operator console answered, quoting the answer.`, ...runFieldsLines(p.runFields, p.approval ? "It runs as the original trigger says now" : "It runs as the comment trigger says now")],
+        summary: [`${p.approval ? "Decide approval for" : "Answer parked run"} ${jobId} on ${p.forge}, as ${ctx.session.name}`, ...(p.approval ? [`Gate ${p.approval.action}, request ${p.approval.requestId}`, "This external action is advisory; approval does not grant a new worker permission."] : []), `It resumes the parked transcript on queue ${p.queue}; once the job passes every check, the worker posts one comment on the issue saying the operator console answered, quoting the answer.`, ...runFieldsLines(p.runFields, p.approval ? "It runs as the original trigger says now" : "It runs as the comment trigger says now")],
         diff: textHtml(answer),
       };
     },
@@ -1487,7 +1268,7 @@ const jobActions = [
           // `p.jobId` is the job that takes it: the page's own, or the run's active recovery job (review F4).
           `Send a ${mode === "followUp" ? "follow-up" : "steer"} to running job ${p.jobId}, as ${ctx.session.name} (message ${p.id}, ${plural(p.bytes, "byte")})`,
           mode === "followUp" ? "The agent reads it once it would otherwise stop, and the run goes on from it." : "The agent reads it after its current tool calls, before its next model call.",
-          "It spends from this run's existing reservation: no new reserve is taken, and the run's turn, dollar and token caps still bind.",
+          "It spends from this run's existing reservation: no new reserve is taken, and the run's turn cap still binds.",
           "The audit log keeps the message's sha256, never its text.",
         ],
         diff: textHtml(p.text),
@@ -1757,9 +1538,6 @@ export const UNDO_SENTENCES = Object.freeze({
   removed: "The queue's copy is gone; the run records its attempts wrote stay.",
   answer: "The answer is queued, and the worker posts it once the job passes its checks.",
   withdrawn: "Send the message again if you still mean it.",
-  allocation: "Revert it from the allocation history, which keeps the split before it.",
-  envelope: "Set it back with the envelope form: this preview's diff shows the old values; the console keeps no copy.",
-  envelopeAfter: "Set it back with the envelope form: the console kept no copy of the old values.",
   tooBig: "Put the previous list back by hand: this preview showed it; the console keeps no copy.",
   tooBigAfter: "Put the previous list back by hand: the console kept no copy of it.",
   resumeUnread: "Pause the queues that were paused again by hand: the fleet was not read before the resume, so which they were is not known.",
@@ -1797,30 +1575,17 @@ const listBefore = (out, key) => (Array.isArray(jsonOf(out.beforeText)?.[key]) ?
 const byHand = (what, field) => `Edit ${what} back by hand: ${field} had no value before, and an edit cannot remove one.`;
 
 /**
- * A paid single act's confirm words (the ConfirmStates card): the most the worker will hold for it, or why no figure
- * can be said. Never "$0" for a reserve that is not known, the `reserveText` rule; and a zero-rated act says so in
- * words (issue #737): "$0.00" on a button reads as a price, and the reserve sentence beside it says what it holds.
+ * A paid act's confirm words: the action's own verb. No token reserve rides a plan any more (C2: the budgets, their
+ * counters and `estimateReserve` went with them), so there is no figure or zero-rated nuance to add.
  */
-function paidLabel(verb, r) {
-  if (!r || r.unknown || r.invalid) return `${verb} (reserve unknown)`;
-  if (r.zeroRated) return `${verb} (zero-rated)`;
-  if (!Number.isSafeInteger(r.tokens)) return `${verb}, 1 job slot`;
-  return `${verb} for up to ${r.tokens.toLocaleString("en-US")} tokens`;
+function paidLabel(verb) {
+  return verb;
 }
 
-/**
- * A paid bulk act's confirm words: the sum of the known reserves, "at least" when some are unknown (the total is then
- * a floor), "zero-rated" when every job is, and "no token reserve" when no job holds a token budget (no per-job cap,
- * or a cap of 0): the slots alone would repeat the count ("Retry 3, 3 job slots"), and the reserve sentence says them.
- */
+/** A paid bulk act's confirm words: the verb and the count. No reserve is carried or summed (C2). */
 function bulkPaidLabel(verb, out) {
   const n = Array.isArray(out.targets) ? out.targets.length : 0;
-  const r = out.reserve ?? {};
-  const each = (out.targets ?? []).map((t) => t.reserve);
-  if (r.unknown > 0) return r.reserveTokens > 0 ? `${verb} ${n}, at least ${r.reserveTokens.toLocaleString("en-US")} tokens` : `${verb} ${n} (reserve unknown)`;
-  if (r.reserveTokens > 0) return `${verb} ${n} for up to ${r.reserveTokens.toLocaleString("en-US")} tokens`;
-  if (each.length > 0 && each.every((x) => x?.zeroRated)) return `${verb} ${n} (zero-rated)`;
-  return `${verb} ${n}, no token reserve`;
+  return `${verb} ${n}`;
 }
 
 const say = (sentence) => () => sentence;
@@ -2097,9 +1862,6 @@ const WRITE_RULES = {
     done: (out) => `Edited project ${out.plan.before.id}`,
   },
   "project-delete": { fields: ["id"], danger: true, undo: say(DELETED), inverse: none, confirmLabel: (out) => `Delete project ${out.plan?.deleted}`, done: (out) => `Deleted project ${out.plan.deleted}` },
-  "envelope-set": { fields: ["envelope"], danger: false, undo: say(twice(UNDO_SENTENCES.envelope, UNDO_SENTENCES.envelopeAfter)), inverse: none, confirmLabel: confirmWord, done: say("Changed the allocation envelope") },
-  "priorities-set": { fields: ["projects", "validDays"], danger: false, undo: say(UNDO_SENTENCES.allocation), inverse: none, confirmLabel: confirmWord, done: say("Applied a priorities plan") },
-  "allocation-revert": { fields: ["index"], danger: false, undo: (out) => out.payload.previousPlanId ? `Restore plan ${out.payload.previousPlanId} from Budget split history; find it by plan id because row numbers change.` : UNDO_SENTENCES.allocation, inverse: none, confirmLabel: confirmWord, done: (out) => `Reverted the allocation to ${`row ${out.payload.index + 1}`}` },
 };
 
 /** How an edit's way back reads its entry: the file's list, the row's word, and the body the edit takes the entry in. */
@@ -2166,8 +1928,7 @@ const zeroTouchActions = ["group", "name", "instruction", "undo"].map((operation
     const p = got.plan;
     return { target: p.target, payload: { params, ...(p.configDigest ? { configDigest: p.configDigest, digest: p.digest } : {}) }, expect: p.expect,
       beforeDigest: p.beforeText ? sha256(p.beforeText) : null, afterDigest: sha256(p.afterText ?? JSON.stringify({ params, configDigest: p.configDigest, digest: p.digest })),
-      summary: [p.title, ...p.summary], ...(p.beforeText !== undefined ? { diff: diffHtmlOf(p.beforeText, p.afterText, { file: p.target }) } : {}),
-      ...(operation === "group" ? { reserve: { tokens: Number(p.maxTokens) } } : {}) };
+      summary: [p.title, ...p.summary], ...(p.beforeText !== undefined ? { diff: diffHtmlOf(p.beforeText, p.afterText, { file: p.target }) } : {}) };
   },
   apply(entry, ctx) { return ctx.a.zeroTouch.apply(this.name, entry); },
 }));
@@ -2232,7 +1993,7 @@ const packageActions = [
       if (!row) return { refusal: `${canary.name} is not staged on this host, so there is nothing for a candidate to replace. Nothing was queued.` };
       if (row.adapter) return { refusal: `${canary.name} is a reviewed subscription adapter, whose identity depends on its exact tree. It moves with a pi-dispatch release. Nothing was queued.` };
       if (row.version === canary.version) return { refusal: `${canary.version} is the version already staged, so a canary would try nothing new. Nothing was queued.` };
-      const result = await ctx.a.rm.planTriggerFire({ index: at, triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, ...reserveInputs(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
+      const result = await ctx.a.rm.planTriggerFire({ index: at, triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, env: plannerEnv(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now });
       if (result.unreachable) return { refusal: "The deployment's queue could not be read, so the canary could not be previewed. Nothing was changed." };
       const got = planned(result);
       if (!got.plan) return got;
@@ -2243,7 +2004,7 @@ const packageActions = [
         summary: [`Runs one paid job of cron trigger ${p.schedulerId} with ${canary.name} ${canary.version} in place of ${row.version}, for that job only`, "No other job loads it, and nothing stays staged", "This is third-party code in a job that holds that trigger's credentials, and what it does to that trigger's own folder or repository stays done", "Its result reads completed or failed. A job that completed does not prove the extension is good: read the run"] };
     },
     async apply(entry, ctx) {
-      const res = await ctx.a.rm.enqueueTriggerFire(entry.payload.plan, { triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, ...reserveInputs(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now, packageCanary: entry.payload.canary });
+      const res = await ctx.a.rm.enqueueTriggerFire(entry.payload.plan, { triggersPath: ctx.a.paths.triggersPath, url: ctx.a.paths.valkeyUrl, env: plannerEnv(ctx), grantsEnv: ctx.a.grantsEnv ?? process.env, fs: ctx.fs, now: ctx.now, packageCanary: entry.payload.canary });
       return funnelResult(res, { jobId: res?.jobId ?? null, queue: res?.queue ?? null });
     },
   },
@@ -2627,7 +2388,7 @@ export async function confirmAction(ctx, action) {
   let result;
   try {
     result = await auditedWrite(
-      { audit, actor, kind: action.kind, target: entry.target, beforeDigest: entry.beforeDigest ?? null, afterDigest: entry.afterDigest ?? null, reserve: reserveTokensOf(entry.reserve), count: Number.isSafeInteger(entry.count) && entry.count >= 1 ? entry.count : null, ticket: tag, failure: r => { const why = failureOf(r); return session.role === "agent" && why ? "action-refused" : why; }, refusal: () => ({ [AUDIT]: true }), log },
+      { audit, actor, kind: action.kind, target: entry.target, beforeDigest: entry.beforeDigest ?? null, afterDigest: entry.afterDigest ?? null, reserve: null, count: Number.isSafeInteger(entry.count) && entry.count >= 1 ? entry.count : null, ticket: tag, failure: r => { const why = failureOf(r); return session.role === "agent" && why ? "action-refused" : why; }, refusal: () => ({ [AUDIT]: true }), log },
       () => action.apply(entry, actx),
     );
   } catch (e) {
@@ -2662,8 +2423,7 @@ async function confirmBulk(ctx, action, entry, { actor, tag, actx }) {
   const audit = capturingAudit(deps.audit);
   const targets = Array.isArray(entry.targets) ? entry.targets : [];
   const count = targets.length;
-  const reserveBy = new Map(targets.map((t) => [t.jobId, reserveTokensOf(t.reserve)]));
-  const rowOf = (jobId) => ({ actor, action: "write", kind: action.kind, target: jobId, count, reserve: reserveBy.get(jobId) ?? null, ticket: tag });
+  const rowOf = (jobId) => ({ actor, action: "write", kind: action.kind, target: jobId, count, reserve: null, ticket: tag });
   const compensate = (jobId, reason) => {
     try {
       audit.append({ ...rowOf(jobId), outcome: "failed", reason: actor.role === "agent" ? "action-refused" : String(reason) });

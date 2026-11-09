@@ -15,13 +15,9 @@ import {
   SPEND_VIEWS,
   flowsMap,
   flowsSelected,
-  splitHistory,
-  splitEnvelope,
-  splitPriorities,
   spendToday,
   spendOver,
   spendTabs,
-  spendCaps,
 } from "../src/console/panels/spend.mjs";
 import {
   SPEND_CARD_CSS_HASHES,
@@ -126,8 +122,8 @@ const view = (over = {}) => ({
   ...over,
 });
 
-test("five Spend pages are viewer reads, non-live and outside the legacy layer", () => {
-  assert.equal(SPEND_VIEWS.length, 5);
+test("four Spend pages are viewer reads, non-live and outside the legacy layer", () => {
+  assert.equal(SPEND_VIEWS.length, 4);
   for (const [name, path] of SPEND_VIEWS) {
     assert.equal(PAGES[name].path, path);
     assert.equal(PAGES[name].auth, "viewer");
@@ -141,7 +137,6 @@ test("queries validate by view, bound select, accept old what-if and canonicaliz
     ["insights", "range=7d&project=web&whatif=p%2Fm&runs=week"],
     ["insights", "whatif=p%2Fm&flow=fix"],
     ["insights-capacity", "range=24h"],
-    ["insights-budget-split", "range=mtd&project=web"],
     ["insights-flows", "range=7d&select=3&view=list&paths=full"],
     ["insights-breakdown", "whatif=p%2Fm&flow=fix"],
   ];
@@ -197,17 +192,6 @@ test("loads pass role/project/view boundaries and windowed run-set what-if witho
     project: "web",
     runs: "week",
   });
-  calls.length = 0;
-  await loadPageData(
-    "insights-budget-split",
-    { range: "mtd", paths: "full" },
-    deps,
-    { role: "operator" },
-  );
-  assert.deepEqual(calls[0], [
-    "mtd",
-    { view: "budget-split", fullPaths: true, project: null, role: "operator" },
-  ]);
 });
 
 test("tab links retain only destination-supported filters and keep 24h off spend routes", () => {
@@ -242,81 +226,7 @@ test("server-selected map is accessible, links spent run and script-free list ha
   assert.doesNotMatch(list, /id="graph-nodes"|id="graph"|script/);
 });
 
-test("structured allocation forms use normalized envelope tokens, delegation bounds and human row numbers", () => {
-  const v = view();
-  const envelope = String(splitEnvelope(v));
-  const priorities = String(splitPriorities(v));
-  const history = String(splitHistory(v));
-  assert.match(envelope, /name="totalTokens"[^>]*value="100000000"/);
-  assert.match(envelope, /name="floor:web"[^>]*value="10000000"/);
-  assert.match(envelope, /data-structured="envelope"/);
-  assert.match(priorities, /name="validDays"[^>]*max="7"/);
-  assert.match(priorities, /name="weight:web"/);
-  assert.match(history, /Revert row 1/);
-  assert.match(history, /name="index"[^>]*value="0"/);
-  assert.doesNotMatch(
-    String(splitHistory({ ...v, role: "viewer" })),
-    /data-action|<th>Action/,
-  );
-  assert.equal(String(splitPriorities({ ...v, role: "viewer" })), "");
-});
-
-test("window reconciliation names unknown hosts, leaves missing holds unknown and draws no non-job soft tick", () => {
-  const text = String(
-    spendToday(
-      view({
-        data: {
-          insights: {
-            spend: {
-              today: {
-                usedTokens: 10_000_000,
-                settledTokens: 2_000_000,
-                heldTokens: null,
-                heldJobs: 2,
-                unknownHosts: ["old-host"],
-                reconciliationMismatch: true,
-              },
-            },
-          },
-        },
-      }),
-    ),
-  );
-  assert.match(text, /old-host/);
-  assert.match(text, /unknown/);
-  assert.match(text, /reconciliation mismatch/);
-  const caps = String(
-    spendCaps(
-      view({
-        data: {
-          insights: {
-            budget: {
-              softHoldPct: 80,
-              tokens: { spent: 85, cap: 100 },
-              windows: {
-                rows: [
-                  {
-                    name: "deployment",
-                    window: "day",
-                    counterTokens: 90_000_000,
-                    capTokens: 100_000_000,
-                    full: false,
-                  },
-                ],
-              },
-            },
-          },
-        },
-      }),
-    ),
-  );
-  assert.doesNotMatch(caps, /<line/);
-  assert.match(caps, /90,000,000/);
-});
-
-
-
-test("all five pages render clean HTML from the real slice assembler, across roles", async () => {
+test("all four pages render clean HTML from the real slice assembler, across roles", async () => {
   const pricing = {
     listPricedModels: () => [],
     piAiVersion: () => "test",
@@ -328,8 +238,6 @@ test("all five pages render clean HTML from the real slice assembler, across rol
     projects: () => ({ projects: [{ id: "web", name: "Web" }] }),
     costs: () => ({ fold: { provenance: { runsTotal: 0 } }, records: [] }),
     graph: () => graph,
-    budget: () => ({ dollars: { windows: [] } }),
-    allocation: () => allocation,
     capacity: () => ({ noTime: true }),
     sizing: () => null,
     hosts: () => ({ hosts: [] }),
@@ -478,35 +386,6 @@ test("a cron id beyond the runs filter bound falls back to its stable trigger in
   assert.match(text, /href="\/runs\?trigger=3"/);
 });
 
-test("Caps says Full from the reader's next-reservation decision before the token counter reaches its cap", () => {
-  const view = {
-    role: "viewer",
-    query: {},
-    data: {
-      insights: {
-        budget: {
-          windows: {
-            rows: [
-              {
-                name: "deployment",
-                window: "day",
-                counterTokens: 9_000_000,
-                capTokens: 10_000_000,
-                full: true,
-              },
-            ],
-          },
-        },
-      },
-    },
-  };
-  const text = String(spendCaps(view));
-  assert.match(text, /spent and held\): Full/);
-  assert.match(text, /9,000,000/);
-  assert.match(text, /10,000,000/);
-  assert.doesNotMatch(text, /<line/);
-});
-
 test("legacy chart viewBoxes preserve complete geometry when a card shrinks", () => {
   assert.equal(
     responsiveInsightsSvg(
@@ -518,53 +397,10 @@ test("legacy chart viewBoxes preserve complete geometry when a card shrinks", ()
   assert.equal(responsiveInsightsSvg(ready), ready);
 });
 
-test("the token budget row is full at its cap and draws no soft-hold tick", () => {
-  for (const [spent, word] of [
-    [10, "Full"],
-    [9, "Open"],
-    [null, "unknown"],
-  ]) {
-    const text = String(
-      spendCaps({
-        role: "viewer",
-        query: {},
-        data: {
-          insights: {
-            budget: {
-              tokens: { spent, cap: 10 },
-              windows: { rows: [] },
-            },
-          },
-        },
-      }),
-    );
-    assert.ok(text.includes(`Tokens today: ${word}`), `${spent} is ${word}`);
-    assert.equal((text.match(/<line\b/g) ?? []).length, 0, "token rows have no soft-hold tick");
-  }
-});
-
-test("Caps names failed token window reads instead of silently omitting their rows", () => {
-  for (const budget of [
-    { windows: { invalid: ["private-error-marker"] } },
-    { windows: { countersUnreachable: "private-error-marker" } },
-    { windows: { limits: { invalid: "private-error-marker" } } },
-  ]) {
-    const text = String(
-      spendCaps({ role: "viewer", query: {}, data: { insights: { budget } } }),
-    );
-    assert.match(text, /settings file or counters could not be read/);
-    assert.doesNotMatch(text, /private-error-marker/);
-  }
-});
-
 test("sidebar and KPI facts keep one label/value pair per row at desktop widths", async () => {
   const fixture = spendFixture();
-  fixture.allocation.state.reasons = {
-    web: "A longer operator reason must have room to wrap as prose.",
-  };
   for (const [name, ids] of [
-    ["insights", ["week", "today", "avg", "plan"]],
-    ["insights-budget-split", ["envelope", "plan-reasons", "split-counts"]],
+    ["insights", ["today", "avg", "sizes"]],
     ["insights-flows", ["flows-selected"]],
   ]) {
     const out = await renderPage(name, {
@@ -611,56 +447,6 @@ test("cron rearm stays a wire and is never described as a target skill or observ
   assert.doesNotMatch(details, /cron-rearm/);
 });
 
-test("allocation history facts stay visible to viewers while only operators get Revert", () => {
-  const id = "a".repeat(64);
-  const p = {
-    ...allocation,
-    state: { ...allocation.state, planId: id },
-    log: [
-      {
-        at: NOW,
-        planId: id,
-        outcome: "applied",
-        writer: "operator-session",
-        weights: { web: 10 },
-      },
-      {
-        at: NOW - 1000,
-        planId: id,
-        outcome: "duplicate",
-        writer: "operator-session",
-        weights: { web: 10 },
-      },
-      {
-        at: NOW - 2000,
-        planId: "b".repeat(64),
-        outcome: "refused",
-        writer: "operator-session",
-        weights: null,
-      },
-      {
-        at: NOW - 3000,
-        planId: "c".repeat(64),
-        outcome: "applied",
-        writer: "operator-session",
-        weights: { web: 1 },
-      },
-    ],
-  };
-  for (const role of ["operator", "viewer"]) {
-    const out = String(
-      splitHistory(view({ role, data: { insights: { allocation: p } } })),
-    );
-    assert.match(out, /In force/);
-    assert.match(out, /Same as row 1/);
-    assert.match(out, /No split to go back to/);
-    assert.equal((out.match(/In force/g) ?? []).length, 1);
-    if (role === "viewer")
-      assert.doesNotMatch(out, /<th>Action|data-action|Revert row/);
-    else assert.match(out, /Revert row 4/);
-  }
-});
-
 const recordMoneyFixture = (records, budget = {}) => ({
   spend: {
     ...spendSummaryOf({ records, hosts: [], budget, nowMs: NOW }),
@@ -702,12 +488,12 @@ test("paid work without token windows shows its real record cost, not its unrese
   assert.equal(p.spend.today.usedTokens, 7);
   assert.equal(p.spend.today.ledgerTokens, 0);
   const today = String(spendToday(moneyView(p)));
-  assert.match(today, /No daily token cap is configured/);
+  assert.match(today, /settled from run records/);
   assert.match(settledCell(today), /^7$/);
-  assert.match(today, /Recorded window settlements/);
-  assert.match(today, /not the cost of all readable work/);
+  assert.match(today, /own settled cost/);
+  assert.match(today, /There is no token counter and no held reserve/);
   const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /^7 settled; 0 held$/);
+  assert.match(dateCell(chart), /^7$/);
   assert.match(chart, /2026-10-29: 7 settled/);
 });
 
@@ -747,186 +533,12 @@ test("estimated floors and real window charges retain separate labels and actual
     tokens: { total: 7, metered: false },
     usage: null,
   });
-  const budget = {
-    windows: {
-      rows: [
-        {
-          ledger: "deployment",
-          name: "deployment",
-          window: "day",
-          counterTokens: 2_000_000,
-          capTokens: 20_000_000,
-          full: false,
-        },
-      ],
-    },
-  };
-  const p = recordMoneyFixture([partial], budget);
+  const p = recordMoneyFixture([partial]);
   const today = String(spendToday(moneyView(p)));
   assert.match(settledCell(today), /~≥7/);
-  assert.match(today, /Counter beyond recorded window charges and holds/);
-  assert.equal(p.spend.today.unattributedTokens, 2_000_000);
+  assert.ok(!today.includes("Counter") && !today.includes("unattributed"), "no token counter is reconciled: there is none");
   const chart = String(spendOver(moneyView(p)));
   assert.match(dateCell(chart), /~≥7/);
   assert.match(chart, /sp-bar--estimated/);
   assert.match(chart, /<li>2026-10-29: ~≥7 settled/);
-});
-
-test("a newer duplicate references the applied row and never claims that its duplicate event put the plan in force", () => {
-  const id = "a".repeat(64);
-  const p = {
-    ...allocation,
-    log: [
-      { planId: id, outcome: "duplicate", weights: { web: 10 } },
-      { planId: id, outcome: "applied", weights: { web: 10 } },
-    ],
-  };
-  const out = String(
-    splitHistory(
-      view({ role: "viewer", data: { insights: { allocation: p } } }),
-    ),
-  );
-  const rows = out.match(/<tr>[\s\S]*?<\/tr>/g).slice(1);
-  assert.match(rows[0], /Same as row 2/);
-  assert.doesNotMatch(rows[0], /In force/);
-  assert.match(rows[1], /In force/);
-});
-
-test("a plan's API-equivalent settlement floor and live hold stay distinct in Today and the daily bar", () => {
-  const plan = moneyRecord("plan-floor", {
-    provider: "plan",
-    model: "paid",
-    tokensWindows: {
-      basis: "floor",
-      reservedTokens: 9_000_000,
-      settledTokens: 9_000_000,
-    },
-    tokens: { total: 0, metered: true },
-    usage: {
-      models: [{ provider: "plan", model: "paid", input: 10 }],
-    },
-  });
-  const budget = {
-    windows: {
-      rows: [
-        {
-          ledger: "deployment",
-          name: "deployment",
-          window: "day",
-          counterTokens: 11_000_000,
-          capTokens: 20_000_000,
-          full: false,
-        },
-      ],
-    },
-  };
-  const hosts = [
-    {
-      name: "host",
-      jobsMore: "0",
-      jobs: [{ id: "live", at: NOW - 1000, h: 2_000_000, ha: NOW - 1000 }],
-    },
-  ];
-  const subscriptions = [{ id: "work", provider: "plan", models: ["paid"] }];
-  const summary = spendSummaryOf({
-    records: [plan],
-    hosts,
-    budget,
-    subscriptions,
-    nowMs: NOW,
-  });
-  const p = {
-    spend: {
-      ...summary,
-      ...spendChartsOf({
-        records: [plan],
-        subscriptions,
-        sinceMs: NOW - 86_400_000,
-        nowMs: NOW,
-        jobCapTokens: 10_000_000,
-        heldTokens: summary.today.heldTokens,
-      }),
-    },
-  };
-  assert.equal(summary.today.heldTokens, 2_000_000);
-  assert.equal(summary.today.settledTokens, 9_000_000);
-  const today = String(spendToday(moneyView(p)));
-  assert.match(settledCell(today), /≥9,000,000/);
-  assert.match(today, /Held for 1 running job<\/dt><dd>2,000,000/);
-  const chart = String(spendOver(moneyView(p)));
-  assert.match(dateCell(chart), /≥9,000,000 settled; 2,000,000 held/);
-  assert.match(chart, /class="sp-held"/);
-});
-
-test("the current neutral split is in force for both roles and offers no redundant Revert", () => {
-  const at = "2026-10-29T12:00:00Z";
-  for (const writer of ["default", "expiry"]) {
-    const state = { planId: null, appliedAt: at, writer, weights: { web: 1 } };
-    const log = [
-      {
-        planId: writer === "expiry" ? "old-plan" : null,
-        at,
-        writer,
-        outcome: writer === "expiry" ? "expired" : "neutral",
-        weights: { web: 1 },
-      },
-    ];
-    for (const role of ["operator", "viewer"]) {
-      const text = String(
-        splitHistory({
-          role,
-          query: {},
-          data: { insights: { allocation: { state, log } } },
-        }),
-      );
-      assert.match(text, /In force/);
-      assert.match(text, /Today&#39;s neutral split/);
-      assert.doesNotMatch(text, /data-action="allocation-revert"/);
-    }
-  }
-});
-
-test("expiry's retained plan id never makes its neutral weights a duplicate of the old applied split", () => {
-  const at = "2026-10-29T12:00:00Z";
-  const old = "2026-10-28T12:00:00Z";
-  const p = {
-    state: {
-      planId: null,
-      appliedAt: at,
-      writer: "expiry",
-      weights: { web: 1 },
-    },
-    log: [
-      {
-        planId: "same-id",
-        at,
-        writer: "expiry",
-        outcome: "expired",
-        weights: { web: 1 },
-      },
-      {
-        planId: "same-id",
-        at: old,
-        writer: "portfolio-job",
-        outcome: "applied",
-        weights: { web: 9 },
-      },
-      {
-        planId: "same-id",
-        at: old,
-        writer: "portfolio-job",
-        outcome: "duplicate",
-        weights: { web: 9 },
-      },
-    ],
-  };
-  for (const role of ["operator", "viewer"]) {
-    const text = String(
-      splitHistory({ role, data: { insights: { allocation: p } } }),
-    );
-    assert.equal((text.match(/In force/g) ?? []).length, 1);
-    assert.match(text, /Same as row 2/);
-    assert.doesNotMatch(text, /Same as row 1/);
-    assert.equal(text.includes("Revert row 2"), role === "operator");
-  }
 });

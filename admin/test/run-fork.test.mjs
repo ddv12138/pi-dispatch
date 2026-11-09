@@ -84,42 +84,6 @@ test("the preview names the derived branch and freezes the shown model across se
 });
 
 
-test("a wider deployment cap cannot widen the confirmed fork, and a narrower hold needs a new preview", async () => {
-  const d = deps({ overlay: { maxTokens: 1_000_001 } });
-  const { plan } = await planRunFork({ ...request, ...d });
-  assert.equal(plan.job.maxTokens, 1_000_001);
-  assert.equal(plan.job.forkReserveTokens, 1_000_001);
-  assert.equal(plan.request.maxTokens, 1_000_001);
-  const wide = await enqueueRunFork(plan, { ...d, overlay: { maxTokens: 20_000_000 }, enqueueFn: async (queued) => {
-    assert.equal(queued.job.maxTokens, 1_000_001);
-    return { ok: true };
-  } });
-  assert.equal(wide.ok, true);
-  const narrow = await enqueueRunFork(plan, { ...d, overlay: { maxTokens: 500_000 }, enqueueFn: () => { throw new Error("must preview the changed hold"); } });
-  assert.match(narrow.refusal, /changed since/);
-});
-
-test("an uncapped preview cannot silently acquire a different reservation at confirmation", async () => {
-  const d = deps();
-  const { plan } = await planRunFork({ ...request, ...d });
-  assert.equal(plan.reserve.maxTokens, null);
-  assert.equal(plan.job.forkReserveTokens, null);
-  const got = await enqueueRunFork(plan, { ...d, overlay: { maxTokens: 2_000_000 }, enqueueFn: () => { throw new Error("must not queue"); } });
-  assert.match(got.refusal, /changed since/);
-});
-
-
-test("a zero-rated preview is pinned in queue data and cannot become a paid reservation at confirmation", async () => {
-  const modelEndpoints = { endpoints: [{ id: "test-endpoint", host: "host.docker.internal", port: 11434, slots: 1, keyless: true }], models: { providers: { test: { api: "openai-completions", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "$PI_DISPATCH_KEYLESS", models: [{ id: "small" }, { id: "large" }] } } } };
-  const d = deps({ overlay: { maxTokens: 2_000_000 }, modelEndpoints });
-  const { plan } = await planRunFork({ ...request, ...d });
-  assert.equal(plan.reserve.zeroRated, true);
-  assert.equal(plan.job.forkReserveTokens, 0);
-  const got = await enqueueRunFork(plan, { ...d, modelEndpoints: null, enqueueFn: () => { throw new Error("must not queue a newly paid fork"); } });
-  assert.match(got.refusal, /changed since/);
-});
-
-
 test("await-input triggers refuse managed forks until parked answers can preserve their independent namespace", async () => {
   const d = deps();
   const basePlan = await d.planRerunFn();

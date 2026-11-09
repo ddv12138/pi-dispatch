@@ -354,17 +354,14 @@ test("the trigger's run.mcp reaches the container env as PI_MCP_SERVERS, and a j
 	}
 });
 
-test("the job's token budget reaches the container env as PI_MAX_TOKENS, 0 included, and an uncapped job emits none (#501)", { skip }, async () => {
-	// The hop from the effective job to buildContainerEnv. Dropped here, every capped job would pass the tokenBudget
-	// gate and then run with NO cap on Docker and Podman alike, so this asserts the argv itself.
-	for (const maxTokens of [0, 500_000]) {
+test("the job's maxTokens never reaches the container env: C2 removed PI_MAX_TOKENS", { skip }, async () => {
+	// The hop from the effective job to buildContainerEnv, asserted on the argv itself: a leftover token budget
+	// (0 included) must not resurrect the runner's meter.
+	for (const maxTokens of [0, 500_000, null, undefined]) {
 		const argv = await argvFor({ ...JOB, maxTokens });
-		assert.ok(argv.includes(`PI_MAX_TOKENS=${maxTokens}`), `cap ${maxTokens} must reach the runner`);
+		assert.ok(!argv.some((a) => String(a).startsWith("PI_MAX_TOKENS")), `maxTokens ${maxTokens} must not reach the runner`);
 	}
-	for (const job of [{ ...JOB, maxTokens: null }, JOB]) {
-		const argv = await argvFor(job);
-		assert.ok(!argv.some((a) => String(a).startsWith("PI_MAX_TOKENS")), "no cap: no variable at all");
-	}
+	assert.ok(!(await argvFor(JOB)).some((a) => String(a).startsWith("PI_MAX_TOKENS")), "no variable at all");
 });
 
 test("overlay extensions: the factory default emits nothing, and only an explicit false emits the opt-out", { skip }, async () => {

@@ -30,11 +30,11 @@ const skip = mod ? false : `bullmq not installed (node ${process.version} < 22.1
 const NOW = Date.UTC(2026, 10, 2, 9, 0);
 const DIGEST = "b".repeat(64);
 // The env side of the settings (start.mjs's `config`); the overlay file on disk is merged over it by the real reader.
-const ENV = { provider: "test", model: "chat", maxTurns: 1, maxTokens: 2000, dailyTokenCap: null, weeklyTokenCap: null, monthlyTokenCap: null, concurrency: 1 };
+const ENV = { provider: "test", model: "chat", maxTurns: 1, concurrency: 1 };
 const SETTINGS_TODAY = "{\n  \"maxTurns\": 1\n}\n";
 const SETTINGS_NEWER = "{\n  \"version\": 2,\n  \"maxTurns\": 1\n}\n";
-const ZERO_TOUCH = { capture: true, model: "test/classifier", maxTokens: 5000, confidence: 0.9, names: {} };
-const RULE = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier", maxTokens: 5000 };
+const ZERO_TOUCH = { capture: true, model: "test/classifier", confidence: 0.9, names: {} };
+const RULE = { id: "help", projects: ["web"], categories: ["how-to"], confidence: 0.9, mode: "draft", flow: "answer", model: "test/chat", decisionModel: "test/classifier" };
 
 /**
  * The two files on disk and the settings read start.mjs builds from them (`getSettings`: the overlay over env through

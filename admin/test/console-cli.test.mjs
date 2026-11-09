@@ -750,20 +750,19 @@ test("endpointSnapshotFn: the worker's endpoint snapshot, so a job that can only
   assert.equal(typeof m.modelEndpoints.loadModelEndpoints, "function", "loadModules loads the worker's endpoint loader");
   assert.equal(typeof m.modelCatalog.builtinModel, "function", "and the builtin catalog's zero-rated lookup");
   const fs = await import("node:fs");
-  const { estimateReserve } = await import("@edgehero/pi-dispatch/reserve-estimate");
   const dir = tempDir("console-eps-");
   const overlay = join(dir, "overlay");
   mkdirSync(overlay);
   writeFileSync(join(overlay, "models.json"), JSON.stringify({ providers: { ollama: { baseUrl: "http://host.docker.internal:11434/v1", api: "openai-completions", models: [{ id: "qwen3" }] } } }));
   const paths = { valkeyUrl: "redis://127.0.0.1:6379/0", globalPiDir: overlay };
-  const job = { kind: "github", provider: "ollama", model: "qwen3", maxTokens: 1500000 };
   const none = endpointSnapshotFn({ m, env: {}, paths, dir, fs })();
   assert.deepEqual(none, { endpoints: [], models: null }, "no declaration: no endpoint, and the overlay is not even read (the worker's rule)");
-  assert.equal(estimateReserve(job, { modelEndpoints: none }).tokens, 1_500_000, "not declared local: the full token cap");
   writeFileSync(join(dir, "model-endpoints.json"), JSON.stringify({ version: 1, endpoints: [{ id: "ollama", host: "host.docker.internal", port: 11434, slots: 2 }] }));
   const snap = endpointSnapshotFn({ m, env: {}, paths, dir, fs })();
   assert.equal(snap.endpoints.length, 1);
-  assert.deepEqual(estimateReserve(job, { modelEndpoints: snap, builtinModel: m.modelCatalog.builtinModel }), { slots: 1, tokens: 0, maxTokens: 1_500_000, zeroRated: true });
+  assert.ok(snap.models && typeof snap.models === "object", "the overlay models ride the snapshot");
+  // No reserve estimator reads it any more: the token budgets are gone (C2).
+  assert.equal(typeof (await import("@edgehero/pi-dispatch/reserve-estimate")).estimateReserve, "undefined");
   // PI_MODEL_ENDPOINTS_FILE names another file, relative to the deployment folder, as the worker resolves it.
   writeFileSync(join(dir, "eps.json"), JSON.stringify({ version: 1, endpoints: [] }));
   assert.deepEqual(endpointSnapshotFn({ m, env: { PI_MODEL_ENDPOINTS_FILE: "eps.json" }, paths, dir, fs })().endpoints, []);

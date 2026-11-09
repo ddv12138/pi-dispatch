@@ -1203,35 +1203,6 @@ test("a folder that is not a repository prints nothing on the caller's stderr", 
   assert.equal(noise, "", "git's fatal line stayed with the read");
 });
 
-test("writeEnvelope carries a Valkey client's words only bounded: control bytes made spaces, at most 200 characters", async () => {
-  const { writeEnvelope } = await import("../src/read-model.mjs");
-  const dir = tempDir("pd-737-envelope-words-");
-  const projectsPath = join(dir, "projects.json");
-  const envelopeFile = join(dir, "envelope.json");
-  writeFileSync(projectsPath, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(envelopeFile, JSON.stringify({ version: 1, window: "week", totalTokens: 100, floorsTokens: { shop: 10, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["operator-session"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  const words = `connect ECONNREFUSED 10.9.8.7:6379 \u001b]52;c;${"A".repeat(300)}\u0007`;
-  const bounded = `connect ECONNREFUSED 10.9.8.7:6379  ]52;c;${"A".repeat(300)} `.slice(0, 200);
-  const write = (over) => writeEnvelope({ envelopeFile, projectsPath, maxTokens: 2_000, change: { totalTokens: 90 }, url: "redis://127.0.0.1:1", ...over });
-  const fails = () => {
-    throw new Error(words);
-  };
-  const client = (over) => () => ({ on() {}, status: "ready", set: async () => null, eval: async () => 1, disconnect() {}, ...over });
-  // The client could not be made, its SET failed, and, once the file could not be replaced, its put-back failed.
-  const unmade = await write({ redisFn: fails });
-  const unset = await write({ redisFn: client({ set: async () => fails() }) });
-  const unput = await write({ redisFn: client({ eval: async () => fails() }), fs: { ...nodeFs, writeFileSync: () => { throw Object.assign(new Error("denied"), { code: "EACCES" }); } } });
-  for (const [what, res] of [["unmade", unmade], ["unset", unset], ["unput", unput]]) {
-    assert.ok(typeof res.invalid === "string" && res.invalid.includes(`(${bounded})`), `${what}: ${res.invalid}`);
-    assert.ok(!res.invalid.includes(words.slice(0, 40)) && !/[\u0000-\u001f]/.test(res.invalid), `${what}: no control byte, and cut`);
-  }
-  assert.match(unmade.invalid, /^could not reach Valkey to record the new envelope's digest in /);
-  assert.match(unset.invalid, /^could not record the new envelope's digest in /);
-  assert.match(unput.invalid, /could not be put back to absent \(/);
-});
-
-// --- the runs page's window, parked projects and the switch preview (issue #737) -----------------------------------------
-
 test("createFleetReader: runsWindow counts the last 24 hours by outcome key, project and reason, lists each field's values, and sums the settled spend (#737)", async () => {
   const logsDir = tempDir("pd-737-window-");
   const settled = (settledTokens) => ({ reservedTokens: settledTokens, settledTokens, basis: "metered", modelBasis: null });
@@ -1986,24 +1957,19 @@ test("the live run facts allowlist excludes queue payload text, validates fields
   }
 });
 
-test("run context reads only the matching trigger's attribution and bounded safe token holds (#747)", async () => {
+test("run context reads only the matching trigger's attribution, and no token holds any more (#747)", async () => {
   const logsDir = tempDir("pd-747-context-");
   const triggersPath = join(logsDir, "triggers.json");
   writeFileSync(triggersPath, JSON.stringify({ triggers: [{ on: { type: "comment", phrase: "/fix" }, run: { flow: "fix", resume: true, recover: true, mcp: ["forge", "bad name"], instructions: "PRIVATE INSTRUCTIONS", secrets: { TOKEN: "PRIVATE REFERENCE" } } }] }));
-  const asked = [];
-  const { runBudgetKeyFor } = await import("@edgehero/pi-dispatch/run-budget-ledger");
   const reader = createFleetReader({ valkeyUrl: "redis://unused", logsDir, triggersPath }, {
     makeQueueFn: () => ({ name: "pi-jobs", close: async () => {} }), parseConnectionFn: () => ({}), readLiveHostsFn: async () => ({ hosts: [] }), discoverHostQueuesFn: async () => [], nowFn: () => AT,
-    redisFn: () => ({ ...emptyRedis(), hgetall: async (key) => (asked.push(key), { seq: "2", slot: "held", s1: "settled", h1: JSON.stringify({ amountTokens: 50, keys: ["PRIVATE KEY"] }), s2: "held", h2: JSON.stringify({ amountTokens: 70 }), s3: "PRIVATE TEXT", h3: JSON.stringify({ amountTokens: 90 }) }) }),
+    redisFn: () => ({ ...emptyRedis() }),
   });
   try {
     assert.deepEqual(await reader.runTrigger(0, "comment"), { index: 0, type: "comment", phrase: "/fix", label: null, pattern: null, mcp: ["forge"], resume: true, recover: true });
     assert.equal(await reader.runTrigger(0, "cron"), null, "a changed row's kind cannot be attributed to an older run");
     assert.equal(await reader.runTrigger(-1, "comment"), null);
-    const holds = await reader.runHolds("gh-base.r1", { recoveryOf: "gh-base" });
-    assert.deepEqual(holds, [{ seq: 1, state: "settled", amountTokens: 50 }, { seq: 2, state: "held", amountTokens: 70 }]);
-    assert.deepEqual(asked, [runBudgetKeyFor("gh-base")]);
-    assert.ok(!JSON.stringify(holds).includes("PRIVATE"));
+    assert.equal(typeof reader.runHolds, "undefined", "the token holds reader is gone with the budgets");
   } finally {
     await reader.dispose();
   }

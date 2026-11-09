@@ -117,19 +117,18 @@ function localDeps({ runContainer, now }) {
 	};
 }
 
-// 1. END-TO-END DRAIN + TOKEN-RESERVATION-BEFORE-CONTAINER. A real Worker (makeProcessor + new Worker) drains one
-//    scheduled job; the stub runContainer reads the token window at call time to prove the reservation already
-//    happened before the container ran (CONST-BUDGET-BEFORE-TOKENS), and the deterministic jobId, name,
-//    and data template are asserted against what BullMQ actually enqueued.
-test("scheduled job drains through a real Worker; token reservation precedes the container", { skip }, async () => {
+// 1. END-TO-END DRAIN. A real Worker (makeProcessor + new Worker) drains one scheduled job; the stub runContainer
+//    reads the old token window at call time to prove C2 reserved nothing before the container, and the
+//    deterministic jobId, name, and data template are asserted against what BullMQ actually enqueued.
+test("scheduled job drains through a real Worker; no token reservation precedes the container", { skip }, async () => {
 	const { Queue, Worker, parseConnection, makeRedisClient, makeProcessor, dayKey } = await load();
 	const name = uniqueQueueName();
 	const conn = parseConnection(url);
 	const redis = makeRedisClient(url);
 	const queue = new Queue(name, { connection: conn });
 	let worker;
-	// The deployment's token windows are reserved under `budget:tok`; a fixed far-future `now` makes the
-	// key deterministic and collision-free with any real day.
+	// The old deployment token windows lived under `budget:tok`; a fixed far-future `now` makes the key
+	// deterministic and collision-free with any real day, and it must stay absent now.
 	const fixedNow = new Date(Date.UTC(2099, 0, 1, 12, 0, 0));
 	const budgetKey = dayKey(fixedNow, "budget:tok"); // "budget:tok:2099-01-01"
 	try {
@@ -137,10 +136,12 @@ test("scheduled job drains through a real Worker; token reservation precedes the
 		await queue.obliterate({ force: true }).catch(() => {});
 
 		const template = localTemplate("nightly");
-		let budgetAtContainer = null;
+		let budgetAtContainer = "not-run";
+		let containerRan = false;
 		const runContainer = async () => {
-			// The reservation must be visible before the only money-spending step runs.
-			budgetAtContainer = Number(await redis.get(budgetKey));
+			// Read at the only money-spending step: C2 left no reservation to find.
+			budgetAtContainer = await redis.get(budgetKey);
+			containerRan = true;
 			return { code: 0, aborted: false };
 		};
 		const baseProcessor = makeProcessor({
@@ -161,14 +162,14 @@ test("scheduled job drains through a real Worker; token reservation precedes the
 
 		await queue.upsertJobScheduler("t", { every: 800 }, { name: "local", data: template, opts: RETENTION });
 
-		// Wait until the container stub ran (=> the token reservation already executed), then assert.
-		await waitFor(() => budgetAtContainer !== null, { timeoutMs: 6000 });
+		// Wait until the container stub ran (=> every pre-container step already executed), then assert.
+		await waitFor(() => containerRan, { timeoutMs: 6000 });
 
 		assert.ok(drainedJob, "a job drained");
 		assert.equal(drainedJob.name, "local");
 		assert.match(drainedJob.id, /^repeat:t:/, "deterministic repeat:<schedulerId>:<millis> jobId");
 		assert.deepEqual(drainedJob.data, template, "job data is the upserted template verbatim");
-		assert.equal(budgetAtContainer, 1000, `the token reservation must precede the container; saw ${budgetAtContainer}`);
+		assert.equal(budgetAtContainer, null, `no token reservation exists; saw ${budgetAtContainer}`);
 	} finally {
 		await teardown({ queue, worker, redis, budgetKeys: [budgetKey] });
 	}

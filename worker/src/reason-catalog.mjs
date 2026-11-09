@@ -19,8 +19,7 @@
  *     (from the pickup and from the runner), `secret-name-reserved` (for `run.secrets` and for a bundle),
  *     `operator-cancel` (cancelled while running, or before it started: index.mjs posts CANCELLED_BEFORE_START_COMMENT),
  *     `awaiting-input` (the issue's reply line, the pull request's comment-phrase one, or the held reply already taken),
- *     `job-user-unmappable` (JOB_USER_COMMENTS' cause rows) and `envelope-mismatch` (ENVELOPE_MISMATCH_COMMENTS' cause
- *     rows).
+ *     `job-user-unmappable` (JOB_USER_COMMENTS' cause rows).
  * `next` is always written here: no table had a "what to do" line.
  *
  * EVERY STRING IS FIXED. No sentence and no next step takes a record value, and none holds a control byte, so a surface
@@ -113,12 +112,7 @@ const ROWS = [
 	["oom-killed", TERMINAL_COMMENTS["oom-killed"], "Raise this project's job memory size, or make the job use less memory, then run it again."],
 	["awaiting-input", "The run asked a question and stopped to wait for the answer. Its work so far is saved, and the next run continues from there. If a reply arrived while it was stopping, that reply was taken as the answer and the run continues on its own.", "If no reply was taken yet, answer the question: reply on the issue or pull request (on a pull request, start the reply with this repository's pi-dispatch comment phrase), or answer from the console's parked page."],
 	["not-parked", "Not run: a reply reached this job as the answer to a waiting run, but no run on this issue was waiting, so it was ordinary conversation. Nothing was spent.", "Nothing to fix. The stale waiting marker was removed from the issue."],
-	// ── Token budgets and caps ──────────────────────────────────────────────────────────────────────────────────────
-	["token-cap", "Refused: a token budget (the deployment's, a repository's or folder's, a project's or a model's) had no room left for this run's token budget, or is smaller than it, so no container was started and nothing ran. Not run.", "Wait for the window to roll over, or raise that budget or lower the run's token budget."],
-	["allocation-cap", "Refused: the share of the budget split for this job's project had no room left for this run's token budget, or is smaller than it, so no container was started and nothing ran. Not run.", "Wait for the window to roll over or for the next priorities plan. The split sets this number, so raising a budget does not help."],
-	["envelope-mismatch", "Refused: this worker's budget envelope is missing, or differs from the one the applied budget split was made for, so no container was started and nothing was spent. Not run.", "Run `pi-dispatch doctor` on each worker and make their envelopes agree, or turn delegated allocation off on all of them."],
-	["portfolio-no-envelope", "Refused: this portfolio job writes a priorities plan, and this worker has no envelope that lets a portfolio job apply one, so it was not run and nothing was spent.", "Install the envelope with delegation on and `portfolio-job` among its writers, or remove the portfolio flag from the trigger."],
-	["portfolio-snapshot-oversize", "Refused: the portfolio snapshot this job would read is larger than a job may carry, so no container was started and nothing was spent. Not run.", "Govern fewer projects or members in the envelope, then run the job again."],
+	// ── Job size ─────────────────────────────────────────────────────────────────────────────────────────────────────
 	["job-size-exceeds-host", SIZE_REFUSAL_COMMENTS["job-size-exceeds-host"], "Lower this project's job size, or raise the worker's host budget (`pi-dispatch doctor` shows both)."],
 	["job-size-exceeds-share", SIZE_REFUSAL_COMMENTS["job-size-exceeds-share"], "Lower this project's job size, or raise its host share (`pi-dispatch doctor` shows both)."],
 	// ── Triggers and waits ──────────────────────────────────────────────────────────────────────────────────────────
@@ -167,7 +161,6 @@ const ROWS = [
 	["job-image-commands-unsupported", imageRefusal("command support", "its runner would not dispatch `run.command`"), REBUILD],
 	["job-image-exclude-tools-unsupported", imageRefusal("exclude-tools support", "its runner would ignore `run.excludeTools`"), REBUILD],
 	["job-image-model-policy-unsupported", imageRefusal("allowed-model support", "its runner cannot hold this job to the models it may use"), REBUILD],
-	["job-image-token-budget-unsupported", imageRefusal("tokenBudget support", "its runner would ignore the per-job token budget and run this job with none"), REBUILD],
 	["job-image-model-failover-unsupported", imageRefusal("model-failover support", "its runner cannot report the signed provider failure and replay-safety evidence this job needs"), REBUILD],
 	["job-image-subscription-auth-unsupported", imageRefusal("subscription authentication", "it cannot verify the admitted access snapshot, community adapter or final request cost"), REBUILD],
 	["job-image-any-uid-unsupported", imageRefusal("`anyUid`", "it cannot run as this worker's own uid, which this host's container runtime requires"), REBUILD],
@@ -199,7 +192,6 @@ const ROWS = [
 	["local-folder-no-commit", "Refused: this job's folder is a git repository with no commit yet. Not run.", "Commit once in the folder, then run the job again."],
 	["local-folder-unreadable-repo", "Refused: git could not read this job's repository (its HEAD, a ref or an object could not be resolved). Not run.", "Run `git status` in the folder to see what is wrong, and repair the repository."],
 	["local-folder-escaped", "Refused: this job's folder is named inside a run root or a cron trigger's folder, but it now resolves outside it through a link, so it was not mounted. Not run.", "List the real folder as a run root or as the trigger's `run.folder`, or remove the link."],
-	["local-folder-holds-envelope", "Refused: this job's folder is the budget envelope's folder or a folder above it, so a job there could edit the envelope. Not run.", "Keep the envelope file outside every job's folder."],
 	["local-folder-holds-subscription-auth", "Refused: this job's folder contains the private subscription credential store, so mounting it would expose refresh credentials. Not run.", "Keep the subscription credential store outside every local job's folder."],
 	["local-folder-project-changed", REFUSAL_COMMENTS["local-folder-project-changed"], "Check the links inside the run root, and list the folder under the project it really belongs to."],
 	["pi-too-many-files", "Refused: the repository's `.pi/` holds more files than a job may carry, in all or in one skill. Not run.", "Remove files from `.pi/` on the default branch, then run the job again."],

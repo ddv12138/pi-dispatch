@@ -12,7 +12,6 @@ import { bannersHtml, buildGraphScene } from "../src/graph-html.mjs";
 import { uiText } from "../src/console/locale.mjs";
 import * as ia from "../src/insights-assembly.mjs";
 import { insightsBody } from "../src/console/panels.mjs";
-import { modelTokenKeyPrefix, scopeTokenKeyPrefix } from "@edgehero/pi-dispatch/scoped-limits";
 
 /**
  * The insights assembly as the operator console uses it (issue #641): a separate process that never loads pi, so the
@@ -82,15 +81,15 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
   const nowMs = Date.now();
   let envReads = 0;
   const payload = await assembleInsights(paths, "7d", { pricing: PRICING, nowMs, envFn: () => (envReads++, env) });
-  assert.deepEqual(Object.keys(payload).sort(), ["allocation", "budget", "capacity", "costByTrigger", "costsUnreachable", "fold", "graph", "projects", "sizing", "window"]);
+  assert.deepEqual(Object.keys(payload).sort(), ["capacity", "costByTrigger", "costsUnreachable", "fold", "graph", "projects", "sizing", "window"]);
   assert.equal(payload.window, "7d");
   assert.equal(payload.costsUnreachable, null);
   assert.equal(payload.fold.provenance.runsTotal, 1, "the one run record was folded");
   assert.equal(payload.fold.provenance.piAiPin, "1.2.3", "through the facade it was handed");
   assert.deepEqual(payload.projects, [{ id: "site", name: "Site" }]);
   assert.deepEqual(payload.fold.plans.map((x) => x.id), ["kimi"], "the declared plan was scored");
-  assert.deepEqual(payload.allocation, { unset: true }, "no envelope file is named");
-  assert.equal(typeof payload.budget.unreachable, "string", "the Valkey read degraded and said so");
+  assert.equal(payload.allocation, undefined, "no allocation slice: there is no envelope");
+  assert.equal(payload.budget, undefined, "no budget slice: there are no token windows");
   assert.ok(envReads >= 1, "the deployment's environment came from envFn, not this process's");
   // The console's whole insights body still builds from it, and carries every section as the renderers draw it.
   const tips = [];
@@ -117,8 +116,6 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
   assert.doesNotMatch(zhPage, /cumulative window spend|no spend recorded/);
   const sections = {
     kpis: html.kpisHtml(nf),
-    budget: html.budgetSectionHtml(html.normBudget(payload.budget)),
-    split: html.splitSectionHtml(html.normAllocation(payload.allocation), tips, names, label),
     sizing: html.sizingSectionHtml(html.normSizing(payload.sizing), tips, scene.nowMs),
     capacity: html.capacitySectionHtml(html.normCapacity(payload.capacity), tips, scene.nowMs, label),
     plans: html.planCardsHtml(nf.plans),
@@ -127,7 +124,7 @@ test("assembleInsights runs in a process without pi, over a small deployment, an
     breakdown: html.breakdownHtml(nf, minted, tips, names),
     topology: html.topologySectionHtml(scene, spendHtml),
     footer: html.footerHtml(nf, label),
-    banners: html.costBannersHtml(payload, nf, html.normBudget(payload.budget), html.normAllocation(payload.allocation)),
+    banners: html.costBannersHtml(payload, nf, null, null),
   };
   for (const [name, out] of Object.entries(sections)) {
     assert.equal(typeof out, "string", name);
@@ -204,258 +201,6 @@ test("the page carries both halves: the topology svg and the spend section, wind
   assert.ok(page.includes('id="graph"'), "the topology pane is in the page");
   assert.ok(page.includes("spend window: last 7d"), "the requested spend window is stated");
   assert.ok(page.includes("topology: fixed 30d record window"), "the fixed topology window is stated beside it");
-});
-
-test("the page carries the budget panel: unreachable canned queue stated as a banner, the lever named", async () => {
-  const page = await assembledPage(cannedPaths(), "30d");
-  assert.ok(page.includes("<h2>budget</h2>"), "the budget panel renders even with the canned dead queue");
-  assert.ok(page.includes("budget unreachable:"), "the absence is a banner, not a silent gap");
-  assert.ok(page.includes("adjust: /dispatch set dailyTokenCap"), "the lever is named -- the panel exists to point at it");
-});
-
-test("the budget slice carries the scoped rows from the limits file; a dead queue leaves used as ? not 0", async () => {
-  const dir = tempDir("admin-insights-sl-");
-  const slPath = join(dir, "scoped-limits.json");
-  writeFileSync(slPath, JSON.stringify({ version: 2, limits: [{ scope: "acme/web", dayTokens: 10_000, concurrent: 2 }] }));
-  const page = await assembledPage({ ...cannedPaths(), scopedLimitsPath: slPath }, "30d");
-  assert.ok(page.includes("scoped limits (scoped-limits.json)"), "the configured limits reach the page");
-  assert.ok(page.includes("concurrent ≤2 (config; in-flight not shown)"), "concurrency stays config-only");
-  // The dead queue leaves the token counter UNKNOWN, never an invented zero (the slice's own shape).
-  const view = await ia.assembleBudgetView({ ...cannedPaths(), scopedLimitsPath: slPath }, {});
-  assert.deepEqual(view.scoped[0].usd.day, { usedTokens: null, capTokens: 10_000 });
-});
-
-test("the budget slice carries a scoped row's token windows, so a token-only row is not drawn bare (#507)", async () => {
-  // A `model:` row, or a `project:` row with only `weekTokens`, has no other window; the page drew its scope and no
-  // number. The counters come from the one scoped read the slice already makes (`tokensUsed`), the caps from the file.
-  const dir = tempDir("admin-insights-usd-");
-  const slPath = join(dir, "scoped-limits.json");
-  writeFileSync(slPath, JSON.stringify({ version: 2, limits: [
-    { scope: "acme/web", concurrent: 2 },
-    { scope: "project:shop", weekTokens: 45000000 },
-    { scope: "model:anthropic/claude-sonnet-4-5", weekTokens: 80000000, monthTokens: 300500000 },
-  ] }));
-  const shop = scopeTokenKeyPrefix("project:shop");
-  const model = modelTokenKeyPrefix("anthropic/claude-sonnet-4-5");
-  const redis = {
-    on() {},
-    disconnect() {},
-    async get(key) {
-      if (key.startsWith(shop)) return "6340917";
-      if (key.startsWith(model) && key.includes(":w:")) return "7966101";
-      return null;
-    },
-  };
-  const view = await ia.assembleBudgetView({ valkeyUrl: "redis://127.0.0.1:1", scopedLimitsPath: slPath }, { redisFn: () => redis });
-  assert.deepEqual(view.scoped.map((r) => r.usd), [
-    { day: null, week: null, month: null },
-    { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null },
-    { day: null, week: { usedTokens: 7_966_101, capTokens: 80_000_000 }, month: { usedTokens: 0, capTokens: 300_500_000 } },
-  ]);
-  const dead = await ia.assembleBudgetView({ valkeyUrl: "not-a-url", scopedLimitsPath: slPath });
-  assert.deepEqual(dead.scoped[1].usd.week, { usedTokens: null, capTokens: 45_000_000 }, "a dead queue leaves the counter unknown, never 0");
-});
-
-test("with an envelope set, the split is read through readAllocations, without hosts or reasons, and counted from the records (#507)", async () => {
-  // The slice's assembler on its own: the rest of assembleInsights dials the real queue (the budget read), which a unit
-  // test cannot fake, so the page half is the console's insights body over exactly what this returns.
-  const { fakeAllocRedis } = await import("./helpers/fake-alloc-redis.mjs");
-  const { readEnvelope } = await import("../src/read-model.mjs");
-  const dir = tempDir("admin-insights-split-");
-  const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
-  writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
-  const digest = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 }).digest;
-  const redis = fakeAllocRedis();
-  const M = 1_000_000;
-  redis.store.set("t507:plan", JSON.stringify({ version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100_000_000, _other: 0 }, unallocated: 0, repos: {}, clamped: false, reasons: { shop: "CANARY-REASON" } }));
-  redis.lists.set("t507:log", [JSON.stringify({ at: "2026-10-05T06:00:00.000Z", host: "CANARY-HOST", writer: "portfolio-job", outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", weights: { shop: 1 } })]);
-  const records = [
-    { jobId: "a", outcome: "policy", reason: "allocation-cap" },
-    { jobId: "b", outcome: "completed", reason: null, plan: { outcome: "refused", reason: "plan-stale", planId: null, clamped: false } },
-    { jobId: "c", outcome: "completed", reason: null, plan: { outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67", clamped: false } },
-    { jobId: "d", outcome: "policy", reason: "over-budget" },
-    // PR #580's reason: a portfolio run that wrote no plan, counted under its reason like any refusal.
-    { jobId: "e", outcome: "completed", reason: null, plan: { outcome: "refused", reason: "plan-absent", planId: null, clamped: false } },
-  ];
-  const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
-  ia._setAllocationSeamsForTests({ redisFn: () => redis, prefix: "t507", now: () => new Date(Date.parse("2026-10-05T12:00:00Z")) });
-  let slice;
-  try {
-    slice = await ia.assembleAllocationView(paths, ia.splitCounts(records), { nowMs: Date.parse("2026-10-05T12:00:00Z") });
-    const viewer = await ia.assembleAllocationView(paths, null, { consoleView: true, role: "viewer", nowMs: Date.parse("2026-10-05T12:00:00Z") });
-    const operator = await ia.assembleAllocationView(paths, null, { consoleView: true, role: "operator", nowMs: Date.parse("2026-10-05T12:00:00Z") });
-    assert.equal(viewer.log[0].host, "CANARY-HOST", "the console names the host without changing shareable exports");
-    assert.deepEqual(viewer.state.weights, { shop: 1, _other: 0 });
-    assert.equal("reasons" in viewer.state, false, "a viewer's data never contains the plan text");
-    assert.equal(operator.state.reasons.shop, "CANARY-REASON");
-    assert.equal(viewer.envelope.delegation.maxPlanDays, 14, "structured forms receive the parsed envelope bounds");
-  } finally {
-    ia._setAllocationSeamsForTests({});
-  }
-  assert.deepEqual(slice.counts, { refusals: { "allocation-cap": 1, "envelope-mismatch": 0, "portfolio-no-envelope": 0, "portfolio-snapshot-oversize": 0 }, plans: { "plan-stale": 1, applied: 1, "plan-absent": 1 } });
-  assert.deepEqual(slice.log, [{ at: "2026-10-05T06:00:00.000Z", writer: "portfolio-job", outcome: "applied", reason: null, planId: "3f9a0c1d2e4b5a67" }], "a row cut to its enum fields: no host");
-  assert.equal(JSON.stringify(slice).includes("CANARY"), false, "no host and no reason text leave the assembler");
-  assert.equal(slice.mismatch, false);
-  const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes('<span class="wl">envelope</span><span>100,000,000 per week · delegation on</span>'), "the envelope the worker's parser read");
-  assert.ok(page.includes('plan 3f9a0c1d2e4b5a67 · written by portfolio-job · applied <time datetime="2026-10-05T06:00:00Z">2026-10-05 06:00 UTC</time>'));
-  assert.ok(page.includes("plans collected in runs on this host, last 30d: applied 1 · plan-absent 1 · plan-stale 1</div>"));
-  assert.equal(ia.splitCounts({ unreachable: "EACCES" }), null, "an unread scan counts nothing");
-  assert.equal(slice.outsideEdit, null);
-
-  // No envelope, and an envelope that does not load: neither reads the queue at all.
-  let dials = 0;
-  ia._setAllocationSeamsForTests({ redisFn: () => { dials += 1; throw new Error("dialled"); }, prefix: "t507" });
-  try {
-    assert.deepEqual(await ia.assembleAllocationView({ envelopeFile: null }, null, { nowMs: Date.parse("2026-10-05T12:00:00Z") }), { unset: true });
-    writeFileSync(files.envelope, "{ not json");
-    // A broken envelope names its file by basename only: a viewer reads the page too.
-    assert.deepEqual(await ia.assembleAllocationView(paths, null, { nowMs: Date.parse("2026-10-05T12:00:00Z") }), { problem: "the envelope file does not load: envelope file is not valid JSON (at character 2): envelope.json" });
-    // An operator's ?paths=full is the page's one opt-in for host paths, and it holds here too.
-    assert.deepEqual(await ia.assembleAllocationView(paths, null, { fullPaths: true, nowMs: Date.parse("2026-10-05T12:00:00Z") }), { problem: `the envelope file does not load: envelope file is not valid JSON (at character 2): ${files.envelope}` });
-    // The cut is made on the parser's raw text: a folder whose name the escape rewrites still loses its path.
-    const odd = join(dir, "zero\u200bwidth");
-    mkdirSync(odd);
-    writeFileSync(join(odd, "envelope.json"), "{ not json");
-    assert.deepEqual(await ia.assembleAllocationView({ ...paths, envelopeFile: join(odd, "envelope.json") }, null, { nowMs: Date.parse("2026-10-05T12:00:00Z") }), { problem: "the envelope file does not load: envelope file is not valid JSON (at character 2): envelope.json" });
-  } finally {
-    ia._setAllocationSeamsForTests({});
-  }
-  assert.equal(dials, 0, "no queue read for an unset or a broken envelope");
-});
-
-test("during an envelope mismatch every total shown is the applied split's, and the mismatch line says this host's file differs, on the text twin, the assembler and the insights page (#507)", async () => {
-  const { fakeAllocRedis } = await import("./helpers/fake-alloc-redis.mjs");
-  const { fileTotalText, renderAllocations, splitTotalTokens } = await import("../src/render.mjs");
-  const { readEnvelope } = await import("../src/read-model.mjs");
-  const dir = tempDir("admin-insights-total-");
-  const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
-  writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  // This host's file says $30; the applied split was made for a $28 envelope (the e2e's outside edit).
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 30_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
-  const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
-  const M = 1_000_000;
-  const made = "5428cdb615bcf0d2";
-  const state = { version: 1, envelopeDigest: made, planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 27_000_000, _other: 0 }, unallocated: 1_000_000, repos: {}, clamped: false };
-  assert.equal(splitTotalTokens(state, 30_000_000), 28 * M);
-  assert.equal(splitTotalTokens(null, 30_000_000), 30 * M, "no split: the envelope's");
-  assert.equal(splitTotalTokens({ ...state, unallocated: -1 }, 30 * M), 30 * M, "a split that does not decode: the envelope's");
-  const redis = fakeAllocRedis();
-  redis.store.set("t507t:plan", JSON.stringify(state));
-  ia._setAllocationSeamsForTests({ redisFn: () => redis, prefix: "t507t", now: () => new Date(Date.parse("2026-10-05T14:00:00Z")) });
-  let slice;
-  try {
-    slice = await ia.assembleAllocationView(paths, null);
-  } finally {
-    ia._setAllocationSeamsForTests({});
-  }
-  assert.deepEqual([slice.totalTokens, slice.fileTotalTokens, slice.mismatch], [28_000_000, 30_000_000, true]);
-  const note = fileTotalText("30,000,000");
-  assert.equal(note, " This host's file says total 30,000,000; the totals shown are the split's.");
-  const text = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state, log: [], spend: { deployment: { tokens: 8_000_000 } } } }).split("\n");
-  assert.match(text[0], /^ALLOCATION · week · total 28,000,000 · /);
-  assert.ok(text.includes(`made for envelope ${made}, not this host's: governed jobs here refuse as envelope-mismatch.${note}`), text.join("\n"));
-  assert.ok(text.includes("  unallocated 1,000,000 · deployment reserved+held 8,000,000 of 28,000,000"), text.join("\n"));
-  const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes("<span>28,000,000 per week · delegation on</span>"), "the envelope row");
-  assert.ok(page.includes(`governed jobs on this host refuse as envelope-mismatch.${note.replaceAll("'", "&#39;")}</span>`), "the page's mismatch line, in render.mjs' words");
-  assert.ok(page.includes("of 28,000,000</span>"), "the headroom");
-  assert.ok(!page.includes("of 30,000,000"));
-  // The same split on a host whose file agrees: no note, and the totals are the same number.
-  const agreeing = renderAllocations({ envelope: { ...read.envelope, totalTokens: 28_000_000 }, digest: read.digest, alloc: { state, log: [], spend: {} } });
-  assert.ok(!agreeing.includes("This host's file says"), agreeing);
-  assert.ok(agreeing.includes(`made for envelope ${made}, not this host's: governed jobs here refuse as envelope-mismatch\n`), "the line ends where it always did");
-});
-
-test("during an envelope mismatch an entry only the split allocates is listed and marked on the text twin and the insights page, by one rule (#507)", async () => {
-  const { fakeAllocRedis } = await import("./helpers/fake-alloc-redis.mjs");
-  const { allocationRowIds, renderAllocations, SPLIT_ONLY_MARK } = await import("../src/render.mjs");
-  const { readEnvelope } = await import("../src/read-model.mjs");
-  const dir = tempDir("admin-insights-splitonly-");
-  const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
-  writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  // This host's file dropped `legacy`; the applied split, made for the old envelope, still allocates it.
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 30_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
-  const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
-  const M = 1_000_000;
-  const state = { version: 1, envelopeDigest: "5428cdb615bcf0d2", planId: "13a11619b5ea3d49", writer: "portfolio-job", appliedAt: "2026-10-05T10:06:00.000Z", weights: { shop: 2, legacy: 1, _other: 0 }, allocations: { shop: 20_000_000, legacy: 7_000_000, _other: 0 }, unallocated: 1_000_000, repos: {}, clamped: false };
-  assert.deepEqual(allocationRowIds(read.envelope.floors, state, true).filter((r) => r.splitOnly).map((r) => r.id), ["legacy"]);
-  assert.deepEqual(allocationRowIds(read.envelope.floors, state, false).filter((r) => r.splitOnly), [], "no mismatch: the file's entries alone");
-  const text = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state, log: [], spend: {} } }).split("\n");
-  const legacy = text.find((l) => l.trim().startsWith("legacy"));
-  assert.ok(legacy, text.join("\n"));
-  assert.match(legacy, new RegExp(`^  legacy\\s+floor -\\s+weight 1\\s+allocation 7,000,000\\s+spent -\\s+${SPLIT_ONLY_MARK}$`));
-  assert.ok(text[0].includes("total 28,000,000"), "the row the total counted is the row shown");
-  const agreeing = renderAllocations({ envelope: read.envelope, digest: read.digest, alloc: { state: { ...state, envelopeDigest: read.digest }, log: [], spend: {} } });
-  assert.ok(!agreeing.includes("legacy"), "the same split on its own envelope lists the file's entries alone");
-  const redis = fakeAllocRedis();
-  redis.store.set("t507s:plan", JSON.stringify(state));
-  ia._setAllocationSeamsForTests({ redisFn: () => redis, prefix: "t507s", now: () => new Date(Date.parse("2026-10-05T14:00:00Z")) });
-  let slice;
-  try {
-    slice = await ia.assembleAllocationView(paths, null);
-  } finally {
-    ia._setAllocationSeamsForTests({});
-  }
-  const page = pageOf({ allocation: slice, window: "30d" }, 0);
-  assert.ok(page.includes(`7,000,000 allocated · ${SPLIT_ONLY_MARK.replace("'", "&#39;")}`), "the page's bar row, in render.mjs' words, escaped");
-  assert.ok(page.includes(`>legacy</text>`), "its label");
-  const agreeingPage = pageOf({ allocation: { ...slice, mismatch: false }, window: "30d" }, 0);
-  assert.ok(!agreeingPage.includes(">legacy</text>"));
-});
-
-test("the outside-edit notice is one rule and one sentence on the panel's text twin, the assembler and the insights page (#507)", async () => {
-  const { fakeAllocRedis } = await import("./helpers/fake-alloc-redis.mjs");
-  const { outsideEdit, outsideEditText, renderAllocations } = await import("../src/render.mjs");
-  const { readEnvelope } = await import("../src/read-model.mjs");
-  const dir = tempDir("admin-insights-outside-");
-  const files = { envelope: join(dir, "envelope.json"), projects: join(dir, "projects.json"), settings: join(dir, "settings.json") };
-  writeFileSync(files.projects, JSON.stringify({ version: 1, projects: [{ id: "shop", members: ["github:acme/web"] }] }));
-  writeFileSync(files.envelope, JSON.stringify({ version: 1, window: "week", totalTokens: 100_000_000, floorsTokens: { shop: 10_000_000, _other: 0 }, defaultWeights: { shop: 1, _other: 0 }, delegation: { enabled: true, writers: ["portfolio-job"], maxStepPct: 25, minIntervalHours: 24, maxPlanDays: 14 } }));
-  writeFileSync(files.settings, JSON.stringify({ maxTokens: 2_000_000 }));
-  const read = readEnvelope({ envelopeFile: files.envelope, projectsPath: files.projects, maxTokens: 2_000_000 });
-  const digest = read.digest;
-  const paths = { envelopeFile: files.envelope, projectsFile: files.projects, settingsFile: files.settings, valkeyUrl: "redis://127.0.0.1:6390" };
-  const M = 1_000_000;
-  const state = { version: 1, envelopeDigest: digest, planId: "3f9a0c1d2e4b5a67", writer: "portfolio-job", appliedAt: "2026-10-05T06:00:00.000Z", weights: { shop: 1, _other: 0 }, allocations: { shop: 100_000_000, _other: 0 }, unallocated: 0, repos: {}, clamped: false };
-  const other = "e2e2e2e2e2e2e2e2";
-  const outside = { at: "2026-10-05T13:00:00.000Z", writer: "envelope-change", outcome: "envelope-changed-externally", reason: "envelope-mismatch", envelopeDigest: other };
-  const applied = { at: "2026-10-05T12:00:00.000Z", writer: "operator-session", outcome: "applied", planId: "3f9a0c1d2e4b5a67", envelopeDigest: digest };
-  const refused = { at: "2026-10-05T12:30:00.000Z", writer: "operator-session", outcome: "refused", reason: "plan-too-soon" };
-  const restored = { ...outside, envelopeDigest: digest };
-  const cases = [[[outside, applied], true], [[applied, outside], true], [[refused, outside, applied], true], [[restored, outside], false], [[], false]];
-  for (const [log, want] of cases) {
-    const redis = fakeAllocRedis();
-    redis.store.set("t507:plan", JSON.stringify(state));
-    redis.lists.set("t507:log", log.map((r) => JSON.stringify(r)));
-    ia._setAllocationSeamsForTests({ redisFn: () => redis, prefix: "t507", now: () => new Date(Date.parse("2026-10-05T14:00:00Z")) });
-    let slice;
-    try {
-      slice = await ia.assembleAllocationView(paths, null);
-    } finally {
-      ia._setAllocationSeamsForTests({});
-    }
-    const label = JSON.stringify(log.map((r) => r.outcome));
-    const rule = outsideEdit(log, digest);
-    assert.equal(rule !== null, want, label);
-    assert.deepEqual(slice.outsideEdit, rule, `the assembler applies the rule: ${label}`);
-    const text = renderAllocations({ envelope: read.envelope, digest, alloc: { state, log, spend: {} } });
-    const page = pageOf({ allocation: slice, window: "30d" }, 0);
-    if (want) {
-      const words = outsideEditText(rule);
-      assert.equal(words, `a host reported envelope e2e2e2e2 at 10-05 13:00, not the one the split was made for (${digest.slice(0, 8)}); a host still on it refuses governed jobs as envelope-mismatch`);
-      assert.ok(text.split("\n").includes(words), `the text twin: ${label}`);
-      assert.ok(page.includes(`<span class="state">${words}</span>`), `the page: ${label}`);
-    } else {
-      assert.ok(!text.includes("a host reported envelope") && !page.includes("a host reported envelope"), label);
-    }
-  }
 });
 
 // ---- the capacity section's assembler (issue #599, phase 4) ----

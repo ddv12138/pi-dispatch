@@ -417,7 +417,7 @@ test("installStdoutPipeGuard keeps the exit code an unhandled EPIPE gives, or th
 
 // --- pi-dispatch run --trigger <cron id> (issue #505): fire one cron trigger now, once, as its schedule would ---
 
-const PM = (folder, run = {}) => ({ on: { type: "cron", id: "pm-weekly", pattern: "0 6 1 1 *" }, run: { kind: "local", folder, flow: "pm", task: "plan the week", provider: "ollama", model: "qwen2.5:3b", github: false, packages: false, resume: false, portfolio: true, ...run } });
+const PM = (folder, run = {}) => ({ on: { type: "cron", id: "pm-weekly", pattern: "0 6 1 1 *" }, run: { kind: "local", folder, flow: "pm", task: "plan the week", provider: "ollama", model: "qwen2.5:3b", github: false, packages: false, resume: false, ...run } });
 const LABEL_WITH_ID = { on: { type: "label", id: "triage", any: ["pi:triage"] }, run: { kind: "github", flow: "triage" } };
 
 /** `main` with stderr captured; the refusal seam fails the test if Valkey is asked, so "nothing queued" is measured. */
@@ -453,7 +453,7 @@ test("run --trigger refuses an unknown id, a webhook trigger's id and a file the
 	writeFileSync(path, JSON.stringify({ triggers: [PM(dir, { portfolio: "yes" })] }));
 	const bad = await refusedTrigger(["run", "--trigger", "pm-weekly"], env2);
 	assert.equal(bad.code, 1);
-	assert.match(bad.err, /run\.portfolio must be true or false when present: .*\. Nothing was queued\.\n$/);
+	assert.match(bad.err, /^error: trigger at index 0: run\.portfolio was removed with the token budget and allocation; remove it .*\. Nothing was queued\.\n$/);
 });
 
 test("run --trigger takes no folder and no other run flag: the trigger's own fields are what runs (#505)", async () => {
@@ -499,7 +499,7 @@ test("run --trigger enqueues the trigger's schedule data whole on this host's qu
 		const { enqueueNonce, ...data } = job.data;
 		assert.equal(typeof enqueueNonce, "string");
 		// Exactly the schedule's data, as the scheduler would have stored it (JSON: undefined keys dropped).
-		assert.deepEqual(data, { kind: "local", folder, flow: "pm", task: "plan the week", provider: "ollama", model: "qwen2.5:3b", github: false, packages: false, resume: false, portfolio: true, trigger: { id: "pm-weekly", pattern: "0 6 1 1 *" } });
+		assert.deepEqual(data, { kind: "local", folder, flow: "pm", task: "plan the week", provider: "ollama", model: "qwen2.5:3b", github: false, packages: false, resume: false, trigger: { id: "pm-weekly", pattern: "0 6 1 1 *" } });
 		assert.equal(job.name, "local");
 		assert.ok((job.opts.attempts ?? 0) <= 1, `run once, as a scheduled tick is (attempts ${job.opts.attempts}); \`pi-dispatch run\` sets 2`);
 		assert.equal(job.opts.backoff, undefined);
@@ -585,19 +585,13 @@ test("run <folder> queues on the host queue the deployment .env names when this 
 	}
 });
 
-test("run --trigger refuses what the worker's loader refuses: PI_MAX_TOKENS from the deployment .env is applied (#505 review)", async () => {
-	const deploy = tempDir("cli-deploy-cap-");
+test("run --trigger refuses what the worker's loader refuses: a retired run.maxTokens is named before Valkey (#505 review)", async () => {
+	// C2 retired the per-job token budget, and the loader refuses the field by name rather than ignoring it, so a
+	// hand-fired trigger cannot disagree with what the worker's scheduled tick would do.
 	const { path } = triggersFile([PM(gitRepo({ dirty: false }), { maxTokens: "2" })]);
-	writeFileSync(join(deploy, ".env"), `PI_TRIGGERS_FILE=${path}\nPI_MAX_TOKENS=1\nVALKEY_URL=redis://127.0.0.1:1\n`);
-	const prev = process.cwd();
-	process.chdir(deploy);
-	try {
-		const r = await refusedTrigger(["run", "--trigger", "pm-weekly"], {});
-		assert.equal(r.code, 1);
-		assert.match(r.err, /^error: trigger at index 0: run\.maxTokens is above this deployment's PI_MAX_TOKENS\. .*Nothing was queued\.\n$/);
-	} finally {
-		process.chdir(prev);
-	}
+	const r = await refusedTrigger(["run", "--trigger", "pm-weekly"], { VALKEY_URL: "redis://127.0.0.1:1", PI_TRIGGERS_FILE: path });
+	assert.equal(r.code, 1);
+	assert.match(r.err, /^error: cron trigger "pm-weekly": run\.maxTokens was retired with the token budgets; remove it \(the deployment no longer has a token budget\): .*\. Nothing was queued\.\n$/);
 });
 
 test("TRIGGER_LOADER_ENV_KEYS covers every config value loadSchedules reads, so run --trigger judges a file as the worker does (#505 review)", () => {
@@ -607,7 +601,7 @@ test("TRIGGER_LOADER_ENV_KEYS covers every config value loadSchedules reads, so 
 	const start = src.indexOf("export function loadSchedules(");
 	const body = src.slice(start, src.indexOf("\n}\n", start));
 	const read = [...new Set([...body.matchAll(/config\.(\w+)/g)].map((m) => m[1]))].sort();
-	const ENV_OF = { triggersFile: "PI_TRIGGERS_FILE", maxTokens: "PI_MAX_TOKENS" };
+	const ENV_OF = { triggersFile: "PI_TRIGGERS_FILE" };
 	assert.deepEqual(read, Object.keys(ENV_OF).sort(), "loadSchedules reads a config value this bolt does not map");
 	assert.deepEqual([...TRIGGER_LOADER_ENV_KEYS].sort(), [...Object.values(ENV_OF), "PI_WORKER_NAME"].sort());
 });

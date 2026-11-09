@@ -27,34 +27,32 @@
  *        A `starting` ledger of a DEAD process is done only when it was seen for less than the wall grace, used less
  *        than the CPU grace, and holds zero spend; otherwise it is unmetered. Judged once, when the file is retired.
  *   3. JUDGE. The fold goes to meter.setChildren with `unmetered` and `processes` widened by what the detector found
- *      (the token cap is judged there, on parent plus children, at the meter's settle-time check). Then, first stop
- *      wins:
+ *      (totals and the per-model ledger only; there is no token budget to judge). Then, first stop wins:
  *      - under a model list: any child `modelRefused`, or any named child row whose pair is not on the PARENT's list
  *        (a spawner can widen a child's own list), is `model-not-allowed`. A model-less row is not judged here: the
  *        child's own guard judged that call against the list it inherited;
- *      - any unmetered child: one `unmetered_child` line (the first time), then the stop an unmetered child gets:
- *        `token_budget` under a token cap, else `model-not-allowed` under a list,
- *        with `cause: "unmetered-child"` so the token stop does not log `token_budget_exceeded`. With no policy it
- *        is a floor only, and nothing stops.
+ *      - any unmetered child: one `unmetered_child` line (the first time), then, under a model list, the stop an
+ *        unmetered child gets: `model-not-allowed`, with `cause: "unmetered-child"`. With no policy it is a floor
+ *        only, and nothing stops.
  *   4. WRITE (ticks only). STOP with the meter's reason once it has stopped, rewritten on every tick so a deleted STOP
  *      comes back. The parent's own failure to write it is counted once as unmetered: a child it cannot reach is a
  *      child it cannot hold to the policy.
  *
- * TEARDOWN: STOP first (the meter's reason, or `token_budget` when the job ended without a stop: past the final fold no
- * child call could be counted), then the final pass. The directory and its STOP stay: the container ends right after,
- * and a directory removed while a child lives would let an agent that makes it again run that child unbraked. A child
- * call in flight at the STOP shows in the final fold as `unresolved`. The teardown line gains `distinct` and `peak` (pi
+ * TEARDOWN: STOP first when the meter stopped (the policy reason; past the final fold no child call could be
+ * counted), then the final pass. The directory and any STOP stay: the container ends right after, and a directory
+ * removed while a child lives would let an agent that makes it again run that child unbraked. A child call in
+ * flight at the STOP shows in the final fold as `unresolved`. The teardown line gains `distinct` and `peak` (pi
  * processes the detector saw, null with no detector) and `unmetered`.
  *
  * The exit line's model counter adds the children's (`guardFields`). The per-job cost guard and its SPENT
  * control file are gone with the money: a child's spend reaches the job only as tokens, through its ledger's
- * totals, and the token cap judges parent plus children at the meter's settle-time check.
+ * totals. There is no token budget, so the parent never stops on a token amount.
  */
 import { closeSync, lstatSync, mkdirSync, openSync, readdirSync, readSync, realpathSync } from "node:fs";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { PI_ENTRIES, RUN_JOB_PATH } from "./child-route.mjs";
-import { MODEL_NOT_ALLOWED, TOKEN_BUDGET } from "./outcome.mjs";
+import { MODEL_NOT_ALLOWED } from "./outcome.mjs";
 import { foldChildLedgers, STOP_FILE, stopFile, writeFileAtomic } from "./usage-meter.mjs";
 
 /**
@@ -373,11 +371,9 @@ export function createChildWatch({
 		return total;
 	}
 
-	/** The stop an unmetered child gets under the job's policies, or null with none. */
+	/** The stop an unmetered child gets under the job's policy, or null with none. */
 	function unmeteredStop() {
-		if (meter.cap !== null) return TOKEN_BUDGET;
-		if (meter.allowed !== null) return MODEL_NOT_ALLOWED;
-		return null;
+		return meter.allowed !== null ? MODEL_NOT_ALLOWED : null;
 	}
 
 	const offList = (row) => row.provider !== null && row.model !== null && !meter.allowed.some((entry) => entry.provider === row.provider && entry.model === row.model);
@@ -529,7 +525,9 @@ export function createChildWatch({
 		},
 		teardown() {
 			if (!closed) {
-				writeStop(meter.state.stopReason ?? TOKEN_BUDGET);
+				// Only a real stop has a reason to write. A clean end has no policy to brake the children for, and
+				// the container is ending; the old generic token stop is gone with the token budget.
+				if (meter.state.stopReason !== null) writeStop(meter.state.stopReason);
 				foldAndDetect({ final: true });
 				judge();
 				closed = true;

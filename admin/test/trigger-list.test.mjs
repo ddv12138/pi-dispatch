@@ -226,23 +226,3 @@ test("projection respects BullMQ's strictly-next boundary while a published tick
   assert.deepEqual(got.rows[0].nextFire.hosts, ["mini1", "build-3"]);
   assert.deepEqual(build({ snapshot: snapshot([cron]), scheduleZones: { nightly: { zone: "UTC", hosts: ["mini1"] } } }).rows[0].nextFire.hosts, []);
 });
-
-test("portfolio run option survives the safe rule projection and explains its budget-split write chip", () => {
-  const got = build({ snapshot: snapshot([rule({ type: "cron", id: "portfolio", pattern: "0 6 * * 1", portfolio: true })]) });
-  assert.equal(got.rows[0].trigger.portfolio, true);
-  assert.ok(got.rows[0].chips.some(chip => chip.kind === "writes" && chip.text === "budget split"));
-  const ordinary = build();
-  assert.ok(!ordinary.rows[0].chips.some(chip => chip.text === "budget split"));
-});
-
-test("reviewed token caps survive projection while invalid counts are excluded", () => {
-  const got = build({ snapshot: snapshot([rule({ maxTokens: 250000, gateBudgetRaiseTokens: 500000 })]) });
-  assert.equal(got.rows[0].trigger.maxTokens, 250000);
-  assert.equal(got.rows[0].trigger.gateBudgetRaiseTokens, 500000);
-  assert.ok(got.rows[0].chips.some(chip => chip.kind === "narrows"));
-  for (const value of [-0.5, Infinity, NaN, "500000"]) {
-    const invalid = build({ snapshot: snapshot([rule({ maxTokens: value, gateBudgetRaiseTokens: value })]) });
-    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "maxTokens"));
-    assert.ok(!Object.hasOwn(invalid.rows[0].trigger, "gateBudgetRaiseTokens"));
-  }
-});

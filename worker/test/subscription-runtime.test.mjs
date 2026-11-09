@@ -49,12 +49,13 @@ test("an explicit binding refuses unrestricted, disabled-extension and unsupport
 		assert.deepEqual(calls, []);
 	}
 });
-test("paid overage requires an explicit positive policy ceiling and a job bound no greater than it", async () => {
+test("paid overage needs the connection's explicit credit allowance; C2 removed the per-job token bound", async () => {
 	const { runtime, calls } = fixture({ row: { ...connection, extraUsageCreditTokens: 400_000 } });
-	assert.equal((await runtime.check(job)).reason, "auth-credit-cap-required");
-	assert.deepEqual(calls, []);
-	assert.equal((await runtime.check({ ...job, maxTokens: 300_000 })).ok, true);
+	// There is no job maxTokens to compare against the connection's ceiling any more, so the check admits the
+	// job and the quota policy carries the connection's own allowance.
+	assert.equal((await runtime.check(job)).ok, true);
 	assert.equal(calls[0].policy.maxCreditTokens, 400_000);
+	assert.equal((await runtime.check({ ...job, maxTokens: 300_000 })).ok, true, "a leftover maxTokens is inert");
 });
 test("OpenAI subscription classifier roles refuse before any quota claim", async () => {
 	const { runtime, calls } = fixture({ row: { ...connection, provider: "openai", adapter: "openai-chatgpt" } });

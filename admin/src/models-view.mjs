@@ -6,7 +6,6 @@ import { join } from "node:path";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, allowedModelsFrom } from "@edgehero/pi-dispatch/config";
 import { parseTriggersDocument } from "@edgehero/pi-dispatch/triggers";
 import { parseProjects } from "@edgehero/pi-dispatch/projects";
-import { parseScopedLimits } from "@edgehero/pi-dispatch/scoped-limits";
 import { splitModelEntry, modelIdProblem, providerIdProblem } from "@edgehero/pi-dispatch/model-ref";
 import { SKILL_NAME_RE } from "@edgehero/pi-dispatch/flow-gate";
 import { MODEL_ROLE_RE } from "@edgehero/pi-dispatch/model-roles";
@@ -16,11 +15,8 @@ import { resolveConfiguredModelRuns, cooldownModelRefs } from "@edgehero/pi-disp
 import { readModelCooldowns } from "@edgehero/pi-dispatch/model-cooldowns";
 import { modelProposalOf } from "@edgehero/pi-dispatch/model-proposal-protocol";
 import { MODEL_WHY, providerFailureOf } from "@edgehero/pi-dispatch/model-failover-protocol";
-import { effectiveTokenCap } from "@edgehero/pi-dispatch/budget-rule";
-import { fmtTokens } from "./panel.mjs";
 import { makeRedisClient } from "@edgehero/pi-dispatch/connection";
 import { readSettingsView } from "./read-model.mjs";
-import { tokenWindowSpecs } from "./token-windows.mjs";
 import { doctorStale } from "./doctor-view.mjs";
 import { meteredRunTokens } from "./costs.mjs";
 import { newerSkippedSentence, readableRecords } from "./newer-release.mjs";
@@ -42,7 +38,7 @@ export function collectModelPolicies({ entries = [], modelRoles = {}, projects =
     const run = entry?.run;
     if (!run || typeof run !== "object") return [];
     return [{ sourceIndex: index, index, label: `trigger ${index + 1}`, authoredProvider: run.provider,
-      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "maxTokens", "flow"]),
+      ...fields(run, ["kind", "folder", "repository", "provider", "model", "models", "fallbackModels", "flow"]),
     }];
   });
   const out = resolveConfiguredModelRuns({ runs, modelRoles, projects, deployment, envList, conservativeLocal: true, ...(resolveFolder ? { resolveFolder } : {}) });
@@ -73,7 +69,7 @@ export function canaryComparisonLines(sample) {
   return [line("Candidate", sample?.candidateStats ?? sample?.candidate), line("Sources", sample?.sourceStats), "These are retained comparisons grouped by role, candidate and flow, not a reconstructed experiment or a quality score."];
 }
 
-function canariesOf(records, roles, deployment, now, sourceRecords = []) {
+function canariesOf(records, roles, now, sourceRecords = []) {
   // A newer release's source record is no comparison (issue #761): its cost and turns are past the stable core.
   sourceRecords = readableRecords(sourceRecords).records;
   const index = new Map([...records, ...sourceRecords].map(record => [record.jobId, record]));
@@ -94,18 +90,13 @@ function canariesOf(records, roles, deployment, now, sourceRecords = []) {
     const sources = group.rows.flatMap(row => row.source ? [row.source] : []);
     const sourceStats = metricRows(sources);
     const partial = sources.length !== group.rows.length || [candidateStats, sourceStats].some(metrics => [metrics.knownMetered, metrics.knownTurns, metrics.knownTokens].some(count => count < metrics.runs));
-    let suggestedCapTokens = null;
-    try { const cap = effectiveTokenCap(undefined, deployment.maxTokens); if (Number.isSafeInteger(cap) && cap > 0 && Number.isSafeInteger(cap * Math.min(10, group.rows.length))) suggestedCapTokens = fmtTokens(cap * Math.min(10, group.rows.length)); } catch { /* A copyable command needs the operator to choose a valid cap. */ }
     const sample = { ...group, count: group.rows.length, candidateStats, sourceStats, partial,
-      scopes: roles.filter(row => row.role === group.role).map(row => row.scope), suggestedCapTokens,
+      scopes: roles.filter(row => row.role === group.role).map(row => row.scope),
       whatIf: `/insights?whatif=${encodeURIComponent(group.candidate)}&flow=${encodeURIComponent(group.flow)}` };
     return { ...sample, digest: sha({ role: sample.role, candidate: sample.candidate, flow: sample.flow, rows: sample.rows, candidateStats, sourceStats, partial }) };
   });
 }
 
-function modelWindows(ref, windows) {
-  return windows.filter(window => window.ledger === "model" && typeof window.name === "string" && window.name.toLowerCase() === ref.toLowerCase()).map(window => ({ scope: `model:${window.name}`, window: window.window, capTokens: integer(window.capTokens), spentTokens: integer(window.counterTokens), unavailable: integer(window.counterTokens) === null }));
-}
 function nextOf(model, fallbacks, cooldowns, status, cooldownsUnknown, policyUnknown = false) {
   if (policyUnknown) return { kind: "unknown", model: null, reason: "model-policy-unavailable" };
   if (fallbacks.length === 0) return { kind: "direct", model, reason: null };
@@ -126,7 +117,7 @@ function authoredRefs(entry, deployment, envList) {
 }
 
 /** Caller-supplied clock and I/O facts. No policy oracle here can authorize a run. */
-export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], deployment = {}, envList = null, overlay = null, overlayUnknown = false, configUnknown = false, cooldowns = [], records = [], sourceRecords = [], snapshot = null, windows = [], coverage = {}, now, status: statusFn = failoverModelStatus, resolveFolder } = {}) {
+export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], deployment = {}, envList = null, overlay = null, overlayUnknown = false, configUnknown = false, cooldowns = [], records = [], sourceRecords = [], snapshot = null, coverage = {}, now, status: statusFn = failoverModelStatus, resolveFolder } = {}) {
   if (!Number.isSafeInteger(now) || now < 0) throw new TypeError("modelsViewOf requires the caller's clock");
   const statuses = new Map();
   const status = ref => {
@@ -162,9 +153,9 @@ export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], dep
   // than a dollar cap did, but the banner said nothing an operator could act on. A capped Radius model surfaces
   // through its own state and doctor instead of a per-model banner.
   const models = [...namedRefs].map(ref => {
-    const parsed = splitModelEntry(ref), price = status(ref), modelWindowsRows = modelWindows(ref, windows);
+    const parsed = splitModelEntry(ref), price = status(ref);
     return { ref, provider: parsed.provider, model: parsed.model, known: price.known, priced: price.priced, reason: price.reason,
-      windows: modelWindowsRows, state: configUnknown || overlayUnknown || cooldowns === null || modelWindowsRows.some(window => window.unavailable) ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : modelWindowsRows.some(window => window.spentTokens >= window.capTokens) ? "window-full" : "available" };
+      state: configUnknown || overlayUnknown || cooldowns === null ? "unknown" : refusedRefs.has(ref) && !resolvedRefs.has(ref) ? "policy-refused" : observedCooldowns.some(row => row.ref === ref) ? "cooling-down" : "available" };
   });
   const hostRows = (snapshot?.doctor?.hosts ?? []).slice(0, MODELS_LIMITS.hosts);
   const proposals = hostRows.flatMap(host => (host.checks ?? []).flatMap(check => {
@@ -179,15 +170,15 @@ export function modelsViewOf({ entries = [], modelRoles = {}, projects = [], dep
   const dedup = new Map(); for (const record of ordered) if (!dedup.has(record.jobId)) dedup.set(record.jobId, record);
   const retained = [...dedup.values()].slice(0, MODELS_LIMITS.records);
   const recentFallbacks = retained.filter(record => MODEL_WHY.includes(record.modelWhy) && record.modelWhy.startsWith("fallback-") && atOf(record) >= now - MODELS_LIMITS.days * DAY).map(record => ({ jobId: record.jobId, ...fields(record, ["provider", "model", "modelRole", "modelWhy"]), providerFailure: providerFailureOf(record.providerFailure) })).slice(0, 20);
-  const waiting = (snapshot?.waiting?.rows ?? []).filter(row => ["model-cooldown", "model-window"].includes(row.why ?? row.reason)).slice(0, MODELS_LIMITS.waits).map(row => ({ jobId: safeId(row.jobId), queue: safeId(row.queue), reason: row.why ?? row.reason })).filter(row => row.jobId);
-  const notes = ["Comparisons and fallback history use at most 1,000 retained local and mirrored run records over 30 days. Missing remote or expired records are unknown.", "A candidate shown next has not reserved a dollar window or endpoint. Credentials, egress, windows and slots are checked again at pickup.", "Repository agents' role declarations are not readable from this page."];
+  const waiting = (snapshot?.waiting?.rows ?? []).filter(row => (row.why ?? row.reason) === "model-cooldown").slice(0, MODELS_LIMITS.waits).map(row => ({ jobId: safeId(row.jobId), queue: safeId(row.queue), reason: row.why ?? row.reason })).filter(row => row.jobId);
+  const notes = ["Comparisons and fallback history use at most 1,000 retained local and mirrored run records over 30 days. Missing remote or expired records are unknown.", "A candidate shown next has not reserved an endpoint. Credentials, egress and slots are checked again at pickup.", "Repository agents' role declarations are not readable from this page."];
   if (facts.runs.some(run => run.projectUnknown) || facts.checks.some(check => check.projectUnknown)) notes.push("A local folder could not be resolved on this console host. The possible project scopes are shown; the owning worker resolves its actual folder at pickup.");
   if (records === null) notes.push("Run records could not be read; comparison and fallback history are unknown.");
   if (newerSkipped > 0) notes.push(`${newerSkippedSentence(newerSkipped)}: comparisons and fallback history leave them out.`);
   if (!snapshot?.waiting || snapshot.waiting.unreachable) notes.push("Waiting jobs could not be read; an empty list is not proof that none wait.");
   if (!snapshot?.doctor || snapshot.doctor.unreachable || !hostRows.length) notes.push("No published doctor proposal evidence is available. Reload after doctor publishes on a host.");
   return { now, scopes: [...new Set(["default", ...projects.map(project => project.id), ...scopes])], state: configUnknown ? "unreadable" : "ready", partial: true, banners, roles, cooldowns: observedCooldowns, models, proposals,
-    canaries: canariesOf(retained, roles, deployment, now, sourceRecords), waiting, recentFallbacks,
+    canaries: canariesOf(retained, roles, now, sourceRecords), waiting, recentFallbacks,
     coverage: { complete: false, partial: true, records: retained.length, days: MODELS_LIMITS.days, truncated: dedup.size > MODELS_LIMITS.records || coverage.truncated === true, notes } };
 }
 
@@ -240,7 +231,7 @@ export async function readModelsHistory({ fleet, now, seed = null } = {}) {
 /** Dedicated page/tool reads. Reuses the caller's snapshot; no read is added to unrelated pages. */
 export async function readModelsView({ paths = {}, env = {}, deploymentDir = null, now = Date.now(), snapshot = null, fleet = null, fs = nodeFs, redis = null, reads = {} } = {}) {
   now = typeof now === "function" ? now() : now;
-  let configUnknown = false, overlayUnknown = false, entries = [], modelRoles = {}, projects = [], limits = [], overlay = null, envList = null;
+  let configUnknown = false, overlayUnknown = false, entries = [], modelRoles = {}, projects = [], overlay = null, envList = null;
   let settings = snapshot?.settings?.overlay ?? {};
   try {
     const text = reads.triggers ? await reads.triggers() : readText(paths.triggersPath, fs, { missing: '{"triggers":[]}' });
@@ -249,15 +240,13 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
     modelRoles = parsed.modelRoles ?? {};
     const projectText = reads.projects ? await reads.projects() : readText(paths.projectsFile, fs);
     projects = projectText === null ? [] : parseProjects(projectText, paths.projectsFile);
-    const limitsText = reads.limits ? await reads.limits() : readText(paths.scopedLimitsPath, fs);
-    limits = limitsText === null ? [] : parseScopedLimits(limitsText, paths.scopedLimitsPath);
     if (snapshot?.settings?.invalid) throw new Error("invalid settings observation");
     if (!snapshot?.settings) { const view = readSettingsView({ settingsFile: paths.settingsFile, fs }); if (view.invalid) throw new Error("invalid settings"); settings = view.overlay ?? {}; }
     envList = allowedModelsFrom(env);
   } catch { configUnknown = true; }
   try { overlay = reads.overlay ? await reads.overlay() : readOverlayModels(paths.globalPiDir, { readFileSync: (path, encoding) => readText(path, fs), lstatSync: path => fs.lstatSync(path) }); }
   catch { overlayUnknown = true; }
-  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL, maxTokens: settings.maxTokens ?? env.PI_MAX_TOKENS ?? null };
+  const deployment = { provider: settings.provider ?? env.PI_PROVIDER ?? DEFAULT_PROVIDER, model: settings.model ?? env.PI_MODEL ?? DEFAULT_MODEL };
   if (providerIdProblem(deployment.provider) !== null || modelIdProblem(deployment.model) !== null) configUnknown = true;
   if (!snapshot && fleet) { try { snapshot = await fleet.snapshot({ waiting: true }); } catch { snapshot = null; } }
   const source = snapshot?.recordDetails instanceof Map ? [...snapshot.recordDetails.values()] : Array.isArray(snapshot?.runs) ? snapshot.runs : null;
@@ -268,21 +257,14 @@ export async function readModelsView({ paths = {}, env = {}, deploymentDir = nul
   } catch { records = null; }
   const policies = collectModelPolicies({ entries, modelRoles, projects, deployment, envList });
   const configuredRefs = cooldownModelRefs(policies.runs, deployment);
-  let client = redis, owned = false, cooldowns = configuredRefs.length ? null : [], counters = null;
-  const specs = tokenWindowSpecs({ caps: {}, limits, now: new Date(now) }).filter(row => row.ledger === "model");
+  let client = redis, owned = false, cooldowns = configuredRefs.length ? null : [];
   try {
-    if (!client && (configuredRefs.length || specs.length) && (!reads.cooldowns && configuredRefs.length || !reads.counters && specs.length)) { client = (reads.redis ?? makeRedisClient)(paths.valkeyUrl); client.on?.("error", () => {}); owned = true; }
+    if (!client && configuredRefs.length && !reads.cooldowns) { client = (reads.redis ?? makeRedisClient)(paths.valkeyUrl); client.on?.("error", () => {}); owned = true; }
     if (configuredRefs.length) cooldowns = await bounded(reads.cooldowns ? reads.cooldowns(configuredRefs, { now: () => now }) : readModelCooldowns(client, configuredRefs, { now: () => now }));
-    if (specs.length) {
-      const values = reads.counters ? await bounded(reads.counters(specs.map(row => row.key))) : await bounded(client.mget(...specs.map(row => row.key)));
-      if (!Array.isArray(values) || values.length !== specs.length) throw new Error("incomplete model counters");
-      counters = new Map(specs.map((row, index) => [row.key, values?.[index] == null ? 0 : /^\d+$/.test(String(values[index])) && Number.isSafeInteger(Number(values[index])) ? Number(values[index]) : null]));
-    }
   } catch { /* Unknown observations remain visible; a read never changes worker policy. */ }
   finally { if (owned) client?.disconnect?.(); }
-  const windows = specs.map(spec => ({ ...spec, counterTokens: counters?.get(spec.key) ?? null }));
   const subscriptionAuth = await readSubscriptionAuthView({ snapshot, read: reads.subscriptionAuth, now });
-  return { subscriptionAuth, ...modelsViewOf({ entries, modelRoles, projects, deployment, envList, overlay, overlayUnknown, configUnknown, cooldowns, records, sourceRecords, snapshot, windows, coverage: historyCoverage, now, ...(reads.status ? { status: reads.status } : {}) }) };
+  return { subscriptionAuth, ...modelsViewOf({ entries, modelRoles, projects, deployment, envList, overlay, overlayUnknown, configUnknown, cooldowns, records, sourceRecords, snapshot, coverage: historyCoverage, now, ...(reads.status ? { status: reads.status } : {}) }) };
 }
 
 /** Explicit machine projection: no doctor prose, command, path, prompt, URL, arbitrary field or secret reaches a model. */
@@ -302,14 +284,13 @@ export function modelsForAgent(view) {
       next: next(row.next) })),
     models: (view?.models ?? []).map(row => ({ ref: model(row.ref), provider: providerIdProblem(row.provider) === null ? row.provider : null, known: typeof row.known === "boolean" ? row.known : null, priced: typeof row.priced === "boolean" ? row.priced : null,
       reason: modelReason(row.reason),
-      state: ["cooling-down", "window-full", "unknown", "unknown-model", "unpriced", "policy-refused", "available"].includes(row.state) ? row.state : "unknown",
-      windows: (row.windows ?? []).map(window => ({ window: ["day", "week", "month"].includes(window.window) ? window.window : null, scope: splitModelEntry(window.scope?.slice(6)) ? window.scope : null, capTokens: integer(window.capTokens), spentTokens: integer(window.spentTokens), unavailable: window.unavailable === true })) })),
+      state: ["cooling-down", "unknown", "unknown-model", "unpriced", "policy-refused", "available"].includes(row.state) ? row.state : "unknown" })),
     cooldowns: (view?.cooldowns ?? []).map(row => ({ ref: model(row.ref), kind: ["rate-limited", "quota-exhausted", "overloaded"].includes(row.kind) ? row.kind : null, until: integer(row.until) })),
     proposals: (view?.proposals ?? []).flatMap(row => modelProposalOf(row) ? [{ ...modelProposalOf(row), id: safeId(row.id), host: safeId(row.host), at: integer(row.at), ageMs: integer(row.ageMs), stale: row.stale === true, level: ["ok", "warn", "fail"].includes(row.level) ? row.level : null }] : []),
     canaries: (view?.canaries ?? []).map(row => ({ id: safeId(row.id), digest: /^[a-f0-9]{64}$/.test(row.digest ?? "") ? row.digest : null, role: roleValid(row.role) ? row.role : null, candidate: model(row.candidate), flow: safeId(row.flow),
       candidateStats: metrics(row.candidateStats), sourceStats: metrics(row.sourceStats), partial: row.partial === true,
       rows: (row.rows ?? []).map(pair => ({ jobId: safeId(pair.jobId), sourceJobId: safeId(pair.sourceJobId), candidate: { model: model(pair.candidate?.model), outcome: safeId(pair.candidate?.outcome), meteredTokens: integer(pair.candidate?.meteredTokens), turns: integer(pair.candidate?.turns), tokens: integer(pair.candidate?.tokens) }, source: pair.source ? { model: model(pair.source.model), outcome: safeId(pair.source.outcome), meteredTokens: integer(pair.source.meteredTokens), turns: integer(pair.source.turns), tokens: integer(pair.source.tokens) } : null })) })),
-    waiting: (view?.waiting ?? []).map(row => ({ jobId: safeId(row.jobId), reason: ["model-cooldown", "model-window"].includes(row.reason) ? row.reason : null })),
+    waiting: (view?.waiting ?? []).map(row => ({ jobId: safeId(row.jobId), reason: row.reason === "model-cooldown" ? row.reason : null })),
     recentFallbacks: (view?.recentFallbacks ?? []).map(row => ({ jobId: runId(row.jobId), provider: providerIdProblem(row.provider) === null ? row.provider : null, model: modelIdProblem(row.model) === null ? row.model : null, modelRole: roleValid(row.modelRole) ? row.modelRole : null, modelWhy: MODEL_WHY.includes(row.modelWhy) ? row.modelWhy : null, providerFailure: providerFailureOf(row.providerFailure) })),
     banners: (view?.banners ?? []).map(row => ({ kind: Object.hasOwn(bannerReasons, row.kind) ? row.kind : "unknown", reason: Object.hasOwn(bannerReasons, row.kind) && bannerReasons[row.kind].includes(row.reason) ? row.reason : null, index: integer(row.index), project: safeId(row.project), projectUnknown: row.projectUnknown === true })),
     coverage: { complete: false, partial: true, records: integer(view?.coverage?.records), days: MODELS_LIMITS.days, truncated: view?.coverage?.truncated === true } };

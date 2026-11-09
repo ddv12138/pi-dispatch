@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
-import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutSplitBars, layoutCapacityChart, tokensText, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_SPLIT_REFUSALS, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
+import { layoutDailyChart, layoutBarList, layoutFlowLines, layoutCumulative, layoutCapacityChart, capMilliText, capPercentText, capShare, capShareText, INSIGHTS_CAPACITY_HOST_NAME, INSIGHTS_CAPACITY_JOBS_ONLY, INSIGHTS_COST_CLASSES, INSIGHTS_PROJECT_ID_RE } from "../src/insights-html.mjs";
 import { PROJECT_ID_RE } from "@edgehero/pi-dispatch/projects";
 import { buildGraphModel } from "../src/graph-model.mjs";
 import { buildGraphScene, drawnColumns, PAGE_THEME } from "../src/graph-html.mjs";
@@ -523,43 +523,6 @@ test("null payload, unreachable costs, missing joins and junk all degrade to a s
 
 // ---- 13. the budget panel (issue #181): facts only, states as words, the lever named ----
 
-test("budget rows render used-vs-cap FACTS: a known token cap gets a bar, unknown caps get words and nothing else", () => {
-  const out = cannedHtml();
-  assert.ok(out.includes("5400000 / cap 8000000 tok"), "the token counter vs its overlay cap -- counts, never dollars");
-  assert.ok(out.includes(">over cap</span>"), "the state is a WORD; color only reinforces it");
-  assert.ok(out.includes("per-job maxTokens 200000"), "the per-job budget rides the token row");
-  assert.ok(out.includes("adjust: /dispatch set dailyTokenCap"), "the lever is named -- the panel exists to point at it");
-  assert.ok(!/remaining/i.test(out), "used-vs-cap facts only; room-left arithmetic is the burn-down lie");
-  assert.ok(!/reserved 3|weeklyCap|soft-hold band/.test(out), "no job-slot window, no soft-hold band");
-
-  // One known cap, one meter track: the token row's.
-  const meters = (out.match(/<svg width="220" height="12" aria-hidden="true">/g) ?? []).length;
-  assert.equal(meters, 1, "the token row draws the only meter; there are no job-slot rows left to draw");
-});
-
-test("budget degrades: a token cap off, an unreachable queue, junk states, and a missing slice", () => {
-  const offPayload = CANNED_PAYLOAD();
-  offPayload.budget.tokens = { spent: 0, cap: null, state: "ok", maxTokens: null };
-  const off = insightsHtml(offPayload, { now: NOW });
-  assert.ok(off.includes("0 tok · daily cap off"), "a token window with no cap is OFF, not zero");
-
-  const downPayload = CANNED_PAYLOAD();
-  downPayload.budget.unreachable = "timed out reaching the queue";
-  downPayload.budget.tokens = { spent: null, cap: 8000000, state: "ok", maxTokens: null };
-  const down = insightsHtml(downPayload, { now: NOW });
-  assert.ok(down.includes("budget unreachable: timed out reaching the queue"), "the banner states the absence");
-  assert.ok(down.includes("cap 8000000 tok (overlay) · spent unavailable (queue unreachable)"), "the cap stays a fact; spent does not invent a zero");
-
-  const junkPayload = CANNED_PAYLOAD();
-  junkPayload.budget.tokens.state = "critical!!";
-  const junk = insightsHtml(junkPayload, { now: NOW });
-  assert.ok(!junk.includes("critical"), "a junk state degrades toward SILENCE -- it can hide an alarm, never invent one");
-
-  const bare = CANNED_PAYLOAD();
-  delete bare.budget;
-  assert.ok(insightsHtml(bare, { now: NOW }).includes("no budget data in this payload"), "a missing slice is a stated absence");
-});
-
 // ---- 14. the line charts (issue #181): shared scales, dashed estimates, honest gaps ----
 
 test("layoutFlowLines: one scale across panels, band-center x, dashed segments where an estimated day touches", () => {
@@ -631,71 +594,6 @@ test("a hostile flow name in the series stays entity-escaped in panel titles and
 });
 
 // ---- scoped limits in the budget panel (issue #242) ----
-
-test("scoped rows render their token facts; config-only concurrency; a retired job-count window draws nothing", () => {
-  const p = CANNED_PAYLOAD();
-  p.budget = {
-    ...CANNED_BUDGET(),
-    scoped: [
-      { scope: "acme/web", concurrent: 1, tokens: { day: { usedTokens: 3, capTokens: 10 }, week: { usedTokens: 12, capTokens: 40 }, month: null } },
-      { scope: "/srv/site", concurrent: null, tokens: { day: { usedTokens: null, capTokens: 4 }, week: null, month: null } },
-      // A pre-C1 payload row: its job-count windows are dropped by the allowlist, never obeyed or rendered.
-      { scope: "old/window", day: { used: 9, cap: 10, state: "over" }, week: null, month: null, concurrent: null },
-    ],
-    scopedInvalid: null,
-  };
-  const page = insightsHtml(p, { now: NOW });
-  assert.ok(page.includes("scoped limits (scoped-limits.json)"), "the scoped block is labeled");
-  assert.ok(page.includes("day reserved+held 3 / cap 10"), "the token counters as exact counts");
-  assert.ok(page.includes("week reserved+held 12 / cap 40"), "every capped token window rides");
-  assert.ok(page.includes("concurrent ≤1 (config; in-flight not shown)"), "concurrency is config-only, said so");
-  assert.ok(page.includes("day reserved+held ? / cap 4"), "an unreadable counter cell renders as ?, never an invented zero");
-  assert.ok(!page.includes("day used 9 / cap 10"), "a retired job-count window is never rendered");
-  assert.ok(page.includes("dispatch_limit_add/edit/delete"), "the scoped lever is named");
-});
-
-test("a scoped row's token windows render as exact counts; junk and an old payload draw none (#507)", () => {
-  const p = CANNED_PAYLOAD();
-  p.budget = {
-    ...CANNED_BUDGET(),
-    scoped: [
-      { scope: "project:shop", concurrent: null, tokens: { day: null, week: { usedTokens: 6_340_917, capTokens: 45_000_000 }, month: null } },
-      { scope: "model:anthropic/claude-sonnet-4-5", concurrent: null, tokens: { day: { usedTokens: null, capTokens: 5_000_000 }, week: { usedTokens: 1, capTokens: 0 }, month: "junk" } },
-      { scope: "acme/web", concurrent: 1 },
-    ],
-    scopedInvalid: null,
-  };
-  const page = insightsHtml(p, { now: NOW });
-  const row = (scope) => page.match(new RegExp(`<div class="row"><span class="wl">${scope.replace(/[/:]/g, "\\$&")}</span><span>([^<]*)</span>`))?.[1] ?? null;
-  assert.equal(row("project:shop"), "week reserved+held 6,340,917 / cap 45,000,000");
-  assert.equal(row("model:anthropic/claude-sonnet-4-5"), "day reserved+held ? / cap 5,000,000", "an unread counter is ?, a zero cap and junk draw nothing");
-  assert.equal(row("acme/web"), "concurrent ≤1 (config; in-flight not shown)", "a token-less row draws its concurrency only");
-});
-
-test("a project row's size rides beside its scope, so a size-only row is never a bare label (#599)", () => {
-  const p = CANNED_PAYLOAD();
-  p.budget = {
-    ...CANNED_BUDGET(),
-    scoped: [
-      { scope: "project:billing", day: null, week: null, month: null, concurrent: null, tokens: {}, size: ["memory 8g", "4 CPUs", 7, ""] },
-      { scope: "project:web", day: null, week: null, month: null, concurrent: null, tokens: { week: { usedTokens: 1_000_000, capTokens: 45_000_000 } }, size: [] },
-    ],
-    scopedInvalid: null,
-  };
-  const page = insightsHtml(p, { now: NOW });
-  const row = (scope) => page.match(new RegExp(`<div class="row"><span class="wl">${scope.replace(/[/:]/g, "\\$&")}</span><span>([^<]*)</span>`))?.[1] ?? null;
-  assert.equal(row("project:billing"), "memory 8g · 4 CPUs", "the size in sizeBits' words; junk entries dropped");
-  assert.equal(row("project:web"), "week reserved+held 1,000,000 / cap 45,000,000");
-});
-
-test("a pre-#242 payload (no scoped key) and an invalid limits file both state their absence honestly", () => {
-  const base = cannedHtml(); // CANNED_BUDGET carries no `scoped` -- the pre-#242 payload shape
-  assert.ok(!base.includes("scoped limits (scoped-limits.json)"), "no scoped block invented for an old payload");
-  const p = CANNED_PAYLOAD();
-  p.budget = { ...CANNED_BUDGET(), scoped: [], scopedInvalid: "scoped-limits file is not valid JSON: x" };
-  const page = insightsHtml(p, { now: NOW });
-  assert.ok(page.includes("scoped limits: file invalid"), "an invalid file is a stated absence, not a silent gap");
-});
 
 // ---- issue #418: no half character reaches the page, and labels are cut in columns ----
 
@@ -915,169 +813,6 @@ const SPLIT = () => ({
 });
 const splitPage = (allocation, over = {}) => insightsHtml({ ...CANNED_PAYLOAD(), allocation, ...over }, { now: NOW });
 
-test("the budget split's live shape: the envelope, the plan, the headroom, the counts and the history, composed exactly (#507)", () => {
-  const out = splitPage(SPLIT());
-  assert.ok(out.includes("<section><h2>budget split</h2>"), "a section under the caps");
-  assert.ok(out.indexOf("<h2>budget split</h2>") > out.indexOf("<h2>budget</h2>") && out.indexOf("<h2>budget split</h2>") < out.indexOf("<h2>daily spend</h2>"));
-  assert.ok(out.includes('<div class="row"><span class="wl">envelope</span><span>100,000,000 per week · delegation on</span></div>'));
-  assert.ok(out.includes('<div class="row"><span class="wl">plan</span><span>plan 3f9a0c1d2e4b5a67 · written by portfolio-job · applied <time datetime="2026-10-05T06:01:00Z">2026-10-05 06:01 UTC</time> · until <time datetime="2026-10-19T06:01:00Z">2026-10-19 06:01 UTC</time> · clamped by the step</span></div>'), "the instants as <time>, UTC text inside (#710, review round 1)");
-  assert.ok(out.includes('<div class="row"><span class="wl">headroom</span><span>unallocated 0 · deployment reserved+held 82,500,000 of 100,000,000</span></div>'));
-  assert.ok(out.includes('<div class="small">refusals in runs on this host, last 30d: allocation-cap 3 · envelope-mismatch 0 · portfolio-no-envelope 0 · portfolio-snapshot-oversize 1</div>'));
-  assert.ok(out.includes('<div class="small">plans collected in runs on this host, last 30d: applied 2 · plan-stale 1</div>'));
-  assert.ok(out.includes('<tr><td><time datetime="2026-10-05T12:30:00Z">2026-10-05 12:30 UTC</time></td><td>operator-session</td><td>refused</td><td>plan-too-soon</td><td class="pid">aaaaaaaaaaaaaaaa</td></tr>'));
-  assert.ok(out.includes('<tr><td><time datetime="2026-10-05T06:01:00Z">2026-10-05 06:01 UTC</time></td><td>portfolio-job</td><td>applied</td><td></td><td class="pid">3f9a0c1d2e4b5a67</td></tr>'));
-  assert.ok(out.includes('77,000,000 spent of 70,000,000 · floor 10,000,000 <tspan fill="'), "the overspent row says over in words");
-  assert.ok(out.includes(">4,250,000 spent of 30,000,000 · floor 10,000,000</text>"), "a row within its allocation carries no word");
-  const tips = listTexts(out, "insights-tips").map((t) => t.text);
-  assert.ok(tips.includes("shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation"));
-  assert.ok(tips.includes("platform · allocated 30,000,000 · spent 4,250,000 · floor 10,000,000"));
-  assert.ok(!out.includes("CANARY-HOST"), "no host reaches a page meant to be shared");
-  assert.ok(!out.includes("CANARY-REASON-TEXT"), "a plan's reason text is the panel's alone");
-  assert.equal(splitPage(SPLIT()), out, "byte-deterministic");
-  const permuted = SPLIT();
-  permuted.floors = Object.fromEntries(Object.entries(permuted.floors).reverse());
-  permuted.spend.projects = Object.fromEntries(Object.entries(permuted.spend.projects).reverse());
-  assert.equal(splitPage(permuted), out, "a permuted map does not move a byte");
-});
-
-test("the split's counts say not counted when the spend scan was unread, never 0 (#507)", () => {
-  const out = splitPage({ ...SPLIT(), counts: null });
-  assert.ok(out.includes('<div class="small">refusals in runs on this host, last 30d: not counted (the spend scan could not be read)</div>'));
-  assert.ok(out.includes('<div class="small">plans collected in runs on this host, last 30d: not counted (the spend scan could not be read)</div>'));
-  assert.ok(!out.includes("allocation-cap 0"), "no invented zero");
-  const none = splitPage({ ...SPLIT(), counts: { refusals: { "allocation-cap": 0 }, plans: {} } });
-  assert.ok(none.includes("refusals in runs on this host, last 30d: allocation-cap 0 · envelope-mismatch 0 · portfolio-no-envelope 0 · portfolio-snapshot-oversize 0</div>"), "a count that was made says 0 for every reason");
-  assert.ok(none.includes("plans collected in runs on this host, last 30d: none</div>"));
-});
-
-test("the split's other three shapes: unset is one line, a problem its text, unreachable a banner and no number (#507)", () => {
-  const unset = splitPage({ unset: true });
-  assert.ok(unset.includes('<section><h2>budget split</h2><div id="split" class="dim">no envelope (PI_ENVELOPE_FILE is unset), so there is no split and delegation is off</div></section>'));
-  const problem = splitPage({ problem: "the envelope file does not load: envelope file: window must be one of day, week, month: envelope.json <b>" });
-  assert.ok(problem.includes('<div id="split"><div class="row"><span class="state over">envelope problem</span><span>the envelope file does not load: envelope file: window must be one of day, week, month: envelope.json &lt;b&gt;</span></div></div>'));
-  const down = splitPage({ window: "week", totalMicros: 100 * SM, unreachable: "connect ECONNREFUSED 127.0.0.1:6379" });
-  assert.ok(down.includes('<div class="banner">budget split unreachable: connect ECONNREFUSED 127.0.0.1:6379</div>'));
-  assert.ok(down.includes('<section><h2>budget split</h2><div id="split" class="dim">the split could not be read from the queue, so no number is shown (see the banner)</div></section>'));
-  assert.ok(!/\$100/.test(down), "the envelope total is not drawn either");
-  assert.ok(!splitPage(undefined).includes("budget split"), "a payload without the slice draws no section at all");
-});
-
-test("junk in a split row degrades to ? or absence, and hostile text is escaped (#507)", () => {
-  const p = SPLIT();
-  p.log = [{ at: "<script>", writer: "<script>alert(1)</script>", outcome: "applied\u001b[31m", reason: "has space", planId: "not-a-hash" }];
-  p.state.writer = "Bad Writer";
-  p.floors = { ...p.floors, "<b>": 5, constructor: 1 };
-  const out = splitPage(p);
-  assert.ok(out.includes('<tr><td>?</td><td>?</td><td>?</td><td></td><td class="pid">?</td></tr>'));
-  assert.ok(out.includes("written by ? ·"));
-  assert.ok(!out.includes("&lt;b&gt;</text>"), "an id that no envelope can name is no row");
-  assert.ok(out.includes(">constructor</text>"), "an id-shaped key is a row like any other");
-  const long = splitPage({ ...SPLIT(), floors: { "customer-data-platform-migration": 0 } });
-  assert.ok(long.includes(">customer-data-pl…</text>"), "a long id is cut to the label column");
-  assert.ok(listTexts(long, "insights-tips").map((t) => t.text).includes("customer-data-platform-migration · allocated - · spent - · floor 0"), "and its tip carries it whole");
-  assert.equal(out.split("<script").length - 1, 0, "still no script element");
-  const down = splitPage({ unreachable: "</script><script>x" });
-  assert.equal(down.split("<script").length - 1, 0);
-  assert.ok(down.includes("budget split unreachable: &lt;/script&gt;&lt;script&gt;x"));
-});
-
-test("the page's token text carries thousands separators, `-` for a value that is not a count", () => {
-  for (const [m, want] of [[0, "0"], [1, "1"], [10, "10"], [999_999, "999,999"], [1_000_000, "1,000,000"], [1_250_000, "1,250,000"], [70_000_000, "70,000,000"], [123_456_789, "123,456,789"], [Number.MAX_SAFE_INTEGER, "9,007,199,254,740,991"]]) {
-    assert.equal(tokensText(m), want, `${m}`);
-  }
-  for (const junk of [-1, 1.5, null, undefined, "70", NaN]) assert.equal(tokensText(junk), "-", "never a 0 for a value nobody measured");
-});
-
-test("layoutSplitBars: one scale for every row, the envelope total or a larger amount, and overspend flagged (#507)", () => {
-  const laid = layoutSplitBars([
-    { id: "a", floor: 10 * SM, allocation: 70 * SM, spent: 77 * SM },
-    { id: "b", floor: 0, allocation: 30 * SM, spent: null },
-  ], 100 * SM);
-  assert.deepEqual(laid, [
-    { y: 0, allocW: 266, spentW: 293, floorX: 38, over: true },
-    { y: 22, allocW: 114, spentW: 0, floorX: null, over: false },
-  ]);
-  // A spend above the total stretches the scale, so it still ends inside its track.
-  const big = layoutSplitBars([{ id: "a", floor: 0, allocation: 50 * SM, spent: 200 * SM }], 100 * SM);
-  assert.deepEqual(big, [{ y: 0, allocW: 95, spentW: 380, floorX: null, over: true }]);
-  assert.deepEqual(layoutSplitBars([{ id: "a", floor: 0, allocation: 0, spent: 0 }], 0), [{ y: 0, allocW: 0, spentW: 0, floorX: null, over: false }], "an all-zero envelope is safe");
-});
-
-test("the console script runs under a DOM stub on the spend screen, and a split bar's tooltip is the composed text (#507)", () => {
-  const out = splitPage(SPLIT());
-  const tips = listTexts(out, "insights-tips").map((t) => t.text);
-  const handlers = {};
-  const el = (extra = {}) => ({ textContent: "", className: "", style: {}, getBoundingClientRect: () => ({ left: 0, top: 0 }), addEventListener() {}, getElementsByTagName: () => [], ...extra });
-  const tipsList = el({ getElementsByTagName: (tag) => (tag === "li" ? tips.map((t) => ({ textContent: t })) : []) });
-  const nodes = { tip: el(), wrap: el(), "insights-tips": tipsList };
-  // No graph svg and no node list: the script wires the chart tooltips and the row replay, and returns before pan/zoom.
-  const document = {
-    body: { getAttribute: (n) => (n === "data-page" ? "insights" : null) },
-    getElementById: (id) => nodes[id] ?? null,
-    getElementsByTagName: () => [],
-    querySelector: () => null,
-    querySelectorAll: () => [],
-    addEventListener: (type, fn) => (handlers[type] = fn),
-  };
-  new Function("document", "setTimeout", "location", "history", "MouseEvent", "EventSource", "fetch", CONSOLE_SCRIPT)(document, () => 0, {}, {}, function () {}, undefined, () => { throw new Error("no fetch on the spend screen"); });
-  const idx = tips.indexOf("shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation");
-  assert.ok(idx >= 0 && out.includes(`<g data-tip="${idx}">`), "the shop bar carries that tip's ordinal");
-  const bar = { getAttribute: (n) => (n === "data-tip" ? String(idx) : null) };
-  handlers.pointermove({ target: { closest: (sel) => (sel === "[data-tip]" ? bar : null) }, clientX: 5, clientY: 5 });
-  assert.equal(nodes.tip.textContent, "shop · allocated 70,000,000 · spent 77,000,000 · floor 10,000,000 · over its allocation");
-  assert.equal(nodes.tip.style.display, "block");
-  assert.equal(nodes.tip.style.left, "19px", "placed beside the pointer, inside the topology pane's frame");
-  // An index the list does not hold shows nothing, and moving off a bar hides only what a bar showed.
-  handlers.pointermove({ target: { closest: () => ({ getAttribute: () => "999" }) }, clientX: 1, clientY: 1 });
-  assert.equal(nodes.tip.style.display, "none");
-  assert.equal(typeof handlers.click, "function", "the breakdown row replay is wired");
-});
-
-test("the split's refusal list is the worker's four reasons, the one list the assembler counts by (#507)", async () => {
-  // This module may not load the worker, so the words are restated here and held to the worker's own constants.
-  const { PORTFOLIO_NO_ENVELOPE } = await import(new URL("../../worker/src/processor.mjs", import.meta.url).href);
-  const { PORTFOLIO_SNAPSHOT_OVERSIZE } = await import(new URL("../../worker/src/portfolio-snapshot.mjs", import.meta.url).href);
-  const { ALLOCATION_CAP_REASON, ENVELOPE_MISMATCH_REASON } = await import("@edgehero/pi-dispatch/allocation");
-  assert.deepEqual([...INSIGHTS_SPLIT_REFUSALS], [ALLOCATION_CAP_REASON, ENVELOPE_MISMATCH_REASON, PORTFOLIO_NO_ENVELOPE, PORTFOLIO_SNAPSHOT_OVERSIZE]);
-  assert.ok(Object.isFrozen(INSIGHTS_SPLIT_REFUSALS));
-  const src = readFileSync(fileURLToPath(new URL("../src/insights-assembly.mjs", import.meta.url)), "utf8");
-  assert.match(src, /const SPLIT_REFUSALS = INSIGHTS_SPLIT_REFUSALS;/, "the assembler counts by the page's list, not a copy");
-});
-
-test("the split says what this host sees: its mismatch, an outside edit, a plan id it cannot read, and a count it cannot read (#507)", () => {
-  const mismatch = splitPage({ ...SPLIT(), mismatch: true });
-  assert.ok(mismatch.includes('the split was made for another envelope, not this host&#39;s: governed jobs on this host refuse as envelope-mismatch'), "the mismatch row names the refusal (escapeHtml's apostrophe inside)");
-  const words = "a host reported envelope e2e2e2e2 at 10-05 13:00, not the one the split was made for (d1d1d1d1); a host still on it refuses governed jobs as envelope-mismatch";
-  const edited = splitPage({ ...SPLIT(), outsideEdit: { digest: "e2e2e2e2", at: "10-05 13:00", split: "d1d1d1d1" } });
-  assert.ok(edited.includes(`<div class="row"><span class="state">${words}</span></div>`));
-  assert.ok(!splitPage(SPLIT()).includes("a host reported envelope"), "no notice without the facts");
-  assert.ok(!splitPage({ ...SPLIT(), outsideEdit: { digest: "<b>", at: "10-05 13:00", split: "d1d1d1d1" } }).includes("a host reported envelope"), "a digest that is not one is no notice");
-  assert.ok(splitPage({ ...SPLIT(), outsideEdit: { digest: "e2e2e2e2", at: "junk", split: "d1d1d1d1" } }).includes("a host reported envelope e2e2e2e2 at ?,"), "an instant that is not one reads ?");
-  const p = SPLIT();
-  p.state.planId = "not-a-hash";
-  const odd = splitPage(p);
-  assert.ok(odd.includes("<span>plan ? · written by portfolio-job ·"), "an unreadable id is not the neutral split");
-  p.state.planId = null;
-  assert.ok(splitPage(p).includes("<span>neutral split, no plan · written by portfolio-job ·"));
-  const bad = SPLIT();
-  bad.log = [{ at: "2026-99-99T99:99:00.000Z", writer: "default", outcome: "neutral", reason: null, planId: null }, { at: "2026-02-31T23:59:00Z", writer: "default", outcome: "neutral", reason: null, planId: "" }];
-  bad.counts = { refusals: { "allocation-cap": -1, "envelope-mismatch": "3" }, plans: { applied: 1.5 } };
-  const junk = splitPage(bad);
-  assert.equal(junk.split("<tr><td>?</td><td>default</td><td>neutral</td><td></td><td class=\"pid\"></td></tr>").length - 1, 2, "a day the calendar lacks (02-31) is ? too, and an empty plan id is no plan");
-  assert.ok(junk.includes("refusals in runs on this host, last 30d: allocation-cap ? · envelope-mismatch ? · portfolio-no-envelope 0 · portfolio-snapshot-oversize 0</div>"));
-  assert.ok(junk.includes("plans collected in runs on this host, last 30d: applied ?</div>"));
-  const block = splitPage({ ...SPLIT(), counts: { refusals: "junk", plans: [1] } });
-  assert.ok(block.includes("refusals in runs on this host, last 30d: ?</div>") && block.includes("plans collected in runs on this host, last 30d: ?</div>"), "a block that is not a map is ?, and blames no scan");
-  assert.ok(!block.includes("not counted"));
-});
-
-test("the Pulse split chart follows its panel width and keeps its labels visible (#750)", () => {
-  // #749 replaced the old #split box with the viewBox-scaled sp-split chart. The removed adapter's scrolling rules
-  // are no longer part of the served screen; the current SVG grows with its panel and does not clip its labels.
-  assert.match(CONSOLE_CSS, /body\[data-page="insights-budget-split"\] \.sp-split\{display: block; width: 100%; overflow: visible;\}/);
-  assert.doesNotMatch(CONSOLE_CSS, /#split\s*\{/);
-});
-
 // ---- the capacity section (issue #599, phase 4, REQ-CAPACITY-INSIGHTS) ----
 
 const CH = 60 * 60 * 1000;
@@ -1240,7 +975,7 @@ test("a bad capacity slice degrades only its own section, and a junk bucket is d
   Object.defineProperty(bad, "hosts", { get() { throw new Error("boom"); } });
   const html = capPage(bad, { sizing, budget: CANNED_BUDGET() });
   assert.ok(capSection(html).includes("capacity not read: the capacity slice is not readable"));
-  assert.ok(html.includes("<h2>job sizes</h2>") && html.includes("<h2>budget</h2>"), "the sections beside it still render");
+  assert.ok(html.includes("<h2>job sizes</h2>") && html.includes("<h2>topology"), "the sections beside it still render");
   // the window not one: a stated absence, no chart
   assert.ok(capSection(capPage({ ...CAP_SLICE(), window: { fromMs: NOW, toMs: NOW - 1, bucketMs: CH } })).includes("the report&#39;s window is not readable"));
   // a bucket with junk numbers is dropped: its hour is hatched, not empty

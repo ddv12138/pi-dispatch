@@ -9,7 +9,7 @@ export const EXIT_INFRA = 1; // retryable: provider 5xx/429, network, our own bu
 export const QUESTION_GROUP_REFUSED = "question-group-refused";
 export const QUESTION_GROUP_UNANSWERED = "question-group-unanswered";
 export const ANSWER_DRAFT_REFUSED = "answer-draft-refused";
-export const EXIT_POLICY = 2; // not retried: turn budget, cap, config error, provider refused the credential
+export const EXIT_POLICY = 2; // not retried: turn budget, model policy, config error, provider refused the credential
 
 /**
  * The policy-stop reasons the meter and the pre-spend policy check name (issues #500, #502). Exported literals,
@@ -17,14 +17,11 @@ export const EXIT_POLICY = 2; // not retried: turn budget, cap, config error, pr
  * `meterStop`, and the worker's closed RUNNER_POLICY_REASONS, which cannot import this file and so reads this
  * source for `= "<reason>"` (worker/test/run-history.test.mjs).
  *
- * `token_budget` keeps its underscore: it is the reason every existing record and dashboard already carries.
- * The others are hyphenated like every other worker reason. `token_budget` is a STOP (the run ran and the
- * settle-time check ended it, the lagging in-run backstop OQ-010 keeps describing); `model-not-allowed` is
- * either a stop or a refusal before any call (a list this runner cannot enforce before a call, which it refuses
- * rather than run with the policy unenforced). The per-job cost-cap reasons (`cost-cap`,
- * `cost-cap-unenforceable`) died with the cost guard (DES-TOKEN-RESERVE-AND-SETTLE).
+ * `model-not-allowed` is either a stop or a refusal before any call (a list this runner cannot enforce before
+ * a call, which it refuses rather than run with the policy unenforced). There is no per-job token budget: the
+ * meter only accounts for tokens and cost. The old `token_budget` reason and the per-job cost-cap reasons
+ * (`cost-cap`, `cost-cap-unenforceable`) are gone; the worker still reads records that carry them.
  */
-export const TOKEN_BUDGET = "token_budget";
 export const MODEL_NOT_ALLOWED = "model-not-allowed";
 export const MODEL_POLICY_UNENFORCEABLE = "model-policy-unenforceable";
 /**
@@ -108,7 +105,7 @@ const UNRESUMABLE_RETRY = /^Cannot continue from message role: /;
  * that already happened are paid for and executed again, which is exactly what #449/#455's rule forbids (a
  * failed turn that made progress is counted, never re-run for free).
  *
- * So it is POLICY, exit 2, not retried, under its own reason rather than borrowing `turn_budget` (no cap
+ * So it is POLICY, exit 2, not retried, under its own reason rather than borrowing `turn_budget` (no budget
  * fired, and a record that said one did would send the operator to the wrong knob). Why that is safe:
  *   - The refusal is pi's, and determinate for this container: the omitted attempt is persisted, so no
  *     second continue() from the same state can succeed.
@@ -150,32 +147,26 @@ export function captureTerminal(previous, event) {
  * into exit 0. This is the composition the runner's own comment calls load-bearing; it lives
  * here so it can be tested without a container.
  *
- * Both budgets abort via session.abort(), which surfaces as `stopReason: "aborted"`. Intercepting
- * them here is what distinguishes an intentional cap (policy, not retried) from the generic abort,
- * and names WHICH cap fired. The turn budget is checked before the token budget only for a stable
- * order; in practice one abort ends the run, so at most one flag is set.
+ * The turn budget aborts via session.abort(), which surfaces as `stopReason: "aborted"`. Intercepting
+ * it here is what distinguishes an intentional policy stop (not retried) from the generic abort and
+ * names WHICH budget fired. There is no token budget to rank beside it any more.
  */
 // `isRetryable` is pi-ai's own transient-error predicate (loadRetryPredicate), threaded to the one branch
 // that reads it; null keeps every provider error retryable, which is what it was before issue #437.
-// `rejected` is classifyPromptRejection's verdict on a prompt() that rejected, or null. It ranks BELOW both
-// budget aborts (a cap that fired is the better-named cause of whatever pi did next) and above everything
+// `rejected` is classifyPromptRejection's verdict on a prompt() that rejected, or null. It ranks BELOW the
+// turn budget (a budget that fired is the better-named cause of whatever pi did next) and above everything
 // the terminal message could say, because a rejected prompt's last message is not the job's outcome.
-// `meterStop` is the process-wide meter's first stop reason (`state.stopReason`: TOKEN_BUDGET, MODEL_NOT_ALLOWED or
-// MODEL_NOT_ALLOWED), or null. It ranks below the turn budget only for the stable order the turn budget always
-// had, and above `tokenAborted`, which since the meter learned more than one stop is the FALLBACK bus meter's
-// flag alone: a runner whose meter installed passes its token stop here, as `meterStop`, never as both.
+// `meterStop` is the process-wide meter's first stop reason (`state.stopReason`: MODEL_NOT_ALLOWED), or null.
+// It ranks below the turn budget only for the stable order the turn budget always had.
 // `parked` (issue #625) is true only when the job was armed with run.awaitInput AND the run ended on that tool's own
 // result (await-input.mjs parkedTerminal). It ranks below every budget stop and a classified rejection, which are the
 // better-named causes, and above everything else: a parked run is completed, and its reason is what the worker reads.
-export function decideExit({ budgetAborted, budgetTurns, meterStop = null, tokenAborted, terminal, command = null, isRetryable = null, rejected = null, parked = false, approval = false }) {
+export function decideExit({ budgetAborted, budgetTurns, meterStop = null, terminal, command = null, isRetryable = null, rejected = null, parked = false, approval = false }) {
 	if (budgetAborted) {
 		return { code: EXIT_POLICY, reason: "turn_budget", turns: budgetTurns };
 	}
 	if (meterStop) {
 		return { code: EXIT_POLICY, reason: meterStop };
-	}
-	if (tokenAborted) {
-		return { code: EXIT_POLICY, reason: TOKEN_BUDGET };
 	}
 	if (rejected) return rejected;
 	if (approval) return { code: EXIT_COMPLETED, reason: AWAITING_APPROVAL };

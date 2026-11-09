@@ -22,12 +22,8 @@ const copyStrings = (value) => Array.isArray(value) ? value.filter((v) => typeof
 const recordOf = (r) => Object.fromEntries(["jobId", "target", "project", "kind", "triggerIndex", "triggerType", "flow", "startedAt", "endedAt", "outcome"].filter((k) => typeof r?.[k] === "string" || Number.isSafeInteger(r?.[k])).map((k) => [k, r[k]]).concat([["reason", recordReason(r)]]));
 
 function ruleOf(t) {
-  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "portfolio", "replicas", "maxTokens", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout", "gateBudgetRaiseTokens"];
+  const scalar = ["index", "type", "forge", "id", "pattern", "phrase", "folder", "flow", "command", "provider", "model", "maxTurns", "backend", "image", "repository", "number", "once", "packages", "resume", "replicas", "secretsProfile", "secretBundle", "awaitInput", "github", "progress", "statusComment", "recover", "steer", "skillsDir", "gateTimeout"];
   const out = Object.fromEntries(scalar.filter((k) => typeof t[k] === "string" || typeof t[k] === "boolean" || Number.isSafeInteger(t[k])).map((k) => [k, t[k]]));
-  for (const key of ["maxTokens", "gateBudgetRaiseTokens"]) {
-    if (typeof t[key] === "number" && Number.isFinite(t[key]) && t[key] >= 0) out[key] = t[key];
-    else delete out[key];
-  }
   // Prompt text and resolver references cannot pass this projection even if a caller accidentally supplies raw data.
   if (typeof t.command === "string") {
     const words = t.command.trim().split(/\s+/);
@@ -69,12 +65,11 @@ function chipsOf(t, packagesAvailable) {
   if (t.github === true) add("reaches", "GitHub access");
   if (t.resume === true) add("writes", "keeps a session");
   if (t.type === "cron") add("writes", "edits its local folder");
-  if (t.portfolio === true) add("writes", "budget split");
   if (t.instructions) add("writes", "standing instructions");
   if (t.awaitInput === true || t.gates?.length) add("asks", "may wait for a person");
   if (t.steer === true) add("asks", "takes messages");
   if (t.recover === true) add("writes", "recovers a lost run");
-  if (t.models?.length || t.maxTokens !== undefined || t.waitFor?.length || t.reviewState?.length || t.all?.length || t.none?.length || t.number) add("narrows", "reviewed constraints");
+  if (t.models?.length || t.waitFor?.length || t.reviewState?.length || t.all?.length || t.none?.length || t.number) add("narrows", "reviewed constraints");
   if (t.secretBundle === false) add("narrows", "no project secret bundle");
   if (t.disarmed) add("spent", "spent one-shot");
   return chips;

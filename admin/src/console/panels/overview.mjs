@@ -9,9 +9,9 @@
  *   - the headline (`overviewHeadline`), the shell's `#p-headline` under the title: what needs the person, or "All
  *     clear", or on a first run how many steps stand before the first job;
  *   - the first run's two (`overviewSetup`, `overviewSetupEmpty`), drawn only while
- *     `firstRunState(...).applies`, and the overview's eight (`overviewNeeds`, `overviewWaiting`, `overviewActive`,
- *     `overviewSpend`, `overviewTimeline`, `overviewCaps`, `overviewWaitlists`, `overviewHosts`), drawn only while it does
- *     not. Every one of the ten is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
+ *     `firstRunState(...).applies`, and the overview's seven (`overviewNeeds`, `overviewWaiting`, `overviewActive`,
+ *     `overviewSpend`, `overviewTimeline`, `overviewWaitlists`, `overviewHosts`), drawn only while it does
+ *     not. Every one of the nine is on the page in both states, an empty panel hidden (`section[data-panel]:empty`), so
  *     the live stream moves a deployment from the checklist to the overview by swapping panels, with no reload.
  *
  * THE ROLE RULE. A viewer reads counts, ids, hosts and why each job waits, in the worker's closed vocabulary: a
@@ -40,7 +40,7 @@
  * and connected where those differ), and each queue's counts are Waitlists' Queues row; the parked
  * runs, with the ones being answered, are Needs you's questions; the day's failed and refused runs (the floor rule, and
  * cancels not counted as refusals) are Needs you's foot line, linking the runs; "no worker online" and the stale-beats
- * note lead the hosts panel; the count and token windows are Caps, under the UTC sentence; the active jobs' table with
+ * note lead the hosts panel; the active jobs' table with
  * its progress stays on Fleet, and Running here counts them in each host's slots.
  */
 import { DEFER_BUCKETS, DEFER_BUCKET_WORDS, DEFER_DUE_SENTENCE, DEFER_PROJECT_RE, DEFER_TIME_MAX_MS, DEFER_WHYS, DEFER_WHY_RE } from "@edgehero/pi-dispatch/defer-reasons";
@@ -52,7 +52,7 @@ import { html } from "../html.mjs";
 import * as ui from "../kit.mjs";
 import { uiText } from "../locale.mjs";
 import { TIMELINE_ROWS, TIMELINE_WAIT_WORDS, TIMELINE_ZOOMS, timelineHtml, timelineLegend, timelineModel } from "../timeline.mjs";
-import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, tokensHtml, shownPath, timeHtml, tokensText, workersOnline } from "./common.mjs";
+import { BEAT_FRESH_MS, RUN_ID_RE, ageText, beatAgeOf, beatFresh, canAct, count, timeHtml, tokensText, workersOnline } from "./common.mjs";
 
 const tr = (message, view) => uiText(message, view?.locale);
 
@@ -70,9 +70,6 @@ export const STALE_BEATS_TEXT = "Host beats look stale (clock skew?), but the qu
 
 /** The hosts panel's note when the registry could not be read this tick: the rows are the last ones read. */
 export const REGISTRY_UNREAD_TEXT = "The host registry could not be read; this shows the fleet as it was last seen.";
-
-/** The line under the caps: the budget's windows reset on UTC boundaries, not on the reader's local ones. */
-export const COUNT_WINDOWS_UTC_TEXT = "Days, weeks (Monday to Sunday) and months here are UTC, as the budget counts them.";
 
 /** What a panel says when the snapshot could not be read at all (the panels' shared sentence, `common.mjs`'s). */
 export const OVERVIEW_UNREAD_TEXT = "The deployment's Valkey could not be read, so this panel has nothing to show. The next refresh tries again.";
@@ -124,11 +121,9 @@ export const HOST_NO_EXPIRY_TEXT = "Its registry row has no expiry, so it will n
 export const NO_DOCTOR_TEXT = "No doctor result yet";
 
 /**
- * What the spend dots are, under them, and where the number beside them comes from: the deployment's day window, its
- * counter's spent and held (`SPEND_HOURS_TEXT`), or, with no such window read, the dots' own sum (`SPEND_SUM_TEXT`).
- * The note names the number's source, so it never says the window's counter over a number that is not it.
+ * What the spend dots are, under them, and where the number beside them comes from: the dots' own sum, the run records'
+ * settled spend today (`SPEND_SUM_TEXT`). The note names the number's source.
  */
-export const SPEND_HOURS_TEXT = "Dots: each UTC hour's settled spend, from the run records. The number is the day window's spent and held.";
 export const SPEND_SUM_TEXT = "Dots: each UTC hour's settled spend, from the run records. The number is their sum.";
 
 /**
@@ -138,12 +133,9 @@ export const SPEND_SUM_TEXT = "Dots: each UTC hour's settled spend, from the run
  */
 export const WAITING_CUT_TEXT = "Not every waiting job was read, so jobs in line may be missing here.";
 
-/** Caps' sentence when the settings overlay was read whole and sets no cap: it names its source, the overlay. */
-export const CAPS_EMPTY_TEXT = "The settings overlay sets no cap.";
-
 /**
  * The fixed sentences of reads that failed, or that were not made whole (a reader's own message can name a host, so
- * none is ever drawn). THE READ RULE, every panel's: a whole count, an empty sentence (`CAPS_EMPTY_TEXT`, "nothing is
+ * none is ever drawn). THE READ RULE, every panel's: a whole count, an empty sentence ("nothing is
  * waiting", "No run in this window, and nothing in line.", Spend today's, the waitlists' calm line) or All clear is
  * drawn only over the reads behind it, each made whole; a read that failed or was cut is said here instead, never drawn
  * as nothing.
@@ -157,9 +149,6 @@ const UNREAD = Object.freeze({
   day: "The run history could not be read, so the day's failures are not counted.",
   waiting: "The waiting jobs could not be read.",
   waitingCut: WAITING_CUT_TEXT,
-  settings: "The settings overlay could not be read, so its caps are not drawn.",
-  dollars: "The token counters could not be read.",
-  counts: "The token counter could not be read, so its window is not drawn.",
   spend: "The run records could not be read, so the spend per hour is not drawn.",
   spendShort: "Not every run record of today was read, so these hours may be missing spend.",
   runs: "The run history could not be read, so only what runs and waits is drawn.",
@@ -602,7 +591,7 @@ export const overviewActive = overviewPanel("Running", (s, view) => {
 // ---- Spend today -----------------------------------------------------------------------------------------------------------
 
 /**
- * A token count as a KPI's big number: `tokensHtml`'s fixed form with the exact amount on hover, in a `<data>` element,
+ * A token count as a KPI's big number: `tokensText`'s exact form with the exact amount on hover, in a `<data>` element,
  * since the bundle draws every `span` inside a `.kpi` in its small label face (`.kpi span`).
  */
 function kpiMoney(tokens) {
@@ -610,42 +599,23 @@ function kpiMoney(tokens) {
 }
 
 /**
- * `used` as a percentage of `cap`, or null: rounded DOWN below the cap (`tokensHtml`'s spent rule), so a window one unit
- * short of its cap never reads as full; at or past it, as it is.
- */
-const pctOf = (used, cap) => (Number.isFinite(used) && Number.isFinite(cap) && cap > 0 ? (used >= cap ? (used / cap) * 100 : Math.floor((used / cap) * 100)) : null);
-
-/**
- * Spend today: the deployment's day window, spent and held, against its cap, where that window's counter was read;
- * else the run records' settled spend today, the dots' sum; else (neither read) a dash, "not known". The note under
- * the dots names which the number is (`SPEND_HOURS_TEXT`, `SPEND_SUM_TEXT`), a counter that could not be read is said
- * (the reader's `unreachable`, or a day window whose counter came back null), and so is a day of records not read
- * whole (only the newest read, or a side of them unread), whose hours may be short.
+ * Spend today: the run records' settled spend today, the dots' sum; a dash, "not known", where they could not be read.
+ * The note under the dots says the number is their sum (`SPEND_SUM_TEXT`), and so is a day of records not read whole
+ * (only the newest read, or a side of them unread), whose hours may be short.
  */
 export const overviewSpend = overviewPanel("Spend today", (s, view) => {
-  const d = s.windows;
-  const day = Array.isArray(d?.rows) ? d.rows.find((r) => r?.ledger === "deployment" && r.window === "day") ?? null : null;
-  const windowRead = day !== null && Number.isSafeInteger(day.counterTokens);
-  const countersUnread = Boolean(d?.unreachable) || (day !== null && !windowRead);
   const hours = Array.isArray(s.spendByHour?.hours) ? s.spendByHour.hours : null;
   const cut = hours === null ? -1 : hours.indexOf(null);
   const past = hours === null ? null : hours.slice(0, cut === -1 ? hours.length : Math.max(1, cut));
   const settled = past === null ? null : past.reduce((a, v) => a + (Number.isSafeInteger(v) && v > 0 ? v : 0), 0);
-  let kpi;
-  let chip = null;
-  if (windowRead) {
-    const pct = pctOf(day.counterTokens, day.capTokens);
-    kpi = ui.kpi(kpiMoney(day.counterTokens), html`of ${tokensHtml(day.capTokens)}`);
-    if (pct !== null) chip = ui.chip(`${count(Math.floor(pct))}% of cap`, { status: day.full ? "failed" : "ok" });
-  } else if (settled !== null) kpi = ui.kpi(kpiMoney(settled), "settled today");
-  else kpi = ui.kpi("-", "not known");
+  const kpi = settled !== null ? ui.kpi(kpiMoney(settled), "settled today") : ui.kpi("-", "not known");
   const dots = past === null ? html`<p class="card__sub">${UNREAD.spend}</p>` : ui.spendDots({ hours: past, label: "Settled spend by UTC hour today", startHour: 0 });
   const unpriced = Number.isSafeInteger(s.spendByHour?.unpriced) && s.spendByHour.unpriced > 0 ? ` ${plural(s.spendByHour.unpriced, "run")} today ${s.spendByHour.unpriced === 1 ? "carries" : "carry"} no settled amount.` : "";
   // The read rule: "No run has settled any spend today." only over the day's records read whole; over a day read in part
   // the note names its number's source as it does for any sum, and `spendShort` says the hours may be missing spend.
   const short = past !== null && (s.spendByHour.floor === true || s.spendByHour.partial === true);
-  const note = past === null ? null : html`<p class="card__sub">${settled === 0 && !short ? SPEND_EMPTY.body : windowRead ? SPEND_HOURS_TEXT : SPEND_SUM_TEXT}${unpriced}</p>`;
-  return ui.card({ title: uiText("Spend today", view.locale), end: chip, body: html`${kpi}${dots}${uiText(note, view.locale)}${short ? html`<p class="card__sub">${uiText(UNREAD.spendShort, view.locale)}</p>` : null}${countersUnread ? html`<p class="card__sub">${uiText(UNREAD.dollars, view.locale)}</p>` : null}` });
+  const note = past === null ? null : html`<p class="card__sub">${settled === 0 && !short ? SPEND_EMPTY.body : SPEND_SUM_TEXT}${unpriced}</p>`;
+  return ui.card({ title: uiText("Spend today", view.locale), body: html`${kpi}${dots}${uiText(note, view.locale)}${short ? html`<p class="card__sub">${uiText(UNREAD.spendShort, view.locale)}</p>` : null}` });
 });
 
 // ---- the timeline ----------------------------------------------------------------------------------------------------------
@@ -707,92 +677,6 @@ export const overviewTimeline = overviewPanel("Runs by project", (s, view) => {
   ].filter(Boolean);
   const body = html`${chipsHtml(view, q, model)}${timelineHtml(model, { label: title })}${notes.map((n) => html`<p class="card__sub">${n}</p>`)}${timelineLegend()}`;
   return ui.card({ title: uiText(title, view.locale), sub: uiText("left of now: what ran; right of now: what is in line", view.locale), end: html`${rowsSeg}${zoomSeg}`, body });
-});
-
-// ---- Caps ------------------------------------------------------------------------------------------------------------------
-
-/** The token window: `[name, window, counter key, overlay cap key]`. */
-const COUNT_CAPS = Object.freeze([
-  ["Tokens", "today", "tokensToday", "dailyTokenCap"],
-]);
-
-const WINDOW_WORD = Object.freeze({ day: "today", week: "week", month: "month" });
-
-/**
- * A token window's capsule name (its capsule adds the unit, "tokens") and, for a project or a model, what the key line says
- * it is. A scope's name is the operator's own `scoped-limits.json` row, and a folder scope is a host path, which a page
- * shows by its last folder for every role (the PATHS rule, `panels.mjs`'s header): every scope is named through
- * `shownPath` (a repo as it is), and the key line names no scope at all, since what it would add is that raw name.
- * A project's capsule is its id, which the key says is a project; a model's is the model alone (its provider,
- * `anthropic/`, would crowd a capsule's label), the key saying which model: a model row's name is `<provider>/<model>`
- * (`splitModelEntry`, a provider before the first `/`), never a host path.
- */
-function windowName(row) {
-  if (row.ledger === "deployment") return { name: "Deploy", key: null };
-  const raw = typeof row.name === "string" ? row.name : "";
-  if (row.ledger === "model") {
-    const short = raw.includes("/") ? raw.slice(raw.lastIndexOf("/") + 1) || raw : raw;
-    return { name: short, key: `${short} tokens is model ${raw}` };
-  }
-  if (raw.startsWith("project:")) {
-    const project = raw.slice("project:".length);
-    return { name: project, key: `${project} tokens is project ${project}` };
-  }
-  return { name: shownPath(raw), key: null };
-}
-
-/**
- * A count window's status by the token budget's own band ("over at the cap", tokens have no soft hold): failed once
- * the counter reaches its cap, else ok.
- */
-export function countStatus(used, cap) {
-  return used >= cap ? "failed" : "ok";
-}
-
-/**
- * Caps: a capsule for every window with a cap whose counter was read. The token caps are the settings overlay's, so
- * they are drawn only from a settings read made whole (the reader's `{ path, overlay }`, an object; never its
- * `{ path, invalid }`, on which the worker refuses every job): any other read is said in a line of its own
- * (`UNREAD.settings`) and draws none of them. A window with a cap whose counter was not read (the token counter that
- * is not a number, the token counters' read failed, or a token window's counter null) is said in a line too. The
- * empty sentence, `CAPS_EMPTY_TEXT`, is drawn only where no window has a cap and nothing went unread, and it names its
- * source: the worker's own caps from its environment (`PI_DAILY_TOKEN_CAP` and the rest) are in no read this console
- * makes, so "No cap is set." would be false of a worker that caps at its default.
- */
-export const overviewCaps = overviewPanel("Caps", (s, view) => {
-  const read = s.settings;
-  const settingsRead = read !== null && typeof read === "object" && !read.invalid && read.overlay !== null && typeof read.overlay === "object" && !Array.isArray(read.overlay);
-  const overlay = settingsRead ? read.overlay : {};
-  const b = s.budget !== null && typeof s.budget === "object" ? s.budget : null;
-  const caps = [];
-  let countsUnread = false;
-  for (const [name, window, key, capKey] of COUNT_CAPS) {
-    const cap = overlay[capKey];
-    if (!Number.isSafeInteger(cap) || cap <= 0) continue;
-    const used = b === null ? NaN : Number(b[key] ?? 0);
-    if (!Number.isFinite(used)) {
-      countsUnread = true;
-      continue;
-    }
-    caps.push(ui.capsule({ name, window, pct: pctOf(used, cap), status: countStatus(used, cap) }));
-  }
-  const keys = [];
-  let dollarsUnread = Boolean(s.windows?.unreachable);
-  for (const r of Array.isArray(s.windows?.rows) ? s.windows.rows : []) {
-    if (!Number.isSafeInteger(r?.capTokens) || r.capTokens <= 0) continue;
-    if (!Number.isSafeInteger(r.counterTokens)) {
-      dollarsUnread = true;
-      continue;
-    }
-    const { name, key } = windowName(r);
-    if (key !== null && !keys.includes(key)) keys.push(key);
-    caps.push(ui.capsule({ name, unit: "tokens", window: WINDOW_WORD[r.window] ?? String(r.window), pct: pctOf(r.counterTokens, r.capTokens), status: r.full ? "failed" : "ok" }));
-  }
-  const unread = [settingsRead ? null : UNREAD.settings, countsUnread ? UNREAD.counts : null, dollarsUnread ? UNREAD.dollars : null].filter(Boolean).map((t) => html`<p class="card__sub">${t}</p>`);
-  const spend = ui.btn({ kind: "sm", label: "Spend", href: hrefTo(view, "insights") });
-  if (caps.length === 0) return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`${unread.length > 0 ? unread : html`<p class="muted">${uiText(CAPS_EMPTY_TEXT, view.locale)}</p>`}<p class="card__sub">${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
-  const legend = html`<p class="keyrow"><span><i class="k tone-ok"></i>Open</span><span><i class="k tone-failed"></i>Full</span>${keys.length > 0 ? html`<span>${keys.join("; ")}</span>` : null}</p>`;
-  return ui.card({ title: uiText("Caps", view.locale), sub: uiText("percent used", view.locale), end: spend, body: html`<div class="capbars">${caps}</div>${legend}${unread}<p class="card__sub">${uiText(COUNT_WINDOWS_UTC_TEXT, view.locale)}</p>` });
 });
 
 // ---- Waitlists -------------------------------------------------------------------------------------------------------------

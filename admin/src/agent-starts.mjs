@@ -9,7 +9,7 @@ export function paidStartEnvironment(env, grantsEnv) {
 export async function checkAgentRerun(plan, { rm, env, grantsEnv, now, consumeRate = false } = {}) {
   if (!["local", "cron"].includes(plan?.kind)) return { refusal: "A forge rerun is person-only; agent reruns are local or cron runs." };
   const job = plan.job;
-  if (!job || job.command !== undefined || job.portfolio === true) return { refusal: "Command and portfolio runs cannot be started by an agent." };
+  if (!job || job.command !== undefined) return { refusal: "Command runs cannot be started by an agent." };
   const granted = paidStartEnvironment(env, grantsEnv);
   if (granted.refusal) return granted;
   const result = await rm.checkDispatchRun({ folder: job.folder, flow: job.flow, aiInvoked: true, consumeRate, env: granted.env, now });

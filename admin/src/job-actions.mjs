@@ -19,9 +19,9 @@ import { trackTouchAction } from "@edgehero/pi-dispatch/touch-outbox";
  *
  * REUSE, NEVER RE-DERIVE (this package's rule): the queue's own producers (`enqueueLocalJobReporting`,
  * `enqueueTriggerRunReporting`, `enqueueForgeJob`), the worker's cron loader (`loadSchedules`), the receiver's routing
- * rule (`jobNeeds`/`routeForgeJob`, capabilities.mjs, which `receiver/src/route.mjs` also calls), the worker's reserve
- * rule (`estimateReserve`) and the console answer's bound (`boundAnswerText`). Nothing here spells a key, a job id or a
- * routing decision of its own.
+ * rule (`jobNeeds`/`routeForgeJob`, capabilities.mjs, which `receiver/src/route.mjs` also calls) and the console
+ * answer's bound (`boundAnswerText`). Nothing here spells a key, a job id or a routing decision of its own. A plan
+ * carries no reserve: token budgets are gone (C2), so there is no hold to preview.
  */
 
 import * as nodeFs from "node:fs";
@@ -37,7 +37,6 @@ import { targetFor } from "@edgehero/pi-dispatch/run-history";
 import { isForgeKind } from "@edgehero/pi-dispatch/forges";
 import { mergeRuns, readMirroredRuns } from "@edgehero/pi-dispatch/run-mirror";
 import { gitDirty, localRepoProblem } from "@edgehero/pi-dispatch/git-dirty";
-import { estimateReserve } from "@edgehero/pi-dispatch/reserve-estimate";
 import { boundAnswerText, consoleAnswerBy, PANEL_ANSWER_BY } from "@edgehero/pi-dispatch/console-answer";
 import { runIdOf } from "@edgehero/pi-dispatch/recovery-queue";
 import * as steerInbox from "@edgehero/pi-dispatch/steer-inbox";
@@ -459,7 +458,6 @@ function runFieldsOf(run, flow) {
     ...(run.maxTurns !== undefined ? { maxTurns: run.maxTurns } : {}),
     ...(run.models !== undefined ? { models: run.models } : {}),
     ...(run.fallbackModels !== undefined ? { fallbackModels: run.fallbackModels } : {}),
-    ...(run.maxTokens !== undefined ? { maxTokens: run.maxTokens } : {}),
     ...(run.skillsDir !== undefined ? { skillsDir: run.skillsDir } : {}),
     ...(run.secrets !== undefined ? { secrets: run.secrets } : {}),
     ...(run.secretsProfile !== undefined ? { secretsProfile: run.secretsProfile } : {}),
@@ -469,7 +467,6 @@ function runFieldsOf(run, flow) {
     ...(run.awaitInput === true ? { awaitInput: true } : {}),
     ...(run.gates !== undefined ? { gates: run.gates } : {}),
     ...(run.gateTimeout !== undefined ? { gateTimeout: run.gateTimeout } : {}),
-    ...(run.gateBudgetRaiseTokens !== undefined ? { gateBudgetRaiseTokens: run.gateBudgetRaiseTokens } : {}),
     ...(run.progress === true ? { progress: true } : {}),
     ...(run.statusComment === true ? { statusComment: true } : {}),
     ...(run.recover === true ? { recover: true } : {}),
@@ -479,8 +476,8 @@ function runFieldsOf(run, flow) {
 }
 
 /**
- * What a forge plan shows an operator of the run it will start (issue #642): `{ flow, model, models, maxTokens,
- * secretsProfile, image, backend, packages?, mcp? }` off the job to enqueue, null where the job leaves the deployment's
+ * What a forge plan shows an operator of the run it will start (issue #642): `{ flow, model, models, secretsProfile,
+ * image, backend, packages?, mcp? }` off the job to enqueue, null where the job leaves the deployment's
  * default. NAMES ONLY: the secret profile's name, never a secret, and not even the `secrets` reference map (a
  * reference is a path into a vault, which an operator reading a preview does not need and a screenshot should not carry).
  */
@@ -490,7 +487,6 @@ function runFieldsSummary(job) {
     model: job.model === undefined ? null : job.provider !== undefined ? `${job.provider}/${job.model}` : job.model,
     models: job.models ?? null,
     ...(job.fallbackModels !== undefined ? { fallbackModels: job.fallbackModels } : {}),
-    maxTokens: job.maxTokens ?? null,
     secretsProfile: job.secretsProfile ?? null,
     image: job.image ?? null,
     backend: job.backend ?? null,
@@ -1092,21 +1088,16 @@ function notParkedRefusal(jobId, record) {
  * what the console's run page asks before it offers the form. The 10-minute semantic window can still swallow a forge
  * re-run; only the enqueue can tell, so `enqueueRerun` reports it.
  *
- * `plan`: `{ kind: "local" | "cron" | "forge", jobId (the run re-run), queue, job (the data to enqueue), reserve,
+ * `plan`: `{ kind: "local" | "cron" | "forge", jobId (the run re-run), queue, job (the data to enqueue),
  * schedule? (cron), forge? (the forge kind), deliveryId? (forge), runFields? (forge: `runFieldsSummary`, names only) }`.
- * `reserve` is `estimateReserve`'s over the deployment's `overlay`, `env` (its PI_MAX_TOKENS, PI_PROVIDER, PI_MODEL
- * and PI_ALLOWED_MODELS) and the worker's pickup inputs `modelEndpoints` (`{ models, endpoints }`) and `builtinModel`;
- * without the last two a job is judged not zero-rated, so the figure is never below what the worker holds.
+ * No reserve is carried: the token budgets it estimated went with the budgets (C2).
  */
 export async function planRerun({
   url,
   logsDir,
   jobId,
   triggersPath = null,
-  overlay = {},
   env = {},
-  modelEndpoints = null,
-  builtinModel = () => null,
   redisFn = makeRedisClient,
   queueFn = makeQueue,
   parseConnectionFn = parseConnection,
@@ -1132,7 +1123,6 @@ export async function planRerun({
     const found = await fleet.find(jobId);
     const data = found?.job?.data ?? null;
     const kind = typeof data?.kind === "string" ? data.kind : record.kind;
-    const reserveOf = (jobData) => estimateReserve(jobData, { overlay, env, modelEndpoints, builtinModel });
     // Issue #710: the cheap refusals first, through the very function the run page asks before it offers the form, so
     // the page never offers a re-run this refuses on the record and the data alone, and never hides one this would plan.
     // The record under the id asked for, so each sentence names it as before.
@@ -1144,7 +1134,7 @@ export async function planRerun({
       if (typeof triggersPath !== "string" || triggersPath === "") return { refusal: "the triggers file is not known here (PI_TRIGGERS_FILE), so a cron run cannot be rebuilt from its trigger" };
       let schedule;
       try {
-        schedule = loadSchedulesFn({ triggersFile: triggersPath, maxTokens: env.PI_MAX_TOKENS === "" ? null : (env.PI_MAX_TOKENS ?? null) }, { fleet: Boolean(env.PI_WORKER_NAME) }).find((s) => s.schedulerId === triggerId);
+        schedule = loadSchedulesFn({ triggersFile: triggersPath }, { fleet: Boolean(env.PI_WORKER_NAME) }).find((s) => s.schedulerId === triggerId);
       } catch (e) {
         return { refusal: `${e?.message ?? e}. Nothing was queued` };
       }
@@ -1153,7 +1143,7 @@ export async function planRerun({
       if (schedule.data?.command !== undefined) return { refusal: `cron trigger "${triggerId}" runs the command /${schedule.data.command}, and a /command run is not re-run from the console; it runs from its reviewed trigger` };
       const folder = folderRefusal(schedule.data.folder, { localRepoProblemFn, gitDirtyFn, cron: true });
       if (folder) return { refusal: `cron trigger "${triggerId}": ${folder}` };
-      return { plan: { kind: "cron", jobId, ...(touchSource ? { touchSource } : {}), queue: localQueueName(env), schedule, job: schedule.data, reserve: reserveOf(schedule.data) } };
+      return { plan: { kind: "cron", jobId, ...(touchSource ? { touchSource } : {}), queue: localQueueName(env), schedule, job: schedule.data } };
     }
 
     if (kind === "local") {
@@ -1162,7 +1152,7 @@ export async function planRerun({
       const folder = folderRefusal(data.folder, { localRepoProblemFn, gitDirtyFn });
       if (folder) return { refusal: folder };
       const job = { folder: data.folder, flow: data.flow, task: data.task };
-      return { plan: { kind: "local", jobId, ...(touchSource ? { touchSource } : {}), queue: localQueueName(env), job, reserve: reserveOf(job) } };
+      return { plan: { kind: "local", jobId, ...(touchSource ? { touchSource } : {}), queue: localQueueName(env), job } };
     }
 
     if (isForgeKind(kind)) {
@@ -1191,7 +1181,7 @@ export async function planRerun({
         ...(data.replica !== undefined ? { replica: data.replica } : {}),
         trigger: { ...(data.trigger ?? {}), deliveryId },
       };
-      return { plan: { kind: "forge", forge: kind, jobId, ...(touchSource ? { touchSource } : {}), deliveryId, queue: forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job), reserve: reserveOf(job) } };
+      return { plan: { kind: "forge", forge: kind, jobId, ...(touchSource ? { touchSource } : {}), deliveryId, queue: forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job) } };
     }
     // Unreachable: `rerunRefusalOf` refused every kind that is neither local nor a forge's. Kept so a kind added to one
     // and not the other still refuses rather than returning nothing.
@@ -1338,8 +1328,8 @@ export function parkedAnswerRefusalOf({ jobId, data, triggersPath, approval = fa
  * head branch, so it keeps the phrase, the receiver's rule), and a comment trigger the receiver would not route a reply
  * through (absent, a command, or without `run.resume`).
  *
- * `plan`: `{ kind: "parked-answer", jobId (the parked run), forge, deliveryId, queue, job, runFields, reserve }`, the
- * reserve over the same inputs as `planRerun`'s (`overlay`, `env`, `modelEndpoints`, `builtinModel`).
+ * `plan`: `{ kind: "parked-answer", jobId (the parked run), forge, deliveryId, queue, job, runFields, approval? }` where
+ * `approval` names the gate only; no reserve is carried (token budgets are gone, C2).
  *
  * `from` is who answers: `"console"` (a token, `by` its name) or `"panel"` (an answer signed with no token, issue #647
  * part 2: `by` is then the reserved `PANEL_ANSWER_BY` whatever is passed, and the worker's trail says
@@ -1356,10 +1346,7 @@ export async function planParkedAnswer({
   answerStoreFn = makeAnswerDraftStore,
   from = "console",
   triggersPath = null,
-  overlay = {},
   env = {},
-  modelEndpoints = null,
-  builtinModel = () => null,
   redisFn = makeRedisClient,
   queueFn = makeQueue,
   parseConnectionFn = parseConnection,
@@ -1451,7 +1438,7 @@ export async function planParkedAnswer({
         comment: { body: bounded.text, ...(delivery.association ? { author_association: CONSOLE_ASSOCIATION } : {}) },
       },
     };
-    return { plan: { kind: "parked-answer", jobId, forge: kind, deliveryId, queue: approvalQueue ?? forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job), ...(approval ? { approval: { requestId: record.approval.requestId, action: record.approval.action, cap: rule.run.gateBudgetRaiseTokens ?? null } } : {}), reserve: estimateReserve(approval && record.approval.action === "budget-raise" && bounded.text.trim() === "/approve" ? { ...job, maxTokens: rule.run.gateBudgetRaiseTokens } : job, { overlay, env, modelEndpoints, builtinModel }) } };
+    return { plan: { kind: "parked-answer", jobId, forge: kind, deliveryId, queue: approvalQueue ?? forgeQueueName(kind, job, fleet.hosts), job, runFields: runFieldsSummary(job), ...(approval ? { approval: { requestId: record.approval.requestId, action: record.approval.action } } : {}) } };
   } catch (err) {
     return { refusal: `could not read the parked run or its job (${boundedText(err?.message ?? String(err))}); nothing was queued` };
   } finally {

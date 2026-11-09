@@ -127,11 +127,9 @@ function triggerNotes(t, bundles = null) {
     t.skillsDir ? `skills ${shownPath(t.skillsDir)}` : null,
     t.image ? `image ${t.image}` : null,
     t.backend ? `venue ${t.backend}` : null,
-    t.maxTokens ? `job cap $${t.maxTokens}` : null,
     Array.isArray(t.fallbackModels) && t.fallbackModels.length > 0
       ? `fallbacks ${t.fallbackModels.join(", ")}`
       : null,
-    t.portfolio ? "writes the budget split" : null,
   ]
     .filter(Boolean)
     .join("; ");
@@ -210,11 +208,7 @@ const SETTINGS_SHOWN = Object.freeze([
   "provider",
   "model",
   "maxTurns",
-  "maxTokens",
   "concurrency",
-  "dailyTokenCap",
-  "weeklyTokenCap",
-  "monthlyTokenCap",
 ]);
 
 /** The settings editor: set a key to a value, or unset it back to its default (the `dispatch_set` tool's two shapes). */
@@ -357,9 +351,6 @@ export const configPauseWindows = fromSnapshot("Pause windows", (s, view) => {
 /** The scoped-limit fields a row may set, in the file's order, with how each reads. */
 const LIMIT_FIELDS = Object.freeze([
   ["concurrent", "at once"],
-  ["dayTokens", "a day"],
-  ["weekTokens", "a week"],
-  ["monthTokens", "a month"],
   ["memory", "memory"],
   ["cpus", "CPUs"],
   ["hostShare", "host share"],
@@ -442,7 +433,7 @@ export const configScopedLimits = fromSnapshot("Scoped limits", (s, view) => {
   )}${limitsEditor(view)}`;
 });
 
-/** The projects, envelope, priorities and revert editors. */
+/** The project editors. */
 function projectsEditor(view) {
   if (!canAct(view)) return null;
   const members = (required) =>
@@ -461,13 +452,7 @@ function projectsEditor(view) {
           { locale: view.locale },
         )}${members(true)}`,
         label: uiText("Preview the add", view.locale), locale: view.locale,
-      })}
-      <p class="note">
-        <a href="/insights/budget-split"
-          >${uiText("Edit the envelope, priorities and allocation history in Budget split", view.locale)}
-          </a
-        >.
-      </p>`,
+      })}`,
   );
 }
 
@@ -523,9 +508,7 @@ export const configProjects = fromSnapshot("Projects", (s, view) => {
     ),
     "The projects file declares no project.",
     view.locale,
-  )}${facts([
-    ["Allocation envelope", s.envelopeSet ? "set" : "not set"],
-  ])}${projectsEditor(view)}`;
+  )}${projectsEditor(view)}`;
 });
 
 /** The detail pages own these panels and writes; Configuration keeps one useful line per source. */

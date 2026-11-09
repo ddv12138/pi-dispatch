@@ -60,7 +60,7 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 		finish: ({ requestId, jobId } = {}) => store.finish({ requestId, jobId }),
 		async before(job) {
 			let configInvalid = false;
-			if (job.gates !== undefined || job.gateTimeout !== undefined || job.gateBudgetRaiseTokens !== undefined) {
+			if (job.gates !== undefined || job.gateTimeout !== undefined) {
 				try { validateApprovalConfig(job); } catch { configInvalid = true; }
 			}
 			const found = await store.find(job);
@@ -118,7 +118,6 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 				decision: { requestId: request.requestId, action: request.action, toolCallId: request.toolCallId, decision: request.decision.decision, text: request.decision.text },
 				request,
 				audit: approvalAudit(request),
-				...(request.action === "budget-raise" && request.decision.decision === "approved" ? { budgetCapTokens: job.gateBudgetRaiseTokens } : {}),
 			};
 		},
 		async afterPark({ job, session, metadata, rawJob = job } = {}) {
@@ -135,9 +134,8 @@ export function makeApprovalRuntime({ store, checkPolicy, now = () => Date.now()
 			}
 			const createdAt = now();
 			const resumeJob = { ...rawJob };
-			// The declaration's own fields stay (gates, gateTimeout, gateBudgetRaiseTokens, maxTokens): the digest this
-			// request is judged by reads them, so stripping one would revoke every budget-raise park at first resume.
-			// (The old maxCostMicros, the metered spend a resumed job must not inherit, no longer rides on a job.)
+			// The declaration's own fields stay (gates, gateTimeout): the digest this request is judged by reads them,
+			// so stripping one would revoke every parked approval at first resume.
 			for (const field of ["id", "approvalDecision", "approvalRequestId"]) delete resumeJob[field];
 			const out = await store.publish({
 				requestId, runId: job.id, kind: job.kind, repo: job.repo,
