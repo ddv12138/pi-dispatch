@@ -20,9 +20,9 @@
  * job is the fast one, the job never reaches the one that can. Jitter changes when the attempt happens, not
  * who wins it.
  *
- * THE ONE CAPABILITY DELIBERATELY NOT ROUTED is `run.resume`. A session key is `sha256(kind, repo, ref)`
- * and `session-store.mjs` records that it is "not random... anyone who knows the repository and the branch
- * can compute it", so publishing keys to route on them would disclose which repositories and branches a
+ * THE ONE CAPABILITY DELIBERATELY NOT ROUTED is `run.resume`. A session key is
+ * `sha256(kind, repo, forge namespace, ref)` and `session-store.mjs` records that it is "not random... anyone
+ * who knows the repository, project id and branch can compute it", so publishing keys to route on them would disclose which repositories and branches a
  * deployment works on, recoverable by guessing a repo name. That is more disclosing than everything else in
  * the registry combined. A resume that lands on the wrong host cold-starts and says so in the record.
  */

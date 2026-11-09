@@ -40,5 +40,6 @@
   "capacity": null,
   "earlier": null,
   "stalledRepick": false,
+  "namespaceId": null,
   "v": 2
 }

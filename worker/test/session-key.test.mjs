@@ -6,13 +6,18 @@ import { FORGE_KINDS } from "../src/forges.mjs";
 
 const ghIssue = { kind: "github", repo: "o/r", target: { type: "issue", number: 7 } };
 const ghPr = { kind: "github", repo: "o/r", target: { type: "pull_request", number: 8 } };
+const glIssue = { kind: "gitlab", repo: "o/r", projectId: 42, target: { type: "issue", number: 7 } };
+const azIssue = { kind: "azure", repo: "o/r", projectId: "azure-project", target: { type: "issue", number: 7 } };
+/** A forge job carrying the identity that forge actually puts on it. */
+const forgeIssue = (kind) => (kind === "gitlab" ? glIssue : kind === "azure" ? azIssue : { kind, repo: "o/r", target: { type: "issue", number: 7 } });
+const namespaceOf = (kind) => (kind === "gitlab" ? "42" : kind === "azure" ? "azure-project" : "");
 const sameRepo = { headRef: "pi/issue-7", headRepo: "o/r" };
 
 test("an issue job keys on the branch its own envelope names, so the issue and its PR converge", () => {
 	// This convergence IS the feature: issue #7's job opens PR #8 on pi/issue-7, and a later job on PR #8
 	// resolves the same key because the head ref is that branch. Keying on the NUMBER would give 7 and 8
 	// and never join -- the mistake a reviewer will propose.
-	assert.deepEqual(keyParts(ghIssue), ["github", "o/r", "pi/issue-7"]);
+	assert.deepEqual(keyParts(ghIssue), ["github", "o/r", "", "pi/issue-7"]);
 	assert.equal(sessionKeyFor(ghPr, sameRepo), sessionKeyFor(ghIssue));
 });
 
@@ -52,7 +57,54 @@ test("the delimiter stops a repo/ref boundary shift from colliding two distinct 
 });
 
 test("the same branch on the two forges is two transcripts, not one", () => {
-	assert.notEqual(sessionKeyFor(ghIssue), sessionKeyFor({ ...ghIssue, kind: "gitlab" }));
+	assert.notEqual(sessionKeyFor(ghIssue), sessionKeyFor(glIssue));
+	assert.notEqual(sessionKeyFor(ghIssue), sessionKeyFor(azIssue));
+});
+
+test("the immutable forge project id is in BOTH the issue and the request key", () => {
+	// Deleting and recreating a GitLab project under the same path issues a new numeric id. It must not resume
+	// the deleted project's transcript, so the id is hash material for the issue AND the pull/merge request.
+	const gl42 = { ...glIssue, projectId: 42 };
+	const gl43 = { ...glIssue, projectId: 43 };
+	assert.notEqual(sessionKeyFor(gl42), sessionKeyFor(gl43), "same repo, branch and issue number; a different project is a different session");
+	assert.equal(sessionKeyFor(gl42), sessionKeyFor({ ...gl42 }), "the same project id resolves the same key");
+	assert.deepEqual(keyParts(gl42), ["gitlab", "o/r", "42", "pi/issue-7"]);
+	const headRef = "pi/issue-7";
+	assert.notEqual(sessionKeyFor({ ...gl42, target: { type: "pull_request", number: 8 } }, { headRef, headRepo: "o/r" }), sessionKeyFor({ ...gl43, target: { type: "pull_request", number: 8 } }, { headRef, headRepo: "o/r" }), "a request key carries the namespace too");
+	// Azure's string id does the same, whether it rides `projectId` or the org/project/repository triple.
+	const azA = { ...azIssue, projectId: "a-project" };
+	const azB = { ...azIssue, projectId: "b-project" };
+	assert.notEqual(sessionKeyFor(azA), sessionKeyFor(azB));
+	assert.deepEqual(keyParts(azA), ["azure", "o/r", "a-project", "pi/issue-7"]);
+	assert.equal(sessionKeyFor({ ...azIssue, projectId: undefined, azure: { projectId: "from-triple" } }), sessionKeyFor({ ...azIssue, projectId: "from-triple" }));
+});
+
+test("a GitLab/Azure job with no usable project id resolves NO KEY -- never the old repo-only key", () => {
+	// Fail closed: a project deleted and recreated under the same path must cold-start, not resume through `repo`.
+	const invalid = {
+		// GitLab's id is a NUMBER on the job; a decimal string is not the value the receiver carries, so it fails closed.
+		gitlab: [undefined, null, "", "42", 0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, {}, []],
+		// Azure's id is a non-empty STRING, so "42" is a perfectly good identity and only emptiness/non-strings fail.
+		azure: [undefined, null, "", 0, -1, 1.5, {}, []],
+	};
+	for (const kind of ["gitlab", "azure"]) {
+		for (const projectId of invalid[kind]) {
+			const job = { ...forgeIssue(kind), projectId };
+			assert.equal(sessionKeyFor(job), null, `${kind} projectId ${JSON.stringify(projectId)} must not resolve`);
+			assert.equal(keyParts(job), null, `${kind} projectId ${JSON.stringify(projectId)} has no key material`);
+		}
+	}
+	assert.equal(sessionKeyFor({ kind: "azure", repo: "o/r", projectId: "", azure: { projectId: "" }, target: { type: "issue", number: 7 } }), null);
+	// A valid Azure triple is still an identity when `projectId` is absent.
+	assert.match(sessionKeyFor({ kind: "azure", repo: "o/r", azure: { projectId: "p" }, target: { type: "issue", number: 7 } }), SESSION_KEY_PATTERN);
+});
+
+test("GitHub and Forgejo keep the empty namespace and still resolve a key", () => {
+	for (const kind of ["github", "forgejo"]) {
+		const job = { kind, repo: "o/r", target: { type: "issue", number: 7 } };
+		assert.deepEqual(keyParts(job), [kind, "o/r", "", "pi/issue-7"]);
+		assert.match(sessionKeyFor(job), SESSION_KEY_PATTERN);
+	}
 });
 
 test("a cron job keys on its scheduler id -- operator-authored, chosen by nobody untrusted", () => {
@@ -72,7 +124,7 @@ test("a job with no trigger entry that could have armed run.resume resolves null
 });
 
 test("the function is total: no input throws, because a throw here would fail a job over a cache miss", () => {
-	for (const job of [undefined, null, {}, { kind: "github" }, { kind: "github", repo: "o/r" }, { kind: "nonsense", repo: "o/r" }, { kind: "github", repo: 7, target: { type: "issue", number: 1 } }, { kind: "github", repo: "o/r", target: { type: "issue", number: "not-a-number" } }, { kind: "github", repo: "o/r", target: { type: "issue", number: 0 } }]) {
+	for (const job of [undefined, null, {}, { kind: "github" }, { kind: "github", repo: "o/r" }, { kind: "nonsense", repo: "o/r" }, { kind: "github", repo: 7, target: { type: "issue", number: 1 } }, { kind: "github", repo: "o/r", target: { type: "issue", number: "not-a-number" } }, { kind: "github", repo: "o/r", target: { type: "issue", number: 0 } }, { kind: "gitlab", repo: "o/r", target: { type: "issue", number: 7 } }, { kind: "gitlab", repo: "o/r", projectId: "42", target: { type: "issue", number: 7 } }, { kind: "azure", repo: "o/r", azure: {}, target: { type: "issue", number: 7 } }]) {
 		assert.doesNotThrow(() => sessionKeyFor(job), `sessionKeyFor(${JSON.stringify(job)}) must not throw`);
 		assert.equal(sessionKeyFor(job), null, `sessionKeyFor(${JSON.stringify(job)}) must be a cold start`);
 	}
@@ -87,7 +139,7 @@ test("the key is a hash, so an attacker-chosen ref never becomes a host path seg
 });
 
 test("the branch half comes from branch.mjs, so the key and the envelope cannot drift", () => {
-	assert.deepEqual(keyParts(ghIssue), ["github", "o/r", issueBranch(7)]);
+	assert.deepEqual(keyParts(ghIssue), ["github", "o/r", "", issueBranch(7)]);
 });
 
 test("every forge the table knows resolves a session key -- none of them cold-starts forever", () => {
@@ -97,15 +149,15 @@ test("every forge the table knows resolves a session key -- none of them cold-st
 	// over the table so a forge added later fails HERE rather than resuming nothing in silence.
 	for (const kind of FORGE_KINDS) {
 		assert.deepEqual(
-			keyParts({ kind, repo: "o/r", target: { type: "issue", number: 7 } }),
-			[kind, "o/r", issueBranch(7)],
+			keyParts(forgeIssue(kind)),
+			[kind, "o/r", namespaceOf(kind), issueBranch(7)],
 			`${kind}: an issue-triggered job must key on the branch its own envelope names`,
 		);
 	}
 });
 
 test("two forges never share a key for the same repo and number", () => {
-	const keys = FORGE_KINDS.map((kind) => sessionKeyFor({ kind, repo: "o/r", target: { type: "issue", number: 7 } }));
+	const keys = FORGE_KINDS.map((kind) => sessionKeyFor(forgeIssue(kind)));
 	assert.equal(new Set(keys).size, keys.length, "the forge is in the key material, so one forge's transcript can never be handed to another's job");
 });
 
@@ -128,7 +180,7 @@ test("a replica-carrying job keys IDENTICALLY to an unreplicated one -- and that
 	// replica index now has to reach keyParts as well.
 	const r1 = { ...ghIssue, replica: 1, replicas: 2 };
 	const r2 = { ...ghIssue, replica: 2, replicas: 2 };
-	assert.deepEqual(keyParts(r1), ["github", "o/r", "pi/issue-7"]);
+	assert.deepEqual(keyParts(r1), ["github", "o/r", "", "pi/issue-7"]);
 	assert.equal(sessionKeyFor(r1), sessionKeyFor(r2));
 	assert.equal(sessionKeyFor(r1), sessionKeyFor(ghIssue));
 	// The branch the two jobs are actually told to push to, by contrast, differs -- which is the whole
@@ -141,10 +193,10 @@ test("the replica/session LOCK holds on EVERY forge, not just github (#187)", ()
 	// Same reading as the github lock above: if this breaks, the triggers.mjs refusal went, and the replica
 	// index now has to reach keyParts on all four forges rather than one.
 	for (const kind of ["gitlab", "forgejo", "azure"]) {
-		const base = { kind, repo: "o/r", target: { type: "issue", number: 7 } };
+		const base = forgeIssue(kind);
 		const r1 = { ...base, replica: 1, replicas: 2 };
 		const r2 = { ...base, replica: 2, replicas: 2 };
-		assert.deepEqual(keyParts(r1), [kind, "o/r", "pi/issue-7"], `${kind} keys on the UNSUFFIXED branch`);
+		assert.deepEqual(keyParts(r1), [kind, "o/r", namespaceOf(kind), "pi/issue-7"], `${kind} keys on the UNSUFFIXED branch`);
 		assert.equal(sessionKeyFor(r1), sessionKeyFor(r2), `${kind}: both replicas resolve one key`);
 		assert.equal(sessionKeyFor(r1), sessionKeyFor(base), `${kind}: and the same key an unreplicated run resolves`);
 	}
@@ -152,11 +204,31 @@ test("the replica/session LOCK holds on EVERY forge, not just github (#187)", ()
 
 // --- a run RECORD's key (issue #647): the admin's chain counter and `pi-dispatch chat` share this one rule ---
 
+test("a run record's namespaceId re-derives exactly its job's key, and a GitLab record without one cold-starts", () => {
+	for (const kind of FORGE_KINDS) {
+		const job = forgeIssue(kind);
+		const record = { kind, target: "o/r#7", triggerType: "issues", namespaceId: namespaceOf(kind) };
+		assert.equal(sessionKeyOfRecord(record), sessionKeyFor(job), `${kind}: the record names the directory its job wrote`);
+	}
+	assert.equal(sessionKeyOfRecord({ kind: "gitlab", target: "o/r#7", triggerType: "issues", namespaceId: "43" }), sessionKeyFor({ ...glIssue, projectId: 43 }));
+	// No dual-read and no fallback: a GitLab/Azure record whose job carried no usable id has no key at all.
+	for (const kind of ["gitlab", "azure"]) {
+		assert.equal(sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues" }), null, `${kind}: missing namespaceId is a cold start`);
+		assert.equal(sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues", namespaceId: "" }), null, `${kind}: an empty namespace is not an identity`);
+		assert.equal(sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues", namespaceId: null }), null, `${kind}: a null namespace is not an identity`);
+	}
+	// GitHub/Forgejo have no repository id yet, so empty is their valid namespace.
+	for (const kind of ["github", "forgejo"]) {
+		assert.equal(sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues", namespaceId: "" }), sessionKeyFor({ kind, repo: "o/r", target: { type: "issue", number: 7 } }));
+		assert.equal(sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues" }), sessionKeyFor({ kind, repo: "o/r", target: { type: "issue", number: 7 } }));
+	}
+});
+
 test("a record's key is the key its job resolved: a forge issue from its target, a cron run from its scheduler id", () => {
 	for (const kind of FORGE_KINDS) {
-		const key = sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues" });
+		const key = sessionKeyOfRecord({ kind, target: "o/r#7", triggerType: "issues", namespaceId: namespaceOf(kind) });
 		assert.match(key, SESSION_KEY_PATTERN, `${kind}: a 32-hex key`);
-		assert.equal(key, sessionKeyFor({ kind, repo: "o/r", target: { type: "issue", number: 7 } }), `${kind}: the job's own key, so a record names the directory its job wrote`);
+		assert.equal(key, sessionKeyFor(forgeIssue(kind)), `${kind}: the job's own key, so a record names the directory its job wrote`);
 	}
 	const cron = sessionKeyFor({ kind: "local", trigger: { id: "nightly.docs" } });
 	assert.equal(sessionKeyOfRecord({ kind: "local", jobId: "repeat:nightly.docs:1760000000000" }), cron);

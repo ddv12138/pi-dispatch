@@ -83,7 +83,7 @@ const CONTEXT_FILE = "context";
  * The venue whose container produced the transcript beside it (issue #277): a backend name, one line.
  *
  * A SIDECAR, NOT KEY MATERIAL. `DES-SESSION-KEY-IS-DERIVED-NOT-INDEXED` makes the key a pure function of
- * (kind, repo, ref), and a venue in the key would fork a trigger moved between venues into a second lineage
+ * (kind, repo, forge namespace, ref), and a venue in the key would fork a trigger moved between venues into a second lineage
  * that nothing ever sweeps. As a sidecar it GATES the one lineage instead: the move costs one cold start.
  *
  * ABSENT READS AS `UNATTRIBUTED_BACKEND`, never as the deployment default. Every transcript written before this
@@ -341,8 +341,8 @@ export function makeSessionStore({
 			// CLI run, an unresolvable head ref), so it gets no mount and no transcript on disk.
 			if (key === null) return null;
 
-			// The model this job will actually run, for the context bound. A key is (kind, repo, ref) and
-			// carries NO model, so two triggers on one issue can name different ones, and the same token
+			// The model this job will actually run, for the context bound. A key is (kind, repo, forge namespace,
+			// ref) and carries NO model, so two triggers on one issue can name different ones, and the same token
 			// count is 78% of a 32k window and 2.5% of a 1M one. Carried on the session object rather than
 			// read again at promote time, so the reading is stamped with the model that produced it.
 			const modelId = modelIdentity(job);
@@ -847,8 +847,8 @@ export function makeSessionStore({
 			return;
 		}
 		if (!context) return;
-		// The model rides along because the ratio is meaningless without it: a key is (kind, repo, ref) and
-		// carries no model, so two triggers on one issue can run different ones, and 25k tokens is 78% of a
+		// The model rides along because the ratio is meaningless without it: a key is (kind, repo, forge
+		// namespace, ref) and carries no model, so two triggers on one issue can run different ones, and 25k tokens is 78% of a
 		// 32k window and 2.5% of a 1M one. A reading from another model is not a reading about this one.
 		const stamp = session.modelId ? ` ${session.modelId}` : "";
 		writeSidecar(dir, CONTEXT_FILE, session.key, `${context.tokens} ${context.window}${stamp}`);
@@ -1129,7 +1129,7 @@ export function makeSessionStore({
 	 * Every sidecar read goes through here, and it is the same load-bearing check `inspectFile` makes on
 	 * the transcript: **`lstat`, regular files only.** The canonical store is host-only and never mounted,
 	 * so nothing in a container can plant a link here -- but the directory NAME is derived rather than
-	 * random (`sha256(kind, repo, ref)`), so anyone who knows the repository and the branch can compute it
+	 * random (`sha256(kind, repo, forge namespace, ref)`), so anyone who knows the repository, project id and branch can compute it
 	 * and pre-create the path. `readFileSync` and `writeFileSync` both follow links, which would turn a
 	 * planted symlink into a read of any worker-readable file on the gate's path, and a promotion into a
 	 * truncating write of any worker-writable one. The transcript has been guarded against exactly this

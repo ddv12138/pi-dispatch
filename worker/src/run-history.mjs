@@ -21,6 +21,7 @@ import { EARLIER_MAX, recordedEarlier } from "./run-earlier.mjs";
 import { recordReasonOf } from "./record-reason.mjs";
 import { WATCH_ID_RE } from "./watch-contract.mjs";
 import { recordedWatchDecision } from "./watch-record.mjs";
+import { namespaceIdFor } from "./session-key.mjs";
 
 export { EARLIER_MAX, recordedEarlier };
 
@@ -1291,6 +1292,13 @@ export function buildRecord({ job, result, error, startedAt, endedAt, host = nul
 		...(touchTracking ? { touchTrackingVersion: 1, touchScopeId: touchScopeOf(data, host) } : {}),
 		...(Array.isArray(source.touches) ? { touches: source.touches.slice(0, 16).map(cleanTouch).filter(Boolean) } : {}),
 		...(source.touchLineageSkipped === "source-unavailable" ? { touchLineageSkipped: "source-unavailable" } : {}),
+		// The forge's IMMUTABLE namespace for the session key (P3): the GitLab numeric project id as a decimal string,
+		// the Azure project id string, and the empty string on GitHub/Forgejo, whose jobs carry no repository id yet.
+		// NOT the budget/project scope in `project` above -- this is the forge's own identity, and `sessionKeyOfRecord`
+		// reads exactly this to re-derive the key its job resolved. Null on a local/watch run and on a GitLab/Azure
+		// record whose job carried no usable id (which is a cold start, never the old repo-only key). Unconditional and
+		// TAIL position, after every conditional key and before `v`, on this record's field-order contract.
+		namespaceId: namespaceIdFor({ ...data, kind }),
 		// The record's version (issue #761, `RUN_RECORD_VERSION`), the LAST key on every record and after every conditional
 		// key, so it stays last whatever a record carries and every earlier position is untouched. Unconditional: a reader
 		// asks one key, and a missing one reads as 1.

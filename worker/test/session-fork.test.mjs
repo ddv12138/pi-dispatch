@@ -43,6 +43,22 @@ test("managed forks and their same-repo PR followups share only their own namesp
 	assert.equal(sessionKeyFor({ ...job, target: { type: "issue", number: 8 } }), null, "a claimed root cannot move across issues");
 });
 
+test("a fork's root key keeps the immutable forge namespace, so a recreated project cannot rebuild it", () => {
+	// The fork's branch name carries the root key, but the root is re-derived from the PR's own job. The namespace
+	// segment must survive that reconstruction: dropping it would compute a root for the old repo-only material.
+	const glIssue = { kind: "gitlab", repo: "group/project", projectId: 42, target: { type: "issue", number: 7 }, resume: true };
+	const glRoot = sessionKeyFor(glIssue);
+	const glForkId = "c".repeat(32);
+	assert.equal(sessionKeyFor({ ...glIssue, fork: { rootKey: glRoot, id: glForkId } }), `${glRoot}.${glForkId}`);
+	const request = { ...glIssue, target: { type: "pull_request", number: 99 } };
+	const headRef = `pi/issue-7-fork-${glForkId}`;
+	assert.equal(sessionKeyFor(request, { headRef, headRepo: glIssue.repo }), `${glRoot}.${glForkId}`, "the same project's PR reaches the same fork root");
+	assert.equal(sessionKeyOfRecord({ kind: "gitlab", target: "group/project#7", namespaceId: "42", fork: { id: glForkId } }), `${glRoot}.${glForkId}`, "a record carries the namespace the fork root was built from");
+	assert.equal(sessionKeyOfRecord({ kind: "gitlab", target: "group/project#7", fork: { id: glForkId } }), null, "a GitLab record with no namespace has no key");
+	// The old material is gone: a fork claim computed against a different project id does not validate.
+	assert.equal(sessionKeyFor({ ...glIssue, projectId: 43, fork: { rootKey: glRoot, id: glForkId } }), null);
+});
+
 test("fork promotion, stamps and resume never modify the original canonical session", () => {
 	const { root, sessionsDir, store, body, originalDir } = fixture();
 	const original = readFileSync(join(originalDir, "current.jsonl"));
