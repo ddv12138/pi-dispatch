@@ -1395,10 +1395,23 @@ test("keyless: a model on an endpoint WITHOUT \"keyless\": true refuses (the fla
 	assert.throws(() => buildContainerEnv({ ...klBase, modelEndpoints: klSnapshot(allKeyed) }), isKeylessRefusal);
 });
 
-test("keyless: the apiKey must be exactly \"$PI_DISPATCH_KEYLESS\"; a literal, another variable, a command or none refuses", { skip }, () => {
-	for (const apiKey of ["ollama", "$OLLAMA_KEY", "${PI_DISPATCH_KEYLESS}", "!echo x", undefined]) {
-		assert.throws(() => buildContainerEnv({ ...klBase, modelEndpoints: klSnapshot(klModels({ apiKey })) }), isKeylessRefusal, String(apiKey));
-	}
+test("keyless: only the exact \"$PI_DISPATCH_KEYLESS\" asks for the keyless path; every other apiKey refuses, naming its own fault", { skip }, () => {
+	// Issue #503 predates custom provider keys: a `$VAR` apiKey is now a supported way IN when the worker environment
+	// carries it, so an unset one is refused for THAT (set it there), never described as a keyless failure. A literal or
+	// a `!cmd` is refused because pi's models.json takes only a variable reference the gate can resolve.
+	const refused = (apiKey, expected) =>
+		assert.throws(
+			() => buildContainerEnv({ ...klBase, modelEndpoints: klSnapshot(klModels({ apiKey })) }),
+			(e) => e.piDispatchConfig === true && (typeof expected === "function" ? expected(e) : expected.test(e.message)),
+			String(apiKey),
+		);
+	refused("ollama", /^models\.json apiKey must be a \$ENV_NAME or \$\{ENV_NAME\} reference/);
+	refused("!echo x", /^models\.json apiKey must be a \$ENV_NAME or \$\{ENV_NAME\} reference/);
+	refused("$OLLAMA_KEY", /^provider local-ollama has no configured credential in the worker environment\. Set OLLAMA_KEY there/);
+	// Both spellings pi resolves are the marker, so the keyless verdict answers both -- and names the exact one it needs.
+	for (const apiKey of ["${PI_DISPATCH_KEYLESS}", undefined]) refused(apiKey, isKeylessRefusal);
+	// The same `$VAR` passes when the worker carries it: the custom-key way in is untouched by the keyless branch.
+	assert.equal(buildContainerEnv({ ...klBase, hostEnv: { HOME: "/root", OLLAMA_KEY: "sk-o" }, modelEndpoints: klSnapshot(klModels({ apiKey: "$OLLAMA_KEY" })) }).OLLAMA_KEY, "sk-o");
 });
 
 test("keyless: no models, no overlay entry, no endpoint declared, or no snapshot at all refuses", { skip }, () => {

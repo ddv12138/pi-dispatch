@@ -1249,7 +1249,12 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// `modelEndpoints` so a later gate reads the same declaration this one leased against. With no endpoints,
 		// only a custom main provider requires the overlay snapshot for its declared API-key variable.
 		let endpointSnapshot = failoverSnapshot;
-		const credentialProvider = selectedEffective?.provider ?? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null).provider;
+		// `settings` can be NULL here: the read above CAPTURES its throw instead of raising it, so a job that will be
+		// refused or retried below still reaches this line. `effectiveJobOf` dereferences `settings`, so it is asked
+		// only with a readable one -- otherwise a throw at the read became a TypeError here, replacing the error the
+		// inner try re-raises, records and turns into an UnrecoverableError with one that records nothing.
+		const settingsReadable = settings !== null && !settingsThrew && settings.invalid !== true;
+		const credentialProvider = selectedEffective?.provider ?? (settingsReadable ? effectiveJobOf(job.data, settings, deps?.allowedModels ?? null).provider : null) ?? job?.provider ?? job?.data?.provider ?? null;
 		// BOTH providers, and that "or" is the fix: the snapshot is what the credential gate reads the key variable
 		// out of, and that gate is asked about `job.provider`. Asking only about the SELECTION's provider left a
 		// custom provider's key unresolvable whenever the two disagreed (the selection resolving a builtin one),
@@ -1260,21 +1265,28 @@ export function makeProcessor({ cancelJob, stopContainer, containerName = (job) 
 		// which is the wrong fault, and the operator is told to set a credential they already set. A skipped
 		// snapshot was silent, so that misdiagnosis had nothing to correct it with. Booleans and a reason token
 		// only, never a message: a selection error can quote file text.
-		const snapshotWanted = Boolean(modelEndpoints) && (modelEndpoints().length > 0 || needsCredentialOverlay);
+		//
+		// THE DECLARATION IS A READ, so only a job that can use it asks for it: `snapshotAllowed` is settled FIRST and
+		// `modelEndpoints()` is called only when it holds. Asking for the endpoint COUNT just to log a skip read the
+		// file for a job already refused on its settings, and made that refusal into the other file's read error when
+		// both were unreadable. The skip is still logged; what it cannot say is whether endpoints are declared.
 		const snapshotAllowed = failoverSnapshot === null && !selectionError && !selectionRefused && !settingsThrew && !settings?.invalid;
-		if (snapshotWanted && !snapshotAllowed) {
+		const snapshotWanted = snapshotAllowed && Boolean(modelEndpoints) && (needsCredentialOverlay || modelEndpoints().length > 0);
+		if (!snapshotAllowed && Boolean(modelEndpoints)) {
 			deps?.log?.("endpoint_snapshot_skipped", {
 				jobId: job.id,
-				provider: credentialProvider ?? null,
+				provider: credentialProvider,
 				customProvider: needsCredentialOverlay,
 				failover: failoverSnapshot !== null,
 				selectionError: selectionError !== null,
 				selectionRefused: typeof selectionRefused === "string" ? selectionRefused : null,
 				settingsThrew,
 				settingsInvalid: settings?.invalid === true,
+				// Not read, so not known: a false here would claim this deployment declares no endpoint.
+				endpointsDeclared: null,
 			});
 		}
-		if (snapshotAllowed && snapshotWanted) {
+		if (snapshotWanted) {
 			let endpoints = [];
 			let models = null;
 			let set = [];

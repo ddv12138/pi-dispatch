@@ -162,10 +162,12 @@ export function resolveProviderCredential({ provider, hostEnv, authFromPi = fals
 	// after an auth.json read, which could only end in a refusal too, and whose wording ("set the key in .env, or run
 	// `pi login`") was advice no custom provider can follow.
 	if (candidates.length === 0 && !piProviders().includes(provider)) {
-		const ids = keylessEndpointsFor(provider, modelEndpoints);
+		// ONE verdict, kept whole: its `endpoints` answer the keyless pass, and its `why` is what the refusal names
+		// when the pass does not happen -- the fact the operator has to change, instead of a reserved-name complaint.
+		const keyless = keylessVerdictOf(provider, modelEndpoints);
 		// The one variable this branch writes, fixed and non-secret. It is the credential's slot in the closed map,
 		// so buildContainerEnv carries it exactly when this gate passes keyless, and on no other job.
-		if (ids !== null) return { [KEYLESS_ENV_NAME]: KEYLESS_VALUE };
+		if (keyless?.keyless) return { [KEYLESS_ENV_NAME]: KEYLESS_VALUE };
 		const customKey = overlayApiKeyVariable(modelEndpoints?.models, provider);
 		if (customKey) {
 			const value = hostEnv?.[customKey];
@@ -185,7 +187,7 @@ export function resolveProviderCredential({ provider, hostEnv, authFromPi = fals
 			error.code = unreadable.code;
 			throw error;
 		}
-		throw configError(unknownProviderMessage(provider, hintOverlay(provider, modelEndpoints, hostEnv)));
+		throw configError(unknownProviderMessage(provider, hintOverlay(provider, modelEndpoints, hostEnv), keyless?.why ?? ""));
 	}
 	const held = candidates
 		.map((name) => [name, hostEnv[name]])
@@ -227,14 +229,26 @@ export const KEYLESS_VALUE = "keyless";
  * snapshot, or no endpoint declared, is null: with nothing declared the overlay is never read, and nothing is keyless.
  */
 export function keylessEndpointsFor(provider, modelEndpoints) {
-	const endpoints = modelEndpoints?.endpoints;
-	if (!Array.isArray(endpoints) || endpoints.length === 0) return null;
-	const verdict = keylessVerdict({ models: modelEndpoints.models, provider, endpoints });
-	return verdict.keyless ? verdict.endpoints : null;
+	const verdict = keylessVerdictOf(provider, modelEndpoints);
+	return verdict?.keyless ? verdict.endpoints : null;
 }
 
-function unknownProviderMessage(provider, overlay = {}) {
-	return `pi has no provider "${provider}", so there is no key variable to give it a key.${providerRenameHint(provider, { ...overlay, piProviders: piProviders() })} Use one of pi's provider ids with its key in the worker environment or in pi's auth.json, or, ${KEYLESS_HOW}.`;
+/**
+ * The whole keyless verdict for this provider under the pickup's snapshot, or null when no endpoint is declared (with
+ * nothing declared there is no verdict to give). The refusal needs `why` as much as the pass needs `endpoints`.
+ */
+function keylessVerdictOf(provider, modelEndpoints) {
+	const endpoints = modelEndpoints?.endpoints;
+	if (!Array.isArray(endpoints) || endpoints.length === 0) return null;
+	return keylessVerdict({ models: modelEndpoints.models, provider, endpoints });
+}
+
+function unknownProviderMessage(provider, overlay = {}, keylessWhy = "") {
+	// A declared custom provider that is NOT keyless is refused with the reason `keylessVerdict` gave: which model or
+	// endpoint failed, and what credential it carried. Appended rather than spliced in, so the rename hint's pinned
+	// sentence stays contiguous, and empty (nothing to add) when there was no verdict to quote.
+	const why = typeof keylessWhy === "string" && keylessWhy !== "" ? ` The keyless path does not apply: ${keylessWhy}.` : "";
+	return `pi has no provider "${provider}", so there is no key variable to give it a key.${providerRenameHint(provider, { ...overlay, piProviders: piProviders() })} Use one of pi's provider ids with its key in the worker environment or in pi's auth.json, or, ${KEYLESS_HOW}.${why}`;
 }
 
 /**

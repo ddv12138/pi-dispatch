@@ -757,13 +757,13 @@ test("doctor: a keyless custom provider is ✓ exactly when the worker's gate pa
 	const provider = (extra = {}) => ({ providers: { "local-ollama": { api: "openai-completions", baseUrl: "http://host.docker.internal:11434/v1", apiKey: "$PI_DISPATCH_KEYLESS", models: [{ id: "qwen" }], ...extra } } });
 	const cases = [
 		{ name: "keyless", endpoints: [MAC], models: provider(), keyless: true },
-		// Since custom provider keys, an apiKey naming the worker's own keyless variable is a configuration
-		// problem said before the keyless verdict's why: the worker refuses the same declaration with the same
-		// reason, so the agreement bolt holds on the new lines.
-		{ name: "endpoint not keyless", endpoints: [{ ...MAC, keyless: false }], models: provider(), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/, fix: /models\.json apiKey names reserved worker variable PI_DISPATCH_KEYLESS/ },
-		{ name: "one model off-endpoint", endpoints: [MAC], models: provider({ models: [{ id: "qwen" }, { id: "big", baseUrl: "https://api.example.com/v1" }] }), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/ },
+		// The keyless marker is the way INTO the keyless path, not a reserved-name mistake: when the path does not
+		// apply, the worker and doctor now both name the reason from the one verdict, so these lines are the "not a
+		// provider pi has" one with `it is not keyless because ...` appended (the agreement bolt, on the new lines).
+		{ name: "endpoint not keyless", endpoints: [{ ...MAC, keyless: false }], models: provider(), keyless: false, line: /✗ PI_PROVIDER is "local-ollama", which is not a provider pi has; it is not keyless because the endpoint mac-ollama serving its model "qwen" is not "keyless": true/, fix: /or, for a custom provider served by a local model server, declare that server in model-endpoints\.json with "keyless": true/ },
+		{ name: "one model off-endpoint", endpoints: [MAC], models: provider({ models: [{ id: "qwen" }, { id: "big", baseUrl: "https://api.example.com/v1" }] }), keyless: false, line: /✗ PI_PROVIDER is "local-ollama", which is not a provider pi has; it is not keyless because its model "big" is not served by a declared model endpoint/ },
 		{ name: "literal key", endpoints: [MAC], models: provider({ apiKey: "ollama" }), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/, fix: /models\.json apiKey must be a \$ENV_NAME or \$\{ENV_NAME\} reference/ },
-		{ name: "nothing declared", endpoints: [], models: provider(), keyless: false, line: /✗ Provider key configuration is invalid \(local-ollama\)/ },
+		{ name: "nothing declared", endpoints: [], models: provider(), keyless: false, line: /✗ PI_PROVIDER is "local-ollama", which is not a provider pi has/ },
 	];
 	for (const c of cases) {
 		const overlay = tempDir("pi-overlay-keyless-");

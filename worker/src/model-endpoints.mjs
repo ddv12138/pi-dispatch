@@ -573,6 +573,11 @@ export function overlayApiKeyProblem(models, provider) {
 	if (overlayApiKeyVariable(models, provider)) return null;
 	const match = typeof entry.apiKey === "string" ? /^(?:\$([A-Za-z_][A-Za-z0-9_]*)|\$\{([A-Za-z_][A-Za-z0-9_]*)\})$/.exec(entry.apiKey) : null;
 	const name = match?.[1] ?? match?.[2] ?? null;
+	// The keyless marker (in either spelling pi resolves) is not a reserved-name mistake: it is how a provider ASKS
+	// for the keyless path, and whether that path applies is `keylessVerdict`'s answer, with its own reason
+	// (env-allowlist and doctor both say it). Left through, so the refusal names the model, endpoint or exact
+	// spelling that failed, never "reserved worker variable PI_DISPATCH_KEYLESS".
+	if (name === KEYLESS_ENV_NAME) return null;
 	return name ? `models.json apiKey names reserved worker variable ${name}` : "models.json apiKey must be a $ENV_NAME or ${ENV_NAME} reference";
 }
 
