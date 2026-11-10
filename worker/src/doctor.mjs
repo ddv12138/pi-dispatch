@@ -7033,7 +7033,7 @@ export async function githubProtectionPreflight(spawn, repositories, runTimeouts
 							ok: false,
 							warn: true,
 							label: `default branch of ${repo} is not protected -- the worker refuses forge jobs on unprotected repos before any spend (REQ-BRANCH-PROTECTION-PRECONDITION)`,
-							fix: `protect ${name} at https://github.com/${repo}/settings/branches (see SECURITY.md) -- a read-only preflight, doctor never changes repo settings`,
+							fix: `protect ${name} at https://github.com/${repo}/settings/branches -- a read-only preflight, doctor never changes repo settings`,
 						},
 		);
 	}

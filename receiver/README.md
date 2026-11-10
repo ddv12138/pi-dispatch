@@ -35,8 +35,7 @@ phrase goes to that running job instead of starting a second one, once the comme
 
 The receiver checks each delivery's signature, the bot loop guard, the forge's own permission check and
 dedup. The worker then applies quiet hours, the image preflight, branch protection and the spend caps.
-Who may fire a trigger is decided by your forge. See
-[`SECURITY.md`](https://github.com/edgehero/pi-dispatch/blob/main/SECURITY.md) for each forge's rule.
+Who may fire a trigger is decided by your forge.
 
 Configuration comes from the environment (the worker's `.env.example` lists all of it). The main settings
 are `WEBHOOK_SECRET`, `VALKEY_URL` and `VALKEY_PASSWORD`, `PI_TRIGGERS_FILE`, `RECEIVER_PORT` and

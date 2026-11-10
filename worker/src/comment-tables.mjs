@@ -144,7 +144,7 @@ export const REFUSAL_COMMENTS = Object.freeze({
 	"skills-dir-missing": "Refused: this trigger set `run.skillsDir`, and that path is absent or is not a directory on the worker host. The job would have run without the skills the flow was written against. Not run.",
 	"secret-profile-unknown": "Refused: this trigger set `run.secrets`, and the resolver profile it names is not usable on this worker host. No profile of that name is declared, or its resolver is absent or not executable. The job would have started with those variables unset, and an agent that gets a 401 writes a plausible report and exits 0. Run `pi-dispatch doctor` on the worker to see which profiles it has. Not run.",
 	"secret-profile-ambiguous": "Refused: this trigger set `run.secrets`, and the resolver profile it names is declared twice on this worker host, once in the environment and once in the settings overlay. Neither wins, on purpose: the job would otherwise run against whichever one happened to be picked. Remove one of the two. Not run.",
-	"unprotected-branch": "Refused: the default branch is not protected. See SECURITY.md.",
+	"unprotected-branch": "Refused: the default branch is not protected. Protect it -- require pull-request reviews and forbid force-pushes. Branch protection is the only technical gate between the agent and the branch. Not run.",
 	"local-folder-project-changed": "Refused: this job's folder now leads into another project's folder, so no container was started and nothing was spent. Not run.",
 	"config-refused": "Refused: this deployment is misconfigured, so the job could not be started. Ask the operator to run `pi-dispatch doctor`. Not run.",
 });

@@ -70,7 +70,6 @@ The global overlay, when `PI_GLOBAL_PI_DIR` is set, is a directory you populate 
 mounted read only into each job; file changes take effect on the next job, and changing its path needs the
 worker container recreated.
 
-Before you rely on it, read [`SECURITY.md`](https://github.com/edgehero/pi-dispatch/blob/main/SECURITY.md).
 In short: the agent can read the provider key and the GitHub PAT inside its container, and the guardrails
 that tell it not to leak them are prompt text. One fine-grained, repo-scoped PAT in `GITHUB_PAT` is shared
 by every job until you rotate it. pi-dispatch never merges anything, but the token can, so branch protection

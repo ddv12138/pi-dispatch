@@ -33,7 +33,6 @@ examples
 .pi
 .claude
 README.md
-SECURITY.md
 LICENSE
 
 # The admin workspace: a pi extension in the operator's session (DES-ADMIN-VIA-PI-EXTENSION);

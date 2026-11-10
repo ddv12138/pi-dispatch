@@ -11,7 +11,7 @@ explains all of it.
 > This directory holds the way to work with a deployment: the **web console** (`pi-dispatch-console`). It is not an
 > npm package. The service itself is the worker and CLI in [`worker/`](../worker/README.md) and the webhook edge in
 > [`receiver/`](../receiver/Dockerfile); the [main repo](https://github.com/edgehero/pi-dispatch) has the job image,
-> the docs (Docker, Podman, egress, every forge) and SECURITY.md. The console runs from the same `deploy-worker`
+> the docs (Docker, Podman, egress, every forge). The console runs from the same `deploy-worker`
 > image as the worker, in the Compose `console` profile.
 
 ## How it works
@@ -221,9 +221,7 @@ they are always the same release: rebuild and recreate both together.
 
 ### → **https://github.com/edgehero/pi-dispatch**
 
-MIT, self hosted. Read [`SECURITY.md`](https://github.com/edgehero/pi-dispatch/blob/main/SECURITY.md)
-before you rely on it: it states plainly what is and is not defended. Short version: the trust model is a
-GitHub Action's. Whoever can merge to your default branch can instruct the agent.
+MIT, self hosted. The trust model is a GitHub Action's: whoever can merge to your default branch can instruct the agent.
 
 ## Configuration in the browser
 
