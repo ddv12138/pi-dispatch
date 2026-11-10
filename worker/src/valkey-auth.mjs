@@ -81,7 +81,7 @@ export function valkeyPasswordProblem(value) {
 }
 
 /** The sentence that tells an operator how to make a good one. */
-export const VALKEY_PASSWORD_HOWTO = "`openssl rand -hex 32` makes one, or remove the line and let `pi-dispatch up` generate it";
+export const VALKEY_PASSWORD_HOWTO = "`openssl rand -hex 32` makes one; write it as VALKEY_PASSWORD in the deployment's .env";
 
 /**
  * The container command that starts Valkey with the password from its environment, as configuration on stdin (see the
@@ -148,7 +148,7 @@ export function valkeyDockerRunArgs({ port = 6379, deployment = null } = {}) {
  * use for). Empty value for a deployment with no password, which the start script reads as "start without one".
  */
 export function valkeyEnvFileText(password) {
-	return `# Written by pi-dispatch (pi-dispatch up) from VALKEY_PASSWORD in the deployment's .env; mode 0600.\n${VALKEY_PASSWORD_KEY}=${password ?? ""}\n`;
+	return `# Written by pi-dispatch from VALKEY_PASSWORD in the deployment's .env; mode 0600.\n${VALKEY_PASSWORD_KEY}=${password ?? ""}\n`;
 }
 
 /**
@@ -177,8 +177,8 @@ export function isLoopbackHost(hostname) {
 }
 
 /**
- * The "is it running?" half of a could-not-reach-Valkey line (issue #480, PR #488's review). `pi-dispatch up` is named
- * only for a loopback VALKEY_URL, the only Valkey `up` starts; a Valkey on another host is asked about by its host
+ * The "is it running?" half of a could-not-reach-Valkey line (issue #480, PR #488's review). The compose command is
+ * named only for a loopback VALKEY_URL, the only Valkey it starts; a Valkey on another host is asked about by its host
  * (`URL.hostname`: never userinfo, a path or a query), and a URL that does not parse by nothing at all.
  */
 export function valkeyDownHint(url) {
@@ -188,7 +188,7 @@ export function valkeyDownHint(url) {
 	} catch {
 		host = null;
 	}
-	if (host !== null && isLoopbackHost(host)) return "is it running? (`pi-dispatch up` in the deployment folder starts it)";
+	if (host !== null && isLoopbackHost(host)) return "is it running? (`docker compose --env-file .env -f deploy/docker-compose.yml up -d` in the deployment folder starts it)";
 	return host !== null ? `is the Valkey at ${host} running?` : "is it running?";
 }
 
@@ -205,7 +205,7 @@ export function valkeyAuthRefusal(err, { passwordSet, from = null, envPath = "th
 	}
 	if (/\bWRONGPASS\b|invalid password|\bNOAUTH\b/i.test(text)) {
 		const source = from === "VALKEY_URL" ? "the password in VALKEY_URL" : `${VALKEY_PASSWORD_KEY} from ${from ?? envPath}`;
-		return `the Valkey VALKEY_URL reaches refused ${source} (${/\bNOAUTH\b/.test(text) ? "NOAUTH" : "WRONGPASS"}): it is not that Valkey's password. After changing ${VALKEY_PASSWORD_KEY}, restart Valkey with it (\`pi-dispatch up\`), then the worker and the receiver`;
+		return `the Valkey VALKEY_URL reaches refused ${source} (${/\bNOAUTH\b/.test(text) ? "NOAUTH" : "WRONGPASS"}): it is not that Valkey's password. After changing ${VALKEY_PASSWORD_KEY}, recreate Valkey with it (\`docker compose --env-file .env -f deploy/docker-compose.yml up -d\`), then restart the worker and the receiver`;
 	}
 	return null;
 }
@@ -274,13 +274,13 @@ export function composeArgs({ project = null, override = false } = {}) {
 export const VALKEY_PORT_KEY = "PI_VALKEY_PORT";
 
 /**
- * The compose override the wizard writes when `up` already runs the deployment's Valkey: compose's own `valkey`
- * service mounts `up`'s volume, `pi-dispatch-valkey-data`, instead of a project volume of its own. Written once,
- * create-only; `up` and every later command for the folder name it.
+ * The compose override written when an older release's quickstart already ran the deployment's Valkey: compose's own
+ * `valkey` service mounts that Valkey's volume, `pi-dispatch-valkey-data`, instead of a project volume of its own.
+ * Written once, create-only; every later compose command for the folder names it.
  */
-export const VALKEY_HANDOVER_OVERRIDE = `# Written by /dispatch setup (the docker compose answer): this deployment's Valkey was the one \`pi-dispatch up\`
+export const VALKEY_HANDOVER_OVERRIDE = `# Written for the docker compose deployment: this deployment's Valkey was the one an older quickstart
 # started (container pi-dispatch-valkey, volume pi-dispatch-valkey-data). compose's valkey service takes over that
-# VOLUME, so the worker and the receiver container (valkey:6379) use one Valkey and one queue. \`pi-dispatch up\` starts
+# VOLUME, so the worker and the receiver container (valkey:6379) use one Valkey and one queue. The compose command starts
 # this Valkey (with -p <this folder's project> and this file) whenever the folder has it.
 services:
   valkey:

@@ -14,13 +14,11 @@ const PERSONAS = [
 ];
 
 for (const { file, marker, sentinel } of PERSONAS) {
-	test(`guardrails/${file} carries its sentinel, is copied into the image where the loader reads it, and the image check looks for it`, () => {
+	test(`guardrails/${file} carries its sentinel and is copied into the image where the loader reads it`, () => {
 		const text = read(`../../../guardrails/${file}`);
 		assert.ok(text.includes(`<!-- ${marker}: ${sentinel} -->`), `${file} lost its sentinel`);
 		const dockerfile = read("../../Dockerfile");
 		assert.ok(dockerfile.includes(`COPY guardrails/${file} /opt/pi-dispatch/${file}`), `the Dockerfile does not copy ${file}`);
-		const verify = read("../../verify-image.sh");
-		assert.ok(verify.includes(`-q "${sentinel}" /opt/pi-dispatch/${file}`), `verify-image.sh does not check ${file}`);
 	});
 }
 

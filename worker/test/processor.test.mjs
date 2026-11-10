@@ -578,9 +578,8 @@ test("a run.github local job mints with an UNDEFINED repo, skips the branch chec
 	const r = await runJob(flaggedLocalJob, d);
 	assert.equal(r.outcome, "completed");
 	assert.equal(minted.length, 1, "mintToken is called exactly once");
-	// The App path refuses a repo-less mint (get-token.mjs) because an installation token must be scoped to
-	// one repo -- so what matters is that the job handed to the minter carries no repo, not that the
-	// argument itself is undefined.
+	// A local run.github job carries no repo; what matters is that the job handed to the minter keeps it
+	// that way, not that the argument itself is undefined.
 	assert.equal(minted[0]?.repo, undefined, "a local job carries no repo for the minter to scope to");
 	assert.ok(!calls.includes("branch-check"), "no branch-protection check -- REQ-BRANCH-PROTECTION-PRECONDITION is forge-jobs-only");
 	assert.equal(tokens.prepare, "tok-local", "the minted token reaches prepareWorkspace");
@@ -604,7 +603,7 @@ test("a flagged local job whose mint rejects (config-tagged) refuses BEFORE rese
 	const { deps: d, calls } = deps({
 		redis,
 		mintToken: async () => {
-			const e = new Error("github jobs and cron triggers with run.github require a working GITHUB_AUTH_SOURCE (gh/pat/app)");
+			const e = new Error("github jobs and cron triggers with run.github require GITHUB_PAT (a fine-grained, repository-scoped PAT)");
 			e.piDispatchConfig = true;
 			throw e;
 		},
@@ -1174,13 +1173,13 @@ test("an egress-proxy refusal names the deployment-folder remedy, not the docker
 		return runJob(job, d);
 	};
 	await run(ghJob, ["local"], { proxyMissing: "pi-dispatch-egress-proxy" });
-	// Issue #480, PR #488's review: `pi-dispatch up` and only that. It works in a folder made without a clone and knows the
-	// folder, where a compose line printed here would start a second Valkey in a folder /dispatch setup laid out.
-	assert.ok(texts[0].includes("Start it with `pi-dispatch up` from the deployment folder, or set PI_EGRESS=0"), texts[0]);
-	assert.doesNotMatch(texts[0], /docker compose/);
-	// PI_EGRESS_PROXY's own proxy: `up` never starts it, so the comment does not say it would (PR #488's review).
+	// Issue #480, PR #488's review: the remedy names the deployment's own compose egress profile, which is what remains
+	// after the quickstart command was removed.
+	assert.ok(texts[0].includes("Start it with `docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d` from the deployment folder, or set PI_EGRESS=0"), texts[0]);
+	assert.doesNotMatch(texts[0], /pi-dispatch up\b/);
+	// PI_EGRESS_PROXY's own proxy: compose never starts it, so the comment does not say it would (PR #488's review).
 	await run(ghJob, ["local"], { proxyStopped: "my-squid" });
-	assert.ok(texts[1].includes("PI_EGRESS_PROXY names your own proxy, which `pi-dispatch up` does not start: start my-squid yourself, or set PI_EGRESS=0"), texts[1]);
+	assert.ok(texts[1].includes("PI_EGRESS_PROXY names your own proxy, which compose does not start: start my-squid yourself, or set PI_EGRESS=0"), texts[1]);
 });
 
 test("a proxy that exists but is STOPPED is its own reason, because the fix is a different one", async () => {

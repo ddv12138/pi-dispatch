@@ -17,12 +17,12 @@ test("the Connections unread state renders its actionable copy in Chinese", () =
 
 
 test("dynamic connection warnings localize fixed clauses while preserving host names and identifiers", () => {
-  const facts = { problems: [{ kind: "proxy", host: "build-west", title: "Refused on build-west: its egress proxy is not running", text: "The host's doctor says its egress proxy is unavailable.", fix: "Run pi-dispatch up on that host.", run: "gh-42" }], environmentUnknown: false, snapshotUnreadable: false };
+  const facts = { problems: [{ kind: "proxy", host: "build-west", title: "Refused on build-west: its egress proxy is not running", text: "The host's doctor says its egress proxy is unavailable.", fix: "Start the egress profile with Docker Compose on that host.", run: "gh-42" }], environmentUnknown: false, snapshotUnreadable: false };
   const markup = draw("connectionsProblems", facts, { locale: "zh" });
   const text = cardText(markup);
   assert.match(text, /拒绝在 build-west 上运行/);
   assert.match(text, /主机的 doctor 检查报告出口代理不可用/);
-  assert.match(text, /请在该主机运行 pi-dispatch up/);
+  assert.match(text, /请在该主机用 Docker Compose 启动 egress profile/);
   assert.match(markup, /gh-42/);
 });
 
@@ -41,7 +41,7 @@ function marked(markup, word, glyph, tone) {
 }
 
 test("armed but unstartable GitHub leads with a qualified receiver refusal and no invented host link", async () => {
-  const facts = await consoleConnectionsFixture(AT, { change: (_, reads) => { reads.environment = () => ({ env: { GITHUB_AUTH_SOURCE: "gh" } }); } });
+  const facts = await consoleConnectionsFixture(AT, { change: (_, reads) => { reads.environment = () => ({ env: {} }); } });
   assert.equal(facts.problems[0].kind, "receiver");
   const banner = draw("connectionsProblems", facts);
   assert.match(cardText(banner), /WEBHOOK_SECRET is not set in the deployment's \.env.*unless its service environment sets it/);
@@ -71,9 +71,8 @@ test("forge configuration unknown and not-configured remain distinct non-colour 
 
 test("polling prints an interval only for a configured poller, never for off or unknown", async () => {
   for (const [env, expected, interval] of [
-    [{ GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "private-value" }, "off", null],
-    [{ GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "private-value", POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "45" }, "on", 45],
-    [{ GITHUB_AUTH_SOURCE: "app", WEBHOOK_SECRET: "private-value" }, "on", 60],
+    [{ WEBHOOK_SECRET: "private-value" }, "off", null],
+    [{ WEBHOOK_SECRET: "private-value", GITHUB_PAT: "ghp_fixture", POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "45" }, "on", 45],
   ]) {
     const facts = await consoleConnectionsFixture(AT, { change: (_, reads) => { reads.environment = () => ({ env }); } });
     const github = row(draw("connectionsForges", facts), "github");
@@ -156,7 +155,7 @@ test("compact MCP rows retain each server's transport, address, exposure and non
 test("phone stack rows retain all labelled forge, proxy and endpoint facts together", async () => {
   const facts = await consoleConnectionsFixture(AT);
   for (const [panel, name, labels, content] of [
-    ["connectionsForges", "github", ["Forge", "State", "Auth", "Webhook", "Polling", "Who may fire"], /GitHub App.*WEBHOOK_SECRET.*X-GitHub-Delivery.*60 s.*write access/],
+    ["connectionsForges", "github", ["Forge", "State", "Auth", "Webhook", "Polling", "Who may fire"], /GITHUB_PAT.*WEBHOOK_SECRET.*X-GitHub-Delivery.*60 s.*write access/],
     ["connectionsEgress", "build3", ["Host", "Proxy", "Checked"], /build3 running.*2026-10-30/],
     ["connectionsEndpoints", "ollama-mini2", ["Endpoint", "Host and port", "Key", "Slots in use"], /ollama-mini2 mini2\.lan:\s*11434 keyless Fleet leases: 1 of 2/],
   ]) {
@@ -189,7 +188,7 @@ test("many armed triggers retain each accessible numbered link without repeating
   assert.match(cardText(doc.within(state)), /^armed by triggers /);
   const poll = doc.nodes.find((node) => node.tag === "td" && node.attrs["data-l"] === "Polling");
   assert.ok(poll.classes.includes("wide"), "the detailed polling fact keeps the full phone row when State lists many triggers");
-  assert.match(cardText(doc.within(poll)), /on.*60 s.*App installation repositories/);
+  assert.match(cardText(doc.within(poll)), /on.*60 s.*POLL_REPOS/);
 });
 
 test("endpoint host facts preserve exact host links, nonzero local counts, changed caps, age and shared-scope conflicts for both roles", async () => {

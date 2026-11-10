@@ -1,9 +1,9 @@
 /**
  * Staging one third-party pi package (issue #796, `DES-PACKAGE-UPDATES-PREPARED-NOT-APPLIED`).
  *
- * The assertions here are what `import-pi --with-packages` always ran. They moved out because a person's Adopt and a canary need
- * them too, and neither can run `import-pi`: it reads the account's paths and working directory, rewrites models, MCP and extensions,
- * and reinstalls every package. The service account usually is not the operator's.
+ * The assertions here are what the retired operator-side staging command always ran. They moved out because a person's Adopt and a canary need
+ * them too, and neither can act as the operator: that command read the account's paths and working directory, rewrote models, MCP and extensions,
+ * and reinstalled every package. The service account usually is not the operator's.
  *
  * WHY A DIRECTORY PER STAGE. `rename` cannot replace a non-empty directory, and swapping one in place would change the tree under a
  * running job's bind mount, so an atomic swap was never available. Each stage gets a directory of its own, nothing already staged is
@@ -27,7 +27,7 @@ export class PackageStageError extends Error {
 	}
 }
 
-/** How long one `npm install` may take in a service. An operator at the keyboard of `import-pi` has Ctrl-C, a worker's child does not. */
+/** How long one `npm install` may take in a service. A person staging at a keyboard has Ctrl-C, a worker's child does not. */
 export const SERVICE_NPM_TIMEOUT_MS = 180_000;
 
 /** How long a tree the manifest stopped naming is kept: longer than any job, so a running job never loses a file it imports lazily. */
@@ -97,8 +97,8 @@ export function npmExecOptions(platform, staging, { timeoutMs, env } = {}) {
 /**
  * What a service's npm gets of the worker's environment. It holds every token the deployment has, and npm has no reason to see them. Reaching a registry takes these
  * and nothing else, and a private registry's credentials live in the service account's `.npmrc`, which npm reads for itself. The registry itself is kept, and
- * `PI_UPDATES_REGISTRY` is honoured here as it is by the look: dropping it would resolve a private name from the public registry, which is dependency confusion. `import-pi` keeps
- * the operator's whole environment: they run it at their own keyboard.
+ * `PI_UPDATES_REGISTRY` is honoured here as it is by the look: dropping it would resolve a private name from the public registry, which is dependency confusion. A person
+ * running npm at their own keyboard keeps their whole environment; this service path keeps only what reaching a registry needs.
  */
 export function serviceNpmEnv(env = process.env) {
 	const kept = {};

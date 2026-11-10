@@ -11,7 +11,7 @@ function receiver({ change = () => {}, at = AT } = {}) {
   change(observations);
   return { v: 1, name: "mini1", version: "4.3.1", startedAt: at - 100_000, at, port: 49155, bind: "loopback", forges: ["github"], deliveries: observations.snapshot(), ageMs: 0 };
 }
-const sources = (status) => ({ environment: () => ({ env: { GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "secret" } }), allowlist: () => [], endpoints: () => [], receivers: async () => status });
+const sources = (status) => ({ environment: () => ({ env: { GITHUB_PAT: "fixture-only", WEBHOOK_SECRET: "secret" } }), allowlist: () => [], endpoints: () => [], receivers: async () => status });
 const snapshot = { hostBudgets: [{ name: "mini1" }], doctor: { hosts: [] }, triggers: { triggers: [{ index: 1, forge: "github", type: "comment" }] } };
 const view = (status, extra = {}) => readConnections({ snapshot, reads: sources(status), now: AT, ...extra });
 const draw = (facts, role = "operator") => String(connectionsForges({ role, data: { connections: facts } }));

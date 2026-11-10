@@ -77,9 +77,8 @@ let pointedDir = null;
 
 /**
  * Where the pointer lives: `PI_DISPATCH_DEPLOYMENT_FILE`, defaulting to pi's own agent dir
- * (`PI_CODING_AGENT_DIR` or `~/.pi/agent` -- the repo's one established home-dir pattern, resolved the
- * way worker/src/import-pi.mjs does). `||` on both reads so an EMPTY string falls back like an unset one,
- * matching resolvePaths' own defaulting idiom.
+ * (`PI_CODING_AGENT_DIR` or `~/.pi/agent` -- the repo's one established home-dir pattern). `||` on both
+ * reads so an EMPTY string falls back like an unset one, matching resolvePaths' own defaulting idiom.
  */
 export function pointerPath(env = process.env) {
   return (

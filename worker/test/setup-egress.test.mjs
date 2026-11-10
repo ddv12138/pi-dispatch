@@ -3,9 +3,8 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
-import { planSetupEgress, applySetupEgress } from "../src/setup-egress.mjs";
+import { planSetupEgress, applySetupEgress, EGRESS_RUN_ARGS } from "../src/setup-egress.mjs";
 import { EGRESS_PROXY_IMAGE } from "../src/egress-proxy-state.mjs";
-import { EGRESS_RUN_ARGS } from "../src/up.mjs";
 import { readPackagedProxyConf } from "../src/egress-conf-copy.mjs";
 
 function fixture() {

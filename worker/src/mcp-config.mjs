@@ -238,7 +238,8 @@ function checkServer(name, raw) {
  * Parse an overlay `mcp.json`. Throws an Error (marked `mcpConfig`) for a file that cannot be read as a whole: not
  * JSON, a duplicate key, not an object, an unknown top-level key. Returns `{ autoEnableCodemode, servers, refused }`:
  * `servers` the accepted entries by name, `refused` `[{ name, problem }]` for each entry that is not accepted. A
- * refused entry is never offered to a job; doctor names it, and import-pi leaves it behind.
+ * refused entry is never offered to a job; doctor names it, and the overlay text written from this parse
+ * leaves it behind.
  */
 export function parseOverlayMcp(text, path = MCP_CONFIG_FILE_NAME) {
 	const fail = (why) => {
@@ -415,7 +416,7 @@ export function jobMcpDocument(parsed, names) {
 	return { version: JOB_MCP_VERSION, autoEnableCodemode: parsed.autoEnableCodemode, codemodeModels: parsed.codemodeModels !== false, servers, refs };
 }
 
-/** The text of an overlay `mcp.json` holding exactly `parsed`'s accepted servers, as import-pi writes it. */
+/** The text of an overlay `mcp.json` holding exactly `parsed`'s accepted servers, ready to write over the overlay's file. */
 export function overlayMcpText(parsed) {
 	const mcpServers = {};
 	for (const [name, server] of Object.entries(parsed.servers)) {

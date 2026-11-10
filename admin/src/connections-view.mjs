@@ -25,8 +25,10 @@ import { readHookRuns, hookRunsView } from "@edgehero/pi-dispatch/hook-runs";
 /** A closed display vocabulary: arbitrary strings, even numeric-looking secrets, are never printed. */
 export const CONNECTION_ENV_TYPES = Object.freeze({
   ...Object.fromEntries(PANEL_SERVICE_KEYS.map((key) => [key, /(?:_FILE|_DIR)$|^(?:TMPDIR|TEMP)$/.test(key) ? "path" : "present"])),
-  RECEIVER_PORT: "port", RECEIVER_BIND: "present", GITHUB_AUTH_SOURCE: ["app", "pat", "gh"],
-  WEBHOOK_SECRET: "present", GITHUB_PAT: "present", GITHUB_APP_ID: "present", GITHUB_APP_PRIVATE_KEY_PATH: "path", GITHUB_APP_INSTALLATION_ID: "present",
+  RECEIVER_PORT: "port", RECEIVER_BIND: "present",
+  // GitHub is PAT-only: the App credentials and the auth-source selector went with `setup github`, so the one
+  // GitHub credential this surface names is the shared token an operator declares in the deployment's `.env`.
+  WEBHOOK_SECRET: "present", GITHUB_PAT: "present",
   GITLAB_WEBHOOK_MODE: ["signature", "token"], GITLAB_WEBHOOK_SECRET: "present", GITLAB_TOKEN: "present", GITLAB_URL: "present",
   FORGEJO_WEBHOOK_SECRET: "present", FORGEJO_TOKEN: "present", FORGEJO_URL: "present", FORGEJO_BOT_ID: "present", FORGEJO_PERMISSION_TOKEN: "present",
   AZURE_WEBHOOK_MODE: ["basic", "header"], AZURE_WEBHOOK_SECRET: "present", AZURE_WEBHOOK_HEADER: "present", AZURE_TOKEN: "present", AZURE_ORG_URL: "present",
@@ -39,8 +41,11 @@ export const CONNECTION_ENV_TYPES = Object.freeze({
   PI_MAX_JOBS_PER_DAY: "integer", PI_MAX_JOBS_PER_WEEK: "integer", PI_MAX_JOBS_PER_MONTH: "integer",
   PI_MAX_USD_PER_DAY: "decimal", PI_MAX_USD_PER_WEEK: "decimal", PI_MAX_USD_PER_MONTH: "decimal", VALKEY_URL: "present",
 });
+// What arms a forge: the environment keys the receiver's own loader reads. GitHub has none of its own any more
+// (no auth-source selector, no App): it is armed by a live GitHub trigger alone, while the others still name
+// their token/URL declarations here.
 export const FORGE_ACTIVATION_KEYS = Object.freeze({
-  github: ["GITHUB_AUTH_SOURCE"], gitlab: ["GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "GITLAB_TOKEN"],
+  github: Object.freeze([]), gitlab: ["GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "GITLAB_TOKEN"],
   forgejo: ["FORGEJO_WEBHOOK_SECRET", "FORGEJO_TOKEN", "FORGEJO_URL"], azure: ["AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_TOKEN", "AZURE_ORG_URL"],
 });
 const ROUTES = Object.freeze({ github: "/", gitlab: "/gitlab", forgejo: "/forgejo", azure: "/azure" });
@@ -98,28 +103,32 @@ export function forgeConnections(env, triggers, { unknown = false } = {}) {
     const rows = list.filter((t) => t.forge === name && t.type !== "cron" && t.type !== "watch" && !t.disarmed).map((t) => t.index).filter(Number.isInteger);
     const keys = FORGE_ACTIVATION_KEYS[name].filter((key) => has(env, key));
     const enabled = unknown ? null : keys.length > 0 || name === "github" && rows.length > 0 ? true : !Array.isArray(triggers) && name === "github" ? null : false;
-    const source = name === "github" ? (["app", "gh", "pat"].includes(env.GITHUB_AUTH_SOURCE) ? env.GITHUB_AUTH_SOURCE : has(env, "GITHUB_AUTH_SOURCE") ? "invalid" : "gh (default)") : "shared token";
-    const auth = name === "github" ? source === "app" ? "GitHub App; a short-lived token for the one repository" : source === "pat" ? "GITHUB_PAT; the host's own token" : source === "invalid" ? "GITHUB_AUTH_SOURCE is invalid; the receiver cannot start" : "gh; the host's own token" : `${name === "azure" ? "AZURE" : name.toUpperCase()}_TOKEN; one shared token`;
+    // One shared token per forge, held by the operator; GitHub's is the repo-scoped PAT, since the App flow is gone.
+    const source = "shared token";
+    const auth = name === "github" ? "GITHUB_PAT; one shared, repo-scoped token held by the operator" : `${name === "azure" ? "AZURE" : name.toUpperCase()}_TOKEN; one shared token`;
     const mode = name === "gitlab" ? env.GITLAB_WEBHOOK_MODE : name === "azure" ? env.AZURE_WEBHOOK_MODE : "hmac";
     const verification = name === "github" || name === "forgejo" ? "HMAC-SHA256" : name === "gitlab" ? mode === "signature" ? "HMAC signature (GitLab 19.0+)" : mode === "token" ? "X-Gitlab-Token; shared secret, no body integrity" : "GITLAB_WEBHOOK_MODE must be signature or token" : mode === "basic" ? "HTTP Basic; shared secret, no body integrity" : mode === "header" ? "Configured header; shared secret, no body integrity" : "AZURE_WEBHOOK_MODE must be basic or header";
     const secretKey = name === "github" ? "WEBHOOK_SECRET" : `${name.toUpperCase()}_WEBHOOK_SECRET`;
-    return { name, path: ROUTES[name], enabled, triggers: rows, activationKeys: keys, source, auth, verification, secret: { key: secretKey, set: unknown ? null : nonblank(env, secretKey) }, deliveryId: FORGES[name].deliveryIdName, access: ACCESS[name], polling: name === "github" ? githubPolling(env, source, unknown) : null };
+    return { name, path: ROUTES[name], enabled, triggers: rows, activationKeys: keys, source, auth, verification, secret: { key: secretKey, set: unknown ? null : nonblank(env, secretKey) }, deliveryId: FORGES[name].deliveryIdName, access: ACCESS[name], polling: name === "github" ? githubPolling(env, unknown) : null };
   });
 }
 
 /** The poller's own repository/default/floor rules; configured polling does not prove a process is running. */
-function githubPolling(env, auth, unknown) {
+function githubPolling(env, unknown) {
   const unread = { state: "unknown", repos: [], source: null, seconds: null };
-  if (unknown || auth === "invalid") return unread;
+  if (unknown) return unread;
   const raw = env.POLL_REPOS;
   const declared = typeof raw === "string" && raw.trim() !== "";
-  const repos = declared ? [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))] : [];
+  // Polling is repo-scoped and PAT-only now that the App's installation discovery is gone: `POLL_REPOS` names
+  // the repositories, and the poller refuses to start unless `GITHUB_PAT` is the one credential it reaches them with.
+  if (!declared) return { state: "off", repos: [], source: null, seconds: null };
+  const repos = [...new Set(raw.split(",").map((s) => s.trim()).filter(Boolean))];
   // Do not turn a rejected repository declaration into an apparently empty, healthy poller.
-  if (declared && (repos.length === 0 || repos.some((repo) => !/^[^\s/]+\/[^\s/]+$/.test(repo)))) return unread;
-  if (!declared && auth !== "app") return { state: "off", repos: [], source: null, seconds: null };
+  if (repos.length === 0 || repos.some((repo) => !/^[^\s/]+\/[^\s/]+$/.test(repo))) return unread;
+  if (!nonblank(env, "GITHUB_PAT")) return unread;
   let seconds;
   try { seconds = Math.max(30, positiveInt(env, "POLL_INTERVAL_SECONDS", 60)); } catch { return unread; }
-  return { state: "on", repos: repos.slice(0, 32), source: declared ? "POLL_REPOS" : "app-installation", seconds };
+  return { state: "on", repos: repos.slice(0, 32), source: "POLL_REPOS", seconds };
 }
 
 function doctorFacts(snapshot) {
@@ -137,7 +146,7 @@ export function connectionsProblems(hosts, runs = [], forges = []) {
   for (const host of hosts) {
     if (host.proxy?.level === "fail") {
       const run = runs.filter((r) => r.host === host.name && ["egress-proxy-missing", "egress-proxy-stopped"].includes(r.reason)).sort((a, b) => Date.parse(b.endedAt ?? b.startedAt) - Date.parse(a.endedAt ?? a.startedAt))[0];
-      problems.push({ kind: "proxy", host: host.name, title: `Refused on ${host.name}: its egress proxy is not running`, text: host.proxy.label ?? "The host's doctor says its egress proxy is unavailable.", fix: "Run pi-dispatch up on that host.", run: typeof run?.jobId === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(run.jobId) ? run.jobId : null });
+      problems.push({ kind: "proxy", host: host.name, title: `Refused on ${host.name}: its egress proxy is not running`, text: host.proxy.label ?? "The host's doctor says its egress proxy is unavailable.", fix: "Start the egress profile with Docker Compose on that host.", run: typeof run?.jobId === "string" && /^[A-Za-z0-9._:-]{1,200}$/.test(run.jobId) ? run.jobId : null });
     }
     for (const check of host.forge) problems.push({ kind: "forge", host: host.name, title: `Forge connection failing on ${host.name}`, text: check.label ?? "The host's forge check failed.", fix: check.fix ?? "Check the forge credentials with doctor on that host.", run: null });
     if (host.endpoints) problems.push({ kind: "endpoints", host: host.name, title: `${host.name} reads its own model-endpoints file, and it does not load`, text: host.endpoints.label ?? "The host's endpoints file does not load.", fix: host.endpoints.fix ?? "Correct model-endpoints.json on that host, then render its egress rules.", run: null });
@@ -291,7 +300,7 @@ export function modelConnections(view) {
     hookRuns: hookRunsView(view?.notify?.history),
     subscriptionAuth: subscriptionAuthForAgent(view?.subscriptionAuth),
     receivers: modelReceivers(view?.receiver, view?.now),
-    forges: (view?.forges ?? []).filter((f) => Object.hasOwn(FORGES, f.name)).map((f) => ({ name: f.name, configured: typeof f.enabled === "boolean" ? f.enabled : null, path: ROUTES[f.name], authSource: ["app", "gh", "pat", "gh (default)", "invalid", "shared token"].includes(f.source) ? f.source : "unknown", activationKeys: (f.activationKeys ?? []).filter((k) => FORGE_ACTIVATION_KEYS[f.name].includes(k)), secret: { key: f.name === "github" ? "WEBHOOK_SECRET" : `${f.name.toUpperCase()}_WEBHOOK_SECRET`, set: typeof f.secret?.set === "boolean" ? f.secret.set : null }, triggerCount: (f.triggers ?? []).filter((i) => Number.isSafeInteger(i) && i >= 0).length })),
+    forges: (view?.forges ?? []).filter((f) => Object.hasOwn(FORGES, f.name)).map((f) => ({ name: f.name, configured: typeof f.enabled === "boolean" ? f.enabled : null, path: ROUTES[f.name], authSource: f.source === "shared token" ? "shared token" : "unknown", activationKeys: (f.activationKeys ?? []).filter((k) => FORGE_ACTIVATION_KEYS[f.name].includes(k)), secret: { key: f.name === "github" ? "WEBHOOK_SECRET" : `${f.name.toUpperCase()}_WEBHOOK_SECRET`, set: typeof f.secret?.set === "boolean" ? f.secret.set : null }, triggerCount: (f.triggers ?? []).filter((i) => Number.isSafeInteger(i) && i >= 0).length })),
     egress: { on: typeof view?.egress?.on === "boolean" ? view.egress.on : null, hosts: (view?.egress?.hosts ?? []).filter((h) => name(h.name)).map((h) => ({ name: h.name, state: h.unreadable ? "unknown" : ["ok", "warn", "fail"].includes(h.proxy?.level) ? h.proxy.level : "not-published", stale: h.stale === true })) },
     endpoints: Array.isArray(view?.endpoints) ? view.endpoints.slice(0, 64).filter((ep) => typeof ep.id === "string" && MODEL_ENDPOINT_ID_RE.test(ep.id)).map((ep) => {
       const host = typeof ep.host === "string" && /^[A-Za-z0-9.:[\]-]+$/.test(ep.host) ? ep.host : null;

@@ -94,7 +94,7 @@ test("init without a cwd .env.example falls back to the copy shipped with the pa
 });
 
 // Issue #468: a new .env carries the deployment's own Valkey password, is readable by this account alone, never shows
-// the value, and an existing one is left as it is (init's contract; `up` and `service install` add a missing password).
+// the value, and an existing one is left as it is (init's contract).
 const PASSWORD = "0f1e2d3c".repeat(8);
 test("init writes a new .env at mode 0600 with a generated VALKEY_PASSWORD it never prints, and never touches an existing one (#468)", () => {
 	const dir = tmp();
@@ -138,13 +138,14 @@ test("init never overwrites an edited allowlist", () => {
 
 // --- issue #453: the next steps follow the venue ------------------------------------------------------------------------
 
-// What init prints for every venue set that includes `local`. Step 2 was a compose command naming deploy/docker-compose.yml,
-// which a folder made by init alone does not have, and it started no egress proxy; it is `pi-dispatch up` since #480.
+// What init prints for every venue set that includes `local`: step 2 is the deployment's compose stack, not a command
+// this package no longer has.
 const DOCKER_NEXT = `
 Next:
   1. docker pull docker.io/ddv12138/pi-job:latest && docker tag docker.io/ddv12138/pi-job:latest pi-job:latest
                                                         # the prebuilt job image (or build your own from a clone)
-  2. pi-dispatch up                                     # Valkey and the egress proxy (unless PI_EGRESS=0)
+  2. docker compose --env-file .env -f deploy/docker-compose.yml up -d
+                                                        # Valkey (add --profile egress for the allowlist proxy)
   3. edit .env                                          # set ANTHROPIC_API_KEY (or your provider's key)
   4. pi-dispatch doctor                                 # verify Docker, Valkey, image, and key
   5. pi-dispatch worker                                 # drain the queue
@@ -168,7 +169,7 @@ test("init's next steps: the docker text byte for byte wherever `local` is a ven
 		["no env, fresh .env", {}],
 		["shell PI_BACKENDS unset, .env without it", { envFile: "ANTHROPIC_API_KEY=\n" }],
 		["local in the shell", { env: { PI_BACKENDS: "local" } }],
-		["up's venues", { venues: { localUsed: true } }],
+		["explicit local venue", { venues: { localUsed: true } }],
 		["off Linux with local listed", { env: { PI_BACKENDS: "local" }, platform: "darwin" }],
 	]) {
 		const { text } = nextFor(opts);
@@ -177,11 +178,11 @@ test("init's next steps: the docker text byte for byte wherever `local` is a ven
 	}
 });
 
-test("init decides the venue exactly as up does: a disagreement, a line the loaders read differently, an unknown backend or a non-Linux host get no ladder (#453 gate)", () => {
+test("init decides the venue the same way the other commands do: a disagreement, a line the loaders read differently, an unknown backend or a non-Linux host get no ladder (#453 gate)", () => {
 	// Gate 456's adversary harness: each of these printed the docker ladder silently.
 	const conflict = nextFor({ env: { PI_BACKENDS: "local" }, envFile: "PI_BACKENDS=podman\n" });
 	assert.match(conflict.text, new RegExp(`\\nNext: which venue this deployment runs is unknown, so no steps are shown: PI_BACKENDS is "local" in this shell and "podman" in ${join(conflict.dir, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}\\. init's next steps would be for the shell's venue while the service runs the file's\\.`));
-	// An empty shell value is a value: it means `local`, which the file's podman contradicts, as up reads it.
+	// An empty shell value is a value: it means `local`, which the file's podman contradicts, as the venue reader reads it.
 	assert.match(nextFor({ env: { PI_BACKENDS: "" }, envFile: "PI_BACKENDS=podman\n" }).text, /\nNext: which venue this deployment runs is unknown, so no steps are shown: PI_BACKENDS is "" in this shell and "podman" in /);
 	for (const envFile of ["export PI_BACKENDS=podman\n", "PI_BACKENDS = podman\n", "PI_BACKENDS=podman # venue\n", "PI_BACKENDS=podman, local\n", "PI_BACKENDS=pod\\\nman\n"]) {
 		const { text } = nextFor({ envFile });
@@ -203,7 +204,7 @@ test("init decides the venue exactly as up does: a disagreement, a line the load
 // --- issue #480: the no-clone folder gets the proxy's rules, and init's output names only what the folder has --------------
 
 test("init in an empty folder scaffolds deploy/egress-proxy.conf, the package's own copy byte for byte, and lists it (#480)", () => {
-	// No seeded example and no deploy/: the folder `npx @edgehero/pi-dispatch up` starts from.
+	// No seeded example and no deploy/: the bare folder a deployment starts from.
 	const dir = tmp();
 	const { out, text } = capture();
 	assert.equal(runInit(dir, { out, newPassword: () => PASSWORD }), 0);
@@ -224,7 +225,7 @@ test("init never overwrites an existing deploy/egress-proxy.conf, and reports it
 	assert.match(text(), /^kept\s+deploy\/egress-proxy\.conf\s+already exists/m);
 });
 
-test("init's ladders name no file the folder does not have, docker and podman (#480)", () => {
+test("init's ladders name no scaffolded file the folder does not have, docker and podman (#480)", () => {
 	for (const [label, opts] of [["docker", {}], ["docker, PI_BACKENDS=local", { env: { PI_BACKENDS: "local" } }]]) {
 		const { text, dir } = nextFor(opts);
 		const ladder = text.slice(text.indexOf("\nNext"));
@@ -237,8 +238,10 @@ test("init's ladders name no file the folder does not have, docker and podman (#
 			if (/^\.?[\w.-]+(\/[\w.-]+)+\/?$/.test(token) || /\.(ya?ml|conf|json|env)$/.test(token) || token === ".env") named.add(token);
 		}
 		assert.ok(named.has(".env"), `${label}: the scan sees the files a step names: ${[...named]}`);
-		for (const file of named) assert.ok(existsSync(join(dir, file)), `${label}: the ladder names ${file}, which init's folder does not have`);
-		assert.doesNotMatch(ladder, /docker-compose\.yml|image\/Dockerfile/, label);
+		// `deploy/docker-compose.yml` is the deployment's compose file, which a clone (or the installed package) ships and
+		// step 2 runs; it is the one file the ladder names that init does not scaffold. Everything else must be there.
+		for (const file of named) if (file !== "deploy/docker-compose.yml") assert.ok(existsSync(join(dir, file)), `${label}: the ladder names ${file}, which init's folder does not have`);
+		assert.doesNotMatch(ladder, /image\/Dockerfile/, label);
 	}
 });
 
@@ -251,7 +254,7 @@ test("init's file column is as wide as the longest name, so every note starts in
 	assert.ok(rows.some((row) => row.includes("egress-allowlist.conf ")), "the 21-character name is followed by a space before its note");
 });
 
-test("init with steps: false prints the file list and no Next ladder (what up passes, #480)", () => {
+test("init with steps: false prints the file list and no Next ladder (a caller that runs the ladder itself, #480)", () => {
 	for (const venues of [undefined, { localUsed: true, podmanUsed: false, podmanDefault: false }, { localUsed: false, podmanUsed: true, podmanDefault: true }]) {
 		const dir = tmp();
 		const { out, text } = capture();

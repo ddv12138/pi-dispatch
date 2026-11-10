@@ -1,15 +1,14 @@
 /**
  * Single-key edits to a dotenv-style file, in two disciplines.
  *
- * `setEnvKeyIfEmpty` exists for `pi-dispatch up`, which fills WEBHOOK_SECRET into a scaffolded .env
+ * `setEnvKeyIfEmpty` exists for `pi-dispatch init`, which fills a scaffolded .env's generated VALKEY_PASSWORD
  * without asking the operator to hand-run `openssl rand -hex 32`. It is init's contract applied to a
  * single key instead of a whole file: init never overwrites an existing file, and this never
  * overwrites an existing VALUE — a key the operator already set is sacrosanct, because a tool that
  * "helpfully" rotates a live webhook secret breaks every configured forge hook at once, silently.
  *
- * `setEnvKey` is the CONSENTED-overwrite sibling, added for `pi-dispatch setup github` (issue #81),
- * whose whole point is replacing values like GITHUB_AUTH_SOURCE=gh with the App credentials the
- * operator just minted and approved line-by-line. The consent lives at the CALLER, never here.
+ * `setEnvKey` is the CONSENTED-overwrite sibling, added for a setup command that mints a credential and
+ * writes it into the operator's file (issue #81). The consent lives at the CALLER, never here.
  *
  * Both return the input text UNCHANGED (byte-identical, same object) when there is nothing to do, so
  * callers can compare identity to know nothing happened.
@@ -251,8 +250,8 @@ export function setEnvKeyIfEmpty(text, key, value, opts) {
  *     (the input string object itself, so callers detect the no-op by identity, like the sibling)
  *
  * THE CONFIRM GATE LIVES AT THE CALLER. This function is mechanical and will happily replace a live
- * credential; the wizard that calls it shows the exact lines it is about to write and collects an
- * explicit y/N first (github-app-setup.mjs). Nothing in here asks, because a transform that sometimes
+ * credential; the setup wizards that call it show the exact lines they are about to write and collect
+ * an explicit y/N first. Nothing in here asks, because a transform that sometimes
  * prompts is untestable and a prompt that sometimes doesn't fire is not a gate. Every other byte is
  * preserved exactly as in the sibling: whole-line replacement only, CRLF survives on the replaced
  * line, the untouched remainder is never re-serialized. A matched line with stray whitespace
@@ -701,7 +700,7 @@ function quotedForShell(p) {
  * Every call `updateEnvFile` makes, for a production caller's fs seam to spread (issue #522's review). The descriptor
  * calls are optional on the seam, because a test fake has none, so a seam that drops one does not fail: the writer
  * quietly goes back to chowning and chmodding the tmp BY PATH, which a swapped tmp redirects. One list, spread by
- * `up`, `service install` and `setup github`, and pinned by a test that reads all four objects.
+ * `setup-host` (its guarded seam); a test reads the production seam's descriptor calls.
  */
 export const ENV_WRITER_FS = Object.freeze({ readFileSync, writeFileSync, renameSync, statSync, chmodSync, chownSync, realpathSync, unlinkSync, openSync, fstatSync, fchownSync, fchmodSync, fsyncSync, closeSync });
 
@@ -778,7 +777,7 @@ function createTmp(fs, tmp, content) {
  */
 export function updateEnvFile(path, key, value, deps = {}) {
 	// `platform` is derived HERE rather than passed by each caller, which is what the first version got
-	// wrong: `up` passed it and `github-app-setup.mjs` did not, so a writer could apply a different grammar
+	// wrong: one writer passed it and another did not, so a writer could apply a different grammar
 	// from the one the service's loader uses, on the line that decides forge auth. A rule that every writer
 	// of this file must remember is a rule one of them will forget.
 	const { fs = ENV_WRITER_FS, overwrite = false, platform = process.platform, narrow = false } = deps;
@@ -1134,8 +1133,8 @@ function quoteSpans(input, loader) {
 			// the quote closes on (measured in /bin/sh on macOS: WEBHOOK_SECRET=two, which the writer then appended a new
 			// secret over). Joining only from a line outside a quote judged the first line alone, and every later line of
 			// the command was inside, so nothing judged the tail. So the command is joined through its quoted newlines and
-			// its continuations alike, and judged whole. Not a refusal of every multi-line quote: the documented
-			// GITHUB_APP_PRIVATE_KEY="-----BEGIN ...-----" is one assignment, which this judges as sh reads it.
+			// its continuations alike, and judged whole. Not a refusal of every multi-line quote: a documented
+			// multi-line quoted value (`K="-----BEGIN ...-----"`) is one assignment, which this judges as sh reads it.
 			// Incremental, so a long quoted value is scanned once rather than once per line. The blank carried across a
 			// continuation keeps the join's EXTENT exact (`X=a \` + `#'` is a comment, not an open quote); the verdict does
 			// not depend on it, since the checks below rescan the whole command and stop at that comment anyway, so dropping
@@ -1456,8 +1455,8 @@ export function envValueShown(value) {
  * closes and the value runs to the end of the file). systemd's rule, and the shells' for these shapes: a value that
  * OPENS with `"` continues to the next `"` not escaped by a backslash, one opening with `'` to the next `'`; a value
  * closed on its own line is no region. Lines strictly after `open`, up to and including `close`, are part of the value.
- * Issue #430 review round 3 replaced a rule that called every such value unreadable, which refused the documented
- * multi-line GITHUB_APP_PRIVATE_KEY that systemd reads perfectly (measured on systemd 259).
+ * Issue #430 review round 3 replaced a rule that called every such value unreadable, which refused a documented
+ * multi-line quoted value that systemd reads perfectly (measured on systemd 259).
  */
 export function quotedRegions(text) {
 	const lines = String(text ?? "").split("\n").map((l) => (l.endsWith("\r") ? l.slice(0, -1) : l));

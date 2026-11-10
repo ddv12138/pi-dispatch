@@ -11,23 +11,23 @@ import { loadConfig } from "../src/config.mjs";
 import { loadReceiverConfig } from "../../receiver/src/config.mjs";
 import { CLI_SERVICE_KEYS, EMPTY_READ_AS_UNSET, SERVICE_ENV_KEYS } from "../src/doctor.mjs";
 
-// Hermetic filesystem: an absolute path exists and holds an empty triggers list; anything else (the empty string, a
-// relative name) does not, which is what a real `existsSync("")` answers.
+// Hermetic filesystem: an absolute path exists and holds one github rule, so the receiver takes its GitHub
+// branch (and reads WEBHOOK_SECRET); anything else (the empty string, a relative name) does not, which is
+// what a real `existsSync("")` answers.
 const fileExists = (p) => typeof p === "string" && isAbsolute(p);
 const readFile = (p) => {
 	if (!fileExists(p)) throw Object.assign(new Error(`ENOENT: ${p}`), { code: "ENOENT" });
-	return '{"triggers":[]}';
+	return '{"triggers":[{"on":{"type":"label","any":["pi:x"]},"run":{"kind":"github","flow":"fix"}}]}';
 };
 
-// One base per branch the loaders take, so a key read only under one forge or one GitHub auth source is read here.
+// One base per branch the loaders take, so a key read only under one forge, or with a GitHub PAT, is read here.
 const common = { HOME: "/home/u", PATH: "/usr/bin", ANTHROPIC_API_KEY: "x", WEBHOOK_SECRET: "s", PI_TRIGGERS_FILE: "/d/triggers.json" };
 const BASES = {
 	plain: common,
 	gitlab: { ...common, GITLAB_TOKEN: "t", GITLAB_URL: "https://gl.example", GITLAB_WEBHOOK_MODE: "token", GITLAB_WEBHOOK_SECRET: "g" },
 	forgejo: { ...common, FORGEJO_TOKEN: "t", FORGEJO_URL: "https://fj.example", FORGEJO_WEBHOOK_SECRET: "f" },
 	azure: { ...common, AZURE_TOKEN: "t", AZURE_ORG_URL: "https://dev.azure.com/o", AZURE_WEBHOOK_SECRET: "a", AZURE_WEBHOOK_MODE: "header", AZURE_WEBHOOK_HEADER: "X-A" },
-	app: { ...common, GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "1", GITHUB_APP_INSTALLATION_ID: "2", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem" },
-	pat: { ...common, GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "p" },
+	pat: { ...common, GITHUB_PAT: "p" },
 };
 
 const outcome = (load, env) => {
@@ -105,7 +105,7 @@ test("the CLI keys on EMPTY_READ_AS_UNSET are exactly the cited ones, none of th
 });
 
 test("the keys the review found hidden are off the list: their empty value is a value (#481)", () => {
-	for (const key of ["PI_TRIGGERS_FILE", "GITLAB_URL", "VALKEY_URL", "PI_JOBS_DIR", "GITHUB_AUTH_SOURCE", "GITHUB_PAT_VAR"]) {
+	for (const key of ["PI_TRIGGERS_FILE", "GITLAB_URL", "VALKEY_URL", "PI_JOBS_DIR"]) {
 		assert.ok(!Object.hasOwn(EMPTY_READ_AS_UNSET, key), key);
 		assert.ok(!asAbsent(key, ""), `${key}: the oracle agrees it is a value`);
 	}

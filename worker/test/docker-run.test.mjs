@@ -610,8 +610,6 @@ test("issue #596, phase 2: only the job builder and the reserve's helper spell -
 	// deploy/ is still scanned, so a unit dropped into a subdirectory cannot slip past this contract.
 	const deployFiles = (at) => readdirSync(at, { withFileTypes: true }).flatMap((entry) => (entry.isDirectory() ? deployFiles(new URL(`${entry.name}/`, at)) : [new URL(entry.name, at)]));
 	for (const f of deployFiles(deploy)) assert.equal(/cgroup.?parent|pidispatch\.slice/i.test(readFileSync(f, "utf8")), false, String(f));
-	// up.mjs runs the proxy from a literal argv; it names no parent.
-	assert.equal(readFileSync(new URL("up.mjs", dir), "utf8").includes("cgroup"), false);
 });
 
 test("the argv pins the working directory to the workspace mount, and a dockerExtra cannot move it (#683)", () => {

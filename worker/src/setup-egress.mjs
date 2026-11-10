@@ -7,9 +7,46 @@ import { fileURLToPath } from "node:url";
 import { deploymentServiceEnv } from "./service-env.mjs";
 import { egressArmed, egressProxyName, DEFAULT_EGRESS_PROXY } from "./egress.mjs";
 import { makeDockerEndpointResolver } from "./backend-local.mjs";
-import { EGRESS_NETWORK_ARGS, EGRESS_RUN_ARGS } from "./up.mjs";
 import { EGRESS_PROXY_IMAGE, PROXY_STATE_FORMAT, jobNetworksOf, parseProxyState, rulesIncludeEndpoints, shippedProxyDrift } from "./egress-proxy-state.mjs";
 import { readPackagedProxyConf } from "./egress-conf-copy.mjs";
+import { MODEL_ENDPOINTS_INCLUDE_NAME } from "./model-endpoints.mjs";
+
+// deploy/docker-compose.yml's `egress` profile, reproduced as one docker run (REQ-EGRESS-ALLOWLIST):
+// same digest-pinned image, same three mounts, same host entry, same explicit container name, same restart
+// policy, on the same upstream network. Written out here for the same reason VALKEY_RUN_ARGS is -- an operator who runs
+// `up` and one who runs compose must end up with the same component, and two ways of starting one thing
+// is two places for it to drift.
+//
+// The per-job networks are NOT here: the worker creates one per job and attaches this container to it for
+// the life of that run. This is only the proxy and its way out.
+export const EGRESS_NETWORK_ARGS = ["network", "create", "pi-dispatch-egress-out"];
+export const EGRESS_RUN_ARGS = [
+	"run",
+	"-d",
+	"--name",
+	"pi-dispatch-egress-proxy",
+	"--restart",
+	"unless-stopped",
+	"--network",
+	"pi-dispatch-egress-out",
+	// `z` for the same measured reason as the compose file's mounts (issue #355): on an SELinux-enforcing host squid
+	// cannot read an unlabelled config and crash-loops; `z` (shared, never `Z`) relabels the one file so any container
+	// may read it, and is a no-op where SELinux is off.
+	"-v",
+	"./deploy/egress-proxy.conf:/etc/squid/squid.conf:ro,z",
+	"-v",
+	"./egress-allowlist.conf:/etc/pi-dispatch/allowlist.conf:ro,z",
+	// Issue #503: the declared model endpoints' rules, which the rules `include`. `init` scaffolds the file, and squid
+	// will not start without it. `egress render` rewrites it in place and prints the reload.
+	"-v",
+	`./${MODEL_ENDPOINTS_INCLUDE_NAME}:/etc/pi-dispatch/model-endpoints.conf:ro,z`,
+	// How the proxy reaches a model server on this host (issue #503): on Docker Engine the name does not exist without
+	// it, and host-gateway is the bridge gateway. Docker Desktop resolves the name already and host-gateway there is the
+	// same host address, so it is on both, as in the compose file. The PROXY only: no job gets it.
+	"--add-host",
+	"host.docker.internal:host-gateway",
+	EGRESS_PROXY_IMAGE,
+];
 
 const digest = (value) => createHash("sha256").update(typeof value === "string" ? value : JSON.stringify(value)).digest("hex");
 const templatesDir = fileURLToPath(new URL("../deploy/", import.meta.url));

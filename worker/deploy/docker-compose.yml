@@ -43,12 +43,11 @@ services:
     # AOF on: the wait-list must survive a reboot (REQ-QUEUE-BURST-NO-DROP). The password reaches valkey-server as
     # configuration on stdin (`valkey-server -`), written by the shell's own echo builtin to a 0600 temp file that is
     # opened and deleted before the image's entrypoint runs. `$$` is compose's escape for a literal `$`: the shell in the
-    # container expands these, never compose. The same script as the Quadlet unit and `pi-dispatch up`'s docker run.
+    # container expands these, never compose. The same script as the Quadlet unit.
     command: ["sh", "-c", 'set -eu; if [ -n "$${VALKEY_PASSWORD:-}" ]; then umask 077; f=$$(mktemp); echo "requirepass $$VALKEY_PASSWORD" >"$$f"; exec 0<"$$f"; rm -f "$$f"; set -- -; else set --; fi; unset VALKEY_PASSWORD; exec docker-entrypoint.sh valkey-server "$$@" --appendonly yes']
-    # Bound to localhost only -- the queue is not a public surface. On VALKEY_URL's port: PI_VALKEY_PORT, which
-    # `pi-dispatch up` and the setup wizard set from VALKEY_URL when they run this file, and which a deployment on a port
-    # other than 6379 puts in its .env for a compose command run by hand (PR #475's review: the port was 6379 whatever
-    # VALKEY_URL said, so the queue could move away from the worker).
+    # Bound to localhost only -- the queue is not a public surface. On VALKEY_URL's port: PI_VALKEY_PORT, which a
+    # deployment on a port other than 6379 puts in its .env for the compose command (PR #475's review: the port was 6379
+    # whatever VALKEY_URL said, so the queue could move away from the worker).
     ports:
       - "127.0.0.1:${PI_VALKEY_PORT:-6379}:6379"
     volumes:

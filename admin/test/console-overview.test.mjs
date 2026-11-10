@@ -1035,7 +1035,6 @@ test("first run: the progress, each step's tile, word and sentence, and an opera
   assert.match(out, /<span class="su-n">8<\/span>Forge credentials<span class="chip tone-idle">Optional<\/span>/);
   assert.match(out, /<p class="su-alt">Or run it yourself in a terminal:<\/p>/);
   for (const argv of [FIRST_RUN_COMMANDS.token, FIRST_RUN_COMMANDS.service, FIRST_RUN_COMMANDS.worker, FIRST_RUN_COMMANDS.up, FIRST_RUN_COMMANDS.doctor]) assert.ok(out.includes(`<span>${argv[1]}</span>`), argv.join(" "));
-  assert.ok(out.includes("<span>&#39;&lt;receiver URL&gt;&#39;</span>") || out.includes("<span>'&lt;receiver URL&gt;'</span>"), "the webhook URL is a quoted placeholder");
   assert.match(out, /<div class="su-act"><a class="btn btn--primary" href="\/config"><svg class="ic ic--sm" aria-hidden="true"><use href="#i-plus"><\/use><\/svg>Add a trigger<\/a><\/div>/);
   assert.equal((out.match(/btn--primary/g) ?? []).length, 1, "one primary");
   assert.ok(!out.includes("redis://") && !out.includes("6379"), "the queue step names no address");
@@ -1067,7 +1066,6 @@ test("first run: the overview's panels as they will read, in the panels' own wor
 
 test("first run: a command with a placeholder carries the sentence that fills it, for an operator", () => {
   const out = draw(overviewSetup, fresh());
-  assert.ok(out.includes("<p class=\"su-alt\">Put the public URL of this deployment&#39;s pi-dispatch-receiver, where GitHub delivers events, in place of <span class=\"code\">&lt;receiver URL&gt;</span>; without a receiver, pass <span class=\"code\">--no-webhook</span> instead of <span class=\"code\">--webhook-url</span> and its URL.</p>"));
   assert.ok(out.includes("<p class=\"su-alt\">Put a name for whoever will hold the token in place of <span class=\"code\">&lt;name&gt;</span>; the command prints the token once.</p>"));
   assert.ok(!draw(overviewSetup, fresh(), { role: "viewer" }).includes("in place of"), "a viewer reads no command, nor its hint");
 });

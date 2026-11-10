@@ -35,7 +35,7 @@ function fixture() {
       snapshot: { hostBudgets: [{ name: "mini1" }], triggers: { triggers: [] }, doctor: { hosts: [] } },
       redisFn: () => { calls.push("connect"); return client; },
       reads: {
-        environment: () => ({ env: { PI_WORKER_NAME: "mini1", GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "SECRET_SENTINEL" } }),
+        environment: () => ({ env: { PI_WORKER_NAME: "mini1", GITHUB_PAT: "fixture-only", WEBHOOK_SECRET: "SECRET_SENTINEL" } }),
         allowlist: () => [], endpoints: () => [endpoint],
         endpointStatus: read("endpointStatus"), slots: read("slots"), receivers: read("receivers"), hookRuns: read("hookRuns"),
       },

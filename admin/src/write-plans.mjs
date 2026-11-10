@@ -1102,7 +1102,7 @@ export function projectShown(p) {
 /** The project `id` names in the file the worker reads, `{ cur }`, or `{ refusal }` saying why there is none. */
 export function projectAt(paths, id, fs = nodeFs) {
   const p = readProjects({ projectsPath: paths.projectsFile, fs });
-  if (p?.unset) return { refusal: "PI_PROJECTS_FILE is unset, so the worker reads no projects; set it in the deployment's .env (pi-dispatch up does) and restart the worker" };
+  if (p?.unset) return { refusal: "PI_PROJECTS_FILE is unset, so the worker reads no projects; set it in the deployment's .env and restart the worker" };
   if (p?.invalid) return { refusal: `the projects file does not load: ${escapeInterpreted(p.invalid)}` };
   if (p?.unreadable) return { refusal: `the projects file ${escapeInterpreted(String(paths.projectsFile))} could not be read (${p.unreadable})` };
   const list = Array.isArray(p?.projects) ? p.projects : [];

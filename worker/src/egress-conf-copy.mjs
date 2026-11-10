@@ -4,13 +4,13 @@
  * writes create-only (issue #480) and the docker proxy mounts, and the podman venue's account-owned copy,
  * `~/.config/pi-dispatch/egress-proxy.conf`, which `service install` writes (podman-stack.mjs, `proxyConfCopyPath`).
  * Neither is rewritten by an upgrade, so a release that changes the shipped rules leaves the proxy on the old ones, and
- * the mount-path comparison `up` and `doctor` make (egress-proxy-state.mjs) cannot see it: the path is right, only the
- * bytes are old.
+ * the mount-path comparison `doctor` makes (egress-proxy-state.mjs) cannot see it: the path is right, only the bytes
+ * are old.
  *
  * So the bytes are compared with the INSTALLED package's copy, the one `init` copies from, and a difference is said.
  * Said, never repaired on its own: a difference reads the same whether an upgrade left the file behind or the operator
  * edited it on purpose, and nothing here can tell the two apart. `doctor` warns (⚠: a differing copy still runs a
- * proxy, and may be exactly what the operator meant); `up` offers the refresh, shown and asked, and keeps the old file.
+ * proxy, and may be exactly what the operator meant) and names the refresh; replacing the copy is the operator's.
  */
 import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -21,8 +21,8 @@ import { fileURLToPath } from "node:url";
  * The proxy's RULES (INT-EGRESS-POLICY-CONTRACT), the package's own copy: `../deploy/` from this module, the layout
  * the packaged copies resolve by, which is worker/deploy in a checkout (byte-identical to the root deploy/,
  * pinned by worker/test/publish.test.mjs) and the shipped deploy/ under npm. Issue #480: the docker proxy mounts
- * `./deploy/egress-proxy.conf` from the deployment folder, and a folder made by `npx @edgehero/pi-dispatch up` had
- * none, so `up` declined to start the proxy the policy is on by default for and every job was refused before it spent.
+ * `./deploy/egress-proxy.conf` from the deployment folder, and a folder made by the old quickstart had none, so the
+ * proxy the policy is on by default for was never started and every job was refused before it spent.
  */
 export const PACKAGED_EGRESS_PROXY_CONF = fileURLToPath(new URL("../deploy/egress-proxy.conf", import.meta.url));
 

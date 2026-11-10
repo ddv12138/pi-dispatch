@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { piOwnPackageDir } from "../../image/runner/src/usage-meter.mjs";
 import { providerKeyCandidates, piProviders } from "../../worker/src/env-allowlist.mjs";
-import { generateProviderKeys } from "../../.github/scripts/provider-key-names.mjs";
+import { generateProviderKeys } from "../../scripts/provider-key-names.mjs";
 import { PROVIDER_KEY_NAMES, PROVIDER_KEYS_SOURCE_SHA256, providerKeyNames } from "../src/provider-key-names.mjs";
 
 test("the console's provider-key source hash is the installed pinned artifact, not upstream HEAD", () => {

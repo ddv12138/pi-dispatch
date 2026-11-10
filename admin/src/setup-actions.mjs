@@ -25,7 +25,7 @@ export const SETUP_REASON_WORDS = Object.freeze(Object.fromEntries(SETUP_REASONS
   "key-present": "This provider key is already set. Choose Replace key and preview its separate confirmation.",
   "key-missing": "This provider key is not set. Choose Add key and preview it again.",
   "remote-runtime": "The runtime is not proven local to this console; use the worker host's terminal.",
-  "proxy-refresh-required": "The proxy needs a replacement or rules refresh; use pi-dispatch up in the terminal.",
+  "proxy-refresh-required": "The proxy needs a replacement or rules refresh; start the egress profile with Docker Compose in the terminal.",
   "missing-receiver": "Install the receiver package on this host before starting its service.",
   "process-timeout": "The host operation timed out. Some effects may have landed; inspect the host before retrying.",
   "plan-stale": "The deployment changed since preview. Preview it again.",

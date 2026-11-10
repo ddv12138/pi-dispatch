@@ -270,14 +270,14 @@ export function rulesFileIncludes(path, fs) {
 }
 
 /**
- * THE ONE LINE for endpoints declared under rules that predate #503 (issue #503's governing rule): `up`, `doctor` and
+ * THE ONE LINE for endpoints declared under rules that predate #503 (issue #503's governing rule): `doctor` and
  * `egress render` print it alike. Replacing or reloading the proxy fixes nothing here, since its rules do not read the
  * include; the rules refresh does, and it brings the proxy's third mount with it.
  */
 export function rulesPredateEndpointsLine(venue) {
 	return venue === "podman"
 		? "model endpoints are declared, but the podman proxy's rules (~/.config/pi-dispatch/egress-proxy.conf) predate #503 and do not include model-endpoints.conf, so the endpoints stay unreachable until the rules are refreshed: `pi-dispatch service install --force`"
-		: "model endpoints are declared, but deploy/egress-proxy.conf predates #503 and does not include model-endpoints.conf, so the endpoints stay unreachable until the rules are refreshed: `pi-dispatch up`, and accept the refresh";
+		: "model endpoints are declared, but deploy/egress-proxy.conf predates #503 and does not include model-endpoints.conf, so the endpoints stay unreachable until the rules are refreshed: replace deploy/egress-proxy.conf with the package's copy, then recreate the proxy with `docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d --force-recreate egress-proxy`";
 }
 
 /**

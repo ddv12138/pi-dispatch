@@ -84,9 +84,9 @@ const LS_TREE_MAX_BYTES = 1 << 20;
  * U+017F LATIN SMALL LETTER LONG S, so adding one would silently widen a security charset by two
  * invisible codepoints. Verified by running it, not assumed.
  *
- * Same shape as import-pi.mjs's ENTRY_NAME_RE by design, and deliberately NOT imported from it:
- * that module pulls in execFile and the npm package stager, and this one is on the security-critical
- * read path. The duplication is pinned by a drift test in materialize.test.mjs.
+ * Same shape as copy-tree.mjs's ENTRY_NAME_RE by design, and deliberately NOT imported from it:
+ * materialize runs on the security-critical git-tree read path and keeps its own copy, and a drift
+ * test in materialize.test.mjs pins the two charsets together.
  */
 export const PI_SEGMENT_RE = /^[a-z0-9](?:[a-z0-9_.-]{0,62}[a-z0-9])?$/i;
 

@@ -1,13 +1,11 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { loadConfig } from "./config.mjs";
 import { EXIT_POLICY, installRejectionPrinter, installStdoutPipeGuard } from "./exit-code.mjs";
 import { isEntryModule } from "./entry.mjs";
-import { gitDirty, localRepoProblem } from "./git-dirty.mjs";
-import { imageRefProblem } from "./image-ref.mjs";
-import { modelIdProblem, providerIdProblem } from "./model-ref.mjs";
+import { localRepoProblem } from "./git-dirty.mjs";
 import { resolveServiceEnv, serviceEnvFileOf, serviceEnvLoader } from "./service-env.mjs";
 
 /** How long the kill switch waits on the host registry before acting on the shared queue alone. */
@@ -22,25 +20,15 @@ const USAGE = `pi-dispatch — run pi coding-agent flows on your own folders
                            --secrets resolves each project secret bundle here and prints its variable names, never values;
                            every run publishes its checks to Valkey for the console and the panel (labels with paths
                            and secret values redacted, kept 7 days), and --no-publish skips that
-  pi-dispatch up [--yes] [--adopt-volume] [--restart-proxy] [--refresh-proxy-rules]
-                           one consented pass: pull+tag the job image, start Valkey, init, doctor
-  pi-dispatch setup github mint GitHub App credentials in one browser click (App Manifest flow);
-                           every write shown first and individually consented — no --yes here
-                           (--webhook-url <URL> | --no-webhook) [--org <org>] [--name <appName>]
   pi-dispatch auth <status|login CONNECTION|logout CONNECTION|usage CONNECTION|trial CONNECTION>
                            manage host-owned subscription authentication
-  pi-dispatch import-pi    stage your host pi setup (models/skills/persona) into a global overlay
-                           [--no-extensions] [--with-packages] [--no-host-packages]
-                           [--packages-file <path>] [--from <agentDir>] [--to <overlayDir>]
 
-  pi-dispatch run <folder> --task "<what to do>" [--flow <name>]
-                           [--provider <p>] [--model <m>] [--max-turns <n>] [--image <ref>] [--force]
   pi-dispatch run --trigger <cron id>
-                           fire one cron trigger now, once, exactly as its schedule would: its folder, flow,
-                           task and every other field come from the triggers file (PI_TRIGGERS_FILE, else
-                           ./triggers.json here); a second call in the same minute queues nothing.
-                           Both run forms take PI_WORKER_NAME (and --trigger PI_TRIGGERS_FILE) from
-                           this shell, else from ./.env here, refusing a disagreement
+                           the only run form: fire one cron trigger now, once, exactly as its schedule would.
+                           Its folder, flow, task and every other field come from the triggers file
+                           (PI_TRIGGERS_FILE, else ./triggers.json here); a second call in the same minute
+                           queues nothing. PI_TRIGGERS_FILE and PI_WORKER_NAME come from this shell, else
+                           from ./.env here, refusing a disagreement
   pi-dispatch canary --role <role> --model <provider/model> --flow <flow>
                            replay up to three retained recent jobs in disposable workspaces with forge
                            access blocked [--count 1..10] [--json]
@@ -124,27 +112,6 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 		return runDoctor(env, { json: flags.includes("--json"), fix: flags.includes("--fix"), live: flags.includes("--live"), secrets: flags.includes("--secrets"), publish: !flags.includes("--no-publish"), publishBy });
 	}
 
-	if (cmd === "up") {
-		const { runUp } = await import("./up.mjs");
-		return runUp(argv.slice(1), { env });
-	}
-
-	if (cmd === "setup") {
-		// Subcommand shape (`setup <forge>`) so future forges can land beside github without a new
-		// top-level verb; an unknown or missing target prints guidance rather than guessing.
-		if (argv[1] === "github") {
-			const { runGithubAppSetup } = await import("./github-app-setup.mjs");
-			return runGithubAppSetup(argv.slice(2), { env });
-		}
-		write(`pi-dispatch setup <target> — guided credential setup\n\n  targets: github\n\n  pi-dispatch setup github (--webhook-url <URL> | --no-webhook) [--org <org>] [--name <appName>]\n      mint GitHub App credentials via the App Manifest flow — one browser click returns the app id,\n      private key, and webhook secret; every write is shown first and individually consented\n`);
-		return argv[1] ? 1 : 0;
-	}
-
-	if (cmd === "import-pi") {
-		const { runImportPi } = await import("./import-pi.mjs");
-		return runImportPi(argv.slice(1), { env });
-	}
-
 	if (cmd === "updates") {
 		const { runUpdatesCli } = await import("./updates-cli.mjs");
 		return runUpdatesCli(argv.slice(1), { env });
@@ -167,6 +134,9 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 	}
 
 	if (cmd === "run") {
+		// `--trigger` is the only run form. The removed folder form's flags stay DECLARED but unused: runTrigger
+		// refuses them by name ("--trigger takes no folder and no other flag") rather than parseArgs failing with a
+		// generic unknown-option error, so an operator who types the old form is told exactly what is wrong.
 		const { values, positionals } = parseArgs({
 			args: argv.slice(1),
 			allowPositionals: true,
@@ -176,91 +146,13 @@ export async function main(argv = process.argv.slice(2), env = process.env, { wr
 				provider: { type: "string" },
 				model: { type: "string" },
 				"max-turns": { type: "string" },
-				image: { type: "string" }, // the container image for this one job; blank/absent = PI_JOB_IMAGE
+				image: { type: "string" },
 				force: { type: "boolean", default: false },
 				trigger: { type: "string" }, // issue #505: fire this cron trigger once, by hand
 			},
 		});
-		if (values.trigger !== undefined) return runTrigger(values, positionals, env, { write, valkeyRefusal, now });
-		const folder = positionals[0] && resolve(positionals[0]);
-		if (!folder || !existsSync(folder)) return fail(`folder not found: ${positionals[0] ?? "(none given)"}`);
-		if (!values.task) return fail("a --task is required");
-		// The one image rule (`image-ref.mjs`, issue #471 gate round 1), before anything is queued: a dash-leading `--image`
-		// was enqueued as it was and reached the runtime's argv as a flag at job start. Empty stays "the default", as below.
-		if (values.image) {
-			const problem = imageRefProblem(values.image);
-			if (problem) return fail(`--image ${problem.reason} (got ${JSON.stringify(values.image)})`);
-		}
-		// The one model-id and provider-id rule (model-ref.mjs, issue #673), before anything is queued, so a local run's
-		// model is one the console's runs filter can find, as a trigger's, PI_MODEL's and the overlay's are. An empty
-		// flag is refused too, never read as absent: it used to be enqueued as "" and run on a model named "". The
-		// value is not echoed, as no other refusal of this rule echoes it.
-		for (const [flag, judge] of [["provider", providerIdProblem], ["model", modelIdProblem]]) {
-			if (values[flag] === undefined) continue;
-			const problem = judge(values[flag]);
-			if (problem) return fail(`--${flag} ${problem}. Nothing was queued.`);
-		}
-
-		// The worker's folder rule, before anything is queued (issue #524): `.git` at the folder itself and a commit at
-		// HEAD. A folder that fails it used to be queued anyway and refused at pickup as a generic `config-refused`.
-		// Not waved away by --force: that flag accepts uncommitted work, and the worker refuses this either way.
-		const notARepo = localRepoProblem(folder);
-		if (notARepo) return fail(`${notARepo} Nothing was queued.`);
-
-		// A local job edits the folder IN PLACE with no undo (SECURITY.md). Refuse a dirty working
-		// tree unless --force, so a bad run cannot mix with uncommitted work the operator can't
-		// cleanly separate.
-		if (!values.force) {
-			const dirty = gitDirty(folder);
-			if (dirty === null) return fail(`${folder} is not a usable git repository`);
-			if (dirty) return fail(`${folder} has uncommitted changes. Commit or stash them, or pass --force.`);
-		}
-
-		// Which host queue (review of PR #575): PI_WORKER_NAME by the deployment's rule, as VALKEY_URL below is, so `run`
-		// from the deployment folder queues where that folder's worker drains even when this shell does not export it.
-		const deployment = cliDeploymentEnv(env, ["PI_WORKER_NAME"]);
-		if (deployment.problem) return fail(`${deployment.problem}. Nothing was queued.`);
-		const config = loadConfig(deployment.env);
-		const { cliValkeyUrl, parseConnection } = await import("./connection.mjs");
-		// PR #475's review: VALKEY_URL as the password is read, this shell's else the deployment .env's (a disagreement
-		// named), not the shell's alone: from the folder of a Valkey on another port, `run` dialled 6379.
-		const valkeyUrl = cliValkeyUrl(env);
-		const { makeQueue, enqueueLocalJobReporting, hostQueueName, swallowedRunSentence } = await import("./queue.mjs");
-		// failFast: a one-shot enqueue must not hang forever if Valkey is down -- error clearly.
-		// Onto THIS host's queue when the deployment declares a name (issue #57). The folder was checked
-		// against this machine's filesystem a few lines up, so this machine is the only one that can run it;
-		// enqueueing it where every host drains would be handing a job to a peer that has no such folder.
-		const hq = config.workerNameDeclared ? hostQueueName(config.workerName) : null;
-		// Issue #464 (gate round 3): judged before anything is sent, so a refused Valkey is said as the refusal it is, from
-		// any directory. Only a refusal stops here; nothing answering is the "could not reach" below.
-		const refused = await valkeyRefusal(valkeyUrl, env);
-		if (refused) return fail(refused);
-		const queue = makeQueue(parseConnection(valkeyUrl, { failFast: true }), { ...(hq ? { name: hq } : {}) });
-		try {
-			// Absent flags stay absent (undefined) so the value resolves at job start against the
-			// settings overlay/env, not a default frozen here (INT-CONFIG-OVERLAY-CONTRACT).
-			const { id: jobId, existing } = await enqueueLocalJobReporting(queue, {
-				folder,
-				task: values.task,
-				flow: values.flow,
-				provider: values.provider,
-				model: values.model,
-				maxTurns: values["max-turns"] ? Number(values["max-turns"]) : undefined,
-				// || not the raw value: `--image ""` must collapse to absent rather than becoming a falsy string that
-				// throws inside buildDockerRunArgs after a budget slot is reserved.
-				image: values.image || undefined,
-				now: now(),
-			});
-			// Issue #530: the closing line used to say "run `pi-dispatch worker` to process it" while workers ran. It now
-			// says what this queue shows, asked on the connection the enqueue already holds, and only when a job was queued.
-			const hint = existing ? null : await workerHint(queue);
-			write(runQueuedLine({ jobId, existing, folder, hint }, { swallowedRunSentence }));
-		} catch (error) {
-			return fail(error?.valkeyRefused ? error.message : `could not reach Valkey at ${(await import("./connection.mjs")).urlShown(valkeyUrl)}: ${(await import("./valkey-auth.mjs")).valkeyDownHint(valkeyUrl)}\n  ${error.message}`);
-		} finally {
-			await queue.close().catch(() => {});
-		}
-		return 0;
+		if (values.trigger === undefined) return fail("pi-dispatch run takes --trigger <cron id>; it is the only run form. Nothing was queued.");
+		return runTrigger(values, positionals, env, { write, valkeyRefusal, now });
 	}
 
 	if (cmd === "pause" || cmd === "resume" || cmd === "status") {
@@ -395,8 +287,8 @@ async function runTrigger(values, positionals, env, { write, valkeyRefusal, now 
 	}
 	if (!schedule) return fail(`no cron trigger with id "${id}" in ${path}. Nothing was queued.`);
 	if (schedule.unserved) return fail(`cron trigger "${id}" runs on another host: its folder is not on this machine. Run this command on the host that has the folder. Nothing was queued.`);
-	// The worker's folder rule, `run <folder>`'s check (issue #524): `.git` at the folder and a commit at HEAD, or the job
-	// is refused at pickup. Uncommitted changes stay allowed, as they are for every scheduled tick.
+	// The worker's folder rule (issue #524): `.git` at the folder and a commit at HEAD, or the job is refused at pickup.
+	// Uncommitted changes stay allowed, as they are for every scheduled tick.
 	const notARepo = localRepoProblem(schedule.data.folder);
 	if (notARepo) return fail(`cron trigger "${id}": ${notARepo} Nothing was queued.`);
 

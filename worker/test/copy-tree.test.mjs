@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, readdirSync, statSync, symlinkSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { ENTRY_NAME_RE, INJECT_LIMITS, copySkillTree } from "../src/copy-tree.mjs";
+import { INJECT_LIMITS, copySkillTree } from "../src/copy-tree.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 /** A host skills dir: `<root>/<name>/SKILL.md`, the `~/.pi/agent/skills` layout. */
@@ -41,7 +41,7 @@ test("copied files are 0444, so nothing on the host can rewrite a job's inputs b
 	assert.equal(statSync(join(dest, "tidy", "SKILL.md")).mode & 0o777, 0o444);
 });
 
-test("mode null preserves the source mode, which is what import-pi needs to re-stage without EACCES", () => {
+test("mode null preserves the source mode, which is what an overlay re-stage needs to avoid EACCES", () => {
 	const src = skillsDir();
 	const dest = destDir();
 	copySkillTree(src, dest, { mode: null });
@@ -161,7 +161,7 @@ test("the caps are the LITERAL numbers reviewed here, not whatever the constant 
 	assert.ok(Object.isFrozen(INJECT_LIMITS));
 });
 
-test("limits null lifts every cap, which is how import-pi stages an overlay", () => {
+test("limits null lifts every cap, which is how a whole overlay is staged", () => {
 	const skills = {};
 	for (let i = 0; i <= INJECT_LIMITS.maxDirs; i++) skills[`s${i}`] = { "SKILL.md": "x" };
 	const result = copySkillTree(skillsDir({ skills }), destDir(), { limits: null, mode: null });
@@ -186,9 +186,4 @@ test("the receipt carries COUNTS only -- no name and no path a caller could log"
 	assert.ok(!serialised.includes(src), "the receipt carries the host path");
 	assert.ok(!serialised.includes("tidy"), "the receipt carries a skill name");
 	assert.deepEqual(Object.keys(result).sort(), ["bytes", "dirs", "files", "skipped"]);
-});
-
-test("ENTRY_NAME_RE lives here now, and import-pi re-exports the same object", async () => {
-	const { ENTRY_NAME_RE: reExported } = await import("../src/import-pi.mjs");
-	assert.equal(reExported, ENTRY_NAME_RE, "the re-export must be the same regex, not a copy");
 });

@@ -1366,14 +1366,12 @@ function validateReplicas(run, at, path) {
  *     parses as a flag -- exactly `validateImageRef`'s reason for the same refusal on `run.image`. We do
  *     NOT pass `--` before it instead: that would be a claim about the resolver's option parser, and the
  *     option parser is the operator's.
- *   - `run.resume: true`. `assertResumeAllowedOnGhSource` (get-token.mjs) already refuses the `gh` token
- *     source for a resumed job, and states the argument this inherits whole: every property
- *     CONST-TOKEN-SCOPED-PER-JOB relies on assumes the credential is an ENV VALUE that dies with the
- *     container, while a persisted transcript is a FILE on host disk, replayed into the next job on that
- *     key. A resolved vault value is an env value the agent can echo, and nothing here redacts a
- *     transcript. Refused with NO escape hatch, unlike that one's PI_SESSIONS_ALLOW_GH_SOURCE: a pure
- *     validator cannot read an env var to find one, and the reason is stronger anyway, since that refusal
- *     complains a `gh` login is "full-scope and NON-EXPIRING" and a vault password does not expire either.
+ *   - `run.resume: true`. Every property CONST-TOKEN-SCOPED-PER-JOB relies on assumes the credential is
+ *     an ENV VALUE that dies with the container, while a persisted transcript is a FILE on host disk,
+ *     replayed into the next job on that key. A resolved vault value is an env value the agent can echo,
+ *     and nothing here redacts a transcript. Refused with NO escape hatch: a pure validator cannot read an
+ *     env var to find one, and even the narrowest GitHub credential this project ships (a fine-grained,
+ *     short-expiry `GITHUB_PAT`) does not make a secret persisted on disk any less durable there.
  *
  * Called from ALL FOUR normalizers, cron included. Unlike `run.replicas` this is NOT refused on a local
  * job: nothing about resolving a secret is forge-specific, and a nightly deploy is the obvious user. The

@@ -68,7 +68,7 @@ test("the compose fix is the command /dispatch setup runs for that folder: its p
 // recreate stays.
 test("beside a container this deployment's up runs, the compose fix changes the line only and recreates nothing (#761)", async () => {
 	const compose = { [COMPOSE]: composeWith("    image: valkey/valkey:8") };
-	const lineOnly = "change that line to `image: valkey/valkey:8.1` (the installed package's deploy/docker-compose.yml has it) and nothing more: this deployment's Valkey is the pi-dispatch-valkey container `pi-dispatch up` runs, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue";
+	const lineOnly = "change that line to `image: valkey/valkey:8.1` (the installed package's deploy/docker-compose.yml has it) and nothing more: this deployment's Valkey is the pi-dispatch-valkey container an older release started, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue";
 	// Both findings together: the container's fix recreates up's container, the compose file's only changes its line.
 	const both = await findings(compose, () => ours("valkey/valkey:8"));
 	assert.deepEqual(both.map((f) => f.store), ["valkey-compose", "valkey-container"]);
@@ -194,9 +194,9 @@ test("the pi-dispatch-valkey container: this deployment's own on valkey:8 is a f
 			const got = await findings({}, valkeyContainer);
 			assert.equal(got.length, 1);
 			assert.equal(got[0].store, "valkey-container");
-			assert.equal(got[0].label, `the pi-dispatch-valkey container runs ${answer.trim()}, the floating tag an older \`pi-dispatch up\` started it with, and keeps it until it is recreated; this release pins ${VALKEY_IMAGE}`);
+			assert.equal(got[0].label, `the pi-dispatch-valkey container runs ${answer.trim()}, the floating tag an older release started it with, and keeps it until it is recreated; this release pins ${VALKEY_IMAGE}`);
 			// stop then rm (SIGTERM, so the AOF is written), never `rm -f`.
-			assert.ok(got[0].fix.startsWith("`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey && pi-dispatch up` in the deployment folder starts valkey/valkey:8.1 on the same pi-dispatch-valkey-data volume"), got[0].fix);
+			assert.ok(got[0].fix.startsWith("`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey` in the deployment folder, then `docker compose --env-file .env -f deploy/docker-compose.yml up -d` starts valkey/valkey:8.1 on the same pi-dispatch-valkey-data volume"), got[0].fix);
 			assert.doesNotMatch(got[0].fix, /rm -f/);
 		}
 	}

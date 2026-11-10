@@ -36,7 +36,8 @@ export const LOCAL_FOLDER_ESCAPED = "local-folder-escaped";
  * documented v1 limitation -- `git init` it first.
  *
  * The task text is DATA (CONST-ISSUE-TEXT-IS-DATA): it goes into /job/prompt.md, never the
- * instructions. The operator supplies it via the CLI (`pi-dispatch run --task`).
+ * instructions. It comes from the local cron trigger's schedule (fired by the worker's scheduler, or
+ * by hand with `pi-dispatch run --trigger`) -- or from the console, which queues the same job.
  *
  * `event` is the trigger context the dispatcher derived (cron/manual/chain); it lands in
  * /job/event.json (INT-CONTAINER-JOB-INPUTS) -- one file per concern, alongside prompt.md. The

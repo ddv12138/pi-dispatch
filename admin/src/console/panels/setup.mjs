@@ -10,7 +10,7 @@ import { TRIGGER_RECIPES } from "../../trigger-recipes.mjs";
 import { setupProviderKeys } from "./provider-keys.mjs";
 
 export const SETUP_DESCRIPTION = "Finish supported steps here. The terminal way remains available for every step.";
-export const SETUP_GITHUB_NOTICE = "GitHub App creation and forge credentials stay in the terminal. Choose a webhook URL, or --no-webhook when using the poller.";
+export const SETUP_FORGE_NOTICE = "Forge credentials are set in the deployment's .env. For GitHub, GITHUB_PAT is the only credential: one shared, repo-scoped token held by the operator.";
 export const SETUP_PROVIDER_NOTICE = "A configured API key or managed subscription is judged by doctor. An ordinary pi OAuth login is not unattended service authentication.";
 export const SETUP_START_NOTICE = "Starting a worker admits queued jobs and future matching events. Its preview names current manual jobs, armed schedules and reserve estimates. Stop or restart can interrupt work; it cannot undo spending.";
 export const SETUP_BOOTSTRAP_COMMAND = Object.freeze(["pi-dispatch", "up", "--console"]);
@@ -40,7 +40,7 @@ function stepBody(view, state, step) {
   if (step.id === "egress") return html`<p class="su-small">${state.facts.allowlistCount === null ? uiText("The allowlist count is not published.", view.locale) : `${state.facts.allowlistCount} ${uiText("hosts in this deployment's allowlist.", view.locale)}`} ${uiText("Unsafe or shared proxy changes require the terminal.", view.locale)}</p><div class="su-act">${action(view, state, "setup-egress-start", "Preview starting the egress proxy")}<a class="btn btn--ghost" href="/config/connections#p-egress">${uiText("Review the allowlist", view.locale)}</a></div>`;
   if (step.id === "provider") return html`<p class="su-small">${uiText(SETUP_PROVIDER_NOTICE, view.locale)}</p>${setupProviderKeys(view)}<a class="link" href="/config/connections#p-subscription-auth">${uiText("Review subscription authentication", view.locale)}</a>`;
   if (step.id === "trigger") return recipes(view);
-  if (step.id === "forge") return html`<p class="su-small">${uiText(SETUP_GITHUB_NOTICE, view.locale)}</p><a class="link" href="/config/connections">${uiText("Review Connections", view.locale)}</a>${view.role === "operator" ? html`<details class="su-term"><summary>${uiText("Receiver service", view.locale)}</summary>${serviceActions(view, state, "receiver")}${ui.cmd(["pi-dispatch", "service", "install", "--receiver"])}</details>` : null}`;
+  if (step.id === "forge") return html`<p class="su-small">${uiText(SETUP_FORGE_NOTICE, view.locale)}</p><a class="link" href="/config/connections">${uiText("Review Connections", view.locale)}</a>${view.role === "operator" ? html`<details class="su-term"><summary>${uiText("Receiver service", view.locale)}</summary>${serviceActions(view, state, "receiver")}${ui.cmd(["pi-dispatch", "service", "install", "--receiver"])}</details>` : null}`;
   return null;
 }
 function stepHtml(view, state, step, index) {

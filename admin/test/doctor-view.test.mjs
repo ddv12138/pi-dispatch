@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { NAMED_CHECK_IDS } from "@edgehero/pi-dispatch/doctor-results";
-import { DOCTOR_FILE_CHECKS, FIRST_RUN_COMMANDS, FIRST_RUN_COMMAND_HINTS, FIRST_RUN_STATES, FIRST_RUN_STEPS, doctorQuote, doctorStale, firstRunCommandHint, firstRunState, stepSentenceText } from "../src/doctor-view.mjs";
+import { DOCTOR_FILE_CHECKS, FIRST_RUN_COMMANDS, FIRST_RUN_STATES, FIRST_RUN_STEPS, doctorQuote, doctorStale, firstRunCommandHint, firstRunState, stepSentenceText } from "../src/doctor-view.mjs";
 import { BEAT_FRESH_MS, configPauseWindows, configSettings, configTriggers, fleetDoctor } from "../src/console/panels.mjs";
 import { cardDocument, cardText } from "./helpers/card-structure.mjs";
 
@@ -318,8 +318,7 @@ test("first run: every command with a placeholder has the sentence that fills it
     assert.equal(hint !== null, holes.length > 0, name);
     for (const hole of holes) assert.ok(hint.some((p) => p?.code === hole), `${name}: the hint names ${hole}`);
   }
-  assert.ok(FIRST_RUN_COMMAND_HINTS.github.some((p) => p?.code === "--no-webhook"), "and the flag for a deployment with no receiver");
-  assert.equal(firstRunCommandHint(["pi-dispatch", "setup", "github", "--webhook-url", "<receiver URL>"]), null, "a copy is no command of the list");
+  assert.equal(firstRunCommandHint(["pi-dispatch", "doctor"]), null, "a command without a placeholder has no hint");
 });
 
 test("first run: a step is its id, state, title, sentence and commands; who reads a command is each surface's rule", () => {
@@ -330,12 +329,16 @@ test("first run: a step is its id, state, title, sentence and commands; who read
 test("first run: the forge step is optional without a forge trigger, else the worst of the github and forges sections", () => {
   const forgeOf = (triggers, checks) => stepOf(firstRunState(firstRun({ triggers: { triggers }, doctor: { hosts: [{ name: "a", ageMs: M, counts: {}, checks, more: 0 }], more: 0 } })), "forge");
   assert.equal(forgeOf([{ type: "cron" }], [{ id: "github.3", level: "fail", label: "x" }]).state, "optional");
-  assert.deepEqual(forgeOf([], []).commands, [FIRST_RUN_COMMANDS.github]);
+  assert.deepEqual(forgeOf([], []).commands, [], "the forge step offers no command: the token is set in .env");
   const label = [{ type: "label", forge: "github" }];
   assert.equal(forgeOf(label, [{ id: "github.1", level: "ok" }, { id: "forges.2", level: "ok" }]).state, "ready");
   assert.equal(forgeOf(label, [{ id: "github.1", level: "ok" }, { id: "forges.2", level: "warn", label: "gitlab token expires soon" }]).state, "check");
-  assert.equal(forgeOf(label, [{ id: "github.12-2", level: "fail", label: "no app id" }]).state, "not-yet");
+  assert.equal(forgeOf(label, [{ id: "github.12-2", level: "fail", label: "token missing" }]).state, "not-yet");
   assert.equal(forgeOf(label, [{ id: "node.1", level: "ok" }]).state, "to-do");
+  for (const step of [forgeOf(label, [{ id: "github.12-2", level: "fail", label: "token missing" }]), forgeOf(label, [{ id: "node.1", level: "ok" }])]) {
+    assert.deepEqual(step.commands, [], "no command sets a forge credential");
+    assert.match(stepSentenceText(step.sentence), /GITHUB_PAT/, "the sentence names the .env declaration instead");
+  }
 });
 
 test("first run: a trigger file that does not load is not yet; one trigger is ready", () => {
@@ -344,7 +347,7 @@ test("first run: a trigger file that does not load is not yet; one trigger is re
   assert.deepEqual(stepOf(firstRunState(firstRun({ triggers: { triggers: [{ type: "cron" }] } })), "trigger").sentence, ["The triggers file holds 1 trigger."]);
 });
 
-test("first run's commands are the CLIs' own: each is in its usage, and setup github carries what the CLI requires", async () => {
+test("first run's commands are the CLIs' own: each is in its usage", async () => {
   const { readFileSync } = await import("node:fs");
   const { USAGE } = await import("../src/console/cli.mjs");
   const workerCli = readFileSync(new URL("../../worker/src/cli.mjs", import.meta.url), "utf8");
@@ -353,10 +356,9 @@ test("first run's commands are the CLIs' own: each is in its usage, and setup gi
   assert.deepEqual(FIRST_RUN_COMMANDS.token, ["pi-dispatch-console", "token", "add", "--name", "<name>", "--role", "viewer"]);
   assert.doesNotMatch(usage, /pi-dispatch service\b/);
   assert.match(usage, /\n {2}pi-dispatch worker {2,}drain the queue/);
-  assert.match(usage, /\n {2}pi-dispatch up \[--yes\]/);
+  assert.doesNotMatch(usage, /pi-dispatch up\b/, "the up command is gone");
   assert.match(usage, /\n {2}pi-dispatch doctor \[--json\] \[--fix\]/);
-  assert.match(usage, /pi-dispatch setup github[^]*\(--webhook-url <URL> \| --no-webhook\)/);
-  assert.deepEqual(FIRST_RUN_COMMANDS.github.slice(0, 4), ["pi-dispatch", "setup", "github", "--webhook-url"]);
+  assert.doesNotMatch(usage, /pi-dispatch setup github/, "the GitHub App setup command is gone with the App");
   // The /dispatch panel is retired (58ef2369), its guided-setup card with it: the worker CLI no longer
   // advertises `/dispatch setup`, and the checklist offers the CLIs' own commands alone -- a deployment whose host
   // still runs the previous release's extension runs the guided setup from that copy, not from this one.

@@ -10,7 +10,7 @@ import { doctorSubscriptionCredentials, subscriptionCredentialCheck, listedProvi
 
 const instant = 1_800_000_000_000;
 const now = () => instant;
-const env = { PI_PROVIDER: "openai", PI_MODEL: "gpt-5.5", PI_WORKER_NAME: "owner-a", PI_AUTH_CONNECTIONS_FILE: "connections.json", PI_AUTH_STORE_DIR: "private", GITHUB_AUTH_SOURCE: "invalid-forge-value" };
+const env = { PI_PROVIDER: "openai", PI_MODEL: "gpt-5.5", PI_WORKER_NAME: "owner-a", PI_AUTH_CONNECTIONS_FILE: "connections.json", PI_AUTH_STORE_DIR: "private" };
 const ready = { ok: true, managed: true, provider: "openai", id: "selected", ownerHost: "owner-a", expiresAt: instant - 1, credential: "never-print-credential", subject: "never-print-subject" };
 function missingBinary() {
 	const child = new EventEmitter();
@@ -19,7 +19,7 @@ function missingBinary() {
 	return child;
 }
 
-test("doctor builds only the local auth subset despite broken forge config, with no renewal or network", async () => {
+test("doctor builds only the local auth subset with no forge credentials, and no renewal or network", async () => {
 	const root = tempDir("doctor-sub-auth-");
 	let checks = 0;
 	const metadata = await doctorSubscriptionCredentials(env, { cwd: root, home: root, now, configure({ config, redis, now: clock }) {
@@ -86,9 +86,9 @@ test("real local auth metadata on an absent store remains read-only", async () =
 	assert.equal(existsSync(privateDir), false);
 });
 
-test("doctor entry reads subscription paths from the deployment service env without requiring valid forge setup", async () => {
+test("doctor entry reads subscription paths from the deployment service env without requiring a forge credential", async () => {
 	const root = tempDir("doctor-sub-service-");
-	writeFileSync(join(root, ".env"), `PI_PROVIDER=openai\nPI_MODEL=gpt-5.5\nPI_WORKER_NAME=owner-a\nPI_AUTH_CONNECTIONS_FILE=${join(root, "connections.json")}\nPI_AUTH_STORE_DIR=${join(root, "private")}\nGITHUB_AUTH_SOURCE=invalid-forge-value\n`);
+	writeFileSync(join(root, ".env"), `PI_PROVIDER=openai\nPI_MODEL=gpt-5.5\nPI_WORKER_NAME=owner-a\nPI_AUTH_CONNECTIONS_FILE=${join(root, "connections.json")}\nPI_AUTH_STORE_DIR=${join(root, "private")}\n`);
 	let captured;
 	let text = "";
 	await runDoctor({}, { cwd: root, home: root, out(value) { text += value; }, spawn: missingBinary, fileExists: existsSync, probeValkey: async () => false, nodeVersion: "22.19.0", platform: "linux", agentDir: join(root, "agent"), wallClock: now, subscriptionFactory({ config, redis }) { captured = config; assert.equal(redis, null); return { auth: { async check() { return ready; } } }; } });

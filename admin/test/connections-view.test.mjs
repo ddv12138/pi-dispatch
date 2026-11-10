@@ -29,7 +29,8 @@ test("environment values use the key's closed type, never the shape of a secret 
   }
   assert.equal(connectionEnvValue("PI_JOB_CPUS", "2.5"), "2.5");
   assert.equal(connectionEnvValue("PI_JOB_CPUS", "2;secret"), "set (invalid number)");
-  assert.equal(connectionEnvValue("GITHUB_AUTH_SOURCE", "secret"), "set (invalid option)");
+  assert.equal(Object.hasOwn(CONNECTION_ENV_TYPES, "GITHUB_AUTH_SOURCE"), false, "the auth-source selector went with the GitHub App");
+  for (const gone of ["GITHUB_APP_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_INSTALLATION_ID"]) assert.equal(Object.hasOwn(CONNECTION_ENV_TYPES, gone), false, gone);
   assert.equal(connectionEnvValue("PI_ON_FAILURE", "/Users/private-person/bin/notify"), ".../notify");
   assert.equal(connectionEnvValue("PI_SETTINGS_FILE", "C:\\Users\\private-person\\settings.json"), ".../settings.json");
   assert.equal(connectionEnvValue("RECEIVER_PORT", "65536"), "set (invalid number)");
@@ -39,7 +40,7 @@ test("environment values use the key's closed type, never the shape of a secret 
 test("forge activation agrees with the actual receiver loader, including non-activation counterexamples", () => {
   const deps = { fileExists: () => true, readFile: () => '{"triggers":[]}' };
   const cases = [
-    {}, { GITHUB_PAT: "unused" }, { GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "unused" },
+    {}, { GITHUB_PAT: "unused" }, { WEBHOOK_SECRET: "unused" },
     { GITLAB_URL: "https://gitlab.example" }, { GITLAB_WEBHOOK_MODE: "signature" }, { GITLAB_TOKEN: "unused" }, { GITLAB_WEBHOOK_SECRET: "unused" },
     { FORGEJO_BOT_ID: "2" }, { FORGEJO_PERMISSION_TOKEN: "unused" }, { FORGEJO_URL: "https://forge.example" }, { FORGEJO_TOKEN: "unused" }, { FORGEJO_WEBHOOK_SECRET: "unused" },
     { AZURE_WEBHOOK_HEADER: "X-Auth" }, { AZURE_ORG_URL: "https://dev.azure.com/org" }, { AZURE_TOKEN: "unused" }, { AZURE_WEBHOOK_SECRET: "unused" }, { AZURE_WEBHOOK_MODE: "basic" },
@@ -57,13 +58,14 @@ test("forge activation agrees with the actual receiver loader, including non-act
   }
 });
 
-test("GitHub active rules and explicit intent count; spent, cron and watch rules do not arm its webhook", () => {
+test("GitHub active rules count; spent, cron and watch rules do not arm its webhook", () => {
   const rows = [ { forge: "github", type: "issue", index: 5 }, { forge: "github", type: "issue", index: 6, disarmed: true }, { forge: "github", type: "cron", index: 7 }, { forge: null, type: "watch", index: 8 } ];
   assert.deepEqual(forgeConnections({}, rows)[0].triggers, [5]);
   assert.equal(forgeConnections({}, rows)[0].enabled, true);
   assert.equal(forgeConnections({}, rows.slice(1))[0].enabled, false);
   assert.equal(forgeConnections({}, null)[0].enabled, null);
-  assert.equal(forgeConnections({ GITHUB_AUTH_SOURCE: "gh" }, null)[0].enabled, true, "explicit service intent remains known even when triggers could not be read");
+  assert.equal(forgeConnections({ GITHUB_PAT: "ghp_x" }, null)[0].enabled, null, "the PAT alone is not what arms GitHub");
+  assert.equal(forgeConnections({ GITHUB_PAT: "ghp_x" }, null)[0].activationKeys.length, 0, "no environment key arms GitHub any more");
   const actual = normalizeTriggerForDisplay({ on: { type: "label", any: ["pi:fix"] }, run: { kind: "github", flow: "fix" } });
   assert.deepEqual(forgeConnections({}, [{ ...actual, index: 2 }])[0].triggers, [2], "the real display record uses forge, not the queue job kind field");
 });
@@ -91,14 +93,12 @@ test("An armed GitHub receiver with an absent or blank deployment secret warns w
   const unknown = await readConnections({ now: AT, snapshot: active, reads: reads({}, { environment: () => ({ unreadable: true, env: {} }) }) });
   assert.equal(unknown.forges[0].secret.set, null);
   assert.ok(!unknown.problems.some((p) => p.kind === "receiver"), "unread metadata cannot prove a missing declaration");
-  const explicit = await readConnections({ now: AT, snapshot: snapshot({ triggers: null }), reads: reads({ GITHUB_AUTH_SOURCE: "gh" }) });
-  assert.ok(explicit.problems.some((p) => p.kind === "receiver"), "an explicit auth source arms GitHub even when the trigger source is unknown");
 });
 
 test("forge delivery ids derive from the worker and polling uses the real poller defaults and floor", () => {
   const deps = { fileExists: () => true, readFile: () => '{"triggers":[]}' };
   for (const interval of [undefined, "1", "45", "120"]) {
-    const env = { GITHUB_AUTH_SOURCE: "gh", POLL_REPOS: "acme/web", ...(interval ? { POLL_INTERVAL_SECONDS: interval } : {}) };
+    const env = { GITHUB_PAT: "ghp_fixture", POLL_REPOS: "acme/web", ...(interval ? { POLL_INTERVAL_SECONDS: interval } : {}) };
     const actual = loadPollerConfig(env, deps);
     const [github] = forgeConnections(env, []);
     assert.equal(github.polling.state, "on");
@@ -108,24 +108,24 @@ test("forge delivery ids derive from the worker and polling uses the real poller
   for (const f of forgeConnections({}, [])) assert.equal(f.deliveryId, FORGES[f.name].deliveryIdName);
 });
 
-test("Polling is configured on, off or unknown, with App discovery and intervals held to the real poller loader", async () => {
+test("Polling is configured on, off or unknown, with repo-scoped intervals held to the real poller loader", async () => {
   const deps = { fileExists: () => true, readFile: () => '{"triggers":[]}' };
-  const app = { GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "1", GITHUB_APP_INSTALLATION_ID: "2", GITHUB_APP_PRIVATE_KEY_PATH: "/private/app-key" };
+  // Without the App's installation discovery there is nothing to list: no POLL_REPOS means polling is off.
   for (const raw of [undefined, "", " \t "]) {
     const file = raw === undefined ? {} : { POLL_REPOS: raw };
     const off = (await readConnections({ now: AT, snapshot: snapshot(), reads: reads(file) })).forges[0].polling;
     assert.deepEqual(off, { state: "off", repos: [], source: null, seconds: null });
     assert.throws(() => loadPollerConfig(file, deps), /nothing to poll/);
-    const on = (await readConnections({ now: AT, snapshot: snapshot(), reads: reads({ ...app, ...file }) })).forges[0].polling;
-    const actual = loadPollerConfig({ ...app, ...file }, deps);
-    assert.equal(actual.repos, null);
-    assert.deepEqual(on, { state: "on", repos: [], source: "app-installation", seconds: actual.intervalSeconds });
   }
-  const declared = { POLL_REPOS: " acme/web, acme/api,acme/web ", POLL_INTERVAL_SECONDS: " 45 " };
+  const declared = { GITHUB_PAT: "ghp_fixture", POLL_REPOS: " acme/web, acme/api,acme/web ", POLL_INTERVAL_SECONDS: " 45 " };
   const actual = loadPollerConfig(declared, deps);
   const on = (await readConnections({ now: AT, snapshot: snapshot(), reads: reads(declared) })).forges[0].polling;
   assert.deepEqual(on, { state: "on", repos: actual.repos, source: "POLL_REPOS", seconds: actual.intervalSeconds });
-  for (const invalid of [{ POLL_REPOS: ",," }, { POLL_REPOS: "PRIVATE_POLL_SENTINEL" }, { POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "0" }, { POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "PRIVATE_INTERVAL_SENTINEL" }]) {
+  // POLL_REPOS is the arm, and GITHUB_PAT is the one credential it needs: without it the poller refuses to start.
+  assert.throws(() => loadPollerConfig({ POLL_REPOS: "acme/web" }, deps), /GITHUB_PAT is required to poll/);
+  const noPat = (await readConnections({ now: AT, snapshot: snapshot(), reads: reads({ POLL_REPOS: "acme/web" }) })).forges[0].polling;
+  assert.deepEqual(noPat, { state: "unknown", repos: [], source: null, seconds: null }, "a poller that cannot start is not shown as on");
+  for (const invalid of [{ GITHUB_PAT: "ghp_fixture", POLL_REPOS: ",," }, { GITHUB_PAT: "ghp_fixture", POLL_REPOS: "PRIVATE_POLL_SENTINEL" }, { GITHUB_PAT: "ghp_fixture", POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "0" }, { GITHUB_PAT: "ghp_fixture", POLL_REPOS: "acme/web", POLL_INTERVAL_SECONDS: "PRIVATE_INTERVAL_SENTINEL" }]) {
     assert.throws(() => loadPollerConfig(invalid, deps));
     const v = await readConnections({ now: AT, snapshot: snapshot(), reads: reads(invalid) });
     assert.deepEqual(v.forges[0].polling, { state: "unknown", repos: [], source: null, seconds: null });
@@ -330,18 +330,15 @@ test("Model reads distinguish unknown MCP and package sources from successfully 
   assert.equal(empty.packages.unreadable, false);
 });
 
-test("Only a writable operator can copy the package staging command; other roles keep its facts and a sentence", async () => {
+test("The staged-package card shows the manifest to every role and offers no command", async () => {
   const connections = await readConnections({ now: AT, snapshot: snapshot({ stagedPackages: { packages: ["@acme/review@1.2.3"], stagedAt: "2026-10-29T12:00:00Z" } }), reads: reads() });
   const rendered = (role, readOnly) => parseDocument(String(page({ title: "Connections", name: "connections", body: connectionsPackages({ data: { connections }, role, readOnly }) })));
-  const operator = rendered("operator", false);
-  assert.ok(operator.querySelector("[data-copy]"));
-  assert.match(operator.textContent, /pi-dispatch import-pi --with-packages/);
-  for (const [role, readOnly] of [["viewer", false], ["operator", true]]) {
-    const page = rendered(role, readOnly);
-    assert.equal(page.querySelector("[data-copy]"), null);
-    assert.match(page.textContent, /@acme\/review@1\.2\.3/);
-    assert.match(page.textContent, /An operator can import and stage the pi packages on the host/);
-    assert.doesNotMatch(page.textContent, /pi-dispatch import-pi --with-packages/);
+  for (const [role, readOnly] of [["operator", false], ["viewer", false], ["operator", true]]) {
+    const doc = rendered(role, readOnly);
+    assert.equal(doc.querySelector("[data-copy]"), null, `${role}/${readOnly}: the card offers no command`);
+    assert.match(doc.textContent, /@acme\/review@1\.2\.3/);
+    assert.match(doc.textContent, /An operator can import and stage the pi packages on the host/);
+    assert.doesNotMatch(doc.textContent, /pi-dispatch import-pi --with-packages/);
   }
 });
 

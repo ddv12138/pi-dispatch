@@ -34,10 +34,11 @@ export function receiverFixture(now, { onlyUnauthorized = false, forges = ["gith
 
 export async function consoleConnectionsFixture(now, { problem = null, unread = false, change = () => {} } = {}) {
   if (!Number.isFinite(now)) throw new TypeError("consoleConnectionsFixture needs the injected page clock");
-  const env = { GITHUB_AUTH_SOURCE: "app", WEBHOOK_SECRET: "fixture-only", GITLAB_WEBHOOK_MODE: "signature", GITLAB_WEBHOOK_SECRET: "fixture-only", GITLAB_TOKEN: "fixture-only", RECEIVER_PORT: "3000", PI_WORKER_NAME: "build3", PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "fixture-only", PI_ON_FAILURE: "/srv/hooks/notify", PI_BACKENDS: "local,podman" };
+  // GitHub is PAT-only: one shared, repo-scoped token in the deployment `.env`, and the poller names its repos.
+  const env = { GITHUB_PAT: "fixture-only", WEBHOOK_SECRET: "fixture-only", POLL_REPOS: "acme/web", GITLAB_WEBHOOK_MODE: "signature", GITLAB_WEBHOOK_SECRET: "fixture-only", GITLAB_TOKEN: "fixture-only", RECEIVER_PORT: "3000", PI_WORKER_NAME: "build3", PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "fixture-only", PI_ON_FAILURE: "/srv/hooks/notify", PI_BACKENDS: "local,podman" };
   const checks = [{ id: "egress.proxy", level: "ok", label: "The egress proxy is running" }];
-  if (problem === "proxy") checks[0] = { id: "egress.proxy", level: "fail", label: "The egress proxy is missing", fix: "Run pi-dispatch up on that host." };
-  if (problem === "forge") checks.push({ id: "github.auth", level: "fail", label: "GitHub credentials cannot be used", fix: "Check the GitHub App declaration." });
+  if (problem === "proxy") checks[0] = { id: "egress.proxy", level: "fail", label: "The egress proxy is missing", fix: "Start the egress profile with Docker Compose on that host." };
+  if (problem === "forge") checks.push({ id: "github.auth", level: "fail", label: "GitHub credentials cannot be used", fix: "Check GITHUB_PAT in the deployment's .env." });
   if (problem === "endpoints") checks.push({ id: "model-endpoints.file", level: "fail", label: "Endpoint 2: port must be 1 to 65535", fix: "Correct model-endpoints.json and render egress rules." });
   const snapshot = {
     settings: { overlay: {} }, triggers: { triggers: [{ index: 2, forge: "github", type: "comment", statusComment: true, packages: false }, { index: 3, forge: "gitlab", type: "pull_request" }] },
@@ -113,7 +114,7 @@ export const CONFIGURATION_DRAW = Object.freeze({
   "connections-hook-timeout.operator": () => connection({ change: (_, reads) => { reads.hookRuns = () => ({ partial: false, more: 0, hosts: [{ name: "mini1", runs: [buildHookRun({ jobId: "gh-f0c2", outcome: "failed", reason: "infra", detail: "timeout", code: null }, NOW - 60_000)] }] }); } }),
   "connections-hook-timeout.viewer": () => connection({ change: (_, reads) => { reads.hookRuns = () => ({ partial: false, more: 0, hosts: [{ name: "mini1", runs: [buildHookRun({ jobId: "gh-f0c2", outcome: "failed", reason: "infra", detail: "timeout", code: null }, NOW - 60_000)] }] }); } }, "viewer"),
   "connections-hook-unreadable.viewer": () => connection({ change: (_, reads) => { reads.hookRuns = () => ({ partial: true, more: 3, hosts: [{ name: "build3", runs: [], unreadable: true }] }); } }, "viewer"),
-  "connections-receiver-missing-secret.operator": () => connection({ change: (_, r) => { r.environment = () => ({ env: { GITHUB_AUTH_SOURCE: "gh" } }); } }),
+  "connections-receiver-missing-secret.operator": () => connection({ change: (_, r) => { r.environment = () => ({ env: {} }); } }),
   "connections-endpoint-bounds.operator": () => connection({ change: (_, r) => { r.endpointStatus = async () => ({ state: "reported", partial: false, more: 0, hosts: [
     { name: "mini1", at: NOW - 1000, ageMs: 1000, state: "reported", endpointsMore: 0, endpoints: [{ id: "ollama-mini2", slots: 2, used: 1, fleet: 1 }] },
     { name: "mini2", at: NOW - 2000, ageMs: 2000, state: "reported", endpointsMore: 0, endpoints: [{ id: "ollama-mini2", slots: 3, used: 2, fleet: 1 }] },

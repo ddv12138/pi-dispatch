@@ -203,7 +203,7 @@ test("egress render names the rules refresh when endpoints are declared and the 
 	mkdirSync(join(docker, "deploy"));
 	writeFileSync(join(docker, "deploy", "egress-proxy.conf"), PRE);
 	const d = await render(docker);
-	assert.match(d.out, /⚠ model endpoints are declared, but deploy\/egress-proxy\.conf predates #503 and does not include model-endpoints\.conf, so the endpoints stay unreachable until the rules are refreshed: `pi-dispatch up`, and accept the refresh/);
+	assert.match(d.out, /⚠ model endpoints are declared, but deploy\/egress-proxy\.conf predates #503 and does not include model-endpoints\.conf, so the endpoints stay unreachable until the rules are refreshed: replace deploy\/egress-proxy\.conf with the package's copy, then recreate the proxy with `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d --force-recreate egress-proxy`/);
 	writeFileSync(join(docker, "deploy", "egress-proxy.conf"), INCL);
 	assert.doesNotMatch((await render(docker)).out, /predates #503/);
 	// No endpoints declared: nothing to say.

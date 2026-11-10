@@ -193,7 +193,7 @@ const ghStatusOutput = [
 test("browser setup doctor publishes inspected facts without a probe container or canary cleanup (#774)", async () => {
 	const calls = [];
 	const { out, text } = capture();
-	await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-example", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "private-pat" }, {
+	await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-example", GITHUB_PAT: "private-pat" }, {
 		out, setupReadOnly: true, spawn: fakeSpawn({ ...green, "gh auth status": 0, "docker run": 0 }, calls), probeValkey: async () => true, fileExists: () => true, nodeVersion: "22.19.0",
 	});
 	assert.match(text(), /Egress proxy running/);
@@ -522,7 +522,7 @@ test("doctor: a packages/ dir with no manifest fails — nothing knows what is s
 	const code = await runDoctor(overlayEnv(overlay({ packagesNoManifest: true })), overlayDeps(out));
 	assert.equal(code, 1);
 	assert.match(text(), /✗ Staged packages manifest readable \(packages\/packages\.json\)/);
-	assert.match(text(), /import-pi --with-packages/);
+	assert.match(text(), /restore packages\/packages\.json in the overlay \(the operator populates it by hand\)/, "the fix is a manual restore: there is no stager any more");
 });
 
 test("doctor: an admin-like staged package is a hard failure (recursion vector)", async () => {
@@ -1110,55 +1110,54 @@ test("doctor: a host where pi will not load warns instead of guessing a variable
 	assert.doesNotMatch(`${c.label} ${c.fix}`, /package/i, "and does not trip the staged-packages no-op pins");
 });
 
-// GITHUB_AUTH_SOURCE=gh (the default) forwards the operator's full gh login into every token-carrying job
-// container (CONST-TOKEN-SCOPED-PER-JOB) — doctor surfaces the trade-off as a warning, never a failure.
-// `readHosts` is injected, never the default: the default opens a real Valkey connection to VALKEY_URL (127.0.0.1:6379
-// when unset), so a test's output depended on whether something answered there. A host running its own Redis read an
-// empty registry and printed nothing; CI's release job, with nothing there, printed "Fleet: could not read the host
-// registry", and the exact-output pins that were captured on the first failed on the second.
+// GitHub auth is a PAT only (`loadGitHubAuth` reads GITHUB_PAT): the same token is handed to every github
+// job, so doctor names the trade-off, and a github-triggered deployment with none is warned that no job token
+// can be minted. `readHosts` is injected, never the default: the default opens a real Valkey connection to
+// VALKEY_URL (127.0.0.1:6379 when unset), so a test's output depended on whether something answered there. A
+// host running its own Redis read an empty registry and printed nothing; CI's release job, with nothing there,
+// printed "Fleet: could not read the host registry", and the exact-output pins that were captured on the first
+// failed on the second.
 const ghDeps = (out, plan, calls, extra = {}) => ({ out, spawn: fakeSpawn(plan, calls), probeValkey: async () => true, readHosts: async () => ({ hosts: [] }), readCapacity: async () => ({ records: [], coverage: { source: "local", reason: null, localHost: null, localHosts: [], local: null, mirror: null } }), fileExists: () => true, nodeVersion: "22.19.0", ...extra });
 const ghEnv = (extra = {}) => ({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", ...extra });
 
-test("doctor: default source gh warns with the login's scopes and names the broad ones", async () => {
+test("doctor: a github-triggered deployment without GITHUB_PAT warns that no job token can be minted", async () => {
 	const { out, text } = capture();
-	const code = await runDoctor(ghEnv(), ghDeps(out, { ...green, "gh auth status": { code: 0, output: ghStatusOutput } }));
-	assert.equal(code, 0, "the scope warning never fails doctor");
-	assert.match(text(), /⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container \(scopes: gist, read:org, repo, workflow\)/);
-	assert.match(text(), /this token carries broad scopes \(workflow\)/, "broad scopes are called out by name");
-	assert.match(text(), /fine-grained PAT \(GITHUB_AUTH_SOURCE=pat\) or a GitHub App/);
+	const code = await runDoctor(imgEnv({ PI_TRIGGERS_FILE: forgeTriggersFile("github") }), ghDeps(out, green));
+	assert.equal(code, 0, "an auth gap is advisory, as the rest of the github block");
+	assert.match(text(), /⚠ GITHUB_PAT is unset: triggers\.json has github triggers, but no job token can be minted, so every github job fails before it starts/);
+	assert.match(text(), /set GITHUB_PAT to a fine-grained, repository-scoped PAT in \.env/);
 });
 
-test("doctor: a fine-grained token (no scopes line) is reported as such", async () => {
+test("doctor: GITHUB_PAT is an ok line plus the same-token rotation warning, and its value never prints", async () => {
+	const pat = "ghp_distinctive_pat_value";
 	const { out, text } = capture();
-	await runDoctor(ghEnv(), ghDeps(out, { ...green, "gh auth status": { code: 0, output: "github.com\n  ✓ Logged in to github.com account octocat\n" } }));
-	assert.match(text(), /scopes not reported \(fine-grained token\)/);
-	assert.doesNotMatch(text(), /broad scopes/);
+	const code = await runDoctor(ghEnv({ GITHUB_PAT: pat }), ghDeps(out, { ...green, "docker run": 0 }));
+	assert.equal(code, 0, "the shared-token warning never fails doctor");
+	assert.match(text(), /✓ GITHUB_PAT is set: GitHub job tokens are minted from it/);
+	assert.match(text(), /⚠ the same GITHUB_PAT is handed to every GitHub job until you rotate it -- it is not scoped per job or per hour/);
+	assert.match(text(), /scope the PAT to the repositories those jobs need, set an expiry on it, and rotate it on a schedule/);
+	assert.doesNotMatch(text(), new RegExp(pat), "the secret value never reaches output");
 });
 
-test("doctor: GITHUB_AUTH_SOURCE=pat emits no scope warning", async () => {
+test("doctor reads GITHUB_PAT from the deployment .env as the service does, never printing it, and never hands it to a probe", async () => {
+	const cwd = scaffoldedCwd();
+	const readEnvFile = (path) => readFileSync(path, "utf8");
+	const envPath = join(cwd, ".env");
+	const pat = "ghp_from_the_file";
+	writeFileSync(envPath, `GITHUB_PAT=${pat}\n`);
 	const { out, text } = capture();
-	await runDoctor(ghEnv({ GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" }), ghDeps(out, green));
-	assert.doesNotMatch(text(), /forwards your full gh login/);
+	const code = await runDoctor(imgEnv(), { ...scaffoldDeps(out, cwd), readEnvFile });
+	assert.equal(code, 0);
+	assert.ok(text().includes(`✓ GITHUB_PAT is set -- GITHUB_PAT read from ${envPath}, as the service reads it; this shell does not set it: GitHub job tokens are minted from it`), text());
+	assert.match(text(), /in-image gh auth: not checked, because GITHUB_PAT comes from/);
+	assert.doesNotMatch(text(), new RegExp(pat), "the PAT's value never reaches output");
 });
 
-test("doctor: source gh with gh missing warns 'auth status failed', still exits 0", async () => {
-	const { out, text } = capture();
-	const code = await runDoctor(ghEnv(), ghDeps(out, { ...green, "gh auth": "enoent" }));
-	assert.equal(code, 0, "a local-only deployment with the default source is valid — warn, don't fail");
-	assert.match(text(), /⚠ GITHUB_AUTH_SOURCE is gh but `gh auth status` failed/);
-	assert.match(text(), /run `gh auth login` \(or switch GITHUB_AUTH_SOURCE\)/);
-});
-
-test("doctor: the in-image probe passes the token on stdin, never in argv or any environment (#521)", async () => {
+test("doctor: the in-image probe passes a shell GITHUB_PAT on stdin, never in argv or the container's environment (#521)", async () => {
 	const calls = [];
 	const { out, text } = capture();
-	const plan = {
-		...green,
-		"gh auth status": { code: 0, output: ghStatusOutput },
-		"gh auth token": { code: 0, output: "gho_fake_mint_123\n" },
-		"docker run": 0,
-	};
-	const code = await runDoctor(ghEnv(), ghDeps(out, plan, calls));
+	const plan = { ...green, "docker run": 0 };
+	const code = await runDoctor(ghEnv({ GITHUB_PAT: "ghp_probe_fixture" }), ghDeps(out, plan, calls));
 	assert.equal(code, 0);
 	// The gh probe specifically: the egress checks run their own containers, so "the first docker run" is
 	// no longer the same thing as "the one this test is about".
@@ -1172,16 +1171,18 @@ test("doctor: the in-image probe passes the token on stdin, never in argv or any
 	// Issue #521: no `-e` and no `--env-file` at all. Either one puts the value in the container create request, which
 	// Docker Desktop's backend log writes to disk in plain text (measured: two copies per doctor run with `-e`).
 	assert.ok(!run.args.some((a) => a === "-e" || a === "--env" || a.startsWith("--env=") || a.startsWith("--env-file")), "no environment flag");
-	assert.ok(!run.args.some((a) => a.includes("gho_fake_mint_123")), "the token never enters argv");
+	assert.ok(!run.args.some((a) => a.includes("ghp_probe_fixture")), "the token never enters argv");
 	// The token is the one line on stdin, and the docker CLI's own environment does not carry it either.
 	assert.equal(run.opts.stdio[0], "pipe", "stdin is a pipe, or the write below goes nowhere");
-	assert.equal(run.stdin, "gho_fake_mint_123\n");
+	assert.equal(run.stdin, "ghp_probe_fixture\n");
 	assert.equal(run.stdinEnded, true, "stdin is closed, so the probe's read returns");
-	assert.ok(!Object.values(run.opts.env).includes("gho_fake_mint_123"), "the CLI's environment holds no copy");
+	// The CLI's own environment IS this shell's, which exports the PAT; what keeps it out of the container is that no
+	// `-e` names it (and podman's probe carries `--env-host=false`). The script reads the value from stdin instead.
+	assert.equal(run.opts.env.GITHUB_PAT, "ghp_probe_fixture");
 	assert.equal(run.opts.env.GH_TOKEN, undefined);
 	assert.equal(run.opts.env.GITHUB_TOKEN, undefined);
 	assert.match(text(), /✓ gh authenticates inside the job image \(pi-job:latest\)/);
-	assert.doesNotMatch(text(), /gho_fake_mint_123/, "the token never reaches output");
+	assert.doesNotMatch(text(), /ghp_probe_fixture/, "the token never reaches output");
 });
 
 // The probe's script, run by a real `sh` (issue #521). Not docker: the question is what the script does with one line of
@@ -1190,7 +1191,7 @@ test("doctor: the in-image probe passes the token on stdin, never in argv or any
 test("doctor: the in-image probe's script hands the stdin line to gh as GH_TOKEN and GITHUB_TOKEN, and nothing else does (#521)", async () => {
 	const calls = [];
 	const { out } = capture();
-	await runDoctor(ghEnv(), ghDeps(out, { ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": 0 }, calls));
+	await runDoctor(ghEnv({ GITHUB_PAT: "ghp_script_fixture" }), ghDeps(out, { ...green, "docker run": 0 }, calls));
 	const run = calls.find((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("gh"));
 	const at = run.args.indexOf("-c");
 	assert.deepEqual(run.args.slice(at + 2), ["sh", "gh", "auth", "status"], "the script's $0, then the command it execs");
@@ -1205,8 +1206,8 @@ test("doctor: the in-image probe's script hands the stdin line to gh as GH_TOKEN
 
 test("doctor: an in-image gh auth failure warns with the egress fix, exits 0", async () => {
 	const { out, text } = capture();
-	const plan = { ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": 1 };
-	const code = await runDoctor(ghEnv(), ghDeps(out, plan));
+	const plan = { ...green, "docker run": 1 };
+	const code = await runDoctor(ghEnv({ GITHUB_PAT: "ghp_failure_fixture" }), ghDeps(out, plan));
 	assert.equal(code, 0, "an in-container auth failure warns but never fails doctor");
 	assert.match(text(), /⚠ gh cannot authenticate inside the job image \(pi-job:latest\)/);
 	assert.match(text(), /check network egress from containers/);
@@ -1215,8 +1216,8 @@ test("doctor: an in-image gh auth failure warns with the egress fix, exits 0", a
 test("doctor: an in-image probe that could not run (exit 126 or 127) names the missing sh or gh, not auth (#521)", async () => {
 	for (const code of [126, 127]) {
 		const { out, text } = capture();
-		const plan = { ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": code };
-		assert.equal(await runDoctor(ghEnv(), ghDeps(out, plan)), 0, "still a warning");
+		const plan = { ...green, "docker run": code };
+		assert.equal(await runDoctor(ghEnv({ GITHUB_PAT: "ghp_cannot_run_fixture" }), ghDeps(out, plan)), 0, "still a warning");
 		assert.match(text(), new RegExp(`⚠ gh could not be run inside the job image \\(pi-job:latest\\): it has no sh or no gh \\(exit ${code}\\)\n {4}→ rebuild or pull the job image: every image built FROM this repo's image/Dockerfile has both`));
 		assert.doesNotMatch(text(), /gh cannot authenticate|check network egress from containers/);
 	}
@@ -1225,323 +1226,9 @@ test("doctor: an in-image probe that could not run (exit 126 or 127) names the m
 test("doctor: no in-image probe when docker is not green (gating)", async () => {
 	const calls = [];
 	const { out } = capture();
-	const plan = { "docker info": 1, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" } };
-	await runDoctor(ghEnv(), ghDeps(out, plan, calls));
+	const plan = { "docker info": 1 };
+	await runDoctor(ghEnv({ GITHUB_PAT: "ghp_gated_fixture" }), ghDeps(out, plan, calls));
 	assert.ok(!calls.some((c) => c.cmd === "docker" && c.args[0] === "run"), "no docker run on top of a down daemon");
-});
-
-test("doctor: GITHUB_AUTH_SOURCE=app skips the in-image probe (mints per-job)", async () => {
-	const calls = [];
-	const { out, text } = capture();
-	// The ids and a key set, since without them doctor fails on their own lines (PR #466 gate round 1): this test is the
-	// probe's.
-	const code = await runDoctor(ghEnv({ GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----x-----END PRIVATE KEY-----" }), ghDeps(out, green, calls));
-	assert.equal(code, 0);
-	assert.match(text(), /✓ in-image gh auth: skipped \(GITHUB_AUTH_SOURCE=app mints per-job\)/);
-	assert.ok(
-		!calls.some((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("gh")),
-		"app mints per-job — nothing to preflight (the egress probes are a different check and still run)",
-	);
-	assert.doesNotMatch(text(), /forwards your full gh login/, "no scope warning for source app");
-});
-
-// -- GITHUB_AUTH_SOURCE=app completeness (issue #81): the credential triple, preflighted -----------------
-//
-// Real temp files for the key, like the overlay tests above: the mode check stats a real mode and the
-// PEM sniff reads real leading bytes. cwd points at tmpdir and fileExists stays the default, so only
-// the app-auth env drives these outcomes; everything else warns at most (and warns never fail).
-
-const KEY_BODY = "sk-app-key-body-distinctive"; // planted so no-contents-in-output is a grep, not a hope
-function appKeyFile({ content = `-----BEGIN PRIVATE KEY-----\n${KEY_BODY}\n-----END PRIVATE KEY-----\n`, mode = 0o600 } = {}) {
-	const path = join(tempDir("pi-app-key-"), "github-app-test.pem");
-	writeFileSync(path, content);
-	chmodSync(path, mode);
-	return path;
-}
-const appEnv = (extra = {}) => ({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "app", ...extra });
-const appDeps = (out) => ({ out, cwd: tmpdir(), spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0" });
-
-test("doctor: a complete app-auth triple with a locked-down PEM is all green, contents never in output", async () => {
-	const keyPath = appKeyFile();
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), appDeps(out));
-	assert.equal(code, 0);
-	assert.match(text(), /✓ GITHUB_APP_ID set \(4242\)/);
-	assert.match(text(), /✓ GITHUB_APP_INSTALLATION_ID set \(987654\)/);
-	assert.match(text(), new RegExp(`✓ GitHub App private key present \\(${keyPath.replace(/[.\\/]/g, "\\$&")}\\)`));
-	assert.doesNotMatch(text(), /group\/world-readable/);
-	assert.doesNotMatch(text(), /does not look like a PEM/);
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY), "the key's contents must never reach output");
-});
-
-test("doctor: app source with the whole triple unset FAILS on the two ids, points at setup github, exits 1", async () => {
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv(), appDeps(out));
-	// PR #466 gate round 1: unset ids refuse the worker's boot (`loadGitHubAuth`), so they are ✗, not the ⚠ they were.
-	assert.equal(code, 1, "a chosen app source without its ids is a deployment that cannot start");
-	assert.match(text(), /✗ GITHUB_AUTH_SOURCE=app but GITHUB_APP_ID is unset or empty -- the worker will refuse to boot\n {4}→ run `pi-dispatch setup github`/);
-	assert.match(text(), /✗ GITHUB_AUTH_SOURCE=app but GITHUB_APP_INSTALLATION_ID is unset or empty -- the worker will refuse to boot\n {4}→ run `pi-dispatch setup github`/);
-	assert.match(text(), /✗ GITHUB_AUTH_SOURCE=app but neither GITHUB_APP_PRIVATE_KEY_PATH nor GITHUB_APP_PRIVATE_KEY is set -- the worker will refuse to boot\n {4}→ run `pi-dispatch setup github`/);
-	assert.match(text(), /run `pi-dispatch setup github`/, "the fix is the wizard that mints all three");
-});
-
-test("doctor: a non-numeric GITHUB_APP_ID is named as such (an id is not a secret, so it IS echoed)", async () => {
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "Iv1.oops", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: appKeyFile() }), appDeps(out));
-	assert.equal(code, 1, "every github job would fail to mint its token (PR #466 gate round 1)");
-	assert.match(text(), /✗ GITHUB_AUTH_SOURCE=app but GITHUB_APP_ID is not numeric \("Iv1\.oops"\) -- github jobs cannot mint tokens\n/);
-	assert.match(text(), /✓ GITHUB_APP_INSTALLATION_ID set \(987654\)/, "the other two are judged independently");
-});
-
-test("doctor: a key path that points at nothing FAILS with the path, since the worker refuses to boot on it", async () => {
-	const { out, text } = capture();
-	const missing = join(tmpdir(), "no-such-github-app.pem");
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: missing }), appDeps(out));
-	assert.equal(code, 1, "`loadGitHubAuth` refuses the boot on it (PR #466 gate round 1)");
-	assert.match(text(), new RegExp(`✗ GITHUB_APP_PRIVATE_KEY_PATH does not exist \\(${missing.replace(/[.\\/]/g, "\\$&")}\\) -- the worker will refuse to boot\\n {4}→ run \`pi-dispatch setup github\``));
-});
-
-test("doctor: a group/world-readable PEM warns with the chmod fix", { skip: process.platform === "win32" ? "POSIX modes are synthetic on win32 (the check skips itself there)" : false }, async () => {
-	const keyPath = appKeyFile({ mode: 0o644 });
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), appDeps(out));
-	assert.equal(code, 0, "a loose mode is a warning, not a failure");
-	assert.match(text(), /⚠ the App private key at .* is group\/world-readable/);
-	assert.match(text(), new RegExp(`chmod 600 ${keyPath.replace(/[.\\/]/g, "\\$&")}`));
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY));
-});
-
-test("doctor: a file that does not start with -----BEGIN warns, and its contents are never echoed", async () => {
-	const keyPath = appKeyFile({ content: `definitely not a pem ${KEY_BODY}\n` });
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), appDeps(out));
-	assert.equal(code, 0);
-	assert.match(text(), /⚠ the file at GITHUB_APP_PRIVATE_KEY_PATH does not look like a PEM \(first line is not "-----BEGIN \.\.\."\)/);
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY), "not even a malformed key's contents may reach output");
-});
-
-// The key can also be supplied as a VALUE (issue #208), for a deployment whose environment comes from a
-// secrets manager. Then there is no file to stat, no mode to judge and nothing for the ignore check to
-// ask about -- what survives is the shape sniff and the rule that nothing from the key reaches output.
-
-test("doctor: an inline App key is reported as such, with no file anywhere and no contents echoed", async () => {
-	const { out, text } = capture();
-	const inline = `-----BEGIN PRIVATE KEY-----\n${KEY_BODY}\n-----END PRIVATE KEY-----`;
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY: inline }), appDeps(out));
-	assert.equal(code, 0);
-	assert.match(text(), /✓ GitHub App private key supplied inline \(GITHUB_APP_PRIVATE_KEY\)/);
-	assert.doesNotMatch(text(), /GITHUB_APP_PRIVATE_KEY_PATH/, "no path was configured, so none is demanded");
-	assert.doesNotMatch(text(), /group\/world-readable|does not ignore it/, "there is no file to have a mode or a repo");
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY));
-});
-
-test("doctor: both key sources set FAILS, since the worker will refuse to boot", async () => {
-	const { out, text } = capture();
-	const env = appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY: "-----BEGIN PRIVATE KEY-----x-----END PRIVATE KEY-----", GITHUB_APP_PRIVATE_KEY_PATH: appKeyFile() });
-	const code = await runDoctor(env, appDeps(out));
-	assert.equal(code, 1, "`loadGitHubAuth` refuses the boot on it, so doctor says ✗ (PR #466 gate round 1)");
-	assert.match(text(), /✗ GITHUB_APP_PRIVATE_KEY and GITHUB_APP_PRIVATE_KEY_PATH are both set -- the worker will refuse to boot\n {4}→ unset one of them/);
-});
-
-test("doctor: an inline value that is not a PEM warns, and its contents are never echoed", async () => {
-	const { out, text } = capture();
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY: `junk ${KEY_BODY}` }), appDeps(out));
-	assert.equal(code, 0);
-	assert.match(text(), /⚠ GITHUB_APP_PRIVATE_KEY does not look like a PEM/);
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY), "not even a malformed key's bytes may reach output");
-});
-
-// The key file's mode protects it from other users on this host and does nothing at all once the file is
-// in a commit (issue #211). `setup github` writes it into the DEPLOYMENT folder, which is very often a
-// checkout, so doctor asks git. `fakeSpawn` matches by prefix and nothing else in these fixtures shells
-// out to git, so keying the plan on "git " is unambiguous here.
-
-test("doctor: a key inside a git work tree that does not ignore it warns, with the path and no contents", async () => {
-	const keyPath = appKeyFile();
-	const { out, text } = capture();
-	const deps = { ...appDeps(out), spawn: fakeSpawn({ ...green, "git ": 1 }) };
-	const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), deps);
-	assert.equal(code, 0, "a committable key is a warning, not a failure -- doctor never fails on hygiene");
-	assert.match(text(), new RegExp(`⚠ the App private key at ${keyPath.replace(/[.\\/]/g, "\\$&")} is inside a git work tree that does not ignore it`));
-	assert.match(text(), /git add -A/, "the fix says what would actually happen");
-	assert.doesNotMatch(text(), new RegExp(KEY_BODY));
-});
-
-test("doctor: check-ignore asks about the key path, from the key's own directory", async () => {
-	const keyPath = appKeyFile();
-	const calls = [];
-	const { out } = capture();
-	const deps = { ...appDeps(out), spawn: fakeSpawn({ ...green, "git ": 1 }, calls) };
-	await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), deps);
-	const git = calls.find((c) => c.cmd === "git");
-	assert.ok(git, "doctor asked git");
-	assert.equal(git.args.at(-1), keyPath, "the question is about the key file itself");
-	assert.equal(git.args.at(-2), "-q");
-	assert.equal(git.args.at(-3), "check-ignore");
-	assert.equal(git.args.at(-4), dirname(keyPath), "asked from the key's own directory, not doctor's cwd");
-});
-
-test("doctor: an ignored key, a non-repo, and a git that will not launch are all silent", async () => {
-	const keyPath = appKeyFile();
-	for (const [name, outcome] of [
-		["ignored (exit 0)", 0],
-		["not a work tree (exit 128)", 128],
-		["git missing", "enoent"],
-	]) {
-		const { out, text } = capture();
-		const deps = { ...appDeps(out), spawn: fakeSpawn({ ...green, "git ": outcome }) };
-		const code = await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: keyPath }), deps);
-		assert.equal(code, 0);
-		assert.doesNotMatch(text(), /does not ignore it/, `${name}: only a definite "not ignored" may warn`);
-	}
-});
-
-test("doctor judges app auth on the service's .env where this shell sets none, never printing the key (PR #466 gate round 2)", async () => {
-	// The ✗ lines would otherwise judge a shell that lacks the keys the worker loads from its .env, and fail a deployment
-	// that boots, or pass one that does not.
-	const cwd = scaffoldedCwd();
-	const readEnvFile = (path) => readFileSync(path, "utf8");
-	const envPath = join(cwd, ".env").replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
-	writeFileSync(join(cwd, ".env"), `GITHUB_AUTH_SOURCE=app\nGITHUB_APP_ID=4242\nGITHUB_APP_INSTALLATION_ID=987654\nGITHUB_APP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----${KEY_BODY}"\n`);
-	const good = capture();
-	const code = await runDoctor(imgEnv(), { ...scaffoldDeps(good.out, cwd), readEnvFile });
-	assert.equal(code, 0, good.text());
-	assert.match(good.text(), new RegExp(`✓ GitHub auth settings read from ${envPath}, as the service reads them \\(this shell does not set them\\): GITHUB_AUTH_SOURCE, GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY\\n`));
-	assert.match(good.text(), /✓ GITHUB_APP_ID set \(4242\)\n/);
-	assert.match(good.text(), /✓ GitHub App private key supplied inline \(GITHUB_APP_PRIVATE_KEY\)\n/);
-	assert.ok(!good.text().includes(KEY_BODY), "the key's contents never reach output");
-	// Chosen in the file, incomplete there: ✗, as the worker would refuse to boot on that file.
-	writeFileSync(join(cwd, ".env"), "GITHUB_AUTH_SOURCE=app\nGITHUB_APP_ID=4242\n");
-	const bad = capture();
-	assert.equal(await runDoctor(imgEnv(), { ...scaffoldDeps(bad.out, cwd), readEnvFile }), 1);
-	assert.match(bad.text(), /✗ GITHUB_AUTH_SOURCE=app but GITHUB_APP_INSTALLATION_ID is unset or empty -- the worker will refuse to boot\n/);
-	// This shell wins where it sets a key, and then the file's value is not read for it.
-	const own = capture();
-	await runDoctor(imgEnv({ GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" }), { ...scaffoldDeps(own.out, cwd), readEnvFile });
-	assert.doesNotMatch(own.text(), /GITHUB_APP_INSTALLATION_ID/, "the shell's pat wins over the file's app");
-	assert.doesNotMatch(own.text(), /GitHub auth settings read from/, "an App key read under another source decides nothing, so nothing is said");
-});
-
-// Issue #481: the GitHub twin of the settings line, and the two GitHub auth refusals doctor had passed in silence. The
-// line hides an empty value only where the loaders read it as unset (`EMPTY_READ_AS_UNSET`): a blank inline App key is
-// hidden, an empty App id is not (the loader keeps it), and its own ✗ names it besides.
-test("the GitHub auth settings line hides only a proven-unset empty key, and an empty or unknown GITHUB_AUTH_SOURCE is a ✗ in that block (#481)", async () => {
-	const cwd = scaffoldedCwd();
-	const readEnvFile = (path) => readFileSync(path, "utf8");
-	const envPath = join(cwd, ".env");
-	const keyPath = join(cwd, "app.pem");
-	writeFileSync(keyPath, `-----BEGIN PRIVATE KEY-----${KEY_BODY}\n`, { mode: 0o600 });
-	writeFileSync(envPath, `GITHUB_AUTH_SOURCE=app\nGITHUB_APP_ID=4242\nGITHUB_APP_INSTALLATION_ID=987654\nGITHUB_APP_PRIVATE_KEY_PATH=${keyPath}\nGITHUB_APP_PRIVATE_KEY=\n`);
-	const good = capture();
-	await runDoctor(imgEnv(), { ...scaffoldDeps(good.out, cwd), readEnvFile });
-	assert.ok(good.text().includes(`✓ GitHub auth settings read from ${envPath}, as the service reads them (this shell does not set them): GITHUB_AUTH_SOURCE, GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_PATH\n`), good.text());
-	// An empty App id is not proven unset (the loader returns it as ""), so it is still named, beside the ✗ that decides.
-	writeFileSync(envPath, "GITHUB_AUTH_SOURCE=app\nGITHUB_APP_ID=\nGITHUB_APP_INSTALLATION_ID=987654\nGITHUB_APP_PRIVATE_KEY_PATH=/nope\n");
-	const idless = capture();
-	assert.equal(await runDoctor(imgEnv(), { ...scaffoldDeps(idless.out, cwd), readEnvFile }), 1);
-	assert.match(idless.text(), /: GITHUB_AUTH_SOURCE, GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID, GITHUB_APP_PRIVATE_KEY_PATH\n/);
-	assert.match(idless.text(), /✗ GITHUB_AUTH_SOURCE=app but GITHUB_APP_ID is unset or empty -- the worker will refuse to boot\n/);
-	const note = `GITHUB_AUTH_SOURCE read from ${envPath}, as the service reads it; this shell does not set it`;
-	for (const [value, shown] of [["", '""'], ["bogus", '"bogus"'], [`ghp_${"x".repeat(36)}`, "an unrecognised value (40 characters, not shown)"]]) {
-		writeFileSync(envPath, `GITHUB_AUTH_SOURCE=${value}\n`);
-		const bad = capture();
-		assert.equal(await runDoctor(imgEnv(), { ...scaffoldDeps(bad.out, cwd), readEnvFile }), 1, `${shown}: both processes exit 2 on it`);
-		const want = `✗ GITHUB_AUTH_SOURCE is ${shown}, which is none of pat, gh or app: the worker and the receiver refuse to start on it (exit 2) -- ${note}`;
-		const lines = bad.text().split("\n");
-		const at = lines.indexOf(want);
-		assert.ok(at > 0, bad.text());
-		// In the GitHub auth block: straight after that block's own read line (an unknown source is not proven unset, so
-		// the line names it), not merely somewhere in the output.
-		assert.ok(lines[at - 1].startsWith(`✓ GitHub auth settings read from ${envPath}`) && lines[at - 1].endsWith(": GITHUB_AUTH_SOURCE"), lines[at - 1]);
-		assert.ok(!bad.text().includes("x".repeat(36)), "a token pasted into the source line is never printed");
-	}
-	// This shell's own bad value is the same ✗, with no file note.
-	writeFileSync(envPath, "");
-	const shell = capture();
-	assert.equal(await runDoctor(imgEnv({ GITHUB_AUTH_SOURCE: "token" }), scaffoldDeps(shell.out, cwd)), 1);
-	assert.match(shell.text(), /✗ GITHUB_AUTH_SOURCE is "token", which is none of pat, gh or app: the worker and the receiver refuse to start on it \(exit 2\)\n/);
-});
-
-// Issue #481 (PR #485 review round 1): the PAT source's refusal, `requires a non-empty <var>`, which both processes make
-// at start and doctor had reported only as a probe it did not run.
-test("GITHUB_AUTH_SOURCE=pat with no PAT, an empty or blank one, or an empty GITHUB_PAT_VAR is a ✗; a PAT in the file is none (#481)", async () => {
-	const cwd = scaffoldedCwd();
-	const readEnvFile = (path) => readFileSync(path, "utf8");
-	const envPath = join(cwd, ".env");
-	const run = async (text) => {
-		writeFileSync(envPath, text);
-		const c = capture();
-		const code = await runDoctor(imgEnv(), { ...scaffoldDeps(c.out, cwd), readEnvFile });
-		return { code, text: c.text() };
-	};
-	const fromFile = (key) => ` -- ${key} read from ${envPath}, as the service reads it; this shell does not set it`;
-	const refusal = "the worker and the receiver refuse to start (exit 2)";
-	const unset = await run("GITHUB_AUTH_SOURCE=pat\n");
-	assert.equal(unset.code, 1);
-	assert.ok(unset.text.includes(`✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset: ${refusal}\n`), unset.text);
-	const empty = await run("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT=\n");
-	assert.equal(empty.code, 1);
-	assert.ok(empty.text.includes(`✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is empty: ${refusal}${fromFile("GITHUB_PAT")}\n`), empty.text);
-	// The probe does not claim a blank PAT "comes from" the file: the file supplies none.
-	assert.doesNotMatch(empty.text, /because GITHUB_PAT comes from/);
-	const blank = await run("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT='   '\n");
-	assert.equal(blank.code, 1);
-	assert.ok(blank.text.includes(`✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is whitespace only: ${refusal}${fromFile("GITHUB_PAT")}\n`), blank.text);
-	const noVar = await run("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT_VAR=\nGITHUB_PAT=ghp_real\n");
-	assert.equal(noVar.code, 1);
-	assert.ok(noVar.text.includes(`✗ GITHUB_AUTH_SOURCE=pat but GITHUB_PAT_VAR is set to an empty value, so it names no variable to take the PAT from: ${refusal}${fromFile("GITHUB_PAT_VAR")}\n`), noVar.text);
-	const named = await run("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT_VAR=MY_PAT\nMY_PAT=\n");
-	assert.ok(named.text.includes(`✗ GITHUB_AUTH_SOURCE=pat but MY_PAT is empty: ${refusal}${fromFile("MY_PAT")}\n`), named.text);
-	const good = await run("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT=ghp_real\n");
-	assert.doesNotMatch(good.text, /GITHUB_AUTH_SOURCE=pat but/);
-	assert.match(good.text, /in-image gh auth: not checked, because GITHUB_PAT comes from/);
-});
-
-// Issue #481 (PR #485 review round 1): a PI_TRIGGERS_FILE that is set and names no file, empty included. The worker takes
-// any set value as the file to load and the receiver as the file to serve from, and both exit 2 without it.
-test("a set PI_TRIGGERS_FILE that names no file, or is empty, is a ✗; unset keeps each process's own default (#481)", async () => {
-	const cwd = scaffoldedCwd();
-	const readEnvFile = (path) => readFileSync(path, "utf8");
-	const envPath = join(cwd, ".env");
-	const refusal = "the worker and the receiver refuse to start on it (exit 2)";
-	const run = async (text, shell = {}) => {
-		writeFileSync(envPath, text);
-		const c = capture();
-		const code = await runDoctor(imgEnv(shell), { ...scaffoldDeps(c.out, cwd), fileExists: existsSync, readEnvFile });
-		return { code, text: c.text() };
-	};
-	const empty = await run("PI_TRIGGERS_FILE=\n");
-	assert.equal(empty.code, 1);
-	const note = ` -- PI_TRIGGERS_FILE read from ${envPath}, as the service reads it; this shell does not set it`;
-	assert.ok(empty.text.includes(`✗ PI_TRIGGERS_FILE is set to an empty value, which neither process reads as unset: ${refusal}${note}\n`), empty.text);
-	const missing = await run("", { PI_TRIGGERS_FILE: "/nonexistent/t.json" });
-	assert.equal(missing.code, 1);
-	assert.ok(missing.text.includes(`✗ PI_TRIGGERS_FILE names "/nonexistent/t.json", which does not exist: ${refusal}\n`), missing.text);
-	const relative = await run("PI_TRIGGERS_FILE=gone.json\n");
-	assert.ok(relative.text.includes(`✗ PI_TRIGGERS_FILE names "${join(cwd, "gone.json")}", which does not exist: ${refusal}${note}\n`), relative.text);
-	// Unset with no ./triggers.json: the worker schedules no cron, so there is nothing of this to say.
-	const unset = await run("");
-	assert.doesNotMatch(unset.text, /PI_TRIGGERS_FILE (is set|names)/);
-	writeFileSync(join(cwd, "t.json"), JSON.stringify({ triggers: [] }));
-	const present = await run(`PI_TRIGGERS_FILE=${join(cwd, "t.json")}\n`);
-	assert.doesNotMatch(present.text, /PI_TRIGGERS_FILE (is set|names)/);
-});
-
-test("doctor trims GITHUB_APP_PRIVATE_KEY_PATH as loadGitHubAuth does: blank beside an inline key is not 'both set' (PR #466 gate round 2)", async () => {
-	const inline = `-----BEGIN PRIVATE KEY-----${KEY_BODY}`;
-	const beside = capture();
-	assert.equal(await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY: inline, GITHUB_APP_PRIVATE_KEY_PATH: "   " }), appDeps(beside.out)), 0);
-	assert.doesNotMatch(beside.text(), /are both set/);
-	assert.match(beside.text(), /✓ GitHub App private key supplied inline/);
-	const alone = capture();
-	assert.equal(await runDoctor(appEnv({ GITHUB_APP_ID: "4242", GITHUB_APP_INSTALLATION_ID: "987654", GITHUB_APP_PRIVATE_KEY_PATH: "   " }), appDeps(alone.out)), 1);
-	assert.match(alone.text(), /✗ GITHUB_AUTH_SOURCE=app but neither GITHUB_APP_PRIVATE_KEY_PATH nor GITHUB_APP_PRIVATE_KEY is set -- the worker will refuse to boot\n/);
-});
-
-test("doctor: the app-auth block only fires for source app", async () => {
-	const { out, text } = capture();
-	await runDoctor(ghEnv({ GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" }), ghDeps(out, green));
-	assert.doesNotMatch(text(), /GITHUB_APP_ID/, "pat deployments hear nothing about App credentials");
 });
 
 // -- replica runs (REQ-REPLICA-RUNS): the multiplier is worth stating, not worth failing on ------------
@@ -1758,7 +1445,7 @@ test("doctor: with PI_PAUSE_WINDOWS_FILE set, the scaffolded file is not mention
 });
 
 test("doctor: a .env that NAMES the key softens the warning instead of crying wolf (#357)", async () => {
-	// `pi-dispatch up` writes these keys into `<cwd>/.env`, which configures the SERVICE through
+	// The quickstart's own env lines write these keys into `<cwd>/.env`, which configures the SERVICE through
 	// EnvironmentFile= and the wrappers and configures nothing about the shell doctor runs in. Unqualified,
 	// the warning would fire on every correctly converged deployment, and this module's own rule is that a
 	// check nobody can silence must never cry wolf.
@@ -2399,7 +2086,7 @@ test("doctor: the .env reader answers for ONE loader, and only for the keys it w
 test("doctor: nothing but the two named keys is ever read out of .env, secrets least of all (#357)", async () => {
 	// The narrowing the whole precedent rests on, and until this test it was a sentence in a docblock:
 	// widening the key list at the call site changed no output, so nothing would have noticed. The bytes
-	// asserted here are the point -- a `.env` holds WEBHOOK_SECRET and provider keys, and `up.mjs`'s own
+	// asserted here are the point -- a `.env` holds WEBHOOK_SECRET and provider keys, and the deployment's own
 	// rule is that a webhook secret in a scrollback is a webhook secret in a pastebin.
 	const cwd = scaffoldedCwd();
 	const secret = "cafef00d".repeat(8);
@@ -2746,8 +2433,8 @@ test("doctor: without --fix, a fixAction-bearing failure prints exactly the old 
 		/✗ Job image present \(pi-job:latest\)\n    → docker pull docker\.io\/ddv12138\/pi-job:latest && docker tag docker\.io\/ddv12138\/pi-job:latest pi-job:latest {2}\(or build image\/Dockerfile\)\n/,
 	);
 	// Issue #468 with #471's rule: doctor starts no Valkey (its start needs the deployment's password in a child's
-	// environment); the fix line names `pi-dispatch up`.
-	assert.match(text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n    → run `pi-dispatch up` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD/);
+	// environment); the fix line names the compose stack.
+	assert.match(text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n    → run `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD/);
 	assert.equal(prompts.length, 0, "no --fix, no prompt -- even with a promptFn injected");
 	assert.doesNotMatch(text(), /fix available|run this\?|skipped:|fixed:|re-check after fixes/);
 });
@@ -2812,7 +2499,7 @@ test("doctor --fix: the converge re-check reruns the probes once and reports gre
 	};
 	const { out, text } = capture();
 	const code = await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture" },
 		{ out, cwd: tmpdir(), spawn, probeValkey: async () => true, fileExists: () => true, nodeVersion: "22.19.0", fix: true, promptFn: async () => true },
 	);
 	assert.match(text(), /✗ Job image present \(pi-job:latest\)/, "the first pass reported the failure as always");
@@ -2827,28 +2514,27 @@ test("doctor --fix: the converge re-check reruns the probes once and reports gre
 	assert.equal(code, 0, "converge-to-green: the exit code judges the re-checked list by the same failed/ok logic");
 });
 
-// Issue #468 with issue #471's rule (PR #474): doctor hands no program anything from `.env`, and a Valkey `up` or
-// compose starts takes the deployment's VALKEY_PASSWORD from there, so `doctor --fix` starts no Valkey at all: the check
-// carries no offer, and its fix line names `pi-dispatch up`, which starts it with the password, labels its container and
-// volume with the folder, and asks before it uses a volume it cannot attribute.
-test("doctor --fix starts no Valkey: the unreachable check names `pi-dispatch up` and offers nothing (#468 over #471)", async () => {
+// Issue #468 with issue #471's rule (PR #474): doctor hands no program anything from `.env`, and the compose stack
+// takes the deployment's VALKEY_PASSWORD from there, so `doctor --fix` starts no Valkey at all: the check carries no
+// offer, and its fix line names the compose stack, which starts it with the password.
+test("doctor --fix starts no Valkey: the unreachable check names the compose stack and offers nothing (#468 over #471)", async () => {
 	const calls = [];
 	const { out, text } = capture();
 	const { fn: promptFn, calls: prompts } = promptRecorder(true);
 	const code = await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture" },
 		{ out, cwd: tmpdir(), spawn: fakeSpawn({ ...EGRESS_OK, "docker info": 0, "docker image": 0, "docker run": 0 }, calls), probeValkey: async () => false, fileExists: () => true, nodeVersion: "22.19.0", fix: true, promptFn },
 	);
 	assert.equal(code, 1);
 	assert.ok(!calls.some((c) => c.cmd === "docker" && ["run", "volume", "start", "compose"].includes(c.args[0]) && c.args.join(" ").includes("valkey")), "nothing started for Valkey");
 	assert.deepEqual(prompts, [], "no offer to accept");
-	assert.match(text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n    → run `pi-dispatch up` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD \(or, in a folder \/dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file \.env -f deploy\/docker-compose\.yml -f deploy\/docker-compose\.valkey\.yml up -d valkey`\)\n/);
+	assert.match(text(), /✗ Valkey reachable \(redis:\/\/127\.0\.0\.1:6379\)\n    → run `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD \(or, in a folder \/dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file \.env -f deploy\/docker-compose\.yml -f deploy\/docker-compose\.valkey\.yml up -d valkey`\)\n/);
 });
 
 test("doctor prints which resume bounds are on, so an unset one is legible as a choice", async () => {
 	const { out, text } = capture();
 	await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture" },
 		{ out, spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fileExists: () => true },
 	);
 	// Defaults: the TTL ships at 14 and the three eligibility bounds ship off. All four are printed, because
@@ -2861,7 +2547,7 @@ test("doctor says the context bound is inert until the job image reports a measu
 	// The one bound that can be set and still do nothing. Its measurement comes from the image's runner,
 	// and there is deliberately no capability label to check against, so this line is the entire
 	// detection surface for "you set it and nothing is happening".
-	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" };
+	const env = { PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture" };
 	const opts = { spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fileExists: () => true };
 
 	const on = capture();
@@ -2878,7 +2564,7 @@ test("the resume-bound lines appear only for a deployment that actually resumes"
 	// feature it does not use.
 	const { out, text } = capture();
 	await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_SESSION_MAX_CONTEXT_PCT: "80", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: "/srv/pi-sessions", PI_SESSION_MAX_CONTEXT_PCT: "80", GITHUB_PAT: "ghp_fixture" },
 		{ out, spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fileExists: () => true },
 	);
 	assert.doesNotMatch(text(), /Resume bounds:/);
@@ -2892,7 +2578,7 @@ test("doctor --fix: the declared-but-absent session store is created silently --
 	const { fn: promptFn, calls: prompts } = promptRecorder(true);
 	const { out, text } = capture();
 	const code = await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: sessionsDir, PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: sessionsDir, PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture" },
 		{
 			out,
 			spawn: fakeSpawn(green),
@@ -2919,7 +2605,7 @@ test("doctor --fix: a missing .env is delegated to init's create-only scaffolds,
 	const { fn: promptFn, calls: prompts } = promptRecorder(true);
 	const { out, text } = capture();
 	const code = await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture" },
 		// The proxy's mounts are this folder's (issue #480): init now scaffolds the files it mounts, so doctor compares them.
 		{ out, cwd, spawn: fakeSpawn({ ...green, [PROXY_KEY]: proxyAnswer("healthy", "running", { cwd, include: join(cwd, "model-endpoints.conf") }) }), probeValkey: async () => true, nodeVersion: "22.19.0", fix: true, promptFn },
 	);
@@ -2936,7 +2622,7 @@ test("doctor --fix: accepting the overlay auth.json offer deletes the file and c
 	const cwd = tempDir("pi-fix-auth-");
 	const { fn: promptFn, calls: prompts } = promptRecorder(true);
 	const { out, text } = capture();
-	const code = await runDoctor(overlayEnv(dir, { GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" }), {
+	const code = await runDoctor(overlayEnv(dir, { GITHUB_PAT: "ghp_fixture" }), {
 		out,
 		cwd,
 		// This folder's mounts (issue #480): the --fix pass runs init here, which scaffolds the files the proxy mounts.
@@ -2952,41 +2638,6 @@ test("doctor --fix: accepting the overlay auth.json offer deletes the file and c
 	assert.match(text(), /fixed: Overlay is credential-free \(no auth\.json\)/);
 	assert.doesNotMatch(text().split("re-check after fixes")[1], /credential-free/, "the converge pass finds the overlay clean");
 	assert.equal(code, 0);
-});
-
-test("doctor --fix: accepting the restage offer re-runs import-pi as a child through the injected spawn", async () => {
-	const dir = overlay({ packages: [pkg(), pkg({ name: "pi-lint", version: "0.4.0", dir: "pi-lint", stage: false })] });
-	const cwd = tempDir("pi-fix-restage-");
-	const calls = [];
-	const env = overlayEnv(dir, { GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" });
-	const { fn: promptFn, calls: prompts } = promptRecorder(true);
-	const { out, text } = capture();
-	await runDoctor(env, {
-		out,
-		cwd,
-		spawn: fakeSpawn({ ...green, [process.execPath]: { code: 0, output: "restage-run-output\n" } }, calls),
-		probeValkey: async () => true,
-		nodeVersion: "22.19.0",
-		fix: true,
-		promptFn,
-	});
-	assert.deepEqual(prompts, ["run this? [y/N] "]);
-	assert.ok(text().includes(`    $ pi-dispatch import-pi --with-packages --no-host-packages --to ${dir}\n`), "the offer names the exact command");
-	const child = calls.find((c) => c.cmd === process.execPath);
-	assert.ok(child, "import-pi runs as a child process, so its own gates and printed-names vetting run unmodified");
-	assert.ok(child.args[0].endsWith("cli.mjs"), "spawned through the real CLI entry");
-	// --no-host-packages keeps the ONE automated staging path a repair: accepting a doctor prompt restores
-	// what the overlay declared, it never performs a first-time import of the host's pi setup (issue #102).
-	assert.deepEqual(child.args.slice(1), ["import-pi", "--with-packages", "--no-host-packages", "--to", dir]);
-	assert.equal(child.opts.env, env, "the child inherits doctor's env (PI_PACKAGES_FILE, PI_CODING_AGENT_DIR)");
-	assert.equal(child.opts.cwd, cwd, "and doctor's cwd seam, where pi-packages.json lives");
-	assert.match(text(), /restage-run-output/, "import-pi's own output is forwarded");
-	assert.match(text(), /fixed: Staged packages present \(pi-fmt@1\.2\.3, pi-lint@0\.4\.0\)/);
-	// The converge pass re-probes the real dirs; the fake spawn staged nothing, so the check honestly
-	// stays failing -- running a fix is reported, convergence is measured.
-	assert.match(text().split("re-check after fixes")[1], /✗ Staged packages present/);
-	const counts = /re-check after fixes: \d+ pass, \d+ warning\(s\), (\d+) failing\n/.exec(text());
-	assert.equal(Number(counts?.[1]), (text().split("re-check after fixes")[1].match(/^✗ /gm) ?? []).length, "the failing count is the ✗ lines listed (PR #466 gate round 1)");
 });
 
 test("doctor --fix: the default prompt answers No on non-TTY stdin and on plain enter", async () => {
@@ -3060,8 +2711,6 @@ const ALLOWED_FIXACTIONS = [
 	// Issue #433: the podman venue's own image line, the image check of a deployment without `local`.
 	[/^podman: job image is not in this account's Podman store \(pi-job:latest\)$/, "prompt"],
 	[/^Overlay is credential-free \(no auth\.json\)$/, "prompt"],
-	[/^Staged packages manifest readable \(/, "prompt"],
-	[/^Staged packages present \(/, "prompt"],
 ];
 
 /** Walk a check list; fail on any fixAction outside the allowed set. Returns the carrying labels. */
@@ -3148,10 +2797,10 @@ test("doctor --fix doctrine: from a fully-broken env, no check outside the allow
 	const carried = assertFixActionDoctrine(checks);
 	// The fixture must actually reach every eligible check -- a triggers-parse regression swallowed to
 	// zeroes would otherwise hollow this pin out silently.
-	for (const expected of [/^\.env present$/, /^Job image present \(pi-job:latest\)$/, /^Overlay is credential-free/, /^Staged packages present/, /^Session store does not exist/]) {
+	for (const expected of [/^\.env present$/, /^Job image present \(pi-job:latest\)$/, /^Overlay is credential-free/, /^Session store does not exist/]) {
 		assert.ok(carried.some((l) => expected.test(l)), `fixture failed to produce a fixAction for ${expected}`);
 	}
-	assert.equal(carried.length, 5, "exactly the eligible checks carry one, no more");
+	assert.equal(carried.length, 4, "exactly the eligible checks carry one, no more");
 	// The nevers, by name: each of these IS failing here and still gets no offer.
 	const never = (re, why) => {
 		const c = checks.find((x) => re.test(x.label));
@@ -3174,10 +2823,10 @@ test("doctor --fix doctrine: from a fully-broken env, no check outside the allow
 	assert.equal(unknown.fixAction, undefined, "doctor never rewrites PI_PROVIDER for the operator");
 	never(/but WEBHOOK_SECRET is unset/, "secrets are never minted or set");
 	never(/AZURE_WEBHOOK_MODE is/, "an undefaulted mode must stay a chosen thing");
-	never(/GITHUB_AUTH_SOURCE is gh but/, "auth posture is never changed behind the operator");
+	never(/^GITHUB_PAT is unset:/, "a missing credential is never minted behind the operator");
 });
 
-test("doctor --fix doctrine: a missing manifest offers restage; overridden image and remote valkey never gain offers", async () => {
+test("doctor --fix doctrine: a missing manifest offers nothing; overridden image and remote valkey never gain offers", async () => {
 	const dir = overlay({ packagesNoManifest: true });
 	const env = {
 		PI_PROVIDER: "anthropic",
@@ -3190,8 +2839,7 @@ test("doctor --fix doctrine: a missing manifest offers restage; overridden image
 	assertFixActionDoctrine(checks);
 	const manifest = checks.find((c) => /^Staged packages manifest readable/.test(c.label));
 	assert.ok(manifest && !manifest.ok);
-	assert.equal(manifest.fixAction.tier, "prompt");
-	assert.equal(manifest.fixAction.describe, `pi-dispatch import-pi --with-packages --no-host-packages --to ${dir}`);
+	assert.equal(manifest.fixAction, undefined, "the overlay is populated by the operator now, so doctor does not run a stager for it");
 	const img = checks.find((c) => c.label === "Job image present (acme/pi-job:2)");
 	assert.ok(img && !img.ok);
 	assert.equal(img.fixAction, undefined, "an overridden PI_JOB_IMAGE is the operator's trust choice -- pulling the default could not honor it");
@@ -3199,8 +2847,8 @@ test("doctor --fix doctrine: a missing manifest offers restage; overridden image
 	assert.ok(valkey && !valkey.ok);
 	assert.equal(valkey.fixAction, undefined, "a remote VALKEY_URL cannot be fixed by starting a local container");
 
-	// A trigger demanding packages nobody staged is a declaration problem, never auto-restaged: with an
-	// empty pi-packages.json a restage would 'succeed' into the same silent package-less job.
+	// A trigger demanding packages nobody staged is a declaration problem, never auto-staged: writing an empty
+	// pi-packages.json would 'succeed' into the same silent package-less job.
 	const c2 = await collectChecks(
 		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_GLOBAL_PI_DIR: overlay({}), PI_TRIGGERS_FILE: triggersFile(true) },
 		collectSeams(green, { nodeVersion: "22.19.0" }),
@@ -3369,9 +3017,9 @@ test("doctor: a proxy that is not on the host FAILS, because every job is refuse
 	// A ✓ would be a lie and a ⚠ would under-report a deployment that cannot run anything at all.
 	assert.equal(code, 1, "an armed policy with no proxy is a hard failure");
 	assert.match(text(), /✗ Egress proxy is not on this host \(pi-dispatch-egress-proxy\)/);
-	// `pi-dispatch up` only (PR #488's review): a compose line here would start a second Valkey in a setup folder.
-	assert.match(text(), /→ `pi-dispatch up` from the deployment folder starts it {2}-- /);
-	assert.doesNotMatch(text(), /--profile egress up -d/);
+	// PR #488's review: the fix names the egress profile explicitly, so it starts the proxy from this deployment folder.
+	assert.match(text(), /→ `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d` from the deployment folder starts it {2}-- /);
+	assert.match(text(), /--profile egress up -d/);
 });
 
 test("doctor: a directory where one of the proxy's two files belongs is a failure naming it (PR #488's review)", async () => {
@@ -3426,7 +3074,7 @@ test("doctor: a two-mount proxy is out of date only under rules that include the
 	assert.doesNotMatch(current.text, /out of date|not this deployment's/, "rules from before #503: a two-mount proxy is current");
 	const ENDPOINT = [{ id: "m", host: "host.docker.internal", port: 11434, slots: 1 }];
 	const declared = await doctor503(folder503(PRE_503_RULES, { endpoints: ENDPOINT }));
-	assert.match(declared.text, /⚠ model endpoints are declared, but deploy\/egress-proxy\.conf predates #503 and does not include model-endpoints\.conf, so the endpoints stay unreachable until the rules are refreshed: `pi-dispatch up`, and accept the refresh/);
+	assert.match(declared.text, /⚠ model endpoints are declared, but deploy\/egress-proxy\.conf predates #503 and does not include model-endpoints\.conf, so the endpoints stay unreachable until the rules are refreshed: replace deploy\/egress-proxy\.conf with the package's copy, then recreate the proxy with `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d --force-recreate egress-proxy`/);
 	assert.doesNotMatch(declared.text, /out of date|not this deployment's/, "not drift: a replace would cut tunnels and fix nothing");
 	const includes = folder503(INCLUDE_503_RULES, { endpoints: ENDPOINT });
 	const stale = await doctor503(includes);
@@ -3617,11 +3265,11 @@ test("doctor: the include is compared INSIDE the running proxy, so a stale copy 
 	const old = declaredInclude([]);
 	const stale = await doctorEndpoints({ inside: old, hostFile: old });
 	assert.equal(stale.failed, true);
-	assert.match(stale.text, /✗ Model endpoints: the include inside the running proxy \(\/etc\/pi-dispatch\/model-endpoints\.conf in pi-dispatch-egress-proxy\) does not match model-endpoints\.json \(mac-ollama\), so a reload would not load the declared rules\n {4}→ `pi-dispatch egress render` in the deployment folder, then `docker exec pi-dispatch-egress-proxy squid -k reconfigure`\. If the render says the file already matches and this line stays, the proxy holds an earlier copy of a file that was replaced rather than written in place, which a reload never sees: `docker rm -f -v pi-dispatch-egress-proxy`, then `pi-dispatch up`/);
+	assert.match(stale.text, /✗ Model endpoints: the include inside the running proxy \(\/etc\/pi-dispatch\/model-endpoints\.conf in pi-dispatch-egress-proxy\) does not match model-endpoints\.json \(mac-ollama\), so a reload would not load the declared rules\n {4}→ `pi-dispatch egress render` in the deployment folder, then `docker exec pi-dispatch-egress-proxy squid -k reconfigure`\. If the render says the file already matches and this line stays, the proxy holds an earlier copy of a file that was replaced rather than written in place, which a reload never sees: `docker rm -f -v pi-dispatch-egress-proxy`, then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d`/);
 	// Rendered, but the folder's file was REPLACED: the container keeps the old inode (measured), so it reads the old rules.
 	const replaced = await doctorEndpoints({ inside: old });
 	assert.equal(replaced.failed, true);
-	assert.match(replaced.text, /✗ Model endpoints: the proxy is mounted on a replaced file: the file it mounts \(\S+model-endpoints\.conf\) differs from what pi-dispatch-egress-proxy reads at \/etc\/pi-dispatch\/model-endpoints\.conf, so it was replaced \(a rename, an editor's save\) rather than written in place, and no reload reaches the proxy\n {4}→ recreate the proxy so it mounts the file anew: `docker rm -f -v pi-dispatch-egress-proxy`, then `pi-dispatch up`/);
+	assert.match(replaced.text, /✗ Model endpoints: the proxy is mounted on a replaced file: the file it mounts \(\S+model-endpoints\.conf\) differs from what pi-dispatch-egress-proxy reads at \/etc\/pi-dispatch\/model-endpoints\.conf, so it was replaced \(a rename, an editor's save\) rather than written in place, and no reload reaches the proxy\n {4}→ recreate the proxy so it mounts the file anew: `docker rm -f -v pi-dispatch-egress-proxy`, then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d`/);
 	// Gate round 1, item 9: a file replaced by hand with the JSON unchanged, so what the PROXY holds still matches the
 	// declaration. The folder's file differing from the proxy's is the finding, whichever of the two matches the JSON.
 	const handReplaced = await doctorEndpoints({ hostFile: `${declaredInclude([MAC])}# a hand edit\n` });
@@ -3970,7 +3618,7 @@ test("doctor: a paused or crash-looping proxy is not running, and one named by P
 	// The worker's simple rule (gate round 3): paused refuses every job, so ✗; restarting and every other non-running
 	// state is retried by the worker, so ⚠ with a fix that says so.
 	// `restarting` is a crash loop that fails every job (one retry, then failed), and `created` never starts: both ✗.
-	for (const [status, fix] of [["restarting", "its squid keeps exiting and its restart policy keeps bringing it back, so every job is retried once, then failed; `docker logs pi-dispatch-egress-proxy` says why"], ["created", "`pi-dispatch up` from the deployment folder starts it  -- "]]) {
+	for (const [status, fix] of [["restarting", "its squid keeps exiting and its restart policy keeps bringing it back, so every job is retried once, then failed; `docker logs pi-dispatch-egress-proxy` says why"], ["created", "`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d` from the deployment folder starts it  -- "]]) {
 		const failed = capture();
 		assert.equal(await runDoctor(ghEnv({ PI_EGRESS: "1" }), ghDeps(failed.out, egressPlan({ [PROXY_KEY]: proxyAnswer("none", status), "gh auth status": { code: 0, output: ghStatusOutput } }))), 1, status);
 		assert.ok(failed.text().includes(`✗ Egress proxy is ${status} (pi-dispatch-egress-proxy)\n    → ${fix}`), `${status}:\n${failed.text()}`);
@@ -3985,7 +3633,7 @@ test("doctor: a paused or crash-looping proxy is not running, and one named by P
 	}
 	const { out, text } = capture();
 	await runDoctor(ghEnv({ PI_EGRESS: "1", PI_EGRESS_PROXY: "my-squid" }), ghDeps(out, egressPlan({ [PROXY_KEY]: proxyAnswer("none", "exited"), "gh auth status": { code: 0, output: ghStatusOutput } })));
-	assert.match(text(), /✗ Egress proxy is stopped \(my-squid\)\n {4}→ PI_EGRESS_PROXY names your own proxy, which neither compose nor `pi-dispatch up` starts: `docker start my-squid` -- /);
+	assert.match(text(), /✗ Egress proxy is stopped \(my-squid\)\n {4}→ PI_EGRESS_PROXY names your own proxy, which compose does not start: `docker start my-squid` -- /);
 	assert.doesNotMatch(text(), /✗ Egress proxy is stopped \(my-squid\)\n {4}→ docker compose/);
 });
 
@@ -4005,7 +3653,7 @@ test("doctor: a RUNNING shipped proxy from another squid, command or folder is �
 	const esc = (t) => t.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
 	const stale = await run(proxyAnswer("healthy", "running", { cwd: folder, image: `ubuntu/squid@sha256:${"0".repeat(64)}` }), { inFolder: false });
 	assert.equal(stale.code, 1);
-	assert.match(stale.text, /✗ Egress proxy is running but is not this deployment's \(pi-dispatch-egress-proxy\): it was created from ubuntu\/squid@sha256:0{64}, not the pinned ubuntu\/squid@sha256:6a097f68[0-9a-f]{56}\n {4}→ `pi-dispatch up` from the deployment folder offers to replace it with the shipped one/);
+	assert.match(stale.text, /✗ Egress proxy is running but is not this deployment's \(pi-dispatch-egress-proxy\): it was created from ubuntu\/squid@sha256:0{64}, not the pinned ubuntu\/squid@sha256:6a097f68[0-9a-f]{56}\n {4}→ from the deployment folder, `docker rm -f -v pi-dispatch-egress-proxy` then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d` replace it with the shipped one/);
 	// The entrypoint and command are judged wherever doctor runs (adversary Y7).
 	const command = await run(proxyAnswer("healthy", "running", { cwd: folder, entrypoint: ["squid"], cmd: ["-N", "-f", "/tmp/open.conf"] }), { inFolder: false });
 	assert.match(command.text, /its entrypoint is \["squid"\], not the image's \["entrypoint\.sh"\]; its command is \["-N","-f","\/tmp\/open\.conf"\]/);
@@ -4019,15 +3667,15 @@ test("doctor: a RUNNING shipped proxy from another squid, command or folder is �
 	assert.equal(desktop.code, 0, "an unknown never fails doctor");
 	assert.match(desktop.text, /⚠ Egress proxy's mounts could not be compared on this host \(pi-dispatch-egress-proxy\): \/host_mnt\/Users\/op\/deploy\/deploy\/egress-proxy\.conf, \/host_mnt\/Users\/op\/deploy\/egress-allowlist\.conf are paths this host cannot resolve/);
 	assert.doesNotMatch(desktop.text, /is not this deployment's/);
-	// Stale by its image with its mounts unknown: `up` offers the replace (PR #456's final check), and the fix says so.
+	// Stale by its image with its mounts unknown: the fix says to replace it (PR #456's final check).
 	const desktopOld = await run(proxyAnswer("healthy", "running", { image: "squid:old", conf: "/host_mnt/Users/op/deploy/deploy/egress-proxy.conf", allowlist: "/host_mnt/Users/op/deploy/egress-allowlist.conf" }));
-	assert.match(desktopOld.text, /✗ Egress proxy is running but is not this deployment's \(pi-dispatch-egress-proxy\): it was created from squid:old, not the pinned [^\n]*\n {4}→ `pi-dispatch up` from the deployment folder offers to replace it with the shipped one/);
-	// Stale on a mount alone while its other mount is unknown: `up` does not offer, so the fix names the commands instead.
+	assert.match(desktopOld.text, /✗ Egress proxy is running but is not this deployment's \(pi-dispatch-egress-proxy\): it was created from squid:old, not the pinned [^\n]*\n {4}→ from the deployment folder, `docker rm -f -v pi-dispatch-egress-proxy` then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d` replace it with the shipped one/);
+	// Stale on a mount alone while its other mount is unknown: the fix names the commands instead.
 	const desktopMount = await run(proxyAnswer("healthy", "running", { conf: "/host_mnt/Users/op/deploy/deploy/egress-proxy.conf", allowlist: join(other, "egress-allowlist.conf") }));
 	assert.equal(desktopMount.code, 1);
 	assert.match(
 		desktopMount.text,
-		new RegExp(`✗ Egress proxy is running but is not this deployment's \\(pi-dispatch-egress-proxy\\): its /etc/pi-dispatch/allowlist\\.conf is ${esc(join(other, "egress-allowlist.conf"))}, not ${esc(join(folder, "egress-allowlist.conf"))}\\n {4}→ check its mounts \\(\`docker inspect --format '\\{\\{json \\.Mounts\\}\\}' pi-dispatch-egress-proxy\`\\), then \`docker rm -f -v pi-dispatch-egress-proxy\` and \`pi-dispatch up\` from the deployment folder replace it with the shipped one; \`up\` does not offer to on its own while one of its mounts cannot be compared here;`),
+		new RegExp(`✗ Egress proxy is running but is not this deployment's \\(pi-dispatch-egress-proxy\\): its /etc/pi-dispatch/allowlist\\.conf is ${esc(join(other, "egress-allowlist.conf"))}, not ${esc(join(folder, "egress-allowlist.conf"))}\\n {4}→ check its mounts \\(\`docker inspect --format '\\{\\{json \\.Mounts\\}\\}' pi-dispatch-egress-proxy\`\\), then \`docker rm -f -v pi-dispatch-egress-proxy\` and \`docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d\` from the deployment folder replace it with the shipped one;`),
 	);
 	// The operator's own proxy is never judged against the shipped one.
 	assert.doesNotMatch((await run(proxyAnswer("healthy", "running", { image: "my/squid:1" }), { env: { PI_EGRESS_PROXY: "my-squid" } })).text, /is not this deployment's|could not be compared/);
@@ -5381,8 +5029,8 @@ test("doctor: the in-image gh probe does NOT run on a docker CLI that points off
 	// another machine. A check must not do what the credentialTransit line warns about.
 	const { out, text } = capture();
 	const calls = [];
-	const plan = { ...green, "docker context inspect": { code: 0, output: '"remote"|"tcp://10.1.2.3:2375"\n' }, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": 0 };
-	await runDoctor(ghEnv(), ghDeps(out, plan, calls));
+	const plan = { ...green, "docker context inspect": { code: 0, output: '"remote"|"tcp://10.1.2.3:2375"\n' }, "docker run": 0 };
+	await runDoctor(ghEnv({ GITHUB_PAT: "ghp_redirected_fixture" }), ghDeps(out, plan, calls));
 	assert.ok(!calls.some((c) => c.cmd === "docker" && c.args.includes("GH_TOKEN")), "no container was handed the token");
 	assert.match(text(), /⚠ in-image gh auth: not checked, because this shell's docker CLI resolves tcp:\/\/10\.1\.2\.3:2375, which is not shown to be on this host/);
 });
@@ -5391,19 +5039,10 @@ test("doctor: the in-image gh probe does NOT run when the docker CLI could not s
 	// Not only a redirect: an endpoint doctor could not read is not observed local either, and gets no credit.
 	const { out, text } = capture();
 	const calls = [];
-	const plan = { ...green, "docker context inspect": { code: 1, output: "" }, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": 0 };
-	await runDoctor(ghEnv(), ghDeps(out, plan, calls));
+	const plan = { ...green, "docker context inspect": { code: 1, output: "" }, "docker run": 0 };
+	await runDoctor(ghEnv({ GITHUB_PAT: "ghp_redirected_fixture" }), ghDeps(out, plan, calls));
 	assert.ok(!calls.some((c) => c.cmd === "docker" && c.args.includes("GH_TOKEN")), "no container was handed the token");
 	assert.match(text(), /⚠ in-image gh auth: not checked, because this shell's docker CLI did not say which daemon it uses \(exit-1\)/);
-});
-
-test("doctor: under GITHUB_AUTH_SOURCE=app a redirected CLI does not claim a probe would send a token (#278)", async () => {
-	// App mode mints per job and never runs the probe, so the redirect warning would be about nothing.
-	const { out, text } = capture();
-	const plan = { ...green, "docker context inspect": { code: 0, output: '"remote"|"tcp://10.1.2.3:2375"\n' } };
-	await runDoctor(ghEnv({ GITHUB_AUTH_SOURCE: "app" }), ghDeps(out, plan));
-	assert.match(text(), /✓ in-image gh auth: skipped \(GITHUB_AUTH_SOURCE=app mints per-job\)/);
-	assert.doesNotMatch(text(), /would send your gh token/);
 });
 
 // -- doctor --live (issue #278, INT-LIVE-PROBE-CONTRACT) ----------------------------------------------------------
@@ -6551,23 +6190,21 @@ test("an endpoint that resolves to NOTHING is said as a phrase, not as a gap (#3
 	assert.match(text(), /credentialTransit is ASSERTED by the operator, not enforced: this shell's docker CLI resolves context "X" to an empty endpoint, which is not shown to be on this host/);
 	assert.doesNotMatch(text(), /resolves\s*, which is not shown/, "neither site rendered here renders the gap");
 	assert.doesNotMatch(text(), /to\s*, which is not shown/, "including the one that names the context");
-	// The other two sites the helper covers are driven separately below, because this plan mints no gh token
-	// and never reaches the in-image probe, and `start.mjs` is a different module entirely. An earlier version
+	// The other two sites the helper covers are driven separately below, because this plan exports no PAT and
+	// never reaches the in-image probe, and `start.mjs` is a different module entirely. An earlier version
 	// of this test said "no site renders the gap" while measuring half of them.
 });
 
 test("the in-image gh probe names an empty endpoint too, not a gap (#360)", async () => {
 	// The third of the four sites, and it was UNPINNED: reverting it to `endpoint.endpoint` survived the whole
-	// suite, because no other test in this file mints a token and this branch runs only once there is one.
+	// suite, because no other test in this file exported a PAT and this branch runs only once there is one.
 	const { out, text } = capture();
 	const plan = {
 		...green,
 		"docker context inspect": { code: 0, output: '"X"|""\n' },
-		"gh auth status": { code: 0, output: ghStatusOutput },
-		"gh auth token": { code: 0, output: "gho_dummy\n" },
 	};
-	await runDoctor(ghEnv({ PI_EGRESS: "0" }), ghDeps(out, plan, [], {}));
-	assert.match(text(), /⚠ in-image gh auth: not checked, because this shell's docker CLI resolves an empty endpoint, which is not shown to be on this host, and the probe would send your gh token there/);
+	await runDoctor(ghEnv({ PI_EGRESS: "0", GITHUB_PAT: "ghp_dummy" }), ghDeps(out, plan, [], {}));
+	assert.match(text(), /⚠ in-image gh auth: not checked, because this shell's docker CLI resolves an empty endpoint, which is not shown to be on this host, and the probe would send your PAT there/);
 	assert.doesNotMatch(text(), /resolves\s*, which is not shown/);
 });
 
@@ -6989,8 +6626,8 @@ test("doctor: the `--fix` pull runs under the LONG bound, not the default one (#
 
 test("doctor: the two bounds are what ship, and the pull one is the larger (#397)", async () => {
 	// The values themselves, because every test above injects its own. `cmd` matches `runCmdCapture`'s, so
-	// the two runners in that file do not disagree about what "too long" means, and `pull` matches the 600s
-	// the same file already gives `import-pi`.
+	// the two runners in that file do not disagree about what "too long" means, and `pull` is the 600s the
+	// image-pulling fixes are bounded by.
 	assert.equal(RUN_TIMEOUTS.cmd, 30_000);
 	assert.equal(RUN_TIMEOUTS.pull, 600_000);
 	assert.ok(RUN_TIMEOUTS.pull > RUN_TIMEOUTS.cmd, "the override exists to be LONGER; equal values would mean one bound and no reason for two");
@@ -7215,8 +6852,8 @@ test("doctor: a boot key line inside a multi-line quoted value is not read as th
 	assert.doesNotMatch(text(), /PI_PAUSE_WINDOWS_FILE is set in .* and loads/, "not read as the key");
 	assert.match(text(), /⚠ PI_PAUSE_WINDOWS_FILE on line 2 of .*\.env lies inside the quoted value that opens on line 1, so the service reads it as part of that value and not as PI_PAUSE_WINDOWS_FILE/);
 	assert.match(text(), /close the quote that opens on line 1 before line 2, or write that value's newlines as \\n escapes/);
-	// A value that closes ABOVE the key leaves it an ordinary line, as the documented PEM does.
-	writeFileSync(join(cwd, ".env"), `GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----"\nPI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json")}\n`);
+	// A value that closes ABOVE the key leaves it an ordinary line.
+	writeFileSync(join(cwd, ".env"), `NOTE="first line\nsecond line"\nPI_PAUSE_WINDOWS_FILE=${join(cwd, "pause-windows.json")}\n`);
 	const pem = capture();
 	await runDoctor(imgEnv(), { ...scaffoldDeps(pem.out, cwd), platform: "linux" });
 	assert.ok(pem.text().includes(`✓ PI_PAUSE_WINDOWS_FILE is set in ${join(cwd, ".env")} (${join(cwd, "pause-windows.json")}) and loads`));
@@ -7503,7 +7140,7 @@ const podmanPlan = ({ info = PODMAN_INFO(), capabilities = "anyUid", image = tru
 	"podman network inspect --format {{.Internal}} {{.DNSEnabled}}": keeperNet === null ? { code: 125, output: "" } : { code: 0, output: `${keeperNet}\n` },
 	docker: "enoent",
 });
-const podmanEnv = (extra = {}) => ({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", PI_BACKENDS: "podman", PI_EGRESS: "0", ...extra });
+const podmanEnv = (extra = {}) => ({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture", PI_BACKENDS: "podman", PI_EGRESS: "0", ...extra });
 const podmanDeps = (out, plan, calls, extra = {}) => ({ ...ghDeps(out, plan, calls), home: PODMAN_HOME, observationFs: podmanFs, jobUserIdentity: LINUX_ID(1234), ...extra });
 
 test("a deployment that does not bless podman spawns no podman and prints no podman line (#354)", async () => {
@@ -7560,8 +7197,7 @@ test("doctor.mjs reads no service key from this shell outside the resolver: ever
 		/^const spawnEnv = seams\.spawnEnv \?\? shellVars;$/,
 		/^const shellValue = \(name\) => \(Object\.hasOwn\(spawnEnv, name\) \? spawnEnv\[name\] : undefined\);$/,
 		/^const \{ cwd, spawn, probeValkey, readHosts = defaultReadHosts, fileExists, nodeVersion, platform, agentDir = agentDirFrom\(spawnEnv\), readHostPiFn = readHostPi, /,
-		/^const probe = await runCmdCapture\(spawn, ghProbeBin, ghProbeArgs\(jobImage, ghProbeBin\), \{ env: spawnEnv, input: `\$\{token\}\\n` \}\);$/,
-		/^const res = await runCmdCapture\(spawn, process\.execPath, \[cli, "import-pi", "--with-packages", "--no-host-packages", "--to", overlay\], \{ env: spawnEnv, cwd, timeoutMs: 600000 \}\);$/,
+		/^const probe = await runCmdCapture\(spawn, ghProbeBin, ghProbeArgs\(jobImage\), \{ env: spawnEnv, input: `\$\{shellPat\}\\n` \}\);$/,
 		/^const res = await runCmdCapture\(spawn, file, args, \{ env: spawnEnv, cwd, timeoutMs: 15000 \}\);$/,
 		// Issue #704: `--secrets` hands a bundle resolver the environment every other child doctor starts gets, whole.
 		/^const resolver = makeBundleResolver\(\{ envBundles: parseSecretBundleProfilesSafe\(env\.PI_SECRET_BUNDLES\)\.bundles, .*hostEnv: spawnEnv, /,
@@ -7749,8 +7385,6 @@ test("a .env straight from init: the settings line names no key init left empty 
 	const named = line.slice(line.lastIndexOf(": ") + 2).split(", ");
 	assert.deepEqual(named.filter((k) => empty.includes(k)), [], line);
 	assert.ok(named.includes("RECEIVER_PORT"), "and the keys init did set are still named");
-	const gh = printed().split("\n").find((l) => l.startsWith("✓ GitHub auth settings read from "));
-	assert.ok(gh?.endsWith(": GITHUB_AUTH_SOURCE"), printed());
 });
 
 // Issue #481: the venue line, the CLI-variable warnings and the closing line judge an empty value by the same allowlist.
@@ -7820,8 +7454,8 @@ test("a .env line doctor cannot read the way the service will is named and its v
 });
 
 test("PI_JOB_IMAGE from .env is the image doctor inspects and runs, said; one the worker's validator refuses is never handed to docker (#471)", async () => {
-	const plan = { ...green, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_x\n" }, "docker run": 0 };
-	const r = await envDoctor("PI_JOB_IMAGE=team/img:1\n", {}, { plan });
+	const plan = { ...green, "docker run": 0 };
+	const r = await envDoctor("PI_JOB_IMAGE=team/img:1\n", { GITHUB_PAT: "ghp_image_fixture" }, { plan });
 	assert.ok(r.calls.some((c) => c.cmd === "docker" && c.args.join(" ") === "image inspect team/img:1"), "the service's image is the one inspected");
 	assert.ok(r.text.includes(`✓ Job image present (team/img:1) -- PI_JOB_IMAGE read from ${r.envPath}, as the service reads it; this shell does not set it`), r.text);
 	assert.ok(r.calls.some((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("team/img:1") && c.args.includes("gh")), "and the probe runs in it");
@@ -7839,19 +7473,15 @@ test("PI_JOB_IMAGE from .env is the image doctor inspects and runs, said; one th
 
 test("a .env-only secret never rides into a process doctor starts, and a PAT only the file holds means the in-image probe is not run, said (#471)", async () => {
 	const plan = { ...green, "docker run": 0 };
-	const r = await envDoctor("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT=ghp_from_file_123\nWEBHOOK_SECRET=wh_file_only\n", {}, { plan });
+	const r = await envDoctor("GITHUB_PAT=ghp_from_file_123\nWEBHOOK_SECRET=wh_file_only\n", {}, { plan });
 	assert.ok(!r.calls.some((c) => c.cmd === "docker" && c.args[0] === "run" && c.args.includes("gh")), "no probe: its token would come from .env");
 	assert.ok(r.text.includes(`⚠ in-image gh auth: not checked, because GITHUB_PAT comes from ${r.envPath} and doctor hands nothing from that file to a program it starts`), r.text);
 	assert.doesNotMatch(r.text, /ghp_from_file_123|wh_file_only/);
-	// A GITHUB_PAT_VAR from the file names which variable is the token: the same, even when this shell holds that variable.
-	const named = await envDoctor("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT_VAR=MY_PAT\n", { MY_PAT: "ghp_shell_456" }, { plan });
-	assert.ok(!named.calls.some((c) => c.args[0] === "run" && c.args.includes("gh")));
-	assert.match(named.text, /in-image gh auth: not checked, because GITHUB_PAT_VAR comes from/);
 	// This shell's own PAT: the probe runs with it, as before #471.
-	const shell = await envDoctor("GITHUB_AUTH_SOURCE=pat\n", { GITHUB_PAT: "ghp_shell_789" }, { plan });
+	const shell = await envDoctor(null, { GITHUB_PAT: "ghp_shell_789" }, { plan });
 	assert.equal(shell.calls.find((c) => c.args[0] === "run" && c.args.includes("gh"))?.stdin, "ghp_shell_789\n");
 	// A PAT set differently in both places is a disagreement on a credential: named, never shown.
-	const both = await envDoctor("GITHUB_AUTH_SOURCE=pat\nGITHUB_PAT=ghp_file_789\n", { GITHUB_PAT: "ghp_shell_000" }, { plan });
+	const both = await envDoctor("GITHUB_PAT=ghp_file_789\n", { GITHUB_PAT: "ghp_shell_000" }, { plan });
 	assert.ok(both.text.includes(`GITHUB_PAT is set differently in this shell and in ${both.envPath} (neither value is shown)`), both.text);
 	assert.doesNotMatch(both.text, /ghp_file_789|ghp_shell_000/);
 });
@@ -7869,7 +7499,7 @@ test("doctor --fix: a session store named only in .env is offered at the prompt 
 	const sessionsDir = join(tempDir("pi-471-sessions-"), "store");
 	const made = [];
 	const { fn: promptFn, calls: prompts } = promptRecorder(false);
-	const r = await envDoctor(`PI_SESSIONS_DIR=${sessionsDir}\n`, { PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" }, { deps: { fix: true, promptFn, mkdir: (p) => made.push(p), fileExists: (p) => p !== sessionsDir } });
+	const r = await envDoctor(`PI_SESSIONS_DIR=${sessionsDir}\n`, { PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture" }, { deps: { fix: true, promptFn, mkdir: (p) => made.push(p), fileExists: (p) => p !== sessionsDir } });
 	assert.deepEqual(prompts, ["run this? [y/N] "], "asked, not run silently");
 	assert.ok(r.text.includes(`fix available: Session store does not exist (${sessionsDir}) -- PI_SESSIONS_DIR read from ${r.envPath}, as the service reads it; this shell does not set it\n    $ mkdir -p ${sessionsDir} && chmod 700 ${sessionsDir}\n`), r.text);
 	assert.deepEqual(made, [], "declined, so nothing was created");
@@ -8038,13 +7668,13 @@ test("the ladder's doctor step judges the service's .env: the provider key's pre
 test("doctor: a PAUSED shipped proxy's fix is docker unpause, as up offers; a RUNNING stale one gets no ✓ line, and the canary through it blames the proxy, not the allowlist (#453 exec round 3)", async () => {
 	const paused = capture();
 	await runDoctor(ghEnv({ PI_EGRESS: "1" }), ghDeps(paused.out, egressPlan({ [PROXY_KEY]: proxyAnswer("none", "paused"), "gh auth status": { code: 0, output: ghStatusOutput } })));
-	assert.match(paused.text(), /✗ Egress proxy is paused \(pi-dispatch-egress-proxy\)\n {4}→ docker unpause pi-dispatch-egress-proxy {2}-- as `pi-dispatch up` offers;/);
+	assert.match(paused.text(), /✗ Egress proxy is paused \(pi-dispatch-egress-proxy\)\n {4}→ docker unpause pi-dispatch-egress-proxy {2}-- the egress policy refuses/);
 	// A running proxy made from another image, the canary's provider probe failing through it (case6-docker-stale-imagerun.txt).
 	const stale = capture();
 	await runDoctor(ghEnv({ PI_EGRESS: "1" }), ghDeps(stale.out, egressPlan({ [PROXY_KEY]: proxyAnswer("none", "running", { image: "docker.io/library/alpine:3.20", entrypoint: [], cmd: ["sleep", "100000"] }), "docker run --rm --name pi-dispatch-egress-probe-provider": 3, "gh auth status": { code: 0, output: ghStatusOutput } })));
 	assert.doesNotMatch(stale.text(), /✓ Egress proxy running/, "never healthy right before the ✗");
 	assert.match(stale.text(), /✗ Egress proxy is running but is not this deployment's \(pi-dispatch-egress-proxy\): it was created from docker\.io\/library\/alpine:3\.20/);
-	assert.match(stale.text(), /⚠ Egress policy does NOT reach the provider \(api\.anthropic\.com\)\n {4}→ the canary ran through pi-dispatch-egress-proxy, which is not this deployment's proxy \(above\), so this says nothing about egress-allowlist\.conf: `pi-dispatch up` from the deployment folder offers to replace it/);
+	assert.match(stale.text(), /⚠ Egress policy does NOT reach the provider \(api\.anthropic\.com\)\n {4}→ the canary ran through pi-dispatch-egress-proxy, which is not this deployment's proxy \(above\), so this says nothing about egress-allowlist\.conf: from the deployment folder, `docker rm -f -v pi-dispatch-egress-proxy` then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d` replace it/);
 	assert.doesNotMatch(stale.text(), /add api\.anthropic\.com to egress-allowlist\.conf/);
 	// A current proxy keeps its ✓ and the allowlist fix.
 	const current = capture();
@@ -8053,7 +7683,7 @@ test("doctor: a PAUSED shipped proxy's fix is docker unpause, as up offers; a RU
 	assert.match(current.text(), /add api\.anthropic\.com to egress-allowlist\.conf/);
 });
 
-test("doctor: a STOPPED shipped proxy that is not this deployment's gets up's replace offer as its fix, never compose (#453 gate 2)", async () => {
+test("doctor: a STOPPED shipped proxy that is not this deployment's gets the compose replace as its fix (#453 gate 2)", async () => {
 	const folder = tempDir("pi-proxy-stopped-");
 	mkdirSync(join(folder, "deploy"));
 	writeFileSync(join(folder, "deploy/egress-proxy.conf"), "http_port 3128\n");
@@ -8062,8 +7692,7 @@ test("doctor: a STOPPED shipped proxy that is not this deployment's gets up's re
 	writeFileSync(join(other, "egress-allowlist.conf"), "evil.example\n");
 	const { out, text } = capture();
 	await runDoctor(ghEnv({ PI_EGRESS: "1" }), { ...ghDeps(out, egressPlan({ [PROXY_KEY]: proxyAnswer("none", "exited", { cwd: folder, allowlist: join(other, "egress-allowlist.conf") }), "gh auth status": { code: 0, output: ghStatusOutput } })), cwd: folder, proxyFilesExist: () => true });
-	assert.match(text(), /✗ Egress proxy is stopped \(pi-dispatch-egress-proxy\)\n {4}→ it is not this deployment's either \(its \/etc\/pi-dispatch\/allowlist\.conf is [^)]*\): `pi-dispatch up` from the deployment folder offers to replace it with the shipped one \(docker rm -f -v pi-dispatch-egress-proxy, then the shipped run\) -- /);
-	assert.doesNotMatch(text(), /✗ Egress proxy is stopped \(pi-dispatch-egress-proxy\)\n {4}→ docker compose/);
+	assert.match(text(), /✗ Egress proxy is stopped \(pi-dispatch-egress-proxy\)\n {4}→ it is not this deployment's either \(its \/etc\/pi-dispatch\/allowlist\.conf is [^)]*\): from the deployment folder, `docker rm -f -v pi-dispatch-egress-proxy` then `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d` replace it with the shipped one -- /);
 });
 
 test("a URL doctor prints has its password blanked and its query dropped, or is not printed at all (#453 gate 3)", () => {
@@ -8077,11 +7706,11 @@ test("a URL doctor prints has its password blanked and its query dropped, or is 
 });
 
 test("doctor's .env reads pass ONE allowlist and ONE loader mapping (#453 gate 3)", async () => {
-	// PR #466 gate round 2 added the GitHub auth source and App keys; issue #464 the jobs and sandbox dirs, and in its gate
-	// round 1 the Valkey opt-in, the TMPDIR the default jobs root lives under, and the worker's name.
+	// PR #466 gate round 2 added the GitHub credential (now the PAT alone); issue #464 the jobs and sandbox dirs, and in
+	// its gate round 1 the Valkey opt-in, the TMPDIR the default jobs root lives under, and the worker's name.
 	// Issue #471: and every other key the service reads that doctor judges, the worker's and the receiver's.
-	assert.deepEqual([...SERVICE_ENV_KEYS], [...new Set(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY", "VALKEY_URL", "PI_VALKEY_SHARED", "VALKEY_PASSWORD", "PI_VALKEY_PORT", "PI_PROVIDER", "PI_MODEL", "GITHUB_AUTH_SOURCE", "GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_PRIVATE_KEY", "PI_JOBS_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...new Set(Object.values(CLI_SERVICE_KEYS).flat())])]);
-	for (const key of ["PI_JOB_IMAGE", "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_ALLOWED_MODELS", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "AZURE_ORG_URL", "AZURE_WEBHOOK_MODE", "WEBHOOK_SECRET", "RECEIVER_PORT", "GITHUB_PAT_VAR"]) {
+	assert.deepEqual([...SERVICE_ENV_KEYS], [...new Set(["PI_BACKENDS", "PI_EGRESS", "PI_EGRESS_PROXY", "VALKEY_URL", "PI_VALKEY_SHARED", "VALKEY_PASSWORD", "PI_VALKEY_PORT", "PI_PROVIDER", "PI_MODEL", "GITHUB_PAT", "PI_JOBS_DIR", "TMPDIR", "PI_WORKER_NAME", ...WORKER_SERVICE_KEYS, ...RECEIVER_SERVICE_KEYS, ...new Set(Object.values(CLI_SERVICE_KEYS).flat())])]);
+	for (const key of ["PI_JOB_IMAGE", "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_RESOLVER_ROOTS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_ALLOWED_MODELS", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "AZURE_ORG_URL", "AZURE_WEBHOOK_MODE", "WEBHOOK_SECRET", "RECEIVER_PORT"]) {
 		assert.ok(SERVICE_ENV_KEYS.includes(key), `${key}, which issue #471 lists, is a service key`);
 	}
 	// Every key whose value steers a spawn, a connection or a write says how it is judged, and is a service key.
@@ -8215,7 +7844,7 @@ const dockerCanaryPinRun = async (scenario, t = null) => {
 const DOCKER_CANARY_PIN = {
 	green: {
 		code: 0,
-		total: 52, // issue #596, phase 2: +1, the probe's cgroup parent inspect
+		total: 50, // issue #596, phase 2: +1, the probe's cgroup parent inspect
 		collection: [
 			"docker info",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
@@ -8234,8 +7863,6 @@ const DOCKER_CANARY_PIN = {
 			"docker run --rm --name pi-dispatch-egress-probe-plainhttp-7 --pull=never --network=pi-dispatch-egress-doctor-7 -e HTTPS_PROXY=http://pi-dispatch-egress-proxy:3128 -e NODE_USE_ENV_PROXY=1 --entrypoint node pi-job:latest -e <egressCanaryPlainScript(plainhttp)>",
 			"docker network disconnect -f pi-dispatch-egress-doctor-7 pi-dispatch-egress-proxy",
 			"docker network rm pi-dispatch-egress-doctor-7",
-			"gh auth status",
-			"gh auth token",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
 		],
 		text: [
@@ -8264,8 +7891,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make `docker info` report its CgroupDriver, then re-run doctor",
 			"✓ local: the daemon is Docker Engine 27.5.1",
 			"✓ local: jobs run as the job image's own user (this shell is uid 1001, the image's own uid)",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
 			"✓ Valkey reachable (redis://127.0.0.1:6379)",
 			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
 			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
@@ -8298,7 +7923,7 @@ const DOCKER_CANARY_PIN = {
 	},
 	stale: {
 		code: 0,
-		total: 50, // issue #596, phase 2: +1, the probe's cgroup parent inspect
+		total: 48, // issue #596, phase 2: +1, the probe's cgroup parent inspect
 		collection: [
 			"docker info",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
@@ -8315,8 +7940,6 @@ const DOCKER_CANARY_PIN = {
 			"docker run --rm --name pi-dispatch-egress-probe-provider-7 --pull=never --network=pi-dispatch-egress-doctor-7 -e HTTPS_PROXY=http://pi-dispatch-egress-proxy:3128 -e NODE_USE_ENV_PROXY=1 --entrypoint node pi-job:latest -e <egressCanaryScript(provider)>",
 			"docker network disconnect -f pi-dispatch-egress-doctor-7 pi-dispatch-egress-proxy",
 			"docker network rm pi-dispatch-egress-doctor-7",
-			"gh auth status",
-			"gh auth token",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
 		],
 		text: [
@@ -8344,8 +7967,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make `docker info` report its CgroupDriver, then re-run doctor",
 			"✓ local: the daemon is Docker Engine 27.5.1",
 			"✓ local: jobs run as the job image's own user (this shell is uid 1001, the image's own uid)",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
 			"✓ Valkey reachable (redis://127.0.0.1:6379)",
 			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
 			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
@@ -8379,7 +8000,7 @@ const DOCKER_CANARY_PIN = {
 	},
 	unfinished: {
 		code: 0,
-		total: 53, // issue #596, phase 2: +1, the probe's cgroup parent inspect
+		total: 51, // issue #596, phase 2: +1, the probe's cgroup parent inspect
 		collection: [
 			"docker info",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
@@ -8399,8 +8020,6 @@ const DOCKER_CANARY_PIN = {
 			"docker rm -f pi-dispatch-egress-probe-provider-7",
 			"docker network disconnect -f pi-dispatch-egress-doctor-7 pi-dispatch-egress-proxy",
 			"docker network rm pi-dispatch-egress-doctor-7",
-			"gh auth status",
-			"gh auth token",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
 		],
 		text: [
@@ -8430,8 +8049,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make `docker info` report its CgroupDriver, then re-run doctor",
 			"✓ local: the daemon is Docker Engine 27.5.1",
 			"✓ local: jobs run as the job image's own user (this shell is uid 1001, the image's own uid)",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
 			"✓ Valkey reachable (redis://127.0.0.1:6379)",
 			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
 			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
@@ -8465,7 +8082,7 @@ const DOCKER_CANARY_PIN = {
 	},
 	hung: {
 		code: 0,
-		total: 53, // issue #596, phase 2: +1, the probe's cgroup parent inspect
+		total: 51, // issue #596, phase 2: +1, the probe's cgroup parent inspect
 		// The kills the provider probe got: none before its 30 s bound, then ONE, with no signal named (so the
 		// default SIGTERM), which is `runCmdCapture`'s. The step runner would send SIGKILL.
 		killsBeforeBound: [],
@@ -8489,8 +8106,6 @@ const DOCKER_CANARY_PIN = {
 			"docker rm -f pi-dispatch-egress-probe-provider-7",
 			"docker network disconnect -f pi-dispatch-egress-doctor-7 pi-dispatch-egress-proxy",
 			"docker network rm pi-dispatch-egress-doctor-7",
-			"gh auth status",
-			"gh auth token",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
 		],
 		text: [
@@ -8520,8 +8135,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make `docker info` report its CgroupDriver, then re-run doctor",
 			"✓ local: the daemon is Docker Engine 27.5.1",
 			"✓ local: jobs run as the job image's own user (this shell is uid 1001, the image's own uid)",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
 			"✓ Valkey reachable (redis://127.0.0.1:6379)",
 			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
 			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
@@ -8555,7 +8168,7 @@ const DOCKER_CANARY_PIN = {
 	},
 	enoent: {
 		code: 0,
-		total: 53, // issue #596, phase 2: +1, the probe's cgroup parent inspect
+		total: 51, // issue #596, phase 2: +1, the probe's cgroup parent inspect
 		// The kills the provider probe got: none before its 30 s bound, then ONE, with no signal named (so the
 		// A probe that never launched is never killed.
 		killsBeforeBound: null,
@@ -8579,8 +8192,6 @@ const DOCKER_CANARY_PIN = {
 			"docker rm -f pi-dispatch-egress-probe-provider-7",
 			"docker network disconnect -f pi-dispatch-egress-doctor-7 pi-dispatch-egress-proxy",
 			"docker network rm pi-dispatch-egress-doctor-7",
-			"gh auth status",
-			"gh auth token",
 			"docker context inspect --format={{json .Name}}|{{json .Endpoints.docker.Host}}",
 		],
 		text: [
@@ -8610,8 +8221,6 @@ const DOCKER_CANARY_PIN = {
 			"    → make `docker info` report its CgroupDriver, then re-run doctor",
 			"✓ local: the daemon is Docker Engine 27.5.1",
 			"✓ local: jobs run as the job image's own user (this shell is uid 1001, the image's own uid)",
-			"⚠ GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (scopes: gist, read:org, repo, workflow)",
-			"    → this token carries broad scopes (workflow) -- use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
 			"✓ Valkey reachable (redis://127.0.0.1:6379)",
 			"✓ Provider key set (anthropic: ANTHROPIC_API_KEY)",
 			"⚠ PI_PAUSE_WINDOWS_FILE is unset in this shell, and <cwd>/.env could not be read, so whether the service is configured for scoped pauses cannot be answered here",
@@ -8739,7 +8348,7 @@ test("forgejo: without FORGEJO_PERMISSION_TOKEN doctor WARNS that the job token 
 });
 
 test("persisted transcripts and a context bound that may be inert are FACT LINES whose advice is in the label (#462)", async () => {
-	const env = imgEnv({ PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", PI_SESSION_MAX_CONTEXT_PCT: "80" });
+	const env = imgEnv({ PI_SESSIONS_DIR: "/srv/pi-sessions", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture", PI_SESSION_MAX_CONTEXT_PCT: "80" });
 	const checks = await collectChecks(env, adviceSeams({ fileExists: () => true }));
 	const transcripts = renderedOne(checks, /persist agent transcripts/);
 	assert.equal(
@@ -9130,7 +8739,7 @@ test("the session store's path reaches the terminal escaped, in its label, its f
 	const { fn: promptFn } = promptRecorder(false);
 	const { out, text } = capture();
 	await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: sessionsDir, PI_SESSION_MAX_AGE_DAYS: "3\u001b]0;x", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture" },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", PI_SESSIONS_DIR: sessionsDir, PI_SESSION_MAX_AGE_DAYS: "3\u001b]0;x", PI_TRIGGERS_FILE: resumeTriggersFile(), GITHUB_PAT: "ghp_fixture" },
 		{ out, spawn: fakeSpawn(green), probeValkey: async () => true, nodeVersion: "22.19.0", fix: true, promptFn, fileExists: (p) => p !== sessionsDir, mkdir: () => {}, chmod: () => {} },
 	);
 	assert.doesNotMatch(text(), /\u001b/, "no raw ESC reaches the terminal");
@@ -9138,7 +8747,7 @@ test("the session store's path reaches the terminal escaped, in its label, its f
 	assert.ok(text().includes('PI_SESSION_MAX_AGE_DAYS="3\\u001b]0;x"'), text());
 });
 
-test("the overlay comparison reads THIS shell's pi setup, the one import-pi stages from, never the .env's (#471)", async () => {
+test("the overlay comparison reads THIS shell's pi setup, never the .env's (#471)", async () => {
 	const dir = overlay({ packages: [pkg()] });
 	const seen = [];
 	await collectChecks(overlayEnv(dir), {
@@ -9253,16 +8862,16 @@ test("no program doctor starts receives an environment derived from .env values 
 	// Issue #521: the probe's extended environment is gone (its token rides stdin), so the shell's own is the only form.
 	for (const e of envOptions) assert.match(e, /^(?:spawnEnv|opts\.env)$/, `a spawn environment built from something other than this shell's: ${e}`);
 	// The one stdin a child is handed: the probe's token, which comes from this shell (pinned just below).
-	assert.deepEqual([...code.matchAll(/\binput: ([^\n]*?) \}\);/g)].map((m) => m[1]), ["`${token}\\n`"]);
+	assert.deepEqual([...code.matchAll(/\binput: ([^\n]*?) \}\);/g)].map((m) => m[1]), ["`${shellPat}\\n`"]);
 	assert.equal(envOptions.filter((e) => e === "opts.env").length, 1, "one forwarder");
 	assert.doesNotMatch(code, /\bcliSpawn\b|\bspawnWith\b/, "no spawn wrapper that could add to it");
 	// The token that one stdin carries never comes from .env (the probe is skipped instead).
-	assert.match(code, /token = patFromFile \? "" : \(shellPat \?\? ""\)\.trim\(\);/);
-	assert.match(code, /const shellPat = shellValue\(patVar\);/);
+	assert.match(code, /const shellPat = \(shellValue\("GITHUB_PAT"\) \?\? ""\)\.trim\(\);/);
+	assert.match(code, /const patFromFile = shellPat === "" && \(service\.fromFile\.GITHUB_PAT \?\? ""\)\.trim\(\) !== "";/);
 
 	const marker = (k) => `from-env-${k.toLowerCase()}-${k.length}`;
 	const cliKeys = [...new Set(Object.values(CLI_SERVICE_KEYS).flat())];
-	const envText = [...cliKeys.map((k) => `${k}=/${marker(k)}`), "GITHUB_AUTH_SOURCE=pat", `GITHUB_PAT=${marker("PAT")}`, `WEBHOOK_SECRET=${marker("WH")}`, `PI_JOB_IMAGE=${marker("IMG")}:1`, "PI_BACKENDS=local,podman", `VALKEY_PASSWORD=${marker("VALKEYPW")}`].join("\n") + "\n";
+	const envText = [...cliKeys.map((k) => `${k}=/${marker(k)}`), "GITHUB_PAT=ghp_fixture", `GITHUB_PAT=${marker("PAT")}`, `WEBHOOK_SECRET=${marker("WH")}`, `PI_JOB_IMAGE=${marker("IMG")}:1`, "PI_BACKENDS=local,podman", `VALKEY_PASSWORD=${marker("VALKEYPW")}`].join("\n") + "\n";
 	for (const [shell, deps] of [
 		[ghEnv(), (out, calls, cwd) => ({ ...ghDeps(out, { ...green, "docker run": 0, "gh auth status": { code: 0, output: ghStatusOutput }, "gh auth token": { code: 0, output: "gho_shell\n" } }, calls), cwd, agentDir: NO_AGENT_DIR })],
 		[podmanEnv({ PI_BACKENDS: "local,podman" }), (out, calls, cwd) => podmanDeps(out, { ...podmanPlan(), ...green }, calls, { cwd })],
@@ -9288,22 +8897,6 @@ test("no program doctor starts receives an environment derived from .env values 
 		assert.match(r.text(), /⚠ XDG_CONFIG_HOME is set in [^\n]* \(\/from-env-xdg_config_home-15\)/, "a path's value is shown");
 		assert.doesNotMatch(r.text(), /service settings read from[^\n]*(CONTAINERS_CONF|DOCKER_HOST|GH_TOKEN)/, "a CLI variable is never listed as read");
 	}
-});
-
-test("a shell GITHUB_PAT_VAR naming a venue key only .env sets hands the probe nothing from the file (#471 round-cap re-review, D1)", async () => {
-	const plan = { ...green, "docker run": 0 };
-	for (const [key, value] of [["PI_BACKENDS", "local"], ["PI_EGRESS", "on"], ["PI_EGRESS_PROXY", "from-dotenv-proxy"]]) {
-		const r = await envDoctor(`GITHUB_AUTH_SOURCE=pat\n${key}=${value}\n`, { GITHUB_PAT_VAR: key, ...(key === "PI_BACKENDS" ? {} : { PI_BACKENDS: "local" }) }, { plan });
-		for (const c of r.calls) {
-			assert.notEqual(c.opts?.env?.GH_TOKEN, value, `${key}: the file's value reached ${c.cmd} as GH_TOKEN`);
-			assert.ok(!(c.stdin ?? "").includes(value), `${key}: the file's value reached ${c.cmd} on stdin`);
-		}
-		assert.ok(!r.calls.some((c) => c.args[0] === "run" && c.args.includes("gh")), `${key}: the probe is skipped`);
-		assert.ok(r.text.includes(`⚠ in-image gh auth: not checked, because ${key} comes from ${r.envPath} and doctor hands nothing from that file to a program it starts`), `${key}: ${r.text}`);
-	}
-	// This shell's own value of the same key: its own, handed on as before.
-	const own = await envDoctor("GITHUB_AUTH_SOURCE=pat\n", { GITHUB_PAT_VAR: "PI_EGRESS_PROXY", PI_EGRESS_PROXY: "shell-token", PI_BACKENDS: "local" }, { plan });
-	assert.equal(own.calls.find((c) => c.args[0] === "run" && c.args.includes("gh"))?.stdin, "shell-token\n");
 });
 
 test("cliNotHandedLines: one ⚠ per CLI variable the file sets, the value only for a path (#471 round cap)", () => {
@@ -9340,7 +8933,7 @@ test("doctor flags a PI_VALKEY_PORT that disagrees with VALKEY_URL's port, in .e
 	writeFileSync(join(dir, ".env"), "VALKEY_URL=redis://127.0.0.1:16495\nPI_VALKEY_PORT=16000\n");
 	const run = async (env) => {
 		const { out, text } = capture();
-		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", ...env }, { out, cwd: dir, spawn: fakeSpawn(green), probeValkey: async () => true, fileExists: () => true, nodeVersion: "22.19.0" });
+		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture", ...env }, { out, cwd: dir, spawn: fakeSpawn(green), probeValkey: async () => true, fileExists: () => true, nodeVersion: "22.19.0" });
 		return text();
 	};
 	const t1 = await run({});
@@ -9361,7 +8954,7 @@ async function doctorAuth({ auth, open, passwordSet = false, env = {}, envFile =
 	const probed = [];
 	const { out, text } = capture();
 	const code = await runDoctor(
-		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", ...env },
+		{ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture", ...env },
 		{
 			out,
 			cwd,
@@ -9390,7 +8983,7 @@ test("doctor (#468): a Valkey that requires a password this deployment does not 
 
 test("doctor (#468): a loopback Valkey that answers a client sending NO password is a warning with the upgrade step; one that requires it is a ✓", async () => {
 	const open = await doctorAuth({ auth: "ok", open: "ok" });
-	assert.match(open.text, /⚠ Valkey \(redis:\/\/127\.0\.0\.1:6379\) has no password: any local account can read, enqueue or delete this deployment's jobs \(VALKEY_PASSWORD is not set\)\n\s+→ run `pi-dispatch up`: it writes a VALKEY_PASSWORD into \.env and restarts pi-dispatch-valkey with it/);
+	assert.match(open.text, /⚠ Valkey \(redis:\/\/127\.0\.0\.1:6379\) has no password: any local account can read, enqueue or delete this deployment's jobs \(VALKEY_PASSWORD is not set\)\n\s+→ put a VALKEY_PASSWORD into \.env \(or let `pi-dispatch init` generate one\), then recreate Valkey with it: `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`/);
 	assert.deepEqual(open.asked.map((a) => a[1]), [false, true], "asked as this deployment, then as a client with none");
 	const stale = await doctorAuth({ auth: "ok", open: "ok", passwordSet: true, envFile: `VALKEY_PASSWORD=${PW468}\n` });
 	assert.match(stale.text, /⚠ Valkey \(redis:\/\/127\.0\.0\.1:6379\) answers a client that sends no password, although VALKEY_PASSWORD is set: it was started before the password existed/);
@@ -9401,9 +8994,9 @@ test("doctor (#468): a loopback Valkey that answers a client sending NO password
 	const remote = await doctorAuth({ auth: "ok", open: "ok", env: { VALKEY_URL: "redis://queue.lan:6379" } });
 	assert.doesNotMatch(remote.text, /has no password|answers a client that sends no password/);
 	assert.equal(remote.asked.length, 1, "no second probe for a remote Valkey");
-	// The upgrade step is one string since the podman venue went: `up` writes the password and restarts the
-	// compose Valkey; the Quadlet branch (and the venue argument) went with it.
-	assert.match(valkeyPasswordUpgradeStep(), /^run `pi-dispatch up`: it writes a VALKEY_PASSWORD into \.env and restarts pi-dispatch-valkey with it \(its volume, and the queue, is kept\); a compose-started Valkey is recreated with `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`\. Then restart the worker and the receiver so they send it$/);
+	// The upgrade step is one string since the podman venue went: write the password and recreate the compose Valkey;
+	// the Quadlet branch (and the venue argument) went with it.
+	assert.match(valkeyPasswordUpgradeStep(), /^put a VALKEY_PASSWORD into \.env \(or let `pi-dispatch init` generate one\), then recreate Valkey with it: `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d` \(its volume, and the queue, is kept\)\. Then restart the worker and the receiver so they send it$/);
 });
 
 test("doctor (#468): a .env holding VALKEY_PASSWORD that others can read is a warning, and a value Valkey could not take is a ✗", async () => {
@@ -9428,7 +9021,7 @@ test("doctor (#468 over #471): the AUTH check's context carries the resolved pas
 	const run = async (env, url = "redis://127.0.0.1:6379") => {
 		const { out, text } = capture();
 		contexts.length = 0;
-		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_fixture", VALKEY_URL: url, ...env }, { out, cwd, spawn: fakeSpawn(green, calls), probeValkey: async () => true, valkeyAuth: async (_u, opts = {}) => (contexts.push(opts.context), { state: opts.withoutPassword ? "noauth" : "ok", passwordSet: true, from: "x" }), nodeVersion: "22.19.0" });
+		await runDoctor({ PI_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "sk-x", GITHUB_PAT: "ghp_fixture", VALKEY_URL: url, ...env }, { out, cwd, spawn: fakeSpawn(green, calls), probeValkey: async () => true, valkeyAuth: async (_u, opts = {}) => (contexts.push(opts.context), { state: opts.withoutPassword ? "noauth" : "ok", passwordSet: true, from: "x" }), nodeVersion: "22.19.0" });
 		return text();
 	};
 	await run({});
@@ -9553,7 +9146,7 @@ test("doctor warns when this folder's deploy/egress-proxy.conf differs from the 
 	};
 	const stale = await run("http_port 3128\nacl allowed dstdomain -n \"/etc/pi-dispatch/allowlist.conf\"\n");
 	assert.match(stale.text, /⚠ deploy\/egress-proxy\.conf in this folder differs from the package's copy \([^)]+\) \(0 lines of it not in the package's copy, 1 line of the package's not in it\), so the egress proxy runs rules this version did not ship\n/);
-	assert.match(stale.text, /→ an upgrade does not rewrite it, so this is either an older version's rules or your own edit: `diff \S+\/deploy\/egress-proxy\.conf \S+egress-proxy\.conf` shows which\. To take this version's, `pi-dispatch up` from this folder offers to replace it with the package's copy, keeping this one as a backup, and then to restart the proxy, since squid reads its rules only at start; a proxy made before #503, which lacks the model-endpoints\.conf mount the new rules need, is REPLACED in the same step instead, asked once\. Leave it if the difference is yours/);
+	assert.match(stale.text, /→ an upgrade does not rewrite it, so this is either an older version's rules or your own edit: `diff \S+\/deploy\/egress-proxy\.conf \S+egress-proxy\.conf` shows which\. To take this version's, replace it with the package's copy, keeping this one as a backup, then recreate the proxy with `docker compose --env-file \.env -f deploy\/docker-compose\.yml --profile egress up -d --force-recreate egress-proxy`, since squid reads its rules only at start; a proxy made before #503, which lacks the model-endpoints\.conf mount the new rules need, is recreated by the same command\. Leave it if the difference is yours/);
 	assert.doesNotMatch(stale.text, /✗ deploy\/egress-proxy\.conf/, "a warning, never a failure: a differing copy still enforces the allowlist");
 	const same = await run("http_port 3128\n");
 	assert.doesNotMatch(same.text, /egress-proxy\.conf in this folder (differs|could not)/);

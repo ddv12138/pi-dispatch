@@ -1,6 +1,6 @@
 /**
  * State this build still meets in the shape, or at the place, an older release left it (issue #761): one finding each,
- * which doctor prints as `state.older` and `up`'s summary repeats for the Valkey container.
+ * which doctor prints as `state.older`.
  *
  * THE RULE for every later release: one that moves or reshapes a store and keeps the old shape readable registers a
  * detector here, gated so that it retires itself (it fires only while the old shape is really there, and says nothing
@@ -18,7 +18,7 @@
  * `VALKEY_IMAGE` (valkey-auth.mjs says why). An upgrade rewrites none of the places that keep it:
  *   - a compose file in the deployment folder, which /dispatch setup copies create-only into `deploy/` (an earlier setup
  *     copied it to the folder's top);
- *   - the `pi-dispatch-valkey` container an older `up` started, which keeps its image until it is recreated.
+ *   - the `pi-dispatch-valkey` container an older release started, which keeps its image until it is recreated.
  *
  * Pure but for two seams, and it never throws: `readFile(path)` gives a file's text (a throw, a missing file, is no
  * finding), and `valkeyContainer()` gives `valkeyContainerOwner`'s verdict on the `pi-dispatch-valkey` container
@@ -30,26 +30,26 @@ import { join } from "node:path";
 import { COMPOSE_FILE, COMPOSE_VALKEY_OVERRIDE, VALKEY_IMAGE, VALKEY_VOLUME, composeArgs, composeProjectName } from "./valkey-auth.mjs";
 
 /**
- * Every Valkey image reference an older release shipped, as each place spelled it: compose and `up`'s `docker run` the
- * short name, the Quadlet unit the fully qualified one. Matched EXACTLY, so `valkey/valkey:8.1`, `:8-alpine` and
+ * Every Valkey image reference an older release shipped, as each place spelled it: compose and the older quickstart's
+ * `docker run` the short name, the Quadlet unit the fully qualified one. Matched EXACTLY, so `valkey/valkey:8.1`, `:8-alpine` and
  * `:8@sha256:...` (each an operator's or this release's choice) never are. When `VALKEY_IMAGE` moves on, the value it
  * leaves is added here, in both spellings; a test holds `VALKEY_IMAGE` out of this list.
  */
 export const OLDER_VALKEY_IMAGES = Object.freeze(["valkey/valkey:8", "docker.io/valkey/valkey:8"]);
 
-/** The container `up` starts Valkey as (`valkeyDockerRunArgs`), the one `valkeyContainer` gives the verdict on. */
+/** The container an older release started Valkey as (`valkeyDockerRunArgs`), the one `valkeyContainer` gives the verdict on. */
 export const VALKEY_CONTAINER = "pi-dispatch-valkey";
 
 /**
- * The image of the Valkey container `owner` describes (`valkeyContainerOwner`'s verdict, valkey-auth.mjs), when `up`
- * runs that container itself, else null. THE one rule `up`'s summary and doctor's `state.older` both judge the container
- * by, so neither names a container the other leaves alone:
- *   - it is provably this deployment's (`ours`: up's label naming this folder, compose's working dir here, or,
+ * The image of the Valkey container `owner` describes (`valkeyContainerOwner`'s verdict, valkey-auth.mjs), when the older
+ * quickstart ran that container itself, else null. THE one rule `upValkeyContainerImage` and doctor's `state.older`
+ * both judge the container by, so neither names a container the other leaves alone:
+ *   - it is provably this deployment's (`ours`: the older quickstart's label naming this folder, compose's working dir here, or,
  *     unlabelled, this deployment's VALKEY_URL port on 127.0.0.1). Another deployment's container, or one nothing ties
  *     to this folder, is never stopped or removed from here, and the fix below does both;
  *   - and the folder is not handed to compose (`handedOver` false: no `COMPOSE_VALKEY_OVERRIDE`). There compose runs the
- *     Valkey and recreates it from the compose file, which its own detector judges, and `pi-dispatch up` starts compose's
- *     valkey, never a container of its own.
+ *     Valkey and recreates it from the compose file, which its own detector judges, and the compose command starts
+ *     compose's valkey, never a container of its own.
  * Anything else, an unknown or absent verdict and a hand-over fact that is not a boolean included, is null: a fix that
  * could act on the wrong container is worse than no finding.
  */
@@ -59,7 +59,7 @@ export function upValkeyContainerImage(owner, { handedOver } = {}) {
 }
 
 /**
- * Whether this deployment's `up` runs its Valkey as that container, whatever its image: the first half of
+ * Whether an older release ran this deployment's Valkey as that container, whatever its image: the first half of
  * `upValkeyContainerImage`'s rule. Then compose does not run this deployment's Valkey, so the compose file's fix must
  * not recreate compose's valkey, which would start a second, empty one beside the queue.
  */
@@ -157,8 +157,7 @@ async function verdictOf(valkeyContainer) {
 
 /**
  * The finding for the `pi-dispatch-valkey` container, or null: `upValkeyContainerImage` of the verdict
- * `valkeyContainer()` gives and `handedOver`, held against the older images. Exported apart for `up`, which hands it
- * the verdict of the inspect it already made and repeats this in its summary. `valkeyContainer` may answer
+ * `valkeyContainer()` gives and `handedOver`, held against the older images. `valkeyContainer` may answer
  * synchronously or not.
  */
 export async function olderValkeyContainerFinding({ valkeyContainer, handedOver } = {}) {
@@ -170,10 +169,10 @@ function containerFinding(owner, handedOver) {
 	if (!found) return null;
 	return {
 		store: "valkey-container",
-		label: `the ${VALKEY_CONTAINER} container runs ${found}, the floating tag an older \`pi-dispatch up\` started it with, and keeps it until it is recreated; ${PINS}`,
+		label: `the ${VALKEY_CONTAINER} container runs ${found}, the floating tag an older release started it with, and keeps it until it is recreated; ${PINS}`,
 		// stop, then rm, never `rm -f`: SIGTERM is what makes Valkey fsync its AOF and save a final snapshot before it exits
 		// (measured on 8.0.2 and 8.1.11), where `rm -f` kills it and can lose the last second of writes to the queue.
-		fix: `\`docker stop ${VALKEY_CONTAINER} && docker rm ${VALKEY_CONTAINER} && pi-dispatch up\` in the deployment folder starts ${VALKEY_IMAGE} on the same ${VALKEY_VOLUME} volume (stopped first, so Valkey writes its AOF out; the queue is kept). ${INTERRUPTS}`,
+		fix: `\`docker stop ${VALKEY_CONTAINER} && docker rm ${VALKEY_CONTAINER}\` in the deployment folder, then \`docker compose --env-file .env -f deploy/docker-compose.yml up -d\` starts ${VALKEY_IMAGE} on the same ${VALKEY_VOLUME} volume (stopped first, so Valkey writes its AOF out; the queue is kept). ${INTERRUPTS}`,
 	};
 }
 
@@ -184,8 +183,8 @@ const olderComposeImage = (text) => composeValkeyImages(text).map(olderValkeyIma
  * Every finding for this deployment, in a fixed order: the folder's compose file, the earlier setup's copy at the
  * folder's top, the container. `cwd` is the deployment folder, `home` this account's home
  * (kept in the signature for its callers); either missing skips its detectors. `handedOver` is whether the folder holds
- * `COMPOSE_VALKEY_OVERRIDE`, as `up` reads it. The container's verdict is asked once, and decides the compose fix too:
- * where this deployment's `up` runs the Valkey (`upRunsValkey`), the compose file only needs its line changed, since
+ * `COMPOSE_VALKEY_OVERRIDE`, as the older quickstart read it. The container's verdict is asked once, and decides the
+ * compose fix too: where an older release ran the Valkey (`upRunsValkey`), the compose file only needs its line changed, since
  * recreating compose's valkey would start a second, empty Valkey beside the queue. Where compose runs it, or the verdict
  * cannot tell (no seam, a throw, a container that is not provably ours), the fix keeps the recreate.
  */
@@ -205,7 +204,7 @@ export async function olderStateFindings({ cwd, home, readFile, valkeyContainer,
 					store: "valkey-compose",
 					label: `${path} names ${found} for Valkey, the floating tag an older pi-dispatch shipped, which moves this host to a newer Valkey minor on its next pull; ${PINS}`,
 					fix: upRunsValkey(owner, { handedOver })
-						? `${line} and nothing more: this deployment's Valkey is the ${VALKEY_CONTAINER} container \`pi-dispatch up\` runs, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue`
+						? `${line} and nothing more: this deployment's Valkey is the ${VALKEY_CONTAINER} container an older release started, not compose's, so recreating compose's valkey from this file would start a second, empty Valkey beside the queue`
 						: `${line}, then recreate Valkey from ${cwd} with \`docker ${composeArgs({ project, override }).join(" ")} up -d valkey\` (leave out \`-p ${project}\` if you run this file without it), which stops it first, so it writes its AOF out, and keeps its volume and the queue in it. ${INTERRUPTS}`,
 				});
 			}

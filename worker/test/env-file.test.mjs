@@ -5,8 +5,6 @@ import { chmodSync, existsSync, lstatSync, readFileSync, realpathSync, statSync,
 import { join } from "node:path";
 import { tempDir } from "./helpers/temp-dir.mjs";
 import { EXEC_ONE_MAX, EXEC_TOTAL_MAX, SYSTEMD_HAZARD_SHAPES, decodeEnvFile, envFileEditCheck, envFileEditRefusal, envFileValueLines, envFileHazard, envFileLoadHazard, envFileSystemdHazard, firstInvalidUtf8, systemdReading, systemdUtf8, envKeyIsBlank, envValueShown, quotedRegions, readEnvAssignments, renderEnvValue, setEnvKey, setEnvKeyIfEmpty, updateEnvFile, ENV_VALUE_UNWRITABLE, ENV_WRITER_FS, groupNameOf, groupRefusal } from "../src/env-file.mjs";
-import { UP_FS } from "../src/up.mjs";
-import { SETUP_GITHUB_FS } from "../src/github-app-setup.mjs";
 import { SYSTEMD_259_ENV_BYTES, SYSTEMD_259_ENV_FILES } from "./helpers/systemd-env-259.mjs";
 
 // -- setEnvKeyIfEmpty: pure transform, table-driven over the text shapes it must handle ---------------
@@ -139,21 +137,21 @@ test("setEnvKeyIfEmpty: the unchanged case returns the same string object (ident
 const overwriteCases = [
 	{
 		name: "an existing set value IS replaced (the whole point of the sibling)",
-		text: "A=1\nGITHUB_AUTH_SOURCE=gh\nB=2\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\nGITHUB_AUTH_SOURCE=app\nB=2\n",
+		text: "A=1\nEXAMPLE_SETTING=gh\nB=2\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\nEXAMPLE_SETTING=app\nB=2\n",
 	},
 	{
 		name: "an empty set line is filled in place",
-		text: "A=1\nGITHUB_AUTH_SOURCE=\nB=2\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\nGITHUB_AUTH_SOURCE=app\nB=2\n",
+		text: "A=1\nEXAMPLE_SETTING=\nB=2\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\nEXAMPLE_SETTING=app\nB=2\n",
 	},
 	{
 		name: "whitespace around = is normalised to the canonical line",
-		text: "GITHUB_AUTH_SOURCE = gh\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "GITHUB_AUTH_SOURCE=app\n",
+		text: "EXAMPLE_SETTING = gh\n",
+		key: "EXAMPLE_SETTING",
+		expected: "EXAMPLE_SETTING=app\n",
 	},
 	{
 		// Same rule as the sibling: a COMMENTED line is kept above the new one, so nothing documented is
@@ -162,75 +160,75 @@ const overwriteCases = [
 		// whose docblock warns it will happily replace one.
 		// KEPT, because `gh` after the `=` is a value an operator may want back.
 		name: "a commented line CARRYING A VALUE is uncommented below itself when no set line exists",
-		text: "A=1\n# GITHUB_AUTH_SOURCE=gh\nB=2\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\n# GITHUB_AUTH_SOURCE=gh\nGITHUB_AUTH_SOURCE=app\nB=2\n",
+		text: "A=1\n# EXAMPLE_SETTING=gh\nB=2\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\n# EXAMPLE_SETTING=gh\nEXAMPLE_SETTING=app\nB=2\n",
 	},
 	{
 		name: "a replaced VALUE leaves no fragment of itself behind, not even as a comment",
-		text: "GITHUB_APP_PRIVATE_KEY=old-secret   # rotated 2026-01-01\n",
-		key: "GITHUB_APP_PRIVATE_KEY",
-		expected: "GITHUB_APP_PRIVATE_KEY=app\n",
+		text: "EXAMPLE_SECRET=old-secret   # rotated 2026-01-01\n",
+		key: "EXAMPLE_SECRET",
+		expected: "EXAMPLE_SECRET=app\n",
 	},
 	{
 		name: "no trace of the key appends at the end",
 		text: "A=1\nB=2\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\nB=2\nGITHUB_AUTH_SOURCE=app\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\nB=2\nEXAMPLE_SETTING=app\n",
 	},
 	{
 		name: "appending to text without a trailing newline first completes the last line",
 		text: "A=1",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\nGITHUB_AUTH_SOURCE=app\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\nEXAMPLE_SETTING=app\n",
 	},
 	{
 		name: "appending to empty text yields just the one line",
 		text: "",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "GITHUB_AUTH_SOURCE=app\n",
+		key: "EXAMPLE_SETTING",
+		expected: "EXAMPLE_SETTING=app\n",
 	},
 	{
 		name: "the FIRST set line wins; a later duplicate is left as it was",
-		text: "GITHUB_AUTH_SOURCE=gh\nGITHUB_AUTH_SOURCE=pat\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "GITHUB_AUTH_SOURCE=app\nGITHUB_AUTH_SOURCE=pat\n",
+		text: "EXAMPLE_SETTING=gh\nEXAMPLE_SETTING=pat\n",
+		key: "EXAMPLE_SETTING",
+		expected: "EXAMPLE_SETTING=app\nEXAMPLE_SETTING=pat\n",
 	},
 	{
 		name: "a set line wins over a commented duplicate wherever the comment sits (the comment stays a comment)",
-		text: "# GITHUB_AUTH_SOURCE=doc note\nGITHUB_AUTH_SOURCE=gh\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "# GITHUB_AUTH_SOURCE=doc note\nGITHUB_AUTH_SOURCE=app\n",
+		text: "# EXAMPLE_SETTING=doc note\nEXAMPLE_SETTING=gh\n",
+		key: "EXAMPLE_SETTING",
+		expected: "# EXAMPLE_SETTING=doc note\nEXAMPLE_SETTING=app\n",
 	},
 	{
 		name: "already exactly KEY=value is a no-op (identity)",
-		text: "A=1\nGITHUB_AUTH_SOURCE=app\nB=2\n",
-		key: "GITHUB_AUTH_SOURCE",
+		text: "A=1\nEXAMPLE_SETTING=app\nB=2\n",
+		key: "EXAMPLE_SETTING",
 		expected: null,
 	},
 	{
 		name: "a key that merely prefixes another name does not match it",
-		text: "GITHUB_AUTH_SOURCE_OLD=x\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "GITHUB_AUTH_SOURCE_OLD=x\nGITHUB_AUTH_SOURCE=app\n",
+		text: "EXAMPLE_SETTING_OLD=x\n",
+		key: "EXAMPLE_SETTING",
+		expected: "EXAMPLE_SETTING_OLD=x\nEXAMPLE_SETTING=app\n",
 	},
 	{
 		name: "CRLF endings survive on the replaced line and everywhere else",
-		text: "A=1\r\nGITHUB_AUTH_SOURCE=gh\r\nB=2\r\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "A=1\r\nGITHUB_AUTH_SOURCE=app\r\nB=2\r\n",
+		text: "A=1\r\nEXAMPLE_SETTING=gh\r\nB=2\r\n",
+		key: "EXAMPLE_SETTING",
+		expected: "A=1\r\nEXAMPLE_SETTING=app\r\nB=2\r\n",
 	},
 	{
 		name: "an already-exact line in a CRLF file is still a no-op (the \\r tail is not a difference)",
-		text: "GITHUB_AUTH_SOURCE=app\r\nB=2\r\n",
-		key: "GITHUB_AUTH_SOURCE",
+		text: "EXAMPLE_SETTING=app\r\nB=2\r\n",
+		key: "EXAMPLE_SETTING",
 		expected: null,
 	},
 	{
 		name: "surrounding comments and blank lines are preserved byte-for-byte",
-		text: "# header\n\nA=1   \n# note\nGITHUB_AUTH_SOURCE=gh\n\n# footer\n",
-		key: "GITHUB_AUTH_SOURCE",
-		expected: "# header\n\nA=1   \n# note\nGITHUB_AUTH_SOURCE=app\n\n# footer\n",
+		text: "# header\n\nA=1   \n# note\nEXAMPLE_SETTING=gh\n\n# footer\n",
+		key: "EXAMPLE_SETTING",
+		expected: "# header\n\nA=1   \n# note\nEXAMPLE_SETTING=app\n\n# footer\n",
 	},
 ];
 
@@ -883,8 +881,8 @@ test("a value that needs quoting round-trips through the writer and back out of 
 });
 
 test("setEnvKey: the already-exact case returns the same string object (identity, not just equality)", () => {
-	const text = "GITHUB_AUTH_SOURCE=app\n";
-	assert.ok(setEnvKey(text, "GITHUB_AUTH_SOURCE", "app") === text);
+	const text = "EXAMPLE_SETTING=app\n";
+	assert.ok(setEnvKey(text, "EXAMPLE_SETTING", "app") === text);
 });
 
 // -- updateEnvFile: the thin fs wrapper — atomicity (tmp + rename) and mode preservation ---------------
@@ -990,16 +988,16 @@ test("updateEnvFile: a file this process does not own is refused, not rewritten 
 });
 
 test("updateEnvFile derives the rendering rule itself, so no writer has to remember it", () => {
-	// The first version took `quotable` from each caller. `up` passed it and `github-app-setup.mjs` did
-	// not, so a writer could apply another platform's rendering to the key that decides forge auth, behind
-	// a ✓. A rendering rule every writer of this file must remember is a rule one of them will forget.
-	const win = fakeFs("/d/.env", "GITHUB_APP_PRIVATE_KEY_PATH=\n");
-	updateEnvFile("/d/.env", "GITHUB_APP_PRIVATE_KEY_PATH", "C:/pi/app key.pem", { fs: win.fs, platform: "win32" });
-	assert.equal(win.files.get("/d/.env"), "GITHUB_APP_PRIVATE_KEY_PATH='C:/pi/app key.pem'\n", "quoted on win32 too, because a shell would split at the space");
-	const posix = fakeFs("/d/.env", "GITHUB_APP_PRIVATE_KEY_PATH=\n");
-	updateEnvFile("/d/.env", "GITHUB_APP_PRIVATE_KEY_PATH", "/srv/pi/app key.pem", { fs: posix.fs, platform: "linux" });
-	assert.equal(posix.files.get("/d/.env"), "GITHUB_APP_PRIVATE_KEY_PATH='/srv/pi/app key.pem'\n", "quoted, because sh would split at the space");
-	// And with NOBODY passing it, which is the shape every caller but `up` uses: the default has to be
+	// The first version took `quotable` from each caller. One writer passed it and another did not, so a
+	// writer could apply another platform's rendering to the key that decides forge auth, behind a ✓. A
+	// rendering rule every writer of this file must remember is a rule one of them will forget.
+	const win = fakeFs("/d/.env", "PI_GLOBAL_PI_DIR=\n");
+	updateEnvFile("/d/.env", "PI_GLOBAL_PI_DIR", "C:/pi/app key.pem", { fs: win.fs, platform: "win32" });
+	assert.equal(win.files.get("/d/.env"), "PI_GLOBAL_PI_DIR='C:/pi/app key.pem'\n", "quoted on win32 too, because a shell would split at the space");
+	const posix = fakeFs("/d/.env", "PI_GLOBAL_PI_DIR=\n");
+	updateEnvFile("/d/.env", "PI_GLOBAL_PI_DIR", "/srv/pi/app key.pem", { fs: posix.fs, platform: "linux" });
+	assert.equal(posix.files.get("/d/.env"), "PI_GLOBAL_PI_DIR='/srv/pi/app key.pem'\n", "quoted, because sh would split at the space");
+	// And with NOBODY passing it, which is the shape most callers use: the default has to be
 	// this host's, or a caller that omits it gets another platform's rendering. Compared against the
 	// explicit form rather than against a fixed string, so the assertion holds on a Windows runner too.
 	const derived = fakeFs("/d/.env", "K=\n");
@@ -1197,7 +1195,7 @@ test("every production fs seam handed to updateEnvFile carries the descriptor ca
 	// fail: the writer goes back to chowning and chmodding the tmp by path, which a swapped tmp redirects, and every
 	// other test still passes. The realpathSync story (#357) is the same shape. So each default is read here.
 	const needed = ["openSync", "writeFileSync", "fstatSync", "fchownSync", "fchmodSync", "fsyncSync", "closeSync", "unlinkSync", "renameSync", "statSync", "realpathSync", "readFileSync"];
-	for (const [name, seam] of Object.entries({ ENV_WRITER_FS, UP_FS, SETUP_GITHUB_FS })) {
+	for (const [name, seam] of Object.entries({ ENV_WRITER_FS })) {
 		for (const call of needed) assert.equal(typeof seam[call], "function", `${name}.${call}`);
 	}
 });
@@ -1281,26 +1279,26 @@ test("updateEnvFile: a symlinked .env is edited THROUGH the link, never replaced
 // -- updateEnvFile { overwrite }: which transform runs is the ONLY difference — atomicity is shared ----
 
 test("updateEnvFile: overwrite:true replaces a set value, still via tmp + rename", () => {
-	const { fs, files, ops } = fakeFs("/deploy/.env", "GITHUB_AUTH_SOURCE=gh\n");
-	const result = updateEnvFile("/deploy/.env", "GITHUB_AUTH_SOURCE", "app", { fs, overwrite: true });
+	const { fs, files, ops } = fakeFs("/deploy/.env", "EXAMPLE_SETTING=gh\n");
+	const result = updateEnvFile("/deploy/.env", "EXAMPLE_SETTING", "app", { fs, overwrite: true });
 	assert.deepEqual(result, { changed: true });
-	assert.equal(files.get("/deploy/.env"), "GITHUB_AUTH_SOURCE=app\n");
-	assert.deepEqual(ops.filter(([op]) => op === "write"), [["write", "/deploy/.env.tmp", "GITHUB_AUTH_SOURCE=app\n"]], "content lands on the tmp path only");
+	assert.equal(files.get("/deploy/.env"), "EXAMPLE_SETTING=app\n");
+	assert.deepEqual(ops.filter(([op]) => op === "write"), [["write", "/deploy/.env.tmp", "EXAMPLE_SETTING=app\n"]], "content lands on the tmp path only");
 	assert.deepEqual(ops.at(-1), ["rename", "/deploy/.env.tmp", "/deploy/.env"]);
 });
 
 test("updateEnvFile: the default (overwrite absent) keeps the never-clobber discipline", () => {
-	const { fs, files } = fakeFs("/deploy/.env", "GITHUB_AUTH_SOURCE=gh\n");
-	const result = updateEnvFile("/deploy/.env", "GITHUB_AUTH_SOURCE", "app", { fs });
+	const { fs, files } = fakeFs("/deploy/.env", "EXAMPLE_SETTING=gh\n");
+	const result = updateEnvFile("/deploy/.env", "EXAMPLE_SETTING", "app", { fs });
 	assert.deepEqual(result, { changed: false }, "without the explicit overwrite opt-in, a set value stays sacrosanct");
-	assert.equal(files.get("/deploy/.env"), "GITHUB_AUTH_SOURCE=gh\n");
+	assert.equal(files.get("/deploy/.env"), "EXAMPLE_SETTING=gh\n");
 });
 
 test("updateEnvFile: overwrite:true onto an already-exact line writes NOTHING (identity short-circuit)", () => {
-	const { fs, files, ops } = fakeFs("/deploy/.env", "GITHUB_AUTH_SOURCE=app\n");
-	const result = updateEnvFile("/deploy/.env", "GITHUB_AUTH_SOURCE", "app", { fs, overwrite: true });
+	const { fs, files, ops } = fakeFs("/deploy/.env", "EXAMPLE_SETTING=app\n");
+	const result = updateEnvFile("/deploy/.env", "EXAMPLE_SETTING", "app", { fs, overwrite: true });
 	assert.deepEqual(result, { changed: false });
-	assert.equal(files.get("/deploy/.env"), "GITHUB_AUTH_SOURCE=app\n");
+	assert.equal(files.get("/deploy/.env"), "EXAMPLE_SETTING=app\n");
 	assert.deepEqual(ops, [["read", "/deploy/.env"]], "the file is read once and never touched");
 });
 
@@ -1325,7 +1323,7 @@ test("a `$HOME` value is not vouched for on either POSIX loader, which is the di
 // -- issue #447: systemd's own line structure, where this reader cannot model it ---------------------------------
 
 test("quotedRegions: a value that opens with a quote runs to its close, and nothing else is a region (#447)", () => {
-	const pem = 'GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----"\nK=1\n';
+	const pem = 'EXAMPLE_SECRET="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----"\nK=1\n';
 	const table = [
 		["a PEM in double quotes", pem, [{ open: 1, close: 3 }]],
 		["single quotes", "K='a\nb'\n", [{ open: 1, close: 2 }]],
@@ -1503,7 +1501,7 @@ test("the systemd reading knows a multi-line quoted value: a key line inside one
 	// Never closed: to the end of the file.
 	assert.equal(readEnvAssignments('NOTE="see\nK=/x.json\n', ["K"]).K.plain, false);
 	// The documented PEM, with keys on both sides, reads as it always did.
-	const pem = 'A=/a.json\nGITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----"\nB=/b.json\n';
+	const pem = 'A=/a.json\nEXAMPLE_SECRET="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----"\nB=/b.json\n';
 	const both = readEnvAssignments(pem, ["A", "B"]);
 	assert.deepEqual([both.A.value, both.A.vouched, both.B.value, both.B.vouched], ["/a.json", true, "/b.json", true]);
 });
@@ -1831,7 +1829,7 @@ test("a shell command is judged through its quoted newlines, so a second assignm
 	}
 	// A multi-line quoted value that is ONE assignment is no hazard: the documented key reads, and the line below it is
 	// filled in place.
-	const pem = 'GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIabc+/=\n-----END RSA PRIVATE KEY-----"\nWEBHOOK_SECRET=\n';
+	const pem = 'EXAMPLE_SECRET="-----BEGIN RSA PRIVATE KEY-----\nMIIabc+/=\n-----END RSA PRIVATE KEY-----"\nWEBHOOK_SECRET=\n';
 	assert.equal(envFileHazard(pem, { loader: "shell" }), null);
 	writeFileSync(path, pem);
 	assert.equal(updateEnvFile(path, "WEBHOOK_SECRET", "new", { platform: "darwin" }).changed, true);

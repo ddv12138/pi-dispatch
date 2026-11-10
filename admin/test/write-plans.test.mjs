@@ -439,7 +439,7 @@ test("every refusal sentence in write-plans.mjs is asserted word for word, and a
       ["pause window index", plans.planPauseWindowEdit({ index: 4, fields: {}, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["pause window delete index", plans.planPauseWindowDelete({ index: 4, paths }).refusal, "no pause window at index 4 (have 1)"],
       ["scoped limit index", plans.planLimitEdit({ params: { index: 2, concurrent: 1 }, paths, env }).refusal, "no scoped limit at index 2 (have 1)"],
-      ["projects unset", plans.projectAt({ ...paths, projectsFile: null }, "shop").refusal, "PI_PROJECTS_FILE is unset, so the worker reads no projects; set it in the deployment's .env (pi-dispatch up does) and restart the worker"],
+      ["projects unset", plans.projectAt({ ...paths, projectsFile: null }, "shop").refusal, "PI_PROJECTS_FILE is unset, so the worker reads no projects; set it in the deployment's .env and restart the worker"],
       ["projects invalid", plans.projectAt({ ...paths, projectsFile: badProjects }, "shop").refusal, { prefix: "the projects file does not load: " }],
       ["projects unreadable", plans.projectAt({ ...paths, projectsFile: dir }, "shop").refusal, { prefix: `the projects file ${dir} could not be read (` }],
       ["no such project", plans.projectAt(alloc, "nope").refusal, "no project with id \"nope\" (dispatch_projects lists them)"],

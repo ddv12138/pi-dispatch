@@ -2,15 +2,16 @@
  * Read the operator's OWN pi setup: which packages they installed with `pi install`, and which of their
  * extensions they turned off with `pi config` (issue #102).
  *
- * Why this exists. `import-pi` used to stage packages from `pi-packages.json` and nothing else, so a package
- * the operator had already installed never reached a job and re-running the import did not change that. The
- * only road in was to declare it a second time, by hand, with an exact version, while the docs promised the
- * import staged "your host pi setup". This module closes that gap by reading what pi itself recorded.
+ * Why this exists. Staging used to take packages from `pi-packages.json` and nothing else, so a package
+ * the operator had already installed never reached a job and re-running the import did not change that.
+ * The only road in was to declare it a second time, by hand, with an exact version, while the docs
+ * promised the overlay staged "your host pi setup". This module closes that gap by reading what pi
+ * itself recorded.
  *
- * Why a separate module from import-pi.mjs. `doctor` is a first-class consumer -- it reports host packages
- * that are not staged and version drift between the two -- and it needs those facts with no overlay write,
- * no `out` stream and none of the stager's print side effects. So this module returns structured facts and
- * every caller renders them its own way.
+ * Why a separate module from the package stager. `doctor` is a first-class consumer -- it reports host
+ * packages that are not staged and version drift between the two -- and it needs those facts with no
+ * overlay write, no `out` stream and none of the stager's print side effects. So this module returns
+ * structured facts and every caller renders them its own way.
  *
  * What it must never become. Nothing on the worker's BOOT path may import this file. It reads host paths and
  * may spawn a package manager, and neither belongs anywhere near `start.mjs`.
@@ -85,8 +86,7 @@ export const PINNED_PI_NEEDLES = {
 
 /**
  * Resolve the host's pi agent dir the way pi's getAgentDir() does: env override, else `~/.pi/agent`.
- * Lives here now (it moved out of import-pi.mjs) because discovery, the extension read and doctor all
- * need the same answer.
+ * Lives here because discovery, the extension read and doctor all need the same answer.
  */
 export function agentDirFrom(env = process.env) {
 	return env.PI_CODING_AGENT_DIR || join(homedir(), ".pi", "agent");
@@ -336,8 +336,8 @@ function makeGlobalRootProbe({ exec, npmCommand, platform }) {
 	const [command, ...prefixArgs] = Array.isArray(npmCommand) && npmCommand.length > 0 ? npmCommand : [platform === "win32" ? "npm.cmd" : "npm"];
 
 	const run = async (args) => {
-		// shell:true on win32 for the same CVE-2024-27980 reason import-pi documents: a .cmd cannot be
-		// spawned without one. Safe here for the same reason too -- argv is literal flags and nothing else.
+		// shell:true on win32 for the same CVE-2024-27980 reason package-stage.mjs documents: a .cmd cannot
+		// be spawned without one. Safe here for the same reason too -- argv is literal flags and nothing else.
 		const options = platform === "win32" ? { shell: true } : {};
 		const { stdout } = await exec(command, [...prefixArgs, ...args], options);
 		return String(stdout ?? "").trim();

@@ -9,7 +9,6 @@ import { hookRunsView } from "@edgehero/pi-dispatch/hook-runs";
 
 const data = (view) => view.data?.connections ?? null;
 const t = (message, view) => uiText(message, view?.locale);
-const operator = (view) => view.role === "operator" && !view.readOnly;
 const triggerLink = (i, locale = "en") => html`<a href="${`/config/trigger?index=${i}`}">${uiText("trigger", locale)} ${i + 1}</a>`;
 const triggers = (rows, locale = "en") => rows.length ? html`${rows.map((i, n) => html`${n ? ", " : null}${triggerLink(i, locale)}`)}` : uiText("no trigger", locale);
 const unknown = (view) => view.role === "agent" ? html`<p>${state(uiText("not published in this agent view", view.locale), "idle", "info")}</p>` : html`<p>${state(uiText("connection facts unavailable", view.locale), "attention", "info")} ${uiText("Reload to try again.", view.locale)}</p>`;
@@ -24,7 +23,7 @@ function polling(poll, locale = "en") {
   if (!poll) return state(tr("not offered"));
   if (poll.state === "off") return state(tr("off"));
   if (poll.state !== "on") return state(tr("unknown"), "attention", "info");
-  return cell(html`${state(tr("on"), "ok")} · ${poll.seconds} s`, html`${poll.source === "app-installation" ? tr("App installation repositories") : "POLL_REPOS"}${poll.repos.length ? html` · ${poll.repos.join(", ")}` : null}`);
+  return cell(html`${state(tr("on"), "ok")} · ${poll.seconds} s`, html`POLL_REPOS${poll.repos.length ? html` · ${poll.repos.join(", ")}` : null}`);
 }
 
 function forgeRow(f, locale = "en") {
@@ -77,7 +76,7 @@ function problemText(text, locale) {
   if (endpoints) return `${endpoints[1]} 使用自己的 model-endpoints 文件，但该文件无法加载`;
   const exact = {
     "The host's doctor says its egress proxy is unavailable.": "主机的 doctor 检查报告出口代理不可用。",
-    "Run pi-dispatch up on that host.": "请在该主机运行 pi-dispatch up。",
+    "Start the egress profile with Docker Compose on that host.": "请在该主机用 Docker Compose 启动 egress profile。",
     "The host's forge check failed.": "主机的代码托管平台检查失败。",
     "Check the forge credentials with doctor on that host.": "请在该主机运行 doctor 检查代码托管凭据。",
     "The host's endpoints file does not load.": "主机的端点文件无法加载。",
@@ -163,7 +162,7 @@ export function connectionsNotify(view) {
 export function connectionsMcp(view) {
   return card(view, "MCP servers", (v) => {
     const refs = [...new Set((v.mcp?.servers ?? []).flatMap((s) => s.refs ?? []))];
-    return html`${v.mcp === null || v.mcp.unreadable ? html`<p>${state(t("overlay MCP file unavailable", v), "attention", "info")}</p>` : !(v.mcp.servers ?? []).length && !(v.mcp.refused ?? []).length ? html`<p class="muted">${t("No overlay MCP server is declared.", v)}</p>` : null}<ul class="rows cn-mcp">${(v.mcp?.servers ?? []).map((s) => ui.rowPill({ icon: "plug", items: [html`<b class="code">${s.name}</b>`, html`<span>${t(s.transport, v)} · <span class="code">${s.where}</span></span>`], end: html`<span class="muted">${t(s.exposure, v)}</span>${s.enabled ? state(t("on", v), "ok") : state(t("off", v))}` }))}${(v.mcp?.refused ?? []).map((name) => ui.rowPill({ icon: "failed", status: "failed", items: [html`<b class="code">${name}:</b>`, html`<span class="tinted">${t("refused,", v)} ${(v.mcp?.problems ?? []).find((p) => p.name === name)?.problem ?? t("the server declaration is not admitted by the worker", v)}.</span>`] }))}${ui.rowPill({ icon: "git", items: [html`<b class="code">forge</b>`, t("GitHub or GitLab, as the job token; merge and approval tools withheld. Version in the job image.", v)] })}</ul><p class="cn-note"><span>${refs.length ? html`${t("References", v)} <span class="code">${refs.join(", ")}</span>. ` : null}${t("Rewritten by", v)} <span class="code">pi-dispatch import-pi</span>; ${t("no form here.", v)}</span></p>`;
+    return html`${v.mcp === null || v.mcp.unreadable ? html`<p>${state(t("overlay MCP file unavailable", v), "attention", "info")}</p>` : !(v.mcp.servers ?? []).length && !(v.mcp.refused ?? []).length ? html`<p class="muted">${t("No overlay MCP server is declared.", v)}</p>` : null}<ul class="rows cn-mcp">${(v.mcp?.servers ?? []).map((s) => ui.rowPill({ icon: "plug", items: [html`<b class="code">${s.name}</b>`, html`<span>${t(s.transport, v)} · <span class="code">${s.where}</span></span>`], end: html`<span class="muted">${t(s.exposure, v)}</span>${s.enabled ? state(t("on", v), "ok") : state(t("off", v))}` }))}${(v.mcp?.refused ?? []).map((name) => ui.rowPill({ icon: "failed", status: "failed", items: [html`<b class="code">${name}:</b>`, html`<span class="tinted">${t("refused,", v)} ${(v.mcp?.problems ?? []).find((p) => p.name === name)?.problem ?? t("the server declaration is not admitted by the worker", v)}.</span>`] }))}${ui.rowPill({ icon: "git", items: [html`<b class="code">forge</b>`, t("GitHub or GitLab, as the job token; merge and approval tools withheld. Version in the job image.", v)] })}</ul><p class="cn-note"><span>${refs.length ? html`${t("References", v)} <span class="code">${refs.join(", ")}</span>. ` : null}${t("The overlay's MCP file is prepared on the host", v)}; ${t("no form here.", v)}</span></p>`;
   });
 }
 
@@ -178,5 +177,5 @@ export function connectionsEnvironment(view) {
 }
 
 export function connectionsPackages(view) {
-  return card(view, "Staged pi packages", (v) => html`${v.packages === null || v.packages.unreadable ? html`<p>${state(t("staged-package manifest unavailable", v), "attention", "info")}</p>` : html`${v.packages.stagedAt ? html`<p class="muted">Staged ${v.packages.stagedAt}.</p>` : null}${(v.packages.packages ?? []).length ? html`<ul class="cn-list">${v.packages.packages.map((p) => html`<li class="code">${p}</li>`)}</ul>` : html`<p class="muted">${t("No pi package is staged.", v)}</p>`}`}<p class="muted">${t("They load into every job except triggers that set", v)} <span class="code">"packages": false</span> (${v.packageOptOuts ?? "unknown count"}). ${t("The manifest records when, not who.", v)}</p>${operator(view) ? ui.cmd(["pi-dispatch", "import-pi", "--with-packages"]) : html`<p class="muted">${t("An operator can import and stage the pi packages on the host.", v)}</p>`}`);
+  return card(view, "Staged pi packages", (v) => html`${v.packages === null || v.packages.unreadable ? html`<p>${state(t("staged-package manifest unavailable", v), "attention", "info")}</p>` : html`${v.packages.stagedAt ? html`<p class="muted">Staged ${v.packages.stagedAt}.</p>` : null}${(v.packages.packages ?? []).length ? html`<ul class="cn-list">${v.packages.packages.map((p) => html`<li class="code">${p}</li>`)}</ul>` : html`<p class="muted">${t("No pi package is staged.", v)}</p>`}`}<p class="muted">${t("They load into every job except triggers that set", v)} <span class="code">"packages": false</span> (${v.packageOptOuts ?? "unknown count"}). ${t("The manifest records when, not who.", v)}</p><p class="muted">${t("An operator can import and stage the pi packages on the host.", v)}</p>`);
 }

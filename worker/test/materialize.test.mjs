@@ -13,7 +13,7 @@ import {
 	materializePiDir,
 	selectEntries,
 } from "../src/materialize.mjs";
-import { ENTRY_NAME_RE } from "../src/import-pi.mjs";
+import { ENTRY_NAME_RE } from "../src/copy-tree.mjs";
 import { tempDir } from "./helpers/temp-dir.mjs";
 
 // --- pure selection logic: runs everywhere ---
@@ -86,10 +86,10 @@ test("PI_SEGMENT_RE carries no `u` flag: with one, U+212A and U+017F would enter
 	assert.equal(withU.test("ſ"), true);
 });
 
-test("PI_SEGMENT_RE and import-pi's ENTRY_NAME_RE agree, so the forced duplicate cannot drift", () => {
-	// Deliberately not imported from import-pi.mjs: that module pulls in execFile and the npm package
-	// stager, and this one is on the security-critical read path. This test is what keeps the copies
-	// honest instead.
+test("PI_SEGMENT_RE and copy-tree's ENTRY_NAME_RE agree, so the forced duplicate cannot drift", () => {
+	// materialize.mjs keeps its own copy of the charset rather than importing the copier: it is on the
+	// security-critical git-tree read path, and the copier walks the host filesystem instead. This test
+	// is what keeps the two copies honest.
 	const vectors = ["a", "ab", "a-b", "a_b", "a.b", "README.md", "SKILL.md", "x9", "A", "..", ".", ".x", "x.", "-x", "x-", "", "a/b", "a b", "a\\b", "K", "a".repeat(64), "a".repeat(65)];
 	for (const v of vectors) {
 		assert.equal(PI_SEGMENT_RE.test(v), ENTRY_NAME_RE.test(v), `charsets disagree on ${JSON.stringify(v)}`);

@@ -4,7 +4,7 @@ import { gzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { catalogDiff, lifecycleModels, roleProposalChecks } from "../src/model-proposals.mjs";
 import { cheaperRouteChecks, doctorModelProposalChecks, fetchLifecycle, parseProposalConfig } from "../src/doctor-model-proposals.mjs";
-import { catalogFromArchive, modelProposalReport, registryCatalog } from "../../.github/scripts/model-proposal-report.mjs";
+import { catalogFromArchive, modelProposalReport, registryCatalog } from "../../scripts/model-proposal-report.mjs";
 
 const rates = { input: 0.0002, output: 0.0004, cacheRead: 0.00002, cacheWrite: 0.00025 }; // a full-context call at these lands between the two reference caps
 const model = (id, cost = rates) => ({ provider: "anthropic", id, type: "chat", api: "anthropic-messages", cost, maxTokens: 4096 });

@@ -1200,7 +1200,7 @@ function judgeProjectRows(before, after, projectsPath, fs) {
 }
 
 /** Why a projects write cannot happen with PI_PROJECTS_FILE unset: the worker reads no projects file then. */
-const PROJECTS_UNSET = "PI_PROJECTS_FILE is unset, so the worker reads no projects file and a project written here would decide nothing. Set it in the deployment's .env (pi-dispatch up does) and restart the worker. Nothing was written";
+const PROJECTS_UNSET = "PI_PROJECTS_FILE is unset, so the worker reads no projects file and a project written here would decide nothing. Set it in the deployment's .env and restart the worker. Nothing was written";
 
 /**
  * Read + validate the projects file for display (issue #499 part C, INT-PROJECTS-FILE-CONTRACT), through the SHARED

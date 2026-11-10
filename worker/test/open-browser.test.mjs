@@ -17,7 +17,7 @@ function fakeChild() {
 
 test("openBrowser spawns the exact per-platform argv, detached and ignored", () => {
 	// The argv table is the module (the GitHub App wizard shipped it first; the graph export reuses
-	// it), so it is pinned literally per platform -- the up.mjs exact-argv doctrine.
+	// it), so it is pinned literally per platform -- the exact-argv doctrine.
 	const cases = [
 		["darwin", "open", ["https://x"]],
 		["win32", "rundll32", ["url.dll,FileProtocolHandler", "https://x"]],

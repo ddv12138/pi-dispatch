@@ -12,7 +12,5 @@ test("the image subscription capability proof actually rejects a fabricated rece
 	writeFileSync(join(root, ".dispatch-auth-adapter.json"), JSON.stringify({ version: 1, adapter: "@gotgenes/pi-anthropic-auth@3.4.3", digest: "a".repeat(64), adapterRevision: "fabricated", sources: {} }));
 	await verifySubscriptionCapability(root);
 	const docker = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
-	const script = readFileSync(new URL("../../verify-image.sh", import.meta.url), "utf8");
 	assert.match(docker, /LABEL dev\.pi-dispatch\.capabilities="[^"\n]*\bsubscriptionAuth\b/);
-	assert.match(script, /subscriptionAuth\)[\s\S]*--network none[\s\S]*subscription-auth-smoke\.mjs/);
 });

@@ -116,11 +116,11 @@ export const FIRST_RUN_STATES = Object.freeze({
 
 /**
  * The commands the first run offers, as argument lists (`kit.mjs` `cmd` quotes each for a shell): a viewer token,
- * the worker as a service or in a terminal, `up` (the egress proxy among what it starts), doctor, and the GitHub App
- * setup. Each is pinned against its CLI's usage by a test. `setup github` is refused without `--webhook-url` or
- * `--no-webhook`, so it is offered whole, its URL a placeholder the copy box quotes and `FIRST_RUN_COMMAND_HINTS`
- * says what to put there. The retired panel's guided setup (`/dispatch setup`) is gone with the panel (58ef2369);
- * hosts still on the previous release run it from their own copy of the extension.
+ * the worker as a service or in a terminal, `up` (the egress proxy among what it starts) and doctor. Each is pinned
+ * against its CLI's usage by a test. No command sets the forge credentials: since the GitHub App and `setup github`
+ * went, an operator sets `GITHUB_PAT` in the deployment's `.env`. The retired panel's guided setup (`/dispatch
+ * setup`) is gone with the panel (58ef2369); hosts still on the previous release run it from their own copy of the
+ * extension.
  */
 export const FIRST_RUN_COMMANDS = Object.freeze({
   token: Object.freeze(["pi-dispatch-console", "token", "add", "--name", "<name>", "--role", "viewer"]),
@@ -128,17 +128,15 @@ export const FIRST_RUN_COMMANDS = Object.freeze({
   worker: Object.freeze(["pi-dispatch", "worker"]),
   up: Object.freeze(["pi-dispatch", "up"]),
   doctor: Object.freeze(["pi-dispatch", "doctor"]),
-  github: Object.freeze(["pi-dispatch", "setup", "github", "--webhook-url", "<receiver URL>"]),
 });
 
 /**
  * What fills each command's placeholder (an argument in angle brackets), as sentence parts like a step's, drawn with the
- * command: a command copied with its placeholder in it does something nobody asked for (`setup github` would start the
- * App Manifest flow with "<receiver URL>" as the webhook). Pinned: every placeholder of `FIRST_RUN_COMMANDS` has one.
+ * command: a command copied with its placeholder in it does something nobody asked for. Pinned: every placeholder of
+ * `FIRST_RUN_COMMANDS` has one.
  */
 export const FIRST_RUN_COMMAND_HINTS = Object.freeze({
   token: Object.freeze(["Put a name for whoever will hold the token in place of ", { code: "<name>" }, "; the command prints the token once."]),
-  github: Object.freeze(["Put the public URL of this deployment's pi-dispatch-receiver, where GitHub delivers events, in place of ", { code: "<receiver URL>" }, "; without a receiver, pass ", { code: "--no-webhook" }, " instead of ", { code: "--webhook-url" }, " and its URL."]),
 });
 
 /** The hint for a command of `FIRST_RUN_COMMANDS` (the same list, as a step's `commands` holds it), or null. */
@@ -163,7 +161,8 @@ const STEP_TITLES = Object.freeze({
 
 /**
  * What a step that is not yet ready stands for in the sentence under the progress ("Jobs start once ..."). A step to
- * do is not among them: a first trigger is what starts jobs by itself, but `pi-dispatch run` queues one without any.
+ * do is not among them: a first trigger is what starts jobs by itself, but re-running a retained local job from the
+ * console queues one without any.
  */
 const STEP_NEEDS = Object.freeze({
   deployment: "the console finds its deployment",
@@ -186,6 +185,13 @@ const PROVIDER_ID_RE = /^provider\.key(?:-\d+)?$/;
 const PROVIDER_DERIVED_RE = /^provider\.\d+(?:-\d+)?$/;
 /** A forge credentials check: any check of the `github` or the `forges` section (no one check holds them). */
 const FORGE_ID_RE = /^(?:github|forges)\./;
+
+/**
+ * Where a forge credential is declared now that the GitHub App (and its `setup github`) is gone: the operator sets
+ * `GITHUB_PAT` in the deployment's `.env`, so the forge step offers no command. Other forges' tokens are their own
+ * `.env` declarations; the GitHub one is the shared, repo-scoped token this sentence names.
+ */
+const FORGE_CREDENTIALS_NOTE = Object.freeze([" For GitHub, set ", { code: "GITHUB_PAT" }, " in the deployment's ", { code: ".env" }, "."]);
 
 /**
  * The worst published level of the checks `test` picks, across the readable doctor rows: `{ level, host, ageMs, label }`
@@ -328,9 +334,11 @@ export function firstRunState(snapshot, { session = null, deployment = null, fre
   // 8. The forge credentials: only a forge's triggers need them.
   const forgeTrigger = triggerList.some((t) => t && t.type !== "cron");
   const forge = forgeTrigger && doctorRead ? worstCheck(doctorRows, (id) => FORGE_ID_RE.test(id)) : null;
-  if (!forgeTrigger) steps.push(step("forge", "optional", ["Only label, comment, issue and pull request triggers need them. Cron triggers on local folders run without."], { commands: [FIRST_RUN_COMMANDS.github] }));
-  else if (forge !== null) steps.push(step("forge", stateOfLevel(forge.level), doctorSaid(forge, { ok: "found the forge credentials", notOk: ["A forge trigger's jobs need them to read and answer on the forge."] }), { commands: forge.level === "ok" ? [] : [FIRST_RUN_COMMANDS.github] }));
-  else steps.push(step("forge", "to-do", newest === null ? NO_DOCTOR_YET("whether the forge credentials work") : ["Doctor on ", { b: newest.host }, " did not check the forge credentials."], { commands: [FIRST_RUN_COMMANDS.github] }));
+  if (!forgeTrigger) steps.push(step("forge", "optional", ["Only label, comment, issue and pull request triggers need them. Cron triggers on local folders run without."]));
+  else if (forge !== null) {
+    const said = doctorSaid(forge, { ok: "found the forge credentials", notOk: ["A forge trigger's jobs need them to read and answer on the forge."] });
+    steps.push(step("forge", stateOfLevel(forge.level), forge.level === "ok" ? said : [...said, ...FORGE_CREDENTIALS_NOTE]));
+  } else steps.push(step("forge", "to-do", [...(newest === null ? NO_DOCTOR_YET("whether the forge credentials work") : ["Doctor on ", { b: newest.host }, " did not check the forge credentials."]), ...FORGE_CREDENTIALS_NOTE]));
 
   const ready = steps.filter((x) => x.state === "ready").length;
   const missing = steps.filter((x) => x.state === "not-yet");

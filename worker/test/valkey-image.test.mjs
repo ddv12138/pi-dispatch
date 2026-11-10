@@ -47,28 +47,11 @@ test("up's docker run and the owner check run VALKEY_IMAGE (#761)", () => {
 	assert.equal(check.filter((a) => /valkey\/valkey/.test(a)).length, 1);
 });
 
-test("CI's Valkey services name VALKEY_IMAGE (#761)", () => {
-	const workflows = readdirSync(join(REPO, ".github", "workflows")).filter((f) => /\.ya?ml$/.test(f));
-	const images = [];
-	for (const file of workflows) {
-		const lines = codeLines(read(`.github/workflows/${file}`));
-		for (const line of lines) {
-			// Every Valkey image a workflow names outside a comment is a service's `image:` equal to the constant.
-			if (/valkey\/valkey/.test(line)) {
-				images.push(file);
-				assert.equal(line.trim(), `image: ${VALKEY_IMAGE}`, `${file}: ${line.trim()}`);
-			}
-		}
-	}
-	// Non-vacuous: the two services of pi-upgrade-check.yml (the suite's, and the Connections lane's own).
-	assert.deepEqual(images.sort(), ["pi-upgrade-check.yml", "pi-upgrade-check.yml"]);
-});
-
 // Code without comments, as valkey-clients.test.mjs strips it: a comment that names an image runs nothing.
 const stripComments = (text) => text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 
 test("no source names a Valkey image but valkey-auth.mjs (the constant) and older-state.mjs (the older ones) (#761)", () => {
-	const trees = ["worker/src", "receiver/src", "admin/src", "image/runner", ".github/scripts"];
+	const trees = ["worker/src", "receiver/src", "admin/src", "image/runner"];
 	const found = [];
 	let scanned = 0;
 	const walk = (dir) => {

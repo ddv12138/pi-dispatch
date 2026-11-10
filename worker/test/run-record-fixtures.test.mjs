@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, utimesSync } from "node:fs";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { FIXTURE_NAME_RE, NEXT_ID, releaseTags } from "../../.github/scripts/run-record-fixtures.mjs";
+import { FIXTURE_NAME_RE, NEXT_ID, releaseTags } from "../../scripts/run-record-fixtures.mjs";
 import { computeCapacity } from "../src/capacity.mjs";
 import { readCapacityRecords, readLocalWindow, readMirrorWindow } from "../src/capacity-records.mjs";
 import { RUN_RECORD_VERSION, buildRecord, earlierFrom, makeFindPreviousRun, makeReadRecord, makeRecordWriter, recordReadable, recordVerdict, recordVersionOf, sanitizeJobId } from "../src/run-history.mjs";

@@ -176,15 +176,15 @@ test("the interval floor stays above the scope re-check, which is what tells the
 	assert.ok(WAIT_INTERVAL_FLOOR_MS > idx.SCOPE_BUSY_RECHECK_MS, `wait floor ${WAIT_INTERVAL_FLOOR_MS} must exceed the scope re-check ${idx.SCOPE_BUSY_RECHECK_MS}`);
 });
 
-test("the wait-for subpath is exported, so a later phase importing it cannot fail at publish time", async () => {
+test("the wait-for subpath resolves to the module it names, so an importer cannot fail on a typo", async () => {
 	// Nothing imports `@edgehero/pi-dispatch/wait-for` until the admin does, so a typo in the subpath would
-	// be invisible for three phases. The map is checked against the file the module actually lives in.
+	// be invisible for three phases. The package is no longer published; the map is checked against the file
+	// the module actually lives in, which is what a local importer resolves through.
 	const { readFileSync } = await import("node:fs");
 	const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 	assert.equal(pkg.exports["./wait-for"], "./src/wait-for.mjs");
 	const resolved = new URL(`../${pkg.exports["./wait-for"].slice(2)}`, import.meta.url);
 	assert.doesNotThrow(() => readFileSync(resolved), "the exported subpath must point at a file that exists");
-	assert.ok(pkg.files.includes("src"), "and src must be in the published tarball");
 });
 
 // --- the grammar, through the loader ----------------------------------------------------------------

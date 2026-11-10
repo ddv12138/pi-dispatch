@@ -5,28 +5,27 @@ import { isAbsolute, join, relative } from "node:path";
  * A valid skill/extension entry name: lowercase kebab/underscore, no leading dot (so no ".." and no
  * dotfiles) and no slashes.
  *
- * It MOVED here from import-pi.mjs, which still re-exports it so every existing import path keeps
- * working -- this codebase does not rename an address that already has readers. The owner is now the
- * module that actually enforces it, because import-pi.mjs importing the copier while the copier
- * imported the charset back would be a cycle for one regex.
+ * It lives here, in the module that enforces it: the copier owns the charset now that the retired
+ * overlay staging command is gone. `materialize.mjs` keeps a deliberately separate copy for the
+ * git-tree path (its PI_SEGMENT_RE), and a test holds the two charsets equal.
  */
 export const ENTRY_NAME_RE = /^[a-z0-9](?:[a-z0-9_.-]{0,62}[a-z0-9])?$/i;
 
 /**
  * Copy a directory of skills from the HOST filesystem into a destination the job container will read.
  *
- * Two callers, deliberately one implementation: `import-pi` staging `~/.pi/agent/skills` into the
- * operator's global overlay, and the per-trigger `run.skillsDir` injection (issue #60). They differ
- * only in whether caps apply and what mode the copies get, both of which are parameters.
+ * Two callers, deliberately one implementation: the per-trigger `run.skillsDir` injection (issue #60,
+ * prepare.mjs) and doctor's host-vs-overlay comparison copy. They differ only in whether caps apply
+ * and what mode the copies get, both of which are parameters.
  *
  * THE SYMLINK GUARD IS THE REASON THIS MODULE EXISTS. The code it replaces tested
  * `fs.statSync(p).isSymbolicLink?.()`, and `statSync` FOLLOWS links, so that expression is
  * permanently `false`: a symlinked skill directory under `~/.pi/agent/skills` was copied AS ITS
  * TARGET'S CONTENTS into an overlay that is `:ro`-mounted into every adversarial-input container.
- * The repo already knew -- `import-pi.mjs` says so where it explains why package staging uses
- * `renameSync` instead -- but the skills path still had the broken guard. `lstatSync` is the fix, and
- * it is the habit two other modules already keep for exactly this reason (`outbox.mjs`:
- * "lstat (NOT stat) so a symlink is rejected on its own inode, not followed"; `sandbox-store.mjs`).
+ * The repo already knew -- package staging explains why it uses `renameSync` instead -- but the
+ * skills path still had the broken guard. `lstatSync` is the fix, and it is the habit two other
+ * modules already keep for exactly this reason (`outbox.mjs`: "lstat (NOT stat) so a symlink is
+ * rejected on its own inode, not followed"; `sandbox-store.mjs`).
  *
  * Every other rule here mirrors `materialize.mjs`, which solves the same problem against a git tree
  * rather than a filesystem: regular files only, destination paths rebuilt from validated name
@@ -43,7 +42,7 @@ export const ENTRY_NAME_RE = /^[a-z0-9](?:[a-z0-9_.-]{0,62}[a-z0-9])?$/i;
  * a log line is the leak `packages.mjs`'s `dropped` record is shaped to avoid.
  */
 
-/** The bounds on one trigger's injected skills. `import-pi` passes none: the overlay is not per job. */
+/** The bounds on one trigger's injected skills. A whole-overlay copy passes none: the overlay is not per job. */
 export const INJECT_LIMITS = Object.freeze({
 	// The binding one, and its reason is NOT disk. Every loaded skill contributes a <name> and a
 	// description (spec-capped at 1024 chars) to the SYSTEM PROMPT of every job of that trigger, so
@@ -61,9 +60,9 @@ export const INJECT_LIMITS = Object.freeze({
  * @param src   host directory whose CHILDREN are skill directories (the `~/.pi/agent/skills` layout)
  * @param dest  destination root; `<dest>/<name>/...` is created
  * @param fs    injected for tests; defaults to the real sync fs
- * @param limits  caps to enforce, or `null` for none (import-pi's staging path)
+ * @param limits  caps to enforce, or `null` for none (a whole-overlay copy)
  * @param mode  file mode for each copy, or `null` to preserve the source's
- * @param onSkip  called with (name, reason) for a skipped TOP-LEVEL entry, so import-pi can print it
+ * @param onSkip  called with (name, reason) for a skipped TOP-LEVEL entry, so the caller can print it
  */
 export function copySkillTree(
 	src,
@@ -111,15 +110,16 @@ export function copySkillTree(
 
 	// An operator who pointed at the wrong directory and got a silently unchanged job is the "a silent
 	// no-op is the worst outcome available here" failure this project refuses. The CALLER decides
-	// whether emptiness is fatal (it is, for a trigger that asked for skills; it is not for import-pi,
-	// where an absent skills/ dir just means the operator has none).
+	// whether emptiness is fatal (it is, for a trigger that asked for skills; it is not for a
+	// whole-overlay copy, where an absent skills/ dir just means the operator has none).
 	if (tally.dirs === 0) return { refused: "skills-dir-empty", tally };
 	return tally;
 }
 
 /**
- * Recursively copy the CONTENTS of one directory. Exported because `import-pi` needs exactly this and
- * must not carry a second walker: its old one guarded symlinks with `statSync`, which follows them.
+ * Recursively copy the CONTENTS of one directory. Exported because the copier's callers need exactly
+ * this and must not carry a second walker: the old one guarded symlinks with `statSync`, which
+ * follows them.
  *
  * Returns a `{ refused }` object or `null`. `tally` and `depth` are internal and default for an
  * external caller, who gets an uncapped, mode-preserving copy.

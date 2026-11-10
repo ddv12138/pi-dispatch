@@ -8,11 +8,12 @@ import { createHash } from "node:crypto";
  * switch in cli.mjs, which reads only VALKEY_URL for the same reason (it must work when GitHub is
  * misconfigured). The provider key is checked for presence only and never printed (secrets-and-pii).
  *
- * GitHub auth gets two advisory (never failing) checks: the default GITHUB_AUTH_SOURCE=gh mints from the
- * operator's FULL-scope gh login, which then reaches every token-carrying job container — the opposite of
- * the App path's per-repo short-lived tokens (CONST-TOKEN-SCOPED-PER-JOB) — so doctor names the scopes it
- * carries; and gh is preflighted inside the job image, since a token that works host-side but not
- * in-container fails jobs mid-run, not at submit. Token values travel via the spawn env or stdin, never argv.
+ * GitHub auth is a PAT only (`loadGitHubAuth` reads GITHUB_PAT): one fine-grained, repository-scoped token is
+ * handed to EVERY github job (CONST-TOKEN-SCOPED-PER-JOB is the operator's choice now — scope it to the
+ * repositories, give it an expiry, rotate it), so doctor names that trade-off as a warning and warns when a
+ * github-triggered deployment has no PAT at all. It also preflights gh inside the job image, since a token that
+ * works host-side but not in-container fails jobs mid-run, not at submit: the value travels via the spawn env or
+ * stdin, never argv, and only when it comes from THIS shell (nothing read from `.env` reaches a child).
  *
  * Issue #80 adds the RECEIVER's half of the preflight. Doctor runs on the worker host, but the triggers
  * file names forges whose deliveries only ever arrive if the receiver can boot -- and the receiver is
@@ -57,7 +58,6 @@ import { BlockList, isIPv4, isIPv6 } from "node:net";
 import * as nodeFs from "node:fs";
 import { NETNS_KEEPER, NETNS_KEEPER_START, STACK_KEYS, VALKEY_SHARED_KEY, judgeValkeyListeners, netnsKeeperRemedy, pinnedValkeyUrl, probeTcpAddress, proxyRestartAdvice, readLinger, readSubuidRanges, readValkeyKeys, valkeySharedOn, valkeyTarget } from "./stack.mjs";
 import { dirname, isAbsolute, join, posix, resolve, win32 } from "node:path";
-import { fileURLToPath } from "node:url";
 import { spawn as nodeSpawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER, DEFAULT_VALKEY_URL, accountTempRoot, checkpointStoreCollision, checkpointsDirPath, allowedModelsFrom, modelFrom, providerFrom, defaultLogsDir, defaultSettingsFile, defaultWorkerName, globalExtensionsEnabled, jobsDirOwnerFix, jobsDirPath, legacyTempStateDir, logsDirPath, modelEndpointsFilePath, delimitedList, pauseWindowsFilePath, projectsFilePath, safeHomeDir, scopedLimitsFilePath, settingsFilePath, underOsTempDir, workerName as workerNameFrom } from "./config.mjs";
@@ -74,11 +74,11 @@ import { declaredEndpointsIn, endpointsDeclaredIn, reloadCommand, rulesFileInclu
 import { loadPauseWindows, parsePauseWindows, parseScopeString, pauseWindowsVersionFor } from "./pause-windows.mjs";
 import { WAIT_AFTER_MAX_DEFAULT_MS, afterInstantMs, parseWaitProfiles } from "./wait-for.mjs";
 import { isForgeKind } from "./forges.mjs";
-import { findLiteralSecret, ADMIN_RE } from "./import-pi.mjs";
+import { findLiteralSecret } from "./secret-scan.mjs";
 import { mcpServerWhere, readOverlayMcp } from "./mcp-config.mjs";
 import { allowlistEntryFor, egressRefusalFor, packageRunnerHosts, parseAllowlist } from "./egress-allowlist.mjs";
 import { agentDirFrom, readHostPi } from "./host-pi.mjs";
-import { PACKAGES_SUBDIR, readStagedSkills, readStageManifest } from "./packages.mjs";
+import { ADMIN_RE, PACKAGES_SUBDIR, readStagedSkills, readStageManifest } from "./packages.mjs";
 import { copySkillTree } from "./copy-tree.mjs";
 import { SKILL_NAME_RE } from "./flow-gate.mjs";
 import { GIT_READ_FLAGS } from "./git-hardening.mjs";
@@ -134,9 +134,6 @@ import { DOCTOR_PUBLISH_SKIPPED_PREFIX } from "./doctor-spawner.mjs";
 
 const NODE_FLOOR = [22, 19]; // pi's engine floor (22.19.0)
 
-// gh login scopes that reach well past what a job should ever hold — called out by name in the fix line.
-const BROAD_SCOPES = ["admin:org", "delete_repo", "workflow"];
-
 // The fix for a trigger-named image without the runner entrypoint, one sentence for either runtime (issue #433).
 const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's image/Dockerfile so it keeps /entrypoint.sh -- an image without the runner can exit 0 without ever starting the agent, and the queue records that as success";
 
@@ -148,7 +145,7 @@ const TRIGGER_IMAGE_ENTRYPOINT_FIX = "build your job image FROM this repo's imag
 // backend log (`~/Library/Containers/com.docker.docker/Data/log/host/com.docker.backend.log`) writes that request,
 // environment included, to disk in plain text. Measured on 2026-10-02 (Docker Desktop 4.37.2, engine 27.4.0): one
 // doctor run left a dummy token in that log twice (GH_TOKEN and GITHUB_TOKEN) with `-e`, and zero times with stdin.
-// This token is the operator's own, so unlike a job's minted one it does not expire within the hour. `-i` attaches
+// This token is the operator's PAT (GITHUB_PAT), handed over by THIS shell alone; `-i` attaches
 // stdin, the entrypoint becomes `sh`, and the script reads one line and exports it to the `gh auth status` it execs,
 // so the value lives only in that process's memory. Rejected: `--env-file` (the CLI expands it into the same create
 // request) and a mounted file (a host temp file that must be written, protected and removed, to say what one pipe
@@ -625,7 +622,7 @@ export const ENV_FILE_READABLE_KEYS = Object.freeze(["PI_PAUSE_WINDOWS_FILE", "P
 /**
  * The keys doctor takes from the deployment's `.env` as the SERVICE's values (issue #453, and since issue #471 every key
  * the service reads that doctor judges): the venue keys `up` and `service install` read, the Valkey the worker connects
- * to, the provider, the GitHub auth source and App keys (PR #466 gate round 2, `GITHUB_SERVICE_KEYS`), that provider's
+ * to, the provider, the GitHub PAT (PR #466 gate round 2, `GITHUB_SERVICE_KEYS`), that provider's
  * key variables (pi's own names for it, passed in, and judged for presence only, never printed), the jobs
  * dirs and the TMPDIR the default jobs root lives under (issue #464), PI_VALKEY_SHARED, the opt-in the Valkey owner check
  * reads, and (issue #471) the rest of the worker's settings doctor judges and the receiver's (`WORKER_SERVICE_KEYS`,
@@ -636,15 +633,14 @@ export const ENV_FILE_READABLE_KEYS = Object.freeze(["PI_PAUSE_WINDOWS_FILE", "P
  * which fixes it offers; none of them reaches a spawned program's environment (PR #474's round cap). Each of those is judged before use as the worker judges
  * it, or named and not used (`STEERING_SERVICE_KEYS`).
  */
-/** The GitHub App keys (PR #466 gate round 2): whose presence and format decide the app-auth lines, which FAIL where
- *  the worker's boot or its token mint would. Judged, never printed, beyond what those lines already print (the ids and
- *  the key's path, neither a secret); the inline key is only ever sniffed for its first bytes. */
-export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_AUTH_SOURCE", "GITHUB_APP_ID", "GITHUB_APP_INSTALLATION_ID", "GITHUB_APP_PRIVATE_KEY_PATH", "GITHUB_APP_PRIVATE_KEY"]);
+/** The GitHub credential (PR #466 gate round 2): `loadGitHubAuth` is PAT-only now, so its presence decides the
+ *  github block's lines and whether the in-image probe may run. Judged for presence only and never printed. */
+export const GITHUB_SERVICE_KEYS = Object.freeze(["GITHUB_PAT"]);
 /** Issue #471: the worker's settings doctor judges, which it read from this shell alone while the service read them from
  *  `.env`. TEMP is TMPDIR's twin in the worker's temp root; PI_CODING_AGENT_DIR is where the worker reads auth.json.
  *  Issue #761: PI_CONSOLE_AUDIT_RETENTION_DAYS is here and not in `CONSOLE_ENV_KEYS` although it is named for the
  *  console: the worker reads it (it runs the audit reaper), and a console key set alone makes doctor judge a console. */
-export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "GITHUB_PAT_VAR", "TEMP"]);
+export const WORKER_SERVICE_KEYS = Object.freeze(["PI_JOB_IMAGE", "PI_JOB_MEMORY", "PI_JOB_CPUS", "PI_CONCURRENCY", ...Object.values(HOST_BUDGET_KEYS), "PI_TRIGGERS_FILE", "PI_LOGS_DIR", "PI_LOG_RETENTION_DAYS", "PI_CONSOLE_AUDIT_RETENTION_DAYS", "PI_RUN_MIRROR_MAX_RUNS", "PI_SETTINGS_FILE", "PI_SESSIONS_DIR", "PI_CHECKPOINTS_DIR", "PI_SESSIONS_TTL_DAYS", "PI_SESSION_MAX_AGE_DAYS", "PI_SESSION_MAX_CONTEXT_PCT", "PI_SESSION_MAX_RESUME_CHAIN", "PI_GLOBAL_PI_DIR", "PI_GLOBAL_ALLOW_EXTENSIONS", "PI_FORWARD_ENV", "PI_AUTH_FROM_PI", "PI_AUTH_CONNECTIONS_FILE", "PI_AUTH_STORE_DIR", "PI_CODING_AGENT_DIR", "PI_BACKEND_FLOOR", "PI_SECRET_PROFILES", "PI_SECRET_BUNDLES", "PI_SECRET_RESOLVER_ROOTS", "PI_SECRET_RESOLVE_TIMEOUT_MS", "PI_WAIT_PROFILES", "PI_WAIT_AFTER_MAX_MS", "PI_DOCTOR_INTERVAL_HOURS", "PI_ALLOWED_MODELS", "PI_DISPATCH_RUN_ROOTS", "TEMP"]);
 /** Issue #471: the receiver's keys doctor judges its boot by (the receiver's unit reads the same `.env`). */
 export const RECEIVER_SERVICE_KEYS = Object.freeze(["WEBHOOK_SECRET", "RECEIVER_PORT", "PI_RECEIVER_ALLOW_SELF", "GITLAB_TOKEN", "GITLAB_URL", "GITLAB_WEBHOOK_MODE", "GITLAB_WEBHOOK_SECRET", "FORGEJO_URL", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_ORG_URL", "AZURE_TOKEN", "AZURE_WEBHOOK_MODE", "AZURE_WEBHOOK_SECRET", "AZURE_WEBHOOK_HEADER"]);
 /**
@@ -706,9 +702,8 @@ export const STEERING_SERVICE_KEYS = Object.freeze({
 	PI_EGRESS_PROXY: "which proxy container doctor inspects: the worker's own name resolution, a disagreement a ✗ (deploymentVenueEnv)",
 	VALKEY_URL: "which Valkey doctor connects to: the owner rule the worker applies at boot, and a line doctor cannot read makes it contact none",
 	PI_JOB_IMAGE: "the image doctor inspects and runs (the canary, the gh probe, --live): the worker's `||` default and the one image rule its boot applies (image-ref.mjs: blank, padded, a leading dash, a control character), a refused value named and not used",
-	GITHUB_AUTH_SOURCE: "whether doctor runs gh on this host: the worker's own three values",
-	GITHUB_PAT_VAR: "which variable is the service's PAT: resolved and never printed; set by the file (or its PAT only in the file), the in-image gh probe is not run, since no program doctor starts is handed anything from .env",
-	PI_GLOBAL_PI_DIR: "the directory `--fix` restages into and removes auth.json from (prompt tier, the command shown first): the worker's rule, unset or empty is off, set must be an absolute path that exists",
+	GITHUB_PAT: "the service's GitHub PAT: resolved and never printed; it decides the github block's lines and whether the in-image gh probe runs, which hands it to a container only when THIS shell exports it (nothing from .env reaches a program doctor starts)",
+	PI_GLOBAL_PI_DIR: "the overlay whose contents doctor judges, and from which `--fix` removes auth.json (prompt tier, the command shown first): the worker's rule, unset or empty is off, set must be an absolute path that exists",
 	PI_TRIGGERS_FILE: "the file whose images, repos and folders doctor probes: a regular file only, parsed by the worker's own parser before any of its values is used",
 	PI_SESSIONS_DIR: "the directory `--fix` creates: silent only for this shell's own value; a value from .env is offered at the prompt tier, shown first",
 	PI_JOBS_DIR: "where --live makes its fixture: the jobs dir owner rule the worker applies at boot (#464)",
@@ -743,7 +738,7 @@ export const DOCTOR_SHELL_KEYS = Object.freeze({
 
 /** Issue #471: the service keys whose values a disagreement line never prints (set or unset only); URLs print as
  *  `urlShown` does. Every other key's two values are shown, quoted. */
-const SECRET_SERVICE_KEYS = new Set([VALKEY_PASSWORD_KEY, "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_APP_PRIVATE_KEY", "WEBHOOK_SECRET", "GITLAB_TOKEN", "GITLAB_WEBHOOK_SECRET", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_TOKEN", "AZURE_WEBHOOK_SECRET"]);
+const SECRET_SERVICE_KEYS = new Set([VALKEY_PASSWORD_KEY, "GH_TOKEN", "GITHUB_TOKEN", "GITHUB_PAT", "WEBHOOK_SECRET", "GITLAB_TOKEN", "GITLAB_WEBHOOK_SECRET", "FORGEJO_TOKEN", "FORGEJO_PERMISSION_TOKEN", "FORGEJO_WEBHOOK_SECRET", "AZURE_TOKEN", "AZURE_WEBHOOK_SECRET"]);
 const URL_SERVICE_KEYS = new Set(["VALKEY_URL", "GITLAB_URL", "FORGEJO_URL", "AZURE_ORG_URL"]);
 
 /** `keys` narrowed to `SERVICE_ENV_KEYS` plus the provider's own key variables. */
@@ -800,7 +795,7 @@ function disagreementShown({ key, shell, file }, path) {
  *
  * Two kinds of proof, each pinned by `doctor-empty-keys.test.mjs`:
  *   - a worker or receiver key: the real loaders (`loadConfig`, `loadReceiverConfig`) return the same answer for the key
- *     empty (or blank) as for it absent, across a base per forge and GitHub auth source, and the key is one they read.
+ *     empty (or blank) as for it absent, across a base per forge and with GITHUB_PAT set and unset, and the key is one they read.
  *   - a CLI key, which neither loader reads: the tool's own source reads it with `os.Getenv(...) != ""`. docker
  *     (docker/cli `cli/command/cli.go` for DOCKER_HOST and DOCKER_CONTEXT, `cli/config/config.go` `Dir()` for
  *     DOCKER_CONFIG), gh (cli/go-gh `pkg/auth/auth.go` for GH_TOKEN, GITHUB_TOKEN and GH_HOST, `pkg/config/config.go`
@@ -810,7 +805,7 @@ function disagreementShown({ key, shell, file }, path) {
  *     TEMP, each read by more than one program, some of which take empty as a value (`os.homedir()` returns an empty
  *     HOME as it is).
  * Where an empty value refuses the boot, the key is not here, and a ✗ of its own names it besides (the boot files,
- * PI_JOBS_DIR, PI_TRIGGERS_FILE, GITHUB_AUTH_SOURCE, the PAT and its variable, the App keys while app is the source).
+ * PI_JOBS_DIR, PI_TRIGGERS_FILE, and the GitHub PAT).
  * Judged HERE and not in `resolveServiceEnv`, whose `fromFile` must keep the "" so every check judges what the service
  * is given.
  */
@@ -818,7 +813,7 @@ export const EMPTY_READ_AS_UNSET = Object.freeze({
 	PI_BACKENDS: "blank",
 	PI_EGRESS: "empty",
 	PI_EGRESS_PROXY: "empty",
-	GITHUB_APP_PRIVATE_KEY: "blank",
+	GITHUB_PAT: "blank",
 	PI_WORKER_NAME: "empty",
 	PI_JOB_IMAGE: "empty",
 	PI_LOGS_DIR: "empty",
@@ -924,7 +919,7 @@ export function envFileKeys(path, keys, { fileExists, readEnvFile, statFile = st
 	// narrow this further, never widen it: the licence for reading a `.env` at all is that it decides what
 	// two named checks SAY, and "the caller passes the right keys" is the kind of rule that holds until the
 	// third check wants the same softening and adds its own key to an array. A `.env` also holds
-	// `WEBHOOK_SECRET` and provider keys, and `up.mjs` states the standard for those: a webhook secret in a
+	// `WEBHOOK_SECRET` and provider keys, and the deployment writer states the standard for those: a webhook secret in a
 	// scrollback is a webhook secret in a pastebin. Add a key here and the addition is the review.
 	const allowed = keys.filter((k) => ENV_FILE_READABLE_KEYS.includes(k));
 	if (allowed.length === 0) return {};
@@ -1151,7 +1146,7 @@ function fixLineFor(key, value) {
 }
 
 function loadVerdict(spec, rawPath, cwd, io, platform = process.platform) {
-	// ABSOLUTE ON THE TARGET PLATFORM, not on this one. `up.mjs` already draws this distinction for the same
+	// ABSOLUTE ON THE TARGET PLATFORM, not on this one. The config loader already draws this distinction for the same
 	// kind of value, and without it `C:\pi\pause-windows.json` is "relative" to a POSIX `isAbsolute` and
 	// gets joined under doctor's cwd -- so the win32 verdicts were computed against a path shape Windows
 	// never produces, and the tests asserting them were asserting the same fiction.
@@ -1338,13 +1333,12 @@ export async function collectChecks(shellVars, seams) {
 	// What a child process is handed: this shell's environment, as before #471, so a value from `.env` (a token, a secret)
 	// never rides into a process doctor starts unless a check passes it by name.
 	const spawnEnv = seams.spawnEnv ?? shellVars;
-	// The one by-name read of this shell's own environment, for a value a child is handed by name (the probe's PAT).
+	// The one by-name read of this shell's own environment, for a value a child is handed by name (the in-image probe's
+	// GITHUB_PAT, and never a value the deployment `.env` supplied).
 	const shellValue = (name) => (Object.hasOwn(spawnEnv, name) ? spawnEnv[name] : undefined);
-	// `agentDir` is the operator's OWN pi setup, the one `import-pi` stages from and the host side of the overlay comparison
-	// below (issue #471 checked): no worker reads it for the overlay, which is PI_GLOBAL_PI_DIR; `import-pi` runs in this
-	// shell and reads this shell's PI_CODING_AGENT_DIR, and the restage offer runs it with this shell's environment. So it
-	// is this shell's, never the file's. The one thing the worker does read there, auth.json, follows the resolution
-	// (`keyAgentDir`).
+	// `agentDir` is the operator's OWN pi setup, the host side of the overlay comparison below (issue #471 checked): no
+	// worker reads it for the overlay, which is PI_GLOBAL_PI_DIR and is populated by the operator. So it is this shell's,
+	// never the file's. The one thing the worker does read there, auth.json, follows the resolution (`keyAgentDir`).
 	const { cwd, spawn, probeValkey, readHosts = defaultReadHosts, fileExists, nodeVersion, platform, agentDir = agentDirFrom(spawnEnv), readHostPiFn = readHostPi, home = safeHomeDir(), underTemp = underOsTempDir, providerOracle = defaultProviderOracle, facts = null, readEnvFile = null, stat: statSeam = statSync, runTimeouts = RUN_TIMEOUTS } = seams;
 
 	// The job image as the worker takes it (`config.mjs` `jobImageFrom`: `||`, so an empty value is the default, where
@@ -1391,8 +1385,6 @@ export async function collectChecks(shellVars, seams) {
 	// Where the image came from, for the lines that judge it, and only when it is the file's (gate round 1): after a
 	// refusal the image judged is the default, which no file named.
 	const jobImageNote = jobImageRefused ? "" : fromFileNote(fileSays("PI_JOB_IMAGE"));
-	// The PAT variable the in-image probe took from the file, if it did (issue #471), for that line's note.
-	let patFromFile = null;
 
 	const checks = [];
 	// Issue #712: the section each check was added in, for its published id (`assignCheckIds`, doctor-results.mjs). Each
@@ -1447,7 +1439,7 @@ export async function collectChecks(shellVars, seams) {
 	// Right after `.env present`, because it answers the same question that check raises: where DOES this
 	// deployment's environment come from. [] unless a seam is configured (issue #216).
 	/**
-	 * A credential presence refusal: `subject` is what is missing ("GITHUB_AUTH_SOURCE=pat but GITHUB_PAT is unset"),
+	 * A credential presence refusal: `subject` is what is missing ("GITHUB_PAT is unset"),
 	 * `refusal` what happens without it, `sep` how the refusal's label joins the two (each check keeps its own), and
 	 * `fix` the usual fix.
 	 *
@@ -2172,198 +2164,32 @@ export async function collectChecks(shellVars, seams) {
 	}
 
 	section("github");
-	// The default source `gh` mints job tokens from the operator's gh login, so the FULL-scope login token
-	// reaches every token-carrying job container — the opposite of the App path's per-repo short-lived
-	// tokens (CONST-TOKEN-SCOPED-PER-JOB). Both checks below warn, never fail: a local-only deployment with
-	// the default source is valid, for the same reason the worker's own auth at start is best-effort.
-	// The service's GitHub auth settings (PR #466 gate round 2): this shell where it sets one, else the deployment's
-	// `.env`, as VALKEY_URL and PI_PROVIDER are read above, so an app-auth ✗ judges the file the worker will load and not
-	// a shell that happens to lack it. Said once, by NAME.
-	// Each key read as `env.NAME` first, so the environment scan (env-docs.test.mjs) still sees every read.
-	const ghSource = env.GITHUB_AUTH_SOURCE ?? "gh"; // config.mjs's own default, read directly, no loadConfig
-	// Only the keys that decide a line: the App keys matter only while app is the source.
-	const ghRead = GITHUB_SERVICE_KEYS.filter((k) => settingsRead(service.fromFile).includes(k) && (k === "GITHUB_AUTH_SOURCE" || ghSource === "app"));
-	if (ghRead.length > 0) checks.push({ ok: true, label: `GitHub auth settings read from ${serviceEnvFile.path}, as the service reads them (this shell does not set them): ${ghRead.join(", ")}` });
-	// Issue #481: a source `loadGitHubAuth` refuses, the EMPTY one included, and both the worker and the receiver load it
-	// at start. It was said nowhere: every branch below asks for gh, pat or app, so `GITHUB_AUTH_SOURCE=` passed doctor on
-	// a deployment that exits 2 at boot. The value is shown only where it is short and plain (PR #485 review round 1): a
-	// token pasted into the wrong line is a token, and this line would have printed it in full.
-	if (ghSource !== "gh" && ghSource !== "pat" && ghSource !== "app") {
-		const sourceShown = /^[A-Za-z0-9_-]{0,12}$/.test(ghSource) ? quotedShown(ghSource) : `an unrecognised value (${ghSource.length} characters, not shown)`;
-		checks.push({ ok: false, label: `GITHUB_AUTH_SOURCE is ${sourceShown}, which is none of pat, gh or app: the worker and the receiver refuse to start on it (exit 2)${fromFileNote(fileSays("GITHUB_AUTH_SOURCE"))}`, fix: "set GITHUB_AUTH_SOURCE to pat, gh or app, or delete the line for the default (gh)" });
-	}
-	// Issue #481 (PR #485 review round 1): the PAT source's own refusal, `GITHUB_AUTH_SOURCE=pat requires a non-empty
-	// <var>`, which both processes make at start (the PAT is trimmed there, so blank is missing too). GITHUB_PAT_VAR set
-	// to "" names no variable at all. Before this doctor said only that the in-image probe was not run. The PAT is
-	// resolved by the service's rule like every other key, by name, and never shown.
-	if (ghSource === "pat") {
-		const patVar = env.GITHUB_PAT_VAR ?? "GITHUB_PAT"; // config.mjs's patVar default, read directly
-		const patValue = patVar === "" ? undefined : service.extra([patVar]).env[patVar];
-		if ((patValue ?? "").trim() === "") {
-			const what = patVar === "" ? "GITHUB_PAT_VAR is set to an empty value, so it names no variable to take the PAT from" : `${patVar} is ${patValue === undefined ? "unset" : patValue === "" ? "empty" : "whitespace only"}`;
-			const note = patVar === "" ? fromFileNote(fileSays("GITHUB_PAT_VAR")) : patValue !== undefined && Object.hasOwn(service.extraFromFile, patVar) ? fromFileNote([patVar]) : "";
-			const patCheck = credentialAbsent({
-				subject: `GITHUB_AUTH_SOURCE=pat but ${what}`,
-				refusal: "the worker and the receiver refuse to start (exit 2)",
-				sep: ": ",
-				fix: patVar === "" ? "delete the GITHUB_PAT_VAR line to use GITHUB_PAT, or name the variable that holds the PAT" : `set ${patVar} to a fine-grained PAT in .env, or switch GITHUB_AUTH_SOURCE`,
-			});
-			// Where the file said it, that is part of the subject either way; the seen label already names .env.
-			checks.push(patCheck.warn ? patCheck : { ...patCheck, label: `${patCheck.label}${note}` });
-		}
-	}
-	if (ghSource === "gh") {
-		// gh writes `auth status` to stdout or stderr depending on version — capture both combined.
-		const status = await runCmdCapture(spawn, "gh", ["auth", "status"]);
-		if (status.code === 0) {
-			const scopes = parseGhTokenScopes(status.output);
-			const broad = (scopes ?? []).filter((s) => BROAD_SCOPES.includes(s));
+	// GitHub auth is a PAT only: `loadGitHubAuth` (config.mjs) returns `{ pat }`, read from GITHUB_PAT and trimmed,
+	// so blank is missing. The same token is handed to EVERY github job until it is rotated, which is a real
+	// trade-off (CONST-TOKEN-SCOPED-PER-JOB is no longer something the worker does for the operator): the warning
+	// below says to scope it to the repositories, expire it, and rotate it. Read by the service's rule like every
+	// other key -- this shell where it sets GITHUB_PAT, else the deployment's `.env` -- and never printed.
+	// Only a github-triggered deployment is warned about a missing one: a local-only deployment needs no PAT, and
+	// telling it so on every run is the always-on advisory this file avoids.
+	if (forges.includes("github") || (service.env.GITHUB_PAT ?? "").trim() !== "") {
+		const pat = service.extra(["GITHUB_PAT"]);
+		const patValue = (pat.env.GITHUB_PAT ?? "").trim();
+		const patNote = fromFileNote(fileSays("GITHUB_PAT"));
+		if (patValue === "") {
 			checks.push({
 				ok: false,
 				warn: true,
-				label: `GITHUB_AUTH_SOURCE=gh forwards your full gh login into every token-carrying job container (${
-					scopes ? `scopes: ${scopes.join(", ")}` : "scopes not reported (fine-grained token)"
-				})`,
-				fix:
-					(broad.length > 0 ? `this token carries broad scopes (${broad.join(", ")}) -- ` : "") +
-					"use a fine-grained PAT (GITHUB_AUTH_SOURCE=pat) or a GitHub App for per-job scoping -- see SECURITY.md",
+				label: `GITHUB_PAT is ${pat.env.GITHUB_PAT === undefined ? "unset" : "blank"}: triggers.json has github triggers, but no job token can be minted, so every github job fails before it starts${patNote}`,
+				fix: "set GITHUB_PAT to a fine-grained, repository-scoped PAT in .env",
 			});
 		} else {
+			checks.push({ ok: true, label: `GITHUB_PAT is set${patNote}: GitHub job tokens are minted from it` });
 			checks.push({
 				ok: false,
 				warn: true,
-				label: "GITHUB_AUTH_SOURCE is gh but `gh auth status` failed",
-				fix: "run `gh auth login` (or switch GITHUB_AUTH_SOURCE) -- github jobs and run.github cron triggers will refuse to run",
+				label: "the same GITHUB_PAT is handed to every GitHub job until you rotate it -- it is not scoped per job or per hour",
+				fix: "scope the PAT to the repositories those jobs need, set an expiry on it, and rotate it on a schedule",
 			});
-		}
-	}
-
-	// GITHUB_AUTH_SOURCE=app: completeness of the credential triple loadGitHubAuth hard-requires
-	// (config.mjs), preflighted here so a half-finished App setup surfaces as doctor lines instead of a
-	// boot refusal. Every line the worker's boot or its token mint refuses on FAILS (PR #466 gate round 1): the two ids
-	// and the key's presence; the key's hygiene lines still warn, the github block's mid-setup doctrine. The private key gets a hygiene pass on top: presence, POSIX mode, and
-	// a first-bytes PEM sniff — but its CONTENTS never reach output: only the leading bytes are read
-	// (never the whole key into memory), and nothing from the file is ever echoed. Every fix line points
-	// at `pi-dispatch setup github`, which mints all three values and writes the PEM 0600 in one pass.
-	if (ghSource === "app") {
-		const setupFix = "run `pi-dispatch setup github` -- it mints the App, writes these .env lines, and lands the key mode 0600";
-		const numeric = (v) => typeof v === "string" && /^\d+$/.test(v.trim());
-		// A FAILURE, not a warning (PR #466 gate round 1): the "mid-setup" doctrine above is about what a deployment may
-		// not have reached yet, and choosing GITHUB_AUTH_SOURCE=app is past that point. Unset, `loadGitHubAuth` refuses the
-		// worker's boot; set but not a number, the worker boots and every github job fails to mint its token. Only ever
-		// reached when app auth is the selected source.
-		const ids = { GITHUB_APP_ID: env.GITHUB_APP_ID, GITHUB_APP_INSTALLATION_ID: env.GITHUB_APP_INSTALLATION_ID };
-		for (const name of Object.keys(ids)) {
-			// Unset and empty alike (`loadGitHubAuth`'s `!appId`), so the words say both (PR #485 review round 2); and a
-			// missing id is one an env-setup script may export (`credentialAbsent`).
-			if (!ids[name]) {
-				checks.push(credentialAbsent({ subject: `GITHUB_AUTH_SOURCE=app but ${name} is unset or empty`, refusal: "the worker will refuse to boot", fix: setupFix }));
-				continue;
-			}
-			checks.push({
-				ok: numeric(ids[name]),
-				label: numeric(ids[name]) ? `${name} set (${ids[name].trim()})` : `GITHUB_AUTH_SOURCE=app but ${name} is not numeric (${JSON.stringify(ids[name])}) -- github jobs cannot mint tokens`,
-				fix: setupFix,
-			});
-		}
-		// Two ways to supply the key, exactly one of them at a time (issue #208): a path to a file, or the
-		// PEM itself in GITHUB_APP_PRIVATE_KEY for a deployment whose environment comes from a secrets
-		// manager. The hygiene pass below belongs to the PATH variant -- there is no mode to check and no
-		// file to stat on a value that only ever exists in this process's environment, and whoever supplies
-		// that environment owns its hygiene. What survives for both is the shape sniff, and the rule that
-		// nothing from the key reaches output.
-		const keyPath = env.GITHUB_APP_PRIVATE_KEY_PATH;
-		const inlineKey = (env.GITHUB_APP_PRIVATE_KEY ?? "").trim();
-		// Blank counts as unset, as `loadGitHubAuth` trims it (PR #466 gate round 2): a path of spaces beside an inline key
-		// is not "both set", and alone it is "neither set".
-		const keyPathSet = (keyPath ?? "").trim() !== "";
-		// The three key lines `loadGitHubAuth` refuses the worker's boot on (both forms set, neither set, a path that does not
-		// exist) FAIL, as the two ids do (PR #466 gate round 1); the hygiene lines below (mode, PEM shape) still warn.
-		if (inlineKey !== "" && keyPathSet) {
-			checks.push({
-				ok: false,
-				label: "GITHUB_APP_PRIVATE_KEY and GITHUB_APP_PRIVATE_KEY_PATH are both set -- the worker will refuse to boot",
-				fix: "unset one of them: the inline value for a deployment fed by a secrets manager, the path for a key on disk",
-			});
-		} else if (inlineKey !== "") {
-			// A flattened key still starts with the header -- the `\n` escapes come after it -- so one sniff
-			// covers both accepted forms.
-			if (inlineKey.startsWith("-----BEGIN")) {
-				checks.push({ ok: true, label: "GitHub App private key supplied inline (GITHUB_APP_PRIVATE_KEY)" });
-			} else {
-				checks.push({
-					ok: false,
-					warn: true,
-					label: `GITHUB_APP_PRIVATE_KEY does not look like a PEM (does not begin "-----BEGIN ...") -- the worker will refuse to boot; contents not shown`,
-					fix: "check for a truncated paste, or point GITHUB_APP_PRIVATE_KEY_PATH at the key file instead",
-				});
-			}
-		} else if (!keyPathSet) {
-			checks.push(credentialAbsent({ subject: "GITHUB_AUTH_SOURCE=app but neither GITHUB_APP_PRIVATE_KEY_PATH nor GITHUB_APP_PRIVATE_KEY is set", refusal: "the worker will refuse to boot", fix: setupFix }));
-		} else if (!fileExists(keyPath)) {
-			checks.push({ ok: false, label: `GITHUB_APP_PRIVATE_KEY_PATH does not exist (${keyPath}) -- the worker will refuse to boot`, fix: setupFix });
-		} else {
-			checks.push({ ok: true, label: `GitHub App private key present (${keyPath})` });
-			// POSIX mode only -- on win32 stat modes are synthetic (0666-ish for everything), so a warn
-			// there would fire on every healthy deployment and teach operators to ignore it.
-			if (platform !== "win32") {
-				try {
-					const loose = statSync(keyPath).mode & 0o077;
-					if (loose !== 0) {
-						checks.push({
-							ok: false,
-							warn: true,
-							label: `the App private key at ${keyPath} is group/world-readable`,
-							fix: `chmod 600 ${keyPath} -- any local user can read the App's signing key right now (\`pi-dispatch setup github\` writes it 0600)`,
-						});
-					}
-				} catch {
-					// stat raced a deletion or an exotic fs: the presence line above already covered existence.
-				}
-			}
-			// First bytes only: enough to see "-----BEGIN", never the key material, and never echoed.
-			try {
-				const fd = openSync(keyPath, "r");
-				const head = Buffer.alloc(16);
-				let read = 0;
-				try {
-					read = readSync(fd, head, 0, head.length, 0);
-				} finally {
-					closeSync(fd);
-				}
-				if (!head.toString("utf8", 0, read).startsWith("-----BEGIN")) {
-					checks.push({
-						ok: false,
-						warn: true,
-						label: `the file at GITHUB_APP_PRIVATE_KEY_PATH does not look like a PEM (first line is not "-----BEGIN ...") -- contents not shown`,
-						fix: setupFix,
-					});
-				}
-			} catch {
-				checks.push({ ok: false, warn: true, label: `the App private key at ${keyPath} exists but is not readable by this user`, fix: setupFix });
-			}
-			// Mode 0600 protects the key from other users on this host; it does nothing once the file is in
-			// a commit. `setup github` writes the key into the DEPLOYMENT FOLDER, and a deployment folder is
-			// very often a checkout -- so the last thing between an App signing key and a public repository
-			// can be one `git add -A`. This repo's own .gitignore covers *.pem; the operator's may not, and
-			// a key they renamed or brought themselves is the same accident.
-			//
-			// Exit 1 is the ONLY case that warns: git says "this is a work tree, and that path is not
-			// ignored". 0 means covered, 128 means no work tree at all, and null means git could not be
-			// launched. Every one of those is silence, because a check nobody can silence must never cry
-			// wolf -- the cost of a missed warning here is one operator reading the doc, and the cost of a
-			// false one is every operator learning to scroll past doctor.
-			// A TIMEOUT is silence too, which is the same answer this comment already argues for `null`: exit 1
-			// is the only case that warns, so a git that did not finish cannot cry wolf.
-			const ignoreCode = (await runCmd(spawn, "git", [...GIT_READ_FLAGS, "-C", dirname(keyPath), "check-ignore", "-q", keyPath], runTimeouts.cmd)).code;
-			if (ignoreCode === 1) {
-				checks.push({
-					ok: false,
-					warn: true,
-					label: `the App private key at ${keyPath} is inside a git work tree that does not ignore it`,
-					fix: `move it outside that repo, or ignore it there (\`*.pem\`) -- one \`git add -A\` commits the App's signing key, which can mint a token for every repository the App is installed on, and mode 0600 does not survive a commit`,
-				});
-			}
 		}
 	}
 
@@ -2371,86 +2197,64 @@ export async function collectChecks(shellVars, seams) {
 	// containers, stale image) fails jobs mid-run, not at submit. Only meaningful when docker and the image
 	// are green; otherwise it is noise on top of the failures already reported above. Issue #354: and only where a job
 	// runs on docker at all.
+	//
+	// Only GITHUB_PAT exported by THIS shell is handed to the probe (issue #471, PR #474's round cap): a value the
+	// deployment `.env` supplied never reaches a program doctor starts, so a file-sourced PAT skips the probe and the
+	// line says why. On stdin (issue #521, `ghProbeArgs`): the token never enters argv (visible in `ps`), the
+	// container create request (which Docker Desktop logs) or doctor's output, and doctor adds no copy of it to the
+	// CLI's environment. That copy may already be there (this shell exports it), and it stays out of the container
+	// because docker forwards nothing `-e` does not name and podman's probe carries `--env-host=false`.
+	//
+	// The CLI's own environment stays doctor's whole one on both runtimes, and that is deliberate rather than left
+	// over (review round 1 asked): what keeps the token OUT of the container is the pinned argv above, while what the
+	// CLI itself reads from it (CONTAINER_HOST, XDG_RUNTIME_DIR, XDG_CONFIG_HOME, the storage conf variables) is what
+	// decides WHICH Podman and which store answer. An allowlist of what Podman needs was rejected for that reason: it
+	// is a list nothing derives.
 	const ghProbeBin = seams.setupReadOnly ? null : localUsed && dockerCode === 0 && imageCode === 0 ? "docker" : null;
 	if (ghProbeBin !== null) {
-		if (ghSource === "app") {
-			checks.push({ ok: true, label: "in-image gh auth: skipped (GITHUB_AUTH_SOURCE=app mints per-job)" });
+		const shellPat = (shellValue("GITHUB_PAT") ?? "").trim();
+		// A PAT only the deployment `.env` supplies: named, never handed to the probe. A blank line supplies none, and
+		// the github block above already says no token can be minted, so that case is silence here.
+		const patFromFile = shellPat === "" && (service.fromFile.GITHUB_PAT ?? "").trim() !== "";
+		if (shellPat === "") {
+			if (patFromFile) {
+				checks.push({
+					ok: false,
+					warn: true,
+					label: `in-image gh auth: not checked, because GITHUB_PAT comes from ${serviceEnvFile?.path ?? join(cwd, ".env")} and doctor hands nothing from that file to a program it starts`,
+					fix: "to check it, run doctor from a shell that exports GITHUB_PAT",
+				});
+			}
+		} else if (ghProbeBin === "docker" && endpoint.local !== true) {
+			// NOT RUN on a daemon that is not observed on this host (#278). The probe hands this shell's PAT to `docker run`
+			// (on stdin since #521), and on a redirected CLI that token rides to another machine. A check must not do the
+			// thing the credentialTransit line warns about.
+			checks.push({
+				ok: false,
+				warn: true,
+				label: `in-image gh auth: not checked, because this shell's docker CLI ${endpoint.local === false ? `resolves ${endpointShown(endpoint)}, which is not shown to be on this host` : `did not say which daemon it uses (${endpoint.reason})`}, and the probe would send your PAT there`,
+				fix: "point the docker CLI at this host and re-run doctor to check it",
+			});
 		} else {
-			let token = "";
-			if (ghSource === "gh") {
-				const minted = await runCmdCapture(spawn, "gh", ["auth", "token"]);
-				if (minted.code === 0) token = minted.output.trim();
-				// mint failed → skip: the status check above already warned that gh auth is broken
-			} else if (ghSource === "pat") {
-				const patVar = env.GITHUB_PAT_VAR ?? "GITHUB_PAT"; // config.mjs's patVar default, read directly
-				// Issue #471: the PAT as the service reads it is resolved (a disagreement on it is said, by name), but the probe
-				// hands a program a token only from THIS shell (PR #474's round cap: nothing from `.env` reaches a spawn), so a
-				// PAT, or the name of its variable, that only the file supplies means the probe is not run, and that is said.
-				const pat = service.extra([patVar]);
-				// The value from THIS shell alone (round-cap re-review, D1): `env` also holds what the file supplied, the venue
-				// keys among them, so a shell GITHUB_PAT_VAR naming PI_EGRESS_PROXY handed the file's value to the probe as its
-				// token. Any value doctor would take from the file (the PAT's own key, or anything `env` has that this shell
-				// has not) skips the probe instead.
-				const shellPat = shellValue(patVar);
-				// Issue #481 (PR #485 review round 1): a PAT line the file leaves blank supplies no PAT (`loadGitHubAuth` trims it,
-				// and the ✗ above names it), and an empty GITHUB_PAT_VAR names none; neither is "the PAT comes from the file".
-				const filePat = Object.hasOwn(pat.fromFile, patVar) && pat.fromFile[patVar].trim() !== "";
-				patFromFile = filePat || (env[patVar] !== undefined && shellPat === undefined && env[patVar].trim() !== "") ? patVar : settingsRead(service.fromFile).includes("GITHUB_PAT_VAR") && env.GITHUB_PAT_VAR !== "" ? "GITHUB_PAT_VAR" : null;
-				token = patFromFile ? "" : (shellPat ?? "").trim(); // absent → skip; loadConfig fails loud at worker boot anyway
-			}
-			if (token && ghProbeBin === "docker" && endpoint.local !== true) {
-				// NOT RUN on a daemon that is not observed on this host (#278). The probe hands the operator's own gh
-				// token -- full scope and non-expiring by default -- to `docker run` (on stdin since #521), and on a redirected CLI that
-				// token rides to another machine. A check must not do the thing the credentialTransit line warns
-				// about. Only once there IS a token: app mode and an unset PAT never run the probe at all.
-				checks.push({
-					ok: false,
-					warn: true,
-					label: `in-image gh auth: not checked, because this shell's docker CLI ${endpoint.local === false ? `resolves ${endpointShown(endpoint)}, which is not shown to be on this host` : `did not say which daemon it uses (${endpoint.reason})`}, and the probe would send your gh token there`,
-					fix: "point the docker CLI at this host and re-run doctor to check it",
-				});
-			} else if (token) {
-				// On stdin (issue #521, `ghProbeArgs`): the token never enters argv (visible in `ps`), the container
-				// create request (which Docker Desktop logs) or doctor's output, and doctor adds no copy of it to the
-				// CLI's environment. That environment may already hold it (a PAT source reads it from this shell's
-				// GITHUB_PAT), and that copy stays out of the container because docker forwards nothing `-e` does not
-				// name and podman's probe carries `--env-host=false`.
-				//
-				// The CLI's own environment stays doctor's whole one on both runtimes, and that is deliberate rather than
-				// left over (review round 1 asked): what keeps it OUT of the container is the pinned argv above, while
-				// what the CLI itself reads from it (CONTAINER_HOST, XDG_RUNTIME_DIR, XDG_CONFIG_HOME, the storage conf
-				// variables) is what decides WHICH Podman and which store answer. The podman section read that service
-				// with this same environment, so a trimmed one could send the token to a service nothing here checked.
-				// An allowlist of what Podman needs was rejected for that reason: it is a list nothing derives.
-				const probe = await runCmdCapture(spawn, ghProbeBin, ghProbeArgs(jobImage, ghProbeBin), { env: spawnEnv, input: `${token}\n` });
-				const where = "";
-				// 126 and 127 are the runtime's and the shell's "could not run that program" (measured on docker 27.4: a
-				// missing entrypoint and a missing exec target both exit 127, a non-executable one 126); `gh auth status`
-				// itself exits 0, 1, 2, 4 or 8. Since the probe's entrypoint became `sh` (#521), an image without one
-				// lands here, and naming it as an auth failure would send the operator to check egress for nothing.
-				const cannotRun = probe.code === 126 || probe.code === 127;
-				checks.push({
-					ok: probe.code === 0,
-					warn: true,
-					label:
-						probe.code === 0
-							? `${where}gh authenticates inside the job image (${jobImage})`
-							: cannotRun
-								? `${where}gh could not be run inside the job image (${jobImage}): it has no sh or no gh (exit ${probe.code})`
-								: `${where}gh cannot authenticate inside the job image (${jobImage})`,
-					fix: cannotRun
-						? "rebuild or pull the job image: every image built FROM this repo's image/Dockerfile has both -- jobs that use gh will fail mid-run"
-						: "check network egress from containers or rebuild/pull the job image -- jobs that use gh will fail mid-run",
-				});
-			} else if (patFromFile) {
-				// The service's PAT is in `.env`, which hands no program anything (PR #474's round cap): named, not run.
-				checks.push({
-					ok: false,
-					warn: true,
-					label: `in-image gh auth: not checked, because ${patFromFile} comes from ${serviceEnvFile?.path ?? join(cwd, ".env")} and doctor hands nothing from that file to a program it starts`,
-					fix: `to check it, run doctor from a shell that exports ${patFromFile === "GITHUB_PAT_VAR" ? "GITHUB_PAT_VAR and the variable it names" : patFromFile}`,
-				});
-			}
+			const probe = await runCmdCapture(spawn, ghProbeBin, ghProbeArgs(jobImage), { env: spawnEnv, input: `${shellPat}\n` });
+			// 126 and 127 are the runtime's and the shell's "could not run that program" (measured on docker 27.4: a
+			// missing entrypoint and a missing exec target both exit 127, a non-executable one 126); `gh auth status`
+			// itself exits 0, 1, 2, 4 or 8. Since the probe's entrypoint became `sh` (#521), an image without one
+			// lands here, and naming it as an auth failure would send the operator to check egress for nothing.
+			const cannotRun = probe.code === 126 || probe.code === 127;
+			checks.push({
+				ok: probe.code === 0,
+				warn: true,
+				label:
+					probe.code === 0
+						? `gh authenticates inside the job image (${jobImage})`
+						: cannotRun
+							? `gh could not be run inside the job image (${jobImage}): it has no sh or no gh (exit ${probe.code})`
+							: `gh cannot authenticate inside the job image (${jobImage})`,
+				fix: cannotRun
+					? "rebuild or pull the job image: every image built FROM this repo's image/Dockerfile has both -- jobs that use gh will fail mid-run"
+					: "check network egress from containers or rebuild/pull the job image -- jobs that use gh will fail mid-run",
+			});
 		}
 	}
 
@@ -2514,9 +2318,9 @@ export async function collectChecks(shellVars, seams) {
 		// Issue #433: without `local`, docker is not this deployment's runtime and may not be installed at all. Issue #468
 		// with issue #471's rule: doctor starts NO Valkey any more (its `--fix` offered a `docker run`, which since #468 needs
 		// the deployment's VALKEY_PASSWORD in the docker CLI's environment, and doctor hands no program anything from
-		// `.env`). It names the step: `pi-dispatch up`, which starts it with the password, labels its container and volume
-		// with this folder, and asks before it uses a volume it cannot attribute. The words hold on both venues.
-		fix: "run `pi-dispatch up` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD (or, in a folder /dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.valkey.yml up -d valkey`)",
+		// `.env`). It names the step: the deployment's compose stack, which starts Valkey with the password from the
+		// deployment `.env`. The words hold on both venues.
+		fix: "run `docker compose --env-file .env -f deploy/docker-compose.yml up -d` in the deployment folder: it starts Valkey with the deployment's VALKEY_PASSWORD (or, in a folder /dispatch setup handed to compose, compose's own: `docker compose -p <folder name> --env-file .env -f deploy/docker-compose.yml -f deploy/docker-compose.valkey.yml up -d valkey`)",
 	});
 
 	// Round 3 of PR #475's review: PI_VALKEY_PORT is the port compose publishes its Valkey on, and VALKEY_URL's is the one
@@ -2815,7 +2619,7 @@ export async function collectChecks(shellVars, seams) {
 		});
 	} else if (overlay) {
 		const dirOk = fileExists(overlay);
-		checks.push({ ok: dirOk, label: `Global overlay dir exists (${envValueShown(overlay)})${fromFileNote(fileSays("PI_GLOBAL_PI_DIR"))}`, fix: "run `pi-dispatch import-pi`, or fix PI_GLOBAL_PI_DIR" });
+		checks.push({ ok: dirOk, label: `Global overlay dir exists (${envValueShown(overlay)})${fromFileNote(fileSays("PI_GLOBAL_PI_DIR"))}`, fix: "create PI_GLOBAL_PI_DIR and populate it with the extensions/, packages/ and models.json the jobs should load, or fix the path" });
 		if (dirOk) {
 			const overlayAuth = join(overlay, "auth.json");
 			checks.push({
@@ -3027,42 +2831,19 @@ export async function collectChecks(shellVars, seams) {
 				}
 			}
 
-			// Staged pi packages (REQ-GLOBAL-PI-OVERLAY): pinned third-party code the operator staged with
-			// `import-pi --with-packages`, loaded by every job whose trigger did not set `run.packages: false`.
-			// Keyed on the dir the same way the extensions pair above is, so a deployment that stages none
-			// prints nothing here.
+			// Staged pi packages (REQ-GLOBAL-PI-OVERLAY): pinned third-party code the operator places in the overlay's
+			// `packages/` directory and declares in `packages/packages.json` (there is no stager any more: the operator
+			// populates PI_GLOBAL_PI_DIR by hand). Every job whose trigger did not set `run.packages: false` loads them.
+			// Keyed on the dir the same way the extensions pair above is, so a deployment that stages none prints
+			// nothing here. None of these checks offers a fixAction: restoring staged code is the operator's call.
 			const packagesDir = join(overlay, PACKAGES_SUBDIR);
 			if (fileExists(packagesDir)) {
-				// The restage offer shared by the two staleness checks below (prompt tier: it fetches and
-				// runs npm on this host). A child process through the injected spawn rather than an
-				// in-process call, so import-pi's own gates run unmodified -- the literal-secret abort, the
-				// admin-extension block, the printed-names vetting -- and its output is forwarded so the
-				// operator still reads the names of exactly what will load into their job containers.
-				//
-				// `--no-host-packages` is load-bearing (issue #102). Since discovery landed, a bare
-				// `--with-packages` also stages whatever the operator installed in pi, and this is the ONE
-				// path where staging happens without them typing the command. Accepting a repair prompt must
-				// stay a repair: it restores what the overlay already had, it never performs a first-time
-				// import of the operator's laptop into every job container. Importing is always something
-				// they asked for.
-				const restageFixAction = {
-					tier: "prompt",
-					describe: `pi-dispatch import-pi --with-packages --no-host-packages --to ${overlay}`,
-					run: async ({ spawn, out }) => {
-						const cli = fileURLToPath(new URL("./cli.mjs", import.meta.url));
-						// npm staging can be slow, so 10 minutes rather than runCmdCapture's default 30s.
-						const res = await runCmdCapture(spawn, process.execPath, [cli, "import-pi", "--with-packages", "--no-host-packages", "--to", overlay], { env: spawnEnv, cwd, timeoutMs: 600000 });
-						if (res.output) out(res.output);
-						return { ok: res.code === 0 };
-					},
-				};
 				const manifest = readStageManifest({ globalPiDir: overlay, readFile: (p) => readFileSync(p, "utf8"), fileExists });
 				if (!manifest) {
 					checks.push({
 						ok: false,
 						label: `Staged packages manifest readable (${PACKAGES_SUBDIR}/packages.json)`,
-						fix: "re-run `pi-dispatch import-pi --with-packages` -- without the manifest nothing knows what is staged, so no package is ever loaded",
-						fixAction: restageFixAction,
+						fix: `restore ${PACKAGES_SUBDIR}/packages.json in the overlay (the operator populates it by hand) -- without the manifest nothing knows what is staged, so no package is ever loaded`,
 					});
 				} else {
 					// A manifest entry whose dir is gone loads nothing, and pi reports no error for a package
@@ -3071,10 +2852,9 @@ export async function collectChecks(shellVars, seams) {
 					checks.push({
 						ok: missing.length === 0,
 						label: `Staged packages present (${manifest.packages.map((p) => `${p.name}@${p.version}`).join(", ")})`,
-						fix: `staged dir missing for ${missing.join(", ")} -- re-run \`pi-dispatch import-pi --with-packages\` to restage`,
-						fixAction: restageFixAction,
+						fix: `staged dir missing for ${missing.join(", ")} -- copy it back under ${packagesDir} (or drop its entry from packages.json)`,
 					});
-					// The admin extension's twin, and blocked for the same reason import-pi blocks that one.
+					// The dispatch admin extension, refused as a recursion vector. Staging is manual now, so this is a warning with the reason rather than a gate in a stager.
 					const admin = manifest.packages.filter((p) => ADMIN_RE.test(p.name) || ADMIN_RE.test(p.dir)).map((p) => p.name);
 					if (admin.length > 0) {
 						checks.push({
@@ -3121,7 +2901,7 @@ export async function collectChecks(shellVars, seams) {
 				checks.push({
 					ok: false,
 					label: `${requiring} trigger(s) require staged packages (run.packages: true) but nothing is staged in ${packagesDir}`,
-					fix: "declare them in pi-packages.json and run `pi-dispatch import-pi --with-packages`, or drop run.packages from the trigger -- otherwise the flow runs without its tools and still exits 0",
+					fix: `declare them in pi-packages.json and stage them under ${packagesDir} (with a packages.json entry), or drop run.packages from the trigger -- otherwise the flow runs without its tools and still exits 0`,
 				});
 			}
 
@@ -3130,10 +2910,9 @@ export async function collectChecks(shellVars, seams) {
 			// every fact it needed to say so. All three are WARNINGS: a deployment may deliberately run a
 			// narrower set than the operator's laptop, and that is a choice, not a fault.
 			//
-			// NONE of them carries a fixAction, and that is doctrine rather than omission. Now that
-			// `--with-packages` discovers, an offered "restage for me" would stop meaning "restore what you
-			// declared" and start meaning "import whatever is on your laptop into every job container". That
-			// is a different consent class and it does not belong behind a y/N prompt.
+			// NONE of them carries a fixAction, and that is doctrine rather than omission: what to copy from the
+			// operator's pi setup into every job container is a trust decision, so doctor only says what is missing
+			// and the fix is a manual copy under PI_GLOBAL_PI_DIR.
 			const staged = readStageManifest({ globalPiDir: overlay, readFile: (p) => readFileSync(p, "utf8"), fileExists });
 			const stagedByName = new Map((staged?.packages ?? []).map((p) => [p.name, p]));
 			const hostPi = await readHostPiFn({
@@ -3158,7 +2937,7 @@ export async function collectChecks(shellVars, seams) {
 					ok: false,
 					warn: true,
 					label: `${unstaged.length} package(s) in your pi setup are NOT staged (${unstaged.map((p) => `${p.name}@${p.version}`).join(", ")})`,
-					fix: `re-run \`pi-dispatch import-pi --with-packages --to ${overlay}\` to stage them, or leave them out if this deployment runs a narrower set than your host`,
+					fix: `copy them into ${packagesDir} and add their entries to packages.json, or leave them out if this deployment runs a narrower set than your host`,
 				});
 			}
 
@@ -3170,7 +2949,7 @@ export async function collectChecks(shellVars, seams) {
 					ok: false,
 					warn: true,
 					label: `${drifted.length} staged package(s) differ from your pi setup (${drifted.map((p) => `${p.name}: overlay ${stagedByName.get(p.name).version}, host ${p.version}`).join("; ")})`,
-					fix: "re-run `pi-dispatch import-pi --with-packages` to move the overlay to your host's versions, or pin the version you want in pi-packages.json (an explicit pin wins over discovery)",
+					fix: `copy your host's version into ${packagesDir}, or pin the version you want in pi-packages.json (an explicit pin wins over discovery)`,
 				});
 			}
 
@@ -3734,8 +3513,8 @@ export async function collectChecks(shellVars, seams) {
 	// scaffolded file. There is no second reader to disagree with, hence no trap, hence no warn: a line that
 	// fires where nothing is broken teaches operators to skim past the ones that matter.
 	//
-	// AND ONE NARROWING, added with `pi-dispatch up`'s four env lines (issue #357). Both checks above fire
-	// on the PROCESS environment, which is the only thing the worker reads. But `up` writes these two keys
+	// AND ONE NARROWING, added with the old quickstart's four env lines (issue #357). Both checks above fire
+	// on the PROCESS environment, which is the only thing the worker reads. But those lines write these two keys
 	// into `<cwd>/.env`, which configures the SERVICE and configures nothing about a shell an operator later
 	// types `pi-dispatch doctor` into. Unqualified, the
 	// warning then cries wolf at a correctly configured deployment, and this module's own rule is that a
@@ -3842,7 +3621,7 @@ export async function collectChecks(shellVars, seams) {
 					? `${spec.key} on line ${notPlainLine} of ${join(cwd, ".env")} is not in the form every loader reads the same way, so the service may read something other than what the line appears to say`
 					: `${spec.key} on line ${notPlainLine} of ${join(cwd, ".env")} lies inside the quoted value that opens on line ${insideAt}, so the service reads it as part of that value and not as ${spec.key}`,
 				fix: insideAt === undefined
-					? `rewrite it as ${fixLineFor(spec.key, scaffolded)} with any comment on its own line above it, which is the form \`pi-dispatch up\` writes`
+					? `rewrite it as ${fixLineFor(spec.key, scaffolded)} with any comment on its own line above it, which is the canonical form`
 					: `close the quote that opens on line ${insideAt} before line ${notPlainLine}, or write that value's newlines as \\n escapes`,
 			});
 		} else if (envFile.hazard == null && onlyExported !== undefined) {
@@ -4222,10 +4001,10 @@ export async function collectChecks(shellVars, seams) {
 	// `deploymentValkeyEnv`), from the file's bytes, and its VALKEY_URL, where it sets one, is the URL judged here. Not
 	// when that reader errors, this shell's VALKEY_URL set or not: under systemd, a NUL or invalid UTF-8 anywhere in the
 	// file (it loads none of it), or, in a file that spells one of its three Valkey keys, a line the service's loader reads
-	// differently or one of those keys on a line it cannot read. `up` refuses each of those on Linux, and elsewhere judges
-	// this shell's value or the default in the file's place. Nor when the file's VALKEY_URL is not `valkeyUrl` (this
-	// shell sets another, which `up` refuses everywhere). Either way the port judged may not be the one the service
-	// dials, and the fix's `pi-dispatch up` would start no Valkey, so the container is not asked about at all.
+	// differently or one of those keys on a line it cannot read. A start from that file refuses each of those on Linux,
+	// and elsewhere judges this shell's value or the default in the file's place. Nor when the file's VALKEY_URL is not
+	// `valkeyUrl` (this shell sets another, which a start refuses everywhere). Either way the port judged may not be the
+	// one the service dials, and the fix would start no Valkey, so the container is not asked about at all.
 	const upValkeyRead = serviceEnvFile ? readValkeyKeys(serviceEnvFile.raw ?? serviceEnvFile.text, { loader: serviceEnvFile.loader, path: serviceEnvFile.path }) : { keys: {} };
 	const valkeyUrlRead = !upValkeyRead.error && (!Object.hasOwn(upValkeyRead.keys, "VALKEY_URL") || upValkeyRead.keys.VALKEY_URL === valkeyUrl);
 	const valkeyContainer = valkeyContainerReader({ spawn, runTimeouts, asked: localUsed && dockerCode === 0 && valkeyUrlRead, cwd, valkeyUrl });
@@ -5719,7 +5498,7 @@ export const CANARY_LINES = Object.freeze({
 });
 
 /** What to do about a `held` leftover: the keeper first, then doctor again, which removes it. */
-const CANARY_HELD_FIX = "start the rootless network keeper (pi-dispatch service install or pi-dispatch up installs it), then re-run doctor, which removes the network once the keeper holds";
+const CANARY_HELD_FIX = `start the rootless network keeper (${NETNS_KEEPER_START}), then re-run doctor, which removes the network once the keeper holds`;
 
 /**
  * One canary check, built from the table and CARRYING what it was built from.
@@ -5790,8 +5569,8 @@ function forRuntime(text, bin) {
  * Anchored on the name, and only for a dead pid: a network this doctor made is its own business, and one whose
  * pid is still alive belongs to a doctor that is still running.
  *
- * EXPORTED for `.github/scripts/podman-conformance.mjs` (issue #452), which leaves a canary network behind on a real
- * rootless Podman and runs THIS sweep over it, so the member read it depends on is exercised on the Podman the
+ * EXPORTED so a conformance run outside this file can exercise it on a real rootless Podman (issue #452): it leaves a
+ * canary network behind and runs THIS sweep over it, so the member read it depends on is exercised on the Podman the
  * required CI job runs rather than only on the lab's. `bin` names the runtime for a caller outside this file, which
  * has no venue constant to hand in; doctor's own two callers pass `venue`.
  */
@@ -6025,14 +5804,14 @@ export function overlayMcpChecks({ overlay, env, fileExists, read, allowlist = [
 		parsed = read();
 	} catch (error) {
 		const why = error?.mcpConfig ? error.message : `cannot be read (${error?.code ?? "unreadable"})`;
-		checks.push({ ok: false, label: `Overlay mcp.json: ${why}`, fix: "re-run `pi-dispatch import-pi`, or fix the file. Until it reads, no job can use an MCP server" });
+		checks.push({ ok: false, label: `Overlay mcp.json: ${why}`, fix: "restore or fix the file. Until it reads, no job can use an MCP server" });
 		return checks;
 	}
 	if (parsed === null) return checks;
 	const names = Object.keys(parsed.servers);
 	checks.push({ ok: true, label: names.length === 0 ? "Overlay mcp.json offers no MCP server" : `Overlay mcp.json offers ${names.length} MCP server${names.length === 1 ? "" : "s"} to triggers that name them (${names.join(", ")})` });
 	for (const { name, problem } of parsed.refused) {
-		checks.push({ ok: false, label: `Overlay mcp.json: server ${quotedShown(name)} is refused: ${problem}`, fix: "fix the entry and re-run `pi-dispatch import-pi`. Until then no job can use it" });
+		checks.push({ ok: false, label: `Overlay mcp.json: server ${quotedShown(name)} is refused: ${problem}`, fix: "fix the entry. Until then no job can use it" });
 	}
 	let armed = false;
 	try {
@@ -6218,7 +5997,7 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 			name: "deploy/egress-proxy.conf in this folder",
 			seams,
 			skip: () => proxyFileIsDirectory(join(seams.cwd, "deploy/egress-proxy.conf")),
-			refresh: `\`pi-dispatch up\` from this folder offers to replace it with the package's copy, keeping this one as a backup, and then to restart the proxy, since squid reads its rules only at start; a proxy made before #503, which lacks the model-endpoints.conf mount the new rules need, is REPLACED in the same step instead, asked once`,
+			refresh: `replace it with the package's copy, keeping this one as a backup, then recreate the proxy with \`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d --force-recreate egress-proxy\`, since squid reads its rules only at start; a proxy made before #503, which lacks the model-endpoints.conf mount the new rules need, is recreated by the same command. Leave it if the difference is yours`,
 		});
 		if (stale) checks.push(stale);
 	}
@@ -6276,7 +6055,7 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 	const up = parsed?.status === "running";
 	const custom = proxy !== DEFAULT_EGRESS_PROXY;
 	// CURRENT, for the shipped name, judged whether it runs or not (gate round 2): a stopped proxy of another folder is
-	// one `up` offers to replace, so its fix must say that, not compose, which would start it as it is. The mounts are
+	// one the fix must say to replace, not merely start, which would leave it as it is. The mounts are
 	// compared only where this folder holds the two files, which is a deployment folder (run elsewhere, doctor cannot
 	// know which folder the service uses), and only where every bind source resolves on this host; otherwise that half
 	// is said to be unknown, never stale.
@@ -6302,12 +6081,12 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 		if (!proxyFilesExist(join(seams.cwd, MODEL_ENDPOINTS_INCLUDE_NAME))) {
 			checks.push(
 				needs.rulesInclude
-					? { ok: false, label: `${MODEL_ENDPOINTS_INCLUDE_NAME} is not in this folder`, fix: `the egress proxy mounts it and its rules include it, and squid will not start without it: \`pi-dispatch init\` writes it (create-only), then \`pi-dispatch up\` starts the proxy` }
+					? { ok: false, label: `${MODEL_ENDPOINTS_INCLUDE_NAME} is not in this folder`, fix: `the egress proxy mounts it and its rules include it, and squid will not start without it: \`pi-dispatch init\` writes it (create-only), then \`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d\` starts the proxy` }
 					: { ok: false, warn: true, label: `${MODEL_ENDPOINTS_INCLUDE_NAME} is not in this folder`, fix: "the proxy's rules here predate #503 and run without it, but the next rules refresh includes it and the proxy will not start without it then: `pi-dispatch init` writes it (create-only)" },
 			);
 		}
 		// Endpoints declared under rules that predate #503: the one line up, doctor and egress render share.
-		if (needs.endpointsDeclared && !needs.rulesInclude) checks.push({ ok: false, warn: true, label: rulesPredateEndpointsLine("docker"), fix: "a reload or a proxy replace changes nothing here: the rules themselves must include the file, and the refresh `pi-dispatch up` offers replaces the proxy with them" });
+		if (needs.endpointsDeclared && !needs.rulesInclude) checks.push({ ok: false, warn: true, label: rulesPredateEndpointsLine("docker"), fix: "a reload or a proxy replace changes nothing here: the rules themselves must include the file, so replace deploy/egress-proxy.conf with the package's copy and recreate the proxy with `docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d --force-recreate egress-proxy`" });
 	}
 	// Issue #503: the declared model endpoints, read as the service reads them. None declared is no line and no container,
 	// so a deployment without them prints what it always did. Under rules that predate the include the line just above is
@@ -6323,13 +6102,13 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 		checks.push(...endpointRouteChecks({ runtime: runtime && addresses ? { ...runtime, hostAddresses: addresses } : runtime, endpoints, prefix: "", proof: "The endpoint probes below are the proof, once the proxy runs and the job image is here." }));
 	}
 	const judged = !custom && parsed ? shippedProxyDrift(parsed, { cwd: seams.cwd, platform: seams.platform ?? process.platform, realpath: (p) => realpathSync(p), compareMounts: inFolder, rulesInclude: needs.rulesInclude }) : { drift: [], unknown: null };
-	// What `up` does with it, told the way `up` decides it (PR #456's final check): a proxy stale by its image, entrypoint
-	// or command is offered for replacement whatever its mounts; one stale on its mounts alone is not while one of its own
-	// two mounts is unknown, so the fix names the commands rather than an offer that `up` would not make.
+	// How much the fix can say (PR #456's final check): a proxy stale by its image, entrypoint or command is named for
+	// replacement whatever its mounts; one stale on its mounts alone is not while one of its own two mounts is unknown, so
+	// the fix names the commands rather than a replace it cannot promise.
 	const mountsOnly = judged.unknown !== null && judged.drift.length > 0 && shippedProxyDrift(parsed, { cwd: seams.cwd, compareMounts: false }).drift.length === 0;
 	const replaceFix = mountsOnly
-		? `check its mounts (\`docker inspect --format '{{json .Mounts}}' ${proxy}\`), then \`docker rm -f -v ${proxy}\` and \`pi-dispatch up\` from the deployment folder replace it with the shipped one; \`up\` does not offer to on its own while one of its mounts cannot be compared here`
-		: `\`pi-dispatch up\` from the deployment folder offers to replace it with the shipped one (docker rm -f -v ${proxy}, then the shipped run)`;
+		? `check its mounts (\`docker inspect --format '{{json .Mounts}}' ${proxy}\`), then \`docker rm -f -v ${proxy}\` and \`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d\` from the deployment folder replace it with the shipped one`
+		: `from the deployment folder, \`docker rm -f -v ${proxy}\` then \`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d\` replace it with the shipped one`;
 	// The worker's simple rule (egress.mjs): paused, exited, dead and created (`STOPPED_PROXY_STATES`) refuse every job,
 	// so ✗; any other state is one the worker retries through (restarting, stopping, removing, ...), so ⚠, and the fix
 	// says jobs wait rather than fail. `restarting` is a crash loop that fails every job (one retry, then failed), so ✗;
@@ -6350,19 +6129,19 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 					? `Egress proxy is ${parsed.status !== "exited" ? parsed.status : "stopped"} (${proxy})`
 					: `Egress proxy exists but its state could not be read (${proxy})`
 				: `Egress proxy is not on this host (${proxy})`,
-		// PI_EGRESS_PROXY names the operator's own proxy, which neither compose nor `up` starts (they start the shipped
-		// name), so its fix is to start that container, not to run compose.
+		// PI_EGRESS_PROXY names the operator's own proxy, which compose does not start (it starts the shipped name),
+		// so its fix is to start that container, not to run compose.
 		fix: retried
 			? `a job meanwhile is retried once, then failed (the worker does not refuse it outright on this state); if it stays ${parsed.status}, \`docker logs ${proxy}\` says why`
 			: parsed?.status === "restarting"
 			? `its squid keeps exiting and its restart policy keeps bringing it back, so every job is retried once, then failed; \`docker logs ${proxy}\` says why`
 			: custom
-			? `PI_EGRESS_PROXY names your own proxy, which neither compose nor \`pi-dispatch up\` starts: ${state.code === 0 ? `\`docker ${parsed?.status === "paused" ? "unpause" : "start"} ${proxy}\`` : `create and start ${proxy} yourself`} -- the egress policy refuses every job pre-spend while it is down, which costs no budget but runs nothing (PI_EGRESS=0 opts out)`
+			? `PI_EGRESS_PROXY names your own proxy, which compose does not start: ${state.code === 0 ? `\`docker ${parsed?.status === "paused" ? "unpause" : "start"} ${proxy}\`` : `create and start ${proxy} yourself`} -- the egress policy refuses every job pre-spend while it is down, which costs no budget but runs nothing (PI_EGRESS=0 opts out)`
 			: judged.drift.length > 0
 				? `${judged.outOfDate ? "it is this deployment's proxy but out of date" : "it is not this deployment's either"} (${judged.drift.join("; ")}): ${replaceFix} -- the egress policy refuses every job pre-spend while it is down, which costs no budget but runs nothing (PI_EGRESS=0 opts out)`
 				: parsed?.status === "paused"
-					? `docker unpause ${proxy}  -- as \`pi-dispatch up\` offers; the egress policy refuses every job pre-spend while it is paused, which costs no budget but runs nothing (PI_EGRESS=0 opts out)`
-					: "`pi-dispatch up` from the deployment folder starts it  -- the egress policy refuses every job pre-spend while this is down, which costs no budget but runs nothing (PI_EGRESS=0 opts out)",
+					? `docker unpause ${proxy}  -- the egress policy refuses every job pre-spend while it is paused, which costs no budget but runs nothing (PI_EGRESS=0 opts out)`
+					: "`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d` from the deployment folder starts it  -- the egress policy refuses every job pre-spend while this is down, which costs no budget but runs nothing (PI_EGRESS=0 opts out)",
 		// Not rendered: `--live`'s peer probe (issue #344) needs the proxy's name and whether it is up, and reads them here
 		// rather than asking docker a second time.
 		proxyState: { proxy, running: up },
@@ -6420,7 +6199,7 @@ async function egressChecks(env, seams, { dockerCode, imageCode, jobImage, endpo
 		// The file the proxy ACTUALLY mounts there, by its bind source from the inspect above, for the shipped proxy and
 		// an operator's alike: never this folder's, which may not be the one mounted (gate round 2).
 		const mounted = readIncludeBindSource(parsed?.mounts);
-		checks.push(endpointsIncludeCheck({ answer: inside, endpoints, bin: "docker", proxy, prefix: "", mounted, recreate: custom ? `recreate ${proxy} so it mounts the file anew` : `\`docker rm -f -v ${proxy}\`, then \`pi-dispatch up\` starts it on the file anew (a restart cuts running jobs' tunnels)` }));
+		checks.push(endpointsIncludeCheck({ answer: inside, endpoints, bin: "docker", proxy, prefix: "", mounted, recreate: custom ? `recreate ${proxy} so it mounts the file anew` : `\`docker rm -f -v ${proxy}\`, then \`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d\` starts it on the file anew (a restart cuts running jobs' tunnels)` }));
 	}
 	if (seams.setupReadOnly) {
 		checks.push({ ok: false, warn: true, label: "Egress canary: not run by browser setup", fix: "run pi-dispatch doctor in the deployment terminal for the container probe" });
@@ -6481,7 +6260,7 @@ export function egressCanaryProbeArgs({ slug, pid, network, proxy, image, url, s
  * (podman-docker or the Docker API) is a `local` deployment here, and tearing a network the proxy is on down there cuts
  * the proxy's route out (measured, #452 gate round 3), so the refusal names the same start command the worker's units run.
  */
-const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (else \`pi-dispatch service install\` or \`pi-dispatch up\` installs it, or start it by hand; a container of its name that is not the shipped keeper must be removed first)`;
+const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet unit is installed: ${NETNS_KEEPER_START} (or start it by hand; a container of its name that is not the shipped keeper must be removed first)`;
 
 /**
  * The egress canary (REQ-EGRESS-ALLOWLIST, issue #431): a throwaway `--internal` network built like a job's, the proxy
@@ -6492,9 +6271,9 @@ const NETNS_KEEPER_FIX = `start it as the worker's account where its Quadlet uni
  * `[{ property, want, reached, probe }]` readings `egressVerdict` folds into `--live`, `probe` being the slug.
  *
  * ONE canary for every caller: docker's `doctor` (`egressChecks`), the podman venue's `doctor --live`
- * (`podmanLiveChecks`) and `.github/scripts/podman-conformance.mjs`. The conformance script used to carry a canary of
- * its own with a plain `fetch`, which proved the network and the allowlist but not the runner's provider call, the
- * exact gap #427 found in doctor's; sharing this one closes it there too.
+ * (`podmanLiveChecks`) and a conformance run outside this file. The conformance script used to carry a canary of its
+ * own with a plain `fetch`, which proved the network and the allowlist but not the runner's provider call, the exact
+ * gap #427 found in doctor's; sharing this one closes it there too.
  *
  * `run(args, { timeoutMs })` is the venue's bounded runner (`liveRunVia` shape) for the network steps and the removals;
  * `probeRun(args)` runs a probe container, by default through `run` under the venue's probe bound: docker's 30 s, and on
@@ -6633,7 +6412,7 @@ export async function runEgressCanary({ run, bin = "docker", proxy, image, pid =
 							? "Egress policy refuses plain HTTP to a listed host off port 80 (api.anthropic.com:443 without a tunnel; only a CONNECT reaches 443)"
 							: "Egress policy lets plain HTTP through to api.anthropic.com on port 443, so a client that does not tunnel reaches every port of a listed host"
 					}`,
-					fix: `the proxy runs rules from before issue #508: restart it on the current egress-proxy.conf (\`pi-dispatch up\`; on the podman venue \`pi-dispatch service install --force\`; for a proxy you started by hand, update the egress-proxy.conf it mounts, then \`${bin} restart ${proxy}\`); a copy you keep by hand must add "http_access deny !Safe_ports !CONNECT" right before "http_access allow allowed"`,
+					fix: `the proxy runs rules from before issue #508: recreate it on the current egress-proxy.conf (\`docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d --force-recreate egress-proxy\`; on the podman venue \`pi-dispatch service install --force\`; for a proxy you started by hand, update the egress-proxy.conf it mounts, then \`${bin} restart ${proxy}\`); a copy you keep by hand must add "http_access deny !Safe_ports !CONNECT" right before "http_access allow allowed"`,
 				});
 				continue;
 			}
@@ -7197,8 +6976,8 @@ export function allowlistHostAliases(text) {
  */
 export async function githubProtectionPreflight(spawn, repositories, runTimeouts = RUN_TIMEOUTS) {
 	const checks = [];
-	// gh availability first, mirroring the GITHUB_AUTH_SOURCE=gh handling in runDoctor: one warn covers
-	// every repo, and the loop is skipped rather than producing one confusing failure line per repo.
+	// gh availability first: one warn covers every repo, and the loop is skipped rather than producing one
+	// confusing failure line per repo.
 	const status = await runCmdCapture(spawn, "gh", ["auth", "status"]);
 	if (status.code !== 0) {
 		checks.push({
@@ -7266,8 +7045,8 @@ export async function githubProtectionPreflight(spawn, repositories, runTimeouts
  *
  * ONE BOUND WITH A PER-CALL OVERRIDE, which is why this is not simply a constant. `--fix`'s `docker pull`
  * can legitimately take minutes on a cold host, so a single bound is either too short for the pull or too
- * long to be a bound. `runCmdCapture` beside this one already had exactly that shape, and so does
- * `import-pi`'s 600s override, so this is the file's existing answer rather than a new one.
+ * long to be a bound. `runCmdCapture` beside this one already had exactly that shape, and `RUN_TIMEOUTS.pull`
+ * is the same per-call override, so this is the file's existing answer rather than a new one.
  *
  * AND IT SAYS WHY, in `liveRunVia`'s vocabulary (`"error"`, `"timeout"`, `"close"`), because the two nulls
  * are opposite facts to an operator: a CLI that never launched means docker is not installed, and one
@@ -7306,11 +7085,11 @@ function runCmd(spawn, cmd, args, timeoutMs = RUN_TIMEOUTS.cmd) {
 
 /**
  * The step that gives a deployment's Valkey its password and restarts it with it (issue #468), per venue: the podman
- * venue's Quadlet Valkey through `service install --force`, docker's through `up` (or compose's own recreate). Named,
- * never run by doctor (issue #471's rule).
+ * venue's Quadlet Valkey through `service install --force`, docker's through compose's own recreate. Named, never run
+ * by doctor (issue #471's rule).
  */
 export function valkeyPasswordUpgradeStep() {
-	return "run `pi-dispatch up`: it writes a VALKEY_PASSWORD into .env and restarts pi-dispatch-valkey with it (its volume, and the queue, is kept); a compose-started Valkey is recreated with `docker compose --env-file .env -f deploy/docker-compose.yml up -d`. Then restart the worker and the receiver so they send it";
+	return "put a VALKEY_PASSWORD into .env (or let `pi-dispatch init` generate one), then recreate Valkey with it: `docker compose --env-file .env -f deploy/docker-compose.yml up -d` (its volume, and the queue, is kept). Then restart the worker and the receiver so they send it";
 }
 
 /** The fix for a Valkey that refuses this deployment's credential (issue #468). */
@@ -7433,20 +7212,6 @@ function runCmdCapture(spawn, cmd, args, opts = {}) {
 		child.on("error", () => finish(null)); // ENOENT etc. — the binary is not available
 		child.on("close", (code) => finish(code));
 	});
-}
-
-/**
- * Pull the scope list out of `gh auth status` output. The line reads like
- * `  - Token scopes: 'gist', 'read:org', 'repo', 'workflow'` (older gh omits the quotes). Returns null
- * when the line is absent — fine-grained tokens report no classic scopes at all.
- */
-function parseGhTokenScopes(output) {
-	const m = output.match(/Token scopes:\s*(.+)/);
-	if (!m) return null;
-	return m[1]
-		.split(",")
-		.map((s) => s.trim().replace(/^'(.*)'$/, "$1"))
-		.filter((s) => s.length > 0);
 }
 
 /**
@@ -9003,9 +8768,8 @@ function defaultIsAlive(pid) {
 /**
  * The bounds every `runCmd` call runs under (issue #397). `cmd` is the default and matches
  * `runCmdCapture`'s, so the two runners in this file do not disagree about what "too long" means. `pull`
- * is the override for the two `--fix` actions that fetch an image, and matches the 600s this file already
- * gives `import-pi`: a cold `docker pull` of the job image is minutes of legitimate work, and bounding it
- * at 30s would turn a working fix into a failed one.
+ * is the override for the `--fix` actions that fetch an image: a cold `docker pull` of the job image is
+ * minutes of legitimate work, and bounding it at 30s would turn a working fix into a failed one.
  *
  * Injected through the `runTimeouts` seam rather than read here, so a test can drive the timeout path in
  * milliseconds instead of waiting half a minute for it.

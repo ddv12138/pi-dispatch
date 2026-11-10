@@ -188,13 +188,10 @@ test("pinned SDK prompt resolves on 429 yet terminal events retain reset evidenc
 });
 
 
-test("the image failover capability is backed by an offline signed normal-entrypoint conformance run", () => {
+test("the image declares the failover capability and the runner records its failure evidence", () => {
 	const dockerfile = readFileSync(new URL("../../Dockerfile", import.meta.url), "utf8");
 	const label = dockerfile.match(/LABEL dev\.pi-dispatch\.capabilities="([^"]+)"/)[1].split(",");
 	assert.ok(label.includes("modelFailover"));
-	const verifier = readFileSync(new URL("../../verify-image.sh", import.meta.url), "utf8");
-	const branch = verifier.match(/\n\t\t\tmodelFailover\)([\s\S]*?)\n\t\t\t\t;;/)[1];
-	for (const expected of ["--network none", "PI_EXIT_AUTH=stdin", "provider-failure-fetch.mjs", '"toolsStarted":false', '"replaySafe":true', '"kind":"rate-limited"', "openssl dgst -sha256 -hmac"]) assert.ok(branch.includes(expected), expected);
 	const runner = readFileSync(new URL("../run-job.mjs", import.meta.url), "utf8");
 	assert.match(runner, /outcome\.code === EXIT_INFRA && outcome\.reason === "error" \? failureObserver\.failure\(terminal\) : null/);
 	assert.match(runner, /exitWriter\.writeExit\(\{[^\n]*replaySafe, toolsStarted: toolStarts\.toolsStarted, \.\.\.\(providerFailure \? \{ providerFailure \} : \{\}\)/);

@@ -591,7 +591,8 @@ export function overlayApiKeyProblem(models, provider) {
  *   - its `apiKey` is exactly `"$PI_DISPATCH_KEYLESS"`. pi composes a models.json provider only with SOME key (at 0.99.1,
  *     `provider-composer.js` "no authentication method configured"), and the worker sets that one variable, fixed and
  *     non-secret, on this branch alone. Any other value means pi sends something the gate never saw: a literal key (a
- *     secret in a mounted file, which `import-pi` already refuses), another `$VAR` (unset in the closed container env,
+ *     secret in a mounted file, which the overlay guard -- `findLiteralSecret` in secret-scan.mjs -- refuses and `doctor`
+ *     reports), another `$VAR` (unset in the closed container env,
  *     so the runner exits 2 after the container started), or `!cmd` (a shell in the job). Refused rather than guessed;
  *   - it carries NO other credential of any kind: no `headers` on the provider, on any model or in any
  *     `modelOverrides` entry, no `oauth`, and no userinfo (`user:pass@`) in the provider's or any model's baseUrl.

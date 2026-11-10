@@ -228,15 +228,14 @@ test("redaction: paths become <path>, URLs keep scheme and host, userinfo, queri
 	assert.equal(r(undefined), "");
 });
 
-test("secret values: secret-named variables, the PAT the pointer names, URL passwords; paths and pointers are not secrets", () => {
+test("secret values: secret-named variables, GITHUB_PAT, URL passwords; paths are not secrets", () => {
 	const values = secretValuesIn(
-		{ ANTHROPIC_API_KEY: "sk-ant-aaaaaaaaaaaaaaaaaaaa", GITHUB_PAT_VAR: "MY_PAT", MY_PAT: "pat-value-123456", VALKEY_URL: "redis://:p%40ssw0rd99@h:6379", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem", PI_LOGS_DIR: "/srv/logs", PI_SESSIONS_TTL_DAYS: "7" },
+		{ ANTHROPIC_API_KEY: "sk-ant-aaaaaaaaaaaaaaaaaaaa", GITHUB_PAT: "pat-value-123456", VALKEY_URL: "redis://:p%40ssw0rd99@h:6379", PI_GLOBAL_PI_DIR: "/srv/pi", PI_LOGS_DIR: "/srv/logs", PI_SESSIONS_TTL_DAYS: "7" },
 		{ WEBHOOK_SECRET: "whsec-1234567890" },
 		undefined,
 	);
 	assert.deepEqual([...new Set(values)].sort(), ["p%40ssw0rd99", "p@ssw0rd99", "pat-value-123456", "sk-ant-aaaaaaaaaaaaaaaaaaaa", "whsec-1234567890"]);
-	assert.deepEqual(secretValuesIn({ GITHUB_PAT_VAR: "TOKEN_HOLDER", TOKEN_HOLDER: "held-by-pointer-1" }).includes("held-by-pointer-1"), true, "the pointer's target is a secret by being pointed at");
-	assert.deepEqual(secretValuesIn({ GITHUB_PAT_VAR: "PLAIN", PLAIN: "pointed-at-value" }), ["pointed-at-value"]);
+	assert.deepEqual(secretValuesIn({ GITHUB_PAT: "another-pat-value" }), ["another-pat-value"], "GITHUB_PAT is redacted by its own name");
 });
 
 test("a record: counts over every check, ok entries are id and level only, warn and fail carry the redacted label and fix", () => {

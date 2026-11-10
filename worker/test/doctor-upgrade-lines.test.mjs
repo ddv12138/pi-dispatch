@@ -133,7 +133,7 @@ test("through the collection: each older-state finding is one state.older warnin
 		asked = args;
 		return [
 			{ store: "valkey-compose", label: "deploy/docker-compose.yml names valkey/valkey:8\u001b[2J", fix: "copy the package's compose file" },
-			{ store: "valkey-container", label: "the running pi-dispatch-valkey container runs valkey/valkey:8", fix: "pause, then docker rm -f pi-dispatch-valkey && pi-dispatch up" },
+			{ store: "valkey-container", label: "the running pi-dispatch-valkey container runs valkey/valkey:8", fix: "pause, then docker rm -f pi-dispatch-valkey && docker compose --env-file .env -f deploy/docker-compose.yml up -d" },
 			{ store: "broken" },
 			null,
 		];
@@ -147,7 +147,7 @@ test("through the collection: each older-state finding is one state.older warnin
 	const older = checks.filter((c) => c.id === "state.older");
 	assert.deepEqual(older, [
 		{ id: "state.older", ok: false, warn: true, label: "deploy/docker-compose.yml names valkey/valkey:8 [2J", fix: "copy the package's compose file" },
-		{ id: "state.older", ok: false, warn: true, label: "the running pi-dispatch-valkey container runs valkey/valkey:8", fix: "pause, then docker rm -f pi-dispatch-valkey && pi-dispatch up" },
+		{ id: "state.older", ok: false, warn: true, label: "the running pi-dispatch-valkey container runs valkey/valkey:8", fix: "pause, then docker rm -f pi-dispatch-valkey && docker compose --env-file .env -f deploy/docker-compose.yml up -d" },
 	]);
 	assert.deepEqual(assignCheckIds(older), ["state.older", "state.older-2"], "a repeat is published with a tail");
 	// The state section's own line about where the durable stores are (here under the OS temp dir, a test's folder).
@@ -195,7 +195,7 @@ test("the Valkey container is asked of Docker only where a job runs on it, the d
 
 // Doctor judges the container by VALKEY_URL's port only where it read VALKEY_URL as the service reads it. Where the `.env`
 // line cannot be read, the default stands in; where this shell and `.env` disagree, the port is the shell's. `up`
-// refuses both, so a fix ending in `pi-dispatch up` would start no Valkey: docker is not asked.
+// refuses both, so a fix naming the compose command would start no Valkey: docker is not asked.
 test("the Valkey container is not asked of Docker when the service's VALKEY_URL line cannot be read and the default stands in", async () => {
 	let args;
 	const seen = [];
@@ -268,8 +268,8 @@ test("state.older names the pi-dispatch-valkey container only where this deploym
 	for (const record of [(dir) => valkeyRecord({ label: dir }), valkeyRecord({ port: 6380 })]) {
 		const found = await older(inspecting(record));
 		assert.equal(found.length, 1);
-		assert.match(found[0].label, /^the pi-dispatch-valkey container runs valkey\/valkey:8, the floating tag an older `pi-dispatch up` started it with/);
-		assert.match(found[0].fix, /^`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey && pi-dispatch up`/);
+		assert.match(found[0].label, /^the pi-dispatch-valkey container runs valkey\/valkey:8, the floating tag an older release started it with/);
+		assert.match(found[0].fix, /^`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey` in the deployment folder, then `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`/);
 	}
 	// Another deployment's (its label), or one nothing ties to this folder (unlabelled, publishing no port, or another one,
 	// as `docker run --network none` leaves it): no finding, so no command that would stop and remove it.
@@ -301,7 +301,7 @@ test("state.older beside up's container: the compose file's fix changes its line
 	assert.equal(found.length, 2);
 	assert.match(found[0].fix, /^change that line to `image: valkey\/valkey:8\.1` \(the installed package's deploy\/docker-compose\.yml has it\) and nothing more: /);
 	assert.doesNotMatch(found[0].fix, /up -d valkey/);
-	assert.match(found[1].fix, /^`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey && pi-dispatch up`/);
+	assert.match(found[1].fix, /^`docker stop pi-dispatch-valkey && docker rm pi-dispatch-valkey` in the deployment folder, then `docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d`/);
 });
 
 test("the default older-state read never throws, and an empty deployment folder holds nothing older", async () => {

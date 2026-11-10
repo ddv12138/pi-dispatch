@@ -28,7 +28,7 @@ import { readSync, writeSync } from "node:fs";
  * a SIGUSR1 from the same uid, or `process._debugProcess(pid)`, opens it on 127.0.0.1:9229, and the loopback exists
  * under `--network none`, so a tool could take a heap snapshot holding the key. Open from #545 until issue #596's
  * review found it; both key holders (the supervisor and the runner) now start with `--disable-sigusr1`
- * (image/entrypoint.sh, image/runner/src/supervise.mjs `RUNNER_NODE_FLAGS`), and verify-image.sh probes both.
+ * (image/entrypoint.sh, image/runner/src/supervise.mjs `RUNNER_NODE_FLAGS`); nothing starts either holder without it.
  *
  * A MAC of the line rather than the bare key printed on it: the job's tools can open the container's stdout pipe for
  * READING (`/proc/1/fd/1`, measured on every venue), so a line carrying the key itself could be read off the pipe and

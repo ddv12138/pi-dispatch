@@ -67,7 +67,6 @@ test("the worker's forge entries run the image's withholding wrappers, never a s
 	const label = /^LABEL dev\.pi-dispatch\.capabilities="([^"]*)"$/m.exec(dockerfile)?.[1]?.split(",");
 	assert.ok(label, "the Dockerfile still declares its capabilities");
 	for (const gate of CAPABILITY_GATES) assert.ok(label.includes(gate.token), `this repository's image declares ${gate.token}`);
-	assert.match(read("image/verify-image.sh"), /\n\t\t\tforgeMcp\)\n/, "and the conformance script proves the claim");
 });
 
 // --- the withheld merge and approval tools (CONST-MERGE-NEVER-AUTOMATIC) ---
@@ -102,30 +101,9 @@ test("forge-mcp-gitlab withholds its merge and approval tools, discover_tools an
 	assert.doesNotMatch(text, /"\$@"|\$\*/);
 });
 
-test("verify-image.sh proves the withholding with the wrappers' own lists and a list of the other names that mention a merge request", () => {
-	const script = read("image/verify-image.sh");
-	for (const name of ["forge-mcp-github.sh", "forge-mcp-gitlab.sh"]) {
-		const { list } = wrapper(name);
-		assert.ok(script.includes(list), `verify-image.sh asks for ${name}'s list`);
-	}
-	assert.ok(script.includes("/merge|approv/i.test(name)"), "the probe flags every name that mentions a merge or an approval");
-	assert.ok(script.includes("withheld.includes(name) || (/merge|approv/i.test(name) && !allowed.has(name))"));
-	assert.ok(script.includes("if (!/unknown tool/i.test(message.error?.message ?? \"\"))"), "a call counts as refused only when refused as unknown, not failed on its arguments");
-	assert.ok(script.includes('const calls = [...withheld, "execute_graphql", "never_listed_tool"];'));
-});
-
-test("the wrappers and verify-image.sh claim no boundary: the withheld tools are a convenience not handed out, and the token's role is the boundary", () => {
+test("the wrappers claim no boundary: the withheld tools are a convenience not handed out, and the token's role is the boundary", () => {
 	for (const name of ["forge-mcp-github.sh", "forge-mcp-gitlab.sh"]) assert.match(wrapper(name).text, /is not a boundary/, name);
 	assert.match(wrapper("forge-mcp-gitlab.sh").text, /quick actions/);
-	assert.match(read("image/verify-image.sh"), /it is not a boundary/);
-	assert.doesNotMatch(read("image/verify-image.sh"), /never merge or approve/);
-});
-
-test("every capability the image declares is proved by verify-image.sh (#683)", () => {
-	// The image's label is the list; the script must have a case per token, so a new token cannot ship unproved.
-	const label = /^LABEL dev\.pi-dispatch\.capabilities="([^"]*)"$/m.exec(dockerfile)?.[1]?.split(",");
-	const script = read("image/verify-image.sh");
-	for (const token of label) assert.ok(script.includes(`\n\t\t\t${token})\n`), `verify-image.sh has a ${token}) case`);
 });
 
 // The per-binary egress policy (#684) and the `dev.pi-dispatch.net-binaries` label it was generated from left with

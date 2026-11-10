@@ -127,16 +127,15 @@ function runtimeUnavailable(venue, gate) {
 }
 
 /**
- * The remedy an egress-proxy refusal's comment names: `pi-dispatch up` from the deployment folder, and ONLY that
- * (issue #480, PR #488's review): it starts the proxy in any folder init made, and it knows the folder. A compose line
- * printed from here could not: a folder /dispatch setup laid out needs its project and override, and without them
- * `--profile egress up -d` also starts compose's unprofiled valkey under project `deploy`, a second Valkey on a fresh
- * volume or a clash on its port. A proxy PI_EGRESS_PROXY names is the operator's own, which `up` never starts, so that
- * one is theirs to start.
+ * The remedy an egress-proxy refusal's comment names: the deployment's compose stack with the egress profile, from the
+ * deployment folder (issue #480, PR #488's review). It replaces the quickstart command this used to name, which is gone.
+ * A folder /dispatch setup laid out needs its project and override for the same profile line, so the comment keeps to
+ * the plain command a compose deployment runs. A proxy PI_EGRESS_PROXY names is the operator's own, which compose does
+ * not start, so that one is theirs to start.
  */
 function egressProxyFix(venue, proxy = DEFAULT_EGRESS_PROXY) {
-	if (proxy !== DEFAULT_EGRESS_PROXY) return `PI_EGRESS_PROXY names your own proxy, which \`pi-dispatch up\` does not start: start ${proxy} yourself`;
-	return "Start it with `pi-dispatch up` from the deployment folder";
+	if (proxy !== DEFAULT_EGRESS_PROXY) return `PI_EGRESS_PROXY names your own proxy, which compose does not start: start ${proxy} yourself`;
+	return "Start it with `docker compose --env-file .env -f deploy/docker-compose.yml --profile egress up -d` from the deployment folder";
 }
 
 /**

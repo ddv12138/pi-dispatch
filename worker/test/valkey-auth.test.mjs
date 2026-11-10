@@ -446,7 +446,7 @@ test("the CLI's VALKEY_URL is this shell's, else the deployment .env's, a disagr
 		assert.doesNotMatch(code, /env\.VALKEY_URL \?\?/, f);
 	}
 	const cli = readFileSync(join(REPO, "worker", "src", "cli.mjs"), "utf8");
-	assert.equal((cli.match(/cliValkeyUrl\(env\)/g) ?? []).length, 2, "run, and run --trigger (#505)");
+	assert.equal((cli.match(/cliValkeyUrl\(env\)/g) ?? []).length, 1, "run --trigger (#505)");
 	assert.equal((cli.match(/await killSwitchUrls\(argv\.slice\(\d\), env\)/g) ?? []).length, 2, "pause/resume/status, and cancel (round 2: both URLs on a disagreement)");
 	// And end to end: `pi-dispatch status` from that folder dials the folder's Valkey (nothing answers there, so it says
 	// where it tried), not 6379.
@@ -464,13 +464,13 @@ test("the CLI's VALKEY_URL is this shell's, else the deployment .env's, a disagr
 		process.chdir(prev);
 	}
 	assert.match(errs.join(""), /could not reach Valkey at redis:\/\/127\.0\.0\.1:1/, errs.join(""));
-	assert.match(errs.join(""), /redis:\/\/127\.0\.0\.1:1: is it running\? \(`pi-dispatch up` in the deployment folder starts it\)\n/, "a loopback Valkey is the one up starts (PR #488's review)");
+	assert.match(errs.join(""), /redis:\/\/127\.0\.0\.1:1: is it running\? \(`docker compose --env-file \.env -f deploy\/docker-compose\.yml up -d` in the deployment folder starts it\)\n/, "a loopback Valkey is the one the compose stack starts (PR #488's review)");
 });
 
-// PR #488's review: `pi-dispatch up` starts only a loopback Valkey, so only a loopback VALKEY_URL is pointed at it.
-test("valkeyDownHint names pi-dispatch up for a loopback Valkey only, and a remote one by its host", async () => {
+// PR #488's review: the compose command starts only a loopback Valkey, so only a loopback VALKEY_URL is pointed at it.
+test("valkeyDownHint names the compose command for a loopback Valkey only, and a remote one by its host", async () => {
 	const { valkeyDownHint } = await import("../src/valkey-auth.mjs");
-	const UP = "is it running? (`pi-dispatch up` in the deployment folder starts it)";
+	const UP = "is it running? (`docker compose --env-file .env -f deploy/docker-compose.yml up -d` in the deployment folder starts it)";
 	for (const url of ["redis://127.0.0.1:6379", "redis://localhost:6380/2", "redis://[::1]:6379", "rediss://:pw@127.0.0.1:6379"]) assert.equal(valkeyDownHint(url), UP, url);
 	assert.equal(valkeyDownHint("redis://user:secret@valkey.internal:6379/0?password=x"), "is the Valkey at valkey.internal running?", "host only: no userinfo, path or query");
 	assert.equal(valkeyDownHint("redis://10.0.0.5:6379"), "is the Valkey at 10.0.0.5 running?");

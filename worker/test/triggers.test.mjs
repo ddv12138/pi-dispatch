@@ -1087,7 +1087,7 @@ test("a run.secrets key the worker sets itself is refused, from every set and de
 	// The two names tea 0.15.0 logs in from: a trigger binding either would be overwritten by the mint after it.
 	assert.ok(reserved.includes("GITEA_TOKEN") && reserved.includes("GITEA_INSTANCE_URL"), "tea's login pair is the worker's alone");
 	assert.ok(reserved.includes("FORGEJO_PERMISSION_TOKEN"), "OQ-043: a trigger binding the admin lookup token would hand a job exactly what it exists to keep out");
-	assert.ok(reserved.includes("GITHUB_APP_PRIVATE_KEY") && reserved.includes("HTTPS_PROXY") && reserved.includes("PI_OFFLINE"));
+	assert.ok(reserved.includes("HTTPS_PROXY") && reserved.includes("PI_OFFLINE"));
 	assert.ok(reserved.includes("PI_DISPATCH_KEYLESS"), "issue #503: the keyless marker is the worker's alone");
 	// Issues #501, #502: a trigger binding its own cost cap or model list would be the policy choosing itself.
 	assert.ok(reserved.includes("PI_MAX_TOKENS") && reserved.includes("PI_ALLOWED_MODELS"), "the two policy inputs are the worker's alone");

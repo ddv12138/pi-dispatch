@@ -83,7 +83,7 @@ export async function applyDesired({ desired, env, cwd, fs = nodeFs, exec, now =
 	if (!current) return refuse("not-staged-here");
 	if (!writable(fs, packagesRoot)) return refuse("overlay-read-only", current.version);
 	if (desired.op === "adopt" && isSubscriptionAdapter(desired.name)) return refuse("adapter", current.version);
-	// Never to an older version. A person may have moved past this row with `import-pi` since, and a host may read it again for any number of reasons (a new host, a lost applied key),
+	// Never to an older version. A person may have staged a newer version on that host since, and a host may read it again for any number of reasons (a new host, a lost applied key),
 	// with nobody looking: "nothing updates by itself" has to hold for a downgrade too. Going back is what Undo is for.
 	if (desired.op === "adopt" && compareVersions(current.version, desired.version) >= 0) return row("no-change", { version: current.version });
 	if (!EXACT_VERSION_RE.test(desired.version)) return refuse("stage-refused", current.version);

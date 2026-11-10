@@ -444,8 +444,7 @@ const BACKENDS_TABLE = {
 			// worker SIGKILL and a kernel OOM both surface as 137. The worker also BOUNDS the wait after the
 			// abort, so a stop that does not take frees the slot instead of holding it forever.
 			abortable: ENFORCED,
-			// `-v <host>:/job:ro` -- the kernel enforces it. `verify-image.sh` proves it with a live write
-			// attempt rather than trusting the flag.
+			// `-v <host>:/job:ro` -- the kernel enforces it; no separate probe ships with this repository.
 			readOnlyJobInputs: ENFORCED,
 			// ASSERTED, not enforced, and this is the honest one. Non-root is `USER pi` in the IMAGE, not in
 			// the worker's argv -- SECURITY.md says so in terms: "Non-root is not in that argv." An

@@ -31,10 +31,12 @@ import { EXACT_VERSION_RE, NPM_NAME_RE } from "./package-names.mjs";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { configError } from "./config.mjs";
-// ENTRY_NAME_RE / ADMIN_RE are import-pi's -- imported rather than re-declared so the staged dir charset
-// and the admin block cannot drift between the stager and this validator (doctor.mjs sets the precedent
-// of importing from import-pi.mjs).
-import { ADMIN_RE, ENTRY_NAME_RE } from "./import-pi.mjs";
+// ENTRY_NAME_RE is the shared copier's own rule; the admin block moved here when the staging command was
+// retired, so the package validator and `doctor` import it from one shared module.
+import { ENTRY_NAME_RE } from "./copy-tree.mjs";
+import { ADMIN_RE } from "./secret-scan.mjs";
+
+export { ADMIN_RE };
 // The container-side mount point is container-spec.mjs's fact -- IMPORTED, never re-typed, so the mount and
 // the packages root below cannot drift apart while both test suites stay green. That module is a LEAF and
 // imports nothing, so this costs no cycle and no weight in the admin's bundle. It used to be imported from
@@ -55,10 +57,8 @@ export { EXACT_VERSION_RE, NPM_NAME_RE };
 
 /**
  * The pi resource kinds a package may contribute by convention dir, when it carries no `pi` manifest.
- * Lives here rather than in import-pi.mjs because host-pi.mjs needs the same list to decide whether a
- * package the operator installed is a pi package at all, and a third module importing from import-pi.mjs
- * would add an edge to the import-pi <-> packages cycle that only survives because both sides use their
- * bindings at call time.
+ * Lives here because host-pi.mjs needs the same list to decide whether a package the operator installed
+ * is a pi package at all, and this module is the one both the stager and `doctor` already read.
  *
  * This list is pi's, not ours: at the pin `collectPackageResources` falls through to exactly these four directory
  * names when `readPiManifest` returns null or lists no resource (1.5.0), so a package with no `pi` key and a `skills/`
@@ -135,7 +135,7 @@ function normalizePackage(entry, index, path, seenDirs) {
 		throw configError(`package "${name}": name must be a valid npm package name (lowercase, optionally "@scope/"-prefixed): ${path}`);
 	}
 	// The admin package can enqueue paid jobs -- staging it into an overlay that every job container reads
-	// is the same recursion vector import-pi already blocks for the admin extension.
+	// is a recursion vector, so it is refused here just as the admin extension is when an overlay is read.
 	if (ADMIN_RE.test(name)) {
 		throw configError(`package "${name}": refused -- the pi-dispatch admin package must never be staged into a job overlay (it can enqueue paid jobs: a recursion vector): ${path}`);
 	}
