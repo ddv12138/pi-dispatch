@@ -566,6 +566,8 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The GitHub auth
 	// migration then removed the source/App/PAT-pointer keys and the gh-resume escape hatch
 	// (7 assignments): GITHUB_PAT is the one GitHub credential left.
+	// PI_WORKER_IMAGE and PI_RECEIVER_IMAGE name the CI-built control-plane images the compose
+	// services run, each overridable to pin a version or a sha rollback tag (2026-11-10).
 	// The count also carries ONE
 	// assignment this file already had at the pin's last edit, which is why it moves by two: at HEAD the file
 	// carried 137 assignments against this pin's 136, so this assertion was already failing before the switch.
@@ -574,7 +576,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
 	// with the podman, OpenShell and sandbox stack, so the pin follows the file down. The job-start caps
 	// removal (C1) then dropped the last four (PI_DAILY_CAP, PI_WEEKLY_CAP, PI_MONTHLY_CAP, PI_SOFT_HOLD_PCT).
-	assert.equal(scanned, 113, "the scan must actually reach every assignment in the file");
+	assert.equal(scanned, 115, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

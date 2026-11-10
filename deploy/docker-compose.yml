@@ -4,10 +4,12 @@
 # worker code receives it, never a job container.
 #
 # The RECEIVER is a container too. It is the one internet-facing process and needs no Docker access, so
-# it has no host service unit any more: its image is built from this snapshot, and the address it
-# publishes comes from the deployment's .env through PI_RECEIVER_PUBLISH (the 253 deployment sets
-# PI_RECEIVER_PUBLISH=192.168.99.253). No override file exists: every value this file reads is a compose
-# variable or an .env key. The `receiver` profile stays OPT-IN: a plain `up` remains Valkey-only.
+# it has no host service unit any more. Its image comes from Docker Hub -- built and pushed by
+# .github/workflows/ci.yml on every push to main -- and a deployment updates it with `docker compose
+# pull` + `up -d`, never a host-side build. The address it publishes comes from the deployment's .env
+# through PI_RECEIVER_PUBLISH (the 253 deployment sets PI_RECEIVER_PUBLISH=192.168.99.253). No override
+# file exists: every value this file reads is a compose variable or an .env key. The `receiver` profile
+# stays OPT-IN: a plain `up` remains Valkey-only.
 #
 #   docker compose --env-file .env -f deploy/docker-compose.yml up -d                     # start Valkey (default)
 #   docker compose --env-file .env -f deploy/docker-compose.yml --profile worker up -d   # Valkey + Linux container worker
@@ -67,6 +69,13 @@ services:
   # daemon host. Local-folder triggers must also live under this tree (or be added as same-path mounts).
   worker:
     profiles: ["worker"]
+    # The control-plane image, built and pushed by .github/workflows/ci.yml on every push to main:
+    # `latest` moves with main, `sha-<sha>` is the immutable rollback tag, and a `v*` git tag adds
+    # the release number. PI_WORKER_IMAGE overrides the whole ref, to pin a version or roll back.
+    # The build block below is the LOCAL development path only: with both keys present, `up` builds
+    # solely when the image is missing from the local store, and `docker compose pull` is what
+    # fetches the registry one -- the 253 deployment's whole update step.
+    image: ${PI_WORKER_IMAGE:-docker.io/ddv12138/pi-dispatch-worker:latest}
     build:
       context: ..
       dockerfile: deploy/worker.Dockerfile
@@ -122,7 +131,9 @@ services:
   # Create an operator token in runtime/console-tokens.json before starting this profile.
   console:
     profiles: ["console"]
-    image: deploy-worker
+    # The same image as the worker service, through the same PI_WORKER_IMAGE variable: one build,
+    # two roles.
+    image: ${PI_WORKER_IMAGE:-docker.io/ddv12138/pi-dispatch-worker:latest}
     user: "10001:10001"
     env_file: ../.env
     working_dir: ${PWD}
@@ -156,16 +167,19 @@ services:
     security_opt:
       - no-new-privileges:true
 
-  # The receiver (issue #82): the always-on webhook edge. It is built from this snapshot, so an edit to
-  # receiver/ takes effect on the next `up --build` and no prebuilt registry image can drift from the
-  # code beside it.
+  # The receiver (issue #82): the always-on webhook edge. Its image comes from Docker Hub, built and
+  # pushed by .github/workflows/ci.yml on every push to main (`latest` moves with main, `sha-<sha>` is
+  # the immutable rollback tag), so a deployment updates it with `docker compose pull` + `up -d` and
+  # never builds on the host. The build block below is the LOCAL development path, same as the
+  # worker's: `up` reaches it only when the image is missing from the local store.
   #
   # Relative paths below resolve against THIS FILE's directory (deploy/), not the caller's cwd --
   # that is the Compose spec for both env_file and bind mounts -- so `../` reaches the repo root
   # regardless of where `docker compose -f deploy/docker-compose.yml ...` is run from.
   receiver:
     profiles: ["receiver"]
-    image: deploy-receiver
+    # PI_RECEIVER_IMAGE overrides the whole ref, to pin a version or roll back.
+    image: ${PI_RECEIVER_IMAGE:-docker.io/ddv12138/pi-dispatch-receiver:latest}
     build:
       context: ..
       dockerfile: receiver/Dockerfile
