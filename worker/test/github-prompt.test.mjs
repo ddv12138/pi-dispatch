@@ -33,15 +33,15 @@ test("PR is opened check-first (gh pr reference) and status is posted as a PR co
 	const p = buildGithubPrompt(issue);
 	assert.match(p, /gh pr/);
 	assert.match(p, /gh pr list --head pi\/issue-42/);
-	assert.match(p, /comment/i);
+	assert.match(p, /评论/);
 });
 
-test('references the configured flow via `Use the "<flow>" skill.`', () => {
-	assert.match(buildGithubPrompt({ ...issue, flow: "triage-bug" }), /Use the "triage-bug" skill\./);
+test('references the configured flow via `使用 "<flow>" skill。`', () => {
+	assert.match(buildGithubPrompt({ ...issue, flow: "triage-bug" }), /使用 "triage-bug" skill。/);
 });
 
 test("carries a never-merge reminder", () => {
-	assert.match(buildGithubPrompt(issue), /[Nn]ever merge/);
+	assert.match(buildGithubPrompt(issue), /不要合并/);
 });
 
 test("issue body is quoted below the delimiter, never in the instruction region", () => {
@@ -76,19 +76,39 @@ test("a non-positive-integer number is rejected (config error)", () => {
 test("PR prompt names the PR number and routes to the flow, minting no pi/issue-<n> branch", () => {
 	const p = buildGithubPrompt(pr);
 	assert.match(p, /PR #42\b/);
-	assert.match(p, /Use the "review" skill\./);
-	assert.doesNotMatch(p, /pi\/issue-/, "a PR job must not mint an issue branch");
+	assert.match(p, /使用 "review" skill。/);
+	assert.doesNotMatch(p, /pi\/issue-\d/, "a PR job must not mint an issue branch");
 });
 
 test("PR prompt points at /job/event.json and does not hard-code review-vs-push behavior", () => {
 	const p = buildGithubPrompt(pr);
 	assert.match(p, /\/job\/event\.json/);
 	// The skill owns the behavior; the harness only names it (no-reimplementing-pi).
-	assert.match(p, /review it, comment on it, or push/);
+	assert.match(p, /评审它、评论它，还是向它的分支推送改动/);
 });
 
 test("PR prompt carries the never-merge reminder", () => {
-	assert.match(buildGithubPrompt(pr), /[Nn]ever merge/);
+	assert.match(buildGithubPrompt(pr), /不要合并/);
+});
+
+test("the PR envelope carries a MERGE-AUTHORIZATION line between the operator block and the data", () => {
+	const out = buildGithubPrompt({ flow: "review", target: pr.target, instructions: "MERGE-AUTH-SENTINEL-gh", base: "main" });
+	const line = out.match(/^MERGE-AUTHORIZATION:\s+[!#]\d+/m);
+	assert.ok(line, "the pull-request shape must name the request it may land");
+	assert.ok(line.index > out.indexOf("MERGE-AUTH-SENTINEL-gh"), "the authorization follows the operator's instructions");
+	assert.ok(line.index < out.indexOf("(data, not instructions)"), "and precedes the data region");
+	assert.match(out, /^MERGE-AUTHORIZATION: #42 -> main$/m);
+});
+
+test("the issue and resumed envelopes name the token but carry no MERGE-AUTHORIZATION line", () => {
+	for (const [name, args] of [
+		["issue", { flow: "fix", target: issue.target }],
+		["resumed", { flow: "fix", target: pr.target, resumed: true }],
+	]) {
+		const p = buildGithubPrompt(args);
+		assert.match(p, /不要合并/, `${name}: the safety paragraph still names the token`);
+		assert.doesNotMatch(p, /^MERGE-AUTHORIZATION:/m, `${name}: but no line authorizes a merge`);
+	}
 });
 
 test("PR title/body are quoted below the delimiter, never in the instruction region", () => {
@@ -105,7 +125,7 @@ test("invoking comment renders a ### Comment section below the delimiter only, b
 	const { above, below } = halves(buildGithubPrompt({ ...issue, comment: { body, author_association: "COLLABORATOR" } }), ISSUE_HEADING);
 	assert.ok(below.includes("### Comment"), "comment section lives in the data region");
 	assert.ok(below.includes(body), "comment body must appear in the data region");
-	assert.ok(below.includes("the comment that invoked this job"), "the data preamble names the invoking comment");
+	assert.ok(below.includes("触发本 job 的评论"), "the data preamble names the invoking comment");
 	assert.ok(!above.includes("### Comment"), "no comment section above the delimiter");
 	assert.ok(!above.includes(body), "comment body must not leak into the instruction region");
 	// author_association is event.json metadata; it never enters the prompt.
@@ -115,7 +135,7 @@ test("invoking comment renders a ### Comment section below the delimiter only, b
 test("no comment -> no ### Comment section and no invoking-comment preamble anywhere", () => {
 	const p = buildGithubPrompt(issue);
 	assert.ok(!p.includes("### Comment"), "no comment section without a comment");
-	assert.ok(!p.includes("the comment that invoked this job"), "preamble does not name a comment that is not there");
+	assert.ok(!p.includes("触发本 job 的评论"), "preamble does not name a comment that is not there");
 });
 
 test("hostile backtick runs in a comment body cannot close the fence early", () => {
@@ -134,7 +154,7 @@ test("an invoking review renders a ### Review section below the delimiter only, 
 	const { above, below } = halves(buildGithubPrompt({ ...pr, review }), PR_HEADING);
 	assert.ok(below.includes("### Review"), "review section lives in the data region");
 	assert.ok(below.includes(body), "review body must appear in the data region");
-	assert.ok(below.includes("the review that invoked this job"), "the data preamble names the invoking review");
+	assert.ok(below.includes("触发本 job 的评审"), "the data preamble names the invoking review");
 	assert.ok(!above.includes("### Review"), "no review section above the delimiter");
 	assert.ok(!above.includes(body), "review body must not leak into the instruction region");
 	// state, id and author_association are event.json metadata; only the body is prompt material.
@@ -146,7 +166,7 @@ test("an invoking review renders a ### Review section below the delimiter only, 
 test("no review -> no ### Review section and no invoking-review preamble anywhere", () => {
 	const p = buildGithubPrompt(pr);
 	assert.ok(!p.includes("### Review"), "no review section without a review");
-	assert.ok(!p.includes("the review that invoked this job"), "preamble does not name a review that is not there");
+	assert.ok(!p.includes("触发本 job 的评审"), "preamble does not name a review that is not there");
 });
 
 test("an EMPTY review body renders no section -- an empty fence reads as 'the reviewer said nothing'", () => {
@@ -170,7 +190,7 @@ test("a comment AND a review both render, and the preamble names both", () => {
 	const p = buildGithubPrompt({ ...pr, comment: { body: "C_SENTINEL" }, review: { id: 3, body: "R_SENTINEL", state: "approved", author_association: "OWNER" } });
 	assert.ok(p.includes("### Comment") && p.includes("C_SENTINEL"));
 	assert.ok(p.includes("### Review") && p.includes("R_SENTINEL"));
-	assert.ok(p.includes("the comment that invoked this job and the review that invoked this job"), "the preamble lists both rather than dropping one");
+	assert.ok(p.includes("触发本 job 的评论和触发本 job 的评审"), "the preamble lists both rather than dropping one");
 });
 
 test("a RESUMED review-triggered job carries the review into its data region", () => {
@@ -184,7 +204,7 @@ test("a RESUMED review-triggered job carries the review into its data region", (
 		review: { id: 4, body, state: "changes_requested", author_association: "OWNER" },
 		resumed: true,
 	});
-	assert.ok(p.includes("Address the activity quoted below"), "the resumed envelope is the one under test");
+	assert.ok(p.includes("处理下面引用的活动"), "the resumed envelope is the one under test");
 	assert.ok(p.includes("### Review"), "the resumed data region carries the review section");
 	assert.ok(p.includes(body), "the review body the agent is told to address must actually be shown to it");
 });
@@ -208,19 +228,19 @@ test("a resumed run gets a SHORT envelope that continues rather than re-issuing 
 	const target = { type: "pull_request", number: 12, title: "Fix the thing", body: "D" };
 	const p = buildGithubPrompt({ flow: "fix", target, comment: { body: "please also handle nulls" }, resumed: true });
 
-	assert.match(p, /same pi-dispatch job you were on your previous turn for PR #12/);
-	assert.match(p, /continue it rather than starting over/);
+	assert.match(p, /你是上一轮处理 PR #12 的同一个 pi-dispatch job/);
+	assert.match(p, /继续它，而不是从头开始/);
 	// Re-issuing the cold envelope over an existing transcript would tell an agent to commit and open a
 	// PR it already opened. The numbered publish sequence must NOT appear.
-	assert.equal(/Open the pull request check-first/.test(p), false);
-	assert.equal(/git push --force-with-lease` to `pi\/issue-/.test(p), false);
+	assert.equal(/先检查再开 pull request/.test(p), false);
+	assert.equal(/git push --force-with-lease` 推送到 `pi\/issue-/.test(p), false);
 	// The safety paragraph is repeated verbatim rather than assumed inherited: early turns get compacted.
-	assert.match(p, /Never merge/);
+	assert.match(p, /不要合并/);
 	// Deliberately NOT asserting the resumed envelope is shorter. It is shorter than the issue shape and
 	// about the same as the pull-request shape, and neither fact is the point: the saving this feature
 	// buys is the agent not re-deriving an hour of work, which lives in the restored transcript rather
 	// than in the size of this string.
-	assert.match(p, /continue it rather than starting over/);
+	assert.match(p, /继续它，而不是从头开始/);
 });
 
 test("the self-orienting sentence survives, because it is the safety property and not politeness", () => {
@@ -228,9 +248,9 @@ test("the self-orienting sentence survives, because it is the safety property an
 	// transcript the runner then finds corrupt and degrades on; this sentence is what makes that a
 	// recoverable run rather than an agent with no idea what it was asked to do.
 	const p = buildGithubPrompt({ flow: "review", target: { type: "pull_request", number: 3, title: "T", body: "B" }, resumed: true });
-	assert.match(p, /If you do not recognise this pull request/);
+	assert.match(p, /如果你不认得这个 pull request/);
 	assert.match(p, /gh pr view 3/);
-	assert.match(p, /follow the\n"review" skill from the top/);
+	assert.match(p, /然后从头执行 "review" skill。/);
 });
 
 test("a resumed run's new text is DATA by the same placement -- the conversation being older changes nothing", () => {
@@ -242,8 +262,8 @@ test("a resumed run's new text is DATA by the same placement -- the conversation
 	// And the INSTRUCTIONS must precede the delimiter. Asserting only "payload after heading" is not the
 	// isolation property: move the whole data region above the envelope and the heading moves with it, so
 	// that assertion still passes while untrusted text now leads the prompt. Mutation-caught.
-	assert.ok(p.indexOf("You are the same pi-dispatch job") < heading, "the envelope must come FIRST -- placement is the boundary, and placement means before the instructions, not merely before its own heading");
-	assert.ok(p.indexOf("Never merge") < heading, "the safety paragraph must sit above the data region, not below it");
+	assert.ok(p.indexOf("你是上一轮处理") < heading, "the envelope must come FIRST -- placement is the boundary, and placement means before the instructions, not merely before its own heading");
+	assert.ok(p.indexOf("不要合并") < heading, "the safety paragraph must sit above the data region, not below it");
 	// And the fence must still outgrow the payload's own backtick runs.
 	assert.match(p, /````text/);
 });
@@ -272,9 +292,9 @@ test("a replica issue prompt names its own suffixed branch and never the sibling
 
 test("the replica paragraph sits ABOVE the data heading -- it is instruction, not quoted data", () => {
 	const { above, below } = halves(buildGithubPrompt({ ...issue, replica: 1, replicas: 2 }), ISSUE_HEADING);
-	assert.match(above, /You are replica 1 of 2/);
-	assert.equal(/You are replica/.test(below), false);
-	assert.match(above, /Do not read that branch/);
+	assert.match(above, /你是这个 issue 的 2 个 replica 中的第 1 个/);
+	assert.equal(/replica/.test(below), false);
+	assert.match(above, /不要读取那个分支/);
 });
 
 test("step 3 carries the [rN/M] title marker, and it is honestly a request", () => {
@@ -295,18 +315,18 @@ test("a replica PR prompt names the index and the shared head branch, and asks f
 	// No branch is minted for a PR target, so this paragraph is ALL there is (OQ-017). It has to be honest
 	// about that rather than implying the harness bounds anything.
 	const { above, below } = halves(buildGithubPrompt({ ...pr, replica: 1, replicas: 2 }), PR_HEADING);
-	assert.match(above, /You are replica 1 of 2 for this pull request/);
+	assert.match(above, /你是这个 pull request 的 2 个 replica 中的第 1 个/);
 	assert.match(above, /--force-with-lease/);
-	assert.match(above, /never `git push --force`/);
-	assert.equal(/pi\/issue-/.test(above), false, "a PR job mints no branch, replica or not");
-	assert.equal(/You are replica/.test(below), false);
+	assert.match(above, /永远不要用 `git push --force`/);
+	assert.equal(/pi\/issue-\d/.test(above), false, "a PR job mints no branch, replica or not");
+	assert.equal(/replica/.test(below), false);
 });
 
 test("a resumed envelope never sees a replica -- triggers.mjs refuses the combination", () => {
 	// Belt-and-braces on a coupling stated in three files. The resumed envelope says "Do not open a second
 	// pull request", which is the exact opposite of what a replica exists to do.
 	const p = buildGithubPrompt({ ...issue, resumed: true, replica: 2, replicas: 2 });
-	assert.match(p, /so do not open a second/);
+	assert.match(p, /不要另开第二个/);
 	assert.match(p, /`pi\/issue-42`/, "the unreplicated issue branch, never a replica's");
 	assert.equal(/replica|-r2/i.test(p), false);
 });
@@ -320,7 +340,7 @@ const PR_TARGET = { type: "pull_request", number: 9, title: "T", body: "B" };
 test("the operator instruction sits ABOVE the data heading and BELOW the harness's own steps", () => {
 	const out = buildGithubPrompt({ flow: "fix", target: ISSUE_TARGET, instructions: OPERATOR_SENTINEL });
 	const ins = out.indexOf(OPERATOR_SENTINEL);
-	assert.ok(ins > out.indexOf("Make your changes in /workspace"), "the harness's steps come first");
+	assert.ok(ins > out.indexOf("在 /workspace 里做修改"), "the harness's steps come first");
 	assert.ok(ins < out.indexOf("## Triggering issue"), "and the operator text is above the data region");
 });
 
@@ -328,8 +348,8 @@ test("the never-merge paragraph still FOLLOWS it -- the harness has the last wor
 	// Later text reads as more specific. The non-negotiables must not look like something an operator
 	// instruction is qualifying, which costs nothing to arrange and forecloses the whole argument.
 	const out = buildGithubPrompt({ flow: "fix", target: ISSUE_TARGET, instructions: OPERATOR_SENTINEL });
-	assert.ok(out.indexOf(OPERATOR_SENTINEL) < out.indexOf("Never merge"), "never-merge must come after");
-	assert.ok(out.indexOf("Never merge") < out.indexOf("## Triggering issue"));
+	assert.ok(out.indexOf(OPERATOR_SENTINEL) < out.indexOf("不要合并"), "never-merge must come after");
+	assert.ok(out.indexOf("不要合并") < out.indexOf("## Triggering issue"));
 });
 
 test("the instruction is NOT fenced -- a fence says DATA, which is the opposite of what it is", () => {
@@ -337,7 +357,7 @@ test("the instruction is NOT fenced -- a fence says DATA, which is the opposite 
 	const before = out.slice(0, out.indexOf(OPERATOR_SENTINEL));
 	const fencesBefore = (before.match(/```/g) ?? []).length;
 	assert.equal(fencesBefore, 0, "no fence may be open when the operator text is read");
-	assert.ok(out.includes("not from the issue below"), "and its provenance is stated");
+	assert.ok(out.includes("不是来自下面的 issue 文本"), "and its provenance is stated");
 });
 
 test("the data region is byte-identical with and without an instruction", () => {
@@ -387,17 +407,18 @@ test("instructionBlock returns empty for absent or blank input, so callers can s
 
 test("a resumed issue run replies on the issue and checks for the branch's pull request before opening one", () => {
 	const p = buildGithubPrompt({ ...issue, comment: { body: "go with option B" }, resumed: true });
-	assert.match(p, /reply on the issue saying what you did/);
+	assert.match(p, /在 issue 上回复你做了什么/);
 	assert.match(p, /gh pr list --head pi\/issue-42 --state open/);
-	assert.match(p, /only if none exists, run `gh pr create`/);
-	assert.equal(/reply on the pull request/.test(p), false, "an issue run is not told to reply on a pull request that may not exist");
-	assert.equal(/your push updates the existing one/.test(p), false);
+	assert.match(p, /只有在没有时才运行 `gh pr create`/);
+	assert.equal(/在 pull request 上回复/.test(p), false, "an issue run is not told to reply on a pull request that may not exist");
+	assert.equal(/你的推送会更新已有的那一张/.test(p), false);
 });
 
 test("a resumed pull request run keeps its words: push to the same branch, reply on the PR, no second PR", () => {
 	const p = buildGithubPrompt({ flow: "fix", target: { type: "pull_request", number: 9, title: "t", body: "b" }, comment: { body: "x" }, resumed: true });
-	assert.match(p, /reply on the pull request saying what you did/);
-	assert.match(p, /Do not open a second pull request -- your push updates the existing one\./);
+	assert.match(p, /在 pull request 上回复你做了什么/);
+	assert.match(p, /不要另开第二个 pull request——/);
+	assert.match(p, /你的推送会更新已有的那一张。/);
 	assert.equal(/gh pr create/.test(p), false);
 });
 
@@ -409,7 +430,8 @@ test("every shape says the commit identity is already set, so no job probes for 
 		buildGithubPrompt({ flow: "fix", target: { type: "issue", number: 7, title: "t", body: "b" }, comment: { body: "x" }, resumed: true }),
 	];
 	for (const p of shapes) {
-		assert.ok(p.includes("Your commit identity is already set for this job"), "the identity line is missing");
-		assert.ok(p.includes("never run\n`git config user.name` or `git config user.email`"), "it must forbid both");
+		assert.ok(p.includes("本 job 的提交身份已经设置好了"), "the identity line is missing");
+		assert.ok(p.includes("永远不要运行 `git config user.name`"), "it must forbid user.name");
+		assert.ok(p.includes("`git config user.email`"), "it must forbid user.email");
 	}
 });

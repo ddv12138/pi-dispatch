@@ -21,7 +21,8 @@ test("the work-item envelope speaks `az repos`, never gh/glab/tea", () => {
 test("Azure's own nouns: a work item, and a pull request a human COMPLETES", () => {
 	const p = buildAzurePrompt({ flow: "fix", target: workItem });
 	assert.match(p, /work item/);
-	assert.match(p, /Never complete or merge/, "completing is Azure's verb, and it is forbidden like merging");
+	// Azure's verb is "complete": the paragraph names both, so the job is told not to complete OR merge.
+	assert.match(p, /不要完成或合并/, "completing and merging are both forbidden in the envelope too");
 });
 
 test("the branch derives only from the work item id, never the mutable title", () => {
@@ -39,6 +40,26 @@ test("a number that is not a positive integer is refused rather than minting a g
 		);
 	}
 	assert.ok(buildAzurePrompt({ flow: "fix", target: { ...workItem, number: "7" } }).includes("`pi/issue-7`"));
+});
+
+test("the pull-request envelope carries a MERGE-AUTHORIZATION line between the operator block and the data", () => {
+	const out = buildAzurePrompt({ flow: "review", target: pr, instructions: "MERGE-AUTH-SENTINEL-az", base: "main" });
+	const line = out.match(/^MERGE-AUTHORIZATION:\s+[!#]\d+/m);
+	assert.ok(line, "the pull-request shape must name the request it may land");
+	assert.ok(line.index > out.indexOf("MERGE-AUTH-SENTINEL-az"), "the authorization follows the operator's instructions");
+	assert.ok(line.index < out.indexOf("(data, not instructions)"), "and precedes the data region");
+	assert.match(out, /^MERGE-AUTHORIZATION: !12 -> main$/m);
+});
+
+test("the work-item and resumed envelopes name the token but carry no MERGE-AUTHORIZATION line", () => {
+	for (const [name, args] of [
+		["work item", { flow: "fix", target: workItem }],
+		["resumed", { flow: "fix", target: pr, resumed: true }],
+	]) {
+		const p = buildAzurePrompt(args);
+		assert.match(p, /不要完成或合并/, `${name}: the safety paragraph still forbids completing and merging`);
+		assert.doesNotMatch(p, /^MERGE-AUTHORIZATION:/m, `${name}: but no line authorizes a merge`);
+	}
 });
 
 test("trigger text stays BELOW the data delimiter on every shape (CONST-ISSUE-TEXT-IS-DATA)", () => {
@@ -64,11 +85,11 @@ test("an azure replica work-item prompt names its own branch and the siblings', 
 	assert.ok(p.includes("`pi/issue-7-r1`"));
 	assert.ok(p.includes("`pi/issue-7-r2`") && p.includes("`pi/issue-7-r3`"), "both siblings are named");
 	assert.equal(p.includes("`pi/issue-7`"), false, "the unsuffixed branch must not appear");
-	assert.match(p, /You are replica 1 of 3 for this work item/);
+	assert.match(p, /你是这个 work item 的 3 个 replica 中的第 1 个/);
 	// The one noun Azure shares with nobody. Calling it an issue here would have the first line of the
 	// envelope disagree with the delivery it describes.
-	assert.match(p, /solve the\s+work item your own way/);
-	assert.equal(/for this issue/.test(p), false, "an azure work item is never an issue");
+	assert.match(p, /按你自己的方式解决这个 work item/);
+	assert.equal(/这个 issue 的/.test(p), false, "an azure work item is never an issue");
 });
 
 test("an azure replica threads the [r1/3] marker onto the create line's own --title flag", () => {
@@ -80,10 +101,10 @@ test("an azure replica threads the [r1/3] marker onto the create line's own --ti
 
 test("an azure replica PULL REQUEST prompt names the SOURCE branch and the lease (OQ-017)", () => {
 	const p = buildAzurePrompt({ flow: "review", target: pr, replica: 2, replicas: 2 });
-	assert.match(p, /You are replica 2 of 2 for this pull request/);
-	assert.match(p, /source branch belongs to a human/, "Azure says source branch where github says head");
+	assert.match(p, /你是这个 pull request 的 2 个 replica 中的第 2 个/);
+	assert.match(p, /源分支属于某个人/, "Azure says source branch where github says head");
 	assert.match(p, /--force-with-lease/);
-	assert.equal(p.includes("pi/issue-"), false, "a pull-request target mints no branch at all");
+	assert.equal(/pi\/issue-\d/.test(p), false, "a pull-request target mints no branch at all");
 });
 
 test("an unflagged azure prompt is byte-identical to before the feature, on both shapes", () => {
@@ -102,15 +123,15 @@ test("a RESUMED azure envelope renders no replica paragraph even if handed an in
 
 test("a resumed issue run replies where the activity came from and checks for the branch's pull request first", () => {
 	const p = buildAzurePrompt({ flow: "fix", target: { type: "issue", number: 5, title: "t", body: "b" }, comment: { body: "go with option B" }, resumed: true });
-	assert.match(p, /reply on the work item saying what you did/);
+	assert.match(p, /在 work item 上回复你做了什么/);
 	assert.match(p, /az repos pr list --source-branch pi\/issue-5 --status active/);
 	assert.match(p, /az repos pr create --source-branch pi\/issue-5/);
-	assert.equal(/your push updates the existing one/.test(p), false, "an issue run is not told a pull request already exists");
+	assert.equal(/你的推送会更新已有的那一张/.test(p), false, "an issue run is not told a pull request already exists");
 });
 
 test("a resumed pull request run keeps its words", () => {
 	const p = buildAzurePrompt({ flow: "fix", target: { type: "pull_request", number: 9, title: "t", body: "b" }, comment: { body: "x" }, resumed: true });
-	assert.match(p, /your push updates the existing one\./);
+	assert.match(p, /你的推送会更新已有的那一张。/);
 	assert.equal(/az \w+ create/.test(p), false);
 });
 
@@ -122,7 +143,8 @@ test("every shape says the commit identity is already set, so no job probes for 
 		buildAzurePrompt({ flow: "fix", target: { type: "issue", number: 7, title: "t", body: "b" }, comment: { body: "x" }, resumed: true }),
 	];
 	for (const p of shapes) {
-		assert.ok(p.includes("Your commit identity is already set for this job"), "the identity line is missing");
-		assert.ok(p.includes("never run\n`git config user.name` or `git config user.email`"), "it must forbid both");
+		assert.ok(p.includes("本 job 的提交身份已经设置好了"), "the identity line is missing");
+		assert.ok(p.includes("永远不要运行 `git config user.name`"), "it must forbid user.name");
+		assert.ok(p.includes("`git config user.email`"), "it must forbid user.email");
 	}
 });

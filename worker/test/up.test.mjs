@@ -1261,7 +1261,7 @@ test("deploy/docker-compose.yml's PI_JOB_IMAGE is a concrete, .env-overridable j
 	// The repository half comes from the one place that names the default's upstream (`jobImageFix`), so a later move
 	// to another registry fails here as well as in the literals above.
 	assert.equal(jobImageFix("docker", "pi-job:latest").split(" ")[2], "docker.io/ddv12138/pi-job:latest");
-	const line = "      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.4}";
+	const line = "      PI_JOB_IMAGE: ${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.5}";
 	for (const path of ["../../deploy/docker-compose.yml", "../deploy/docker-compose.yml"]) {
 		const compose = readFileSync(new URL(path, import.meta.url), "utf8");
 		assert.ok(compose.split("\n").includes(line), `${path}: the concrete default, overridable from .env`);

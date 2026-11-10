@@ -211,7 +211,7 @@ else
 	for capability in $(echo "$capabilities" | tr ',' ' '); do
 		case "$capability" in
 			replicas)
-				docker run --rm --entrypoint grep "$IMAGE_REF" -q "the branch your prompt names" /opt/pi-dispatch/HARD_RULES.md 2>/dev/null \
+				docker run --rm --entrypoint grep "$IMAGE_REF" -q "FLOOR-CLAUSE: branch-name-from-prompt" /opt/pi-dispatch/HARD_RULES.md 2>/dev/null \
 					|| fail "the image declares 'replicas' but its baked HARD_RULES.md still hard-codes a single branch name -- the system prompt would contradict the replica prompt and both replicas would push to one branch"
 				;;
 			commands)

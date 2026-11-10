@@ -324,8 +324,11 @@ test("happy path returns { workspace, jobDir, sha, materialised }", async () => 
 
 	// prompt.md is the user prompt; it names the flow and quotes the issue body as data.
 	const prompt = readFileSync(join(h.jobDir, "prompt.md"), "utf8");
-	assert.ok(prompt.includes('Use the "frontend-fix" skill'));
+	assert.ok(prompt.includes('使用 "frontend-fix" skill'));
 	assert.ok(prompt.includes(JOB.target.body));
+	// An issue-shaped job has no request the line could name, even though the safety paragraph
+	// mentions the token inline: assert the LINE, not the substring.
+	assert.doesNotMatch(prompt, /^MERGE-AUTHORIZATION:/m, "an issue job must not authorize a merge");
 });
 
 // -- 11: a PR-triggered job clones the BASE default branch and carries PR context as event.json data --
@@ -364,8 +367,10 @@ test("a PR job clones the base default-branch SHA (never the PR head) and writes
 
 	// prompt.md is the PR prompt: names the flow, routes to it, mints no pi/issue-<n> branch.
 	const prompt = readFileSync(join(h.jobDir, "prompt.md"), "utf8");
-	assert.ok(prompt.includes('Use the "review" skill'));
-	assert.ok(!prompt.includes("pi/issue-"), "a PR job must not mint an issue branch");
+	assert.ok(prompt.includes('使用 "review" skill'));
+	assert.doesNotMatch(prompt, /pi\/issue-\d/, "a PR job must not mint an issue branch");
+	// The PR shape is the one envelope that authorizes a merge, naming PR #12 and its base branch.
+	assert.match(prompt, /^MERGE-AUTHORIZATION: #12 -> main$/m, "the PR job carries its authorization line");
 });
 
 // -- 12: a comment-triggered job surfaces the invoking comment -- event.json + prompt.md as DATA --
@@ -460,7 +465,7 @@ test("a flow job's prompt keeps the full envelope -- the command arm changes not
 	const h = harness({ git });
 	await prepareGithubWorkspace(JOB, TOKEN, h.deps);
 	const prompt = readFileSync(join(h.jobDir, "prompt.md"), "utf8");
-	assert.ok(prompt.includes('Use the "frontend-fix" skill'), "the envelope's flow hint survives");
+	assert.ok(prompt.includes('使用 "frontend-fix" skill'), "the envelope's flow hint survives");
 	assert.ok(prompt.includes(JOB.target.body), "and the issue text still arrives as prompt DATA");
 	assert.notEqual(prompt[0], "/", "a flow prompt is never a slash invocation");
 });

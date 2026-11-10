@@ -1,164 +1,59 @@
-# 253 server deployment
+# 253 服务器部署
 
-What is deployed on the server reachable as `root@192.168.99.253`. The deployment directory is `/root/pi-dispatch`,
-with no Git metadata; `.env` and `runtime/` carry the state that stays on the server rather than in the snapshot.
+本文描述 `root@192.168.99.253` 上部署了什么。部署目录是 `/root/pi-dispatch`，没有 Git 元数据；`.env` 和
+`runtime/` 保存留在服务器上、不随快照走的状态。
 
-## Layout
+## 布局
 
-- Compose project `deploy`, from the one shipped file `deploy/docker-compose.yml`. There is no override file:
-  every value the file reads is a compose variable or a key in `.env`. `deploy/` holds only that file,
-  `worker.Dockerfile`, `worker.Dockerfile.dockerignore`, `egress-proxy.conf` and `triggers.json` — no host service
-  definitions and no environment wrappers.
-- The `worker` and `console` profiles run the locally built `deploy-worker` image (application under
-  `/opt/pi-dispatch`), with the deployment directory mounted at the same absolute path, so job paths resolve on the
-  daemon host. The worker holds the host Docker socket; the console runs the same image without a socket.
-- The `receiver` profile builds `deploy-receiver` from `receiver/Dockerfile` at this snapshot; nothing is pulled
-  from a registry. It publishes `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`, and this host sets
-  `PI_RECEIVER_PUBLISH=192.168.99.253` in `.env`.
-- Ports: console `4790` on all host interfaces, plain HTTP; Valkey `127.0.0.1:6379`; receiver
-  `192.168.99.253:3000`.
-- Egress is armed (`PI_EGRESS` unset), with a `pi-dispatch-egress-proxy` container in front of the jobs.
-- Runtime state is under `/root/pi-dispatch/runtime`: `jobs/`, `logs/`, `sandboxes/`, `tmp/`, `home/`, the trigger
-  and settings files, and the read-only job overlay `pi-global/`.
-- Five containers run: `valkey`, `worker`, `console`, `receiver` and `egress-proxy`.
+- Compose 项目 `deploy`，来自唯一随仓库发布的文件 `deploy/docker-compose.yml`。没有 override 文件：文件读取
+  的每个值都是 compose 变量或 `.env` 里的键。`deploy/` 只放该文件、`worker.Dockerfile`、
+  `worker.Dockerfile.dockerignore`、`egress-proxy.conf` 和 `triggers.json`——没有宿主机服务定义，也没有环境
+  包装脚本。
+- `worker` 和 `console` 两个 profile 运行本地构建的 `deploy-worker` 镜像（应用在 `/opt/pi-dispatch`），部署
+  目录按同样的绝对路径挂载进去，因此 job 路径在 daemon 主机上可以解析。worker 持有宿主机 Docker socket；
+  console 用同一镜像但不挂 socket。
+- `receiver` profile 从本快照的 `receiver/Dockerfile` 构建 `deploy-receiver`，不从任何 registry 拉取。它发布
+  `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`，这台主机在 `.env` 里设 `PI_RECEIVER_PUBLISH=192.168.99.253`。
+- 端口：console `4790` 监听所有宿主接口、明文 HTTP；Valkey `127.0.0.1:6379`；receiver
+  `192.168.99.253:3000`。
+- Egress 已启用（`PI_EGRESS` 未设置），job 前面有 `pi-dispatch-egress-proxy` 容器。
+- 运行状态在 `/root/pi-dispatch/runtime` 下：`jobs/`、`logs/`、`sandboxes/`、`tmp/`、`home/`、trigger 与
+  settings 文件，以及只读 job overlay `pi-global/`。
+- 运行五个容器：`valkey`、`worker`、`console`、`receiver`、`egress-proxy`。
 
-## The job image
+## 运行 compose
 
-The job image is published from a checkout, not by CI: `./image/publish.sh` builds and pushes
+Compose 从部署根目录运行，带 env 文件和随仓库发布的 compose 文件：
 
-| Repository | What runs it |
-|---|---|
-| `docker.io/ddv12138/pi-job` | every job without its own `run.image` |
-| `docker.io/ddv12138/pi-job-java21` | a Java flow, through that trigger's `run.image` |
-
-Both carry `python3`, the three baked skills and the runner this repository ships; the Java one adds JDK 21 and
-Maven. The tag this host runs for both is `4.3.4`, the current release.
-
-The worker service names the default job image as a compose interpolation default, and `.env` wins over it, so the
-shipped default applies only when the key is absent from `.env`. `.env` here pins `PI_JOB_IMAGE` to
-`docker.io/ddv12138/pi-job:4.3.4`, and the two tags are the whole set of job images on the host.
-
-Jobs launch with `--pull=never`, so nothing is fetched at job time. Docker Hub is not reachable directly from this
-host (`registry-1.docker.io` refuses); pulls go through the registry mirror configured in `/etc/docker/daemon.json`.
-`PI_JOB_IMAGE` is read at container creation, so the running container keeps the value it was created with until the
-worker is recreated.
-
-## The Java trigger
-
-A Java flow needs a JVM, so its trigger names the Java image by hand in `runtime/triggers.json` (the console's
-trigger form has no image field):
-
-```json
-{ "on": { "type": "label", "any": ["afk-spec"] },
-  "run": { "kind": "gitlab", "flow": "spec-run",
-           "image": "docker.io/ddv12138/pi-job-java21:4.3.4",
-           "statusComment": true, "maxTurns": 300 } }
+```bash
+cd /root/pi-dispatch
+docker compose --env-file .env -f deploy/docker-compose.yml up -d worker console
 ```
 
-All three rules in `runtime/triggers.json` — `spec-run`, `ticket-run` and `ticket-merge` — name that Java image by
-hand, at `4.3.4`. The merger needs Maven to test the candidate, even though it writes no code.
+cwd 和 env 文件都是必须的：worker 与 console 通过 `"../:${PWD}"` 挂载代码树，`DOCKER_GID` 来自 `.env`，
+worker 据此加入 socket 的组。receiver 在 `profiles: ["receiver"]` 后面，重启要带该 profile：
 
-A trigger naming an image that is not on this host is refused **before** spend (`job-image-missing`). The image's
-Maven settings are baked at build time, not passed by the job:
+```bash
+docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver restart receiver
+```
 
-- mirror `https://maven.aliyun.com/repository/public`, whose host is also in `egress-allowlist.conf`;
-- a `<proxies>` block, because **Java ignores `HTTPS_PROXY`** and a Maven job on the job network reaches nothing
-  without it. The proxy host baked in is the address a **job container** reaches, not the host's loopback.
+## job 镜像
 
-## Triggers
+job 镜像从 checkout 构建并推送，不走 CI：`./image/publish.sh` 负责构建和推送。
 
-`runtime/triggers.json`, pointed at by `PI_TRIGGERS_FILE`, holds three rules:
+| 仓库 | 谁在运行 |
+|---|---|
+| `docker.io/ddv12138/pi-job` | 所有没有自己 `run.image` 的 job |
+| `docker.io/ddv12138/pi-job-java21` | Java flow，经由该 trigger 的 `run.image` |
 
-| `on` | flow | `maxTurns` | notes |
-|---|---|---|---|
-| issue label adds `afk-spec` | `spec-run` | 300 | label rule |
-| issue label adds `ready-for-agent` | `ticket-run` | 120 | `resume: true` |
-| MR `open` | `ticket-merge` | 120 | `open` only |
+两个镜像都带 `python3`、三个 baked skill 和本仓库的 runner；Java 那个额外带 JDK 21 和 Maven。这台主机两个
+都用 `4.3.5`，即当前发布版本。
 
-`ticket-run` implements one ticket on `pi/issue-<ticket>`, runs `mvn -q test`, and opens a MR to `pi/issue-<spec>`;
-it does not merge or push the spec branch. `ticket-merge` drains the open ticket -> spec MRs, serializes them per
-spec with the lock branch `pi/spec-lock-<n>`, and merges only after testing the merged ticket branch. It does not
-merge spec -> master; that remains a human step. Ticket jobs stay parallel; only merges queue.
+worker 服务把默认 job 镜像作为 compose 插值默认值，`.env` 覆盖它，所以只有 `.env` 缺少该键时随仓库的默认值
+才生效。这台主机的 `.env` 把 `PI_JOB_IMAGE` 固定为 `docker.io/ddv12138/pi-job:4.3.5`；这两个 tag 就是主机上
+全部的 job 镜像。
 
-`PI_CONCURRENCY` (6) bounds the deployment, and no rule sets `concurrent: 1`. `.env` holds `PI_JOB_CPUS` 1 and
-`PI_JOB_MEMORY` 2g beside it, under a `PI_HOST_MEMORY_BUDGET` of 12g and a `PI_HOST_CPU_BUDGET` of 6. The deployment
-runs without job-start or token caps, and `.env` carries none of the retired cap keys.
+job 以 `--pull=never` 启动，运行时不拉取任何东西。这台主机无法直连 Docker Hub（`registry-1.docker.io`
+拒绝），拉取走 `/etc/docker/daemon.json` 里配置的 registry mirror。`PI_JOB_IMAGE` 在创建容器时读取，
+所以运行中的容器一直用它创建时的值，直到 worker 被重建。
 
-## Session store
-
-`ticket-run` arms `run.resume`, so `PI_SESSIONS_DIR` is required; it has no default. This host's store is
-`/root/pi-dispatch/runtime/sessions`, mode `0700`, owner `10001:10001`, with `PI_SESSION_MAX_RESUME_CHAIN=20`. It is
-PII-bearing and host-only, outside every git repo.
-
-## The receiver (GitLab)
-
-`deploy-receiver` is built from `receiver/Dockerfile` at this snapshot — there is no
-`ghcr.io/edgehero/pi-dispatch-receiver:latest` pull — and serves the published address above,
-`192.168.99.253:3000`.
-
-Settings live in `.env`: `GITLAB_URL=https://git.133ec.com`, `GITLAB_TOKEN` (a personal PAT of `liukang`, id 340),
-`GITLAB_WEBHOOK_MODE=token`, `GITLAB_WEBHOOK_SECRET`. `GITHUB_AUTH_SOURCE=gh` is commented out, so this deployment
-serves GitLab only.
-
-The container reads `triggers.json` through a single-file bind mount: an in-place rewrite changes the bytes but
-produces no directory event, so the process keeps its boot-time rules, and a write by rename leaves the mount on the
-old inode.
-
-**The bot-loop guard is disarmed here**: `PI_RECEIVER_ALLOW_SELF=1`, because this GitLab has a single identity, so
-`liukang`'s own comments and labels arrive as the harness's. The switch disarms only that comparison; the author
-gate, resolution and verification are unchanged, the receiver says so at boot (`bot_loop_guard_disabled`), and
-`pi-dispatch doctor` warns by name.
-
-What bounds the spend is the turn cap (`PI_MAX_TURNS`), `PI_CONCURRENCY`, the host memory/CPU budget and the flow
-itself. The rules are therefore clear of the shapes that reproduce the harness's own output: no
-`on: {type:"pull_request", action:["update"]}` (every push the agent makes to its own merge request is one), no
-`on: {type:"comment", phrase:"@pi"}` (a status comment is a comment), and no close rules on items the agent closes
-itself. The shapes in place are label rules keyed to a label a person applies.
-
-The deliberate exception is the `ticket-merge` rule on MR **`open`**: it fires once per MR, and the merger only
-merges — it does not open a MR — so it creates no loop.
-
-**Who can trigger a job**: the author gate requires Developer or above. On this single-identity host
-`PI_RECEIVER_ALLOW_SELF=1` also lets the token's own account trigger.
-
-## This GitLab is 13.2.10
-
-- `GITLAB_WEBHOOK_MODE=token`, because `signature` needs 19.0+ and the native delivery id needs 17.4+. Deliveries
-  are deduplicated by `body-sha256-<hex>` over the event header and the raw body.
-- **No project or group access tokens** exist on this version, so the credential is a personal PAT of `liukang`,
-  which `CONST-TOKEN-SCOPED-PER-JOB` calls a residual: it reaches every project that account belongs to and makes
-  the harness's identity that human account. Its name, scopes and expiry are not auditable from the API on this
-  version; the only view is the token list at `https://git.133ec.com/profile/personal_access_tokens` for that
-  account, where the row with the most recent **Last used** is the one this deployment holds.
-- Webhook bodies carry **no `user.id`**, so the receiver resolves the sender from `user.username` (one exact match
-  only) and drops a delivery whose actor cannot be resolved as `missing-sender-id`.
-- Endpoint behaviour: no header or a wrong header answers 401, the correct secret answers 204, `/` answers 404.
-
-## Egress
-
-`egress-allowlist.conf` holds one host per line, six of them today: `api.anthropic.com` (doctor's provider probe;
-`PI_PROVIDER` here is `tencentmaas`, but the probe still asks it), `.github.com` (the leading dot takes the
-subdomains), `registry.npmjs.org` (a serviced repo's own dependencies), `tokenhub.tencentmaas.com` (the model
-provider), `git.133ec.com` (a job's clone and push) and `maven.aliyun.com` (the Java image's Maven mirror).
-
-## The overlay
-
-`runtime/pi-global` is mounted read-only into every job as `/opt/pi-global`: `models.json` (this deployment's
-`tencentmaas` provider and its two models), `packages/` (the staged `pi-subagents`), and `skills/`. The three skills
-(`code-review`, `tdd`, `implement-spec`) are also baked into the job image; the overlay's copies win on this host.
-`implement-spec` in the overlay has its `disable-model-invocation: true` line removed, because an unattended job
-that loads that flag cannot call the skill.
-
-`pi-subagents` is staged, not baked. A worker built from the current source applies its own reviewed compatibility
-adaptation while staging the package.
-
-## Doctor expectations
-
-`pi-dispatch doctor` reports these on this host, and they are configuration rather than faults:
-
-- `PI_RECEIVER_ALLOW_SELF=1`, the disarmed bot-loop guard;
-- `GITHUB_AUTH_SOURCE=gh` with no `gh` login in the container, because the GitHub arm is off;
-- `WEBHOOK_SECRET` unset: the GitLab arm verifies with `GITLAB_WEBHOOK_SECRET`;
-- the console listening on `0.0.0.0:4790` in plain HTTP, and `PI_CONSOLE_ALLOWED_HOSTS=*`;
-- `cpu_reserve_fail_open` on the local venue: this kernel is cgroup v1, so no CPU quota is held across jobs;
-- staged packages load in every job (no trigger sets `run.packages: false`).

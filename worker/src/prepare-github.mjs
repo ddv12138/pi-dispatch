@@ -198,7 +198,7 @@ export async function prepareGithubWorkspace(
 			// they move together will widen the wrong one.
 			job.command
 				? `/${job.command}`
-				: managedForkPrompt(job, buildPrompt({ flow: job.flow, target: job.target, comment: job.trigger?.comment, resumed: session?.resume === true, replica: job.replica, replicas: job.replicas, review: job.trigger?.review, instructions: job.instructions, fork: job.fork })),
+				: managedForkPrompt(job, buildPrompt({ flow: job.flow, target: job.target, comment: job.trigger?.comment, resumed: session?.resume === true, replica: job.replica, replicas: job.replicas, review: job.trigger?.review, instructions: job.instructions, fork: job.fork, base: triggerBase(job) })),
 			{ mode: 0o444 },
 		);
 
@@ -241,6 +241,26 @@ export async function prepareGithubWorkspace(
 /** A recovery pin: a full commit id and the checkpoint store's `file://` URL, nothing else (never a forge URL). */
 function validPin(pin) {
 	return pin !== null && typeof pin === "object" && typeof pin.sha === "string" && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(pin.sha) && typeof pin.from === "string" && pin.from.startsWith("file://");
+}
+
+/**
+ * The BASE BRANCH the triggering event names, or undefined when it names none. This is the branch the
+ * prompt's `MERGE-AUTHORIZATION` line lets a PR job land on -- never a clone ref (the clone is pinned to a
+ * resolved SHA above), and never anything read back from the workspace.
+ *
+ * Read per forge from `job.trigger.event`, which is the delivery's own payload where the job carries it.
+ * github/forgejo fall back to the target's `base.ref`, and azure likewise, because the receiver projects
+ * that ref into the target for both; gitlab's target carries none, so there the envelope simply omits the
+ * `-> <base>` half of the line (the builder handles an absent base).
+ */
+function triggerBase(job) {
+	const event = job.trigger?.event;
+	if (job.kind === "gitlab") return event?.object_attributes?.target_branch;
+	if (job.kind === "azure") {
+		const ref = event?.resource?.targetRefName;
+		return typeof ref === "string" ? ref.replace(/^refs\/heads\//, "") : job.target?.base?.ref;
+	}
+	return event?.pull_request?.base?.ref ?? job.target?.base?.ref;
 }
 
 /**

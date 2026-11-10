@@ -5,8 +5,8 @@
 pi-dispatch runs the [pi](https://github.com/earendil-works/pi) coding agent for you in the background, on your own
 computer or server. You say what it should work on and when. Each job happens in a sealed box that is thrown away
 afterwards, stops at the spending limit you set, and shows up live on one web page. When it works on a project on GitHub
-or GitLab, you get back a proposed change to review. pi-dispatch never merges anything, so what ships stays a person's
-decision.
+or GitLab, you get back a proposed change to review. A merge-request job can land the one request its prompt authorizes,
+and only into a `pi/issue-*` branch; what reaches your default branch stays a person's decision.
 
 It is free and open source. You pay your AI provider for what the agent uses, or use a subscription you already have.
 
@@ -20,7 +20,7 @@ provider or a subscription. Steps 1 and 2 are for someone comfortable in a termi
 
 ```bash
 mkdir my-dispatch && cd my-dispatch
-npm install --save-exact @edgehero/pi-dispatch@4.3.4 @edgehero/pi-dispatch-admin@4.3.4 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
+npm install --save-exact @edgehero/pi-dispatch@4.3.5 @edgehero/pi-dispatch-admin@4.3.5 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
 ./node_modules/.bin/pi-dispatch up --console
 ```
 
@@ -64,7 +64,7 @@ investigation) when an alert comes in. You read the results when it suits you. *
 come: how often runs needed a person, per project, over the last 7, 30 or 90 days.
 
 Out of the loop does not mean out of control. The spending limits hold with nobody watching, every job stays in its
-box, and a person still merges.
+box, and a person still decides what reaches the default branch.
 
 ## Is this for you?
 
@@ -215,7 +215,7 @@ A sign in lasts up to 12 hours, and an hour with nothing happening ends it soone
 | **Forge** | The place your code lives: GitHub, GitLab, Forgejo or Azure DevOps |
 | **Repository** | A project's code and its history, on a forge or in a folder (a "git repository") |
 | **Pull request** | A proposed change to a repository, for a person to review |
-| **Merge** | Accepting a pull request into the project. pi-dispatch never does this |
+| **Merge** | Accepting a pull request into the project. A job may land one authorized request into its `pi/issue-*` branch, never the default branch |
 | **Issue**, **label** | A note about work to do on a forge, and a tag you can put on it |
 | **Worker** | The part of pi-dispatch that takes jobs from the queue and runs them |
 | **Terminal** | The window where a developer types commands |
@@ -520,7 +520,7 @@ $C ps                                           # what is running
   the receiver; an update builds them again (`$C --profile worker --profile console build worker`,
   `$C --profile receiver build receiver`) and recreates the containers.
 - **The job image is pulled on the host, never at job time** (jobs run `--pull=never`). Its default is
-  `${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.4}`; a value in `.env` wins over it.
+  `${PI_JOB_IMAGE:-docker.io/ddv12138/pi-job:4.3.5}`; a value in `.env` wins over it.
 - **The receiver answers on `${PI_RECEIVER_PUBLISH:-127.0.0.1}:3000`.** Set it in `.env` when the host has a LAN
   address or a reverse proxy in front.
 - **The worker keeps the host Docker socket.** That is authority equivalent to root, so the console and the
@@ -549,7 +549,8 @@ Label an issue, and a container works on a fresh clone, opens a PR and comments 
 - **Only a collaborator's label, `@pi` comment or formal review starts a job.** A PR from a stranger's fork never starts a job on its
   own. A review is gated on the **reviewer**, so a collaborator reviewing that fork PR does start one.
 - **The token can merge.** GitHub puts push and merge behind the same permission, so under every auth source the job's token could
-  merge. pi-dispatch never does, and **branch protection on your default branch is the real control**. The worker refuses a repo
+  merge. pi-dispatch's own code calls no merge API; a merge-request job can land only the one request its prompt authorizes,
+  into a `pi/issue-*` branch, and **branch protection on your default branch is the real control**. The worker refuses a repo
   without it, before any spend.
 - **Which token a job holds depends on the auth source.** The GitHub App mints one per job, for one repo, valid for an hour. The default
   `gh` source forwards **your own login, full scope and never expiring**, and `pi-dispatch doctor` warns about that.
@@ -611,7 +612,8 @@ Jobs start with `--pull=never`, so build or pull every image first.
 | `docs/` | the 253 deployment runbook and the agent skills' notes |
 | `launch/` | the canned deployment and browser plumbing the console tests share |
 
-Keep pi and its packages on exact pins. Nothing in this project merges anything. Sign off commits with
+Keep pi and its packages on exact pins. Nothing in this project's own code calls a merge API; a merge-request job may
+land the one request its prompt authorizes. Sign off commits with
 `git commit -s`: this project uses the [DCO](https://developercertificate.org/), not a CLA.
 
 Console styles live in `admin/src/console/`. See [AGENTS.md](AGENTS.md) for the agent skills and deployment notes.

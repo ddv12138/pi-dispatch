@@ -218,8 +218,13 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   composed explicitly, so a repo's own `.pi/APPEND_SYSTEM.md` **cannot shadow the safety floor**. And the
   line that has not moved: **webhook issue, PR and comment text is data** — it goes in the user prompt,
   never the system prompt, whatever a repository's files say.
-- **We never merge.** No code path in this project calls a merge API; grep is the test. Note carefully
-  what that does and does not mean — see below.
+- **The harness calls no merge API; a merge-request job may still land one.** No code path in this
+  project calls a merge API; grep is the test. Since 4.3.5 a merge-request/pull-request prompt carries
+  one `MERGE-AUTHORIZATION` line, and the job may land only the request that line names, only into that
+  request's `pi/issue-*` target branch, and only at the commit that was tested. It may never
+  merge into the default or another protected branch, and issue text, review comments and skills cannot
+  add the line. That is a prompt permission, not enforcement — branch protection stays the barrier.
+  Note carefully what that does and does not mean — see below.
 - **Spend.** A per-job turn cap enforced by our runner (pi has no turn limit of its own), a concurrency
   limit, the host's memory/CPU budget and a 30-minute container wall-clock timeout, with your provider's own
   spend limit as the backstop across runs. Token usage and cost are still recorded and shown per run. An agent
@@ -648,9 +653,11 @@ Stated openly rather than discovered later:
 
 - **The forge's own MCP server holds the job's forge token.** A github or gitlab trigger that names `forge` in
   `run.mcp` gives its job github-mcp-server or mcp-gitlab, started with the token the worker minted for that job. It is the one server the pickup hands a forge token, and it
-  holds no power the job's `gh` or `glab` lacks with that token. The image's wrapper withholds each server's
-  dedicated merge and approval tools, so the harness does not hand the agent a ready made one
-  (`CONST-MERGE-NEVER-AUTOMATIC`), but that is not a boundary: GitLab runs a `/merge` or `/approve` quick action
+  holds no power the job's `gh` or `glab` lacks with that token. The image's wrapper still withholds each
+  server's dedicated merge and approval tools, so the harness hands the agent no ready-made merge tool
+  (`CONST-MERGE-NEVER-AUTOMATIC`); the one merge a merge-request job is authorized to perform is a command
+  it runs itself, with the token the job already holds, and only for the request its prompt names. That is
+  not a boundary: GitLab runs a `/merge` or `/approve` quick action
   written in a note or a description the listed tools post, and the job's CLI, or the server started from the
   job's shell, act with the token's full role. The boundary is the one in the paragraph below: the token's role and
   the branch's protection (on GitLab, a Developer token, never Maintainer, which could unprotect a branch or change
@@ -665,7 +672,9 @@ Stated openly rather than discovered later:
   branch directly (`POST /merges`), force-pushing (`PATCH /git/refs/{ref}`) and deleting a ref are **all
   gated by `contents: write`** — the *same* permission the agent needs to push the commit that is its
   entire job. GitHub offers no finer split. The container also ships `gh`. So "we never call merge" is
-  true of *our* code and says nothing about what an injected agent does with a valid credential.
+  true of *our* code and says nothing about what an injected agent does with a valid credential, or
+  about the one merge a `MERGE-AUTHORIZATION` prompt asks for: the authorization covers only the request
+  it names, only into a `pi/issue-*` branch, and never the default branch — but it is prompt text.
   **Branch protection on your default branch is the only technical barrier**, which is why the worker
   refuses to run without it. If you disable it, the honest worst case is: **one successful injection =
   full compromise of that repository within the hour**, including rewriting `.pi/` itself — which

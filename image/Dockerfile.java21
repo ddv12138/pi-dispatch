@@ -27,7 +27,7 @@
 # Every property this file inherits (the chosen base image, the pinned pi, the runner, the entrypoint, the
 # guardrails floor, the three `dev.pi-dispatch.*` labels) is inherited rather than restated, so there is no
 # second copy of a pin to forget to bump.
-ARG BASE=pi-job:4.3.4
+ARG BASE=pi-job:4.3.5
 
 # The toolchain stage. Pinned by DIGEST: `3.9-eclipse-temurin-21` FLOATS and did move (it
 # resolved to Maven 3.9.16 when this recipe was first written), so a tag here would silently change the JDK
