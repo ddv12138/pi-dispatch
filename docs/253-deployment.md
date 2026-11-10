@@ -59,8 +59,10 @@ docker compose --env-file .env -f deploy/docker-compose.yml \
   `pull` 把 registry 镜像放进本地存储，`up` 才会使用它。
 - valkey 和 egress-proxy 不在这两个命令的 profile 里，正在运行的它们不受影响。
 - worker 有 35s 优雅停机，console 15s；挑没有 job 在跑的时候执行。
-- 这台主机无法直连 Docker Hub，拉取走 `/etc/docker/daemon.json` 里的 registry mirror（与拉 job 镜像同一
-  条路）。
+- 这台主机无法直连 Docker Hub，拉取走 systemd drop-in（`/etc/systemd/system/docker.service.d/afk-proxy.conf`）
+  配置的 HTTP 代理——运维者 Mac 上的 `192.168.3.120:1080`。Mac 合盖、休眠或代理应用没开时，253 拉不了任何
+  镜像（afk 之名由此而来），日常更新要挑代理在线的时候。registry mirror 已于 2026-11-10 删除：旧的阿里云
+  个人加速域名已停办（直连 403），`daemon.json` 现在是空配置，拉取只有代理这一条路。
 - 只有 `deploy/docker-compose.yml` 本身变化（端口、挂载、环境变量）才需要从仓库把该文件 scp 过来；镜像
   更新不需要同步任何文件。
 
