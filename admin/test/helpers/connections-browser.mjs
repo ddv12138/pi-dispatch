@@ -47,7 +47,7 @@ export async function startConnectionsBrowserFixture(dir, { slice, readOnly = fa
     assert.equal(await redis.dbsize(), 0, "The dedicated browser database must be empty");
     ownsDatabase = true;
     fixture = await startSetupBrowserFixture(dir, { readOnly, connectionsOptions: { redis, now: SETUP_AT } });
-    fixture.changeEnv("GITHUB_AUTH_SOURCE=gh\nWEBHOOK_SECRET=fixture-secret\nPI_WORKER_NAME=build3\nPI_PROVIDER=anthropic\nPI_ON_FAILURE=/fixture/notify\n");
+    fixture.changeEnv("GITHUB_PAT=fixture-secret\nWEBHOOK_SECRET=fixture-secret\nPI_WORKER_NAME=build3\nPI_PROVIDER=anthropic\nPI_ON_FAILURE=/fixture/notify\n");
     writeFileSync(join(dir, "egress-allowlist.conf"), "api.github.com\nregistry.npmjs.org\n");
     const endpoints = [
       { id: "local-model", host: "host.docker.internal", port: 11434, slots: 2, keyless: true },

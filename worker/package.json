@@ -1,45 +1,10 @@
 {
   "name": "@edgehero/pi-dispatch",
   "version": "4.3.5",
+  "private": true,
   "type": "module",
   "description": "The pi-dispatch worker and CLI: runs the pi coding agent as a self-hosted service, one locked down Docker or Podman container per job, with spend caps checked before anything is spent, plus init, up and doctor.",
-  "keywords": [
-    "pi",
-    "pi-coding-agent",
-    "coding-agent",
-    "ai-agent",
-    "autonomous-agents",
-    "self-hosted",
-    "github",
-    "gitlab",
-    "forgejo",
-    "gitea",
-    "azure-devops",
-    "job-queue",
-    "bullmq",
-    "cron",
-    "docker",
-    "cli",
-    "podman"
-  ],
   "license": "MIT",
-  "author": "Rob Boerman",
-  "homepage": "https://github.com/edgehero/pi-dispatch/tree/main/worker",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/edgehero/pi-dispatch.git",
-    "directory": "worker"
-  },
-  "bugs": "https://github.com/edgehero/pi-dispatch/issues",
-  "files": [
-    "src",
-    ".env.example",
-    "deploy"
-  ],
-  "main": "src/index.mjs",
-  "bin": {
-    "pi-dispatch": "src/cli.mjs"
-  },
   "exports": {
     ".": "./src/index.mjs",
     "./answerer": "./src/answerer.mjs",
@@ -183,7 +148,6 @@
   },
   "dependencies": {
     "@earendil-works/pi-ai": "1.5.0",
-    "@octokit/auth-app": "8.2.0",
     "@octokit/rest": "22.0.1",
     "bullmq": "5.80.4",
     "ioredis": "5.11.1",

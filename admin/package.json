@@ -1,45 +1,11 @@
 {
   "name": "@edgehero/pi-dispatch-admin",
   "version": "4.3.5",
+  "private": true,
   "description": "Operator web console for pi-dispatch.",
-  "keywords": [
-    "pi",
-    "pi-coding-agent",
-    "coding-agent",
-    "ai-agent",
-    "autonomous-agents",
-    "self-hosted",
-    "github",
-    "gitlab",
-    "forgejo",
-    "gitea",
-    "azure-devops",
-    "job-queue",
-    "cron",
-    "tui",
-    "dashboard",
-    "podman",
-    "docker"
-  ],
   "license": "MIT",
-  "author": "Rob Boerman",
-  "homepage": "https://github.com/edgehero/pi-dispatch/tree/main/admin",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/edgehero/pi-dispatch.git",
-    "directory": "admin"
-  },
-  "bugs": "https://github.com/edgehero/pi-dispatch/issues",
   "type": "module",
-  "bin": {
-    "pi-dispatch-console": "./dist/console.mjs"
-  },
-  "files": [
-    "dist"
-  ],
   "scripts": {
-    "build": "node build.mjs",
-    "prepublishOnly": "node build.mjs",
     "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
