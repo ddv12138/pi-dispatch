@@ -1971,18 +1971,23 @@ export async function collectChecks(shellVars, seams) {
 	// the receiver on another host with its own env), and doctor's job is to say what will not work, not
 	// to refuse.
 	if (forges.length > 0) {
-		// Presence only, value never read out (secrets-and-pii) -- without it the receiver refuses to boot,
-		// because a webhook it cannot verify is a forgeable paid-agent trigger (CONST-HMAC-OVER-RAW-BODY).
-		const webhookSecret = env.WEBHOOK_SECRET;
-		if (typeof webhookSecret !== "string" || webhookSecret.trim() === "") {
-			checks.push({
-				ok: false,
-				warn: true,
-				label: `triggers.json has ${forges.join("/")} triggers but WEBHOOK_SECRET is unset -- the receiver will refuse to start`,
-				fix: "generate one (`openssl rand -hex 32`) and set WEBHOOK_SECRET in .env -- `pi-dispatch-receiver` verifies every delivery's signature against it and refuses to boot without it",
-			});
-		} else {
-			checks.push({ ok: true, label: "WEBHOOK_SECRET set -- the receiver (`pi-dispatch-receiver`) can verify deliveries" });
+		// Presence only, value never read out (secrets-and-pii) -- and only the GITHUB arm needs it:
+		// `loadReceiverConfig` requires WEBHOOK_SECRET exactly when the triggers serve GitHub, while GitLab,
+		// Forgejo and Azure each verify with their own secret (checked in the blocks below). Warning about
+		// this key for a gitlab-only deployment said "the receiver will refuse to start" about a receiver
+		// that was serving fine, so the check now follows the same `servesGithub` rule the boot does.
+		if (forges.includes("github")) {
+			const webhookSecret = env.WEBHOOK_SECRET;
+			if (typeof webhookSecret !== "string" || webhookSecret.trim() === "") {
+				checks.push({
+					ok: false,
+					warn: true,
+					label: `triggers.json has ${forges.join("/")} triggers but WEBHOOK_SECRET is unset -- the receiver will refuse to start`,
+					fix: "generate one (`openssl rand -hex 32`) and set WEBHOOK_SECRET in .env -- `pi-dispatch-receiver` verifies every delivery's signature against it and refuses to boot without it",
+				});
+			} else {
+				checks.push({ ok: true, label: "WEBHOOK_SECRET set -- the receiver (`pi-dispatch-receiver`) can verify deliveries" });
+			}
 		}
 		// Validated only WHEN SET: unset (or empty) means the loader's own default of 3000, which needs no
 		// line. The malformed value IS echoed -- a port is not a secret, and naming the shape it actually

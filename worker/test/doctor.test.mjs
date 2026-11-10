@@ -2196,6 +2196,25 @@ test("doctor: a deployment with no forge triggers prints no receiver line at all
 	assert.doesNotMatch(text(), /WEBHOOK_SECRET|RECEIVER_PORT/, "no receiver noise for a cron/local-only deployment");
 });
 
+test("doctor: a gitlab-only deployment is not asked for WEBHOOK_SECRET -- that key is the github arm's", async () => {
+	// loadReceiverConfig requires WEBHOOK_SECRET only when the triggers serve github; a gitlab deployment
+	// verifies with GITLAB_WEBHOOK_SECRET. Warning about the github key here said "the receiver will refuse
+	// to start" about a receiver that boots fine (a live 253 deployment ran into exactly that).
+	const { out, text } = capture();
+	await runDoctor(
+		imgEnv({
+			PI_TRIGGERS_FILE: forgeTriggersFile("gitlab"),
+			GITLAB_TOKEN: "glpat_test",
+			GITLAB_WEBHOOK_MODE: "token",
+			GITLAB_WEBHOOK_SECRET: "gl_webhook_secret",
+		}),
+		imgDeps(out, green),
+	);
+	assert.match(text(), /gitlab triggers configured/, "the gitlab arm is still reported on");
+	assert.doesNotMatch(text(), /but WEBHOOK_SECRET is unset/, "the github key is not the gitlab arm's");
+	assert.doesNotMatch(text(), /✓ WEBHOOK_SECRET set/, "and its presence is not claimed either");
+});
+
 test("doctor: a disarmed bot-loop guard is warned about by name, and an armed one prints nothing", async () => {
 	// The switch exists (one-identity forges), but nobody should learn it is off from a bill. `0`, empty and
 	// unset are all the armed default and must stay quiet; a value that is neither is a boot refusal.
