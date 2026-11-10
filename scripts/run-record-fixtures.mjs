@@ -22,17 +22,17 @@
  * The fixtures are the SHAPES each release's builder makes from these inputs, not everything that release wrote: see
  * cases.mjs.
  *
- * Usage: node .github/scripts/run-record-fixtures.mjs --write       regenerates every shape from the tags
- *        node .github/scripts/run-record-fixtures.mjs --next-only   rewrites only `next`, from the working tree (no tags
+ * Usage: node scripts/run-record-fixtures.mjs --write       regenerates every shape from the tags
+ *        node scripts/run-record-fixtures.mjs --next-only   rewrites only `next`, from the working tree (no tags
  *                                                                   needed: what a change to `buildRecord` runs)
- *        node .github/scripts/run-record-fixtures.mjs --check       exits 1 and names each file that differs
+ *        node scripts/run-record-fixtures.mjs --check       exits 1 and names each file that differs
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 /** Where the fixtures live, relative to the repository. */
 export const FIXTURE_DIR = "worker/test/fixtures/run-records";
 /** Where each tag's `worker/src` is extracted while the generator runs (gitignored). */
@@ -173,7 +173,7 @@ export function write(dir, { manifest, files }) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	const mode = process.argv[2];
 	if (mode !== "--write" && mode !== "--next-only" && mode !== "--check") {
-		console.error("usage: node .github/scripts/run-record-fixtures.mjs --write|--next-only|--check");
+		console.error("usage: node scripts/run-record-fixtures.mjs --write|--next-only|--check");
 		process.exit(2);
 	}
 	const dir = join(ROOT, FIXTURE_DIR);
@@ -192,7 +192,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 	}
 	if (mode === "--check") {
 		const changed = differences(dir, generation);
-		for (const name of changed) console.error(`::error::${FIXTURE_DIR}/${name} differs from what run-record-fixtures.mjs generates. Run node .github/scripts/run-record-fixtures.mjs --write; never edit a generated fixture by hand.`);
+		for (const name of changed) console.error(`::error::${FIXTURE_DIR}/${name} differs from what run-record-fixtures.mjs generates. Run node scripts/run-record-fixtures.mjs --write; never edit a generated fixture by hand.`);
 		process.exit(changed.length > 0 ? 1 : 0);
 	}
 	write(dir, generation);

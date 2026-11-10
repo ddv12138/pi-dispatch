@@ -9,7 +9,6 @@
 #
 #   ./image/publish.sh                  # build both, push :<version> and :latest
 #   ./image/publish.sh --no-push        # build only (for a host that will run them here)
-#   ./image/publish.sh --verify         # also run image/verify-image.sh against both pushed names
 #   ./image/publish.sh --republish      # push a <version> tag that is already on the registry (see below)
 #
 # The Maven settings of a Java job are a fact about the NETWORK it runs in, so they are read from the environment
@@ -33,14 +32,12 @@ JAVA_REPO=${PI_JAVA_IMAGE_REPOSITORY:-${REPO}-java21}
 VERSION=$(node -p "require('$ROOT/package.json').version")
 
 PUSH=1
-VERIFY=0
 REPUBLISH=0
 for arg in "$@"; do
 	case "$arg" in
 		--no-push) PUSH=0 ;;
-		--verify) VERIFY=1 ;;
 		--republish) REPUBLISH=1 ;;
-		*) echo "usage: $0 [--no-push] [--verify] [--republish]" >&2; exit 2 ;;
+		*) echo "usage: $0 [--no-push] [--republish]" >&2; exit 2 ;;
 	esac
 done
 
@@ -104,12 +101,6 @@ if [ "$PUSH" -eq 1 ]; then
 		echo "== push $name"
 		docker push "$name"
 	done
-fi
-
-if [ "$VERIFY" -eq 1 ]; then
-	# The same script CI runs against the image this repo builds: the pins, the contract, and the capabilities label.
-	./image/verify-image.sh "$REPO:$VERSION"
-	./image/verify-image.sh "$JAVA_REPO:$VERSION"
 fi
 
 echo

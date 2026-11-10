@@ -1,10 +1,9 @@
 # The receiver container (issue #82). The one internet-facing process, packaged so the edge can run
-# beside Valkey with `docker compose --profile receiver up -d` -- while the worker stays on the HOST
-# (DES-WORKER-ON-HOST). Nothing here needs Docker access: the receiver only verifies deliveries and
+# beside Valkey with `docker compose --profile receiver up -d` -- while the worker runs in its own
+# container beside it. Nothing here needs Docker access: the receiver only verifies deliveries and
 # enqueues, so no docker.sock is mounted, ever.
 #
 # Build context is the repo root:  docker build -f receiver/Dockerfile -t pi-dispatch-receiver .
-# Prebuilt for amd64+arm64 at ghcr.io/edgehero/pi-dispatch-receiver (.github/workflows/receiver-image.yml).
 
 # Pinned by DIGEST, not tag, and deliberately the SAME pin image/Dockerfile carries: a floating base
 # tag is a silent break (CONST-PI-VERSION-PINNED's reasoning, one vendor over), and one shared digest

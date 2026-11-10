@@ -1,7 +1,7 @@
 /** Read only JSON bytes from integrity-checked npm archives. Candidate JavaScript is never loaded (#717). */
 import { createHash } from "node:crypto";
 import { gunzipSync } from "node:zlib";
-import { catalogDiff, renderCatalogProposal } from "../../worker/src/model-proposals.mjs";
+import { catalogDiff, renderCatalogProposal } from "../worker/src/model-proposals.mjs";
 
 const LIMIT = 32 * 1024 * 1024;
 export async function boundedBytes(response, limit = LIMIT) {

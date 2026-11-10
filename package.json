@@ -15,8 +15,7 @@
     "admin"
   ],
   "scripts": {
-    "test": "node --test \"image/runner/test/*.test.mjs\" \"worker/test/*.test.mjs\" \"receiver/test/*.test.mjs\" \"admin/test/*.test.mjs\"",
-    "test:affected": "node scripts/test-affected.mjs"
+    "test": "node --test \"image/runner/test/*.test.mjs\" \"worker/test/*.test.mjs\" \"receiver/test/*.test.mjs\" \"admin/test/*.test.mjs\""
   },
   "overrides": {
     "@earendil-works/pi-agent-core": "1.5.0",
