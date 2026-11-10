@@ -5,14 +5,14 @@ in the background: on a schedule, on your repo's issues and pull requests, or fr
 thrown away afterwards, stops at the spending limit you set, and shows up live on one web page. You start in the loop, watching it work. You
 move to near the loop, where it asks when it needs you, and to out of the loop, where you review what comes back. pi-dispatch never merges
 anything, so what ships stays a person's decision. It runs on a provider key or a subscription you already have, falls back to other models you
-list, and brings your own pi setup and extensions along with `pi-dispatch import-pi`. The [main README](https://github.com/edgehero/pi-dispatch#readme)
+list, and layers a global pi overlay you populate yourself. The [main README](https://github.com/edgehero/pi-dispatch#readme)
 explains all of it.
 
-> This npm package, **`@edgehero/pi-dispatch-admin`**, holds the way to work with a deployment: the **web console**
-> (`pi-dispatch-console`, above). The service itself is
-> [`@edgehero/pi-dispatch`](https://www.npmjs.com/package/@edgehero/pi-dispatch) (worker and CLI) and
-> [`@edgehero/pi-dispatch-receiver`](https://www.npmjs.com/package/@edgehero/pi-dispatch-receiver) (the webhook edge). The
-> [main repo](https://github.com/edgehero/pi-dispatch) has the job image, the docs (Docker, Podman, egress, every forge) and SECURITY.md.
+> This directory holds the way to work with a deployment: the **web console** (`pi-dispatch-console`). It is not an
+> npm package. The service itself is the worker and CLI in [`worker/`](../worker/README.md) and the webhook edge in
+> [`receiver/`](../receiver/Dockerfile); the [main repo](https://github.com/edgehero/pi-dispatch) has the job image,
+> the docs (Docker, Podman, egress, every forge) and SECURITY.md. The console runs from the same `deploy-worker`
+> image as the worker, in the Compose `console` profile.
 
 ## How it works
 
@@ -44,7 +44,7 @@ flags itself, so nothing an image contains can weaken them. The non root user co
 Docker Desktop (and for a worker running as uid 1001), and from the worker's own uid on a native Linux
 daemon. That is why an image has to meet a checklist. What each
 container runtime guarantees is declared by the venue, and
-`pi-dispatch doctor --live` reads it back from real containers.
+the `doctor --live` check reads it back from real containers.
 
 **Where it runs.** On any Linux server or VM you control, or your own Mac or Windows machine with Docker
 Desktop: the worker is a long running process beside a container runtime on the same host. Serverless
@@ -57,10 +57,10 @@ The job image ships Playwright and Chromium, so a flow can build a frontend, scr
 
 **What the agent can see.** Two credentials go into each job as environment values, the provider key and
 the forge token, and **the agent can read both**. The guardrails tell it never to print or send them, but
-that is prompt text, not enforcement. Set a spend limit at your provider. On GitHub, the default `gh` auth
-source forwards **your whole login, full scope and never expiring**, and `pi-dispatch doctor` warns about
-it; the GitHub App gives each job a one hour token for one repo instead. Network egress is denied by
-default and goes through an allowlist proxy, and the allowed hosts are yours to list.
+that is prompt text, not enforcement. Set a spend limit at your provider. On GitHub, one fine-grained,
+repo-scoped PAT in `GITHUB_PAT` is shared by every job until you rotate it: there is no per-job token and
+no App to configure. Network egress is denied by default and goes through an allowlist proxy, and the
+allowed hosts are yours to list.
 
 ## Triggers: what starts a job
 
@@ -86,10 +86,9 @@ matching.
 **Flows and workflows.** `run.flow` names a skill committed to the target repo at
 `.pi/skills/<flow>/SKILL.md`, read from the **default branch**. The repo owns the prompt, and merging it
 is the repo's consent. A skill may call other skills, which is already a workflow. For typed multi-stage
-workflows, stage a pi extension such as `@juicesharp/rpiv-workflow` into the deployment. It is pinned to an
-exact version, installed on your host (never at job time, since jobs run offline), loaded in every
-container and declinable per trigger. Anything you installed with `pi install` is staged automatically at
-your host's version.
+workflows, put a pi extension such as `@juicesharp/rpiv-workflow` in the global overlay's `packages/`
+or `extensions/` directory. It is pinned to an exact version and installed on your host, never at job
+time because jobs run offline; it loads in every container, and a trigger can decline the packages.
 
 `run.command` is the second entry point. A trigger may name a registered command that a staged extension
 provides (`"command": "wf run nightly"`). The job's whole prompt is that line, handled by the extension
@@ -107,7 +106,7 @@ Four things to know before you build on it:
 
 ## The operator console
 
-The same package installs `pi-dispatch-console`, a separate process that serves a live web console for the
+The same container image also provides `pi-dispatch-console`, a separate process that serves a live web console for the
 deployment on loopback or on a private unix socket, behind a named token per person. It shows the
 whole fleet as it changes: an overview of what needs you, what waits and why, and the last hours as a timeline (on a
 deployment that has not run yet, what stands before its first job), every run with filters, one search by
@@ -120,7 +119,7 @@ It can act as well as show: cancel, retry, remove and re-run jobs, answer a park
 and edit the configuration, each previewed (with how to undo it), confirmed and recorded in one audit log, and after
 each change the page names it, who made it and its audit row, with an Undo
 where there is a way back. When `serve` starts it prints how to sign in (the commands that make a token or a one time
-link, never a token), and `pi-dispatch-console link --name <you> --port <n>` prints the link for an SSH tunnel's local
+link, never a token), and the console command's `link --name <you> --port <n>` prints the link for an SSH tunnel's local
 port. The sign-in page says why a session ended. Every running job's progress shows in its row on the fleet page
 and on its run page, and its transcript, redacted, streams live
 on its run page for operators. Nothing listens unless you start it.
@@ -135,7 +134,7 @@ on its run page for operators. Nothing listens unless you start it.
   checkpoint), behind your confirm.
 - **MCP servers, read-only.** The Connections page shows each overlay MCP server as the overlay offers it now:
   where it runs, how its tools are reached, the variable names it is handed, and any server the worker refuses,
-  with why. No form and no key changes them; they are rewritten by `pi-dispatch import-pi`.
+  with why. No form and no key changes them; they are whatever the overlay's `mcp.json` holds.
 - **Insights, the one analytics page.** `/insights` shows plan verdicts against API rates, daily, cumulative and
   per flow spend charts, five breakdowns (by flow, trigger, model, repo and project), how busy each host was
   (jobs only), and the trigger and flow topology with spend on each trigger, plus a what if form that re-prices a
@@ -158,8 +157,8 @@ on its run page for operators. Nothing listens unless you start it.
 - **Hosts.** The fleet page shows each worker host: how long ago it beat, its slots in use, what its budget has
   promised its jobs, and its running jobs with project, size and age, then how busy it was over the last 7 days (busy
   share, jobs at once, time full, the wait and the top projects). Time before a host's history starts is said and not counted,
-  but a host that is new, or was down, inside history that is here reads as idle for that time. `pi-dispatch capacity`
-  prints the same report.
+  but a host that is new, or was down, inside history that is here reads as idle for that time. The CLI's `capacity`
+  command prints the same report.
   It counts jobs only: a machine busy with other work reads as idle.
 
 - **Held and failed jobs.** A trigger with `run.waitFor` holds its job in the queue, unstarted and
@@ -173,7 +172,7 @@ The console reads the whole deployment, not one host. Its overview names the wor
 names, and a run's page names the machine that ran a job. The pause switch stops every queue, and the
 schedules view spans hosts. On a single host none of that shows, because there is nothing to tell apart.
 The fleet page's Hosts card shows each machine's slots, budget and running jobs now and how busy it was over the last 7
-days; `pi-dispatch capacity`, doctor and the insights page read the same capacity report, from
+days; the CLI's `capacity` command, doctor and the insights page read the same capacity report, from
 the run records (jobs only: a machine busy with other work reads as idle).
 
 ## Install
@@ -181,30 +180,42 @@ the run records (jobs only: a machine busy with other work reads as idle).
 ```bash
 git clone https://github.com/ddv12138/pi-dispatch.git my-dispatch && cd my-dispatch
 cp .env.example .env
-docker compose --env-file .env -f deploy/docker-compose.yml --profile worker --profile console up -d
+C="docker compose --env-file .env -f deploy/docker-compose.yml"
+$C --profile worker --profile console build
+$C --profile worker --profile console up -d
+docker exec deploy-worker-1 node /opt/pi-dispatch/admin/src/console/cli.mjs token add --name <name> --role operator
+$C --profile console restart console
 ```
 
 **This is the way to set up pi-dispatch.** Deployment is Linux Docker Compose; the `console` profile runs the
-console beside the worker and Valkey. It needs an operator token in the deployment's
-`runtime/console-tokens.json` before it starts (`pi-dispatch-console token add --name <name> --role operator`), and
-`pi-dispatch-console link` prints a one-use `/setup` sign-in link once the console answers. The checklist uses
-actual heartbeat and doctor evidence,
+console beside the worker and Valkey. The console refuses to serve until `runtime/console-tokens.json` holds an operator
+token, which is why the token comes from the worker container before the console restart. Once it answers, a one-use
+`/setup` sign-in comes from the console container:
+
+```bash
+docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs link --name <name>
+```
+
+The checklist uses actual heartbeat and doctor evidence,
 keeps Starting distinct from Ready, and offers individually previewed and confirmed service actions, a create-only
 provider key field and editable first-trigger recipes. First run explains the
 explicit local host grant, read-only/viewer/agent views, key and invitation privacy, and terminal recovery.
 
-Forge credentials are the one terminal step: `pi-dispatch setup github --webhook-url '<receiver URL>'` creates a
-GitHub App in one browser click, or `--no-webhook` for polling. Every step says what it will do, asks first and can
-be declined. Nothing is written into your repo, and no credential passes through a dialog. A deployment whose queue
-is only down keeps the unreachable banner: setup appears when there is nothing, never over an outage.
+Forge credentials are one `.env` edit: create a fine-grained, repo-scoped GitHub PAT (contents, issues and pull
+requests read and write, plus metadata read) and put it in `GITHUB_PAT`. Every job shares that token until you
+rotate it, so changing it means recreating the worker and receiver containers. For webhook deliveries, add a repository webhook
+with `WEBHOOK_SECRET`; with no public URL, the receiver's `poll` mode watches `POLL_REPOS`. Nothing is written into
+your repo, and no credential passes through a dialog. A deployment whose queue is only down keeps the unreachable
+banner: setup appears when there is nothing, never over an outage.
 
 **Already have a deployment?** The console finds it with `--deployment <dir>` if you pass it, else the folder a
 deployment pointer (`pi-dispatch-deployment.json`) names, else the current folder. It reads its settings from that
 deployment's `.env`; a value exported in your shell wins. The switches that grant a capability (`PI_BACKENDS`,
 `PI_EGRESS`, `DOCKER_HOST`) are never read from a file.
 
-Run every `pi-dispatch-console` command as the account that runs the deployment, on the deployment's host, and keep
-the worker's and the console's packages on the same release: upgrade them together.
+Run console commands in the console container. The operator token is the one exception: the worker container creates it
+before the console can serve. The worker and the console run the same `deploy-worker` image built from this checkout, so
+they are always the same release: rebuild and recreate both together.
 
 ## Get the whole thing
 

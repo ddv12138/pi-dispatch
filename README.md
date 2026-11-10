@@ -12,31 +12,61 @@ It is free and open source. You pay your AI provider for what the agent uses, or
 
 ## Install in four steps
 
-**1. Have these ready.** A computer or server that stays on (on a Mac or Windows machine, jobs run only while you are logged in),
-[Docker](https://www.docker.com/products/docker-desktop/) and [Node.js](https://nodejs.org) 22.19 or newer, and a key from an AI
-provider or a subscription. Steps 1 and 2 are for someone comfortable in a terminal.
+**1. Have these ready.** A Linux host (a VM, a VPS or a server) that stays on, with Docker Engine and the Compose plugin,
+and `git`. On a Mac or Windows machine Docker Desktop runs the same containers, but only while you are logged in, and it is
+not a deployment target. Jobs start in containers, so the host needs a container runtime and nothing else installed on it:
+there is no npm install step and no wrapper script. You also need a key from an AI provider or a subscription, and — if jobs will
+touch GitHub — a fine-grained PAT in `GITHUB_PAT`, scoped to the repositories jobs may use. Steps 1 and 2 are for someone comfortable in a terminal.
 
-**2. Install it.** Into a folder that will stay there:
+**2. Clone it and write `.env`.** Into a folder that will stay there:
 
 ```bash
-mkdir my-dispatch && cd my-dispatch
-npm install --save-exact @edgehero/pi-dispatch@4.3.5 @edgehero/pi-dispatch-admin@4.3.5 @earendil-works/pi-coding-agent@1.5.0 --omit=dev --omit=optional --ignore-scripts --no-audit --no-fund
-./node_modules/.bin/pi-dispatch up --console
+git clone https://github.com/ddv12138/pi-dispatch.git my-dispatch
+cd my-dispatch
+cp .env.example .env
 ```
 
-It asks before it starts anything, then prints a sign in link that works for 60 seconds.
+Then edit `.env`: the provider key and model, `GITHUB_PAT`, `PI_SESSIONS_DIR`, and the hosts jobs may reach.
 
-**3. Finish the checklist in your browser.** The link opens a live list of what is ready and what is not: the queue, a worker, the
-network rules, your provider key and a first trigger. It offers recipes: fix an issue when it gets a label, tidy every night, or
-answer a comment.
+**3. Build and start it.** The compose file builds the worker and the console from the checkout beside it:
+
+```bash
+C="docker compose --env-file .env -f deploy/docker-compose.yml"
+$C --profile worker --profile console build
+$C --profile worker --profile console up -d
+```
+
+That starts Valkey, the worker and the console; once it has a token, the console answers on port `4790`. The receiver (`--profile receiver`)
+and the egress proxy (`--profile egress`) are opt-in profiles you start when a forge or egress needs them.
+
+**4. Add the console token and sign in.** The console refuses to serve without an operator token, so create it in the
+worker container, then restart the console:
+
+```bash
+docker exec deploy-worker-1 node /opt/pi-dispatch/admin/src/console/cli.mjs token add --name you --role operator
+docker compose --env-file .env -f deploy/docker-compose.yml --profile console restart console
+docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs link --name you
+```
+
+The first command prints your token once; paste it at `http://<host>:4790/`, or open the one-time link from the last
+command. From another machine, add that address to `PI_CONSOLE_ALLOWED_HOSTS` in `.env` and recreate the console.
+
+The console finishes the setup: a live list of what is ready and what is not (the queue, a worker, the network rules, your
+provider key and a first trigger), with recipes: fix an issue when it gets a label, tidy every night, or answer a comment.
 
 <details>
-<summary>Prefer the terminal? What <code>pi-dispatch doctor</code> checks</summary>
+<summary>Prefer the terminal? What <code>doctor</code> checks</summary>
+
+Run it in the worker container, against the deployment's own `.env`:
+
+```bash
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs doctor --live
+```
 
 </details>
 
-**4. Bring your own pi setup, if you have one** ([below](#bring-your-own-pi-setup)), and [run a first job](#how-to-use-it). Running it on a
-server for good has [its own steps](#set-up-a-host).
+An optional [global overlay](#global-overlay-optional) gives every job your own pi setup. Running a host for good has
+[its own steps](#set-up-a-host), and a first job is [below](#how-to-use-it).
 
 ## Why: from in the loop to out of the loop
 
@@ -92,7 +122,7 @@ your AI provider** — that is the hard cap on the bill.
 **Can it break my project?** On GitHub, GitLab, Forgejo or Azure DevOps a job works on a fresh copy and comes back with a
 pull request for you to review, and on GitHub pi-dispatch refuses a repository whose default branch is not protected. A job
 on a folder on your own machine edits that folder directly, with no undo, so it refuses a folder with uncommitted
-changes unless you force it.
+changes: commit first.
 
 **Can it reach my passwords or my other files?** A job sees only its own project, inside its box, and can reach only the
 internet addresses you allow. Two secrets do go in, and the agent can read them: your AI provider key and your GitHub or
@@ -150,28 +180,36 @@ updates by itself.
 at port `4790` by default; add the host name or IP to `PI_CONSOLE_ALLOWED_HOSTS` before opening it from another device.
 The connection is plain HTTP, so use a trusted TLS proxy or an SSH tunnel on an untrusted network.
 
-## Bring your own pi setup
+## Global overlay (optional)
 
-Already use pi? Your models, skills, persona and extensions come along, so jobs work the way your own sessions do. Run this in the
-folder you installed into, whenever your setup changes:
+A shared pi setup for every job. Point `PI_GLOBAL_PI_DIR` at a directory on the host and it is mounted read only at
+`/opt/pi-global` in each job, layered under the project's own `.pi/`. Populate it by hand; nothing copies your host pi
+setup for you. The layout:
 
-```bash
-./node_modules/.bin/pi-dispatch import-pi --with-packages
-# then, in that folder's .env, point at the copy it made:
-PI_GLOBAL_PI_DIR=/absolute/path/to/my-dispatch/pi-global
-./node_modules/.bin/pi-dispatch doctor     # checks that the copy holds no credential
+```text
+my-dispatch/pi-global/
+  models.json          model definitions only, never a key
+  APPEND_SYSTEM.md     persona added to the built-in guardrails
+  skills/              pi skills every job can use
+  extensions/          extensions loaded in every job
+  prompts/             prompt templates
+  mcp.json             MCP servers, with credentials as references only
+  packages/            optional: pinned third-party pi packages, installed offline
 ```
 
-| What comes along | What never does |
-|---|---|
-| Your custom models, as definitions only | `auth.json`, and any key written into a file (the import refuses it) |
-| Your skills and persona | Your sessions, themes and settings |
-| Your extensions, each listed by name as it copies them | Any extension you have turned off in pi |
-| The packages you installed with `pi install`, pinned at the version you have | Anything a project asks to install: only you choose what gets installed |
-| Your MCP servers, with credentials as references only | Secrets of any kind: the copy is read by jobs, so it holds none |
+Set `PI_GLOBAL_PI_DIR` to an absolute path under the deployment folder, so the worker container reaches the same path the
+host does. File changes take effect on the next job; changing the path in `.env` needs the worker container recreated,
+because Compose reads that file when it creates the container. The mount is read only: a job can read the overlay and can
+never write back.
 
-**Read the list it prints.** An extension is code, and it runs in every job, beside work that may come from a stranger's issue text. Skip
-extensions with `--no-extensions`, or keep one trigger's jobs out of your packages with `"packages": false`.
+| What goes there | What never does |
+|---|---|
+| Model definitions, skills, persona, prompt templates, extensions you have vetted, MCP server references, pinned packages | `auth.json`, and any key written into a file: the provider key stays in the environment |
+| Extensions you vetted, because each is code you chose | Your sessions, themes and settings |
+
+**Vet the extensions.** An extension is code, and it runs in every job, beside work that may come from a stranger's issue text. Set
+`PI_GLOBAL_ALLOW_EXTENSIONS=0` to keep them in place but dormant, and let a trigger decline the overlay's packages with
+`"packages": false`.
 
 Your projects still win. A job layers your setup under the project's own `.pi/` folder, so a project's skill replaces yours of the same
 name, and a small safety floor sits under both, which neither can remove. To add a language or a system tool rather than a pi setting, build
@@ -179,17 +217,19 @@ your own job image.
 
 ## How to use it
 
-Once it is installed, this is the path through the three stages.
+Once the containers are running, this is the path through the three stages.
 
-**1. Run a first job and watch it.** Start the worker from the checklist. Give it a folder that is a git repository, with your
-work committed, because a job on a folder edits it directly. Then open **Runs** in the console and read along. You are in
-the loop.
+**1. Run a first job and watch it.** Add a cron trigger in the console, or use one already in `runtime/triggers.json`; its
+folder must be a git repository, with your work committed, because a job on a folder edits it directly. Press **Fire now**
+on the trigger, or fire the cron trigger by hand in the worker container:
 
 ```bash
-./node_modules/.bin/pi-dispatch run ./my-project --task "add type hints" --flow tidy
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs run --trigger nightly-tidy
 ```
 
-A flow is a short text file of instructions in your project, such as `.pi/skills/tidy/SKILL.md`. The
+Then open **Runs** in the console and read along. You are in the loop.
+
+A flow is a short text file of instructions in your project, such as `.pi/skills/tidy/SKILL.md`. A trigger names it, and the
 [`examples/`](examples/) folder has one to copy.
 
 **2. Give it a schedule or a label.** On **Triggers**, add a rule: every night at three, or whenever an issue gets the label
@@ -199,7 +239,12 @@ add `resume` and `awaitInput` to the rule in `triggers.json`, which is a job for
 **3. Step back when the numbers say you can.** Read **Zero touch** under Runs. When a kind of work rarely needs you, let
 it run and review what comes back. You are out of the loop for that work, and still in charge of what ships.
 
-To open the console again later, go to its address, or make a new sign in link with `pi-dispatch-console link --name <you>`.
+To open the console again later, go to its address, or make a new sign in link in the console container:
+
+```bash
+docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs link --name you
+```
+
 A sign in lasts up to 12 hours, and an hour with nothing happening ends it sooner. After that, you need your token or a new link.
 
 ## Words used here
@@ -229,15 +274,16 @@ own README, no permission system. pi-dispatch adds exactly that layer and nothin
 compare with the one you use: it is the queue, the bounds and the box around the pi you already run, steered by the
 `.pi/` setup your repo already has.
 
-> **Naming heads up.** The published packages are scoped: `@edgehero/pi-dispatch` (the `pi-dispatch` command). The bare npm
-> name `pi-dispatch` belongs to an unrelated package (see [License](#license)), so outside a checkout always use the scoped
-> name.
+> **Naming heads up.** This project is not published to npm: you run it from a checkout, in containers. The bare npm name
+> `pi-dispatch` belongs to an unrelated package (see [License](#license)); `pi-dispatch` here means the CLI inside the worker
+> container.
 
 ## Where it can run
 
-pi-dispatch is a long running worker that starts containers, so it needs Node 22.19 or newer beside a container
-runtime, on the same host. In a deployment the worker runs in a container and reaches the host's Docker socket
-([Run it with Compose](#run-it-with-compose)); on your own machine it runs on the host.
+pi-dispatch is a long running worker that starts containers, so it needs a container runtime on the same host. In a deployment
+the worker runs in a container, built from this checkout, and reaches the host's Docker socket
+([Run it with Compose](#run-it-with-compose)); on your own Mac or Windows machine Docker Desktop supplies both, and jobs run while
+you are logged in.
 
 | Where | Works? |
 |---|---|
@@ -259,8 +305,8 @@ Only the receiver needs to be reachable from the internet, and only for webhooks
 - **`openshell`**: one NVIDIA OpenShell sandbox per job on a gateway on this host, in copy mode, so nothing of the job is
   mounted into the sandbox. The gateway's policy is the egress control, so no egress proxy starts. A provider made for each job
   holds its secrets, one per endpoint, so the agent sees placeholders rather than the values, with no secrets manager
-  needed. `openshell-bind` runs the same policy with the job's folders bind mounted. `pi-dispatch doctor --openshell` checks the gateway first, and
-  `up` sets it up. Pinned to OpenShell 0.1.4, since its
+  needed. `openshell-bind` runs the same policy with the job's folders bind mounted. The `doctor --openshell` check
+  validates the gateway before a job starts. Pinned to OpenShell 0.1.4, since its
   interfaces are marked experimental.
 
 Each job gets the memory and CPUs its project's row sets (4 GB and 2 CPUs by default), and starts only when its size fits
@@ -270,13 +316,13 @@ beside what already runs on that machine.
 
 A machine that runs jobs for good, rather than while you watch. **Linux with Docker Compose is the only supported
 deployment.** The host needs Docker Engine with the Compose plugin and a copy of this repository at the release you
-want: the compose file builds the worker and the receiver from the source beside it, so an npm install is the local
-path, not this one. The worker container holds the host Docker socket, which is authority equivalent to root; run it
-on a host you control, and read [`SECURITY.md`](SECURITY.md) before it faces anyone.
+want: the compose file builds the worker and the receiver from the source beside it. The worker container holds the host
+Docker socket, which is authority equivalent to root; run it on a host you control, and read [`SECURITY.md`](SECURITY.md)
+before it faces anyone.
 
 1. Put the checkout where it will stay. Your `.env` and `runtime/` sit beside it and are the deployment's state; an
    update replaces the source and keeps both.
-2. Copy `.env.example` to `.env` and fill it in: the provider key, the forge token, `PI_SESSIONS_DIR`, and the hosts
+2. Copy `.env.example` to `.env` and fill it in: the provider key, `GITHUB_PAT`, `PI_SESSIONS_DIR`, and the hosts
    jobs may reach.
 3. Start it with [Run it with Compose](#run-it-with-compose), then check it:
 
@@ -293,9 +339,13 @@ ssh -L 4790:127.0.0.1:4790 yourhost              # on your own machine; then, on
 docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs link --name you --port 4790
 ```
 
-**Connect a forge.** `pi-dispatch setup github --webhook-url '<receiver URL>'` creates a GitHub App in one browser click, or `--no-webhook`
-if the host has no public address; the `receiver` profile keeps the receiver running, and `PI_RECEIVER_PUBLISH` in `.env` is the
-address it answers on. GitLab, Forgejo and Azure DevOps have a [setup page each](#other-forges).
+**Connect a forge.** Create a fine-grained GitHub PAT scoped to the repositories jobs may work on: contents, issues and pull
+requests read and write, plus metadata read. Put it in `GITHUB_PAT` in `.env` and recreate the worker and receiver containers. That one
+token is shared by every job until you rotate it; rotate by editing `.env` and recreating them. For webhook
+deliveries, point a repository webhook at the receiver URL with the same `WEBHOOK_SECRET` the receiver reads; without a
+public address, run the receiver's `poll` mode with `POLL_REPOS` instead. The `receiver` profile keeps the receiver
+running, and `PI_RECEIVER_PUBLISH` in `.env` is the address it answers on. GitLab, Forgejo and Azure DevOps have a
+[setup page each](#other-forges).
 
 **Before it runs unattended:**
 
@@ -303,7 +353,7 @@ address it answers on. GitLab, Forgejo and Azure DevOps have a [setup page each]
 - Protect the default branch of every repository it may touch: the worker refuses a GitHub repository without it.
 - On a shared server, prefer `PI_BACKENDS=podman`: access to the Docker socket is equivalent to root.
 - List the hosts jobs may reach, since everything else is denied.
-- Use the GitHub App rather than the default `gh` source, which forwards your whole login.
+- Scope `GITHUB_PAT` to the repositories it may touch and rotate it on a schedule; every job shares it until you do.
 - Read [`SECURITY.md`](SECURITY.md).
 
 **Add a second machine.** Point it at the same Valkey and give every worker a name with `PI_WORKER_NAME`. Each host keeps its own logs, jobs and
@@ -324,9 +374,9 @@ PI_MODEL=claude-sonnet-5-5
 ANTHROPIC_API_KEY=...
 ```
 
-Override them for one job with `--provider` and `--model`. The worker asks pi which variable your provider reads, and
-`doctor` checks that it is set. If you are logged into pi with an API key, leave it blank: the worker reads it from
-`~/.pi/agent/auth.json`. Providers without a single key variable (an AWS profile for Bedrock, for example) are refused before anything is
+Override them per trigger with `run.provider` and `run.model`. The worker asks pi which variable your provider reads, and
+the `doctor` check reports whether it is set. If you are logged into pi with an API key, leave it blank: the worker reads it from
+its own pi agent directory (`PI_CODING_AGENT_DIR`, else `~/.pi/agent` in the worker container). Providers without a single key variable (an AWS profile for Bedrock, for example) are refused before anything is
 spent. A trigger's `run.models`, or `PI_ALLOWED_MODELS`, names the models a job may call, and the job is stopped before it calls another.
 
 ### Subscriptions
@@ -340,9 +390,9 @@ A subscription you already pay for works through an explicit connection in `PI_A
   integrations, so read them first. Whether they permit your deployment is not something this project can tell you.
 
 ```bash
-pi-dispatch auth login chatgpt-main    # on the owning host: the browser sign in, and the worker keeps the renewal
-pi-dispatch auth status
-pi-dispatch auth usage chatgpt-main
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs auth login chatgpt-main    # in the worker container: the browser sign in, and the worker keeps the renewal
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs auth status
+docker exec deploy-worker-1 node /opt/pi-dispatch/worker/src/cli.mjs auth usage chatgpt-main
 ```
 
 The owning host keeps the refresh credentials, and a job gets only a short lived access credential. A binding owns its provider: when it is
@@ -365,7 +415,7 @@ before a credential is minted or a repository cloned, and must pass the same che
 catalog with a cost bound and a credential, allowed by egress, with endpoint room. A failed model cools down for a while. An attempt may call only
 its selected model, so a flow that means to use several keeps its own setup.
 
-**Proposals and canaries.** Doctor suggests a change, `pi-dispatch canary` replays up to three retained jobs on the candidate in disposable workspaces,
+**Proposals and canaries.** Doctor suggests a change, the worker's `canary` command replays up to three retained jobs on the candidate in disposable workspaces,
 and the Models page shows the comparison. A person adopts it, and no model can.
 
 ## Triggers
@@ -430,7 +480,7 @@ Run the formatter and linter and fix what they report; tighten obvious type hole
 Keep the diff minimal and open a PR titled "tidy: <what changed>". Do not change behavior.
 ```
 
-The flow holds the standing instructions. The **task** is the one off request: your `--task`, a trigger's `task`, or the issue
+The flow holds the standing instructions. The **task** is the one off request: a trigger's `task`, or the issue
 or comment text. Flows are read from the **default branch**, so a flow must be merged before a trigger can use it. That merge
 is the repo's consent. `ai-trigger` only decides which flows a model may start. It does not decide who may fire a job: a cron
 or forge trigger in your reviewed `triggers.json` runs its flow either way
@@ -440,7 +490,7 @@ or forge trigger in your reviewed `triggers.json` runs its flow either way
 
 ```mermaid
 flowchart LR
-  CLI["pi-dispatch run"] -->|enqueue| Q
+  CLI["pi-dispatch run --trigger"] -->|enqueue| Q
   CRON["a schedule"] -->|enqueue| Q
   FORGE["GitHub, GitLab, Forgejo, Azure"] --> R["receiver: webhook or poll"] -->|enqueue| Q
   Q[("Valkey + BullMQ<br/>the queue")] --> B{"under the turn cap,<br/>concurrency, scoped limits<br/>and host budget?"}
@@ -460,13 +510,13 @@ Every trigger takes this path: admission is checked before the container starts,
 - **Network egress is denied by default.** Each job gets its own network behind an allowlist proxy, and a job the policy cannot
   serve is refused before it spends. The allowed hosts are yours to list.
 - **Token and cost records cover the whole job**, including subagent sessions and `pi` child processes.
-- **The container runtime is a named backend** that declares what it guarantees. `pi-dispatch doctor` prints the declaration, and
-  `pi-dispatch doctor --live` reads eight of those properties back from real containers.
+- **The container runtime is a named backend** that declares what it guarantees. `doctor` prints the declaration, and
+  `doctor --live` reads eight of those properties back from real containers.
 - **Credentials.** On Docker and Podman the provider key and the forge token go in as environment values, and **the agent can read both**. The
   guardrails tell it never to print or send them, but that is prompt text, not enforcement. Bound the key with a **spend limit at
-  your provider**. On GitHub the token is one hour for one repo with the App, or **your whole login, full scope and never
-  expiring**, with the default `gh` source. Anything in `PI_FORWARD_ENV` has the same exposure. The limit is on the damage, not
-  on the leak. None of these have to sit in a file.
+  your provider**. On GitHub the token is a fine-grained PAT from `GITHUB_PAT`: it reaches only the repositories it is scoped to, with the
+  permissions you granted, and every job shares it until you rotate it. Anything in `PI_FORWARD_ENV` has the same exposure. The
+  limit is on the damage, not on the leak. None of these have to sit in a file.
 
 ## Costs, projects and capacity
 
@@ -479,7 +529,7 @@ model that the insights page prices. A zero rate run with no declared plan reads
 concurrency and job size. A project has no spend share to plan or move.
 
 **Capacity.** Each machine keeps its own memory and CPU budget, and room is kept for a waiting big job so small ones cannot starve it.
-The console, `pi-dispatch capacity` and `doctor` report how busy each host was. They count jobs only: a machine busy with other work
+The console, the CLI's `capacity` command and `doctor` report how busy each host was. They count jobs only: a machine busy with other work
 reads as idle.
 
 **Flows map.** Which triggers start which flows, what chained to what, and what each cost.
@@ -489,11 +539,11 @@ of every write, and Configuration. Each write is a preview and a confirm, and pa
 
 ## Reuse your existing pi setup
 
-[Above](#bring-your-own-pi-setup) is how. Below it, four trust levels layer, most trusted first: the image's baked safety floor, the global overlay
-(mounted read only at `/opt/pi-global`) with its staged packages and a trigger's `run.skillsDir`, the repo's `.pi/`, and the task text, which is never
+The [global overlay](#global-overlay-optional) is how. Below it, four trust levels layer, most trusted first: the image's baked safety floor, the global overlay
+(mounted read only at `/opt/pi-global`) with its manually populated packages and a trigger's `run.skillsDir`, the repo's `.pi/`, and the task text, which is never
 instructions.
 
-- **Nothing installs at job time.** Every job runs with `PI_OFFLINE=1`, so pi's resolver cannot shell out to npm. A package is staged on the host, at an
+- **Nothing installs at job time.** Every job runs with `PI_OFFLINE=1`, so pi's resolver cannot shell out to npm. A package in the overlay is installed on the host, at an
   exact version, always with `--ignore-scripts`.
 - **A repo's own `.pi/extensions` do run**, because the checkout is the default branch and merging is the gate. Nothing installs packages because a repo asks.
 - **MCP servers are yours, not the repo's.** A repo's `.pi/mcp.json` is never read for a job, and a trigger names the servers its jobs connect.
@@ -548,17 +598,17 @@ Label an issue, and a container works on a fresh clone, opens a PR and comments 
 
 - **Only a collaborator's label, `@pi` comment or formal review starts a job.** A PR from a stranger's fork never starts a job on its
   own. A review is gated on the **reviewer**, so a collaborator reviewing that fork PR does start one.
-- **The token can merge.** GitHub puts push and merge behind the same permission, so under every auth source the job's token could
-  merge. pi-dispatch's own code calls no merge API; a merge-request job can land only the one request its prompt authorizes,
+- **Every GitHub job holds the same token: `GITHUB_PAT`.** It is a fine-grained PAT scoped to the repositories it may touch,
+  and every job shares it until you rotate it. GitHub puts push and merge behind the same permission, so the token can
+  merge; pi-dispatch's own code calls no merge API, a merge-request job can land only the one request its prompt authorizes,
   into a `pi/issue-*` branch, and **branch protection on your default branch is the real control**. The worker refuses a repo
   without it, before any spend.
-- **Which token a job holds depends on the auth source.** The GitHub App mints one per job, for one repo, valid for an hour. The default
-  `gh` source forwards **your own login, full scope and never expiring**, and `pi-dispatch doctor` warns about that.
 - **The checkout is always the base repo at its default branch**, never a PR branch. A commit that lands on your default branch can run
   code in a job. Issue and comment text never can; it stays data.
 
-`pi-dispatch setup github` creates a GitHub App in one browser click, shows every `.env` line before you agree, and never prints a secret.
-Run the part that takes in forge events as a container beside the worker, or in `poll` mode with no public URL.
+Create the PAT in GitHub's settings: fine-grained, the repositories jobs may touch, contents, issues and pull requests read and
+write, metadata read. Put it in `GITHUB_PAT` in `.env` and recreate the worker and receiver containers. Run the receiver profile to take in forge events, or
+its `poll` mode with `POLL_REPOS` when the host has no public URL.
 
 ## Other forges
 
@@ -568,7 +618,8 @@ Run the part that takes in forge events as a container beside the worker, or in 
 | Forgejo and Gitea | `/forgejo` | Permission on that repository, read with a separate token no job sees |
 | Azure DevOps | `/azure`, a Service Hook | The weakest transport of the four (no HMAC signature, no signed timestamp), so configure it carefully |
 
-These forges have one auth source each, a token you create, so setting theirs to `app` gets a clear refusal at boot.
+These forges each take one token you create — `GITLAB_TOKEN`, `FORGEJO_TOKEN` or `AZURE_TOKEN` — and there is no App
+equivalent to configure.
 
 ## How it compares
 
@@ -589,14 +640,13 @@ Everything on this page is built and running, on all four forges and on Docker a
 To work on pi-dispatch itself, or to build a custom job image:
 
 ```bash
-git clone https://github.com/edgehero/pi-dispatch && cd pi-dispatch
+git clone https://github.com/ddv12138/pi-dispatch && cd pi-dispatch
 npm ci
-node admin/build.mjs                                # the console bundle, gitignored
-valkey-server --port 6379 --save '' --daemonize yes
-VALKEY_TEST_URL=redis://127.0.0.1:6379 PI_DISPATCH_REQUIRE_LOADER_TESTS=1 PI_DISPATCH_REQUIRE_WORKER_TESTS=1 \
-  PI_DISPATCH_REQUIRE_RECEIVER_TESTS=1 npm test
+npm test
 ```
 
+There is no CI: this is the whole suite, and you run it yourself before you push. Some integration tests need a real Valkey;
+start one (the Compose file's `valkey` service works) and set `VALKEY_TEST_URL=redis://127.0.0.1:6379`, or they skip.
 Run the tests with an empty `HOME` outside the temp folder and a short `TMPDIR`: some load the real `~/.pi` setup, and unix sockets have a path limit.
 They use `node:test` with hand written, injected fakes, and no network or Docker. A job image comes from `docker build -f image/Dockerfile -t pi-job:latest .`.
 Jobs start with `--pull=never`, so build or pull every image first.
@@ -623,7 +673,4 @@ Console styles live in `admin/src/console/`. See [AGENTS.md](AGENTS.md) for the 
 MIT. See [LICENSE](LICENSE). Built on [pi](https://github.com/earendil-works/pi) by Mario Zechner, which does the actual hard part.
 
 > **Not affiliated with** the unrelated npm package `pi-dispatch`, a pi extension for rotating ChatGPT Codex OAuth accounts. Same name,
-> different thing. This project publishes scoped packages only:
-> [`@edgehero/pi-dispatch`](https://www.npmjs.com/package/@edgehero/pi-dispatch) (worker and CLI),
-> [`@edgehero/pi-dispatch-receiver`](https://www.npmjs.com/package/@edgehero/pi-dispatch-receiver), and
-> [`@edgehero/pi-dispatch-admin`](https://www.npmjs.com/package/@edgehero/pi-dispatch-admin) (the console). The bare name is theirs.
+> different thing. This project publishes nothing to npm: it runs from a checkout of this repository, in containers.

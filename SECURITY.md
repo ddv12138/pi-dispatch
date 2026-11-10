@@ -41,7 +41,7 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | **GitLab webhook** — label, `@pi` comment, or MR activity | A project member with **Developer access or above**, resolved from the API on every delivery. The label is **not** the approval step — see below. | Decline the MR |
 | **Forgejo webhook** — label, `@pi` comment, or PR activity | A collaborator with **owner, admin or write** permission, resolved from the API on every delivery — labels included. | Decline the PR |
 | **Azure DevOps service hook** — work-item tag, `@pi` comment, or PR activity | A **project member**, resolved from the Graph API on every delivery. A work item names the actor only by email address. | Decline the PR |
-| **CLI** — manual run (`pi-dispatch run`) | Whoever has shell on the host / can run the CLI | Decline the PR, or **nothing** for a folder |
+| **CLI** — firing a cron trigger now (`pi-dispatch run --trigger <cron id>`) | Whoever has shell on the host / can run the CLI | Decline the PR, or **nothing** for a folder |
 | **Cron** — a schedule | **Nobody, at the time it runs.** It fires unattended. | As above |
 | **AI tool** — `dispatch_run` (operator session) | Whoever can prompt-inject the operator's model | **Nothing** — it enqueues a paid run that edits a folder in place |
 | **Outbox chain** — a completed job container | A completed local job's agent, after host-side validation | As the folder row above — a same-folder follow-up, no undo |
@@ -54,7 +54,7 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | A serviced repo's `.pi/` on the **default branch** | **Maintainer-level** | It is read into the system prompt, from a pinned SHA, on purpose — same trust as `.github/workflows/`. Only someone who can merge can change it. |
 | A serviced repo's contents on **any other branch** | **None** | A fork PR can contain anything. Never read for instructions. |
 | A local folder's `.pi/` | **Whatever can write that folder** | No merge gate, no reviewer, no history |
-| A local folder's `.git/` (config, attributes, index, exclude list) | **Whatever can write that folder**, which includes the local job's own agent | The host reads the folder's dirty state before a local run (`pi-dispatch run`, the console, `/dispatch run`). That read never uses the folder's own git config, `info/attributes` or `info/exclude`, and clears the index's assume-unchanged and skip-worktree bits in a copy, so nothing in that directory runs on the host or hides uncommitted work from the guard. The operator's own global git config still applies |
+| A local folder's `.git/` (config, attributes, index, exclude list) | **Whatever can write that folder**, which includes the local job's own agent | The host reads the folder's dirty state before a local run (the console, or a cron fired now with `pi-dispatch run --trigger`). That read never uses the folder's own git config, `info/attributes` or `info/exclude`, and clears the index's assume-unchanged and skip-worktree bits in a copy, so nothing in that directory runs on the host or hides uncommitted work from the guard. The operator's own global git config still applies |
 | A trigger's `run.secrets` and `run.secretsProfile` | **Operator — the same trust as the triggers file, plus a host exec** | The references are named in the reviewed file; the resolver that reads them is a script the operator wrote and declared. The job receives VALUES and never a manager credential, so it cannot enumerate a vault, but it can spend what it was given. |
 | A project's `secretBundles` entry and its bundle resolver (issue #704) | **Operator, the same trust as the triggers file, plus a host exec, plus whoever can write the manager the resolver reads** | The binding (project, profile, reference) is in the reviewed file; the variables are NOT. The resolver prints whatever the manager (or file) holds at each job start, so a variable added there reaches the next job of the project with no review of `triggers.json`. The job still receives values and never the manager's credential. Trigger-made jobs only: never a chained child, a manual run or a fork pull request (unless `forkReviews`), and every run record lists the variable NAMES it received. |
 | A trigger's `run.skillsDir` and `run.instructions` | **Operator — the same trust as the triggers file** | Both are instructions, and both come from the reviewed `triggers.json` on the worker host rather than from any payload. Nothing reachable from a webhook, an issue or comment body, or `dispatch_run` can set either, and no panel key or AI tool writes them. The skills are copied per job into `/job` (adding no mount) and are layered UNDER the repo's own `.pi/`, so a serviced repo still wins a name collision; the instruction text lands in the user prompt above the issue text and never in the system prompt |
@@ -63,16 +63,16 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
 | A job container's `/outbox` request file | **None** — agent-authored | An agent-initiated signal channel back to the host; validated host-side before anything is enqueued. **Local jobs only** — a github job has no `/outbox` mount at all |
 | A job container's `/session` transcript | **None**, agent-authored | The **second** agent-initiated channel, and this row exists because the line above used to say "only". Written by the agent, read back host-side on a `completed` exit, `lstat`-checked and regular-files-only on both edges. Since #643 every job has one unless the worker sets `PI_LIVE_TRANSCRIPTS=0` (a non-resume job's is an empty live file in its own job folder, never promoted), and the worker also tails it during the run to publish a redacted copy to Valkey: parsed as data, redacted, escaped and capped before it leaves, never executed or fed to a model. Since #644 the worker also reads run progress from it (turns, steps, the tool running, and the phases a `report_progress` call names): display only, never trusted, since the agent can write any line into it ([Run progress](#what-is-not-defended-v1)) |
 | The **checkpoint store** (`PI_CHECKPOINTS_DIR`, else `<PI_SESSIONS_DIR>/.checkpoints`) | **None** for its contents (agent-authored trees and transcripts); **Operator** for the directory | Since #645 a trigger with `run.recover` has its running jobs checkpointed into it: the job's whole workspace and its transcript, written by the worker from the host side, never mounted into any container. A recovery writes those bytes back into a new job's workspace, so a restore re-checks every path with the snapshot's own rules and then resets `.pi/`, `.agents/` and the root `AGENTS.md`/`CLAUDE.md` to the run's base commit, so nothing the agent wrote there loads as the repository's own; a repository with `.pi/extensions/` gets no recovery, because an extension's imports cannot be reset ([Durable runs](#what-is-not-defended-v1)) |
-| A steer-armed job's **inbox** (`run.steer`, `pi-dispatch steer`, a phrase comment) | **Operator** for who may send from the host (whoever can run `pi-dispatch steer` against the deployment's Valkey, which is the queue's own trust); **Collaborator** (write access) for a comment, whose author passes the same forge author gate that starting a job takes, on a comment trigger that also set `run.steer`; **None** for the text, which reaches the agent as data | Since #646 a trigger with `run.steer` lets a message reach its running agent. The worker writes it into a per-job directory mounted **read-only** at `/inbox` (the agent can neither plant nor withdraw a message), framed as data with the same fence the issue text gets and with no operator authority, and the agent's receipt is counted only under a MAC keyed by a per-attempt key the agent cannot read. A collaborator's phrase comment on the job's issue or pull request is routed there instead of starting a job; an operator also sends from the console (the operator role, behind its session rules, the text never listed or audited) and from the `/dispatch` panel ([Steering](#what-is-not-defended-v1)) |
-| A **resurrected sandbox**'s operator shell (`pi-dispatch sandbox`) | **Operator — the same trust as a terminal on this host** | A third channel, and the first the **operator** opens rather than the agent. Not a job container: no minted token, no provider key, no agent running, started only by a keypress. It re-mounts a finished run's workspace, which for a forge job holds attacker-influenced code — the same trust shape as checking out a stranger's pull request locally. Every isolation flag still applies; ports it publishes are `127.0.0.1`-only and last only while it does |
-| The **venue** a job's container is built in (`run.backend`, `PI_BACKENDS`) | **Operator — the same trust as the daemon they point the worker at** | A different axis from every row above. Those ask *who wrote this*; this asks *who is holding the execution*. Today there is one venue, the Docker daemon the worker's docker CLI resolves, which is the operator's own machine unless `DOCKER_HOST` or a docker context points it elsewhere; the worker reads that answer at boot and before each job, logs a redirect, and a floor asking `credentialTransit=enforced` refuses one. It judges the endpoint's form, so a unix socket or loopback port that is really a tunnel to another machine still reads as this host. A venue that is not this host holds the container, the job's files, the provider key and the per-job forge token, and the isolation flags in **this worker's argv do not reach it**. What bounds it is a declaration an operator reads, a floor they can require of every blessed venue, and a boot refusal when the two disagree. |
+| A steer-armed job's **inbox** (`run.steer`, `pi-dispatch steer`, a phrase comment) | **Operator** for who may send from the host (whoever can run `pi-dispatch steer` against the deployment's Valkey, which is the queue's own trust); **Collaborator** (write access) for a comment, whose author passes the same forge author gate that starting a job takes, on a comment trigger that also set `run.steer`; **None** for the text, which reaches the agent as data | Since #646 a trigger with `run.steer` lets a message reach its running agent. The worker writes it into a per-job directory mounted **read-only** at `/inbox` (the agent can neither plant nor withdraw a message), framed as data with the same fence the issue text gets and with no operator authority, and the agent's receipt is counted only under a MAC keyed by a per-attempt key the agent cannot read. A collaborator's phrase comment on the job's issue or pull request is routed there instead of starting a job; an operator also sends from the console (the operator role, behind its session rules, the text never listed or audited) ([Steering](#what-is-not-defended-v1)) |
+| A **resurrected sandbox**'s operator shell (`pi-dispatch sandbox`) | **Operator — the same trust as a terminal on this host** | A third channel, and the first the **operator** opens rather than the agent. Not a job container: no forge token, no provider key, no agent running, started only by a keypress. It re-mounts a finished run's workspace, which for a forge job holds attacker-influenced code — the same trust shape as checking out a stranger's pull request locally. Every isolation flag still applies; ports it publishes are `127.0.0.1`-only and last only while it does |
+| The **venue** a job's container is built in (`run.backend`, `PI_BACKENDS`) | **Operator — the same trust as the daemon they point the worker at** | A different axis from every row above. Those ask *who wrote this*; this asks *who is holding the execution*. Today there is one venue, the Docker daemon the worker's docker CLI resolves, which is the operator's own machine unless `DOCKER_HOST` or a docker context points it elsewhere; the worker reads that answer at boot and before each job, logs a redirect, and a floor asking `credentialTransit=enforced` refuses one. It judges the endpoint's form, so a unix socket or loopback port that is really a tunnel to another machine still reads as this host. A venue that is not this host holds the container, the job's files, the provider key and the deployment's forge token, and the isolation flags in **this worker's argv do not reach it**. What bounds it is a declaration an operator reads, a floor they can require of every blessed venue, and a boot refusal when the two disagree. |
 | The **`openshell` venue's supervisor**, which holds a job's credentials (`credentialCustody: layer`, issue #684) | **Vendor code on this host, `asserted`, never `enforced`** | On `local` and `podman` the provider key, the forge token and a trigger's resolved secrets are in the job container's environment, where the agent reads them. On `openshell` they are not: per job the worker creates an OpenShell provider holding them (the values reach the `openshell` CLI through its own environment, never an argv or a file), and the agent's environment holds placeholders (`openshell:resolve:env:v<rev>_NAME`). OpenShell's supervisor, beside the sandbox, terminates TLS and swaps the real value in only in a request to a host the job's policy admits, a policy the worker generates from your allowlist and model endpoints and reads back. An injected agent that dumps its environment dumps placeholders, and `OQ-028`'s host-argv exposure is closed on this venue. The price: the values and the provider and forge plaintext now live in a vendor process, so a compromised supervisor holds everything the job held, bounded by the token's scope and expiry and your provider spend limit, not by trusting its code (`OQ-047`). Its gateway must be on this host (loopback or a unix socket), refused per job otherwise; `PI_EGRESS=0` refuses the boot with it, because its policy is the only path the credentials resolve through. A credential rotated mid-run does not reach a running job (jobs are bounded at 30 minutes). Since issue #730 the runner there runs under a READABLE node (the supervisor's broker must read the runner's memory to let it connect, which a non-dumpable one refuses), so the exit-line key the runner holds is kept from the job's tools not by the node's mode but by three things: OpenShell's workload seccomp (`process_vm_readv`, `ptrace`, `pidfd_getfd` denied), Yama for `/proc/<pid>/mem` (the worker refusing the venue before spend unless the host's `kernel.yama.ptrace_scope` is exactly 1, so the protection is never silently absent: 0 or unreadable and 2 or 3 are each refused by name), and `ulimit -c 0` in the entrypoint so a holder's core cannot carry the key (a file `core_pattern` writes nothing; a pipe `core_pattern` goes to a host-root handler outside the sandbox, which a tool cannot read). A tool can reopen a holder's steer-frame pipe and its stdout and so break or garble a steered job's messages or the worker's exit-line read, never forge a signed line without the key nor read the key (`OQ-047`) |
 | The **`openshell-bind` venue's binds** (bind mode, issue #686) | **Worker-built read-only binds plus the sandbox policy, applied by vendor code, `asserted`** | Upstream says it plainly: "Bind mounts expose gateway-host files to the sandbox and can bypass workspace isolation and filesystem policy." So on this venue OpenShell's own filesystem isolation does NOT keep the agent off the job's host directories. What holds is the worker's side: `/job`, `/inbox` and the overlay are bound read-only (a write fails with EROFS, measured), every bind target is listed in the sandbox's filesystem policy (`read_only` or `read_write`, read back before the job starts), and no other host path of the job's is bound; the compute driver still mounts its own runtime and the supervisor's socket beside them, as it does for every OpenShell sandbox (vendor code, `asserted`). Because a sandbox outlives its exec, the worker deletes it and waits until the gateway no longer lists it before it reads the job's tree (60 s at most; a sandbox still listed then is named in the log, the run takes no recovery snapshot, and a completed run or a folder job is not run again), and a salvage of a lost attempt's tree waits the same way. `/workspace`, `/session` and `/outbox` are the job's to write, exactly as on `local`, and a folder job edits the operator's folder in place. The credentials, the network policy and the placeholders are the `openshell` row's, unchanged. Opt-in per host: the gateway refuses every bind until its gateway.toml allows them, and the worker refuses each job before it spends while it does |
-| The operator console process (`pi-dispatch-console serve`) | **Operator, the same trust as the admin extension** | It runs as the deployment's account and writes through the same read-model funnels as the panel. It renders untrusted text (issue titles, and from #641 on run text) but only escaped, after the control-byte scrub, under a strict CSP and behind the operator role; it executes none of it and feeds none of it to a model. It listens on loopback or a 0600 unix socket, never on the receiver ([The operator console](#the-operator-console)) |
+| The operator console process (`pi-dispatch-console serve`) | **Operator, the same trust as the deployment's account** | It runs as the deployment's account and writes through the same audited funnels for every caller. It renders untrusted text (issue titles, and from #641 on run text) but only escaped, after the control-byte scrub, under a strict CSP and behind the operator role; it executes none of it and feeds none of it to a model. It listens on loopback or a 0600 unix socket, never on the receiver ([The operator console](#the-operator-console)) |
 | The operator's browser | **Operator, while it holds a session** | A signed-in browser acts as the token's person. Every other page that browser opens, including one on another `localhost` port, is **None**: the console refuses its writes by origin, not by trust in the browser |
-| The console tokens file (`PI_CONSOLE_TOKENS_FILE`) | **Operator, the same trust as the deployment's `.env`** | It says who may sign in. It holds sha256 hashes only, so a copy signs no one in, but whoever can WRITE it can add a person. The console refuses to start on one that is group or world accessible, a symlink or another account's; the pi extension guards it from its own session's `write` and `edit`; doctor fails it inside any path a job container can see (a local trigger's `run.folder` or `run.skillsDir`, a `PI_DISPATCH_RUN_ROOTS` root, `PI_GLOBAL_PI_DIR`) |
-| The login-code drop directory (`console-login-codes/` beside the tokens file) | **Operator, the same trust as the tokens file** | `pi-dispatch-console link` and, since issue #708, `/dispatch console --link` write a one-time code's hash there (directory 0700, file 0600, 60 seconds, consumed by the first `unlink` that wins; the panel appends its audit row first). Whoever can write it can mint a login, which is why it must be the deployment account's alone, and why the pi extension guards the directory, every path under it, from its own session's `write` and `edit`, as it guards the tokens file |
-| Receiver, worker, queue, admin extension, operator console, sandbox gateway | Trusted | They never execute agent-authored content: the admin extension feeds only PII-free, fixed-enum run records to the model; raw container output stays in the overlay viewer. The operator console renders untrusted text as data only: escaped, behind the operator role, and never in a list view |
+| The console tokens file (`PI_CONSOLE_TOKENS_FILE`) | **Operator, the same trust as the deployment's `.env`** | It says who may sign in. It holds sha256 hashes only, so a copy signs no one in, but whoever can WRITE it can add a person. The console refuses to start on one that is group or world accessible, a symlink or another account's; doctor fails it inside any path a job container can see (a local trigger's `run.folder` or `run.skillsDir`, a `PI_DISPATCH_RUN_ROOTS` root, `PI_GLOBAL_PI_DIR`) |
+| The login-code drop directory (`console-login-codes/` beside the tokens file) | **Operator, the same trust as the tokens file** | `pi-dispatch-console link` writes a one-time code's hash there (directory 0700, file 0600, 60 seconds, consumed by the first `unlink` that wins). Whoever can write it can mint a login, which is why it must be the deployment account's alone |
+| Receiver, worker, queue, operator console, sandbox gateway | Trusted | They never execute agent-authored content: raw container output stays in the overlay viewer. The operator console renders untrusted text as data only: escaped, behind the operator role, and never in a list view |
 
 ## What is defended
 
@@ -178,24 +178,22 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   run's egress NETWORK, never a container: it takes one only when that run has no retained directory left,
   no running container and no container being created, which is what keeps it away from a session that is
   open or still starting.
-- **Credential scope.** A repo-scoped, short-lived token minted per job — a GitHub App installation
-  token, or a single-owner fine-grained PAT. Its narrow scope and short expiry bound **where** and for
-  **how long** an injected agent can act within that repo. See *What is NOT defended*.
-- **CI integrity, on the App path or a narrowed PAT.** A GitHub App installation token grants `contents`
-  and `pull_requests` write and **not** `workflows`, which is a separate scope; on a fine-grained PAT the
-  same narrowing is an operator-set property. On those two sources an injected agent cannot rewrite
-  `.github/workflows/` even though it can write code.
-  **It does NOT hold under the shipped default.** `GITHUB_AUTH_SOURCE=gh` is the default, and it mints your
-  own `gh auth token` **verbatim**: the whole operator login, which routinely carries the `workflow` scope.
-  On that source an injected agent **can** rewrite your workflow files. `pi-dispatch doctor` lists
-  `workflow` among the broad scopes it warns about by name, so that warning is your signal, and it is the
-  only one you get. See *Operator responsibilities* for the same fact stated from the credential side.
-  **What the App grants is also wider than `contents` + `pull_requests`.** The manifest this project mints
-  asks for `contents: write`, `pull_requests: write`, `issues: write` and `metadata: read`. `issues: write`
-  exists for the comment-back path (a job replies on the issue that triggered it), and it is real authority:
-  with it an injected agent can close issues and edit or delete comments. The constitution's stated ideal
-  (`CONST-TOKEN-SCOPED-PER-JOB`, "contents + pull-requests only") is **narrower than what ships**; this
-  paragraph is that gap, written down.
+- **Credential scope.** One fine-grained, repo-scoped PAT in `GITHUB_PAT`, handed to every GitHub job
+  until you rotate it. Its **repository selection**, its **fine-grained permissions** and its **expiry**
+  bound where and for how long an injected agent can act; the worker mints nothing per job and GitHub
+  scopes nothing per job. See *What is NOT defended*.
+- **CI integrity, where the PAT's permissions allow it.** A fine-grained PAT granted `contents` and
+  `pull_requests` write but **not** `workflows` lets an injected agent write code without rewriting
+  `.github/workflows/`, which is a separate permission. That split is an operator-set property of the
+  PAT, not a worker check: grant `workflows` and the same agent **can** rewrite your workflow files.
+  `pi-dispatch` cannot see which permissions you granted, so the PAT's permission list is the whole
+  claim; read it before you rely on this split. See *Operator responsibilities* for the same fact stated
+  from the credential side.
+  **What a PAT can grant is wider than `contents` + `pull_requests`.** `issues: write`, which the
+  comment-back path needs (a job replies on the issue that triggered it), is real authority: with it an
+  injected agent can close issues and edit or delete comments. `contents` + `pull_requests` only is the
+  narrower ideal, and it is not enough for the comment path; with one shared PAT the permission set you
+  grant is the whole answer, and this paragraph is that gap written down.
   **It does NOT hold on GitLab.** A project access token needs `api` to post a note, and `api` grants full
   project API read/write; `write_repository` alone already permits pushing `.gitlab-ci.yml`. GitLab offers
   no contents-vs-CI split, so an injected agent on a GitLab job **can** rewrite your pipeline definition,
@@ -239,8 +237,8 @@ Jobs are a **trigger × target** matrix, and the triggers do not share a threat 
   and only an attempt the worker could fully arm listens: a venue that binds mounts, an image declaring `steer` (a job
   on an image without it is refused before it spends) and `exitAuth`, and a Valkey client.
   - **Framed as data, with no authority.** The worker, not the job, builds the words the agent reads: a heading saying
-    the message is data and not instructions, who sent it (a console token's name, the command line or the dispatch
-    panel; a forge author only by user id and association, each held to a closed charset: a number, or on Azure
+    the message is data and not instructions, who sent it (a console token's name or the command line;
+    a forge author only by user id and association, each held to a closed charset: a number, or on Azure
     DevOps a GUID or an `azid-` digest, never a login or display name), and the text verbatim inside the same fence the issue
     text gets, so a body holding backticks cannot close it. An operator's message carries no more authority than a
     comment: standing operator instructions live in the reviewed triggers file (`run.instructions`), so a leaked
@@ -312,7 +310,7 @@ refuse; resurrected sandboxes remain credential-free.
 
 ## The operator console
 
-The admin extension binds no port. The optional sandbox gateway binds its own, on a hostname of its own (below). The operator console does too: `pi-dispatch-console serve` is a separate process
+The optional sandbox gateway binds its own port, on a hostname of its own (below). The operator console does too: `pi-dispatch-console serve` is a separate process
 that serves a web page to manage the deployment (the console, `DES-OPERATOR-CONSOLE`,
 `REQ-CONSOLE-SECURITY`, `REQ-OPERATOR-CONSOLE-ACTIONS`). It never runs on the receiver, which faces the internet. It listens on `127.0.0.1:4790` by
 default, or on a unix socket at mode 0600, and refuses any other address unless you set `PI_CONSOLE_BIND_PUBLIC=1`
@@ -368,8 +366,8 @@ The threat model, and what answers each part:
   expires (on `localhost` or an IP address such a copy replaces the person's instead, measured in Chrome). All of it
   is cosmetic, since the cookie reaches no session, no page content and no write. The redesign left
   the CSP exactly as it was: one stylesheet and one script, both the console's own files, no inline style or script,
-  no external resource, and a check in CI loads every page in a real browser, at a phone's width and its top bar at
-  two phone widths and eighteen desktop widths, and fails on any violation it reports.
+  no external resource. A test holds every page to that markup: no inline style or script, no event handler, each
+  page loads the console's one script by URL, and a CSP violation a browser reports is a bug.
 - **A leaked tokens file grants nothing.** The file stores sha256 hashes, never a token; a token is shown once, at
   `token add` or `token rotate`, and appears in no log, audit row or page. Revoking or rotating a token, or
   `sessions end-all`, ends the affected sessions on their next request. An entry a later release wrote for a role this
@@ -445,16 +443,16 @@ The threat model, and what answers each part:
   stream shares it whatever they say. A
   run id outside the shapes the worker mints is
   refused before any file path or Valkey key is built from it. No page read writes: the console's reader is built
-  read-only, so it reads the run mirror without pruning it and leaves the held-jobs set as it finds it (the panel's
-  own reader still tidies both, as it always did), and a test records every Valkey command a snapshot sends. The one
+  read-only, so it reads the run mirror without pruning it and leaves the held-jobs set as it finds it, and a test
+  records every Valkey command a snapshot sends. The one
   write left is BullMQ's own: opening a queue client sets that queue's metadata (its library version and event cap)
   to the values every worker already writes, so it changes nothing a reader sees.
 - **Who sees what.** Run records hold no attacker-chosen text by construction, so both roles see them; their job id,
   target and parent job id can still be shaped by whoever opened an issue, and are escaped like every value. **Since
   #737 a record's reason is a fixed word by construction too**: an older worker recorded an infrastructure error's own
   message there, which can name a forge API path and a repository, and the worker now records a fixed word for every
-  failure (`worker-error` where it has none of its own). The runs list and the `/dispatch` panel's list, run detail
-  and `/dispatch runs` table show a reason only when it is such a word, for both roles, and so do `/api/run`,
+  failure (`worker-error` where it has none of its own). The console's runs list and run detail
+  show a reason only when it is such a word, for both roles, and so do `/api/run`,
   `/api/state` and the model's `dispatch_runs` tool, so an older record's text reaches no script and no model; the
   console's run page still shows its own record's reason as it was recorded, escaped. The parked page shows no question
   text: the question is the run's own words, which the console shows only in the run page's transcript, to operators.
@@ -472,7 +470,7 @@ The threat model, and what answers each part:
   the boot rule for `PI_WORKER_NAME`, which also refuses a `.json` or `.log` tail so that no file a worker names after
   itself passes for a run record); any other is no host to any reader of the registry, the console's among them, and
   no reader removes it. A job scheduler, which the same URL could also add, is named by the admin's surfaces (the
-  console, the `/dispatch` panel and its tools) only by an id and a job name in the cron trigger id's characters
+  console and its tools) only by an id and a job name in the cron trigger id's characters
   (`[A-Za-z0-9._-]`) and at most 200 of them (`SCHEDULER_NAME_MAX` is `SCHEDULER_ID_MAX`, `mapSchedulers`; since issue
   #761, wider than the 176 the triggers file takes, so a schedule an earlier release made for a longer id is still
   named and can be removed); any other is read as no name, never cut to one, and no other name stands in for
@@ -519,7 +517,7 @@ The threat model, and what answers each part:
   single-use ticket bound to the session and the action; the ticket, not the request body, holds what will be done,
   the file snapshots it was built from and the jobs it names, so a confirm applies the change the operator saw or is
   refused (a file another session wrote, a job that was retried, removed or failed again since the preview).
-  Every write goes through the same validators and funnels as the `/dispatch` panel, with the same refusal words.
+  Every write goes through the same validators and funnels as every other console write, with the same refusal words.
   Since issue #737 every action takes only the body keys its preview reads and refuses any other by name before
   anything is planned (a key that is not a plain identifier is called "a field it was sent"; a value is never
   repeated), and the pi tool that adds a trigger (`dispatch_trigger_add`) refuses a field its trigger type does not
@@ -546,9 +544,7 @@ The threat model, and what answers each part:
   log records the answer's sha256, never its text.
 - **Who did what.** Every write, every write refused by a guard and every sign-in is appended to
   `PI_LOGS_DIR/console-audit/YYYY-MM.jsonl` as a hash chain (`pi-dispatch-console audit verify` names the first
-  broken link). Since issue #642 the same chain holds the `/dispatch` panel's writes and the pi extension's tools'
-  writes, as actor role `panel` with the account's login name, so a change made from a terminal is recorded like one
-  made from a browser. For both, the row is appended BEFORE the write and a write whose row cannot be appended does
+  broken link). The row is appended BEFORE the write and a write whose row cannot be appended does
   not happen. Refusals of requests with no session are written one row each up to 60 a minute and counted past
   that, so a flood cannot grow the log without bound. The chain makes an edit evident, not impossible: whoever can write that file can also rewrite every
   row after the one they changed. Nothing vouches for the newest row, and an edit to it is never seen: the next row
@@ -652,7 +648,7 @@ Stated openly rather than discovered later:
   environment.
 
 - **The forge's own MCP server holds the job's forge token.** A github or gitlab trigger that names `forge` in
-  `run.mcp` gives its job github-mcp-server or mcp-gitlab, started with the token the worker minted for that job. It is the one server the pickup hands a forge token, and it
+  `run.mcp` gives its job github-mcp-server or mcp-gitlab, started with the job's forge token (on GitHub, the deployment's PAT). It is the one server the pickup hands a forge token, and it
   holds no power the job's `gh` or `glab` lacks with that token. The image's wrapper still withholds each
   server's dedicated merge and approval tools, so the harness hands the agent no ready-made merge tool
   (`CONST-MERGE-NEVER-AUTOMATIC`); the one merge a merge-request job is authorized to perform is a command
@@ -661,8 +657,8 @@ Stated openly rather than discovered later:
   written in a note or a description the listed tools post, and the job's CLI, or the server started from the
   job's shell, act with the token's full role. The boundary is the one in the paragraph below: the token's role and
   the branch's protection (on GitLab, a Developer token, never Maintainer, which could unprotect a branch or change
-  who may merge, through the server's settings tools as through `glab`). A GitHub installation token lives one hour,
-  and the server cannot outlive the job anyway. GitHub's lockdown mode is on, and it is best effort: it withholds
+  who may merge, through the server's settings tools as through `glab`). A GitHub PAT is not minted for the job and does not
+  expire with it: the server cannot outlive the job, but the credential it read outlives every job that held it, until its expiry or your revocation. GitHub's lockdown mode is on, and it is best effort: it withholds
   some content written by people without push access on a public repository, and it is not an authorization
   boundary. Issue, pull request and comment text the server's tools return is untrusted prompt content, exactly like
   the issue text that started the job.
@@ -686,7 +682,7 @@ Stated openly rather than discovered later:
   branch can therefore run arbitrary code inside a job container — with the job's GitHub token and
   network egress bounded only by the allowlist you configured, which necessarily includes your forge —
   where previously they could only supply text the agent reads. What bounds
-  it is the container, the token's narrow scope and short expiry, and your branch protection; **this
+  it is the container, the PAT's permissions and expiry, and your branch protection; **this
   layer bounds nothing**. The practical rule: a repository whose default branch you would not hand a
   shell to is not a repository to service. Note the population is the same one that could already write
   `.pi/`, which this harness has always read and obeyed — the escalation is from *instructions* to *code*,
@@ -784,9 +780,9 @@ Stated openly rather than discovered later:
   alongside `run.resume`. Two residuals are stated rather than defended. On a **pull_request**-typed target
   the replicas share the review request's branch (a head branch on GitHub and Forgejo, a source branch on
   GitLab and Azure), and only the prompt asks them not to collide (`OQ-017`) — a **comment** trigger reaches
-  that same state, since a comment on a merge or pull request routes to that target. And on
-  gitlab/forgejo/azure the replicas hold the **same** operator-supplied token rather than N per-job scoped
-  ones: only the GitHub App path mints per job, so a replica set there is N concurrent attempts against one
+  that same state, since a comment on a merge or pull request routes to that target. And on every forge
+  the replicas hold the **same** operator-supplied token rather than N per-job scoped ones — there is no
+  per-job mint on any forge, GitHub's PAT included — so a replica set is N concurrent attempts against one
   credential on one target. `PI_CONCURRENCY` bounds how many are ever live at once.
 - **Local-folder jobs have no gate and no undo.** No merge, no reviewer, no pull request to decline. The
   bar for writing the agent's standing instructions drops from "can merge to default" to "can write a
@@ -804,8 +800,9 @@ Stated openly rather than discovered later:
   is a real narrowing and it is **not** a fix for this row, for a reason worth reading twice: **your forge
   is on the allowlist, because a job that cannot push has nothing to do**, and a repository is a perfectly
   good place to write a secret to. A successful injection still has somewhere to send things; it has fewer
-  places. What actually bounds the damage is unchanged and is what it always was: the token's short expiry
-  and narrow scope (`CONST-TOKEN-SCOPED-PER-JOB`), and a provider-side spend limit on the key. The list of
+  places. What actually bounds the damage is unchanged and is what it always was: the PAT's repository
+  selection and fine-grained permissions, the expiry you set on it, and a provider-side spend limit on the
+  key — the worker mints no narrower credential per job to fall back on. The list of
   hosts is also **yours**, and nothing here can enumerate what your own flows reach (`OQ-026`). You can
   return to open egress with `PI_EGRESS=0`; run this on hardware where that is acceptable.
 - **A resolved secret is a secret the agent can read, and this feature does not change where it can go.**
@@ -833,9 +830,9 @@ Stated openly rather than discovered later:
   `PI_CAPTURE_JOB_LOGS`, so a value the agent echoes reaches the worker container's log on the Docker host
   (Docker's default `json-file` driver keeps it there). Treat that log directory as a secret store; a
   `logging: driver: none` on the worker service suppresses it at the cost of watching jobs run.
-- **The provider API key is broad.** Unlike the GitHub token it cannot be meaningfully scoped per job —
-  the agent needs it to function. It is the one broad secret inside the container. **Set a spend limit
-  on it.**
+- **The provider API key is broad.** Unlike the forge token it cannot be narrowed to a repository or a
+  permission — the agent needs it to function, and it is the one secret inside the container with no such
+  boundary. **Set a spend limit on it.**
 - **Captured job logs can contain issue and comment text (PII).** By default the worker writes only an
   id-only status record per job — `logs/<jobId>.json`, keyed on stable ids (the delivery GUID,
   `repo#issue`) and never on issue or comment bodies. With `PI_CAPTURE_JOB_LOGS=1` (opt-in, **off by
@@ -848,7 +845,7 @@ Stated openly rather than discovered later:
   (the next bullet).
 - **Live transcripts are in Valkey (PII), redacted but not secret-proof.** This reverses what this file said until #643, that transcripts stay on the host that ran the job. Unless you set
   `PI_LIVE_TRANSCRIPTS=0`, every worker publishes each running job's transcript to the deployment's Valkey (one
-  stream per job, `run:live:<job id>`), so the console and the `/dispatch` panel on any host can show it live.
+  stream per job, `run:live:<job id>`), so the console on any host can show it live.
   - **What the worker reads**: only the job's own transcript file, as a regular file. The agent can replace that
     file inside its container, so the worker refuses a symlink, a FIFO or a different file swapped in (it checks
     before and after opening, and opens without following links), publishes one fixed note, and stops reading it,
@@ -862,8 +859,7 @@ Stated openly rather than discovered later:
     title, body and author for 31 days. The transcript adds tool output and the agent's own text, redacted, for a
     day.
   - **Who can read it**: anyone with access to your Valkey (its password, its port, its volume or a backup of it),
-    the console's operator role, and anyone who runs the `/dispatch` panel against the deployment. A console viewer
-    cannot.
+    the console's operator role. A console viewer cannot.
   - **What is redacted**: every value the worker handed the job's container except the structural ones (paths,
     flags, model names, counts), so the forge token, the provider key, every forwarded variable, every resolved
     secret and every model-endpoint key, plus the exit key, each in its plain, JSON-escaped and URL-encoded
@@ -890,7 +886,7 @@ Stated openly rather than discovered later:
     whose trigger set `run.progress`, the phase names and the latest note, redacted like the transcript and with
     the transcript's residual (a secret the agent transforms is not caught). It is removed 24 hours after the run
     ends, and at most 7 days after its first write when the worker died first. A running job's key is rewritten at
-    least every 30 seconds, so the console and the panel mark a key that has not changed for 3 minutes as stale (the
+    least every 30 seconds, so the console marks a key that has not changed for 3 minutes as stale (the
     worker may be gone) instead of showing the job as still running. Every id in the file is capped at 128 characters
     before the worker keeps it, so a forged line cannot make the worker hold a large id in memory. With `PI_LIVE_TRANSCRIPTS=0` and progress
     on, no transcript text reaches Valkey, but those phase names and notes still do.
@@ -931,12 +927,13 @@ Stated openly rather than discovered later:
     The reset cannot see what an extension imports (a file outside `.pi/`, a package from `node_modules`), so a
     repository whose default branch has anything under `.pi/extensions/` gets no recovery at all: its runs are not
     armed (`recoverSkipped: "workspace-extensions"`) and run as before.
-  - **The secret scan and its limits.** A checkpoint that holds the job's minted forge token or a resolved
-    `run.secrets` value, in a file's bytes, a file or directory name or a link target, is refused whole and the run
-    keeps the checkpoint it had. The match is literal: a value the agent encoded or split is not caught. The
+  - **The secret scan and its limits.** A checkpoint that holds the job's forge token (on GitHub, the
+    deployment's PAT) or a resolved `run.secrets` value, in a file's bytes, a file or directory name or a
+    link target, is refused whole and the run keeps the checkpoint it had. The match is literal: a value the agent encoded or split is not caught. The
     transcript copy is not scanned (it has the transcript's exposure, as with `run.resume`). A salvage checkpoint,
     taken from a crashed attempt's job folder after that attempt died, has no secret values to match, so it is stored
-    unscanned; the store is host-private and a forge token from a minted App installation is dead within the hour.
+    unscanned; the store is host-private, but the token is not minted per job, so a GitHub PAT stays usable there
+    until its expiry or your revocation.
   - **Self-induced recoveries are capped.** The agent can end its own container (kill its runner) and that reads as
     an infrastructure exit, which a `run.recover` run continues. Each run is continued at most twice, and each
     container reserves its own dollar hold up to the per-job cap before it starts, so a crash loop costs at most
@@ -961,8 +958,8 @@ Stated openly rather than discovered later:
     Valkey URL and its credential can push into an open run's inbox directly, as they can already enqueue jobs, cancel
     them and edit the queue: Valkey is the deployment's own trust, so protect it as such. Since issue #646 part 3 an
     operator also sends from the console, behind its session rules (the operator role, a same-origin JSON write, a
-    single-use ticket bound to the previewed message, an audit row holding the message's sha256 and never its text),
-    and from the `/dispatch` panel, whose push is audited as the panel. A console viewer sees a run's inbox without
+    single-use ticket bound to the previewed message, an audit row holding the message's sha256 and never its text).
+    A console viewer sees a run's inbox without
     any text and cannot send. No model-callable tool sends a message, so the operator's own model cannot steer a run.
   - **What is not defended for comments.** The gate judges write access, not intent: a collaborator can steer a run
     toward anything they could have written in the issue. Several comments can each cost a turn, up to the inbox's
@@ -990,8 +987,8 @@ Stated openly rather than discovered later:
     Cancel is still the way to stop a run.
 - **Prompt injection is not prevented, only bounded.** Untrusted text is kept out of the trusted region
   of the prompt by *placement*, not by filtering — content-filtering natural language is not a security
-  boundary and this project does not pretend otherwise. The bound is the container, the scoped token,
-  branch protection, and the human merge gate.
+  boundary and this project does not pretend otherwise. The bound is the container, the PAT's repository
+  selection and permissions, branch protection, and the human merge gate.
 - **A project's own instructions can argue with the guardrails.** The baked safety floor cannot be
   *deleted* from the prompt — that is asserted by a test. It can be *contradicted* by a project persona,
   because prompt ordering is not an enforcement mechanism. This is the same honesty as the point above:
@@ -1005,7 +1002,8 @@ Stated openly rather than discovered later:
   another's, because there is only meant to be one. This is also the assumption the discovery posture
   above rests on: it is safe when the repositories you service are ones whose default branch you or your
   collaborators control. A deployment servicing repositories owned by mutually-distrusting third parties
-  needs discovery turned back off **and** the GitHub App token path, neither of which is the default.
+  needs discovery turned back off, and even then it is outside this model: every job holds the same PAT,
+  and there is no per-job token to narrow it to one repository.
 - **An agent that can write a folder can self-authorize a flow by committing to it.** Making a flow
   AI-triggerable is a committed `ai-trigger: allow` in the folder's `.pi/`, so an agent that can write the
   folder can commit that opt-in. Be precise about what that buys, because the obvious reading is wrong: the
@@ -1026,7 +1024,7 @@ Stated openly rather than discovered later:
   `local-folder-escaped`); the committed per-flow opt-in (default deny, read at a pre-agent SHA); the
   dirty-tree refusal (no force option); no spend-knob parameters on the tool; a per-hour rate limit; and
   the per-job turn cap (`PI_MAX_TURNS`), with the operator's provider spend limit as the outer backstop.
-  One supporting fact about that allowlist, because `/dispatch setup` writes a file that could otherwise
+  One supporting fact about that allowlist, because a deployment pointer could otherwise
   widen it: the **deployment pointer** resolves paths only, through an allowlist of exactly six path/URL
   keys. `PI_DISPATCH_RUN_ROOTS` is excluded **by construction**, as is every credential-shaped key, because a
   pointer that could widen the AI-run folder allowlist would be a second, unreviewed door to the very
@@ -1119,39 +1117,47 @@ Stated openly rather than discovered later:
 - Do not blanket-forward host environment into job containers. Pass only the variables the configured
   provider needs. In particular `ANTHROPIC_OAUTH_TOKEN`, and at the pinned pi `ANTHROPIC_AUTH_TOKEN` ahead
   of it, silently take precedence over `ANTHROPIC_API_KEY`, so a stray variable in the host environment can quietly redirect which credential
-  a job spends. Every minted-token name is refused in `PI_FORWARD_ENV` at config load, across all four
+  a job spends. Every forge-token name is refused in `PI_FORWARD_ENV` at config load, across all four
   forges: `GITHUB_TOKEN`, `GH_TOKEN`, `GITLAB_TOKEN`, `GL_TOKEN`, `FORGEJO_TOKEN`, `GITEA_TOKEN`,
-  `GITEA_SERVER_TOKEN`, `AZURE_DEVOPS_EXT_PAT` and `SYSTEM_ACCESSTOKEN`. The worker sets them from the per-job mint, and a
+  `GITEA_SERVER_TOKEN`, `AZURE_DEVOPS_EXT_PAT` and `SYSTEM_ACCESSTOKEN`. The worker sets them from the
+  deployment's own credentials (on GitHub, the PAT), and a
   forwarded operator token would silently override it. That list is derived from one row per forge rather
-  than hand-maintained, so a forge added to the mint cannot be missed here. `FORGEJO_PERMISSION_TOKEN` is refused too, for another reason:
+  than hand-maintained, so a forge added to the credential set cannot be missed here. `FORGEJO_PERMISSION_TOKEN` is refused too, for another reason:
   it is an admin account's token that only the receiver's author gate reads, and no job may hold it. If a secrets manager supplies
   the worker's environment, its own credential belongs on the host and never in `PI_FORWARD_ENV`: a token
   that can read every secret in your project is a worse thing to hand an agent than the two credentials a
   job already carries.
 - **A secret resolver is an exec inside the worker's own environment, which holds every credential this
   deployment has.** `PI_SECRET_PROFILES` names resolver scripts in `.env`, and
-  `/dispatch secrets add` can name one from the panel. Both run as the account the worker runs as — uid 10001 in
+  the console's secrets page can name one from the settings overlay. Both run as the account the worker runs as — uid 10001 in
   the shipped Compose file, with the deployment's whole `.env` in its environment — so the blast radius is that
   environment, not a smaller one.
-  What bounds it: the panel path is fail-CLOSED (`PI_SECRET_RESOLVER_ROOTS` is empty by default,
-  so the panel can declare nothing at all until an operator names the directory), the worker re-checks
-  every panel-declared path against those roots on the realpath rather than trusting the settings file,
+  What bounds it: the console path is fail-CLOSED (`PI_SECRET_RESOLVER_ROOTS` is empty by default,
+  so the console can declare nothing at all until an operator names the directory), the worker re-checks
+  every console-declared path against those roots on the realpath rather than trusting the settings file,
   and a trigger names only a profile NAME, never a path. A deployment that never sets
-  `PI_SECRET_RESOLVER_ROOTS` gives the panel no way to declare a resolver at all.
-- **With `GITHUB_AUTH_SOURCE=gh` (the default), your entire gh login reaches every token-carrying job.**
-  The minted value is your own full-scope `gh auth token`, and `pi-dispatch doctor` warns and names the
-  scopes it carries (calling out broad ones like `admin:org`, `delete_repo`, `workflow`). Prefer a
-  fine-grained PAT — or an App — for real per-job scoping. Your `~/.config/gh` is never mounted into a
-  container; the credential reaches jobs only as env values.
-  **`pi-dispatch setup github` makes the App path the easy one** (issue #81): the GitHub App Manifest
-  flow mints the app id, private key, and webhook secret in one browser click, against a throwaway
-  listener on **your own loopback** — nothing crosses a maintainer-controlled service, the conversion
-  code is single-use and expires in an hour, and the wizard shows every `.env` line before writing it,
-  never prints a secret, writes the PEM `0600`, and refuses to overwrite an existing key file or an
-  already-set `WEBHOOK_SECRET`. The credential minted is the narrowest this system supports
-  (`contents`/`pull_requests`/`issues` write + `metadata` read, per-repo 1h installation tokens).
-- **On GitLab there is no stronger option to prefer.** GitLab has no App equivalent and no short-expiry
-  per-job token, so your project access token is what every GitLab job gets, for as long as you leave it
+  `PI_SECRET_RESOLVER_ROOTS` gives the console no way to declare a resolver at all.
+- **GitHub auth is one fine-grained, repo-scoped PAT in `GITHUB_PAT`, and the same token goes to every GitHub job.**
+  The worker reads it from its own environment and hands it to the container as `GITHUB_TOKEN` / `GH_TOKEN`;
+  it is never mounted as a file, and your `~/.config/gh` is never mounted. There is no `gh`-login source any
+  more; this PAT is the only GitHub credential the deployment reads. There is no per-job mint and no
+  per-job scoping from GitHub: every GitHub job holds that one PAT until you rotate it, so a job that leaks
+  it leaks the whole grant to every repository the PAT selects.
+  What it can do is exactly what you granted: the PAT's repository selection and its fine-grained
+  permissions — `contents` and `pull_requests` write for the work, `issues` write for the comment-back
+  path, `metadata` read. Select only the repositories you service, grant no more permissions than those,
+  and set the shortest expiry you will tolerate re-minting; the deployment cannot narrow a token it did
+  not mint.
+  **If it leaks, revocation and expiry are the only things that end it.** A token echoed into a job log, a
+  session transcript or a checkpoint, or written to the Docker Desktop log below, stays usable on every
+  host that holds a copy until you revoke it on GitHub or its expiry date arrives.
+  The trade against the removed GitHub App path is real and is stated rather than hidden: an App
+  installation token was minted per job, scoped to one repository and dead within the hour, so a leak aged
+  out on its own and no two jobs shared authority. That path — `pi-dispatch setup github` — is gone, and
+  per-job scoping from GitHub is not available here at all. What
+  replaces the per-hour bound is the PAT's permissions, its repository selection and the expiry you set.
+- **On GitLab there is no stronger option to prefer.** GitLab has no App equivalent and offers no per-job
+  token either, so your project access token is what every GitLab job gets, for as long as you leave it
   valid. Use a **project** token rather than a group token (a group token reaches every project in the
   group), give it the shortest expiry you will tolerate re-minting, and rotate it — the expiry bound is
   yours to enforce, because nothing on GitLab's side enforces it for you. `pi-dispatch doctor` says so
@@ -1169,62 +1175,53 @@ Stated openly rather than discovered later:
   note the review *is* the gate, since landing a commit on the default branch is the only qualification
   any of it requires.
 - **The global pi overlay (`PI_GLOBAL_PI_DIR`) is production code too**, and it must be credential-free. It
-  is mounted `:ro` into every job — a container that runs adversarial input — so a secret in it is a secret
-  in the box. Stage it with `pi-dispatch import-pi` (it refuses a `models.json` with a literal key and never
-  copies `auth.json`) and let `pi-dispatch doctor` re-check it; the provider key belongs in the environment,
-  never a mounted file. Overlay **extensions run arbitrary code against adversarial input, reaching
-  whatever your egress allowlist permits** (which includes your forge), and are not scanned for secrets —
-  and they are staged and loaded **by default**. `import-pi`
-  copies `extensions/` unless you pass `--no-extensions`, and **prints every extension it staged**: read
-  that list, because it is the vetting step. Anything you do not want in job containers should not be in
-  the overlay; `PI_GLOBAL_ALLOW_EXTENSIONS=0` disables the whole directory if you want it staged but
-  dormant. Any other value than `0` or `1` is refused at boot rather than guessed — a typo must not
-  silently leave extensions loading. Never place the admin extension in the overlay (it can enqueue paid
-  jobs — a recursion vector; `import-pi` blocks it).
+  is a read-only mount into every job — a container that runs adversarial input — so a secret in it is a
+  secret in the box, and a change in it takes effect on the next job. Populate it yourself, by hand:
+  `models.json`, `APPEND_SYSTEM.md`, `skills/`, `extensions/`, `prompts/`, `mcp.json` and, optionally,
+  `packages/`. Do not put `auth.json`, or a `models.json` holding a literal key, in it; the provider key
+  belongs in the environment, never a mounted file. There is no stager to scan what you place there — you
+  are the review step — and `pi-dispatch doctor` re-checks what it can. Overlay **extensions run arbitrary
+  code against adversarial input, reaching whatever your egress allowlist permits** (which includes your
+  forge), and are not scanned for secrets — and when present they load **by default**. Anything you do not
+  want in job containers should not be in the overlay; `PI_GLOBAL_ALLOW_EXTENSIONS=0` disables the whole
+  directory if you want it present but dormant. Any other value than `0` or `1` is refused at boot rather
+  than guessed — a typo must not silently leave extensions loading. Never place an admin-like extension in
+  the overlay (it can enqueue paid jobs — a recursion vector): the runner drops such an entry before the
+  session sees it, though the file has already been imported by then, so the container is what bounds it.
 - **Every image you name in `triggers.json` is production code, and you are its build gate.** Pull or build
   it yourself on the machine running the worker — jobs launch with `--pull=never`, so nothing is ever fetched
   at job time and a name this host does not have is refused before the job costs anything. Hold it to the
   conformance checklist (non-root with a writable home, the runner as entrypoint,
-  the exit-code protocol, the pinned pi version, root-owned guardrails, fonts, the loader posture), and run
-  the `image` CI job against your own tag. `PI_JOB_IMAGE` and each `run.image` are **separate security
+  the exit-code protocol, the pinned pi version, root-owned guardrails, fonts, the loader posture), and try
+  it yourself against your own tag before a trigger names it. `PI_JOB_IMAGE` and each `run.image` are **separate security
   postures**, not one: a carve-out you made in one image is not inherited by another. `pi-dispatch doctor`
   lists every image your triggers name and warns when one's entrypoint does not look like the runner — that
   is presence and a hint, never conformance.
 - **Staged pi packages are third-party code you are choosing to run against adversarial input.** They live
-  inside the same overlay and pass four gates: an **exact** version, either declared in `pi-packages.json` or
-  captured from what your host has installed (a floating
+  inside the same overlay and pass four gates: an **exact** version in `pi-packages.json` (a floating
   range turns a silent upstream release into every queued job becoming a no-op that still reports success),
-  host-side staging by `import-pi --with-packages`, a **per-trigger** `"packages"` switch — an **opt-OUT**,
-  so once staged they load for every job and `"packages": false` on a trigger is how one flow declines
+  placement in the overlay by the operator — nothing discovers packages from
+  your `pi` setup — a **per-trigger** `"packages"` switch — an **opt-OUT**,
+  so once present they load for every job and `"packages": false` on a trigger is how one flow declines
   them; there is deliberately no env flag deciding it fleet-wide — and runner-side validation: a
   package that did not mount is refused before any spend, and a package skill that takes the name of a repo
   or overlay skill loses — the repo's stays in force, and the attempt is logged. Since issue #796 a person can also try
   one exact version on one job, or adopt it fleet-wide, from the console's Updates page: both
-  go through the same staging with `--ignore-scripts`, refuse a dependency tree holding anything but registry tarballs with a hash (npm runs a git dependency's build script whatever that flag says), neither is open to an agent, and a tried version is new third-party
+  go through staging that runs `--ignore-scripts`, refuse a dependency tree holding anything but registry tarballs with a hash (npm runs a git dependency's build script whatever that flag says), neither is open to an agent, and a tried version is new third-party
   code in a job that holds its trigger's credentials, which is why that is a person's call. Two facts to hold on to.
-  Staging runs
-  `npm install --ignore-scripts`: **without that flag a package's — and every transitive dependency's —
+  Staging runs `npm install --ignore-scripts`: **without that flag a package's — and every transitive dependency's —
   lifecycle scripts would run AS YOU, ON YOUR HOST**, at stage time, which is a host compromise and not a
-  job one; the price is that a package needing a build step is staged INCOMPLETE and may fail at run time
-  (`import-pi` warns by name). And a package whose name looks like the dispatch admin is refused outright,
-  the same recursion block the admin extension gets. Jobs run with `PI_OFFLINE=1` set unconditionally, so a
+  job one; the price is that a package needing a build step is staged INCOMPLETE and may fail at run time.
+  And a package whose name looks like the dispatch admin is refused outright,
+  the same recursion block the runner applies to an admin-like extension. Jobs run with `PI_OFFLINE=1` set unconditionally, so a
   package source can never become a network install from inside a container. Vet each one and pin it; you
   are extending your own trust boundary to whoever publishes it.
-  Since issue #102 `--with-packages` also **discovers** the packages you installed with `pi install`, which
-  widens what one command stages. It does not widen what is *permitted*: every gate above runs on a
-  discovered package exactly as it does on a declared one, discovery only ever adds candidates, and the
-  printed list names each one with where it came from. Two consequences are worth stating plainly. The
-  review surface moved: a version used to change only when you edited `pi-packages.json`, and now a
-  `pi update` followed by a re-stage moves it with no diff anywhere, so the receipt's provenance field,
-  `doctor`'s drift warning and that printed list are what stand in for the diff. And `doctor --fix`'s
-  restage offer deliberately runs `--no-host-packages`: the only path that stages without you typing the
-  command stays a repair, never a first-time import of your laptop into every job container.
 - **A serviced repo's declared packages are NOT installed, and that is deliberate.** A repo's
   `.pi/extensions` execute (above), but nothing reads a repo's package list and installs it. Two independent
   reasons: a clone does not contain installed `node_modules` unless someone committed them, so honouring
   such a declaration would mean a job-time registry install, which `PI_OFFLINE=1` exists to make
   unreachable; and whoever can merge can already instruct the agent, while adding arbitrary npm packages
-  would put third-party **install-time and load-time** code beside a live minted forge token in a container
+  would put third-party **install-time and load-time** code beside a live forge token in a container
   that can reach your forge. That is a materially bigger grant than editing a
   prompt. If it is ever wanted, the shape
   is an operator-held allowlist, not a per-repo opt-in, because the repo is the thing that is not trusted.
@@ -1236,48 +1233,26 @@ Stated openly rather than discovered later:
   and runs as the runner's user, so a child that hides from both, a client that is not pi, or a direct API call
   is still absent from the run record (`OQ-011`). `PI_MAX_TURNS` likewise bounds only the root session's turns. The backstops there are the 30-minute container timeout, concurrency and the
   host budget, and your provider-side spend limit, not the meter.
-- **The admin surface is not a network service.** It is a pi extension in your own terminal session plus
-  a `settings.json` file, and it binds no port. The operator console is the exception you start yourself: a separate
-  process that listens on loopback or a private socket, under the rules in [The operator console](#the-operator-console). Whoever can run pi with the extension loaded, or write
-  `PI_SETTINGS_FILE` (default `~/.pi-dispatch/settings.json`, whose permissions are therefore part of your
-  threat model), holds operator power: the same trust as shell access on the host. Treat it that way.
+- **The operator's settings are not a network service.** There is no `/dispatch` pi extension and no
+  `/dispatch setup` installer: nothing in a pi session installs or upgrades host software, and no
+  in-session panel holds a write guard. What remains is a `settings.json` file and the operator console.
+  Whoever can write `PI_SETTINGS_FILE` (default `~/.pi-dispatch/settings.json`, whose permissions are
+  therefore part of your threat model) holds operator power: the same trust as shell access on the host.
+  Treat it that way. The operator console is the exception you start yourself: a separate
+  process that listens on loopback or a private socket, under the rules in [The operator console](#the-operator-console).
   It is operator-present, processes no adversarial input, and holds no harness credentials — which is why
-  pi running here is scoped out of the container-per-job constraint. Raw job logs are untrusted container
-  output, and the extension never routes them into model context.
-  **It does, however, install and execute host software.** `/dispatch setup` is the guided path and it is not
-  read-only: it runs `npm install @edgehero/pi-dispatch@<pinned version> --ignore-scripts --omit=dev` into a
-  directory you name, then spawns that runtime's own CLI (`up`, `doctor`, `setup github`) attached to
-  your terminal. Each of those sits behind a confirm showing the exact command and directory first, nothing
-  is auto-accepted (the child's own y/N prompts still run), and the install is followed by a hard-stop
-  assertion on the installed version, because npm has reported success over a wrong or absent install before.
-  `--ignore-scripts` is load-bearing here exactly as it is for `import-pi`: **without it the lifecycle scripts
-  of that package and every transitive dependency would run AS YOU, ON YOUR HOST**, at install time, which is
-  a host compromise and not a job one. So: no port, no harness credential, and still the same trust as shell
-  access, which is where `/dispatch setup` stops being theoretical.
-  **The model in that session has a shell too, and the write guard cannot see it.** The admin extension blocks
-  pi's `write` and `edit` tools (a call nested through `ctx.executeTool` or a codemode script included) whose
-  target is `projects.json`, `scoped-limits.json`, `triggers.json`, the settings overlay, the
-  deployment's `.env`, the deployment pointer (issue #504), the console tokens file (issue #640) or anything in the
-  console's login-codes directory beside it (issue #708). The `.env` and the pointer are guarded because they
-  NAME the other files: the panel reads `.env` on every call, and a session that could point it at a decoy could
-  unguard the real file, write it, and point it back; the guarded set also never shrinks within a session. With no
-  pointer, the `.env` of the folder pi started in may only add to the set (every guarded file it names, and itself),
-  and an `init` folder's own `triggers.json`, `scoped-limits.json` and `projects.json` are guarded. A deployment the
-  panel cannot see at all (no pointer, no key set, not the folder pi started in) is not guarded. The target
-  is resolved as pi resolves it (`~`, an `@` prefix, Unicode spaces, `file://`, against the session's working
-  directory) and compared by file identity, so a symlink, a hard link or a case variant is the file it names (a
-  name not yet created is compared fully case-folded); a target it cannot resolve is blocked. A `powershell`
-  command (a built-in tool since pi 0.99.1, registered but not active by default) that names one of those files is
-  blocked by its text, which is a best effort: a glob, a backtick escape, an environment variable
-  (`$env:PI_PROJECTS_FILE`) or an 8.3 short name (`PROJEC~1.JSO`) passes, while an ordinary read of another folder's
-  `settings.json` is blocked for naming it. `bash`, your own `!` commands, and a later extension that rewrites a
-  tool's path after the guard ran can write any file your account can, and none of them can be filtered reliably.
-  Nor can a `bash` command in the same message as a `write`: pi runs every `tool_call` hook of a parallel batch
-  before it executes any call of it, so an `ln -s` there can repoint a path the guard already judged (this needs
-  `bash`, which is the residual already). That residual is named, not closed.
+  the console process is scoped out of the container-per-job constraint. Raw job logs are untrusted container
+  output, and it never routes them into model context.
+  **No in-session guard replaces that trust now.** The files the retired extension used to guard from a
+  model's `write` and `edit` tools — `projects.json`, `scoped-limits.json`, `triggers.json`, the settings
+  overlay, the deployment's `.env`, the deployment pointer (issue #504), the console tokens file (issue
+  #640) and the console's login-codes directory beside it (issue #708) — are bounded by ownership and
+  mode, plus the console's own role checks for the writes it makes itself. A process that can write one
+  of them can point the console at a decoy or add a person; `bash` was always the residual and is now the
+  whole boundary. Treat write access to any of them as operator power, because it is.
 - **The graph export writes one static HTML file, on your keystroke, to a temp path it names.** What
   crosses into it: trigger configuration you authored, skill names and frontmatter from the repos you
-  service, and the PII-free run-record fields the panel already shows. What never does: raw job log
+  service, and the PII-free run-record fields the console already shows. What never does: raw job log
   bytes, issue or task text, session material, or a host path beyond a folder's basename unless you
   pass `--full-paths` yourself (your own reviewed `run.folder` config, on your keystroke). Nothing
   listens and nothing serves the file — opening it is a local browser reading local bytes, and the
@@ -1288,34 +1263,34 @@ Stated openly rather than discovered later:
   local clipboard, including over SSH. What crosses is a host-assigned job id or a target URL derived
   from id-only fields, never log bytes or issue text; nothing is ever read back from the clipboard; and
   the sequence is emitted only in direct response to the keypress, through the same injected seam
-  discipline as every other side effect. The panel emits no OSC 8 hyperlink at all: it used to link a run
+  discipline as every other side effect. It emits no OSC 8 hyperlink at all: it used to link a run
   target, and that was withdrawn under issue #382, because the gate that keeps a stored field's escapes off
-  the terminal can recognise a SHAPE and not an author, so allowing the panel's own link allowed an
+  the terminal can recognise a SHAPE and not an author, so allowing its own link allowed an
   identically-shaped one written into a trigger field.
 - Review every PR. Automation opens them; it does not land them.
 - Point local-folder jobs only at folders you can restore.
-- Keep the pinned pi version current, and let the upgrade tests gate the bump.
+- Keep the pinned pi version current; test the bump against your own images before you take it.
 
 - **With sessions enabled, "the credential reaches jobs only as env values" stops being the whole story.**
   An env value lives in container memory and dies with the container. A **session transcript is a file**,
   and any command the agent ran that echoed its own authorization header put your token into it,
-  permanently, on your disk, where the next job on that key will read it. Under `GITHUB_AUTH_SOURCE=gh`
-  — the shipped default — that token is your entire `gh` login and it does not expire. **Prefer the App
-  path or a short-expiry fine-grained PAT before arming `run.resume`**, so the exposure is bounded by an
-  expiry rather than by whether an agent ever ran a verbose curl. On GitLab there is no stronger option to
-  prefer, so the same warning applies with no mitigation beyond rotating the token.
+  permanently, on your disk, where the next job on that key will read it. The GitHub credential is one PAT,
+  shared by every job and valid until its expiry or your revocation, so a transcript that caught it stays
+  dangerous for that whole window. **Set the PAT's expiry to the shortest you will tolerate before arming
+  `run.resume`**, so the exposure ends on a date rather than on whether an agent ever ran a verbose curl.
+  On GitLab there is no stronger option to prefer, so the same warning applies with no mitigation beyond
+  rotating the token.
 - **On Docker Desktop, "dies with the container" is not true either.** Docker Desktop for macOS writes each
   container create request, environment included, in plain text to
   `~/Library/Containers/com.docker.docker/Data/log/host/com.docker.backend.log` (rotated to `.0` to `.8`
-  beside it). Every job's forge token rests there. pi-dispatch cannot stop that and does not scrub it. A
-  minted App installation token expires in about an hour, so its copy is dead soon after; a long-lived PAT,
-  a `gh` login, a GitLab or a Forgejo token stays usable there for as long as the token does. The provider
+  beside it). Every job's forge token rests there. pi-dispatch cannot stop that and does not scrub it.
+  Nothing in this deployment shortens a token's life: a GitHub PAT stays usable there until its expiry or
+  your revocation, and a GitLab or Forgejo token for as long as the token does. The provider
   API key, every `run.secretsProfile` value, every project secret bundle value and every `PI_FORWARD_ENV` value a job carries rest there too, as the same `-e NAME=VALUE`
   the paragraph on secret profiles describes, and those have no expiry at all; the provider key can spend
-  money. The App path does not close that. Set a spend limit on the provider key, rotate any key or secret
+  money. Set a spend limit on the provider key, rotate any key or secret
   you suspect, and treat that folder as a secret store. Outside jobs, the same log gets the Valkey password
-  (`pi-dispatch up`, and the `docker run` doctor's Valkey fix shows, pass `-e VALKEY_PASSWORD`; the compose
-  file's Valkey sets it in `environment:`) and, in the Compose deployment, the whole `.env` of the worker, the
+  (the compose file's Valkey takes `VALKEY_PASSWORD` from the deployment `.env` and sets it in `environment:`) and, in the Compose deployment, the whole `.env` of the worker, the
   console and the receiver (`env_file: ../.env`: webhook secrets and forge credentials). doctor's in-image `gh`
   check passes your token on stdin, so doctor itself adds no copy.
 - **`PI_SESSIONS_DIR` is a PII store, and it has no default.** Unset means the feature is unavailable and
@@ -1357,8 +1332,8 @@ no personal profile or private integration to interpret it.
 An answer rule is reviewed configuration, never model-writable. Its draft job has no Valkey/console reach and
 cannot post: it gets only trusted data readers, a classifier and structured submit, with builtin/executable context
 withheld. Its workspace is read only; the host binds output to an authenticated receipt and rechecks citations and
-current scope/configuration. App credentials are narrowed for read access. A PAT cannot be attenuated at mint,
-so its existing scope is a residual and the restricted tool profile is the boundary. Prompt injection can still
+current scope/configuration. A PAT cannot be attenuated at mint, so its existing permissions are a residual and
+the restricted tool profile is the boundary. Prompt injection can still
 produce an inaccurate cited proposal; a person must inspect it and alone confirms sending or adopting guidance.
 Approval, product, security, money, scope, uncovered and insufficient-confidence classifications never draft.
 Private question/draft inputs have bounded retention; logs and ordinary run records hold no such text.
