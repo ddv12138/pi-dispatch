@@ -31,8 +31,8 @@ import { mergeSecretProfiles, withinRoots } from "./secret-profiles.mjs";
 
 /**
  * The largest value a resolver may print. `outbox.mjs` caps a request file at 4 KiB, which is too small
- * here (a 4096-bit PEM chain, a service-account JSON -- this project already carries
- * `GITHUB_APP_PRIVATE_KEY` as an env value), and `materialize.mjs` allows git 16 MiB, which per reference
+ * here (a 4096-bit PEM chain, a service-account JSON -- a private key or token is an env value in most
+ * deployments), and `materialize.mjs` allows git 16 MiB, which per reference
  * is a memory bomb. 64 KiB holds any real credential and bounds a full 16-reference job at 1 MiB.
  *
  * On overflow the child is killed and the job refuses. NEVER TRUNCATED: a silently shortened credential is

@@ -4,14 +4,14 @@
  *
  * Octokit's own default logger is `console.warn` and `console.error`, and `@octokit/rest` carries the request-log
  * plugin, which calls `log.error` with `GET /user - 401 with id ... in 12ms` for every failed request. A worker booted
- * with `GITHUB_AUTH_SOURCE=pat` and a refused token printed exactly that beside its `github_auth_unavailable` line, and
+ * with a refused `GITHUB_PAT` printed exactly that beside its `github_auth_unavailable` line, and
  * a pipeline that parses each line as JSON breaks on it.
  *
  * - `debug`, `info` and `error` are dropped. The request-log plugin is the only caller of `info` and `error`, and its
  *   `error` is always followed by the rejection itself, which the caller already reports in its own words (the boot
  *   line's `reason`, a job's refusal). Logging it twice would also put a request path into the stream.
  * - `warn` is KEPT, as one JSON event: it is how `@octokit/request` says an endpoint is deprecated and how
- *   `@octokit/auth-app` says it retried past clock skew, and neither has another surface. Dropping it would make an
+ *   an auth strategy says it retried past clock skew, and neither has another surface. Dropping it would make an
  *   endpoint that GitHub is about to remove fail with no warning at all.
  *
  * `log` is the caller's `(event, fields)` logger. Without one the warning still goes out as JSON, on stderr, where

@@ -1,17 +1,18 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertResumeAllowedOnGhSource, makeGitHubAuth } from "../src/get-token.mjs";
+import { makeGitHubAuth } from "../src/get-token.mjs";
 
 /**
  * All collaborators are injected. Fakes are hand-rolled (no mocking library), matching the
  * budget/identity test convention.
  */
 
-/** Fake @octokit/rest: `new Octokit(opts)` ignores auth; `request(route)` returns canned `{ data }`. */
+/** Fake @octokit/rest: `new Octokit(opts)` records its options; `request(route)` returns canned `{ data }`. */
 function FakeOctokit(routes) {
 	return class {
 		constructor(options) {
 			this.options = options;
+			instances.push(options);
 		}
 		async request(route) {
 			if (!(route in routes)) throw new Error(`unexpected route: ${route}`);
@@ -22,25 +23,8 @@ function FakeOctokit(routes) {
 	};
 }
 
-/**
- * Fake @octokit/auth-app. `createAppAuth(auth)` returns an async `appAuth(params)` that records its
- * params in `calls` and either yields `result` (e.g. `{ token }`) or throws `error`.
- */
-function fakeCreateAppAuth({ result, error, calls }) {
-	return () => async (params) => {
-		calls.push(params);
-		if (error) throw error;
-		return result;
-	};
-}
-
-/** Callback-style execFile so `promisify` resolves `{ stdout, stderr }` (or rejects with `error`). */
-function fakeExecFile({ stdout = "", stderr = "", error = null } = {}) {
-	return (_file, _args, cb) => {
-		if (error) return cb(error);
-		cb(null, { stdout, stderr });
-	};
-}
+const instances = [];
+const USER_ROUTES = { "GET /user": { id: 4242, login: "octo" } };
 
 /** An Error tagged like an octokit RequestError. */
 function httpError(status, extra = {}) {
@@ -49,17 +33,12 @@ function httpError(status, extra = {}) {
 	return Object.assign(e, extra);
 }
 
-const USER_ROUTES = { "GET /user": { id: 4242, login: "octo" } };
-const APP_ROUTES = {
-	"GET /app": { slug: "pi-dispatch", id: 9001 },
-	"GET /users/{username}": { id: 555123, login: "pi-dispatch[bot]" },
-};
-
 // -- pat -----------------------------------------------------------------------------------------
 
 test("pat happy: mintToken returns the non-empty token, selfId is the /user integer id", async () => {
+	instances.length = 0;
 	const auth = await makeGitHubAuth(
-		{ source: "pat" },
+		{ pat: "ghp_realtoken" },
 		{ Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "ghp_realtoken" } },
 	);
 	assert.equal(auth.source, "pat");
@@ -68,425 +47,64 @@ test("pat happy: mintToken returns the non-empty token, selfId is the /user inte
 	const token = await auth.mintToken("owner/repo");
 	assert.equal(token, "ghp_realtoken");
 	assert.ok(token.length > 0);
+	assert.equal(instances[0].auth, "ghp_realtoken", "the client is authenticated with the PAT");
 });
 
-test("pat honours a custom patVar", async () => {
-	const auth = await makeGitHubAuth(
-		{ source: "pat", patVar: "MY_PAT" },
-		{ Octokit: FakeOctokit(USER_ROUTES), env: { MY_PAT: "ghp_custom" } },
-	);
-	assert.equal(await auth.mintToken({ kind: "github", repo: "o/r" }), "ghp_custom");
+test("pat is trimmed once: whitespace around the env value never reaches GitHub", async () => {
+	const auth = await makeGitHubAuth({}, { Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "  ghp_padded\n" } });
+	assert.equal(await auth.mintToken({ kind: "github", repo: "o/r" }), "ghp_padded");
 });
 
 test("pat empty env var is a config error (money hole: absent GITHUB_TOKEN runs anonymously)", async () => {
 	await assert.rejects(
-		() => makeGitHubAuth({ source: "pat" }, { Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "" } }),
-		(e) => e.piDispatchConfig === true,
+		() => makeGitHubAuth({}, { Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "" } }),
+		(e) => e.piDispatchConfig === true && /GITHUB_PAT/.test(e.message),
+	);
+});
+
+test("pat absent is a config error, never an empty token", async () => {
+	await assert.rejects(
+		() => makeGitHubAuth({}, { Octokit: FakeOctokit(USER_ROUTES), env: {} }),
+		(e) => e.piDispatchConfig === true && /GITHUB_PAT/.test(e.message),
 	);
 });
 
 test("pat whitespace-only env var is a config error", async () => {
 	await assert.rejects(
-		() => makeGitHubAuth({ source: "pat" }, { Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "   \t\n" } }),
+		() => makeGitHubAuth({}, { Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "   \t\n" } }),
 		(e) => e.piDispatchConfig === true,
 	);
 });
 
-// -- gh ------------------------------------------------------------------------------------------
-
-test("gh happy: mintToken returns the trimmed `gh auth token` stdout, selfId resolves", async () => {
-	const auth = await makeGitHubAuth(
-		{ source: "gh" },
-		{ Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ stdout: "ghs_ghtoken\n" }) },
-	);
-	assert.equal(auth.source, "gh");
-	assert.equal(auth.selfId, 4242);
-	assert.equal(await auth.mintToken("owner/repo"), "ghs_ghtoken");
-});
-
-test("gh mintToken(undefined) still resolves -- a local run.github job has no repo and gh ignores it", async () => {
-	const auth = await makeGitHubAuth(
-		{ source: "gh" },
-		{ Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ stdout: "ghs_ghtoken\n" }) },
-	);
-	assert.equal(await auth.mintToken(undefined), "ghs_ghtoken");
-});
-
-test("gh logged-out (exit 0, empty stdout) is a config error", async () => {
+test("pat identity refusal: a 401 is a tagged config error, so the service stops", async () => {
 	await assert.rejects(
-		() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ stdout: "" }) }),
-		(e) => e.piDispatchConfig === true,
+		() => makeGitHubAuth({}, { Octokit: FakeOctokit({ "GET /user": httpError(401) }), env: { GITHUB_PAT: "ghp_bad" } }),
+		(e) => e.piDispatchConfig === true && /could not resolve self identity/.test(e.message),
 	);
 });
 
-test("gh ENOENT (binary absent) is a config error", async () => {
-	const enoent = Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
-	await assert.rejects(
-		() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ error: enoent }) }),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-test("gh spawn errnos other than ENOENT are retryable, not a misconfiguration", async () => {
-	// Issue #316. `promisify(execFile)` overloads `error.code`: a SPAWN failure sets a string errno, a
-	// non-zero EXIT sets the integer status. The old comment called both deterministic and tagged both, so
-	// a host momentarily out of file descriptors told the issue author to check whether the gh CLI was
-	// installed, refunded the reserve and never retried the delivery. The binary is installed. It was
-	// installed a second ago and it is installed now.
-	for (const code of ["EAGAIN", "EMFILE", "ENFILE", "ETIMEDOUT", "EPERM", "EIO"]) {
-		const error = Object.assign(new Error(`spawn gh ${code}`), { code });
+test("pat identity: a transient refusal stays untagged, so a supervisor restarts the service", async () => {
+	for (const [name, error] of [
+		["500", httpError(500)],
+		["429", httpError(429)],
+		["primary rate limit (403 + x-ratelimit-remaining: 0)", httpError(403, { response: { headers: { "x-ratelimit-remaining": "0" } } })],
+		["a network fault, which octokit reports as 500", Object.assign(httpError(500), { cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), { code: "ENOTFOUND" }) })],
+	]) {
 		await assert.rejects(
-			() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ error }) }),
-			(e) => e.piDispatchRetry === true && e.piDispatchConfig === undefined,
-			`${code} is the host being busy, not the operator being wrong`,
+			() => makeGitHubAuth({}, { Octokit: FakeOctokit({ "GET /user": error }), env: { GITHUB_PAT: "ghp_x" } }),
+			(e) => e.piDispatchConfig === undefined,
+			`${name} must throw untagged, so entryExitCode gives 1 and the supervisor restarts`,
 		);
 	}
 });
 
-test("gh ENOTDIR joins ENOENT on the determinate side -- a PATH component that is a file means absent", async () => {
-	const error = Object.assign(new Error("spawn gh ENOTDIR"), { code: "ENOTDIR" });
-	await assert.rejects(
-		() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ error }) }),
-		(e) => e.piDispatchConfig === true,
+test("the caller's logger reaches the Octokit client", async () => {
+	instances.length = 0;
+	const events = [];
+	await makeGitHubAuth(
+		{},
+		{ Octokit: FakeOctokit(USER_ROUTES), env: { GITHUB_PAT: "ghp_x" }, log: (event, fields) => events.push({ event, ...fields }) },
 	);
-});
-
-test("gh non-zero exit stays a config error -- the residual named in runGhAuthToken", async () => {
-	// A judgment call, recorded rather than derived. `gh auth token` exits 1 for a logged-out host far more
-	// often than for a locked keyring or a token refresh that could not reach the network, and separating
-	// the two needs a table of gh's own stderr strings. `code` is a NUMBER here, which is what the spawn
-	// arm keys on.
-	const error = Object.assign(new Error("Command failed: gh auth token"), { code: 1, stdout: "", stderr: "not logged in" });
-	await assert.rejects(
-		() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ error }) }),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-// -- app -----------------------------------------------------------------------------------------
-
-test("app happy: installation token minted, selfId is the bot-user id via the two-step", async () => {
-	const calls = [];
-	const auth = await makeGitHubAuth(
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_installtoken" }, calls }),
-			readFile: async () => "-----BEGIN RSA PRIVATE KEY-----\nx\n-----END RSA PRIVATE KEY-----\n",
-		},
-	);
-	assert.equal(auth.source, "app");
-	assert.equal(auth.selfId, 555123); // bot USER id, not the App id
-	assert.ok(Number.isInteger(auth.selfId));
-	assert.equal(await auth.mintToken({ kind: "github", repo: "some-owner/some-repo" }), "ghs_installtoken");
-});
-
-test("app happy with an inline key: mints without ever touching the filesystem (issue #208)", async () => {
-	const calls = [];
-	const pem = "-----BEGIN RSA PRIVATE KEY-----\ninline\n-----END RSA PRIVATE KEY-----\n";
-	let readFileCalls = 0;
-	const auth = await makeGitHubAuth(
-		// The shape loadGitHubAuth produces for a secrets-manager deployment: key in hand, no path at all.
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: undefined, privateKey: pem },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_installtoken" }, calls }),
-			readFile: async () => {
-				readFileCalls++;
-				throw new Error("a deployment with no key file must never reach the filesystem");
-			},
-		},
-	);
-	assert.equal(await auth.mintToken({ kind: "github", repo: "some-owner/some-repo" }), "ghs_installtoken");
-	assert.equal(readFileCalls, 0, "the inline key is used directly -- no read, no path, nothing to stat");
-});
-
-test("app mint strips the owner: repositoryNames gets the bare repo name", async () => {
-	const calls = [];
-	const auth = await makeGitHubAuth(
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_x" }, calls }),
-			readFile: async () => "PEM",
-		},
-	);
-	await auth.mintToken({ kind: "github", repo: "acme-corp/widgets" });
-	assert.deepEqual(calls[0].repositoryNames, ["widgets"]);
-	assert.equal(calls[0].type, "installation");
-	assert.equal("permissions" in calls[0], false, "a job mint passes NO narrowing -- the installation's full grant is the job token's contract");
-});
-
-test("app mint passes a caller's permissions narrowing through to the installation token (issue #231)", async () => {
-	// The receiver's closer-permission lookup mints with { metadata: "read" }, so the token it holds
-	// for that one question cannot write anything even if leaked. The narrowing is the CALLER's
-	// statement; absent means the full grant (the job path above pins that half).
-	const calls = [];
-	const auth = await makeGitHubAuth(
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_x" }, calls }),
-			readFile: async () => "PEM",
-		},
-	);
-	await auth.mintToken({ repo: "acme-corp/widgets", permissions: { metadata: "read" } });
-	assert.deepEqual(calls[0].permissions, { metadata: "read" }, "the narrowing reaches GitHub, not just our own bookkeeping");
-	assert.deepEqual(calls[0].repositoryNames, ["widgets"], "narrowing never loosens the repo scope");
-});
-
-test("an answer draft's App token is scoped to one repository with read permissions, despite a supplied wider grant (#772)", async () => {
-	const calls = [];
-	const auth = await makeGitHubAuth({ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" }, { Octokit: FakeOctokit(APP_ROUTES), createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_x" }, calls }), readFile: async () => "PEM" });
-	await auth.mintToken({ kind: "github", purpose: "answer-draft", repo: "acme-corp/widgets", permissions: { contents: "write", issues: "write" } });
-	assert.deepEqual(calls[0].repositoryNames, ["widgets"]);
-	assert.deepEqual(calls[0].permissions, { contents: "read", issues: "read", pull_requests: "read", metadata: "read" });
-});
-
-test("app mintToken with no repo (local run.github job) is a config error steering to gh/pat", async () => {
-	const calls = [];
-	const auth = await makeGitHubAuth(
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ result: { token: "ghs_x" }, calls }),
-			readFile: async () => "PEM",
-		},
-	);
-	for (const repo of [undefined, ""]) {
-		await assert.rejects(
-			() => auth.mintToken({ kind: "github", repo }),
-			(e) => e.piDispatchConfig === true && /run\.github/.test(e.message),
-			`repo=${JSON.stringify(repo)}`,
-		);
-	}
-	assert.equal(calls.length, 0, "the refusal happens before any mint attempt");
-});
-
-test("app missing config (no installationId) is a config error before any network call", async () => {
-	await assert.rejects(
-		() =>
-			makeGitHubAuth(
-				{ source: "app", appId: "123", privateKeyPath: "/keys/app.pem" },
-				{ Octokit: FakeOctokit(APP_ROUTES), createAppAuth: fakeCreateAppAuth({ result: {}, calls: [] }), readFile: async () => "PEM" },
-			),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-test("app unreadable PEM is a config error", async () => {
-	const enoent = Object.assign(new Error("no such file"), { code: "ENOENT" });
-	await assert.rejects(
-		() =>
-			makeGitHubAuth(
-				{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/nope.pem" },
-				{
-					Octokit: FakeOctokit(APP_ROUTES),
-					createAppAuth: fakeCreateAppAuth({ result: {}, calls: [] }),
-					readFile: async () => {
-						throw enoent;
-					},
-				},
-			),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-test("app mint 503 is a retryable InfraRetry", async () => {
-	const auth = await appAuthThrowing(httpError(503));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint 429 is a retryable InfraRetry", async () => {
-	const auth = await appAuthThrowing(httpError(429));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint 403 + retry-after (secondary rate limit) is a retryable InfraRetry", async () => {
-	const auth = await appAuthThrowing(httpError(403, { response: { headers: { "retry-after": "60" } } }));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint network fault (ENOTFOUND) is a retryable InfraRetry", async () => {
-	// The fixture carries status 500 because that is what octokit produces for a network fault: its fetch
-	// wrapper turns EVERY rejection into RequestError(message, 500) and keeps the original as `cause`.
-	// Measured against the pinned @octokit/request for both ENOTFOUND and ECONNREFUSED. The old fixture had
-	// no status at all, which octokit cannot emit, so it was exercising a branch this path never reaches
-	// (issue #316).
-	const enotfound = Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), {
-		status: 500,
-		cause: Object.assign(new Error("getaddrinfo ENOTFOUND api.github.com"), { code: "ENOTFOUND" }),
-	});
-	const auth = await appAuthThrowing(enotfound);
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint: a STATUS-LESS rejection is determinate, because it never reached the network", async () => {
-	// Octokit always sets a status, so a rejection without one came from local code. In practice that is
-	// @octokit/auth-app signing the JWT with a key it cannot import: an OpenSSH-format key, or one whose
-	// base64 was mangled by a copy-paste. Measured: that throws a plain Error with code ERR_OSSL_UNSUPPORTED
-	// and no status. Retrying it is paying to be told the same thing twice, and the operator needs the
-	// message, not a restart.
-	const badKey = Object.assign(new Error("error:1E08010C:DECODER routines::unsupported"), { code: "ERR_OSSL_UNSUPPORTED" });
-	const auth = await appAuthThrowing(badKey);
-	await assert.rejects(
-		() => auth.mintToken({ kind: "github", repo: "o/r" }),
-		(e) => e.piDispatchConfig === true && /before any request was made/.test(e.message) && /ERR_OSSL_UNSUPPORTED/.test(e.message),
-	);
-});
-
-test("app mint: a TLS trust fault is determinate even though octokit dresses it as a 500", async () => {
-	// The carve-out would not exist on this path without an explicit check: a private CA in front of a GHES
-	// instance, or a TLS-inspecting proxy re-signing api.github.com, arrives with status 500 and the real
-	// cause underneath. 500 is transient, so the status arm alone would retry it forever rather than naming
-	// NODE_EXTRA_CA_CERTS.
-	const tls = Object.assign(new Error("self-signed certificate"), {
-		status: 500,
-		cause: new TypeError("fetch failed", { cause: Object.assign(new Error("self-signed certificate"), { code: "DEPTH_ZERO_SELF_SIGNED_CERT" }) }),
-	});
-	const auth = await appAuthThrowing(tls);
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-test("app mint: a SECONDARY rate limit that carries neither header is still retryable", async () => {
-	// GitHub's guidance is a three-rung ladder ending in "otherwise wait at least a minute", because a
-	// secondary limit can arrive with no retry-after AND a non-zero quota. Octokit's own throttling plugin
-	// reads the BODY for exactly this reason. Without it, the busiest deployments get the public
-	// misconfiguration comment one row below the case #316 was filed for.
-	const secondary = Object.assign(new Error("You have exceeded a secondary rate limit. Please wait a few minutes before you try again."), {
-		status: 403,
-		response: { headers: { "x-ratelimit-remaining": "4998" } },
-	});
-	const auth = await appAuthThrowing(secondary);
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint: a 403 whose body is not JSON is a WAF interstitial, not a scope refusal", async () => {
-	// A Cloudflare or WAF challenge in front of a GHES instance answers 403 with HTML. The forge's API did
-	// not refuse anything; something in front of it did, and that is indeterminate.
-	const waf = Object.assign(new Error("<html>Attention Required</html>"), {
-		status: 403,
-		response: { headers: { "content-type": "text/html; charset=UTF-8" } },
-	});
-	const auth = await appAuthThrowing(waf);
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint: a 403 whose body IS JSON stays a determinate scope refusal", async () => {
-	// The bound on the arm above. A real GitHub permission refusal is JSON, and it must keep saying so.
-	const scope = Object.assign(new Error("Resource not accessible by integration"), {
-		status: 403,
-		response: { headers: { "content-type": "application/json; charset=utf-8", "x-ratelimit-remaining": "4998" } },
-	});
-	const auth = await appAuthThrowing(scope);
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-test("gh killed by a signal is the host under pressure, not a misconfiguration", async () => {
-	// A child killed by a signal sets code to null and signal to the name, so the string-errno arm never
-	// sees it and it fell to the determinate side: an OOM-killed gh told the issue author their deployment
-	// was misconfigured.
-	const killed = Object.assign(new Error("Command failed: gh auth token"), { code: null, signal: "SIGKILL", stdout: "", stderr: "" });
-	await assert.rejects(
-		() => makeGitHubAuth({ source: "gh" }, { Octokit: FakeOctokit(USER_ROUTES), execFile: fakeExecFile({ error: killed }) }),
-		(e) => e.piDispatchRetry === true && /SIGKILL/.test(e.message),
-	);
-});
-
-test("app mint 401 (bad credentials) is a deterministic config error", async () => {
-	const auth = await appAuthThrowing(httpError(401));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-test("app mint 404 (unknown installation) is a deterministic config error", async () => {
-	const auth = await appAuthThrowing(httpError(404));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-test("app mint: GitHub's PRIMARY rate limit is retryable, and it does not send retry-after", async () => {
-	// The defect issue #316 was filed for. The old classifier tested `retry-after` alone, which is the
-	// SECONDARY limit; the primary limit answers 403 with `x-ratelimit-remaining: 0` and
-	// `x-ratelimit-reset`, clears within the hour, and fell through to the catch-all as a permanent
-	// refusal with a public comment blaming the operator. `receiver/src/poller.mjs` has read this pair
-	// correctly since it was written.
-	const auth = await appAuthThrowing(httpError(403, { response: { headers: { "x-ratelimit-remaining": "0", "x-ratelimit-reset": "1757000000" } } }));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchRetry === true);
-});
-
-test("app mint: a plain 403 stays determinate -- a scope problem is not a rate limit", async () => {
-	// The bound on the arm above. Widening 403 wholesale would turn a genuinely revoked permission into a
-	// job that retries and then fails silently instead of saying what is wrong.
-	const auth = await appAuthThrowing(httpError(403));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-test("app mint: 408, 425 and an unparseable status are retryable", async () => {
-	// 408 and 425 are about timing by definition. `status: 0` is what @octokit/request-error stores when
-	// the status will not parse, and 0 is a NUMBER, so the old `status !== undefined` catch-all turned "we
-	// could not tell what happened" into a permanent refusal.
-	for (const status of [408, 425, 0]) {
-		const auth = await appAuthThrowing(httpError(status));
-		await assert.rejects(
-			() => auth.mintToken({ kind: "github", repo: "o/r" }),
-			(e) => e.piDispatchRetry === true,
-			`status ${status} is indeterminate or transient, never a misconfiguration`,
-		);
-	}
-});
-
-test("app mint: an ordinary determinate 4xx is still a config error", async () => {
-	// The catch-all still exists and still has work to do; what changed is what reaches it.
-	const auth = await appAuthThrowing(httpError(422));
-	await assert.rejects(() => auth.mintToken({ kind: "github", repo: "o/r" }), (e) => e.piDispatchConfig === true);
-});
-
-/** Build an app auth whose mint call throws `error` (construction still succeeds via canned routes). */
-async function appAuthThrowing(error) {
-	return makeGitHubAuth(
-		{ source: "app", appId: "123", installationId: "456", privateKeyPath: "/keys/app.pem" },
-		{
-			Octokit: FakeOctokit(APP_ROUTES),
-			createAppAuth: fakeCreateAppAuth({ error, calls: [] }),
-			readFile: async () => "PEM",
-		},
-	);
-}
-
-// -- source validation ---------------------------------------------------------------------------
-
-test("unknown source is a config error", async () => {
-	await assert.rejects(
-		() => makeGitHubAuth({ source: "oauth" }, {}),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-test("missing source is a config error", async () => {
-	await assert.rejects(
-		() => makeGitHubAuth({}, {}),
-		(e) => e.piDispatchConfig === true,
-	);
-});
-
-test("the gh source refuses to mint for a run.resume job, and the escape hatch is explicit", () => {
-	// CONST-TOKEN-SCOPED-PER-JOB assumes the credential is an ENV VALUE that dies with the container. A
-	// transcript is a FILE: any command that echoed an auth header persists the token to host disk, replayed
-	// into the next job on that key. This source is the operator's whole gh login -- full-scope and
-	// NON-EXPIRING -- so the one bound that would contain that is absent exactly where it lasts longest.
-	assert.throws(
-		() => assertResumeAllowedOnGhSource({ kind: "github", repo: "o/r", resume: true }, false),
-		(e) => e.piDispatchConfig === true && /non-expiring/.test(e.message),
-		"refused at MINT time, so it costs no budget slot and no clone -- the app-source refusal's shape",
-	);
-
-	// This must NOT become a general gh-source refusal: only an armed job is affected.
-	for (const job of [{ kind: "github", repo: "o/r" }, { kind: "github", repo: "o/r", resume: false }, { kind: "local" }, undefined, null]) {
-		assert.doesNotThrow(() => assertResumeAllowedOnGhSource(job, false), `job ${JSON.stringify(job)} is unarmed and must mint exactly as before`);
-	}
-
-	// The escape hatch is strictly `=== true`, so a hand-set string cannot arm it by accident.
-	assert.doesNotThrow(() => assertResumeAllowedOnGhSource({ resume: true }, true), "PI_SESSIONS_ALLOW_GH_SOURCE=1 lets an operator take the trade explicitly");
-	for (const weak of ["1", "true", 1, {}]) {
-		assert.throws(() => assertResumeAllowedOnGhSource({ resume: true }, weak), (e) => e.piDispatchConfig === true, `allowGhResume ${JSON.stringify(weak)} must not open the hatch`);
-	}
+	assert.equal(typeof instances[0].log?.warn, "function", "octokitLogOptions' `log` is passed");
+	assert.equal(typeof instances[0].request?.log?.warn, "function", "and its `request` logger beside it (issue #530)");
 });

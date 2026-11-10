@@ -17,12 +17,11 @@
  *
  * The receiver holds no JOB credentials. Minting a job's scoped token is the worker's business, per
  * container, per job (CONST-TOKEN-SCOPED-PER-JOB), and that claim keeps its full force. What the
- * receiver ALSO uses, since issue #231, is a per-close-delivery token for a permission QUESTION --
- * does the account that closed this item hold write access (CONST-TRIGGER-AUTHOR-GATE's close arm).
- * On the App source that token is minted repo-scoped AND narrowed to metadata:read (the mint passes
- * the narrowing through, so a leak of it can write nothing); on pat/gh it is the operator's own
- * standing token, already resident in this process's env, used for one read. Never a job credential
- * on any source: no container ever receives it, and it exists only for the lookup it served.
+ * receiver ALSO uses, since issue #231, is the operator's own PAT for a permission QUESTION -- does the
+ * account that closed this item hold write access (CONST-TRIGGER-AUTHOR-GATE's close arm). The PAT is
+ * taken from `GITHUB_PAT`, the one GitHub credential, and it is the operator's standing token, already
+ * resident in this process's env, used for one read. Never a job credential: no container receives it,
+ * and it exists only for the lookup it served.
  *
  * DES-ADMIN-VIA-PI-EXTENSION: this process exposes exactly one surface, the webhook handler. There is no
  * admin, dashboard, or admin-extension route here -- the admin surface is a pi extension in the
@@ -30,7 +29,7 @@
  */
 
 import http from "node:http";
-import { workerName } from "@edgehero/pi-dispatch/config";
+import { configError, workerName } from "@edgehero/pi-dispatch/config";
 import { makeReceiverPublisher, receiverBind } from "@edgehero/pi-dispatch/receiver-status";
 import { readFileSync, watch } from "node:fs";
 import { dirname, basename } from "node:path";
@@ -129,10 +128,10 @@ export async function startReceiver(
 	// every forge, so the bound the operator configured is the bound every arm obeys.
 	const retryOpts = { windowMs: cfg.identityRetryWindowMs, log, now, sleep };
 
-	// The GitHub arm, when the deployment actually serves GitHub -- now conditional, exactly like the three
-	// sibling arms below (issue #99). It was unconditional, and since GITHUB_AUTH_SOURCE defaults to `gh` and
-	// the gh path shells out to `gh auth token`, a GitLab-only deployment could not boot without installing
-	// and logging into the GitHub CLI it has no use for.
+	// The GitHub arm, when the deployment actually serves GitHub -- conditional, exactly like the three
+	// sibling arms below (issue #99). `servesGithub` is decided from the triggers file alone, and there is
+	// no GitHub App or `gh` fallback any more: the arm's credential is `GITHUB_PAT`, so a deployment with
+	// github triggers and no PAT refuses here, naming the key, before it can listen.
 	//
 	// SKIPPING THIS IS ONLY SAFE BECAUSE THE ROUTE IS ALSO ABSENT. `cfg.servesGithub` gates both: this
 	// identity resolution AND whether `makeReceiver` mounts `/` at all. `selfId` is the bot-loop guard's sole
@@ -143,6 +142,9 @@ export async function startReceiver(
 	let selfId;
 	let resolveAuthority;
 	if (cfg.servesGithub) {
+		if (!cfg.github?.pat) {
+			throw configError("GITHUB_PAT is required when a github trigger is configured: the receiver must resolve the harness's own GitHub identity before it may listen, and a fine-grained, repository-scoped PAT is the only credential it accepts");
+		}
 		// HARD-FAIL identity resolution -- still NO try/catch here. A DETERMINATE throw (absent/bad github
 		// auth, an unresolvable id, anything tagged piDispatchConfig) propagates same-tick and the server
 		// below is never created: without selfId the bot-loop guard cannot run, so refusing to boot is the
@@ -162,16 +164,14 @@ export async function startReceiver(
 		// Issue #530: the GitHub client's own warnings go through this JSON log, never Octokit's plain console lines.
 		const auth = await retryIdentity(() => makeAuth(cfg.github, { log: (event, fields) => log({ event, ...fields }) }), { forge: "github", ...retryOpts });
 		selfId = auth.selfId;
-		log({ event: "self_identity", id: selfId, source: cfg.github.source });
-		// The lookup token asks the mint to narrow to metadata:read -- the App path honors it GitHub-side,
-		// so the token this process holds for the permission question cannot write even if leaked; the
-		// pat/gh sources cannot narrow (the operator's standing token is what it is, and it already lives
-		// in this process's env), which is why the header above words the claim per source.
+		log({ event: "self_identity", id: selfId, source: "GITHUB_PAT" });
+		// The lookup token is the operator's own PAT: it cannot be narrowed GitHub-side, which is why it is
+		// never a job credential -- it stays in this process and answers one read per close delivery.
 		resolveAuthority = makeResolveGitHubAuthorityFn({ mintToken: (job) => auth.mintToken({ ...job, permissions: { metadata: "read" } }) });
 	} else {
 		// Said out loud, because the alternative is an operator staring at a label trigger that does nothing.
-		// The two ways out are the two signals `decideServesGithub` reads, so the line names both.
-		log({ event: "github_arm_skipped", reason: "no github triggers and GITHUB_AUTH_SOURCE unset" });
+		// The one way out is a github rule in the triggers file (this decision's only signal).
+		log({ event: "github_arm_skipped", reason: "no github triggers configured" });
 	}
 
 	// Ride-out connection (no failFast): the receiver is long-running and should survive a Valkey

@@ -100,7 +100,10 @@ function OTHER_VENUE(name, { spawned = [], reap = async () => ({ reaped: true })
 
 async function runStart({ env = {}, whileRunning, makeUpdatesRunner, makeDoctorSpawner, makeAuth, makeHost, makeGitLabAuth, makeGitLabHost, makeReaper, makeLogSink, makeRecordWriter, makeLogReaper, makeRetentionSweep, makeRunContainer, makeHostRegistry, makeScopeClaimSweeper, makeClaimSweeper, makeBackendRegistry, extraBackends, order, stops, now, authResolveTimeoutMs, resolveDockerEndpoint, readDaemonFacts, jobUserIdentity, bootImage, loadConfig, ensureJobsDir, ensureUnderAccountRoot, judgeValkey, sleep, watchFs, watchScopedLimits, watchProjects, readMirroredRecord, readProgressKey, makeCpuReserve, listJobContainers, workerHostBudget, workerRunningJobs, makePrepareWorkspace, makeLiveTranscriptOpener, makeStatusCommenter, makeRunMirror, makePortfolioSnapshot, finishModelAttempt, durable = {} } = {}) {
 	// Every real socket in this helper must use the injected test service, including callers that only override other settings.
-	env = { VALKEY_URL, ...env };
+	// GITHUB_PAT is the one github credential, and its presence is what arms the github forge here. Only a
+	// test that injects `makeAuth` gets one: a boot with the REAL auth would otherwise reach api.github.com
+	// from CI. A deployment with no PAT has no github arm, which is the property the wiring must keep.
+	env = { VALKEY_URL, ...(makeAuth ? { GITHUB_PAT: "ghp_test_fixture" } : {}), ...env };
 	const secretsResolverCalls = [];
 	const calls = [];
 	const registered = {};
@@ -459,7 +462,7 @@ test("approval expiry: restart finds retained future work after its declaration 
 
 test("github configured: real mintToken and the host's isDefaultBranchProtected are wired", { skip }, async () => {
 	const host = fakeHost();
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 123, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 123, source: "pat" });
 	const { deps, logs } = await runStart({ makeAuth, makeHost: () => host });
 
 	const ghJob = { kind: "github", repo: "o/r" };
@@ -475,7 +478,7 @@ test("github configured: real mintToken and the host's isDefaultBranchProtected 
 	assert.equal(typeof deps.packageCanary?.check, "function", "issue #796: without it every canary is refused");
 	assert.equal(typeof deps.packageCanary?.install, "function");
 	assert.ok(
-		logs.some((l) => l.event === "self_identity" && l.id === 123 && l.source === "gh"),
+		logs.some((l) => l.event === "self_identity" && l.id === 123 && l.source === "pat"),
 		"a self_identity log carrying { id, source } must be emitted",
 	);
 });
@@ -486,7 +489,7 @@ test("comment is best-effort: a rejecting postStatusComment does not reject the 
 			throw new Error("comment API down");
 		},
 	});
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { deps } = await runStart({ makeAuth, makeHost: () => host });
 
 	const ghJob = { kind: "github", repo: "o/r", issueNumber: 7, id: "j1" };
@@ -560,7 +563,7 @@ test("a TRANSIENT boot auth failure is re-resolved on the next job, not carried 
 	const makeAuth = async () => {
 		attempt += 1;
 		if (attempt === 1) throw new Error("connect ETIMEDOUT api.github.com:443"); // untagged: transient
-		return { mintToken: async () => "tok", selfId: 777, source: "gh" };
+		return { mintToken: async () => "tok", selfId: 777, source: "pat" };
 	};
 	const { deps, logs } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 
@@ -626,7 +629,7 @@ test("a re-resolve that fails DETERMINATELY stops re-resolving -- the second job
 	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	await assert.rejects(
 		() => deps.mintToken({ kind: "github", repo: "o/r" }),
-		// The REAL reason, not the generic "configure GITHUB_AUTH_SOURCE". `ensureAuth` used to turn a
+		// The REAL reason, not the generic "configure GITHUB_PAT". `ensureAuth` used to turn a
 		// determinate failure into null, which sent every such job to the fallback message while the
 		// specific one was already in hand and went only to the log.
 		(e) => e.piDispatchConfig === true && /bad app credentials/.test(e.message),
@@ -646,7 +649,7 @@ test("comment re-resolves a transiently-failed forge, and still falls back to st
 	const makeAuth = async () => {
 		attempt += 1;
 		if (attempt === 1) throw new Error("connect ETIMEDOUT");
-		return { mintToken: async () => "tok", selfId: 1, source: "gh" };
+		return { mintToken: async () => "tok", selfId: 1, source: "pat" };
 	};
 	const { deps } = await runStart({ makeAuth, makeHost: () => host });
 	await deps.comment({ kind: "github", repo: "o/r", id: "j1" }, "Refused: ...");
@@ -676,7 +679,7 @@ test("a factory that throws SYNCHRONOUSLY does not leave the forge dead for the 
 		attempt += 1;
 		if (attempt === 1) return Promise.reject(new Error("connect ETIMEDOUT")); // boot: transient
 		if (attempt === 2) throw new Error("sync boom"); // NOT a rejection: a synchronous throw
-		return Promise.resolve({ mintToken: async () => "tok", selfId: 3, source: "gh" });
+		return Promise.resolve({ mintToken: async () => "tok", selfId: 3, source: "pat" });
 	};
 	let clock = 1_000_000;
 	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost(), now: () => clock });
@@ -704,7 +707,7 @@ test("a forge that accepts the connection and never answers does not wedge the q
 		attempt += 1;
 		if (attempt === 1) throw new Error("connect ETIMEDOUT");
 		await blackHole; // accepts, and answers nothing
-		return { mintToken: async () => "tok", selfId: 4, source: "gh" };
+		return { mintToken: async () => "tok", selfId: 4, source: "pat" };
 	};
 	// The production bound is ten seconds. Injected down to 50ms here because the property is that a bound
 	// EXISTS, and proving it by waiting ten real seconds would be paid for on every run for the life of
@@ -774,7 +777,7 @@ test("concurrent jobs share ONE re-resolve, not one per job", { skip }, async ()
 		attempt += 1;
 		if (attempt === 1) throw new Error("connect ETIMEDOUT");
 		await gate;
-		return { mintToken: async () => "tok", selfId: 5, source: "gh" };
+		return { mintToken: async () => "tok", selfId: 5, source: "pat" };
 	};
 	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	const jobs = [deps.mintToken({ kind: "github", repo: "o/r" }), deps.mintToken({ kind: "github", repo: "o/r" }), deps.mintToken({ kind: "github", repo: "o/r" })];
@@ -790,7 +793,7 @@ test("a local job still reaches github auth, because run.github borrows it", { s
 	const makeAuth = async () => {
 		attempt += 1;
 		if (attempt === 1) throw new Error("connect ETIMEDOUT");
-		return { mintToken: async () => "tok", selfId: 9, source: "gh" };
+		return { mintToken: async () => "tok", selfId: 9, source: "pat" };
 	};
 	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.equal(await deps.mintToken({ kind: "local", repo: "o/r" }), "tok");
@@ -798,7 +801,7 @@ test("a local job still reaches github auth, because run.github borrows it", { s
 
 test("resolveDefaultBranchSha is threaded into prepareWorkspace (C2)", { skip }, async () => {
 	const host = fakeHost();
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 5, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 5, source: "pat" });
 	const { captured, deps } = await runStart({ makeAuth, makeHost: () => host });
 
 	// makePrepareWorkspace receives resolveDefaultBranchSha and closes over it; the closure is what
@@ -820,7 +823,7 @@ test("subscription store custody reaches both live pickup and final local prepar
 	const { makePrepareWorkspace: realPrepare } = await import("../src/prepare.mjs");
 	await runStart({
 		env: { PI_WORKER_NAME: "custody-worker", PI_AUTH_CONNECTIONS_FILE: policyFile, PI_AUTH_STORE_DIR: storeDir, PI_SETTINGS_FILE: join(deployment, "settings.json"), PI_JOBS_DIR: join(deployment, "jobs"), PI_SWEEP_INTERVAL_HOURS: "0" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 5, source: "gh" }), makeHost: () => fakeHost(),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 5, source: "pat" }), makeHost: () => fakeHost(),
 		makePrepareWorkspace: options => { prepareCalls.push(options); return realPrepare(options); },
 		whileRunning: async ({ deps }) => {
 			const job = { kind: "local", folder, provider: "unmanaged", model: "test-model", task: "work", github: true, repo: "org/repo" };
@@ -837,7 +840,7 @@ test("subscription store custody reaches both live pickup and final local prepar
 
 test("the boot reaper runs BEFORE the worker starts draining (strays cleared first)", { skip }, async () => {
 	const order = [];
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const makeReaper = () => async () => {
 		order.push("reap");
 	};
@@ -846,7 +849,7 @@ test("the boot reaper runs BEFORE the worker starts draining (strays cleared fir
 });
 
 test("a reaper that throws does NOT reject startWorker (boot is best-effort)", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const makeReaper = () => async () => {
 		throw new Error("docker daemon down");
 	};
@@ -856,7 +859,7 @@ test("a reaper that throws does NOT reject startWorker (boot is best-effort)", {
 });
 
 test("job_completed carries reason when the result has one and omits it otherwise", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.equal(typeof handlers.completed, "function", "startWorker must register a completed handler");
 
@@ -872,7 +875,7 @@ test("job_completed carries reason when the result has one and omits it otherwis
 });
 
 test("chain wiring: the outbox collectChain is wired into deps as a function", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.equal(typeof deps.collectChain, "function", "the outbox chain collector must be wired into deps.collectChain");
 });
@@ -880,7 +883,7 @@ test("chain wiring: the outbox collectChain is wired into deps as a function", {
 // Cron wiring. DEFAULT env => no PI_TRIGGERS_FILE => schedules=[] => reconcile is skipped, so these
 // assert the wiring that runs even with cron disabled: no live Valkey required.
 test("cron wiring: a stalled listener is registered and schedules_installed precedes worker_started", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 9, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 9, source: "pat" });
 	const { captured, logs, registered } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 
 	// (a) the money backstop is keyed on "stalled", and it is INVOKED here rather than merely counted.
@@ -924,7 +927,7 @@ test("cron wiring: a stalled listener is registered and schedules_installed prec
 // Run-history wiring (REQ-LOCAL-JOB-VISIBILITY). DEFAULT env => no live Valkey / disk required: the
 // harness injects inert run-history factories, so these assert the wiring, not the I/O.
 test("run-history: makeLogSink receives config.logsDir and the captureJobLogs gate (both polarities)", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 
 	const on = await runStart({ env: { PI_LOGS_DIR: "/tmp/pi-logs", PI_CAPTURE_JOB_LOGS: "1" }, makeAuth, makeHost: () => fakeHost() });
 	assert.equal(on.logSinkCalls.length, 1, "makeLogSink must be constructed exactly once");
@@ -939,7 +942,7 @@ test("run-history: makeLogSink receives config.logsDir and the captureJobLogs ga
 });
 
 test("run-history: recordRun is passed to createWorker as a TOP-LEVEL arg, not nested under deps", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { captured } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.equal(typeof captured.recordRun, "function", "recordRun must be a top-level createWorker arg");
 	assert.equal(captured.deps.recordRun, undefined, "recordRun must NOT be nested under deps");
@@ -949,7 +952,7 @@ test("run-history: recordRun is passed to createWorker as a TOP-LEVEL arg, not n
 // cannot exist so readOverlay yields the normal empty overlay and getSettings resolves purely from
 // env/default config -- no real settings.json on the host is consulted.
 test("runtime settings: getSettings is a top-level createWorker arg resolving effective settings; the static cap arg is gone", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const settingsFile = "/pi-dispatch-nonexistent/does-not-exist/settings.json";
 	const { captured, logs } = await runStart({ env: { PI_SETTINGS_FILE: settingsFile }, makeAuth, makeHost: () => fakeHost() });
 
@@ -981,7 +984,7 @@ test("runtime settings: getSettings is a top-level createWorker arg resolving ef
 });
 
 test("runtime settings: a boot overlay sets the constructed concurrency, and worker_started reports that effective value (not the env default)", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	// A real settings.json whose concurrency (7) differs from the env default (3), so the boot-effective
 	// value is distinguishable from config.concurrency in both the constructor arg and the log.
 	const dir = tempDir("pi-settings-");
@@ -1000,7 +1003,7 @@ test("runtime settings: a boot overlay sets the constructed concurrency, and wor
 test("run-history: the log reaper sweeps aged history BEFORE the worker starts draining", { skip }, async () => {
 	const order = [];
 	let reaperArgs;
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const makeLogReaper = (args) => {
 		reaperArgs = args;
 		return () => {
@@ -1022,7 +1025,7 @@ test("run-history: the log reaper sweeps aged history BEFORE the worker starts d
 // REQ-GLOBAL-PI-OVERLAY staged packages. The overlay dir EXISTS (config refuses a missing one at load)
 // but holds no packages.json -- the shape of every deployment that never opted into staged packages.
 test("staged packages: an overlay with no packages.json boots to packagePaths [] and logs it -- never a boot failure", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const overlay = tempDir("pi-global-");
 	try {
 		const { captured, logs, runContainerCalls } = await runStart({ env: { PI_GLOBAL_PI_DIR: overlay }, makeAuth, makeHost: () => fakeHost() });
@@ -1044,7 +1047,7 @@ test("staged packages: an overlay with no packages.json boots to packagePaths []
 });
 
 test("staged packages: no overlay configured means no manifest read and no packages_manifest_absent noise", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { logs, runContainerCalls } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.deepEqual(runContainerCalls[0].packagePaths(), [], "no overlay -> the empty staged set");
 	assert.ok(!logs.some((l) => l.event === "packages_manifest_absent"), "a deployment with no overlay at all has nothing to warn about");
@@ -1064,7 +1067,7 @@ function whileCapturingLogs(fn) {
 // The reason the boot-time read became a per-job one (issue #102): `pi install` then `import-pi` is now a
 // routine act, so a re-stage that only lands after a restart is a stale set nobody asked for.
 test("staged packages: a re-stage after boot reaches the NEXT job, with no worker restart", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const overlay = tempDir("pi-global-");
 	try {
 		const { runContainerCalls } = await runStart({ env: { PI_GLOBAL_PI_DIR: overlay }, makeAuth, makeHost: () => fakeHost() });
@@ -1089,7 +1092,7 @@ test("staged packages: a re-stage after boot reaches the NEXT job, with no worke
 // PI_PACKAGES at all, so the runner's assertPackagePathsExist would have nothing to refuse and the job
 // would run WITHOUT its tools and still exit 0 -- the silent no-op, arrived at by a different road.
 test("staged packages: a manifest that goes unreadable after boot keeps the last-known-good set and says so", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const overlay = tempDir("pi-global-");
 	try {
 		mkdirSync(join(overlay, "packages"), { recursive: true });
@@ -1117,7 +1120,7 @@ test("the free credential gate resolves against the SAME inputs buildContainerEn
 	// PI_AUTH_FROM_PI=0 on BOTH runs. Without it the verdicts are decided by whether the developer's own
 	// ~/.pi/agent/auth.json holds an anthropic login, which is exactly the "decided by the shell" failure
 	// this repo has already been bitten by once.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const withKey = await runStart({ env: { PI_AUTH_FROM_PI: "0", ANTHROPIC_API_KEY: "sk-ant-x", PI_FORWARD_ENV: "MY_CUSTOM_KEY" }, makeAuth, makeHost: () => fakeHost() });
 	const gate = withKey.deps.checkProviderCredential;
 	assert.equal(typeof gate, "function", "the processor is wired with the gate at all");
@@ -1156,7 +1159,7 @@ test("the MCP check is wired into the processor, reads the boot's overlay per jo
 	// Driven rather than read: the processor's own default refuses every job that names a server, so a wiring that
 	// dropped this dep (or put it on a backend bundle the processor never sees) would refuse each run.mcp job as
 	// mcp-config-invalid with nothing else failing.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const overlay = tempDir("pi-global-");
 	try {
 		const { deps } = await runStart({ env: { PI_GLOBAL_PI_DIR: overlay, PI_AUTH_FROM_PI: "0" }, makeAuth, makeHost: () => fakeHost() });
@@ -1190,7 +1193,7 @@ test("the secrets resolver and the container builder are handed the SAME host en
 	// without `hostEnv` and fell back to `process.env`, while makeRunContainer got startWorker's own `env`.
 	// Identical on the shipped path, where both are process.env, and divergent under an injected one, which
 	// is the hazard start.mjs already names for sessionsDir. One deployment value, one place.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { runContainerCalls, secretsResolverCalls } = await runStart({
 		env: { PI_FORWARD_ENV: "MY_CUSTOM_KEY", PI_SECRET_PROFILES: "default:/opt/pi/resolve.sh" },
 		makeAuth,
@@ -1205,7 +1208,7 @@ test("the secrets resolver and the container builder are handed the SAME host en
 test("the image preflight and the container factory are wired from the SAME config.jobImage", { skip }, async () => {
 	// If these two ever drifted, the worker would check one tag and run another -- the preflight would pass
 	// on an image the container never uses, and the guarantee it exists to provide would be a lie.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { runContainerCalls, imagePreflightCalls } = await runStart({ env: { PI_JOB_IMAGE: "pi-job:0.1.0" }, makeAuth, makeHost: () => fakeHost() });
 
 	assert.equal(imagePreflightCalls.length, 1, "the preflight is constructed exactly once, at boot");
@@ -1214,7 +1217,7 @@ test("the image preflight and the container factory are wired from the SAME conf
 });
 
 test("run-history: worker_started announces logsDir, captureJobLogs and logRetentionDays (a path is not PII)", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { logs } = await runStart({
 		env: { PI_LOGS_DIR: "/tmp/pi-logs", PI_CAPTURE_JOB_LOGS: "1", PI_LOG_RETENTION_DAYS: "7" },
 		makeAuth,
@@ -1234,7 +1237,7 @@ test("a gitlab job routes to the gitlab forge's auth and host, never to github's
 	const glHost = fakeHost({ isDefaultBranchProtected: async (ref) => (asked.gitlab.push(ref?.projectId), true) });
 	const { deps } = await runStart({
 		env: { GITLAB_TOKEN: "glpat-x" },
-		makeAuth: async () => ({ mintToken: async () => "gh-tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "gh-tok", selfId: 1, source: "pat" }),
 		makeHost: () => ghHost,
 		makeGitLabAuth: async () => ({ mintToken: async () => "gl-tok", selfId: 2, source: "pat" }),
 		makeGitLabHost: () => glHost,
@@ -1254,7 +1257,7 @@ test("a gitlab job routes to the gitlab forge's auth and host, never to github's
 
 test("with no GITLAB_TOKEN there is no gitlab forge, and a gitlab job refuses at mint", { skip }, async () => {
 	const { deps } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "gh-tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "gh-tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 	});
 	await assert.rejects(
@@ -1332,7 +1335,7 @@ test("once wiring: deps.checkOnceSpent reads PI_TRIGGERS_FILE when set, and excu
 	try {
 		const triggersPath = join(dir, "triggers.json");
 		writeFileSync(triggersPath, JSON.stringify({ triggers: [onceEntry(40, { at: "2026-08-28T09:00:00.000Z", jobId: "gh-first" })] }));
-		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 		const { deps } = await runStart({ env: { PI_TRIGGERS_FILE: triggersPath }, makeAuth, makeHost: () => fakeHost() });
 
 		assert.equal(typeof deps.checkOnceSpent, "function", "the one-shot pre-spend check must be wired into deps");
@@ -1352,7 +1355,7 @@ test("once wiring: deps.checkOnceSpent reads PI_TRIGGERS_FILE when set, and excu
 });
 
 test("C2: no portfolio wiring survives -- no flag check, no plan collector, no snapshot", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { deps, captured } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	assert.equal(deps.checkPortfolioFlag, undefined);
 	assert.equal(deps.collectPlan, undefined);
@@ -1374,7 +1377,7 @@ test("once wiring: with PI_TRIGGERS_FILE unset the fallback is <cwd>/triggers.js
 	try {
 		writeFileSync(join(dir, "triggers.json"), JSON.stringify({ triggers: [onceEntry(40, { at: "2026-08-28T09:00:00.000Z", jobId: "gh-first" })] }));
 		process.chdir(dir);
-		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 		const { deps } = await runStart({ makeAuth, makeHost: () => fakeHost() }); // PI_TRIGGERS_FILE absent from env
 		assert.deepEqual(
 			await deps.checkOnceSpent(onceEffectiveJob(40), { queueJobId: "gh-other" }),
@@ -1404,7 +1407,7 @@ test("once wiring: writeRecord lands strictly BEFORE the disarm, for all three r
 			const marks = JSON.parse(readFileSync(triggersPath, "utf8")).triggers.map((t) => t.on.disarmed?.jobId ?? null);
 			observed.push({ jobId: record.jobId, outcome: record.outcome, marks });
 		};
-		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+		const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 		const { captured } = await runStart({ env: { PI_TRIGGERS_FILE: triggersPath }, makeAuth, makeHost: () => fakeHost(), makeRecordWriter });
 
 		const at = "2026-08-28T09:00:00.000Z";
@@ -1783,7 +1786,7 @@ test("model endpoints: a declared worker name arms the fleet lease and sweeps th
 		const swept = [];
 		const { captured } = await runStart({
 			env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL, PI_MODEL_ENDPOINTS_FILE: file },
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 			makeHost: () => fakeHost(),
 			makeReaper: () => async () => ({ reaped: true }),
 			makeScopeClaimSweeper: () => async () => ({ swept: 0, skipped: false }),
@@ -1846,7 +1849,7 @@ test("the live-edit watchers are CLOSED with the worker that armed them", { skip
 
 		const { captured, logs } = await runStart({
 			env: { VALKEY_URL, PI_TRIGGERS_FILE: triggersPath, PI_PAUSE_WINDOWS_FILE: pausePath, PI_SCOPED_LIMITS_FILE: limitsPath, PI_PROJECTS_FILE: projectsPath },
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 			makeHost: () => fakeHost(),
 		});
 
@@ -1955,7 +1958,7 @@ test("a boot that refuses AFTER the handoff still drains what it opened", { skip
 				runStart({
 					env: { VALKEY_URL, PI_TRIGGERS_FILE: triggersPath },
 					stops,
-					makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+					makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 					makeHost: () => fakeHost(),
 					makeHostRegistry: (args) => {
 						const real = makeHostRegistry(args);
@@ -2003,7 +2006,7 @@ test("a refusal from a DIFFERENT post-handoff point stops the worker too -- the 
 				runStart({
 					env: { VALKEY_URL, PI_PAUSE_WINDOWS_FILE: pausePath },
 					stops,
-					makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+					makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 					makeHost: () => fakeHost(),
 					makeRetentionSweep: () => ({
 						start: () => {
@@ -2026,7 +2029,7 @@ test("a refusal from a DIFFERENT post-handoff point stops the worker too -- the 
 test("every log line carries the host", { skip }, async () => {
 	const { logs } = await runStart({
 		env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 	});
 	const emitted = logs.filter((l) => l.event);
 	assert.ok(emitted.length > 0);
@@ -2036,7 +2039,7 @@ test("every log line carries the host", { skip }, async () => {
 test("a call site that passes its own host is OVERRIDDEN, never trusted", { skip }, async () => {
 	const { deps } = await runStart({
 		env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 	});
 	// The stamp sits AFTER the spread, so the closure's value wins: no call site knows better than this
 	// one which process wrote a line, and one that passed `host` would be lying by construction.
@@ -2049,7 +2052,7 @@ test("a call site that passes its own host is OVERRIDDEN, never trusted", { skip
 test("the worker is NAMED, the registry is closed on shutdown, and the boot line announces both host and digest", { skip }, async () => {
 	const { captured, logs } = await runStart({
 		env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 	});
 
 	// Naming the BullMQ Worker is what makes getWorkers() rows tell hosts apart, and it stamps
@@ -2091,7 +2094,7 @@ test("an unreachable Valkey cannot hang boot, and a HANG is what unreachable mea
 		const { captured, logs } = await Promise.race([
 			runStart({
 				env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL, PI_TRIGGERS_FILE: triggersFile },
-				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 				makeHostRegistry: (args) => makeHostRegistry({ ...args, redis: hanging, timeoutMs: 50 }),
 			}),
 			// NOT unref'd: an unref'd rejection timer does not fire when the hang is the only thing left, so
@@ -2112,7 +2115,7 @@ test("an unreachable Valkey cannot hang boot, and a HANG is what unreachable mea
 });
 
 test("the boot scope-claim sweep actually RUNS, and is told whether the reaper enumerated", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 
 	// The headline defect this pins: `makeReaper` returned nothing at all, so `?.reaped === true` was
 	// always false and the whole sweep was dead code that nobody noticed. Every reaper fake in this file
@@ -2130,7 +2133,7 @@ test("the boot scope-claim sweep actually RUNS, and is told whether the reaper e
 });
 
 test("a reaper that could not enumerate passes reaped:false, and the sweep declines", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 
 	// The money finding: freeing a slot for a container that may still be running lets ANOTHER host start
 	// one alongside it. The reaper's `docker ps` is inside its own try, so a daemon blip means this host
@@ -2147,7 +2150,7 @@ test("a reaper that could not enumerate passes reaped:false, and the sweep decli
 });
 
 test("an UNDECLARED worker name never sweeps a shared keyspace it does not participate in", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 
 	const swept = [];
 	await runStart({
@@ -2165,7 +2168,7 @@ test("a named run leaves NO host-queue keys behind in the test Valkey", { skip }
 	// until something reads the live keyspace for host queues -- and `discoverHostQueues`, which the kill
 	// switch depends on, does exactly that. A future integration test for it would otherwise see queues no
 	// test created and pass, or fail, for reasons unrelated to what it was checking.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { makeRedisClient } = await import("../src/connection.mjs");
 	const probe = makeRedisClient(VALKEY_URL);
 	probe.on("error", () => {});
@@ -2217,7 +2220,7 @@ test("startWorker CONNECTS the registry to the processor, and to the abort (#227
 	};
 	let registryArgs = null;
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		extraBackends: [far],
 		makeBackendRegistry: (args) => {
@@ -2251,7 +2254,7 @@ test("the run record resolves a venue with the SAME default the registry dispatc
 	let registryArgs = null;
 	const records = [];
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		makeBackendRegistry: (args) => {
 			registryArgs = args;
@@ -2550,7 +2553,7 @@ async function settleListeners() {
 test("a TERMINAL failed attempt comments ONCE through the real adapter; a retried one comments nothing and job_failed stays byte-identical", { skip }, async () => {
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ makeAuth, makeHost: () => host });
 
 	// finishedOn is BullMQ's own terminal decision: set on the non-retry branch alone, visible here
@@ -2577,7 +2580,7 @@ test("a TERMINAL failed attempt comments ONCE through the real adapter; a retrie
 test("PI_ON_FAILURE fires for the paid terminals only: terminal-failed and policy worker-abort/runner-policy/provider-auth-refused, nothing else", { skip }, async () => {
 	// An unresolvable command still proves the THREADING (the on_failure line is the hook's own), while
 	// spawning nothing on a test machine.
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ env: { PI_ON_FAILURE: "/nope/pi-notify-does-not-exist" }, makeAuth, makeHost: () => fakeHost() });
 
 	const fired = async (drive) => {
@@ -2619,7 +2622,7 @@ test("PI_ON_FAILURE fires for the paid terminals only: terminal-failed and polic
 });
 
 test("issue #502: the model gates are wired: the real catalog, and PI_ALLOWED_MODELS from env into the processor's deps", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const listed = await runStart({ env: { PI_ALLOWED_MODELS: "anthropic/claude-haiku-4-5,openai/gpt-x" }, makeAuth, makeHost: () => fakeHost() });
 	assert.deepEqual(listed.deps.allowedModels, ["anthropic/claude-haiku-4-5", "openai/gpt-x"], "the env list reaches the processor through deps");
 	assert.equal(typeof listed.deps.checkModelsKnown, "function", "the model-exists gate is wired, not left at its admit-everything default");
@@ -2630,7 +2633,7 @@ test("issue #502: the model gates are wired: the real catalog, and PI_ALLOWED_MO
 });
 
 test("with PI_ON_FAILURE unset, a terminal failure produces no on_failure line and the existing lines are unchanged", { skip }, async () => {
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ makeAuth, makeHost: () => fakeHost() });
 	const from = bootLines.length;
 	handlers.failed({ id: "j1", data: { kind: "github", repo: "o/r" }, attemptsMade: 2, finishedOn: 9 }, new Error("x"));
@@ -2683,7 +2686,7 @@ const stalledError = async () => {
 async function lostLockBoot({ env = {}, readMirroredRecord } = {}) {
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const out = await runStart({ env: { PI_ON_FAILURE: "/nope/pi-notify-does-not-exist", ...env }, makeAuth, makeHost: () => host, ...(readMirroredRecord ? { readMirroredRecord } : {}) });
 	const drive = async (job, err) => {
 		const from = bootLines.length;
@@ -2699,7 +2702,7 @@ test("a finished job's model attempt key gets its expiry in the listeners: compl
 	writeFileSync(join(logsDir, "gh-41.json"), `${JSON.stringify(lostLockRecord("gh-41"))}\n`);
 	const finished = [];
 	let refuse = false;
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({
 		env: { PI_LOGS_DIR: logsDir },
 		makeAuth,
@@ -2862,7 +2865,7 @@ test("LIVE: a job whose lock is lost while its processor runs is run once, neith
 	const logsDir = tempDir("pi-lost-lock-live-");
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	// The REAL record writer and the REAL listeners and lookup, from a real boot; only the queue below is this test's.
 	const { captured, handlers } = await runStart({ env: { PI_LOGS_DIR: logsDir, PI_ON_FAILURE: "/nope/pi-notify-does-not-exist" }, makeAuth, makeHost: () => host, makeRecordWriter: realRecordWriter });
 
@@ -2960,7 +2963,7 @@ test("LIVE: a job whose lock is lost while its processor runs is run once, neith
 test("a terminal LOCAL failure comments into the log fallthrough with the fixed sentence, and posts nothing to any forge (review finding)", { skip }, async () => {
 	const forgeCalls = [];
 	const host = fakeHost({ postStatusComment: async () => void forgeCalls.push(1) });
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ makeAuth, makeHost: () => host });
 	const from = bootLines.length;
 	handlers.failed({ id: "L-1", data: { kind: "local", folder: "/Users/op/private-project" }, attemptsMade: 2, finishedOn: 9 }, new Error("x"));
@@ -2985,7 +2988,7 @@ test("a real err.reason token rides the hook's argv end to end, through a REAL s
 	// ambient process.env (the #309 rule every spawner in start.mjs follows -- review finding).
 	writeFileSync(script, `#!/bin/sh\necho "$@ marker=$INJECTED_ENV_MARKER" >> "${out}"\n`);
 	chmodSync(script, 0o755);
-	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" });
+	const makeAuth = async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" });
 	const { handlers } = await runStart({ env: { PI_ON_FAILURE: script, INJECTED_ENV_MARKER: "threaded" }, makeAuth, makeHost: () => fakeHost() });
 	handlers.failed({ id: "gh-9", data: { kind: "github", repo: "o/r" }, attemptsMade: 2, finishedOn: 9 }, Object.assign(new Error("the runtime could not start the container, exit 125"), { reason: "container-never-started" }));
 	// A real child: poll for its write rather than guessing its scheduling, on a WALL CLOCK. The bound is a
@@ -3047,7 +3050,7 @@ test("an endpoint read that timed out refuses a floor UNTAGGED, so the superviso
 test("without a floor a redirected docker CLI boots, logs it once without credentials, and gates each job only by the floor", { skip }, async () => {
 	let answer = { local: false, context: "remote", endpoint: "ssh://remote", reason: null, transient: false };
 	const { captured, logs } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		resolveDockerEndpoint: async () => answer,
 	});
@@ -3081,7 +3084,7 @@ test("a floor asking only credentialTransit=asserted BOOTS on a redirected CLI a
 	// it is met, and only the operator's pointing the CLI elsewhere is being asserted.
 	const { captured, logs } = await runStart({
 		env: { PI_BACKEND_FLOOR: "credentialTransit=asserted" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		resolveDockerEndpoint: REMOTE_ENDPOINT,
 	});
@@ -3096,7 +3099,7 @@ test("with a floor, a context switched AFTER boot refuses the next job before it
 	let answer = { local: true, context: "desktop-linux", endpoint: "unix:///x.sock", reason: null, transient: false };
 	const { captured, logs } = await runStart({
 		env: { PI_BACKEND_FLOOR: "credentialTransit=enforced" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		resolveDockerEndpoint: async () => answer,
 	});
@@ -3129,7 +3132,7 @@ test("a rootless daemon or a root worker refuses to BOOT when local is the defau
 		["desktop-linux", DOCKER_FACTS({ os: "Docker Desktop" }), LINUX_ID(1234), /Docker Desktop on Linux/],
 	]) {
 		const order = [];
-		const makeAuth = async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" });
+		const makeAuth = async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "pat" });
 		await assert.rejects(
 			() => runStart({ readDaemonFacts, jobUserIdentity, order, makeAuth, makeHost: () => fakeHost(), makeReaper: () => (order.push("makeReaper"), async () => ({ reaped: true })) }),
 			(err) => err.piDispatchConfig === true && pattern.test(err.message),
@@ -3139,7 +3142,7 @@ test("a rootless daemon or a root worker refuses to BOOT when local is the defau
 	}
 	// Non-vacuous: the same recorders on a decidable daemon do see forge auth, so an empty array above means "before".
 	const order = [];
-	await runStart({ readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: LINUX_ID(1234), order, makeAuth: async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), makeReaper: () => (order.push("makeReaper"), async () => ({ reaped: true })) });
+	await runStart({ readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: LINUX_ID(1234), order, makeAuth: async () => (order.push("makeAuth"), { mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), makeReaper: () => (order.push("makeReaper"), async () => ({ reaped: true })) });
 	assert.ok(order.includes("makeAuth") && order.includes("makeReaper"), JSON.stringify(order));
 });
 
@@ -3160,7 +3163,7 @@ test("an unanswered or unreadable daemon BOOTS, and says what it could not decid
 		["transient", async () => ({ answered: false, reason: "timeout", transient: true }), "unknown"],
 		["unparseable", async () => ({ answered: false, reason: "unparseable", transient: false }), "unmappable"],
 	]) {
-		const { logs } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts, jobUserIdentity: LINUX_ID(1234) });
+		const { logs } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts, jobUserIdentity: LINUX_ID(1234) });
 		assert.equal(logs.find((l) => l.event === "job_user")?.mode, mode, label);
 		assert.equal(logs.find((l) => l.event === "worker_started")?.jobUser?.mode, mode, `${label}: the boot line names it`);
 	}
@@ -3168,7 +3171,7 @@ test("an unanswered or unreadable daemon BOOTS, and says what it could not decid
 
 test("on macOS the job user is the image's whatever the daemon says, and its one facts read feeds the runtime observations (#345)", { skip }, async () => {
 	let reads = 0;
-	const { logs } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts: async () => (reads++, { answered: false, reason: "daemon-unreachable", transient: true }), jobUserIdentity: { platform: "darwin", release: "24.6.0", euid: 501, egid: 20 } });
+	const { logs } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts: async () => (reads++, { answered: false, reason: "daemon-unreachable", transient: true }), jobUserIdentity: { platform: "darwin", release: "24.6.0", euid: 501, egid: 20 } });
 	assert.equal(reads, 1, "read once, for the observations; the decision needs no fact");
 	const started = logs.find((l) => l.event === "worker_started");
 	assert.deepEqual(started.jobUser, { mode: "image", user: null, cause: "desktop-platform" });
@@ -3182,14 +3185,14 @@ test("the per-job gate: --user with HOME for another uid on an anyUid image, ref
 	// Never this machine's socket: the owner and group are the test's.
 	const stat = () => ({ uid: 0, gid: 2375 });
 
-	const other = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: { ...LINUX_ID(1234), stat }, resolveDockerEndpoint: async () => (endpointReads.push(1), endpoint) });
+	const other = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: { ...LINUX_ID(1234), stat }, resolveDockerEndpoint: async () => (endpointReads.push(1), endpoint) });
 	assert.ok(other.logs.some((l) => l.event === "job_image_any_uid_unsupported"), "the default image cannot run as this uid: said once at boot");
 	const reads = endpointReads.length;
 	assert.deepEqual(await other.captured.deps.jobUserPreflight(job, { capabilities: ["anyUid"], observed: { ok: true, endpoint } }), { user: "1234:1234", home: "/home/pi" });
 	assert.equal(endpointReads.length, reads, "the endpoint the observation just read is reused, never read twice for one job");
 	assert.deepEqual(await other.captured.deps.jobUserPreflight(job, { capabilities: [], observed: { ok: true, endpoint } }), { refused: "job-image-any-uid-unsupported", cause: "any-uid-unsupported" });
 
-	const shipped = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: { ...LINUX_ID(1001), stat } });
+	const shipped = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(), jobUserIdentity: { ...LINUX_ID(1001), stat } });
 	assert.ok(!shipped.logs.some((l) => l.event === "job_image_any_uid_unsupported"), "uid 1001 needs no anyUid");
 	assert.deepEqual(await shipped.captured.deps.jobUserPreflight(job, { capabilities: [], observed: { ok: true, endpoint } }), { user: null, home: null });
 });
@@ -3200,7 +3203,7 @@ test("the per-job gate refuses a docker-group primary gid through the socket it 
 	const stat = (path) => (statted.push(path), { uid: 0, gid: 2375 });
 	const bootEndpoint = { local: true, context: "default", endpoint: "unix:///run/pd-boot/docker.sock", reason: null, transient: false };
 	const { captured, logs } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: DOCKER_FACTS(),
 		jobUserIdentity: { ...LINUX_ID(1235, 2375), stat },
@@ -3219,7 +3222,7 @@ test("a job on another venue never reaches the job-user decision, and a changed 
 	let reads = 0;
 	const endpoint = { local: true, context: "default", endpoint: "unix:///run/pd-test/docker.sock", reason: null, transient: false };
 	const { captured, logs } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => (reads++, answer),
 		jobUserIdentity: { ...LINUX_ID(1234), stat: () => ({ uid: 0, gid: 2375 }) },
@@ -3249,7 +3252,7 @@ test("the per-job gate carries relabel: true from a local Podman daemon with SEL
 	const job = { kind: "github", repo: "o/r", target: { type: "issue", number: 1 } };
 	const stat = () => ({ uid: 0, gid: 2375 });
 	const start = (over, identity = LINUX_ID(1234)) =>
-		runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(over), jobUserIdentity: { ...identity, stat }, resolveDockerEndpoint: async () => endpoint });
+		runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(over), jobUserIdentity: { ...identity, stat }, resolveDockerEndpoint: async () => endpoint });
 	const podman = await start({ podman: true, selinux: true, bounds: null });
 	assert.deepEqual(await podman.captured.deps.jobUserPreflight(job, { capabilities: ["anyUid"], observed: { ok: true, endpoint } }), { user: "1234:1234", home: "/home/pi", relabel: true });
 	// The image-mode path relabels too: uid 1001 needs no --user, and its mounts are denied just the same.
@@ -3272,7 +3275,7 @@ test("the per-job gate carries relabel: true from a local Podman daemon with SEL
 test("PI_FORWARD_ENV=HOME on a worker that runs jobs under --user is said at boot", { skip }, async () => {
 	const { logs } = await runStart({
 		env: { PI_FORWARD_ENV: "HOME" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: DOCKER_FACTS(),
 		jobUserIdentity: { ...LINUX_ID(1234), stat: () => ({ uid: 0, gid: 2375 }) },
@@ -3283,7 +3286,7 @@ test("PI_FORWARD_ENV=HOME on a worker that runs jobs under --user is said at boo
 	// A uid-1001 worker runs jobs with no --user, so its forwarded HOME is really forwarded: nothing to say.
 	const shipped = await runStart({
 		env: { PI_FORWARD_ENV: "HOME" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: DOCKER_FACTS(),
 		jobUserIdentity: { ...LINUX_ID(1001), stat: () => ({ uid: 0, gid: 2375 }) },
@@ -3322,7 +3325,7 @@ test("per job: the runtime observations are read from the job user's cached fact
 	let current = endpoint;
 	const { captured } = await runStart({
 		env: { PI_BACKEND_FLOOR: "isolation=enforced" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => (reads++, facts()),
 		resolveDockerEndpoint: async () => current,
@@ -3355,7 +3358,7 @@ test("per job: the runtime observations are read from the job user's cached fact
 test("per job without a floor: an unanswered facts read is not cached, and the job-user gate reuses the observation's read instead of asking again (#345)", { skip }, async () => {
 	let reads = 0;
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => (reads++, { answered: false, reason: "timeout", transient: true }),
 		jobUserIdentity: LINUX_ID(1234),
@@ -3374,7 +3377,7 @@ test("a floor that needs a daemon observation waits the facts read's own bound a
 		await new Promise((resolve) => setTimeout(resolve, 5_600));
 		return DOCKER_FACTS()();
 	};
-	const { logs } = await runStart({ env: { PI_BACKEND_FLOOR: "isolation=enforced" }, readDaemonFacts: slow, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
+	const { logs } = await runStart({ env: { PI_BACKEND_FLOOR: "isolation=enforced" }, readDaemonFacts: slow, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost() });
 	assert.equal(logs.find((l) => l.event === "worker_started")?.daemonAppliesBounds, true, "past the 5 s image bound, and still credited");
 });
 
@@ -3383,7 +3386,7 @@ test("per job, a floor on the endpoint refuses a redirected CLI BEFORE any daemo
 	let current = { local: true, context: "default", endpoint: "unix:///x.sock", reason: null, transient: false };
 	const { captured } = await runStart({
 		env: { PI_BACKEND_FLOOR: "credentialTransit=enforced,isolation=enforced" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => (reads++, DOCKER_FACTS()()),
 		resolveDockerEndpoint: async () => current,
@@ -3548,7 +3551,7 @@ test("a registry that refuses at boot releases every handle boot opened, so the 
 		() =>
 			runStart({
 				env: { PI_WORKER_NAME: "refuses-at-registry", VALKEY_URL },
-				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 				makeHost: () => fakeHost(),
 				makeHostRegistry: (args) => {
 					const real = makeHostRegistry(args);
@@ -3579,7 +3582,7 @@ test("a deployment WITHOUT local boots on its own venue, and asks this host's do
 	const swept = [];
 	const { captured, logs, imagePreflightCalls, runContainerCalls } = await runStart({
 		env: { PI_WORKER_NAME: "no-docker-1", VALKEY_URL },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		// A floor naming an observation only `local` makes. With `local` blessed and unobserved this is the unanswered,
 		// transient arm, exit 1 forever; without it there is nothing of local's to observe.
@@ -3628,7 +3631,7 @@ test("with local blessed, a blessed venue with NO boot reaper never lets the sco
 	const swept = [];
 	const { logs } = await runStart({
 		env: { PI_WORKER_NAME: "mac-mini-1", VALKEY_URL },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		loadConfig: await configWith({ backends: ["local", "ghost"], defaultBackend: "local" }),
 		makeReaper: () => async () => ({ reaped: true }),
@@ -3645,7 +3648,7 @@ test("a blessed third venue seeds the host budget from its OWN lister and settle
 	let farList = async () => [{ name: "pi-job-old", memMiB: 512, cpuCenti: 100 }];
 	const spawned = [];
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		loadConfig: await configWith({ backends: ["far"], defaultBackend: "far" }),
 		listJobContainers: (bin) => async () => assert.fail(`the ${bin} lister ran for a venue that is not blessed`),
@@ -3676,7 +3679,7 @@ test("a third venue never borrows local's boot tolerance, and a registered but u
 		throw Object.assign(new Error(`${venue} does not answer`), { code: 125 });
 	};
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		loadConfig: await configWith({ backends: ["far", "local"], defaultBackend: "far" }),
 		readDaemonFacts: DOCKER_FACTS({ rootless: true }),
@@ -3694,7 +3697,7 @@ test("a venue whose words are observation-gated must carry an observationPreflig
 	// `local`'s table entry names `observedBy`. A bundle claiming that name with no preflight would have those words hold
 	// with nothing observing them; the absent answer admits every job.
 	const base = {
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		loadConfig: await configWith({ backends: ["far"], defaultBackend: "far" }),
 	};
@@ -3715,7 +3718,7 @@ test("a venue whose words are observation-gated must carry an observationPreflig
 test("with local blessed, the preflights are local's own members and a job naming another venue gets that venue's answer (#354)", { skip }, async () => {
 	let reads = 0;
 	const { captured } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => (reads++, { answered: true, facts: { shape: "docker", podman: false, os: "Test Linux", rootless: false, userns: false, bounds: { pids: true, memory: true }, serviceIsRemote: null, remoteSocketPath: null } }),
 		extraBackends: [OTHER_VENUE("far", { jobUserPreflight: async () => ({ user: "4242:4242", home: "/far" }) })],
@@ -3743,7 +3746,7 @@ test("a backend registry refusal releases every handle boot opened before it, no
 		() =>
 			runStart({
 				env: { PI_WORKER_NAME: "refused-1", VALKEY_URL },
-				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+				makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 				makeHost: () => fakeHost(),
 				makeBackendRegistry: () => {
 					throw new Error("registry refused this boot");
@@ -3774,7 +3777,7 @@ test("backend registry refusal settles both queue starts before closing and obse
 	const events = [];
 	const pending = runStart({
 		env: { VALKEY_URL, PI_WORKER_NAME: "refused-before-queue-ready", PI_SWEEP_INTERVAL_HOURS: "0" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		makeBackendRegistry: () => { throw refusal; },
 		durable: { makeRuntimeQueue: (_connection, options) => {
@@ -3807,7 +3810,7 @@ test("backend registry refusal settles both queue starts before closing and obse
 test("a TERMINAL netns-keeper-not-holding failure comments the keeper's fixed sentence and logs the reason whole (#458)", { skip }, async () => {
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const { handlers } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => host });
+	const { handlers } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => host });
 	const SENTENCE = `the rootless network keeper pi-dispatch-netns-keeper is not under this account's Podman ${"y".repeat(300)}`;
 	const err = Object.assign(new Error(SENTENCE), { reason: "netns-keeper-not-holding" });
 	const from = bootLines.length;
@@ -3830,7 +3833,7 @@ test("a TERMINAL netns-keeper-not-holding failure comments the keeper's fixed se
 test("a TERMINAL netns-keeper-crash-loop failure comments its own fixed sentence and logs the reason whole (#476)", { skip }, async () => {
 	const posted = [];
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
-	const { handlers } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => host });
+	const { handlers } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => host });
 	const SENTENCE = `the rootless network keeper pi-dispatch-netns-keeper keeps restarting (a crash loop): ${"z".repeat(300)}`;
 	const from = bootLines.length;
 	handlers.failed({ id: "c1", data: { kind: "github", repo: "o/r", target: { type: "issue", number: 7 } }, attemptsMade: 2, finishedOn: 123 }, Object.assign(new Error(SENTENCE), { reason: "netns-keeper-crash-loop" }));
@@ -3840,7 +3843,7 @@ test("a TERMINAL netns-keeper-crash-loop failure comments its own fixed sentence
 });
 
 test("local's job teardown uses the runtime THAT job was admitted on, recorded per job, even after the endpoint's answer changes mid-job (#452 gate round 5)", { skip }, async () => {
-	const { runContainerCalls, captured } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
+	const { runContainerCalls, captured } = await runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost() });
 	const opts = runContainerCalls[0];
 	const endpoint = { local: true, context: "default", endpoint: "unix:///test.sock", reason: null, transient: false };
 	const admittedOn = (daemonFacts) => ({ ok: true, endpoint, jobUser: { decision: { mode: "image", user: null, cause: "desktop-platform", reason: null }, socket: null, facts: daemonFacts, daemon: { answered: true, facts: daemonFacts } } });
@@ -3964,7 +3967,7 @@ test("the host row's fpProjects follows the LIVE projects ref through a reload (
 	await runStart({
 		watchProjects,
 		env: { VALKEY_URL, PI_WORKER_NAME: "fp-projects-1", PI_PROJECTS_FILE: projectsFile },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		makeHostRegistry: (args) => {
 			const real = makeHostRegistry(args);
@@ -3989,7 +3992,7 @@ test("C2: the host heartbeat carries no token fingerprint any more", { skip }, a
 	let fields = null;
 	await runStart({
 		env: { VALKEY_URL, PI_WORKER_NAME: "fp-c2-1" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		makeHostRegistry: (args) => {
 			const real = makeHostRegistry(args);
@@ -4004,7 +4007,7 @@ test("the per-job gate carries the daemon's CPU count beside the user, from the 
 	const job = { kind: "github", repo: "o/r", target: { type: "issue", number: 1 } };
 	const stat = () => ({ uid: 0, gid: 2375 });
 	const start = (over, identity = LINUX_ID(1234)) =>
-		runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(over), jobUserIdentity: { ...identity, stat }, resolveDockerEndpoint: async () => endpoint });
+		runStart({ makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), readDaemonFacts: DOCKER_FACTS(over), jobUserIdentity: { ...identity, stat }, resolveDockerEndpoint: async () => endpoint });
 	const counted = await start({ hostCpus: 4 });
 	assert.deepEqual(await counted.captured.deps.jobUserPreflight(job, { capabilities: ["anyUid"], observed: { ok: true, endpoint } }), { user: "1234:1234", home: "/home/pi", hostCpus: 4 });
 	const shipped = await start({ hostCpus: 4 }, LINUX_ID(1001));
@@ -4034,7 +4037,7 @@ test("issue #596 (gate round 1): a size flag the daemon drops rides beside the u
 	const { makeHostRegistry } = await import("../src/host-registry.mjs");
 	let published = null;
 	const { deps, runContainerCalls } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: async () => {
 			reads++;
@@ -4077,7 +4080,7 @@ test("issue #761: a newer settings overlay reaches the processor as { invalid, n
 	const dir = tempDir("pi-761-settings-");
 	const settingsFile = join(dir, "settings.json");
 	writeFileSync(settingsFile, `${JSON.stringify({ version: 2, maxTurns: 5 }, null, 2)}\n`);
-	const { captured, logs } = await runStart({ env: { PI_SETTINGS_FILE: settingsFile }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() });
+	const { captured, logs } = await runStart({ env: { PI_SETTINGS_FILE: settingsFile }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost() });
 	const read = captured.getSettings();
 	assert.equal(read.newer, true, "the processor defers on this (newer-release), never refuses");
 	assert.match(read.invalid, /written by a newer pi-dispatch \(version 2; this build understands 1\)/);
@@ -4184,7 +4187,7 @@ test("issue #761: a running worker's watchers carry a newer pause windows or tri
 	await runStart({
 		env: { PI_PAUSE_WINDOWS_FILE: pausePath, PI_TRIGGERS_FILE: triggersPath },
 		watchFs,
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		whileRunning: async ({ captured }) => {
 			assert.equal(captured.pauseWindowsNewer(), false, "a boot that loaded both starts not newer");
@@ -4209,7 +4212,7 @@ test("issue #596 (gate round 2): the boot's clock and log reach the job-user res
 	let fail = false;
 	const facts = DOCKER_FACTS();
 	const { deps, logsNow } = await runStart({
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		now: () => t,
 		readDaemonFacts: async () => (fail ? { answered: false, reason: "timeout", transient: true } : { ...(await facts()), facts: { ...(await facts()).facts, hostCpus: 14 } }),
@@ -4236,7 +4239,7 @@ test("issue #596, phase 2: createWorker is handed the host budget's inputs and t
 	const { captured } = await runStart({
 		workerHostBudget: { snapshot: () => ({ ...snap }), current: () => ({ memMiB: null, cpuCenti: null }), detail: () => detail },
 		env: { PI_HOST_MEMORY_BUDGET: "auto", PI_HOST_CPU_BUDGET: "6", PI_JOB_MEMORY: "2g" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		readDaemonFacts: DOCKER_FACTS({ hostCpus: 8, memTotalMiB: 16384 }),
 		jobUserIdentity: { ...LINUX_ID(1001), stat: () => ({ uid: 0, gid: 2375 }) },
@@ -4298,7 +4301,7 @@ test("issue #599, phase 2: the registry beat publishes the jobs running now and 
 	await runStart({
 		workerHostBudget: { snapshot: () => ({ waiters: 2 }), current: () => ({ memMiB: 8192, cpuCenti: 400 }), entries: () => entries },
 		workerRunningJobs: { list: () => running },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost(),
 		makeHostRegistry: (args) => {
 			const real = makeHostRegistry(args);
@@ -4324,7 +4327,7 @@ test("issue #599, phase 2: the registry beat publishes the jobs running now and 
 	running = [{ id: "local-0123456789abcdef", project: null, memMiB: 2048, cpuCenti: 200, at: 5 }];
 	const plain = await (async () => {
 		let fields = null;
-		await runStart({ workerRunningJobs: { list: () => running }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost(), makeHostRegistry: (args) => ({ ...makeHostRegistry(args), start: async (f) => void (fields = f) }) });
+		await runStart({ workerRunningJobs: { list: () => running }, makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost(), makeHostRegistry: (args) => ({ ...makeHostRegistry(args), start: async (f) => void (fields = f) }) });
 		return fields;
 	})();
 	assert.deepEqual([plain.waiters(), JSON.parse(plain.jobs()), plain.jobsMore()], ["", [{ id: "local-0123456789abcdef", p: null, m: 2048, c: 200, at: 5 }], "0"]);
@@ -4335,7 +4338,7 @@ test("issue #596, phase 2: the CPU reserve plan reads a systemd daemon's slice o
 		const endpoint = { local, context: "x", endpoint: local ? "unix:///run/pd-test/docker.sock" : "tcp://10.1.2.3:2375", reason: null, transient: false };
 		const syncs = [];
 		const { captured } = await runStart({
-			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+			makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 			makeHost: () => fakeHost(),
 			readDaemonFacts: DOCKER_FACTS({ hostCpus: 8, memTotalMiB: 16384, cgroupDriver: "systemd", cgroupVersion: "v2" }),
 			jobUserIdentity: { ...LINUX_ID(1001), stat: () => ({ uid: 0, gid: 2375 }) },
@@ -4355,7 +4358,7 @@ test("PI_LIVE_TRANSCRIPTS=0 hands local no publishing opener and the preparer no
 	const { EventEmitter } = await import("node:events");
 	const rc = await import("../src/run-container.mjs");
 	const { makePrepareWorkspace: realPrepare } = await import("../src/prepare.mjs");
-	const auth = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }), makeHost: () => fakeHost() };
+	const auth = { makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }), makeHost: () => fakeHost() };
 	const boot = async (env) => {
 		const prepareCalls = [];
 		const out = await runStart({
@@ -4433,7 +4436,7 @@ test("the opener gets both switches and a commenter factory over never-throwing 
 	const boot = (env) =>
 		runStart({
 			env,
-			makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "gh" }),
+			makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "pat" }),
 			makeHost: () => host,
 			makeLiveTranscriptOpener: (args) => (openers.push(args), () => ({ start() {}, finish: async () => {} })),
 			makeStatusCommenter: (args) => (commenters.push(args), { start() {}, update() {}, finish: async () => {}, commentId: () => null }),
@@ -4489,7 +4492,7 @@ test("completed draft provenance also guards late status, comment and label call
 	const calls = [], openers = [], commenters = [], digest = "a".repeat(64);
 	const host = fakeHost({ postStatusComment: async () => (calls.push("post"), { id: "77" }), editStatusComment: async () => calls.push("edit"), setParkedLabel: async () => calls.push("label") });
 	const { deps, recordRun } = await runStartWithRecords({
-		makeAuth: async () => ({ mintToken: async () => (calls.push("mint"), "tok"), selfId: 1, source: "gh" }), makeHost: () => host,
+		makeAuth: async () => ({ mintToken: async () => (calls.push("mint"), "tok"), selfId: 1, source: "pat" }), makeHost: () => host,
 		makeLiveTranscriptOpener: args => (openers.push(args), () => ({ start() {}, finish: async () => {} })),
 		makeStatusCommenter: args => (commenters.push(args), { start() {}, update() {}, finish: async () => {}, commentId: () => null }),
 		readProgressKey: async () => ({ commentId: "77", snapshot: { turn: 1, steps: 1 } }),
@@ -4518,7 +4521,7 @@ test("the status comment's final edit is the record's outcome, or retrying for a
 	const host = fakeHost({ postStatusComment: async () => ({ id: "7" }), editStatusComment: async () => {} });
 	const { recordRun, records } = await runStartWithRecords({
 		env: { PI_LIVE_TRANSCRIPTS: "0" },
-		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "pat" }),
 		makeHost: () => host,
 		makeLiveTranscriptOpener: (args) => (openers.push(args), () => ({ start() {}, finish: async () => {} })),
 		makeStatusCommenter: ({ jobId }) => ({ start() {}, update() {}, commentId: () => "7", finish: async (s, outcome) => void finishes.push([jobId, s?.turn ?? null, outcome]) }),
@@ -4554,7 +4557,7 @@ test("a record with no commenter edits the comment an earlier attempt posted, on
 	const host = fakeHost({ postStatusComment: async () => ({ id: "7" }), editStatusComment: async (job, target, id, text) => void edits.push([id, text, target]) });
 	const { recordRun } = await runStartWithRecords({
 		env: { PI_LIVE_TRANSCRIPTS: "0" },
-		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "pat" }),
 		makeHost: () => host,
 		readProgressKey: async ({ jobId }) => (reads.push(jobId), key),
 	});
@@ -4693,7 +4696,7 @@ async function durableStallBoot(t) {
 	const host = fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) });
 	const out = await runStartWithRecords({
 		env: { PI_LOGS_DIR: tempDir("pi-stall-"), PI_ON_FAILURE: "/nope/pi-notify-does-not-exist" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => host,
 		now: () => DURABLE_NOW,
 		durable: t.durable,
@@ -4851,7 +4854,7 @@ test("issue #645: the host-lost sweep is built over the recovery queues and the 
 	let handed = null;
 	const out = await runStartWithRecords({
 		env: { PI_ON_FAILURE: "/nope/pi-notify-does-not-exist" },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => fakeHost({ postStatusComment: async (_job, _target, text) => void posted.push(text) }),
 		now: () => DURABLE_NOW,
 		makeRetentionSweep: (args) => ((handed = args), { start() {}, sweepOnce: async () => {}, close: async () => {} }),
@@ -4936,7 +4939,7 @@ test("issue #645: a `.rN` job's record settles its RUN's status comment as retry
 	const host = fakeHost({ postStatusComment: async () => ({ id: "7" }), editStatusComment: async (job, target, id, text) => void edits.push([id, text]) });
 	const { recordRun } = await runStartWithRecords({
 		env: { PI_LIVE_TRANSCRIPTS: "0" },
-		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok-1", selfId: 1, source: "pat" }),
 		makeHost: () => host,
 		makeLiveTranscriptOpener: (args) => (openers.push(args), () => ({ start() {}, finish: async () => {} })),
 		makeStatusCommenter: ({ jobId }) => ({ start() {}, update() {}, commentId: () => "7", finish: async (s, outcome) => void finishes.push([jobId, outcome]) }),
@@ -5042,7 +5045,7 @@ async function newerFailedBoot({ env = {}, readMirroredRecord, pointer = NEWER_P
 	};
 	await runStart({
 		env: { PI_LOGS_DIR: logsDir, PI_ON_FAILURE: script, ...env },
-		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "gh" }),
+		makeAuth: async () => ({ mintToken: async () => "tok", selfId: 1, source: "pat" }),
 		makeHost: () => host,
 		makeRecordWriter: realRecordWriter,
 		now: () => DURABLE_NOW,

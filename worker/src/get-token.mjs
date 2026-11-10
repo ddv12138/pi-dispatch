@@ -1,139 +1,58 @@
 /**
- * GitHub authentication for the worker: mint a per-job scoped token and resolve the harness's own
- * identity ONCE at construction. Three sources -- a user PAT, the `gh` CLI, or a GitHub App -- each
- * yielding the same `{ mintToken, selfId, source }` shape so the processor never branches on source.
+ * GitHub authentication for the worker and receiver: ONE fine-grained, repository-scoped PAT in
+ * `GITHUB_PAT`, resolved once at construction into the same `{ mintToken, selfId, source }` shape the
+ * processor consumes, so the processor never branches on a source.
  *
- * CONST-TOKEN-SCOPED-PER-JOB: the App path mints one installation token per job, scoped to the one
- * repo, expiring in an hour. That short-lived, repo-scoped expiry IS the blast-radius bound for an
- * exfiltrated environment (App: 1h; a single-owner fine-grained PAT: operator-set, still short).
- * The per-job SCOPING claim is the App path's property alone: `gh` and `pat` hand out the
- * operator-scoped credential and rely on the operator keeping that credential narrow (the
- * INT-CONTAINER-RUNTIME-CONTRACT trade-off note).
+ * CONST-TOKEN-SCOPED-PER-JOB: the credential is the operator's own PAT -- the one scope and expiry their
+ * GitHub settings give it -- and every job hands that same token to its container. The per-job SCOPING
+ * claim is therefore the operator's, not this module's: the token should be fine-grained and limited to
+ * the repositories this deployment serves (the INT-CONTAINER-RUNTIME-CONTRACT trade-off note).
  *
  * Money-hole invariant: `mintToken` NEVER returns "" / null. `env-allowlist.mjs` forwards the token
  * as `GITHUB_TOKEN` only when truthy (`if (githubToken)`), so an empty token becomes an ABSENT
- * variable -- a silent anonymous run that still spends provider money. Every mint path routes through
+ * variable -- a silent anonymous run that still spends provider money. The mint routes through
  * `requireToken`, which throws `configError` on an empty/whitespace token instead of handing it out.
  *
- * All side-effecting collaborators are INJECTED (Octokit, createAppAuth, execFile, readFile, env),
- * each defaulting to the real import -- the budget.mjs / identity.mjs DI convention -- so the whole
- * module is testable offline with no GitHub, no `gh` binary, and no filesystem.
+ * All side-effecting collaborators are INJECTED (Octokit, env, log), each defaulting to the real import
+ * -- the budget.mjs / identity.mjs DI convention -- so the module is testable offline with no GitHub.
  */
 
-import { execFile as realExecFile } from "node:child_process";
-import { readFile as realReadFile } from "node:fs/promises";
-import { promisify } from "node:util";
-import { createAppAuth as realCreateAppAuth } from "@octokit/auth-app";
 import { Octokit as RealOctokit } from "@octokit/rest";
 import { configError } from "./config.mjs";
 import { resolveSelfId } from "./identity.mjs";
 import { octokitLogOptions } from "./octokit-log.mjs";
-import { InfraRetry } from "./processor.mjs";
-import { isDeterminateFetchFailure, isDeterminateFsCode, isTransientStatus, octokitHeaderReader } from "./transient.mjs";
 
 /**
- * Build the auth surface for `cfg = { source, patVar?, appId?, installationId?, privateKeyPath? }`.
+ * Build the auth surface for `cfg` (unused beyond the call-site convention: the credential is the
+ * process environment's `GITHUB_PAT`).
  *
  * Returns `{ mintToken, selfId, source }`:
  *   - `mintToken(job)` -> a non-empty token string (rejects, never returns empty). It takes the whole
- *     job, not a repo, because that is the shape every forge's auth can implement: each reads whatever
- *     identifies the target on its own side (here `job.repo`) without the caller knowing which forge it
- *     asked. A local `run.github` cron job carries no `repo`, which the App path refuses below.
- *   - `selfId` -> the acting identity's integer user id (resolved once here, for the bot-loop guard).
- *   - `source` -> the configured source, echoed back.
+ *     job because that is the shape every forge's auth implements; this one reads no part of it.
+ *   - `selfId` -> the token owner's integer user id (resolved once here, for the bot-loop guard).
+ *   - `source` -> always `"pat"`, echoed so a boot line can name the credential without printing it.
  *
- * Fails CLOSED at construction: an empty PAT, an unreadable PEM, a logged-out `gh`, or an
- * unresolvable identity throws before returning, so a misconfigured worker refuses to boot.
+ * Fails CLOSED at construction: an empty/blank PAT or an unresolvable identity throws before returning,
+ * so a misconfigured worker refuses to boot (and a job mints nothing) rather than running anonymously.
  */
 export async function makeGitHubAuth(cfg, deps = {}) {
-	// The explicit, named opt-out for the gh-source resume refusal below (PI_SESSIONS_ALLOW_GH_SOURCE).
-	// Read once at construction, and strictly `=== true` so a hand-set string cannot arm it.
-	const allowGhResume = cfg?.allowGhResume === true;
+	void cfg; // kept as the first argument so every forge's factory has one call shape
 	const {
 		Octokit = RealOctokit,
-		createAppAuth = realCreateAppAuth,
-		execFile = realExecFile,
-		readFile = realReadFile,
 		env = process.env,
-		// Issue #530: the caller's `(event, fields)` logger, which a GitHub client's own warnings go through. Every client
-		// here is built with `octokitLog`, so none prints Octokit's plain `GET /user - 401 ...` line into a JSON stream.
+		// Issue #530: the caller's `(event, fields)` logger, which a GitHub client's own warnings go through. The
+		// client is built with `octokitLogOptions`, so it never prints Octokit's plain `GET /user - 401 ...` line
+		// into a JSON stream.
 		log,
 	} = deps;
 	const quiet = octokitLogOptions(log);
 
-	const source = cfg?.source;
-
-	if (source === "pat") {
-		const patVar = cfg.patVar ?? "GITHUB_PAT";
-		const token = requireToken(env[patVar], patVar);
-		const octokit = new Octokit({ auth: token, ...quiet });
-		const selfId = await resolveSelfId({ source: "pat", octokit });
-		const mintToken = async () => requireToken(token, patVar);
-		return { mintToken, selfId, source };
-	}
-
-	if (source === "gh") {
-		const execFileAsync = promisify(execFile);
-		const ghToken = () => runGhAuthToken(execFileAsync);
-		// Resolve identity from a token minted once here; each job mints its own below.
-		const octokit = new Octokit({ auth: await ghToken(), ...quiet });
-		const selfId = await resolveSelfId({ source: "gh", octokit });
-		const mintToken = async (job) => {
-			assertResumeAllowedOnGhSource(job, allowGhResume);
-			return ghToken();
-		};
-		return { mintToken, selfId, source };
-	}
-
-	if (source === "app") {
-		if (!cfg.appId || !cfg.installationId || (!cfg.privateKeyPath && !cfg.privateKey)) {
-			throw configError(
-				"app auth requires appId, installationId, and one of privateKeyPath / privateKey (see .env.example)",
-			);
-		}
-		// The key is either already in hand (GITHUB_APP_PRIVATE_KEY, normalised and shape-checked at config
-		// load) or on disk. loadGitHubAuth refuses both-set, so this is a fallback, never a precedence rule.
-		const privateKey = cfg.privateKey ?? (await readPem(readFile, cfg.privateKeyPath));
-		// `log` rides in the auth options too: the per-job `createAppAuth` below builds no Octokit, and
-		// `@octokit/auth-app` otherwise defaults its own warnings to `console.warn`.
-		const auth = { appId: cfg.appId, privateKey, installationId: cfg.installationId, log: quiet.log };
-		// And its `request`: auth-app's default one is a bare `@octokit/request`, whose deprecation warning goes to
-		// `console`. An unauthenticated Octokit's `request` carries the quiet logger and adds no auth hook; the identity
-		// client below is not changed, since Octokit already hands its own request to its auth strategy.
-		const mintRequest = new Octokit({ ...quiet }).request;
-
-		// App-JWT client: resolveSelfId's app path reads GET /app then GET /users/{slug}[bot].
-		const octokit = new Octokit({ authStrategy: createAppAuth, auth, ...quiet });
-		const selfId = await resolveSelfId({ source: "app", octokit });
-
-		const mintToken = async (job) => {
-			const repo = job?.repo;
-			// A local run.github job carries no repo, and an installation token MUST be scoped to one
-			// (CONST-TOKEN-SCOPED-PER-JOB) -- refuse deterministically rather than mint broad.
-			if (!repo || !String(repo).trim()) {
-				throw configError(
-					"GITHUB_AUTH_SOURCE=app mints per-repo installation tokens, and a local run.github job has no repo to scope to -- use gh or pat for run.github cron triggers, or run the work as a github job",
-				);
-			}
-			const repositoryNames = [repoNameOf(repo)]; // scope to the ONE repo; owner stripped
-			// An optional PERMISSIONS narrowing (issue #231): the receiver's closer-permission lookup asks
-			// for `{ metadata: "read" }`, so the token it holds for that one question cannot write anything
-			// even if leaked. Job mints never pass this and keep the installation's full grant -- narrowing
-			// is the caller's statement of intent, not a default this mint could guess.
-			const permissions = job?.purpose === "answer-draft" ? { contents: "read", issues: "read", pull_requests: "read", metadata: "read" } : job?.permissions;
-			let minted;
-			try {
-				const appAuth = createAppAuth({ ...auth, request: mintRequest });
-				minted = await appAuth({ type: "installation", repositoryNames, ...(permissions && { permissions }) });
-			} catch (error) {
-				throw classifyAppMintError(error);
-			}
-			return requireToken(minted?.token, "app installation token");
-		};
-		return { mintToken, selfId, source };
-	}
-
-	throw configError(`makeGitHubAuth: unknown or missing source: ${JSON.stringify(source)}`);
+	const token = requireToken(env.GITHUB_PAT, "GITHUB_PAT");
+	const octokit = new Octokit({ auth: token, ...quiet });
+	const selfId = await resolveSelfId({ source: "pat", octokit });
+	// Trimmed once above; the same non-empty value every job gets.
+	const mintToken = async () => requireToken(token, "GITHUB_PAT");
+	return { mintToken, selfId, source: "pat" };
 }
 
 /**
@@ -144,150 +63,8 @@ function requireToken(raw, what) {
 	const token = (raw ?? "").trim();
 	if (!token) {
 		throw configError(
-			`${what}: empty token -- refusing to run (an absent GITHUB_TOKEN runs anonymously on paid infra)`,
+			`${what}: empty token -- refusing to run (an absent GITHUB_TOKEN runs anonymously on paid infra; set GITHUB_PAT to a fine-grained, repository-scoped PAT)`,
 		);
 	}
 	return token;
-}
-
-/**
- * Run `gh auth token` (array args, no shell) and return the trimmed token.
- *
- * THIS RUNS PER JOB, not only at boot: `makeGitHubAuth`'s gh arm mints once to resolve the identity and
- * then again on every delivery, so a fault here is a fault on the job path.
- *
- * `promisify(execFile)` overloads `error.code`, and issue #316 is what that overloading cost. A SPAWN
- * failure sets it to a string errno; a non-zero EXIT sets it to the integer status. The old comment
- * called both deterministic and tagged both, so `EAGAIN` and `EMFILE` under fd pressure -- the host being
- * momentarily busy -- were reported to the issue author as "is the gh CLI installed and logged in?" and
- * never retried.
- *
- * So: a spawn errno splits on the same allow-list every other absence question uses, and `ENOENT` (no
- * binary on PATH) stays determinate. A NON-ZERO EXIT stays determinate too, and that is a judgment call
- * rather than a derivation. `gh auth token` exits 1 for a logged-out host far more often than for a
- * locked keyring or a token refresh that could not reach the network, and the only thing that separates
- * them is a table of gh's own stderr strings, which is exactly the hand-maintained table this project
- * keeps deleting. The residual is named here rather than papered over.
- */
-async function runGhAuthToken(execFileAsync) {
-	let stdout;
-	try {
-		({ stdout } = await execFileAsync("gh", ["auth", "token"]));
-	} catch (error) {
-		const detail = error?.code ?? error?.message ?? "unknown";
-		// A child killed by a SIGNAL sets `code` to null and `signal` to the name. An OOM-killed `gh` is
-		// the host being under pressure, not a deployment that is wrong.
-		if (error?.signal) {
-			throw new InfraRetry(`\`gh auth token\` was killed by ${error.signal}; the host is under pressure`);
-		}
-		if (typeof error?.code === "string" && !isDeterminateFsCode(error.code)) {
-			throw new InfraRetry(`\`gh auth token\` could not be run (${detail}); the host is momentarily unable to spawn it`);
-		}
-		throw configError(`\`gh auth token\` failed (${detail}); is the gh CLI installed and logged in?`);
-	}
-	// Logged-out gh can exit 0 with empty stdout; an empty token is the money hole, so refuse it.
-	return requireToken(stdout, "gh auth token");
-}
-
-/** Read a PEM file as UTF-8, throwing configError on an unreadable or empty file. */
-async function readPem(readFile, path) {
-	let pem;
-	try {
-		pem = await readFile(path, "utf8");
-	} catch (error) {
-		throw configError(`could not read private key at ${path}: ${error?.code ?? error?.message ?? "unknown"}`);
-	}
-	if (!pem || !pem.trim()) {
-		throw configError(`private key at ${path} is empty`);
-	}
-	return pem;
-}
-
-/** `"owner/name"` -> `"name"`. The installation token is scoped by repo NAME, not `owner/name`. */
-function repoNameOf(repo) {
-	const name = String(repo ?? "").split("/").pop()?.trim() ?? "";
-	if (!name) {
-		throw configError(`app token mint: invalid repo, expected "owner/name", got ${JSON.stringify(repo)}`);
-	}
-	return name;
-}
-
-/**
- * Map an octokit/auth-app rejection to the retry-vs-config distinction the queue depends on.
- *
- * Determinate (configError): 401 bad credentials and 404 unknown installation, both of which refuse
- * identically until an operator changes something. Everything the shared rule calls transient is an
- * `InfraRetry`; every other 4xx is determinate.
- *
- * TWO CORRECTIONS TO WHAT THIS COMMENT USED TO CLAIM (issue #316), because the old version described a
- * function that did not exist.
- *
- * It said 403-with-retry-after was the rate-limit case. That is the SECONDARY limit. GitHub answers the
- * PRIMARY limit -- the one a busy deployment actually hits, and which clears within the hour -- with 403,
- * `x-ratelimit-remaining: 0` and no `retry-after`, so it fell through to the catch-all and became a
- * permanent refusal. 408 and 425 went the same way, and so did an unparseable status, which
- * `@octokit/request-error` reports as the NUMBER 0.
- *
- * It also said status-less network faults reach the bottom branch. They do not:
- * `@octokit/request`'s fetch wrapper turns every network rejection into `RequestError(message, 500)`, so
- * that branch is unreachable through octokit, and the 5xx arm has been doing the work all along.
- *
- * TWO CONSEQUENCES OF THAT SAME FACT, and they run in opposite directions.
- *
- * A TRUST OR REDIRECT FAULT ARRIVES WEARING A 500. The wrapper keeps the original rejection as `cause`,
- * so the chain is intact, but the status says 500 and 500 is transient. A private CA in front of a GHES
- * instance, or a TLS-inspecting corporate proxy re-signing `api.github.com`, would otherwise be retried
- * forever instead of naming `NODE_EXTRA_CA_CERTS`. So the determinate check runs FIRST.
- *
- * AND AN ABSENT STATUS MEANS THIS NEVER REACHED THE NETWORK. Octokit always sets one, so a status-less
- * rejection came from local code: `@octokit/auth-app` signing the JWT with a key that is not PKCS//8, the
- * commonest App setup mistake there is. That is determinate, and it used to be retried and then reported
- * as an infrastructure failure with the real reason nowhere an operator would look.
- */
-function classifyAppMintError(error) {
-	const status = typeof error?.status === "number" ? error.status : undefined;
-	const detail = error?.message ?? "unknown";
-
-	if (isDeterminateFetchFailure(error)) return configError(`app token mint refused: ${detail}`);
-	if (status === 401) return configError("app token mint refused: bad app credentials (401)");
-	if (status === 404) return configError("app token mint refused: unknown installation (404)");
-	if (status === undefined) {
-		// Local, and therefore the operator's. `code` is worth carrying: a bad PEM surfaces as an OpenSSL
-		// DECODER error whose code says more than its message does.
-		const code = error?.code ? `${error.code}: ` : "";
-		return configError(`app token mint failed before any request was made (${code}${detail})`);
-	}
-	if (isTransientStatus(status, octokitHeaderReader(error), detail)) {
-		return new InfraRetry(`app token mint: transient upstream refusal (${status})`);
-	}
-	return configError(`app token mint failed (${status}): ${detail}`);
-}
-
-/**
- * Refuse to mint the `gh` source's credential for a job that will persist its transcript
- * (REQ-RESUMABLE-SESSION x CONST-TOKEN-SCOPED-PER-JOB). Pure and total so the decision is testable
- * offline -- the gh path itself shells out to a real `gh`, and a security gate that needs a live CLI to
- * exercise is a gate nobody re-tests.
- *
- * Every property CONST-TOKEN-SCOPED-PER-JOB relies on assumes the credential is an ENV VALUE: it lives in
- * container memory and dies with the container, which is what makes `short-lived` do real work. A
- * persisted transcript is a FILE, and any command the agent ran that echoed its own authorization header
- * wrote the token into it -- on host disk, replayed into the next job on that key, for as long as
- * PI_SESSIONS_TTL_DAYS allows. This source is the operator's whole `gh` login: full-scope and
- * NON-EXPIRING, so the one bound that would have contained that exposure is absent exactly where the
- * exposure is most durable. The app and fine-grained-pat paths both carry an expiry.
- *
- * REFUSED rather than warned, and the asymmetry is the whole argument: a warning is read once at setup,
- * the disclosure is permanent and silent, and nothing downstream ever notices. The escape hatch is
- * explicit and named, following PI_GLOBAL_ALLOW_EXTENSIONS -- an operator who has read this can still take
- * the trade, but has to say so rather than miss a line in SECURITY.md.
- *
- * Refused at MINT time, the same shape and moment as the app-source refusal above, so it costs no budget
- * slot and no clone.
- */
-export function assertResumeAllowedOnGhSource(job, allowGhResume) {
-	if (job?.resume !== true || allowGhResume === true) return;
-	throw configError(
-		"GITHUB_AUTH_SOURCE=gh is a full-scope, non-expiring credential, and run.resume writes the agent's transcript to disk -- any command that echoed an auth header would persist it. Use GITHUB_AUTH_SOURCE=app or a short-expiry fine-grained PAT, drop run.resume from this trigger, or set PI_SESSIONS_ALLOW_GH_SOURCE=1 to accept the trade explicitly (SECURITY.md)",
-	);
 }

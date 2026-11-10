@@ -7,8 +7,8 @@
  * (issue #316): a determinate fault is tagged and stays stopped, a transient one is untagged and
  * is restarted.
  *
- * The `octokit` client is INJECTED, already authenticated by the caller (user token for pat/gh,
- * app-JWT for app). This module never constructs Octokit -- keeping it a pure, testable leaf, per
+ * The `octokit` client is INJECTED, already authenticated by the caller with the operator's
+ * `GITHUB_PAT`. This module never constructs Octokit -- keeping it a pure, testable leaf, per
  * the budget.mjs convention.
  */
 
@@ -16,12 +16,8 @@ import { configError } from "./config.mjs";
 import { isDeterminateFetchFailure, isTransientStatus, octokitHeaderReader, transientError } from "./transient.mjs";
 
 /**
- * Resolve the acting identity's numeric user id from `auth = { source, octokit }`.
- *
- * - `pat` / `gh`: the token belongs to a user -- `GET /user` yields that user's id.
- * - `app`: the token is an app-JWT. `GET /app` yields the app `slug`; the bot USER whose id shows
- *   up in `sender.id` is `slug[bot]`, resolved via `GET /users/{username}`. The App id is a
- *   different number and would never match `sender.id`, so the two-step is required.
+ * Resolve the acting identity's numeric user id from `auth = { source, octokit }`. `source` is always
+ * `"pat"` now -- the PAT belongs to a user, so `GET /user` yields that user's id.
  *
  * Returns an integer id. Throws `configError` on unknown/missing source, missing octokit, a determinate
  * octokit refusal, or a non-integer id.
@@ -38,15 +34,13 @@ import { isDeterminateFetchFailure, isTransientStatus, octokitHeaderReader, tran
  * `@octokit/request`'s fetch wrapper turns EVERY network rejection into `RequestError(message, 500)` and
  * keeps the original as `cause`, so a private CA or a redirect arrives wearing a transient status and the
  * determinate check has to run first. And an ABSENT status means the failure never reached the HTTP layer
- * at all, because octokit always sets one: it came from local code, which in practice means signing the
- * App JWT with a key that is not PKCS//8 -- the commonest App setup mistake there is, and one that no
- * amount of restarting fixes.
+ * at all, because octokit always sets one: it came from local code, and no amount of restarting fixes it.
  */
 export async function resolveSelfId(auth) {
 	const source = auth?.source;
 	const octokit = auth?.octokit;
 
-	if (source !== "pat" && source !== "gh" && source !== "app") {
+	if (source !== "pat") {
 		throw configError(`resolveSelfId: unknown auth source: ${source}`);
 	}
 	if (!octokit) {
@@ -55,16 +49,8 @@ export async function resolveSelfId(auth) {
 
 	let id;
 	try {
-		if (source === "app") {
-			const { data: app } = await octokit.request("GET /app");
-			const { data: bot } = await octokit.request("GET /users/{username}", {
-				username: `${app.slug}[bot]`,
-			});
-			id = bot.id;
-		} else {
-			const { data: user } = await octokit.request("GET /user");
-			id = user.id;
-		}
+		const { data: user } = await octokit.request("GET /user");
+		id = user.id;
 	} catch (error) {
 		// Order is load-bearing; see the docblock. Trust and redirect faults are wearing a 500, and a
 		// status-less rejection never reached the network.

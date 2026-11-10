@@ -614,8 +614,8 @@ function watchModelEndpointsFile(config, ref, log, atBoot) {
  * therefore never branches on which forge a job belongs to; the only place that knows is here.
  *
  * Forge auth is initialised best-effort, per forge: a local-only deployment must still boot when no
- * working GITHUB_AUTH_SOURCE is present, so an auth failure is logged and that forge's deps fail closed
- * per job (mintToken throws configError) rather than blocking startup. Collaborators are injectable
+ * GITHUB_PAT is present, so an auth failure is logged and that forge's deps fail closed per job
+ * (mintToken throws configError) rather than blocking startup. Collaborators are injectable
  * (defaulting to the real ones) so the wiring is testable offline with no Redis and no forge.
  */
 /**
@@ -1037,8 +1037,8 @@ export async function startWorker(
 	 * verdict at none of the cost. And a DETERMINATE answer retires the re-resolver entirely.
 	 *
 	 * The determinate error is RETHROWN rather than turned into `null`. Returning null sent every such job
-	 * to the generic "configure GITHUB_AUTH_SOURCE" message while the specific reason -- bad credentials,
-	 * a key that is not PKCS//8 -- was already in hand and went only to the log. The caller decides what to
+	 * to the generic "configure GITHUB_PAT" message while the specific reason -- bad credentials, an
+	 * expired token -- was already in hand and went only to the log. The caller decides what to
 	 * do with it; the point is that it reaches the caller.
 	 */
 	const ensureAuth = async (kind) => {
@@ -1107,7 +1107,18 @@ export async function startWorker(
 		}
 	};
 
-	await attachAuth("github", (cfg) => makeAuth(cfg, { log }), config.github);
+	// The GitHub arm is PAT-only, and it exists only when the operator supplied `GITHUB_PAT`: a
+	// deployment with no github trigger must boot without one, and the credential's presence is the one
+	// signal this process has that github jobs may arrive from the receiver. A cron trigger that opted
+	// into `run.github` is a github feature the worker CAN see, so its absence refuses the boot naming
+	// the key rather than letting a scheduled job discover it at 03:00. A github job that reaches a
+	// worker without a PAT refuses at mint time (below) with the same named key.
+	const githubCron = schedules.current.some((schedule) => schedule?.data?.github === true);
+	if (config.github?.pat) {
+		await attachAuth("github", (cfg) => makeAuth(cfg, { log }), config.github);
+	} else if (githubCron) {
+		throw configError("GITHUB_PAT is required: a cron trigger sets run.github, which mints a GitHub token for that job -- set GITHUB_PAT to a fine-grained, repository-scoped PAT");
+	}
 	// GitLab joins the same map on the same best-effort terms. It appears only when configured: a forge
 	// with no entry refuses its jobs at mint time with a message naming what is missing, which is a better
 	// answer than an entry that exists and cannot authenticate.
@@ -1673,12 +1684,13 @@ export async function startWorker(
 	//
 	// This was a boot-time read until issue #102, and the argument for that was sound while it held: the
 	// staged set was deploy-time state under a :ro mount, identical for every job, so a per-job read bought
-	// nothing. What changed is that `import-pi --with-packages` now discovers what the operator installed in
-	// pi, which makes `pi install X` then re-stage a ROUTINE act rather than a rare one. Under the boot read
-	// the jobs after such a re-stage keep the old set until someone restarts the worker, and when the re-stage
-	// DROPS a package the symptom is worse than staleness: the runner refuses a missing staged dir at
-	// container start (exit 2), so every job pays for a container that dies at startup until the restart. A free
-	// filesystem read that prevents a paid-and-wasted run is exactly what CONST-BUDGET-BEFORE-TOKENS asks for.
+	// nothing. What changed is that the overlay is now prepared by hand -- the operator replaces files under
+	// PI_GLOBAL_PI_DIR/packages/ (or stages them from the console's Updates page) -- which makes changing the
+	// staged set a ROUTINE act rather than a rare one. Under the boot read the jobs after such a change keep
+	// the old set until someone restarts the worker, and when the change DROPS a package the symptom is worse
+	// than staleness: the runner refuses a missing staged dir at container start (exit 2), so every job pays
+	// for a container that dies at startup until the restart. A free filesystem read that prevents a
+	// paid-and-wasted run is exactly what CONST-BUDGET-BEFORE-TOKENS asks for.
 	//
 	// Last-known-good on a failed read, never []: an empty set emits no PI_PACKAGES at all, so the runner's
 	// assertPackagePathsExist has nothing to refuse and the job would run WITHOUT its tools and still exit 0.
@@ -2625,8 +2637,8 @@ export async function startWorker(
 				return await host.resolvePullRequestHead(job, token);
 			},
 			// REQ-MCP-OPERATOR-SERVERS: the overlay's mcp.json read once per job that names a server, never at boot (an
-			// operator who re-runs import-pi must not have to restart the worker). The allowlist is the one the proxy
-			// mounts, this folder's egress-allowlist.conf (up.mjs), and the endpoints
+			// operator who edits the overlay by hand must not have to restart the worker). The allowlist is the one the proxy
+			// mounts, this folder's egress-allowlist.conf (the worker), and the endpoints
 			// are the pickup's snapshot, so the check and the proxy read the same declarations.
 			checkMcp: makeMcpCheck({
 				globalPiDir: config.globalPiDir,
@@ -2720,7 +2732,7 @@ export async function startWorker(
 				}
 				if (auth) return await auth.mintToken(job);
 				if (kind === "github") {
-					throw configError("github jobs and cron triggers with run.github require a working GITHUB_AUTH_SOURCE (gh/pat/app)");
+					throw configError("github jobs and cron triggers with run.github require GITHUB_PAT (a fine-grained, repository-scoped PAT) -- set it in the deployment environment");
 				}
 				throw configError(`no forge credentials are configured for job kind ${JSON.stringify(job?.kind)} -- see .env.example`);
 			},

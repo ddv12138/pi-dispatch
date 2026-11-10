@@ -437,24 +437,16 @@ test("a triggers file that is not a {triggers:[...]} object is a config error", 
 	assert.throws(withTriggers(JSON.stringify({ nope: [] })), (e) => e.piDispatchConfig === true);
 });
 
-// -- github auth block (unchanged, single-sourced from the worker loader) ------------------------
+// -- github auth block (single-sourced from the worker loader, PAT-only) -------------------------
 
-test("github block is produced by the shared worker loader -- default gh source, exact block shape", () => {
+test("github block is the shared worker loader's PAT shape", () => {
 	const c = loadReceiverConfig({ WEBHOOK_SECRET: "shh" }, validTriggers);
-	assert.deepEqual(c.github, {
-		source: "gh",
-		patVar: "GITHUB_PAT",
-		appId: undefined,
-		installationId: undefined,
-		privateKeyPath: undefined,
-		privateKey: null,
-	});
+	assert.deepEqual(c.github, { pat: null });
 });
 
-test("github block reflects env just as the worker loader does (source=pat echoes patVar)", () => {
-	const c = loadReceiverConfig({ WEBHOOK_SECRET: "shh", GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_x" }, validTriggers);
-	assert.equal(c.github.source, "pat");
-	assert.equal(c.github.patVar, "GITHUB_PAT");
+test("github block reflects GITHUB_PAT, trimmed, just as the worker loader does", () => {
+	const c = loadReceiverConfig({ WEBHOOK_SECRET: "shh", GITHUB_PAT: "  ghp_x\n" }, validTriggers);
+	assert.deepEqual(c.github, { pat: "ghp_x" });
 });
 
 // -- live reload (the testable core of the receiver's trigger watcher) ---------------------------
@@ -624,43 +616,13 @@ test("ANY github webhook rule type arms servesGithub -- label, comment, or pull_
 	}
 });
 
-test("an explicit GITHUB_AUTH_SOURCE sets servesGithub true with no github triggers -- explicit intent wins", () => {
-	// An operator who names an auth source has said "GitHub" out loud, and may be arming the receiver
-	// before the first rule exists. Respecting that also keeps boot byte-identical for everyone who sets it.
-	for (const source of ["gh", "pat", "app"]) {
-		const env = {
-			WEBHOOK_SECRET: "shh",
-			GITHUB_AUTH_SOURCE: source,
-			...(source === "pat" ? { GITHUB_PAT: "ghp_x" } : {}),
-			...(source === "app" ? { GITHUB_APP_ID: "1", GITHUB_APP_INSTALLATION_ID: "2", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem" } : {}),
-		};
-		const c = loadReceiverConfig(env, gitlabOnlyTriggers);
-		assert.equal(c.servesGithub, true, `GITHUB_AUTH_SOURCE=${source} is an explicit statement that this deployment serves github`);
-		// And with the endpoint armed, the secret is required again -- the two move together, always.
-		assert.throws(
-			() => loadReceiverConfig({ ...env, WEBHOOK_SECRET: undefined }, gitlabOnlyTriggers),
-			(e) => e.piDispatchConfig === true && /WEBHOOK_SECRET/.test(e.message),
-			`GITHUB_AUTH_SOURCE=${source} must re-impose the secret requirement`,
-		);
-	}
-});
-
-test("the default auth source does NOT arm servesGithub -- github.source cannot distinguish default from choice", () => {
-	// loadGitHubAuth defaults `source` to "gh", so reading the PARSED block would answer yes for every
-	// deployment on earth and re-create the defect. The decision reads env.GITHUB_AUTH_SOURCE itself.
-	const c = loadReceiverConfig({}, gitlabOnlyTriggers);
-	assert.equal(c.github.source, "gh", "the block still defaults, exactly as the worker's does");
-	assert.equal(c.servesGithub, false, "a defaulted source is not an operator saying github");
-});
-
-test("a github auth block error is reported as itself, never laundered into a WEBHOOK_SECRET complaint", () => {
-	// Ordering: triggers and the auth block parse BEFORE the conditional secret check, so a typo'd source
-	// on a secretless deployment names the typo. The reverse order would send the operator hunting for a
-	// secret they do not need.
-	assert.throws(
-		() => loadReceiverConfig({ GITHUB_AUTH_SOURCE: "gitthub" }, gitlabOnlyTriggers),
-		(e) => e.piDispatchConfig === true && /GITHUB_AUTH_SOURCE/.test(e.message),
-	);
+test("GITHUB_PAT alone does not arm servesGithub -- only the triggers file does", () => {
+	// The receiver's GitHub arm is decided by the triggers file alone now. A credential in a shared env
+	// file is not a statement that this receiver terminates GitHub webhooks, and the decision must not
+	// read it.
+	const c = loadReceiverConfig({ GITHUB_PAT: "ghp_x" }, gitlabOnlyTriggers);
+	assert.equal(c.servesGithub, false, "a credential is not an operator saying github");
+	assert.deepEqual(c.github, { pat: "ghp_x" });
 });
 
 test("reloadTriggers does NOT recompute servesGithub -- a live edit can never mount / with an unarmed guard", () => {

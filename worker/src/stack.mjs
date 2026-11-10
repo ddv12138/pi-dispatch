@@ -392,7 +392,7 @@ export async function judgeValkeyListeners({ url, probeTcp, lookup, fs, euid, us
 		const foreign = answered.filter((a) => a.cls === "foreign");
 		return { ...base, chosen: rootFirst.address, refusal: null, heldBy: rootFirst.why ? "an owner /proc does not name (root's NAT, as docker without its proxy)" : "root", own: false, elsewhere: foreign.length > 0 ? [describe(foreign)] : [] };
 	}
-	const ways = `Give this account a Valkey of its own on another port, VALKEY_URL=redis://127.0.0.1:<port> in ${envPath} (\`pi-dispatch up\` starts this account's own Valkey there); or, if that Valkey is shared on purpose, say so with ${VALKEY_SHARED_KEY}=1 in ${envPath}`;
+	const ways = `Give this account a Valkey of its own on another port, VALKEY_URL=redis://127.0.0.1:<port> in ${envPath} (the deployment's compose stack starts this account's own Valkey there); or, if that Valkey is shared on purpose, say so with ${VALKEY_SHARED_KEY}=1 in ${envPath}`;
 	const own = `this account (uid ${euid}) or its containers (subordinate uids read from ${source})`;
 	const unknown = others.filter((a) => a.why);
 	if (unknown.length === others.length) {
@@ -677,8 +677,8 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 		// A value that OPENS with a quote continues across lines in systemd's parser until that quote closes (round 2,
 		// E4: systemd's test-env-file.c, env_file_6), so a key line INSIDE such a value is part of it, not an
 		// assignment. The general reader knows this too since #447; this check stays for the sentence it can say. Only a
-		// key line inside a still-open region is in doubt (round 3, D1): the documented multi-line
-		// GITHUB_APP_PRIVATE_KEY="-----BEGIN ...-----" closes, and a PI_BACKENDS above or below it reads normally
+		// key line inside a still-open region is in doubt (round 3, D1): a documented multi-line quoted value
+		// (`K="-----BEGIN ...-----"`) closes, and a PI_BACKENDS above or below it reads normally
 		// (measured on systemd 259: the unit saw both). A quote that never closes runs to the end of the file, so every
 		// key line after it is in doubt.
 		const regions = quotedRegions(text);
@@ -687,7 +687,7 @@ function readVenueKeys(content, { loader, path, assumeSpelled, keys: KEYS, about
 			if (!m || comment.test(lines[i])) continue;
 			const inside = regions.find((r) => i + 1 > r.open && (r.close === null || i + 1 <= r.close));
 			if (inside) {
-				return { error: `${path} line ${i + 1} (${m[1]}) lies inside the quoted value that opens on line ${inside.open}${inside.close === null ? " and never closes" : ` and closes on line ${inside.close}`}, so the service reads it as part of that value, not as ${m[1]}. Close that quote on its own line, write the value's newlines as \\n escapes, or for a GitHub App key use GITHUB_APP_PRIVATE_KEY_PATH` };
+				return { error: `${path} line ${i + 1} (${m[1]}) lies inside the quoted value that opens on line ${inside.open}${inside.close === null ? " and never closes" : ` and closes on line ${inside.close}`}, so the service reads it as part of that value, not as ${m[1]}. Close that quote on its own line, or write the value's newlines as \\n escapes` };
 			}
 		}
 		const hazard = envFileHazard(text, { loader });

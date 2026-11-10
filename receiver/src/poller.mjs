@@ -87,10 +87,9 @@
  * A fresh poller must not replay a repo's backlog -- a label applied months ago was a human approval
  * for THAT moment's issue text and budget, not a standing order; the operator arms polling from now.
  *
- * WHICH REPOS: POLL_REPOS wins when set (see poller-config.mjs). With GITHUB_AUTH_SOURCE=app and no
- * POLL_REPOS, the App installation's repository list is the source of truth, refreshed every
- * DISCOVERY_EVERY cycles so an operator who installs the App on a new repo gets polling without a
- * restart. Zero repos from either mechanism fails loud at boot.
+ * WHICH REPOS: the explicit `POLL_REPOS` list (see poller-config.mjs). GitHub polling is authenticated
+ * by `GITHUB_PAT`, a fine-grained, repository-scoped PAT; there is no installation whose repositories
+ * could be listed, so an empty roster fails loud at boot.
  *
  * POLITENESS: per-endpoint-per-repo ETags make the idle steady state nearly free (304s do not count
  * against the rate limit, per GitHub's docs); `x-poll-interval` is honored as the MINIMUM cycle
@@ -106,9 +105,6 @@
  * flow, reasons, counts) -- never a title, a body, or a login.
  */
 
-import { createSign } from "node:crypto";
-import { readFile as fsReadFile } from "node:fs/promises";
-import { configError } from "@edgehero/pi-dispatch/config";
 import { judgeValkeyAtStart, makeRedisClient, parseConnection, valkeyClientContext } from "@edgehero/pi-dispatch/connection";
 import { makeGitHubAuth } from "@edgehero/pi-dispatch/get-token";
 import { enqueueGitHubJob, makeQueue } from "@edgehero/pi-dispatch/queue";
@@ -126,9 +122,6 @@ const API_URL = "https://api.github.com";
 // lengthening the retention cannot leave the cursor the shorter of the poller's two dedup layers -- see the header's
 // cursor/TTL section.
 export const CURSOR_TTL_SECONDS = FORGE_JOB_RETENTION_S + 4 * 86_400;
-// Installation repo-list refresh cadence, in cycles (~10 minutes at the default interval): fresh
-// enough that a newly installed repo starts polling soon, cheap enough to be invisible in the quota.
-const DISCOVERY_EVERY = 10;
 // Page bounds. The events endpoint has no `since`, so a backlog deeper than this is skipped with an
 // explicit log line rather than stalling the cycle; comments self-heal (the cursor advances and the
 // next cycle picks up the rest); the open-PR list just caps how many open PRs the diff can see.
@@ -182,7 +175,6 @@ export async function startPoller(env = process.env, deps = {}) {
 		queueFn,
 		selfIdFn,
 		tokenFn,
-		readFile = fsReadFile,
 		fsDeps = {},
 		makeAuth = makeGitHubAuth,
 		makeQueueFn = makeQueue,
@@ -215,25 +207,17 @@ export async function startPoller(env = process.env, deps = {}) {
 		() => (selfIdFn ? selfIdFn(cfg.github) : getAuth().then((a) => a.selfId)),
 		{ forge: "github", windowMs: cfg.identityRetryWindowMs, log: out, now, sleep: sleepFn },
 	);
-	out({ event: "self_identity", id: selfId, source: cfg.github.source });
+	out({ event: "self_identity", id: selfId, source: "GITHUB_PAT" });
 
-	// The polling credential comes from the same auth config the worker validates. pat/gh hand back
-	// the operator's own token via the shared mintToken; the app source mints an installation token
-	// itself (below) because the worker's mint is per-repo-scoped BY DESIGN (CONST-TOKEN-SCOPED-PER-JOB
-	// bounds a token that enters a sandbox) while this one never leaves this process and must both read
-	// every polled repo and list the installation -- a scope no single-repo token can carry.
-	const mintToken = tokenFn ?? (cfg.github.source === "app"
-		? makeAppInstallationTokenFn(cfg.github, { fetchFn, readFile, now })
-		: async () => (await getAuth()).mintToken());
+	// The polling credential is the operator's own `GITHUB_PAT`, handed back by the shared mint. There is
+	// no installation token to mint here: the PAT must already be scoped (fine-grained) to the repos
+	// POLL_REPOS names, and it never leaves this process. `tokenFn` stays as the test seam for that mint.
+	const mintToken = tokenFn ?? (async () => (await getAuth()).mintToken());
 
 	// The closer-authority resolver (issue #231), built over the poller's OWN mint above -- the injected
-	// factory default, start.mjs's convention. On the app source that mint hands back the CACHED,
-	// UNSCOPED installation token (makeAppInstallationTokenFn below), and the resolver's job-shaped
-	// `{ repo }` argument is simply ignored by it. That is fine for what this token does here: one
-	// read-only permission lookup that never leaves this process. The webhook arm's per-delivery
-	// metadata:read narrowing (start.mjs) is the stricter posture; the poller's cache is the deliberate
-	// cost tradeoff its own header already records (the credential must read every polled repo anyway),
-	// and github-members.mjs names this cache as the recorded fallback to per-delivery minting.
+	// factory default, start.mjs's convention. The mint here is the same standing PAT used for polling
+	// (one read-only permission lookup that never leaves this process); github-members.mjs records that
+	// this is the poller's cost tradeoff versus the webhook arm's per-delivery call.
 	const resolveCloserAuthority = makeResolveGitHubAuthorityFn({ mintToken, fetchFn });
 
 	// Cursor store. ioredis is imported lazily so tests injecting a fake never load the driver. The
@@ -266,27 +250,11 @@ export async function startPoller(env = process.env, deps = {}) {
 
 	const ctx = { cfg, selfId, fetchFn, redis: redisClient, enqueue, out, now, random, resolveCloserAuthority };
 
-	// The repo set: explicit POLL_REPOS, or the App installation's list (cfg.repos === null only when
-	// the source is app -- poller-config enforces it). An empty discovery is a config error, not an
-	// idle loop: a poller watching nothing must refuse to start, not report healthy cycles forever.
-	let repos = cfg.repos;
-	if (repos === null) {
-		try {
-			repos = await discoverRepos(ctx, makeApi(ctx, await mintToken(), emptyStats()));
-		} catch (err) {
-			await closeOwned();
-			throw err;
-		}
-		if (repos.length === 0) {
-			await closeOwned();
-			throw configError(
-				"the App installation grants no repositories -- install the GitHub App on the repos to poll, or set POLL_REPOS=owner/name[,owner/name...] explicitly",
-			);
-		}
-		out({ event: "poll_repos_discovered", repos: repos.length });
-	}
+	// The repo set is the explicit POLL_REPOS list; poller-config refuses an unset one, so there is no
+	// installation to discover from and no empty roster to guard here.
+	const repos = cfg.repos;
 
-	out({ event: "poller_started", repos: repos.length, intervalSeconds: cfg.intervalSeconds, valkey: cfg.valkeyUrl, discovery: cfg.repos === null });
+	out({ event: "poller_started", repos: repos.length, intervalSeconds: cfg.intervalSeconds, valkey: cfg.valkeyUrl });
 
 	let stopped = false;
 	let wake;
@@ -299,7 +267,6 @@ export async function startPoller(env = process.env, deps = {}) {
 	};
 
 	const done = (async () => {
-		let cycleNo = 0;
 		while (!stopped) {
 			const stats = emptyStats();
 			const startedAt = now();
@@ -316,19 +283,6 @@ export async function startPoller(env = process.env, deps = {}) {
 
 			if (token !== null) {
 				const api = makeApi(ctx, token, stats);
-
-				// Low-frequency installation-list refresh. A refresh failure KEEPS the current list -- a
-				// discovery outage must not stop polling the repos already armed.
-				if (cfg.repos === null && cycleNo > 0 && cycleNo % DISCOVERY_EVERY === 0) {
-					try {
-						const found = await discoverRepos(ctx, api);
-						if (found.length > 0) repos = found;
-						else out({ event: "poll_discovery_empty", kept: repos.length });
-					} catch (err) {
-						if (err instanceof RateLimited) rateResetMs = err.resetMs;
-						else out({ event: "poll_discovery_failed", reason: err?.message });
-					}
-				}
 
 				if (rateResetMs === null) {
 					for (const repo of repos) {
@@ -352,7 +306,6 @@ export async function startPoller(env = process.env, deps = {}) {
 				}
 			}
 
-			cycleNo++;
 			// `steered` (issue #646) only when a comment steered a run this cycle, so a cycle line without one is unchanged;
 			// `held` (issue #638) by the same rule, when a reply was held for a parking run.
 			out({ event: "poll_cycle", repos: repos.length, fetched: stats.fetched, enqueued: stats.enqueued, notModified: stats.notModified, ...(stats.steered > 0 ? { steered: stats.steered } : {}), ...(stats.held > 0 ? { held: stats.held } : {}), ms: now() - startedAt });
@@ -520,24 +473,6 @@ function makeApi(ctx, token, stats) {
 			return { json: await res.json() };
 		},
 	};
-}
-
-/**
- * List the App installation's repositories (paginated). Archived repos are not filtered here: an
- * archived repo simply produces nothing, and per-repo error isolation covers any oddity -- fewer
- * special cases beats a slightly shorter roster.
- */
-async function discoverRepos(ctx, api) {
-	const names = [];
-	for (let page = 1; page <= 10; page++) {
-		const r = await api.get(`/installation/repositories?per_page=100&page=${page}`);
-		const batch = Array.isArray(r.json?.repositories) ? r.json.repositories : [];
-		for (const item of batch) {
-			if (typeof item?.full_name === "string" && item.full_name !== "") names.push(item.full_name);
-		}
-		if (batch.length < 100) break;
-	}
-	return names;
 }
 
 /** One repo, one cycle: the three endpoints, then a TTL touch so the key family ages as a unit. */
@@ -1037,54 +972,4 @@ async function gate(ctx, eventName, payload, deliveryId, stats) {
 	}
 	stats.enqueued += created;
 	if (created > 0) ctx.out({ event: "enqueued", delivery: deliveryId, repo: job.repo, target: `${job.target.type}#${job.target.number}`, flow: job.flow, replicas: created });
-}
-
-/**
- * The default app-source polling credential: a self-minted, UNSCOPED installation token, cached until
- * ~5 minutes before its 1-hour expiry.
- *
- * Two deliberate departures from the worker's mint, both explained by where the token goes. The
- * worker's `mintToken` scopes to ONE repo because its token enters a sandbox with adversarial text
- * (CONST-TOKEN-SCOPED-PER-JOB bounds that blast radius); this token never leaves this process, and it
- * must read every polled repo AND call GET /installation/repositories -- a scope no single-repo token
- * has. And the mint is a hand-rolled RS256 App JWT + one POST rather than @octokit/auth-app, because
- * the receiver package does not depend on that library and a hoisted import it never declared would
- * break a standalone install; the mint is small enough to own (node:crypto signs, fetch posts).
- */
-function makeAppInstallationTokenFn(github, { fetchFn, readFile, now }) {
-	let cached = null; // { token, expiresAtMs }
-	return async () => {
-		if (cached !== null && cached.expiresAtMs - now() > 5 * 60_000) return cached.token;
-		// Inline key (GITHUB_APP_PRIVATE_KEY) when the operator supplied one, the file otherwise. The shared
-		// loadGitHubAuth normalised and shape-checked it at load and refuses both-set, so there is nothing to
-		// decide here (issue #208).
-		const pem = github.privateKey ?? (await readFile(github.privateKeyPath, "utf8"));
-		const jwt = appJwt(github.appId, pem, now());
-		const res = await fetchFn(`${API_URL}/app/installations/${github.installationId}/access_tokens`, {
-			method: "POST",
-			headers: {
-				accept: "application/vnd.github+json",
-				"user-agent": "pi-dispatch-poller",
-				"x-github-api-version": "2022-11-28",
-				authorization: `Bearer ${jwt}`,
-			},
-		});
-		if (!res.ok) throw new Error(`installation token mint -> HTTP ${res.status}`);
-		const body = await res.json();
-		if (typeof body?.token !== "string" || body.token === "") {
-			// The money-hole invariant, same as get-token.mjs: an empty token must never flow onward.
-			throw new Error("installation token mint returned no token");
-		}
-		cached = { token: body.token, expiresAtMs: Date.parse(body.expires_at ?? "") || now() + 55 * 60_000 };
-		return cached.token;
-	};
-}
-
-/** GitHub App JWT (RS256): iat backdated 60s for clock skew, 9-minute expiry (below the 10-min cap). */
-function appJwt(appId, privateKeyPem, nowMs) {
-	const b64 = (obj) => Buffer.from(JSON.stringify(obj)).toString("base64url");
-	const iat = Math.floor(nowMs / 1000) - 60;
-	const unsigned = `${b64({ alg: "RS256", typ: "JWT" })}.${b64({ iat, exp: iat + 600, iss: String(appId) })}`;
-	const signature = createSign("RSA-SHA256").update(unsigned).sign(privateKeyPem).toString("base64url");
-	return `${unsigned}.${signature}`;
 }

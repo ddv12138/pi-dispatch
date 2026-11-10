@@ -251,10 +251,10 @@ test("E4/D1: only a key line INSIDE a still-open quoted value is in doubt; a mul
 	assert.match(readStackKeys("NOTE='see\nPI_BACKENDS=podman\n").error, /opens on line 1 and never closes/);
 	// An escaped `"` does not close a double-quoted value (the E4c mutant: `rest.includes('"')`).
 	assert.match(readStackKeys('K="a\\"\nPI_BACKENDS=podman\n').error, /line 2 \(PI_BACKENDS\) lies inside/);
-	assert.match(readStackKeys('K="a\\"\nPI_BACKENDS=podman\n').error, /GITHUB_APP_PRIVATE_KEY_PATH/);
-	// D1 (measured on systemd 259): the documented multi-line GitHub App key, with the venue key before AND after it.
-	const pem = 'GITHUB_APP_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\nabc=\n-----END RSA PRIVATE KEY-----"\n';
-	assert.deepEqual(readStackKeys(`PI_BACKENDS=podman\nPI_EGRESS=1\n${pem}GITHUB_APP_PRIVATE_KEY_PATH=\n`).keys, { PI_BACKENDS: "podman", PI_EGRESS: "1" });
+	assert.match(readStackKeys('K="a\\"\nPI_BACKENDS=podman\n').error, /write the value's newlines as \\n escapes/);
+	// D1 (measured on systemd 259): a documented multi-line quoted value, with the venue key before AND after it.
+	const pem = 'SOME_KEY="-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\nabc=\n-----END RSA PRIVATE KEY-----"\n';
+	assert.deepEqual(readStackKeys(`PI_BACKENDS=podman\nPI_EGRESS=1\n${pem}PI_EGRESS_PROXY=http://proxy:3128\n`).keys, { PI_BACKENDS: "podman", PI_EGRESS: "1", PI_EGRESS_PROXY: "http://proxy:3128" });
 	assert.deepEqual(readStackKeys(`${pem}PI_BACKENDS=podman\n`).keys, { PI_BACKENDS: "podman" });
 	// A quote opened MID-value does not continue, and a closed one is ordinary.
 	assert.deepEqual(readStackKeys("NOTE=a'b\nPI_BACKENDS=podman\n").keys, { PI_BACKENDS: "podman" });

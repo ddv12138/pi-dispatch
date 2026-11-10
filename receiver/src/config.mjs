@@ -17,6 +17,8 @@
  *   they must never disagree: the WEBHOOK_SECRET requirement, whether `/` is mounted at all
  *   (receiver.mjs), and whether boot resolves the harness's GitHub identity to arm the bot-loop guard
  *   (start.mjs). Deriving it inline in two places is how a route ends up live with a disarmed guard.
+ *   It is decided from the triggers file alone: there is no auth source to name any more, and a
+ *   credential lying in the env is not a statement that this receiver terminates GitHub webhooks.
  * - `triggers` is the receiver's webhook allowlist, grouped by type: label rules (the label IS the
  *   collaborator approval), the single comment trigger (phrase + default flow), and pull_request rules.
  *   Only collaborators can apply labels, so the label/PR-label allowlist is the human approval gate
@@ -96,12 +98,11 @@ function allowSelfFlag(env) {
  */
 export function loadReceiverConfig(env = process.env, { readFile = readFileSync, fileExists = existsSync } = {}) {
 	// Triggers and the GitHub auth block are parsed FIRST, before the secret check, because the secret is
-	// now conditional on what they say. Their own fail-loud errors therefore surface first -- a garbled
-	// GITHUB_AUTH_SOURCE is reported as a garbled GITHUB_AUTH_SOURCE, never laundered into a confusing
-	// complaint about WEBHOOK_SECRET.
+	// now conditional on what they say. Their own fail-loud errors therefore surface first -- a malformed
+	// triggers file is reported as itself, never laundered into a confusing complaint about WEBHOOK_SECRET.
 	const triggers = loadTriggers(env, readFile, fileExists);
-	const github = loadGitHubAuth(env, fileExists);
-	const servesGithub = decideServesGithub(env, triggers.github);
+	const github = loadGitHubAuth(env);
+	const servesGithub = decideServesGithub(triggers.github);
 
 	const allowSelf = allowSelfFlag(env);
 
@@ -138,37 +139,25 @@ export function loadReceiverConfig(env = process.env, { readFile = readFileSync,
  * GitHub id to arm the bot-loop guard (start.mjs) -- so it is decided once, here, from the operator's own
  * files rather than assumed.
  *
- * Either of two signals is a yes:
+ * THE TRIGGERS FILE NAMES A GITHUB WEBHOOK RULE. `triggers.github` is the group `loadTriggers` built
+ * from every `run.kind: "github"` webhook entry, and `emptyGroup()` is what a forge the file never
+ * mentions gets. So an empty group -- zero label rules, no comment trigger, zero pull_request rules --
+ * means a signed GitHub delivery could not fire anything even if it arrived: the endpoint would verify
+ * the HMAC, match no rule, and answer 204 forever. That is not a GitHub deployment.
  *
- *  - THE TRIGGERS FILE NAMES A GITHUB WEBHOOK RULE. `triggers.github` is the group `loadTriggers` built
- *    from every `run.kind: "github"` webhook entry, and `emptyGroup()` is what a forge the file never
- *    mentions gets. So an empty group -- zero label rules, no comment trigger, zero pull_request rules --
- *    means a signed GitHub delivery could not fire anything even if it arrived: the endpoint would verify
- *    the HMAC, match no rule, and answer 204 forever. That is not a GitHub deployment.
- *
- *  - GITHUB_AUTH_SOURCE IS SET EXPLICITLY. An operator who names an auth source has said "GitHub" out
- *    loud, and they may well be arming the receiver before the first rule exists (or driving it from the
- *    poller, which is GitHub-only). Explicit intent wins over the inferred signal, and it is also what
- *    keeps this change byte-identical to today's behaviour for every deployment that sets the variable.
- *    Read from `env` and NOT from the parsed block: `loadGitHubAuth` defaults `source` to "gh", so
- *    `github.source` cannot tell an explicit choice from a default and would answer yes for everyone.
- *
- * Deliberately NOT a signal: the presence of GITHUB_PAT / GITHUB_APP_* alone. Those are credentials a
- * shared env file may carry for the worker (which mints per-job tokens and is a separate process); a
- * credential lying around is not a statement that this receiver terminates GitHub webhooks.
+ * Deliberately NOT a signal: the presence of `GITHUB_PAT` alone. That credential may be in a shared env
+ * file for the worker or the poller (separate processes); a credential lying around is not a statement
+ * that this receiver terminates GitHub webhooks. The poller's own loader requires the PAT explicitly
+ * because POLL_REPOS is its arm.
  */
-function decideServesGithub(env, githubGroup) {
+function decideServesGithub(githubGroup) {
 	// The close groups count too (issue #231): a deployment whose ONLY github rule is a close trigger
 	// must still mount `/`, require WEBHOOK_SECRET and build auth, or the one-shot the operator armed
 	// can never fire -- and the receiver would report nothing, the silent no-op this file's header
 	// calls the worst outcome. Conversely a deployment whose last github one-shot is SPENT stops
 	// counting here at its next boot (the sentinel groups nowhere), which is deliberate: nothing is
 	// left to serve, and INT-TRIGGERS-FILE-CONTRACT states it.
-	const hasGithubTriggers = githubGroup.label.length > 0 || githubGroup.comment !== null || githubGroup.pullRequest.length > 0 || githubGroup.issue.length > 0 || githubGroup.prClose.length > 0;
-	// `loadGitHubAuth` has already refused a garbled value by the time we get here, so anything non-empty
-	// here is one of pat|gh|app -- a real choice, not a typo we would be reading as consent.
-	const explicitAuthSource = env.GITHUB_AUTH_SOURCE !== undefined && env.GITHUB_AUTH_SOURCE !== "";
-	return hasGithubTriggers || explicitAuthSource;
+	return githubGroup.label.length > 0 || githubGroup.comment !== null || githubGroup.pullRequest.length > 0 || githubGroup.issue.length > 0 || githubGroup.prClose.length > 0;
 }
 
 /**

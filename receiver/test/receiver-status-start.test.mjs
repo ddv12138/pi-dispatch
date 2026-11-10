@@ -8,12 +8,14 @@ import { startReceiver } from "../src/start.mjs";
 const AT = Date.UTC(2026, 10, 1);
 function fixture(overrides = {}) {
 	const dir = tempDir("receiver-status-start-");
-	const path = join(dir, "triggers.json"); writeFileSync(path, '{"triggers":[]}');
-	const env = { PI_TRIGGERS_FILE: path, GITHUB_AUTH_SOURCE: "gh", WEBHOOK_SECRET: "secret", PI_WORKER_NAME: "mini1", ...overrides };
+	const path = join(dir, "triggers.json");
+	// A github rule arms `servesGithub` (the loader's only signal); GITHUB_PAT is then the arm's credential.
+	writeFileSync(path, JSON.stringify({ triggers: [{ on: { type: "label", any: ["pi:x"] }, run: { kind: "github", flow: "fix" } }] }));
+	const env = { PI_TRIGGERS_FILE: path, WEBHOOK_SECRET: "secret", GITHUB_PAT: "ghp_x", PI_WORKER_NAME: "mini1", ...overrides };
 	const closers = []; const log = []; const events = []; let published;
 	const server = { address: () => ({ address: "::ffff:127.0.0.1", port: 49155 }), listen(_port, _bind, cb) { events.push("listen"); cb(); }, close(cb) { cb?.(); } };
 	const queue = { client: Promise.resolve({}), close: async () => events.push("queue-close") };
-	const deps = { now: () => AT, closers, write: (line) => log.push(JSON.parse(line)), judgeValkey: async () => {}, makeAuth: async () => ({ selfId: 999, source: "gh" }), makeQueueFn: () => queue, makeForgeRouterFn: () => ({ close: async () => {} }), createServer: () => server,
+	const deps = { now: () => AT, closers, write: (line) => log.push(JSON.parse(line)), judgeValkey: async () => {}, makeAuth: async () => ({ selfId: 999, source: "pat" }), makeQueueFn: () => queue, makeForgeRouterFn: () => ({ close: async () => {} }), createServer: () => server,
 		makeReceiverPublisherFn: (options) => { published = options; events.push("publisher"); return { start: () => events.push("start"), close: () => events.push("stop") }; } };
 	return { env, deps, closers, server, queue, log, events, published: () => published };
 }

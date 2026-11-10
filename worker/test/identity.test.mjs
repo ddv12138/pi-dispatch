@@ -4,7 +4,7 @@ import { resolveSelfId } from "../src/identity.mjs";
 
 /**
  * Hand-rolled fake @octokit/rest: `request(route, params)` returns a canned `{ data }` keyed on the
- * route string. `calls` records every (route, params) so tests can assert the two-step app path.
+ * route string. `calls` records every (route, params).
  */
 function fakeOctokit(routes) {
 	const calls = [];
@@ -30,24 +30,12 @@ test("pat: GET /user id is returned", async () => {
 	);
 });
 
-test("gh: GET /user id is returned", async () => {
+test("gh is no longer a source -- only the PAT resolves a GitHub identity", async () => {
 	const octokit = fakeOctokit({ "GET /user": { id: 77, login: "runner" } });
-	assert.equal(await resolveSelfId({ source: "gh", octokit }), 77);
-});
-
-test("app: resolves slug[bot] user id via GET /app then GET /users/{username}", async () => {
-	const octokit = fakeOctokit({
-		"GET /app": { slug: "pi-dispatch", id: 9001 },
-		"GET /users/{username}": { id: 555123, login: "pi-dispatch[bot]" },
-	});
-	const id = await resolveSelfId({ source: "app", octokit });
-	// The BOT USER id (sender.id), not the App id.
-	assert.equal(id, 555123);
-	assert.deepEqual(
-		octokit.calls.map((c) => c.route),
-		["GET /app", "GET /users/{username}"],
+	await assert.rejects(
+		() => resolveSelfId({ source: "gh", octokit }),
+		(e) => e.piDispatchConfig === true && /unknown auth source/.test(e.message),
 	);
-	assert.equal(octokit.calls[1].params.username, "pi-dispatch[bot]");
 });
 
 /** An octokit rejection as octokit actually builds one: a `status` property, not a status in the prose. */
@@ -94,9 +82,8 @@ test("a transient octokit rejection is NOT a config error -- it must not stop th
 
 test("a rejection with NO status never reached the network, and is determinate", async () => {
 	// Octokit always sets one: measured, a network fault arrives as 500 with the errno underneath, for both
-	// ENOTFOUND and ECONNREFUSED. So a status-less rejection came from local code, which on the app path
-	// means signing the JWT with a key @octokit/auth-app cannot import -- an OpenSSH-format key, or base64
-	// mangled by a paste. Retrying that is a restart loop against a fault no restart fixes.
+	// ENOTFOUND and ECONNREFUSED. So a status-less rejection came from local code, and no amount of
+	// restarting fixes it.
 	const badKey = Object.assign(new Error("error:1E08010C:DECODER routines::unsupported"), { code: "ERR_OSSL_UNSUPPORTED" });
 	await assert.rejects(
 		() => resolveSelfId({ source: "pat", octokit: fakeOctokit({ "GET /user": badKey }) }),

@@ -666,7 +666,7 @@ async function poll({ steer, body = `@pi ${MARK}` }) {
 	let remaining = 2;
 	let poller;
 	poller = await startPollerReal(
-		{ POLL_REPOS: "o/r" },
+		{ POLL_REPOS: "o/r", GITHUB_PAT: "github_pat_test" },
 		{
 			judgeValkey: async () => {},
 			fetchFn: async (url) => {

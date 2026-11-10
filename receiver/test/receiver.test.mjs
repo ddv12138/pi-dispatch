@@ -15,8 +15,8 @@ const SELF_ID = 999;
 function forgeTriggers({ knownFlows, ...group }) {
 	return { github: group, knownFlows };
 }
-// `servesGithub: true` is what mounts `/` at all (issue #99): the loader decides it from the triggers file
-// plus GITHUB_AUTH_SOURCE, and this fixture is a github-serving deployment, so it says so explicitly. A
+// `servesGithub: true` is what mounts `/` at all (issue #99): the loader decides it from the triggers file,
+// and this fixture is a github-serving deployment, so it says so explicitly. A
 // fixture that omitted it would 404 every delivery below, which is the point of the pair of tests at the
 // bottom of this file.
 const cfg = {

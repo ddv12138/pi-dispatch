@@ -202,9 +202,9 @@ const NOT_A_SECRET = /(_PATH|_FILE|_DIR|_DIRS|_VAR|_SOURCE|_MODE|_HEADER|_URL|_I
 const KNOB_VALUE = /^(?:\d+(?:\.\d+)?|true|false|on|off|yes|no)$/i;
 
 /**
- * Every value in these environments that must never be published: each secret-named variable's value, the value of the
- * variable `GITHUB_PAT_VAR` names, and the password inside any URL-shaped value. Strings only; `makeRedactor` drops
- * anything under its eight-character floor (a port, a flag, a word).
+ * Every value in these environments that must never be published: each secret-named variable's value -- which includes
+ * `GITHUB_PAT` by its `^GITHUB_PAT` name rule -- and the password inside any URL-shaped value. Strings only;
+ * `makeRedactor` drops anything under its eight-character floor (a port, a flag, a word).
  */
 export function secretValuesIn(...envs) {
 	const values = [];
@@ -224,8 +224,6 @@ export function secretValuesIn(...envs) {
 				}
 			}
 		}
-		const patVar = env?.GITHUB_PAT_VAR;
-		if (typeof patVar === "string" && typeof env?.[patVar] === "string" && env[patVar] !== "") values.push(env[patVar]);
 	}
 	return values;
 }

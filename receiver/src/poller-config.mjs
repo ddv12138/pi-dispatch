@@ -18,11 +18,11 @@
  * the classic drift: two parsers of one file, one of them quietly behind on the next rule field.
  *
  * Poller-specific env:
- *   - POLL_REPOS: comma-separated `owner/name` list -- the explicit answer to "which repos". When
- *     unset AND GITHUB_AUTH_SOURCE=app, the poller instead lists the App installation's repositories
- *     at boot (and refreshes at low frequency). Unset with any other auth source is a config error:
- *     a PAT/gh credential names no repo set, and a poller that watched nothing would look exactly
- *     like a poller that was working.
+ *   - POLL_REPOS: comma-separated `owner/name` list -- the explicit answer to "which repos", and the
+ *     poller's GitHub arm. Required: there is no App installation to list any more, so an empty set is a
+ *     config error (a poller that watched nothing would look exactly like a poller that was working).
+ *   - GITHUB_PAT: the fine-grained, repository-scoped PAT the poller polls with. Required alongside
+ *     POLL_REPOS, because the poller resolves its own identity through the same credential.
  *   - POLL_INTERVAL_SECONDS: the cycle delay, default 60, floored at 30. The floor is a courtesy to
  *     GitHub's polling guidance (the API asks pollers to respect `X-Poll-Interval`, typically 60s);
  *     a typo'd `1` must not turn the harness into a hammer.
@@ -50,8 +50,8 @@ const POLL_INTERVAL_DEFAULT_SECONDS = 60;
  * deliberately nothing else.
  * `webhookSecret`, `port`, `bind` and the other-forge blocks are receiver-only concerns: the poller
  * binds no port and speaks only GitHub (the other forges' producers stay webhook-armed).
- * `repos === null` means "discover from the App installation each boot" and is only reachable when
- * the auth source is `app`.
+ * `repos` is always the explicit `POLL_REPOS` list: there is no installation to discover repositories
+ * from, so an unset or empty list refuses at boot.
  */
 export function loadPollerConfig(env = process.env, { readFile = readFileSync, fileExists = existsSync } = {}) {
 	// A present WEBHOOK_SECRET is passed through untouched (a deployment may run serve AND poll from
@@ -62,13 +62,16 @@ export function loadPollerConfig(env = process.env, { readFile = readFileSync, f
 	);
 
 	const repos = parsePollRepos(env.POLL_REPOS);
-	if (repos === null && base.github.source !== "app") {
-		// Fail-loud at boot naming BOTH mechanisms: a poller with an empty repo set would cycle forever,
-		// log healthy summaries, and trigger nothing -- indistinguishable from working until someone
-		// labels an issue and waits.
-		throw configError(
-			"nothing to poll: set POLL_REPOS=owner/name[,owner/name...] or use GITHUB_AUTH_SOURCE=app so the poller can list the App installation's repositories",
-		);
+	if (repos === null) {
+		// Fail-loud at boot: a poller with an empty repo set would cycle forever, log healthy summaries,
+		// and trigger nothing -- indistinguishable from working until someone labels an issue and waits.
+		// There is no App installation to fall back to, so the set must be explicit.
+		throw configError("nothing to poll: set POLL_REPOS=owner/name[,owner/name...] -- a poller has no credential that can list repositories, so the set must be explicit");
+	}
+	if (!base.github.pat) {
+		// The arm POLL_REPOS enables is a GitHub arm, so it needs the one GitHub credential. Naming it at
+		// load is the difference between one clear line and a failed identity boot gate.
+		throw configError("GITHUB_PAT is required to poll: a fine-grained, repository-scoped PAT is the only GitHub credential, and POLL_REPOS names the repositories it must reach");
 	}
 
 	return {

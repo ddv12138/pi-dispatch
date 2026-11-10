@@ -46,7 +46,7 @@ export const SYSTEMD_259_ENV_FILES = Object.freeze([
 	["p-notes","K=\"/a.json\" # see \"notes\"\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],
 	["p-sq-then-char","K='a'b'\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],
 	["p-reopen-closes","K=\"a\" \"b\"\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],
-	["p-pem","GITHUB_APP_PRIVATE_KEY=\"-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MaNtRE0l\n-----END RSA PRIVATE KEY-----\"\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],
+	["p-pem","SOME_KEY=\"-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy0AHB7MaNtRE0l\n-----END RSA PRIVATE KEY-----\"\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],
 	["p-crlf","K=1\r\nPI_BACKENDS=podman\r\n",{"PI_BACKENDS":"podman"},null,null],
 	["p-cr-eof","K=1\nPI_BACKENDS=podman\r",{"PI_BACKENDS":"podman"},null,null],
 	["p-key-dash-plain","FOO-BAR=x\nPI_BACKENDS=podman\n",{"PI_BACKENDS":"podman"},null,null],

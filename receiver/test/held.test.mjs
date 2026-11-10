@@ -407,7 +407,7 @@ async function poll({ held, body, enqueueAnswer = null }) {
 	let remaining = 2;
 	let poller;
 	poller = await startPoller(
-		{ POLL_REPOS: "o/r" },
+		{ POLL_REPOS: "o/r", GITHUB_PAT: "github_pat_test" },
 		{
 			judgeValkey: async () => {},
 			fetchFn: async (url) => {

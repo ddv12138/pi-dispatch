@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { generateKeyPairSync } from "node:crypto";
 import { test } from "node:test";
 import { filter } from "../src/filter.mjs";
 import { parseSubset } from "../src/receiver.mjs";
@@ -156,6 +155,8 @@ function fakeRedis() {
  * cycle boundaries, advances the fake clock, and calls stop() after the last one.
  */
 async function runPoller({ env = { POLL_REPOS: "o/r" }, cycles = 1, routes = [], redis = fakeRedis(), selfId = SELF, fsDeps = FS, queueFn: queueFnOver } = {}) {
+	// GITHUB_PAT is the poller's one credential and POLL_REPOS is its arm; a test overrides either.
+	const pollEnv = { GITHUB_PAT: "ghp_test_fixture", ...env };
 	const queued = [];
 	const out = [];
 	const sleeps = [];
@@ -163,7 +164,7 @@ async function runPoller({ env = { POLL_REPOS: "o/r" }, cycles = 1, routes = [],
 	const fetchFn = fakeFetch(routes);
 	let remaining = cycles;
 	let poller;
-	poller = await startPoller(env, {
+	poller = await startPoller(pollEnv, {
 		fetchFn,
 		redis,
 		// Overridable (issue #289) so a test can answer with the dedup shape; the default returns
@@ -241,7 +242,7 @@ async function withStdout(fn) {
 // ---------------------------------------------------------------------------------------------------
 
 test("SUBSET PARITY: every polled REST shape enqueues field-for-field what its webhook delivery would", async () => {
-	const cfg = loadPollerConfig({ POLL_REPOS: "o/r" }, FS);
+	const cfg = loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, FS);
 	const { queued, out } = await runPoller({ cycles: 3, routes: scenarioRoutes() });
 	assertNoRepoFailure(out);
 	assert.equal(queued.length, 6, "one job per fresh shape: labeled issue, labeled PR, 2 comments, PR opened, PR synchronize");
@@ -364,7 +365,7 @@ test("a 304 on the open-PR list still sweeps reviews, taking its PR numbers from
 });
 
 test("SUBSET PARITY for a review, including the case GitHub itself is inconsistent about", async () => {
-	const cfg = loadPollerConfig({ POLL_REPOS: "o/r" }, FS);
+	const cfg = loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, FS);
 	const { queued, out } = await runPoller({
 		cycles: 2,
 		routes: reviewRoutes({ pulls: [ghResponse(200, [PR9A])], reviews: [ghResponse(200, []), ghResponse(200, [RV600])] }),
@@ -602,7 +603,7 @@ function closeRoutes({ events, permission = [ghResponse(200, { permission: "admi
 const collaboratorCalls = (fetch) => fetch.calls.filter((c) => c.url.includes("/collaborators/"));
 
 test("SUBSET PARITY for a close: issue and PR `closed` events enqueue what their webhook twins would (issue #231)", async () => {
-	const cfg = loadPollerConfig({ POLL_REPOS: "o/r" }, CLOSE_FS);
+	const cfg = loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, CLOSE_FS);
 	const { queued, out, fetch } = await runPoller({
 		cycles: 2,
 		routes: closeRoutes({ events: [ghResponse(200, [EV698]), ghResponse(200, [EV701, EV700, EV698])] }),
@@ -807,7 +808,7 @@ test("non-close sources never take the authority path, even with close rules arm
 });
 
 // ---------------------------------------------------------------------------------------------------
-// Failure isolation and repo discovery
+// Failure isolation
 // ---------------------------------------------------------------------------------------------------
 
 test("one repo's API error skips that repo for the cycle and never stalls the others", async () => {
@@ -825,72 +826,15 @@ test("one repo's API error skips that repo for the cycle and never stalls the ot
 	assert.equal(out.filter((o) => o.event === "poll_cycle").length, 1, "the cycle completes and summarizes");
 });
 
-test("GITHUB_AUTH_SOURCE=app with no POLL_REPOS discovers the installation's repositories and polls them", async () => {
-	const env = { GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "7", GITHUB_APP_INSTALLATION_ID: "11", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem" };
-	const routes = [
-		{ path: "/installation/repositories", replies: [ghResponse(200, { total_count: 2, repositories: [{ full_name: "o/a" }, { full_name: "o/b" }] })] },
-		{ path: "/repos/o/a/issues/events", replies: [ghResponse(200, [])] },
-		{ path: "/repos/o/a/pulls?state=open", replies: [ghResponse(200, [])] },
-		{ path: "/repos/o/b/issues/events", replies: [ghResponse(200, [])] },
-		{ path: "/repos/o/b/pulls?state=open", replies: [ghResponse(200, [])] },
-	];
-	const { out, fetch } = await runPoller({ env, cycles: 1, routes });
-	assert.ok(fetch.calls[0].url.includes("/installation/repositories"), "discovery runs before any repo poll");
-	assert.ok(out.some((o) => o.event === "poll_repos_discovered" && o.repos === 2));
-	for (const repo of ["o/a", "o/b"]) {
-		assert.ok(fetch.calls.some((c) => c.url.includes(`/repos/${repo}/issues/events`)), `${repo} is polled`);
-	}
-});
-
-test("an inline App key mints the poll token without touching the filesystem (issue #208)", async () => {
-	// No tokenFn here: this drives the REAL makeAppInstallationTokenFn, which is the only place the
-	// receiver reads the key. `readFile` throws, so a deployment with no key file on disk proves it.
-	// A REAL key: the receiver signs an App JWT with it, so a fixture string only proves the crypto
-	// rejects a fixture string. Generated here rather than at module scope -- one test needs it.
-	const { privateKey: PEM } = generateKeyPairSync("rsa", { modulusLength: 2048, publicKeyEncoding: { type: "spki", format: "pem" }, privateKeyEncoding: { type: "pkcs8", format: "pem" } });
-	const env = { GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "7", GITHUB_APP_INSTALLATION_ID: "11", GITHUB_APP_PRIVATE_KEY: PEM, POLL_REPOS: "o/a" };
-	const routes = [
-		{ path: "/app/installations/11/access_tokens", replies: [ghResponse(201, { token: "ghs_polled" })] },
-		{ path: "/repos/o/a/issues/events", replies: [ghResponse(200, [])] },
-		{ path: "/repos/o/a/pulls?state=open", replies: [ghResponse(200, [])] },
-	];
-	const fetchFn = fakeFetch(routes);
-	// The injected sleep runs INSIDE startPoller, before its binding settles, so it cannot reach for
-	// `poller.stop()` the way runPoller does. It parks forever instead; stop() below is seen by the
-	// loop's own `if (stopped) break` at the end of cycle one, so the delay is never reached.
-	const never = new Promise(() => {});
-	const poller = await startPoller(env, {
-		fetchFn,
-		redis: fakeRedis(),
-		queueFn: async () => {},
-		out: () => {},
-		now: () => NOW,
-		random: () => 0.5,
-		selfIdFn: async () => SELF,
-		readFile: async () => assert.fail("an inline key must never send the receiver to the filesystem"),
-		fsDeps: FS,
-		sleep: () => never,
-	});
-	poller.stop();
-	await poller.done;
-	const mint = fetchFn.calls.find((c) => c.url.includes("/access_tokens"));
-	assert.ok(mint, "the installation token was minted from the inline key");
-	assert.equal(mint.method, "POST");
-	assert.match(mint.headers.authorization, /^Bearer /, "signed as an App JWT built from the key we supplied");
-});
-
-test("zero repos from discovery fails loud at boot, naming both mechanisms", async () => {
-	const env = { GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "7", GITHUB_APP_INSTALLATION_ID: "11", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem" };
-	const routes = [{ path: "/installation/repositories", replies: [ghResponse(200, { total_count: 0, repositories: [] })] }];
+test("poll mode with no POLL_REPOS refuses at boot -- there is no installation to discover from", async () => {
 	await assert.rejects(
-		startPoller(env, {
-			fetchFn: fakeFetch(routes),
+		startPoller({ GITHUB_PAT: "ghp_x" }, {
+			fetchFn: fakeFetch([]),
 			redis: fakeRedis(),
 			queueFn: async () => assert.fail("nothing may enqueue"),
 			out: () => {},
 			now: () => NOW,
 			selfIdFn: async () => SELF,
-			tokenFn: async () => "poll-token",
 			fsDeps: FS,
 			sleep: async () => assert.fail("the loop must never start"),
 		}),
@@ -903,31 +847,37 @@ test("zero repos from discovery fails loud at boot, naming both mechanisms", asy
 // Config
 // ---------------------------------------------------------------------------------------------------
 
-test("POLL_REPOS parsing: trim, dedupe, owner/name validation, and the no-repos-no-app refusal", () => {
-	const cfg = loadPollerConfig({ POLL_REPOS: " o/a , o/b ,o/a " }, FS);
+test("POLL_REPOS parsing: trim, dedupe, owner/name validation, and the explicit-set requirement", () => {
+	const cfg = loadPollerConfig({ POLL_REPOS: " o/a , o/b ,o/a ", GITHUB_PAT: "ghp_x" }, FS);
 	assert.deepEqual(cfg.repos, ["o/a", "o/b"], "trimmed and deduped, in order");
 	assert.equal(cfg.intervalSeconds, 60);
 	assert.ok(!("webhookSecret" in cfg), "the placeholder secret must never escape the loader");
 
-	assert.throws(() => loadPollerConfig({ POLL_REPOS: "not-a-repo" }, FS), (e) => e.piDispatchConfig === true);
-	assert.throws(() => loadPollerConfig({ POLL_REPOS: " , " }, FS), (e) => e.piDispatchConfig === true);
-	// Unset + a non-app source names BOTH mechanisms in the refusal.
-	assert.throws(() => loadPollerConfig({}, FS), (e) => e.piDispatchConfig === true && /POLL_REPOS/.test(e.message) && /app/.test(e.message));
-	// Unset + app source defers to installation discovery.
-	const appCfg = loadPollerConfig({ GITHUB_AUTH_SOURCE: "app", GITHUB_APP_ID: "1", GITHUB_APP_INSTALLATION_ID: "2", GITHUB_APP_PRIVATE_KEY_PATH: "/k.pem" }, FS);
-	assert.equal(appCfg.repos, null);
+	assert.throws(() => loadPollerConfig({ POLL_REPOS: "not-a-repo", GITHUB_PAT: "ghp_x" }, FS), (e) => e.piDispatchConfig === true);
+	assert.throws(() => loadPollerConfig({ POLL_REPOS: " , ", GITHUB_PAT: "ghp_x" }, FS), (e) => e.piDispatchConfig === true);
+	// There is no App installation to discover from any more: an unset set refuses, whatever else is in env.
+	assert.throws(
+		() => loadPollerConfig({ GITHUB_PAT: "ghp_x" }, FS),
+		(e) => e.piDispatchConfig === true && /POLL_REPOS/.test(e.message),
+	);
+	// POLL_REPOS is the poller's github arm, so it requires the one credential that can poll.
+	assert.throws(
+		() => loadPollerConfig({ POLL_REPOS: "o/r" }, FS),
+		(e) => e.piDispatchConfig === true && /GITHUB_PAT/.test(e.message),
+		"a PAT is the only github credential, so the arm must name it",
+	);
 });
 
 test("POLL_INTERVAL_SECONDS: default 60, floored at 30 so a typo cannot hammer the API", () => {
-	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", POLL_INTERVAL_SECONDS: "5" }, FS).intervalSeconds, 30);
-	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", POLL_INTERVAL_SECONDS: "90" }, FS).intervalSeconds, 90);
-	assert.throws(() => loadPollerConfig({ POLL_REPOS: "o/r", POLL_INTERVAL_SECONDS: "x" }, FS), (e) => e.piDispatchConfig === true);
+	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", POLL_INTERVAL_SECONDS: "5" }, FS).intervalSeconds, 30);
+	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", POLL_INTERVAL_SECONDS: "90" }, FS).intervalSeconds, 90);
+	assert.throws(() => loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", POLL_INTERVAL_SECONDS: "x" }, FS), (e) => e.piDispatchConfig === true);
 });
 
 test("WEBHOOK_SECRET: not required for poll, still required for serve", () => {
 	// The poller has nothing to verify -- its credential authenticates the other direction -- so the
 	// same env that boots poll must still refuse to boot serve.
-	const env = { POLL_REPOS: "o/r" };
+	const env = { POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" };
 	assert.doesNotThrow(() => loadPollerConfig(env, FS));
 	assert.throws(() => loadReceiverConfig(env, FS), /WEBHOOK_SECRET/);
 });
@@ -976,7 +926,7 @@ test("the poller's boot gate retries a transient identity failure, then the loop
 	const clock = { ms: NOW };
 	let idCalls = 0;
 	let poller;
-	poller = await startPoller({ POLL_REPOS: "o/r" }, {
+	poller = await startPoller({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, {
 		fetchFn: fakeFetch(EMPTY_POLL_ROUTES()),
 		redis: fakeRedis(),
 		queueFn: async () => {},
@@ -1014,7 +964,7 @@ test("the poller's getAuth re-invokes makeAuth on retry: the cache memoizes SUCC
 	const out = [];
 	const clock = { ms: NOW };
 	let poller;
-	poller = await startPoller({ POLL_REPOS: "o/r" }, {
+	poller = await startPoller({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, {
 		fetchFn: fakeFetch(EMPTY_POLL_ROUTES()),
 		redis: fakeRedis(),
 		queueFn: async () => {},
@@ -1024,7 +974,7 @@ test("the poller's getAuth re-invokes makeAuth on retry: the cache memoizes SUCC
 		makeAuth: async () => {
 			mints++;
 			if (mints === 1) throw new Error("gh answered 502 mid-restart");
-			return { selfId: SELF, source: "gh", mintToken: async () => "poll-token" };
+			return { selfId: SELF, source: "pat", mintToken: async () => "poll-token" };
 		},
 		tokenFn: async () => "poll-token",
 		fsDeps: FS,
@@ -1041,7 +991,7 @@ test("the poller's getAuth re-invokes makeAuth on retry: the cache memoizes SUCC
 test("a tagged identity refusal stops the poller boot same-tick: no sleep, no loop (issue #318)", async () => {
 	const sleeps = [];
 	await assert.rejects(
-		startPoller({ POLL_REPOS: "o/r" }, {
+		startPoller({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, {
 			fetchFn: async () => assert.fail("the loop must never start on a determinate refusal"),
 			redis: fakeRedis(),
 			queueFn: async () => {},
@@ -1061,9 +1011,9 @@ test("a tagged identity refusal stops the poller boot same-tick: no sleep, no lo
 });
 
 test("loadPollerConfig passes the retry window THROUGH the receiver loader: one parse, one floor (issue #318)", () => {
-	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r" }, FS).identityRetryWindowMs, 600_000);
-	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", RECEIVER_IDENTITY_RETRY_SECONDS: "10" }, FS).identityRetryWindowMs, 60_000, "the floor holds on the poll path too");
-	assert.throws(() => loadPollerConfig({ POLL_REPOS: "o/r", RECEIVER_IDENTITY_RETRY_SECONDS: "x" }, FS), (e) => e.piDispatchConfig === true);
+	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, FS).identityRetryWindowMs, 600_000);
+	assert.equal(loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", RECEIVER_IDENTITY_RETRY_SECONDS: "10" }, FS).identityRetryWindowMs, 60_000, "the floor holds on the poll path too");
+	assert.throws(() => loadPollerConfig({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", RECEIVER_IDENTITY_RETRY_SECONDS: "x" }, FS), (e) => e.piDispatchConfig === true);
 });
 
 // ---------------------------------------------------------------------------------------------------
@@ -1135,7 +1085,7 @@ test("stop() while parked on the REAL default sleep: the race is won, the timer 
 		const liveDelta = () => [...live].filter((id) => !before.has(id));
 		let parked;
 		const cycleSeen = new Promise((resolve) => (parked = resolve));
-		poller = await startPoller({ POLL_REPOS: "o/r" }, {
+		poller = await startPoller({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, {
 			fetchFn: fakeFetch(EMPTY_POLL_ROUTES()),
 			redis: fakeRedis(),
 			queueFn: async () => {},
@@ -1203,7 +1153,7 @@ test("a rejecting sleep still propagates through the cancel finally (issue #325)
 	// sleep -- a broken sleep is a loud loop death surfacing through `done`, not a silent wedge.
 	let calls = 0;
 	const boom = new Error("sleep exploded");
-	const poller = await startPoller({ POLL_REPOS: "o/r" }, {
+	const poller = await startPoller({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, {
 		fetchFn: fakeFetch(EMPTY_POLL_ROUTES()),
 		redis: fakeRedis(),
 		queueFn: async () => {},
@@ -1249,7 +1199,7 @@ test("the poller judges VALKEY_URL before building its own Valkey clients, and a
 	const base = { fetchFn: fakeFetch(EMPTY_POLL_ROUTES()), out: () => {}, now: () => NOW, random: () => 0.5, selfIdFn: async () => SELF, tokenFn: async () => "poll-token", fsDeps: FS, sleep: async () => {}, signals: false };
 	// Settled either way, so a poller that starts after all is stopped and fails this test rather than running on.
 	let started = null;
-	const err = await startPollerReal({ POLL_REPOS: "o/r", VALKEY_URL: "redis://localhost:16583" }, {
+	const err = await startPollerReal({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x", VALKEY_URL: "redis://localhost:16583" }, {
 		...base,
 		makeQueueFn: () => (queues++, { close: async () => {} }),
 		makeRedisFn: () => (queues++, fakeRedis()),
@@ -1269,7 +1219,7 @@ test("the poller judges VALKEY_URL before building its own Valkey clients, and a
 	assert.equal(queues, 0, "no client of its own was built");
 	// With its clients injected (a test's fakes), nothing of its own is built and nothing is judged.
 	let judged = 0;
-	const poller = await startPollerReal({ POLL_REPOS: "o/r" }, { ...base, redis: fakeRedis(), queueFn: async () => {}, judgeValkey: async () => judged++, sleep: async () => poller?.stop() });
+	const poller = await startPollerReal({ POLL_REPOS: "o/r", GITHUB_PAT: "ghp_x" }, { ...base, redis: fakeRedis(), queueFn: async () => {}, judgeValkey: async () => judged++, sleep: async () => poller?.stop() });
 	poller.stop();
 	await poller.done.catch(() => {});
 	assert.equal(judged, 0);

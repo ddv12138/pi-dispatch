@@ -21,10 +21,12 @@ const TRIGGERS_PATH = fileURLToPath(new URL("../../deploy/triggers.json", import
 const SECRET = "shh";
 
 function baseEnv(overrides = {}) {
-	return { WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: TRIGGERS_PATH, ...overrides };
+	// GITHUB_PAT is the one github credential; the committed triggers file names github rules, so a
+	// serving boot requires it (start.mjs refuses clearly without it).
+	return { WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: TRIGGERS_PATH, GITHUB_PAT: "ghp_test_fixture", ...overrides };
 }
 
-const okAuth = async () => ({ selfId: 12345, source: "gh" });
+const okAuth = async () => ({ selfId: 12345, source: "pat" });
 const throwingAuth = async () => {
 	throw Object.assign(new Error("no identity"), { piDispatchConfig: true });
 };
@@ -264,10 +266,9 @@ test("the makeReceiver handler is wired to createServer and a signed delivery en
 // --- the github arm is conditional, like the other three (issue #99) -------------------------------
 //
 // Before this, `makeAuth(cfg.github)` ran unconditionally at boot while the gitlab/forgejo/azure arms were
-// each gated on their own config. With GITHUB_AUTH_SOURCE defaulting to `gh`, that meant a GitLab-only
-// deployment had to have the GitHub CLI installed and logged in -- and a WEBHOOK_SECRET for an endpoint it
-// never served -- or it could not start. Both directions are pinned: skipped when github is not served,
-// still a hard-fail boot gate when it is.
+// each gated on their own config. That meant a GitLab-only deployment had to have a GitHub credential --
+// and a WEBHOOK_SECRET for an endpoint it never served -- or it could not start. Both directions are
+// pinned: skipped when github is not served, still a hard-fail boot gate when it is.
 
 test("PI_RECEIVER_ALLOW_SELF=1 is announced at boot, and the default boot says nothing about it", async () => {
 	// "Fail open and say which": a guard that is off must be visible in the log of the machine that runs it,
@@ -304,7 +305,7 @@ test("a gitlab-only deployment boots without ever calling makeAuth, and says so 
 	const skipped = lines.find((l) => l.event === "github_arm_skipped");
 	assert.ok(skipped, `the skip must be logged; boot lines were: ${JSON.stringify(lines)}`);
 	assert.match(skipped.reason, /github triggers/);
-	assert.match(skipped.reason, /GITHUB_AUTH_SOURCE/, "the reason names both signals, which are the two ways out");
+	assert.match(skipped.reason, /no github triggers configured/, "the reason names the one signal left (a github rule in the triggers file)");
 	assert.equal(lines.some((l) => l.event === "self_identity" && l.forge === undefined), false, "no github identity line, because no github identity was resolved");
 	// The gitlab arm is untouched by any of this: its own identity resolution still ran, hard-fail as ever.
 	assert.equal(lines.find((l) => l.event === "self_identity" && l.forge === "gitlab")?.id, 4242);
@@ -323,16 +324,17 @@ test("a github-serving deployment still HARD-FAILS when makeAuth throws -- no se
 	assert.equal(captured.listen, undefined, "the receiver must never listen without the bot-loop guard");
 });
 
-test("an explicit GITHUB_AUTH_SOURCE re-arms the boot gate even with no github triggers", async () => {
-	// Explicit intent wins in the loader, and this is what that costs: the endpoint exists, so identity
-	// resolution is mandatory again and an unresolvable one is still a refusal to boot.
+test("a github-serving deployment with no GITHUB_PAT refuses at boot, naming the key", async () => {
+	// There is no App and no gh fallback: the arm's only credential is the PAT. The refusal is a
+	// configError (exit 2) before the handler or a socket exists, so a supervisor stops instead of
+	// restarting into the same answer.
 	const { captured, createServer } = capturingServer();
-	const env = gitlabOnlyEnv({ WEBHOOK_SECRET: SECRET, GITHUB_AUTH_SOURCE: "pat", GITHUB_PAT: "ghp_x" });
 	await assert.rejects(
-		startReceiverClosed(env, { makeAuth: throwingAuth, makeQueueFn: stubQueue, createServer, ...gitlabFakes }),
-		(e) => e.piDispatchConfig === true,
+		startReceiverClosed({ ...baseEnv(), GITHUB_PAT: undefined }, { makeAuth: throwingAuth, makeQueueFn: stubQueue, createServer }),
+		(e) => e.piDispatchConfig === true && /GITHUB_PAT/.test(e.message),
 	);
-	assert.equal(captured.listen, undefined, "an armed github endpoint with no identity must not listen");
+	assert.equal(captured.handler, undefined, "the handler must never be built without a credential");
+	assert.equal(captured.listen, undefined, "and the receiver must never listen");
 });
 
 test("a github-free deployment 404s `/` -- the skipped identity resolution and the absent route are one decision", async () => {
@@ -379,7 +381,7 @@ test("the github closer resolver is built over the boot auth object's OWN mintTo
 		};
 
 	await bootLogLines((write) =>
-		startReceiverClosed({ WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: triggersPath }, { write, makeAuth: async () => auth, makeQueueFn: () => queue, createServer, makeResolveGitHubAuthority }),
+		startReceiverClosed({ WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: triggersPath, GITHUB_PAT: "ghp_test_fixture" }, { write, makeAuth: async () => auth, makeQueueFn: () => queue, createServer, makeResolveGitHubAuthority }),
 	);
 
 	const payload = JSON.stringify({
@@ -626,7 +628,7 @@ test("a TRANSIENT github identity failure at boot retries in-process, then serve
 	const flakyAuth = async () => {
 		calls++;
 		if (calls < 3) throw new Error(`connect ECONNREFUSED 10.0.0.5:443 (attempt ${calls})`);
-		return { selfId: 12345, source: "gh" };
+		return { selfId: 12345, source: "pat" };
 	};
 	let t = 0;
 	const sleeps = [];
@@ -689,7 +691,7 @@ test("the retry wraps EACH arm: a gitlab retry re-resolves gitlab alone and rebu
 		}),
 		"utf8",
 	);
-	const env = { WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: triggersPath, GITLAB_WEBHOOK_MODE: "token", GITLAB_WEBHOOK_SECRET: "gl-secret", GITLAB_TOKEN: "glpat-x" };
+	const env = { WEBHOOK_SECRET: SECRET, PI_TRIGGERS_FILE: triggersPath, GITHUB_PAT: "ghp_test_fixture", GITLAB_WEBHOOK_MODE: "token", GITLAB_WEBHOOK_SECRET: "gl-secret", GITLAB_TOKEN: "glpat-x" };
 
 	const { captured, createServer } = capturingServer();
 	let authCalls = 0;
@@ -700,7 +702,7 @@ test("the retry wraps EACH arm: a gitlab retry re-resolves gitlab alone and rebu
 	const lines = await bootLogLines((write) =>
 		startReceiverClosed(env, {
 			write,
-			makeAuth: async () => (authCalls++, { selfId: 12345, source: "gh" }),
+			makeAuth: async () => (authCalls++, { selfId: 12345, source: "pat" }),
 			makeQueueFn: (...args) => (queueBuilds++, stubQueue(...args)),
 			createServer,
 			resolveGitLabSelfId: async () => {

@@ -21,9 +21,8 @@
  *     assertion MEANS, not about a live false positive.
  *   - It runs in ONE direction: a name read and not accounted for fails. The reverse (a key nothing
  *     reads) is NOT asserted, because some names genuinely reach the code by indirection this scan
- *     cannot follow. `env[patVar]` (`worker/src/config.mjs`) resolves `GITHUB_PAT` through a variable,
- *     and provider keys are resolved by pi at runtime through `findEnvKeys`. Asserting the reverse
- *     would fail on a correct tree.
+ *     cannot follow: provider keys are resolved by pi at runtime through `findEnvKeys`. Asserting the
+ *     reverse would fail on a correct tree.
  *   - It FAILS CLOSED on an unfamiliar RECEIVER: any identifier ending in `env` other than the known
  *     ones is a fourth way to read the environment, and the test says so instead of silently shrinking
  *     its own scope. Destructuring the environment is refused too, in its plain form: a default value
@@ -276,7 +275,7 @@ export function markedInternal(files = allSources()) {
 }
 
 /** Names `.env.example` declares. Pinned to column 0 to 2 (`NAME=` or `# NAME=`), so continuation
- *  prose such as "Prefer GITHUB_AUTH_SOURCE=app" cannot grant a variable false coverage. */
+ *  prose such as "remember to set GITHUB_PAT=..." cannot grant a variable false coverage. */
 export function declaredInEnvExample() {
 	const txt = readFileSync(join(REPO_ROOT, ".env.example"), "utf8");
 	const names = new Set();
@@ -564,7 +563,10 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_AUTH_CONNECTIONS_FILE and PI_AUTH_STORE_DIR add the host-owned subscription boundary (#781).
 	// PI_SANDBOX_GATEWAYS_FILE adds the hand-owned browser gateway enrollment (#754).
 	// PI_CONSOLE_AUDIT_RETENTION_DAYS and PI_RUN_MIRROR_MAX_RUNS add the audit trail's own retention and the run index cap (#761).
-	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The count also carries ONE
+	// PI_RECEIVER_ALLOW_SELF adds the bot-loop guard's disarm switch (2026-11-04). The GitHub auth
+	// migration then removed the source/App/PAT-pointer keys and the gh-resume escape hatch
+	// (7 assignments): GITHUB_PAT is the one GitHub credential left.
+	// The count also carries ONE
 	// assignment this file already had at the pin's last edit, which is why it moves by two: at HEAD the file
 	// carried 137 assignments against this pin's 136, so this assertion was already failing before the switch.
 	// The token-only accounting removed the retired dollar keys (the last two, PI_WEEKLY_COST_USD and
@@ -572,7 +574,7 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// PI_OPENSHELL_ENGINE and PI_OPENSHELL_GATEWAY (#683) and the six PI_SANDBOX_* keys (#683, #754, #771)
 	// with the podman, OpenShell and sandbox stack, so the pin follows the file down. The job-start caps
 	// removal (C1) then dropped the last four (PI_DAILY_CAP, PI_WEEKLY_CAP, PI_MONTHLY_CAP, PI_SOFT_HOLD_PCT).
-	assert.equal(scanned, 120, "the scan must actually reach every assignment in the file");
+	assert.equal(scanned, 113, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM
