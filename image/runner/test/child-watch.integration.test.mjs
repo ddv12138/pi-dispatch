@@ -138,6 +138,11 @@ test("a parent plus a pi child stopped on a policy: STOP is written and the chil
 	assert.equal(w.callCount(), 1, "the second call never reached the provider");
 	assert.match(result.stdout, new RegExp(STOP_MESSAGES[MODEL_NOT_ALLOWED]), "the child answered it with the brake");
 	hook.teardown();
+	// The guard this file carries for teardown: it removes NOTHING. The STOP a real stop wrote stays on
+	// disk with the directory -- a directory removed while a child lives would let an agent that makes
+	// it again run that child unbraked.
+	assert.equal(existsSync(join(w.ledger, "STOP")), true, "the STOP stays after teardown");
+	assert.equal(existsSync(w.ledger), true, "so does the directory");
 	const snap = meter.snapshot();
 	assert.deepEqual([snap.total, snap.childTotal, snap.childProcesses, snap.unmeteredChildren], [1077, 777, 1, 0]);
 	assert.equal(snap.rootTotal + snap.otherTotal + snap.looseTotal + snap.childTotal, snap.total);
@@ -226,5 +231,13 @@ test("a metered pi child seen on every tick is never counted unmetered (issue #5
 	assert.deepEqual(teardown, { distinct: 1, peak: 1, unmetered: 0 });
 	assert.equal(meter.state.stopReason, null);
 	assert.deepEqual([meter.snapshot().childTotal, meter.snapshot().childProcesses], [1554, 1]);
-	assert.equal(existsSync(join(w.ledger, "STOP")), true, "the directory and its STOP stay after teardown");
+	// What teardown must never do is REMOVE things: the ledger directory stays. But a CLEAN end writes
+	// no STOP and must not grow one: teardown writes one only for a real policy stop, "the old generic
+	// token stop is gone with the token budget" (child-watch.mjs's teardown). This assertion used to
+	// expect a STOP here -- true while teardown still wrote one unconditionally with a `token_budget`
+	// fallback, and unsatisfiable on every Linux runner since 174378e7 removed that fallback (it could
+	// never fail on macOS: this test is Linux-only). The STOP-stays half of the guard moved to the
+	// policy-stop test above, where a STOP actually exists.
+	assert.equal(existsSync(w.ledger), true, "the directory stays after teardown");
+	assert.equal(existsSync(join(w.ledger, "STOP")), false, "a clean end writes no STOP");
 });
