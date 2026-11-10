@@ -10,9 +10,11 @@
   `worker.Dockerfile.dockerignore`、`egress-proxy.conf` 和 `triggers.json`——没有宿主机服务定义，也没有环境
   包装脚本。
 - `worker` 和 `console` 两个 profile 运行 `docker.io/ddv12138/pi-dispatch-worker:latest`（应用在
-  `/opt/pi-dispatch`），从 Docker Hub 拉取。该镜像由 GitHub Actions（`.github/workflows/ci.yml`）在每次
-  push main 时跑完测试后构建并推送：`latest` 随 main 移动，`sha-<短sha>` 是不可变的回滚 tag，`v*` git tag
-  会推出版本号 tag。compose 里保留的 `build:` 块只服务本地开发——服务器上不在现场构建。部署目录按同样的
+  `/opt/pi-dispatch`），从 Docker Hub 拉取。该镜像由 GitHub Actions（`.github/workflows/images.yml`）在每次
+  push main 时构建并推送——与测试套件（`.github/workflows/ci.yml`）并行、不被测试门禁：部署端是显式
+  pull，拉取前可以先看测试状态，且每个构建都会落一个不可变的 `sha-<短sha>` tag 可钉住或回滚。
+  `latest` 随 main 移动，`v*` git tag 会推出版本号 tag。compose 里保留的 `build:` 块只服务本地开发——
+  服务器上不在现场构建。部署目录按同样的
   绝对路径挂载进容器，因此 job 路径在 daemon 主机上可以解析。worker 持有宿主机 Docker socket；console 用
   同一镜像但不挂 socket。
 - `receiver` profile 运行 `docker.io/ddv12138/pi-dispatch-receiver:latest`，同样由 CI 构建推送、部署端

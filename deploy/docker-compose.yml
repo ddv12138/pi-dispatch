@@ -5,7 +5,7 @@
 #
 # The RECEIVER is a container too. It is the one internet-facing process and needs no Docker access, so
 # it has no host service unit any more. Its image comes from Docker Hub -- built and pushed by
-# .github/workflows/ci.yml on every push to main -- and a deployment updates it with `docker compose
+# .github/workflows/images.yml on every push to main -- and a deployment updates it with `docker compose
 # pull` + `up -d`, never a host-side build. The address it publishes comes from the deployment's .env
 # through PI_RECEIVER_PUBLISH (the 253 deployment sets PI_RECEIVER_PUBLISH=192.168.99.253). No override
 # file exists: every value this file reads is a compose variable or an .env key. The `receiver` profile
@@ -69,7 +69,7 @@ services:
   # daemon host. Local-folder triggers must also live under this tree (or be added as same-path mounts).
   worker:
     profiles: ["worker"]
-    # The control-plane image, built and pushed by .github/workflows/ci.yml on every push to main:
+    # The control-plane image, built and pushed by .github/workflows/images.yml on every push to main:
     # `latest` moves with main, `sha-<sha>` is the immutable rollback tag, and a `v*` git tag adds
     # the release number. PI_WORKER_IMAGE overrides the whole ref, to pin a version or roll back.
     # The build block below is the LOCAL development path only: with both keys present, `up` builds
@@ -168,7 +168,7 @@ services:
       - no-new-privileges:true
 
   # The receiver (issue #82): the always-on webhook edge. Its image comes from Docker Hub, built and
-  # pushed by .github/workflows/ci.yml on every push to main (`latest` moves with main, `sha-<sha>` is
+  # pushed by .github/workflows/images.yml on every push to main (`latest` moves with main, `sha-<sha>` is
   # the immutable rollback tag), so a deployment updates it with `docker compose pull` + `up -d` and
   # never builds on the host. The build block below is the LOCAL development path, same as the
   # worker's: `up` reaches it only when the image is missing from the local store.

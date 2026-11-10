@@ -1,0 +1,86 @@
+# The control-plane IMAGE builds -- docker.io/ddv12138/pi-dispatch-worker (the compose worker AND
+# console run it) and docker.io/ddv12138/pi-dispatch-receiver. These builds run in PARALLEL with the
+# test suite (.github/workflows/ci.yml) and are deliberately NOT gated by it: the suite is long and
+# has a documented hang history (issue #657), while an image push on its own is harmless -- a
+# deployment updates only by an explicit `docker compose pull`, the operator reads the CI status
+# first, and every build also lands an immutable `sha-<sha>` tag to pin or roll back to
+# (docs/253-deployment.md holds the update and rollback procedure).
+#
+# Manual run: the Actions page's "Run workflow" button, or
+#
+#   gh workflow run images.yml --ref <branch-or-tag>
+#
+# A manual run from a non-main ref builds and pushes ONLY a `sha-<sha>` tag: `latest` moves
+# exclusively on main and on `v*` tags, so a scratch branch can never become the image a deployment
+# pulls by default, while every manual build still produces its own immutable rollback point.
+#
+# WHAT IS NOT BUILT HERE: the job images ddv12138/pi-job and pi-job-java21. They still come off the
+# maintainer's machine via image/publish.sh -- released version tags there never move, and the Java
+# image bakes one deployment's Maven network settings in -- see that script's header.
+name: images
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One ref, one live build: a second push to the same ref cancels the first run's in-progress build
+# instead of two registry pushes racing for the same `latest` tag.
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  images:
+    runs-on: ubuntu-latest
+    env:
+      # Shared tag rules for both metadata steps below. `latest` moves ONLY on main and on v* tags;
+      # the sha tag is UNCONDITIONAL -- every run, manual or not, produces its immutable rollback
+      # point; the semver tag exists only when the ref is a v* release tag.
+      IMAGE_TAGS: |
+        type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+        type=sha,prefix=sha-
+        type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      # One metadata step PER IMAGE, deliberately: with several images on one step the action's
+      # outputs mix the names, and a build-push step would push one image under both repositories.
+      - id: meta-worker
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/ddv12138/pi-dispatch-worker
+          tags: ${{ env.IMAGE_TAGS }}
+      - id: meta-receiver
+        uses: docker/metadata-action@v5
+        with:
+          images: docker.io/ddv12138/pi-dispatch-receiver
+          tags: ${{ env.IMAGE_TAGS }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/worker.Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-worker.outputs.tags }}
+          labels: ${{ steps.meta-worker.outputs.labels }}
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,scope=worker,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: receiver/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta-receiver.outputs.tags }}
+          labels: ${{ steps.meta-receiver.outputs.labels }}
+          cache-from: type=gha,scope=receiver
+          cache-to: type=gha,scope=receiver,mode=max

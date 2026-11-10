@@ -2,7 +2,7 @@
 # Build the two job images from THIS checkout and publish them, so a deployment pulls exactly what this source is.
 #
 # WHY THE JOB IMAGES STILL BYPASS CI. The control-plane images (the compose worker/console and the
-# receiver) are built and pushed by .github/workflows/ci.yml on every push to main; the job images are
+# receiver) are built and pushed by .github/workflows/images.yml on every push to main; the job images are
 # not, for two reasons a shared runner cannot satisfy: a released version tag here never moves (the
 # guard below is what refuses to re-push one), and the Java image bakes ONE deployment network's Maven
 # mirror/proxy settings into the image, read from the environment at build time below. What the script

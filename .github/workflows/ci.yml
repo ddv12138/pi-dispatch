@@ -1,21 +1,30 @@
-# CI for the control-plane images. Two jobs:
+# CI for the test suite -- an independent signal on every push to main, every pull request and every
+# `v*` tag. The control-plane IMAGE builds live in .github/workflows/images.yml and run in PARALLEL
+# with this workflow, deliberately NOT gated by it: the suite is long and has a documented hang
+# history (issue #657), while an image push on its own is harmless -- a deployment updates only by an
+# explicit `docker compose pull`, the operator can read this workflow's status before pulling, and
+# every build also lands an immutable `sha-<sha>` tag to pin or roll back to (docs/253-deployment.md).
 #
-#   test   -- the full npm test suite, on every push and every pull request. The images job below
-#             refuses to build from anything the tests did not pass on.
-#   images -- build and push the two control-plane images to Docker Hub, on push to main and on a
-#             `v*` release tag only. PRs never see the registry credentials and never push.
+# The posture is the repo's own known-good CI config (3ba40127~1, pi-upgrade-check.yml): a REAL Valkey
+# backs the integration tests -- a skipped assertion is an UNVERIFIED assertion, so the
+# PI_DISPATCH_REQUIRE_*_TESTS variables turn a skip into a hard failure, and VALKEY_TEST_URL is the
+# service the integration tests dial. The suite reads ONE service: the worker/receiver/admin
+# integration tests isolate themselves on separate database numbers of the same URL. Sixty minutes
+# bounds the job (issue #657: a hung test once held one for five hours under the default cap).
 #
-# WHAT IS BUILT HERE AND WHAT IS NOT. Built: docker.io/ddv12138/pi-dispatch-worker (the compose
-# worker AND console run it) from deploy/worker.Dockerfile, and docker.io/ddv12138/pi-dispatch-receiver
-# from receiver/Dockerfile. Tag rules are set once at job level and shared by both images --
-# `latest` follows every build (main and release tags), `sha-<sha>` names a main build and never
-# moves (the rollback point a deployment pins), and a `v*` git tag adds its `<version>` number.
-# NOT built here: the job images ddv12138/pi-job and pi-job-java21. They still come off the
-# maintainer's machine via image/publish.sh -- released version tags there never move, and the
-# Java image bakes one deployment's Maven network settings in -- see that script's header.
-#
-# The 253 deployment updates itself with `docker compose pull` + `up -d` against the `latest`
-# these pushes move; docs/253-deployment.md holds the procedure and the rollback steps.
+# WHY PORT 6399, NOT 6379. Part of the suite dials redis://127.0.0.1:6399 with NO env gate at all:
+# worker/test/cli.test.mjs hardcodes VALKEY_URL: "redis://127.0.0.1:6399", and start-wiring.test.mjs
+# falls back to the same literal -- whose own comment (lines 27-41) predicts this exact trap: "A
+# hardcoded local port therefore passes on a laptop that happens to run one there and wedges CI".
+# A worker pointed at an unreachable Valkey does not fail fast: the boot health gate throws a
+# retryable error (worker/src/valkey-endpoint.mjs) and the CLI retries every 2 seconds forever. The
+# first CI run of this workflow hung 52 minutes doing exactly that -- "nothing answers VALKEY_URL
+# (127.0.0.1:6399)" every 2 seconds -- because the service sat on 6379. So the service container
+# PUBLISHES on 127.0.0.1:6399 (mapped from its own 6379) and VALKEY_TEST_URL points at the same
+# container: the gated tests read the env, the hardcoded tests hit the literal, and both land on a
+# healthy Valkey. The suite is also run with the env armed locally before every workflow change --
+# a laptop that happens to run a Valkey on 6399 can no longer mask this, because the hardcoded
+# tests now always find the CI container there too.
 name: CI
 
 on:
@@ -27,8 +36,7 @@ on:
 permissions:
   contents: read
 
-# One ref, one live run: a rapid second push to main cancels the first run's in-progress build
-# instead of queueing two registry pushes racing for the same `latest` tag.
+# One ref, one live test run: a rapid second push to main cancels the stale run.
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -36,6 +44,19 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    services:
+      # A real Valkey backs the queue integration tests. AOF is not needed for a test run; the point
+      # is a genuine Redis-protocol server, not the fake. Every Valkey image name in this file is
+      # VALKEY_IMAGE (worker/src/valkey-auth.mjs), held to it by worker/test/valkey-image.test.mjs.
+      valkey:
+        image: valkey/valkey:8.1
+        ports:
+          # Published on 6399, NOT the container's own 6379: the reason is the comment at the top of
+          # this file -- the hardcoded redis://127.0.0.1:6399 tests must land on this container too.
+          - 127.0.0.1:6399:6379
+        options: >-
+          --health-cmd "valkey-cli ping" --health-interval 10s --health-timeout 3s --health-retries 5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -44,54 +65,8 @@ jobs:
           cache: npm
       - run: npm ci --no-audit --no-fund
       - run: npm test
-
-  images:
-    needs: test
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    env:
-      # Shared tag rules for both metadata steps below. `latest` is unconditional; the sha tag is
-      # a main-branch fact; the semver tag only exists when the ref is a v* release tag.
-      IMAGE_TAGS: |
-        type=raw,value=latest
-        type=sha,prefix=sha-,enable=${{ github.ref == 'refs/heads/main' }}
-        type=semver,pattern={{version}},enable=${{ startsWith(github.ref, 'refs/tags/v') }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      # One metadata step PER IMAGE, deliberately: with several images on one step the action's
-      # outputs mix the names, and a build-push step would push one image under both repositories.
-      - id: meta-worker
-        uses: docker/metadata-action@v5
-        with:
-          images: docker.io/ddv12138/pi-dispatch-worker
-          tags: ${{ env.IMAGE_TAGS }}
-      - id: meta-receiver
-        uses: docker/metadata-action@v5
-        with:
-          images: docker.io/ddv12138/pi-dispatch-receiver
-          tags: ${{ env.IMAGE_TAGS }}
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: deploy/worker.Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta-worker.outputs.tags }}
-          labels: ${{ steps.meta-worker.outputs.labels }}
-          cache-from: type=gha,scope=worker
-          cache-to: type=gha,scope=worker,mode=max
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: receiver/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.meta-receiver.outputs.tags }}
-          labels: ${{ steps.meta-receiver.outputs.labels }}
-          cache-from: type=gha,scope=receiver
-          cache-to: type=gha,scope=receiver,mode=max
+        env:
+          PI_DISPATCH_REQUIRE_LOADER_TESTS: "1"
+          PI_DISPATCH_REQUIRE_WORKER_TESTS: "1"
+          PI_DISPATCH_REQUIRE_RECEIVER_TESTS: "1"
+          VALKEY_TEST_URL: "redis://127.0.0.1:6399"
