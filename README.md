@@ -72,7 +72,7 @@ npm ci
 npm test
 ```
 
-CI(GitHub Actions)在每个 push 和 PR 上跑全量测试;合入 main 或打 `v*` tag 后,测试通过会自动把控制面镜像发布到 Docker Hub——worker 和 console 共用一个镜像,receiver 一个(`latest` 跟随最新,`sha-<sha>` 钉住每个构建用于回滚,`v*` tag 加版本号)。**任务镜像(`pi-job`)不走 CI**,由 `./image/publish.sh` 从本机构建发布:发布过的版本 tag 永不移动,Java 镜像还要把单个部署的 Maven 网络设置烤进去,这些是共享 runner 做不到的。
+CI(GitHub Actions)在每个 push 和 PR 上跑全量测试;合入 main 或打 `v*` tag 后,控制面镜像自动发布到 Docker Hub——构建与测试并行、不被测试门禁(测试挂了也发版;兜底是部署端显式 `docker compose pull`,拉取前先看测试状态,见 `docs/253-deployment.md`),worker 和 console 共用一个镜像,receiver 一个(`latest` 跟随最新,`sha-<sha>` 钉住每个构建用于回滚,`v*` tag 加版本号)。**任务镜像(`pi-job`)不走 CI**,由 `./image/publish.sh` 从本机构建发布:发布过的版本 tag 永不移动,Java 镜像还要把单个部署的 Maven 网络设置烤进去,这些是共享 runner 做不到的。
 
 测试用 `node:test` 加手写的注入假件,不联网、不碰 Docker。少数集成测试需要真的 Valkey——起一个(compose 文件里的 `valkey` 服务就行)并设 `VALKEY_TEST_URL=redis://127.0.0.1:6379`,否则它们跳过。跑测试时让 `HOME` 指向临时目录外的空目录、用个短的 `TMPDIR`。任务启动带 `--pull=never`,所以先把用到的镜像 build 或 pull 好。pi 及其包保持精确锁版本。提交请用 `git commit -s` 签名:本项目遵循 [DCO](https://developercertificate.org/),不签 CLA。
 
