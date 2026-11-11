@@ -1,7 +1,9 @@
 # 253 服务器部署
 
-本文描述 `root@192.168.99.253` 上部署了什么。部署目录是 `/root/pi-dispatch`，没有 Git 元数据；`.env` 和
-`runtime/` 保存留在服务器上、不随快照走的状态。
+本文描述 `root@192.168.99.253` 上部署了什么。部署目录是 `/root/pi-dispatch`，没有 Git 元数据；`.env`、
+`egress-allowlist.conf`、`model-endpoints.conf` 和 `runtime/` 是留在服务器上、不随快照走的状态——同步
+checkout 时必须保留（2026-11-10 的一次 checkout 同步曾把两个 conf 文件删掉，导致 egress-proxy 重建即
+不可用，后从运行中容器原样恢复）。
 
 ## 布局
 
@@ -83,6 +85,9 @@ PI_RECEIVER_IMAGE=docker.io/ddv12138/pi-dispatch-receiver:sha-<短sha>  # 仅回
 ```
 
 恢复到最新后再把该键从 `.env` 删掉或更新，否则部署会一直钉在旧镜像上。
+
+运维提醒：如果曾用 rsync/checkout 方式同步部署目录，同步后必须运行 `pi-dispatch doctor`——它会对
+egress-proxy 的挂载做 drift 检查，allowlist 缺失时会明确报 "does not exist on this host"。
 
 ## job 镜像
 
