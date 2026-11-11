@@ -141,11 +141,13 @@ function buildWorkItemPrompt(flow, target, comment, replica, replicas, instructi
 		"   分支名只能取自 work item id——绝不能取自它的标题或描述。",
 		`2. 用 \`git push --force-with-lease\` 把它只推送到 \`${branch}\`。重跑这个 job 时`,
 		"   必须收敛到同一个分支，所以 `--force-with-lease` 是预期行为，也是幂等的。",
-		"   永远不要用 `git push --force`，也不要推送到任何其他分支。",
+		"   永远不要用 `git push --force`，也不要把票的提交推送到任何其他分支；唯一的例外是",
+		"   skill 第 3 步：spec 分支 `pi/issue-<spec>` 缺失时从默认分支创建一次。",
 		"3. 先检查再开 pull request，因为当源分支已有一张 pull request 时，`az repos pr create` 不会",
 		"   报错，而是再开第二张：",
 		`   - 先检查，例如 \`az repos pr list --source-branch ${branch} --status active\`。`,
 		"   - 如果已有一张，就复用它——你的推送已经更新了它。不要另外创建。",
+		"   - 开 pull request 时目标分支必须是 spec 分支 `pi/issue-<spec>`，绝不能是 master 或其他默认分支。",
 		...(replica === undefined
 			? [`   - 只有在不存在时才运行 \`az repos pr create --source-branch ${branch}\`。`]
 			: [

@@ -174,13 +174,15 @@ function buildIssuePrompt(flow, target, comment, replica, replicas, instructions
 		"   分支名只能取自 issue 编号——绝不能取自 issue 标题或描述。",
 		`2. 用 \`git push --force-with-lease\` 把它只推送到 \`${branch}\`。重跑这个 job 时`,
 		"   必须收敛到同一个分支，所以 `--force-with-lease` 是预期行为，也是幂等的。",
-		"   永远不要用 `git push --force`，也不要推送到任何其他分支。",
+		"   永远不要用 `git push --force`，也不要把票的提交推送到任何其他分支；唯一的例外是",
+		"   skill 第 3 步：spec 分支 `pi/issue-<spec>` 缺失时从默认分支创建一次。",
 		"3. 先检查再开 merge request，因为当源分支已有一张 MR 时，裸跑 `glab mr create` 会报错：",
 		`   - 先检查是否已有打开的 MR，例如 \`glab mr list --source-branch ${branch}\``,
 		`     （或 \`glab mr view ${branch}\`）。`,
 		`   - 如果 \`glab\` 答不上来，就问 API：\`glab api "projects/:id/merge_requests?source_branch=${branch}&state=opened"\``,
 		"     它会列出同一源分支下打开的 merge request。",
 		"   - 如果已有一张，就复用它——你的推送已经更新了它。不要运行 `glab mr create`。",
+		"   - 开 MR 时目标分支必须是 spec 分支 `pi/issue-<spec>`，绝不能是 master 或其他默认分支。",
 		...(replica === undefined
 			? ["   - 只有在不存在时才运行 `glab mr create` 开一张。"]
 			: [
