@@ -118,6 +118,7 @@ function triggerCheckFilterResult(input, groups) {
 export const CHECK_REASON_SENTENCES = Object.freeze({
   "self": "The described actor is the service itself; the bot-loop guard refuses it.",
   "author-not-allowed": "The described actor does not have the authority this forge requires.",
+  "actor-not-allowed": "The described actor is not on this deployment's GITLAB_ALLOWED_ACTORS allowlist, so the receiver refuses every delivery from them regardless of their project role.",
   "pr-author-not-allowed": "The described pull request author is not an owner, member or collaborator.",
   "review-author-not-allowed": "The described reviewer is not an owner, member or collaborator.",
   "closer-not-allowed": "The described closer does not have write access.",

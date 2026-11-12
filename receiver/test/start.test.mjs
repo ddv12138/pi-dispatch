@@ -976,3 +976,32 @@ test("a boot that did NOT lose the race stays silent and reloads nothing (issue 
 	assert.doesNotMatch(text, /triggers_reread_after_arming/, "an unchanged file says nothing");
 	assert.doesNotMatch(text, /triggers_reloaded/, "and reloads nothing");
 });
+
+// --- GITLAB_ALLOWED_ACTORS and the bot-loop guard collide when the token belongs to a person ---------
+//
+// The allowlist is enforced inside filterGitLab, which runs AFTER the guard. So an allowlist that names
+// the token's own account is dead on arrival unless ALLOW_SELF disarms the guard first -- and dead on
+// arrival is invisible, because the deployment boots and simply refuses every delivery. Refusing the boot
+// is the only outcome an operator cannot misread.
+
+test("an allowlist naming the token's own account refuses to boot unless ALLOW_SELF is on", async () => {
+	const { createServer } = capturingServer();
+	await assert.rejects(
+		startReceiverClosed(gitlabOnlyEnv({ GITLAB_ALLOWED_ACTORS: "4242" }), { write: () => true, makeQueueFn: stubQueue, createServer, ...gitlabFakes }),
+		(e) => e.piDispatchConfig === true && /PI_RECEIVER_ALLOW_SELF/.test(e.message),
+		"the boot must name the switch that makes the list live",
+	);
+
+	const lines = await bootLogLines(async (write) => {
+		await startReceiverClosed(gitlabOnlyEnv({ GITLAB_ALLOWED_ACTORS: "4242,7", PI_RECEIVER_ALLOW_SELF: "1" }), { write, makeQueueFn: stubQueue, createServer: capturingServer().createServer, ...gitlabFakes });
+	});
+	assert.deepEqual(lines.find((l) => l.event === "gitlab_allowed_actors")?.ids, [4242, 7], "the armed list is stated at boot, ids only");
+});
+
+test("an allowlist that does not name the token's account boots with the guard armed, and never mentions ALLOW_SELF", async () => {
+	const lines = await bootLogLines(async (write) => {
+		await startReceiverClosed(gitlabOnlyEnv({ GITLAB_ALLOWED_ACTORS: "7" }), { write, makeQueueFn: stubQueue, createServer: capturingServer().createServer, ...gitlabFakes });
+	});
+	assert.deepEqual(lines.find((l) => l.event === "gitlab_allowed_actors")?.ids, [7]);
+	assert.equal(lines.some((l) => l.event === "bot_loop_guard_disabled"), false);
+});

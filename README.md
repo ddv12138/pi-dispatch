@@ -52,7 +52,7 @@ docker exec deploy-console-1 node /opt/pi-dispatch/admin/src/console/cli.mjs lin
 
 `run` 指向一个 **flow**(流程文件)——一份 Markdown 指令,放在目标仓库的 `.pi/skills/<flow>/SKILL.md`,从默认分支读取,所以同一个 flow 名字,每个仓库可以有自己的写法;也可以指向一个已注册的 pi `command`。[triggers.example.json](triggers.example.json) 用注释写全了每种触发器和每个字段;[examples/](examples/) 有一套能直接抄的 `.pi` 样例。
 
-**谁能触发任务,由你的托管平台决定,pi-dispatch 不另设门槛。** GitHub 上,只有协作者的标签、`@pi` 评论或正式 review 能启动任务——陌生人的 fork PR 不会自己启动任何东西。GitLab 上要求项目成员有 Developer 及以上权限,每次投递都实时查一次。Forgejo 要求 owner、admin 或 write 权限,同样每次都查。Azure DevOps 是四家里传输最弱的(没有 HMAC 签名),要开请格外小心配置。
+**谁能触发任务,默认由你的托管平台决定,pi-dispatch 不另设门槛;GitLab 部署可以用 `GITLAB_ALLOWED_ACTORS` 再收窄到指定账号。** GitHub 上,只有协作者的标签、`@pi` 评论或正式 review 能启动任务——陌生人的 fork PR 不会自己启动任何东西。GitLab 上要求项目成员有 Developer 及以上权限,每次投递都实时查一次;设了 `GITLAB_ALLOWED_ACTORS` 后,触发者还必须在那份数字用户 id 名单里,两道门槛叠加而不是互相替代。Forgejo 要求 owner、admin 或 write 权限,同样每次都查。Azure DevOps 是四家里传输最弱的(没有 HMAC 签名),要开请格外小心配置。
 
 **任务能碰什么。** 托管平台上的任务在默认分支的全新副本上干活,干完提 PR;默认分支没开分支保护的仓库会被直接拒绝。本地文件夹的任务是直接改那个文件夹的,没有撤销:文件夹里有未提交改动时它会拒绝启动,而且只应该指向你愿意从备份恢复的文件夹。
 

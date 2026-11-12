@@ -207,11 +207,26 @@ export async function startReceiver(
 		if (cfg.gitlab) {
 			const gitlabSelfId = await retryIdentity(() => resolveSelfIdFn({ apiUrl: cfg.gitlab.apiUrl, token: cfg.gitlab.token }), { forge: "gitlab", ...retryOpts });
 			log({ event: "self_identity", forge: "gitlab", id: gitlabSelfId, mode: cfg.gitlab.mode });
+			// The allowlist and the bot-loop guard collide on ONE identity when the token belongs to a
+			// person: the guard drops that person's deliveries before the allowlist is ever read, so a list
+			// naming them can admit nobody it names. Refusing at boot beats shipping a list that looks armed
+			// and is dead -- the failure would otherwise surface as silence, which reads like a working gate.
+			const allowedActors = cfg.gitlab.allowedActors ?? null;
+			if (allowedActors !== null && allowedActors.has(gitlabSelfId) && !cfg.allowSelf) {
+				throw configError(`GITLAB_ALLOWED_ACTORS lists this deployment's own GitLab user id ${gitlabSelfId}, the account GITLAB_TOKEN belongs to, but PI_RECEIVER_ALLOW_SELF is off: the bot-loop guard drops every delivery from that account before the allowlist is read, so the list could never admit it. Set PI_RECEIVER_ALLOW_SELF=1 to accept that account's events (the 253 deployment does), or remove that id from GITLAB_ALLOWED_ACTORS`);
+			}
+			if (allowedActors !== null) {
+				log({ event: "gitlab_allowed_actors", count: allowedActors.size, ids: [...allowedActors] });
+				// The variable is named for the forge it narrows, and this line makes that concrete for a
+				// deployment that also serves another one: the other endpoints keep their own gates.
+				if (cfg.servesGithub || cfg.forgejo || cfg.azure) log({ event: "gitlab_allowed_actors_scope", reason: "gitlab-only", note: "GITLAB_ALLOWED_ACTORS narrows /gitlab deliveries only" });
+			}
 			gitlab = {
 				mode: cfg.gitlab.mode,
 				secret: cfg.gitlab.secret,
 				selfId: gitlabSelfId,
 				resolveActor: makeResolveActorFn({ apiUrl: cfg.gitlab.apiUrl, token: cfg.gitlab.token }),
+				allowedActors,
 			};
 		}
 

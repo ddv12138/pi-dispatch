@@ -177,7 +177,15 @@ function loadGitLabConfig(env) {
 	const secret = env.GITLAB_WEBHOOK_SECRET;
 	const token = env.GITLAB_TOKEN;
 	const apiUrl = env.GITLAB_URL ?? "https://gitlab.com";
-	if (!mode && !secret && !token) return null;
+	// Parsed before the presence check: a deployment that sets ONLY the allowlist has configured nothing
+	// to allowlist, and falling through to `return null` would silently drop it.
+	const allowedActors = parseGitLabAllowedActors(env.GITLAB_ALLOWED_ACTORS);
+	if (!mode && !secret && !token) {
+		if (allowedActors !== null) {
+			throw configError("GITLAB_ALLOWED_ACTORS is set but this deployment serves no GitLab: set GITLAB_WEBHOOK_MODE, GITLAB_WEBHOOK_SECRET and GITLAB_TOKEN too, or unset GITLAB_ALLOWED_ACTORS");
+		}
+		return null;
+	}
 
 	if (mode !== "signature" && mode !== "token") {
 		throw configError(`GITLAB_WEBHOOK_MODE must be "signature" (HMAC, GitLab 19.0+) or "token" (X-Gitlab-Token, any version); got ${JSON.stringify(mode)}`);
@@ -191,7 +199,43 @@ function loadGitLabConfig(env) {
 	if (typeof token !== "string" || token.trim() === "") {
 		throw configError("GITLAB_TOKEN is required for gitlab triggers -- the receiver resolves the actor's project access level before it may enqueue");
 	}
-	return { mode, secret, token, apiUrl };
+	return { mode, secret, token, apiUrl, allowedActors };
+}
+
+/**
+ * `GITLAB_ALLOWED_ACTORS` -- the operator's opt-in allowlist for who may start a GitLab job at all.
+ *
+ * Unset (`undefined`) is `null`, and that is the only value the filter treats as "not configured": the
+ * deployment keeps the access-level gate it always had (any Developer or above). Anything else is a
+ * comma-separated list of NUMERIC GitLab user ids and is enforced as a SECOND gate beside the access
+ * level, never as a replacement -- an actor named here still has to clear `members/all` at Developer or
+ * above, so a person later removed from the project does not ride a stale list.
+ *
+ * Why numeric ids and not usernames: a username is renamed, reused and personal data; the id is the
+ * stable key the webhook carries and the member lookup already takes. The error message names where to
+ * find one.
+ *
+ * Blank is REFUSED rather than read as either "everyone" or "nobody": an operator who writes
+ * `GITLAB_ALLOWED_ACTORS=` and gets a wide-open deployment, or a dead one, has been lied to by a variable
+ * whose whole purpose is to narrow. Unset is the documented way to keep the old behaviour.
+ */
+function parseGitLabAllowedActors(raw) {
+	if (raw === undefined) return null;
+	const text = typeof raw === "string" ? raw.trim() : String(raw).trim();
+	if (text === "") {
+		throw configError("GITLAB_ALLOWED_ACTORS is set to an empty value, which is ambiguous and refused rather than read as 'everyone' or 'nobody': unset it to keep the access-level gate, or list at least one numeric GitLab user id");
+	}
+	const ids = new Set();
+	for (const piece of text.split(",")) {
+		const id = piece.trim();
+		// No sign, no leading zero, no whitespace-only: `Number()` would accept "1e3", "0x1f" and " 7 ",
+		// and the point of the allowlist is that its members are exact.
+		if (!/^[1-9][0-9]*$/.test(id)) {
+			throw configError(`GITLAB_ALLOWED_ACTORS must be a comma-separated list of numeric GitLab user ids (the "id" from GET /api/v4/user, or a member's page under Project information > Members); got ${JSON.stringify(id)}`);
+		}
+		ids.add(Number(id));
+	}
+	return ids;
 }
 
 /**

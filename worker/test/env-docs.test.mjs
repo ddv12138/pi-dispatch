@@ -578,7 +578,8 @@ test("no assignment in .env.example carries an inline comment, live or commented
 	// removal (C1) then dropped the last four (PI_DAILY_CAP, PI_WEEKLY_CAP, PI_MONTHLY_CAP, PI_SOFT_HOLD_PCT).
 	// MAVEN_MIRROR_URL, MAVEN_PROXY_HOST, MAVEN_PROXY_PORT and MAVEN_PROXY_NONPROXY add the Maven cache
 	// proxy keys the job runner renders ~/.m2/settings.xml from (2026-11-12, docs/253-deployment.md).
-	assert.equal(scanned, 119, "the scan must actually reach every assignment in the file");
+	// GITLAB_ALLOWED_ACTORS adds the receiver's opt-in trigger allowlist (2026-11-12).
+	assert.equal(scanned, 120, "the scan must actually reach every assignment in the file");
 	assert.match("  PI_X=1 # c", /^\s*(# )?([A-Z_][A-Z0-9_]*)=(.*)$/, "and the shape it scans for is the shape the file uses, indented or not");
 
 	// systemd drops an `export` line entirely (measured: "Ignoring invalid environment assignment"), and a BOM

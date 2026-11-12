@@ -10,6 +10,10 @@
  *   1. The bot-loop guard runs UNCONDITIONALLY. Under a project access token the harness is a project
  *      member and would clear the access gate, so its own status comment is an event that passes -- an
  *      unbounded paid recursion. Gating this behind the access check would reintroduce exactly that loop.
+ *   1.5. THEN the operator's allowlist (`GITLAB_ALLOWED_ACTORS`), when armed, so an unlisted actor costs no
+ *      members lookup. It is a NARROWING beside step 2, never a replacement; `null` is the only unarmed
+ *      value. This runs after the guard, which is why a list naming the token's own account needs
+ *      PI_RECEIVER_ALLOW_SELF -- start.mjs refuses that combination rather than booting a dead list.
  *   2. THEN the access gate, then the route.
  *
  * WHY THE ACCESS GATE COVERS LABEL TRIGGERS TOO, unlike GitHub.
@@ -53,9 +57,10 @@ export const MR_ACTIONS = new Set(["open", "update", "reopen", "approved"]);
  *
  * `subset` is a `parseGitLabSubset` projection; `triggers` is the gitlab rule group; `authorized` is the
  * receiver's resolved verdict for this actor; `deliveryId` is the stable `webhook-id`, carried into the job
- * for dedup.
+ * for dedup. `allowedActors` is the operator's allowlist (`GITLAB_ALLOWED_ACTORS`): `null` means the
+ * deployment did not arm one, and any Set means only the ids in it may start a job.
  */
-export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, deliveryId, { allowSelf = false } = {}) {
+export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, deliveryId, { allowSelf = false, allowedActors = null } = {}) {
 	// (0) Fail-closed on identity. MUST precede the self compare -- see header.
 	if (typeof subset?.user?.id !== "number") {
 		return { enqueue: false, reason: "missing-sender-id" };
@@ -66,6 +71,16 @@ export function filterGitLab(subset, triggers, knownFlows, selfId, authorized, d
 	// operator's explicit switch (PI_RECEIVER_ALLOW_SELF), and only an exact `true` disarms it.
 	if (allowSelf !== true && subset.user.id === selfId) {
 		return { enqueue: false, reason: "self" };
+	}
+
+	// (1.5) The operator's allowlist, when armed. NARROWING ONLY, and deliberately checked before the
+	// access lookup's verdict is consulted: an actor nobody listed is refused without even an explanatory
+	// role check, and an actor who IS listed still has to clear step (2), so removing somebody from the
+	// project cannot be undone by a stale list. `null` is the sentinel -- an empty Set is refused at boot
+	// (config.mjs) and must never reach here, because `has()` on it would refuse everyone while looking
+	// like a configured allowlist.
+	if (allowedActors !== null && !allowedActors.has(subset.user.id)) {
+		return { enqueue: false, reason: "actor-not-allowed" };
 	}
 
 	// (2) The access gate, for EVERY trigger type. See the header for why a label does not substitute.

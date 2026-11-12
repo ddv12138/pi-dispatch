@@ -449,7 +449,7 @@ function makeGitHubHandler({ queue, routeTo, selfId, cfg, log, resolveAuthority,
  * The lookup runs only for events that could still fire -- after verification, and after the payload has
  * been projected -- so an unauthenticated flood cannot make this project call GitLab at all.
  */
-function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, resolveActor, now, steer }) {
+function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, resolveActor, allowedActors = null, now, steer }) {
 	return makeGitLabVerifiedHandler({ mode, secret, ...(now ? { now } : {}) }, async ({ rawBody, delivery }, res) => {
 		let subset;
 		try {
@@ -477,7 +477,7 @@ function makeGitLabHandler({ routeTo, queue, cfg, log, mode, secret, selfId, res
 		// `missing-sender-id` exactly as before.
 		const actor = { ...subset, user: { id: resolved.id } };
 
-		let result = filterGitLab(actor, cfg.triggers?.gitlab, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery, { allowSelf: cfg.allowSelf });
+		let result = filterGitLab(actor, cfg.triggers?.gitlab, cfg.triggers?.knownFlows, selfId, resolved.authorized, delivery, { allowSelf: cfg.allowSelf, allowedActors });
 		if (!result.enqueue) {
 			// Issue #638: a phrase-free reply that missed only the parked marker is held for a run parking on its target, or
 			// enqueued as a parked reply when a run just parked there; otherwise this is today's drop, byte for byte.

@@ -530,8 +530,52 @@ test("no gitlab variables at all -> cfg.gitlab is null, and no /gitlab route exi
 
 test("a complete gitlab config loads, defaulting only the instance URL", () => {
   const c = loadReceiverConfig(glEnv, validTriggers);
-  assert.deepEqual(c.gitlab, { mode: "token", secret: "gl-secret", token: "glpat-x", apiUrl: "https://gitlab.com" });
+  assert.deepEqual(c.gitlab, { mode: "token", secret: "gl-secret", token: "glpat-x", apiUrl: "https://gitlab.com", allowedActors: null });
   assert.equal(loadReceiverConfig({ ...glEnv, GITLAB_URL: "https://gl.internal" }, validTriggers).gitlab.apiUrl, "https://gl.internal");
+});
+
+// --- GITLAB_ALLOWED_ACTORS: an opt-in allowlist beside the access-level gate ----------------------
+//
+// The filter is tested in filter-gitlab.test.mjs; this block pins the PARSING, because every wrong shape
+// here is a deployment that believes it narrowed something and did not. The sentinel is `null`; a
+// non-empty Set is the only enforced form, and blank is refused rather than guessed in either direction.
+
+test("GITLAB_ALLOWED_ACTORS parses comma-separated numeric ids, trims, and dedupes", () => {
+  const c = loadReceiverConfig({ ...glEnv, GITLAB_ALLOWED_ACTORS: " 101, 202 ,101,303 " }, validTriggers);
+  assert.deepEqual([...c.gitlab.allowedActors], [101, 202, 303]);
+});
+
+test("an absent GITLAB_ALLOWED_ACTORS is null -- the access-level gate stays exactly as it was", () => {
+  assert.equal(loadReceiverConfig(glEnv, validTriggers).gitlab.allowedActors, null);
+});
+
+test("a blank GITLAB_ALLOWED_ACTORS is refused rather than read as everyone or nobody", () => {
+  for (const raw of ["", "   ", "\t"]) {
+    assert.throws(
+      () => loadReceiverConfig({ ...glEnv, GITLAB_ALLOWED_ACTORS: raw }, validTriggers),
+      (e) => e.piDispatchConfig === true && /GITLAB_ALLOWED_ACTORS is set to an empty value/.test(e.message),
+      JSON.stringify(raw),
+    );
+  }
+});
+
+test("a non-numeric or non-positive GITLAB_ALLOWED_ACTORS entry refuses at boot, with the offending piece named", () => {
+  for (const raw of ["alice", "101,alice", "0", "-1", "1e3", "0x1f", "007", "101,,202"]) {
+    assert.throws(
+      () => loadReceiverConfig({ ...glEnv, GITLAB_ALLOWED_ACTORS: raw }, validTriggers),
+      (e) => e.piDispatchConfig === true && /GITLAB_ALLOWED_ACTORS must be a comma-separated list of numeric GitLab user ids/.test(e.message),
+      JSON.stringify(raw),
+    );
+  }
+});
+
+test("GITLAB_ALLOWED_ACTORS without any GitLab connection refuses at boot rather than silently disarming", () => {
+  // The variable narrows an endpoint. With no endpoint there is nothing to narrow, and returning null here
+  // would leave an operator believing /gitlab is restricted when it does not exist.
+  assert.throws(
+    () => loadReceiverConfig({ WEBHOOK_SECRET: "shh", GITLAB_ALLOWED_ACTORS: "101" }, validTriggers),
+    (e) => e.piDispatchConfig === true && /serves no GitLab/.test(e.message),
+  );
 });
 
 test("GITLAB_WEBHOOK_MODE is required and never defaulted -- the two modes are not equally strong", () => {

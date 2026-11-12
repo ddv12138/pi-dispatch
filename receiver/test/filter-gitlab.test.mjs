@@ -52,8 +52,8 @@ function notePayload(over = {}) {
 	};
 }
 
-const run = (payload, { authorized = true, selfId = SELF_ID, delivery = "wh-1", allowSelf = false } = {}) =>
-	filterGitLab(parseGitLabSubset(payload), triggers, knownFlows, selfId, authorized, delivery, { allowSelf });
+const run = (payload, { authorized = true, selfId = SELF_ID, delivery = "wh-1", allowSelf = false, allowedActors = null } = {}) =>
+	filterGitLab(parseGitLabSubset(payload), triggers, knownFlows, selfId, authorized, delivery, { allowSelf, allowedActors });
 
 // --- the label diff (the repeat-paid-run bug this design exists to prevent) ---
 
@@ -505,4 +505,39 @@ test("a GitLab note without the phrase resumes a parked issue, and not a merge r
 	const mr = notePayload({ object_attributes: { action: "create", note: "option B please", noteable_type: "MergeRequest" }, merge_request: { iid: 12, title: "MR", description: "D", labels: [label("pi-awaiting-input")] } });
 	assert.equal(go(mr).reason, "no-trigger-phrase");
 	assert.equal(run(parked).reason, "no-trigger-phrase", "a comment trigger without resume has nothing to continue");
+});
+
+
+// --- GITLAB_ALLOWED_ACTORS: the opt-in allowlist beside the access-level gate ----------------------
+//
+// The property the design rests on is NARROWING: a listed actor must still clear the access gate, and an
+// unlisted one is refused without that gate being consulted (it costs a network call). The order matters
+// for the boot-time collision with the bot-loop guard, pinned below.
+
+test("an unlisted actor is refused even when their project role would have admitted them", () => {
+	const r = run(issuePayload(), { allowedActors: new Set([101, 202]) });
+	assert.deepEqual(r, { enqueue: false, reason: "actor-not-allowed" });
+});
+
+test("a listed actor is admitted only if the access gate also passes -- the list never replaces it", () => {
+	assert.equal(run(issuePayload(), { allowedActors: new Set([MEMBER]) }).enqueue, true);
+	assert.deepEqual(run(issuePayload(), { allowedActors: new Set([MEMBER]), authorized: false }), { enqueue: false, reason: "author-not-allowed" });
+});
+
+test("an unlisted actor is refused before the access verdict is consulted (#cost, #order)", () => {
+	// `authorized` is false AND the actor is unlisted: the reason must be the allowlist's, because the
+	// receiver never even asks GitLab for a role it will not use. A regression that moved this check after
+	// the gate would turn every refused stranger into one more members lookup.
+	assert.deepEqual(run(issuePayload(), { allowedActors: new Set([101]), authorized: false }), { enqueue: false, reason: "actor-not-allowed" });
+});
+
+test("the bot-loop guard still runs before the allowlist, which is why an allowlist naming the token's own account needs ALLOW_SELF", () => {
+	// start.mjs refuses this combination at boot; the filter's own ordering is what that refusal is about.
+	assert.deepEqual(run(issuePayload({ user: { id: SELF_ID, username: "me" } }), { allowedActors: new Set([SELF_ID]) }), { enqueue: false, reason: "self" });
+	assert.equal(run(issuePayload({ user: { id: SELF_ID, username: "me" } }), { allowedActors: new Set([SELF_ID]), allowSelf: true }).enqueue, true);
+});
+
+test("an unarmed allowlist (null) keeps the access-level gate exactly as it was", () => {
+	assert.equal(run(issuePayload(), { allowedActors: null }).enqueue, true);
+	assert.deepEqual(run(issuePayload(), { allowedActors: null, authorized: false }), { enqueue: false, reason: "author-not-allowed" });
 });
