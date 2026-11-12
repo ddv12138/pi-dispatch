@@ -40,6 +40,34 @@
   台部署的 `.env` 设了 `PI_TRIGGERS_FILE=/root/pi-dispatch/runtime/triggers.json`，三个服务因此读同一个
   文件。`deploy/triggers.json` 只是 init 脚手架，内容与 runtime 文件无关，改它不生效。
 - 运行六个容器：`valkey`、`worker`、`console`、`receiver`、`egress-proxy`、`maven-proxy`。
+- 这台部署的 `.env` 设了 `COMPOSE_PROFILES=worker,console,receiver,egress,maven`，因此带 `--env-file .env`
+  的普通 `up` 会启动全部六个服务；`--profile` 只在别的部署、或临时单独操作某个服务时才需要。
+
+## GitLab 触发白名单
+
+`.env` 的 `GITLAB_ALLOWED_ACTORS` 可以把 `/gitlab` 的触发者收窄到一份名单。未设时行为不变：项目成员
+Developer 及以上就能触发。设了以后，触发者必须同时在名单里，并且仍然是 Developer 及以上——白名单是
+叠加的第二道门槛，不是替代，所以从项目里移除的人不会被一份旧名单放回来。
+
+值是逗号分隔的**数字** GitLab 用户 id，不是用户名。取 id 有两种方式：读 receiver 启动日志里的
+`self_identity`（`forge: "gitlab"`）拿 PAT 主人自己的 id；或对任意成员用
+`curl -H "PRIVATE-TOKEN: $GITLAB_TOKEN" "$GITLAB_URL/api/v4/user"` 拿当前 token 的 id。空值
+（`GITLAB_ALLOWED_ACTORS=`）会在启动时报错，不会被理解成“所有人”或“没人”。
+
+这台部署已经设了 `PI_RECEIVER_ALLOW_SELF=1`，所以可以在名单里写 PAT 主人（张三）自己的 id。反过来，
+如果哪天关掉该开关，名单里又写着 PAT 主人，receiver 会拒绝启动并指出这两行配置互相矛盾——机器人的
+循环防护会先丢掉那个账号的所有投递，白名单根本轮不到。失败在启动时比“能启动但永远不触发”更容易发现。
+
+落地顺序不能反：
+
+1. 先合入代码并发布新的 receiver 镜像。旧镜像不认识这个变量，设了也不会生效。
+2. 在 `/root/pi-dispatch/.env` 加 `GITLAB_ALLOWED_ACTORS=<张三的 id>`。compose 的 receiver 用
+   `env_file: ../.env`，不需要改 `deploy/docker-compose.yml`。
+3. `docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver up -d receiver`。
+4. 确认启动日志里有 `gitlab_allowed_actors`，并列出预期的 id。
+
+验证：让不在名单里的人给 issue 加 `ready-for-agent`，receiver 应返回 204 并在日志里记
+`dropped reason: actor-not-allowed`；名单内的人做同样操作会正常入队。
 
 ## 运行 compose
 
@@ -56,6 +84,13 @@ worker 据此加入 socket 的组。receiver 在 `profiles: ["receiver"]` 后面
 ```bash
 docker compose --env-file .env -f deploy/docker-compose.yml --profile receiver restart receiver
 ```
+
+## 资源约束
+
+这台主机是 4 核（CentOS 7，cgroup v1）。`.env` 设 `PI_CONCURRENCY=1`、`PI_HOST_CPU_BUDGET=3`：
+一次只跑一个 job，单容器的 `--cpus` 由 3 CPU 的 host budget 决定，留 1 核给 worker、Valkey 和宿主。
+`PI_JOB_CPUS=1` 只用于预算记账和 cpu-shares，不是硬上限。cgroup v1 上 worker 启动会报
+`cpu_reserve_fail_open reason=cgroup-v1`，意思是父 cgroup 的聚合配额落不下去，不是单容器没有限制。
 
 ## 更新与回滚
 
@@ -174,3 +209,14 @@ cp -r ~/.m2/repository/com/sscloud/xxx/yyy/zzz /root/pi-dispatch/maven-repo/host
   构件。
 - 目录改动即时生效：nginx 只按路径读文件，无需重启容器。
 - 拷错/多拷不影响已有内容，`:ro` 挂载保证容器侧改不了这些文件。
+
+## 2026-11-12 job stall
+
+17:44 启动的 Java job 在 17:46 被判 `job stalled`，主机 load 峰值 74。事后核对：job 平均只占 0.32 核，
+瓶颈是磁盘 I/O（当时 `%iowait` 31%、dm 队列 1817、await 2.9 秒，job 启动前盘已 97% util）；worker 的锁
+续租在 30 秒 TTL 内没有到达 Valkey，BullMQ 的 stall 检查因此判死。判失败后容器没有停，直到人工
+`docker stop`。
+
+三个叠加因素：镜像清理的磁盘 I/O 与 Maven 首次构建（1033 次依赖请求、约 1000 个小文件）重叠；
+`PI_HOST_CPU_BUDGET=6` 在 4 核机器上超过物理核数，6 并发没有聚合配额；BullMQ 的 stall/失败路径不负责
+停容器。已把 `PI_CONCURRENCY` 降到 1、`PI_HOST_CPU_BUDGET` 降到 3。"失败后停容器"仍需代码修复。
