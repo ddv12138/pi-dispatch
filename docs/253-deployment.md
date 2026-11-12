@@ -1,9 +1,10 @@
 # 253 服务器部署
 
 本文描述 `root@192.168.99.253` 上部署了什么。部署目录是 `/root/pi-dispatch`，没有 Git 元数据；`.env`、
-`egress-allowlist.conf`、`model-endpoints.conf` 和 `runtime/` 是留在服务器上、不随快照走的状态——同步
-checkout 时必须保留（2026-11-10 的一次 checkout 同步曾把两个 conf 文件删掉，导致 egress-proxy 重建即
-不可用，后从运行中容器原样恢复）。
+`egress-allowlist.conf`、`model-endpoints.conf`、`maven-repo/` 和 `runtime/` 是留在服务器上、不随快照走的
+状态——同步 checkout 时必须保留（2026-11-10 的一次 checkout 同步曾把两个 conf 文件删掉，导致 egress-proxy
+重建即不可用，后从运行中容器原样恢复；`maven-repo/` 是 2026-11-12 加入的私有 Maven 构件托管目录，见下文
+"Maven 依赖代理"一节）。
 
 ## 布局
 
@@ -91,8 +92,9 @@ egress-proxy 的挂载做 drift 检查，allowlist 缺失时会明确报 "does n
 
 ## job 镜像
 
-job 镜像不走 CI：从 checkout 在本机构建并推送，`./image/publish.sh` 负责构建和推送（版本 tag 不可变，且
-Java 镜像烘焙了本部署网络的 Maven 代理配置——CI 共享 runner 无法知道这些，见该脚本头注释）。
+job 镜像不走 CI：从 checkout 在本机构建并推送，`./image/publish.sh` 负责构建和推送（版本 tag 不可变。
+4.3.6 及更早的 Java 镜像把本部署网络的 Maven 代理配置烘焙在镜像里；4.3.7 起改为运行时渲染，见上文
+"Maven 依赖代理"——Dockerfile 的 MAVEN_* 构建参数机制保留，但本部署的发布不再传它们）。
 
 | 仓库 | 谁在运行 |
 |---|---|
@@ -118,3 +120,56 @@ worker 服务把默认 job 镜像作为 compose 插值默认值，`.env` 覆盖�
 job 以 `--pull=never` 启动，运行时不拉取任何东西。`PI_JOB_IMAGE` 在创建容器时读取，所以运行中的容器一直用
 它创建时的值，直到 worker 被重建；`run.image` 指到的 tag 也必须在主机上现成存在，删镜像前先确认没有
 trigger 或运行中的容器还钉着它。
+
+## Maven 依赖代理
+
+4.3.7 起 Java job 的 Maven 依赖不再烘焙进镜像：`run.image` 用标准 `pi-job-java21` tag（无 `-m2seed` 变体），
+依赖在运行时从 `maven-proxy` 容器拉。该容器是 `deploy/docker-compose.yml` 里 `profiles: ["maven"]` 的
+nginx 服务（`pi-dispatch-maven-proxy`，`deploy/maven-proxy.conf` 是它的规则）：公开依赖代理
+maven.aliyun.com 并缓存在 `maven-cache` 卷（第一个 job 拉一次，后续复用，metadata 只缓存 10 分钟），私有
+构件从宿主机 `/root/pi-dispatch/maven-repo/hosted/` 只读服务。整条链路：
+
+```
+job --(http:80)--> pi-dispatch-maven-proxy --(CONNECT 443)--> squid --> maven.aliyun.com
+```
+
+maven-proxy 自己也没有直达外网的路由，它对 aliyun 的上游连接同样过 squid，所以
+`egress-allowlist.conf` 里必须同时有 `pi-dispatch-maven-proxy` 和 `maven.aliyun.com` 两行。
+
+启用：`--profile egress --profile maven up -d maven-proxy`。默认 `up` 不启动它，与 receiver/console/egress
+同一条 opt-in 约定。
+
+### .env 的键
+
+worker 的容器环境里追加这四个键，再靠 PI_FORWARD_ENV 转发进 job 容器（worker/src/env-allowlist.mjs 按精确
+名转发，空值跳过）：
+
+```
+MAVEN_MIRROR_URL=http://pi-dispatch-maven-proxy
+MAVEN_PROXY_HOST=pi-dispatch-egress-proxy
+MAVEN_PROXY_PORT=3128
+PI_FORWARD_ENV=MAVEN_MIRROR_URL,MAVEN_PROXY_HOST,MAVEN_PROXY_PORT
+```
+
+`MAVEN_PROXY_NONPROXY` 不设：转发器跳过空值，渲染器把缺省当作空 nonProxyHosts，与 4.3.6 镜像内烘焙的
+行为一致。job 容器没有绕过 squid 的路由，maven-proxy 自身也必须走 squid。
+
+job 容器内的 `~/.m2/settings.xml` 由 runner 在准备阶段渲染（image/runner/src/maven-settings.mjs）：
+`MAVEN_MIRROR_URL` 或 `MAVEN_PROXY_HOST` 任一被转发进来就写，XML 形状与 Dockerfile.java21 的构建时模板
+逐字段一致，两者都未设置时什么都不写（非 Java job 零影响）。渲染失败（端口非法、home 不可写等）是
+exit 2 的预消费配置错误，不会静默。4.3.7 的标准镜像里全局 settings.xml 是空壳，这个运行时文件是唯一
+来源；Dockerfile 的 MAVEN_* 构建参数机制保留做向后兼容，发布时不传。
+
+### 补包流程
+
+构建报 `Could not resolve com.sscloud.xxx:yyy:zzz` 时，把该构件目录从旧 seed 镜像或开发机 `~/.m2` 拷到
+宿主机对应路径：
+
+```bash
+cp -r ~/.m2/repository/com/sscloud/xxx/yyy/zzz /root/pi-dispatch/maven-repo/hosted/com/sscloud/xxx/yyy/
+```
+
+- SNAPSHOT 必须整个版本目录一起拷（含 `maven-metadata.xml`），缺 metadata 时 SNAPSHOT 解析不出具体时间戳
+  构件。
+- 目录改动即时生效：nginx 只按路径读文件，无需重启容器。
+- 拷错/多拷不影响已有内容，`:ro` 挂载保证容器侧改不了这些文件。

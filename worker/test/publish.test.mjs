@@ -31,6 +31,10 @@ const MIRRORED_DEPLOY = [
 	// the distinction this file's own comment asks to be decided: it ships unedited, the compose service
 	// mounts it, and the operator's own list lives in the deployment folder where `init` scaffolds it.
 	"egress-proxy.conf",
+	// The Maven cache proxy's RULES (the 4.3.7 deployment, docs/253-deployment.md): same reasoning as
+	// egress-proxy.conf -- ships unedited, the maven-proxy service mounts it, the operator's own state
+	// (the hosted artifacts tree) lives in the deployment folder.
+	"maven-proxy.conf",
 	// The ticket flows' skills (4ac16f08): a DIRECTORY, mounted whole at /opt/pi-skills by the compose
 	// service. A package that ships the compose file and not this tree mounts an empty directory, and a
 	// job naming the flow then loads no SKILL.md and exits 0 without doing the work.

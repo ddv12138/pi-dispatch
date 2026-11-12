@@ -46,6 +46,7 @@ import {
 	loadRetryPredicate,
 } from "./src/outcome.mjs";
 import { restoreEnvProxyDispatcher } from "./src/env-proxy.mjs";
+import { installMavenSettings } from "./src/maven-settings.mjs";
 import { readCgroupUsage } from "./src/cgroup-usage.mjs";
 import { createExitWriter, readExitKey, writeAllSync } from "./src/exit-line.mjs";
 import { createJobModelRuntime, installDefaultModelsPath, loadPiAuthStorage } from "./src/model-runtime.mjs";
@@ -204,6 +205,14 @@ async function main() {
 	// NODE_USE_ENV_PROXY installed, so with egress armed the provider call went direct and died on the job's
 	// `--internal` network (issue #427). Free, and a no-op unless NODE_USE_ENV_PROXY=1 reached the container.
 	restoreEnvProxyDispatcher();
+	// Maven's runtime settings (4.3.7, image/runner/src/maven-settings.mjs has the whole story): the standard
+	// image's global settings.xml is an empty shell, and the MAVEN_* variables the worker forwarded through the
+	// operator's PI_FORWARD_ENV are the ONLY source. With neither trigger variable set this writes nothing and a
+	// non-Java job is byte-identical to before; with one set, ~/.m2/settings.xml must be on disk before Maven's
+	// first resolve, and a failure here is exit 2 pre-spend, not a mid-build Maven failure after the container
+	// was paid for.
+	const mavenSettings = installMavenSettings();
+	if (mavenSettings !== null) log("maven_settings_written", { path: mavenSettings.path });
 	// Same moment as the mount asserts above, same exit code, and the same silent-skip hazard behind it
 	// (issue #291): pi matches excludeTools entries by exact name or `*` pattern, so an unknown name is a no-op
 	// with no diagnostic -- the job would run WITH the tool the trigger says to remove. Free, pre-spend,
